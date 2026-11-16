@@ -435,6 +435,44 @@ fn engine_stood_aside_and_loader_in_folder() {
     assert!(r.summary.contains("dbghelp.dll"));
 }
 
+/// A player's report of 16 Nov 2026 (Steam Deck, shroudlink's singleplayer package 0.8.1): its client addon, chained
+/// from the Library, loaded the `shroudlink_core.dll` an older hand installation had left next to the game, and
+/// kiln-shroudlink stood aside for it. The finding names that file and keeps the addon, which draws the MODS tab.
+#[test]
+fn shroudlink_aside_for_a_core_its_addon_loaded_names_the_core() {
+    let f = Fx::healthy("sl-core");
+    f.w("kiln/state/shroudlink.json", br#"{"format":1,"plugin":"kiln-shroudlink","steppedAside":true,
+        "corePath":"S:\\steamapps\\common\\Enshrouded\\shroudlink_core.dll",
+        "steppedAsideReason":"shroudlink's own core runs in this process (S:\\steamapps\\common\\Enshrouded\\shroudlink_core.dll); its mods in shroudlink_mods/ load there",
+        "mods":[{"id":"expeditions","status":"not-loaded","reason":"..."}]}"#);
+    let r = build(&f.input());
+    let o = finding(&r, "own-loader");
+    assert!(o.text.contains(r"S:\steamapps\common\Enshrouded\shroudlink_core.dll") && o.text.contains("MODS tab"), "{}", o.text);
+}
+
+#[test]
+fn shroudlink_aside_names_a_chained_core_instead_of_the_game_root() {
+    let f = Fx::healthy("sl-chain-core");
+    f.w("kiln/state/shroudlink.json", br#"{"format":1,"steppedAside":true,
+        "corePath":"S:\\Enshrouded\\kiln\\chain\\shroudlink_core.dll",
+        "steppedAsideReason":"own core S:\\Enshrouded\\kiln\\chain\\shroudlink_core.dll",
+        "mods":[]}"#);
+    let r = build(&f.input());
+    let o = finding(&r, "own-loader");
+    assert!(o.text.contains(r"S:\Enshrouded\kiln\chain\shroudlink_core.dll"), "{}", o.text);
+    assert!(!o.text.contains("Remove shroudlink_core.dll from the game folder") && !o.text.contains("client addon loaded"), "{}", o.text);
+}
+
+#[test]
+fn shroudlink_aside_without_a_core_path_does_not_guess_from_the_reason() {
+    let f = Fx::healthy("sl-unknown-core");
+    f.w("kiln/state/shroudlink.json", br#"{"format":1,"steppedAside":true,
+        "steppedAsideReason":"another core claimed first; could be shroudlink_core.dll", "mods":[]}"#);
+    let r = build(&f.input());
+    let o = finding(&r, "own-loader");
+    assert!(!o.text.contains("Remove shroudlink_core.dll from the game folder") && !o.text.contains("client addon loaded"), "{}", o.text);
+}
+
 /// A player's report of 13 Nov 2026 (Steam Deck): Kiln hosted ShroudForge, kiln-eml stood aside for it as designed, and
 /// the summary said "EML's own loader runs in the game" as a problem. No such loader ran. `Fx::healthy`'s boot.json
 /// names pid 412: the two state files are of the last start when they name it too.

@@ -927,6 +927,11 @@ pub struct NativeManifest {
     /// It never decides whether the mod loads.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub updates: Option<UpdatesSpec>,
+    /// (dev.30) `.asi` plugins for Ultimate ASI Loader in the folder, '/'-separated: the Library writes this for an
+    /// `.asi` package (crate::game_files). Such a package is placed in the game folder, never loaded by kiln-core, so
+    /// `dlls` may be empty when this is not.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub asi: Vec<String>,
 }
 
 fn nbad(message: impl std::fmt::Display) -> Error {
@@ -1025,10 +1030,25 @@ pub fn parse_native(text: &str) -> Result<NativeManifest> {
     {
         return Err(nbad(format!("clients {} must be none, kiln or mod", c.raw(text))));
     }
+    // an .asi package (game_files): its plugins, which Ultimate ASI Loader loads from the game folder
+    let mut asi = 0;
+    if let Some(a) = root.get("asi").filter(|n| !n.is_null()) {
+        let bad = || nbad("'asi' must be an array of relative paths of .asi files in the mod folder, each once");
+        if !a.is_array() {
+            return Err(bad());
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        for e in a.elements() {
+            match e.node.as_str() {
+                Some(p) if is_rel_path(p) && ends_with_ci(p, ".asi") && p.len() > 4 && seen.insert(p) => asi += 1,
+                _ => return Err(bad()),
+            }
+        }
+    }
     let Some(dlls) = root.get("dlls").filter(|n| !n.is_null()) else {
         return Err(nbad("'dlls' is required (the DLLs to load, e.g. [\"my-mod.dll\"])"));
     };
-    if !dlls.is_array() || dlls.elements().is_empty() {
+    if !dlls.is_array() || (dlls.elements().is_empty() && asi == 0) {
         return Err(nbad("'dlls' must be a non-empty array of DLL paths"));
     }
     let mut seen = std::collections::BTreeSet::new();

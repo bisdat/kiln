@@ -128,10 +128,8 @@ pub(crate) fn json<T: serde::Serialize>(path: &Path, value: &T, names: &[PathBuf
 pub(crate) fn rename_dir(from: &Path, to: &Path) -> Result<()> {
     #[cfg(windows)]
     {
-        use std::os::windows::ffi::OsStrExt;
         use windows_sys::Win32::Storage::FileSystem::{MoveFileExW, MOVEFILE_WRITE_THROUGH};
-        let wide = |p: &Path| -> Vec<u16> { p.as_os_str().encode_wide().chain(std::iter::once(0)).collect() };
-        let (src, dst) = (wide(from), wide(to));
+        let (src, dst) = (crate::util::win32_path(from)?, crate::util::win32_path(to)?);
         // SAFETY: both are NUL-terminated UTF-16 strings that live until the call returns.
         if unsafe { MoveFileExW(src.as_ptr(), dst.as_ptr(), MOVEFILE_WRITE_THROUGH) } == 0 {
             return Err(io_at(to, "renaming to")(std::io::Error::last_os_error()));

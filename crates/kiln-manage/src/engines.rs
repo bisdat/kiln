@@ -356,6 +356,9 @@ pub fn loader_reason(engine: Engine, file: &str) -> String {
             "{file} is {n}, a stand-alone server mod: Kiln doesn't manage it, copy it into the server folder yourself"
         ),
         Engine::ReShade => format!("{file} is ReShade, which runs on its own next to Kiln: Kiln doesn't manage it, copy it into the Enshrouded folder yourself"),
+        // its download is a dinput8.dll: copied into the game folder by hand it would replace Kiln's proxy
+        Engine::UltimateAsiLoader => format!("{file} is Ultimate ASI Loader: add it to the Library and Kiln puts it next to the game as {} \
+            (never as dinput8.dll, that is Kiln's)", crate::game_files::UAL_FILE),
         Engine::Aldrich => format!("{file} is {n}, which runs on its own from the Enshrouded folder: Kiln doesn't manage it, copy its files there yourself"),
         _ => format!("{file} is {n}, {}: Kiln doesn't manage it, copy it into the Enshrouded folder yourself", info(engine).what),
     }
@@ -382,6 +385,21 @@ pub fn is_shroudlink_addon(file: &str, bytes: &[u8], exports: &[String]) -> bool
     let names = |t: &str| find_any(&lower, &[t.as_bytes().to_vec(), utf16(t)]).iter().any(|f| *f);
     file.to_ascii_lowercase().ends_with("dinput8.dll") && has("DirectInput8Create") && !has("CrashHandlerFactory")
         && names("shroudlink") && !names("steam_api64_o.dll")
+}
+
+/// The file name shroudlink's client addon loads its core from, in the game folder (its singleplayer mode).
+pub const SHROUDLINK_CORE: &str = "shroudlink_core.dll";
+
+/// shroudlink's own server core as the client addon loads it (`shroudlink_core.dll` next to the game), by the rule
+/// kiln-shroudlink steps aside by (native/plugins/shroudlink/upstream/server/src/kiln.rs `is_core_image`): that file
+/// name, or the core's export pair `CrashHandlerFactory` + `DirectInput8Create`, together with the core's own texts.
+pub fn shroudlink_core_at(path: &Path) -> bool {
+    let Ok(bytes) = std::fs::read(path) else { return false };
+    let Ok(pe) = crate::pe::parse(&bytes) else { return false };
+    let has = |e: &str| pe.exports.iter().any(|x| x == e);
+    let named = path.file_name().is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case(SHROUDLINK_CORE));
+    crate::pe::is_pe64_dll(&bytes) && (named || (has("CrashHandlerFactory") && has("DirectInput8Create")))
+        && [b"shroudlink server ".as_slice(), b"chestsort_server_".as_slice()].iter().all(|s| crate::pe::contains(&bytes, s).is_some())
 }
 
 /// [`is_shroudlink_addon`] for a file on disk (false when it cannot be read).
@@ -794,7 +812,7 @@ pub fn detect_file(path: &Path) -> Option<Detected> {
     }
     if ext == "asi" {
         return d(DetectKind::Asi, Some(Engine::UltimateAsiLoader), format!(
-            "{file} is an .asi plugin for Ultimate ASI Loader. Kiln can't load .asi plugins yet; support is coming"
+            "{file} is an .asi plugin for Ultimate ASI Loader: {}", crate::game_files::ASI_REASON
         ));
     }
     None
@@ -853,6 +871,8 @@ fn registry() -> &'static RwLock<HashMap<DetectKind, Loader>> {
 /// Every engine mod kind (EML ... Ember): `engine_mods::import_engine_mod` (content-addressed copy).
 fn builtin_loaders(m: &mut HashMap<DetectKind, Loader>) {
     crate::engine_mods::builtin_loaders(m);
+    // Ultimate ASI Loader and .asi plugins: a native mod Kiln places in the game folder (game_files)
+    m.insert(DetectKind::Asi, Loader { name: "ultimate-asi-loader", import: crate::game_files::import_asi });
 }
 
 /// Registers (or replaces) the loader of a Library kind at run time. Returns the previous one.
@@ -954,10 +974,12 @@ mod tests {
                              (DetectKind::Shroudlink, "kiln-shroudlink"), (DetectKind::Ember, "kiln-ember")] {
             assert_eq!(loader_for(kind).map(|l| l.name), Some(name));
         }
-        assert!(loader_for(DetectKind::Asi).is_none());
-        assert!(register_loader(DetectKind::Asi, Loader { name: "test", import: noop }).is_none());
-        assert_eq!(loader_for(DetectKind::Asi).map(|l| l.name), Some("test"));
-        registry().write().unwrap().remove(&DetectKind::Asi);
+        // .asi packages: a native mod placed in the game folder (game_files)
+        assert_eq!(loader_for(DetectKind::Asi).map(|l| l.name), Some("ultimate-asi-loader"));
+        assert!(loader_for(DetectKind::Data).is_none());
+        assert!(register_loader(DetectKind::Data, Loader { name: "test", import: noop }).is_none());
+        assert_eq!(loader_for(DetectKind::Data).map(|l| l.name), Some("test"));
+        registry().write().unwrap().remove(&DetectKind::Data);
     }
 
     #[test]

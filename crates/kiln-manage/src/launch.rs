@@ -254,6 +254,15 @@ pub fn play_with(dirs: &DataDirs, install: &GameInstall, request: &LaunchRequest
     if install.kind != crate::game::GameKind::Client {
         return Err(Error::invalid("launch_play starts the game client; servers start through server_start"));
     }
+    if matches!(request.mode, LaunchMode::Vanilla | LaunchMode::NoMods) {
+        let loaders = crate::game_files::loaders_in_game(&install.path)?;
+        if !loaders.is_empty() {
+            let files = loaders.iter().map(|(id, file)| format!("{file} ({id})")).collect::<Vec<_>>().join(", ");
+            return Err(Error::new(ErrorCode::Unsupported, format!(
+                "The game still loads {files} from its folder. Switch those mods off and activate the profile first, \
+                 then start without mods.")));
+        }
+    }
     // A start with mods holds the game's lock until Steam was asked (state::lock_game): no cook writes a mod's files
     // meanwhile (one that runs now is waited for a moment, then the start is refused with a sentence that says so),
     // and a cook asked for right after is refused while the game starts (cook::AFTER_START).

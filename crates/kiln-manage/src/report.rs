@@ -1328,6 +1328,14 @@ pub fn build(input: &ReportInput) -> Report {
                     plural(off.len(), "EML mod of the profile", "EML mods of the profile"), if off.len() == 1 { "this one is" } else { "these are" },
                     off.join(", "), e.plugin));
             }
+        } else if stood_aside(st) && e.kind == ModKind::Shroudlink
+            && let Some(core) = jstr(st.get("corePath")).filter(|p| !p.is_empty())
+        {
+            // The plugin records the actual loaded core, which may also be under kiln/chain/.
+            cx.find("own-loader", Level::Problem, format!(
+                "{} stood aside at the last start for shroudlink's own core ({core}). That core runs only the mods in shroudlink_mods, \
+                 so the shroudlink mods in the profile did not load through Kiln. Remove {core}: Kiln then runs them, and the client \
+                 addon keeps its MODS tab.", e.plugin));
         } else if stood_aside(st) {
             let n = kind_name(e.kind);
             cx.find("own-loader", Level::Problem, format!(

@@ -511,10 +511,11 @@ pub fn launch_options_info(install: &GameInstall, roots: &[SteamRoot]) -> Option
         overrides.as_deref().is_some_and(|o| overrides_native(o, name))
             || registry.as_deref().is_some_and(|b| user_reg_native(&String::from_utf8_lossy(b), name))
     };
+    // chained by Kiln's installer ([chain]), or by activation for the profile's .asi packages ([profile], game_files)
     let chained = crate::chain::read(&install.path).is_ok_and(|ini| ini.chain.iter().any(|e| {
         e.status == crate::chain::EntryStatus::Ok
             && e.path.rsplit('\\').next().is_some_and(|n| n.eq_ignore_ascii_case(crate::install::ASI_LOADER_NAME))
-    })) && std::fs::read_dir(&install.path).is_ok_and(|entries| entries.flatten().any(|e| {
+    }) || crate::game_files::ual_in_profile_section(&ini, &install.path)) && std::fs::read_dir(&install.path).is_ok_and(|entries| entries.flatten().any(|e| {
         e.file_name().to_string_lossy().eq_ignore_ascii_case(crate::install::ASI_LOADER_NAME) && e.path().is_file()
     }));
     let has = native("dinput8");

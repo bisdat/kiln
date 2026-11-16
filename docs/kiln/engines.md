@@ -47,6 +47,8 @@ Kiln owns only `dinput8.dll`.
   `chain.ini [chain]`. Occupied chain names always get a numbered suffix, even for identical bytes, directories or
   dangling links. Ultimate ASI Loader runs only under names it knows, so it is chained as `xinput9_1_0.dll` next
   to the game (`..\xinput9_1_0.dll` in chain.ini). If that name is taken (case ignored, even identical bytes), the install is refused.
+  Ultimate ASI Loader that comes later, from the Library, goes to the same place at profile activation ([Files in the
+  game folder](#files-in-the-game-folder)).
 - DLLs under any other proxy name are never moved. EML's `dbghelp.dll`, Shroudtopia's `winmm.dll` and SET's
   `powrprof.dll` keep running next to Kiln.
 - The receipt's `replaced[].engine` names the engine. Uninstall restores every original byte-identically, unless
@@ -157,7 +159,8 @@ native, builtin: `WINEDLLOVERRIDES="dinput8=n,b"`, or `dinput8` as "native, buil
 Kiln chains Ultimate ASI Loader as `xinput9_1_0.dll` in the game folder ([Installer](#installer)). Kiln loads it by
 its full path, but Wine still applies its rules for the name `xinput9_1_0`. Set it to native, builtin as well:
 `WINEDLLOVERRIDES="dinput8,xinput9_1_0=n,b"` (Steam: `WINEDLLOVERRIDES="dinput8,xinput9_1_0=n,b" %command%`).
-The launcher names both overrides when Ultimate ASI Loader is chained and reports a missing override.
+The launcher names both overrides when Ultimate ASI Loader is chained (by the installer in `[chain]`, or since dev.30 for
+the profile's `.asi` packages in `[profile]`) and reports a missing override.
 - Tested (2026-11-14, dedicated server lab under GE-Proton11-11, Kiln 0.2.0-dev.28's proxy, a test DLL of ours named
   `xinput9_1_0.dll`, not Ultimate ASI Loader itself): without the override, a DLL without version information did not
   run. Wine loaded its own `xinput9_1_0` instead, and dev.28's `proxy.log` still said `loaded at ...`. With
@@ -190,7 +193,7 @@ The launcher names both overrides when Ultimate ASI Loader is chained and report
 | `cheat-table` | `.ct`, `.cetrainer` |
 | `reshade` | a `.ini` with "reshade" in its name |
 | `data` | `.kfc` (patched game files) |
-| `asi` | `.asi` |
+| `asi` | an `.asi` file, Ultimate ASI Loader (export or text `IsUltimateASILoader`, any file name), or a folder with either (directly in it, or `.asi` in a folder of it, as Smart Workshop's `Scripts\`): imported as one native mod that activation places in the game folder ([Files in the game folder](#files-in-the-game-folder)) |
 
 A kind without a loader is skipped on import with its reason. It is never imported as a plain DLL.
 An unreadable/unknown `mod.json` or incomplete Lua package stays one skipped item: its helper DLLs are never
@@ -262,9 +265,11 @@ engines' mods") and 5.8.
   `powrprof.dll` + a folder, a lone `winmm.dll`) is imported as one native mod: the whole package folder, with a
   generated `native.json` listing the DLL (phase `dllmain` for a `DirectInput8Create` proxy, chain-loaded by Kiln's proxy;
   `early` otherwise), named after the package. Kiln loads the DLL from that folder, so a mod that reads its files next
-  to its own DLL finds them; the result says so in one line when the package has such files. A mod that looks for them in the game folder does not: that needs files placed into the game
-  folder by profile activation, which the Library has no kind for yet. A lone DLL under a proxy name gets a few characters of its
-  hash in its id, so two different `winmm.dll` files never share an entry.
+  to its own DLL finds them; the result says so in one line when the package has such files. A mod that looks for them
+  in the game folder does not. One such shape is placed there at activation (since dev.30): a loader under a proxy name
+  with a folder of plugin DLLs beside it (`powrprof.dll` + `plugins\`), see [Files in the game folder](#files-in-the-game-folder).
+  For any other DLL mod that reads its files from the game folder, Kiln still has no kind. A lone DLL under a proxy name
+  gets a few characters of its hash in its id, so two different `winmm.dll` files never share an entry.
 - **Archives.** `.7z` is read in-process (`sevenz-rust2`, pure Rust, no password support, decoder memory capped at 256
   MiB). `.rar` needs a tool that is already on the PC (`unrar`, `7zz`/`7z`, `bsdtar`, Windows' `tar.exe`), found by
   absolute path, started with an empty private working folder, stopped when its output passes the import limits, and its
@@ -471,11 +476,63 @@ interior jump(s) and K own patch(es)` or `executable file refused: <reason> (RVA
 in a game yet. A mid-install failure can also leave pass-through jumps in some entries; see the gameplay service's
 refusal status and installed-target mask.
 
+### Files in the game folder
+
+Some packages only work from the game folder itself (dev.30, `crates/kiln-manage/src/game_files.rs`). The Library
+keeps them as native mods, and activation places their files there instead of having kiln-core load them: the
+profile's `kiln/profile.json` does not list them, the launcher's native plan says "placed in the game folder at
+activation". Kiln tells them by their files, so an entry an older launcher imported counts as well:
+
+- **A plugin loader the game loads itself.** The native mod's one DLL sits at the top of its folder under a proxy name
+  other than Kiln's `dinput8.dll`, the game's `steam_api64.dll` and `xinput9_1_0.dll` (`powrprof.dll`, `winmm.dll`,
+  `version.dll` ...), it has no `init` export in native.json, it is no engine's own loader that Kiln runs the mods of
+  (SET's `powrprof.dll` stays as [above](#managing-every-engines-mods)), and a folder beside it holds a DLL: its plugins.
+  "Autoloot and coop loot sharing" (Nexus 266: `powrprof.dll`, `plugins\AutolootCoop.dll`, its ini and loot list) is
+  this shape; the game imports `POWRPROF.dll`, so the copy next to the game is the one that runs. Every file keeps its
+  place below the game folder. A DLL mod with its files but no folder of DLLs (InventoryLock's `winmm.dll` + ini) is
+  still loaded from the Library.
+- **Ultimate ASI Loader and `.asi` plugins** (Smart Workshop, Nexus 361: a `Scripts` folder with the `.asi`, which
+  needs UAL). UAL goes next to the game as `xinput9_1_0.dll`, a name it runs under, and Kiln's proxy loads it from
+  `kiln/chain.ini` `[profile]` (`..\xinput9_1_0.dll`). The plugins keep their folder (`Scripts\SmartWorkshop.asi`), in the
+  spelling the game folder already has (`scripts\`); files at the top of the package go to `scripts\`, where UAL looks
+  (UAL also reads `plugins\` and its own folder). A package of plugins alone uses the UAL that is there: the one Kiln's
+  installer chained (`[chain]`, nothing more is written), one the player put there under that name, or the one another
+  package of the profile brings (UAL's own download is a `dinput8.dll`: added to the Library it becomes the native mod
+  `ultimate-asi-loader`). Without any, nothing of it is placed and activation says so. A file at `xinput9_1_0.dll` that
+  is not UAL is left alone.
+
+Documents and installer scripts (`readme*`, `license*`, `.md`, `.pdf`, `.bat` ...) stay in the Library; other `.txt`
+files go along (a loot list). Ownership goes file by file, in `kiln/state/game-files.json`: Kiln writes a file only
+where there is none or where it still holds the bytes Kiln wrote, and removes only such files when the mod is switched
+off or leaves the profile, when the profile is deactivated and when Kiln is uninstalled; folders it made go when they
+are empty. A code file (`.dll`, `.asi`) that is there already and that Kiln did not place (SET's `powrprof.dll`, the
+player's own copy) keeps the whole package out, with a sentence naming the file: Kiln leaves a game-folder file it did
+not place alone. The same bytes, put there by hand, serve and stay the player's: Kiln does not remove them. A settings
+file the player or the mod changed stays where it is, also when the mod goes; a code file Kiln placed that changed
+since is neither replaced nor removed and shows as a retained placement. Play once does not change these files: a
+profile with other such mods than the active one is activated first.
+
+Under Wine or Proton the game takes a game-folder DLL under a proxy name only with a DLL override for that name (a
+loader: `powrprof=n,b`; the activation says it). For Ultimate ASI Loader chained from `[profile]` the launcher's Steam
+launch option check asks for `xinput9_1_0` as it does for the installer's ([Ultimate ASI Loader next to Kiln on
+Wine](#ultimate-asi-loader-next-to-kiln-on-wine)).
+
+Not covered: a DLL mod that reads only its settings from the game folder (no folder of plugin DLLs), and dedicated
+servers (they keep the legacy layout, no profile activation places these files).
+
 ### Shroudlink client addon
 
 Shroudlink packages run in Kiln's `kiln-shroudlink` server core. The in-game MODS tab next to Skills is drawn by
 Shroudlink's separate client addon. Import the addon from the Shroudlink download into the Library as a native mod and
 switch it on in the client profile.
+
+The addon loads Shroudlink's own core when `shroudlink_core.dll` is next to the game (its singleplayer mode; the
+Library leaves the core of the singleplayer package out, kiln-shroudlink is that core). A core left there by an earlier
+hand installation then runs, kiln-shroudlink steps aside, and that core reads only `shroudlink_mods\*.dll`: the
+profile's Shroudlink mods do not load ("no mods on this server"). Since dev.30 the Engines view and the activation name
+that file ("Remove shroudlink_core.dll from the game folder: Kiln then runs them, and the addon keeps its MODS tab"),
+also when the addon comes from the Library through `chain.ini` `[profile]`; kiln-shroudlink's own hint in `kiln.log`
+and `kiln/state/shroudlink.json` names the core file it found, and so does a support report.
 
 On desktop and Steam Deck, the mods list explains when a client profile enables Shroudlink mods without loading the
 addon: the mods still run, but the tab needs the addon. If an addon is in the Library, **Switch addon on** enables it

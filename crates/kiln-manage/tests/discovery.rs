@@ -284,9 +284,13 @@ fn chained_loader_launch_advice() {
     assert!(info.has_dll_override && info.advice.is_none());
     write(&f.client.join("xinput9_1_0.dll"), b"fixture");
     assert!(game::launch_options_info(&install, &roots).unwrap().advice.is_none());
-    // A file alone isn't chained; neither is a profile entry.
+    // A file alone isn't chained; neither is a profile entry for a file that is not Ultimate ASI Loader.
     write(&f.client.join("kiln/chain.ini"), "[profile]\n..\\xinput9_1_0.dll\n");
     assert!(game::launch_options_info(&install, &roots).unwrap().advice.is_none());
+    // dev.30: activation writes that [profile] line for the profile's .asi packages (game_files); with UAL there it counts
+    write(&f.client.join("xinput9_1_0.dll"), kiln_manage::pe::build_test_dll(&["DirectInput8Create", "IsUltimateASILoader"], b""));
+    assert!(game::launch_options_info(&install, &roots).unwrap().advice.as_deref().is_some_and(|a| a.contains("xinput9_1_0")));
+    write(&f.client.join("xinput9_1_0.dll"), b"fixture");
     write(&f.client.join("kiln/chain.ini"), "[chain]\n..\\XINPUT9_1_0.DLL\n");
     let info = game::launch_options_info(&install, &roots).unwrap();
     assert!(info.has_dll_override);

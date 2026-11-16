@@ -1039,6 +1039,11 @@ pub fn resolve_preview_for(dirs: &DataDirs, profile: &Profile, side: RunSide, ho
             native.push(NativePlanEntry { id: m.id.clone(), version: m.version.clone(), phase, enabled: false, reason: Some("disabled in the profile".into()) });
             continue;
         }
+        if let Some(plan) = crate::game_files::plan(&folder) {
+            native.push(NativePlanEntry { id: m.id.clone(), version: m.version.clone(), phase, enabled: true,
+                reason: Some(crate::game_files::preview_reason(&plan)) });
+            continue;
+        }
         if let Some((engine, file)) = crate::engines::own_loader_in(&folder) {
             if engine == crate::engines::Engine::Set {
                 let reason = skipped_set_loader(&m.id, &file);
@@ -1147,6 +1152,12 @@ pub fn render(dirs: &DataDirs, profile: &Profile, install: &GameInstall, mode: P
     for k in ModKind::ALL.into_iter().filter(|k| *k != ModKind::Plugin) {
         for m in list_of(&profile.mods, k) {
             let folder = crate::library::path_of(dirs, &lref(k, m))?;
+            // a native mod whose files activation places in the game folder (a loader the game loads itself, Ultimate
+            // ASI Loader and .asi plugins): kiln-core does not load it, on or off (an .asi package's native.json names no
+            // DLL, which kiln-core would call broken)
+            if k == ModKind::Native && crate::game_files::plan(&folder).is_some() {
+                continue;
+            }
             // ShroudForge and SET read their mods from their own folder in the game: the copy placed there
             // (their plugins take the list as "this profile uses the engine"; copy mode keeps the relative copy path)
             // An EML mod a native DLL reads in the game's mods folder runs from the copy placed there, so the DLL and
@@ -1569,7 +1580,7 @@ fn write_native_switches(config_dir: &Path, profile: &Profile) -> Result<()> {
 /// when it wrote, and what the rules decided about the load order (compat::Plan::order_notes: one sentence each, for
 /// the activation's notes and the launcher's log).
 fn write_chain_plan(dirs: &DataDirs, profile: &Profile, install: &GameInstall, file: &ProfileFile) -> Result<(bool, Vec<String>)> {
-    let entries = crate::compat::dllmain_entries(dirs, profile, file)?;
+    let entries = crate::compat::profile_entries(dirs, profile, install, file)?;
     let plan = crate::compat::plan(dirs, profile, install, &entries);
     Ok((crate::chain::write_profile_plan(&install.path, &plan.chain)?, plan.order_notes()))
 }
@@ -1658,23 +1669,51 @@ pub fn activate(dirs: &DataDirs, profile_id: &str, install: &GameInstall) -> Res
     file.generation = generation; // grows with every write of the file
     let now = now_rfc3339();
     file.written = Some(now.clone());
-    // chain.ini first: its [chain] lines (a compat rule may switch a chained loader off) decide which own loaders run
-    let (_, order_notes) = write_chain_plan(dirs, &profile, install, &file)?;
-    // ShroudForge and SET read their mods from their own folder in the game; the other engines' own loaders too.
-    let mut placed = crate::engine_mods::place(dirs, &profile, &install.path)?;
-    // a version a roll back put into the profile: the settings it had before the update go back into its copy
-    placed.kept_files.extend(crate::kept::restore_after_place(dirs, &profile, &install.path));
-    // Greeneye and Flame mods run from the copies place() just made in <game>/greeneye/ and <game>/mods/
-    // (engine_mods::game_path_of)
-    file.mods = render(dirs, &profile, install, mode)?.mods;
     let pj = install.path.join(crate::paths::game::PROFILE);
-    // Preserve the legacy writer's conflict check: a directory in its staging slot may belong to another
-    // launcher/recovery. The durable writer uses exclusive random temps and never truncates that path.
+    // Refuse the known staging conflict before changing any game-folder packages.
     let legacy_stage = crate::util::with_suffix(&pj, ".tmp");
     if std::fs::symlink_metadata(&legacy_stage).is_ok_and(|m| m.is_dir()) {
         return Err(Error::new(ErrorCode::Io, format!("{}: legacy profile staging path is a directory", legacy_stage.display())));
     }
-    crate::durable::json(&pj, &file, &[])?;
+    let previous = crate::game_files::placed(&install.path)?;
+    let chain_path = install.path.join(crate::paths::game::CHAIN);
+    let old_chain = if chain_path.is_file() { Some(std::fs::read(&chain_path).map_err(io_at(&chain_path, "reading"))?) } else { None };
+    let mut chain_written = false;
+    let changes: Result<_> = (|| {
+        // native mods that run from the game folder itself (game_files): before chain.ini, which names the Ultimate ASI
+        // Loader placed for them
+        let game_files = crate::game_files::place(dirs, &profile, &install.path)?;
+        // chain.ini first: its [chain] lines (a compat rule may switch a chained loader off) decide which own loaders run
+        let (_, order_notes) = write_chain_plan(dirs, &profile, install, &file)?;
+        chain_written = true;
+        // ShroudForge and SET read their mods from their own folder in the game; the other engines' own loaders too.
+        let mut placed = crate::engine_mods::place(dirs, &profile, &install.path)?;
+        // a version a roll back put into the profile: the settings it had before the update go back into its copy
+        placed.kept_files.extend(crate::kept::restore_after_place(dirs, &profile, &install.path));
+        // Greeneye and Flame mods run from the copies place() just made in <game>/greeneye/ and <game>/mods/
+        // (engine_mods::game_path_of)
+        file.mods = render(dirs, &profile, install, mode)?.mods;
+        crate::durable::json(&pj, &file, &[])?;
+        Ok((game_files, order_notes, placed))
+    })();
+    let (game_files, order_notes, placed) = match changes {
+        Ok(done) => done,
+        Err(mut error) => {
+            // profile.json still names the old activation. Restore the packages that were actually placed,
+            // including when the saved profile has since been edited or placement stopped halfway through.
+            if let Err(e) = crate::game_files::place_mods(dirs, &previous, &install.path) {
+                error.message.push_str(&format!("; could not restore the earlier game-folder files: {}", e.message));
+            }
+            if chain_written {
+                let restored = match old_chain {
+                    Some(bytes) => crate::durable::replace(&chain_path, &bytes),
+                    None => remove_if_there(&chain_path),
+                };
+                if let Err(e) = restored { error.message.push_str(&format!("; could not restore chain.ini: {}", e.message)); }
+            }
+            return Err(error);
+        }
+    };
     crate::kept::crash_point(crate::kept::Step::GameProfileWritten);
     remove_if_there(&install.path.join(crate::paths::game::CHAIN_ONCE))?;
     remove_if_there(&install.path.join(crate::paths::game::PROFILE_ONCE))?;
@@ -1690,8 +1729,8 @@ pub fn activate(dirs: &DataDirs, profile_id: &str, install: &GameInstall) -> Res
         own_loaders: placed.own_loaders,
         kept_files: placed.kept_files,
         warnings: skipped_native_loaders(dirs, &profile).into_iter().chain(copy_warnings).chain(placed.warnings).chain(placed.own_notes)
-            .chain(order_notes).collect(),
-        retained: placed.retained,
+            .chain(game_files.notes).chain(order_notes).collect(),
+        retained: placed.retained.into_iter().chain(game_files.retained).collect(),
         safety_notes: placed.safety_notes,
     };
     let _ = crate::durable::json(&activation_record(dirs, install), &a, &[pj.clone()]);
@@ -1726,8 +1765,11 @@ pub fn refresh_active(dirs: &DataDirs, install: &GameInstall) -> Result<Option<A
         // A play-once profile also changes SF/SET's fixed folders. Reconcile those copies before the next normal
         // launch even though profile.json itself still describes the active profile. Never change them mid-game.
         if running_process(install)?.is_none() {
+            let game_files = crate::game_files::place(dirs, &profile, &install.path)?;
             let mut placed = crate::engine_mods::place(dirs, &profile, &install.path)?;
             placed.kept_files.extend(crate::kept::restore_after_place(dirs, &profile, &install.path));
+            placed.warnings.extend(game_files.notes);
+            placed.retained.extend(game_files.retained);
             // a copy placed only now (an older Kiln's file names the Library entry): the file must name the copy
             if !render(dirs, &profile, install, mode).is_ok_and(|fresh| same(&fresh, &file)) {
                 let mut a = activate(dirs, &profile.id, install)?;
@@ -1819,13 +1861,19 @@ pub fn write_once(dirs: &DataDirs, profile_id: &str, install: &GameInstall) -> R
                 copies there; activate this profile to change them before playing (play-once keeps the active selection)"));
         }
     }
+    // Compare with verified placements, since the active profile may have unapplied edits.
+    if crate::game_files::would_change(dirs, &profile.mods.native, &install.path)? {
+        return Err(Error::new(ErrorCode::Unsupported, "Mods placed in the game folder itself (a plugin loader such as powrprof.dll, \
+            Ultimate ASI Loader and .asi plugins) are fixed there; activate this profile to change them before playing (play-once \
+            keeps the active selection)"));
+    }
     // XHL-Core named dinput8.dll runs from Kiln's copy under its own name; the active profile's copy stays as it is
     crate::engine_mods::place_xhl_core_for_once(dirs, &profile, &install.path)?;
     let (mut file, _, _, _) = prepare(dirs, &profile, install)?;
     file.written = Some(now_rfc3339());
     // The single start follows this profile's plan: its compat rules (a [chain] proxy switched off, entries loaded late)
     // and its late natives, not the active profile's that chain.ini holds. once.ini carries [profile], [chain] and [late].
-    let entries = crate::compat::dllmain_entries(dirs, &profile, &file)?;
+    let entries = crate::compat::profile_entries(dirs, &profile, install, &file)?;
     crate::chain::write_once(&install.path, &crate::compat::plan(dirs, &profile, install, &entries).chain)?;
     crate::util::write_json_atomic(&install.path.join(crate::paths::game::PROFILE_ONCE), &file)?;
     Ok(file)
@@ -1839,7 +1887,11 @@ pub fn deactivate(dirs: &DataDirs, install: &GameInstall) -> Result<()> {
 /// Deactivate with the fixed-folder cleanup result. Player-edited copies are retained, not silently deleted.
 pub fn deactivate_report(dirs: &DataDirs, install: &GameInstall) -> Result<crate::engine_mods::PlacementCleanup> {
     refuse_running(install)?;
-    let cleanup = crate::engine_mods::unplace(dirs, &install.path)?;
+    let mut cleanup = crate::engine_mods::unplace(dirs, &install.path)?;
+    let files = crate::game_files::unplace(&install.path)?;
+    cleanup.removed.extend(files.removed);
+    cleanup.retained.extend(files.retained);
+    cleanup.kept_files.extend(files.kept_files);
     let pj = install.path.join(crate::paths::game::PROFILE);
     if pj.is_file() {
         let to = install.path.join(crate::paths::game::BACKUPS).join(format!("profile-{}.json", ts_compact(crate::util::now_unix())));

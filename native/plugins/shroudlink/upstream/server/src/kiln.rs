@@ -505,21 +505,29 @@ fn module_path(m: HMODULE) -> String {
 
 /// kiln: what an enabled profile entry does while this plugin stands aside for shroudlink's own core. That core reads
 /// only `<game>/shroudlink_mods/*.dll`; Kiln copies nothing there, so an entry runs only when its DLL already is one of
-/// those files (`own-loader`), else it does not load (`not-loaded`).
-pub fn aside_entry(e: &Entry, game: &Path) -> (&'static str, String) {
+/// those files (`own-loader`), else it does not load (`not-loaded`). `core`: the core's file as found in the process
+/// (empty when another core claimed the process first); the reason names that file, since removing it lets Kiln run the
+/// mod. `shroudlink_core.dll` is the one the client addon loads from the game folder (its singleplayer mode): the addon
+/// itself stays, it draws the MODS tab (a player report of 2026-11-16, where the hint named the wrong files).
+pub fn aside_entry(e: &Entry, game: &Path, core: &str) -> (&'static str, String) {
     let dir = game.join(plugins::DIR);
     let flat_dll = e.path.extension().is_some_and(|x| x.eq_ignore_ascii_case("dll"))
         && e.path.parent().is_some_and(|p| p == dir.as_path() || (p.exists() && dir.exists() && same_dir(p, &dir)));
     if flat_dll {
-        ("own-loader", format!("runs under shroudlink's own core (the profile entry is in {}, where it reads)", plugins::DIR))
-    } else {
-        ("not-loaded", format!(
-            "shroudlink's own core runs this start and reads only <game>\\{}\\*.dll; this mod is in Kiln's Library, so it \
-             does not load. Remove shroudlink's own core (steam_api64.dll, crashhandler64.dll or dinput8.dll in the game \
-             folder) to let Kiln run it",
-            plugins::DIR
-        ))
+        return ("own-loader", format!("runs under shroudlink's own core (the profile entry is in {}, where it reads)", plugins::DIR));
     }
+    let file = core.rsplit(['\\', '/']).next().unwrap_or_default();
+    let fix = if !file.is_empty() {
+        format!("Remove shroudlink's own core ({core}) to let Kiln run it; the client addon stays and keeps its MODS tab")
+    } else {
+        "Remove shroudlink's own core (steam_api64.dll, crashhandler64.dll or dinput8.dll in the game folder, or \
+         shroudlink_core.dll, which shroudlink's client addon loads) to let Kiln run it".to_string()
+    };
+    ("not-loaded", format!(
+        "shroudlink's own core runs this start and reads only <game>\\{}\\*.dll; this mod is in Kiln's Library, so it does not \
+         load. {fix}",
+        plugins::DIR
+    ))
 }
 
 fn same_dir(a: &Path, b: &Path) -> bool {
@@ -532,6 +540,8 @@ fn same_dir(a: &Path, b: &Path) -> bool {
 struct State {
     plan_note: String,
     stepped_aside: String,
+    /// kiln: the file of the real core this plugin stood aside for (aside_entry names it)
+    core: String,
     started: bool,
     claimed_elsewhere: bool,
     profile_mods: Vec<Entry>,
@@ -541,6 +551,7 @@ struct State {
 static STATE: Mutex<State> = Mutex::new(State {
     plan_note: String::new(),
     stepped_aside: String::new(),
+    core: String::new(),
     started: false,
     claimed_elsewhere: false,
     profile_mods: Vec::new(),
@@ -565,7 +576,7 @@ fn write_state() {
     if !st.stepped_aside.is_empty() || st.claimed_elsewhere {
         let game = kiln_path(PATH_GAME).unwrap_or_default();
         for e in st.profile_mods.iter().filter(|e| e.enabled) {
-            let (status, reason) = aside_entry(e, &game);
+            let (status, reason) = aside_entry(e, &game, &st.core);
             mods.push(json!({ "id": e.id, "dll": e.path.display().to_string(), "status": status, "reason": reason }));
         }
     }
@@ -584,6 +595,7 @@ fn write_state() {
         "plan": st.plan_note,
         "steppedAside": !st.stepped_aside.is_empty(),
         "steppedAsideReason": st.stepped_aside,
+        "corePath": st.core,
         "started": st.started,
         "claimedElsewhere": st.claimed_elsewhere,
         "features": on,
@@ -693,9 +705,9 @@ pub unsafe extern "C" fn kiln_plugin_main(api: *const KilnApi, owner: u64, info:
 }
 
 /// kiln: one line per enabled profile entry while standing aside; WARN for those that do not load.
-fn log_aside(plan: &Plan, game: &Path) {
+fn log_aside(plan: &Plan, game: &Path, core: &str) {
     for e in plan.listed.iter().filter(|e| e.enabled) {
-        let (status, reason) = aside_entry(e, game);
+        let (status, reason) = aside_entry(e, game, core);
         let id = if e.id.is_empty() { "?" } else { &e.id };
         klog(if status == "not-loaded" { LOG_WARN } else { LOG_INFO }, &format!("profile mod {id}: {status}: {reason}"));
     }
@@ -722,8 +734,12 @@ unsafe extern "C" fn on_ready(_user: *mut c_void) {
     if let Some(core) = real_core_in_process() {
         let why = format!("shroudlink's own core runs in this process ({core}); its mods in shroudlink_mods/ load there");
         klog(LOG_INFO, &format!("{PLUGIN_ID} steps aside: {why}"));
-        log_aside(&plan, &game);
-        STATE.lock().unwrap_or_else(|e| e.into_inner()).stepped_aside = why;
+        log_aside(&plan, &game, &core);
+        {
+            let mut st = STATE.lock().unwrap_or_else(|e| e.into_inner());
+            st.stepped_aside = why;
+            st.core = core;
+        }
         write_state();
         return;
     }
@@ -755,7 +771,7 @@ unsafe extern "C" fn on_ready(_user: *mut c_void) {
             klog(LOG_INFO, &format!("shroudlink core running: features [{}]", hooks::working().join(", ")));
         } else {
             klog(LOG_INFO, &format!("{PLUGIN_ID} steps aside: another shroudlink core claimed this process first"));
-            log_aside(&plan_for_log, &game_for_log);
+            log_aside(&plan_for_log, &game_for_log, "");
         }
         write_state();
     });
@@ -924,14 +940,24 @@ mod tests {
     fn standing_aside_reports_profile_entries_truthfully() {
         let game = Path::new("C:\\g");
         let library = Entry { id: "chestsort".into(), path: PathBuf::from("C:\\g\\kiln\\library\\chestsort\\chestsort.dll"), enabled: true };
-        let (status, reason) = aside_entry(&library, game);
+        let (status, reason) = aside_entry(&library, game, "C:\\g\\steam_api64.dll");
         assert_eq!(status, "not-loaded");
         assert!(reason.contains("reads only <game>\\shroudlink_mods\\*.dll"), "{reason}");
+        assert!(reason.contains("Remove shroudlink's own core (C:\\g\\steam_api64.dll)"), "{reason}");
         let flat = Entry { id: "meter".into(), path: game.join("shroudlink_mods").join("meter.dll"), enabled: true };
-        assert_eq!(aside_entry(&flat, game).0, "own-loader");
+        assert_eq!(aside_entry(&flat, game, "").0, "own-loader");
         // the launcher's per-mod folders are Kiln's layout: upstream's core does not read them
         let nested = Entry { id: "meter".into(), path: game.join("shroudlink_mods").join("meter").join("meter.dll"), enabled: true };
-        assert_eq!(aside_entry(&nested, game).0, "not-loaded");
+        assert_eq!(aside_entry(&nested, game, "").0, "not-loaded");
+        // the singleplayer package's client addon loaded a core left next to the game (a player report of 2026-11-16):
+        // the hint names that file and keeps the addon
+        let (status, reason) = aside_entry(&library, game, "S:\\steamapps\\common\\Enshrouded\\shroudlink_core.dll");
+        assert_eq!(status, "not-loaded");
+        assert!(reason.contains("S:\\steamapps\\common\\Enshrouded\\shroudlink_core.dll") && reason.contains("MODS tab"), "{reason}");
+        assert!(!reason.contains("dinput8.dll"), "the addon is not the core: {reason}");
+        let (_, reason) = aside_entry(&library, game, "C:\\g\\kiln\\chain\\shroudlink_core.dll");
+        assert!(reason.contains("C:\\g\\kiln\\chain\\shroudlink_core.dll"), "{reason}");
+        assert!(!reason.contains("client addon loaded"), "a chained core need not come from the addon: {reason}");
     }
 
     /// The loader over Kiln's roots, with shroudlink's own example mod (hello_mod.dll next to the test binary's

@@ -978,7 +978,14 @@ pub fn plan(dirs: &DataDirs, profile: &Profile, install: &GameInstall, profile_d
     };
     let ini = chain::parse(text.as_bytes());
     let mut entries: Vec<PlanEntry> = chain_paths(&ini, &text).into_iter().map(|p| chain_entry(install, p)).collect();
-    entries.extend(profile_dlls.iter().map(|(id, p)| profile_entry(id, p)));
+    entries.extend(profile_dlls.iter().map(|(id, p)| {
+        let mut entry = profile_entry(id, p);
+        // The synthetic game-folder UAL entry must be selectable by engine ordering rules too.
+        if p.eq_ignore_ascii_case(crate::game_files::UAL_CHAIN_LINE) {
+            entry.engine = entry_host_path(install, p).and_then(|h| engine_word_of(&h));
+        }
+        entry
+    }));
 
     let mut facts = Facts::default();
     facts.add_engine("kiln");
@@ -1036,15 +1043,26 @@ pub fn plan(dirs: &DataDirs, profile: &Profile, install: &GameInstall, profile_d
     Plan { entries, facts, rules: results, rule_errors, chain, chain_text: text, ini, hooks, chain_error }
 }
 
+/// Every `[profile]` entry activation writes into chain.ini for `profile` in `install`: [`dllmain_entries`], then the
+/// line that loads Ultimate ASI Loader for the profile's `.asi` packages Kiln placed (game_files::ual_chain_entry).
+pub fn profile_entries(dirs: &DataDirs, profile: &Profile, install: &GameInstall, file: &crate::profile::ProfileFile) -> Result<Vec<(String, String)>> {
+    let mut out = dllmain_entries(dirs, profile, file)?;
+    out.extend(crate::game_files::ual_chain_entry(dirs, profile, &install.path));
+    Ok(out)
+}
+
 /// The profile's enabled native mods with phase dllmain: (mod id, game-side DLL path), from its rendered file.
 pub fn dllmain_entries(dirs: &DataDirs, profile: &Profile, file: &crate::profile::ProfileFile) -> Result<Vec<(String, String)>> {
     let mut out = Vec::new();
-    for (m, fm) in profile.mods.native.iter().zip(&file.mods.native) {
+    for m in &profile.mods.native {
         if !m.enabled {
             continue;
         }
         let r = crate::library::LibraryRef { kind: ModKind::Native, id: m.id.clone(), version: m.version.clone(), hash: m.hash.clone() };
         let folder = crate::library::path_of(dirs, &r)?;
+        // the rendered entry of this mod; none for a mod placed in the game folder itself (game_files), which the game
+        // or Ultimate ASI Loader loads, not Kiln's proxy
+        let Some(fm) = file.mods.native.iter().find(|f| f.id == m.id && f.hash.as_deref() == Some(m.hash.as_str())) else { continue };
         let Ok(n) = crate::manifest::read_native(&folder) else { continue };
         if n.phase != NativePhase::Dllmain {
             continue;
@@ -1288,7 +1306,7 @@ fn profile_dlls(dirs: &DataDirs, profile: &Profile, install: &GameInstall) -> Re
     let mode = crate::game::path_mode(install, dirs)?;
     Ok(match crate::profile::render(dirs, profile, install, mode)
         .or_else(|e| if e.code == ErrorCode::Unsupported { crate::profile::render(dirs, profile, install, crate::game::PathMode::Copy) } else { Err(e) })
-        .and_then(|f| dllmain_entries(dirs, profile, &f))
+        .and_then(|f| profile_entries(dirs, profile, install, &f))
     {
         Ok(d) => (d, None),
         Err(e) => (Vec::new(), Some(e.message)),

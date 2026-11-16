@@ -186,7 +186,7 @@ pub fn game_status(install: &GameInstall) -> Result<kiln_manage::game::GameStatu
 }
 
 /// `game::launch_options_info`, read again only when one of its inputs changed: the Steam roots it reads, the prefix's
-/// user.reg (MBs) and each Steam user's localconfig.vdf (game_status runs every few seconds).
+/// user.reg (MBs), each Steam user's localconfig.vdf, and the chain and loader files (game_status runs every few seconds).
 fn launch_options(install: &GameInstall, roots: &[kiln_manage::steam::SteamRoot]) -> Option<kiln_manage::game::LaunchOptionsInfo> {
     use kiln_manage::filecache::FileKey;
     use std::sync::{LazyLock, Mutex};
@@ -202,6 +202,12 @@ fn launch_options(install: &GameInstall, roots: &[kiln_manage::steam::SteamRoot]
         None => roots.to_vec(),
     };
     let mut files = Vec::new();
+    files.push(install.path.join(kiln_manage::paths::game::CHAIN));
+    let mut loaders: Vec<std::path::PathBuf> = std::fs::read_dir(&install.path).into_iter().flatten().flatten()
+        .filter(|e| e.file_name().to_string_lossy().eq_ignore_ascii_case(kiln_manage::install::ASI_LOADER_NAME))
+        .map(|e| e.path()).collect();
+    loaders.sort();
+    files.extend(loaders);
     if let Some(p) = &install.prefix {
         files.push(p.join("user.reg"));
     }
@@ -343,6 +349,18 @@ mod tests {
         std::fs::remove_dir_all(root.join("userdata/111")).unwrap();
         check("users changed");
         assert_eq!(fresh().unwrap().value.as_deref(), Some("-high %command%"));
+        // Activation changes the profile chain without touching Steam's settings.
+        std::fs::create_dir_all(g.path.join("kiln")).unwrap();
+        std::fs::write(g.path.join("xinput9_1_0.dll"), kiln_manage::pe::build_test_dll(&["IsUltimateASILoader"], b"UAL")).unwrap();
+        put(&g.path.join("kiln/chain.ini"), "[profile]\n..\\xinput9_1_0.dll\n");
+        assert!(fresh().unwrap().chained_override_missing);
+        check("profile placed and chained UAL");
+        std::fs::write(g.path.join("xinput9_1_0.dll"), b"another DLL").unwrap();
+        check("UAL replaced outside Kiln");
+        std::fs::write(g.path.join("xinput9_1_0.dll"), kiln_manage::pe::build_test_dll(&["IsUltimateASILoader"], b"UAL")).unwrap();
+        check("UAL restored");
+        put(&g.path.join("kiln/chain.ini"), "[profile]\n");
+        check("profile disabled UAL");
         let _ = std::fs::remove_dir_all(&t);
     }
 }

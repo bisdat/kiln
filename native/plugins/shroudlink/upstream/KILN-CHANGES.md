@@ -36,6 +36,12 @@ Own loader and drop-ins (dev.22, marked `kiln:`):
 |---|---|
 | `server/src/kiln.rs` | With an active profile `shroudlink_mods/` is read only with drop-ins on for shroudlink (`"dropins": true` or a list naming `shroudlink`), whether or not the profile lists shroudlink mods (before, a profile without a `mods.shroudlink` list read it too). While standing aside (a real core runs, or another core claimed the process), `kiln/state/shroudlink.json` lists every enabled profile entry: `own-loader` when its DLL is a file directly in `shroudlink_mods/` (the only place upstream's core reads), else `not-loaded` with the reason, and each `not-loaded` entry is logged at WARN. Host test `standing_aside_reports_profile_entries_truthfully`. |
 
+The step-aside hint (dev.30, marked `kiln:`):
+
+| File | Change |
+|---|---|
+| `server/src/kiln.rs` | `aside_entry` names the core file `real_core_in_process` found in the `not-loaded` reason, and `shroudlink.json` carries that path in `corePath`. Advice names that file, including a core under `kiln/chain/`, and keeps the client addon for its MODS tab. With none known (another core claimed the process), the reason lists possible names. Host test `standing_aside_reports_profile_entries_truthfully`. |
+
 The enclosing workspace enables `Win32_Storage_FileSystem` and `Win32_Security` for those checked handles.
 `../build.sh --test` also includes the common crate's tests. `../src/guard.c` and `../tests/nearby/` are Kiln's own
 integration code/tests outside the vendored crates.

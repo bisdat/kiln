@@ -254,8 +254,10 @@ fn every_engine_kind_is_detected_with_its_reason() {
         assert_eq!((d.kind, d.engine), (kind, engine), "{}: {}", path.display(), d.reason);
         assert!(d.reason.contains(words), "{}: {:?} lacks {words:?}", path.display(), d.reason);
         assert!(!d.reason.ends_with('.'), "{}: the launcher adds the period: {:?}", path.display(), d.reason);
-        // importable: every engine mod kind (engine_mods); never loaders or files
-        let runs = kiln_manage::manifest::ModKind::of_detect(d.kind).is_some_and(|k| kiln_manage::engine_mods::IMPORTED.contains(&k));
+        // importable: every engine mod kind (engine_mods); never loaders or files, except (dev.30) .asi plugins, which the
+        // Library takes as a native mod that activation places in the game folder (game_files, tests/game_files.rs)
+        let runs = kiln_manage::manifest::ModKind::of_detect(d.kind).is_some_and(|k| kiln_manage::engine_mods::IMPORTED.contains(&k))
+            || d.kind == DetectKind::Asi;
         assert_eq!(d.kind.importable(), runs, "{}: {:?}", path.display(), d.kind);
     }
     // Kiln's own kinds are untouched: a stand-alone dinput8 mod and a plain DLL stay bare DLLs

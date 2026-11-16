@@ -110,6 +110,25 @@ fn chained(game_dir: &Path) -> Vec<(String, PathBuf)> {
     }).collect()
 }
 
+/// `kiln/chain.ini` `[profile]` lines that are switched on, as host paths: the dllmain native mods of the active profile
+/// (Library paths, `Z:\…` under Proton), which the launcher writes there at activation.
+fn profile_chained(game_dir: &Path) -> Vec<PathBuf> {
+    let Ok(ini) = crate::chain::read(game_dir) else { return Vec::new() };
+    ini.profile.iter().filter(|e| e.status == crate::chain::EntryStatus::Ok).filter_map(|e| {
+        if e.relative {
+            let mut host = game_dir.join(crate::paths::game::KILN);
+            for part in e.path.split('\\').filter(|s| !s.is_empty()) {
+                if part == ".." { host.pop(); } else { host.push(part); }
+            }
+            Some(host)
+        } else if cfg!(windows) {
+            Some(PathBuf::from(&e.path))
+        } else {
+            crate::winpath::z_to_unix(&e.path)
+        }
+    }).collect()
+}
+
 /// `dinput8-chain.ini` `[Chain]` and `[EMF]` entries and the lines before any section, read as the proxy reads them
 /// (relative to the game folder, EMF's rule; `chain::shared_chain_value`).
 fn emf_chained(game_dir: &Path) -> Vec<(String, PathBuf)> {
@@ -146,18 +165,24 @@ pub fn find(game_dir: &Path, profile: Option<&ProfileView>) -> Vec<OwnLoader> {
         }
     };
     // shroudlink's client addon (its dinput8.dll: the MODS tab) is not shroudlink's core. It starts a core of its own
-    // only from `shroudlink_core.dll` in the game folder (singleplayer).
-    let addon_only = |kind: ProxyKind, host: &Path| kind == ProxyKind::Shroudlink && crate::engines::shroudlink_addon_at(host)
-        && !game_dir.join("shroudlink_core.dll").is_file();
+    // only from `shroudlink_core.dll` in the game folder (singleplayer): that file is then shroudlink's own loader, however
+    // the addon comes in (next to the game, chained by the installer, or from the Library through chain.ini [profile],
+    // as shroudlink's singleplayer package does), and kiln-shroudlink steps aside for it (player report 2026-11-16).
+    let is_addon = |kind: ProxyKind, host: &Path| kind == ProxyKind::Shroudlink && crate::engines::shroudlink_addon_at(host);
+    let mut addon = false;
     for slot in crate::engines::scan_proxies(game_dir) {
-        if addon_only(slot.class.kind, &game_dir.join(&slot.name)) { continue; }
+        if is_addon(slot.class.kind, &game_dir.join(&slot.name)) { addon = true; continue; }
         add(slot.class.kind, slot.name, Via::Proxy);
     }
     for (file, host) in chained(game_dir) {
         if let Ok(c) = crate::pe::classify_proxy(&host) {
-            if addon_only(c.kind, &host) { continue; }
+            if is_addon(c.kind, &host) { addon = true; continue; }
             add(c.kind, file, Via::Chain);
         }
+    }
+    addon = addon || profile_chained(game_dir).iter().any(|host| crate::engines::shroudlink_addon_at(host));
+    if addon && crate::engines::shroudlink_core_at(&game_dir.join(crate::engines::SHROUDLINK_CORE)) {
+        add(ProxyKind::Shroudlink, crate::engines::SHROUDLINK_CORE.into(), Via::Proxy);
     }
     for (file, host) in emf_chained(game_dir) {
         if let Ok(c) = crate::pe::classify_proxy(&host) { add(c.kind, file, Via::EmfChain); }
@@ -493,7 +518,12 @@ pub fn notes(game_dir: &Path, loaders: &[OwnLoader], profile: Option<&ProfileVie
         let who = loader_name(l);
         let label = short(kind);
         let folder = format!("{}/", l.folder.trim_end_matches('/'));
+        // shroudlink's core in the game folder, which its client addon loads (find): the file to remove is that one, not
+        // the addon, which keeps the MODS tab
+        let sl_core = l.kind == ModKind::Shroudlink && l.file.eq_ignore_ascii_case(crate::engines::SHROUDLINK_CORE);
         let mut text = match (l.via, l.engine) {
+            _ if sl_core => format!("shroudlink's client addon loads shroudlink's own core from the game folder ({}, its singleplayer \
+                mode), and that core runs only the {label} mods in {folder}", l.file),
             (Via::HostedShroudForge, _) if profile.is_some_and(|p| !p.eml_runtime.is_empty()) => format!(
                 "Kiln hosts ShroudForge because the EML package {} needs ShroudForge's runtime: ShroudForge then runs the {label} mods in {folder}",
                 profile.and_then(|p| p.eml_runtime.first()).expect("runtime requirement")),
@@ -517,6 +547,10 @@ pub fn notes(game_dir: &Path, loaders: &[OwnLoader], profile: Option<&ProfileVie
         } else {
             match l.delivery {
                 Delivery::Plugin => text.push_str(&format!("; Kiln's plugin copies this profile's {n} {label} mod(s) there before it starts")),
+                Delivery::None if sl_core => text.push_str(&format!(
+                    "; this profile's {n} {label} mod(s) are in Kiln's Library, so they do not load while it runs ({}), and kiln-shroudlink \
+                    stands aside for it. Remove {} from the game folder: Kiln then runs them, and the addon keeps its MODS tab",
+                    names(&not_copied), l.file)),
                 Delivery::None => text.push_str(&format!(
                     "; it cannot read Kiln's Library, so this profile's {n} {label} mod(s) do not load while it runs ({}). Remove {} to let Kiln run them",
                     names(&not_copied), l.file)),
@@ -589,7 +623,8 @@ pub fn notes(game_dir: &Path, loaders: &[OwnLoader], profile: Option<&ProfileVie
 /// always on Windows and through a chain line; under Wine or Proton a proxy file (not `dinput8.dll`) only with a DLL
 /// override, which the launcher cannot see.
 fn proxy_unloaded(l: &OwnLoader) -> bool {
-    cfg!(not(windows)) && l.via == Via::Proxy && !l.file.eq_ignore_ascii_case("dinput8.dll")
+    // (a file another DLL loads by its path, as shroudlink's addon loads its core, needs no override)
+    cfg!(not(windows)) && l.via == Via::Proxy && !l.file.eq_ignore_ascii_case("dinput8.dll") && crate::engines::is_proxy_name(&l.file)
 }
 
 /// ShroudForge's mods folder when ShroudForge may run the EML mods this start, from the folder they are in, each only

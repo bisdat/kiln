@@ -35,6 +35,7 @@
 //! | [`notices`] | which activation notices the launcher has shown per game (`installs/<id>.notices-seen.json`) |
 //! | [`quick`] | the simple flow: import + add to the active profile + apply, the default profile "My mods", undo |
 //! | [`engine_mods`] | other engines' mods in the launcher: importers, placing SF/SET mods, settings, plugin status (owner: wire) |
+//! | [`game_files`] | native mods placed in the game folder itself: a plugin loader the game loads (`powrprof.dll` + `plugins\`), Ultimate ASI Loader and `.asi` plugins |
 //! | [`found`] | mods in the game folder Kiln did not put there: whether each loads with a profile, and adding one |
 //! | [`shroudforge`] | ShroudForge mods next to Kiln: install detection, mod packages, switches, settings, status (owner: sf) |
 //! | [`playonce`] | `kiln/play-once.ini` |
@@ -101,6 +102,7 @@ pub mod kept;
 pub mod settings_files;
 pub(crate) mod durable;
 pub mod engine_mods;
+pub mod game_files;
 pub mod restore_data;
 pub mod found;
 pub mod own_loaders;

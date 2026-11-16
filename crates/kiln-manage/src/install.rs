@@ -1221,6 +1221,11 @@ pub fn uninstall_report(dirs: &DataDirs, install: &GameInstall, progress: &mut d
         }
     }
     let mut report = UninstallReport { placements: crate::engine_mods::unplace(dirs, game_dir)?, ..Default::default() };
+    // native mods placed in the game folder itself (game_files): Kiln's files go, Ultimate ASI Loader as well
+    let files = crate::game_files::unplace(game_dir)?;
+    report.placements.removed.extend(files.removed);
+    report.placements.retained.extend(files.retained);
+    report.placements.kept_files.extend(files.kept_files);
     if let Some(warning) = report.placements.warning() { progress.report(None, &warning); }
     for kept in &report.placements.kept_files { progress.report(None, kept); }
     let total = receipt.files.len().max(1);
