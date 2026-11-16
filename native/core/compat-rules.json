@@ -3,6 +3,12 @@
   "format": 1,
   "rules": [
     {
+      "id": "shroudtopia-item-skill-text-original-code",
+      "action": "original-code",
+      "subject": { "mod": "shroudtopia:item-skill-text" },
+      "message": "Item Skill Descriptions can check the game's original code while Auto Doors keeps its hooks."
+    },
+    {
       "id": "auto-loot-plus-before-ultimate-asi-loader",
       "when": [
         { "mod": "native:auto-loot-plus" },

@@ -82,7 +82,7 @@ int main(int, char** argv){
  Channel collision;check(!collision.open(true),"core refuses an already-existing channel instead of trusting its contents");
  ++fake_pid;times_fail=true;Channel no_identity;check(!no_identity.open(true),"missing process identity fails open without creating a wait");times_fail=false;
  std::ifstream shipped_file(argv[2]);std::stringstream shipped_text;shipped_text<<shipped_file.rdbuf();
- auto shipped=parse_rules(shipped_text.str(),"shipped");check(shipped.ok && shipped.dropped==0 && shipped.rules.size()==1,"all shipped rules parse");
+ auto shipped=parse_rules(shipped_text.str(),"shipped");check(shipped.ok && shipped.dropped==0 && shipped.rules.size()==2,"all shipped rules parse");
  Facts package_start;package_start.mods={"shroudtopia:item-skill-text"};Facts package_own;
  package_own.mods={"native:auto-doors-new-version"};package_own.modules={"powrprof.dll","AutoDoors/bin/ad_core.dll"};
  // 0.2.0-dev.29.5 (inbox 33): Auto Doors started late does nothing (it must start before the game registers its programs),
@@ -90,6 +90,15 @@ int main(int, char** argv){
  check(!native_defer_rule(shipped.rules,package_start,package_own,true),"no shipped rule defers Auto Doors");
  package_own.modules={"powrprof.dll"};
  check(!native_defer_rule(shipped.rules,package_start,package_own,true),"shipped rule never matches an unrelated powrprof provider");
+ Facts original_start;
+ const auto* original=original_code_rule(shipped.rules,original_start,"shroudtopia:item-skill-text");
+ check(original && original->id=="shroudtopia-item-skill-text-original-code","shipped rule selects only item-skill-text");
+ check(!original_code_rule(shipped.rules,original_start,"shroudtopia:other"),"another Shroudtopia mod is not selected");
+ auto conditional=shipped.rules;
+ for(auto& r:conditional)if(r.action=="original-code")r.when={{Matcher::Kind::Engine,"test-host"}};
+ check(!original_code_rule(conditional,original_start,"shroudtopia:item-skill-text"),"original-code respects start conditions");
+ original_start.engines={"test-host"};
+ check(original_code_rule(conditional,original_start,"shroudtopia:item-skill-text"),"matching condition enables the named rule");
  const std::string rule=R"({"format":1,"rules":[{"id":"doors","action":"defer","when":[{"mod":"shroudtopia:item-skill-text"}],"subject":{"mod":"native:auto-doors-1.1.0-298-1.1.0-2026-11-04t19-12z-axkrtkhdp"},"target":{"mod":"shroudtopia:item-skill-text"},"max_wait_ms":30000}]})";
  auto p=parse_rules(rule,"test");
  check(p.ok && p.rules.size()==1 && !p.dropped,"accept bounded first-pass deferral rule");

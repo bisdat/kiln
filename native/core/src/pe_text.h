@@ -248,6 +248,37 @@ inline bool redirected_call_at(const uint8_t* file, const uint8_t* live, size_t 
     return in_code && outside && (!call_lands || call_lands(to));
 }
 
+// A complete entry jump to outside the game image. The caller establishes the function boundary.
+// Shared by the original-code shim and the scanners; no instruction bytes are changed here.
+inline size_t entry_jump(const uint8_t* p, size_t left, uintptr_t entry, uintptr_t image_base,
+                         size_t image_size, uintptr_t* destination,
+                         bool (*read_pointer)(uintptr_t, uintptr_t*) = nullptr) {
+    size_t width = 0;
+    uintptr_t target = 0;
+    if (left >= 5 && p[0] == 0xE9) {
+        int32_t d;
+        std::memcpy(&d, p + 1, 4);
+        width = 5, target = entry + 5 + static_cast<intptr_t>(d);
+    } else if (left >= 14 && p[0] == 0xFF && p[1] == 0x25 &&
+               p[2] == 0 && p[3] == 0 && p[4] == 0 && p[5] == 0) {
+        width = 14;
+        std::memcpy(&target, p + 6, 8);
+    } else if (read_pointer && left >= 6 && p[0] == 0xFF && p[1] == 0x25) {
+        int32_t d;
+        std::memcpy(&d, p + 2, 4);
+        if (read_pointer(entry + 6 + static_cast<intptr_t>(d), &target)) width = 6;
+    } else if (left >= 12 && p[0] == 0x48 && p[1] == 0xB8 && p[10] == 0xFF && p[11] == 0xE0) {
+        width = 12;
+        std::memcpy(&target, p + 2, 8);
+    } else if (left >= 13 && p[0] == 0x49 && p[1] == 0xBB && p[10] == 0x41 && p[11] == 0xFF && p[12] == 0xE3) {
+        width = 13;
+        std::memcpy(&target, p + 2, 8);
+    }
+    if (!width || !target || (target >= image_base && target - image_base < image_size)) return 0;
+    if (destination) *destination = target;
+    return width;
+}
+
 // Differences between the file's code and the live code that no hook form explains: bytes another mod changed in
 // place (a check skipped, a jump made unconditional, a number raised). `sites` counts them as places (changed bytes
 // closer than 16 bytes are one place), `first` holds the offsets of the first few.
@@ -271,7 +302,6 @@ inline OtherDiffs other_differences(const uint8_t* file, const uint8_t* live, si
                                     bool (*read_pointer)(uintptr_t, uintptr_t*) = nullptr,
                                     std::vector<DiffRun>* uncovered = nullptr) {
     if (uncovered) uncovered->clear();
-    auto outside = [&](uintptr_t a) { return a < image_base || a - image_base >= image_size; };
     OtherDiffs out;
     size_t last = 0;
     bool any = false;
@@ -290,24 +320,8 @@ inline OtherDiffs other_differences(const uint8_t* file, const uint8_t* live, si
                 covered = true;
                 break;
             }
-            if (left >= 5 && p[0] == 0xE9) {
-                int32_t d;
-                std::memcpy(&d, p + 1, 4);
-                width = 5, target = live_text + start + 5 + static_cast<intptr_t>(d);
-            } else if (left >= 14 && p[0] == 0xFF && p[1] == 0x25 &&
-                       p[2] == 0 && p[3] == 0 && p[4] == 0 && p[5] == 0) {
-                width = 14;
-                std::memcpy(&target, p + 6, 8);
-            } else if (read_pointer && left >= 6 && p[0] == 0xFF && p[1] == 0x25) {
-                // A hook may keep its destination in a separate pointer slot. The caller must read it safely.
-                int32_t d;
-                std::memcpy(&d, p + 2, 4);
-                if (read_pointer(live_text + start + 6 + static_cast<intptr_t>(d), &target)) width = 6;
-            } else if (left >= 12 && p[0] == 0x48 && p[1] == 0xB8 && p[10] == 0xFF && p[11] == 0xE0) {
-                width = 12;
-                std::memcpy(&target, p + 2, 8);
-            }
-            if (!width || !outside(target)) continue;
+            width = entry_jump(p, left, live_text + start, image_base, image_size, &target, read_pointer);
+            if (!width) continue;
             size_t end = start + width;
             // the NOPs a hook fills the rest of the instructions it replaced with: up to 20, what Greeneye Loader
             // writes behind its 12-byte jump (a hook of at most 32 bytes); the others stay well below that

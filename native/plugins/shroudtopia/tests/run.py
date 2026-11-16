@@ -13,7 +13,10 @@ plugin = Path(os.environ.get('KILN_SHROUDTOPIA_SOURCE', root / 'native/plugins/s
 loop = plugin[plugin.index('int json_int('):plugin.index('DWORD WINAPI thread_main')]
 config = context[context.index('namespace config {'):context.index('// ---------------------------------------------------------------------------------------------- memory')]
 loaded = plugin[plugin.index('struct Loaded {'):plugin.index('ModContext* g_ctx')]
+if 'HMODULE module' not in loaded: loaded=loaded.replace('struct Loaded {','struct Loaded { HMODULE module=nullptr;')
 scheduling = plugin[plugin.index('void drive('):plugin.index('int json_int(')]
+flow = plugin[plugin.index('void prepare_original_code('):plugin.index('void drive(')] if 'void prepare_original_code(' in plugin else 'void prepare_original_code(Loaded&) {}'
+
 # Exercise the exact registration hook, including the origin gate and metadata name.
 hook = 'config::ensure_profile_entry(m->name, m->origin == "profile");'
 registration = hook if hook in plugin[plugin.index('m->mod = inst;'):plugin.index('// Shroudtopia\'s UpdateMods.')] else ''
@@ -29,13 +32,33 @@ preamble = r'''
 #include <iostream>
 #include <algorithm>
 #include <stdexcept>
+#include <cstdio>
 #include <nlohmann/json.hpp>
 using json = nlohmann::json;
 namespace fs = std::filesystem;
 constexpr int KILN_LOG_INFO=1, KILN_LOG_WARN=2, KILN_LOG_ERROR=3;
-struct Host { template<class... T> void logf(T...) {} } H;
+
+using HMODULE=void*;
+struct KilnStr {const char* ptr=nullptr;size_t len=0;};
+namespace kiln::compat {
+constexpr const char* kOriginalCodeService="kiln.internal.original-code";
+struct OriginalCodeApi {KilnStr (*rule)(KilnStr);};
+}
+std::vector<void*> patched;
+std::vector<std::string> compat_logs;
+KilnStr selected_rule(KilnStr mod){return std::string(mod.ptr,mod.len)=="shroudtopia:item-skill-text"?KilnStr{"test-rule",9}:KilnStr{};}
+const kiln::compat::OriginalCodeApi rules{selected_rule};
+bool have_rules=true,have_memcmp=true;
+struct Host {
+ template<class T> const T* service(const char*,unsigned){return have_rules?reinterpret_cast<const T*>(&rules):nullptr;}
+ template<class... T> void logf(int,const char* fmt,T... args){char b[1024];std::snprintf(b,sizeof b,fmt,args...);compat_logs.emplace_back(b);}
+} H;
+namespace original {size_t install(HMODULE h,const kiln::compat::OriginalCodeApi*){if(!have_memcmp)return 0;patched.push_back(h);return 1;}}
+
 std::atomic<bool> g_log_enabled{true};
 namespace kcompat {
+KilnStr kstr(const std::string& s){return {s.data(),s.size()};}
+std::string_view sv(KilnStr s){return {s.ptr?s.ptr:"",s.len};}
 bool fail_write=false;
 bool exists(const fs::path& p) { return fs::exists(p); }
 std::string path_utf8(const fs::path& p) { return p.string(); }
@@ -59,7 +82,8 @@ struct Mod {
  bool keeps_flag=true;  // false: a mod that never writes its own `active` field
  bool fault_activate=false;
  int activations=0, deactivations=0, updates=0;
- void Load(ModContext*) {} void Activate(ModContext*) {++activations; if (fault_activate) throw std::runtime_error("test"); if (keeps_flag) active=true;}
+ void* module=nullptr;
+ void Load(ModContext*) {if(module && std::find(patched.begin(),patched.end(),module)==patched.end())throw std::runtime_error("Load ran before IAT patch");} void Activate(ModContext*) {++activations; if (fault_activate) throw std::runtime_error("test"); if (keeps_flag) active=true;}
  void Update(ModContext*) {++updates;} void Deactivate(ModContext*) {++deactivations; if (keeps_flag) active=false;}
 };
 '''
@@ -67,7 +91,7 @@ main = r'''
 std::mutex g_mu;
 std::vector<std::unique_ptr<Loaded>> g_mods;
 bool g_server=false;
-'''+scheduling+r'''
+'''+flow+scheduling+r'''
 // Run the real first-pass loop with a virtual clock and no Windows worker.
 uint64_t clock_ms=0;
 unsigned waits=0, scans=0;
@@ -181,6 +205,28 @@ int main(int argc, char** argv) {
   check(mod.deactivations==3 && lines("Deactivating: Flagless")==1 && lines("W Flagless: switched off, but the mod leaves its own 'active' flag on")==1,
         "a mod that leaves its flag on is deactivated on every cycle, said once");
   check(f.status=="active","and it still reads as the mod reports itself");
+ }
+
+
+ // The production per-mod rule query/patch must precede the first Load, and only run once.
+ {
+  auto run_flow=[&](const char* id,bool service,bool import){
+   patched.clear();compat_logs.clear();have_rules=service;have_memcmp=import;
+   Mod m;auto q=std::make_unique<Loaded>();q->mod=&m;q->id=id;q->name=id;q->client=true;
+   q->module=reinterpret_cast<void*>(0x1234);
+   if(std::string(id)=="item-skill-text" && service && import)m.module=q->module;
+   auto settings=base;settings["mods"][id]={{"active",true}};
+   kcompat::write_file_atomic(file,settings.dump());config::init(file,file.parent_path()/"absent.json");
+   g_mods.clear();g_mods.push_back(std::move(q));update_mods();update_mods();
+   check(g_mods[0]->status=="active","per-mod flow still loads and activates");
+  };
+  run_flow("item-skill-text",true,true);
+  check(patched.size()==1 && compat_logs.size()==1,"selected mod is patched and logged once before Load");
+  check(!compat_logs.empty() && compat_logs[0].find("test-rule")!=std::string::npos,"patch log names the matching rule");
+  run_flow("other",true,true);check(patched.empty() && compat_logs.empty(),"unnamed mod has no IAT change or compat log");
+  run_flow("item-skill-text",false,true);check(patched.empty() && compat_logs.empty(),"older core without private service is unchanged");
+  run_flow("item-skill-text",true,false);check(patched.empty() && compat_logs.empty(),"no memcmp import leaves the DLL alone");
+  have_rules=have_memcmp=true;
  }
 
  // Completion must follow every first Load/Activate, including a failing mod, and the configured delay.

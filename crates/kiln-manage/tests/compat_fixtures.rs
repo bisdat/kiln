@@ -147,3 +147,16 @@ fn no_shipped_rule_defers_auto_doors() {
     assert!(errors.is_empty(), "{errors:?}");
     assert!(rules.iter().all(|r| !matches!(r.rule.action, RuleAction::Defer)), "a shipped defer rule is back");
 }
+
+#[test]
+fn original_code_is_host_only_and_never_changes_the_chain() {
+    let doc = serde_json::json!({"format":1,"rules":[{
+        "id":"original", "action":"original-code", "subject":{"mod":"shroudtopia:item-skill-text"}
+    }]});
+    let (rules, errors) = parse_rules(doc.to_string().as_bytes(), RuleSource::Kiln);
+    assert!(errors.is_empty(), "{errors:?}");
+    assert_eq!(rules.len(), 1);
+    assert!(evaluate(&rules, &Facts::default(), &[]).is_empty());
+    let bytes = serde_json::to_value(&rules[0].rule).unwrap();
+    assert_eq!(bytes["action"], "original-code");
+}

@@ -13,6 +13,7 @@
 #include "log.h"
 #include "native_mods.h"
 #include "profile.h"
+#include "sigdb.h"
 #include "services/hooks_internal.h"
 
 #include <psapi.h>  // after windows.h (common.h)
@@ -195,6 +196,7 @@ ojson rules_report(const std::vector<ChainRow>& rows, const Facts& facts) {
             ctx.proxy_loaded.insert(r.id);
     }
     for (const Rule& r : g_rules) {
+        if (r.action == "original-code") continue; // per-mod import results belong to the host log
         const bool early = std::any_of(g_early.begin(), g_early.end(), [&](const auto& e) { return e.first == r.id; });
         if (!fired.count(&r) && !early && !sticky_late(r, rows)) continue;
         const Outcome oc = outcome_of(r, rows, facts, ctx);
@@ -353,6 +355,34 @@ std::vector<Rule> native_wait_rules(Facts* facts) {
         if (r->action == "defer" && present(r->target, *facts)) out.push_back(*r);
     return out;
 }
+
+namespace {
+KilnStr KILN_CALL original_rule(KilnStr mod) {
+    std::lock_guard lock(g_mu);
+    const Facts facts = gather_facts(chain_rows(), {}, false, false);
+    const Rule* r = original_code_rule(g_rules, facts, sv(mod));
+    return r ? kstr(r->id) : KilnStr{};
+}
+void KILN_CALL original_used(uint32_t rva) {
+    std::string who;
+    for (const auto& t : hooks::hooked_targets()) {
+        if (t.rva != rva) continue;
+        if (t.has_over) who = t.over.module;
+        else if (!t.links.empty()) who = t.links.front().owner;
+        else if (t.has_before) who = t.before.module;
+        break;
+    }
+    if (who.empty()) {
+        const auto address = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr)) + rva;
+        for (const auto& d : sigdb::live_differs())
+            if (d.address == address) { who = d.by; break; }
+    }
+    KLOG_I("shroudtopia: original-code check used the game's original bytes at rva 0x%X%s%s", rva,
+           who.empty() ? "" : "; hook ", who.c_str());
+}
+const OriginalCodeApi kOriginalCodeTable{{sizeof(OriginalCodeApi), 1}, &original_rule, &original_used};
+} // namespace
+const OriginalCodeApi* original_code_table() { return &kOriginalCodeTable; }
 
 void boot_done() {
     const bool hooked = hooks::chain::ready();

@@ -89,6 +89,9 @@ pub enum RuleAction {
     Before,
     /// The native loader waits for Shroudtopia's first activation pass. No chain changes.
     Defer,
+    /// The Shroudtopia host exposes original entry bytes to this mod's imported memcmp.
+    #[serde(rename = "original-code")]
+    OriginalCode,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -99,7 +102,7 @@ pub struct Rule {
     #[serde(default)]
     pub when: Vec<Matcher>,
     pub action: RuleAction,
-    /// What `late` / `disable` act on (`warn` may leave it out); `before`: the DLL that loads first.
+    /// What the action acts on (`warn` may leave it out); `original-code`: a Shroudtopia mod.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subject: Option<Matcher>,
     /// `before`: the DLL that loads after the subject. `defer`: a Shroudtopia mod enabled in the profile.
@@ -193,6 +196,11 @@ fn check_rule(r: &Rule) -> std::result::Result<(), String> {
     }
     if !matches!(r.action, RuleAction::Before | RuleAction::Defer) && r.target.is_some() {
         return Err("a \"target\" belongs to action before or defer only".into());
+    }
+    if r.action == RuleAction::OriginalCode
+        && !matches!(&r.subject, Some(Matcher::Mod(s)) if s.starts_with("shroudtopia:") && s.len() > 12)
+    {
+        return Err("original-code needs a shroudtopia:<id> subject".into());
     }
     if r.action == RuleAction::Defer {
         if !matches!(&r.target, Some(Matcher::Mod(s)) if s.starts_with("shroudtopia:") && s.len() > 12)
@@ -443,7 +451,7 @@ pub fn evaluate(rules: &[SourcedRule], facts: &Facts, entries: &[PlanEntry]) -> 
 pub fn evaluate_with(rules: &[SourcedRule], facts: &Facts, entries: &[PlanEntry], never_late: &dyn Fn(&PlanEntry) -> bool) -> Vec<RuleResult> {
     let mut results: Vec<RuleResult> = rules
         .iter()
-        .filter(|sr| sr.rule.action != RuleAction::Defer) // core-only waits add no launcher rows or chain changes
+        .filter(|sr| !matches!(sr.rule.action, RuleAction::Defer | RuleAction::OriginalCode)) // host-only actions do not change the chain
         .map(|sr| {
             let r = &sr.rule;
             let fired = r.when.iter().all(|m| facts.holds(m));

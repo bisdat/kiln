@@ -10,6 +10,7 @@
 #include <shroudtopia/shroudtopia.h>
 
 #include "../../compat/compat.h"
+#include "../../compat/original_code_service.h"
 
 namespace kshroud {
 
@@ -19,6 +20,7 @@ constexpr const char* kPluginVersion = "1.0.0";
 constexpr const char* kShroudtopiaVersion = "0.1.1";
 
 extern kcompat::Host H;
+namespace original { size_t install(HMODULE module, const kiln::compat::OriginalCodeApi* rules); }
 
 // The mod whose code runs now on this thread (Log attributes lines to it), else the last one the loop drove, as
 // Shroudtopia's own loader does.

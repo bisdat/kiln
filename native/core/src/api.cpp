@@ -24,6 +24,7 @@
 #include "registry.h"
 #include "sigdb.h"
 #include "config.h"
+#include "compat.h"
 #include "tick.h"
 #include "worldinfo.h"
 #include "services/kiln_caps.h"
@@ -137,6 +138,8 @@ std::mutex g_published_mutex;
 std::vector<Published> g_published;
 
 const void* KILN_CALL api_service(KilnStr name, uint32_t min_version) {
+    if (sv(name) == compat::kOriginalCodeService)
+        return min_version <= 1 ? compat::original_code_table() : nullptr;
     // kiln.profile works in safe idle too: early native mods and the managed host read it to find their mods/configs.
     if (sv(name) == KILN_PROFILE_SERVICE) return min_version <= KILN_PROFILE_VERSION ? profile::table() : nullptr;
     // kiln.progress too: the early plugins show their long work with it, before hooks are decided (and in safe idle).

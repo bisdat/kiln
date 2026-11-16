@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "compat_rules.h"
+#include "../../plugins/compat/original_code_service.h"
 #include "nlohmann/json.hpp"
 
 namespace kiln::compat {
@@ -90,6 +91,7 @@ void init();
 void apply_early();
 // Current profile facts (without entries disabled by a rule), and a copy of the wait rules. Boot only.
 std::vector<Rule> native_wait_rules(Facts* facts);
+const OriginalCodeApi* original_code_table();
 void boot_done();
 
 }  // namespace kiln::compat

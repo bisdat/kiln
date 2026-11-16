@@ -1713,6 +1713,135 @@
         "b2"
       ],
       "dropped": 7
+    },
+    {
+      "name": "original code for a Shroudtopia mod",
+      "input": {
+        "format": 1,
+        "rules": [
+          {
+            "id": "original",
+            "action": "original-code",
+            "subject": {
+              "mod": "shroudtopia:item-skill-text"
+            }
+          }
+        ]
+      },
+      "ok": true,
+      "rules": [
+        "original"
+      ],
+      "dropped": 0
+    },
+    {
+      "name": "original code rejects missing subject",
+      "input": {
+        "format": 1,
+        "rules": [
+          {
+            "id": "original",
+            "action": "original-code"
+          }
+        ]
+      },
+      "ok": true,
+      "rules": [],
+      "dropped": 1
+    },
+    {
+      "name": "original code rejects module subject",
+      "input": {
+        "format": 1,
+        "rules": [
+          {
+            "id": "original",
+            "action": "original-code",
+            "subject": {
+              "module": "item-skill-text.dll"
+            }
+          }
+        ]
+      },
+      "ok": true,
+      "rules": [],
+      "dropped": 1
+    },
+    {
+      "name": "original code rejects other engine",
+      "input": {
+        "format": 1,
+        "rules": [
+          {
+            "id": "original",
+            "action": "original-code",
+            "subject": {
+              "mod": "emf:item-skill-text"
+            }
+          }
+        ]
+      },
+      "ok": true,
+      "rules": [],
+      "dropped": 1
+    },
+    {
+      "name": "original code rejects empty id",
+      "input": {
+        "format": 1,
+        "rules": [
+          {
+            "id": "original",
+            "action": "original-code",
+            "subject": {
+              "mod": "shroudtopia:"
+            }
+          }
+        ]
+      },
+      "ok": true,
+      "rules": [],
+      "dropped": 1
+    },
+    {
+      "name": "original code rejects target",
+      "input": {
+        "format": 1,
+        "rules": [
+          {
+            "id": "original",
+            "action": "original-code",
+            "subject": {
+              "mod": "shroudtopia:item-skill-text"
+            },
+            "target": {
+              "mod": "shroudtopia:other"
+            }
+          }
+        ]
+      },
+      "ok": true,
+      "rules": [],
+      "dropped": 1
+    },
+    {
+      "name": "original code rejects timeout",
+      "input": {
+        "format": 1,
+        "rules": [
+          {
+            "id": "original",
+            "action": "original-code",
+            "subject": {
+              "mod": "shroudtopia:item-skill-text"
+            },
+            "max_wait_ms": 100
+          }
+        ]
+      },
+      "ok": true,
+      "rules": [],
+      "dropped": 1
     }
   ],
   "merge": [

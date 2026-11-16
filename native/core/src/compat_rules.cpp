@@ -133,12 +133,12 @@ bool parse_rule(const json& j, const char* source, Rule* r, std::string* why) {
         }
     }
     if (!j.contains("action") || !j["action"].is_string()) {
-        *why = "\"action\" must be warn, late, disable, before or defer";
+        *why = "\"action\" must be warn, late, disable, before, defer or original-code";
         return false;
     }
     r->action = j["action"].get<std::string>();
-    if (r->action != "warn" && r->action != "late" && r->action != "disable" && r->action != "before" && r->action != "defer") {
-        *why = "\"action\" must be warn, late, disable, before or defer";
+    if (r->action != "warn" && r->action != "late" && r->action != "disable" && r->action != "before" && r->action != "defer" && r->action != "original-code") {
+        *why = "\"action\" must be warn, late, disable, before, defer or original-code";
         return false;
     }
     if (j.contains("message")) {
@@ -170,6 +170,12 @@ bool parse_rule(const json& j, const char* source, Rule* r, std::string* why) {
     }
     if ((r->action == "before" || r->action == "defer") && !r->has_target) {
         *why = "action " + r->action + " needs a \"target\"";
+        return false;
+    }
+    if (r->action == "original-code" &&
+        (r->subject.kind != Matcher::Kind::Mod || r->subject.value.rfind("shroudtopia:", 0) != 0 ||
+         r->subject.value.size() == 12)) {
+        *why = "original-code needs a shroudtopia:<id> subject";
         return false;
     }
     if (r->action == "defer") {
@@ -351,3 +357,13 @@ const Rule* native_defer_rule(const std::vector<Rule>& rules, const Facts& start
 }
 
 }  // namespace kiln::compat
+
+namespace kiln::compat {
+const Rule* original_code_rule(const std::vector<Rule>& rules, const Facts& start, std::string_view mod) {
+    Facts own;
+    own.mods.emplace_back(mod);
+    for (const Rule* r : evaluate(rules, start))
+        if (r->action == "original-code" && present(r->subject, own)) return r;
+    return nullptr;
+}
+} // namespace kiln::compat

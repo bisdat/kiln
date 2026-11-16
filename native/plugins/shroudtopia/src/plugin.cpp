@@ -39,6 +39,8 @@ using kcompat::to_wide;
 using CreateModFn = Mod* (*)();
 
 struct Loaded {
+    HMODULE module = nullptr;
+    bool original_prepared = false;
     fs::path dll;
     std::string origin;  // "profile" or "folder"
     std::string name;    // GetMetaData().name: the key in shroudtopia.json "mods"
@@ -446,6 +448,7 @@ void check_and_load() {
             g_refused[key] = why;
             continue;  // never FreeLibrary: its DllMain may have started something
         }
+        m->module = h;
         m->mod = inst;
         m->name = meta.name;
         m->version = meta.version;
@@ -463,6 +466,18 @@ void check_and_load() {
         std::lock_guard lock(g_mu);
         g_mods.push_back(std::move(m));
     }
+}
+
+void prepare_original_code(Loaded& m) {
+    if (m.original_prepared) return;
+    m.original_prepared = true;
+    if (!m.module) return;
+    const auto* rules = H.service<kiln::compat::OriginalCodeApi>(kiln::compat::kOriginalCodeService, 1);
+    if (!rules) return;
+    const std::string rule(kcompat::sv(rules->rule(kcompat::kstr("shroudtopia:" + m.id))));
+    if (rule.empty() || !original::install(m.module, rules)) return;
+    H.logf(KILN_LOG_INFO, "shroudtopia: %s sees the game's original code when it checks a hooked function (compat rule %s)",
+           m.id.c_str(), rule.c_str());
 }
 
 void drive(Loaded& m, const char* what, std::function<void()> call) {
@@ -499,6 +514,7 @@ void update_mods() {
                 loader_log(KILN_LOG_INFO, m->name + ": " + m->reason);
                 continue;
             }
+            prepare_original_code(*m);
             loader_log(KILN_LOG_INFO, "Loading mod: " + m->name);
             drive(*m, "Load", [&] { m->mod->Load(g_ctx); m->mod->loaded = true; });
             if (m->status == "faulted") continue;
