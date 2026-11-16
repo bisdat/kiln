@@ -380,7 +380,13 @@ void KILN_CALL original_used(uint32_t rva) {
     KLOG_I("shroudtopia: original-code check used the game's original bytes at rva 0x%X%s%s", rva,
            who.empty() ? "" : "; hook ", who.c_str());
 }
-const OriginalCodeApi kOriginalCodeTable{{sizeof(OriginalCodeApi), 1}, &original_rule, &original_used};
+bool KILN_CALL original_read(uintptr_t address, uint8_t* out, size_t size) {
+    if (!out || !size || size > 4096 + 34) return false;
+    // A mapped file can fault after a disk error. Never propagate that fault into a foreign memcmp.
+    __try { return sigdb::file_bytes(address, out, size); }
+    __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+const OriginalCodeApi kOriginalCodeTable{{sizeof(OriginalCodeApi), kOriginalCodeVersion}, &original_rule, &original_used, &original_read};
 } // namespace
 const OriginalCodeApi* original_code_table() { return &kOriginalCodeTable; }
 

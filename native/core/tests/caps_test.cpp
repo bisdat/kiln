@@ -557,6 +557,8 @@ void core_rows(const std::filesystem::path& dir) {
     reset();
     resolve_with(dir, "48 B8 ?? ?? ?? ?? ?? ?? ?? ?? E8 {helper:rel32}");
     caps::core_rows(true, true, "");
+    CHECK(get("kiln.internal.original-code").rc == KILN_OK && get("kiln.internal.original-code").state == KILN_CAP_AVAILABLE,
+          "private service lookup has an honest capability row");
     bool all = true;
     for (const char* f : {"items.fuel", "net.kick", "tick", "tick.wait_jobs", "world.lifecycle"})
         all = all && is(f, A, KILN_CAP_REASON_NONE) && get(f).source == "sigdb";

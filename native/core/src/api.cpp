@@ -139,7 +139,7 @@ std::vector<Published> g_published;
 
 const void* KILN_CALL api_service(KilnStr name, uint32_t min_version) {
     if (sv(name) == compat::kOriginalCodeService)
-        return min_version <= 1 ? compat::original_code_table() : nullptr;
+        return min_version <= compat::kOriginalCodeVersion ? compat::original_code_table() : nullptr;
     // kiln.profile works in safe idle too: early native mods and the managed host read it to find their mods/configs.
     if (sv(name) == KILN_PROFILE_SERVICE) return min_version <= KILN_PROFILE_VERSION ? profile::table() : nullptr;
     // kiln.progress too: the early plugins show their long work with it, before hooks are decided (and in safe idle).

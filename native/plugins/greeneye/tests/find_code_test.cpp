@@ -108,6 +108,12 @@ int main(int argc, char** argv) {
             std::memcpy(live.data() + 0x280, dispatch, sizeof dispatch);
         }
     }
+    if (scenario == "r11-hook") {
+        const uintptr_t target = 1;
+        live[site] = 0x49; live[site + 1] = 0xBB;
+        std::memcpy(live.data() + site + 2, &target, 8);
+        live[site + 10] = 0x41; live[site + 11] = 0xFF; live[site + 12] = 0xE3;
+    }
     if (scenario == "inside-pattern") live[0x180 + 20] = 0xE9;
     if (scenario == "mixed-patches") live[0x380] = 0xCD;
     if (scenario == "indirect-slot" || scenario == "unreadable-slot" || scenario == "inside-image-slot") {

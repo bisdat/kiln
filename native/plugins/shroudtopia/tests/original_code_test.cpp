@@ -48,6 +48,7 @@ int main(){
  check(original && std::memcmp(original,expected.data()+entry,32)<0 && std::memcmp(expected.data()+entry,original,32)>0,
        "memcmp preserves unsigned ordering in either argument position");
  check(!range(0,4097),"large comparisons keep ordinary memcmp");
+ hook(0);live[entry+24]^=1;check(!range(1,2),"a partial check cannot hide another patch in the observed entry");
  hook(0);live[entry+5]=0x90;check(range(0,32),"hook instruction padding is recognised");
  hook(0);live[entry+8]=0xEB;check(!range(0,32),"non-NOP changed suffix is not hidden");
  hook(0);int32_t inside=16;std::memcpy(live.data()+entry+1,&inside,4);check(!range(0,32),"jump inside game is not an entry hook");

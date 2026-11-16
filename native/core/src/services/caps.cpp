@@ -54,6 +54,7 @@
 #include "services/kiln_caps.h"
 #include "services/kiln_profile.h"
 #include "services/kiln_progress.h"
+#include "../../../plugins/compat/original_code_service.h"
 #include "service.h"
 
 namespace kiln::caps {
@@ -440,10 +441,11 @@ void refresh_tick() {
 
 // Served in safe idle too (api_service special-cases them).
 bool served_in_safe_idle(std::string_view name) {
-    return name == KILN_PROFILE_SERVICE || name == KILN_PROGRESS_SERVICE || name == KILN_CAPS_SERVICE;
+    return name == KILN_PROFILE_SERVICE || name == KILN_PROGRESS_SERVICE || name == KILN_CAPS_SERVICE || name == compat::kOriginalCodeService;
 }
 
 bool in_core_service(std::string_view name) {
+    if (name == compat::kOriginalCodeService) return true;
     struct Find {
         std::string_view name;
         bool found;
@@ -801,6 +803,8 @@ void core_rows(bool hooks, bool verified, const std::string& safe_idle) {
     svc::each([](const svc::Service& s, void* user) {
         static_cast<std::vector<Svc>*>(user)->push_back({s.name, s.version, s.available});
     }, &services);
+    // Internal means unsupported for mod authors, not hidden from KilnApi.service or the capability registry.
+    services.push_back({compat::kOriginalCodeService, compat::kOriginalCodeVersion, true});
     std::vector<std::filesystem::path> idle_dlls;  // safe idle: what kiln/services would have loaded
     if (!hooks) {
         std::error_code ec;

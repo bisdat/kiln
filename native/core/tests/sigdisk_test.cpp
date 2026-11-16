@@ -427,6 +427,18 @@ static void padded_hooks() {
         std::fill(live.begin() + 20, live.begin() + 20 + nops, 0x90);
         return pe::only_hook_differences(file.data(), live.data(), file.size(), l_text, base, 0x10000);
     };
+    auto r11 = file;
+    r11[8] = 0x49; r11[9] = 0xBB; std::memcpy(r11.data() + 10, &out, 8);
+    r11[18] = 0x41; r11[19] = 0xFF; r11[20] = 0xE3;
+    CHECK(pe::only_hook_differences(file.data(), r11.data(), file.size(), l_text, base, 0x10000),
+          "the shared recognizer accepts an r11 entry jump for sigdb");
+    uintptr_t destination = 123;
+    CHECK(pe::entry_jump(r11.data() + 8, 13, l_text + 8, base, 0x10000, &destination) == 13 && destination == out,
+          "the shared recognizer reports the complete r11 width and destination");
+    const uintptr_t zero = 0;
+    std::memcpy(r11.data() + 10, &zero, 8);
+    CHECK(!pe::entry_jump(r11.data() + 8, 13, l_text + 8, base, 0x10000, &destination),
+          "the shared recognizer rejects a null destination");
     CHECK(hooked(0) && hooked(6) && hooked(13), "a 12-byte jump with up to 13 NOPs is a hook");
     CHECK(hooked(20), "a 12-byte jump with 20 NOPs (Greeneye Loader's longest hook) is a hook");
     CHECK(!hooked(21), "21 NOPs behind a jump are more than any hook writes: the last one is an in-place patch");

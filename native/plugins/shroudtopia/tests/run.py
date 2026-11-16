@@ -41,6 +41,7 @@ constexpr int KILN_LOG_INFO=1, KILN_LOG_WARN=2, KILN_LOG_ERROR=3;
 using HMODULE=void*;
 struct KilnStr {const char* ptr=nullptr;size_t len=0;};
 namespace kiln::compat {
+constexpr unsigned kOriginalCodeVersion=2;
 constexpr const char* kOriginalCodeService="kiln.internal.original-code";
 struct OriginalCodeApi {KilnStr (*rule)(KilnStr);};
 }

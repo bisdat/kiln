@@ -472,7 +472,7 @@ void prepare_original_code(Loaded& m) {
     if (m.original_prepared) return;
     m.original_prepared = true;
     if (!m.module) return;
-    const auto* rules = H.service<kiln::compat::OriginalCodeApi>(kiln::compat::kOriginalCodeService, 1);
+    const auto* rules = H.service<kiln::compat::OriginalCodeApi>(kiln::compat::kOriginalCodeService, kiln::compat::kOriginalCodeVersion);
     if (!rules) return;
     const std::string rule(kcompat::sv(rules->rule(kcompat::kstr("shroudtopia:" + m.id))));
     if (rule.empty() || !original::install(m.module, rules)) return;
