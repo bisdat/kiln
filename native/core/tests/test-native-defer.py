@@ -82,10 +82,12 @@ int main(int, char** argv){
  Channel collision;check(!collision.open(true),"core refuses an already-existing channel instead of trusting its contents");
  ++fake_pid;times_fail=true;Channel no_identity;check(!no_identity.open(true),"missing process identity fails open without creating a wait");times_fail=false;
  std::ifstream shipped_file(argv[2]);std::stringstream shipped_text;shipped_text<<shipped_file.rdbuf();
- auto shipped=parse_rules(shipped_text.str(),"shipped");check(shipped.ok && shipped.dropped==0 && shipped.rules.size()==2,"all shipped rules parse");
+ auto shipped=parse_rules(shipped_text.str(),"shipped");check(shipped.ok && shipped.dropped==0 && shipped.rules.size()==1,"all shipped rules parse");
  Facts package_start;package_start.mods={"shroudtopia:item-skill-text"};Facts package_own;
  package_own.mods={"native:auto-doors-new-version"};package_own.modules={"powrprof.dll","AutoDoors/bin/ad_core.dll"};
- check(native_defer_rule(shipped.rules,package_start,package_own,true)!=nullptr,"shipped rule identifies Auto Doors by its own files rather than its archive name");
+ // 0.2.0-dev.29.5 (inbox 33): Auto Doors started late does nothing (it must start before the game registers its programs),
+ // so no shipped rule defers it any more; the defer action stays for rules a player or a later Kiln writes.
+ check(!native_defer_rule(shipped.rules,package_start,package_own,true),"no shipped rule defers Auto Doors");
  package_own.modules={"powrprof.dll"};
  check(!native_defer_rule(shipped.rules,package_start,package_own,true),"shipped rule never matches an unrelated powrprof provider");
  const std::string rule=R"({"format":1,"rules":[{"id":"doors","action":"defer","when":[{"mod":"shroudtopia:item-skill-text"}],"subject":{"mod":"native:auto-doors-1.1.0-298-1.1.0-2026-11-04t19-12z-axkrtkhdp"},"target":{"mod":"shroudtopia:item-skill-text"},"max_wait_ms":30000}]})";

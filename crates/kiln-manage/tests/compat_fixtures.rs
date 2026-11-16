@@ -139,12 +139,11 @@ fn native_first_pass_rule_is_validated_without_changing_chain_entries() {
 }
 
 #[test]
-fn shipped_auto_doors_wait_uses_a_distinctive_package_file() {
+fn no_shipped_rule_defers_auto_doors() {
+    // 0.2.0-dev.29.5 (inbox 33): started after Shroudtopia's first pass, Auto Doors 1.1.0 did nothing, so the shipped
+    // defer rule is gone; the action itself stays for a player's own rules.
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../native/core/compat-rules.json");
     let (rules, errors) = parse_rules(&std::fs::read(path).unwrap(), RuleSource::Kiln);
     assert!(errors.is_empty(), "{errors:?}");
-    let rule = &rules.iter().find(|r| r.rule.id == "auto-doors-after-shroudtopia-first-pass").unwrap().rule;
-    assert_eq!(rule.subject, Some(Matcher::Module("AutoDoors/bin/ad_core.dll".into())));
-    assert_eq!(rule.target, Some(Matcher::Mod("shroudtopia:item-skill-text".into())));
-    assert_eq!(rule.max_wait_ms, Some(30000));
+    assert!(rules.iter().all(|r| !matches!(r.rule.action, RuleAction::Defer)), "a shipped defer rule is back");
 }
