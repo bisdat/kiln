@@ -112,7 +112,7 @@ export function acceptedRestore(s: { phase: string; restoreRequested?: boolean }
 
 export function releaseRuntimeAdvice(target?: string): string {
   if (!target) return "Releases before 0.2.0-dev.29 leave the test build's Kiln in your game: reinstall the release's Kiln on the Runtime page. Newer releases put their own Kiln in at the next Play.";
-  const v = /^(\d+)\.(\d+)\.(\d+)(?:-dev\.(\d+))?$/.exec(parseBuild(target).version);
+  const v = /^(\d+)\.(\d+)\.(\d+)(?:-dev\.(\d+)(?:\.\d+)?)?$/.exec(parseBuild(target).version);
   const automatic = v && (Number(v[1]) > 0 || Number(v[2]) > 2 || (Number(v[2]) === 2 && (Number(v[3]) > 0 || (Number(v[3]) === 0 && (v[4] === undefined || Number(v[4]) >= 29)))));
   return automatic ? "Kiln in your game goes back with it at the next Play." : "This release leaves the test build's Kiln in your game. Reinstall the release's Kiln on the Runtime page.";
 }
