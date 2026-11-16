@@ -1529,11 +1529,38 @@ pub fn changed_on_disk(folder: &Path, rec: &ImportRecord) -> bool {
     if let Some((k, changed)) = SEEN.lock().ok().and_then(|s| s.as_ref().and_then(|m| m.get(folder).cloned())) && k == keys {
         return changed;
     }
-    let changed = recorded_hash(folder, rec).is_ok_and(|h| h != rec.hash);
+    // what the mod wrote beside itself while it ran from here (a Shroudtopia mod's log) is no edit
+    let changed = recorded_hash(folder, rec).is_ok_and(|h| h != rec.hash) && !own_output(folder, rec).is_ok_and(|o| o.is_some());
     if let Ok(mut s) = SEEN.lock() {
         s.get_or_insert_with(Default::default).insert(folder.to_path_buf(), (keys, changed));
     }
     changed
+}
+
+/// The files an engine mod wrote into its own Library entry while it ran from there: kiln-shroudtopia runs a mod's DLL
+/// in place, and Item Skill Descriptions (Nexus 350) writes `item-skill-text.log` beside it (GetModuleFileNameW), so the
+/// folder no longer has its imported kdh1. They are the newest files (at most 64) whose leaving out gives exactly the
+/// imported size and kdh1. Some(their relative paths), empty when the entry is as imported; None when the entry differs
+/// in a file of the mod itself, and for a Kiln mod or a plugin DLL (those are compared by identity and by the DLL alone).
+pub(crate) fn own_output(folder: &Path, rec: &ImportRecord) -> Result<Option<Vec<String>>> {
+    if matches!(rec.kind, ModKind::Kiln | ModKind::Plugin) { return Ok(None); }
+    let records = crate::hash::dir_records(folder)?;
+    if crate::hash::dirhash_records(records.clone())? == rec.hash { return Ok(Some(Vec::new())); }
+    let mut files: Vec<(std::time::SystemTime, crate::hash::Record)> = records.into_iter()
+        .map(|f| (std::fs::metadata(folder.join(&f.path)).and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH), f))
+        .collect();
+    files.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.path.cmp(&b.1.path)));
+    let total: u64 = files.iter().map(|(_, f)| f.size).sum();
+    let Some(extra) = total.checked_sub(rec.size) else { return Ok(None) };
+    let mut added = 0u64;
+    for n in 1..=files.len().min(64) {
+        added += files[n - 1].1.size;
+        if added > extra { break; }
+        if added == extra && crate::hash::dirhash_records(files[n..].iter().map(|(_, f)| f.clone()))? == rec.hash {
+            return Ok(Some(files[..n].iter().map(|(_, f)| f.path.clone()).collect()));
+        }
+    }
+    Ok(None)
 }
 
 /// The error of a Library entry whose files are not the ones its record names (Play, activation, a placement): which

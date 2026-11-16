@@ -2857,43 +2857,10 @@ pub fn game_path_of(dirs: &DataDirs, kind: ModKind, m: &crate::profile::ProfileM
 fn split_runtime_files(dirs: &DataDirs, game: &Path, kind: ModKind, m: &crate::profile::ProfileMod, src: &Path) -> Result<Option<Vec<String>>> {
     if crate::hash::dirhash(src)? == m.hash { return Ok(Some(Vec::new())); }
     let r = crate::library::LibraryRef { kind, id: m.id.clone(), version: m.version.clone(), hash: m.hash.clone() };
-    let imported = crate::library::record(dirs, &r)?.size;
-    // the files dirhash counts (no dot entries), newest first
-    let mut files: Vec<(std::time::SystemTime, crate::hash::Record)> = Vec::new();
-    fn walk(dir: &Path, prefix: &str, out: &mut Vec<(std::time::SystemTime, crate::hash::Record)>) -> Result<()> {
-        for e in std::fs::read_dir(dir).map_err(io_at(dir, "reading"))? {
-            let e = e?;
-            let name = e.file_name().to_string_lossy().into_owned();
-            if name.starts_with('.') { continue; }
-            let rel = if prefix.is_empty() { name } else { format!("{prefix}/{name}") };
-            let meta = std::fs::symlink_metadata(e.path())?;
-            if meta.is_dir() {
-                walk(&e.path(), &rel, out)?;
-            } else if meta.is_file() {
-                let (sha256, size) = crate::hash::sha256_file(&e.path())?;
-                out.push((meta.modified().unwrap_or(std::time::UNIX_EPOCH), crate::hash::Record { path: rel, size, sha256 }));
-            }
-        }
-        Ok(())
-    }
     refuse_symlink_path(&dirs.root, src)?;
-    walk(src, "", &mut files)?;
-    files.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.path.cmp(&b.1.path)));
-    let total: u64 = files.iter().map(|(_, f)| f.size).sum();
-    let Some(extra) = total.checked_sub(imported) else { return Ok(None) };
-    let mut added = 0u64;
-    let mut cut = None;
-    for n in 1..=files.len().min(64) {
-        added += files[n - 1].1.size;
-        if added > extra { break; }
-        if added == extra && crate::hash::dirhash_records(files[n..].iter().map(|(_, f)| f.clone()))? == m.hash {
-            cut = Some(n);
-            break;
-        }
-    }
-    let Some(n) = cut else { return Ok(None) };
+    let Some(rels) = crate::library::own_output(src, &crate::library::record(dirs, &r)?)? else { return Ok(None) };
+    if rels.is_empty() { return Ok(Some(Vec::new())); }
     let kept = kept_dir(game, kind, &m.id);
-    let rels: Vec<String> = files[..n].iter().map(|(_, f)| f.path.clone()).collect();
     // never park a kept file here: what is already kept for this mod is its own and stays as it is
     if rels.iter().any(|rel| std::fs::symlink_metadata(kept.join(rel)).is_ok()) { return Ok(None); }
     let mut moved: Vec<String> = Vec::new();

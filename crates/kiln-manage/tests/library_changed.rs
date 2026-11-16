@@ -612,3 +612,32 @@ fn a_folder_that_cannot_be_removed_stays_findable_and_is_finished_later() {
     library::take_over_with(&dirs, &old, &mut no_game).unwrap();
     assert!(!folder.exists() && library::record(&dirs, &old).is_err(), "the retry finished");
 }
+
+/// Discord #support, PepegaJedi, 2026-11-16 (Item Skill Descriptions, Nexus 350): a Shroudtopia mod runs from its Library
+/// entry and writes `item-skill-text.log` next to its DLL. That is the mod's own output, not an edit: the list must not
+/// say "Changed on disk", also after the log grew. An edit of the mod itself next to such a log still counts.
+#[test]
+fn a_log_the_mod_writes_beside_itself_is_no_change() {
+    let t = tmp("ownlog");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let s = t.0.join("src/item-skill-text");
+    put(&s, "item-skill-text.dll", &build_test_dll(&["CreateModInstance"], b"skill text"));
+    put(&s, "mod.json", br#"{"id":"item-skill-text","name":"item-skill-text","version":"0.3.0"}"#);
+    let r = library::import(&dirs, &[s], &mut NoProgress).unwrap();
+    let old = r.imported.iter().find(|x| x.kind == ModKind::Shroudtopia).cloned().unwrap_or_else(|| panic!("{r:?}"));
+    let entry = library::path_of(&dirs, &old).unwrap();
+    let changed = || version_of(&library::list(&dirs, Some(ModKind::Shroudtopia)).unwrap(), ModKind::Shroudtopia, &old.id).versions[0].changed;
+    assert!(!changed());
+
+    // the game ran: the mod's log appeared beside its DLL (the folder is newer than the record now)
+    age_record(&entry);
+    put(&entry, "item-skill-text.log", b"Loaded item-skill-text 0.3.0\n");
+    assert!(!changed(), "the mod's own log is no edit");
+    // the next run: the log grew
+    put(&entry, "item-skill-text.log", b"Loaded item-skill-text 0.3.0\nInactive: target function changed\n");
+    assert!(!changed(), "a grown log is no edit");
+
+    // the mod itself edited as well: that is a change
+    put(&entry, "mod.json", br#"{"id":"item-skill-text","name":"Item Skill Text","version":"0.3.0"}"#);
+    assert!(changed(), "an edit of the mod next to its log");
+}
