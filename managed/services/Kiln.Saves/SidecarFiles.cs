@@ -26,6 +26,23 @@ internal sealed class SidecarFiles(Func<bool> stagingWaiting)
     private bool _pruneDue;                                          // a pruning stopped for a staging: again next time
     private readonly HashSet<string> _folders = new(StringComparer.Ordinal);  // sidecar folders made in this session
 
+    /// <summary>Generations whose newest staging is not on disk because every try to write it failed (review 2: a backup
+    /// of such a generation would carry no mod data, or an older staging's). Process-wide, by folder; under its own lock
+    /// (read by a backup while the writer is idle).</summary>
+    private readonly HashSet<(string Root, uint Gen)> _failed = [];
+
+    public bool Failed(string root, uint gen)
+    {
+        lock (_failed) return _failed.Contains((root, gen));
+    }
+
+    private void MarkFailed(string root, uint gen, bool failed)
+    {
+        lock (_failed)
+            if (failed) _failed.Add((root, gen));
+            else _failed.Remove((root, gen));
+    }
+
     public void Run(Job job)
     {
         if (job.Epoch != _epoch)
@@ -70,12 +87,14 @@ internal sealed class SidecarFiles(Func<bool> stagingWaiting)
             catch (Exception e) when (e is IOException or UnauthorizedAccessException)
             {
                 Remember(job);
+                MarkFailed(job.Root, job.Gen, true);
                 SavesRuntime.Log(LogLevel.Error, $"Kiln.Saves: writing mod data generation {job.Gen} failed {attempt} times: {e.Message} (the world " +
                                                  "write goes ahead without it; its confirmation writes it again; a crash before then loads an older generation)");
                 return;
             }
         }
         Remember(job);
+        MarkFailed(job.Root, job.Gen, false);
         job.QueuedMs = queued;
         job.WorkMs = Since(t0);
         job.DiskText = disk.Text(job.WorkMs);
@@ -88,7 +107,7 @@ internal sealed class SidecarFiles(Func<bool> stagingWaiting)
     }
 
     /// <summary>How often a staging is written before the world write goes ahead without it, and the first pause between
-    /// two tries (then twice that): 3 tries in about 0.75 s.</summary>
+    /// two tries (then twice that): 3 tries with 0.25 s and 0.5 s between them, plus the tries' own file time.</summary>
     internal static int WriteAttempts = 3, RetryMs = 250;
 
     /// <summary>The blobs that are not on disk, then the pending manifest (unless the same manifest is already in its file).</summary>
@@ -180,7 +199,16 @@ internal sealed class SidecarFiles(Func<bool> stagingWaiting)
                 {
                     // Its staging could not be written before the world write: now, forced, before the confirmation.
                     staged.Late = true;
-                    WriteBlobsAndManifest(staged, null, ref disk, out _, out _);
+                    try
+                    {
+                        WriteBlobsAndManifest(staged, null, ref disk, out _, out _);
+                    }
+                    catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+                    {
+                        MarkFailed(job.Root, job.Rev, true);  // still not on disk: no backup may claim this generation
+                        throw;
+                    }
+                    MarkFailed(job.Root, job.Rev, false);
                     retried = true;
                 }
                 man = (JsonObject)staged.Manifest!.DeepClone();

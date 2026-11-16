@@ -411,11 +411,11 @@ public sealed class WriterOrderTests : IDisposable
     }
 
     [Fact]
-    public void AReloadThatOutwaitsTheWriterStillLoadsTheGenerationBeingConfirmed()
+    public void AReloadThatOutwaitsTheWriterNeverTakesAnOlderGeneration()
     {
         // Review 1, finding 2: a load whose wait for the writer ran out read the folder while the confirmation was being
         // written: it listed pending R, the writer then put confirmed R in place and deleted pending R, and the load fell
-        // back to R-1.
+        // back to R-1. Now (review 2) a load whose wait runs out reads nothing: deferred, then read at a pump.
         using var native = new FakeSavesTable();
         var limit = SaveWriter.DrainLimit;
         try
@@ -451,8 +451,12 @@ public sealed class WriterOrderTests : IDisposable
             Dispatch(SavesNative.EvWritten, 202, 2, saveSeq: 200, unix: 1002);
             Assert.True(reached.Wait(Long));
             var match = _h.Restart(2, new FakeInstanceWorld());   // the world file of revision 2 is on disk
+            Assert.Equal(DataMatch.None, match);                   // not read: never generation 1 for world file 2
+            Assert.False(SavesRuntime.WorldDataReady);
+            Assert.True(Store.Writer.Drain("test", Long));        // the stalled confirmation finishes
+            Pump();
             WorldStore.IoHook = _hook;
-            Assert.Equal(DataMatch.Exact, match);
+            Assert.Equal(DataMatch.Exact, Store.Match);
             Assert.Equal(10, Value(Store, 0));
         }
         finally
@@ -463,10 +467,11 @@ public sealed class WriterOrderTests : IDisposable
     }
 
     [Fact]
-    public void ABackupThatOutwaitsTheWriterStillCarriesItsModData()
+    public void ABackupThatWaitsForTheWriterCarriesItsModData()
     {
         // Review 1, finding 3: a backup whose wait for the writer ran out found no confirmation and reported success with no
-        // mod data at all.
+        // mod data at all. A writer that finishes within the limit: the backup waits for it and carries the generation (one
+        // that does not finish fails the backup: ABackupWhileTheWriterHangsFailsInsteadOfHoldingTheTick).
         using var native = new FakeSavesTable();
         var world = Guid.NewGuid();
         InstanceHarness.OpenFolder(_h.Root, world.ToString());
@@ -478,7 +483,7 @@ public sealed class WriterOrderTests : IDisposable
         var limit = SaveWriter.DrainLimit;
         try
         {
-            SaveWriter.DrainLimit = TimeSpan.FromMilliseconds(100);
+            SaveWriter.DrainLimit = TimeSpan.FromSeconds(5);
             FiveBundles(1);
             FakeSavesTable.WriteWorldHeader(file, world, 1, 1001);
             SaveThroughEvents(1, 100);
@@ -488,7 +493,7 @@ public sealed class WriterOrderTests : IDisposable
             Dispatch(SavesNative.EvSnapshot, 201, 2, saveSeq: 200);
             FakeSavesTable.WaitLikeTheWorldWrite(Long);
             FakeSavesTable.WriteWorldHeader(file, world, 2, 1002);   // the game's world write
-            var freeze = FreezeAt("rename", gate: TimeSpan.FromSeconds(2));
+            var freeze = FreezeAt("rename", gate: TimeSpan.FromSeconds(1));   // the confirmation stalls 1 s
             Dispatch(SavesNative.EvWritten, 202, 2, saveSeq: 200, unix: 1002);
             freeze.Reached();
             var backup = SavesBackups.Create("slow-disk", 2, 1002, SaveReason.Backup);   // right after the write, as Saves.Backup does
@@ -563,6 +568,134 @@ public sealed class WriterOrderTests : IDisposable
         WorldStore.IoHook = _hook;
         Dispatch(SavesNative.EvWritten, 202, 2, saveSeq: 200, unix: 1002);
         Assert.Equal(DataMatch.Exact, _h.Restart(2, new FakeInstanceWorld()));
+    }
+
+    // ---- review round 2 ----
+
+    private static void Pump() =>
+        typeof(SavesRuntime).GetMethod("Pump", BindingFlags.Static | BindingFlags.NonPublic)!.Invoke(null, null);
+
+    [Fact]
+    public void AReloadWhileTheWriterHangsIsDeferredNotHeldAndReadOnceTheWriterIsDone()
+    {
+        // Review 2, finding 1: a load waited for the writer without a limit, so a disk that never answers held the tick
+        // thread for good. Now the load is deferred: no data, nothing saved over it, read at a pump once the writer is done.
+        using var native = new FakeSavesTable();
+        var limit = SaveWriter.DrainLimit;
+        try
+        {
+            SaveWriter.DrainLimit = TimeSpan.FromMilliseconds(200);
+            FiveBundles(1);
+            SaveThroughEvents(1, 100);
+            Written();
+            Set(0, 10);
+            Dispatch(SavesNative.EvSaving, 200, 2);
+            Dispatch(SavesNative.EvSnapshot, 201, 2, saveSeq: 200);
+            FakeSavesTable.WaitLikeTheWorldWrite(Long);
+            var freeze = FreezeAt("rename", gate: TimeSpan.FromSeconds(6));   // the confirmation's forced write does not return
+            Dispatch(SavesNative.EvWritten, 202, 2, saveSeq: 200, unix: 1002);
+            freeze.Reached();
+            var sw = Stopwatch.StartNew();
+            var match = _h.Restart(2, new FakeInstanceWorld(), tick: false);
+            Assert.True(sw.Elapsed < TimeSpan.FromSeconds(3), $"the load held the tick thread {sw.Elapsed.TotalMilliseconds:F0} ms");
+            Assert.Equal(DataMatch.None, match);
+            Assert.False(SavesRuntime.WorldDataReady);              // unavailable, as a hosted world's data before its load
+            Dispatch(SavesNative.EvSaving, 300, 3);            // a save meanwhile writes nothing over the unread data
+            freeze.Release();
+            Written();
+            Assert.False(File.Exists(Pending(3)));
+            Pump();                                            // the writer is done: the next pump reads it
+            Assert.True(SavesRuntime.WorldDataReady);
+            Assert.Equal(DataMatch.Exact, Store.Match);
+            Assert.Equal(10, Value(Store, 0));
+        }
+        finally
+        {
+            SaveWriter.DrainLimit = limit;
+        }
+    }
+
+    private (Guid World, string File) BackupSetup()
+    {
+        var world = Guid.NewGuid();
+        InstanceHarness.OpenFolder(_h.Root, world.ToString());
+        var saves = Temp("savegame");
+        var file = Path.Combine(saves, "world0.ksd");
+        FakeSavesTable.Paths[SavesNative.PathSaveDir] = saves;
+        FakeSavesTable.Paths[SavesNative.PathWorldFile] = file;
+        FakeSavesTable.Paths[SavesNative.PathBackups] = Temp("backups");
+        return (world, file);
+    }
+
+    [Fact]
+    public void ABackupWhileTheWriterHangsFailsInsteadOfHoldingTheTick()
+    {
+        // Review 2, finding 1, for backups: the backup fails after the writer's limit instead of waiting for good.
+        using var native = new FakeSavesTable();
+        var (world, file) = BackupSetup();
+        var limit = SaveWriter.DrainLimit;
+        try
+        {
+            SaveWriter.DrainLimit = TimeSpan.FromMilliseconds(200);
+            FiveBundles(1);
+            FakeSavesTable.WriteWorldHeader(file, world, 1, 1001);
+            SaveThroughEvents(1, 100);
+            Written();
+            Set(0, 10);
+            Dispatch(SavesNative.EvSaving, 200, 2);
+            Dispatch(SavesNative.EvSnapshot, 201, 2, saveSeq: 200);
+            FakeSavesTable.WaitLikeTheWorldWrite(Long);
+            FakeSavesTable.WriteWorldHeader(file, world, 2, 1002);
+            var freeze = FreezeAt("rename", gate: TimeSpan.FromSeconds(6));
+            Dispatch(SavesNative.EvWritten, 202, 2, saveSeq: 200, unix: 1002);
+            freeze.Reached();
+            var sw = Stopwatch.StartNew();
+            Assert.Throws<InvalidOperationException>(() => SavesBackups.Create("hung-disk", 2, 1002, SaveReason.Backup));
+            Assert.True(sw.Elapsed < TimeSpan.FromSeconds(3), $"the backup held the tick thread {sw.Elapsed.TotalMilliseconds:F0} ms");
+            Assert.Empty(Directory.EnumerateFileSystemEntries(FakeSavesTable.Paths[SavesNative.PathBackups]));
+        }
+        finally
+        {
+            SaveWriter.DrainLimit = limit;
+        }
+    }
+
+    [Fact]
+    public void ABackupOfAGenerationThatCouldNotBeWrittenFails()
+    {
+        // Review 2, finding 2: the manifests could not be written at all (tries, then the confirmation's try); the writer is
+        // idle, and the backup used to publish a world file with no mod data as a success.
+        using var native = new FakeSavesTable();
+        var (world, file) = BackupSetup();
+        var retry = SidecarFiles.RetryMs;
+        try
+        {
+            SidecarFiles.RetryMs = 1;
+            FiveBundles(1);
+            FakeSavesTable.WriteWorldHeader(file, world, 1, 1001);
+            SaveThroughEvents(1, 100);
+            Written();
+            var tick = Environment.CurrentManagedThreadId;
+            WorldStore.IoHook = op =>
+            {
+                if (op == "create" && Environment.CurrentManagedThreadId != tick) throw new IOException("Access to the path is denied.");
+            };
+            Dispatch(SavesNative.EvSaving, 200, 2);
+            Dispatch(SavesNative.EvSnapshot, 201, 2, saveSeq: 200);
+            FakeSavesTable.WaitLikeTheWorldWrite(Long);
+            FakeSavesTable.WriteWorldHeader(file, world, 2, 1002);
+            Dispatch(SavesNative.EvWritten, 202, 2, saveSeq: 200, unix: 1002);
+            Written();
+            WorldStore.IoHook = _hook;
+            Assert.False(File.Exists(Pending(2)));
+            Assert.Throws<InvalidOperationException>(() => SavesBackups.Create("no-data", 2, 1002, SaveReason.Backup));
+            Assert.Empty(Directory.EnumerateFileSystemEntries(FakeSavesTable.Paths[SavesNative.PathBackups]));
+        }
+        finally
+        {
+            WorldStore.IoHook = _hook;
+            SidecarFiles.RetryMs = retry;
+        }
     }
 
     [Fact]

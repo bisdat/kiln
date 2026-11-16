@@ -25,9 +25,17 @@ internal static class SavesBackups
     /// <summary>Copies the world file (revision <paramref name="rev"/>, just written) and its sidecar generation. Tick
     /// thread, right after the write: the game cannot start another save before this returns. It reads the sidecar only
     /// once Kiln.Saves' writer has written everything it was handed, and while it writes nothing (review 1: a backup that
-    /// went on after a bounded wait could miss its generation's confirmation and carry no mod data at all).</summary>
-    internal static BackupInfo Create(string name, uint rev, uint unix, SaveReason reason) =>
-        SavesRuntime.Store.Writer.Exclusive($"backup '{name}'", () => CreateNow(name, rev, unix, reason));
+    /// went on while a confirmation was still being written could miss it). It fails instead (review 2) when the writer
+    /// is still busy after <see cref="SaveWriter.DrainLimit"/> (a disk that does not answer: the tick thread must not wait
+    /// for good), and when the generation of that world file has no usable manifest on disk: a backup that brings a world
+    /// back without its mods' data is no backup.</summary>
+    internal static BackupInfo Create(string name, uint rev, uint unix, SaveReason reason)
+    {
+        if (SavesRuntime.Store.Writer.TryExclusive($"backup '{name}'", SaveWriter.DrainLimit, () => CreateNow(name, rev, unix, reason), out var info))
+            return info;
+        throw new InvalidOperationException($"backup '{name}' not made: Kiln.Saves' writer has not finished the files of mod data generation " +
+                                            $"{rev} after {SaveWriter.DrainLimit.TotalSeconds:F0} s (the disk does not answer)");
+    }
 
     private static BackupInfo CreateNow(string name, uint rev, uint unix, SaveReason reason)
     {
@@ -36,6 +44,18 @@ internal static class SavesBackups
         var h = WorldStore.ReadHeader(world) ?? throw new InvalidOperationException($"{world} is not readable");
         if (h.Revision != rev) throw new InvalidOperationException($"{Path.GetFileName(world)} is at revision {h.Revision}, expected {rev}");
         var id = h.Guid.ToString();
+        // Its mod data, decided before anything is copied: its confirmation, else its pending manifest (the same generation,
+        // when its confirmation could not be written; a restore loads it as staged), one that reads and names only blobs
+        // that are there. A generation whose newest staging could not be written has neither that is its own.
+        string? manifest = null;
+        if (store.WorldId == id && store.Root is { } root)
+        {
+            if (store.Writer.WriteFailed(root, rev))
+                throw new InvalidOperationException($"backup '{name}' not made: Kiln.Saves could not write mod data generation {rev} (kiln.log has " +
+                                                    "the error); the backup would bring the world back without its mods' data");
+            manifest = store.UsableManifest(rev, h.Unix)
+                       ?? throw new InvalidOperationException($"backup '{name}' not made: mod data generation {rev} has no usable manifest on disk");
+        }
         var created = DateTimeOffset.UtcNow;
         var folder = $"{created:yyyyMMdd-HHmmss}-{name}";
         var dest = Path.Combine(Dir, folder);
@@ -62,9 +82,6 @@ internal static class SavesBackups
             throw new InvalidOperationException("the world file changed while it was copied");
         }
         var bundles = 0;
-        // Its confirmation, else its pending manifest (the same generation: a confirmation that failed to be written);
-        // a restore of that loads it as staged.
-        var manifest = store.WorldId == id ? store.CommittedManifest(rev, h.Unix) ?? store.PendingManifest(rev) : null;
         if (manifest != null)
         {
             Add(manifest, Path.Combine("worlds", id, "manifests", Path.GetFileName(manifest)));

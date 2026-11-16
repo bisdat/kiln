@@ -38,8 +38,9 @@ namespace Kiln;
 /// game starts no snapshot while its previous world write runs. Pruning stops between two files when a staging is
 /// waiting and runs again after the next confirmation.</para>
 /// <para><b>Stops, reloads, exits.</b> A world load or reload and a backup read the folder only once the writer has
-/// written everything, and while it writes nothing (<see cref="Exclusive{T}"/>, no time limit). A world close and the
-/// shutdown save's confirmation wait for it at most <see cref="DrainLimit"/> (logged). A process that ends with jobs
+/// written everything, and while it writes nothing (<see cref="TryExclusive{T}"/>, at most <see cref="DrainLimit"/>: a
+/// load that cannot read then is deferred, a backup fails). A world close and the shutdown save's confirmation wait for it
+/// at most <see cref="DrainLimit"/> (logged). A process that ends with jobs
 /// queued (a crash, kill -9, or after that wait) leaves what an end at that point always left: no torn file (each one
 /// goes to a temp name and is renamed), a staging is on disk before its world file while the world write's wait holds,
 /// and a confirmation not written yet means the next start loads that generation as <c>Staged</c>, with the same
@@ -240,39 +241,35 @@ internal sealed unsafe class SaveWriter
     }
 
     /// <summary>Runs <paramref name="read"/> on the calling thread once the writer has written everything handed to it, and
-    /// with nothing written while it runs, so a load or a backup reads the sidecar folder as one state. No time limit
-    /// (review 1): a reader that went on after a bounded wait could list a pending manifest, see the writer put its
-    /// confirmation in place and delete it, and take an older generation, or a backup could miss its generation. A wait
-    /// over <see cref="DrainLimit"/> is logged, and again every 10 s. <paramref name="read"/> must not hand the writer a
-    /// job (it would wait for itself).</summary>
-    public T Exclusive<T>(string why, Func<T> read)
+    /// with nothing written while it runs, so a load or a backup reads the sidecar folder as one state (review 1: a reader
+    /// that went on while a confirmation was being written could list a pending manifest, see it replaced by its
+    /// confirmation and deleted, and take an older generation). Waits at most <paramref name="limit"/> (review 2: a disk
+    /// that never answers must not hold the tick thread for good); false when the writer was still busy then, and
+    /// <paramref name="read"/> did not run: the caller defers (a load) or fails (a backup). <paramref name="read"/> must not
+    /// hand the writer a job (it would wait for itself).</summary>
+    public bool TryExclusive<T>(string why, TimeSpan limit, Func<T> read, out T result)
     {
         var sw = Stopwatch.StartNew();
-        var next = DrainLimit;
-        while (true)
+        int left;
+        lock (_lock)
         {
-            int left;
-            lock (_lock)
-            {
-                while (_running != null || _stages.Count > 0 || _others.Count > 0)
-                {
-                    var wait = next - sw.Elapsed;
-                    if (wait <= TimeSpan.Zero) break;
-                    Monitor.Wait(_lock, wait);
-                }
-                left = _stages.Count + _others.Count + (_running != null ? 1 : 0);
-                if (left == 0) _running = Reader;
-            }
-            if (left == 0) break;
-            SavesRuntime.Log(LogLevel.Warn, $"Kiln.Saves: {why}: still waiting for the writer after {sw.Elapsed.TotalSeconds:F0} s " +
-                                            $"({left} write(s) to do); it reads the folder only once they are written");
-            next = sw.Elapsed + TimeSpan.FromSeconds(10);
+            while ((left = _stages.Count + _others.Count + (_running != null ? 1 : 0)) > 0 && sw.Elapsed < limit)
+                Monitor.Wait(_lock, limit - sw.Elapsed);
+            if (left == 0) _running = Reader;
         }
         var ms = sw.Elapsed.TotalMilliseconds;
+        if (left > 0)
+        {
+            SavesRuntime.Log(LogLevel.Warn, $"Kiln.Saves: {why}: the writer still has {left} write(s) to do after {ms:F0} ms (the disk does " +
+                                            "not answer); not read now");
+            result = default!;
+            return false;
+        }
         if (ms > WorldStore.SlowMs) SavesRuntime.Log(LogLevel.Info, $"Kiln.Saves: {why}: waited {ms:F1} ms for the writer to finish its files");
         try
         {
-            return read();
+            result = read();
+            return true;
         }
         finally
         {
@@ -284,9 +281,14 @@ internal sealed unsafe class SaveWriter
         }
     }
 
+    /// <summary>Generation <paramref name="gen"/> of the folder <paramref name="root"/>: its newest staging, or its staging
+    /// written again at the confirmation, could not be written (its tries failed). Read while the writer is idle
+    /// (<see cref="TryExclusive{T}"/>).</summary>
+    public bool WriteFailed(string root, uint gen) => _files.Failed(root, gen);
+
     private sealed class ReaderJob : Job;
 
-    /// <summary>What <see cref="_running"/> holds while <see cref="Exclusive{T}"/> reads.</summary>
+    /// <summary>What <see cref="_running"/> holds while <see cref="TryExclusive{T}"/> reads.</summary>
     private static readonly ReaderJob Reader = new() { Epoch = 0, Root = "", WorldId = null };
 
     /// <summary>Drains (bounded, as <see cref="Drain"/>) and ends the writer's thread; the next job starts one again.

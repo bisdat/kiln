@@ -58,6 +58,32 @@ internal sealed unsafe class WorldStore
     /// <summary>Writes every file of the save path, off the tick thread (one writer for the process).</summary>
     internal SaveWriter Writer => SaveWriter.Shared;
 
+    /// <summary>The load of the open world could not read its folder (the writer was still busy with it after
+    /// <see cref="SaveWriter.DrainLimit"/>): its revision and file time, to read it later (<see cref="RetryLoad"/>).</summary>
+    private (uint Revision, uint Unix)? _deferred;
+
+    /// <summary>The game has loaded this world (its matching starts when the data is read).</summary>
+    private bool _matching;
+
+    /// <summary>The world's mod data is not read yet (review 2): it is unavailable, and nothing is saved over it.</summary>
+    internal bool LoadDeferred => _deferred != null;
+
+    /// <summary>Reads a deferred load once the writer is idle (the pump, about once a second, and the game's load). True
+    /// when it was read now; the caller then tells mods (WorldLoadedEvent).</summary>
+    internal bool RetryLoad()
+    {
+        if (_deferred is not { } d || !Writer.Idle) return false;
+        Load(d.Revision, d.Unix);
+        if (_deferred != null) return false;
+        if (_matching)
+        {
+            Entities.StartMatching();
+            Instances.StartMatching();
+        }
+        SavesRuntime.Log(LogLevel.Info, $"Kiln.Saves: world {WorldId}: mod data read now that the writer is done: generation {Generation} ({Match})");
+        return true;
+    }
+
     /// <summary>Files <see cref="WriteAtomic(string, byte[])"/> wrote in this process, and of them the ones forced to disk
     /// (tests count the writes and the forced writes of a save).</summary>
     internal static long FilesWritten, FilesForced;
@@ -132,6 +158,7 @@ internal sealed unsafe class WorldStore
         if (id == null)
         {
             SavesRuntime.Log(LogLevel.Info, $"Kiln.Saves: new world (no file yet); mod data is kept in memory until the first save");
+            _deferred = null;
             Entities.StartMatching();
             Instances.StartMatching();
             return;
@@ -148,10 +175,14 @@ internal sealed unsafe class WorldStore
             DetachAll();
             Open(id, revision, unix);
         }
+        _matching = true;
+        if (_deferred != null && RetryLoad()) return;  // the writer may have finished since: read it now (it starts the matching)
         Entities.StartMatching();
         Instances.StartMatching();
         SavesRuntime.Log(LogLevel.Info, $"Kiln.Saves: world {WorldId} revision {revision} loaded by the game; mod data " +
-                                        $"generation {Generation} ({Match}), {_bundles.Count} bundles, {Entities.Summary}, {Instances.Summary}");
+                                        (_deferred != null
+                                            ? "not read yet (Kiln.Saves' writer is still busy with this folder): unavailable until it is"
+                                            : $"generation {Generation} ({Match}), {_bundles.Count} bundles, {Entities.Summary}, {Instances.Summary}"));
     }
 
     /// <summary>A new world got its id with its first save.</summary>
@@ -184,6 +215,8 @@ internal sealed unsafe class WorldStore
         Generation = 0;
         Match = DataMatch.None;
         _loadedRevision = _loadedUnix = 0;
+        _deferred = null;
+        _matching = false;
         NewSession();
         _opened = false;
         _closed = true;
@@ -223,7 +256,7 @@ internal sealed unsafe class WorldStore
         var dir = Path.Combine(Root!, "manifests");
         // One stable read (review 1): only once the writer has every file it was handed on disk, and with nothing written
         // while it reads, so a confirmation that is still being written cannot make it take an older generation.
-        var found = Writer.Exclusive("loading mod data", () =>
+        if (!Writer.TryExclusive("loading mod data", SaveWriter.DrainLimit, () =>
         {
             Io("list");
             var all = ListManifests(dir);
@@ -244,7 +277,22 @@ internal sealed unsafe class WorldStore
                 return (Manifest: (ManifestName?)m, Match: match, Bundles: bundles, Newer: all.Any(x => x.Revision > m.Revision), Count: all.Count, Unusable: unusable);
             }
             return (Manifest: null, Match: DataMatch.None, Bundles: new List<(string, JsonObject)>(), Newer: all.Count > 0, Count: all.Count, Unusable: unusable);
-        });
+        }, out var found))
+        {
+            // Review 2: the writer is still busy with this folder (a disk that does not answer). Reading it now could take an
+            // older generation; waiting longer would hold the tick thread. So the load is deferred: no mod data until it can
+            // be read (Saves.WorldDataReady is false, as for a hosted world before its load), nothing staged or confirmed
+            // over it, and the pump reads it as soon as the writer is idle (RetryLoad), then WorldLoadedEvent goes.
+            _deferred = (revision, unix);
+            Generation = 0;
+            Match = DataMatch.None;
+            Instances.OnLoaded(0, DataMatch.None, true);
+            SavesRuntime.Log(LogLevel.Warn, $"Kiln.Saves: world {WorldId} file revision {revision}: mod data not read yet: Kiln.Saves' writer " +
+                                            "has not finished this folder's files; until it has, the world's mod data is unavailable " +
+                                            "(Saves.WorldDataReady is false), nothing is saved over it, and it is read as soon as the writer is done");
+            return;
+        }
+        _deferred = null;
         foreach (var line in found.Unusable) SavesRuntime.Log(LogLevel.Error, line);
         if (found.Manifest is { } chosen)
         {
@@ -460,6 +508,13 @@ internal sealed unsafe class WorldStore
             SavesRuntime.Log(LogLevel.Warn, "Kiln.Saves: the save's revision is unknown; mod data not written");
             return;
         }
+        if (_deferred != null)
+        {
+            // Not read yet (review 2): an empty store must never be staged over the data on disk. The world file of this
+            // save gets no generation of its own; loading it takes the newest one on disk, which is the data this world had.
+            SavesRuntime.Log(LogLevel.Warn, $"Kiln.Saves: generation {gen} not staged: this world's mod data is not read yet (the writer is still busy)");
+            return;
+        }
         var t0 = System.Diagnostics.Stopwatch.GetTimestamp();
         var bundles = new List<(string Scope, byte[] Data)>();
         foreach (var b in _bundles.Values)
@@ -544,7 +599,7 @@ internal sealed unsafe class WorldStore
     public void Commit(uint rev, uint unix, SaveReason reason)
     {
         EnsureOpen();
-        if (Root == null || rev == 0) return;
+        if (Root == null || rev == 0 || _deferred != null) return;
         var t0 = System.Diagnostics.Stopwatch.GetTimestamp();
         if (!_stagedGens.Contains(rev)) Stage(rev, reason, late: true);  // the save began before Kiln.Saves was started
         if (Root == null || !_stagedGens.Contains(rev)) return;
@@ -664,18 +719,30 @@ internal sealed unsafe class WorldStore
         }
     }
 
-    /// <summary>The pending manifest of a revision, for a backup of a generation whose confirmation could not be written:
-    /// the same generation, which a restore loads as staged.</summary>
-    internal string? PendingManifest(uint rev) => Root != null && File.Exists(PendingPath(Root, rev)) ? PendingPath(Root, rev) : null;
-
-    /// <summary>The committed manifest of (revision, world time), for backups.</summary>
-    internal string? CommittedManifest(uint rev, uint unix)
+    /// <summary>The manifest of generation <paramref name="rev"/> a backup carries: its confirmation of that world file time,
+    /// else another confirmation of the revision, else its pending manifest (the same generation, when its confirmation
+    /// could not be written; a restore loads it as staged). Only one that reads and names blobs that are all there.</summary>
+    internal string? UsableManifest(uint rev, uint unix)
     {
         if (Root == null) return null;
-        var p = CommittedPath(rev, unix);
-        if (File.Exists(p)) return p;
-        return ListManifests(Path.Combine(Root, "manifests")).Where(m => !m.Pending && m.Revision == rev)
-            .OrderByDescending(m => m.Unix).Select(m => m.Path).FirstOrDefault();
+        var exact = CommittedPath(rev, unix);
+        var candidates = new List<string> { exact };
+        candidates.AddRange(ListManifests(Path.Combine(Root, "manifests")).Where(m => !m.Pending && m.Revision == rev && m.Path != exact)
+            .OrderByDescending(m => m.Unix).Select(m => m.Path));
+        candidates.Add(PendingPath(Root, rev));
+        foreach (var p in candidates)
+        {
+            try
+            {
+                if (!File.Exists(p) || JsonNode.Parse(File.ReadAllBytes(p))?["bundles"] is not JsonObject list) continue;
+                if (list.All(kv => kv.Value?["sha256"]?.GetValue<string>() is { } sha && File.Exists(BlobPath(sha)))) return p;
+            }
+            catch (Exception e) when (e is IOException or JsonException or InvalidOperationException or UnauthorizedAccessException)
+            {
+                // not usable: the next one
+            }
+        }
+        return null;
     }
 
     internal IEnumerable<string> BlobsOf(string manifest)
