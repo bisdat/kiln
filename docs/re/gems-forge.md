@@ -34,12 +34,23 @@ Order **[dis]**: return at once when `input.version == consumed.version`; forge 
 (this is the cancel path kiln.gemcraft uses); the forge's template must read and have `maxGemLevel != 0`; the gem: the
 request's slot when it is set (getItemStack `0x93fce0`; an entity without an Inventory resolves index 0 through its
 WeaponGemSlot, so `{weaponPide, 0}` names the socket), else the weapon's WeaponGemSlot; its Level (`0x724bf568`) and cap
-(`0x638a979a`) through AttrFind; then the action. Every branch stores the consumed version, whatever happened.
+(`0x638a979a`) through AttrFind; then the action. Every branch stores the consumed version, whatever happened, **except**
+when the gem's Level cannot be read: no Level component (server `0x144e93`, client `0x385b62`) or an attribute lookup
+error (`0x144f59`/`0x144f62`, `0x385c28`/`0x385c31`) jumps past the store (`0x145019` / `0x385d13`), so the game offers
+that version again every step until the client sends another (kiln.gemcraft's hold book runs such a version once and
+never holds or reports it again).
+
+The setup block the handler gives InventoryTxInit (server `0x144c1c..0x144d03`, client `0x3858ec..0x3859d3`, `rsp+0x70`)
+**[dis]**: `+0` flags 4 (InventoryFull to the operator), `+8` the iterator's ctx, `+0x10` ItemRegistry, `+0x18`
+BalancingRegistry, `+0x20` 0 (no AttributeRegistry), `+0x28` InventorySetup, `+0x30` Inventory, `+0x38` SlotSelection,
+`+0x40` ItemState, `+0x48` OwnerRelationship, `+0x50` InventorySetup, `+0x58` InventoryEmptyState, **`+0x60`
+WeaponGemSlot** (what makes `{weaponPide, 0}` a slot of the transaction), `+0xA8` the InventoryFull sender, `+0xC8` the
+player (operator), everything else 0.
 
 | action | branch (S / C) | cost or yield | what moves |
 |---|---|---|---|
 | Slot 1 | `0x1453c2` / `0x3860b9` | `0x938fa0` / `0xe91e60` (maxGemLevel, multiplier, modifier, Balancing), paid in `materialItemId` (removeItems on the same tx, must leave 0 missing) | `0x1b4950` / `0x414db0`: the exact source slot → `{weaponPide, 0}`, one item, the gem's entity kept |
-| Unslot 2 | `0x1452a9` / `0x385fa0` | `0x938f30` / `0xe91df0` = `xor eax,eax; ret`: **free** on this build | `0x1b4bb0` / `0x415010`: `{weaponPide, 0}` → the player's inventory |
+| Unslot 2 | `0x1452a9` / `0x385fa0` | `0x938f30` / `0xe91df0` = `xor eax,eax; ret`: **free** on this build | `0x1b4bb0` / `0x415010` (sigdb `gems/UnslotMove`): `Result12* (out, tx, u64 src, u32 owner, u16 amount, u32 1, u8 1, u8 1)` called with `({weaponPide, 0}, the player, 1, 1, 1, 1)`: takeItems `0x1b9460` from `src`, then `0x1b4d10` puts the stack into `owner`'s inventory; the handler commits only when `out.error == 0 && out.value == 0` (value: what did not fit) |
 | Upgrade 3 | `0x145118` / `0x385e0f` | refused when level ≥ cap or ≥ maxGemLevel; `0x939020` / `0xe91ee0` (level, maxGemLevel, multiplier, modifier, Balancing) | the payment is **committed first**, then Level +1 and its formulas (`0xab970`), then the gem impact is reset |
 | Recycle 4 | `0x144f9a` / `0x385c69` | essence = the forge's upgradeMaterial; `0x939060` / `0xe91f20` (level, maxGemLevel, Balancing) | destroyItemStack (`0x1b27a0`) of the request's slot, addItems of the yield |
 
@@ -49,8 +60,10 @@ else the constant 1.0 (`0xbd6b90` / `0x13d0c90`). The costs read the BalancingRe
 `gem_crafting_sequence` plays as the forge's action sequence.
 
 **No ownership check** in the handler: it reads neither the carrier's category nor its slot type, nor checks that the
-source is a gem item, nor that the items are the player's (the Gem Forge report §6.3). kiln.gemcraft checks those itself
-before it calls the handler for code.
+source is a gem item, nor that the items are the player's (the Gem Forge report §6.3). Its "gem" is any stack with an item
+entity: Recycle would destroy a sword in the request's slot for essence, Upgrade would raise a sword's Level. kiln.gemcraft
+checks those itself before it calls the handler for code (a WeaponGem for Slot, Upgrade and Recycle; an unreadable
+category is refused).
 
 ## What Kiln does (kiln-items.dll, `native/services/items/gems.cpp`)
 - **Code actions**: the program `kiln_items_gems` (kiln.world; an entity program over the player characters: read
@@ -64,8 +77,19 @@ before it calls the handler for code.
 - **Players' actions**: a kiln.hooks link on the handler. While a hold lease runs (a `GemCraftingEvent` handler listens), a
   new version is not passed on: it stays unconsumed and the game offers it again next step. Pre reports it; the answer
   runs it (allow) or calls the handler once on a copy of the iterator whose request copy has forge 0 (cancel: the game
-  only stores the consumed version). 8 steps without an answer: it runs. While watched, the state before and after
-  (socket, gem, Level, the material and essence counts of the player) gives `GemCraftedEvent`.
+  only stores the consumed version; the forge-0 test is the handler's first decision, before any action branch, on both
+  exes: server `0x144d06..0x144d2d`, client `0x3859d6..0x3859fd`; before it only the setup block on the stack and the
+  current-entity read). 8 steps without an answer: it runs. A verdict stands after holding stops (the hook asks the
+  book whenever it holds an entry); an action released before Pre saw it is not reported; a version that ran is
+  remembered per player, so one the game leaves unconsumed runs again without a second event. While watched, the state
+  before and after (socket, gem, Level, the material and essence counts of the player) gives `GemCraftedEvent`.
+- **Free and replaced costs**: the take-back of Kiln's gift is measured (`gift_left`: the material count before and after
+  the handler), not assumed, because Upgrade commits its payment before the Level write and a commit can roll back by
+  itself. A replaced cost must be a plain stack (no HasPIDE): the take is by item id from anywhere.
+- **The forgeless return** (`KILN_GEM_RETURN`, for `Gems.ReturnSocketedGems`): inside the player's update of
+  `kiln_items_gems`, a transaction on Kiln's buffer with the handler's own setup block (above, from the mapped iterator),
+  `gems/UnslotMove(out, tx, {carrier, 0}, player, 1, 1, 1, 1)`, commit on the handler's condition, else rollback; then the
+  socket and the backpack are read again (Unslot's judge). No forge, no cost, no `GemCraftingEvent`.
 
 ## Lab
 `mods/tests/gems-forge-test` (lab `gems-g3`, a copy of the gems-g1 world, server 26430253, no client): a spawned

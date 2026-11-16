@@ -94,6 +94,11 @@ using UpgradeCostFn = uint64_t(__fastcall*)(uint32_t level, uint32_t max_level, 
 using RecycleYieldFn = uint64_t(__fastcall*)(uint32_t level, uint32_t max_level, void* balancing);
 using MultiplierFn = float(__fastcall*)(uint32_t material, uint32_t key, void* recipes);
 using CurrentEntityFn = uint32_t*(__fastcall*)(void* ctx, uint32_t* out);
+// The forge Unslot's move (server 0x1b4bb0, client 0x415010): takes `amount` from the slot `src` (a socket {carrier, 0}
+// through the tx's WeaponGemSlot accessor) and puts it into `owner`'s inventory on `tx`; out.value = what did not fit.
+// The handler calls it with (out, tx, {weaponPide, 0}, the player, 1, 1, 1, 1).
+using UnslotMoveFn = Result12*(__fastcall*)(Result12* out, void* tx, uint64_t src, uint32_t owner, uint16_t amount, uint32_t a6,
+                                            uint8_t a7, uint8_t a8);
 
 struct Game {
     GemActionFn action = nullptr;
@@ -102,6 +107,7 @@ struct Game {
     UpgradeCostFn upgrade_cost = nullptr;
     RecycleYieldFn recycle_yield = nullptr;
     MultiplierFn multiplier = nullptr;
+    UnslotMoveFn unslot_move = nullptr;
     const float* one = nullptr;
     CurrentEntityFn current_entity = nullptr;
     int64_t in_weapon = 0, in_source = 0, in_forge = 0, in_material = 0, in_version = 0, in_action = 0;
@@ -129,6 +135,7 @@ std::atomic<uint64_t> g_hold_until{0};
 std::atomic<bool> g_watch{false};
 std::atomic<uint64_t> g_view_storage{0};  // the storage whose handler accessors were checked
 gems::HoldBook g_book;                    // g_mu
+std::atomic<uint32_t> g_book_n{0};        // g_book's entries and memories: the hook asks the book while any are there
 std::vector<KilnGemCraft> g_crafted;      // g_mu
 std::atomic<uint32_t> g_crafted_total{0};
 std::atomic<uint32_t> g_hook_faults{0};
@@ -381,7 +388,13 @@ void snapshot(const View& v, KilnEntity player, const Act& a, uint32_t material,
         case KILN_GEM_ACTION_UNSLOT: s->gem_pide = s->socket_pide; break;
         default: s->gem_pide = a.source ? s->source_pide : s->socket_pide; break;
     }
-    if (s->gem_pide) s->level_known = level_of(v, s->gem_pide, &s->level, &s->cap);
+    if (s->gem_pide) {
+        s->level_known = level_of(v, s->gem_pide, &s->level, &s->cap);
+        // what the item is (the handler never asks; precheck refuses a non-gem)
+        const uint32_t gem_item = s->gem_pide == s->source_pide ? s->source_item : s->socket_item;
+        if (const auto* info = gem_item ? static_cast<const uint8_t*>(E.item_find(gem_item, v.items)) : nullptr)
+            s->gem_category = info[G.item_category];
+    }
     const Counts c = count_in(v, player, material, essence, look_pide);
     s->material = c.a;
     s->essence = c.b;
@@ -391,11 +404,6 @@ void snapshot(const View& v, KilnEntity player, const Act& a, uint32_t material,
 uint32_t item_of_pide(const View& v, uint32_t pide) {
     const uint8_t* st = other(v, v.it[gems::I_ITEMSTATE], pide, kItemStateSize);
     return st ? rd<uint32_t>(st, 8) : 0;
-}
-
-uint8_t category_of(const View& v, uint32_t item) {
-    const auto* info = static_cast<const uint8_t*>(E.item_find(item, v.items));
-    return info ? info[G.item_category] : 0xFF;
 }
 
 // The record of an action before it runs: who, what, where, the forge, the price.
@@ -425,6 +433,11 @@ void describe(const View& v, KilnEntity player, const Act& a, const Forge& f, co
             c->cost_count = price;
         }
     }
+}
+
+// After any change of g_book (g_mu held).
+void book_count() {
+    g_book_n.store(static_cast<uint32_t>(g_book.size() + g_book.remembered()), std::memory_order_release);
 }
 
 void push_crafted(const KilnGemCraft& c) {
@@ -532,13 +545,50 @@ void cancel_call(uint64_t* it) {
     call_handler(copy);
 }
 
+// The player and the unconsumed version of one call, nothing else read: what the book needs when nothing new is held.
+bool who_impl(uint64_t* it, uint32_t* player, uint32_t* version) {
+    if (!new_action(it, version)) return false;
+    void* ctx = reinterpret_cast<void*>(it[gems::I_CTX]);
+    if (!ctx) return false;
+    uint32_t e = 0;
+    G.current_entity(ctx, &e);
+    *player = e;
+    return e != 0;
+}
+bool who(uint64_t* it, uint32_t* player, uint32_t* version, bool* go) {
+    __try {
+        *go = who_impl(it, player, version);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+gems::HoldBook::Now book_on(uint32_t player, uint32_t version, uint64_t step, const KilnGemCraft* info, bool hold_new) {
+    std::lock_guard lock(g_mu);
+    const gems::HoldBook::Now now = g_book.on_action(player, version, step, info, hold_new);
+    book_count();
+    return now;
+}
+
 void __fastcall hook_gem_action(uint64_t* it) {
     if (t_in_code) return g_hook.call<void>(it);  // our own request (kiln_items_gems), never a player's action
     const uint64_t step = current_step();
     const bool holding = step <= g_hold_until.load(std::memory_order_acquire);
     const bool watching = g_watch.load(std::memory_order_acquire);
-    if ((!holding && !watching) || g_layout.load(std::memory_order_acquire) != 1 || g_off.load(std::memory_order_acquire))
+    const bool book = g_book_n.load(std::memory_order_acquire) != 0;
+    if (!holding && !watching && !book) return g_hook.call<void>(it);
+    const bool on = g_layout.load(std::memory_order_acquire) == 1 && !g_off.load(std::memory_order_acquire);
+    if (!on || (!holding && !watching)) {
+        // Only the book: an answer given while holding still stands (a cancel stays a cancel after the handler's mod
+        // stopped listening, holding lapsed or gems.craft went off); nothing new is held, read or reported.
+        uint32_t player = 0, version = 0;
+        bool go = false;
+        if (book && who(it, &player, &version, &go) && go &&
+            book_on(player, version, step, nullptr, false) == gems::HoldBook::Now::Cancel)
+            return cancel_call(it);
         return g_hook.call<void>(it);
+    }
     HookCall h;
     bool go = false;
     char why[160] = "";
@@ -551,12 +601,8 @@ void __fastcall hook_gem_action(uint64_t* it) {
         if (why[0]) switch_off(why);
         return g_hook.call<void>(it);
     }
-    if (holding) {
-        gems::HoldBook::Now now;
-        {
-            std::lock_guard lock(g_mu);
-            now = g_book.on_action(h.player, h.version, step, &h.info);
-        }
+    if (holding || book) {
+        const gems::HoldBook::Now now = book_on(h.player, h.version, step, &h.info, holding);
         if (now == gems::HoldBook::Now::Hold) return;  // not passed on: the version stays unconsumed, the game offers it again
         if (now == gems::HoldBook::Now::Cancel) return cancel_call(it);
     }
@@ -675,6 +721,64 @@ void finish_status(KilnGemCraft* c, int32_t status, const char* why) {
     std::snprintf(c->message, sizeof c->message, "%s", why);
 }
 
+// A give or take that puts back what Kiln did around a forge action. It should never fail (the items were just there
+// or their room was just freed); when it does, the player is short or over by that much: said loudly, never silent.
+void restore(const Access& acc, bool take, KilnEntity player, uint32_t item, uint32_t count, const char* what) {
+    char w[128] = "";
+    const int32_t st = give_take(acc, take, player, item, count, w);
+    if (st != KILN_ITEMS_DONE)
+        LOGE("gems: putting back %s for player %u failed (status %d: %s): %s %u x 0x%08x", what, player, st, w,
+             take ? "the player keeps" : "the player is short of", count, item);
+}
+
+// An item Kiln may take as a replaced cost: a plain stack. An item with an entity of its own (gear, a gem) would be
+// destroyed by the take and come back new (level, perks, socket lost) from a refund, and could be the carrier or the
+// gem of the action itself.
+bool plain_item(const View& v, uint32_t item) {
+    const auto* info = static_cast<const uint8_t*>(E.item_find(item, v.items));
+    return info && (rd<uint32_t>(info, E.item_flags) & 2u) == 0;
+}
+
+// KILN_GEM_RETURN (Gems.ReturnSocketedGems): the gem in the carrier's socket into the player's own inventory without a
+// forge and free, through the forge Unslot's own move on a transaction set up as the forge's handler sets up its own.
+void run_return(CodeRun* cr, const View& v, KilnGemCraft* c) {
+    const KilnGemRequest& r = cr->r;
+    const KilnEntity player = cr->player;
+    Act a;
+    a.action = KILN_GEM_ACTION_UNSLOT;
+    a.weapon = r.carrier;
+    Snapshot b;
+    snapshot(v, player, a, 0, 0, 0, &b);
+    if (r.gem && b.gem_pide != r.gem) return finish_status(c, KILN_GEM_NOT_FOUND, "the socket does not hold the gem the request names");
+    describe(v, player, a, Forge{}, b, c);
+    c->flags |= KILN_GEMCRAFT_BY_CODE | KILN_GEMCRAFT_FREE;
+    const char* pre = "";
+    const int32_t st = gems::precheck_return(b, free_generic(v, player), &pre);
+    if (st != KILN_GEM_DONE) return finish_status(c, st, pre);
+    alignas(16) uint8_t s[kSetupBlock];
+    gems::handler_setup(cr->h, player, static_cast<uint32_t>(E.setup_operator), s);
+    E.tx_ctor(g_tx);
+    E.tx_init(g_tx, s);
+    Result12 out{};
+    G.unslot_move(&out, g_tx, KILN_SLOT_ID(r.carrier, 0), player, 1, 1, 1, 1);
+    const bool commit = out.error == 0 && out.value == 0;  // the handler's own condition
+    if (commit) E.commit(g_tx);
+    else E.rollback(g_tx);
+    E.free_arrays(g_tx);
+    Snapshot after;
+    snapshot(v, player, a, 0, 0, b.socket_pide, &after);
+    const gems::Outcome o = gems::judge(KILN_GEM_ACTION_UNSLOT, b, after);
+    c->step = current_step();
+    if (o.status != KILN_GEM_DONE) {
+        char w[128];
+        std::snprintf(w, sizeof w, "the game's unslot move did not happen (error 0x%02x, %u not placed)", out.error, out.value);
+        return finish_status(c, out.error == 0 && out.value != 0 ? KILN_GEM_NO_ROOM : KILN_GEM_REFUSED, w);
+    }
+    c->status = KILN_GEM_DONE;
+    c->level_after = b.level;
+    c->message[0] = 0;
+}
+
 // One code action inside the program update (guarded by run_code).
 void run_code_impl(CodeRun* cr) {
     View v;
@@ -707,6 +811,7 @@ void run_code_impl(CodeRun* cr) {
     if (r.carrier && !find_pide(r.carrier))
         return finish_status(c, KILN_GEM_NOT_FOUND, "the carrier is not in the holder's inventories");
     if (r.gem_slot && !in_holder(r.gem_slot)) return finish_status(c, KILN_GEM_NOT_FOUND, "the gem slot is not one of the holder's");
+    if (r.flags & KILN_GEM_RETURN) return run_return(cr, v, c);  // holder 0: the player's own inventories (request_valid)
     Act a;
     a.action = r.action;
     a.weapon = r.carrier;
@@ -723,8 +828,6 @@ void run_code_impl(CodeRun* cr) {
     describe(v, player, a, f, b, c);
     c->ticket = 0;
     c->flags |= KILN_GEMCRAFT_BY_CODE | ((r.flags & KILN_GEM_FREE) ? KILN_GEMCRAFT_FREE : 0) | ((r.flags & KILN_GEM_COST) ? KILN_GEMCRAFT_COST : 0);
-    if (r.action == KILN_GEM_ACTION_SLOT && b.source_pide && category_of(v, b.source_item) != gems::kWeaponGemCategory)
-        return finish_status(c, KILN_GEM_NOT_FOUND, "the item in the gem slot is not a gem");
     const uint32_t price = f.ok ? game_price(v, a, f, b.level) : 0;
     const gems::CostPlan plan = gems::plan_cost(r, a.action == KILN_GEM_ACTION_RECYCLE ? 0 : price);
     const uint32_t have = plan.give_material ? price : b.material;  // a free or replaced cost: Kiln gives the game's price
@@ -732,6 +835,8 @@ void run_code_impl(CodeRun* cr) {
     const int32_t st = gems::precheck(r.action, b, f.max_level, a.action == KILN_GEM_ACTION_RECYCLE ? 0 : price, have,
                                       r.action != KILN_GEM_ACTION_UNSLOT || free_generic(v, player), &pre);
     if (st != KILN_GEM_DONE) return finish_status(c, st, pre);
+    if (plan.take_count && !plain_item(v, plan.take_item))
+        return finish_status(c, KILN_GEM_REFUSED, "a replaced cost must be a plain item (not gear or a gem with an entity of its own)");
     // a replaced cost: taken first (all or nothing), then the game's price given (the game takes it back)
     char w[128] = "";
     if (plan.take_count) {
@@ -742,8 +847,9 @@ void run_code_impl(CodeRun* cr) {
     if (plan.give_material) {
         const int32_t g = give_take(*cr->acc, false, player, a.material, plan.give_material, w);
         if (g != KILN_ITEMS_DONE) {
-            give_take(*cr->acc, false, player, plan.take_item, plan.take_count, w);  // the replacement back
-            return finish_status(c, KILN_GEM_NO_ROOM, "no room for the forge's payment Kiln hands over for a free or replaced cost");
+            if (plan.take_count) restore(*cr->acc, false, player, plan.take_item, plan.take_count, "a replaced cost");
+            return finish_status(c, g == KILN_ITEMS_UNAVAILABLE ? KILN_GEM_UNAVAILABLE : KILN_GEM_NO_ROOM,
+                                 "no room for the forge's payment Kiln hands over for a free or replaced cost");
         }
     }
     // the game's action, on our request
@@ -758,10 +864,12 @@ void run_code_impl(CodeRun* cr) {
     const gems::Outcome o = gems::judge(r.action, b2, after);
     c->level_after = o.level_after;
     c->step = current_step();
+    // Kiln's gift of the game's price: whatever of it the game did not take goes back (measured: Upgrade commits its
+    // payment before it raises the Level, and a commit can roll back by itself)
+    const uint32_t left = gems::gift_left(plan.give_material, b2.material, after.material);
+    if (left) restore(*cr->acc, true, player, a.material, left, "the forge's price Kiln handed over");
     if (o.status != KILN_GEM_DONE) {
-        // undo what Kiln did around it
-        if (plan.give_material) give_take(*cr->acc, true, player, a.material, plan.give_material, w);
-        if (plan.take_count) give_take(*cr->acc, false, player, plan.take_item, plan.take_count, w);
+        if (plan.take_count) restore(*cr->acc, false, player, plan.take_item, plan.take_count, "a replaced cost");
         c->cost_item = c->cost_count = c->yield_item = c->yield_count = 0;
         return finish_status(c, KILN_GEM_REFUSED, "the game's action changed nothing (its own checks refused it)");
     }
@@ -772,15 +880,20 @@ void run_code_impl(CodeRun* cr) {
         c->yield_item = o.got ? essence : 0;
         c->yield_count = o.got;
         if (plan.replace_yield) {
-            give_take(*cr->acc, true, player, essence, o.got, w);
-            const int32_t g = give_take(*cr->acc, false, player, plan.yield_item, plan.yield_count, w);
-            c->yield_item = plan.yield_item;
-            c->yield_count = plan.yield_count;
-            if (g != KILN_ITEMS_DONE) {
-                give_take(*cr->acc, false, player, essence, o.got, w);  // no room for the replacement: the forge's yield stays
-                c->yield_item = o.got ? essence : 0;
-                c->yield_count = o.got;
-                std::snprintf(c->message, sizeof c->message, "the replacement did not fit: the forge's essence was given");
+            // the forge's yield goes, the replacement comes: only once the yield is really back in Kiln's hands
+            const int32_t t = give_take(*cr->acc, true, player, essence, o.got, w);
+            if (t != KILN_ITEMS_DONE) {
+                std::snprintf(c->message, sizeof c->message, "the forge's essence could not be swapped for the replacement: it was kept");
+            } else {
+                const int32_t g = give_take(*cr->acc, false, player, plan.yield_item, plan.yield_count, w);
+                c->yield_item = plan.yield_count ? plan.yield_item : 0;
+                c->yield_count = plan.yield_count;
+                if (g != KILN_ITEMS_DONE) {
+                    restore(*cr->acc, false, player, essence, o.got, "the forge's essence");  // the replacement did not fit
+                    c->yield_item = o.got ? essence : 0;
+                    c->yield_count = o.got;
+                    std::snprintf(c->message, sizeof c->message, "the replacement did not fit: the forge's essence was given");
+                }
             }
         }
     } else if (plan.give_material || plan.take_count || (r.flags & KILN_GEM_FREE)) {
@@ -905,7 +1018,13 @@ void poll_program() {
 
 // equipment_actions' declaration, read from the server world's program directory, against the handler's iterator layout.
 void check_layout() {
-    if (g_layout.load() != 0 || !g_w || g_w->header.size < offsetof(KilnWorldApi, game_program_list) + sizeof(void*)) return;
+    if (g_layout.load() != 0 || !g_w) return;
+    if (g_w->header.size < offsetof(KilnWorldApi, game_program_list) + sizeof(void*)) {  // fail closed, and say so
+        g_layout.store(2);
+        lower(KILN_CAP_REASON_SERVICE_MISSING, "kiln.world is too old to show equipment_actions' declaration (the layout check)");
+        LOGE("gems: forge actions off: kiln.world has no game_program_list (the handler's layout cannot be checked)");
+        return;
+    }
     const int32_t idx = g_w->game_program_find(KILN_WORLD_SERVER, str("equipment_actions"));
     if (idx < 0) return;  // the directory is not published yet
     std::vector<std::vector<std::string>> lists(KILN_GAME_LISTS);
@@ -1122,6 +1241,7 @@ void gems_resolve() {
               sym("gems/GemSlotCost", &G.slot_cost) && sym("gems/GemUnslotCost", &G.unslot_cost) &&
               sym("gems/GemUpgradeCost", &G.upgrade_cost) && sym("gems/GemRecycleYield", &G.recycle_yield) &&
               sym("gems/MaterialMultiplier", &G.multiplier) && sym("gems/MultiplierOne", &one) &&
+              sym("gems/UnslotMove", &G.unslot_move) &&
               sym("world/CurrentEntityId", &G.current_entity) && cst("gems/iter.size", &iter) &&
               cst("gems/input.weapon", &G.in_weapon) && cst("gems/input.source", &G.in_source) &&
               cst("gems/input.material", &G.in_material) && cst("gems/input.version", &G.in_version) &&
@@ -1142,7 +1262,8 @@ void gems_resolve() {
                         G.in_action == G.in_weapon + 0x18 && G.in_action + 1 <= static_cast<int64_t>(kInputCopy) &&
                         G.consumed_version + 4 <= static_cast<int64_t>(kConsumedBytes) && G.tpl_allow == 0x20 &&
                         G.tpl_max > G.tpl_allow && G.tpl_modifier > G.tpl_max && G.tpl_modifier < 0x40 &&
-                        G.item_category > 0 && G.item_category < 0x800 && G.attr_level && G.attr_cap;
+                        G.item_category > 0 && G.item_category < 0x800 && G.attr_level && G.attr_cap &&
+                        E.setup_operator > 0 && E.setup_operator + 4 <= static_cast<int64_t>(kSetupBlock) && E.item_flags > 0;
     G.ok = ok && layout && G.one;
     if (!G.ok) {
         const char* why = !g_api->feature(str(kFeature)) ? "gems.craft did not resolve on this game build"
@@ -1208,6 +1329,7 @@ void gems_pre(uint64_t step) {
         std::lock_guard lock(g_mu);
         if (!holding) g_book.release_all();
         g_book.expire(step, kTimeoutSteps);
+        book_count();
         const int state = g_state.load();
         for (auto i = g_pending.begin(); i != g_pending.end();) {
             const bool off = g_off.load() || g_layout.load() == 2 || state == KILN_ITEMS_PROGRAM_NONE;
@@ -1264,6 +1386,7 @@ void gems_world_closed() {
         g_pending.clear();
         g_pending_n.store(0, std::memory_order_release);
         g_book.clear();
+        book_count();
     }
     g_layout.store(0);
     g_view_storage.store(0);

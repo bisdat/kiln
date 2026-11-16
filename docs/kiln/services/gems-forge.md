@@ -41,8 +41,11 @@ Log.Info($"level {up.LevelBefore} -> {up.LevelAfter}, paid {up.Paid}");
 ### Where the items may be
 The carrier and the gem must be in the player's own inventories (backpack, action bars, worn gear), or in an entity you
 name with `GemCraftOptions.Holder` (for example a chest your mod lets the player use). Kiln checks before the action that
-they are there, that the socket is there and empty (Socket) or holds a gem (Unsocket), and that the item to socket is a
-gem. The game itself checks none of that, so a mod should not skip it either: only name a holder the player may use.
+they are there, that each ref still names the item it was taken from (an `ItemInstanceRef` whose item was destroyed, or
+whose entity id now names another item, is `NotFound`), that the socket is there and empty (Socket) or holds something
+(Unsocket), and that the item to socket, upgrade or recycle is a gem. The game itself checks none of that (its action
+would recycle a sword, or raise a sword's level, if asked), so a mod should not skip it either: only name a holder the
+player may use.
 
 ### Free and changed costs
 `GemCraftOptions.Cost` changes what the player pays, for creative tools, quest rewards or a mod's own prices:
@@ -54,8 +57,13 @@ await Gems.Recycle(player, gemRef, forge, new GemCraftOptions { Cost = new GemCo
 ```
 For Recycle the option replaces what the player gets (`GemCost.Free`: nothing). Everything else about the action stays
 the game's: the level cap, the forge's maximum level, the socket checks. How it works: Kiln gives the player the game's
-price right before the game's action (the game takes it back) and takes your price; if the action does not happen, both
-are undone. The player needs a free slot for that moment when the game's price is not 0 (otherwise `NoRoom`).
+price right before the game's action (the game takes it back) and takes your price; afterwards Kiln counts the material
+and takes back whatever of its gift the game did not take, and if the action did not happen it gives your price back.
+The player needs a free slot for that moment when the game's price is not 0 (otherwise `NoRoom`). A replaced price must
+be a plain item (essence, gold, runes): an item with an entity of its own (gear, a gem) throws `ArgumentException`, since
+Kiln takes it by item id from anywhere in the inventory and it could be the very carrier or gem of the action. For
+Recycle the replacement is given, so any item works there; when the game's essence cannot be swapped (the replacement
+does not fit), the player keeps the essence and `Message` says so.
 
 ### Results
 `GemCraftResult`: `Status`, `Action`, `Player`, `Forge`, `Carrier`, `Gem`, `LevelBefore`, `LevelAfter` (Recycle: 0),
@@ -67,7 +75,7 @@ are undone. The player needs a free slot for that moment when the game's price i
 | `Refused` | the game's own checks refused it; also when 256 actions are waiting (try again in a step) |
 | `NotEnough` | the player cannot pay |
 | `NoForge` | the forge entity is no Shroud Forge |
-| `NotFound` | the carrier, its socket or the gem is not where the call says, or the item is not a gem |
+| `NotFound` | the carrier, its socket or the gem is not where the call says, a ref is stale, or the item is not a gem |
 | `Occupied` | Socket: the socket holds a gem already; Unsocket: it is empty |
 | `NoRoom` | Unsocket: the backpack is full; a free or changed cost: no room for the game's price |
 | `MaxLevel` | Upgrade: at the gem's own cap or the forge's maximum level |
@@ -89,9 +97,13 @@ Events.On<GemCraftedEvent>(e =>
   not canceled, it runs in the next step. `Cost` is the game's own price with that forge (the cost function the game then
   charges). Cancel refuses it: the game treats it as a request without a forge, so nothing is paid and nothing moves. The
   player's game is not told; its forge screen shows the inventory as it is at the next update. A held action nobody
-  answers within 8 steps runs. Only players' actions: `Gems`' own calls are never held or posted here.
+  answers within 8 steps runs. A cancel stands even when the handler's mod stops listening before the game saw the
+  answer. Each action is posted once: when the last handler goes, what is still held runs without an event, and an
+  action the game leaves unconsumed (its own handler does that when the gem's level cannot be read) is not posted again.
+  Only players' actions: `Gems`' own calls are never held or posted here.
 - **`GemCraftedEvent`**: after an action changed something: a player's (after the game committed it) or a `Gems` call
-  (`ByCode`). `Paid` and `Received` are counted from the player's inventory before and after. A refused or canceled action
+  (`ByCode`), including the forgeless unsocket of `Gems.ReturnSocketedGems` (`Unsocket`, `ByCode`, `Forge` none, nothing
+  paid). `Paid` and `Received` are counted from the player's inventory before and after. A refused or canceled action
   posts nothing.
 - Gems that change any other way (a mod moving items, a socket written directly) are not seen here; G1's
   `GemSocketChangedEvent` sees every change of a socket by polling.
@@ -105,4 +117,6 @@ Events.On<GemCraftedEvent>(e =>
 
 ## For native code
 `native/core/abi/services/kiln_gemcraft.h` (`kiln.gemcraft` v1, in kiln-items.dll): `submit`, `cancel`, `hold`, `held`,
-`decide`, `watch`, `crafted`, `status`. Evidence and the handler's layout: [docs/re/gems-forge.md](../../re/gems-forge.md).
+`decide`, `watch`, `crafted`, `status`. `KILN_GEM_RETURN` (an Unslot alone, forge 0, no holder) takes a gem out of any
+carrier in the player's own inventories without a forge and free: what `Gems.ReturnSocketedGems` uses for sockets the
+forge does not list. Evidence and the handler's layout: [docs/re/gems-forge.md](../../re/gems-forge.md).

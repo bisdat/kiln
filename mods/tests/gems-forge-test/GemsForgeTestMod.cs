@@ -257,6 +257,8 @@ public sealed class GemsForgeTestMod : Mod
             $"Recycle: received {rec.Received}, the inventory gained {e8 - e7}");
         Check(_crafted.Count(c => c.ByCode && c.Action == GemCraftAction.Recycle) == 1, "Recycle: GemCraftedEvent");
 
+        await ReviewChecks(p, forge, sword, gemId, essence);
+
         // ---- no essence: an Upgrade cannot be paid ----
         await Items.Give(p, GemName, 1, new Gear(3));
         await Steps(4);
@@ -270,5 +272,94 @@ public sealed class GemsForgeTestMod : Mod
         var noForge = await Gems.Upgrade(p, gem2.Ref, p);
         Check(noForge.Status == GemCraftStatus.NoForge, $"a player is no forge: {noForge.Status} ({noForge.Reason})");
         Info($"inventory at the end: {Gear(p)}");
+    }
+
+    // ---- review (G3 review-and-fix): the forgeless return for G4, the native non-gem refusal, stale refs, gear costs ----
+    private static readonly Type GemCraftingType = typeof(Gems).Assembly.GetType("Kiln.GemCrafting", throwOnError: true)!;
+
+    // internal GemCrafting.UnsocketWithoutForge(EntityId owner, ItemInstanceRef carrier): what Gems.ReturnSocketedGems calls
+    private static Task<(bool Ok, string? Reason)> ReturnGem(EntityId owner, ItemInstanceRef carrier) =>
+        (Task<(bool Ok, string? Reason)>)GemCraftingType.GetMethod("UnsocketWithoutForge",
+                System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic, [typeof(EntityId), typeof(ItemInstanceRef)])!
+            .Invoke(null, [owner, carrier])!;
+
+    // a request straight to kiln.gemcraft, past Kiln.Abilities' own checks (what a buggy or hostile native caller can send)
+    private static Task<GemCraftResult> Raw(GemCraftAction action, EntityId player, uint carrier, ulong gemSlot, uint gem, EntityId forge)
+    {
+        var rt = typeof(Gems).Assembly.GetType("Kiln.GemcraftNative+Request", throwOnError: true)!;
+        var req = Activator.CreateInstance(rt)!;
+        void Set(string f, object v) => rt.GetField(f)!.SetValue(req, v);
+        Set("Size", 56u);
+        Set("Action", (uint)action);
+        Set("Player", player.Value);
+        Set("Carrier", carrier);
+        Set("GemSlot", gemSlot);
+        Set("Gem", gem);
+        Set("Forge", forge.Value);
+        var send = GemCraftingType.GetMethod("Send", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;
+        return (Task<GemCraftResult>)send.Invoke(null, [req, action, player, ItemInstanceRef.None, ItemInstanceRef.None, forge, null, "lab"])!;
+    }
+
+    private async Task ReviewChecks(EntityId p, EntityId forge, InventorySlot sword, ItemId gemId, ItemId essence)
+    {
+        // a gem in the sword's socket (code, free), then out again without any forge
+        Info($"give: {await Items.Give(p, GemName, 1, new Gear(4))}");
+        await Steps(4);
+        var g4 = Items.Read(p)!.Slots.First(s => !s.IsEmpty && s.Item == gemId && s.Level == 4);
+        var put = await Gems.Socket(p, sword.Ref, g4.Ref, forge, new GemCraftOptions { Cost = GemCost.Free });
+        await Steps(2);
+        Check(put.Ok && SocketOf(sword.ItemEntity) == (gemId.Value, g4.ItemEntity.Value), $"review: a level 4 gem socketed for the return ({put.Status})");
+        var e0 = Count(p, essence);
+        _crafted.Clear();
+        var (ok, why) = await ReturnGem(p, sword.Ref);
+        await Steps(2);
+        var back = SlotOf(p, g4.ItemEntity);
+        Info($"review: UnsocketWithoutForge: {ok} {why}; {Gear(p)}");
+        Check(ok && why is null, $"review: UnsocketWithoutForge answered ({ok}, {why})");
+        Check(SocketOf(sword.ItemEntity) == (0, 0) && back is not null && back.Level == 4,
+            $"review: no forge: the socket is empty, the same gem entity {g4.ItemEntity} is back at {back?.Slot} level {back?.Level}");
+        Check(Count(p, essence) == e0, $"review: nothing paid ({e0} -> {Count(p, essence)} essence)");
+        Check(_crafted.Count(c => c.ByCode && c.Action == GemCraftAction.Unsocket && c.Forge.IsNone && c.Gem.Entity.Id == g4.ItemEntity) == 1,
+            $"review: one GemCraftedEvent (Unsocket, by code, no forge) ({_crafted.Count})");
+        var (again, againWhy) = await ReturnGem(p, sword.Ref);
+        Check(!again && againWhy is { } aw && aw.Contains("empty"), $"review: the empty socket: ({again}, {againWhy})");
+        var (chest, chestWhy) = await ReturnGem(forge, sword.Ref);
+        Check(!chest && chestWhy is { } cw && cw.Contains("player"), $"review: a non-player owner is refused at once: ({chest}, {chestWhy})");
+
+        // the game's handler recycles whatever item entity the request's slot holds: kiln.gemcraft refuses a non-gem
+        var swordNow = SlotOf(p, sword.ItemEntity)!;
+        var e1 = Count(p, essence);
+        var raw = await Raw(GemCraftAction.Recycle, p, 0, swordNow.Slot.Value, sword.ItemEntity.Value, forge);
+        await Steps(2);
+        Info($"review: a raw Recycle of the sword's slot: {raw}");
+        Check(raw.Status == GemCraftStatus.NotFound && SlotOf(p, sword.ItemEntity) is not null && Count(p, essence) == e1,
+            $"review: Recycle of a sword named as a loose gem: {raw.Status} ({raw.Reason}); the sword is still there, no essence given");
+        var rawUp = await Raw(GemCraftAction.Upgrade, p, 0, swordNow.Slot.Value, sword.ItemEntity.Value, forge);
+        Check(rawUp.Status == GemCraftStatus.NotFound && SlotOf(p, sword.ItemEntity)?.Level == swordNow.Level,
+            $"review: Upgrade of a sword's level through the forge: {rawUp.Status}; level {SlotOf(p, sword.ItemEntity)?.Level}");
+
+        // a stale ref (the same entity id with another stamp) acts on nothing
+        var loose = SlotOf(p, g4.ItemEntity)!;
+        if (loose.Ref.Entity.Serial != 0)
+        {
+            var stale = new ItemInstanceRef(new EntityRef(loose.ItemEntity, loose.Ref.Entity.Serial ^ 1), loose.Item);
+            var st = await Gems.Recycle(p, stale, forge);
+            Check(st.Status == GemCraftStatus.NotFound && SlotOf(p, g4.ItemEntity) is not null, $"review: a stale gem ref: {st.Status} ({st.Reason})");
+        }
+        else
+        {
+            Info("review: the gem's ref has no stamp (items.instances off): stale-ref check skipped");
+        }
+
+        // a replaced price that is gear (a gem) throws
+        try
+        {
+            await Gems.Upgrade(p, loose.Ref, forge, new GemCraftOptions { Cost = new GemCost(gemId, 1) });
+            Check(false, "review: a gem as the replaced price was accepted");
+        }
+        catch (ArgumentException e)
+        {
+            Check(SlotOf(p, g4.ItemEntity)?.Level == 4, $"review: a gem as the replaced price throws ({e.Message})");
+        }
     }
 }

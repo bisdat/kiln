@@ -92,6 +92,30 @@ void requests() {
     check(!request_valid(c), "request: action 5 is refused");
     c.action = 0;
     check(!request_valid(c), "request: action 0 (Invalid) is refused");
+
+    // review fix: KILN_GEM_RETURN, a forgeless free unsocket into the player's own inventory (Gems.ReturnSocketedGems)
+    KilnGemRequest rt = req(KILN_GEM_ACTION_UNSLOT);
+    rt.forge = 0;
+    rt.carrier = 2001;
+    rt.flags = KILN_GEM_RETURN;
+    check(request_valid(rt), "request: RETURN: an Unslot of a carrier without a forge");
+    rt.gem = 3001;
+    check(request_valid(rt), "request: RETURN may name the gem it expects in the socket");
+    KilnGemRequest bad = rt;
+    bad.forge = 900;
+    check(!request_valid(bad), "request: RETURN with a forge is refused (it never runs the forge's handler)");
+    bad = rt;
+    bad.holder = 1127;
+    check(!request_valid(bad), "request: RETURN with a holder is refused (the player's own inventories only)");
+    bad = rt;
+    bad.flags = KILN_GEM_RETURN | KILN_GEM_FREE;
+    check(!request_valid(bad), "request: RETURN with FREE is refused");
+    bad = rt;
+    bad.action = KILN_GEM_ACTION_UPGRADE;
+    check(!request_valid(bad), "request: RETURN on an Upgrade is refused");
+    bad = rt;
+    bad.carrier = 0;
+    check(!request_valid(bad), "request: RETURN without a carrier is refused");
 }
 
 std::vector<std::vector<std::string>> game_lists() {
@@ -189,6 +213,78 @@ void hold_book() {
     r.expire(500, 250);
     check(r.size() == 0, "hold: an entry the hook never asked about again is dropped (the player left)");
     (void)n;
+
+    // review fixes
+    HoldBook q;
+    q.on_action(8, 1, 10, nullptr);
+    q.release_all();
+    got.clear();
+    q.report([&](const Held& h) { got.push_back(h.info); }, 8);
+    check(got.empty(), "hold: an action released before Pre saw it is not reported (a cancel could no longer stop it)");
+    check(q.on_action(8, 1, 11, nullptr) == Now::Run, "hold: ... and it runs");
+
+    HoldBook nh;  // holding stopped: the hook asks the book without holding anything new
+    check(nh.on_action(9, 1, 10, nullptr, false) == Now::Run && nh.size() == 0 && nh.total() == 0,
+          "hold: not holding: a new action runs at once, nothing is recorded or reported");
+    nh.on_action(9, 2, 11, nullptr);
+    nh.decide(9, 2, true);
+    check(nh.on_action(9, 2, 12, nullptr, false) == Now::Cancel, "hold: not holding any more: a cancel already given still stands");
+    nh.on_action(9, 3, 13, nullptr);
+    check(nh.on_action(9, 4, 14, nullptr, false) == Now::Run && nh.size() == 0,
+          "hold: not holding: a newer version drops the older entry and runs");
+
+    HoldBook lp;  // the game's handler did not consume a version it ran (no Level on the gem): it comes back every step
+    lp.on_action(10, 5, 20, nullptr);
+    lp.decide(10, 5, false);
+    check(lp.on_action(10, 5, 21, nullptr) == Now::Run, "hold: allowed version 5 runs");
+    check(lp.on_action(10, 5, 22, nullptr) == Now::Run && lp.size() == 0 && lp.total() == 1,
+          "hold: the same version again (the handler left it unconsumed): it runs again, never held or reported twice");
+    got.clear();
+    lp.report([&](const Held& h) { got.push_back(h.info); }, 8);
+    check(got.empty(), "hold: no second GemCraftingEvent for a version that already ran");
+    check(lp.on_action(10, 6, 23, nullptr) == Now::Hold && lp.total() == 2, "hold: the player's next version is held as usual");
+    HoldBook to;
+    to.on_action(11, 1, 30, nullptr);
+    check(to.on_action(11, 1, 30 + kHoldTimeoutSteps, nullptr) == Now::Run, "hold: timed out: runs");
+    check(to.on_action(11, 1, 30 + kHoldTimeoutSteps + 1, nullptr) == Now::Run && to.size() == 0,
+          "hold: a timed-out version seen again runs without a new hold");
+    to.expire(30 + kHoldTimeoutSteps + 1 + 251, 250);
+    check(to.on_action(11, 1, 600, nullptr) == Now::Hold, "hold: the memory of a version that ran expires with the book's entries");
+}
+
+void gifts() {
+    check(gift_left(0, 40, 40) == 0, "gift: nothing given, nothing to take back");
+    check(gift_left(27, 57, 30) == 0, "gift: the game took its price (57 -> 30): nothing to take back");
+    check(gift_left(27, 57, 57) == 27, "gift: the game took nothing (refused): all 27 back");
+    check(gift_left(27, 57, 57 + 5) == 27, "gift: never more than was given");
+    check(gift_left(27, 27, 0) == 0, "gift: the player had none of their own: the game took exactly the gift");
+    check(gift_left(27, 20, 20) == 20, "gift: a count lower than the gift (something else took some) takes back what is there");
+}
+
+void setup_block() {
+    uint64_t h[I_COUNT];
+    for (int i = 0; i < I_COUNT; ++i) h[i] = 0x1000u + static_cast<uint64_t>(i);
+    alignas(16) uint8_t s[0xF0];
+    std::memset(s, 0xCC, sizeof s);
+    handler_setup(h, 2542, 0xC8, s);
+    auto q = [&](int off) {
+        uint64_t v;
+        std::memcpy(&v, s + off, 8);
+        return v;
+    };
+    uint32_t op = 0;
+    std::memcpy(&op, s + 0xC8, 4);
+    // server 0x144c1c..0x144d03 / client 0x3858ec..0x3859d3: the block the gem handler hands InventoryTxInit
+    check(s[0] == 4 && s[1] == 0, "setup: flags 4 (InventoryFull to the operator), stock mode 0");
+    check(q(0x08) == h[I_CTX] && q(0x10) == h[I_ITEMS] && q(0x18) == h[I_BALANCING] && q(0x20) == 0,
+          "setup: ctx, ItemRegistry, BalancingRegistry; no AttributeRegistry (as the handler)");
+    check(q(0x28) == h[I_SETUP] && q(0x30) == h[I_INVENTORY] && q(0x38) == h[I_SLOTSEL] && q(0x40) == h[I_ITEMSTATE] &&
+              q(0x48) == h[I_OWNER] && q(0x50) == h[I_SETUP] && q(0x58) == h[I_EMPTY],
+          "setup: the seven inventory accessors at the handler's offsets");
+    check(q(0x60) == h[I_GEMSLOT], "setup: WeaponGemSlot at +0x60: a socket {carrier, 0} is a slot of the transaction");
+    check(q(0x68) == 0 && q(0x70) == 0 && q(0xA0) == 0 && q(0xA8) == h[I_EV_FULL] && q(0xC0) == 0,
+          "setup: no NetworkFuel, no Fuel, no PickupEvent, the InventoryFull sender, no knowledge queue");
+    check(op == 2542 && q(0xD0) == 0 && q(0xE8) == 0, "setup: the player as the operator, the rest zero");
 }
 
 void judging() {
@@ -246,6 +342,8 @@ void prechecks() {
     Snapshot s;
     s.socket = true;
     s.source_pide = 3001;
+    s.gem_pide = 3001;
+    s.gem_category = kWeaponGemCategory;
     check(precheck(KILN_GEM_ACTION_SLOT, s, 10, 5, 5, true, &why) == KILN_GEM_DONE, "precheck: Slot ok (5 to pay, 5 there)");
     check(precheck(KILN_GEM_ACTION_SLOT, s, 10, 5, 4, true, &why) == KILN_GEM_NOT_ENOUGH, "precheck: Slot: cannot pay");
     check(precheck(KILN_GEM_ACTION_SLOT, s, 0, 0, 0, true, &why) == KILN_GEM_NO_FORGE, "precheck: no forge (maxGemLevel 0)");
@@ -261,6 +359,7 @@ void prechecks() {
     check(precheck(KILN_GEM_ACTION_UNSLOT, u, 10, 0, 0, true, &why) == KILN_GEM_DONE, "precheck: Unslot ok");
     Snapshot g;
     g.gem_pide = 3001;
+    g.gem_category = kWeaponGemCategory;
     g.level_known = true;
     g.level = 10;
     g.cap = 105;
@@ -270,6 +369,38 @@ void prechecks() {
     check(precheck(KILN_GEM_ACTION_UPGRADE, g, 50, 0, 0, true, &why) == KILN_GEM_MAX_LEVEL, "precheck: Upgrade at the gem's own cap");
     Snapshot r;
     check(precheck(KILN_GEM_ACTION_RECYCLE, r, 10, 0, 0, true, &why) == KILN_GEM_NOT_FOUND, "precheck: Recycle without a gem");
+
+    // review fix: the handler takes any item with an entity as "the gem" (Recycle destroys it, Upgrade raises its Level);
+    // Kiln refuses anything that is not a WeaponGem, and an item whose category it cannot read
+    Snapshot sword;
+    sword.socket = true;
+    sword.source_pide = sword.gem_pide = 4001;
+    sword.gem_category = 2;  // Weapons
+    sword.level_known = true;
+    sword.level = 3;
+    sword.cap = 105;
+    check(precheck(KILN_GEM_ACTION_RECYCLE, sword, 10, 0, 0, true, &why) == KILN_GEM_NOT_FOUND && std::strstr(why, "not a gem"),
+          "precheck: Recycle of a sword (a loose slot naming a non-gem) is refused");
+    check(precheck(KILN_GEM_ACTION_UPGRADE, sword, 10, 0, 0, true, &why) == KILN_GEM_NOT_FOUND,
+          "precheck: Upgrade of a sword's Level through the forge is refused");
+    check(precheck(KILN_GEM_ACTION_SLOT, sword, 10, 0, 0, true, &why) == KILN_GEM_NOT_FOUND, "precheck: Slot of a sword is refused");
+    sword.gem_category = 0xFF;
+    check(precheck(KILN_GEM_ACTION_RECYCLE, sword, 10, 0, 0, true, &why) == KILN_GEM_NOT_FOUND,
+          "precheck: an item whose category cannot be read is refused (fail closed)");
+    Snapshot odd;  // an odd socket content still comes out: Unslot only moves it into the backpack
+    odd.socket = true;
+    odd.socket_pide = odd.gem_pide = 4002;
+    odd.gem_category = 2;
+    check(precheck(KILN_GEM_ACTION_UNSLOT, odd, 10, 0, 0, true, &why) == KILN_GEM_DONE, "precheck: Unslot does not ask what the socket holds");
+
+    // review fix: the forgeless return (KILN_GEM_RETURN)
+    Snapshot ret;
+    check(precheck_return(ret, true, &why) == KILN_GEM_NOT_FOUND, "return: no socket");
+    ret.socket = true;
+    check(precheck_return(ret, true, &why) == KILN_GEM_OCCUPIED, "return: an empty socket");
+    ret.socket_pide = ret.gem_pide = 3001;
+    check(precheck_return(ret, false, &why) == KILN_GEM_NO_ROOM, "return: no free backpack slot");
+    check(precheck_return(ret, true, &why) == KILN_GEM_DONE, "return: ok (no forge, no cost)");
 }
 
 void costs() {
@@ -307,6 +438,8 @@ int main() {
     judging();
     prechecks();
     costs();
+    gifts();
+    setup_block();
     std::printf("%s: %d failure(s)\n", failures ? "FAILED" : "PASSED", failures);
     return failures ? 1 : 0;
 }

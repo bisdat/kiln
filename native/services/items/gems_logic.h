@@ -26,7 +26,10 @@ constexpr uint32_t kWeaponGemCategory = 15;  // ItemCategory WeaponGem
 inline bool request_valid(const KilnGemRequest& r) {
     if (r.size < sizeof(KilnGemRequest) || r.reserved[0] || r.reserved[1] || r.player == 0) return false;
     if (r.action < KILN_GEM_ACTION_SLOT || r.action > KILN_GEM_ACTION_RECYCLE) return false;
-    if (r.flags & ~(KILN_GEM_FREE | KILN_GEM_COST)) return false;
+    if (r.flags & ~(KILN_GEM_FREE | KILN_GEM_COST | KILN_GEM_RETURN)) return false;
+    if (r.flags & KILN_GEM_RETURN)  // the forgeless return: alone, an Unslot of a carrier in the player's own inventories
+        return r.flags == KILN_GEM_RETURN && r.action == KILN_GEM_ACTION_UNSLOT && r.carrier != 0 && r.gem_slot == 0 &&
+               r.forge == 0 && r.holder == 0 && r.cost_item == 0 && r.cost_count == 0;
     if ((r.flags & KILN_GEM_FREE) && (r.flags & KILN_GEM_COST)) return false;
     if (r.flags & KILN_GEM_COST) {
         if (r.cost_count > kMaxCostCount || (r.cost_count != 0 && r.cost_item == 0)) return false;
@@ -125,10 +128,19 @@ struct Held {
 
 class HoldBook {
 public:
-    // Hook side, for a player's unconsumed action `version` in step `step` while holding: what to do now.
-    // Hold: keep it (first time: recorded with `info`). Allow / Cancel: the verdict (the entry goes).
+    // Hook side, for a player's unconsumed action `version` in step `step`: what to do now.
+    // Hold: keep it (first time: recorded with `info`). Run / Cancel: the verdict (the entry goes).
+    // `hold_new` false (nobody holds now): nothing new is held or recorded; a verdict already given still stands (a
+    // cancel stays a cancel when the handler's mod stopped listening or holding lapsed before the hook saw the answer).
+    // A version that already ran and comes back unconsumed (the game's handler leaves it so when the gem has no readable
+    // Level; another hook in the chain may too) runs again without a new hold: one GemCraftingEvent per action, no loop.
     enum class Now : uint8_t { Hold, Run, Cancel };
-    Now on_action(uint32_t player, uint32_t version, uint64_t step, const KilnGemCraft* info) {
+    Now on_action(uint32_t player, uint32_t version, uint64_t step, const KilnGemCraft* info, bool hold_new = true) {
+        for (Ran& r : ran_)
+            if (r.player == player && r.version == version) {
+                r.seen = step;
+                return Now::Run;
+            }
         for (size_t i = 0; i < held_.size(); ++i) {
             Held& h = held_[i];
             if (h.player != player) continue;
@@ -136,17 +148,19 @@ public:
                 held_.erase(held_.begin() + static_cast<ptrdiff_t>(i));
                 break;
             }
-            if (h.verdict == Verdict::Allow || (h.verdict == Verdict::None && step >= h.since + kHoldTimeoutSteps)) {
-                timed_out_ += h.verdict == Verdict::None;
+            if (h.verdict == Verdict::Allow || (h.verdict == Verdict::None && (!hold_new || step >= h.since + kHoldTimeoutSteps))) {
+                timed_out_ += h.verdict == Verdict::None && hold_new;
                 held_.erase(held_.begin() + static_cast<ptrdiff_t>(i));
+                remember(player, version, step);
                 return Now::Run;
             }
-            if (h.verdict == Verdict::Cancel) {
+            if (h.verdict == Verdict::Cancel) {  // the forge-0 call always consumes it: nothing to remember
                 held_.erase(held_.begin() + static_cast<ptrdiff_t>(i));
                 return Now::Cancel;
             }
             return Now::Hold;
         }
+        if (!hold_new) return Now::Run;
         Held h;
         h.player = player;
         h.version = version;
@@ -156,13 +170,15 @@ public:
         ++total_;
         return Now::Hold;
     }
-    // Tick side: the held actions not reported yet (each once).
+    // Tick side: the held actions not reported yet (each once). One that already has a verdict (holding stopped and
+    // released it) is not handed out: a handler could no longer cancel it.
     template <class F>
     uint32_t report(F&& f, uint32_t max) {
         uint32_t n = 0;
         for (Held& h : held_) {
             if (h.reported || n >= max) continue;
             h.reported = true;
+            if (h.verdict != Verdict::None) continue;
             f(h);
             ++n;
         }
@@ -170,7 +186,7 @@ public:
     }
     bool waiting_reports() const {
         for (const Held& h : held_)
-            if (!h.reported) return true;
+            if (!h.reported && h.verdict == Verdict::None) return true;
         return false;
     }
     // Tick side: the answer. False: no such held action.
@@ -188,19 +204,43 @@ public:
         for (Held& h : held_)
             if (h.verdict == Verdict::None) h.verdict = Verdict::Allow;
     }
-    // Entries nobody's hook asked about for a long time (the player left): dropped.
+    // Entries nobody's hook asked about for a long time (the player left): dropped; so is the memory of a version that
+    // ran and has not come back for as long.
     void expire(uint64_t step, uint64_t age) {
         for (size_t i = held_.size(); i-- > 0;)
             if (step > held_[i].since + age) held_.erase(held_.begin() + static_cast<ptrdiff_t>(i));
+        for (size_t i = ran_.size(); i-- > 0;)
+            if (step > ran_[i].seen + age) ran_.erase(ran_.begin() + static_cast<ptrdiff_t>(i));
     }
-    void clear() { held_.clear(); }
+    void clear() {
+        held_.clear();
+        ran_.clear();
+    }
+    // Entries the hook must look at even while nothing is held (a verdict waiting, a version that ran): any thread reads
+    // this through the owner's atomic copy.
     size_t size() const { return held_.size(); }
+    size_t remembered() const { return ran_.size(); }
     uint32_t total() const { return total_; }
     uint32_t canceled() const { return canceled_; }
     uint32_t timed_out() const { return timed_out_; }
 
 private:
+    struct Ran {
+        uint32_t player, version;
+        uint64_t seen;
+    };
+    // one per player: its last version that ran
+    void remember(uint32_t player, uint32_t version, uint64_t step) {
+        for (Ran& r : ran_)
+            if (r.player == player) {
+                r.version = version;
+                r.seen = step;
+                return;
+            }
+        ran_.push_back({player, version, step});
+    }
     std::vector<Held> held_;
+    std::vector<Ran> ran_;
     uint32_t total_ = 0, canceled_ = 0, timed_out_ = 0;
 };
 
@@ -216,6 +256,7 @@ struct Snapshot {
     uint32_t material = 0;        // count of the cost item in the player's inventories
     uint32_t essence = 0;         // count of the yield item in the player's inventories
     bool gem_in_player = false;   // the gem's entity is in one of the player's inventories
+    uint8_t gem_category = 0xFF;  // the gem's ItemInfo category (0xFF: not read); a gem is kWeaponGemCategory
 };
 
 struct Outcome {
@@ -251,35 +292,55 @@ inline Outcome judge(uint32_t action, const Snapshot& b, const Snapshot& a) {
     return o;
 }
 
+// Unslot's own checks (the forge's Unslot and the forgeless return): a socket that holds something, room for it.
+inline int32_t precheck_unslot(const Snapshot& b, bool backpack_room, const char** why) {
+    if (!b.socket) return *why = "the carrier has no gem socket", KILN_GEM_NOT_FOUND;
+    if (b.socket_pide == 0) return *why = "the socket is empty", KILN_GEM_OCCUPIED;
+    if (!backpack_room) return *why = "no free backpack slot for the gem", KILN_GEM_NO_ROOM;
+    return KILN_GEM_DONE;
+}
+
 // Why an action would be refused before the game runs it (KILN_GEM_DONE: nothing Kiln can see stops it). The game's
-// own checks still run; these give the caller a reason instead of "refused".
+// own checks still run; these give the caller a reason instead of "refused". The game's handler takes any stack with an
+// item entity as "the gem" (it reads no category: Recycle would destroy a sword, Upgrade raise its Level), so Slot,
+// Upgrade and Recycle need a WeaponGem, and an item whose category cannot be read is refused.
 inline int32_t precheck(uint32_t action, const Snapshot& b, uint32_t forge_max, uint32_t cost, uint32_t pays_from_have,
                         bool backpack_room, const char** why) {
     *why = "";
     if (forge_max == 0) return *why = "the forge entity is no Shroud Forge (no template, or maxGemLevel 0)", KILN_GEM_NO_FORGE;
+    const char* not_gem = "the item is not a gem (or its category cannot be read)";
     switch (action) {
         case KILN_GEM_ACTION_SLOT:
             if (!b.socket) return *why = "the carrier has no gem socket", KILN_GEM_NOT_FOUND;
             if (b.socket_pide != 0) return *why = "the socket holds a gem already", KILN_GEM_OCCUPIED;
             if (b.source_pide == 0) return *why = "the gem slot holds no gem", KILN_GEM_NOT_FOUND;
+            if (b.gem_category != kWeaponGemCategory) return *why = not_gem, KILN_GEM_NOT_FOUND;
             break;
-        case KILN_GEM_ACTION_UNSLOT:
-            if (!b.socket) return *why = "the carrier has no gem socket", KILN_GEM_NOT_FOUND;
-            if (b.socket_pide == 0) return *why = "the socket is empty", KILN_GEM_OCCUPIED;
-            if (!backpack_room) return *why = "no free backpack slot for the gem", KILN_GEM_NO_ROOM;
+        case KILN_GEM_ACTION_UNSLOT: {
+            const int32_t st = precheck_unslot(b, backpack_room, why);
+            if (st != KILN_GEM_DONE) return st;
             break;
+        }
         case KILN_GEM_ACTION_UPGRADE:
             if (b.gem_pide == 0) return *why = "no gem there", KILN_GEM_NOT_FOUND;
+            if (b.gem_category != kWeaponGemCategory) return *why = not_gem, KILN_GEM_NOT_FOUND;
             if (!b.level_known) return *why = "the gem's level cannot be read", KILN_GEM_NOT_FOUND;
             if (b.level >= b.cap || b.level >= forge_max) return *why = "the gem is at its cap or the forge's maximum level", KILN_GEM_MAX_LEVEL;
             break;
         case KILN_GEM_ACTION_RECYCLE:
             if (b.gem_pide == 0) return *why = "no gem there", KILN_GEM_NOT_FOUND;
+            if (b.gem_category != kWeaponGemCategory) return *why = not_gem, KILN_GEM_NOT_FOUND;
             break;
         default: return *why = "unknown action", KILN_GEM_NOT_FOUND;
     }
     if (cost > pays_from_have) return *why = "the player cannot pay the forge's cost", KILN_GEM_NOT_ENOUGH;
     return KILN_GEM_DONE;
+}
+
+// KILN_GEM_RETURN: no forge, no cost; the socket and the room as for Unslot.
+inline int32_t precheck_return(const Snapshot& b, bool backpack_room, const char** why) {
+    *why = "";
+    return precheck_unslot(b, backpack_room, why);
 }
 
 // ---- a free or replaced cost around the game's action ----
@@ -310,6 +371,43 @@ inline CostPlan plan_cost(const KilnGemRequest& r, uint32_t game_cost) {
         p.take_count = r.cost_count;
     }
     return p;
+}
+
+// What is left of the game's price Kiln handed over (`give`, for a free or replaced cost) once the game's action ran:
+// the material count right before the handler (`before`, the gift included) and right after it (`after`). The game
+// takes its price or nothing (one transaction), but Upgrade commits the payment before it raises the Level, and a
+// commit can roll back by itself: so the take-back is measured, never assumed. 0: the game took all of it.
+inline uint32_t gift_left(uint32_t give, uint32_t before, uint32_t after) {
+    if (!give) return 0;
+    const uint32_t without = before >= give ? before - give : 0;  // the count without the gift
+    if (after <= without) return 0;
+    const uint32_t left = after - without;
+    return left > give ? give : left;
+}
+
+// ---- the forgeless return (KILN_GEM_RETURN): the InventoryTx setup block the gem handler builds ----
+// Server 0x144c1c..0x144d03, client 0x3858ec..0x3859d3 (docs/re/gems-forge.md): flags 4 (InventoryFull to the
+// operator), the iterator's context, ItemRegistry, BalancingRegistry (no AttributeRegistry), the seven inventory
+// accessors, WeaponGemSlot at +0x60 (so a socket {carrier, 0} is a slot of the transaction), the InventoryFull sender, the
+// player as operator; everything else zero. `h` is the handler's iterator (I_* layout), `operator_off` the setup's
+// operator offset (sigdb items/setup.operator, 0xC8).
+inline void handler_setup(const uint64_t* h, uint32_t player, uint32_t operator_off, uint8_t* s) {
+    std::memset(s, 0, 0xF0);
+    s[0x00] = 0x04;
+    auto put = [s](int off, uint64_t v) { std::memcpy(s + off, &v, 8); };
+    put(0x08, h[I_CTX]);
+    put(0x10, h[I_ITEMS]);
+    put(0x18, h[I_BALANCING]);
+    put(0x28, h[I_SETUP]);
+    put(0x30, h[I_INVENTORY]);
+    put(0x38, h[I_SLOTSEL]);
+    put(0x40, h[I_ITEMSTATE]);
+    put(0x48, h[I_OWNER]);
+    put(0x50, h[I_SETUP]);
+    put(0x58, h[I_EMPTY]);
+    put(0x60, h[I_GEMSLOT]);
+    put(0xA8, h[I_EV_FULL]);
+    if (operator_off + 4 <= 0xF0) std::memcpy(s + operator_off, &player, 4);
 }
 
 // ---- text ----

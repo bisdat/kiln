@@ -22,8 +22,14 @@
  *  - Players' actions: while hold() is renewed, a player's new forge action is held for one step (the game's handler
  *    is not run for it) and reported by held() in the next Pre; decide() allows it (it runs in the next step) or
  *    cancels it (the game consumes it as a request without a forge: nothing is paid, nothing moves). An action not
- *    decided within 8 steps runs. While watch() is on, each player's action that ran (allowed, or never held) is
+ *    decided within 8 steps runs. A decision stands once given, also after holding stops; an action released before
+ *    held() handed it out (hold(0), or the lease lapsed) is not handed out; a version that ran and comes back
+ *    unconsumed (the game's handler leaves it so when the gem's Level cannot be read) runs again but is never held or
+ *    handed out twice. While watch() is on, each player's action that ran (allowed, or never held) is
  *    reported by crafted() with what changed and what was paid.
+ *  - Code actions refuse what the game's handler would take without asking: an item that is not a gem (category
+ *    WeaponGem) for Slot, Upgrade and Recycle, a KILN_GEM_COST item with an entity of its own (gear, a gem). After a
+ *    free or replaced cost Kiln takes back what the game did not take of its gift (counted, not assumed).
  *
  * Threads: submit, cancel, status: any thread. hold, held, decide, watch, crafted: the tick thread (Pre). Callbacks run
  * on the tick thread in Pre, one step after the step the action ran in. The table only grows at the end. */
@@ -50,6 +56,11 @@ enum {
 enum {
     KILN_GEM_FREE = 0x0001u, /* the player pays nothing (Recycle: gets nothing) */
     KILN_GEM_COST = 0x0002u, /* the player pays cost_count x cost_item instead (Recycle: gets it instead of the essence) */
+    KILN_GEM_RETURN = 0x0004u, /* KILN_GEM_ACTION_UNSLOT only, alone, with forge 0 and holder 0: the gem in the carrier's
+                                  socket goes into the player's own inventory through the game's own unslot move (the one
+                                  the forge's Unslot makes) on a transaction Kiln sets up as the forge's handler does,
+                                  without a forge and free. The carrier must be in the player's inventories (worn
+                                  included). For taking gems out of sockets the forge does not list (Gems.ReturnSocketedGems) */
 };
 
 typedef struct KilnGemRequest {

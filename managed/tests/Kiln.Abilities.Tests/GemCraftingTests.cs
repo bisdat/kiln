@@ -162,6 +162,79 @@ public sealed unsafe class GemCraftingTests : IDisposable
         Assert.Equal(9999u, elsewhere.Carrier);
     }
 
+    // review fix: a ref is checked against what its slot holds now, stamp and item type included
+    private static ItemInstanceRef Stamped(uint entity, ItemId item, ulong stamp) => new(new EntityRef(new EntityId(entity), stamp), item);
+
+    private const ulong ItemsStamp = 2UL << 60;  // IdentitySources.Stamp(Items, n): the items source's place
+
+    [Fact]
+    public void BuildRefusesAStaleRefOrAnotherItemInItsPlace()
+    {
+        var gemSlot = SlotId.Of(new EntityId(2546), 3);
+        var slots = new[]
+        {
+            Slot(SlotId.Of(new EntityId(2546), 0), Sword, 2554) with { Ref = Stamped(2554, Sword, ItemsStamp | 0x51) },
+            Slot(gemSlot, Bleeding, 2560) with { Ref = Stamped(2560, Bleeding, ItemsStamp | 0x62) },
+        };
+        var player = new EntityId(1);
+        var forge = new EntityId(3300);
+        // the gem the mod holds a ref to was destroyed and its entity id now names another gem
+        var (_, staleGem) = GemCrafting.Build(GemCraftAction.Socket, player, Stamped(2554, Sword, ItemsStamp | 0x51),
+            Stamped(2560, Bleeding, ItemsStamp | 0x61), forge, null, slots, id => id == Bleeding);
+        Assert.Equal(GemCraftStatus.NotFound, staleGem!.Status);
+        Assert.Contains("no longer exists", staleGem.Message);
+        // a stale carrier: Recycle would destroy the gem of whatever item has that id now
+        var (_, staleCarrier) = GemCrafting.Build(GemCraftAction.Recycle, player, Stamped(2554, Sword, ItemsStamp | 0x50), default,
+            forge, null, slots, id => id == Bleeding);
+        Assert.Equal(GemCraftStatus.NotFound, staleCarrier!.Status);
+        var (_, staleUnsocket) = GemCrafting.Build(GemCraftAction.Unsocket, player, Stamped(2554, Sword, ItemsStamp | 0x50), default,
+            forge, null, slots, id => id == Bleeding);
+        Assert.Equal(GemCraftStatus.NotFound, staleUnsocket!.Status);
+        // a ref that names another item type than the one in its place
+        var (_, otherType) = GemCrafting.Build(GemCraftAction.Upgrade, player, Ref(2560, Sword), default, forge, null, slots,
+            id => id == Bleeding);
+        Assert.Equal(GemCraftStatus.NotFound, otherType!.Status);
+        // the same stamps (or a ref without one) are the item
+        var (ok, none) = GemCrafting.Build(GemCraftAction.Socket, player, Stamped(2554, Sword, ItemsStamp | 0x51),
+            Stamped(2560, Bleeding, ItemsStamp | 0x62), forge, null, slots, id => id == Bleeding);
+        Assert.Null(none);
+        Assert.Equal(gemSlot.Value, ok.GemSlot);
+        var (_, plain) = GemCrafting.Build(GemCraftAction.Upgrade, player, Ref(2560, Bleeding), default, forge, null, slots, id => id == Bleeding);
+        Assert.Null(plain);
+    }
+
+    // review fix: Kiln takes a replaced cost by item id from anywhere in the inventory; gear or a gem would be destroyed
+    // (it may be the very carrier or gem of the action) and come back new from a refund
+    [Fact]
+    public void AReplacedCostMustBeAPlainItem()
+    {
+        var slots = Array.Empty<InventorySlot>();
+        Assert.Throws<ArgumentException>(() => GemCrafting.Build(GemCraftAction.Upgrade, new EntityId(1), Ref(2554, Sword), default,
+            new EntityId(3300), new GemCraftOptions { Cost = new GemCost(Bleeding, 1) }, slots, _ => false, id => id != Essence));
+        var (paid, _) = GemCrafting.Build(GemCraftAction.Upgrade, new EntityId(1), Ref(2554, Sword), default, new EntityId(3300),
+            new GemCraftOptions { Cost = new GemCost(Essence, 3) }, slots, _ => false, id => id != Essence);
+        Assert.Equal(GemcraftNative.Cost, paid.Flags);
+        // Recycle's replacement is given, not taken: gear is fine there
+        var (yield, _) = GemCrafting.Build(GemCraftAction.Recycle, new EntityId(1), Ref(2554, Sword), default, new EntityId(3300),
+            new GemCraftOptions { Cost = new GemCost(Bleeding, 1) }, slots, _ => false, id => id != Essence);
+        Assert.Equal(Bleeding.Value, yield.CostItem);
+    }
+
+    [Fact]
+    public void TheForgelessReturnNamesTheCarrierInTheOwnersInventories()
+    {
+        var owner = new EntityId(1);
+        var slots = new[] { Slot(SlotId.Of(new EntityId(2550), 0), Sword, 2554) with { Ref = Stamped(2554, Sword, ItemsStamp | 0x51) } };
+        var (r, refusal) = GemCrafting.BuildReturn(owner, Stamped(2554, Sword, ItemsStamp | 0x51), slots);
+        Assert.Null(refusal);
+        Assert.Equal((uint)GemCraftAction.Unsocket, r.Action);
+        Assert.Equal(GemcraftNative.Return, r.Flags);
+        Assert.Equal((1u, 2554u, 0u, 0u, 0ul), (r.Player, r.Carrier, r.Forge, r.Holder, r.GemSlot));
+        Assert.Equal((0u, 0u), (r.CostItem, r.CostCount));
+        Assert.NotNull(GemCrafting.BuildReturn(owner, Ref(9999, Sword), slots).Refusal);  // not the owner's
+        Assert.NotNull(GemCrafting.BuildReturn(owner, Stamped(2554, Sword, ItemsStamp | 0x50), slots).Refusal);  // stale
+    }
+
     [Fact]
     public void ACostOptionBecomesTheRequestsFlags()
     {
@@ -310,6 +383,7 @@ public sealed unsafe class GemCraftingTests : IDisposable
 
     internal static GemcraftNative.Craft NewCraft(GemCraftAction action, uint flags = 0) => Craft(action, flags: flags);
     internal static ItemInstanceRef NewRef(uint entity, ItemId item) => Ref(entity, item);
+    internal static InventorySlot NewSlot(SlotId at, ItemId item, uint entity) => Slot(at, item, entity);
     internal static readonly ItemId SwordId = Sword;
     internal Fake Backend => _fake;
 }
@@ -346,5 +420,49 @@ public sealed class GemCraftingSubmitTests : IDisposable
         _fake.SubmitResult = GemcraftNative.Unavailable;
         _fake.Detail = "gems.craft was switched off (see kiln.log)";
         kiln.Run(() => Assert.Throws<KilnUnavailableException>(() => Call(() => Gems.Unsocket(new EntityId(1), GemCraftingTests.NewRef(2554, GemCraftingTests.SwordId), new EntityId(3300)))));
+    }
+
+    // review addition: G4's Gems.ReturnSocketedGems takes gems out of non-weapon sockets through this, without a forge
+    [Fact]
+    public async Task UnsocketWithoutForgeRunsTheForgelessReturnAndAnswersInsteadOfThrowing()
+    {
+        using var kiln = new KilnHarness();
+        kiln.Capabilities.Override(Gems.CraftCapability, true);
+        var owner = new EntityId(1);
+        var ring = GemCraftingTests.NewRef(2554, GemCraftingTests.SwordId);
+        var slots = new[] { GemCraftingTests.NewSlot(SlotId.Of(new EntityId(2550), 0), GemCraftingTests.SwordId, 2554) };
+        var task = kiln.Run(() => GemCrafting.UnsocketWithoutForge(owner, ring, slots, _ => true));
+        var (r, key) = Assert.Single(_fake.Submitted);
+        Assert.Equal(GemcraftNative.Return, r.Flags);
+        Assert.Equal((uint)GemCraftAction.Unsocket, r.Action);
+        Assert.Equal(0u, r.Forge);
+        Assert.False(task.IsCompleted);
+        kiln.Run(() => GemCrafting.Complete(key, GemCraftingTests.NewCraft(GemCraftAction.Unsocket, GemcraftNative.ByCode)));
+        Assert.Equal((true, (string?)null), await task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+
+        // a refusal from the native side is an answer
+        var refused = kiln.Run(() => GemCrafting.UnsocketWithoutForge(owner, ring, slots, _ => true));
+        var (_, key2) = _fake.Submitted[1];
+        var noRoom = GemCraftingTests.NewCraft(GemCraftAction.Unsocket, GemcraftNative.ByCode);
+        noRoom.Status = (int)GemCraftStatus.NoRoom;
+        kiln.Run(() => GemCrafting.Complete(key2, noRoom));
+        var (ok2, why2) = await refused.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        Assert.False(ok2);
+        Assert.Equal("NoRoom", why2);
+
+        // never an exception: no owner, not a player character, the carrier elsewhere, the capability off, a full queue
+        Assert.False((await kiln.Run(() => GemCrafting.UnsocketWithoutForge(EntityId.None, ring, slots, _ => true))).Ok);
+        var chest = await kiln.Run(() => GemCrafting.UnsocketWithoutForge(new EntityId(1127), ring, slots, _ => false));
+        Assert.False(chest.Ok);
+        Assert.Contains("player", chest.Reason);
+        Assert.False((await kiln.Run(() => GemCrafting.UnsocketWithoutForge(owner, GemCraftingTests.NewRef(9999, GemCraftingTests.SwordId), slots, _ => true))).Ok);
+        _fake.SubmitResult = GemcraftNative.Unavailable;
+        var off = await kiln.Run(() => GemCrafting.UnsocketWithoutForge(owner, ring, slots, _ => true));
+        Assert.False(off.Ok);
+        _fake.SubmitResult = 0;
+        kiln.Capabilities.Override(Gems.CraftCapability, false);
+        Assert.False((await kiln.Run(() => GemCrafting.UnsocketWithoutForge(owner, ring, slots, _ => true))).Ok);
+        Assert.Equal(2, _fake.Submitted.Count);
+        Assert.False((await GemCrafting.UnsocketWithoutForge(owner, ring, slots, _ => true)).Ok);  // not the tick thread
     }
 }

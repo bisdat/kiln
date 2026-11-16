@@ -256,7 +256,8 @@ public static partial class Gems
     /// <param name="options">A holder, or a free or replaced cost.</param>
     /// <returns>Completes on the tick thread one step after the step it ran in. A refusal is a result
     /// (<see cref="GemCraftResult.Ok"/> false); nothing changed then.</returns>
-    /// <exception cref="ArgumentException">An argument is none, or the cost is negative or over 100000.</exception>
+    /// <exception cref="ArgumentException">An argument is none, or the cost is negative, over 100000, or an item with an
+    /// entity of its own (gear, a gem): a replaced price must be a plain item.</exception>
     /// <exception cref="InvalidOperationException">Not on the tick thread, or the calling mod is unloading.</exception>
     /// <exception cref="KilnUnavailableException">The capability <c>gems.craft</c> is off.</exception>
     /// <example><code>
@@ -278,7 +279,8 @@ public static partial class Gems
     /// <returns>As <see cref="Socket(EntityId, ItemInstanceRef, ItemInstanceRef, EntityId, GemCraftOptions?)"/>;
     /// <see cref="GemCraftStatus.Occupied"/> when the socket is empty, <see cref="GemCraftStatus.NoRoom"/> when the
     /// backpack is full.</returns>
-    /// <exception cref="ArgumentException">An argument is none, or the cost is negative or over 100000.</exception>
+    /// <exception cref="ArgumentException">An argument is none, or the cost is negative, over 100000, or an item with an
+    /// entity of its own (gear, a gem): a replaced price must be a plain item.</exception>
     /// <exception cref="InvalidOperationException">Not on the tick thread, or the calling mod is unloading.</exception>
     /// <exception cref="KilnUnavailableException">The capability <c>gems.craft</c> is off.</exception>
     [ServerOnly, TickThreadOnly, RequiresCapability(CraftCapability)]
@@ -297,7 +299,8 @@ public static partial class Gems
     /// <param name="options">A holder, or a free or replaced cost.</param>
     /// <returns>As <see cref="Socket(EntityId, ItemInstanceRef, ItemInstanceRef, EntityId, GemCraftOptions?)"/>;
     /// <see cref="GemCraftStatus.MaxLevel"/> at a cap.</returns>
-    /// <exception cref="ArgumentException">An argument is none, or the cost is negative or over 100000.</exception>
+    /// <exception cref="ArgumentException">An argument is none, or the cost is negative, over 100000, or an item with an
+    /// entity of its own (gear, a gem): a replaced price must be a plain item.</exception>
     /// <exception cref="InvalidOperationException">Not on the tick thread, or the calling mod is unloading.</exception>
     /// <exception cref="KilnUnavailableException">The capability <c>gems.craft</c> is off.</exception>
     [ServerOnly, TickThreadOnly, RequiresCapability(CraftCapability)]
@@ -333,7 +336,7 @@ internal static unsafe class GemcraftNative
     public const string Name = "kiln.gemcraft";
     public const uint Version = 1;
     public const int Ok = 0, InvalidArgument = 1, NotFound = 2, Unavailable = 3, BufferTooSmall = 5;
-    public const uint Free = 0x1, Cost = 0x2;
+    public const uint Free = 0x1, Cost = 0x2, Return = 0x4;
     public const uint ByCode = 0x1, Priced = 0x8;
     public const int MaxCost = 100000;
 
@@ -532,11 +535,30 @@ internal static unsafe class GemCrafting
         if (WhyOff() is { } why) throw new KilnUnavailableException(Gems.CraftCapability, $"{api}: {why}");
     }
 
+    // The slot that holds item entity x now, by its entity id.
+    private static InventorySlot? SlotOf(IReadOnlyList<InventorySlot> slots, ItemInstanceRef x) =>
+        slots.FirstOrDefault(s => !s.IsEmpty && s.ItemEntity == x.Entity.Id);
+
+    /// <summary>Why <paramref name="s"/> (the slot that holds <paramref name="x"/>'s entity id) is not the item
+    /// <paramref name="x"/> names; null when it is. The ref names another item type, or carries another stamp: the item it
+    /// named is gone and its entity id names a new one.</summary>
+    internal static string? Mismatch(InventorySlot s, ItemInstanceRef x)
+    {
+        if (!x.Item.IsNone && s.Item != x.Item) return $"the item {x} is not there any more (that entity holds {s.Item} now)";
+        if (x.Entity.Serial != 0 && !s.Ref.IsNone && s.Ref.Entity.Serial != 0 && s.Ref.Entity.Serial != x.Entity.Serial)
+            return $"the item {x} no longer exists (a stale ref: its entity id names another item now)";
+        return null;
+    }
+
     /// <summary>The request for an action, from what the player's (or holder's) inventories hold now: the carrier by its
-    /// entity, a loose gem by its slot. Null with a refusal when an item is not there.</summary>
+    /// entity, a loose gem by its slot. Null with a refusal when an item is not there, or its slot holds another item than
+    /// the ref names (another type, or the same entity id with another stamp).</summary>
+    /// <param name="isGear">Whether an item has an entity of its own (gear, gems): such an item is no replaced cost.</param>
+    /// <exception cref="ArgumentException">The cost is negative, over 100000, or (but for Recycle) an item with an entity
+    /// of its own.</exception>
     internal static (GemcraftNative.Request Request, GemCraftResult? Refusal) Build(GemCraftAction action, EntityId player,
         ItemInstanceRef first, ItemInstanceRef gem, EntityId forge, GemCraftOptions? options, IReadOnlyList<InventorySlot> slots,
-        Func<ItemId, bool> isGem)
+        Func<ItemId, bool> isGem, Func<ItemId, bool>? isGear = null)
     {
         var r = new GemcraftNative.Request
         {
@@ -552,31 +574,41 @@ internal static unsafe class GemCrafting
             if (cost.IsFree) r.Flags = GemcraftNative.Free;
             else
             {
+                // Kiln takes it by item id from anywhere in the inventory: an item with an entity of its own would be
+                // destroyed (it may be the action's own carrier or gem) and come back new from a refund
+                if (action != GemCraftAction.Recycle && isGear?.Invoke(cost.Item) == true)
+                    throw new ArgumentException("a replaced cost must be a plain item (not gear or a gem with an entity of its own)", nameof(options));
                 r.Flags = GemcraftNative.Cost;
                 r.CostItem = cost.Item.Value;
                 r.CostCount = (uint)cost.Count;
             }
         }
         GemCraftResult Refuse(string why) => new(GemCraftStatus.NotFound, action, player, forge, first, gem, 0, 0, default, default, why);
-        InventorySlot? SlotOf(ItemInstanceRef x) => slots.FirstOrDefault(s => !s.IsEmpty && s.ItemEntity == x.Entity.Id);
+        // a carrier found in the slots must be the item the ref names; one not found there is checked by kiln.gemcraft
+        string? CarrierWrong(ItemInstanceRef x) => SlotOf(slots, x) is { } c ? Mismatch(c, x) : null;
         switch (action)
         {
             case GemCraftAction.Socket:
             {
                 r.Carrier = first.Entity.Id.Value;
-                if (SlotOf(gem) is not { } g) return (r, Refuse("the gem is not in the player's (or the holder's) inventories"));
+                if (CarrierWrong(first) is { } cw) return (r, Refuse(cw));
+                if (SlotOf(slots, gem) is not { } g) return (r, Refuse("the gem is not in the player's (or the holder's) inventories"));
+                if (Mismatch(g, gem) is { } gw) return (r, Refuse(gw));
                 if (!isGem(g.Item)) return (r, Refuse("the item to socket is not a gem"));
                 r.GemSlot = g.Slot.Value;
                 r.Gem = gem.Entity.Id.Value;
                 break;
             }
             case GemCraftAction.Unsocket:
+                if (CarrierWrong(first) is { } uw) return (r, Refuse(uw));
                 r.Carrier = first.Entity.Id.Value;
                 break;
             default:
             {
                 // a loose gem by its slot, a carrier by its entity
-                if (SlotOf(first) is { } s && isGem(s.Item))
+                var s = SlotOf(slots, first);
+                if (s is not null && Mismatch(s, first) is { } fw) return (r, Refuse(fw));
+                if (s is not null && isGem(s.Item))
                 {
                     r.GemSlot = s.Slot.Value;
                     r.Gem = first.Entity.Id.Value;
@@ -598,8 +630,105 @@ internal static unsafe class GemCrafting
         if (mod is { Alive: false }) throw new InvalidOperationException("the mod is unloading");
         var holder = options?.Holder is { IsNone: false } h ? h : player;
         var slots = Items.Read(holder)?.Slots ?? [];
-        var (r, refusal) = Build(action, player, first, gem, forge, options, slots, id => Items.Get(id)?.Category == ItemCategory.WeaponGem);
+        var (r, refusal) = Build(action, player, first, gem, forge, options, slots, id => Items.Get(id)?.Category == ItemCategory.WeaponGem,
+            id => Items.Get(id)?.IsGear == true);
         if (refusal is not null) return Task.FromResult(refusal);
+        // an item ref whose entity is gone, or whose id names another spawn now (found nowhere in the slots above)
+        foreach (var x in new[] { first, gem })
+            if (!x.IsNone && Alive(x) == false)
+                return Task.FromResult(new GemCraftResult(GemCraftStatus.NotFound, action, player, forge, first, gem, 0, 0, default, default,
+                    $"the item {x} no longer exists (a stale ref)"));
+        return Send(r, action, player, first, gem, forge, mod, api);
+    }
+
+    // The ref's entity is the spawn it captured; null when Kiln cannot tell here (no entity source).
+    private static bool? Alive(ItemInstanceRef x)
+    {
+        try
+        {
+            return x.IsAlive;
+        }
+        catch (KilnUnavailableException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>The forgeless return's request (kiln.gemcraft KILN_GEM_RETURN): the carrier must be in the owner's own
+    /// inventories (worn included) and be the item the ref names.</summary>
+    internal static (GemcraftNative.Request Request, string? Refusal) BuildReturn(EntityId owner, ItemInstanceRef carrier,
+        IReadOnlyList<InventorySlot> slots)
+    {
+        var r = new GemcraftNative.Request
+        {
+            Size = (uint)sizeof(GemcraftNative.Request),
+            Action = (uint)GemCraftAction.Unsocket,
+            Flags = GemcraftNative.Return,
+            Player = owner.Value,
+            Carrier = carrier.Entity.Id.Value,
+        };
+        if (SlotOf(slots, carrier) is not { } s) return (r, "the carrier is not in the owner's inventories");
+        return (r, Mismatch(s, carrier));
+    }
+
+    /// <summary>
+    /// Gem wave G4's uninstall path (<c>Gems.ReturnSocketedGems</c>): takes the gem out of <paramref name="carrier"/>'s
+    /// socket into <paramref name="owner"/>'s own inventory without a forge and free of charge. kiln.gemcraft runs the
+    /// game's own unslot move (the forge Unslot's) on a transaction it sets up as the forge's handler does, inside the
+    /// owner's update of kiln_items_gems, and checks the socket and the backpack afterwards (KILN_GEM_RETURN).
+    /// </summary>
+    /// <param name="owner">A player character (the entity kiln_items_gems runs for); a chest or any other holder is
+    /// refused: move the items into the player's inventory first.</param>
+    /// <param name="carrier">An item in the owner's inventories (backpack, action bars, worn) whose socket holds a gem; any
+    /// carrier, a weapon included.</param>
+    /// <returns>Never throws: (true, null) when the gem is in the owner's inventory now and the socket empty; otherwise
+    /// (false, why) and nothing moved (<c>Occupied</c>: the socket is empty; <c>NoRoom</c>: no free backpack slot;
+    /// <c>Unavailable</c>, <c>Dropped</c>, a stale or foreign carrier, gems.craft off, not the tick thread). Completes on
+    /// the tick thread one step after the step it ran in, or at once for a refusal Kiln sees before. A
+    /// <see cref="GemCraftedEvent"/> (Unsocket, by code, no forge) follows a return that happened.</returns>
+    [ServerOnly, TickThreadOnly]
+    internal static Task<(bool Ok, string? Reason)> UnsocketWithoutForge(EntityId owner, ItemInstanceRef carrier) =>
+        UnsocketWithoutForge(owner, carrier, null, IsPlayerCharacter);
+
+    /// <summary>Whether an entity is a player character (kiln_items_gems iterates those: PlayerInput); null when Kiln
+    /// cannot tell here (no kiln.world).</summary>
+    private static bool? IsPlayerCharacter(EntityId e) => World.Available ? World.Has(e, "PlayerInput") : null;
+
+    /// <summary><see cref="UnsocketWithoutForge(EntityId, ItemInstanceRef)"/> with the owner's slots and the player test
+    /// given (tests); <paramref name="slots"/> null: read now.</summary>
+    internal static Task<(bool Ok, string? Reason)> UnsocketWithoutForge(EntityId owner, ItemInstanceRef carrier,
+        IReadOnlyList<InventorySlot>? slots, Func<EntityId, bool?> isPlayer)
+    {
+        static Task<(bool Ok, string? Reason)> No(string why) => Task.FromResult<(bool Ok, string? Reason)>((false, why));
+        try
+        {
+            if (owner.IsNone) return No("no owner");
+            if (carrier.IsNone) return No("no carrier");
+            Services.RequireTickThread("Gems.ReturnSocketedGems");
+            if (!Capabilities.Is(Gems.CraftCapability)) return No($"{Gems.CraftCapability} is off: {Capabilities.Why(Gems.CraftCapability)}");
+            if (WhyOff() is { } off) return No(off);
+            if (isPlayer(owner) == false)
+                return No("the owner is not a player character: gems go back into a player's own inventory (move the items there first)");
+            var mod = ModContext.CurrentMod;
+            if (mod is { Alive: false }) return No("the mod is unloading");
+            var (r, refusal) = BuildReturn(owner, carrier, slots ?? Items.Read(owner)?.Slots ?? []);
+            if (refusal is not null) return No(refusal);
+            if (Alive(carrier) == false) return No($"the item {carrier} no longer exists (a stale ref)");
+            return Send(r, GemCraftAction.Unsocket, owner, carrier, default, EntityId.None, mod, "Gems.ReturnSocketedGems")
+                .ContinueWith(t => t.IsCompletedSuccessfully ? (t.Result.Ok, t.Result.Reason)
+                        : (false, t.Exception?.GetBaseException().Message ?? "canceled"),
+                    CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+        }
+        catch (Exception e) when (e is KilnUnavailableException or InvalidOperationException or ArgumentException)
+        {
+            return No(e.Message);
+        }
+    }
+
+    // Queues a built request; its task completes from the native result.
+    private static Task<GemCraftResult> Send(in GemcraftNative.Request r, GemCraftAction action, EntityId player, ItemInstanceRef first,
+        ItemInstanceRef gem, EntityId forge, ModContext? mod, string api)
+    {
         var tcs = new TaskCompletionSource<GemCraftResult>(TaskCreationOptions.RunContinuationsAsynchronously);
         long key;
         lock (Gate)
