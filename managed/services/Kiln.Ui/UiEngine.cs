@@ -837,31 +837,44 @@ internal static unsafe class UiEngine
         var now = Environment.TickCount64;
         if (now - _keysDrawnAtMs > 250) _remapping = null;
         _keysDrawnAtMs = now;
-        ui.TextDisabled(UiNative.MouseKeysAvailable
+        // wrapped: a single line was cut off at the menu's width in the game (inbox 40)
+        ui.TextWrapped(UiNative.MouseKeysAvailable
             ? "Click a key, then press the new one: a key, the middle or a side mouse button, or a turn of the wheel, " +
               "with Ctrl, Shift or Alt if you like (left and right click can't be bound). Click it again to cancel; " +
-              "Escape cancels and closes the menu. Saved to kiln/config/keybinds.json."
-            : "Click a key, then press the new one. Click it again to cancel; Escape cancels and closes the menu. Saved to kiln/config/keybinds.json.");
+              "Escape cancels and closes the menu. Unbind leaves an action without a key. Saved to kiln/config/keybinds.json."
+            : "Click a key, then press the new one. Click it again to cancel; Escape cancels and closes the menu. Unbind leaves " +
+              "an action without a key. Saved to kiln/config/keybinds.json.");
         if (!ui.BeginTable("kiln.keys", "Action", "Key", "Default", "")) return;
-        void Line(string id, string what, KeyChord key, KeyChord def)
-        {
-            using var _ = ui.Id(id);
-            ui.NextRow();
-            ui.NextColumn();
-            ui.Text(what);
-            ui.Tooltip(id);
-            ui.NextColumn();
-            if (ui.Button(_remapping == id ? "press a key..." : key.ToString(), 160 * ui.Scale)) _remapping = _remapping == id ? null : id;
-            ui.NextColumn();
-            ui.TextDisabled(def.ToString());
-            ui.NextColumn();
-            if (key != def && ui.SmallButton("Reset")) KeyBindings.Reset(id);
-        }
-        Line(KeyBindings.MenuId, "Kiln: open this menu", KeyBindings.MenuKey, KeyBindings.MenuDefault);
+        KeyLine(ui, KeyBindings.MenuId, "Kiln: open this menu", KeyBindings.MenuKey, KeyBindings.MenuDefault);
         foreach (var g in KeyBindings.All.GroupBy(b => b.Category))
             foreach (var b in g)
-                Line(b.Id, $"{g.Key}: {b.Description}", b.Key, b.Default);
+                KeyLine(ui, b.Id, $"{g.Key}: {b.Description}", b.Key, b.Default);
         ui.EndTable();
+    }
+
+    /// <summary>One row of the Keys page: the action, its key (click to rebind), the default, Reset when it differs and
+    /// Unbind (the key becomes None) for every binding but the menu's own key, which would lock the menu away.</summary>
+    internal static void KeyLine(UiDraw ui, string id, string what, KeyChord key, KeyChord def)
+    {
+        using var _ = ui.Id(id);
+        ui.NextRow();
+        ui.NextColumn();
+        ui.Text(what);
+        ui.Tooltip(id);
+        ui.NextColumn();
+        if (ui.Button(_remapping == id ? "press a key..." : key.ToString(), 160 * ui.Scale)) _remapping = _remapping == id ? null : id;
+        ui.NextColumn();
+        ui.TextDisabled(def.ToString());
+        ui.NextColumn();
+        var reset = key != def;
+        if (reset && ui.SmallButton("Reset")) KeyBindings.Reset(id);
+        if (id == KeyBindings.MenuId || key.IsNone) return;
+        if (reset) ui.SameLine();
+        if (ui.SmallButton("Unbind"))
+        {
+            if (_remapping == id) _remapping = null;
+            KeyBindings.Rebind(id, KeyChord.None);
+        }
     }
 
     internal static void OverlayTab(UiDraw ui)
