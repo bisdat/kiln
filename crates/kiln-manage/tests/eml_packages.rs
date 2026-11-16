@@ -2224,3 +2224,46 @@ fn a_native_plugin_ini_is_held_back_from_a_version_without_its_dll() {
         assert!(a.retained.is_empty(), "off {off}: {a:?}");
     }
 }
+
+/// Codex review 3: a native-plugin.ini held back from a version that does not have the DLL it names never reaches the
+/// new copy, also when that version ships no ini at all (an EML package that is no XHL-Core plugin any more, its DLL
+/// renamed). It waits in kiln/kept-mod-files, as the warning says.
+#[test]
+fn a_held_back_plugin_ini_stays_out_of_a_version_that_ships_none() {
+    let d = drop_on_launcher("xhl-hybrid", "XHL-Auto-Loot");
+    let copy = d.g.path.join("mods/XHL-Auto-Loot");
+    let mine: &[u8] = b"[Plugin]\nDll=XHL-Auto-Loot.dll\nRadius=3\n";
+    put(&copy, "native-plugin.ini", mine);
+    let update = d._t.0.join("update");
+    put(&update, "dbghelp.dll", &eml_dbghelp());
+    put(&update, "mods/XHL-Auto-Loot/mod.json", br#"{"id":"XHL-Auto-Loot","name":"XHL-Auto-Loot","version":"2.0.0","capabilities":["patch"]}"#);
+    put(&update, "mods/XHL-Auto-Loot/src/mod.lua", b"-- 2.0.0\nreturn {}");
+    put(&update, "mods/XHL-Auto-Loot/XHL-Auto-Loot-2.dll", &xhl_plugin());
+    put(&update, "mods/XHL-Auto-Loot/config.txt", b"x");
+    let r = kiln_manage::quick::add_with(&d.dirs, &d.g, &[update], false, &mut NoProgress).unwrap();
+    let a = r.activation.expect("applied");
+    assert_eq!(std::fs::read(copy.join("src/mod.lua")).unwrap(), b"-- 2.0.0\nreturn {}", "the new version is placed: {a:?}");
+    assert!(!copy.join("native-plugin.ini").exists(), "the player's ini names a DLL this version does not have: {a:?}");
+    assert_eq!(std::fs::read(d.g.path.join("kiln/kept-mod-files/eml/xhl-auto-loot/native-plugin.ini")).unwrap(), mine);
+    assert!(a.warnings.iter().any(|w| w.contains("names XHL-Auto-Loot.dll") && w.contains("kiln/kept-mod-files/eml/xhl-auto-loot")), "{a:?}");
+}
+
+/// Codex review 4: Play with an unchanged profile only reconciles the mod folders (profile::refresh_active). The safety
+/// note about the player's own XHL plugin folder of a mod that is off comes back from that too, also when nothing else
+/// changed: here the player put the plugin back into mods by hand after switching it off.
+#[test]
+fn play_with_an_unchanged_profile_names_the_players_own_xhl_folder_of_a_mod_that_is_off() {
+    let (t, dirs, g) = fresh("own-xhl-play");
+    kiln_manage::quick::add_with(&dirs, &g, &[zip(&t, "xhl-plugin", "XHL-Vein-Mining"), zip(&t, "xhl-core", "XHL-Core")], false,
+        &mut NoProgress).unwrap();
+    let mut p = profile::get(&dirs, "my-mods").unwrap();
+    p.mods.xhl[0].enabled = false;
+    let p = profile::save(&dirs, &p).unwrap();
+    profile::activate(&dirs, &p.id, &g).unwrap();
+    let own = g.path.join("mods/XHL-Vein-Mining");
+    assert!(!own.exists());
+    layout(&g.path, "xhl-plugin");
+    let a = profile::refresh_active(&dirs, &g).unwrap().expect("the reconcile reports the folder that still runs");
+    let note = a.safety_notes.iter().find(|n| n.starts_with("xhl:xhl-vein-mining:")).unwrap_or_else(|| panic!("{a:?}"));
+    assert!(note.contains(&own.display().to_string()) && a.warnings.contains(note), "{a:?}");
+}

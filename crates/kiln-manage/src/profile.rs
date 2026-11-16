@@ -1734,12 +1734,16 @@ pub fn refresh_active(dirs: &DataDirs, install: &GameInstall) -> Result<Option<A
             // order (Kiln's shipped rules after an update, a mod added to the Library), the start says so
             let (wrote, order_notes) = write_chain_plan(dirs, &profile, install, &file)?;
             let order_notes = if wrote { order_notes } else { Vec::new() };
-            if !(placed.retained.is_empty() && placed.kept_files.is_empty() && placed.warnings.is_empty() && order_notes.is_empty())
+            // A player's own folder that still runs although its mod is off is said at every reconcile too (the plain
+            // own-folder notes are not repeated; the launcher raises each sentence once until it is closed).
+            if !(placed.retained.is_empty() && placed.kept_files.is_empty() && placed.warnings.is_empty() && placed.safety_notes.is_empty()
+                && order_notes.is_empty())
                 && let Some(mut a) = active(dirs, install)?
             {
                 a.own_loaders = placed.own_loaders;
                 a.kept_files = placed.kept_files;
-                a.warnings = placed.warnings.into_iter().chain(order_notes).collect();
+                a.warnings = placed.warnings.into_iter().chain(placed.safety_notes.iter().cloned()).chain(order_notes).collect();
+                a.safety_notes = placed.safety_notes;
                 a.retained = placed.retained;
                 return Ok(Some(a));
             }

@@ -538,7 +538,8 @@ pub struct PlaceReport {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub own_notes: Vec<String>,
     /// The notes of [`PlaceReport::own_notes`] about a player's own folder that may still run although the profile has
-    /// its mod off (Kiln never switches it): the launcher raises these even with its notes about mod folders off.
+    /// its mod off (Kiln never switches it): the launcher raises these even with its notes about mod folders off, and a
+    /// reconcile of an unchanged profile passes them on too (profile::refresh_active).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub safety_notes: Vec<String>,
     /// Files a mod wrote into its placed folder (its settings): one sentence per mod when they were moved to
@@ -769,8 +770,7 @@ fn drop_parked(game: &Path, p: &Publication) -> bool {
     let ours = dir.file_name().is_some_and(|n| n.to_string_lossy().starts_with(".kiln-place-")) && dir.parent() == p.path.parent();
     if !ours || validate_publication(game, p).is_err() || !dir.is_dir() { return false; }
     // A saved receipt alone does not prove the replacement survived. Never discard the only old tree.
-    if !p.path.is_dir() || marker(&p.path).as_ref() != Some(&p.to.marker)
-        || player_entries(&p.path, p.to.marker.kind, &current_receipt(&p.path, &p.to)).ok().flatten().is_none()
+    if !p.path.is_dir() || marker(&p.path).as_ref() != Some(&p.to.marker) || !holds_receipt(&p.path, &p.to)
         || marker(parked) != p.from { return false; }
     std::fs::remove_dir_all(dir).is_ok()
 }
@@ -821,8 +821,9 @@ fn recover_publications(game: &Path, receipts: &mut Vec<Placement>) -> Result<Ve
         if current.map(|r| r.marker.clone()) != p.from { continue; } // the receipt moved on: nothing of this to finish
         // only a publication that replaced a copy Kiln held (its receipt still the current one): a folder without a
         // receipt (a first placement stopped before its receipt, or one whose receipt is gone) is never adopted
+        // (the same reading of the copy as placement's: a game-folder copy carries the player's settings by its rules)
         let published = p.from.is_some() && p.path.is_dir() && marker(&p.path).as_ref() == Some(&p.to.marker)
-            && player_entries(&p.path, p.to.marker.kind, &current_receipt(&p.path, &p.to)).ok().flatten().is_some();
+            && holds_receipt(&p.path, &p.to);
         if published {
             receipts.retain(|r| r.path != p.path);
             receipts.push(p.to.clone());
@@ -838,8 +839,7 @@ fn recover_publications(game: &Path, receipts: &mut Vec<Placement>) -> Result<Ve
             // The old copy is home. Remove only the verified unused staged replacement, then an empty container.
             let dir = parked.parent().expect("validated parent");
             let new = dir.join("new");
-            if marker(&new).as_ref() == Some(&p.to.marker)
-                && player_entries(&new, p.to.marker.kind, &current_receipt(&new, &p.to)).ok().flatten().is_some() {
+            if marker(&new).as_ref() == Some(&p.to.marker) && holds_receipt(&new, &p.to) {
                 refuse_symlink_path(game, &new)?;
                 let _ = std::fs::remove_dir_all(&new);
             }
@@ -1213,13 +1213,24 @@ fn copy_entries(game: &Path, from: &Path, to: &Path, entries: &[&String], retain
     Ok(())
 }
 
-/// Before Kiln removes its copy `dst`: the files the mod wrote there go to [`kept_dir`]. A conflicting earlier retained
-/// file or directory is parked as `.kept-N`; neither value is discarded. Returns the sentence for [`PlaceReport::kept_files`], if any.
+/// [`copy_entries`] (retaining) into a folder where the player's files wait while the copy they come from goes (the
+/// settings stash, [`kept_dir`]): the folder is made durably, then each file and every folder name in it is flushed, so
+/// a stop right after the copy is removed loses none of them. An error: the caller keeps the copy.
+fn keep_entries_durably(game: &Path, from: &Path, to: &Path, entries: &[&String]) -> Result<()> {
+    refuse_symlink_path(game, to)?;
+    crate::durable::ensure_dir(to)?;
+    copy_entries(game, from, to, entries, true)?;
+    for rel in entries { crate::durable::flush_file(&to.join(rel.as_str()))?; }
+    crate::durable::flush_tree(to)
+}
+
+/// Before Kiln removes its copy `dst`: the files the mod wrote there go to [`kept_dir`], durably. A conflicting earlier
+/// retained file or directory is parked as `.kept-N`; neither value is discarded. Returns the sentence for [`PlaceReport::kept_files`], if any.
 pub(crate) fn keep_player_files(game: &Path, dst: &Path, kind: ModKind, id: &str, player: &[String]) -> Result<Option<String>> {
     let files: Vec<&String> = file_entries(player).collect();
     if files.is_empty() { return Ok(None); }
     let kept = kept_dir(game, kind, id);
-    copy_entries(game, dst, &kept, &files, true)?;
+    keep_entries_durably(game, dst, &kept, &files)?;
     let names: Vec<String> = files.iter().map(|s| s.to_string()).collect();
     Ok(Some(format!("{}:{id}: kept {} the mod wrote ({}) in {KEPT_MOD_FILES}/{}/{id}; they go back when the mod is placed again",
         kind.as_str(), if names.len() == 1 { "1 file" } else { "the files" }, some_names(&names), kind.as_str())))
@@ -1240,14 +1251,17 @@ pub(crate) struct Carried {
 }
 
 /// Copies the player's files of `c` over a staged new copy of `kind`/`id` (staged under `game`). A file the new copy
-/// ships under the same name stays the library's (unless it is a settings file): the player's goes to [`kept_dir`].
+/// ships under the same name stays the library's (unless it is a settings file): the player's goes to [`kept_dir`]. So
+/// does XHL-Core's ini naming a DLL the new copy does not have, whether it ships an ini or not ([`hold_back_plugin_ini`]).
 pub(crate) fn carry_in(game: &Path, kind: ModKind, id: &str, c: &Carry, staged: &Path) -> Result<Carried> {
     let (mut back, mut aside) = (Vec::new(), Vec::new());
     for rel in file_entries(&c.entries) {
         let to = staged.join(rel);
         // the library's own file, or a library file where a folder of the path would be, keeps that path
         let blocked = rel.match_indices('/').any(|(i, _)| staged.join(&rel[..i]).is_file());
-        if blocked || to.is_dir() || (to.is_file() && !is_settings_file(kind, rel)) {
+        let dangling = rel.eq_ignore_ascii_case(XHL_PLUGIN_INI) && std::fs::read(c.from.join(rel)).ok().and_then(|b| xhl_ini_dll(&b))
+            .is_some_and(|dll| !has_file_any_case(staged, &dll));
+        if blocked || to.is_dir() || dangling || (to.is_file() && !is_settings_file(kind, rel)) {
             aside.push(rel.clone());
         } else {
             back.push(rel.clone());
@@ -1256,7 +1270,7 @@ pub(crate) fn carry_in(game: &Path, kind: ModKind, id: &str, c: &Carry, staged: 
     copy_entries(game, c.from, staged, &back.iter().collect::<Vec<_>>(), false)?;
     // a file the new version ships itself: the player's goes to the kept folder (already there when it came from it)
     if !aside.is_empty() && !c.from_kept {
-        copy_entries(game, c.from, &kept_dir(game, kind, id), &aside.iter().collect::<Vec<_>>(), true)?;
+        keep_entries_durably(game, c.from, &kept_dir(game, kind, id), &aside.iter().collect::<Vec<_>>())?;
     }
     Ok(Carried { back, aside })
 }
@@ -2946,7 +2960,17 @@ fn settings_changed(game: &Path, receipts: &[Placement], dst: &Path, kind: ModKi
     if receipt.marker.format != 1 || !crate::manifest::is_mod_id(&receipt.marker.id) || marker(dst).as_ref() != Some(&receipt.marker) {
         return Ok(Mine::No);
     }
-    let now = placement_files(dst, kind)?;
+    let (settings, added, code) = game_folder_changes(dst, receipt)?;
+    if !code.is_empty() { return Ok(Mine::Changed(code)); }
+    Ok(Mine::Yes(receipt.clone(), settings, added))
+}
+
+/// What changed in the game-folder copy `dst` since Kiln placed it as `receipt` (as [`current_receipt`] reads it), by
+/// the rules [`Mine::Yes`] and [`Mine::Changed`] name: (the settings files changed or added, the other files added that
+/// are no code, the code or manifests changed, added or removed). Placement and the recovery of a stopped
+/// publication ([`holds_receipt`]) read a copy the same way.
+fn game_folder_changes(dst: &Path, receipt: &Placement) -> Result<(Vec<String>, Vec<String>, Vec<String>)> {
+    let now = placement_files(dst, receipt.marker.kind)?;
     let (mut settings, mut added, mut code) = (Vec::new(), Vec::new(), Vec::new());
     // ShroudForge's switch made by hand in a copy Kiln left without it: Kiln's own file, not a setting of the player's
     let adopted = adopted_switch(dst, receipt);
@@ -2962,8 +2986,16 @@ fn settings_changed(game: &Path, receipts: &[Placement], dst: &Path, kind: ModKi
     }
     // Receipt ownership never authorizes throwing away player edits to code or manifests, including removed files.
     code.extend(receipt.files.keys().filter(|rel| !rel.ends_with('/') && !now.contains_key(*rel) && !is_game_settings_file(rel)).cloned());
-    if !code.is_empty() { return Ok(Mine::Changed(code)); }
-    Ok(Mine::Yes(receipt.clone(), settings, added))
+    Ok((settings, added, code))
+}
+
+/// The copy at `path` is the one `receipt` describes, with nothing of it changed but what the player may change: for a
+/// game-folder copy by [`game_folder_changes`] (its settings by extension, XHL-Core's ini naming Kiln's DLL), else by
+/// [`player_entries`]. What recovery checks before it takes a published copy for Kiln's or drops a parked one.
+fn holds_receipt(path: &Path, receipt: &Placement) -> bool {
+    let receipt = current_receipt(path, receipt);
+    if receipt.game_folder { game_folder_changes(path, &receipt).is_ok_and(|(_, _, code)| code.is_empty()) }
+    else { player_entries(path, receipt.marker.kind, &receipt).ok().flatten().is_some() }
 }
 
 /// Code or a manifest in a game-folder copy: the manifest, the Lua, the plugin ini, DLLs. A file of this kind that is
@@ -2982,7 +3014,7 @@ fn is_game_settings_file(rel: &str) -> bool {
 }
 
 /// XHL-Core's `native-plugin.ini` of a game-folder copy (`dst`), changed since Kiln placed it, is the mod's settings file
-/// while its `[Plugin]` entry still names a DLL Kiln placed there, unchanged ([`xhl_ini_dll`]): XHL's plugins keep their
+/// while its `[Plugin]` entry still names a DLL (a `.dll` file) Kiln placed there, unchanged ([`xhl_ini_dll`]): XHL's plugins keep their
 /// settings in it (XHL-Area-Harvest's `[Planting]`, XHL-Free-Climb's `[Climbing]`) and XHL-Core writes its `Enabled`
 /// there. One that names another DLL, or none, is code ([`is_game_code`]); so is one the copy did not have.
 fn plugin_ini_is_setting(dst: &Path, rel: &str, receipt: &Placement, now: &std::collections::BTreeMap<String, String>) -> bool {
@@ -2990,7 +3022,7 @@ fn plugin_ini_is_setting(dst: &Path, rel: &str, receipt: &Placement, now: &std::
     let path = dst.join(rel);
     let Some(dll) = std::fs::metadata(&path).ok().filter(|m| m.len() <= 64 * 1024)
         .and_then(|_| std::fs::read(&path).ok()).and_then(|b| xhl_ini_dll(&b)) else { return false };
-    receipt.files.iter().any(|(r, hash)| r.eq_ignore_ascii_case(&dll) && now.get(r) == Some(hash))
+    receipt.files.iter().any(|(r, hash)| r.eq_ignore_ascii_case(&dll) && r.to_ascii_lowercase().ends_with(".dll") && now.get(r) == Some(hash))
 }
 
 /// The DLL the `[Plugin]` section of an XHL-Core `native-plugin.ini` names (`Dll=`, the key and section in any case, as
@@ -3068,7 +3100,7 @@ fn stash_settings(game: &Path, kind: ModKind, id: &str, files: &[(String, Vec<u8
     refuse_symlink_path(game, &dir)?;
     if files.is_empty() { return Ok(()); }
     let parent = dir.parent().expect("settings stash parent");
-    std::fs::create_dir_all(parent).map_err(io_at(parent, "creating"))?;
+    crate::durable::ensure_dir(parent)?;
     let staged = crate::library::TempDir::new(parent, "settings")?;
     let mut entries = Vec::new();
     for (rel, bytes) in files {
@@ -3079,8 +3111,9 @@ fn stash_settings(game: &Path, kind: ModKind, id: &str, files: &[(String, Vec<u8
         entries.push(rel.clone());
     }
     // A failed earlier removal or a player edit may leave older data here. Preserve conflicting values as .kept-N,
-    // including file/directory collisions, exactly as generic SET/player-file retention does.
-    copy_entries(game, staged.path(), &dir, &entries.iter().collect::<Vec<_>>(), true)
+    // including file/directory collisions, exactly as generic SET/player-file retention does. Durable before the copy
+    // the settings come from is removed.
+    keep_entries_durably(game, staged.path(), &dir, &entries.iter().collect::<Vec<_>>())
 }
 
 fn stashed_settings(game: &Path, kind: ModKind, id: &str) -> Result<Vec<(String, Vec<u8>)>> {
@@ -4551,6 +4584,105 @@ mod tests {
     /// inbox 21c: the DLL XHL-Core's native-plugin.ini names, as the XHL packages and AZJ-LootMultiplier write it and as
     /// Windows' ini reading finds it (section and key in any case, UTF-16LE with its BOM). An entry that leaves the
     /// plugin's folder, one in another section, or a commented one names nothing Kiln placed.
+    /// A pure XHL plugin (XHL-Vein-Mining as its author ships it: the DLL, XHL-Core's ini, config.txt) in a test
+    /// Library, `build` the bytes that make its DLL differ per build; the profile entry for it.
+    fn xhl_plugin_mod(dirs: &DataDirs, root: &Path, build: &[u8]) -> crate::profile::ProfileMod {
+        let src = root.join(format!("pkg-{}/XHL-Vein-Mining", &crate::hash::sha256_hex(build)[..12]));
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(src.join("XHL-Vein-Mining.dll"), crate::pe::build_test_dll(&["XhlPluginEntry"], build)).unwrap();
+        std::fs::write(src.join(XHL_PLUGIN_INI), "[Plugin]\nEnabled=1\nDll=XHL-Vein-Mining.dll\n").unwrap();
+        std::fs::write(src.join("config.txt"), "radiusMeters=10\n").unwrap();
+        let r = crate::library::import(dirs, &[src], &mut crate::task::NoProgress).unwrap();
+        let r = r.imported.iter().chain(&r.existing).find(|x| x.kind == ModKind::Xhl).cloned().unwrap_or_else(|| panic!("{r:?}"));
+        crate::profile::ProfileMod { id: r.id, version: r.version, hash: r.hash, enabled: true }
+    }
+
+    /// A data dir, a game folder and a profile with the XHL plugin of build "v1", placed.
+    fn xhl_placed(tmp: &Path) -> (DataDirs, PathBuf, crate::profile::Profile) {
+        let dirs = DataDirs::at(tmp.join("data"));
+        let game = tmp.join("game");
+        std::fs::create_dir_all(game.join("kiln")).unwrap();
+        let mut p = crate::profile::create(&dirs, "p", None).unwrap();
+        p.mods.xhl = vec![xhl_plugin_mod(&dirs, tmp, b"v1")];
+        let rep = place(&dirs, &p, &game).unwrap();
+        assert_eq!(rep.placed, ["xhl:xhl-vein-mining"], "{rep:?}");
+        (dirs, game, p)
+    }
+
+    /// Codex review 1: what a switched-off copy holds of the player's is on disk before the copy goes. Its settings
+    /// (the stash) and the other files it wrote (the kept folder) are flushed, with the names of their folders, before
+    /// the receipt that removes the copy is written; a stop right after the removal loses none of them.
+    #[test]
+    fn a_switched_off_copys_settings_are_durable_before_the_copy_goes() {
+        let tmp = crate::library::TempDir::new(&std::env::temp_dir(), "xhl-durable-stash").unwrap();
+        let (dirs, game, mut p) = xhl_placed(tmp.path());
+        let copy = game.join("mods/XHL-Vein-Mining");
+        std::fs::write(copy.join("config.txt"), "radiusMeters=12\n").unwrap();
+        std::fs::write(copy.join(XHL_PLUGIN_INI), "[Plugin]\nEnabled=1\nDll=XHL-Vein-Mining.dll\nRadius=3\n").unwrap();
+        std::fs::write(copy.join("XHL-Vein-Mining.log"), "written by the plugin").unwrap();
+        p.mods.xhl[0].enabled = false;
+        let (rep, events) = crate::durable::recording(|| place(&dirs, &p, &game).unwrap());
+        assert!(!copy.exists() && rep.removed == ["xhl:xhl-vein-mining"], "{rep:?}");
+        let receipts = placements_file(&game);
+        let removed_at = events.iter().rposition(|e| matches!(e, crate::durable::Event::Journal { path, .. } if *path == receipts))
+            .unwrap_or_else(|| panic!("no receipt write: {events:?}"));
+        let (stash, kept) = (stash_dir(&game, ModKind::Xhl, "xhl-vein-mining"), kept_dir(&game, ModKind::Xhl, "xhl-vein-mining"));
+        let before = |e: crate::durable::Event| events.iter().position(|x| *x == e).is_some_and(|i| i < removed_at);
+        for file in [stash.join("config.txt"), stash.join(XHL_PLUGIN_INI), kept.join("XHL-Vein-Mining.log")] {
+            assert!(before(crate::durable::Event::File(file.clone())), "{} is not flushed before the copy goes: {events:?}", file.display());
+        }
+        for dir in [&stash, &kept, &stash.parent().unwrap().to_path_buf(), &kept.parent().unwrap().to_path_buf()] {
+            assert!(before(crate::durable::Event::Dir(dir.clone())), "{}'s names are not flushed before the copy goes: {events:?}", dir.display());
+        }
+    }
+
+    /// Codex review 2: an update stopped after the new copy was published and before its receipt was written. The new
+    /// copy holds the player's native-plugin.ini and config.txt, carried over as their settings. Recovery reads the
+    /// copy as placement does, so it takes the published copy for Kiln's: it stays Kiln's, and switched off it goes.
+    #[test]
+    fn an_update_stopped_after_publishing_an_edited_plugin_ini_is_recovered_as_kilns_copy() {
+        let tmp = crate::library::TempDir::new(&std::env::temp_dir(), "xhl-recover-ini").unwrap();
+        let (dirs, game, mut p) = xhl_placed(tmp.path());
+        let copy = game.join("mods/XHL-Vein-Mining");
+        let mine = "[Plugin]\nEnabled=1\nDll=XHL-Vein-Mining.dll\nRadius=3\n";
+        std::fs::write(copy.join(XHL_PLUGIN_INI), mine).unwrap();
+        std::fs::write(copy.join("config.txt"), "radiusMeters=12\n").unwrap();
+        p.mods.xhl[0] = xhl_plugin_mod(&dirs, tmp.path(), b"v2");
+        crate::kept::hooks::STOP_AT.with(|s| s.set(Some(crate::kept::Step::Published)));
+        let stopped = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { let _ = place(&dirs, &p, &game); })).is_err();
+        crate::kept::hooks::STOP_AT.with(|s| s.set(None));
+        assert!(stopped, "the update did not reach Published");
+        let rep = place(&dirs, &p, &game).unwrap();
+        assert!(rep.kept == ["xhl:xhl-vein-mining"] && rep.retained.is_empty() && rep.own.is_empty() && rep.placed.is_empty(), "{rep:?}");
+        assert_eq!(marker(&copy).map(|m| m.hash), Some(p.mods.xhl[0].hash.clone()), "the published copy");
+        assert_eq!(std::fs::read_to_string(copy.join(XHL_PLUGIN_INI)).unwrap(), mine);
+        p.mods.xhl[0].enabled = false;
+        let rep = place(&dirs, &p, &game).unwrap();
+        assert!(!copy.exists() && rep.retained.is_empty(), "switched off, XHL-Core must not find it: {rep:?}");
+        assert_eq!(std::fs::read_to_string(stash_dir(&game, ModKind::Xhl, "xhl-vein-mining").join(XHL_PLUGIN_INI)).unwrap(), mine);
+    }
+
+    /// Codex review 5: an edited native-plugin.ini is a setting only while it names a DLL Kiln placed, unchanged. One
+    /// that points XHL-Core at an EML package's manifest or Lua (files Kiln placed, unchanged) is code.
+    #[test]
+    fn an_edited_plugin_ini_is_a_setting_only_while_it_names_kilns_dll() {
+        let tmp = crate::library::TempDir::new(&std::env::temp_dir(), "xhl-ini-dll").unwrap();
+        let dst = tmp.path().join("XHL-A");
+        std::fs::create_dir_all(dst.join("src")).unwrap();
+        std::fs::write(dst.join("mod.json"), r#"{"id":"xhl-a","version":"1.0.0"}"#).unwrap();
+        std::fs::write(dst.join("src/mod.lua"), "return {}").unwrap();
+        std::fs::write(dst.join("XHL-A.dll"), crate::pe::build_test_dll(&["XhlPluginEntry"], b"a")).unwrap();
+        std::fs::write(dst.join(XHL_PLUGIN_INI), "[Plugin]\nDll=XHL-A.dll\n").unwrap();
+        let receipt = Placement { path: dst.clone(), marker: Marker { format: 1, kind: ModKind::Eml, id: "xhl-a".into(),
+            version: "1.0.0".into(), hash: "kdh1:00".into() }, files: placement_files(&dst, ModKind::Eml).unwrap(), extension: None, game_folder: true };
+        for (ini, setting) in [("[Plugin]\nDll=XHL-A.dll\nEnabled=0\n", true), ("[Plugin]\nDll=mod.json\n", false),
+                               ("[Plugin]\nDll=src/mod.lua\n", false), ("[Plugin]\nDll=Other.dll\n", false)] {
+            std::fs::write(dst.join(XHL_PLUGIN_INI), ini).unwrap();
+            let now = placement_files(&dst, ModKind::Eml).unwrap();
+            assert_eq!(plugin_ini_is_setting(&dst, XHL_PLUGIN_INI, &receipt, &now), setting, "{ini:?}");
+        }
+    }
+
     #[test]
     fn the_dll_an_xhl_plugin_ini_names() {
         let utf16 = |s: &str| [0xFFu8, 0xFE].into_iter().chain(s.encode_utf16().flat_map(u16::to_le_bytes)).collect::<Vec<u8>>();
