@@ -38,8 +38,19 @@ void owner_gone(KilnOwner owner);
 void feature_off(std::string_view name);
 void service_published(KilnOwner owner, std::string_view name, uint32_t version);
 void service_dll(const std::filesystem::path& file, std::string_view status, const std::string& error);
+void service_internal_refused(const std::filesystem::path& file, const std::string& text);
 bool flush();  // a last write of capabilities.json when something is dirty; waits about 2 s at most
 }  // namespace kiln::caps
+
+#include "kiln_version.h"
+// The build metadata native/cmake/kiln_build_stamp.sh writes for every build ("+<yyyymmdd>.<git>", or "+nogit.<nonce>"
+// in a source export without git); absent, no DLL gets Kiln-internal access (build_stamp() below).
+#if __has_include("kiln_build.h")
+#include "kiln_build.h"
+#endif
+#ifndef KILN_BUILD
+#define KILN_BUILD ""
+#endif
 
 namespace kiln {
 namespace {
@@ -129,6 +140,7 @@ KilnResult KILN_CALL api_constant(KilnStr name, int64_t* out) {
     return sigdb::constant(sv(name), out) ? KILN_OK : KILN_ERR_NOT_FOUND;
 }
 
+// ---- service lookup (begin)
 struct Published {
     KilnOwner owner;
     std::string name;
@@ -137,9 +149,61 @@ struct Published {
 std::mutex g_published_mutex;
 std::vector<Published> g_published;
 
-const void* KILN_CALL api_service(KilnStr name, uint32_t min_version) {
+// Kiln-internal tables (docs/kiln/services/README.md "Kiln-internal tables"): a name under "kiln.internal." is
+// published and resolved only through the KilnApi the service loader hands the DLLs of kiln/services (Kiln's own, same
+// build), and published only for an owner that loader created for one. Plugins, managed mods and foreign DLLs get the
+// other KilnApi, which neither publishes nor resolves such a name. Not a sandbox: it keeps a table that hands out game
+// addresses or lock primitives out of every other caller's reach.
+constexpr std::string_view kInternalPrefix = "kiln.internal.";
+bool internal_name(std::string_view name) { return name.size() > kInternalPrefix.size() && name.starts_with(kInternalPrefix); }
+std::vector<KilnOwner> g_service_owners;  // under g_published_mutex: owners load_one created for kiln/services DLLs
+
+// This core's build identity, the stamp every kiln_service/kiln_plugin DLL of the same build exports as
+// kiln_build_stamp() (native/cmake/kiln_build_stamp.cpp): "<version><build metadata>", e.g.
+// "0.2.0-dev+20261115.ddb9bd4". Without build metadata it is "": a matching version alone is not a build, so such a
+// core grants no DLL internal access (fail closed).
+std::string build_stamp() {
+    constexpr std::string_view build = KILN_BUILD;
+    return build.empty() ? std::string() : std::string(KILN_VERSION).append(build);
+}
+
+// A kiln/services DLL gets internal access only when it was built with this core: its kiln_build_stamp() equals the
+// core's build identity. It keeps a stale or foreign service DLL out; it is no defence against native code already in
+// the process.
+bool service_stamp_trusted(std::string_view dll_stamp) {
+    const std::string core = build_stamp();
+    return !core.empty() && dll_stamp == core;
+}
+
+void service_owner_add(KilnOwner owner) {
+    std::lock_guard lock(g_published_mutex);
+    g_service_owners.push_back(owner);
+}
+
+// load_one's choice for a kiln/services DLL: a service owner (and the services' KilnApi) only for a DLL of this very
+// build; every other DLL loads with the plugins' KilnApi and no internal access. `why` says which case refused.
+bool grant_internal(KilnOwner owner, std::string_view dll_stamp, std::string& why) {
+    const std::string core = build_stamp();
+    if (core.empty()) {
+        why = "this core was built without build metadata (no KILN_BUILD), so no service DLL gets Kiln-internal tables";
+        return false;
+    }
+    if (dll_stamp != core) {
+        why = "build stamp '" + (dll_stamp.empty() ? std::string("none") : std::string(dll_stamp)) + "' is not this core's '" +
+              core + "' (a stale or foreign service DLL)";
+        return false;
+    }
+    service_owner_add(owner);
+    return true;
+}
+
+const void* lookup_service(KilnStr name, uint32_t min_version, bool services) {
+    // The core's own original-code table (compat.h) predates the internal-name rule and is resolved by the shroudtopia
+    // plugin through the plugins' KilnApi: it stays reachable from every view, ahead of any published table.
     if (sv(name) == compat::kOriginalCodeService)
         return min_version <= compat::kOriginalCodeVersion ? compat::original_code_table() : nullptr;
+    if (internal_name(sv(name)) && !services) return nullptr;
+
     // kiln.profile works in safe idle too: early native mods and the managed host read it to find their mods/configs.
     if (sv(name) == KILN_PROFILE_SERVICE) return min_version <= KILN_PROFILE_VERSION ? profile::table() : nullptr;
     // kiln.progress too: the early plugins show their long work with it, before hooks are decided (and in safe idle).
@@ -160,21 +224,54 @@ const void* KILN_CALL api_service(KilnStr name, uint32_t min_version) {
     return nullptr;
 }
 
-KilnResult KILN_CALL api_register_service(KilnOwner owner, KilnStr name, const void* table) {
+const void* KILN_CALL api_service(KilnStr name, uint32_t min_version) { return lookup_service(name, min_version, false); }
+const void* KILN_CALL api_service_services(KilnStr name, uint32_t min_version) {
+    return lookup_service(name, min_version, true);
+}
+
+// Registration is split like lookup. The owner is whatever the caller passes (owner IDs are small sequential integers),
+// so it cannot tell a service from a plugin; the KilnApi the call came through can. The plugins' register_service
+// refuses every internal name, whatever the owner; the services' one also requires an owner load_one made for a
+// kiln/services DLL.
+KilnResult register_published(KilnOwner owner, KilnStr name, const void* table, bool services) {
     if (!table || !name.ptr || name.len == 0) return KILN_ERR_INVALID_ARGUMENT;
     const auto* h = static_cast<const KilnServiceHeader*>(table);
     if (h->size < sizeof(KilnServiceHeader)) return KILN_ERR_INVALID_ARGUMENT;
     {
         std::lock_guard lock(g_published_mutex);
+        if (internal_name(sv(name)) &&
+            (!services ||
+             std::find(g_service_owners.begin(), g_service_owners.end(), owner) == g_service_owners.end())) {
+            KLOG_W("service %.*s: a Kiln-internal name, refused for %s (only Kiln's own services publish one)",
+                   static_cast<int>(name.len), name.ptr, reg::owner_name(owner).c_str());
+            return KILN_ERR_INVALID_ARGUMENT;
+        }
         for (const auto& p : g_published)
             if (p.name == sv(name)) return KILN_ERR_INVALID_ARGUMENT;
         g_published.push_back({owner, std::string(sv(name)), table});
     }
     KLOG_I("service %.*s v%u published by %s", static_cast<int>(name.len), name.ptr, h->version,
            reg::owner_name(owner).c_str());
-    caps::service_published(owner, sv(name), h->version);  // unlocked: its subscribers may call api_service
+    // Kiln-internal tables stay out of the public capability rows and capabilities.json.
+    if (!internal_name(sv(name))) caps::service_published(owner, sv(name), h->version);  // unlocked: subscribers may call api_service
     return KILN_OK;
 }
+
+KilnResult KILN_CALL api_register_service(KilnOwner owner, KilnStr name, const void* table) {
+    return register_published(owner, name, table, false);
+}
+KilnResult KILN_CALL api_register_service_services(KilnOwner owner, KilnStr name, const void* table) {
+    return register_published(owner, name, table, true);
+}
+
+// The services' KilnApi: the plugins' one with the lookup and the registration that also take Kiln-internal tables.
+KilnApi services_api_from(const KilnApi& plugins) {
+    KilnApi services = plugins;
+    services.service = &api_service_services;
+    services.register_service = &api_register_service_services;
+    return services;
+}
+// ---- service lookup (end)
 
 uintptr_t KILN_CALL api_server_world() { return g_hooks ? worldinfo::server_world() : 0; }
 uintptr_t KILN_CALL api_singleton(uintptr_t world, KilnStr name) {
@@ -242,6 +339,8 @@ const KilnApi g_api = {
     &api_session,
 };
 
+const KilnApi g_service_api = services_api_from(g_api);
+
 }  // namespace
 
 const KilnApi* api() { return &g_api; }
@@ -285,6 +384,29 @@ void record(const char* kind, const std::filesystem::path& file, const char* sta
     g_plugin_records.push_back(std::move(r));
 }
 
+// ---- service stamp (begin)
+// A DLL's kiln_build_stamp() string (empty without the export), called and copied under the fault guard.
+struct StampCall {
+    const char*(KILN_CALL* fn)(void);
+    const char* text;
+};
+void KILN_CALL call_stamp(void* user) {
+    auto* c = static_cast<StampCall*>(user);
+    c->text = c->fn();
+}
+std::string dll_build_stamp(HMODULE h) {
+    StampCall call{reinterpret_cast<const char*(KILN_CALL*)(void)>(GetProcAddress(h, "kiln_build_stamp")), nullptr};
+    unsigned long code = 0;
+    if (!call.fn || !guard::task(&call_stamp, &call, &code) || !call.text) return {};
+    char text[129]{};
+    for (size_t i = 0; i < sizeof text - 1; ++i) {
+        if (!guard::copy(&text[i], reinterpret_cast<uintptr_t>(call.text + i), 1)) return {};
+        if (!text[i]) break;
+    }
+    return text;
+}
+// ---- service stamp (end)
+
 void load_one(const std::filesystem::path& file, const char* kind) {
     const std::string name = to_utf8(file.filename().wstring());
     const std::wstring key = lower_path(file);
@@ -311,11 +433,23 @@ void load_one(const std::filesystem::path& file, const char* kind) {
         return;
     }
     const KilnOwner owner = reg::owner_create(std::string(kind) + ":" + name);
+    // kiln/services DLLs of this very build are Kiln's own: their owner may publish Kiln-internal tables and their
+    // KilnApi resolves them. Another build's DLL loads as before, without that access.
+    bool service = false;
+    if (std::string_view(kind) == "service") {
+        std::string why;
+        service = grant_internal(owner, dll_build_stamp(h), why);
+        if (!service) {
+            const std::string text = name + ": " + why + ": loaded without Kiln-internal tables";
+            KLOG_W("service %s", text.c_str());
+            caps::service_internal_refused(file, text);
+        }
+    }
     KilnPluginInfo info{};
     info.size = sizeof info;
     KilnResult rc = KILN_ERR_INTERNAL;
     unsigned long code = 0;
-    if (!guard::plugin_main(main, &g_api, owner, &info, &rc, &code)) {
+    if (!guard::plugin_main(main, service ? &g_service_api : &g_api, owner, &info, &rc, &code)) {
         KLOG_E("%s %s: kiln_plugin_main faulted (0x%08lx); its registrations were revoked", kind, name.c_str(), code);
         char text[64];
         std::snprintf(text, sizeof text, "kiln_plugin_main faulted (0x%08lx)", code);

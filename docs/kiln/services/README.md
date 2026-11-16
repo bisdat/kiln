@@ -90,6 +90,7 @@ row above and grows its own page.
   game's call site with `caller()` (use it instead of `_ReturnAddress()`), and lists every hook in
   `state/hooks.json`. See [hooks.md](hooks.md).
 - Other services: look them up in `info->on_ready` (`api->service("kiln.world", 1)`), not in `kiln_plugin_main`.
+  `kiln.internal.*` tables resolve only for Kiln's own services ([Kiln-internal tables](#kiln-internal-tables)).
 - Capabilities: the core gives your service a row (`kiln.<svc>`) and one per sigdb feature. Report what else it can or
   cannot do through `kiln.caps` (`<svc>.<thing>`; [caps.md](caps.md)), and a session-dependent row as pending before
   the mods load.
@@ -100,6 +101,38 @@ row above and grows its own page.
 - Names you define in sigdb are prefixed with your service: symbols `items/InventoryCommit`, constants
   `items/tx.size`. Unprefixed names belong to the core file (`SimStep`, `world.storage`, `GetEntityTransform`, ...)
   and may be used, never redefined.
+
+## Kiln-internal tables
+
+A service name that starts with `kiln.internal.` is Kiln-internal:
+
+- only an owner the core created for a DLL loaded from `kiln/services` **of this very build** may publish one: every DLL
+  built with `kiln_service`/`kiln_plugin` exports `kiln_build_stamp()` (`native/cmake/kiln_build_stamp.cpp`, the
+  version plus the build metadata), and the core gives internal access only when it equals its own build identity. The
+  build metadata comes from `native/cmake/kiln_build_stamp.sh`, which CMake runs at configure time and before every
+  build of a stamped target (`native/build.sh` builds through it): `+<yyyymmdd>.<commit>` in a git work tree, or
+  `+nogit.<nonce>` in a source export without git (one random nonce per build directory, shared by that build's core
+  and DLLs). A core without build metadata grants no DLL internal access (a matching version alone is not a build). A
+  stale or foreign DLL in `kiln/services`, or any DLL under such a core, loads as before, without internal access, with
+  a warning in kiln.log and the row `kiln.<svc>.internal` unavailable (`service-older`) saying why;
+- `KilnApi.register_service` publishes it and `KilnApi.service` resolves it only through the `KilnApi` the core hands to
+  those DLLs (whose `register_service` also checks the owner). Plugins, managed mods, early plugins and foreign DLLs get
+  the other `KilnApi`: its `register_service` refuses every `kiln.internal.*` name with `KILN_ERR_INVALID_ARGUMENT` and
+  a warning, whatever owner it is given (owner IDs are guessable), and its `service` answers NULL for one;
+- its header lives with its owner (a service's `native/services/<svc>/include/`, or the core's `native/core/src/`),
+  never in `native/core/abi`, `kiln-abi` or the SDK, and it may change between Kiln builds: consumers check
+  `header.version` for an exact match and `header.size` for each member they call, and on a mismatch log it and report
+  their own row unavailable with that reason;
+- Kiln-internal tables get no public capability row and do not appear in `capabilities.json`.
+
+This is a reach rule, not a sandbox: it keeps tables that hand out game addresses or Kiln's own lock primitives away from
+plugins and from stale or foreign service DLLs. It is no defence against arbitrary native code already in the process,
+which can read memory anyway.
+
+```sh
+KILN_OUT=/path/to/build native/core/tests/test-service-access.sh   # the kiln.internal.* rule (real api.cpp block, stamped and without build metadata)
+KILN_OUT=/path/to/build native/core/tests/test-build-stamp.sh      # the build metadata script (git, overrides, no git, nested export)
+```
 
 ## Managed rules
 - Public API as static classes in namespace `Kiln` (e.g. `Kiln.Teleport`), no pointers in public signatures.

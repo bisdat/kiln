@@ -30,8 +30,9 @@
 #include "services/hooks_internal.h"
 #include "services/service.h"
 
-// The build stamp ("+20261106.8d20598") native/build.sh writes; empty in a build without it. Only this file includes
-// it, so a new commit rebuilds only this file.
+// The build stamp ("+20261106.8d20598", or "+nogit.<nonce>") native/cmake/kiln_build_stamp.sh writes; empty in a
+// build without it. This file, api.cpp (the build identity for Kiln-internal access) and every stamped DLL's
+// native/cmake/kiln_build_stamp.cpp include it, so a new commit rebuilds only those.
 #if __has_include("kiln_build.h")
 #include "kiln_build.h"
 #endif

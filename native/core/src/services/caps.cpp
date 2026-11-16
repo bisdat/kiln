@@ -951,6 +951,26 @@ void service_dll(const std::filesystem::path& file, std::string_view status, con
     }
 }
 
+// load_one: a kiln/services DLL of another build loads without Kiln-internal tables; row "<its row>.internal" says so.
+void service_internal_refused(const std::filesystem::path& file, const std::string& text) {
+    const std::string name = dll_row_name(file);
+    if (name.empty()) return;
+    try {
+        op([&](std::vector<Event>& ev) {
+            Report r;
+            r.kind = kDll;
+            r.state = KILN_CAP_UNAVAILABLE;
+            r.reason = KILN_CAP_REASON_SERVICE_OLDER;
+            r.text = cut(text, KILN_CAP_TEXT_MAX);
+            r.source = "core";
+            g_dll_failed[name + ".internal"] = r;
+            set_core_locked(name + ".internal", kDll, r.state, r.reason, r.text, r.source, 0, ev);
+            return 0;
+        });
+    } catch (...) {
+    }
+}
+
 }  // namespace kiln::caps
 
 KILN_SERVICE(caps, KILN_CAPS_SERVICE, KILN_CAPS_VERSION, &kiln::caps::kTable, nullptr);
