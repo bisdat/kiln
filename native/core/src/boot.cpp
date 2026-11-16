@@ -562,14 +562,16 @@ void boot() {
     progress_state::step("native-early");
     compat::apply_early();  // rules that switch a listed mod off: before anything reads the profile
     native_mods::discover(verified);
-    native_mods::run_early();
     // Another loader that looks for game functions by their bytes on its own thread (shroudlink's client addon) gets to
-    // finish looking before Kiln hooks anything: a Kiln hook over a prologue would hide that function from it.
+    // finish looking before Kiln hooks anything and before the early native mods start: a hook over a prologue, Kiln's
+    // or an early native mod's (Auto Doors 1.1.0 hooks the text function at rva 0xaff9f0 that the addon's native UI
+    // scans for), would hide that function from it.
     if (verified || config().policy_any) {
         progress_state::step("native-early", "Waiting for other loaders' code scans");
         foreign::wait_for_scanners(g_boot_info.addon_log_size);
-        if (foreign::waits().empty()) progress_state::step("native-early", "Loading early native mods");  // none to wait for
+        progress_state::step("native-early", "Loading early native mods");
     }
+    native_mods::run_early();
     // kiln.hooks for early plugins that hook game code (kiln-shroudforge's native runtime does it while it initialises);
     // taken away again below when this start is safe idle.
     const bool early_hooks = (verified || config().policy_any) && hooks::serve_early();
