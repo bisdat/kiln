@@ -1089,3 +1089,27 @@ fn shroudlink_addon_finding_is_one_info_and_client_only() {
     fx.w("kiln/chain.ini", "[chain]\nchain\\renamed.dll\n");
     assert!(!build(&input).findings.iter().any(|f| f.id == "shroudlink-client-addon"));
 }
+
+/// Inbox 38 (sosmic, 16 Nov 2026): an EML mod the launcher had on was listed "off" in the summary's Profile section.
+/// The game's profile had it `enabled: false` with an `emlRuntimeBlocked` reason (ShroudForge's runtime was switched
+/// off at activation). The section says it is on and why its data was not applied; a mod the player switched off
+/// stays "off".
+#[test]
+fn a_runtime_blocked_eml_mod_reads_on_not_applied() {
+    let f = Fx::healthy("eml-blocked");
+    let why = "needs ShroudForge's runtime, which the KILN_SHROUDFORGE=0 environment variable switches off";
+    f.w("kiln/profile.json", serde_json::to_vec(&serde_json::json!({
+        "format": 1, "id": "my-mods", "name": "My mods", "generation": 3, "dropins": false,
+        "configDir": r"Z:\var\home\frostling\.local\share\kiln\profiles\my-mods\config",
+        "emlRuntimeBlocked": {"ammo-slots": why},
+        "mods": {"eml": [
+            {"id": "ammo-slots", "version": "0.8.2", "path": r"Z:\lib\eml\ammo-slots", "enabled": false},
+            {"id": "other-eml", "version": "1.0.0", "path": r"Z:\lib\eml\other-eml", "enabled": false},
+        ]},
+    })).unwrap());
+    let r = build(&f.input());
+    let line = r.summary.lines().find(|l| l.contains("ammo-slots") && l.contains("0.8.2")).unwrap_or_default();
+    assert!(line.contains(&format!("on, not applied: {why}")), "{}", r.summary);
+    let other = r.summary.lines().find(|l| l.contains("other-eml")).unwrap_or_default();
+    assert!(other.trim_end().ends_with("off"), "{}", r.summary);
+}
