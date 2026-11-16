@@ -92,20 +92,40 @@ int main() {
         check(c.caught && !c.capped && c.ms >= 290, "the next world's saves wait with their own limit again (uncap)");
     }
 
-    // Numbers wrap after 2^64 stagings (the managed side skips 0): still ordered.
+    // A shutdown line delivered late (review 2): its deadline counts from when the game logged it; one already past
+    // applies at once.
+    {
+        ksaves::StageBarrier p;
+        p.issued(1);
+        p.cap(std::chrono::steady_clock::now() - 1000ms);
+        const auto t0 = std::chrono::steady_clock::now();
+        const auto c = p.wait(30000ms);
+        check(c.needed && !c.caught && c.capped && std::chrono::steady_clock::now() - t0 < 100ms,
+              "a shutdown deadline already past ends the wait at once");
+    }
+
+    // Numbers wrap after 2^64 stagings (the managed side skips 0): still ordered. Serial numbers only move forward by less
+    // than 2^63, so the counters walk there in quarter steps (review 2: a jump from 0 to near the end reads as backwards).
     {
         ksaves::StageBarrier r;
         const uint64_t max = UINT64_MAX;
-        r.issued(max - 1);
-        r.done(max - 1);
+        for (const uint64_t n : {uint64_t{1} << 62, uint64_t{2} << 62, uint64_t{3} << 62, max - 1}) {
+            r.issued(n);
+            r.done(n);
+        }
+        check(r.issued_value() == max - 1 && r.done_value() == max - 1, "the counters stand just before the wrap");
         r.issued(max);
-        r.issued(1);  // the next after max
+        r.issued(1);  // the next after max (0 is skipped)
+        check(r.issued_value() == 1, "the staging after the wrap is the newest");
         auto c = r.wait(50ms);
-        check(c.needed && !c.caught && c.target == 1, "a staging issued after the wrap is waited for");
+        check(c.needed && !c.caught && c.target == 1 && c.reached == max - 1, "a staging issued after the wrap is waited for");
         r.done(max);
+        check(r.done_value() == max, "the writer's staging before the wrap counts");
         r.done(1);
         c = r.wait(1000ms);
         check(c.caught && !c.needed && r.done_value() == 1, "it counts as done once the writer reports it, across the wrap");
+        r.done(max);
+        check(r.done_value() == 1, "an older number after the wrap does not move done back");
     }
     return failures ? 1 : 0;
 }
