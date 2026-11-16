@@ -4,12 +4,14 @@
 //
 // Three observe-only hooks (each calls the original first or last and never changes its arguments or result):
 //  - requestServerSave(inst)        server thread: who asked (return address), whether the game accepted it
-//  - save2WriteWorld(save2, user)   Save2Thread: the world file is complete (result byte, slot, GUID, revision)
+//  - save2WriteWorld(save2, user)   Save2Thread: the world file is complete (result byte, slot, GUID, revision); before
+//                                   the original it waits (bounded) for Kiln.Saves' writer (stage_barrier.h)
 //  - loadSavegameStep(out, inst)    server thread: the world finished loading (once, on the first result 0)
 // The managed Kiln.Saves registers a pump; it is called synchronously for SAVING (inside the game's request, before
 // the game snapshots the world in its next instance tick) and at the start of a step for everything else.
 #include <windows.h>
 #include "snapshot_stage.h"
+#include "stage_barrier.h"
 #include "new_world.h"
 #include <intrin.h>
 #include <shlobj.h>
@@ -35,6 +37,7 @@
 
 // The managed mirror (managed/services/Kiln.Saves/Native.cs) relies on these sizes.
 static_assert(sizeof(KilnSaveEvent) == 88 && sizeof(KilnSavesStatus) == 128);
+static_assert(sizeof(KilnSavesApi) == 64, "kiln.saves v1 with stage_progress (0.2.0-dev.30): Native.cs TableV2");
 
 namespace {
 
@@ -265,6 +268,12 @@ uint32_t g_current_reason = 0;
 uint64_t g_autosaves_logged = 0;
 ksaves::SnapshotStage g_snapshot_stage;
 std::atomic<bool> g_can_snapshot_stage{false};
+// Kiln.Saves' writer and the game's world write (stage_barrier.h, kiln_saves.h stage_progress): the Save2Thread waits up
+// to this long for the pending manifest before it writes a world file; a shutdown save less, because the game's shutdown
+// gives its last save 10 s in all (docs/re/saves.md, serverShutdown).
+ksaves::StageBarrier g_stage;
+constexpr auto kStageWait = std::chrono::milliseconds(30000);
+constexpr auto kStageWaitShutdown = std::chrono::milliseconds(6000);
 
 std::atomic<uintptr_t> g_inst{0};
 std::atomic<uintptr_t> g_save2{0};
@@ -421,6 +430,15 @@ void __fastcall hk_request(uintptr_t inst) {
 }
 
 void __fastcall hk_write(uintptr_t save2, uintptr_t user) {
+    // The world file must not reach the disk before Kiln.Saves' writer has this save's pending manifest there: the tick
+    // thread no longer writes it itself (stage_barrier.h). This thread is the game's Save2Thread; the world steps on.
+    uint32_t writing_reason;
+    {
+        std::lock_guard lk(g_mu);
+        writing_reason = g_current_reason;
+    }
+    const ksaves::StageBarrier::Wait staged =
+        g_stage.wait(writing_reason == KILN_SAVE_REASON_SHUTDOWN ? kStageWaitShutdown : kStageWait);
     g_h_write.call(save2, user);
     g_save2.store(save2);
     uint8_t result = 0xFF;
@@ -471,6 +489,21 @@ void __fastcall hk_write(uintptr_t save2, uintptr_t user) {
             ++g_st.failed;
         }
         n_auto = reason == KILN_SAVE_REASON_AUTOSAVE ? g_autosaves_logged : 0;
+    }
+    if (staged.needed) {
+        const auto t = static_cast<unsigned long long>(staged.target), r = static_cast<unsigned long long>(staged.reached);
+        if (staged.off)
+            logf(KILN_LOG_WARN, "saves: the world write of revision %u did not wait for Kiln.Saves' writer, which is still "
+                 "behind since an earlier wait ran out (staging %llu of %llu on disk); a crash before it catches up loads "
+                 "an older generation of mod data", rev, r, t);
+        else if (!staged.caught)
+            logf(KILN_LOG_WARN, "saves: the world write of revision %u waited %.0f ms for Kiln.Saves' writer and went ahead "
+                 "(staging %llu of %llu on disk); a crash before the writer finishes loads an older generation of mod data",
+                 rev, staged.ms, r, t);
+        else
+            logf(staged.ms > 250 ? KILN_LOG_INFO : KILN_LOG_DEBUG, "saves: the world write of revision %u waited %.1f ms "
+                 "for Kiln.Saves' writer to put staging %llu on disk (on the Save2Thread; the server's steps went on)",
+                 rev, staged.ms, t);
     }
     if (result != 0)
         logf(KILN_LOG_WARN, "saves: world write #%llu FAILED (result %u, %s save #%llu); the game retries up to 4 times",
@@ -801,7 +834,8 @@ KilnResult KILN_CALL t_status(KilnSavesStatus* out) {
     out->size = sizeof(KilnSavesStatus);
     out->features = (g_can_snapshot_stage.load() ? KILN_SAVES_CAN_SNAPSHOT_STAGE : 0u) | (g_can_request ? KILN_SAVES_CAN_REQUEST : 0u) | (g_can_write ? KILN_SAVES_CAN_WRITE : 0u) |
                     (g_can_load ? KILN_SAVES_CAN_LOAD : 0u) | (g_can_reason ? KILN_SAVES_CAN_REASON : 0u) |
-                    (g_client ? KILN_SAVES_CLIENT_HOSTED : 0u);
+                    (g_client ? KILN_SAVES_CLIENT_HOSTED : 0u) |
+                    (g_can_write ? KILN_SAVES_CAN_STAGE_BARRIER : 0u);  // the barrier runs in the world write's hook
     out->autosave_interval_ns = g_autosave_ns;
     out->pending_request = g_pending_reason.load() ? 1 : 0;
     return KILN_OK;
@@ -863,8 +897,14 @@ KilnResult KILN_CALL t_set_pump_interval(uint32_t steps) {
     return KILN_OK;
 }
 
+KilnResult KILN_CALL t_stage_progress(uint64_t issued, uint64_t done) {
+    if (issued) g_stage.issued(issued);
+    if (done) g_stage.done(done);
+    return KILN_OK;
+}
+
 const KilnSavesApi kTable = {{sizeof(KilnSavesApi), KILN_SAVES_VERSION}, &t_status, &t_request, &t_next_event,
-                             &t_set_pump, &t_path, &t_set_pump_interval};
+                             &t_set_pump, &t_path, &t_set_pump_interval, &t_stage_progress};
 
 bool sym(const char* name, uintptr_t* out) { return g_api->symbol(KilnStr{name, std::strlen(name)}, out) == KILN_OK; }
 bool cst(const char* name, int64_t* out) { return g_api->constant(KilnStr{name, std::strlen(name)}, out) == KILN_OK; }
