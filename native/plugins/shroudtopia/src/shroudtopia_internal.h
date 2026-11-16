@@ -7,6 +7,7 @@
 
 #include <vector>
 
+#undef WIN32_LEAN_AND_MEAN  // Shroudtopia's header (kept as upstream has it) defines it again; windows.h is in already
 #include <shroudtopia/shroudtopia.h>
 
 #include "../../compat/compat.h"
