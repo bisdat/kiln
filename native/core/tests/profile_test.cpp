@@ -155,6 +155,20 @@ int main(int argc, char** argv) try {
     p = profile(); p["mods"]["future-engine"] = json::array();
     g_state = State{}; parse(p.dump());
     if (!warned_about("mods.future-engine")) throw std::runtime_error("a really unknown kind is no longer warned about");
+    // inbox 24: the launcher removes the game-folder copy of a mod the profile switched off, so the entry names a folder
+    // that is not there. That is no problem: no "is missing; skipped" warning and no missing folder in boot.json. One
+    // that is on still warns.
+    for (const auto& [kind, path] : {std::pair{"eml", "../mods/Switched-Off-Mod"}, std::pair{"kiln", "profiles/test/Switched-Off-Mod"}}) {
+        kiln::g_logged.clear();
+        p = profile(); p["mods"][kind] = {{{"id", "safe"}, {"path", path}, {"enabled", false}}};
+        g_state = State{}; parse(p.dump());
+        if (warned_about("Switched-Off-Mod") || !g_state.missing.empty())
+            throw std::runtime_error(std::string(kind) + ": a switched-off mod's removed folder is warned about as missing");
+        p["mods"][kind][0]["enabled"] = true;
+        g_state = State{}; parse(p.dump());
+        if (!warned_about("Switched-Off-Mod") || g_state.missing.size() != 1)
+            throw std::runtime_error(std::string(kind) + ": an enabled mod's missing folder is no longer warned about");
+    }
     // One table of folder names for the three validators of ../mods/<folder> (kiln-manage, this parser, the schema).
     std::ifstream names_file(argv[2]);
     if (!names_file) throw std::runtime_error(std::string("cannot read ") + argv[2]);
