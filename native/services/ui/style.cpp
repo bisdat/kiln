@@ -198,8 +198,11 @@ struct BlobArray {
     uint32_t count;
 };
 
-// The default language group's regular font of the game's keen::UiFontResource (docs/re/game-ui.md).
+// The default language group's regular font of the game's keen::UiFontResource (docs/re/game-ui.md). On its own thread,
+// started by the first window in the game's look (the mod manager): it reads two blobs of about 85 KB from the game's
+// containers. The log line says how long that took (24.6 s on a hard disk before blob_read read only the blob's bytes).
 void load_game_font() {
+    const uint64_t started = now_ms();
     const auto* a = static_cast<const KilnAssetsApi*>(g_api->service(KilnStr{KILN_ASSETS_SERVICE, sizeof(KILN_ASSETS_SERVICE) - 1}, 1));
     auto fail = [](const char* why) {
         g_font_note = why;
@@ -270,8 +273,9 @@ void load_game_font() {
     if (bold_index != UINT32_MAX && bold_index != font_index) g_bold_bytes = ttf_of(bold_index);
     g_font_bytes.swap(ttf);
     char b[128];
-    std::snprintf(b, sizeof b, "font %u of %u, %zu bytes; bold %s", font_index, fonts.count, g_font_bytes.size(),
-                  g_bold_bytes.empty() ? "none" : std::to_string(bold_index).c_str());
+    std::snprintf(b, sizeof b, "font %u of %u, %zu bytes; bold %s; read in %llu ms", font_index, fonts.count, g_font_bytes.size(),
+                  g_bold_bytes.empty() ? "none" : std::to_string(bold_index).c_str(),
+                  static_cast<unsigned long long>(now_ms() - started));
     g_font_note = b;
     g_font_state = 2;
 }
