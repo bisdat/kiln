@@ -1,5 +1,5 @@
 kiln_service(items items.cpp engine.cpp pide.cpp moves.cpp xfer.cpp names.cpp stamps.cpp instances.cpp equip.cpp wear.cpp toolwear.cpp toolwear_table.cpp
-             setsnap.cpp sets.cpp setexec.cpp)
+             setsnap.cpp sets.cpp setexec.cpp gems.cpp)
 
 # Host tests (no game): the move / ledger / rule / name logic, and the transfer hooks against a fake inventory world.
 # Run under Wine: native/services/items/tests/run.sh
@@ -43,3 +43,6 @@ target_include_directories(items-setexec-test PRIVATE "${CMAKE_SOURCE_DIR}/core/
 set_target_properties(items-setexec-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/items-tests")
 add_executable(items-setorder-test tests/setorder_test.cpp)
 set_target_properties(items-setorder-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/items-tests")
+add_executable(items-gems-test tests/gems_test.cpp)
+target_include_directories(items-gems-test PRIVATE "${CMAKE_SOURCE_DIR}/core/abi")
+set_target_properties(items-gems-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/items-tests")

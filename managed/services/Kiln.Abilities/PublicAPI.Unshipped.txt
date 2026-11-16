@@ -285,3 +285,115 @@ static Kiln.GemSocketsSetup.operator !=(Kiln.GemSocketsSetup? left, Kiln.GemSock
 static Kiln.GemSocketsSetup.operator ==(Kiln.GemSocketsSetup? left, Kiln.GemSocketsSetup? right) -> bool
 static Kiln.Gems.ReturnSocketedGems(Kiln.EntityId owner) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Kiln.GemReturned!>!>!
 static Kiln.Gems.SocketKinds.get -> Kiln.GemSocketKinds
+const Kiln.Gems.CraftCapability = "gems.craft" -> string!
+Kiln.GemCost
+Kiln.GemCost.Count.get -> int
+Kiln.GemCost.Count.init -> void
+Kiln.GemCost.Deconstruct(out Kiln.ItemId Item, out int Count) -> void
+Kiln.GemCost.Equals(Kiln.GemCost other) -> bool
+Kiln.GemCost.GemCost(Kiln.ItemId Item, int Count) -> void
+Kiln.GemCost.GemCost() -> void
+Kiln.GemCost.IsFree.get -> bool
+Kiln.GemCost.Item.get -> Kiln.ItemId
+Kiln.GemCost.Item.init -> void
+Kiln.GemCraftAction
+Kiln.GemCraftAction.Recycle = 4 -> Kiln.GemCraftAction
+Kiln.GemCraftAction.Socket = 1 -> Kiln.GemCraftAction
+Kiln.GemCraftAction.Unsocket = 2 -> Kiln.GemCraftAction
+Kiln.GemCraftAction.Upgrade = 3 -> Kiln.GemCraftAction
+Kiln.GemCraftedEvent
+Kiln.GemCraftedEvent.Action.get -> Kiln.GemCraftAction
+Kiln.GemCraftedEvent.ByCode.get -> bool
+Kiln.GemCraftedEvent.Carrier.get -> Kiln.ItemInstanceRef
+Kiln.GemCraftedEvent.Forge.get -> Kiln.EntityId
+Kiln.GemCraftedEvent.Gem.get -> Kiln.ItemInstanceRef
+Kiln.GemCraftedEvent.Involves(Kiln.EntityId entity) -> bool
+Kiln.GemCraftedEvent.LevelAfter.get -> int
+Kiln.GemCraftedEvent.LevelBefore.get -> int
+Kiln.GemCraftedEvent.Paid.get -> Kiln.GemCost
+Kiln.GemCraftedEvent.Player.get -> Kiln.EntityId
+Kiln.GemCraftedEvent.Received.get -> Kiln.GemCost
+Kiln.GemCraftedEvent.Result.get -> Kiln.GemCraftResult!
+Kiln.GemCraftingEvent
+Kiln.GemCraftingEvent.Action.get -> Kiln.GemCraftAction
+Kiln.GemCraftingEvent.Carrier.get -> Kiln.ItemInstanceRef
+Kiln.GemCraftingEvent.Cost.get -> Kiln.GemCost
+Kiln.GemCraftingEvent.Forge.get -> Kiln.EntityId
+Kiln.GemCraftingEvent.GemCraftingEvent(Kiln.EntityId player, Kiln.EntityId forge, Kiln.GemCraftAction action, Kiln.ItemInstanceRef carrier, Kiln.ItemInstanceRef gem, int gemLevel, Kiln.GemCost cost, Kiln.GemCost yield, uint version) -> void
+Kiln.GemCraftingEvent.Gem.get -> Kiln.ItemInstanceRef
+Kiln.GemCraftingEvent.GemLevel.get -> int
+Kiln.GemCraftingEvent.Involves(Kiln.EntityId entity) -> bool
+Kiln.GemCraftingEvent.Player.get -> Kiln.EntityId
+Kiln.GemCraftingEvent.Version.get -> uint
+Kiln.GemCraftingEvent.Yield.get -> Kiln.GemCost
+Kiln.GemCraftOptions
+Kiln.GemCraftOptions.<Clone>$() -> Kiln.GemCraftOptions!
+Kiln.GemCraftOptions.Cost.get -> Kiln.GemCost?
+Kiln.GemCraftOptions.Cost.init -> void
+Kiln.GemCraftOptions.Equals(Kiln.GemCraftOptions? other) -> bool
+Kiln.GemCraftOptions.GemCraftOptions() -> void
+Kiln.GemCraftOptions.Holder.get -> Kiln.EntityId
+Kiln.GemCraftOptions.Holder.init -> void
+Kiln.GemCraftResult
+Kiln.GemCraftResult.Action.get -> Kiln.GemCraftAction
+Kiln.GemCraftResult.Action.init -> void
+Kiln.GemCraftResult.Carrier.get -> Kiln.ItemInstanceRef
+Kiln.GemCraftResult.Carrier.init -> void
+Kiln.GemCraftResult.<Clone>$() -> Kiln.GemCraftResult!
+Kiln.GemCraftResult.Deconstruct(out Kiln.GemCraftStatus Status, out Kiln.GemCraftAction Action, out Kiln.EntityId Player, out Kiln.EntityId Forge, out Kiln.ItemInstanceRef Carrier, out Kiln.ItemInstanceRef Gem, out int LevelBefore, out int LevelAfter, out Kiln.GemCost Paid, out Kiln.GemCost Received, out string! Message) -> void
+Kiln.GemCraftResult.Equals(Kiln.GemCraftResult? other) -> bool
+Kiln.GemCraftResult.Forge.get -> Kiln.EntityId
+Kiln.GemCraftResult.Forge.init -> void
+Kiln.GemCraftResult.GemCraftResult(Kiln.GemCraftStatus Status, Kiln.GemCraftAction Action, Kiln.EntityId Player, Kiln.EntityId Forge, Kiln.ItemInstanceRef Carrier, Kiln.ItemInstanceRef Gem, int LevelBefore, int LevelAfter, Kiln.GemCost Paid, Kiln.GemCost Received, string! Message) -> void
+Kiln.GemCraftResult.Gem.get -> Kiln.ItemInstanceRef
+Kiln.GemCraftResult.Gem.init -> void
+Kiln.GemCraftResult.LevelAfter.get -> int
+Kiln.GemCraftResult.LevelAfter.init -> void
+Kiln.GemCraftResult.LevelBefore.get -> int
+Kiln.GemCraftResult.LevelBefore.init -> void
+Kiln.GemCraftResult.Message.get -> string!
+Kiln.GemCraftResult.Message.init -> void
+Kiln.GemCraftResult.Ok.get -> bool
+Kiln.GemCraftResult.Paid.get -> Kiln.GemCost
+Kiln.GemCraftResult.Paid.init -> void
+Kiln.GemCraftResult.Player.get -> Kiln.EntityId
+Kiln.GemCraftResult.Player.init -> void
+Kiln.GemCraftResult.Reason.get -> string?
+Kiln.GemCraftResult.Received.get -> Kiln.GemCost
+Kiln.GemCraftResult.Received.init -> void
+Kiln.GemCraftResult.Status.get -> Kiln.GemCraftStatus
+Kiln.GemCraftResult.Status.init -> void
+Kiln.GemCraftStatus
+Kiln.GemCraftStatus.Canceled = 7 -> Kiln.GemCraftStatus
+Kiln.GemCraftStatus.Done = 0 -> Kiln.GemCraftStatus
+Kiln.GemCraftStatus.Dropped = 9 -> Kiln.GemCraftStatus
+Kiln.GemCraftStatus.MaxLevel = 6 -> Kiln.GemCraftStatus
+Kiln.GemCraftStatus.NoForge = 3 -> Kiln.GemCraftStatus
+Kiln.GemCraftStatus.NoRoom = 5 -> Kiln.GemCraftStatus
+Kiln.GemCraftStatus.NotEnough = 2 -> Kiln.GemCraftStatus
+Kiln.GemCraftStatus.NotFound = 4 -> Kiln.GemCraftStatus
+Kiln.GemCraftStatus.Occupied = 10 -> Kiln.GemCraftStatus
+Kiln.GemCraftStatus.Refused = 1 -> Kiln.GemCraftStatus
+Kiln.GemCraftStatus.Unavailable = 8 -> Kiln.GemCraftStatus
+~override Kiln.GemCost.Equals(object obj) -> bool
+override Kiln.GemCost.GetHashCode() -> int
+override Kiln.GemCost.ToString() -> string!
+override Kiln.GemCraftedEvent.ToString() -> string!
+override Kiln.GemCraftingEvent.ToString() -> string!
+override Kiln.GemCraftOptions.Equals(object? obj) -> bool
+override Kiln.GemCraftOptions.GetHashCode() -> int
+override Kiln.GemCraftOptions.ToString() -> string!
+override Kiln.GemCraftResult.Equals(object? obj) -> bool
+override Kiln.GemCraftResult.GetHashCode() -> int
+override Kiln.GemCraftResult.ToString() -> string!
+static Kiln.GemCost.Free.get -> Kiln.GemCost
+static Kiln.GemCost.operator !=(Kiln.GemCost left, Kiln.GemCost right) -> bool
+static Kiln.GemCost.operator ==(Kiln.GemCost left, Kiln.GemCost right) -> bool
+static Kiln.GemCraftOptions.operator !=(Kiln.GemCraftOptions? left, Kiln.GemCraftOptions? right) -> bool
+static Kiln.GemCraftOptions.operator ==(Kiln.GemCraftOptions? left, Kiln.GemCraftOptions? right) -> bool
+static Kiln.GemCraftResult.operator !=(Kiln.GemCraftResult? left, Kiln.GemCraftResult? right) -> bool
+static Kiln.GemCraftResult.operator ==(Kiln.GemCraftResult? left, Kiln.GemCraftResult? right) -> bool
+static Kiln.Gems.Recycle(Kiln.EntityId player, Kiln.ItemInstanceRef gemOrCarrier, Kiln.EntityId forge, Kiln.GemCraftOptions? options = null) -> System.Threading.Tasks.Task<Kiln.GemCraftResult!>!
+static Kiln.Gems.Socket(Kiln.EntityId player, Kiln.ItemInstanceRef carrier, Kiln.ItemInstanceRef gem, Kiln.EntityId forge, Kiln.GemCraftOptions? options = null) -> System.Threading.Tasks.Task<Kiln.GemCraftResult!>!
+static Kiln.Gems.Unsocket(Kiln.EntityId player, Kiln.ItemInstanceRef carrier, Kiln.EntityId forge, Kiln.GemCraftOptions? options = null) -> System.Threading.Tasks.Task<Kiln.GemCraftResult!>!
+static Kiln.Gems.Upgrade(Kiln.EntityId player, Kiln.ItemInstanceRef gemOrCarrier, Kiln.EntityId forge, Kiln.GemCraftOptions? options = null) -> System.Threading.Tasks.Task<Kiln.GemCraftResult!>!

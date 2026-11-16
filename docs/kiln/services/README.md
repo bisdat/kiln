@@ -32,6 +32,7 @@ available is generated from a boot's `capabilities.json`: [../status.generated.m
 | [gameplay.md](gameplay.md) | kiln.gameplay: player/world interaction events and protection zones |
 | [hooks.md](hooks.md) | kiln.hooks v2: one registry for every hook |
 | [items.md](items.md) | kiln.items: items in inventories |
+| [gems-forge.md](gems-forge.md) | kiln.gemcraft (gem wave): a Shroud Forge's socket, unsocket, upgrade and recycle from code (`Gems.Socket`, ...) and players' forge actions (`GemCraftingEvent`, `GemCraftedEvent`) |
 | [knowledge.md](knowledge.md) | kiln.knowledge: the game's knowledge, the vanilla journal, dialogue events, the client veto |
 | [npcs.md](npcs.md) | Friendly NPCs and quests in the game's own UI |
 | [pacing.md](pacing.md) | kiln.pacing: where the game waits, and its task pools |

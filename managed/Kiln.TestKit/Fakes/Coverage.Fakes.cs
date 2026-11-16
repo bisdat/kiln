@@ -83,6 +83,11 @@ public static partial class Coverage
             "no fake: a true pair is a client hosting its world (a kiln.client fake, a client-side harness, a client tick) and " +
             "shares one channel registry, so no handshake refusal could be tested; Kiln.Network reports itself unavailable",
             "kiln.net");
+        Row("kiln.gemcraft", CoverageKind.Unavailable,
+            "no fake: Gems.Socket, Unsocket, Upgrade and Recycle run the game's own forge transaction in a server world, and " +
+            "GemCraftingEvent / GemCraftedEvent come from a hook on the game's gem handler; the kit has neither, so the calls " +
+            "end Unavailable (Kiln.Abilities.Tests drive the managed side on a fake kiln.gemcraft table)",
+            "kiln.gemcraft");
         foreach (var fake in KitFakes.All) fake.AddCoverage(rows);  // dev.28 on: Fakes/<Service>/ (IKitFake)
     }
 }

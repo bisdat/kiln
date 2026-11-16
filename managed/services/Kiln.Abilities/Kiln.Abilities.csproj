@@ -20,6 +20,8 @@
     <InternalsVisibleTo Include="Kiln.Contract.Tests" />
     <!-- the host's unload order: a mod's native admission closes before its OnUnload (NativeAdmissionOrderTests) -->
     <InternalsVisibleTo Include="Kiln.Host.Tests" />
+    <!-- gems: the forge actions' requests, results and event pump on a fake kiln.gemcraft (GemCraftingTests) -->
+    <InternalsVisibleTo Include="Kiln.Abilities.Tests" />
     <ProjectReference Include="../../Kiln.Api/Kiln.Api.csproj" Private="false" />
     <ProjectReference Include="../Kiln.Spawn/Kiln.Spawn.csproj" Private="false" />
     <!-- gems: item catalog, item instances and sockets (Gems/) -->

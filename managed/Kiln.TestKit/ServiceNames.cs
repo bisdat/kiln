@@ -31,6 +31,7 @@ internal static class ServiceNames
         "kiln.flame",
         "kiln.gamedata",
         "kiln.gameplay",
+        "kiln.gemcraft",
         "kiln.hooks",
         "kiln.items",
         "kiln.knowledge",

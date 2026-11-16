@@ -28,6 +28,7 @@
 #include "engine.h"
 #include "completed_results.h"
 #include "equip.h"
+#include "gems.h"
 #include "instances.h"
 #include "moves.h"
 #include "names.h"
@@ -1100,6 +1101,7 @@ void drop_world(const char* why) {
     instances_world_reset();  // v4: entity ids start again in the next world: every stamp is forgotten
     toolwear::world_reset();  // its queued records name entities of the world that went
     equip_world_closed();     // v5: waiting equips end as dropped
+    gems_world_closed();      // gem wave G3: waiting forge actions end as dropped
     sets_world_closed();      // v6: every set snapshot named this world
     int expected = KILN_ITEMS_PROGRAM_RUNNING;
     if (g_program.compare_exchange_strong(expected, KILN_ITEMS_PROGRAM_ACTIVE))
@@ -1138,6 +1140,7 @@ void KILN_CALL on_pre(const KilnTickInfo* tick, void*) {
     deliver();
     sets_pre(tick->step);  // v6: snapshot expiry and stamp resets, before equip_pre hands requests to the program
     equip_pre(g_world.load() ? g_world.load() : g_api->server_world(), tick->step);  // v5
+    gems_pre(tick->step);  // gem wave G3: forge actions' layout check, results, held players' actions
     xfer_deliver();
     selftest_pre(tick->step);
     if (!g_catalog.load(std::memory_order_relaxed) && (tick->step & 7) == 0) build_catalog();
@@ -2075,6 +2078,7 @@ void resolve() {
     // Prepare availability; the first valid tool-wear rule request installs the hooks.
     if (E.wear_ok) toolwear::install(g_api, g_owner);
     xfer_init();  // after every symbol above: a lab switch may install the hooks right now
+    gems_resolve();  // gem wave G3: the forge actions (kiln.gemcraft), after the transaction symbols
 }
 
 void register_main();
@@ -2085,6 +2089,7 @@ void KILN_CALL on_ready(void*) {
     // v5: equip runs in a program of its own, an entity program over the player characters: kiln.world only
     const auto* w = static_cast<const KilnWorldApi*>(g_api->service(KilnStr{KILN_WORLD_SERVICE, std::strlen(KILN_WORLD_SERVICE)}, 1));
     equip_register(w && w->header.size >= sizeof(KilnWorldApi) ? w : nullptr);
+    gems_register(w && w->header.size >= sizeof(KilnWorldApi) ? w : nullptr);  // gem wave G3: kiln_items_gems
 }
 
 void register_main() {
@@ -2150,5 +2155,6 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     // Published even when give/take are off on this build: their functions then return KILN_ERR_UNAVAILABLE, and
     // status() says why.
     toolwear::publish(api, owner);  // kiln.toolwear: published also where its hooks are off (status says why)
+    gems_publish(api, owner);       // kiln.gemcraft: published also where gems.craft is off (status says why)
     return api->register_service(owner, KilnStr{KILN_ITEMS_SERVICE, std::strlen(KILN_ITEMS_SERVICE)}, &kTable);
 }

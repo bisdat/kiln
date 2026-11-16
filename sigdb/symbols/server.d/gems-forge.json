@@ -1,0 +1,90 @@
+{
+  "format": 1,
+  "side": "server",
+  "comment": "Gem wave G3 (gems.craft): the game's weapon-gem action of a player at a Shroud Forge (Slot, Unslot, Upgrade, Recycle), equipment_actions' per-player handler (server 26430253 0x144bb0; the client's hosted copy 0x385880, docs/re/gems-forge.md). kiln.items hooks the handler (GemCraftingEvent: hold, cancel; GemCraftedEvent: before and after), and runs it for Gems.Socket / Unsocket / Upgrade / Recycle with a request of its own inside its program kiln_items_gems. The cost functions, the forge template read and the material multiplier are captured from the handler's own calls, so a cost Kiln shows before an action is the one the handler then charges. Every pattern matches once on server 26430253 and on client 26430625 (the hosted copy), so the client composes this file unchanged (client.d/gems-forge.json only records that). A game update that changes the handler stops a pattern from matching and turns gems.craft off.",
+  "symbols": {
+    "gems/GemAction": {
+      "comment": "equipment_actions' weapon-gem handler: void (iterator*), the program's unpacked iterator (0xf0 bytes: ctx, PlayerInput, the Equipment and ServerConsumedPlayerInput write records, the registries, KnowledgeTriggerQueue, the ShroudForge template accessor, eight other-entity accessors, two event senders). Returns at once when PlayerInput's weaponGemAction version equals the consumed one; otherwise runs the action and stores the consumed version, whatever happened",
+      "find": [
+        {
+          "pattern": "40 55 53 41 54 41 55 48 8D AC 24 ?? ?? FF FF B8 ?? 73 00 00 E8 ?? ?? ?? ?? 48 2B E0 48 8B 59 08 4C 8B E1 48 8B 49 68 48 85 C9 74 ?? 41 0F B6 44 24 62 4D 8B 4C 24 58 4D 8B 44 24 50 49 8B 54 24 48 88 44 24 28 41 0F B7 44 24 60 66 89 44 24 20 E8 ?? ?? ?? ?? 49 8B 4C 24 40 8B 83 {gems/input.version:d32} 39 81 {gems/consumed.version:d32} 0F 84"
+        }
+      ]
+    },
+    "@gems/EquipmentActions.calls": {
+      "comment": "equipment_actions' update (server 0x1472c0, client 0x388280): per player the equip handler, then the gem handler, with the iterator at rsp+0x20, then iter_next with the iterator's size (0xf0). A second vote for gems/GemAction, the proof that it is what a player's forge action runs, and the iterator size kiln.items builds its own request's iterator with",
+      "find": [
+        { "pattern": "84 C0 74 2B 48 8D 4C 24 20 E8 ?? ?? ?? ?? 48 8D 4C 24 20 E8 {gems/GemAction:rel32} 41 B8 {gems/iter.size:d32} 48" }
+      ]
+    },
+    "@gems/GemAction.calls": {
+      "comment": "Inside the handler: the forge's ShroudForge template read (job storage, accessor iterator+0x98, forge entity) and its maxGemLevel check; the gem Level's two attributes (level, cap) read through items/AttrFind; the Slot and Unslot cost functions (maxGemLevel, multiplier, craftingCostModifier, BalancingRegistry), told apart by what follows (Slot packs the socket and loads the request's source slot, Unslot packs the socket and moves to the player); Upgrade's material multiplier (only with allowAllMaterialTiersForUpgraderInsert, else the constant 1.0) and cost (level, maxGemLevel, multiplier, modifier, BalancingRegistry); Recycle's yield (level, maxGemLevel, BalancingRegistry); the Unslot branch's move of the socket's gem into the player's inventory (gems/UnslotMove: out, tx, {weaponPide, 0}, the player, 1, 1, 1, 1), which kiln.gemcraft's forgeless return (KILN_GEM_RETURN) calls on a transaction set up as the handler sets up its own",
+      "find": [
+        {
+          "scope": { "symbol": "gems/GemAction", "size": 4096 },
+          "pattern": "49 8B BC 24 98 00 00 00 48 8B 09 E8 ?? ?? ?? ?? 48 8B C8 44 8B C3 48 8B D7 E8 {gems/ReadTemplate:rel32} 48 89 85 ?? ?? 00 00 48 85 C0 74 06 83 78 {gems/forge.max_level:d8} 00"
+        },
+        {
+          "scope": { "symbol": "gems/GemAction", "size": 4096 },
+          "pattern": "41 F6 46 06 01 75 0A 33 F6 40 B7 16 44 8B FE EB ?? 4D 8B 84 24 88 00 00 00 48 8D 4C 24 ?? BA {gems/attr.level:d32} E8 ?? ?? ?? ??"
+        },
+        {
+          "scope": { "symbol": "gems/GemAction", "size": 4096 },
+          "pattern": "41 F6 46 06 01 75 07 41 B0 16 8B D6 EB ?? 4D 8B 84 24 88 00 00 00 48 8D 4C 24 ?? BA {gems/attr.level_cap:d32} E8 ?? ?? ?? ??"
+        },
+        {
+          "scope": { "symbol": "gems/GemAction", "size": 4096 },
+          "pattern": "8B 4F 24 E8 {gems/GemSlotCost:rel32} 8B 1B 8B F8 85 C0 74 3E ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? 8B 8E {gems/input.weapon:d32} 33 D2 48 8B 9E {gems/input.source:d32} E8"
+        },
+        {
+          "scope": { "symbol": "gems/GemAction", "size": 4096 },
+          "pattern": "8B 4F 24 E8 {gems/GemUnslotCost:rel32} 8B 1B 8B F8 85 C0 74 3E ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? 8B 8E {gems/input.weapon:d32} 33 D2 E8 ?? ?? ?? ?? 49 8B 0C 24"
+        },
+        {
+          "scope": { "symbol": "gems/GemAction", "size": 4096 },
+          "pattern": "80 7F {gems/forge.allow_all:d8} 00 74 1A 4D 8B 84 24 80 00 00 00 BA {gems/multiplier.key:d32} 8B 8E {gems/input.material:d32} E8 {gems/MaterialMultiplier:rel32} EB 08 F3 0F 10 05 {gems/MultiplierOne:rel32} 49 8B 44 24 70 0F 28 D0 F3 0F 10 5F {gems/forge.cost_modifier:d8} 41 8B CF 8B 57 {gems/forge.max_level:d8} 48 89 44 24 20 E8 {gems/GemUpgradeCost:rel32}"
+        },
+        {
+          "scope": { "symbol": "gems/GemAction", "size": 4096 },
+          "pattern": "41 8B CF 4D 8B 44 24 70 8B 57 {gems/forge.max_level:d8} E8 {gems/GemRecycleYield:rel32}"
+        },
+        {
+          "scope": { "symbol": "gems/GemAction", "size": 4096 },
+          "pattern": "0F B6 8E {gems/input.action:d32} 83 E9 01 0F 84 ?? ?? ?? ?? 83 E9 01 0F 84 ?? ?? ?? ?? 83 E9 01 0F 84 ?? ?? ?? ?? 83 F9 01 0F 85"
+        },
+        {
+          "scope": { "symbol": "gems/GemAction", "size": 4096 },
+          "pattern": "8B 8E {gems/input.weapon:d32} 33 D2 E8 ?? ?? ?? ?? 49 8B 0C 24 48 8D 95 ?? ?? 00 00 48 8B D8 E8 ?? ?? ?? ?? B9 01 00 00 00 48 8D 55 ?? 88 4C 24 38 4C 8B C3 88 4C 24 30 44 8B 08 89 4C 24 28 66 89 4C 24 20 48 8D 4C 24 ?? E8 {gems/UnslotMove:rel32} 80 7C 24 ?? 00"
+        }
+      ]
+    }
+  },
+  "constants": {
+    "gems/iter.size": { "value": 240 },
+    "gems/consumed.version": { "min_votes": 1 },
+    "gems/input.version": { "min_votes": 1 },
+    "gems/input.weapon": { "min_votes": 2 },
+    "gems/input.source": { "min_votes": 1 },
+    "gems/input.material": { "min_votes": 1 },
+    "gems/input.action": { "min_votes": 1 },
+    "gems/forge.max_level": { "min_votes": 3 },
+    "gems/forge.allow_all": { "min_votes": 1 },
+    "gems/forge.cost_modifier": { "min_votes": 1 },
+    "gems/attr.level": { "min_votes": 1 },
+    "gems/attr.level_cap": { "min_votes": 1 },
+    "gems/multiplier.key": { "min_votes": 1 }
+  },
+  "features": {
+    "gems.craft": {
+      "symbols": ["gems/GemAction", "@gems/EquipmentActions.calls", "@gems/GemAction.calls", "gems/ReadTemplate", "gems/GemSlotCost",
+                  "gems/GemUnslotCost", "gems/GemUpgradeCost", "gems/GemRecycleYield", "gems/MaterialMultiplier", "gems/MultiplierOne",
+                  "gems/UnslotMove",
+                  "items/AttrFind", "items/JobStorage", "items/ReadOther", "items/GuidToItemId", "items/ItemRegistryFind",
+                  "items/InventoryTxCtor", "items/InventoryTxInit", "items/InventoryAddItems", "items/InventoryRemoveItems",
+                  "items/InventoryCommit", "items/InventoryRollback", "items/InventoryFreeArrays"],
+      "constants": ["gems/iter.size", "gems/consumed.version", "gems/input.version", "gems/input.weapon", "gems/input.source",
+                    "gems/input.material", "gems/input.action", "gems/forge.max_level", "gems/forge.allow_all",
+                    "gems/forge.cost_modifier", "gems/attr.level", "gems/attr.level_cap", "gems/multiplier.key"]
+    }
+  }
+}
