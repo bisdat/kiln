@@ -346,7 +346,9 @@ Outcome outcome_of(const Rule& r, const std::vector<ChainRow>& rows, const Facts
     if (r.action == "warn") return o;
     if (r.action == "before") return before_outcome(r, rows);
     if (r.action == "defer") {
-        o.applied = false;
+        // The native loader does the wait and logs it (info, or a warning on its timeout); this report only points
+        // there, so a working wait is no warning at every start.
+        o.applied = true;
         o.note = "the native loader handles this wait; see native.json and kiln.log";
         return o;
     }
