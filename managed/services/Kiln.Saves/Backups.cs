@@ -23,10 +23,12 @@ internal static class SavesBackups
     private static string Dir => SavesNative.GetPath(SavesNative.PathBackups) ?? throw SavesCaps.Off(SavesCaps.Service, "kiln.saves is unavailable");
 
     /// <summary>Copies the world file (revision <paramref name="rev"/>, just written) and its sidecar generation. Tick
-    /// thread, right after the write: the game cannot start another save before this returns.</summary>
+    /// thread, right after the write: the game cannot start another save before this returns. It waits for Kiln.Saves'
+    /// writer first (bounded): the generation's confirmation is written off the tick thread.</summary>
     internal static BackupInfo Create(string name, uint rev, uint unix, SaveReason reason)
     {
         var store = SavesRuntime.Store;
+        store.Writer.Drain($"backup '{name}'");
         var world = SavesRuntime.WorldFile ?? throw new InvalidOperationException("the world file is not known");
         var h = WorldStore.ReadHeader(world) ?? throw new InvalidOperationException($"{world} is not readable");
         if (h.Revision != rev) throw new InvalidOperationException($"{Path.GetFileName(world)} is at revision {h.Revision}, expected {rev}");

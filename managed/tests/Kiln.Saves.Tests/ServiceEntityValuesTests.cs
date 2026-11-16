@@ -65,6 +65,7 @@ public sealed class ServiceEntityValuesTests : IDisposable
         rec.ByMod["some-mod"] = new() { ["note"] = new WorldStore.Slot { Json = "\"mod data\"" } };
         store.Stage(1, SaveReason.Request, late: false);
         store.Commit(1, 1001, SaveReason.Request);
+        Assert.True(store.Writer.Drain("test"));  // the confirmation is written off the tick thread
         var bundles = JsonNode.Parse(File.ReadAllText(Path.Combine(_root, "manifests", "0000000001-1001.json")))!["bundles"]!.AsObject();
         Assert.NotNull(bundles["entity/" + Scope]);
         Assert.NotNull(bundles["entity/some-mod"]);
