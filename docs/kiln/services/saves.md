@@ -93,9 +93,10 @@ data (objects are serialized when the mod unloads and read into the new instance
   (`stage_progress`, below), so the world file of revision *R* normally never reaches the disk before generation *R*'s
   manifest. A staging whose write fails is tried 3 times (0.25 s and 0.5 s between the tries) while the world write
   waits.
-- **Where that order does not hold.** The world write's wait is bounded and logged: 30 s, and once the shutdown begins
-  every wait ends 6 s after that at the latest, also one already running, because the game gives its last save 10 s in
-  all. The shutdown counts from the first of: the game's log line "Trigger gameflow shutdown" (from the time the game
+- **Where that order does not hold.** The world write's wait is bounded and logged: 6 s, because the game gives its
+  last save 10 s in all and kiln.saves does not always see the shutdown in time (without `saves.reasons` it knows the
+  shutdown only from the game's log line, which a slow `kiln.log` write can hold up for seconds). Once the shutdown
+  begins, every wait ends 6 s after that at the latest, also one already running. The shutdown counts from the first of: the game's log line "Trigger gameflow shutdown" (from the time the game
   logged it, which the core records; a line that reaches kiln.saves late applies at once when its 6 s have passed), a
   save request recognised as the shutdown's (`saves.reasons`), the world's stop. A wait that runs out lets the world
   write go and warns, and then does not wait again until the writer has caught up. So the world file of *R* can reach
@@ -629,8 +630,8 @@ its writer, the writer each one it has on disk, and the world write waits for th
   first save; data written before that is kept in memory and written with the first save.
 - The kill -9 window: none for the generation choice while the world write's wait holds. A generation is staged before
   the world write (since 0.2.0-dev.30 the world write waits for the writer to have it on disk); a crash between the two
-  leaves revision R on disk and loads generation R. A staging that takes longer than that wait (30 s; 6 s once the
-  shutdown begins), one that cannot be written after its tries, or a save while the barrier is off after such a wait
+  leaves revision R on disk and loads generation R. A staging that takes longer than that wait (6 s; once the
+  shutdown begins, 6 s after its start at the latest), one that cannot be written after its tries, or a save while the barrier is off after such a wait
   opens a window, logged as a warning, in which a crash loads the newest usable older generation for world file R, or
   none. After a power loss or a system crash, the world file of
   an unchanged save can load an older generation with the same bundles (`DataMatch.Older`) when the system had not yet

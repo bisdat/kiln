@@ -19,10 +19,24 @@ namespace ksaves {
 // again as soon as it has caught up.
 //
 // Shutdown. cap(at) ends every wait at `at` at the latest, also a wait already running (the game's shutdown gives its
-// last save 10 s in all, an autosave's wait may have begun with 30 s); uncap() lifts it (the next hosted world).
+// last save 10 s in all: a world write that begins waiting after the shutdown began must not take its own full limit);
+// uncap() lifts it (the next hosted world).
 //
 // Numbers are serial: compared by their difference, so the wrap after 2^64 stagings changes nothing (the managed side
 // skips 0, which stage_progress reads as "unchanged").
+
+// How long the Save2Thread waits for the writer before a world write (saves.cpp hk_write): no longer than the shutdown's
+// wait, for every save (review 3). No shutdown signal reaches kiln.saves in time on every build: the shutdown's save
+// request names its reason only with saves.reasons (and the game's shutdown skips that request in one case), the game's
+// shutdown line comes through Kiln's log thread, which a slow kiln.log write can hold for seconds, and the world's stop
+// comes after the last save. So a world write that began waiting before a shutdown nobody saw still goes inside the
+// game's 10 s, with room for the write itself.
+inline constexpr std::chrono::milliseconds kWorldWriteWait{6000};
+// Once the shutdown is seen, every wait ends this long after the shutdown began at the latest (StageBarrier::cap).
+inline constexpr std::chrono::milliseconds kShutdownWait{6000};
+// The game's own budget for its last save: serverShutdown waits for a save in flight at most 10 s (docs/re/saves.md).
+inline constexpr std::chrono::milliseconds kGameShutdownBudget{10000};
+
 class StageBarrier {
 public:
     using clock = std::chrono::steady_clock;

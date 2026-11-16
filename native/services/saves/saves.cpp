@@ -271,14 +271,15 @@ uint32_t g_current_reason = 0;
 uint64_t g_autosaves_logged = 0;
 ksaves::SnapshotStage g_snapshot_stage;
 std::atomic<bool> g_can_snapshot_stage{false};
-// Kiln.Saves' writer and the game's world write (stage_barrier.h, kiln_saves.h stage_progress): the Save2Thread waits up
-// to this long for the pending manifest before it writes a world file; once the shutdown begins, every wait (also one
-// already running) ends 6 s after that at the latest, because the game's shutdown gives its last save 10 s in all
-// (docs/re/saves.md, serverShutdown). The shutdown is seen three ways, so no single optional signature decides it
-// (review 1): the game's own log line, a save request classified as the shutdown's (saves.reasons), the world's stop.
+// Kiln.Saves' writer and the game's world write (stage_barrier.h, kiln_saves.h stage_progress): the Save2Thread waits at
+// most kWorldWriteWait (6 s) for the pending manifest before it writes a world file, because the game's shutdown gives its
+// last save 10 s in all (docs/re/saves.md, serverShutdown) and none of the shutdown's signals reaches this DLL in time on
+// every build (review 3); once the shutdown is seen, every wait (also one already running) ends kShutdownWait after the
+// shutdown began at the latest. It is seen three ways, so no single optional signature decides it (review 1): the game's
+// own log line, a save request classified as the shutdown's (saves.reasons), the world's stop.
 ksaves::StageBarrier g_stage;
-constexpr auto kStageWait = std::chrono::milliseconds(30000);
-constexpr auto kStageWaitShutdown = std::chrono::milliseconds(6000);
+using ksaves::kShutdownWait;
+using ksaves::kWorldWriteWait;
 constexpr std::string_view kShutdownLine = "Trigger gameflow shutdown";  // the game, ~100 ms before its shutdown save
 std::atomic<bool> g_shutdown_capped{false};
 const KilnLogApi* g_log_time = nullptr;  // kiln.log (in the core): when a delivered game line was logged
@@ -292,11 +293,11 @@ int64_t steady_ns(SteadyClock::time_point t) {
 // `at`: when the shutdown began (for the log line: when the game logged it, which can be well before its delivery). The
 // deadline counts from then; one already past applies at once.
 void shutdown_begins(const char* why, SteadyClock::time_point at = SteadyClock::now()) {
-    g_stage.cap(at + kStageWaitShutdown);
+    g_stage.cap(at + kShutdownWait);
     if (!g_shutdown_capped.exchange(true)) {
         const auto late = std::chrono::duration_cast<std::chrono::milliseconds>(SteadyClock::now() - at).count();
         logf(KILN_LOG_INFO, "saves: shutdown begins (%s, %lld ms ago): a world write waits for Kiln.Saves' writer until %lld ms "
-             "after that at the latest", why, static_cast<long long>(late), static_cast<long long>(kStageWaitShutdown.count()));
+             "after that at the latest", why, static_cast<long long>(late), static_cast<long long>(kShutdownWait.count()));
     }
 }
 
@@ -467,7 +468,7 @@ void __fastcall hk_request(uintptr_t inst) {
 void __fastcall hk_write(uintptr_t save2, uintptr_t user) {
     // The world file must not reach the disk before Kiln.Saves' writer has this save's pending manifest there: the tick
     // thread no longer writes it itself (stage_barrier.h). This thread is the game's Save2Thread; the world steps on.
-    const ksaves::StageBarrier::Wait staged = g_stage.wait(kStageWait);  // shortened once the shutdown begins
+    const ksaves::StageBarrier::Wait staged = g_stage.wait(kWorldWriteWait);  // shortened once the shutdown begins
     g_h_write.call(save2, user);
     g_save2.store(save2);
     uint8_t result = 0xFF;

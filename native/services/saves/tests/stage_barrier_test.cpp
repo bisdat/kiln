@@ -104,6 +104,34 @@ int main() {
               "a shutdown deadline already past ends the wait at once");
     }
 
+    // A shutdown nobody tells kiln.saves about in time (review 3): saves.reasons is off, so the shutdown's save request
+    // says nothing, and the game's shutdown line waits behind a slow kiln.log write on Kiln's log thread. The world write
+    // of an autosave already waiting must still go inside the game's 10 s for its last save, with the limit saves.cpp
+    // uses (kWorldWriteWait), not only once the line arrives.
+    {
+        ksaves::StageBarrier q;
+        q.issued(1);  // the writer never catches up (a disk that does not answer)
+        std::atomic<bool> waiting{false};
+        std::chrono::steady_clock::time_point ended{};
+        std::thread save2([&] {
+            waiting = true;
+            q.wait(ksaves::kWorldWriteWait);
+            ended = std::chrono::steady_clock::now();
+        });
+        while (!waiting) std::this_thread::yield();
+        std::this_thread::sleep_for(200ms);
+        const auto shutdown = std::chrono::steady_clock::now();  // the game logs its line; the callback is held back
+        save2.join();                                             // ... until the world write went
+        q.cap(shutdown + ksaves::kShutdownWait);                  // the line, delivered late: its deadline from when it was logged
+        const auto after = std::chrono::duration_cast<std::chrono::milliseconds>(ended - shutdown).count();
+        std::printf("     the world write went %lld ms after the shutdown began (the game gives %lld ms)\n", static_cast<long long>(after),
+                    static_cast<long long>(ksaves::kGameShutdownBudget.count()));
+        check(ended - shutdown <= ksaves::kShutdownWait + 500ms,
+              "with the shutdown's signal held back while a world write waits, the write still goes within the shutdown's wait");
+        check(ksaves::kWorldWriteWait <= ksaves::kShutdownWait && ksaves::kShutdownWait < ksaves::kGameShutdownBudget,
+              "no world write waits longer than the shutdown's wait, and that leaves the world write room in the game's 10 s");
+    }
+
     // Numbers wrap after 2^64 stagings (the managed side skips 0): still ordered. Serial numbers only move forward by less
     // than 2^63, so the counters walk there in quarter steps (review 2: a jump from 0 to near the end reads as backwards).
     {
