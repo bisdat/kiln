@@ -98,3 +98,83 @@ static Kiln.Gems.Get(Kiln.ItemId gem) -> Kiln.GemInfo?
 static Kiln.Gems.Socket(Kiln.ItemInstanceRef carrier) -> Kiln.SocketedGem?
 static Kiln.SocketedGem.operator !=(Kiln.SocketedGem left, Kiln.SocketedGem right) -> bool
 static Kiln.SocketedGem.operator ==(Kiln.SocketedGem left, Kiln.SocketedGem right) -> bool
+const Kiln.Gems.SocketsCapability = "gems.sockets" -> string!
+Kiln.GemReturned
+Kiln.GemReturned.Carrier.get -> Kiln.ItemInstanceRef
+Kiln.GemReturned.Carrier.init -> void
+Kiln.GemReturned.<Clone>$() -> Kiln.GemReturned!
+Kiln.GemReturned.Deconstruct(out Kiln.ItemInstanceRef Carrier, out Kiln.ItemId Gem, out int Level, out bool Returned, out string? Reason) -> void
+Kiln.GemReturned.Equals(Kiln.GemReturned? other) -> bool
+Kiln.GemReturned.Gem.get -> Kiln.ItemId
+Kiln.GemReturned.Gem.init -> void
+Kiln.GemReturned.GemReturned(Kiln.ItemInstanceRef Carrier, Kiln.ItemId Gem, int Level, bool Returned, string? Reason) -> void
+Kiln.GemReturned.Level.get -> int
+Kiln.GemReturned.Level.init -> void
+Kiln.GemReturned.Reason.get -> string?
+Kiln.GemReturned.Reason.init -> void
+Kiln.GemReturned.Returned.get -> bool
+Kiln.GemReturned.Returned.init -> void
+Kiln.GemSocketKinds
+Kiln.GemSocketKinds.All = Kiln.GemSocketKinds.Rings | Kiln.GemSocketKinds.Armour | Kiln.GemSocketKinds.Shields | Kiln.GemSocketKinds.OtherGear -> Kiln.GemSocketKinds
+Kiln.GemSocketKinds.Armour = 2 -> Kiln.GemSocketKinds
+Kiln.GemSocketKinds.None = 0 -> Kiln.GemSocketKinds
+Kiln.GemSocketKinds.OtherGear = 8 -> Kiln.GemSocketKinds
+Kiln.GemSocketKinds.Rings = 1 -> Kiln.GemSocketKinds
+Kiln.GemSocketKinds.Shields = 4 -> Kiln.GemSocketKinds
+Kiln.GemSocketResult
+Kiln.GemSocketResult.After.get -> Kiln.ItemInstanceRef
+Kiln.GemSocketResult.After.init -> void
+Kiln.GemSocketResult.Before.get -> Kiln.ItemInstanceRef
+Kiln.GemSocketResult.Before.init -> void
+Kiln.GemSocketResult.<Clone>$() -> Kiln.GemSocketResult!
+Kiln.GemSocketResult.Deconstruct(out Kiln.GemSocketStatus Status, out Kiln.ItemInstanceRef Before, out Kiln.ItemInstanceRef After, out string! Reason) -> void
+Kiln.GemSocketResult.Equals(Kiln.GemSocketResult? other) -> bool
+Kiln.GemSocketResult.GemSocketResult(Kiln.GemSocketStatus Status, Kiln.ItemInstanceRef Before, Kiln.ItemInstanceRef After, string! Reason) -> void
+Kiln.GemSocketResult.Reason.get -> string!
+Kiln.GemSocketResult.Reason.init -> void
+Kiln.GemSocketResult.Status.get -> Kiln.GemSocketStatus
+Kiln.GemSocketResult.Status.init -> void
+Kiln.GemSocketResult.Succeeded.get -> bool
+Kiln.GemSocketsSetup
+Kiln.GemSocketsSetup.<Clone>$() -> Kiln.GemSocketsSetup!
+Kiln.GemSocketsSetup.Deconstruct(out Kiln.GemSocketKinds Kinds, out bool Server, out string? ServerReason, out bool ForgeLists, out string? ForgeReason) -> void
+Kiln.GemSocketsSetup.Equals(Kiln.GemSocketsSetup? other) -> bool
+Kiln.GemSocketsSetup.ForgeLists.get -> bool
+Kiln.GemSocketsSetup.ForgeLists.init -> void
+Kiln.GemSocketsSetup.ForgeReason.get -> string?
+Kiln.GemSocketsSetup.ForgeReason.init -> void
+Kiln.GemSocketsSetup.GemSocketsSetup(Kiln.GemSocketKinds Kinds, bool Server, string? ServerReason, bool ForgeLists, string? ForgeReason) -> void
+Kiln.GemSocketsSetup.Kinds.get -> Kiln.GemSocketKinds
+Kiln.GemSocketsSetup.Kinds.init -> void
+Kiln.GemSocketsSetup.Server.get -> bool
+Kiln.GemSocketsSetup.Server.init -> void
+Kiln.GemSocketsSetup.ServerReason.get -> string?
+Kiln.GemSocketsSetup.ServerReason.init -> void
+Kiln.GemSocketStatus
+Kiln.GemSocketStatus.AlreadyHasSocket = 1 -> Kiln.GemSocketStatus
+Kiln.GemSocketStatus.Done = 0 -> Kiln.GemSocketStatus
+Kiln.GemSocketStatus.Equipped = 3 -> Kiln.GemSocketStatus
+Kiln.GemSocketStatus.KindNotAllowed = 2 -> Kiln.GemSocketStatus
+Kiln.GemSocketStatus.NotFound = 4 -> Kiln.GemSocketStatus
+Kiln.GemSocketStatus.NotGear = 5 -> Kiln.GemSocketStatus
+Kiln.GemSocketStatus.Refused = 6 -> Kiln.GemSocketStatus
+Kiln.GemSocketStatus.Unavailable = 7 -> Kiln.GemSocketStatus
+override Kiln.GemReturned.Equals(object? obj) -> bool
+override Kiln.GemReturned.GetHashCode() -> int
+override Kiln.GemReturned.ToString() -> string!
+override Kiln.GemSocketResult.Equals(object? obj) -> bool
+override Kiln.GemSocketResult.GetHashCode() -> int
+override Kiln.GemSocketResult.ToString() -> string!
+override Kiln.GemSocketsSetup.Equals(object? obj) -> bool
+override Kiln.GemSocketsSetup.GetHashCode() -> int
+override Kiln.GemSocketsSetup.ToString() -> string!
+static Kiln.GemReturned.operator !=(Kiln.GemReturned? left, Kiln.GemReturned? right) -> bool
+static Kiln.GemReturned.operator ==(Kiln.GemReturned? left, Kiln.GemReturned? right) -> bool
+static Kiln.Gems.AddSocket(Kiln.ItemInstanceRef item) -> System.Threading.Tasks.Task<Kiln.GemSocketResult!>!
+static Kiln.Gems.AllowSockets(Kiln.GemSocketKinds kinds, double rollChance = 0) -> Kiln.GemSocketsSetup!
+static Kiln.GemSocketResult.operator !=(Kiln.GemSocketResult? left, Kiln.GemSocketResult? right) -> bool
+static Kiln.GemSocketResult.operator ==(Kiln.GemSocketResult? left, Kiln.GemSocketResult? right) -> bool
+static Kiln.GemSocketsSetup.operator !=(Kiln.GemSocketsSetup? left, Kiln.GemSocketsSetup? right) -> bool
+static Kiln.GemSocketsSetup.operator ==(Kiln.GemSocketsSetup? left, Kiln.GemSocketsSetup? right) -> bool
+static Kiln.Gems.ReturnSocketedGems(Kiln.EntityId owner) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Kiln.GemReturned!>!>!
+static Kiln.Gems.SocketKinds.get -> Kiln.GemSocketKinds

@@ -239,7 +239,42 @@ const uint8_t* stack_at(const Access& a, uint64_t slot) {
     return inv ? inv + 12 * KILN_SLOT_INDEX(slot) : nullptr;
 }
 
-void run_give(const Access& a, const KilnItemsRequest& r, uint8_t* tx, KilnItemsResult* res) {
+// KILN_ITEMS_REPLACE (v7): the slot must hold exactly this one item entity of this item; read before the transaction.
+bool replace_source_ok(const Access& a, const KilnItemsRequest& r, KilnItemsResult* res) {
+    const uint8_t* st = stack_at(a, r.slot);
+    if (!st) return fail(res, KILN_ITEMS_SLOT_CHANGED, "inventory %u could not be read", KILN_SLOT_INVENTORY(r.slot)), false;
+    const uint32_t id = rd<uint32_t>(st, 0), cnt = rd<uint32_t>(st, 4), pide = rd<uint32_t>(st, 8);
+    if (id != r.item || cnt != 1)
+        return fail(res, KILN_ITEMS_SLOT_CHANGED, "the slot holds item 0x%08x, not 0x%08x", id, r.item), false;
+    if (pide != r.pide)
+        return fail(res, KILN_ITEMS_SLOT_CHANGED, "the slot holds item entity %u, not %u", pide, r.pide), false;
+    return true;
+}
+
+// The take half of a REPLACE on the give's transaction: exactly one op 1 (take) of `r.pide` out of `r.slot`.
+bool replace_take(const Access& a, const KilnItemsRequest& r, uint8_t* tx, KilnItemsResult* res) {
+    (void)a;
+    Result12 out{};
+    E.remove_items(&out, tx, r.entity, r.item, r.slot, 1);
+    const Ops ops = ops_of(tx);
+    uint32_t takes = 0;
+    bool exact = true;
+    for (uint64_t i = 0; i < ops.n && ops.p; ++i) {
+        const uint8_t* op = ops.p + i * kOpStride;
+        if (op[0x26] != 1) continue;
+        ++takes;
+        if (rd<uint64_t>(op, 0) != r.slot || !op[0x30] || rd<uint32_t>(op, 0x20) != r.pide) exact = false;
+    }
+    res->game_error = out.error;
+    if (out.error) return fail(res, KILN_ITEMS_REFUSED, "the game refused taking the old item (error 0x%02x)", out.error), false;
+    if (out.value != 0 || takes != 1 || !exact)
+        return fail(res, KILN_ITEMS_SLOT_CHANGED, "the old item could not be taken from its slot alone (%u take(s))", takes), false;
+    return true;
+}
+
+void run_give(const Access& a, const Job& job, uint8_t* tx, KilnItemsResult* res) {
+    const KilnItemsRequest& r = job.r;
+    const bool replace = (r.flags & KILN_ITEMS_REPLACE) != 0;
     const auto* setup = static_cast<const uint8_t*>(other(a, A_SETUP, r.entity));
     if (!setup) return fail(res, KILN_ITEMS_NO_INVENTORY, "entity %u has no inventory (no InventorySetup)", r.entity);
     if (!setup[E.setup_initialized])
@@ -250,14 +285,22 @@ void run_give(const Access& a, const KilnItemsRequest& r, uint8_t* tx, KilnItems
         return fail(res, KILN_ITEMS_SLOT_CHANGED, "the slot (inventory %u) is not one of entity %u's slots",
                     KILN_SLOT_INVENTORY(r.slot), r.entity);
     const bool gear = (rd<uint32_t>(info, E.item_flags) & 2u) != 0;
+    if (replace && !gear) return fail(res, KILN_ITEMS_REFUSED, "item 0x%08x is no gear (no item entity to re-create)", r.item);
+    if (replace && !replace_source_ok(a, r, res)) return;
     const bool player = r.entity >= 1 && r.entity <= kMaxPlayer;
     uint8_t flags = 0;
     if ((r.flags & KILN_ITEMS_NOTIFY) && player) flags |= 0x01;  // PickupEvent + "+N" popup
-    if (r.flags & KILN_ITEMS_NO_MERGE) flags |= 0x80;
+    if ((r.flags & KILN_ITEMS_NO_MERGE) || replace) flags |= 0x80;
     alignas(16) uint8_t s[kSetupBlock];
     fill_setup(a, r, flags, s);
     E.tx_ctor(tx);
     E.tx_init(tx, s);
+    if (replace && !replace_take(a, r, tx, res)) {  // nothing of the give runs: roll the take back
+        E.rollback(tx);
+        E.free_arrays(tx);
+        res->change_count = 0;
+        return;
+    }
     OptU32 level{r.level, static_cast<uint8_t>((r.flags & KILN_ITEMS_LEVEL) ? 1 : 0), {}};
     OptU8 rarity{r.rarity, static_cast<uint8_t>((r.flags & KILN_ITEMS_RARITY) ? 1 : 0)};
     OptF32 fuel{0.0f, 0, {}};
@@ -276,10 +319,16 @@ void run_give(const Access& a, const KilnItemsRequest& r, uint8_t* tx, KilnItems
     res->done = r.count - remaining;
     res->game_error = out.error;
     const bool dry = (r.flags & KILN_ITEMS_DRY_RUN) != 0;
-    const bool all = (r.flags & KILN_ITEMS_ALL_OR_NOTHING) != 0;
+    const bool all = (r.flags & KILN_ITEMS_ALL_OR_NOTHING) != 0 || replace;  // a replace is both halves or neither
     const bool commit = out.error == 0 && res->done > 0 && !(all && remaining > 0) && !dry;
     if (commit) {
-        pide_commit(tx, E.commit, r.flags, r.unlock, r.item); // createPide runs inside the commit
+        PideOptions o;
+        o.flags = r.flags;
+        o.unlock = r.unlock;
+        o.item = r.item;
+        o.dye = job.dye;
+        o.durability = job.durability;
+        pide_commit(tx, E.commit, o);  // createPide runs inside the commit
     } else {
         E.rollback(tx);
     }
@@ -292,6 +341,7 @@ void run_give(const Access& a, const KilnItemsRequest& r, uint8_t* tx, KilnItems
     if (queued != res->done) {  // the op list and the result disagree: report it, trust the game's count
         std::snprintf(res->message, sizeof res->message, "note: %u queued vs %u reported", queued, res->done);
     }
+    if (commit && replace) stamp_destroyed(r.pide, r.item);  // v7: the old item entity is gone (a tombstone from now on)
     if (commit && gear) {  // the game created each item entity at commit
         for (uint32_t i = 0; i < res->change_count; ++i) {
             if (const uint8_t* st = stack_at(a, res->changes[i].slot)) res->changes[i].pide = rd<uint32_t>(st, 8);
@@ -1020,7 +1070,7 @@ bool run_job(const Access& a, const Job& job, uint8_t* tx, KilnItemsResult* res,
     __try {
         if (job.take) run_take(a, job.r, tx, res);
         else if (job.r.flags & KILN_ITEMS_RECIPE) run_recipe(a, job.r, tx, res);
-        else run_give(a, job.r, tx, res);
+        else run_give(a, job, tx, res);
         return true;
     } __except (*code = GetExceptionCode(), EXCEPTION_EXECUTE_HANDLER) {
         return false;

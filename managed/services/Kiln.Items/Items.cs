@@ -193,7 +193,12 @@ public static unsafe partial class Items
                     r.Unlock = un >= 5 ? (byte)255 : (byte)un;
                 }
             }
-            if (g.GemSlot) r.Flags |= ItemsNative.GemSlot;
+            if (g.GemSlot)
+            {
+                r.Flags |= ItemsNative.GemSlot;
+                // v7: gear other than weapons gets the slot when a mod allowed its kind (Gems.AllowSockets)
+                if (ItemSockets.AllowsGive(item)) r.Flags |= ItemsNative.GemSlotAny;
+            }
         }
         if (options.HasFlag(GiveOptions.Notify)) r.Flags |= ItemsNative.Notify;
         if (options.HasFlag(GiveOptions.AllOrNothing)) r.Flags |= ItemsNative.AllOrNothing;
@@ -316,8 +321,13 @@ public static unsafe partial class Items
     private static readonly HashSet<ModContext> Watched = new();
     private static long _nextKey;
 
-    private static Task<ItemsResult> Submit(bool take, ItemsNative.Request r, string api)
+    private static Task<ItemsResult> Submit(bool take, ItemsNative.Request r, string api) =>
+        SubmitEx(take, new ItemsNative.RequestEx { Base = r }, api);
+
+    // v7: the request with its extension (Base.Size says which: the v1 size, or sizeof(RequestEx) for a dye / durability)
+    internal static Task<ItemsResult> SubmitEx(bool take, ItemsNative.RequestEx rx, string api)
     {
+        var r = rx.Base;
         var t = Require(api);
         if (r.Count == 0) return Invalid(new EntityId(r.Entity), new ItemId(r.Item), 0, "count must be 1-100000");
         if (r.Entity == 0) return Invalid(default, new ItemId(r.Item), (int)r.Count, "no entity");
@@ -336,8 +346,8 @@ public static unsafe partial class Items
         ulong ticket = 0;
         var owner = Services.CallerOwner;
         var rc = take
-            ? t->Take(owner, &r, &OnDone, (void*)key, &ticket)
-            : t->Give(owner, &r, &OnDone, (void*)key, &ticket);
+            ? t->Take(owner, &rx.Base, &OnDone, (void*)key, &ticket)
+            : t->Give(owner, &rx.Base, &OnDone, (void*)key, &ticket);
         if (rc != ItemsNative.Ok)
         {
             lock (Gate) InFlight.Remove(key);

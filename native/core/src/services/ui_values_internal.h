@@ -8,6 +8,7 @@
 //   ui_values_changes.cpp  change publication: identities, the 4096-entry cache, Added/Updated/Removed/Evicted/Reset
 //   ui_values_slots.cpp    the drawn slots of each completed UI frame (copy_slots, subscribe_slots)
 //   ui_values_gemforge.cpp the copied GEMS candidate list and selection context
+//   ui_values_sockets.cpp  gems.sockets: the Gem Forge lists' category masks widened for sockets on other gear
 //   ui_values_lines.cpp    tooltip lines collected at the item detail view, the details window's snapshots
 //   ui_values_service.cpp  the production environment (owners, kiln.caps, sigdb, kiln.hooks, kiln.client, kiln.ui),
 //                          the SEH guards and the service's registration with the core
@@ -162,6 +163,13 @@ void slots_reset_for_tests();
 KilnResult gemforge_copy(KilnOwner, uint64_t, uint64_t, KilnUiGemForgeFrame*, KilnUiGemForgeCandidate*, uint32_t,
                         uint32_t*);
 void gemforge_reset_for_tests();
+
+// ---- gems.sockets: the Gem Forge's widened category masks (ui_values_sockets.cpp) ----
+KilnResult sockets_set(KilnOwner owner, uint32_t category_mask);
+void sockets_owner_retired(KilnOwner owner);
+uint32_t sockets_effective();  // the OR over owners without Weapons (the extra bits the hooks add); 0 = vanilla
+uint32_t sockets_seen();       // every extra bit applied in this process: a list built a frame ago may still hold one
+void sockets_reset_for_tests();
 
 // ---- change publication (ui_values_changes.cpp) ----
 bool changes_wanted();  // a change subscriber exists: the chains stage their results

@@ -8,12 +8,26 @@
 //    current value += the newly unlocked count (the workbench's upgrade does both, one at a time; docs/re/items.md).
 //  - GEM_SLOT: on a Weapon (ItemInfo category 2) whose list has no WeaponGemSlot (the game's roll did not give one),
 //    one entry {WeaponGemSlot, 12 zero bytes = an empty ItemStack} is appended while the list has room.
+// v7, the gem wave (feature gems.sockets: sigdb/symbols/server.d/gems-sockets.json; docs/kiln/services/gems-sockets.md).
+// The game's own gem slot is weapons-only: category 2 and (the BalancingRegistry chance roll or ItemInfo.gemSlotOverride),
+// server 0x1b1cf5..0x1b1e14. The rest of the gem system is category-blind, so the hook widens creation:
+//  - GEM_SLOT_ANY (with GEM_SLOT, scoped to a give): any gear but gems, dyes and customization items gets the slot;
+//  - gemSlotOverride.isSet on a non-weapon (no game item sets it outside the weapons; a data pack does): the slot, on
+//    every creation (loot, crafting, gives), as the game does for weapons;
+//  - socket rolls (socket_roll): a non-weapon of a kind with a chance rolls the slot on every creation;
+//  - DYE / DURABILITY (scoped to a give, used by Gems.AddSocket's re-creation): a ColorPaletteItem {dye} and a
+//    DurabilityPercentageInit {fraction} entry (the game's item_durability_init reads the latter), replaced when the
+//    list has one, else appended.
+// Weapons keep the game's own roll; an item whose list already has a WeaponGemSlot never gets a second one.
 // Component hashes are FNV-1a-32 of the reflected type names, so they hold across builds. Faults count; the item is
 // then created as the game made it.
 #include <windows.h>
 
 #include <atomic>
+#include <cmath>
 #include <cstring>
+#include <mutex>
+#include <unordered_map>
 
 #include "kiln_hook.hpp"
 #include "pide.h"
@@ -26,8 +40,15 @@ constexpr uint32_t kPerkContainerNew = 0xe288d50cu;  // keen::ecs::PerkContainer
 constexpr uint32_t kLevel = 0xe550da37u;             // keen::ecs::Level: 8-byte attribute header, u32 values[2]
 constexpr uint32_t kWeaponGemSlot = 0x84ba9b52u;     // keen::ecs::WeaponGemSlot {ItemStack weaponGem} (12 bytes)
 constexpr uint32_t kUsedItem = 0x0b02361du;          // keen::ecs::UsedItem {u32 itemId}
+constexpr uint32_t kDye = 0x103e50eau;               // keen::ecs::ColorPaletteItem {u32 paletteItemId} (4 bytes)
+constexpr uint32_t kDurabilityInit = 0x41184ffau;    // keen::ecs::DurabilityPercentageInit {float value} (4 bytes)
+constexpr uint8_t kEquipment = 1;                    // ItemCategory.Equipment (rings, armour, shields, backpacks)
 constexpr uint8_t kWeapons = 2;                      // ItemCategory.Weapons
 constexpr uint32_t kMaxPerks = 5;
+// ItemInfo.equipment.slot (EquipmentSlotType) sits 0x38 after ItemInfo.category (0xcc / 0x104, kfc's reflection of
+// keen::ItemInfo; the catalog reads both at these offsets). Only used when the category constant is 0xcc.
+constexpr int64_t kCategoryAtFixedLayout = 0xcc;
+constexpr int64_t kEquipSlotAfterCategory = 0x104 - 0xcc;
 
 struct Override {
     uint32_t hash;
@@ -40,16 +61,59 @@ static_assert(sizeof(Override) == 24);
 alignas(16) uint8_t g_zero_gem[16] = {};  // the appended gem slot's data (read by the spawn, never written)
 kiln::MidHook2 h_spawn;
 int64_t g_list = 0, g_count = 0, g_category = 0;  // rbp displacements (int8), ItemInfo offset
+int64_t g_override = 0;                          // v7: ItemInfo.gemSlotOverride.isSet (0 = feature gems.sockets off)
 const uint32_t* g_level_index = nullptr;         // createPide's current-level index into Level's values
 bool g_ok = false;
 
 thread_local uint32_t t_flags = 0;
 thread_local uint8_t t_unlock = 0;
 thread_local uint32_t t_item = 0;
+thread_local uint32_t t_dye = 0;      // the appended ColorPaletteItem's data (lives through the commit)
+thread_local float t_durability = 1;  // the appended DurabilityPercentageInit's data
+
+// v7 socket rolls: per owner, and the highest chance of each kind (float bits; read lock-free by the hook)
+std::mutex g_roll_mu;
+std::unordered_map<KilnOwner, KilnItemsSocketRoll> g_rolls;
+std::atomic<uint32_t> g_roll_bits[4] = {};
+std::atomic<bool> g_roll_any{false};
+
+float rand01() {  // per thread: xorshift64*, seeded from the thread and the clock
+    thread_local uint64_t x = 0;
+    if (x == 0) {
+        x = (static_cast<uint64_t>(GetCurrentThreadId()) << 32) ^ GetTickCount64() ^ reinterpret_cast<uintptr_t>(&x);
+        if (x == 0) x = 0x9e3779b97f4a7c15ull;
+    }
+    x ^= x >> 12;
+    x ^= x << 25;
+    x ^= x >> 27;
+    return static_cast<float>((x * 0x2545f4914f6cdd1dull) >> 40) / static_cast<float>(1u << 24);  // [0, 1)
+}
+float (*g_rand)() = &rand01;  // tests replace it
 
 struct Counters {
     std::atomic<uint64_t> unlocked{0}, gems{0}, faults{0};
+    std::atomic<uint64_t> any{0}, overrides{0}, rolled{0}, extras{0};  // v7
 } C;
+
+float roll_chance(SocketKind k) {
+    if (k < kKindRings || k > kKindOther) return 0;
+    const uint32_t bits = g_roll_bits[k].load(std::memory_order_relaxed);
+    float f;
+    std::memcpy(&f, &bits, 4);
+    return f;
+}
+
+// Sets an entry's 4-byte value, or appends {hash, data, 4} while the list has room. false: neither.
+bool put4(Override* list, uint64_t& count, uint64_t cap, Override* existing, uint32_t hash, void* data) {
+    if (existing && existing->data && existing->size >= 4) {
+        std::memcpy(existing->data, data, 4);
+        return true;
+    }
+    if (existing || count >= cap) return false;
+    list[count] = Override{hash, 0, data, 4};
+    ++count;
+    return true;
+}
 
 bool layout_ok(int64_t list, int64_t count, int64_t category) {
     // sigdb's d8 captures are unsigned bytes; the instructions sign-extend them as rbp displacements.
@@ -66,13 +130,39 @@ void apply(safetyhook::Context& c) {
     if (!list || count > 64 || cap < count) return;
     Override* perks = nullptr;
     Override* level = nullptr;
+    Override* dye = nullptr;
+    Override* durability = nullptr;
     bool gem = false, own_item = false;
     for (uint64_t i = 0; i < count; ++i) {
         if (list[i].hash == kPerkContainerNew && list[i].size >= 2) perks = &list[i];
         else if (list[i].hash == kLevel && list[i].size >= 16) level = &list[i];
         else if (list[i].hash == kWeaponGemSlot) gem = true;
+        else if (list[i].hash == kDye) dye = &list[i];
+        else if (list[i].hash == kDurabilityInit) durability = &list[i];
         else if (list[i].hash == kUsedItem && list[i].size >= 4 && list[i].data)
-            own_item = *static_cast<const uint32_t*>(list[i].data) == t_item;
+            own_item = t_item != 0 && *static_cast<const uint32_t*>(list[i].data) == t_item;
+    }
+    // v7: a gem slot on a non-weapon the game creates (any creation, no give scope): gemSlotOverride, or a roll
+    if (!gem && info && g_override && count < cap) {
+        const uint8_t category = info[g_category];
+        const SocketKind kind = socket_kind(
+            category, g_category == kCategoryAtFixedLayout ? info[g_category + kEquipSlotAfterCategory] : 0xFF);
+        const bool scoped_any = own_item && (t_flags & KILN_ITEMS_GEM_SLOT) && (t_flags & KILN_ITEMS_GEM_SLOT_ANY);
+        if (kind != kKindNone && kind != kKindWeapon) {
+            std::atomic<uint64_t>* counter = nullptr;
+            if (scoped_any) counter = &C.any;
+            else if (info[g_override] != 0) counter = &C.overrides;
+            else if (g_roll_any.load(std::memory_order_relaxed)) {
+                const float chance = roll_chance(kind);
+                if (chance > 0 && g_rand() < chance) counter = &C.rolled;
+            }
+            if (counter) {
+                list[count] = Override{kWeaponGemSlot, 0, g_zero_gem, 12};
+                ++count;
+                gem = true;
+                counter->fetch_add(1, std::memory_order_relaxed);
+            }
+        }
     }
     if (!own_item) return;
     // Both parts of an upgrade must be understood before changing either one.
@@ -93,6 +183,13 @@ void apply(safetyhook::Context& c) {
         ++count;
         C.gems.fetch_add(1, std::memory_order_relaxed);
     }
+    // v7 extras after the gem slot (the list has 8 inline entries; the slot matters most): durability, then the dye
+    if (t_flags & KILN_ITEMS_DURABILITY) {
+        if (put4(list, count, cap, durability, kDurabilityInit, &t_durability)) C.extras.fetch_add(1, std::memory_order_relaxed);
+    }
+    if (t_flags & KILN_ITEMS_DYE) {
+        if (put4(list, count, cap, dye, kDye, &t_dye)) C.extras.fetch_add(1, std::memory_order_relaxed);
+    }
 }
 
 void apply_guarded(safetyhook::Context& c) {
@@ -104,7 +201,8 @@ void apply_guarded(safetyhook::Context& c) {
 }
 
 void hk_spawn(safetyhook::Context& c) {
-    if (t_flags & (KILN_ITEMS_UNLOCK | KILN_ITEMS_GEM_SLOT)) apply_guarded(c);
+    // v7: with feature gems.sockets every creation is looked at (one byte of ItemInfo; gemSlotOverride and rolls)
+    if ((t_flags & kPideFlags) || g_override) apply_guarded(c);
 }
 
 }  // namespace
@@ -121,55 +219,130 @@ bool pide_install(const KilnApi* api, KilnOwner owner) {
     // plausibility: rbp-relative slots of the list (pointer, count, capacity follow each other), a byte field of ItemInfo
     if (!layout_ok(g_list, g_count, g_category)) return false;
     g_level_index = reinterpret_cast<const uint32_t*>(index);
+    // v7: gemSlotOverride's offset; without it (feature gems.sockets off) the v7 options are refused
+    int64_t gem_override = 0;
+    const bool sockets = api->feature(KilnStr{"gems.sockets", 12}) && cst("items/item.gem_override", &gem_override) &&
+                         gem_override > g_category && gem_override < 0x1000;
     g_ok = h_spawn.install(api, owner, site, &hk_spawn, "items/PideSpawn");
+    if (g_ok && sockets) g_override = gem_override;
     return g_ok;
 }
 
 bool pide_available() { return g_ok; }
+bool pide_sockets_available() { return g_ok && g_override != 0; }
 
 bool pide_request_valid(uint32_t flags, uint8_t unlock) {
-    if ((flags & (KILN_ITEMS_UNLOCK | KILN_ITEMS_GEM_SLOT)) && (flags & KILN_ITEMS_RECIPE)) return false;
+    if ((flags & kPideFlags) && (flags & KILN_ITEMS_RECIPE)) return false;
+    if ((flags & KILN_ITEMS_GEM_SLOT_ANY) && !(flags & KILN_ITEMS_GEM_SLOT)) return false;
     return (flags & KILN_ITEMS_UNLOCK) ? ((unlock >= 1 && unlock <= 5) || unlock == 255) : unlock == 0;
 }
 
-void pide_begin(uint32_t flags, uint8_t unlock, uint32_t item) {
-    t_flags = g_ok ? (flags & (KILN_ITEMS_UNLOCK | KILN_ITEMS_GEM_SLOT)) : 0;
-    t_unlock = unlock;
-    t_item = item;
+void pide_begin(const PideOptions& o) {
+    t_flags = g_ok ? (o.flags & kPideFlags) : 0;
+    t_unlock = o.unlock;
+    t_item = o.item;
+    t_dye = o.dye;
+    t_durability = o.durability;
 }
 
 void pide_end() {
     t_flags = 0;
     t_unlock = 0;
     t_item = 0;
+    t_dye = 0;
+    t_durability = 1;
 }
 
-void pide_commit(void* tx, void(KILN_CALL* commit)(void*), uint32_t flags, uint8_t unlock, uint32_t item) {
+void pide_commit(void* tx, void(KILN_CALL* commit)(void*), const PideOptions& o) {
     const auto previous_flags = t_flags;
     const auto previous_unlock = t_unlock;
     const auto previous_item = t_item;
-    pide_begin(flags, unlock, item);
+    const auto previous_dye = t_dye;
+    const auto previous_durability = t_durability;
+    pide_begin(o);
 #ifdef KILN_ITEMS_HOST_TEST
     try { commit(tx); }
     catch (...) {
         t_flags = previous_flags; t_unlock = previous_unlock; t_item = previous_item;
+        t_dye = previous_dye; t_durability = previous_durability;
         throw;
     }
     t_flags = previous_flags; t_unlock = previous_unlock; t_item = previous_item;
+    t_dye = previous_dye; t_durability = previous_durability;
 #else
     __try { commit(tx); }
     __finally {
         t_flags = previous_flags;
         t_unlock = previous_unlock;
         t_item = previous_item;
+        t_dye = previous_dye;
+        t_durability = previous_durability;
     }
 #endif
+}
+
+void pide_commit(void* tx, void(KILN_CALL* commit)(void*), uint32_t flags, uint8_t unlock, uint32_t item) {
+    PideOptions o;
+    o.flags = flags;
+    o.unlock = unlock;
+    o.item = item;
+    pide_commit(tx, commit, o);
 }
 
 void pide_counters(uint64_t* unlocked, uint64_t* gems, uint64_t* faults) {
     *unlocked = C.unlocked.load();
     *gems = C.gems.load();
     *faults = C.faults.load();
+}
+
+void pide_socket_counters(uint64_t* by_give, uint64_t* by_override, uint64_t* by_roll, uint64_t* extras) {
+    *by_give = C.any.load();
+    *by_override = C.overrides.load();
+    *by_roll = C.rolled.load();
+    *extras = C.extras.load();
+}
+
+SocketKind socket_kind(uint8_t category, uint8_t equip_slot) {
+    switch (category) {
+        case kWeapons: return kKindWeapon;
+        case 0:   // Customization (body parts, hair)
+        case 15:  // WeaponGem: a gem never holds a gem
+        case 16:  // ColorPalette (dyes)
+            return kKindNone;
+        case kEquipment:
+            if (equip_slot == 37) return kKindRings;                       // Armour_Ring
+            if (equip_slot >= 13 && equip_slot <= 17) return kKindArmour;  // Armour_Head .. Armour_Feet
+            if (equip_slot == 18) return kKindShields;                     // Shield
+            if (equip_slot == 0xFF) return kKindNone;                      // layout unknown: no roll by kind
+            return kKindOther;
+        default: return kKindOther;
+    }
+}
+
+KilnResult pide_socket_roll(KilnOwner owner, const KilnItemsSocketRoll* roll) {
+    if (roll) {
+        if (roll->size < sizeof(KilnItemsSocketRoll) || roll->reserved != 0) return KILN_ERR_INVALID_ARGUMENT;
+        for (float f : {roll->rings, roll->armour, roll->shields, roll->other})
+            if (!(f >= 0.0f && f <= 1.0f)) return KILN_ERR_INVALID_ARGUMENT;  // NaN fails too
+        if (!pide_sockets_available()) return KILN_ERR_UNAVAILABLE;
+    }
+    std::lock_guard lock(g_roll_mu);
+    if (!roll || (roll->rings == 0 && roll->armour == 0 && roll->shields == 0 && roll->other == 0)) g_rolls.erase(owner);
+    else g_rolls[owner] = *roll;
+    float best[4] = {};
+    for (const auto& [o, r] : g_rolls) {
+        const float v[4] = {r.rings, r.armour, r.shields, r.other};
+        for (int k = 0; k < 4; ++k) best[k] = v[k] > best[k] ? v[k] : best[k];
+    }
+    bool any = false;
+    for (int k = 0; k < 4; ++k) {
+        uint32_t bits;
+        std::memcpy(&bits, &best[k], 4);
+        g_roll_bits[k].store(bits, std::memory_order_relaxed);
+        any |= best[k] > 0;
+    }
+    g_roll_any.store(any, std::memory_order_relaxed);
+    return KILN_OK;
 }
 
 }  // namespace kitems

@@ -13,6 +13,27 @@ internal static unsafe class ItemsNative
     // KilnItemsRequest.flags
     public const uint Level = 0x01, Rarity = 0x02, ExactSlot = 0x04, AllOrNothing = 0x08, Notify = 0x10, NoMerge = 0x20,
         DryRun = 0x40, Recipe = 0x80, Unlock = 0x100, GemSlot = 0x200;
+    // v7 (the gem wave): sockets on any gear, the re-creation of gear (Gems.AddSocket)
+    public const uint GemSlotAny = 0x400, Replace = 0x800, Dye = 0x1000, DurabilityFlag = 0x2000;
+
+    /// <summary>KilnItemsRequestEx (v7): the request, then the dye and durability of a give with Dye / DurabilityFlag.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RequestEx
+    {
+        public Request Base;
+        public uint DyeItem;
+        public float Durability;
+        public uint R0, R1;
+    }
+
+    /// <summary>KilnItemsSocketRoll (v7).</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct SocketRoll
+    {
+        public uint Size;
+        public float Rings, Armour, Shields, Other;
+        public uint Reserved;
+    }
 
     [StructLayout(LayoutKind.Sequential)]
     public struct Request
@@ -566,6 +587,14 @@ internal static unsafe class ItemsNative
         public delegate* unmanaged[Cdecl]<ulong, ulong, EquipDecisions.SetOp*, uint, SetPlan*, int> SetPlanOf;
         public delegate* unmanaged[Cdecl]<ulong, SetRequest*, delegate* unmanaged[Cdecl]<SetResult*, void*, void>, void*, ulong*, int> EquipSet;
         public delegate* unmanaged[Cdecl]<ulong, int> SetCancel;
+    }
+
+    /// <summary>The v7 table (the gem wave): v6 followed by socket_roll.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct TableV7
+    {
+        public TableV6 V6;
+        public delegate* unmanaged[Cdecl]<ulong, SocketRoll*, int> SocketRollOf;
     }
 
     /// <summary>True when a table of <paramref name="size"/> bytes has the v6 member that ends at <paramref name="end"/>.</summary>

@@ -61,7 +61,7 @@ IReadOnlyList<EntityId> chests = Items.FindInventories(InventoryKinds.Containers
   Unset `Gear` values are the game's defaults, the same as crafting: a level rolled in the item's range, `rarity` or, with
   `generateRarity` set (loot weapons), the lowest allowed rarity (Common), never a rolled one: docs/re/items.md section 10.
 - `Gear.Unlocked` (1-4, 5 or 255 = all the item has; null or 0 = none) and `Gear.GemSlot` (weapons: an empty gem slot when the game's roll
-  gave none) are applied as the item entity is created: a hook in the game's createPide changes the component list it
+  gave none; other gear only when a mod allowed its kind with `Gems.AllowSockets`: [gems-sockets.md](gems-sockets.md)) are applied as the item entity is created: a hook in the game's createPide changes the component list it
   spawns the item with (`PerkContainerNew.unlockedPerks`, the `Level` value + the unlocked count, a `WeaponGemSlot` entry;
   docs/re/creative-mode-146.md "Part 3 research", section 2). `Items.GearOptionsAvailable` says whether this build has
   it (feature `items.pide_options`); without it a give with them is `Unavailable`. C: `KILN_ITEMS_UNLOCK` with

@@ -131,10 +131,14 @@ KilnUiItemView gem_view(const GemRawView& raw) {
 int gem_lookup(uint32_t id, uint8_t& cat) {
     return id && env().item_category ? env().item_category(id, &cat) : -1;
 }
+// A category the producer's carrier pass lists: Weapons (2), or one gems.sockets added in this process (a list the
+// game built before a mod narrowed the mask again may still hold it).
+bool gem_carrier_category(uint8_t cat) { return cat == 2 || (cat < 32 && ((sockets_seen() >> cat) & 1u)); }
 enum GemRows { kRowsBroken = -1, kRowsNoCatalog = 0, kRowsOk = 1 };
-// The producer lists only loose WeaponGem (15) items and Weapons (2) that hold a gem (docs/re: 0xd27cb0). A row the
-// catalog does not know is classified like the game did: a weapon when the model has a socket gem for its pide,
-// otherwise a loose gem. A known item of another category, or a known weapon without its gem, breaks the contract.
+// The producer lists only loose WeaponGem (15) items and carriers that hold a gem: Weapons (2), plus the categories
+// gems.sockets widened (docs/re: 0xd27cb0). A row the catalog does not know is classified like the game did: a carrier
+// when the model has a socket gem for its pide, otherwise a loose gem. A known item of another category, or a known
+// carrier without its gem, breaks the contract.
 GemRows gem_rows(GemReader& rd, const GemContext& c, const GemArray& a, GemFrame& frame) {
     uintptr_t sockets = 0; uint64_t count = 0;
     if (!rd.get(c.model, 0x6b40, sockets) || !rd.get(c.model, 0x6b48, count) || count > kGemMax ||
@@ -158,7 +162,7 @@ GemRows gem_rows(GemReader& rd, const GemContext& c, const GemArray& a, GemFrame
         uint8_t cat = 0;
         const int known = gem_lookup(v.item, cat);
         if (known < 0) return kRowsNoCatalog;
-        if (known && cat != 15 && cat != 2) return kRowsBroken;
+        if (known && cat != 15 && !gem_carrier_category(cat)) return kRowsBroken;
         const auto it = v.client_entity ? gems.find(v.client_entity) : gems.end();
         const bool loose = known ? cat == 15 : it == gems.end();
         if (loose) {
@@ -205,7 +209,7 @@ void gem_capture_before(GemCapture& cap, uintptr_t state, uintptr_t header, GemR
         if (known < 0) {
             gem_note("Kiln's item catalog could not be asked about the selected weapon");
             m = {}; cap.frame.rows.clear(); // no catalog: this frame stays unavailable
-        } else if ((known && cat != 2) || !m.selected_weapon.client_entity) {
+        } else if ((known && !gem_carrier_category(cat)) || !m.selected_weapon.client_entity) {
             gem_fail("Gem Forge selected weapon is incoherent"); m.ok = 0;
         }
     }

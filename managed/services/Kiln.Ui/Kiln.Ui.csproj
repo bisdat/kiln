@@ -14,6 +14,8 @@
     <InternalsVisibleTo Include="Kiln.Admin" />
     <!-- the features a failed hook takes down, on a fake kiln.ui table -->
     <InternalsVisibleTo Include="Kiln.Contract.Tests" />
+    <!-- Gems.AllowSockets widens the client's Gem Forge lists through GemForgeSockets.Widen -->
+    <InternalsVisibleTo Include="Kiln.Abilities" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../Kiln.Api/Kiln.Api.csproj" Private="false" />

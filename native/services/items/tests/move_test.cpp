@@ -39,6 +39,7 @@ uint64_t g_test_step = 1;
 uint64_t current_step() { return g_test_step; }  // v4: an entry's age (instances.cpp)
 // engine.cpp's give path calls these; this test never gives, and pide.cpp has its own test (pide_test.cpp)
 void pide_commit(void* tx, void(KILN_CALL* commit)(void*), uint32_t, uint8_t, uint32_t) { commit(tx); }
+void pide_commit(void* tx, void(KILN_CALL* commit)(void*), const PideOptions&) { commit(tx); }
 }  // namespace kitems
 
 using namespace kitems;
@@ -989,11 +990,141 @@ void chain_test(bool other_first) {
 
 }  // namespace
 
+// v7 (the gem wave): KILN_ITEMS_REPLACE, a give that first takes one item entity out of its slot on the same
+// transaction (Gems.AddSocket re-creates gear this way). Fake addItems / removeItems on the fake world record the
+// game's commit ops (op 0 put, op 1 take) where the engine reads them.
+std::vector<uint8_t> g_ops;  // kOpStride records
+struct OpList { const uint8_t* p; uint64_t n; };
+OpList* g_oplist = nullptr;
+uint32_t g_next_pide = 900;
+bool g_add_fails = false;
+void push_op(uint8_t kind, uint64_t slot, uint32_t item, uint16_t amount, uint32_t pide) {
+    const size_t at = g_ops.size();
+    g_ops.resize(at + kOpStride, 0);
+    uint8_t* op = g_ops.data() + at;
+    std::memcpy(op, &slot, 8);
+    std::memcpy(op + 8, &item, 4);
+    std::memcpy(op + 0x20, &pide, 4);
+    std::memcpy(op + 0x24, &amount, 2);
+    op[0x26] = kind;
+    op[0x30] = pide ? 1 : 0;
+    g_oplist->p = g_ops.data();
+    g_oplist->n = g_ops.size() / kOpStride;
+}
+uint32_t links_of(uint32_t owner, uint32_t* out) {
+    auto it = g_comps.find({T_SETUP, owner});
+    uint32_t n = 0;
+    for (int k = 0; it != g_comps.end() && k < 16; ++k) {
+        uint32_t l;
+        std::memcpy(&l, it->second.data() + 4 * k, 4);
+        if (l) out[n++] = l;
+    }
+    return n;
+}
+Result12* __fastcall fake_remove(Result12* out, void*, uint32_t owner, uint32_t item, uint64_t slot, uint32_t count) {
+    *out = {};
+    uint32_t links[16];
+    const uint32_t n = links_of(owner, links);
+    auto take_from = [&](uint32_t inv, uint32_t k) {
+        if (!count || item_at(inv, k) != item) return;
+        const uint32_t have = count_at(inv, k), pide = pide_at(inv, k), t = have < count ? have : count;
+        push_op(1, KILN_SLOT_ID(inv, k), item, static_cast<uint16_t>(t), pide);
+        put(inv, k, have - t ? item : 0, have - t, have - t ? pide : 0);
+        count -= t;
+    };
+    if (slot) take_from(KILN_SLOT_INVENTORY(slot), KILN_SLOT_INDEX(slot));
+    for (uint32_t i = 0; i < n; ++i)
+        for (uint32_t k = 0; k < 8; ++k) take_from(links[i], k);
+    out->value = count;
+    return out;
+}
+Result12* __fastcall fake_add(Result12* out, void*, uint32_t owner, uint64_t slot, uint32_t item, uint32_t count, OptU32*,
+                              OptU8*, OptF32*) {
+    *out = {};
+    if (g_add_fails) {
+        out->error = 0x27;
+        return out;
+    }
+    uint32_t links[16];
+    const uint32_t n = links_of(owner, links);
+    auto put_into = [&](uint32_t inv, uint32_t k) {
+        if (!count || item_at(inv, k) != 0) return;
+        push_op(0, KILN_SLOT_ID(inv, k), item, 1, 0);
+        put(inv, k, item, 1, g_next_pide++);  // the item entity the commit creates (the engine reads it after)
+        --count;
+    };
+    if (slot) put_into(KILN_SLOT_INVENTORY(slot), KILN_SLOT_INDEX(slot));
+    for (uint32_t i = 0; i < n; ++i)
+        for (uint32_t k = 0; k < 8; ++k) put_into(links[i], k);
+    out->value = count;
+    return out;
+}
+
+void replace_test() {
+    E.tx_ctor = &fake_tx_ctor;
+    E.tx_init = &fake_tx_init;
+    E.commit = &fake_tx_noop;
+    E.rollback = &fake_tx_rollback;
+    E.free_arrays = &fake_tx_noop;
+    E.remove_items = &fake_remove;
+    E.add_items = &fake_add;
+    E.tx_ops = 0x100;  // FakeTx.words[0x20..0x21]
+    FakeTx tx;
+    Access a;
+    check(access_from_tx(&tx, &a), "replace: transaction accessors check out");
+    auto run = [&](uint32_t item, uint64_t slot, uint32_t pide, uint32_t flags) {
+        g_ops.clear();
+        new (&tx) FakeTx();
+        g_oplist = reinterpret_cast<OpList*>(reinterpret_cast<uint8_t*>(&tx) + 0x100);
+        *g_oplist = {};
+        Job job;
+        job.r.size = sizeof(KilnItemsRequest);
+        job.r.flags = KILN_ITEMS_REPLACE | flags;
+        job.r.entity = A;
+        job.r.item = item;
+        job.r.count = 1;
+        job.r.slot = slot;
+        job.r.pide = pide;
+        KilnItemsResult res{};
+        unsigned long code = 0;
+        check(run_job(a, job, reinterpret_cast<uint8_t*>(&tx), &res, &code), "replace: the job runs without a fault");
+        return res;
+    };
+    put(A, 2, SWORD, 1, 77);
+    put(A, 0, WOOD, 9);
+    auto r = run(SWORD, KILN_SLOT_ID(A, 2), 77, KILN_ITEMS_GEM_SLOT | KILN_ITEMS_GEM_SLOT_ANY);
+    check(r.status == KILN_ITEMS_DONE && r.done == 1 && item_at(A, 2) == SWORD && pide_at(A, 2) == 900 &&
+              r.change_count == 1 && r.changes[0].slot == KILN_SLOT_ID(A, 2) && r.changes[0].pide == 900 &&
+              g_ops.size() == 2 * kOpStride && g_ops[0x26] == 1 && g_ops[kOpStride + 0x26] == 0,
+          "replace: one transaction takes item entity 77 out of its slot, then creates the new one in the same slot");
+    r = run(SWORD, KILN_SLOT_ID(A, 2), 77, 0);
+    check(r.status == KILN_ITEMS_SLOT_CHANGED && pide_at(A, 2) == 900 && g_ops.empty(),
+          "replace: a slot that no longer holds that item entity is refused before the transaction");
+    r = run(WOOD, KILN_SLOT_ID(A, 0), 77, 0);
+    check(r.status == KILN_ITEMS_REFUSED && count_at(A, 0) == 9, "replace: an item without an item entity is refused");
+    put(A, 4, SWORD, 1, 55);
+    g_add_fails = true;
+    r = run(SWORD, KILN_SLOT_ID(A, 4), 55, 0);
+    g_add_fails = false;
+    check(r.status == KILN_ITEMS_REFUSED && item_at(A, 4) == SWORD && pide_at(A, 4) == 55,
+          "replace: when the game refuses the new item, the take is rolled back with it (the old item stays)");
+    for (uint32_t k = 0; k < 8; ++k) if (k != 4) put(A, k, IRON, 1);
+    for (uint32_t k = 0; k < 8; ++k) put(A2, k, IRON, 1);
+    r = run(SWORD, KILN_SLOT_ID(A, 4), 55, KILN_ITEMS_DRY_RUN);
+    check(r.status == KILN_ITEMS_DONE && item_at(A, 4) == SWORD && pide_at(A, 4) == 55,
+          "replace: a dry run in a full inventory says it would work (the freed slot) and changes nothing");
+}
+
 int main(int argc, char** argv) {
     setup_engine();
     const std::string mode = argc > 1 ? argv[1] : "all";
     if (mode == "review") {
         review_tests();
+        std::printf("items move test (%s): %d failure(s)\n", mode.c_str(), failures);
+        return failures ? EXIT_FAILURE : EXIT_SUCCESS;
+    }
+    if (mode == "replace") {
+        replace_test();
         std::printf("items move test (%s): %d failure(s)\n", mode.c_str(), failures);
         return failures ? EXIT_FAILURE : EXIT_SUCCESS;
     }

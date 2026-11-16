@@ -19,6 +19,8 @@
     <!-- Item instances (ItemInstances, ItemRecord, ItemInstanceInfo): instance data lives in Kiln.Saves. -->
     <InternalsVisibleTo Include="Kiln.Saves" />
     <InternalsVisibleTo Include="Kiln.Saves.Tests" />
+    <!-- the gem wave: Gems (sockets on any gear, ItemSockets) and the gem reads live in Kiln.Abilities -->
+    <InternalsVisibleTo Include="Kiln.Abilities" />
     <ProjectReference Include="../../Kiln.Api/Kiln.Api.csproj" Private="false" />
     <EmbeddedResource Include="Data/items.tsv" LogicalName="Kiln.Items.items.tsv" />
     <None Include="Data/ITEMS-LICENSE.txt" />
