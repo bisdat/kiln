@@ -191,6 +191,7 @@ bool build_frame(float width, float height, float dpi) {
     io.DeltaTime = dt;
     style_frame_begin();  // the game's font and new images join the atlas / texture list before the frame
     ImGui::NewFrame();
+    footer_overlay();  // Kiln's mark next to its line in the main menu's footer, behind every window (menu_footer.cpp)
     KilnUiFrame f{};
     f.size = sizeof f;
     f.width = width;
@@ -439,6 +440,9 @@ KilnResult KILN_CALL t_subscribe_key_ex(KilnOwner o, KilnUiKeyFn fn, void* u, ui
     return keys_subscribe(o, fn, u, flags, out);
 }
 
+// Kiln's line in the main menu's footer (menu_footer.cpp)
+void KILN_CALL t_menu_footer(int32_t mods, uint32_t flags) { footer_set(mods, flags); }
+
 // kiln.ui.tick (for Kiln.Host)
 KilnResult KILN_CALL tt_subscribe(KilnOwner o, KilnUiFrameTickFn fn, void* u, KilnHandle* out) { return game_subscribe_frame_tick(o, fn, u, out); }
 KilnResult KILN_CALL tt_unsubscribe(KilnHandle h) { return game_unsubscribe(h) ? KILN_OK : KILN_ERR_NOT_FOUND; }
@@ -459,9 +463,11 @@ static_assert(offsetof(KilnUiApi, menu_shown) == offsetof(KilnUiApi, subscribe_w
               "kiln.ui v6 appends menu_shown, menu_entries, menu_activate, menu_scroll after subscribe_window_input");
 static_assert(offsetof(KilnUiApi, subscribe_key_ex) == offsetof(KilnUiApi, menu_scroll) + sizeof(void*),
               "kiln.ui v7 appends subscribe_key_ex after menu_scroll (UiNative.Table7)");
-static_assert(offsetof(KilnUiApi, set_next_window_size_constraints) == offsetof(KilnUiApi, subscribe_key_ex) + sizeof(void*) &&
-                  sizeof(KilnUiApi) == offsetof(KilnUiApi, set_next_window_size_constraints) + sizeof(void*),
+static_assert(offsetof(KilnUiApi, set_next_window_size_constraints) == offsetof(KilnUiApi, subscribe_key_ex) + sizeof(void*),
               "kiln.ui appends size constraints after subscribe_key_ex");
+static_assert(offsetof(KilnUiApi, menu_footer) == offsetof(KilnUiApi, set_next_window_size_constraints) + sizeof(void*) &&
+                  sizeof(KilnUiApi) == offsetof(KilnUiApi, menu_footer) + sizeof(void*),
+              "kiln.ui appends menu_footer after the size constraints (UiNative.TableFooter)");
 static_assert(sizeof(KilnUiMenuEntry) == 40 && offsetof(KilnUiMenuEntry, entry) == 8 && offsetof(KilnUiMenuEntry, text) == 16 &&
                   offsetof(KilnUiMenuEntry, drawn) == 36,
               "KilnUiMenuEntry layout (UiNative.MenuEntryInfo)");
@@ -506,6 +512,7 @@ const KilnUiApi kTable = {
     // v7
     &t_subscribe_key_ex,
     &t_set_next_window_size_constraints,
+    &t_menu_footer,
 };
 
 std::string api_path(int kind) {

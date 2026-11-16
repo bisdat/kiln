@@ -70,8 +70,10 @@ inline bool capturing() {
 }
 // Something to draw this frame. The native fallback menu counts too.
 extern std::atomic<uint32_t> g_render_demand;  // kiln.render acquire_frames handles (render.cpp)
+extern std::atomic<uint32_t> g_footer_demand;  // Kiln's mark next to its line in the main menu's footer (menu_footer.cpp)
 inline bool want_draw() {
-    return overlay_drawing_on() && (capturing() || g_demand.load(std::memory_order_relaxed) > 0 || g_render_demand.load(std::memory_order_relaxed) > 0);
+    return overlay_drawing_on() && (capturing() || g_demand.load(std::memory_order_relaxed) > 0 || g_render_demand.load(std::memory_order_relaxed) > 0 ||
+                                    g_footer_demand.load(std::memory_order_relaxed) > 0);
 }
 bool in_frame();  // the calling thread is inside the overlay frame's callbacks (drawing calls work)
 
@@ -148,6 +150,13 @@ void scroll_after_frame(uint64_t frame);       // UI thread, after each UI frame
 void scroll_exit();                            // on_unload (the process exits with code 0): the crash guard's marker goes
 bool game_unsubscribe(KilnHandle h);
 void game_status_line(char* out, size_t cap);
+uint64_t game_frames();                        // UI frames finished so far (any thread)
+
+// ---- menu_footer.cpp (Kiln's line in the main menu's footer: feature ui.menu_footer, menu_footer.h) ----
+bool footer_install();                        // game_install: resolve, copy the footer function, hook it
+void footer_set(int32_t mods, uint32_t flags);  // any thread: the mods' count (< 0 unknown) and KILN_UI_FOOTER_* (Kiln.Ui)
+void footer_after_frame(uintptr_t sys10);     // UI thread, after each UI frame: the canvas metrics for the mark
+void footer_overlay();                        // render thread, inside the ImGui frame: the mark
 
 // ---- menu_page.cpp (the Kiln menu as a page of the game's main menu: feature ui.menu_page) ----
 bool page_install(bool main_menu_hooked);  // game_install, after the MainMenuEntry hook: resolve, hook Credits

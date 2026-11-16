@@ -44,6 +44,16 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -I"$here/chain_
 g++ -std=c++20 -O1 -g -Wall -Wextra -pthread -fsanitize=address,undefined \
     -I"$here/stubs" -I"$here/../../../core/abi" "$here/menu_page_host_test.cpp" -o "$out/menu_page_host_test"
 "$out/menu_page_host_test"
+# Kiln's line in the main menu's footer: its text, its mark's place, when Kiln's copy runs (menu_footer.h)
+g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/menu_footer_test.cpp" -o "$out/menu_footer_test"
+"$out/menu_footer_test"
+# the footer function's copy keeps its meaning (code_clone.h, Zydis from safetyhook); also over the game's own footer
+# function when the client exe is installed (read only)
+safetyhook=$here/../../../third_party/safetyhook
+[[ $out/zydis.o -nt $safetyhook/Zydis.c ]] || gcc -O1 -g -w -I"$safetyhook" -c "$safetyhook/Zydis.c" -o "$out/zydis.o"
+g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -I"$safetyhook" "$here/code_clone_test.cpp" "$out/zydis.o" \
+    -o "$out/code_clone_test"
+"$out/code_clone_test"
 
 imgui=$here/../../../third_party/imgui
 # Dear ImGui once, as objects, for both ImGui tests

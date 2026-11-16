@@ -198,6 +198,9 @@ enum {
     KILN_UI_ENTRY_ATTENTION = 2u,  /* the game's attention marker (pause menu only) */
 };
 
+/* menu_footer flags (size-guarded tail after set_next_window_size_constraints) */
+#define KILN_UI_FOOTER_SHOWN 1u /* draw Kiln's line in the main menu's footer (else the game's footer as it was) */
+
 /* menu_shown (v6): which mods' entries the game's menus draw; Kiln's own Mods entry is always drawn */
 enum {
     KILN_UI_MENU_SHOW_FEW = 0,     /* a menu draws its mods' entries while it has only a few, else none (the default) */
@@ -847,6 +850,14 @@ typedef struct KilnUiApi {
      * No-op outside drawing frames (including KILN_UI_OVERLAY=0). Check header.size through this member
      * and its non-null pointer before calling; older tables do not contain it. */
     void(KILN_CALL* set_next_window_size_constraints)(float min_w, float min_h, float max_w, float max_h);
+    /* Additive size-guarded tail (0.2.0-dev.29.11; check header.size through this member and its non-null pointer):
+     * Kiln's line in the main menu's footer, "Kiln <version> - <mods> Mods Loaded" with Kiln's mark, above the game's
+     * build number (feature ui.menu_footer; it takes the place of XHL-Core's "All mods loaded" line). Kiln.Ui calls it
+     * with the count of mods loaded this start (every engine's, as Kiln's Mods page counts them; < 0 not known yet: no
+     * line) and KILN_UI_FOOTER_SHOWN unless the player hid the line (Kiln setting mainMenuFooter). Until a call with
+     * a count and SHOWN, and whenever the line is hidden or faulted, the game draws its footer as it always did (with
+     * another mod's line there). Any thread; the next frame follows it. */
+    void(KILN_CALL* menu_footer)(int32_t mods, uint32_t flags);
 } KilnUiApi;
 
 /* ====================================================================================================================

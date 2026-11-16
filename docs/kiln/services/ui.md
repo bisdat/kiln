@@ -20,3 +20,15 @@ With `KILN_UI_WINDOW_ALWAYS_AUTO_RESIZE`, equal minimum and maximum width fixes
 the width while height follows content between `min_h` and `max_h`. EMF windows
 use `(width, 0, width, frame.height * 0.85f)`: later rows grow the window and content
 past the cap scrolls. Older overlays retain the previous appearing-only size call.
+
+## Kiln's line in the main menu's footer (0.2.0-dev.29.11)
+
+`KilnUiApi.menu_footer(int32_t mods, uint32_t flags)` is appended after `set_next_window_size_constraints`; the service
+version stays 7. On x64 it is at byte offset 896 and the table is 904 bytes. Readers check `header.size >=
+offsetof(KilnUiApi, menu_footer) + sizeof(ui->menu_footer)` and that the pointer is non-null; the managed mirror is
+`UiNative.TableFooter`.
+
+Kiln.Ui calls it with the count of mods loaded this start (< 0: not known yet, no line) and `KILN_UI_FOOTER_SHOWN`
+unless the player hid the line (setting `mainMenuFooter`). kiln.ui then draws "Kiln &lt;version&gt; - &lt;N&gt; Mods
+Loaded" above the game's build number, in place of XHL-Core's footer line ([the guide](../ui.md#kilns-line-in-the-main-menus-footer-since-020-dev2911)).
+Any thread; the next UI frame follows it. A native mod has no reason to call it.

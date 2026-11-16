@@ -284,6 +284,29 @@ internal static unsafe class UiNative
         public delegate* unmanaged[Cdecl]<float, float, float, float, void> SetNextWindowSizeConstraints;
     }
 
+    /// <summary>The tail after the size constraints (0.2.0-dev.29.11): menu_footer, Kiln's line in the main menu's footer
+    /// (<see cref="MainMenuFooter"/>).</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct TableFooter
+    {
+        public TableConstraints Base;
+        public delegate* unmanaged[Cdecl]<int, uint, void> MenuFooter;
+    }
+
+    /// <summary>KILN_UI_FOOTER_SHOWN.</summary>
+    public const uint FooterShown = 1;
+
+    /// <summary>kiln.ui's menu_footer, or null on a table without it (a kiln-ui.dll older than 0.2.0-dev.29.11).</summary>
+    public static delegate* unmanaged[Cdecl]<int, uint, void> MenuFooterSlot
+    {
+        get
+        {
+            var t = T;
+            if (t == null || t->Header.Size < (uint)sizeof(TableFooter)) return null;
+            return ((TableFooter*)t)->MenuFooter;
+        }
+    }
+
     public static delegate* unmanaged[Cdecl]<float, float, float, float, void> WindowConstraintsSlot
     {
         get
