@@ -72,14 +72,15 @@ public sealed class WriterOrderTests : IDisposable
         private readonly ManualResetEventSlim _reached = new(), _gate = new();
         private int _seen;
 
-        public Freeze(string op, int nth = 1, int tick = -1)
+        public Freeze(string op, int nth = 1, int tick = -1, TimeSpan? gate = null)
         {
+            var hold = gate ?? Long;
             var tickThread = tick < 0 ? Environment.CurrentManagedThreadId : tick;
             WorldStore.IoHook = o =>
             {
                 if (o != op || Environment.CurrentManagedThreadId == tickThread || Interlocked.Increment(ref _seen) != nth) return;
                 _reached.Set();
-                _gate.Wait(Long);  // never for good: a failed test must not leave the writer stuck for the next ones
+                _gate.Wait(hold);  // never for good: a failed test must not leave the writer stuck for the next ones
             };
         }
 
@@ -88,9 +89,9 @@ public sealed class WriterOrderTests : IDisposable
         public void Release() => _gate.Set();
     }
 
-    private Freeze FreezeAt(string op, int nth = 1)
+    private Freeze FreezeAt(string op, int nth = 1, TimeSpan? gate = null)
     {
-        var f = new Freeze(op, nth);
+        var f = new Freeze(op, nth, gate: gate);
         _freezes.Add(f);
         return f;
     }
@@ -360,6 +361,208 @@ public sealed class WriterOrderTests : IDisposable
         WorldStore.IoHook = _hook;
         Assert.Equal(DataMatch.Exact, _h.Restart(2, new FakeInstanceWorld()));
         Assert.Equal(90, Value(Store, 0));
+    }
+
+    // ---- review round 1 ----
+
+    private string Temp(string name)
+    {
+        var dir = Path.Combine(AppContext.BaseDirectory, "instance-tests", name + "-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        _copies.Add(dir);
+        return dir;
+    }
+
+    [Fact]
+    public void AResumedPruningStillKeepsTheGenerationsOfTheGamesBackups()
+    {
+        // Review 1, finding 1: a pruning that stopped for a staging ran again at the next confirmation without the save
+        // folder, so it no longer saw the game's backups and dropped the generation one of them needs.
+        using var native = new FakeSavesTable();
+        var world = Guid.NewGuid();
+        InstanceHarness.OpenFolder(_h.Root, world.ToString());
+        var saves = Temp("savegame");
+        FakeSavesTable.Paths[SavesNative.PathSaveDir] = saves;
+        FakeSavesTable.WriteWorldHeader(Path.Combine(saves, "backup", "world0.ksd.backup-9"), world, 1, 1001);   // the game's oldest backup
+        FiveBundles(1);
+        for (uint gen = 1; gen <= 40; gen++)
+        {
+            Set(0, (int)gen);                                  // every save changes: every confirmation is forced
+            SaveThroughEvents(gen, 100 * gen);
+            Written();
+        }
+        Assert.True(File.Exists(Confirmed(1, 1001)));        // the 1st, 11th, 21st and 31st prunings kept it for the backup
+        Set(0, 41);
+        Dispatch(SavesNative.EvSaving, 4100, 41);
+        Dispatch(SavesNative.EvSnapshot, 4101, 41, saveSeq: 4100);
+        FakeSavesTable.WaitLikeTheWorldWrite(Long);
+        var freeze = FreezeAt("list");                         // the 41st confirmation's pruning
+        Dispatch(SavesNative.EvWritten, 4102, 41, saveSeq: 4100, unix: 1041);
+        freeze.Reached();
+        Set(0, 42);
+        Dispatch(SavesNative.EvSaving, 4200, 42);              // a staging comes: the pruning stops
+        freeze.Release();
+        Dispatch(SavesNative.EvSnapshot, 4201, 42, saveSeq: 4200);
+        FakeSavesTable.WaitLikeTheWorldWrite(Long);
+        Dispatch(SavesNative.EvWritten, 4202, 42, saveSeq: 4200, unix: 1042);   // its pruning runs again here
+        Written();
+        Assert.False(File.Exists(Confirmed(2, 1002)));       // it did prune (beyond the newest 30, no backup needs it)
+        Assert.True(File.Exists(Confirmed(1, 1001)), "the generation of the game's backup was pruned");
+    }
+
+    [Fact]
+    public void AReloadThatOutwaitsTheWriterStillLoadsTheGenerationBeingConfirmed()
+    {
+        // Review 1, finding 2: a load whose wait for the writer ran out read the folder while the confirmation was being
+        // written: it listed pending R, the writer then put confirmed R in place and deleted pending R, and the load fell
+        // back to R-1.
+        using var native = new FakeSavesTable();
+        var limit = SaveWriter.DrainLimit;
+        try
+        {
+            SaveWriter.DrainLimit = TimeSpan.FromMilliseconds(100);
+            FiveBundles(1);
+            SaveThroughEvents(1, 100);
+            Written();
+            Set(0, 10);
+            Dispatch(SavesNative.EvSaving, 200, 2);
+            Dispatch(SavesNative.EvSnapshot, 201, 2, saveSeq: 200);
+            FakeSavesTable.WaitLikeTheWorldWrite(Long);
+            var tick = Environment.CurrentManagedThreadId;
+            var reached = new ManualResetEventSlim();
+            var gate = new ManualResetEventSlim();
+            var raced = 0;
+            WorldStore.IoHook = op =>
+            {
+                if (Environment.CurrentManagedThreadId != tick)
+                {
+                    if (op == "rename" && !reached.IsSet)
+                    {
+                        reached.Set();                         // the confirmation, before its rename
+                        gate.Wait(TimeSpan.FromSeconds(2));
+                    }
+                    return;
+                }
+                if (op != "read" || Interlocked.Exchange(ref raced, 1) != 0) return;
+                gate.Set();                                    // the load reads: the writer finishes right now
+                var sw = Stopwatch.StartNew();
+                while (File.Exists(Pending(2)) && sw.Elapsed < TimeSpan.FromSeconds(3)) Thread.Sleep(5);
+            };
+            Dispatch(SavesNative.EvWritten, 202, 2, saveSeq: 200, unix: 1002);
+            Assert.True(reached.Wait(Long));
+            var match = _h.Restart(2, new FakeInstanceWorld());   // the world file of revision 2 is on disk
+            WorldStore.IoHook = _hook;
+            Assert.Equal(DataMatch.Exact, match);
+            Assert.Equal(10, Value(Store, 0));
+        }
+        finally
+        {
+            WorldStore.IoHook = _hook;
+            SaveWriter.DrainLimit = limit;
+        }
+    }
+
+    [Fact]
+    public void ABackupThatOutwaitsTheWriterStillCarriesItsModData()
+    {
+        // Review 1, finding 3: a backup whose wait for the writer ran out found no confirmation and reported success with no
+        // mod data at all.
+        using var native = new FakeSavesTable();
+        var world = Guid.NewGuid();
+        InstanceHarness.OpenFolder(_h.Root, world.ToString());
+        var saves = Temp("savegame");
+        var file = Path.Combine(saves, "world0.ksd");
+        FakeSavesTable.Paths[SavesNative.PathSaveDir] = saves;
+        FakeSavesTable.Paths[SavesNative.PathWorldFile] = file;
+        FakeSavesTable.Paths[SavesNative.PathBackups] = Temp("backups");
+        var limit = SaveWriter.DrainLimit;
+        try
+        {
+            SaveWriter.DrainLimit = TimeSpan.FromMilliseconds(100);
+            FiveBundles(1);
+            FakeSavesTable.WriteWorldHeader(file, world, 1, 1001);
+            SaveThroughEvents(1, 100);
+            Written();
+            Set(0, 10);
+            Dispatch(SavesNative.EvSaving, 200, 2);
+            Dispatch(SavesNative.EvSnapshot, 201, 2, saveSeq: 200);
+            FakeSavesTable.WaitLikeTheWorldWrite(Long);
+            FakeSavesTable.WriteWorldHeader(file, world, 2, 1002);   // the game's world write
+            var freeze = FreezeAt("rename", gate: TimeSpan.FromSeconds(2));
+            Dispatch(SavesNative.EvWritten, 202, 2, saveSeq: 200, unix: 1002);
+            freeze.Reached();
+            var backup = SavesBackups.Create("slow-disk", 2, 1002, SaveReason.Backup);   // right after the write, as Saves.Backup does
+            WorldStore.IoHook = _hook;
+            Assert.Equal(5, backup.DataBundles);
+            var info = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(Path.Combine(backup.Directory, "backup.json")))!;
+            Assert.NotNull(info["dataManifest"]);
+        }
+        finally
+        {
+            WorldStore.IoHook = _hook;
+            SaveWriter.DrainLimit = limit;
+        }
+    }
+
+    [Fact]
+    public void PruningsLastCleanupStopsForAStagingToo()
+    {
+        // Review 1, finding 5: the last loop of pruning (old temp files of manifests) did not look for a waiting staging.
+        using var native = new FakeSavesTable();
+        FiveBundles(1);
+        SaveThroughEvents(1, 100);
+        Written();
+        var manifests = Path.Combine(_h.Root, "manifests");
+        for (var i = 0; i < 20; i++)
+        {
+            var tmp = Path.Combine(manifests, $"0000000001-1001.json.tmp-1-{i}");   // left by a crash an hour ago
+            File.WriteAllText(tmp, "{}");
+            File.SetLastWriteTimeUtc(tmp, DateTime.UtcNow.AddHours(-1));
+        }
+        typeof(WorldStore).GetField("_commits", Hidden)!.SetValue(Store, 10);   // the next confirmation prunes
+        Dispatch(SavesNative.EvSaving, 200, 2);
+        Dispatch(SavesNative.EvSnapshot, 201, 2, saveSeq: 200);
+        FakeSavesTable.WaitLikeTheWorldWrite(Long);
+        var freeze = FreezeAt("delete", nth: 2);               // the confirmation deletes its pending manifest, then pruning a temp
+        Dispatch(SavesNative.EvWritten, 202, 2, saveSeq: 200, unix: 1002);
+        freeze.Reached();
+        WorldStore.IoHook = op =>
+        {
+            if (op == "delete") Thread.Sleep(300);             // the rest of the cleanup is slow
+        };
+        Set(0, 30);
+        Dispatch(SavesNative.EvSaving, 300, 3);
+        freeze.Release();
+        var waited = FakeSavesTable.WaitLikeTheWorldWrite(Long);
+        Written();
+        WorldStore.IoHook = _hook;
+        // the other 19 temp files would take 5.7 s; the cleanup stops at the next one
+        Assert.True(waited < TimeSpan.FromMilliseconds(1500), $"the world write waited {waited.TotalMilliseconds:F0} ms behind pruning's cleanup");
+    }
+
+    [Fact]
+    public void AStagingWhoseWriteFailsOnceIsWrittenAgainBeforeTheWorldWrite()
+    {
+        // Review 1, the failed staging: a write that fails reported "done" at once, so the world write went ahead without
+        // its manifest. A failure that passes (a file held for a moment, as an antivirus scan does) is now retried first.
+        using var native = new FakeSavesTable();
+        FiveBundles(1);
+        SaveThroughEvents(1, 100);
+        Written();
+        var tick = Environment.CurrentManagedThreadId;
+        var failed = 0;
+        WorldStore.IoHook = op =>
+        {
+            if (op == "rename" && Environment.CurrentManagedThreadId != tick && Interlocked.Exchange(ref failed, 1) == 0)
+                throw new IOException("The process cannot access the file because it is being used by another process.");
+        };
+        Dispatch(SavesNative.EvSaving, 200, 2);                // its only staging (as for a shutdown save: no snapshot staging)
+        FakeSavesTable.WaitLikeTheWorldWrite(Long);
+        Assert.Equal(1, failed);
+        Assert.True(File.Exists(Pending(2)), "the world write went ahead without generation 2's pending manifest");
+        WorldStore.IoHook = _hook;
+        Dispatch(SavesNative.EvWritten, 202, 2, saveSeq: 200, unix: 1002);
+        Assert.Equal(DataMatch.Exact, _h.Restart(2, new FakeInstanceWorld()));
     }
 
     [Fact]

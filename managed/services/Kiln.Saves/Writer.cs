@@ -37,11 +37,13 @@ namespace Kiln;
 /// own manifest. More than one save cannot pile up, since the world write of the first waits for its staging and the
 /// game starts no snapshot while its previous world write runs. Pruning stops between two files when a staging is
 /// waiting and runs again after the next confirmation.</para>
-/// <para><b>Stops, reloads, exits.</b> A world load or reload, a world close, the shutdown save's confirmation and a
-/// backup wait for the writer (bounded, logged): files that are not written yet still are, before anything reads the
-/// folder. A process that ends with jobs queued (a crash, kill -9) leaves what an end at that point always left: no torn
-/// file (each one goes to a temp name and is renamed), a staging is on disk before its world file, and a confirmation not
-/// written yet means the next start loads that generation as <c>Staged</c>, with the same data.</para>
+/// <para><b>Stops, reloads, exits.</b> A world load or reload and a backup read the folder only once the writer has
+/// written everything, and while it writes nothing (<see cref="Exclusive{T}"/>, no time limit). A world close and the
+/// shutdown save's confirmation wait for it at most <see cref="DrainLimit"/> (logged). A process that ends with jobs
+/// queued (a crash, kill -9, or after that wait) leaves what an end at that point always left: no torn file (each one
+/// goes to a temp name and is renamed), a staging is on disk before its world file while the world write's wait holds,
+/// and a confirmation not written yet means the next start loads that generation as <c>Staged</c>, with the same
+/// data.</para>
 /// </remarks>
 internal sealed unsafe class SaveWriter
 {
@@ -135,7 +137,7 @@ internal sealed unsafe class SaveWriter
         }
         lock (_lock)
         {
-            job.Ticket = ++_issued;
+            job.Ticket = NextTicket();
             for (var i = _stages.Count - 1; i >= 0; i--)
                 if (_stages[i].Epoch == job.Epoch && _stages[i].Gen == job.Gen && _stages[i].Root == job.Root)
                 {
@@ -166,13 +168,23 @@ internal sealed unsafe class SaveWriter
         job.Queued = Stopwatch.GetTimestamp();
         lock (_lock)
         {
-            if (job is StageJob s) s.Ticket = ++_issued;
+            if (job is StageJob s) s.Ticket = NextTicket();
             while (_running != null || _stages.Count > 0 || _others.Count > 0) Monitor.Wait(_lock);
             _running = job;
         }
         Execute(job);
         Finish(job);
     }
+
+    /// <summary>Staging numbers grow by one and skip 0 (stage_progress's "unchanged") when they wrap; they are compared as
+    /// serial numbers (<see cref="Later"/>, stage_barrier.h), so the wrap after 2^64 stagings changes nothing.</summary>
+    private ulong NextTicket()
+    {
+        if (++_issued == 0) _issued = 1;
+        return _issued;
+    }
+
+    internal static bool Later(ulong a, ulong b) => (long)(a - b) > 0;
 
     private void Enqueue(Job job)
     {
@@ -226,6 +238,56 @@ internal sealed unsafe class SaveWriter
             SavesRuntime.Log(LogLevel.Info, $"Kiln.Saves: {why}: waited {ms:F1} ms for the writer to finish its files");
         return idle;
     }
+
+    /// <summary>Runs <paramref name="read"/> on the calling thread once the writer has written everything handed to it, and
+    /// with nothing written while it runs, so a load or a backup reads the sidecar folder as one state. No time limit
+    /// (review 1): a reader that went on after a bounded wait could list a pending manifest, see the writer put its
+    /// confirmation in place and delete it, and take an older generation, or a backup could miss its generation. A wait
+    /// over <see cref="DrainLimit"/> is logged, and again every 10 s. <paramref name="read"/> must not hand the writer a
+    /// job (it would wait for itself).</summary>
+    public T Exclusive<T>(string why, Func<T> read)
+    {
+        var sw = Stopwatch.StartNew();
+        var next = DrainLimit;
+        while (true)
+        {
+            int left;
+            lock (_lock)
+            {
+                while (_running != null || _stages.Count > 0 || _others.Count > 0)
+                {
+                    var wait = next - sw.Elapsed;
+                    if (wait <= TimeSpan.Zero) break;
+                    Monitor.Wait(_lock, wait);
+                }
+                left = _stages.Count + _others.Count + (_running != null ? 1 : 0);
+                if (left == 0) _running = Reader;
+            }
+            if (left == 0) break;
+            SavesRuntime.Log(LogLevel.Warn, $"Kiln.Saves: {why}: still waiting for the writer after {sw.Elapsed.TotalSeconds:F0} s " +
+                                            $"({left} write(s) to do); it reads the folder only once they are written");
+            next = sw.Elapsed + TimeSpan.FromSeconds(10);
+        }
+        var ms = sw.Elapsed.TotalMilliseconds;
+        if (ms > WorldStore.SlowMs) SavesRuntime.Log(LogLevel.Info, $"Kiln.Saves: {why}: waited {ms:F1} ms for the writer to finish its files");
+        try
+        {
+            return read();
+        }
+        finally
+        {
+            lock (_lock)
+            {
+                _running = null;
+                Monitor.PulseAll(_lock);
+            }
+        }
+    }
+
+    private sealed class ReaderJob : Job;
+
+    /// <summary>What <see cref="_running"/> holds while <see cref="Exclusive{T}"/> reads.</summary>
+    private static readonly ReaderJob Reader = new() { Epoch = 0, Root = "", WorldId = null };
 
     /// <summary>Drains (bounded, as <see cref="Drain"/>) and ends the writer's thread; the next job starts one again.
     /// Returns whether everything was written. Nothing in Kiln stops it today (a process ends with it); the seam has it
@@ -308,7 +370,7 @@ internal sealed unsafe class SaveWriter
         lock (_lock)
         {
             _running = null;
-            if (job is StageJob s && s.Ticket > _done) _done = s.Ticket;
+            if (job is StageJob s && Later(s.Ticket, _done)) _done = s.Ticket;
             Monitor.PulseAll(_lock);
         }
         if (job is not StageJob st) return;
@@ -421,6 +483,7 @@ internal struct DiskTime
     public void CreateFolder(string path)
     {
         var t = Now();
+        WorldStore.Io("folder");
         Directory.CreateDirectory(path);
         FolderMs += Since(t);
         Folders++;

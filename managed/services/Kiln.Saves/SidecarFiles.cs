@@ -52,16 +52,28 @@ internal sealed class SidecarFiles(Func<bool> stagingWaiting)
         bool unchanged = false, same = false;
         int fresh = 0;
         long bytes = 0;
-        try
+        string? retried = null;
+        for (var attempt = 1; ; attempt++)
         {
-            (fresh, bytes) = WriteBlobsAndManifest(job, before, ref disk, out unchanged, out same);
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-        {
-            Remember(job);
-            SavesRuntime.Log(LogLevel.Error, $"Kiln.Saves: writing mod data generation {job.Gen} failed: {e.Message} (it is written again at its " +
-                                             "confirmation; a crash before then loads an older generation)");
-            return;
+            try
+            {
+                (fresh, bytes) = WriteBlobsAndManifest(job, before, ref disk, out unchanged, out same);
+                break;
+            }
+            catch (Exception e) when ((e is IOException or UnauthorizedAccessException) && attempt < WriteAttempts)
+            {
+                // A file held for a moment (an antivirus scan on Windows): the world write waits for this staging, so try
+                // again before giving up (review 1). At most about a second, inside the barrier's shortest wait.
+                retried = e.Message;
+                Thread.Sleep(RetryMs * attempt);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                Remember(job);
+                SavesRuntime.Log(LogLevel.Error, $"Kiln.Saves: writing mod data generation {job.Gen} failed {attempt} times: {e.Message} (the world " +
+                                                 "write goes ahead without it; its confirmation writes it again; a crash before then loads an older generation)");
+                return;
+            }
         }
         Remember(job);
         job.QueuedMs = queued;
@@ -71,8 +83,13 @@ internal sealed class SidecarFiles(Func<bool> stagingWaiting)
                    $"{(job.Snapshot ? ", snapshot staging" : "")}): {job.Manifest!["bundles"]!.AsObject().Count} bundles, {fresh} new blobs ({bytes} bytes)" +
                    $"{(job.Replaced ? ", replacing the save request's staging before it was written" : "")}" +
                    $"{(unchanged ? ", manifest unchanged: nothing written" : "")}" +
-                   $"{(same ? $", bundles as in generation {job.Gen - 1}: manifest not forced to disk" : "")}";
+                   $"{(same ? $", bundles as in generation {job.Gen - 1}: manifest not forced to disk" : "")}" +
+                   $"{(retried != null ? $", written after a failed attempt ({retried})" : "")}";
     }
+
+    /// <summary>How often a staging is written before the world write goes ahead without it, and the first pause between
+    /// two tries (then twice that): 3 tries in about 0.75 s.</summary>
+    internal static int WriteAttempts = 3, RetryMs = 250;
 
     /// <summary>The blobs that are not on disk, then the pending manifest (unless the same manifest is already in its file).</summary>
     private (int Fresh, long Bytes) WriteBlobsAndManifest(StageJob job, StageJob? before, ref DiskTime disk, out bool unchanged, out bool same)
@@ -285,7 +302,11 @@ internal sealed class SidecarFiles(Func<bool> stagingWaiting)
             }
             var tmps = disk.List(() => Directory.EnumerateFiles(dir, "*.tmp-*").Select(f => (f, File.GetLastWriteTimeUtc(f))).ToList());
             foreach (var (f, written) in tmps)
-                if (written < cutoff) disk.Delete(f);
+            {
+                if (written >= cutoff) continue;
+                if (stagingWaiting()) return false;  // review 1: this loop too
+                disk.Delete(f);
+            }
             if (dropped + blobsDropped > 0)
                 SavesRuntime.Log(LogLevel.Debug, $"Kiln.Saves: pruned {dropped} manifests and {blobsDropped} blobs; {keep.Count} manifests kept");
             return true;

@@ -28,8 +28,8 @@ namespace Kiln;
 /// <para>Who writes (since 0.2.0-dev.30, issue #39): the tick thread only serializes the bundles (in memory); every file
 /// operation of a save (blobs, manifests, the pending manifest's delete, pruning) runs on <see cref="SaveWriter"/>'s
 /// thread, in order, and kiln.saves holds the game's world write until the writer has the generation's pending manifest
-/// on disk, so a world file still never reaches the disk before its manifest. A world load, a world close, the shutdown
-/// save and a backup wait for the writer (bounded) before they read or leave the folder.</para>
+/// on disk (bounded: <c>docs/kiln/services/saves.md</c> says where the order does not hold). A world load and a backup
+/// read the folder only while the writer is idle; a world close and the shutdown save wait for it, bounded.</para>
 /// </remarks>
 internal sealed unsafe class WorldStore
 {
@@ -62,8 +62,8 @@ internal sealed unsafe class WorldStore
     /// (tests count the writes and the forced writes of a save).</summary>
     internal static long FilesWritten, FilesForced;
 
-    /// <summary>Test seam: called before every file operation of the save path (<c>check</c>, <c>create</c>, <c>flush</c>,
-    /// <c>rename</c>, <c>read</c>, <c>delete</c>, <c>list</c>) with its name, on the thread that does it. Tests slow the
+    /// <summary>Test seam: called before every file operation of the save path and of a load (<c>check</c>, <c>create</c>,
+    /// <c>flush</c>, <c>rename</c>, <c>read</c>, <c>delete</c>, <c>list</c>, <c>folder</c>) with its name, on the thread that does it. Tests slow the
     /// disk with it (issue #39: on a busy hard drive each of these can take seconds).</summary>
     internal static Action<string>? IoHook;
 
@@ -216,41 +216,52 @@ internal sealed unsafe class WorldStore
 
     private void Load(uint revision, uint unix)
     {
-        // Every file the writer still has to write is on disk before the folder is read (a reload right after a save).
-        Writer.Drain("loading mod data");
         _loadedRevision = revision;
         _loadedUnix = unix;
         NewSession();
         DetachAll();
         var dir = Path.Combine(Root!, "manifests");
-        var all = ListManifests(dir);
-        var order = new List<(ManifestName m, DataMatch match)>();
-        foreach (var m in all.Where(m => !m.Pending && m.Revision == revision && (unix == 0 || m.Unix == unix)).OrderByDescending(m => m.Unix))
-            order.Add((m, DataMatch.Exact));
-        foreach (var m in all.Where(m => m.Pending && m.Revision == revision)) order.Add((m, DataMatch.Staged));
-        foreach (var m in all.Where(m => !m.Pending && m.Revision < revision).OrderByDescending(m => m.Revision).ThenByDescending(m => m.Unix))
-            order.Add((m, DataMatch.Older));
-        foreach (var (m, match) in order)
+        // One stable read (review 1): only once the writer has every file it was handed on disk, and with nothing written
+        // while it reads, so a confirmation that is still being written cannot make it take an older generation.
+        var found = Writer.Exclusive("loading mod data", () =>
         {
-            if (!TryLoadManifest(m.Path, out var bundles, out var error))
+            Io("list");
+            var all = ListManifests(dir);
+            var order = new List<(ManifestName m, DataMatch match)>();
+            foreach (var m in all.Where(m => !m.Pending && m.Revision == revision && (unix == 0 || m.Unix == unix)).OrderByDescending(m => m.Unix))
+                order.Add((m, DataMatch.Exact));
+            foreach (var m in all.Where(m => m.Pending && m.Revision == revision)) order.Add((m, DataMatch.Staged));
+            foreach (var m in all.Where(m => !m.Pending && m.Revision < revision).OrderByDescending(m => m.Revision).ThenByDescending(m => m.Unix))
+                order.Add((m, DataMatch.Older));
+            var unusable = new List<string>();
+            foreach (var (m, match) in order)
             {
-                SavesRuntime.Log(LogLevel.Error, $"Kiln.Saves: manifest {Path.GetFileName(m.Path)} is unusable ({error}); trying an older one");
-                continue;
+                if (!TryLoadManifest(m.Path, out var bundles, out var error))
+                {
+                    unusable.Add($"Kiln.Saves: manifest {Path.GetFileName(m.Path)} is unusable ({error}); trying an older one");
+                    continue;
+                }
+                return (Manifest: (ManifestName?)m, Match: match, Bundles: bundles, Newer: all.Any(x => x.Revision > m.Revision), Count: all.Count, Unusable: unusable);
             }
-            foreach (var (scope, doc) in bundles) Absorb(scope, doc);
-            Generation = m.Revision;
-            Match = match;
-            Instances.OnLoaded(m.Revision, match);
-            var level = match == DataMatch.Older ? LogLevel.Warn : LogLevel.Info;
-            SavesRuntime.Log(level, $"Kiln.Saves: world {WorldId} file revision {revision}: mod data generation {m.Revision} " +
-                                    $"({match}{(match == DataMatch.Older ? ": the world file is newer than Kiln's data" : "")}, " +
-                                    $"{Path.GetFileName(m.Path)}, {bundles.Count} bundles)");
+            return (Manifest: null, Match: DataMatch.None, Bundles: new List<(string, JsonObject)>(), Newer: all.Count > 0, Count: all.Count, Unusable: unusable);
+        });
+        foreach (var line in found.Unusable) SavesRuntime.Log(LogLevel.Error, line);
+        if (found.Manifest is { } chosen)
+        {
+            foreach (var (scope, doc) in found.Bundles) Absorb(scope, doc);
+            Generation = chosen.Revision;
+            Match = found.Match;
+            Instances.OnLoaded(chosen.Revision, found.Match, found.Newer);
+            var level = found.Match == DataMatch.Older ? LogLevel.Warn : LogLevel.Info;
+            SavesRuntime.Log(level, $"Kiln.Saves: world {WorldId} file revision {revision}: mod data generation {chosen.Revision} " +
+                                    $"({found.Match}{(found.Match == DataMatch.Older ? ": the world file is newer than Kiln's data" : "")}, " +
+                                    $"{Path.GetFileName(chosen.Path)}, {found.Bundles.Count} bundles)");
             return;
         }
         Generation = 0;
         Match = DataMatch.None;
-        Instances.OnLoaded(0, DataMatch.None);
-        SavesRuntime.Log(LogLevel.Info, $"Kiln.Saves: world {WorldId} file revision {revision}: no mod data yet ({all.Count} manifests, none usable)");
+        Instances.OnLoaded(0, DataMatch.None, found.Newer);
+        SavesRuntime.Log(LogLevel.Info, $"Kiln.Saves: world {WorldId} file revision {revision}: no mod data yet ({found.Count} manifests, none usable)");
     }
 
     private bool TryLoadManifest(string path, out List<(string scope, JsonObject doc)> bundles, out string error)
@@ -259,11 +270,13 @@ internal sealed unsafe class WorldStore
         error = "";
         try
         {
+            Io("read");
             var man = JsonNode.Parse(File.ReadAllBytes(path))?.AsObject() ?? throw new InvalidDataException("empty");
             if (man["bundles"] is not JsonObject list) return true;
             foreach (var (scope, entry) in list)
             {
                 var sha = entry?["sha256"]?.GetValue<string>() ?? throw new InvalidDataException($"{scope}: no sha256");
+                Io("read");
                 var bytes = File.ReadAllBytes(BlobPath(sha));
                 var actual = Convert.ToHexStringLower(SHA256.HashData(bytes));
                 if (actual != sha) throw new InvalidDataException($"{scope}: blob {sha[..12]} has sha256 {actual[..12]}");
@@ -541,7 +554,9 @@ internal sealed unsafe class WorldStore
             Epoch = _epoch, Root = Root, WorldId = WorldId, Rev = rev, Unix = unix, Reason = reason, Prune = ++_commits % 10 == 1,
             WorldFile = unix == 0 ? SavesRuntime.WorldFile : null,
         };
-        if (job.Prune) job.SaveDir = Saves.SaveDirectory;
+        // Every confirmation carries the save folder: a pruning that stopped for a staging runs again at the next one, and
+        // it keeps the generations of the game's backups only when it can see them (review 1). A native path, no disk.
+        job.SaveDir = Saves.SaveDirectory;
         Generation = rev;
         Match = DataMatch.Exact;
         _loadedRevision = rev;
@@ -648,6 +663,10 @@ internal sealed unsafe class WorldStore
             return null;
         }
     }
+
+    /// <summary>The pending manifest of a revision, for a backup of a generation whose confirmation could not be written:
+    /// the same generation, which a restore loads as staged.</summary>
+    internal string? PendingManifest(uint rev) => Root != null && File.Exists(PendingPath(Root, rev)) ? PendingPath(Root, rev) : null;
 
     /// <summary>The committed manifest of (revision, world time), for backups.</summary>
     internal string? CommittedManifest(uint rev, uint unix)

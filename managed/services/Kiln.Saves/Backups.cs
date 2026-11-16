@@ -23,12 +23,15 @@ internal static class SavesBackups
     private static string Dir => SavesNative.GetPath(SavesNative.PathBackups) ?? throw SavesCaps.Off(SavesCaps.Service, "kiln.saves is unavailable");
 
     /// <summary>Copies the world file (revision <paramref name="rev"/>, just written) and its sidecar generation. Tick
-    /// thread, right after the write: the game cannot start another save before this returns. It waits for Kiln.Saves'
-    /// writer first (bounded): the generation's confirmation is written off the tick thread.</summary>
-    internal static BackupInfo Create(string name, uint rev, uint unix, SaveReason reason)
+    /// thread, right after the write: the game cannot start another save before this returns. It reads the sidecar only
+    /// once Kiln.Saves' writer has written everything it was handed, and while it writes nothing (review 1: a backup that
+    /// went on after a bounded wait could miss its generation's confirmation and carry no mod data at all).</summary>
+    internal static BackupInfo Create(string name, uint rev, uint unix, SaveReason reason) =>
+        SavesRuntime.Store.Writer.Exclusive($"backup '{name}'", () => CreateNow(name, rev, unix, reason));
+
+    private static BackupInfo CreateNow(string name, uint rev, uint unix, SaveReason reason)
     {
         var store = SavesRuntime.Store;
-        store.Writer.Drain($"backup '{name}'");
         var world = SavesRuntime.WorldFile ?? throw new InvalidOperationException("the world file is not known");
         var h = WorldStore.ReadHeader(world) ?? throw new InvalidOperationException($"{world} is not readable");
         if (h.Revision != rev) throw new InvalidOperationException($"{Path.GetFileName(world)} is at revision {h.Revision}, expected {rev}");
@@ -59,7 +62,9 @@ internal static class SavesBackups
             throw new InvalidOperationException("the world file changed while it was copied");
         }
         var bundles = 0;
-        var manifest = store.WorldId == id ? store.CommittedManifest(rev, h.Unix) : null;
+        // Its confirmation, else its pending manifest (the same generation: a confirmation that failed to be written);
+        // a restore of that loads it as staged.
+        var manifest = store.WorldId == id ? store.CommittedManifest(rev, h.Unix) ?? store.PendingManifest(rev) : null;
         if (manifest != null)
         {
             Add(manifest, Path.Combine("worlds", id, "manifests", Path.GetFileName(manifest)));

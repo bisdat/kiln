@@ -31,6 +31,9 @@ internal sealed unsafe class FakeSavesTable : IDisposable
     private static long _issued, _done, _progressCalls;
     private static uint _features;
 
+    /// <summary>What path(kind) answers (KILN_SAVES_PATH_*); a kind not here is NOT_FOUND.</summary>
+    public static readonly Dictionary<int, string> Paths = [];
+
     private readonly Table* _table;
     private readonly object? _oldTable;
     private readonly object? _oldLooked;
@@ -49,6 +52,7 @@ internal sealed unsafe class FakeSavesTable : IDisposable
         Interlocked.Exchange(ref _issued, 0);
         Interlocked.Exchange(ref _done, 0);
         Interlocked.Exchange(ref _progressCalls, 0);
+        Paths.Clear();
         _features = SavesNative.CanRequest | SavesNative.CanWrite | SavesNative.CanLoad | SavesNative.CanSnapshotStage |
                     (barrier ? StageBarrierFeature : 0u);
         _table = (Table*)NativeMemory.AllocZeroed((nuint)sizeof(Table));
@@ -67,6 +71,7 @@ internal sealed unsafe class FakeSavesTable : IDisposable
 
     public void Dispose()
     {
+        Paths.Clear();
         TableField.SetValue(null, _oldTable);
         LookedField.SetValue(null, _oldLooked);
         NativeMemory.Free(_table);
@@ -105,7 +110,27 @@ internal sealed unsafe class FakeSavesTable : IDisposable
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
-    private static int PathOf(int kind, byte* buffer, nuint capacity, nuint* length) => SavesNative.NotFound;
+    private static int PathOf(int kind, byte* buffer, nuint capacity, nuint* length)
+    {
+        if (!Paths.TryGetValue(kind, out var path)) return SavesNative.NotFound;
+        var bytes = System.Text.Encoding.UTF8.GetBytes(path);
+        *length = (nuint)bytes.Length;
+        if (buffer == null || capacity < (nuint)bytes.Length) return SavesNative.BufferTooSmall;
+        bytes.CopyTo(new Span<byte>(buffer, bytes.Length));
+        return SavesNative.Ok;
+    }
+
+    /// <summary>A world file header as the game writes it ("SV2C", GUID at +0x0C, revision at +0x1C, UTC seconds at +0x20).</summary>
+    public static void WriteWorldHeader(string file, Guid world, uint revision, uint unix)
+    {
+        var b = new byte[0x24];
+        "SV2C"u8.CopyTo(b);
+        world.TryWriteBytes(b.AsSpan(0x0C, 16));
+        BitConverter.TryWriteBytes(b.AsSpan(0x1C), revision);
+        BitConverter.TryWriteBytes(b.AsSpan(0x20), unix);
+        Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+        File.WriteAllBytes(file, b);
+    }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int SetPumpInterval(uint steps) => SavesNative.Ok;
