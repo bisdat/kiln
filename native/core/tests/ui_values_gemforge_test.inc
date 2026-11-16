@@ -10,9 +10,13 @@ struct GemFixture {
     uint8_t selector[0x60]{};
     GemHeader header{};
     GemGrid grid = nullptr;
+    KilnMidFn end = nullptr;
     FrameHookFn frame = nullptr;
     KilnOwner owner = 0;
-    bool draw = true, change = false;
+    bool draw = true, change = false, combined = false, change_weapons = false, read_during = false;
+    bool change_after_grids = false, omit_end = false;
+    KilnUiGemForgeFrame during{};
+    KilnResult during_result = KILN_ERR_INTERNAL;
     uint8_t role = 0;
     int original_calls = 0;
     GemFixture() {
@@ -24,7 +28,7 @@ struct GemFixture {
         for (const char* n : {"ui/GemForgeMenu", "ui/GemForgeLists", "ui/GemForgeCandidates", "ui/GemForgeSourceRet",
              "ui/GemForgeSlotRet", "ui/GemForgeScreenCall", "ui/GemForgeListsCall", "ui/GemForgeGemsCall",
              "ui/GemForgeWeaponsCall", "ui/GemForgeSwitch", "ui/GemForgeLowerBoundary",
-             "ui/PlayStateUi"}) fake::symbols[n] = 0x140000001ull;
+             "ui/GemForgeEnd", "ui/PlayStateUi"}) fake::symbols[n] = 0x140000001ull;
         const std::map<std::string, int64_t> fields = {
             {"ui/state.ui_state", 0xc}, {"ui/play.hud_screen", 0x1cd8}, {"ui/play.localEntity", 0x18},
             {"ui/gemforge.mode", 0}, {"ui/gemforge.selected", 0x10}, {"ui/gemforge.weapon", 0x18},
@@ -62,9 +66,13 @@ struct GemFixture {
         for (const auto& r : fake::raws) {
             if (r.label == "ui.values/GemForgeGrid") {
                 grid = reinterpret_cast<GemGrid>(r.fn);
-                *r.original = reinterpret_cast<void*>(+[](void*, void*, void*, void*, float, uint8_t) {
+                *r.original = reinterpret_cast<void*>(+[](void*, void*, void*, void*, float, uint8_t weapons) {
                     ++gem_fixture->original_calls;
                     if (gem_fixture->change) ++gem_fixture->selector[0];
+                    if (weapons && gem_fixture->change_weapons) {
+                        put(gem_fixture->selector, 0x10, uint32_t{0x5001});
+                        gem_fixture->selector[0x14] = 3;
+                    }
                 });
             }
             if (r.label == "ui.values/GemForgeFrame") {
@@ -72,10 +80,19 @@ struct GemFixture {
                 *r.original = reinterpret_cast<void*>(+[](void*, void*) {
                     auto& f = *gem_fixture;
                     if (f.draw) f.grid(f.selector, &f.header, nullptr, nullptr, 12.5f, f.role);
+                    if (f.draw && f.combined) f.grid(f.selector, &f.header, nullptr, nullptr, 12.5f, 1);
+                    if (f.change_after_grids) ++f.selector[0];
+                    if (f.end && !f.omit_end) {
+                        KilnRegisters regs{}; regs.rdi = addr(f.selector);
+                        f.end(&regs, nullptr);
+                    }
                     ++fake::screen.frame;
+                    if (f.read_during) f.during_result = f.read(f.during);
                 });
             }
         }
+        for (const auto& r : fake::mids)
+            if (r.label == "ui.values/GemForgeEnd") end = r.fn;
     }
     KilnResult read(KilnUiGemForgeFrame& f, KilnUiGemForgeCandidate* r = nullptr, uint32_t cap = 0,
                     uint64_t session = 0, uint64_t frame_id = 0) {
@@ -183,6 +200,50 @@ void gemforge_tests() {
         CHECK(f.read(m, rows.data(), n) == KILN_OK && m.ok && m.count == n && rows.back().index == 0xdead,
               "gemforge: copies all %u rows, including empty and maximum lists, within output bounds", n);
         if (n) CHECK(rows[n - 1].index == n - 1, "gemforge: duplicate rows preserve source order");
+    }
+    {
+        GemFixture f; KilnUiGemForgeFrame m{}; KilnUiGemForgeCandidate rows[2]{};
+        f.read(m); f.arm(); f.frame(nullptr, nullptr); f.read(m, rows, 2);
+        const auto old = m;
+        // kiln.ui and slot subscribers run inside the frame chain, after screen.frame advances.
+        f.read_during = true; f.frame(nullptr, nullptr);
+        CHECK(f.during_result == KILN_OK && !f.during.ok && f.during.reason == KUI_STALE_FRAME,
+              "gemforge: a read inside the publishing frame is unavailable");
+        CHECK(f.read(m, rows, 2) == KILN_OK && m.ok && m.generation == old.generation,
+              "gemforge: an in-progress read does not change a coherent generation");
+        CHECK(f.read(m, rows, 2, old.session, old.frame) == KILN_OK && m.ok && m.frame == old.frame,
+              "gemforge: an in-progress read preserves the previous sizing retry");
+    }
+    {
+        GemFixture f; KilnUiGemForgeFrame m{}; KilnUiGemForgeCandidate rows[2]{};
+        f.read(m); f.arm(); f.combined = true;
+        f.frame(nullptr, nullptr); f.read(m, rows, 2);
+        const auto old = m;
+        f.change_weapons = true; f.frame(nullptr, nullptr);
+        CHECK(f.original_calls == 4 && f.read(m, rows, 2) == KILN_OK && !m.ok,
+              "gemforge: selection in the later WEAPONS grid invalidates the GEMS capture");
+        CHECK(f.read(m, rows, 2, old.session, old.frame) == KILN_OK && !m.ok,
+              "gemforge: a later weapon selection also invalidates pinned GEMS retries");
+        f.change_weapons = false; f.frame(nullptr, nullptr);
+        CHECK(f.read(m, rows, 2) == KILN_OK && m.ok && m.selected_page == 0x5001 && m.selected_index == 3 &&
+              m.generation > old.generation,
+              "gemforge: the next combined frame publishes the changed selection");
+    }
+    {
+        GemFixture f; KilnUiGemForgeFrame m{}; KilnUiGemForgeCandidate rows[2]{};
+        f.read(m); f.arm(); f.frame(nullptr, nullptr); f.read(m, rows, 2);
+        const auto old = m;
+        f.change_after_grids = true; f.frame(nullptr, nullptr);
+        CHECK(f.read(m, rows, 2) == KILN_OK && !m.ok,
+              "gemforge: a menu action after both grids invalidates the capture");
+        CHECK(f.read(m, rows, 2, old.session, old.frame) == KILN_OK && !m.ok,
+              "gemforge: a menu action also invalidates pinned retries");
+        f.change_after_grids = false; f.frame(nullptr, nullptr);
+        CHECK(f.read(m, rows, 2) == KILN_OK && m.ok && m.mode == 1,
+              "gemforge: the next menu frame has the updated mode");
+        f.omit_end = true; f.frame(nullptr, nullptr);
+        CHECK(f.read(m, rows, 2) == KILN_OK && !m.ok,
+              "gemforge: a capture without a completed menu check is refused");
     }
     {
         kiln::uivalues::GemReader rd;

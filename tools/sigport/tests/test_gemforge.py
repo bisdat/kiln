@@ -44,7 +44,8 @@ class GemForgeSignatures(unittest.TestCase):
                           'GemForgeCandidates': 0xd27cb0, 'GemForgeGrid': 0xcaefc0,
                           'GemForgeSourceRet': 0xcafbac, 'GemForgeSlotRet': 0xcaf59a,
                           'GemForgeScreenCall': 0xc61196, 'GemForgeListsCall': 0xcae1f4,
-                          'GemForgeGemsCall': 0xcaff97, 'GemForgeWeaponsCall': 0xcaffd3}.items():
+                          'GemForgeGemsCall': 0xcaff97, 'GemForgeWeaponsCall': 0xcaffd3,
+                          'GemForgeEnd': 0xcaeece}.items():
             self.assertEqual(rva, symbols['ui/' + name]['rva'], name)
         for name, value in {'ui/gemforge.sockets': 0x6b40, 'ui/gemforge.socketCount': 0x6b48,
                             'ui/gemforge.selected': 0x10, 'ui/gemforge.weapon': 0x18}.items():

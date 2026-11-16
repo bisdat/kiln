@@ -37,7 +37,7 @@ after each completed UI frame, including unavailable frames. Keep callbacks shor
 keep. Dispose the registration when finished; mod unload also removes it.
 
 Kiln retains two copied frames for a sizing retry. A mode, selected identity, list, screen or session change invalidates
-old generations. A selection change during the grid call discards that frame; the next coherent draw can replace it.
+old generations. A selection change in either grid or a later menu action discards that frame; the next coherent draw can replace it.
 Closing the selector, an absent GEMS draw, capability loss, a newer completed frame without a matching capture, or an
 age over 1000 ms makes the current result unavailable. Saved snapshots remain historical values.
 

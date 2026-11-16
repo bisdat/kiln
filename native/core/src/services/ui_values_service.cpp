@@ -177,11 +177,12 @@ bool subscribe_frames(void (*fn)(uint64_t, void*), void* user) {
 }
 
 bool gemforge_contract() {
-    uintptr_t grid = 0, lower = 0;
+    uintptr_t grid = 0, lower = 0, end = 0;
     hooks::fp::Fingerprint fp;
     // The standard pass stops at 300 instructions here. Its exact measured prefix is a guard, not a full type proof.
     // The scoped LowerBoundary signature separately proves the fifth (float) stack argument beyond that prefix.
     if (!sigdb::symbol("ui/GemForgeGrid", &grid) || !sigdb::symbol("ui/GemForgeLowerBoundary", &lower) ||
+        !sigdb::symbol("ui/GemForgeEnd", &end) ||
         !sigdb::fingerprint(grid, &fp) || !fp.ok || fp.thunk || fp.reads != 0x0f || fp.passes != 0xd0 ||
         fp.indirect || fp.stack != 2 || fp.stack_blind || fp.tail || fp.rets != hooks::fp::kRetRax ||
         fp.insns != 300 || !fp.truncated) return false;
@@ -189,6 +190,9 @@ bool gemforge_contract() {
     // Start with an untouched grid entry. A pre-existing foreign detour is refused for this first implementation.
     if (!sigdb::file_bytes(grid, file_entry, sizeof file_entry) ||
         !guard::copy(live_entry, grid, sizeof live_entry) || std::memcmp(file_entry, live_entry, sizeof file_entry))
+        return false;
+    if (!sigdb::file_bytes(end, file_entry, sizeof file_entry) ||
+        !guard::copy(live_entry, end, sizeof live_entry) || std::memcmp(file_entry, live_entry, sizeof file_entry))
         return false;
     // Read the original file code, never a live detour. Captured table offsets must dispatch screen 45 to the menu.
     int64_t map = 0, targets = 0;

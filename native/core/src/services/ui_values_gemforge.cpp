@@ -32,11 +32,19 @@ struct GemRing {
     bool drawing = false;
 };
 GemRing& gem_ring() { static auto* r = new GemRing; return *r; }
+struct GemSelection {
+    uint8_t mode = 0;
+    uint32_t page = 0;
+    uint8_t slot = 0;
+    GemRawView weapon{};
+    bool operator==(const GemSelection&) const = default;
+};
 struct GemCapture {
     GemFrame frame;
     ClientNow client{};
+    GemSelection selection;
     uint64_t before_frame = 0;
-    bool seen = false;
+    bool seen = false, menu_checked = false;
 };
 thread_local GemCapture* t_gem = nullptr;
 
@@ -89,13 +97,6 @@ int gem_context(GemReader& rd, const ClientNow& now, GemContext& c) {
     }
     return -1;
 }
-struct GemSelection {
-    uint8_t mode = 0;
-    uint32_t page = 0;
-    uint8_t slot = 0;
-    GemRawView weapon{};
-    bool operator==(const GemSelection&) const = default;
-};
 bool gem_selection(GemReader& rd, uintptr_t state, GemSelection& s) {
     return rd.get(state, 0, s.mode) && s.mode <= 4 && rd.get(state, 0x10, s.page) &&
         rd.get(state, 0x14, s.slot) && (!s.page || s.slot < 8) && rd.get(state, 0x18, s.weapon);
@@ -163,6 +164,7 @@ void gem_capture_before(GemCapture& cap, uintptr_t state, uintptr_t header, GemR
         gem_fail("Gem Forge list, selection or local model is unreadable or invalid"); return;
     }
     auto& m = cap.frame.meta;
+    cap.selection = selection;
     m.size = sizeof m; m.ok = 1; m.count = static_cast<uint32_t>(array.count);
     m.local_player = context.player; m.mode = selection.mode;
     m.has_selected_row = selection.page != 0;
@@ -202,6 +204,20 @@ void hk_gem_grid(void* state, void* header, void* rect, void* actions, float low
         }
     }
 }
+// RDI still names the selector before the menu restores its saved registers. Later grids and menu actions can
+// change the selection after GEMS returns. Copy and compare here; never retain the selector pointer.
+void KILN_CALL on_gem_end(KilnRegisters* r, void*) {
+    GemCapture* cap = t_gem;
+    if (!cap || !cap->frame.meta.ok || !gem_on()) return;
+    GemReader rd; GemSelection after;
+    if (!gem_selection(rd, r->rdi, after)) {
+        gem_fail("Gem Forge final selection became unreadable");
+    } else if (!(after == cap->selection)) {
+        cap->frame.meta.ok = 0; cap->frame.meta.reason = KUI_STALE_FRAME;
+    } else {
+        cap->menu_checked = true;
+    }
+}
 bool gem_screen(const KilnUiScreen& s) { return s.available && s.ui_state == KILN_UI_STATE_PLAY && s.hud_screen == 45; }
 bool gem_same(const GemFrame& a, const GemFrame& b) {
     // Frame stamps and C struct padding are not list identity.
@@ -227,7 +243,7 @@ void gem_publish(GemCapture& cap) {
     KilnUiScreen screen{}; ClientNow now{};
     const bool have_screen = env().screen && env().screen(&screen);
     const bool have_client = env().client && env().client(&now);
-    const bool valid = gem_on() && m.ok && have_screen && gem_screen(screen) &&
+    const bool valid = gem_on() && m.ok && cap.menu_checked && have_screen && gem_screen(screen) &&
         have_client && now.session == cap.client.session && now.local_player == cap.client.local_player &&
         screen.frame == cap.before_frame + 1;
     m.size = sizeof m;
@@ -293,13 +309,15 @@ bool install_gemforge(uint32_t list) {
         int64_t actual = 0;
         if (!sig_constant(name, &actual) || actual != expected) { logf(KILN_LOG_ERROR, "ui.values: missing or changed %s", name); return false; }
     }
-    uintptr_t grid = 0, frame = 0, unused = 0;
+    uintptr_t grid = 0, frame = 0, end = 0, unused = 0;
     for (const char* name : {"ui/GemForgeMenu", "ui/GemForgeLists", "ui/GemForgeCandidates", "ui/GemForgeSourceRet",
          "ui/GemForgeSlotRet", "ui/GemForgeScreenCall", "ui/GemForgeListsCall", "ui/GemForgeGemsCall",
          "ui/GemForgeWeaponsCall", "ui/GemForgeSwitch", "ui/GemForgeLowerBoundary", "ui/PlayStateUi"})
         if (!sig_symbol(name, &unused)) return false;
-    if (!sig_symbol("ui/UiApp", &g_gem_app) || !sig_symbol("ui/GemForgeGrid", &grid) || !sig_symbol("ui/GameUiFrame", &frame)) return false;
+    if (!sig_symbol("ui/UiApp", &g_gem_app) || !sig_symbol("ui/GemForgeGrid", &grid) ||
+        !sig_symbol("ui/GemForgeEnd", &end) || !sig_symbol("ui/GameUiFrame", &frame)) return false;
     auto rc = env().hook_raw(grid, "ui.values/GemForgeGrid", 0, reinterpret_cast<void*>(&hk_gem_grid), reinterpret_cast<void**>(&g_gem_grid_next));
+    if (rc == KILN_OK) rc = env().hook_mid(end, "ui.values/GemForgeEnd", &on_gem_end);
     if (rc == KILN_OK) rc = env().hook_raw(frame, "ui.values/GemForgeFrame", 110, reinterpret_cast<void*>(&hk_gem_frame), reinterpret_cast<void**>(&g_gem_frame_next));
     return rc == KILN_OK && g_gem_grid_next && g_gem_frame_next;
 }
@@ -318,17 +336,19 @@ KilnResult gemforge_copy(KilnOwner owner, uint64_t session, uint64_t frame, Kiln
     const uint32_t size = out->size, stride = capacity ? rows[0].size : 0;
     if (capacity && (stride > kGemBytes || !GemReader::range(reinterpret_cast<uintptr_t>(rows), capacity, stride))) return KILN_ERR_INVALID_ARGUMENT;
     *out = {}; out->size = size; out->reason = KUI_NO_FRAME;
-    ClientNow now{}; KilnUiScreen screen{};
-    const bool current = env().client && env().client(&now) && now.local_player && env().screen && env().screen(&screen) && gem_screen(screen);
     std::shared_ptr<const GemFrame> pick;
     {
         auto& r = gem_ring(); std::lock_guard lk(r.mu);
+        // A frame in progress is temporarily unavailable, not an invalidation of retained copies.
+        if (r.drawing) { out->reason = KUI_STALE_FRAME; return KILN_OK; }
+        // Sample under the frame lock so a completed publication cannot overtake these stamps.
+        ClientNow now{}; KilnUiScreen screen{};
+        const bool current = env().client && env().client(&now) && now.local_player && env().screen && env().screen(&screen) && gem_screen(screen);
         const uint64_t ticks = env().tick_ms ? env().tick_ms() : 0;
         if (!current || (r.latest && (r.latest->meta.session != now.session || r.latest->meta.local_player != now.local_player ||
             r.latest->meta.frame != screen.frame || ticks < r.latest->meta.capture_ms || ticks - r.latest->meta.capture_ms > 1000))) {
             gem_clear_locked(r); out->reason = KUI_STALE_FRAME; return KILN_OK;
         }
-        if (r.drawing) { out->reason = KUI_STALE_FRAME; return KILN_OK; }
         if (!session && !frame) pick = r.latest;
         else for (const auto& f : {r.latest, r.previous}) if (f && f->meta.session == session && f->meta.frame == frame) pick = f;
         if (pick && (ticks < pick->meta.capture_ms || ticks - pick->meta.capture_ms > 1000)) {
