@@ -27,6 +27,7 @@ internal static class ServiceNames
         "kiln.creatures",
         "kiln.decisions",
         "kiln.eml",
+        "kiln.engine",
         "kiln.example",
         "kiln.flame",
         "kiln.gamedata",
