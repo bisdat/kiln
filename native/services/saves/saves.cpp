@@ -28,6 +28,7 @@
 #include <mutex>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "kiln_api.h"
@@ -269,11 +270,26 @@ uint64_t g_autosaves_logged = 0;
 ksaves::SnapshotStage g_snapshot_stage;
 std::atomic<bool> g_can_snapshot_stage{false};
 // Kiln.Saves' writer and the game's world write (stage_barrier.h, kiln_saves.h stage_progress): the Save2Thread waits up
-// to this long for the pending manifest before it writes a world file; a shutdown save less, because the game's shutdown
-// gives its last save 10 s in all (docs/re/saves.md, serverShutdown).
+// to this long for the pending manifest before it writes a world file; once the shutdown begins, every wait (also one
+// already running) ends 6 s after that at the latest, because the game's shutdown gives its last save 10 s in all
+// (docs/re/saves.md, serverShutdown). The shutdown is seen three ways, so no single optional signature decides it
+// (review 1): the game's own log line, a save request classified as the shutdown's (saves.reasons), the world's stop.
 ksaves::StageBarrier g_stage;
 constexpr auto kStageWait = std::chrono::milliseconds(30000);
 constexpr auto kStageWaitShutdown = std::chrono::milliseconds(6000);
+constexpr std::string_view kShutdownLine = "Trigger gameflow shutdown";  // the game, ~100 ms before its shutdown save
+std::atomic<bool> g_shutdown_capped{false};
+
+void shutdown_begins(const char* why) {
+    g_stage.cap(ksaves::StageBarrier::clock::now() + kStageWaitShutdown);
+    if (!g_shutdown_capped.exchange(true))
+        logf(KILN_LOG_INFO, "saves: shutdown begins (%s): a world write waits at most %lld ms more for Kiln.Saves' writer", why,
+             static_cast<long long>(kStageWaitShutdown.count()));
+}
+
+void KILN_CALL on_game_log(int32_t, KilnStr text, void*) {  // Kiln's log thread
+    if (std::string_view(text.ptr, text.len).find(kShutdownLine) != std::string_view::npos) shutdown_begins("the game's shutdown line");
+}
 
 std::atomic<uintptr_t> g_inst{0};
 std::atomic<uintptr_t> g_save2{0};
@@ -378,6 +394,7 @@ void __fastcall hk_request(uintptr_t inst) {
     g_h_request.call(inst);
     if (have_ss) rd(ss + static_cast<uintptr_t>(O.ss_state), &after);
     const uint32_t reason = classify(ret);
+    if (reason == KILN_SAVE_REASON_SHUTDOWN) shutdown_begins("the shutdown's save request");
     const bool accepted = have_ss && before == 0 && after == 1;
     if (!accepted) {
         std::lock_guard lk(g_mu);
@@ -432,13 +449,7 @@ void __fastcall hk_request(uintptr_t inst) {
 void __fastcall hk_write(uintptr_t save2, uintptr_t user) {
     // The world file must not reach the disk before Kiln.Saves' writer has this save's pending manifest there: the tick
     // thread no longer writes it itself (stage_barrier.h). This thread is the game's Save2Thread; the world steps on.
-    uint32_t writing_reason;
-    {
-        std::lock_guard lk(g_mu);
-        writing_reason = g_current_reason;
-    }
-    const ksaves::StageBarrier::Wait staged =
-        g_stage.wait(writing_reason == KILN_SAVE_REASON_SHUTDOWN ? kStageWaitShutdown : kStageWait);
+    const ksaves::StageBarrier::Wait staged = g_stage.wait(kStageWait);  // shortened once the shutdown begins
     g_h_write.call(save2, user);
     g_save2.store(save2);
     uint8_t result = 0xFF;
@@ -497,9 +508,9 @@ void __fastcall hk_write(uintptr_t save2, uintptr_t user) {
                  "behind since an earlier wait ran out (staging %llu of %llu on disk); a crash before it catches up loads "
                  "an older generation of mod data", rev, r, t);
         else if (!staged.caught)
-            logf(KILN_LOG_WARN, "saves: the world write of revision %u waited %.0f ms for Kiln.Saves' writer and went ahead "
+            logf(KILN_LOG_WARN, "saves: the world write of revision %u waited %.0f ms for Kiln.Saves' writer and went ahead%s "
                  "(staging %llu of %llu on disk); a crash before the writer finishes loads an older generation of mod data",
-                 rev, staged.ms, r, t);
+                 rev, staged.ms, staged.capped ? " for the shutdown" : "", r, t);
         else
             logf(staged.ms > 250 ? KILN_LOG_INFO : KILN_LOG_DEBUG, "saves: the world write of revision %u waited %.1f ms "
                  "for Kiln.Saves' writer to put staging %llu on disk (on the Save2Thread; the server's steps went on)",
@@ -818,11 +829,14 @@ bool g_closed = false;  // tick thread
 void KILN_CALL on_world(const KilnWorldEvent* ev, void*) {
     if (ev->kind != KILN_WORLD_SERVER) return;
     if (ev->event == KILN_WORLD_STOPPING) {
+        shutdown_begins("the world stops");
         drop_world("the game is closing it");
         g_closed = true;
     } else if (ev->event == KILN_WORLD_STARTED) {
         if (ev->session > 1 && !g_closed) drop_world("a new server world started");
         g_closed = false;
+        g_stage.uncap();  // a game client hosts the next world: its saves wait with their own limit again
+        g_shutdown_capped.store(false);
     }
 }
 
@@ -990,6 +1004,8 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     }
     KilnHandle h = 0;
     api->subscribe_world(owner, &on_world, nullptr, &h);
+    if (api->subscribe_log(owner, &on_game_log, nullptr, &h) != KILN_OK)
+        logf(KILN_LOG_WARN, "saves: the game's log is not readable: the shutdown is seen only by its save request's reason and the world's stop");
     api->subscribe_tick(owner, KILN_TICK_PRE, &on_pre, nullptr, &h);
     g_can_snapshot_stage.store(g_can_request && g_can_write && g_wait_jobs &&
         api->subscribe_tick(owner, KILN_TICK_POST, &on_post, nullptr, &h) == KILN_OK);

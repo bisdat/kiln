@@ -58,5 +58,54 @@ int main() {
     b.done(2);
     w = b.wait(1000ms);
     check(w.caught && !w.needed && b.issued_value() == 6 && b.done_value() == 6, "issued and done never go back");
+
+    // Shutdown (review 1): the game's shutdown gives its last save 10 s in all, whatever the save's reason says.
+    {
+        ksaves::StageBarrier s;
+        s.issued(1);
+        const auto t1 = std::chrono::steady_clock::now();
+        std::thread stop([&] {
+            std::this_thread::sleep_for(100ms);
+            s.cap(std::chrono::steady_clock::now() + 100ms);  // the shutdown begins while an autosave's world write waits
+        });
+        auto c = s.wait(30000ms);
+        stop.join();
+        const auto took = std::chrono::steady_clock::now() - t1;
+        check(c.needed && !c.caught && c.capped && took >= 190ms && took < 2000ms,
+              "a wait already running with 30 s is cut short when the shutdown begins");
+        s.done(1);
+        s.issued(2);
+        const auto t2 = std::chrono::steady_clock::now();
+        s.cap(std::chrono::steady_clock::now() + 100ms);
+        c = s.wait(30000ms);
+        check(c.needed && !c.caught && c.capped && std::chrono::steady_clock::now() - t2 < 2000ms,
+              "a world write after the shutdown began waits until the shutdown's deadline at the latest");
+        s.done(2);
+        s.uncap();
+        s.issued(3);
+        std::thread w3([&] {
+            std::this_thread::sleep_for(300ms);
+            s.done(3);
+        });
+        c = s.wait(5000ms);
+        w3.join();
+        check(c.caught && !c.capped && c.ms >= 290, "the next world's saves wait with their own limit again (uncap)");
+    }
+
+    // Numbers wrap after 2^64 stagings (the managed side skips 0): still ordered.
+    {
+        ksaves::StageBarrier r;
+        const uint64_t max = UINT64_MAX;
+        r.issued(max - 1);
+        r.done(max - 1);
+        r.issued(max);
+        r.issued(1);  // the next after max
+        auto c = r.wait(50ms);
+        check(c.needed && !c.caught && c.target == 1, "a staging issued after the wrap is waited for");
+        r.done(max);
+        r.done(1);
+        c = r.wait(1000ms);
+        check(c.caught && !c.needed && r.done_value() == 1, "it counts as done once the writer reports it, across the wrap");
+    }
     return failures ? 1 : 0;
 }

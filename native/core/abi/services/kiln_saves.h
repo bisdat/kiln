@@ -162,9 +162,11 @@ typedef struct KilnSavesApi {
      * staging up to `done` on disk, written or failed (its own thread). 0 leaves a number as it is. Before the game's
      * Save2Thread writes a world file, kiln.saves waits until done reaches what was issued by then, so the world file of
      * revision R never reaches the disk before generation R's pending manifest (the order the tick thread kept when it
-     * wrote that manifest itself). The wait is bounded (30 s; 6 s for a shutdown save, which the game gives 10 s in all)
-     * and logged; one that runs out lets the world write go and does not wait again until the writer has caught up.
-     * Any thread. */
+     * wrote that manifest itself). The wait is bounded (30 s) and logged; once the shutdown begins (the game's shutdown
+     * log line, the shutdown's save request, the world's stop) every wait, also one already running, ends 6 s after that
+     * at the latest, because the game gives its last save 10 s in all. A wait that runs out lets the world write go and
+     * does not wait again until the writer has caught up. Numbers are serial (compared by difference; skip 0 when they
+     * wrap). Any thread. */
     KilnResult(KILN_CALL* stage_progress)(uint64_t issued, uint64_t done);
 } KilnSavesApi;
 
