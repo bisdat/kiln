@@ -1,6 +1,14 @@
 // SPDX-License-Identifier: MIT
 // Only the rule-selected mod's IAT calls this shim. The game and every other DLL keep their imports and code.
-#include "shroudtopia_internal.h"
+// Not shroudtopia_internal.h: Shroudtopia's own header (kept as upstream has it) redefines WIN32_LEAN_AND_MEAN, which
+// the build defines; nothing here needs it. install() is declared in shroudtopia_internal.h for plugin.cpp.
+#include <windows.h>
+#include <cstdint>
+#include <cstring>
+#include <filesystem>
+#include <iterator>
+#include <string>
+#include <vector>
 #include "../../compat/original_code_service.h"
 #include "original_code.h"
 #include "memcmp_import.h"
