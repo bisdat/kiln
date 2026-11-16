@@ -336,6 +336,17 @@ pub fn is_standalone_tool(engine: Engine) -> bool {
 pub fn loader_reason(engine: Engine, file: &str) -> String {
     let n = engine.name();
     let short = short_name(engine);
+    // A loader or tool shipped under Kiln's own proxy name: "copy it into the game folder" would replace Kiln's
+    // dinput8.dll (0.2.0-dev.29 told a player to do that for Ultimate ASI Loader). The supported way is a chain entry.
+    let kilns_name = info(Engine::Kiln).proxies.iter().any(|p| file.eq_ignore_ascii_case(p));
+    if kilns_name && engine != Engine::Kiln && !loader_is_note(engine) {
+        return match engine {
+            Engine::UltimateAsiLoader => format!("{file} is {n}: don't copy it over Kiln's own dinput8.dll; name it \
+                xinput9_1_0.dll and list that in dinput8-chain.ini (Kiln wiki)"),
+            _ => format!("{file} is {n}: don't copy it over Kiln's own dinput8.dll; give it another name and list it in \
+                dinput8-chain.ini (Kiln wiki)"),
+        };
+    }
     match engine {
         Engine::Kiln => format!("{file} is Kiln's own loader: install or update Kiln on the Runtime page instead of adding it as a mod"),
         Engine::Ember => "Ember's own loader is in this package: not needed, and Kiln can't run Ember mods yet".to_string(),
