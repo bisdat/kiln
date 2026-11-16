@@ -66,11 +66,13 @@ var back = await Gems.ReturnSocketedGems(player);
   socketed again on that step), `Unavailable`. Nothing changed for any of them.
   **Read back.** kiln.items' Done says the transaction ran; the socket and the unlocked upgrades come from its createPide
   hook, which leaves an item as the game made it when it cannot apply them (a full override list, an item layout this
-  game build does not have, a fault). So Kiln reads the new item back on the next step: `Done` only when it has its
+  game build does not have, a fault). So Kiln reads the new item back once the world has run a step with it (the game
+  finishes a new item, its shown rarity and level, in the step after its transaction: read at the result's delivery a
+  new Epic ring still says Common, level 0): `Done` only when it has its
   socket and kept its level, unlocked upgrades, rarity, dye and durability (each compared where both reads have it; a
   durability the game does not let Kiln read is not compared); otherwise `Incomplete`, `After` the new item (the old one
   is gone either way), and `GemSocketResult.Missing` one entry per thing it lacks (`"a socket"`, `"level 34 (it has
-  30)"`, `"4 unlocked upgrades (it has 0)"`, ...). The task completes on the tick thread two or three steps after the call.
+  30)"`, `"4 unlocked upgrades (it has 0)"`, ...). The task completes on the tick thread two to four steps after the call.
 - `Gems.ReturnSocketedGems(owner)` (server, tick thread): the uninstall path below.
 
 ## For data packs
@@ -124,7 +126,8 @@ vanilla forge only lists weapons, so without Kiln **nobody can take that gem out
 puts gems into other gear, run `Gems.ReturnSocketedGems(player)` for each player (or let the mod do it from a command):
 every gem in a non-weapon socket of that player's inventories (worn items included) goes into the player's inventory,
 free of charge, without a forge; the result lists each gem with `Returned` and a reason when it did not come back (no
-free backpack slot, `gems.craft` off). It runs the game's own Remove move through the forge actions' service
+free slot, `gems.craft` off). Room is any free slot on the player's Generic pages, a worn backpack's pages included,
+where the game's own unslot puts the gem. It runs the game's own Remove move through the forge actions' service
 (kiln.gemcraft `KILN_GEM_RETURN`, capability `gems.craft`): each return that happened is also a `GemCraftedEvent`
 (`Unsocket`, `ByCode`, `Forge` none, nothing paid). Weapons are left alone (the vanilla forge handles them). The owner must
 be a player character; items in chests: move them into the player's inventory first.

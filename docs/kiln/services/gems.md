@@ -150,7 +150,7 @@ if (Gems.Socket(Items.Held(player)) is { } s)                      // the gem in
 
 | Member | What it gives | Where |
 |---|---|---|
-| `Gems.Catalog` | every gem item (`GemInfo`): item, name, display name, rarity, level range, program GUID, configs by id (`GemConfigValue`: id, alias, kind, base value, scale factor, `Text` for a GUID or enum value), `FromMod` (a mod's item: kiln.content's definitions or a kiln.gamedata clone). Read again when the catalog or game data changed, at most every 2 s otherwise | server, and a game client with a world |
+| `Gems.Catalog` | every gem item (`GemInfo`): item, name, display name (a game gem's English name; a mod's gem: the name its definition gives, `displayName` or its English text; null without one), rarity, level range, program GUID, configs by id (`GemConfigValue`: id, alias, kind, base value, scale factor, `Text` for a GUID or enum value), `FromMod` (a mod's item: kiln.content's definitions or a kiln.gamedata clone). Read again when the catalog or game data changed, at most every 2 s otherwise | server, and a game client with a world |
 | `Gems.Get(item)` | one gem's `GemInfo`, null when the item is not a gem | as above |
 | `Gems.Equipped(player)` | the gems whose effects run now, one `EquippedGem` per impact slot with a gem impact: slot (`GemImpactSlot`: `Held`, `Shield`, `Head`..`Feet`, `Ring1`, `Ring2`, `Ammo`, `Spell`), the socket (`SocketedGem`: carrier, gem, level) and the gem impact's entity | server (and a hosting client): a joined client has no gem impacts |
 | `Gems.Socket(item)` | the gem in an item's socket (`SocketedGem`), null when it has none | server (and a hosting client) |

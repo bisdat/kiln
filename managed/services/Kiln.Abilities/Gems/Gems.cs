@@ -109,12 +109,14 @@ internal static class GemReads
         _keyCheckedAt = now;
         if (same && key == _key) return _catalog;
         var mods = world.ModItems();
+        var names = world.ModNames();  // the item catalog names the game's items only
         var list = new List<GemInfo>();
         foreach (var item in world.Items())
         {
             if (item.Category != ItemCategory.WeaponGem || item.IsBlueprint) continue;
             var data = world.Data(item);
-            list.Add(new GemInfo(item.Id, item.Name, item.DisplayName, item.Rarity, item.LevelMin, item.LevelMax,
+            var shown = item.DisplayName is { Length: > 0 } d ? d : names.GetValueOrDefault(item.Id.Value) is { Length: > 0 } n ? n : null;
+            list.Add(new GemInfo(item.Id, item.Name, shown, item.Rarity, item.LevelMin, item.LevelMax,
                 data?.Program ?? Guid.Empty, data?.Configs ?? new Dictionary<uint, GemConfigValue>(),
                 mods.Contains(item.Id.Value) || data?.IsClone == true));
         }

@@ -40,6 +40,8 @@ public sealed class GemsBaseTests : IDisposable
             return Gamedata.GetValueOrDefault(item.Id.Value);
         }
         public IReadOnlySet<uint> ModItems() => Mods;
+        public Dictionary<uint, string> Names = new();
+        public IReadOnlyDictionary<uint, string> ModNames() => Names;
         public IReadOnlyList<GemImpactRow>? Impacts(EntityId holder)
         {
             ImpactReads++;
@@ -126,6 +128,32 @@ public sealed class GemsBaseTests : IDisposable
         Assert.Null(GemReads.Get(_w, Sword));
         Assert.Null(GemReads.Get(_w, ItemId.None));
     }
+
+    // Owner's real-client check (2026-11-16): Gems.Catalog gave DisplayName null ("") for every mod gem (Gems.Register
+    // with a DisplayName, a data pack's gem with texts) while the game showed their names: the item catalog's display
+    // names are the game's own (Kiln's shipped list). A mod gem's is the name its definition gives.
+    [Fact]
+    public void AModGemsDisplayNameIsTheNameItsDefinitionGives()
+    {
+        var i = _w.Catalog.FindIndex(x => x.Id == ModGem);
+        _w.Catalog[i] = _w.Catalog[i] with { DisplayName = null };  // the item catalog knows no name for a mod's item
+        _w.Names[ModGem.Value] = "Gem of Frostbite";
+        Assert.Equal("Gem of Frostbite", GemReads.Get(_w, ModGem)!.DisplayName);
+        Assert.Equal("T1_Gem_GemOfBleeding shown", GemReads.Get(_w, Bleeding)!.DisplayName);  // a game gem: the catalog's
+        GemReads.Forget();
+        _w.Names.Clear();
+        _w.Key++;
+        Assert.Null(GemReads.Get(_w, ModGem)!.DisplayName);  // no name of its own: null, as before
+    }
+
+    [Theory]
+    [InlineData("""{"name":"Gem_a_b","displayName":"Gem of Frostbite","texts":{"en":{"name":"other"}}}""", "Gem of Frostbite")]
+    [InlineData("""{"name":"GemSample_Gem_DeepCuts","texts":{"de":{"name":"Edelstein"},"en":{"name":"Gem of Deep Cuts"}}}""", "Gem of Deep Cuts")]
+    [InlineData("""{"texts":{"*":{"name":"Any language"}}}""", "Any language")]
+    [InlineData("""{"name":"Gem_a_b","displayName":""}""", null)]
+    [InlineData("""not json""", null)]
+    [InlineData(null, null)]
+    public void ADefinitionsNameIsItsDisplayNameOrItsEnglishText(string? json, string? want) => Assert.Equal(want, GemJson.DisplayName(json));
 
     [Fact]
     public void TheCatalogIsKeptUntilItsKeyChangesOrItIsOld()

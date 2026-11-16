@@ -33,6 +33,10 @@ internal interface IGemWorld
     /// <summary>The item ids mods defined (kiln.content's new items).</summary>
     IReadOnlySet<uint> ModItems();
 
+    /// <summary>The names mods gave their items, by item id (kiln.content's definitions: <c>displayName</c>, else the
+    /// <c>"en"</c> or every-language text's name). The item catalog has display names for the game's items only.</summary>
+    IReadOnlyDictionary<uint, string> ModNames() => new Dictionary<uint, string>();
+
     /// <summary>The 11 impact slots of an entity's Equipment; null when it has none.</summary>
     IReadOnlyList<GemImpactRow>? Impacts(EntityId holder);
 
@@ -101,6 +105,15 @@ internal sealed unsafe class LiveGemWorld : IGemWorld
     {
         if (!NewContent.Available) return new HashSet<uint>();
         return NewContent.Definitions().Where(d => d.Kind == ContentKind.Items).Select(d => d.Id).ToHashSet();
+    }
+
+    public IReadOnlyDictionary<uint, string> ModNames()
+    {
+        var names = new Dictionary<uint, string>();
+        if (!NewContent.Available) return names;
+        foreach (var d in NewContent.Definitions())
+            if (d.Kind == ContentKind.Items && GemJson.DisplayName(d.DefinitionJson) is { } n) names[d.Id] = n;
+        return names;
     }
 
     public IReadOnlyList<GemImpactRow>? Impacts(EntityId holder)
@@ -254,6 +267,26 @@ internal static class GemJson
             }
         }
         return result;
+    }
+
+    /// <summary>The name a kiln.content item definition gives (its JSON as <c>NewContent.Definitions()</c> lists it):
+    /// <c>displayName</c>, else <c>texts.en.name</c>, else <c>texts["*"].name</c>; null without one.</summary>
+    internal static string? DisplayName(string? definitionJson)
+    {
+        if (string.IsNullOrEmpty(definitionJson)) return null;
+        JsonNode? d;
+        try
+        {
+            d = JsonNode.Parse(definitionJson);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
+        if (d is not JsonObject o) return null;
+        foreach (var n in new[] { o["displayName"], o["texts"]?["en"]?["name"], o["texts"]?["*"]?["name"] })
+            if (Text(n) is { Length: > 0 } s) return s;
+        return null;
     }
 
     /// <summary>id -> alias from <c>Content.ConfigVocabulary()</c>: <c>[{"id": "0x..", "names": [..], "alias": ".."}]</c>

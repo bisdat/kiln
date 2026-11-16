@@ -30,8 +30,9 @@ public sealed class GemsIntegrationTestMod : Mod
     private readonly List<GemSocketChangedEvent> _changed = new();
     private readonly List<GemTriggeredEvent> _triggered = new();
     private GemHandle? _reaper, _ghost;
-    private bool _phase2, _landed;
+    private bool _phase2, _probe, _backpack, _landed;
     private string _marker = "";
+    private ulong _step;  // the server world's step (Context.Tick.Pre)
     private WorldPosition _at;
 
     private void Info(string s) => Log.Info($"{Id}: INFO {s}");
@@ -47,7 +48,10 @@ public sealed class GemsIntegrationTestMod : Mod
         if (!Client.IsDedicatedServer) return;
         _marker = Path.Combine(Context.DataDirectory, "phase2.txt");
         _phase2 = File.Exists(_marker);
-        Info($"start {(_phase2 ? 2 : 1)}");
+        _probe = File.Exists(Path.Combine(Context.DataDirectory, "probe.txt"));
+        _backpack = File.Exists(Path.Combine(Context.DataDirectory, "backpack.txt"));
+        Context.Tick.Pre += (in TickInfo t) => _step = t.Step;
+        Info($"start {(_backpack ? "backpack" : _probe ? "probe" : _phase2 ? "2" : "1")}");
         var setup = Gems.AllowSockets(GemSocketKinds.Rings);
         Check(setup.Server, $"AllowSockets(Rings) works on the server: {setup}");
         _reaper = Gems.Register(new GemDefinition
@@ -99,7 +103,9 @@ public sealed class GemsIntegrationTestMod : Mod
             var sw = System.Diagnostics.Stopwatch.StartNew();
             while (!Spawn.WorldRunning && sw.Elapsed.TotalSeconds < 240) await Context.Scheduler.NextTick();
             await Steps(60);
-            if (_phase2) await Phase2();
+            if (_backpack) await Backpack();
+            else if (_probe) await Probe();
+            else if (_phase2) await Phase2();
             else await Phase1();
         }
         catch (Exception e)
@@ -205,6 +211,131 @@ public sealed class GemsIntegrationTestMod : Mod
         Info($"hit {attacker} -> {target} ({cut} cut): health {h0?.Current} -> {Combat.GetHealth(target)?.Current}{(_landed ? "" : " (the hit did not land)")}");
     }
 
+    // ---- probe (kiln/data/gems-integration-test/probe.txt): a new item entity at the moment its give is delivered ----
+    // What a read right at a transaction's completion (ItemsGivenEvent, Pre of the step after it ran) sees of a new ring
+    // given at level 20 (its range starts at 40), Epic, 2 upgrades, and of AddSocket's re-creation of it, then step by
+    // step: ItemState's UI rarity / level, the Level attribute's two values, PerkContainerNew (owner's client report:
+    // AddSocket read back level 40 and Common where the ring was 42 and Epic).
+
+    private string Snap(EntityId p, EntityId pide)
+    {
+        var sl = SlotOf(p, pide);
+        var lv = World.ReadBytes(pide, "Level");
+        var pk = World.ReadBytes(pide, "PerkContainerNew");
+        return $"step {_step}: ItemState rarity {sl?.Rarity} level {sl?.Level}; Level values " +
+               (lv is { Length: >= 16 } ? $"{BitConverter.ToUInt32(lv, 8)}/{BitConverter.ToUInt32(lv, 12)}" : "none") +
+               $"; PerkContainerNew {(pk is null ? "none" : Convert.ToHexString(pk))}; socket {HasSocket(pide)}";
+    }
+
+    private async Task Probe()
+    {
+        File.Delete(Path.Combine(Context.DataDirectory, "probe.txt"));
+        if (await Stage() is not { } st) return;
+        var (p, _) = st;
+        var delivered = new List<EntityId>();
+        using var sub = Events.On<ItemsGivenEvent>(e =>
+        {
+            if (e.Item.Value != RingShock || e.Result.Changes.Count == 0) return;
+            var pide = e.Result.Changes[0].ItemEntity;
+            delivered.Add(pide);
+            Info($"probe {pide} at delivery, {Snap(p, pide)}");
+        });
+        async Task Follow(EntityId pide)
+        {
+            for (var i = 1; i <= 4; i++)
+            {
+                await Steps(1);
+                Info($"probe {pide} after {i} tick(s), {Snap(p, pide)}");
+            }
+        }
+        var give = await Items.Give(p, new ItemId(RingShock), 1, new Gear(20, ItemRarity.Epic) { Unlocked = 2 }, GiveOptions.NoMerge);
+        Info($"probe give: {give}; the mod's await came back at step {_step}");
+        if (delivered.Count == 0) { Check(false, "probe: no ItemsGivenEvent for the ring"); return; }
+        await Follow(delivered[0]);
+        var ring = SlotOf(p, delivered[0]);
+        if (ring is null) { Check(false, "probe: the ring is not in the inventory"); return; }
+        var add = await Gems.AddSocket(ring.Ref);
+        Info($"probe AddSocket: {add}; the mod's await came back at step {_step}");
+        if (delivered.Count < 2) { Check(false, "probe: no ItemsGivenEvent for the re-creation"); return; }
+        await Follow(delivered[1]);
+        Check(true, "probe done");
+    }
+
+    // ---- backpack (kiln/data/gems-integration-test/backpack.txt): ReturnSocketedGems with room only in a worn backpack ----
+    // Owner's client 2026-11-16: "no free backpack slot for the gem" with free slots on the backpack's pages, which a
+    // player's InventorySetup reaches through a Virtual (5) link to the backpack's own setup; Kiln's precheck read only
+    // top-level Generic links.
+
+    private static (uint Link, byte Category)[] Links(EntityId e) =>
+        World.ReadBytes(e, "InventorySetup") is { Length: >= 0x50 } b
+            ? Enumerable.Range(0, 16).Select(k => (BitConverter.ToUInt32(b, 4 * k), b[0x40 + k])).TakeWhile(l => l.Item1 != 0).ToArray()
+            : [];
+
+    private static string Tree(EntityId e, int depth = 0) =>
+        string.Join(" ", Links(e).Select(l => l.Category == 5 && depth < 3 ? $"{l.Link}:V[{Tree(new EntityId(l.Link), depth + 1)}]" : $"{l.Link}:{l.Category}"));
+
+    // the Generic pages a setup reaches, each with whether it sits behind a Virtual link
+    private static List<(uint Page, bool Virtual)> GenericPages(EntityId e, bool behind = false, int depth = 0)
+    {
+        var list = new List<(uint, bool)>();
+        foreach (var (link, cat) in Links(e))
+            if (cat == 5 && depth < 3) list.AddRange(GenericPages(new EntityId(link), true, depth + 1));
+            else if (cat == 4) list.Add((link, behind));
+        return list;
+    }
+
+    private async Task Backpack()
+    {
+        File.Delete(Path.Combine(Context.DataDirectory, "backpack.txt"));
+        if (await Stage() is not { } st) return;
+        var (p, forge) = st;
+        Info($"backpack: the stand-in's setup before: {Tree(p)}");
+        var packId = Items.Lookup("Backpack_T1_NEW")?.Id ?? ItemId.None;
+        var pack = await GiveOne(p, packId);
+        var eqPack = pack is null ? null : await Items.Equip(p, pack.Slot, EquipmentSlot.Backpack);
+        await Steps(10);
+        Info($"backpack: {packId} given {pack?.Slot}, equip {eqPack?.Status} {eqPack?.Message}; setup now: {Tree(p)}");
+        var ring = await GiveOne(p, new ItemId(RingShock), new Gear(20, ItemRarity.Rare) { GemSlot = true });
+        var gem = await GiveOne(p, Items.Lookup("T1_Gem_GemOfBleeding")!.Id, new Gear(5));
+        if (ring is null || gem is null) { Check(false, $"backpack: ring {ring}, gem {gem}"); return; }
+        var put = await Gems.Socket(p, ring.Ref, gem.Ref, forge, new GemCraftOptions { Cost = GemCost.Free });
+        var eq = await Items.Equip(p, SlotOf(p, ring.ItemEntity)!.Slot, EquipmentSlot.Ring0);
+        await Steps(4);
+        Check(put.Ok && eq.Status == ItemsStatus.Done && Gems.Socket(ring.Ref)?.Gem == gem.Item,
+            $"backpack: a worn ring with a Gem of Bleeding ({put.Status}, equip {eq.Status})");
+        var pages = GenericPages(p);
+        Info($"backpack: Generic pages {string.Join(" ", pages.Select(x => $"{x.Page}{(x.Virtual ? "(V)" : "")}"))}");
+        if (!pages.Any(x => x.Virtual))
+        {
+            Check(false, "backpack: the stand-in's setup has no Virtual link to a backpack's pages: the owner's structure is not reproduced");
+            return;
+        }
+        // fill every Generic slot (rings: one per slot), then free exactly one on a backpack page
+        var filler = new ItemId(RingLight);
+        for (var i = 0; i < 300; i++)
+        {
+            var r = await Items.Give(p, filler, 1, null, GiveOptions.NoMerge);
+            if (r.Status != ItemsStatus.Done) { Info($"backpack: full after {i} filler(s): {r.Status} {r.Message}"); break; }
+        }
+        await Steps(4);
+        bool OnPage(InventorySlot sl, bool @virtual) => pages.Any(x => x.Page == sl.Slot.Inventory.Value && x.Virtual == @virtual);
+        var inBackpack = Items.Read(p)!.Slots.FirstOrDefault(sl => !sl.IsEmpty && sl.Item == filler && OnPage(sl, true));
+        if (inBackpack is null) { Check(false, "backpack: no filler on a backpack page to take"); return; }
+        var take = await Items.Take(p, filler, 1, inBackpack.Slot, exactSlot: true, itemEntity: inBackpack.ItemEntity);
+        await Steps(4);
+        var slots = Items.Read(p)!.Slots;
+        var topFree = slots.Count(sl => sl.IsEmpty && OnPage(sl, false));
+        var packFree = slots.Count(sl => sl.IsEmpty && OnPage(sl, true));
+        Check(take.Status == ItemsStatus.Done && topFree == 0 && packFree == 1,
+            $"backpack: the only free Generic slot is on a backpack page ({take.Status}; top-level free {topFree}, backpack free {packFree})");
+        var back = await Gems.ReturnSocketedGems(p);
+        await Steps(4);
+        Info($"backpack: ReturnSocketedGems: {string.Join(" | ", back)}");
+        var landed = SlotOf(p, gem.ItemEntity);
+        Check(back.Count == 1 && back[0].Returned && landed is not null && OnPage(landed, true) && Gems.Socket(ring.Ref) is null,
+            $"backpack: ReturnSocketedGems puts the gem into the backpack's free slot ({landed?.Slot}): {string.Join(" | ", back)}");
+    }
+
     // ---- first start ----
 
     private async Task Phase1()
@@ -232,6 +363,8 @@ public sealed class GemsIntegrationTestMod : Mod
 
         Info($"give essence: {await Items.Give(p, EssenceName, 300)}");
         var gem = await GiveOne(p, _reaper!.Item, new Gear(7));
+        Check(Gems.Get(_reaper.Item)?.DisplayName == "Gem of the Reaper (lab)",
+            $"Gems.Get gives a registered gem the DisplayName it was registered with: {Gems.Get(_reaper.Item)?.DisplayName}");
         Check(gem is { Level: 7 } && !gem.ItemEntity.IsNone && Gems.Get(_reaper.Item) is { FromMod: true },
             $"the registered gem in the backpack at level 7 ({gem}); Gems.Get: {Gems.Get(_reaper.Item)}");
         if (gem is null) return;

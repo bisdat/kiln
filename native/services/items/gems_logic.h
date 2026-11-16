@@ -337,6 +337,42 @@ inline int32_t precheck(uint32_t action, const Snapshot& b, uint32_t forge_max, 
     return KILN_GEM_DONE;
 }
 
+// ---- room for an unslotted gem ----
+// Is there a free slot where the game's unslot puts the gem (gems/UnslotMove: the transaction's add into the player's
+// inventories, 0x1b4d10)? Its Generic (4) pages: the ones a player's InventorySetup links directly, and the ones behind a
+// Virtual (5) link, another InventorySetup (a worn backpack's pages), followed up to 3 levels deep as kiln.items' page walk
+// does (engine.cpp walk, what Items.Read lists). Equipment, Currency and other categories never take a gem. A slot is
+// free when its stack has no item or no count. `setup` is the player's InventorySetup (84 bytes: 16 u32 links, then 16
+// u8 link categories at +0x40); `setup_of(entity)` gives another entity's InventorySetup and `inventory_of(entity)` an
+// Inventory (8 x ItemStack {u32 item, u32 count, u32 pide}), each nullptr when unreadable. Kiln's precheck only: the
+// game's own add still decides (the handler commits only when everything fit), and a return is judged afterwards.
+// Owner's client 2026-11-16: a backpack behind a Virtual link was skipped, so a player with free backpack slots and full
+// top-level pages was told "no free backpack slot".
+template <class SetupOf, class InventoryOf>
+bool generic_room(const uint8_t* setup, SetupOf setup_of, InventoryOf inventory_of, int depth = 0) {
+    for (int k = 0; k < 16; ++k) {
+        uint32_t link = 0;
+        std::memcpy(&link, setup + 4 * k, 4);
+        if (link == 0) break;
+        const uint8_t category = setup[0x40 + k];
+        if (category == 5) {
+            if (depth < 3)
+                if (const uint8_t* inner = setup_of(link))
+                    if (generic_room(inner, setup_of, inventory_of, depth + 1)) return true;
+            continue;
+        }
+        if (category != 4) continue;
+        if (const uint8_t* inv = inventory_of(link))
+            for (uint32_t j = 0; j < 8; ++j) {
+                uint32_t item = 0, count = 0;
+                std::memcpy(&item, inv + 12 * j, 4);
+                std::memcpy(&count, inv + 12 * j + 4, 4);
+                if (item == 0 || count == 0) return true;
+            }
+    }
+    return false;
+}
+
 // KILN_GEM_RETURN: no forge, no cost; the socket and the room as for Unslot.
 inline int32_t precheck_return(const Snapshot& b, bool backpack_room, const char** why) {
     *why = "";

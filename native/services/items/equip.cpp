@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "engine.h"
+#include "gems_logic.h"
 #include "equip_logic.h"
 #include "instances.h"
 #include "setexec.h"
@@ -283,20 +284,14 @@ const Stack* stack_in(const PageSet& ps, uint64_t slot) {
     return nullptr;
 }
 
-// A free slot in one of the player's Generic (4) links: where the game's unequip puts the item (0x1b5a50).
+// A free slot in one of the player's Generic (4) links, the worn backpack's pages too (reached through a Virtual link,
+// gems::generic_room): where the game's unequip puts the item (0x1b5a50). Only names a refusal: "no room" or refused.
 bool has_free_generic(const Access& a, KilnEntity p) {
     const auto* setup = static_cast<const uint8_t*>(other(a, A_SETUP, p, kSetupSize));
     if (!setup) return true;  // unknown: do not claim "no room"
-    for (int k = 0; k < 16; ++k) {
-        const uint32_t link = rd<uint32_t>(setup, 4 * k);
-        if (link == 0) break;
-        if (setup[0x40 + k] != 4) continue;
-        const auto* inv = static_cast<const uint8_t*>(other(a, A_INVENTORY, link, kInventorySize));
-        if (!inv) continue;
-        for (uint32_t j = 0; j < 8; ++j)
-            if (rd<uint32_t>(inv, 12 * j + 4) == 0) return true;
-    }
-    return false;
+    return gems::generic_room(
+        setup, [&](uint32_t e) { return static_cast<const uint8_t*>(other(a, A_SETUP, e, kSetupSize)); },
+        [&](uint32_t e) { return static_cast<const uint8_t*>(other(a, A_INVENTORY, e, kInventorySize)); });
 }
 
 }  // namespace

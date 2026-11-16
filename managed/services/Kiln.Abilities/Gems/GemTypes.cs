@@ -5,7 +5,9 @@ namespace Kiln;
 // WeaponGem (15) with its own item entity and Level (1..105); its effect is the Impact program in its ItemInfo's
 // equipment.program with the configs in impactValues, scaled by the gem's level. docs/kiln/services/gems.md.
 
-/// <summary>A gem item definition (category WeaponGem) from the catalog: the game's own gems and any mod's.</summary>
+/// <summary>A gem item definition (category WeaponGem) from the catalog: the game's own gems and any mod's.
+/// <c>DisplayName</c> is a game gem's English name, or the name a mod's definition gives its gem (<c>displayName</c>,
+/// else its English text); null without one.</summary>
 public sealed record GemInfo(ItemId Item, string Name, string? DisplayName, ItemRarity Rarity, int LevelMin, int LevelMax,
     Guid Program, IReadOnlyDictionary<uint, GemConfigValue> Configs, bool FromMod);
 

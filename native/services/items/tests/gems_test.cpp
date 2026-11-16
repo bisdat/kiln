@@ -4,6 +4,7 @@
 // snapshot before and after says an action did, the prechecks, and a free or replaced cost around the game's action.
 #include <cstdio>
 #include <cstring>
+#include <map>
 
 #include "../gems_logic.h"
 
@@ -431,6 +432,68 @@ void costs() {
 }
 }  // namespace
 
+// Owner's real-client check (2026-11-16, a client hosting its world): Gems.ReturnSocketedGems answered "no free backpack
+// slot for the gem" twice with free backpack slots. The player's InventorySetup: links 0-1 Equipment (2), 2-6 Generic
+// (4) pages all full, 7 a Virtual (5) link to the worn backpack's own InventorySetup with four Generic pages (1, 3, 8, 8
+// free), 8 Currency (3). The precheck read only top-level Generic links; the game's unslot fills the backpack's pages too
+// (as Items.Read lists them: engine.cpp walk).
+void backpack_room() {
+    struct Fake {
+        std::map<uint32_t, std::vector<uint8_t>> setups, inventories;
+        std::vector<uint8_t>& setup(uint32_t e, std::initializer_list<std::pair<uint32_t, uint8_t>> links) {
+            auto& b = setups[e];
+            b.assign(84, 0);
+            int k = 0;
+            for (auto [id, cat] : links) {
+                std::memcpy(b.data() + 4 * k, &id, 4);
+                b[0x40 + k] = cat;
+                ++k;
+            }
+            return b;
+        }
+        void page(uint32_t e, int free) {
+            auto& b = inventories[e];
+            b.assign(96, 0);
+            for (int j = 0; j < 8 - free; ++j) {
+                const uint32_t item = 0x6a40e93a, count = 7;
+                std::memcpy(b.data() + 12 * j, &item, 4);
+                std::memcpy(b.data() + 12 * j + 4, &count, 4);
+            }
+        }
+        bool room(uint32_t player) {
+            return generic_room(
+                setups.at(player).data(),
+                [&](uint32_t e) -> const uint8_t* { auto it = setups.find(e); return it == setups.end() ? nullptr : it->second.data(); },
+                [&](uint32_t e) -> const uint8_t* { auto it = inventories.find(e); return it == inventories.end() ? nullptr : it->second.data(); });
+        }
+    };
+    Fake f;
+    f.setup(1, {{2, 2}, {6577, 2}, {6590, 4}, {6591, 4}, {6592, 4}, {6593, 4}, {6594, 4}, {9000, 5}, {6600, 3}});
+    f.page(2, 0), f.page(6577, 7), f.page(6600, 8);  // equipment and currency: never where a gem goes
+    for (uint32_t e = 6590; e <= 6594; ++e) f.page(e, 0);
+    f.setup(9000, {{6576, 4}, {6597, 4}, {6598, 4}, {6599, 4}});  // the worn backpack's own setup: its pages
+    f.page(6576, 1), f.page(6597, 3), f.page(6598, 8), f.page(6599, 8);
+    check(f.room(1), "room: free slots on the pages of a backpack behind a Virtual link count (the owner's player)");
+    f.page(6576, 0), f.page(6597, 0), f.page(6598, 0), f.page(6599, 0);
+    check(!f.room(1), "room: a full backpack and full Generic links: no room");
+    f.page(6599, 1);
+    check(f.room(1), "room: one free slot on the backpack's last page is room");
+    f.page(6599, 0), f.page(6577, 8), f.page(6600, 8);
+    check(!f.room(1), "room: free Equipment and Currency slots are not room for a gem");
+    f.page(6592, 1);
+    check(f.room(1), "room: a free slot on a top-level Generic link is room (as before)");
+    f.page(6592, 0);
+    f.setups.erase(9000);
+    check(!f.room(1), "room: a Virtual link whose setup cannot be read gives no room of its own");
+    f.setup(9000, {{9001, 5}});  // nested Virtual links, as the walk follows them (depth 3)
+    f.setup(9001, {{9002, 5}});
+    f.setup(9002, {{6599, 4}});
+    f.page(6599, 2);
+    check(f.room(1), "room: a page behind nested Virtual links counts");
+    f.setup(9002, {{9000, 5}});  // a cycle ends at the depth limit
+    check(!f.room(1), "room: a cycle of Virtual links ends (no room, no endless walk)");
+}
+
 int main() {
     requests();
     layout();
@@ -440,6 +503,7 @@ int main() {
     costs();
     gifts();
     setup_block();
+    backpack_room();
     std::printf("%s: %d failure(s)\n", failures ? "FAILED" : "PASSED", failures);
     return failures ? 1 : 0;
 }

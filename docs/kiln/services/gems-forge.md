@@ -77,7 +77,7 @@ does not fit), the player keeps the essence and `Message` says so.
 | `NoForge` | the forge entity is no Shroud Forge |
 | `NotFound` | the carrier, its socket or the gem is not where the call says, a ref is stale, or the item is not a gem |
 | `Occupied` | Socket: the socket holds a gem already; Unsocket: it is empty |
-| `NoRoom` | Unsocket: the backpack is full; a free or changed cost: no room for the game's price |
+| `NoRoom` | Unsocket: no free slot on the player's Generic pages (a worn backpack's pages count); a free or changed cost: no room for the game's price |
 | `MaxLevel` | Upgrade: at the gem's own cap or the forge's maximum level |
 | `Unavailable`, `Dropped` | `gems.craft` went off, or the player left / the world closed before it ran |
 

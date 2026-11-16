@@ -1,0 +1,14 @@
+<Project>
+  <!-- A test dummy for real-client checks: /dummy spawns the game's Training Doll near you (or /dummy enemy <template>
+       a creature), healed to full after every hit, with a damage line in chat after 5 s without a hit.
+       Build: dotnet build mods/tests/test-dummy/TestDummy.csproj -t:KilnDeploy -p:KilnModsDir=<folder> -->
+  <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.props" />
+  <PropertyGroup>
+    <KilnModId>test-dummy</KilnModId>
+    <KilnModName>Test dummy</KilnModName>
+    <Version>0.1.0</Version>
+    <KilnServices>Combat;Spawn;Chat;Players;World;Build;Items;Abilities</KilnServices>
+    <KilnSide>server</KilnSide>
+  </PropertyGroup>
+  <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.targets" />
+</Project>

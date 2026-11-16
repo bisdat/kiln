@@ -158,7 +158,8 @@ public static partial class Gems
     /// kind allowed (<see cref="AllowSockets"/>). Kiln reads the new item back: <see cref="GemSocketStatus.Done"/> only when
     /// it has its socket and kept everything above that the game lets Kiln read; otherwise
     /// <see cref="GemSocketStatus.Incomplete"/> with <see cref="GemSocketResult.Missing"/> (the item is re-created either
-    /// way). Completes on the tick thread two or three steps later.
+    /// way). It reads once the world has run a step with the new item (the game finishes a new item in that step).
+    /// Completes on the tick thread two to four steps later.
     /// </summary>
     [ServerOnly]
     [TickThreadOnly]
@@ -183,7 +184,7 @@ public static partial class Gems
                     ? ResultOf(item, t.Result)
                     : new GemSocketResult(GemSocketStatus.Unavailable, item, item, t.Exception?.GetBaseException().Message ?? "canceled");
                 if (r.Status != GemSocketStatus.Done) done.TrySetResult(r);
-                else OnNextTick(() => done.TrySetResult(ReadBack(r, g, rarity)));  // the read needs the tick thread
+                else AfterWorldStep(() => done.TrySetResult(ReadBack(r, g, rarity)));  // the read needs the tick thread
             },
             CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
         return done.Task;
@@ -204,13 +205,22 @@ public static partial class Gems
         }
     }
 
-    // Runs once on the tick thread at the next service tick.
-    private static void OnNextTick(Action run)
+    /// <summary>Runs <paramref name="run"/> once on the tick thread, at a service tick after the world has run a whole
+    /// step since this call. The game finishes a new item entity (its ItemState rarity and level, the Level attribute's
+    /// values) in the world step after the transaction that made it: at the result's delivery, in a step's Pre, it still
+    /// reads Common, level 0 (lab gems-int probe 2026-11-16; on a client hosting its world the read-back ran 4 ms after
+    /// the delivery and saw "level 40, Common"). Any thread: called in the delivery step's Pre, the last service tick is
+    /// that step's (it ran before the delivery) or the one before (it has not run yet), so the handler waits for the second
+    /// step after the last one. A world that starts again (its steps count from 1 again) runs it at once.</summary>
+    internal static void AfterWorldStep(Action run)
     {
+        var last = ServiceTick.Step;
+        var due = last + 2;
         var ran = 0;
         IDisposable? tick = null;
-        tick = ServiceTick.Add("kiln.abilities gem socket check", (in TickInfo _) =>
+        tick = ServiceTick.Add("kiln.abilities gem socket check", (in TickInfo t) =>
         {
+            if (t.Step < due && t.Step >= last) return;
             if (Interlocked.Exchange(ref ran, 1) != 0) return;
             tick?.Dispose();
             run();

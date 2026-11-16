@@ -320,19 +320,14 @@ Counts count_in(const View& v, KilnEntity holder, uint32_t item_a, uint32_t item
     return c;
 }
 
-// A free slot in one of the player's Generic (4) links: where the game's unslot puts the gem.
+// A free slot on one of the player's Generic (4) pages, a worn backpack's behind a Virtual link included: where the
+// game's unslot puts the gem (gems::generic_room).
 bool free_generic(const View& v, KilnEntity p) {
     const uint8_t* setup = other(v, v.it[gems::I_SETUP], p, kSetupSize);
     if (!setup) return true;  // unknown: let the game decide
-    for (int k = 0; k < 16; ++k) {
-        const uint32_t link = rd<uint32_t>(setup, 4 * k);
-        if (link == 0) break;
-        if (setup[0x40 + k] != 4) continue;
-        if (const uint8_t* inv = other(v, v.it[gems::I_INVENTORY], link, kInventorySize))
-            for (uint32_t j = 0; j < 8; ++j)
-                if (rd<uint32_t>(inv, 12 * j + 4) == 0) return true;
-    }
-    return false;
+    return gems::generic_room(
+        setup, [&](uint32_t e) { return other(v, v.it[gems::I_SETUP], e, kSetupSize); },
+        [&](uint32_t e) { return other(v, v.it[gems::I_INVENTORY], e, kInventorySize); });
 }
 
 struct Forge {
