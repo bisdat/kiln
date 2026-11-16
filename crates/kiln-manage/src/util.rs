@@ -359,19 +359,40 @@ fn replace_durable(from: &Path, to: &Path) -> Result<()> {
     std::fs::File::open(dir).and_then(|d| d.sync_all()).map_err(io_at(dir, "flushing"))
 }
 
+/// Absolute, extended Windows names for direct Win32 calls, including paths beyond MAX_PATH.
+#[cfg(windows)]
+pub(crate) fn win32_path(path: &Path) -> Result<Vec<u16>> {
+    use std::os::windows::ffi::OsStrExt;
+    let path = std::path::absolute(path).map_err(io_at(path, "resolving"))?;
+    win32_path_units(path.as_os_str().encode_wide().collect())
+}
+
+#[cfg(any(windows, test))]
+fn win32_path_units(mut path: Vec<u16>) -> Result<Vec<u16>> {
+    if path.contains(&0) { return Err(Error::invalid("the path holds a NUL character")); }
+    let slash = u16::from(b'\\');
+    let extended: Vec<u16> = r"\\?\".encode_utf16().collect();
+    if !path.starts_with(&extended) {
+        for c in &mut path { if *c == u16::from(b'/') { *c = slash; } }
+        let prefix = if path.len() >= 3 && path[1] == u16::from(b':') && path[2] == slash {
+            extended
+        } else if path.starts_with(&[slash, slash]) {
+            path.drain(..2);
+            r"\\?\UNC\".encode_utf16().collect()
+        } else {
+            return Err(Error::invalid("expected an absolute Windows path"));
+        };
+        path.splice(..0, prefix);
+    }
+    path.push(0);
+    Ok(path)
+}
+
 /// Windows: the folder cannot be flushed like on Unix; the replace itself is written through before it returns.
 #[cfg(windows)]
 fn replace_durable(from: &Path, to: &Path) -> Result<()> {
-    use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Storage::FileSystem::{MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH};
-    let wide = |p: &Path| -> Result<Vec<u16>> {
-        let w: Vec<u16> = p.as_os_str().encode_wide().collect();
-        if w.contains(&0) {
-            return Err(Error::invalid(format!("{}: the path holds a NUL character", p.display())));
-        }
-        Ok(w.into_iter().chain(std::iter::once(0)).collect())
-    };
-    let (src, dst) = (wide(from)?, wide(to)?);
+    let (src, dst) = (win32_path(from)?, win32_path(to)?);
     // SAFETY: both are NUL-terminated UTF-16 strings that live until the call returns.
     if unsafe { MoveFileExW(src.as_ptr(), dst.as_ptr(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) } == 0 {
         return Err(io_at(to, "renaming to")(std::io::Error::last_os_error()));
@@ -465,6 +486,24 @@ pub fn copy_tree(from: &Path, to: &Path) -> Result<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn windows_rename_paths_support_long_drive_and_unc_names() {
+        for (root, expected) in [(r"C:\game\", r"\\?\C:\game\"), (r"\\server\share\game\", r"\\?\UNC\server\share\game\")] {
+            let path = format!("{root}{}\\mod.dll", "subfolder\\".repeat(35));
+            let wide = win32_path_units(path.encode_utf16().collect()).unwrap();
+            assert_eq!(wide.last(), Some(&0));
+            assert!(String::from_utf16(&wide[..wide.len()-1]).unwrap().starts_with(expected));
+        }
+        let extended = r"\\?\C:\game\mod.dll";
+        let wide = win32_path_units(extended.encode_utf16().collect()).unwrap();
+        assert_eq!(String::from_utf16(&wide[..wide.len()-1]).unwrap(), extended);
+        assert!(win32_path_units(vec![u16::from(b'C'), 0]).is_err());
+        let unusual = vec![67, 58, 92, 0xD800, 46, 100, 108, 108];
+        let wide = win32_path_units(unusual.clone()).unwrap();
+        assert_eq!(&wide[4..wide.len()-1], unusual, "Windows names must retain unpaired UTF-16 units too");
+        assert!(win32_path_units("relative\\mod.dll".encode_utf16().collect()).is_err());
+    }
 
     #[test]
     fn rfc3339_round_trip() {

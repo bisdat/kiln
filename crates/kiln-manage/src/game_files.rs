@@ -262,6 +262,15 @@ struct Receipts {
     /// Changes begun and not yet committed, written before their first file changes ([`run`]); [`recover`] settles them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pending: Vec<Intent>,
+    /// Side files of committed work stay recorded until their cleanup commits too.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    cleanup: Vec<Cleanup>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct Cleanup {
+    rel: String,
+    tag: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -328,6 +337,8 @@ fn read_receipts(game: &Path) -> Result<Receipts> {
 thread_local! {
     /// Tests: fail [`run`] after this many file changes, before its commit (a stop in the middle).
     static STOP_AFTER: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+    static STOP_BEFORE_CLEANUP: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static FAIL_OWNERSHIP_LINK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// Durably, through an exclusively created temporary file of a random name ([`crate::durable::json`]); the file goes when
@@ -335,7 +346,7 @@ thread_local! {
 fn save_receipts(game: &Path, r: &Receipts) -> Result<()> {
     let file = receipts_path(game);
     crate::engine_mods::refuse_symlink_path(game, &file)?;
-    if r.mods.is_empty() && r.ual.is_none() && r.pending.is_empty() {
+    if r.mods.is_empty() && r.ual.is_none() && r.pending.is_empty() && r.cleanup.is_empty() {
         return match std::fs::remove_file(&file) {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(io_at(&file, "removing")(e)),
             _ => Ok(()),
@@ -367,18 +378,48 @@ fn sha_of(path: &Path) -> Result<Option<String>> {
 
 /// `rel` below `game` with each component as the game folder already spells it (case ignored), so a package's
 /// `Scripts/` lands in a `scripts/` that is there, as Windows would have it; the rest as `rel` spells it.
-fn spelled(game: &Path, rel: &str) -> String {
-    let mut at = game.to_path_buf();
-    let mut out = Vec::new();
-    for part in rel.split('/').filter(|p| !p.is_empty()) {
-        let name = if at.join(part).symlink_metadata().is_ok() { part.to_string() } else {
-            std::fs::read_dir(&at).into_iter().flatten().flatten().map(|e| e.file_name().to_string_lossy().into_owned())
-                .find(|n| n.eq_ignore_ascii_case(part)).unwrap_or_else(|| part.to_string())
-        };
-        at.push(&name);
-        out.push(name);
+fn spelled(game: &Path, rel: &str) -> Result<String> {
+    CasePaths::new(game).spelled(rel)
+}
+
+/// A read-only pass lists each folder once, including exact matches: Linux can have two spellings at once.
+struct CasePaths<'a> {
+    game: &'a Path,
+    dirs: BTreeMap<PathBuf, BTreeMap<String, Vec<String>>>,
+}
+
+impl<'a> CasePaths<'a> {
+    fn new(game: &'a Path) -> Self { Self { game, dirs: BTreeMap::new() } }
+
+    fn spelled(&mut self, rel: &str) -> Result<String> {
+        let mut at = self.game.to_path_buf();
+        let mut out = Vec::new();
+        for part in rel.split('/').filter(|p| !p.is_empty()) {
+            if !self.dirs.contains_key(&at) {
+                let mut names: BTreeMap<String, Vec<String>> = BTreeMap::new();
+                match std::fs::read_dir(&at) {
+                    Ok(entries) => for entry in entries {
+                        let name = entry.map_err(io_at(&at, "reading"))?.file_name();
+                        if let Some(name) = name.to_str() {
+                            names.entry(name.to_ascii_lowercase()).or_default().push(name.to_string());
+                        }
+                    },
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
+                    Err(e) => return Err(io_at(&at, "reading")(e)),
+                }
+                self.dirs.insert(at.clone(), names);
+            }
+            let matches = self.dirs[&at].get(&part.to_ascii_lowercase());
+            if matches.is_some_and(|names| names.len() > 1) {
+                return Err(Error::new(ErrorCode::Refused, format!(
+                    "{}: more than one name matches {part} ignoring case; keep just one spelling before activating or removing mods", at.display())));
+            }
+            let name = matches.and_then(|names| names.first()).cloned().unwrap_or_else(|| part.to_string());
+            at.push(&name);
+            out.push(name);
+        }
+        Ok(out.join("/"))
     }
-    out.join("/")
 }
 
 fn host(game: &Path, rel: &str) -> PathBuf {
@@ -401,9 +442,10 @@ fn side_file(path: &Path, tag: &str, what: &str) -> PathBuf {
 }
 
 /// Finds a journal side file even when its parent or destination was renamed only by case.
-fn side_at(game: &Path, rel: &str, tag: &str, what: &str) -> PathBuf {
+fn side_at(paths: &mut CasePaths<'_>, rel: &str, tag: &str, what: &str) -> Result<PathBuf> {
     let path = side_file(Path::new(rel), tag, what);
-    host(game, &spelled(game, &path.to_string_lossy().replace('\\', "/")))
+    let rel = paths.spelled(&path.to_string_lossy().replace('\\', "/"))?;
+    Ok(host(paths.game, &rel))
 }
 
 /// Writes `bytes` into a new file next to `path` (created exclusively, flushed).
@@ -418,10 +460,17 @@ fn stage(path: &Path, tag: &str, bytes: &[u8]) -> Result<PathBuf> {
     written.inspect_err(|_| { let _ = std::fs::remove_file(&staged); })?;
     // Keep the file's identity until its receipt commits. Equal bytes alone cannot prove that we published it.
     let proof = side_file(path, tag, "owned");
-    std::fs::hard_link(&staged, &proof).map_err(io_at(&proof, "recording file ownership"))
+    ownership_link(&staged, &proof).map_err(|e| Error::new(ErrorCode::Refused, format!(
+        "{}: cannot record file ownership ({e}); game-folder mods need a drive that supports hard links and allows writing", proof.display())))
         .inspect_err(|_| { let _ = std::fs::remove_file(&staged); })?;
     crate::durable::flush_dir(dir)?;
     Ok(staged)
+}
+
+fn ownership_link(from: &Path, to: &Path) -> std::io::Result<()> {
+    #[cfg(test)]
+    if FAIL_OWNERSHIP_LINK.with(|s| s.get()) { return Err(std::io::ErrorKind::Unsupported.into()); }
+    std::fs::hard_link(from, to)
 }
 
 /// Both names still refer to the same physical file, rather than two files with equal content.
@@ -453,13 +502,28 @@ fn same_file(a: &Path, b: &Path) -> Result<bool> {
     Ok(identity(a)? == identity(b)?)
 }
 
-fn remove_proof(game: &Path, rel: &str, tag: &str) -> Result<()> {
-    let proof = side_at(game, rel, tag, "owned");
-    crate::engine_mods::refuse_symlink_path(game, &proof)?;
-    match std::fs::remove_file(&proof) {
-        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(io_at(&proof, "removing")(e)),
-        _ => Ok(()),
+fn remove_proof(paths: &mut CasePaths<'_>, rel: &str, tag: &str) -> Result<()> {
+    crate::bundle::safe_rel_path(rel)?;
+    for what in ["new", "owned"] {
+        let proof = side_at(paths, rel, tag, what)?;
+        crate::engine_mods::refuse_symlink_path(paths.game, &proof)?;
+        match std::fs::remove_file(&proof) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(io_at(&proof, "removing")(e)),
+            _ => {},
+        }
+        if let Some(dir) = proof.parent().filter(|p| p.is_dir()) { crate::durable::flush_dir(dir)?; }
     }
+    Ok(())
+}
+
+fn finish_cleanup(game: &Path, rc: &mut Receipts) -> Result<()> {
+    if rc.cleanup.is_empty() { return Ok(()); }
+    #[cfg(test)]
+    if STOP_BEFORE_CLEANUP.with(|s| s.get()) { return Err(Error::invalid("injected stop after commit")); }
+    let mut paths = CasePaths::new(game);
+    for side in &rc.cleanup { remove_proof(&mut paths, &side.rel, &side.tag)?; }
+    rc.cleanup.clear();
+    save_receipts(game, rc)
 }
 
 /// Moves `from` to `to` only while there is no file at `to`: false (and `from` stays) when one is there.
@@ -479,10 +543,8 @@ fn publish_new(from: &Path, to: &Path) -> Result<bool> {
 /// Moves `from` to `to` only while there is no file at `to` (`MoveFileExW` without `MOVEFILE_REPLACE_EXISTING`).
 #[cfg(windows)]
 fn publish_new(from: &Path, to: &Path) -> Result<bool> {
-    use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Storage::FileSystem::{MoveFileExW, MOVEFILE_WRITE_THROUGH};
-    let wide = |p: &Path| -> Vec<u16> { p.as_os_str().encode_wide().chain(std::iter::once(0)).collect() };
-    let (src, dst) = (wide(from), wide(to));
+    let (src, dst) = (crate::util::win32_path(from)?, crate::util::win32_path(to)?);
     // SAFETY: both are NUL-terminated UTF-16 strings that live until the call returns.
     if unsafe { MoveFileExW(src.as_ptr(), dst.as_ptr(), MOVEFILE_WRITE_THROUGH) } == 0 {
         let e = std::io::Error::last_os_error();
@@ -594,20 +656,20 @@ fn new_tag() -> Result<String> {
 /// it was when nothing is there now, a staged file goes, and a new file is Kiln's only when its identity link proves
 /// publication. Earlier owned bytes still count too. Then the intent ends. Nothing is written over.
 fn recover(game: &Path, rc: &mut Receipts, rep: &mut GameFilesReport) -> Result<()> {
-    if rc.pending.is_empty() { return Ok(()); }
-    let mut proofs = Vec::new();
+    if rc.pending.is_empty() { return finish_cleanup(game, rc); }
+    let mut paths = CasePaths::new(game);
     for intent in std::mem::take(&mut rc.pending) {
         let mut files: Vec<(String, Option<String>)> = Vec::new();
         for op in &intent.ops {
             crate::bundle::safe_rel_path(&op.rel)?;
-            let rel = spelled(game, &op.rel);
+            let rel = paths.spelled(&op.rel)?;
             let dst = host(game, &rel);
             crate::engine_mods::refuse_symlink_path(game, &dst)?;
-            let staged = side_at(game, &op.rel, &intent.tag, "new");
+            let staged = side_at(&mut paths, &op.rel, &intent.tag, "new")?;
             if std::fs::symlink_metadata(&staged).is_ok_and(|m| m.is_file()) {
                 std::fs::remove_file(&staged).map_err(io_at(&staged, "removing"))?;
             }
-            let parked = side_at(game, &op.rel, &intent.tag, "old");
+            let parked = side_at(&mut paths, &op.rel, &intent.tag, "old")?;
             if std::fs::symlink_metadata(&parked).is_ok_and(|m| m.is_file()) {
                 if std::fs::symlink_metadata(&dst).is_err() {
                     publish_new(&parked, &dst)?;
@@ -618,12 +680,12 @@ fn recover(game: &Path, rc: &mut Receipts, rep: &mut GameFilesReport) -> Result<
                 }
             }
             let have = sha_of(&dst)?;
-            let proof = side_at(game, &op.rel, &intent.tag, "owned");
+            let proof = side_at(&mut paths, &op.rel, &intent.tag, "owned")?;
             crate::engine_mods::refuse_symlink_path(game, &proof)?;
             let published = have.is_some() && have == op.after && proof.is_file() && same_file(&dst, &proof)?;
             let kilns = have.is_some() && (have == op.before || published);
             files.push((rel, if kilns { have } else { None }));
-            proofs.push((op.rel.clone(), intent.tag.clone()));
+            rc.cleanup.push(Cleanup { rel: op.rel.clone(), tag: intent.tag.clone() });
         }
         match &intent.owner {
             Owner::Ual { from } => {
@@ -644,8 +706,7 @@ fn recover(game: &Path, rc: &mut Receipts, rep: &mut GameFilesReport) -> Result<
             match &intent.owner { Owner::Mod { id, .. } => tag(id), Owner::Ual { .. } => format!("Ultimate ASI Loader ({UAL_FILE})") }));
     }
     save_receipts(game, rc)?;
-    for (rel, tag) in proofs { remove_proof(game, &rel, &tag)?; }
-    Ok(())
+    finish_cleanup(game, rc)
 }
 
 // ---- working out what changes ----
@@ -691,13 +752,14 @@ fn wanted_of<'a>(dirs: &DataDirs, mods: &'a [ProfileMod]) -> Vec<Wanted<'a>> {
 /// Removal ops for Kiln's files of an earlier placement (`files`, game-relative -> sha256) that the new plan does not
 /// place again (`keep_rels`): a file still Kiln's goes, a changed code file stays (retained, its receipt line kept), a
 /// changed settings file is the player's from now on.
-fn removals(game: &Path, id: &str, files: &BTreeMap<String, String>, keep_rels: &[String], off: bool, pf: &mut Preflight,
+fn removals(paths: &mut CasePaths<'_>, id: &str, files: &BTreeMap<String, String>, keep_rels: &[String], off: bool, pf: &mut Preflight,
             ops: &mut Vec<Op>, keep: &mut BTreeMap<String, String>) -> Result<()> {
+    let game = paths.game;
     let mut settings = Vec::new();
     for (rel, sha) in files {
         if keep_rels.iter().any(|k| k.eq_ignore_ascii_case(rel)) { continue; }
         crate::bundle::safe_rel_path(rel)?;
-        let actual = spelled(game, rel);
+        let actual = paths.spelled(rel)?;
         let path = host(game, &actual);
         crate::engine_mods::refuse_symlink_path(game, &path)?;
         match sha_of(&path)? {
@@ -735,6 +797,7 @@ enum Ual {
 /// receipts hold that the profile does not want go; Ultimate ASI Loader; each package the profile wants, whole or not at
 /// all (a code file in the way keeps all of it out, the files of its earlier version included).
 fn preflight(dirs: &DataDirs, mods: &[ProfileMod], game: &Path, rc: &Receipts) -> Result<Preflight> {
+    let mut paths = CasePaths::new(game);
     let mut pf = Preflight { jobs: Vec::new(), notes: Vec::new(), retained: Vec::new(), released: Vec::new(), kept: Vec::new(), drop_ual: false };
     let wanted = wanted_of(dirs, mods);
     let (mapped, _) = one_place_each(wanted.iter().flat_map(|(_, _, p)| p.files.iter().map(|(_, r)| (r.clone(), r.clone()))).collect());
@@ -743,7 +806,7 @@ fn preflight(dirs: &DataDirs, mods: &[ProfileMod], game: &Path, rc: &Receipts) -
 
     // Ultimate ASI Loader for the .asi packages
     let need_ual = wanted.iter().any(|(_, _, p)| p.shape == Shape::Asi && p.problem.is_none());
-    let ual_rel = spelled(game, UAL_FILE);
+    let ual_rel = paths.spelled(UAL_FILE)?;
     let ual_path = host(game, &ual_rel);
     crate::engine_mods::refuse_symlink_path(game, &ual_path)?;
     let at_slot = sha_of(&ual_path)?;
@@ -816,13 +879,13 @@ fn preflight(dirs: &DataDirs, mods: &[ProfileMod], game: &Path, rc: &Receipts) -
         let (mut blocked, mut theirs, mut same) = (None, Vec::new(), Vec::new());
         let mut targets = Vec::new();
         for (src, rel) in &p.files {
-            let rel = spelled(game, &mapped[rel]);
+            let rel = paths.spelled(&mapped[rel])?;
             if let Some(other) = reserved.get(&rel.to_ascii_lowercase()) {
                 blocked = Some(format!("{rel} is also needed by {other}"));
                 break;
             }
             if let Some(other) = rc.mods.iter().find(|x| x.id != m.id && wanted.iter().any(|(m, _, _)| m.id == x.id)
-                && x.files.keys().any(|r| r.eq_ignore_ascii_case(&rel))) {
+                && (x.files.keys().any(|r| r.eq_ignore_ascii_case(&rel)) || x.loader.as_ref().is_some_and(|r| r.eq_ignore_ascii_case(&rel)))) {
                 blocked = Some(format!("{rel} still belongs to {}", tag(&other.id)));
                 break;
             }
@@ -875,7 +938,7 @@ fn preflight(dirs: &DataDirs, mods: &[ProfileMod], game: &Path, rc: &Receipts) -
                     pf.released.push((m.id.clone(), rel.clone()));
                 }
             }
-            removals(game, &m.id, &x.files, &targets, false, &mut pf, &mut ops, &mut keep)?;
+            removals(&mut paths, &m.id, &x.files, &targets, false, &mut pf, &mut ops, &mut keep)?;
         }
         if !theirs.is_empty() && (!ops.is_empty() || !had) {
             pf.notes.push(format!("{t}: {} in the game folder already and differ from the package's; Kiln leaves them as they are \
@@ -900,7 +963,7 @@ fn preflight(dirs: &DataDirs, mods: &[ProfileMod], game: &Path, rc: &Receipts) -
         });
         if ops.is_empty() && had { pf.kept.push(t); }
         let owner = Owner::Mod { id: m.id.clone(), version: m.version.clone(), hash: m.hash.clone(), shape: p.shape,
-            loader: p.loader.as_ref().map(|l| spelled(game, l)) };
+            loader: p.loader.as_ref().map(|l| paths.spelled(l)).transpose()? };
         pf.jobs.push(Job { intent: Intent { tag: new_tag()?, owner, ops }, bytes, keep, done, removal: false });
     }
 
@@ -910,7 +973,7 @@ fn preflight(dirs: &DataDirs, mods: &[ProfileMod], game: &Path, rc: &Receipts) -
             continue;
         }
         let (mut ops, mut keep) = (Vec::new(), BTreeMap::new());
-        removals(game, &x.id, &x.files, &[], true, &mut pf, &mut ops, &mut keep)?;
+        removals(&mut paths, &x.id, &x.files, &[], true, &mut pf, &mut ops, &mut keep)?;
         let owner = Owner::Mod { id: x.id.clone(), version: x.version.clone(), hash: x.hash.clone(), shape: x.shape, loader: x.loader.clone() };
         // the removals first: a folder one package leaves is free for the next one
         pf.jobs.insert(0, Job { intent: Intent { tag: new_tag()?, owner, ops }, bytes: BTreeMap::new(), keep, done: None, removal: true });
@@ -969,8 +1032,9 @@ fn run(game: &Path, rc: &mut Receipts, job: Job, rep: &mut GameFilesReport) -> R
             }
         }
     }
+    rc.cleanup.extend(intent.ops.iter().map(|op| Cleanup { rel: op.rel.clone(), tag: intent.tag.clone() }));
     save_receipts(game, rc)?;
-    for op in &intent.ops { remove_proof(game, &op.rel, &intent.tag)?; }
+    finish_cleanup(game, rc)?;
     if let Some(d) = done.filter(|_| ok) { rep.notes.push(d); }
     Ok(ok)
 }
@@ -980,6 +1044,31 @@ fn owner_label(o: &Owner) -> String {
         Owner::Mod { id, .. } => tag(id),
         Owner::Ual { .. } => format!("Ultimate ASI Loader ({UAL_FILE})"),
     }
+}
+
+/// Refuse known write failures before removing an outgoing package. Probes are journaled too.
+fn check_changes(game: &Path, rc: &mut Receipts, jobs: &[Job]) -> Result<()> {
+    let mut folders = std::collections::BTreeSet::new();
+    for op in jobs.iter().flat_map(|j| &j.intent.ops) {
+        let path = host(game, &op.rel);
+        if op.before.is_some() && std::fs::metadata(&path).map_err(io_at(&path, "inspecting"))?.permissions().readonly() {
+            return Err(Error::new(ErrorCode::Refused, format!(
+                "{}: is read-only; make it writable before changing game-folder mods", path.display())));
+        }
+        if op.after.is_some() {
+            let parent = op.rel.rsplit_once('/').map(|(p, _)| p).unwrap_or("");
+            folders.insert(parent.to_string());
+        }
+    }
+    if folders.is_empty() { return Ok(()); }
+    let probes: Vec<Cleanup> = folders.into_iter().map(|p| Ok(Cleanup {
+        rel: if p.is_empty() { ".kiln-check".into() } else { format!("{p}/.kiln-check") }, tag: new_tag()?,
+    })).collect::<Result<_>>()?;
+    rc.cleanup.extend(probes.iter().cloned());
+    save_receipts(game, rc)?;
+    let checked = probes.iter().try_for_each(|p| stage(&host(game, &p.rel), &p.tag, b"").map(|_| ()));
+    let cleaned = finish_cleanup(game, rc);
+    checked.and(cleaned)
 }
 
 /// Places the files of the profile's enabled native mods that run from the game folder ([`plan`]) and takes out the
@@ -999,6 +1088,7 @@ pub fn place_mods(dirs: &DataDirs, mods: &[ProfileMod], game: &Path) -> Result<G
     let mut rc = read_receipts(game)?;
     recover(game, &mut rc, &mut rep)?;
     let pf = preflight(dirs, mods, game, &rc)?;
+    check_changes(game, &mut rc, &pf.jobs)?;
     rep.notes.extend(pf.notes);
     rep.retained.extend(pf.retained);
     rep.kept.extend(pf.kept);
@@ -1063,7 +1153,7 @@ pub(crate) fn loaders_in_game(game: &Path) -> Result<Vec<(String, String)>> {
     for x in rc.mods.iter().filter(|x| x.shape == Shape::Loader) {
         let Some(file) = x.loader.clone().or_else(|| x.files.keys().find(|r| !r.contains('/') && ext(r) == "dll").cloned()) else { continue };
         crate::bundle::safe_rel_path(&file)?;
-        let file = spelled(game, &file);
+        let file = spelled(game, &file)?;
         let path = host(game, &file);
         crate::engine_mods::refuse_symlink_path(game, &path)?;
         if sha_of(&path)?.is_some() { loaders.push((tag(&x.id), file)); }
@@ -1083,18 +1173,20 @@ pub fn unplace(game: &Path) -> Result<crate::engine_mods::PlacementCleanup> {
     let mut rc = read_receipts(game)?;
     let mut rep = GameFilesReport::default();
     recover(game, &mut rc, &mut rep)?;
+    let mut paths = CasePaths::new(game);
     let mut pf = Preflight { jobs: Vec::new(), notes: Vec::new(), retained: Vec::new(), released: Vec::new(), kept: Vec::new(), drop_ual: false };
     for x in rc.mods.clone() {
         let (mut ops, mut keep) = (Vec::new(), BTreeMap::new());
-        removals(game, &x.id, &x.files, &[], true, &mut pf, &mut ops, &mut keep)?;
+        removals(&mut paths, &x.id, &x.files, &[], true, &mut pf, &mut ops, &mut keep)?;
         let owner = Owner::Mod { id: x.id.clone(), version: x.version.clone(), hash: x.hash.clone(), shape: x.shape, loader: x.loader.clone() };
         pf.jobs.push(Job { intent: Intent { tag: new_tag()?, owner, ops }, bytes: BTreeMap::new(), keep, done: None, removal: true });
     }
     if let Some(u) = rc.ual.clone() {
-        let path = host(game, &spelled(game, UAL_FILE));
+        let rel = paths.spelled(UAL_FILE)?;
+        let path = host(game, &rel);
         match sha_of(&path)? {
             Some(have) if have == u.sha256 => pf.jobs.push(Job { intent: Intent { tag: new_tag()?, owner: Owner::Ual { from: u.from },
-                ops: vec![Op { rel: spelled(game, UAL_FILE), before: Some(have), after: None }] }, bytes: BTreeMap::new(),
+                ops: vec![Op { rel, before: Some(have), after: None }] }, bytes: BTreeMap::new(),
                 keep: BTreeMap::new(), done: None, removal: true }),
             Some(_) => {
                 out.retained.push(RetainedPlacement { path, may_run: true, off: true, reason: format!(
@@ -1104,6 +1196,7 @@ pub fn unplace(game: &Path) -> Result<crate::engine_mods::PlacementCleanup> {
             None => rc.ual = None,
         }
     }
+    check_changes(game, &mut rc, &pf.jobs)?;
     for (id, rel) in &pf.released {
         if let Some(x) = rc.mods.iter_mut().find(|x| x.id == *id) { x.files.retain(|r, _| r != rel); }
     }
@@ -1129,7 +1222,7 @@ pub fn ual_chain_entry(dirs: &DataDirs, profile: &crate::profile::Profile, game:
     let asi: Vec<(&ProfileMod, GamePlan)> = profile.mods.native.iter().filter(|m| m.enabled && placed(&m.id))
         .filter_map(|m| plan_of(dirs, m).filter(|p| p.shape == Shape::Asi).map(|p| (m, p))).collect();
     let (first, _) = asi.first()?;
-    if !is_ual_at(&host(game, &spelled(game, UAL_FILE))) { return None; }
+    if !is_ual_at(&host(game, &spelled(game, UAL_FILE).ok()?)) { return None; }
     let chained = crate::chain::read(game).is_ok_and(|ini| ini.chain.iter()
         .any(|e| e.status == crate::chain::EntryStatus::Ok && e.path.eq_ignore_ascii_case(UAL_CHAIN_LINE)));
     if chained { return None; }
@@ -1143,7 +1236,7 @@ pub fn ual_chain_entry(dirs: &DataDirs, profile: &crate::profile::Profile, game:
 /// for a file of that name that is not UAL is not this.
 pub fn ual_in_profile_section(ini: &crate::chain::ChainIni, game: &Path) -> bool {
     ini.profile.iter().any(|e| e.status == crate::chain::EntryStatus::Ok && e.path.eq_ignore_ascii_case(UAL_CHAIN_LINE))
-        && is_ual_at(&host(game, &spelled(game, UAL_FILE)))
+        && spelled(game, UAL_FILE).is_ok_and(|rel| is_ual_at(&host(game, &rel)))
 }
 
 // ---- the Library: .asi packages ----
@@ -1308,8 +1401,8 @@ mod tests {
         let g = std::env::temp_dir().join(format!("km-gf-spell-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&g);
         std::fs::create_dir_all(g.join("scripts")).unwrap();
-        assert_eq!(spelled(&g, "Scripts/SmartWorkshop.asi"), "scripts/SmartWorkshop.asi");
-        assert_eq!(spelled(&g, "plugins/x.dll"), "plugins/x.dll");
+        assert_eq!(spelled(&g, "Scripts/SmartWorkshop.asi").unwrap(), "scripts/SmartWorkshop.asi");
+        assert_eq!(spelled(&g, "plugins/x.dll").unwrap(), "plugins/x.dll");
         let _ = std::fs::remove_dir_all(&g);
     }
 
@@ -1475,5 +1568,75 @@ mod tests {
         std::fs::rename(g.join("plugins"), g.join("PLUGINS")).unwrap();
         unplace(&g).unwrap();
         assert!(!g.join("PLUGINS").exists(), "both the published file and its identity link must be found and removed");
+    }
+
+    #[test]
+    fn committed_identity_links_are_cleaned_after_a_stop() {
+        for recovering in [false, true] {
+            let (g, _gone) = entry(&format!("cleanup-stop-{recovering}"), NATIVE, &[]);
+            let job = Job { intent: Intent { tag: "cleanup".into(), owner: test_owner(), ops: vec![
+                Op { rel: "plugins/new.dll".into(), before: None, after: Some(crate::hash::sha256_hex(b"new")) },
+            ] }, bytes: BTreeMap::from([("plugins/new.dll".into(), b"new".to_vec())]), keep: BTreeMap::new(), done: None, removal: false };
+            if recovering { STOP_AFTER.with(|s| s.set(Some(1))); }
+            else { STOP_BEFORE_CLEANUP.with(|s| s.set(true)); }
+            assert!(run(&g, &mut Receipts::default(), job, &mut GameFilesReport::default()).is_err());
+            STOP_AFTER.with(|s| s.set(None));
+            if recovering {
+                STOP_BEFORE_CLEANUP.with(|s| s.set(true));
+                assert!(recover(&g, &mut read_receipts(&g).unwrap(), &mut GameFilesReport::default()).is_err());
+            }
+            STOP_BEFORE_CLEANUP.with(|s| s.set(false));
+            assert!(read_receipts(&g).unwrap().pending.is_empty(), "ownership committed before the stop");
+            let proof = side_file(&g.join("plugins/new.dll"), "cleanup", "owned");
+            assert!(proof.is_file());
+            recover(&g, &mut read_receipts(&g).unwrap(), &mut GameFilesReport::default()).unwrap();
+            assert!(!proof.exists(), "a committed link must remain discoverable until cleanup finishes");
+            unplace(&g).unwrap();
+            assert!(!g.join("plugins").exists());
+        }
+    }
+
+    #[test]
+    fn unsupported_links_refuse_before_removing_an_earlier_package() {
+        let (root, _gone) = entry("unsupported-links", NATIVE, &[]);
+        let source = root.join("package");
+        put(&source, "native.json", NATIVE.as_bytes());
+        put(&source, "powrprof.dll", &build_test_dll(&[], b"plugins\\"));
+        put(&source, "plugins/new.dll", &build_test_dll(&[], b"plugin"));
+        let dirs = DataDirs::at(root.join("data"));
+        let report = crate::library::import(&dirs, &[source], &mut crate::task::NoProgress).unwrap();
+        let m = &report.imported[0];
+        let game = root.join("game");
+        put(&game, "old.dll", b"old");
+        let rc = Receipts { mods: vec![Placed { id: "old".into(), version: "1.0.0".into(), hash: "old".into(),
+            shape: Shape::Loader, loader: Some("old.dll".into()), files: BTreeMap::from([
+                ("old.dll".into(), crate::hash::sha256_hex(b"old"))]) }], ..Default::default() };
+        save_receipts(&game, &rc).unwrap();
+        FAIL_OWNERSHIP_LINK.with(|s| s.set(true));
+        let result = place_mods(&dirs, &[ProfileMod { id: m.id.clone(), version: m.version.clone(), hash: m.hash.clone(), enabled: true }], &game);
+        FAIL_OWNERSHIP_LINK.with(|s| s.set(false));
+        assert!(result.is_err());
+        assert_eq!(std::fs::read(game.join("old.dll")).unwrap(), b"old", "filesystem refusal must precede every package change");
+        assert!(!game.join("plugins/new.dll").exists());
+        assert!(read_receipts(&game).unwrap().pending.is_empty());
+    }
+
+    #[test]
+    fn interrupted_write_probes_are_cleaned_without_placing_files() {
+        let (g, _gone) = entry("probe-stop", NATIVE, &[]);
+        let job = Job { intent: Intent { tag: "probe".into(), owner: test_owner(), ops: vec![
+            Op { rel: "plugins/new.dll".into(), before: None, after: Some(crate::hash::sha256_hex(b"new")) },
+        ] }, bytes: BTreeMap::new(), keep: BTreeMap::new(), done: None, removal: false };
+        STOP_BEFORE_CLEANUP.with(|s| s.set(true));
+        let result = check_changes(&g, &mut Receipts::default(), &[job]);
+        STOP_BEFORE_CLEANUP.with(|s| s.set(false));
+        assert!(result.is_err());
+        assert!(!g.join("plugins/new.dll").exists());
+        let mut rc = read_receipts(&g).unwrap();
+        assert!(!rc.cleanup.is_empty());
+        recover(&g, &mut rc, &mut GameFilesReport::default()).unwrap();
+        assert!(!receipts_path(&g).exists());
+        assert_eq!(std::fs::read_dir(g.join("plugins")).unwrap().count(), 0);
+        recover(&g, &mut rc, &mut GameFilesReport::default()).unwrap();
     }
 }
