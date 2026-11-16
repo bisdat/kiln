@@ -97,6 +97,8 @@ left out, and its path is listed once in `index.json` under `runtimeOnly`.
 | Query | Answer |
 |---|---|
 | `item:`, `template:`, `skill:`, `material:` | the entry of that name |
+| `names:items`, `names:templates`, `names:skills`, `names:materials` | the names that kind holds, sorted, as `{"names": [...]}` (the result's `resourceId` is the empty GUID); read a record by its name. Counts against the read budget like a value |
+| `names:templates/<component type>` | the templates whose record has a component of that type (`names:templates/MiningNode`), sorted, the same way; the first such query of a type reads `templates.data` once (about a second for 160 MB), later ones are answered from memory |
 | `resource:<GUID>/<8 hex type hash>/<part>` | the item or template whose resource this is; a resource of another type is not in the snapshot (not found) |
 
 The result is `{"resourceId","typeHash","part","value"}`: the GUID, the type hash as 8 lower-case hex digits, the part

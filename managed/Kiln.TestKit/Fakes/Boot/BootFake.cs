@@ -180,7 +180,7 @@ internal sealed unsafe class BootFake : IKitFake
     /// <summary>boot.GameData in the kit: the records the test scripted (KilnHarness.BootPhase.SetRecord), else NotFound.</summary>
     private sealed class KitGameData(BootFakeState state) : IReadOnlyGameData
     {
-        private static readonly Regex Query = new(@"^(item:.+|template:.+|skill:0x[0-9a-fA-F]{8}|material:.+|resource:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/[0-9a-fA-F]{8}/[0-9]+)$",
+        private static readonly Regex Query = new(@"^(item:.+|template:.+|skill:0x[0-9a-fA-F]{8}|material:.+|names:(items|templates|skills|materials|templates/[A-Za-z0-9_]{1,96})|resource:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/[0-9a-fA-F]{8}/[0-9]+)$",
             RegexOptions.CultureInvariant);
 
         public BootContext? Frame { get; set; }
@@ -190,11 +190,25 @@ internal sealed unsafe class BootFake : IKitFake
             ArgumentNullException.ThrowIfNull(key);
             if (Frame is { Open: false }) return new BootDataResult(false, "PhaseClosed: the boot-author frame is closed; the game's data is read inside OnBoot only", null);
             if (FakeTables.Off("mods.boot.game_data")) throw new KilnUnavailableException("mods.boot.game_data", "switched off by the test");
-            if (!Query.IsMatch(key)) throw new ArgumentException($"\"{key}\" is not a game-data query (item:, template:, skill:0x..., material:, resource:)", nameof(key));
+            if (!Query.IsMatch(key)) throw new ArgumentException($"\"{key}\" is not a game-data query (item:, template:, skill:0x..., material:, resource:, names:<kind>)", nameof(key));
             lock (state.Lock)
+            {
+                if (key.StartsWith("names:", StringComparison.Ordinal) && !state.Records.ContainsKey(key))
+                {
+                    // names:<kind>: the names of the records the test scripted for that kind, sorted
+                    var what = key[6..];
+                    var component = what.StartsWith("templates/", StringComparison.Ordinal) ? what[10..] : null;
+                    var prefix = (component != null ? "templates" : what)[..^1] + ":";
+                    var names = state.Records.Where(r => r.Key.StartsWith(prefix, StringComparison.Ordinal))
+                        .Where(r => component == null || r.Value.Value.GetRawText().Replace(" ", "").Contains($"\"$type\":\"{component}\"", StringComparison.Ordinal))
+                        .Select(r => r.Key[prefix.Length..]).Order(StringComparer.Ordinal).ToArray();
+                    using var doc = System.Text.Json.JsonDocument.Parse(System.Text.Json.JsonSerializer.Serialize(new { names }));
+                    return new BootDataResult(true, null, new BootDataValue(Guid.Empty, 0, 0, doc.RootElement.Clone()));
+                }
                 return state.Records.TryGetValue(key, out var v)
                     ? new BootDataResult(true, null, v)
                     : new BootDataResult(false, $"NotFound: no record {key} in the game's data (the test scripted none: KilnHarness.BootPhase.SetRecord)", null);
+            }
         }
     }
 }

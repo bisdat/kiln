@@ -12,6 +12,7 @@
 // is only ever a key into a loaded index, never part of a path.
 #pragma once
 #include <algorithm>
+#include <map>
 #include <array>
 #include <cstdint>
 #include <cstring>
@@ -259,7 +260,7 @@ class Reader {
         return key_;
     }
 
-    /// One query of the grammar kiln.boot checked (item:, template:, skill:, material:, resource:).
+    /// One query of the grammar kiln.boot checked (item:, template:, skill:, material:, resource:, names:<kind>).
     ///   KILN_OK              *json holds {"resourceId","typeHash","part","value"}; *value_bytes the value's length
     ///   KILN_ERR_BUFFER_TOO_SMALL  capacity (which counts the NUL) is too small: *required is set, no data is read
     ///   KILN_ERR_NOT_FOUND   no such record in the snapshot
@@ -275,6 +276,52 @@ class Reader {
         const std::string_view form = query.substr(0, colon), arg = query.substr(colon + 1);
         const Entry* e = nullptr;
         size_t kind = 0;
+        if (form == "names") {
+            // names:<kind>: the names of one kind's index, sorted, as {"names": [...]} (no resource of its own)
+            // names:templates/<component type>: the templates whose record has a component of that type
+            std::string component;
+            std::string_view which = arg;
+            if (const auto slash = arg.find('/'); slash != std::string_view::npos) {
+                component = std::string(arg.substr(slash + 1));
+                which = arg.substr(0, slash);
+            }
+            kind = which == "items" ? 0 : which == "templates" ? 1 : which == "skills" ? 2 : which == "materials" ? 3 : 4;
+            if (kind == 4 || (!component.empty() && kind != 1)) return KILN_ERR_INVALID_ARGUMENT;
+            if (!load(kind, why)) return KILN_ERR_UNAVAILABLE;
+            std::vector<std::string> names;
+            if (component.empty()) {
+                names.reserve(kinds_[kind].entries.size());
+                for (const auto& [name, _] : kinds_[kind].entries) names.push_back(name);
+            } else if (const auto hit = by_component_.find(component); hit != by_component_.end()) {
+                names = hit->second;
+            } else {
+                // one pass over templates.data (the producer writes compact JSON: "$type":"<name>"), kept for the process
+                const auto data = dir_ / "templates.data";
+                std::ifstream in(data, std::ios::binary);
+                if (!in) return *why = "templates.data could not be read", KILN_ERR_UNAVAILABLE;
+                const std::string needle = "\"$type\":\"" + component + "\"";
+                std::string value;
+                for (const auto& [name, e] : kinds_[kind].entries) {
+                    if (e.length > (64u << 20)) continue;
+                    value.resize(static_cast<size_t>(e.length));
+                    in.seekg(static_cast<std::streamoff>(e.offset));
+                    if (!in.read(value.data(), static_cast<std::streamsize>(value.size()))) return *why = "templates.data could not be read", KILN_ERR_UNAVAILABLE;
+                    if (value.find(needle) != std::string::npos) names.push_back(name);
+                }
+                by_component_[component] = names;
+            }
+            std::sort(names.begin(), names.end());
+            const std::string value = nlohmann::json{{"names", names}}.dump();
+            const std::string head = "{\"resourceId\":\"00000000-0000-0000-0000-000000000000\",\"typeHash\":\"00000000\",\"part\":0,\"value\":";
+            if (value.size() > result_max || head.size() + value.size() + 2 > result_max)
+                return *why = "the list of names is larger than one result may be", KILN_ERR_UNAVAILABLE;
+            if (value.size() > budget_left) return *why = "the mod's game-data budget is spent", KILN_ERR_UNAVAILABLE;
+            const size_t need = head.size() + value.size() + 2;
+            if (capacity < need) return *required = need, KILN_ERR_BUFFER_TOO_SMALL;
+            *json = head + value + "}";
+            *value_bytes = value.size();
+            return KILN_OK;
+        }
         if (form == "resource") {
             if (!load_resources(why)) return KILN_ERR_UNAVAILABLE;
             const auto it = resources_.find(lowered(arg));
@@ -319,6 +366,7 @@ class Reader {
     }
 
    private:
+    std::map<std::string, std::vector<std::string>> by_component_;  // names:templates/<component> answers (mutex_)
     bool verify_locked(std::string* why) {
         if (!open_) return *why = damaged_.empty() ? "no snapshot" : damaged_, false;
         if (verified_) return true;
@@ -328,6 +376,7 @@ class Reader {
                 open_ = false;
                 for (auto& k : kinds_) k = Kind{};
                 resources_loaded_ = false;
+                by_component_.clear();
                 resources_.clear();
                 return *why = damaged_, false;
             }

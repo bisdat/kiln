@@ -60,7 +60,10 @@ public sealed record BootDataResult(bool Ok, string? Reason, BootDataValue? Data
 public interface IReadOnlyGameData
 {
     /// <summary>One record: <c>item:&lt;debugName&gt;</c>, <c>template:&lt;debugName&gt;</c>, <c>skill:0x&lt;8 hex digits&gt;</c>,
-    /// <c>material:&lt;GameMaterials name or CellN&gt;</c>, <c>resource:&lt;GUID&gt;/&lt;8 hex type hash&gt;/&lt;part&gt;</c>.</summary>
+    /// <c>material:&lt;GameMaterials name or CellN&gt;</c>, <c>resource:&lt;GUID&gt;/&lt;8 hex type hash&gt;/&lt;part&gt;</c>; or the names
+    /// one kind holds: <c>names:items</c>, <c>names:templates</c>, <c>names:skills</c>, <c>names:materials</c> (the value is
+    /// <c>{"names": [...]}</c>, sorted; read each record by its name), and <c>names:templates/&lt;component type&gt;</c> for the
+    /// templates that have one (<c>names:templates/MiningNode</c>).</summary>
     /// <exception cref="ArgumentException">The key is not one of the five forms.</exception>
     /// <exception cref="KilnUnavailableException"><c>mods.boot.game_data</c> is off.</exception>
     [BootThreadOnly, RequiresCapability("mods.boot.game_data")]

@@ -142,6 +142,16 @@ void configs_scan();
 // references, {"mul","add","min","max","raiseOnly","lowerOnly","set"} ops on the original). *reset: {"reset": true}.
 bool parse_leaf(const Field& f, const gjson& v, const uint8_t* original, uint8_t* out, bool* reset, std::string* err);
 
+// ---- structural edits of a boot resource patch (gamedata_bootstruct.cpp) -----------------------------------------
+// Made in the copy of a resource before its field writes; the copy only grows (a moved list or a new component's data
+// goes behind its own bytes). *removed / *added / *appended: how many entries changed (0: nothing to do, still true).
+bool boot_remove_components(const TType* type, const std::vector<std::string>& names, std::vector<uint8_t>* bytes, size_t* removed,
+                            std::string* err);
+bool boot_add_components(const TType* type, const std::vector<std::string>& names, std::vector<uint8_t>* bytes, size_t* added,
+                         std::string* err);
+bool boot_append(Root kind, const TType* root, const std::string& path, const std::vector<gjson>& values, bool above_last,
+                 std::vector<uint8_t>* bytes, size_t* appended, std::string* err);
+
 // ============================================================================================= resources ========
 bool res_ready();
 const char* res_via();

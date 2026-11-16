@@ -33,8 +33,39 @@ public sealed record ResourcePatchBlock : IBlock
     public int Part { get; init; }
 
     /// <summary>Member path to value. A path: members by name (<c>a.b</c>), <c>[i]</c> an element of a list that exists,
-    /// <c>[*]</c> every element.</summary>
+    /// <c>[*]</c> every element. On a template (<c>keen::ecs::TemplateResource</c>) a path starts with a component's
+    /// type name: <c>"PickupItemZone.lastAttempt.value"</c>.</summary>
     public Dictionary<string, ResourceValue> Set { get; init; } = new(StringComparer.Ordinal);
+
+    /// <summary>A template's components to take out, by type name (<c>"SpawnTime"</c>); one the template hasn't got
+    /// is skipped. Made before <see cref="AddComponents"/>, <see cref="Append"/> and <see cref="Set"/>.
+    /// <c>CurrentTransform</c> and what an actor needs to live are refused.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<string>? RemoveComponents { get; init; }
+
+    /// <summary>Components of the game's types a template gets (by type name, <c>"PickupItemZone"</c>), zeroed; one it
+    /// has already stays as it is. <see cref="Set"/> then fills their fields in. The template's list stays sorted by type
+    /// name, as the game's are.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<string>? AddComponents { get; init; }
+
+    /// <summary>List path to values added at its end: a list of numbers, bools or enum members
+    /// (<c>"difficultySettings.settingValues.enemyDamage.steps"</c>). Made before <see cref="Set"/>.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, ResourceListAppend>? Append { get; init; }
+
+    internal bool HasWork => Set.Count > 0 || RemoveComponents?.Count > 0 || AddComponents?.Count > 0 || Append?.Count > 0;
+}
+
+/// <summary>Values a resource patch adds to the end of a list (<see cref="ResourcePatchBlock.Append"/>).</summary>
+public sealed record ResourceListAppend
+{
+    /// <summary>The values, in order: numbers, bools or enum members' names.</summary>
+    public List<ResourceValue> Values { get; init; } = [];
+
+    /// <summary>Only a value greater than the list's last (the last one added counts) is added: a sorted list stays sorted,
+    /// and values the game's list already reaches are left out.</summary>
+    public bool AboveLast { get; init; }
 }
 
 /// <summary>What a resource patch writes into one field: a plain value, or a change of the game's own value

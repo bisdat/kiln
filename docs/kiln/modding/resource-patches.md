@@ -45,8 +45,9 @@ A start in which the game's resource service was already up before the boot gene
 | `list[3]` | element 3 of a list that exists (counted from 0) |
 | `list[*]` | every element of the list, however many this game build has |
 
-A path must end in a number, a bool or an enum. Strings, references to other resources, whole structs and the length
-of a list cannot be patched.
+A path must end in a number, a bool or an enum. Strings, references to other resources and whole structs cannot be
+patched. A list is made longer with `append`, a template's components changed with `addComponents` and
+`removeComponents` (below).
 
 ## Values
 
@@ -81,6 +82,48 @@ public override void OnBoot(BootContext boot)
     });
 }
 ```
+
+## Templates and lists
+
+Besides `set`, a patch can change the shape of a resource. These are made first, in this order, and `set` then works
+on the result:
+
+| Key | On | Does |
+|---|---|---|
+| `removeComponents` | a template (`keen::ecs::TemplateResource`) | takes out the components of these types (`"SpawnTime"`); one the template hasn't got is skipped. `CurrentTransform`, and what an actor needs to live, are refused. |
+| `addComponents` | a template | gives it components of these game types (`"PickupItemZone"`), zeroed; one it has already stays as it is. The list stays sorted by type name, as the game's lists are. |
+| `append` | a list of numbers, bools or enum members | adds `values` at its end. `"aboveLast": true` adds only a value greater than the list's last (the last added counts), so a sorted list stays sorted and values the game's list already reaches are left out. |
+
+On a template, a `set` path starts with a component's type name, as template paths do elsewhere
+(`"PickupItemZone.lastAttempt.value"`, `"Gravity.isActive"`); that is how the fields of an added component are filled in.
+
+```json
+{
+  "format": 1,
+  "resourcePatches": {
+    "ground-pickup": {
+      "resource": "<the template's GUID>",
+      "type": "keen::ecs::TemplateResource",
+      "removeComponents": ["SpawnTime"],
+      "addComponents": ["PickupItemZone"],
+      "set": { "PickupItemZone.lastAttempt.value": 0, "Gravity.isActive": false }
+    },
+    "more-steps": {
+      "resource": "46e14df6-fb8f-4f66-9463-e23b9e19e48e",
+      "type": "keen::FbUiBundle",
+      "append": { "difficultySettings.settingValues.enemyDamage.steps": { "values": [3, 5, 10], "aboveLast": true } }
+    }
+  }
+}
+```
+
+In C#: `RemoveComponents = ["SpawnTime"]`, `AddComponents = ["PickupItemZone"]`,
+`Append = new() { ["…steps"] = new ResourceListAppend { Values = [3, 5, 10], AboveLast = true } }`.
+
+How it is done: the changed resource is the copy Kiln serves (the game's own bytes stay as they were). A moved list and
+an added component's data go behind the resource's bytes; every offset in the game's data is self-relative, so nothing
+else has to move. Two mods that add and remove one component of a template, or append to one list, are not combined:
+the later mod is refused.
 
 ## What is checked, and when
 

@@ -26,6 +26,10 @@ bool resolve(Root, Node root, const std::string&, std::vector<Resolved>* out, st
 bool parse_leaf(const Field&, const gjson& v, const uint8_t*, uint8_t* out, bool* reset, std::string*) {
     uint32_t n = v.get<uint32_t>(); std::memcpy(out, &n, 4); *reset = false; return true;
 }
+// the structural edits have their own test (bootstruct_test.cpp): here they change nothing
+bool boot_remove_components(const TType*, const std::vector<std::string>&, std::vector<uint8_t>*, size_t* n, std::string*) { *n = 0; return true; }
+bool boot_add_components(const TType*, const std::vector<std::string>&, std::vector<uint8_t>*, size_t* n, std::string*) { *n = 0; return true; }
+bool boot_append(Root, const TType*, const std::string&, const std::vector<gjson>&, bool, std::vector<uint8_t>*, size_t* n, std::string*) { *n = 0; return true; }
 }
 }
 namespace {
@@ -82,6 +86,24 @@ int main() {
         apply(nullptr);
         check(put_count == 1 && patched == 42 && vanilla == 10, "published readiness writes the override, preserves vanilla");
         plan.destroy(plan.plan); active = nullptr;
+        // The structural edits' shapes (their bytes: bootstruct_test.cpp).
+        auto one = [&](nlohmann::json doc) {
+            nlohmann::json e = {{"owners", {{{"id", "a"}}}}, {"collectors", {{"patches", {{{"owner", "a"}, {"key", "k"}, {"document", doc}}}}}}};
+            issue = {}; issue.size = sizeof(issue);
+            auto p = prepare(e, &issue);
+            if (p.ok) p.destroy(p.plan);
+            return p.ok;
+        };
+        check(one({{"resource", "fixture"}, {"type", "fixture"}, {"append", {{"list", {{"values", {1, 2}}, {"aboveLast", true}}}}}}),
+              "an append alone is a patch");
+        check(!one({{"resource", "fixture"}, {"type", "fixture"}, {"addComponents", {"Alpha"}}}) &&
+              std::string(issue.reason).find("only a template") != std::string::npos, "components on a non-template are refused");
+        check(!one({{"resource", "fixture"}, {"type", "fixture"}, {"append", {{"list", {{"values", "x"}}}}}}), "a bad append is refused");
+        check(!one({{"resource", "fixture"}, {"type", "fixture"}, {"append", {{"list", {{"values", {1}}, {"more", 1}}}}}}),
+              "an unknown append member is refused");
+        check(!one({{"resource", "fixture"}, {"type", "fixture"}, {"set", nlohmann::json::object()}}), "nothing to do is refused");
+        check(one({{"resource", "fixture"}, {"type", "keen::ecs::TemplateResource"}, {"removeComponents", {"SpawnTime"}}}),
+              "a template's components (types unchecked here)");
         // Readiness without a published plan (also the immediate callback at a late bind).
         apply(nullptr);
         for (const char* mod : {"a", "b"}) {

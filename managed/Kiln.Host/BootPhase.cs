@@ -111,7 +111,7 @@ internal sealed unsafe class BootGameData(KilnBootApi* table, ulong author) : IR
                     continue;
                 case KilnAbi.ErrNotFound: return new BootDataResult(false, $"NotFound: no record {key} in the game's data", null);
                 case KilnAbi.ErrRevoked: return new BootDataResult(false, "PhaseClosed: the boot-author frame is closed", null);
-                case KilnAbi.ErrInvalidArgument: throw new ArgumentException($"\"{key}\" is not a game-data query (item:, template:, skill:0x..., material:, resource:)", nameof(key));
+                case KilnAbi.ErrInvalidArgument: throw new ArgumentException($"\"{key}\" is not a game-data query (item:, template:, skill:0x..., material:, resource:, names:<kind>)", nameof(key));
                 default:
                     if (!Kiln.Capabilities.Is("mods.boot.game_data")) throw ServiceCaps.Unavailable("mods.boot.game_data");
                     return new BootDataResult(false, $"Unavailable: kiln.boot could not answer {key} (rc {rc}): a type the view cannot decode, or the budget is spent", null);
