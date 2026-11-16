@@ -29,6 +29,9 @@ bash "$here/run-menu-scroll-host.sh"
 # the middle and side mouse buttons and the wheel as key presses: twins of raw records and messages, notches (mouse_press.h)
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/mouse_press_test.cpp" -o "$out/mouse_press_test"
 "$out/mouse_press_test"
+# one key press counts once, also across a focus loss (key_hold.h, GitHub issue 39): plain logic
+g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/key_hold_test.cpp" -o "$out/key_hold_test"
+"$out/key_hold_test"
 # key names and which key a binding means on any layout (key_names.h, GitHub issue 33): plain logic
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/key_names_test.cpp" -o "$out/key_names_test"
 "$out/key_names_test"

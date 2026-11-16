@@ -30,6 +30,7 @@
 
 #include "backends/imgui_impl_win32.h"
 #include "imgui.h"
+#include "key_hold.h"
 #include "key_names.h"
 #include "mouse_press.h"
 #include "safetyhook.hpp"
@@ -63,7 +64,8 @@ chain::State g_chain;
 HWND g_attached = nullptr;
 bool g_loop_said = false;
 bool g_raw_keyboard_seen = false;
-std::atomic<bool> g_down[256] = {};  // keys down, as the window's messages told (the wheel asks from other threads)
+hold::Keys g_keys;  // keys held, across a focus loss (key_hold.h; the wheel asks from other threads)
+int g_repress_said = 0;
 bool g_consumed[256] = {};  // vk consumed by a binding: swallow its legacy messages too
 std::atomic<uint32_t> g_pressed_vk{0}, g_pressed_mods{0};
 bool g_was_capturing = false;
@@ -149,12 +151,35 @@ bool is_key_msg(UINT m) {
            m == WM_UNICHAR;
 }
 
-// One key transition: menu key + subscribers. true = keep it from the game. A mouse button (mouse_press.h) never
+// A new press of a key soon after its last one: what Kiln saw in between, for the log (a few times a game). One press
+// that opened a window and shut it again showed as two presses 40 ms apart (Nexus 179900169); this line tells a key
+// that bounces (released a few ms before) from one press delivered twice (no release in between).
+void say_repress(uint32_t vk, const hold::Down& d, bool raw) {
+    if (d.since_press_ms >= 150 || g_repress_said >= 5) return;
+    ++g_repress_said;
+    char name[32];
+    keys::name(vk, name, sizeof name);
+    char released[64];
+    if (d.since_release_ms == hold::kNone) std::snprintf(released, sizeof released, "no release seen in between");
+    else std::snprintf(released, sizeof released, "released %u ms before", d.since_release_ms);
+    logf(KILN_LOG_INFO, "ui: key %s went down again %u ms after its last press (%s; %s): Kiln counts a new press. If one "
+         "press of a key acted twice, send this line (said up to 5 times)", name, d.since_press_ms, released,
+         raw ? "raw input" : "key message");
+}
+
+// One key transition: menu key + subscribers. true = keep it from the game. A down of a held key is a repeat (key_hold.h:
+// also after a focus loss; a key message's previous-state bit says so too). A mouse button (mouse_press.h) never
 // repeats (a press while it is down means its release was lost) and is not a key for take_pressed_key.
-bool on_key(uint32_t vk, uint32_t scan, bool down, bool from_mouse = false) {
+bool on_key(uint32_t vk, uint32_t scan, bool down, bool from_mouse = false, hold::Prev prev = hold::Prev::unknown) {
     if (vk == 0 || vk > 255) return false;
-    const bool repeat = down && !from_mouse && g_down[vk].load();
-    g_down[vk].store(down);
+    bool repeat = false;
+    if (down) {
+        const hold::Down d = g_keys.down(vk, from_mouse ? hold::Prev::unknown : prev, now_ms());
+        repeat = !from_mouse && d.repeat;
+        if (!repeat && !from_mouse) say_repress(vk, d, prev == hold::Prev::unknown);
+    } else {
+        g_keys.up(vk, now_ms());
+    }
     KilnUiKey k{};
     k.size = sizeof(k);
     k.vk = vk;
@@ -296,16 +321,22 @@ bool message_mouse_presses(UINT m, WPARAM w, bool over_panel) {
     }
 }
 
-// Releases can go to the newly focused window. Forget local repeat/consumption state without inventing key messages
-// for either subscribers or the game (the v5 focus record lets subscribers reset their own state).
+// The window lost the keyboard. Held keys stay held (key_hold.h): a key still down must not press again with its next
+// down; their releases may go to the window that has the keyboard now, so keys_back settles them. Consumption, a
+// pending bind-capture press and the mouse's twins and notches are forgotten, without inventing key messages for
+// either subscribers or the game (the v5 focus record lets subscribers reset their own state).
 void forget_keys() {
-    for (uint32_t vk = 0; vk < 256; ++vk) {
-        g_down[vk].store(false, std::memory_order_relaxed);
-        g_consumed[vk] = false;
-    }
+    g_keys.focus_lost();
+    for (uint32_t vk = 0; vk < 256; ++vk) g_consumed[vk] = false;
     g_pressed_vk.store(0, std::memory_order_relaxed);
     g_twins.clear();
     g_notches.clear();
+}
+
+// The keyboard is back: each key is held exactly when it is down now. One let go while the game had no focus presses
+// anew; one held all through is still held.
+void keys_back() {
+    g_keys.focus_back([](uint32_t vk) { return (GetAsyncKeyState(static_cast<int>(vk)) & 0x8000) != 0; });
 }
 
 // A Kiln panel next to a game screen (set_hover_capture) has the mouse over it: its clicks and wheel are Kiln's.
@@ -550,7 +581,8 @@ LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
             const uint32_t vk = static_cast<uint32_t>(w) & 0xFF;
             bool consumed = false;
             if (g_raw_keyboard_seen && !raw_input::registered_for(6, h)) g_raw_keyboard_seen = false;
-            if (!g_raw_keyboard_seen) consumed = on_key(vk, (static_cast<uint32_t>(l) >> 16) & 0x1FF, true);
+            if (!g_raw_keyboard_seen)
+                consumed = on_key(vk, (static_cast<uint32_t>(l) >> 16) & 0x1FF, true, false, hold::prev_of_lparam(l));
             else consumed = g_consumed[vk];
             enqueue(h, m, w, l);
             if (cap || consumed) {
@@ -576,6 +608,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
             break;
         case WM_SETFOCUS:
             if (fed) feed_focus_gained();
+            keys_back();
             enqueue(h, m, w, l);
             break;
         case WM_KILLFOCUS:
@@ -592,6 +625,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
                 else feed_focus_lost(m, w, l);
             }
             if (!w) forget_keys();
+            else keys_back();
             break;
         case WM_SETCURSOR:
             if (cap && LOWORD(l) == HTCLIENT) {
@@ -909,7 +943,7 @@ void input_poll_window() {
 
 bool input_attached() { return g_attached != nullptr; }
 
-bool input_key_held(uint32_t vk) { return vk > 0 && vk < 256 && g_down[vk].load(); }
+bool input_key_held(uint32_t vk) { return g_keys.held(vk); }
 
 void input_replay() {
     std::deque<Msg> q;

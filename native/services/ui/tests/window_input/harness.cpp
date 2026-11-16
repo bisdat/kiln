@@ -11,6 +11,8 @@
 //   - the game's procedure and Kiln's own key handling get exactly what they get without a subscriber, also while Kiln
 //     captures input (menu open, the wheel) and for a key a Kiln binding consumes, and those records still arrive;
 //   - one focus loss (WM_ACTIVATEAPP 0 and WM_KILLFOCUS) gives one record;
+//   - a key held through a focus loss stays held (its next down, raw record or key message, is a repeat), one let go
+//     while the game had no focus is a new press again (key_hold.h; GetAsyncKeyState is the test's);
 //   - unsubscribe stops delivery, waits for a call in flight on the window thread, works from inside the callback;
 //     a faulting subscriber is removed and the others go on;
 //   - the middle and side buttons and the wheel as key presses (mouse_press.h, since 0.2.0-dev.27): a raw record and
@@ -43,6 +45,7 @@ const KilnApi* g_api = nullptr;
 KilnOwner g_owner = 0;
 std::atomic<uint32_t> g_demand{0}, g_interactive{0}, g_render_demand{0}, g_hover_panels{0};
 std::atomic<bool> g_menu_open{false}, g_text_input{false}, g_want_mouse{false}, g_wheel_active{false}, g_page_capture{false};
+std::atomic<HWND> g_hwnd{nullptr};  // input_poll_window's (drawing off); never called here
 thread_local CallbackLifetime* t_callback = nullptr;
 int g_errors = 0;
 void logf(int, const char* fmt, ...) {
@@ -425,20 +428,82 @@ void raw_boundaries() {
     check(RegisterRawInputDevices(&restore, 1, sizeof restore), "raw keyboard registration restored");
 }
 
+// The keys physically down, as GetAsyncKeyState tells (this exe's import of it answers from here; without a display
+// Wine's says no key is down).
+bool g_physical[256] = {};
+bool g_async_patched = false;
+SHORT WINAPI fake_async_key_state(int vk) { return vk > 0 && vk < 256 && g_physical[vk] ? static_cast<SHORT>(0x8000) : 0; }
+
+size_t new_presses(uint32_t vk) {
+    char want[24];
+    std::snprintf(want, sizeof want, "vk=%u ", vk);
+    size_t n = 0;
+    for (const auto& x : kui::g_kiln_keys)
+        if (x.rfind(want, 0) == 0 && x.find("down=1 repeat=0") != std::string::npos) ++n;
+    return n;
+}
+
+// A held key across a focus loss (GitHub #39, Nexus 179900169: one press of F8 opened Kiln Auto Loot's window and shut
+// it 40 ms later). Kiln's held keys stay held while the game has no focus; when it comes back, each key is held exactly
+// when it is down then.
 void held_focus_lost() {
+    check(g_async_patched, "this exe's GetAsyncKeyState import answers from the test (the held state is settled with it)");
     send(WM_INPUT, RIM_INPUT, raw_key(0x24, RI_KEY_BREAK, 'J'));
+    g_physical['J'] = true;
     send(WM_INPUT, RIM_INPUT, raw_key(0x24, RI_KEY_MAKE, 'J'));
     send(WM_KILLFOCUS, 0, 0);
-    check(!kui::input_key_held('J'), "focus loss clears Kiln's held keys when no release arrives");
     uint32_t mods = 0;
     check(kui::input_take_pressed(&mods) == 0, "focus loss discards a pending bind-capture press");
+    g_physical['J'] = false;  // let go while the game had no focus: the release went to another window
     send(WM_SETFOCUS, 0, 0);
+    check(!kui::input_key_held('J'), "a key let go while the game had no focus is not held once the focus is back");
+    g_physical['J'] = true;
     send(WM_INPUT, RIM_INPUT, raw_key(0x24, RI_KEY_MAKE, 'J'));
     check(kui::g_kiln_keys.back().find("repeat=0") != std::string::npos,
           "first key after refocus is not mistaken for a repeat: %s", kui::g_kiln_keys.back().c_str());
+
+    // held all through a focus loss: the next down is its repeat, not a second press
     send(WM_ACTIVATEAPP, FALSE, 0);
-    check(!kui::input_key_held('J'), "app deactivation also clears Kiln's held keys");
+    check(kui::input_key_held('J'), "a key still down as the game loses the focus stays held");
+    send(WM_ACTIVATEAPP, TRUE, 0);
+    send(WM_INPUT, RIM_INPUT, raw_key(0x24, RI_KEY_MAKE, 'J'));
+    check(kui::g_kiln_keys.back().find("repeat=1") != std::string::npos,
+          "a key held through a focus loss: its next raw record is a repeat, not a second press: %s", kui::g_kiln_keys.back().c_str());
+    g_physical['J'] = false;
     send(WM_INPUT, RIM_INPUT, raw_key(0x24, RI_KEY_BREAK, 'J'));
+    check(!kui::input_key_held('J'), "its release ends it");
+
+    // one press, its raw record, a focus loss before its key message, and raw keyboard input gone for the window (key
+    // messages take over): the press counts once
+    kui::g_kiln_keys.clear();
+    g_physical[VK_F8] = true;
+    send(WM_INPUT, RIM_INPUT, raw_key(0x42, RI_KEY_MAKE, VK_F8));
+    send(WM_KILLFOCUS, 0, 0);
+    const RAWINPUTDEVICE remove{1, 6, RIDEV_REMOVE, nullptr};
+    check(RegisterRawInputDevices(&remove, 1, sizeof remove), "raw keyboard unregistered");
+    send(WM_KEYDOWN, VK_F8, key_l(0x42, false, false));  // the same press's message: the key was up before it
+    check(new_presses(VK_F8) == 1, "one press of F8, its raw record, a focus loss, then its key message: one press (%zu)%s",
+          new_presses(VK_F8), join(kui::g_kiln_keys).c_str());
+    send(WM_SETFOCUS, 0, 0);
+    send(WM_KEYDOWN, VK_F8, key_l(0x42, false, false) | (1ll << 30));  // its repeat
+    check(new_presses(VK_F8) == 1, "and its repeat after the focus is back is no second press (%zu)", new_presses(VK_F8));
+    g_physical[VK_F8] = false;
+    send(WM_KEYUP, VK_F8, key_l(0x42, false, true));
+
+    // key messages only: a down whose previous-state bit says the key was down already is a repeat, also of a key whose
+    // first down Kiln never saw (it went down while another window had the focus)
+    kui::g_kiln_keys.clear();
+    send(WM_KEYDOWN, 'L', key_l(0x26, false, false) | (1ll << 30));
+    check(new_presses('L') == 0, "a key message with the previous-state bit set is a repeat (%s)", join(kui::g_kiln_keys).c_str());
+    send(WM_KEYUP, 'L', key_l(0x26, false, true));
+    send(WM_KEYDOWN, 'L', key_l(0x26, false, false));
+    check(new_presses('L') == 1, "after its release the next down is a press (%zu)", new_presses('L'));
+    send(WM_KEYUP, 'L', key_l(0x26, false, true));
+    const RAWINPUTDEVICE add{1, 6, 0, nullptr};
+    check(RegisterRawInputDevices(&add, 1, sizeof add), "raw keyboard registered again");
+    std::memset(g_physical, 0, sizeof g_physical);
+    send(WM_KILLFOCUS, 0, 0);
+    send(WM_SETFOCUS, 0, 0);
 }
 
 void raw_unregistered() {
@@ -1203,6 +1268,8 @@ int main() {
         std::printf("FAIL this exe imports no GetRawInputData to stand in for\n");
         return 1;
     }
+    void* real_async = nullptr;  // input.cpp settles held keys with it when the focus comes back
+    g_async_patched = patch_import("GetAsyncKeyState", reinterpret_cast<void*>(&fake_async_key_state), &real_async);
     WNDCLASSW wc{};
     wc.lpfnWndProc = &game_proc;
     wc.hInstance = GetModuleHandleW(nullptr);
