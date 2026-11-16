@@ -2,7 +2,7 @@
 //! The content-addressed mod library on kiln_manage::library; imports run as tasks.
 
 use super::TaskId;
-use super::app::{spawn_task, to_value};
+use super::app::{launcher_log, spawn_task, to_value};
 use crate::state::{blocking, dirs};
 use kiln_manage::Error;
 use kiln_manage::library::{self, Detected, LibraryEntry, LibraryRef, RemoveReport, TakenOver};
@@ -38,8 +38,28 @@ pub async fn library_import(app: AppHandle, paths: Vec<String>) -> Result<TaskId
     let paths: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
     Ok(spawn_task(&app, "library_import", title, move |p| {
         for path in &paths { kiln_manage::quick::validate_import_path(path)?; }
-        to_value(library::import(&dirs()?, &paths, p)?)
+        let r = library::import(&dirs()?, &paths, p)?;
+        log_import("library_import", &r);
+        to_value(r)
     }))
+}
+
+/// What an import took, left out (with the reason) and did not need, one line each in launcher.log: the toast goes, a
+/// support report keeps these (inbox 42). The task's own line says only that it ended.
+fn log_import(task: &str, r: &library::ImportReport) {
+    let name = |x: &LibraryRef| r.names.get(&format!("{}/{}", x.kind.as_str(), x.id)).cloned().unwrap_or_else(|| x.id.clone());
+    for x in &r.imported {
+        launcher_log("import", &format!("{task}: added {} ({}/{} {})", name(x), x.kind.as_str(), x.id, x.version));
+    }
+    for x in &r.existing {
+        launcher_log("import", &format!("{task}: already there {} ({}/{} {})", name(x), x.kind.as_str(), x.id, x.version));
+    }
+    for s in &r.skipped {
+        launcher_log("import", &format!("{task}: left out {}: {}", s.path, s.reason));
+    }
+    for n in &r.notes {
+        launcher_log("import", &format!("{task}: not needed {}: {}", n.path, n.text));
+    }
 }
 
 /// The simple flow (kiln_manage::quick::add): imports `paths`, adds what they hold to the game's active profile
@@ -62,6 +82,7 @@ pub async fn library_add(app: AppHandle, game_id: String, paths: Vec<String>) ->
     let a = app.clone();
     Ok(spawn_task(&app, "library_add", title, move |p| {
         let r = kiln_manage::quick::add(&dirs()?, &g, &paths, p)?;
+        log_import("library_add", &r.import);
         if r.applied {
             super::profile::emit_status_later(a, game_id);
         }

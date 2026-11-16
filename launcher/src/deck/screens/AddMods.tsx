@@ -8,7 +8,7 @@ import { useNavigate } from "react-router-dom";
 import * as api from "../../api/commands";
 import type { AddReport, DeckFoundMod } from "../../api/commands";
 import { invalidateGame, qk, useActiveProfile, useGame, useGameStatus, useProfile } from "../../api/hooks";
-import { leftOutLine, summarize } from "../../shell/importResult";
+import { leftOutLine, rememberAdd, summarize } from "../../shell/importResult";
 import { runTask, toast } from "../../ui";
 import { notifyAdd } from "../../shell/notices";
 import { FolderIcon, ModpackDialog, useBrowse } from "../dialogs";
@@ -62,6 +62,9 @@ export default function AddMods() {
       if (r.profileId) qc.invalidateQueries({ queryKey: qk.profile(r.profileId) });
       invalidateGame(qc, game.id);
       notifyAdd(r); // what writing the profile again kept in the game folder, and what else changed in it
+      // kept for "Last adds" (the desktop's main list, after the Deck's toast is gone)
+      rememberAdd({ heading: r.added.length ? "Added and switched on" : r.already.length ? "Already on" : r.libraryOnly ? "Added, switched off" : "Nothing was added",
+        summary: summarize(r.import), libraryOnly: r.libraryOnly });
       if (r.modpacks.length) setPack(r.modpacks[0]);
       else if (r.added.length) toast.ok(`Added ${r.added.length === 1 ? r.added[0].name : `${r.added.length} mods`}`, r.missing.length ? `Needs ${r.missing.map((x) => x.id).join(", ")}` : undefined);
       else if (r.already.length) toast.info(`${r.already.length === 1 ? r.already[0].name : `${r.already.length} mods`} already on`);
