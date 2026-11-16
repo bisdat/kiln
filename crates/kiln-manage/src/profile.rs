@@ -1416,6 +1416,14 @@ fn sync_copies(dirs: &DataDirs, profile: &Profile, install: &GameInstall, warnin
                     return Err(Error::new(ErrorCode::HashMismatch, format!("{}: the copy does not match {}", target.display(), m.hash)));
                 }
             } else {
+                let rec = crate::library::record(dirs, &lref(k, m))?;
+                let output = if crate::engine_mods::run_folder(k).is_none() {
+                    crate::library::own_output(&src, &rec)?.unwrap_or_default()
+                } else { Vec::new() };
+                let matches = |folder: &Path| -> Result<bool> {
+                    if crate::engine_mods::run_folder(k).is_some() { Ok(crate::hash::of_mod(k, folder)? == m.hash) }
+                    else { crate::library::matches_import(folder, &rec, &output) }
+                };
                 if crate::engine_mods::run_folder(k).is_some() {
                     crate::engine_mods::refuse_symlink_path(&install.path, &dst)?;
                     match std::fs::symlink_metadata(&dst) {
@@ -1428,20 +1436,19 @@ fn sync_copies(dirs: &DataDirs, profile: &Profile, install: &GameInstall, warnin
                     }
                 } else {
                     // a Kiln mod's copy the player cooked (assets/cooked) is still that mod: kept with its cooked files
-                    if dst.is_dir() && crate::hash::of_mod(k, &dst).is_ok_and(|h| h == m.hash) {
+                    if dst.is_dir() && matches(&dst).unwrap_or(false) {
                         continue;
                     }
                     _cook = hold_copy(k, &dst, &m.id)?;
                     let _ = std::fs::remove_dir_all(&dst);
                 }
                 crate::util::copy_tree(&src, &dst)?;
-                let h = crate::hash::of_mod(k, &dst)?;
-                if h != m.hash {
-                    if crate::hash::of_mod(k, &src).is_ok_and(|s| s != m.hash) {
+                if !matches(&dst)? {
+                    if matches(&src).is_ok_and(|same| !same) {
                         // the player changed the files in the Library folder: which mod, and the way to take it over
                         return Err(crate::library::changed_error(&lref(k, m), &src));
                     }
-                    return Err(Error::new(ErrorCode::HashMismatch, format!("{}: the copy has {h}, the library entry {}", dst.display(), m.hash)));
+                    return Err(Error::new(ErrorCode::HashMismatch, format!("{}: the copy does not match the library entry {}", dst.display(), m.hash)));
                 }
             }
             copied += 1;

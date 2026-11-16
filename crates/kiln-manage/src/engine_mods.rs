@@ -2981,6 +2981,12 @@ fn is_game_code(rel: &str) -> bool {
     low == "mod.json" || low == XHL_PLUGIN_INI || low.starts_with("src/") || matches!(ext, "dll" | "exe" | "asi" | "lua" | "luac")
 }
 
+/// A new file that may be the mod's output, never code or a manifest of another mod.
+pub(crate) fn is_runtime_output(rel: &str) -> bool {
+    !is_game_code(rel) && !rel.to_ascii_lowercase().ends_with(".luau")
+        && !MOD_MANIFESTS.iter().any(|m| rel.rsplit('/').next().unwrap_or(rel).eq_ignore_ascii_case(m))
+}
+
 /// A file a mod's DLL (or the player) may have written as settings: not the manifest, the Lua, code or the plugin ini.
 fn is_game_settings_file(rel: &str) -> bool {
     let low = rel.to_ascii_lowercase();

@@ -1530,8 +1530,11 @@ pub fn changed_on_disk(folder: &Path, rec: &ImportRecord) -> bool {
         return changed;
     }
     // what the mod wrote beside itself while it ran from here (a Shroudtopia mod's log) is no edit
-    let changed = recorded_hash(folder, rec).is_ok_and(|h| h != rec.hash) && !own_output(folder, rec).is_ok_and(|o| o.is_some());
-    if let Ok(mut s) = SEEN.lock() {
+    let differs = recorded_hash(folder, rec).is_ok_and(|h| h != rec.hash);
+    let output = differs && own_output(folder, rec).is_ok_and(|o| o.is_some());
+    let changed = differs && !output;
+    // Output can grow, and code can change, without touching the folder or its manifest. Recheck these entries.
+    if !output && let Ok(mut s) = SEEN.lock() {
         s.get_or_insert_with(Default::default).insert(folder.to_path_buf(), (keys, changed));
     }
     changed
@@ -1540,8 +1543,9 @@ pub fn changed_on_disk(folder: &Path, rec: &ImportRecord) -> bool {
 /// The files an engine mod wrote into its own Library entry while it ran from there: kiln-shroudtopia runs a mod's DLL
 /// in place, and Item Skill Descriptions (Nexus 350) writes `item-skill-text.log` beside it (GetModuleFileNameW), so the
 /// folder no longer has its imported kdh1. They are the newest files (at most 64) whose leaving out gives exactly the
-/// imported size and kdh1. Some(their relative paths), empty when the entry is as imported; None when the entry differs
-/// in a file of the mod itself, and for a Kiln mod or a plugin DLL (those are compared by identity and by the DLL alone).
+/// imported size and kdh1. Code and manifests are never output. Some(their relative paths), empty when the entry is as
+/// imported; None when the entry differs in a file of the mod itself, and for a Kiln mod or a plugin DLL (those are
+/// compared by identity and by the DLL alone).
 pub(crate) fn own_output(folder: &Path, rec: &ImportRecord) -> Result<Option<Vec<String>>> {
     if matches!(rec.kind, ModKind::Kiln | ModKind::Plugin) { return Ok(None); }
     let records = crate::hash::dir_records(folder)?;
@@ -1554,6 +1558,7 @@ pub(crate) fn own_output(folder: &Path, rec: &ImportRecord) -> Result<Option<Vec
     let Some(extra) = total.checked_sub(rec.size) else { return Ok(None) };
     let mut added = 0u64;
     for n in 1..=files.len().min(64) {
+        if !crate::engine_mods::is_runtime_output(&files[n - 1].1.path) { break; }
         added += files[n - 1].1.size;
         if added > extra { break; }
         if added == extra && crate::hash::dirhash_records(files[n..].iter().map(|(_, f)| f.clone()))? == rec.hash {
@@ -1561,6 +1566,15 @@ pub(crate) fn own_output(folder: &Path, rec: &ImportRecord) -> Result<Option<Vec
         }
     }
     Ok(None)
+}
+
+/// Verify a copy against the import, keeping the output paths already proved by `own_output` on its source.
+/// Copying changes timestamps, so the copy must not guess those paths again. Any other new files still count.
+pub(crate) fn matches_import(folder: &Path, rec: &ImportRecord, output: &[String]) -> Result<bool> {
+    let hash = if output.is_empty() { recorded_hash(folder, rec)? } else {
+        crate::hash::dirhash_records(crate::hash::dir_records(folder)?.into_iter().filter(|f| !output.contains(&f.path)))?
+    };
+    Ok(hash == rec.hash || own_output(folder, rec)?.is_some())
 }
 
 /// The error of a Library entry whose files are not the ones its record names (Play, activation, a placement): which
