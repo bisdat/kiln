@@ -1051,7 +1051,8 @@ fn check_changes(game: &Path, rc: &mut Receipts, jobs: &[Job]) -> Result<()> {
     let mut folders = std::collections::BTreeSet::new();
     for op in jobs.iter().flat_map(|j| &j.intent.ops) {
         let path = host(game, &op.rel);
-        if op.before.is_some() && std::fs::metadata(&path).map_err(io_at(&path, "inspecting"))?.permissions().readonly() {
+        // Windows refuses deleting a read-only file. Unix uses the parent folder's permissions instead.
+        if cfg!(windows) && op.before.is_some() && std::fs::metadata(&path).map_err(io_at(&path, "inspecting"))?.permissions().readonly() {
             return Err(Error::new(ErrorCode::Refused, format!(
                 "{}: is read-only; make it writable before changing game-folder mods", path.display())));
         }
@@ -1639,4 +1640,55 @@ mod tests {
         assert_eq!(std::fs::read_dir(g.join("plugins")).unwrap().count(), 0);
         recover(&g, &mut rc, &mut GameFilesReport::default()).unwrap();
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_probe_in_unwritable_folder_does_not_block_later_activations() {
+        use std::os::unix::fs::PermissionsExt;
+        let (g, _gone) = entry("unwritable-probe", NATIVE, &[]);
+        let dir = g.join("plugins");
+        std::fs::create_dir_all(&dir).unwrap();
+        let permissions = std::fs::metadata(&dir).unwrap().permissions();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let job = Job { intent: Intent { tag: "probe".into(), owner: test_owner(), ops: vec![
+            Op { rel: "new.dll".into(), before: None, after: Some(crate::hash::sha256_hex(b"new")) },
+            Op { rel: "plugins/new.dll".into(), before: None, after: Some(crate::hash::sha256_hex(b"new")) },
+        ] }, bytes: BTreeMap::new(), keep: BTreeMap::new(), done: None, removal: false };
+        let checked = check_changes(&g, &mut Receipts::default(), &[job]);
+        // The player switches the failed package off. Its folder stays unwritable and is not Kiln's to change.
+        let later = place_mods(&DataDirs::at(g.join("data")), &[], &g);
+        std::fs::set_permissions(&dir, permissions).unwrap();
+        assert!(checked.is_err(), "the folder must actually refuse writing");
+        assert!(later.is_ok(), "a probe that created no files must not block an unrelated activation: {later:?}");
+        assert!(!receipts_path(&g).exists());
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+        assert!(!g.join("new.dll").exists());
+        assert!(!std::fs::read_dir(&g).unwrap().any(|e| e.unwrap().file_name().to_string_lossy().contains("kiln-check")));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn readonly_changes_refuse_before_removing_any_package_file() {
+        let (g, _gone) = entry("readonly-loader", NATIVE, &[]);
+        put(&g, "powrprof.dll", b"loader");
+        put(&g, "plugins/x.dll", b"plugin");
+        let rc = Receipts { mods: vec![Placed { id: "m".into(), version: "0.0.0".into(), hash: "package".into(),
+            shape: Shape::Loader, loader: Some("powrprof.dll".into()), files: BTreeMap::from([
+                ("powrprof.dll".into(), crate::hash::sha256_hex(b"loader")),
+                ("plugins/x.dll".into(), crate::hash::sha256_hex(b"plugin")),
+            ]) }], ..Default::default() };
+        save_receipts(&g, &rc).unwrap();
+        let loader = g.join("powrprof.dll");
+        let permissions = std::fs::metadata(&loader).unwrap().permissions();
+        let mut readonly = permissions.clone();
+        readonly.set_readonly(true);
+        std::fs::set_permissions(&loader, readonly).unwrap();
+        let result = unplace(&g);
+        std::fs::set_permissions(&loader, permissions).unwrap();
+        assert!(result.is_err(), "Windows must refuse before removing any package file");
+        assert!(result.unwrap_err().message.contains("read-only"));
+        assert_eq!(std::fs::read(&loader).unwrap(), b"loader");
+        assert_eq!(std::fs::read(g.join("plugins/x.dll")).unwrap(), b"plugin");
+    }
+
 }

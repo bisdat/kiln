@@ -177,6 +177,56 @@ fn a_plain_dll_mod_under_a_proxy_name_still_runs_from_the_library() {
     assert!(native_listed(&install.path, &r.id));
 }
 
+#[test]
+fn ordinary_mod_kinds_do_not_enter_game_folder_package_preflight() {
+    use std::os::unix::fs::PermissionsExt;
+    for kind in [ModKind::Native, ModKind::Kiln, ModKind::Eml, ModKind::ShroudForge] {
+        let t = tmp(&format!("ordinary-{kind:?}"));
+        let dirs = DataDirs::at(t.0.join("data"));
+        let install = game(&t.0);
+        // Preflight would refuse these two spellings. Neither belongs to the ordinary mod being activated.
+        put(&install.path, "xinput9_1_0.dll", b"player's first file");
+        put(&install.path, "XINPUT9_1_0.DLL", b"player's second file");
+        let plugins = install.path.join("plugins");
+        std::fs::create_dir(&plugins).unwrap();
+        std::fs::set_permissions(&plugins, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let pkg = t.0.join("ordinary");
+        match kind {
+            ModKind::Native => put(&pkg, "winmm.dll", &build_test_dll(&["timeGetTime"], b"ordinary")),
+            ModKind::Kiln => {
+                put(&pkg, "kiln.mod.json", br#"{"id":"ordinary","version":"1.0.0","apiVersion":"0.2","entryAssembly":"M.dll","side":"both"}"#);
+                put(&pkg, "M.dll", b"managed fixture");
+            }
+            ModKind::Eml | ModKind::ShroudForge => {
+                put(&pkg, "mod.json", br#"{"id":"ordinary","name":"Ordinary","version":"1.0.0","capabilities":["patch"]}"#);
+                put(&pkg, "src/mod.lua", b"return {}");
+                if kind == ModKind::ShroudForge {
+                    put(&pkg, "extended.mod.json", br#"{"schemaVersion":1,"launcher":"SF","enabled":false,"targets":["client","server"],"settings":{}}"#);
+                }
+            }
+            _ => unreachable!(),
+        }
+        let r = import_one(&dirs, &pkg, kind);
+        let mut p = profile_with(&dirs, "ordinary", Vec::new());
+        match kind {
+            ModKind::Native => p.mods.native.push(pm(&r, true)),
+            ModKind::Kiln => p.mods.kiln.push(pm(&r, true)),
+            ModKind::Eml => p.mods.eml.push(pm(&r, true)),
+            ModKind::ShroudForge => p.mods.shroudforge.push(pm(&r, true)),
+            _ => unreachable!(),
+        }
+        let p = profile::save(&dirs, &p).unwrap();
+        let activated = profile::activate(&dirs, &p.id, &install);
+        std::fs::set_permissions(&plugins, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(activated.is_ok(), "{kind:?}: {activated:?}");
+        assert!(!install.path.join(kiln_manage::game_files::RECEIPTS).exists());
+        assert!(!install.path.join("kiln/state/game-files.lock").exists());
+        assert_eq!(read(&install.path.join("xinput9_1_0.dll")), b"player's first file");
+        assert_eq!(read(&install.path.join("XINPUT9_1_0.DLL")), b"player's second file");
+        assert_eq!(std::fs::read_dir(&plugins).unwrap().count(), 0);
+    }
+}
+
 // ---- 25: Ultimate ASI Loader and .asi plugins ----
 
 fn ual() -> Vec<u8> {
@@ -723,7 +773,7 @@ fn a_case_spelling_update_never_claims_the_players_parallel_folder() {
 }
 
 #[test]
-fn readonly_changes_refuse_before_removing_any_package_file() {
+fn unix_readonly_files_can_be_removed_without_changing_their_permissions() {
     let t = tmp("readonly-loader");
     let dirs = DataDirs::at(t.0.join("data"));
     let install = game(&t.0);
@@ -735,11 +785,14 @@ fn readonly_changes_refuse_before_removing_any_package_file() {
     let mut permissions = std::fs::metadata(&loader).unwrap().permissions();
     permissions.set_readonly(true);
     std::fs::set_permissions(&loader, permissions).unwrap();
+    let preserved = t.0.join("players-link.dll");
+    std::fs::hard_link(&loader, &preserved).unwrap();
     let result = kiln_manage::game_files::unplace(&install.path);
-    assert!(result.is_err(), "a read-only loader must be refused before other files are removed");
-    assert!(loader.is_file());
-    assert!(install.path.join("plugins/AutolootCoop.dll").is_file());
-    assert!(install.path.join("AutolootCoop.ini").is_file());
+    assert!(result.is_ok(), "Unix deletes through the writable parent folder: {result:?}");
+    assert!(!loader.exists());
+    assert!(!install.path.join("plugins").exists());
+    assert!(!install.path.join("AutolootCoop.ini").exists());
+    assert!(std::fs::metadata(&preserved).unwrap().permissions().readonly(), "Kiln must not clear the player's permissions");
 }
 
 #[test]
