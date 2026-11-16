@@ -77,10 +77,17 @@ public:
     void lower_current_priority() override { ++lowered_; }
 
     ModuleRef acquire_module(uintptr_t address) override {
-        std::lock_guard lock(mutex_);
-        ++module_refs_[address];
-        ++acquires_;
-        return {static_cast<uint64_t>(address), module_present_};
+        ModuleRef ref;
+        std::function<void(uintptr_t)> hook;
+        {
+            std::lock_guard lock(mutex_);
+            ++module_refs_[address];
+            ++acquires_;
+            ref = {static_cast<uint64_t>(address), module_present_};
+            hook = acquire_hook_;
+        }
+        if (hook) hook(address);  // outside the platform lock: a test may hold the caller here
+        return ref;
     }
     void release_module(ModuleRef ref) override {
         std::lock_guard lock(mutex_);
@@ -149,6 +156,11 @@ public:
         std::lock_guard lock(mutex_);
         reuse_ids_ = on;
     }
+    // Called (outside the platform lock) after every acquire_module, on the acquiring thread.
+    void set_acquire_hook(std::function<void(uintptr_t)> hook) {
+        std::lock_guard lock(mutex_);
+        acquire_hook_ = std::move(hook);
+    }
     void set_module_present(bool present) { module_present_ = present; }
     std::size_t module_refcount(uintptr_t address) {
         std::lock_guard lock(mutex_);
@@ -184,6 +196,7 @@ private:
     int fail_starts_ = 0;
     bool reuse_ids_ = false;
     std::vector<uint64_t> free_ids_;
+    std::function<void(uintptr_t)> acquire_hook_;
     std::atomic<uint64_t> clock_{0};
     std::atomic<uintptr_t> fault_target_{0};
     bool fault_after_ = false;

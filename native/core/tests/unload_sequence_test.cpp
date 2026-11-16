@@ -92,6 +92,12 @@ namespace log {
 void write(int, const char*, std::string_view) { ++logs; if (throw_log) throw std::runtime_error("log fault"); }
 }
 namespace caps { bool flush() { ++flushes; return true; } }
+// kiln.tasks (services/tasks.cpp): the exit closes task admission first, for a normal exit only
+namespace tasks_svc {
+int exits = 0, refusals = 0;
+void exiting() { ++exits; }
+void exit_begins() { ++refusals; }
+}
 #define KLOG_I(...) log::write(KILN_LOG_INFO, "kiln", "test log")
 #define KLOG_W(...) log::write(KILN_LOG_WARN, "kiln", "test log")
 #define KLOG_E(...) log::write(KILN_LOG_ERROR, "kiln", "test log")
@@ -132,7 +138,29 @@ void prepare(void (KILN_CALL* handler)(void*)) {
 }
 void cleanup() { delete[] kiln::g_unload_jobs; kiln::g_unload_jobs = nullptr; }
 void KILN_CALL marker(void*) {}
+int tasks_exits_at_handler = -1;
+void KILN_CALL tasks_marker(void*) { tasks_exits_at_handler = kiln::tasks_svc::exits; }
 int main() {
+    // kiln.tasks: a normal exit seals task admission before any on_unload handler runs; also with no handler at all;
+    // never on a non-zero exit (a crash must not touch the pool's locks)
+    prepare(&tasks_marker);
+    kiln::tasks_svc::exits = kiln::tasks_svc::refusals = 0;
+    kiln::exit_call(0);
+    check(kiln::tasks_svc::exits == 1 && kiln::tasks_svc::refusals == 1 && tasks_exits_at_handler == 1,
+          "kiln.tasks: a normal exit closes task admission once, before the on_unload handlers");
+    cleanup();
+    prepare(&marker);
+    kiln::g_unload_count = 0;  // nothing registered an on_unload
+    kiln::tasks_svc::exits = 0;
+    kiln::unload_run(0, "test");
+    check(kiln::tasks_svc::exits == 1, "kiln.tasks: closed also when no on_unload handler exists");
+    cleanup();
+    prepare(&marker);
+    kiln::tasks_svc::exits = kiln::tasks_svc::refusals = 0;
+    kiln::exit_call(42);
+    check(kiln::tasks_svc::exits == 0 && kiln::tasks_svc::refusals == 1,
+          "kiln.tasks: a non-zero exit only closes admission (lock-free); it does not seal the pool");
+    cleanup();
     prepare(&reexit);
     kiln::exit_call(0);
     check(secondary_waits.size() == 1 && secondary_waits[0] == 13250,

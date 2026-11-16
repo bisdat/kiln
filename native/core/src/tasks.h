@@ -22,25 +22,22 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <string_view>
 
 #include "kiln_api.h"
+#include "services/kiln_tasks.h"
 #include "tasks_model.h"
 #include "tasks_platform.h"
 
 namespace kiln::tasks {
 
-// The pool-facing body/done callback shapes (the public kiln_tasks.h mirrors these exactly; private here, no ABI).
-struct TaskRun {
-    uint32_t size, reserved;
-    KilnHandle task;
-    KilnOwner owner;
-    uint32_t(KILN_CALL* cancelled)(const TaskRun*);  // poll, any time during the body
-    void* internal;                                  // the pool's per-segment context; never a game pointer
-};
-using TaskBodyFn = void(KILN_CALL*)(const TaskRun* run, void* user);
-using TaskDoneFn = void(KILN_CALL*)(KilnHandle task, uint32_t state, void* user);
+// The body/done callback shapes are the public kiln_tasks.h v1 ones: the pool calls exactly what a plugin passed.
+// TaskRun.internal is the pool's per-segment context, never a game pointer.
+using TaskRun = KilnTaskRun;
+using TaskBodyFn = KilnTaskBodyFn;
+using TaskDoneFn = KilnTaskDoneFn;
 
 struct PoolConfig {
     Limits limits;
@@ -50,9 +47,11 @@ struct PoolConfig {
     uint64_t queued_watchdog_ns = 30ull * 1000 * 1000 * 1000;
     uint64_t shutdown_join_ns = 2ull * 1000 * 1000 * 1000;  // per worker at shutdown; past it the worker is detached
     uint64_t restart_retry_ns = 1ull * 1000 * 1000 * 1000;  // a worker that could not start is tried again after this
+    uint64_t watchdog_interval_ns = 1ull * 1000 * 1000 * 1000;  // the maintenance thread's sweep (with a sink set)
 };
 
-// Watchdog reports (delivered to an injected sink; services/tasks.cpp logs them). Report only, never a kill.
+// Watchdog reports: a task running, or queued, past its age. Report only, never a kill; each task is reported at
+// most once per kind (it never repeats every sweep). services/tasks.cpp logs them (kiln.log, one line each).
 struct Watch {
     enum class Kind : uint32_t { RunningTooLong, QueuedTooLong };
     Kind kind;
@@ -60,8 +59,19 @@ struct Watch {
     KilnHandle task;
     std::string name;
     uint64_t age_ns;
+    std::string owner_name;  // the owner's bounded name (kept after it was revoked)
 };
 using WatchFn = void (*)(const Watch&, void* user);
+
+// A worker kind lost its last worker (a replacement's start failed: queued work waits for a retried start), or got
+// one back. Said once each way, from the maintenance thread outside every lock; admission is the capability's.
+struct PoolNote {
+    enum class Kind : uint32_t { SlotLost, SlotRecovered };
+    Kind kind;
+    Slot slot;
+    std::size_t queued;  // work ready to run, all owners, when it was noted
+};
+using NoteFn = void (*)(const PoolNote&, void* user);
 
 class Pool {
 public:
@@ -72,12 +82,15 @@ public:
 
     // ---- owners ----
     KilnResult open_owner(KilnOwner owner, std::string_view name);
+    KilnResult ensure_owner(KilnOwner owner, std::string_view name);  // Model::ensure_owner
     KilnResult quarantine(KilnOwner owner);
     // drain_owner: seal, cancel queued, signal running, then wait up to timeout_ns for quiescence. Refused
     // (WRONG_THREAD) on a pool worker for any timeout, so a body or done never drains (the binding adds the tick/world rule).
     // *outstanding = body + done still in flight (0 = quiescent).
     KilnResult drain_owner(KilnOwner owner, uint64_t timeout_ns, uint32_t* outstanding);
     KilnResult retire_owner(KilnOwner owner, uint32_t* outstanding);
+    // Process exit: seal every owner (queued tasks cancelled, running ones signalled). Never waits.
+    void close();
 
     // ---- task operations (reentrant: safe to call from inside a body or done) ----
     KilnResult submit(KilnOwner owner, const SubmitArgs& args, TaskBodyFn body, TaskDoneFn done, void* user,
@@ -95,6 +108,11 @@ public:
     // A watchdog sweep against the platform clock: one report per task over its age, with owner and name, delivered
     // to `fn` outside every lock. Gated on the model's real state, so a cancelled or finished task never reports.
     void run_watchdog(WatchFn fn, void* user);
+    // The maintenance thread sweeps every watchdog_interval_ns and hands each new report to `fn` (outside every lock,
+    // on the maintenance thread). nullptr stops it.
+    void set_watch_sink(WatchFn fn, void* user);
+    // PoolNote lines (slot lost / recovered), on the maintenance thread outside every lock. nullptr stops them.
+    void set_note_sink(NoteFn fn, void* user);
 
     // Diagnostics / test seams.
     Counts counts() const;
@@ -106,18 +124,86 @@ public:
     // for LongRunning, also a normal worker for its done) is live. submit refuses CAPABILITY otherwise (the
     // tasks.pool capability row reads it). start_failures() counts worker starts that failed (each retried later).
     bool can_run(Slot slot) const;
+    int health() const;  // lock-free: 1 while normal work can run (can_run(Normal)), else 0
     uint64_t start_failures() const;
     enum class Point : uint32_t {
+        MetaPrepared,        // inside submit, everything allocated, before publication (a test may throw here)
         SubmitPublished,     // inside submit, after the model published, before it returns (under the pool mutex)
         MaintenanceStopped,  // inside shutdown, after the maintenance thread was joined, before the workers are
     };
     void set_test_hook(std::function<void(Point)> hook);
+    void set_model_test_hook(std::function<void(Model::Point)> hook);
     static int live_cores();  // pool cores not yet freed (a detached worker keeps its core alive)
 
     struct Core;  // all state; co-owned by the Pool and its worker threads
 
 private:
     std::shared_ptr<Core> core_;
+};
+
+// ---- kiln.tasks v1: the public table's behaviour over one Pool (services/tasks.cpp binds it to the core) ----
+
+// What the binding needs from the core, injectable so host tests drive it without Windows or a game.
+class ServiceEnv {
+public:
+    virtual ~ServiceEnv() = default;
+    // The calling thread is the tick thread or any world thread (KilnApi.on_world_thread for any kind).
+    virtual bool on_tick_or_world_thread() = 0;
+    virtual bool owner_alive(KilnOwner owner) = 0;
+    virtual std::string owner_name(KilnOwner owner) = 0;
+};
+
+class Service {
+public:
+    Service(Pool& pool, ServiceEnv& env);
+    Service(const Service&) = delete;
+    Service& operator=(const Service&) = delete;
+
+    // ---- kiln_tasks.h v1 members (the contract is the header's) ----
+    KilnResult submit(KilnOwner owner, const KilnTaskInfo* info, KilnTaskBodyFn body, KilnTaskDoneFn done, void* user,
+                      KilnHandle* task, uint32_t* refusal);
+    KilnResult cancel(KilnOwner owner, KilnHandle task, uint32_t* state);
+    KilnResult status(KilnOwner owner, KilnHandle task, uint32_t* state);
+    KilnResult release(KilnOwner owner, KilnHandle task);
+    KilnResult drain_owner(KilnOwner owner, uint32_t timeout_ms, uint32_t* running);
+
+    // ---- the core's lifecycle edges ----
+    // The live server world's sessions and Post edges (tick thread): one snapshot that AFTER_STEP captures whole.
+    void session_started(uint32_t session);
+    // A Post edge: `step` is KilnTickInfo.step (from 1, strictly increasing). Refused (false, nothing changes) for a
+    // session that is not the live one, a step 0 or one not above the session's last edge.
+    bool post_edge(uint32_t session, uint64_t step);
+    void session_stopping(uint32_t session);
+    void owner_retiring(KilnOwner owner);  // the registry's owner-retiring observer: nonblocking
+    // The registry callback (reg::add_owner_retiring, observer owner 0, user = the Service): retires the owner's tasks
+    // (no new ones, queued ones cancelled with their dones, running ones signalled). It never waits and never calls
+    // into the registry, so owner_revoke stays nonblocking; revocation is not callback quiescence (drain_owner is).
+    static void KILN_CALL owner_retiring_observer(KilnOwner retiring, void* service);
+    void exiting();                        // the process exit begins: SHUTDOWN from now on, every owner sealed
+    void refuse_new();                     // any exit, also a crash's: SHUTDOWN from now on; one atomic store, no lock
+
+    struct Snapshot {
+        uint32_t session = 0;
+        uint64_t edge = 0;
+        bool live = false;
+    };
+    Snapshot snapshot() const;
+    uint64_t refused_edges() const;
+
+    // Test seams (outside every lock): submit passed its owner_alive check / AFTER_STEP captured its snapshot.
+    enum class Point : uint32_t { AfterAliveCheck, AfterCapture };
+    void set_test_hook(std::function<void(Point)> hook);
+
+private:
+    KilnResult open(KilnOwner owner);
+
+    Pool& pool_;
+    ServiceEnv& env_;
+    mutable std::mutex mutex_;  // the session snapshot
+    Snapshot snap_;
+    uint64_t refused_edges_ = 0;
+    std::atomic<bool> exiting_{false};
+    std::function<void(Point)> hook_;
 };
 
 }  // namespace kiln::tasks

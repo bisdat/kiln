@@ -4,6 +4,7 @@
 // Built twice by test-tasks.sh (ASan/UBSan and ThreadSanitizer); `tasks_model_test <name>` runs one test.
 #include <algorithm>
 #include <atomic>
+#include <new>
 #include <chrono>
 #include <string>
 #include <thread>
@@ -995,6 +996,37 @@ KILN_TASKS_TEST(slot_cursors_independent) {
         }
     }
     check(a_served, "A's normal work is served while B's LongRunning and C's normal leases keep resuming");
+}
+
+// a submission is all or nothing. An allocation failing while the record is being published
+// (here: thrown at the point between the owner's table and the queue) leaves no record, no outstanding count and no
+// queued work, and the owner keeps working.
+KILN_TASKS_TEST(submit_is_transactional) {
+    for (const bool after_step : {false, true}) {
+        Model m;
+        m.open_owner(1, "a");
+        m.set_test_hook([](Model::Point p) {
+            if (p == Model::Point::SubmitPublishing) throw std::bad_alloc();
+        });
+        SubmitArgs a = named("fails");
+        a.after_step = after_step;
+        a.session = 1;
+        KilnHandle h = 0;
+        Refusal why = Refusal::None;
+        bool threw = false;
+        try {
+            m.submit(1, a, &h, &why);
+        } catch (const std::bad_alloc&) {
+            threw = true;
+        }
+        m.set_test_hook(nullptr);
+        const Counts c = m.counts();
+        check(threw && c.records == 0 && c.outstanding == 0 && c.ready == 0 && c.waiting == 0,
+              std::string("a failed publication leaves nothing") + (after_step ? " (AFTER_STEP)" : ""));
+        const KilnHandle ok = submit_ok(m, 1, named("next"), "the owner submits again");
+        Work w;
+        check(m.dequeue(Slot::Normal, &w) && w.task == ok, "and that task is the only work");
+    }
 }
 }  // namespace
 

@@ -9,6 +9,7 @@
 #include <deque>
 #include <functional>
 #include <mutex>
+#include <new>
 #include <string>
 #include <thread>
 #include <vector>
@@ -894,6 +895,190 @@ KILN_TASKS_TEST(watchdog_after_retire) {
     check(named_it, "the watchdog still reports the body that outlives its retired owner");
     stuck.release.open();
     check(until([&] { return pool.counts().outstanding == 0; }), "quiescent");
+}
+
+// submit's capability check and its publication are one decision. A submit held
+// between the check and the publication (inside acquire_module) while the only normal worker faults and its
+// replacement cannot start is refused CAPABILITY, holds no reference and never runs.
+KILN_TASKS_TEST(capability_rechecked_at_publication) {
+    HostPlatform platform;
+    Job held, faulter;  // before the pool: they outlive every worker
+    held.platform = faulter.platform = &platform;
+    held.release.open();
+    PoolConfig c = config(1);
+    c.restart_retry_ns = 60ull * 1000 * 1000 * 1000;
+    Pool pool(c, &platform);
+    pool.open_owner(1, "held");
+    pool.open_owner(2, "faults");
+    Gate in_window, proceed;
+    std::atomic<bool> armed{true};
+    std::atomic<std::thread::id> submitter{};
+    platform.set_acquire_hook([&](uintptr_t) {
+        if (std::this_thread::get_id() != submitter.load() || !armed.exchange(false)) return;
+        in_window.open();  // the capability check passed; the publication has not happened
+        proceed.wait();
+    });
+    KilnHandle h = 7;
+    Refusal why = Refusal::None;
+    KilnResult r = KILN_OK;
+    std::thread a([&] {
+        submitter.store(std::this_thread::get_id());
+        r = pool.submit(1, named("held in the window"), &job_body, &job_done, &held, &h, &why);
+    });
+    in_window.wait();
+    platform.fail_starts("kiln-task-N", 1);
+    platform.fault_next_call_of(reinterpret_cast<uintptr_t>(&job_body));
+    KilnHandle fh = 0;
+    Refusal fwhy = Refusal::None;
+    pool.submit(2, named("faulter"), &job_body, &job_done, &faulter, &fh, &fwhy);
+    check(until([&] { return !pool.can_run(Slot::Normal) && platform.pending_start_failures() == 0; }),
+          "the only normal worker faulted and its replacement could not start");
+    proceed.open();
+    a.join();
+    platform.set_acquire_hook(nullptr);
+    check(r == KILN_ERR_UNAVAILABLE && why == Refusal::Capability && h == 0,
+          "the held submit is refused CAPABILITY at publication (got " + std::to_string(r) + ")");
+    check(pool.tracked_tasks() == 1 && pool.counts().records == 1,
+          "only the faulted task is tracked; the refused one holds no reference");
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    check(held.body_runs.load() == 0, "and it never ran");
+}
+
+// an exception before publication (every allocation of a submit happens there) releases the
+// module references and leaves nothing a worker could see; the next submit works.
+KILN_TASKS_TEST(submit_exception_before_publication) {
+    HostPlatform platform;
+    Job j, next;
+    j.platform = next.platform = &platform;
+    j.release.open();
+    next.release.open();
+    Pool pool(config(1), &platform);
+    pool.open_owner(1, "a");
+    pool.set_test_hook([](Pool::Point p) {
+        if (p == Pool::Point::MetaPrepared) throw std::bad_alloc();
+    });
+    KilnHandle h = 0;
+    Refusal why = Refusal::None;
+    bool threw = false;
+    try {
+        pool.submit(1, named("fails"), &job_body, &job_done, &j, &h, &why);
+    } catch (const std::bad_alloc&) {
+        threw = true;
+    }
+    pool.set_test_hook(nullptr);
+    check(threw && pool.counts().records == 0 && pool.tracked_tasks() == 0 && platform.acquires() == platform.releases(),
+          "nothing published, no reference kept");
+    pool.set_model_test_hook([](Model::Point p) {
+        if (p == Model::Point::SubmitPublishing) throw std::bad_alloc();
+    });
+    threw = false;
+    try {
+        pool.submit(1, named("fails in the model"), &job_body, &job_done, &j, &h, &why);
+    } catch (const std::bad_alloc&) {
+        threw = true;
+    }
+    pool.set_model_test_hook(nullptr);
+    check(threw && pool.counts().records == 0 && pool.tracked_tasks() == 0 && platform.acquires() == platform.releases(),
+          "a failure inside the model's publication: nothing published, no reference kept");
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    check(j.body_runs.load() == 0, "no failed submission ran");
+    submit(pool, 1, named("next"), next);
+    check(until([&] { return next.done_calls.load() == 1; }), "the next submit runs");
+}
+
+// The maintenance thread's watchdog sweep: each over-age task reported once per kind (never every sweep), with its
+// owner's name, without anyone calling run_watchdog (the binding logs these lines).
+KILN_TASKS_TEST(watchdog_sweeps_once_per_state) {
+    HostPlatform platform;
+    Job running, queued;
+    running.platform = queued.platform = &platform;
+    struct Sink {
+        std::mutex mutex;
+        std::vector<Watch> seen;
+        std::size_t count(KilnHandle task, Watch::Kind kind) {
+            std::lock_guard lock(mutex);
+            std::size_t n = 0;
+            for (const Watch& w : seen) n += w.task == task && w.kind == kind;
+            return n;
+        }
+    } sink;
+    PoolConfig c = config(1);
+    c.running_watchdog_ns = 1000;
+    c.queued_watchdog_ns = 1000;
+    c.watchdog_interval_ns = 1000 * 1000;  // 1 ms
+    Pool pool(c, &platform);
+    pool.open_owner(1, "mod.watched");
+    pool.set_watch_sink(+[](const Watch& w, void* user) {
+        auto* s = static_cast<Sink*>(user);
+        std::lock_guard lock(s->mutex);
+        s->seen.push_back(w);
+    }, &sink);
+    const KilnHandle rh = submit(pool, 1, named("runs long"), running);
+    check(until([&] { return running.body_runs.load() == 1; }), "running");
+    const KilnHandle qh = submit(pool, 1, named("waits"), queued);  // one worker: it waits behind
+    platform.advance(5000);
+    check(until([&] { return sink.count(rh, Watch::Kind::RunningTooLong) == 1 && sink.count(qh, Watch::Kind::QueuedTooLong) == 1; }),
+          "the maintenance thread's sweep reported the running and the queued task");
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));  // dozens of sweeps
+    check(sink.count(rh, Watch::Kind::RunningTooLong) == 1 && sink.count(qh, Watch::Kind::QueuedTooLong) == 1,
+          "each was reported once, not every sweep");
+    {
+        std::lock_guard lock(sink.mutex);
+        check(!sink.seen.empty() && sink.seen.front().owner_name == "mod.watched" && sink.seen.front().owner == 1,
+              "a report names the owner");
+    }
+    running.release.open();
+    check(until([&] { return queued.body_runs.load() == 1; }), "the queued task runs");
+    platform.advance(5000);
+    check(until([&] { return sink.count(qh, Watch::Kind::RunningTooLong) == 1; }),
+          "once running past its age it is reported again, once, for the new state");
+    pool.set_watch_sink(nullptr, nullptr);
+    queued.release.open();
+    check(until([&] { return pool.counts().outstanding == 0; }), "quiescent");
+}
+
+// A worker kind that loses its last worker (the replacement's start failed) is said once, with the queued count, and
+// once again when a retried start brings it back; admission is unchanged (the capability refuses meanwhile).
+KILN_TASKS_TEST(slot_lost_and_recovered_noted_once) {
+    HostPlatform platform;
+    Job faulter, waiting;
+    faulter.platform = waiting.platform = &platform;
+    waiting.release.open();
+    struct Notes {
+        std::mutex mutex;
+        std::vector<PoolNote> seen;
+        std::size_t count(PoolNote::Kind k) {
+            std::lock_guard lock(mutex);
+            std::size_t n = 0;
+            for (const PoolNote& p : seen) n += p.kind == k && p.slot == Slot::Normal;
+            return n;
+        }
+    } notes;
+    PoolConfig c = config(1);
+    c.restart_retry_ns = 200ull * 1000 * 1000;  // 200 ms
+    Pool pool(c, &platform);
+    pool.set_note_sink(+[](const PoolNote& n, void* user) {
+        auto* s = static_cast<Notes*>(user);
+        std::lock_guard lock(s->mutex);
+        s->seen.push_back(n);
+    }, &notes);
+    pool.open_owner(1, "a");
+    pool.open_owner(2, "bad");
+    platform.fail_starts("kiln-task-N", 2);  // the replacement and its first retry fail
+    platform.fault_next_call_of(reinterpret_cast<uintptr_t>(&job_body));
+    KilnHandle fh = 0;
+    Refusal why = Refusal::None;
+    pool.submit(2, named("faulter"), &job_body, &job_done, &faulter, &fh, &why);
+    check(until([&] { return notes.count(PoolNote::Kind::SlotLost) == 1; }), "the lost slot was noted");
+    {
+        std::lock_guard lock(notes.mutex);
+        check(!notes.seen.empty() && notes.seen.front().queued >= 1, "with the queued work (the faulted task's done)");
+    }
+    check(until([&] { return notes.count(PoolNote::Kind::SlotRecovered) == 1; }), "and its recovery, once a retry started");
+    check(notes.count(PoolNote::Kind::SlotLost) == 1, "the failed retry in between did not say it again");
+    submit(pool, 1, named("after"), waiting);
+    check(until([&] { return waiting.done_calls.load() == 1 && faulter.done_calls.load() == 1; }), "work runs again");
+    pool.set_note_sink(nullptr, nullptr);
 }
 }  // namespace
 

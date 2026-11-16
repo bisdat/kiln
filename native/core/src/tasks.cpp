@@ -40,6 +40,7 @@ struct Meta {
     uint64_t queued_since = 0;   // when it was accepted (the watchdog checks the model's state too)
     uint64_t running_since = 0;  // when its current body started (valid while `running`)
     bool running = false;
+    bool reported_running = false, reported_queued = false;  // the watchdog says each once
 };
 
 struct Worker {
@@ -97,16 +98,33 @@ struct Pool::Core : std::enable_shared_from_this<Pool::Core> {
     std::vector<Live> live_threads;               // every started worker thread not yet joined (one join set)
     std::unordered_set<uint64_t> exited;          // serials of worker incarnations that returned from their loop
     uint64_t next_serial = 0;
-    uint32_t healthy[2] = {0, 0};                 // started, not faulted workers per slot (Normal, LongRunning)
+    // Per slot kind (Normal, LongRunning): logical workers that run, or whose replacement after a fault is under way.
+    // A worker counts out only when its start (or its replacement's) failed, and back in when a retry started it:
+    // a fault alone never makes the pool refuse work for the moment its replacement takes.
+    uint32_t healthy[2] = {0, 0};
     std::vector<std::pair<Slot, uint32_t>> pending_starts;  // workers that could not start: retried by maintenance
     uint64_t start_failures = 0;
+    std::chrono::steady_clock::time_point next_retry{};  // when pending_starts are tried again
+    std::chrono::steady_clock::time_point next_sweep{};  // the next watchdog sweep
+    WatchFn watch_fn = nullptr;  // the periodic watchdog sweep's sink (set_watch_sink)
+    bool maintenance_kick = false;  // set_watch_sink changed the schedule: the maintenance thread re-plans its wait
+    NoteFn note_fn = nullptr;  // slot lost / recovered (set_note_sink)
+    void* note_user = nullptr;
+    bool slot_lost[2] = {false, false};  // a replacement's failed start took the slot's last worker
+    bool slot_said[2] = {false, false};  // ...and that was said (once; recovery said once too)
+    void* watch_user = nullptr;
     ThreadHandle maintenance_thread{};
     bool maintenance_started = false;
     uint32_t stuck_workers = 0;
     std::function<void(Point)> hook;
 
-    bool start_worker(Slot slot, uint32_t index);  // mutex held; false: queued in pending_starts for a retry
+    // mutex held; `counted`: the slot is already in `healthy` (a replacement). false: queued in pending_starts for a
+    // retry, and out of `healthy`.
+    bool start_worker(Slot slot, uint32_t index, bool counted);
     void start_maintenance();                      // mutex held
+    bool can_run_locked(Slot slot) const;          // mutex held
+    void publish_health_locked();                  // mutex held: `health` follows can_run_locked(Normal)
+    std::atomic<int> health{0};                    // lock-free copy for the capability row (1 = normal work runs)
     static void thread_entry(void* context);
     void worker_loop(Worker& self);
     bool run_one(Worker& self);
@@ -114,6 +132,7 @@ struct Pool::Core : std::enable_shared_from_this<Pool::Core> {
     void deliver_done(Worker& self, Work& work);
     void on_fault(Worker& self, KilnOwner owner);
     void maintenance_loop();
+    void sweep_watchdog(WatchFn fn, void* user);
     void wake_all();
     void release_meta(KilnHandle task);
     std::shared_ptr<Meta> find_meta(KilnHandle task);
@@ -145,7 +164,7 @@ void invoke_done(void* context) {
 
 // ---- threads ----
 
-bool Pool::Core::start_worker(Slot slot, uint32_t index) {
+bool Pool::Core::start_worker(Slot slot, uint32_t index, bool counted) {
     auto w = std::make_shared<Worker>();
     w->core = shared_from_this();
     w->slot = slot;
@@ -157,13 +176,23 @@ bool Pool::Core::start_worker(Slot slot, uint32_t index) {
     if (w->thread.id == 0) {  // it does not exist: counted, and maintenance tries again (submit refuses meanwhile
         delete context;       // when no worker of the slot is live, so accepted work is never stranded silently)
         ++start_failures;
+        if (pending_starts.empty())
+            next_retry = std::chrono::steady_clock::now() + std::chrono::nanoseconds(config.restart_retry_ns);
         pending_starts.emplace_back(slot, index);
+        if (counted) {
+            --healthy[slot_index_of(slot)];
+            if (healthy[slot_index_of(slot)] == 0) slot_lost[slot_index_of(slot)] = true;
+            publish_health_locked();
+        }
         maintenance_cv.notify_all();
         return false;
     }
     live_threads.push_back({w->thread, w->serial});
     roster[index] = w;
-    ++healthy[slot_index_of(slot)];
+    if (!counted) {
+        ++healthy[slot_index_of(slot)];
+        publish_health_locked();
+    }
     return true;
 }
 
@@ -175,6 +204,7 @@ void Pool::Core::start_maintenance() {
     maintenance_thread = platform.start_thread("kiln-task-maint", &Core::thread_entry, context);
     maintenance_started = maintenance_thread.id != 0;
     if (!maintenance_started) delete context;
+    publish_health_locked();
 }
 
 void Pool::Core::thread_entry(void* context) {
@@ -289,8 +319,7 @@ void Pool::Core::on_fault(Worker& self, KilnOwner owner) {
     self.faulted = true;  // this thread retires; maintenance joins it and starts a replacement
     for (auto& weak : roster) {
         if (auto w = weak.lock(); w.get() == &self) {
-            retired.push_back({w->thread, w->serial, w->slot, w->index});
-            --healthy[slot_index_of(w->slot)];
+            retired.push_back({w->thread, w->serial, w->slot, w->index});  // stays counted: replaced next
             weak.reset();
         }
     }
@@ -300,39 +329,84 @@ void Pool::Core::on_fault(Worker& self, KilnOwner owner) {
 void Pool::Core::maintenance_loop() {
     for (;;) {
         std::vector<Retired> to_join;
-        std::vector<std::pair<Slot, uint32_t>> to_start;
+        struct Start {
+            Slot slot;
+            uint32_t index;
+            bool counted;
+        };
+        std::vector<Start> to_start;
+        WatchFn sweep = nullptr;
+        void* sweep_user = nullptr;
         {
             std::unique_lock lock(mutex);
-            const auto ready = [&] { return stopping || !retired.empty(); };
-            // a worker that could not start is tried again after restart_retry_ns (or with the next retirement)
-            if (pending_starts.empty()) maintenance_cv.wait(lock, ready);
-            else maintenance_cv.wait_for(lock, std::chrono::nanoseconds(config.restart_retry_ns), ready);
+            const auto ready = [&] { return stopping || !retired.empty() || maintenance_kick; };
+            // Wake for a retirement, for the retry of a worker that could not start (restart_retry_ns after its
+            // failure), and for the watchdog sweep (every watchdog_interval_ns while a sink is set).
+            using Clock = std::chrono::steady_clock;
+            auto wake = Clock::time_point::max();
+            if (!pending_starts.empty()) wake = std::min(wake, next_retry);
+            if (watch_fn) wake = std::min(wake, next_sweep);
+            if (wake == Clock::time_point::max()) maintenance_cv.wait(lock, ready);
+            else maintenance_cv.wait_until(lock, wake, ready);
             if (stopping && retired.empty()) return;
+            maintenance_kick = false;
+            const auto now = Clock::now();
             for (const Retired& w : retired) {
                 to_join.push_back(w);
                 // out of the join set under the lock, so shutdown never joins it a second time
                 live_threads.erase(std::remove_if(live_threads.begin(), live_threads.end(),
                                                   [&](const Live& l) { return l.serial == w.serial; }),
                                    live_threads.end());
-                if (!stopping) to_start.emplace_back(w.slot, w.index);
+                if (!stopping) to_start.push_back({w.slot, w.index, true});
+            }
+            // a failed start is tried again when due, or with a retirement's replacement
+            if (!stopping && !pending_starts.empty() && (now >= next_retry || !retired.empty())) {
+                for (auto [slot, index] : pending_starts) to_start.push_back({slot, index, false});
+                pending_starts.clear();
             }
             retired.clear();
-            if (!stopping) {
-                to_start.insert(to_start.end(), pending_starts.begin(), pending_starts.end());
-                pending_starts.clear();
+            if (watch_fn && now >= next_sweep) {
+                sweep = watch_fn;
+                sweep_user = watch_user;
+                next_sweep = now + std::chrono::nanoseconds(config.watchdog_interval_ns);
             }
         }
         for (const Retired& w : to_join)
             if (w.thread.id) platform.join_thread(w.thread);  // replace only after the old thread has exited
-        std::lock_guard lock(mutex);
-        for (const Retired& w : to_join) exited.erase(w.serial);
-        if (stopping) return;
-        bool started = false;
-        for (auto [slot, index] : to_start) started |= start_worker(slot, index);
-        if (started) {
-            ++generation;  // a new worker: let it look for work accepted while none could run
-            work_cv.notify_all();
+        std::vector<PoolNote> notes;
+        NoteFn note = nullptr;
+        void* note_to = nullptr;
+        {
+            std::lock_guard lock(mutex);
+            for (const Retired& w : to_join) exited.erase(w.serial);
+            if (stopping) return;
+            bool started = false;
+            for (const Start& st : to_start) started |= start_worker(st.slot, st.index, st.counted);
+            if (started) {
+                ++generation;  // a new worker: let it look for work accepted while none could run
+                work_cv.notify_all();
+            }
+            // a slot that lost its last worker, or got one back: said once each way (no admission change here)
+            for (const Slot slot : {Slot::Normal, Slot::LongRunning}) {
+                const std::size_t i = slot_index_of(slot);
+                if (slot_lost[i] && !slot_said[i]) {
+                    slot_said[i] = true;
+                    notes.push_back({PoolNote::Kind::SlotLost, slot, 0});
+                } else if (slot_said[i] && healthy[i] > 0) {
+                    slot_said[i] = slot_lost[i] = false;
+                    notes.push_back({PoolNote::Kind::SlotRecovered, slot, 0});
+                }
+            }
+            if (!notes.empty()) {
+                const std::size_t ready = model.counts().ready;  // pool -> model lock order
+                for (PoolNote& n : notes) n.queued = ready;
+            }
+            note = note_fn;
+            note_to = note_user;
         }
+        if (note)
+            for (const PoolNote& n : notes) note(n, note_to);  // outside every lock: the sink logs
+        if (sweep) sweep_watchdog(sweep, sweep_user);  // outside every lock: the sink logs
     }
 }
 
@@ -398,13 +472,14 @@ Pool::Pool(PoolConfig config, Platform* platform)
     std::lock_guard lock(c.mutex);
     c.start_maintenance();
     uint32_t index = 0;
-    for (uint32_t i = 0; i < c.normal_workers; ++i) c.start_worker(Slot::Normal, index++);
-    for (uint32_t i = 0; i < c.long_running_workers; ++i) c.start_worker(Slot::LongRunning, index++);
+    for (uint32_t i = 0; i < c.normal_workers; ++i) c.start_worker(Slot::Normal, index++, false);
+    for (uint32_t i = 0; i < c.long_running_workers; ++i) c.start_worker(Slot::LongRunning, index++, false);
 }
 
 Pool::~Pool() { core_->shutdown(); }
 
 KilnResult Pool::open_owner(KilnOwner owner, std::string_view name) { return core_->model.open_owner(owner, name); }
+KilnResult Pool::ensure_owner(KilnOwner owner, std::string_view name) { return core_->model.ensure_owner(owner, name); }
 
 KilnResult Pool::submit(KilnOwner owner, const SubmitArgs& in, TaskBodyFn body, TaskDoneFn done, void* user,
                         KilnHandle* task, Refusal* why) {
@@ -414,37 +489,71 @@ KilnResult Pool::submit(KilnOwner owner, const SubmitArgs& in, TaskBodyFn body, 
         if (why) *why = Refusal::Argument;
         return KILN_ERR_INVALID_ARGUMENT;
     }
-    if (!can_run(in.long_running ? Slot::LongRunning : Slot::Normal)) {  // never accept work no worker can run
+    const Slot slot = in.long_running ? Slot::LongRunning : Slot::Normal;
+    if (!can_run(slot)) {  // never accept work no worker can run (checked again at publication)
         if (task) *task = 0;
         if (why) *why = Refusal::Capability;
         return KILN_ERR_UNAVAILABLE;
     }
-    // Module references before acceptance; a refused submit releases them (it transfers nothing).
+    // A submission is all or nothing. Every allocation happens before publication; the module references are owned
+    // by `refs` until the metadata takes them, so an exception (or a refusal) anywhere before that releases them and
+    // leaves nothing a worker could see. Publication itself (the model's, transactional too) and the metadata commit
+    // into reserved room do not throw.
+    struct Refs {
+        Platform& platform;
+        ModuleRef body{}, done{};
+        bool owned = true;
+        ~Refs() {
+            if (!owned) return;
+            platform.release_module(body);
+            platform.release_module(done);
+        }
+    } refs{c.platform};
+    refs.body = c.platform.acquire_module(reinterpret_cast<uintptr_t>(body));  // before acceptance
+    refs.done = c.platform.acquire_module(reinterpret_cast<uintptr_t>(done));
     auto m = std::make_shared<Meta>();
-    m->body = c.platform.acquire_module(reinterpret_cast<uintptr_t>(body));
-    m->done = c.platform.acquire_module(reinterpret_cast<uintptr_t>(done));
     m->owner = owner;
     m->name = std::string(in.name);
+    std::unordered_map<KilnHandle, std::shared_ptr<Meta>> spare;  // the metadata map's node, allocated here
+    spare.emplace(0, m);
+    auto node = spare.extract(spare.begin());
     SubmitArgs args = in;
     args.payload = {reinterpret_cast<uintptr_t>(body), reinterpret_cast<uintptr_t>(done), reinterpret_cast<uintptr_t>(user)};
+    {
+        std::function<void(Point)> prep;
+        {
+            std::lock_guard lock(c.mutex);
+            prep = c.hook;
+        }
+        if (prep) prep(Point::MetaPrepared);
+    }
     KilnHandle handle = 0;
     KilnResult r = KILN_OK;
     {
         // Publish and register in ONE pool critical section: a worker that dequeues the task at once (from its drain
-        // loop, without waiting for a wake) blocks on this mutex in run_one until the metadata is in place.
+        // loop, without waiting for a wake) blocks on this mutex in run_one until the metadata is in place. The
+        // capability check again here: a worker may have faulted (and its replacement failed) meanwhile.
         std::lock_guard lock(c.mutex);
-        r = c.model.submit(owner, args, &handle, why);
+        c.meta.reserve(c.meta.size() + 1);  // may throw: still before publication
+        if (!c.can_run_locked(slot)) {
+            if (why) *why = Refusal::Capability;
+            r = KILN_ERR_UNAVAILABLE;
+        } else {
+            r = c.model.submit(owner, args, &handle, why);
+        }
         if (r == KILN_OK) {
-            if (c.hook) c.hook(Point::SubmitPublished);
+            m->body = refs.body;
+            m->done = refs.done;
+            refs.owned = false;
             m->queued_since = c.platform.now_ns();
-            c.meta.emplace(handle, m);
+            node.key() = handle;
+            c.meta.insert(std::move(node));  // reserved: no allocation, no rehash
+            if (c.hook) c.hook(Point::SubmitPublished);
         }
     }
     if (r != KILN_OK) {
-        c.platform.release_module(m->body);
-        c.platform.release_module(m->done);
         if (task) *task = 0;
-        return r;
+        return r;  // refs released by its destructor
     }
     if (task) *task = handle;
     c.wake_all();
@@ -503,8 +612,9 @@ KilnResult Pool::drain_owner(KilnOwner owner, uint64_t timeout_ns, uint32_t* out
         return sealed;
     }
     if (timeout_ns > 0) {
-        const uint64_t deadline = c.platform.now_ns() + timeout_ns;
-        while (left > 0 && c.platform.now_ns() < deadline) {
+        // a wait budget in real time (the platform clock is the watchdog's and may be a test's fake one)
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::nanoseconds(timeout_ns);
+        while (left > 0 && std::chrono::steady_clock::now() < deadline) {
             std::this_thread::sleep_for(std::chrono::microseconds(100));
             c.model.outstanding(owner, &left);
         }
@@ -519,20 +629,25 @@ KilnResult Pool::retire_owner(KilnOwner owner, uint32_t* outstanding) {
     return r;
 }
 
-void Pool::run_watchdog(WatchFn fn, void* user) {
-    Core& c = *core_;
+void Pool::run_watchdog(WatchFn fn, void* user) { core_->sweep_watchdog(fn, user); }
+
+void Pool::Core::sweep_watchdog(WatchFn fn, void* user) {
     std::vector<Watch> reports;
     {
-        std::lock_guard lock(c.mutex);
-        const uint64_t now = c.platform.now_ns();
-        for (const auto& [task, m] : c.meta) {
+        std::lock_guard lock(mutex);
+        const uint64_t now = platform.now_ns();
+        for (const auto& [task, m] : meta) {
             // by handle, not the owner-scoped public status: a body that outlives its retired owner is still named
-            const State s = c.model.diag_state(task);  // pool -> model lock order; the model never calls back
-            if (s == State::Running && m->running && now - m->running_since >= c.config.running_watchdog_ns)
-                reports.push_back({Watch::Kind::RunningTooLong, m->owner, task, m->name, now - m->running_since});
-            else if (s == State::Queued && now - m->queued_since >= c.config.queued_watchdog_ns)
-                reports.push_back({Watch::Kind::QueuedTooLong, m->owner, task, m->name, now - m->queued_since});
+            const State s = model.diag_state(task);  // pool -> model lock order; the model never calls back
+            if (s == State::Running && m->running && !m->reported_running && now - m->running_since >= config.running_watchdog_ns) {
+                m->reported_running = true;
+                reports.push_back({Watch::Kind::RunningTooLong, m->owner, task, m->name, now - m->running_since, {}});
+            } else if (s == State::Queued && !m->reported_queued && now - m->queued_since >= config.queued_watchdog_ns) {
+                m->reported_queued = true;
+                reports.push_back({Watch::Kind::QueuedTooLong, m->owner, task, m->name, now - m->queued_since, {}});
+            }
         }
+        for (Watch& r : reports) r.owner_name = model.owner_name(r.owner);
     }
     for (const Watch& r : reports) fn(r, user);  // outside every lock
 }
@@ -546,10 +661,16 @@ bool Pool::is_pool_worker() const { return t_core == core_.get(); }
 uint32_t Pool::normal_workers() const { return core_->normal_workers; }
 bool Pool::can_run(Slot slot) const {
     std::lock_guard lock(core_->mutex);
-    const Core& c = *core_;
-    // a LongRunning task's done runs on a normal worker
-    return c.maintenance_started && c.healthy[0] > 0 && (slot == Slot::Normal || c.healthy[1] > 0);
+    return core_->can_run_locked(slot);
 }
+void Pool::Core::publish_health_locked() {
+    health.store(can_run_locked(Slot::Normal) ? 1 : 0, std::memory_order_release);
+}
+bool Pool::Core::can_run_locked(Slot slot) const {
+    // a LongRunning task's done runs on a normal worker
+    return maintenance_started && healthy[0] > 0 && (slot == Slot::Normal || healthy[1] > 0);
+}
+int Pool::health() const { return core_->health.load(std::memory_order_acquire); }
 uint64_t Pool::start_failures() const {
     std::lock_guard lock(core_->mutex);
     return core_->start_failures;
@@ -560,5 +681,184 @@ void Pool::set_test_hook(std::function<void(Point)> hook) {
     core_->hook = std::move(hook);
 }
 int Pool::live_cores() { return g_live_cores.load(); }
+void Pool::set_note_sink(NoteFn fn, void* user) {
+    std::lock_guard lock(core_->mutex);
+    core_->note_fn = fn;
+    core_->note_user = user;
+}
+void Pool::set_watch_sink(WatchFn fn, void* user) {
+    {
+        std::lock_guard lock(core_->mutex);
+        core_->watch_fn = fn;
+        core_->watch_user = user;
+        core_->maintenance_kick = true;
+    }
+    core_->maintenance_cv.notify_all();  // start (or stop) the periodic sweep now
+}
+void Pool::set_model_test_hook(std::function<void(Model::Point)> hook) { core_->model.set_test_hook(std::move(hook)); }
+
+}  // namespace kiln::tasks
+
+// ---- kiln.tasks v1 binding (Service) ----
+namespace kiln::tasks {
+
+void Pool::close() {
+    core_->model.seal_all();
+    core_->wake_all();  // the cancelled tasks' dones
+}
+
+namespace {
+KilnResult refuse(KilnHandle* task, uint32_t* refusal, KilnResult result, Refusal why) {
+    if (task) *task = 0;
+    if (refusal) *refusal = static_cast<uint32_t>(why);
+    return result;
+}
+}  // namespace
+
+Service::Service(Pool& pool, ServiceEnv& env) : pool_(pool), env_(env) {}
+
+void Service::set_test_hook(std::function<void(Point)> hook) { hook_ = std::move(hook); }
+
+// The owner's model instance, opened at its first use. A revoke between the caller's alive check and this point is
+// caught by the re-check: the instance is retired again (the registry's observer may have run before it existed).
+KilnResult Service::open(KilnOwner owner) {
+    const KilnResult r = pool_.ensure_owner(owner, env_.owner_name(owner));
+    if (r != KILN_OK) return r;
+    if (!env_.owner_alive(owner)) {
+        pool_.retire_owner(owner, nullptr);
+        return KILN_ERR_REVOKED;
+    }
+    return KILN_OK;
+}
+
+KilnResult Service::submit(KilnOwner owner, const KilnTaskInfo* info, KilnTaskBodyFn body, KilnTaskDoneFn done,
+                           void* user, KilnHandle* task, uint32_t* refusal) {
+    // every required pointer and field before any side effect
+    if (!owner || !info || !body || !done || !task || info->size < sizeof(KilnTaskInfo) ||
+        (info->flags & ~uint32_t{KILN_TASK_LONG_RUNNING | KILN_TASK_AFTER_STEP}) || info->priority > 2 ||
+        info->reserved != 0 || (info->name.len && !info->name.ptr) ||
+        !valid_name(std::string_view(info->name.ptr ? info->name.ptr : "", info->name.len)))
+        return refuse(task, refusal, KILN_ERR_INVALID_ARGUMENT, Refusal::Argument);
+    if (exiting_.load(std::memory_order_acquire)) return refuse(task, refusal, KILN_ERR_UNAVAILABLE, Refusal::Shutdown);
+    if (!env_.owner_alive(owner)) return refuse(task, refusal, KILN_ERR_REVOKED, Refusal::OwnerSealed);
+    if (hook_) hook_(Point::AfterAliveCheck);
+    SubmitArgs args;
+    args.name = std::string_view(info->name.ptr, info->name.len);
+    args.priority = static_cast<Priority>(info->priority);
+    args.long_running = (info->flags & KILN_TASK_LONG_RUNNING) != 0;
+    if (info->flags & KILN_TASK_AFTER_STEP) {
+        const Snapshot snap = snapshot();  // one consistent (session, edge, live)
+        if (!snap.live) return refuse(task, refusal, KILN_ERR_UNAVAILABLE, Refusal::NoServerWorld);
+        args.after_step = true;
+        args.session = snap.session;
+        args.edge = snap.edge;
+        if (hook_) hook_(Point::AfterCapture);
+    }
+    if (const KilnResult r = open(owner); r != KILN_OK)
+        return refuse(task, refusal, r,
+                      r == KILN_ERR_REVOKED ? Refusal::OwnerSealed
+                      : r == KILN_ERR_UNAVAILABLE && exiting_.load(std::memory_order_acquire) ? Refusal::Shutdown
+                                                                                                : Refusal::Capability);
+    Refusal why = Refusal::None;
+    const KilnResult r = pool_.submit(owner, args, body, done, user, task, &why);
+    if (r != KILN_OK && refusal) *refusal = static_cast<uint32_t>(why);
+    return r;
+}
+
+KilnResult Service::cancel(KilnOwner owner, KilnHandle task, uint32_t* state) {
+    if (state) *state = KILN_TASK_NONE;
+    if (!owner) return KILN_ERR_INVALID_ARGUMENT;
+    State s = State::None;
+    KilnResult r = pool_.cancel(owner, task, &s);
+    if (r == KILN_ERR_REVOKED && env_.owner_alive(owner)) r = KILN_ERR_NOT_FOUND;  // never opened: nothing of it
+    if (state) *state = static_cast<uint32_t>(s);
+    return r;
+}
+
+KilnResult Service::status(KilnOwner owner, KilnHandle task, uint32_t* state) {
+    if (!owner || !state) return KILN_ERR_INVALID_ARGUMENT;
+    State s = State::None;
+    KilnResult r = pool_.status(owner, task, &s);
+    if (r == KILN_ERR_REVOKED && env_.owner_alive(owner)) r = KILN_ERR_NOT_FOUND;
+    *state = static_cast<uint32_t>(s);
+    return r;
+}
+
+KilnResult Service::release(KilnOwner owner, KilnHandle task) {
+    if (!owner) return KILN_ERR_INVALID_ARGUMENT;
+    const KilnResult r = pool_.release(owner, task);
+    return r == KILN_ERR_REVOKED && env_.owner_alive(owner) ? KILN_ERR_NOT_FOUND : r;
+}
+
+KilnResult Service::drain_owner(KilnOwner owner, uint32_t timeout_ms, uint32_t* running) {
+    if (running) *running = 0;
+    if (!owner) return KILN_ERR_INVALID_ARGUMENT;
+    if (pool_.is_pool_worker()) return KILN_ERR_WRONG_THREAD;  // any timeout: no self-drain
+    if (timeout_ms > 0 && env_.on_tick_or_world_thread()) return KILN_ERR_WRONG_THREAD;
+    const bool alive = env_.owner_alive(owner);
+    if (alive) {
+        // seal even an owner that never submitted: drain seals for good
+        if (const KilnResult r = open(owner); r != KILN_OK && r != KILN_ERR_REVOKED) return r;
+    }
+    uint32_t left = 0;
+    const KilnResult r = pool_.drain_owner(owner, uint64_t{timeout_ms} * 1000 * 1000, &left);
+    if (running) *running = left;
+    if (r != KILN_OK) return r;
+    return alive || left == 0 ? KILN_OK : KILN_ERR_REVOKED;
+}
+
+Service::Snapshot Service::snapshot() const {
+    std::lock_guard lock(mutex_);
+    return snap_;
+}
+
+uint64_t Service::refused_edges() const {
+    std::lock_guard lock(mutex_);
+    return refused_edges_;
+}
+
+void Service::session_started(uint32_t session) {
+    std::lock_guard lock(mutex_);
+    snap_ = {session, 0, true};
+}
+
+bool Service::post_edge(uint32_t session, uint64_t step) {
+    {
+        std::lock_guard lock(mutex_);
+        if (!snap_.live || session != snap_.session || step == 0 || step <= snap_.edge) {
+            ++refused_edges_;
+            return false;
+        }
+        snap_.edge = step;
+    }
+    pool_.edge(session, step);
+    return true;
+}
+
+void Service::session_stopping(uint32_t session) {
+    {
+        std::lock_guard lock(mutex_);
+        if (session == snap_.session) snap_.live = false;
+    }
+    pool_.end_session(session);
+}
+
+void Service::owner_retiring(KilnOwner owner) {
+    if (owner) pool_.retire_owner(owner, nullptr);  // model only: never waits, never calls out
+}
+
+void KILN_CALL Service::owner_retiring_observer(KilnOwner retiring, void* service) {
+    try {
+        static_cast<Service*>(service)->owner_retiring(retiring);
+    } catch (...) {  // nothing leaves an observer (the registry calls it under a fault guard, not an exception one)
+    }
+}
+
+void Service::refuse_new() { exiting_.store(true, std::memory_order_release); }
+
+void Service::exiting() {
+    exiting_.store(true, std::memory_order_release);
+    pool_.close();
+}
 
 }  // namespace kiln::tasks

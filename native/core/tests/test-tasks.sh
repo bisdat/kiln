@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
-# kiln.tasks host suite: the production model and pool (src/tasks_model.cpp, src/tasks.cpp) under their overlap
-# tests, built twice: ASan/UBSan and ThreadSanitizer, each halting on the first report. No game, no Wine.
+# kiln.tasks host suite: the production model, pool and binding (src/tasks_model.cpp, src/tasks.cpp) under
+# their overlap tests, built twice: ASan/UBSan and ThreadSanitizer, each halting on the first report. No game, no Wine.
 #   native/core/tests/test-tasks.sh [test-name]
 # Output: $KILN_OUT/tasks-tests when KILN_OUT is set, else a private temporary directory removed on exit.
 set -euo pipefail
@@ -25,7 +25,12 @@ for kind in asan tsan; do
   fi
   "$cxx" "${common[@]}" "${san[@]}" "$here/tasks_model_test.cpp" "${model[@]}" -o "$out/tasks_model_test_$kind"
   "$cxx" "${common[@]}" "${san[@]}" "$here/tasks_pool_test.cpp" "${pool[@]}" -o "$out/tasks_pool_test_$kind"
-  for bin in tasks_model_test tasks_pool_test; do
+  "$cxx" "${common[@]}" "${san[@]}" "$here/tasks_api_test.cpp" "${pool[@]}" -o "$out/tasks_api_test_$kind"
+  "$cxx" "${common[@]}" "${san[@]}" "$here/tasks_edges_test.cpp" "${pool[@]}" -o "$out/tasks_edges_test_$kind"
+  # the binding against the real owner registry (src/registry.cpp, included by the test with host stubs)
+  "$cxx" "${common[@]}" "${san[@]}" -I"$here/stubs" -I"$here/../../third_party" "$here/tasks_registry_test.cpp" "${pool[@]}" \
+    -o "$out/tasks_registry_test_$kind"
+  for bin in tasks_model_test tasks_pool_test tasks_api_test tasks_edges_test tasks_registry_test; do
     printf '[%s] ' "$kind"
     rc=0
     TSAN_OPTIONS=halt_on_error=1:exitcode=66 ASAN_OPTIONS=halt_on_error=1 "$out/${bin}_$kind" "$@" || rc=$?
@@ -33,3 +38,6 @@ for kind in asan tsan; do
     if [[ $rc != 0 && $rc != 2 ]]; then exit "$rc"; fi
   done
 done
+# the core's calls into kiln.tasks at the server world's start, Post and STOPPING (tick.cpp, checked as source)
+"$cxx" -std=c++20 -O1 -Wall -Wextra -Werror "$here/tasks_wiring_test.cpp" -o "$out/tasks_wiring_test"
+"$out/tasks_wiring_test" "$here/../src/tick.cpp" | grep -v '^ok'

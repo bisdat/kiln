@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
 // kiln.tasks' model: owners, tasks, admission, fair ready queues, cancellation, release and callback
-// quiescence. No thread, no clock, no user callback of its own: the pool's workers (tasks.h) execute the work dequeue()
-// hands them and report back; the public kiln.tasks v1 table and the managed host's leases sit on top. One mutex guards all
-// state, and nothing here calls user code, so no callback can ever run under it. Host-portable (only kiln_api.h).
+// quiescence. No thread, no clock, no user callback of its own: the pool's workers (tasks.h) run
+// the work dequeue() hands them and report back; the public kiln.tasks v1 table and the managed host's leases sit on
+// top. One mutex guards all state, and nothing here calls user code, so no callback can ever run under it.
+// Host-portable (only kiln_api.h).
 //
 // Life of a task (every accepted submission gets exactly one done delivery):
 //   submit -> Queued (ready, or waiting for a Post edge when AFTER_STEP) -> dequeue -> Running (one segment at a
@@ -114,6 +115,10 @@ public:
     // A new instance for `owner` (a retired owner id may be opened again: a new instance, its old handles stay
     // foreign). INVALID_ARGUMENT: owner 0 or already open; UNAVAILABLE: instance numbers exhausted.
     KilnResult open_owner(KilnOwner owner, std::string_view name);
+    // The binding's open: create the owner's instance only when it has none. OK: open (new or existing); REVOKED: its
+    // instance was retired (a tombstone is never replaced: registry owner ids are never reused); UNAVAILABLE: the
+    // process exit closed admission (seal_all) or instance numbers are exhausted.
+    KilnResult ensure_owner(KilnOwner owner, std::string_view name);
     // drain_owner with no wait: seal forever, cancel queued roots (each still gets its done), signal running ones,
     // release terminal records; later terminal records release themselves. *outstanding = tasks whose done has not
     // returned (0 = body AND done quiescent).
@@ -123,6 +128,8 @@ public:
     // The owner was revoked: seal, signal running, release every terminal record; the instance stays a tombstone.
     KilnResult retire(KilnOwner owner, uint32_t* outstanding);
     KilnResult outstanding(KilnOwner owner, uint32_t* count) const;
+    // Process exit: seal every open owner (queued roots cancelled, running ones signalled, terminal records dropped).
+    void seal_all();
 
     // ---- the public operations (services/tasks.cpp binds them) ----
     // *task = 0 and *why set on every non-OK return; *why untouched on OK.
@@ -169,7 +176,10 @@ public:
     std::string owner_name(KilnOwner owner) const;  // the bounded copy, also after retire ("" when unknown)
 
     // Test seam: called (outside the model mutex) at the points below; nullptr in production.
-    enum class Point : uint32_t { SubmitBeforePublish };
+    enum class Point : uint32_t {
+        SubmitBeforePublish,  // outside the model mutex
+        SubmitPublishing,     // under it: the record is in its owner's table, not yet queued (a test may throw here)
+    };
     void set_test_hook(std::function<void(Point)> hook);
     bool lock_held_by_anyone() const { return locked_.load(); }
 
@@ -202,6 +212,7 @@ private:
     uint64_t session_ = 0;    // the newest server session an edge or end named
     uint64_t last_edge_ = 0;  // the last Post edge of session_
     uint64_t ended_ = 0;      // every session up to this one has ended
+    bool closing_ = false;    // the process exit closed root admission for good (seal_all)
     std::size_t ready_ = 0, ready_max_ = 0, running_ = 0;
     uint32_t long_running_ = 0;
     std::function<void(Point)> hook_;

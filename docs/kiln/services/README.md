@@ -48,6 +48,7 @@ available is generated from a boot's `capabilities.json`: [../status.generated.m
 | [spawn.md](spawn.md) | kiln.spawn: create and destroy entities from templates (creatures, item drops, props) |
 | [steamguard.md](steamguard.md) | kiln.steamguard / SteamGuard: the achievement guard (game client only, experimental) |
 | [surfaces.md](surfaces.md) | kiln.surfaces: building surfaces |
+| [tasks.md](tasks.md) | kiln.tasks: Kiln-owned worker threads for off-tick work (`submit`/`cancel`/`status`/`release`/`drain_owner`), states, quiescence, AFTER_STEP sessions, exit and the `tasks.pool` capability |
 | [time.md](time.md) | kiln.time: time of day and weather |
 | [types.md](types.md) | kiln.types: the game's types, systems, events and components by name |
 | [vfx-cook.md](vfx-cook.md) | VFX blocks: the builder |

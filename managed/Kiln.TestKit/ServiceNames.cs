@@ -57,6 +57,7 @@ internal static class ServiceNames
         "kiln.spawn",
         "kiln.steamguard",
         "kiln.surfaces",
+        "kiln.tasks",
         "kiln.time",
         "kiln.toolwear",
         "kiln.types",

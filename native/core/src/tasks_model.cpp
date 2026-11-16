@@ -235,6 +235,25 @@ void Model::leave_ring_if_done(Owner& o) {
 
 // ---- owners ----
 
+KilnResult Model::ensure_owner(KilnOwner owner, std::string_view name) {
+    if (!owner) return KILN_ERR_INVALID_ARGUMENT;
+    auto o = std::make_shared<Owner>();  // allocated before the lock; dropped when the owner already has one
+    o->id = owner;
+    o->name = bounded_owner_name(name);
+    Lock lock(*this);
+    if (closing_) return KILN_ERR_UNAVAILABLE;
+    if (const auto existing = find_open(owner)) return existing->retired ? KILN_ERR_REVOKED : KILN_OK;
+    if (next_instance_ > kMaxInstance) return KILN_ERR_UNAVAILABLE;
+    instances_.reserve(instances_.size() + 1);  // every allocation before the first change
+    ring_.reserve(ring_.size() + 1);
+    current_.reserve(current_.size() + 1);
+    o->instance = next_instance_++;
+    current_[owner] = o;
+    instances_[o->instance] = o;
+    ring_.push_back(o);
+    return KILN_OK;
+}
+
 KilnResult Model::open_owner(KilnOwner owner, std::string_view name) {
     if (!owner) return KILN_ERR_INVALID_ARGUMENT;
     auto o = std::make_shared<Owner>();
@@ -260,6 +279,18 @@ KilnResult Model::seal(KilnOwner owner, uint32_t* outstanding) {
     drop_terminal(*o);
     if (outstanding) *outstanding = o->outstanding;
     return o->retired ? KILN_ERR_REVOKED : KILN_OK;
+}
+
+void Model::seal_all() {
+    Lock lock(*this);
+    closing_ = true;  // no new owner instance and no new root from now on (continuations stay admitted)
+    for (const auto& [id, o] : current_) {
+        if (o->retired) continue;
+        o->sealed = true;
+        cancel_all_queued(*o);
+        signal_running(*o);
+        drop_terminal(*o);
+    }
 }
 
 KilnResult Model::quarantine(KilnOwner owner) {
@@ -319,29 +350,40 @@ KilnResult Model::submit(KilnOwner owner, const SubmitArgs& args, KilnHandle* ta
     r->payload = args.payload;
     hook(Point::SubmitBeforePublish);
     Lock lock(*this);
+    if (closing_) return fail(KILN_ERR_UNAVAILABLE, Refusal::Shutdown);
     const auto o = find_open(owner);
     if (!o || o->retired) return fail(KILN_ERR_REVOKED, Refusal::OwnerSealed);
     if (o->quarantined) return fail(KILN_ERR_UNAVAILABLE, Refusal::OwnerQuarantined);
     if (o->sealed) return fail(KILN_ERR_UNAVAILABLE, Refusal::OwnerSealed);
     if (o->records.size() >= limits_.owner_capacity || o->issued >= limits_.max_sequence)
         return fail(KILN_ERR_UNAVAILABLE, Refusal::QueueFull);
-    const uint64_t seq = ++o->issued;
+    // All or nothing: the one allocation that can fail after this point is placing the record (the owner's table,
+    // then a queue); on an exception everything is undone before it leaves, under the same lock, so no other thread
+    // ever sees a half-published task.
+    const uint64_t seq = o->issued + 1;
     r->handle = make_handle(o->instance, seq);
     r->home = o.get();
     o->records.emplace(seq, r);
-    ++o->outstanding;
-    // Compared under the same mutex as edge()/end_session(), so an edge or an end between the caller's capture and
-    // this point is never lost: the task is queued as if it had been accepted after it.
-    if (!args.after_step) {
-        enqueue(*o, r, Work::Kind::Body);
-    } else if (args.session <= ended_ || args.session < session_) {
-        publish_terminal(*o, r, State::Cancelled);  // its session is over: cancelled at once, never carried over
-    } else if (args.session == session_ && args.edge < last_edge_) {
-        enqueue(*o, r, Work::Kind::Body);  // its session already had a newer edge
-    } else {
-        r->waiting = true;
-        o->waiting.push_back(r);
+    try {
+        hook(Point::SubmitPublishing);
+        // Compared under the same mutex as edge()/end_session(), so an edge or an end between the caller's capture
+        // and this point is never lost: the task is queued as if it had been accepted after it.
+        if (!args.after_step) {
+            enqueue(*o, r, Work::Kind::Body);
+        } else if (args.session <= ended_ || args.session < session_) {
+            publish_terminal(*o, r, State::Cancelled);  // its session is over: cancelled at once, never carried over
+        } else if (args.session == session_ && args.edge < last_edge_) {
+            enqueue(*o, r, Work::Kind::Body);  // its session already had a newer edge
+        } else {
+            o->waiting.push_back(r);
+            r->waiting = true;
+        }
+    } catch (...) {
+        o->records.erase(seq);
+        throw;
     }
+    o->issued = seq;
+    ++o->outstanding;
     *task = r->handle;
     return KILN_OK;
 }

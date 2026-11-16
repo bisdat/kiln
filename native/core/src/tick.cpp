@@ -24,6 +24,12 @@
 #include "progress_state.h"
 #include "worldinfo.h"
 
+namespace kiln::tasks_svc {  // services/tasks.cpp: the live server session and its Post edges for AFTER_STEP
+void session_started(uint32_t session);
+void post_edge(uint32_t session, uint64_t step);
+void session_stopping(uint32_t session);
+}  // namespace kiln::tasks_svc
+
 namespace kiln::tick {
 namespace {
 
@@ -324,6 +330,7 @@ void begin_world(uint32_t kind, uintptr_t world) {
     KLOG_I("tick: %s world 0x%llx started (session %u, thread %lu%s)", kKindName[kind],
            static_cast<unsigned long long>(world), session, GetCurrentThreadId(),
            old ? "; the previous one stopped without a destroy event" : "");
+    if (kind == KILN_WORLD_SERVER) tasks_svc::session_started(session);
     dispatch_event(KILN_WORLD_STARTED, kind, world, session);
 }
 
@@ -429,6 +436,9 @@ uintptr_t server_step(uintptr_t storage, uintptr_t ticked, uintptr_t r8, uintptr
                 KLOG_W("tick: Post subscribers exist but WaitWorldJobs is unresolved; Post is not delivered");
             }
         }
+        // kiln.tasks' AFTER_STEP: Kiln's Post of this step ran (a scheduling hint); queues the released tasks for
+        // the pool, never runs one here
+        tasks_svc::post_edge(g_sessions[KILN_WORLD_SERVER].load(), info.step);
         const double t3 = now_ms();
         if (g_step > 1 && info.wall_delta_ms > 0) g_win.interval.push_back(static_cast<float>(t0 - g_prev_start));
         g_win.step.push_back(static_cast<float>(t2 - t1));
@@ -625,6 +635,7 @@ void __fastcall hk_world_destroy(uintptr_t world) {
                 worldinfo::set_world(KILN_WORLD_PREDICTION, 0);
             }
             if (kind == KILN_WORLD_SERVER) window_clock::stopping();
+            if (kind == KILN_WORLD_SERVER) tasks_svc::session_stopping(session);
             dispatch_event(KILN_WORLD_STOPPING, kind, world, session);
             if (kind == KILN_WORLD_SERVER) window_clock::stopped();
             worldinfo::set_world(kind, 0);  // the next step of this kind (even at the same address) starts a session

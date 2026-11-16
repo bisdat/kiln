@@ -52,6 +52,11 @@ bool flush();  // a last write of capabilities.json when something is dirty; wai
 #define KILN_BUILD ""
 #endif
 
+namespace kiln::tasks_svc {
+void exit_begins();  // services/tasks.cpp: any exit: kiln.tasks refuses new tasks (one atomic store, no lock)
+void exiting();      // a normal exit: kiln.tasks seals every owner too (no wait)
+}  // namespace kiln::tasks_svc
+
 namespace kiln {
 namespace {
 
@@ -738,6 +743,11 @@ void unload_abandon() noexcept {
 // The trigger: the process is exiting with `exit_code` (through `via`). Returns when the caller may go on into the
 // real exit.
 void unload_run(uint32_t exit_code, const char* via) {
+    // kiln.tasks first. Every exit closes its admission with one lock-free store (also a crash's: a stranded lock or
+    // heap is never touched); a normal exit also cancels the queued tasks and signals the running ones (model lock).
+    // Neither waits: the process exit ends the pool's threads.
+    tasks_svc::exit_begins();
+    if (exit_code == 0) tasks_svc::exiting();
     if (!g_unload_count) return;
     if (exit_code != 0) {
         // A crash may have stranded the heap or the logger's mutex. Do not allocate, log, poll, or wait, even when
