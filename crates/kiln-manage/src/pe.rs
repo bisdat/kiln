@@ -73,6 +73,8 @@ pub enum ProxyKind {
     ReShade,
     /// A loader that reads dinput8-chain.ini (XHL-Core, Auto Loot Plus and others).
     ChainLoader,
+    /// CharosDX's dinput8.dll loader: loads every `mods\<mod>\native\*.dll` (Sparkworks Enhanced, Cross-Base Storage).
+    NativeFolders,
     /// Some other DLL mod or proxy.
     Unknown,
     /// Not a 64-bit PE DLL.

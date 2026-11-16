@@ -88,6 +88,7 @@ const PROXY: Record<ProxyKind, string> = {
   kiln: "In place", none: "None", shroudforge: "ShroudForge", emf: "EMF's own", unknown: "Another DLL mod", notdll: "Not a DLL",
   eml: "EML", flame: "Flame (Creative Mode)", shroudlink: "shroudlink", modloaderproxy: "ModLoader Proxy",
   ultimateasiloader: "Ultimate ASI Loader", aldrich: "Aldrich Mod Menu", chainloader: "A chain loader",
+  nativefolders: "CharosDX's mod loader",
   set: "Shrouded Engine Tweaks", enshwick: "Enshwick", greeneye: "Greeneye Loader", shroudtopia: "Shroudtopia",
   ember: "Ember", livemap: "Live Map", sharedxp: "Shared XP", reshade: "ReShade",
 };

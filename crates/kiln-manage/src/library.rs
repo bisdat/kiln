@@ -544,6 +544,30 @@ pub(crate) fn native_bundle_proxy(dir: &Path) -> Option<PathBuf> {
     proxies.next().is_none().then_some(p)
 }
 
+/// The DLLs of a mod folder made for CharosDX's dinput8.dll loader (engines::Engine::NativeFolders: Sparkworks
+/// Enhanced, Cross-Base Storage, Craft From Stations), '/'-separated below `dir` in the loader's order; None for any
+/// other folder. Such a folder is a mod.json that only names the mod ("EML does not run anything here") beside
+/// `native/*.dll`. The loader LoadLibrary's each of those DLLs from its DllMain and calls nothing in them: each starts
+/// itself and keeps its files (config.ini, debug.log) beside its own DLL, so Kiln loads them from the Library folder.
+/// A folder with Lua, another manifest, or a DLL that belongs to another engine is not one.
+pub(crate) fn native_folder_dlls(dir: &Path) -> Option<Vec<String>> {
+    if !dir.join(EMF_MANIFEST).is_file() || MOD_MANIFESTS.iter().any(|m| *m != EMF_MANIFEST && dir.join(m).is_file())
+        || crate::engine_mods::has_xhl_plugin_ini(dir) || dir.join("src").is_dir()
+        || std::fs::read_dir(dir).into_iter().flatten().flatten().any(|e| e.path().extension().is_some_and(|x| x.eq_ignore_ascii_case("lua"))) {
+        return None;
+    }
+    let native = std::fs::read_dir(dir).ok()?.flatten().map(|e| e.path())
+        .find(|p| file_name(p).eq_ignore_ascii_case("native") && p.is_dir() && !p.is_symlink())?;
+    let folder = file_name(&native);
+    let mut dlls = crate::engines::dlls_in(&native);
+    if dlls.is_empty() || dlls.iter().any(|p| p.is_symlink() || detect_dll(p).kind != DetectKind::BareDll) {
+        return None;
+    }
+    // FindFirstFileA's order on NTFS: by name, case ignored
+    dlls.sort_by_key(|p| file_name(p).to_lowercase());
+    Some(dlls.iter().map(|p| format!("{folder}/{}", file_name(p))).collect())
+}
+
 /// Files owned by the native part of a game-folder bundle. Engine mods and bundled loaders remain separate items.
 fn native_companion(path: &Path, proxy: &Path) -> bool {
     if path == proxy { return true; }
@@ -670,6 +694,19 @@ fn detect_folder_at(dir: &Path, depth: usize, top_name: Option<&str>) -> Detecte
         }
         return mk(DetectKind::Xhl, Some(name.clone()), Some("0.0.0".into()), Some(name),
             "requires XHL-Core: Kiln preserves and places this native-plugin.ini companion in the game's mods folder; Kiln never loads this plugin DLL itself".into());
+    }
+    // A mod folder for CharosDX's dinput8.dll loader (Sparkworks Enhanced, Cross-Base Storage): mod.json names the mod,
+    // native/ holds its DLLs, nothing runs from EML. Kiln loads those DLLs itself, as one native mod.
+    if !has_lua && let Some(dlls) = native_folder_dlls(dir) {
+        let v = crate::manifest::read_text(&dir.join(EMF_MANIFEST)).ok()
+            .and_then(|t| crate::jsonc::parse(t.trim_start_matches('\u{feff}')).ok());
+        let s = |k: &str| v.as_ref().and_then(|v| v.get(k)).and_then(|x| x.as_str()).map(|x| x.trim().to_string()).filter(|x| !x.is_empty());
+        let shown = s("name").unwrap_or_else(|| file_name(dir));
+        let id = s("id").filter(|i| crate::manifest::is_mod_id(i)).unwrap_or_else(|| id_from_name(&s("id").unwrap_or_else(|| file_name(dir))));
+        let version = s("version").filter(|v| semverish(v)).unwrap_or_else(|| "0.0.0".into());
+        let list = dlls.iter().map(String::as_str).collect::<Vec<_>>().join(", ");
+        return mk(DetectKind::BareDll, Some(id), Some(version), Some(shown), format!("{list}: a DLL mod made for CharosDX's dinput8.dll \
+            loader (mods\\<mod>\\native), added as one native mod; Kiln loads its DLLs itself"));
     }
     // A package with an unknown/broken manifest is one item, never a bag of helper DLLs to execute.
     if dir.join(EMF_MANIFEST).is_file() || has_lua {
@@ -1662,6 +1699,43 @@ pub(crate) fn fallback_version(version: &str) -> String {
     if semverish(&legacy) { legacy } else { format!("0.0.0-import-{slug}") }
 }
 
+/// Imports a mod folder made for CharosDX's dinput8.dll loader ([`native_folder_dlls`]) as one native mod.
+fn import_native_folder(dirs: &DataDirs, d: &Detected, src: &Path, dlls: Vec<String>, from: &ImportSource, report: &mut ImportReport)
+    -> Result<()> {
+    let staging_parent = dirs.library();
+    let now = crate::util::now_rfc3339();
+    // a mod folder made for CharosDX's dinput8.dll loader: native/*.dll, loaded by Kiln from the Library folder
+    // in the loader's order, on the game and on servers alike (the loader ran wherever it was put, and each DLL
+    // decides for itself what it does on a dedicated server)
+    let tmp = TempDir::new(&staging_parent, "import")?;
+    let work = tmp.path().join("m");
+    let mut size = copy_mod_tree(src, &work)?;
+    if crate::hash::dirhash(&work)? != crate::hash::dirhash(src)? {
+        return Err(Error::new(ErrorCode::HashMismatch, "It changed while it was imported."));
+    }
+    let id = d.id.clone().unwrap_or_else(|| id_from_name(&file_name(src)));
+    let name = d.name.clone().unwrap_or_else(|| file_name(src));
+    let version = d.version.clone().filter(|v| semverish(v)).unwrap_or_else(|| "0.0.0".into());
+    // its own loader would have run it from <game>\mods\<mod>\native: say where its settings and logs are now
+    report.note(&d.path, format!("{name}: Kiln loads {} from the mod's folder in Kiln's Library, so the settings and logs it \
+        writes beside its DLL (config.ini, debug.log) are there, not in the game's mods folder", dlls.join(", ")));
+    let manifest = serde_json::json!({
+        "format": 1, "id": id, "name": name, "version": version,
+        "description": format!("Generated by Kiln from {}'s mod.json and its native folder (a mod made for CharosDX's \
+            dinput8.dll loader, which loads mods\\<mod>\\native\\*.dll)", file_name(src)),
+        "side": "both", "dlls": dlls, "phase": "early",
+    });
+    let mut body = serde_json::to_string_pretty(&manifest)?;
+    body.push('\n');
+    size += body.len() as u64;
+    std::fs::write(work.join(crate::manifest::NATIVE_MANIFEST), body).map_err(io(&work, "writing"))?;
+    let hash = crate::hash::dirhash(&work)?;
+    let rec = ImportRecord { format: 1, kind: ModKind::Native, id, version, hash, imported: now, source: Some(from.clone()), size,
+        name: Some(name), side: Some(Side::Both), clients: Some(Clients::default_for(Side::Both)), file: None, manifest_id: None,
+        game_folder: None };
+    commit(dirs, &work, rec, report)
+}
+
 /// Imports one detected item (folder or DLL) into the library.
 fn import_item(dirs: &DataDirs, d: &Detected, src: &Path, from: &ImportSource, report: &mut ImportReport) -> Result<()> {
     let staging_parent = dirs.library();
@@ -1723,6 +1797,9 @@ fn import_item(dirs: &DataDirs, d: &Detected, src: &Path, from: &ImportSource, r
             commit(dirs, &work, rec, report)
         }
         DetectKind::BareDll if src.is_dir() => {
+            if let Some(dlls) = native_folder_dlls(src) {
+                return import_native_folder(dirs, d, src, dlls, from, report);
+            }
             // a plain DLL mod with the files it reads: the folder is one native mod, its DLL listed in a generated native.json
             let dlls = survey_dlls(src);
             let Some(dll) = package_dll(src, &dlls) else {
