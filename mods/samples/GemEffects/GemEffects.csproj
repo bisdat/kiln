@@ -1,0 +1,18 @@
+<Project>
+  <!-- GemEffects (docs/kiln/services/gems-new.md, "New gems with a C# effect"): two gems registered with Gems.Register,
+       each run by a Kiln trigger program that calls this mod's C# handler on the server. The Gem of Frostbite: a critical
+       hit chills the target (the game's frost slow, longer with the gem's level). The Gem of Renewal: a killing blow
+       heals the wearer (more with the gem's level). Admins get both with /gemeffects. Side both: a client needs the new
+       gems to show them; the effects run on the server only.
+       Build: dotnet build mods/samples/GemEffects/GemEffects.csproj -t:KilnDeploy -p:KilnModsDir=<folder> -->
+  <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.props" />
+  <PropertyGroup>
+    <KilnModId>gemeffects</KilnModId>
+    <KilnModName>Gem Effects</KilnModName>
+    <Version>0.1.0</Version>
+    <KilnServices>Abilities;Content;Items;Chat;Players</KilnServices>
+    <KilnSide>both</KilnSide>
+    <KilnClients>mod</KilnClients>
+  </PropertyGroup>
+  <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.targets" />
+</Project>

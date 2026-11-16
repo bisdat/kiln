@@ -213,9 +213,12 @@ public sealed class GemsBaseTests : IDisposable
     // ---- equipment ----
 
     [Fact]
-    public void TheServerLayoutFixtureIsTheReflectionDumpOfItsBuild()
+    public void TheServerLayoutFixtureIsTheReflectionDumpOfItsBuild() => CheckServerLayoutFixture();
+
+    // the repository from this source file, not the build output (an --artifacts-path outside the tree has no sigdb)
+    private static void CheckServerLayoutFixture([System.Runtime.CompilerServices.CallerFilePath] string here = "")
     {
-        var root = AppContext.BaseDirectory;
+        var root = Path.GetDirectoryName(here);
         while (root is not null && !Directory.Exists(Path.Combine(root, "sigdb", "types", "server"))) root = Path.GetDirectoryName(root);
         Assert.NotNull(root);
         var dump = JsonNode.Parse(File.ReadAllText(Path.Combine(root!, "sigdb", "types", "server",

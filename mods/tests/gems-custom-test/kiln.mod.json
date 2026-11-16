@@ -1,0 +1,12 @@
+{
+  "id": "gems-custom-test",
+  "name": "new gems lab test",
+  "version": "0.1.0",
+  "apiVersion": "0.2",
+  "entryAssembly": "GemsCustomTest.dll",
+  "side": "server",
+  "description": "PASS/FAIL lines (gem wave G2): Gems.Register's gems and their Kiln trigger programs in a server world: the programs registered from kiln.assets, the gems defined with them, a data gem's configs, and each trigger program's kiln.Signal on a player-template entity's hits through the game's applyDamage. Player-free; the handler call needs a socketed gem (G1's Gems.Equipped), a check after the merge or in a client.",
+  "writes": [
+    "WeaponGemSlot"
+  ]
+}

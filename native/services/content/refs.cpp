@@ -136,7 +136,7 @@ bool template_loaded(const uint8_t g[16]) {
 
 // kiln.assets: a resource a mod serves (resource_put NEW or override) counts as loaded for its reference type.
 // keen::Model references resolve to the keen::RenderModel of the same GUID (docs/re/models.md); templates to
-// keen::ecs::TemplateResource; other ObjectReference<T> to T.
+// keen::ecs::TemplateResource; ImpactProgramReference (equipment.program) to keen::ImpactProgram; other ObjectReference<T> to T.
 bool asset_served(const std::string& ref_type, const uint8_t g[16]) {
     const KilnAssetsApi* a = assets_api();
     if (!a || a->header.size < offsetof(KilnAssetsApi, resource_read) + sizeof(a->resource_read) || !a->resource_read) return false;
@@ -145,6 +145,7 @@ bool asset_served(const std::string& ref_type, const uint8_t g[16]) {
     else if (ref_type == "keen::ObjectReference<keen::VoxelObjectDefinition>") type = 0xe53afbafu;  // a shape's preview: keen::VoxelModelResource
     else if (ref_type == "keen::ecs::TemplateReference") type = 0x39768775u;   // FNV-1a("keen::ecs::TemplateResource")
     else if (ref_type == "keen::PerkReference") type = 0x6084515au;            // FNV-1a("keen::Perk"): kiln.gamedata's perk clones
+    else if (ref_type == "keen::ImpactProgramReference") type = 0xd4922d88u;   // FNV-1a("keen::ImpactProgram"): an item's equipment.program (a mod's or Kiln's gem programs)
     else if (ref_type.rfind("keen::ObjectReference<", 0) == 0 && ref_type.size() > 23)
         type = fnv1a(ref_type.substr(22, ref_type.size() - 23));
     if (!type) return false;

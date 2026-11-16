@@ -123,3 +123,85 @@ Kiln.GemTriggeredEvent.Step.get -> ulong
 Kiln.GemTriggeredEvent.Target.get -> Kiln.EntityId
 override Kiln.GemSocketChangedEvent.ToString() -> string!
 override Kiln.GemTriggeredEvent.ToString() -> string!
+Kiln.GemDefinition
+Kiln.GemDefinition.BaseOn.get -> string!
+Kiln.GemDefinition.BaseOn.init -> void
+Kiln.GemDefinition.Configs.get -> System.Collections.Generic.Dictionary<string!, object!>!
+Kiln.GemDefinition.Configs.init -> void
+Kiln.GemDefinition.Description.get -> string?
+Kiln.GemDefinition.Description.init -> void
+Kiln.GemDefinition.DisplayName.get -> string?
+Kiln.GemDefinition.DisplayName.init -> void
+Kiln.GemDefinition.GemDefinition() -> void
+Kiln.GemDefinition.Guid.get -> System.Guid?
+Kiln.GemDefinition.Guid.init -> void
+Kiln.GemDefinition.Icon.get -> string?
+Kiln.GemDefinition.Icon.init -> void
+Kiln.GemDefinition.Id.get -> string!
+Kiln.GemDefinition.Id.init -> void
+Kiln.GemDefinition.LevelMax.get -> int?
+Kiln.GemDefinition.LevelMax.init -> void
+Kiln.GemDefinition.LevelMin.get -> int?
+Kiln.GemDefinition.LevelMin.init -> void
+Kiln.GemDefinition.Name.get -> string?
+Kiln.GemDefinition.Name.init -> void
+Kiln.GemDefinition.OnTrigger.get -> System.Action<Kiln.GemTriggerContext!>?
+Kiln.GemDefinition.OnTrigger.init -> void
+Kiln.GemDefinition.Program.get -> System.Guid?
+Kiln.GemDefinition.Program.init -> void
+Kiln.GemDefinition.Rarity.get -> Kiln.ItemRarity?
+Kiln.GemDefinition.Rarity.init -> void
+Kiln.GemDefinition.Texts.get -> System.Collections.Generic.Dictionary<string!, Kiln.ItemTexts!>!
+Kiln.GemDefinition.Texts.init -> void
+Kiln.GemDefinition.Trigger.get -> Kiln.GemTrigger?
+Kiln.GemDefinition.Trigger.init -> void
+Kiln.GemHandle
+Kiln.GemHandle.Definition.get -> Kiln.GemDefinition!
+Kiln.GemHandle.Dispose() -> void
+Kiln.GemHandle.Guid.get -> System.Guid
+Kiln.GemHandle.Item.get -> Kiln.ItemId
+Kiln.GemHandle.Name.get -> string!
+Kiln.GemHandle.Ok.get -> bool
+Kiln.GemHandle.Reason.get -> string?
+Kiln.GemTrigger
+Kiln.GemTrigger.EnemiesOnly.get -> bool
+Kiln.GemTrigger.Interval.get -> System.TimeSpan
+Kiln.GemTrigger.Kind.get -> Kiln.GemTriggerKind
+Kiln.GemTriggerContext
+Kiln.GemTriggerContext.Backstab.get -> bool
+Kiln.GemTriggerContext.Blocked.get -> bool
+Kiln.GemTriggerContext.Carrier.get -> Kiln.ItemInstanceRef
+Kiln.GemTriggerContext.Crit.get -> bool
+Kiln.GemTriggerContext.Damage.get -> int
+Kiln.GemTriggerContext.Definition.get -> Kiln.GemDefinition!
+Kiln.GemTriggerContext.Gem.get -> Kiln.ItemId
+Kiln.GemTriggerContext.HealthChange.get -> int
+Kiln.GemTriggerContext.Impact.get -> Kiln.EntityId
+Kiln.GemTriggerContext.KillingBlow.get -> bool
+Kiln.GemTriggerContext.Level.get -> int
+Kiln.GemTriggerContext.OtherIsEnemy.get -> bool
+Kiln.GemTriggerContext.Player.get -> Kiln.EntityId
+Kiln.GemTriggerContext.Position.get -> Kiln.WorldPosition
+Kiln.GemTriggerContext.Slot.get -> Kiln.GemImpactSlot
+Kiln.GemTriggerContext.Source.get -> Kiln.EntityId
+Kiln.GemTriggerContext.Step.get -> ulong
+Kiln.GemTriggerContext.Target.get -> Kiln.EntityId
+Kiln.GemTriggerContext.TargetPart.get -> Kiln.EntityId
+Kiln.GemTriggerContext.Trigger.get -> Kiln.GemTriggerKind
+Kiln.GemTriggerContext.Weapon.get -> Kiln.EntityId
+Kiln.GemTriggerKind
+Kiln.GemTriggerKind.Backstab = 4 -> Kiln.GemTriggerKind
+Kiln.GemTriggerKind.Crit = 2 -> Kiln.GemTriggerKind
+Kiln.GemTriggerKind.Hit = 1 -> Kiln.GemTriggerKind
+Kiln.GemTriggerKind.HitTaken = 5 -> Kiln.GemTriggerKind
+Kiln.GemTriggerKind.Kill = 3 -> Kiln.GemTriggerKind
+Kiln.GemTriggerKind.Passive = 6 -> Kiln.GemTriggerKind
+override Kiln.GemHandle.ToString() -> string!
+override Kiln.GemTrigger.ToString() -> string!
+static Kiln.GemTrigger.OnBackstab(bool enemiesOnly = true) -> Kiln.GemTrigger!
+static Kiln.GemTrigger.OnHit(bool crit = false, bool enemiesOnly = true) -> Kiln.GemTrigger!
+static Kiln.GemTrigger.OnHitTaken(bool enemiesOnly = true) -> Kiln.GemTrigger!
+static Kiln.GemTrigger.OnKill(bool enemiesOnly = true) -> Kiln.GemTrigger!
+static Kiln.GemTrigger.Passive(System.TimeSpan interval) -> Kiln.GemTrigger!
+static Kiln.Gems.Register(Kiln.GemDefinition! definition) -> Kiln.GemHandle!
+static readonly Kiln.GemTrigger.PassiveStep -> System.TimeSpan
