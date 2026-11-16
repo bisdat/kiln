@@ -7,6 +7,7 @@
 #include <string>
 
 #include "engine_state.h"
+#include "memory.h"
 
 namespace kiln::engine {
 
@@ -58,5 +59,8 @@ ImageFacts gather_facts(const KilnApi* api) {
     }
     return facts;
 }
+
+// The process image the profile was matched against (layout RVAs are relative to it).
+std::uintptr_t mem::image_base() { return reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr)); }
 
 }  // namespace kiln::engine

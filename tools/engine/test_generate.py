@@ -124,6 +124,38 @@ class Rules(unittest.TestCase):
         self.assertEqual(g.generate(ROOT), (ROOT / g.OUTPUT).read_text(encoding='utf-8'))
 
 
+class AttributeModel(unittest.TestCase):
+    """ShroudForge publish_attribute_model (loaded-resources/initialize_resource_access.cpp:30-38): the selected exact
+    profile's attributeCalculationModel is published only as "attribute-command-v1" with non-empty string evidence."""
+
+    def model(self, edit):
+        p = copy.deepcopy(PROFILES['client'])
+        edit(p)
+        return g.attribute_model(p)
+
+    def test_ported_profiles_publish_the_command_model(self):
+        for side, p in PROFILES.items():
+            self.assertEqual(g.attribute_model(p), 'attribute-command-v1', side)
+        generated = (ROOT / g.OUTPUT).read_text(encoding='utf-8')
+        self.assertEqual(generated.count('[0], "attribute-command-v1"},'), len(PROFILES))  # each Profile row's last field
+
+    def test_evidence_must_be_a_non_empty_string(self):
+        self.assertEqual(self.model(lambda p: p['provenance'].pop('attributeCalculationEvidence')), '')
+        self.assertEqual(self.model(lambda p: p['provenance'].update(attributeCalculationEvidence='')), '')
+        self.assertEqual(self.model(lambda p: p['provenance'].update(attributeCalculationEvidence=['x'])), '')
+
+    def test_only_the_command_model_is_published(self):
+        self.assertEqual(self.model(lambda p: p.update(attributeCalculationModel='attribute-command-v2')), '')
+        self.assertEqual(self.model(lambda p: p.pop('attributeCalculationModel')), '')
+
+    def test_malformed_inputs_refuse_the_profile(self):
+        # ShroudForge: value() of a non-string and at("provenance") on a profile without one throw
+        with self.assertRaises(g.ProfileError):
+            self.model(lambda p: p.update(attributeCalculationModel=1))
+        with self.assertRaises(g.ProfileError):
+            self.model(lambda p: p.pop('provenance'))
+
+
 def export_tree(root):
     """An exported copy of the generator's inputs and output under `root`."""
     for source in sorted((ROOT / 'sigdb/engine').glob('*/*.json')):

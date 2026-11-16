@@ -27,7 +27,7 @@ available is generated from a boot's `capabilities.json`: [../status.generated.m
 | [combat.md](combat.md) | kiln.combat: health, damage, healing, kills, god mode and combat events |
 | [content.md](content.md) | kiln.content: registries and data packs |
 | [creatures.md](creatures.md) | kiln.creatures: one creature's values, variants, AI events, commands and arsenal rules |
-| [engine.md](engine.md) | kiln.engine: which exact game build runs (`identity`, `gate_stats`) against per-build engine profiles (`sigdb/engine/`); the Kiln-internal kiln.internal.engine table for Kiln's own services |
+| [engine.md](engine.md) | kiln.engine: which exact game build runs (`identity`, `gate_stats`) against per-build engine profiles (`sigdb/engine/`); the Kiln-internal kiln.internal.engine table (engine reads and the engine's own write gate) for Kiln's own services |
 | [gamedata.md](gamedata.md) | kiln.gamedata: spells, abilities, creatures and their attacks as data |
 | [gems.md](gems.md) | Gems: how a gem works, changing one with a data pack, the `Gems` read API and gem events; with [gems-new.md](gems-new.md) (new gems, `Gems.Register`), [gems-forge.md](gems-forge.md) (forge actions from code) and [gems-sockets.md](gems-sockets.md) (sockets on rings, armour, shields) |
 | [gameplay.md](gameplay.md) | kiln.gameplay: player/world interaction events and protection zones |

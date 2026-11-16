@@ -2,14 +2,18 @@
 // kiln.engine: exact-build engine profile selection (public kiln.engine v1, data only) and the Kiln-internal
 // primitive table kiln.internal.engine. Portable: the Windows facts of the loaded image come from facts_win.cpp.
 #include <atomic>
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <string>
 
 #include "engine_state.h"
+#include "gate.h"
 #include "identity.h"
 #include "include/kiln_engine_native.h"
+#include "memory.h"
 #include "profiles.g.h"
+#include "resolve.h"
 #include "services/kiln_caps.h"
 
 namespace kiln::engine {
@@ -71,9 +75,111 @@ const Layout* KILN_CALL layout() {
     return g_state && g_state->selection.profile ? &g_state->selection.profile->layout : nullptr;
 }
 
+const Profile* KILN_CALL profile() { return g_state ? g_state->selection.profile : nullptr; }
+
+// Read primitives (kiln_engine_native.h): any thread, no allocation, no host lock, no wait.
+KilnResult KILN_CALL copy(std::uintptr_t address, void* out, std::size_t bytes) {
+    if (!bytes) return KILN_OK;
+    if (!out) return KILN_ERR_INVALID_ARGUMENT;
+    return mem::read_span(address, out, bytes) ? KILN_OK : KILN_ERR_UNAVAILABLE;
+}
+
+KilnResult KILN_CALL view(std::uint32_t kind, EcsView* out, std::uint32_t* reason) {
+    if (!out || !reason || kind > static_cast<std::uint32_t>(ViewKind::Client)) return KILN_ERR_INVALID_ARGUMENT;
+    stats().views.fetch_add(1, std::memory_order_relaxed);
+    EcsView v{};
+    const Reason r = ecs_view(layout(), static_cast<ViewKind>(kind), v, mem::image_base());
+    *reason = static_cast<std::uint32_t>(r);
+    if (r != Reason::None) {
+        stats().view_failures.fetch_add(1, std::memory_order_relaxed);
+        return KILN_ERR_UNAVAILABLE;
+    }
+    *out = v;
+    return KILN_OK;
+}
+
+std::int32_t KILN_CALL write_supported(const EcsView* expected, std::uint16_t component) {
+    return expected && ecs_write_supported(layout(), *expected, component, mem::image_base()) ? 1 : 0;
+}
+
+// The engine's original write gate. The caller's thread comes from the core before any word is touched; a core
+// without on_world_thread cannot prove the caller is off the world threads, so the gate refuses (fail closed).
+CallerThread caller_thread() {
+    const KilnApi* api = g_state ? g_state->api : nullptr;
+    if (!api || api->size < offsetof(KilnApi, on_world_thread) + sizeof api->on_world_thread || !api->on_world_thread)
+        return CallerThread::Unknown;
+    if (api->on_world_thread(KILN_WORLD_SERVER)) return CallerThread::ServerWorld;
+    if (api->on_world_thread(KILN_WORLD_CLIENT) || api->on_world_thread(KILN_WORLD_PREDICTION)) return CallerThread::ClientWorld;
+    return CallerThread::Other;
+}
+bool gate_record(const EcsGate* gate) { return gate && gate->size == sizeof(EcsGate); }
+
+KilnResult KILN_CALL gate_acquire_member(const EcsView* expected, EcsGate* gate, std::uint32_t* reason) {
+    if (!expected || !gate_record(gate) || !reason || !gate->owner || !gate->step ||
+        gate->admission > static_cast<std::uint32_t>(GateAdmission::RetryKilnHolder))
+        return KILN_ERR_INVALID_ARGUMENT;
+    const Reason r = gate_acquire(layout(), *expected, *gate, caller_thread(), mem::image_base());
+    *reason = static_cast<std::uint32_t>(r);
+    return r == Reason::None ? KILN_OK : KILN_ERR_UNAVAILABLE;
+}
+std::int32_t KILN_CALL gate_validate_member(const EcsGate* gate) {
+    return gate_record(gate) && gate_validate(layout(), *gate, mem::image_base()) ? 1 : 0;
+}
+std::int32_t KILN_CALL gate_component_member(const EcsGate* gate, std::uint16_t component) {
+    return gate_record(gate) && gate_component_supported(*gate, component) ? 1 : 0;
+}
+std::int32_t KILN_CALL gate_track_member(const EcsGate* gate, std::uintptr_t entity, std::uint16_t component) {
+    return gate_record(gate) && gate_track_change(*gate, entity, component) ? 1 : 0;
+}
+KilnResult KILN_CALL gate_write_member(const EcsGate* gate, std::uintptr_t address, const void* data, std::size_t bytes) {
+    if (!gate_record(gate) || !gate->held || (!data && bytes)) return KILN_ERR_INVALID_ARGUMENT;
+    switch (gate_write(*gate, address, data, bytes)) {
+        case GateWrite::Ok: return KILN_OK;
+        case GateWrite::TooLarge: return KILN_ERR_BUFFER_TOO_SMALL;  // over gate.maximum_bytes, no mutation
+        default: return KILN_ERR_UNAVAILABLE;                        // faulted: a partial write may have happened
+    }
+}
+void KILN_CALL gate_release_member(EcsGate* gate) {
+    if (gate_record(gate)) gate_release(*gate);
+}
+
+// The gate closes while the server world is stopping (a later acquire would only ever see a dying world) and opens at
+// the next server world's STARTED; at process exit it closes for good. Both then wait a few microseconds for a Kiln
+// holder already in flight and say so when one is left. The core dispatches STOPPING from the world-destroy hook on the
+// destroying thread; that no Kiln holder can be inside then rests on the engine holding the Scene word Shared through
+// teardown, which the bounded look below would show if it is wrong.
+constexpr std::uint64_t kExitHolderWaitNs = 20'000;
+void KILN_CALL world_event(const KilnWorldEvent* event, void*) {
+    if (!event || event->kind != KILN_WORLD_SERVER) return;
+    if (event->event == KILN_WORLD_STOPPING && !gate_close_session(true, kExitHolderWaitNs))
+        log(KILN_LOG_WARN, "kiln.engine: a Kiln thread held the engine's write gate at a stopping server world "
+                           "(gave up waiting after 20 us)");
+    if (event->event == KILN_WORLD_STARTED) gate_close_session(false);
+}
+// The live server step for the busy latch (until the next server step edge), from the server Pre.
+void KILN_CALL server_pre(const KilnTickInfo* tick, void*) {
+    if (tick) gate_set_server_step(tick->step);
+}
+void KILN_CALL on_exit(void*) {
+    if (!gate_close_for_exit(kExitHolderWaitNs))
+        log(KILN_LOG_WARN, "kiln.engine: a Kiln thread still held the engine's write gate at exit (gave up after 20 us)");
+}
+
 const KilnEngineApi g_table = {{sizeof(KilnEngineApi), KILN_ENGINE_VERSION}, &identity, &gate_stats};
-const KilnEngineNativeApi g_native = {{sizeof(KilnEngineNativeApi), KILN_ENGINE_NATIVE_VERSION}, sizeof(Layout), 0,
-                                      &layout};
+const KilnEngineNativeApi g_native = {{sizeof(KilnEngineNativeApi), KILN_ENGINE_NATIVE_VERSION},
+                                      sizeof(Layout),
+                                      sizeof(Profile),
+                                      &layout,
+                                      &copy,
+                                      &view,
+                                      &write_supported,
+                                      &profile,
+                                      &gate_acquire_member,
+                                      &gate_validate_member,
+                                      &gate_component_member,
+                                      &gate_track_member,
+                                      &gate_write_member,
+                                      &gate_release_member};
 }  // namespace
 
 const Layout* selected_layout() { return layout(); }
@@ -81,6 +187,7 @@ const Layout* selected_layout() { return layout(); }
 void reset_for_tests() {
     delete g_state;
     g_state = nullptr;
+    gate_reset_for_tests();
 }
 
 }  // namespace kiln::engine
@@ -127,6 +234,15 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
                write ? "" : p ? "the profile has no enabled native-thread Scene write gate" : unknown);
         info->id = str(KILN_ENGINE_SERVICE);
         info->version = str("1");
+        info->on_unload = &on_exit;
+        KilnHandle events{};
+        if (api->size < offsetof(KilnApi, subscribe_world) + sizeof api->subscribe_world || !api->subscribe_world ||
+            api->subscribe_world(owner, &world_event, nullptr, &events) != KILN_OK)
+            log(KILN_LOG_INFO, "kiln.engine: no world lifecycle events here; the write gate is not closed at a stopping world "
+                               "(a later acquire still refuses a dying world's view)");
+        KilnHandle tick{};
+        if (!api->subscribe_tick || api->subscribe_tick(owner, KILN_TICK_PRE, &server_pre, nullptr, &tick) != KILN_OK)
+            log(KILN_LOG_INFO, "kiln.engine: no server step here; the write gate's busy latch keys on the caller's step");
         const KilnResult rc = api->register_service(owner, str(KILN_ENGINE_SERVICE), &g_table);
         if (rc != KILN_OK) return rc;
         if (api->register_service(owner, str(KILN_ENGINE_NATIVE_SERVICE), &g_native) != KILN_OK)

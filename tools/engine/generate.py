@@ -484,7 +484,22 @@ def load(path):
     if resource['item_id_map']:
         sections |= SECTION_BITS['item_id_map']
     return {'path': path, 'raw': raw, 'profile': profile, 'target': target, 'sha256': sha, 'timestamp': timestamp,
-            'size': size, 'layout': layout, 'sections': sections}
+            'size': size, 'layout': layout, 'sections': sections, 'attribute_model': attribute_model(profile)}
+
+
+def attribute_model(profile):
+    # initialize_resource_access.cpp:30-38 (publish_attribute_model), run once the exact profile is selected and
+    # configured: value("attributeCalculationModel", "") and at("provenance") throw on a non-string or a missing object.
+    model = profile.get('attributeCalculationModel', '')
+    if not isinstance(model, str):
+        raise ProfileError('[json.exception.type_error.302] type must be string: attributeCalculationModel')
+    provenance = at(profile, 'provenance')
+    if not isinstance(provenance, dict):
+        raise ProfileError('[json.exception.type_error.304] cannot use at() with a non-object: provenance')
+    evidence = provenance.get('attributeCalculationEvidence')
+    if model != 'attribute-command-v1' or not isinstance(evidence, str) or not evidence:
+        return ''
+    return model
 
 
 def leaves(obj, prefix=''):
@@ -588,9 +603,10 @@ def emit(profiles, root):
                       lay['scene_count_offset'], lay['scene_capacity_offset'], lay['entry_stride'],
                       lay['entry_context_offset'], lay['entry_uuid_offset'], lay['entry_state_offset'],
                       lay['maximum_scenes'], lay['entry_ready_state'], entity, write, queue, spawn, resource))
-        lines.append('    {%s, %s, %s, %du, %du, %du, %du, 0x%xu, %s, kLeaves%d, sizeof kLeaves%d / sizeof kLeaves%d[0]},' % (
+        lines.append('    {%s, %s, %s, %du, %du, %du, %du, 0x%xu, %s, kLeaves%d, sizeof kLeaves%d / sizeof kLeaves%d[0], %s},' % (
             c_string(text(p['profile'], 'id')), c_string(p['target']), c_string(p['sha256']), p['timestamp'],
-            p['size'], 4, p['profile']['schemaVersion'], p['sections'], layout, index, index, index))
+            p['size'], 4, p['profile']['schemaVersion'], p['sections'], layout, index, index, index,
+            c_string(p['attribute_model'])))
     lines.append('};')
     lines.append('}  // namespace kiln::engine::generated')
     return '\n'.join(lines) + '\n'

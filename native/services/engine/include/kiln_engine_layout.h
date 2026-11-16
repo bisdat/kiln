@@ -93,6 +93,9 @@ struct Profile {
     Layout layout;
     const Leaf* leaves;
     std::size_t leaf_count;
+    // ShroudForge's published attribute model for this exact profile (initialize_resource_access.cpp:30-38):
+    // "attribute-command-v1" when the profile names it with non-empty provenance.attributeCalculationEvidence, else "".
+    const char* attribute_calculation_model;
 };
 
 }  // namespace kiln::engine
