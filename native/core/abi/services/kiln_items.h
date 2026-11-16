@@ -76,7 +76,10 @@ enum {
     KILN_ITEMS_REPLACE = 0x0800u,        /* give: in the same transaction first take the item entity `pide` out of
                                             `slot` (it must hold `item` and that entity), then create the new item,
                                             preferably in that slot: both or neither (Gems.AddSocket re-creates gear this
-                                            way). `count` 1, a gear item, `slot` and `pide` required; not with RECIPE */
+                                            way). `count` 1, a gear item, `slot` and `pide` required; not with RECIPE.
+                                            KILN_ITEMS_REFUSED, nothing changed: the item is worn or held (a player's
+                                            equipment slot or item in hand, or ItemState IsEquipped), has a gem slot
+                                            (its gem would be destroyed with it), or has no readable ItemState */
     KILN_ITEMS_DYE = 0x1000u,            /* give gear dyed with KilnItemsRequestEx.dye (needs the Ex request) */
     KILN_ITEMS_DURABILITY = 0x2000u,     /* give gear at KilnItemsRequestEx.durability (0..1 of its max; needs the Ex
                                             request), as the game's DurabilityPercentageInit sets it */
@@ -1077,9 +1080,10 @@ typedef struct KilnItemsApi {
     /* ---- v7, since 0.2.0-dev.30: gem sockets (check header.size; KILN_ERR_UNAVAILABLE without feature
      * items.pide_options) ---- */
 
-    /* Sets `owner`'s socket rolls (see "gem sockets"); NULL or every chance 0 ends them. KILN_ERR_INVALID_ARGUMENT: a
-     * chance outside 0..1 (or not a number), size too small, reserved not 0. cancel_owner(owner) ends them too. Any
-     * thread; the next item the game creates uses them. */
+    /* Sets `owner`'s socket rolls (see "gem sockets"); NULL or every chance 0 ends them. KILN_ERR_UNAVAILABLE (checked
+     * first, for any non-NULL roll, even an invalid one: a probe that changes nothing): feature gems.sockets is off.
+     * KILN_ERR_INVALID_ARGUMENT: a chance outside 0..1 (or not a number), size too small, reserved not 0.
+     * cancel_owner(owner) ends them too. Any thread; the next item the game creates uses them. */
     KilnResult(KILN_CALL* socket_roll)(KilnOwner owner, const KilnItemsSocketRoll* roll);
 } KilnItemsApi;
 

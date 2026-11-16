@@ -53,6 +53,33 @@ public sealed unsafe class ItemSocketsTests
         finally { ItemSockets.SetAllowed(null, 0); }
     }
 
+    // Review: Gear.GemSlot on an allowed kind asks kiln.items for GEM_SLOT_ANY only when the server part works here. Else
+    // (gems.sockets off on this build, an older kiln.items) the flag would make the whole give Unavailable / Invalid, where
+    // the guide promises "otherwise it is unchanged" (the item is given without a socket, as before v7).
+    [Theory]
+    [InlineData(ItemSockets.Rings, ItemSockets.Rings, true, true)]
+    [InlineData(ItemSockets.Rings, ItemSockets.Rings, false, false)]
+    [InlineData(ItemSockets.Armour, ItemSockets.Rings, true, false)]
+    [InlineData(0u, ItemSockets.AllKinds, true, false)]
+    public void AGiveAsksForASocketOnOtherGearOnlyWhenItsKindIsAllowedAndTheServerPartWorks(uint kind, uint allowed, bool serverOn,
+        bool want)
+    {
+        var asked = false;
+        Assert.Equal(want, ItemSockets.GivesAnySlot(kind, allowed, () => { asked = true; return serverOn; }));
+        Assert.Equal(kind != 0 && (allowed & kind) != 0, asked);  // the native probe runs only for an allowed kind
+    }
+
+    [Fact]
+    public void WithoutKilnItemsV7AGiveNeverAsksForASocketOnOtherGear()
+    {
+        try
+        {
+            ItemSockets.SetAllowed(null, ItemSockets.AllKinds);
+            Assert.False(ItemSockets.ServerSocketsOn);  // no kiln.items here (unit tests)
+        }
+        finally { ItemSockets.SetAllowed(null, 0); }
+    }
+
     private static ItemSockets.GearState Ring(int level = 34, int unlocked = 4, int dur = 300, int durMax = 1200, uint dye = 0) =>
         new(Found: true, Placed: true, Equipped: false, Item: new ItemId(18908173), Holder: new EntityId(2), Slot: new SlotId(0x3_0000_1234),
             HasSocket: false, Gem: ItemId.None, GemLevel: 0, Level: level, HasDurability: durMax > 0, Durability: dur,

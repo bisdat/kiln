@@ -240,6 +240,9 @@ const uint8_t* stack_at(const Access& a, uint64_t slot) {
 }
 
 // KILN_ITEMS_REPLACE (v7): the slot must hold exactly this one item entity of this item; read before the transaction.
+// The re-creation destroys the old item entity, so worn or held gear (a player's equipment slots and the item in hand,
+// as moves protect them, or ItemState IsEquipped) and gear with a gem slot (ItemState HasWeaponGemSlot: a gem in it would
+// be destroyed with its carrier) are refused; the caller's earlier read may be a step old.
 bool replace_source_ok(const Access& a, const KilnItemsRequest& r, KilnItemsResult* res) {
     const uint8_t* st = stack_at(a, r.slot);
     if (!st) return fail(res, KILN_ITEMS_SLOT_CHANGED, "inventory %u could not be read", KILN_SLOT_INVENTORY(r.slot)), false;
@@ -248,6 +251,19 @@ bool replace_source_ok(const Access& a, const KilnItemsRequest& r, KilnItemsResu
         return fail(res, KILN_ITEMS_SLOT_CHANGED, "the slot holds item 0x%08x, not 0x%08x", id, r.item), false;
     if (pide != r.pide)
         return fail(res, KILN_ITEMS_SLOT_CHANGED, "the slot holds item entity %u, not %u", pide, r.pide), false;
+    PlayerGuard g;
+    player_guard(a, r.entity, &g);
+    if (g.is_player && g.protects(r.slot))
+        return fail(res, KILN_ITEMS_REFUSED, "item entity %u is worn or held by player %u: unequip it first", pide, r.entity), false;
+    PtrSize ps{};
+    E.read_other(&ps, a.storage, a.acc[A_ITEMSTATE], pide);
+    if (!ps.ptr || ps.size < kItemStateSize)
+        return fail(res, KILN_ITEMS_REFUSED, "item entity %u has no ItemState to check", pide), false;
+    const uint16_t state = rd<uint16_t>(static_cast<const uint8_t*>(ps.ptr), 0x0E);
+    if (state & (1u << 3))  // IsEquipped
+        return fail(res, KILN_ITEMS_REFUSED, "item entity %u is worn or held (IsEquipped): unequip it first", pide), false;
+    if (state & (1u << 8))  // HasWeaponGemSlot
+        return fail(res, KILN_ITEMS_REFUSED, "item entity %u has a gem slot: re-creating it would destroy its gem", pide), false;
     return true;
 }
 

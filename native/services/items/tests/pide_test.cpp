@@ -196,6 +196,18 @@ int main() {
     check(pide_socket_roll(1, &bad) == KILN_ERR_INVALID_ARGUMENT && pide_socket_roll(1, &nan) == KILN_ERR_INVALID_ARGUMENT &&
           pide_socket_roll(1, &small) == KILN_ERR_INVALID_ARGUMENT && pide_socket_roll(1, &reserved) == KILN_ERR_INVALID_ARGUMENT &&
           !g_roll_any.load(), "chances outside 0..1, NaN, a short struct or reserved bits are refused and change nothing");
+    // review: availability is told before the arguments, so Kiln.Items' probe (an invalid roll) never ends anyone's rolls
+    KilnItemsSocketRoll invalid_probe{};  // size 0: never valid
+    g_override = 0;
+    const KilnResult off_probe = pide_socket_roll(0, &invalid_probe);
+    g_override = 0x798;
+    KilnItemsSocketRoll core_roll{sizeof(KilnItemsSocketRoll), 0.4f, 0, 0, 0, 0};
+    const KilnResult core_set = pide_socket_roll(0, &core_roll);
+    const KilnResult on_probe = pide_socket_roll(0, &invalid_probe);
+    check(off_probe == KILN_ERR_UNAVAILABLE && core_set == KILN_OK && on_probe == KILN_ERR_INVALID_ARGUMENT &&
+              g_roll_any.load() && roll_chance(kKindRings) == 0.4f,
+          "without gems.sockets even an invalid roll says unavailable; with it the probe is refused and the core's own rolls stay");
+    pide_socket_roll(0, nullptr);
     g_rand = &rand01;
     // dye and durability of a re-created item (Gems.AddSocket)
     PideOptions extra;
@@ -225,8 +237,18 @@ int main() {
     only_dye.flags = KILN_ITEMS_DYE;
     only_dye.item = 7;
     only_dye.dye = 9;
-    pide_commit(&has_dye, &spawn, only_dye);
-    check(game_dye == 9 && has_dye.count() == 4, "a list that already has a dye entry gets its value replaced, not a second entry");
+    uint32_t seen_existing = 0;
+    struct DyeProbe { Fixture* f; uint32_t* y; } dye_probe{&has_dye, &seen_existing};
+    pide_commit(&dye_probe, [](void* arg) {
+        auto* p = static_cast<DyeProbe*>(arg);
+        spawn(p->f);
+        for (uint64_t i = 0; i < p->f->count(); ++i)
+            if (p->f->list[i].hash == kDye) std::memcpy(p->y, p->f->list[i].data, 4);
+    }, only_dye);
+    // review: the entry's data may be the game's (an ItemInfo default on another build); it is pointed at the give's
+    // value, never written through
+    check(game_dye == 5 && seen_existing == 9 && has_dye.count() == 4,
+          "a list that already has a dye entry spawns the give's dye without a second entry and without writing the game's buffer");
     Fixture full_extra; ring(full_extra);
     *reinterpret_cast<uint64_t*>(full_extra.frame + 40) = 5;  // room for two more entries
     pide_commit(&full_extra, &spawn, extra);

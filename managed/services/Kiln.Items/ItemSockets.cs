@@ -58,14 +58,22 @@ internal static unsafe class ItemSockets
         }
     }
 
-    /// <summary>Items.Give's Gear.GemSlot on a non-weapon: true when the item's kind is allowed.</summary>
+    /// <summary>Items.Give's Gear.GemSlot on a non-weapon: true when the item's kind is allowed and the server part works
+    /// here. Otherwise the give goes on without the socket (as before v7, and as Gear.GemSlot's documentation says),
+    /// instead of failing as a whole on a build where gems.sockets is off.</summary>
     internal static bool AllowsGive(ItemId item)
     {
         var allowed = AllowedKinds;
-        if (allowed == 0) return false;
-        var kind = KindOf(item);
-        return kind != 0 && (allowed & kind) != 0;
+        return allowed != 0 && GivesAnySlot(KindOf(item), allowed, static () => ServerSocketsOn);
     }
+
+    /// <summary>The decision of <see cref="AllowsGive"/>: a kind of the four, allowed, and (asked last, it calls kiln.items)
+    /// the server part on. Pure but for <paramref name="serverOn"/>.</summary>
+    internal static bool GivesAnySlot(uint kind, uint allowed, Func<bool> serverOn) =>
+        kind != 0 && (allowed & kind) != 0 && serverOn();
+
+    /// <summary>kiln.items here has v7 and feature gems.sockets (<see cref="WhyOff"/> is null).</summary>
+    internal static bool ServerSocketsOn => WhyOff == null;
 
     // ---- the native side ----
 
@@ -94,12 +102,14 @@ internal static unsafe class ItemSockets
             var t = V7;
             if (t == null)
                 return Items.Available ? "kiln.items here has no gem sockets (v7; update Kiln)" : "kiln.items is not loaded";
-            var probe = new ItemsNative.SocketRoll { Size = (uint)sizeof(ItemsNative.SocketRoll) };
-            // owner 0 is Kiln's own and never has rolls: an all-zero roll ends nothing and tells whether the feature is on
+            // An invalid roll (size 0) changes nothing: kiln.items answers Unavailable when the feature is off (checked
+            // first), else InvalidArgument. A valid all-zero roll would end owner 0's rolls (Kiln's own, from a call
+            // with no mod on the thread), so the probe never sends one.
+            var probe = new ItemsNative.SocketRoll();
             var rc = t->SocketRollOf(0, &probe);
-            return rc == ItemsNative.Ok ? null
+            return rc == ItemsNative.InvalidArgument ? null
                 : rc == ItemsNative.Unavailable ? "feature gems.sockets is off on this game build (see capabilities)"
-                : $"kiln.items refused the probe ({rc})";
+                : $"kiln.items answered the probe with {rc}";
         }
     }
 

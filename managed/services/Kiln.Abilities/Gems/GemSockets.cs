@@ -49,7 +49,8 @@ public enum GemSocketStatus
     NotFound = 4,
     /// <summary>It has no item entity of its own (a plain stack), or it is a gem, a dye or a customization item.</summary>
     NotGear = 5,
-    /// <summary>The game refused the re-creation, or the slot changed meanwhile; nothing changed (see the reason).</summary>
+    /// <summary>The game refused the re-creation, or the item changed meanwhile (put on, taken in hand, given a gem
+    /// slot); nothing changed (see the reason).</summary>
     Refused = 6,
     /// <summary>Sockets on other gear do not work here (see the reason); nothing changed.</summary>
     Unavailable = 7,
@@ -92,12 +93,14 @@ public static partial class Gems
     /// there. Items whose game data sets <c>gemSlotOverride</c> get a socket whatever this says (see the guide).
     /// Balance is the mod's: a gem reacts to every hit of its wearer, not only the carrier's, and up to 11 gems can run at
     /// once (held item, shield, 5 armour pieces, 2 rings, arrows, spell).
+    /// Call it in OnLoad or on the tick thread: the allowance belongs to the mod running there and ends with it. From
+    /// another thread no mod is known, so it would be Kiln's own and outlive the mod.
     /// </summary>
     /// <param name="kinds">The kinds; <see cref="GemSocketKinds.None"/> ends this mod's allowance and rolls.</param>
     /// <param name="rollChance">0..1: the chance a new item of these kinds rolls an empty socket when the game creates it
     /// (server). 0 (the default): only Kiln's own calls give sockets.</param>
     /// <exception cref="ArgumentOutOfRangeException">An unknown kind bit, or a chance outside 0..1.</exception>
-    [AnyThread]
+    [TickThreadOnly]
     [RequiresCapability(SocketsCapability)]
     public static GemSocketsSetup AllowSockets(GemSocketKinds kinds, double rollChance = 0)
     {
@@ -129,10 +132,12 @@ public static partial class Gems
     /// Gives an existing piece of gear without a socket an empty one: the game cannot add a component to an item
     /// entity, so Kiln re-creates the item in the same slot, in one inventory transaction (the old item entity is taken,
     /// the new one created; both or neither). Kept: the item, its level, rarity, unlocked upgrades, durability (as a
-    /// fraction of its max) and dye. Not kept: the item entity itself (anything keyed to the old entity, such as Kiln.Saves'
-    /// instance data, stays with the old one), water in a can. The item must sit in an inventory (a backpack, an action bar,
-    /// a chest), not worn. Weapons are accepted always; other gear needs its kind allowed (<see cref="AllowSockets"/>).
-    /// Completes on the tick thread one or two steps later.
+    /// fraction of its max) and dye. Not kept: the item entity itself (anything keyed to the old entity is not moved:
+    /// Kiln.Saves' instance data on it counts as destroyed, so a mod that keeps data on gear reads it first and sets it on
+    /// <see cref="GemSocketResult.After"/>), water in a can. The item must sit in an inventory (a backpack, an action bar,
+    /// a chest), not worn nor held in the hand; kiln.items checks that again on the step it runs (put on or taken in hand
+    /// meanwhile: <see cref="GemSocketStatus.Refused"/>, nothing changed). Weapons are accepted always; other gear needs its
+    /// kind allowed (<see cref="AllowSockets"/>). Completes on the tick thread one or two steps later.
     /// </summary>
     [ServerOnly]
     [TickThreadOnly]

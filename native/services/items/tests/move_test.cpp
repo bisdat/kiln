@@ -1090,7 +1090,13 @@ void replace_test() {
         check(run_job(a, job, reinterpret_cast<uint8_t*>(&tx), &res, &code), "replace: the job runs without a fault");
         return res;
     };
+    // every item entity the game makes has an ItemState (createPide); a re-creation reads it (the review's guard below)
+    auto item_state = [](uint32_t pide, uint16_t bits) {
+        auto& is = comp(T_ITEMSTATE, pide, kItemStateSize);
+        std::memcpy(is.data() + 0x0E, &bits, 2);
+    };
     put(A, 2, SWORD, 1, 77);
+    item_state(77, 1u << 4);
     put(A, 0, WOOD, 9);
     auto r = run(SWORD, KILN_SLOT_ID(A, 2), 77, KILN_ITEMS_GEM_SLOT | KILN_ITEMS_GEM_SLOT_ANY);
     check(r.status == KILN_ITEMS_DONE && r.done == 1 && item_at(A, 2) == SWORD && pide_at(A, 2) == 900 &&
@@ -1103,6 +1109,7 @@ void replace_test() {
     r = run(WOOD, KILN_SLOT_ID(A, 0), 77, 0);
     check(r.status == KILN_ITEMS_REFUSED && count_at(A, 0) == 9, "replace: an item without an item entity is refused");
     put(A, 4, SWORD, 1, 55);
+    item_state(55, 1u << 4);
     g_add_fails = true;
     r = run(SWORD, KILN_SLOT_ID(A, 4), 55, 0);
     g_add_fails = false;
@@ -1113,6 +1120,67 @@ void replace_test() {
     r = run(SWORD, KILN_SLOT_ID(A, 4), 55, KILN_ITEMS_DRY_RUN);
     check(r.status == KILN_ITEMS_DONE && item_at(A, 4) == SWORD && pide_at(A, 4) == 55,
           "replace: a dry run in a full inventory says it would work (the freed slot) and changes nothing");
+
+    // Review (gem wave G4): a re-creation destroys the old item entity, so it never touches gear that is worn or held
+    // (the player may have equipped or picked it up after Gems.AddSocket read it) nor gear with a gem slot (a gem in it
+    // would be destroyed with its carrier). Checked on the job's step, before the transaction.
+    reset_world();
+    auto run_on = [&](uint32_t entity, uint64_t slot, uint32_t pide) {
+        g_ops.clear();
+        new (&tx) FakeTx();
+        g_oplist = reinterpret_cast<OpList*>(reinterpret_cast<uint8_t*>(&tx) + 0x100);
+        *g_oplist = {};
+        Job job;
+        job.r.size = sizeof(KilnItemsRequest);
+        job.r.flags = KILN_ITEMS_REPLACE | KILN_ITEMS_GEM_SLOT | KILN_ITEMS_GEM_SLOT_ANY;
+        job.r.entity = entity;
+        job.r.item = SWORD;
+        job.r.count = 1;
+        job.r.slot = slot;
+        job.r.pide = pide;
+        KilnItemsResult res{};
+        unsigned long code = 0;
+        check(run_job(a, job, reinterpret_cast<uint8_t*>(&tx), &res, &code), "replace guard: the job runs without a fault");
+        return res;
+    };
+    put(P, 7, SWORD, 1, 61);  // P's SlotSelection names P:7 as equipment[0] (reset_world)
+    item_state(61, 1u << 4);  // the guard must not depend on IsEquipped alone
+    r = run_on(P, KILN_SLOT_ID(P, 7), 61);
+    check(r.status == KILN_ITEMS_REFUSED && item_at(P, 7) == SWORD && pide_at(P, 7) == 61 && g_ops.empty(),
+          "replace guard: gear in a player's equipped slot is refused before the transaction (unequip first)");
+    put(PBAR, 3, SWORD, 1, 62);
+    item_state(62, 1u << 4);
+    {
+        auto& sel = comp(T_SEL, P, 216);
+        const uint32_t bar = PBAR;
+        std::memcpy(sel.data() + 0xa8, &bar, 4);  // the item in hand: PBAR:3
+        sel[0xac] = 3;
+    }
+    r = run_on(P, KILN_SLOT_ID(PBAR, 3), 62);
+    check(r.status == KILN_ITEMS_REFUSED && item_at(PBAR, 3) == SWORD && pide_at(PBAR, 3) == 62 && g_ops.empty(),
+          "replace guard: the item a player holds in hand is refused");
+    put(A, 1, SWORD, 1, 63);
+    item_state(63, 1u << 3);  // ItemState IsEquipped
+    r = run_on(A, KILN_SLOT_ID(A, 1), 63);
+    check(r.status == KILN_ITEMS_REFUSED && item_at(A, 1) == SWORD && pide_at(A, 1) == 63 && g_ops.empty(),
+          "replace guard: an item whose ItemState says IsEquipped is refused");
+    put(A, 3, SWORD, 1, 64);
+    item_state(64, 1u << 8);  // ItemState HasWeaponGemSlot
+    r = run_on(A, KILN_SLOT_ID(A, 3), 64);
+    check(r.status == KILN_ITEMS_REFUSED && item_at(A, 3) == SWORD && pide_at(A, 3) == 64 && g_ops.empty(),
+          "replace guard: an item that has a gem slot is refused (its gem would be destroyed with it)");
+    put(A, 6, SWORD, 1, 67);  // no ItemState: nothing to check against, so nothing is destroyed
+    r = run_on(A, KILN_SLOT_ID(A, 6), 67);
+    check(r.status == KILN_ITEMS_REFUSED && item_at(A, 6) == SWORD && pide_at(A, 6) == 67 && g_ops.empty(),
+          "replace guard: an item entity whose ItemState cannot be read is refused (fail closed)");
+    put(A, 5, SWORD, 1, 65);
+    item_state(65, (1u << 4) | (1u << 6));  // HasLevel, IsNew: an ordinary item
+    put(PBAR, 4, SWORD, 1, 66);             // on the action bar, not in hand
+    item_state(66, 1u << 4);
+    r = run_on(A, KILN_SLOT_ID(A, 5), 65);
+    const auto bar = run_on(P, KILN_SLOT_ID(PBAR, 4), 66);
+    check(r.status == KILN_ITEMS_DONE && pide_at(A, 5) != 65 && bar.status == KILN_ITEMS_DONE && pide_at(PBAR, 4) != 66,
+          "replace guard: ordinary gear in a chest or on a player's action bar (not in hand) is still re-created");
 }
 
 int main(int argc, char** argv) {

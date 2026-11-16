@@ -95,6 +95,17 @@ public sealed class GemSocketsTests
         Assert.Throws<ArgumentOutOfRangeException>(() => Gems.AllowSockets(GemSocketKinds.Rings, double.NaN));
     }
 
+    // Review: the allowance, the rolls and the forge mask belong to the mod on the calling thread (ModContext.CurrentMod,
+    // tick thread only). From another thread there is none: they would become Kiln's own and outlive the mod. So the
+    // call is tick-thread only (the KILN101 analyzer warns a mod that calls it elsewhere), not [AnyThread].
+    [Fact]
+    public void AllowSocketsIsTickThreadOnlyBecauseItsLifetimeIsTheCallingMods()
+    {
+        var m = typeof(Gems).GetMethod(nameof(Gems.AllowSockets))!;
+        Assert.NotNull(m.GetCustomAttributes(typeof(TickThreadOnlyAttribute), false).SingleOrDefault());
+        Assert.Empty(m.GetCustomAttributes(typeof(AnyThreadAttribute), false));
+    }
+
     [Fact]
     public void WithoutTheServicesAllowSocketsKeepsTheKindsAndSaysWhyNothingElseWorks()
     {

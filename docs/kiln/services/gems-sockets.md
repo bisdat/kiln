@@ -37,9 +37,10 @@ var back = await Gems.ReturnSocketedGems(player);
 ```
 
 - `Gems.AllowSockets(kinds, rollChance = 0)` lets gear of these kinds hold a gem while the calling mod is loaded (a later
-  call replaces this mod's; `GemSocketKinds.None` ends it; mods add up). Kinds: `Rings`, `Armour` (head, chest, hands,
-  legs, feet), `Shields`, `OtherGear` (tools, backpacks, gliders, instruments: a gem there runs only while the item sits
-  in an impact slot, a tool in the hand), `All`.
+  call replaces this mod's; `GemSocketKinds.None` ends it; mods add up). Call it in `OnLoad` or on the tick thread: that
+  is where Kiln knows the calling mod (from another thread the allowance would be Kiln's own and outlive the mod).
+  Kinds: `Rings`, `Armour` (head, chest, hands, legs, feet), `Shields`, `OtherGear` (tools, backpacks, gliders,
+  instruments: a gem there runs only while the item sits in an impact slot, a tool in the hand), `All`.
   - Server: `Gear.GemSlot` and `AddSocket` work on these kinds. With `rollChance` above 0 every new item of these kinds the
     game creates (loot, crafting, a give) rolls an empty socket with that chance; the highest chance any mod asks for
     wins. Weapons keep the game's own roll (a chance per rarity from its balancing data).
@@ -50,15 +51,18 @@ var back = await Gems.ReturnSocketedGems(player);
     to another server `Server` is false.
 - `Gems.SocketKinds`: the kinds any mod allows now.
 - `Gear.GemSlot` (Kiln.Items): a weapon gets an empty socket when the game's roll gave none; other gear when its kind is
-  allowed. Nothing happens to an item that already has one.
+  allowed and the server part works here (`GemSocketsSetup.Server`); otherwise the item is given without one, as
+  before. Nothing happens to an item that already has one.
 - `Gems.AddSocket(item)` (server, tick thread): the game cannot add a component to an existing item entity, so Kiln
   re-creates the item **in the same slot, in one inventory transaction** (the old item entity is taken and the new one
   created: both or neither). Kept: the item, its level, rarity, unlocked upgrades, durability (as a fraction of its max:
-  a broken item stays broken) and dye. Not kept: the item entity (anything keyed to the old one, such as Kiln.Saves'
-  instance data, stays with it; follow `GemSocketResult.After`), water in a can. Weapons are always accepted; other gear
-  needs its kind allowed. Refusals: `AlreadyHasSocket`, `KindNotAllowed` (with the call that allows it), `Equipped`
-  (unequip it first), `NotFound`, `NotGear` (gems, dyes and customization items never hold a gem), `Refused` (the game
-  said no, or the slot changed meanwhile), `Unavailable`.
+  a broken item stays broken) and dye. Not kept: the item entity (follow `GemSocketResult.After`; nothing keyed to the
+  old one moves: Kiln.Saves' instance data on it counts as destroyed, so a mod that keeps instance data on gear reads it
+  before and sets it on `After`), water in a can. Weapons are always accepted; other gear needs its kind allowed.
+  Refusals: `AlreadyHasSocket`, `KindNotAllowed` (with the call that allows it), `Equipped` (worn or held in the hand:
+  unequip it first), `NotFound`, `NotGear` (gems, dyes and customization items never hold a gem), `Refused` (the game
+  said no, or the item changed before the step it ran: moved, put on, taken in hand; kiln.items checks worn, held and
+  socketed again on that step), `Unavailable`.
 - `Gems.ReturnSocketedGems(owner)` (server, tick thread): the uninstall path below.
 
 ## For data packs
@@ -125,10 +129,12 @@ is why nothing happens until a mod asks.
 ## C (kiln.items v7)
 
 `native/core/abi/services/kiln_items.h` "gem sockets": `KILN_ITEMS_GEM_SLOT_ANY` (with `KILN_ITEMS_GEM_SLOT`: any gear),
-`KILN_ITEMS_REPLACE` (a give that first takes the item entity `pide` out of `slot` on the same transaction),
+`KILN_ITEMS_REPLACE` (a give that first takes the item entity `pide` out of `slot` on the same transaction; refused,
+nothing changed, when that item is worn or held, has a gem slot, or has no readable ItemState),
 `KILN_ITEMS_DYE` / `KILN_ITEMS_DURABILITY` with `KilnItemsRequestEx` (the re-created item's dye, and its durability as
 `DurabilityPercentageInit`, which the game's `item_durability_init` reads), and `socket_roll(owner, KilnItemsSocketRoll*)`
-(chances per kind: rings, armour, shields, other; `NULL` ends the owner's). The forge lists: kiln.ui.values'
+(chances per kind: rings, armour, shields, other; `NULL` ends the owner's; `KILN_ERR_UNAVAILABLE` is checked before the
+arguments, so an invalid roll is a probe that changes nothing). The forge lists: kiln.ui.values'
 `gemforge_sockets(owner, category_mask)` (`kiln_ui_values.h`).
 
 ## How it works (evidence)
@@ -140,7 +146,11 @@ is why nothing happens until a mod asks.
   `GEM_SLOT_ANY`, `gemSlotOverride` on a non-weapon, and the rolls. The kind comes from `ItemInfo.category` and
   `ItemInfo.equipment.slot` (`EquipmentSlotType`: 13-17 armour, 18 shield, 37 ring).
 - The override list has 8 inline entries; a re-created item adds the socket first, then `DurabilityPercentageInit`, then
-  `ColorPaletteItem`, each only while there is room.
+  `ColorPaletteItem`, each only while there is room. On server 26430253 createPide's own entries for a re-creation are at
+  most five (`UsedItem`, `ItemState`, `OwnerRelationship`, `Level`, `PerkContainerNew`; a give passes no fuel; a weapon
+  whose own roll gave a socket has a sixth and gets no second one), so all three fit. An entry the game already has
+  is pointed at Kiln's value, never written through. The game's save loader (`0x7abe80..0x7abebd`) builds
+  `DurabilityPercentageInit` the same way, as current / max (0..1).
 - equipment_impacts (`0x147330`) runs the gem of the item in each of its 11 impact slots (`0x146430`), category-blind;
   the save writer (`0x70894f`) and loader (`0x7ac159`) keep `WeaponGemSlot`, the gem id and the gem's level on any item;
   the server's socket action (`0x144bb0`) checks no carrier category (dossier `dev29/out/gem-system/DOSSIER.md` §6).

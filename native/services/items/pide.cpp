@@ -103,13 +103,15 @@ float roll_chance(SocketKind k) {
     return f;
 }
 
-// Sets an entry's 4-byte value, or appends {hash, data, 4} while the list has room. false: neither.
+// Points an existing entry at `data` (its old data may be the game's: an ItemInfo default or a shared buffer, so it is
+// never written through), or appends {hash, data, 4} while the list has room. false: neither.
 bool put4(Override* list, uint64_t& count, uint64_t cap, Override* existing, uint32_t hash, void* data) {
-    if (existing && existing->data && existing->size >= 4) {
-        std::memcpy(existing->data, data, 4);
+    if (existing) {
+        if (existing->size != 4) return false;  // another layout than the 4-byte one this build measured: left alone
+        existing->data = data;
         return true;
     }
-    if (existing || count >= cap) return false;
+    if (count >= cap) return false;
     list[count] = Override{hash, 0, data, 4};
     ++count;
     return true;
@@ -321,10 +323,11 @@ SocketKind socket_kind(uint8_t category, uint8_t equip_slot) {
 
 KilnResult pide_socket_roll(KilnOwner owner, const KilnItemsSocketRoll* roll) {
     if (roll) {
+        // availability first: a caller can ask "is it on?" with an invalid roll and change nothing (Kiln.Items does)
+        if (!pide_sockets_available()) return KILN_ERR_UNAVAILABLE;
         if (roll->size < sizeof(KilnItemsSocketRoll) || roll->reserved != 0) return KILN_ERR_INVALID_ARGUMENT;
         for (float f : {roll->rings, roll->armour, roll->shields, roll->other})
             if (!(f >= 0.0f && f <= 1.0f)) return KILN_ERR_INVALID_ARGUMENT;  // NaN fails too
-        if (!pide_sockets_available()) return KILN_ERR_UNAVAILABLE;
     }
     std::lock_guard lock(g_roll_mu);
     if (!roll || (roll->rings == 0 && roll->armour == 0 && roll->shields == 0 && roll->other == 0)) g_rolls.erase(owner);
