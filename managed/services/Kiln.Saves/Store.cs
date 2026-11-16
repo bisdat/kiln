@@ -59,6 +59,13 @@ internal sealed unsafe class WorldStore
     /// (tests count the writes and the forced writes of a save).</summary>
     internal static long FilesWritten, FilesForced;
 
+    /// <summary>Test seam: called before every file operation of the save path (<c>check</c>, <c>create</c>, <c>flush</c>,
+    /// <c>rename</c>, <c>read</c>, <c>delete</c>, <c>list</c>) with its name, on the thread that does it. Tests slow the
+    /// disk with it (issue #39: on a busy hard drive each of these can take seconds).</summary>
+    internal static Action<string>? IoHook;
+
+    private static void Io(string op) => IoHook?.Invoke(op);
+
     internal readonly EntityTable Entities;
 
     /// <summary>Data that stays with one item (InstanceData): bundles "instances/&lt;mod&gt;" and
@@ -465,12 +472,12 @@ internal sealed unsafe class WorldStore
         // staging, found nothing changed): writing it again would only change its creation time, which nothing reads.
         // Blobs are content-addressed (Put writes only a blob that is not on disk). So a crash at any point finds the same
         // files as after a rewrite: that manifest was renamed into place before this staging, as before.
-        var unchanged = _staged is { } last && last.Path == path && last.Content == content && File.Exists(path);
+        var unchanged = _staged is { } last && last.Path == path && last.Content == content && Exists(path);
         // The save request's staging of a generation with the bundles of the previous one (confirmed by this process, still
         // on disk) and no new blob: not forced to disk (the class remarks). The snapshot staging, a late staging and every
         // staging with a change force their write as before.
         var same = !unchanged && !snapshot && !late && fresh == 0 && _confirmed is { } c && c.Revision == gen - 1 &&
-                   c.Bundles == BundlesKey(list) && File.Exists(CommittedPath(c.Revision, c.Unix));
+                   c.Bundles == BundlesKey(list) && Exists(CommittedPath(c.Revision, c.Unix));
         if (!unchanged)
         {
             WriteAtomic(path, Encoding.UTF8.GetBytes(man.ToJsonString()), ref disk, force: !same);
@@ -526,7 +533,7 @@ internal sealed unsafe class WorldStore
     {
         var sha = Convert.ToHexStringLower(SHA256.HashData(data));
         var path = BlobPath(sha);
-        if (!File.Exists(path))
+        if (!Exists(path))
         {
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             WriteAtomic(path, data, ref disk);
@@ -576,12 +583,13 @@ internal sealed unsafe class WorldStore
         var sw = System.Diagnostics.Stopwatch.StartNew();
         if (unix == 0 && ReadHeader(SavesRuntime.WorldFile) is { } h && h.Revision == rev) unix = h.Unix;
         var pending = PendingPath(rev);
-        if (!File.Exists(pending)) Stage(rev, reason, late: true);  // the save began before Kiln.Saves was started
-        if (!File.Exists(pending)) return;
+        if (!Exists(pending)) Stage(rev, reason, late: true);  // the save began before Kiln.Saves was started
+        if (!Exists(pending)) return;
         var disk = new DiskTime();
         var same = false;
         try
         {
+            Io("read");
             var man = JsonNode.Parse(File.ReadAllBytes(pending))!.AsObject();
             man["state"] = "committed";
             man["worldUnix"] = unix;
@@ -590,8 +598,9 @@ internal sealed unsafe class WorldStore
             // its pending manifest was not (the class remarks). The first confirmation of a session and every change force.
             var bundles = BundlesKey(man["bundles"] as JsonObject);
             same = _forced != null && _confirmed is { } c && c.Revision == rev - 1 && c.Bundles == bundles &&
-                   File.Exists(CommittedPath(c.Revision, c.Unix));
+                   Exists(CommittedPath(c.Revision, c.Unix));
             WriteAtomic(CommittedPath(rev, unix), Encoding.UTF8.GetBytes(man.ToJsonString()), ref disk, force: !same);
+            Io("delete");
             File.Delete(pending);
             _confirmed = (rev, unix, bundles);
             if (!same) _forced = (rev, unix);
@@ -658,12 +667,14 @@ internal sealed unsafe class WorldStore
     {
         var tmp = $"{path}.tmp-{Environment.ProcessId}-{Interlocked.Increment(ref _tmpCounter)}";
         long t;
+        Io("create");
         using (var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 16))
         {
             fs.Write(data);
             if (force)
             {
                 t = System.Diagnostics.Stopwatch.GetTimestamp();
+                Io("flush");
                 fs.Flush(flushToDisk: true);
                 disk.FlushMs += System.Diagnostics.Stopwatch.GetElapsedTime(t).TotalMilliseconds;
                 Interlocked.Increment(ref FilesForced);
@@ -674,10 +685,17 @@ internal sealed unsafe class WorldStore
             }
         }
         t = System.Diagnostics.Stopwatch.GetTimestamp();
+        Io("rename");
         File.Move(tmp, path, overwrite: true);
         disk.RenameMs += System.Diagnostics.Stopwatch.GetElapsedTime(t).TotalMilliseconds;
         disk.Files++;
         Interlocked.Increment(ref FilesWritten);
+    }
+
+    private static bool Exists(string path)
+    {
+        Io("check");
+        return File.Exists(path);
     }
 
     internal readonly record struct Header(Guid Guid, uint Revision, uint Unix);
@@ -687,6 +705,7 @@ internal sealed unsafe class WorldStore
         if (file == null) return null;
         try
         {
+            Io("read");
             using var f = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
             Span<byte> b = stackalloc byte[0x24];
             if (f.Read(b) != b.Length || b[0] != (byte)'S' || b[1] != (byte)'V' || b[2] != (byte)'2' || b[3] != (byte)'C') return null;
@@ -705,6 +724,7 @@ internal sealed unsafe class WorldStore
         try
         {
             var dir = Path.Combine(Root, "manifests");
+            Io("list");
             var all = ListManifests(dir);
             var keep = new HashSet<string>(StringComparer.Ordinal);
             foreach (var m in all.Where(m => !m.Pending).OrderByDescending(m => m.Revision).Take(KeepGenerations)) keep.Add(m.Path);
@@ -712,6 +732,7 @@ internal sealed unsafe class WorldStore
             var wanted = new HashSet<(uint, uint)>();
             if (Saves.SaveDirectory is { } sd && Directory.Exists(sd))
             {
+                Io("list");
                 foreach (var f in Directory.EnumerateFiles(sd, "world*.ksd").Concat(
                              Directory.Exists(Path.Combine(sd, "backup")) ? Directory.EnumerateFiles(Path.Combine(sd, "backup")) : []))
                     if (ReadHeader(f) is { } h && h.Guid.ToString() == WorldId) wanted.Add((h.Revision, h.Unix));
@@ -722,6 +743,7 @@ internal sealed unsafe class WorldStore
             int dropped = 0, blobsDropped = 0;
             foreach (var m in all.Where(m => !keep.Contains(m.Path)))
             {
+                Io("delete");
                 File.Delete(m.Path);
                 dropped++;
             }
@@ -730,6 +752,7 @@ internal sealed unsafe class WorldStore
             {
                 try
                 {
+                    Io("read");
                     if (JsonNode.Parse(File.ReadAllBytes(p))?["bundles"] is JsonObject list)
                         foreach (var (_, e) in list)
                             if (e?["sha256"]?.GetValue<string>() is { } sha) referenced.Add(sha);
@@ -740,6 +763,7 @@ internal sealed unsafe class WorldStore
                 }
             }
             var cutoff = DateTime.UtcNow - OrphanAge;
+            Io("list");
             foreach (var f in Directory.EnumerateFiles(Path.Combine(Root, "blobs"), "*", SearchOption.AllDirectories))
             {
                 var name = Path.GetFileName(f);
@@ -747,6 +771,7 @@ internal sealed unsafe class WorldStore
                 var sha = tmp ? "" : Path.GetFileNameWithoutExtension(name);
                 if ((tmp || !referenced.Contains(sha)) && File.GetLastWriteTimeUtc(f) < cutoff)
                 {
+                    Io("delete");
                     File.Delete(f);
                     blobsDropped++;
                 }
