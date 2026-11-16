@@ -20,7 +20,8 @@ struct Start { Record record; bool off; };
 // on a second death at the SAME stage. Guarded -> retry once the guarded start has run
 // for a minute (finish); a guarded start that ends sooner stays guarded. Retry -> trying,
 // preserving the first death. A successful overlay frame resets trying (finish); locked
-// stays locked. Deleting the record or changing the graphics-wrapper set resets all history.
+// stays locked. Deleting the record or changing the graphics-wrapper identity resets all history.
+// Versioned identities also give old presence-only records one fresh attempt after an update.
 inline Start begin(Record r, const std::string& modules) {
     if (r.modules != modules) r = {};
     r.modules = modules;

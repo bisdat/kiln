@@ -6,6 +6,7 @@
 #include "services/kiln_caps.h"
 #include "ui.h"
 #include "overlay_guard_runtime.h"
+#include "overlay_wrappers.h"
 namespace kui {
 namespace {
 std::mutex mu;
@@ -34,26 +35,21 @@ std::filesystem::path api_path(int kind) {
     if (g_api->path(kind, b, sizeof b, &n) != KILN_OK || !n || n >= sizeof b) return {};
     return std::filesystem::path(std::u8string(b, b + n));
 }
-// Bounded known-wrapper set, no recursive disk scan. Presence and loaded presence use
-// the same bit so loading an already installed DLL does not spuriously grant a retry.
+// Only known wrapper names, with full loaded paths for copies outside the two install folders.
 std::string modules(bool& streamline) {
-    auto game = api_path(KILN_PATH_GAME);
-    std::string set = "m";
-    const wchar_t* names[] = {L"sl.interposer.dll", L"nvngx_dlss.dll", L"dxgi.dll", L"ReShade64.dll", L"opengl32.dll", L"powrprof.dll"};
-    // dxgi, opengl32 and powrprof are also Windows' own DLLs: only a FILE of that name next to the game is a wrapper.
-    // Whether the system's copy is loaded yet when this runs differs from start to start and would reset the history.
-    const bool system_name[] = {false, false, true, false, true, true};
-    for (unsigned i = 0; i < 6; ++i) {
-        bool found = !system_name[i] && GetModuleHandleW(names[i]) != nullptr;
-        if (!game.empty()) {
-            std::error_code ec;
-            found |= std::filesystem::is_regular_file(game / names[i], ec);
-            found |= std::filesystem::is_regular_file(game / L"Streamline" / names[i], ec);
+    overlay_guard::LoadedWrappers loaded;
+    for (unsigned i = 0; i < overlay_guard::wrapper_names.size(); ++i) {
+        if (i == 1 || overlay_guard::system_names[i]) continue;
+        if (auto h = GetModuleHandleW(overlay_guard::wrapper_names[i])) {
+            loaded[i] = overlay_guard::wrapper_names[i];
+            std::wstring file(32768, L'\0');
+            const DWORD n = GetModuleFileNameW(h, file.data(), DWORD(file.size()));
+            if (n && n < file.size()) { file.resize(n); loaded[i] = file; }
         }
-        if (found) set += char('a' + i);
-        if (!i) streamline = found;
     }
-    return set;
+    const auto found = overlay_guard::detect_wrappers(api_path(KILN_PATH_GAME), loaded);
+    streamline = found.streamline;
+    return found.identity;
 }
 void save() {
     if (path.empty()) return;
@@ -130,6 +126,8 @@ bool overlay_guard_start() noexcept {
             CloseHandle(h);
             if (!ok || !overlay_guard::parse(std::string(b, n), record)) error();
         } else if (GetLastError() != ERROR_FILE_NOT_FOUND && GetLastError() != ERROR_PATH_NOT_FOUND) error();
+        if (!record.modules.empty() && record.modules != wrapper_set)
+            logf(KILN_LOG_INFO, "ui: overlay crash guard: graphics wrappers changed or the guard was updated; clearing earlier startup failures");
         auto start = overlay_guard::begin(record, wrapper_set);
         apply_mode(start.off);
         record = start.record;
