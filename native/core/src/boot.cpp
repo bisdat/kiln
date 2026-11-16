@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // kiln_boot: called by the dinput8 proxy on the main thread, at the game's entry point, before any game code ran.
-//   paths, log, kiln.json, profile (kiln.profile), image + side, build record, native mods "early", other loaders'
-//   byte scans (foreign_scan.h), sigdb, hooks,
+//   paths, log, kiln.json, profile (kiln.profile), image + side, build record, other loaders' byte scans
+//   (foreign_scan.h), native mods "early", sigdb, hooks,
 //   in-core services, service DLLs + plugins, native mods "boot", native "world" armed, .NET host, chain DLLs named in
 //   chain.ini [late], state/boot.json, state/hooks.json.
 #include <atomic>
@@ -566,11 +566,10 @@ void boot() {
     // finish looking before Kiln hooks anything and before the early native mods start: a hook over a prologue, Kiln's
     // or an early native mod's (Auto Doors 1.1.0 hooks the text function at rva 0xaff9f0 that the addon's native UI
     // scans for), would hide that function from it.
-    if (verified || config().policy_any) {
-        progress_state::step("native-early", "Waiting for other loaders' code scans");
-        foreign::wait_for_scanners(g_boot_info.addon_log_size);
-        progress_state::step("native-early", "Loading early native mods");
-    }
+    // Native policy defaults to always, including safe idle on an unverified build. The scanner gate must too.
+    progress_state::step("native-early", "Waiting for other loaders' code scans");
+    foreign::wait_for_scanners(g_boot_info.addon_log_size);
+    progress_state::step("native-early", "Loading early native mods");
     native_mods::run_early();
     // kiln.hooks for early plugins that hook game code (kiln-shroudforge's native runtime does it while it initialises);
     // taken away again below when this start is safe idle.

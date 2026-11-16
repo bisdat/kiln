@@ -656,13 +656,15 @@ Once a guarded start has run for a minute, the next start tries the overlay agai
 (the log says so; automatic Streamline protection still takes precedence). A second interrupted attempt at the same stage keeps it off. To re-enable it, close the
 game and delete `kiln/state/overlay-start.guard`. Removing a detected graphics wrapper
 also permits a new attempt, as does adding or replacing one. The guard compares the paths,
-contents, sizes and write times of `sl.interposer.dll`, `dxgi.dll`, `ReShade64.dll`,
+sizes and the first and last 64 KiB of `sl.interposer.dll`, `dxgi.dll`, `ReShade64.dll`,
 `opengl32.dll`, and `powrprof.dll` directly in the game folder or its `Streamline/` folder.
 Loaded Streamline and ReShade copies also count, once per file; loaded Windows system copies
 of dxgi/opengl32/powrprof do not. The game's `nvngx_dlss.dll` and leftover Streamline helpers
 do not count as wrappers. It does not scan arbitrary subfolders. Older presence-only guard
-records get one fresh attempt after this update; the new record still guards repeated
-interrupted starts with the same wrappers. Unknown/unreadable records permit normal startup. File errors are logged once
+records get one fresh attempt after this update. Only one wrapper-change recovery is allowed
+until an overlay frame succeeds; further changes keep the failure history. Timestamp-only
+changes do not grant a recovery. A same-size replacement that changes only unsampled bytes
+may need the guard deleted manually. Unknown/unreadable records permit normal startup. File errors are logged once
 and do not prevent startup. This guard does not make Streamline and the overlay compatible.
 
 

@@ -14,16 +14,22 @@ struct Record {
     Stage stage = Stage::begun, failed_stage = Stage::begun;
     unsigned failures = 0;
     std::string modules;
+    bool wrapper_retry = false;
 };
 struct Start { Record record; bool off; };
 // No record/complete -> trying. Unfinished trying -> guarded (one death), or locked
 // on a second death at the SAME stage. Guarded -> retry once the guarded start has run
 // for a minute (finish); a guarded start that ends sooner stays guarded. Retry -> trying,
 // preserving the first death. A successful overlay frame resets trying (finish); locked
-// stays locked. Deleting the record or changing the graphics-wrapper identity resets all history.
-// Versioned identities also give old presence-only records one fresh attempt after an update.
+// stays locked. A wrapper change permits one recovery until a drawn frame succeeds. Further changes preserve the
+// history, so a wrapper updated on every start cannot keep crashing forever. Deleting the record resets it all.
+// Versioned identities give old presence-only records one fresh attempt after an update too.
 inline Start begin(Record r, const std::string& modules) {
-    if (r.modules != modules) r = {};
+    if (r.modules != modules && !r.wrapper_retry) {
+        const bool had_identity = !r.modules.empty();
+        r = {};
+        r.wrapper_retry = had_identity;
+    }
     r.modules = modules;
     if (r.phase == Phase::trying) {
         r.failures = r.failures && r.failed_stage == r.stage ? 2 : 1;
@@ -37,7 +43,7 @@ inline Start begin(Record r, const std::string& modules) {
 }
 inline Record finish(Record r) {
     if (r.phase == Phase::guarded) r.phase = Phase::retry;
-    else if (r.phase == Phase::trying) { r.phase = Phase::complete; r.failures = 0; }
+    else if (r.phase == Phase::trying) { r.phase = Phase::complete; r.failures = 0; r.wrapper_retry = false; }
     return r;
 }
 // A start that has not drawn yet is fine too when the game kept presenting through Kiln's hooks for a while after
@@ -56,19 +62,22 @@ inline Record rearm(Record r) {
     return r;
 }
 inline std::string encode(const Record& r) {
-    return "1 " + std::to_string(unsigned(r.phase)) + " " + std::to_string(unsigned(r.stage)) + " " +
-        std::to_string(unsigned(r.failed_stage)) + " " + std::to_string(r.failures) + " " + r.modules + "\n";
+    return "2 " + std::to_string(unsigned(r.phase)) + " " + std::to_string(unsigned(r.stage)) + " " +
+        std::to_string(unsigned(r.failed_stage)) + " " + std::to_string(r.failures) + " " +
+        std::to_string(unsigned(r.wrapper_retry)) + " " + r.modules + "\n";
 }
 // First field is the format version. Reject partial, oversized, future or malformed records.
 inline bool parse(const std::string& text, Record& out) {
     out = {};
     if (text.size() > 512) return false;
     std::istringstream in(text);
-    unsigned version, phase, stage, failed, count;
+    unsigned version, phase, stage, failed, count, wrapper_retry = 0;
     std::string modules, extra;
-    if (!(in >> version >> phase >> stage >> failed >> count >> modules) || (in >> extra) ||
-        version != 1 || phase > 4 || stage > 5 || failed > 5 || count > 2 || modules.size() > 128) return false;
-    out = {Phase(phase), Stage(stage), Stage(failed), count, modules};
+    if (!(in >> version >> phase >> stage >> failed >> count) || (version != 1 && version != 2)) return false;
+    if (version == 2 && (!(in >> wrapper_retry) || wrapper_retry > 1)) return false;
+    if (!(in >> modules) || (in >> extra) || phase > 4 || stage > 5 || failed > 5 || count > 2 || modules.size() > 128)
+        return false;
+    out = {Phase(phase), Stage(stage), Stage(failed), count, modules, wrapper_retry != 0};
     return true;
 }
 } // namespace kui::overlay_guard

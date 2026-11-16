@@ -5,9 +5,13 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <vector>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 namespace kui::overlay_guard {
 inline constexpr std::array<const wchar_t*, 6> wrapper_names = {
@@ -16,14 +20,47 @@ inline constexpr std::array<const wchar_t*, 6> wrapper_names = {
 inline constexpr std::array<bool, 6> system_names = {false, false, true, false, true, true};
 using LoadedWrappers = std::array<std::filesystem::path, wrapper_names.size()>;
 struct Wrappers { std::string identity; bool streamline = false; };
+inline std::string wrapper_path_key(std::u8string name) {
+    for (auto& c : name) if (c == u8'\\') c = u8'/';
+    for (auto& c : name) if (c >= u8'A' && c <= u8'Z') c += u8'a' - u8'A';
+    if (name.starts_with(u8"//?/unc/")) name = u8"//" + name.substr(8);
+    else if (name.starts_with(u8"//?/")) name.erase(0, 4);
+    return std::string(name.begin(), name.end());
+}
+// Sample the first and last 64 KiB. Startup I/O stays bounded even for a huge or growing file.
+template <class Bytes>
+bool wrapper_contents(std::istream& in, uint64_t size, Bytes&& bytes) {
+    if (!in || size > uint64_t((std::numeric_limits<std::streamoff>::max)())) return false;
+    constexpr uint64_t sample = 64 * 1024;
+    std::array<char, 16384> buffer;
+    auto read = [&](uint64_t at, uint64_t count) {
+        in.seekg(std::streamoff(at));
+        if (!in) return false;
+        while (count) {
+            const size_t n = size_t((std::min)(count, uint64_t(buffer.size())));
+            in.read(buffer.data(), std::streamsize(n));
+            if (in.gcount()) bytes(buffer.data(), size_t(in.gcount()));
+            if (in.gcount() != std::streamsize(n)) return false;
+            count -= n;
+        }
+        return true;
+    };
+    const uint64_t first = (std::min)(size, sample), last = (std::min)(size - first, sample);
+    return read(0, first) && (!last || read(size - last, last));
+}
 // Canonical paths deduplicate an installed DLL and its loaded copy. Windows paths are
 // case insensitive; neither a different spelling nor load timing changes the identity.
 inline std::string wrapper_path(const std::filesystem::path& file) {
     std::error_code ec;
     auto canonical = std::filesystem::weakly_canonical(file, ec);
-    auto name = (ec ? file.lexically_normal() : canonical).generic_u8string();
-    for (auto& c : name) if (c >= u8'A' && c <= u8'Z') c += u8'a' - u8'A';
-    return std::string(name.begin(), name.end());
+    auto path = ec ? file.lexically_normal() : canonical;
+#ifdef _WIN32
+    // Fold native UTF-16 before encoding, including non-ASCII Windows folder names.
+    auto wide = path.wstring();
+    CharLowerBuffW(wide.data(), DWORD(wide.size()));
+    path = std::filesystem::path(wide);
+#endif
+    return wrapper_path_key(path.generic_u8string());
 }
 inline Wrappers detect_wrappers(const std::filesystem::path& game, const LoadedWrappers& loaded = {}) {
     Wrappers out;
@@ -57,8 +94,8 @@ inline Wrappers detect_wrappers(const std::filesystem::path& game, const LoadedW
         if (!i) out.streamline = found;
     }
     std::sort(files.begin(), files.end(), [](const File& a, const File& b) { return a.name < b.name; });
-    // FNV-1a is a change detector, not an authenticity check. Stream the few known files
-    // with bounded memory: content catches replacements even when size and time match.
+    // FNV-1a is a change detector, not an authenticity check. Size and sampled contents catch
+    // ordinary replacements; a timestamp-only touch does not grant another crashing attempt.
     uint64_t hash = UINT64_C(14695981039346656037);
     auto bytes = [&](const char* data, size_t size) {
         for (size_t i = 0; i < size; ++i) { hash ^= static_cast<unsigned char>(data[i]); hash *= UINT64_C(1099511628211); }
@@ -70,13 +107,10 @@ inline Wrappers detect_wrappers(const std::filesystem::path& game, const LoadedW
     for (const auto& file : files) {
         number(file.name.size()); bytes(file.name.data(), file.name.size());
         std::error_code ec;
-        number(std::filesystem::file_size(file.path, ec));
-        const auto time = std::filesystem::last_write_time(file.path, ec);
-        number(ec ? 0 : uint64_t(time.time_since_epoch().count()));
+        const auto size = std::filesystem::file_size(file.path, ec);
+        number(size);
         std::ifstream in(file.path, std::ios::binary);
-        std::array<char, 16384> buffer;
-        while (in.read(buffer.data(), buffer.size()) || in.gcount()) bytes(buffer.data(), size_t(in.gcount()));
-        number(in.eof() ? 1 : 0); // unreadable files have a stable identity too
+        number(wrapper_contents(in, size, bytes) ? 1 : 0); // unreadable files have a stable identity too
     }
     std::ostringstream encoded;
     encoded << "w2-" << std::hex << hash;

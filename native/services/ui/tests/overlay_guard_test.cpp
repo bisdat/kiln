@@ -87,6 +87,60 @@ int main() {
         ++checks;
         if (!b) { ++failures; std::printf("FAIL: %s\n", name); }
     };
+    // A wrapper updater must not grant an unlimited sequence of crashing attempts.
+    {
+        auto first = begin({}, "w2-churn0").record;
+        first.stage = Stage::device;
+        auto changed = begin(first, "w2-churn1");
+        expect(!changed.off, "one wrapper change grants recovery");
+        Record persisted;
+        expect(parse(encode(changed.record), persisted) && persisted.wrapper_retry,
+               "wrapper recovery survives persistence");
+        expect(idle(persisted).wrapper_retry, "an idle start does not renew wrapper recovery");
+        auto drawn = finish(persisted);
+        expect(!drawn.wrapper_retry && !begin(drawn, "w2-churn2").off,
+               "a successfully drawn frame renews wrapper recovery");
+        persisted.stage = Stage::device;
+        auto guarded = begin(persisted, "w2-churn2");
+        expect(guarded.off, "another wrapper change cannot erase the recovery crash");
+        auto retry = begin(finish(guarded.record), "w2-churn3").record;
+        retry.stage = Stage::device;
+        auto locked = begin(retry, "w2-churn4");
+        expect(locked.off && locked.record.phase == Phase::locked, "changing wrappers still locks repeated crashes");
+        expect(begin(locked.record, "w2-churn5").off, "further changes cannot bypass a used recovery");
+        expect(!parse("2 1 0 0 0 2 w2-a\n", persisted), "an invalid recovery flag is rejected");
+        expect(!parse("2 1 0 0 0\n", persisted), "a missing recovery flag is rejected");
+        expect(parse("1 4 3 3 2 mb\n", persisted) && !persisted.wrapper_retry,
+               "old records can use one wrapper recovery");
+    }
+    {
+        const std::string large(1024 * 1024, 'x');
+        std::istringstream in(large);
+        size_t read = 0;
+        const bool ok = wrapper_contents(in, large.size(), [&](const char*, size_t n) { read += n; });
+        expect(ok && read <= 128 * 1024, "wrapper content reads are capped at 128 KiB per file");
+    }
+    for (size_t size : {0u, 1u, 65535u, 65536u, 65537u, 131072u, 131073u, 1048576u}) {
+        std::string data(size, 'a');
+        if (size) { data.front() = 'b'; data.back() = 'c'; }
+        std::istringstream in(data);
+        std::string sampled;
+        const bool ok = wrapper_contents(in, size, [&](const char* b, size_t n) { sampled.append(b, n); });
+        const auto expected = size <= 131072 ? data : data.substr(0, 65536) + data.substr(size - 65536);
+        expect(ok && sampled == expected, "bounded reads include the exact prefix and suffix without overlap");
+    }
+    {
+        std::istringstream truncated("short");
+        expect(!wrapper_contents(truncated, 100, [](const char*, size_t) {}), "a truncated file is not a complete sample");
+        std::istringstream oversized("short");
+        size_t read = 0;
+        expect(!wrapper_contents(oversized, UINT64_MAX, [&](const char*, size_t n) { read += n; }) && !read,
+               "an unknown or unrepresentable size cannot trigger an unbounded read");
+    }
+    expect(wrapper_path_key(u8"//?/C:/Möds/sl.interposer.dll") == wrapper_path_key(u8"C:/Möds/sl.interposer.dll"),
+           "extended drive paths use the same identity");
+    expect(wrapper_path_key(u8"\\\\?\\UNC\\host\\Möds\\ReShade64.dll") == wrapper_path_key(u8"//host/Möds/ReShade64.dll"),
+           "extended UNC paths use the same identity");
     const auto root = std::filesystem::temp_directory_path() /
         ("kiln-overlay-guard-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     std::filesystem::create_directories(root / "Streamline");
@@ -108,6 +162,9 @@ int main() {
     write(root / "powrprof.dll", "wrapper two"); // same size, same timestamp, different contents
     std::filesystem::last_write_time(root / "powrprof.dll", timestamp);
     const auto replaced = detect_wrappers(root);
+    std::filesystem::last_write_time(root / "powrprof.dll", timestamp + std::chrono::seconds(1));
+    expect(detect_wrappers(root).identity == replaced.identity, "a write-time-only change does not grant recovery");
+    std::filesystem::last_write_time(root / "powrprof.dll", timestamp);
     Record locked{Phase::locked, Stage::device, Stage::device, 2, installed.identity};
     expect(!begin(locked, replaced.identity).off, "replacing a wrapper permits a new attempt");
     expect(begin(locked, installed.identity).off, "the same wrapper remains locked");
@@ -162,6 +219,13 @@ int main() {
     loaded[3] = root / "external/ReShade64.dll";
     const auto reshade = detect_wrappers(root, loaded);
     expect(!reshade.streamline && reshade.identity != bare.identity, "a loaded ReShade copy is still a wrapper");
+    std::filesystem::create_directories(root / u8"Möds");
+    const auto unicode_file = root / u8"Möds/ReShade64.dll";
+    write(unicode_file, "a wrapper in a non-ASCII folder");
+    loaded[3] = unicode_file;
+    const auto unicode = detect_wrappers(root, loaded);
+    expect(unicode.identity != bare.identity && unicode.identity == detect_wrappers(root, loaded).identity,
+           "a non-ASCII loaded path can be read and remains stable");
     // Adding, removing or replacing wrappers resets every phase. It earns only one
     // attempt: after persistence, another death with the same set guards and then locks.
     for (const auto& before : {bare.identity, installed.identity, sl_disk.identity, both.identity}) {

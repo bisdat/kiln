@@ -31,9 +31,12 @@ void error() {
     }
 }
 std::filesystem::path api_path(int kind) {
-    char b[2048]; size_t n = 0;
-    if (g_api->path(kind, b, sizeof b, &n) != KILN_OK || !n || n >= sizeof b) return {};
-    return std::filesystem::path(std::u8string(b, b + n));
+    size_t n = 0;
+    if (g_api->path(kind, nullptr, 0, &n) != KILN_ERR_BUFFER_TOO_SMALL || !n || n > 128 * 1024) return {};
+    std::u8string b(n, u8'\0');
+    if (g_api->path(kind, reinterpret_cast<char*>(b.data()), b.size(), &n) != KILN_OK || !n || n > b.size()) return {};
+    b.resize(n);
+    return std::filesystem::path(b);
 }
 // Only known wrapper names, with full loaded paths for copies outside the two install folders.
 std::string modules(bool& streamline) {
@@ -127,7 +130,9 @@ bool overlay_guard_start() noexcept {
             if (!ok || !overlay_guard::parse(std::string(b, n), record)) error();
         } else if (GetLastError() != ERROR_FILE_NOT_FOUND && GetLastError() != ERROR_PATH_NOT_FOUND) error();
         if (!record.modules.empty() && record.modules != wrapper_set)
-            logf(KILN_LOG_INFO, "ui: overlay crash guard: graphics wrappers changed or the guard was updated; clearing earlier startup failures");
+            logf(KILN_LOG_INFO, record.wrapper_retry
+                ? "ui: overlay crash guard: graphics wrappers changed again before an overlay frame succeeded; keeping earlier startup failures"
+                : "ui: overlay crash guard: graphics wrappers changed or the guard was updated; allowing one fresh startup attempt");
         auto start = overlay_guard::begin(record, wrapper_set);
         apply_mode(start.off);
         record = start.record;
