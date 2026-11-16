@@ -8,6 +8,7 @@
 #include <functional>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <regex>
 #include <set>
 
@@ -15,6 +16,9 @@
 #include "api.h"
 #include "chain_status.h"
 #include "config.h"
+#include "compat.h"
+#include "../../plugins/compat/first_pass.h"
+#include "../../plugins/shroudtopia/src/own_loader.h"
 #include "crash.h"
 #include "image.h"
 #include "kiln_native.h"
@@ -69,6 +73,8 @@ struct Mod {
     std::vector<std::pair<std::string, semver::Range>> incompatible;
     std::vector<Dll> dlls;
     St state = St::Pending;
+    std::optional<compat::Rule> wait_rule;
+    bool phase_reached = false;
     std::string reason;
     std::vector<std::string> notes;
     int load_index = -1;
@@ -108,6 +114,8 @@ struct LateDll {
 std::vector<LateDll> g_late;
 bool g_late_collected = false;
 bool g_late_ran = false;
+first_pass::Channel g_first_pass;
+bool g_defer_ready = false, g_defer_worker = false;
 
 void fail(Mod& m, St st, std::string reason) {
     m.state = st;
@@ -837,11 +845,14 @@ void run_phase(uint32_t phase) {
     int n = 0;
     for (Mod* m : g_order[phase]) {
         if (m->state != St::Pending) continue;
+        m->phase_reached = true;
+        if (m->wait_rule) continue;
         load_mod(*m, phase);
         ++n;
     }
     if (n) KLOG_I("native: phase %s: %d mod(s) handled", kPhases[phase], n);
     write_state();
+    if (g_defer_ready) start_deferred();
 }
 
 const char* const kChainSources[] = {"chain", "profile", "emf"};
@@ -935,7 +946,124 @@ void discover(bool verified) {
     write_state();
 }
 
-void run_early() { run_phase(KILN_NATIVE_PHASE_EARLY); }
+// native-defer:begin
+bool ordered_after(const Mod& m, const Mod& d) {
+    if (d.phase > m.phase) return false;
+    const auto has = [](const auto& ids, const auto& id) { return std::find(ids.begin(), ids.end(), id) != ids.end(); };
+    return has(m.needs, d.id) || has(m.after, d.id) || has(d.before, m.id);
+}
+
+// The same load_mod path as each normal phase. Waiting and deferred loads run off the game thread.
+DWORD WINAPI deferred_main(void*) {
+    for (;;) {
+        bool waiting = false, changed = false;
+        {
+            std::lock_guard lock(g_mutex);
+            for (uint32_t phase = KILN_NATIVE_PHASE_EARLY; phase <= KILN_NATIVE_PHASE_WORLD; ++phase) {
+                for (Mod* m : g_order[phase]) {
+                    if (m->state != St::Pending || !m->phase_reached || !m->wait_rule) continue;
+                    const auto decision = g_first_pass.decision(m->wait_rule->max_wait_ms);
+                    if (decision == first_pass::Decision::Wait || std::any_of(g_mods.begin(), g_mods.end(), [&](const Mod& d) {
+                        return d.state == St::Pending && d.wait_rule && ordered_after(*m, d);
+                    })) { waiting = true; continue; }
+                    if (decision == first_pass::Decision::Cancel) {
+                        fail(*m, St::Skipped, "Shroudtopia is stopping; native startup canceled");
+                        changed = true;
+                        continue;
+                    }
+                    const auto started = g_first_pass.started();
+                    const auto elapsed = started ? GetTickCount64() - started : 0;
+                    if (decision == first_pass::Decision::Timeout)
+                        KLOG_W("native %s: Shroudtopia's first pass did not finish within %u ms; starting anyway", m->id.c_str(),
+                               m->wait_rule->max_wait_ms);
+                    load_mod(*m, phase);
+                    if (m->state == St::Loaded)
+                        KLOG_I("native %s started %s, %llu ms", m->id.c_str(),
+                               decision == first_pass::Decision::Complete ? "after Shroudtopia's first pass" :
+                               decision == first_pass::Decision::Timeout ? "after the Shroudtopia wait timed out" :
+                               "without a Shroudtopia host wait", static_cast<unsigned long long>(elapsed));
+                    changed = true;
+                }
+            }
+            if (changed) write_state();
+            if (!waiting) { g_defer_worker = false; return 0; }
+        }
+        Sleep(25);  // no native loader lock while the host is running its pass
+    }
+}
+// native-defer:end
+
+void run_early() {
+    compat::Facts facts;
+    const auto rules = compat::native_wait_rules(&facts);
+    if (rules.empty()) { run_phase(KILN_NATIVE_PHASE_EARLY); return; }
+    std::error_code ec;
+    bool host = config().plugins && (g_verified || config().policy_any) &&
+                fs::is_regular_file(paths().plugins / L"kiln-shroudtopia.dll", ec);
+    if (!host && config().plugins && (g_verified || config().policy_any)) {
+        for (const auto& e : profile::state().mods[KILN_PROFILE_KIND_PLUGIN])
+            if (e.enabled && lower(to_wide(e.path)).ends_with(L"\\kiln-shroudtopia.dll")) host = true;
+    }
+    if (host && !kshroud::own_loader_in_process(paths().game).empty()) host = false;
+    {
+        std::lock_guard lock(g_mutex);
+        bool channel = false;
+        for (Mod& m : g_mods) {
+            if (m.state != St::Pending || m.phase == KILN_NATIVE_PHASE_DLLMAIN) continue;
+            compat::Facts own;
+            own.mods.push_back("native:" + m.id);
+            for (const auto& d : m.dlls) own.modules.push_back(u8(fs::path(to_wide(d.file)).filename()));
+            const auto* rule = compat::native_defer_rule(rules, facts, own, host);
+            if (!rule) continue;
+            if (!channel && !(channel = g_first_pass.open(true))) {
+                KLOG_W("native %s: cannot create the Shroudtopia first-pass wait; starting in its normal phase", m.id.c_str());
+                continue;
+            }
+            m.wait_rule = *rule;
+            m.notes.push_back("waits for Shroudtopia's first pass (" + rule->target.value.substr(12) + " is on)");
+            KLOG_I("native %s %s", m.id.c_str(), m.notes.back().c_str());
+        }
+        // Keep declared load dependencies when their predecessor waits, including across later phases.
+        bool changed;
+        do {
+            changed = false;
+            for (Mod& m : g_mods) {
+                if (m.state != St::Pending || m.wait_rule || m.phase == KILN_NATIVE_PHASE_DLLMAIN) continue;
+                for (const Mod& d : g_mods) {
+                    if (!d.wait_rule || !ordered_after(m, d)) continue;
+                    m.wait_rule = d.wait_rule;
+                    m.notes.push_back("waits for native " + d.id + " after Shroudtopia's first pass");
+                    KLOG_I("native %s %s", m.id.c_str(), m.notes.back().c_str());
+                    changed = true;
+                    break;
+                }
+            }
+        } while (changed);
+    }
+    run_phase(KILN_NATIVE_PHASE_EARLY);
+    start_deferred();  // watch the host as soon as it starts, even if another plugin callback blocks
+}
+
+void start_deferred() {
+    std::lock_guard lock(g_mutex);
+    if (g_defer_worker) return;
+    bool any = false;
+    for (const Mod& m : g_mods) any |= m.state == St::Pending && m.phase_reached && m.wait_rule.has_value();
+    if (!any) return;
+    g_defer_worker = true;
+    HANDLE worker = CreateThread(nullptr, 0, &deferred_main, nullptr, 0, nullptr);
+    if (worker) { CloseHandle(worker); return; }
+    KLOG_W("native: cannot start the Shroudtopia wait worker; starting the waiting natives now");
+    g_first_pass.bypass();
+    deferred_main(nullptr);
+}
+
+void plugins_ready() {
+    std::lock_guard lock(g_mutex);
+    g_defer_ready = true;
+    g_first_pass.absent();  // every on_ready returned; an absent/failed/idle host cannot start a pass
+    start_deferred();
+}
 
 void run_late() {
     std::lock_guard lock(g_mutex);
@@ -1060,6 +1188,7 @@ std::vector<LateRow> late_rows() {
 }
 
 void run_boot() {
+    std::lock_guard lock(g_mutex);
     g_hooks = hooks_enabled();
     run_phase(KILN_NATIVE_PHASE_BOOT);
 }

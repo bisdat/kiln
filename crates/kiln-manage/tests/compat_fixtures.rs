@@ -108,3 +108,32 @@ fn evaluate_cases() {
     }
     assert!(bad.is_empty(), "{}", bad.join("\n"));
 }
+
+#[test]
+fn native_first_pass_rule_is_validated_without_changing_chain_entries() {
+    let good = serde_json::json!({"format":1,"rules":[{
+        "id":"doors", "action":"defer", "subject":{"mod":"native:auto-doors"},
+        "when":[{"mod":"shroudtopia:item-skill-text"}],
+        "target":{"mod":"shroudtopia:item-skill-text"}, "max_wait_ms":30000
+    }]});
+    let (rules, errors) = parse_rules(good.to_string().as_bytes(), RuleSource::Kiln);
+    assert!(errors.is_empty(), "{errors:?}");
+    assert_eq!(rules.len(), 1);
+    let facts = Facts { mods: vec!["shroudtopia:item-skill-text".into()], ..Facts::default() };
+    let entries = vec![PlanEntry { path:"powrprof.dll".into(), file:"powrprof.dll".into(), section:Section::Profile, engine:None, mod_id:Some("auto-doors".into()) }];
+    let results = evaluate(&rules, &facts, &entries);
+    assert!(results.is_empty(), "core wait rules add no launcher rows or chain changes");
+    for value in [serde_json::json!(0), serde_json::json!(-1), serde_json::json!(30001), serde_json::json!(1.5), serde_json::json!("30000"), serde_json::Value::Null] {
+        let mut bad=good.clone(); bad["rules"][0]["max_wait_ms"]=value;
+        let (rules, errors)=parse_rules(bad.to_string().as_bytes(), RuleSource::Kiln);
+        assert!(rules.is_empty() && errors.len()==1, "{bad}: {errors:?}");
+    }
+    for key in ["target", "max_wait_ms"] {
+        let mut bad=good.clone();bad["rules"][0].as_object_mut().unwrap().remove(key);
+        assert!(parse_rules(bad.to_string().as_bytes(),RuleSource::Kiln).0.is_empty());
+    }
+    let mut bad=good.clone();bad["rules"][0]["target"]=serde_json::json!({"mod":"emf:item-skill-text"});
+    assert!(parse_rules(bad.to_string().as_bytes(),RuleSource::Kiln).0.is_empty());
+    let mut bad=good.clone();bad["rules"][0]["action"]=serde_json::json!("warn");bad["rules"][0].as_object_mut().unwrap().remove("target");
+    assert!(parse_rules(bad.to_string().as_bytes(),RuleSource::Kiln).0.is_empty());
+}

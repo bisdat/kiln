@@ -106,7 +106,7 @@ bool parse_rule(const json& j, const char* source, Rule* r, std::string* why) {
     }
     for (const auto& [key, v] : j.items()) {
         (void)v;
-        if (key != "id" && key != "when" && key != "action" && key != "subject" && key != "target" && key != "message") {
+        if (key != "id" && key != "when" && key != "action" && key != "subject" && key != "target" && key != "max_wait_ms" && key != "message") {
             *why = "unknown key \"" + key + "\"";
             return false;
         }
@@ -133,12 +133,12 @@ bool parse_rule(const json& j, const char* source, Rule* r, std::string* why) {
         }
     }
     if (!j.contains("action") || !j["action"].is_string()) {
-        *why = "\"action\" must be warn, late, disable or before";
+        *why = "\"action\" must be warn, late, disable, before or defer";
         return false;
     }
     r->action = j["action"].get<std::string>();
-    if (r->action != "warn" && r->action != "late" && r->action != "disable" && r->action != "before") {
-        *why = "\"action\" must be warn, late, disable or before";
+    if (r->action != "warn" && r->action != "late" && r->action != "disable" && r->action != "before" && r->action != "defer") {
+        *why = "\"action\" must be warn, late, disable, before or defer";
         return false;
     }
     if (j.contains("message")) {
@@ -161,15 +161,31 @@ bool parse_rule(const json& j, const char* source, Rule* r, std::string* why) {
         return false;
     }
     if (j.contains("target")) {
-        if (r->action != "before") {
-            *why = "a \"target\" belongs to action before only";
+        if (r->action != "before" && r->action != "defer") {
+            *why = "a \"target\" belongs to action before or defer only";
             return false;
         }
         if (!parse_matcher(j["target"], &r->target, why)) return false;
         r->has_target = true;
     }
-    if (r->action == "before" && !r->has_target) {
-        *why = "action before needs a \"target\"";
+    if ((r->action == "before" || r->action == "defer") && !r->has_target) {
+        *why = "action " + r->action + " needs a \"target\"";
+        return false;
+    }
+    if (r->action == "defer") {
+        if (r->target.kind != Matcher::Kind::Mod || r->target.value.rfind("shroudtopia:", 0) != 0 ||
+            r->target.value.size() == 12 || (r->subject.kind != Matcher::Kind::Mod && r->subject.kind != Matcher::Kind::Module)) {
+            *why = "defer needs a native mod or module subject and a shroudtopia:<id> target";
+            return false;
+        }
+        if (!j.contains("max_wait_ms") || !j["max_wait_ms"].is_number_integer() ||
+            j["max_wait_ms"] < 1 || j["max_wait_ms"] > 30000) {
+            *why = "defer needs max_wait_ms from 1 to 30000";
+            return false;
+        }
+        r->max_wait_ms = j["max_wait_ms"].get<uint32_t>();
+    } else if (j.contains("max_wait_ms")) {
+        *why = "max_wait_ms belongs to action defer only";
         return false;
     }
     return true;
@@ -325,6 +341,13 @@ std::vector<const Rule*> evaluate(const std::vector<Rule>& rules, const Facts& f
     for (const Rule& r : rules)
         if (std::all_of(r.when.begin(), r.when.end(), [&](const Matcher& m) { return present(m, facts); })) out.push_back(&r);
     return out;
+}
+
+const Rule* native_defer_rule(const std::vector<Rule>& rules, const Facts& start, const Facts& native, bool host_available) {
+    if (!host_available) return nullptr;
+    for (const Rule* r : evaluate(rules, start))
+        if (r->action == "defer" && present(r->target, start) && present(r->subject, native)) return r;
+    return nullptr;
 }
 
 }  // namespace kiln::compat

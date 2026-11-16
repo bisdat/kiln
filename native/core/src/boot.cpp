@@ -620,6 +620,7 @@ void boot() {
     boot_svc::stop_writer(&stop_state, nullptr);
     if (hooks) load_plugins();  // kiln/services/*.dll, then plugins (profile-aware), then on_ready
     else progress_state::step("plugins");
+    native_mods::plugins_ready();
     if (hooks) boot_svc::bound();  // every on_ready ran: the collectors are registered
     if (hooks) arm_unload();    // on_unload at the process's exit call
     for (const auto& p : plugin_records())

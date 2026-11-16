@@ -20,6 +20,8 @@
 
 #include "shroudtopia_internal.h"
 #include "../../compat/module_watch.h"
+#include "../../compat/first_pass.h"
+#include "own_loader.h"
 
 #include <psapi.h>
 
@@ -87,6 +89,7 @@ HANDLE g_stop = nullptr, g_worker = nullptr;
 std::atomic<bool> g_unloading{false};
 bool g_foreign_started = false;
 bool g_handoff = false;
+kiln::first_pass::Channel g_first_pass;
 
 std::string own_loader_in_process();
 // While standing aside: the profile's entries that kiln-shroudtopia did not register, with what happens to each
@@ -109,6 +112,7 @@ bool observe_own_loader() {
         g_stepped_aside = reason;
     }
     g_handoff = true;
+    g_first_pass.bypass();
     loader_log(KILN_LOG_WARN, "kiln-shroudtopia steps aside: " + reason +
         (g_foreign_started ? "; stopping scheduling; already-installed mod hooks remain mapped" : "; no mod was started"));
     report_aside();
@@ -593,6 +597,7 @@ void loop() {
             if (g_handoff || WaitForSingleObject(g_stop, 0) == WAIT_OBJECT_0) break;
             update_mods();
         }
+        g_first_pass.done();
         ++g_cycles;
         const uint64_t now = GetTickCount64();
         if (now - last_status > 5000) {
@@ -607,46 +612,13 @@ DWORD WINAPI thread_main(void*) {
     DWORD code = 0;
     if (!guarded([] { loop(); }, &code))
         loader_log(KILN_LOG_ERROR, "Loader worker stopped after a fault (" + fault_text(code) + ")");
+    g_first_pass.bypass();  // stopped or faulted: no more startup work can complete
     if (g_unloading) stop_memory();
     write_status();
     return 0;
 }
 
-// Shroudtopia's loader in this process: shroudtopia.dll (its winmm.dll proxy loads it by that name), or a winmm.dll
-// from the game folder carrying Shroudtopia's or Shroudweave's name.
-std::string own_loader_in_process() {
-    HMODULE modules[2048]{};
-    DWORD needed = 0;
-    if (!K32EnumProcessModules(GetCurrentProcess(), modules, sizeof modules, &needed)) return {};
-    const auto count = std::min<size_t>(needed / sizeof(HMODULE), std::size(modules));
-    for (size_t i = 0; i < count; ++i) {
-        if (modules[i] == GetModuleHandleW(nullptr)) continue;
-        wchar_t p[32768]{};
-        const auto n = GetModuleFileNameW(modules[i], p, static_cast<DWORD>(std::size(p)));
-        if (!n || n == std::size(p)) continue;
-        const fs::path file(p);
-        // Wine's builtin winmm.dll reports a game-folder winmm.dll's path without running that file.
-        if (!kcompat::module_is_file(modules[i], file)) continue;
-        if (kcompat::kiln_own_module(modules[i], file)) continue;  // Kiln's proxy and plugins name every engine
-        if (kcompat::lower(path_utf8(file.filename())) == "shroudtopia.dll" &&
-            !kcompat::pe_exports_name(file, "CreateModInstance"))
-            return "Shroudtopia's loader is loaded (" + to_utf8(p) + ")";
-        std::error_code ec;
-        const bool game = fs::equivalent(file.parent_path(), g_game, ec);
-        const bool chain = fs::equivalent(file.parent_path(), g_game / L"kiln" / L"chain", ec);
-        if (!game && !chain) continue;
-        // Exclude our own plugin and mods with the API strings; a loader is a process-level proxy, not a
-        // CreateModInstance-exporting mod. Chain DLLs may be renamed, so inspect every eligible module path.
-        if (modules[i] == GetModuleHandleW(L"kiln-shroudtopia.dll") ||
-            kcompat::pe_exports_name(file, KILN_PLUGIN_MAIN) || kcompat::pe_exports_name(file, "CreateModInstance")) continue;
-        std::string d;
-        kcompat::read_file(p, &d);
-        const std::string l = kcompat::lower(d);
-        if (l.find("shroudtopia") != std::string::npos || l.find("shroudweave") != std::string::npos)
-            return "a Shroudtopia loader proxy is loaded (" + to_utf8(p) + ")";
-    }
-    return {};
-}
+std::string own_loader_in_process() { return kshroud::own_loader_in_process(g_game); }
 
 void report_aside() {
     std::set<std::string> registered;
@@ -703,6 +675,7 @@ bool anything_to_load() {
 }
 
 void KILN_CALL on_ready(void*) {
+    g_first_pass.open(false);
     g_game = H.path(KILN_PATH_GAME);
     g_state = H.state_dir();
     g_server = H.api->side() == KILN_SIDE_SERVER;
@@ -717,6 +690,7 @@ void KILN_CALL on_ready(void*) {
     g_stepped_aside = own_loader_in_process();
     if (!g_stepped_aside.empty()) {
         H.logf(KILN_LOG_WARN, "kiln-shroudtopia steps aside: %s; the Shroudtopia mods are its to load", g_stepped_aside.c_str());
+        g_first_pass.bypass();
         report_aside();
         write_status();
         return;
@@ -740,8 +714,10 @@ void KILN_CALL on_ready(void*) {
         loader_log(KILN_LOG_ERROR, "Cannot pin the compatibility runtime; no mods were started");
         return;
     }
+    g_first_pass.begin();
     g_stop = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     if (!g_stop || !(g_worker = CreateThread(nullptr, 0, &thread_main, nullptr, 0, nullptr))) {
+        g_first_pass.bypass();
         loader_log(KILN_LOG_ERROR, "Cannot create the loader worker; no mods were started");
         if (g_stop) CloseHandle(g_stop), g_stop = nullptr;
     }
@@ -750,6 +726,7 @@ void KILN_CALL on_ready(void*) {
 
 void KILN_CALL on_unload(void*) {
     g_unloading = true;
+    g_first_pass.stop();
     if (g_stop) SetEvent(g_stop);
     if (g_worker && WaitForSingleObject(g_worker, 1000) != WAIT_OBJECT_0) {
         // A foreign entry point can block indefinitely. Do not unmap its API or revoke its trampolines while it

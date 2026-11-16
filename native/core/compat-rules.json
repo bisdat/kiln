@@ -12,6 +12,23 @@
       "subject": { "mod": "native:auto-loot-plus" },
       "target": { "engine": "ultimate-asi-loader" },
       "message": "Ultimate ASI Loader loads after Kiln so that Auto Loot Plus can hook the game first; Auto Loot Plus's F8 menu needs that."
+    },
+    {
+      "id": "auto-doors-after-shroudtopia-first-pass",
+      "when": [
+        {
+          "mod": "shroudtopia:item-skill-text"
+        }
+      ],
+      "action": "defer",
+      "subject": {
+        "mod": "native:auto-doors-1.1.0-298-1.1.0-2026-11-04t19-12z-axkrtkhdp"
+      },
+      "target": {
+        "mod": "shroudtopia:item-skill-text"
+      },
+      "max_wait_ms": 30000,
+      "message": "Auto Doors waits for Item Skill Descriptions to start before it changes the same game function."
     }
   ]
 }

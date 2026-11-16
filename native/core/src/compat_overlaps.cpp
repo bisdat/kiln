@@ -345,6 +345,11 @@ Outcome outcome_of(const Rule& r, const std::vector<ChainRow>& rows, const Facts
     Outcome o;
     if (r.action == "warn") return o;
     if (r.action == "before") return before_outcome(r, rows);
+    if (r.action == "defer") {
+        o.applied = false;
+        o.note = "the native loader handles this wait; see native.json and kiln.log";
+        return o;
+    }
     const std::string what = matcher_text(r.subject);
     if (r.action == "late") {
         if (r.subject.kind != Matcher::Kind::Module) {

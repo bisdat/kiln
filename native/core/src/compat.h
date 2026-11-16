@@ -88,6 +88,8 @@ Outcome outcome_of(const Rule& rule, const std::vector<ChainRow>& rows, const Fa
 // native loader and the plugins read the profile; boot_done() after hooks.json was first written.
 void init();
 void apply_early();
+// Current profile facts (without entries disabled by a rule), and a copy of the wait rules. Boot only.
+std::vector<Rule> native_wait_rules(Facts* facts);
 void boot_done();
 
 }  // namespace kiln::compat

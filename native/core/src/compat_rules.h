@@ -4,6 +4,7 @@
 // test native/core/tests/compat_test.cpp runs it under Wine against schema/fixtures/compat-rules/cases.json, the same
 // file the launcher's Rust evaluator is held to.
 #pragma once
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -21,14 +22,15 @@ std::string matcher_text(const Matcher& m);        // `module xhl*.dll`, for log
 struct Rule {
     std::string id;
     std::vector<Matcher> when;     // empty: the rule always fires
-    std::string action;            // warn | late | disable | before (dev.29)
-    bool has_subject = false;      // required for late, disable and before
+    std::string action;            // warn | late | disable | before | defer
+    bool has_subject = false;      // required for late, disable, before and defer
     Matcher subject;
-    // before (dev.29) only, required there: the DLL that loads after the subject. The launcher orders the two in chain.ini
+    // before (dev.29): the DLL that loads after the subject. The launcher orders the two in chain.ini
     // (the target late, the subject early); the core reports whether the order held. A core before dev.29 drops the rule
     // ("unknown key \"target\"") and keeps the others.
     bool has_target = false;
-    Matcher target;
+    Matcher target;             // defer: shroudtopia:<id> enabled in this profile
+    uint32_t max_wait_ms = 0;      // defer only: 1-30000 ms after Shroudtopia starts
     std::string message;
     std::string source;            // shipped | user
 };
@@ -61,5 +63,8 @@ struct Facts {
 bool present(const Matcher& m, const Facts& facts);
 // The rules whose every `when` matcher is present (all of them when `when` is empty), in rule order.
 std::vector<const Rule*> evaluate(const std::vector<Rule>& rules, const Facts& facts);
+
+// First matching native wait rule; target must also be enabled in this start.
+const Rule* native_defer_rule(const std::vector<Rule>& rules, const Facts& start, const Facts& native, bool host_available);
 
 }  // namespace kiln::compat

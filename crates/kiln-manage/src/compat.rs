@@ -87,6 +87,8 @@ pub enum RuleAction {
     /// [profile] and its late phase keeps that order, so the phases are what can order a [profile] DLL first. For a DLL
     /// that has to patch the game's imports before another one redirects them (Auto Loot Plus, Ultimate ASI Loader).
     Before,
+    /// The native loader waits for Shroudtopia's first activation pass. No chain changes.
+    Defer,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -100,9 +102,11 @@ pub struct Rule {
     /// What `late` / `disable` act on (`warn` may leave it out); `before`: the DLL that loads first.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subject: Option<Matcher>,
-    /// `before` only: the DLL that loads after the subject (late).
+    /// `before`: the DLL that loads after the subject. `defer`: a Shroudtopia mod enabled in the profile.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<Matcher>,
+    #[serde(default, rename = "max_wait_ms", skip_serializing_if = "Option::is_none")]
+    pub max_wait_ms: Option<u32>,
     #[serde(default)]
     pub message: String,
 }
@@ -146,10 +150,11 @@ pub fn parse_rules(bytes: &[u8], source: RuleSource) -> (Vec<SourcedRule>, Vec<S
             errors.push(format!("more than {MAX_RULES} rules: the last {} are ignored", list.len() - MAX_RULES));
             break;
         }
-        // a matcher is an object: `"subject": null` is not one (serde would read it as no subject)
-        if let Some(key) = ["subject", "target"].into_iter().find(|k| r.get(k).is_some_and(|s| s.is_null())) {
+        // Explicit null is invalid for optional matchers and the timeout.
+        if let Some(key) = ["subject", "target", "max_wait_ms"].into_iter().find(|k| r.get(k).is_some_and(|s| s.is_null())) {
             let id = r.get("id").and_then(|x| x.as_str()).map(|s| format!(" ({s})")).unwrap_or_default();
-            errors.push(format!("rule {}{id}: \"{key}\" must be a matcher", i + 1));
+            let expected = if key == "max_wait_ms" { "an integer" } else { "a matcher" };
+            errors.push(format!("rule {}{id}: \"{key}\" must be {expected}", i + 1));
             continue;
         }
         let rule: Rule = match serde_json::from_value(r.clone()) {
@@ -183,11 +188,22 @@ fn check_rule(r: &Rule) -> std::result::Result<(), String> {
     if r.action != RuleAction::Warn && r.subject.is_none() {
         return Err(format!("action {:?} needs a \"subject\"", r.action).to_lowercase());
     }
-    if r.action == RuleAction::Before && r.target.is_none() {
-        return Err("action before needs a \"target\"".into());
+    if matches!(r.action, RuleAction::Before | RuleAction::Defer) && r.target.is_none() {
+        return Err(format!("action {:?} needs a \"target\"", r.action).to_lowercase());
     }
-    if r.action != RuleAction::Before && r.target.is_some() {
-        return Err("a \"target\" belongs to action before only".into());
+    if !matches!(r.action, RuleAction::Before | RuleAction::Defer) && r.target.is_some() {
+        return Err("a \"target\" belongs to action before or defer only".into());
+    }
+    if r.action == RuleAction::Defer {
+        if !matches!(&r.target, Some(Matcher::Mod(s)) if s.starts_with("shroudtopia:") && s.len() > 12)
+            || !matches!(&r.subject, Some(Matcher::Mod(_) | Matcher::Module(_))) {
+            return Err("defer needs a native mod or module subject and a shroudtopia:<id> target".into());
+        }
+        if !r.max_wait_ms.is_some_and(|n| (1..=30000).contains(&n)) {
+            return Err("defer needs max_wait_ms from 1 to 30000".into());
+        }
+    } else if r.max_wait_ms.is_some() {
+        return Err("max_wait_ms belongs to action defer only".into());
     }
     if r.when.len() > MAX_WHEN {
         return Err(format!("more than {MAX_WHEN} conditions in \"when\""));
@@ -427,6 +443,7 @@ pub fn evaluate(rules: &[SourcedRule], facts: &Facts, entries: &[PlanEntry]) -> 
 pub fn evaluate_with(rules: &[SourcedRule], facts: &Facts, entries: &[PlanEntry], never_late: &dyn Fn(&PlanEntry) -> bool) -> Vec<RuleResult> {
     let mut results: Vec<RuleResult> = rules
         .iter()
+        .filter(|sr| sr.rule.action != RuleAction::Defer) // core-only waits add no launcher rows or chain changes
         .map(|sr| {
             let r = &sr.rule;
             let fired = r.when.iter().all(|m| facts.holds(m));

@@ -21,6 +21,10 @@ namespace kiln::native_mods {
 // verified (native.policy verified-only); before sigdb, after init_image/apply_side.
 void discover(bool verified);
 void run_early();
+// Start first-pass waits on a separate worker.
+void start_deferred();
+// After every plugin on_ready returns, release absent/failed/idle hosts.
+void plugins_ready();
 void run_boot();
 // Hooks on: subscribes to the first world start (phase world). Hooks off: world mods become "skipped".
 void arm_world(bool hooks);

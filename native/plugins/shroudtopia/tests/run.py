@@ -9,7 +9,8 @@ import subprocess
 
 root = Path(__file__).resolve().parents[4]
 context = (root / 'native/plugins/shroudtopia/src/context.cpp').read_text()
-plugin = (root / 'native/plugins/shroudtopia/src/plugin.cpp').read_text()
+plugin = Path(os.environ.get('KILN_SHROUDTOPIA_SOURCE', root / 'native/plugins/shroudtopia/src/plugin.cpp')).read_text()
+loop = plugin[plugin.index('int json_int('):plugin.index('DWORD WINAPI thread_main')]
 config = context[context.index('namespace config {'):context.index('// ---------------------------------------------------------------------------------------------- memory')]
 loaded = plugin[plugin.index('struct Loaded {'):plugin.index('ModContext* g_ctx')]
 scheduling = plugin[plugin.index('void drive('):plugin.index('int json_int(')]
@@ -26,6 +27,8 @@ preamble = r'''
 #include <memory>
 #include <functional>
 #include <iostream>
+#include <algorithm>
+#include <stdexcept>
 #include <nlohmann/json.hpp>
 using json = nlohmann::json;
 namespace fs = std::filesystem;
@@ -44,7 +47,7 @@ bool write_file_atomic(const fs::path& p, const std::string& s) {
 }
 }
 using DWORD=unsigned;
-template<class F> bool guarded(F f, DWORD*) { f(); return true; }
+template<class F> bool guarded(F f, DWORD* code) { try { f(); return true; } catch (...) { *code=1; return false; } }
 void set_current_mod(const std::string&) {}
 std::string fault_text(DWORD) { return "fault"; }
 constexpr const char* kShroudtopiaVersion="0.1.1";
@@ -54,8 +57,9 @@ struct ModContext { std::set<void*> loadedMods; } ctx, *g_ctx=&ctx;
 struct Mod {
  bool loaded=false, active=false;
  bool keeps_flag=true;  // false: a mod that never writes its own `active` field
+ bool fault_activate=false;
  int activations=0, deactivations=0, updates=0;
- void Load(ModContext*) {} void Activate(ModContext*) {++activations; if (keeps_flag) active=true;}
+ void Load(ModContext*) {} void Activate(ModContext*) {++activations; if (fault_activate) throw std::runtime_error("test"); if (keeps_flag) active=true;}
  void Update(ModContext*) {++updates;} void Deactivate(ModContext*) {++deactivations; if (keeps_flag) active=false;}
 };
 '''
@@ -64,6 +68,25 @@ std::mutex g_mu;
 std::vector<std::unique_ptr<Loaded>> g_mods;
 bool g_server=false;
 '''+scheduling+r'''
+// Run the real first-pass loop with a virtual clock and no Windows worker.
+uint64_t clock_ms=0;
+unsigned waits=0, scans=0;
+bool external=false;
+void* g_stop=nullptr;
+std::atomic<uint64_t> g_cycles{0};
+bool g_handoff=false;
+constexpr unsigned WAIT_OBJECT_0=0;
+uint64_t GetTickCount64(){return clock_ms;}
+unsigned WaitForSingleObject(void*,unsigned ms){clock_ms+=ms;return ++waits>20?WAIT_OBJECT_0:258;}
+bool observe_own_loader(){return external;}
+void check_and_load(){++scans;}
+void write_status(){}
+struct FirstPass {
+ bool completed=false;
+ std::function<void()> validate;
+ void done(){if(!completed){completed=true;if(validate)validate();}}
+}g_first_pass;
+'''+loop+r'''
 int failures=0, checks=0;
 void check(bool ok, const char* label) { ++checks; if (!ok) { ++failures; std::cerr<<"FAIL "<<label<<"\n"; } }
 int main(int argc, char** argv) {
@@ -158,6 +181,30 @@ int main(int argc, char** argv) {
   check(mod.deactivations==3 && lines("Deactivating: Flagless")==1 && lines("W Flagless: switched off, but the mod leaves its own 'active' flag on")==1,
         "a mod that leaves its flag on is deactivated on every cycle, said once");
   check(f.status=="active","and it still reads as the mod reports itself");
+ }
+
+ // Completion must follow every first Load/Activate, including a failing mod, and the configured delay.
+ {
+  json settings={{"active",true},{"bootDelay",100},{"updateDelay",10},{"mods",{{"One",{{"active",true}}},{"Fault",{{"active",true}}},{"Two",{{"active",true}}}}}};
+  kcompat::write_file_atomic(file,settings.dump());config::init(file,file.parent_path()/"absent.json");
+  Mod one, fault, two;fault.fault_activate=true;
+  g_mods.clear();
+  for(auto item: {std::pair{"One",&one},std::pair{"Fault",&fault},std::pair{"Two",&two}}){
+   auto m=std::make_unique<Loaded>();m->name=item.first;m->mod=item.second;m->client=true;g_mods.push_back(std::move(m));
+  }
+  g_first_pass={};clock_ms=0;waits=scans=0;external=false;g_handoff=false;
+  g_first_pass.validate=[&]{
+   check(clock_ms>=100,"first pass includes bootDelay");
+   check(one.loaded && fault.loaded && two.loaded && one.activations==1 && fault.activations==1 && two.activations==1,
+         "completion follows all first Load/Activate attempts, including failure");
+   check(g_mods[1]->status=="faulted" && g_mods[2]->status=="active","fault does not prevent later activation or completion");
+  };
+  loop();check(g_first_pass.completed,"first pass signals completion");
+  g_first_pass={};clock_ms=0;waits=scans=0;external=true;
+  loop();check(!g_first_pass.completed && scans==0,"external loader during delay does not claim a completed pass");
+  external=false;g_first_pass={};clock_ms=0;waits=scans=0;
+  settings["active"]=false;kcompat::write_file_atomic(file,settings.dump());config::init(file,file.parent_path()/"absent.json");
+  loop();check(g_first_pass.completed && scans==0,"globally disabled host completes a no-op first pass");
  }
  std::cout<<checks-failures<<"/"<<checks<<" checks passed\n"; return failures?1:0;
 }

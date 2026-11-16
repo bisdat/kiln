@@ -112,7 +112,7 @@ void add_unique(std::vector<std::string>& v, const std::string& s) {
 bool ieq(const std::string& a, const char* b) { return glob_match(b, a); }  // no wildcard in b: a case-insensitive compare
 
 // What is present now (compat_rules.h Facts).
-Facts gather_facts(const std::vector<ChainRow>& rows, const std::vector<std::string>& symbols, bool sf_hosted) {
+Facts gather_facts(const std::vector<ChainRow>& rows, const std::vector<std::string>& symbols, bool sf_hosted, bool include_disabled = true) {
     Facts f;
     f.modules = loaded_module_names();
     for (const ChainRow& r : rows)
@@ -145,7 +145,7 @@ Facts gather_facts(const std::vector<ChainRow>& rows, const std::vector<std::str
             }
         }
     }
-    for (const std::string& m : g_rule_off) add_unique(f.mods, m);
+    if (include_disabled) for (const std::string& m : g_rule_off) add_unique(f.mods, m);
     return f;
 }
 
@@ -343,6 +343,15 @@ void apply_early() {
         // The report (rules_report) says whether that held: a dllmain native mod's DLL may be running already.
         g_early.emplace_back(r->id, "switched off in the profile before the plugins read it");
     }
+}
+
+std::vector<Rule> native_wait_rules(Facts* facts) {
+    std::lock_guard lock(g_mu);
+    *facts = gather_facts(chain_rows(), {}, false, false);
+    std::vector<Rule> out;
+    for (const Rule* r : evaluate(g_rules, *facts))
+        if (r->action == "defer" && present(r->target, *facts)) out.push_back(*r);
+    return out;
 }
 
 void boot_done() {
