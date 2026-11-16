@@ -31,5 +31,11 @@
     <ProjectReference Include="../Kiln.Chat/Kiln.Chat.csproj" Private="false" />
     <ProjectReference Include="../Kiln.Client/Kiln.Client.csproj" Private="false" />
     <ProjectReference Include="../Kiln.Content/Kiln.Content.csproj" Private="false" />
+    <!-- gems (Gems/GemRegistry.cs): the trigger programs are served through kiln.assets under the registering mod -->
+    <ProjectReference Include="../Kiln.Assets/Kiln.Assets.csproj" Private="false" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- the gem trigger programs, assembled from Gems/programs/*.kimp with tools/impact (no game files needed) -->
+    <EmbeddedResource Include="Gems/programs/*.bin" LogicalName="Kiln.Gems.%(Filename).bin" />
   </ItemGroup>
 </Project>

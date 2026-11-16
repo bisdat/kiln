@@ -25,7 +25,8 @@ std::string lower(std::string s) {
 // What resolve() reaches on the host: no game memory (rd refuses), no assets service, no schema fields.
 uint32_t fnv1a(const void* data, size_t n) { uint32_t h=2166136261u; for(size_t i=0;i<n;++i)h=(h^static_cast<const uint8_t*>(data)[i])*16777619u; return h; }
 bool rd(uintptr_t, void*, size_t) { return false; }
-const KilnAssetsApi* assets_api() { return nullptr; }
+const KilnAssetsApi* test_assets = nullptr;  // null: no assets service (every test but served_impact_programs)
+const KilnAssetsApi* assets_api() { return test_assets; }
 const Field* Schema::find(const std::string&) const { return nullptr; }
 // Host fixture GUID decoder (same Windows byte layout as game.cpp; no game memory involved).
 bool guid_parse(const std::string& s, uint8_t out[16]) {
@@ -202,11 +203,34 @@ void own_mod_models(const std::filesystem::path& root) {
 }
 }
 
+// A gem's equipment.program (keen::ImpactProgramReference) names a program a mod serves through kiln.assets as a
+// keen::ImpactProgram (gem wave G2: the Kiln gem trigger programs): asset_served asks kiln.assets for that type.
+uint32_t asked_type = 0;
+void served_impact_programs() {
+    using namespace kc;
+    static KilnAssetsApi a{};
+    a.header.size = sizeof a;
+    a.resource_read = [](const KilnAssetKey* k, void*, size_t, size_t* n) -> KilnResult {
+        asked_type = k->type;
+        *n = 64;
+        return k->type == 0xd4922d88u && k->guid[0] == 0x6e ? KILN_ERR_BUFFER_TOO_SMALL : KILN_ERR_NOT_FOUND;
+    };
+    test_assets = &a;
+    uint8_t g[16] = {0x6e, 0x6c, 0x69, 0x6b};
+    check(asset_served("keen::ImpactProgramReference", g), "an ImpactProgramReference to a served keen::ImpactProgram is loaded");
+    check(asked_type == 0xd4922d88u, "ImpactProgramReference asks kiln.assets for keen::ImpactProgram (0xd4922d88)");
+    g[0] = 0x11;
+    check(!asset_served("keen::ImpactProgramReference", g), "an ImpactProgramReference nobody serves is not loaded");
+    check(asset_served("keen::ObjectReference<keen::ImpactProgram>", (const uint8_t[16]){0x6e}), "ObjectReference<ImpactProgram> as before");
+    test_assets = nullptr;
+}
+
 int main(int argc, char** argv) {
     try {
         table_references();
     pool_references_need_their_binding();
         malformed_entries();
+        served_impact_programs();
         if (argc != 2) throw std::runtime_error("provide a new fixture directory");
         own_mod_models(argv[1]);
         std::printf("refs-test: %d checks passed, 0 failed\n", checks);

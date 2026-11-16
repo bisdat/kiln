@@ -65,6 +65,7 @@ internal static class AbilitiesCaps
         }
         RefreshBuffs();
         ReportNatives();
+        GemRegistry.ReportRow();  // gems.triggers: what Gems.Register needs (gem wave G2; G1's event joins the row)
         try
         {
             var (state, reason, text) = DecideList(PlayerStates.Status is { } st ? st.Reflection : null, Row("kiln.playerstate"), Row("players.reflection"));

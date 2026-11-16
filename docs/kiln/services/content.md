@@ -559,7 +559,9 @@ section 8.
 - **Validation**: a GUID is accepted for a field when a loaded item uses it in a field of the same reflected
   reference type (27 reference types, pools built from every ItemInfo of the world), when the engine's template list
   holds it (template references, through kiln.spawn), or when kiln.assets serves a resource of that type under it
-  (`keen::Model` references: `keen::RenderModel`; templates: `keen::ecs::TemplateResource`), or, for a template, when it
+  (`keen::Model` references: `keen::RenderModel`; templates: `keen::ecs::TemplateResource`; an item's `program`
+  (`equipment.program`, an `ImpactProgramReference`): `keen::ImpactProgram`, since the gem wave: before it a served program was
+  refused there, the base's stayed), or, for a template, when it
   is a template clone defined in this game (a world registers its clones at its load, after its items and before anything
   can place one, so a placeable item names its own template from the start). `item:<name>.<path>`
   must name a field of the same type. Anything else is skipped with a warning (the base's value stays; the item still
