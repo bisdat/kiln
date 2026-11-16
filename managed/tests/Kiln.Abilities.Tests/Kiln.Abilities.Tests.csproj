@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Unit tests of Kiln.Abilities' gems (gem wave) with no game: the forge actions' requests, results and event pump
+       (GemCraftingTests, G3) on a fake kiln.gemcraft. -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <OutputType>Exe</OutputType>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <!-- not Kiln.Abilities.Tests: a namespace Kiln.Abilities would hide the class Kiln.Abilities -->
+    <RootNamespace>Kiln.AbilitiesTests</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit.v3" Version="3.1.0" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../Kiln.TestKit/Kiln.TestKit.csproj" />
+    <ProjectReference Include="../../services/Kiln.Abilities/Kiln.Abilities.csproj" />
+    <ProjectReference Include="../../services/Kiln.Items/Kiln.Items.csproj" />
+  </ItemGroup>
+</Project>

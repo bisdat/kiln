@@ -9,9 +9,9 @@
   "verified": true,
   "note": "runtime-verified in labs on this exe, 2026-11-11, Kiln 0.2.0-dev+20261112.68988ae, policy any, standard lab save copied fresh for each group, one group per boot (or per run of boots): the running core resolved sigdb 447/447 symbols (355 defined, 92 captured), 542/542 constants (493 defined, 49 captured) and 146/146 features, each to the same value as the offline resolve (compared per name from sigdb-report.json); base world 24/0, players 30/0, chat+time 50/0, hooks 17/0, content 33/0, newcontent 24/0; api 74/0; settings 70/0; items 95/0 (kiln.items self-test on); combat 203/0 (watch-all); spawn 57/0 over 3 boots; gameplay 48/0; creatures 63/0; assets 17/0; rules 53/0; pacing 21/0; types 32/0 + types-peer 8/0; progression 45/0 (no player); net 168/0 with nettest 95 PASS, 0 FAIL; quests 188/0 over 3 boots; skills 124/0 over 2 boots; characters 53/0 over 3 boots; gamedata 71/0 over 2 boots (reload, restart); saves 54/0 over 8 boots (SIGINT, kill -9 x3, restore, game backup); build 79/0 over 4 boots; placeholder 34/0 over 4 boots (kill -9). Failing, so their names stay static: abilities 70/3, 70/3, 71/2 over three runs (the bow shot is refused by the core's PlaySequence guard every time, the Greet emote ran 73/66/79 steps of the 80 the test wants, the staff cast 38/35 then passed, the PC under heavy load); npcai 25/6 twice (force ready unavailable on four spawned creatures, the peacekeeper's relations not applied). Not run: emf (its probe needs third-party EMF mods). Levels: lab 1093 names in 24 services, static 42 (abilities, npcai, emf). With this record under verified-only: build verified, SimStep hooked, every server service loaded (27; audio, screen, ui and vfx skipped as client-only), 0 error lines.",
   "declared": {
-    "symbols": 546,
-    "constants": 628,
-    "features": 174
+    "symbols": 556,
+    "constants": 641,
+    "features": 175
   },
   "features": {
     "abilities.attributes": true,
@@ -76,6 +76,7 @@
     "gameplay.recipes": true,
     "gameplay.spawn": true,
     "gameplay.terraform": true,
+    "gems.craft": true,
     "hooks.owner_cleanup": true,
     "hooks.typed": true,
     "items.catalog": true,
@@ -315,6 +316,14 @@
     "gameplay/RandomSpawnerSpawnRet": "0x106287",
     "gameplay/RecipeFind": "0x940a20",
     "gameplay/TerraformImpact": "0x18e0b0",
+    "gems/GemAction": "0x144bb0",
+    "gems/GemRecycleYield": "0x939060",
+    "gems/GemSlotCost": "0x938fa0",
+    "gems/GemUnslotCost": "0x938f30",
+    "gems/GemUpgradeCost": "0x939020",
+    "gems/MaterialMultiplier": "0x940b80",
+    "gems/MultiplierOne": "0xbd6b90",
+    "gems/ReadTemplate": "0x64f9f0",
     "items/ActorSpawnUpdate": "0x454f0",
     "items/AddComponent": "0x5fc570",
     "items/AreaDeposit": "0x1b2a70",
@@ -759,6 +768,19 @@
     "gameplay/teleport.applied": "0x48",
     "gameplay/teleport.find_ground": "0x49",
     "gameplay/teleport.target_entity": "0x38",
+    "gems/attr.level": "0x724bf568",
+    "gems/attr.level_cap": "0x638a979a",
+    "gems/consumed.version": "0x98",
+    "gems/forge.allow_all": "0x20",
+    "gems/forge.cost_modifier": "0x28",
+    "gems/forge.max_level": "0x24",
+    "gems/input.action": "0x278",
+    "gems/input.material": "0x270",
+    "gems/input.source": "0x264",
+    "gems/input.version": "0x274",
+    "gems/input.weapon": "0x260",
+    "gems/iter.size": "0xf0",
+    "gems/multiplier.key": "0xff88b470",
     "items/attr.durability": "0xed71dc01",
     "items/attr.durability_max": "0x3c8a292f",
     "items/attr.fuel": "0x5b0bf75",
@@ -2056,6 +2078,41 @@
         "gameplay.recipes": "lab",
         "gameplay.spawn": "lab",
         "gameplay.terraform": "lab"
+      }
+    },
+    "gems-forge": {
+      "level": "static",
+      "date": "2026-11-16",
+      "evidence": "resolved offline (tools/sigport/build_record.py)",
+      "symbols": {
+        "@gems/EquipmentActions.calls": "static",
+        "@gems/GemAction.calls": "static",
+        "gems/GemAction": "static",
+        "gems/GemRecycleYield": "static",
+        "gems/GemSlotCost": "static",
+        "gems/GemUnslotCost": "static",
+        "gems/GemUpgradeCost": "static",
+        "gems/MaterialMultiplier": "static",
+        "gems/MultiplierOne": "static",
+        "gems/ReadTemplate": "static"
+      },
+      "constants": {
+        "gems/attr.level": "static",
+        "gems/attr.level_cap": "static",
+        "gems/consumed.version": "static",
+        "gems/forge.allow_all": "static",
+        "gems/forge.cost_modifier": "static",
+        "gems/forge.max_level": "static",
+        "gems/input.action": "static",
+        "gems/input.material": "static",
+        "gems/input.source": "static",
+        "gems/input.version": "static",
+        "gems/input.weapon": "static",
+        "gems/iter.size": "static",
+        "gems/multiplier.key": "static"
+      },
+      "features": {
+        "gems.craft": "static"
       }
     },
     "items": {

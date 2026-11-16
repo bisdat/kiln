@@ -1,0 +1,79 @@
+# The Shroud Forge's gem actions (server 26430253, exe `f0d824be…`; client 26430625, exe `5d9ef2f1…`) **[dis] [refl] [rt]**
+
+Evidence for kiln.gemcraft (gem wave G3: `Gems.Socket`, `Unsocket`, `Upgrade`, `Recycle`, `GemCraftingEvent`,
+`GemCraftedEvent`). Starting points: the gem dossier (`/mnt/Dongus/kiln-wave/dev29/out/gem-system/DOSSIER.md` §1, §5) and
+the Gem Forge report §6 (the hosted copy's Slot branch). Method: capstone, recursive descent from the handler, both exes;
+reflection from `sigdb/types`; program lists from `sigdb/programs`. Signatures: `sigdb/symbols/server.d/gems-forge.json`
+(the client composes it unchanged: `client.d/gems-forge.json` is an empty overlay that records the client's addresses).
+Lab: `mods/tests/gems-forge-test` (below).
+
+## The handler
+`equipment_actions` (server update `0x1472c0`, client `0x388280`; flags `0x210`) calls, per player, the equip handler and
+then the weapon-gem handler **`0x144bb0`** (client **`0x385880`**) with one argument: the program's unpacked iterator
+(`rsp+0x20` in the update, which then calls iter_next with the size **0xf0**). The iterator follows the program's
+declaration (`sigdb/programs/server/f0d824be….json`, 30 qwords):
+
+| qword | offset | what | the handler uses it for |
+|---|---|---|---|
+| 0 | +0x00 | ProgramContext | the job (`[ctx]`), the current entity (= the player, `world/CurrentEntityId` `0x65b870`) |
+| 1 | +0x08 | PlayerInput (read) | the request: `weaponGemAction` at `+0x260` |
+| 2-7 | +0x10 | Equipment write record | Upgrade: the gem impact is despawned so it respawns at the new level (`0x1428b0`, `0x5fbe20`) |
+| 8-13 | +0x40 | ServerConsumedPlayerInput write record | `+0x98` consumedWeaponGemAction; record `+0x28` = tracker (0: not marked) |
+| 14-17 | +0x70..+0x88 | BalancingRegistry, ItemRegistry, RecipeRegistry, AttributeRegistry | costs; item lookups; the material multiplier; Level attributes |
+| 18 | +0x90 | KnowledgeTriggerQueue | Slot: a knowledge trigger (`0x9a3cd0(queue, player, 7)`) |
+| 19 | +0x98 | ShroudForge template accessor | `0x64f9f0(storage, accessor, forge)` (client `0x9b3b60`) |
+| 20-27 | +0xa0..+0xd8 | Inventory, InventoryEmptyState, InventorySetup, ItemState, Level, OwnerRelationship, SlotSelection, WeaponGemSlot | the transaction's setup block (as `equipment_actions`' equip handler builds it) and the gem / socket reads |
+| 28-29 | +0xe0, +0xe8 | GemCraftingEvent, InventoryFull senders | the success event; InventoryFull |
+
+The request, `ChangeWeaponGemAction` (28 bytes) **[refl]**: `+0` weaponPide, `+4` weaponGem (InventorySlotId, 8 bytes),
+`+0xc` forgeEntityId, `+0x10` materialItemId, `+0x14` versionData, `+0x18` action (`WeaponGemActionType`: Invalid 0, Slot 1,
+Unslot 2, Upgrade 3, Recycle 4). `ShroudForge` (68 bytes): `+0x10` upgradeMaterial (an item GUID), `+0x20`
+allowAllMaterialTiersForUpgraderInsert, `+0x24` maxGemLevel, `+0x28` craftingCostModifier.
+
+Order **[dis]**: return at once when `input.version == consumed.version`; forge 0 → store the consumed version, return
+(this is the cancel path kiln.gemcraft uses); the forge's template must read and have `maxGemLevel != 0`; the gem: the
+request's slot when it is set (getItemStack `0x93fce0`; an entity without an Inventory resolves index 0 through its
+WeaponGemSlot, so `{weaponPide, 0}` names the socket), else the weapon's WeaponGemSlot; its Level (`0x724bf568`) and cap
+(`0x638a979a`) through AttrFind; then the action. Every branch stores the consumed version, whatever happened.
+
+| action | branch (S / C) | cost or yield | what moves |
+|---|---|---|---|
+| Slot 1 | `0x1453c2` / `0x3860b9` | `0x938fa0` / `0xe91e60` (maxGemLevel, multiplier, modifier, Balancing), paid in `materialItemId` (removeItems on the same tx, must leave 0 missing) | `0x1b4950` / `0x414db0`: the exact source slot → `{weaponPide, 0}`, one item, the gem's entity kept |
+| Unslot 2 | `0x1452a9` / `0x385fa0` | `0x938f30` / `0xe91df0` = `xor eax,eax; ret`: **free** on this build | `0x1b4bb0` / `0x415010`: `{weaponPide, 0}` → the player's inventory |
+| Upgrade 3 | `0x145118` / `0x385e0f` | refused when level ≥ cap or ≥ maxGemLevel; `0x939020` / `0xe91ee0` (level, maxGemLevel, multiplier, modifier, Balancing) | the payment is **committed first**, then Level +1 and its formulas (`0xab970`), then the gem impact is reset |
+| Recycle 4 | `0x144f9a` / `0x385c69` | essence = the forge's upgradeMaterial; `0x939060` / `0xe91f20` (level, maxGemLevel, Balancing) | destroyItemStack (`0x1b27a0`) of the request's slot, addItems of the yield |
+
+The multiplier: `0x940b80` / `0xe99940` (material, `0xff88b470`, RecipeRegistry) when the forge allows all material tiers,
+else the constant 1.0 (`0xbd6b90` / `0x13d0c90`). The costs read the BalancingRegistry's table at `+0x20` (`+0x200`, `+0x204`,
+`+0x20c`). Success sends `GemCraftingEvent {+8 forge, +0xc action}` (hash `0xe4bc5e18`, 16 bytes), which
+`gem_crafting_sequence` plays as the forge's action sequence.
+
+**No ownership check** in the handler: it reads neither the carrier's category nor its slot type, nor checks that the
+source is a gem item, nor that the items are the player's (the Gem Forge report §6.3). kiln.gemcraft checks those itself
+before it calls the handler for code.
+
+## What Kiln does (kiln-items.dll, `native/services/items/gems.cpp`)
+- **Code actions**: the program `kiln_items_gems` (kiln.world; an entity program over the player characters: read
+  PlayerInput) declares `equipment_actions`' access without the consumed input, plus Fuel and PickupEvent for kiln.items'
+  own give/take. For a request it maps its iterator onto the handler's layout by name, points qword 1 at a request buffer
+  of its own and qwords 8-13 at a consumed record of its own (tracker 0), and calls the handler. The layout is checked in
+  the first Pre of each server world against `equipment_actions`' declaration in the game's program directory
+  (`game_program_list`), and the handler iterator's eight accessors against the world's component map. A free or replaced
+  cost gives the player the game's price right before the call (the game takes it back) and takes the replacement; a
+  refusal undoes both. Recycle's yield is replaced after the call.
+- **Players' actions**: a kiln.hooks link on the handler. While a hold lease runs (a `GemCraftingEvent` handler listens), a
+  new version is not passed on: it stays unconsumed and the game offers it again next step. Pre reports it; the answer
+  runs it (allow) or calls the handler once on a copy of the iterator whose request copy has forge 0 (cancel: the game
+  only stores the consumed version). 8 steps without an answer: it runs. While watched, the state before and after
+  (socket, gem, Level, the material and essence counts of the player) gives `GemCraftedEvent`.
+
+## Lab
+`mods/tests/gems-forge-test` (lab `gems-g3`, a copy of the gems-g1 world, server 26430253, no client): a spawned
+`1_Player` and a spawned `Shroud_Gem_Forge_01_Grassland`. Results: see the G3 report
+(`/mnt/Dongus/kiln-wave/gems/out/g3-forge/REPORT.md`).
+
+## Not known
+- What a joined client's forge screen shows after a canceled action (the client predicts nothing for this host-only
+  program; the inventory replicates as it is).
+- Whether a socket on a non-weapon carrier (gem wave G4) behaves the same in the handler (no category read was found).
+- The client's own UI command path (`0xda5b00` / `0xd61e90`) is not used.
