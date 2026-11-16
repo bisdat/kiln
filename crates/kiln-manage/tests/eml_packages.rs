@@ -797,10 +797,11 @@ fn retains(a: &profile::Activation, copy: &Path) -> bool {
 /// run, as deactivate and uninstall do; before, only `PlaceReport::changed` named it, and nothing read that.
 #[test]
 fn copies_activation_has_to_keep_are_reported_as_retained_by_every_activation_path() {
-    // switched off in the profile: the player changed the plugin's ini
+    // switched off in the profile: the player added code (a DLL beside the plugin; an edit of its native-plugin.ini is
+    // the mod's settings, not code)
     let d = drop_on_launcher("xhl-plugin", "XHL plugin");
     let copy = d.g.path.join("mods/XHL-Vein-Mining");
-    put(&copy, "native-plugin.ini", b"[Plugin]\nDll=XHL-Vein-Mining.dll\nVerbose=1\n");
+    put(&copy, "Helper.dll", &xhl_plugin());
     let mut p = my_mods(&d);
     p.mods.xhl[0].enabled = false;
     let p = profile::save(&d.dirs, &p).unwrap();
@@ -854,7 +855,7 @@ fn reason_for(a: &profile::Activation, copy: &Path) -> String {
 fn retained_copies_say_what_still_runs() {
     let d = drop_on_launcher("xhl-plugin", "XHL plugin");
     let copy = d.g.path.join("mods/XHL-Vein-Mining");
-    put(&copy, "native-plugin.ini", b"[Plugin]\nDll=XHL-Vein-Mining.dll\nVerbose=1\n");
+    put(&copy, "Helper.dll", &xhl_plugin());
     let a = profile::activate(&d.dirs, "my-mods", &d.g).unwrap();
     assert!(reason_for(&a, &copy).contains("It is on in the profile; this changed copy stays as it is, and its loader may still use it"), "{a:?}");
     assert!(!reason_for(&a, &copy).contains("is what runs"), "no promise that it runs: {a:?}");
@@ -881,7 +882,7 @@ fn play_reports_what_the_game_folder_holds_even_when_the_start_fails() {
     let d = drop_on_launcher("xhl-plugin", "XHL plugin");
     let copy = d.g.path.join("mods/XHL-Vein-Mining");
     let req = LaunchRequest { mode: LaunchMode::Profile, profile_id: None, skip_backup: true };
-    put(&copy, "native-plugin.ini", b"[Plugin]\nDll=XHL-Vein-Mining.dll\nVerbose=1\n");
+    put(&copy, "Helper.dll", &xhl_plugin());
     let r = kiln_manage::launch::play_with(&d.dirs, &d.g, &req, Some(&[]), &|_| Ok(())).unwrap();
     let a = r.activation.expect("Play reports the kept copy of an unchanged profile");
     assert!(retains(&a, &copy), "{a:?}");
@@ -2060,4 +2061,166 @@ fn a_mods_folder_kiln_cannot_name_is_not_placed_under_another_name() {
     assert!(only_record(&dirs, ModKind::Eml).get("gameFolder").is_none());
     assert!(!summary(&r.import).contains("reads it from the game's mods folder"), "{}", summary(&r.import));
     assert!(game_mods_folders(&g).is_empty(), "{:?}", tree(&g.path));
+}
+
+/// inbox 21: XHL-Vein-Mining's own settings are in its config.txt (radiusMeters, holdKeyVk). An edit there is the
+/// player's setting, not code: switched off, the folder goes (XHL-Core loads every plugin folder in mods, whatever the
+/// profile says) and the file waits in kiln/state/placed-settings; switched on, it comes back, and the result says so
+/// (before, only switching off was said, so a value coming back after a re-add looked like Kiln's doing).
+#[test]
+fn an_xhl_plugins_edited_config_txt_waits_while_it_is_off_and_coming_back_is_named() {
+    let d = drop_on_launcher("xhl-plugin", "XHL-Vein-Mining");
+    let copy = d.g.path.join("mods/XHL-Vein-Mining");
+    put(&copy, "config.txt", b"radiusMeters=12\n");
+    let mut p = my_mods(&d);
+    p.mods.xhl[0].enabled = false;
+    let p = profile::save(&d.dirs, &p).unwrap();
+    let a = profile::activate(&d.dirs, &p.id, &d.g).unwrap();
+    assert!(!copy.exists(), "{a:?}");
+    assert!(retained_of(&a).is_empty(), "{a:?}");
+    let stash = d.g.path.join("kiln/state/placed-settings/xhl/xhl-vein-mining");
+    assert_eq!(std::fs::read(stash.join("config.txt")).unwrap(), b"radiusMeters=12\n");
+    assert!(a.kept_files.iter().any(|k| k.starts_with("xhl:xhl-vein-mining: kept runtime settings (config.txt)")), "{a:?}");
+    let mut p = p;
+    p.mods.xhl[0].enabled = true;
+    let p = profile::save(&d.dirs, &p).unwrap();
+    let a = profile::activate(&d.dirs, &p.id, &d.g).unwrap();
+    assert_eq!(std::fs::read(copy.join("config.txt")).unwrap(), b"radiusMeters=12\n");
+    assert!(!stash.exists());
+    assert!(a.kept_files.iter().any(|k| k.starts_with("xhl:xhl-vein-mining: put back") && k.contains("config.txt")
+        && k.contains("placed-settings")), "{a:?}");
+}
+
+/// inbox 21: a copy Kiln has to keep while its mod is off (the player changed its code, or here pointed its
+/// native-plugin.ini at another DLL) says plainly who still runs it when it is an XHL-Core plugin folder: XHL-Core, which
+/// loads every plugin folder in mods that has a native-plugin.ini.
+#[test]
+fn a_kept_xhl_plugin_folder_of_a_mod_that_is_off_names_xhl_core() {
+    for (which, folder, file, bytes) in [
+        ("xhl-plugin", "XHL-Vein-Mining", "native-plugin.ini", &b"[Plugin]\nDll=XHL-Vein-Mining-dev.dll\n"[..]),
+        ("xhl-hybrid", "XHL-Auto-Loot", "src/mod.lua", &b"-- the player's code"[..]),
+    ] {
+        let d = drop_on_launcher(which, folder);
+        let copy = d.g.path.join("mods").join(folder);
+        put(&copy, file, bytes);
+        let mut p = my_mods(&d);
+        p.mods.xhl.iter_mut().chain(p.mods.eml.iter_mut()).for_each(|m| m.enabled = false);
+        let p = profile::save(&d.dirs, &p).unwrap();
+        let a = profile::activate(&d.dirs, &p.id, &d.g).unwrap();
+        assert_eq!(std::fs::read(copy.join(file)).unwrap(), bytes, "{which}: the player's file stays");
+        let reason = reason_for(&a, &copy);
+        assert!(reason.contains("It is off in the profile, but its own loader may still load it")
+            && reason.contains("XHL-Core loads every plugin folder in mods that has a native-plugin.ini"), "{which}: {reason}");
+    }
+}
+
+/// inbox 21: an XHL plugin the player installed by hand (no Kiln receipt: the player's own folder), then switched off in
+/// Kiln. Kiln never removes a folder it did not place, and XHL-Core loads it from there whatever the profile says, so the
+/// mod kept running without a word. The activation now says so plainly, as a safety note (raised even with the notes
+/// about mod folders off).
+#[test]
+fn a_players_own_xhl_plugin_folder_of_a_mod_that_is_off_is_named_plainly() {
+    let (t, dirs, g) = fresh("own-xhl-off");
+    layout(&g.path, "xhl-plugin");
+    let own = g.path.join("mods/XHL-Vein-Mining");
+    let r = kiln_manage::quick::add_with(&dirs, &g, &[zip(&t, "xhl-plugin", "XHL-Vein-Mining"), zip(&t, "xhl-core", "XHL-Core")], false,
+        &mut NoProgress).unwrap();
+    assert!(r.applied, "{r:?}");
+    assert!(kiln_manage::engine_mods::marker(&own).is_none(), "still the player's folder");
+    assert!(kiln_manage::engine_mods::xhl_host(&g.path).available);
+    let mut p = profile::get(&dirs, "my-mods").unwrap();
+    p.mods.xhl[0].enabled = false;
+    let p = profile::save(&dirs, &p).unwrap();
+    let a = profile::activate(&dirs, &p.id, &g).unwrap();
+    assert_eq!(std::fs::read(own.join("XHL-Vein-Mining.dll")).unwrap(), xhl_plugin(), "Kiln never removes the player's folder");
+    let note = a.safety_notes.iter().find(|n| n.starts_with("xhl:xhl-vein-mining:"))
+        .unwrap_or_else(|| panic!("nothing says the switched-off mod still runs: {a:?}"));
+    assert!(note.contains(&own.display().to_string()) && note.contains("XHL-Core") && note.contains("still runs"), "{note}");
+    assert!(a.warnings.contains(note), "{a:?}");
+    // on again: the folder serves the entry, as before
+    let mut p = p;
+    p.mods.xhl[0].enabled = true;
+    let p = profile::save(&dirs, &p).unwrap();
+    let a = profile::activate(&dirs, &p.id, &g).unwrap();
+    assert!(!a.safety_notes.iter().any(|n| n.starts_with("xhl:xhl-vein-mining:")), "{a:?}");
+}
+
+/// inbox 21c (the owner's decision, 2026-11-15): XHL's plugins keep their settings in XHL-Core's native-plugin.ini
+/// (XHL-Free-Climb's `[Climbing]`, XHL-Area-Harvest's `[Planting]`), and XHL-Core writes its `Enabled` there. An edit that
+/// leaves its `[Plugin] Dll=` naming the DLL Kiln placed is the mod's settings, not code: the copy is kept as it is while
+/// the mod is on, goes when it is switched off (the ini waits in the settings stash) and comes back with it. Before, such
+/// an edit kept the folder of a switched-off mod, and XHL-Core went on loading it.
+#[test]
+fn an_xhl_plugins_edited_native_plugin_ini_is_its_settings() {
+    for (which, folder, ini) in [
+        ("xhl-2x", "XHL-Free-Climb", &b"[Plugin]\r\nEnabled=1\r\nDll=XHL-Free-Climb.dll\r\n\r\n[Climbing]\r\nHoldKeyVk=72\r\nHoldGamepadButton=R3\r\n"[..]),
+        // an EML package that is an XHL-Core plugin too, its plugin switched off in XHL-Core's own way
+        ("xhl-hybrid", "XHL-Auto-Loot", &b"[plugin]\ndll = xhl-auto-loot.dll\nEnabled=0\n"[..]),
+    ] {
+        let d = drop_on_launcher(which, folder);
+        let copy = d.g.path.join("mods").join(folder);
+        put(&copy, "native-plugin.ini", ini);
+        let a = profile::activate(&d.dirs, "my-mods", &d.g).unwrap();
+        assert!(a.retained.is_empty(), "{which}: on, the edited ini is the player's setting: {a:?}");
+        assert_eq!(std::fs::read(copy.join("native-plugin.ini")).unwrap(), ini, "{which}");
+        let mut p = my_mods(&d);
+        p.mods.xhl.iter_mut().chain(p.mods.eml.iter_mut()).for_each(|m| m.enabled = false);
+        let p = profile::save(&d.dirs, &p).unwrap();
+        let a = profile::activate(&d.dirs, &p.id, &d.g).unwrap();
+        assert!(!copy.exists() && a.retained.is_empty(), "{which}: switched off, XHL-Core must not find the plugin: {a:?}");
+        let stash = d.g.path.join("kiln/state/placed-settings").join(if which == "xhl-2x" { "xhl/xhl-free-climb" } else { "eml/xhl-auto-loot" });
+        assert_eq!(std::fs::read(stash.join("native-plugin.ini")).unwrap(), ini, "{which}");
+        assert!(a.kept_files.iter().any(|k| k.contains("kept runtime settings") && k.contains("native-plugin.ini")), "{which}: {a:?}");
+        let mut p = p;
+        p.mods.xhl.iter_mut().chain(p.mods.eml.iter_mut()).for_each(|m| m.enabled = true);
+        let p = profile::save(&d.dirs, &p).unwrap();
+        let a = profile::activate(&d.dirs, &p.id, &d.g).unwrap();
+        assert_eq!(std::fs::read(copy.join("native-plugin.ini")).unwrap(), ini, "{which}: on again, the player's ini is back");
+        assert!(a.kept_files.iter().any(|k| k.contains("put back") && k.contains("native-plugin.ini")), "{which}: {a:?}");
+        assert!(!stash.exists(), "{which}");
+    }
+}
+
+/// inbox 21c: the player's native-plugin.ini never goes into a version that no longer has the DLL it names (the author
+/// renamed it): XHL-Core would find no plugin. That version starts with its own ini, and the player's waits where the
+/// result says: in the settings stash when the mod was off, in kiln/kept-mod-files when the update replaced the copy.
+#[test]
+fn a_native_plugin_ini_is_held_back_from_a_version_without_its_dll() {
+    let renamed = |d: &Dropped| {
+        let update = d._t.0.join("update");
+        layout(&update, "xhl-plugin");
+        std::fs::remove_file(update.join("mods/XHL-Vein-Mining/XHL-Vein-Mining.dll")).unwrap();
+        put(&update, "mods/XHL-Vein-Mining/XHL-Vein-Mining-2.dll", &xhl_plugin());
+        put(&update, "mods/XHL-Vein-Mining/native-plugin.ini", b"[Plugin]\nDll=XHL-Vein-Mining-2.dll\n");
+        update
+    };
+    let mine: &[u8] = b"[Plugin]\nDll=XHL-Vein-Mining.dll\nRadius=3\n";
+    for off in [true, false] {
+        let d = drop_on_launcher("xhl-plugin", "XHL-Vein-Mining");
+        let copy = d.g.path.join("mods/XHL-Vein-Mining");
+        put(&copy, "native-plugin.ini", mine);
+        if off {
+            let mut p = my_mods(&d);
+            p.mods.xhl[0].enabled = false;
+            activate(&d, &p);
+            assert!(!copy.exists());
+        }
+        let r = kiln_manage::quick::add_with(&d.dirs, &d.g, &[renamed(&d)], false, &mut NoProgress).unwrap();
+        // (the add may already have placed it, or left the entry off)
+        let mut said: Vec<profile::Activation> = r.activation.into_iter().collect();
+        let mut p = my_mods(&d);
+        assert_eq!(p.mods.xhl.len(), 1, "{p:?}");
+        if !p.mods.xhl[0].enabled {
+            p.mods.xhl[0].enabled = true;
+            let p = profile::save(&d.dirs, &p).unwrap();
+            said.push(profile::activate(&d.dirs, &p.id, &d.g).unwrap());
+        }
+        let a = said.last().cloned().expect("an activation");
+        assert!(copy.join("XHL-Vein-Mining-2.dll").is_file(), "off {off}: the new version is placed: {said:?}");
+        assert_eq!(std::fs::read(copy.join("native-plugin.ini")).unwrap(), b"[Plugin]\nDll=XHL-Vein-Mining-2.dll\n", "off {off}: its own ini");
+        let waits = if off { "kiln/state/placed-settings/xhl/xhl-vein-mining" } else { "kiln/kept-mod-files/xhl/xhl-vein-mining" };
+        assert_eq!(std::fs::read(d.g.path.join(waits).join("native-plugin.ini")).unwrap(), mine, "off {off}");
+        assert!(said.iter().flat_map(|a| &a.warnings).any(|w| w.contains("names XHL-Vein-Mining.dll") && w.contains(waits)), "off {off}: {said:?}");
+        assert!(a.retained.is_empty(), "off {off}: {a:?}");
+    }
 }

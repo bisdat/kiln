@@ -1094,8 +1094,10 @@ fn keep_sf_values(dirs: &DataDirs, game: &Path, receipts: &mut Vec<Placement>, r
         Ok(_) => "Kiln switched it off in ShroudForge's settings".to_string(),
         Err(e) => format!("Kiln could not switch it off in ShroudForge's settings ({}), so ShroudForge may still run it", reason_at(dst, e.message)),
     };
+    // (a game-folder copy that is an XHL-Core plugin never gets here: it goes, its values wait with its settings)
+    let xhl = if has_xhl_plugin_ini(dst) { format!(" {XHL_LOADS}, so the mod may still run from there.") } else { String::new() };
     retain_off(rep, tag, dst, format!("its ShroudForge settings (extended.mod.json) were changed since Kiln placed it (values set in the game, or an edit), so Kiln keeps the folder and {off}. \
-        Switch the mod on in the profile to use them again, or remove the folder by hand to drop them"), true);
+        Switch the mod on in the profile to use them again, or remove the folder by hand to drop them.{xhl}"), true);
     Some(())
 }
 
@@ -2072,11 +2074,40 @@ fn sf_settings(dst: &Path) -> Vec<(String, serde_json::Value)> {
     crate::shroudforge::read_mod(dst).map(|m| m.settings.into_iter().map(|s| (s.key, s.value)).collect()).unwrap_or_default()
 }
 
-/// [`retain`], with what still runs from that copy ([`still_runs`]) after the reason.
+/// [`retain`], with what still runs from that copy ([`still_runs`]) after the reason. A copy kept while its mod is off
+/// that is an XHL-Core plugin folder names XHL-Core ([`XHL_LOADS`]): "its own loader" is not plain enough there.
 fn retain_runs(rep: &mut PlaceReport, tag: String, path: &Path, reason: impl Into<String>, runs: String) {
     let reason = reason_at(path, reason.into());
     let off = runs.starts_with(OFF_IN_PROFILE);
-    retain_off(rep, tag, path, format!("{}. {runs}", reason.trim_end_matches('.')), off);
+    let xhl = if off && has_xhl_plugin_ini(path) { format!(" {XHL_LOADS}.") } else { String::new() };
+    retain_off(rep, tag, path, format!("{}. {runs}{xhl}", reason.trim_end_matches('.')), off);
+}
+
+/// What XHL-Core does with a folder in the game's mods folder, for the sentences about a folder that may still run.
+/// XHL-Core reads no profile and no ShroudForge switch.
+const XHL_LOADS: &str = "XHL-Core loads every plugin folder in mods that has a native-plugin.ini, whatever the profile says";
+
+/// The player's own folder `path` serves the entry `tag`, which the profile has off, and it is an XHL-Core plugin folder
+/// while the game has XHL-Core: Kiln never removes a folder it did not place, so the mod still runs from there. A safety
+/// note ([`PlaceReport::safety_notes`]), in plain words.
+fn own_xhl_folder_off(rep: &mut PlaceReport, tag: String, path: &Path) {
+    let note = format!("{tag}: it is off in the profile, but your own folder {} is still in the game's mods folder, and {XHL_LOADS}, so \
+        the mod still runs. Kiln never removes a folder it did not place: to stop the mod, close the game and move that folder out of the \
+        mods folder.", path.display());
+    rep.safety_notes.push(note.clone());
+    rep.own_notes.push(note);
+    rep.own.push(tag);
+}
+
+/// Kiln's ShroudForge copy `dst` stays switched off in ShroudForge's file ([`switch_copy`]), as every ShroudForge mod's
+/// does, but its folder has XHL-Core's native-plugin.ini (Building Tools for ShroudForge): where the game has XHL-Core
+/// (`xhl`, asked once per placement), XHL-Core loads it from there whatever that switch says. A folder that may still run
+/// while its mod is off ([`RetainedPlacement::off`]); it is no changed copy, so not in [`PlaceReport::changed`].
+fn sf_copy_xhl_loads(rep: &mut PlaceReport, xhl: &mut Option<bool>, game: &Path, dst: &Path) {
+    if !has_xhl_plugin_ini(dst) || !*xhl.get_or_insert_with(|| xhl_host(game).available) { return; }
+    rep.retained.push(RetainedPlacement { path: dst.to_path_buf(), may_run: true, off: true, reason: format!(
+        "Kiln switched it off in ShroudForge's settings, but its folder has a native-plugin.ini, and {XHL_LOADS}, so the mod may still \
+        run from there") });
 }
 
 /// How [`still_runs`] starts for a mod the profile has off.
@@ -2132,6 +2163,8 @@ fn place_with(dirs: &DataDirs, profile: &crate::profile::Profile, game_dir: &Pat
     // a publication a stop left half done is finished or put back first
     rep.warnings.extend(recover_publications(game_dir, &mut receipts)?);
     let roots = Roots { data: &dirs.root, game: game_dir };
+    // whether the game has XHL-Core ([`xhl_host`]): asked once, only for a folder XHL-Core would load
+    let mut xhl_core: Option<bool> = None;
     for kind in [ModKind::ShroudForge, ModKind::Set] {
         let list = profile.mods.list(kind);
         let root = match kind {
@@ -2192,6 +2225,7 @@ fn place_with(dirs: &DataDirs, profile: &crate::profile::Profile, game_dir: &Pat
                         }
                         Ok(_) => {}
                     }
+                    if !m.enabled { sf_copy_xhl_loads(&mut rep, &mut xhl_core, game_dir, &dst); }
                 }
                 rep.kept.push(tag(&m.id));
             } else {
@@ -2233,6 +2267,7 @@ fn place_with(dirs: &DataDirs, profile: &crate::profile::Profile, game_dir: &Pat
                 };
                 rep.kept_files.extend(said);
                 rep.warnings.extend(warned);
+                if kind == ModKind::ShroudForge && !m.enabled { sf_copy_xhl_loads(&mut rep, &mut xhl_core, game_dir, &dst); }
                 rep.placed.push(tag(&m.id));
             }
         }
@@ -2269,11 +2304,14 @@ fn place_with(dirs: &DataDirs, profile: &crate::profile::Profile, game_dir: &Pat
                     format!("its ShroudForge settings cannot be read, so it was not switched off: {}", e.message), still_runs(kind, false, None, None)),
                 Ok(sf) if sf.enabled => {
                     match switch_copy(game_dir, &mut receipts, dst, false) {
-                        Ok(()) => rep.switched.push(tag(&receipt.marker.id)),
+                        Ok(()) => {
+                            rep.switched.push(tag(&receipt.marker.id));
+                            sf_copy_xhl_loads(&mut rep, &mut xhl_core, game_dir, dst);
+                        }
                         Err(e) => retain_runs(&mut rep, tag(&receipt.marker.id), dst, e.message, still_runs(kind, false, None, None)),
                     }
                 }
-                Ok(_) => {}
+                Ok(_) => sf_copy_xhl_loads(&mut rep, &mut xhl_core, game_dir, dst),
             }
         }
     }
@@ -2328,6 +2366,22 @@ fn place_with(dirs: &DataDirs, profile: &crate::profile::Profile, game_dir: &Pat
                 (None, None) => {}
             }
         }
+        // The player's own folder of an entry the profile has off, when it is an XHL-Core plugin folder: Kiln never removes
+        // it, and XHL-Core loads it whatever the profile says. Said once per activation, as a safety note.
+        if placing && matches!(kind, ModKind::Eml | ModKind::Xhl) {
+            let mods = game_dir.join(EML_GAME_MODS);
+            for m in list.iter().filter(|m| !m.enabled) {
+                let Some(folder) = game_folder_of(dirs, kind, m) else { continue };
+                let dst = mods.join(folder);
+                let own = if std::fs::symlink_metadata(&dst).is_ok() { Some(dst.clone()) } else {
+                    crate::library::path_of(dirs, &crate::library::LibraryRef { kind, id: m.id.clone(), version: m.version.clone(), hash: m.hash.clone() })
+                        .ok().and_then(|src| same_mod_elsewhere(&mods, kind, &src, &dst))
+                };
+                let Some(own) = own.filter(|p| std::fs::symlink_metadata(p).is_ok_and(|x| x.is_dir()) && has_xhl_plugin_ini(p)
+                    && !receipts.iter().any(|r| r.path == *p) && !targets.iter().any(|(_, _, d, _)| d == p)) else { continue };
+                if *xhl_core.get_or_insert_with(|| xhl_host(game_dir).available) { own_xhl_folder_off(&mut rep, tag(&m.id), &own); }
+            }
+        }
         for (m, src, dst, game_folder) in targets.iter().filter(|_| placing) {
             let want = Marker { format: 1, kind, id: m.id.clone(), version: m.version.clone(), hash: m.hash.clone() };
             let dst = dst.clone();
@@ -2335,6 +2389,7 @@ fn place_with(dirs: &DataDirs, profile: &crate::profile::Profile, game_dir: &Pat
                 let key = settings_key(kind, &m.id, &dst);
                 let mods = game_dir.join(EML_GAME_MODS);
                 let kept_at = kept_dir(game_dir, kind, &key);
+                let mut from_stash = false;
                 let (settings, carry) = match settings_changed(game_dir, &receipts, &dst, kind, &m.id) {
                     // nothing there to keep (a link in the way): the mod is not placed, and the result says why
                     Err(e) if std::fs::symlink_metadata(&dst).is_err() => {
@@ -2352,7 +2407,14 @@ fn place_with(dirs: &DataDirs, profile: &crate::profile::Profile, game_dir: &Pat
                     Ok(Mine::Yes(have, changed, added)) => match read_settings(&dst, &changed) {
                         Ok(settings) => {
                             // a ShroudForge file with the player's metadata edits: set aside, its values go over by themselves
-                            let added = if changed.iter().any(|c| c == "extended.mod.json") { added } else { with_edited_extension(dirs, &dst, &have, added) };
+                            let mut added = if changed.iter().any(|c| c == "extended.mod.json") { added } else { with_edited_extension(dirs, &dst, &have, added) };
+                            // XHL-Core's ini naming a DLL this version does not ship: set aside like a file it ships itself
+                            let (settings, held) = hold_back_plugin_ini(src, settings);
+                            for (rel, dll) in held {
+                                rep.warnings.push(format!("{}: your {rel} names {dll}, which version {} does not have, so it is kept in {KEPT_MOD_FILES}/{}/{key} \
+                                    and the mod starts with this version's own", tag(&m.id), m.version, kind.as_str()));
+                                added.push(rel);
+                            }
                             (settings, (!added.is_empty()).then(|| Carry { from: &dst, entries: added, from_kept: false }))
                         }
                         Err(e) => { retain_runs(&mut rep, tag(&m.id), &dst, e.message, still_runs(kind, true, marker_at(&receipts, &dst), Some(&want))); continue; }
@@ -2377,6 +2439,13 @@ fn place_with(dirs: &DataDirs, profile: &crate::profile::Profile, game_dir: &Pat
                                 tag(&m.id), stash_dir(game_dir, kind, &key).display(), e.message));
                             Vec::new()
                         });
+                        // XHL-Core's ini naming a DLL this version does not ship stays in the stash
+                        let (settings, held) = hold_back_plugin_ini(src, settings);
+                        for (rel, dll) in held {
+                            rep.warnings.push(format!("{}: your earlier {rel} names {dll}, which version {} does not have, so it stays in {} \
+                                and the mod starts with this version's own", tag(&m.id), m.version, stash_dir(game_dir, kind, &key).display()));
+                        }
+                        from_stash = !settings.is_empty();
                         let carry = kept_carry(game_dir, &kept_at, kind).unwrap_or_else(|e| {
                             rep.warnings.push(format!("{}: the files it wrote earlier in {} cannot be read ({}); they stay there",
                                 tag(&m.id), kept_at.display(), e.message));
@@ -2399,6 +2468,13 @@ fn place_with(dirs: &DataDirs, profile: &crate::profile::Profile, game_dir: &Pat
                 };
                 rep.kept_files.extend(said);
                 rep.warnings.extend(warned);
+                // said, since a mod removed from the Library and added again gets them back too
+                let names: Vec<String> = settings.iter().filter(|(rel, bytes)| !(kind == ModKind::Eml && rel == "extended.mod.json"
+                    && std::str::from_utf8(bytes).is_ok_and(bare_eml_switch))).map(|(rel, _)| rel.clone()).collect();
+                if from_stash && !names.is_empty() {
+                    rep.kept_files.push(format!("{}: put back its runtime settings ({}) from {}, as they were when the mod was last switched off \
+                        or removed", tag(&m.id), some_names(&names), stash_dir(game_dir, kind, &key).display()));
+                }
                 // a whole extended.mod.json carried as the player's settings file holds the old copy's switch; a package
                 // ShroudForge cannot read got none, and this says why
                 if sf { switch_on_eml_copy(game_dir, &mut receipts, &mut rep, tag(&m.id), &dst); }
@@ -2477,9 +2553,16 @@ fn place_with(dirs: &DataDirs, profile: &crate::profile::Profile, game_dir: &Pat
             if receipt.game_folder {
                 // Its DLL's settings and files wait for the mod to come back. The copy goes so a drop-in scan cannot run it.
                 let key = settings_key(kind, id, dst);
+                // XHL-Core loads an EML package that is its plugin too whatever ShroudForge's switch says: its folder goes
+                // even with the player's ShroudForge values in it, and its extended.mod.json waits with its settings
+                let xhl = kind == ModKind::Eml && has_xhl_plugin_ini(dst);
                 match settings_changed(game_dir, &receipts, dst, kind, id) {
-                    Ok(Mine::Yes(..)) if kind == ModKind::Eml && keep_sf_values(dirs, game_dir, &mut receipts, &mut rep, tag(id), dst).is_some() => continue,
-                    Ok(Mine::Yes(_, changed, added)) => {
+                    Ok(Mine::Yes(..)) if kind == ModKind::Eml && !xhl && keep_sf_values(dirs, game_dir, &mut receipts, &mut rep, tag(id), dst).is_some() => continue,
+                    Ok(Mine::Yes(_, mut changed, added)) => {
+                        if xhl && !changed.iter().any(|c| c == "extended.mod.json")
+                            && receipts.iter().find(|r| r.path == *dst).is_some_and(|r| sf_values_changed(dirs, dst, r)) {
+                            changed.push("extended.mod.json".into());
+                        }
                         let files = match read_settings(dst, &changed) {
                             Ok(files) => files,
                             Err(e) => { retain_runs(&mut rep, tag(id), dst, e.message, still_runs(kind, false, None, None)); continue; }
@@ -2843,7 +2926,8 @@ fn settings_key(kind: ModKind, id: &str, dst: &Path) -> String {
 /// Whose is a game-folder copy, and what in it changed since Kiln placed it.
 enum Mine {
     /// Kiln's (its receipt and its marker agree), with what the DLL or the player wrote since (relative, '/'
-    /// separated): the settings files changed or added ([`is_game_settings_file`]), then the other files added that
+    /// separated): the settings files changed or added ([`is_game_settings_file`], and XHL-Core's ini while it still
+    /// names Kiln's DLL: [`plugin_ini_is_setting`]), then the other files added that
     /// are no code ([`is_game_code`]), such as a log or a cache the DLL writes beside itself.
     Yes(Placement, Vec<String>, Vec<String>),
     /// There, and not Kiln's: the player's own folder, or one whose marker is not the receipt's.
@@ -2868,7 +2952,7 @@ fn settings_changed(game: &Path, receipts: &[Placement], dst: &Path, kind: ModKi
     let adopted = adopted_switch(dst, receipt);
     for (rel, _) in now.iter().filter(|(rel, hash)| !rel.ends_with('/') && receipt.files.get(*rel) != Some(*hash)
         && !(adopted && rel.as_str() == "extended.mod.json")) {
-        if is_game_settings_file(rel) {
+        if is_game_settings_file(rel) || plugin_ini_is_setting(dst, rel, receipt, &now) {
             settings.push(rel.clone());
         } else if !receipt.files.contains_key(rel) && !is_game_code(rel) {
             added.push(rel.clone());
@@ -2897,9 +2981,72 @@ fn is_game_settings_file(rel: &str) -> bool {
         && crate::settings_files::is_settings_extension(&low)
 }
 
+/// XHL-Core's `native-plugin.ini` of a game-folder copy (`dst`), changed since Kiln placed it, is the mod's settings file
+/// while its `[Plugin]` entry still names a DLL Kiln placed there, unchanged ([`xhl_ini_dll`]): XHL's plugins keep their
+/// settings in it (XHL-Area-Harvest's `[Planting]`, XHL-Free-Climb's `[Climbing]`) and XHL-Core writes its `Enabled`
+/// there. One that names another DLL, or none, is code ([`is_game_code`]); so is one the copy did not have.
+fn plugin_ini_is_setting(dst: &Path, rel: &str, receipt: &Placement, now: &std::collections::BTreeMap<String, String>) -> bool {
+    if !rel.eq_ignore_ascii_case(XHL_PLUGIN_INI) || !receipt.files.contains_key(rel) { return false; }
+    let path = dst.join(rel);
+    let Some(dll) = std::fs::metadata(&path).ok().filter(|m| m.len() <= 64 * 1024)
+        .and_then(|_| std::fs::read(&path).ok()).and_then(|b| xhl_ini_dll(&b)) else { return false };
+    receipt.files.iter().any(|(r, hash)| r.eq_ignore_ascii_case(&dll) && now.get(r) == Some(hash))
+}
+
+/// The DLL the `[Plugin]` section of an XHL-Core `native-plugin.ini` names (`Dll=`, the key and section in any case, as
+/// Windows' ini reading has them), relative to the plugin's folder with `/`. UTF-8 (a BOM allowed) or UTF-16LE with
+/// its BOM. None: no such entry, or one that leaves the folder (absolute, a drive, `..`).
+fn xhl_ini_dll(bytes: &[u8]) -> Option<String> {
+    let text = match bytes {
+        [0xFF, 0xFE, rest @ ..] => String::from_utf16(&rest.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).collect::<Vec<_>>()).ok()?,
+        _ => std::str::from_utf8(bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes)).ok()?.to_string(),
+    };
+    let mut plugin = false;
+    for line in text.lines().map(str::trim) {
+        if let Some(section) = line.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
+            plugin = section.trim().eq_ignore_ascii_case("Plugin");
+        } else if let Some((key, value)) = line.split_once('=').filter(|_| plugin && !line.starts_with([';', '#'])) {
+            if !key.trim().eq_ignore_ascii_case("Dll") { continue; }
+            let value = value.trim().trim_matches('"').replace('\\', "/");
+            let value = value.trim_start_matches("./");
+            let leaves = value.is_empty() || value.starts_with('/') || value.contains(':') || value.split('/').any(|p| p == "..");
+            return (!leaves).then(|| value.to_string());
+        }
+    }
+    None
+}
+
+/// A settings file read for a new copy: its relative path and bytes ([`read_settings`]).
+type SettingsFile = (String, Vec<u8>);
+
+/// The settings of an earlier copy (or the stash) that may go into a new copy of `src`, and the ones held back: XHL-Core's
+/// `native-plugin.ini` naming a DLL `src` does not have (the new version renamed it), with that DLL. Put into the new
+/// copy, it would point XHL-Core at nothing.
+fn hold_back_plugin_ini(src: &Path, settings: Vec<SettingsFile>) -> (Vec<SettingsFile>, Vec<(String, String)>) {
+    let (mut keep, mut held) = (Vec::new(), Vec::new());
+    for (rel, bytes) in settings {
+        match xhl_ini_dll(&bytes).filter(|_| rel.eq_ignore_ascii_case(XHL_PLUGIN_INI)) {
+            Some(dll) if !has_file_any_case(src, &dll) => held.push((rel, dll)),
+            _ => keep.push((rel, bytes)),
+        }
+    }
+    (keep, held)
+}
+
+/// `rel` ('/' separated) names a file under `root`, each part in any case (as Windows finds it).
+fn has_file_any_case(root: &Path, rel: &str) -> bool {
+    let mut at = root.to_path_buf();
+    for part in rel.split('/').filter(|p| !p.is_empty()) {
+        let Some(next) = std::fs::read_dir(&at).into_iter().flatten().flatten()
+            .find(|e| e.file_name().to_str().is_some_and(|n| n.eq_ignore_ascii_case(part))) else { return false };
+        at = next.path();
+    }
+    at != root && at.is_file()
+}
+
 fn read_settings(dir: &Path, changed: &[String]) -> Result<Vec<(String, Vec<u8>)>> {
     let mut out = Vec::new();
-    for rel in changed.iter().filter(|r| is_game_settings_file(r)) {
+    for rel in changed.iter().filter(|r| is_game_settings_file(r) || r.eq_ignore_ascii_case(XHL_PLUGIN_INI)) {
         crate::bundle::safe_rel_path(rel)?;
         let p = dir.join(rel);
         refuse_symlink_path(dir, &p)?;
@@ -4399,6 +4546,30 @@ mod tests {
         assert!(player_entries_of(now, &before, ModKind::Eml).is_none());
         assert!(!is_settings_file(ModKind::Eml, "native-plugin.ini"));
         assert!(!is_settings_file(ModKind::Eml, "mod.json"));
+    }
+
+    /// inbox 21c: the DLL XHL-Core's native-plugin.ini names, as the XHL packages and AZJ-LootMultiplier write it and as
+    /// Windows' ini reading finds it (section and key in any case, UTF-16LE with its BOM). An entry that leaves the
+    /// plugin's folder, one in another section, or a commented one names nothing Kiln placed.
+    #[test]
+    fn the_dll_an_xhl_plugin_ini_names() {
+        let utf16 = |s: &str| [0xFFu8, 0xFE].into_iter().chain(s.encode_utf16().flat_map(u16::to_le_bytes)).collect::<Vec<u8>>();
+        let wide = utf16("[Plugin]\r\nDll=Wide.dll\r\n");
+        let cases: [(&[u8], Option<&str>); 10] = [
+            (b"[Plugin]\r\nEnabled=1\r\nDll=XHL-Area-Harvest.dll\r\n\r\n[Planting]\r\nMode=Row\r\n", Some("XHL-Area-Harvest.dll")),
+            (b"; AZJ LootMultiplier\n\n[Plugin]\nname = AZJ\ndll = AZJ-LootMultiplier.dll\nenabled = true\n", Some("AZJ-LootMultiplier.dll")),
+            (b"\xEF\xBB\xBF[ plugin ]\nDLL=\".\\bin\\X.dll\"\n", Some("bin/X.dll")),
+            (&wide, Some("Wide.dll")),
+            (b"[Other]\nDll=Other.dll\n[Plugin]\nEnabled=1\n", None),
+            (b"[Plugin]\n;Dll=Commented.dll\n", None),
+            (b"[Plugin]\nDll=..\\\\outside.dll\n", None),
+            (b"[Plugin]\nDll=C:\\\\Games\\\\x.dll\n", None),
+            (b"[Plugin]\nDll=\n", None),
+            (b"player edited code", None),
+        ];
+        for (text, dll) in cases {
+            assert_eq!(xhl_ini_dll(text).as_deref(), dll, "{:?}", String::from_utf8_lossy(text));
+        }
     }
 
     /// manage-import F5, native-core-sf F4: one table of folder names for the three validators of Copy mode's
