@@ -4,7 +4,7 @@ kiln.stations: the production stations of a base (kilns, smelters, looms, grinde
 the game's `FactoryStation`), the bases the game's crafting code sees with their Magic chests, and the game's own station
 actions for code: fill from chests, stop, resume, the recipe a station repeats, and moving its finished items into a
 chest. C#: `Stations` and `Bases` (`Kiln.Blocks`, `namespace Kiln`). Native: `native/core/abi/services/kiln_stations.h`
-(in kiln-items.dll). Since 0.2.0-dev.29.
+(in kiln-items.dll). Since 0.2.0-dev.29.14 (mod API 0.2.6).
 
 `Stations` is the class that already had `Stations.Status` and `Stations.Start` (dev.28, [world-blocks.md](../modding/world-blocks.md)).
 `Start` writes the selection without the game's write tracking; for a selection players see at once use `Select`, and
@@ -225,7 +225,7 @@ rather than reasoning on a `StationInfo` from before it.
 Every station event carries the `Base` (id) it happened in. They are posted on the tick thread in Pre. Kiln watches
 stations only while a handler of `StationStateChangedEvent`, `StationPlacedEvent`, `StationRemovedEvent` or
 `BasesChangedEvent` listens (a diff of every station's state each step and a scan for new ones every 32 steps).
-`StationCraftedEvent` comes from Kiln.Gameplay's `ItemCraftedEvent`, which since 0.2.0-dev.29 reports an automated
+`StationCraftedEvent` comes from Kiln.Gameplay's `ItemCraftedEvent`, which since 0.2.0-dev.29.14 reports an automated
 station's cycle **once, at its end** (before, twice: at the cycle's start and at its end). `StationPlayerActionEvent` is
 Kiln.Players' `PlayerClientActionEvent` of the game's `playerCraftingAction`, typed: while a handler listens, Kiln holds
 every player's client actions for one step (about 17 ms) so they can be canceled; canceling either event cancels the same
@@ -283,5 +283,5 @@ checked by hand with `mods/tests/stations-client-check` (`/stationcheck`, admins
 `station_read`, `recipe*`, `category*`, `workshop_recipes`, `plan`) on the tick thread; `submit(owner, request, done, user,
 &ticket)` from any thread, the result in `done` on the tick thread; `cancel(ticket)` drops the callback; the events by
 polling: `watch(1)`, then `events(after_seq, ...)` each step (`last_seq()` to start at the newest). A cycle's end for native
-code is kiln.gameplay's `KILN_GAMEPLAY_CRAFTED` (once per cycle since 0.2.0-dev.29). The game's facts behind all of it:
+code is kiln.gameplay's `KILN_GAMEPLAY_CRAFTED` (once per cycle since 0.2.0-dev.29.14). The game's facts behind all of it:
 [docs/re/stations.md](../../re/stations.md).
