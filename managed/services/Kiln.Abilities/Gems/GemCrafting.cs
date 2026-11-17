@@ -389,8 +389,8 @@ internal static unsafe class GemcraftNative
     {
         public uint Size, Player, Holder;
         public ulong Slot;
-        public uint Gem, Item, Level, PayFrom, PayHolder, ReturnTo, LifetimeSteps, Rarity, Reserved;
-        public ulong Token, ExpiresStep;
+        public uint Gem, Item, Level, PayFrom, PayHolder, ReturnTo, LifetimeMs, Rarity, Reserved;
+        public ulong Token, ExpiresMs;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -432,6 +432,7 @@ internal static unsafe class GemcraftNative
         public delegate* unmanaged[Cdecl]<ulong, uint, uint, uint*, int> Withdraw;
         public delegate* unmanaged[Cdecl]<uint, Source*, uint, uint*, int> Sources;
         public delegate* unmanaged[Cdecl]<uint, uint, uint, uint*, uint, uint*, int> Payers;
+        public delegate* unmanaged[Cdecl]<uint, uint*, int> ForgeMaterial;
     }
 
     /// <summary>The table's size before 0.2.0-dev.29.15 (eight functions).</summary>
@@ -462,6 +463,8 @@ internal interface IGemcraftBackend
     int Withdraw(ulong owner, uint player, uint holder, out uint count);
     int Sources(uint player, Span<GemcraftNative.Source> into, out uint count);
     int Payers(uint player, uint payFrom, uint payHolder, Span<uint> into, out uint count);
+    /// <summary>The forge's own upgrade material (Ok); NotFound: not read yet (ask again); InvalidArgument: no forge.</summary>
+    int ForgeMaterial(uint forge, out uint item);
 }
 
 /// <summary>Kiln.Abilities' side of kiln.gemcraft: submissions and results, the pump of held and crafted actions.</summary>
@@ -586,6 +589,15 @@ internal static unsafe class GemCrafting
             else
                 fixed (uint* p = into) rc = t->Payers(player, payFrom, payHolder, p, (uint)into.Length, &n);
             count = n;
+            return rc;
+        }
+
+        public int ForgeMaterial(uint forge, out uint item)
+        {
+            uint m = 0;
+            var t = T2;
+            var rc = t == null ? GemcraftNative.Unavailable : t->ForgeMaterial(forge, &m);
+            item = m;
             return rc;
         }
     }

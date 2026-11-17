@@ -516,18 +516,20 @@ inline uint64_t payers_have(const std::vector<std::pair<uint32_t, uint32_t>>& pa
 // ---- gem sources: offers of one gem in a container to one player, found again by the player's request ----
 constexpr uint32_t kMaxSourcesPerPlayer = 256;
 constexpr uint32_t kMaxSources = 4096;
-constexpr uint32_t kMaxSourceLifetime = 3000;
+constexpr uint32_t kMaxSourceLifetimeMs = 120000;  // 2 minutes, real time (GetTickCount64)
+constexpr uint32_t kNoSession = 0xFFFFFFFFu;        // session_of(): the entity is a player slot nobody is in game in
 
 inline bool source_valid(const KilnGemSource& s) {
     return s.size >= sizeof(KilnGemSource) && s.player != 0 && s.holder != 0 && s.holder != s.player && s.gem != 0 &&
            s.item != 0 && s.slot != 0 && (s.slot >> 40) == 0 && KILN_SLOT_INDEX(s.slot) <= 7 &&
            KILN_SLOT_INVENTORY(s.slot) != 0 && s.pay_from <= KILN_GEM_PAY_PLAYER_THEN_BASE &&
-           ((s.pay_from == KILN_GEM_PAY_HOLDER) == (s.pay_holder != 0)) && s.lifetime_steps >= 1 &&
-           s.lifetime_steps <= kMaxSourceLifetime && s.reserved == 0;
+           ((s.pay_from == KILN_GEM_PAY_HOLDER) == (s.pay_holder != 0)) && s.lifetime_ms >= 1 &&
+           s.lifetime_ms <= kMaxSourceLifetimeMs && s.reserved == 0;
 }
 
 struct SourceEntry {
     KilnOwner owner = 0;
+    uint32_t session = 0;  // the player's session when it was offered (kiln.players' handle; 0: not a player slot)
     KilnGemSource s{};
 };
 
@@ -535,12 +537,22 @@ struct SourceEntry {
 // the book. Tick thread (the owner holds the service's lock around every call).
 class SourceBook {
 public:
-    // All or nothing: false (with why) and no change when an entry is bad or a player would hold too many.
-    template <class Rng>
-    bool offer(KilnOwner owner, KilnGemSource* in, uint32_t count, uint64_t step, Rng&& rng, const char** why) {
+    // All or nothing: false (with why) and no change when an entry is bad, a player is not in game (session_of gives
+    // kNoSession) or would hold too many. `now` is real time in ms; each offer keeps its player's session.
+    template <class SessionOf, class Rng>
+    bool offer(KilnOwner owner, KilnGemSource* in, uint32_t count, uint64_t now, SessionOf&& session_of, Rng&& rng, const char** why) {
         *why = "";
         for (uint32_t i = 0; i < count; ++i)
             if (!source_valid(in[i])) return *why = "an offered gem is not valid (size, player, holder, slot, gem, item, payer, lifetime)", false;
+        std::vector<std::pair<uint32_t, uint32_t>> sessions;  // player, session
+        for (uint32_t i = 0; i < count; ++i) {
+            bool seen = false;
+            for (auto& pr : sessions) seen |= pr.first == in[i].player;
+            if (seen) continue;
+            const uint32_t sn = session_of(in[i].player);
+            if (sn == kNoSession) return *why = "a player the gems are offered to is not in game", false;
+            sessions.push_back({in[i].player, sn});
+        }
         // the count per player after replacing the same slots
         std::vector<std::pair<uint32_t, uint32_t>> per;  // player, live after
         for (uint32_t i = 0; i < count; ++i) {
@@ -583,19 +595,22 @@ public:
             for (int tries = 0; tries < 16 && (t == 0 || find_token(t)); ++tries) t = rng();
             if (t == 0 || find_token(t)) return *why = "no fresh token", false;  // a broken generator: nothing more offered
             s.token = t;
-            s.expires_step = step + s.lifetime_steps;
+            s.expires_ms = now + s.lifetime_ms;
             SourceEntry e;
             e.owner = owner;
+            for (auto& pr : sessions)
+                if (pr.first == s.player) e.session = pr.second;
             e.s = s;
             book_.push_back(e);
         }
         used_ = true;
         return true;
     }
-    // The live offer for a player's request naming `slot`; nullptr when none (or expired at `step`).
-    const SourceEntry* find(uint32_t player, uint64_t slot, uint64_t step) const {
+    // The live offer for a player's request naming `slot`, made in the player's current `session`; nullptr when none,
+    // expired at `now` (ms), or made to an earlier session of the entity (the player left; another may hold the slot).
+    const SourceEntry* find(uint32_t player, uint64_t slot, uint64_t now, uint32_t session) const {
         for (const SourceEntry& e : book_)
-            if (e.s.player == player && e.s.slot == slot && step <= e.s.expires_step) return &e;
+            if (e.s.player == player && e.s.slot == slot && now <= e.s.expires_ms && e.session == session && session != kNoSession) return &e;
         return nullptr;
     }
     const SourceEntry* find_token(uint64_t token) const {
@@ -632,17 +647,20 @@ public:
     }
     // A mod unloaded: its offers go.
     void drop_owner(KilnOwner owner) { withdraw(owner, 0, 0); }
-    // Offers expired at `step` go (kept `grace` steps longer, so a request that arrives right after still finds its
+    // A player left (or a new one took the slot): every owner's offers to the entity go.
+    uint32_t drop_player(uint32_t player) { return player ? withdraw(0, player, 0) : 0; }
+    // Offers expired at `now` (ms) go (kept `grace` ms longer, so a request that arrives right after still finds its
     // page in names_page and is refused rather than passed on).
-    void expire(uint64_t step, uint64_t grace) {
+    void expire(uint64_t now, uint64_t grace) {
         for (size_t k = book_.size(); k-- > 0;)
-            if (step > book_[k].s.expires_step + grace) book_.erase(book_.begin() + static_cast<ptrdiff_t>(k));
+            if (now > book_[k].s.expires_ms + grace) book_.erase(book_.begin() + static_cast<ptrdiff_t>(k));
     }
+    // The offers `player` can use now: live at `now` (ms) and of the player's `session`.
     template <class F>
-    uint32_t live_for(uint32_t player, uint64_t step, F&& f) const {
+    uint32_t live_for(uint32_t player, uint64_t now, uint32_t session, F&& f) const {
         uint32_t n = 0;
         for (const SourceEntry& e : book_)
-            if (e.s.player == player && step <= e.s.expires_step) {
+            if (e.s.player == player && now <= e.s.expires_ms && e.session == session && session != kNoSession) {
                 f(e.s);
                 ++n;
             }
@@ -672,6 +690,19 @@ inline bool own_gem_slot(uint64_t slot, uint32_t weapon, bool carrier_own, const
     for (uint32_t p : pages)
         if (p == page) return true;
     return false;
+}
+
+// Once offers are in use: a request is foreign (only an offer may run it) when it names a gem slot outside the player's
+// own pages; foreign by its carrier (refused, an offer never covers it) when it names a carrier the player's own pages
+// do not hold. `carrier_own`: the player's pages hold the item entity `weapon`.
+struct Ownership {
+    bool foreign = false, foreign_carrier = false;
+};
+inline Ownership ownership(uint64_t slot, uint32_t weapon, bool carrier_own, const std::vector<uint32_t>& pages) {
+    Ownership o;
+    o.foreign_carrier = weapon != 0 && !carrier_own;
+    o.foreign = o.foreign_carrier || !own_gem_slot(slot, weapon, carrier_own, pages);
+    return o;
 }
 
 // What the hook does with a player's request that names a gem outside the player's own inventories.

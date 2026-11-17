@@ -7,8 +7,9 @@
 // (written into the character's PlayerInput.weaponGemAction as a client's would arrive, offsets of server 26430253): a
 // forged slot without an offer, an offered upgrade, the same request again, a stale offer after its gem moved, a gem
 // taken from the chest right after the request, an offer whose payer is short, an offered recycle with the essence into
-// the chest, a withdrawn offer. Each against what the inventories, sockets and levels hold afterwards. Everything spawned
-// is destroyed at the end.
+// the chest, a withdrawn offer. Review 2026-11-17: an offer to a player slot nobody is in, a chest's carrier refused
+// (Unslot, Insert), the gem socketed in the held sword upgraded and recycled with an offer live. Each against what the
+// inventories, sockets and levels hold afterwards. Everything spawned is destroyed at the end.
 using Kiln;
 
 namespace GemforgeChestTest;
@@ -345,6 +346,151 @@ public sealed class GemforgeChestTestMod : Mod
         await Inject(GemCraftAction.Socket, sword.ItemEntity, own.Slot);
         Check(SocketOf(sword.ItemEntity) == (gemId.Value, own.ItemEntity.Value) && pe7 - Count(p, essence) > 0,
             $"part 2: the player's own gem still sockets through the game's path, paid by the player ({SocketOf(sword.ItemEntity)})");
+
+        // ================= review 2026-11-17 =================
+        // (1) an offer belongs to a player's session: a player slot nobody is in game in gets none (no client here, so a
+        // leave and a new session in the same slot is the host test's; this is the native session lookup on a server)
+        var noOne = Gems.OfferChestGems(new EntityId(16), chestA, new GemSourceOptions());
+        Check(!noOne.Ok && noOne.Gems.Count == 0, $"review 1: an offer to player slot 16 (nobody in game) is refused ({noOne.Refusal})");
+
+        // (5) a carrier outside the player's inventories is refused once offers are in use (the game's handler checks no
+        // ownership): Unslot of the gem in chest D's sword, and the player's own gem into another sword of chest D
+        var gemsBefore = GemsIn(p, gemId);
+        var vx = await Inject(GemCraftAction.Unsocket, sword2.ItemEntity, default);
+        Check(ConsumedNow() == vx && SocketOf(sword2.ItemEntity) == (gemId.Value, gA.ItemEntity.Value) && GemsIn(p, gemId) == gemsBefore,
+            $"review 5: Unslot of a chest's sword is refused, its gem stays socketed ({SocketOf(sword2.ItemEntity)})");
+        Info($"give: {await Items.Give(chestD, SwordName, 1, new Gear(null, ItemRarity.Common) { GemSlot = true })}");
+        await Steps(4);
+        var sword3 = Items.Read(chestD)!.Slots.First(s => !s.IsEmpty && s.Item == swordId && s.ItemEntity != sword2.ItemEntity);
+        var own2 = await GiveGem(p, gemId, 1);
+        var pe9 = Count(p, essence);
+        var vy = await Inject(GemCraftAction.Socket, sword3.ItemEntity, own2.Slot);
+        Check(ConsumedNow() == vy && SocketOf(sword3.ItemEntity) == (0, 0) && SlotOf(p, own2.ItemEntity) is not null && Count(p, essence) == pe9,
+            $"review 5: the player's own gem into a chest's sword is refused, nothing paid ({SocketOf(sword3.ItemEntity)})");
+
+        // (8) the gem socketed in the sword the player holds (action bar slot 0, the game's main hand) after offers exist:
+        // the player's own Upgrade and Recycle still run (the page walk finds the action bar)
+        var live = Gems.OfferChestGems(p, chestA, new GemSourceOptions());
+        Info($"an offer is live for the next checks: {live.Gems.Count} gem(s) ({live.Refusal ?? "ok"})");
+        var sel = World.ReadBytes(p, "SlotSelection");
+        var bar0 = sel is { Length: >= 0xa8 } ? new EntityId(BitConverter.ToUInt32(sel, 0xa0)) : EntityId.None;
+        var pagesOf = Items.Read(p)!.Slots.Select(x => x.Slot.Inventory).Distinct().ToList();
+        Info($"action bar page {bar0}; the player's pages: {string.Join(" ", pagesOf)}");
+        Check(!bar0.IsNone && pagesOf.Contains(bar0), "review 8: the action bar is one of the player's pages (Items.Read's walk)");
+        // a worn piece (a helmet): its equipment page is one of the player's pages too (a socketed ring or armour worn)
+        Info($"give: {await Items.Give(p, "Armor_T1_Warrior_DPS_Helmet", 1)}");
+        await Steps(4);
+        var helmet = Items.Read(p)!.Slots.FirstOrDefault(x => !x.IsEmpty && Items.Get(x.Item)?.Name == "Armor_T1_Warrior_DPS_Helmet");
+        var worn = helmet is null ? null : await Items.Equip(p, helmet.Slot, EquipmentSlot.ArmourHead);
+        await Steps(4);
+        sel = World.ReadBytes(p, "SlotSelection");
+        var equipPages = new HashSet<EntityId>();
+        for (var i = 0; i < 20 && sel is { Length: >= 0xa0 }; i++)
+            if (BitConverter.ToUInt32(sel, i * 8) is var e && e != 0) equipPages.Add(new EntityId(e));
+        pagesOf = Items.Read(p)!.Slots.Select(x => x.Slot.Inventory).Distinct().ToList();
+        Info($"helmet worn: {worn}; equipment pages (SlotSelection.equipment): {string.Join(" ", equipPages)}");
+        Check(worn is { Ok: true } && equipPages.Count > 0 && equipPages.All(pagesOf.Contains),
+            "review 8: the page of a worn piece is one of the player's pages (worn rings and armour count as the player's own)");
+        // Items.Give put the sword on the action bar already (a weapon goes there first); else move it there
+        if (SlotOf(p, sword.ItemEntity) is { } at && at.Slot.Inventory != bar0)
+        {
+            var toChest = await Items.Move(p, at.Slot, chestD, 0, MoveOptions.ActionBar);
+            await Steps(4);
+            var toBar = await Items.Move(chestD, SlotOf(chestD, sword.ItemEntity)!.Slot, p, 0, MoveOptions.ActionBar, SlotId.Of(bar0, 0));
+            await Steps(4);
+            Info($"sword to chest D {toChest.Status}, to the action bar {toBar.Status}");
+        }
+        var held = SlotOf(p, sword.ItemEntity);
+        var hand = sel is { Length: >= 0xc1 } ? sel[0xc0] : -1;
+        Info($"the sword is at {held?.Slot}; the selected action bar slot (SlotSelection +0xc0) is {hand}");
+        Check(held is { } h && h.Slot.Inventory == bar0, $"review 8: the sword is in the action bar ({held?.Slot}, selected {hand})");
+        var lv0 = Gems.Socket(sword.Ref)?.Level ?? -1;
+        var pe10 = Count(p, essence);
+        var vv = await Inject(GemCraftAction.Upgrade, sword.ItemEntity, SlotId.Of(sword.ItemEntity, 0));
+        var lv1 = Gems.Socket(sword.Ref)?.Level ?? -1;
+        Check(ConsumedNow() == vv && lv1 == lv0 + 1 && pe10 - Count(p, essence) > 0,
+            $"review 8: Upgrade of the socketed gem in the held sword with an offer live: level {lv0} -> {lv1}, paid {pe10 - Count(p, essence)}");
+        var pe11 = Count(p, essence);
+        var vr = await Inject(GemCraftAction.Recycle, sword.ItemEntity, SlotId.Of(sword.ItemEntity, 0));
+        Check(ConsumedNow() == vr && SocketOf(sword.ItemEntity) == (0, 0) && Count(p, essence) > pe11,
+            $"review 8: Recycle of the socketed gem in the held sword with an offer live: socket {SocketOf(sword.ItemEntity)}, essence {pe11} -> {Count(p, essence)}");
+        // a second forge no request has used yet: its material can only come from the gem program's own read
+        var forge2 = await Put(ForgeTemplate, 46, 40);
+        await Steps(10);
+        await ServerHalf(p, forge2, chestA, chestB, gemId, essence);
         Info($"at the end: player {Gear(p)} | A {Gear(chestA)} | B {Gear(chestB)} | C {Gear(chestC)} | D {Gear(chestD)}");
+    }
+
+    // Review 2026-11-17, the server half without a client: Kiln's own GemSources.Hello (internal, reached by reflection: a
+    // lab-only shortcut for the client's hello over kiln:gemsources) on this dedicated server. The forge's material is
+    // read by the gem program (kiln.gemcraft forge_material), the payer counts are of it, the hello limit holds across a
+    // close, and a player who left loses the offers.
+    private async Task ServerHalf(EntityId p, EntityId forge, EntityId chestA, EntityId chestB, ItemId gemId, ItemId essence)
+    {
+        const System.Reflection.BindingFlags Any = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public |
+                                                   System.Reflection.BindingFlags.Static;
+        var asm = typeof(Gems).Assembly;
+        var gs = asm.GetType("Kiln.GemSources");
+        var helloType = asm.GetType("Kiln.GemForgeHello");
+        var hello = gs?.GetMethod("Hello", Any, [typeof(EntityId), helloType!]);
+        var gone = gs?.GetMethod("PlayerGone", Any, [typeof(EntityId)]);
+        var sendHook = gs?.GetField("SendHook", Any);
+        var forgeHook = gs?.GetField("ForgeNearHook", Any);
+        if (gs is null || helloType is null || hello is null || gone is null || sendHook is null || forgeHook is null)
+        {
+            Check(false, "server half: Kiln.GemSources' internals are not where this test expects them");
+            return;
+        }
+        object Hello(bool open) => Activator.CreateInstance(helloType, open, Array.Empty<uint>())!;
+        var sent = new List<object>();
+        sendHook.SetValue(null, new Action<EntityId, object>((to, m) => { if (to == p) sent.Add(m); }));
+        forgeHook.SetValue(null, new Func<EntityId, EntityId>(_ => forge));  // the forge the screen is at (here: the second one)
+        var opened = new List<GemForgeOpenedEvent>();
+        var gH = await GiveGem(chestA, gemId, 2);
+        var sub = Events.On<GemForgeOpenedEvent>(e =>
+        {
+            if (e.Player != p) return;
+            opened.Add(e);
+            Gems.OfferChestGems(p, chestA, new GemSourceOptions { PayFrom = GemPayer.From(chestB) });
+        });
+        try
+        {
+            hello.Invoke(null, [p, Hello(true)]);
+            await Steps(20);  // the pump sends the rows; the gem program reads the forge's material within a step or two
+            Check(opened.Count == 1 && opened[0].Forge == forge && !opened[0].Refresh,
+                $"server half: a hello posts GemForgeOpenedEvent with the forge found near the player ({opened.FirstOrDefault()?.Forge}, {forge})");
+            static System.Collections.IEnumerable? Prop(object o, string name) => o.GetType().GetProperty(name)?.GetValue(o) as System.Collections.IEnumerable;
+            static object? Field(object o, string name) => o.GetType().GetProperty(name)?.GetValue(o);
+            var last = sent.LastOrDefault(m => m.GetType().Name == "GemForgeOffers");
+            var payers = last is null ? [] : Prop(last, "Payers")!.Cast<object>().ToList();
+            var rows = last is null ? [] : Prop(last, "Rows")!.Cast<object>().ToList();
+            var counts = sent.Where(m => m.GetType().Name == "GemForgeOffers").Select(m => Prop(m, "Payers")!.Cast<object>().Count()).ToList();
+            Info($"server half: {sent.Count} message(s), payer rows per message [{string.Join(" ", counts)}]; rows {rows.Count}, payers {string.Join(", ", payers.Select(x => $"{Field(x, "Item"):x} x{Field(x, "Count")}"))}");
+            Check(rows.Any(r => (uint)Field(r, "Pide")! == gH.ItemEntity.Value),
+                "server half: the rows list chest A's offered gem");
+            Check(payers.Count == 1 && (uint)Field(payers[0], "Item")! == essence.Value && (uint)Field(payers[0], "Count")! == (uint)Count(chestB, essence),
+                $"server half: one payer count, of the forge's own upgrade material (read by the gem program), what chest B holds ({Count(chestB, essence)})");
+            // the hello limit is the player's and holds across a close: a close and an open inside the second post nothing
+            hello.Invoke(null, [p, Hello(false)]);
+            hello.Invoke(null, [p, Hello(true)]);
+            await Steps(2);
+            Check(opened.Count == 1, $"server half: a close and an open inside the second post no event at once ({opened.Count})");
+            await Steps(40);
+            Check(opened.Count == 2 && !opened[1].Refresh, $"server half: the opening is posted once the second is over ({opened.Count})");
+            // a player who left (the next player in the slot gets nothing of theirs): the session and every offer go
+            gone.Invoke(null, [p]);
+            sent.Clear();
+            var stillThere = Gems.WithdrawChestGems(p);
+            await Steps(4);
+            Check(stillThere == 0 && sent.Count == 0,
+                $"server half: after the player left no offer of theirs is left ({stillThere}) and nothing more is sent ({sent.Count})");
+        }
+        finally
+        {
+            sub.Dispose();
+            sendHook.SetValue(null, null);
+            forgeHook.SetValue(null, null);
+            hello.Invoke(null, [p, Hello(false)]);
+        }
     }
 }

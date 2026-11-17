@@ -51,7 +51,7 @@ static_assert(sizeof(KilnGemCraft) == 232 && offsetof(KilnGemCraft, gem_slot) ==
                   offsetof(KilnGemCraft, message) == 104,
               "kiln_gemcraft.h: KilnGemCraft (managed mirror)");
 static_assert(sizeof(KilnGemcraftStatus) == 188, "kiln_gemcraft.h: KilnGemcraftStatus (managed mirror)");
-static_assert(sizeof(KilnGemcraftApi) == 8 + 13 * 8, "kiln_gemcraft.h: the table (managed mirror)");
+static_assert(sizeof(KilnGemcraftApi) == 8 + 14 * 8, "kiln_gemcraft.h: the table (managed mirror)");
 
 namespace kitems {
 namespace {
@@ -66,7 +66,7 @@ constexpr const char* kFeature = "gems.craft";
 constexpr const char* kPayersFeature = "gems.payers";  // the handler's payment, unslot move and Recycle's give, moved
 constexpr const char* kProgram = "kiln_items_gems";
 constexpr uint32_t kMaxPayers = 64;
-constexpr uint64_t kSourceGrace = 250;  // a lapsed offer's page is still refused (not passed on) for this many steps
+constexpr uint64_t kSourceGraceMs = 10000;  // a lapsed offer's page is still refused (not passed on) this long
 constexpr uint32_t kMaxPending = 256;
 constexpr uint32_t kPerPlayerStep = 4;
 constexpr uint64_t kTimeoutSteps = 250;
@@ -210,6 +210,18 @@ struct Route {
     uint32_t moved_pay = 0, moved_return = 0, faults = 0;  // what the mid hooks did (log, judge)
 };
 thread_local Route t_route;
+std::atomic<uint32_t> g_foreign_logged{0};  // the first few foreign requests are logged with what decided them
+// Forges' upgrade materials (forge -> item; 0: not a forge), read by the gem program for forge_material (g_mu)
+std::unordered_map<uint32_t, uint32_t> g_forge_material;
+std::vector<uint32_t> g_forge_probe;  // forges asked about and not read yet (g_mu)
+std::atomic<uint32_t> g_forge_probe_n{0};
+constexpr size_t kMaxForgeCache = 256, kMaxForgeProbe = 16;
+// The end of a code action on this thread, however it ended (a fault in the game's handler too): the hook passes
+// players' actions on again and the mid hooks never move a later payment with this action's route.
+void end_code_action() {
+    t_route = Route{};
+    t_in_code = false;
+}
 kiln::MidHook2 g_mid_pay[3], g_mid_give, g_mid_unslot;
 std::atomic<int> g_route_hooks{0};  // 0 not installed, 1 installed, 2 failed (gems.payers off)
 char g_payers_why[160] = "";        // g_mu
@@ -543,7 +555,7 @@ void call_handler(uint64_t* it) {
 // Kiln takes from the first payers itself on the same transaction and points the game's call at the last one.
 void on_pay(KilnRegisters& r) {
     Route& rt = t_route;
-    if (!rt.active || rt.n == 0) return;
+    if (!t_in_code || !rt.active || rt.n == 0) return;
     if (static_cast<uint32_t>(r.r8) != rt.player || static_cast<uint32_t>(r.r9) != rt.material) return;
     auto* count = reinterpret_cast<uint32_t*>(r.rsp + 0x20);
     std::vector<std::pair<uint32_t, uint32_t>> payers;
@@ -564,7 +576,7 @@ void on_pay(KilnRegisters& r) {
 // Recycle's essence: addItems(out, tx, owner = r8d, ...).
 void on_give(KilnRegisters& r) {
     Route& rt = t_route;
-    if (!rt.active || !rt.return_to || static_cast<uint32_t>(r.r8) != rt.player) return;
+    if (!t_in_code || !rt.active || !rt.return_to || static_cast<uint32_t>(r.r8) != rt.player) return;
     r.r8 = rt.return_to;
     ++rt.moved_return;
 }
@@ -572,7 +584,7 @@ void on_give(KilnRegisters& r) {
 // Unslot's move of the socket's gem: UnslotMove(out, tx, src, owner = r9d, ...).
 void on_unslot(KilnRegisters& r) {
     Route& rt = t_route;
-    if (!rt.active || !rt.return_to || static_cast<uint32_t>(r.r9) != rt.player) return;
+    if (!t_in_code || !rt.active || !rt.return_to || static_cast<uint32_t>(r.r9) != rt.player) return;
     r.r9 = rt.return_to;
     ++rt.moved_return;
 }
@@ -640,7 +652,8 @@ struct HookCall {
     Forge forge;
     Snapshot before;
     KilnGemCraft info{};
-    bool foreign = false;  // (offers were made) the request names a gem outside the player's own inventories
+    bool foreign = false;          // (offers were made) the request names a gem or a carrier outside the player's own inventories
+    bool foreign_carrier = false;  // the carrier: refused, whatever was offered
 };
 
 bool new_action(uint64_t* it, uint32_t* version) {
@@ -659,12 +672,16 @@ bool prepare_impl(uint64_t* it, HookCall* h, char* why) {
     h->player = e;
     h->act = act_of(reinterpret_cast<const uint8_t*>(it[gems::I_INPUT]));
     h->forge = forge_of(h->v, h->act.forge);
+    if (h->forge.ok && h->forge.essence) {
+        std::lock_guard lock(g_mu);
+        if (g_forge_material.size() < kMaxForgeCache) g_forge_material[h->act.forge] = h->forge.essence;
+    }
     const uint32_t essence = h->act.action == KILN_GEM_ACTION_RECYCLE ? h->forge.essence : 0;
     snapshot(h->v, h->player, h->act, h->act.material, essence, 0, &h->before);
     describe(h->v, h->player, h->act, h->forge, h->before, &h->info);
     h->info.version = h->version;
     h->info.step = current_step();
-    if (g_sources_used.load(std::memory_order_acquire) && h->act.source) {
+    if (g_sources_used.load(std::memory_order_acquire) && (h->act.source || h->act.weapon)) {
         PageSet ps;
         bool init = false;
         std::vector<uint32_t> pages;
@@ -675,8 +692,14 @@ bool prepare_impl(uint64_t* it, HookCall* h, char* why) {
                 for (uint32_t k = 0; k < kSlotsPerPage; ++k)
                     carrier_own |= h->act.weapon && !is_empty(ps.p[i].s[k]) && pide_of(ps.p[i].s[k]) == h->act.weapon;
             }
-            h->foreign = !gems::own_gem_slot(h->act.source, h->act.weapon, carrier_own, pages);
-        } else {  // the player's pages cannot be read: at least a page an offer named is never passed on
+            const gems::Ownership o = gems::ownership(h->act.source, h->act.weapon, carrier_own, pages);
+            h->foreign = o.foreign;
+            h->foreign_carrier = o.foreign_carrier;
+            if (o.foreign && g_foreign_logged.fetch_add(1) < 8)
+                LOGI("gems: player %u's %s: gem slot %u:%u, carrier %u (%s), %u own pages", h->player, gems::action_name(h->act.action),
+                     KILN_SLOT_INVENTORY(h->act.source), KILN_SLOT_INDEX(h->act.source), h->act.weapon,
+                     carrier_own ? "the player's" : "not the player's", ps.n);
+        } else if (h->act.source) {  // the player's pages cannot be read: at least a page an offer named is never passed on
             std::lock_guard lock(g_mu);
             h->foreign = g_sources.names_page(h->player, KILN_SLOT_INVENTORY(h->act.source));
         }
@@ -751,6 +774,22 @@ bool who(uint64_t* it, uint32_t* player, uint32_t* version, bool* go, uint64_t* 
     }
 }
 
+// Real time for offers (milliseconds; a dedicated server's step rate is not fixed).
+uint64_t now_ms() { return GetTickCount64(); }
+
+// The session `player` is in now, as offers keep it: kiln.players' connection handle (slot | generation << 6) of a player
+// in game; gems::kNoSession for a player slot nobody is in game in (or whose handle is not known: fail closed); 0 for any
+// other entity (a spawned character: only server code drives its input). Never under g_mu.
+uint32_t session_now(uint32_t player) {
+    if (player < 1 || player > kMaxPlayer) return 0;
+    if (!g_players) return gems::kNoSession;
+    KilnPlayer p{};
+    p.size = sizeof p;
+    if (g_players->get(player, &p) != KILN_OK || p.state != KILN_PLAYER_IN_GAME || p.handle == 0 || p.handle == gems::kNoSession)
+        return gems::kNoSession;
+    return p.handle;
+}
+
 // A player's request naming an offered gem: consumed by the caller (the handler runs on a copy without a forge), and
 // queued as a code action with the offer's holder, payers and return. False: it cannot be queued (refused instead).
 bool queue_offered(const HookCall& h, const gems::SourceEntry& e) {
@@ -775,11 +814,9 @@ bool queue_offered(const HookCall& h, const gems::SourceEntry& e) {
     q.want_level = e.s.level;
     q.version = h.version;
     q.material = h.act.material;
-    if (h.player >= 1 && h.player <= kMaxPlayer && g_players) {
+    if (h.player >= 1 && h.player <= kMaxPlayer) {
         q.session = true;
-        KilnPlayer p{};
-        p.size = sizeof p;
-        if (g_players->get(h.player, &p) == KILN_OK && p.state == KILN_PLAYER_IN_GAME) q.handle = p.handle;
+        q.handle = e.session;  // the offer's session (find matched it to the player's now); checked again when it runs
     }
     if (g_pending.size() >= kMaxPending) return false;
     g_pending.push_back(std::move(q));
@@ -789,9 +826,9 @@ bool queue_offered(const HookCall& h, const gems::SourceEntry& e) {
 
 // The hook's answer to a request naming a gem outside the player's own inventories (offers were made in this world):
 // true = queued as the offer's code action, false = refused. Either way the caller consumes the player's request.
-bool take_foreign(const HookCall& h, uint64_t step) {
+bool take_foreign(const HookCall& h, uint64_t now, uint32_t session) {
     std::lock_guard lock(g_mu);
-    const gems::SourceEntry* e = g_sources.find(h.player, h.act.source, step);
+    const gems::SourceEntry* e = g_sources.find(h.player, h.act.source, now, session);
     if (gems::foreign_verdict(h.act.action, e) == gems::Foreign::Refuse) return false;
     const gems::SourceEntry copy = *e;
     g_sources.take(copy.s.token);  // one request per offer: a duplicate finds nothing
@@ -800,11 +837,11 @@ bool take_foreign(const HookCall& h, uint64_t step) {
     return true;
 }
 
-void refused_foreign(uint32_t player, uint64_t slot, uint32_t action, const char* why) {
+void refused_foreign(uint32_t player, uint64_t slot, uint32_t action, uint32_t carrier, const char* why) {
     const uint32_t n = g_sources_refused.fetch_add(1);
     if (n < 20 || (n & 0xff) == 0)
-        LOGW("gems: player %u's %s naming the gem slot %u:%u outside the player's inventories was refused (%s); refusals so far: %u",
-             player, gems::action_name(action), KILN_SLOT_INVENTORY(slot), KILN_SLOT_INDEX(slot), why, n + 1);
+        LOGW("gems: player %u's %s (gem slot %u:%u, carrier %u) was refused: %s; refusals so far: %u", player, gems::action_name(action),
+             KILN_SLOT_INVENTORY(slot), KILN_SLOT_INDEX(slot), carrier, why, n + 1);
 }
 
 gems::HoldBook::Now book_on(uint32_t player, uint32_t version, uint64_t step, const KilnGemCraft* info, bool hold_new) {
@@ -837,7 +874,7 @@ void __fastcall hook_gem_action(uint64_t* it) {
                 named = g_sources.names_page(player, KILN_SLOT_INVENTORY(source));
             }
             if (named) {
-                refused_foreign(player, source, 0, "the forge actions are off");
+                refused_foreign(player, source, 0, 0, "the forge actions are off and the gem slot is a page an offer named");
                 return cancel_call(it);
             }
         }
@@ -862,13 +899,21 @@ void __fastcall hook_gem_action(uint64_t* it) {
     if (h.foreign) {
         // A gem outside the player's own inventories: only an offer makes it a request Kiln runs (the offer's holder,
         // payers and return, everything checked again when it runs); anything else is consumed, nothing moves.
+        // the offer must be of the player's session now: a player who left and another in the same slot (the same
+        // entity) never share one
+        const uint32_t session = session_now(h.player);
+        const uint64_t ms = now_ms();
         bool offered = false;
         {
             std::lock_guard lock(g_mu);
-            offered = gems::foreign_verdict(h.act.action, g_sources.find(h.player, h.act.source, step)) == gems::Foreign::Offered;
+            offered = h.foreign_carrier ? false
+                                        : gems::foreign_verdict(h.act.action, g_sources.find(h.player, h.act.source, ms, session)) ==
+                                              gems::Foreign::Offered;
         }
         if (!offered) {
-            refused_foreign(h.player, h.act.source, h.act.action, "no live offer of that gem to this player");
+            refused_foreign(h.player, h.act.source, h.act.action, h.act.weapon,
+                            h.foreign_carrier ? "the carrier is not in the player's own inventories"
+                                              : "the gem slot is outside the player's inventories and no live offer of it to this player (in this session)");
             return cancel_call(it);
         }
         if (holding || book) {  // GemCraftingEvent sees it as any other forge action of the player
@@ -876,7 +921,7 @@ void __fastcall hook_gem_action(uint64_t* it) {
             if (now == gems::HoldBook::Now::Hold) return;
             if (now == gems::HoldBook::Now::Cancel) return cancel_call(it);
         }
-        if (!take_foreign(h, step)) refused_foreign(h.player, h.act.source, h.act.action, "the offer lapsed, was used, or no room to queue it");
+        if (!take_foreign(h, ms, session)) refused_foreign(h.player, h.act.source, h.act.action, h.act.weapon, "the offer lapsed, was used, or no room to queue it");
         return cancel_call(it);
     }
     if (holding || book) {
@@ -1115,7 +1160,12 @@ void run_code_impl(CodeRun* cr) {
     if (!r.gem_slot && r.carrier && (r.action == KILN_GEM_ACTION_UPGRADE || r.action == KILN_GEM_ACTION_RECYCLE))
         a.source = KILN_SLOT_ID(r.carrier, 0);  // a socketed gem, as the client names it: the carrier's socket
     const Forge f = forge_of(v, r.forge);
-    a.material = q && q->material ? q->material : f.essence;
+    // the material: the one the player's client named when the player pays (the game's own rule), the forge's own
+    // upgrade material when containers pay (a client never picks what a chest gives)
+    const bool others_pay = gems::request_routed(r) && r.action != KILN_GEM_ACTION_RECYCLE &&
+                            !(r.flags & (KILN_GEM_FREE | KILN_GEM_COST)) && r.pay_from != KILN_GEM_PAY_PLAYER;
+    a.material = q && q->material && !others_pay ? q->material : f.essence;
+    if (others_pay && !a.material) return finish_status(c, KILN_GEM_UNAVAILABLE, "the forge's upgrade material is not readable");
     const uint32_t essence = r.action == KILN_GEM_ACTION_RECYCLE ? f.essence : 0;
     Snapshot b;
     snapshot(v, player, a, a.material, essence, 0, &b, ret);
@@ -1196,15 +1246,20 @@ void run_code_impl(CodeRun* cr) {
     snapshot(v, player, a, a.material, essence, 0, &b2, ret);
     const uint64_t paid_before = route_pays ? route_total(rt) : 0;
     set_request(a);
-    t_in_code = true;
-    if (routed) {
-        rt.active = true;
-        t_route = rt;
+    struct CodeScope {  // normal and C++ exits; a fault (SEH) ends it in each()'s fault path
+        ~CodeScope() { end_code_action(); }
+    };
+    Route used;
+    {
+        CodeScope scope;
+        t_in_code = true;
+        if (routed) {
+            rt.active = true;
+            t_route = rt;
+        }
+        call_handler(cr->h);
+        used = t_route;
     }
-    call_handler(cr->h);
-    const Route used = t_route;
-    t_route = Route{};
-    t_in_code = false;
     Snapshot after;
     snapshot(v, player, a, a.material, essence, b2.socket_pide, &after, ret);
     gems::Outcome o = gems::judge(r.action, b2, after);
@@ -1299,8 +1354,26 @@ void push_ended(const Request& q, const KilnGemCraft& c) {
     }
 }
 
+// The forges forge_material asked about, read through the handler's own template accessor (SEH: game memory).
+bool probe_forges_impl(const uint64_t* h, const uint32_t* forges, uint32_t n, uint32_t* out) {
+    View v;
+    if (!view_of(const_cast<uint64_t*>(h), &v)) return false;
+    for (uint32_t i = 0; i < n; ++i) {
+        const Forge f = forge_of(v, forges[i]);
+        out[i] = f.ok ? f.essence : 0;
+    }
+    return true;
+}
+bool probe_forges(const uint64_t* h, const uint32_t* forges, uint32_t n, uint32_t* out) {
+    __try {
+        return probe_forges_impl(h, forges, n, out);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
 void KILN_CALL each(KilnProgramCtx* ctx, uint64_t* it, KilnEntity player, void*) {
-    if (g_pending_n.load(std::memory_order_acquire) == 0) return;
+    if (g_pending_n.load(std::memory_order_acquire) == 0 && g_forge_probe_n.load(std::memory_order_acquire) == 0) return;
     Request batch[kPerPlayerStep];
     uint32_t n = 0;
     {
@@ -1317,7 +1390,16 @@ void KILN_CALL each(KilnProgramCtx* ctx, uint64_t* it, KilnEntity player, void*)
         }
         g_pending_n.store(static_cast<uint32_t>(g_pending.size()), std::memory_order_release);
     }
-    if (!n) return;
+    uint32_t probe[kMaxForgeProbe];
+    uint32_t pn = 0;
+    if (g_forge_probe_n.load(std::memory_order_acquire)) {
+        std::lock_guard lock(g_mu);
+        for (uint32_t f : g_forge_probe)
+            if (pn < kMaxForgeProbe) probe[pn++] = f;
+        g_forge_probe.clear();
+        g_forge_probe_n.store(0, std::memory_order_release);
+    }
+    if (!n && !pn) return;
     Access acc{};
     bool ok = false;
     char why[160] = "";
@@ -1337,6 +1419,13 @@ void KILN_CALL each(KilnProgramCtx* ctx, uint64_t* it, KilnEntity player, void*)
         LOGI("program %s runs: accessors verified (player %u)", kProgram, player);
     }
     uint64_t h[gems::I_COUNT];
+    if (pn) {
+        uint32_t mat[kMaxForgeProbe] = {};
+        const bool read = ok && !g_off.load() && g_layout.load() == 1 && (build_iterator(ctx, it, h), probe_forges(h, probe, pn, mat));
+        std::lock_guard lock(g_mu);
+        for (uint32_t i = 0; i < pn; ++i)
+            if (read && g_forge_material.size() < kMaxForgeCache) g_forge_material[probe[i]] = mat[i];
+    }
     for (uint32_t i = 0; i < n; ++i) {
         CodeRun cr{};
         cr.acc = &acc;
@@ -1350,7 +1439,7 @@ void KILN_CALL each(KilnProgramCtx* ctx, uint64_t* it, KilnEntity player, void*)
         } else {
             build_iterator(ctx, it, h);
             if (!run_code(&cr, &code)) {
-                t_in_code = false;
+                end_code_action();  // the route too: a later payment on this thread is never moved by it
                 abandon_tx(g_tx);
                 char b[160];
                 std::snprintf(b, sizeof b, "the game faulted (0x%08lx) in a %s for player %u", code, gems::action_name(cr.r.action), player);
@@ -1675,9 +1764,21 @@ KilnResult KILN_CALL t_offer(KilnOwner owner, KilnGemSource* sources, uint32_t c
         lower(KILN_CAP_REASON_FAULTED, why);
         return KILN_ERR_UNAVAILABLE;
     }
+    // each player's session now (kiln.players, read before the lock): an offer belongs to it
+    std::vector<std::pair<uint32_t, uint32_t>> sessions;
+    for (uint32_t i = 0; i < count; ++i) {
+        bool seen = false;
+        for (auto& pr : sessions) seen |= pr.first == sources[i].player;
+        if (!seen) sessions.push_back({sources[i].player, session_now(sources[i].player)});
+    }
+    auto session_of = [&](uint32_t player) {
+        for (auto& pr : sessions)
+            if (pr.first == player) return pr.second;
+        return gems::kNoSession;
+    };
     const char* bad = "";
     std::lock_guard lock(g_mu);
-    if (!g_sources.offer(owner, sources, count, current_step(), &random_token, &bad)) {
+    if (!g_sources.offer(owner, sources, count, now_ms(), session_of, &random_token, &bad)) {
         LOGW("gems: an offer of %u gem(s) was refused: %s", count, bad);
         return std::strstr(bad, "more than") ? KILN_ERR_BUFFER_TOO_SMALL : KILN_ERR_INVALID_ARGUMENT;
     }
@@ -1694,13 +1795,29 @@ KilnResult KILN_CALL t_withdraw(KilnOwner owner, KilnEntity player, KilnEntity h
 
 KilnResult KILN_CALL t_sources(KilnEntity player, KilnGemSource* out, uint32_t capacity, uint32_t* out_count) {
     if (!out_count || !player || (capacity && !out)) return KILN_ERR_INVALID_ARGUMENT;
+    const uint32_t session = session_now(player);
     std::lock_guard lock(g_mu);
     uint32_t written = 0;
-    const uint32_t n = g_sources.live_for(player, current_step(), [&](const KilnGemSource& s) {
+    const uint32_t n = g_sources.live_for(player, now_ms(), session, [&](const KilnGemSource& s) {
         if (written < capacity) out[written++] = s;
     });
     *out_count = n;
     return n > capacity ? KILN_ERR_BUFFER_TOO_SMALL : KILN_OK;
+}
+
+KilnResult KILN_CALL t_forge_material(KilnEntity forge, uint32_t* out_item) {
+    if (!forge || !out_item) return KILN_ERR_INVALID_ARGUMENT;
+    *out_item = 0;
+    std::lock_guard lock(g_mu);
+    if (auto it = g_forge_material.find(forge); it != g_forge_material.end()) {
+        *out_item = it->second;
+        return it->second ? KILN_OK : KILN_ERR_INVALID_ARGUMENT;
+    }
+    if (std::find(g_forge_probe.begin(), g_forge_probe.end(), forge) == g_forge_probe.end() && g_forge_probe.size() < kMaxForgeProbe) {
+        g_forge_probe.push_back(forge);
+        g_forge_probe_n.store(static_cast<uint32_t>(g_forge_probe.size()), std::memory_order_release);
+    }
+    return KILN_ERR_NOT_FOUND;
 }
 
 KilnResult KILN_CALL t_payers(KilnEntity player, uint32_t pay_from, KilnEntity pay_holder, KilnEntity* out, uint32_t capacity,
@@ -1722,7 +1839,7 @@ KilnResult KILN_CALL t_payers(KilnEntity player, uint32_t pay_from, KilnEntity p
 const KilnGemcraftApi kTable = {
     {sizeof(KilnGemcraftApi), KILN_GEMCRAFT_VERSION},
     &t_status, &t_submit, &t_cancel, &t_hold, &t_held, &t_decide, &t_watch, &t_crafted,
-    &t_extras, &t_offer, &t_withdraw, &t_sources, &t_payers,
+    &t_extras, &t_offer, &t_withdraw, &t_sources, &t_payers, &t_forge_material,
 };
 
 template <typename F>
@@ -1866,7 +1983,7 @@ void gems_pre(uint64_t step) {
             }
             ++i;
         }
-        g_sources.expire(step, kSourceGrace);
+        g_sources.expire(now_ms(), kSourceGraceMs);
         g_pending_n.store(static_cast<uint32_t>(g_pending.size()), std::memory_order_release);
     }
     // gems.payers' mid hooks go in when a request first needs them (tick thread); without them those requests end
@@ -1936,6 +2053,9 @@ void gems_world_closed() {
         book_count();
         g_sources.clear();
         g_sources_used.store(false);
+        g_forge_material.clear();  // entity ids belong to the world
+        g_forge_probe.clear();
+        g_forge_probe_n.store(0, std::memory_order_release);
     }
     g_layout.store(0);
     g_view_storage.store(0);

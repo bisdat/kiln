@@ -4,8 +4,8 @@
 // Kiln's native side (kiln.gemcraft) mints a short-lived token per offered gem and later finds it again from the game's
 // own request, which names the gem's real slot; Kiln's channel "kiln:gemsources" (required: false) carries the offers to
 // the player's Kiln client, which lists them in the GEMS grid (kiln.ui.values gemforge_sources, ui.gemforge.sources).
-// Nothing a client sends is authority: the client only says "my forge screen is open" and which materials its price
-// test asked about. docs/kiln/services/gems-forge.md ("Chest gems"), docs/kiln/ui-gemforge.md.
+// Nothing a client sends is authority: the client only says "my forge screen is open" (a material list on the wire is
+// ignored). docs/kiln/services/gems-forge.md ("Chest gems"), docs/kiln/ui-gemforge.md.
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 
@@ -79,8 +79,8 @@ public sealed record GemSourceOptions
     /// else a container your mod vouches for (the chest itself, for example).</summary>
     public EntityId ReturnTo { get; init; }
 
-    /// <summary>How long the offer is good for (default 30 s; 0.04 s to 120 s). <see cref="GemForgeOpenedEvent"/> comes
-    /// again every 5 s while the player's forge screen stays open: offer again there.</summary>
+    /// <summary>How long the offer is good for, real time (default 30 s; 1 ms to 120 s). <see cref="GemForgeOpenedEvent"/>
+    /// comes again every 5 s while the player's forge screen stays open: offer again there.</summary>
     public TimeSpan Lifetime { get; init; } = TimeSpan.FromSeconds(30);
 }
 
@@ -156,7 +156,7 @@ public static partial class Gems
     /// <param name="holder">A container (a chest; not a player or an NPC) whose loose gems the player may use now.</param>
     /// <param name="options">Who pays, where Recycle's essence goes, how long the offer is good for.</param>
     /// <returns>The gems offered with their tokens, or a refusal (<see cref="GemSourceOffer.Refusal"/>) and nothing offered.</returns>
-    /// <exception cref="ArgumentException">No player or holder, the player as the holder, or a lifetime outside 0.04 s to 120 s.</exception>
+    /// <exception cref="ArgumentException">No player or holder, the player as the holder, or a lifetime outside 1 ms to 120 s.</exception>
     /// <exception cref="InvalidOperationException">Not on the tick thread, or the calling mod is unloading.</exception>
     /// <exception cref="KilnUnavailableException"><c>gems.sources</c> is off, or a payer or return other than the player
     /// while <c>gems.payers</c> is off.</exception>
@@ -186,7 +186,9 @@ public static partial class Gems
 
 // ---- the wire (channel "kiln:gemsources" v1) ----
 
-/// <summary>Client to server: the forge screen is open (or closed), and the materials its price test asked about.</summary>
+/// <summary>Client to server: the forge screen is open (or closed). <c>Wants</c> (at most 8 materials) is kept on the wire
+/// but ignored by the server since the review of 2026-11-17 (the counts are of the forge's own upgrade material); Kiln's
+/// client sends none.</summary>
 internal sealed record GemForgeHello(bool Open, uint[] Wants)
 {
     public const ushort Id = 1;
@@ -258,31 +260,41 @@ internal static class GemSources
 {
     public const string ChannelName = "kiln:gemsources";
     public const string ChannelVersion = "1";
-    internal const double StepsPerSecond = 25;     // a dedicated server's step: 40 ms
-    internal const int MaxLifetimeSteps = 3000;
+    internal const int MaxLifetimeMs = 120_000;
     internal static readonly TimeSpan KeepAlive = TimeSpan.FromSeconds(5);
+    private const long PostEveryMs = 1000;  // a player's hellos post GemForgeOpenedEvent at most once a second
+    private const int MaterialTries = 250;   // pumps a forge's material is asked for before the counts are left out
     private const double ForgeRadius = 12;
 
     private static readonly object Gate = new();
     private static NetChannel? _channel;
-    private static bool _started, _clientStarted;
+    private static bool _started, _clientStarted, _playersWatched;
 
-    // server: the open forge screens (player -> what its client asked about) and players whose offers changed this tick
+    // server: the open forge screens (player -> its forge) and players whose offers changed this tick
     private sealed class Session
     {
-        public HashSet<uint> Wants = new();
         public EntityId Forge;
-        public ulong LastPost;  // the step of the last GemForgeOpenedEvent: a client's hellos post at most one a second
+        public bool Posted;        // the opening was posted (later posts are refreshes)
+        public bool PostDue;       // a hello inside the player's second: the pump posts once the second is over
+        public uint Material;      // the forge's upgrade material (what containers pay in); 0 not known
+        public int MaterialAsks;   // pumps that asked kiln.gemcraft for it
     }
     private static readonly Dictionary<uint, Session> Sessions = new();
+    private static readonly Dictionary<uint, long> LastPost = new();  // player -> ms of the last post (kept across a close)
     private static readonly HashSet<uint> Dirty = new();
     private static readonly ConcurrentQueue<(EntityId Player, GemForgeHello Hello)> Inbox = new();
-    private static readonly Dictionary<ulong, ulong> OfferedAt = new();  // token -> the step it was offered in (row lifetimes)
     private static readonly ConditionalWeakTable<ModContext, StrongBox<ulong>> Owners = new();
     private static long _nextOwner = 1;  // 1: Kiln's own (no mod); 0 means every owner to kiln.gemcraft
 
+    /// <summary>Real time in ms: the clock kiln.gemcraft's expiries use (GetTickCount64). Tests set their own.</summary>
+    internal static Func<long> Clock = static () => Environment.TickCount64;
+    internal static long NowMs() => Clock();
+
     /// <summary>Test hook: what the server sent (player, message) instead of the channel; null: the channel.</summary>
     internal static Action<EntityId, object>? SendHook;
+
+    /// <summary>Test hook: the forge near a player; null: the world's nearest Shroud Forge.</summary>
+    internal static Func<EntityId, EntityId>? ForgeNearHook;
 
     /// <summary>Kiln.Abilities' start (both sides): the channel, and on a game client the forge screen's watch.</summary>
     internal static void Start()
@@ -343,6 +355,53 @@ internal static class GemSources
         }
     }
 
+    // The server's watch of players leaving and joining (a player entity is the slot + 1: the next player in the slot
+    // must never find the last one's session or offers). Started with the first hello or offer.
+    private static void WatchPlayers()
+    {
+        lock (Gate)
+        {
+            if (_playersWatched) return;
+            _playersWatched = true;
+        }
+        var outer = ModContext.CurrentMod;
+        ModContext.CurrentMod = null;  // Kiln's own subscription
+        try
+        {
+            Events.On<PlayerLeftEvent>(static e => PlayerGone(e.Player.Entity));
+            Events.On<PlayerJoinedEvent>(static e => PlayerGone(e.Player.Entity));
+        }
+        catch (Exception e) when (e is KilnUnavailableException or InvalidOperationException or TypeInitializationException or FileNotFoundException)
+        {
+            // kiln.players is not here: the offers stay bound to the session natively (kiln.gemcraft checks it)
+            ModLog.Warn($"kiln.abilities: chest gems do not see players leave ({e.Message}); offers still end with the player's session");
+        }
+        finally
+        {
+            ModContext.CurrentMod = outer;
+        }
+    }
+
+    /// <summary>A player left, or a player joined into the slot (tick thread): the forge session, its rate limit and every
+    /// owner's offers to the entity go.</summary>
+    internal static void PlayerGone(EntityId player)
+    {
+        if (player.IsNone) return;
+        lock (Gate)
+        {
+            Sessions.Remove(player.Value);
+            LastPost.Remove(player.Value);
+            Dirty.Remove(player.Value);
+        }
+        try
+        {
+            GemCrafting.Backend.Withdraw(0, player.Value, 0, out _);
+        }
+        catch (Exception e) when (e is KilnUnavailableException or InvalidOperationException)
+        {
+        }
+    }
+
     /// <summary>Why offers cannot be made here; null: they can.</summary>
     internal static string? WhyOff()
     {
@@ -352,18 +411,18 @@ internal static class GemSources
         return null;
     }
 
-    internal static int LifetimeSteps(TimeSpan t)
+    internal static int LifetimeMs(TimeSpan t)
     {
-        var steps = Math.Round(t.TotalSeconds * StepsPerSecond);
-        if (double.IsNaN(steps) || steps < 1 || steps > MaxLifetimeSteps)
-            throw new ArgumentException("a lifetime of 0.04 s to 120 s", nameof(t));
-        return (int)steps;
+        var ms = Math.Round(t.TotalMilliseconds);
+        if (double.IsNaN(ms) || ms < 1 || ms > MaxLifetimeMs)
+            throw new ArgumentException("a lifetime of 1 ms to 120 s", nameof(t));
+        return (int)ms;
     }
 
     /// <summary>The native offer entries for the loose gems of <paramref name="slots"/> (a gem item, one of it, with its
     /// own item entity). Pure (tests).</summary>
     internal static List<GemcraftNative.Source> Entries(EntityId player, EntityId holder, IReadOnlyList<InventorySlot> slots,
-        GemSourceOptions o, int lifetimeSteps, Func<ItemId, bool> isGem)
+        GemSourceOptions o, int lifetimeMs, Func<ItemId, bool> isGem)
     {
         var list = new List<GemcraftNative.Source>();
         foreach (var s in slots)
@@ -375,7 +434,7 @@ internal static class GemSources
                 Size = (uint)Unsafe.SizeOf<GemcraftNative.Source>(), Player = player.Value, Holder = holder.Value, Slot = s.Slot.Value,
                 Gem = s.ItemEntity.Value, Item = s.Item.Value, Level = (uint)Math.Max(0, s.Level), PayFrom = (uint)o.PayFrom.Kind,
                 PayHolder = o.PayFrom.Kind == GemPayerKind.Container ? o.PayFrom.Container.Value : 0, ReturnTo = o.ReturnTo.Value,
-                LifetimeSteps = (uint)lifetimeSteps, Rarity = s.Rarity is { } r ? (uint)r : 0,
+                LifetimeMs = (uint)lifetimeMs, Rarity = s.Rarity is { } r ? (uint)r : 0,
             });
         }
         return list;
@@ -389,7 +448,7 @@ internal static class GemSources
         if (player.IsNone) throw new ArgumentException("no player", nameof(player));
         if (holder.IsNone) throw new ArgumentException("no holder", nameof(holder));
         if (holder == player) throw new ArgumentException("the holder is a container, not the player", nameof(holder));
-        var steps = LifetimeSteps(o.Lifetime);
+        var ms = LifetimeMs(o.Lifetime);
         var mod = ModContext.CurrentMod;
         if (mod is { Alive: false }) throw new InvalidOperationException("the mod is unloading");
         if (WhyOff() is { } off) throw new KilnUnavailableException(Gems.SourcesCapability, $"Gems.OfferChestGems: {off}");
@@ -399,7 +458,8 @@ internal static class GemSources
         var inv = contents ?? Items.Read(holder);
         if (inv is null || !inv.Initialized) return No("the holder has no initialized inventory (not loaded, or no container)");
         if (inv.IsPlayer || inv.IsNpc) return No("the holder is a player or an NPC, not a container");
-        var entries = Entries(player, holder, inv.Slots, o, steps, isGem ?? (id => Items.Get(id)?.Category == ItemCategory.WeaponGem));
+        WatchPlayers();
+        var entries = Entries(player, holder, inv.Slots, o, ms, isGem ?? (id => Items.Get(id)?.Category == ItemCategory.WeaponGem));
         var offered = new List<OfferedGem>();
         if (entries.Count > 0)
         {
@@ -409,15 +469,13 @@ internal static class GemSources
                 return No(rc switch
                 {
                     GemcraftNative.BufferTooSmall => "the player would hold more than 256 offered gems (or more than 4096 are live)",
-                    GemcraftNative.InvalidArgument => "kiln.gemcraft refused an entry",
+                    GemcraftNative.InvalidArgument => "kiln.gemcraft refused an entry, or the player is not in game",
                     _ => $"kiln.gemcraft refused the offer (error {rc}): {WhyOff() ?? "see kiln.log"}",
                 });
-            var now = ServiceTick.Step;
             lock (Gate)
             {
                 foreach (var e in arr)
                 {
-                    OfferedAt[e.Token] = now;
                     var slot = inv.Slots.FirstOrDefault(s => s.Slot.Value == e.Slot);
                     offered.Add(new OfferedGem(e.Token, slot?.Ref is { IsNone: false } r ? r : new ItemInstanceRef(new EntityRef(new EntityId(e.Gem), 0), new ItemId(e.Item)),
                         new SlotId(e.Slot), (int)e.Level));
@@ -446,6 +504,7 @@ internal static class GemSources
     /// <summary>The nearest Shroud Forge within 12 m of the player; none when Kiln cannot tell.</summary>
     private static EntityId ForgeNear(EntityId player)
     {
+        if (ForgeNearHook is { } hook) return hook(player);
         try
         {
             if (World.Transform(player) is not { } t) return EntityId.None;
@@ -458,28 +517,42 @@ internal static class GemSources
         }
     }
 
-    /// <summary>The server's part of the pump (tick thread, every Pre): the clients' hellos, then the rows of players whose
-    /// offers changed.</summary>
+    /// <summary>The server's part of the pump (tick thread, every Pre): the clients' hellos, openings due after the
+    /// player's second, the forges' materials still to read, then the rows of players whose offers changed.</summary>
     internal static void PumpServer()
     {
         var n = 0;
         while (n++ < 256 && Inbox.TryDequeue(out var item)) Hello(item.Player, item.Hello);
+        var now = NowMs();
+        List<(uint Player, EntityId Forge, bool Refresh)>? due = null;
         uint[] dirty;
-        var now = ServiceTick.Step;
         lock (Gate)
         {
-            // the offer steps of tokens long past any lifetime go
-            if (OfferedAt.Count > 0 && now % 250 == 0)
-                foreach (var t in OfferedAt.Where(kv => now > kv.Value + MaxLifetimeSteps + 250).Select(kv => kv.Key).ToList())
-                    OfferedAt.Remove(t);
-            if (Dirty.Count == 0) return;
+            foreach (var (p, s) in Sessions)
+            {
+                if (s.PostDue && !(LastPost.TryGetValue(p, out var last) && now - last < PostEveryMs && now >= last))
+                {
+                    s.PostDue = false;
+                    LastPost[p] = now;
+                    (due ??= []).Add((p, s.Forge, s.Posted));
+                    s.Posted = true;
+                }
+                // the forge's material not read yet: ask again (the rows go again once it is known)
+                if (s.Material == 0 && !s.Forge.IsNone && s.MaterialAsks is > 0 and < MaterialTries) Dirty.Add(p);
+            }
+            if (LastPost.Count > 64)  // limits long past matter no more
+                foreach (var p in LastPost.Where(kv => now - kv.Value > 60_000 && !Sessions.ContainsKey(kv.Key)).Select(kv => kv.Key).ToList())
+                    LastPost.Remove(p);
             dirty = Dirty.ToArray();
             Dirty.Clear();
         }
+        if (due is not null)
+            foreach (var (p, forge, refresh) in due) Post(new EntityId(p), forge, refresh);
         foreach (var p in dirty) SendRows(new EntityId(p));
     }
 
-    // A client's hello (tick thread).
+    // A client's hello (tick thread). Only "the screen is open / closed" counts: the materials a client names are ignored
+    // (the counts are of the forge's own upgrade material, what containers pay in).
     internal static void Hello(EntityId player, GemForgeHello m)
     {
         if (player.IsNone) return;
@@ -496,24 +569,30 @@ internal static class GemSources
             return;
         }
         if (WhyOff() is not null) return;  // the hello came over kiln.net: the row's other needs are kiln.gemcraft's
-        bool refresh, more = false;
+        WatchPlayers();
+        bool fresh, limited, refresh;
         Session s;
-        var now = ServiceTick.Step;
+        var now = NowMs();
         lock (Gate)
         {
-            refresh = Sessions.TryGetValue(player.Value, out s!);
-            if (!refresh) Sessions[player.Value] = s = new Session();
-            foreach (var w in m.Wants)
-                if (w != 0 && s.Wants.Count < 8) more |= s.Wants.Add(w);
-            if (refresh && now < s.LastPost + (ulong)StepsPerSecond && now >= s.LastPost)
+            fresh = !Sessions.TryGetValue(player.Value, out s!);
+            if (fresh) Sessions[player.Value] = s = new Session();
+            // the player's limit, kept across a close: a close and an open inside the second post nothing more either
+            limited = LastPost.TryGetValue(player.Value, out var last) && now - last < PostEveryMs && now >= last;
+            if (limited)
             {
-                if (more) Dirty.Add(player.Value);  // a new material: the counts again, no new event
-                return;
+                if (!s.Posted) s.PostDue = true;  // the opening: posted by the pump once the second is over
             }
-            s.LastPost = now;
+            else
+            {
+                LastPost[player.Value] = now;
+                s.PostDue = false;
+            }
+            refresh = s.Posted;
+            if (!limited) s.Posted = true;
         }
-        if (!refresh) s.Forge = ForgeNear(player);
-        Post(player, s.Forge, refresh);
+        if (fresh) s.Forge = ForgeNear(player);
+        if (!limited) Post(player, s.Forge, refresh);
     }
 
     private static void Post(EntityId player, EntityId forge, bool refresh)
@@ -529,16 +608,18 @@ internal static class GemSources
         lock (Gate) Dirty.Add(player.Value);
     }
 
-    /// <summary>The rows and payer counts of a player's live offers, as the client gets them. Pure but for the reads it is
-    /// given (tests).</summary>
-    internal static GemForgeOffers Rows(IReadOnlyList<GemcraftNative.Source> live, ICollection<uint> wants, uint player, ulong now,
-        Func<ulong, ulong> offeredAt, Func<GemcraftNative.Source, uint[]> payersOf, Func<uint, uint, uint> countIn)
+    /// <summary>The rows and payer counts of a player's live offers, as the client gets them: <paramref name="material"/>
+    /// is the forge's own upgrade material (0: not known, no counts). Pure but for the reads it is given (tests).</summary>
+    internal static GemForgeOffers Rows(IReadOnlyList<GemcraftNative.Source> live, uint material, uint player, long nowMs,
+        Func<GemcraftNative.Source, uint[]> payersOf, Func<uint, uint, uint> countIn)
     {
         var groups = new List<(uint PayFrom, uint PayHolder)>();
         var rows = new List<GemForgeOfferRow>();
         var payers = new List<GemForgeOfferPayer>();
         foreach (var s in live)
         {
+            var left = (long)Math.Min(s.ExpiresMs, long.MaxValue) - nowMs;
+            if (left <= 0) continue;
             byte group = 0;
             if (s.PayFrom != 0)
             {
@@ -548,24 +629,19 @@ internal static class GemSources
                     if (groups.Count >= 255) continue;
                     groups.Add((s.PayFrom, s.PayHolder));
                     g = groups.Count - 1;
-                    var list = payersOf(s);
-                    foreach (var item in wants)
+                    if (material != 0 && payers.Count < 64)
                     {
-                        if (payers.Count >= 64) break;
                         long total = 0;
-                        foreach (var e in list)
-                            if (e != player) total += countIn(e, item);
-                        payers.Add(new GemForgeOfferPayer((byte)(g + 1), s.PayFrom == (uint)GemPayerKind.PlayerThenBaseStorage, item,
+                        foreach (var e in payersOf(s))
+                            if (e != player) total += countIn(e, material);
+                        payers.Add(new GemForgeOfferPayer((byte)(g + 1), s.PayFrom == (uint)GemPayerKind.PlayerThenBaseStorage, material,
                             (uint)Math.Min(total, int.MaxValue)));
                     }
                 }
                 group = (byte)(g + 1);
             }
-            var age = now >= offeredAt(s.Token) ? now - offeredAt(s.Token) : 0;
-            var left = s.LifetimeSteps > age ? s.LifetimeSteps - age : 0;
-            if (left == 0) continue;
             rows.Add(new GemForgeOfferRow((uint)s.Slot, (byte)((s.Slot >> 32) & 0xff), s.Item, s.Gem, s.Level, (byte)s.Rarity, group, s.Token,
-                (uint)Math.Min(left * 1000 / StepsPerSecond, uint.MaxValue)));
+                (uint)Math.Min(left, MaxLifetimeMs)));
         }
         return new GemForgeOffers(rows.ToArray(), payers.ToArray());
     }
@@ -573,28 +649,42 @@ internal static class GemSources
     private static void SendRows(EntityId player)
     {
         if (GemCrafting.Backend.Extras() is null) return;
-        uint[] wants;
+        Session? s;
         lock (Gate)
+            if (!Sessions.TryGetValue(player.Value, out s)) return;  // the screen closed: nothing to send
+        if (s.Material == 0 && !s.Forge.IsNone)
         {
-            if (!Sessions.TryGetValue(player.Value, out var s)) return;  // the screen closed: nothing to send
-            wants = s.Wants.ToArray();
+            var rc = GemCrafting.Backend.ForgeMaterial(s.Forge.Value, out var item);
+            lock (Gate)
+            {
+                if (rc == GemcraftNative.Ok) s.Material = item;
+                else if (rc == GemcraftNative.NotFound) s.MaterialAsks++;
+                else s.MaterialAsks = MaterialTries;  // no forge: the rows go without counts
+            }
         }
         var buf = new GemcraftNative.Source[256];
         for (var i = 0; i < buf.Length; i++) buf[i].Size = (uint)Unsafe.SizeOf<GemcraftNative.Source>();
-        var rc = GemCrafting.Backend.Sources(player.Value, buf, out var n);
-        if (rc != GemcraftNative.Ok && rc != GemcraftNative.BufferTooSmall) return;
+        var sr = GemCrafting.Backend.Sources(player.Value, buf, out var n);
+        if (sr != GemcraftNative.Ok && sr != GemcraftNative.BufferTooSmall) return;
         var live = buf.AsSpan(0, (int)Math.Min(n, (uint)buf.Length)).ToArray();
-        Dictionary<ulong, ulong> at;
-        lock (Gate) at = new Dictionary<ulong, ulong>(OfferedAt);
-        var now = ServiceTick.Step;
-        var msg = Rows(live, wants, player.Value, now, t => at.TryGetValue(t, out var s) ? s : now,
-            s =>
+        var msg = Rows(live, s.Material, player.Value, NowMs(),
+            src =>
             {
                 Span<uint> list = stackalloc uint[64];
-                return GemCrafting.Backend.Payers(player.Value, s.PayFrom, s.PayHolder, list, out var k) is GemcraftNative.Ok or GemcraftNative.BufferTooSmall
+                return GemCrafting.Backend.Payers(player.Value, src.PayFrom, src.PayHolder, list, out var k) is GemcraftNative.Ok or GemcraftNative.BufferTooSmall
                     ? list[..(int)Math.Min(k, 64u)].ToArray() : [];
             },
-            (e, item) => (uint)Math.Max(0, Items.Read(new EntityId(e))?.Count(new ItemId(item)) ?? 0));
+            (e, item) =>
+            {
+                try
+                {
+                    return (uint)Math.Max(0, Items.Read(new EntityId(e))?.Count(new ItemId(item)) ?? 0);
+                }
+                catch (Exception x) when (x is KilnUnavailableException or InvalidOperationException)
+                {
+                    return 0;  // unreadable: the client's price test shows less, the server still checks the payment
+                }
+            });
         Send(player, msg);
     }
 
@@ -627,7 +717,6 @@ internal static class GemSources
     {
         var player = new EntityId(c.Player);
         var message = GemCrafting.Message(c);
-        lock (Gate) OfferedAt.Remove(c.Ticket);
         Send(player, new GemForgeOutcome(c.Ticket, c.Status, c.Status == 0 ? "" : message.Length > 0 ? message : ((GemCraftStatus)c.Status).ToString()));
         Session? s;
         lock (Gate) Sessions.TryGetValue(player.Value, out s);
@@ -639,19 +728,28 @@ internal static class GemSources
         lock (Gate)
         {
             Sessions.Clear();
+            LastPost.Clear();
             Dirty.Clear();
-            OfferedAt.Clear();
+            _playersWatched = false;
         }
         while (Inbox.TryDequeue(out _)) { }
         SendHook = null;
+        ForgeNearHook = null;
+        Clock = static () => Environment.TickCount64;
+        TickSwitchHook = null;
+        ServerSideHook = null;
+        _open = _ticking = false;
     }
 
     // ================================================================ client ====
 
-    private static bool _open;
+    private static bool _open, _ticking;
     private static long _lastHello;
-    private static uint[] _lastWants = [];
     private static int _setFailures;
+
+    /// <summary>Test hooks: the frame watch switched on or off; whether the server takes hellos (hosting, or Kiln there).</summary>
+    internal static Action<bool>? TickSwitchHook;
+    internal static Func<bool>? ServerSideHook;
 
     private static void StartClient()
     {
@@ -667,7 +765,7 @@ internal static class GemSources
             ModContext.CurrentMod = null;
             try
             {
-                Ui.Screens.UiTick += ClientTick;
+                Ui.Screens.Changed += ClientChanged;  // screen changes only: no work in other frames
             }
             finally
             {
@@ -683,36 +781,66 @@ internal static class GemSources
     // ui.screens reads unavailable before the game's UI exists (boot): the watch starts anyway and stays idle until then.
     private static bool UiScreensMayCome() => GemForgeSources.TableHere;
 
-    // Every UI frame (the game's UI thread): the forge screen opened, stays open (every 5 s, or a new material to ask
-    // about), or closed.
-    private static void ClientTick(GameScreen now)
+    private static bool ServerSide() => ServerSideHook?.Invoke() ?? (Client.IsHosting || Network.ServerHasKiln);
+
+    // A screen change (the game's UI thread): the forge screen opened (the frame watch starts, the server is told) or
+    // closed (the watch stops, the rows go, the server is told).
+    internal static void ClientChanged(GameScreen before, GameScreen now)
     {
-        var open = now.Hud == HudScreen.ShroudForge && (Client.IsHosting || Network.ServerHasKiln);
-        var tick = Environment.TickCount64;
-        if (!open)
-        {
-            if (_open)
-            {
-                _open = false;
-                Hello(false, []);
-                GemForgeSources.Set([], []);
-            }
-            return;
-        }
-        var wants = GemForgeSources.State() is { } st ? st.Wanted : [];
-        var newWants = wants.Any(w => !_lastWants.Contains(w));
-        if (!_open || newWants || tick - _lastHello >= (long)KeepAlive.TotalMilliseconds)
+        var open = now.Hud == HudScreen.ShroudForge && ServerSide();
+        if (open == _ticking) return;
+        _ticking = open;
+        SwitchTick(open);
+        if (open)
         {
             _open = true;
-            _lastHello = tick;
-            _lastWants = _lastWants.Union(wants).Take(8).ToArray();
-            Hello(true, _lastWants);
+            _lastHello = Environment.TickCount64;
+            Hello(true);
+        }
+        else if (_open)
+        {
+            _open = false;
+            Hello(false);
+            GemForgeSources.Set([], []);
         }
     }
 
-    private static void Hello(bool open, uint[] wants)
+    private static void SwitchTick(bool on)
     {
-        var m = new GemForgeHello(open, wants);
+        if (TickSwitchHook is { } hook)
+        {
+            hook(on);
+            return;
+        }
+        var outer = ModContext.CurrentMod;
+        ModContext.CurrentMod = null;
+        try
+        {
+            if (on) Ui.Screens.UiTick += ClientTick;
+            else Ui.Screens.UiTick -= ClientTick;
+        }
+        catch (Exception e) when (e is KilnUnavailableException or InvalidOperationException)
+        {
+        }
+        finally
+        {
+            ModContext.CurrentMod = outer;
+        }
+    }
+
+    // Every UI frame while the forge screen is open (the game's UI thread): the keep-alive every 5 s.
+    private static void ClientTick(GameScreen now)
+    {
+        if (now.Hud != HudScreen.ShroudForge) return;  // Changed switches the watch off
+        var tick = Environment.TickCount64;
+        if (tick - _lastHello < (long)KeepAlive.TotalMilliseconds) return;
+        _lastHello = tick;
+        Hello(true);
+    }
+
+    private static void Hello(bool open)
+    {
+        var m = new GemForgeHello(open, []);  // the server counts the forge's own material: no materials to name
         if (Client.IsHosting && Client.HasLocalPlayer)
         {
             Inbox.Enqueue((Client.LocalPlayer, m));  // the server half in this process takes it on its tick
@@ -720,7 +848,6 @@ internal static class GemSources
             return;
         }
         _channel?.SendToServer(m);
-        if (!open) _lastWants = [];
     }
 
     // The server's rows (the client's main thread, or the hosting process' tick thread).
