@@ -5,7 +5,7 @@ What a player is doing right now, and an event for anything that changes. Part o
 | Layer | File |
 |---|---|
 | Managed | `managed/services/Kiln.Players/PlayerStates.cs`, `PlayerStateEvents.cs`, `PlayerStateIds.g.cs` (generated) |
-| Native | `native/services/players/playerstate.cpp`, `kiln_playerstate.h`, service `kiln.playerstate` in `kiln-players.dll` |
+| Native | `native/services/players/playerstate.cpp`, `native/core/abi/services/kiln_playerstate.h` (in the SDK at `native/include/services/kiln_playerstate.h`), service `kiln.playerstate` in `kiln-players.dll` |
 | Symbols | `sigdb/symbols/server.d/players.json` (features `players.reflection`, `players.action_cancel`, `players.sequence_names`) |
 | Test mod | `mods/tests/playerstate-test` |
 | Evidence | `docs/re/player-state.md` |
@@ -171,6 +171,26 @@ Health and the other vitals are `NetworkPlayerAttributes`, updated once per step
 - A state a new build adds fires `PlayerStateChangedEvent` with a raw id: `(PlayerStateId)0x0140` and `e.Name` the game's name. `PlayerStates.All` lists it with `NamedByKiln == false`.
 - A state a new build drops reads as unknown.
 - Regenerate the constants: `python3 tools/typegen/playerstates.py --exe <enshrouded.exe> managed/services/Kiln.Players/PlayerStateIds.g.cs`. `--check` lists what changed first.
+
+## For native code
+
+`kiln.playerstate` is published to native mods (`api->service("kiln.playerstate", 1)`). The header is in the SDK. A station button is one of the game's client actions (`client_action_info` names it; the crafting screen's is `playerCraftingAction`). Holding and canceling it:
+
+```c
+const KilnPlayerStateApi* ps = (const KilnPlayerStateApi*)api->service("kiln.playerstate", 1);
+if (!ps || ps->header.size < offsetof(KilnPlayerStateApi, client_action_decide) + sizeof(void*)) return;
+/* every server-world Pre, while you want the next press held (8 steps without a call ends it): */
+ps->client_action_hold(&player, 1);
+KilnPlayerHeldAction held[8];
+for (int i = 0; i < 8; i++) held[i].size = sizeof held[i];
+uint32_t n = 0;
+if (ps->client_action_held(held, 8, &n) == KILN_OK)
+    for (uint32_t i = 0; i < n; i++)
+        if (is_station_button(held[i]))
+            ps->client_action_decide(held[i].entity, held[i].index, held[i].version, 1); /* 1 cancels; 0 lets it run */
+```
+
+`status().client_hold` is 0 when this build cannot hold (then `client_action_hold` returns `KILN_ERR_UNAVAILABLE` and a cancel changes nothing). Call these on the server world's thread in Pre. `client_action_interest` is the narrower hold: name the crafting action's index and only that action waits a step.
 
 ## One verdict with the typed equipment event (since 0.2.0-dev.29)
 For `changeEquipmentAction` and `swapEquipmentSetAction`, while a `PlayerEquippingEvent` handler (Kiln.Items) listens,
