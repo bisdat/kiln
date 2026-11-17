@@ -112,6 +112,32 @@ bool editing(void* state) {
     uint8_t yes = 0;
     return state && game_read(reinterpret_cast<const uint8_t*>(state) + kEditActiveOffset, &yes) && yes != 0;
 }
+
+// The constructor receives a caller-owned chat string at widget+0x150.
+// The editor's private buffer may differ from the value committed for send.
+// This is a read-only cross-check: never trust the widget pointer without SEH
+// and size checks; the game controls both pointers and their lifetimes.
+bool widget_text(void* widget, std::string* out) {
+    uintptr_t caller_buffer = 0;
+    if (!widget || !game_read(reinterpret_cast<const uint8_t*>(widget) + 0x150, &caller_buffer)) return false;
+    EditHead b{};
+    if (!game_read(reinterpret_cast<const void*>(caller_buffer), &b) ||
+        b.length > kMaxEditBytes || b.length > b.capacity || b.capacity > (1ull << 20))
+        return false;
+    if (b.length == 0) { out->clear(); return true; }
+    char bytes[1024];
+    if (!game_copy(b.data, bytes, static_cast<size_t>(b.length))) return false;
+    out->assign(bytes, static_cast<size_t>(b.length));
+    return true;
+}
+
+size_t controls(std::string_view line) {
+    size_t n = 0;
+    for (const unsigned char c : line)
+        if (c < 0x20 || c == 0x7f) ++n;
+    return n;
+}
+
 bool symbol(const char* name, uintptr_t* out) {
     *out = 0;
     return g_api->symbol(KilnStr{name, std::strlen(name)}, out) == KILN_OK && *out;
@@ -221,10 +247,28 @@ void history_after(void* widget, void* result, bool hud) {
     if (game_read(result, &event) && event != 0) {
         std::string sent;
         const bool readable = edit_text(state, &sent);
+        // Compare the game's caller-owned chat string with the private edit
+        // state. Log *only* validity flags, lengths, controls and equivalence:
+        // no user message contents, addresses, hashes or command names.
+        std::string committed;
+        const bool committed_readable = widget_text(widget, &committed);
         if (g_trace_on.load(std::memory_order_relaxed) && g_event_log_count.fetch_add(1) < 24)
-            logf(KILN_LOG_INFO, "ui: chat history trace: %s input event=%u readable=%u bytes=%zu command=%u",
-                 hud ? "HUD" : "Social", static_cast<unsigned>(event), readable ? 1u : 0u,
-                 readable ? sent.size() : 0, readable && !sent.empty() && sent.front() == '/' ? 1u : 0u);
+            logf(KILN_LOG_INFO,
+                 "ui: chat history trace: %s event=%u edit_ok=%u edit_bytes=%zu edit_command=%u edit_valid=%u "
+                 "edit_sensitive=%u edit_controls=%zu widget_ok=%u widget_bytes=%zu widget_command=%u "
+                 "widget_valid=%u widget_sensitive=%u widget_controls=%zu same=%u",
+                 hud ? "HUD" : "Social", static_cast<unsigned>(event),
+                 readable ? 1u : 0u, readable ? sent.size() : 0,
+                 readable && !sent.empty() && sent.front() == '/' ? 1u : 0u,
+                 readable && chat_history::History::valid(sent) ? 1u : 0u,
+                 readable && chat_history::History::sensitive(sent) ? 1u : 0u,
+                 readable ? controls(sent) : 0,
+                 committed_readable ? 1u : 0u, committed_readable ? committed.size() : 0,
+                 committed_readable && !committed.empty() && committed.front() == '/' ? 1u : 0u,
+                 committed_readable && chat_history::History::valid(committed) ? 1u : 0u,
+                 committed_readable && chat_history::History::sensitive(committed) ? 1u : 0u,
+                 committed_readable ? controls(committed) : 0,
+                 readable && committed_readable && sent == committed ? 1u : 0u);
         if (event == 1 && readable && !g_diagnose_on.load(std::memory_order_relaxed)) {
             const size_t before = g_history.count();
             const bool persisted_changed = g_history.submit(sent);
