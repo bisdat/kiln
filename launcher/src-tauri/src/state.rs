@@ -169,6 +169,10 @@ pub fn game_status(install: &GameInstall) -> Result<kiln_manage::game::GameStatu
     };
     let boot = kiln_manage::state::read_boot(&install.path).ok().flatten();
     let newer_mods = kiln_manage::game::newer_mods(&d, &runtime, active_profile.as_deref());
+    // (dev.29.17) how it starts, and whether Kiln knows the exe's build (the game's records, else the runtime Play installs)
+    let client = install.kind == kiln_manage::game::GameKind::Client;
+    let start = client.then(|| kiln_manage::direct::mode_of(&d, install));
+    let build = kiln_manage::direct::build_check(install, || runtime_to_install(&d, install));
     Ok(kiln_manage::game::GameStatus {
         id: install.id.clone(),
         running: proc.is_some(),
@@ -180,9 +184,28 @@ pub fn game_status(install: &GameInstall) -> Result<kiln_manage::game::GameStatu
         other_folder_profile,
         play_once_pending: install.path.join(kiln_manage::paths::game::PLAY_ONCE).is_file(),
         boot,
-        launch_options: launch_options(install, &roots),
+        // a direct start sets WINEDLLOVERRIDES itself: Steam's launch options are not this start's
+        launch_options: if start == Some(kiln_manage::direct::StartMode::Direct) { None } else { launch_options(install, &roots) },
         newer_mods,
+        start,
+        build,
     })
+}
+
+/// The runtime zip Play would install into this game: the launcher's shipped one when it has it, else the newest for
+/// the side (`direct::build_check` reads its build index while Kiln is not in the game yet).
+fn runtime_to_install(d: &DataDirs, install: &GameInstall) -> Option<std::path::PathBuf> {
+    let side = match install.kind {
+        kiln_manage::game::GameKind::Server => kiln_manage::manifest::RunSide::Server,
+        kiln_manage::game::GameKind::Client => kiln_manage::manifest::RunSide::Client,
+    };
+    if let Some(v) = crate::commands::runtime::shipped_version()
+        && let Ok(b) = kiln_manage::bundle::find(d, &v)
+        && b.sides.contains(&side)
+    {
+        return Some(b.file);
+    }
+    kiln_manage::direct::newest_bundle(d, side)
 }
 
 /// `game::launch_options_info`, read again only when one of its inputs changed: the Steam roots it reads, the prefix's

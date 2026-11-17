@@ -92,7 +92,7 @@ fn log_errors(game: &Path, boot: &kiln_manage::state::BootJson) -> Option<LogErr
     (pid == Some(boot.pid)).then_some(errors)
 }
 
-/// `KILN_LAUNCH_DRY_RUN=1`: launch_play does everything except opening the steam:// URI.
+/// `KILN_LAUNCH_DRY_RUN=1`: launch_play does everything except opening the steam:// URI or starting the exe.
 pub fn dry_run() -> bool {
     std::env::var("KILN_LAUNCH_DRY_RUN").is_ok_and(|v| v == "1")
 }
@@ -113,15 +113,43 @@ pub async fn launch_play(app: AppHandle, game_id: String, request: LaunchRequest
             open(uri)
         };
         let dirs = dirs()?;
-        let r = if dry_run() {
-            // tests against game copies: write the play-once files, back up, but never open steam:// (that would
-            // start the real game through Steam)
-            kiln_manage::launch::play_with(&dirs, &g, &request, None, &|uri| asked(uri, &|u| {
-                eprintln!("KILN_LAUNCH_DRY_RUN: not opening {u}");
-                Ok(())
-            }))
-        } else {
-            kiln_manage::launch::play_with(&dirs, &g, &request, None, &|uri| asked(uri, &kiln_manage::launch::desktop_open))
+        // (dev.29.17) a folder that starts directly: the launcher starts its exe (Proton or Wine on Linux) instead of
+        // asking Steam, which only ever starts the copy in its own library. The command is built before anything is
+        // written, so a missing Proton refuses the start as it is.
+        let direct = (kiln_manage::direct::mode_of(&dirs, &g) == kiln_manage::direct::StartMode::Direct).then(|| {
+            let roots = crate::state::steam_roots();
+            let g = kiln_manage::game::sync_start(&dirs, &g, &roots).unwrap_or_else(|_| g.clone());
+            kiln_manage::direct::plan(&g, &kiln_manage::direct::settings(&dirs, &g), &roots)
+        }).transpose()?;
+        let r = match &direct {
+            Some(cmd) => {
+                let log = kiln_manage::launch::direct_log(&dirs, &g);
+                let go = |c: &kiln_manage::direct::DirectCommand| {
+                    track(&id, |t| {
+                        t.begin("steam", now_ms());
+                        if let Some(s) = t.steps.iter_mut().rev().find(|s| s.id == "steam") {
+                            s.label = kiln_manage::start_progress::DIRECT_STEP_LABEL.into();
+                        }
+                        t.asked = true;
+                    });
+                    crate::commands::app::launcher_log("start", &format!("{}: {} {:?} in {}", id, c.program.display(), c.args, c.cwd.display()));
+                    if dry_run() {
+                        eprintln!("KILN_LAUNCH_DRY_RUN: not starting {}", c.program.display());
+                        return Ok(());
+                    }
+                    kiln_manage::direct::spawn(c, Some(&log)).map(|_| ())
+                };
+                kiln_manage::launch::play_via(&dirs, &g, &request, None, kiln_manage::launch::Starter::Direct(cmd, &go))
+            }
+            None if dry_run() => {
+                // tests against game copies: write the play-once files, back up, but never open steam:// (that would
+                // start the real game through Steam)
+                kiln_manage::launch::play_with(&dirs, &g, &request, None, &|uri| asked(uri, &|u| {
+                    eprintln!("KILN_LAUNCH_DRY_RUN: not opening {u}");
+                    Ok(())
+                }))
+            }
+            None => kiln_manage::launch::play_with(&dirs, &g, &request, None, &|uri| asked(uri, &kiln_manage::launch::desktop_open)),
         };
         match &r {
             // the start's mod set, as the launch record has it
