@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "../chat_history.h"
+#include "../chat_focus.h"
 #include <cassert>
 #include <string>
 #include <vector>
@@ -63,5 +64,40 @@ int main() {
     assert(from_widget.count() == 1);
     assert(from_widget.older("draft") == "/help");
     assert(from_widget.newer("/help") == "draft");
+
+    // Regression (in-game 11:47): Up successfully recalled a line, but a
+    // transient widget mismatch / one missing UI focus frame reset browse
+    // state, so Down returned changed=0 instead of restoring the draft.
+    History navigation;
+    assert(navigation.submit("/one"));
+    assert(navigation.submit("/two"));
+    kui::chat_focus::Grace focus;
+    assert(!focus.frame(true));
+    assert(navigation.older("draft") == "/two");
+    // Native UI's widget representation briefly diverged and one focus
+    // frame was absent. Neither observation is a user edit.
+    const std::string transient_widget = "stale-widget-buffer";
+    assert(transient_widget != "/two");
+    assert(!focus.frame(false));
+    assert(!focus.frame(true));
+    assert(navigation.browsing());
+    assert(navigation.newer(transient_widget) == "draft");
+    assert(!navigation.browsing());
+
+    // Explicit typing must still cancel the browse cursor.
+    assert(navigation.older("second draft") == "/two");
+    navigation.edited(); // WndProc observed WM_CHAR, delete or paste
+    assert(navigation.newer("manually edited") == "manually edited");
+
+    // Prolonged loss of focus expires the cursor exactly once.
+    assert(navigation.older("third draft") == "/two");
+    for (unsigned i = 1; i < kui::chat_focus::Grace::kMissingFramesBeforeReset; ++i)
+        assert(!focus.frame(false));
+    assert(focus.frame(false));
+    navigation.edited();
+    assert(!focus.frame(false));
+    assert(!navigation.browsing());
+    assert(navigation.newer("closed chat") == "closed chat");
+
 
 }
