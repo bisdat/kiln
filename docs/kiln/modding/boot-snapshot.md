@@ -1,7 +1,7 @@
 # The game-data snapshot for OnBoot
 
-`Mod.OnBoot` runs before the game has loaded anything, so the game's items, templates, skill nodes and materials are
-not in memory yet. What `boot.GameData.Read(...)` answers comes from a **snapshot**: a copy of those records, made from
+`Mod.OnBoot` runs before the game has loaded anything, so the game's items, templates, skill nodes, materials and other
+resources are not in memory yet. What `boot.GameData.Read(...)` answers comes from a **snapshot**: a copy of those records, made from
 the game's own files before the start, once per game build. This page is about the snapshot: who makes it, where it
 lies, what it costs, and what a mod sees when it is not there.
 
@@ -39,10 +39,11 @@ is (a later start with an OnBoot mod reuses it).
 
 - **The first start after a game update**: half a minute to a minute (32 to 44 s measured on a busy PC, the client's
   and a dedicated server's data alike). A later start hashes the exe, reads the 64 KiB archive header, and verifies
-  checksums of all eight snapshot files (about 200 MB of reads). Reuse time depends on storage speed; the earlier
+  checksums of all ten snapshot files (about 300 MB of reads). Reuse time depends on storage speed; the earlier
   sub-second measurements predate checksum verification. A damaged snapshot is rebuilt. Older snapshots without
   producer checksums are rebuilt once, while the reader's format remains 1.
-- **Disk**: about **200 MB** in the game folder (209 MB for game build 1287369: templates 158 MB, items 48 MB). One
+- **Disk**: about **300 MB** in the game folder (game build 1287369: 292 MB for the dedicated server, templates 158 MB,
+  resources 80 MB, items 48 MB; about 335 MB for the client, whose resources are 117 MB). One
   snapshot is kept: the one of the current game build. An older one is deleted only after the new one is written and
   reads back.
 - It is written into the game folder you play (or serve) from; a client and a dedicated server each have their own.
@@ -71,6 +72,45 @@ has loaded (member names as the game's reflection has them, GUIDs as text, enums
 | `template:<name>` | every template, by its name (or its GUID when it has none) |
 | `skill:0x<8 hex>` | the nodes of the game's skill tree, by id (`skill:0x8efcc472`) |
 | `material:<name>` | the rows of the game's building and terrain material table, named as the `GameMaterials` catalog names them (`material:StoneRough`, `Cell<id>` for a row no item places) |
+| `names:resources/<qualified type name>` | every resource of the archive, of every type: its GUID, part and name (`names:resources/keen::SceneResource`) |
+| `resource:<GUID>/<type>/<part>` | the value of a resource of any type, the type as its 8 hex hash or its qualified name, except the bulk asset types below |
+
+### Every resource
+
+Since kiln-bootsnap 2 the snapshot also lists **every resource** of the game's archive (`resources.index.json`), by
+qualified type name: every type in the archive can be listed, 85 types and 43,958 resources on the dedicated server of
+game build 1287369, 146 types and 91,909 resources on its client. A resource has a name when its type's root has a
+`debugName` or `name` string: on the server `TemplateResource`, `ItemInfo`, `SequenceResource`, `Perk`, `MidiResource`
+and `VoxelBlueprintConfig`; the client adds `SoundResource`, `RenderModel`, `UiTextureResource`,
+`RenderMaterialResource`, `RenderTextureResource`, `GpcResource` and `SoundReverbPresetResource`. Every other resource is
+listed by its GUID.
+
+`resources.data` holds the value of every resource that is not an item or template already stored in its kind, so
+`resource:` reads a `SceneResource`, the `BalancingTable` or the `RecipeRegistryResource` in `OnBoot`. Not stored:
+
+- **bulk asset types**, listed with their names but without values (one `skipped` line per type):
+  `keen::JointAnimation`, `keen::RootMotionAnimation`, `keen::SceneEntityChunkResource`, `keen::RenderModel`,
+  `keen::RenderModelChunkModelResource`, `keen::VfxResource`. Storing them would cost about 960 MB and 7 minutes on the client
+  per game build (JointAnimation alone 600 MB and almost 6 minutes);
+- **values over 4 MiB**: on build 1287369 `GameKnowledgeResource`, `GameKnowledgeQueryResourceDb`,
+  `SceneRandomLootResource` and, on the client, `MaterialFeedbackCollectionResource`.
+
+A `resource:` read of either answers unavailable. A resource value may hold up to 1,000,000 JSON nodes (the four
+kinds: 100,000).
+
+What the list costs, measured on game build 1287369 (a busy PC, load average about 30):
+
+| | dedicated server | client |
+|---|---|---|
+| `resources.index.json` | 3.2 MB, 43,958 entries | 7.2 MB, 91,909 entries |
+| `resources.data` | 80 MB | 117 MB |
+| added time to make the snapshot | 24 s | 31 s |
+| listing alone (names, without values) | 0.2 s | 0.7 s |
+
+The names of items and templates are those their kinds read; only the other named types' strings are read again (two
+small reads each). A snapshot made before kiln-bootsnap 2 has no list: it is made again once at the next start through
+the launcher. Until then every other key reads as before and `names:resources/...` answers unavailable with what to
+run.
 
 It is **the game's data as it shipped**, read from the game's own archive: when EML (or another loader keeping EML's
 backups) has patched the archive, the snapshot is made from the backup pair it kept (`.kfc.bak`,
@@ -89,7 +129,8 @@ after world load.
 - **A value larger than 4 MiB** is not stored (a `skipped` line says so).
 - **Decoder budgets** also refuse oversized or malformed inputs before large allocations: 256 MiB executable/image,
   16 MiB archive directory or resource blob, 8 MiB decompressed chunk, 100,000 entries per kind and 100,000 JSON nodes
-  per value. Each kind's data is limited to 1 GiB and each index to 32 MiB. A value exceeding its walk/byte budget is
+  per value (1,000,000 for a value in `resources.data`, 250,000 resources in the list). Each kind's data is limited to
+  1 GiB and each index to 32 MiB. A value exceeding its walk/byte budget is
   skipped with a reason; an archive exceeding its input budgets is refused. These bounds can require an update to
   the producer after a game format change.
 - **A kind the game's archive cannot give** (a type the reflection lacks after a game update) is written empty: every

@@ -104,7 +104,22 @@ sound or a VFX a name.
 ## Reading the game's data
 `boot.GameData.Read(key)` reads one record of the game's data as shipped, from a snapshot made before the start
 ([boot-snapshot.md](boot-snapshot.md)): `item:<debugName>`, `template:<debugName>`, `skill:0x<8 hex digits>`,
-`material:<name>`, `resource:<GUID>/<type hash>/<part>`. It answers `BootDataResult`, with the record as camelCase JSON.
+`material:<name>`, `resource:<GUID>/<type hash>/<part>` (any resource of the game, of any type; the type also by its
+qualified name: `resource:<GUID>/keen::SceneResource/0`). It answers `BootDataResult`, with the record as camelCase JSON.
+
+To find resources, `names:<kind>` lists one kind's names (`names:items`), and `names:resources/<qualified type name>`
+lists every resource of a type, with its GUID, part and name:
+
+```csharp
+var scenes = boot.GameData.Read("names:resources/keen::SceneResource");
+foreach (var r in scenes.Data!.Value.GetProperty("resources").EnumerateArray())
+{
+    var scene = boot.GameData.Read($"resource:{r.GetProperty("resourceId").GetString()}/keen::SceneResource/{r.GetProperty("part").GetInt32()}");
+}
+```
+
+Bulk asset types (animations, meshes, world chunks, effects) are listed but their values are not in the snapshot: a
+`resource:` read of one is unavailable. The list is in [boot-gamedata.md](boot-gamedata.md).
 
 - Without a snapshot of this game build, `mods.boot.game_data` is unavailable and `Read` throws
   `KilnUnavailableException`. The row's reason says what to run.
