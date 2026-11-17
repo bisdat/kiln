@@ -415,6 +415,14 @@ void resolve() {
         }
     }
     if (feat("gameplay.craft")) F.craft = sym("gameplay/CraftRecipe", &fn.craft);
+    if (F.craft && feat("gameplay.craft_phase")) {  // since 0.2.0-dev.29: an automated station's cycle is one CRAFTED
+        int64_t flags = -1, ctx = -1, outputs = 0;
+        if (cst("gameplay/craft.flags_frame", &flags) && cst("gameplay/craft.ctx_frame", &ctx) &&
+            cst("gameplay/craft.outputs_only", &outputs) && flags > ctx && flags - ctx < 0x100 && outputs > 0 && outputs < 0x100) {
+            L.craft_phase.flags_offset = flags - ctx;
+            L.craft_phase.outputs_only = static_cast<uint32_t>(outputs);
+        }
+    }
     if (feat("gameplay.build")) {
         F.build = sym("gameplay/PlaceBlueprint", &fn.place_block) && sym("gameplay/PlaceProp", &fn.place_prop) &&
                   sym("gameplay/DismantleBlock", &fn.dismantle) && sym("gameplay/DismantleBlock2", &fn.dismantle2) &&
@@ -506,10 +514,12 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
         return KILN_ERR_UNAVAILABLE;
     }
     KG_I("kiln.gameplay: intercept %s (queues %s), emit %s, "
-         "discard %s, components %s, transforms %s; hashes craft %08x accept %08x loot %08x "
+         "discard %s, components %s, transforms %s, craft phase %s; hashes craft %08x accept %08x loot %08x "
          "pickup %08x accepted %08x declined %08x",
          F.intercept ? "on" : "off", F.queues ? "on" : "off", F.emit ? "on" : "off", F.discard ? "on" : "off",
-         F.components ? "on" : "off", F.transforms ? "on" : "off", H.craft_request, H.accept_offer, H.loot, H.pickup, H.accepted, H.declined);
+         F.components ? "on" : "off", F.transforms ? "on" : "off",
+         L.craft_phase.known() ? "on (an automated station's cycle is one CRAFTED)" : "off (a station's cycle reports twice)",
+         H.craft_request, H.accept_offer, H.loot, H.pickup, H.accepted, H.declined);
     if (!F.intercept && !F.craft && !F.build && !F.terraform && !F.spawn && !F.components && !entity_hooks)
         return KILN_ERR_UNAVAILABLE;
     return api->register_service(owner, KilnStr{KILN_GAMEPLAY_SERVICE, sizeof(KILN_GAMEPLAY_SERVICE) - 1}, &kTable);

@@ -82,7 +82,10 @@ public enum CraftResult
 }
 
 /// <summary>The game ran its craft core once (one unit of a craft request, or an automated station's cycle). Post
-/// phase of the same step. Forge's ItemCraftedEvent, fired for failures too: check <see cref="Succeeded"/>.</summary>
+/// phase of the same step. Forge's ItemCraftedEvent, fired for failures too: check <see cref="Succeeded"/>.
+/// An automated station (a kiln, a smelter: <see cref="Operator"/> == <see cref="Station"/>) is reported once per
+/// finished cycle, when its outputs arrive, and only on success (since 0.2.0-dev.29; before, a cycle's start, when the
+/// inputs are taken, was reported as well).</summary>
 public sealed class ItemCraftedEvent : GameplayEvent
 {
     static ItemCraftedEvent() => Gameplay.RegisterHookEvent(typeof(ItemCraftedEvent),2,"gameplay.craft");
