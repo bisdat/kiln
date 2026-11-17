@@ -1022,7 +1022,38 @@ pub fn build(input: &ReportInput) -> Report {
             let _ = writeln!(g, "Compat tool:   {} (prefix version: {})", tool.as_deref().unwrap_or("Steam's default"), version.as_deref().unwrap_or("unknown"));
             facts.proton = tool.or(version);
         }
-        if let Some(lo) = crate::game::launch_options_info(i, &roots) {
+        // how the launcher starts it: through Steam, or directly (direct.rs) with its Proton or Wine and prefix
+        let start = (i.kind == GameKind::Client).then(|| {
+            let settings = dirs.as_ref().map(|d| crate::direct::settings(d, i)).unwrap_or_default();
+            (crate::direct::effective_mode(i, Some(&settings)), settings)
+        });
+        if crate::direct::is_custom(i) {
+            let _ = writeln!(g, "Custom folder: yes (no Steam library knows it)");
+        }
+        match &start {
+            Some((crate::direct::StartMode::Direct, settings)) => {
+                let how = if cfg!(windows) {
+                    "the launcher starts enshrouded.exe itself".to_string()
+                } else {
+                    match crate::direct::plan(i, settings, &roots) {
+                        Ok(c) => format!("{} {} (WINEDLLOVERRIDES {})", c.runner.as_ref().map(|r| format!("{:?} {}", r.kind, r.label)).unwrap_or_default(),
+                            c.runner.as_ref().map(|r| if r.source == "custom" { "(the player's choice)" } else { "" }).unwrap_or_default(),
+                            c.env.iter().find(|(k, _)| k == "WINEDLLOVERRIDES").map(|(_, v)| v.as_str()).unwrap_or("-")),
+                        Err(e) => format!("cannot start: {}", e.message),
+                    }
+                };
+                let _ = writeln!(g, "Start:         directly ({how}); Steam running: {}", if crate::direct::steam_running() { "yes" } else { "no" });
+                if let Some(d) = dirs.as_ref() {
+                    cx.add_tail_at("launcher/game-start.log", &crate::launch::direct_log(d, i), SMALL_LOG_MAX);
+                }
+            }
+            Some((crate::direct::StartMode::Steam, _)) => {
+                let _ = writeln!(g, "Start:         through Steam (steam://rungameid/{})", i.app_id);
+            }
+            None => {}
+        }
+        let direct = matches!(start, Some((crate::direct::StartMode::Direct, _)));
+        if let Some(lo) = (!direct).then(|| crate::game::launch_options_info(i, &roots)).flatten() {
             let _ = writeln!(g, "Launch opts:   {} (dinput8 override: {}; chained xinput9_1_0 override missing: {})", lo.value.as_deref().unwrap_or("(none)"), if lo.has_dll_override { "yes" } else { "no" }, if lo.chained_override_missing { "yes" } else { "no" });
             facts.override_missing = !lo.has_dll_override;
             if lo.chained_override_missing {
@@ -1436,9 +1467,9 @@ pub fn build(input: &ReportInput) -> Report {
         boot.as_ref(), boot_time, proxy_log.is_some(), &facts);
     if receipt.is_some() {
         match facts.known_build {
-            Some(None) => cx.find("unknown-build", Level::Problem, format!(
-                "This game build ({}, Steam build {}) is one this Kiln does not know: Kiln stays idle and loads no mods until a Kiln update adds it.",
-                facts.exe_sha.as_deref().map(|h| &h[..12.min(h.len())]).unwrap_or("?"), facts.build.as_deref().unwrap_or("unknown"))),
+            Some(None) => cx.find("unknown-build", Level::Problem, format!("{} (Steam build {}; a Kiln update that knows the build fixes it.)",
+                crate::direct::unknown_build_sentence(facts.exe_sha.as_deref().map(|h| &h[..12.min(h.len())]).unwrap_or("?")),
+                facts.build.as_deref().unwrap_or("unknown"))),
             Some(Some(false)) => cx.find("unknown-build", Level::Warning, "Kiln has a record of this game build but it is not verified: with the policy verified-only Kiln stays idle."),
             _ => {}
         }
