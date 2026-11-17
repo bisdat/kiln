@@ -24,6 +24,7 @@ Capabilities (sigdb features, `server.d/stations.json`, the client's hosted worl
 | `stations.fill` | `Stations.Fill` |
 | `stations.control` | `Stations.Stop`, `Resume`, `Select` |
 | `stations.events` | `StationStateChangedEvent`, `StationPlacedEvent`, `StationRemovedEvent`, `BasesChangedEvent`, `StationCraftedEvent`, `StationPlayerActionEvent` (a subscription is taken before a world runs, in `OnLoad`) |
+| `stations.output_sources` | `Stations.SetOutputSource`, and fills taking from opted-in stations' finished items ([Station outputs as crafting stock](#station-outputs-as-crafting-stock), since 0.2.0-dev.29.17) |
 
 Where: the server world, on its tick thread: a dedicated server, or a game client while it hosts. A client that joined
 another's world has no server world: `Stations.Available` is false there and every call throws `KilnUnavailableException`.
@@ -161,6 +162,54 @@ the game does the same after its own fill button. Read the station a few steps a
 "Use all ingredient options" (`StationInfo.UseAllOptions`, `FillPlan.UseAllOptions`): the station may then consume other
 options of a category than the one a fill loads, so its loaded crafts can drop faster than a plan says.
 
+## Station outputs as crafting stock
+Since 0.2.0-dev.29.17 (mod API 0.2.9, row `stations.output_sources`; GitHub #68). A station can lend its finished items
+to the fills of its base: a charcoal kiln's charcoal fills the forge next to it while it is still in the kiln.
+
+```csharp
+Stations.SetOutputSource(charcoalKiln);                  // opt in: true when it is kept with the save
+Stations.SetOutputSource(charcoalKiln, on: false);       // opt out
+bool lends = Stations.IsOutputSource(charcoalKiln);
+IReadOnlyList<EntityId> lenders = Stations.OutputSources(home.Id);  // the base's opted-in stations, in the order used
+
+StationResult r = await Stations.Fill(forge, new FillOptions { Crafts = 5 });
+Log.Info($"{r.FromOutputs} item(s) came from station outputs");
+await Stations.Fill(forge, new FillOptions { Crafts = 5, UseStationOutputs = false });   // the game's sources only
+FillPlan p = Stations.Plan(forge);                       // FillInput.Outputs: what the base's stations lend of each input
+```
+
+The rules:
+- **Opt-in per station.** Nothing lends by default; a base with no station opted in fills exactly as the game does.
+- **Last.** A fill takes from the player's bag (when it names one), then from the Magic chests (after its reserves), and
+  from the opted-in stations only what those cannot cover, in entity order.
+- **Only finished items.** A station lends the stacks `StationInfo.Outputs` lists: an output of its selected or running
+  recipe that is not also an input of either. Never its queued inputs (a kiln's logs stay), never its `Leftovers`,
+  never an output that is also an input of its recipe.
+- **Its own base.** A station lends only to fills in the base it stands in (the game's own base lookup).
+- **Checked at the fill.** Inside the fill's transaction, on the server, against the station's inventory and recipe
+  then: a station that changed recipe since it was opted in lends what its recipe now makes.
+- **All or nothing.** One inventory transaction with the game's own fill: when the stock and the outputs together do not
+  cover it, nothing moves (a non-exact fill tries fewer crafts, as before).
+- A fill whose recipe names the same item twice (an item and a category option that is that item) does not use
+  station outputs.
+
+**The station screen's fill button.** On the server Kiln follows a player's fill presses while any station is opted in
+(the players' client actions wait one step for it, about 17 ms, as with `StationPlayerActionEvent`). A press the
+player's bag and the Magic chests cannot cover but the base's opted-in outputs can is run as Kiln's fill (the same
+recipe, category choices and amount, all or nothing, the player's bag first) and the game's own is canceled; kiln.log
+says so. Every other press runs as the game's. Kiln keeps the game's checks: the player must stand in the station's base
+and have the right to access inventories. Not checked yet with a real client: whether the game's client greys its fill
+button, or does not send the press, when its own view of the chests is short (the client checks the fill itself before
+it sends). If it does, the button reaches the server only when the chests alone would do, and station outputs at the
+button need a client half; `Stations.Fill` from a mod works either way (real-client check C7).
+
+**Kept with the save.** An opt-in is kept beside the save (kiln.saves' entity attachments, the station known by its
+template and place, as `EntityData`) with the mod that set it, and comes back after a restart while that mod is loaded
+and once kiln.stations' managed side has started (the first use of `Stations`, `Bases` or a station event: a mod that
+opts stations in should touch `Stations` in `OnLoad`, for example `Stations.OutputSources()` or an event subscription).
+A station removed, or a mod no longer loaded, lends nothing (the record waits for the mod's return). The native set is
+per session (`kiln_stations.h`: `set_output_source`, `output_sources`).
+
 ## Stop, resume, select
 ```csharp
 await Stations.Stop(kiln);                               // the stop button: now
@@ -290,6 +339,10 @@ checked by hand with `mods/tests/stations-client-check` (`/stationcheck`, admins
 - **C5** After fills, the base's Magic chests are emptied as expected; ordinary chests are untouched.
 - **C6** At the quick-stack station, switch one Magic chest off for deposits: `/stationcheck base` lists it under
   Magic chests and not under "take deposits", and `collect` puts nothing into it.
+- **C7** A charcoal kiln with charcoal and logs in it, opted in (`/stationcheck lend`), next to a forge whose recipe
+  needs charcoal, the Magic chests holding none: press the forge's "fill from chests". Expected: the forge gets the
+  charcoal, the kiln keeps its logs, kiln.log says the press ran as Kiln's fill. If the button is greyed or nothing
+  reaches the server, note it: the button then needs the client half (phase 2).
 
 ## Limits
 - Server world only (dedicated server, hosting client). A joined client has none.
@@ -300,6 +353,8 @@ checked by hand with `mods/tests/stations-client-check` (`/stationcheck`, admins
 - No "which station screen is open" read (`Stations.Nearest` stands in), and no event when a chest's contents change.
 - Kiln adds no hook for this: it calls the game's functions and writes the bytes its own code writes; the only hook
   involved is kiln.gameplay's existing craft hook.
+- Station outputs as crafting stock cover fills (`Stations.Fill`, the fill button on the server), not a player's craft
+  at a workbench (that needs a client half: the client counts what the craft button may use).
 
 ## For native code
 `native/core/abi/services/kiln_stations.h` (`kiln.stations` v1, in kiln-items.dll): the same reads (`base_*`, `stations`,
