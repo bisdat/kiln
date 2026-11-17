@@ -89,7 +89,8 @@ export function useAddMods(): (paths: string[], target?: GameInstall) => Promise
       const a = await api.profileActivate(r.profileId, game.id);
       qc.setQueryData(qk.active(game.id), a);
       refresh(r.profileId, game.id);
-      toast.ok(r.profileName ? t("shell.drop.loaded", { name: r.profileName }) : t("shell.drop.loadedProfile"), t("shell.drop.loadedDetail"));
+      const direct = qc.getQueryData<GameStatus>(qk.gameStatus(game.id))?.start === "direct";
+      toast.ok(r.profileName ? t("shell.drop.loaded", { name: r.profileName }) : t("shell.drop.loadedProfile"), direct ? t("shell.drop.loadedDetailDirect") : t("shell.drop.loadedDetail"));
       notifyActivation(a);
     } catch (e) { toast.error(e, r.profileName ? t("shell.drop.loadFailed", { name: r.profileName }) : t("shell.drop.loadFailedProfile")); }
   };
