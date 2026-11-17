@@ -13,7 +13,7 @@ directly** chosen. "Keep the default" keeps that.
 
 Everything else works as for Steam's copy: Install Kiln, the mods list and profiles, the Library, copy and Z: path
 modes, save backups before a start, the start progress bar, the stop watch (exit, copy-back of mod configs in copy
-mode, crash reports) and the support report.
+mode, crash reports) and the support report. None of it needs Steam.
 
 ## How Kiln starts it
 
@@ -22,9 +22,22 @@ Play, then the game folder line, **Starts directly** / **Starts through Steam** 
 - **Through Steam**: Play asks Steam to start Enshrouded (`steam://rungameid/1203620`), as Steam's Play button does.
   The default for Steam's own copy. For a custom folder this starts Steam's copy, not the folder.
 - **Start the game directly**: Play starts this folder's `enshrouded.exe` itself, after the same profile, save backup
-  and start steps as through Steam. The default for a custom folder.
+  and start steps. The default for a custom folder. On a PC with no Steam installed it is the only way, and the dialog
+  does not offer the other.
 
 The choice is kept per game in the launcher's record of the install (`<data>/installs/<installId>.json`, `start`).
+
+## Steam is not needed
+
+A direct start needs no Steam at all: Steam does not have to be installed or running, and the launcher reads no Steam
+library, opens no `steam://` link and gives no Steam launch-option advice for it. Adding the folder, Install Kiln,
+profiles, the mods list, Play, the start progress, the stop watch, copy-back, crash reports, updates and the support
+report all work on a PC without Steam. A Steam library left on a drive (another system's, or with Steam uninstalled)
+is a custom folder there too: Steam's Play could not start it.
+
+Kiln starts the exe and nothing else. It doesn't set `SteamAppId` or `SteamGameId`, doesn't write or change
+`steam_appid.txt` and doesn't touch `steam_api64.dll` or anything else of the game's own. Whether a given copy of the
+game needs anything more to run (Steam, for one) is that copy's business, not Kiln's.
 
 ### Windows
 
@@ -33,40 +46,50 @@ Windows loads first, so nothing else is set.
 
 ### Linux
 
-The game runs under a Proton or Wine you pick:
+The game runs under a umu-run, Proton or Wine you pick:
 
-- **Automatic** (the default): the Proton Steam uses for Enshrouded (Steam's compatibility setting for the game, else
-  its default), else the newest one found.
-- Any Proton Kiln found: GE-Proton and other compatibility tools (`compatibilitytools.d` of Steam, and the usual GE-Proton
-  folders), and Valve's Proton builds in your Steam libraries.
-- `wine` on your PATH, or **Another Proton or Wine…**: a Proton folder (the one with the `proton` script) or a `wine`
-  program.
+- **Automatic** (the default) picks, in this order, and the dialog says which and why:
+  1. `umu-run` (umu-launcher, the usual way to run Proton outside Steam) when it is on your PATH;
+  2. else the newest Proton found (GE-Proton and other compatibility tools first, then Valve's Proton builds if a Steam
+     library has any);
+  3. else `wine` on your PATH.
+- Any of those Kiln found. Kiln looks for Proton builds where they are kept without Steam too:
+  `~/.local/share/Steam/compatibilitytools.d` (whether or not Steam is installed; umu downloads there as well),
+  `~/.steam/root/compatibilitytools.d`, `$XDG_DATA_HOME/Steam/compatibilitytools.d`, Heroic's
+  `~/.config/heroic/tools/proton`, Lutris's `$XDG_DATA_HOME/lutris/runners/proton`, the system's
+  `/usr/share/steam/compatibilitytools.d`, and, when Steam is installed, its `compatibilitytools.d` folders and
+  libraries.
+- **Another umu-run, Proton or Wine…**: a `umu-run` program, a Proton folder (the one with the `proton` script) or a
+  `wine` program.
 
-GE-Proton is the most reliable choice outside Steam. Valve's Proton builds expect Steam's runtime container and may not
-start outside Steam on every system. A plain Wine needs Windows' Steam inside its prefix for the game's Steam sign-in,
-so Proton is the choice for most players.
+What each sets, besides `WINEDLLOVERRIDES=dinput8=n,b` (`dinput8,xinput9_1_0=n,b` when Ultimate ASI Loader is chained;
+plain Wine also gets `mshtml=`):
+
+- **umu-run**: `umu-run <exe>` with `WINEPREFIX` (the prefix), `GAMEID=umu-default` and `PROTONPATH` (the newest
+  GE-Proton or other compatibility-tools Proton found, so umu downloads no Proton). Without one, `PROTONPATH` is left
+  out and umu uses its own Proton, which it downloads at its first start. umu also sets up its runtime at its first
+  start, which needs the internet once. Kiln gives umu's own default `GAMEID`, not `umu-1203620`: umu turns
+  `umu-<number>` into `SteamAppId`, which Kiln never sets.
+- **Proton**: `<proton> run <exe>` with `STEAM_COMPAT_DATA_PATH` (the compatdata folder) and
+  `STEAM_COMPAT_CLIENT_INSTALL_PATH`. Proton needs that variable to name a folder: your Steam folder when Steam is
+  installed, otherwise an empty folder of Kiln's own, `~/.local/share/kiln-prefixes/_compat-client` (under
+  `$XDG_DATA_HOME` when set), made at the first start. Valve's Proton builds expect Steam's runtime container and may
+  not start outside Steam on every system; GE-Proton (directly or through umu-run) is the reliable choice.
+- **Wine**: `wine <exe>` with `WINEPREFIX`.
+
+Inherited `WINEPREFIX`, `WINEDLLOVERRIDES`, `STEAM_COMPAT_*`, `SteamAppId`, `SteamGameId`, `GAMEID`, `PROTONPATH` and
+`LD_PRELOAD` of the launcher's own environment are dropped. The dialog shows the exact command.
 
 **Prefix.** Kiln makes one prefix per game, at the first start: `~/.local/share/kiln-prefixes/<installId>` (under
-`$XDG_DATA_HOME` when set). It is outside the launcher's data folder and never moves with it. The saves of this copy
-live in it. Or pick a folder: for Proton the folder that holds `pfx` (a Steam `compatdata` folder), for Wine the prefix
-itself. The first start under Proton takes longer while Proton makes the prefix.
+`$XDG_DATA_HOME` when set). It is outside the launcher's data folder and never moves with it. The Wine prefix is its
+`pfx` folder for every runner; the saves of this copy live in it. Or pick a folder: for Proton the folder that holds
+`pfx` (a Steam `compatdata` folder), for umu-run and Wine the prefix itself. The first start takes longer while the
+prefix is made.
 
-Kiln sets what the Steam launch option it advises for Steam's copy sets: `WINEDLLOVERRIDES=dinput8=n,b` (with
-`xinput9_1_0` too when Ultimate ASI Loader is chained), and for Proton `STEAM_COMPAT_DATA_PATH` and
-`STEAM_COMPAT_CLIENT_INSTALL_PATH` (your Steam folder). The dialog shows the exact command. The Proton or Wine output
-of the last direct start is in `<data>/logs/game-start-<installId>.log`, and the support report carries it.
+The umu, Proton or Wine output of the last direct start is in `<data>/logs/game-start-<installId>.log`, and the support
+report carries it.
 
 Steam Deck Game Mode is not covered.
-
-## Steam must be running
-
-The game signs in through Steam (its Steam API) however it is started. Start Steam before Play; the launcher says
-"Steam isn't running" when it can't see it.
-
-Kiln never touches the game's Steam or ownership checks: it doesn't write or change `steam_appid.txt`, doesn't change
-`steam_api64.dll`, and doesn't set `SteamAppId` or `SteamGameId` the way Steam does when it starts a game. If a copy asks
-Steam to start it instead, Steam starts the copy in its own library, and the custom folder doesn't run. Kiln doesn't
-work around that.
 
 ## Unknown game builds
 

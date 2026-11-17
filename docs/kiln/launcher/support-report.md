@@ -30,7 +30,7 @@ Code: `crates/kiln-manage/src/report.rs` (`build`, `redact`, `write_zip`), the T
 | `game/kiln/state/*.json` | every state file (boot, mods, native, last-server, hooks, each engine's), at most 1 MiB each |
 | `game/kiln/profile.json`, `kiln/chain.ini`, `kiln/kiln.json`, `kiln/.install.json`, `dinput8-chain.ini` | as they are, redacted; a link in a file's place, and a state file that is a link, is not followed ("a link, not followed") |
 | `launcher/launcher.log` | the last 192 KiB of `<data>/logs/launcher.log` |
-| `launcher/game-start.log` | (dev.29.17) a game that starts directly: the last 192 KiB of `<data>/logs/game-start-<installId>.log`, the Proton or Wine output of its last direct start ([custom-game-folders.md](custom-game-folders.md)) |
+| `launcher/game-start.log` | (dev.29.17) a game that starts directly: the last 192 KiB of `<data>/logs/game-start-<installId>.log`, the umu-run, Proton or Wine output of its last direct start ([custom-game-folders.md](custom-game-folders.md)) |
 | `listings/game-folder.txt` | the game folder's top level: type, size, modified, name |
 | `listings/kiln-folder.txt` | `kiln/`, two levels deep |
 | `listings/mod-folders.txt` | each engine's mods folder (`kiln/mods`, `kiln/native`, `kiln/plugins`, `emf/mods`, `kiln/eml/mods`, `mods`, `greeneye`, `shrouded_engine_tweaks/mods`, ShroudForge's, `shroudlink_mods`, `ember/mods`), two levels deep |
@@ -45,8 +45,10 @@ lines. A file that is cut says so in its first line.
 - **Game:** the folder (redacted), client or server, platform, Steam build, the Proton prefix, the compat tool from
   Steam's `config.vdf` and the prefix's `version` file, Steam's launch options (not for a direct start), running or not,
   the exe's sha256 and whether `kiln/sigdb/builds/<side>/<sha256>.json` says Kiln verified this build. (dev.29.17)
-  "Custom folder: yes" for a folder no Steam library knows, and "Start:" through Steam, or directly with the Proton or
-  Wine, its `WINEDLLOVERRIDES` and whether Steam runs.
+  "Custom folder: yes" for a folder no Steam library knows, and "Start:" through Steam, or directly with the umu-run,
+  Proton or Wine (and umu's Proton), whether it was automatic or the player's, and its `WINEDLLOVERRIDES`. A direct
+  start reads nothing of Steam's: no compat tool (the prefix's Proton `version` instead), no launch options, and a
+  start that did not load Kiln points at `launcher/game-start.log`, not at Steam's launch options.
 - **Kiln in the game:** the install receipt, each DLL under a proxy name next to the game and what it is
   (`engines::scan_proxies`), `kiln/chain.ini`.
 - **Profile:** `kiln/profile.json`: name, generation, drop-ins, each mod (kind, id, version, on/off).

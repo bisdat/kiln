@@ -128,7 +128,7 @@ Root: `$KILN_DATA_DIR`, else the folder the pointer `data-folder.json` in the de
 | `schema-cache/<modid>/<version>+<hash8>/<file>.json` | config schema snapshots cached per mod version |
 | `backups/` | `saves/<gameId>/` (save backups without a profile), `install/<installId>/` (mirror of install backups), `profiles/` (deleted profiles) |
 | `logs/launcher.log` | the launcher's own log |
-| `logs/game-start-<installId>.log` | (dev.29.17) the Proton or Wine output of the last direct start of that install (written again at every one; the support report carries it) |
+| `logs/game-start-<installId>.log` | (dev.29.17) the umu-run, Proton or Wine output of the last direct start of that install (written again at every one; the support report carries it) |
 | `state/software-render.json` | Linux: there, a start without an override draws without the GPU (`{format, why, at, version}`; written by the launcher when its page did not start, or by Settings; [app.md](app.md), "Drawing without the GPU") |
 | `state/desktop-entry.json` | Linux AppImage: there when the player turned "Kiln Launcher in the app menu" off (`{format, on: false, at}`); absent, every start writes or updates the app menu entry and icons ([app.md](app.md), "Taskbar icon and app menu") |
 | `update.json` | the self-update's state: `{format, skipped, checked, updated: {from, to, at, source, notes}}` (releasing.md) |
@@ -1130,20 +1130,28 @@ cooks nothing); `vanilla` and `no-mods`, nothing. Neither step refuses the start
    write Steam's config. Directly (dev.29.17; the default for a folder no Steam library knows, `GameInstall.source`
    `manual` and `library` null, else the player's `start` in the install record): the launcher starts the folder's
    `enshrouded.exe` itself (`kiln_manage::direct`): Windows runs it with the game folder as working folder (Kiln's
-   `dinput8.dll` is loaded from there first; nothing is set); Linux runs `<proton> run <exe>` with
-   `STEAM_COMPAT_DATA_PATH` (the compatdata folder) and `STEAM_COMPAT_CLIENT_INSTALL_PATH` (the Steam root), or `wine
-   <exe>` with `WINEPREFIX`, both with `WINEDLLOVERRIDES` `dinput8=n,b` (`dinput8,xinput9_1_0=n,b` with a chained
-   Ultimate ASI Loader; Wine also `mshtml=`), in the game folder, in its own session, output into
-   `logs/game-start-<installId>.log`. The runner is the player's, else the Proton Steam maps to app 1203620 (else app
-   0), else the first found (compatibility-tools folders, GE-Proton newest first; Valve's Protons in the libraries; wine
-   on PATH). The prefix is the player's, else Kiln's own `$XDG_DATA_HOME/kiln-prefixes/<installId>` (outside the data
-   folder: never moved with it); while the install starts directly its `prefix` and `platform` are that prefix's
-   (saves, path mode). The command is built before step 1's files are written (no runner refuses the start as it is).
-   Inherited `WINEPREFIX`, `WINEDLLOVERRIDES`, `STEAM_COMPAT_*`, `SteamAppId`, `SteamGameId`, `LD_PRELOAD` are
-   dropped. Kiln never sets `SteamAppId`/`SteamGameId`, never writes `steam_appid.txt`, never touches the game's Steam
-   DLLs: Steam must run (the game's Steam API), and a copy that asks Steam to restart it is restarted as Steam's own
-   copy ([custom-game-folders.md](custom-game-folders.md)). The `steam` start step is labelled "Starting the game"
-   then; `LaunchResult.via` is `direct` and `uri` empty.
+   `dinput8.dll` is loaded from there first; nothing is set); Linux runs `umu-run <exe>` with `WINEPREFIX` (the
+   prefix itself), `GAMEID=umu-default` (never `umu-<appid>`: umu derives `SteamAppId` from it) and `PROTONPATH` (the
+   first compatibility-tools Proton found; left out when none: umu's own), or `<proton> run <exe>` with
+   `STEAM_COMPAT_DATA_PATH` (the compatdata folder) and `STEAM_COMPAT_CLIENT_INSTALL_PATH` (the Steam root when Steam
+   is installed, else Kiln's empty `<kiln-prefixes>/_compat-client`, made at the start), or `wine <exe>` with
+   `WINEPREFIX`, all with `WINEDLLOVERRIDES` `dinput8=n,b` (`dinput8,xinput9_1_0=n,b` with a chained Ultimate ASI
+   Loader; Wine also `mshtml=`), in the game folder, in its own session, output into `logs/game-start-<installId>.log`.
+   The runner is the player's, else automatic (`direct::default_runner`): `umu-run` on PATH, else the first Proton
+   found (compatibility-tools folders, GE-Proton newest first: Steam's when installed, `~/.local/share/Steam`,
+   `~/.steam/{root,steam}`, `$XDG_DATA_HOME/Steam`, Heroic's `tools/proton`, Lutris's `runners/proton`,
+   `/usr/share/steam`; then Valve's Protons in the Steam libraries), else `wine` on PATH; Steam's compat tool mapping
+   is not read. The prefix is the player's, else Kiln's own `$XDG_DATA_HOME/kiln-prefixes/<installId>` (outside the
+   data folder: never moved with it; the Wine prefix is its `pfx` for every runner); while the install starts directly
+   its `prefix` and `platform` (`proton` under umu-run or Proton, `wine` under Wine) are that prefix's (saves, path
+   mode). The command is built before step 1's files are written (no runner refuses the start as it is). Inherited
+   `WINEPREFIX`, `WINEDLLOVERRIDES`, `STEAM_COMPAT_*`, `SteamAppId`, `SteamGameId`, `GAMEID`, `UMU_ID`,
+   `PROTONPATH`, `STORE`, `PROTON_VERB`, `LD_PRELOAD` are dropped. Nothing of a direct start needs Steam (installed or
+   running): Kiln starts the exe and nothing else; it never sets `SteamAppId`/`SteamGameId`, never writes
+   `steam_appid.txt`, never touches the game's Steam DLLs, and whether a copy needs Steam is that copy's business
+   ([custom-game-folders.md](custom-game-folders.md)). Without any Steam install a Steam library folder is added as a
+   custom folder (`game::inspect_with` with no roots). The `steam` start step (its id stays) is labelled "Starting the
+   game" then, before it begins too (`LauncherStart.direct`); `LaunchResult.via` is `direct` and `uri` empty.
 5. Watch: the process appears -> `kiln://game {kind: "started"}`; `state/boot.json` with a live pid and the nonce ->
    `{kind: "boot"}`; `mods.json`/`native.json` updates -> `{kind: "mods"|"native"}`; exit -> `{kind: "stopped"}`.
    play-once.ini still there after 120 s: the proxy did not run; under Proton show the `WINEDLLOVERRIDES="dinput8=n,b"
@@ -1222,7 +1230,7 @@ Shared types (TypeScript names, defined in `commands.ts`; Rust in kiln-manage un
 | game | `game_add` | path: string | `GameInstall` |
 | game | `game_remove` | gameId | null |
 | game | `game_status` | gameId | `GameStatus` (+ `started`: RFC 3339 start of the running game's process, null when stopped; + `otherFolderProfile {id, root?}` when another data folder's profile is active in the game, `activeProfile` null then: `profile::game_profile_owner`; (dev.29.17) + `start`: `'steam'\|'direct'` for a client; + `build: BuildCheck {sha256, short, known, from: 'game'\|'bundle'}`: the exe's sha256 against the game's `kiln/sigdb/builds/<side>/` records (`verified: true` counts), else the `builds` index of the runtime Play would install, left out when neither is there; `launchOptions` null for a direct start) |
-| game | `game_start_get` | gameId | (dev.29.17) `StartSetup {mode, settings: StartSettings, custom, windows, runners: RunnerInfo[], runner, defaultRunner, problem?, ownPrefix, command: DirectCommand \| null, steamRunning}` (`RunnerInfo {kind: 'proton'\|'wine', path, label, source: 'steam'\|'compat'\|'system'\|'custom'}`, `DirectCommand {program, args, cwd, env, envRemove, runner, prefix}`: what a direct start runs now) |
+| game | `game_start_get` | gameId | (dev.29.17) `StartSetup {mode, settings: StartSettings, custom, windows, steamFound, runners: RunnerInfo[], runner, defaultRunner, problem?, ownPrefix, command: DirectCommand \| null}` (`steamFound`: a Steam install was found; without one "Through Steam" is not offered for a direct start; `runners` in the order automatic takes them; `RunnerInfo {kind: 'umu'\|'proton'\|'wine', path, label, source: 'steam'\|'compat'\|'system'\|'custom', proton?}` (`proton`: umu's `PROTONPATH`), `DirectCommand {program, args, cwd, env, envRemove, runner, prefix}`: what a direct start runs now) |
 | game | `game_start_set` | gameId, settings: StartSettings | (dev.29.17) `GameInstall` as it starts now (refused while the game runs, for a server, and for a runner or prefix on Windows; a relative path is refused) |
 | runtime | `runtime_list` | - | `RuntimeBundle[]` |
 | runtime | `runtime_import` | path: string | `RuntimeBundle` |
@@ -1544,11 +1552,14 @@ default; the launcher uses `full`. Builds for Linux and `x86_64-pc-windows-msvc`
 | `hash` | `dirhash(&Path) -> Result<String>`, `dirhash_records(impl IntoIterator<Item = Record>)`, `sha256_file`, `sha256_hex`, `hex`, `hash8`, `fingerprint(entries) -> String`, `Record`, `FingerprintEntry` |
 | `vdf` | `parse(&str) -> Result<Vdf>`, `Vdf::{get, path, as_str, entries}` |
 | `steam` | `roots()`, `libraries(&SteamRoot)`, `app_manifest(&Path, u32)`, `compat_tool`, `launch_options`, `compatdata`; `SteamRoot`, `SteamFlavor`, `Library`, `AppManifest`, `LaunchOptions` |
-| `game` | `detect()`, `inspect(&Path)`, `known(&DataDirs)`, `add`, `add_with`, `remove`, `status`, `path_mode`, (dev.29.17) `set_start`, `sync_start`, `apply_start`, `asi_loader_chained`; `GameInstall`, `GameKind`, `Platform`, `PathMode`, `GameStatus` (+ `otherFolderProfile`, `start`, `build`), `OtherFolderProfile`, `LaunchOptionsInfo`, `InstallRecord` (+ `start`) |
+| `game` | `detect()`, `inspect(&Path)`, `known(&DataDirs)`, `add`, `add_with`, `remove`, `status`, `path_mode`, (dev.29.17) `set_start`, `sync_start`, `apply_start`, `add_on`, `set_start_on`, `apply_start_on`, `asi_loader_chained`; `GameInstall`, `GameKind`, `Platform`, `PathMode`, `GameStatus` (+ `otherFolderProfile`, `start`, `build`), `OtherFolderProfile`, `LaunchOptionsInfo`, `InstallRecord` (+ `start`) |
 | `pe` | `exports(&Path)`, `is_pe64_dll(&[u8])`, `classify_proxy(&Path) -> Result<ProxyClass>`; `ProxyKind {None, Kiln, ShroudForge, Emf, Unknown, NotDll}`, `ProxyClass`, marker constants |
 | `proc` | `list()`, `find_game(&GameInstall)`, `alive(u32)`; `ProcessInfo` |
 | `launch` | `steam_uri(u32)`, `open_uri(&str)`, `play(&DataDirs, &GameInstall, &LaunchRequest) -> Result<LaunchResult>` (through Steam or directly, as the install's record says), `play_with` (Steam, a test's opener), `play_via(.., Starter)`, `direct_log`; `LaunchMode`, `LaunchRequest`, `LaunchResult`, `Starter` |
-| `direct` | (dev.29.17) `StartMode`, `StartSettings`, `is_custom`, `effective_mode`, `settings`, `mode_of`, `prefixes_root`, `own_prefix`, `prefix_paths`, `runner_at`, `runners`, `default_runner`, `resolve_runner`, `command_for` (the command from facts, no I/O), `plan`, `prefix_of`, `spawn`, `steam_running`, `setup` (`StartSetup`), `build_check` (`BuildCheck`), `known_in_game`, `known_in_manifest`, `newest_bundle`, `unknown_build_sentence`; `RunnerInfo`, `RunnerKind`, `DirectCommand`, `SCRUB` |
+| `direct` | (dev.29.17) `StartMode`, `StartSettings`, `is_custom`, `effective_mode`, `settings`, `mode_of`, `prefixes_root`, `own_prefix`, `prefix_paths`, `runner_at`, `runners`, `default_runner`, `resolve_runner`, `command_for` (the command from facts, no I/O), `plan`, `prefix_of`, `spawn`, `setup` (`StartSetup`),
+`Host` (home, `XDG_DATA_HOME`, PATH and the system's compatibility-tools folders; `plan_on`, `prefix_on`, `setup_on`,
+`game::add_on`, `set_start_on`, `apply_start_on` take one: tests), `compat_roots`, `compat_client_dir`, `umu_proton`,
+`platform_of`, `UMU_RUN`, `UMU_GAMEID`, `NO_RUNNER`, `build_check` (`BuildCheck`), `known_in_game`, `known_in_manifest`, `newest_bundle`, `unknown_build_sentence`; `RunnerInfo`, `RunnerKind`, `DirectCommand`, `SCRUB` |
 | `winpath` | `unix_to_z(&Path)`, `z_to_unix(&str)`, `z_drive_ok(&Path)`, `to_game(&Path, &GameInstall)`, `to_host(&str, &GameInstall)` |
 | `bundle` | `read(&Path)`, `verify(&Path, &mut dyn Progress)`, `create(&Path, &Path, &CreateOptions)`, `list(&DataDirs)`, `import(&DataDirs, &Path)`; `RuntimeManifest`, `RuntimeComponent`, `RuntimeFile`, `RuntimeBuilds`, `RuntimeBuild`, `RuntimeBundle`, `CreateOptions` |
 | `install` | `read_receipt(&Path)`, `status`, `install(&DataDirs, &GameInstall, &Path, &InstallOptions, &mut dyn Progress)`, `uninstall`, `rollback`, `plan`; `InstallReceipt`, `ReceiptRuntime`, `ReceiptGame`, `ReceiptFile`, `ReplacedFile`, `ReplacedClass`, `ReplacedAction`, `InstallOptions`, `InstallState` |

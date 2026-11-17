@@ -420,7 +420,7 @@ fn start(dirs: &DataDirs, install: &GameInstall, request: &LaunchRequest, saves:
     Ok(LaunchResult { game_id: install.id.clone(), mode: request.mode, nonce, backup, uri, started, activation: None, via })
 }
 
-/// Where a direct start's Proton or Wine output goes: `<data>/logs/game-start-<installId>.log` (written again at every
+/// Where a direct start's umu-run, Proton or Wine output goes: `<data>/logs/game-start-<installId>.log` (written again at every
 /// direct start; the support report reads it).
 pub fn direct_log(dirs: &DataDirs, install: &GameInstall) -> std::path::PathBuf {
     dirs.logs().join(format!("game-start-{}.log", install.id))
