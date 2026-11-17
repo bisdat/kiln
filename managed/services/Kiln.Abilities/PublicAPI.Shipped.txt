@@ -292,12 +292,20 @@ Kiln.GemCraftAction.Unsocket = 2 -> Kiln.GemCraftAction
 Kiln.GemCraftAction.Upgrade = 3 -> Kiln.GemCraftAction
 Kiln.GemCraftOptions
 Kiln.GemCraftOptions.<Clone>$() -> Kiln.GemCraftOptions!
+Kiln.GemCraftOptions.CarrierHolder.get -> Kiln.EntityId
+Kiln.GemCraftOptions.CarrierHolder.init -> void
 Kiln.GemCraftOptions.Cost.get -> Kiln.GemCost?
 Kiln.GemCraftOptions.Cost.init -> void
 Kiln.GemCraftOptions.Equals(Kiln.GemCraftOptions? other) -> bool
 Kiln.GemCraftOptions.GemCraftOptions() -> void
+Kiln.GemCraftOptions.GemHolder.get -> Kiln.EntityId
+Kiln.GemCraftOptions.GemHolder.init -> void
 Kiln.GemCraftOptions.Holder.get -> Kiln.EntityId
 Kiln.GemCraftOptions.Holder.init -> void
+Kiln.GemCraftOptions.PayFrom.get -> Kiln.GemPayer
+Kiln.GemCraftOptions.PayFrom.init -> void
+Kiln.GemCraftOptions.ReturnTo.get -> Kiln.EntityId
+Kiln.GemCraftOptions.ReturnTo.init -> void
 Kiln.GemCraftResult
 Kiln.GemCraftResult.<Clone>$() -> Kiln.GemCraftResult!
 Kiln.GemCraftResult.Action.get -> Kiln.GemCraftAction
@@ -396,6 +404,11 @@ Kiln.GemDefinition.Texts.get -> System.Collections.Generic.Dictionary<string!, K
 Kiln.GemDefinition.Texts.init -> void
 Kiln.GemDefinition.Trigger.get -> Kiln.GemTrigger?
 Kiln.GemDefinition.Trigger.init -> void
+Kiln.GemForgeOpenedEvent
+Kiln.GemForgeOpenedEvent.Forge.get -> Kiln.EntityId
+Kiln.GemForgeOpenedEvent.Involves(Kiln.EntityId entity) -> bool
+Kiln.GemForgeOpenedEvent.Player.get -> Kiln.EntityId
+Kiln.GemForgeOpenedEvent.Refresh.get -> bool
 Kiln.GemHandle
 Kiln.GemHandle.Definition.get -> Kiln.GemDefinition!
 Kiln.GemHandle.Dispose() -> void
@@ -439,6 +452,17 @@ Kiln.GemInfo.Program.get -> System.Guid
 Kiln.GemInfo.Program.init -> void
 Kiln.GemInfo.Rarity.get -> Kiln.ItemRarity
 Kiln.GemInfo.Rarity.init -> void
+Kiln.GemPayer
+Kiln.GemPayer.Container.get -> Kiln.EntityId
+Kiln.GemPayer.Equals(Kiln.GemPayer other) -> bool
+Kiln.GemPayer.GemPayer() -> void
+Kiln.GemPayer.IsPlayer.get -> bool
+Kiln.GemPayer.Kind.get -> Kiln.GemPayerKind
+Kiln.GemPayerKind
+Kiln.GemPayerKind.BaseStorage = 2 -> Kiln.GemPayerKind
+Kiln.GemPayerKind.Container = 1 -> Kiln.GemPayerKind
+Kiln.GemPayerKind.Player = 0 -> Kiln.GemPayerKind
+Kiln.GemPayerKind.PlayerThenBaseStorage = 3 -> Kiln.GemPayerKind
 Kiln.GemReturned
 Kiln.GemReturned.<Clone>$() -> Kiln.GemReturned!
 Kiln.GemReturned.Carrier.get -> Kiln.ItemInstanceRef
@@ -515,6 +539,30 @@ Kiln.GemSocketsSetup.Server.get -> bool
 Kiln.GemSocketsSetup.Server.init -> void
 Kiln.GemSocketsSetup.ServerReason.get -> string?
 Kiln.GemSocketsSetup.ServerReason.init -> void
+Kiln.GemSourceOffer
+Kiln.GemSourceOffer.<Clone>$() -> Kiln.GemSourceOffer!
+Kiln.GemSourceOffer.Deconstruct(out Kiln.EntityId Player, out Kiln.EntityId Holder, out System.Collections.Generic.IReadOnlyList<Kiln.OfferedGem!>! Gems, out string? Refusal) -> void
+Kiln.GemSourceOffer.Equals(Kiln.GemSourceOffer? other) -> bool
+Kiln.GemSourceOffer.GemSourceOffer(Kiln.EntityId Player, Kiln.EntityId Holder, System.Collections.Generic.IReadOnlyList<Kiln.OfferedGem!>! Gems, string? Refusal) -> void
+Kiln.GemSourceOffer.Gems.get -> System.Collections.Generic.IReadOnlyList<Kiln.OfferedGem!>!
+Kiln.GemSourceOffer.Gems.init -> void
+Kiln.GemSourceOffer.Holder.get -> Kiln.EntityId
+Kiln.GemSourceOffer.Holder.init -> void
+Kiln.GemSourceOffer.Ok.get -> bool
+Kiln.GemSourceOffer.Player.get -> Kiln.EntityId
+Kiln.GemSourceOffer.Player.init -> void
+Kiln.GemSourceOffer.Refusal.get -> string?
+Kiln.GemSourceOffer.Refusal.init -> void
+Kiln.GemSourceOptions
+Kiln.GemSourceOptions.<Clone>$() -> Kiln.GemSourceOptions!
+Kiln.GemSourceOptions.Equals(Kiln.GemSourceOptions? other) -> bool
+Kiln.GemSourceOptions.GemSourceOptions() -> void
+Kiln.GemSourceOptions.Lifetime.get -> System.TimeSpan
+Kiln.GemSourceOptions.Lifetime.init -> void
+Kiln.GemSourceOptions.PayFrom.get -> Kiln.GemPayer
+Kiln.GemSourceOptions.PayFrom.init -> void
+Kiln.GemSourceOptions.ReturnTo.get -> Kiln.EntityId
+Kiln.GemSourceOptions.ReturnTo.init -> void
 Kiln.GemTrigger
 Kiln.GemTrigger.EnemiesOnly.get -> bool
 Kiln.GemTrigger.Interval.get -> System.TimeSpan
@@ -878,6 +926,19 @@ Kiln.NativeState.Refused = 3 -> Kiln.NativeState
 Kiln.NativeState.Waiting = 1 -> Kiln.NativeState
 Kiln.NativeSyncHandler
 Kiln.NativeWrapHandler
+Kiln.OfferedGem
+Kiln.OfferedGem.<Clone>$() -> Kiln.OfferedGem!
+Kiln.OfferedGem.Deconstruct(out ulong Token, out Kiln.ItemInstanceRef Gem, out Kiln.SlotId Slot, out int Level) -> void
+Kiln.OfferedGem.Equals(Kiln.OfferedGem? other) -> bool
+Kiln.OfferedGem.Gem.get -> Kiln.ItemInstanceRef
+Kiln.OfferedGem.Gem.init -> void
+Kiln.OfferedGem.Level.get -> int
+Kiln.OfferedGem.Level.init -> void
+Kiln.OfferedGem.OfferedGem(ulong Token, Kiln.ItemInstanceRef Gem, Kiln.SlotId Slot, int Level) -> void
+Kiln.OfferedGem.Slot.get -> Kiln.SlotId
+Kiln.OfferedGem.Slot.init -> void
+Kiln.OfferedGem.Token.get -> ulong
+Kiln.OfferedGem.Token.init -> void
 Kiln.Optional<T>
 Kiln.Optional<T>.GetValueOrDefault(T fallback = default(T)) -> T
 Kiln.Optional<T>.HasValue.get -> bool
@@ -918,7 +979,9 @@ Kiln.SocketedGem.SocketedGem(Kiln.ItemInstanceRef Carrier, Kiln.ItemId Gem, int 
 [KILNX001]static Kiln.Abilities.Natives.LabLockBypass.get -> ulong?
 [KILNX001]static Kiln.Abilities.Natives.LabRetire.get -> (ulong Deferred, uint PendingCore, int PendingManaged, ulong Watchdog)?
 const Kiln.Gems.CraftCapability = "gems.craft" -> string!
+const Kiln.Gems.PayersCapability = "gems.payers" -> string!
 const Kiln.Gems.SocketsCapability = "gems.sockets" -> string!
+const Kiln.Gems.SourcesCapability = "gems.sources" -> string!
 const Kiln.ImpactConfigIds.AttackCategory = 606890942 -> uint
 const Kiln.ImpactConfigIds.AttackMod = 2236524794 -> uint
 const Kiln.ImpactConfigIds.BuffType = 1524311620 -> uint
@@ -973,10 +1036,13 @@ override Kiln.GemCraftResult.GetHashCode() -> int
 override Kiln.GemCraftResult.ToString() -> string!
 override Kiln.GemCraftedEvent.ToString() -> string!
 override Kiln.GemCraftingEvent.ToString() -> string!
+override Kiln.GemForgeOpenedEvent.ToString() -> string!
 override Kiln.GemHandle.ToString() -> string!
 override Kiln.GemInfo.Equals(object? obj) -> bool
 override Kiln.GemInfo.GetHashCode() -> int
 override Kiln.GemInfo.ToString() -> string!
+override Kiln.GemPayer.GetHashCode() -> int
+override Kiln.GemPayer.ToString() -> string!
 override Kiln.GemReturned.Equals(object? obj) -> bool
 override Kiln.GemReturned.GetHashCode() -> int
 override Kiln.GemReturned.ToString() -> string!
@@ -987,6 +1053,12 @@ override Kiln.GemSocketResult.ToString() -> string!
 override Kiln.GemSocketsSetup.Equals(object? obj) -> bool
 override Kiln.GemSocketsSetup.GetHashCode() -> int
 override Kiln.GemSocketsSetup.ToString() -> string!
+override Kiln.GemSourceOffer.Equals(object? obj) -> bool
+override Kiln.GemSourceOffer.GetHashCode() -> int
+override Kiln.GemSourceOffer.ToString() -> string!
+override Kiln.GemSourceOptions.Equals(object? obj) -> bool
+override Kiln.GemSourceOptions.GetHashCode() -> int
+override Kiln.GemSourceOptions.ToString() -> string!
 override Kiln.GemTrigger.ToString() -> string!
 override Kiln.GemTriggeredEvent.ToString() -> string!
 override Kiln.ImpactInstance.ToString() -> string!
@@ -1010,6 +1082,9 @@ override Kiln.NativeRef.ToString() -> string!
 override Kiln.NativeResult.Equals(object? obj) -> bool
 override Kiln.NativeResult.GetHashCode() -> int
 override Kiln.NativeResult.ToString() -> string!
+override Kiln.OfferedGem.Equals(object? obj) -> bool
+override Kiln.OfferedGem.GetHashCode() -> int
+override Kiln.OfferedGem.ToString() -> string!
 override Kiln.Optional<T>.ToString() -> string!
 override Kiln.SequenceOptions.Equals(object? obj) -> bool
 override Kiln.SequenceOptions.GetHashCode() -> int
@@ -1093,12 +1168,22 @@ static Kiln.GemCraftResult.operator !=(Kiln.GemCraftResult? left, Kiln.GemCraftR
 static Kiln.GemCraftResult.operator ==(Kiln.GemCraftResult? left, Kiln.GemCraftResult? right) -> bool
 static Kiln.GemInfo.operator !=(Kiln.GemInfo? left, Kiln.GemInfo? right) -> bool
 static Kiln.GemInfo.operator ==(Kiln.GemInfo? left, Kiln.GemInfo? right) -> bool
+static Kiln.GemPayer.BaseStorage.get -> Kiln.GemPayer
+static Kiln.GemPayer.From(Kiln.EntityId container) -> Kiln.GemPayer
+static Kiln.GemPayer.Player.get -> Kiln.GemPayer
+static Kiln.GemPayer.PlayerThenBaseStorage.get -> Kiln.GemPayer
+static Kiln.GemPayer.operator !=(Kiln.GemPayer left, Kiln.GemPayer right) -> bool
+static Kiln.GemPayer.operator ==(Kiln.GemPayer left, Kiln.GemPayer right) -> bool
 static Kiln.GemReturned.operator !=(Kiln.GemReturned? left, Kiln.GemReturned? right) -> bool
 static Kiln.GemReturned.operator ==(Kiln.GemReturned? left, Kiln.GemReturned? right) -> bool
 static Kiln.GemSocketResult.operator !=(Kiln.GemSocketResult? left, Kiln.GemSocketResult? right) -> bool
 static Kiln.GemSocketResult.operator ==(Kiln.GemSocketResult? left, Kiln.GemSocketResult? right) -> bool
 static Kiln.GemSocketsSetup.operator !=(Kiln.GemSocketsSetup? left, Kiln.GemSocketsSetup? right) -> bool
 static Kiln.GemSocketsSetup.operator ==(Kiln.GemSocketsSetup? left, Kiln.GemSocketsSetup? right) -> bool
+static Kiln.GemSourceOffer.operator !=(Kiln.GemSourceOffer? left, Kiln.GemSourceOffer? right) -> bool
+static Kiln.GemSourceOffer.operator ==(Kiln.GemSourceOffer? left, Kiln.GemSourceOffer? right) -> bool
+static Kiln.GemSourceOptions.operator !=(Kiln.GemSourceOptions? left, Kiln.GemSourceOptions? right) -> bool
+static Kiln.GemSourceOptions.operator ==(Kiln.GemSourceOptions? left, Kiln.GemSourceOptions? right) -> bool
 static Kiln.GemTrigger.OnBackstab(bool enemiesOnly = true) -> Kiln.GemTrigger!
 static Kiln.GemTrigger.OnHit(bool crit = false, bool enemiesOnly = true) -> Kiln.GemTrigger!
 static Kiln.GemTrigger.OnHitTaken(bool enemiesOnly = true) -> Kiln.GemTrigger!
@@ -1109,6 +1194,7 @@ static Kiln.Gems.AllowSockets(Kiln.GemSocketKinds kinds, double rollChance = 0) 
 static Kiln.Gems.Catalog.get -> System.Collections.Generic.IReadOnlyList<Kiln.GemInfo!>!
 static Kiln.Gems.Equipped(Kiln.EntityId player) -> System.Collections.Generic.IReadOnlyList<Kiln.EquippedGem!>!
 static Kiln.Gems.Get(Kiln.ItemId gem) -> Kiln.GemInfo?
+static Kiln.Gems.OfferChestGems(Kiln.EntityId player, Kiln.EntityId holder, Kiln.GemSourceOptions? options = null) -> Kiln.GemSourceOffer!
 static Kiln.Gems.Recycle(Kiln.EntityId player, Kiln.ItemInstanceRef gemOrCarrier, Kiln.EntityId forge, Kiln.GemCraftOptions? options = null) -> System.Threading.Tasks.Task<Kiln.GemCraftResult!>!
 static Kiln.Gems.Register(Kiln.GemDefinition! definition) -> Kiln.GemHandle!
 static Kiln.Gems.ReturnSocketedGems(Kiln.EntityId owner) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Kiln.GemReturned!>!>!
@@ -1117,6 +1203,7 @@ static Kiln.Gems.Socket(Kiln.ItemInstanceRef carrier) -> Kiln.SocketedGem?
 static Kiln.Gems.SocketKinds.get -> Kiln.GemSocketKinds
 static Kiln.Gems.Unsocket(Kiln.EntityId player, Kiln.ItemInstanceRef carrier, Kiln.EntityId forge, Kiln.GemCraftOptions? options = null) -> System.Threading.Tasks.Task<Kiln.GemCraftResult!>!
 static Kiln.Gems.Upgrade(Kiln.EntityId player, Kiln.ItemInstanceRef gemOrCarrier, Kiln.EntityId forge, Kiln.GemCraftOptions? options = null) -> System.Threading.Tasks.Task<Kiln.GemCraftResult!>!
+static Kiln.Gems.WithdrawChestGems(Kiln.EntityId player, Kiln.EntityId holder = default(Kiln.EntityId)) -> int
 static Kiln.ImpactConfigIds.Parse(string! key) -> uint
 static Kiln.ImpactNativeAccess.Connected(ref Kiln.NativeCall call, int i) -> bool
 static Kiln.ImpactNativeAccess.Context(ref Kiln.NativeCall call) -> Kiln.NativeContext
@@ -1139,6 +1226,8 @@ static Kiln.NativeParameter.operator !=(Kiln.NativeParameter? left, Kiln.NativeP
 static Kiln.NativeParameter.operator ==(Kiln.NativeParameter? left, Kiln.NativeParameter? right) -> bool
 static Kiln.NativeResult.operator !=(Kiln.NativeResult? left, Kiln.NativeResult? right) -> bool
 static Kiln.NativeResult.operator ==(Kiln.NativeResult? left, Kiln.NativeResult? right) -> bool
+static Kiln.OfferedGem.operator !=(Kiln.OfferedGem? left, Kiln.OfferedGem? right) -> bool
+static Kiln.OfferedGem.operator ==(Kiln.OfferedGem? left, Kiln.OfferedGem? right) -> bool
 static Kiln.SequenceOptions.operator !=(Kiln.SequenceOptions? left, Kiln.SequenceOptions? right) -> bool
 static Kiln.SequenceOptions.operator ==(Kiln.SequenceOptions? left, Kiln.SequenceOptions? right) -> bool
 static Kiln.SocketedGem.operator !=(Kiln.SocketedGem left, Kiln.SocketedGem right) -> bool
@@ -1156,6 +1245,7 @@ virtual Kiln.NativeWrapHandler.Invoke(ref Kiln.NativeCall call) -> void
 ~override Kiln.DamageSetup.Equals(object obj) -> bool
 ~override Kiln.DamageSetup.ToString() -> string
 ~override Kiln.GemCost.Equals(object obj) -> bool
+~override Kiln.GemPayer.Equals(object obj) -> bool
 ~override Kiln.ImpactRef.Equals(object obj) -> bool
 ~override Kiln.NativeArg.Equals(object obj) -> bool
 ~override Kiln.NativeArg.ToString() -> string

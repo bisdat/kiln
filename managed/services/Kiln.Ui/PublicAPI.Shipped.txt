@@ -27,6 +27,8 @@ Kiln.CraftingPanelOptions
 Kiln.CraftingPanelOptions.<Clone>$() -> Kiln.CraftingPanelOptions!
 Kiln.CraftingPanelOptions.Anchor.get -> Kiln.CraftingPanelAnchor
 Kiln.CraftingPanelOptions.Anchor.init -> void
+Kiln.CraftingPanelOptions.AtFactories.get -> bool
+Kiln.CraftingPanelOptions.AtFactories.init -> void
 Kiln.CraftingPanelOptions.CraftingPanelOptions() -> void
 Kiln.CraftingPanelOptions.Equals(Kiln.CraftingPanelOptions? other) -> bool
 Kiln.CraftingPanelOptions.Interactive.get -> bool
@@ -44,10 +46,14 @@ Kiln.CraftingScreen.CraftingScreen() -> void
 Kiln.CraftingScreen.CraftingScreen(bool AtStation, uint Workshop, uint Recipe, bool Journal) -> void
 Kiln.CraftingScreen.Deconstruct(out bool AtStation, out uint Workshop, out uint Recipe, out bool Journal) -> void
 Kiln.CraftingScreen.Equals(Kiln.CraftingScreen other) -> bool
+Kiln.CraftingScreen.IsFactory.get -> bool
+Kiln.CraftingScreen.IsFactory.init -> void
 Kiln.CraftingScreen.Journal.get -> bool
 Kiln.CraftingScreen.Journal.init -> void
 Kiln.CraftingScreen.Recipe.get -> uint
 Kiln.CraftingScreen.Recipe.init -> void
+Kiln.CraftingScreen.Station.get -> Kiln.EntityId
+Kiln.CraftingScreen.Station.init -> void
 Kiln.CraftingScreen.Workshop.get -> uint
 Kiln.CraftingScreen.Workshop.init -> void
 Kiln.GameLanguage
@@ -541,6 +547,7 @@ Kiln.UiDraw.InputMultiline(string! label, ref string! value, int maxBytes = 4096
 Kiln.UiDraw.InputText(string! label, ref string! value, int maxBytes = 256) -> bool
 Kiln.UiDraw.ItemClicked(Kiln.UiMouseButton button = Kiln.UiMouseButton.Left) -> bool
 Kiln.UiDraw.ItemHovered.get -> bool
+Kiln.UiDraw.ItemIcon(Kiln.ItemId item, float size = 0) -> void
 Kiln.UiDraw.KeyPressed(Kiln.UiKey key, bool repeat = false, bool claim = false) -> bool
 Kiln.UiDraw.LastItem.get -> Kiln.UiItem
 Kiln.UiDraw.Look(Kiln.UiStyle style) -> Kiln.UiDraw.LookScope
@@ -590,6 +597,7 @@ Kiln.UiFont.GameBold = 2 -> Kiln.UiFont
 Kiln.UiImage
 Kiln.UiImage.Dispose() -> void
 Kiln.UiImage.Height.get -> int
+Kiln.UiImage.Item.get -> Kiln.ItemId?
 Kiln.UiImage.UiImage() -> void
 Kiln.UiImage.Width.get -> int
 Kiln.UiItem
@@ -1225,6 +1233,8 @@ static Kiln.Ui.Crafting.Current.get -> Kiln.CraftingScreen?
 static Kiln.Ui.Crafting.Describe(uint workshop = 0) -> string!
 static Kiln.Ui.Crafting.MenuAvailable.get -> bool
 static Kiln.Ui.Frame -> System.Action<Kiln.UiDraw!>?
+static Kiln.Ui.ItemIconsAvailable.get -> bool
+static Kiln.Ui.ItemImage(Kiln.ItemId item) -> Kiln.UiImage?
 static Kiln.Ui.LoadImage(byte[]! png) -> Kiln.UiImage?
 static Kiln.Ui.LoadImage(string! path) -> Kiln.UiImage?
 static Kiln.Ui.MenuOpen.get -> bool
