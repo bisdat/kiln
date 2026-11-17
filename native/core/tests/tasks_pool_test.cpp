@@ -1080,6 +1080,194 @@ KILN_TASKS_TEST(slot_lost_and_recovered_noted_once) {
     check(until([&] { return waiting.done_calls.load() == 1 && faulter.done_calls.load() == 1; }), "work runs again");
     pool.set_note_sink(nullptr, nullptr);
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// Process exit: close() then park(). After the park no worker starts another body or done; the caller waits (bounded)
+// for the ones already running.
+
+// park() on its own thread, so the test can watch it wait.
+struct Parker {
+    std::atomic<bool> returned{false};
+    Pool::ParkResult result;
+    std::chrono::steady_clock::duration took{};
+    std::thread thread;
+    void start(Pool& pool, uint64_t timeout_ns) {
+        thread = std::thread([this, &pool, timeout_ns] {
+            const auto t0 = std::chrono::steady_clock::now();
+            result = pool.park(timeout_ns);
+            took = std::chrono::steady_clock::now() - t0;
+            returned = true;
+        });
+    }
+    void join() {
+        if (thread.joinable()) thread.join();
+    }
+};
+
+// A body in flight is waited for; the cancelled queued task and every done stay undelivered once parked.
+KILN_TASKS_TEST(exit_park_waits_for_the_running_body) {
+    HostPlatform platform;
+    Pool pool(config(1, 1), &platform);
+    pool.open_owner(1, "mod.one");
+    Job running, queued;
+    running.platform = queued.platform = &platform;
+    queued.release.open();
+    submit(pool, 1, named("active"), running);
+    check(until([&] { return running.body_runs.load() == 1; }), "the body is running");
+    submit(pool, 1, named("waiting"), queued);  // the one normal worker is busy: queued
+    pool.close();                               // the exit seals: the queued one is cancelled (its done queued)
+    Parker parker;
+    parker.start(pool, 5ull * 1000 * 1000 * 1000);
+    check(until([&] { return pool.parked(); }), "the park began while the body runs");
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    check(!parker.returned.load(), "park waits while a body runs");
+    running.release.open();
+    check(until([&] { return parker.returned.load(); }), "park returns once the body returned");
+    parker.join();
+    check(parker.result.running_at_start == 1 && parker.result.still_running == 0 && parker.result.names.empty(),
+          "one callback was running at the park, none is left");
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    check(queued.body_runs.load() == 0, "the cancelled queued task never ran");
+    check(running.done_calls.load() == 0 && queued.done_calls.load() == 0, "no done runs once the pool parked");
+    check(pool.parked(), "the pool says it is parked");
+}
+
+// A body that ignores its cancel past the bound is named and left running; nothing else runs after it returns.
+KILN_TASKS_TEST(exit_park_bound) {
+    HostPlatform platform;
+    Pool pool(config(2, 1), &platform);
+    pool.open_owner(1, "mod.one");
+    pool.open_owner(2, "mod.two");
+    Job stuck, idle_owner;
+    stuck.platform = idle_owner.platform = &platform;
+    idle_owner.release.open();
+    submit(pool, 1, named("stuck"), stuck);
+    check(until([&] { return stuck.body_runs.load() == 1; }), "the body is running");
+    pool.close();
+    const auto t0 = std::chrono::steady_clock::now();
+    const Pool::ParkResult r = pool.park(50ull * 1000 * 1000);
+    const auto took = std::chrono::steady_clock::now() - t0;
+    check(r.running_at_start == 1 && r.still_running == 1, "the body that ignores its cancel is still running");
+    check(r.names == "mod.one/stuck", "and named <owner>/<task>: '" + r.names + "'");
+    check(took >= std::chrono::milliseconds(50) && took < std::chrono::seconds(2), "park gave up at its bound");
+    KilnHandle h = 0;
+    Refusal why = Refusal::None;
+    check(pool.submit(2, named("late"), &job_body, &job_done, &idle_owner, &h, &why) != KILN_OK, "nothing is accepted");
+    stuck.release.open();
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    check(stuck.done_calls.load() == 0, "the late body's done is not delivered after the park");
+    check(pool.park(0).still_running == 0, "a second park finds every worker parked");
+}
+
+// After the park a timed drain_owner no longer waits (no done can run any more): it reports what is left at once.
+KILN_TASKS_TEST(exit_park_drain_does_not_wait) {
+    HostPlatform platform;
+    Pool pool(config(1, 1), &platform);
+    pool.open_owner(1, "mod.one");
+    Job running, queued;
+    running.platform = queued.platform = &platform;
+    queued.release.open();
+    submit(pool, 1, named("active"), running);
+    check(until([&] { return running.body_runs.load() == 1; }), "the body is running");
+    submit(pool, 1, named("waiting"), queued);
+    pool.close();
+    Parker parker;
+    parker.start(pool, 5ull * 1000 * 1000 * 1000);
+    check(until([&] { return pool.parked(); }), "the park began while the body runs");
+    running.release.open();
+    check(until([&] { return parker.returned.load(); }), "parked");
+    parker.join();
+    uint32_t left = 0;
+    const auto t0 = std::chrono::steady_clock::now();
+    check(pool.drain_owner(1, 5ull * 1000 * 1000 * 1000, &left) == KILN_OK && left > 0, "the dones are left undelivered");
+    check(std::chrono::steady_clock::now() - t0 < std::chrono::seconds(1), "drain_owner returned at once after the park");
+}
+
+// The exit can come from inside a body (a task that ends the process): park never waits for its own caller.
+KILN_TASKS_TEST(exit_park_from_a_body) {
+    HostPlatform platform;
+    Pool pool(config(1, 1), &platform);
+    pool.open_owner(1, "mod.one");
+    Job self;
+    self.platform = &platform;
+    self.release.open();
+    Pool::ParkResult inner;
+    std::chrono::steady_clock::duration took{};
+    std::atomic<bool> returned{false};  // publishes inner and took to the test thread
+    self.extra = [&](const TaskRun*) {
+        pool.close();
+        const auto t0 = std::chrono::steady_clock::now();
+        inner = pool.park(2ull * 1000 * 1000 * 1000);
+        took = std::chrono::steady_clock::now() - t0;
+        returned = true;
+    };
+    submit(pool, 1, named("exits"), self);
+    check(until([&] { return returned.load(); }), "the body parked the pool");
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    check(inner.still_running == 0 && took < std::chrono::seconds(1), "park did not wait for the body that called it");
+    check(self.done_calls.load() == 0, "its own done is not delivered after the park");
+}
+
+// The maintenance thread stops at the park: no watchdog sweep (no log line) runs after it.
+KILN_TASKS_TEST(exit_park_stops_maintenance) {
+    HostPlatform platform;
+    PoolConfig c = config(1, 1);
+    c.watchdog_interval_ns = 1000 * 1000;              // 1 ms (real time)
+    c.running_watchdog_ns = 1000ull * 1000 * 1000;     // 1 s on the fake clock
+    c.queued_watchdog_ns = 1000;
+    Pool pool(c, &platform);
+    pool.open_owner(1, "mod.one");
+    std::atomic<int> reports{0};
+    pool.set_watch_sink(+[](const Watch&, void* user) { static_cast<std::atomic<int>*>(user)->fetch_add(1); }, &reports);
+    Job stuck, queued;
+    stuck.platform = queued.platform = &platform;
+    queued.release.open();
+    submit(pool, 1, named("stuck"), stuck);
+    check(until([&] { return stuck.body_runs.load() == 1; }), "the body is running");
+    submit(pool, 1, named("waits"), queued);
+    platform.advance(5000);
+    check(until([&] { return reports.load() == 1; }), "the watchdog reports while the pool runs (the queued task)");
+    pool.close();
+    check(pool.park(1000 * 1000).still_running == 1, "the stuck body is left running");
+    platform.advance(2ull * 1000 * 1000 * 1000);  // the running body is now overdue: a sweep would report it
+    std::this_thread::sleep_for(std::chrono::milliseconds(30));
+    check(reports.load() == 1, "no sweep ran after the park");
+    stuck.release.open();
+}
+
+// Under load (TSan): once park() returned with nothing running, no body or done starts again.
+KILN_TASKS_TEST(exit_park_under_load) {
+    HostPlatform platform;
+    Pool pool(config(4, 2), &platform);
+    for (KilnOwner o = 1; o <= 4; ++o) pool.open_owner(o, "o");
+    std::atomic<int> starts{0};
+    struct Tiny {
+        std::atomic<int>* starts;
+    } tiny{&starts};
+    const auto body = +[](const TaskRun*, void* user) { static_cast<Tiny*>(user)->starts->fetch_add(1); };
+    const auto done = +[](KilnHandle, uint32_t, void* user) { static_cast<Tiny*>(user)->starts->fetch_add(1); };
+    std::atomic<bool> stop{false};
+    std::vector<std::thread> submitters;
+    for (KilnOwner o = 1; o <= 4; ++o)
+        submitters.emplace_back([&, o] {
+            while (!stop.load()) {
+                KilnHandle h = 0;
+                Refusal why = Refusal::None;
+                if (pool.submit(o, named("tiny", Priority::Normal, o == 4), body, done, &tiny, &h, &why) == KILN_OK)
+                    pool.release(o, h);
+                std::this_thread::yield();
+            }
+        });
+    check(until([&] { return starts.load() > 200; }), "the pool is busy");
+    pool.close();
+    const Pool::ParkResult r = pool.park(5ull * 1000 * 1000 * 1000);
+    const int at_park = starts.load();
+    check(r.still_running == 0, "every running callback returned within the bound");
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    check(starts.load() == at_park, "nothing started after the park returned");
+    stop = true;
+    for (auto& t : submitters) t.join();
+}
 }  // namespace
 
 int main(int argc, char** argv) { return kiln::tasks::test::run(argc, argv, "tasks pool"); }
