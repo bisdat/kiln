@@ -104,6 +104,13 @@ pub struct GameStatus {
     /// runtime's): they may fail to load until Kiln is updated on the Runtime page.
     #[serde(default)]
     pub newer_mods: Vec<crate::profile::NewerKilnMod>,
+    /// (dev.29.17) How this client starts (`direct::effective_mode`: through Steam, or directly); left out for a server.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start: Option<crate::direct::StartMode>,
+    /// (dev.29.17) Whether Kiln knows the build of the game's exe (`direct::build_check`); left out when it cannot be
+    /// told (the exe unreadable, no runtime in the game and none in the launcher).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build: Option<crate::direct::BuildCheck>,
 }
 
 /// `GameStatus.other_folder_profile`: the id of another data folder's profile active in the game, and the data folder
@@ -136,6 +143,10 @@ pub struct InstallRecord {
     pub added: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub updated: Option<String>,
+    /// (dev.29.17) How the player wants this install started (`direct::StartSettings`): left out while every choice
+    /// is Kiln's default (through Steam for a Steam install, directly for a folder no Steam library knows).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start: Option<crate::direct::StartSettings>,
 }
 
 fn canon(p: &Path) -> PathBuf {
@@ -370,8 +381,10 @@ pub fn write_record(dirs: &DataDirs, install: &GameInstall, receipt: Option<serd
         format: 1,
         install: install.clone(),
         receipt,
-        added: old.and_then(|o| o.added).or_else(|| Some(now.clone())),
+        added: old.as_ref().and_then(|o| o.added.clone()).or_else(|| Some(now.clone())),
         updated: Some(now),
+        // the player's start choice stays with the record whoever writes it again (an install, a move, Add again)
+        start: old.and_then(|o| o.start),
     };
     let mut text = serde_json::to_string_pretty(&rec)?;
     text.push('\n');
@@ -405,11 +418,108 @@ pub fn known(dirs: &crate::paths::DataDirs) -> Result<Vec<GameInstall>> {
 
 /// Adds (or refreshes) the install at `path`: inspect, exe sha256, record.
 pub fn add(dirs: &crate::paths::DataDirs, path: &Path) -> Result<GameInstall> {
-    let roots = steam::roots().unwrap_or_default();
-    let mut g = inspect_with(path, &roots, &dirs.root)?;
+    add_with(dirs, path, &steam::roots().unwrap_or_default())
+}
+
+/// `add` with explicit Steam roots. A folder that starts directly (a custom folder by default, or the player's choice
+/// kept in its record) gets the platform and prefix of that start ([`apply_start`]).
+pub fn add_with(dirs: &crate::paths::DataDirs, path: &Path, roots: &[SteamRoot]) -> Result<GameInstall> {
+    let mut g = inspect_with(path, roots, &dirs.root)?;
     g.exe_sha256 = crate::hash::sha256_file(&g.path.join(&g.exe)).ok().map(|(h, _)| h);
+    let settings = record(dirs, &g.id).ok().flatten().and_then(|r| r.start).unwrap_or_default();
+    apply_start(&mut g, &settings, roots, &dirs.root);
     write_record(dirs, &g, receipt_json(&g.path))?;
     Ok(g)
+}
+
+/// The install as it runs with `settings`: a direct start under Proton or Wine (Linux) runs in its own prefix, which
+/// is the install's `prefix` and `platform` then (saves, path mode, logs follow it); a start through Steam keeps what
+/// `inspect` found. Windows and servers are left as they are.
+pub fn apply_start(install: &mut GameInstall, settings: &crate::direct::StartSettings, roots: &[SteamRoot], data_root: &Path) {
+    if install.kind != GameKind::Client || cfg!(windows) {
+        return;
+    }
+    if crate::direct::effective_mode(install, Some(settings)) == crate::direct::StartMode::Direct
+        && let Some((platform, pfx)) = crate::direct::prefix_of(install, settings, roots)
+    {
+        install.platform = platform;
+        install.prefix = Some(pfx);
+        install.path_mode = path_mode_for(platform, install.steam_flavor, install.prefix.as_deref(), data_root);
+    }
+}
+
+/// Changes how an install starts (`game_start_set`): validates the choice, keeps it in the record and writes the
+/// install's platform and prefix for it again. A server, or a Proton/Wine/prefix choice on Windows, is refused.
+pub fn set_start(dirs: &DataDirs, id: &str, settings: &crate::direct::StartSettings, roots: &[SteamRoot]) -> Result<GameInstall> {
+    let rec = record(dirs, id)?.ok_or_else(|| Error::not_found(format!("no game install {id}")))?;
+    let old = rec.install.clone();
+    if old.kind != GameKind::Client {
+        return Err(Error::invalid("a dedicated server starts on the Servers page; its start is not set here"));
+    }
+    if cfg!(windows) && (settings.runner.is_some() || settings.prefix.is_some()) {
+        return Err(Error::invalid("Proton, Wine and a prefix are for Linux: Windows starts the game itself"));
+    }
+    if let Some(r) = &settings.runner {
+        crate::direct::runner_at(r)?;
+    }
+    if let Some(p) = &settings.prefix {
+        if !p.is_absolute() {
+            return Err(Error::invalid(format!("the prefix must be an absolute path, not {}", p.display())));
+        }
+        if p.exists() && !p.is_dir() {
+            return Err(Error::invalid(format!("{} is not a folder", p.display())));
+        }
+        let kind = match &settings.runner {
+            Some(r) => crate::direct::runner_at(r)?.kind,
+            None => crate::direct::resolve_runner(settings, roots).map(|r| r.kind).unwrap_or(crate::direct::RunnerKind::Proton),
+        };
+        crate::direct::prefix_paths(kind, Some(p), p)?;
+    }
+    // what the folder is without a direct start (Steam's facts, or inspect's guess), then the start's own
+    let mut g = inspect_with(&old.path, roots, &dirs.root).map(|mut fresh| {
+        fresh.id = old.id.clone();
+        fresh.exe_sha256 = old.exe_sha256.clone().or(fresh.exe_sha256);
+        fresh.build_id = fresh.build_id.or(old.build_id.clone());
+        fresh
+    }).unwrap_or(old);
+    apply_start(&mut g, settings, roots, &dirs.root);
+    let mut new = InstallRecord { start: (settings != &crate::direct::StartSettings::default()).then(|| settings.clone()), ..rec };
+    new.install = g.clone();
+    new.updated = Some(crate::saves::rfc3339(std::time::SystemTime::now()));
+    let mut text = serde_json::to_string_pretty(&new)?;
+    text.push('\n');
+    write_atomic(&record_path(dirs, id)?, text.as_bytes())?;
+    Ok(g)
+}
+
+/// The install with the platform and prefix its start uses now (a launcher from before dev.29.17 recorded a custom
+/// folder with Steam's prefix): written again when they differ. Cheap enough for the game list and Play.
+pub fn sync_start(dirs: &DataDirs, install: &GameInstall, roots: &[SteamRoot]) -> Result<GameInstall> {
+    if install.kind != GameKind::Client || cfg!(windows) {
+        return Ok(install.clone());
+    }
+    let Some(rec) = record(dirs, &install.id)? else { return Ok(install.clone()) };
+    let settings = rec.start.clone().unwrap_or_default();
+    if crate::direct::effective_mode(&rec.install, Some(&settings)) != crate::direct::StartMode::Direct {
+        return Ok(rec.install);
+    }
+    let mut g = rec.install.clone();
+    apply_start(&mut g, &settings, roots, &dirs.root);
+    if g != rec.install {
+        write_record(dirs, &g, rec.receipt)?;
+    }
+    Ok(g)
+}
+
+/// Ultimate ASI Loader is chained next to the game (by Kiln's installer `[chain]`, or by activation for the profile's
+/// `.asi` packages `[profile]`), so Wine must load `xinput9_1_0` native first too.
+pub fn asi_loader_chained(install: &GameInstall) -> bool {
+    crate::chain::read(&install.path).is_ok_and(|ini| ini.chain.iter().any(|e| {
+        e.status == crate::chain::EntryStatus::Ok
+            && e.path.rsplit('\\').next().is_some_and(|n| n.eq_ignore_ascii_case(crate::install::ASI_LOADER_NAME))
+    }) || crate::game_files::ual_in_profile_section(&ini, &install.path)) && std::fs::read_dir(&install.path).is_ok_and(|entries| entries.flatten().any(|e| {
+        e.file_name().to_string_lossy().eq_ignore_ascii_case(crate::install::ASI_LOADER_NAME) && e.path().is_file()
+    }))
 }
 
 pub fn remove(dirs: &crate::paths::DataDirs, id: &str) -> Result<()> {
@@ -512,12 +622,7 @@ pub fn launch_options_info(install: &GameInstall, roots: &[SteamRoot]) -> Option
             || registry.as_deref().is_some_and(|b| user_reg_native(&String::from_utf8_lossy(b), name))
     };
     // chained by Kiln's installer ([chain]), or by activation for the profile's .asi packages ([profile], game_files)
-    let chained = crate::chain::read(&install.path).is_ok_and(|ini| ini.chain.iter().any(|e| {
-        e.status == crate::chain::EntryStatus::Ok
-            && e.path.rsplit('\\').next().is_some_and(|n| n.eq_ignore_ascii_case(crate::install::ASI_LOADER_NAME))
-    }) || crate::game_files::ual_in_profile_section(&ini, &install.path)) && std::fs::read_dir(&install.path).is_ok_and(|entries| entries.flatten().any(|e| {
-        e.file_name().to_string_lossy().eq_ignore_ascii_case(crate::install::ASI_LOADER_NAME) && e.path().is_file()
-    }));
+    let chained = asi_loader_chained(install);
     let has = native("dinput8");
     let chained_override_missing = chained && !native("xinput9_1_0");
     Some(LaunchOptionsInfo {
@@ -567,6 +672,9 @@ pub fn status_with(dirs: &DataDirs, install: &GameInstall, roots: &[SteamRoot]) 
     };
     let boot = crate::state::read_boot(&install.path).ok().flatten();
     let newer_mods = newer_mods(dirs, &runtime, active_profile.as_deref());
+    let start = (install.kind == GameKind::Client).then(|| crate::direct::mode_of(dirs, install));
+    let side = if install.kind == GameKind::Client { crate::manifest::RunSide::Client } else { crate::manifest::RunSide::Server };
+    let build = crate::direct::build_check(install, || crate::direct::newest_bundle(dirs, side));
     Ok(GameStatus {
         id: install.id.clone(),
         running: proc.is_some(),
@@ -578,8 +686,10 @@ pub fn status_with(dirs: &DataDirs, install: &GameInstall, roots: &[SteamRoot]) 
         other_folder_profile,
         play_once_pending: install.path.join(crate::paths::game::PLAY_ONCE).is_file(),
         boot,
-        launch_options: launch_options_info(install, roots),
+        launch_options: if start == Some(crate::direct::StartMode::Direct) { None } else { launch_options_info(install, roots) },
         newer_mods,
+        start,
+        build,
     })
 }
 
