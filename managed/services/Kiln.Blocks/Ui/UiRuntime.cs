@@ -432,7 +432,7 @@ internal sealed class KilnUiBackend : IUiBackend
         {
             var screen = Ui.Screen(new UiText(title), Draw, new UiScreenOptions
             {
-                Style = UiStyle.Game, Width = b.Width > 0 ? b.Width : 720, Height = b.Height > 0 ? b.Height : 520, DimBackground = b.Dim ?? true, TitleBar = b.TitleBar,
+                Style = UiStyle.Player, Width = b.Width > 0 ? b.Width : 720, Height = b.Height > 0 ? b.Height : 520, DimBackground = b.Dim ?? true, TitleBar = b.TitleBar,
             });
             // the title follows the game's language, as a screen's does
             screen.Title = w.Plan.Title.Text;

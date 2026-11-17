@@ -83,7 +83,7 @@ internal static class CreativeMenu
         ModContext.CurrentMod = null;  // Kiln's, not the mod whose tick happened to start it
         try
         {
-            _screen = Ui.Screen("Creative", Draw, new UiScreenOptions { Style = UiStyle.Game, Width = 820, Height = 600 });
+            _screen = Ui.Screen("Creative", Draw, new UiScreenOptions { Style = UiStyle.Player, Width = 820, Height = 600 });
             _screen.Opened += () => Interlocked.Exchange(ref _refreshRequested, 1);
             KeyBindings.Register(KeyId, DefaultKey, () => _screen.Toggle(), "Open the creative menu", "Creative");
             KeyBindings.Register(FlightKeyId, "None", ToggleFlight, "Character flight on or off (creative mode)", "Creative");

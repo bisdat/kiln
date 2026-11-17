@@ -344,18 +344,23 @@ public sealed unsafe partial class UiDraw
         if (UiNative.HasGameUi) T->Dummy(width, height);
     }
 
-    /// <summary>Switches the look (game / Kiln) for the windows begun inside the scope: <c>using (ui.Look(UiStyle.Game)) { ... }</c>.</summary>
-    public LookScope Look(UiStyle style)
-    {
-        PushStyleRaw(style);
-        return new LookScope();
-    }
+    /// <summary>Switches the look (the player's, the game's, Kiln's) for the windows begun inside the scope:
+    /// <c>using (ui.Look(UiStyle.Game)) { ... }</c>. For a mod's own theme: <see cref="Look(UiTheme)"/>.</summary>
+    public LookScope Look(UiStyle style) => PushLookRaw(null, style) ? new LookScope(TopLook) : default;
 
+    /// <summary>Ends a <see cref="Look(UiStyle)"/> or <see cref="Look(UiTheme)"/>. It pops only its own look, while it is the
+    /// one on top: one Kiln already took off (a callback that ended without disposing it) is not popped again.</summary>
     public readonly struct LookScope : IDisposable
     {
+        private readonly long _serial;
+
+        internal LookScope(long serial) => _serial = serial;
+
         public void Dispose()
         {
-            if (UiNative.HasGameUi) UiNative.T->PopStyle();
+            if (_serial == 0) return;
+            var ui = UiEngine.DrawContext;
+            if (ui.TopLook == _serial) ui.PopStyleRaw();
         }
     }
 
@@ -377,14 +382,13 @@ public sealed unsafe partial class UiDraw
     /// <summary>The <see cref="UiScreen"/> being drawn, if any.</summary>
     public UiScreen? CurrentScreen { get; internal set; }
 
-    internal void PushStyleRaw(UiStyle style)
-    {
-        if (UiNative.HasGameUi) T->PushStyle((uint)style);
-    }
+    internal void PushStyleRaw(UiStyle style) => PushLookRaw(null, style);
 
     internal void PopStyleRaw()
     {
+        if (LookDepth == 0) return;
         if (UiNative.HasGameUi) T->PopStyle();
+        LookPopped();
     }
 
     internal void FocusNextWindow()
@@ -453,6 +457,14 @@ public sealed record UiWindowOptions
 
     /// <summary>Background opacity (0..1), null = the theme's.</summary>
     public float? BackgroundAlpha { get; init; }
+
+    /// <summary>The window's look: <see cref="UiStyle.Player"/> (the default: the look the player chose for Kiln's UI),
+    /// <see cref="UiStyle.Game"/> or <see cref="UiStyle.Kiln"/>. Since 0.2.0-dev.29.16 (before, windows were drawn in Kiln's
+    /// ember look).</summary>
+    public UiStyle Style { get; init; } = UiStyle.Player;
+
+    /// <summary>Your own theme for the window (<see cref="Ui.Themes.Define"/>), over <see cref="Style"/>. Since 0.2.0-dev.29.16.</summary>
+    public UiTheme? Theme { get; init; }
 }
 
 /// <summary>A Kiln window (Forge: a Screen). Draws every frame while open; closes with its X or <see cref="Open"/>.</summary>

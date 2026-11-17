@@ -142,24 +142,39 @@ internal static class ModManagerLogic
 }
 
 /// <summary>The game's menu palette (docs/re/game-ui.md section 4) and the mod manager's state colours.</summary>
+/// <summary>The colours of Kiln's own pages: the player's look (KilnLook.Player, refreshed at each frame's start), named as
+/// the game look's roles read (the game's menu colours, or the neutral stand-in until they are read; ember, translucent or a
+/// mod's theme when the player chose one; docs/kiln/ui.md "Looks and themes").</summary>
 internal static class GameColors
 {
-    public static readonly Color Text = Color.FromRgba(0xeeeae2ff);
-    public static readonly Color Muted = Color.FromRgba(0xc0cdd5ab);
-    public static readonly Color Faint = Color.FromRgba(0xc0cdd570);
-    public static readonly Color Gold = Color.FromRgba(0xcaac54ff);
-    public static readonly Color GoldBright = Color.FromRgba(0xf5c558ff);
-    public static readonly Color GoldDeep = Color.FromRgba(0x896828ff);
-    public static readonly Color Tile = Color.FromRgba(0x363246ff);
-    public static readonly Color Attention = Color.FromRgba(0xffe06bff);
-    public static readonly Color Warning = Color.FromRgba(0xf26e6eff);
-    public static readonly Color Ok = Color.FromRgba(0x9fcf8aff);
-    public static readonly Color Idle = Color.FromRgba(0x9aa3adff);
-    public static readonly Color Night = Color.FromRgba(0x121118ff);
-    /// <summary>menu.tileBackgroundColor's alpha in the game's data (169): the panels on the game page.</summary>
-    public const byte PanelAlpha = 169;
+    private static UiPalette P => KilnLook.Player;
+    private static Color Opaque(Color c) => c.WithAlpha(255);
+    private static Color Times(Color c, float k) =>
+        new((byte)Math.Clamp(MathF.Round(c.R * k), 0, 255), (byte)Math.Clamp(MathF.Round(c.G * k), 0, 255), (byte)Math.Clamp(MathF.Round(c.B * k), 0, 255), 255);
+
+    public static Color Text => Opaque(P.Text);
+    public static Color Muted => P.TextMuted;
+    public static Color Faint => P.TextMuted.WithAlpha(0x70);
+    /// <summary>The look's border: lines, captions, the chosen row's mark (the game's tab highlight).</summary>
+    public static Color Gold => Opaque(P.Border);
+    /// <summary>The look's accent: the chosen tab (the game's chosen-tile outline).</summary>
+    public static Color GoldBright => Opaque(P.Accent);
+    /// <summary>The look's header: a held row (the game's chosen-row ground).</summary>
+    public static Color GoldDeep => Opaque(P.Header);
+    public static Color Tile => Opaque(P.PanelBackground);
+    public static Color Attention => Opaque(P.Attention);
+    public static Color Warning => Opaque(P.Warning);
+    public static Color Ok => Opaque(P.Ok);
+    public static Color Idle => Times(P.TextMuted, 0.8f);
+    /// <summary>The darkest ground: the window colour, darker.</summary>
+    public static Color Night => Times(P.WindowBackground, 0.69f);
+    /// <summary>The look's panel opacity (the game's tile: 169): the panels on the game page.</summary>
+    public static byte PanelAlpha => P.PanelBackground.A;
     /// <summary>A lighter tile for rows hovered or chosen on a tile panel.</summary>
-    public static readonly Color TileLight = Color.FromRgba(0x56506eff);
+    public static Color TileLight => Times(P.PanelBackground, 1.6f);
+    /// <summary>How strongly Kiln darkens the game behind its pages: 1 for an opaque look, less for a translucent one (its
+    /// window opacity against the game look's 0.9).</summary>
+    public static float Backdrop => Math.Clamp(P.WindowBackground.A / 230f, 0.15f, 1f);
 
     public static Color Of(ModRunState s, bool missing) => missing ? Warning : s switch
     {
@@ -284,7 +299,7 @@ internal sealed class ModManagerPage
     {
         _k = s / (ui.Scale > 0 ? ui.Scale : 1);
         TakeRequest();
-        var kilnSettings = ConfigScreens.HasConfigs("kiln");
+        var kilnSettings = ConfigScreens.HasConfigs("kiln") || PlayerLook.Available;  // the Look is there on every client
         if (_menuRowsFrame == 0 || ui.FrameNumber - _menuRowsFrame >= 15 || ui.FrameNumber < _menuRowsFrame)
         {
             try { _menuRows = MenuSource(); }
@@ -439,7 +454,7 @@ internal sealed class ModManagerPage
     // still leaves the muted text readable; the hue stays the game's.
     private static void Panel(UiDraw ui, PageRect r, float s)
     {
-        ui.DrawRect(UiLayer.Window, r.X, r.Y, r.Right, r.Bottom, GameColors.Night.WithAlpha(110), 2 * s);
+        ui.DrawRect(UiLayer.Window, r.X, r.Y, r.Right, r.Bottom, GameColors.Night.WithAlpha((byte)(110 * GameColors.Backdrop)), 2 * s);
         ui.DrawRect(UiLayer.Window, r.X, r.Y, r.Right, r.Bottom, GameColors.Tile.WithAlpha(GameColors.PanelAlpha), 2 * s);
     }
 
@@ -739,7 +754,10 @@ internal sealed class ModManagerPage
         using (ui.PushVar(UiStyleVar.WindowPadding, Backed ? 12 * s : 26 * s, Backed ? 8 * s : 22 * s))
         {
             if (ui.BeginChild("kiln.settings", r.Width, r.Bottom - top, UiChildFlags.NavFlattened | UiChildFlags.Padding))
+            {
+                LookPage.Draw(ui, s, (u, text, sc) => u.Text(GameColors.Gold.WithAlpha(210), text));  // the player's look of Kiln's UI
                 ConfigScreens.Draw(ui, "kiln");
+            }
             ui.EndChild();
         }
     }
@@ -836,15 +854,16 @@ internal static class ModManagerHost
         var w = ui.Width;
         var h = ui.Height;
         var s = PageScale(w, h, ui.Scale);
-        ui.PushStyleRaw(UiStyle.Game);
+        ui.PushStyleRaw(UiStyle.Player);  // the player's look (the game's unless they chose another)
         try
         {
-            // the dimmed game behind: darker at the top and bottom, like the game's own menus
-            ui.DrawRect(UiLayer.Background, 0, 0, w, h, GameColors.Night.WithAlpha(200));
+            // the dimmed game behind: darker at the top and bottom, like the game's own menus (lighter for a translucent look)
+            var k = GameColors.Backdrop;
+            ui.DrawRect(UiLayer.Background, 0, 0, w, h, GameColors.Night.WithAlpha((byte)(200 * k)));
             const int bands = 10;  // a little darker towards the top and the bottom edge, in soft steps
             for (var i = 0; i < bands; i++)
             {
-                var a = (byte)(5 * (bands - i));
+                var a = (byte)(5 * (bands - i) * k);
                 var y0 = MathF.Floor(h * 0.18f * i / bands);
                 var y1 = MathF.Floor(h * 0.18f * (i + 1) / bands);
                 ui.DrawRect(UiLayer.Background, 0, y0, w, y1, Color.Black.WithAlpha(a));
