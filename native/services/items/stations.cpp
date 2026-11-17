@@ -14,6 +14,10 @@
 //    (the program's tracked write) after ServerFactoryInfo is told. Every game call and game read is guarded.
 //  - Events: while a watch is on, Pre reads every known station's FactoryStation and diffs it; a scan of the world's
 //    entities every 32 steps finds stations placed and removed and the bases' changes.
+//  - Station outputs as crafting stock (GitHub #68, 0.2.0-dev.29.17): a FILL also takes, last, from the Outputs of
+//    opted-in stations of the same base. Inside the program's one transaction Kiln first asks the game's AutoTransferRecipe
+//    for each input's shortfall with a source list of only the stations that lend that item (count 1, crafts = the
+//    shortfall: the game moves exactly that), then for the rest with the base's own stock as always. docs/re/stations.md §8.
 #include "stations.h"
 
 #include <windows.h>
@@ -117,7 +121,7 @@ struct Game {
     int64_t fs_next = 0, fs_next_sel = 0, fs_stopped = 0, fs_use_all = 0, fs_start = 0, fs_pause = 0, fs_missing = 0,
             fs_running = 0, fs_running_sel = 0, fs_size = 0;
     int64_t recipe_duration = 0, recipe_water = 0;
-    bool read = false, fill_ok = false, control = false, events = false;
+    bool read = false, fill_ok = false, control = false, events = false, outputs_ok = false;
 };
 Game G;
 
@@ -177,6 +181,10 @@ struct Wrote {
     uint32_t selected = 0;
 };
 std::unordered_map<KilnEntity, Wrote> g_wrote;
+
+// ---- station outputs as crafting stock: the opted-in stations (g_mu), this session's ----
+constexpr uint32_t kMaxSources = 4096;
+std::vector<KilnEntity> g_sources;  // sorted, unique
 
 // ---- watch ----
 std::atomic<int> g_watchers{0};
@@ -586,6 +594,54 @@ int64_t scaled(int64_t dur_ns) {
     return static_cast<int64_t>(static_cast<double>(sec * f) * 1e9);
 }
 
+// ---- station outputs as crafting stock (GitHub #68) ----
+// A station's recipes as the classification needs them (selected and running); defined after the category reads.
+bool source_recipes(const FsBytes& fs, void* reg, SourceRecipes* out);
+
+std::vector<KilnEntity> sources_copy() {
+    std::lock_guard lock(g_mu);
+    return g_sources;
+}
+
+// What opted-in stations of base `base` lend of each of `items` for a fill of `target`: per item the count and the
+// stations, in entity order. `factory`, `base_of` and `count` are the caller's reads (the tick thread's, or the program's).
+struct Lent {
+    std::unordered_map<uint32_t, uint64_t> count;
+    std::unordered_map<uint32_t, std::vector<uint32_t>> by;
+};
+template <class Factory, class BaseOf, class Count>
+void lenders(KilnEntity target, int32_t base, const std::vector<uint32_t>& items, void* reg, Factory factory, BaseOf base_of,
+             Count count, Lent* out) {
+    std::vector<SourceCandidate> cands;
+    for (KilnEntity e : sources_copy()) {
+        SourceCandidate c{e, -1, false};
+        FsBytes fs{};
+        if (e != target && factory(e, &fs)) {
+            c.station = true;
+            c.base = base_of(e);
+        }
+        cands.push_back(c);
+    }
+    for (uint32_t e : eligible_sources(cands, target, base)) {
+        FsBytes fs{};
+        SourceRecipes sr;
+        if (!factory(e, &fs) || !source_recipes(fs, reg, &sr)) continue;
+        std::unordered_map<uint32_t, uint64_t> inv;
+        bool counted = false;
+        for (uint32_t item : items) {
+            if (!lends_item(sr, item)) continue;
+            if (!counted) {
+                count(e, &inv);
+                counted = true;
+            }
+            const uint64_t n = inv[item];
+            if (!n) continue;
+            out->count[item] += n;
+            out->by[item].push_back(e);
+        }
+    }
+}
+
 // ---- the plan (tick thread; the program repeats it with its own reads) ----
 struct PlanOut {
     int32_t status = KILN_STATION_DONE;
@@ -683,7 +739,7 @@ void finish_plan(const KilnStationRequest& r, PlanOut* p) {
 // The inputs of a FILL with their counts: the station's, the base stock's (after the reserves), the player's bag.
 void plan_inputs(const KilnStationRequest& r, const KilnStationStack* keep, const ResolveCall& rc,
                  std::unordered_map<uint32_t, uint64_t>& have, std::unordered_map<uint32_t, uint64_t>& stock,
-                 std::unordered_map<uint32_t, uint64_t>& bag, PlanOut* p) {
+                 std::unordered_map<uint32_t, uint64_t>& bag, const Lent* lent, PlanOut* p) {
     for (uint32_t i = 0; i < rc.n; ++i) {
         InputNow x{};
         x.item = rc.out[i].item;
@@ -692,8 +748,28 @@ void plan_inputs(const KilnStationRequest& r, const KilnStationStack* keep, cons
         const uint64_t k = keep_of(keep, r.keep_count, x.item);
         x.stock = after_keep(stock[x.item], k) + bag[x.item];  // the game takes from the player first; no reserve there
         x.kept = std::min(stock[x.item], k);
+        if (lent) {  // last: the opted-in stations' Outputs (no reserve there either)
+            const auto it = lent->count.find(x.item);
+            x.outputs = it == lent->count.end() ? 0 : it->second;
+            x.stock += x.outputs;
+        }
         p->in.push_back(x);
     }
+}
+
+// Whether a FILL may use station outputs: the capability, the request, and resolved inputs without a repeated item.
+bool outputs_allowed(const KilnStationRequest& r, const ResolveCall& rc) {
+    if (!G.outputs_ok || (r.flags & KILN_STATION_FILL_NO_OUTPUTS)) return false;
+    uint32_t items[KILN_STATIONS_MAX_INPUTS];
+    for (uint32_t i = 0; i < rc.n; ++i) items[i] = rc.out[i].item;
+    if (inputs_repeat(items, rc.n)) return false;
+    std::lock_guard lock(g_mu);
+    return !g_sources.empty();
+}
+std::vector<uint32_t> input_items(const ResolveCall& rc) {
+    std::vector<uint32_t> v;
+    for (uint32_t i = 0; i < rc.n; ++i) v.push_back(rc.out[i].item);
+    return v;
 }
 
 void plan_tick(const KilnStationRequest& r, PlanOut* p) {
@@ -717,7 +793,16 @@ void plan_tick(const KilnStationRequest& r, PlanOut* p) {
     if (base_list(rb, static_cast<uint32_t>(p->base), false, &list))
         for (KilnEntity c : list) count_items(c, &stock);
     if (r.player) count_items(r.player, &bag);
-    plan_inputs(r, r.keep, rc, have, stock, bag, p);
+    Lent lent;
+    const bool outs = outputs_allowed(r, rc);
+    if (outs)
+        lenders(r.station, p->base, input_items(rc), reg, [](KilnEntity e, FsBytes* f) { return factory_of(e, f); },
+                [&](KilnEntity e) {
+                    KilnVec3 sp{};
+                    return position_of(e, &sp) ? base_index_at(rb.sys, sp) : -1;
+                },
+                [](KilnEntity e, std::unordered_map<uint32_t, uint64_t>* m) { count_items(e, m); }, &lent);
+    plan_inputs(r, r.keep, rc, have, stock, bag, outs ? &lent : nullptr, p);
     void* attributes = singleton("impact::AttributeRegistry");
     int32_t cur = 0, max = 0;
     water_of(r.station, attributes, &cur, &max);
@@ -951,7 +1036,28 @@ void run_fill(const Run& run, const Req& q, KilnStationResult* res) {
     count_pages(run.a, r.station, &have);
     for (uint64_t i = 0; i < stock[1] && stock[0]; ++i) count_pages(run.a, reinterpret_cast<const uint32_t*>(stock[0])[i], &stocked);
     if (r.player) count_pages(run.a, r.player, &bag);
-    plan_inputs(r, q.keep, rc, have, stocked, bag, &p);
+    // the opted-in stations' Outputs, revalidated here at the transaction: this step's inventories and recipes
+    Lent lent;
+    const bool outs = outputs_allowed(r, rc);
+    if (outs)
+        lenders(r.station, base, input_items(rc), run.recipes,
+                [&](KilnEntity e, FsBytes* f) {
+                    const uint8_t* fp = other(run, run.acc_factory, e, static_cast<uint64_t>(G.fs_size));
+                    if (!fp) return false;
+                    std::memcpy(f->b, fp, sizeof f->b);
+                    return true;
+                },
+                [&](KilnEntity e) {
+                    const uint8_t* t = other(run, run.acc_transform, e, 24);
+                    if (!t) return -1;
+                    KilnVec3 sp{};
+                    sp.x = static_cast<double>(rd<int64_t>(t, 0)) * (1.0 / 4294967296.0);
+                    sp.y = static_cast<double>(rd<int64_t>(t, 8)) * (1.0 / 4294967296.0);
+                    sp.z = static_cast<double>(rd<int64_t>(t, 16)) * (1.0 / 4294967296.0);
+                    return base_index_at(run.bases, sp);
+                },
+                [&](KilnEntity e, std::unordered_map<uint32_t, uint64_t>* m) { count_pages(run.a, e, m); }, &lent);
+    plan_inputs(r, q.keep, rc, have, stocked, bag, outs ? &lent : nullptr, &p);
     const uint32_t charges = rd<uint32_t>(recipe, G.recipe_water);
     {
         int32_t cur = 0, max = 0;
@@ -984,20 +1090,55 @@ void run_fill(const Run& run, const Req& q, KilnStationResult* res) {
     alignas(16) uint8_t setup[kSetupBlock];
     setup_for_fill(run, r.player, pos, setup);
     char fault[128] = "";
+    uint64_t from_outputs = 0;
     const Attempts at = run_attempts(r.flags, p.planned, [&](uint32_t n) -> int32_t {
+        // what the station outputs pay, last (none: the plain fill, exactly as before)
+        std::vector<uint32_t> shares;
+        if (outs && !output_shares(p.in, n, p.loaded, &shares)) return 4;  // the outputs counted cannot cover n
+        const bool lend = outs && any_share(shares);
         E.tx_ctor(g_tx);
         E.tx_init(g_tx, setup);
-        FillCall f{&run, g_tx, stock, inputs, r.station, n, water, r.player, -1};
         unsigned long code = 0;
-        // the game's function owns nothing of ours: a fault leaves the transaction to roll back
-        if (!guard(&fill_call_impl, &f, &code)) {
-            abandon_tx(g_tx);
-            std::snprintf(fault, sizeof fault, "the game faulted (0x%08lx) in its fill of station %u", code, r.station);
-            return kAttemptFault;
+        auto call = [&](const uint64_t* st, const void* ins, uint32_t crafts, uint32_t w, KilnEntity pl) -> int32_t {
+            FillCall f{&run, g_tx, st, ins, r.station, crafts, w, pl, -1};
+            // the game's function owns nothing of ours: a fault leaves the transaction to roll back
+            if (!guard(&fill_call_impl, &f, &code)) {
+                abandon_tx(g_tx);
+                std::snprintf(fault, sizeof fault, "the game faulted (0x%08lx) in its fill of station %u", code, r.station);
+                return kAttemptFault;
+            }
+            return f.rc;
+        };
+        int32_t rc0 = 0;
+        uint32_t n_game = n;
+        if (lend) {
+            // 1. each input's shortfall, from only the stations that lend that item: one resolved stack with count 1, so
+            //    the game's "loaded" is what the station holds of it and it moves exactly `crafts` of it
+            for (size_t k = 0; k < p.in.size() && rc0 == 0; ++k) {
+                if (!shares[k]) continue;
+                const auto by = lent.by.find(p.in[k].item);
+                uint32_t j = 0;
+                while (j < rc.n && rc.out[j].item != p.in[k].item) ++j;
+                if (by == lent.by.end() || by->second.empty() || j >= rc.n) {
+                    rc0 = 4;
+                    break;
+                }
+                alignas(8) uint8_t one[24];
+                std::memcpy(one, rc.vec.inline_ + static_cast<size_t>(j) * 24, 24);
+                wr<uint32_t>(one, 0x14, 1u);
+                const uint64_t slice[2] = {reinterpret_cast<uint64_t>(one), 1};
+                const uint64_t from[4] = {reinterpret_cast<uint64_t>(by->second.data()), by->second.size(), 0, 0};
+                rc0 = call(from, slice, shares[k], 0, 0);
+            }
+            // 2. the rest from the player and the chests, and the water, as a plain fill of n would take them
+            n_game = crafts_after_shares(p.in, shares, n, p.loaded);
         }
-        if (f.rc == 0) {
+        if (rc0 == 0 && (!lend || n_game > 0)) rc0 = call(stock, inputs, n_game, water, r.player);
+        if (rc0 == kAttemptFault) return kAttemptFault;
+        if (rc0 == 0) {
             res->change_count = 0;
             ledger(g_tx, res);
+            from_outputs = lend ? shares_total(shares) : 0;
             if (dry) E.rollback(g_tx);
             else E.commit(g_tx);
             E.free_arrays(g_tx);
@@ -1005,8 +1146,9 @@ void run_fill(const Run& run, const Req& q, KilnStationResult* res) {
         }
         E.rollback(g_tx);
         E.free_arrays(g_tx);
-        return f.rc;
+        return rc0;
     });
+    res->from_outputs = static_cast<uint32_t>(std::min<uint64_t>(from_outputs, UINT32_MAX));
     if (fault[0]) {
         switch_off(fault);
         return finish_text(res, KILN_STATION_UNAVAILABLE, fault);
@@ -1735,6 +1877,36 @@ bool category_options(void* reg, uint32_t id, uint32_t* n) {
     return true;
 }
 
+// A station's recipes as the classification needs them (selected and running), from the registry `reg`. Tick thread, or
+// inside the program (the registry is only read).
+bool source_recipes(const FsBytes& fs, void* reg, SourceRecipes* out) {
+    out->outputs.clear();
+    out->inputs.clear();
+    const uint32_t ids[2] = {rd<uint32_t>(fs.b, G.fs_next), rd<uint32_t>(fs.b, G.fs_running)};
+    bool any = false;
+    for (int k = 0; k < 2; ++k) {
+        if (!ids[k] || (k == 1 && ids[1] == ids[0])) continue;
+        static thread_local KilnStationRecipe rec;
+        std::memset(&rec, 0, sizeof rec);
+        rec.size = sizeof rec;
+        RecipeCall c{ids[k], reg, &rec, false};
+        unsigned long code = 0;
+        if (!reg || !G.recipe_find || !guard(&recipe_impl, &c, &code)) return false;  // unreadable: lends nothing
+        if (!c.found) continue;
+        any = true;
+        for (uint32_t i = 0; i < rec.output_count; ++i) out->outputs.push_back(rec.outputs[i].item);
+        for (uint32_t i = 0; i < rec.input_count; ++i) {
+            if (rec.inputs[i].item) out->inputs.push_back(rec.inputs[i].item);
+            if (!rec.inputs[i].category) continue;
+            KilnItemId items[64];
+            CatCall cc{reg, rec.inputs[i].category, 0, false, 0, items, nullptr, 64, 0, false};
+            if (!guard(&cat_impl, &cc, &code) || !cc.found || cc.n > 64) return false;  // a category it cannot list: lends nothing
+            for (uint32_t o = 0; o < cc.n; ++o) out->inputs.push_back(items[o]);
+        }
+    }
+    return any;
+}
+
 KilnResult KILN_CALL t_category(uint32_t id, KilnItemId* items, float* scaling, uint32_t capacity, uint32_t* out_count) {
     if (!id || !out_count || (capacity && !items)) return KILN_ERR_INVALID_ARGUMENT;
     *out_count = 0;
@@ -1768,11 +1940,14 @@ KilnResult KILN_CALL t_workshop_recipes(uint32_t workshop, uint32_t* out, uint32
 }
 
 KilnResult KILN_CALL t_plan(const KilnStationRequest* r, KilnStationPlan* out) {
-    if (!r || !out || out->size < sizeof(KilnStationPlan)) return KILN_ERR_INVALID_ARGUMENT;
+    // a caller built before 0.2.0-dev.29.17 passes the plan without `outputs`: it gets everything up to message
+    constexpr uint32_t kPlanV1 = static_cast<uint32_t>(offsetof(KilnStationPlan, outputs));
+    if (!r || !out || out->size < kPlanV1) return KILN_ERR_INVALID_ARGUMENT;
     if (r->action != KILN_STATION_FILL || !request_valid(*r)) return KILN_ERR_INVALID_ARGUMENT;
     if (KilnResult g = read_gate(); g != KILN_OK) return g;
     const uint32_t size = out->size;
-    std::memset(out, 0, sizeof *out);
+    const bool with_outputs = size >= sizeof(KilnStationPlan);
+    std::memset(out, 0, with_outputs ? sizeof *out : kPlanV1);
     out->size = size;
     out->station = r->station;
     PlanOut p;
@@ -1794,7 +1969,8 @@ KilnResult KILN_CALL t_plan(const KilnStationRequest* r, KilnStationPlan* out) {
         const uint32_t i = out->input_count++;
         out->inputs[i] = {x.item, x.count};
         out->have[i] = static_cast<uint32_t>(std::min<uint64_t>(x.have, UINT32_MAX));
-        out->stock[i] = static_cast<uint32_t>(std::min<uint64_t>(x.stock, UINT32_MAX));
+        out->stock[i] = static_cast<uint32_t>(std::min<uint64_t>(x.stock - std::min(x.stock, x.outputs), UINT32_MAX));
+        if (with_outputs) out->outputs[i] = static_cast<uint32_t>(std::min<uint64_t>(x.outputs, UINT32_MAX));
     }
     std::snprintf(out->message, sizeof out->message, "%s", p.why);
     return KILN_OK;
@@ -1833,6 +2009,30 @@ KilnResult KILN_CALL t_submit(KilnOwner owner, const KilnStationRequest* r, Kiln
     return KILN_OK;
 }
 
+KilnResult KILN_CALL t_set_output_source(KilnEntity station, uint32_t on) {
+    if (!station || on > 1) return KILN_ERR_INVALID_ARGUMENT;
+    if (!G.outputs_ok || g_off.load()) return KILN_ERR_UNAVAILABLE;
+    std::lock_guard lock(g_mu);
+    const auto it = std::lower_bound(g_sources.begin(), g_sources.end(), station);
+    const bool there = it != g_sources.end() && *it == station;
+    if (on && !there) {
+        if (g_sources.size() >= kMaxSources) return KILN_ERR_BUFFER_TOO_SMALL;
+        g_sources.insert(it, station);
+    } else if (!on && there) {
+        g_sources.erase(it);
+    }
+    return KILN_OK;
+}
+
+KilnResult KILN_CALL t_output_sources(KilnEntity* out, uint32_t capacity, uint32_t* out_count) {
+    if (!out_count || (capacity && !out)) return KILN_ERR_INVALID_ARGUMENT;
+    std::lock_guard lock(g_mu);
+    const uint32_t n = static_cast<uint32_t>(g_sources.size());
+    *out_count = n;
+    for (uint32_t i = 0; i < n && i < capacity; ++i) out[i] = g_sources[i];
+    return n > capacity ? KILN_ERR_BUFFER_TOO_SMALL : KILN_OK;
+}
+
 KilnResult KILN_CALL t_cancel(uint64_t ticket) {
     std::lock_guard lock(g_mu);
     return g_callbacks.erase(ticket) ? KILN_OK : KILN_ERR_NOT_FOUND;
@@ -1869,7 +2069,7 @@ const KilnStationsApi kTable = {
     {sizeof(KilnStationsApi), KILN_STATIONS_VERSION},
     &t_status, &t_base_count, &t_base_at, &t_base_of, &t_base_at_position, &t_base_storage, &t_base_water, &t_base_stock,
     &t_stations, &t_station_read, &t_recipe, &t_recipe_inputs, &t_category, &t_category_at, &t_workshop_recipes, &t_plan,
-    &t_submit, &t_cancel, &t_watch, &t_events, &t_last_seq,
+    &t_submit, &t_cancel, &t_watch, &t_events, &t_last_seq, &t_set_output_source, &t_output_sources,
 };
 
 template <typename F>
@@ -1922,6 +2122,11 @@ void stations_resolve() {
                 sym("stations/FactoryInfoInvalidate", &G.invalidate) && E.setup_operator > 0 &&
                 E.setup_operator + 4 <= static_cast<int64_t>(kSetupBlock);
     G.control = G.read && feat("stations.control") && (G.invalidate || sym("stations/FactoryInfoInvalidate", &G.invalidate));
+    {  // the per-item take of AutoTransferRecipe and its 24-byte input stacks (item +0x10, count +0x14), checked on this build
+        int64_t stack_item = 0, stack_size = 0;
+        G.outputs_ok = G.fill_ok && feat("stations.output_sources") && cst("stations/stack.item", &stack_item) &&
+                       cst("stations/stack.size", &stack_size) && stack_item == 0x10 && stack_size == 24;
+    }
     G.events = G.read && feat("stations.events");
     if (!G.read) {
         const char* why = !feat("stations.read") ? "stations.read did not resolve on this game build"
@@ -1929,8 +2134,9 @@ void stations_resolve() {
         set_detail(why);
         if (feat("stations.read")) lower("stations.read", KILN_CAP_REASON_SYMBOL_MISSING, why);
     }
-    LOGI("stations: reads %s, fill %s, control %s, events %s (need kiln.world for the program)", G.read ? "on" : "OFF",
-         G.fill_ok ? "on" : "OFF", G.control ? "on" : "OFF", G.events ? "on" : "OFF");
+    LOGI("stations: reads %s, fill %s, control %s, events %s, output sources %s (need kiln.world for the program)",
+         G.read ? "on" : "OFF", G.fill_ok ? "on" : "OFF", G.control ? "on" : "OFF", G.events ? "on" : "OFF",
+         G.outputs_ok ? "on" : "OFF");
 }
 
 void stations_register(const KilnWorldApi* w) {
@@ -2055,6 +2261,7 @@ void stations_world_closed() {
         g_pending_n.store(0, std::memory_order_release);
         g_wrote.clear();
         g_ring.clear();
+        g_sources.clear();  // entity ids of a closed world name nothing
     }
     g_known.clear();
     g_stations.clear();

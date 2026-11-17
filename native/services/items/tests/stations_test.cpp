@@ -54,12 +54,13 @@ int main() {
     static_assert(sizeof(KilnStationResult) == 1232 && offsetof(KilnStationResult, limited_by) == 52 &&
                   offsetof(KilnStationResult, short_item) == 56 && offsetof(KilnStationResult, ticket) == 64 &&
                   offsetof(KilnStationResult, changes) == 80 && offsetof(KilnStationResult, message) == 1104);
-    static_assert(sizeof(KilnStationPlan) == 696 && offsetof(KilnStationPlan, short_item) == 36 &&
+    static_assert(sizeof(KilnStationPlan) == 824 && offsetof(KilnStationPlan, outputs) == 696 && offsetof(KilnStationPlan, short_item) == 36 &&
                   offsetof(KilnStationPlan, water_per_craft) == 44 && offsetof(KilnStationPlan, inputs) == 56);
     static_assert(sizeof(KilnStationEvent) == 112 && offsetof(KilnStationEvent, by) == 64 && offsetof(KilnStationEvent, position) == 72 &&
                   offsetof(KilnStationEvent, base) == 96);
     static_assert(sizeof(KilnStationsStatus) == 188);
-    static_assert(sizeof(KilnStationsApi) == 8 + 21 * 8);
+    static_assert(sizeof(KilnStationsApi) == 8 + 23 * 8 && offsetof(KilnStationsApi, set_output_source) == 8 + 21 * 8);
+    static_assert(offsetof(KilnStationResult, from_outputs) == 60);
 
     // ---- requests ----
     CHECK(request_valid(req(KILN_STATION_FILL)));
@@ -418,6 +419,135 @@ int main() {
         CHECK(broken.read && !broken.fill && !broken.control && broken.events);
         CHECK(!status_bits(false, true, true, true, true, true).events);              // no reads, no watch
         CHECK(!status_bits(true, true, true, false, true, true).events);
+    }
+
+    // ---- station outputs as crafting stock (GitHub #68) ----
+    {
+        // the request flag: FILL only
+        KilnStationRequest r = req(KILN_STATION_FILL);
+        r.flags = KILN_STATION_FILL_NO_OUTPUTS;
+        CHECK(request_valid(r));
+        KilnStationRequest s2 = req(KILN_STATION_STOP);
+        s2.flags = KILN_STATION_FILL_NO_OUTPUTS;
+        CHECK(!request_valid(s2));
+        r.flags = 0x0100;  // unknown
+        CHECK(!request_valid(r));
+
+        // classification: a charcoal kiln (logs -> charcoal) lends charcoal only; never its logs (an input), never a
+        // leftover (dirt: neither), never an output that is also an input (seed -> seed + fibre: the seed)
+        const uint32_t LOGS = 11, CHARCOAL = 12, DIRT = 13, SEED = 14, FIBRE = 15, ORE = 16, OAK = 17, PINE = 18;
+        SourceRecipes kiln{{CHARCOAL}, {LOGS}};
+        CHECK(lends_item(kiln, CHARCOAL));
+        CHECK(!lends_item(kiln, LOGS));
+        CHECK(!lends_item(kiln, DIRT));
+        CHECK(!lends_item(kiln, 0));
+        SourceRecipes bed{{SEED, FIBRE}, {SEED}};
+        CHECK(!lends_item(bed, SEED));
+        CHECK(lends_item(bed, FIBRE));
+        // a category input: every option counts as an input (an "any wood" kiln never lends oak or pine)
+        SourceRecipes anywood{{CHARCOAL, OAK}, {OAK, PINE}};
+        CHECK(!lends_item(anywood, OAK) && !lends_item(anywood, PINE) && lends_item(anywood, CHARCOAL));
+        // the running recipe counts too: selected makes charcoal, running still makes logs from ... (both recipes' sets)
+        SourceRecipes both{{CHARCOAL, LOGS}, {LOGS, ORE}};
+        CHECK(!lends_item(both, LOGS) && !lends_item(both, ORE) && lends_item(both, CHARCOAL));
+        SourceRecipes none{};
+        CHECK(!lends_item(none, CHARCOAL));
+
+        // eligibility: opted in, still a station, the same base, not the target; entity order, once each
+        const std::vector<SourceCandidate> cands = {{40, 0, true}, {30, 0, true}, {50, 1, true}, {60, 0, false},
+                                                    {20, -1, true}, {10, 0, true}, {30, 0, true}};
+        const std::vector<uint32_t> el = eligible_sources(cands, 10, 0);
+        CHECK(el.size() == 2 && el[0] == 30 && el[1] == 40);  // 50: another base; 60: no station; 20: no base; 10: target
+        CHECK(eligible_sources(cands, 10, -1).empty());
+        CHECK(eligible_sources(cands, 99, 1).size() == 1);
+
+        const uint32_t rep[3] = {LOGS, CHARCOAL, LOGS}, norep[2] = {ORE, CHARCOAL};
+        CHECK(inputs_repeat(rep, 3) && !inputs_repeat(norep, 2) && !inputs_repeat(norep, 0));
+
+        // bisdat's case: a forge (ore 2 + charcoal 3 a craft) holds nothing; the chests have 10 ore and 4 charcoal,
+        // an opted-in kiln lends 20 charcoal. A fill of 3 crafts: chests pay 4 charcoal first, the kiln the other 5.
+        std::vector<InputNow> in(2);
+        in[0].item = ORE, in[0].count = 2, in[0].stock = 10;
+        in[1].item = CHARCOAL, in[1].count = 3, in[1].stock = 4 + 20, in[1].outputs = 20;
+        PlanMath m = plan_math(KILN_STATION_FILL_ADD, 3, in);
+        CHECK(m.status == KILN_STATION_DONE && m.planned == 3 && m.affordable == 5);  // ore covers 5, charcoal 8
+        std::vector<uint32_t> shares;
+        CHECK(output_shares(in, 3, m.loaded, &shares) && shares[0] == 0 && shares[1] == 5 && shares_total(shares) == 5);
+        CHECK(any_share(shares));
+        // after the share is in the forge (5 charcoal), the game's own call for the rest is still 3 crafts on top of 0
+        CHECK(crafts_after_shares(in, shares, 3, m.loaded) == 3);
+
+        // the two game calls together put exactly what a plain fill of n puts, the chests paying first
+        auto both_calls = [&](std::vector<InputNow> v, uint32_t n, std::vector<uint64_t>* first_paid, std::vector<uint64_t>* outs_paid) {
+            const uint32_t loaded = crafts_loaded(v);
+            std::vector<uint32_t> sh;
+            if (!output_shares(v, n, loaded, &sh)) return -1;
+            first_paid->assign(v.size(), 0);
+            outs_paid->assign(v.size(), 0);
+            // call 1 per share: one stack with count 1, crafts = share -> the game moves exactly the share
+            for (size_t k = 0; k < v.size(); ++k) {
+                if (!sh[k]) continue;
+                InputNow one = v[k];
+                one.count = 1;
+                one.stock = v[k].outputs;
+                std::vector<uint32_t> mv;
+                if (game_fill({one}, sh[k], &mv) != 0 || mv[0] != sh[k]) return -2;
+                v[k].have += mv[0];
+                (*outs_paid)[k] = mv[0];
+            }
+            // call 2: the base's own sources only, n' = n + loaded - loaded'
+            std::vector<InputNow> rest = v;
+            for (auto& x : rest) x.stock -= std::min(x.stock, x.outputs);
+            const uint32_t n2 = crafts_after_shares(v, std::vector<uint32_t>(v.size(), 0), n, loaded);
+            std::vector<uint32_t> mv;
+            if (n2 > 0) {
+                if (game_fill(rest, n2, &mv) != 0) return -3;
+                for (size_t k = 0; k < v.size(); ++k) {
+                    v[k].have += mv[k];
+                    (*first_paid)[k] = mv[k];
+                }
+            }
+            // every input ends where a plain fill of n would put it
+            for (const auto& x : v)
+                if (x.count && x.have < static_cast<uint64_t>(n + loaded) * x.count) return -4;
+            return static_cast<int>(crafts_loaded(v));
+        };
+        std::vector<uint64_t> fp, op;
+        CHECK(both_calls(in, 3, &fp, &op) == 3 && fp[0] == 6 && fp[1] == 4 && op[0] == 0 && op[1] == 5);
+        // outputs taken last: chests that cover it all leave the kiln untouched
+        in[1].stock = 30 + 20;
+        CHECK(output_shares(in, 3, 0, &shares) && !any_share(shares));
+        CHECK(both_calls(in, 3, &fp, &op) == 3 && fp[1] == 9 && op[1] == 0);
+        // a forge that already holds a partial load: have counts, so only the top-up is paid
+        in[0].have = 3, in[1].have = 4, in[1].stock = 2 + 20;  // loaded = min(3/2, 4/3) = 1
+        CHECK(crafts_loaded(in) == 1);
+        CHECK(output_shares(in, 2, 1, &shares) && shares[1] == 3);  // need 3*3-4 = 5, chests 2, kiln 3
+        CHECK(crafts_after_shares(in, shares, 2, 1) == 2);          // charcoal 7 -> loaded' 1 still (ore): 2 more
+        CHECK(both_calls(in, 2, &fp, &op) == 3 && op[1] == 3 && fp[1] == 2 && fp[0] == 3);
+        // the share lifts the bottleneck: then the game's own call asks for fewer crafts on top of a higher loaded
+        std::vector<InputNow> one(1);
+        one[0].item = CHARCOAL, one[0].count = 3, one[0].have = 2, one[0].stock = 0 + 20, one[0].outputs = 20;
+        CHECK(output_shares(one, 2, 0, &shares) && shares[0] == 4);
+        CHECK(crafts_after_shares(one, shares, 2, 0) == 0);  // the outputs alone reach the target: no second call
+        CHECK(both_calls(one, 2, &fp, &op) == 2 && op[0] == 4);
+        // not enough: the outputs do not cover the rest -> no share at all (the fill tries fewer or nothing moves)
+        std::vector<InputNow> shortv(1);
+        shortv[0].item = CHARCOAL, shortv[0].count = 3, shortv[0].stock = 2 + 4, shortv[0].outputs = 4;
+        m = plan_math(KILN_STATION_FILL_ADD | KILN_STATION_FILL_EXACT, 3, shortv);
+        CHECK(m.status == KILN_STATION_NOT_ENOUGH && m.planned == 0 && m.limit.why == KILN_STATION_LIMIT_STOCK);
+        CHECK(!output_shares(shortv, 3, 0, &shares));
+        m = plan_math(KILN_STATION_FILL_ADD, 3, shortv);
+        CHECK(m.status == KILN_STATION_PARTIAL && m.planned == 2);
+        // water never comes from outputs: the game's own call pours it
+        std::vector<InputNow> wet(2);
+        wet[0].item = CHARCOAL, wet[0].count = 1, wet[0].stock = 5, wet[0].outputs = 5;
+        CHECK(water_input(1, false, 0, 640, 640, &wet[1]));
+        CHECK(output_shares(wet, 2, 0, &shares) && shares[0] == 2 && shares[1] == 0);
+        CHECK(crafts_after_shares(wet, shares, 2, 0) == 2);  // the water still holds loaded at 0: the game's call pours 2 crafts' water
+        // reserves: the chests' stock already excludes the reserve, so outputs pay before the reserve is touched
+        std::vector<InputNow> kept(1);
+        kept[0].item = CHARCOAL, kept[0].count = 1, kept[0].kept = 10, kept[0].stock = 2 + 8, kept[0].outputs = 8;
+        CHECK(output_shares(kept, 6, 0, &shares) && shares[0] == 4);
     }
 
     std::printf("stations: %d checks, %d failures\n", checks, failed);
