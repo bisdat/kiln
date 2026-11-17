@@ -38,6 +38,8 @@
     <None Remove="Fixtures/**" />
     <!-- BakeTargetsTests runs its targets on a stub project -->
     <None Include="../../Kiln.Sdk/Sdk/Kiln.Bake.targets" Link="Kiln.Bake.targets" CopyToOutputDirectory="PreserveNewest" />
+    <!-- ModServicesTargetsTests evaluates the mod targets on a stub project (KilnServices, side and clients defaults) -->
+    <None Include="../../Kiln.Sdk/Sdk/Kiln.Mod.targets" Link="Kiln.Mod.targets" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <Target Name="WriteBakeModPath" AfterTargets="Build">
     <MSBuild Projects="@(KilnBakeMod)" Targets="GetTargetPath" Properties="Configuration=$(Configuration)">

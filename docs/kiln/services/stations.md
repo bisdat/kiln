@@ -6,6 +6,12 @@ actions for code: fill from chests, stop, resume, the recipe a station repeats, 
 chest. C#: `Stations` and `Bases` (`Kiln.Blocks`, `namespace Kiln`). Native: `native/core/abi/services/kiln_stations.h`
 (in kiln-items.dll). Since 0.2.0-dev.29.14 (mod API 0.2.6).
 
+**In a mod project** list `Stations` in `KilnServices` (since 0.2.0-dev.29.15): it references Kiln.Blocks' assembly for
+`Stations` and `Bases`, and leaves the mod `side: server` with no `clients` need, so a server does not refuse players
+without Kiln for a mod that only automates stations. Listing `Blocks` (as with 0.2.0-dev.29.14) also works but makes the mod
+`side: both` and `clients: kiln`, which is right only for a mod that defines blocks. With `Stations` alone, a block type or
+`Blocks.Define` in the code gets the build warning KILN108 asking for `Blocks`.
+
 `Stations` is the class that already had `Stations.Status` and `Stations.Start` (dev.28, [world-blocks.md](../modding/world-blocks.md)).
 `Start` writes the selection without the game's write tracking; for a selection players see at once use `Select`, and
 `Read` gives all that `Status` gives and more.

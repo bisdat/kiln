@@ -54,7 +54,7 @@ copied); copies NuGet dependencies next to the mod (they load into the mod's own
 | `KilnAdvanced` | false | `advanced` |
 | `KilnFeatures`, `KilnExports` | | `features`, `exports` (`;` lists) |
 | `KilnTestsAutoRun`, `KilnTestTimeoutSeconds` | | `tests` |
-| `KilnServices` | | (references) Players, Chat, World, Items, Spawn, Time, Settings, … and `Testing` |
+| `KilnServices` | | (references) Players, Chat, World, Items, Spawn, Time, Settings, … and `Testing`; `Stations` (since 0.2.0-dev.29.15) references Kiln.Blocks for `Stations` and `Bases` alone, without `Blocks`' side and clients defaults ([stations.md](../services/stations.md)) |
 | `KilnServer` / `KilnModsDir` | | deploy target: a server folder / its `kiln/mods` |
 | `KilnReload` | false | KilnDeploy also writes `kiln/control/deploy-<id>.cmd` = `reload <id>` |
 | `KilnPackageOutputPath` | next to the output folder | where KilnPack writes the zip |
