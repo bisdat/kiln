@@ -15,6 +15,18 @@ struct Entry {
     bool persisted = false;
 };
 
+// A native chat widget can report a frame-old text snapshot before the
+// game's TextInputProcess synchronizes it. While browsing, the last text
+// successfully applied through EditSetText is our known displayed value.
+// Compare a proposed recall against that value, not the stale snapshot.
+// Without browsing, the live widget value remains the source of truth.
+inline bool needs_replacement(std::string_view next, std::string_view widget,
+                              std::string_view last_applied, bool browsing_before) {
+    const std::string_view shown =
+        browsing_before && !last_applied.empty() ? last_applied : widget;
+    return next != shown;
+}
+
 // One UI thread owns History. Window-thread keys are passed through chat_keys::Router.
 class History {
 public:
