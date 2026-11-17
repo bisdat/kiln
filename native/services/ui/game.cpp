@@ -402,6 +402,8 @@ void* __fastcall hk_craft(uint64_t packed, int32_t select) {
 }
 
 void after_frame(uintptr_t sys10) {
+    // Issue #44: end of the game's UI frame decides whether chat really has edit focus.
+    chat_input_frame_end();
     if (!overlay_drawing_on()) input_poll_window();
     ++g_frame_no;
     g_frames.store(g_frame_no, std::memory_order_relaxed);
