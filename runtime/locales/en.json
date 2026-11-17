@@ -42,5 +42,90 @@
       "missing": "{language} (Kiln has no texts in this language)",
       "saved": "Kiln's own menus and messages; mods' texts follow the game's language. Saved in kiln/kiln.json (\"ui\"), as the launcher's Settings show."
     }
+  },
+  "menu": {
+    "title": "Mod Manager",
+    "game_title": "MODS",
+    "subtitle": {
+      "loaded": "{loaded} of {count} mods loaded"
+    },
+    "sections": {
+      "mods": "Mods",
+      "network": "Network",
+      "keys": "Keys",
+      "overlay": "Overlay"
+    },
+    "shroudlink": {
+      "open": "shroudlink menus",
+      "back": "Back to mods"
+    },
+    "hints": {
+      "back": "Back",
+      "next_section": "Next section",
+      "arrows": "Arrows",
+      "move": "Move",
+      "choose": "Choose",
+      "search": "Search",
+      "gamepad": "Gamepad: LB / RB sections, A choose, B back"
+    }
+  },
+  "mods": {
+    "engines": {
+      "all": "All mods",
+      "attention": "Needs attention",
+      "menus": "Menu entries",
+      "menus_note": "The entries mods added to the game's menus. Choose one here to do what it does in the menu.",
+      "settings": "Kiln settings"
+    },
+    "captions": {
+      "engines": "ENGINES",
+      "all": "ALL MODS",
+      "attention": "NEEDS ATTENTION",
+      "details": "DETAILS",
+      "settings": "KILN SETTINGS",
+      "pause_entries": "PAUSE MENU ENTRIES",
+      "main_entries": "MAIN MENU ENTRIES"
+    },
+    "search": {
+      "hint": "Search mods (Ctrl+F)"
+    },
+    "empty": {
+      "loading": "Reading the mod list...",
+      "none": "No mods are installed.",
+      "none_hint": "Add mods in the Kiln launcher (Library), put them in your profile, then start the game again.",
+      "no_match": "No mod matches \"{search}\".",
+      "no_match_hint": "Try another word, or clear the search box.",
+      "nothing": "Nothing here.",
+      "nothing_hint": "Pick All mods on the left."
+    },
+    "side": {
+      "client": "Game only",
+      "both": "Game and server",
+      "world": "Your world only",
+      "server": "Server only"
+    },
+    "details": {
+      "pick_list": "Pick a mod in the list to see what it is, whether it loaded, and its settings.",
+      "pick": "Pick a mod to see its details.",
+      "id_version": "{id}   ·   version {version}",
+      "wrong": "WHAT WENT WRONG",
+      "state": "STATE",
+      "engine": "ENGINE",
+      "load_order": "LOAD ORDER",
+      "loads_as": "Loads as number {number}.",
+      "needs": "NEEDS",
+      "dependency": "{id} {range}",
+      "dependency_optional": "{id} {range} (optional)",
+      "dependency_optional_off": "{id} {range} (optional): not loaded",
+      "dependency_missing": "{id} {range}: missing",
+      "folder": "FOLDER",
+      "status": "STATUS"
+    },
+    "menus": {
+      "open": "Open",
+      "unavailable": "\"{entry}\" is not available here now.",
+      "plugin": "a Kiln plugin",
+      "hidden": "{mod}   ·   not in the game's menu now"
+    }
   }
 }
