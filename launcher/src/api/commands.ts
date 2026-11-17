@@ -231,6 +231,8 @@ export interface ProxyClass {
   sha256: string | null;
   size: number | null;
   detail: string | null;
+  /** EML: a modified EML loader, with what its own code does (kiln_manage::engines::EmlExtras::what). */
+  modified?: string | null;
 }
 export interface ReceiptFile {
   path: string;
@@ -464,6 +466,10 @@ export interface LibraryVersion {
   /** (dev.29) An earlier version an update replaced, kept for a roll back (kiln_manage::kept::KeptInfo). Kept versions
    *  come after the others in `versions`, so `versions[0]` is never one unless nothing else is left. */
   kept?: KeptInfo | null;
+  /** EML mods: the part of the mod Kiln does not run (kiln_manage::library::ImportRecord::loader_part). Its package
+   *  carried a modified EML loader (a dbghelp.dll with code of its own, such as a hotkey) that Kiln does not load;
+   *  Kiln runs the mod's EML part only. Absent: the whole mod runs. */
+  loaderPart?: string | null;
 }
 export interface KeptInfo {
   /** When it was kept (RFC 3339 UTC). */

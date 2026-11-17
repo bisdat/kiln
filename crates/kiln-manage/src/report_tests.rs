@@ -435,6 +435,24 @@ fn engine_stood_aside_and_loader_in_folder() {
     assert!(r.summary.contains("dbghelp.dll"));
 }
 
+/// Player report 2026-11-17 (Holster Toggle, Steam Deck): a modified EML loader next to the game is named as one, with
+/// what its own code does, and under Proton the finding says that without the override that code does not run either.
+#[test]
+fn a_modified_eml_loader_in_the_folder_is_named_with_its_own_code() {
+    let f = Fx::healthy("modified-eml");
+    f.w("dbghelp.dll", crate::pe::build_test_dll(&["MiniDumpWriteDump"],
+        b"EML_LOG_FILE_PATH crates\\mod-loader-runtime\\src\\native\\holster.rs m182-holster m182_native.json"));
+    let l = finding(&build(&f.input()), "loader-in-folder").text.clone();
+    assert!(l.starts_with("dbghelp.dll is a modified EML loader with code of its own (a weapon holster hotkey; settings in \
+        m182_native.json). On Windows the game always loads it"), "{l}");
+    assert!(!l.contains("Without that override"), "Windows has no override: {l}");
+    let mut i = f.input();
+    i.install = Some(f.install(Platform::Proton));
+    let l = finding(&build(&i), "loader-in-folder").text.clone();
+    assert!(l.contains("Under Wine or Proton it loads only with a DLL override for that name") && l.ends_with("Without that override \
+        neither EML nor its own code runs from it, and Kiln runs the EML mods' data part itself."), "{l}");
+}
+
 /// A player's report of 16 Nov 2026 (Steam Deck, shroudlink's singleplayer package 0.8.1): its client addon, chained
 /// from the Library, loaded the `shroudlink_core.dll` an older hand installation had left next to the game, and
 /// kiln-shroudlink stood aside for it. The finding names that file and keeps the addon, which draws the MODS tab.
