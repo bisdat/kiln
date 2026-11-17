@@ -134,6 +134,10 @@ struct Line {
     uint8_t* sys;
     uint32_t handle;
     uint64_t account;
+    uint32_t tag1 = 0, tag2 = 0;
+    uint64_t time = 0;
+    int has_time = -1;  // -1: no time pointer
+    bool operator==(const Line&) const = default;
 };
 std::mutex g_game_mutex;
 std::vector<Line> g_inbox;                // lines the game's own ChatLogAdd really added
@@ -154,10 +158,11 @@ __declspec(noinline) ChatResult* game_chat_log_add(ChatResult* out, uint8_t* sys
                                                    const OptTime* time) {
     {
         std::lock_guard lock(g_game_mutex);
-        g_inbox.push_back({type, std::string(text->data, static_cast<size_t>(text->size)), sys, handle, account});
+        g_inbox.push_back({type, std::string(text->data, static_cast<size_t>(text->size)), sys, handle, account, tag1, tag2,
+                           time ? time->time : 0, time ? time->has : -1});
     }
     out->code = 0;
-    out->value = tag1 + tag2 + static_cast<uint32_t>(time->has);
+    out->value = tag1 + tag2 + (time ? static_cast<uint32_t>(time->has) : 7u);
     return out;
 }
 
@@ -167,9 +172,11 @@ __declspec(noinline) uintptr_t game_chat_receive(uint8_t* gs, uintptr_t line, ui
     ChatResult r{};
     StrView v{text, std::strlen(text)};
     OptTime t{};
+    t.time = 0x5EC0DE00ull + static_cast<uint64_t>(gs[0x40]);  // a time the game set: kiln.chat must add the line back with it
+    t.has = 1;
     uint8_t* sys = nullptr;
     std::memcpy(&sys, gs + 0x20, sizeof sys);
-    game_chat_log_add(&r, sys, static_cast<uint8_t>(kind), &v, 0, 0, static_cast<uint32_t>(connection), 4242, &t);
+    game_chat_log_add(&r, sys, static_cast<uint8_t>(kind), &v, 3, 5, static_cast<uint32_t>(connection), 4242, &t);
     return r.code + 1000;  // used after the call: no tail jump
 }
 
@@ -343,12 +350,13 @@ void check(bool ok, const char* what, const std::string& detail = "") {
     ok ? ++g_pass : ++g_fail;
 }
 
-// A subscriber of kiln.chat (a mod): records the lines it is handed; consumes the ones that say "swallow".
+// A subscriber of kiln.chat (a mod): records the lines it is handed; consumes the ones that say "swallow", and, as
+// Kiln.Chat does, a slash line naming one of its commands ("/kt-known"). Any other slash line is not its business.
 std::vector<std::string> g_heard;
 bool KILN_CALL on_chat(const KilnChatMessage* m, void*) {
     std::string t(m->text.ptr, m->text.len);
     g_heard.push_back(t);
-    return t.find("swallow") != std::string::npos;
+    return t.find("swallow") != std::string::npos || t.rfind("/kt-known", 0) == 0;
 }
 
 size_t inbox_size() {
@@ -367,6 +375,7 @@ std::atomic<int> g_front_calls{0};
 KilnHandle g_front_handle = 0;
 std::mutex g_caller_mutex;
 std::vector<uintptr_t> g_front_callers;
+std::vector<std::string> g_front_texts;
 ChatResult* front_hook(ChatResult* out, uint8_t* sys, uint8_t type, const StrView* text, uint32_t tag1, uint32_t tag2,
                        uint32_t handle, uint64_t account, const OptTime* time) {
     ++g_front_calls;
@@ -374,6 +383,8 @@ ChatResult* front_hook(ChatResult* out, uint8_t* sys, uint8_t type, const StrVie
         const uintptr_t c = chain::caller_of(g_front_handle);
         std::lock_guard lock(g_caller_mutex);
         if (g_front_callers.size() < 8) g_front_callers.push_back(c);
+        if (text && text->data && text->size && text->data[0] == '/')
+            g_front_texts.emplace_back(text->data, static_cast<size_t>(text->size));
     }
     return reinterpret_cast<ChatResult* (*)(ChatResult*, uint8_t*, uint8_t, const StrView*, uint32_t, uint32_t, uint32_t,
                                             uint64_t, const OptTime*)>(g_front_original)(out, sys, type, text, tag1, tag2,
@@ -555,6 +566,51 @@ int main(int argc, char** argv) {
         check(g_heard.size() == heard_before + 200 && inbox_size() == inbox_before + static_cast<size_t>(notices.load()) + 200,
               "all 200 held lines were delivered and added", "heard +" + std::to_string(g_heard.size() - heard_before));
     }
+    // ---- 7. pass-through: a slash line naming no Kiln command (another loader's, an EMF Lua or native mod's) ----
+    // Kiln.Chat's default (0.2.0-dev.29.17): its subscriber does not consume it, so the line reaches the game exactly as
+    // an unhooked line would: the same bytes and arguments (time included), in the same Pre, so the same frame's send
+    // step sends it; the links after kiln.chat's get it once, a link in front saw only the game's own call.
+    const std::string slash_text = "/lua print('hi')";
+    {
+        const size_t inbox_before = inbox_size(), heard_before = g_heard.size();
+        g_gs_storage[0x40] = 7;  // the stand-in game's time for this line
+        game_chat_receive(g_gs_storage, reinterpret_cast<uintptr_t>(slash_text.c_str()), 0, 0x41);
+        game_chat_receive(g_gs_storage, reinterpret_cast<uintptr_t>("/kt-known 1 2"), 0, 0x41);
+        check(inbox_size() == inbox_before && g_heard.size() == heard_before, "both slash lines held back for the subscriber");
+        g_pre(nullptr, nullptr);  // ONE Pre: no second pass needed
+        Line got{}, want{0, slash_text, g_sys, 0x41, 4242, 3, 5, 0x5EC0DE07ull, 1};
+        {
+            std::lock_guard lock(g_game_mutex);
+            if (g_inbox.size() == inbox_before + 1) got = g_inbox.back();
+        }
+        check(g_heard.size() == heard_before + 2 && inbox_size() == inbox_before + 1 && got == want,
+              "an unknown slash line, not consumed, is added back in the same Pre with the original text and arguments "
+              "(type, tags, connection, account, the game's time); a known command is consumed",
+              "inbox +" + std::to_string(inbox_size() - inbox_before) + ", text '" + got.text + "', tags " +
+                  std::to_string(got.tag1) + "/" + std::to_string(got.tag2) + ", time " + std::to_string(got.time) + "/" +
+                  std::to_string(got.has_time));
+        g_pre(nullptr, nullptr);
+        check(inbox_size() == inbox_before + 1, "nothing is added a step later");
+
+        // the same line with nobody subscribed (an unhooked line): what the game gets is identical
+        check(chat->unsubscribe(sub) == KILN_OK, "the mod unsubscribes");
+        game_chat_receive(g_gs_storage, reinterpret_cast<uintptr_t>(slash_text.c_str()), 0, 0x41);
+        Line direct{};
+        {
+            std::lock_guard lock(g_game_mutex);
+            if (g_inbox.size() == inbox_before + 2) direct = g_inbox.back();
+        }
+        check(inbox_size() == inbox_before + 2 && direct == got,
+              "unhooked, the receive loop adds the same line with the same arguments: pass-through is indistinguishable",
+              "inbox +" + std::to_string(inbox_size() - inbox_before));
+        if (front) {
+            std::lock_guard lock(g_caller_mutex);
+            const auto n = std::count(g_front_texts.begin(), g_front_texts.end(), slash_text);
+            check(n == 2, "the mod link in front saw the line once per typing (the game's call), not again on the add-back",
+                  std::to_string(n));
+        }
+    }
+
     if (front) check(g_front_calls.load() > 0, "the mod link in front saw the calls");
     if (front) {
         std::lock_guard lock(g_caller_mutex);
