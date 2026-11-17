@@ -23,13 +23,16 @@ KilnStationRequest req(uint32_t action) {
 }
 
 // The game's AutoTransferRecipe, as read from the code (docs/re/stations.md §3.1), on plain numbers: returns 0 and
-// fills `moved` per input, or 4 when the stock is short. Used to check the planner never asks for what the game refuses.
+// fills `moved` per input, or 4 when the stock is short, 2 when the station cannot hold it (water: its capacity). The
+// water input (kWaterItem) counts in "loaded" as the game counts it. Used to check the planner never asks for what the
+// game refuses.
 int game_fill(const std::vector<InputNow>& in, uint32_t n, std::vector<uint32_t>* moved) {
     const uint32_t loaded = crafts_loaded(in);
     moved->assign(in.size(), 0);
     for (size_t k = 0; k < in.size(); ++k) {
         const uint32_t need = game_need(in[k], n, loaded);
         if (need > in[k].stock) return 4;
+        if (in[k].room != UINT64_MAX && in[k].have + need > in[k].room) return 2;
         (*moved)[k] = need;
     }
     return 0;
@@ -39,18 +42,21 @@ int game_fill(const std::vector<InputNow>& in, uint32_t n, std::vector<uint32_t>
 int main() {
     // ---- ABI sizes (the managed mirror) ----
     static_assert(sizeof(KilnBaseId) == 16 && sizeof(KilnStationChoice) == 8 && sizeof(KilnStationStack) == 8);
-    static_assert(sizeof(KilnStationBase) == 144 && offsetof(KilnStationBase, min) == 80);
+    static_assert(sizeof(KilnStationBase) == 432 && offsetof(KilnStationBase, altar_ids) == 92 && offsetof(KilnStationBase, min) == 368);
     static_assert(sizeof(KilnStation) == 200 && offsetof(KilnStation, position) == 32 && offsetof(KilnStation, state) == 56 &&
                   offsetof(KilnStation, crafts_loaded) == 132 && offsetof(KilnStation, recipe_start_ns) == 136 &&
-                  offsetof(KilnStation, progress) == 168);
+                  offsetof(KilnStation, progress) == 168 && offsetof(KilnStation, flags) == 180);
     static_assert(sizeof(KilnStationInput) == 16 && sizeof(KilnStationRecipe) == 624 && offsetof(KilnStationRecipe, inputs) == 48);
     static_assert(sizeof(KilnStationRequest) == 88 && offsetof(KilnStationRequest, choices) == 24 &&
                   offsetof(KilnStationRequest, keep) == 64);
     static_assert(sizeof(KilnItemsMoveChange) == 32);
-    static_assert(sizeof(KilnStationResult) == 1224 && offsetof(KilnStationResult, ticket) == 56 &&
-                  offsetof(KilnStationResult, changes) == 72 && offsetof(KilnStationResult, message) == 1096);
-    static_assert(sizeof(KilnStationPlan) == 680 && offsetof(KilnStationPlan, inputs) == 40);
-    static_assert(sizeof(KilnStationEvent) == 96 && offsetof(KilnStationEvent, by) == 64 && offsetof(KilnStationEvent, position) == 72);
+    static_assert(sizeof(KilnStationResult) == 1232 && offsetof(KilnStationResult, limited_by) == 52 &&
+                  offsetof(KilnStationResult, short_item) == 56 && offsetof(KilnStationResult, ticket) == 64 &&
+                  offsetof(KilnStationResult, changes) == 80 && offsetof(KilnStationResult, message) == 1104);
+    static_assert(sizeof(KilnStationPlan) == 696 && offsetof(KilnStationPlan, short_item) == 36 &&
+                  offsetof(KilnStationPlan, water_per_craft) == 44 && offsetof(KilnStationPlan, inputs) == 56);
+    static_assert(sizeof(KilnStationEvent) == 112 && offsetof(KilnStationEvent, by) == 64 && offsetof(KilnStationEvent, position) == 72 &&
+                  offsetof(KilnStationEvent, base) == 96);
     static_assert(sizeof(KilnStationsStatus) == 188);
     static_assert(sizeof(KilnStationsApi) == 8 + 21 * 8);
 
@@ -97,6 +103,14 @@ int main() {
     CHECK(!request_valid(r));
     r = req(7);
     CHECK(!request_valid(r));
+    // FILL's player: a player entity (1..1023) or 0; never another entity (a chest's id would make the game take from it)
+    r = req(KILN_STATION_FILL);
+    r.player = 2550;
+    CHECK(!request_valid(r));
+    r.player = 1;
+    CHECK(request_valid(r));
+    r.player = 1023;
+    CHECK(request_valid(r));
 
     // ---- the fill's arithmetic: the charcoal kiln (12 of category wood, 3 of another per craft) ----
     std::vector<InputNow> in{{0x2b0cf1d5, 12, 30, 100}, {0x07e67b5b, 3, 4, 20}};
@@ -113,7 +127,8 @@ int main() {
     CHECK(crafts_wanted(0, 1, 3) == 0);               // already more than asked
     CHECK(crafts_wanted(KILN_STATION_FILL_ADD, 5, 1) == 5);
     CHECK(crafts_first_try(0, 20, 7) == 7);
-    CHECK(crafts_first_try(KILN_STATION_FILL_EXACT, 20, 7) == 20);
+    CHECK(crafts_first_try(KILN_STATION_FILL_EXACT, 20, 7) == 0);   // EXACT and the stock (after reserves) short: no call
+    CHECK(crafts_first_try(KILN_STATION_FILL_EXACT, 7, 7) == 7);
     CHECK(crafts_next_try(0, 7, 1) == 3);
     CHECK(crafts_next_try(0, 1, 1) == 0);
     CHECK(crafts_next_try(KILN_STATION_FILL_EXACT, 7, 1) == 0);
@@ -137,8 +152,122 @@ int main() {
     CHECK(after_craft_due(KILN_STATION_STATE_NO_RECIPE, 0, 5, 5));
     CHECK(!after_craft_due(KILN_STATION_STATE_RUNNING, 0x5568cc2b, 5, 5));   // the same cycle runs
     CHECK(after_craft_due(KILN_STATION_STATE_RUNNING, 0x5568cc2b, 5, 9));    // a new cycle started: the old one ended
-    CHECK(after_craft_due(KILN_STATION_STATE_OUTPUT_FULL, 0x5568cc2b, 5, 5)); // ended, outputs waiting
+    CHECK(!after_craft_due(KILN_STATION_STATE_OUTPUT_FULL, 0x5568cc2b, 5, 5)); // outputs waiting: a stop now refunds the inputs
+    CHECK(!after_craft_due(KILN_STATION_STATE_PAUSED, 0x5568cc2b, 5, 5));      // paused mid-cycle: a stop now loses it
     CHECK(after_craft_due(KILN_STATION_STATE_MISSING_MATERIALS, 0x5568cc2b, 5, 5));
+
+    // ---- water counts in "loaded" (the game's count), unless the request pours none ----
+    {
+        std::vector<InputNow> w{{0x2b0cf1d5, 12, 60, 100}};  // items for 5 crafts in the station
+        InputNow water{};
+        CHECK(water_input(1, false, 0, 256, 1000, &water) && water.item == kWaterItem && water.count == 64);
+        w.push_back(water);
+        CHECK(crafts_loaded(w) == 0);  // no water: no complete craft
+        PlanMath m = plan_math(0, 5, w);  // up to 5: the water for them (the station holds 4 crafts' worth)
+        CHECK(m.loaded == 0 && m.wanted == 5 && m.planned == 4 && m.status == KILN_STATION_PARTIAL);
+        CHECK(m.limit.why == KILN_STATION_LIMIT_WATER);
+        std::vector<uint32_t> moved;
+        CHECK(game_fill(w, m.planned, &moved) == 0 && moved[0] == 0 && moved[1] == 4 * 64);
+        CHECK(game_fill(w, m.planned + 1, &moved) == 2);
+        w[1].have = 64;  // one craft's water
+        PlanMath add = plan_math(KILN_STATION_FILL_ADD, 1, w);
+        CHECK(add.loaded == 1 && add.planned == 1 && add.loaded + add.planned == 2);  // not 6
+        CHECK(!water_input(1, true, 0, 256, 1000, &water));  // NO_WATER: items alone
+        CHECK(!water_input(0, false, 0, 256, 1000, &water)); // a recipe without water
+        std::vector<InputNow> dry{{0x2b0cf1d5, 12, 60, 100}};
+        CHECK(plan_math(0, 5, dry).status == KILN_STATION_UNCHANGED);
+        w[1].stock = 0;
+        w[1].have = 0;
+        PlanMath none = plan_math(0, 1, w);
+        CHECK(none.planned == 0 && none.status == KILN_STATION_NOT_ENOUGH && none.limit.why == KILN_STATION_LIMIT_WATER);
+    }
+    // ---- the player's bag, reserves, EXACT ----
+    {
+        std::vector<InputNow> bag{{1, 12, 0, after_keep(10, 10) + 24, 10}};  // the base's 10 all reserved, 24 in the bag
+        CHECK(plan_math(0, 5, bag).planned == 2);
+        std::vector<InputNow> res{{1, 12, 0, after_keep(30, 20), 20}};        // 10 may be taken: not one craft
+        PlanMath e = plan_math(KILN_STATION_FILL_EXACT, 1, res);
+        CHECK(e.planned == 0 && e.status == KILN_STATION_NOT_ENOUGH && e.limit.why == KILN_STATION_LIMIT_RESERVE && e.limit.item == 1);
+        std::vector<InputNow> ok{{1, 12, 0, after_keep(50, 20), 20}};         // 30 may be taken: 2 crafts
+        CHECK(plan_math(KILN_STATION_FILL_EXACT, 2, ok).planned == 2);
+        CHECK(plan_math(KILN_STATION_FILL_EXACT, 3, ok).planned == 0);
+        std::vector<InputNow> short_{{1, 12, 0, 5}, {2, 3, 0, 100}};
+        PlanMath s = plan_math(0, 1, short_);
+        CHECK(s.status == KILN_STATION_NOT_ENOUGH && s.limit.why == KILN_STATION_LIMIT_STOCK && s.limit.item == 1);
+    }
+    // ---- one item named twice is one input ----
+    {
+        std::vector<InputNow> dup{{1, 12, 30, 0}, {1, 3, 30, 0}, {2, 1, 9, 0}};
+        merge_inputs(&dup);
+        CHECK(dup.size() == 2 && dup[0].count == 15 && crafts_loaded(dup) == 2);
+    }
+    // ---- the game's function, tried with less after a refusal ----
+    {
+        int calls = 0;
+        auto room3 = [&](uint32_t n) { ++calls; return n > 3 ? 2 : 0; };  // the station takes 3 crafts' inputs
+        Attempts a = run_attempts(0, 13, room3);
+        CHECK(a.ok && a.n == 3 && a.tries == 3 && calls == 3 && fill_status(a, 13) == KILN_STATION_PARTIAL);
+        Attempts x = run_attempts(KILN_STATION_FILL_EXACT, 13, room3);  // all or nothing: no smaller try
+        CHECK(!x.ok && x.tries == 1 && fill_status(x, 13) == KILN_STATION_NO_ROOM);
+        Attempts never = run_attempts(0, 64, [](uint32_t) { return 4; });
+        CHECK(!never.ok && never.tries == kMaxTries && fill_status(never, 64) == KILN_STATION_NOT_ENOUGH);
+        Attempts fault = run_attempts(0, 64, [](uint32_t) { return kAttemptFault; });
+        CHECK(!fault.ok && fault.tries == 1);
+        CHECK(fill_status(run_attempts(0, 5, [](uint32_t) { return 0; }), 5) == KILN_STATION_DONE);
+        CHECK(fill_status(run_attempts(0, 5, [](uint32_t) { return 5; }), 5) == KILN_STATION_REFUSED);
+        CHECK(!run_attempts(0, 0, room3).ok);  // nothing planned: no call
+    }
+    // ---- a waiting stop, step by step ----
+    {
+        StopSeen s{};
+        s.present = true;
+        s.state = KILN_STATION_STATE_RUNNING;
+        s.running = 0x5568cc2b;
+        s.selected = 0x5568cc2b;
+        s.start = 100;
+        s.now = 50'000'000'000;
+        CHECK(waiting_stop(s, 0x5568cc2b, 100, 10, 1000) == StopWait::Wait);      // the same cycle runs
+        CHECK(waiting_stop(s, 0x5568cc2b, 100, 1001, 1000) == StopWait::TimedOut); // too long: nothing written
+        StopSeen p = s;
+        p.state = KILN_STATION_STATE_PAUSED;
+        CHECK(waiting_stop(p, 0x5568cc2b, 100, 10, 1000) == StopWait::Wait);
+        p.state = KILN_STATION_STATE_OUTPUT_FULL;
+        CHECK(waiting_stop(p, 0x5568cc2b, 100, 10, 1000) == StopWait::Wait);
+        StopSeen resumed = s;
+        resumed.start = s.now - 30'000'000'000;  // resumed from a pause: start = now - what it had run
+        CHECK(waiting_stop(resumed, 0x5568cc2b, 100, 10, 1000) == StopWait::Wait);
+        StopSeen fresh = s;
+        fresh.start = s.now - 40'000'000;  // a new cycle, one step old
+        CHECK(waiting_stop(fresh, 0x5568cc2b, 100, 10, 1000) == StopWait::Write);
+        StopSeen between = s;
+        between.state = KILN_STATION_STATE_NO_RECIPE;  // the step between two cycles
+        CHECK(waiting_stop(between, 0x5568cc2b, 100, 10, 1000) == StopWait::Write);
+        StopSeen stopped = s;
+        stopped.stopped = 1;
+        CHECK(waiting_stop(stopped, 0x5568cc2b, 100, 10, 1000) == StopWait::Unchanged);
+        StopSeen other = s;
+        other.selected = 0x1234;
+        CHECK(waiting_stop(other, 0x5568cc2b, 100, 10, 1000) == StopWait::Canceled);
+        StopSeen gone{};
+        CHECK(waiting_stop(gone, 0x5568cc2b, 100, 10, 1000) == StopWait::Gone);
+        auto stop = req(KILN_STATION_STOP);
+        CHECK(withdraws_waiting(stop));
+        stop.flags = KILN_STATION_AFTER_CRAFT;
+        CHECK(!withdraws_waiting(stop));
+        CHECK(withdraws_waiting(req(KILN_STATION_RESUME)) && withdraws_waiting(req(KILN_STATION_SELECT)));
+        CHECK(!withdraws_waiting(req(KILN_STATION_FILL)));
+    }
+    // ---- the queue: withdraw a station's waiting stops, flush a list ----
+    {
+        std::vector<Req> after(3);
+        after[0].r.station = 10;
+        after[1].r.station = 11;
+        after[2].r.station = 10;
+        auto w = take_if(&after, [](const Req& q) { return q.r.station == 10; });
+        CHECK(w.size() == 2 && after.size() == 1 && after[0].r.station == 11);
+        auto all = take_if(&after, [](const Req&) { return true; });
+        CHECK(all.size() == 1 && after.empty());
+    }
 
     // ---- a base's id ----
     KilnBaseId ids[3]{};
@@ -189,6 +318,19 @@ int main() {
     CHECK(unlock_verdict(false, -1, {0}) == Unlock::No);
     CHECK(unlock_verdict(false, -1, {}) == Unlock::Unknown);      // a player query and no player in game
     CHECK(unlock_verdict(false, -1, {-1, -1}) == Unlock::Unknown);
+
+    // ---- status: the events are on before a world runs (a mod subscribes in OnLoad) ----
+    {
+        const StatusBits menu = status_bits(true, true, true, true, false, false);  // no world yet, no program yet
+        CHECK(!menu.read && !menu.fill && !menu.control);
+        CHECK(menu.events);
+        const StatusBits world = status_bits(true, true, true, true, true, true);
+        CHECK(world.read && world.fill && world.control && world.events);
+        const StatusBits broken = status_bits(true, true, true, true, true, false);  // the program broke
+        CHECK(broken.read && !broken.fill && !broken.control && broken.events);
+        CHECK(!status_bits(false, true, true, true, true, true).events);              // no reads, no watch
+        CHECK(!status_bits(true, true, true, false, true, true).events);
+    }
 
     std::printf("stations: %d checks, %d failures\n", checks, failed);
     return failed ? 1 : 0;

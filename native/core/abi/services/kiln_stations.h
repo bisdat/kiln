@@ -43,7 +43,7 @@ extern "C" {
 #define KILN_STATIONS_VERSION 1u
 
 #define KILN_STATIONS_MAX_BASES 16u   /* the game's own limit */
-#define KILN_STATIONS_MAX_ALTARS 8u   /* altars listed per base */
+#define KILN_STATIONS_MAX_ALTARS 16u  /* altars listed per base (a base merges at most 16 zones) */
 #define KILN_STATIONS_MAX_INPUTS 32u  /* recipe inputs (the game's data has at most 32) */
 #define KILN_STATIONS_MAX_OUTPUTS 8u
 #define KILN_STATIONS_MAX_CHANGES 32u /* ledger entries in a result */
@@ -92,12 +92,13 @@ typedef struct KilnStationBase {
     uint32_t index;         /* the game's record index this session (0..15): changes when the bases are rebuilt */
     KilnBaseId id;          /* the smallest altar baseId of the record */
     uint32_t altar_count;   /* altars whose zones make this base (more than one when their zones overlap) */
-    KilnEntity altars[KILN_STATIONS_MAX_ALTARS];
+    KilnEntity altars[KILN_STATIONS_MAX_ALTARS];   /* their entities (this session) */
+    KilnBaseId altar_ids[KILN_STATIONS_MAX_ALTARS]; /* their own baseId, kept in the save: a stable key per altar */
     uint32_t storage_count; /* crafting-stock containers the game lists for the base now */
     uint32_t water_count;   /* water sources that hold water */
     uint32_t zone_count;    /* altar zone boxes merged into the base */
     uint32_t station_count; /* production stations whose position is in the base */
-    uint32_t version;       /* the game's zone version (the bases are rebuilt when it changes) */
+    uint32_t version;       /* Kiln's count of base rebuilds this session (it moves when the records change) */
     KilnVec3 min, max;      /* the record's box, metres */
     uint32_t reserved[4];
 } KilnStationBase;
@@ -120,11 +121,18 @@ typedef struct KilnStation {
     int64_t recipe_start_ns; /* the running cycle's start, world program time */
     int64_t pause_ns;        /* FactoryStation.recipePauseDuration */
     int64_t now_ns;          /* the world's program time of the last step (0 before kiln_items_stations ran) */
-    int64_t duration_ns;     /* the selected (else running) recipe's duration, scaled by factoryProductionSpeedFactor */
-    float progress;          /* 0..1 while running, 0 otherwise */
-    int32_t water, water_max; /* the station's water (Fuel units; 0, 0 for a station without water) */
-    uint32_t reserved[5];
+    int64_t duration_ns;     /* the cycle in progress' duration (running_recipe != 0), else the selected recipe's; scaled by
+                                factoryProductionSpeedFactor */
+    float progress;          /* 0..1 of the cycle in progress (while paused: where it paused), 0 when none runs */
+    int32_t water, water_max; /* the station's water (Fuel units, 64 per charge; 0, 0 for a station without water) */
+    uint32_t flags;          /* KILN_STATION_FLAG_* */
+    uint32_t reserved[4];
 } KilnStation;
+
+/* KilnStation.flags */
+enum {
+    KILN_STATION_FLAG_STOP_PENDING = 0x1u, /* a STOP with KILN_STATION_AFTER_CRAFT waits for the cycle's end (not saved) */
+};
 
 /* One recipe input as the data has it: an item (item != 0) or "any item of a category" (category != 0). */
 typedef struct KilnStationInput {
@@ -178,7 +186,8 @@ typedef struct KilnStationRequest {
     uint32_t crafts;        /* FILL: 1..1000 */
     uint32_t recipe;        /* SELECT: the recipe; FILL: 0 = the station's selected recipe (else that one) */
     KilnStationChoice choices[4]; /* SELECT, FILL with a recipe: the category choices; all zero = the station's own */
-    KilnEntity player;      /* FILL: also take from this player's inventories first, as the game's button does; 0 = never */
+    KilnEntity player;      /* FILL: also take from this player's inventories first, as the game's button does (a player
+                               entity, 1..1023); 0 = never */
     uint32_t keep_count;    /* FILL: entries in keep (0..64) */
     const KilnStationStack* keep; /* FILL: leave at least this many of each item in the base's stock (copied by submit) */
     uint32_t reserved[4];   /* 0 */
@@ -199,6 +208,19 @@ enum {
     KILN_STATION_REFUSED = 10,      /* the game's function refused it (game_error) */
     KILN_STATION_UNAVAILABLE = 11,  /* the capability went off after the request was accepted */
     KILN_STATION_DROPPED = 12,      /* not run: the world closed, or kiln_items_stations did not run it in 10 s */
+    KILN_STATION_TIMED_OUT = 13,    /* STOP after craft: the cycle did not end in time (about an hour of steps); nothing written */
+    KILN_STATION_QUEUE_FULL = 14,   /* not taken: 1024 actions wait (submit's KILN_ERR_BUFFER_TOO_SMALL; a managed result) */
+    KILN_STATION_CANCELED = 15,     /* STOP after craft: withdrawn before it was written (a later resume, select or stop on
+                                       the station, Kiln's or a player's; the message says which); nothing written */
+};
+
+/* KilnStationResult.limited_by / KilnStationPlan.limited_by: what kept a FILL below what was asked */
+enum {
+    KILN_STATION_LIMIT_NONE = 0,
+    KILN_STATION_LIMIT_STOCK = 1,   /* the base's stock (short_item) */
+    KILN_STATION_LIMIT_RESERVE = 2, /* the request's reserve of short_item */
+    KILN_STATION_LIMIT_ROOM = 3,    /* the station's room */
+    KILN_STATION_LIMIT_WATER = 4,   /* water: the base's water sources, or the station's water capacity */
 };
 
 typedef struct KilnStationResult {
@@ -215,6 +237,9 @@ typedef struct KilnStationResult {
                                station, 4 missing materials, 5 no station inventory), 0 */
     uint32_t change_count;  /* entries in changes */
     uint8_t state_before, state_after, stopped_before, stopped_after;
+    uint8_t limited_by;     /* FILL, not DONE: KILN_STATION_LIMIT_* */
+    uint8_t reserved8[3];
+    KilnItemId short_item;  /* FILL, limited by STOCK or RESERVE: the item; 0 otherwise */
     uint32_t reserved;
     uint64_t ticket, step;
     KilnItemsMoveChange changes[KILN_STATIONS_MAX_CHANGES]; /* FILL: the transaction's ledger (a take: from_slot set, to_slot
@@ -235,10 +260,17 @@ typedef struct KilnStationPlan {
     uint32_t crafts_affordable; /* more crafts the base's stock covers (after the reserves) */
     uint32_t crafts_planned;    /* what a fill with this request would ask the game for */
     uint32_t input_count;       /* resolved inputs (the category choices applied) */
-    uint32_t reserved;
+    KilnItemId short_item;      /* limited by STOCK or RESERVE: the item; 0 otherwise */
+    uint8_t limited_by;         /* KILN_STATION_LIMIT_* when crafts_planned is below what was asked */
+    uint8_t use_all_options;    /* the station has "use all ingredient options" on: it may consume other options */
+    uint8_t reserved8[2];
+    uint32_t water_per_craft;   /* Fuel units one craft needs (0: none, or NO_WATER) */
+    uint32_t water_have;        /* in the station now */
+    uint32_t water_stock;       /* in the base's water sources */
     KilnStationStack inputs[KILN_STATIONS_MAX_INPUTS]; /* per craft */
     uint32_t have[KILN_STATIONS_MAX_INPUTS];           /* in the station now */
-    uint32_t stock[KILN_STATIONS_MAX_INPUTS];          /* in the base's stock containers, after the reserves */
+    uint32_t stock[KILN_STATIONS_MAX_INPUTS];          /* in the base's stock containers, after the reserves (plus the
+                                                          named player's inventories) */
     char message[128];
 } KilnStationPlan;
 
@@ -260,11 +292,12 @@ typedef struct KilnStationEvent {
     uint8_t state_before, state_after, stopped_before, stopped_after;
     uint32_t selected_before, selected_after;
     uint32_t running_before, running_after;
-    int32_t base_index;
+    int32_t base_index;     /* this session's record index; -1: in no base */
     uint32_t reserved0;
-    KilnOwner by;           /* STATE: the owner whose kiln.stations request wrote the station in the step before; 0 = the
-                               game or a player */
+    KilnOwner by;           /* STATE: the owner whose kiln.stations request made exactly this change (its stop flag or its
+                               selection) in the step before; 0 = the game, a player, or a change the game made after it */
     KilnVec3 position;
+    KilnBaseId base;        /* the base's id (zero: in no base) */
 } KilnStationEvent;
 
 typedef struct KilnStationsStatus {
@@ -276,7 +309,7 @@ typedef struct KilnStationsStatus {
     uint8_t program;        /* KILN_ITEMS_PROGRAM_* of kiln_items_stations */
     uint8_t watching;       /* 1: a watch is on */
     uint8_t knowledge;      /* 1: kiln.knowledge is here (SELECT's unlock check) */
-    uint8_t reserved0;
+    uint8_t scanned;        /* 1: the first scan of the world's stations is done (stations() is complete from then on) */
     uint32_t bases;         /* the game's bases now */
     uint32_t stations;      /* stations seen at the last scan */
     uint32_t pending;       /* requests waiting */

@@ -15,6 +15,12 @@ namespace kitems::stations {
 
 constexpr uint32_t kMaxCrafts = 1000;
 constexpr uint32_t kGameMaxCount = 0xFFFF;  // the game clamps what one input may move to a u16
+constexpr uint32_t kMaxPlayerEntity = 1023;  // player entities, as kiln.items (engine.h kMaxPlayer)
+constexpr uint32_t kWaterItem = 0;           // InputNow.item of a recipe's water (a pseudo input)
+constexpr uint32_t kWaterUnitsPerCharge = 64;  // Fuel units per water charge (kiln_items.h)
+
+// FILL's player: 0, or a player entity. Another entity would make the game's fill take from that entity's inventories.
+inline bool player_ok(uint32_t p) { return p == 0 || p <= kMaxPlayerEntity; }
 
 // ---- requests ----
 inline bool any_choice(const KilnStationChoice* c) {
@@ -39,7 +45,7 @@ inline bool request_valid(const KilnStationRequest& r) {
         if (r.crafts < 1 || r.crafts > kMaxCrafts) return false;
         if (r.keep_count > KILN_STATIONS_MAX_KEEP || (r.keep_count && !r.keep)) return false;
         if (any_choice(r.choices) && r.recipe == 0) return false;  // choices name a recipe's categories
-        return true;
+        return player_ok(r.player);
     }
     case KILN_STATION_STOP:
         return (r.flags & ~KILN_STATION_AFTER_CRAFT) == 0 && r.crafts == 0 && r.recipe == 0 && r.keep_count == 0 && r.player == 0;
@@ -54,14 +60,43 @@ inline bool request_valid(const KilnStationRequest& r) {
 }
 
 // ---- the fill's arithmetic ----
-// One resolved input: `count` per craft, `have` in the station (every link, partial stacks too), `stock` in the base's
-// stock containers after the reserves.
+// One resolved input: `count` per craft, `have` in the station (every link, partial stacks too), `stock` what the fill may
+// take (the base's stock containers after the reserves, plus the named player's inventories), `kept` what the reserves
+// held back, `room` the most the station can hold of it (water: its capacity; items: not modelled). The recipe's water is
+// an input too (item kWaterItem, count = units per craft): the game counts it in "loaded" (docs/re/stations.md §3.1).
 struct InputNow {
     uint32_t item = 0;
     uint32_t count = 0;
     uint64_t have = 0;
     uint64_t stock = 0;
+    uint64_t kept = 0;
+    uint64_t room = UINT64_MAX;
 };
+
+// The water input of a recipe with `charges` per craft (none when 0, or when the request pours no water).
+inline bool water_input(uint32_t charges, bool no_water, uint64_t station_water, uint64_t station_max, uint64_t base_water,
+                        InputNow* out) {
+    if (charges == 0 || no_water) return false;
+    *out = InputNow{};
+    out->item = kWaterItem;
+    out->count = charges * kWaterUnitsPerCharge;
+    out->have = station_water;
+    out->stock = base_water;
+    out->room = station_max;
+    return true;
+}
+
+// Inputs naming the same item more than once (an item and a category option that is that item) become one: the station
+// holds one pile of it, and the stock is taken once.
+inline void merge_inputs(std::vector<InputNow>* in) {
+    std::vector<InputNow> out;
+    for (const InputNow& i : *in) {
+        auto it = std::find_if(out.begin(), out.end(), [&](const InputNow& o) { return o.item == i.item; });
+        if (it == out.end()) out.push_back(i);
+        else it->count += i.count;
+    }
+    in->swap(out);
+}
 
 // Complete crafts the station holds: min over inputs of have / count; 0 when an input's count is 0 (as the game).
 inline uint32_t crafts_loaded(const std::vector<InputNow>& in) {
@@ -91,7 +126,12 @@ inline uint32_t crafts_affordable(const std::vector<InputNow>& in, uint32_t load
         const uint64_t more = total > loaded ? total - loaded : 0;
         // the u16 clamp: n never asks more than 0xFFFF of one input per call
         const uint64_t cap = (static_cast<uint64_t>(kGameMaxCount) + i.have) / i.count;
-        best = std::min<uint64_t>(best, std::min<uint64_t>(more, cap > loaded ? cap - loaded : 0));
+        uint64_t m = std::min<uint64_t>(more, cap > loaded ? cap - loaded : 0);
+        if (i.room != UINT64_MAX) {  // the station holds no more than this of it
+            const uint64_t r = i.room / i.count;
+            m = std::min<uint64_t>(m, r > loaded ? r - loaded : 0);
+        }
+        best = std::min<uint64_t>(best, m);
     }
     return best == UINT64_MAX ? 0 : static_cast<uint32_t>(std::min<uint64_t>(best, UINT32_MAX));
 }
@@ -102,12 +142,6 @@ inline uint32_t crafts_wanted(uint32_t flags, uint32_t crafts, uint32_t loaded) 
     return crafts > loaded ? crafts - loaded : 0;
 }
 
-// The first n a fill runs the game's function with: what is wanted, cut to what the stock covers unless EXACT.
-inline uint32_t crafts_first_try(uint32_t flags, uint32_t wanted, uint32_t affordable) {
-    if (flags & KILN_STATION_FILL_EXACT) return wanted;
-    return std::min(wanted, affordable);
-}
-
 // After the game refused n (no room in the station, or a short input it saw and the plan did not): the next n to try, 0
 // to stop. Halves, at most kMaxTries calls in all.
 constexpr uint32_t kMaxTries = 6;
@@ -116,15 +150,163 @@ inline uint32_t crafts_next_try(uint32_t flags, uint32_t n, uint32_t tries) {
     return n / 2;
 }
 
+// The first n a fill runs the game's function with: what is wanted, cut to what the stock covers. EXACT: all of it, or 0
+// (no call) when the stock after the reserves does not cover it: the game itself knows no reserves.
+inline uint32_t crafts_first_try(uint32_t flags, uint32_t wanted, uint32_t affordable) {
+    if (flags & KILN_STATION_FILL_EXACT) return wanted <= affordable ? wanted : 0;
+    return std::min(wanted, affordable);
+}
+
+// What allows the fewest more crafts, and why: the item and KILN_STATION_LIMIT_*.
+struct Limit {
+    uint32_t item = 0;
+    uint8_t why = KILN_STATION_LIMIT_NONE;
+};
+inline Limit limit_of(const std::vector<InputNow>& in, uint32_t loaded) {
+    Limit l;
+    uint64_t best = UINT64_MAX;
+    for (const auto& i : in) {
+        if (i.count == 0) continue;
+        const uint64_t total = (i.have + i.stock) / i.count;
+        const uint64_t more = total > loaded ? total - loaded : 0;
+        uint64_t room_more = UINT64_MAX;
+        if (i.room != UINT64_MAX) {
+            const uint64_t r = i.room / i.count;
+            room_more = r > loaded ? r - loaded : 0;
+        }
+        const uint64_t m = std::min(more, room_more);
+        if (m >= best) continue;
+        best = m;
+        if (i.item == kWaterItem) l = {0, KILN_STATION_LIMIT_WATER};
+        else if (room_more < more) l = {i.item, KILN_STATION_LIMIT_ROOM};
+        else if (i.kept && (i.have + i.stock + i.kept) / i.count > total) l = {i.item, KILN_STATION_LIMIT_RESERVE};
+        else l = {i.item, KILN_STATION_LIMIT_STOCK};
+    }
+    return l;
+}
+
+// The plan's arithmetic for a FILL request over its inputs (water and duplicates already folded in).
+struct PlanMath {
+    int32_t status = KILN_STATION_DONE;
+    uint32_t loaded = 0, affordable = 0, wanted = 0, planned = 0;
+    Limit limit;
+};
+inline PlanMath plan_math(uint32_t flags, uint32_t crafts, const std::vector<InputNow>& in) {
+    PlanMath p;
+    p.loaded = crafts_loaded(in);
+    p.affordable = crafts_affordable(in, p.loaded);
+    p.wanted = std::min<uint32_t>(crafts_wanted(flags, crafts, p.loaded), kGameMaxCount);
+    p.planned = crafts_first_try(flags, p.wanted, p.affordable);
+    if (p.wanted == 0) {
+        p.status = KILN_STATION_UNCHANGED;
+        return p;
+    }
+    if (p.planned < p.wanted) p.limit = limit_of(in, p.loaded);
+    if (p.planned == 0) p.status = p.limit.why == KILN_STATION_LIMIT_ROOM ? KILN_STATION_NO_ROOM : KILN_STATION_NOT_ENOUGH;
+    else p.status = p.planned < p.wanted ? KILN_STATION_PARTIAL : KILN_STATION_DONE;
+    return p;
+}
+
+// The game's function, tried with n and then less (crafts_next_try) until it takes it. `attempt(n)` returns the game's
+// code (0: done) or kAttemptFault (stop at once).
+constexpr int32_t kAttemptFault = -0x7fffffff;
+struct Attempts {
+    bool ok = false;
+    uint32_t n = 0, tries = 0;
+    int32_t code = 0;
+};
+template <class F>
+Attempts run_attempts(uint32_t flags, uint32_t first, F attempt) {
+    Attempts a;
+    uint32_t n = first;
+    while (n > 0) {
+        ++a.tries;
+        a.code = attempt(n);
+        if (a.code == 0) {
+            a.ok = true;
+            a.n = n;
+            return a;
+        }
+        if (a.code == kAttemptFault) return a;
+        n = crafts_next_try(flags, n, a.tries);
+    }
+    return a;
+}
+// A FILL's status from its attempts: DONE / PARTIAL, else the game's last code (2 no room, 4 short), else REFUSED.
+inline int32_t fill_status(const Attempts& a, uint32_t wanted) {
+    if (a.ok) return a.n < wanted ? KILN_STATION_PARTIAL : KILN_STATION_DONE;
+    if (a.code == 2) return KILN_STATION_NO_ROOM;
+    if (a.code == 4) return KILN_STATION_NOT_ENOUGH;
+    return KILN_STATION_REFUSED;
+}
+
 // Stock after a reserve: what may be taken of `have` when `keep` must stay.
 inline uint64_t after_keep(uint64_t stock, uint64_t keep) { return stock > keep ? stock - keep : 0; }
 
 // ---- stop after the running craft ----
-// Stop now when the station runs no cycle, or the cycle that ran at the request has ended (a new start, or a state that
-// is not Running). `start0` is recipeStart when the request was taken.
-inline bool after_craft_due(uint8_t state, uint32_t running, int64_t start0, int64_t start_now) {
-    if (state != KILN_STATION_STATE_RUNNING || running == 0) return true;
-    return start_now != start0;
+// A cycle is in progress while running != 0 in Running, Paused (it resumes where it paused) or OutputFull (its outputs
+// wait for room); a stop then makes the game refund the inputs and lose the cycle. Due: no cycle in progress, or a new
+// cycle began (Running with another start, younger than kFreshNs: a resume from a pause also moves the start, to
+// now - the time it had run). `start0` is recipeStart when the request was taken; now_ns the world's program time.
+constexpr int64_t kFreshNs = 2'000'000'000;
+inline bool cycle_in_progress(uint8_t state, uint32_t running) {
+    return running != 0 && (state == KILN_STATION_STATE_RUNNING || state == KILN_STATION_STATE_PAUSED ||
+                            state == KILN_STATION_STATE_OUTPUT_FULL);
+}
+inline bool after_craft_due(uint8_t state, uint32_t running, int64_t start0, int64_t start_now, int64_t now_ns = INT64_MIN) {
+    if (!cycle_in_progress(state, running)) return true;
+    if (state != KILN_STATION_STATE_RUNNING || start_now == start0) return false;
+    return now_ns == INT64_MIN || now_ns - start_now < kFreshNs;
+}
+
+// A waiting STOP (after craft), looked at each step.
+enum class StopWait { Wait, Write, TimedOut, Canceled, Unchanged, Gone };
+struct StopSeen {
+    bool present = false;  // the station still has its FactoryStation
+    uint8_t state = 0, stopped = 0;
+    uint32_t running = 0, selected = 0;
+    int64_t start = 0, now = 0;
+};
+inline StopWait waiting_stop(const StopSeen& s, uint32_t selected0, int64_t start0, uint64_t waited, uint64_t max_steps) {
+    if (!s.present) return StopWait::Gone;
+    if (s.stopped) return StopWait::Unchanged;            // someone stopped it meanwhile: nothing left to do
+    if (s.selected != selected0) return StopWait::Canceled;  // its recipe was changed (a player's or a mod's select)
+    if (after_craft_due(s.state, s.running, start0, s.start, s.now)) return StopWait::Write;
+    return waited > max_steps ? StopWait::TimedOut : StopWait::Wait;
+}
+
+// A later action on a station withdraws a STOP waiting there: RESUME, SELECT, and a STOP that is not after-craft.
+inline bool withdraws_waiting(const KilnStationRequest& r) {
+    return r.action == KILN_STATION_RESUME || r.action == KILN_STATION_SELECT ||
+           (r.action == KILN_STATION_STOP && !(r.flags & KILN_STATION_AFTER_CRAFT));
+}
+
+// ---- the request queue ----
+struct Req {
+    uint64_t ticket = 0;
+    KilnOwner owner = 0;
+    KilnStationRequest r{};
+    KilnStationStack keep[KILN_STATIONS_MAX_KEEP]{};
+    uint64_t submitted = 0;
+    // STOP after craft: what the station showed when it was taken
+    bool waiting = false;
+    int64_t start0 = 0;
+    uint32_t selected0 = 0;
+    uint64_t waiting_since = 0;
+};
+// Removes the requests of `list` that match and returns them, in order.
+template <class P>
+std::vector<Req> take_if(std::vector<Req>* list, P pred) {
+    std::vector<Req> out;
+    for (auto i = list->begin(); i != list->end();) {
+        if (pred(*i)) {
+            out.push_back(*i);
+            i = list->erase(i);
+        } else {
+            ++i;
+        }
+    }
+    return out;
 }
 
 // ---- a base's id ----
@@ -203,6 +385,22 @@ private:
     std::deque<KilnStationEvent> buf_;
     uint64_t seq_ = 0;
 };
+
+// ---- status ----
+// What kiln.stations reports as on. `live`: a server world runs here; `program`: kiln_items_stations is registered and
+// not broken. The reads and the actions need the world; the events do not: a mod subscribes in OnLoad, before any world
+// runs (and a game client that hosts later gets its world after that), and the watch only diffs while a world runs.
+struct StatusBits {
+    bool read = false, fill = false, control = false, events = false;
+};
+inline StatusBits status_bits(bool read_ok, bool fill_ok, bool control_ok, bool events_ok, bool live, bool program) {
+    StatusBits b;
+    b.read = read_ok && live;
+    b.fill = fill_ok && program && live;
+    b.control = control_ok && program && live;
+    b.events = events_ok && read_ok;
+    return b;
+}
 
 // ---- SELECT's unlock check ----
 // The verdict from the answers: the world's (-1 unknown / not applicable, 0, 1) and the players' in game.
