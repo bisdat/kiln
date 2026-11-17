@@ -318,6 +318,9 @@ internal sealed unsafe class HostRuntime : IHostServices, IKilnBackend
         // subscriptions and the game's entry point (BootPhase.cs)
         host._mods.PrepareGameplayHooks();
         BootPhase.Run(host.Service, host._owner, host._mods, host.Log);
+        // the files the first mod load and the first service tick read on the game's thread, read now on another one (a
+        // hard disk the game loads from made them slow there: ModPrefetch.cs)
+        ModPrefetch.Start(host._mods.PrefetchFiles, host.Log);
         AppDomain.CurrentDomain.UnhandledException += (_, e) => host.Unhandled(e.ExceptionObject as Exception, e.IsTerminating);
         TaskScheduler.UnobservedTaskException += (_, e) =>
         {
