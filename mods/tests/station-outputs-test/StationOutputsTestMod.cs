@@ -181,7 +181,11 @@ public sealed class StationOutputsTestMod : Mod
         {
             var e = await Place(t, Near(at, 1), keep: false);
             if (e.IsNone) continue;
-            foreach (var rid in Stations.RecipesOf(e))
+            IReadOnlyList<uint> ids;
+            try { ids = Stations.RecipesOf(e); }
+            catch (KeyNotFoundException) { ids = []; }  // a workshop with no recipes of its own
+            Info($"{t}: workshop 0x{Stations.Read(e)?.Workshop ?? 0:x8}, {ids.Count} recipe(s)");
+            foreach (var rid in ids)
             {
                 if (Stations.Recipe(rid) is not { } r) continue;
                 var ins = Stations.ResolveInputs(rid);
@@ -191,7 +195,9 @@ public sealed class StationOutputsTestMod : Mod
                     targetTemplate = t;
                     target = rid;
                 }
-                var both = r.Outputs.Select(o => o.Item).FirstOrDefault(o => r.Inputs.Any(i => !i.IsCategory && i.Item == o));
+                // an item on both sides: an input itself, or an option of a category input (both count as inputs)
+                var both = r.Outputs.Select(o => o.Item).FirstOrDefault(o => r.Inputs.Any(i =>
+                    i.IsCategory ? Stations.Category(i.Category)?.Options.Any(x => x.Item == o) == true : i.Item == o));
                 if (loop is null && !both.IsNone && r.WaterCharges == 0) loop = (t, rid, both);
             }
             await Remove(e);
