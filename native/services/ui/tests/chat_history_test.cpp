@@ -41,4 +41,13 @@ int main() {
     assert(!History::valid("\xf4\x90\x80\x80"));
     assert(History::sensitive("/key ABC"));
     assert(!History::sensitive("/keyboard"));
+    // A normal five-byte slash command must be accepted. In-game issue #44
+    // logging showed bytes=5/command=1 but count stayed zero.
+    History direct;
+    assert(History::valid("/help"));
+    assert(!History::sensitive("/help"));
+    assert(direct.submit("/help"));
+    assert(direct.count() == 1);
+    assert(direct.older("") == "/help");
+
 }
