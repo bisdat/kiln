@@ -293,6 +293,26 @@ internal static unsafe class UiNative
         public delegate* unmanaged[Cdecl]<int, uint, void> MenuFooter;
     }
 
+    /// <summary>The tail after menu_footer (0.2.0-dev.29.15): image_load_rgba, an overlay image from pixels (the game's item
+    /// icons, <see cref="ItemIcons"/>).</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct TableImageRgba
+    {
+        public TableFooter Base;
+        public delegate* unmanaged[Cdecl]<ulong, byte*, uint, uint, ulong> ImageLoadRgba;
+    }
+
+    /// <summary>kiln.ui's image_load_rgba, or null on a table without it (a kiln-ui.dll older than 0.2.0-dev.29.15).</summary>
+    public static delegate* unmanaged[Cdecl]<ulong, byte*, uint, uint, ulong> ImageLoadRgbaSlot
+    {
+        get
+        {
+            var t = T;
+            if (t == null || t->Header.Size < (uint)sizeof(TableImageRgba)) return null;
+            return ((TableImageRgba*)t)->ImageLoadRgba;
+        }
+    }
+
     /// <summary>KILN_UI_FOOTER_SHOWN.</summary>
     public const uint FooterShown = 1;
 
