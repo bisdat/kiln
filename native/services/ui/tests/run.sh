@@ -32,6 +32,9 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/mouse_pr
 # Issue 44: scoped chat Up/Down and UI-thread queue must never steal gameplay or releases.
 g++ -std=c++20 -O1 -g -Wall -Wextra -pthread -fsanitize=address,undefined "$here/chat_keys_test.cpp" -o "$out/chat_keys_test"
 "$out/chat_keys_test"
+# Issue 44: history draft, commands-only persistence policy, sensitive text, UTF-8.
+g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/chat_history_test.cpp" -o "$out/chat_history_test"
+"$out/chat_history_test"
 # one key press counts once, also across a focus loss (key_hold.h, GitHub issue 39): plain logic
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/key_hold_test.cpp" -o "$out/key_hold_test"
 "$out/key_hold_test"
