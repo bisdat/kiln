@@ -141,8 +141,8 @@ public enum ScreenKind
 public readonly record struct CraftingScreen(bool AtStation, uint Workshop, uint Recipe, bool Journal)
 {
     /// <summary>A production station's screen (keen::HudScreenType FactoryCrafting: a kiln, smelter, loom, seed bed...): the game
-    /// draws it as a transfer screen, not with its crafting menu, so Kiln's tabs and subcategories never show there, but
-    /// <c>Ui.Crafting.AddPanel</c> panels do. Since 0.2.0-dev.29.15.</summary>
+    /// draws it as a transfer screen, not with its crafting menu, so Kiln's tabs and subcategories never show there;
+    /// <c>Ui.Crafting.AddPanel</c> panels do when their options set <c>AtFactories</c>. Since 0.2.0-dev.29.15.</summary>
     public bool IsFactory { get; init; }
 
     /// <summary>On a factory screen, the station's entity: the entity the game's screen is about (play data +0x2c50). Entities

@@ -19,26 +19,35 @@ internal static class ContentNames
     private static Dictionary<uint, Def> _defs = new();
     private static long _readAt;      // Environment.TickCount64 of the last read, 0: never
     private static Task? _reading;
-    private const long Stale = 2000;  // a miss reads the listing again at most every 2 s
+    private static string? _lastListing;
+    private static int _unchanged;    // reads in a row that found the same listing (or none)
+
+    /// <summary>How long a miss waits before the listing is read again: 2 s after a read that found something new, then
+    /// twice as long after each read that found the same listing (an id that is no new item: a game item drawn or named, an
+    /// unknown id), at most 2 minutes. A changed listing starts over at 2 s.</summary>
+    internal static long Stale => 2000 + RetryDelay.Of(_unchanged, 2000, 118_000);
 
     /// <summary>Tests: the listing to read instead of kiln.content's (null: kiln.content's).</summary>
     internal static Func<string?>? ListingOverride;
 
+    /// <summary>Tests: the clock (Environment.TickCount64).</summary>
+    internal static Func<long> Clock = () => Environment.TickCount64;
+
     /// <summary>The definition of a new item with this id, or null (none, or the listing is being read: asked again, it
-    /// answers). A miss reads the listing again in the background at most every 2 seconds.</summary>
+    /// answers). A miss reads the listing again in the background, at most every <see cref="Stale"/>.</summary>
     public static Def? Find(uint id)
     {
         lock (Gate)
         {
             if (_defs.TryGetValue(id, out var d)) return d;
-            if (_reading == null && (_readAt == 0 || Environment.TickCount64 - _readAt >= Stale))
+            if (_reading == null && (_readAt == 0 || Clock() - _readAt >= Stale))
                 _reading = Task.Run(Read);
             return null;
         }
     }
 
-    /// <summary><see cref="Find"/> for a worker thread that may wait: a miss reads the listing now (at most every 2 seconds)
-    /// and looks again.</summary>
+    /// <summary><see cref="Find"/> for a worker thread that may wait: a miss reads the listing now (at most every
+    /// <see cref="Stale"/>) and looks again.</summary>
     public static Def? FindNow(uint id)
     {
         if (Find(id) is { } d) return d;
@@ -48,7 +57,7 @@ internal static class ContentNames
         else
         {
             lock (Gate)
-                if (_readAt != 0 && Environment.TickCount64 - _readAt < Stale) return null;
+                if (_readAt != 0 && Clock() - _readAt < Stale) return null;
             Read();
         }
         lock (Gate) return _defs.GetValueOrDefault(id);
@@ -58,9 +67,10 @@ internal static class ContentNames
     internal static void Read()
     {
         Dictionary<uint, Def>? next = null;
+        string? json = null;
         try
         {
-            var json = ListingOverride is { } o ? o() : NewContent.Available ? NewContent.DefinitionsJson() : null;
+            json = ListingOverride is { } o ? o() : NewContent.Available ? NewContent.DefinitionsJson() : null;
             if (json != null) next = Parse(json);
         }
         catch (Exception e) when (e is not OutOfMemoryException)
@@ -70,7 +80,9 @@ internal static class ContentNames
         lock (Gate)
         {
             if (next != null) _defs = next;
-            _readAt = Environment.TickCount64;
+            _unchanged = json != null && json != _lastListing ? 0 : _unchanged + 1;
+            _lastListing = json;
+            _readAt = Clock();
             _reading = null;
         }
     }
@@ -82,7 +94,10 @@ internal static class ContentNames
             _defs = new();
             _readAt = 0;
             _reading = null;
+            _lastListing = null;
+            _unchanged = 0;
             ListingOverride = null;
+            Clock = () => Environment.TickCount64;
         }
     }
 

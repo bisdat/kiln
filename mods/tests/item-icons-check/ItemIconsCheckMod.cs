@@ -70,7 +70,7 @@ public sealed class ItemIconsCheckMod : Mod
         _window = Ui.Window("Item icons check", Draw, new UiWindowOptions { Width = 760, Height = 620, StartOpen = false });
         KeyBindings.Register("iconcheck.toggle", "F9", () => _window.Toggle(), "Item icons check");
         Ui.Menus.Add(MenuLocation.PauseMenu, "Item icons check", () => _window.Open = true, order: 40);
-        Ui.Crafting.AddPanel("Icon check", Panel);
+        Ui.Crafting.AddPanel("Icon check", Panel, new CraftingPanelOptions { AtFactories = true });  // at a kiln too
         Context.Tick.Pre += OnPre;
     }
 

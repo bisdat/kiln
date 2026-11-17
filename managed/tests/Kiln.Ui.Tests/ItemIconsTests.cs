@@ -2,6 +2,8 @@
 // The game's item icons in Kiln windows (ItemIcons.cs): which texture an item draws, the cache's limits and retries, the
 // placeholder, a world change, and kiln.content's listing of new items (ContentNames). No game: the texture reads, the
 // overlay and the clock are the tests' own.
+using System.Runtime.CompilerServices;
+using System.Text.RegularExpressions;
 using Xunit;
 
 namespace Kiln;
@@ -18,6 +20,7 @@ public sealed class ItemIconsTests : IDisposable
     private readonly List<(Guid Texture, int Bucket)> _decoded = [];
     private readonly List<ulong> _freed = [];
     private readonly Dictionary<Guid, int> _served = [];
+    private readonly Dictionary<ulong, int> _states = [];  // kiln.ui's image_state of an upload (default: ready)
     private uint _session = 1;
 
     public ItemIconsTests()
@@ -37,7 +40,10 @@ public sealed class ItemIconsTests : IDisposable
         };
         ItemIcons.Upload = (px, w, h) => ++_next;
         ItemIcons.Free = h => _freed.Add(h);
+        ItemIcons.ImageState = h => _states.GetValueOrDefault(h, ImageReady);
     }
+
+    private const int ImageWaiting = 1, ImageReady = 2, ImageFailed = 3;  // KILN_UI_IMAGE_* (kiln_ui.h)
 
     public void Dispose()
     {
@@ -142,8 +148,8 @@ public sealed class ItemIconsTests : IDisposable
     public void TheCacheStaysWithinItsLimitsDroppingIconsNotDrawnForASecond()
     {
         ItemIcons.GameItem = id => new Guid((int)id.Value, 0, 0, new byte[8]);
-        // 600 different icons drawn in the same moment: at most 512 textures; the rest wait on the placeholder, and none that
-        // is drawn now is dropped
+        // 600 different icons drawn in the same moment: at most MaxEntries textures; the rest wait on the placeholder, and none
+        // that is drawn now is dropped
         for (uint i = 1; i <= 600; i++) ItemIcons.Handle(new ItemId(i), 32, out _, out _);
         Assert.Equal(ItemIcons.MaxEntries, ItemIcons.Stats.Textures);
         Assert.Empty(_freed);
@@ -228,7 +234,7 @@ public sealed class ItemIconsTests : IDisposable
         }
         Assert.Equal(5, t.Textures);
         var gone = t.Trim(usedBefore: 35);                                   // 4 (used at 40) stays drawn
-        Assert.Equal(2, gone.Count);                                         // 1 and 2: the oldest that may go
+        Assert.Equal(2, gone!.Count);                                        // 1 and 2: the oldest that may go
         Assert.Equal(3, t.Count);
         Assert.True(t.TryGet(0, out _) && t.TryGet(3, out _) && t.TryGet(4, out _));
         Assert.Equal((300L, 3), (t.Bytes, t.Textures));
@@ -238,9 +244,9 @@ public sealed class ItemIconsTests : IDisposable
         // entries without a texture (missing icons) do not count against the textures, only their own bound
         for (var i = 0; i < 12; i++) t.Add(100 + i, now: 0).Loading = false;
         Assert.True(t.Room(10));
-        Assert.Empty(t.Trim(usedBefore: 1));                                 // 12 = 4 x 3: still within
+        Assert.Null(t.Trim(usedBefore: 1));                                  // 12 = 4 x 3: still within
         t.Add(200, now: 0).Loading = false;
-        Assert.Single(t.Trim(usedBefore: 1));
+        Assert.Single(t.Trim(usedBefore: 1)!);
     }
 
     [Fact]
@@ -271,5 +277,267 @@ public sealed class ItemIconsTests : IDisposable
         Assert.Equal(Mine, ContentNames.FindNow(NewContent.IdOf(Mine))?.Guid);
         Assert.Equal(Mine, ContentNames.Find(NewContent.IdOf(Mine))?.Guid);
         Assert.Null(ContentNames.FindNow(0x5));                              // read less than 2 s ago: not again
+    }
+
+    // ---- review of 0.2.0-dev.29.15: the overlay's image budget, failed uploads, wasted reads ----
+
+    private static string RepoRoot([CallerFilePath] string source = "")
+    {
+        foreach (var start in new[] { AppContext.BaseDirectory, Path.GetDirectoryName(source) ?? "" })
+            for (var d = new DirectoryInfo(start); d != null; d = d.Parent)
+                if (File.Exists(Path.Combine(d.FullName, "native", "services", "ui", "vk.cpp")) &&
+                    Directory.Exists(Path.Combine(d.FullName, "managed", "tests", "Kiln.Ui.Tests")))
+                    return d.FullName;
+        throw new InvalidOperationException("repository root not found above the test assembly or its source");
+    }
+
+    /// <summary>kiln.ui's image budget (native/services/ui/image_budget.h): the images it lets exist at once.</summary>
+    private static int OverlayMaxImages()
+    {
+        var text = File.ReadAllText(Path.Combine(RepoRoot(), "native", "services", "ui", "image_budget.h"));
+        int Num(string name) => int.Parse(Regex.Match(text, $@"constexpr uint32_t {name} = (\d+);").Groups[1].Value);
+        return Num("kDescriptorPoolSize") - Num("kReserved");
+    }
+
+    [Fact]
+    public void TheCacheStaysWellUnderTheOverlaysImageBudget()
+    {
+        // the overlay's descriptor pool held 64 sets while this cache allowed 512 textures: past 64 a texture got no set and
+        // was drawn with a null one. The cache (plus the placeholder) takes at most half of what kiln.ui lets exist: the rest
+        // are mods' own pictures (Ui.LoadImage) and Kiln's.
+        var max = OverlayMaxImages();
+        Assert.True(ItemIcons.MaxEntries + 1 <= max / 2, $"{ItemIcons.MaxEntries} icons + the placeholder against {max} overlay images");
+
+        // 700 distinct icons, drawn 100 at a time as a list scrolls, then all at once: never more images than the cache allows
+        var live = new HashSet<ulong>();
+        var refused = 0;
+        var most = 0;
+        ItemIcons.Upload = (_, _, _) =>
+        {
+            if (live.Count >= max)
+            {
+                refused++;
+                return 0;
+            }
+            live.Add(++_next);
+            most = Math.Max(most, live.Count);
+            return _next;
+        };
+        ItemIcons.Free = h => live.Remove(h);
+        ItemIcons.GameItem = id => new Guid((int)id.Value, 0, 0, new byte[8]);
+        for (var frame = 0; frame < 400; frame++)
+        {
+            _now += 16;
+            var first = (uint)(frame / 10 * 25 % 700);
+            for (uint i = 0; i < 100; i++) ItemIcons.Handle(new ItemId(1 + (first + i) % 700), 64, out _, out _);
+        }
+        for (var frame = 0; frame < 50; frame++)
+        {
+            _now += 16;
+            for (uint i = 1; i <= 700; i++) ItemIcons.Handle(new ItemId(i), 64, out _, out _);
+        }
+        Assert.Equal(0, refused);
+        Assert.True(most <= ItemIcons.MaxEntries + 1, $"{most} overlay images at once");
+    }
+
+    [Fact]
+    public void AnIconIsDrawnOnlyOnceTheOverlayUploadedItAndAFailedUploadIsFreedAndRetriedLater()
+    {
+        ItemIcons.Upload = (_, _, _) =>
+        {
+            _states[++_next] = ImageWaiting;  // a new image waits for the next frames' uploads
+            return _next;
+        };
+        var placeholder = ItemIcons.Placeholder();
+        _states[placeholder] = ImageReady;
+        Assert.Equal(placeholder, ItemIcons.Handle(Id(Logs), 64, out _, out _));
+        var icon = _next;
+        Assert.Equal(placeholder, ItemIcons.Handle(Id(Logs), 64, out _, out _));  // uploaded, not drawn yet
+        _states[icon] = ImageReady;
+        Assert.Equal(icon, ItemIcons.Handle(Id(Logs), 64, out _, out _));
+
+        // no descriptor set (the pool was full): never drawn, freed, the placeholder; read again later, later each time
+        ItemIcons.Handle(Id(Sword), 64, out _, out _);
+        var failed = _next;
+        _states[failed] = ImageFailed;
+        Assert.Equal(placeholder, ItemIcons.Handle(Id(Sword), 64, out _, out _));
+        Assert.Contains(failed, _freed);
+        var reads = _decoded.Count;
+        _now += 1_000;
+        Assert.Equal(placeholder, ItemIcons.Handle(Id(Sword), 64, out _, out _));
+        Assert.Equal(reads, _decoded.Count);                                 // not at once
+        _now += 5_000;
+        ItemIcons.Handle(Id(Sword), 64, out _, out _);
+        Assert.Equal(reads + 1, _decoded.Count);                             // after 5 s
+        _states[_next] = ImageFailed;
+        ItemIcons.Handle(Id(Sword), 64, out _, out _);                       // fails again
+        _now += 6_000;
+        ItemIcons.Handle(Id(Sword), 64, out _, out _);
+        Assert.Equal(reads + 1, _decoded.Count);                             // the next wait is longer: 10 s
+        _now += 5_000;
+        ItemIcons.Handle(Id(Sword), 64, out _, out _);
+        Assert.Equal(reads + 2, _decoded.Count);
+    }
+
+    [Fact]
+    public void AnIconOutsideItsWindowIsNotLoaded()
+    {
+        // the window's rectangle and an icon's box at the cursor, screen pixels
+        Assert.True(ItemIcons.OnScreen(110, 120, 64, 64, 100, 100, 400, 300));
+        Assert.True(ItemIcons.OnScreen(60, 120, 64, 64, 100, 100, 400, 300));   // half in on the left
+        Assert.False(ItemIcons.OnScreen(110, 420, 64, 64, 100, 100, 400, 300)); // scrolled below the window
+        Assert.False(ItemIcons.OnScreen(110, 30, 64, 64, 100, 100, 400, 300));  // scrolled above it
+        Assert.False(ItemIcons.OnScreen(520, 120, 64, 64, 100, 100, 400, 300));
+        Assert.True(ItemIcons.OnScreen(110, 9000, 64, 64, 100, 100, 0, 0));     // no window size known: drawn
+    }
+
+    [Fact]
+    public void NoTextureIsReadWhileTheCacheIsFullOfIconsDrawnNow()
+    {
+        ItemIcons.GameItem = id => new Guid((int)id.Value, 0, 0, new byte[8]);
+        for (uint i = 1; i <= ItemIcons.MaxEntries; i++) ItemIcons.Handle(new ItemId(i), 32, out _, out _);
+        Assert.Equal(ItemIcons.MaxEntries, ItemIcons.Stats.Textures);
+        var reads = _decoded.Count;
+        // one more, while every icon is drawn this second: it waits on the placeholder without reading its texture
+        for (var frame = 0; frame < 20; frame++)
+        {
+            _now += 100;
+            for (uint i = 1; i <= ItemIcons.MaxEntries + 1; i++) ItemIcons.Handle(new ItemId(i), 32, out _, out _);
+        }
+        Assert.Equal(reads, _decoded.Count);
+        Assert.Equal(ItemIcons.Placeholder(), ItemIcons.Handle(new ItemId((uint)ItemIcons.MaxEntries + 1), 32, out _, out _));
+    }
+
+    [Fact]
+    public void AMissingIconIsLookedForLessOftenEachTime()
+    {
+        ItemIcons.GameItem = _ => Guid.Empty;                                // a game item whose texture cannot be read
+        ItemIcons.Handle(new ItemId(5), 64, out _, out _);
+        Assert.Single(_decoded);
+        var at = new List<long>();
+        var start = _now;
+        for (var s = 0; s < 2_000; s++)
+        {
+            _now += 1_000;
+            var before = _decoded.Count;
+            ItemIcons.Handle(new ItemId(5), 64, out _, out _);
+            if (_decoded.Count > before) at.Add((_now - start) / 1_000);
+        }
+        // 60 s, then 120 s, 240 s, 480 s, then every 10 minutes
+        Assert.Equal([60, 180, 420, 900], at.Take(4));
+        Assert.Equal(600, at[4] - at[3]);
+    }
+
+    [Fact]
+    public void ADrawOfACachedIconAllocatesNothing()
+    {
+        ItemIcons.Handle(Id(Logs), 64, out _, out _);
+        ItemIcons.Handle(Id(Logs), 64, out _, out _);
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var i = 0; i < 1_000; i++) ItemIcons.Handle(Id(Logs), 64, out _, out _);
+        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+        var t = new IconTable<int>(maxEntries: 3, maxBytes: 1000);
+        t.Add(1, now: 0).Loading = false;
+        Assert.Null(t.Trim(usedBefore: 10));                                 // within the limits: nothing made
+    }
+
+    [Fact]
+    public void AnIconLargerThanTheWholeCacheIsNeverReadAgain()
+    {
+        ItemIcons.Decode = (g, _) =>
+        {
+            _decoded.Add((g, 0));
+            return (new byte[4], 4096, 4096);                                // 64 MiB of pixels: over the 24 MiB the cache holds
+        };
+        var uploads = 0;
+        ItemIcons.Upload = (_, _, _) =>
+        {
+            uploads++;
+            return ++_next;
+        };
+        var placeholder = ItemIcons.Placeholder();
+        uploads = 0;
+        for (var s = 0; s < 100; s++)
+        {
+            _now += 60_000;
+            Assert.Equal(placeholder, ItemIcons.Handle(Id(Logs), 256, out _, out _));
+        }
+        Assert.Single(_decoded);
+        Assert.Equal(0, uploads);
+    }
+
+    [Fact]
+    public void AnUploadThatThrowsOrRunsOutOfMemoryLeavesNothingStuck()
+    {
+        var throws = true;
+        ItemIcons.Upload = (_, _, _) => throws ? throw new InvalidOperationException("kiln.ui went away") : ++_next;
+        Assert.Equal(0ul, ItemIcons.Placeholder());                          // its own upload throws: none, no exception
+        throws = false;
+        _now += 5_000;
+        var placeholder = ItemIcons.Placeholder();                           // made a little later
+        Assert.NotEqual(0ul, placeholder);
+        throws = true;
+        Assert.Equal(placeholder, ItemIcons.Handle(Id(Logs), 64, out _, out _));
+        throws = false;
+        _now += 5_000;
+        ItemIcons.Handle(Id(Logs), 64, out _, out _);
+        Assert.NotEqual(placeholder, ItemIcons.Handle(Id(Logs), 64, out _, out _));  // read again, drawn
+
+        // out of memory while reading: the request is dropped, never thrown at the draw, and asked again later
+        var oom = true;
+        ItemIcons.Decode = (g, b) => oom ? throw new OutOfMemoryException() : (new byte[b * b * 4], b, b);
+        Assert.Equal(placeholder, ItemIcons.Handle(Id(Sword), 64, out _, out _));
+        oom = false;
+        _now += 5_000;
+        ItemIcons.Handle(Id(Sword), 64, out _, out _);
+        Assert.NotEqual(placeholder, ItemIcons.Handle(Id(Sword), 64, out _, out _));
+    }
+
+    [Fact]
+    public void ANewItemsBaseIconIsNotReadAgainWhileItsOwnIsNotServed()
+    {
+        var def = new ContentNames.Def(Id(Mine).Value, Mine, IconGuid: Sword, BaseGuid: Sword, "Frost Edge", new Dictionary<string, string>(), HasIconFile: true);
+        ItemIcons.Defined = id => id == def.Id ? def : null;
+        ItemIcons.Handle(Id(Mine), 64, out _, out _);
+        for (var s = 0; s < 120; s++)
+        {
+            _now += 1_000;
+            ItemIcons.Handle(Id(Mine), 64, out _, out _);
+        }
+        Assert.Single(_decoded);                                             // looked at again, the same texture: not read again
+    }
+
+    [Fact]
+    public void KilnContentsListingIsReadLessOftenWhileItDoesNotChange()
+    {
+        var reads = 0;
+        var now = 1_000_000L;
+        ContentNames.Clock = () => now;
+        ContentNames.ListingOverride = () =>
+        {
+            reads++;
+            return "[]";
+        };
+        // a draw of a game item asks for a new item first: every few seconds for a minute
+        for (var s = 0; s < 60; s++)
+        {
+            now += 1_000;
+            ContentNames.FindNow(0x1234);
+        }
+        Assert.InRange(reads, 4, 7);                                         // 2 s, 4 s, 6 s, 10 s, 18 s, 34 s ...: not 30
+        // the listing changes (a world loads its new items): quick again
+        ContentNames.ListingOverride = () =>
+        {
+            reads++;
+            return reads < 100 ? $"[{{\"kind\":\"recipe\",\"guid\":\"{Guid.NewGuid()}\",\"id\":\"0x2\"}}]" : "[]";
+        };
+        now += 200_000;
+        reads = 0;
+        for (var s = 0; s < 10; s++)
+        {
+            now += 2_000;
+            ContentNames.FindNow(0x1234);
+        }
+        Assert.Equal(10, reads);
     }
 }

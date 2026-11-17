@@ -22,6 +22,7 @@
 #include "services/kiln_progress.h"
 #include "services/kiln_caps.h"
 #include "services/kiln_render.h"
+#include "image_budget.h"
 #include "ui.h"
 #include "load_hook.h"
 #include "slider.h"
@@ -403,6 +404,7 @@ KilnResult KILN_CALL t_menu_add(KilnOwner o, uint32_t menu, int32_t order, KilnS
 KilnResult KILN_CALL t_menu_set(KilnHandle e, KilnStr text, uint32_t flags) { return game_menu_set(e, text, flags); }
 KilnHandle KILN_CALL t_image_load(KilnOwner o, const void* png, size_t len) { if (!overlay_drawing_on()) return 0; return image_load(o, png, len); }
 uint32_t KILN_CALL t_screen_target() { return game_screen_target(); }
+int32_t KILN_CALL t_image_state(KilnHandle h) { return image_state(h); }
 KilnHandle KILN_CALL t_image_load_rgba(KilnOwner o, const uint8_t* rgba, uint32_t w, uint32_t h) {
     if (!overlay_drawing_on()) return 0;
     return image_load_rgba(o, rgba, w, h);
@@ -474,8 +476,12 @@ static_assert(offsetof(KilnUiApi, menu_footer) == offsetof(KilnUiApi, set_next_w
               "kiln.ui appends menu_footer after the size constraints (UiNative.TableFooter)");
 static_assert(offsetof(KilnUiApi, image_load_rgba) == offsetof(KilnUiApi, menu_footer) + sizeof(void*) &&
                   offsetof(KilnUiApi, screen_target) == offsetof(KilnUiApi, image_load_rgba) + sizeof(void*) &&
-                  sizeof(KilnUiApi) == offsetof(KilnUiApi, screen_target) + sizeof(void*),
-              "kiln.ui appends image_load_rgba and screen_target after menu_footer (UiNative.TableImageRgba, TableScreenTarget)");
+                  offsetof(KilnUiApi, image_state) == offsetof(KilnUiApi, screen_target) + sizeof(void*) &&
+                  sizeof(KilnUiApi) == offsetof(KilnUiApi, image_state) + sizeof(void*),
+              "kiln.ui appends image_load_rgba, screen_target and image_state after menu_footer (UiNative.TableImageRgba, TableScreenTarget, TableImageState)");
+static_assert(int{KILN_UI_IMAGE_UNKNOWN} == int{img::kUnknown} && int{KILN_UI_IMAGE_WAITING} == int{img::kWaiting} &&
+                  int{KILN_UI_IMAGE_READY} == int{img::kReady} && int{KILN_UI_IMAGE_FAILED} == int{img::kFailed},
+              "image states (image_budget.h)");
 static_assert(sizeof(KilnUiMenuEntry) == 40 && offsetof(KilnUiMenuEntry, entry) == 8 && offsetof(KilnUiMenuEntry, text) == 16 &&
                   offsetof(KilnUiMenuEntry, drawn) == 36,
               "KilnUiMenuEntry layout (UiNative.MenuEntryInfo)");
@@ -523,6 +529,7 @@ const KilnUiApi kTable = {
     &t_menu_footer,
     &t_image_load_rgba,  // 0.2.0-dev.29.15
     &t_screen_target,    // 0.2.0-dev.29.15
+    &t_image_state,      // 0.2.0-dev.29.15
 };
 
 std::string api_path(int kind) {

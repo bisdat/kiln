@@ -863,7 +863,8 @@ KilnResult KILN_CALL t_cat_read(KilnHandle h, uint64_t first, KilnBlobCatalogEnt
 KilnResult KILN_CALL t_cat_close(KilnHandle h) { return op_catalog_close(h); }
 
 // texture_rgba (0.2.0-dev.29.15): a texture's pixels, one mip level, as RGBA8 (texture_rgba.h). Kiln.Ui draws the game's own
-// item icons with it; nothing is written anywhere. The pixel blob is read whole (an item icon's chain is 87 KB).
+// item icons with it; nothing is written anywhere. The pixel blob is read whole (an item icon's chain is 87 KB), without the
+// content map's lazy accessor (the caller is a worker). A level no mip fits (a mod's one-level PNG icon) is scaled down.
 KilnResult KILN_CALL t_tex_rgba(const KilnAssetKey* k, uint32_t min_side, uint8_t* rgba, size_t cap, uint32_t* out_w, uint32_t* out_h) {
     if (out_w) *out_w = 0;
     if (out_h) *out_h = 0;
@@ -879,21 +880,31 @@ KilnResult KILN_CALL t_tex_rgba(const KilnAssetKey* k, uint32_t min_side, uint8_
     if (rr != KILN_OK) return rr == KILN_ERR_BUFFER_TOO_SMALL ? KILN_ERR_INVALID_ARGUMENT : rr;
     tex::Desc d;
     if (!tex::describe(k->type, rb.data(), rn, &d) || !tex::supported(d.format)) return KILN_ERR_INVALID_ARGUMENT;
-    uint32_t lw = 0, lh = 0;
+    uint32_t lw = 0, lh = 0, ow = 0, oh = 0;
     const uint32_t level = tex::pick_level(d, min_side);
     const size_t at = tex::level_offset(d, level, &lw, &lh), need = tex::level_bytes(d.format, lw, lh);
-    if (out_w) *out_w = lw;
-    if (out_h) *out_h = lh;
-    if (!rgba || cap < static_cast<size_t>(lw) * lh * 4) return KILN_ERR_BUFFER_TOO_SMALL;
+    tex::fit_size(lw, lh, min_side, &ow, &oh);
+    if (out_w) *out_w = ow;
+    if (out_h) *out_h = oh;
+    if (!rgba || cap < static_cast<size_t>(ow) * oh * 4) return KILN_ERR_BUFFER_TOO_SMALL;
     if (at + need > d.blob_size() || d.blob_size() > (64u << 20)) return KILN_ERR_INVALID_ARGUMENT;  // the resource does not add up
     std::vector<uint8_t> blob(d.blob_size());
     KilnContentHash h;
     std::memcpy(&h, d.hash, 16);
     size_t got = 0;
-    const KilnResult br = op_blob_read(&h, blob.data(), blob.size(), &got);
+    const KilnResult br = op_blob_read(&h, blob.data(), blob.size(), &got, /*resident=*/true);
     if (br != KILN_OK) return br == KILN_ERR_INTERNAL ? KILN_ERR_INTERNAL : KILN_ERR_NOT_FOUND;
-    if (got < at + need || !tex::decode(d.format, lw, lh, blob.data() + at, got - at, rgba)) return KILN_ERR_NOT_FOUND;
+    if (got < at + need) return KILN_ERR_NOT_FOUND;
+    if (ow == lw && oh == lh) return tex::decode(d.format, lw, lh, blob.data() + at, got - at, rgba) ? KILN_OK : KILN_ERR_NOT_FOUND;
+    std::vector<uint8_t> level_px(static_cast<size_t>(lw) * lh * 4);
+    if (!tex::decode(d.format, lw, lh, blob.data() + at, got - at, level_px.data())) return KILN_ERR_NOT_FOUND;
+    tex::downscale_box(level_px.data(), lw, lh, rgba, ow, oh);
     return KILN_OK;
+}
+
+// blob_read_resident (0.2.0-dev.29.15): blob_read without the content map's lazy accessor, for callers off the game's threads.
+KilnResult KILN_CALL t_blob_read_resident(const KilnContentHash* h, void* b, size_t c, size_t* n) {
+    return op_blob_read(h, b, c, n, /*resident=*/true);
 }
 
 const KilnAssetsApi kTable = {
@@ -910,6 +921,7 @@ const KilnAssetsApi kTable = {
     &t_blob_add_ex, &t_blob_over_ex,  // since 0.2.0-dev.28
     &t_cat_open, &t_cat_read, &t_cat_close,
     &t_tex_rgba,  // since 0.2.0-dev.29.15
+    &t_blob_read_resident,
 };
 
 const KilnAssetsVfxApi kVfxTable = {

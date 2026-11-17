@@ -138,7 +138,12 @@ struct GameBlob {
     uint64_t offset;
     uint16_t container;
 };
-bool game_blob_find(const HashK& h, GameBlob* out);  // the game's content map (needs the resource system)
+// The game's content map (needs the resource system). lazy: when the game has not asked for its content index yet, ask its
+// accessor here (only from the game's own threads, while loading cannot own the reader: blob_read's existing callers);
+// false: answer not found until the game has opened its index (any thread: the item icon worker, the names task).
+bool game_blob_find(const HashK& h, GameBlob* out, bool lazy = true);
+// A copy of the game's resident memory that cannot fault (SEH): false when the bytes cannot be read (any thread).
+bool game_copy(void* out, const void* game, size_t n);
 std::string game_container_path(uint16_t index);   // UTF-8 path of enshrouded_NNN.dat, "" if unknown
 // The keys of the game's own content index, copied (the catalog, catalog.cpp): the whole key array in one guarded copy,
 // checked against its bucket layout on the copy, the header read again after it. Fetches the index when the game has not
@@ -318,7 +323,8 @@ KilnResult op_blob_override(KilnOwner owner, const KilnContentHash* hash, const 
 KilnResult op_blob_add_ex(KilnOwner owner, const void* data, size_t len, KilnContentHash* out, uint32_t origin);
 KilnResult op_blob_override_ex(KilnOwner owner, const KilnContentHash* hash, const void* data, size_t len, uint32_t origin);
 KilnResult op_blob_remove(KilnOwner owner, const KilnContentHash* hash);
-KilnResult op_blob_read(const KilnContentHash* hash, void* buffer, size_t cap, size_t* out_len);
+// resident: never asks the game for its content index itself (game_blob_find lazy false): blob_read_resident, texture_rgba.
+KilnResult op_blob_read(const KilnContentHash* hash, void* buffer, size_t cap, size_t* out_len, bool resident = false);
 KilnResult op_icon_register(KilnOwner owner, const uint8_t guid[16], const Rgba& img);
 KilnResult op_icon_remove(KilnOwner owner, const uint8_t guid[16]);
 int32_t op_icon_state(const uint8_t guid[16]);

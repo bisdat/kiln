@@ -33,11 +33,23 @@
 #include "backends/imgui_impl_vulkan.h"
 #include "imgui.h"
 #include "safetyhook.hpp"
+#include "image_budget.h"
 #include "ui.h"
 #include "vk_hooks.h"
 
 namespace kui {
 namespace {
+
+// ImGui's Vulkan backend reports every call's result here (it ignored them before 0.2.0-dev.29.15): a failed
+// vkAllocateDescriptorSets leaves a texture with no descriptor set, which style.cpp then never draws (image_budget.h). Each
+// error code is logged once a process; VK_SUCCESS and the positive codes are not errors.
+std::atomic<uint32_t> g_vk_logged{0};
+void check_vk(VkResult err) {
+    if (err >= 0) return;
+    const uint32_t bit = 1u << (static_cast<uint32_t>(-static_cast<int32_t>(err)) & 31u);
+    if (g_vk_logged.fetch_or(bit) & bit) return;
+    logf(KILN_LOG_WARN, "ui: a Vulkan call of the overlay's ImGui backend failed (VkResult %d); what it made is not drawn", static_cast<int>(err));
+}
 
 std::atomic<bool> g_wine{false};
 std::atomic<bool> g_installed{false};
@@ -342,7 +354,8 @@ bool ensure_imgui_vulkan(Device& d, Swap& s, VkQueue queue, uint32_t family) {
     ii.Device = d.device;
     ii.QueueFamily = family;
     ii.Queue = queue;
-    ii.DescriptorPoolSize = 64;
+    ii.DescriptorPoolSize = img::kDescriptorPoolSize;  // every image Kiln lets exist, plus ImGui's own (image_budget.h)
+    ii.CheckVkResultFn = &check_vk;
     ii.MinImageCount = std::max<uint32_t>(2, s.min_images);
     ii.ImageCount = std::max<uint32_t>(ii.MinImageCount, static_cast<uint32_t>(s.images.size()));
     ii.PipelineInfoMain.RenderPass = s.pass;

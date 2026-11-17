@@ -16,6 +16,12 @@ public sealed class FactoryScreenTests : IDisposable
 
     private static void ScreenChanged(GameScreen prev, GameScreen cur) => Crafting.GetMethod("ScreenChanged", Any)!.Invoke(null, [prev, cur]);
     private static bool PanelsVisible => (bool)Crafting.GetProperty("Visible", Any)!.GetValue(null)!;
+    private static int VisiblePanels => (int)Crafting.GetProperty("VisiblePanels", Any)!.GetValue(null)!;
+    private static int InteractivePanels => (int)Crafting.GetProperty("InteractivePanels", Any)!.GetValue(null)!;
+    private static CraftingScreen PanelScreen => (CraftingScreen)Crafting.GetProperty("PanelScreen", Any)!.GetValue(null)!;
+
+    private static IDisposable AddPanel(CraftingPanelOptions options) =>
+        (IDisposable)Crafting.GetMethod("AddPanel", Any)!.Invoke(null, [(UiText)"test", (Action<UiDraw, CraftingScreen>)((_, _) => { }), options])!;
 
     public FactoryScreenTests() => UiNative.ScreenTargetOverride = () => 12205;
 
@@ -43,10 +49,48 @@ public sealed class FactoryScreenTests : IDisposable
         Assert.Equal(0u, c.Recipe);
         Assert.Equal(new EntityId(12205), c.Station);
 
-        // the panels' visibility follows it: a panel shows at a kiln now
+        // the crafting screen is open there; which panels show is their own choice (AtFactories)
         Assert.False(PanelsVisible);
         ScreenChanged(GameScreen.None, g);
         Assert.True(PanelsVisible);
+    }
+
+    [Fact]
+    public void OnlyPanelsThatAskForFactoryScreensShowThere()
+    {
+        // panels written for crafting menus (a recipe, the menu's tabs) do not show up at a kiln by themselves after 29.15:
+        // CraftingPanelOptions.AtFactories (default false) asks for them
+        using var menuPanel = AddPanel(new CraftingPanelOptions());
+        using var stationPanel = AddPanel(new CraftingPanelOptions { AtFactories = true, Interactive = false });
+        Assert.False(new CraftingPanelOptions().AtFactories);
+        ScreenChanged(GameScreen.None, GameScreen.From(Native((byte)HudScreen.FactoryCrafting, interaction: 0x2546ae49)));
+        Assert.Equal(1, VisiblePanels);                                    // the AtFactories one
+        Assert.Equal(0, InteractivePanels);                                // it takes no mouse; the menu panel is not there
+        ScreenChanged(GameScreen.None, GameScreen.From(Native((byte)HudScreen.StationBasedCrafting, crafting: 1, interaction: 0x4da88f73)));
+        Assert.Equal(2, VisiblePanels);                                    // at a bench both show
+        Assert.Equal(1, InteractivePanels);
+        stationPanel.Dispose();
+        ScreenChanged(GameScreen.None, GameScreen.From(Native((byte)HudScreen.FactoryCrafting, interaction: 0x2546ae49)));
+        Assert.Equal(0, VisiblePanels);                                    // no panel for factories: nothing is drawn there
+    }
+
+    [Fact]
+    public void APanelSeesTheStationTheGameNamesNowNotTheOneWhenTheScreenOpened()
+    {
+        // the game may write the screen's target a frame after the screen opens (or move it to another station without
+        // closing the screen): the panel's CraftingScreen reads it each frame
+        uint target = 0;
+        UiNative.ScreenTargetOverride = () => target;
+        ScreenChanged(GameScreen.None, GameScreen.From(Native((byte)HudScreen.FactoryCrafting, interaction: 0x2546ae49)));
+        Assert.Equal(EntityId.None, PanelScreen.Station);
+        target = 12205;
+        Assert.Equal(new EntityId(12205), PanelScreen.Station);
+        target = 12300;
+        Assert.Equal(new EntityId(12300), PanelScreen.Station);
+        Assert.True(PanelScreen.IsFactory);
+        // not a factory screen: no station entity, whatever the native value says
+        ScreenChanged(GameScreen.None, GameScreen.From(Native((byte)HudScreen.StationBasedCrafting, crafting: 1, interaction: 0x4da88f73)));
+        Assert.Equal(EntityId.None, PanelScreen.Station);
     }
 
     [Fact]

@@ -334,6 +334,27 @@ internal static unsafe class UiNative
 
     internal static Func<uint>? ScreenTargetOverride;
 
+    /// <summary>The tail after screen_target (0.2.0-dev.29.15): image_state, whether an overlay image is drawn yet.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct TableImageState
+    {
+        public TableScreenTarget Base;
+        public delegate* unmanaged[Cdecl]<ulong, int> ImageStateFn;
+    }
+
+    /// <summary>KILN_UI_IMAGE_WAITING / READY / FAILED (kiln_ui.h image_state).</summary>
+    public const int ImageUnknown = 0, ImageWaiting = 1, ImageReady = 2, ImageFailed = 3;
+
+    /// <summary>kiln.ui's image_state of an image (<see cref="ImageUnknown"/>, waiting, ready, failed); ready on a kiln.ui
+    /// without it (it draws what it has).</summary>
+    public static int ImageState(ulong image)
+    {
+        var t = T;
+        if (t == null || t->Header.Size < (uint)sizeof(TableImageState)) return ImageReady;
+        var f = ((TableImageState*)t)->ImageStateFn;
+        return f == null ? ImageReady : f(image);
+    }
+
     /// <summary>KILN_UI_FOOTER_SHOWN.</summary>
     public const uint FooterShown = 1;
 

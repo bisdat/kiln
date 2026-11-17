@@ -21,7 +21,7 @@
   -->
   <PropertyGroup>
     <_KilnBakeAuto>false</_KilnBakeAuto>
-    <_KilnBakeAuto Condition="$(_KilnServiceList.Contains(';Quests;')) or $(_KilnServiceList.Contains(';Skills;')) or $(_KilnServiceList.Contains(';Blocks;')) or $(_KilnServiceList.Contains(';Vfx;'))">true</_KilnBakeAuto>
+    <_KilnBakeAuto Condition="$(_KilnServiceList.ToLowerInvariant().Contains(';quests;')) or $(_KilnServiceList.ToLowerInvariant().Contains(';skills;')) or $(_KilnServiceList.ToLowerInvariant().Contains(';blocks;')) or $(_KilnServiceList.ToLowerInvariant().Contains(';vfx;'))">true</_KilnBakeAuto>
     <KilnBake Condition="'$(KilnBake)' == ''">$(_KilnBakeAuto)</KilnBake>
     <KilnBakeSteps Condition="'$(KilnBakeSteps)' == ''">10</KilnBakeSteps>
     <KilnBakeWorldTables Condition="'$(KilnBakeWorldTables)' == ''">false</KilnBakeWorldTables>

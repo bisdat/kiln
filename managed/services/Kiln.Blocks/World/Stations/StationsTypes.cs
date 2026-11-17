@@ -6,7 +6,7 @@ namespace Kiln;
 
 /// <summary>A base's id: the GUID the game gives a flame altar (its <c>BaseIdComponent</c>, kept in the save). A base
 /// made of several overlapping altar zones takes the smallest of its altars' ids (the 16 bytes compared in memory
-/// order), so the id changes when an overlapping altar is added or removed. Since 0.2.0-dev.29.14.14.</summary>
+/// order), so the id changes when an overlapping altar is added or removed. Since 0.2.0-dev.29.14.</summary>
 /// <param name="Value">The GUID.</param>
 public readonly record struct BaseId(Guid Value)
 {
@@ -58,7 +58,7 @@ public sealed record BaseInfo(BaseId Id, int Index, IReadOnlyList<BaseAltar> Alt
 }
 
 /// <summary>One flame altar of a base: its entity (this session) and its own id (the GUID the game keeps in the save with
-/// the altar; it never changes). Since 0.2.0-dev.29.14.14.</summary>
+/// the altar; it never changes). Since 0.2.0-dev.29.14.</summary>
 public readonly record struct BaseAltar(EntityId Entity, BaseId Id);
 
 /// <summary>A base whose id changed when the game rebuilt its bases: an overlapping altar came or went

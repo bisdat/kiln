@@ -21,7 +21,8 @@ static_assert(offsetof(KilnUiApi, menu_footer) == 896);
 static_assert(offsetof(KilnUiApi, image_load_rgba) == offsetof(KilnUiApi, menu_footer) + sizeof(void*));
 static_assert(offsetof(KilnUiApi, image_load_rgba) == 904);
 static_assert(offsetof(KilnUiApi, screen_target) == 912);
-static_assert(sizeof(KilnUiApi) == offsetof(KilnUiApi, screen_target) + sizeof(void*));
+static_assert(offsetof(KilnUiApi, image_state) == 920);
+static_assert(sizeof(KilnUiApi) == offsetof(KilnUiApi, image_state) + sizeof(void*));
 int main() {
     // Drawing off: no frame/context, just as KILN_UI_OVERLAY=0. Must not enter ImGui.
     kui_draw::t_set_next_window_size_constraints(300, 0, 300, 918);

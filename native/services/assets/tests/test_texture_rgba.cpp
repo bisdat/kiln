@@ -240,13 +240,46 @@ void decodes() {
 }
 }  // namespace
 
+// A level no mip fits: a mod's PNG icon (one level, 512x512) asked at 64 is scaled down to 64x64; a level within twice
+// min_side stays; shapes are kept; the box filter keeps solid colours and weights colour by alpha.
+void fits_and_downscales() {
+    uint32_t w = 0, h = 0;
+    fit_size(512, 512, 64, &w, &h);
+    CHECK(w == 64 && h == 64);
+    fit_size(128, 128, 64, &w, &h);
+    CHECK(w == 128 && h == 128);  // within twice: a mip, kept (the draw scales it)
+    fit_size(129, 100, 64, &w, &h);
+    CHECK(w == 64 && h == 50);
+    fit_size(360, 388, 32, &w, &h);
+    CHECK(w == 30 && h == 32);
+    fit_size(512, 512, 0, &w, &h);
+    CHECK(w == 512 && h == 512);
+    fit_size(4096, 1, 64, &w, &h);
+    CHECK(w == 64 && h == 1);
+    // 8x8 of four solid quadrants down to 2x2: each output pixel is its quadrant
+    std::vector<uint8_t> src(8 * 8 * 4), dst(2 * 2 * 4);
+    for (uint32_t y = 0; y < 8; ++y)
+        for (uint32_t x = 0; x < 8; ++x) {
+            uint8_t* p = &src[(y * 8 + x) * 4];
+            p[0] = x < 4 ? 200 : 10, p[1] = y < 4 ? 20 : 220, p[2] = 99, p[3] = 255;
+        }
+    downscale_box(src.data(), 8, 8, dst.data(), 2, 2);
+    CHECK(dst[0] == 200 && dst[1] == 20 && dst[4] == 10 && dst[8 + 1] == 220 && dst[15] == 255);
+    // a transparent half does not darken the colour: half red opaque, half black transparent -> red at half alpha
+    std::vector<uint8_t> half(2 * 1 * 4, 0), one(4);
+    half[0] = 255, half[3] = 255;  // pixel 0: red, opaque; pixel 1: black, clear
+    downscale_box(half.data(), 2, 1, one.data(), 1, 1);
+    CHECK(one[0] == 255 && one[1] == 0 && one[3] == 128);
+}
+
 int main() {
     describes_and_picks();
     decodes();
+    fits_and_downscales();
     if (g_fail) {
         std::fprintf(stderr, "test_texture_rgba: %d failed\n", g_fail);
         return 1;
     }
-    std::printf("PASS assets.texture-rgba (resource layouts, mip choice, RGBA8/BGRA8/R8/BC1/BC3/BC4/BC5/BC7 decoding)\n");
+    std::printf("PASS assets.texture-rgba (resource layouts, mip choice, RGBA8/BGRA8/R8/BC1/BC3/BC4/BC5/BC7 decoding, downscaling)\n");
     return 0;
 }
