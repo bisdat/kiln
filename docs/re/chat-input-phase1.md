@@ -4,8 +4,11 @@
 input probe has been validated in-game by a tester for both HUD and Social
 call sites. An opt-in preview now implements Up/Down recall in the native
 service, backed by a portable native history model compatible with the existing
-managed history file format. **The preview itself has not yet been compiled
-and run in-game.** The managed ChatHistory remains a separate reference model;
+managed history file format. **The first preview was compiled and run in-game on 17 Nov 2026:** installation,
+HUD call-site and Social call-site/focus detection all PASS; Up/Down history
+did not visibly work (FAIL). The tester restored the previous DLL. A new,
+read-only diagnostic mode has been added to isolate key routing, submit events
+and edit-state readability before another interactive trial. The managed ChatHistory remains a separate reference model;
 the managed/native service bridge, Ctrl+R UI and completion are not implemented.
 
 ## What the model does
@@ -139,6 +142,40 @@ ordinary chat only for the current process. Only submitted slash commands are
 persisted (atomic best-effort replace) at `<game>/kiln/user/chat-history.json`.
 The preview does not yet separate histories by server, expose a Clear button,
 implement Ctrl+R, or offer command Tab completion. No typed text is logged.
+
+### Read-only key/submission diagnosis after the failed preview (17 Nov 2026)
+
+The first history preview logged `chat history preview installed` and edit
+focus for **both** HUD and Social, but no successful recall was observed.
+The tester reverted the UI DLL. Neither focus message confirms that the
+history model received a submit or an Up/Down key press.
+
+A narrower diagnostic is now available: set **only**
+`KILN_CHAT_HISTORY_DIAG=1` in the client's environment. It wins over
+`KILN_CHAT_HISTORY=1` if both are set: **no Up/Down key is consumed, no
+EditSetText is called, and no history file is written**. It still resolves the
+native edit state and reads the submit event after `TextInputProcess`. It logs
+only event codes, text byte counts, whether text starts with '/', arrow key
+codes, modifier/capture/focus booleans; no chat text or sensitive arguments.
+
+The diagnostic logs (at most 24 per event type):
+
+- `ui: chat history diagnostic installed ...`: mode enabled.
+- `ui: chat history: HUD/Social edit focus confirmed ...`: focused edit state.
+- `ui: chat history trace: key Up ... focus=1 captured=0 consumed=0`: WndProc
+  sees the arrow while focus is active; the diagnostic deliberately passes it on.
+- `ui: chat history trace: HUD input event=1 readable=1 bytes=N command=1`:
+  pressing Enter produced a readable slash-command submission, without logging
+  content. Event 2 is Escape.
+- No key line: WndProc is not seeing that key, or input is received from
+  another path. A key line with `focus=0` implies a focus timing problem.
+  No event-1 line after Enter: result placement / event type needs inspection.
+  Event 1 with `readable=0`: edit-state text layout needs inspection.
+
+`KILN_CHAT_HISTORY_TRACE=1` alongside `KILN_CHAT_HISTORY=1` enables the
+same privacy-safe counters *during interactive recall*. Use that mode only
+after diagnosing the basic key/submit path. The adapter now reads the event
+discriminant as a single byte, avoiding mismatches from adjacent bytes.
 
 ### Interactive acceptance checklist
 
