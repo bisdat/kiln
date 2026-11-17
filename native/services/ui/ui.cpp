@@ -9,6 +9,9 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <optional>
 #include <mutex>
 #include <memory>
 #include <string>
@@ -27,6 +30,7 @@
 #include "load_hook.h"
 #include "slider.h"
 #include "overlay_guard_runtime.h"
+#include "ini_file.h"
 #include "draw_slots.h"
 
 namespace kui {
@@ -52,6 +56,28 @@ uint64_t g_frame_no = 0;
 uint64_t g_last_frame_ms = 0;
 float g_style_scale = 0;
 std::string g_ini_path;
+// imgui.ini, read and written on IniFile's thread (ini_file.h); ImGui gets and gives it in memory. The write replaces the
+// file through a temporary one, nothing forced to the disk (window places: a lost last move is no loss).
+kui::IniFile g_ini(
+    [](const std::string& path) -> std::optional<std::string> {
+        std::ifstream f(std::filesystem::path(std::u8string(path.begin(), path.end())), std::ios::binary);
+        if (!f) return std::nullopt;
+        std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+        if (f.bad()) return std::nullopt;
+        return text;
+    },
+    [](const std::string& path, const std::string& text) {
+        const std::filesystem::path file(std::u8string(path.begin(), path.end()));
+        auto temp = file;
+        temp += L".tmp";
+        {
+            std::ofstream f(temp, std::ios::binary | std::ios::trunc);
+            if (!f) return false;
+            f.write(text.data(), static_cast<std::streamsize>(text.size()));
+            if (!f) return false;
+        }
+        return MoveFileExW(temp.c_str(), file.c_str(), MOVEFILE_REPLACE_EXISTING) != 0;
+    });
 bool g_imgui = false;
 thread_local bool t_in_frame = false;
 
@@ -142,7 +168,9 @@ bool imgui_create(HWND hwnd, float dpi) {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
-    io.IniFilename = g_ini_path.empty() ? nullptr : g_ini_path.c_str();
+    // imgui.ini from memory (g_ini read it on its thread since the plugin started); saved through g_ini (build_frame)
+    io.IniFilename = nullptr;
+    if (const auto ini = g_ini.text(); ini && !ini->empty()) ImGui::LoadIniSettingsFromMemory(ini->data(), ini->size());
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_NavEnableGamepad | ImGuiConfigFlags_NoMouseCursorChange;
     io.MouseDrawCursor = false;
     // By default ImGui opens a "conflicting ID" popup for programmers over the game when two items share an id, in Kiln's
@@ -174,6 +202,8 @@ bool imgui_create(HWND hwnd, float dpi) {
 
 void imgui_destroy() {
     if (!g_imgui) return;
+    size_t ini_size = 0;  // what ImGui's own shutdown saved while it had the file name
+    if (const char* ini = ImGui::SaveIniSettingsToMemory(&ini_size)) g_ini.save(std::string(ini, ini_size));
     ImGui_ImplWin32_Shutdown();
     ImGui::DestroyContext();
     g_imgui = false;
@@ -192,6 +222,11 @@ bool build_frame(float width, float height, float dpi) {
     io.DeltaTime = dt;
     style_frame_begin();  // the game's font and new images join the atlas / texture list before the frame
     ImGui::NewFrame();
+    if (io.WantSaveIniSettings) {  // a window moved or resized a few seconds ago: imgui.ini is written on g_ini's thread
+        size_t ini_size = 0;
+        if (const char* ini = ImGui::SaveIniSettingsToMemory(&ini_size)) g_ini.save(std::string(ini, ini_size));
+        io.WantSaveIniSettings = false;
+    }
     footer_overlay();  // Kiln's mark next to its line in the main menu's footer, behind every window (menu_footer.cpp)
     KilnUiFrame f{};
     f.size = sizeof f;
@@ -580,6 +615,7 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
             std::filesystem::create_directories(p);
             const auto s = (p / "imgui.ini").u8string();
             g_ini_path.assign(s.begin(), s.end());
+            g_ini.start(g_ini_path);  // read now, on its thread: the first frame finds it in memory
         }
     } catch (...) {
     }

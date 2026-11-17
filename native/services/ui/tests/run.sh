@@ -19,6 +19,9 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/overlay_
 "$out/overlay_guard_test"
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/overlay_mode_test.cpp" -o "$out/overlay_mode_test"
 "$out/overlay_mode_test"
+# imgui.ini read and written on its own thread, never on the present call (ini_file.h, inbox 50)
+g++ -std=c++20 -O1 -g -Wall -Wextra -pthread -fsanitize=thread "$here/ini_file_test.cpp" -o "$out/ini_file_test"
+"$out/ini_file_test"
 # which renderer call is the main menu's Settings entry (another module wrapping the game's call): plain logic
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/menu_site_test.cpp" -o "$out/menu_site_test"
 "$out/menu_site_test"
