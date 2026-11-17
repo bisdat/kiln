@@ -118,7 +118,8 @@ public:
     KilnResult open_owner(KilnOwner owner, std::string_view name);
     // The binding's open: create the owner's instance only when it has none. OK: open (new or existing); REVOKED: its
     // instance was retired (a tombstone is never replaced: registry owner ids are never reused); UNAVAILABLE: the
-    // process exit closed admission (seal_all) or instance numbers are exhausted.
+    // owner has no instance and the process exit closed admission (seal_all), or instance numbers are exhausted. An
+    // existing instance is found first, also after the exit (sealed by then), so drain_owner reports its real count.
     KilnResult ensure_owner(KilnOwner owner, std::string_view name);
     // drain_owner with no wait: seal forever, cancel queued roots (each still gets its done), signal running ones,
     // release terminal records; later terminal records release themselves. *outstanding = tasks whose done has not

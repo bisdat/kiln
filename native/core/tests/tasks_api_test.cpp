@@ -359,6 +359,48 @@ KILN_TASKS_TEST(capability_and_shutdown) {
     check(until([&] { return pool.counts().outstanding == 0; }), "quiescent (every job outlives its callbacks)");
 }
 
+// After the exit began, drain_owner still reports the owner's real running count (seal, cancel queued, poll); with
+// timeout 0 it never waits. An owner the pool never saw is still refused UNAVAILABLE. The same after the park, where a
+// timed drain returns at once (no done runs any more).
+KILN_TASKS_TEST(drain_after_exit_reports_running) {
+    HostPlatform p;
+    FakeEnv env;
+    env.add(1);
+    env.add(2);
+    Pool pool(config(), &p);
+    Service s(pool, env);
+    const KilnTaskInfo i = info("t");
+    Job running;
+    KilnHandle h = 0;
+    s.submit(1, &i, &body, &done, &running, &h, nullptr);
+    check(until([&] { return running.body_runs.load() == 1; }), "a body runs");
+    s.exiting();
+    uint32_t left = 0;
+    KilnResult r = s.drain_owner(1, 0, &left);
+    check(r == KILN_OK && left == 1,
+          "after exiting(): drain(0) reports the running body (got " + std::to_string(r) + ", " + std::to_string(left) + ")");
+    left = 7;
+    r = s.drain_owner(2, 0, &left);
+    check(r == KILN_ERR_UNAVAILABLE && left == 0, "an owner the pool never saw: UNAVAILABLE, 0 (got " + std::to_string(r) + ")");
+    check(pool.counts().owners == 1, "and no owner instance was created for it");
+    const Pool::ParkResult parked = s.park(10ull * 1000 * 1000);
+    check(parked.still_running == 1, "the park leaves the held body running");
+    left = 0;
+    r = s.drain_owner(1, 0, &left);
+    check(r == KILN_OK && left == 1, "after the park: drain(0) still reports it (got " + std::to_string(r) + ", " +
+                                         std::to_string(left) + ")");
+    const auto t0 = std::chrono::steady_clock::now();
+    r = s.drain_owner(1, 2000, &left);
+    check(r == KILN_OK && left == 1 && std::chrono::steady_clock::now() - t0 < std::chrono::seconds(1),
+          "a timed drain after the park returns at once with the real count");
+    running.release.open();
+    check(until([&] { return running.saw_cancel.load() == 1; }), "the body saw its cancel and returns");
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    left = 0;
+    s.drain_owner(1, 0, &left);
+    check(left == 1 && running.done_calls.load() == 0, "its done stays undelivered after the park: still outstanding");
+}
+
 // submit forced against an owner revoke between its owner_alive check and its queueing: refused, or accepted and
 // then cancelled with its done; the body never runs.
 KILN_TASKS_TEST(submit_vs_revoke) {
