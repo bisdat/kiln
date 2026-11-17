@@ -209,6 +209,58 @@ export interface GameStatus {
   /** Another data folder's profile is active in the game (an older launcher after a move, KILN_DATA_DIR, another
    *  launcher): said, never shown as loaded; `activeProfile` is null then. `root`: the data folder its paths name. */
   otherFolderProfile?: { id: string; root?: string | null };
+  /** (dev.29.17) How this client starts: through Steam, or directly (a folder no Steam library knows). Absent for a server. */
+  start?: StartMode;
+  /** (dev.29.17) Whether Kiln knows the exe's build; absent when it cannot be told. */
+  build?: BuildCheck;
+}
+/** How an install starts (kiln_manage::direct). */
+export type StartMode = "steam" | "direct";
+/** What the player chose for an install's start; a field left out is Kiln's default. */
+export interface StartSettings {
+  mode?: StartMode;
+  /** Linux: a Proton folder (with its `proton` script) or a Wine binary; absent: automatic. */
+  runner?: string;
+  /** Linux: the prefix (Proton: the compatdata folder holding pfx; Wine: the prefix); absent: Kiln's own. */
+  prefix?: string;
+}
+export interface RunnerInfo {
+  kind: "proton" | "wine";
+  path: string;
+  label: string;
+  /** "steam" (Valve's Proton), "compat" (compatibility tools: GE-Proton and others), "system", "custom". */
+  source: "steam" | "compat" | "system" | "custom";
+}
+export interface DirectCommand {
+  program: string;
+  args: string[];
+  cwd: string;
+  env: [string, string][];
+  envRemove: string[];
+  runner: RunnerInfo | null;
+  prefix: string | null;
+}
+/** `game_start_get`: an install's start, what can be picked, and the command a direct start runs now. */
+export interface StartSetup {
+  mode: StartMode;
+  settings: StartSettings;
+  custom: boolean;
+  windows: boolean;
+  runners: RunnerInfo[];
+  runner: RunnerInfo | null;
+  /** What "automatic" picks: the Proton Steam maps to Enshrouded, else the first found. */
+  defaultRunner: RunnerInfo | null;
+  problem?: string;
+  ownPrefix: string | null;
+  command: DirectCommand | null;
+  steamRunning: boolean;
+}
+/** Whether Kiln knows the build of the game's exe (sigdb's build records by sha256). */
+export interface BuildCheck {
+  sha256: string;
+  short: string;
+  known: boolean;
+  from: "game" | "bundle";
 }
 export interface NewerKilnMod {
   id: string;
@@ -706,6 +758,8 @@ export interface LaunchResult {
   started: string;
   /** Mode profile: the activation when the active profile had changed and was written again before the start. */
   activation?: Activation;
+  /** (dev.29.17) How the game was started; `uri` is empty for a direct start. */
+  via?: StartMode;
 }
 export type ChainStatus = "loaded" | "failed" | "missing" | "refused" | "duplicate" | "skipped";
 export type RefusalDetail = "self" | "system" | "kiln" | "shroudforge" | "not-dll" | "outside" | "too-many";
@@ -1263,6 +1317,8 @@ export const gameDetect = () => call<GameInstall[]>("game_detect");
 export const gameAdd = (path: string) => call<GameInstall>("game_add", { path });
 export const gameRemove = (gameId: GameId) => call<null>("game_remove", { gameId });
 export const gameStatus = (gameId: GameId) => call<GameStatus>("game_status", { gameId });
+export const gameStartGet = (gameId: GameId) => call<StartSetup>("game_start_get", { gameId });
+export const gameStartSet = (gameId: GameId, settings: StartSettings) => call<GameInstall>("game_start_set", { gameId, settings });
 
 // runtime.rs
 export const runtimeList = () => call<RuntimeBundle[]>("runtime_list");
@@ -1988,7 +2044,7 @@ export const dataFolderRestart = () => call<null>("data_folder_restart");
 export const COMMANDS = [
   "snapshot_status", "snapshot_continue",
   "app_info", "app_settings_get", "app_settings_set", "app_open_path", "app_open_url", "task_list", "task_get", "task_cancel",
-  "game_list", "game_detect", "game_add", "game_remove", "game_status",
+  "game_list", "game_detect", "game_add", "game_remove", "game_status", "game_start_get", "game_start_set",
   "runtime_list", "runtime_import", "runtime_status", "runtime_install", "runtime_uninstall", "runtime_rollback", "runtime_classify",
   "profile_list", "profile_get", "profile_create", "profile_save", "profile_delete", "profile_resolve", "profile_activate",
   "profile_deactivate", "profile_active", "activation_notices", "notices_unseen", "notices_shown",
