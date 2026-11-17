@@ -1,5 +1,58 @@
 # Native chat input: phase-1 history groundwork
 
+## Latest game test and draft-restoration fix (17 November 2026)
+
+The 11:47 interactive trace **PASSED** recording submissions (including
+Social persisted commands), queueing Up/Down, selecting older history
+entries and applying engine `EditSetText` with successful post-call widget
+readback. However, **Down did not restore the unsent draft** immediately
+after Up: `recall newer entries=2 changed=0`. The user explicitly
+confirmed that draft restoration failed. This is a **FAIL** for the complete
+feature, despite the verified low-level text replacement.
+
+Inspection found that the adapter previously called `History::edited()` on
+*every* difference between the live widget buffer and last-applied command,
+even if caused by normal game UI synchronization. It also reset browsing on
+a single non-editing UI frame. Either path would discard the saved draft
+before Down, while subsequent Up/Down still reached the router.
+
+The unverified correction:
+- Navigating remains active until the player actually types or edits text.
+  WndProc marks WM_CHAR/WM_SYSCHAR/WM_UNICHAR, WM_PASTE,
+  Backspace/Delete and Ctrl+V/Ctrl+X as explicit user edits; only these
+  clear an active browsing cursor (outside Enter/Escape and focus loss).
+- A temporary widget-text mismatch **never** resets history by itself.
+- A missing chat focus frame stops arrow interception immediately, but the
+  browsing cursor is only forgotten after **four consecutive missing UI frames**.
+  Actual Enter/Escape explicitly terminate the browse session.
+- The trace includes `browsing_before` and `browsing_after`, and reports
+  whether a reset came from actual text editing or sustained loss of focus.
+- Added regression coverage for Up→Down draft restoration despite a stale
+  widget snapshot / single missing focus frame, explicit manual edit, and
+  four-frame focus timeout.
+
+This revision is in fork draft PR #2. **It has not yet been compiled or
+tested in-game.** Do not merge until the user confirms the draft visually
+restores after Down, and focus isolation / persistence survive relaunch.
+
+### Next concise test
+
+Run the standalone C++ test, rebuild `kiln-ui.dll`, then test only:
+enter `draft` in HUD chat without sending, Up, Down. Expect a previous
+command on Up and the unsent `draft` on Down. Confirm in the log:
+
+```text
+recall older ... changed=1 ... browsing_after=1
+recall newer ... changed=1 browsing_before=1 browsing_after=0
+engine edit replacement verified (widget readback)
+```
+
+Then test manual typing after recall and a normal Escape/close. Submit a
+harmless command only if history is empty on startup. Continue to use
+`KILN_CHAT_HISTORY=1 KILN_CHAT_HISTORY_TRACE=1` for this test and keep
+the known-good UI DLL backup. No raw chat contents are logged.
+
+
 **Status (fork experiment, client build 26430625):** The read-only native
 input probe has been validated in-game by a tester for both HUD and Social
 call sites. An opt-in preview now implements Up/Down recall in the native
