@@ -22,7 +22,9 @@ non-system `powrprof.dll` switched kiln-set off: GitHub issue 23). A non-system 
 counts as a failed look (below). Nothing below the Windows folder is inspected (System32, its DriverStore with the
 graphics driver's DLLs, WinSxS): those files are Windows' and the drivers', and SET ships in the game folder. The check
 runs before initialization and before Lua tick/menu work; a module loaded later stops the runtime and releases its Lua
-owners. Kiln uses `dinput8.dll`, so installation does not replace SET's file.
+owners. That later check runs on kiln-set's own thread, never on the game's UI frame or server step: it reads each newly
+loaded module whole once (on a hard disk, seconds for the DLLs a game loads at its first frames), and the frame or step
+after it finished applies it. Kiln uses `dinput8.dll`, so installation does not replace SET's file.
 
 The launcher recognises SET's loader in an archive or folder and leaves it out of the Library, while importing the Lua
 mod folders. An older launcher could import `powrprof.dll` as a native mod (the cause confirmed by support report r1110).

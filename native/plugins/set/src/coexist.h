@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <condition_variable>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
@@ -10,6 +11,8 @@
 #include <fstream>
 #include <map>
 #include <mutex>
+#include <optional>
+#include <thread>
 #if defined(_WIN32) || defined(KSET_LOADER_HOST_TEST)
 #include <windows.h>
 #include "../../compat/module_watch.h"  // and winternl.h: LDR_DATA_TABLE_ENTRY
@@ -219,6 +222,89 @@ inline Inspection inspect_runtime() {
 // One look, as text: empty when clean. A failed inventory reads like a conflict here; callers that keep running use
 // ConflictGate, which tells the two apart.
 inline std::string runtime_conflict() { return inspect_runtime().text; }
+
+// The re-checks after a DLL load, on a thread of their own: the game's UI frame and server step only start a look and
+// take its result on a later frame or step, they never read module files. A look reads a newly loaded module whole for
+// SET's name (cached afterwards by file identity): at the first frames of a hard-disk player's game, the DLSS DLL and
+// what else loads with the renderer took the window into "not responding" for seconds (perfdiag 2026-11-17, inbox 50).
+// One look at a time; nothing is lost while one runs (the caller keeps its request and starts the next look when it
+// takes this one's result). The startup check (on_ready) stays on its caller's thread: nothing runs before it.
+// start(), take(), running() and wait() are serialized by the caller; finished() is lock-free for the per-frame path.
+class LookWorker {
+public:
+    LookWorker() = default;
+    LookWorker(const LookWorker&) = delete;
+    LookWorker& operator=(const LookWorker&) = delete;
+    // At process exit the thread is gone or about to be: a DLL detach never waits for it. A plugin that is unloaded
+    // while the game runs calls wait() first (on_unload).
+    ~LookWorker() {
+        if (thread_.joinable()) thread_.detach();
+    }
+    // Host tests: run each look on the caller's thread, so start() has its result at once.
+    bool run_inline = false;
+    // Starts a look unless one runs or a finished one waits to be taken. False when no look could start (no thread).
+    bool start() {
+        std::unique_lock lock(mu_);
+        if (busy_ || result_) return false;
+        if (thread_.joinable()) thread_.join();  // the last look's thread, done (busy_ is false)
+        busy_ = true;
+        if (run_inline) {
+            lock.unlock();
+            look();
+            return true;
+        }
+        try {
+            thread_ = std::thread([this] { look(); });
+        } catch (...) {
+            busy_ = false;
+            return false;
+        }
+        return true;
+    }
+    // A finished look is waiting to be taken.
+    bool finished() const { return done_.load(std::memory_order_acquire); }
+    // The finished look, once; nothing while one runs or none was started.
+    std::optional<Inspection> take() {
+        if (!finished()) return std::nullopt;
+        std::lock_guard lock(mu_);
+        done_.store(false, std::memory_order_relaxed);
+        std::optional<Inspection> seen = std::move(result_);
+        result_.reset();
+        return seen;
+    }
+    bool running() const {
+        std::lock_guard lock(mu_);
+        return busy_;
+    }
+    // Until a running look has finished (its result stays to be taken).
+    void wait() {
+        std::unique_lock lock(mu_);
+        cv_.wait(lock, [this] { return !busy_; });
+        lock.unlock();
+        if (thread_.joinable()) thread_.join();
+    }
+
+private:
+    void look() {
+        Inspection seen;
+        try {
+            seen = inspect_runtime();
+        } catch (...) {
+            seen = {Inventory::failed, "loaded modules could not be inspected: the check ran out of memory"};
+        }
+        std::lock_guard lock(mu_);
+        result_ = std::move(seen);
+        busy_ = false;
+        done_.store(true, std::memory_order_release);
+        cv_.notify_all();
+    }
+    mutable std::mutex mu_;
+    std::condition_variable cv_;
+    std::thread thread_;
+    bool busy_ = false;
+    std::optional<Inspection> result_;
+    std::atomic<bool> done_{false};
+};
 
 // Diagnostic only: whether this process can be read through a handle to its own pid, which is what a Toolhelp module
 // snapshot of it needs (and other loaders' module scans through a process handle). "" when it can, else the call and
