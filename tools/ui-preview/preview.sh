@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 # Renders the Kiln mod manager to PNGs without the game (tools/ui-preview/README.md).
 #   tools/ui-preview/preview.sh [--font TTF] [--no-game-font] [--scene NAME] [--size WxH --scale S]
+# (--no-game-font also leaves the game's colours out: the game look is then its neutral stand-in)
 # Output: $KILN_OUT/preview/*.png (KILN_OUT default: <repo>/.out). Builds the shim and the preview app first.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
@@ -41,6 +42,12 @@ if [[ -z $font && $gamefont == 1 ]]; then
   font=$(python3 -I "$here/game_font.py" "$KILN_OUT/ui-preview/game-ui-font.ttf" 2>/dev/null || true)
   [[ -n $font ]] || echo "game font not found: the preview uses a system font" >&2
 fi
+# the game's UI colours (its UI bundle and the layout of the fields kiln.ui reads), the same way; else the neutral stand-in
+colors=()
+if [[ $gamefont == 1 ]]; then
+  mapfile -t colors < <(python3 -I "$here/game_colors.py" "$KILN_OUT/ui-preview/game-ui-bundle" 2>/dev/null || true)
+  ((${#colors[@]} == 2)) || { colors=(); echo "game colours not found: the game look is its neutral stand-in" >&2; }
+fi
 
 dotnet build "$here/Kiln.Ui.Preview/Kiln.Ui.Preview.csproj" --artifacts-path "$KILN_OUT/dotnet" -v q -nologo | grep -E "error|Error" || true
 app=$KILN_OUT/dotnet/bin/Kiln.Ui.Preview/debug/Kiln.Ui.Preview.dll
@@ -52,6 +59,7 @@ for s in "${sizes[@]}"; do
   [[ -n $font ]] && args+=(--font "$font")
   bold=${font%.ttf}-bold.ttf  # game_font.py writes the game's bold face next to the regular one
   [[ -n $font && -f $bold ]] && args+=(--bold-font "$bold")
+  ((${#colors[@]} == 2)) && args+=(--game-colors "${colors[0]}" --game-layout "${colors[1]}")
   [[ -n $scene ]] && args+=(--scene "$scene")
   dotnet "$app" "${args[@]}"
 done

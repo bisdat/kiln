@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Kiln.Skills client part: each Kiln talent tree as a Kiln.Ui screen in the game's look (UiStyle.Game), opened from an
+// Kiln.Skills client part: each Kiln talent tree as a Kiln.Ui screen in the player's look (UiStyle.Player), opened from an
 // entry in the game's pause menu and/or a key. Nodes sit on a grid; links are drawn between them; a side panel shows
 // the selected node with its Unlock / Refund buttons; Respec at the bottom. State comes from the server
 // (TalentNet.Client); actions go back through TalentNet.Send (a hosting client calls the server part directly).
@@ -27,7 +27,7 @@ internal static class TalentUi
         var rows = t.Nodes.Count == 0 ? 1 : t.Nodes.Max(n => n.Row) + 1;
         st.Screen = Ui.Screen(t.Name, ui => Draw(e, st, ui), new UiScreenOptions
         {
-            Style = UiStyle.Game,
+            Style = UiStyle.Player,
             Width = Math.Clamp(cols * Cell + 360, 640, 1500),
             Height = Math.Clamp(rows * Row + 190, 420, 960),
         });
@@ -133,10 +133,13 @@ internal static class TalentUi
         var cols = t.Nodes.Count == 0 ? 1 : t.Nodes.Max(n => n.Column) + 1;
         var rows = t.Nodes.Count == 0 ? 1 : t.Nodes.Max(n => n.Row) + 1;
         float cell = Cell * s, row = Row * s, node = Node * s;
-        // UiStyle.Game: a bordered child's padding is WindowPadding (14, 12), items are ItemSpacing (10, 8) apart
+        // the game look's spacing in every look: a bordered child's padding is WindowPadding (14, 12), items are ItemSpacing
+        // (10, 8) apart (pushed, so the player's ember look or a theme does not move the nodes off their links)
         float padX = 14 * s, padY = 12 * s, gapY = 8 * s;
         var canvasW = cols * cell + 2 * padX;
         var canvasH = rows * row + 2 * padY;
+        using var pad = ui.PushVar(UiStyleVar.WindowPadding, padX, padY);
+        using var gap = ui.PushVar(UiStyleVar.ItemSpacing, 10 * s, gapY);
         if (ui.BeginChild("talent-canvas", canvasW, canvasH))
         {
             var (cx, cy, _, _) = ui.WindowRect;

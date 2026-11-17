@@ -111,7 +111,7 @@ bool guarded_frame(KilnUiFrameFn fn, const KilnUiFrame* f, void* user) {
 }
 
 void apply_style(float scale) {
-    style_apply_base(scale);  // Kiln's ember look (style.cpp); game-style windows push KILN_UI_STYLE_GAME
+    style_apply_base(scale);  // the looks at this scale (style.cpp); windows that push nothing get the player's
     g_style_scale = scale;
 }
 
@@ -215,6 +215,7 @@ bool build_frame(float width, float height, float dpi) {
     ImGui_ImplWin32_NewFrame();
     ImGuiIO& io = ImGui::GetIO();
     io.DisplaySize = ImVec2(width, height);
+    dpi *= user_scale();  // the player's scale (kiln.json ui.scale, set_look) on top of the display's
     if (dpi != g_style_scale) apply_style(dpi);
     const uint64_t t = now_ms();
     const float dt = g_last_frame_ms ? std::clamp((t - g_last_frame_ms) / 1000.0f, 0.0001f, 0.25f) : 1.0f / 60.0f;
@@ -485,6 +486,32 @@ KilnResult KILN_CALL t_subscribe_key_ex(KilnOwner o, KilnUiKeyFn fn, void* u, ui
 // Kiln's line in the main menu's footer (menu_footer.cpp)
 void KILN_CALL t_menu_footer(int32_t mods, uint32_t flags) { footer_set(mods, flags); }
 
+// Looks, themes and fonts (style.cpp, 0.2.0-dev.29.16). Mods never set the player's look: set_look from a native plugin
+// (a module that exports kiln_plugin_main; per_caller below tells them apart the same way) is refused. Kiln.Ui's managed
+// call comes from no such module.
+bool caller_is_plugin(void* ret) {
+    HMODULE m = nullptr;
+    return GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                              static_cast<LPCWSTR>(ret), &m) &&
+           m && GetProcAddress(m, "kiln_plugin_main") != nullptr;
+}
+KilnResult KILN_CALL t_theme_create(KilnOwner o, const KilnUiThemeDef* def, KilnHandle* out) { return theme_create(o, def, out); }
+KilnResult KILN_CALL t_theme_free(KilnHandle h) { return theme_free(h); }
+KilnResult KILN_CALL t_set_look(const KilnUiLook* look) {
+    if (caller_is_plugin(_ReturnAddress())) {
+        static std::atomic<bool> said{false};
+        if (!said.exchange(true)) logf(KILN_LOG_WARN, "ui: a native plugin called set_look: refused (the player chooses Kiln's look)");
+        return KILN_ERR_UNAVAILABLE;
+    }
+    return look_set(look);
+}
+KilnResult KILN_CALL t_look_info(KilnUiLookInfo* out) { return look_info(out); }
+KilnHandle KILN_CALL t_font_load(KilnOwner o, const void* data, size_t len) {
+    if (!overlay_drawing_on()) return 0;
+    return font_load(o, data, len);
+}
+void KILN_CALL t_font_free(KilnHandle h) { font_free(h); }
+
 // kiln.ui.tick (for Kiln.Host)
 KilnResult KILN_CALL tt_subscribe(KilnOwner o, KilnUiFrameTickFn fn, void* u, KilnHandle* out) { return game_subscribe_frame_tick(o, fn, u, out); }
 KilnResult KILN_CALL tt_unsubscribe(KilnHandle h) { return game_unsubscribe(h) ? KILN_OK : KILN_ERR_NOT_FOUND; }
@@ -511,9 +538,23 @@ static_assert(offsetof(KilnUiApi, menu_footer) == offsetof(KilnUiApi, set_next_w
               "kiln.ui appends menu_footer after the size constraints (UiNative.TableFooter)");
 static_assert(offsetof(KilnUiApi, image_load_rgba) == offsetof(KilnUiApi, menu_footer) + sizeof(void*) &&
                   offsetof(KilnUiApi, screen_target) == offsetof(KilnUiApi, image_load_rgba) + sizeof(void*) &&
-                  offsetof(KilnUiApi, image_state) == offsetof(KilnUiApi, screen_target) + sizeof(void*) &&
-                  sizeof(KilnUiApi) == offsetof(KilnUiApi, image_state) + sizeof(void*),
+                  offsetof(KilnUiApi, image_state) == offsetof(KilnUiApi, screen_target) + sizeof(void*),
               "kiln.ui appends image_load_rgba, screen_target and image_state after menu_footer (UiNative.TableImageRgba, TableScreenTarget, TableImageState)");
+static_assert(offsetof(KilnUiApi, theme_create) == 928 && offsetof(KilnUiApi, theme_free) == 936 &&
+                  offsetof(KilnUiApi, push_theme) == 944 && offsetof(KilnUiApi, set_look) == 952 &&
+                  offsetof(KilnUiApi, look_info) == 960 && offsetof(KilnUiApi, font_load) == 968 &&
+                  offsetof(KilnUiApi, font_free) == 976 && offsetof(KilnUiApi, push_font_handle) == 984 &&
+                  sizeof(KilnUiApi) == 992,
+              "kiln.ui appends the looks after image_state (0.2.0-dev.29.16; UiNative.TableLooks)");
+static_assert(sizeof(KilnUiThemeDef) == 360 && offsetof(KilnUiThemeDef, color_mask) == 16 && offsetof(KilnUiThemeDef, roles) == 24 &&
+                  offsetof(KilnUiThemeDef, colors) == 88 && offsetof(KilnUiThemeDef, vars) == 216 &&
+                  offsetof(KilnUiThemeDef, background) == 344 && offsetof(KilnUiThemeDef, font) == 352,
+              "KilnUiThemeDef layout (UiNative.ThemeDef)");
+static_assert(sizeof(KilnUiLook) == 32 && offsetof(KilnUiLook, theme) == 8 && offsetof(KilnUiLook, background) == 16,
+              "KilnUiLook layout (UiNative.Look)");
+static_assert(sizeof(KilnUiLookInfo) == 104 && offsetof(KilnUiLookInfo, theme) == 8 && offsetof(KilnUiLookInfo, game_colors) == 28 &&
+                  offsetof(KilnUiLookInfo, roles) == 32 && offsetof(KilnUiLookInfo, role_count) == 96,
+              "KilnUiLookInfo layout (UiNative.LookInfo)");
 static_assert(int{KILN_UI_IMAGE_UNKNOWN} == int{img::kUnknown} && int{KILN_UI_IMAGE_WAITING} == int{img::kWaiting} &&
                   int{KILN_UI_IMAGE_READY} == int{img::kReady} && int{KILN_UI_IMAGE_FAILED} == int{img::kFailed},
               "image states (image_budget.h)");
@@ -565,6 +606,8 @@ const KilnUiApi kTable = {
     &t_image_load_rgba,  // 0.2.0-dev.29.15
     &t_screen_target,    // 0.2.0-dev.29.15
     &t_image_state,      // 0.2.0-dev.29.15
+    // looks, themes and fonts (0.2.0-dev.29.16)
+    &t_theme_create, &t_theme_free, &t_push_theme, &t_set_look, &t_look_info, &t_font_load, &t_font_free, &t_push_font_handle,
 };
 
 std::string api_path(int kind) {

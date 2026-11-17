@@ -93,6 +93,9 @@ internal static unsafe class UiEngine
 
     public static void Log(LogLevel level, string text) => Backend.Current.Log(0, level, "ui: " + text);
 
+    /// <summary>The drawing context of the frames (render thread).</summary>
+    internal static UiDraw DrawContext => Draw;
+
     public static void EnsureStarted()
     {
         if (Interlocked.CompareExchange(ref _started, 1, 0) != 0) return;
@@ -102,6 +105,7 @@ internal static unsafe class UiEngine
             return;
         }
         if (UiNative.DrawingOffReason is { } reason) Log(LogLevel.Info, reason);
+        PlayerLook.Start();  // the player's look of Kiln's UI (kiln.json "ui")
         KeyBindings.Load();
         ApplyMenuKey(KeyBindings.MenuKey);
         // the game page needs the layout calls (v3) for the page itself and v4 for the page state
@@ -279,6 +283,7 @@ internal static unsafe class UiEngine
         }
         foreach (var i in imgs) i.Dispose();
         UiWheel.RemoveOwnedBy(mod);
+        UiThemes.RemoveOwnedBy(mod);
         Ui.Menus.RemoveOwnedBy(mod);
         Ui.Screens.RemoveOwnedBy(mod);
         Ui.Crafting.RemoveOwnedBy(mod);
@@ -338,6 +343,7 @@ internal static unsafe class UiEngine
     {
         Draw.Frame = f;
         var ui = Draw;
+        KilnLook.BeginFrame();  // the player's palette for Kiln's own pages
         RenderDispatch.Frame(ui);  // RenderFrameEvent handlers (they draw on the background list, under everything below)
         // the Kiln menu: inside the game's main menu (the game page), or the full-display mod manager over the game; an
         // older kiln.ui without the layout calls keeps the small window
@@ -382,9 +388,22 @@ internal static unsafe class UiEngine
         Ui.Crafting.DrawPanels(ui);
         DrawScreens(ui);
         foreach (var (h, owner) in FrameHandlers.Snapshot())
+        {
+            var looks = ui.LookDepth;
             if (!UiModCalls.Invoke(owner, h, ui, "Ui.Frame handler") && Fault(h, owner, "a frame handler")) FrameHandlers.Remove(h);
-        DrawHud(ui, hud);
-        DrawToasts(ui);
+            ui.RestoreLooks(looks);  // a look the handler left on never reaches the next one
+        }
+        var hudLooks = ui.LookDepth;
+        ui.PushStyleRaw(UiStyle.Player);  // Kiln's HUD lines and toasts: the player's look and its font
+        try
+        {
+            DrawHud(ui, hud);
+            DrawToasts(ui);
+        }
+        finally
+        {
+            ui.RestoreLooks(hudLooks);
+        }
     }
 
     /// <summary>A rebind armed in the Keys tab lasts only while the tab is drawn: kiln.ui closes the menu on Escape
@@ -407,12 +426,17 @@ internal static unsafe class UiEngine
         if (!o.TitleBar) flags |= 1u << 0;
         if (!o.Interactive && !ui.Capturing) flags |= (1u << 9) | (1u << 18) | (1u << 19);  // no inputs
         var open = true;
+        var looks = ui.LookDepth;
+        ui.PushLookRaw(o.Theme, o.Style);  // the player's look unless the window's mod chose its own
         if (ui.BeginWindow(w.Key, ref open, flags))
         {
+            var inner = ui.LookDepth;
             if (!UiModCalls.Invoke(w.Owner, w.Draw, ui, $"window '{w.Title}'") && Fault(w, w.Owner, $"window '{w.Title}'"))
                 w.SetOpenFromUi(false);
+            ui.RestoreLooks(inner);  // a look the callback left on goes before the window ends
         }
         ui.EndWindow();
+        ui.RestoreLooks(looks);
         if (!open) w.SetOpenFromUi(false);
     }
 
@@ -425,12 +449,12 @@ internal static unsafe class UiEngine
         var s0 = ui.Scale;
         if (open.Any(s => s.Options.DimBackground))
         {
-            // a full-screen, input-less window behind the screens
+            // a full-screen, input-less window behind the screens, in the player's look (lighter when it is translucent)
             ui.NextWindowPos(0, 0, 1);
             ui.NextWindowSize(ui.Width, ui.Height, 1);
-            ui.NextWindowAlpha(0.45f);
+            ui.NextWindowAlpha(0.45f * GameColors.Backdrop);
             uint dim = (1u << 0) | (1u << 1) | (1u << 2) | (1u << 3) | (1u << 5) | (1u << 9) | (1u << 12) | (1u << 13) | (1u << 18) | (1u << 19);
-            ui.PushStyleRaw(UiStyle.Kiln);
+            ui.PushStyleRaw(UiStyle.Player);
             if (ui.BeginWindowNoClose("###kiln.screens.dim", dim)) { }
             ui.EndWindow();
             ui.PopStyleRaw();
@@ -438,7 +462,8 @@ internal static unsafe class UiEngine
         foreach (var s in open)
         {
             var o = s.Options;
-            ui.PushStyleRaw(o.Style);
+            var looks = ui.LookDepth;
+            ui.PushLookRaw(o.Theme, o.Style);
             if (o.FullScreen)
             {
                 ui.NextWindowPos(0, 0, 1);
@@ -461,10 +486,12 @@ internal static unsafe class UiEngine
             var keep = true;
             ui.CurrentScreen = s;
             var visible = o.CloseButton && !o.FullScreen ? ui.BeginWindow($"{s.Title}{s.Id}", ref keep, flags) : ui.BeginWindowNoClose($"{s.Title}{s.Id}", flags);
+            var inner = ui.LookDepth;
             if (visible && !UiModCalls.Invoke(s.Owner, s.Draw, ui, $"screen '{s.Title}'") && Fault(s, s.Owner, $"screen '{s.Title}'")) keep = false;
+            ui.RestoreLooks(inner);
             ui.EndWindow();
             ui.CurrentScreen = null;
-            ui.PopStyleRaw();
+            ui.RestoreLooks(looks);
             if (!keep) s.Close();
         }
     }
@@ -499,7 +526,7 @@ internal static unsafe class UiEngine
             var (ax, ay) = Anchor(group.Key);
             var x0 = ax switch { 0 => pad, 1 => (ui.Width - boxW) / 2, _ => ui.Width - boxW - pad };
             var y0 = ay switch { 0 => pad * 4, 1 => (ui.Height - boxH) / 2, _ => ui.Height - boxH - pad * 4 };
-            ui.DrawRect(x0, y0, x0 + boxW, y0 + boxH, new Color(0, 0, 0, 110), 4 * ui.Scale);
+            ui.DrawRect(x0, y0, x0 + boxW, y0 + boxH, GameColors.Night.WithAlpha(110), 4 * ui.Scale);  // the player's look
             var y = y0 + pad * 0.25f;
             foreach (var l in lines)
             {
@@ -538,13 +565,15 @@ internal static unsafe class UiEngine
             var (w, h) = ui.MeasureText(t.Text);
             var left = (t.Until - now).TotalSeconds;
             var alpha = (byte)Math.Clamp(255 * Math.Min(1, left / 0.5) * Math.Min(1, (now - t.Start).TotalSeconds / 0.2), 0, 255);
-            var accent = t.Kind switch { ToastKind.Success => Color.Green, ToastKind.Warning => Color.Yellow, ToastKind.Error => Color.Red, _ => Color.Orange };
+            // in the player's look: its window colour, a status colour by kind, its text colour
+            var p = KilnLook.Player;
+            var accent = t.Kind switch { ToastKind.Success => p.Ok, ToastKind.Warning => p.Attention, ToastKind.Error => p.Warning, _ => p.Accent };
             var x1 = ui.Width - 20 * s;
             var x0 = x1 - w - 28 * s;
             var y0 = y - h - 12 * s;
-            ui.DrawRect(x0, y0, x1, y, new Color(16, 16, 20, (byte)(alpha * 0.85)), 5 * s);
+            ui.DrawRect(x0, y0, x1, y, GameColors.Night.WithAlpha((byte)(alpha * 0.88)), 5 * s);
             ui.DrawRect(x0, y0, x0 + 5 * s, y, accent.WithAlpha(alpha), 2 * s);
-            ui.DrawText(x0 + 16 * s, y0 + 6 * s, t.Text, Color.White.WithAlpha(alpha));
+            ui.DrawText(x0 + 16 * s, y0 + 6 * s, t.Text, p.Text.WithAlpha(alpha));
             y = y0 - 8 * s;
         }
     }
@@ -738,8 +767,13 @@ internal static unsafe class UiEngine
         label(ui, "SETTINGS", s);
         if (generated) ConfigScreens.Draw(ui, modId);
         foreach (var p in pages)
-            if (p.ModId == modId && !UiModCalls.Invoke(p.Owner, p.Draw, ui, $"config page {modId}") && Fault(p.Draw, p.Owner, $"config page {modId}"))
+        {
+            if (p.ModId != modId) continue;
+            var looks = ui.LookDepth;
+            if (!UiModCalls.Invoke(p.Owner, p.Draw, ui, $"config page {modId}") && Fault(p.Draw, p.Owner, $"config page {modId}"))
                 p.H.Dispose();
+            ui.RestoreLooks(looks);
+        }
     }
 
     /// <summary>What mods say about themselves (<see cref="StatusLines"/>): the last snapshot; the sources run on a worker about

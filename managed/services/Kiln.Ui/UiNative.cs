@@ -342,6 +342,72 @@ internal static unsafe class UiNative
         public delegate* unmanaged[Cdecl]<ulong, int> ImageStateFn;
     }
 
+    /// <summary>KilnUiThemeDef (kiln_ui.h, 0.2.0-dev.29.16): a theme's definition, copied by theme_create.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct ThemeDef
+    {
+        public uint Size, Base, RoleMask, VarMask;
+        public ulong ColorMask;
+        public fixed uint Roles[16];
+        public fixed uint Colors[32];
+        public fixed float Vars[32];  // [16][2]
+        public float Background, Rounding;
+        public ulong Font;
+    }
+
+    /// <summary>KilnUiLook (kiln_ui.h, 0.2.0-dev.29.16): the player's look.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct Look
+    {
+        public uint Size, Kind;
+        public ulong Theme;
+        public float Background, Opacity, Scale;
+        public uint Reserved;
+    }
+
+    /// <summary>KilnUiLookInfo (kiln_ui.h, 0.2.0-dev.29.16): the player's look and a palette.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct LookInfo
+    {
+        public uint Size, Kind;
+        public ulong Theme;
+        public float Background, Opacity, Scale;
+        public byte GameColors, GameFont, R0, R1;
+        public fixed uint Roles[16];
+        public uint RoleCount, Reserved2;
+    }
+
+    /// <summary>The tail after image_state (0.2.0-dev.29.16): looks, themes and fonts.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct TableLooks
+    {
+        public TableImageState Base;
+        public delegate* unmanaged[Cdecl]<ulong, ThemeDef*, ulong*, int> ThemeCreate;
+        public delegate* unmanaged[Cdecl]<ulong, int> ThemeFree;
+        public delegate* unmanaged[Cdecl]<ulong, byte> PushTheme;
+        public delegate* unmanaged[Cdecl]<Look*, int> SetLook;
+        public delegate* unmanaged[Cdecl]<LookInfo*, int> GetLookInfo;
+        public delegate* unmanaged[Cdecl]<ulong, void*, nuint, ulong> FontLoad;
+        public delegate* unmanaged[Cdecl]<ulong, void> FontFree;
+        public delegate* unmanaged[Cdecl]<ulong, byte> PushFontHandle;
+    }
+
+    /// <summary>kiln.ui's looks tail (0.2.0-dev.29.16), or null on a table without all of it (an older kiln-ui.dll). Each
+    /// slot is still checked for null by its caller.</summary>
+    public static TableLooks* Looks
+    {
+        get
+        {
+            if (LooksOverride != null) return LooksOverride;
+            var t = T;
+            if (t == null || t->Header.Size < (uint)sizeof(TableLooks)) return null;
+            return (TableLooks*)t;
+        }
+    }
+
+    /// <summary>Tests: a table of the looks tail in place of kiln.ui's.</summary>
+    internal static TableLooks* LooksOverride;
+
     /// <summary>KILN_UI_IMAGE_WAITING / READY / FAILED (kiln_ui.h image_state).</summary>
     public const int ImageUnknown = 0, ImageWaiting = 1, ImageReady = 2, ImageFailed = 3;
 
@@ -464,6 +530,7 @@ internal static unsafe class UiNative
         _table3 = null;
         _table4 = null;
         _table6 = null;
+        LooksOverride = null;
         MouseKeysAvailable = false;
     }
 

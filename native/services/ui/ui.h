@@ -175,13 +175,23 @@ KilnResult page_state(KilnUiMenuPage* out);
 void page_status_line(char* out, size_t cap);
 bool style_push_font(uint32_t font);       // style.cpp: KILN_UI_FONT_*; false = not loaded (nothing pushed)
 
-// ---- style.cpp (Kiln's and the game's look, the game font, images) ----
-void style_apply_base(float scale);          // the default (Kiln ember) style, scaled
-void style_push(uint32_t style);             // inside a frame
+// ---- style.cpp (the looks: Kiln's, the game's, the player's, mods' themes; the game's font and colours, mod fonts, images) ----
+void style_apply_base(float scale);          // the looks at this scale; windows that push nothing get the player's
+void style_push(uint32_t style);             // inside a frame: KILN_UI_STYLE_*
+bool theme_push(KilnHandle theme);           // inside a frame; false: no such theme (nothing pushed); style_pop pops it
 void style_pop();
-void style_frame_begin();                    // render thread, before NewFrame: fonts and textures to add
+size_t style_depth();                        // looks pushed now (render thread)
+void style_frame_begin();                    // render thread, before NewFrame: fonts, colours, looks and textures
 void style_frame_end();                      // render thread, after the frame: unbalanced pushes
 float style_scale();
+float user_scale();                          // the player's scale (set_look), any thread
+bool style_push_font_handle(KilnHandle font);  // inside a frame: a mod font; false = not in the atlas (nothing pushed)
+KilnResult theme_create(KilnOwner owner, const KilnUiThemeDef* def, KilnHandle* out);  // any thread
+KilnResult theme_free(KilnHandle theme);                                              // any thread
+KilnResult look_set(const KilnUiLook* look);                                           // any thread (the caller is checked in ui.cpp)
+KilnResult look_info(KilnUiLookInfo* out);                                             // any thread
+KilnHandle font_load(KilnOwner owner, const void* data, size_t len);                   // any thread; 0 refused
+void font_free(KilnHandle font);                                                       // any thread
 KilnHandle image_load(KilnOwner owner, const void* png, size_t len);
 KilnHandle image_load_rgba(KilnOwner owner, const uint8_t* rgba, uint32_t w, uint32_t h);  // w*h*4 bytes, copied
 int32_t image_state(KilnHandle h);  // image_budget.h: unknown, waiting, ready, failed
