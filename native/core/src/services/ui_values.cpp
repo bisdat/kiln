@@ -234,6 +234,15 @@ KilnResult KILN_CALL t_gemforge_sockets(KilnOwner owner, uint32_t category_mask)
     return guarded("gemforge_sockets", [&] { return sockets_set(owner, category_mask); });
 }
 
+KilnResult KILN_CALL t_gemforge_sources(KilnOwner owner, const KilnUiGemForgeSource* rows, uint32_t count,
+                                        const KilnUiGemForgePayer* payers, uint32_t payer_count) {
+    return guarded("gemforge_sources", [&] { return sources_set(owner, rows, count, payers, payer_count); });
+}
+
+KilnResult KILN_CALL t_gemforge_sources_state(KilnUiGemForgeSourcesState* out) {
+    return guarded("gemforge_sources_state", [&] { return sources_state(out); });
+}
+
 const KilnUiValuesApi kTable = {
     {sizeof(KilnUiValuesApi), KILN_UI_VALUES_VERSION},
     &t_subscribe,
@@ -249,6 +258,8 @@ const KilnUiValuesApi kTable = {
     &t_copy_gemforge,
     &t_subscribe_gemforge,
     &t_gemforge_sockets,
+    &t_gemforge_sources,
+    &t_gemforge_sources_state,
 };
 
 // ---- text ops for providers ----
@@ -390,6 +401,7 @@ void owner_retired(KilnOwner owner) {
     }
     stage_owner_retired(owner);
     sockets_owner_retired(owner);
+    sources_owner_retired(owner);
 }
 
 size_t active(std::string_view mod) {
@@ -600,6 +612,7 @@ void reset_for_tests() {  // host tests only: nothing dispatches while it runs
     slots_reset_for_tests();
     gemforge_reset_for_tests();
     sockets_reset_for_tests();
+    sources_reset_for_tests();
     lines_reset_for_tests();
 }
 

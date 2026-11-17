@@ -42,8 +42,8 @@ internal static unsafe class FakeUiValues
     public static void Install()
     {
         Free();
-        // room for every appended slot (Gem Forge snapshot, gems.sockets); the header says which ones are there
-        Table = (UiValuesNative.Table*)NativeMemory.AllocZeroed((nuint)sizeof(UiValuesNative.SocketsTable));
+        // room for every appended slot (Gem Forge snapshot, gems.sockets, gem sources); the header says which ones are there
+        Table = (UiValuesNative.Table*)NativeMemory.AllocZeroed((nuint)sizeof(UiValuesNative.SourcesTable));
         Table->Header = new ServiceHeader { Size = (uint)sizeof(UiValuesNative.Table), Version = 1 };
         Table->Subscribe = &Subscribe;
         Table->Unsubscribe = &Unsubscribe;

@@ -40,12 +40,92 @@ Log.Info($"level {up.LevelBefore} -> {up.LevelAfter}, paid {up.Paid}");
 
 ### Where the items may be
 The carrier and the gem must be in the player's own inventories (backpack, action bars, worn gear), or in an entity you
-name with `GemCraftOptions.Holder` (for example a chest your mod lets the player use). Kiln checks before the action that
-they are there, that each ref still names the item it was taken from (an `ItemInstanceRef` whose item was destroyed, or
-whose entity id now names another item, is `NotFound`), that the socket is there and empty (Socket) or holds something
-(Unsocket), and that the item to socket, upgrade or recycle is a gem. The game itself checks none of that (its action
-would recycle a sword, or raise a sword's level, if asked), so a mod should not skip it either: only name a holder the
-player may use.
+name with `GemCraftOptions.Holder` (for example a chest your mod lets the player use). Since 0.2.0-dev.29.15 the gem and
+the carrier may be in two different places: `GemHolder` names where the gem is and `CarrierHolder` where the carrier is
+(each defaults to `Holder`, then to the player). Kiln checks before the action that they are there, that each ref still
+names the item it was taken from (an `ItemInstanceRef` whose item was destroyed, or whose entity id now names another
+item, is `NotFound`), that each holder is the player or a loaded container (not another player, not an NPC), that the
+socket is there and empty (Socket) or holds something (Unsocket), and that the item to socket, upgrade or recycle is a
+gem. The game itself checks none of that (its action would recycle a sword, or raise a sword's level, if asked), so a
+mod should not skip it either: only name a holder the player may use.
+
+```csharp
+// a gem in the chest, the sword in the player's backpack: one transaction, the gem never passes the backpack
+var gem = Items.Read(chest)!.Slots.First(s => s.Item == bleedingId);
+GemCraftResult r = await Gems.Socket(player, sword.Ref, gem.Ref, forge, new GemCraftOptions { GemHolder = chest });
+```
+
+The game's own action does the move: its request names the gem's inventory slot (a page entity and an index, the
+chest's page here) and the carrier's item entity, and its transaction reads and writes both inventories. A refusal or a
+rollback leaves both where they were; nothing is lent to the backpack.
+
+### Who pays and where things go (since 0.2.0-dev.29.15)
+`GemCraftOptions.PayFrom` names who pays the game's cost of a Socket or an Upgrade (Unsocket is free on this game build;
+Recycle pays nothing): `GemPayer.Player` (the default, as the game), `GemPayer.From(chest)` (a container your mod vouches
+for), `GemPayer.BaseStorage` (the crafting-stock containers of the base the player stands in: the Magic chests, in the
+game's order, as the game's crafting from base storage takes them; the player needs the server's CanAccessInventories
+right) or `GemPayer.PlayerThenBaseStorage` (the player's inventories first, then those). `GemCraftOptions.ReturnTo`
+names where an unsocketed gem and Recycle's essence go (none: the player).
+
+```csharp
+// upgrade a gem in the chest, paid by the chest
+await Gems.Upgrade(player, gem.Ref, forge, new GemCraftOptions { GemHolder = chest, PayFrom = GemPayer.From(chest) });
+// take the gem out of a sword into the chest
+await Gems.Unsocket(player, sword.Ref, forge, new GemCraftOptions { ReturnTo = chest });
+```
+
+The game still decides the cost (by the gem's level and the forge) and takes it inside the action's own transaction:
+Kiln points the game's payment at the payers (it takes from the first payers itself on the same transaction and lets
+the game's own call take the rest from the last one), and the game's unslot move and Recycle's give at `ReturnTo`. When
+the payers cannot pay, nothing is paid and nothing moves (`NotEnough`); outside a base, or without the right,
+`BaseStorage` pays nothing (`NotEnough`) and `PlayerThenBaseStorage` is the player alone. `Paid` and `Received` are counted
+in the payers and in `ReturnTo`. Other than the player, both need the capability `gems.payers`; a replaced price
+(`Cost`, not free) is the player's and is refused together with another payer (`ArgumentException`).
+
+**Does the game's forge take essence from base storage itself?** No (client 26430625, server 26430253, static
+analysis): the handler's payment is the inventory transaction's removeItems with the player as the owner, which walks the
+player's own InventorySetup links, not `InventoryPay`/base stock as crafting does; and the forge screen's price test counts
+the material only in the player's own Generic pages. `PayFrom` is the way to make chests pay.
+
+### Chest gems in the forge's own GEMS list (since 0.2.0-dev.29.15)
+A server mod can offer a player the loose gems of a container at the Shroud Forge: on the player's Kiln client they appear
+in the game's own GEMS list (after the player's own gems, drawn as the game draws a gem), and the player inserts,
+upgrades or recycles one there as any other gem, without a backpack round trip. Capability `gems.sources` (server).
+
+```csharp
+Events.On<GemForgeOpenedEvent>(e =>                       // the player's forge screen opened (and every 5 s while open)
+{
+    foreach (var chest in ChestsThePlayerMayUse(e.Player))  // your policy: the player's base, a permission, a distance
+        Gems.OfferChestGems(e.Player, chest, new GemSourceOptions { PayFrom = GemPayer.From(chest), ReturnTo = chest });
+});
+```
+
+- `GemForgeOpenedEvent` (server, tick thread): a Kiln client says its forge screen opened (`Refresh` false), stays open
+  (every 5 s), or an action on an offered gem just ended (`Refresh` true). `Forge` is the nearest Shroud Forge within 12 m
+  of the player, or none. When the screen closes, every offer to the player is withdrawn.
+- `Gems.OfferChestGems(player, holder, options)`: offers every loose gem in `holder` (a gem item, one of it, with its own
+  item entity) to `player` for `Lifetime` (default 30 s, up to 120 s), with `PayFrom` (Insert, Upgrade) and `ReturnTo`
+  (Recycle's essence). Each gem gets a token Kiln mints (random, never reused); the result lists them. An offer of the
+  same slot replaces the older one; at most 256 live offers per player. `Gems.WithdrawChestGems(player, holder)` takes
+  your mod's offers back; your mod's offers also go when it unloads.
+- **What the server checks when the player acts.** The player's request is the game's own: it names the gem's real slot
+  in the chest. Kiln's hook on the game's gem handler finds the offer by player and slot, consumes the request (the game
+  runs nothing for it) and runs the action through the code path above with the offer's holder, payer and return; when
+  it runs, Kiln checks again that the slot still holds the offered gem entity and item at the offered level, that the
+  carrier is in the player's own inventories, and that the forge is a Shroud Forge, and the payment and the move happen
+  in the game's one transaction. Each offer is used once. A request that names a gem outside the player's own
+  inventories without a live offer to that player (forged, stale, another player's, withdrawn) is consumed and nothing
+  moves, from the first offer in a world on (before any offer the game's own behaviour is unchanged). A
+  `GemCraftingEvent` handler sees and can cancel an offered gem's action like any other forge action of the player;
+  `GemCraftedEvent` follows with `ByCode` false.
+- **What the player sees.** A refused action changes nothing on the forge screen (the game has no message for it); a
+  Kiln client shows a toast with the reason ("Gem Forge: the payers cannot pay the forge's cost").
+- **Clients.** The offers travel over Kiln's channel `kiln:gemsources` (not required: a client without it joins and sees
+  the game's own list). A client lists them only with `ui.gemforge.sources` ([../ui-gemforge.md](../ui-gemforge.md#chest-gems-in-the-gems-grid)),
+  and its hooks go in only when this server sent rows: a vanilla client, an older Kiln, or a server that never offers
+  leaves the forge screen exactly as the game's. Nothing a client sends is authority: it says only that the screen is
+  open and which materials its price test asked about.
+- Chests in unloaded parts of the world are out of reach (their inventories are not there); offer only what is loaded.
 
 ### Free and changed costs
 `GemCraftOptions.Cost` changes what the player pays, for creative tools, quest rewards or a mod's own prices:
@@ -67,19 +147,19 @@ does not fit), the player keeps the essence and `Message` says so.
 
 ### Results
 `GemCraftResult`: `Status`, `Action`, `Player`, `Forge`, `Carrier`, `Gem`, `LevelBefore`, `LevelAfter` (Recycle: 0),
-`Paid`, `Received` (Recycle), `Message`. Statuses:
+`Paid` (what the payers paid), `Received` (Recycle: what reached `ReturnTo`), `Message`. Statuses:
 
 | Status | Meaning |
 |---|---|
 | `Done` | it happened |
 | `Refused` | the game's own checks refused it; also when 256 actions are waiting (try again in a step) |
-| `NotEnough` | the player cannot pay |
+| `NotEnough` | the payers (the player by default) cannot pay |
 | `NoForge` | the forge entity is no Shroud Forge |
-| `NotFound` | the carrier, its socket or the gem is not where the call says, a ref is stale, or the item is not a gem |
+| `NotFound` | the carrier, its socket or the gem is not where the call says, a ref is stale, a holder is no container, or the item is not a gem; an offered gem's slot no longer holds it at the offered level |
 | `Occupied` | Socket: the socket holds a gem already; Unsocket: it is empty |
-| `NoRoom` | Unsocket: no free slot on the player's Generic pages (a worn backpack's pages count); a free or changed cost: no room for the game's price |
+| `NoRoom` | Unsocket: no free slot on the player's Generic pages (a worn backpack's pages count), or in `ReturnTo`; a free or changed cost: no room for the game's price |
 | `MaxLevel` | Upgrade: at the gem's own cap or the forge's maximum level |
-| `Unavailable`, `Dropped` | `gems.craft` went off, or the player left / the world closed before it ran |
+| `Unavailable`, `Dropped` | `gems.craft` (or, for payers and returns, `gems.payers`) went off, or the player left / the world closed before it ran |
 
 ## Events
 ```csharp
@@ -109,8 +189,20 @@ Events.On<GemCraftedEvent>(e =>
   `GemSocketChangedEvent` sees every change of a socket by polling, a few steps later (gems.md, "Which event for what":
   each forge action that changes a socket shows up in both).
 
+## Capability rows
+| Row | Kind | What it says |
+|---|---|---|
+| `gems.craft` | sigdb feature (server; a hosting client composes it) | the four actions, their events and the forgeless return |
+| `gems.payers` | sigdb feature (`server.d/gems-forge.json`, since 0.2.0-dev.29.15) | `PayFrom` and `ReturnTo` other than the player: the five call sites of the handler Kiln's mid hooks sit on (its three payments, its unslot move, Recycle's give), each checked before hooking to be the call the static analysis measured. kiln-items.dll lowers it (`faulted`) when a hook cannot go in; Kiln.Abilities lowers it (`service-older`) with a kiln-items.dll before 0.2.0-dev.29.15 |
+| `gems.sources` | managed, session (Kiln.Abilities, since 0.2.0-dev.29.15) | `Gems.OfferChestGems`, `WithdrawChestGems`, `GemForgeOpenedEvent`: needs `gems.craft`, kiln.gemcraft's appended part (`service-older` before 0.2.0-dev.29.15) and kiln.net; pending until the server world runs |
+| `ui.gemforge.sources` | sigdb feature (client, since 0.2.0-dev.29.15) | the offered rows in the GEMS grid ([../ui-gemforge.md](../ui-gemforge.md#chest-gems-in-the-gems-grid)) |
+
 ## Limits
 - Server side only. On a game client that joined someone else's world, `gems.craft` is off.
+- Offered chest gems are loose gems only: a weapon in a chest with a gem in it is not listed (the game's list shows only
+  the player's own carriers). Insert, Upgrade and Recycle work on them; Remove (Unslot) names no gem slot.
+- `BaseStorage` follows the game's rule for crafting from base storage: the base the player stands in, and the
+  CanAccessInventories right of the player's user group.
 - The forge screen of the player's game shows Kiln's actions only as the inventory updates (no animation for code
   actions on the player's screen; the forge itself plays its action sequence, as for a player's click).
 - Gems on rings and armour: the game's action accepts any carrier with a socket ([gems-sockets.md](gems-sockets.md) adds
@@ -119,6 +211,10 @@ Events.On<GemCraftedEvent>(e =>
 
 ## For native code
 `native/core/abi/services/kiln_gemcraft.h` (`kiln.gemcraft` v1, in kiln-items.dll): `submit`, `cancel`, `hold`, `held`,
-`decide`, `watch`, `crafted`, `status`. `KILN_GEM_RETURN` (an Unslot alone, forge 0, no holder) takes a gem out of any
+`decide`, `watch`, `crafted`, `status`; appended in 0.2.0-dev.29.15 (check `header.size`): `extras` (which appended parts
+run), `offer`, `withdraw`, `sources`, `payers`. `KilnGemRequest` gained `gem_holder`, `carrier_holder`, `pay_from`
+(`KILN_GEM_PAY_*`), `pay_holder`, `return_to` (a request of the first version's size, `KILN_GEM_REQUEST_V1_SIZE`, reads
+them as 0); `KilnGemCraft.flags` gained `KILN_GEMCRAFT_SOURCE` (an offered gem's action: `ticket` is the offer's token,
+reported by `crafted` whatever its status) and `KILN_GEMCRAFT_ROUTED`. `KILN_GEM_RETURN` (an Unslot alone, forge 0, no holder) takes a gem out of any
 carrier in the player's own inventories without a forge and free: what `Gems.ReturnSocketedGems` uses for sockets the
 forge does not list. Evidence and the handler's layout: [docs/re/gems-forge.md](../../re/gems-forge.md).

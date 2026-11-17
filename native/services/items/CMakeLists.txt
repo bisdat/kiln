@@ -1,5 +1,7 @@
 kiln_service(items items.cpp engine.cpp pide.cpp moves.cpp xfer.cpp names.cpp stamps.cpp instances.cpp equip.cpp wear.cpp toolwear.cpp toolwear_table.cpp
              setsnap.cpp sets.cpp setexec.cpp gems.cpp stations.cpp)
+# gems.cpp: the offered gems' tokens come from the system's random generator
+target_link_libraries(kiln-items PRIVATE bcrypt)
 
 # Host tests (no game): the move / ledger / rule / name logic, and the transfer hooks against a fake inventory world.
 # Run under Wine: native/services/items/tests/run.sh

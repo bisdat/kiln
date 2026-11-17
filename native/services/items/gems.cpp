@@ -18,6 +18,7 @@
 #include "gems.h"
 
 #include <windows.h>
+#include <bcrypt.h>
 
 #include <algorithm>
 #include <atomic>
@@ -39,13 +40,18 @@
 #include "services/kiln_caps.h"
 #include "services/kiln_gemcraft.h"
 #include "services/kiln_players.h"
+#include "services/kiln_stations.h"
 
-static_assert(sizeof(KilnGemRequest) == 56 && offsetof(KilnGemRequest, gem_slot) == 24, "kiln_gemcraft.h: KilnGemRequest (managed mirror)");
+static_assert(sizeof(KilnGemRequest) == 80 && offsetof(KilnGemRequest, gem_slot) == 24 &&
+                  offsetof(KilnGemRequest, gem_holder) == KILN_GEM_REQUEST_V1_SIZE && offsetof(KilnGemRequest, return_to) == 72,
+              "kiln_gemcraft.h: KilnGemRequest (managed mirror)");
+static_assert(sizeof(KilnGemSource) == 80 && offsetof(KilnGemSource, slot) == 16 && offsetof(KilnGemSource, token) == 64,
+              "kiln_gemcraft.h: KilnGemSource (managed mirror)");
 static_assert(sizeof(KilnGemCraft) == 232 && offsetof(KilnGemCraft, gem_slot) == 40 && offsetof(KilnGemCraft, ticket) == 88 &&
                   offsetof(KilnGemCraft, message) == 104,
               "kiln_gemcraft.h: KilnGemCraft (managed mirror)");
 static_assert(sizeof(KilnGemcraftStatus) == 188, "kiln_gemcraft.h: KilnGemcraftStatus (managed mirror)");
-static_assert(sizeof(KilnGemcraftApi) == 8 + 8 * 8, "kiln_gemcraft.h: the table (managed mirror)");
+static_assert(sizeof(KilnGemcraftApi) == 8 + 13 * 8, "kiln_gemcraft.h: the table (managed mirror)");
 
 namespace kitems {
 namespace {
@@ -57,7 +63,10 @@ using gems::Snapshot;
 #define LOGE(...) items_log(KILN_LOG_ERROR, __VA_ARGS__)
 
 constexpr const char* kFeature = "gems.craft";
+constexpr const char* kPayersFeature = "gems.payers";  // the handler's payment, unslot move and Recycle's give, moved
 constexpr const char* kProgram = "kiln_items_gems";
+constexpr uint32_t kMaxPayers = 64;
+constexpr uint64_t kSourceGrace = 250;  // a lapsed offer's page is still refused (not passed on) for this many steps
 constexpr uint32_t kMaxPending = 256;
 constexpr uint32_t kPerPlayerStep = 4;
 constexpr uint64_t kTimeoutSteps = 250;
@@ -116,6 +125,11 @@ struct Game {
     int64_t item_category = 0;
     uint32_t attr_level = 0, attr_cap = 0, mult_key = 0;
     bool ok = false;
+    // gems.payers: the handler's own calls Kiln's mid hooks sit on (the call instructions; their arguments are set)
+    uintptr_t pay_slot = 0, pay_unslot = 0, pay_upgrade = 0;  // removeItems(out, tx, owner = r8, item = r9, count = [rsp+0x20])
+    uintptr_t recycle_give = 0;                                // addItems(out, tx, owner = r8, slot, item, count, ...)
+    uintptr_t unslot_call = 0;                                 // UnslotMove(out, tx, src, owner = r9, ...)
+    bool payers = false;
 };
 Game G;
 
@@ -142,13 +156,22 @@ std::atomic<uint32_t> g_hook_faults{0};
 
 // code actions
 struct Request {
-    uint64_t ticket;
-    KilnOwner owner;
-    KilnGemRequest r;
-    uint64_t submitted;
+    uint64_t ticket = 0;
+    KilnOwner owner = 0;
+    KilnGemRequest r{};
+    uint64_t submitted = 0;
     bool session = false;
     uint32_t handle = 0;
     uint64_t verified_step = 0;
+    // pay_from: the payers resolved in Pre of the step it runs in (entities in order; empty: the player as the game)
+    std::vector<uint32_t> payers;
+    bool payers_ready = false;
+    // a player's action on an offered gem (gem sources): the offer's token, what the gem was when offered, the input
+    // version the player sent
+    bool source = false;
+    uint64_t token = 0;
+    uint32_t want_item = 0, want_level = 0, version = 0;
+    uint32_t material = 0;  // the material the player's request named (an offered gem's action); 0: the forge's essence
 };
 struct Callback {
     KilnGemDoneFn fn;
@@ -172,15 +195,49 @@ alignas(16) uint8_t g_input[kInputBytes];
 alignas(16) uint8_t g_consumed[kConsumedBytes];
 thread_local bool t_in_code = false;  // this thread runs a code action: the hook passes it straight through
 
+// gem sources (offers): g_mu; g_sources_used mirrors g_sources.used() for the hook's lock-free first test
+gems::SourceBook g_sources;
+std::atomic<bool> g_sources_used{false};
+std::atomic<uint32_t> g_sources_refused{0}, g_sources_taken{0};
+
+// gems.payers: the route of the code action this thread runs (set around the handler call, read by the mid hooks)
+struct Route {
+    bool active = false;
+    uint32_t player = 0, material = 0, return_to = 0;
+    uint32_t n = 0;                        // payers (0: the game's own payment)
+    uint32_t payer[kMaxPayers] = {};
+    uint32_t have[kMaxPayers] = {};        // each payer's count of the material right before the handler
+    uint32_t moved_pay = 0, moved_return = 0, faults = 0;  // what the mid hooks did (log, judge)
+};
+thread_local Route t_route;
+kiln::MidHook2 g_mid_pay[3], g_mid_give, g_mid_unslot;
+std::atomic<int> g_route_hooks{0};  // 0 not installed, 1 installed, 2 failed (gems.payers off)
+char g_payers_why[160] = "";        // g_mu
+
 void set_detail(const char* s) {
     std::lock_guard lock(g_mu);
     std::snprintf(g_detail, sizeof g_detail, "%s", s);
 }
 
+void lower_row(const char* row, uint32_t reason, const char* why) {
+    const auto* caps = static_cast<const KilnCapsApi*>(g_api ? g_api->service(str(KILN_CAPS_SERVICE), KILN_CAPS_VERSION) : nullptr);
+    if (caps && caps->report) caps->report(g_owner, str(row), KILN_CAP_UNAVAILABLE, reason, str(why));
+}
+
 void lower(uint32_t reason, const char* why) {
     set_detail(why);
-    const auto* caps = static_cast<const KilnCapsApi*>(g_api ? g_api->service(str(KILN_CAPS_SERVICE), KILN_CAPS_VERSION) : nullptr);
-    if (caps && caps->report) caps->report(g_owner, str(kFeature), KILN_CAP_UNAVAILABLE, reason, str(why));
+    lower_row(kFeature, reason, why);
+}
+
+// gems.payers off (its hooks failed, or the feature did not resolve): requests that need it are refused, the rest runs.
+void payers_off(uint32_t reason, const char* why) {
+    {
+        std::lock_guard lock(g_mu);
+        std::snprintf(g_payers_why, sizeof g_payers_why, "%s", why);
+    }
+    g_route_hooks.store(2, std::memory_order_release);
+    lower_row(kPayersFeature, reason, why);
+    LOGE("gems: payers and returns other than the player are off: %s", why);
 }
 
 void switch_off(const char* why) {
@@ -368,8 +425,10 @@ uint32_t game_price(const View& v, const Act& a, const Forge& f, uint32_t level)
     }
 }
 
-// The state an action is judged by. `look_pide`: a gem entity to look for in the player's inventories.
-void snapshot(const View& v, KilnEntity player, const Act& a, uint32_t material, uint32_t essence, uint32_t look_pide, Snapshot* s) {
+// The state an action is judged by. `look_pide`: a gem entity to look for in the player's inventories (or in `ret`, where
+// an unslotted gem and Recycle's essence go when that is not the player).
+void snapshot(const View& v, KilnEntity player, const Act& a, uint32_t material, uint32_t essence, uint32_t look_pide, Snapshot* s,
+              KilnEntity ret = 0) {
     *s = Snapshot{};
     if (a.weapon) {
         uint32_t item = 0, pide = 0;
@@ -390,10 +449,39 @@ void snapshot(const View& v, KilnEntity player, const Act& a, uint32_t material,
         if (const auto* info = gem_item ? static_cast<const uint8_t*>(E.item_find(gem_item, v.items)) : nullptr)
             s->gem_category = info[G.item_category];
     }
+    if (ret && ret != player) {
+        s->material = count_in(v, player, material, 0, 0).a;
+        const Counts r = count_in(v, ret, essence, 0, look_pide);
+        s->essence = r.a;
+        s->gem_in_player = r.has_pide;  // in the return holder
+        return;
+    }
     const Counts c = count_in(v, player, material, essence, look_pide);
     s->material = c.a;
     s->essence = c.b;
     s->gem_in_player = c.has_pide;
+}
+
+// Each payer's count of `material` (read_pages on the handler's accessors), into the route.
+void route_counts(const View& v, Route* rt) {
+    for (uint32_t i = 0; i < rt->n; ++i) rt->have[i] = count_in(v, rt->payer[i], rt->material, 0, 0).a;
+}
+uint64_t route_total(const Route& rt) {
+    uint64_t n = 0;
+    for (uint32_t i = 0; i < rt.n; ++i) n += rt.have[i];
+    return n;
+}
+
+// An entity a request names as a holder (where the gem or the carrier is, or a return) is an initialized inventory that
+// is not another player's or an NPC's: a container the caller vouches for, or the player itself.
+bool holder_ok(const View& v, KilnEntity holder, KilnEntity player, const char** why) {
+    if (holder == player) return true;
+    const uint8_t* setup = other(v, v.it[gems::I_SETUP], holder, kSetupSize);
+    if (!setup) return *why = "the holder has no inventory (not loaded, or no container)", false;
+    if (E.setup_initialized > 0 && E.setup_initialized < kSetupSize && !setup[E.setup_initialized])
+        return *why = "the holder's inventory is not initialized", false;
+    if (setup[0x50] & 0x03) return *why = "the holder is another player or an NPC, not a container", false;
+    return true;
 }
 
 uint32_t item_of_pide(const View& v, uint32_t pide) {
@@ -446,6 +534,91 @@ void call_handler(uint64_t* it) {
     else G.action(it);
 }
 
+// ================================================================================ gems.payers: the route ====
+// Mid hooks on three kinds of the handler's own calls. They act only while this thread runs a code action with a route
+// (t_route.active), and only on the call that pays the player's material, adds to the player or unslots to the player;
+// every other call (players' own actions, other threads) passes untouched.
+
+// The payment: removeItems(out = rcx, tx = rdx, owner = r8d, item = r9d, count = [rsp+0x20]) through the game's wrapper.
+// Kiln takes from the first payers itself on the same transaction and points the game's call at the last one.
+void on_pay(KilnRegisters& r) {
+    Route& rt = t_route;
+    if (!rt.active || rt.n == 0) return;
+    if (static_cast<uint32_t>(r.r8) != rt.player || static_cast<uint32_t>(r.r9) != rt.material) return;
+    auto* count = reinterpret_cast<uint32_t*>(r.rsp + 0x20);
+    std::vector<std::pair<uint32_t, uint32_t>> payers;
+    for (uint32_t i = 0; i < rt.n; ++i) payers.push_back({rt.payer[i], rt.have[i]});
+    const gems::PayPlan p = gems::plan_payment(payers, *count);
+    void* tx = reinterpret_cast<void*>(r.rdx);
+    uint32_t missing = 0;
+    for (const gems::PayStep& s : p.before) {
+        Result12 out{};
+        E.remove_items(&out, tx, s.payer, rt.material, 0, s.take);
+        missing += out.error ? s.take : std::min(out.value, s.take);
+    }
+    rt.moved_pay = *count;
+    r.r8 = p.last;
+    *count = p.last_take + missing;  // a part another payer did not give is missing at the last: the game rolls back
+}
+
+// Recycle's essence: addItems(out, tx, owner = r8d, ...).
+void on_give(KilnRegisters& r) {
+    Route& rt = t_route;
+    if (!rt.active || !rt.return_to || static_cast<uint32_t>(r.r8) != rt.player) return;
+    r.r8 = rt.return_to;
+    ++rt.moved_return;
+}
+
+// Unslot's move of the socket's gem: UnslotMove(out, tx, src, owner = r9d, ...).
+void on_unslot(KilnRegisters& r) {
+    Route& rt = t_route;
+    if (!rt.active || !rt.return_to || static_cast<uint32_t>(r.r9) != rt.player) return;
+    r.r9 = rt.return_to;
+    ++rt.moved_return;
+}
+
+// Tick thread (Pre), once, when a request first needs the route. False: gems.payers is off now.
+bool install_route_hooks() {
+    const int st = g_route_hooks.load(std::memory_order_acquire);
+    if (st != 0) return st == 1;
+    if (!G.payers) return false;
+    const char* names[3] = {"gems/PaySlot", "gems/PayUnslot", "gems/PayUpgrade"};
+    const uintptr_t pays[3] = {G.pay_slot, G.pay_unslot, G.pay_upgrade};
+    // each site is the call instruction the static RE measured: E8 to the function it must call (docs/re/gems-forge.md)
+    uintptr_t pay_fn = 0, give_fn = 0, unslot_fn = 0;
+    const bool targets = g_api->symbol(str("gems/PayMaterial"), &pay_fn) == KILN_OK &&
+                         g_api->symbol(str("items/InventoryAddItems"), &give_fn) == KILN_OK &&
+                         g_api->symbol(str("gems/UnslotMove"), &unslot_fn) == KILN_OK;
+    auto calls = [](uintptr_t site, uintptr_t fn) {
+        if (!site || !fn) return false;
+        const auto* b = reinterpret_cast<const uint8_t*>(site);
+        int32_t rel = 0;
+        std::memcpy(&rel, b + 1, 4);
+        return b[0] == 0xE8 && site + 5 + static_cast<intptr_t>(rel) == fn;
+    };
+    if (!targets || !calls(G.pay_slot, pay_fn) || !calls(G.pay_unslot, pay_fn) || !calls(G.pay_upgrade, pay_fn) ||
+        !calls(G.recycle_give, give_fn) || !calls(G.unslot_call, unslot_fn)) {
+        payers_off(KILN_CAP_REASON_SYMBOL_MISSING, "a gems.payers site is not the call the static analysis measured (another detour there, or another build)");
+        return false;
+    }
+    bool ok = true;
+    for (int i = 0; i < 3 && ok; ++i) ok = g_mid_pay[i].install(g_api, g_owner, pays[i], &on_pay, names[i]);
+    if (ok) ok = g_mid_give.install(g_api, g_owner, G.recycle_give, &on_give, "gems/RecycleGive");
+    if (ok) ok = g_mid_unslot.install(g_api, g_owner, G.unslot_call, &on_unslot, "gems/UnslotMoveCall");
+    if (!ok) {
+        for (auto& h : g_mid_pay) h.revoke();
+        g_mid_give.revoke();
+        g_mid_unslot.revoke();
+        payers_off(KILN_CAP_REASON_FAULTED, "the mid hooks on the gem handler's payment, unslot move or Recycle give could not be installed (see kiln.log)");
+        return false;
+    }
+    g_route_hooks.store(1, std::memory_order_release);
+    LOGI("gems: payers and returns routed (mid hooks on the handler's payment %p %p %p, give %p, unslot %p)",
+         reinterpret_cast<void*>(G.pay_slot), reinterpret_cast<void*>(G.pay_unslot), reinterpret_cast<void*>(G.pay_upgrade),
+         reinterpret_cast<void*>(G.recycle_give), reinterpret_cast<void*>(G.unslot_call));
+    return true;
+}
+
 // ================================================================================ the hook (players' actions) ====
 
 Act act_of(const uint8_t* input) {
@@ -467,6 +640,7 @@ struct HookCall {
     Forge forge;
     Snapshot before;
     KilnGemCraft info{};
+    bool foreign = false;  // (offers were made) the request names a gem outside the player's own inventories
 };
 
 bool new_action(uint64_t* it, uint32_t* version) {
@@ -490,6 +664,23 @@ bool prepare_impl(uint64_t* it, HookCall* h, char* why) {
     describe(h->v, h->player, h->act, h->forge, h->before, &h->info);
     h->info.version = h->version;
     h->info.step = current_step();
+    if (g_sources_used.load(std::memory_order_acquire) && h->act.source) {
+        PageSet ps;
+        bool init = false;
+        std::vector<uint32_t> pages;
+        bool carrier_own = false;
+        if (read_pages(h->v.a, h->player, &ps, &init)) {
+            for (uint32_t i = 0; i < ps.n; ++i) {
+                pages.push_back(ps.p[i].entity);
+                for (uint32_t k = 0; k < kSlotsPerPage; ++k)
+                    carrier_own |= h->act.weapon && !is_empty(ps.p[i].s[k]) && pide_of(ps.p[i].s[k]) == h->act.weapon;
+            }
+            h->foreign = !gems::own_gem_slot(h->act.source, h->act.weapon, carrier_own, pages);
+        } else {  // the player's pages cannot be read: at least a page an offer named is never passed on
+            std::lock_guard lock(g_mu);
+            h->foreign = g_sources.names_page(h->player, KILN_SLOT_INVENTORY(h->act.source));
+        }
+    }
     return true;
 }
 bool prepare(uint64_t* it, HookCall* h, bool* go, char* why) {
@@ -541,22 +732,79 @@ void cancel_call(uint64_t* it) {
 }
 
 // The player and the unconsumed version of one call, nothing else read: what the book needs when nothing new is held.
-bool who_impl(uint64_t* it, uint32_t* player, uint32_t* version) {
+bool who_impl(uint64_t* it, uint32_t* player, uint32_t* version, uint64_t* source) {
     if (!new_action(it, version)) return false;
     void* ctx = reinterpret_cast<void*>(it[gems::I_CTX]);
     if (!ctx) return false;
     uint32_t e = 0;
     G.current_entity(ctx, &e);
     *player = e;
+    if (source) *source = act_of(reinterpret_cast<const uint8_t*>(it[gems::I_INPUT])).source;
     return e != 0;
 }
-bool who(uint64_t* it, uint32_t* player, uint32_t* version, bool* go) {
+bool who(uint64_t* it, uint32_t* player, uint32_t* version, bool* go, uint64_t* source = nullptr) {
     __try {
-        *go = who_impl(it, player, version);
+        *go = who_impl(it, player, version, source);
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
+}
+
+// A player's request naming an offered gem: consumed by the caller (the handler runs on a copy without a forge), and
+// queued as a code action with the offer's holder, payers and return. False: it cannot be queued (refused instead).
+bool queue_offered(const HookCall& h, const gems::SourceEntry& e) {
+    Request q;
+    q.ticket = items_next_ticket();
+    q.r.size = sizeof q.r;
+    q.r.action = h.act.action;
+    q.r.player = h.player;
+    q.r.carrier = h.act.action == KILN_GEM_ACTION_SLOT ? h.act.weapon : 0;
+    q.r.gem_slot = h.act.source;
+    q.r.gem = e.s.gem;
+    q.r.forge = h.act.forge;
+    q.r.gem_holder = e.s.holder;
+    q.r.pay_from = h.act.action == KILN_GEM_ACTION_RECYCLE ? KILN_GEM_PAY_PLAYER : e.s.pay_from;
+    q.r.pay_holder = q.r.pay_from == KILN_GEM_PAY_HOLDER ? e.s.pay_holder : 0;
+    q.r.return_to = e.s.return_to;
+    if (!gems::request_valid(q.r)) return false;
+    q.submitted = current_step();
+    q.source = true;
+    q.token = e.s.token;
+    q.want_item = e.s.item;
+    q.want_level = e.s.level;
+    q.version = h.version;
+    q.material = h.act.material;
+    if (h.player >= 1 && h.player <= kMaxPlayer && g_players) {
+        q.session = true;
+        KilnPlayer p{};
+        p.size = sizeof p;
+        if (g_players->get(h.player, &p) == KILN_OK && p.state == KILN_PLAYER_IN_GAME) q.handle = p.handle;
+    }
+    if (g_pending.size() >= kMaxPending) return false;
+    g_pending.push_back(std::move(q));
+    g_pending_n.store(static_cast<uint32_t>(g_pending.size()), std::memory_order_release);
+    return true;
+}
+
+// The hook's answer to a request naming a gem outside the player's own inventories (offers were made in this world):
+// true = queued as the offer's code action, false = refused. Either way the caller consumes the player's request.
+bool take_foreign(const HookCall& h, uint64_t step) {
+    std::lock_guard lock(g_mu);
+    const gems::SourceEntry* e = g_sources.find(h.player, h.act.source, step);
+    if (gems::foreign_verdict(h.act.action, e) == gems::Foreign::Refuse) return false;
+    const gems::SourceEntry copy = *e;
+    g_sources.take(copy.s.token);  // one request per offer: a duplicate finds nothing
+    if (!queue_offered(h, copy)) return false;
+    g_sources_taken.fetch_add(1);
+    return true;
+}
+
+void refused_foreign(uint32_t player, uint64_t slot, uint32_t action, const char* why) {
+    const uint32_t n = g_sources_refused.fetch_add(1);
+    if (n < 20 || (n & 0xff) == 0)
+        LOGW("gems: player %u's %s naming the gem slot %u:%u outside the player's inventories was refused (%s); refusals so far: %u",
+             player, gems::action_name(action), KILN_SLOT_INVENTORY(slot), KILN_SLOT_INDEX(slot), why, n + 1);
 }
 
 gems::HoldBook::Now book_on(uint32_t player, uint32_t version, uint64_t step, const KilnGemCraft* info, bool hold_new) {
@@ -572,15 +820,30 @@ void __fastcall hook_gem_action(uint64_t* it) {
     const bool holding = step <= g_hold_until.load(std::memory_order_acquire);
     const bool watching = g_watch.load(std::memory_order_acquire);
     const bool book = g_book_n.load(std::memory_order_acquire) != 0;
-    if (!holding && !watching && !book) return g_hook.call<void>(it);
+    const bool sources = g_sources_used.load(std::memory_order_acquire);
+    if (!holding && !watching && !book && !sources) return g_hook.call<void>(it);
     const bool on = g_layout.load(std::memory_order_acquire) == 1 && !g_off.load(std::memory_order_acquire);
-    if (!on || (!holding && !watching)) {
+    if (!on || (!holding && !watching && !sources)) {
+        uint32_t player = 0, version = 0;
+        uint64_t source = 0;
+        bool go = false;
+        const bool read = (book || sources) && who(it, &player, &version, &go, &source) && go;
+        // The forge actions are off (a fault, a changed layout): a request naming a page an offer named is refused
+        // without reading the world, never passed on to run unchecked.
+        if (read && sources && !on && source) {
+            bool named = false;
+            {
+                std::lock_guard lock(g_mu);
+                named = g_sources.names_page(player, KILN_SLOT_INVENTORY(source));
+            }
+            if (named) {
+                refused_foreign(player, source, 0, "the forge actions are off");
+                return cancel_call(it);
+            }
+        }
         // Only the book: an answer given while holding still stands (a cancel stays a cancel after the handler's mod
         // stopped listening, holding lapsed or gems.craft went off); nothing new is held, read or reported.
-        uint32_t player = 0, version = 0;
-        bool go = false;
-        if (book && who(it, &player, &version, &go) && go &&
-            book_on(player, version, step, nullptr, false) == gems::HoldBook::Now::Cancel)
+        if (read && book && book_on(player, version, step, nullptr, false) == gems::HoldBook::Now::Cancel)
             return cancel_call(it);
         return g_hook.call<void>(it);
     }
@@ -595,6 +858,26 @@ void __fastcall hook_gem_action(uint64_t* it) {
     if (!go) {
         if (why[0]) switch_off(why);
         return g_hook.call<void>(it);
+    }
+    if (h.foreign) {
+        // A gem outside the player's own inventories: only an offer makes it a request Kiln runs (the offer's holder,
+        // payers and return, everything checked again when it runs); anything else is consumed, nothing moves.
+        bool offered = false;
+        {
+            std::lock_guard lock(g_mu);
+            offered = gems::foreign_verdict(h.act.action, g_sources.find(h.player, h.act.source, step)) == gems::Foreign::Offered;
+        }
+        if (!offered) {
+            refused_foreign(h.player, h.act.source, h.act.action, "no live offer of that gem to this player");
+            return cancel_call(it);
+        }
+        if (holding || book) {  // GemCraftingEvent sees it as any other forge action of the player
+            const gems::HoldBook::Now now = book_on(h.player, h.version, step, &h.info, holding);
+            if (now == gems::HoldBook::Now::Hold) return;
+            if (now == gems::HoldBook::Now::Cancel) return cancel_call(it);
+        }
+        if (!take_foreign(h, step)) refused_foreign(h.player, h.act.source, h.act.action, "the offer lapsed, was used, or no room to queue it");
+        return cancel_call(it);
     }
     if (holding || book) {
         const gems::HoldBook::Now now = book_on(h.player, h.version, step, &h.info, holding);
@@ -709,6 +992,7 @@ struct CodeRun {
     KilnGemRequest r;
     KilnGemCraft out;
     bool fault;
+    const Request* q;  // the queued request (payers, the offer it came from)
 };
 
 void finish_status(KilnGemCraft* c, int32_t status, const char* why) {
@@ -786,26 +1070,42 @@ void run_code_impl(CodeRun* cr) {
         return finish_status(c, KILN_GEM_UNAVAILABLE, why);
     }
     const KilnEntity player = cr->player;
-    const KilnEntity holder = r.holder ? r.holder : player;
-    // where the carrier and the gem are: the holder's inventories (the player's own, or the one the caller names)
-    PageSet ps;
-    bool init = false;
-    if (!read_pages(*cr->acc, holder, &ps, &init) || !init)
-        return finish_status(c, KILN_GEM_NOT_FOUND, holder == player ? "the player has no initialized inventory" : "the holder has no initialized inventory");
-    auto find_pide = [&](uint32_t pide) -> uint64_t {
+    const Request* q = cr->q;
+    // where the gem and the carrier are (each its own holder, both default to `holder`, then to the player), where an
+    // unslotted gem or Recycle's essence goes, and who pays: containers the caller vouches for, or the player
+    const KilnEntity base = r.holder ? r.holder : player;
+    const KilnEntity gem_holder = r.gem_holder ? r.gem_holder : base;
+    const KilnEntity carrier_holder = r.carrier_holder ? r.carrier_holder : base;
+    const KilnEntity ret = r.return_to ? r.return_to : player;
+    const char* bad = "";
+    if ((r.gem_slot && !holder_ok(v, gem_holder, player, &bad)) || (r.carrier && !holder_ok(v, carrier_holder, player, &bad)) ||
+        !holder_ok(v, ret, player, &bad) || (r.pay_holder && !holder_ok(v, r.pay_holder, player, &bad)))
+        return finish_status(c, KILN_GEM_NOT_FOUND, bad);
+    PageSet cps, gps;
+    bool cinit = false, ginit = false;
+    if (r.carrier && (!read_pages(*cr->acc, carrier_holder, &cps, &cinit) || !cinit))
+        return finish_status(c, KILN_GEM_NOT_FOUND, carrier_holder == player ? "the player has no initialized inventory"
+                                                                              : "the carrier's holder has no initialized inventory");
+    if (r.gem_slot && (!read_pages(*cr->acc, gem_holder, &gps, &ginit) || !ginit))
+        return finish_status(c, KILN_GEM_NOT_FOUND, gem_holder == player ? "the player has no initialized inventory"
+                                                                          : "the gem's holder has no initialized inventory");
+    auto find_pide = [](const PageSet& ps, uint32_t pide) -> uint64_t {
         for (uint32_t i = 0; i < ps.n; ++i)
             for (uint32_t k = 0; k < kSlotsPerPage; ++k)
                 if (!is_empty(ps.p[i].s[k]) && pide_of(ps.p[i].s[k]) == pide) return ps.p[i].s[k].slot;
         return 0;
     };
-    auto in_holder = [&](uint64_t slot) {
+    auto in_pages = [](const PageSet& ps, uint64_t slot) {
         for (uint32_t i = 0; i < ps.n; ++i)
             if (ps.p[i].entity == KILN_SLOT_INVENTORY(slot)) return true;
         return false;
     };
-    if (r.carrier && !find_pide(r.carrier))
-        return finish_status(c, KILN_GEM_NOT_FOUND, "the carrier is not in the holder's inventories");
-    if (r.gem_slot && !in_holder(r.gem_slot)) return finish_status(c, KILN_GEM_NOT_FOUND, "the gem slot is not one of the holder's");
+    if (r.carrier && !find_pide(cps, r.carrier))
+        return finish_status(c, KILN_GEM_NOT_FOUND, carrier_holder == player ? "the carrier is not in the player's inventories"
+                                                                             : "the carrier is not in its holder's inventories");
+    if (r.gem_slot && !in_pages(gps, r.gem_slot))
+        return finish_status(c, KILN_GEM_NOT_FOUND, gem_holder == player ? "the gem slot is not one of the player's"
+                                                                          : "the gem slot is not one of its holder's");
     if (r.flags & KILN_GEM_RETURN) return run_return(cr, v, c);  // holder 0: the player's own inventories (request_valid)
     Act a;
     a.action = r.action;
@@ -815,21 +1115,65 @@ void run_code_impl(CodeRun* cr) {
     if (!r.gem_slot && r.carrier && (r.action == KILN_GEM_ACTION_UPGRADE || r.action == KILN_GEM_ACTION_RECYCLE))
         a.source = KILN_SLOT_ID(r.carrier, 0);  // a socketed gem, as the client names it: the carrier's socket
     const Forge f = forge_of(v, r.forge);
-    a.material = f.essence;
+    a.material = q && q->material ? q->material : f.essence;
     const uint32_t essence = r.action == KILN_GEM_ACTION_RECYCLE ? f.essence : 0;
     Snapshot b;
-    snapshot(v, player, a, a.material, essence, 0, &b);
+    snapshot(v, player, a, a.material, essence, 0, &b, ret);
     if (r.gem && b.gem_pide != r.gem) return finish_status(c, KILN_GEM_NOT_FOUND, "the gem is not the item entity the request names");
+    if (q && q->source) {  // an offered gem: the one the offer named, unchanged since
+        if (b.source_item != q->want_item) return finish_status(c, KILN_GEM_NOT_FOUND, "the offered gem's slot holds another item now");
+        if (!b.level_known || b.level != q->want_level)
+            return finish_status(c, KILN_GEM_NOT_FOUND, "the offered gem's level changed since it was offered");
+    }
     describe(v, player, a, f, b, c);
     c->ticket = 0;
     c->flags |= KILN_GEMCRAFT_BY_CODE | ((r.flags & KILN_GEM_FREE) ? KILN_GEMCRAFT_FREE : 0) | ((r.flags & KILN_GEM_COST) ? KILN_GEMCRAFT_COST : 0);
     const uint32_t price = f.ok ? game_price(v, a, f, b.level) : 0;
     const gems::CostPlan plan = gems::plan_cost(r, a.action == KILN_GEM_ACTION_RECYCLE ? 0 : price);
-    const uint32_t have = plan.give_material ? price : b.material;  // a free or replaced cost: Kiln gives the game's price
+    // the route: payers other than the player (their counts now), a return other than the player
+    const bool routed = gems::request_routed(r);
+    Route rt;
+    if (routed) {
+        if (g_route_hooks.load(std::memory_order_acquire) != 1)
+            return finish_status(c, KILN_GEM_UNAVAILABLE, "gems.payers is off: payers and returns other than the player cannot run");
+        c->flags |= KILN_GEMCRAFT_ROUTED;
+        rt.player = player;
+        rt.material = a.material;
+        rt.return_to = ret != player ? ret : 0;
+        const bool pays = r.action != KILN_GEM_ACTION_RECYCLE && !(r.flags & (KILN_GEM_FREE | KILN_GEM_COST)) &&
+                          r.pay_from != KILN_GEM_PAY_PLAYER;
+        if (pays && q)
+            for (uint32_t e : q->payers) {
+                if (rt.n >= kMaxPayers) break;
+                if (e != player && !holder_ok(v, e, player, &bad)) continue;  // a payer gone since Pre pays nothing
+                rt.payer[rt.n++] = e;
+            }
+        if (pays && rt.n == 0)
+            return finish_status(c, KILN_GEM_NOT_ENOUGH, r.pay_from == KILN_GEM_PAY_HOLDER ? "the paying container is gone"
+                                                     : "no base storage pays: the player stands in no base, or lacks the right to use its inventories");
+        route_counts(v, &rt);
+    }
+    const bool route_pays = routed && rt.n > 0;
+    const uint32_t have = plan.give_material ? price : route_pays ? static_cast<uint32_t>(std::min<uint64_t>(route_total(rt), UINT32_MAX)) : b.material;
+    bool room = true;
+    if (r.action == KILN_GEM_ACTION_UNSLOT) {
+        if (ret == player) {
+            room = free_generic(v, player);
+        } else {  // a container: any empty slot of its pages
+            PageSet rps;
+            bool rinit = false;
+            room = !read_pages(*cr->acc, ret, &rps, &rinit) || !rinit;  // unreadable: let the game decide
+            for (uint32_t i = 0; i < rps.n && !room; ++i)
+                for (uint32_t k = 0; k < kSlotsPerPage && !room; ++k) room = is_empty(rps.p[i].s[k]);
+        }
+    }
     const char* pre = "";
-    const int32_t st = gems::precheck(r.action, b, f.max_level, a.action == KILN_GEM_ACTION_RECYCLE ? 0 : price, have,
-                                      r.action != KILN_GEM_ACTION_UNSLOT || free_generic(v, player), &pre);
-    if (st != KILN_GEM_DONE) return finish_status(c, st, pre);
+    const int32_t st = gems::precheck(r.action, b, f.max_level, a.action == KILN_GEM_ACTION_RECYCLE ? 0 : price, have, room, &pre);
+    if (st != KILN_GEM_DONE) {
+        if (st == KILN_GEM_NOT_ENOUGH && route_pays) return finish_status(c, st, "the payers cannot pay the forge's cost");
+        if (st == KILN_GEM_NO_ROOM && ret != player) return finish_status(c, st, "no free slot for the gem where it should go");
+        return finish_status(c, st, pre);
+    }
     if (plan.take_count && !plain_item(v, plan.take_item))
         return finish_status(c, KILN_GEM_REFUSED, "a replaced cost must be a plain item (not gear or a gem with an entity of its own)");
     // a replaced cost: taken first (all or nothing), then the game's price given (the game takes it back)
@@ -847,16 +1191,32 @@ void run_code_impl(CodeRun* cr) {
                                  "no room for the forge's payment Kiln hands over for a free or replaced cost");
         }
     }
-    // the game's action, on our request
+    // the game's action, on our request (with the route: the payment, the unslot move and Recycle's give moved)
     Snapshot b2;
-    snapshot(v, player, a, a.material, essence, 0, &b2);
+    snapshot(v, player, a, a.material, essence, 0, &b2, ret);
+    const uint64_t paid_before = route_pays ? route_total(rt) : 0;
     set_request(a);
     t_in_code = true;
+    if (routed) {
+        rt.active = true;
+        t_route = rt;
+    }
     call_handler(cr->h);
+    const Route used = t_route;
+    t_route = Route{};
     t_in_code = false;
     Snapshot after;
-    snapshot(v, player, a, a.material, essence, b2.socket_pide, &after);
-    const gems::Outcome o = gems::judge(r.action, b2, after);
+    snapshot(v, player, a, a.material, essence, b2.socket_pide, &after, ret);
+    gems::Outcome o = gems::judge(r.action, b2, after);
+    if (route_pays) {  // what the payers paid (counted, not assumed)
+        Route now = used;
+        route_counts(v, &now);
+        const uint64_t paid_after = route_total(now);
+        o.paid = paid_before > paid_after ? static_cast<uint32_t>(std::min<uint64_t>(paid_before - paid_after, UINT32_MAX)) : 0;
+    }
+    if (routed && used.moved_return == 0 && ret != player &&
+        (r.action == KILN_GEM_ACTION_UNSLOT || r.action == KILN_GEM_ACTION_RECYCLE) && o.status == KILN_GEM_DONE)
+        LOGW("gems: the %s ran but Kiln's return hook did not see its give (player %u, return %u)", gems::action_name(r.action), player, ret);
     c->level_after = o.level_after;
     c->step = current_step();
     // Kiln's gift of the game's price: whatever of it the game did not take goes back (measured: Upgrade commits its
@@ -876,15 +1236,15 @@ void run_code_impl(CodeRun* cr) {
         c->yield_count = o.got;
         if (plan.replace_yield) {
             // the forge's yield goes, the replacement comes: only once the yield is really back in Kiln's hands
-            const int32_t t = give_take(*cr->acc, true, player, essence, o.got, w);
+            const int32_t t = give_take(*cr->acc, true, ret, essence, o.got, w);
             if (t != KILN_ITEMS_DONE) {
                 std::snprintf(c->message, sizeof c->message, "the forge's essence could not be swapped for the replacement: it was kept");
             } else {
-                const int32_t g = give_take(*cr->acc, false, player, plan.yield_item, plan.yield_count, w);
+                const int32_t g = give_take(*cr->acc, false, ret, plan.yield_item, plan.yield_count, w);
                 c->yield_item = plan.yield_count ? plan.yield_item : 0;
                 c->yield_count = plan.yield_count;
                 if (g != KILN_ITEMS_DONE) {
-                    restore(*cr->acc, false, player, essence, o.got, "the forge's essence");  // the replacement did not fit
+                    restore(*cr->acc, false, ret, essence, o.got, "the forge's essence");  // the replacement did not fit
                     c->yield_item = o.got ? essence : 0;
                     c->yield_count = o.got;
                     std::snprintf(c->message, sizeof c->message, "the replacement did not fit: the forge's essence was given");
@@ -920,7 +1280,23 @@ KilnGemCraft result_base(const Request& q) {
     c.gem_slot = q.r.gem_slot;
     c.ticket = q.ticket;
     c.flags = KILN_GEMCRAFT_BY_CODE;
+    if (q.source) {
+        c.flags = KILN_GEMCRAFT_SOURCE;
+        c.ticket = q.token;
+        c.version = q.version;
+    }
     return c;
+}
+
+// A request that ends without running (dropped, off, the world closed): a code action's result goes to its callback,
+// an offered gem's to crafted() (its player's client is told). g_mu held.
+void push_ended(const Request& q, const KilnGemCraft& c) {
+    if (!q.source) {
+        g_done.push_back(c);
+    } else if (g_crafted.size() < kMaxCrafted) {
+        g_crafted.push_back(c);
+        g_crafted_total.fetch_add(1);
+    }
 }
 
 void KILN_CALL each(KilnProgramCtx* ctx, uint64_t* it, KilnEntity player, void*) {
@@ -931,7 +1307,8 @@ void KILN_CALL each(KilnProgramCtx* ctx, uint64_t* it, KilnEntity player, void*)
         std::lock_guard lock(g_mu);
         const uint64_t now = current_step();
         for (auto i = g_pending.begin(); i != g_pending.end() && n < kPerPlayerStep;) {
-            if (i->r.player == player && (!i->session || i->verified_step == now)) {
+            if (i->r.player == player && (!i->session || i->verified_step == now) &&
+                (i->payers_ready || !gems::request_routed(i->r))) {
                 batch[n++] = *i;
                 i = g_pending.erase(i);
             } else {
@@ -966,6 +1343,7 @@ void KILN_CALL each(KilnProgramCtx* ctx, uint64_t* it, KilnEntity player, void*)
         cr.h = h;
         cr.player = player;
         cr.r = batch[i].r;
+        cr.q = &batch[i];
         cr.out = result_base(batch[i]);
         if (g_off.load() || g_layout.load() != 1) {
             finish_status(&cr.out, KILN_GEM_UNAVAILABLE, why[0] ? why : "gems.craft is off (see kiln.log)");
@@ -982,10 +1360,19 @@ void KILN_CALL each(KilnProgramCtx* ctx, uint64_t* it, KilnEntity player, void*)
         }
         if (cr.out.status != KILN_GEM_DONE) cr.out.cost_item = cr.out.cost_count = cr.out.yield_item = cr.out.yield_count = 0;  // a refusal pays nothing
         cr.out.ticket = batch[i].ticket;
+        if (batch[i].source) {  // a player's action on an offered gem: the player's, reported with the offer's token
+            cr.out.flags = (cr.out.flags & ~KILN_GEMCRAFT_BY_CODE) | KILN_GEMCRAFT_SOURCE;
+            cr.out.ticket = batch[i].token;
+            cr.out.version = batch[i].version;
+            LOGI("gems: offered gem: player %u's %s of gem %u in slot %u:%u (offer %016llx, version %u): status %d, paid %u x 0x%08x, got %u x 0x%08x%s%s",
+                 player, gems::action_name(cr.out.action), batch[i].r.gem, KILN_SLOT_INVENTORY(batch[i].r.gem_slot),
+                 KILN_SLOT_INDEX(batch[i].r.gem_slot), static_cast<unsigned long long>(batch[i].token), batch[i].version, cr.out.status,
+                 cr.out.cost_count, cr.out.cost_item, cr.out.yield_count, cr.out.yield_item, cr.out.message[0] ? ": " : "", cr.out.message);
+        }
         if (!cr.out.step) cr.out.step = current_step();
         std::lock_guard lock(g_mu);
-        g_done.push_back(cr.out);
-        if (cr.out.status == KILN_GEM_DONE && g_crafted.size() < kMaxCrafted) {
+        if (!batch[i].source) g_done.push_back(cr.out);
+        if ((cr.out.status == KILN_GEM_DONE || batch[i].source) && g_crafted.size() < kMaxCrafted) {
             g_crafted.push_back(cr.out);
             g_crafted_total.fetch_add(1);
         }
@@ -1042,6 +1429,37 @@ void check_layout() {
     }
     g_layout.store(1);
     LOGI("gems: equipment_actions' declaration matches the gem handler's iterator (%d entries)", gems::I_COUNT);
+}
+
+// Who pays a routed request, in order (tick thread): the paying container, or the base the player stands in with its
+// crafting-stock containers in the game's order (the player needs the CanAccessInventories right, as for crafting from
+// base storage), the player first for KILN_GEM_PAY_PLAYER_THEN_BASE. Empty: nobody (the request ends NOT_ENOUGH).
+std::vector<uint32_t> resolve_payers(const KilnGemRequest& r) {
+    std::vector<uint32_t> out;
+    switch (r.pay_from) {
+        case KILN_GEM_PAY_PLAYER: return out;  // the game's own payment (a route only for the return)
+        case KILN_GEM_PAY_HOLDER: out.push_back(r.pay_holder); return out;
+        case KILN_GEM_PAY_PLAYER_THEN_BASE: out.push_back(r.player); break;
+        default: break;
+    }
+    bool allowed = false;
+    if (g_players) {
+        KilnPlayer p{};
+        p.size = sizeof p;
+        allowed = g_players->get(r.player, &p) == KILN_OK && (p.permissions & KILN_PLAYER_CAN_ACCESS_INVENTORIES) != 0;
+    }
+    const auto* st = static_cast<const KilnStationsApi*>(g_api->service(str(KILN_STATIONS_SERVICE), KILN_STATIONS_VERSION));
+    if (!allowed || !st || st->header.size < sizeof(KilnStationsApi)) return out;
+    KilnStationBase b{};
+    b.size = sizeof b;
+    if (st->base_of(r.player, &b) != KILN_OK) return out;  // the player stands in no base
+    KilnEntity list[kMaxPayers];
+    uint32_t n = 0;
+    const KilnResult rc = st->base_storage(b.index, list, kMaxPayers, &n);
+    if (rc != KILN_OK && rc != KILN_ERR_BUFFER_TOO_SMALL) return out;
+    for (uint32_t i = 0; i < n && i < kMaxPayers && out.size() < kMaxPayers; ++i)
+        if (list[i] && list[i] != r.player) out.push_back(list[i]);
+    return out;
 }
 
 bool session_still(KilnEntity player, uint32_t handle, bool* readable) {
@@ -1105,9 +1523,11 @@ KilnResult KILN_CALL t_status(KilnGemcraftStatus* out) {
     return KILN_OK;
 }
 
-KilnResult KILN_CALL t_submit(KilnOwner owner, const KilnGemRequest* r, KilnGemDoneFn done, void* user, uint64_t* out_ticket) {
+KilnResult KILN_CALL t_submit(KilnOwner owner, const KilnGemRequest* in, KilnGemDoneFn done, void* user, uint64_t* out_ticket) {
     if (out_ticket) *out_ticket = 0;
-    if (!r || !gems::request_valid(*r)) return KILN_ERR_INVALID_ARGUMENT;
+    KilnGemRequest norm{};  // an older caller's shorter request: the appended fields read 0
+    if (!gems::normalize_request(in, &norm) || !gems::request_valid(norm)) return KILN_ERR_INVALID_ARGUMENT;
+    const KilnGemRequest* r = &norm;
     const int state = g_state.load();
     static std::atomic<uint32_t> refusals{0};
     auto refuse = [&](const char* why) {
@@ -1115,6 +1535,7 @@ KilnResult KILN_CALL t_submit(KilnOwner owner, const KilnGemRequest* r, KilnGemD
         return KILN_ERR_UNAVAILABLE;
     };
     if (!G.ok || g_off.load() || g_layout.load() == 2) return refuse("gems.craft is off (see kiln.log)");
+    if (gems::request_routed(*r) && (!G.payers || g_route_hooks.load() == 2)) return refuse("gems.payers is off (see kiln.log)");
     if (!g_w || !g_tx || state == KILN_ITEMS_PROGRAM_NONE || state == KILN_ITEMS_PROGRAM_BROKEN)
         return refuse("the program kiln_items_gems is not registered or broke");
     KilnSessionInfo si{};
@@ -1210,9 +1631,98 @@ KilnResult KILN_CALL t_crafted(KilnGemCraft* out, uint32_t capacity, uint32_t* o
     return g_crafted.empty() ? KILN_OK : KILN_ERR_BUFFER_TOO_SMALL;
 }
 
+// ---- 0.2.0-dev.29.15: payers and gem sources ----
+
+uint64_t random_token() {
+    uint64_t t = 0;
+    if (BCryptGenRandom(nullptr, reinterpret_cast<PUCHAR>(&t), sizeof t, BCRYPT_USE_SYSTEM_PREFERRED_RNG) != 0) return 0;
+    return t;
+}
+
+// Why gem sources cannot run here; nullptr: they can.
+const char* sources_off() {
+    if (!G.ok || g_off.load() || g_layout.load() == 2) return "gems.craft is off";
+    const int state = g_state.load();
+    if (!g_w || state == KILN_ITEMS_PROGRAM_NONE || state == KILN_ITEMS_PROGRAM_BROKEN) return "the program kiln_items_gems is not registered or broke";
+    return nullptr;
+}
+
+KilnResult KILN_CALL t_extras(uint32_t* out_flags, char* why, uint32_t why_cap) {
+    if (!out_flags) return KILN_ERR_INVALID_ARGUMENT;
+    uint32_t f = 0;
+    const char* off_sources = sources_off();
+    const bool payers = G.payers && g_route_hooks.load() != 2 && !off_sources;
+    if (payers) f |= KILN_GEMCRAFT_HAS_PAYERS;
+    if (!off_sources) f |= KILN_GEMCRAFT_HAS_SOURCES;
+    *out_flags = f;
+    if (why && why_cap) {
+        std::lock_guard lock(g_mu);
+        const char* w = off_sources ? off_sources : !payers ? (g_payers_why[0] ? g_payers_why : "gems.payers did not resolve on this build") : "";
+        std::snprintf(why, why_cap, "%s", w);
+    }
+    return KILN_OK;
+}
+
+KilnResult KILN_CALL t_offer(KilnOwner owner, KilnGemSource* sources, uint32_t count) {
+    if (count && !sources) return KILN_ERR_INVALID_ARGUMENT;
+    if (sources_off()) return KILN_ERR_UNAVAILABLE;
+    for (uint32_t i = 0; i < count; ++i)
+        if (sources[i].pay_from != KILN_GEM_PAY_PLAYER && (!G.payers || g_route_hooks.load() == 2)) return KILN_ERR_UNAVAILABLE;
+    if (!count) return KILN_OK;
+    // the hook must see every player's request from now on (requests naming a gem outside the player's inventories)
+    char why[160] = "";
+    if (!install_hook(why, sizeof why)) {
+        lower(KILN_CAP_REASON_FAULTED, why);
+        return KILN_ERR_UNAVAILABLE;
+    }
+    const char* bad = "";
+    std::lock_guard lock(g_mu);
+    if (!g_sources.offer(owner, sources, count, current_step(), &random_token, &bad)) {
+        LOGW("gems: an offer of %u gem(s) was refused: %s", count, bad);
+        return std::strstr(bad, "more than") ? KILN_ERR_BUFFER_TOO_SMALL : KILN_ERR_INVALID_ARGUMENT;
+    }
+    if (!g_sources_used.exchange(true)) LOGI("gems: gem sources in use: players' forge requests naming a gem outside their own inventories run only through an offer from now on");
+    return KILN_OK;
+}
+
+KilnResult KILN_CALL t_withdraw(KilnOwner owner, KilnEntity player, KilnEntity holder, uint32_t* out_count) {
+    std::lock_guard lock(g_mu);
+    const uint32_t n = g_sources.withdraw(owner, player, holder);
+    if (out_count) *out_count = n;
+    return KILN_OK;
+}
+
+KilnResult KILN_CALL t_sources(KilnEntity player, KilnGemSource* out, uint32_t capacity, uint32_t* out_count) {
+    if (!out_count || !player || (capacity && !out)) return KILN_ERR_INVALID_ARGUMENT;
+    std::lock_guard lock(g_mu);
+    uint32_t written = 0;
+    const uint32_t n = g_sources.live_for(player, current_step(), [&](const KilnGemSource& s) {
+        if (written < capacity) out[written++] = s;
+    });
+    *out_count = n;
+    return n > capacity ? KILN_ERR_BUFFER_TOO_SMALL : KILN_OK;
+}
+
+KilnResult KILN_CALL t_payers(KilnEntity player, uint32_t pay_from, KilnEntity pay_holder, KilnEntity* out, uint32_t capacity,
+                              uint32_t* out_count) {
+    if (!out_count || !player || (capacity && !out) || pay_from > KILN_GEM_PAY_PLAYER_THEN_BASE ||
+        ((pay_from == KILN_GEM_PAY_HOLDER) != (pay_holder != 0)))
+        return KILN_ERR_INVALID_ARGUMENT;
+    KilnGemRequest r{};
+    r.player = player;
+    r.pay_from = pay_from;
+    r.pay_holder = pay_holder;
+    const std::vector<uint32_t> list = resolve_payers(r);
+    *out_count = static_cast<uint32_t>(list.size());
+    const uint32_t n = std::min<uint32_t>(capacity, *out_count);
+    if (n) std::memcpy(out, list.data(), n * sizeof(KilnEntity));
+    return *out_count > capacity ? KILN_ERR_BUFFER_TOO_SMALL : KILN_OK;
+}
+
 const KilnGemcraftApi kTable = {
     {sizeof(KilnGemcraftApi), KILN_GEMCRAFT_VERSION},
     &t_status, &t_submit, &t_cancel, &t_hold, &t_held, &t_decide, &t_watch, &t_crafted,
+    &t_extras, &t_offer, &t_withdraw, &t_sources, &t_payers,
 };
 
 template <typename F>
@@ -1268,6 +1778,15 @@ void gems_resolve() {
         if (g_api->feature(str(kFeature))) lower(KILN_CAP_REASON_SYMBOL_MISSING, why);
     }
     LOGI("gems: forge actions %s", G.ok ? "possible (needs kiln.world)" : "OFF");
+    // gems.payers: the handler's payment calls, its unslot move and Recycle's give (mid hooks, installed on first use)
+    G.payers = G.ok && g_api->feature(str(kPayersFeature)) && sym("gems/PaySlot", &G.pay_slot) && sym("gems/PayUnslot", &G.pay_unslot) &&
+               sym("gems/PayUpgrade", &G.pay_upgrade) && sym("gems/RecycleGive", &G.recycle_give) &&
+               sym("gems/UnslotMoveCall", &G.unslot_call) && E.remove_items;
+    if (!G.payers) {
+        std::snprintf(g_payers_why, sizeof g_payers_why, "%s", !G.ok ? "gems.craft is off" : "gems.payers did not resolve on this build");
+        if (G.ok && g_api->feature(str(kPayersFeature))) lower_row(kPayersFeature, KILN_CAP_REASON_SYMBOL_MISSING, g_payers_why);
+    }
+    LOGI("gems: payers and returns other than the player %s", G.payers ? "possible" : "OFF");
 }
 
 void gems_register(const KilnWorldApi* w) {
@@ -1320,6 +1839,8 @@ void gems_pre(uint64_t step) {
     check_layout();
     const bool holding = step <= g_hold_until.load();
     std::vector<std::pair<uint64_t, std::pair<KilnEntity, uint32_t>>> check;  // ticket, player, handle
+    std::vector<std::pair<uint64_t, KilnGemRequest>> route;                   // ticket, request: payers to resolve
+    bool any_routed = false;
     {
         std::lock_guard lock(g_mu);
         if (!holding) g_book.release_all();
@@ -1334,15 +1855,27 @@ void gems_pre(uint64_t step) {
                 finish_status(&c, off ? KILN_GEM_UNAVAILABLE : KILN_GEM_DROPPED,
                               off ? "gems.craft went off" : "the player's program did not run it within 10 s");
                 c.step = step;
-                g_done.push_back(c);
+                push_ended(*i, c);
                 i = g_pending.erase(i);
                 continue;
             }
             if (i->session) check.push_back({i->ticket, {i->r.player, i->handle}});
+            if (gems::request_routed(i->r)) {
+                any_routed = true;
+                route.push_back({i->ticket, i->r});
+            }
             ++i;
         }
+        g_sources.expire(step, kSourceGrace);
         g_pending_n.store(static_cast<uint32_t>(g_pending.size()), std::memory_order_release);
     }
+    // gems.payers' mid hooks go in when a request first needs them (tick thread); without them those requests end
+    const bool routes = any_routed && install_route_hooks();
+    // the payers of each routed request, as the game's crafting finds base storage, read now (tick thread): the step
+    // the request runs in
+    std::vector<std::pair<uint64_t, std::vector<uint32_t>>> payers;
+    if (routes)
+        for (auto& [ticket, r] : route) payers.push_back({ticket, resolve_payers(r)});
     // the session each request was made for, read now from the game's record (tick thread)
     std::vector<std::pair<uint64_t, bool>> verdicts;
     for (auto& [ticket, ph] : check) {
@@ -1351,6 +1884,25 @@ void gems_pre(uint64_t step) {
     }
     {
         std::lock_guard lock(g_mu);
+        if (any_routed && !routes)
+            for (auto i = g_pending.begin(); i != g_pending.end();) {
+                if (!gems::request_routed(i->r)) {
+                    ++i;
+                    continue;
+                }
+                KilnGemCraft c = result_base(*i);
+                finish_status(&c, KILN_GEM_UNAVAILABLE, "gems.payers is off: payers and returns other than the player cannot run");
+                c.step = step;
+                push_ended(*i, c);
+                i = g_pending.erase(i);
+            }
+        for (auto& [ticket, list] : payers)
+            for (Request& q : g_pending)
+                if (q.ticket == ticket) {
+                    q.payers = std::move(list);
+                    q.payers_ready = true;
+                    break;
+                }
         for (auto& [ticket, good] : verdicts)
             for (auto i = g_pending.begin(); i != g_pending.end(); ++i) {
                 if (i->ticket != ticket) continue;
@@ -1360,7 +1912,7 @@ void gems_pre(uint64_t step) {
                     KilnGemCraft c = result_base(*i);
                     finish_status(&c, KILN_GEM_DROPPED, "the player is not in game (or another session holds the slot)");
                     c.step = step;
-                    g_done.push_back(c);
+                    push_ended(*i, c);
                     g_pending.erase(i);
                 }
                 break;
@@ -1376,12 +1928,14 @@ void gems_world_closed() {
         for (const Request& q : g_pending) {
             KilnGemCraft c = result_base(q);
             finish_status(&c, KILN_GEM_DROPPED, "the server world closed");
-            g_done.push_back(c);
+            push_ended(q, c);
         }
         g_pending.clear();
         g_pending_n.store(0, std::memory_order_release);
         g_book.clear();
         book_count();
+        g_sources.clear();
+        g_sources_used.store(false);
     }
     g_layout.store(0);
     g_view_storage.store(0);

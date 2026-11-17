@@ -23,16 +23,38 @@ constexpr uint32_t kMaxHoldSteps = 250;
 constexpr uint32_t kWeaponGemCategory = 15;  // ItemCategory WeaponGem
 
 // ---- requests ----
+// A caller's request as Kiln keeps it: the caller's bytes (at most sizeof), the appended fields 0 when its size does not
+// cover them (a 0.2.0-dev.29.11..14 caller). False: shorter than the first version (nothing is read past `size`).
+inline bool normalize_request(const KilnGemRequest* in, KilnGemRequest* out) {
+    std::memset(out, 0, sizeof *out);
+    if (!in || in->size < KILN_GEM_REQUEST_V1_SIZE) return false;
+    std::memcpy(out, in, in->size < sizeof *out ? in->size : sizeof *out);
+    out->size = sizeof *out;
+    return true;
+}
+
+// The request needs Kiln's routing of the handler's payment or return (gems.payers): a payer or a return that is not the
+// player. A free cost pays nothing, so its pay_from routes nothing.
+inline bool request_routed(const KilnGemRequest& r) {
+    const bool pays = r.action != KILN_GEM_ACTION_RECYCLE && !(r.flags & (KILN_GEM_FREE | KILN_GEM_COST));
+    return (pays && r.pay_from != KILN_GEM_PAY_PLAYER) || (r.return_to != 0 && r.return_to != r.player);
+}
+
 inline bool request_valid(const KilnGemRequest& r) {
-    if (r.size < sizeof(KilnGemRequest) || r.reserved[0] || r.reserved[1] || r.player == 0) return false;
+    if (r.size < sizeof(KilnGemRequest) || r.reserved[0] || r.reserved[1] || r.reserved2 || r.player == 0) return false;
     if (r.action < KILN_GEM_ACTION_SLOT || r.action > KILN_GEM_ACTION_RECYCLE) return false;
     if (r.flags & ~(KILN_GEM_FREE | KILN_GEM_COST | KILN_GEM_RETURN)) return false;
+    if (r.pay_from > KILN_GEM_PAY_PLAYER_THEN_BASE || ((r.pay_from == KILN_GEM_PAY_HOLDER) != (r.pay_holder != 0)))
+        return false;
     if (r.flags & KILN_GEM_RETURN)  // the forgeless return: alone, an Unslot of a carrier in the player's own inventories
         return r.flags == KILN_GEM_RETURN && r.action == KILN_GEM_ACTION_UNSLOT && r.carrier != 0 && r.gem_slot == 0 &&
-               r.forge == 0 && r.holder == 0 && r.cost_item == 0 && r.cost_count == 0;
+               r.forge == 0 && r.holder == 0 && r.cost_item == 0 && r.cost_count == 0 && r.gem_holder == 0 &&
+               r.carrier_holder == 0 && r.pay_from == 0 && r.pay_holder == 0 && r.return_to == 0;
     if ((r.flags & KILN_GEM_FREE) && (r.flags & KILN_GEM_COST)) return false;
     if (r.flags & KILN_GEM_COST) {
         if (r.cost_count > kMaxCostCount || (r.cost_count != 0 && r.cost_item == 0)) return false;
+        // a replaced price is taken from the player by item id; only the game's own price goes to other payers
+        if (r.action != KILN_GEM_ACTION_RECYCLE && r.pay_from != KILN_GEM_PAY_PLAYER) return false;
     } else if (r.cost_item != 0 || r.cost_count != 0) {
         return false;
     }
@@ -444,6 +466,221 @@ inline void handler_setup(const uint64_t* h, uint32_t player, uint32_t operator_
     put(0x60, h[I_GEMSLOT]);
     put(0xA8, h[I_EV_FULL]);
     if (operator_off + 4 <= 0xF0) std::memcpy(s + operator_off, &player, 4);
+}
+
+// ---- payers (gems.payers): the handler's payment spread over several inventories on its own transaction ----
+// The game's payment is one removeItems(owner = the player, material, cost) on the action's transaction; with payers Kiln
+// takes from the payers in order: the first ones itself (removeItems on the same transaction, before the game's call),
+// and the game's own call takes the rest from the last payer that has some (its missing count then decides, as the
+// game's does: anything missing and the handler rolls the whole transaction back). `have` is each payer's count of the
+// material, read right before the handler runs.
+struct PayStep {
+    uint32_t payer = 0;  // entity
+    uint32_t take = 0;
+};
+struct PayPlan {
+    std::vector<PayStep> before;  // Kiln's own removeItems, in order
+    uint32_t last = 0;            // the payer the game's call takes from
+    uint32_t last_take = 0;       // what the game's call asks for (the rest; with a shortfall the missing part too)
+    uint32_t short_by = 0;        // what no payer has
+};
+inline PayPlan plan_payment(const std::vector<std::pair<uint32_t, uint32_t>>& payers, uint32_t cost) {
+    PayPlan p;
+    if (payers.empty()) return p;
+    uint32_t left = cost;
+    std::vector<PayStep> steps;
+    for (const auto& [payer, have] : payers) {
+        if (!left) break;
+        const uint32_t take = have < left ? have : left;
+        if (take) steps.push_back({payer, take});
+        left -= take;
+    }
+    p.short_by = left;
+    if (steps.empty()) {  // nobody has any: the game's call asks the first payer for all of it and finds it missing
+        p.last = payers.front().first;
+        p.last_take = cost;
+        return p;
+    }
+    p.last = steps.back().payer;
+    p.last_take = steps.back().take + left;
+    steps.pop_back();
+    p.before = std::move(steps);
+    return p;
+}
+inline uint64_t payers_have(const std::vector<std::pair<uint32_t, uint32_t>>& payers) {
+    uint64_t n = 0;
+    for (const auto& pr : payers) n += pr.second;
+    return n;
+}
+
+// ---- gem sources: offers of one gem in a container to one player, found again by the player's request ----
+constexpr uint32_t kMaxSourcesPerPlayer = 256;
+constexpr uint32_t kMaxSources = 4096;
+constexpr uint32_t kMaxSourceLifetime = 3000;
+
+inline bool source_valid(const KilnGemSource& s) {
+    return s.size >= sizeof(KilnGemSource) && s.player != 0 && s.holder != 0 && s.holder != s.player && s.gem != 0 &&
+           s.item != 0 && s.slot != 0 && (s.slot >> 40) == 0 && KILN_SLOT_INDEX(s.slot) <= 7 &&
+           KILN_SLOT_INVENTORY(s.slot) != 0 && s.pay_from <= KILN_GEM_PAY_PLAYER_THEN_BASE &&
+           ((s.pay_from == KILN_GEM_PAY_HOLDER) == (s.pay_holder != 0)) && s.lifetime_steps >= 1 &&
+           s.lifetime_steps <= kMaxSourceLifetime && s.reserved == 0;
+}
+
+struct SourceEntry {
+    KilnOwner owner = 0;
+    KilnGemSource s{};
+};
+
+// The book of live offers. `token` is Kiln's random source (tests pass their own); a token is never 0 and never repeats in
+// the book. Tick thread (the owner holds the service's lock around every call).
+class SourceBook {
+public:
+    // All or nothing: false (with why) and no change when an entry is bad or a player would hold too many.
+    template <class Rng>
+    bool offer(KilnOwner owner, KilnGemSource* in, uint32_t count, uint64_t step, Rng&& rng, const char** why) {
+        *why = "";
+        for (uint32_t i = 0; i < count; ++i)
+            if (!source_valid(in[i])) return *why = "an offered gem is not valid (size, player, holder, slot, gem, item, payer, lifetime)", false;
+        // the count per player after replacing the same slots
+        std::vector<std::pair<uint32_t, uint32_t>> per;  // player, live after
+        for (uint32_t i = 0; i < count; ++i) {
+            const uint32_t pl = in[i].player;
+            bool seen = false;
+            for (auto& pr : per) seen |= pr.first == pl;
+            if (seen) continue;
+            uint32_t n = 0;
+            for (const SourceEntry& e : book_)
+                if (e.s.player == pl) {
+                    bool replaced = false;
+                    for (uint32_t j = 0; j < count; ++j) replaced |= in[j].player == pl && in[j].slot == e.s.slot;
+                    n += !replaced;
+                }
+            for (uint32_t j = 0; j < count; ++j)
+                if (in[j].player == pl) {
+                    bool dup = false;
+                    for (uint32_t k = 0; k < j; ++k) dup |= in[k].player == pl && in[k].slot == in[j].slot;
+                    n += !dup;
+                }
+            per.push_back({pl, n});
+        }
+        size_t others = 0, total = 0;  // the book's entries of players not in this call, plus every player's count after
+        for (const SourceEntry& e : book_) {
+            bool listed = false;
+            for (auto& pr : per) listed |= pr.first == e.s.player;
+            others += !listed;
+        }
+        total = others;
+        for (auto& pr : per) {
+            if (pr.second > kMaxSourcesPerPlayer) return *why = "a player would hold more than 256 offered gems", false;
+            total += pr.second;
+        }
+        if (total > kMaxSources) return *why = "more than 4096 offered gems would be live", false;
+        for (uint32_t i = 0; i < count; ++i) {
+            KilnGemSource& s = in[i];
+            for (size_t k = book_.size(); k-- > 0;)
+                if (book_[k].s.player == s.player && book_[k].s.slot == s.slot) book_.erase(book_.begin() + static_cast<ptrdiff_t>(k));
+            uint64_t t = 0;
+            for (int tries = 0; tries < 16 && (t == 0 || find_token(t)); ++tries) t = rng();
+            if (t == 0 || find_token(t)) return *why = "no fresh token", false;  // a broken generator: nothing more offered
+            s.token = t;
+            s.expires_step = step + s.lifetime_steps;
+            SourceEntry e;
+            e.owner = owner;
+            e.s = s;
+            book_.push_back(e);
+        }
+        used_ = true;
+        return true;
+    }
+    // The live offer for a player's request naming `slot`; nullptr when none (or expired at `step`).
+    const SourceEntry* find(uint32_t player, uint64_t slot, uint64_t step) const {
+        for (const SourceEntry& e : book_)
+            if (e.s.player == player && e.s.slot == slot && step <= e.s.expires_step) return &e;
+        return nullptr;
+    }
+    const SourceEntry* find_token(uint64_t token) const {
+        for (const SourceEntry& e : book_)
+            if (e.s.token == token) return &e;
+        return nullptr;
+    }
+    // Removes the offer with this token (a request used it). True when it was there.
+    bool take(uint64_t token) {
+        for (size_t k = 0; k < book_.size(); ++k)
+            if (book_[k].s.token == token) {
+                book_.erase(book_.begin() + static_cast<ptrdiff_t>(k));
+                return true;
+            }
+        return false;
+    }
+    // A page entity some offer (live or lapsed but still in the book) to the player names: what the hook refuses without
+    // reading the world when the forge actions are off.
+    bool names_page(uint32_t player, uint32_t page) const {
+        for (const SourceEntry& e : book_)
+            if (e.s.player == player && KILN_SLOT_INVENTORY(e.s.slot) == page) return true;
+        return false;
+    }
+    uint32_t withdraw(KilnOwner owner, uint32_t player, uint32_t holder) {
+        uint32_t n = 0;
+        for (size_t k = book_.size(); k-- > 0;) {
+            const SourceEntry& e = book_[k];
+            if ((!owner || e.owner == owner) && (!player || e.s.player == player) && (!holder || e.s.holder == holder)) {
+                book_.erase(book_.begin() + static_cast<ptrdiff_t>(k));
+                ++n;
+            }
+        }
+        return n;
+    }
+    // A mod unloaded: its offers go.
+    void drop_owner(KilnOwner owner) { withdraw(owner, 0, 0); }
+    // Offers expired at `step` go (kept `grace` steps longer, so a request that arrives right after still finds its
+    // page in names_page and is refused rather than passed on).
+    void expire(uint64_t step, uint64_t grace) {
+        for (size_t k = book_.size(); k-- > 0;)
+            if (step > book_[k].s.expires_step + grace) book_.erase(book_.begin() + static_cast<ptrdiff_t>(k));
+    }
+    template <class F>
+    uint32_t live_for(uint32_t player, uint64_t step, F&& f) const {
+        uint32_t n = 0;
+        for (const SourceEntry& e : book_)
+            if (e.s.player == player && step <= e.s.expires_step) {
+                f(e.s);
+                ++n;
+            }
+        return n;
+    }
+    // Offers were made in this world: from now on a player's request naming a gem outside the player's own inventories
+    // runs only through a live offer.
+    bool used() const { return used_; }
+    size_t size() const { return book_.size(); }
+    void clear() {
+        book_.clear();
+        used_ = false;
+    }
+
+private:
+    std::vector<SourceEntry> book_;
+    bool used_ = false;
+};
+
+// Whether a player's request names a gem of the player's own: its slot's page is one of the player's pages, or it is the
+// socket {carrier, 0} of a carrier in the player's pages (Upgrade / Recycle of a socketed gem). `pages`: the player's
+// page entities; `carrier_own`: the request's carrier is in them.
+inline bool own_gem_slot(uint64_t slot, uint32_t weapon, bool carrier_own, const std::vector<uint32_t>& pages) {
+    if (!slot) return true;  // no slot: a socketed gem through its carrier (Unslot), judged by the carrier
+    const uint32_t page = KILN_SLOT_INVENTORY(slot);
+    if (weapon && page == weapon && KILN_SLOT_INDEX(slot) == 0) return carrier_own;
+    for (uint32_t p : pages)
+        if (p == page) return true;
+    return false;
+}
+
+// What the hook does with a player's request that names a gem outside the player's own inventories.
+enum class Foreign : uint8_t { Offered, Refuse };
+inline Foreign foreign_verdict(uint32_t action, const SourceEntry* offer) {
+    if (!offer) return Foreign::Refuse;
+    // the GEMS grid offers loose gems: Insert, Upgrade, Recycle (Unslot names no gem slot)
+    if (action != KILN_GEM_ACTION_SLOT && action != KILN_GEM_ACTION_UPGRADE && action != KILN_GEM_ACTION_RECYCLE) return Foreign::Refuse;
+    return Foreign::Offered;
 }
 
 // ---- text ----
