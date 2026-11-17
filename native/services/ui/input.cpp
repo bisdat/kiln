@@ -194,7 +194,10 @@ bool on_key(uint32_t vk, uint32_t scan, bool down, bool from_mouse = false, hold
         g_pressed_mods.store(k.mods);
         g_pressed_vk.store(vk);
     }
-    const bool consumed = dispatch_key(k, from_mouse);
+    // Issue #44: only a validated, focused native chat edit owns Up/Down.
+    // The chat router queues work for the UI thread; this WndProc never writes game memory.
+    const bool chat_kept = !from_mouse && !capturing() && chat_input_on_key(vk, k.mods, down);
+    const bool consumed = chat_kept || dispatch_key(k, from_mouse);
     if (!down) {
         g_consumed[vk] = false;
         return false;  // releases always reach the game
@@ -620,6 +623,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
             break;
         case WM_KILLFOCUS:
             if (fed) feed_focus_lost(m, w, l);
+            chat_input_window_blur();
             forget_keys();
             enqueue(h, m, w, l);
             break;
@@ -631,7 +635,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
                 if (w) feed_focus_gained();
                 else feed_focus_lost(m, w, l);
             }
-            if (!w) forget_keys();
+            if (!w) { chat_input_window_blur(); forget_keys(); }
             else keys_back();
             break;
         case WM_SETCURSOR:
