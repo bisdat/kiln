@@ -1091,6 +1091,7 @@ void run_fill(const Run& run, const Req& q, KilnStationResult* res) {
     setup_for_fill(run, r.player, pos, setup);
     char fault[128] = "";
     uint64_t from_outputs = 0;
+    std::vector<uint32_t> lenders_used;  // the stations a committed fill took from (their screens refresh too)
     const Attempts at = run_attempts(r.flags, p.planned, [&](uint32_t n) -> int32_t {
         // what the station outputs pay, last (none: the plain fill, exactly as before)
         std::vector<uint32_t> shares;
@@ -1139,6 +1140,11 @@ void run_fill(const Run& run, const Req& q, KilnStationResult* res) {
             res->change_count = 0;
             ledger(g_tx, res);
             from_outputs = lend ? shares_total(shares) : 0;
+            lenders_used.clear();
+            for (size_t k = 0; lend && k < p.in.size(); ++k)
+                if (shares[k])
+                    if (const auto by = lent.by.find(p.in[k].item); by != lent.by.end())
+                        lenders_used.insert(lenders_used.end(), by->second.begin(), by->second.end());
             if (dry) E.rollback(g_tx);
             else E.commit(g_tx);
             E.free_arrays(g_tx);
@@ -1158,7 +1164,12 @@ void run_fill(const Run& run, const Req& q, KilnStationResult* res) {
     if (at.ok) {
         res->crafts_added = at.n;
         res->crafts_after = p.loaded + at.n;
-        if (!dry && G.invalidate && run.factory_info) G.invalidate(run.factory_info, r.station);
+        if (!dry && G.invalidate && run.factory_info) {
+            G.invalidate(run.factory_info, r.station);
+            std::sort(lenders_used.begin(), lenders_used.end());
+            lenders_used.erase(std::unique(lenders_used.begin(), lenders_used.end()), lenders_used.end());
+            for (uint32_t e : lenders_used) G.invalidate(run.factory_info, e);
+        }
         if (status == KILN_STATION_DONE) return void(res->status = KILN_STATION_DONE);
         // fewer than wanted: what the plan saw, or the station's room when the game refused more
         if (at.n < p.planned) {
