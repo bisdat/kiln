@@ -117,6 +117,13 @@ missing rolls the whole transaction back. Kiln (sigdb feature `gems.payers`) put
 give at `return_to`. removeItems with a container as the owner is what the game's own crafting fill does (it takes from
 the base's stock containers on a transaction whose operator is the player, docs/re/stations.md 3.1).
 
+The payment is in the request's `materialItemId`, which the handler takes as the client sent it (no check against the
+forge). For a route with payers other than the player Kiln writes the forge's `upgradeMaterial` there (read through the
+handler's own `ShroudForge` template accessor, which also serves `kiln.gemcraft.forge_material`), so a client never
+picks what a chest pays in; the client's material counts only when the player pays, as in the game. The route (mid hooks)
+acts only while `t_in_code` and the route are set on that thread; both are cleared after the handler call, also when it
+faulted.
+
 **Does the forge pay from base storage?** No. The three payments call removeItems with the player as the owner (it walks
 the owner's InventorySetup links, docs/re/items.md 4), not `InventoryPay` / `BaseStockForPlayer` as crafting does. The
 client's price test (below) counts only the player's Generic views.

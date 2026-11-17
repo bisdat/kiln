@@ -71,8 +71,11 @@ What the client does, on measured client build 26430625 only (static analysis; s
 - A selected chest row resolves to the offered gem's view (the game would find no view for a key that is not the
   player's), so the selection, the detail panel and the action buttons work as for a gem of the player's.
 - When an offer's payer is not the player (a chest, base storage), the Insert and Upgrade price tests add what that
-  payer holds of the material, as the server last said: the button shows what the server will be able to charge. Picture
-  only: the server pays from the payers or refuses.
+  payer holds of the forge's own upgrade material, as the server last said (the only material payers other than the
+  player pay in): the button shows what the server will be able to charge. Picture only: the server pays from the
+  payers or refuses.
+- A row is listed only when the client's own item catalog knows its item as a loose gem (WeaponGem); a row of an
+  unknown item (or without a catalog) is dropped.
 - The action sends the game's own request; it names the chest gem's real slot. The server checks the offer, the slot,
   the gem and its level, the payer and the transaction; a refusal leaves the screen as it was and Kiln shows a toast with
   the reason.
@@ -80,7 +83,8 @@ What the client does, on measured client build 26430625 only (static analysis; s
 Safety: the four hooks (a link on the GEMS grid, a mid hook on the selected-row resolve, two on the price tests) go in
 only when a server sent this player rows, after each site's instruction bytes were compared with the measured ones; a
 mismatch (another game build, another tool's hook there) turns the row off for the process and the forge stays the
-game's. While no row is live every hook returns at once. Rows belong to the client world they came in (a new session or
+game's. While no row is live every hook returns at once. Kiln's client does no per-frame work for this until the forge
+screen opens (it watches screen changes; the frame watch for the 5-second keep-alive runs only while the screen is open). Rows belong to the client world they came in (a new session or
 local player drops them) and lapse with their offer (30 s by default; the server sends them again every 5 s while the
 screen is open). A client without Kiln, an older Kiln, or a Kiln client on a server that never offers sees the game's
 own forge.

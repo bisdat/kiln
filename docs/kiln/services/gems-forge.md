@@ -102,9 +102,13 @@ Events.On<GemForgeOpenedEvent>(e =>                       // the player's forge 
 
 - `GemForgeOpenedEvent` (server, tick thread): a Kiln client says its forge screen opened (`Refresh` false), stays open
   (every 5 s), or an action on an offered gem just ended (`Refresh` true). `Forge` is the nearest Shroud Forge within 12 m
-  of the player, or none. When the screen closes, every offer to the player is withdrawn.
+  of the player, or none. A client's hellos post it at most once a second per player (a close and an open count too;
+  an opening inside the second is posted when the second is over). Every offer to the player is withdrawn when the
+  screen closes, when the player leaves, and when a player joins into the same slot; an offer also belongs to the
+  player's session (kiln.players' connection handle): a later player in the same slot (the same entity id) never finds
+  it, even before it lapses. An offer to a player slot nobody is in game in is refused.
 - `Gems.OfferChestGems(player, holder, options)`: offers every loose gem in `holder` (a gem item, one of it, with its own
-  item entity) to `player` for `Lifetime` (default 30 s, up to 120 s), with `PayFrom` (Insert, Upgrade) and `ReturnTo`
+  item entity) to `player` for `Lifetime` (real time; default 30 s, 1 ms to 120 s), with `PayFrom` (Insert, Upgrade) and `ReturnTo`
   (Recycle's essence). Each gem gets a token Kiln mints (random, never reused); the result lists them. An offer of the
   same slot replaces the older one; at most 256 live offers per player. `Gems.WithdrawChestGems(player, holder)` takes
   your mod's offers back; your mod's offers also go when it unloads.
@@ -113,9 +117,18 @@ Events.On<GemForgeOpenedEvent>(e =>                       // the player's forge 
   runs nothing for it) and runs the action through the code path above with the offer's holder, payer and return; when
   it runs, Kiln checks again that the slot still holds the offered gem entity and item at the offered level, that the
   carrier is in the player's own inventories, and that the forge is a Shroud Forge, and the payment and the move happen
-  in the game's one transaction. Each offer is used once. A request that names a gem outside the player's own
-  inventories without a live offer to that player (forged, stale, another player's, withdrawn) is consumed and nothing
-  moves, from the first offer in a world on (before any offer the game's own behaviour is unchanged). A
+  in the game's one transaction. Each offer is used once. Payers other than the player pay in the forge's own upgrade
+  material (the material a client names counts only when the player pays, as in the game).
+- **What is refused once offers are in use.** From the first offer in a world on (before any offer the game's own
+  behaviour is unchanged), a player's forge request is consumed and nothing moves when it names:
+  - a carrier (the weapon) that is not in the player's own inventories (a chest's or another player's weapon), whatever
+    was offered; or
+  - a gem slot outside the player's own inventories without a live offer of that slot to that player in the player's
+    current session (forged, stale, lapsed, already used, withdrawn, another player's, or made to an earlier player in
+    the same slot).
+
+  The player's own inventories are the pages of the player's InventorySetup (backpack, worn bags, action bar, equipment),
+  the same pages `Items.Read` lists; a gem socketed in a carrier there is the player's own. A
   `GemCraftingEvent` handler sees and can cancel an offered gem's action like any other forge action of the player;
   `GemCraftedEvent` follows with `ByCode` false.
 - **What the player sees.** A refused action changes nothing on the forge screen (the game has no message for it); a
@@ -124,7 +137,8 @@ Events.On<GemForgeOpenedEvent>(e =>                       // the player's forge 
   the game's own list). A client lists them only with `ui.gemforge.sources` ([../ui-gemforge.md](../ui-gemforge.md#chest-gems-in-the-gems-grid)),
   and its hooks go in only when this server sent rows: a vanilla client, an older Kiln, or a server that never offers
   leaves the forge screen exactly as the game's. Nothing a client sends is authority: it says only that the screen is
-  open and which materials its price test asked about.
+  open (a material list on the wire is ignored). The payer counts the client gets are of the forge's own upgrade
+  material, read by the gem program (`forge_material`).
 - Chests in unloaded parts of the world are out of reach (their inventories are not there); offer only what is loaded.
 
 ### Free and changed costs
@@ -212,7 +226,9 @@ Events.On<GemCraftedEvent>(e =>
 ## For native code
 `native/core/abi/services/kiln_gemcraft.h` (`kiln.gemcraft` v1, in kiln-items.dll): `submit`, `cancel`, `hold`, `held`,
 `decide`, `watch`, `crafted`, `status`; appended in 0.2.0-dev.29.15 (check `header.size`): `extras` (which appended parts
-run), `offer`, `withdraw`, `sources`, `payers`. `KilnGemRequest` gained `gem_holder`, `carrier_holder`, `pay_from`
+run), `offer`, `withdraw`, `sources`, `payers`, `forge_material`. `KilnGemSource.lifetime_ms` / `expires_ms` are real
+time (GetTickCount64); an offer keeps the player's session and `sources` lists only the offers of the session now.
+`KilnGemRequest` gained `gem_holder`, `carrier_holder`, `pay_from`
 (`KILN_GEM_PAY_*`), `pay_holder`, `return_to` (a request of the first version's size, `KILN_GEM_REQUEST_V1_SIZE`, reads
 them as 0); `KilnGemCraft.flags` gained `KILN_GEMCRAFT_SOURCE` (an offered gem's action: `ticket` is the offer's token,
 reported by `crafted` whatever its status) and `KILN_GEMCRAFT_ROUTED`. `KILN_GEM_RETURN` (an Unslot alone, forge 0, no holder) takes a gem out of any
