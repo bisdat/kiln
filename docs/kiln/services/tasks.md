@@ -109,15 +109,30 @@ authoritative server world (the main menu, a client joined to a remote server) `
 
 ## Managed tasks
 
-The managed host runs managed tasks on the same pool, through its Kiln-internal lease table
-(`kiln.internal.tasks.host`, `native/core/src/tasks_host.h`; a managed API for mods on top of it is not part of this
-version): one pool, one set of limits and one unload rule for native and managed tasks. A managed task counts once
+The managed host runs C# tasks (`Context.Tasks`) on the same pool, through its Kiln-internal lease table
+(`kiln.internal.tasks.host`, `native/core/src/tasks_host.h`; Kiln.Host's side is `managed/Kiln.Host/Tasks.cs`): one
+pool, one set of limits and one unload rule for native and managed tasks. A managed task counts once
 against its owner's 1024 records; between its awaits it holds no worker, and its continuations are never refused by the
 cap or a drain, so a cancelled task can always finish. Its hops back to the tick run on the server world's tick before
 the Pre subscribers, in order per mod and mods in turn, at most 64 hops and 2 ms per mod and 4 ms in all per server
 step; the rest wait for the next step, never dropped. In this version hops land only on a server world's tick (a
 dedicated server, or a hosting client's server world): with no live server world (the main menu, a client joined to a
 remote server) a hop is refused at once, and the hops still pending when that world stops complete as cancelled.
+
+Kiln.Host uses the table only when it belongs to the same build: it checks the table's size and version and compares
+the core's build stamp with the one Kiln.Api was built with. On a mismatch `tasks.pool` is unavailable to C# mods, and
+`kiln.log` says why (`tasks: C# tasks are off: ...`).
+
+The core tells the host once when a managed task is quiescent: after its last segment returned and its last tick hop
+was dispatched, also for a task that was cancelled before it ever ran. Until then the host keeps the task's state and
+the load context of the mod's code alive, so a mod's assemblies are never unloaded under a running task. The core
+releases a managed task's record right after that notification, so ended C# tasks do not count against the owner's
+1024 records. A `NextGateWindow` wait belongs to the server session it was asked in: the core arms it only while that
+session is still the live one, and it never wakes in another world.
+
+A C# exception that ends a task faults only that task (`kiln.log` names the mod and the task once). It is not a handler
+fault of the mod and does not count toward the fault policy that disables a mod. When a mod unloads or is disabled, its
+tasks' cancellation is signalled first; their cancellation and `finally` continuations still run on the pool afterwards.
 
 ## Exit
 

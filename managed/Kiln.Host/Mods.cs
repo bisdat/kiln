@@ -1036,6 +1036,26 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
         }
     }
 
+    // ---- task tick hops (TaskTickDispatcher.cs) ----
+
+    /// <summary>The tick dispatcher of the mods' tasks: their tick hops run through it before the Pre handlers, apart
+    /// from <see cref="DrainPending"/>.</summary>
+    internal TaskTickDispatcher TaskTick => _taskTick ??= new TaskTickDispatcher(this);
+    private TaskTickDispatcher? _taskTick;
+
+    /// <summary>Books the time of one task tick hop to its mod's Pre cost (the hop runs before the mod's Pre handlers).
+    /// An owner that is no loaded mod (a Kiln component, a mod that just unloaded) books nothing.</summary>
+    internal void AccountTaskHop(ulong owner, long ticks)
+    {
+        foreach (var mod in _mods)
+        {
+            if (mod.Owner != owner) continue;
+            mod.PreTicks += ticks;
+            mod.TotalPreTicks += ticks;
+            return;
+        }
+    }
+
     /// <summary>Runs what was queued before this step began; work queued while draining (e.g. the next
     /// <c>await NextTick()</c>) waits for the next step. Each item faults on its own.</summary>
     private void DrainPending(LoadedMod mod)

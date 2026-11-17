@@ -15,6 +15,22 @@ internal sealed class ComponentTask
     private readonly Action<KilnTaskContext> _work;
     private KilnTask? _task;
 
+    /// <summary>The host's source of Kiln-internal owners, one per component name (the same owner for the same name);
+    /// null while no host bound the pool. A component never runs under a mod's owner.</summary>
+    internal static Func<string, ulong>? Owners;
+
+    /// <summary>A component's runner under that component's own Kiln-internal owner: what a friend assembly calls.
+    /// Nothing starts until <see cref="Start"/>.</summary>
+    /// <exception cref="KilnUnavailableException">No host bound Kiln's task pool here (tasks.pool).</exception>
+    internal static ComponentTask Create(string component, string name, Action<KilnTaskContext> work)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(component);
+        var owners = Owners ?? throw new KilnUnavailableException(TaskRun.Capability, "Kiln's task pool is not running in this process");
+        var owner = owners(component);
+        if (owner == 0) throw new KilnUnavailableException(TaskRun.Capability, $"Kiln could not create an owner for its component '{component}'");
+        return new ComponentTask(owner, component, name, work);
+    }
+
     /// <param name="owner">The component's own native owner (not a mod's); never 0.</param>
     /// <param name="component">The component, for logs and diagnostics (e.g. <c>kiln.saves</c>).</param>
     /// <param name="name">The task's name (the task name rule of <see cref="KilnTasks"/>).</param>

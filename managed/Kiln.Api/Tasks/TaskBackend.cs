@@ -58,8 +58,9 @@ internal readonly record struct LeaseRow(ulong Owner, ulong Lease, KilnTaskState
 /// refused by the owner's limits or by a seal, so a cancelled task can always finish.</para>
 /// <para>Records: the backend drops a lease's record once it is terminal (finished, or cancelled before its first
 /// segment); the host never releases one. A lease cancelled before its first segment never gets a dispatch:
-/// <see cref="Cancel"/> reports it (<see cref="KilnTaskState.Cancelled"/>), and after <see cref="SealOwner"/> the host
-/// asks <see cref="Status"/>.</para>
+/// <see cref="Cancel"/> reports it (<see cref="KilnTaskState.Cancelled"/>). The real pool also tells the host when a
+/// lease is quiescent (<see cref="TaskRun.LeaseEnded"/>, the table's <c>bind_ended</c>), which covers the leases a seal,
+/// a revoke or a session's end cancelled while they were queued.</para>
 /// <para>Misuse (arming twice, resuming a registration that is not armed, finishing outside a segment) is a bug in
 /// Kiln: the backend throws <see cref="InvalidOperationException"/> (the table's INTERNAL).</para>
 /// </remarks>

@@ -296,6 +296,7 @@ internal sealed unsafe class HostRuntime : IHostServices, IKilnBackend
         ModsBackend.Current = host._mods;
         Kiln.Testing.Tests.Starter = host.RequestTests;
         ServiceTick.HostDriven = true;  // Kiln's service tick runs from the host's Pre, not from a mod's
+        host.StartTasks();  // C# tasks on the core's task pool, through the private view's lease table (Tasks.cs)
         try
         {
             Kiln.Capabilities.Start();  // the registry's snapshot, and the identity rows that follow their sources
@@ -377,7 +378,73 @@ internal sealed unsafe class HostRuntime : IHostServices, IKilnBackend
     public void Log(LogLevel level, string text) => Log(_owner, level, text);
     public nint Service(string name, uint minVersion) => NativeCalls.WithUtf8(name, s => (nint)_api->Service(s, minVersion));
     public ulong OwnerCreate(string id) => NativeCalls.WithUtf8(id, s => _api->OwnerCreate(s));
-    public void OwnerRevoke(ulong owner) => _api->OwnerRevoke(owner);
+    public void OwnerRevoke(ulong owner)
+    {
+        HostTasks.Bound?.RetireOwner(owner);  // its tasks' cancellation is signalled before the core retires it; never waits
+        _api->OwnerRevoke(owner);
+    }
+
+    // ---- tasks (Tasks.cs) ----
+
+    /// <summary>Binds the core's task pool for C# tasks. The lease table comes from the private API view the core hands
+    /// to <see cref="Entry.Init"/>; a core without it (or of another build) leaves tasks.pool unavailable with the
+    /// reason.</summary>
+    private void StartTasks()
+    {
+        try
+        {
+            HostTasks.Start(new HostTasksEnvironment
+            {
+                Service = Service,
+                OnServerTick = () => _api->OnWorldThread != null && _api->OnWorldThread(KilnAbi.WorldServer) != 0,
+                Log = Log,
+                BuildStamp = KilnBuild.Of(typeof(Kiln.Mod).Assembly)?.Version,
+                TickHop = TaskHop,
+            });
+            ComponentTask.Owners = ComponentOwner;
+        }
+        catch (Exception e)
+        {
+            Log(LogLevel.Warn, $"tasks: C# tasks are off: {e.Message}");
+        }
+    }
+
+    private readonly Dictionary<string, ulong> _componentOwners = new(StringComparer.Ordinal);
+
+    /// <summary>One Kiln-internal owner per component, created on first use and kept for the process: never a mod's.</summary>
+    private ulong ComponentOwner(string component)
+    {
+        lock (_componentOwners)
+        {
+            if (!_componentOwners.TryGetValue(component, out var owner))
+                _componentOwners[component] = owner = OwnerCreate(component);
+            return owner;
+        }
+    }
+
+    /// <summary>One tick hop of a task, on the server world's tick before its Pre subscribers. On a client the hosted
+    /// server world drives the mods under <c>_drive</c>, and the hop is tick work like theirs.</summary>
+    private void TaskHop(ulong owner, Action hop)
+    {
+        if (!_client)
+        {
+            _mods.TaskTick.Run(owner, hop);
+            return;
+        }
+        lock (_drive)
+        {
+            var previous = Volatile.Read(ref _driver);
+            Volatile.Write(ref _driver, Environment.CurrentManagedThreadId);
+            try
+            {
+                _mods.TaskTick.Run(owner, hop);
+            }
+            finally
+            {
+                Volatile.Write(ref _driver, previous);
+            }
+        }
+    }
     public bool CanRevokeOwners => true;
 
     // ---- game log mirror (core log thread) ----

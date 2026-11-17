@@ -401,6 +401,48 @@ internal sealed class TaskRun
         Task.Publish(KilnTaskState.Cancelled, null, new OperationCanceledException($"the task '{Name}' was cancelled before it started", Token));
     }
 
+    /// <summary>The host retires the task's owner (unload, disable): the task is asked to stop, like a
+    /// <see cref="KilnTask.Cancel"/>. <paramref name="hostState"/> is what <see cref="TaskBackend.Admit"/> got.</summary>
+    internal static void CancelFromHost(object hostState)
+    {
+        if (hostState is TaskRun run) run.RequestCancel();
+    }
+
+    /// <summary>The assembly the task's work lives in (the host pins its load context while the task can run); null when
+    /// <paramref name="hostState"/> is no task.</summary>
+    internal static System.Reflection.Assembly? WorkAssemblyOf(object hostState) =>
+        hostState is TaskRun run ? run._work.Method.Module.Assembly : null;
+
+    /// <summary>The backend's end notification: the lease is quiescent, nothing of it will be dispatched again. A task
+    /// that never got a segment (cancelled while queued by a seal, a revoke or its owner's retirement, which only the
+    /// backend sees) ends Cancelled here. A task that started but never ended its lease itself (its worker faulted
+    /// natively, so the core ended the lease) ends Faulted here, so nothing waits on it for ever.</summary>
+    internal static void LeaseEnded(object hostState, KilnTaskState state)
+    {
+        if (hostState is TaskRun run) run.EndedByBackend(state);
+    }
+
+    private void EndedByBackend(KilnTaskState state)
+    {
+        bool started;
+        lock (_gate)
+        {
+            if (_finished) return;  // the usual case: the task ended its lease itself, in its last segment
+            _finished = true;
+            started = _started;
+        }
+        CancelToken();
+        if (!started || state == KilnTaskState.Cancelled)
+        {
+            Task.Publish(KilnTaskState.Cancelled, null,
+                new OperationCanceledException($"the task '{Name}' was cancelled before it {(started ? "ended" : "started")}", Token));
+            return;
+        }
+        var fault = new InvalidOperationException(
+            $"the task '{Name}' was ended by Kiln's task pool ({state}) before its work returned: its worker faulted outside managed code");
+        if (Task.Publish(KilnTaskState.Faulted, fault, null)) LogFault(fault);
+    }
+
     private void CancelToken()
     {
         if (_cts.IsCancellationRequested) return;

@@ -27,6 +27,7 @@
     <KilnSample Include="../../../mods/samples/SampleConsumer/SampleConsumer.csproj" />
     <KilnSample Include="../../../mods/samples/SampleTests/SampleTests.csproj" />
     <KilnSample Include="../../../mods/samples/SampleFaulty/SampleFaulty.csproj" />
+    <KilnSample Include="../../../mods/samples/SampleTasks/SampleTasks.csproj" />
     <ProjectReference Include="@(KilnSample)" ReferenceOutputAssembly="false" />
   </ItemGroup>
   <!-- samples.txt: the output assembly of each sample, so tests find them under any configuration/artifacts path. -->
