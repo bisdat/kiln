@@ -131,10 +131,10 @@ pointer is non-null; the managed mirror is `UiNative.TableImageEx`. The guide: [
   draws an image (a `Dummy` of the box with the picture on the window's draw list, so hover and tooltips cover the box;
   returns false); else an `ImageButton` of that id whose frame is the box's (FIT's spare room joins the frame padding),
   true when clicked. Inside a frame callback. Until the image is READY (`image_state`) the box is kept and nothing drawn (a
-  button stays clickable). Kiln.Ui draws `ItemIcon(item, size, trim: true)`, `Image(..., trim: true)` and
-  `ImageButton(..., trim: true)` with TRIM | FIT, and `Image(img, w, h, u0, v0, u1, v1)` with the UVs.
+  button stays clickable). Kiln.Ui draws `ItemIconTrimmed(item, size)`, `ImageTrimmed(...)` and
+  `ImageButtonTrimmed(...)` with TRIM | FIT, and `ImagePart(img, w, h, u0, v0, u1, v1)` with the UVs.
 - `image_opaque_rect(image, &x, &y, &width, &height)`: the opaque bounds in pixels (any pointer may be null). False: no
-  such image. Any thread. Kiln.Ui's trimmed `RenderDraw.Image` reads it and draws through kiln.render's `image` (which
+  such image. Any thread. Kiln.Ui's `RenderDraw.ImageTrimmed` reads it and draws through kiln.render's `image` (which
   already takes UVs).
 - Host tests: `tests/image_rect_test.cpp` (the bounds on synthetic icons with margins, fully transparent and opaque ones,
   odd sizes, faint pixels, random images against a full scan; UVs; fitting) and the image part of `style_host_test.cpp`

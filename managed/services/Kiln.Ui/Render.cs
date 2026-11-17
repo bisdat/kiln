@@ -413,17 +413,12 @@ public sealed unsafe class RenderDraw
         T->Image(handle, x0, y0, x1, y1, 0, 0, 1, 1, (tint ?? Color.White).Rgba);
     }
 
-    /// <summary>An image over the rectangle like <see cref="Image(UiImage, float, float, float, float, Color?)"/>; with
-    /// <paramref name="trim"/> only its art (since 0.2.0-dev.29.16): the transparent margin is left out and the art fitted
+    /// <summary>An image over the rectangle like <see cref="Image(UiImage, float, float, float, float, Color?)"/>, but only
+    /// its art (since 0.2.0-dev.29.16): the transparent margin is left out and the art fitted
     /// inside the rectangle, keeping its aspect ratio, centred. For the game's item icons (<see cref="Ui.ItemImage"/>).</summary>
-    public void Image(UiImage image, float x0, float y0, float x1, float y1, Color? tint, bool trim)
+    public void ImageTrimmed(UiImage image, float x0, float y0, float x1, float y1, Color? tint = null)
     {
         ArgumentNullException.ThrowIfNull(image);
-        if (!trim)
-        {
-            Image(image, x0, y0, x1, y1, tint);
-            return;
-        }
         int iw = image.Width, ih = image.Height;
         var px = Math.Max(Math.Abs(x1 - x0), Math.Abs(y1 - y0));
         var handle = image.Item is { } item ? ItemIcons.Handle(item, ItemIcons.TrimmedPixels(px), out iw, out ih) : image.Handle;
@@ -437,7 +432,7 @@ public sealed unsafe class RenderDraw
     /// <summary>Part of an image over the rectangle (since 0.2.0-dev.29.16): (<paramref name="u0"/>, <paramref name="v0"/>)
     /// to (<paramref name="u1"/>, <paramref name="v1"/>) in texture coordinates, 0..1 across the image (u1 &lt; u0 flips
     /// it). A sprite sheet's cell, a crop of a picture.</summary>
-    public void Image(UiImage image, float x0, float y0, float x1, float y1, float u0, float v0, float u1, float v1, Color? tint = null)
+    public void ImagePart(UiImage image, float x0, float y0, float x1, float y1, float u0, float v0, float u1, float v1, Color? tint = null)
     {
         ArgumentNullException.ThrowIfNull(image);
         var span = Math.Max(Math.Max(Math.Abs(u1 - u0), Math.Abs(v1 - v0)), 1f / 256);

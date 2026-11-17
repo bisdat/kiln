@@ -160,8 +160,8 @@ KeyBindings.Register("mymod.waypoints", "F6", screen.Toggle);       // a key ope
   theme (`Theme = ...`, [Looks and themes](#looks-and-themes-0220-dev2916)). Inside any window:
   `using (ui.Look(UiStyle.Game)) { … }`.
 - Widgets: everything in `UiDraw` (below) plus `Image` / `ImageButton` (PNG via `Ui.LoadImage`, or an item's icon via
-  `Ui.ItemImage`; `trim: true` or UVs for only part of it), `ItemIcon` ([Item icons and names](#item-icons-and-names);
-  `trim: true` without the icon's margin), `Combo`,
+  `Ui.ItemImage`; `ImageTrimmed` / `ImageButtonTrimmed` without its margin, `ImagePart` for part of it), `ItemIcon`
+  ([Item icons and names](#item-icons-and-names); `ItemIconTrimmed` without the icon's margin), `Combo`,
   `InputMultiline`, `Space`, `WindowRect`, `CloseScreen`.
 - Open from the game's menus (`Ui.Menus`), a key binding, a command or code (any thread).
 - `FullScreen = true`: the whole display, no title bar, not movable or resizable (Width/Height are ignored); draw your own
@@ -493,19 +493,20 @@ if (img != null && ui.ImageButton("pick", img, 40 * ui.Scale, 40 * ui.Scale)) Pi
   and recipes: `Stations.WorkshopName`, `Stations.RecipeName` ([services/stations.md](services/stations.md)).
 - Not square (a few lore items: 360x388): the picture keeps its shape inside the square.
 - **Trimmed** (since 0.2.0-dev.29.16): the game's icons sit small in the middle of a wide transparent margin, so at 32-40
-  pixels the art fills only part of the box. `trim: true` draws only the art, as large as fits:
+  pixels the art fills only part of the box. The `...Trimmed` calls draw only the art, as large as fits:
   ```csharp
-  ui.ItemIcon(item, 40 * ui.Scale, trim: true);                     // the art fills 40 pixels square, centred
-  ui.Image(img, 40 * ui.Scale, 40 * ui.Scale, trim: true);          // the same through Ui.ItemImage (or your own PNG)
-  if (ui.ImageButton("pick", img, 40 * ui.Scale, 40 * ui.Scale, trim: true)) Pick(item);
-  draw.Image(img, x0, y0, x1, y1, null, trim: true);                // RenderDraw (HUD layer)
+  ui.ItemIconTrimmed(item, 40 * ui.Scale);                          // the art fills 40 pixels square, centred
+  ui.ImageTrimmed(img, 40 * ui.Scale, 40 * ui.Scale);               // the same through Ui.ItemImage (or your own PNG)
+  if (ui.ImageButtonTrimmed("pick", img, 40 * ui.Scale, 40 * ui.Scale)) Pick(item);
+  draw.ImageTrimmed(img, x0, y0, x1, y1);                           // RenderDraw (HUD layer)
   ```
   The art's bounds (pixels with alpha 16 or more) are found once, when the icon is loaded; the art keeps its aspect ratio
   and is centred, and the box taken stays the size asked for (the layout is the same as untrimmed). A trimmed icon reads a
   sharper level (twice the size drawn: 40 pixels reads the 128 level), so the magnified art stays crisp. The placeholder
-  fills the box. The calls without `trim` draw exactly as before.
-- **Part of an image** (since 0.2.0-dev.29.16): `ui.Image(img, width, height, u0, v0, u1, v1)` and
-  `draw.Image(img, x0, y0, x1, y1, u0, v0, u1, v1)` draw the rectangle (u0, v0)-(u1, v1) of the picture, in 0..1 across it
+  fills the box. `ItemIcon`, `Image` and `ImageButton` draw exactly as before. (Own names, not overloads: a method group
+  released in dev.26 gains no overload.)
+- **Part of an image** (since 0.2.0-dev.29.16): `ui.ImagePart(img, width, height, u0, v0, u1, v1)` and
+  `draw.ImagePart(img, x0, y0, x1, y1, u0, v0, u1, v1)` draw the rectangle (u0, v0)-(u1, v1) of the picture, in 0..1 across it
   (a sprite sheet's cell; u1 < u0 flips it).
 - Not done: icons of buffs, skills or anything that is not an item; the item's rarity frame or count (draw them yourself);
   the icon of an item on a server (no pictures there).

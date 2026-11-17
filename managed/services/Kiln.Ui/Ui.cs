@@ -218,18 +218,13 @@ public sealed unsafe partial class UiDraw
     }
 
     /// <summary>
-    /// Draws an image like <see cref="Image(UiImage, float, float)"/>; with <paramref name="trim"/> only its art (since
-    /// 0.2.0-dev.29.16): the transparent margin around it is left out and the art is fitted inside
+    /// Draws only an image's art (since 0.2.0-dev.29.16), otherwise like <see cref="Image(UiImage, float, float)"/>: the
+    /// transparent margin around it is left out and the art is fitted inside
     /// <paramref name="width"/> x <paramref name="height"/>, keeping its aspect ratio, centred. The whole box is still taken.
     /// For the game's item icons (<see cref="Ui.ItemImage"/>), whose art sits small in the middle of a wide margin.
     /// </summary>
-    public void Image(UiImage image, float width, float height, bool trim)
+    public void ImageTrimmed(UiImage image, float width, float height)
     {
-        if (!trim)
-        {
-            Image(image, width, height);
-            return;
-        }
         ArgumentNullException.ThrowIfNull(image);
         if (!UiNative.HasGameUi) return;
         float w = width > 0 ? width : image.Width * Scale, h = height > 0 ? height : image.Height * Scale;
@@ -249,7 +244,7 @@ public sealed unsafe partial class UiDraw
     /// stretched over <paramref name="width"/> x <paramref name="height"/> (0 = that part's own size, scaled by
     /// <see cref="Scale"/>). A sprite sheet's cell, a crop of a picture.
     /// </summary>
-    public void Image(UiImage image, float width, float height, float u0, float v0, float u1, float v1)
+    public void ImagePart(UiImage image, float width, float height, float u0, float v0, float u1, float v1)
     {
         ArgumentNullException.ThrowIfNull(image);
         if (!UiNative.HasGameUi) return;
@@ -293,12 +288,10 @@ public sealed unsafe partial class UiDraw
         return T->ImageButton(Utf8.Of(id), handle, w, h) != 0;
     }
 
-    /// <summary>An image as a button, like <see cref="ImageButton(string, UiImage, float, float)"/>; with
-    /// <paramref name="trim"/> only its art, fitted inside the image's box (see <see cref="Image(UiImage, float, float, bool)"/>;
-    /// since 0.2.0-dev.29.16).</summary>
-    public bool ImageButton(string id, UiImage image, float width, float height, bool trim)
+    /// <summary>An image as a button, like <see cref="ImageButton(string, UiImage, float, float)"/>, showing only its art,
+    /// fitted inside the image's box (see <see cref="ImageTrimmed"/>; since 0.2.0-dev.29.16).</summary>
+    public bool ImageButtonTrimmed(string id, UiImage image, float width, float height)
     {
-        if (!trim) return ImageButton(id, image, width, height);
         ArgumentNullException.ThrowIfNull(image);
         if (!UiNative.HasGameUi) return false;
         float w = width > 0 ? width : image.Width * Scale, h = height > 0 ? height : image.Height * Scale;
@@ -333,17 +326,17 @@ public sealed unsafe partial class UiDraw
     }
 
     /// <summary>
-    /// Draws the game's own icon of <paramref name="item"/> like <see cref="ItemIcon(ItemId, float)"/>; with
-    /// <paramref name="trim"/> (since 0.2.0-dev.29.16) only its art: the game's icons sit small in the middle of a wide
+    /// Draws the game's own icon of <paramref name="item"/> like <see cref="ItemIcon(ItemId, float)"/>, but only its art
+    /// (since 0.2.0-dev.29.16): the game's icons sit small in the middle of a wide
     /// transparent margin, so at 32-40 pixels the art fills a fraction of the box. Trimmed, the art's own bounds (found once
     /// when the icon is loaded) fill <paramref name="size"/> pixels square, keeping their aspect ratio, centred; a sharper
     /// level of the icon is read for it. The box taken stays <paramref name="size"/> square.
     /// </summary>
-    /// <example><c>ui.ItemIcon(item, 40 * ui.Scale, trim: true);</c></example>
-    public void ItemIcon(ItemId item, float size, bool trim)
+    /// <example><c>ui.ItemIconTrimmed(item, 40 * ui.Scale);</c></example>
+    public void ItemIconTrimmed(ItemId item, float size)
     {
         var s = size > 0 ? size : 64 * Scale;
-        ItemIconBox(item, s, s, trim);
+        ItemIconBox(item, s, s, trim: true);
     }
 
     /// <summary>Whether a box of w x h at the cursor shows in the current window (an icon scrolled out of a list is neither
@@ -819,7 +812,7 @@ public static unsafe partial class Ui
     /// still gets an image: it draws the neutral placeholder.</returns>
     /// <remarks>Any thread. The icon is loaded off the render thread the first time it is drawn: the first frames show a
     /// placeholder of the same size. Kiln keeps at most 512 icons (24 MiB); icons not drawn for a second are dropped first
-    /// past that, and loaded again when drawn. See also <see cref="UiDraw.ItemIcon(ItemId, float, bool)"/> (trimmed: only the art).</remarks>
+    /// past that, and loaded again when drawn. See also <see cref="UiDraw.ItemIconTrimmed"/> (only the art).</remarks>
     [AnyThread]
     public static UiImage? ItemImage(ItemId item) => ItemIcons.View(item);
 
