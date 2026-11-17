@@ -1,5 +1,53 @@
 # Native chat input: phase-1 history groundwork
 
+## 12:06 runtime: Down applies an empty draft — post-call capture correction
+
+**Observed on 17 November 2026:** HUD Up visibly restored a saved command;
+Down **did perform EditSetText and passed widget readback**, but the original
+unsent text `draft` was cleared instead of restored:
+
+```text
+recall older entries=1 changed=1 browsing_before=0 browsing_after=1 stale_widget=0
+engine edit replacement verified (widget readback)
+recall newer entries=1 changed=1 browsing_before=1 browsing_after=0 stale_widget=1
+engine edit replacement verified (widget readback)
+```
+
+The earlier comparison bug is fixed. The remaining symptom strongly suggests
+the *value* captured as `draft_` on the first Up was empty: the adapter
+historically called `History::older(current)` with the widget contents
+**before** the original `TextInputProcess`, even though previous tests proved
+that snapshot can lag behind the visible, edited text.
+
+**Current unverified fix:** cache the caller-owned widget's text **after**
+`TextInputProcess` on non-browsing frames, independently for HUD and Social.
+On the initial Up, pass this authoritative post-call snapshot into
+`History::older` instead of the stale pre-call string. Continue applying the
+selected command through the already verified engine `EditSetText` path.
+Invalidate the per-field cache on Enter/Escape, sustained focus loss and
+unreadable/invalid snapshots. The trace now logs a bounded summary:
+
+```text
+chat history trace: capture draft from_postcall=1 bytes=5 precall_bytes=0
+```
+
+No draft content is logged. Regression tests reproduce an empty pre-call
+widget, a cached `draft`, Up followed by Down, blank drafts, and
+independent HUD/Social snapshots.
+
+**Next acceptance:** run standalone host tests and build the fork's UI DLL,
+then in a throwaway world type an unsent `draft` in HUD and use Up/Down.
+Visually, Down must return the exact original text. The expected
+`capture draft` summary is `from_postcall=1 bytes=5` and the Down
+`recall newer ... changed=1` should be followed by successful widget
+readback. If `bytes=0`, the post-call cache itself is not seeing typed input:
+**do not try to repair it by guessing offsets or direct memory writes**;
+instead investigate the game's UI flow before enabling another adapter.
+
+This revision is restricted to draft PR #2 in `bisdat/kiln` and has **not
+yet been compiled or validated in-game**. The draft remains unmerged.
+
+
 ## 12:01 in-game trace: draft restored in model, but SetText skipped
 
 At 12:01 on 17 Nov 2026, user confirmed Up visibly recalled the command
