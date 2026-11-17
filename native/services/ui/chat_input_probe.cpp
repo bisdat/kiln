@@ -42,6 +42,9 @@ bool g_editing_in_frame = false;
 bool g_was_editing = false;
 bool g_hud_focus_logged = false, g_social_focus_logged = false;
 std::string g_last_applied;
+// SetText changes the editor. The caller-owned widget buffer is updated
+// by the normal TextInputProcess, so verify only after that call returns.
+bool g_set_text_pending = false;
 
 constexpr uint64_t kEditHash = 0x72615e88968a8b89ull;
 constexpr uintptr_t kEditOffset = 0x10;
@@ -203,7 +206,10 @@ void history_before(void* widget) {
     void* state = game_state(widget);
     if (!editing(state)) return;
     std::string current;
-    if (!edit_text(state, &current)) return;
+    // The private edit bytes were proven NOT to be the visible chat string
+    // (3 control bytes in the exact game build). Only use the validated
+    // caller-owned widget buffer for the live draft and submitted text.
+    if (!widget_text(widget, &current)) return;
     if (!g_last_applied.empty() && current != g_last_applied) {
         g_history.edited();
         g_last_applied.clear();
@@ -222,17 +228,11 @@ void history_before(void* widget) {
             logf(KILN_LOG_WARN, "ui: chat history: edit replace failed; preview disabled for this process");
             return;
         }
-        std::string verified;
-        if (!edit_text(state, &verified) || verified != next) {
-            g_keys.focus(false);
-            g_history_on.store(false, std::memory_order_release);
-            logf(KILN_LOG_WARN, "ui: chat history: SetText returned but readback failed; preview disabled for this process");
-            return;
-        }
         current = next;
         g_last_applied = next;
-        if (g_trace_on.load(std::memory_order_relaxed) && g_recall_log_count.fetch_add(1) < 24)
-            logf(KILN_LOG_INFO, "ui: chat history trace: engine edit replacement verified (no text logged)");
+        g_set_text_pending = true;
+        // Post-call check in history_after(): the game's TextInputProcess
+        // first synchronizes its private edit with the outgoing widget string.
     }
 }
 
@@ -240,23 +240,40 @@ void history_before(void* widget) {
 void history_after(void* widget, void* result, bool hud) {
     void* state = game_state(widget);
     if (!state) return;
+    if (g_set_text_pending) {
+        g_set_text_pending = false;
+        std::string applied;
+        if (!widget_text(widget, &applied) || applied != g_last_applied) {
+            g_keys.focus(false);
+            g_history_on.store(false, std::memory_order_release);
+            logf(KILN_LOG_WARN,
+                 "ui: chat history: SetText did not reach the chat widget after input processing; "
+                 "preview disabled for this process");
+            return;
+        }
+        if (g_trace_on.load(std::memory_order_relaxed) && g_recall_log_count.fetch_add(1) < 24)
+            logf(KILN_LOG_INFO, "ui: chat history trace: engine edit replacement verified (widget readback)");
+    }
     // The input result is an event discriminant. Only the first byte is
     // needed (1 = Enter, 2 = Escape); reading a 32-bit word could include
     // unrelated/uninitialised trailing bytes and miss a valid submission.
     uint8_t event = 0;
     if (game_read(result, &event) && event != 0) {
+        // The actual chat string is the caller-owned buffer, verified in
+        // both HUD and Social. Do not submit the private edit's invalid
+        // internal/control bytes to the history model.
         std::string sent;
-        const bool readable = edit_text(state, &sent);
+        const bool readable = widget_text(widget, &sent);
         // Compare the game's caller-owned chat string with the private edit
         // state. Log *only* validity flags, lengths, controls and equivalence:
         // no user message contents, addresses, hashes or command names.
         std::string committed;
-        const bool committed_readable = widget_text(widget, &committed);
+        const bool committed_readable = edit_text(state, &committed);
         if (g_trace_on.load(std::memory_order_relaxed) && g_event_log_count.fetch_add(1) < 24)
             logf(KILN_LOG_INFO,
-                 "ui: chat history trace: %s event=%u edit_ok=%u edit_bytes=%zu edit_command=%u edit_valid=%u "
-                 "edit_sensitive=%u edit_controls=%zu widget_ok=%u widget_bytes=%zu widget_command=%u "
-                 "widget_valid=%u widget_sensitive=%u widget_controls=%zu same=%u",
+                 "ui: chat history trace: %s event=%u widget_ok=%u widget_bytes=%zu widget_command=%u widget_valid=%u "
+                 "widget_sensitive=%u widget_controls=%zu edit_ok=%u edit_bytes=%zu edit_command=%u "
+                 "edit_valid=%u edit_sensitive=%u edit_controls=%zu same=%u",
                  hud ? "HUD" : "Social", static_cast<unsigned>(event),
                  readable ? 1u : 0u, readable ? sent.size() : 0,
                  readable && !sent.empty() && sent.front() == '/' ? 1u : 0u,
@@ -289,7 +306,7 @@ void history_after(void* widget, void* result, bool hud) {
     }
     if (!g_last_applied.empty()) {
         std::string now;
-        if (edit_text(state, &now) && now != g_last_applied) {
+        if (widget_text(widget, &now) && now != g_last_applied) {
             g_history.edited();
             g_last_applied.clear();
         }
