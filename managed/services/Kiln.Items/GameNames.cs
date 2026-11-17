@@ -281,7 +281,7 @@ internal static class GameNames
                 if (d.Items.Count == 0) d = null;  // the resource service is not up yet
             }
         }
-        catch (Exception e) when (e is InvalidOperationException or ArgumentException or InvalidDataException or NotSupportedException)
+        catch (Exception e) when (e is not OutOfMemoryException)
         {
             Backend.Current.Log(0, LogLevel.Debug, $"Kiln.Items: the game's names could not be read: {e.Message}");
             d = null;
@@ -334,7 +334,7 @@ internal static class GameNames
                 if (GameNameData.LanguageBlob(d.Collection, d.Layout, v) is { } hash && ResourceStore.ReadBlob(hash) is { } blob)
                     table = GameNameData.Table(blob, d.Layout);
         }
-        catch (Exception e) when (e is InvalidOperationException or ArgumentException)
+        catch (Exception e) when (e is not OutOfMemoryException)
         {
             Backend.Current.Log(0, LogLevel.Debug, $"Kiln.Items: the game's {lang} texts could not be read: {e.Message}");
         }

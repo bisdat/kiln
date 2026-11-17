@@ -63,7 +63,7 @@ internal static class ContentNames
             var json = ListingOverride is { } o ? o() : NewContent.Available ? NewContent.DefinitionsJson() : null;
             if (json != null) next = Parse(json);
         }
-        catch (Exception e) when (e is JsonException or InvalidOperationException or KilnUnavailableException or ArgumentException)
+        catch (Exception e) when (e is not OutOfMemoryException)
         {
             Backend.Current.Log(0, LogLevel.Debug, $"Kiln.Content: new items' names and icons: the listing could not be read: {e.Message}");
         }

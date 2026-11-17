@@ -28,6 +28,11 @@ internal static class ItemIconKey
     {
         final = false;
         if (item.Value == 0) return null;
+        if (gameItem(item) is { } g)
+        {
+            final = true;
+            return g;  // the ids of the game's items and of new items never meet (FNV-1a of different GUIDs)
+        }
         if (defined(item.Value) is { } d)
         {
             if (iconState(d.Guid) == Served)
@@ -41,11 +46,6 @@ internal static class ItemIconKey
                 return alias;            // the base item's texture (or "icon"'s), as the game shows it meanwhile
             }
             return null;                 // not in a world yet: no clone, no alias
-        }
-        if (gameItem(item) is { } g)
-        {
-            final = true;
-            return g;
         }
         return null;
     }
@@ -214,7 +214,9 @@ internal static unsafe class ItemIcons
                         width = e.Width;
                         height = e.Height;
                     }
-                    else if (!e.Loading && e.RetryAt != 0 && now >= e.RetryAt) Request(key, e);
+                    // a missing icon, or one that may change (a new item's base icon while its own PNG is pending): read again,
+                    // the picture it has stays drawn meanwhile
+                    if (!e.Loading && e.RetryAt != 0 && now >= e.RetryAt) Request(key, e);
                 }
                 else if (item.Value != 0)
                 {
@@ -347,30 +349,32 @@ internal static unsafe class ItemIcons
             bytes = (long)p.W * p.H * 4;
             if (handle == 0) why = "the overlay took no image";
         }
+        ulong unused = 0;
         lock (Gate)
         {
-            if (!Table.TryGet(key, out var e))
-            {
-                if (handle != 0) Free(handle);  // dropped meanwhile (a world change)
-                return;
-            }
-            e.Loading = false;
-            e.Handle = handle;
-            if (handle != 0 && px is { } q)
-            {
-                e.Width = q.W;
-                e.Height = q.H;
-                Table.SetBytes(e, bytes);
-                // an alias for a PNG icon still pending: look again later, the mod's own icon may be served by then
-                e.RetryAt = final ? 0 : Clock() + RetryMs;
-                _loaded++;
-            }
+            if (!Table.TryGet(key, out var e)) unused = handle;  // dropped meanwhile (a world change)
             else
             {
-                e.RetryAt = Clock() + (final ? RetryFinalMs : RetryMs);
-                _missing++;
+                e.Loading = false;
+                if (handle != 0 && px is { } q)
+                {
+                    unused = e.Handle;  // the picture it replaces (a re-read)
+                    e.Handle = handle;
+                    e.Width = q.W;
+                    e.Height = q.H;
+                    Table.SetBytes(e, bytes);
+                    // a new item's base icon while its own PNG is pending: look again later, its own may be served by then
+                    e.RetryAt = final ? 0 : Clock() + RetryMs;
+                    _loaded++;
+                }
+                else
+                {
+                    e.RetryAt = Clock() + (final ? RetryFinalMs : RetryMs);  // a picture it has stays
+                    if (e.Handle == 0) _missing++;
+                }
             }
         }
+        if (unused != 0) Free(unused);
         if (why != null && texture is not null) Note($"item 0x{key.Item:x8}: {why}");
     }
 

@@ -117,8 +117,9 @@ public static unsafe partial class Items
         if (item.Value == 0) return null;
         try
         {
+            // a game item never asks kiln.content (its listing is read again on a miss); a new item is no game item
+            if (GameNames.ItemGuid(item) is not null) return GameNames.ItemName(item) ?? ItemCatalog.ShippedName(item.Value);
             if (DefinedNames.Of(item.Value, GameNames.Language) is { Length: > 0 } defined) return defined;
-            if (GameNames.ItemName(item) is { Length: > 0 } game) return game;
         }
         catch (Exception e) when (e is InvalidOperationException or ArgumentException or NotSupportedException or KilnUnavailableException)
         {

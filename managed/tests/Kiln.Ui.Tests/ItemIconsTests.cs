@@ -173,6 +173,27 @@ public sealed class ItemIconsTests : IDisposable
     }
 
     [Fact]
+    public void ANewItemShowsItsBaseIconUntilItsOwnIsServedThenItsOwn()
+    {
+        var def = new ContentNames.Def(Id(Mine).Value, Mine, IconGuid: Sword, BaseGuid: Sword, "Frost Edge", new Dictionary<string, string>(), HasIconFile: true);
+        ItemIcons.Defined = id => id == def.Id ? def : null;
+        ItemIcons.Handle(Id(Mine), 64, out _, out _);
+        var alias = ItemIcons.Handle(Id(Mine), 64, out _, out _);
+        Assert.Equal([(Sword, 64)], _decoded);                               // the base's (the Bronze Sword's) texture meanwhile
+        _served[Mine] = ItemIconKey.Served;                                  // kiln.assets serves the mod's PNG now
+        Assert.Equal(alias, ItemIcons.Handle(Id(Mine), 64, out _, out _));   // not before the retry time
+        _now += 5_000;
+        Assert.Equal(alias, ItemIcons.Handle(Id(Mine), 64, out _, out _));   // read again; the old picture this frame
+        Assert.Equal((Mine, 64), _decoded[^1]);
+        var own = ItemIcons.Handle(Id(Mine), 64, out _, out _);
+        Assert.NotEqual(alias, own);
+        Assert.Contains(alias, _freed);                                      // the base's copy is freed
+        _now += 60_000;
+        ItemIcons.Handle(Id(Mine), 64, out _, out _);
+        Assert.Equal(2, _decoded.Count);                                     // its own icon is for good: no more reads
+    }
+
+    [Fact]
     public void ANewClientWorldDropsEveryIcon()
     {
         ItemIcons.Handle(Id(Logs), 64, out _, out _);
