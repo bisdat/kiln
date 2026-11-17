@@ -143,6 +143,38 @@ persisted (atomic best-effort replace) at `<game>/kiln/user/chat-history.json`.
 The preview does not yet separate histories by server, expose a Clear button,
 implement Ctrl+R, or offer command Tab completion. No typed text is logged.
 
+### Interactive trace after the read-only PASS (17 Nov 2026)
+
+An instrumented `KILN_CHAT_HISTORY=1 KILN_CHAT_HISTORY_TRACE=1` run showed:
+- Up/Down were received while chat was focused, `mods=0 captured=0 consumed=1`.
+- The adapter called recall, but all calls reported `entries=0 changed=0`.
+- HUD submitted a five-byte non-command line (`command=0`) and the
+  Social editor submitted a five-byte slash-prefixed line (`command=1`).
+- The Social submit reported `entries=0 added=0 persisted=0` despite a
+  readable five-byte slash-prefixed line. The history's validation or
+  underlying edit-text representation is thus the immediate suspect;
+  the SetText replacement path has not been exercised.
+
+Added a read-only comparison between the private edit state's text and the
+caller's outgoing widget chat buffer (`widget+0x150`). In diagnostic mode,
+both data sources are examined only through guarded/size-bounded reads.
+The trace logs only booleans, lengths, control-byte counts, equality and
+event codes; **never raw chat text or hashes**. On the next test run, use
+`KILN_CHAT_HISTORY_DIAG=1`, submit one harmless command (`/help`) from
+each chat input, and examine:
+
+- `edit_valid=0 edit_controls=N`: private edit bytes are invalid.
+- `widget_valid=1 same=0`: outgoing caller buffer differs from private edit;
+  consider reading the outgoing buffer on submit, after confirming layout.
+- `edit_valid=1 edit_sensitive=1`: classification rejects this input.
+- `edit_valid=1 edit_sensitive=0`: history model should accept; investigate
+  the model invocation/state instead.
+- `widget_ok=0`: caller buffer layout is not confirmed; do not write from it.
+
+Do not test interactive history again until the source of the zero-entry
+submissions is established. The existing read-only diagnostic does not swallow
+keys, replace game text or persist chat.
+
 ### Diagnostic results confirmed in-game (17 Nov 2026)
 
 The follow-up **read-only** `KILN_CHAT_HISTORY_DIAG=1` test passed on the
