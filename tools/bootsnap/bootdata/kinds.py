@@ -32,6 +32,22 @@ TERRAFORMING = "keen::TerraformingEfficiencyRegistryResource"
 KINDS = ("items", "templates", "skills", "materials")
 NAME_MEMBERS = ("debugName", "name")
 RESOURCES_MAX = 250000  # entries of resources.index.json (an archive table holds at most 250,000 resources)
+# Types whose values resources.data does not store: bulk asset data (animation curves, world chunk entities, meshes,
+# effect graphs) no mod reads as JSON. They are still listed with their names (names:resources); resource: answers
+# unavailable for them. One `skipped` line per type says so. Measured cost of storing them (build 1287369): JointAnimation
+# 600 MB / 350 s, SceneEntityChunkResource 220 MB / 36 s, RenderModel 67 MB / 23 s (client), VfxResource 45 MB / 7 s
+# (client), RenderModelChunkModelResource 21 MB / 5 s (client), RootMotionAnimation 7 MB / 2 s.
+VALUES_NOT_STORED = (
+    "keen::JointAnimation",
+    "keen::RootMotionAnimation",
+    "keen::SceneEntityChunkResource",
+    "keen::RenderModel",
+    "keen::RenderModelChunkModelResource",
+    "keen::VfxResource",
+)
+# JSON nodes one resources.data value may have: registries (recipes, loot, a scene) have more than the kinds' 100,000;
+# the 4 MiB value bound still holds
+RESOURCE_NODES = 1000000
 
 Row = namedtuple("Row", "name order key sort value")
 
@@ -105,8 +121,8 @@ class Source:
             t = self.g.get(f[1])
         return off, t
 
-    def value_of_resource(self, type_name, key):
-        return lambda: self.walker.json(type_name, self.kfc.read(key))
+    def value_of_resource(self, type_name, key, nodes=100000):
+        return lambda: self.walker.json(type_name, self.kfc.read(key), nodes=nodes)
 
     def value_of_row(self, row_type, blob, offset):
         return lambda: self.walker.json(row_type, blob, offset)
@@ -239,7 +255,7 @@ class Source:
         return "" if any(c < 0x20 or c >= 0x7F for c in s) else s.decode("ascii")
 
     def resource_types(self):
-        """{type name: (hash, [(guid, part, name)])} for every type of the archive, a type the reflection lacks as
+        """{type name: (hash, [(key, name)])} for every type of the archive, a type the reflection lacks as
         "0x<8 hex>". Names the kinds read are reused; the other named types' strings are read in stream order (each
         chunk is decompressed once)."""
         out, total = {}, 0
@@ -256,5 +272,5 @@ class Source:
                 for key in sorted(keys, key=self.stream_offset):
                     got = self.names.get((key, at))
                     names[key] = got if got is not None else self._name_at(key, at)
-            out[name] = (th, [(key.guid, key[2], names.get(key, "")) for key in keys])
+            out[name] = (th, [(key, names.get(key, "")) for key in keys])
         return out

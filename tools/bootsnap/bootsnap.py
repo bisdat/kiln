@@ -5,6 +5,7 @@
     bootsnap.py make --game <dir> [--force] [--if-needed] [--exe <file>] [--root <dir>] [--json]
     bootsnap.py show --game <dir> [--root <dir>] <query>...      item:<name> template:<name> skill:0x<hex> material:<name>
                                                                  names:resources/<qualified type name>
+                                                                 resource:<GUID>/<8 hex type hash or qualified name>/<part>
     bootsnap.py key  --game <dir> [--exe <file>]
 
 `make` reads the game's own archive (snapshot.archive_files: the backup another loader kept aside, else the live pair) and the game
@@ -243,6 +244,12 @@ def cmd_show(a):
         if q.startswith("names:resources/"):
             got = snapshot.read_resource_names(path, q[len("names:resources/"):])
             print(json.dumps({"query": q, "found": False} if got is None else {"query": q, **got}, indent=1))
+            rc = rc if got is not None else 1
+            continue
+        if q.startswith("resource:"):
+            parts = q[len("resource:"):].split("/")
+            got = snapshot.read_resource(path, parts[0], parts[1], int(parts[2])) if len(parts) == 3 and parts[2].isdigit() else None
+            print(json.dumps({"query": q, "found": False} if got is None else {"query": q, "from": got[0], "value": got[1]}, indent=1))
             rc = rc if got is not None else 1
             continue
         prefix, _, name = q.partition(":")

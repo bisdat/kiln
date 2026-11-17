@@ -320,8 +320,8 @@ class Walker:
         self.configs = configs
         self.deadline = deadline
 
-    def json(self, type_name, blob, offset=0, depth=ROOT_DEPTH):
-        self.nodes_left = 100000
+    def json(self, type_name, blob, offset=0, depth=ROOT_DEPTH, nodes=100000):
+        self.nodes_left = nodes
         self.bytes_left = 4 * 1024 * 1024 - 256
         t = self.g.named(type_name) if isinstance(type_name, str) else type_name
         return self.node(t, Blob(blob), offset, depth)
