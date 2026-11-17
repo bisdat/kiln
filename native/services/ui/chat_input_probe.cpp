@@ -1,12 +1,20 @@
 // SPDX-License-Identifier: MIT
-// Issue #44: opt-in, read-only probe for the native Enshrouded chat input.
-// NO text is read or logged, no key is intercepted, and no game data is modified.
-// After the two call sites are confirmed in a running client, replace this with
-// the scoped history adapter using chat_keys.h and the managed ChatHistory model.
+// Issue #44: validated HUD/Social call-site probe and opt-in native Up/Down history.
+// KILN_CHAT_INPUT_PROBE=1: read-only. KILN_CHAT_HISTORY=1: preview command recall.
+// All game edit operations are scoped to the two confirmed chat call sites.
 #include <windows.h>
 #include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <string>
+#include <string_view>
+#include <vector>
+
+#include "nlohmann/json.hpp"
+#include "chat_history.h"
+#include "chat_keys.h"
 #include "kiln_hook.hpp"
 #include "ui.h"
 
@@ -15,33 +23,236 @@ namespace {
 
 kiln::RawHook g_input;
 uintptr_t g_hud_ret = 0, g_social_ret = 0;
+uintptr_t g_state_fn = 0, g_set_text_fn = 0;
 std::atomic<bool> g_hud_seen{false}, g_social_seen{false};
+std::atomic<bool> g_history_on{false};
+std::atomic<bool> g_window_blurred{false};
+chat_keys::Router g_keys;
+chat_history::History g_history;
+std::filesystem::path g_history_file;
+// UI-thread-only.
+bool g_editing_in_frame = false;
+bool g_was_editing = false;
+std::string g_last_applied;
+
+constexpr uint64_t kEditHash = 0x72615e88968a8b89ull;
+constexpr uintptr_t kEditOffset = 0x10;
+constexpr uintptr_t kEditActiveOffset = 0x1988;
+constexpr uint64_t kMaxEditBytes = 1024;
 
 struct GameText { const char* data; uint64_t length; uint64_t hash; };
-static_assert(sizeof(GameText) == 24);
+struct TextSlice { const char* data; uint64_t length; };
+struct EditHead { const char* data; uint64_t length; uint64_t capacity; };
+static_assert(sizeof(GameText) == 24 && sizeof(EditHead) == 24);
 
-void __fastcall hk_input(void* widget, void* result, const GameText* label, uint32_t mode) {
-    // The hook is deliberately transparent. The caller must be captured before
-    // continuing the rest of Kiln's hook chain.
-    const uintptr_t caller = g_input.caller();
-    g_input.call<void>(widget, result, label, mode);
-    if (caller == g_hud_ret && !g_hud_seen.exchange(true))
-        logf(KILN_LOG_INFO, "ui: chat input probe: native HUD chat call observed (read-only)");
-    else if (caller == g_social_ret && !g_social_seen.exchange(true))
-        logf(KILN_LOG_INFO, "ui: chat input probe: native Social chat call observed (read-only)");
+template <class T> bool game_read(const void* p, T* out) {
+    if (!p || reinterpret_cast<uintptr_t>(p) < 0x10000) return false;
+    __try {
+        std::memcpy(out, p, sizeof(T));
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+bool game_copy(const char* p, char* out, size_t len) {
+    if (!p || reinterpret_cast<uintptr_t>(p) < 0x10000 || len > 1024) return false;
+    __try {
+        std::memcpy(out, p, len);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
 }
 
+// Game accessor is called only from the scoped input hook.
+using StateFn = void* (__fastcall*)(void*, uint64_t, uint32_t);
+void* game_state(void* widget) {
+    if (!g_state_fn || !widget) return nullptr;
+    __try {
+        return reinterpret_cast<StateFn>(g_state_fn)(widget, kEditHash, 1);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return nullptr;
+    }
+}
+
+// EditSetText(out, edit, &slice): use the engine to maintain cursor, selection
+// and undo bookkeeping instead of writing to an arbitrary game buffer.
+using SetTextFn = void (__fastcall*)(void*, void*, const TextSlice*);
+bool game_set_text(void* edit, const char* data, size_t length) {
+    if (!g_set_text_fn || !edit || length > 1024) return false;
+    const TextSlice slice{data, length};
+    alignas(16) uint8_t result[256]{};
+    __try {
+        reinterpret_cast<SetTextFn>(g_set_text_fn)(result, edit, &slice);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+bool edit_text(void* state, std::string* out) {
+    EditHead b{};
+    if (!state || !game_read(reinterpret_cast<const uint8_t*>(state) + kEditOffset, &b) ||
+        b.length > kMaxEditBytes || b.length > b.capacity || b.capacity > (1ull << 20))
+        return false;
+    if (!b.length) { out->clear(); return true; }
+    char bytes[1024];
+    if (!game_copy(b.data, bytes, static_cast<size_t>(b.length))) return false;
+    out->assign(bytes, static_cast<size_t>(b.length));
+    return true;
+}
+bool editing(void* state) {
+    uint8_t yes = 0;
+    return state && game_read(reinterpret_cast<const uint8_t*>(state) + kEditActiveOffset, &yes) && yes != 0;
+}
 bool symbol(const char* name, uintptr_t* out) {
     *out = 0;
     return g_api->symbol(KilnStr{name, std::strlen(name)}, out) == KILN_OK && *out;
 }
+bool env_enabled(const char* name) {
+    char env[8]{};
+    const DWORD n = GetEnvironmentVariableA(name, env, sizeof env);
+    return n > 0 && n < sizeof env && env[0] == '1' && env[1] == '\0';
+}
+std::filesystem::path history_path() {
+    char buffer[4096]{};
+    size_t length = 0;
+    if (g_api->path(KILN_PATH_KILN, buffer, sizeof buffer, &length) != KILN_OK || !length || length >= sizeof buffer)
+        return {};
+    const std::u8string utf8(reinterpret_cast<const char8_t*>(buffer), length);
+    return std::filesystem::path(utf8) / "user" / "chat-history.json";
+}
+void load_history() {
+    g_history_file = history_path();
+    if (g_history_file.empty()) return;
+    try {
+        std::ifstream in(g_history_file, std::ios::binary);
+        if (!in.good()) return;
+        const auto doc = nlohmann::json::parse(in);
+        if (!doc.is_object() || !doc.contains("version") || doc["version"] != 1 ||
+            !doc.contains("entries") || !doc["entries"].is_array()) return;
+        std::vector<std::string> lines;
+        for (const auto& e : doc["entries"]) {
+            if (lines.size() >= 2000) break;
+            if (e.is_object() && e.contains("text") && e["text"].is_string())
+                lines.push_back(e["text"].get<std::string>());
+        }
+        g_history.load(lines);
+    } catch (...) {
+        // History is optional; file problems must never interfere with chat.
+    }
+}
+void save_history() {
+    if (g_history_file.empty()) return;
+    try {
+        std::filesystem::create_directories(g_history_file.parent_path());
+        nlohmann::json doc = {{"version", 1}, {"entries", nlohmann::json::array()}};
+        for (const auto& line : g_history.persisted())
+            doc["entries"].push_back({{"text", line}, {"server", nullptr}});
+        const std::filesystem::path temp = g_history_file.wstring() + L".tmp";
+        {
+            std::ofstream file(temp, std::ios::binary | std::ios::trunc);
+            if (!file) return;
+            file << doc.dump();
+            file.flush();
+            if (!file) return;
+        }
+        if (!MoveFileExW(temp.c_str(), g_history_file.c_str(),
+                         MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+            DeleteFileW(temp.c_str());
+    } catch (...) {
+        // Optional local history; never crash or block chat over a file error.
+    }
+}
 
+// UI-thread-only, before the underlying TextInputProcess.
+void history_before(void* widget) {
+    void* state = game_state(widget);
+    if (!editing(state)) return;
+    std::string current;
+    if (!edit_text(state, &current)) return;
+    g_editing_in_frame = true;
+    if (!g_last_applied.empty() && current != g_last_applied) {
+        g_history.edited();
+        g_last_applied.clear();
+    }
+    chat_keys::Action action{};
+    while (g_keys.take(action)) {
+        const std::string next = action == chat_keys::Action::Older
+                                     ? g_history.older(current) : g_history.newer(current);
+        if (next == current) continue;
+        if (!game_set_text(reinterpret_cast<uint8_t*>(state) + kEditOffset, next.data(), next.size())) {
+            g_keys.focus(false);
+            logf(KILN_LOG_WARN, "ui: chat history: edit replace failed; future input is vanilla");
+            return;
+        }
+        current = next;
+        g_last_applied = next;
+    }
+}
+
+// The submit result is set by TextInputProcess, before the caller sends and clears.
+void history_after(void* widget, void* result) {
+    void* state = game_state(widget);
+    if (!editing(state)) return;
+    g_editing_in_frame = true;
+    uint32_t event = 0;
+    if (game_read(result, &event) && event == 1) {
+        std::string sent;
+        if (edit_text(state, &sent) && g_history.submit(sent)) save_history();
+        g_last_applied.clear();
+    } else if (!g_last_applied.empty()) {
+        std::string now;
+        if (edit_text(state, &now) && now != g_last_applied) {
+            g_history.edited();
+            g_last_applied.clear();
+        }
+    }
+}
+
+void __fastcall hk_input(void* widget, void* result, const GameText* label, uint32_t mode) {
+    const uintptr_t caller = g_input.caller();
+    const bool hud = caller == g_hud_ret;
+    const bool social = caller == g_social_ret;
+    const bool scoped = hud || social;
+    if (g_history_on.load(std::memory_order_relaxed) && scoped && mode == 0)
+        history_before(widget);
+    g_input.call<void>(widget, result, label, mode);
+    if (hud && !g_hud_seen.exchange(true))
+        logf(KILN_LOG_INFO, "ui: chat input probe: native HUD chat call observed (read-only call-site confirmation)");
+    else if (social && !g_social_seen.exchange(true))
+        logf(KILN_LOG_INFO, "ui: chat input probe: native Social chat call observed (read-only call-site confirmation)");
+    if (g_history_on.load(std::memory_order_relaxed) && scoped && mode == 0)
+        history_after(widget, result);
+}
 } // namespace
 
+// Window thread: the core WndProc already deduplicates raw and legacy key messages.
+bool chat_input_on_key(uint32_t vk, uint32_t mods, bool down) {
+    return g_history_on.load(std::memory_order_acquire) && g_keys.key(vk, mods, down);
+}
+
+void chat_input_window_blur() {
+    g_keys.focus(false);
+    g_window_blurred.store(true, std::memory_order_release);
+}
+
+// UI thread, after the game finishes each GameUiFrame.
+void chat_input_frame_end() {
+    if (!g_history_on.load(std::memory_order_acquire)) return;
+    const bool active = g_editing_in_frame && !g_window_blurred.exchange(false);
+    g_keys.focus(active);
+    if (!active && g_was_editing) {
+        g_history.edited();
+        g_last_applied.clear();
+    }
+    g_was_editing = active;
+    g_editing_in_frame = false;
+}
+
 bool chat_input_probe_install() {
-    char enabled[8]{};
-    if (GetEnvironmentVariableA("KILN_CHAT_INPUT_PROBE", enabled, sizeof enabled) == 0 || enabled[0] != '1')
-        return false; // default: do not hook anything
+    const bool history = env_enabled("KILN_CHAT_HISTORY");
+    const bool probe = env_enabled("KILN_CHAT_INPUT_PROBE");
+    if (!history && !probe) return false;
     if (!g_api->feature(KilnStr{"chat.ui.input", sizeof("chat.ui.input") - 1})) {
         logf(KILN_LOG_WARN, "ui: chat input probe requested, but chat.ui.input symbols are unavailable");
         return false;
@@ -53,12 +264,22 @@ bool chat_input_probe_install() {
         logf(KILN_LOG_WARN, "ui: chat input probe requested, but scoped call sites were not resolved");
         return false;
     }
-    if (!g_input.install(g_api, g_owner, input, reinterpret_cast<void*>(&hk_input), "chatui/TextInputProcess")) {
-        logf(KILN_LOG_WARN, "ui: chat input probe hook unavailable: %s", g_input.error());
+    if (history && (!symbol("chatui/TextInputState", &g_state_fn) ||
+                    !symbol("chatui/EditSetText", &g_set_text_fn))) {
+        logf(KILN_LOG_WARN, "ui: chat history unavailable: edit state/replace symbols unresolved");
         return false;
     }
-    logf(KILN_LOG_INFO, "ui: chat input probe installed for HUD and Social (read-only; no history keys intercepted)");
+    if (!g_input.install(g_api, g_owner, input, reinterpret_cast<void*>(&hk_input), "chatui/TextInputProcess")) {
+        logf(KILN_LOG_WARN, "ui: chat input hook unavailable: %s", g_input.error());
+        return false;
+    }
+    if (history) {
+        load_history();
+        g_history_on.store(true, std::memory_order_release);
+        logf(KILN_LOG_INFO, "ui: chat history preview installed (Up/Down, commands persisted; opt-in; no Tab/Ctrl+R)");
+    } else {
+        logf(KILN_LOG_INFO, "ui: chat input probe installed for HUD and Social (read-only; no history keys intercepted)");
+    }
     return true;
 }
-
 } // namespace kui
