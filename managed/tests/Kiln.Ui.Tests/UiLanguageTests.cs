@@ -130,7 +130,7 @@ public sealed unsafe class UiLanguageTests : IDisposable
         Assert.Equal(40, sizeof(UiNative.Texts));
         Assert.Equal(8, (int)Marshal.OffsetOf<UiNative.Texts>(nameof(UiNative.Texts.Language)));
         Assert.Equal(24, (int)Marshal.OffsetOf<UiNative.Texts>(nameof(UiNative.Texts.Keys)));
-        Assert.Equal(992, (int)Marshal.OffsetOf<UiNative.TableTexts>(nameof(UiNative.TableTexts.SetTexts)));
+        Assert.Equal(1008, (int)Marshal.OffsetOf<UiNative.TableTexts>(nameof(UiNative.TableTexts.SetTexts)));
         var h = File.ReadAllText(Path.Combine(RepoRoot(), "native", "core", "abi", "services", "kiln_ui.h"));
         Assert.Contains("KilnResult(KILN_CALL* set_texts)(const KilnUiTexts* texts);\n} KilnUiApi;", h, StringComparison.Ordinal);
     }

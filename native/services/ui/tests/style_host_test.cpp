@@ -4,7 +4,7 @@
 // stand-in before), the player's look (game, translucent, ember, a theme; opacity, scale, clamps), themes (roles, single
 // colours, spacing, rounding, background; refusals; push/pop and the end of the frame; a freed theme), look_info inside and
 // outside a frame, immediate drawing's alpha, mod fonts (refusals, the budget, joining and leaving the atlas), and the pure
-// rules of look_palette.h and font_budget.h.
+// rules of look_palette.h and font_budget.h; overlay images' opaque bounds and trimmed, fitted and part-of-image draws.
 #include <cassert>
 #include <chrono>
 #include <cstdio>
@@ -256,6 +256,118 @@ static void pure() {
     CHECK(fonts::admit(ttf, fonts::kMaxFontBytes, 2, fonts::kMaxTotalBytes - fonts::kMaxFontBytes + 1) == fonts::kTooMuch);
 }
 
+// ---- images: opaque bounds found at load, trimmed / fitted / part-of-image draws (image_ex, 0.2.0-dev.29.16) ----
+struct Quad {
+    ImVec2 p0, p1, uv0, uv1;
+};
+// The last image drawn into the current window: the quad AddImage / ImageButton just wrote (top left, bottom right).
+static Quad last_quad() {
+    const ImDrawList* dl = ImGui::GetWindowDrawList();
+    const int n = dl->VtxBuffer.Size;
+    if (n < 4) return {};
+    const ImDrawVert& a = dl->VtxBuffer[n - 4];
+    const ImDrawVert& c = dl->VtxBuffer[n - 2];
+    return {a.pos, c.pos, a.uv, c.uv};
+}
+static std::vector<uint8_t> icon_px(int w, int h, int x0, int y0, int x1, int y1) {
+    std::vector<uint8_t> px(static_cast<size_t>(w) * h * 4, 0);
+    for (int y = y0; y < y1; ++y)
+        for (int x = x0; x < x1; ++x) {
+            uint8_t* p = &px[(static_cast<size_t>(y) * w + x) * 4];
+            p[0] = p[1] = p[2] = p[3] = 255;
+        }
+    return px;
+}
+static void images() {
+    // a 64 x 64 icon whose art is 32 x 48 at (16, 8); one with no art at all; a PNG-less 37 x 23 opaque one
+    const auto art = icon_px(64, 64, 16, 8, 48, 56);
+    const KilnHandle icon = kui::image_load_rgba(3, art.data(), 64, 64);
+    const auto none = icon_px(20, 10, 0, 0, 0, 0);
+    const KilnHandle clear = kui::image_load_rgba(3, none.data(), 20, 10);
+    const auto all = icon_px(37, 23, 0, 0, 37, 23);
+    const KilnHandle solid = kui::image_load_rgba(3, all.data(), 37, 23);
+    CHECK(icon && clear && solid);
+    uint32_t x = 9, y = 9, w = 9, h = 9;
+    CHECK(kui::image_opaque_rect(icon, &x, &y, &w, &h) && x == 16 && y == 8 && w == 32 && h == 48);  // before upload: any thread
+    CHECK(kui::image_opaque_rect(clear, &x, &y, &w, &h) && x == 0 && y == 0 && w == 20 && h == 10);  // nothing opaque: whole
+    CHECK(kui::image_opaque_rect(solid, &x, &y, &w, &h) && x == 0 && y == 0 && w == 37 && h == 23);
+    CHECK(kui::image_opaque_rect(icon, nullptr, nullptr, nullptr, nullptr));
+    CHECK(!kui::image_opaque_rect(0xdead, &x, &y, &w, &h));
+
+    // not uploaded yet: the box is taken, nothing drawn
+    frame([&] {
+        ImGui::SetNextWindowPos(ImVec2(0, 0));
+        ImGui::SetNextWindowSize(ImVec2(600, 700));  // every draw below in view (a clipped one adds no quad)
+        ImGui::Begin("images");
+        const int before = ImGui::GetWindowDrawList()->VtxBuffer.Size;
+        const float y0 = ImGui::GetCursorPosY();
+        CHECK(!kui::image_draw_ex(nullptr, icon, KILN_UI_IMAGE_DRAW_TRIM | KILN_UI_IMAGE_DRAW_FIT, 40, 40, 0, 0, 0, 0));
+        CHECK(ImGui::GetWindowDrawList()->VtxBuffer.Size == before);
+        CHECK(near(ImGui::GetItemRectSize().x, 40) && near(ImGui::GetItemRectSize().y, 40));
+        CHECK(ImGui::GetCursorPosY() > y0 + 39);
+        ImGui::End();
+    });
+    frame();  // uploaded at the end of the first frame (the fake backend), ready from here
+    CHECK(kui::image_state(icon) == kui::img::kReady);
+    frame([&] {
+        ImGui::SetNextWindowPos(ImVec2(0, 0));
+        ImGui::SetNextWindowSize(ImVec2(600, 700));  // every draw below in view (a clipped one adds no quad)
+        ImGui::Begin("images");
+        // trimmed and fitted: the art's 32 x 48 into 40 x 40 is 26.67 x 40, centred; only the art's UVs are sampled
+        ImVec2 at = ImGui::GetCursorScreenPos();
+        CHECK(!kui::image_draw_ex(nullptr, icon, KILN_UI_IMAGE_DRAW_TRIM | KILN_UI_IMAGE_DRAW_FIT, 40, 40, 0.3f, 0.3f, 0.4f, 0.4f));
+        Quad q = last_quad();
+        CHECK(near(q.uv0.x, 0.25f) && near(q.uv0.y, 0.125f) && near(q.uv1.x, 0.75f) && near(q.uv1.y, 0.875f));
+        CHECK(near(q.p0.x - at.x, 20 / 3.f, 0.01f) && near(q.p0.y - at.y, 0) && near(q.p1.x - q.p0.x, 80 / 3.f, 0.01f) &&
+              near(q.p1.y - q.p0.y, 40));
+        CHECK(near(ImGui::GetItemRectSize().x, 40) && near(ImGui::GetItemRectSize().y, 40));  // the whole box is the item
+        // trimmed, not fitted: stretched over the box
+        at = ImGui::GetCursorScreenPos();
+        kui::image_draw_ex(nullptr, icon, KILN_UI_IMAGE_DRAW_TRIM, 40, 40, 0, 0, 0, 0);
+        q = last_quad();
+        CHECK(near(q.p0.x, at.x) && near(q.p1.x - q.p0.x, 40) && near(q.p1.y - q.p0.y, 40) && near(q.uv0.x, 0.25f));
+        // trimmed without a size: the art's own pixels
+        kui::image_draw_ex(nullptr, icon, KILN_UI_IMAGE_DRAW_TRIM, 0, 0, 0, 0, 0, 0);
+        CHECK(near(ImGui::GetItemRectSize().x, 32) && near(ImGui::GetItemRectSize().y, 48));
+        // no flags, no UVs: the whole image over the box, as image does
+        kui::image_draw_ex(nullptr, icon, 0, 40, 40, 0, 0, 0, 0);
+        q = last_quad();
+        CHECK(near(q.uv0.x, 0) && near(q.uv0.y, 0) && near(q.uv1.x, 1) && near(q.uv1.y, 1) && near(q.p1.x - q.p0.x, 40));
+        // a source rectangle: the top-left quarter, at its own size (32 x 32)
+        kui::image_draw_ex(nullptr, icon, 0, 0, 0, 0, 0, 0.5f, 0.5f);
+        q = last_quad();
+        CHECK(near(q.uv1.x, 0.5f) && near(q.uv1.y, 0.5f) && near(q.p1.x - q.p0.x, 32) && near(q.p1.y - q.p0.y, 32));
+        // flipped
+        kui::image_draw_ex(nullptr, icon, 0, 16, 16, 1, 0, 0, 1);
+        q = last_quad();
+        CHECK(near(q.uv0.x, 1) && near(q.uv1.x, 0) && near(q.p1.x - q.p0.x, 16));
+        // nothing opaque: trimming draws it whole
+        kui::image_draw_ex(nullptr, clear, KILN_UI_IMAGE_DRAW_TRIM | KILN_UI_IMAGE_DRAW_FIT, 40, 40, 0, 0, 0, 0);
+        q = last_quad();
+        CHECK(near(q.uv0.x, 0) && near(q.uv1.x, 1) && near(q.uv1.y, 1) && near(q.p1.x - q.p0.x, 40) && near(q.p1.y - q.p0.y, 20));
+        // a button: the image fitted inside the frame of a 40 x 40 image button
+        const ImVec2 pad = ImGui::GetStyle().FramePadding;
+        at = ImGui::GetCursorScreenPos();
+        CHECK(!kui::image_draw_ex("##trimmed", icon, KILN_UI_IMAGE_DRAW_TRIM | KILN_UI_IMAGE_DRAW_FIT, 40, 40, 0, 0, 0, 0));
+        q = last_quad();
+        CHECK(near(ImGui::GetItemRectSize().x, 40 + 2 * pad.x) && near(ImGui::GetItemRectSize().y, 40 + 2 * pad.y));
+        CHECK(near(q.uv0.x, 0.25f) && near(q.p0.x - at.x, pad.x + 20 / 3.f, 0.01f) && near(q.p1.y - q.p0.y, 40));
+        CHECK(near(ImGui::GetStyle().FramePadding.x, pad.x));  // popped
+        // no such image: nothing at all
+        const int before = ImGui::GetWindowDrawList()->VtxBuffer.Size;
+        CHECK(!kui::image_draw_ex(nullptr, 0xdead, KILN_UI_IMAGE_DRAW_TRIM, 40, 40, 0, 0, 0, 0));
+        CHECK(!kui::image_draw_ex("##gone", 0xdead, 0, 40, 40, 0, 0, 0, 0));
+        CHECK(ImGui::GetWindowDrawList()->VtxBuffer.Size == before);
+        ImGui::End();
+    });
+    kui::image_free(icon);
+    kui::image_free(clear);
+    kui::image_free(solid);
+    CHECK(!kui::image_opaque_rect(icon, &x, &y, &w, &h));
+    frame();
+    frame();
+}
+
 int main() {
     pure();
 
@@ -480,6 +592,8 @@ int main() {
     } else {
         std::printf("style_host_test: no system TTF found: the atlas part of the font checks is skipped\n");
     }
+
+    images();
 
     ImGui::DestroyContext();
     std::printf("style_host_test: %d checks, %d failed\n", g_checks, g_fail);

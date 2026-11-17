@@ -30,6 +30,7 @@
 #include "font_budget.h"
 #include "font_group.h"
 #include "image_budget.h"
+#include "image_rect.h"
 #include "look_palette.h"
 #include "services/kiln_assets.h"
 #include "services/kiln_types.h"
@@ -958,6 +959,7 @@ struct Image {
     bool registered;
     bool dead;
     bool failed = false;  // uploaded without a descriptor set (image_budget.h): never drawn
+    img::Rect opaque{};   // its opaque bounds, found when loaded (image_rect.h): trimmed draws, image_opaque_rect
 };
 std::mutex g_img_mu;
 std::unordered_map<KilnHandle, Image*> g_images;
@@ -1272,6 +1274,7 @@ KilnHandle image_load(KilnOwner owner, const void* png, size_t len) {
     auto* img = new Image{next_handle(), owner, nullptr, {}, w, h, false, false};
     img->rgba.assign(px, px + static_cast<size_t>(w) * h * 4);
     stbi_image_free(px);
+    img->opaque = img::opaque_bounds(img->rgba.data(), w, h);
     std::lock_guard lk(g_img_mu);
     if (!image_room_locked()) {
         delete img;
@@ -1286,6 +1289,7 @@ KilnHandle image_load_rgba(KilnOwner owner, const uint8_t* rgba, uint32_t w, uin
     if (!rgba || w == 0 || h == 0 || w > 4096 || h > 4096) return 0;
     auto* img = new Image{next_handle(), owner, nullptr, {}, static_cast<int>(w), static_cast<int>(h), false, false};
     img->rgba.assign(rgba, rgba + static_cast<size_t>(w) * h * 4);
+    img->opaque = img::opaque_bounds(img->rgba.data(), img->w, img->h);  // once, on the loading thread
     std::lock_guard lk(g_img_mu);
     if (!image_room_locked()) {
         delete img;
@@ -1303,12 +1307,13 @@ img::State state_locked(const Image* i) {
 }
 
 // The texture to draw for h: only an uploaded one with its descriptor set (else ImGui would bind a null set).
-ImTextureData* drawable(KilnHandle h, float* iw, float* ih) {
+ImTextureData* drawable(KilnHandle h, float* iw, float* ih, img::Rect* opaque = nullptr) {
     std::lock_guard lk(g_img_mu);
     auto it = g_images.find(h);
     if (it == g_images.end()) return nullptr;
     *iw = static_cast<float>(it->second->w);
     *ih = static_cast<float>(it->second->h);
+    if (opaque) *opaque = it->second->opaque;
     return state_locked(it->second) == img::kReady ? it->second->tex : nullptr;
 }
 }  // namespace
@@ -1347,6 +1352,48 @@ bool image_button(const char* id, KilnHandle h, float w, float hgt) {
     const ImVec2 size(w > 0 ? w : iw, hgt > 0 ? hgt : ih);
     if (!tex) return ImGui::InvisibleButton(id, size);  // the button's place and clicks, nothing drawn
     return ImGui::ImageButton(id, tex->GetTexRef(), size);
+}
+
+// image_ex (0.2.0-dev.29.16): part of an image (uv), or its opaque bounds (TRIM), optionally fitted in the box keeping its
+// aspect ratio (FIT); id: a button. The box is taken whatever is drawn; inside a frame.
+bool image_draw_ex(const char* id, KilnHandle h, uint32_t flags, float w, float hgt, float u0, float v0, float u1, float v1) {
+    float iw = 0, ih = 0;
+    img::Rect opaque;
+    ImTextureData* tex = drawable(h, &iw, &ih, &opaque);
+    if (iw <= 0) return false;  // no such image
+    img::Uv uv;
+    if (flags & KILN_UI_IMAGE_DRAW_TRIM) uv = img::uv_of(opaque, static_cast<int>(iw), static_cast<int>(ih));
+    else if (u0 != 0 || v0 != 0 || u1 != 0 || v1 != 0) uv = {u0, v0, u1, v1};
+    const float sw = std::fabs(uv.u1 - uv.u0) * iw, sh = std::fabs(uv.v1 - uv.v0) * ih;  // the source in pixels
+    const ImVec2 box(w > 0 ? w : sw, hgt > 0 ? hgt : sh);
+    const img::Placed at = (flags & KILN_UI_IMAGE_DRAW_FIT) ? img::fit(box.x, box.y, sw, sh) : img::Placed{0, 0, box.x, box.y};
+    if (id) {
+        const ImVec2 pad = ImGui::GetStyle().FramePadding;
+        if (!tex) return ImGui::InvisibleButton(id, ImVec2(box.x + 2 * pad.x, box.y + 2 * pad.y));  // its place and clicks
+        // image_button's frame around the box; the image fitted inside it (the extra space joins the padding)
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(pad.x + at.x, pad.y + at.y));
+        const bool clicked = ImGui::ImageButton(id, tex->GetTexRef(), ImVec2(at.w, at.h), ImVec2(uv.u0, uv.v0), ImVec2(uv.u1, uv.v1));
+        ImGui::PopStyleVar();
+        return clicked;
+    }
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    ImGui::Dummy(box);  // the box is the item (hover, tooltips, layout), whatever part of it the image covers
+    if (tex && ImGui::IsItemVisible())
+        ImGui::GetWindowDrawList()->AddImage(tex->GetTexRef(), ImVec2(p.x + at.x, p.y + at.y), ImVec2(p.x + at.x + at.w, p.y + at.y + at.h),
+                                             ImVec2(uv.u0, uv.v0), ImVec2(uv.u1, uv.v1), ImGui::GetColorU32(IM_COL32_WHITE));
+    return false;
+}
+
+bool image_opaque_rect(KilnHandle h, uint32_t* x, uint32_t* y, uint32_t* w, uint32_t* hgt) {
+    std::lock_guard lk(g_img_mu);
+    auto it = g_images.find(h);
+    if (it == g_images.end()) return false;
+    const img::Rect& r = it->second->opaque;
+    if (x) *x = static_cast<uint32_t>(r.x0);
+    if (y) *y = static_cast<uint32_t>(r.y0);
+    if (w) *w = static_cast<uint32_t>(r.w());
+    if (hgt) *hgt = static_cast<uint32_t>(r.h());
+    return true;
 }
 
 void image_free(KilnHandle h) {

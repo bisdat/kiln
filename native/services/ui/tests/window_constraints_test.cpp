@@ -25,8 +25,12 @@ static_assert(offsetof(KilnUiApi, image_state) == 920);
 // the looks tail (0.2.0-dev.29.16) is appended after it; nothing before it moves
 static_assert(offsetof(KilnUiApi, theme_create) == offsetof(KilnUiApi, image_state) + sizeof(void*));
 static_assert(offsetof(KilnUiApi, push_font_handle) == 984);
-// set_texts (0.2.0-dev.29.16, Kiln's own texts) is appended after it; nothing before it moves
-static_assert(offsetof(KilnUiApi, set_texts) == offsetof(KilnUiApi, push_font_handle) + sizeof(void*));
+// image_ex and image_opaque_rect (0.2.0-dev.29.16) after it; nothing before them moves
+static_assert(offsetof(KilnUiApi, image_ex) == offsetof(KilnUiApi, push_font_handle) + sizeof(void*));
+static_assert(offsetof(KilnUiApi, image_ex) == 992);
+static_assert(offsetof(KilnUiApi, image_opaque_rect) == 1000);
+// set_texts (0.2.0-dev.29.16, Kiln's own texts) after them
+static_assert(offsetof(KilnUiApi, set_texts) == offsetof(KilnUiApi, image_opaque_rect) + sizeof(void*));
 static_assert(sizeof(KilnUiApi) == offsetof(KilnUiApi, set_texts) + sizeof(void*));
 int main() {
     // Drawing off: no frame/context, just as KILN_UI_OVERLAY=0. Must not enter ImGui.

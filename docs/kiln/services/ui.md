@@ -67,7 +67,7 @@ overlay's backend are logged once per error code. Kiln.Ui's item icon cache keep
 
 Eight more slots are appended after `image_state`; the service version stays 7. On x64 `theme_create` is at byte offset 928,
 `theme_free` 936, `push_theme` 944, `set_look` 952, `look_info` 960, `font_load` 968, `font_free` 976, `push_font_handle` 984,
-and `set_texts` 992 (below); the table is 1000 bytes. Readers check `header.size` through the member they call and that its pointer is non-null; the
+and the table is 992 bytes (1008 with [the image tail](#part-of-an-image-trimmed-images-0220-dev2916), 1016 with `set_texts`). Readers check `header.size` through the member they call and that its pointer is non-null; the
 managed mirror is `UiNative.TableLooks`. The guide: [Looks and themes](../ui.md#looks-and-themes-0220-dev2916).
 
 - **Looks.** `push_style` takes `KILN_UI_STYLE_PLAYER` (2) too: the look the player chose (`set_look`). Windows that push no
@@ -113,9 +113,36 @@ managed mirror is `UiNative.TableLooks`. The guide: [Looks and themes](../ui.md#
 - Host test: `native/services/ui/tests/style_host_test.cpp` (in `tests/run.sh`) runs style.cpp on a headless ImGui context
   with a fake `kiln.types` and `kiln.assets`.
 
+## Part of an image, trimmed images (0.2.0-dev.29.16)
+
+Two more slots are appended after `push_font_handle`; the service version stays 7. On x64 `image_ex` is at byte offset 992,
+`image_opaque_rect` 1000, and the table is 1008 bytes. Readers check `header.size` through the member they call and that its
+pointer is non-null; the managed mirror is `UiNative.TableImageEx`. The guide: [Item icons](../ui.md#item-icons-and-names)
+("Trimmed").
+
+- Every image of `image_load` and `image_load_rgba` gets its **opaque bounds** when it is loaded (on the loading thread,
+  before the lock): the smallest rectangle holding every pixel with alpha >= 16 (`img::kOpaqueAlpha`,
+  `native/services/ui/image_rect.h`); the whole image when no pixel is that opaque. Kept with the image; nothing else changes.
+- `image_ex(id, image, &KilnUiImageDraw)`: `image` / `image_button` with more say. `KilnUiImageDraw` (32 bytes: `size`,
+  `flags`, `width`, `height`, `u0`, `v0`, `u1`, `v1`; set `size` first, a short or null one draws nothing): the box (0 = the
+  source's pixel size), the source rectangle in texture coordinates (all 0 = the whole image; u1 < u0 flips), and
+  `KILN_UI_IMAGE_DRAW_TRIM` (1: the source is the opaque bounds, the UVs are ignored) and `KILN_UI_IMAGE_DRAW_FIT` (2: the
+  source keeps its aspect ratio inside the box, as large as fits, centred; the whole box is still taken). An empty `id`
+  draws an image (a `Dummy` of the box with the picture on the window's draw list, so hover and tooltips cover the box;
+  returns false); else an `ImageButton` of that id whose frame is the box's (FIT's spare room joins the frame padding),
+  true when clicked. Inside a frame callback. Until the image is READY (`image_state`) the box is kept and nothing drawn (a
+  button stays clickable). Kiln.Ui draws `ItemIcon(item, size, trim: true)`, `Image(..., trim: true)` and
+  `ImageButton(..., trim: true)` with TRIM | FIT, and `Image(img, w, h, u0, v0, u1, v1)` with the UVs.
+- `image_opaque_rect(image, &x, &y, &width, &height)`: the opaque bounds in pixels (any pointer may be null). False: no
+  such image. Any thread. Kiln.Ui's trimmed `RenderDraw.Image` reads it and draws through kiln.render's `image` (which
+  already takes UVs).
+- Host tests: `tests/image_rect_test.cpp` (the bounds on synthetic icons with margins, fully transparent and opaque ones,
+  odd sizes, faint pixels, random images against a full scan; UVs; fitting) and the image part of `style_host_test.cpp`
+  (bounds kept from `image_load_rgba`, trimmed / fitted / part-of-image draws and buttons, quads and UVs on the draw list).
+
 ## Kiln's own texts and CJK glyphs (0.2.0-dev.29.16)
 
-One more slot after `push_font_handle`: `set_texts` at byte offset 992 (the table is 1000 bytes; check `header.size`
+One more slot after `image_opaque_rect`: `set_texts` at byte offset 1008 (the table is 1016 bytes; check `header.size`
 through it and its pointer). The guide: [translating-game.md](../translating-game.md).
 - `set_texts(&KilnUiTexts)`: Kiln's own texts that kiln.ui draws (the Mods entry in the game's menus, Kiln's line in the main
   menu's footer, the window shown without the managed host), from `runtime/locales/<language>.json`'s `native` section, and

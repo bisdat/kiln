@@ -11,6 +11,9 @@ bash "$here/run-window-constraints.sh"
 # the overlay's image budget: the descriptor pool holds every image Kiln lets exist, uploads spread over frames (image_budget.h)
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/image_budget_test.cpp" -o "$out/image_budget_test"
 "$out/image_budget_test" "$here/../vk.cpp"
+# an image's opaque bounds (trimmed item icons), their UVs and fitting a source in a box (image_rect.h): plain logic
+g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/image_rect_test.cpp" -o "$out/image_rect_test"
+"$out/image_rect_test"
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/render_math_test.cpp" -o "$out/render_math_test"
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/wheel_math_test.cpp" -o "$out/wheel_math_test"
 "$out/wheel_math_test"
