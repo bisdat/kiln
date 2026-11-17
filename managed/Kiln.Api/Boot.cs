@@ -60,10 +60,14 @@ public sealed record BootDataResult(bool Ok, string? Reason, BootDataValue? Data
 public interface IReadOnlyGameData
 {
     /// <summary>One record: <c>item:&lt;debugName&gt;</c>, <c>template:&lt;debugName&gt;</c>, <c>skill:0x&lt;8 hex digits&gt;</c>,
-    /// <c>material:&lt;GameMaterials name or CellN&gt;</c>, <c>resource:&lt;GUID&gt;/&lt;8 hex type hash&gt;/&lt;part&gt;</c>; or the names
+    /// <c>material:&lt;GameMaterials name or CellN&gt;</c>, <c>resource:&lt;GUID&gt;/&lt;8 hex type hash&gt;/&lt;part&gt;</c> or
+    /// <c>resource:&lt;GUID&gt;/&lt;qualified type name&gt;/&lt;part&gt;</c> (any resource of any type:
+    /// <c>resource:&lt;GUID&gt;/keen::SceneResource/0</c>; bulk asset types are listed but not stored); or the names
     /// one kind holds: <c>names:items</c>, <c>names:templates</c>, <c>names:skills</c>, <c>names:materials</c> (the value is
-    /// <c>{"names": [...]}</c>, sorted; read each record by its name), and <c>names:templates/&lt;component type&gt;</c> for the
-    /// templates that have one (<c>names:templates/MiningNode</c>).</summary>
+    /// <c>{"names": [...]}</c>, sorted; read each record by its name), <c>names:templates/&lt;component type&gt;</c> for the
+    /// templates that have one (<c>names:templates/MiningNode</c>), and <c>names:resources/&lt;qualified type name&gt;</c> for every
+    /// resource of a type (<c>names:resources/keen::SceneResource</c>: <c>{"names": [...], "resources": [{"resourceId", "part",
+    /// "name"}, ...]}</c>; the result's TypeHash is the type's).</summary>
     /// <exception cref="ArgumentException">The key is not one of the forms above.</exception>
     /// <exception cref="KilnUnavailableException"><c>mods.boot.game_data</c> is off.</exception>
     [BootThreadOnly, RequiresCapability("mods.boot.game_data")]

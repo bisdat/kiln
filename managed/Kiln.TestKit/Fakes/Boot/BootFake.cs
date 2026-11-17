@@ -177,10 +177,13 @@ internal sealed unsafe class BootFake : IKitFake
         return true;
     }
 
-    /// <summary>boot.GameData in the kit: the records the test scripted (KilnHarness.BootPhase.SetRecord), else NotFound.</summary>
+    /// <summary>boot.GameData in the kit: the records the test scripted (KilnHarness.BootPhase.SetRecord), else NotFound.
+    /// <c>resource:&lt;GUID&gt;/&lt;qualified type name&gt;/&lt;part&gt;</c> is the hash form (the name's FNV-1a); <c>names:resources/&lt;type&gt;</c>
+    /// lists the records scripted under <c>resource:</c> keys of that type, and the <c>item:</c>/<c>template:</c> records whose
+    /// resourceId and typeHash name a resource of it (with their names).</summary>
     internal sealed class KitGameData(BootFakeState state) : IReadOnlyGameData
     {
-        private static readonly Regex Query = new(@"^(item:.+|template:.+|skill:0x[0-9a-fA-F]{8}|material:.+|names:(items|templates|skills|materials|templates/[A-Za-z0-9_]{1,96})|resource:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/[0-9a-fA-F]{8}/[0-9]+)$",
+        private static readonly Regex Query = new(@"^(item:.+|template:.+|skill:0x[0-9a-fA-F]{8}|material:.+|names:(items|templates|skills|materials|templates/[A-Za-z0-9_]{1,96}|resources/(?=[A-Za-z0-9_:]*::)[A-Za-z0-9_:]{1,160})|resource:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/([0-9a-fA-F]{8}|(?=[A-Za-z0-9_:]*::)[A-Za-z0-9_:]{1,160})/[0-9]+)$",
             RegexOptions.CultureInvariant);
 
         public BootContext? Frame { get; set; }
@@ -193,6 +196,14 @@ internal sealed unsafe class BootFake : IKitFake
             if (!Query.IsMatch(key)) throw new ArgumentException($"\"{key}\" is not a game-data query (item:, template:, skill:0x..., material:, resource:, names:<kind>)", nameof(key));
             lock (state.Lock)
             {
+                if (key.StartsWith("names:resources/", StringComparison.Ordinal) && !state.Records.ContainsKey(key))
+                    return ResourceNames(key["names:resources/".Length..]);
+                if (key.StartsWith("resource:", StringComparison.Ordinal) && !state.Records.ContainsKey(key))
+                {
+                    var want = ParseResource(key)!.Value;
+                    foreach (var (k, rec) in state.Records)
+                        if (ParseResource(k) is { } got && got == want) return new BootDataResult(true, null, rec);
+                }
                 if (key.StartsWith("names:", StringComparison.Ordinal) && !state.Records.ContainsKey(key))
                 {
                     // names:<kind>: the names of the records the test scripted for that kind, sorted
@@ -215,6 +226,49 @@ internal sealed unsafe class BootFake : IKitFake
                     ? new BootDataResult(true, null, v)
                     : new BootDataResult(false, $"NotFound: no record {key} in the game's data (the test scripted none: KilnHarness.BootPhase.SetRecord)", null);
             }
+        }
+
+        /// <summary>32-bit FNV-1a of the name's UTF-8 bytes: the game's type hash of a qualified type name.</summary>
+        internal static uint TypeHash(string name)
+        {
+            var h = 0x811C9DC5u;
+            foreach (var b in System.Text.Encoding.UTF8.GetBytes(name)) h = (h ^ b) * 0x01000193u;
+            return h;
+        }
+
+        // resource:<GUID>/<8 hex or qualified name>/<part> as (GUID, type hash, part); null for another key
+        private static (Guid Id, uint Type, long Part)? ParseResource(string key)
+        {
+            if (!key.StartsWith("resource:", StringComparison.Ordinal)) return null;
+            var parts = key["resource:".Length..].Split('/');
+            if (parts.Length != 3 || !Guid.TryParse(parts[0], out var id) || !long.TryParse(parts[2], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var part))
+                return null;
+            var type = parts[1].Length == 8 && uint.TryParse(parts[1], System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture, out var h) ? h : TypeHash(parts[1]);
+            return (id, type, part);
+        }
+
+        // names:resources/<type>, as kiln.boot answers it: {"names", "resources"} sorted by (name, resourceId, part)
+        private BootDataResult ResourceNames(string type)
+        {
+            var hash = TypeHash(type);
+            var found = new Dictionary<(Guid, long), string>();
+            foreach (var (k, v) in state.Records)
+            {
+                if (ParseResource(k) is { } r && r.Type == hash) found.TryAdd((r.Id, r.Part), "");
+                else if ((k.StartsWith("item:", StringComparison.Ordinal) || k.StartsWith("template:", StringComparison.Ordinal)) && v.TypeHash == hash && v.ResourceId != Guid.Empty)
+                    found[(v.ResourceId, v.Part)] = k[(k.IndexOf(':') + 1)..];
+            }
+            if (found.Count == 0)
+                return new BootDataResult(false, $"NotFound: no resource of {type} in the game's data (the test scripted none: KilnHarness.BootPhase.SetRecord under resource:)", null);
+            var rows = found.Select(f => (Id: f.Key.Item1.ToString("D"), Part: f.Key.Item2, Name: f.Value))
+                .OrderBy(r => r.Name, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).ThenBy(r => r.Part).ToArray();
+            var value = new
+            {
+                names = rows.Select(r => r.Name.Length > 0 ? r.Name : r.Id).Distinct().Order(StringComparer.Ordinal).ToArray(),
+                resources = rows.Select(r => new { resourceId = r.Id, part = r.Part, name = r.Name }).ToArray(),
+            };
+            using var doc = JsonDocument.Parse(JsonSerializer.Serialize(value));
+            return new BootDataResult(true, null, new BootDataValue(Guid.Empty, hash, 0, doc.RootElement.Clone()));
         }
     }
 }
