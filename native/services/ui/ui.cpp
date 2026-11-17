@@ -589,9 +589,10 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     info->on_ready = [](void*) { game_ready(); };
     // the process exits with code 0 (kiln_api.h on_unload: under Wine, and on Windows where kiln.json turns it on): the
     // scrolling pause menu's crash guard knows the game did not end in its calls (menu_scroll.cpp), and the overlay's
-    // crash guard that the overlay's start did not end it (overlay_guard.cpp)
+    // crash guard that the overlay's start did not end it (overlay_guard.cpp); chat history's last file write is done
+    // (chat_input_probe.cpp)
     if (info->size >= offsetof(KilnPluginInfo, on_unload) + sizeof(info->on_unload))
-        info->on_unload = [](void*) { scroll_exit(); overlay_guard_exit(); };
+        info->on_unload = [](void*) { scroll_exit(); overlay_guard_exit(); chat_input_exit(); };
     // the cursor import slots are patched once vulkan-1.dll loads (vk_install), long after the exe's own start-up code
     if (!overlay_drawing_on()) {
         // No Vulkan load observer, exports, objects or pre-overlay callbacks in this mode.

@@ -14,10 +14,10 @@
 #include <string_view>
 #include <vector>
 
-#include "nlohmann/json.hpp"
 #include "chat_history.h"
 #include "chat_focus.h"
 #include "chat_keys.h"
+#include "chat_store.h"
 #include "kiln_hook.hpp"
 #include "ui.h"
 
@@ -158,55 +158,60 @@ bool env_enabled(const char* name) {
     const DWORD n = GetEnvironmentVariableA(name, env, sizeof env);
     return n > 0 && n < sizeof env && env[0] == '1' && env[1] == '\0';
 }
+// <game>/kiln/data/kiln.ui/chat-history.json, beside imgui.ini (ui.cpp): kiln.ui's own data, per game folder.
 std::filesystem::path history_path() {
     char buffer[4096]{};
     size_t length = 0;
-    if (g_api->path(KILN_PATH_KILN, buffer, sizeof buffer, &length) != KILN_OK || !length || length >= sizeof buffer)
+    if (g_api->path(KILN_PATH_DATA, buffer, sizeof buffer, &length) != KILN_OK || !length || length >= sizeof buffer)
         return {};
     const std::u8string utf8(reinterpret_cast<const char8_t*>(buffer), length);
-    return std::filesystem::path(utf8) / "user" / "chat-history.json";
+    return std::filesystem::path(utf8) / "kiln.ui" / "chat-history.json";
 }
 void load_history() {
     g_history_file = history_path();
     if (g_history_file.empty()) return;
     try {
+        std::error_code ec;
+        const auto size = std::filesystem::file_size(g_history_file, ec);
+        if (ec || size > chat_store::kMaxFileBytes) return;  // none yet, or not ours
         std::ifstream in(g_history_file, std::ios::binary);
-        if (!in.good()) return;
-        const auto doc = nlohmann::json::parse(in);
-        if (!doc.is_object() || !doc.contains("version") || doc["version"] != 1 ||
-            !doc.contains("entries") || !doc["entries"].is_array()) return;
-        std::vector<std::string> lines;
-        for (const auto& e : doc["entries"]) {
-            if (lines.size() >= 2000) break;
-            if (e.is_object() && e.contains("text") && e["text"].is_string())
-                lines.push_back(e["text"].get<std::string>());
-        }
-        g_history.load(lines);
+        std::string text(static_cast<size_t>(size), '\0');
+        if (!in.read(text.data(), static_cast<std::streamsize>(text.size()))) return;
+        g_history.load(chat_store::parse(text));
     } catch (...) {
         // History is optional; file problems must never interfere with chat.
     }
 }
-void save_history() {
-    if (g_history_file.empty()) return;
+// The writer thread's write (chat_store::Saver): a temp file, then one rename over the old file.
+void write_history_file(const std::string& text) {
+    static std::atomic<bool> said{false};
     try {
-        std::filesystem::create_directories(g_history_file.parent_path());
-        nlohmann::json doc = {{"version", 1}, {"entries", nlohmann::json::array()}};
-        for (const auto& line : g_history.persisted())
-            doc["entries"].push_back({{"text", line}, {"server", nullptr}});
+        std::error_code ec;
+        std::filesystem::create_directories(g_history_file.parent_path(), ec);
         const std::filesystem::path temp = g_history_file.wstring() + L".tmp";
+        bool ok = false;
         {
             std::ofstream file(temp, std::ios::binary | std::ios::trunc);
-            if (!file) return;
-            file << doc.dump();
-            file.flush();
-            if (!file) return;
+            ok = file && file.write(text.data(), static_cast<std::streamsize>(text.size())) && file.flush();
         }
-        if (!MoveFileExW(temp.c_str(), g_history_file.c_str(),
-                         MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
-            DeleteFileW(temp.c_str());
+        if (ok && MoveFileExW(temp.c_str(), g_history_file.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+            return;
+        DeleteFileW(temp.c_str());
     } catch (...) {
-        // Optional local history; never crash or block chat over a file error.
     }
+    if (!said.exchange(true)) logf(KILN_LOG_WARN, "ui: chat history: could not write chat-history.json (said once)");
+}
+// Created at the first save and never destroyed: a static destructor must not join a thread (chat_store.h).
+std::atomic<chat_store::Saver*> g_saver{nullptr};
+// UI thread: hands the persisted lines to the writer thread; never touches the disk itself.
+void save_history() {
+    if (g_history_file.empty()) return;
+    chat_store::Saver* saver = g_saver.load(std::memory_order_acquire);
+    if (!saver) {
+        saver = new chat_store::Saver(&write_history_file);
+        g_saver.store(saver, std::memory_order_release);
+    }
+    saver->request(g_history.persisted());
 }
 
 // UI-thread-only, before the underlying TextInputProcess.
@@ -456,6 +461,11 @@ void chat_input_frame_end() {
             logf(KILN_LOG_INFO, "ui: chat history trace: navigation reset after sustained loss of chat focus");
     }
     g_editing_in_frame = false;
+}
+
+// on_unload (ui.cpp): the last list is written and the writer thread joined, while the process still runs.
+void chat_input_exit() {
+    if (chat_store::Saver* saver = g_saver.load(std::memory_order_acquire)) saver->stop();
 }
 
 bool chat_input_probe_install() {

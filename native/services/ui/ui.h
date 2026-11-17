@@ -84,6 +84,7 @@ extern std::atomic<uint32_t> g_hover_panels; // Kiln panels that take the mouse 
 // ---- chat_input_probe.cpp (GitHub issue 44: Up/Down history in the game's chat field) ----
 bool chat_input_probe_install();  // game_install: hooks the chat field when chat history (or a diagnostic) is on
 void chat_input_frame_end();      // the game's UI thread, after each GameUiFrame: whether the chat field has focus
+void chat_input_exit();           // on_unload: writes the history file still pending, stops its writer thread
 
 // The window procedure's one hook point for the game's chat field (input.cpp calls it on the window thread, before
 // Kiln's own key handling). Set by chat_input_probe_install while chat history or its diagnostic runs; null otherwise,

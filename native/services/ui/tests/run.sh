@@ -38,6 +38,10 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -pthread -fsanitize=address,undefined "$here
 # Issue 44: history draft, commands-only persistence policy, sensitive text, UTF-8.
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/chat_history_test.cpp" -o "$out/chat_history_test"
 "$out/chat_history_test"
+# Issue 44: chat-history.json's format, and its writer thread (the UI thread never waits for the disk; chat_store.h)
+g++ -std=c++20 -O1 -g -Wall -Wextra -pthread -fsanitize=address,undefined -I"$here/../../../third_party" "$here/chat_store_test.cpp" \
+    -o "$out/chat_store_test"
+"$out/chat_store_test"
 # one key press counts once, also across a focus loss (key_hold.h, GitHub issue 39): plain logic
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/key_hold_test.cpp" -o "$out/key_hold_test"
 "$out/key_hold_test"

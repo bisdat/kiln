@@ -57,7 +57,7 @@ class History {
 public:
     explicit History(std::size_t limit = 200) : limit_(std::clamp<std::size_t>(limit, 1, 2000)) {}
 
-    // Existing persisted entries, e.g. from kiln/user/chat-history.json.
+    // Persisted entries, from kiln/data/kiln.ui/chat-history.json (chat_store.h).
     void load(const std::vector<std::string>& lines) {
         entries_.clear();
         edited();
