@@ -286,6 +286,10 @@ clients. A carrier is any item with a socket: a weapon, or a ring, armour piece 
 gear" (lab: a ring by code, socketed and upgraded at a spawned forge). `GemCraftingEvent` (cancelable) comes before a
 player's own action, `GemCraftedEvent` after any action that happened ("Which event for what" above).
 
+Seen in a real game: chest gems in the GEMS grid and chests paying for an upgrade (bisdat, 2026-11-17, a world hosted on
+a Linux PC under Proton; [gems-forge.md](gems-forge.md#seen-in-a-real-game-020-dev2915) says what passed and what is
+not seen yet).
+
 ## Sockets on other gear
 Full reference: [gems-sockets.md](gems-sockets.md). The game runs the gem of the item in any of the 11 impact slots, and
 its save keeps a socket on any item; only the creation of a socket, the forge's lists and the vanilla forge's Remove are
