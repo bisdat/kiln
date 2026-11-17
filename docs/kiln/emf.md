@@ -172,6 +172,16 @@ player sees of them is not checked.
 | loot_magnet, bulk_craft, companion, villager_jobs | yes | Ready, and their mod programs (`emit_event`) registered. They act on a player's input. | wheel (client) |
 | emf_probe (Kiln's test mod) | yes | 72 checks over the whole table, 0 failures (96 with the v28 to v40 answers in 0.2.0-dev.27). | - |
 
+**Mods kiln-emf runs differently on purpose** (`native/plugins/emf/src/compat_ticks.h`, logged at load):
+
+- **Expeditions (GronGM) up to 1.2.x:** its `on_tick` is called for the server world only. EMF (and kiln-emf) run a
+  mod's `on_tick` after every world's step, each on that world's own thread. Expeditions returns at once for the
+  client and prediction worlds, but first clears the world pointer its server-world work reads through, so in a
+  game that hosts its own world a main-thread tick lands in the middle of a survivor search and empties it ("No free
+  survivors nearby" next to the survivors, Send's "too far away"; seen on a Steam Deck, confirmed with a diagnostic
+  build). Its other worlds' ticks do nothing else, so nothing is lost. Versions after 1.2.90 get every world's tick
+  again.
+
 ## Hook order
 `hook`, `hook_pattern` and `hook_address` put each mod's detour into [kiln.hooks v2](services/hooks.md): one physical
 detour per game function, shared with Kiln's own services, and your detour is a **link** in it, owned by `emf:<mod id>` and
