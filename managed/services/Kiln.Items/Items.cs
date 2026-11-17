@@ -101,6 +101,32 @@ public static unsafe partial class Items
     /// <summary>Items whose debug or display name contains <paramref name="text"/> (ignoring case).</summary>
     public static IReadOnlyList<ItemInfo> Search(string text, int max = 25) => ItemCatalog.Search(T, text, max);
 
+    /// <summary>
+    /// The item's name for players (since 0.2.0-dev.29.15). On a game client it is in the game's text language
+    /// (<c>GameLanguage.Current</c>), read from the game's own texts at run time; that works in the main menu and on a
+    /// client that joined another's world too, where <see cref="Get"/> has no catalog. A new item (kiln.content) gets its
+    /// definition's text for that language, else its <c>DisplayName</c>. On a dedicated server (whose data has no texts),
+    /// and on a client until the game's texts are read (the first call starts that in the background; it takes a fraction
+    /// of a second), it is the English name Kiln ships for the game's items. Null for an id Kiln knows no name of.
+    /// </summary>
+    /// <remarks>Any thread, also a draw callback: it never waits for a read. Keep the answer per frame, not per call site,
+    /// if you draw many names.</remarks>
+    [AnyThread]
+    public static string? DisplayName(ItemId item)
+    {
+        if (item.Value == 0) return null;
+        try
+        {
+            if (DefinedNames.Of(item.Value, GameNames.Language) is { Length: > 0 } defined) return defined;
+            if (GameNames.ItemName(item) is { Length: > 0 } game) return game;
+        }
+        catch (Exception e) when (e is InvalidOperationException or ArgumentException or NotSupportedException or KilnUnavailableException)
+        {
+            // fall back to the English name below
+        }
+        return ItemCatalog.ShippedName(item.Value);
+    }
+
     // ------------------------------------------------------------------------------------------- reading -------
 
     /// <summary>The inventory of <paramref name="entity"/>, or null when it has none (or it does not exist).</summary>

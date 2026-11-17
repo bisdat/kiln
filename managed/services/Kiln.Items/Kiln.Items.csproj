@@ -21,6 +21,9 @@
     <InternalsVisibleTo Include="Kiln.Saves.Tests" />
     <!-- gems (Kiln.Abilities/Gems): a carrier's socket and a player's items read through the same item instances -->
     <InternalsVisibleTo Include="Kiln.Abilities" />
+    <!-- the game's own names and item GUIDs (GameNames): the item icons (Kiln.Ui) -->
+    <InternalsVisibleTo Include="Kiln.Ui" />
+    <InternalsVisibleTo Include="Kiln.Ui.Tests" />
     <ProjectReference Include="../../Kiln.Api/Kiln.Api.csproj" Private="false" />
     <EmbeddedResource Include="Data/items.tsv" LogicalName="Kiln.Items.items.tsv" />
     <None Include="Data/ITEMS-LICENSE.txt" />
