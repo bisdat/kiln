@@ -133,6 +133,8 @@ export interface LauncherSettings {
   /** (dev.29) "Earlier versions to keep": how many earlier versions of a mod an update keeps for a roll back, with
    *  their settings (0 to KEEP_MAX; default 1; absent from an older backend). */
   keepVersions?: number;
+  /** The launcher's language (Settings, Language; src/i18n): "system" or absent = the system's, else a tag ("zh-CN"). */
+  language?: string | null;
 }
 /** The most `keepVersions` may be (kiln_manage::kept::KEEP_MAX). */
 export const KEEP_MAX = 5;
@@ -1109,6 +1111,14 @@ export const taskCancel = (taskId: TaskId) => call<null>("task_cancel", { taskId
 export const appStarted = () => call<null>("app_started");
 /** Settings, "Draw the launcher without the GPU": sets or clears the marker for the next start (Linux). */
 export const appRenderSet = (software: boolean) => call<RenderInfo>("app_render_set", { software });
+/** Translation files a player put in the data folder's `locales/` (docs/kiln/translating.md): `<tag>.json` each, read
+ *  at the start and on Settings' reload. `dir` is the folder (it need not exist). */
+export interface LocaleFiles {
+  dir: string;
+  files: { tag: string; text: string }[];
+  errors: { file: string; message: string }[];
+}
+export const appLocales = () => call<LocaleFiles>("app_locales");
 /** Local game assets for the save editor and the admin map (`kiln-asset` protocol roots). */
 export interface AssetsStatus {
   root: string;
@@ -1994,6 +2004,7 @@ export const COMMANDS = [
   "data_folder_notice_ack", "data_folder_restart",
   "app_started", "app_render_set",
   "updates_check",
+  "app_locales",
 ] as const;
 export type CommandName = (typeof COMMANDS)[number];
 

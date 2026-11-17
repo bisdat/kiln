@@ -14,6 +14,7 @@ import { DeckModeCard, saveSettings } from "../deck/mode";
 import { NexusCard } from "../components/NexusSettings";
 import { ProfilesCard } from "../components/ProfilesSettings";
 import { LibraryCard } from "../components/LibrarySettings";
+import { LanguageCard } from "../components/LanguageSettings";
 import {
   Badge, Button, Card, ConfirmDanger, EmptyState, Field, IconButton, NumberInput, Page, PageHeader, PathPicker, SchemaForm, Select, Skeleton,
   Toggle, errorText, fmtAgo, fmtBytes, setTypeToConfirm, toast, typeToConfirm,
@@ -37,6 +38,7 @@ export default function SettingsPage() {
         <ProfilesCard />
         <LibraryCard />
         <LauncherCard />
+        <LanguageCard />
         <GamesCard />
         <AppearanceCard />
         <UpdatesCard />
@@ -194,7 +196,8 @@ function KilnJsonCard() {
     <Card title="Kiln" sub={<><span className="k-mono">kiln/kiln.json</span> · applies at the next start</>}>
       {status.data && !installed ? <EmptyState title="Kiln is not installed" hint="Install it on Runtime first." /> :
         doc.isLoading ? <Skeleton lines={5} /> : doc.error ? <EmptyState title="kiln.json unavailable" hint={errorText(doc.error)} /> : doc.data?.schema && (
-          <SchemaForm schema={doc.data.schema} values={doc.data.values} errors={doc.data.errors} disabled={set.isPending}
+          // ui.language has its own control (Language: components/LanguageSettings.tsx)
+          <SchemaForm schema={{ ...doc.data.schema, entries: doc.data.schema.entries.filter((e) => e.path !== "ui.language") }} values={doc.data.values} errors={doc.data.errors} disabled={set.isPending}
             onChange={(path, value) => set.mutate({ path, value })} onReset={(path) => reset.mutate(path)} />
         )}
       {doc.data && <span className="k-hint">"client" and "server" override sections are kept as they are.</span>}
