@@ -143,6 +143,27 @@ public sealed class BootLoweringTests : IDisposable
     }
 
     [Fact]
+    public void An_appended_value_is_a_plain_value_not_a_change_of_the_games_value()
+    {
+        var f = new BootContext("boot-gallery", 1, BootRoles.DedicatedServer, new UnavailableGameData());
+        var d = BootDefinitions.For(f);
+        var e = Assert.Throws<ArgumentException>(() => d.Define("doubled", new ResourcePatchBlock
+        {
+            Resource = Guid.NewGuid(), Type = "keen::FbUiBundle",
+            Append = new() { ["steps"] = new ResourceListAppend { Values = [3, ResourceValue.Times(2)] } },
+        }));
+        Assert.Contains("not a change of the game's value", e.Message);
+        Assert.Throws<ArgumentException>(() => d.Define("none", new ResourcePatchBlock
+        {
+            Resource = Guid.NewGuid(), Type = "keen::FbUiBundle", Append = new() { ["steps"] = new ResourceListAppend() },
+        }));
+        e = Assert.Throws<ArgumentException>(() => d.DefineJson("resourcePatches", "doubled-json",
+            """{"resource":"82706b40-61b1-4b8f-8b23-dcec6971bda1","type":"keen::FbUiBundle","append":{"steps":{"values":[{"mul":2}]}}}"""));
+        Assert.Contains("not a change of the game's value", e.Message);
+        Assert.Empty(f.Staged);
+    }
+
+    [Fact]
     public void The_sample_lowers_into_documents_of_assets_content_and_skills_and_registers_nothing()
     {
         var sink = new CountingSink();

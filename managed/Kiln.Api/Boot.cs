@@ -64,7 +64,7 @@ public interface IReadOnlyGameData
     /// one kind holds: <c>names:items</c>, <c>names:templates</c>, <c>names:skills</c>, <c>names:materials</c> (the value is
     /// <c>{"names": [...]}</c>, sorted; read each record by its name), and <c>names:templates/&lt;component type&gt;</c> for the
     /// templates that have one (<c>names:templates/MiningNode</c>).</summary>
-    /// <exception cref="ArgumentException">The key is not one of the five forms.</exception>
+    /// <exception cref="ArgumentException">The key is not one of the forms above.</exception>
     /// <exception cref="KilnUnavailableException"><c>mods.boot.game_data</c> is off.</exception>
     [BootThreadOnly, RequiresCapability("mods.boot.game_data")]
     BootDataResult Read(string key);

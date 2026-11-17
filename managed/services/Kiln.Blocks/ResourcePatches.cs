@@ -55,12 +55,28 @@ public sealed record ResourcePatchBlock : IBlock
     public Dictionary<string, ResourceListAppend>? Append { get; init; }
 
     internal bool HasWork => Set.Count > 0 || RemoveComponents?.Count > 0 || AddComponents?.Count > 0 || Append?.Count > 0;
+
+    /// <summary>What kiln.content would refuse in the patch's shape that Kiln.Blocks can see first; null when nothing.</summary>
+    internal string? Problem()
+    {
+        foreach (var (path, append) in Append ?? [])
+        {
+            if (append is null) return $"append \"{path}\": no values";
+            if (append.Values is null || append.Values.Count == 0) return $"append \"{path}\": no values";
+            if (append.Values.Any(v => v.IsChange))
+                return $"append \"{path}\": a value is a number, a bool or an enum member's name, not a change of the game's value ({{ mul, add, min, max }})";
+        }
+        foreach (var (name, list) in new[] { ("removeComponents", RemoveComponents), ("addComponents", AddComponents) })
+            if (list?.Any(string.IsNullOrEmpty) == true) return $"{name}: a component's type name is empty";
+        return null;
+    }
 }
 
 /// <summary>Values a resource patch adds to the end of a list (<see cref="ResourcePatchBlock.Append"/>).</summary>
 public sealed record ResourceListAppend
 {
-    /// <summary>The values, in order: numbers, bools or enum members' names.</summary>
+    /// <summary>The values, in order: numbers, bools or enum members' names (a change such as <see cref="ResourceValue.Times"/> is
+    /// refused: there is no game's value to change).</summary>
     public List<ResourceValue> Values { get; init; } = [];
 
     /// <summary>Only a value greater than the list's last (the last one added counts) is added: a sorted list stays sorted,
