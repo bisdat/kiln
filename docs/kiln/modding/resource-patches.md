@@ -205,9 +205,14 @@ comes later in the load order is refused before the game starts, and the report 
   works on the list as its own `append` left it;
 - one mod copies a component that another removes, or two mods copy one component from different templates (the same
   copy from both is fine). One mod's `addComponents` and another's copy of that component are fine: the copy is made
-  after the add, so the copied data is what the template gets; another mod's `set` on a copied component is fine too;
+  after the add, so the copied data is what the template gets;
+- one mod copies a component and another has a path into it that counts on what the component holds: an index on the
+  way (`"Stock.items[5].x"`), a change of the game's value (`{ "mul": 2 }` would change the copied value instead), or a
+  `clear`, `replace` or `append` of a list in it. Either order: the later mod is refused. Another mod's plain value set
+  on a copied component (`"InventoryCraftingStock.canReceiveAreaDeposit": true`) is fine: it is written after the copy.
+  Within one mod, every path into its own copy is fine;
 - two mods clear or replace one list, unless both make the same change (two `clear`s, or two `replace`s with the same
-  values, are combined);
+  values, are combined; `1` and `1.0` are the same value);
 - one mod clears or replaces a list and another appends to it, sets one or all of its elements (`list[2]`, `list[*]`),
   or names a path through it (`list[2].x`, a list inside its elements): the elements the other mod counts on are gone or
   others. Within one mod this is fine: its `clear` or `replace`, then its `append`, then its `set` are made in that order;

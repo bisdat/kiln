@@ -163,8 +163,9 @@ bool boot_replace(Root kind, const TType* root, const std::string& path, const s
 // template has none of that type, the first of that type replaced when it has. `from` names the source in messages.
 struct CopySource {
     std::string brief, from;
-    const uint8_t* data = nullptr;  // the source template's bytes (nullptr: not in this game build)
+    const uint8_t* data = nullptr;  // the source template's bytes (nullptr: not in this game build, or `why`)
     size_t len = 0;
+    std::string why;                // why it was not read, when that is not a missing resource
 };
 bool boot_copy_components(const TType* type, const std::vector<CopySource>& copies, std::vector<uint8_t>* bytes, size_t* copied,
                           std::string* err);

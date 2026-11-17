@@ -314,6 +314,9 @@ void copy_components() {
           "CurrentTransform is never copied over");
     check(!boot_copy_components(&tmpl, {{"Stock", "gone", nullptr, 0}}, &c, &n, &err) && err.find("MissingResource") != std::string::npos,
           "a source the game build has not got is refused");
+    check(!boot_copy_components(&tmpl, {{"Stock", "huge", nullptr, 0, "the template huge is 70000000 bytes, over the 64 MiB a copy is read from"}}, &c, &n, &err) &&
+              err.find("over the 64 MiB") != std::string::npos && err.find("MissingResource") == std::string::npos,
+          "a source too large to read says so, not that it is missing");
     check(!boot_copy_components(&tmpl, {{"Editor", "magic", src.data(), src.size()}}, &c, &n, &err) && err.find("does not take") != std::string::npos,
           "a member of a kind the copy does not know is refused, not guessed");
     auto broken = src;

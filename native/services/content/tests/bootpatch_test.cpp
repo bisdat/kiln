@@ -247,6 +247,26 @@ void reshape_conflicts() {
           "the same copy from both is combined");
     check(accepted(both(templ({{"addComponents", {"Stock"}}}), templ({{"copyComponents", {{"Stock", "magic-chest"}}}}))), "an add and a copy combine (the copy's data stays)");
     check(accepted(both(templ({{"copyComponents", {{"Stock", "magic-chest"}}}}), templ({{"set", {{"Stock.x", 1}}}}))), "another mod's set on the copy is fine");
+    check(accepted(both(templ({{"set", {{"Stock.x", 1}}}}), templ({{"copyComponents", {{"Stock", "magic-chest"}}}}))), "a plain set before the copy is fine too");
+    // a copy pulls the component from under another mod's path that counts on what it holds: the later mod is refused (review)
+    check(refused(both(templ({{"set", {{"Stock.items[5].x", 1}}}}), templ({{"copyComponents", {{"Stock", "magic-chest"}}}})), "b", "counts on what Stock holds"),
+          "a copy after another mod's indexed path into the component is refused");
+    check(refused(both(templ({{"copyComponents", {{"Stock", "magic-chest"}}}}), templ({{"set", {{"Stock.items[5].x", 1}}}})), "b", "copies the component Stock"),
+          "an indexed path into a component another mod copies is refused");
+    check(refused(both(templ({{"set", {{"Stock.x", {{"mul", 2}}}}}}), templ({{"copyComponents", {{"Stock", "magic-chest"}}}})), "b", "counts on"),
+          "a copy after another mod's change of the game's value is refused");
+    check(refused(both(templ({{"copyComponents", {{"Stock", "magic-chest"}}}}), templ({{"set", {{"stock.x", {{"mul", 2}}}}}})), "b", "copies the component"),
+          "a change of the game's value on a component another mod copies is refused");
+    check(refused(both(templ({{"append", {{"Stock.list", {{"values", {1}}}}}}}), templ({{"copyComponents", {{"Stock", "magic-chest"}}}})), "b", "appends to"),
+          "a copy after another mod's append into the component is refused");
+    check(refused(both(templ({{"copyComponents", {{"Stock", "magic-chest"}}}}), templ({{"clear", {"Stock.list"}}})), "b", "copies the component"),
+          "a clear in a component another mod copies is refused");
+    check(refused(both(templ({{"copyComponents", {{"Stock", "magic-chest"}}}}), templ({{"replace", {{"Stock.list", {{"values", {2}}}}}}})), "b", "copies the component"),
+          "a replace in a component another mod copies is refused");
+    check(accepted(docs_of({{"a", "k1", templ({{"copyComponents", {{"Stock", "magic-chest"}}}, {"set", {{"Stock.items[0].x", {{"mul", 2}}}}}})}})),
+          "one mod's own copy and paths into it are fine (made after the copy)");
+    check(accepted(both(plain({{"replace", {{"list", {{"values", {1, 2}}}}}}}), plain({{"replace", {{"list", {{"values", {1.0, 2.0}}}}}}}))),
+          "1 and 1.0 are the same replace");
     check(refused(both(templ({{"set", {{"components[0].x", 1}}}}), templ({{"copyComponents", {{"Stock", "magic-chest"}}}})), "b", "by its place"),
           "a copy after another mod's components[i] is refused");
     // lists

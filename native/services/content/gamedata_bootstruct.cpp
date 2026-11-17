@@ -441,7 +441,7 @@ bool boot_copy_components(const TType* type, const std::vector<CopySource>& copi
         std::string why;
         const TType* t = component_type(c.brief, &why);
         if (!t) return *err = "\"copyComponents\": " + why, false;
-        if (!c.data) return *err = label + ": MissingResource: this game build has no template " + c.from, false;
+        if (!c.data) return *err = label + ": " + (c.why.empty() ? "MissingResource: this game build has no template " + c.from : c.why), false;
         size_t src_field = 0;
         std::vector<Var> src_vars;
         if (!read_components(type, c.data, c.len, &src_field, &src_vars, &why)) return *err = label + ": the template " + c.from + ": " + why, false;

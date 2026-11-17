@@ -24,8 +24,8 @@
 //     any other way by another mod (the same clear, or the same values, from both is fine), a "components[i]" path on a
 //     template whose components change. The plan is frozen.
 //   apply (kiln.assets when_resources_ready: the game's resource service is up and nothing has read through it): each
-//     resource is copied, every document's structural edits are made in the copy (removes, adds, appends), then every
-//     set, with the game's values as the originals, and the copy is served as an override. A document is all or
+//     resource is copied, every document's structural edits are made in the copy (kPhases: removes, adds, copies, clears,
+//     replaces, appends), then every set, with the game's values as the originals, and the copy is served as an override. A document is all or
 //     nothing: when one of its edits fails, the copy is made again from the game's bytes without that document, so the
 //     resource is what the other documents make it. What only the bytes can say (the resource is not there, an index
 //     past the array, a component the template has not got) is a fault after the publication, once per document:
@@ -193,7 +193,8 @@ bool same_place(const std::vector<Seg>& a, const std::vector<Seg>& b, size_t n =
 bool through(const std::vector<Seg>& list, const std::vector<Seg>& path) {
     return path.size() > list.size() && path[list.size()].index && same_place(list, path, list.size());
 }
-const char* verb_of(const std::string& what) {
+const char* verb_of(std::string what) {
+    if (!what.empty() && what.back() == '!') what.pop_back();  // a fragile path (template_path)
     return what == "append" ? "appends to" : what == "clear" ? "clears" : what == "replace" ? "replaces" : "sets";
 }
 
@@ -473,7 +474,9 @@ KilnResult KILN_CALL prepare_boot(void*, const KilnBootPrepareInputV1* in, KilnB
         auto count = [&]() { return plan->sets < kMaxSets ? (++plan->sets, true) : false; };
         // A path on a template: a component another mod removes is not one to start at, and "components[i]" names another
         // component once the list changes.
-        auto template_path = [&](const std::string& path, const std::vector<Seg>& segs, const char* what, std::string* why) {
+        // `fragile`: the path counts on what the component holds (a list index on the way, a change of the game's value,
+        // a list edit): another mod's copyComponents of that component would pull it from under it
+        auto template_path = [&](const std::string& path, const std::vector<Seg>& segs, const char* what, bool fragile, std::string* why) {
             const Head h = head_of(types ? type : nullptr, segs);
             if (h.components_index) {
                 if (const auto& st = structure[res_key]; !st.empty())
@@ -485,12 +488,18 @@ KilnResult KILN_CALL prepare_boot(void*, const KilnBootPrepareInputV1* in, KilnB
             }
             if (h.member || h.component.empty()) return true;
             const std::string c = folded(h.component);
-            for (const Claim& r : components[res_key + "|" + c])
+            for (const Claim& r : components[res_key + "|" + c]) {
                 if (r.mod != d.owner && r.value == "-")
                     return *why = "Conflict: mod " + r.mod + " removes the component " + h.component + " of " + res_key +
                                   " that this path starts at; the later mod is refused",
                            false;
-            uses[res_key + "|" + c].push_back({path, d.owner, what});
+                if (r.mod != d.owner && fragile && r.value[0] == 'c')
+                    return *why = "Conflict: mod " + r.mod + " copies the component " + h.component + " of " + res_key +
+                                  " whole from another template, and this path counts on what it holds (a list, an index, or a change of the "
+                                  "game's value); the later mod is refused",
+                           false;
+            }
+            uses[res_key + "|" + c].push_back({path, d.owner, std::string(what) + (fragile ? "!" : "")});
             return true;
         };
         // the structural edits: what can be checked here is, the bytes when they are applied
@@ -556,6 +565,12 @@ KilnResult KILN_CALL prepare_boot(void*, const KilnBootPrepareInputV1* in, KilnB
                     if (cl.mod != d.owner && (cl.value == "-" || (cl.value[0] == 'c' && cl.value != mine)))
                         return refused("", "Conflict: mod " + cl.mod + (cl.value == "-" ? " removes " : " copies from another template ") + brief +
                                                " of " + res_key + "; two mods on one component are not combined");
+                // a copy replaces what another mod's path into the component counts on: the later mod (this one) is refused
+                for (const Claim& u : uses[res_key + "|" + c])
+                    if (u.mod != d.owner && !u.value.empty() && u.value.back() == '!')
+                        return refused("", "Conflict: mod " + u.mod + " " + verb_of(u.value) + " \"" + u.index + "\" of " + res_key +
+                                               ", which counts on what " + brief + " holds, and this patch copies " + brief +
+                                               " whole from another template; the later mod is refused");
                 list.push_back({"", d.owner, mine});
                 op.names.push_back(brief);
                 op.sources.push_back(src);
@@ -603,7 +618,7 @@ KilnResult KILN_CALL prepare_boot(void*, const KilnBootPrepareInputV1* in, KilnB
                             return refused(path, "\"" + w + "\": a value is a number, a bool or an enum member's name");
                 }
                 if (!count()) return refused(path, too_many);
-                if (rp.tmpl && !template_path(path, segs, which, &err)) return refused(path, err);
+                if (rp.tmpl && !template_path(path, segs, which, true, &err)) return refused(path, err);
                 // the list and its values against the types (a variant or an optional on the way: the bytes say)
                 Field el;
                 bool unknown = !types;
@@ -627,7 +642,8 @@ KilnResult KILN_CALL prepare_boot(void*, const KilnBootPrepareInputV1* in, KilnB
                 const std::string dump = clear ? std::string() : spec["values"].dump();
                 for (const ListClaim& r : reshaped) {
                     if (r.res != res_key || r.mod == d.owner) continue;
-                    if (same_place(r.place, place) && (append || r.what != w || r.value != dump))
+                    // the same values are the same replace however they are written (1 and 1.0)
+                    if (same_place(r.place, place) && (append || r.what != w || (r.value != dump && nlohmann::json::parse(r.value) != spec["values"])))
                         return refused(path, "Conflict: mod " + r.mod + " " + verb_of(r.what) + " this list of " + res_key + " (\"" + r.path +
                                                  "\"); two mods on one list are not combined (the same " + r.what + " from both is)");
                     if (through(r.place, place) || (!append && through(place, r.place)))
@@ -661,7 +677,9 @@ KilnResult KILN_CALL prepare_boot(void*, const KilnBootPrepareInputV1* in, KilnB
             std::string err;
             std::vector<Seg> segs;
             if (!segments(path, &segs, &err)) return refused(path, err);
-            if (rp.tmpl && !template_path(path, segs, "set", &err)) return refused(path, err);
+            if (rp.tmpl && !template_path(path, segs, "set",
+                                          is_op(value) || std::any_of(segs.begin(), segs.end(), [](const Seg& g) { return g.index; }), &err))
+                return refused(path, err);
             // a template's path starts at a component (by its type) or at a member of the template
             Field leaf;
             bool unknown = !types;
@@ -717,7 +735,11 @@ KilnResult KILN_CALL prepare_boot(void*, const KilnBootPrepareInputV1* in, KilnB
 
 // The templates copyComponents copies from, as served before any resource patch of this start is written (read once, at
 // the start of apply: a patch on a source template does not carry over into the copies). Key: guid_text.
-using Sources = std::map<std::string, std::vector<uint8_t>>;
+struct Source {
+    std::vector<uint8_t> bytes;
+    std::string why;  // not read: why (bytes empty)
+};
+using Sources = std::map<std::string, Source>;
 
 // One build of a resource's copy from the game's bytes, with every document that is not left out: every document's
 // removeComponents, then addComponents, copyComponents, clear, replace and append (kPhases; each on the copy as the one
@@ -742,7 +764,9 @@ bool build(const ResPatch& rp, const gd::TType* type, const uint8_t* data, size_
                 for (size_t k = 0; o.op == 'c' && k < o.names.size(); ++k) {
                     const std::string g = guid_text(o.sources[k].guid);
                     const auto it = sources.find(g);
-                    from.push_back({o.names[k], g, it == sources.end() ? nullptr : it->second.data(), it == sources.end() ? 0 : it->second.size()});
+                    const bool have = it != sources.end() && it->second.why.empty();
+                    from.push_back({o.names[k], g, have ? it->second.bytes.data() : nullptr, have ? it->second.bytes.size() : 0,
+                                    it != sources.end() ? it->second.why : std::string()});
                 }
                 const bool ok = o.op == '-' ? gd::boot_remove_components(type->resolved(), o.names, copy, &n, &err)
                               : o.op == '+' ? gd::boot_add_components(type->resolved(), o.names, copy, &n, &err)
@@ -835,8 +859,13 @@ void KILN_CALL apply(void*) {
                     const std::string g = guid_text(o.sources[k].guid);
                     const void* p = nullptr;
                     size_t n = 0;
-                    if (sources.count(g) || !A || A->resource_data(&o.sources[k], &p, &n) != KILN_OK || !p || n > kMaxResource) continue;
-                    sources[g].assign(static_cast<const uint8_t*>(p), static_cast<const uint8_t*>(p) + n);
+                    if (sources.count(g) || !A || A->resource_data(&o.sources[k], &p, &n) != KILN_OK || !p) continue;  // MissingResource
+                    if (n > kMaxResource) {
+                        sources[g].why = "the template " + g + " is " + std::to_string(n) + " bytes, over the " + std::to_string(kMaxResource >> 20) +
+                                         " MiB a copy is read from";
+                        continue;
+                    }
+                    sources[g].bytes.assign(static_cast<const uint8_t*>(p), static_cast<const uint8_t*>(p) + n);
                 }
     for (const ResPatch& rp : plan->resources) {
         const std::string what = rp.type + " " + guid_text(rp.res.guid);
