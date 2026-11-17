@@ -851,6 +851,7 @@ const handlers: Record<string, Handler> = {
     return { ...render };
   },
   app_desktop_set: (a) => (desktop = { ...desktop, on: !!a.on, installed: !!a.on, foreign: false }),
+  app_locales: () => ({ dir: `${mockDataDir()}/locales`, files: [], errors: [] }),
   app_settings_get: () => settings,
   app_settings_set: (a) => (settings = { ...(a.settings as LauncherSettings) }),
   app_open_path: () => null,

@@ -33,3 +33,10 @@ Kiln builds on the work of the Enshrouded modding community.
 | frostdev | frostdev.io | Kiln launcher theme and design. |
 
 Enshrouded is a trademark of Keen Games GmbH. Kiln is not affiliated with or endorsed by Keen Games.
+
+## Translations
+
+Translators of the launcher and of Kiln's in-game texts ([how to translate](docs/kiln/translating.md)).
+
+None yet. Each translation adds a line here: the language, the translator's name as they want it shown, and what
+they translated (the launcher, the in-game texts).

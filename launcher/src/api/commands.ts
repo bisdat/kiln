@@ -4,6 +4,7 @@
 // Types mirror crates/kiln-manage (serde camelCase) and launcher/src-tauri/src/commands/*.rs.
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { listen as tauriListen } from "@tauri-apps/api/event";
+import { t } from "../i18n";
 import { canFallBack, noteFallback } from "./fallback";
 import { loadMock } from "./mockLoad";
 import { oneActivation, profileSwitched } from "./oneActivation";
@@ -146,6 +147,8 @@ export interface LauncherSettings {
   /** (dev.29) "Earlier versions to keep": how many earlier versions of a mod an update keeps for a roll back, with
    *  their settings (0 to KEEP_MAX; default 1; absent from an older backend). */
   keepVersions?: number;
+  /** The launcher's language (Settings, Language; src/i18n): "system" or absent = the system's, else a tag ("zh-CN"). */
+  language?: string | null;
 }
 /** The most `keepVersions` may be (kiln_manage::kept::KEEP_MAX). */
 export const KEEP_MAX = 5;
@@ -1124,6 +1127,14 @@ export const appStarted = () => call<null>("app_started");
 export const appRenderSet = (software: boolean) => call<RenderInfo>("app_render_set", { software });
 /** Settings, "Kiln Launcher in the app menu" (Linux AppImage): writes or removes the entry and its icons. */
 export const appDesktopSet = (on: boolean) => call<DesktopInfo>("app_desktop_set", { on });
+/** Translation files a player put in the data folder's `locales/` (docs/kiln/translating.md): `<tag>.json` each, read
+ *  at the start and on Settings' reload. `dir` is the folder (it need not exist). */
+export interface LocaleFiles {
+  dir: string;
+  files: { tag: string; text: string }[];
+  errors: { file: string; message: string }[];
+}
+export const appLocales = () => call<LocaleFiles>("app_locales");
 /** Local game assets for the save editor and the admin map (`kiln-asset` protocol roots). */
 export interface AssetsStatus {
   root: string;
@@ -1227,7 +1238,7 @@ export interface BeforeBeta {
  *  an updater command in the Nexus build. Failure to read the distribution also fails closed. */
 async function selfUpdateCall<T>(cmd: string, args: Record<string, unknown> = {}): Promise<T> {
   const info = await appInfo();
-  if ((info.distribution ?? "direct") !== "direct") throw { code: "unsupported", message: "Self-update is disabled in this build" } satisfies KilnError;
+  if ((info.distribution ?? "direct") !== "direct") throw { code: "unsupported", message: t("api.commands.selfUpdateDisabled") } satisfies KilnError;
   return call<T>(cmd, args);
 }
 export const updateStatus = () => selfUpdateCall<UpdateStatus>("update_status");
@@ -2010,6 +2021,7 @@ export const COMMANDS = [
   "app_started", "app_render_set",
   "updates_check",
   "app_desktop_set",
+  "app_locales",
 ] as const;
 export type CommandName = (typeof COMMANDS)[number];
 

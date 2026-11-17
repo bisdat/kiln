@@ -238,7 +238,8 @@ pub fn run() {
             commands::app::app_started,
             commands::app::app_render_set,
             commands::updates::updates_check,
-            commands::app::app_desktop_set
+            commands::app::app_desktop_set,
+            commands::app::app_locales
         ]))
         .build(tauri::generate_context!())
         .expect("error while building the Kiln Launcher")
