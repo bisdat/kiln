@@ -152,10 +152,9 @@ bool boot_add_components(const TType* type, const std::vector<std::string>& name
     if (!read_components(type, *bytes, &field_at, &vars, err)) return false;
     for (const std::string& brief : names) {
         if (std::any_of(vars.begin(), vars.end(), [&](const Var& v) { return v.brief == brief; })) continue;  // it has one: kept as it is
-        const TType* t = type_named("keen::ecs::" + brief);
-        const TType* b = t;
-        while (b && b->name != "keen::ecs::Component") b = b->inner();
-        if (!t || !b) return *err = "\"addComponents\": \"" + brief + "\" is not a component type of the game", false;
+        std::string why;
+        const TType* t = component_type(brief, &why);
+        if (!t) return *err = "\"addComponents\": " + why, false;
         if (!t->size || t->size > 65536) return *err = "\"addComponents\": \"" + brief + "\" has an unusable size", false;
         vars.push_back({brief, t->hash, t->size, -1});
         ++*added;

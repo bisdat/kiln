@@ -23,6 +23,7 @@
 #include "content.h"
 #include "nlohmann/json.hpp"
 #include "services/kiln_gamedata.h"
+#include "services/kiln_types.h"
 
 namespace kc {
 
@@ -151,6 +152,32 @@ bool boot_add_components(const TType* type, const std::vector<std::string>& name
                          std::string* err);
 bool boot_append(Root kind, const TType* root, const std::string& path, const std::vector<gjson>& values, bool above_last,
                  std::vector<uint8_t>* bytes, size_t* appended, std::string* err);
+
+// A component type a template can hold, by its name without "keen::ecs::" ("PickupItemZone"): a struct that derives
+// from keen::ecs::Component and is not that base, and, when kiln.types has the game's list of ECS components (read from
+// the exe), one on that list (an intermediate base below Component is not). nullptr + *why otherwise. Boot resource
+// patches (prepare and apply) and clones' addComponents ask it.
+inline const TType* component_type(const std::string& brief, std::string* why) {
+    const TType* t = brief.empty() || brief.find(':') != std::string::npos ? nullptr : type_named("keen::ecs::" + brief);
+    const TType* r = t ? t->resolved() : nullptr;
+    const TType* b = r;
+    for (int depth = 0; b && b->name != "keen::ecs::Component" && depth < 32; ++depth) b = b->inner();
+    if (!r || !b || b->name != "keen::ecs::Component" || r == b || r->kind != K_STRUCT)
+        return *why = "\"" + brief + "\" is not a component type of this game build", nullptr;
+    const auto* T = g_api ? static_cast<const KilnTypesApi*>(g_api->service(KilnStr{KILN_TYPES_SERVICE, sizeof(KILN_TYPES_SERVICE) - 1}, 1))
+                          : nullptr;
+    const uint32_t n = T && T->header.size >= offsetof(KilnTypesApi, component_type_at) + sizeof(void*) && T->type_info && T->component_type_count &&
+                               T->component_type_at
+                           ? T->component_type_count()
+                           : 0;
+    if (!n) return r;  // no list to ask: the base class says it
+    for (uint32_t i = 0; i < n && i < 65536; ++i) {
+        KilnTypeInfo info{};
+        info.size = sizeof info;
+        if (T->type_info(T->component_type_at(i), &info) == KILN_OK && info.hash == r->hash) return r;
+    }
+    return *why = "\"" + brief + "\" is not one of the game's ECS components (a base type, or a type no entity holds)", nullptr;
+}
 
 // ============================================================================================= resources ========
 bool res_ready();

@@ -6,13 +6,15 @@
 #include <map>
 #include <stdexcept>
 namespace kc {
+const KilnApi* g_api = nullptr;
 namespace gd {
-// types: a template with a components list, three component types, CurrentTransform, a struct with a list of floats
-TType comp_base, alpha, beta, gammaT, transform, tmpl, f32, steps_list, holder;
+// types: a template with a components list, three component types, CurrentTransform, an intermediate base below
+// keen::ecs::Component that is no component of the game's (Middle), a struct with a list of floats
+TType comp_base, middle, alpha, beta, gammaT, transform, tmpl, f32, steps_list, holder;
 std::map<uint32_t, const TType*> by_hash;
 const TType* TType::resolved() const { return this; }
 const TType* TType::inner() const {
-    if (this == &alpha || this == &beta || this == &gammaT || this == &transform) return &comp_base;
+    if (this == &alpha || this == &beta || this == &gammaT || this == &transform || this == &middle) return &comp_base;
     if (this == &steps_list) return &f32;
     return nullptr;
 }
@@ -23,7 +25,7 @@ const TField* TType::field(const std::string& n) const {
 const TType* TField::type() const { return nullptr; }
 const TType* type_hash(uint32_t h) { auto it = by_hash.find(h); return it == by_hash.end() ? nullptr : it->second; }
 const TType* type_named(const std::string& n) {
-    for (const TType* t : {&alpha, &beta, &gammaT, &transform}) if (t->name == n) return t;
+    for (const TType* t : {&alpha, &beta, &gammaT, &transform, &comp_base, &middle}) if (t->name == n) return t;
     return nullptr;
 }
 bool leaf_of(const TType* t, Field* f) {
@@ -67,6 +69,8 @@ void types() {
     comp(beta, "Beta", 0xb2, 12);
     comp(gammaT, "Gamma", 0xc3, 4);
     comp(transform, "CurrentTransform", 0xd4, 16);
+    comp(middle, "Middle", 0xe5, 8);
+    comp_base.kind = K_STRUCT, comp_base.size = 1, comp_base.hash = 0xf6;
     tmpl.name = "keen::ecs::TemplateResource", tmpl.kind = K_STRUCT, tmpl.size = 0x10;
     tmpl.fields.push_back({"components", 0, 8});
     f32.kind = K_F32, f32.size = 4;
@@ -121,6 +125,42 @@ void add_components() {
     check(!boot_add_components(&tmpl, {"Nope"}, &b, &n, &err), "an unknown type is refused");
 }
 
+// The game's list of ECS components (kiln.types): Alpha, Beta, Gamma, CurrentTransform; not Middle, not the base.
+const uint32_t kListed[] = {0xa1, 0xb2, 0xc3, 0xd4};
+KilnTypesApi types_table{};
+KilnApi api{};
+const void* KILN_CALL service(KilnStr name, uint32_t) {
+    return std::string(name.ptr, name.len) == KILN_TYPES_SERVICE ? &types_table : nullptr;
+}
+
+// addComponents takes a component of the game's: not keen::ecs::Component itself, nor a base below it the game's list
+// of ECS components has not got (without that list, the base class is what says it)
+void component_types() {
+    std::string err;
+    size_t n = 0;
+    auto b = template_bytes();
+    check(!boot_add_components(&tmpl, {"Component"}, &b, &n, &err) && err.find("not a component type") != std::string::npos,
+          "the base type keen::ecs::Component is refused");
+    check(component_type("Component", &err) == nullptr && component_type("", &err) == nullptr && component_type("keen::ecs::Alpha", &err) == nullptr,
+          "the base, an empty name and a qualified name are no component names");
+    check(component_type("Middle", &err) == &middle, "without kiln.types' list, a type below Component is one");
+    types_table.header.size = sizeof types_table;
+    types_table.component_type_count = []() -> uint32_t { return 4; };
+    types_table.component_type_at = [](uint32_t i) -> const KilnType* { return reinterpret_cast<const KilnType*>(&kListed[i]); };
+    types_table.type_info = [](const KilnType* t, KilnTypeInfo* out) -> KilnResult {
+        out->hash = *reinterpret_cast<const uint32_t*>(t);
+        return KILN_OK;
+    };
+    api.service = &service;
+    g_api = &api;
+    check(component_type("Beta", &err) == &beta, "a listed component is one");
+    b = template_bytes();
+    check(!boot_add_components(&tmpl, {"Middle"}, &b, &n, &err) && err.find("not one of the game's ECS components") != std::string::npos,
+          "an intermediate type the game's list has not got is refused");
+    check(boot_add_components(&tmpl, {"Beta"}, &b, &n, &err) && n == 1, "a listed one is added");
+    g_api = nullptr;
+}
+
 void remove_components() {
     auto b = template_bytes();
     size_t n = 0;
@@ -170,6 +210,7 @@ int main() {
     try {
         types();
         add_components();
+        component_types();
         remove_components();
         append();
     } catch (const std::exception& e) {
