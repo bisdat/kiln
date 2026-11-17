@@ -104,13 +104,42 @@ fn symlinks_inside_the_root_are_refused_behind_a_linked_ancestor() {
         assert_eq!(refuse_symlink_path(&game, &path).unwrap_err().code, ErrorCode::Refused, "{}", path.display());
     }
     refuse_symlink_path(&game, &game.join("mods")).unwrap();
-    // the root itself being a link is refused as before (only what lies above it is the system's)
+    // the root itself being a link (a moved Steam game folder) is the player's layout: what lies below it is checked
     std::os::unix::fs::symlink(&real, t.0.join("var/home/user/game-link")).unwrap();
     let linked_root = t.0.join("home/user/game-link");
-    assert_eq!(refuse_symlink_path(&linked_root, &linked_root.join("mods")).unwrap_err().code, ErrorCode::Refused);
+    for path in [linked_root.join("mods"), linked_root.join("kiln/state/engine-mods.lock"), linked_root.join("missing/child")] {
+        refuse_symlink_path(&linked_root, &path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    }
+    for path in [linked_root.join("mods/linked"), linked_root.join("mods/linked/child"), linked_root.join("mods/dangling")] {
+        assert_eq!(refuse_symlink_path(&linked_root, &path).unwrap_err().code, ErrorCode::Refused, "{}", path.display());
+    }
+    // asked about the root itself, a link is still a link
     assert_eq!(refuse_symlink_path(&linked_root, &linked_root).unwrap_err().code, ErrorCode::Refused);
     // a path that is not under the root gets the strict check from its first component: the link above it refuses
     assert_eq!(refuse_symlink_path(&t.0.join("elsewhere"), &game.join("mods")).unwrap_err().code, ErrorCode::Refused);
+}
+
+/// A profile is placed into a game folder that is itself a link (a Steam library moved elsewhere and linked back):
+/// "the active profile changed and cannot be applied: <game>: symlinks are not allowed" until 0.2.0-dev.29.12.
+#[cfg(unix)]
+#[test]
+fn a_profile_is_placed_into_a_linked_game_folder() {
+    let t = tmp("linked-game");
+    let real = t.0.join("library/steamapps/common/Enshrouded");
+    std::fs::create_dir_all(&real).unwrap();
+    std::fs::write(real.join("enshrouded.exe"), b"MZ").unwrap();
+    let game = t.0.join("Enshrouded-link");
+    std::os::unix::fs::symlink(&real, &game).unwrap();
+    let dirs = kiln_manage::paths::DataDirs::at(t.0.join("data"));
+    let profile = kiln_manage::profile::create(&dirs, "Linked game", None).unwrap();
+    kiln_manage::engine_mods::place(&dirs, &profile, &game).unwrap_or_else(|e| panic!("placed into the linked game: {e}"));
+    assert!(real.join("kiln/state/engine-mods.lock").is_file(), "Kiln's state is in the real game folder");
+    // a link below the game folder is still refused
+    std::fs::remove_dir_all(real.join("kiln")).unwrap();
+    std::fs::create_dir_all(t.0.join("kiln-elsewhere")).unwrap();
+    std::os::unix::fs::symlink(t.0.join("kiln-elsewhere"), real.join("kiln")).unwrap();
+    let e = kiln_manage::engine_mods::place(&dirs, &profile, &game).unwrap_err();
+    assert!(e.code == ErrorCode::Refused && e.message.contains("symlinks are not allowed"), "{e}");
 }
 
 #[cfg(windows)]
