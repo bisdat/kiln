@@ -422,6 +422,16 @@ KilnHandle image_load(KilnOwner owner, const void* png, size_t len) {
     return img->handle;
 }
 
+// The same image from pixels (kiln.assets' texture_rgba: the game's item icons, Kiln.Ui's Ui.ItemImage).
+KilnHandle image_load_rgba(KilnOwner owner, const uint8_t* rgba, uint32_t w, uint32_t h) {
+    if (!rgba || w == 0 || h == 0 || w > 4096 || h > 4096) return 0;
+    auto* img = new Image{next_handle(), owner, nullptr, {}, static_cast<int>(w), static_cast<int>(h), false, false};
+    img->rgba.assign(rgba, rgba + static_cast<size_t>(w) * h * 4);
+    std::lock_guard lk(g_img_mu);
+    g_images[img->handle] = img;
+    return img->handle;
+}
+
 bool image_size(KilnHandle h, uint32_t* w, uint32_t* hgt) {
     std::lock_guard lk(g_img_mu);
     auto it = g_images.find(h);

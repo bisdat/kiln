@@ -402,6 +402,10 @@ KilnResult KILN_CALL t_menu_add(KilnOwner o, uint32_t menu, int32_t order, KilnS
 }
 KilnResult KILN_CALL t_menu_set(KilnHandle e, KilnStr text, uint32_t flags) { return game_menu_set(e, text, flags); }
 KilnHandle KILN_CALL t_image_load(KilnOwner o, const void* png, size_t len) { if (!overlay_drawing_on()) return 0; return image_load(o, png, len); }
+KilnHandle KILN_CALL t_image_load_rgba(KilnOwner o, const uint8_t* rgba, uint32_t w, uint32_t h) {
+    if (!overlay_drawing_on()) return 0;
+    return image_load_rgba(o, rgba, w, h);
+}
 bool KILN_CALL t_image_size(KilnHandle h, uint32_t* w, uint32_t* hh) { return image_size(h, w, hh); }
 void KILN_CALL t_image_free(KilnHandle h) { image_free(h); }
 void KILN_CALL t_set_hover_capture(uint32_t n) { if (overlay_drawing_on()) g_hover_panels = n; }
@@ -465,9 +469,11 @@ static_assert(offsetof(KilnUiApi, subscribe_key_ex) == offsetof(KilnUiApi, menu_
               "kiln.ui v7 appends subscribe_key_ex after menu_scroll (UiNative.Table7)");
 static_assert(offsetof(KilnUiApi, set_next_window_size_constraints) == offsetof(KilnUiApi, subscribe_key_ex) + sizeof(void*),
               "kiln.ui appends size constraints after subscribe_key_ex");
-static_assert(offsetof(KilnUiApi, menu_footer) == offsetof(KilnUiApi, set_next_window_size_constraints) + sizeof(void*) &&
-                  sizeof(KilnUiApi) == offsetof(KilnUiApi, menu_footer) + sizeof(void*),
+static_assert(offsetof(KilnUiApi, menu_footer) == offsetof(KilnUiApi, set_next_window_size_constraints) + sizeof(void*),
               "kiln.ui appends menu_footer after the size constraints (UiNative.TableFooter)");
+static_assert(offsetof(KilnUiApi, image_load_rgba) == offsetof(KilnUiApi, menu_footer) + sizeof(void*) &&
+                  sizeof(KilnUiApi) == offsetof(KilnUiApi, image_load_rgba) + sizeof(void*),
+              "kiln.ui appends image_load_rgba after menu_footer (UiNative.TableImageRgba)");
 static_assert(sizeof(KilnUiMenuEntry) == 40 && offsetof(KilnUiMenuEntry, entry) == 8 && offsetof(KilnUiMenuEntry, text) == 16 &&
                   offsetof(KilnUiMenuEntry, drawn) == 36,
               "KilnUiMenuEntry layout (UiNative.MenuEntryInfo)");
@@ -513,6 +519,7 @@ const KilnUiApi kTable = {
     &t_subscribe_key_ex,
     &t_set_next_window_size_constraints,
     &t_menu_footer,
+    &t_image_load_rgba,  // 0.2.0-dev.29.15
 };
 
 std::string api_path(int kind) {

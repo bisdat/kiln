@@ -7,7 +7,8 @@
  * the game window's own input records for native plugins (subscribe_window_input); v6 appends the mods' entries in the
  * game's menus; v7 appends subscribe_key_ex, key callbacks that also get mouse presses.
  *
- * The size-guarded tail after v7 appends set_next_window_size_constraints.
+ * The size-guarded tail after v7 appends set_next_window_size_constraints, menu_footer (0.2.0-dev.29.11) and
+ * image_load_rgba (0.2.0-dev.29.15).
  *
  * How (docs/re/client-render.md):
  *  - The game loads vulkan-1.dll at run time and presents with vkQueuePresentKHR on queue family 0 (no static Vulkan
@@ -858,6 +859,12 @@ typedef struct KilnUiApi {
      * a count and SHOWN, and whenever the line is hidden or faulted, the game draws its footer as it always did (with
      * another mod's line there). Any thread; the next frame follows it. */
     void(KILN_CALL* menu_footer)(int32_t mods, uint32_t flags);
+    /* Additive size-guarded tail (0.2.0-dev.29.15; check header.size >= offsetof(KilnUiApi, image_load_rgba) +
+     * sizeof(void*) and the pointer): image_load with pixels instead of a PNG. `rgba` is width * height * 4 bytes (R, G, B,
+     * A, rows top down, straight alpha; copied), 1..4096 a side. The same kind of image as image_load's: drawn with image /
+     * image_button, freed with image_free, uploaded at the next frame. Any thread. 0 = refused (no overlay drawing, a size
+     * out of range, NULL). Kiln.Ui loads the game's own item icons with it (kiln.assets texture_rgba decodes them). */
+    KilnHandle(KILN_CALL* image_load_rgba)(KilnOwner owner, const uint8_t* rgba, uint32_t width, uint32_t height);
 } KilnUiApi;
 
 /* ====================================================================================================================
