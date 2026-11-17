@@ -212,7 +212,7 @@ mod start_bar {
 
     #[test]
     fn play_shows_the_boot_game_data_step_with_the_tools_lines_then_the_next_step() {
-        let lines = ["needed by more-flame-altars", "checking the game data snapshot", "making the game data snapshot (about 200 MB, once per game build)",
+        let lines = ["needed by more-flame-altars", "checking the game data snapshot", "making the game data snapshot (about 300 MB, once per game build)",
             "items 1200/4100", "templates 900/52000", "templates 52000/52000", "skills 300/300", "materials 120/120"];
         let looks: std::rc::Rc<RefCell<Vec<(String, sp::Timeline, bool)>>> = Default::default();
         let keep = looks.clone();

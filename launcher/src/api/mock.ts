@@ -1237,7 +1237,7 @@ const handlers: Record<string, Handler> = {
     gameOf(gid);
     if (!profiles.has(pid)) reject("not_found", `no profile ${pid}`);
     const s = onceBootSnapshots.get(pid) ?? { status: "skipped" as const, emptyKinds: [], reason: "no mod needs the boot snapshot" };
-    const steps = s.status === "skipped" ? ["no mod needs the boot snapshot"] : ["Game data for OnBoot mods (about 200 MB, once per game build): reading the game's archive"];
+    const steps = s.status === "skipped" ? ["no mod needs the boot snapshot"] : ["Game data for OnBoot mods (about 300 MB, once per game build): reading the game's archive"];
     return startTask("boot_snapshot_run", "Game data for OnBoot mods", steps, () => {
       if (running[gid]) reject("game_running", "Close the game first.");
       return s;

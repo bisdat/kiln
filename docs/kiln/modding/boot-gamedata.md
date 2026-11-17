@@ -57,7 +57,7 @@ The producer writes into `boot-gamedata/<key>.tmp-<pid>/` and renames the direct
 computed, and all eight kind files present (the two resource files are optional: below). Anything else is "no snapshot", and the row's reason names the test that
 failed. `checksums` (written by the producer since the 08b review) holds the SHA-256 of each of the eight files (and of the two resource files when they are there): kiln.boot
 checks every file against it before anything is served (a start with a boot mod does it at once, about a second for a
-200 MB snapshot). A file that does not match, or a list that leaves one out, makes the snapshot not ready: the row
+300 MB snapshot). A file that does not match, or a list that leaves one out, makes the snapshot not ready: the row
 `mods.boot.game_data` says `damaged` and names the file, and nothing of it is read. A snapshot written before checksums
 has none and is read as before.
 

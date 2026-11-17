@@ -1,6 +1,6 @@
 // Play's boot game-data step (kiln_manage::boot_snapshot, docs/kiln/modding/boot-snapshot.md): after the cook, when an
 // enabled mod of the start asks for the boot phase, the launcher makes the snapshot of the game's data that Mod.OnBoot
-// reads, once per game build (about a minute and about 200 MB the first time, well under a second after that). It never
+// reads, once per game build (about a minute and about 300 MB the first time, well under a second after that). It never
 // stops a start: what went wrong is one line here.
 import type { BootSnapshot } from "../api/commands";
 import { t } from "../i18n";

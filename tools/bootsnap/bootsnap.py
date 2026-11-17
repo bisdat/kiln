@@ -207,7 +207,7 @@ def cmd_make(a):
     def building(exe):
         # none of this game build yet: a build begins (the launcher shows its own step of the start from this line:
         # kiln_manage::start_progress::BOOT_SNAPSHOT_MAKING); a current snapshot never gets here
-        print(f"boot-snapshot: {MAKING} (about 200 MB, once per game build)", file=sys.stderr, flush=True)
+        print(f"boot-snapshot: {MAKING} (about 300 MB, once per game build)", file=sys.stderr, flush=True)
         return open_source(exe)
 
     r = snapshot.make(a.game, building, exe=a.exe, force=a.force, root=a.root, progress=progress)
