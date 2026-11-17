@@ -67,7 +67,7 @@ overlay's backend are logged once per error code. Kiln.Ui's item icon cache keep
 
 Eight more slots are appended after `image_state`; the service version stays 7. On x64 `theme_create` is at byte offset 928,
 `theme_free` 936, `push_theme` 944, `set_look` 952, `look_info` 960, `font_load` 968, `font_free` 976, `push_font_handle` 984,
-and the table is 992 bytes (1008 with [the image tail](#part-of-an-image-trimmed-images-0220-dev2916)). Readers check `header.size` through the member they call and that its pointer is non-null; the
+and the table is 992 bytes (1008 with [the image tail](#part-of-an-image-trimmed-images-0220-dev2916), 1016 with `set_texts`). Readers check `header.size` through the member they call and that its pointer is non-null; the
 managed mirror is `UiNative.TableLooks`. The guide: [Looks and themes](../ui.md#looks-and-themes-0220-dev2916).
 
 - **Looks.** `push_style` takes `KILN_UI_STYLE_PLAYER` (2) too: the look the player chose (`set_look`). Windows that push no
@@ -139,3 +139,35 @@ pointer is non-null; the managed mirror is `UiNative.TableImageEx`. The guide: [
 - Host tests: `tests/image_rect_test.cpp` (the bounds on synthetic icons with margins, fully transparent and opaque ones,
   odd sizes, faint pixels, random images against a full scan; UVs; fitting) and the image part of `style_host_test.cpp`
   (bounds kept from `image_load_rgba`, trimmed / fitted / part-of-image draws and buttons, quads and UVs on the draw list).
+
+## Kiln's own texts and CJK glyphs (0.2.0-dev.29.16)
+
+One more slot after `image_opaque_rect`: `set_texts` at byte offset 1008 (the table is 1016 bytes; check `header.size`
+through it and its pointer). The guide: [translating-game.md](../translating-game.md).
+- `set_texts(&KilnUiTexts)`: Kiln's own texts that kiln.ui draws (the Mods entry in the game's menus, Kiln's line in the main
+  menu's footer, the window shown without the managed host), from `runtime/locales/<language>.json`'s `native` section, and
+  `language`, the language Kiln's UI shows (a lower-case tag). `count` pairs of `keys` / `texts` (UTF-8, copied; keys
+  outside `native.` ignored; at most 4096). Kiln.Ui calls it at start and whenever the language changes; the Mods entries and
+  the footer's line are made again at once. Until then, and for a key it lacks, kiln.ui draws its built-in English
+  (`native/services/ui/ui_text.h`). Plural keys come as `.one` / `.other`; kiln.ui takes `.one` for 1. **Kiln.Ui only**: a
+  native plugin's call is refused with `KILN_ERR_UNAVAILABLE` (logged once), as for `set_look`. `INVALID_ARGUMENT` for NULL, a
+  short `size`, a count over 4096 or NULL arrays with a count. `KilnUiTexts` is 40 bytes (`language` at 8, `keys` 24,
+  `texts` 32).
+- **Glyphs.** When that language (else the game's text language, which mods' texts follow) is Chinese, Japanese or Korean,
+  kiln.ui reads the game's own font of that language group: `keen::UiFontResource` through `kiln.assets` (`resource_list`,
+  `resource_read`, `blob_read`), the group whose `groupLanguages` mask has the language and is not the default group, its
+  regular glyph sets (`fontVariantMask` 0) in order, each font once, at most 4 files, 16 MiB each, 24 MiB together
+  (`font_budget.h`), the fields' places from `kiln.types` when it has them (else 26430625's layout,
+  `native/services/ui/font_group.h`). On a worker, at the first overlay frame that needs it (asked again 5 s later, at most 4
+  times, while the game has not listed the resource). The render thread then merges each file into the overlay's default
+  font, the game's UI font and its bold face (`MergeMode`, the target's size, `GlyphExcludeRanges` = every rune outside the
+  set's ranges), now or as those fonts arrive; another group's files replace them, a Latin language removes them (their
+  sources leave the fonts; glyphs are made again as drawn). Mods' fonts get none.
+- `KilnUiLookInfo.glyphs` (byte 30; it was reserved) is `KILN_UI_GLYPHS_LATIN` (0, no such language), `LOADING` (1),
+  `READY` (2) or `FAILED` (3, kiln.log says why), and `glyph_language` (byte 31) the `keen::LanguageId` it is about (20 zh-CN,
+  21 zh-TW, 11 ja-JP, 13 ko-KR). Kiln.Ui shows its overlay texts in English until `READY` for its language.
+- Host tests (`tests/run.sh`): `ui_text_test.cpp` (the handoff, plurals, placeholders, the built-in English against
+  en.json), `font_group_test.cpp` (the group, sets and exclusions from made-up resource bytes, another layout, bad data, the
+  budget), `group_host_test.cpp` (style.cpp's loading on a headless ImGui context with a made-up resource and a system TTF:
+  the language's choice, the state, merging into fonts that arrive later, replacing, removing, a failed read, the layout
+  from reflection; `KILN_TEST_CJK_FONT=<an extracted CJK font>` also checks a real CJK glyph).

@@ -41,6 +41,7 @@ KilnHandle next_handle() {
     static std::atomic<KilnHandle> h{100};
     return h++;
 }
+KilnResult game_screen(KilnUiScreen*) { return KILN_ERR_UNAVAILABLE; }  // no game: the game's language is not known
 }  // namespace kui
 
 namespace look = kui::look;

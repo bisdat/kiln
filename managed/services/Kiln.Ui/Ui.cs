@@ -576,15 +576,26 @@ public sealed class UiWindow : IDisposable
         Draw = draw;
         Options = options;
         Owner = owner;
-        Key = $"{title}###kiln.w{Interlocked.Increment(ref _ids)}";
+        _id = $"###kiln.w{Interlocked.Increment(ref _ids)}";
+        Key = title + _id;
         _open = options.StartOpen && UiNative.DrawingOffReason == null;
     }
 
-    public string Title { get; }
+    private readonly string _id;
+
+    public string Title { get; private set; }
     public UiWindowOptions Options { get; }
     internal Action<UiDraw> Draw { get; }
     internal ModContext? Owner { get; }
-    internal string Key { get; }
+    internal string Key { get; private set; }
+
+    /// <summary>Kiln's own windows: a new title in the language Kiln's UI shows (KilnText.Changed); the ImGui id stays, so
+    /// the window keeps its place and size. Any thread.</summary>
+    internal void Retitle(string title)
+    {
+        Title = title;
+        Key = title + _id;
+    }
     internal bool Disposed;
     private volatile bool _open;
 

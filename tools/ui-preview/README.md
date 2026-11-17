@@ -36,6 +36,15 @@ How it works:
   fakes `kiln.types` from that layout, so `style.cpp`'s real reader runs. Never copied into the tree. Without the game (or
   with `--no-game-font`) the game look is its neutral stand-in, as on a build where the read fails.
 
+- Kiln's texts in another language: `--language zh-CN --locales DIR` (a folder with `zh-CN.json`, e.g. a stub translation
+  kept outside the tree) sets kiln.json's `ui.language` for every scene. For a Chinese, Japanese or Korean language
+  `game_fonts.py` reads the game's own `keen::UiFontResource` and the font files of that language's group (and the default
+  group's) from the local game with `tools/kfc` into `$KILN_OUT/ui-preview/game-fonts/` (never copied into the tree), and the
+  shim serves them to style.cpp's real readers (`kiln_preview_font_resource`), so the preview loads them as the game would:
+  Kiln's texts stay English until the group's font joined the atlas. Each scene prints when the glyphs were ready, the
+  first frame's time in the language and the font atlas (`kiln_preview_atlas`: texture size, glyphs made, font sources);
+  the PNG is `<scene>-<language>-<size>.png`.
+
 Scenes (`Kiln.Ui.Preview/Program.cs`, `Scenes`): `typical` (25 mods over Kiln, EMF, EML, SET and ShroudForge, one failed,
 one switched off), `typical-emf` (one engine), `typical-search`, `typical-config` (a mod's settings inline),
 `typical-keys` (three Down presses: the selection follows the focus), `problems` (failed mods in several engines, a

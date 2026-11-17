@@ -372,7 +372,7 @@ internal static unsafe class UiNative
         public uint Size, Kind;
         public ulong Theme;
         public float Background, Opacity, Scale;
-        public byte GameColors, GameFont, R0, R1;
+        public byte GameColors, GameFont, Glyphs, GlyphLanguage;
         public fixed uint Roles[16];
         public uint RoleCount, Reserved2;
     }
@@ -472,6 +472,42 @@ internal static unsafe class UiNative
         (x, y, width, height) = (a, b, c, d);
         return true;
     }
+
+    /// <summary>KilnUiTexts (kiln_ui.h, 0.2.0-dev.29.16): Kiln's own texts kiln.ui draws, and the language.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct Texts
+    {
+        public uint Size, Count;
+        public NativeStr Language;
+        public NativeStr* Keys;
+        public NativeStr* Values;
+    }
+
+    /// <summary>The tail after image_opaque_rect (0.2.0-dev.29.16): set_texts.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct TableTexts
+    {
+        public TableImageEx Base;
+        public delegate* unmanaged[Cdecl]<Texts*, int> SetTexts;
+    }
+
+    /// <summary>kiln.ui's set_texts, or null on a table without it (a kiln-ui.dll older than 0.2.0-dev.29.16). Tests:
+    /// <see cref="SetTextsOverride"/>.</summary>
+    public static delegate* unmanaged[Cdecl]<Texts*, int> SetTextsSlot
+    {
+        get
+        {
+            if (SetTextsOverride != null) return SetTextsOverride;
+            var t = T;
+            if (t == null || t->Header.Size < (uint)sizeof(TableTexts)) return null;
+            return ((TableTexts*)t)->SetTexts;
+        }
+    }
+
+    internal static delegate* unmanaged[Cdecl]<Texts*, int> SetTextsOverride;
+
+    /// <summary>KILN_UI_GLYPHS_* (kiln_ui.h look_info): the overlay's glyphs of a Chinese, Japanese or Korean language.</summary>
+    public const byte GlyphsLatin = 0, GlyphsLoading = 1, GlyphsReady = 2, GlyphsFailed = 3;
 
     /// <summary>KILN_UI_IMAGE_WAITING / READY / FAILED (kiln_ui.h image_state).</summary>
     public const int ImageUnknown = 0, ImageWaiting = 1, ImageReady = 2, ImageFailed = 3;
@@ -597,6 +633,8 @@ internal static unsafe class UiNative
         _table6 = null;
         LooksOverride = null;
         ImageExOverride = null;
+
+        SetTextsOverride = null;
         MouseKeysAvailable = false;
     }
 

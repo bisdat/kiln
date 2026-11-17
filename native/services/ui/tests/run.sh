@@ -56,6 +56,13 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -pthread -fsanitize=address,undefined \
 # Kiln's line in the main menu's footer: its text, its mark's place, when Kiln's copy runs (menu_footer.h)
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/menu_footer_test.cpp" -o "$out/menu_footer_test"
 "$out/menu_footer_test"
+# Kiln's own texts kiln.ui draws (ui_text.h): the handoff from Kiln.Ui, English fallback, plurals, placeholders, and the
+# built-in English against runtime/locales/en.json
+g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -I"$here/../../../third_party" "$here/ui_text_test.cpp" -o "$out/ui_text_test"
+"$out/ui_text_test" "$here/../../../../runtime/locales/en.json"
+# which of the game's fonts gives the overlay a Chinese, Japanese or Korean language's glyphs (font_group.h), made-up data
+g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/font_group_test.cpp" -o "$out/font_group_test"
+"$out/font_group_test"
 # the footer function's copy keeps its meaning (code_clone.h, Zydis from safetyhook); also over the game's own footer
 # function when the client exe is installed (read only)
 safetyhook=$here/../../../third_party/safetyhook
@@ -84,5 +91,11 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -Wno-unused-function -pthread -fsanitize=add
     -I"$here/stubs" -I"$here/.." -I"$here/../../../core/abi" -I"$imgui" -I"$here/../../../third_party" \
     "$here/style_host_test.cpp" "${objs[@]}" -o "$out/style_host_test"
 "$out/style_host_test"
+# the game's Chinese, Japanese and Korean fonts in the overlay's atlas (style.cpp, font_group.h): made-up resource, system TTF
+# (KILN_TEST_CJK_FONT=<an extracted CJK TTF/OTF, outside the tree> also checks a real CJK glyph)
+g++ -std=c++20 -O1 -g -Wall -Wextra -Wno-unused-function -pthread -fsanitize=address,undefined \
+    -I"$here/stubs" -I"$here/.." -I"$here/../../../core/abi" -I"$imgui" -I"$here/../../../third_party" \
+    "$here/group_host_test.cpp" "${objs[@]}" -o "$out/group_host_test"
+"$out/group_host_test"
 PYTHONDONTWRITEBYTECODE=1 python3 "$here/render_sigdb_test.py"
 PYTHONDONTWRITEBYTECODE=1 python3 "$here/per_caller_test.py"

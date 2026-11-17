@@ -10,7 +10,7 @@
  * The size-guarded tail after v7 appends set_next_window_size_constraints, menu_footer (0.2.0-dev.29.11),
  * image_load_rgba, screen_target and image_state (0.2.0-dev.29.15), and looks, themes and fonts (0.2.0-dev.29.16:
  * theme_create, theme_free, push_theme, set_look, look_info, font_load, font_free, push_font_handle; then image_ex and
- * image_opaque_rect: part of an image, trimmed item icons).
+ * image_opaque_rect: part of an image, trimmed item icons; then set_texts: Kiln's own texts in the player's language).
  *
  * How (docs/re/client-render.md):
  *  - The game loads vulkan-1.dll at run time and presents with vkQueuePresentKHR on queue family 0 (no static Vulkan
@@ -620,6 +620,14 @@ typedef struct KilnUiLook {
     uint32_t reserved;
 } KilnUiLook;               /* 32 bytes */
 
+/* KilnUiLookInfo.glyphs (0.2.0-dev.29.16): the game's own font of the language group Kiln's language (else the game's) needs */
+enum {
+    KILN_UI_GLYPHS_LATIN = 0,    /* no Chinese, Japanese or Korean language: the overlay's fonts as they are */
+    KILN_UI_GLYPHS_LOADING = 1,  /* being read from the game's data (Kiln's texts show in English meanwhile) */
+    KILN_UI_GLYPHS_READY = 2,    /* merged into the overlay's font atlas */
+    KILN_UI_GLYPHS_FAILED = 3,   /* not available (kiln.log says why): Kiln's texts stay English */
+};
+
 /* look_info: the player's look and a palette. */
 typedef struct KilnUiLookInfo {
     uint32_t size;          /* sizeof(KilnUiLookInfo) */
@@ -628,12 +636,23 @@ typedef struct KilnUiLookInfo {
     float background, opacity, scale;  /* as set (clamped) */
     uint8_t game_colors;    /* 1: the game's colours were read from its data; 0: the neutral stand-in (so far) */
     uint8_t game_font;      /* 1: the game's UI font is loaded */
-    uint8_t reserved[2];
+    uint8_t glyphs;         /* KILN_UI_GLYPHS_*: the overlay's glyphs of a Chinese, Japanese or Korean language (set_texts) */
+    uint8_t glyph_language; /* the keen::LanguageId `glyphs` is about (20 zh-CN, 21 zh-TW, 11 ja-JP, 13 ko-KR), 0 none */
     uint32_t roles[16];     /* KILN_UI_ROLE_COUNT colours, 0xRRGGBBAA: inside a frame callback the look pushed now (the
                                player's when none is), elsewhere the player's. WINDOW_BG's alpha is the windows' opacity */
     uint32_t role_count;    /* KILN_UI_ROLE_COUNT */
     uint32_t reserved2;
 } KilnUiLookInfo;           /* 104 bytes */
+
+/* set_texts: Kiln's own texts that kiln.ui draws, in the language Kiln's UI shows (docs/kiln/translating-game.md). */
+typedef struct KilnUiTexts {
+    uint32_t size;          /* sizeof(KilnUiTexts) */
+    uint32_t count;         /* entries in keys[] and texts[] */
+    KilnStr language;       /* the language Kiln's UI shows, a lower-case tag ("zh-cn", "en-us"): also picks the overlay's
+                               glyphs (the game's own font of a Chinese, Japanese or Korean language group) */
+    const KilnStr* keys;    /* "native.menu.mods", ... (keys outside "native." are ignored) */
+    const KilnStr* texts;   /* their texts, UTF-8 */
+} KilnUiTexts;              /* 40 bytes */
 
 typedef struct KilnUiApi {
     KilnServiceHeader header; /* { sizeof(KilnUiApi), KILN_UI_VERSION } */
@@ -1023,6 +1042,15 @@ typedef struct KilnUiApi {
      *   found once when it was loaded. False: no such image. Any thread. */
     bool(KILN_CALL* image_ex)(KilnStr id, KilnHandle image, const KilnUiImageDraw* draw);
     bool(KILN_CALL* image_opaque_rect)(KilnHandle image, uint32_t* x, uint32_t* y, uint32_t* width, uint32_t* height);
+    /* Additive size-guarded tail (0.2.0-dev.29.16; check header.size >= offsetof(KilnUiApi, set_texts) + sizeof(void*) and
+     * the pointer): Kiln's own texts that kiln.ui draws (the Mods entry, Kiln's line in the main menu's footer, the fallback
+     * window), from runtime/locales/<language>.json's "native." section, and the language Kiln's UI shows. Kiln.Ui calls it
+     * at start and whenever that language changes (kiln.json ui.language, or the game's language with "auto"); the next
+     * frame and the game's next menu frame follow it. Until then, and for a key it lacks, kiln.ui draws English. With a
+     * Chinese, Japanese or Korean language (or the game's), kiln.ui adds the game's own font of that language group to the
+     * overlay's font atlas. Copied; any thread. A call from a native plugin is refused (KILN_ERR_UNAVAILABLE): the player
+     * chooses the language. INVALID_ARGUMENT: NULL, size too small, count over 4096 or NULL arrays with a count. */
+    KilnResult(KILN_CALL* set_texts)(const KilnUiTexts* texts);
 } KilnUiApi;
 
 /* ====================================================================================================================
