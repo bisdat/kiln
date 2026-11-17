@@ -4,6 +4,7 @@
 // Types mirror crates/kiln-manage (serde camelCase) and launcher/src-tauri/src/commands/*.rs.
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { listen as tauriListen } from "@tauri-apps/api/event";
+import { t } from "../i18n";
 import { canFallBack, noteFallback } from "./fallback";
 import { loadMock } from "./mockLoad";
 import { oneActivation, profileSwitched } from "./oneActivation";
@@ -1222,7 +1223,7 @@ export interface BeforeBeta {
  *  an updater command in the Nexus build. Failure to read the distribution also fails closed. */
 async function selfUpdateCall<T>(cmd: string, args: Record<string, unknown> = {}): Promise<T> {
   const info = await appInfo();
-  if ((info.distribution ?? "direct") !== "direct") throw { code: "unsupported", message: "Self-update is disabled in this build" } satisfies KilnError;
+  if ((info.distribution ?? "direct") !== "direct") throw { code: "unsupported", message: t("api.commands.selfUpdateDisabled") } satisfies KilnError;
   return call<T>(cmd, args);
 }
 export const updateStatus = () => selfUpdateCall<UpdateStatus>("update_status");

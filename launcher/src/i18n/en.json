@@ -21,7 +21,15 @@
     "save": "Save",
     "show": "Show",
     "undo": "Undo",
-    "update": "Update"
+    "update": "Update",
+    "confirmWord": {
+      "clean": "clean",
+      "delete": "delete",
+      "forget": "forget",
+      "restore": "restore",
+      "switch": "switch",
+      "uninstall": "uninstall"
+    }
   },
   "languageSettings": {
     "title": "Language",
@@ -37,7 +45,351 @@
     "gameAuto": "Same as the game (default)",
     "gameHint": "Kiln's own menus and messages in the game (kiln.json ui.language). A language Kiln has no texts for shows English. Mods choose their own.",
     "gameNoKiln": "Install Kiln on Runtime first.",
-    "gameNoGame": "No game selected.",
-    "saved": "Kiln in game: {0}"
+    "gameNoGame": "No game selected."
+  },
+  "format": {
+    "ago": {
+      "justNow": "just now",
+      "minutes": "{n} min ago",
+      "hours": "{n} h ago",
+      "yesterday": "yesterday"
+    },
+    "installNote": {
+      "one": "{count} changed file kept in backups",
+      "other": "{count} changed files kept in backups"
+    }
+  },
+  "ui": {
+    "brand": {
+      "starting": "Starting"
+    },
+    "button": {
+      "loading": "Loading"
+    },
+    "dropZone": {
+      "dropHere": "Drop files here",
+      "dropsUnavailable": "File drops unavailable",
+      "cannotOpen": "Could not open files",
+      "needsDesktop": "Needs the desktop app",
+      "files": "Files",
+      "folder": "Folder",
+      "browse": "Browse"
+    },
+    "form": {
+      "clearNamed": "Clear {label}",
+      "clear": "Clear",
+      "clearTitle": "{word} (Esc)",
+      "flameLight": "Light {label}",
+      "flameOnTitle": "{label} is on: switch it off",
+      "flameOffTitle": "{label} is off: switch it on",
+      "flameLitTitle": "{label} is lit: put it out",
+      "flameOutTitle": "{label} is out: light it"
+    },
+    "jsonView": {
+      "items": "{n} items",
+      "keys": "{n} keys"
+    },
+    "logView": {
+      "log": "Log",
+      "noMatch": "Nothing matches that filter.",
+      "empty": "Nothing written yet.",
+      "follow": "Follow"
+    },
+    "modal": {
+      "typeToConfirm": "Type {word} to confirm"
+    },
+    "sortableList": {
+      "reorder": "Reorder {name}",
+      "dragHint": "Drag, or Alt+Up/Down",
+      "moveUp": "Move up",
+      "moveDown": "Move down"
+    },
+    "table": {
+      "ascending": "Ascending",
+      "descending": "Descending",
+      "empty": "Nothing here."
+    },
+    "schemaForm": {
+      "notOnOff": "Not on/off",
+      "notNumber": "Not a number",
+      "wholeOnly": "Whole numbers only",
+      "min": "Min {min}",
+      "max": "Max {max}",
+      "notOption": "Not an option",
+      "durationLike": "Like \"30s\", \"5m\", \"1h30m\"",
+      "notList": "Not a list",
+      "notText": "Not text",
+      "noMatch": "No setting matches that.",
+      "noSettings": "This config has no settings.",
+      "synced": "Synced",
+      "syncedTitle": "Sent to Kiln clients",
+      "restart": "Restart",
+      "restartTitle": "Applies after a restart",
+      "pending": "Pending",
+      "pendingTitle": "Saved; waits for a restart",
+      "default": "Default {value}",
+      "resetLabel": "Reset {name} to its default",
+      "removeItem": "Remove {item}",
+      "addItem": "Add {type}"
+    },
+    "taskProgress": {
+      "titleFailed": "{title} failed",
+      "titleCanceled": "{title} canceled",
+      "taskFailed": "task failed",
+      "done": "Done",
+      "failed": "Failed",
+      "canceled": "Canceled",
+      "titleState": "{title}: {state}",
+      "cancelTask": "Cancel {title}",
+      "andMore": "{title} and {count} more",
+      "tasks": "Tasks",
+      "tasksLabel": "Tasks: {label}",
+      "clearFinished": "Clear finished"
+    },
+    "toast": {
+      "times": " ({count} times)",
+      "earlier": {
+        "one": "{count} earlier notice",
+        "other": "{count} earlier notices"
+      },
+      "keptFiles": "Files your mods wrote were kept",
+      "keptFolders": "Some mod folders were kept",
+      "keptFoldersDetail": "{detail}. These mods may still run through Kiln or another loader. With the game closed, review or move the listed folders to stop them; your settings have not been deleted.",
+      "showLess": "Show less",
+      "showAll": "Show all"
+    }
+  },
+  "api": {
+    "channel": {
+      "name": {
+        "beta": "Beta (test builds)",
+        "release": "Release",
+        "stableNone": "Stable (none yet)",
+        "devBuilds": "Dev builds"
+      },
+      "word": {
+        "beta": "Beta",
+        "release": "Release",
+        "stable": "Stable",
+        "dev": "Dev"
+      },
+      "buildBeta": "{version} beta {n}",
+      "worldWarning": "A world you play with a test build may not load the same way on the release, and servers and players must run the same build to play together.",
+      "toBeta": {
+        "title": "Switch to the beta?",
+        "what": "Test builds of the next release, for testing with the Kiln Discord. The launcher installs the newest one and restarts. To test its Kiln in your game, install it on the Runtime page.",
+        "back": "You can switch back to the release here at any time.",
+        "confirm": "Switch now",
+        "task": "Switch to the beta"
+      },
+      "back": {
+        "title": "Switch back to the release?",
+        "what": "The launcher installs the newest release and restarts, also when it is older than this test build. {advice}",
+        "confirm": "Switch back",
+        "task": "Switch back to the release"
+      },
+      "restore": {
+        "label": "Put back my profiles and settings from before the beta",
+        "hint": "Saved {when}, before the first start of a test build. Mods you added in the beta stay in the Library."
+      },
+      "notice": {
+        "switchBack": "This game has Kiln {from} from a test build; Play puts this launcher's Kiln {to} in first.",
+        "betaLauncher": "This launcher is a test build; this game still has the release's Kiln. Install Kiln {version} on Runtime to test it."
+      },
+      "advice": {
+        "unknown": "Releases before 0.2.0-dev.29 leave the test build's Kiln in your game: reinstall the release's Kiln on the Runtime page. Newer releases put their own Kiln in at the next Play.",
+        "automatic": "Kiln in your game goes back with it at the next Play.",
+        "manual": "This release leaves the test build's Kiln in your game. Reinstall the release's Kiln on the Runtime page."
+      }
+    },
+    "kinds": {
+      "notRunning": {
+        "ember": "Ember mods don't run yet: Ember has not published its mod ABI, so kiln-ember only finds and reports them. They stay in your list; running them will require a compatible loader update."
+      },
+      "name": {
+        "native": "Native",
+        "plugin": "Plugin",
+        "eml": "EML (Enshrouded Mod Loader)",
+        "xhl": "XHL (requires XHL-Core)",
+        "ember": "Ember (server SDK)"
+      },
+      "short": {
+        "native": "Native",
+        "plugin": "Plugin"
+      }
+    },
+    "nexus": {
+      "type": {
+        "kiln": "Kiln mod",
+        "native": "Native mod",
+        "emf": "EMF mod",
+        "dll": "DLL mod",
+        "modpack": "Modpack",
+        "notKiln": "Not a Kiln mod"
+      }
+    },
+    "updates": {
+      "reason": {
+        "incompleteList": "the release list is too long to read to its end",
+        "invalidMetadata": "the newest release's kiln-release.json is not valid for this mod",
+        "missingAsset": "the newest release has no file with the expected name",
+        "ambiguousAsset": "the newest release has several files with the expected name",
+        "ambiguousRelease": "several releases share the highest version",
+        "nonSemver": "the versions are not semantic versions, so they cannot be ordered",
+        "sameVersionUnbound": "the same version is published, and Kiln does not know which upload of it you have",
+        "network": "no answer (offline, or not signed in where a sign-in is needed)",
+        "sourceConflict": "its update source changed and waits for your yes",
+        "rateLimited": "the provider's request limit is used up for now",
+        "notFound": "no repository or no matching release was found",
+        "notChecked": "not checked yet",
+        "releaseRemoved": "the release this copy came from is gone",
+        "unknown": "unknown reason"
+      },
+      "stale": "Not confirmed lately.",
+      "staleReason": "Not confirmed lately: {reason}.",
+      "word": {
+        "update": "Update",
+        "updateStale": "Update (stale)",
+        "updateTo": "Update {version}",
+        "updateToStale": "Update {version} (stale)",
+        "newUpload": "New upload",
+        "newUploadStale": "New upload (stale)",
+        "current": "Up to date",
+        "unsupported": "No update source",
+        "disabled": "Checks off",
+        "unknown": "Unknown",
+        "unknownStale": "Unknown (stale)"
+      },
+      "detail": {
+        "available": "Version {candidate} is published; you have {installed}.",
+        "incompatible": "Its release says it does not load on this Kiln.",
+        "newUpload": "Version {installed} was published again as another file.",
+        "current": "{installed} is the newest published version.",
+        "unsupported": "Kiln does not know where this mod is published. Set a source to get update notices.",
+        "disabled": "Its provider is switched off in this build.",
+        "unknown": "Kiln cannot tell whether an update exists: {reason}."
+      }
+    },
+    "oneActivation": {
+      "busy": "Kiln is still loading a profile in this game. Try again when that is done."
+    },
+    "commands": {
+      "selfUpdateDisabled": "Self-update is disabled in this build"
+    },
+    "admin": {
+      "sessionClosed": "The admin session closed ({reason}).",
+      "sessionClosedReconnecting": "The admin session closed ({reason}); reconnecting…",
+      "notConnected": "Not connected to the server's Kiln.Admin.",
+      "needsNewer": "This needs a newer Kiln.Admin on the server (it has no '{op}' op yet)."
+    }
+  },
+  "logs": {
+    "tab": {
+      "game": "Game",
+      "proxy": "Proxy",
+      "mods": "Kiln mods",
+      "crash": "Crashes",
+      "ticks": "Tick stats",
+      "engines": "Engines"
+    },
+    "title": "Logs",
+    "noGame": "No game yet. Find Enshrouded on Play first.",
+    "say": {
+      "ticks": "Kiln writes a line each minute a world runs.",
+      "engines": "Other engines' plugins: what each one did at the last start.",
+      "crash": "Kiln writes one when a mod faults too often.",
+      "file": "{name}, {size}, written {ago}.",
+      "notYet": "Not written yet: it appears after the next start."
+    },
+    "openFolder": "Open folder",
+    "tabsLabel": "Log",
+    "unreadable": "The logs are not readable",
+    "noFile": "No file",
+    "fileLabel": "Log file",
+    "follow": "Follow",
+    "pause": "Pause",
+    "filter": "Filter",
+    "notYetTitle": "Not written yet. It appears after the next start.",
+    "olderCut": "… (older lines cut)",
+    "cantRead": "Can't read it",
+    "crashes": {
+      "report": "Report",
+      "when": "When",
+      "size": "Size",
+      "unreadable": "The reports are not readable",
+      "label": "Crash reports",
+      "empty": "No crash reports. Kiln writes one when a mod faults too often."
+    }
+  },
+  "about": {
+    "lucideIcons": "Lucide icons",
+    "mitOrApache": "MIT or Apache-2.0",
+    "version": "Version",
+    "launcher": "Launcher",
+    "commit": "Commit",
+    "platform": "Platform",
+    "newVersions": "New versions",
+    "updates": "Updates",
+    "backend": "Backend",
+    "browserMock": "Browser mock",
+    "data": "Data",
+    "launcherUses": "The launcher uses",
+    "tagline": "Mods for Enshrouded. Theme and design: frostdev.",
+    "credits": "Credits",
+    "creditsFrom": "From CREDITS.md"
+  },
+  "saves": {
+    "kind": {
+      "world": "world",
+      "character": "character",
+      "otherKind": "other"
+    },
+    "title": "Saves",
+    "noGame": "No game yet. Find Enshrouded on Play first.",
+    "col": {
+      "file": "File",
+      "kind": "Kind",
+      "changed": "Changed",
+      "size": "Size"
+    },
+    "sub": {
+      "one": "{count} save file. Kiln backs them up before a start with different mods and keeps the last ones.",
+      "other": "{count} save files. Kiln backs them up before a start with different mods and keeps the last ones."
+    },
+    "files": "Save files",
+    "steamUser": "Steam user {id}",
+    "openFolder": "Open folder",
+    "unavailable": "Saves unavailable",
+    "none": "No saves found"
+  },
+  "ticks": {
+    "now": "now",
+    "minAgo": "{n} min ago",
+    "noneYetShort": "No tick stats yet. Kiln writes them each minute a world runs.",
+    "stepMinutes": {
+      "one": "Step p99, {count} minute",
+      "other": "Step p99, {count} minutes"
+    },
+    "msSuffix": " ms",
+    "chartLabel": "Step p99 over the last {count} minutes, from {min} to {max} milliseconds, now {now}.",
+    "unreadable": "The tick stats are not readable",
+    "noneYet": "No tick stats yet.",
+    "noneYetHint": "Kiln writes one line each minute while a world runs.",
+    "col": {
+      "minute": "Minute",
+      "rate": "Steps/s",
+      "p50": "Step p50",
+      "p99": "Step p99",
+      "max": "Max",
+      "kilnP99": "Kiln p99"
+    },
+    "ms": "{v} ms",
+    "lastMinute": "Last minute",
+    "steps": "Steps",
+    "maxStep": "Max step",
+    "subscribers": "Subscribers",
+    "subs": "{pre} pre, {post} post",
+    "world": "World",
+    "perMinute": "Tick stats per minute"
   }
 }
