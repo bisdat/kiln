@@ -389,5 +389,14 @@
       "other": "{count} changes applied (saved when a world runs)"
     },
     "saved": "{id}: saved"
+  },
+  "shroudlink": {
+    "needs_addon": "This requires a cooperating shroudlink client addon with bridge ABI v1. The stock addon is unchanged.",
+    "waiting": "Waiting for a live shroudlink host, UI protocol 2, recognized world, and presentation lease.",
+    "no_entries": "The host has not sent any menu entries.",
+    "apply": "Apply",
+    "item": "Item {id} × {count}",
+    "close_window": "Close window",
+    "declined": "shroudlink declined the last request ({error}); refreshing its current state."
   }
 }
