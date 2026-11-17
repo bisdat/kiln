@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: MIT
 // Issue 44, phase 1: shell-like history without a game client or an installed native chat hook.
-using System.Text;
 using Xunit;
 
 namespace Kiln.ChatHistoryTests;
@@ -31,8 +30,17 @@ public sealed class ChatHistoryTests : IDisposable
         Assert.Equal("/help", h.Older("/help")); // bounded at the oldest
         Assert.Equal("/tp home", h.Newer("/help"));
         Assert.Equal("/time", h.Newer("/tp home"));
-        Assert.Equal("/give me something", h.Newer("/give me something"));
+        Assert.Equal("/give me something", h.Newer("/time"));
         Assert.Equal("/give me something", h.Newer("/give me something")); // no more history browsing
+    }
+
+    [Fact]
+    public void Down_without_active_history_does_not_erase_the_input()
+    {
+        var h = new ChatHistory(Pathname);
+        Assert.Equal("/unsent", h.Newer("/unsent"));
+        h.Submit("/help");
+        Assert.Equal("/still unsent", h.Newer("/still unsent"));
     }
 
     [Fact]
