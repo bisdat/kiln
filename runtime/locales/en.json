@@ -127,5 +127,220 @@
       "plugin": "a Kiln plugin",
       "hidden": "{mod}   ·   not in the game's menu now"
     }
+  },
+  "catalog": {
+    "chip": {
+      "loaded": "Loaded",
+      "waiting": "Waiting",
+      "off": "Off",
+      "failed": "Failed",
+      "not_loaded": "Not loaded",
+      "missing": "Missing"
+    },
+    "engine": {
+      "native": "Native DLL mods",
+      "plugin": "Kiln plugins",
+      "chain": "Chain DLLs"
+    },
+    "about": {
+      "kiln": "Kiln's own mods (C#).",
+      "native": "DLL mods Kiln loads at start.",
+      "plugin": "Native plugins that extend Kiln.",
+      "chain": "Other DLLs Kiln starts next to the game.",
+      "emf": "Enshrouded Mod Framework mods, run by Kiln.",
+      "eml": "Enshrouded Mod Loader mods: they change the game's data before it starts.",
+      "xhl": "XHL-Core plugins, placed in the game's mods folder. Only XHL-Core, installed separately, loads them; Kiln does not.",
+      "shroudforge": "ShroudForge mods, run by the ShroudForge runtime.",
+      "set": "Shrouded Engine Tweaks Lua mods, run by Kiln.",
+      "greeneye": "Greeneye Loader mods, run by Kiln.",
+      "flame": "Flame mods, run by Kiln.",
+      "shroudtopia": "Shroudtopia mods, run by Kiln.",
+      "enshwick": "Enshwick mods, run by Enshwick's loader.",
+      "shroudlink": "shroudlink mods, run by Kiln.",
+      "ember": "Ember server mods."
+    },
+    "profile": {
+      "no_mods": "Play once without mods: no mod loads this start.",
+      "invalid": "The profile could not be read, so no mod loads.",
+      "invalid_why": "The profile could not be read, so no mod loads ({error}).",
+      "legacy": "No profile: Kiln loads the mods folders.",
+      "name": "Profile: {name}",
+      "off": "Switched off in the profile.",
+      "missing": "Its folder is missing: {path}",
+      "kept_xhl": "Switched off in the profile, but its folder is still in the game's mods folder ({folder}), so XHL-Core may still load it.",
+      "kept_enshwick": "Switched off in the profile, but its folder is still in the game's mods folder ({folder}), so Enshwick's loader, which runs every folder there, may still run it.",
+      "kept": "Switched off in the profile, but its folder is still in the game's mods folder ({folder}), so a mod or loader that reads that folder may still use it."
+    },
+    "help": {
+      "turn_on": "Turn it on in the Kiln launcher (Profiles), then start the game again.",
+      "kept": "Remove it in the Kiln launcher, or move that folder out of the game's mods folder, to be sure it does not run.",
+      "repair": "Repair or remove it in the Kiln launcher (Library), then start the game again."
+    },
+    "file": {
+      "too_large": "the file is too large",
+      "invalid": "it is cut off or not valid JSON",
+      "unreadable": "the file could not be read: {error}",
+      "not_object": "the file is not a JSON object"
+    },
+    "engine_unreadable": "Kiln could not read this engine's report: {error}",
+    "report_unreadable": "Its report could not be read: {error}",
+    "see_log": "see kiln.log",
+    "kiln": {
+      "with_world": "Starts with your own world, when you play alone or friends join you. It does not run in someone else's world.",
+      "hosted_off": "Off in this game: its kiln.json turns off mods that start with your world (mods.hosted is false).",
+      "hosted_off_help": "To let it start, remove \"hosted\": false from the \"mods\" part of kiln/kiln.json in the game folder, then start the game again.",
+      "pending": "It loads when its turn comes (for example when a world starts).",
+      "disabled": "Kiln switched it off after too many errors. Start the game again to retry, or update the mod.",
+      "failed": "Read the reason above. Update the mod or what it needs in the Kiln launcher, then start the game again. kiln/logs/kiln.log has the details.",
+      "unloaded": "It was unloaded by a command. Start the game again to load it.",
+      "not_reported": "Listed in the profile, but Kiln did not load it this start.",
+      "not_reported_help": "Start the game again. If it stays like this, check kiln/logs/kiln.log."
+    },
+    "native": {
+      "policy": "Kiln's native policy does not load DLL mods on this game build.",
+      "failed_help": "Read the reason above. Update the DLL mod in the Kiln launcher, then start the game again.",
+      "no_report": "Kiln's native loader wrote no report this start.",
+      "old_report": "The native loader's report is from an earlier start.",
+      "not_reported": "Listed in the profile, but the native loader did not report it."
+    },
+    "plugin": {
+      "engine_failed": "Kiln's {engine} plugin did not start: {error}. Its mods cannot run.",
+      "failed_help": "Update or remove the plugin in the Kiln launcher, then start the game again.",
+      "no_report": "Kiln's start report is missing, so it is not known whether it loaded.",
+      "not_reported": "Listed in the profile, but Kiln did not load it."
+    },
+    "chain": {
+      "failed_help": "Check the DLL in chain.ini (or the Kiln launcher), then start the game again."
+    },
+    "ember": {
+      "reason": "Ember mods cannot run yet: Ember has not published a way for mods to run.",
+      "help": "Nothing to do now. The mod stays in your profile and runs once Kiln supports Ember mods."
+    },
+    "shroudtopia": {
+      "off": "Switched off in Shroudtopia's settings.",
+      "off_help": "In shroudtopia/shroudtopia.json in the profile's config folder, set active to true in the mods entry named \"{name}\" (the name in kiln.log's Registered mod line). Save the file; Shroudtopia reads it again while the game runs.",
+      "not_active": "Switched on, but the mod does not report itself active.",
+      "not_active_help": "Kiln runs Shroudtopia mods through Shroudtopia 0.1.1's mod interface and keeps calling this mod's Activate. A mod made for another game version, or built against another Shroudtopia, can stay like this without doing anything. kiln/logs/kiln.log has its own lines as [shroudtopia:{name}]; the mod's author can tell whether it supports this game version."
+    },
+    "engine_mods": {
+      "own_loader": "{engine}'s own loader runs the {engine} mods this start and reads only its own folder. Activate the profile again in the Kiln launcher (it copies the mod there), then start the game again.",
+      "failed_help": "Read the reason above. Update the mod in the Kiln launcher, then start the game again. kiln/logs/kiln.log has the {engine} lines.",
+      "unreadable": "{engine}'s report could not be read: {error}. Kiln reads it again in a moment.",
+      "not_run": "{engine} did not run this start, so this mod did not load.",
+      "not_run_folder": "{engine} did not run this start, so the mod did not load.",
+      "old_report": "{engine} did not report this start (its last report is from an earlier start).",
+      "not_reported": "Listed in the profile, but {engine} did not report it this start.",
+      "plugin_help": "Check that Kiln's {engine} plugin is installed (kiln/plugins), then start the game again.",
+      "note_old": "{engine} did not report this start; its last report is from an earlier start.",
+      "note_not_run": "{engine} did not run this start."
+    },
+    "note": {
+      "aside_emf": "EMF: stepped aside for the real EMF.",
+      "aside_emf_why": "EMF: stepped aside for the real EMF ({reason}).",
+      "aside": "Stepped aside: another {engine} loader runs these mods.",
+      "aside_why": "Stepped aside: another {engine} loader runs these mods ({reason}).",
+      "emf_idle": "EMF went idle on this game build: {reason}",
+      "eml_patched": {
+        "one": "Game data patched before the game started ({count} change).",
+        "other": "Game data patched before the game started ({count} changes)."
+      },
+      "eml_failed": "EML failed: {error}. The game data was put back to normal.",
+      "eml_aside_sf": "EML: stepped aside for ShroudForge, which runs the EML mods of its mods folder whose ShroudForge switch is on.",
+      "eml_aside": "EML: stepped aside for EML's own loader.",
+      "eml_aside_why": "EML: stepped aside for EML's own loader ({reason}).",
+      "eml_idle": "No EML mods this start.",
+      "ember": "Ember: mods are found but cannot run yet.",
+      "shroudlink_elsewhere": "Another shroudlink loader runs these mods.",
+      "set_aside": "SET: stepped aside for SET's own loader.",
+      "set_aside_why": "SET: stepped aside for SET's own loader ({reason}).",
+      "set_waiting": "Mods load at the main menu.",
+      "set_off": "Off this start."
+    },
+    "sf": {
+      "hosted_menu": "ShroudForge: runtime hosted by Kiln. Pick a mod to switch it and change its settings here (ShroudForge's own Modloader window is not running).",
+      "hosted": "ShroudForge: runtime hosted by Kiln. Pick a mod to switch it and change its settings.",
+      "self_hosted": "ShroudForge: its own loader runs the mods; Kiln stepped aside. Pick a mod to switch it and change its settings.",
+      "not_installed": "ShroudForge is not installed, so its mods cannot run.",
+      "off": "ShroudForge is off this start.",
+      "off_why": "ShroudForge is off: {reason}.",
+      "failed": "ShroudForge failed: {reason}.",
+      "no_report": "ShroudForge did not report this start.",
+      "not_run": "ShroudForge did not run this start.",
+      "runs_it": "ShroudForge runs it.",
+      "fix_first": "Fix ShroudForge first (see the engine line), then start the game again.",
+      "unconfirmed": "ShroudForge runs, but Kiln could not read what it says about this mod (see the engine line). This is not proof the mod is active.",
+      "off_in_settings": "Switched off in ShroudForge's settings.",
+      "eml_failed_help": "Fix ShroudForge first (see kiln.log), then start the game again. Kiln EML stood aside and did not apply this mod.",
+      "eml_aside_but": "Kiln EML stood aside for ShroudForge, but {note}",
+      "eml_off": {
+        "one": "{count} of the profile's EML mods is switched off in ShroudForge, so nothing applies it this start. ShroudForge runs the EML mods of its folder whose ShroudForge switch is on.",
+        "other": "{count} of the profile's EML mods are switched off in ShroudForge, so nothing applies them this start. ShroudForge runs the EML mods of its folder whose ShroudForge switch is on."
+      },
+      "hand_off": "You put this mod into ShroudForge's folder yourself, and ShroudForge has it switched off.",
+      "hand_off_profile_help": "Switch it on in Mods > ShroudForge (its own row there), or remove the folder and press Play in the Kiln launcher: the mod is in your profile, so Kiln then places its own copy, switched on.",
+      "off_in_sf_help": "ShroudForge runs it only once its switch is on: the reason above says where to switch it on. Then start the game again.",
+      "no_switch_file": "ShroudForge has not switched it on: it has no extended.mod.json, the file that holds ShroudForge's switch, so ShroudForge does not run it.",
+      "package_unreadable": "ShroudForge reads this folder, but Kiln cannot read the package as ShroudForge does ({error}); ShroudForge refuses a package it cannot read.",
+      "eml_switch_off": "In ShroudForge's mods folder, but its extended.mod.json (the file that holds ShroudForge's switch) says enabled: false, so nothing applies it this start.",
+      "eml_no_switch": "In ShroudForge's mods folder, but it has no extended.mod.json, the file that holds ShroudForge's switch, and ShroudForge keeps a package off until its switch is on, so nothing applies it this start.",
+      "eml_press_play": "Press Play in the Kiln launcher (or activate the profile again): Kiln switches it on in ShroudForge's settings. Then start the game again.",
+      "eml_other_side": "ShroudForge runs it on the {sides} only.",
+      "and": " and ",
+      "eml_unconfirmed": "Its ShroudForge switch is on, but ShroudForge's record of this start's startup pass does not list it at this version, so Kiln cannot confirm it was applied.",
+      "startup_failed": "ShroudForge's startup game-data pass failed in this game start.",
+      "startup_failed_why": "ShroudForge's startup game-data pass failed in this game start: {error}",
+      "startup_failed_help": "ShroudForge's log has the details. Start the game again once the cause is fixed.",
+      "startup_applied": "ShroudForge applied its game-data changes at the start of this game start (its record of the startup pass lists this mod). A change of its settings applies with the next start.",
+      "startup_current": "ShroudForge found its game-data changes of an earlier start still current for this start's mods (its record of the startup pass lists this mod). A change of its settings applies with the next start.",
+      "settings_unreadable": "Its package settings cannot be read; ShroudForge's per-mod activation is not confirmed.",
+      "hand_off_help_live": "Switch it on below, or remove the folder and add the mod with Add mods in the Kiln launcher. ShroudForge starts it while you play.",
+      "hand_off_help_next": "Switch it on below, or remove the folder and add the mod with Add mods in the Kiln launcher. It applies at the next game start.",
+      "no_switch_help_live": "Switch it on below: Kiln writes the extended.mod.json ShroudForge's own Modloader writes. ShroudForge starts it while you play.",
+      "no_switch_help_next": "Switch it on below: Kiln writes the extended.mod.json ShroudForge's own Modloader writes. It applies at the next game start.",
+      "off_ext": "Switched off in ShroudForge's settings (the mod's extended.mod.json).",
+      "off_ext_repair": "Switched off in ShroudForge's settings (the mod's extended.mod.json). {repair}",
+      "switch_on_below": "Switch it on below.",
+      "repair_help": "Change any of its settings, or switch it off and on, in Kiln's menu once: that repairs it.",
+      "other_side": "It runs on the {sides} only.",
+      "no_runtime": "Its switch is on, but ShroudForge has no current per-mod runtime report. This is not proof the mod is active.",
+      "error": "ShroudForge: {error}",
+      "restart": "Start the game again.",
+      "error_help": "Read the reason above. Update the mod, then start the game again. ShroudForge's log has the details.",
+      "startup_unconfirmed": "Enabled for startup game-data changes; ShroudForge's record of this start's startup pass does not list it at this version, so Kiln cannot confirm it.",
+      "inactive": "ShroudForge does not run it right now; a change of its switch takes a second or two, or it starts with the next game start.",
+      "effect": "ShroudForge Lua is active; reported effect: {effect}. {detail}",
+      "effect_failed_help": "The mod reports that its change did not apply. ShroudForge's log has the details.",
+      "active": "ShroudForge runs its Lua; the mod reports no effect result."
+    },
+    "enshwick": {
+      "no_report": "Enshwick did not report this start.",
+      "not_run": "Enshwick did not run this start.",
+      "started": "Enshwick's loader started.",
+      "starting": "Enshwick's loader is starting.",
+      "failed": "Enshwick's loader failed: {reason}.",
+      "no_loader": "Enshwick's loader is missing: {reason}.",
+      "install": "install Enshwick",
+      "aside": "Enshwick: stepped aside for Enshwick's own loader.",
+      "runs_it": "Enshwick's loader runs it. Enshwick reports no result per mod.",
+      "fix_first": "Fix Enshwick first (see the engine line), then start the game again.",
+      "copy_failed": "Kiln could not copy it into the game's mods folder.",
+      "copy_failed_help": "Close other tools that use the game's mods folder, then start the game again.",
+      "removed": "Removed from the game's mods folder."
+    },
+    "xhl": {
+      "prerequisite": "Requires XHL-Core: only that separately installed host loads it. Import XHL-Core in the Kiln launcher as a Native mod and turn it on, or install it as its author says, then start the game again.",
+      "core_started": "Placed in the game's mods folder for XHL-Core. XHL-Core started with the game, and it loads this plugin itself, not Kiln. Whether the plugin started is in XHL-Core's own log, XHL-Native-Plugin-Host.log next to XHL-Core.",
+      "placed": "Placed in the game's mods folder for XHL-Core. Kiln does not load it, and Kiln cannot tell whether XHL-Core runs it.",
+      "found_core": "An XHL-Core plugin in the game's mods folder. XHL-Core started with the game, and it loads this plugin itself, not Kiln. Whether the plugin started is in XHL-Core's own log, XHL-Native-Plugin-Host.log next to XHL-Core.",
+      "found": "An XHL-Core plugin in the game's mods folder. Kiln does not load it, and Kiln cannot tell whether XHL-Core runs it.",
+      "note_core": "XHL: placed for XHL-Core, a separate host. XHL-Core started with the game and loads these plugins; Kiln never loads them itself.",
+      "note": "XHL: placed for XHL-Core, a separate host. Kiln never loads these plugin DLLs and does not check here whether XHL-Core is installed."
+    }
+  },
+  "set": {
+    "about": "SET Mod Settings, Compatibility, Entities, Hooks, Bindings, Console and local support report.",
+    "unavailable": "SET tools are unavailable (kiln-set is not running).",
+    "open": "SET settings and tools",
+    "open_failed": "SET tools are unavailable; check the engine status."
   }
 }
