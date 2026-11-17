@@ -194,7 +194,7 @@ the profile's `.asi` packages in `[profile]`) and reports a missing override.
 | `cheat-table` | `.ct`, `.cetrainer` |
 | `reshade` | a `.ini` with "reshade" in its name |
 | `data` | `.kfc` (patched game files) |
-| `asi` | an `.asi` file, Ultimate ASI Loader (export or text `IsUltimateASILoader`, any file name), or a folder with either (directly in it, or `.asi` in a folder of it, as Smart Workshop's `Scripts\`): imported as one native mod that activation places in the game folder ([Files in the game folder](#files-in-the-game-folder)) |
+| `asi` | an `.asi` file, Ultimate ASI Loader (export or text `IsUltimateASILoader`, any file name), or a folder with either (directly in it, or `.asi` in a folder of it, as Smart Workshop's `Scripts\`): imported as one native mod that activation places in the game folder ([Files in the game folder](#files-in-the-game-folder)). A package that also has that same mod as a Kiln native mod (`native.json`, same id, file name, or DLL bytes) adds only the Kiln mod; the `.asi` is left out and launcher.log says so |
 
 A kind without a loader is skipped on import with its reason. It is never imported as a plain DLL.
 An unreadable/unknown `mod.json` or incomplete Lua package stays one skipped item: its helper DLLs are never

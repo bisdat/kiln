@@ -678,7 +678,9 @@ fn detect_folder_at(dir: &Path, depth: usize, top_name: Option<&str>) -> Detecte
     }
     // Ultimate ASI Loader and/or .asi plugins (in the folder or a folder of it, as Smart Workshop's Scripts/): one
     // package, a native mod placed in the game folder (game_files)
-    if !has_mod_manifest(dir) && let Some(d) = crate::game_files::detect_asi_package(dir, depth, top_name) {
+    // A native.json in a subfolder is that mod. The .asi beside it is the same mod's other build, not a reason to
+    // take the whole package as only an .asi (drop_asi_copies_of_native_mods leaves the Kiln mod).
+    if !has_mod_manifest(dir) && !has_mod_subfolder(dir) && let Some(d) = crate::game_files::detect_asi_package(dir, depth, top_name) {
         return d;
     }
     if let Some(d) = crate::engines::detect_folder(dir) {
@@ -766,6 +768,9 @@ fn detect_folder_at(dir: &Path, depth: usize, top_name: Option<&str>) -> Detecte
             only.name = Some(name);
         }
     }
+    // A package that ships one mod twice (native.json and the same DLL as an .asi for Ultimate ASI Loader) keeps the
+    // Kiln native mod. The .asi would also be placed in the game folder and loaded again.
+    drop_asi_copies_of_native_mods(&mut items);
     if items.iter().any(|i| i.kind != DetectKind::Unknown) {
         let n = items.iter().filter(|i| i.kind.importable()).count();
         // a loader the package carries that Kiln does not need (it runs that engine's mods itself) is not something
@@ -825,6 +830,77 @@ pub(crate) fn native_settings_dirs(dir: &Path) -> Vec<PathBuf> {
 }
 
 /// `top_name`: what `dir` is called when it is an unpacked archive at depth 0 (detect_folder_at).
+/// An `.asi` in this package is the same mod as a `native.json` sibling when the native id matches the file, or a
+/// listed DLL has the same name or the same bytes.
+fn drop_asi_copies_of_native_mods(items: &mut [Detected]) {
+    let natives: Vec<(std::path::PathBuf, Option<String>)> = items.iter()
+        .filter(|i| i.kind == DetectKind::Native)
+        .map(|i| (std::path::PathBuf::from(&i.path), i.id.clone()))
+        .collect();
+    if natives.is_empty() {
+        return;
+    }
+    for item in items.iter_mut() {
+        if item.kind != DetectKind::Asi {
+            continue;
+        }
+        let path = std::path::PathBuf::from(&item.path);
+        let Some((_, id)) = natives.iter().find(|(dir, id)| asi_is_native_mod(dir, id.as_deref(), &path)) else { continue };
+        let shown = id.as_deref().unwrap_or("its native mod");
+        item.kind = DetectKind::Unknown;
+        item.engine = None;
+        item.reason = format!("the same mod is already this package's Kiln native mod ({shown}): only that one is added, so it is not also loaded as an .asi");
+    }
+}
+
+fn asi_is_native_mod(native_dir: &Path, native_id: Option<&str>, asi_item: &Path) -> bool {
+    let asis = asi_files_of(asi_item);
+    if asis.is_empty() {
+        return false;
+    }
+    let dlls = crate::manifest::read_native(native_dir).map(|m| m.dlls).unwrap_or_default();
+    let dll_paths: Vec<std::path::PathBuf> = dlls.iter().map(|d| native_dir.join(d.replace('/', std::path::MAIN_SEPARATOR_STR))).collect();
+    for asi in &asis {
+        let stem = asi.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+        if native_id.is_some_and(|id| id.eq_ignore_ascii_case(stem) || id.eq_ignore_ascii_case(&id_from_name(stem))) {
+            return true;
+        }
+        let asi_hash = crate::hash::sha256_file(asi).ok().map(|h| h.0);
+        for dll in &dll_paths {
+            let same_name = dll.file_stem().and_then(|s| s.to_str()).is_some_and(|s| s.eq_ignore_ascii_case(stem));
+            let same_bytes = asi_hash.as_ref().is_some_and(|a| crate::hash::sha256_file(dll).ok().is_some_and(|h| &h.0 == a));
+            if same_name || same_bytes {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn asi_files_of(item: &Path) -> Vec<std::path::PathBuf> {
+    let is_asi = |p: &Path| p.is_file() && p.extension().is_some_and(|x| x.eq_ignore_ascii_case("asi"));
+    if is_asi(item) {
+        return vec![item.to_path_buf()];
+    }
+    if !item.is_dir() {
+        return vec![];
+    }
+    let mut out = Vec::new();
+    for e in std::fs::read_dir(item).into_iter().flatten().flatten() {
+        let p = e.path();
+        if is_asi(&p) {
+            out.push(p);
+        } else if p.is_dir() {
+            for inner in std::fs::read_dir(&p).into_iter().flatten().flatten() {
+                if is_asi(&inner.path()) {
+                    out.push(inner.path());
+                }
+            }
+        }
+    }
+    out
+}
+
 fn children(dir: &Path, depth: usize, top_name: Option<&str>) -> Vec<Detected> {
     let mut entries: Vec<PathBuf> = std::fs::read_dir(dir).into_iter().flatten().flatten().map(|e| e.path()).collect();
     entries.sort();

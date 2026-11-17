@@ -265,6 +265,23 @@ fn asi(tag: &[u8]) -> Vec<u8> {
 }
 
 #[test]
+fn a_package_with_a_native_mod_and_the_same_asi_keeps_only_the_native_mod() {
+    let t = tmp("both");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let pkg = t.0.join("workshop");
+    let dll = build_test_dll(&["kiln_native_init"], b"workshop");
+    put(&pkg, "mod/native.json", br#"{"format":1,"id":"smart-workshop","version":"1.2.0","dlls":["SmartWorkshop.dll"],"phase":"boot","init":"kiln_native_init"}"#);
+    put(&pkg, "mod/SmartWorkshop.dll", &dll);
+    put(&pkg, "SmartWorkshop.asi", &asi(b"the asi build"));
+    put(&pkg, "Scripts/OtherPlugin.asi", &asi(b"someone else"));
+    let r = library::import(&dirs, &[pkg], &mut NoProgress).unwrap();
+    let native: Vec<_> = r.imported.iter().filter(|x| x.kind == ModKind::Native && x.id == "smart-workshop").collect();
+    assert_eq!(native.len(), 1, "{r:#?}");
+    assert!(r.skipped.iter().any(|s| s.path.contains("SmartWorkshop.asi") && s.reason.contains("smart-workshop")), "{r:#?}");
+    assert!(r.imported.iter().any(|x| x.id == "scripts"), "a different .asi package is still imported: {r:#?}");
+}
+
+#[test]
 fn ultimate_asi_loader_with_its_plugins_is_imported_and_placed() {
     let t = tmp("ual");
     let dirs = DataDirs::at(t.0.join("data"));
