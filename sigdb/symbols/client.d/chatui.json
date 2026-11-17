@@ -45,7 +45,7 @@
             "symbol": "chatui/HudChatWindow",
             "size": 8192
           },
-          "pattern": "E8 {chatui/TextInputProcess:rel32}",
+          "pattern": "E8 {chatui/TextInputProcess:rel32} 48 8B 85 B0",
           "offset": 5
         }
       ]
@@ -57,7 +57,7 @@
             "symbol": "chatui/SocialChat",
             "size": 16384
           },
-          "pattern": "E8 {chatui/TextInputProcess:rel32}",
+          "pattern": "E8 {chatui/TextInputProcess:rel32} 83",
           "offset": 5
         }
       ]
