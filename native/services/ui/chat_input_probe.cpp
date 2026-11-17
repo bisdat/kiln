@@ -33,6 +33,7 @@ std::filesystem::path g_history_file;
 // UI-thread-only.
 bool g_editing_in_frame = false;
 bool g_was_editing = false;
+bool g_hud_focus_logged = false, g_social_focus_logged = false;
 std::string g_last_applied;
 
 constexpr uint64_t kEditHash = 0x72615e88968a8b89ull;
@@ -191,10 +192,15 @@ void history_before(void* widget) {
 }
 
 // The submit result is set by TextInputProcess, before the caller sends and clears.
-void history_after(void* widget, void* result) {
+void history_after(void* widget, void* result, bool hud) {
     void* state = game_state(widget);
     if (!editing(state)) return;
     g_editing_in_frame = true;
+    bool& logged = hud ? g_hud_focus_logged : g_social_focus_logged;
+    if (!logged) {
+        logged = true;
+        logf(KILN_LOG_INFO, "ui: chat history: %s edit focus confirmed (no text logged)", hud ? "HUD" : "Social");
+    }
     uint32_t event = 0;
     if (game_read(result, &event) && event == 1) {
         std::string sent;
@@ -214,15 +220,15 @@ void __fastcall hk_input(void* widget, void* result, const GameText* label, uint
     const bool hud = caller == g_hud_ret;
     const bool social = caller == g_social_ret;
     const bool scoped = hud || social;
-    if (g_history_on.load(std::memory_order_relaxed) && scoped && mode == 0)
+    if (g_history_on.load(std::memory_order_relaxed) && scoped)
         history_before(widget);
     g_input.call<void>(widget, result, label, mode);
     if (hud && !g_hud_seen.exchange(true))
-        logf(KILN_LOG_INFO, "ui: chat input probe: native HUD chat call observed (read-only call-site confirmation)");
+        logf(KILN_LOG_INFO, "ui: chat input probe: native HUD chat call observed (call-site confirmation)");
     else if (social && !g_social_seen.exchange(true))
-        logf(KILN_LOG_INFO, "ui: chat input probe: native Social chat call observed (read-only call-site confirmation)");
-    if (g_history_on.load(std::memory_order_relaxed) && scoped && mode == 0)
-        history_after(widget, result);
+        logf(KILN_LOG_INFO, "ui: chat input probe: native Social chat call observed (call-site confirmation)");
+    if (g_history_on.load(std::memory_order_relaxed) && scoped)
+        history_after(widget, result, hud);
 }
 } // namespace
 
