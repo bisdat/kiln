@@ -81,6 +81,9 @@ void set_error(const char* fmt, ...);
 KilnHandle next_handle();                    // one handle space for every kiln.ui subscription (any thread)
 extern std::atomic<uint32_t> g_hover_panels; // Kiln panels that take the mouse only while it is over them
 
+// ---- chat_input_probe.cpp (issue 44: opt-in read-only call-site validation) ----
+bool chat_input_probe_install();  // disabled unless KILN_CHAT_INPUT_PROBE=1
+
 // ---- input.cpp ----
 void input_install_iat();       // SetCursorPos / ClipCursor slots of the game exe (plugin main)
 void input_hook_xinput();      // after XInput loads: idle pad for the game while Kiln has the input
