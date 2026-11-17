@@ -272,6 +272,7 @@ internal static class GemSources
     {
         public HashSet<uint> Wants = new();
         public EntityId Forge;
+        public ulong LastPost;  // the step of the last GemForgeOpenedEvent: a client's hellos post at most one a second
     }
     private static readonly Dictionary<uint, Session> Sessions = new();
     private static readonly HashSet<uint> Dirty = new();
@@ -495,14 +496,21 @@ internal static class GemSources
             return;
         }
         if (WhyOff() is not null) return;  // the hello came over kiln.net: the row's other needs are kiln.gemcraft's
-        bool refresh;
+        bool refresh, more = false;
         Session s;
+        var now = ServiceTick.Step;
         lock (Gate)
         {
             refresh = Sessions.TryGetValue(player.Value, out s!);
             if (!refresh) Sessions[player.Value] = s = new Session();
             foreach (var w in m.Wants)
-                if (w != 0 && s.Wants.Count < 8) s.Wants.Add(w);
+                if (w != 0 && s.Wants.Count < 8) more |= s.Wants.Add(w);
+            if (refresh && now < s.LastPost + (ulong)StepsPerSecond && now >= s.LastPost)
+            {
+                if (more) Dirty.Add(player.Value);  // a new material: the counts again, no new event
+                return;
+            }
+            s.LastPost = now;
         }
         if (!refresh) s.Forge = ForgeNear(player);
         Post(player, s.Forge, refresh);

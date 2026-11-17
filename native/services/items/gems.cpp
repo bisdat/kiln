@@ -1364,6 +1364,10 @@ void KILN_CALL each(KilnProgramCtx* ctx, uint64_t* it, KilnEntity player, void*)
             cr.out.flags = (cr.out.flags & ~KILN_GEMCRAFT_BY_CODE) | KILN_GEMCRAFT_SOURCE;
             cr.out.ticket = batch[i].token;
             cr.out.version = batch[i].version;
+            LOGI("gems: offered gem: player %u's %s of gem %u in slot %u:%u (offer %016llx, version %u): status %d, paid %u x 0x%08x, got %u x 0x%08x%s%s",
+                 player, gems::action_name(cr.out.action), batch[i].r.gem, KILN_SLOT_INVENTORY(batch[i].r.gem_slot),
+                 KILN_SLOT_INDEX(batch[i].r.gem_slot), static_cast<unsigned long long>(batch[i].token), batch[i].version, cr.out.status,
+                 cr.out.cost_count, cr.out.cost_item, cr.out.yield_count, cr.out.yield_item, cr.out.message[0] ? ": " : "", cr.out.message);
         }
         if (!cr.out.step) cr.out.step = current_step();
         std::lock_guard lock(g_mu);

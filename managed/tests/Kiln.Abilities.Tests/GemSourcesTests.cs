@@ -261,8 +261,15 @@ public sealed class GemSourcesTests : IDisposable
         Assert.Equal(Player, to);
         var rows = Assert.IsType<GemForgeOffers>(msg);
         Assert.Equal(2560u, Assert.Single(rows.Rows).Pide);
+        // within a second a client's hellos post nothing more (a hostile client cannot make the mods offer every frame);
+        // a new material to ask about sends the counts again
+        sent.Clear();
         kiln.Run(() => GemSources.Hello(Player, new GemForgeHello(true, [])));
-        Assert.True(seen[1].Refresh);
+        Assert.Single(seen);
+        kiln.Run(() => GemSources.Hello(Player, new GemForgeHello(true, [7u])));
+        kiln.Run(GemSources.PumpServer);
+        Assert.Single(seen);
+        Assert.IsType<GemForgeOffers>(Assert.Single(sent).Item2);
         // the screen closed: every owner's offers to the player go (owner 0), nothing more is sent
         kiln.Run(() => GemSources.Hello(Player, new GemForgeHello(false, [])));
         Assert.Contains((0ul, Player.Value, 0u), Fake.Withdrawals);
