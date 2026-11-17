@@ -4,6 +4,7 @@ Only platform I/O and foreign-call guards are substituted; config mutations and 
 Run through the review slot, with KILN_OUT set to this task's build folder.
 """
 import os
+import re
 from pathlib import Path
 import subprocess
 
@@ -17,9 +18,12 @@ if 'HMODULE module' not in loaded: loaded=loaded.replace('struct Loaded {','stru
 scheduling = plugin[plugin.index('void drive('):plugin.index('int json_int(')]
 flow = plugin[plugin.index('void prepare_original_code('):plugin.index('void drive(')] if 'void prepare_original_code(' in plugin else 'void prepare_original_code(Loaded&) {}'
 
-# Exercise the exact registration hook, including the origin gate and metadata name.
-hook = 'config::ensure_profile_entry(m->name, m->origin == "profile");'
-registration = hook if hook in plugin[plugin.index('m->mod = inst;'):plugin.index('// Shroudtopia\'s UpdateMods.')] else ''
+# Exercise the exact registration hook, including the origin gate and metadata name: the plugin's own statement, taken
+# as it is (a fixed copy of it went stale when the gate learned "profile-eml" and then silently tested no hook at all).
+hooks = re.findall(r'config::ensure_profile_entry\(m->name,[^;]*\);',
+                   plugin[plugin.index('m->mod = inst;'):plugin.index('// Shroudtopia\'s UpdateMods.')])
+if len(hooks) != 1: raise SystemExit(f'FAIL registration: expected one config::ensure_profile_entry(m->name, ...) call, found {len(hooks)}')
+registration = hooks[0]
 preamble = r'''
 #include <filesystem>
 #include <fstream>
@@ -138,6 +142,8 @@ int main(int argc, char** argv) {
  check(!disabled && unchanged==off,"existing false entry untouched");
  auto [dropin,unlisted]=run(base,"folder",nullptr);
  check(!dropin && unlisted==base,"not profile-enabled: no entry or activation");
+ auto [eml,emlDoc]=run(base,"profile-eml",nullptr);
+ check(eml && emlDoc["mods"]["Reported Name.With Dot"]==json({{"active",true}}),"a profile's EML entry activates first start too");
  auto [folder,folderDoc]=run(base,"profile",json::object());
  check(folder && folderDoc["mods"].contains("Reported Name.With Dot"),"profile folder without defaults activates");
  auto existing=base; existing["mods"]["Reported Name.With Dot"]={{"custom",7}};
