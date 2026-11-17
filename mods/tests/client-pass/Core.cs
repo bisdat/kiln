@@ -122,11 +122,14 @@ public sealed partial class ClientPassMod
         var exiting = Line("unload: the process is exiting");
         var order = Line("unload: called in this order:");
         var done = Line("unload: done in");
+        var parked = Line("kiln.tasks: parked at exit");
         var abnormal = Line("not a normal exit");
 
         c.Expect(exiting?.Contains("exit code 0", StringComparison.Ordinal) == true,
             $"{exit}: \"unload: the process is exiting (..., exit code 0, ...)\"", exiting);
         c.Expect(order is not null, $"{exit}: \"unload: called in this order: ...\"", order);
+        c.Expect(parked is not null && !parked.Contains("still running", StringComparison.Ordinal),
+            $"{exit}: \"kiln.tasks: parked at exit; ...\" with no task left running", parked);
         c.Expect(done?.Contains("(0 faulted, 0 given up, 0 not called)", StringComparison.Ordinal) == true,
             $"{exit}: \"unload: done in N ms (0 faulted, 0 given up, 0 not called)\"", done);
         if (abnormal is not null)

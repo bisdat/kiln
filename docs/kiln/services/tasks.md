@@ -153,10 +153,11 @@ while every other thread still runs:
    it can no longer take the engine's gate and ends with the process.
 5. Then the plugins' `on_unload` handlers, where they are on.
 
-On native Windows these steps run by default (`kiln.json` `"unloadAtExit"`: `"auto"`); the plugins' handlers run there
-only with `"on"`. Under Wine and Proton (Linux servers, the Steam Deck) the older order stays in this release: steps 1
-and 2, then every handler last loaded first (Kiln's services last), and no park. `"off"` places no exit link at all,
-anywhere; the process exit then simply ends the pool's threads.
+The order is the same on every platform. On native Windows the plugins' handlers run only with `kiln.json`
+`"unloadAtExit"`: `"on"`; with `"auto"` (the default) the link runs Kiln's own steps 1 to 4 there. Under Wine and Proton
+(Linux servers, the Steam Deck) every handler runs, after the park: tasks no longer run while the plugins' handlers do,
+which is new in this version (before, every handler ran last loaded first with the pool sealed but not parked).
+`"off"` places no exit link at all, anywhere; the process exit then simply ends the pool's threads.
 
 An exit called from a `DllMain` (the loader lock is held) does steps 1 and 2 only: nothing waits under the loader
 lock. A body that ends the process itself is never waited for. Once the pool is parked, `drain_owner` does not wait:

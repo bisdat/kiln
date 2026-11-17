@@ -617,11 +617,10 @@ void load_plugins() {
 // caught (crash report) and one that blocks is given up after its limit, and the next one runs either way. Nothing
 // else is torn down (no FreeLibrary, no owner revoke, no hook removed): the process is ending.
 //
-// Kiln's own exit steps come first (boot.cpp's policy decides where; on native Windows they are all the link does by
-// default): kiln.tasks refuses new tasks and seals its owners, Kiln's own services' handlers run (kiln.engine closes
-// its write gate for good), then the task pool parks (no body or done starts any more; a bounded wait for the running
-// ones), and only then the plugins' handlers, last loaded first. Elsewhere the older order stays: every handler last
-// loaded first, no park.
+// Kiln's own exit steps come first, on every platform (on native Windows they are all the link does by default):
+// kiln.tasks refuses new tasks and seals its owners, Kiln's own services' handlers run (kiln.engine closes its write
+// gate for good), then the task pool parks (no body or done starts any more; a bounded wait for the running ones), and
+// only then the plugins' handlers, last loaded first.
 namespace {
 
 constexpr DWORD kUnloadHandlerMs = 3000;  // kiln-shroudtopia's own handler waits up to 1 s for its worker
@@ -651,7 +650,6 @@ DWORD g_unload_handler_ms = kUnloadHandlerMs, g_unload_total_ms = kUnloadTotalMs
 std::atomic<int> g_unload_state{0};  // 0 not run, 1 running, 2 over
 std::atomic<double> g_unload_started_ms{-1};  // published before state 1, shared by all exit callers
 HANDLE g_unload_over = nullptr;      // manual-reset, set when the sequence is over
-bool g_unload_kiln_first = false;    // Kiln's exit steps (its services' handlers, the pool's park) before the plugins
 
 // KILN_UNLOAD_HANDLER_MS / KILN_UNLOAD_TOTAL_MS: shorter limits (for tests); a value above the default is ignored.
 DWORD unload_limit(const wchar_t* name, DWORD fallback) {
@@ -758,20 +756,16 @@ size_t unload_handlers(bool own_services) {
     }));
 }
 
-// Called by boot.cpp before it arms the trigger: one job per module whose on_unload the exit calls, last loaded first.
-// `kiln_first`: Kiln's exit steps (its own services' handlers, then the task pool's park) run before the plugins'
-// handlers, which are called only with `plugins`; otherwise every handler is called, last loaded first, and the pool is
-// not parked. Returns the number of jobs; unload_prepared() says whether the sequence exists (it may have no job).
-size_t unload_prepare(bool plugins, bool kiln_first) {
+// Called by boot.cpp before it arms the trigger: one job per module whose on_unload the exit calls, last loaded first:
+// Kiln's own services always, the plugins only with `plugins`. Returns the number of jobs; unload_prepared() says
+// whether the sequence exists (it may have no job: Kiln's own steps still run).
+size_t unload_prepare(bool plugins) {
     if (g_unload_over) return g_unload_count;
-    if (!kiln_first) plugins = true;
     size_t n = 0;
     for (const auto& m : g_modules)
         if (has_unload(m) && (plugins || m.own_service)) ++n;
-    if (!n && !kiln_first) return 0;  // nothing to call and no step of Kiln's own: no sequence
     g_unload_over = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     if (!g_unload_over) return 0;
-    g_unload_kiln_first = kiln_first;
     g_unload_jobs = new UnloadJob[n ? n : 1]{};
     for (size_t i = g_modules.size(); i-- > 0;) {
         const auto& m = g_modules[i];
@@ -805,10 +799,8 @@ struct UnloadCalls {
     std::string calls;
     unsigned faulted = 0, given_up = 0, skipped = 0;
 };
-enum class Pick { All, OwnServices, Plugins };
-bool picked(const UnloadJob& j, Pick pick) {
-    return pick == Pick::All || (pick == Pick::OwnServices) == j.own_service;
-}
+enum class Pick { OwnServices, Plugins };
+bool picked(const UnloadJob& j, Pick pick) { return (pick == Pick::OwnServices) == j.own_service; }
 size_t own_service_jobs() {
     size_t n = 0;
     for (size_t i = 0; i < g_unload_count; ++i) n += g_unload_jobs[i].own_service;
@@ -878,7 +870,7 @@ void unload_run(uint32_t exit_code, const char* via) {
     // Neither waits; the pool's park, later in the sequence, is the one bounded wait for its running callbacks.
     tasks_svc::exit_begins();
     if (exit_code == 0) tasks_svc::exiting();
-    if (!g_unload_over || (!g_unload_count && !g_unload_kiln_first)) return;
+    if (!g_unload_over) return;
     if (exit_code != 0) {
         // A crash may have stranded the heap or the logger's mutex. Do not allocate, log, poll, or wait, even when
         // another thread is already running the normal sequence. The game's non-zero exits must reach the OS now.
@@ -901,8 +893,8 @@ void unload_run(uint32_t exit_code, const char* via) {
             }
         }
         if (was == 1) {
-            const double bound = g_unload_total_ms + (g_unload_kiln_first ? kUnloadParkMs : 0) + kUnloadFlushMs +
-                                 kUnloadLogWaitMs + kUnloadMarginMs;
+            const double bound =
+                g_unload_total_ms + kUnloadParkMs + kUnloadFlushMs + kUnloadLogWaitMs + kUnloadMarginMs;
             const double left = bound - (now_ms() - g_unload_started_ms.load());
             WaitForSingleObject(g_unload_over, static_cast<DWORD>(std::max(0.0, left)));
         }
@@ -910,39 +902,26 @@ void unload_run(uint32_t exit_code, const char* via) {
     }
     char line[256];
     if (holds_loader_lock()) {
-        if (g_unload_kiln_first)
-            std::snprintf(line, sizeof line,
-                          "unload: the process exits from under the loader lock (%s, thread %lu: a DllMain called it): no "
-                          "on_unload handler is called (their threads could not start) and the task pool is not parked "
-                          "(nothing waits under the loader lock)",
-                          via, GetCurrentThreadId());
-        else
-            std::snprintf(line, sizeof line,
-                          "unload: the process exits from under the loader lock (%s, thread %lu: a DllMain called it): no "
-                          "on_unload handler is called (their threads could not start)",
-                          via, GetCurrentThreadId());
+        std::snprintf(line, sizeof line,
+                      "unload: the process exits from under the loader lock (%s, thread %lu: a DllMain called it): no "
+                      "on_unload handler is called (their threads could not start) and the task pool is not parked "
+                      "(nothing waits under the loader lock)",
+                      via, GetCurrentThreadId());
         unload_finish(KILN_LOG_WARN, line);
         return;
     }
     UnloadCalls c;
     c.t0 = g_unload_started_ms.load();
-    if (g_unload_kiln_first) {
-        KLOG_I("unload: the process is exiting (%s, exit code 0, thread %lu): Kiln's own exit steps (%zu service "
-               "handler(s), then the task pool parks within %lu ms), then %zu plugin on_unload handler(s), last loaded "
-               "first, each on its own thread, up to %lu ms each and %lu ms in all",
-               via, GetCurrentThreadId(), own_service_jobs(), kUnloadParkMs, g_unload_count - own_service_jobs(),
-               g_unload_handler_ms, g_unload_total_ms);
-        call_jobs(c, Pick::OwnServices);  // kiln.engine closes its write gate for good: no task can take it any more
-        const double park0 = now_ms();
-        tasks_svc::park(kUnloadParkMs);   // no task body or done runs from here; the plugins' handlers come after
-        c.t0 += now_ms() - park0;         // the park's wait is not the handlers' time
-        call_jobs(c, Pick::Plugins);
-    } else {
-        KLOG_I("unload: the process is exiting (%s, exit code 0, thread %lu): %zu on_unload handler(s), last loaded "
-               "first, each on its own thread, up to %lu ms each and %lu ms in all",
-               via, GetCurrentThreadId(), g_unload_count, g_unload_handler_ms, g_unload_total_ms);
-        call_jobs(c, Pick::All);
-    }
+    KLOG_I("unload: the process is exiting (%s, exit code 0, thread %lu): Kiln's own exit steps (%zu service "
+           "handler(s), then the task pool parks within %lu ms), then %zu plugin on_unload handler(s), last loaded "
+           "first, each on its own thread, up to %lu ms each and %lu ms in all",
+           via, GetCurrentThreadId(), own_service_jobs(), kUnloadParkMs, g_unload_count - own_service_jobs(),
+           g_unload_handler_ms, g_unload_total_ms);
+    call_jobs(c, Pick::OwnServices);  // kiln.engine closes its write gate for good: no task can take it any more
+    const double park0 = now_ms();
+    tasks_svc::park(kUnloadParkMs);   // no task body or done runs from here; the plugins' handlers come after
+    c.t0 += now_ms() - park0;         // the park's wait is not the handlers' time
+    call_jobs(c, Pick::Plugins);
     // The handlers may have reported rows (kiln.caps): capabilities.json is written a last time when something is
     // dirty. Its worker's whole wait is bounded at 2 s, outside the handlers' limits.
     if (!unload_flush()) KLOG_W("unload: capabilities.json could not be written a last time");

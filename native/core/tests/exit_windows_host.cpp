@@ -218,7 +218,7 @@ int main() {
     for (auto& m : kiln::g_modules) m.info.size = sizeof(KilnPluginInfo);
     kiln::g_modules[0].info.on_unload = &service_handler;
     kiln::g_modules[1].info.on_unload = &plugin_handler;
-    kiln::unload_prepare(true, true);
+    kiln::unload_prepare(true);
     kiln::g_exit_next = reinterpret_cast<void*>(&ExitProcess);
     kiln::g_exit_via = "test";
     std::printf("exit: begins\n");

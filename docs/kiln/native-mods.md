@@ -105,10 +105,9 @@ closed its worlds and returned from main, before Windows ends the other threads 
   which and why.
 - **Proven:** a dedicated server stopped with Ctrl-C, SIGINT or by the launcher (lab). The client's normal quit is
   expected to call it too, but its exit code is not yet confirmed to be 0: not run in a client.
-- **Order and thread:** every service and plugin that loaded, in reverse load order (plugins before the services they
-  use), each on a thread Kiln starts for it while the exiting thread waits. On native Windows Kiln's own steps come
-  first: Kiln's own services, then the task pool parks (no task body or `done` runs any more, so don't wait for your
-  own tasks), then the plugins ([services/tasks.md](services/tasks.md#exit)).
+- **Order and thread:** Kiln's own exit steps first: Kiln's own services, then the task pool parks (no task body or
+  `done` runs any more, so don't wait for your own tasks), then every plugin that loaded, last loaded first
+  ([services/tasks.md](services/tasks.md#exit)); each on a thread Kiln starts for it while the exiting thread waits.
 - **Limits:** 3 s per handler, 10 s for all. A handler that has not returned is given up and named in kiln.log; after
   10 s the rest are not called. A fault is caught (kiln.log and a crash report) and the next handler runs.
 - **Do:** write your own files atomically; stop your own threads and wait for them briefly.

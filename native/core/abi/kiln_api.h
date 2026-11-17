@@ -258,11 +258,10 @@ typedef struct KilnPluginInfo {
      * not yet confirmed to be 0; the guided client check must confirm it. Called at the process's exit call: after
      * the game saved, closed its worlds and returned from main, before Windows ends the other threads and before any
      * DLL_PROCESS_DETACH, never under the loader lock. A plugin stays loaded for the life of the process; nothing is
-     * unloaded after the call. Every service and plugin that loaded is called, in reverse load order (plugins before
-     * the services they use), each on a thread kiln-core starts for the call (not the main thread, not a world
-     * thread) while the exiting thread waits. On native Windows Kiln's own exit steps come first instead: Kiln's own
-     * services (kiln/services DLLs of this build) are called, then kiln.tasks parks its pool (no task body or done
-     * runs any more: do not wait for your own tasks), then the plugins, last loaded first. A fault is caught
+     * unloaded after the call. Kiln's own exit steps come first: Kiln's own services (kiln/services DLLs of this
+     * build) are called, then kiln.tasks parks its pool (no task body or done runs any more: do not wait for your own
+     * tasks), then every plugin that loaded, last loaded first; each handler on a thread kiln-core starts for the call
+     * (not the main thread, not a world thread) while the exiting thread waits. A fault is caught
      * (kiln.log and a crash report) and the next handler runs; a handler that has not returned after 3 s is given up
      * (named in kiln.log; its thread ends with the process), and once 10 s have gone by in all (the pool's park, at
      * most 0.5 s, not counted), the rest are not called. Do: write your own files (atomically),
