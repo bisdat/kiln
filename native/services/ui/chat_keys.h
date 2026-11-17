@@ -11,6 +11,18 @@ namespace kui::chat_keys {
 
 enum class Action : uint8_t { Older = 1, Newer = 2 };
 
+// What ends a history browse: the player changed the field's text (docs/re/chat-input.md, the field's keys).
+// A character the field inserts: printable text and Tab (the game's character path keeps '\t' and drops the other
+// control characters). Enter, Escape, Backspace and Ctrl+letter arrive as control characters and are not edits here.
+constexpr bool inserts_text(uint32_t ch) { return (ch >= 0x20 && ch != 0x7f) || ch == '\t'; }
+// A key that changes the text without a character: Backspace, Delete, Shift+Insert (paste), Ctrl+V/X (paste, cut),
+// Ctrl+Z/Y (undo, redo). Ctrl+A/C only select or copy. mods: KilnUiKey bits (1 Ctrl, 2 Shift, 4 Alt).
+constexpr bool edits_text(uint32_t vk, uint32_t mods) {
+    constexpr uint32_t kBack = 0x08, kDelete = 0x2E, kInsert = 0x2D, kCtrl = 1, kShift = 2;
+    return vk == kBack || vk == kDelete || ((mods & kShift) && vk == kInsert) ||
+           ((mods & kCtrl) && (vk == 'V' || vk == 'X' || vk == 'Z' || vk == 'Y'));
+}
+
 class Router {
 public:
     void focus(bool yes) {

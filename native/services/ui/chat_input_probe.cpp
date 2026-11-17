@@ -38,6 +38,7 @@ std::atomic<uint32_t> g_recall_log_count{0};
 // transient differences in the game's widget buffer between UI frames.
 std::atomic<bool> g_manual_text_edit{false};
 std::atomic<bool> g_window_blurred{false};
+std::atomic<bool> g_ime_composing{false};  // window thread: between WM_IME_STARTCOMPOSITION and its end
 chat_keys::Router g_keys;
 chat_history::History g_history;
 chat_history::DraftCapture g_hud_draft, g_social_draft;
@@ -393,34 +394,45 @@ bool read_layout() {
 }
 } // namespace
 
-// Window thread: the core WndProc already deduplicates raw and legacy key messages.
-void chat_input_text_edited() {
-    if (g_history_on.load(std::memory_order_acquire) && g_keys.focused())
+namespace {
+// ---- window thread: input.cpp's chat sink (ui.h ChatInputSink), set only while history or its diagnostics run ----
+// The window procedure has already folded raw input and key messages into one transition per key.
+
+// Typed text ends a history browse (chat_keys::inserts_text); a transient difference in the widget's buffer never does.
+void on_text(uint32_t ch) {
+    if (chat_keys::inserts_text(ch) && g_history_on.load(std::memory_order_acquire) && g_keys.focused())
         g_manual_text_edit.store(true, std::memory_order_release);
 }
 
-bool chat_input_on_key(uint32_t vk, uint32_t mods, bool down, bool captured) {
+bool on_key(uint32_t vk, uint32_t mods, bool down, bool captured) {
     if (!g_history_on.load(std::memory_order_acquire) && !g_diagnose_on.load(std::memory_order_acquire))
         return false;
-    // These keys modify text without necessarily producing WM_CHAR. Modifier
-    // bits follow KilnUiKey; Ctrl+V/X is paste/cut, Ctrl+A is only selection.
-    if (down && !captured && g_history_on.load(std::memory_order_relaxed) && g_keys.focused() &&
-        (vk == VK_BACK || vk == VK_DELETE ||
-         ((mods & KILN_UI_MOD_CTRL) && (vk == 'V' || vk == 'X'))))
+    // While an IME composes, Up/Down pick its candidates and Backspace edits the composition: none of it is ours.
+    const bool composing = g_ime_composing.load(std::memory_order_acquire);
+    // Keys that change the text without a character (chat_keys::edits_text) end a browse as typing does.
+    if (down && !captured && !composing && chat_keys::edits_text(vk, mods) &&
+        g_history_on.load(std::memory_order_relaxed) && g_keys.focused())
         g_manual_text_edit.store(true, std::memory_order_release);
-    const bool kept = !captured && g_history_on.load(std::memory_order_acquire) && g_keys.key(vk, mods, down);
+    const bool kept = !captured && !composing && g_history_on.load(std::memory_order_acquire) && g_keys.key(vk, mods, down);
     if (down && (vk == VK_UP || vk == VK_DOWN) && g_trace_on.load(std::memory_order_relaxed) &&
         g_key_log_count.fetch_add(1) < 24)
-        logf(KILN_LOG_INFO, "ui: chat history trace: key %s mods=%u focus=%u captured=%u consumed=%u",
-             vk == VK_UP ? "Up" : "Down", mods, g_keys.focused() ? 1u : 0u, captured ? 1u : 0u, kept ? 1u : 0u);
+        logf(KILN_LOG_INFO, "ui: chat history trace: key %s mods=%u focus=%u captured=%u ime=%u consumed=%u",
+             vk == VK_UP ? "Up" : "Down", mods, g_keys.focused() ? 1u : 0u, captured ? 1u : 0u, composing ? 1u : 0u,
+             kept ? 1u : 0u);
     return kept;
 }
 
-void chat_input_window_blur() {
+void on_ime(bool composing) { g_ime_composing.store(composing, std::memory_order_release); }
+
+void on_blur() {
     g_keys.focus(false);
     g_manual_text_edit.store(false, std::memory_order_release);
+    g_ime_composing.store(false, std::memory_order_release);
     g_window_blurred.store(true, std::memory_order_release);
 }
+
+const ChatInputSink kSink{&on_key, &on_text, &on_ime, &on_blur};
+} // namespace
 
 // UI thread, after the game finishes each GameUiFrame.
 void chat_input_frame_end() {
@@ -475,6 +487,7 @@ bool chat_input_probe_install() {
         logf(KILN_LOG_WARN, "ui: chat input hook unavailable: %s", g_input.error());
         return false;
     }
+    if (history || diag) input_set_chat_sink(&kSink);
     if (history) {
         load_history();
         g_trace_on.store(env_enabled("KILN_CHAT_HISTORY_TRACE"), std::memory_order_release);

@@ -81,12 +81,20 @@ void set_error(const char* fmt, ...);
 KilnHandle next_handle();                    // one handle space for every kiln.ui subscription (any thread)
 extern std::atomic<uint32_t> g_hover_panels; // Kiln panels that take the mouse only while it is over them
 
-// ---- chat_input_probe.cpp (issue 44: read-only probe or opt-in Up/Down history) ----
-bool chat_input_probe_install(); // enabled by KILN_CHAT_INPUT_PROBE=1 or KILN_CHAT_HISTORY=1
-bool chat_input_on_key(uint32_t vk, uint32_t mods, bool down, bool captured); // WndProc thread; focus-gated
-void chat_input_text_edited(); // WndProc thread: actual typing/paste, no key consumption
-void chat_input_window_blur(); // WndProc thread; clear pending history keys
-void chat_input_frame_end(); // game's UI thread; recompute chat edit focus
+// ---- chat_input_probe.cpp (GitHub issue 44: Up/Down history in the game's chat field) ----
+bool chat_input_probe_install();  // game_install: hooks the chat field when chat history (or a diagnostic) is on
+void chat_input_frame_end();      // the game's UI thread, after each GameUiFrame: whether the chat field has focus
+
+// The window procedure's one hook point for the game's chat field (input.cpp calls it on the window thread, before
+// Kiln's own key handling). Set by chat_input_probe_install while chat history or its diagnostic runs; null otherwise,
+// and in the input.cpp host harnesses, which do not link chat_input_probe.cpp.
+struct ChatInputSink {
+    bool (*key)(uint32_t vk, uint32_t mods, bool down, bool captured);  // a key transition; true keeps a press from the game
+    void (*text)(uint32_t ch);                                           // WM_CHAR / WM_UNICHAR, while Kiln does not capture
+    void (*ime)(bool composing);                                         // an IME composition started (true) or ended
+    void (*blur)();                                                      // the window lost focus / the game was deactivated
+};
+void input_set_chat_sink(const ChatInputSink* sink);  // input.cpp; the sink must live for the process
 
 // ---- input.cpp ----
 void input_install_iat();       // SetCursorPos / ClipCursor slots of the game exe (plugin main)
