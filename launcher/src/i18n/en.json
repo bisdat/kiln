@@ -2721,7 +2721,13 @@
       "fireHint": "The fire on Play (WebGL). Off: a plain Play button, easier on weak GPUs.",
       "noGpu": "Draw the launcher without the GPU",
       "fireOffSoftware": "Off while the launcher draws without the GPU.",
-      "fireOffEnv": "Off for this start: KILN_LAUNCHER_NO_WEBGL is set."
+      "fireOffEnv": "Off for this start: KILN_LAUNCHER_NO_WEBGL is set.",
+      "desktop": "Kiln Launcher in the app menu",
+      "desktopHint": "With its icon, so the taskbar and dock show Kiln's icon too. Kiln keeps it pointed at this AppImage.",
+      "desktopHintFile": "With its icon, so the taskbar and dock show Kiln's icon too. Kiln keeps it pointed at this AppImage. {file}",
+      "desktopHintForeign": "With its icon, so the taskbar and dock show Kiln's icon too. Kiln keeps it pointed at this AppImage. {file} is not Kiln's: turning this on replaces it.",
+      "desktopOn": "Kiln Launcher is in the app menu",
+      "desktopOff": "Kiln Launcher is out of the app menu"
     },
     "render": {
       "intro": "For a window that stays black. Applies at the next start.",

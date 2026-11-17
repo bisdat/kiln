@@ -10,7 +10,7 @@ translation does not have yet shows in English, so a translation can be partial 
 | What | English (the source) | Your language |
 |---|---|---|
 | Launcher | `launcher/src/i18n/en.json` | `launcher/src/i18n/<language>.json`, e.g. `zh-CN.json` |
-| In game (being built) | `runtime/locales/en.json` | `runtime/locales/<language>.json`; in a game folder `<game>/kiln/locales/<language>.json` |
+| In game ([translating-game.md](translating-game.md)) | `runtime/locales/en.json` | `runtime/locales/<language>.json`; in a game folder `<game>/kiln/locales/<language>.json` |
 
 Name the file by its language tag: `zh-CN.json` (Simplified Chinese), `zh-TW.json`, `de.json`, `pt-BR.json`, `es-419.json`.
 A main language (`de.json`) serves all its regions; a regional file (`pt-BR.json`) wins over it for that region.
@@ -86,8 +86,10 @@ single short word that is easy to type with your language's keyboard or input me
 A file there wins over the launcher's built-in file of the same language, so you can test changes to a translation
 the launcher already ships. A broken file is named under the reload button with what is wrong.
 
-**In game:** put the file in `<game>/kiln/locales/` and choose the language in Settings, Language, "Kiln in game"
-(kiln.json `ui.language`; "Same as the game" follows the game's own language setting).
+**In game:** put the file in `<game>/kiln/locales/` and choose the language in game (Mods, Kiln settings, Language) or
+in the launcher's Settings, Language, "Kiln in game" (both set kiln.json `ui.language`; "Same as the game" follows the
+game's own language). [translating-game.md](translating-game.md) has the details, the CJK fonts and a preview without
+the game.
 
 **Check the file** before you send it (with the repository checked out, from `launcher/`):
 

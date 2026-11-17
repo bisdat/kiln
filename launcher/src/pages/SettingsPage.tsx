@@ -116,7 +116,7 @@ function AppearanceCard() {
   const desktop = info.data?.desktop;
   const setDesktop = (on: boolean) => api.appDesktopSet(on).then((next) => {
     qc.setQueryData(qk.appInfo, (cur: api.AppInfo | undefined) => (cur ? { ...cur, desktop: next } : cur));
-    toast.ok(on ? "Kiln Launcher is in the app menu" : "Kiln Launcher is out of the app menu");
+    toast.ok(on ? t("settings.appearance.desktopOn") : t("settings.appearance.desktopOff"));
   }).catch((e) => toast.error(e));
   const setRender = (on: boolean) => api.appRenderSet(on).then((next) => {
     qc.setQueryData(qk.appInfo, (cur: api.AppInfo | undefined) => (cur ? { ...cur, render: next } : cur));
@@ -127,16 +127,15 @@ function AppearanceCard() {
       <Toggle checked={!forced && s.data.animatedFire !== false} disabled={forced} onChange={(on) => void saveSettings(qc, () => ({ animatedFire: on }))}
         label={t("settings.appearance.fire")} hint={forced ? fireOff(info.data) : t("settings.appearance.fireHint")} />
       {render && <Toggle checked={render.marker} onChange={(on) => void setRender(on)} label={t("settings.appearance.noGpu")} hint={renderHint(render)} />}
-      {desktop && <Toggle checked={desktop.on && desktop.installed} onChange={(on) => void setDesktop(on)} label="Kiln Launcher in the app menu" hint={desktopHint(desktop)} />}
+      {desktop && <Toggle checked={desktop.on && desktop.installed} onChange={(on) => void setDesktop(on)} label={t("settings.appearance.desktop")} hint={desktopHint(desktop)} />}
     </Card>
   );
 }
 
 /** The AppImage's app menu entry: what it does, where it is, what is in the way. */
 function desktopHint(d: DesktopInfo): string {
-  const what = "With its icon, so the taskbar and dock show Kiln's icon too. Kiln keeps it pointed at this AppImage.";
-  if (d.foreign) return `${what} ${d.file} is not Kiln's: turning this on replaces it.`;
-  return d.on && d.installed ? `${what} ${d.file}` : what;
+  if (d.foreign) return t("settings.appearance.desktopHintForeign", { file: d.file });
+  return d.on && d.installed ? t("settings.appearance.desktopHintFile", { file: d.file }) : t("settings.appearance.desktopHint");
 }
 
 /** Why the fire is off for this start (app_info.noWebgl). */
