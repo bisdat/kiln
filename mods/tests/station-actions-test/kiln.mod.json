@@ -1,0 +1,9 @@
+{
+  "id": "station-actions-test",
+  "name": "kiln.stations lab test",
+  "version": "0.1.0",
+  "apiVersion": "0.2",
+  "entryAssembly": "StationActionsTest.dll",
+  "side": "server",
+  "description": "PASS/FAIL lines: kiln.stations on a dedicated server with no player: the bases and their Magic chests, the game's fill from chests (up to, add, dry run, exact, reserves), stop now and after the current craft, resume, select with the unlock check, collect, one crafted event per cycle, water from a well. Places its own stations and chests in the world's base and removes them."
+}
