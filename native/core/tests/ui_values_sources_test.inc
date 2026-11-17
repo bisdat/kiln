@@ -51,6 +51,12 @@ struct SourcesFixture {
         fake::constants["ui/view.stride"] = 0x48;
         fake::constants["ui/gemforge.selected"] = 0x10;
         env().gemforge_abi = +[] { return true; };
+        // the client's catalog: 110..113 are gems (WeaponGem 15), 200 a sword (Weapons 2), anything else unknown
+        env().item_category = +[](uint32_t item, uint8_t* cat) {
+            if (item >= 110 && item <= 113) return *cat = 15, 1;
+            if (item == 200) return *cat = 2, 1;
+            return 0;
+        };
         fake::client.session = 3;
         fake::client.local_player = 77;
         fake::ticks = 10000;
@@ -158,6 +164,23 @@ void sources_tests() {
         KilnUiGemForgePayer bp = payer(0, 0x2b0cf1d5, 9);
         KilnUiGemForgeSource ok = SourcesFixture::row(0x9001, 1, 110, 1201, 3, 1);
         CHECK(T()->gemforge_sources(f.owner, &ok, 1, &bp, 1) == KILN_ERR_INVALID_ARGUMENT, "sources: a payer row of group 0 is refused");
+    }
+    {
+        // review 2026-11-17: a row whose item the client's catalog does not know as a gem is dropped (never drawn)
+        SourcesFixture f;
+        CHECK(f.set({SourcesFixture::row(0x9001, 1, 112, 1201, 3), SourcesFixture::row(0x9001, 2, 999, 1202, 3),
+                     SourcesFixture::row(0x9001, 3, 200, 1203, 3)}) == KILN_OK,
+              "sources: rows with an unknown item and a non-gem item are taken as a call");
+        KilnUiGemForgeSourcesState st{};
+        st.size = sizeof st;
+        CHECK(T()->gemforge_sources_state(&st) == KILN_OK && st.rows == 1, "sources: only the row of a known gem is kept");
+        f.draw();
+        CHECK(src_test::seen.count == 3, "sources: the grid gets the game's two rows and the one known gem");
+        env().item_category = +[](uint32_t, uint8_t*) { return -1; };  // no catalog on this client
+        CHECK(f.set({SourcesFixture::row(0x9001, 1, 112, 1201, 3)}) == KILN_OK, "sources: without a catalog the call is taken");
+        st = {};
+        st.size = sizeof st;
+        CHECK(T()->gemforge_sources_state(&st) == KILN_OK && st.rows == 0, "sources: without a catalog no row is kept (fail closed)");
     }
     {
         SourcesFixture f(false);

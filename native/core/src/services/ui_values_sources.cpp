@@ -56,12 +56,19 @@ SrcBook& src_book() {
 std::atomic<bool> g_src_active{false};   // installed and not off
 std::atomic<uint32_t> g_src_live{0};     // rows set (the hooks' first, lock-free test)
 std::atomic<uint64_t> g_injected{0}, g_resolved{0}, g_priced{0};
+std::atomic<uint32_t> g_src_unknown{0};  // rows dropped: an item the client's catalog does not know as a gem
 SrcGridFn g_src_grid_next = nullptr;
 thread_local std::vector<uint8_t> t_src_buf;
 
 bool src_row_valid(const KilnUiGemForgeSource& r) {
     return r.size >= sizeof(KilnUiGemForgeSource) && r.page != 0 && r.slot <= 7 && r.item != 0 && r.pide != 0 &&
            r.reserved0 == 0 && r.reserved1 == 0 && r.reserved2 == 0;
+}
+// The client's own catalog knows the row's item as a loose gem (WeaponGem, 15): the only rows the GEMS grid lists. An
+// item the catalog does not know (or no catalog) is never drawn.
+bool src_row_known(const KilnUiGemForgeSource& r) {
+    uint8_t cat = 0;
+    return env().item_category && env().item_category(r.item, &cat) == 1 && cat == 15;
 }
 bool src_payer_valid(const KilnUiGemForgePayer& p) {
     return p.size >= sizeof(KilnUiGemForgePayer) && p.group != 0 && p.item != 0 && !p.reserved[0] && !p.reserved[1];
@@ -294,7 +301,12 @@ KilnResult sources_set(KilnOwner owner, const KilnUiGemForgeSource* rows, uint32
         s.player = now.local_player;
     }
     drop();
+    uint32_t unknown = 0;
     for (uint32_t i = 0; i < count; ++i) {
+        if (!src_row_known(rows[i])) {
+            ++unknown;
+            continue;
+        }
         SrcRow r;
         r.owner = owner;
         r.s = rows[i];
@@ -307,6 +319,8 @@ KilnResult sources_set(KilnOwner owner, const KilnUiGemForgeSource* rows, uint32
         s.payers.push_back({owner, p});
         s.wanted.erase(std::remove(s.wanted.begin(), s.wanted.end(), p.item), s.wanted.end());
     }
+    if (unknown && g_src_unknown.fetch_add(unknown) == 0)
+        logf(KILN_LOG_WARN, "ui.values: %u offered chest gem row(s) dropped: the item is not a gem in this client's catalog", unknown);
     src_prune_locked(s);
     return KILN_OK;
 }
@@ -351,6 +365,7 @@ void sources_reset_for_tests() {
     g_src_active = false;
     g_src_live = 0;
     g_injected = g_resolved = g_priced = 0;
+    g_src_unknown = 0;
     g_src_grid_next = nullptr;
 }
 
