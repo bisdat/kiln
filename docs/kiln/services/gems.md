@@ -18,7 +18,7 @@ details; this page says what each part is and how they fit together. Research an
 | Layer | Path |
 |---|---|
 | Managed | `managed/services/Kiln.Abilities/Gems/` → `kiln/host/Kiln.Abilities.dll` (static class `Kiln.Gems`, its types and events); Kiln.Items (`Gear.GemSlot` on other gear); Kiln.Ui (the forge lists on clients) |
-| Native | kiln-items.dll: `kiln.gemcraft` (the forge actions, `kiln_gemcraft.h`) and `kiln.items` v7 (sockets on other gear, the re-creating give, socket rolls); kiln.ui.values `gemforge_sockets` (client); kiln.content (an item's program served through kiln.assets; placeholders) |
+| Native | kiln-items.dll: `kiln.gemcraft` (the forge actions, payers, offered chest gems; `kiln_gemcraft.h`) and `kiln.items` v7 (sockets on other gear, the re-creating give, socket rolls); kiln.ui.values `gemforge_sockets` (client); kiln.content (an item's program served through kiln.assets; placeholders) |
 | Reads | kiln.items (item catalog, item instances), kiln.gamedata (a gem's `equipment.program` and `impactValues`), kiln.world + kiln.types (`Equipment.equipmentImpacts`), kiln.abilities (native events, `kiln.Signal`) |
 | Signatures | `sigdb/symbols/{server,client}.d/gems-forge.json`, `gems-sockets.json` |
 | Rows | `gems.read`, `gems.triggers`, `gems.craft`, `gems.sockets` ([caps.md](caps.md)); see "Capability rows" below |
@@ -279,7 +279,10 @@ checks and its costs, paid by the player in the forge's material), and the event
 
 Each returns a `Task<GemCraftResult>` (`Ok`, `Status`, `Reason`, `LevelBefore` / `LevelAfter`, `Paid`, `Received`); a
 refusal is a result, not an exception. `GemCraftOptions { Holder, Cost }`: a chest the player may use, `GemCost.Free` or
-another price. A carrier is any item with a socket: a weapon, or a ring, armour piece or shield with "Sockets on other
+another price; since 0.2.0-dev.29.15 also `GemHolder` / `CarrierHolder` (the gem and the carrier in two places, one
+transaction), `PayFrom` (a chest or the base's Magic chests pay) and `ReturnTo` (where an unsocketed gem and Recycle's
+essence go), and `Gems.OfferChestGems` with `GemForgeOpenedEvent`: a container's gems in the forge's own GEMS list on Kiln
+clients. A carrier is any item with a socket: a weapon, or a ring, armour piece or shield with "Sockets on other
 gear" (lab: a ring by code, socketed and upgraded at a spawned forge). `GemCraftingEvent` (cancelable) comes before a
 player's own action, `GemCraftedEvent` after any action that happened ("Which event for what" above).
 
@@ -349,6 +352,9 @@ continues on the tick thread (the mod's `SynchronizationContext`).
 | `gems.triggers` | managed, session (with `gems.read`) | `GemTriggeredEvent` and `Gems.Register`'s handlers: needs `gems.read`, kiln.abilities and its native events (`abilities.natives`). `Gems.Register` also needs kiln.content's new items and, for a trigger, kiln.assets: it checks those itself and throws `KilnUnavailableException` naming `gems.triggers` (the row can read available without them) |
 | `gems.craft` | sigdb feature (`server.d/gems-forge.json`; a hosting client composes it) | the forge actions and `GemCraftingEvent` / `GemCraftedEvent`, and `Gems.ReturnSocketedGems`' forgeless return. kiln-items.dll lowers it when the gem handler's layout does not check out (`symbol-missing`), without a usable kiln.world (`service-missing`), or after a fault (`faulted`, until restart); Kiln.Abilities lowers it where kiln.gemcraft is not here. Off on a client that joined another world |
 | `gems.sockets` | sigdb feature, one per side (`server.d/gems-sockets.json`: the createPide hook; `client.d/gems-sockets.json`: the forge lists) | server: `Gems.AllowSockets`' server part, `Gear.GemSlot` on other gear, `AddSocket`, rolls, `gemSlotOverride` on any gear; client: the widened forge lists. Kiln.Abilities lowers it when neither kiln.items v7 nor kiln.ui.values' `gemforge_sockets` is here |
+| `gems.payers` | sigdb feature (`server.d/gems-forge.json`, since 0.2.0-dev.29.15) | `PayFrom` and `ReturnTo` other than the player ([gems-forge.md](gems-forge.md#who-pays-and-where-things-go-since-020-dev2915)) |
+| `gems.sources` | managed, session (since 0.2.0-dev.29.15) | offered chest gems at the forge: `Gems.OfferChestGems`, `GemForgeOpenedEvent` ([gems-forge.md](gems-forge.md#chest-gems-in-the-forges-own-gems-list-since-020-dev2915)) |
+| `ui.gemforge.sources` | sigdb feature (client, since 0.2.0-dev.29.15) | the offered chest gems in the GEMS grid ([../ui-gemforge.md](../ui-gemforge.md#chest-gems-in-the-gems-grid)) |
 
 ## What is checked
 Each part's page lists its own tests and labs ([gems-new.md](gems-new.md#tests), [gems-forge.md](gems-forge.md),
