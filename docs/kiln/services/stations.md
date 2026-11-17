@@ -45,6 +45,7 @@ BaseInfo? home = Bases.Of(player);                      // the base the entity s
 IReadOnlyList<EntityId> chests = Bases.Storage(home!.Id);
 IReadOnlyList<EntityId> deposit = Bases.Storage(home.Id, deposit: true); // those that take deposits
 IReadOnlyDictionary<ItemId, long> stock = Bases.Stock(home.Id);
+var made = Bases.Stock(home.Id, withStations: true);    // + finished items still in the base's stations (0.2.0-dev.29.15)
 long logs = Bases.Stock(home.Id, Items.Lookup("Material_T1_Wood_Logs")!.Id);
 EntityId? room = Bases.FindRoomFor(home.Id, charcoalId); // a chest that takes deposits and the item (same item first)
 ```

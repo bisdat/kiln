@@ -367,6 +367,33 @@ public sealed unsafe class StationsTests : IDisposable
     }
 
     [Fact]
+    public void StockWithStationsCountsFinishedItemsStillInTheBasesStations()
+    {
+        using var k = Kiln();
+        var charcoal = k.Items.AddItem("Material_T1_Charcoal", 50);
+        var logs = k.Items.AddItem("Material_T1_Wood_Logs", 50);
+        var r = _fake.Recipes[0x1234];
+        r.Outputs[0] = charcoal.Value;                                    // the kiln's recipe makes charcoal from logs (0x10)...
+        _fake.Recipes[0x1234] = r;
+        var kilnEntity = k.Entities.Create(new WorldPosition(1, 2, 3));     // the fake world's entity stands for the station
+        var row = _fake.StationRows[3300];
+        _fake.StationRows.Remove(3300);
+        row.Entity = kilnEntity.Value;
+        _fake.StationRows[kilnEntity.Value] = row;
+        var station = k.Items.AddContainer(kilnEntity);
+        station.Put(charcoal, 7);                                         // finished, not collected
+        station.Put(logs, 4);                                             // a leftover: not a product
+        _fake.Stock = [new StationsNative.Stack { Item = charcoal.Value, Count = 40 }];
+        var id = new BaseId(AltarGuid);
+        Assert.Equal(40, k.Run(() => Bases.Stock(id))[charcoal]);         // the chests only, as before
+        Assert.Equal(40, k.Run(() => Bases.Stock(id, withStations: false))[charcoal]);
+        var all = k.Run(() => Bases.Stock(id, withStations: true));
+        Assert.Equal(47, all[charcoal]);
+        Assert.False(all.ContainsKey(logs));
+        Assert.Empty(k.Run(() => Bases.Stock(new BaseId(Guid.NewGuid()), withStations: true)));
+    }
+
+    [Fact]
     public void StationsAndRecipesHaveNamesForPlayers()
     {
         // the game's data as Kiln.Items reads it: the kiln's workshop placed by Prop_Production_T1_Charcoal_Kiln, a recipe with no
