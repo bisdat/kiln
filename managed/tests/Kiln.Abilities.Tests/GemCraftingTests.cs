@@ -75,7 +75,7 @@ public sealed unsafe class GemCraftingTests : IDisposable
             for (var i = 0; i < sources.Length; i++)
             {
                 sources[i].Token = NextToken++;
-                sources[i].ExpiresStep = 100 + sources[i].LifetimeSteps;
+                sources[i].ExpiresMs = (ulong)GemSources.NowMs() + sources[i].LifetimeMs;
                 Live.Add(sources[i]);
             }
             Offers.Add((owner, sources.ToArray()));
@@ -102,6 +102,17 @@ public sealed unsafe class GemCraftingTests : IDisposable
             for (var i = 0; i < PayerList.Length && i < into.Length; i++) into[i] = PayerList[i];
             count = (uint)PayerList.Length;
             return 0;
+        }
+
+        // forge -> its upgrade material (absent: not read yet, NotFound; 0: no forge, InvalidArgument)
+        public readonly Dictionary<uint, uint> ForgeMaterials = [];
+        public readonly List<uint> ForgeAsks = [];
+
+        public int ForgeMaterial(uint forge, out uint item)
+        {
+            ForgeAsks.Add(forge);
+            if (!ForgeMaterials.TryGetValue(forge, out item)) return GemcraftNative.NotFound;
+            return item != 0 ? 0 : GemcraftNative.InvalidArgument;
         }
 
         private static int Drain(Queue<GemcraftNative.Craft> q, Span<GemcraftNative.Craft> into, out uint count)
@@ -147,7 +158,7 @@ public sealed unsafe class GemCraftingTests : IDisposable
         Assert.Equal(80, sizeof(GemcraftNative.Request));  // 56 before 0.2.0-dev.29.15 (KILN_GEM_REQUEST_V1_SIZE)
         Assert.Equal(232, sizeof(GemcraftNative.Craft));
         Assert.Equal(188, sizeof(GemcraftNative.Status));
-        Assert.Equal(8 + 13 * 8, sizeof(GemcraftNative.Table));
+        Assert.Equal(8 + 14 * 8, sizeof(GemcraftNative.Table));  // forge_material appended (review 2026-11-17)
         Assert.Equal(8 + 8 * 8, (int)GemcraftNative.V1TableSize);
         Assert.Equal(56, (int)System.Runtime.InteropServices.Marshal.OffsetOf<GemcraftNative.Request>("GemHolder"));
         Assert.Equal(72, (int)System.Runtime.InteropServices.Marshal.OffsetOf<GemcraftNative.Request>("ReturnTo"));

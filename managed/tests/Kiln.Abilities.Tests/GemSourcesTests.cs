@@ -122,16 +122,17 @@ public sealed class GemSourcesTests : IDisposable
             Slot(SlotId.Of(new EntityId(5002), 1), Bleeding, 2561, level: 5),
         };
         var o = new GemSourceOptions { PayFrom = GemPayer.From(Chest), ReturnTo = Chest };
-        var e = GemSources.Entries(Player, Chest, slots, o, GemSources.LifetimeSteps(o.Lifetime), id => id == Bleeding);
+        var e = GemSources.Entries(Player, Chest, slots, o, GemSources.LifetimeMs(o.Lifetime), id => id == Bleeding);
         Assert.Equal(2, e.Count);
         Assert.Equal((2560u, 3u, SlotId.Of(new EntityId(5001), 0).Value), (e[0].Gem, e[0].Level, e[0].Slot));
         Assert.Equal((2561u, 5u), (e[1].Gem, e[1].Level));
-        Assert.All(e, x => Assert.Equal((Player.Value, Chest.Value, 1u, Chest.Value, Chest.Value, 750u),
-            (x.Player, x.Holder, x.PayFrom, x.PayHolder, x.ReturnTo, x.LifetimeSteps)));
-        Assert.Equal(1, GemSources.LifetimeSteps(TimeSpan.FromSeconds(0.04)));
-        Assert.Equal(3000, GemSources.LifetimeSteps(TimeSpan.FromSeconds(120)));
-        Assert.Throws<ArgumentException>(() => GemSources.LifetimeSteps(TimeSpan.Zero));
-        Assert.Throws<ArgumentException>(() => GemSources.LifetimeSteps(TimeSpan.FromSeconds(121)));
+        // review 2026-11-17: lifetimes are real time (a dedicated server's step rate is not fixed)
+        Assert.All(e, x => Assert.Equal((Player.Value, Chest.Value, 1u, Chest.Value, Chest.Value, 30_000u),
+            (x.Player, x.Holder, x.PayFrom, x.PayHolder, x.ReturnTo, x.LifetimeMs)));
+        Assert.Equal(1, GemSources.LifetimeMs(TimeSpan.FromMilliseconds(1)));
+        Assert.Equal(120_000, GemSources.LifetimeMs(TimeSpan.FromSeconds(120)));
+        Assert.Throws<ArgumentException>(() => GemSources.LifetimeMs(TimeSpan.Zero));
+        Assert.Throws<ArgumentException>(() => GemSources.LifetimeMs(TimeSpan.FromSeconds(121)));
     }
 
     private static InventoryContents Contents(bool initialized, byte flags, params InventorySlot[] slots) =>
@@ -172,10 +173,10 @@ public sealed class GemSourcesTests : IDisposable
     [Fact]
     public void TheClientGetsRowsWithPayerGroupsCountsWithoutThePlayerAndLifetimes()
     {
-        GemcraftNative.Source Src(ulong token, uint slotPage, byte index, uint payFrom, uint payHolder, uint lifetime = 750) => new()
+        GemcraftNative.Source Src(ulong token, uint slotPage, byte index, uint payFrom, uint payHolder, ulong expires = 50_000) => new()
         {
             Player = 1, Holder = 5000, Slot = ((ulong)index << 32) | slotPage, Gem = 2560 + (uint)token, Item = Bleeding.Value, Level = 4,
-            PayFrom = payFrom, PayHolder = payHolder, LifetimeSteps = lifetime, Rarity = 2, Token = token,
+            PayFrom = payFrom, PayHolder = payHolder, LifetimeMs = 30_000, Rarity = 2, Token = token, ExpiresMs = expires,
         };
         var live = new[]
         {
@@ -183,19 +184,25 @@ public sealed class GemSourcesTests : IDisposable
             Src(2, 5001, 4, (uint)GemPayerKind.Container, 5000),
             Src(3, 5002, 0, (uint)GemPayerKind.Container, 5000),
             Src(4, 5002, 1, (uint)GemPayerKind.PlayerThenBaseStorage, 0),
-            Src(5, 5002, 2, 0, 0, lifetime: 10),
+            Src(5, 5002, 2, 0, 0, expires: 19_999),
         };
-        var counts = new Dictionary<(uint, uint), uint> { [(5000, Essence.Value)] = 40, [(6000, Essence.Value)] = 7, [(1, Essence.Value)] = 99 };
-        var m = GemSources.Rows(live, [Essence.Value], 1, now: 120, offeredAt: t => t == 5 ? 100ul : 115ul,
+        var counts = new Dictionary<(uint, uint), uint>
+        {
+            [(5000, Essence.Value)] = 40, [(6000, Essence.Value)] = 7, [(1, Essence.Value)] = 99, [(5000, 7u)] = 1000,
+        };
+        var m = GemSources.Rows(live, Essence.Value, 1, nowMs: 20_000,
             payersOf: s => s.PayFrom == (uint)GemPayerKind.Container ? [5000u] : [1u, 6000u],
             countIn: (e, item) => counts.TryGetValue((e, item), out var n) ? n : 0);
-        Assert.Equal(4, m.Rows.Length);  // the fifth lapsed (offered at 100, 10 steps)
+        Assert.Equal(4, m.Rows.Length);  // the fifth lapsed (real time)
         Assert.Equal((5001u, (byte)3, (byte)0), (m.Rows[0].Page, m.Rows[0].Slot, m.Rows[0].Group));
         Assert.Equal(((byte)1, (byte)1, (byte)2), (m.Rows[1].Group, m.Rows[2].Group, m.Rows[3].Group));  // one group per payer
-        Assert.Equal(745u * 40, m.Rows[0].LifetimeMs);  // 750 - (120 - 115) steps, 40 ms each
+        Assert.Equal(30_000u, m.Rows[0].LifetimeMs);  // expires at 50 000 ms, now 20 000
+        // review 2026-11-17: the counts are of the forge's own upgrade material only (what containers pay in)
         Assert.Equal(2, m.Payers.Length);
         Assert.Equal(new GemForgeOfferPayer(1, false, Essence.Value, 40), m.Payers[0]);
         Assert.Equal(new GemForgeOfferPayer(2, true, Essence.Value, 7), m.Payers[1]);  // the player's own 99 are the client's own count
+        // the forge's material not known (no forge near, not read yet): rows, no counts
+        Assert.Empty(GemSources.Rows(live, 0, 1, 20_000, _ => [5000u], (_, _) => 40).Payers);
     }
 
     [Fact]
@@ -246,6 +253,11 @@ public sealed class GemSourcesTests : IDisposable
         kiln.Capabilities.Override(Gems.CraftCapability, true);
         var sent = new List<(EntityId, object)>();
         GemSources.SendHook = (p, m) => sent.Add((p, m));
+        long clock = 1_000_000;
+        GemSources.Clock = () => clock;
+        GemSources.ForgeNearHook = _ => Forge;
+        Fake.ForgeMaterials[Forge.Value] = Essence.Value;
+        Fake.PayerList = [Chest.Value];
         var seen = new List<GemForgeOpenedEvent>();
         var gem = Slot(SlotId.Of(new EntityId(5001), 0), Bleeding, 2560, level: 3);
         kiln.Run(() => Events.On<GemForgeOpenedEvent>(e =>
@@ -257,25 +269,112 @@ public sealed class GemSourcesTests : IDisposable
         kiln.Run(GemSources.PumpServer);
         var e1 = Assert.Single(seen);
         Assert.False(e1.Refresh);
+        Assert.Equal(Forge, e1.Forge);
         var (to, msg) = Assert.Single(sent);
         Assert.Equal(Player, to);
         var rows = Assert.IsType<GemForgeOffers>(msg);
         Assert.Equal(2560u, Assert.Single(rows.Rows).Pide);
-        // within a second a client's hellos post nothing more (a hostile client cannot make the mods offer every frame);
-        // a new material to ask about sends the counts again
+        // within a second a client's hellos post nothing more (a hostile client cannot make the mods offer every frame)
         sent.Clear();
+        clock += 200;
         kiln.Run(() => GemSources.Hello(Player, new GemForgeHello(true, [])));
         Assert.Single(seen);
-        kiln.Run(() => GemSources.Hello(Player, new GemForgeHello(true, [7u])));
+        // review 2026-11-17: a close and an open within the second post no event either (the limit is the player's,
+        // kept across a close); the pump posts the opening once the second is over
+        kiln.Run(() => GemSources.Hello(Player, new GemForgeHello(false, [])));
+        kiln.Run(() => GemSources.Hello(Player, new GemForgeHello(true, [])));
         kiln.Run(GemSources.PumpServer);
         Assert.Single(seen);
-        Assert.IsType<GemForgeOffers>(Assert.Single(sent).Item2);
+        clock += 900;
+        kiln.Run(GemSources.PumpServer);
+        Assert.Equal(2, seen.Count);
+        Assert.False(seen[1].Refresh);  // the screen's opening, posted late
+        // review 2026-11-17: the client's materials are ignored: the counts are of the forge's upgrade material only
+        sent.Clear();
+        clock += 1_100;
+        kiln.Run(() => GemSources.Hello(Player, new GemForgeHello(true, [7u, 0x2b0cf1d6])));
+        kiln.Run(GemSources.PumpServer);
+        var counted = Assert.IsType<GemForgeOffers>(Assert.Single(sent).Item2);
+        Assert.All(counted.Payers, x => Assert.Equal(Essence.Value, x.Item));
         // the screen closed: every owner's offers to the player go (owner 0), nothing more is sent
         kiln.Run(() => GemSources.Hello(Player, new GemForgeHello(false, [])));
         Assert.Contains((0ul, Player.Value, 0u), Fake.Withdrawals);
         sent.Clear();
         kiln.Run(GemSources.PumpServer);
         Assert.Empty(sent);
+    }
+
+    [Fact]
+    public void TheForgesMaterialIsAskedAgainUntilTheProgramReadIt()
+    {
+        using var kiln = new KilnHarness();
+        kiln.Capabilities.Override(Gems.CraftCapability, true);
+        var sent = new List<(EntityId, object)>();
+        GemSources.SendHook = (p, m) => sent.Add((p, m));
+        GemSources.ForgeNearHook = _ => Forge;
+        Fake.PayerList = [Chest.Value];
+        var gem = Slot(SlotId.Of(new EntityId(5001), 0), Bleeding, 2560, level: 3);
+        kiln.Run(() => Events.On<GemForgeOpenedEvent>(e =>
+            GemSources.Offer(e.Player, Chest, new GemSourceOptions { PayFrom = GemPayer.From(Chest) }, Contents(true, 0, gem), id => id == Bleeding)));
+        kiln.Capabilities.Override(Gems.PayersCapability, true);
+        kiln.Run(() => GemSources.Hello(Player, new GemForgeHello(true, [])));
+        kiln.Run(GemSources.PumpServer);
+        Assert.Empty(Assert.IsType<GemForgeOffers>(Assert.Single(sent).Item2).Payers);  // not read yet: rows without counts
+        Fake.ForgeMaterials[Forge.Value] = Essence.Value;  // the gem program read it
+        sent.Clear();
+        kiln.Run(GemSources.PumpServer);
+        var p = Assert.Single(Assert.IsType<GemForgeOffers>(Assert.Single(sent).Item2).Payers);
+        Assert.Equal((Essence.Value, (byte)1), (p.Item, p.Group));
+    }
+
+    [Fact]
+    public void APlayerWhoLeftLosesTheSessionAndEveryOffer()
+    {
+        // review 2026-11-17: the entity id is the player slot + 1; the next player in the slot never inherits anything
+        using var kiln = new KilnHarness();
+        kiln.Capabilities.Override(Gems.CraftCapability, true);
+        var sent = new List<(EntityId, object)>();
+        GemSources.SendHook = (p, m) => sent.Add((p, m));
+        var gem = Slot(SlotId.Of(new EntityId(5001), 0), Bleeding, 2560, level: 3);
+        kiln.Run(() => Events.On<GemForgeOpenedEvent>(e =>
+            GemSources.Offer(e.Player, Chest, new GemSourceOptions(), Contents(true, 0, gem), id => id == Bleeding)));
+        kiln.Run(() => GemSources.Hello(Player, new GemForgeHello(true, [])));
+        kiln.Run(GemSources.PumpServer);
+        Assert.Single(Fake.Live);
+        kiln.Run(() => GemSources.PlayerGone(Player));
+        Assert.Contains((0ul, Player.Value, 0u), Fake.Withdrawals);
+        Assert.Empty(Fake.Live);
+        sent.Clear();
+        kiln.Run(GemSources.PumpServer);
+        Assert.Empty(sent);  // no session: nothing is sent to whoever is in the slot now
+        // the next player's first hello opens a new session and posts at once (the old player's limit went with them)
+        var seen = 0;
+        kiln.Run(() => Events.On<GemForgeOpenedEvent>(_ => seen++));
+        kiln.Run(() => GemSources.Hello(Player, new GemForgeHello(true, [])));
+        Assert.Equal(1, seen);
+    }
+
+    [Fact]
+    public void TheClientWatchesUiFramesOnlyWhileTheForgeScreenIsOpen()
+    {
+        // review 2026-11-17: no per-frame work from startup; the frame watch runs only while the forge screen is open
+        var switches = new List<bool>();
+        GemSources.TickSwitchHook = on => switches.Add(on);
+        GemSources.ServerSideHook = () => true;
+        var forge = new GameScreen(GameUiState.Play, HudScreen.ShroudForge, ScreenKind.Other, 0, null, 0, 1);
+        var play = new GameScreen(GameUiState.Play, HudScreen.Invalid, ScreenKind.InGame, 0, null, 0, 2);
+        GemSources.ClientChanged(GameScreen.None, play);
+        Assert.Empty(switches);
+        GemSources.ClientChanged(play, forge);
+        Assert.Equal([true], switches);
+        GemSources.ClientChanged(forge, forge with { Frame = 3 });
+        Assert.Equal([true], switches);
+        GemSources.ClientChanged(forge, play);
+        Assert.Equal([true, false], switches);
+        // a server without Kiln: the forge screen starts nothing
+        GemSources.ServerSideHook = () => false;
+        GemSources.ClientChanged(play, forge);
+        Assert.Equal([true, false], switches);
     }
 
     [Fact]
