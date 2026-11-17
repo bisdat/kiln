@@ -153,10 +153,35 @@ bool symbol(const char* name, uintptr_t* out) {
     *out = 0;
     return g_api->symbol(KilnStr{name, std::strlen(name)}, out) == KILN_OK && *out;
 }
-bool env_enabled(const char* name) {
+// An environment switch: 1 or 0, else -1 (unset or anything else).
+int env_switch(const char* name) {
     char env[8]{};
     const DWORD n = GetEnvironmentVariableA(name, env, sizeof env);
-    return n > 0 && n < sizeof env && env[0] == '1' && env[1] == '\0';
+    if (n != 1) return -1;
+    return env[0] == '1' ? 1 : env[0] == '0' ? 0 : -1;
+}
+bool env_enabled(const char* name) { return env_switch(name) == 1; }
+
+// The player's switch: kiln.json "ui": {"chatHistory": true} (the launcher's Settings, "Kiln"), read once at start.
+// Off when the file, the section or the key is missing or unreadable.
+bool kiln_json_chat_history() {
+    char buffer[4096]{};
+    size_t length = 0;
+    if (g_api->path(KILN_PATH_KILN, buffer, sizeof buffer, &length) != KILN_OK || !length || length >= sizeof buffer)
+        return false;
+    try {
+        const std::u8string utf8(reinterpret_cast<const char8_t*>(buffer), length);
+        std::ifstream in(std::filesystem::path(utf8) / "kiln.json", std::ios::binary);
+        if (!in) return false;
+        const auto doc = nlohmann::json::parse(in, nullptr, false, true);  // JSONC, as the core reads it
+        if (!doc.is_object()) return false;
+        const auto ui = doc.find("ui");
+        if (ui == doc.end() || !ui->is_object()) return false;
+        const auto on = ui->find("chatHistory");
+        return on != ui->end() && on->is_boolean() && on->get<bool>();
+    } catch (...) {
+        return false;
+    }
 }
 // <game>/kiln/data/kiln.ui/chat-history.json, beside imgui.ini (ui.cpp): kiln.ui's own data, per game folder.
 std::filesystem::path history_path() {
@@ -468,17 +493,29 @@ void chat_input_exit() {
     if (chat_store::Saver* saver = g_saver.load(std::memory_order_acquire)) saver->stop();
 }
 
+// Chat history is off unless the player switches it on (kiln.json ui.chatHistory). The environment is for
+// diagnostics: KILN_CHAT_HISTORY=1/0 overrides the switch, KILN_CHAT_HISTORY_TRACE=1 adds counts to kiln.log (never
+// text), KILN_CHAT_HISTORY_DIAG=1 watches keys and submits without taking a key, KILN_CHAT_INPUT_PROBE=1 only confirms
+// the two call sites. Nothing is hooked while all of them are off.
 bool chat_input_probe_install() {
     const bool diag = env_enabled("KILN_CHAT_HISTORY_DIAG");
-    const bool history = env_enabled("KILN_CHAT_HISTORY") && !diag; // diagnostics take precedence: never swallow keys
+    const int forced = env_switch("KILN_CHAT_HISTORY");
+    const bool switched = forced < 0 && kiln_json_chat_history();
+    const char* why = forced >= 0 ? "KILN_CHAT_HISTORY" : "kiln.json ui.chatHistory";
+    const bool history = (forced == 1 || switched) && !diag;  // diagnostics take precedence: never swallow keys
     const bool probe = env_enabled("KILN_CHAT_INPUT_PROBE");
-    if (!history && !diag && !probe) return false;
+    if (!history && !diag && !probe) {
+        logf(KILN_LOG_INFO, "ui: chat history off (%s)", forced == 0 ? "KILN_CHAT_HISTORY=0" : "kiln.json ui.chatHistory");
+        return false;
+    }
     if (!g_api->feature(KilnStr{"chat.ui.input", sizeof("chat.ui.input") - 1})) {
-        logf(KILN_LOG_WARN, "ui: chat input probe requested, but this game build lacks feature chat.ui.input");
+        logf(KILN_LOG_WARN, "ui: chat history is on (%s), but this game build lacks feature chat.ui.input: the chat field "
+             "stays the game's own", history ? why : "a diagnostic");
         return false;
     }
     if (!read_layout()) {
-        logf(KILN_LOG_WARN, "ui: chat input probe requested, but chat.ui.input's layout constants are unusable");
+        logf(KILN_LOG_WARN, "ui: chat history is on, but chat.ui.input's layout constants are unusable: the chat field "
+             "stays the game's own");
         return false;
     }
     uintptr_t input = 0;
@@ -502,7 +539,8 @@ bool chat_input_probe_install() {
         load_history();
         g_trace_on.store(env_enabled("KILN_CHAT_HISTORY_TRACE"), std::memory_order_release);
         g_history_on.store(true, std::memory_order_release);
-        logf(KILN_LOG_INFO, "ui: chat history preview installed (Up/Down, commands persisted; opt-in; no Tab/Ctrl+R)");
+        logf(KILN_LOG_INFO, "ui: chat history on (%s): Up/Down in the HUD and Social chat, %zu command(s) kept from "
+             "earlier games", why, g_history.count());
     } else if (diag) {
         g_trace_on.store(true, std::memory_order_release);
         g_diagnose_on.store(true, std::memory_order_release);
