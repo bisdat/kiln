@@ -116,11 +116,15 @@ pub async fn launch_play(app: AppHandle, game_id: String, request: LaunchRequest
         // (dev.29.17) a folder that starts directly: the launcher starts its exe (Proton or Wine on Linux) instead of
         // asking Steam, which only ever starts the copy in its own library. The command is built before anything is
         // written, so a missing Proton refuses the start as it is.
-        let direct = (kiln_manage::direct::mode_of(&dirs, &g) == kiln_manage::direct::StartMode::Direct).then(|| {
+        let mut g = g;
+        let direct = if kiln_manage::direct::mode_of(&dirs, &g) == kiln_manage::direct::StartMode::Direct {
+            // the install as it starts directly (its prefix: the saves backed up, the path mode), then the command
             let roots = crate::state::steam_roots();
-            let g = kiln_manage::game::sync_start(&dirs, &g, &roots).unwrap_or_else(|_| g.clone());
-            kiln_manage::direct::plan(&g, &kiln_manage::direct::settings(&dirs, &g), &roots)
-        }).transpose()?;
+            g = kiln_manage::game::sync_start(&dirs, &g, &roots).unwrap_or(g);
+            Some(kiln_manage::direct::plan(&g, &kiln_manage::direct::settings(&dirs, &g), &roots)?)
+        } else {
+            None
+        };
         let r = match &direct {
             Some(cmd) => {
                 let log = kiln_manage::launch::direct_log(&dirs, &g);
