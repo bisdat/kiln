@@ -51,15 +51,26 @@ std::string g_last_applied;
 // by the normal TextInputProcess, so verify only after that call returns.
 bool g_set_text_pending = false;
 
-constexpr uint64_t kEditHash = 0x72615e88968a8b89ull;
-constexpr uintptr_t kEditOffset = 0x10;
-constexpr uintptr_t kEditActiveOffset = 0x1988;
 constexpr uint64_t kMaxEditBytes = 1024;
+
+// The game's layout, from sigdb (chatui.json, feature chat.ui.input; docs/re/chat-input.md), read once at install.
+struct Layout {
+    uint64_t state_hash = 0;  // TextInputState's key of a text field's state block
+    uintptr_t edit = 0;       // state + edit: the field's editor (EditSetText's second argument)
+    uintptr_t editing = 0;    // state + editing: a byte, set while the field has typing focus
+    uintptr_t buffer = 0;     // widget + buffer: pointer to the caller's chat string (StringHead)
+} L;
 
 struct GameText { const char* data; uint64_t length; uint64_t hash; };
 struct TextSlice { const char* data; uint64_t length; };
-struct EditHead { const char* data; uint64_t length; uint64_t capacity; };
-static_assert(sizeof(GameText) == 24 && sizeof(EditHead) == 24);
+struct StringHead { const char* data; uint64_t length; uint64_t capacity; };  // the engine's UTF-8 string
+static_assert(sizeof(GameText) == 24 && sizeof(StringHead) == 24 && sizeof(TextSlice) == 16);
+// EditSetText's result on client 26430625: 8 bytes, {u8 error, u32 at +4}, written as one qword (an error) or as the
+// two fields (error 0: the text was set). docs/re/chat-input.md. The buffer has 64 bytes so a later build that grows
+// the result stays inside it until the RE notes are checked again.
+struct EditResult { uint8_t error; uint8_t pad[3]; uint32_t detail; };
+static_assert(sizeof(EditResult) == 8);
+constexpr size_t kEditResultBuffer = 64;
 
 template <class T> bool game_read(const void* p, T* out) {
     if (!p || reinterpret_cast<uintptr_t>(p) < 0x10000) return false;
@@ -80,55 +91,46 @@ bool game_copy(const char* p, char* out, size_t len) {
     }
 }
 
-// Game accessor is called only from the scoped input hook.
+// TextInputState(widget, hash, 1): the field's state block, as TextInputProcess itself asks for it each frame. Called
+// only from the scoped input hook, for the widget the game is processing in this very call.
 using StateFn = void* (__fastcall*)(void*, uint64_t, uint32_t);
 void* game_state(void* widget) {
     if (!g_state_fn || !widget) return nullptr;
     __try {
-        return reinterpret_cast<StateFn>(g_state_fn)(widget, kEditHash, 1);
+        return reinterpret_cast<StateFn>(g_state_fn)(widget, L.state_hash, 1);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return nullptr;
     }
 }
 
-// EditSetText(out, edit, &slice): use the engine to maintain cursor, selection
-// and undo bookkeeping instead of writing to an arbitrary game buffer.
+// EditSetText(&result, editor, &slice): the engine keeps the cursor, selection and undo history right, instead of Kiln
+// writing to a game buffer. The editor holds UTF-32; the slice is UTF-8, as the chat's own clear passes it.
 using SetTextFn = void (__fastcall*)(void*, void*, const TextSlice*);
 bool game_set_text(void* edit, const char* data, size_t length) {
-    if (!g_set_text_fn || !edit || length > 1024) return false;
+    if (!g_set_text_fn || !edit || length > kMaxEditBytes) return false;
     const TextSlice slice{data, length};
-    alignas(16) uint8_t result[256]{};
+    alignas(16) uint8_t result[kEditResultBuffer]{};
     __try {
         reinterpret_cast<SetTextFn>(g_set_text_fn)(result, edit, &slice);
-        return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
-}
-bool edit_text(void* state, std::string* out) {
-    EditHead b{};
-    if (!state || !game_read(reinterpret_cast<const uint8_t*>(state) + kEditOffset, &b) ||
-        b.length > kMaxEditBytes || b.length > b.capacity || b.capacity > (1ull << 20))
-        return false;
-    if (!b.length) { out->clear(); return true; }
-    char bytes[1024];
-    if (!game_copy(b.data, bytes, static_cast<size_t>(b.length))) return false;
-    out->assign(bytes, static_cast<size_t>(b.length));
-    return true;
+    EditResult r{};
+    std::memcpy(&r, result, sizeof r);
+    return r.error == 0;
 }
 bool editing(void* state) {
     uint8_t yes = 0;
-    return state && game_read(reinterpret_cast<const uint8_t*>(state) + kEditActiveOffset, &yes) && yes != 0;
+    return state && game_read(reinterpret_cast<const uint8_t*>(state) + L.editing, &yes) && yes != 0;
 }
 
-// The constructor receives a caller-owned chat string at widget+0x150.
-// The editor's private buffer may differ from the value committed for send.
-// This is a read-only cross-check: never trust the widget pointer without SEH
-// and size checks; the game controls both pointers and their lifetimes.
+// The chat's widget points at the caller's chat string (widget + L.buffer): the UTF-8 line the caller sends on Enter
+// and clears after. The editor's own text is UTF-32 and is never read. Both pointers and their lifetimes are the
+// game's: every read is SEH-guarded and size-checked.
 bool widget_text(void* widget, std::string* out) {
     uintptr_t caller_buffer = 0;
-    if (!widget || !game_read(reinterpret_cast<const uint8_t*>(widget) + 0x150, &caller_buffer)) return false;
-    EditHead b{};
+    if (!widget || !game_read(reinterpret_cast<const uint8_t*>(widget) + L.buffer, &caller_buffer)) return false;
+    StringHead b{};
     if (!game_read(reinterpret_cast<const void*>(caller_buffer), &b) ||
         b.length > kMaxEditBytes || b.length > b.capacity || b.capacity > (1ull << 20))
         return false;
@@ -260,7 +262,7 @@ void history_before(void* widget, bool hud) {
                  browsing_before ? 1u : 0u, g_history.browsing() ? 1u : 0u,
                  stale_widget ? 1u : 0u);
         if (!changed) continue;
-        if (!game_set_text(reinterpret_cast<uint8_t*>(state) + kEditOffset, next.data(), next.size())) {
+        if (!game_set_text(reinterpret_cast<uint8_t*>(state) + L.edit, next.data(), next.size())) {
             g_keys.focus(false);
             g_history_on.store(false, std::memory_order_release);
             logf(KILN_LOG_WARN, "ui: chat history: edit replace failed; preview disabled for this process");
@@ -292,39 +294,25 @@ void history_after(void* widget, void* result, bool hud) {
         if (g_trace_on.load(std::memory_order_relaxed) && g_recall_log_count.fetch_add(1) < 24)
             logf(KILN_LOG_INFO, "ui: chat history trace: engine edit replacement verified (widget readback)");
     }
-    // The input result is an event discriminant. Only the first byte is
-    // needed (1 = Enter, 2 = Escape); reading a 32-bit word could include
-    // unrelated/uninitialised trailing bytes and miss a valid submission.
+    // The result's event is a u32 TextInputProcess zeroes on entry and sets to 1 (Enter) or 2 (Escape); the callers
+    // compare the whole dword. Its low byte carries the same.
     uint8_t event = 0;
     if (game_read(result, &event) && event != 0) {
         (hud ? g_hud_draft : g_social_draft).clear(); // next edit session starts fresh
-        // The actual chat string is the caller-owned buffer, verified in
-        // both HUD and Social. Do not submit the private edit's invalid
-        // internal/control bytes to the history model.
+        // The line sent is the caller's chat string (the caller hands exactly these bytes to the send).
         std::string sent;
         const bool readable = widget_text(widget, &sent);
-        // Compare the game's caller-owned chat string with the private edit
-        // state. Log *only* validity flags, lengths, controls and equivalence:
-        // no user message contents, addresses, hashes or command names.
-        std::string committed;
-        const bool committed_readable = edit_text(state, &committed);
+        // Only validity flags, lengths and counts: never the text, addresses or command names.
         if (g_trace_on.load(std::memory_order_relaxed) && g_event_log_count.fetch_add(1) < 24)
             logf(KILN_LOG_INFO,
                  "ui: chat history trace: %s event=%u widget_ok=%u widget_bytes=%zu widget_command=%u widget_valid=%u "
-                 "widget_sensitive=%u widget_controls=%zu edit_ok=%u edit_bytes=%zu edit_command=%u "
-                 "edit_valid=%u edit_sensitive=%u edit_controls=%zu same=%u",
+                 "widget_sensitive=%u widget_controls=%zu",
                  hud ? "HUD" : "Social", static_cast<unsigned>(event),
                  readable ? 1u : 0u, readable ? sent.size() : 0,
                  readable && !sent.empty() && sent.front() == '/' ? 1u : 0u,
                  readable && chat_history::History::valid(sent) ? 1u : 0u,
                  readable && chat_history::History::sensitive(sent) ? 1u : 0u,
-                 readable ? controls(sent) : 0,
-                 committed_readable ? 1u : 0u, committed_readable ? committed.size() : 0,
-                 committed_readable && !committed.empty() && committed.front() == '/' ? 1u : 0u,
-                 committed_readable && chat_history::History::valid(committed) ? 1u : 0u,
-                 committed_readable && chat_history::History::sensitive(committed) ? 1u : 0u,
-                 committed_readable ? controls(committed) : 0,
-                 readable && committed_readable && sent == committed ? 1u : 0u);
+                 readable ? controls(sent) : 0);
         if (event == 1 && readable && !g_diagnose_on.load(std::memory_order_relaxed)) {
             const size_t before = g_history.count();
             const bool persisted_changed = g_history.submit(sent);
@@ -365,14 +353,16 @@ void history_after(void* widget, void* result, bool hud) {
     // WndProc's explicit text-edit signal, not a transient UI buffer snapshot.
 }
 
-void __fastcall hk_input(void* widget, void* result, const GameText* label, uint32_t mode) {
+// TextInputProcess returns &result in rax (MSVC hidden result pointer); every text field of the game passes through
+// here, so the hook hands that back even though none of today's 14 callers reads it.
+void* __fastcall hk_input(void* widget, void* result, const GameText* label, uint32_t mode) {
     const uintptr_t caller = g_input.caller();
     const bool hud = caller == g_hud_ret;
     const bool social = caller == g_social_ret;
     const bool scoped = hud || social;
     if (g_history_on.load(std::memory_order_relaxed) && scoped)
         history_before(widget, hud);
-    g_input.call<void>(widget, result, label, mode);
+    void* const out = g_input.call<void*>(widget, result, label, mode);
     if (hud && !g_hud_seen.exchange(true))
         logf(KILN_LOG_INFO, "ui: chat input probe: native HUD chat call observed (call-site confirmation)");
     else if (social && !g_social_seen.exchange(true))
@@ -380,6 +370,26 @@ void __fastcall hk_input(void* widget, void* result, const GameText* label, uint
     if (scoped && (g_history_on.load(std::memory_order_relaxed) ||
                    g_diagnose_on.load(std::memory_order_relaxed)))
         history_after(widget, result, hud);
+    return out;
+}
+
+bool cst(const char* name, int64_t* out) { return g_api->constant(KilnStr{name, std::strlen(name)}, out) == KILN_OK; }
+
+// The layout constants of feature chat.ui.input. The ranges only catch a capture gone wrong (the state block is 0x1990
+// bytes and the widget about 0x280 on 26430625); sigdb's captures are what follows a game update.
+bool read_layout() {
+    int64_t lo = 0, hi = 0, edit = 0, editing = 0, buffer = 0;
+    if (!cst("chatui/state.hash.lo", &lo) || !cst("chatui/state.hash.hi", &hi) || !cst("chatui/state.edit", &edit) ||
+        !cst("chatui/state.editing", &editing) || !cst("chatui/widget.buffer", &buffer))
+        return false;
+    if (lo < 0 || lo > 0xffffffffll || hi < 0 || hi > 0xffffffffll || (lo | hi) == 0 || edit <= 0 || edit >= 0x100 ||
+        editing <= edit || editing >= 0x10000 || buffer <= 0 || buffer >= 0x1000)
+        return false;
+    L.state_hash = (static_cast<uint64_t>(hi) << 32) | static_cast<uint64_t>(lo);
+    L.edit = static_cast<uintptr_t>(edit);
+    L.editing = static_cast<uintptr_t>(editing);
+    L.buffer = static_cast<uintptr_t>(buffer);
+    return true;
 }
 } // namespace
 
@@ -442,7 +452,11 @@ bool chat_input_probe_install() {
     const bool probe = env_enabled("KILN_CHAT_INPUT_PROBE");
     if (!history && !diag && !probe) return false;
     if (!g_api->feature(KilnStr{"chat.ui.input", sizeof("chat.ui.input") - 1})) {
-        logf(KILN_LOG_WARN, "ui: chat input probe requested, but chat.ui.input symbols are unavailable");
+        logf(KILN_LOG_WARN, "ui: chat input probe requested, but this game build lacks feature chat.ui.input");
+        return false;
+    }
+    if (!read_layout()) {
+        logf(KILN_LOG_WARN, "ui: chat input probe requested, but chat.ui.input's layout constants are unusable");
         return false;
     }
     uintptr_t input = 0;

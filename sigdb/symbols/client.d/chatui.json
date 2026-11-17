@@ -1,7 +1,7 @@
 {
   "format": 1,
   "side": "client",
-  "comment": "Issue #44 phase 1: candidate native chat input symbols from client Steam build 26430625 (enshrouded.exe SHA-256 5d9ef2f140b8ed49e30dbee655841b89d08baec20f799a1817e171a18a850c77). Addresses and edit-state layout in upstream issue #44 are from static reverse engineering, not game-tested for this fork. The feature remains opt-in pending in-game validation.",
+  "comment": "kiln.ui's chat history (GitHub issue 44, phase 1) on the client: Up/Down in the game's chat field (client 26430625, enshrouded.exe 5d9ef2f1). Evidence: docs/re/chat-input.md. TextInputProcess(widget, &result, &label, mode) runs one text field for one UI frame on the UI thread; it writes result {u32 event (0 none, 1 Enter, 2 Escape), u8} and returns &result in rax. The HUD chat (HudChatWindow) and the Social tab (SocialChat) each call it once: Kiln acts only on those two calls, told apart by their return addresses HudInputReturn and SocialInputReturn. The field's widget keeps the caller's chat string at widget+widget.buffer: a pointer to {char* data, u64 length, u64 capacity} (UTF-8, capacity 0x400), the very bytes the caller sends on Enter. TextInputState(widget, state.hash, 1) returns the field's persistent state block (the UI's hash-keyed state store, 0x1990 bytes, freed when the field is not drawn for a frame); its byte state+state.editing is set while the field has typing focus, and state+state.edit is the field's editor. The editor's own text is UTF-32 (one u32 per character, length in characters), so Kiln never reads it. EditSetText(&result, editor, &{data, length}) is the game's own replace-the-text (UTF-8 in; clears the undo history, cursor and selection to the end); the chat calls it with an empty string after sending. Its result is 8 bytes {u8 error, u32 at +4}; error 0 is success. TextInputEdit is TextInputProcess's editing callee, where the layout constants are captured.",
   "symbols": {
     "chatui/TextInputProcess": {
       "find": [
@@ -45,7 +45,7 @@
             "symbol": "chatui/HudChatWindow",
             "size": 8192
           },
-          "pattern": "E8 {chatui/TextInputProcess:rel32} 48 8B 85 B0",
+          "pattern": "E8 {chatui/TextInputProcess:rel32} 48 8B 85 ?? ?? ?? ?? 85 C0 0F 84",
           "offset": 5
         }
       ]
@@ -57,10 +57,99 @@
             "symbol": "chatui/SocialChat",
             "size": 16384
           },
-          "pattern": "E8 {chatui/TextInputProcess:rel32} 83",
+          "pattern": "E8 {chatui/TextInputProcess:rel32} 83 BD ?? ?? ?? ?? 01 0F 85",
           "offset": 5
         }
       ]
+    },
+    "@chatui/TextInputProcess.fields": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "chatui/TextInputProcess",
+            "size": 512
+          },
+          "pattern": "48 BA {chatui/state.hash.lo:d32} {chatui/state.hash.hi:d32} 41 B8 01 00 00 00 48 8B CB E8 {chatui/TextInputState:rel32}"
+        },
+        {
+          "scope": {
+            "symbol": "chatui/TextInputProcess",
+            "size": 512
+          },
+          "pattern": "48 8B D6 48 8B CB E8 {chatui/TextInputEdit:rel32} 4C 8D 9C 24"
+        }
+      ]
+    },
+    "@chatui/TextInputEdit.fields": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "chatui/TextInputEdit",
+            "size": 256
+          },
+          "pattern": "4C 8B E2 41 B8 01 00 00 00 48 BA {chatui/state.hash.lo:d32} {chatui/state.hash.hi:d32} 48 8B F1 E8 {chatui/TextInputState:rel32}"
+        },
+        {
+          "scope": {
+            "symbol": "chatui/TextInputEdit",
+            "size": 512
+          },
+          "pattern": "4C 8B 86 ?? ?? ?? ?? 48 8B 96 {chatui/widget.buffer:d32} E8 ?? ?? ?? ?? 48 8B 86 {chatui/widget.buffer:d32}"
+        },
+        {
+          "scope": {
+            "symbol": "chatui/TextInputEdit",
+            "size": 2048
+          },
+          "pattern": "41 F6 DC 1B C0 83 C0 02 89 01 45 88 BE {chatui/state.editing:d32}"
+        }
+      ]
+    },
+    "@chatui/HudChatWindow.fields": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "chatui/HudChatWindow",
+            "size": 8192
+          },
+          "pattern": "48 BA {chatui/state.hash.lo:d32} {chatui/state.hash.hi:d32} 41 B8 01 00 00 00 48 89 78 08 E8 {chatui/TextInputState:rel32}"
+        },
+        {
+          "scope": {
+            "symbol": "chatui/HudChatWindow",
+            "size": 8192
+          },
+          "pattern": "48 8D 8D ?? ?? ?? ?? 48 8D 53 {chatui/state.edit:d8} 66 0F 7F 44 24 ?? E8 {chatui/EditSetText:rel32}"
+        }
+      ]
+    },
+    "@chatui/SocialChat.fields": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "chatui/SocialChat",
+            "size": 16384
+          },
+          "pattern": "48 8B D8 48 8D 50 {chatui/state.edit:d8} 66 0F 7F 44 24 ?? E8 {chatui/EditSetText:rel32}"
+        }
+      ]
+    }
+  },
+  "constants": {
+    "chatui/state.hash.lo": {
+      "min_votes": 2
+    },
+    "chatui/state.hash.hi": {
+      "min_votes": 2
+    },
+    "chatui/state.edit": {
+      "min_votes": 2
+    },
+    "chatui/state.editing": {
+      "min_votes": 1
+    },
+    "chatui/widget.buffer": {
+      "min_votes": 1
     }
   },
   "features": {
@@ -74,7 +163,13 @@
         "chatui/HudInputReturn",
         "chatui/SocialInputReturn"
       ],
-      "constants": []
+      "constants": [
+        "chatui/state.hash.lo",
+        "chatui/state.hash.hi",
+        "chatui/state.edit",
+        "chatui/state.editing",
+        "chatui/widget.buffer"
+      ]
     }
   }
 }
