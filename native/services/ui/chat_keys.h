@@ -31,6 +31,9 @@ public:
         if (!focused() || mods != 0 || (vk != 0x26 && vk != 0x28)) return false;
         if (down) {
             std::lock_guard lock(mu_);
+            // Focus can be lost between the first check and acquiring the queue lock.
+            // Recheck under the lock so a closed field cannot leave a stale press queued.
+            if (!active_.load(std::memory_order_acquire)) return false;
             if (pending_.size() < 32) pending_.push_back(vk == 0x26 ? Action::Older : Action::Newer);
         }
         return down;
