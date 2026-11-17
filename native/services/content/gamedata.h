@@ -151,8 +151,9 @@ bool boot_remove_components(const TType* type, const std::vector<std::string>& n
                             std::string* err);
 bool boot_add_components(const TType* type, const std::vector<std::string>& names, std::vector<uint8_t>* bytes, size_t* added,
                          std::string* err);
+// *first (when given): the index of the first value appended (the list's length before it).
 bool boot_append(Root kind, const TType* root, const std::string& path, const std::vector<gjson>& values, bool above_last,
-                 std::vector<uint8_t>* bytes, size_t* appended, std::string* err);
+                 std::vector<uint8_t>* bytes, size_t* appended, std::string* err, size_t* first = nullptr);
 // "clear": the list at `path` (any element type) made empty. *cleared: how many elements it had.
 bool boot_clear(Root kind, const TType* root, const std::string& path, std::vector<uint8_t>* bytes, size_t* cleared, std::string* err);
 // "replace": the list of scalars at `path` holds exactly `values` (a new list behind the copy). *written: values.size().
@@ -167,8 +168,10 @@ struct CopySource {
     size_t len = 0;
     std::string why;                // why it was not read, when that is not a missing resource
 };
+// `max_bytes`: what the copy may grow to in all, every component's data and padding counted before it is allocated (the
+// patched resource's cap).
 bool boot_copy_components(const TType* type, const std::vector<CopySource>& copies, std::vector<uint8_t>* bytes, size_t* copied,
-                          std::string* err);
+                          std::string* err, size_t max_bytes = 64u << 20);
 
 // A component type a template can hold, by its name without "keen::ecs::" ("PickupItemZone"): a struct that derives
 // from keen::ecs::Component and is not that base, and, when kiln.types has the game's list of ECS components (read from

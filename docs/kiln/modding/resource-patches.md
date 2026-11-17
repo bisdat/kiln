@@ -96,7 +96,7 @@ order. The order in which a patch writes its keys does not matter.
 |---|---|---|
 | `removeComponents` | a template (`keen::ecs::TemplateResource`) | takes out the components of these types (`"SpawnTime"`); one the template hasn't got is skipped. `CurrentTransform`, and what an actor needs to live, are refused. |
 | `addComponents` | a template | gives it components of these game types (`"PickupItemZone"`), zeroed; one it has already stays as it is. The list stays sorted by type name, as the game's lists are. |
-| `copyComponents` | a template | `{ "<component type>": "<template GUID>" }`: copies the whole component, with all its data (references, nested structs, lists, strings, variants), from that other template. Added when the template has none of that type, its own (the first of that type) replaced when it has. The source must have the component. `CurrentTransform` is refused, and on a template that is an actor so is what an actor needs to live. The source is read as the game has it, before any resource patch of this start: another patch on the source template does not carry over. `set` and `append` paths on the copied component then apply. |
+| `copyComponents` | a template | `{ "<component type>": "<template GUID>" }`: copies the whole component, with all its data (references, nested structs, lists, strings, variants), from that other template. Added when the template has none of that type, its own (the first of that type) replaced when it has. The source must have the component. `CurrentTransform` is refused, and on a template that is an actor so is what an actor needs to live. The source is read as the game has it, before any resource patch of this start: another patch on the source template does not carry over. The same patch's own `set`, `append`, `clear` and `replace` paths on the copied component then apply to the copy; from another mod only a plain value `set` does (anything that counts on what the component held is refused, see [Two mods on one resource](#two-mods-on-one-resource)). |
 | `clear` | lists of anything | `["<list path>", …]`: each list made empty, whatever its elements are (structs, references, numbers). |
 | `replace` | a list of numbers, bools or enum members | `{ "<list path>": { "values": [ … ] } }`: the list holds exactly these values afterwards, as many as given (fewer or more than before). At least one value; to empty a list use `clear`. A value is plain. |
 | `append` | a list of numbers, bools or enum members | adds `values` at its end. `"aboveLast": true` adds only a value greater than the list's last (the last added counts), so a sorted list stays sorted and values the game's list already reaches are left out. A value is plain: `{ "mul": 2 }` has no game's value to change and is refused. |
@@ -201,8 +201,10 @@ comes later in the load order is refused before the game starts, and the report 
 - one mod removes a component that another mod's `set` or `append` path starts at;
 - two mods append to one list;
 - one mod appends to a list and another sets every element of it with `[*]` (the `[*]` would change the appended values
-  too). Another mod's `[i]` on that list is fine: an index names the same element either way. Within one mod, `set`
-  works on the list as its own `append` left it;
+  too). Another mod's `[i]` of an element the list already had is fine: an index names the same element either way. An
+  `[i]` of an element another mod appended is not (it would write over that mod's value): its patch is refused when the
+  resource is written, in either load order, since every append is made before every set. Within one mod, `set` works
+  on the list as its own `append` left it;
 - one mod copies a component that another removes, or two mods copy one component from different templates (the same
   copy from both is fine). One mod's `addComponents` and another's copy of that component are fine: the copy is made
   after the add, so the copied data is what the template gets;
@@ -245,11 +247,13 @@ When the write is made (the game's data is in memory only then):
 
 - the resource exists in this game build;
 - the template has the component a path starts at (one of the game's, or added by a patch), and an index like `[25]`
-  is inside the list. `[*]` on an empty list changes nothing and is not an error;
+  is inside the list, and not an element another mod appended. `[*]` on an empty list changes nothing and is not an
+  error;
 - `removeComponents` does not take what an actor needs to live (`Actor`, `NetworkActor`, its transforms, …) from a
   template that is an actor, and `copyComponents` does not copy one of those over onto it;
 - the template `copyComponents` copies from exists and has the component, and everything of the component can be
-  copied: every member's type is in the game's reflection (a variant of a type it does not name, or one of the
+  copied within the 64 MiB the patched resource may reach (every copied component of the patch counted together):
+  every member's type is in the game's reflection (a variant of a type it does not name, or one of the
   editor's own `Ds…` kinds, is refused rather than guessed), and every list, string and variant lies inside the source's
   bytes;
 - the template's component list and the list a `clear`, `replace` or `append` names can be read, and the patched

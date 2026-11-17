@@ -75,7 +75,7 @@ bool boot_add_components(const TType*, const std::vector<std::string>& names, st
     }
     return true;
 }
-bool boot_copy_components(const TType*, const std::vector<CopySource>& copies, std::vector<uint8_t>* b, size_t* n, std::string* err) {
+bool boot_copy_components(const TType*, const std::vector<CopySource>& copies, std::vector<uint8_t>* b, size_t* n, std::string* err, size_t) {
     *n = 0;
     for (const auto& c : copies) {
         trace.push_back("copy " + c.brief);
@@ -97,7 +97,9 @@ bool boot_replace(Root, const TType*, const std::string& path, const std::vector
     mark(b, 10000000), *n = v.size();
     return true;
 }
-bool boot_append(Root, const TType*, const std::string& path, const std::vector<gjson>&, bool, std::vector<uint8_t>* b, size_t* n, std::string* err) {
+bool boot_append(Root, const TType*, const std::string& path, const std::vector<gjson>&, bool, std::vector<uint8_t>* b, size_t* n, std::string* err,
+                 size_t* first) {
+    if (first) *first = 2;  // "list" holds 2 elements: an append adds element 2
     trace.push_back("append " + path);
     *n = 0;
     if (path == "bad") return *err = "\"append\": bad: not a list", false;
@@ -229,6 +231,20 @@ void copy_clear_replace() {
     check(faults.size() == 1 && faults[0].mod == "a" && has(faults[0].reason, "Broken") && patched.marks == 10000000, "a's clear is not kept, b's replace is");
     run(docs_of({{"a", "k1", plain({{"replace", {{"bad", {{"values", {3}}}}}}, {"set", {{"value", 5}}}})}}));
     check(faults.size() == 1 && has(faults[0].reason, "bad is not a list") && put_count == 0, "a failing replace: nothing of its patch");
+    // another mod's set of an element this mod appended faults the setter, in either load order (review); the list's own
+    // elements and the mod's own appended ones are fine
+    for (int order = 0; order < 2; ++order) {
+        auto app = std::make_tuple("a", "k1", plain({{"append", {{"list", {{"values", {99}}}}}}}));
+        auto set = std::make_tuple("b", "k2", plain({{"set", {{"list[2]", 0}}}}));
+        run(order ? docs_of({set, app}) : docs_of({app, set}));
+        check(faults.size() == 1 && faults[0].mod == "b" && has(faults[0].reason, "element 2") && has(faults[0].reason, "mod a appended"),
+              "a set over another mod's appended element is refused at apply");
+        check(put_count == 1 && patched.marks == 10000 && patched.value == 10, "the append is kept, the set is not");
+    }
+    run(docs_of({{"a", "k1", plain({{"append", {{"list", {{"values", {99}}}}}}})}, {"b", "k2", plain({{"set", {{"list[0]", 5}}}})}}));
+    check(faults.empty() && patched.value == 5 && patched.marks == 10000, "a set of an element the list already had stays allowed");
+    run(docs_of({{"a", "k1", plain({{"append", {{"list", {{"values", {99}}}}}}, {"set", {{"list[2]", 5}}}})}}));
+    check(faults.empty() && patched.value == 5, "a mod's set of its own appended element is fine");
     // a clear of a list that changes nothing else is still a change that is served
     run(docs_of({{"a", "k1", plain({{"clear", {"list"}}})}}));
     check(faults.empty() && put_count == 1 && patched.marks == 1000000, "a clear alone is served");

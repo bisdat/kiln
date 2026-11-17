@@ -752,6 +752,13 @@ bool build(const ResPatch& rp, const gd::TType* type, const uint8_t* data, size_
     *here = 0;
     notes->clear();
     const gd::Root root_kind = rp.tmpl ? gd::Root::Template : gd::Root::Plain;
+    // the elements each append added (its list's place, [first, first + n)): another mod's set of one of them is refused
+    struct Added {
+        std::string mod, path;
+        std::vector<Seg> place;
+        size_t first = 0, n = 0;
+    };
+    std::vector<Added> added;
     for (const char phase : kPhases) {
         for (size_t i = 0; i < rp.docs.size(); ++i) {
             if (left_out[i]) continue;
@@ -759,7 +766,7 @@ bool build(const ResPatch& rp, const gd::TType* type, const uint8_t* data, size_
             for (const StructOp& o : d.ops) {
                 if (o.op != phase) continue;
                 std::string err;
-                size_t n = 0;
+                size_t n = 0, first = 0;
                 std::vector<gd::CopySource> from;
                 for (size_t k = 0; o.op == 'c' && k < o.names.size(); ++k) {
                     const std::string g = guid_text(o.sources[k].guid);
@@ -770,11 +777,16 @@ bool build(const ResPatch& rp, const gd::TType* type, const uint8_t* data, size_
                 }
                 const bool ok = o.op == '-' ? gd::boot_remove_components(type->resolved(), o.names, copy, &n, &err)
                               : o.op == '+' ? gd::boot_add_components(type->resolved(), o.names, copy, &n, &err)
-                              : o.op == 'c' ? gd::boot_copy_components(type->resolved(), from, copy, &n, &err)
+                              : o.op == 'c' ? gd::boot_copy_components(type->resolved(), from, copy, &n, &err, kMaxResource)
                               : o.op == 'x' ? gd::boot_clear(root_kind, type->resolved(), o.path, copy, &n, &err)
                               : o.op == 'r' ? gd::boot_replace(root_kind, type->resolved(), o.path, o.values, copy, &n, &err)
-                                            : gd::boot_append(root_kind, type->resolved(), o.path, o.values, o.above_last, copy, &n, &err);
+                                            : gd::boot_append(root_kind, type->resolved(), o.path, o.values, o.above_last, copy, &n, &err, &first);
                 if (!ok) return *bad = i, *why = err, false;
+                if (o.op == 'a' && n) {
+                    std::vector<Seg> segs;
+                    std::string e;
+                    if (segments(o.path, &segs, &e)) added.push_back({d.mod, o.path, normalised(segs, rp.tmpl), first, n});
+                }
                 if (copy->size() > kMaxResource)
                     return *bad = i, *why = "the patched " + what + " would be over " + std::to_string(kMaxResource >> 20) + " MiB", false;
                 // a clear or a replace changes the list even when it ends as long as it was
@@ -795,6 +807,23 @@ bool build(const ResPatch& rp, const gd::TType* type, const uint8_t* data, size_
         const DocPatch& d = rp.docs[i];
         for (const Set& s : d.sets) {
             auto failed = [&](const std::string& e) { return *bad = i, *why = "\"" + s.path + "\": " + e, false; };
+            // an element another mod appended is that mod's: a set by index does not write over it (either load order:
+            // appends are made before every set). The mod's own appended elements, and the list's own, are fine.
+            {
+                std::vector<Seg> segs;
+                std::string e;
+                if (segments(s.path, &segs, &e)) {
+                    const std::vector<Seg> place = normalised(segs, rp.tmpl);
+                    for (const Added& a : added) {
+                        const size_t at = a.place.size();
+                        if (a.mod == d.mod || place.size() <= at || !place[at].index || place[at].s == "*" || !same_place(a.place, place, at)) continue;
+                        const unsigned long k = std::stoul(place[at].s);
+                        if (k >= a.first && k < a.first + a.n)
+                            return failed("Conflict: element " + std::to_string(k) + " of \"" + a.path + "\" is one mod " + a.mod +
+                                          " appended; another mod's set does not write over it");
+                    }
+                }
+            }
             std::vector<gd::Resolved> found;
             std::string err;
             if (!gd::resolve(root_kind, gd::Node{type->resolved(), lo}, s.path, &found, &err)) return failed(err.empty() ? "no such member in " + what : err);

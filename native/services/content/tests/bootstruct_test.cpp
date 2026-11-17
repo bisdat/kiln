@@ -225,7 +225,8 @@ void append() {
     check(f.size() == 4 && f[0] == 1 && f[1] == 2 && f[2] == 2.5f && f[3] == 3, "1, 2, 2.5, 3");
     check(at<int32_t>(c, 0) % 16 == 0 && static_cast<size_t>(at<int32_t>(c, 0)) >= 0x30, "the list moved behind the copy");
     auto d = b;
-    check(boot_append(Root::Plain, &holder, "steps", vals, false, &d, &n, &err), "append all");
+    size_t first = 99;
+    check(boot_append(Root::Plain, &holder, "steps", vals, false, &d, &n, &err, &first) && first == 2, "append all, the first appended is element 2");
     check(n == 4 && floats_of(d).size() == 6, "every value appended");
     check(!boot_append(Root::Plain, &holder, "nope", vals, false, &d, &n, &err), "an unknown path is refused");
     std::vector<uint8_t> empty(0x10, 0);
@@ -345,6 +346,41 @@ void copy_components() {
         check(c == template_bytes(), "the refused copies left the bytes as they were");
         check(boot_copy_components(&tmpl, one, &c, &n, &err) && n == 1, "the real layout copies again");
         c = template_bytes();
+    }
+    // one size cap for the whole call, padding counted, checked before anything is allocated (review)
+    {
+        const std::vector<CopySource> two = {{"Stock", "magic", src.data(), src.size()}, {"Gamma", "magic", src.data(), src.size()}};
+        auto d = template_bytes();
+        check(!boot_copy_components(&tmpl, one, &d, &n, &err, d.size()) && err.find("over its size cap") != std::string::npos && d == template_bytes(),
+              "no room at all: refused, nothing grows");
+        size_t cap = d.size();
+        for (bool ok = false; !ok && cap < d.size() + 4096; cap += 16) {
+            auto t = template_bytes();
+            ok = boot_copy_components(&tmpl, one, &t, &n, &err, cap);
+            if (ok) {
+                const auto t2 = template_bytes();
+                auto u = t2;
+                check(!boot_copy_components(&tmpl, two, &u, &n, &err, cap) && err.find("Gamma") != std::string::npos && u == t2,
+                      "two components share one budget: the second, past the cap, is refused and nothing is kept");
+            }
+        }
+        check(cap < d.size() + 4096, "the smallest cap that holds Stock was found");
+        // a fixed array of more than 65536 elements is refused, never copied with its tail left pointing at the source
+        // (in a heap value: Stock's variant holds an Inner of 560,000 bytes that is one such array)
+        TType big_array;
+        big_array.name = "keen::StaticArray<BlobString,70000>", big_array.kind = K_ARRAY, big_array.count = 70000, big_array.size = 560000;
+        big_array.inner_rec = reinterpret_cast<uintptr_t>(&str);
+        auto big = src;
+        big.resize(0x200 + 560000, 0);
+        put<int32_t>(big, 0x80 + 28, static_cast<int32_t>(0x200 - (0x80 + 28)));
+        put<uint32_t>(big, 0x80 + 32, 560000);
+        const auto saved_size = inner.size;
+        const auto saved_fields = inner.fields;
+        inner.size = 560000, inner.fields = {{"many", reinterpret_cast<uintptr_t>(&big_array), 0}};
+        auto e = template_bytes();
+        check(!boot_copy_components(&tmpl, {{"Stock", "magic", big.data(), big.size()}}, &e, &n, &err) && err.find("too many elements") != std::string::npos,
+              "an array over 65536 elements is refused");
+        inner.size = saved_size, inner.fields = saved_fields;
     }
     // an actor: what it needs to live is not copied over
     auto actor = template_bytes();

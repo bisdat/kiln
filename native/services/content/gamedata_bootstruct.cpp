@@ -146,7 +146,7 @@ struct Copier {
     size_t src_len = 0;
     std::vector<uint8_t>* dst = nullptr;
     std::string* err = nullptr;
-    size_t budget = 64u << 20;  // bytes this copy may add (the patched resource is held below 64 MiB anyway)
+    size_t* budget = nullptr;  // bytes every copy of one call may still add, padding included (shared: the resource's cap)
 
     template <class T>
     bool rd(int64_t at, T* v) const {
@@ -166,10 +166,14 @@ struct Copier {
     // n bytes of the source at `from`, behind the copy; *at: where they are now
     bool place(int64_t from, size_t n, size_t* at, const std::string& what) {
         if (from < 0 || static_cast<uint64_t>(from) + n > src_len) return fail(what + " lies outside the source template's bytes");
-        if (n > budget) return fail(what + " is too large to copy");
-        budget -= n;
-        *at = align16(dst->size());
-        dst->resize(align16(*at + n + 1), 0);  // one zero byte behind it at least (a string's terminator)
+        // what the copy grows by, its alignment included, is counted before anything is allocated
+        const size_t start = align16(dst->size());
+        if (n > *budget || start - dst->size() > *budget - n) return fail(what + " is too large to copy: the patched template would be over its size cap");
+        const size_t end = align16(start + n + 1);  // one zero byte behind it at least (a string's terminator)
+        if (end - dst->size() > *budget) return fail(what + " is too large to copy: the patched template would be over its size cap");
+        *budget -= end - dst->size();
+        *at = start;
+        dst->resize(end, 0);
         if (n) std::memcpy(dst->data() + *at, src + from, n);
         return true;
     }
@@ -194,7 +198,8 @@ struct Copier {
                 if (!el) return fail(r->name + ": its element type is not known");
                 const uint32_t es = el->size ? el->size : (r->count ? r->size / r->count : 0);
                 if (r->count && !es) return fail(r->name + ": the size of its elements is not known");
-                for (uint32_t i = 0; i < r->count && i < 65536; ++i)
+                if (r->count > 65536) return fail(r->name + " has too many elements to copy");  // never a tail left pointing at the source
+                for (uint32_t i = 0; i < r->count; ++i)
                     if (!fix(el, from + int64_t{i} * es, to + size_t{i} * es, std::min(end, to + size_t{i + 1} * es), depth + 1)) return false;
                 return true;
             }
@@ -317,7 +322,7 @@ bool boot_add_components(const TType* type, const std::vector<std::string>& name
 }
 
 bool boot_append(Root kind, const TType* root, const std::string& path, const std::vector<gjson>& values, bool above_last,
-                 std::vector<uint8_t>* bytes, size_t* appended, std::string* err) {
+                 std::vector<uint8_t>* bytes, size_t* appended, std::string* err, size_t* first) {
     *appended = 0;
     std::vector<Resolved> rs;
     std::string why;
@@ -340,6 +345,7 @@ bool boot_append(Root kind, const TType* root, const std::string& path, const st
     const int64_t old_at = static_cast<int64_t>(where) + rel;
     if (count && (!rel || old_at < 0 || static_cast<uint64_t>(old_at) + count * el_size > bytes->size()))
         return *err = "\"append\": " + path + ": the list is not readable", false;
+    if (first) *first = rel ? count : 0;
     // the new elements' bytes, in order
     std::vector<std::vector<uint8_t>> add;
     bool have_last = count > 0;
@@ -421,7 +427,7 @@ bool boot_replace(Root kind, const TType* root, const std::string& path, const s
 }
 
 bool boot_copy_components(const TType* type, const std::vector<CopySource>& copies, std::vector<uint8_t>* bytes, size_t* copied,
-                          std::string* err) {
+                          std::string* err, size_t max_bytes) {
     *copied = 0;
     if (copies.empty()) return true;
     size_t field_at = 0;
@@ -429,6 +435,7 @@ bool boot_copy_components(const TType* type, const std::vector<CopySource>& copi
     if (!read_components(type, *bytes, &field_at, &vars, err)) return false;
     const bool actor = std::any_of(vars.begin(), vars.end(), [](const Var& v) { return v.brief == "Actor"; });
     const size_t was = bytes->size();
+    size_t budget = max_bytes > was ? max_bytes - was : 0;  // one budget for every component of the call
     struct Undo {  // a refused copy leaves the bytes as they were
         std::vector<uint8_t>* b;
         size_t n;
@@ -449,7 +456,7 @@ bool boot_copy_components(const TType* type, const std::vector<CopySource>& copi
         if (s == src_vars.end()) return *err = label + ": the template " + c.from + " has no " + c.brief, false;
         if (s->data < 0 || s->size < t->size || s->size > 65536 || static_cast<uint64_t>(s->data) + s->size > c.len)
             return *err = label + ": the " + c.brief + " of " + c.from + " is not readable", false;
-        Copier cp{c.data, c.len, bytes, &why};
+        Copier cp{c.data, c.len, bytes, &why, &budget};
         size_t at = 0;
         if (!cp.place(s->data, s->size, &at, c.brief) || !cp.fix(t, s->data, at, at + s->size, 0)) return *err = label + " from " + c.from + ": " + why, false;
         const auto mine = std::find_if(vars.begin(), vars.end(), [&](const Var& v) { return v.brief == c.brief; });
