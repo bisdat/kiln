@@ -24,6 +24,8 @@
     <InternalsVisibleTo Include="Kiln.Abilities.Tests" />
     <ProjectReference Include="../../Kiln.Api/Kiln.Api.csproj" Private="false" />
     <ProjectReference Include="../Kiln.Spawn/Kiln.Spawn.csproj" Private="false" />
+    <!-- gems (Gems/GemSources.cs): a player who left loses the forge session and the chest-gem offers -->
+    <ProjectReference Include="../Kiln.Players/Kiln.Players.csproj" Private="false" />
     <!-- gems: item catalog, item instances and sockets (Gems/) -->
     <ProjectReference Include="../Kiln.Items/Kiln.Items.csproj" Private="false" />
     <ProjectReference Include="../Kiln.World/Kiln.World.csproj" Private="false" />

@@ -683,13 +683,9 @@ bool add_components(const Def& d, const TType* type, std::vector<uint8_t>* bytes
         }
         const std::string brief = n.get<std::string>();
         if (std::any_of(vars.begin(), vars.end(), [&](const Var& v) { return v.brief == brief; })) continue;
-        const TType* t = type_named("keen::ecs::" + brief);
-        const TType* b = t;
-        while (b && b->name != "keen::ecs::Component") b = b->inner();
-        if (!b) {
-            *err = "\"" + brief + "\" is not a component type of the game";
-            return false;
-        }
+        // a struct below keen::ecs::Component, not that base, and on the game's list of ECS components when kiln.types has it
+        const TType* t = component_type(brief, err);
+        if (!t) return false;
         vars.push_back({brief, t->hash, t->size, -1});
         added += (static_cast<size_t>(t->size) + 15) & ~size_t(15);
     }

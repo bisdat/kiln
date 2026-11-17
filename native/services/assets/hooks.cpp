@@ -658,9 +658,11 @@ bool game_key_of(uintptr_t S, uint32_t handle, Key* out) {
     return true;
 }
 
-bool game_blob_find(const HashK& h, GameBlob* out) {
+bool game_copy(void* out, const void* game, size_t n) { return rd(reinterpret_cast<uintptr_t>(game), out, n); }
+
+bool game_blob_find(const HashK& h, GameBlob* out, bool lazy) {
     const void* m = g_game_map.load();
-    if (!m && g_content_on) {
+    if (!m && g_content_on && lazy) {
         // Not requested by the game yet: ask the accessor ourselves (reader = S + 8).
         const uintptr_t S = g_S.load();
         uintptr_t reader = 0;

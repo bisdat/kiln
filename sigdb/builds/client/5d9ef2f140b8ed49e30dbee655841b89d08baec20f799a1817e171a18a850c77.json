@@ -9,9 +9,9 @@
   "verified": true,
   "note": "runtime-verified through Steam (GE-Proton11-11), policy any, core + every service + kiln-emf + probe + ui-test + menubuttons: side client, sigdb 306/306 symbols, 434/434 constants (client.d composed), SimStep + WorldDestroy hooked, boot complete, 0 errors; main menu entries Kiln / ui-test / Mods (the Kiln sample screen opened); hosted a LOCAL world offline (saves: world loaded: slot 0x0002 (world1.ksd)): server world 60 steps/s on the GameServer thread, client and prediction worlds on the main thread, local player 1; ui-test all checks PASS (screens MainMenu/Loading/InGame/PauseMenu/Map/Crafting, menu entries chosen, crafting state), Kiln crafting tabs and subcategories shown, Insert overlay; tick cost as on ce6fdba6 (server step p50 2.5 ms, Kiln Pre 0.037 ms; client 1.2 ms); back to the menu (worlds stopping, shutdown save), clean quit (Shutdown 'Steam'). Not covered: joining a remote server, service write paths on the client. Added in dev.22 from static analysis only (resolved offline with sigdb_check.py, not yet seen running): ui.menu_page, ui.menu_page_sound, ui.error_popup (ui/PreGameCredits, ui/PreGameCreditsRet, ui/UiPlaySound and their constants). Levels (record 2, refreshed offline on 2026-11-11, no client run): lab = the names the boot above resolved, as its record listed them (199 named symbols, 434 constants, 106 features), each resolving to the same value today; every service loaded in that boot, but only ui-test ran, so lab here means loaded with Kiln's checks passing, not that the service test mods ran on the client. static = everything else, resolved offline only: the 186 @ probes (the boot's record did not list probes), the dev.22 ui names above, and every name declared since (the services audio, characters, emf-net, npcai, pacing, progression, quests, render, rules, skills, types and vfx, and new names of combat, creatures, gamedata, items, net, players, time and ui): 158 symbols, 210 constants and 70 features. sigdb now declares 543 symbols (441 defined, 102 captured), 644 constants (595 defined, 49 captured) and 176 features; all of them resolve offline on this exe.",
   "declared": {
-    "symbols": 753,
-    "constants": 861,
-    "features": 222
+    "symbols": 765,
+    "constants": 862,
+    "features": 224
   },
   "features": {
     "abilities.attributes": true,
@@ -90,6 +90,7 @@
     "gameplay.spawn": true,
     "gameplay.terraform": true,
     "gems.craft": true,
+    "gems.payers": true,
     "gems.sockets": true,
     "hooks.owner_cleanup": true,
     "hooks.typed": true,
@@ -204,6 +205,7 @@
     "ui.crafting": true,
     "ui.error_popup": true,
     "ui.gemforge.inspect": true,
+    "ui.gemforge.sources": true,
     "ui.language": true,
     "ui.main_menu": true,
     "ui.menu_footer": true,
@@ -406,8 +408,14 @@
     "gems/GemUpgradeCost": "0xe91ee0",
     "gems/MaterialMultiplier": "0xe99940",
     "gems/MultiplierOne": "0x13d0c90",
+    "gems/PayMaterial": "0x411330",
+    "gems/PaySlot": "0x386142",
+    "gems/PayUnslot": "0x386029",
+    "gems/PayUpgrade": "0x385eb6",
     "gems/ReadTemplate": "0x9b3b60",
+    "gems/RecycleGive": "0x385dc2",
     "gems/UnslotMove": "0x415010",
+    "gems/UnslotMoveCall": "0x386089",
     "items/ActorSpawnUpdate": "0x228130",
     "items/AddComponent": "0x960a20",
     "items/AreaDeposit": "0x412ed0",
@@ -649,6 +657,9 @@
     "ui/FuelToCharges": "0xd49090",
     "ui/GameUiDataGet": "0xa4c040",
     "ui/GameUiFrame": "0xbd0f90",
+    "ui/GemForgeActions": "0xd23f90",
+    "ui/GemForgeAffordSlot": "0xd243dc",
+    "ui/GemForgeAffordUpgrade": "0xd246cc",
     "ui/GemForgeCandidates": "0xd27cb0",
     "ui/GemForgeCarrierMask": "0xd27d80",
     "ui/GemForgeEnd": "0xcaeece",
@@ -659,6 +670,7 @@
     "ui/GemForgeLowerBoundary": "0xcaf778",
     "ui/GemForgeMenu": "0xcacb20",
     "ui/GemForgeScreenCall": "0xc61196",
+    "ui/GemForgeSelectResolve": "0xcacfa4",
     "ui/GemForgeSlotRet": "0xcaf59a",
     "ui/GemForgeSourceRet": "0xcafbac",
     "ui/GemForgeSwitch": "0xc61135",
@@ -1471,6 +1483,7 @@
     "ui/play.modelsCount": "0x3068",
     "ui/play.stamina": "0x584",
     "ui/play.staminaMax": "0x588",
+    "ui/play.target": "0x2c50",
     "ui/popups.error": "0x550",
     "ui/pregame.main_menu": "0x8",
     "ui/pregame.page": "0x24c",
@@ -2701,8 +2714,12 @@
       "date": "2026-11-16",
       "evidence": "resolved offline (tools/sigport/build_record.py)",
       "symbols": {
+        "@ui/GemForgeActions.call": "static",
         "@ui/gemforge.modelFields": "static",
         "@ui/gemforge.socketFields": "static",
+        "ui/GemForgeActions": "static",
+        "ui/GemForgeAffordSlot": "static",
+        "ui/GemForgeAffordUpgrade": "static",
         "ui/GemForgeCandidates": "static",
         "ui/GemForgeEnd": "static",
         "ui/GemForgeGemsCall": "static",
@@ -2712,6 +2729,7 @@
         "ui/GemForgeLowerBoundary": "static",
         "ui/GemForgeMenu": "static",
         "ui/GemForgeScreenCall": "static",
+        "ui/GemForgeSelectResolve": "static",
         "ui/GemForgeSlotRet": "static",
         "ui/GemForgeSourceRet": "static",
         "ui/GemForgeSwitch": "static",
@@ -2731,7 +2749,8 @@
         "ui/gemforge.weapon": "static"
       },
       "features": {
-        "ui.gemforge.inspect": "static"
+        "ui.gemforge.inspect": "static",
+        "ui.gemforge.sources": "static"
       }
     },
     "gems-forge": {
@@ -2748,8 +2767,14 @@
         "gems/GemUpgradeCost": "static",
         "gems/MaterialMultiplier": "static",
         "gems/MultiplierOne": "static",
+        "gems/PayMaterial": "static",
+        "gems/PaySlot": "static",
+        "gems/PayUnslot": "static",
+        "gems/PayUpgrade": "static",
         "gems/ReadTemplate": "static",
-        "gems/UnslotMove": "static"
+        "gems/RecycleGive": "static",
+        "gems/UnslotMove": "static",
+        "gems/UnslotMoveCall": "static"
       },
       "constants": {
         "gems/attr.level": "static",
@@ -2767,7 +2792,8 @@
         "gems/multiplier.key": "static"
       },
       "features": {
-        "gems.craft": "static"
+        "gems.craft": "static",
+        "gems.payers": "static"
       }
     },
     "gems-sockets": {
@@ -3730,6 +3756,7 @@
         "@ui/ErrorPopup.flag": "static",
         "@ui/GameUiFrame.fields": "static",
         "@ui/GameUiPopups.base": "static",
+        "@ui/HudCrafting.fields": "static",
         "@ui/InfoScroller.scrollbar": "static",
         "@ui/MainMenu.credits": "static",
         "@ui/MainMenu.settings_state": "static",
@@ -3795,6 +3822,7 @@
         "ui/hud.no_ui": "lab",
         "ui/play.hud_screen": "lab",
         "ui/play.interaction": "lab",
+        "ui/play.target": "static",
         "ui/popups.error": "static",
         "ui/pregame.main_menu": "static",
         "ui/pregame.page": "static",

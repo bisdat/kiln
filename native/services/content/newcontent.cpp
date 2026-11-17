@@ -4230,6 +4230,7 @@ std::string nc_definitions_json() {
         Fingerprint f;
         f.add(in_world), f.add(listed), f.add(icon), f.add(d->version), f.add(d->orphan), f.add(d->placeholder);
         f.add(d->error), f.add(d->warnings), f.add(d->gear_notes), f.add(d->icon_problem), f.add(d->owner_label), f.add(d->source), f.add(d->mod);
+        f.add(d->icon_guid), f.add(d->base_guid);
         if (f.h != d->listed_as || d->listed.empty()) {
             char idb[16];
             std::snprintf(idb, sizeof idb, "0x%08x", d->id);
@@ -4255,6 +4256,10 @@ std::string nc_definitions_json() {
                     for (auto& [k, v] : t) ls.insert(k);
                 for (const std::string& k : ls) langs.push_back(k);
                 if (!langs.empty()) e["languages"] = langs;
+                // the UI texture the game draws for this item while kiln.assets serves no icon under its own GUID (the base
+                // item's, or "icon"'s): Kiln.Ui's Ui.ItemImage draws the same (0.2.0-dev.29.15)
+                e["iconGuid"] = guid_text(d->icon_guid);
+                e["baseGuid"] = guid_text(d->base_guid);  // the item it was cloned from (its name when the definition gives none)
                 if (!d->icon_file.empty()) {
                     e["iconFile"] = d->icon_file;
                     if (icon != -2) {

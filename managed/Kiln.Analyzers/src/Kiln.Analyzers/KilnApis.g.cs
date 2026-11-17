@@ -85,6 +85,7 @@ internal static partial class KilnApis
         "M:Kiln.Bases.Of(Kiln.EntityId)", // Bases.Of(EntityId): via StationsCore.CheckRead(string)
         "M:Kiln.Bases.Stock(Kiln.BaseId)", // Bases.Stock(BaseId): via StationsCore.CheckRead(string)
         "M:Kiln.Bases.Stock(Kiln.BaseId,Kiln.ItemId)", // Bases.Stock(BaseId, ItemId): via Bases.Stock(BaseId)
+        "M:Kiln.Bases.StockWithStations(Kiln.BaseId)", // Bases.StockWithStations(BaseId): via Bases.Stock(BaseId)
         "M:Kiln.Bases.Storage(Kiln.BaseId,System.Boolean)", // Bases.Storage(BaseId, bool): via StationsCore.List(BaseId, bool, string)
         "M:Kiln.Bases.TryGet(Kiln.BaseId,Kiln.BaseInfo@)", // Bases.TryGet(BaseId, out BaseInfo?): via Bases.Get(BaseId)
         "M:Kiln.Bases.WaterSources(Kiln.BaseId)", // Bases.WaterSources(BaseId): via StationsCore.List(BaseId, bool, string)
@@ -298,6 +299,7 @@ internal static partial class KilnApis
         "M:Kiln.EntityData.Set``1(Kiln.EntityId,System.String,``0)", // EntityData.Set<T>(EntityId, string, T): via PlayerData.Set<T>(ulong, string, T)
         "M:Kiln.EntityData.TryGet``1(Kiln.EntityId,System.String,``0@)", // EntityData.TryGet<T>(EntityId, string, out T?): via PlayerData.TryGet<T>(ulong, string, out T?)
         "M:Kiln.EntityData.get_Entities", // EntityData.Entities.get: via EntityData.Keys(EntityId, string, bool)
+        "M:Kiln.EntityData.get_Matched", // EntityData.Matched.get: via EntityData.Keys(EntityId, string, bool)
         "M:Kiln.EntityData.get_Waiting", // EntityData.Waiting.get: via EntityData.Keys(EntityId, string, bool)
         "M:Kiln.EntityRef.Of(Kiln.EntityId)", // EntityRef.Of(EntityId): Game.AssertTickThread
         "M:Kiln.EntityRef.get_IsAlive", // EntityRef.IsAlive.get: Game.AssertTickThread
@@ -381,11 +383,13 @@ internal static partial class KilnApis
         "M:Kiln.GemTriggeredEvent.get_Info", // GemTriggeredEvent.Info.get: via Gems.Get(ItemId)
         "M:Kiln.Gems.Equipped(Kiln.EntityId)", // Gems.Equipped(EntityId): Services.RequireTickThread
         "M:Kiln.Gems.Get(Kiln.ItemId)", // Gems.Get(ItemId): Services.RequireTickThread
+        "M:Kiln.Gems.OfferChestGems(Kiln.EntityId,Kiln.EntityId,Kiln.GemSourceOptions)", // Gems.OfferChestGems(EntityId, EntityId, GemSourceOptions?): Services.RequireTickThread
         "M:Kiln.Gems.Recycle(Kiln.EntityId,Kiln.ItemInstanceRef,Kiln.EntityId,Kiln.GemCraftOptions)", // Gems.Recycle(EntityId, ItemInstanceRef, EntityId, GemCraftOptions?): via GemCrafting.Check(string, EntityId, EntityId)
         "M:Kiln.Gems.Socket(Kiln.EntityId,Kiln.ItemInstanceRef,Kiln.ItemInstanceRef,Kiln.EntityId,Kiln.GemCraftOptions)", // Gems.Socket(EntityId, ItemInstanceRef, ItemInstanceRef, EntityId, GemCraftOptions?): via GemCrafting.Check(string, EntityId, EntityId)
         "M:Kiln.Gems.Socket(Kiln.ItemInstanceRef)", // Gems.Socket(ItemInstanceRef): Services.RequireTickThread
         "M:Kiln.Gems.Unsocket(Kiln.EntityId,Kiln.ItemInstanceRef,Kiln.EntityId,Kiln.GemCraftOptions)", // Gems.Unsocket(EntityId, ItemInstanceRef, EntityId, GemCraftOptions?): via GemCrafting.Check(string, EntityId, EntityId)
         "M:Kiln.Gems.Upgrade(Kiln.EntityId,Kiln.ItemInstanceRef,Kiln.EntityId,Kiln.GemCraftOptions)", // Gems.Upgrade(EntityId, ItemInstanceRef, EntityId, GemCraftOptions?): via GemCrafting.Check(string, EntityId, EntityId)
+        "M:Kiln.Gems.WithdrawChestGems(Kiln.EntityId,Kiln.EntityId)", // Gems.WithdrawChestGems(EntityId, EntityId): via GemSources.Withdraw(EntityId, EntityId)
         "M:Kiln.Gems.get_Catalog", // Gems.Catalog.get: Services.RequireTickThread
         "M:Kiln.InstanceData.All``1(Kiln.InstanceKey{``0})", // InstanceData.All<T>(InstanceKey<T>): via InstanceData.Use<T>(string, InstanceKey<T>)
         "M:Kiln.InstanceData.Claim``1(Kiln.ParkedInstance{``0},Kiln.ItemInstanceRef)", // InstanceData.Claim<T>(ParkedInstance<T>, ItemInstanceRef): via InstanceData.Resolve<T>(ParkedInstance<T>, string)
@@ -864,6 +868,7 @@ internal static partial class KilnApis
         "P:Kiln.Time.WeatherChoiceAvailable=kiln.time,time.weather_choose", // T3 != null: Services.Get("kiln.time"); Is("time.weather_choose")
         "P:Kiln.Ui.Available=kiln.ui", // via Kiln.UiNative.Available
         "P:Kiln.Ui.Crafting.MenuAvailable=kiln.craftmenu", // UiNative.Craft != null: Services.Get("kiln.craftmenu")
+        "P:Kiln.Ui.ItemIconsAvailable=kiln.assets", // via Kiln.ResourceStore.HasTextureRgba
         "P:Kiln.UiWheel.Available=kiln.ui", // UiNative.T2 != null: Services.Get("kiln.ui")
         "P:Kiln.UiWheel.IsAnyOpen=kiln.ui", // t != null: Services.Get("kiln.ui")
         "P:Kiln.Villagers.Available=kiln.creatures", // t != null: Services.Get("kiln.creatures")

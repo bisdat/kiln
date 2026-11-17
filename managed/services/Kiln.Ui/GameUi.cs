@@ -130,13 +130,27 @@ public enum ScreenKind
     Other,
 }
 
-/// <summary>A crafting menu that is open.</summary>
-/// <param name="AtStation">A crafting station's menu (workbench, forge, an NPC's, ...); false for the player's own.</param>
+/// <summary>A crafting menu that is open, or (since 0.2.0-dev.29.15) a production station's screen (<see cref="IsFactory"/>).</summary>
+/// <param name="AtStation">A crafting station's menu (workbench, forge, an NPC's, a kiln's...); false for the player's own.</param>
 /// <param name="Workshop">keen::WorkshopId of the menu (the station's kind, e.g. the Workbench 0x4da88f73; 0 = the
-/// player's own crafting). Pass it to <c>Ui.Crafting.AddTab</c> / <c>AddSubcategory</c>.</param>
-/// <param name="Recipe">The recipe id selected in the menu, 0 = none.</param>
+/// player's own crafting). Pass it to <c>Ui.Crafting.AddTab</c> / <c>AddSubcategory</c>. On a factory screen: the workshop the
+/// game keeps for the station in use (play data +0x2e48), which its crafting code reads as the station's; that it is the
+/// factory's own was not seen in a game: check it (0 or another station's is possible).</param>
+/// <param name="Recipe">The recipe id selected in the menu, 0 = none (always 0 on a factory screen).</param>
 /// <param name="Journal">The journal's recipe book.</param>
-public readonly record struct CraftingScreen(bool AtStation, uint Workshop, uint Recipe, bool Journal);
+public readonly record struct CraftingScreen(bool AtStation, uint Workshop, uint Recipe, bool Journal)
+{
+    /// <summary>A production station's screen (keen::HudScreenType FactoryCrafting: a kiln, smelter, loom, seed bed...): the game
+    /// draws it as a transfer screen, not with its crafting menu, so Kiln's tabs and subcategories never show there;
+    /// <c>Ui.Crafting.AddPanel</c> panels do when their options set <c>AtFactories</c>. Since 0.2.0-dev.29.15.</summary>
+    public bool IsFactory { get; init; }
+
+    /// <summary>On a factory screen, the station's entity: the entity the game's screen is about (play data +0x2c50). Entities
+    /// the game replicates have the server's ids, so a mod's server half can find the station by it (check that the player is
+    /// near it before acting). <see cref="EntityId.None"/> elsewhere and on a build where Kiln does not read it. Since
+    /// 0.2.0-dev.29.15.</summary>
+    public EntityId Station { get; init; }
+}
 
 /// <summary>The game screen of the last UI frame. <c>StationWorkshop</c>: the workshop id of the crafting station the
 /// player uses (0 when none).</summary>
@@ -180,11 +194,19 @@ public readonly record struct GameScreen(GameUiState State, HudScreen Hud, Scree
         },
     };
 
+    /// <summary>A production station's screen (HUD FactoryCrafting) as a crafting screen: no crafting builder runs there, so
+    /// the native screen names no crafting menu (docs/re/game-ui.md section 5).</summary>
+    internal static CraftingScreen? FactoryScreen(GameUiState state, HudScreen hud, uint workshop, uint station) =>
+        state == GameUiState.Play && hud == HudScreen.FactoryCrafting
+            ? new CraftingScreen(true, workshop, 0, false) { IsFactory = true, Station = station != 0 ? new EntityId(station) : EntityId.None }
+            : null;
+
     internal static GameScreen From(in UiNative.Screen s)
     {
         var state = (GameUiState)s.UiState;
         var hud = (HudScreen)s.HudScreen;
-        CraftingScreen? c = s.Crafting != 0 ? new CraftingScreen(s.Station != 0, s.Workshop != 0 ? s.Workshop : s.Station, s.Recipe, s.Crafting == 2) : null;
+        CraftingScreen? c = s.Crafting != 0 ? new CraftingScreen(s.Station != 0, s.Workshop != 0 ? s.Workshop : s.Station, s.Recipe, s.Crafting == 2)
+            : hud == HudScreen.FactoryCrafting ? FactoryScreen(state, hud, s.Interaction, UiNative.ScreenTarget()) : null;
         return new GameScreen(state, hud, KindOf(state, hud, s.Crafting), s.Interaction, c, s.Language, s.Frame);
     }
 }

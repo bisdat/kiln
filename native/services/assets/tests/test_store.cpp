@@ -146,7 +146,15 @@ bool game_vfx_keys(uintptr_t S, std::vector<Key>* out) {
 // The game's own blobs: the content map knows these (offset, container) and the containers are kiln_test_fs files.
 std::map<std::tuple<uint32_t, uint32_t, uint32_t, uint32_t>, GameBlob> g_fake_game_blobs;
 std::vector<std::string> g_fake_containers;
-bool game_blob_find(const HashK& h, GameBlob* out) {
+int g_fake_lazy_asks = 0, g_fake_resident_asks = 0;  // game_blob_find calls that may / may not ask the game's accessor
+bool g_fake_copy_faults = false;                      // the game's resident bytes cannot be read (moved, unmapped)
+bool game_copy(void* out, const void* game, size_t n) {
+    if (g_fake_copy_faults) return false;
+    std::memcpy(out, game, n);
+    return true;
+}
+bool game_blob_find(const HashK& h, GameBlob* out, bool lazy) {
+    ++(lazy ? g_fake_lazy_asks : g_fake_resident_asks);
     const auto it = g_fake_game_blobs.find({h.size, h.h0, h.h1, h.h2});
     if (it == g_fake_game_blobs.end()) return false;
     *out = it->second;
@@ -848,6 +856,14 @@ void game_blob_range() {
     check(past == KILN_ERR_NOT_FOUND && bytes_read == 0,
           "a blob past its container's end is not found, and nothing is read for it (" + std::to_string(bytes_read) + " bytes read)");
     check(op_blob_read(&gone, buf.data(), buf.size(), &n) == KILN_ERR_INTERNAL, "a container that cannot be opened: internal error");
+    // off the game's threads (the item icon worker, the names task): the resident read never asks the game for its content
+    // index itself; blob_read as before may (the game's own threads)
+    g_fake_lazy_asks = g_fake_resident_asks = 0;
+    const KilnResult resident = op_blob_read(&font, buf.data(), buf.size(), &n, true);
+    check(resident == KILN_OK && g_fake_resident_asks == 1 && g_fake_lazy_asks == 0,
+          "blob_read_resident finds a game blob without the content map's lazy accessor");
+    (void)op_blob_read(&font, buf.data(), buf.size(), &n);
+    check(g_fake_lazy_asks == 1, "blob_read may still ask the accessor (its callers run on the game's threads)");
     bool closed = true;
     for (const auto& o : kiln_test_fs::opens) closed = closed && o.closed;
     check(closed, "every container opened is closed again");
@@ -892,6 +908,12 @@ int main() {
     check(items() == 0, "up: nothing added");
     check(read(graph) == "GAME-GRAPH" && by_handle(kGraphHandle) == "<not served>", "up: the game's own graph is what is read and served");
     check(logged(mark, kGraphKeyText, "reserved for kiln.playeranim"), "up: the log line names the key");
+    // resource_read copies the game's resident bytes off the game's threads too (the item icon worker, the names task): a
+    // copy that would fault (the game moved or dropped the resource) is "not found", never a crash
+    g_fake_copy_faults = true;
+    check(read(item) == "<result " + std::to_string(KILN_ERR_NOT_FOUND) + ">", "a game resource whose bytes cannot be read is not found");
+    g_fake_copy_faults = false;
+    check(read(item) == "GAME-ITEM", "and read again once they can");
 
     // 2. The pin: kiln.playeranim's put.
     std::puts("-- 2: the pinning put");

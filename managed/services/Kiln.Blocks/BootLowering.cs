@@ -72,8 +72,10 @@ internal static class BootLowering
                     try
                     {
                         var patch = JsonSerializer.Deserialize<ResourcePatchBlock>((string)s["json"]!, BlockJson.SharedOptions)!;
-                        if (patch.Resource == Guid.Empty || patch.Type.Length == 0 || patch.Set.Count == 0)
-                            return new JsonObject { ["ok"] = false, ["reason"] = $"{kind}/{key}: a resource patch names a resource, its type and at least one field to set" }.ToJsonString();
+                        if (patch.Resource == Guid.Empty || patch.Type.Length == 0 || !patch.HasWork)
+                            return new JsonObject { ["ok"] = false, ["reason"] = $"{kind}/{key}: a resource patch names a resource, its type and at least one change (a field to set, components to add or remove, a list to append to)" }.ToJsonString();
+                        if (patch.Problem() is { } problem)
+                            return new JsonObject { ["ok"] = false, ["reason"] = $"{kind}/{key}: {problem}" }.ToJsonString();
                         sink.Patch(key, JsonNode.Parse((string)s["json"]!)!.AsObject());
                     }
                     catch (JsonException e)

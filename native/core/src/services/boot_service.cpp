@@ -224,11 +224,19 @@ bool hex_run(std::string_view s, size_t n, bool lower_only) {
     return true;
 }
 
-// The five query forms of IReadOnlyGameData.Read (chapter 08 §4.1).
+// The query forms of IReadOnlyGameData.Read (chapter 08 §4.1), and names:<kind> (the names one kind's index holds).
 bool query_ok(std::string_view q) {
     const auto colon = q.find(':');
     if (colon == std::string_view::npos) return false;
     const std::string_view form = q.substr(0, colon), arg = q.substr(colon + 1);
+    if (form == "names") {
+        // names:<kind>, or names:templates/<component type> (templates that have one: "MiningNode")
+        if (arg == "items" || arg == "templates" || arg == "skills" || arg == "materials") return true;
+        if (arg.substr(0, 10) != "templates/" || arg.size() == 10 || arg.size() > 10 + 96) return false;
+        for (const char c : arg.substr(10))
+            if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_')) return false;
+        return true;
+    }
     if (form == "item" || form == "template") return name_ok(arg, true);
     if (form == "material") return name_ok(arg, false);
     if (form == "skill") return arg.size() == 10 && arg[0] == '0' && arg[1] == 'x' && hex_run(arg.substr(2), 8, false);

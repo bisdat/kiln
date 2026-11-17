@@ -145,4 +145,23 @@ public sealed class BootFakeTests
         Assert.Equal(BootModState.Committed, run.State);
         Assert.Equal(["statuses/tk-sdk-cold"], run.Definitions);
     }
+
+    [Fact]
+    public void NamesOfTemplatesWithAComponentCountTheTemplatesOwnComponentsOnly()
+    {
+        using var kiln = new KilnHarness();
+        kiln.BootPhase.SetRecord("template:Zone", """{"components": [{"$type": "Health"}, {"$type": "PickupItemZone", "radius": 2}]}""");
+        kiln.BootPhase.SetRecord("template:Nested", """{"components": [{"$type": "Spawner", "spawn": {"$type": "PickupItemZone"}}]}""");
+        var data = new BootFake.KitGameData(BootFake.StateOf(kiln));
+        string[] Names(string key)
+        {
+            var r = data.Read(key);
+            Assert.True(r.Ok, r.Reason);
+            return r.Data!.Value.GetProperty("names").EnumerateArray().Select(x => x.GetString()!).ToArray();
+        }
+        Assert.Equal(["Zone"], Names("names:templates/PickupItemZone"));
+        Assert.Equal(["Nested"], Names("names:templates/Spawner"));
+        Assert.Empty(Names("names:templates/PickupItem"));
+        Assert.Equal(["Nested", "Zone"], Names("names:templates"));
+    }
 }

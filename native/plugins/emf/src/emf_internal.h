@@ -108,6 +108,7 @@ struct Mod {
     std::string state;             // state-file word when kiln-emf stands aside ("own-loader", "not-loaded"), else ""
     uint32_t emf_min = 1;
     bool loose = false;
+    bool server_ticks_only = false;  // compat_ticks.h: on_tick for the server world only (a known mod bug)
     bool enabled_default = true;
     bool enabled = true;
     std::vector<Dependency> deps;

@@ -67,12 +67,16 @@ public sealed unsafe class StationsTests : IDisposable
         }
 
         public (int Rc, uint[] Ids) BaseList(uint index, bool water) =>
-            (water ? Water : Storage).TryGetValue(index, out var ids) ? (0, ids) : (StationsNative.NotFound, []);
+            !Rebuilt && (water ? Water : Storage).TryGetValue(index, out var ids) ? (0, ids) : (StationsNative.NotFound, []);
 
-        public (int Rc, StationsNative.Stack[] Rows) BaseStock(uint index) => (0, Stock);
+        /// <summary>The game rebuilt its bases between Kiln's reads: a record index read a moment ago is gone.</summary>
+        public bool Rebuilt;
+
+        public (int Rc, StationsNative.Stack[] Rows) BaseStock(uint index) => Rebuilt ? (StationsNative.NotFound, []) : (0, Stock);
 
         public (int Rc, uint[] Ids) StationIds(int baseIndex) =>
-            (0, StationRows.Values.Where(s => baseIndex < 0 || s.BaseIndex == baseIndex).Select(s => s.Entity).ToArray());
+            Rebuilt && baseIndex >= 0 ? (StationsNative.NotFound, [])
+                : (0, StationRows.Values.Where(s => baseIndex < 0 || s.BaseIndex == baseIndex).Select(s => s.Entity).ToArray());
 
         public int StationRead(uint entity, out StationsNative.Station s) =>
             StationRows.TryGetValue(entity, out s) ? 0 : StationsNative.NotFound;
@@ -291,7 +295,35 @@ public sealed unsafe class StationsTests : IDisposable
         Assert.Equal(b.Id, kiln.Run(() => Bases.At(new WorldPosition(1, 0, 1)))!.Id);
         Assert.Null(kiln.Run(() => Bases.At(new WorldPosition(100, 0, 1))));
         Assert.Null(kiln.Run(() => Bases.Get(new BaseId(Guid.NewGuid()))));
-        Assert.Throws<KeyNotFoundException>(() => kiln.Run(() => Bases.Storage(new BaseId(Guid.NewGuid()))));
+        Assert.Empty(kiln.Run(() => Bases.Storage(new BaseId(Guid.NewGuid()))));  // since 0.2.0-dev.29.15: no base, nothing in it
+    }
+
+    [Fact]
+    public void ABaseRebuiltBetweenTwoReadsIsEmptyNotAnException()
+    {
+        // The game rebuilds its bases every server frame: an id read from Bases.All, or a record index found a moment ago, can be
+        // gone by the next read (an altar placed or removed). Consumers polled Bases.Stock and Stations.InBase and got
+        // KeyNotFoundException (Busy Hands, 0.2.0-dev.29.14).
+        using var kiln = Kiln();
+        var id = new BaseId(AltarGuid);
+        _fake.Rebuilt = true;  // found by id, then its record is gone
+        Assert.Empty(kiln.Run(() => Bases.Stock(id)));
+        Assert.Equal(0, kiln.Run(() => Bases.Stock(id, new ItemId(0x10))));
+        Assert.Empty(kiln.Run(() => Bases.Storage(id)));
+        Assert.Empty(kiln.Run(() => Bases.Storage(id, deposit: true)));
+        Assert.Empty(kiln.Run(() => Bases.WaterSources(id)));
+        Assert.Empty(kiln.Run(() => Stations.InBase(id)));
+        Assert.Null(kiln.Run(() => Bases.FindRoomFor(id, new ItemId(0x10))));
+        // an id no base has any more (its altar's zone merged into another base)
+        _fake.Rebuilt = false;
+        var gone = new BaseId(Guid.NewGuid());
+        Assert.Empty(kiln.Run(() => Bases.Stock(gone)));
+        Assert.Empty(kiln.Run(() => Stations.InBase(gone)));
+        Assert.Empty(kiln.Run(() => Bases.WaterSources(gone)));
+        Assert.Null(kiln.Run(() => Bases.FindRoomFor(gone, new ItemId(0x10))));
+        // the base still there: answered as before
+        Assert.Equal(40, kiln.Run(() => Bases.Stock(id, new ItemId(0x10))));
+        Assert.Equal([new EntityId(3300)], kiln.Run(() => Stations.InBase(id)));
     }
 
     [Fact]
@@ -332,6 +364,63 @@ public sealed unsafe class StationsTests : IDisposable
         var inputs = kiln.Run(() => Stations.ResolveInputs(0x1234, [new CategoryChoice(77, 1)]));
         Assert.Equal([new StationStack(new ItemId(0x10), 2), new StationStack(new ItemId(0x7001), 1)], inputs);
         Assert.Throws<KeyNotFoundException>(() => kiln.Run(() => Stations.ResolveInputs(0x9999)));
+    }
+
+    [Fact]
+    public void StockWithStationsCountsFinishedItemsStillInTheBasesStations()
+    {
+        using var k = Kiln();
+        var charcoal = k.Items.AddItem("Material_T1_Charcoal", 50);
+        var logs = k.Items.AddItem("Material_T1_Wood_Logs", 50);
+        var r = _fake.Recipes[0x1234];
+        r.Outputs[0] = charcoal.Value;                                    // the kiln's recipe makes charcoal from logs (0x10)...
+        _fake.Recipes[0x1234] = r;
+        var kilnEntity = k.Entities.Create(new WorldPosition(1, 2, 3));     // the fake world's entity stands for the station
+        var row = _fake.StationRows[3300];
+        _fake.StationRows.Remove(3300);
+        row.Entity = kilnEntity.Value;
+        _fake.StationRows[kilnEntity.Value] = row;
+        var station = k.Items.AddContainer(kilnEntity);
+        station.Put(charcoal, 7);                                         // finished, not collected
+        station.Put(logs, 4);                                             // a leftover: not a product
+        _fake.Stock = [new StationsNative.Stack { Item = charcoal.Value, Count = 40 }];
+        var id = new BaseId(AltarGuid);
+        Assert.Equal(40, k.Run(() => Bases.Stock(id))[charcoal]);         // the chests only, as before
+        var all = k.Run(() => Bases.StockWithStations(id));
+        Assert.Equal(47, all[charcoal]);
+        Assert.False(all.ContainsKey(logs));
+        Assert.Empty(k.Run(() => Bases.StockWithStations(new BaseId(Guid.NewGuid()))));
+    }
+
+    [Fact]
+    public void StationsAndRecipesHaveNamesForPlayers()
+    {
+        // the game's data as Kiln.Items reads it: the kiln's workshop placed by Prop_Production_T1_Charcoal_Kiln, a recipe with no
+        // name of its own whose output is charcoal, and the game's German texts
+        var kiln = new ItemId(0x15e4e52e);
+        GameNames.UseForTests(GameNameLayout.Measured, new() { [kiln.Value] = Guid.NewGuid() }, new() { [0x51] = (5u, kiln.Value), [0x52] = (6u, 0u) },
+            new() { [0x1234] = (0u, 0x162cb6d2u), [0x99] = (7u, 0u) }, "de-de", new() { [6] = "Werkbank", [7] = "Sonderrezept", [8] = "Köhlerofen" },
+            itemTags: new() { [kiln.Value] = 8 });
+        try
+        {
+            using var k = Kiln();
+            var r = _fake.Recipes[0x1234];
+            r.Outputs[0] = 0x162cb6d2;                                      // Material_T1_Charcoal
+            _fake.Recipes[0x1234] = r;
+            Assert.Equal("Köhlerofen", k.Run(() => Stations.Read(new EntityId(3300)))!.DisplayName);  // the placing item, in German
+            Assert.Equal("Charcoal", k.Run(() => Stations.Recipe(0x1234))!.DisplayName);               // the first output (no German text here)
+            // any side, any thread: from the game's data alone (a joined client names the ids its server half sends)
+            Assert.Equal("Köhlerofen", Stations.WorkshopName(0x51));
+            Assert.Equal("Werkbank", Stations.WorkshopName(0x52));         // no item: the workshop's own text
+            Assert.Equal("Charcoal", Stations.RecipeName(0x1234));
+            Assert.Equal("Sonderrezept", Stations.RecipeName(0x99));       // no output: the recipe's own text
+            Assert.Null(Stations.WorkshopName(0x77));                       // not in the game's data (a mod's own workshop)
+            Assert.Null(Stations.RecipeName(0));
+        }
+        finally
+        {
+            GameNames.ResetForTests();
+        }
     }
 
     [Fact]

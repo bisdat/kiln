@@ -374,6 +374,107 @@ internal static unsafe class ResourceStore
         var k = MakeKey(id);
         t->ResourceRemove(owner, &k);
     }
+
+    // ---- reads for the game's own texts and item icons (Kiln.Items' GameNames, Kiln.Ui's item icons; 0.2.0-dev.29.15) ----
+
+    /// <summary>keen::ContentHash: 16 bytes.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct ContentHash
+    {
+        public uint Size, H0, H1, H2;
+    }
+
+    /// <summary>The kiln.assets table as far as texture_rgba: the slots after resource_list that these reads call (blob_read,
+    /// resource_is_new, texture_rgba); the others are placeholders.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct TableReads
+    {
+        public Table Front;
+        public void* BlobAdd, BlobOverride, BlobRemove;
+        public delegate* unmanaged[Cdecl]<ContentHash*, void*, nuint, nuint*, int> BlobRead;
+        public void* TextureOverridePng, Dump, Status, RevertOwner, LoadManifest, ResourceData;
+        public delegate* unmanaged[Cdecl]<Key*, int> ResourceIsNew;
+        public void* ResourceNewCount, WhenResourcesReady, BlobAddEx, BlobOverrideEx, BlobCatalogOpen, BlobCatalogRead, BlobCatalogClose;
+        public delegate* unmanaged[Cdecl]<Key*, uint, byte*, nuint, uint*, uint*, int> TextureRgba;
+        public delegate* unmanaged[Cdecl]<ContentHash*, void*, nuint, nuint*, int> BlobReadResident;
+    }
+
+    private static TableReads* Reads(int end)
+    {
+        var t = T;
+        return t != null && t->Header.Size >= (uint)end ? (TableReads*)t : null;
+    }
+
+    private static int EndOf(string slot) => (int)Marshal.OffsetOf<TableReads>(slot) + sizeof(nint);
+
+    /// <summary>Whether kiln.assets has texture_rgba (0.2.0-dev.29.15 and later).</summary>
+    public static bool HasTextureRgba
+    {
+        get
+        {
+            var r = Reads(EndOf(nameof(TableReads.TextureRgba)));
+            return r != null && r->TextureRgba != null;
+        }
+    }
+
+    /// <summary>1 when the resource was served in this process as one the game itself does not have (a mod's new one).</summary>
+    public static bool IsNew(ResourceId id)
+    {
+        var r = Reads(EndOf(nameof(TableReads.ResourceIsNew)));
+        if (r == null || r->ResourceIsNew == null) return false;
+        var k = MakeKey(id);
+        return r->ResourceIsNew(&k) != 0;
+    }
+
+    /// <summary>kiln.assets' icon state of a UI texture GUID (KILN_ICON_*: 0 none, 1 pending, 2 served, 3 failed); 0 without it.</summary>
+    public static int IconState(Guid guid)
+    {
+        var t = T;
+        if (t == null || t->IconState == null) return 0;
+        Span<byte> g = stackalloc byte[16];
+        guid.TryWriteBytes(g);
+        fixed (byte* p = g) return ((delegate* unmanaged[Cdecl]<byte*, int>)t->IconState)(p);
+    }
+
+    /// <summary>The bytes of a content blob (a mod's, else the game's own from its container), or null. At most
+    /// <paramref name="maxBytes"/>. For callers off the game's threads (a worker, a task): it never asks the game for its
+    /// content index itself (kiln.assets' blob_read_resident; null until the game has opened it).</summary>
+    public static byte[]? ReadBlob(ReadOnlySpan<byte> hash16, int maxBytes = 64 << 20)
+    {
+        var r = Reads(EndOf(nameof(TableReads.BlobReadResident)));
+        if (r == null || r->BlobReadResident == null || hash16.Length < 16) return null;
+        ContentHash h = MemoryMarshal.Read<ContentHash>(hash16);
+        if (h.Size == 0 || h.Size > (uint)maxBytes) return null;
+        var buffer = GC.AllocateUninitializedArray<byte>((int)h.Size);
+        nuint got = 0;
+        int rc;
+        fixed (byte* p = buffer) rc = r->BlobReadResident(&h, p, (nuint)buffer.Length, &got);
+        return rc == Ok && got == h.Size ? buffer : null;
+    }
+
+    /// <summary>texture_rgba: one mip level of a texture resource as RGBA8 (the smallest level whose sides are at least
+    /// <paramref name="minSide"/>). The kiln.assets result code (0: done; 2: no such texture; 3: not here); the pixels and
+    /// size on success.</summary>
+    public static int TextureRgba(ResourceId id, uint minSide, out byte[] rgba, out int width, out int height)
+    {
+        rgba = [];
+        width = height = 0;
+        var r = Reads(EndOf(nameof(TableReads.TextureRgba)));
+        if (r == null || r->TextureRgba == null) return 3;
+        var k = MakeKey(id);
+        uint w = 0, h = 0;
+        var rc = r->TextureRgba(&k, minSide, null, 0, &w, &h);
+        if (rc != BufferTooSmall) return rc == Ok ? 1 : rc;  // a size query never succeeds without a buffer
+        if (w == 0 || h == 0 || w > 4096 || h > 4096) return 1;
+        var buffer = GC.AllocateUninitializedArray<byte>(checked((int)(w * h * 4)));
+        uint w2 = 0, h2 = 0;
+        fixed (byte* p = buffer) rc = r->TextureRgba(&k, minSide, p, (nuint)buffer.Length, &w2, &h2);
+        if (rc != Ok || w2 != w || h2 != h) return rc == Ok ? 1 : rc;
+        rgba = buffer;
+        width = (int)w;
+        height = (int)h;
+        return Ok;
+    }
 }
 
 /// <summary>A path that leads nowhere in this resource only because of its data (an unset optional, an array that is too
