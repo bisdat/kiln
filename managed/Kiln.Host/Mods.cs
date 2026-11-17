@@ -419,8 +419,9 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
             }
             loaded.Add(m.Id);
             var shared = Find(m.Id)!.ResolvedDependencies;
+            var (check, code, onLoad) = _loadSplit;
             _host.Log(LogLevel.Info, $"mod {m.Id} {m.Version} loaded in {sw.Elapsed.TotalMilliseconds:F1} ms" +
-                                     (m.HasCode ? "" : " (data only: no entryAssembly)") +
+                                     (m.HasCode ? $" (layout check {check:F1} ms, assemblies {code:F1} ms, OnLoad {onLoad:F1} ms)" : " (data only: no entryAssembly)") +
                                      (shared.Count > 0 ? $" (after {string.Join(", ", shared.Order(StringComparer.Ordinal))})" : ""));
         }
         if (_reportStart) StartProgress.Step("mods", "", "", count, count);
@@ -485,10 +486,16 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
         Advanced = m.Advanced,
     };
 
+    // LoadCore's last split, for the "loaded in" line: Kiln's checks before any of the mod's code loads (boot refusal,
+    // layout stamp: Kiln.Game), its assemblies to a bound instance, and OnLoad (with the registration of its handlers)
+    private (double Check, double Code, double OnLoad) _loadSplit;
+
     [MethodImpl(MethodImplOptions.NoInlining)]
     private bool LoadCore(string directory, Manifest manifest, out string error)
     {
         error = "";
+        var phase = Stopwatch.StartNew();
+        _loadSplit = default;
         // a boot mod loads only with its boot content in this process (chapter 08 §4.4): RestartRequiredBoot otherwise
         if (BootLoadRefusal(manifest, directory) is { } boot)
         {
@@ -503,6 +510,7 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
             _host.Log(LogLevel.Error, error);
             return false;
         }
+        var checkMs = phase.Elapsed.TotalMilliseconds;
         var dependencies = DependencyClosure(manifest);
         ulong owner = 0;
         uint gameplayRequested = 0;
@@ -545,7 +553,10 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
                 record.State = ModState.Loaded;
                 record.Error = null;
             }
-            if (Invoke(mod, static m => { Kiln.Events.Register(m.Instance); m.Instance.OnLoad(); }, "OnLoad"))
+            var codeMs = phase.Elapsed.TotalMilliseconds - checkMs;
+            var invoked = Invoke(mod, static m => { Kiln.Events.Register(m.Instance); m.Instance.OnLoad(); }, "OnLoad");
+            _loadSplit = (checkMs, codeMs, phase.Elapsed.TotalMilliseconds - checkMs - codeMs);
+            if (invoked)
             {
                 mod.Loaded = true;
                 // a committed boot mod's runtime activation: its definitions' runtime parts and BootDefinitionsCommittedEvent (Kiln.Blocks)
