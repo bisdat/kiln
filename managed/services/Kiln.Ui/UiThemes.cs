@@ -230,6 +230,7 @@ internal static unsafe partial class UiThemes
             if (!float.IsFinite(v.X) || !float.IsFinite(v.Y)) throw new ArgumentException($"Vars[{k}] is not a number", nameof(spec));
         var owner = UiModCalls.Caller;
         UiModCalls.Watch(owner);
+        UiModCalls.RequireAlive(owner);
         var id = ModId(owner) + ":" + name;
         var def = ToNative(spec);
         ulong handle = 0;
@@ -244,7 +245,11 @@ internal static unsafe partial class UiThemes
         ulong old = 0;
         lock (Lock)
         {
-            UiModCalls.RequireAlive(owner);
+            if (owner is { Alive: false })
+            {
+                if (handle != 0 && t != null && t->ThemeFree != null) t->ThemeFree(handle);  // the mod unloads: nothing is kept
+                UiModCalls.RequireAlive(owner);
+            }
             if (Themes.TryGetValue(id, out var existing) && !existing.IsDisposed && ReferenceEquals(existing.Owner, owner))
             {
                 theme = existing;
