@@ -143,6 +143,33 @@ persisted (atomic best-effort replace) at `<game>/kiln/user/chat-history.json`.
 The preview does not yet separate histories by server, expose a Clear button,
 implement Ctrl+R, or offer command Tab completion. No typed text is logged.
 
+### Diagnostic results confirmed in-game (17 Nov 2026)
+
+The follow-up **read-only** `KILN_CHAT_HISTORY_DIAG=1` test passed on the
+exact SHA-256-pinned client:
+
+- HUD event 1 (Enter) produced readable text, five bytes beginning with `/`;
+  event 2 (Escape) was observed.
+- Social event 1 produced the same readable command; event 2 was observed.
+- WndProc received Up and Down repeatedly with `mods=0 focus=1 captured=0`.
+  `consumed=0` was required: diagnostic mode never swallows a key.
+- HUD/Social native call sites and edit focus were both observed.
+
+This establishes the native submit event, the input read path and keyboard
+routing; it does **not** validate the history model's submission path, the
+actual interception, or game SetText. The first interactive preview's
+32-bit event read was changed to an 8-bit discriminant before the diagnostic
+passed. An additional readback guard now disables interactive history if
+SetText returns without updating the edit buffer.
+
+**Next test:** rebuild `kiln-ui.dll` and launch with
+`KILN_CHAT_HISTORY=1 KILN_CHAT_HISTORY_TRACE=1` (not the diagnostic flag).
+Submit harmless slash commands and press Up/Down. Log should report
+`submit processed`, `recall older/newer entries=N changed=1`, and
+`engine edit replacement verified`. The logs never include command text.
+If `SetText ... readback failed` appears, revert the DLL and investigate the
+engine call ABI instead of retrying interactions.
+
 ### Read-only key/submission diagnosis after the failed preview (17 Nov 2026)
 
 The first history preview logged `chat history preview installed` and edit
