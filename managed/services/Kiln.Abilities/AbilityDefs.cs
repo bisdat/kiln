@@ -229,7 +229,7 @@ internal static class AbilityRegistry
     private static string HudText(Entry e)
     {
         var left = e.LocalCooldownUntil - Environment.TickCount64;
-        return left > 0 ? $"{e.Def.Name} [{e.Key?.Key}]: {left / 1000.0:F1} s" : "";
+        return left > 0 ? KilnText.T("abilities.cooldown", ("ability", e.Def.Name), ("key", e.Key?.Key), ("seconds", left / 1000.0)) : "";
     }
 
     // ---- services: channel, /cast, tick ----

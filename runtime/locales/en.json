@@ -199,14 +199,19 @@
   },
   "abilities": {
     "server_lacks": "the server does not have this ability",
-    "not_connected": "not connected to a Kiln server"
+    "not_connected": "not connected to a Kiln server",
+    "cooldown": "{ability} [{key}]: {seconds:F1} s"
   },
   "blocks": {
     "toast": {
       "baked_vfx": "{mod}: vfx \"{name}\" differs from the mod's build: rebuild the mod",
       "baked_material": "{mod}: material \"{name}\" differs from the mod's build: rebuild the mod",
       "new_vfx": "{mod}: new VFX \"{name}\": restart the game to see it",
-      "new_material": "{mod}: new material \"{name}\": restart the game to see it"
+      "new_material": "{mod}: new material \"{name}\": restart the game to see it",
+      "no_window": "{window} is not a window this game has",
+      "too_many": "too many commands waiting: slow down",
+      "command_failed": "{command} failed",
+      "server_value": "{config}: {path} is the server's: it can be changed after leaving"
     }
   },
   "creative": {
@@ -343,6 +348,107 @@
       "stopped": "Stopped",
       "fast": "Fast",
       "help": "For the whole world, until it is set back or the server restarts."
+    }
+  },
+  "checks": {
+    "title": "Guided checks",
+    "header": "Guided checks · {session}",
+    "session": {
+      "hosted": "hosted world",
+      "joined": "joined to a server (the checks run there)",
+      "server": "dedicated server",
+      "menu": "main menu: host a world or join a server to run checks"
+    },
+    "totals": "   {passed} passed · {failed} failed · {skipped} skipped · {never} never run",
+    "guard": "Achievement guard: {guard}",
+    "guard_warning": "GUARD WARNING: {warning}",
+    "ledger": "Ledger: {ledger}",
+    "idle": "No check is running. Pick one below, or run them all in order.",
+    "run_these": "Run these {count}",
+    "run_all": "Run all",
+    "refresh": "Refresh",
+    "queued": "{count} more queued",
+    "only_new": "Only the {count} check(s) new in Kiln {version}",
+    "none_server": "The server lists no checks.",
+    "none_mods": "No loaded mod registered checks.",
+    "area": "{area}  ({done}/{count} passed)",
+    "cheats_note": "Checks tagged cheats change the character for good: use a throwaway character and delete it afterwards.",
+    "verdict": {
+      "pass": "PASS",
+      "fail": "FAIL",
+      "skip": "SKIP"
+    },
+    "run": "Run",
+    "item": {
+      "needs": "{ids}  needs {needs}",
+      "refused": "    refused: {reason}",
+      "note": "    note: {note}"
+    },
+    "now": "Now: {title}",
+    "now_cheats": "{mod}/{id} · {area} · cheats",
+    "confirm": {
+      "before": "Before this check starts:",
+      "no": "No, do not run it",
+      "yes": "Yes, run it",
+      "yes_wait": "Yes, run it (read the text first)"
+    },
+    "setting_up": "(setting up…)",
+    "fail_note": "What went wrong? Enter records the fail with this line; Escape records it without one.",
+    "pass": "Pass",
+    "fail": "Fail…",
+    "skip": "Skip",
+    "stop": "Stop (no entry)",
+    "writing": "Writing the verdict…",
+    "assert": {
+      "ok": "ok   {what}",
+      "ok_detail": "ok   {what} — {detail}",
+      "fail": "FAIL {what}",
+      "fail_detail": "FAIL {what} — {detail}"
+    },
+    "hud": {
+      "confirming": "Check \"{title}\" asks a question first: open the list ({open})",
+      "finishing": "Check \"{title}\": writing the verdict",
+      "running": "Check \"{title}\": {instruction}   [pass {pass} · fail {fail} · skip {skip}]",
+      "setting_up": "setting up…"
+    },
+    "key": {
+      "category": "Guided checks",
+      "open": "Open the list of guided checks",
+      "pass": "Pass the running check",
+      "fail": "Fail the running check (then type one line)",
+      "skip": "Skip the running check"
+    },
+    "keys": "Keys: list {open} · pass {pass} · fail {fail} · skip {skip} (Kiln menu, Keys)"
+  },
+  "talents": {
+    "key": {
+      "category": "Talents",
+      "open": "Open the talent tree {tree}"
+    },
+    "no_server_trees": "the server does not have Kiln talent trees",
+    "not_connected": "not connected to a Kiln server",
+    "waiting": "Waiting for the server...",
+    "points": "Points: {0} available  ({1} of {2} spent)",
+    "select": "Select a talent.",
+    "level_cost": "Level {0} / {1}   Cost {2}",
+    "needs_all": "Needs all of: {0}",
+    "needs_one": "Needs one of: {0}",
+    "needs_points": "Needs {0} points spent in this tree",
+    "needs_level": "Needs character level {0}",
+    "unlock": "Unlock ({0})",
+    "next_level": "Next level ({0})",
+    "refund": "Refund",
+    "respec": "Respec (free)",
+    "close": "Close",
+    "tooltip": "{0}  ({1}/{2}, cost {3})",
+    "paused": "The game is paused: this applies when you resume.",
+    "effect": {
+      "attribute": "attribute {0} +{1}/level",
+      "buff": "buff {0}",
+      "game_node": "game node {0}",
+      "program": "program {0}",
+      "ability": "ability {0}",
+      "code": "code"
     }
   }
 }
