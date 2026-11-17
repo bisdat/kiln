@@ -11,18 +11,27 @@ resource backs it, and where its value sits.
   native/services/worldtables `material_name`): from the debug name of the first item that places the cell, else
   "Cell<id>" (also when that name is taken already).
 
+Besides the four kinds, `resource_types()` lists every resource of the archive by type, for resources.index.json: (GUID,
+part, name), the name being the root struct's BlobString member `debugName`, else `name` (Graph.field's lookup), "" for a
+type without one. The items and templates kinds read the same strings: those are kept by key while their rows are made,
+so only the other named types' strings are read again.
+
 A row is (name, order, key, sort, value): `order` is the archive's resource order (the first of two equal names is the
 one kept), `sort` the place of its bytes in the resource stream (values are decoded in that order, so every chunk is
 decompressed once), `value()` the live reader's JSON of it (live.Walker, depth 12).
 """
+import struct
 from collections import namedtuple
 
+from . import live
 from .live import Blob
 
 ITEM, TEMPLATE = "keen::ItemInfo", "keen::ecs::TemplateResource"
 SKILL_TREE, SKILL_NODE = "keen::SkillTreeResource", "keen::SkillTreeNode"
 TERRAFORMING = "keen::TerraformingEfficiencyRegistryResource"
 KINDS = ("items", "templates", "skills", "materials")
+NAME_MEMBERS = ("debugName", "name")
+RESOURCES_MAX = 250000  # entries of resources.index.json (an archive table holds at most 250,000 resources)
 
 Row = namedtuple("Row", "name order key sort value")
 
@@ -61,6 +70,7 @@ class Source:
 
     def __init__(self, kfc, graph, walker):
         self.kfc, self.g, self.walker = kfc, graph, walker
+        self.names = {}  # (resource key, offset of its name string) -> the string, as the items/templates rows read it
 
     def close(self):
         self.kfc.close()
@@ -109,14 +119,15 @@ class Source:
         t = self.need(ITEM)
         name_at = self.need_field(t, "debugName")[2]
         for order, key in enumerate(self.keys(ITEM)):
-            name = Blob(self.kfc.read(key)).blob_string(name_at)
+            name = self.names[(key, name_at)] = Blob(self.kfc.read(key)).blob_string(name_at)
             yield Row(name, order, key, self.stream_offset(key), self.value_of_resource(ITEM, key))
 
     def templates(self):
         t = self.need(TEMPLATE)
         name_at = self.need_field(t, "name")[2]
         for order, key in enumerate(self.keys(TEMPLATE)):
-            name = Blob(self.kfc.read(key)).blob_string(name_at) or key.guid
+            name = self.names[(key, name_at)] = Blob(self.kfc.read(key)).blob_string(name_at)
+            name = name or key.guid
             yield Row(name, order, key, self.stream_offset(key), self.value_of_resource(TEMPLATE, key))
 
     def _collection(self, type_name, array):
@@ -200,3 +211,50 @@ class Source:
                 taken.add(name)
                 yield Row(name, order, key, self.stream_offset(key) + at, self.value_of_row(el, blob, at))
                 order += 1
+
+    # ---- every resource, for resources.index.json ----
+    def name_member(self, t):
+        """The offset of a root struct's name string: its BlobString member debugName, else name; None without one."""
+        r = self.g.resolved(t) if t is not None else None
+        if r is None or r.kind != live.K_STRUCT:
+            return None
+        for member in NAME_MEMBERS:
+            f = self.g.field(r, member)
+            if f is None:
+                continue
+            ft = self.g.resolved(self.g.get(f[1]))
+            if ft is not None and ft.kind == live.K_BLOBSTRING:
+                return f[2]
+        return None
+
+    def _name_at(self, key, at):
+        """Blob.blob_string(at) of one resource, reading only its 8 bytes {i32 rel, u32 len} and the string."""
+        off, size = self.kfc.values[self.kfc.index[key]]
+        if not 0 <= at <= size - 8:
+            return ""
+        rel, n = struct.unpack("<iI", self.kfc.read_stream(off + at, 8))
+        if rel == 0 or n == 0 or n > 512 or not 0 <= at + rel <= size - n:
+            return ""
+        s = self.kfc.read_stream(off + at + rel, n)
+        return "" if any(c < 0x20 or c >= 0x7F for c in s) else s.decode("ascii")
+
+    def resource_types(self):
+        """{type name: (hash, [(guid, part, name)])} for every type of the archive, a type the reflection lacks as
+        "0x<8 hex>". Names the kinds read are reused; the other named types' strings are read in stream order (each
+        chunk is decompressed once)."""
+        out, total = {}, 0
+        for th in sorted(self.kfc.bundles):
+            t = self.g.hashed(th)
+            name = t.name if t is not None else f"0x{th:08x}"
+            keys = self.kfc.resources_of_type(th)
+            total += len(keys)
+            if total > RESOURCES_MAX:
+                raise KindError(f"the archive has more than {RESOURCES_MAX} resources")
+            at = self.name_member(t)
+            names = {}
+            if at is not None:
+                for key in sorted(keys, key=self.stream_offset):
+                    got = self.names.get((key, at))
+                    names[key] = got if got is not None else self._name_at(key, at)
+            out[name] = (th, [(key.guid, key[2], names.get(key, "")) for key in keys])
+        return out

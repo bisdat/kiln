@@ -562,7 +562,7 @@ class SnapshotTests(unittest.TestCase):
         d = self.root / key
         self.assertEqual(Path(r["path"]), d)
         self.assertEqual(sorted(p.name for p in d.iterdir()), sorted(
-            ["index.json"] + [f"{k}.index.json" for k in kinds.KINDS] + [f"{k}.data" for k in kinds.KINDS]))
+            ["index.json", "resources.index.json"] + [f"{k}.index.json" for k in kinds.KINDS] + [f"{k}.data" for k in kinds.KINDS]))
         raw = (d / "index.json").read_bytes()
         self.assertFalse(raw.startswith(b"\xef\xbb\xbf"))
         idx = json.loads(raw)
@@ -574,7 +574,9 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(idx["gameBuild"], "1")
         self.assertTrue(idx["tool"].startswith("kiln-bootsnap"))
         self.assertRegex(idx["written"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
-        self.assertEqual(idx["counts"], {"items": 4, "templates": 2, "skills": 2, "materials": 5})
+        self.assertEqual(idx["counts"], {"items": 4, "templates": 2, "skills": 2, "materials": 5, "resources": 12})
+        self.assertEqual(idx["tool"], "kiln-bootsnap 2")
+        self.assertEqual(sorted(idx["checksums"]), sorted(["resources.index.json"] + [f"{k}.{x}" for k in kinds.KINDS for x in ("index.json", "data")]))
         self.assertIn({"kind": "items", "name": "Material_T1_Wood_Logs", "reason": "duplicate name"}, idx["skipped"])
         self.assertIn({"kind": "skills", "name": "0x8efcc472", "reason": "duplicate name"}, idx["skipped"])
         self.assertTrue(any(s["kind"] == "items" and s["reason"].startswith("no name") for s in idx["skipped"]))
@@ -598,10 +600,86 @@ class SnapshotTests(unittest.TestCase):
                 at += n
             self.assertEqual(at, len(blob))
             total += len(ix["entries"])
-        self.assertEqual(total, sum(idx["counts"].values()))
+        self.assertEqual(total, sum(idx["counts"][k] for k in kinds.KINDS))
         got = snapshot.read_value(d, "skills", "0x8efcc472")
         self.assertEqual(got[1], {"id": 0x8efcc472, "cost": 3})
         self.assertEqual(got[0][3], f"{fnv('keen::SkillTreeResource'):08x}")
+
+    def test_resources_index_lists_every_resource_by_type(self):
+        # one resource of a type the reflection lacks: listed under "0x<hash>"
+        shutil.rmtree(self.game)
+        unknown = fnv("keen::NotReflected")
+        self.game = make_game(self.game, resources() + [("0000000d-0000-4000-8000-000000000000", unknown, 2, b"\0" * 16)])
+        r = self.make()
+        d = Path(r["path"])
+        self.assertEqual(r["counts"]["resources"], 13)
+        ix = json.loads((d / "resources.index.json").read_text())
+        self.assertEqual((ix["format"], ix["kind"]), (1, "resources"))
+        types = ix["types"]
+        self.assertEqual(sorted(types), sorted([f"0x{unknown:08x}", "keen::ImpactProgram", "keen::ItemInfo", "keen::SkillTreeResource",
+                                                "keen::TerraformingEfficiencyRegistryResource", "keen::ecs::TemplateResource"]))
+        for name, t in types.items():
+            self.assertEqual(t["hash"], name[2:] if name.startswith("0x") else f"{fnv(name):08x}")
+        g = lambda i: f"{i:08x}-0000-4000-8000-000000000000"  # noqa: E731
+        # every item, also the duplicate and the unnamed one, sorted by (name, GUID, part); the name as the archive has it
+        self.assertEqual(types["keen::ItemInfo"]["entries"], [
+            [g(6), 0, ""], [g(2), 0, "Block_T2_Stone_Rough"], [g(4), 0, "Build_TerrainMaterial_T1_Sand"],
+            [g(1), 0, "Material_T1_Wood_Logs"], [g(5), 0, "Material_T1_Wood_Logs"], [g(3), 0, "_Block_Stone_Rough_Crafting"]])
+        self.assertEqual(types["keen::ecs::TemplateResource"]["entries"], [[g(8), 0, ""], [g(7), 0, "NPC_Workshop_Fisher_Trader"]])
+        self.assertEqual(types["keen::SkillTreeResource"]["entries"], [[g(9), 0, ""]], "no root name member: unnamed")
+        self.assertEqual(types[f"0x{unknown:08x}"]["entries"], [["0000000d-0000-4000-8000-000000000000", 2, ""]])
+        # what kiln.boot answers for names:resources/<type>: an unnamed resource contributes its GUID to names
+        got = snapshot.read_resource_names(d, "keen::ecs::TemplateResource")
+        self.assertEqual(got["typeHash"], f"{TPL_T:08x}")
+        self.assertEqual(got["value"]["names"], [g(8), "NPC_Workshop_Fisher_Trader"])
+        self.assertEqual(got["value"]["resources"][1], {"resourceId": g(7), "part": 0, "name": "NPC_Workshop_Fisher_Trader"})
+        self.assertEqual(snapshot.read_resource_names(d, "keen::NotReflected")["typeHash"], f"{unknown:08x}", "by the name's hash")
+        self.assertIsNone(snapshot.read_resource_names(d, "keen::SceneResource"))
+
+    def test_resource_names_reuse_the_kinds_strings(self):
+        src = source_for(self.exe)
+        try:
+            for kind in ("items", "templates"):
+                list(src.rows(kind))
+            read = []
+            real = src._name_at
+            src._name_at = lambda key, at: read.append(key) or real(key, at)
+            types = src.resource_types()
+            self.assertEqual(read, [], "item and template names come from the kinds' rows")
+            self.assertIn((src.kfc.keys[0].guid, 0, "Material_T1_Wood_Logs"), types["keen::ItemInfo"][1])
+            fresh = source_for(self.exe)  # without the kinds first, the strings are read, the same
+            try:
+                self.assertEqual(fresh.resource_types(), types)
+            finally:
+                fresh.close()
+        finally:
+            src.close()
+
+    def test_a_snapshot_without_the_resource_list_is_rebuilt_once(self):
+        # kiln-bootsnap 1 wrote no resources.index.json and no checksum of it
+        self.make()
+        d = self.root / self.key()
+        (d / "resources.index.json").unlink()
+        marker = json.loads((d / "index.json").read_text())
+        marker["checksums"].pop("resources.index.json")
+        marker["counts"].pop("resources")
+        marker["tool"] = "kiln-bootsnap 1"
+        (d / "index.json").write_text(json.dumps(marker))
+        self.assertFalse(snapshot.valid(d, self.key()))
+        self.assertEqual(self.make()["status"], "made")
+        self.assertTrue((d / "resources.index.json").is_file())
+        self.assertEqual(self.make()["status"], "reused")
+        # a damaged list, or a count that does not match, is not reused either
+        for change in (lambda ix: ix["types"]["keen::ItemInfo"].update(hash="00000000"),
+                       lambda ix: ix["types"]["keen::ItemInfo"]["entries"].pop()):
+            ix = json.loads((d / "resources.index.json").read_text())
+            change(ix)
+            (d / "resources.index.json").write_text(json.dumps(ix))
+            marker = json.loads((d / "index.json").read_text())
+            marker["checksums"]["resources.index.json"] = snapshot.file_sha256(d / "resources.index.json")
+            (d / "index.json").write_text(json.dumps(marker))
+            self.assertFalse(snapshot.valid(d, self.key()))
+            self.assertEqual(self.make()["status"], "made")
 
     def test_same_key_writes_nothing(self):
         self.make()
@@ -934,6 +1012,9 @@ class CliTests(unittest.TestCase):
                 at += 1
         self.assertEqual(values[0]["value"], EXPECTED_ITEM)
         self.assertEqual(values[1]["value"], {"id": 0x8efcc472, "cost": 3})
+        rc, out, _ = self.run_cli("show", "--game", str(self.game), "names:resources/keen::ecs::TemplateResource")
+        self.assertEqual(rc, 0)
+        self.assertEqual(json.loads(out)["value"]["names"], ["00000008-0000-4000-8000-000000000000", "NPC_Workshop_Fisher_Trader"])
         rc, out, _ = self.run_cli("show", "--game", str(self.game), "item:Nope")
         self.assertEqual((rc, json.loads(out)), (1, {"query": "item:Nope", "found": False}))
 

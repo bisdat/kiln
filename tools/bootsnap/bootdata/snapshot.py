@@ -5,6 +5,7 @@ files, the finished-marker, reuse and replace.
     <game>/kiln/data/boot-gamedata/<key>/
         index.json                    written last: its presence is the finished-marker
         <kind>.index.json, <kind>.data    for items, templates, skills, materials
+        resources.index.json          every resource of the archive by type: (GUID, part, name)
 
 The producer writes into `<key>.tmp-<pid>/` and renames the directory, so a directory named by a key is complete or
 absent; a run that is killed leaves only its `.tmp-<pid>` directory, without `index.json`, which the next run removes.
@@ -21,10 +22,11 @@ import stat
 import time
 from pathlib import Path
 
-from .kinds import KINDS, KindError
+from .kinds import KINDS, KindError, RESOURCES_MAX, fnv1a32
 
 FORMAT = 1
-TOOL = "kiln-bootsnap 1"
+TOOL = "kiln-bootsnap 2"
+RESOURCES = "resources.index.json"
 VALUE_MAX = 4 * 1024 * 1024 - 256  # KILN_BOOT_RESULT_MAX less 256 bytes for the result wrapper
 INDEX_MAX = 32 * 1024 * 1024
 DATA_MAX = 1024 * 1024 * 1024
@@ -267,7 +269,8 @@ def empty_kinds(skipped):
 
 # ---- reading a snapshot back (reuse, `show`) ------------------------------------------------------------------------
 def valid(path, key):
-    """Verify all eight files before reuse. The marker's producer-only checksums are ignored by the format-1 reader;
+    """Verify all nine files before reuse (a snapshot without resources.index.json, from kiln-bootsnap 1, is rebuilt
+    once). The marker's producer-only checksums are ignored by the format-1 reader;
     older snapshots without them are rebuilt once. Mere file presence cannot detect a truncated or damaged cache."""
     p = Path(path)
     try:
@@ -301,8 +304,38 @@ def valid(path, key):
                 at += e[1]
             if at != (p / f"{kind}.data").stat().st_size:
                 return False
-        return True
+        file = p / RESOURCES
+        if _linked(file) or not file.is_file() or file.stat().st_size > INDEX_MAX or checksums.get(RESOURCES) != file_sha256(file, no_links=True):
+            return False
+        return _resources_ok(_read_index(file), idx.get("counts", {}).get("resources"))
     except (OSError, ValueError, TypeError, KeyError, IndexError, AttributeError, RecursionError):
+        return False
+
+
+_GUID = re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}")
+_HEX8 = re.compile(r"[0-9a-f]{8}")
+_TYPE = re.compile(r"[A-Za-z0-9_:]{1,160}")
+
+
+def _resources_ok(ix, count):
+    """resources.index.json as kiln.boot reads it: each type by its qualified name (or "0x<8 hex>" with that hash), its
+    hash as 8 lower hex digits (the name's FNV-1a), entries [GUID, part, name]; `count` entries in all."""
+    try:
+        if type(ix.get("format")) is not int or ix["format"] != FORMAT or ix.get("kind") != "resources" or not isinstance(ix.get("types"), dict):
+            return False
+        n = 0
+        for name, t in ix["types"].items():
+            if not isinstance(t, dict) or not isinstance(t.get("hash"), str) or not _HEX8.fullmatch(t["hash"]) or not isinstance(t.get("entries"), list):
+                return False
+            if name != f"0x{t['hash']}" and (not _TYPE.fullmatch(name) or "::" not in name or f"{fnv1a32(name):08x}" != t["hash"]):
+                return False
+            for e in t["entries"]:
+                if (not isinstance(e, list) or len(e) != 3 or not isinstance(e[0], str) or not _GUID.fullmatch(e[0])
+                        or type(e[1]) is not int or not 0 <= e[1] <= 0x7fffffff or not isinstance(e[2], str)):
+                    return False
+            n += len(t["entries"])
+        return type(count) is int and n == count <= RESOURCES_MAX
+    except (TypeError, KeyError, AttributeError):
         return False
 
 
@@ -325,6 +358,21 @@ def read_value(path, kind, name):
         f.seek(e[0])
         raw = f.read(e[1])
     return e, json.loads(raw.decode("utf-8"))
+
+
+def read_resource_names(path, type_name):
+    """What kiln.boot answers for names:resources/<type>: {"typeHash", "value": {"names", "resources"}}, or None when the
+    snapshot lists no resource of that type (by name, else by the name's FNV-1a hash)."""
+    types = _read_index(Path(path) / RESOURCES)["types"]
+    t = types.get(type_name)
+    if t is None:
+        h = f"{fnv1a32(type_name):08x}"
+        t = next((v for v in types.values() if v["hash"] == h), None)
+    if t is None or not t["entries"]:
+        return None
+    rows = sorted(t["entries"], key=lambda e: (e[2], e[0], e[1]))
+    return {"typeHash": t["hash"], "value": {"names": sorted({e[2] or e[0] for e in rows}),
+                                             "resources": [{"resourceId": e[0], "part": e[1], "name": e[2]} for e in rows]}}
 
 
 # ---- writing ----------------------------------------------------------------------------------------------------------
@@ -443,6 +491,26 @@ def write_kind(src, kind, out_dir, skipped, progress=None):
     return len(entries)
 
 
+def write_resources(src, out_dir, skipped, progress=None):
+    """resources.index.json: every resource of the archive by type (kinds.Source.resource_types), each type's entries
+    sorted by (name, GUID, part). Returns the count. An archive the rule cannot read is written empty with one
+    `skipped` line, as a kind is."""
+    try:
+        types = src.resource_types()
+    except KindError as e:
+        types = {}
+        skipped.append({"kind": "resources", "name": "", "reason": f"kind not read: {e}"})
+    out = {}
+    for name in sorted(types):
+        th, entries = types[name]
+        out[name] = {"hash": f"{th:08x}", "entries": [[g, part, n] for g, part, n in sorted(entries, key=lambda e: (e[2], e[0], e[1]))]}
+    count = sum(len(t["entries"]) for t in out.values())
+    _write_json(out_dir / RESOURCES, {"format": FORMAT, "kind": "resources", "types": out})
+    if progress:
+        progress("resources", count, count)
+    return count
+
+
 def make(game, src_factory, exe=None, force=False, root=None, progress=None, after_kind=None):
     exe = find_exe(game, exe)
     display_root = root_of(Path(game).resolve(strict=True))
@@ -496,6 +564,9 @@ def _make(game, src_factory, exe, force, root, progress, after_kind):
             counts[kind] = write_kind(src, kind, tmp, skipped, progress)
             if after_kind:
                 after_kind(kind, tmp)
+        counts["resources"] = write_resources(src, tmp, skipped, progress)  # after the kinds: it reuses their names
+        if after_kind:
+            after_kind("resources", tmp)
         src.close()  # the archive's files are not held open while the directory is renamed
         src = None
         text = version.decode("utf-8", "replace")
@@ -504,8 +575,8 @@ def _make(game, src_factory, exe, force, root, progress, after_kind):
             "gameBuild": text.split("|", 1)[0], "tool": TOOL,
             "written": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "counts": counts, "skipped": skipped, "runtimeOnly": [],
-            "checksums": {f"{k}.{s}": file_sha256(tmp / f"{k}.{s}")
-                          for k in KINDS for s in ("index.json", "data")},
+            "checksums": {**{f"{k}.{s}": file_sha256(tmp / f"{k}.{s}") for k in KINDS for s in ("index.json", "data")},
+                          RESOURCES: file_sha256(tmp / RESOURCES)},
         })
         _sync_dir(tmp)
         old = None
