@@ -396,6 +396,7 @@ internal static unsafe class ResourceStore
         public delegate* unmanaged[Cdecl]<Key*, int> ResourceIsNew;
         public void* ResourceNewCount, WhenResourcesReady, BlobAddEx, BlobOverrideEx, BlobCatalogOpen, BlobCatalogRead, BlobCatalogClose;
         public delegate* unmanaged[Cdecl]<Key*, uint, byte*, nuint, uint*, uint*, int> TextureRgba;
+        public delegate* unmanaged[Cdecl]<ContentHash*, void*, nuint, nuint*, int> BlobReadResident;
     }
 
     private static TableReads* Reads(int end)
@@ -436,17 +437,18 @@ internal static unsafe class ResourceStore
     }
 
     /// <summary>The bytes of a content blob (a mod's, else the game's own from its container), or null. At most
-    /// <paramref name="maxBytes"/>.</summary>
+    /// <paramref name="maxBytes"/>. For callers off the game's threads (a worker, a task): it never asks the game for its
+    /// content index itself (kiln.assets' blob_read_resident; null until the game has opened it).</summary>
     public static byte[]? ReadBlob(ReadOnlySpan<byte> hash16, int maxBytes = 64 << 20)
     {
-        var r = Reads(EndOf(nameof(TableReads.BlobRead)));
-        if (r == null || hash16.Length < 16) return null;
+        var r = Reads(EndOf(nameof(TableReads.BlobReadResident)));
+        if (r == null || r->BlobReadResident == null || hash16.Length < 16) return null;
         ContentHash h = MemoryMarshal.Read<ContentHash>(hash16);
         if (h.Size == 0 || h.Size > (uint)maxBytes) return null;
         var buffer = GC.AllocateUninitializedArray<byte>((int)h.Size);
         nuint got = 0;
         int rc;
-        fixed (byte* p = buffer) rc = r->BlobRead(&h, p, (nuint)buffer.Length, &got);
+        fixed (byte* p = buffer) rc = r->BlobReadResident(&h, p, (nuint)buffer.Length, &got);
         return rc == Ok && got == h.Size ? buffer : null;
     }
 

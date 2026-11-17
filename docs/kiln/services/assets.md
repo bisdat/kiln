@@ -191,9 +191,18 @@ write through it.
 Since 0.2.0-dev.29.15 (check `header.size >= offsetof(KilnAssetsApi, texture_rgba) + sizeof(void*)`): `texture_rgba(key,
 min_side, rgba, cap, &w, &h)`, a texture resource's pixels as the game reads them now (`keen::UiTextureResource` or
 `keen::RenderTextureResource`, a retexture or a mod's icon included), one mip level (the smallest whose sides are both at least
-`min_side`) decoded to RGBA8 (RGBA8, BGRA8, R8, BC1, BC3, BC4, BC5, BC7; others `KILN_ERR_INVALID_ARGUMENT`). Ask the size
-first (`rgba` NULL: `KILN_ERR_BUFFER_TOO_SMALL` with the size, no pixel read). It reads that one blob (an item icon's chain is
-87 KB). Kiln.Ui draws the game's item icons with it ([ui.md](../ui.md#item-icons-and-names)); it is not a managed API, and
+`min_side`) decoded to RGBA8 (RGBA8, BGRA8, R8, BC1, BC3, BC4, BC5, BC7; others `KILN_ERR_INVALID_ARGUMENT`). A level no mip
+fits (longer side over twice `min_side`: a mod's PNG icon has one level up to 512) is box-scaled down so its longer side is
+`min_side`, its shape kept; the size answered is that size. Ask the size first (`rgba` NULL: `KILN_ERR_BUFFER_TOO_SMALL` with
+the size, no pixel read). It reads that one blob (an item icon's chain is 87 KB), without asking the game for its content
+index (as `blob_read_resident`). The game's resident bytes are copied under a fault guard: a resource the game dropped
+meanwhile is `KILN_ERR_NOT_FOUND`, as is any `resource_read` of the game's own bytes that cannot be read.
+
+`blob_read_resident(hash, buffer, capacity, &len)` (since 0.2.0-dev.29.15, after `texture_rgba`; check `header.size >=
+offsetof(KilnAssetsApi, blob_read_resident) + sizeof(void*)`): `blob_read` for callers off the game's threads. `blob_read`
+asks the game's content-map accessor itself while the game has not opened its content index, which only the game's own
+threads may do (loading can own the reader then); `blob_read_resident` answers `KILN_ERR_NOT_FOUND` until the game has opened
+it, and is otherwise the same. Kiln.Items reads the game's texts with it (`Items.DisplayName`). Kiln.Ui draws the game's item icons with it ([ui.md](../ui.md#item-icons-and-names)); it is not a managed API, and
 Kiln writes the pixels nowhere. The pure part (layouts, the level, the decoders) is `native/services/assets/texture_rgba.h`,
 host-tested by `tests/test_texture_rgba.cpp` (`tests/run.sh`).
 

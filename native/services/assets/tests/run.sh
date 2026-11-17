@@ -11,7 +11,7 @@ out=$KILN_OUT/assets-host-test
 mkdir -p "$out"
 
 # The service's header is C: it compiles as C11.
-printf '#include <stddef.h>\n#include "services/kiln_assets.h"\n#include "services/kiln_assets_vfx.h"\n_Static_assert(KILN_ASSET_PUT_PIN == 4, "KILN_ASSET_PUT_PIN");\n_Static_assert(sizeof(KilnBlobCatalogInfo) == 32, "info");\n_Static_assert(sizeof(KilnBlobCatalogEntry) == 48, "entry");\n_Static_assert(sizeof(KilnAssetsVfxBudget) == 16, "vfx budget");\n_Static_assert(offsetof(KilnAssetsApi, texture_rgba) == offsetof(KilnAssetsApi, blob_catalog_close) + sizeof(void*), "texture_rgba appended");\n_Static_assert(offsetof(KilnAssetsApi, texture_rgba) == 216 && sizeof(KilnAssetsApi) == 224, "x64 layout");\n' |
+printf '#include <stddef.h>\n#include "services/kiln_assets.h"\n#include "services/kiln_assets_vfx.h"\n_Static_assert(KILN_ASSET_PUT_PIN == 4, "KILN_ASSET_PUT_PIN");\n_Static_assert(sizeof(KilnBlobCatalogInfo) == 32, "info");\n_Static_assert(sizeof(KilnBlobCatalogEntry) == 48, "entry");\n_Static_assert(sizeof(KilnAssetsVfxBudget) == 16, "vfx budget");\n_Static_assert(offsetof(KilnAssetsApi, texture_rgba) == offsetof(KilnAssetsApi, blob_catalog_close) + sizeof(void*), "texture_rgba appended");\n_Static_assert(offsetof(KilnAssetsApi, texture_rgba) == 216 && offsetof(KilnAssetsApi, blob_read_resident) == 224 && sizeof(KilnAssetsApi) == 232, "x64 layout");\n' |
   gcc -std=c11 -Wall -Wextra -pedantic -fsyntax-only -I"$here/../../../core/abi" -x c -
 echo "PASS kiln_assets.h compiles as C11"
 

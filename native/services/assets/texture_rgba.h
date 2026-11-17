@@ -115,6 +115,40 @@ inline uint32_t pick_level(const Desc& d, uint32_t min_side) {
     return l;
 }
 
+// The size texture_rgba answers for a level of lw x lh asked at min_side: the level itself, unless no mip fits (a mod's PNG
+// icon has one level up to 512, an odd texture may stop early): a level whose longer side is over twice min_side is scaled
+// down so its longer side is min_side, its shape kept. min_side 0: the level as it is.
+inline void fit_size(uint32_t lw, uint32_t lh, uint32_t min_side, uint32_t* ow, uint32_t* oh) {
+    *ow = lw, *oh = lh;
+    const uint32_t longer = std::max(lw, lh);
+    if (!min_side || longer <= 2 * min_side) return;
+    *ow = std::max(1u, static_cast<uint32_t>((static_cast<uint64_t>(lw) * min_side + longer / 2) / longer));
+    *oh = std::max(1u, static_cast<uint32_t>((static_cast<uint64_t>(lh) * min_side + longer / 2) / longer));
+}
+
+// A box filter from sw x sh RGBA to dw x dh (dw <= sw, dh <= sh): each output pixel the mean of the source pixels it covers,
+// colour weighted by alpha (no dark fringes at transparent edges).
+inline void downscale_box(const uint8_t* src, uint32_t sw, uint32_t sh, uint8_t* dst, uint32_t dw, uint32_t dh) {
+    for (uint32_t y = 0; y < dh; ++y) {
+        const uint32_t y0 = static_cast<uint32_t>(static_cast<uint64_t>(y) * sh / dh);
+        const uint32_t y1 = std::max(y0 + 1, static_cast<uint32_t>(static_cast<uint64_t>(y + 1) * sh / dh));
+        for (uint32_t x = 0; x < dw; ++x) {
+            const uint32_t x0 = static_cast<uint32_t>(static_cast<uint64_t>(x) * sw / dw);
+            const uint32_t x1 = std::max(x0 + 1, static_cast<uint32_t>(static_cast<uint64_t>(x + 1) * sw / dw));
+            uint64_t c[3] = {0, 0, 0}, a = 0, n = 0;
+            for (uint32_t yy = y0; yy < y1 && yy < sh; ++yy)
+                for (uint32_t xx = x0; xx < x1 && xx < sw; ++xx, ++n) {
+                    const uint8_t* p = src + (static_cast<size_t>(yy) * sw + xx) * 4;
+                    for (int k = 0; k < 3; ++k) c[k] += static_cast<uint64_t>(p[k]) * p[3];
+                    a += p[3];
+                }
+            uint8_t* q = dst + (static_cast<size_t>(y) * dw + x) * 4;
+            for (int k = 0; k < 3; ++k) q[k] = static_cast<uint8_t>(a ? (c[k] + a / 2) / a : 0);
+            q[3] = static_cast<uint8_t>(n ? (a + n / 2) / n : 0);
+        }
+    }
+}
+
 // Where `level` starts in the blob, and its size in pixels.
 inline size_t level_offset(const Desc& d, uint32_t level, uint32_t* lw, uint32_t* lh) {
     size_t off = 0;
