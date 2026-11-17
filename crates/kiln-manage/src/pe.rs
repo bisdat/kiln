@@ -301,11 +301,19 @@ pub fn classify_bytes(b: &[u8]) -> ProxyClass {
         "Wine builtin DLL".into()
     } else if has(DINPUT8_EXPORT) {
         "another dinput8 proxy (exports DirectInput8Create)".into()
+    } else if has("SteamAPI_Init") && has("SteamAPI_RunCallbacks") {
+        // the game's own steam_api64.dll (Valve's Steamworks API), which every install has next to the game: not a mod
+        // (two support reports, 2026-11-16, read "an unknown DLL, 311.6 KB" for it)
+        STEAMWORKS_DETAIL.into()
     } else {
         "a 64-bit DLL without known markers".into()
     });
     c
 }
+
+/// The detail of an Unknown proxy that is the game's own steam_api64.dll (exports SteamAPI_Init and
+/// SteamAPI_RunCallbacks): Valve's Steamworks API, which every install has next to the game; the report names it so.
+pub const STEAMWORKS_DETAIL: &str = "Steam's Steamworks API (exports SteamAPI_Init), as the game ships it";
 
 /// What the file at `path` is (ProxyKind::None when it does not exist).
 pub fn classify_proxy(path: &Path) -> Result<ProxyClass> {
@@ -418,6 +426,16 @@ mod tests {
         assert_eq!(parse(&d).unwrap().exports, ["DirectInput8Create", "emf_loader_identity"]);
         assert!(!is_pe64_dll(b"MZ not really"));
         assert!(!is_pe64_dll(b""));
+    }
+
+    #[test]
+    fn the_games_own_steam_api64_is_named_and_shroudlinks_proxy_still_is_shroudlink() {
+        let steam = classify_bytes(&build_test_dll(&["SteamAPI_Init", "SteamAPI_RunCallbacks", "SteamAPI_Shutdown"], b"valve"));
+        assert_eq!((steam.kind, steam.detail.as_deref()), (ProxyKind::Unknown, Some(STEAMWORKS_DETAIL)));
+        let shroudlink = classify_bytes(&build_test_dll(&["SteamAPI_Init", "SteamAPI_RunCallbacks"], b"LoadLibraryW steam_api64_o.dll"));
+        assert_eq!(shroudlink.kind, ProxyKind::Shroudlink);
+        let other = classify_bytes(&build_test_dll(&["SteamAPI_Init"], b""));
+        assert_eq!(other.detail.as_deref(), Some("a 64-bit DLL without known markers"), "one Steam export alone is not enough");
     }
 
     #[test]

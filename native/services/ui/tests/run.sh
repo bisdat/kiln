@@ -8,6 +8,9 @@ export KILN_OUT
 out=$KILN_OUT/ui-host-test
 mkdir -p "$out"
 bash "$here/run-window-constraints.sh"
+# the overlay's image budget: the descriptor pool holds every image Kiln lets exist, uploads spread over frames (image_budget.h)
+g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/image_budget_test.cpp" -o "$out/image_budget_test"
+"$out/image_budget_test" "$here/../vk.cpp"
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/render_math_test.cpp" -o "$out/render_math_test"
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/wheel_math_test.cpp" -o "$out/wheel_math_test"
 "$out/wheel_math_test"

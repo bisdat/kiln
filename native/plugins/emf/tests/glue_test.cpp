@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <map>
+#include <set>
 #include <stdexcept>
 #include <thread>
 
@@ -54,12 +55,14 @@ bool portraits_wait(const std::string &k) { return k != drawing_key; }
 bool portraits_drawing(const std::string &k) { return k == drawing_key; }
 void portraits_when_drawn(void (*fn)()) { when_drawn = fn; }
 int unsupported_calls = 0, refusals = 0;
+std::set<std::string> unsupported_fns;  // every function that reported itself not supported
 static void say(const char *what, const char *fn, const char *why) {
     if (std::getenv("KEMF_TEST_VERBOSE"))
         std::printf("  %s %s: %s\n", what, fn ? fn : "", why ? why : "");
 }
 void unsupported(const Mod *, const char *fn, const char *why) {
     ++unsupported_calls;
+    if (fn) unsupported_fns.insert(fn);
     say("unsupported", fn, why);
 }
 void refuse(const Mod *, const char *fn, const char *why, bool) {
@@ -257,7 +260,10 @@ static void test_window_sizing(KilnUiApi &ui) {
     d.widgets = nullptr; d.count = 0;
     CHECK(table.window_update(&d));
     const auto full = ui.header.size;
-    for (auto short_size : {offsetof(KilnUiApi, set_next_window_size_constraints), sizeof(KilnUiApi) - 1}) {
+    // a table that ends before the constraints slot, and one that ends a byte short of covering it (kiln.ui has grown
+    // past that slot since, so sizeof(KilnUiApi) - 1 no longer is that case)
+    for (auto short_size : {offsetof(KilnUiApi, set_next_window_size_constraints),
+                            offsetof(KilnUiApi, set_next_window_size_constraints) + sizeof(ui.set_next_window_size_constraints) - 1}) {
         ui.header.size = short_size;
         window_calls.clear(); size_calls = constraint_calls = 0;
         frame_fn(&fr, nullptr);
@@ -916,7 +922,7 @@ static void test_v40(KilnApi &api) {
         if (!slots[i] && i != offsetof(EmfApi, chat_tell_ex) / sizeof(void *) &&
             i != offsetof(EmfApi, chat_broadcast_ex) / sizeof(void *))
             ++empty;
-    CHECK(n - first == 45 && empty == 0);
+    CHECK(n - first == 52 && empty == 0);  // v28-v40: 45; v43: 1, v44: 3, v46: 3
     CHECK(!t.chat_tell_ex && !t.chat_broadcast_ex && !t.net_peer);
 
     auto *w = reinterpret_cast<EmfWorld *>(worlds[0]);
@@ -1024,6 +1030,95 @@ static void test_v40(KilnApi &api) {
     CHECK(!t.world_to_screen(10, 20, 30, &px, &py) && px == -1 && py == -1);
     render_ok = true;
     CHECK(unsupported_calls - before == counted);
+}
+
+// v43-v46 (EMF 0.6.13 and 0.6.14): seven functions Kiln does not carry yet, by the rules of v28-v40's. v45 added no
+// function (EmfBlockInfo.world, EMF_BREAK_WORLD); v46 also gave EmfMoveOrder hold_seconds (pad2's place) and the flag
+// EMF_MOVE_HOLD, which change nothing in the answer.
+static int v46_callbacks = 0;
+static void test_v46() {
+    EmfApi t{};
+    fill_v40(&t);
+    CHECK(t.player_permissions && t.break_blocks && t.block_at && t.find_wall && t.villager_move && t.villager_move_cancel &&
+          t.villager_moving);
+    auto *w = reinterpret_cast<EmfWorld *>(worlds[0]);
+    const int before = unsupported_calls, refused_before = refusals;
+    auto break_cb = [](EmfWorld *, uint32_t, const EmfBreakResult *, void *) { ++v46_callbacks; };
+    auto move_cb = [](EmfWorld *, uint32_t, uint32_t, void *) { ++v46_callbacks; };
+    const std::string not_yet = "not available on Kiln yet";
+
+    // v43: false and *perms = 0, as for an entity that is no player
+    uint32_t perms = 0x3F;
+    CHECK(!t.player_permissions(w, 7, &perms) && perms == 0);
+    CHECK(!t.player_permissions(w, 7, nullptr));
+
+    // v44: a break is refused with its reason and no callback; block_at and find_wall answer false and leave *out as
+    // it was (EMF writes it only on success): a mod built with 0.6.14's SDK keeps world = -1, "not known"
+    EmfBreakBlocks bb{};
+    bb.size = sizeof bb;
+    bb.flags = EMF_BREAK_INSTANT | EMF_BREAK_DROPS;
+    bb.x = 1, bb.y = 2, bb.z = 3, bb.radius = 2, bb.height = 1;
+    CHECK(t.break_blocks(w, &bb, break_cb, nullptr) == 0 && bb.why == not_yet);
+    // v45: the flag for the world's own blocks gets the same answer
+    bb = {};
+    bb.size = sizeof bb;
+    bb.flags = EMF_BREAK_WORLD;
+    CHECK(t.break_blocks(w, &bb, nullptr, nullptr) == 0 && bb.why == not_yet);
+    EmfBlockInfo info{};
+    info.size = sizeof info;
+    info.kind = 77;
+    info.world = -1;
+    const float from[3] = {0, 0, 0}, to[3] = {10, 0, 0};
+    CHECK(!t.block_at(w, 1, 2, 3, &info) && info.size == sizeof info && info.kind == 77 && info.world == -1);
+    CHECK(!t.find_wall(w, from, to, &info) && info.size == sizeof info && info.kind == 77 && info.world == -1);
+    info.size = 40;  // a v44 mod's EmfBlockInfo, before `world`
+    CHECK(!t.block_at(w, 1, 2, 3, &info) && !t.find_wall(w, from, to, &info) && info.size == 40 && info.kind == 77);
+    CHECK(!t.block_at(w, 1, 2, 3, nullptr) && !t.find_wall(w, nullptr, nullptr, nullptr));
+
+    // v46: a villager move gets enemy_move's refusal, with hold_seconds or EMF_MOVE_HOLD too, and no callback
+    EmfPathPoint point{1, 2, 3, 0};
+    EmfMoveOrder mo{};
+    mo.size = sizeof mo;
+    mo.enemy = 9;
+    mo.count = 1;
+    mo.points = &point;
+    CHECK(t.villager_move(w, &mo, move_cb, nullptr) == 0 && mo.why == not_yet);
+    mo.why[0] = 0;
+    mo.flags = EMF_MOVE_HOLD;
+    CHECK(t.villager_move(w, &mo, move_cb, nullptr) == 0 && mo.why == not_yet);
+    mo.why[0] = 0;
+    mo.flags = 0;
+    mo.hold_seconds = 60;
+    mo.stuck_seconds = 20;
+    CHECK(t.villager_move(w, &mo, move_cb, nullptr) == 0 && mo.why == not_yet);
+    mo = {};
+    mo.size = 128;  // a mod built with EMF 0.6.8's header
+    CHECK(t.villager_move(w, &mo, nullptr, nullptr) == 0 && mo.why == not_yet);
+    CHECK(!t.villager_move_cancel(1) && t.villager_moving(w, 9) == 0);
+    // enemy_move with EMF_MOVE_HOLD (EMF: "EMF_MOVE_HOLD is for villager_move"): refused as every order on Kiln
+    mo = {};
+    mo.size = sizeof mo;
+    mo.flags = EMF_MOVE_HOLD;
+    CHECK(t.enemy_move(w, &mo, move_cb, nullptr) == 0 && mo.why == not_yet);
+    CHECK(v46_callbacks == 0 && refusals == refused_before);
+    // each of the seven reported itself (one kiln.log line per mod and function, state/emf.json "unsupported")
+    for (const char *fn : {"player_permissions", "break_blocks", "block_at", "find_wall", "villager_move",
+                           "villager_move_cancel", "villager_moving"})
+        CHECK(unsupported_fns.count(fn) == 1);
+    const int counted = unsupported_calls - before;
+    CHECK(counted >= 7);
+
+    // a request whose size is below EMF's minimum is refused untouched (no `why`), as EMF refuses it
+    bb = {};
+    bb.size = sizeof bb - 1;
+    CHECK(t.break_blocks(w, &bb, break_cb, nullptr) == 0 && bb.why[0] == 0);
+    CHECK(t.break_blocks(w, nullptr, break_cb, nullptr) == 0);
+    mo = {};
+    mo.size = 127;
+    mo.flags = EMF_MOVE_HOLD;
+    CHECK(t.villager_move(w, &mo, move_cb, nullptr) == 0 && mo.why[0] == 0);
+    CHECK(t.villager_move(w, nullptr, move_cb, nullptr) == 0);
+    CHECK(refusals == refused_before + 4 && unsupported_calls - before == counted && v46_callbacks == 0);
 }
 
 static void test_wheel_and_right_clicks(KilnUiApi &ui) {
@@ -1293,6 +1388,7 @@ int main(int argc, char **argv) {
     test_attributes();
     test_wheel_and_right_clicks(ui);
     test_v40(api);
+    test_v46();
     windows_shutdown();
     CHECK(live_images == 0);
     std::printf("glue_test: %d checks, %d failures\n", checks, failures);

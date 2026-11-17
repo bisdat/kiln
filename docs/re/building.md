@@ -410,5 +410,8 @@ Written through the same code, with a new material in slot 85 copied from slot 4
 - **Drawn by a client:** a slot with its own cooked textures, rather than copied ones; the edge decoration of a new slot; a new item in the menu; a cooked armor piece.
 - Which UI reads the known-material sets (1.2).
 - The factory budget's amount (2.4); the capacity of the client's per-workshop recipe list map, `G38UiPlayData` (client `0x31b730`).
-- Whether a factory screen is the same builder as a bench's, `CraftingMenu` `0xb80050`, with `FbUiFactory` parts.
+- ~~Whether a factory screen is the same builder as a bench's, `CraftingMenu` `0xb80050`, with `FbUiFactory` parts.~~
+  Answered statically on client 26430625 (0.2.0-dev.29.15): it is not. HUD 28 (FactoryCrafting) has no case in the HUD
+  dispatcher's crafting switch; PlayStateUi draws it with the chest-style transfer screen `0xb9d0f0` (mode 2): docs/re/game-ui.md
+  section 5, "Factory screens".
 - Why a placed rack on open ground without `UsedItem` wasn't saved (section 5).

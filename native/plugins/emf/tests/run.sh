@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Host tests of kiln-emf's EmfApi v10 wheel, v18 attributes, v22-v26 logic and v28-v42 answers (src/v26_model.*, api_*.cpp
+# Host tests of kiln-emf's EmfApi v10 wheel, v18 attributes, v22-v26 logic and v28-v46 answers (src/v26_model.*, api_*.cpp
 # against fake Kiln services): no game, no Wine.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
@@ -7,6 +7,8 @@ here=$(cd "$(dirname "$0")" && pwd)
 out=$KILN_OUT/emf-host-test
 mkdir -p "$out"
 g++ -std=c++20 -Wall -Wextra -I"$here/../include" "$here/abi_test.cpp" -o "$out/abi_test"
+g++ -std=c++20 -Wall -Wextra -I"$here/../src" "$here/compat_ticks_test.cpp" -o "$out/compat_ticks_test"
+"$out/compat_ticks_test"
 "$out/abi_test"
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -I"$here/../include" -I"$here/../src" \
     "$here/v26_model_test.cpp" "$here/../src/v26_model.cpp" -o "$out/v26_model_test"

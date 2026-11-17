@@ -706,3 +706,39 @@ fn effect_run_names_obey_the_registry_byte_limit() {
     let report = run(&[d], &opts());
     assert!(report.diagnostics.iter().any(|d| d.severity == Severity::Error && d.message.contains("90")), "{}", report.to_text());
 }
+
+/// docs/kiln/modding/resource-patches.md: every blocks-file example passes the schema, and a patch is at least one change
+/// of set, append, addComponents, removeComponents (with nothing else, or an appended change of the game's value, refused).
+#[test]
+fn resource_patch_examples_pass_and_a_patch_needs_a_change() {
+    let doc = std::fs::read_to_string(repo().join("docs/kiln/modding/resource-patches.md")).unwrap();
+    let examples: Vec<&str> = doc.split("```json").skip(1).filter_map(|b| b.split("```").next()).filter(|b| b.contains("\"resourcePatches\"")).collect();
+    assert!(examples.len() >= 2, "{}", examples.len());
+    let d = tmp("resource-patch-examples");
+    std::fs::create_dir_all(d.join("blocks")).unwrap();
+    std::fs::write(d.join("kiln.mod.json"), r#"{"id":"patch-docs","version":"1.0.0","apiVersion":"0.2","side":"server","boot":true,"license":"MIT"}"#).unwrap();
+    for (i, e) in examples.iter().enumerate() {
+        std::fs::write(d.join(format!("blocks/example-{i}.json")), e).unwrap();
+    }
+    let r = run(&[d.clone()], &opts());
+    let errors: Vec<String> = r.diagnostics.iter().filter(|x| x.severity == Severity::Error).map(|x| format!("{}:{} {} {}", x.file, x.line, x.code, x.message)).collect();
+    assert!(errors.is_empty(), "{}", errors.join("\n"));
+    let guid = "82706b40-61b1-4b8f-8b23-dcec6971bda1";
+    let cases = [
+        (serde_json::json!({"resource": guid, "type": "keen::BalancingTable"}), true),
+        (serde_json::json!({"resource": guid, "type": "keen::BalancingTable", "append": {"steps": {"values": [{"mul": 2}]}}}), true),
+        (serde_json::json!({"resource": guid, "type": "keen::BalancingTable", "append": {"steps": {"values": [1], "below": true}}}), true),
+        (serde_json::json!({"resource": guid, "type": "keen::ecs::TemplateResource", "addComponents": []}), true),
+        (serde_json::json!({"resource": guid, "type": "keen::ecs::TemplateResource", "removeComponents": ["SpawnTime"]}), false),
+        (serde_json::json!({"resource": guid, "type": "keen::BalancingTable", "append": {"steps": {"values": [3, 5], "aboveLast": true}}}), false),
+    ];
+    for (i, (patch, bad)) in cases.iter().enumerate() {
+        let e = tmp(&format!("resource-patch-case-{i}"));
+        std::fs::create_dir_all(e.join("blocks")).unwrap();
+        std::fs::write(e.join("kiln.mod.json"), r#"{"id":"patch-case","version":"1.0.0","apiVersion":"0.2","side":"server","boot":true,"license":"MIT"}"#).unwrap();
+        std::fs::write(e.join("blocks/p.json"), serde_json::json!({"format": 1, "resourcePatches": {"one": patch}}).to_string()).unwrap();
+        let r = run(&[e], &opts());
+        let errors = r.diagnostics.iter().filter(|x| x.severity == Severity::Error).count();
+        assert_eq!(errors > 0, *bad, "case {i}: {patch}: {}", r.to_text());
+    }
+}

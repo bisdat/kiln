@@ -193,6 +193,13 @@
           "pattern": "0F B6 4E {gameplay/pi.transfer.type:d8} 85 C9 0F 84 ?? ?? ?? ?? 83 E9 01 0F 84 ?? ?? ?? ?? 83 E9 01 0F 84 ?? ?? ?? ?? 83 E9 01 0F 84 ?? ?? ?? ?? 83 F9 01 0F 85 ?? ?? ?? ?? 83 7E {gameplay/pi.transfer.slot:d8} 00 75 ?? 80 7E ?? 00"
         }
       ]
+    },
+    "@gameplay/CraftRecipe.factory_phase": {
+      "find": [
+        {
+          "pattern": "80 8C 24 {gameplay/craft.flags_frame:d32} {gameplay/craft.outputs_only:d8} 48 8D 8C 24 {gameplay/craft.ctx_frame:d32} 48 8B D6 E8 {gameplay/CraftRecipe:rel32} 85 C0 74 ?? 48 8B 03 80 38 05"
+        }
+      ]
     }
   },
   "constants": {
@@ -284,6 +291,15 @@
       "min_votes": 1
     },
     "gameplay/pi.transfer.slot": {
+      "min_votes": 1
+    },
+    "gameplay/craft.flags_frame": {
+      "min_votes": 1
+    },
+    "gameplay/craft.outputs_only": {
+      "min_votes": 1
+    },
+    "gameplay/craft.ctx_frame": {
       "min_votes": 1
     }
   },
@@ -395,6 +411,17 @@
         "gameplay/scpi.transfer",
         "gameplay/pi.transfer.type",
         "gameplay/pi.transfer.slot"
+      ]
+    },
+    "gameplay.craft_phase": {
+      "symbols": [
+        "gameplay/CraftRecipe",
+        "@gameplay/CraftRecipe.factory_phase"
+      ],
+      "constants": [
+        "gameplay/craft.flags_frame",
+        "gameplay/craft.outputs_only",
+        "gameplay/craft.ctx_frame"
       ]
     }
   }

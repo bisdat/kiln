@@ -976,6 +976,14 @@ void input_replay() {
                 logf(KILN_LOG_INFO, "ui: the game window delivers wheel messages; the raw wheel ignored");
                 break;
             }
+    // A batch with a window cursor position never moves Kiln's cursor by raw deltas as well. After a long frame (a
+    // hitch) the raw records queued ahead of the window's coalesced WM_MOUSEMOVE would fling the cursor by the whole
+    // unaccelerated motion and back within one frame, and a click between the two landed where the cursor never was.
+    for (const auto& m : q)
+        if (m.msg == WM_MOUSEMOVE) {
+            g_last_legacy_move = t;
+            break;
+        }
     for (const auto& m : q) {
         if (m.msg == WM_MOUSEMOVE) g_last_legacy_move = t;
         if (m.msg != kRawMouseMsg) {
@@ -1041,9 +1049,20 @@ void input_capture_changed() {
     const bool cap = capturing();
     if (cap == g_was_capturing) return;
     g_was_capturing = cap;
+    if (cap) {
+        // The mouse input of play, still queued, is not the new screen's: during play the game keeps its cursor at the
+        // window's centre for mouse look, so an attack click from just before the screen opened (or seconds of them,
+        // after a hitch) clicked whatever the screen has there (a Close button, "Clear the list").
+        std::lock_guard<std::mutex> lk(g_qmu);
+        g_queue.erase(std::remove_if(g_queue.begin(), g_queue.end(),
+                                     [](const Msg& x) { return x.msg == kRawMouseMsg || is_mouse_msg(x.msg); }),
+                      g_queue.end());
+    }
     if (ImGui::GetCurrentContext()) {
         ImGuiIO& io = ImGui::GetIO();
         io.MouseDrawCursor = cap;
+        if (cap)  // a button held in play (the game had its press) is up for the screen: its release clicks nothing
+            for (int b = 0; b < ImGuiMouseButton_COUNT; ++b) io.AddMouseButtonEvent(b, false);
         if (!cap) {
             io.ClearInputKeys();
             g_pad_fed_any = false;

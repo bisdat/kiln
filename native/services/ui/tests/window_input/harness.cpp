@@ -39,12 +39,15 @@
 #include "key_names.h"
 #include "ui.h"
 #include "raw_input_source.h"
+#include "backends/imgui_impl_win32.h"
+#include "imgui.h"
+#include "imgui_internal.h"
 
 // ---- what input.cpp needs from ui.cpp ----
 namespace kui {
 const KilnApi* g_api = nullptr;
 KilnOwner g_owner = 0;
-std::atomic<uint32_t> g_demand{0}, g_interactive{0}, g_render_demand{0}, g_hover_panels{0};
+std::atomic<uint32_t> g_demand{0}, g_interactive{0}, g_render_demand{0}, g_hover_panels{0}, g_footer_demand{0};
 std::atomic<bool> g_menu_open{false}, g_text_input{false}, g_want_mouse{false}, g_wheel_active{false}, g_page_capture{false};
 std::atomic<HWND> g_hwnd{nullptr};  // input_poll_window's (drawing off); never called here
 thread_local CallbackLifetime* t_callback = nullptr;
@@ -1525,6 +1528,76 @@ void layout_scan_codes() {
 
 }  // namespace
 
+// ---- the overlay's replay into ImGui as a Kiln screen opens (input_capture_changed, input_replay) ----
+int imgui_presses(int button) {
+    int n = 0;
+    for (const ImGuiInputEvent& e : ImGui::GetCurrentContext()->InputEventsQueue)
+        if (e.Type == ImGuiInputEventType_MouseButton && e.MouseButton.Button == button && e.MouseButton.Down) ++n;
+    return n;
+}
+std::string imgui_positions() {
+    std::string s;
+    for (const ImGuiInputEvent& e : ImGui::GetCurrentContext()->InputEventsQueue)
+        if (e.Type == ImGuiInputEventType_MousePos) {
+            char b[48];
+            std::snprintf(b, sizeof b, " (%.0f, %.0f)", e.MousePos.PosX, e.MousePos.PosY);
+            s += b;
+        }
+    return s;
+}
+void imgui_events_taken() { ImGui::GetCurrentContext()->InputEventsQueue.resize(0); }
+
+void replay_screen_opens() {
+    fresh();
+    ImGui::CreateContext();
+    ImGui::GetIO().DisplaySize = ImVec2(1920, 1080);
+    check(ImGui_ImplWin32_Init(g_win), "ImGui's Win32 backend on the test window");
+    kui::input_replay();  // what the cases above left queued
+    imgui_events_taken();
+
+    // play: the game keeps its cursor at the centre for mouse look; an attack click, then a Kiln screen opens before
+    // the overlay's next frame (or a hitch kept the frame back)
+    send(WM_MOUSEMOVE, 0, MAKELPARAM(960, 540));
+    send(WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(960, 540));
+    send(WM_LBUTTONUP, 0, MAKELPARAM(960, 540));
+    send(WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(960, 540));  // held as the screen opens
+    kui::g_interactive = 1;
+    kui::input_capture_changed();
+    kui::input_replay();
+    check(imgui_presses(0) == 0, "a screen that opens gets no click of play that was still queued (%d presses)", imgui_presses(0));
+    imgui_events_taken();
+    send(WM_LBUTTONUP, 0, MAKELPARAM(960, 540));  // the held button's release: up already, it clicks nothing
+    send(WM_MOUSEMOVE, 0, MAKELPARAM(100, 100));
+    send(WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(100, 100));
+    send(WM_LBUTTONUP, 0, MAKELPARAM(100, 100));
+    kui::input_replay();
+    check(imgui_presses(0) == 1, "a click on the open screen reaches it (%d presses)", imgui_presses(0));
+    imgui_events_taken();
+
+    // a hitch: no frame for 300 ms, the mouse moved; raw records come ahead of the window's coalesced WM_MOUSEMOVE
+    Sleep(300);
+    send(WM_INPUT, RIM_INPUT, raw_mouse(0, 500, 40));
+    send(WM_MOUSEMOVE, 0, MAKELPARAM(120, 100));
+    kui::input_replay();
+    const std::string hitch = imgui_positions();
+    check(hitch == " (120, 100)", "after a hitch the cursor goes where the window says, not by raw deltas first:%s", hitch.c_str());
+    imgui_events_taken();
+
+    // raw motion only (Wine's pointer lock, no WM_MOUSEMOVE for 250 ms): the raw deltas still move Kiln's cursor
+    Sleep(300);
+    send(WM_INPUT, RIM_INPUT, raw_mouse(0, 30, 0));
+    kui::input_replay();
+    const std::string raw_only = imgui_positions();
+    check(raw_only == " (150, 100)", "raw motion alone still moves Kiln's cursor:%s", raw_only.c_str());
+    imgui_events_taken();
+
+    kui::g_interactive = 0;
+    kui::input_capture_changed();
+    kui::input_replay();
+    ImGui_ImplWin32_Shutdown();
+    ImGui::DestroyContext();
+}
+
 int main() {
     if (!patch_import("GetRawInputData", reinterpret_cast<void*>(&fake_raw), reinterpret_cast<void**>(&g_real_raw))) {
         std::printf("FAIL this exe imports no GetRawInputData to stand in for\n");
@@ -1594,6 +1667,7 @@ int main() {
     kui::keys_unsubscribe(kiln_ui_h);
     mouse_subscribers();
     mouse_key_names();
+    replay_screen_opens();
 
     std::printf("%s: %d checks, %d failed\n", g_fails ? "FAIL" : "PASS", g_checks, g_fails);
     return g_fails ? 1 : 0;

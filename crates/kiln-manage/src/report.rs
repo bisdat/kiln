@@ -706,6 +706,8 @@ fn listing(root: &Path, prefix: &str, depth: usize, out: &mut Vec<String>, skip:
 fn proxy_text(c: &ProxyClass) -> String {
     let name = match c.kind {
         ProxyKind::None => return "missing".into(),
+        ProxyKind::Unknown if c.detail.as_deref() == Some(crate::pe::STEAMWORKS_DETAIL) => return format!("Steam's own Steamworks DLL{}",
+            c.size.map(|n| format!(", {}", crate::util::human_size(n))).unwrap_or_default()),
         ProxyKind::Unknown => "an unknown DLL".to_string(),
         ProxyKind::NotDll => "not a 64-bit DLL".to_string(),
         k => crate::engines::Engine::of_proxy(k).map(|e| e.name().to_string()).unwrap_or_else(|| format!("{k:?}")),

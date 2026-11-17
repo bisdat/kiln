@@ -5,7 +5,8 @@
 //   - one loader thread: wait "bootDelay" ms, then every "updateDelay" ms: reload shroudtopia.json when it changed;
 //     while "active", look for new mod DLLs; Load each new mod that supports this side; Activate / Update /
 //     Deactivate each loaded mod by "mods.<mod name>.active";
-//   - mods: the active profile's "shroudtopia" entries (a mod folder or a DLL), then <game>/mods/<name>/ folders with
+//   - mods: the active profile's "shroudtopia" entries (a mod folder or a DLL), the Shroudtopia module of its "eml"
+//     entries (an EML mod may ship one beside its Lua: Skill Search), then <game>/mods/<name>/ folders with
 //     a mod.json and <game>/mods/*.dll (compat.h's profile rule). Unlike Shroudtopia, a DLL is loaded only when its
 //     file exports CreateModInstance, so other loaders' DLLs in mods/ (Flame, EML packages) are never run by it;
 //   - each call into a mod runs under a fault guard: a mod that faults is switched off, the game runs on;
@@ -84,6 +85,9 @@ std::set<std::wstring> g_seen;           // DLL paths already handled (loaded, o
 std::map<std::wstring, std::string> g_refused;  // path -> reason, for the status file
 std::string g_stepped_aside;
 kcompat::EnginePlan g_plan;
+// The profile's EML entries: an EML mod may ship a Shroudtopia module beside its Lua (Skill Search draws its search
+// box with one, the In Game Ping System its markers). The EML part is EML's (or ShroudForge's); the module is ours.
+kcompat::EnginePlan g_eml_plan;
 fs::path g_game, g_state;
 bool g_server = false;
 std::atomic<uint64_t> g_cycles{0};
@@ -290,6 +294,17 @@ std::vector<Candidate> scan() {
             add_dll_file(r.path, r.path.parent_path(), r.id, "profile");
         }
     }
+    // the Shroudtopia module of an EML entry of the profile (the folder scan below finds it only with drop-ins on)
+    for (const auto& r : g_eml_plan.listed) {
+        std::error_code ec;
+        if (!r.enabled || !fs::is_directory(r.path, ec) || kcompat::exists(r.path / L"flame.json")) continue;
+        Candidate c;
+        if (!folder_dll(r.path, r.id, &c, nullptr)) continue;  // an EML mod without a module: nothing of ours
+        if (profile_ids.count(kcompat::lower(c.id))) continue;
+        c.origin = "profile-eml";
+        profile_ids.insert(kcompat::lower(c.id));
+        out.push_back(std::move(c));
+    }
     if (!g_plan.read_folder) return out;
     const fs::path mods = g_game / L"mods";
     std::vector<fs::path> dirs, files;
@@ -461,7 +476,7 @@ void check_and_load() {
                    m->target.c_str(), kShroudtopiaVersion);
         loader_log(KILN_LOG_INFO, "Registered mod: " + m->name + " " + m->version + " by " + m->author + " (" + m->origin + ", " +
                                       path_utf8(c.dll) + ")");
-        config::ensure_profile_entry(m->name, m->origin == "profile");
+        config::ensure_profile_entry(m->name, m->origin == "profile" || m->origin == "profile-eml");
         g_ctx->registeredMods[path_utf8(c.dll)] = inst;  // as Shroudtopia: keyed by the DLL path (only this thread writes)
         std::lock_guard lock(g_mu);
         g_mods.push_back(std::move(m));
@@ -675,12 +690,17 @@ void note_idle_loader() {
 // <game>/mods (top level or one folder down). Without any, the plugin stays idle: no loop thread, no settings file.
 bool anything_to_load() {
     if (!g_plan.listed.empty()) return true;
-    if (!g_plan.read_folder) return false;
-    if (kcompat::exists(g_game / L"shroudtopia.json")) return true;
     std::error_code ec;
     auto is_mod_dll = [](const fs::path& f) {
         return kcompat::lower(to_utf8(f.extension().wstring())) == ".dll" && kcompat::pe_exports_name(f, "CreateModInstance");
     };
+    for (const auto& r : g_eml_plan.listed) {
+        if (!r.enabled || !fs::is_directory(r.path, ec) || kcompat::exists(r.path / L"flame.json")) continue;
+        for (const auto& f : fs::directory_iterator(r.path, ec))
+            if (is_mod_dll(f.path())) return true;
+    }
+    if (!g_plan.read_folder) return false;
+    if (kcompat::exists(g_game / L"shroudtopia.json")) return true;
     for (const auto& e : fs::directory_iterator(g_game / L"mods", ec)) {
         if (is_mod_dll(e.path())) return true;
         if (!e.is_directory(ec) || !kcompat::exists(e.path() / L"mod.json") || kcompat::exists(e.path() / L"flame.json")) continue;
@@ -696,6 +716,7 @@ void KILN_CALL on_ready(void*) {
     g_state = H.state_dir();
     g_server = H.api->side() == KILN_SIDE_SERVER;
     g_plan = kcompat::plan_engine(H, "shroudtopia");
+    g_eml_plan = kcompat::plan_engine(H, "eml");
     if (!anything_to_load() && own_loader_in_process().empty()) {
         H.logf(KILN_LOG_INFO, "kiln-shroudtopia %s: no Shroudtopia mods (%s); idle until the next start", kPluginVersion, g_plan.note.c_str());
         return;

@@ -24,6 +24,9 @@ for mode in r4-fallback-noworld r4-fallback-play r4-fallback-server r4-fallback-
     entities entities-threads entities-late entities-refuse entities-partial-refuse entities-sigrefuse entities-tick entities-filter; do
     "$out/remaining_hooks_test" "$mode"
 done
+g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined \
+    -I"$here/../../../core/abi" "$here/craft_phase_test.cpp" -o "$out/craft_phase_test"
+"$out/craft_phase_test"
 g++ -std=c++20 -O1 -g -pthread -Wall -Wextra -fsanitize=address,undefined \
     -I"$here/../../../core/abi" "$here/late_fixture_test.cpp" -o "$out/late_fixture_test"
 "$out/late_fixture_test"

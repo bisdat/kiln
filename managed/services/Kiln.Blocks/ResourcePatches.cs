@@ -11,7 +11,8 @@ namespace Kiln;
 
 /// <summary>Fields of one game resource, set before the game reads it. Stage it in <see cref="Mod.OnBoot"/>:
 /// <c>BootDefinitions.For(boot).Define("more-altars", new ResourcePatchBlock { ... })</c>. Numbers, bools and enums
-/// only. Two mods that set one field are not combined: the later mod's boot content is refused.</summary>
+/// only. Two mods that set one field are not combined: the later mod's boot content is refused. A patch is applied whole
+/// or not at all: when one of its changes cannot be written, none of them is kept and the fault names the patch.</summary>
 /// <example>
 /// <code>
 /// new ResourcePatchBlock
@@ -33,8 +34,55 @@ public sealed record ResourcePatchBlock : IBlock
     public int Part { get; init; }
 
     /// <summary>Member path to value. A path: members by name (<c>a.b</c>), <c>[i]</c> an element of a list that exists,
-    /// <c>[*]</c> every element.</summary>
+    /// <c>[*]</c> every element. On a template (<c>keen::ecs::TemplateResource</c>) a path starts with a component's
+    /// type name: <c>"PickupItemZone.lastAttempt.value"</c>.</summary>
     public Dictionary<string, ResourceValue> Set { get; init; } = new(StringComparer.Ordinal);
+
+    /// <summary>A template's components to take out, by type name (<c>"SpawnTime"</c>); one the template hasn't got
+    /// is skipped. Made before <see cref="AddComponents"/>, <see cref="Append"/> and <see cref="Set"/>.
+    /// <c>CurrentTransform</c> and what an actor needs to live are refused.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<string>? RemoveComponents { get; init; }
+
+    /// <summary>Components of the game's types a template gets (by type name, <c>"PickupItemZone"</c>), zeroed; one it
+    /// has already stays as it is. <see cref="Set"/> then fills their fields in. The template's list stays sorted by type
+    /// name, as the game's are.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<string>? AddComponents { get; init; }
+
+    /// <summary>List path to values added at its end: a list of numbers, bools or enum members
+    /// (<c>"difficultySettings.settingValues.enemyDamage.steps"</c>). Made before <see cref="Set"/>.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, ResourceListAppend>? Append { get; init; }
+
+    internal bool HasWork => Set.Count > 0 || RemoveComponents?.Count > 0 || AddComponents?.Count > 0 || Append?.Count > 0;
+
+    /// <summary>What kiln.content would refuse in the patch's shape that Kiln.Blocks can see first; null when nothing.</summary>
+    internal string? Problem()
+    {
+        foreach (var (path, append) in Append ?? [])
+        {
+            if (append is null) return $"append \"{path}\": no values";
+            if (append.Values is null || append.Values.Count == 0) return $"append \"{path}\": no values";
+            if (append.Values.Any(v => v.IsChange))
+                return $"append \"{path}\": a value is a number, a bool or an enum member's name, not a change of the game's value ({{ mul, add, min, max }})";
+        }
+        foreach (var (name, list) in new[] { ("removeComponents", RemoveComponents), ("addComponents", AddComponents) })
+            if (list?.Any(string.IsNullOrEmpty) == true) return $"{name}: a component's type name is empty";
+        return null;
+    }
+}
+
+/// <summary>Values a resource patch adds to the end of a list (<see cref="ResourcePatchBlock.Append"/>).</summary>
+public sealed record ResourceListAppend
+{
+    /// <summary>The values, in order: numbers, bools or enum members' names (a change such as <see cref="ResourceValue.Times"/> is
+    /// refused: there is no game's value to change).</summary>
+    public List<ResourceValue> Values { get; init; } = [];
+
+    /// <summary>Only a value greater than the list's last (the last one added counts) is added: a sorted list stays sorted,
+    /// and values the game's list already reaches are left out.</summary>
+    public bool AboveLast { get; init; }
 }
 
 /// <summary>What a resource patch writes into one field: a plain value, or a change of the game's own value

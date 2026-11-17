@@ -1,0 +1,2076 @@
+// SPDX-License-Identifier: MIT
+// kiln.stations (since 0.2.0-dev.29): the production stations of a base and the game's own station actions, for code.
+// ABI native/core/abi/services/kiln_stations.h, evidence docs/re/stations.md, logic without game memory in
+// stations_logic.h (host test tests/stations_test.cpp).
+//
+//  - Reads (tick thread, Pre or Post): the game's PlayerBasesSystemServer (its base records, each with the
+//    crafting-stock list and the water-source list the game rebuilds every server frame), BaseAtPosition (the game's own
+//    lookup), FactoryStation / Crafting / BaseIdComponent through kiln.world, inventories through kiln.items' reads,
+//    recipes and ingredient categories from the game's RecipeRegistry, the game's own ResolveRecipeInputs.
+//  - Actions: kiln_items_stations, a system program registered through kiln.world with player_crafting's own access
+//    (minus PlayerInput / ServerConsumedPlayerInput, plus Crafting). FILL calls the game's AutoTransferRecipe (the code of
+//    the "fill from chests" button) on an inventory transaction set up as the game's handler sets it up, with the
+//    station's base stock and no player; STOP / RESUME / SELECT write FactoryStation as the game's player_crafting does
+//    (the program's tracked write) after ServerFactoryInfo is told. Every game call and game read is guarded.
+//  - Events: while a watch is on, Pre reads every known station's FactoryStation and diffs it; a scan of the world's
+//    entities every 32 steps finds stations placed and removed and the bases' changes.
+#include "stations.h"
+
+#include <windows.h>
+
+#include <algorithm>
+#include <atomic>
+#include <cmath>
+#include <cstddef>
+#include <cstdio>
+#include <cstring>
+#include <mutex>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+#include "../quests/kiln_knowledge.h"
+#include "engine.h"
+#include "equip.h"
+#include "equip_logic.h"
+#include "instances.h"
+#include "sets.h"
+#include "stations_logic.h"
+#include "services/kiln_caps.h"
+#include "services/kiln_gameplay.h"
+#include "services/kiln_players.h"
+#include "services/kiln_stations.h"
+#include "xfer.h"
+
+namespace kitems {
+namespace {
+
+using namespace stations;
+
+#define LOGI(...) items_log(KILN_LOG_INFO, __VA_ARGS__)
+#define LOGW(...) items_log(KILN_LOG_WARN, __VA_ARGS__)
+#define LOGE(...) items_log(KILN_LOG_ERROR, __VA_ARGS__)
+
+constexpr const char* kProgram = "kiln_items_stations";
+constexpr uint32_t kMaxPending = 1024;
+constexpr uint32_t kPerStep = 16;
+constexpr uint64_t kTimeoutSteps = 250;      // ~10 s: a request the program did not run is answered DROPPED
+constexpr uint64_t kScanEvery = 32;          // steps between scans of the world's stations and altars
+constexpr uint32_t kMaxStations = 4096;
+constexpr uint32_t kMaxAltars = 64;
+constexpr uint64_t kAfterCraftMaxSteps = 24 * 60 * 60;  // ~1 h of steps: a stop waiting for a cycle's end gives up
+constexpr uint32_t kRecipeVecInline = KILN_STATIONS_MAX_INPUTS;
+
+template <typename T>
+T rd(const void* p, int64_t off) {
+    T v;
+    std::memcpy(&v, static_cast<const uint8_t*>(p) + off, sizeof v);
+    return v;
+}
+template <typename T>
+void wr(void* p, int64_t off, T v) {
+    std::memcpy(static_cast<uint8_t*>(p) + off, &v, sizeof v);
+}
+
+uint32_t fnv(const char* s) {
+    uint32_t h = 0x811c9dc5u;
+    for (; *s; ++s) h = (h ^ static_cast<uint8_t>(*s)) * 0x01000193u;
+    return h;
+}
+uint32_t comp_hash(const char* name) {
+    char b[96];
+    std::snprintf(b, sizeof b, "keen::ecs::%s", name);
+    return fnv(b);
+}
+KilnStr str(const char* s) { return KilnStr{s, std::strlen(s)}; }
+
+// ---- the game's functions and layouts (sigdb server.d/stations.json) ----
+struct BaseHit {  // BaseAtPosition's result: {u8 error (0 found, 0x1f none); ...; u8 index at +8}
+    uint8_t error;
+    uint8_t pad[7];
+    uint8_t index;
+    uint8_t pad2[7];
+};
+using BaseAtFn = BaseHit*(__fastcall*)(BaseHit* out, void* bases, const float* position);
+// int AutoTransferRecipe(tx, const BaseStock* {A.ptr, A.count, B.ptr, B.count}, const {stacks*, count}* inputs,
+//                        u32 station, u16 crafts, u32 waterCharges, u32 player)
+using FillFn = int32_t(__fastcall*)(void* tx, const void* stock, const void* inputs, uint32_t station, uint16_t crafts,
+                                    uint32_t water_charges, uint32_t player);
+// ResolveRecipeInputs(recipe, DynamicArray<RecipeItemStack 24 B>* out, const RecipeInputCategorySelections*, RecipeRegistry*)
+using ResolveFn = void(__fastcall*)(const void* recipe, void* out, const void* selections, void* recipes);
+using InvalidateFn = void(__fastcall*)(void* factory_info, uint32_t station);
+using SpeedFn = float(__fastcall*)(void* balancing);
+using ProgramTimeFn = int64_t*(__fastcall*)(void* ctx, int64_t* out);
+using RecipeFindFn = void*(__fastcall*)(uint32_t id, void* recipes);
+
+struct Game {
+    BaseAtFn base_at = nullptr;
+    FillFn fill = nullptr;
+    ResolveFn resolve = nullptr;
+    InvalidateFn invalidate = nullptr;
+    SpeedFn speed = nullptr;
+    ProgramTimeFn program_time = nullptr;
+    RecipeFindFn recipe_find = nullptr;
+    int64_t bases_count = 0, stride = 0, aabb_y = 0, zone_mask_rel = 0, zones = 0, stock_items = 0, stock_items_count = 0,
+            stock_water = 0, stock_water_count = 0;
+    int64_t cat_bits = 0, cat_cap = 0, cat_keys = 0, cat_values = 0, cat_count = 0;
+    int64_t fs_next = 0, fs_next_sel = 0, fs_stopped = 0, fs_use_all = 0, fs_start = 0, fs_pause = 0, fs_missing = 0,
+            fs_running = 0, fs_running_sel = 0, fs_size = 0;
+    int64_t recipe_duration = 0, recipe_water = 0;
+    bool read = false, fill_ok = false, control = false, events = false;
+};
+Game G;
+
+// FactoryStation (reflection, docs/re/stations.md §1.1) and the other components read
+constexpr int64_t kFsState = 0x00;
+constexpr int64_t kCraftingWorkshop = 0x10;   // Crafting.workshopId
+constexpr int64_t kRecipeId = 0x10, kRecipeWorkshop = 0x24, kRecipeInputs = 0x28, kRecipeOutputs = 0x30,
+                  kRecipeKnowledge = 0x50;     // RecipeInfo
+constexpr uint32_t kInputStride = 48, kOutputStride = 24;
+constexpr int64_t kInputItem = 0x10, kInputCount = 0x14, kInputCategory = 0x28, kInputCategoryCount = 0x2c;
+constexpr uint32_t kSetupBases = 0xD8, kSetupPosition = 0xE0, kSetupNetworkFuel = 0x68;  // the setup block (items.md §3)
+
+const KilnApi* g_api = nullptr;
+KilnOwner g_owner = 0;
+const KilnWorldApi* g_w = nullptr;
+const KilnPlayersApi* g_players = nullptr;
+const KilnKnowledgeApi* g_know = nullptr;
+const KilnGameplayApi* g_gameplay = nullptr;
+
+uint32_t H_FACTORY = 0, H_CRAFTING = 0, H_BASE_ID = 0, H_TRANSFORM = 0, H_NETWORK_FUEL = 0;
+
+std::mutex g_mu;  // everything below that is not atomic; never held while calling the game or a callback
+char g_detail[160] = "not resolved";
+std::atomic<bool> g_off{false};
+
+// ---- program ----
+KilnHandle g_prog = 0;
+std::atomic<int> g_state{KILN_ITEMS_PROGRAM_NONE};
+bool g_slots = false;
+int g_s_sing[7] = {-1, -1, -1, -1, -1, -1, -1};  // Balancing, Items, Attributes, Bases, Recipes, Knowledge, FactoryInfo
+int g_s_acc[A_COUNT] = {};
+int g_s_factory = -1, g_s_netfuel = -1, g_s_transform = -1, g_s_crafting = -1;
+int g_s_ev[2] = {-1, -1};  // PickupEvent, InventoryFull
+uint8_t* g_tx = nullptr;
+std::atomic<int64_t> g_now{0};          // the world's program time of the last step (ns)
+std::atomic<uint32_t> g_speed_bits{0};  // FactorySpeed's factor of the last step (1 / factoryProductionSpeedFactor)
+
+// ---- requests (Req: stations_logic.h) ----
+struct Callback {
+    KilnStationDoneFn fn;
+    void* user;
+};
+std::vector<Req> g_incoming;  // submitted, SELECT not checked yet (g_mu)
+std::vector<Req> g_ready;     // the program takes them (g_mu)
+std::vector<Req> g_after;     // STOP after craft, waiting for the cycle's end (program thread only, under g_mu)
+std::vector<KilnStationResult> g_done;  // g_mu
+std::unordered_map<uint64_t, Callback> g_callbacks;  // g_mu
+std::atomic<uint32_t> g_pending_n{0};
+std::atomic<uint32_t> g_done_total{0};
+// Kiln's last STOP / RESUME / SELECT write per station: whose, when, and what it set (a state event names the owner only
+// for exactly that change) (g_mu)
+struct Wrote {
+    KilnOwner owner = 0;
+    uint64_t step = 0;
+    bool sets_stopped = false, sets_selected = false;
+    uint8_t stopped = 0;
+    uint32_t selected = 0;
+};
+std::unordered_map<KilnEntity, Wrote> g_wrote;
+
+// ---- watch ----
+std::atomic<int> g_watchers{0};
+EventRing g_ring;  // g_mu
+struct Known {
+    Snap snap;
+    bool fresh;
+};
+std::unordered_map<KilnEntity, Known> g_known;  // tick thread
+uint64_t g_scan_step = 0;
+bool g_scanned = false;
+std::atomic<bool> g_scanned_any{false};  // status(): the first scan is done (any thread)
+std::atomic<uint32_t> g_station_count{0};  // status(): stations at the last scan (any thread)
+std::vector<KilnEntity> g_stations;  // the last scan (tick thread)
+uint64_t g_stations_step = 0;
+struct Altar {
+    KilnEntity e;
+    KilnBaseId id;
+    int32_t base;
+};
+std::vector<Altar> g_altars;  // tick thread
+uint64_t g_altars_step = 0;
+uint32_t g_bases_sig = 0;      // a fingerprint of the base records, for BASES events
+uint32_t g_bases_version = 0;  // raised when it changes
+
+void set_detail(const char* s) {
+    std::lock_guard lock(g_mu);
+    std::snprintf(g_detail, sizeof g_detail, "%s", s);
+}
+
+void lower(const char* feature, uint32_t reason, const char* why) {
+    set_detail(why);
+    const auto* caps = static_cast<const KilnCapsApi*>(g_api ? g_api->service(str(KILN_CAPS_SERVICE), KILN_CAPS_VERSION) : nullptr);
+    if (caps && caps->report) caps->report(g_owner, str(feature), KILN_CAP_UNAVAILABLE, reason, str(why));
+}
+
+void switch_off(const char* why) {
+    if (!g_off.exchange(true)) {
+        LOGE("stations: actions off until the server, or the hosting player's game, restarts: %s", why);
+        lower("stations.fill", KILN_CAP_REASON_FAULTED, why);
+        lower("stations.control", KILN_CAP_REASON_FAULTED, why);
+    }
+}
+
+bool guard(void (*fn)(void*), void* p, unsigned long* code) {
+    __try {
+        fn(p);
+        return true;
+    } __except (*code = GetExceptionCode(), EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+bool here() {
+    if (!g_api) return false;
+    KilnSessionInfo si{};
+    si.size = sizeof si;
+    const KilnResult rc = g_api->session(&si);
+    return equip_here(rc, si.state) == EquipHere::Yes && items_server_world() != 0;
+}
+
+void* singleton(const char* name) {
+    const uintptr_t w = items_server_world();
+    return w ? reinterpret_cast<void*>(g_api->singleton(w, str(name))) : nullptr;
+}
+
+// ================================================================================ bases (tick thread) ====
+
+struct RawBase {
+    uint64_t a_ptr, a_n, b_ptr, b_n;
+    float min[3], max[3];
+    uint32_t zone_mask;
+};
+struct RawBases {
+    void* sys = nullptr;
+    uint32_t count = 0;
+    RawBase r[KILN_STATIONS_MAX_BASES];
+    bool ok = false;
+};
+
+void read_bases_impl(void* p) {
+    auto* o = static_cast<RawBases*>(p);
+    const auto* s = static_cast<const uint8_t*>(o->sys);
+    o->count = rd<uint32_t>(s, G.bases_count);
+    if (o->count > KILN_STATIONS_MAX_BASES) return;
+    for (uint32_t i = 0; i < o->count; ++i) {
+        const int64_t off = static_cast<int64_t>(i) * G.stride;
+        RawBase& b = o->r[i];
+        b.a_ptr = rd<uint64_t>(s, G.stock_items + off);
+        b.a_n = rd<uint64_t>(s, G.stock_items_count + off);
+        b.b_ptr = rd<uint64_t>(s, G.stock_water + off);
+        b.b_n = rd<uint64_t>(s, G.stock_water_count + off);
+        for (int k = 0; k < 3; ++k) {
+            b.min[k] = rd<float>(s, G.aabb_y - 4 + off + 4 * k);
+            b.max[k] = rd<float>(s, G.aabb_y - 4 + 0x10 + off + 4 * k);
+        }
+        b.zone_mask = rd<uint32_t>(s, G.aabb_y + G.zone_mask_rel + off);
+        if (b.a_n > kMaxStations || b.b_n > kMaxStations || (b.a_n && !b.a_ptr) || (b.b_n && !b.b_ptr)) return;
+    }
+    o->ok = true;
+}
+
+bool read_bases(RawBases* out) {
+    out->sys = singleton("PlayerBasesSystemServer");
+    if (!out->sys || !G.read) return false;
+    unsigned long code = 0;
+    return guard(&read_bases_impl, out, &code) && out->ok;
+}
+
+struct HitCall {
+    void* sys;
+    float pos[3];
+    BaseHit hit;
+};
+void base_at_impl(void* p) {
+    auto* h = static_cast<HitCall*>(p);
+    G.base_at(&h->hit, h->sys, h->pos);
+}
+// The base (record index) a position is in, by the game's own lookup; -1: none.
+int32_t base_index_at(void* sys, const KilnVec3& pos) {
+    if (!sys || !G.base_at) return -1;
+    HitCall h{sys, {static_cast<float>(pos.x), static_cast<float>(pos.y), static_cast<float>(pos.z)}, {}};
+    h.hit.error = 0xff;
+    unsigned long code = 0;
+    if (!guard(&base_at_impl, &h, &code)) return -1;
+    return h.hit.error == 0 && h.hit.index < KILN_STATIONS_MAX_BASES ? h.hit.index : -1;
+}
+
+bool position_of(KilnEntity e, KilnVec3* out) {
+    return g_w && g_w->position(e, out) == KILN_OK;
+}
+
+void scan_altars(uint64_t step, void* sys) {
+    if (step != 0 && g_altars_step != 0 && step - g_altars_step < kScanEvery && step >= g_altars_step) return;
+    g_altars_step = step ? step : 1;
+    g_altars.clear();
+    if (!g_w) return;
+    KilnEntity ids[kMaxAltars];
+    uint32_t n = 0;
+    if (g_w->find(H_BASE_ID, ids, kMaxAltars, &n) != KILN_OK && n == 0) return;
+    n = std::min(n, kMaxAltars);
+    for (uint32_t i = 0; i < n; ++i) {
+        uint32_t size = 0;
+        const auto* c = static_cast<const uint8_t*>(g_w->component(ids[i], H_BASE_ID, &size));
+        if (!c || size < 16) continue;
+        Altar a{};
+        a.e = ids[i];
+        std::memcpy(a.id.guid, c, 16);
+        KilnVec3 p{};
+        a.base = position_of(ids[i], &p) ? base_index_at(sys, p) : -1;
+        g_altars.push_back(a);
+    }
+}
+
+void fill_base(const RawBases& rb, uint32_t i, KilnStationBase* out) {
+    const uint32_t size = out->size;
+    std::memset(out, 0, sizeof *out);
+    out->size = size;
+    out->index = i;
+    const RawBase& b = rb.r[i];
+    KilnBaseId ids[kMaxAltars];
+    uint32_t n = 0;
+    for (const Altar& a : g_altars) {
+        if (a.base != static_cast<int32_t>(i) || n >= kMaxAltars) continue;
+        ids[n++] = a.id;
+        if (out->altar_count < KILN_STATIONS_MAX_ALTARS) {
+            out->altars[out->altar_count] = a.e;
+            out->altar_ids[out->altar_count] = a.id;
+        }
+        ++out->altar_count;
+    }
+    out->altar_count = std::min<uint32_t>(out->altar_count, KILN_STATIONS_MAX_ALTARS);
+    out->id = smallest_id(ids, n);
+    out->storage_count = static_cast<uint32_t>(b.a_n);
+    out->water_count = static_cast<uint32_t>(b.b_n);
+    for (uint32_t m = b.zone_mask; m; m &= m - 1) ++out->zone_count;
+    out->version = g_bases_version;
+    out->min = KilnVec3{b.min[0], b.min[1], b.min[2]};
+    out->max = KilnVec3{b.max[0], b.max[1], b.max[2]};
+    uint32_t stations = 0;
+    for (KilnEntity e : g_stations) {
+        auto k = g_known.find(e);
+        if (k != g_known.end() && k->second.snap.base == static_cast<int32_t>(i)) ++stations;
+    }
+    out->station_count = stations;
+}
+
+struct ListCopy {
+    uint64_t ptr, n;
+    KilnEntity* out;
+    uint32_t cap, written;
+};
+void copy_list_impl(void* p) {
+    auto* c = static_cast<ListCopy*>(p);
+    const auto* ids = reinterpret_cast<const uint32_t*>(c->ptr);
+    for (uint64_t i = 0; i < c->n && c->written < c->cap; ++i) c->out[c->written++] = ids[i];
+}
+// The game's list of a base (A: stock containers, B: water sources) copied out.
+bool base_list(const RawBases& rb, uint32_t i, bool water, std::vector<KilnEntity>* out) {
+    const RawBase& b = rb.r[i];
+    const uint64_t n = water ? b.b_n : b.a_n;
+    out->assign(static_cast<size_t>(n), 0);
+    ListCopy c{water ? b.b_ptr : b.a_ptr, n, out->data(), static_cast<uint32_t>(n), 0};
+    unsigned long code = 0;
+    if (n && !guard(&copy_list_impl, &c, &code)) return false;
+    out->resize(c.written);
+    return true;
+}
+
+// ================================================================================ recipes (tick thread) ====
+
+void* recipes_registry() { return singleton("g38_items::RecipeRegistry"); }
+
+struct RecipeCall {
+    uint32_t id;
+    void* registry;
+    KilnStationRecipe* out;
+    bool found;
+};
+void recipe_impl(void* p) {
+    auto* c = static_cast<RecipeCall*>(p);
+    const auto* r = static_cast<const uint8_t*>(G.recipe_find(c->id, c->registry));
+    if (!r) return;
+    c->found = true;
+    KilnStationRecipe& o = *c->out;
+    o.id = rd<uint32_t>(r, kRecipeId);
+    o.workshop = rd<uint32_t>(r, kRecipeWorkshop);
+    o.duration_ns = rd<int64_t>(r, G.recipe_duration);
+    o.water_charges = rd<uint32_t>(r, G.recipe_water);
+    o.knowledge_id = rd<uint32_t>(r, kRecipeKnowledge);
+    o.knowledge_value = rd<uint32_t>(r, kRecipeKnowledge + 4);
+    o.knowledge_compare = r[kRecipeKnowledge + 8];
+    o.knowledge_type = r[kRecipeKnowledge + 9];
+    o.knowledge_player_only = r[kRecipeKnowledge + 10];
+    const int32_t in_rel = rd<int32_t>(r, kRecipeInputs);
+    const uint32_t in_n = rd<uint32_t>(r, kRecipeInputs + 4);
+    o.input_count = std::min(in_n, KILN_STATIONS_MAX_INPUTS);
+    const uint8_t* in = r + kRecipeInputs + in_rel;
+    for (uint32_t i = 0; i < o.input_count && in_rel; ++i) {
+        const uint8_t* e = in + i * kInputStride;
+        o.inputs[i].item = rd<uint32_t>(e, kInputItem);
+        o.inputs[i].count = rd<uint32_t>(e, kInputCount);
+        o.inputs[i].category = rd<uint32_t>(e, kInputCategory);
+        o.inputs[i].category_count = rd<uint32_t>(e, kInputCategoryCount);
+    }
+    const int32_t out_rel = rd<int32_t>(r, kRecipeOutputs);
+    const uint32_t out_n = rd<uint32_t>(r, kRecipeOutputs + 4);
+    o.output_count = std::min(out_n, KILN_STATIONS_MAX_OUTPUTS);
+    const uint8_t* outs = r + kRecipeOutputs + out_rel;
+    for (uint32_t i = 0; i < o.output_count && out_rel; ++i) {
+        o.outputs[i].item = rd<uint32_t>(outs + i * kOutputStride, kInputItem);
+        o.outputs[i].count = rd<uint32_t>(outs + i * kOutputStride, kInputCount);
+    }
+}
+
+KilnResult recipe_info(uint32_t id, KilnStationRecipe* out) {
+    void* reg = recipes_registry();
+    if (!reg || !G.recipe_find) return KILN_ERR_UNAVAILABLE;
+    const uint32_t size = out->size;
+    std::memset(out, 0, sizeof *out);
+    out->size = size;
+    RecipeCall c{id, reg, out, false};
+    unsigned long code = 0;
+    if (!guard(&recipe_impl, &c, &code)) return KILN_ERR_INTERNAL;
+    return c.found ? KILN_OK : KILN_ERR_NOT_FOUND;
+}
+
+// The game's resolution of a recipe's inputs (category choices applied, counts scaled), into plain stacks.
+struct ResolveVec {  // the game's DynamicArray as AutoTransferAction sets it up: {ptr, count, capacity, grow fn, alloc}
+    uint64_t ptr, count, capacity, grow, alloc;
+    uint8_t inline_[kRecipeVecInline * 24];
+};
+struct ResolveCall {
+    const void* recipe;
+    const KilnStationChoice* choices;
+    void* registry;
+    ResolveVec vec;
+    KilnStationStack out[KILN_STATIONS_MAX_INPUTS];
+    uint32_t n;
+    bool too_many;
+};
+void resolve_impl(void* p) {
+    auto* c = static_cast<ResolveCall*>(p);
+    if (rd<uint32_t>(c->recipe, kRecipeInputs + 4) > kRecipeVecInline) {  // no grow function given: never overflow
+        c->too_many = true;
+        return;
+    }
+    c->vec.ptr = reinterpret_cast<uint64_t>(c->vec.inline_);
+    c->vec.count = 0;
+    c->vec.capacity = kRecipeVecInline;
+    c->vec.grow = 0;
+    c->vec.alloc = 0;
+    alignas(8) uint8_t sel[32] = {};
+    if (c->choices) std::memcpy(sel, c->choices, 32);
+    G.resolve(c->recipe, &c->vec, sel, c->registry);
+    c->n = static_cast<uint32_t>(std::min<uint64_t>(c->vec.count, kRecipeVecInline));
+    for (uint32_t i = 0; i < c->n; ++i) {
+        c->out[i].item = rd<uint32_t>(c->vec.inline_, i * 24 + 0x10);
+        c->out[i].count = rd<uint32_t>(c->vec.inline_, i * 24 + 0x14);
+    }
+}
+struct FindCall {
+    uint32_t id;
+    void* registry;
+    const void* recipe;
+};
+void find_impl(void* p) {
+    auto* f = static_cast<FindCall*>(p);
+    f->recipe = G.recipe_find(f->id, f->registry);
+}
+const void* find_recipe(uint32_t id, void* reg) {
+    FindCall f{id, reg, nullptr};
+    unsigned long code = 0;
+    if (!G.recipe_find || !reg || !guard(&find_impl, &f, &code)) return nullptr;
+    return f.recipe;
+}
+// Tick thread or inside the program (the function reads the registry only).
+bool resolve_inputs(const void* recipe, const KilnStationChoice* choices, void* reg, ResolveCall* c) {
+    c->recipe = recipe;
+    c->choices = choices;
+    c->registry = reg;
+    c->n = 0;
+    c->too_many = false;
+    unsigned long code = 0;
+    return guard(&resolve_impl, c, &code) && !c->too_many;
+}
+
+// ================================================================================ stations (tick thread) ====
+
+struct FsBytes {
+    uint8_t b[0x68];
+};
+bool factory_of(KilnEntity e, FsBytes* out) {
+    if (!g_w) return false;
+    uint32_t size = 0;
+    const void* p = g_w->component(e, H_FACTORY, &size);
+    if (!p || size < static_cast<uint32_t>(G.fs_size)) return false;
+    std::memcpy(out->b, p, sizeof out->b);
+    return true;
+}
+uint32_t workshop_of(KilnEntity e) {
+    uint32_t size = 0;
+    const void* p = g_w ? g_w->component(e, H_CRAFTING, &size) : nullptr;
+    return p && size >= kCraftingWorkshop + 4 ? rd<uint32_t>(p, kCraftingWorkshop) : 0;
+}
+
+Snap snap_of(const FsBytes& fs, uint32_t workshop, int32_t base, const KilnVec3& pos) {
+    Snap s{};
+    s.state = fs.b[kFsState];
+    s.stopped = fs.b[G.fs_stopped];
+    s.selected = rd<uint32_t>(fs.b, G.fs_next);
+    s.running = rd<uint32_t>(fs.b, G.fs_running);
+    s.workshop = workshop;
+    s.base = base;
+    s.pos = pos;
+    return s;
+}
+
+// Counts per item in an entity's inventories (tick thread, kiln.items' read).
+void count_items(KilnEntity e, std::unordered_map<uint32_t, uint64_t>* into) {
+    static thread_local std::vector<KilnItemsSlot> slots;
+    slots.resize(8 * KILN_ITEMS_MAX_INVENTORIES);
+    ReadOut ro{};
+    ro.info.size = sizeof ro.info;
+    ro.slots = slots.data();
+    ro.capacity = static_cast<uint32_t>(slots.size());
+    unsigned long code = 0;
+    if (!read_inventory(items_server_world(), singleton("g38_items::ItemRegistry"), e, &ro, &code) || !ro.found) return;
+    for (uint32_t i = 0; i < ro.written; ++i)
+        if (slots[i].item && slots[i].count) (*into)[slots[i].item] += slots[i].count;
+}
+
+// A water container's water (Fuel units); false when it holds none or has no Fuel. Tick thread, or inside the program
+// (which declares Fuel: no other program writes it meanwhile).
+bool water_of(KilnEntity e, void* attributes, int32_t* cur, int32_t* max) {
+    *cur = *max = 0;
+    bool found = false;
+    unsigned long code = 0;
+    return attributes && read_fuel(items_server_world(), attributes, e, cur, max, &found, &code) && found;
+}
+uint64_t base_water(const RawBases& rb, int32_t base, void* attributes) {
+    std::vector<KilnEntity> list;
+    uint64_t sum = 0;
+    if (base < 0 || !base_list(rb, static_cast<uint32_t>(base), true, &list)) return 0;
+    for (KilnEntity c : list) {
+        int32_t cur = 0, max = 0;
+        if (water_of(c, attributes, &cur, &max) && cur > 0) sum += static_cast<uint64_t>(cur);
+    }
+    return sum;
+}
+// The id of base `index` from the altars of the last scan (zero: none).
+KilnBaseId base_id_of(int32_t index) {
+    KilnBaseId ids[kMaxAltars];
+    uint32_t n = 0;
+    for (const Altar& a : g_altars)
+        if (a.base == index && n < kMaxAltars) ids[n++] = a.id;
+    return smallest_id(ids, n);
+}
+
+int64_t scaled(int64_t dur_ns) {
+    uint32_t bits = g_speed_bits.load(std::memory_order_relaxed);
+    float f;
+    std::memcpy(&f, &bits, 4);
+    if (!(f > 0.0f)) f = 1.0f;
+    // as factory_station: double(ns) * 1e-9 -> float, times the factor, -> double * 1e9 -> int
+    const float sec = static_cast<float>(static_cast<double>(dur_ns) * 1e-9);
+    return static_cast<int64_t>(static_cast<double>(sec * f) * 1e9);
+}
+
+// ---- the plan (tick thread; the program repeats it with its own reads) ----
+struct PlanOut {
+    int32_t status = KILN_STATION_DONE;
+    uint32_t recipe = 0;
+    int32_t base = -1;
+    std::vector<InputNow> in;  // the resolved inputs, then the water (kWaterItem) when the recipe needs some
+    uint32_t loaded = 0, affordable = 0, wanted = 0, planned = 0;
+    Limit limit;
+    uint32_t water_per = 0;
+    uint64_t water_have = 0, water_stock = 0;
+    uint8_t use_all = 0;
+    char why[128] = "";
+};
+
+void say(PlanOut* p, int32_t status, const char* fmt, uint32_t a = 0, uint32_t b = 0) {
+    p->status = status;
+    std::snprintf(p->why, sizeof p->why, fmt, a, b);
+}
+
+// A category choice fits a recipe when the category is one of its inputs' and the index is one of the category's options.
+struct CatCall;
+bool category_options(void* reg, uint32_t id, uint32_t* n);
+bool choices_fit(const void* recipe, const KilnStationChoice* choices, void* reg, char* why, size_t cap) {
+    const auto* r = static_cast<const uint8_t*>(recipe);
+    const int32_t rel = rd<int32_t>(r, kRecipeInputs);
+    const uint32_t n = std::min(rd<uint32_t>(r, kRecipeInputs + 4), KILN_STATIONS_MAX_INPUTS);
+    for (int k = 0; k < 4; ++k) {
+        const KilnStationChoice& c = choices[k];
+        if (!c.category) continue;
+        bool in_recipe = false;
+        for (uint32_t i = 0; i < n && rel && !in_recipe; ++i)
+            in_recipe = rd<uint32_t>(r + kRecipeInputs + rel + i * kInputStride, kInputCategory) == c.category;
+        if (!in_recipe)
+            return std::snprintf(why, cap, "category 0x%08x is not one of recipe 0x%08x's inputs", c.category, rd<uint32_t>(r, kRecipeId)), false;
+        uint32_t options = 0;
+        if (!category_options(reg, c.category, &options) || c.index >= options)
+            return std::snprintf(why, cap, "category 0x%08x has no option %u (%u options)", c.category, c.index, options), false;
+    }
+    return true;
+}
+
+// Station, recipe and choices of a FILL (shared by plan() and the program): fills recipe, choices, the recipe pointer.
+bool fill_recipe(const KilnStationRequest& r, const FsBytes& fs, uint32_t workshop, void* reg, const void** recipe,
+                 KilnStationChoice* choices, PlanOut* p) {
+    p->recipe = r.recipe ? r.recipe : rd<uint32_t>(fs.b, G.fs_next);
+    if (!p->recipe) return say(p, KILN_STATION_NO_RECIPE, "the station has no recipe selected"), false;
+    *recipe = find_recipe(p->recipe, reg);
+    if (!*recipe) return say(p, KILN_STATION_NO_RECIPE, "recipe 0x%08x is not in the recipe registry", p->recipe), false;
+    const uint32_t rw = rd<uint32_t>(*recipe, kRecipeWorkshop);
+    if (rw != workshop)
+        return say(p, KILN_STATION_WRONG_WORKSHOP, "recipe 0x%08x is a recipe of workshop 0x%08x", p->recipe, rw), false;
+    std::memset(choices, 0, sizeof(KilnStationChoice) * 4);
+    if (any_choice(r.choices)) {
+        if (!choices_fit(*recipe, r.choices, reg, p->why, sizeof p->why)) return p->status = KILN_STATION_REFUSED, false;
+        std::memcpy(choices, r.choices, sizeof r.choices);
+    } else if (p->recipe == rd<uint32_t>(fs.b, G.fs_next)) {
+        std::memcpy(choices, fs.b + G.fs_next_sel, 32);
+    }
+    p->use_all = fs.b[G.fs_use_all];
+    return true;
+}
+
+uint64_t keep_of(const KilnStationStack* keep, uint32_t n, uint32_t item) {
+    uint64_t k = 0;
+    for (uint32_t i = 0; i < n; ++i)
+        if (keep[i].item == item) k += keep[i].count;
+    return k;
+}
+
+// The arithmetic once `in` holds the resolved inputs with have and stock (and the water input).
+void finish_plan(const KilnStationRequest& r, PlanOut* p) {
+    merge_inputs(&p->in);
+    const PlanMath m = plan_math(r.flags, r.crafts, p->in);
+    p->loaded = m.loaded;
+    p->affordable = m.affordable;
+    p->wanted = m.wanted;
+    p->planned = m.planned;
+    p->limit = m.limit;
+    p->status = m.status;
+    if (m.status == KILN_STATION_UNCHANGED) return say(p, KILN_STATION_UNCHANGED, "the station already holds %u complete craft(s)", p->loaded);
+    if (m.planned >= m.wanted) return;
+    const int32_t st = m.status;
+    switch (m.limit.why) {
+    case KILN_STATION_LIMIT_WATER:
+        return say(p, st, "water (the base's water sources, or the station's water capacity) covers %u more craft(s)", m.affordable);
+    case KILN_STATION_LIMIT_RESERVE:
+        return say(p, st, "the reserve of item 0x%08x leaves %u more craft(s)", m.limit.item, m.affordable);
+    case KILN_STATION_LIMIT_STOCK:
+        return say(p, st, "the base's stock of item 0x%08x covers %u more craft(s)", m.limit.item, m.affordable);
+    default:
+        return say(p, st, "%u of %u craft(s) covered", m.planned, m.wanted);
+    }
+}
+
+// The inputs of a FILL with their counts: the station's, the base stock's (after the reserves), the player's bag.
+void plan_inputs(const KilnStationRequest& r, const KilnStationStack* keep, const ResolveCall& rc,
+                 std::unordered_map<uint32_t, uint64_t>& have, std::unordered_map<uint32_t, uint64_t>& stock,
+                 std::unordered_map<uint32_t, uint64_t>& bag, PlanOut* p) {
+    for (uint32_t i = 0; i < rc.n; ++i) {
+        InputNow x{};
+        x.item = rc.out[i].item;
+        x.count = rc.out[i].count;
+        x.have = have[x.item];
+        const uint64_t k = keep_of(keep, r.keep_count, x.item);
+        x.stock = after_keep(stock[x.item], k) + bag[x.item];  // the game takes from the player first; no reserve there
+        x.kept = std::min(stock[x.item], k);
+        p->in.push_back(x);
+    }
+}
+
+void plan_tick(const KilnStationRequest& r, PlanOut* p) {
+    FsBytes fs{};
+    if (!factory_of(r.station, &fs)) return say(p, KILN_STATION_NOT_A_STATION, "entity %u has no FactoryStation", r.station);
+    void* reg = recipes_registry();
+    const void* recipe = nullptr;
+    KilnStationChoice choices[4];
+    if (!fill_recipe(r, fs, workshop_of(r.station), reg, &recipe, choices, p)) return;
+    KilnVec3 pos{};
+    RawBases rb{};
+    if (!position_of(r.station, &pos) || !read_bases(&rb)) return say(p, KILN_STATION_NO_BASE, "the bases cannot be read");
+    p->base = base_index_at(rb.sys, pos);
+    if (p->base < 0) return say(p, KILN_STATION_NO_BASE, "station %u stands in no base", r.station);
+    ResolveCall rc{};
+    if (!resolve_inputs(recipe, choices, reg, &rc))
+        return say(p, KILN_STATION_REFUSED, "the inputs of recipe 0x%08x cannot be resolved", p->recipe);
+    std::unordered_map<uint32_t, uint64_t> have, stock, bag;
+    count_items(r.station, &have);
+    std::vector<KilnEntity> list;
+    if (base_list(rb, static_cast<uint32_t>(p->base), false, &list))
+        for (KilnEntity c : list) count_items(c, &stock);
+    if (r.player) count_items(r.player, &bag);
+    plan_inputs(r, r.keep, rc, have, stock, bag, p);
+    void* attributes = singleton("impact::AttributeRegistry");
+    int32_t cur = 0, max = 0;
+    water_of(r.station, attributes, &cur, &max);
+    InputNow w{};
+    if (water_input(rd<uint32_t>(recipe, G.recipe_water), (r.flags & KILN_STATION_NO_WATER) != 0, static_cast<uint64_t>(std::max(cur, 0)),
+                    static_cast<uint64_t>(std::max(max, 0)), base_water(rb, p->base, attributes), &w)) {
+        p->water_per = w.count;
+        p->water_have = w.have;
+        p->water_stock = w.stock;
+        p->in.push_back(w);
+    }
+    finish_plan(r, p);
+}
+
+// ================================================================================ the program ====
+
+const char* const kSingRead[5] = {"BalancingRegistry", "g38_items::ItemRegistry", "impact::AttributeRegistry",
+                                  "PlayerBasesSystemServer", "g38_items::RecipeRegistry"};
+const char* const kSingWrite[2] = {"KnowledgeTriggerQueue", "ServerFactoryInfo"};
+const char* const kOtherRead[2] = {"CurrentTransform", "Crafting"};
+const char* const kEvents[2] = {"PickupEvent", "InventoryFull"};
+
+bool resolve_slots() {
+    if (g_slots) return true;
+    for (int i = 0; i < 5; ++i) g_s_sing[i] = g_w->program_slot(g_prog, KILN_SLOT_SINGLETON, str(kSingRead[i]));
+    for (int i = 0; i < 2; ++i) g_s_sing[5 + i] = g_w->program_slot(g_prog, KILN_SLOT_SINGLETON, str(kSingWrite[i]));
+    for (int i = 0; i < A_COUNT; ++i) g_s_acc[i] = g_w->program_slot(g_prog, KILN_SLOT_OTHER_WRITE, str(kAccNames[i]));
+    g_s_factory = g_w->program_slot(g_prog, KILN_SLOT_OTHER_WRITE, str("FactoryStation"));
+    g_s_netfuel = g_w->program_slot(g_prog, KILN_SLOT_OTHER_WRITE, str("NetworkFuel"));
+    g_s_transform = g_w->program_slot(g_prog, KILN_SLOT_OTHER_READ, str(kOtherRead[0]));
+    g_s_crafting = g_w->program_slot(g_prog, KILN_SLOT_OTHER_READ, str(kOtherRead[1]));
+    for (int i = 0; i < 2; ++i) g_s_ev[i] = g_w->program_slot(g_prog, KILN_SLOT_EVENT_OUT, str(kEvents[i]));
+    auto good = [](int s) { return s >= 1 && s < 96; };
+    bool ok = good(g_s_factory) && good(g_s_netfuel) && good(g_s_transform) && good(g_s_crafting);
+    for (int s : g_s_sing) ok = ok && good(s);
+    for (int s : g_s_acc) ok = ok && good(s);
+    for (int s : g_s_ev) ok = ok && good(s);
+    return g_slots = ok;
+}
+
+// The program's own view of one update: kiln.items' Access plus the station accessors and singletons.
+struct Run {
+    KilnProgramCtx* ctx;
+    uint64_t* it;
+    Access a;
+    uint64_t acc_factory, acc_netfuel, acc_transform, acc_crafting;
+    void* bases;
+    void* recipes;
+    void* factory_info;
+};
+
+struct ExtraCheck {
+    const Run* run;
+    bool ok;
+    char why[160];
+};
+void extra_check_impl(void* p) {
+    auto* x = static_cast<ExtraCheck*>(p);
+    const Run& r = *x->run;
+    void* registry = *static_cast<void**>(r.a.storage);
+    const std::pair<uint64_t, uint32_t> want[4] = {{r.acc_factory, H_FACTORY}, {r.acc_netfuel, H_NETWORK_FUEL},
+                                                    {r.acc_transform, H_TRANSFORM}, {r.acc_crafting, H_CRAFTING}};
+    for (const auto& [acc, h] : want) {
+        const uint16_t* idx = E.component_map_find(static_cast<uint8_t*>(registry) + E.registry_components, &h);
+        if (!acc || !idx || *reinterpret_cast<const uint16_t*>(acc) != *idx) {
+            std::snprintf(x->why, sizeof x->why, "an accessor of kiln_items_stations is not the component it names (hash %08x)", h);
+            return;
+        }
+    }
+    if (!r.bases || !r.recipes || !r.factory_info) {
+        std::snprintf(x->why, sizeof x->why, "a singleton slot of kiln_items_stations is empty (bases, recipes, factory info)");
+        return;
+    }
+    x->ok = true;
+}
+
+bool verify(KilnProgramCtx* ctx, uint64_t* it, Run* run, char* why) {
+    const int sing[4] = {g_s_sing[0], g_s_sing[1], g_s_sing[2], g_s_sing[5]};  // Balancing, Items, Attributes, Knowledge
+    bool ok = false;
+    unsigned long code = 0;
+    if (!verify_access(it, sing, g_s_acc, g_s_ev, ctx, &run->a, &ok, why, &code) || !ok) return false;
+    run->ctx = ctx;
+    run->it = it;
+    run->acc_factory = it[g_s_factory];
+    run->acc_netfuel = it[g_s_netfuel];
+    run->acc_transform = it[g_s_transform];
+    run->acc_crafting = it[g_s_crafting];
+    run->bases = reinterpret_cast<void*>(it[g_s_sing[3]]);
+    run->recipes = reinterpret_cast<void*>(it[g_s_sing[4]]);
+    run->factory_info = reinterpret_cast<void*>(it[g_s_sing[6]]);
+    run->a.recipes = run->recipes;
+    ExtraCheck x{run, false, ""};
+    if (!guard(&extra_check_impl, &x, &code) || !x.ok) {
+        std::snprintf(why, 160, "%s", x.why[0] ? x.why : "checking kiln_items_stations' accessors faulted");
+        return false;
+    }
+    return true;
+}
+
+const uint8_t* other(const Run& r, uint64_t acc, KilnEntity e, uint64_t min) {
+    PtrSize ps{};
+    E.read_other(&ps, r.a.storage, acc, e);
+    return ps.ptr && ps.size >= min ? static_cast<const uint8_t*>(ps.ptr) : nullptr;
+}
+
+// Counts per item in an entity's inventories, inside the program (the program's accessors).
+void count_pages(const Access& a, KilnEntity e, std::unordered_map<uint32_t, uint64_t>* into) {
+    PageSet ps;
+    bool init = false;
+    if (!read_pages(a, e, &ps, &init)) return;
+    for (uint32_t p = 0; p < ps.n; ++p)
+        for (const Stack& s : ps.p[p].s)
+            if (s.item && s.count) (*into)[s.item] += s.count;
+}
+
+void finish(KilnStationResult* res, int32_t status, const char* fmt, uint32_t a = 0, uint32_t b = 0) {
+    res->status = status;
+    std::snprintf(res->message, sizeof res->message, fmt, a, b);
+}
+
+void finish_text(KilnStationResult* res, int32_t status, const char* text) {
+    res->status = status;
+    std::snprintf(res->message, sizeof res->message, "%s", text);
+}
+
+KilnStationResult result_base(const Req& q) { return result_for(q); }
+
+void noted_write(KilnEntity station, KilnOwner owner, const uint8_t* fs_after, uint32_t action) {
+    Wrote w;
+    w.owner = owner;
+    w.step = current_step();
+    w.sets_stopped = action == KILN_STATION_STOP || action == KILN_STATION_RESUME || action == KILN_STATION_SELECT;
+    w.sets_selected = action == KILN_STATION_SELECT;
+    w.stopped = fs_after[G.fs_stopped];
+    w.selected = rd<uint32_t>(fs_after, G.fs_next);
+    std::lock_guard lock(g_mu);
+    g_wrote[station] = w;
+}
+
+// ---- FILL inside the program ----
+struct FillCall {
+    const Run* run;
+    void* tx;
+    const uint64_t* stock;
+    const void* inputs;  // {ptr, count}
+    uint32_t station, crafts, water, player;
+    int32_t rc;
+};
+void fill_call_impl(void* p) {
+    auto* f = static_cast<FillCall*>(p);
+    f->rc = G.fill(f->tx, f->stock, f->inputs, f->station, static_cast<uint16_t>(f->crafts), f->water, f->player);
+}
+
+void setup_for_fill(const Run& r, KilnEntity player, const float pos[3], uint8_t* s) {
+    std::memset(s, 0, kSetupBlock);
+    const Access& a = r.a;
+    auto put = [s](uint32_t off, const void* v) { std::memcpy(s + off, &v, 8); };
+    auto put_acc = [s](uint32_t off, uint64_t v) { std::memcpy(s + off, &v, 8); };
+    put(0x08, a.ctx);
+    put(0x10, a.items);
+    put(0x18, a.balancing);
+    put(0x20, a.attributes);
+    put_acc(0x28, a.acc[A_SETUP]);
+    put_acc(0x30, a.acc[A_INVENTORY]);
+    put_acc(0x38, a.acc[A_SLOTSEL]);
+    put_acc(0x40, a.acc[A_ITEMSTATE]);
+    put_acc(0x48, a.acc[A_OWNER]);
+    put_acc(0x58, a.acc[A_EMPTY]);
+    put_acc(kSetupNetworkFuel, r.acc_netfuel);
+    put_acc(0x70, a.acc[A_FUEL]);
+    put(0xA0, a.ev_pickup);
+    put(0xA8, a.ev_full);
+    put(0xC0, player ? a.knowledge : nullptr);
+    std::memcpy(s + E.setup_operator, &player, 4);  // the game's handler: the player; for a fill of Kiln's alone: 0
+    put(kSetupBases, r.bases);
+    std::memcpy(s + kSetupPosition, pos, 12);
+}
+
+void ledger(const uint8_t* tx, KilnStationResult* res) {
+    const uint8_t* ops = rd<const uint8_t*>(tx, E.tx_ops);
+    const uint64_t n = rd<uint64_t>(tx, E.tx_ops + 8);
+    for (uint64_t i = 0; i < n && ops && res->change_count < KILN_STATIONS_MAX_CHANGES; ++i) {
+        const uint8_t* op = ops + i * kOpStride;
+        KilnItemsMoveChange& c = res->changes[res->change_count++];
+        const uint64_t slot = rd<uint64_t>(op, 0);
+        if (op[0x26] == 0) c.to_slot = slot;
+        else c.from_slot = slot;
+        c.item = rd<uint32_t>(op, 8);
+        c.amount = rd<uint16_t>(op, 0x24);
+        const uint32_t pide = rd<uint32_t>(op, 0x20);
+        c.pide = pide == 0xFFFFFFFFu ? 0 : pide;
+    }
+}
+
+void run_fill(const Run& run, const Req& q, KilnStationResult* res) {
+    const KilnStationRequest& r = q.r;
+    if (!G.fill_ok) return finish(res, KILN_STATION_UNAVAILABLE, "stations.fill is off on this build");
+    const uint8_t* fsp = other(run, run.acc_factory, r.station, static_cast<uint64_t>(G.fs_size));
+    if (!fsp) return finish(res, KILN_STATION_NOT_A_STATION, "entity %u has no FactoryStation", r.station);
+    FsBytes fs{};
+    std::memcpy(fs.b, fsp, sizeof fs.b);
+    res->state_before = res->state_after = fs.b[kFsState];
+    res->stopped_before = res->stopped_after = fs.b[G.fs_stopped];
+    const uint8_t* cr = other(run, run.acc_crafting, r.station, kCraftingWorkshop + 4);
+    const uint32_t workshop = cr ? rd<uint32_t>(cr, kCraftingWorkshop) : 0;
+    PlanOut p;
+    const void* recipe = nullptr;
+    KilnStationChoice choices[4];
+    if (!fill_recipe(r, fs, workshop, run.recipes, &recipe, choices, &p)) return finish_text(res, p.status, p.why);
+    res->recipe = p.recipe;
+    const uint8_t* tr = other(run, run.acc_transform, r.station, 24);
+    if (!tr) return finish(res, KILN_STATION_NOT_A_STATION, "station %u has no position", r.station);
+    float pos[3];
+    for (int k = 0; k < 3; ++k) pos[k] = static_cast<float>(static_cast<double>(rd<int64_t>(tr, 8 * k)) * (1.0 / 4294967296.0));
+    const int32_t base = base_index_at(run.bases, KilnVec3{pos[0], pos[1], pos[2]});
+    if (base < 0) return finish(res, KILN_STATION_NO_BASE, "station %u stands in no base", r.station);
+    // the base's stock, as BaseStockForPlayer hands it to the game's handler: {A.ptr, A.count, B.ptr, B.count}
+    uint64_t stock[4] = {};
+    {
+        const auto* s = static_cast<const uint8_t*>(run.bases);
+        const int64_t off = static_cast<int64_t>(base) * G.stride;
+        stock[0] = rd<uint64_t>(s, G.stock_items + off);
+        stock[1] = rd<uint64_t>(s, G.stock_items_count + off);
+        stock[2] = rd<uint64_t>(s, G.stock_water + off);
+        stock[3] = rd<uint64_t>(s, G.stock_water_count + off);
+    }
+    ResolveCall rc{};
+    if (!resolve_inputs(recipe, choices, run.recipes, &rc))
+        return finish(res, KILN_STATION_REFUSED, "the inputs of recipe 0x%08x cannot be resolved", p.recipe);
+    std::unordered_map<uint32_t, uint64_t> have, stocked, bag;
+    count_pages(run.a, r.station, &have);
+    for (uint64_t i = 0; i < stock[1] && stock[0]; ++i) count_pages(run.a, reinterpret_cast<const uint32_t*>(stock[0])[i], &stocked);
+    if (r.player) count_pages(run.a, r.player, &bag);
+    plan_inputs(r, q.keep, rc, have, stocked, bag, &p);
+    const uint32_t charges = rd<uint32_t>(recipe, G.recipe_water);
+    {
+        int32_t cur = 0, max = 0;
+        water_of(r.station, run.a.attributes, &cur, &max);
+        uint64_t water_stock = 0;
+        for (uint64_t i = 0; i < stock[3] && stock[2]; ++i) {
+            int32_t c = 0, m = 0;
+            if (water_of(reinterpret_cast<const uint32_t*>(stock[2])[i], run.a.attributes, &c, &m) && c > 0) water_stock += static_cast<uint64_t>(c);
+        }
+        InputNow w{};
+        if (water_input(charges, (r.flags & KILN_STATION_NO_WATER) != 0, static_cast<uint64_t>(std::max(cur, 0)),
+                        static_cast<uint64_t>(std::max(max, 0)), water_stock, &w))
+            p.in.push_back(w);
+    }
+    finish_plan(r, &p);
+    res->crafts_before = res->crafts_after = p.loaded;
+    res->crafts_requested = p.wanted;
+    auto set_limit = [&](const Limit& l) {
+        res->limited_by = l.why;
+        res->short_item = l.why == KILN_STATION_LIMIT_STOCK || l.why == KILN_STATION_LIMIT_RESERVE ? l.item : 0;
+    };
+    if (p.status != KILN_STATION_DONE && p.status != KILN_STATION_PARTIAL) {
+        if (p.status != KILN_STATION_UNCHANGED) set_limit(p.limit);
+        return finish_text(res, p.status, p.why);
+    }
+    // the game's inputs as AutoTransferRecipe takes them: {RecipeItemStack 24 B*, count}
+    const uint64_t inputs[2] = {rc.vec.ptr, rc.vec.count};
+    const uint32_t water = (r.flags & KILN_STATION_NO_WATER) ? 0u : charges;
+    const bool dry = (r.flags & KILN_STATION_DRY_RUN) != 0;
+    alignas(16) uint8_t setup[kSetupBlock];
+    setup_for_fill(run, r.player, pos, setup);
+    char fault[128] = "";
+    const Attempts at = run_attempts(r.flags, p.planned, [&](uint32_t n) -> int32_t {
+        E.tx_ctor(g_tx);
+        E.tx_init(g_tx, setup);
+        FillCall f{&run, g_tx, stock, inputs, r.station, n, water, r.player, -1};
+        unsigned long code = 0;
+        // the game's function owns nothing of ours: a fault leaves the transaction to roll back
+        if (!guard(&fill_call_impl, &f, &code)) {
+            abandon_tx(g_tx);
+            std::snprintf(fault, sizeof fault, "the game faulted (0x%08lx) in its fill of station %u", code, r.station);
+            return kAttemptFault;
+        }
+        if (f.rc == 0) {
+            res->change_count = 0;
+            ledger(g_tx, res);
+            if (dry) E.rollback(g_tx);
+            else E.commit(g_tx);
+            E.free_arrays(g_tx);
+            return 0;
+        }
+        E.rollback(g_tx);
+        E.free_arrays(g_tx);
+        return f.rc;
+    });
+    if (fault[0]) {
+        switch_off(fault);
+        return finish_text(res, KILN_STATION_UNAVAILABLE, fault);
+    }
+    res->game_error = at.ok ? 0 : at.code;
+    const int32_t status = fill_status(at, p.wanted);
+    if (at.ok) {
+        res->crafts_added = at.n;
+        res->crafts_after = p.loaded + at.n;
+        if (!dry && G.invalidate && run.factory_info) G.invalidate(run.factory_info, r.station);
+        if (status == KILN_STATION_DONE) return void(res->status = KILN_STATION_DONE);
+        // fewer than wanted: what the plan saw, or the station's room when the game refused more
+        if (at.n < p.planned) {
+            set_limit(Limit{0, KILN_STATION_LIMIT_ROOM});
+            return finish(res, KILN_STATION_PARTIAL, "%u of %u craft(s): the station had no room for more", at.n, p.wanted);
+        }
+        set_limit(p.limit);
+        return finish_text(res, KILN_STATION_PARTIAL, p.why);
+    }
+    if (status == KILN_STATION_NO_ROOM) {
+        set_limit(Limit{0, KILN_STATION_LIMIT_ROOM});
+        return finish(res, KILN_STATION_NO_ROOM, "the station has no room for the inputs (the game's code 2)");
+    }
+    if (status == KILN_STATION_NOT_ENOUGH) {
+        set_limit(p.limit.why ? p.limit : Limit{0, KILN_STATION_LIMIT_STOCK});
+        return finish(res, KILN_STATION_NOT_ENOUGH, "the base's stock is short (the game's code 4)");
+    }
+    finish(res, KILN_STATION_REFUSED, "the game's fill refused it (code %u)", static_cast<uint32_t>(at.code));
+}
+
+// ---- STOP / RESUME / SELECT inside the program ----
+uint8_t* write_factory(const Run& run, KilnEntity e) {
+    uint32_t size = 0;
+    void* p = g_w->write_other(run.ctx, run.acc_factory, e, &size);
+    return p && size >= static_cast<uint32_t>(G.fs_size) ? static_cast<uint8_t*>(p) : nullptr;
+}
+
+void run_control(const Run& run, Req& q, KilnStationResult* res, bool* keep_waiting) {
+    const KilnStationRequest& r = q.r;
+    *keep_waiting = false;
+    if (!G.control) return finish(res, KILN_STATION_UNAVAILABLE, "stations.control is off on this build");
+    const uint8_t* now = other(run, run.acc_factory, r.station, static_cast<uint64_t>(G.fs_size));
+    if (!now) return finish(res, KILN_STATION_NOT_A_STATION, "entity %u has no FactoryStation", r.station);
+    res->state_before = res->state_after = now[kFsState];
+    res->stopped_before = res->stopped_after = now[G.fs_stopped];
+    if (r.action == KILN_STATION_STOP) {
+        if (r.flags & KILN_STATION_AFTER_CRAFT) {
+            const int64_t start = rd<int64_t>(now, G.fs_start);
+            const uint32_t selected = rd<uint32_t>(now, G.fs_next);
+            if (!q.waiting) {
+                if (now[G.fs_stopped]) return finish(res, KILN_STATION_UNCHANGED, "the station is stopped already");
+                q.waiting = true;
+                q.start0 = start;
+                q.selected0 = selected;
+                q.waiting_since = current_step();
+            }
+            StopSeen seen;
+            seen.present = true;
+            seen.state = now[kFsState];
+            seen.stopped = now[G.fs_stopped];
+            seen.running = rd<uint32_t>(now, G.fs_running);
+            seen.selected = selected;
+            seen.start = start;
+            seen.now = g_now.load(std::memory_order_relaxed);
+            switch (waiting_stop_step(&q, seen, current_step() - q.waiting_since, kAfterCraftMaxSteps)) {
+            case StopWait::Wait:
+                *keep_waiting = true;
+                return;
+            case StopWait::TimedOut:
+                return finish(res, KILN_STATION_TIMED_OUT, "the running cycle did not end within about an hour of steps: nothing written");
+            case StopWait::Canceled:
+                return finish(res, KILN_STATION_CANCELED, "the station's recipe was changed to 0x%08x while the stop waited: nothing written",
+                              selected);
+            case StopWait::Unchanged:
+                return finish(res, KILN_STATION_UNCHANGED, "the station was stopped while the stop waited");
+            case StopWait::Gone:
+                return finish(res, KILN_STATION_NOT_A_STATION, "entity %u has no FactoryStation", r.station);
+            case StopWait::Write:
+                break;
+            }
+        } else if (now[G.fs_stopped]) {
+            return finish(res, KILN_STATION_UNCHANGED, "the station is stopped already");
+        }
+    }
+    if (r.action == KILN_STATION_RESUME && !now[G.fs_stopped]) return finish(res, KILN_STATION_UNCHANGED, "the station is not stopped");
+    const bool own_choices = r.action == KILN_STATION_SELECT && any_choice(r.choices);
+    if (r.action == KILN_STATION_SELECT) {
+        if (r.recipe) {
+            const void* recipe = find_recipe(r.recipe, run.recipes);
+            if (!recipe) return finish(res, KILN_STATION_NO_RECIPE, "recipe 0x%08x is not in the recipe registry", r.recipe);
+            const uint8_t* cr = other(run, run.acc_crafting, r.station, kCraftingWorkshop + 4);
+            const uint32_t ws = cr ? rd<uint32_t>(cr, kCraftingWorkshop) : 0;
+            const uint32_t rw = rd<uint32_t>(recipe, kRecipeWorkshop);
+            if (rw != ws) return finish(res, KILN_STATION_WRONG_WORKSHOP, "recipe 0x%08x is a recipe of workshop 0x%08x", r.recipe, rw);
+            char why[128];
+            if (own_choices && !choices_fit(recipe, r.choices, run.recipes, why, sizeof why)) return finish_text(res, KILN_STATION_REFUSED, why);
+        } else if (own_choices) {
+            return finish(res, KILN_STATION_REFUSED, "category choices without a recipe");
+        }
+        // all-zero choices keep the station's own
+        const bool same = rd<uint32_t>(now, G.fs_next) == r.recipe && (!own_choices || std::memcmp(now + G.fs_next_sel, r.choices, 32) == 0) &&
+                          ((r.flags & KILN_STATION_KEEP_STOPPED) || !now[G.fs_stopped]);
+        if (same) return finish(res, KILN_STATION_UNCHANGED, "the station has this recipe selected already");
+    }
+    if (G.invalidate && run.factory_info) G.invalidate(run.factory_info, r.station);  // as player_crafting, before the write
+    uint8_t* w = write_factory(run, r.station);
+    if (!w) return finish(res, KILN_STATION_NOT_A_STATION, "entity %u has no FactoryStation to write", r.station);
+    switch (r.action) {
+    case KILN_STATION_STOP: w[G.fs_stopped] = 1; break;
+    case KILN_STATION_RESUME: w[G.fs_stopped] = 0; break;
+    case KILN_STATION_SELECT:
+        wr<uint32_t>(w, G.fs_next, r.recipe);
+        if (own_choices) std::memcpy(w + G.fs_next_sel, r.choices, 32);
+        if (!(r.flags & KILN_STATION_KEEP_STOPPED)) w[G.fs_stopped] = 0;
+        break;
+    default: break;
+    }
+    res->state_after = w[kFsState];
+    res->stopped_after = w[G.fs_stopped];
+    noted_write(r.station, q.owner, w, r.action);
+    res->status = KILN_STATION_DONE;
+}
+
+struct ActCall {
+    const Run* run;
+    Req* q;
+    KilnStationResult* res;
+    bool keep_waiting;
+};
+void act_impl(void* p) {
+    auto* a = static_cast<ActCall*>(p);
+    if (a->q->r.action == KILN_STATION_FILL) run_fill(*a->run, *a->q, a->res);
+    else run_control(*a->run, *a->q, a->res, &a->keep_waiting);
+}
+
+struct TickCall {
+    KilnProgramCtx* ctx;
+    void* balancing;
+    int64_t now;
+    float speed;
+};
+void tick_impl(void* p) {
+    auto* t = static_cast<TickCall*>(p);
+    int64_t v = 0;
+    if (G.program_time) t->now = *G.program_time(t->ctx, &v);
+    if (G.speed && t->balancing) t->speed = G.speed(t->balancing);
+}
+
+const char* action_name(uint32_t a) {
+    switch (a) {
+    case KILN_STATION_FILL: return "fill";
+    case KILN_STATION_STOP: return "stop";
+    case KILN_STATION_RESUME: return "resume";
+    case KILN_STATION_SELECT: return "select";
+    default: return "?";
+    }
+}
+
+void KILN_CALL each(KilnProgramCtx* ctx, uint64_t* it, KilnEntity, void*) {
+    if (g_off.load()) return;
+    if (!resolve_slots()) {
+        switch_off("kiln.world did not report kiln_items_stations' iterator slots");
+        return;
+    }
+    {  // the world's time and the speed factor, every step (station_read's progress)
+        TickCall t{ctx, reinterpret_cast<void*>(it[g_s_sing[0]]), 0, 0.0f};
+        unsigned long code = 0;
+        if (guard(&tick_impl, &t, &code)) {
+            g_now.store(t.now, std::memory_order_relaxed);
+            uint32_t bits;
+            std::memcpy(&bits, &t.speed, 4);
+            g_speed_bits.store(bits, std::memory_order_relaxed);
+        }
+    }
+    if (g_pending_n.load(std::memory_order_acquire) == 0) return;
+    std::vector<Req> batch, after;
+    {
+        std::lock_guard lock(g_mu);
+        const size_t take = std::min<size_t>(g_ready.size(), kPerStep);
+        batch.assign(g_ready.begin(), g_ready.begin() + static_cast<ptrdiff_t>(take));
+        g_ready.erase(g_ready.begin(), g_ready.begin() + static_cast<ptrdiff_t>(take));
+        after = g_after;  // the stops waiting for a cycle's end, every step (g_after keeps them listed: stop_pending)
+    }
+    if (batch.empty() && after.empty()) return;
+    Run run{};
+    char why[160] = "";
+    const bool ok = verify(ctx, it, &run, why);
+    if (!ok) {
+        LOGE("stations: kiln_items_stations' iterator: %s", why[0] ? why : "?");
+        switch_off(why[0] ? why : "checking kiln_items_stations' iterator faulted");
+    } else if (g_state.exchange(KILN_ITEMS_PROGRAM_RUNNING) != KILN_ITEMS_PROGRAM_RUNNING) {
+        LOGI("program %s runs: accessors verified", kProgram);
+    }
+    std::vector<KilnStationResult> done;
+    auto act = [&](Req& q, KilnStationResult* res) -> bool {
+        if (!ok) {
+            finish(res, KILN_STATION_UNAVAILABLE, "kiln_items_stations is off (see kiln.log)");
+            return false;
+        }
+        ActCall a{&run, &q, res, false};
+        unsigned long code = 0;
+        if (!guard(&act_impl, &a, &code)) {
+            abandon_tx(g_tx);
+            char b[128];
+            std::snprintf(b, sizeof b, "the game faulted (0x%08lx) in an action on station %u", code, q.r.station);
+            finish_text(res, KILN_STATION_UNAVAILABLE, b);
+            switch_off(b);
+            return false;
+        }
+        return a.keep_waiting;
+    };
+    auto answer = [&](const Req&, const KilnStationResult& r) {
+        KilnStationResult x = r;
+        x.step = current_step();
+        done.push_back(x);
+    };
+    std::vector<Req> still = run_batch(batch, std::move(after), act, answer);
+    std::lock_guard lock(g_mu);
+    for (auto& r : done) g_done.push_back(r);
+    g_after = still;
+    g_pending_n.store(static_cast<uint32_t>(g_ready.size() + g_after.size() + g_incoming.size()), std::memory_order_release);
+}
+
+// ================================================================================ Pre ====
+
+void poll_program() {
+    if (!g_w || g_state.load() != KILN_ITEMS_PROGRAM_PENDING) return;
+    KilnWorldProgramInfo pi{};
+    pi.size = sizeof pi;
+    if (g_w->program_info(g_prog, &pi) != KILN_OK) return;
+    if (pi.state == KILN_PROGRAM_ACTIVE) {
+        int expected = KILN_ITEMS_PROGRAM_PENDING;
+        g_state.compare_exchange_strong(expected, KILN_ITEMS_PROGRAM_ACTIVE);
+    } else if (pi.state == KILN_PROGRAM_REFUSED || pi.state == KILN_PROGRAM_FAULTED || pi.state == KILN_PROGRAM_SKIPPED) {
+        g_state.store(KILN_ITEMS_PROGRAM_NONE);
+        char b[160];
+        std::snprintf(b, sizeof b, "kiln.world reports %s as state %u (see kiln.log)", kProgram, pi.state);
+        lower("stations.fill", KILN_CAP_REASON_FAULTED, b);
+        lower("stations.control", KILN_CAP_REASON_FAULTED, b);
+        LOGE("stations: %s", b);
+    }
+}
+
+// SELECT's unlock check: the world (shared progression) and every player in game, by the game's evaluator.
+bool unlocked(uint32_t recipe_id, char* why, size_t cap) {
+    KilnStationRecipe rec{};
+    rec.size = sizeof rec;
+    if (recipe_info(recipe_id, &rec) != KILN_OK) return std::snprintf(why, cap, "recipe 0x%08x is not in the recipe registry", recipe_id), false;
+    if (rec.knowledge_id == 0) return true;
+    if (!g_know) {
+        std::snprintf(why, cap, "kiln.knowledge is not loaded: Kiln cannot tell whether anyone has unlocked recipe 0x%08x "
+                                "(ask with ALLOW_LOCKED to select it anyway)", recipe_id);
+        return false;
+    }
+    KilnKnowledgeQuery q{rec.knowledge_id, rec.knowledge_value, rec.knowledge_compare, rec.knowledge_type, rec.knowledge_player_only, 0};
+    uint8_t v = 0;
+    const KilnResult wrc = g_know->query(0, &q, KILN_KNOW_MODE_SHARED, &v);
+    const int world = wrc == KILN_OK ? (v ? 1 : 0) : -1;
+    std::vector<int> players;
+    KilnPlayer ps[KILN_PLAYERS_MAX_SLOTS];
+    uint32_t n = 0;
+    if (g_players) {
+        for (auto& p : ps) p.size = sizeof p;
+        g_players->list(0, ps, KILN_PLAYERS_MAX_SLOTS, &n);
+        for (uint32_t i = 0; i < std::min<uint32_t>(n, KILN_PLAYERS_MAX_SLOTS); ++i) {
+            if (ps[i].state != KILN_PLAYER_IN_GAME) continue;
+            uint8_t pv = 0;
+            const KilnResult prc = g_know->query(ps[i].entity, &q, KILN_KNOW_MODE_PLAYER, &pv);
+            players.push_back(prc == KILN_OK ? (pv ? 1 : 0) : -1);
+        }
+    }
+    switch (unlock_verdict(false, world, players)) {
+    case Unlock::Yes: return true;
+    case Unlock::No:
+        std::snprintf(why, cap, "no one on this server has unlocked recipe 0x%08x (the world and %zu player(s) in game checked)",
+                      recipe_id, players.size());
+        return false;
+    case Unlock::Unknown:
+    default:
+        std::snprintf(why, cap, "recipe 0x%08x's unlock is a player's and no player is in game to check it (ALLOW_LOCKED selects it anyway)",
+                      recipe_id);
+        return false;
+    }
+}
+
+bool guarded_done(KilnStationDoneFn fn, const KilnStationResult* r, void* user) {
+    __try {
+        fn(r, user);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+void deliver() {
+    std::vector<KilnStationResult> done;
+    std::vector<std::pair<KilnStationResult, Callback>> calls;
+    {
+        std::lock_guard lock(g_mu);
+        done.swap(g_done);
+        for (const KilnStationResult& r : done) {
+            auto i = g_callbacks.find(r.ticket);
+            if (i == g_callbacks.end()) continue;
+            calls.emplace_back(r, i->second);
+            g_callbacks.erase(i);
+        }
+    }
+    g_done_total.fetch_add(static_cast<uint32_t>(done.size()));
+    for (const KilnStationResult& r : done)
+        LOGI("stations: ticket %llu: %s station %u recipe 0x%08x: status %d, crafts %u -> %u (+%u), game code %d, %u change(s)%s%s",
+             static_cast<unsigned long long>(r.ticket), action_name(r.action), r.station, r.recipe, r.status, r.crafts_before,
+             r.crafts_after, r.crafts_added, r.game_error, r.change_count, r.message[0] ? ": " : "", r.message);
+    for (auto& [r, cb] : calls)
+        if (!guarded_done(cb.fn, &r, cb.user)) LOGE("stations: a result callback faulted (ticket %llu)", static_cast<unsigned long long>(r.ticket));
+}
+
+uint32_t bases_fingerprint(const RawBases& rb) {
+    uint32_t h = 0x811c9dc5u ^ rb.count;
+    for (uint32_t i = 0; i < rb.count; ++i) {
+        const auto* p = reinterpret_cast<const uint8_t*>(rb.r[i].min);
+        for (int k = 0; k < 24; ++k) h = (h ^ p[k]) * 0x01000193u;
+        h = (h ^ rb.r[i].zone_mask) * 0x01000193u;
+    }
+    return h;
+}
+
+void push_event(const KilnStationEvent& ev) {
+    std::lock_guard lock(g_mu);
+    g_ring.push(ev);
+}
+
+// The stations of the world (a scan of the entity map through kiln.world), at most every kScanEvery steps.
+void scan_stations(uint64_t step, void* sys, bool events) {
+    g_stations_step = step ? step : 1;
+    std::vector<KilnEntity> ids(kMaxStations);
+    uint32_t n = 0;
+    if (!g_w || (g_w->find(H_FACTORY, ids.data(), kMaxStations, &n) != KILN_OK && n == 0)) n = 0;
+    ids.resize(std::min(n, kMaxStations));
+    for (auto& [e, k] : g_known) k.fresh = false;
+    for (KilnEntity e : ids) {
+        FsBytes fs{};
+        if (!factory_of(e, &fs)) continue;
+        KilnVec3 pos{};
+        position_of(e, &pos);
+        const Snap s = snap_of(fs, workshop_of(e), base_index_at(sys, pos), pos);
+        auto it = g_known.find(e);
+        if (it == g_known.end()) {
+            g_known.emplace(e, Known{s, true});
+            if (events && g_scanned) {
+                KilnStationEvent ev = state_event(e, s, s);
+                ev.kind = KILN_STATION_EV_PLACED;
+                ev.step = step;
+                ev.base = base_id_of(s.base);
+                push_event(ev);
+            }
+        } else {
+            it->second.fresh = true;
+            it->second.snap.base = s.base;
+            it->second.snap.pos = s.pos;
+            it->second.snap.workshop = s.workshop;
+        }
+    }
+    for (auto it = g_known.begin(); it != g_known.end();) {
+        if (!it->second.fresh) {
+            if (events && g_scanned) {
+                KilnStationEvent ev = state_event(it->first, it->second.snap, it->second.snap);
+                ev.kind = KILN_STATION_EV_REMOVED;
+                ev.step = step;
+                ev.base = base_id_of(it->second.snap.base);
+                push_event(ev);
+            }
+            it = g_known.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    g_stations = ids;
+    g_scanned = true;
+    g_station_count.store(static_cast<uint32_t>(ids.size()), std::memory_order_relaxed);
+    g_scanned_any.store(true, std::memory_order_relaxed);
+}
+
+void watch_pre(uint64_t step) {
+    const bool watching = g_watchers.load() > 0;
+    RawBases rb{};
+    const bool have_bases = read_bases(&rb);
+    void* sys = have_bases ? rb.sys : nullptr;
+    bool rebuilt = false;
+    if (have_bases) {
+        const uint32_t sig = bases_fingerprint(rb);
+        if (sig != g_bases_sig) {
+            rebuilt = true;
+            const bool first = g_bases_sig == 0;
+            g_bases_sig = sig;
+            ++g_bases_version;
+            g_altars_step = 0;  // rescan the altars now
+            if (!first && watching) {
+                KilnStationEvent ev{};
+                ev.size = sizeof ev;
+                ev.kind = KILN_STATION_EV_BASES;
+                ev.base_index = static_cast<int32_t>(rb.count);
+                ev.step = step;
+                push_event(ev);
+            }
+        }
+    }
+    if (!watching) return;
+    if (scan_due(g_scanned, step, g_stations_step, kScanEvery, rebuilt)) {  // a rebuild moves the stations' base indices
+        scan_altars(step, sys);
+        scan_stations(step, sys, true);
+    }
+    for (auto& [e, k] : g_known) {
+        FsBytes fs{};
+        if (!factory_of(e, &fs)) continue;  // gone: the next scan reports it
+        Snap s = snap_of(fs, k.snap.workshop, k.snap.base, k.snap.pos);
+        if (s == k.snap) continue;
+        KilnStationEvent ev = state_event(e, k.snap, s);
+        ev.base = base_id_of(s.base);
+        {
+            // the owner of a Kiln write that made exactly this change (its stop flag or its selection), in the step before
+            std::lock_guard lock(g_mu);
+            auto w = g_wrote.find(e);
+            if (w != g_wrote.end() && step <= w->second.step + 2) {
+                const Wrote& x = w->second;
+                const bool flag = x.sets_stopped && s.stopped != k.snap.stopped && s.stopped == x.stopped;
+                const bool sel = x.sets_selected && s.selected != k.snap.selected && s.selected == x.selected;
+                if (flag || sel) {
+                    ev.by = x.owner;
+                    g_wrote.erase(w);  // once
+                }
+            }
+        }
+        ev.step = step;
+        push_event(ev);
+        k.snap = s;
+    }
+}
+
+// ================================================================================ the table ====
+
+bool tick() { return g_api && g_api->on_tick_thread(); }
+
+KilnResult read_gate() {
+    if (!tick()) return KILN_ERR_WRONG_THREAD;
+    if (!G.read || !here()) return KILN_ERR_UNAVAILABLE;
+    return KILN_OK;
+}
+
+KilnResult KILN_CALL t_status(KilnStationsStatus* out) {
+    if (!out || out->size < sizeof(KilnStationsStatus)) return KILN_ERR_INVALID_ARGUMENT;
+    const uint32_t size = out->size;
+    std::memset(out, 0, sizeof *out);
+    out->size = size;
+    const int state = g_state.load();
+    const bool live = here();
+    const bool prog = state != KILN_ITEMS_PROGRAM_NONE && state != KILN_ITEMS_PROGRAM_BROKEN && !g_off.load();
+    const StatusBits on = status_bits(G.read, G.fill_ok, G.control, G.events, live, prog);
+    out->read = on.read ? 1 : 0;
+    out->fill = on.fill ? 1 : 0;
+    out->control = on.control ? 1 : 0;
+    out->events = on.events ? 1 : 0;
+    out->program = static_cast<uint8_t>(state);
+    out->watching = g_watchers.load() > 0 ? 1 : 0;
+    out->knowledge = g_know ? 1 : 0;
+    out->stations = g_station_count.load(std::memory_order_relaxed);
+    out->scanned = g_scanned_any.load(std::memory_order_relaxed) ? 1 : 0;
+    out->pending = g_pending_n.load();
+    out->done = g_done_total.load();
+    std::lock_guard lock(g_mu);
+    if (!live) std::snprintf(out->detail, sizeof out->detail, "no server world here (a joined client, or no world yet)");
+    else if (!(out->read && out->fill && out->control)) std::snprintf(out->detail, sizeof out->detail, "%s", g_detail);
+    return KILN_OK;
+}
+
+KilnResult KILN_CALL t_base_count(uint32_t* out) {
+    if (!out) return KILN_ERR_INVALID_ARGUMENT;
+    *out = 0;
+    if (KilnResult g = read_gate(); g != KILN_OK) return g;
+    RawBases rb{};
+    if (!read_bases(&rb)) return KILN_ERR_UNAVAILABLE;
+    *out = rb.count;
+    return KILN_OK;
+}
+
+KilnResult base_fill(uint32_t index, KilnStationBase* out, const RawBases& rb) {
+    if (index >= rb.count) return KILN_ERR_NOT_FOUND;
+    scan_altars(current_step(), rb.sys);
+    if (!g_scanned) scan_stations(current_step(), rb.sys, false);
+    fill_base(rb, index, out);
+    return KILN_OK;
+}
+
+KilnResult KILN_CALL t_base_at(uint32_t index, KilnStationBase* out) {
+    if (!out || out->size < sizeof(KilnStationBase)) return KILN_ERR_INVALID_ARGUMENT;
+    if (KilnResult g = read_gate(); g != KILN_OK) return g;
+    RawBases rb{};
+    if (!read_bases(&rb)) return KILN_ERR_UNAVAILABLE;
+    return base_fill(index, out, rb);
+}
+
+KilnResult KILN_CALL t_base_at_position(const KilnVec3* p, KilnStationBase* out) {
+    if (!p || !out || out->size < sizeof(KilnStationBase)) return KILN_ERR_INVALID_ARGUMENT;
+    if (KilnResult g = read_gate(); g != KILN_OK) return g;
+    RawBases rb{};
+    if (!read_bases(&rb)) return KILN_ERR_UNAVAILABLE;
+    const int32_t i = base_index_at(rb.sys, *p);
+    if (i < 0) return KILN_ERR_NOT_FOUND;
+    return base_fill(static_cast<uint32_t>(i), out, rb);
+}
+
+KilnResult KILN_CALL t_base_of(KilnEntity e, KilnStationBase* out) {
+    if (!e || !out || out->size < sizeof(KilnStationBase)) return KILN_ERR_INVALID_ARGUMENT;
+    if (KilnResult g = read_gate(); g != KILN_OK) return g;
+    KilnVec3 p{};
+    if (!position_of(e, &p)) return KILN_ERR_NOT_FOUND;
+    return t_base_at_position(&p, out);
+}
+
+KilnResult list_out(const std::vector<KilnEntity>& v, KilnEntity* out, uint32_t capacity, uint32_t* out_count) {
+    *out_count = static_cast<uint32_t>(v.size());
+    const uint32_t n = std::min<uint32_t>(capacity, *out_count);
+    if (n && out) std::memcpy(out, v.data(), n * sizeof(KilnEntity));
+    return *out_count > capacity ? KILN_ERR_BUFFER_TOO_SMALL : KILN_OK;
+}
+
+KilnResult base_list_out(uint32_t index, bool water, KilnEntity* out, uint32_t capacity, uint32_t* out_count) {
+    if (!out_count || (capacity && !out)) return KILN_ERR_INVALID_ARGUMENT;
+    *out_count = 0;
+    if (KilnResult g = read_gate(); g != KILN_OK) return g;
+    RawBases rb{};
+    if (!read_bases(&rb)) return KILN_ERR_UNAVAILABLE;
+    if (index >= rb.count) return KILN_ERR_NOT_FOUND;
+    std::vector<KilnEntity> v;
+    if (!base_list(rb, index, water, &v)) return KILN_ERR_INTERNAL;
+    return list_out(v, out, capacity, out_count);
+}
+KilnResult KILN_CALL t_base_storage(uint32_t i, KilnEntity* out, uint32_t cap, uint32_t* n) { return base_list_out(i, false, out, cap, n); }
+KilnResult KILN_CALL t_base_water(uint32_t i, KilnEntity* out, uint32_t cap, uint32_t* n) { return base_list_out(i, true, out, cap, n); }
+
+KilnResult KILN_CALL t_base_stock(uint32_t index, KilnStationStack* out, uint32_t capacity, uint32_t* out_count) {
+    if (!out_count || (capacity && !out)) return KILN_ERR_INVALID_ARGUMENT;
+    *out_count = 0;
+    if (KilnResult g = read_gate(); g != KILN_OK) return g;
+    RawBases rb{};
+    if (!read_bases(&rb)) return KILN_ERR_UNAVAILABLE;
+    if (index >= rb.count) return KILN_ERR_NOT_FOUND;
+    std::vector<KilnEntity> v;
+    if (!base_list(rb, index, false, &v)) return KILN_ERR_INTERNAL;
+    std::unordered_map<uint32_t, uint64_t> sum;
+    for (KilnEntity c : v) count_items(c, &sum);
+    std::vector<KilnStationStack> rows;
+    for (auto& [item, count] : sum) rows.push_back({item, static_cast<uint32_t>(std::min<uint64_t>(count, UINT32_MAX))});
+    std::sort(rows.begin(), rows.end(), [](const KilnStationStack& a, const KilnStationStack& b) { return a.item < b.item; });
+    *out_count = static_cast<uint32_t>(rows.size());
+    const uint32_t n = std::min<uint32_t>(capacity, *out_count);
+    if (n) std::memcpy(out, rows.data(), n * sizeof(KilnStationStack));
+    return *out_count > capacity ? KILN_ERR_BUFFER_TOO_SMALL : KILN_OK;
+}
+
+KilnResult KILN_CALL t_stations(int32_t base, KilnEntity* out, uint32_t capacity, uint32_t* out_count) {
+    if (!out_count || (capacity && !out)) return KILN_ERR_INVALID_ARGUMENT;
+    *out_count = 0;
+    if (KilnResult g = read_gate(); g != KILN_OK) return g;
+    const uint64_t step = current_step();
+    RawBases rb{};
+    read_bases(&rb);
+    if (!g_scanned || step - g_stations_step >= kScanEvery) scan_stations(step, rb.sys, g_watchers.load() > 0);
+    if (base < 0) return list_out(g_stations, out, capacity, out_count);
+    std::vector<KilnEntity> v;
+    for (KilnEntity e : g_stations) {
+        auto k = g_known.find(e);
+        if (k != g_known.end() && k->second.snap.base == base) v.push_back(e);
+    }
+    return list_out(v, out, capacity, out_count);
+}
+
+KilnResult KILN_CALL t_station_read(KilnEntity e, KilnStation* out) {
+    if (!e || !out || out->size < sizeof(KilnStation)) return KILN_ERR_INVALID_ARGUMENT;
+    if (KilnResult g = read_gate(); g != KILN_OK) return g;
+    FsBytes fs{};
+    if (!factory_of(e, &fs)) return KILN_ERR_NOT_FOUND;
+    const uint32_t size = out->size;
+    std::memset(out, 0, sizeof *out);
+    out->size = size;
+    out->entity = e;
+    out->workshop = workshop_of(e);
+    position_of(e, &out->position);
+    RawBases rb{};
+    if (read_bases(&rb)) {
+        out->base_index = base_index_at(rb.sys, out->position);
+        if (out->base_index >= 0) {
+            scan_altars(current_step(), rb.sys);
+            KilnStationBase b{};
+            b.size = sizeof b;
+            fill_base(rb, static_cast<uint32_t>(out->base_index), &b);
+            out->base = b.id;
+        }
+    } else {
+        out->base_index = -1;
+    }
+    out->state = fs.b[kFsState];
+    out->stopped_by_player = fs.b[G.fs_stopped];
+    out->use_all_options = fs.b[G.fs_use_all];
+    out->needs = fs.b[G.fs_missing];
+    out->running_recipe = rd<uint32_t>(fs.b, G.fs_running);
+    out->selected_recipe = rd<uint32_t>(fs.b, G.fs_next);
+    std::memcpy(out->running_choices, fs.b + G.fs_running_sel, 32);
+    std::memcpy(out->selected_choices, fs.b + G.fs_next_sel, 32);
+    out->recipe_start_ns = rd<int64_t>(fs.b, G.fs_start);
+    out->pause_ns = rd<int64_t>(fs.b, G.fs_pause);
+    out->now_ns = g_now.load(std::memory_order_relaxed);
+    void* attributes = singleton("impact::AttributeRegistry");
+    int32_t cur = 0, max = 0;
+    if (water_of(e, attributes, &cur, &max)) {
+        out->water = cur;
+        out->water_max = max;
+    }
+    void* reg = recipes_registry();
+    // loaded crafts: of the selected recipe, its water counted as the game counts it
+    if (const void* recipe = out->selected_recipe ? find_recipe(out->selected_recipe, reg) : nullptr) {
+        ResolveCall rc{};
+        if (resolve_inputs(recipe, reinterpret_cast<const KilnStationChoice*>(fs.b + G.fs_next_sel), reg, &rc)) {
+            std::unordered_map<uint32_t, uint64_t> have;
+            count_items(e, &have);
+            std::vector<InputNow> in;
+            for (uint32_t i = 0; i < rc.n; ++i) in.push_back({rc.out[i].item, rc.out[i].count, have[rc.out[i].item], 0});
+            merge_inputs(&in);
+            InputNow w{};
+            if (water_input(rd<uint32_t>(recipe, G.recipe_water), false, static_cast<uint64_t>(std::max(cur, 0)),
+                            static_cast<uint64_t>(std::max(max, 0)), 0, &w))
+                in.push_back(w);
+            out->crafts_loaded = crafts_loaded(in);
+        }
+    }
+    // the duration and progress of the cycle in progress (its own recipe), else the selected recipe's duration
+    const uint32_t shown = out->running_recipe ? out->running_recipe : out->selected_recipe;
+    if (const void* recipe = shown ? find_recipe(shown, reg) : nullptr) out->duration_ns = scaled(rd<int64_t>(recipe, G.recipe_duration));
+    if (cycle_in_progress(out->state, out->running_recipe) && out->duration_ns > 0) {
+        double f = 0.0;
+        if (out->state == KILN_STATION_STATE_PAUSED) f = static_cast<double>(out->pause_ns) / static_cast<double>(out->duration_ns);
+        else if (out->now_ns > 0 && out->recipe_start_ns > 0)
+            f = static_cast<double>(out->now_ns - out->recipe_start_ns) / static_cast<double>(out->duration_ns);
+        out->progress = static_cast<float>(std::clamp(f, 0.0, 1.0));
+    }
+    {
+        std::lock_guard lock(g_mu);
+        auto waits = [&](const std::vector<Req>& l) {
+            return std::any_of(l.begin(), l.end(), [&](const Req& q) {
+                return q.r.station == e && q.r.action == KILN_STATION_STOP && (q.r.flags & KILN_STATION_AFTER_CRAFT);
+            });
+        };
+        if (waits(g_after) || waits(g_ready) || waits(g_incoming)) out->flags |= KILN_STATION_FLAG_STOP_PENDING;
+    }
+    return KILN_OK;
+}
+
+KilnResult KILN_CALL t_recipe(uint32_t id, KilnStationRecipe* out) {
+    if (!id || !out || out->size < sizeof(KilnStationRecipe)) return KILN_ERR_INVALID_ARGUMENT;
+    if (KilnResult g = read_gate(); g != KILN_OK) return g;
+    return recipe_info(id, out);
+}
+
+KilnResult KILN_CALL t_recipe_inputs(uint32_t id, const KilnStationChoice* choices, KilnStationStack* out, uint32_t capacity,
+                                     uint32_t* out_count) {
+    if (!id || !out_count || (capacity && !out)) return KILN_ERR_INVALID_ARGUMENT;
+    *out_count = 0;
+    if (KilnResult g = read_gate(); g != KILN_OK) return g;
+    void* reg = recipes_registry();
+    const void* recipe = find_recipe(id, reg);
+    if (!recipe) return KILN_ERR_NOT_FOUND;
+    static const KilnStationChoice none[4] = {};
+    ResolveCall rc{};
+    if (!resolve_inputs(recipe, choices ? choices : none, reg, &rc)) return KILN_ERR_INTERNAL;
+    *out_count = rc.n;
+    const uint32_t n = std::min(capacity, rc.n);
+    if (n) std::memcpy(out, rc.out, n * sizeof(KilnStationStack));
+    return rc.n > capacity ? KILN_ERR_BUFFER_TOO_SMALL : KILN_OK;
+}
+
+struct CatCall {
+    void* reg;
+    uint32_t want_id;   // category(): this id
+    uint32_t want_at;   // category_at(): the index-th in map order
+    bool by_index;
+    uint32_t found_id;
+    KilnItemId* items;
+    float* scaling;
+    uint32_t cap, n;
+    bool found;
+};
+void cat_impl(void* p) {
+    auto* c = static_cast<CatCall*>(p);
+    const auto* r = static_cast<const uint8_t*>(c->reg);
+    const auto* bits = rd<const uint64_t*>(r, G.cat_bits);
+    const uint64_t cap = rd<uint64_t>(r, G.cat_cap);
+    const auto* keys = rd<const uint32_t*>(r, G.cat_keys);
+    const auto* values = rd<const uint8_t* const*>(r, G.cat_values);
+    if (!bits || !keys || !values || cap > (1u << 20)) return;
+    uint32_t seen = 0;
+    for (uint64_t i = 0; i < cap; ++i) {
+        if (!((bits[i >> 6] >> (i & 63)) & 1)) continue;
+        const uint32_t id = keys[i];
+        const bool hit = c->by_index ? seen++ == c->want_at : id == c->want_id;
+        if (!hit) continue;
+        c->found = true;
+        c->found_id = id;
+        const uint8_t* cat = values[i];
+        if (!cat || c->by_index) return;
+        const int32_t rel = rd<int32_t>(cat, 4);
+        const uint32_t n = rd<uint32_t>(cat, 8);
+        const uint8_t* it = cat + 4 + rel;
+        c->n = n;
+        for (uint32_t k = 0; k < n && k < c->cap && rel; ++k) {
+            c->items[k] = rd<uint32_t>(it, 8 * k);
+            if (c->scaling) c->scaling[k] = rd<float>(it, 8 * k + 4);
+        }
+        return;
+    }
+}
+
+bool category_options(void* reg, uint32_t id, uint32_t* n) {
+    CatCall c{reg, id, 0, false, 0, nullptr, nullptr, 0, 0, false};
+    unsigned long code = 0;
+    if (!reg || !guard(&cat_impl, &c, &code) || !c.found) return false;
+    *n = c.n;
+    return true;
+}
+
+KilnResult KILN_CALL t_category(uint32_t id, KilnItemId* items, float* scaling, uint32_t capacity, uint32_t* out_count) {
+    if (!id || !out_count || (capacity && !items)) return KILN_ERR_INVALID_ARGUMENT;
+    *out_count = 0;
+    if (KilnResult g = read_gate(); g != KILN_OK) return g;
+    CatCall c{recipes_registry(), id, 0, false, 0, items, scaling, capacity, 0, false};
+    unsigned long code = 0;
+    if (!c.reg || !guard(&cat_impl, &c, &code)) return KILN_ERR_UNAVAILABLE;
+    if (!c.found) return KILN_ERR_NOT_FOUND;
+    *out_count = c.n;
+    return c.n > capacity ? KILN_ERR_BUFFER_TOO_SMALL : KILN_OK;
+}
+
+KilnResult KILN_CALL t_category_at(uint32_t index, uint32_t* out_id) {
+    if (!out_id) return KILN_ERR_INVALID_ARGUMENT;
+    *out_id = 0;
+    if (KilnResult g = read_gate(); g != KILN_OK) return g;
+    CatCall c{recipes_registry(), 0, index, true, 0, nullptr, nullptr, 0, 0, false};
+    unsigned long code = 0;
+    if (!c.reg || !guard(&cat_impl, &c, &code)) return KILN_ERR_UNAVAILABLE;
+    if (!c.found) return KILN_ERR_NOT_FOUND;
+    *out_id = c.found_id;
+    return KILN_OK;
+}
+
+KilnResult KILN_CALL t_workshop_recipes(uint32_t workshop, uint32_t* out, uint32_t capacity, uint32_t* out_count) {
+    if (!out_count || (capacity && !out)) return KILN_ERR_INVALID_ARGUMENT;
+    *out_count = 0;
+    if (KilnResult g = read_gate(); g != KILN_OK) return g;
+    if (!g_gameplay || !g_gameplay->workshop_recipes) return KILN_ERR_UNAVAILABLE;
+    return g_gameplay->workshop_recipes(workshop, out, capacity, out_count);
+}
+
+KilnResult KILN_CALL t_plan(const KilnStationRequest* r, KilnStationPlan* out) {
+    if (!r || !out || out->size < sizeof(KilnStationPlan)) return KILN_ERR_INVALID_ARGUMENT;
+    if (r->action != KILN_STATION_FILL || !request_valid(*r)) return KILN_ERR_INVALID_ARGUMENT;
+    if (KilnResult g = read_gate(); g != KILN_OK) return g;
+    const uint32_t size = out->size;
+    std::memset(out, 0, sizeof *out);
+    out->size = size;
+    out->station = r->station;
+    PlanOut p;
+    plan_tick(*r, &p);
+    out->status = p.status;
+    out->recipe = p.recipe;
+    out->base_index = p.base;
+    out->crafts_loaded = p.loaded;
+    out->crafts_affordable = p.affordable;
+    out->crafts_planned = p.status == KILN_STATION_DONE || p.status == KILN_STATION_PARTIAL ? p.planned : 0;
+    out->limited_by = p.limit.why;
+    out->short_item = p.limit.why == KILN_STATION_LIMIT_STOCK || p.limit.why == KILN_STATION_LIMIT_RESERVE ? p.limit.item : 0;
+    out->use_all_options = p.use_all;
+    out->water_per_craft = p.water_per;
+    out->water_have = static_cast<uint32_t>(std::min<uint64_t>(p.water_have, UINT32_MAX));
+    out->water_stock = static_cast<uint32_t>(std::min<uint64_t>(p.water_stock, UINT32_MAX));
+    for (const InputNow& x : p.in) {
+        if (x.item == kWaterItem || out->input_count >= KILN_STATIONS_MAX_INPUTS) continue;  // water: its own fields
+        const uint32_t i = out->input_count++;
+        out->inputs[i] = {x.item, x.count};
+        out->have[i] = static_cast<uint32_t>(std::min<uint64_t>(x.have, UINT32_MAX));
+        out->stock[i] = static_cast<uint32_t>(std::min<uint64_t>(x.stock, UINT32_MAX));
+    }
+    std::snprintf(out->message, sizeof out->message, "%s", p.why);
+    return KILN_OK;
+}
+
+KilnResult KILN_CALL t_submit(KilnOwner owner, const KilnStationRequest* r, KilnStationDoneFn done, void* user, uint64_t* out_ticket) {
+    if (out_ticket) *out_ticket = 0;
+    if (!r || !request_valid(*r)) return KILN_ERR_INVALID_ARGUMENT;
+    static std::atomic<uint32_t> refusals{0};
+    auto refuse = [&](const char* why) {
+        if (refusals.fetch_add(1) < 5) LOGW("stations: an action was refused: %s", why);
+        return KILN_ERR_UNAVAILABLE;
+    };
+    const bool fill = r->action == KILN_STATION_FILL;
+    if (g_off.load() || (fill ? !G.fill_ok : !G.control)) return refuse(fill ? "stations.fill is off" : "stations.control is off");
+    const int state = g_state.load();
+    if (!g_w || !g_tx || state == KILN_ITEMS_PROGRAM_NONE || state == KILN_ITEMS_PROGRAM_BROKEN)
+        return refuse("the program kiln_items_stations is not registered or broke");
+    if (!here()) return refuse("no server world here");
+    Req q{};
+    q.ticket = items_next_ticket();
+    q.owner = owner;
+    q.r = *r;
+    q.r.size = sizeof(KilnStationRequest);
+    q.r.keep = nullptr;
+    for (uint32_t i = 0; i < r->keep_count; ++i) q.keep[i] = r->keep[i];
+    q.submitted = current_step();
+    {
+        std::lock_guard lock(g_mu);
+        if (g_incoming.size() + g_ready.size() + g_after.size() >= kMaxPending) return KILN_ERR_BUFFER_TOO_SMALL;
+        g_incoming.push_back(q);
+        if (done) g_callbacks.emplace(q.ticket, Callback{done, user});
+        g_pending_n.store(static_cast<uint32_t>(g_ready.size() + g_after.size() + g_incoming.size()), std::memory_order_release);
+    }
+    if (out_ticket) *out_ticket = q.ticket;
+    return KILN_OK;
+}
+
+KilnResult KILN_CALL t_cancel(uint64_t ticket) {
+    std::lock_guard lock(g_mu);
+    return g_callbacks.erase(ticket) ? KILN_OK : KILN_ERR_NOT_FOUND;
+}
+
+KilnResult KILN_CALL t_watch(uint32_t on) {
+    if (on) {
+        if (!G.events || !G.read) return KILN_ERR_UNAVAILABLE;
+        g_watchers.fetch_add(1);
+    } else {
+        int v = g_watchers.load();
+        while (v > 0 && !g_watchers.compare_exchange_weak(v, v - 1)) {
+        }
+    }
+    return KILN_OK;
+}
+
+KilnResult KILN_CALL t_events(uint64_t after, KilnStationEvent* out, uint32_t capacity, uint32_t* out_count) {
+    if (!out_count || (capacity && !out)) return KILN_ERR_INVALID_ARGUMENT;
+    *out_count = 0;
+    if (!tick()) return KILN_ERR_WRONG_THREAD;
+    std::lock_guard lock(g_mu);
+    bool more = false;
+    *out_count = g_ring.read(after, out, capacity, &more);
+    return more ? KILN_ERR_BUFFER_TOO_SMALL : KILN_OK;
+}
+
+uint64_t KILN_CALL t_last_seq() {
+    std::lock_guard lock(g_mu);
+    return g_ring.last();
+}
+
+const KilnStationsApi kTable = {
+    {sizeof(KilnStationsApi), KILN_STATIONS_VERSION},
+    &t_status, &t_base_count, &t_base_at, &t_base_of, &t_base_at_position, &t_base_storage, &t_base_water, &t_base_stock,
+    &t_stations, &t_station_read, &t_recipe, &t_recipe_inputs, &t_category, &t_category_at, &t_workshop_recipes, &t_plan,
+    &t_submit, &t_cancel, &t_watch, &t_events, &t_last_seq,
+};
+
+template <typename F>
+bool sym(const char* name, F* out) {
+    uintptr_t a = 0;
+    if (g_api->symbol(str(name), &a) != KILN_OK || !a) return false;
+    *out = reinterpret_cast<F>(a);
+    return true;
+}
+bool cst(const char* name, int64_t* out) { return g_api->constant(str(name), out) == KILN_OK; }
+bool feat(const char* name) { return g_api->feature(str(name)); }
+
+}  // namespace
+
+void stations_resolve() {
+    g_api = items_api();
+    g_owner = items_owner();
+    H_FACTORY = comp_hash("FactoryStation");
+    H_CRAFTING = comp_hash("Crafting");
+    H_BASE_ID = comp_hash("BaseIdComponent");
+    H_TRANSFORM = comp_hash("CurrentTransform");
+    H_NETWORK_FUEL = comp_hash("NetworkFuel");
+    int64_t fs_size = 0, fs_state = -1, fs_running = -1, fs_running_sel = -1, fs_pause = -1, fs_missing = -1;
+    const bool layout = cst("stations/factory.size", &fs_size) && cst("stations/factory.state", &fs_state) &&
+                        cst("stations/factory.running_recipe", &fs_running) && cst("stations/factory.running_selections", &fs_running_sel) &&
+                        cst("stations/factory.pause_duration", &fs_pause) && cst("stations/factory.missing", &fs_missing) &&
+                        cst("stations/factory.recipe_start", &G.fs_start) && fs_size == 0x68 && fs_state == kFsState;
+    G.fs_size = fs_size;
+    G.fs_running = fs_running;
+    G.fs_running_sel = fs_running_sel;
+    G.fs_pause = fs_pause;
+    G.fs_missing = fs_missing;
+    G.read = feat("stations.read") && layout && E.read_ok && sym("stations/BaseAtPosition", &G.base_at) &&
+             sym("stations/ResolveRecipeInputs", &G.resolve) && sym("content/RecipeFind", &G.recipe_find) &&
+             sym("stations/FactorySpeed", &G.speed) && sym("gameplay/ProgramTime", &G.program_time) &&
+             cst("stations/bases.count", &G.bases_count) && cst("stations/bases.stride", &G.stride) &&
+             cst("stations/bases.aabb_y", &G.aabb_y) && cst("stations/bases.zone_mask_rel", &G.zone_mask_rel) &&
+             cst("stations/bases.zones", &G.zones) && cst("stations/stock.items", &G.stock_items) &&
+             cst("stations/stock.items_count", &G.stock_items_count) && cst("stations/stock.water", &G.stock_water) &&
+             cst("stations/stock.water_count", &G.stock_water_count) && cst("stations/categories.bits", &G.cat_bits) &&
+             cst("stations/categories.cap", &G.cat_cap) && cst("stations/categories.keys", &G.cat_keys) &&
+             cst("stations/categories.values", &G.cat_values) && cst("stations/categories.count", &G.cat_count) &&
+             cst("stations/recipe.duration", &G.recipe_duration) && cst("stations/recipe.water_charges", &G.recipe_water) &&
+             cst("stations/factory.next_recipe", &G.fs_next) && cst("stations/factory.next_selections", &G.fs_next_sel) &&
+             cst("stations/factory.stopped_by_player", &G.fs_stopped) && cst("stations/factory.use_all", &G.fs_use_all) &&
+             G.stride == 0x130 && G.stock_items_count == G.stock_items + 8 && G.stock_water_count == G.stock_water + 8 &&
+             G.cat_cap == G.cat_bits + 8 && G.fs_next + 4 == G.fs_next_sel && G.fs_stopped == G.fs_use_all + 1 &&
+             G.fs_stopped < G.fs_size && G.fs_missing < G.fs_size;
+    G.fill_ok = G.read && feat("stations.fill") && E.tx_ok && sym("stations/AutoTransferRecipe", &G.fill) &&
+                sym("stations/FactoryInfoInvalidate", &G.invalidate) && E.setup_operator > 0 &&
+                E.setup_operator + 4 <= static_cast<int64_t>(kSetupBlock);
+    G.control = G.read && feat("stations.control") && (G.invalidate || sym("stations/FactoryInfoInvalidate", &G.invalidate));
+    G.events = G.read && feat("stations.events");
+    if (!G.read) {
+        const char* why = !feat("stations.read") ? "stations.read did not resolve on this game build"
+                                                 : "a symbol or layout constant of kiln.stations does not check out";
+        set_detail(why);
+        if (feat("stations.read")) lower("stations.read", KILN_CAP_REASON_SYMBOL_MISSING, why);
+    }
+    LOGI("stations: reads %s, fill %s, control %s, events %s (need kiln.world for the program)", G.read ? "on" : "OFF",
+         G.fill_ok ? "on" : "OFF", G.control ? "on" : "OFF", G.events ? "on" : "OFF");
+}
+
+void stations_register(const KilnWorldApi* w) {
+    g_gameplay = static_cast<const KilnGameplayApi*>(items_api()->service(str(KILN_GAMEPLAY_SERVICE), 1));
+    g_know = static_cast<const KilnKnowledgeApi*>(items_api()->service(str(KILN_KNOWLEDGE_SERVICE), 1));
+    if (g_know && g_know->header.size < offsetof(KilnKnowledgeApi, query) + sizeof(void*)) g_know = nullptr;
+    g_players = static_cast<const KilnPlayersApi*>(items_api()->service(str(KILN_PLAYERS_SERVICE), 1));
+    if (g_players && g_players->header.size < sizeof(KilnPlayersApi)) g_players = nullptr;
+    if (!G.read) return;
+    if (!w || w->header.size < sizeof(KilnWorldApi)) {
+        lower("stations.read", KILN_CAP_REASON_SERVICE_MISSING, "kiln.stations needs kiln.world (entity reads and its program)");
+        G.read = G.fill_ok = G.control = G.events = false;
+        return;
+    }
+    g_w = w;
+    if (!G.fill_ok && !G.control) return;
+    g_tx = static_cast<uint8_t*>(VirtualAlloc(nullptr, static_cast<SIZE_T>(E.tx_size), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
+    if (!g_tx) {
+        set_detail("no memory for the stations' transaction");
+        G.fill_ok = G.control = false;
+        return;
+    }
+    std::vector<KilnStr> sr, sw, orr, ow, eo;
+    for (const char* n : kSingRead) sr.push_back(str(n));
+    for (const char* n : kSingWrite) sw.push_back(str(n));
+    for (const char* n : kOtherRead) orr.push_back(str(n));
+    for (int i = 0; i < A_COUNT; ++i) ow.push_back(str(kAccNames[i]));
+    ow.push_back(str("FactoryStation"));
+    ow.push_back(str("NetworkFuel"));
+    for (const char* n : kEvents) eo.push_back(str(n));
+    KilnProgramDesc d{};
+    d.size = sizeof d;
+    d.flags = KILN_PROGRAM_SYSTEM | KILN_PROGRAM_HOST_ONLY;
+    d.name = str(kProgram);
+    d.each = &each;
+    d.singletons_read = KilnNames{sr.data(), static_cast<uint32_t>(sr.size()), 0};
+    d.singletons_write = KilnNames{sw.data(), static_cast<uint32_t>(sw.size()), 0};
+    d.singletons_write_optional = 1;  // KnowledgeTriggerQueue (a player's fill only)
+    d.other_read = KilnNames{orr.data(), static_cast<uint32_t>(orr.size()), 0};
+    d.other_write = KilnNames{ow.data(), static_cast<uint32_t>(ow.size()), 0};
+    d.events_out = KilnNames{eo.data(), static_cast<uint32_t>(eo.size()), 0};
+    if (w->register_program(items_owner(), &d, &g_prog) != KILN_OK) {
+        lower("stations.fill", KILN_CAP_REASON_FAULTED, "kiln.world refused the program kiln_items_stations (see kiln.log)");
+        lower("stations.control", KILN_CAP_REASON_FAULTED, "kiln.world refused the program kiln_items_stations (see kiln.log)");
+        G.fill_ok = G.control = false;
+        return;
+    }
+    g_state.store(KILN_ITEMS_PROGRAM_PENDING);
+    set_detail("waiting for the server world (kiln.world)");
+    LOGI("program %s registered through kiln.world (station actions; knowledge %s, players %s, gameplay %s)", kProgram,
+         g_know ? "here" : "not here", g_players ? "here" : "not here", g_gameplay ? "here" : "not here");
+}
+
+void stations_pre(uint64_t step) {
+    if (!G.read) return;
+    poll_program();
+    // SELECT's unlock check (tick thread), then the program may take them
+    std::vector<Req> incoming;
+    {
+        std::lock_guard lock(g_mu);
+        incoming.swap(g_incoming);
+    }
+    std::vector<Req> ready;
+    std::vector<KilnStationResult> refused;
+    for (Req& q : incoming) {
+        if (q.r.action == KILN_STATION_SELECT && q.r.recipe && !(q.r.flags & KILN_STATION_ALLOW_LOCKED)) {
+            char why[128] = "";
+            if (!unlocked(q.r.recipe, why, sizeof why)) {
+                KilnStationResult res = result_base(q);
+                finish_text(&res, KILN_STATION_LOCKED, why);
+                res.step = step;
+                refused.push_back(res);
+                continue;
+            }
+        }
+        ready.push_back(q);
+    }
+    {
+        std::lock_guard lock(g_mu);
+        for (auto& q : ready) g_ready.push_back(q);
+        for (auto& r : refused) g_done.push_back(r);
+        const int state = g_state.load();
+        const bool off = g_off.load() || state == KILN_ITEMS_PROGRAM_NONE;
+        for (auto i = g_ready.begin(); i != g_ready.end();) {
+            const bool stale = step > i->submitted + kTimeoutSteps;
+            if (off || stale) {
+                KilnStationResult res = result_base(*i);
+                finish(&res, off ? KILN_STATION_UNAVAILABLE : KILN_STATION_DROPPED,
+                       off ? "kiln.stations' actions went off" : "kiln_items_stations did not run it within 10 s");
+                res.step = step;
+                g_done.push_back(res);
+                i = g_ready.erase(i);
+                continue;
+            }
+            ++i;
+        }
+        if (off) {  // the program no longer runs: the stops waiting for a cycle's end are answered too
+            for (const Req& q : take_if(&g_after, [](const Req&) { return true; })) {
+                KilnStationResult res = result_base(q);
+                finish(&res, KILN_STATION_UNAVAILABLE, "kiln.stations' actions went off while the stop waited: nothing written");
+                res.step = step;
+                g_done.push_back(res);
+            }
+        }
+        g_pending_n.store(static_cast<uint32_t>(g_ready.size() + g_after.size() + g_incoming.size()), std::memory_order_release);
+    }
+    deliver();
+    if (G.events && items_server_world()) watch_pre(step);
+}
+
+void stations_world_closed() {
+    {
+        std::lock_guard lock(g_mu);
+        for (auto* list : {&g_incoming, &g_ready, &g_after}) {
+            for (const Req& q : *list) {
+                KilnStationResult res = result_base(q);
+                finish(&res, KILN_STATION_DROPPED, "the server world closed");
+                g_done.push_back(res);
+            }
+            list->clear();
+        }
+        g_pending_n.store(0, std::memory_order_release);
+        g_wrote.clear();
+        g_ring.clear();
+    }
+    g_known.clear();
+    g_stations.clear();
+    g_altars.clear();
+    g_scanned = false;
+    g_scanned_any.store(false);
+    g_station_count.store(0);
+    g_stations_step = g_altars_step = 0;
+    g_bases_sig = 0;
+    g_now.store(0);
+    int expected = KILN_ITEMS_PROGRAM_RUNNING;
+    g_state.compare_exchange_strong(expected, KILN_ITEMS_PROGRAM_ACTIVE);
+}
+
+KilnResult stations_publish(const KilnApi* api, KilnOwner owner) {
+    return api->register_service(owner, str(KILN_STATIONS_SERVICE), &kTable);
+}
+
+}  // namespace kitems

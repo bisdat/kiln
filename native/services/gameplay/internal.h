@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "kiln_api.h"
+#include "craft_phase.h"
 #include "services/kiln_gameplay.h"
 
 namespace kg {
@@ -66,6 +67,8 @@ struct Layout {
     // discard actions (PlayerInput / ServerConsumedPlayerInput, captured in inventory_actions)
     int64_t pi_item_version = -1, pi_item_type = -1, pi_item_slot = -1, scpi_item = -1;
     int64_t pi_tr_version = -1, pi_tr_type = -1, pi_tr_slot = -1, scpi_tr = -1;
+    // the craft core's phase flag (feature gameplay.craft_phase): an automated station's cycle is reported once
+    CraftPhase craft_phase{};
 };
 extern Layout L;
 

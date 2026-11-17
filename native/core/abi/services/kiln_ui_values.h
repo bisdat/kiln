@@ -11,7 +11,8 @@
  * (KUI_SLOT), ui.values.held (KUI_HELD), ui.values.hud (KUI_HEALTH, KUI_STAMINA, KUI_MANA), ui.values.tooltip_lines
  * (tooltip_lines, open/close_tooltip_details), ui.slots.inspect (copy_slots, subscribe_slots), ui.gemforge.inspect
  * (copy_gemforge_candidates, subscribe_gemforge_candidates), gems.sockets (gemforge_sockets; the row also carries
- * kiln.items' socket options, and on a server it is kiln.items' alone). A kind's game hooks are
+ * kiln.items' socket options, and on a server it is kiln.items' alone), ui.gemforge.sources (gemforge_sources,
+ * 0.2.0-dev.29.15). A kind's game hooks are
  * installed when the first provider of that kind registers and its row is available; one kind failing leaves the
  * others working, and the game's own value is drawn whenever no provider changes it. These seven rows never exist on a
  * dedicated server. They require the measured client build; after a game update they are off until Kiln is updated.
@@ -252,6 +253,47 @@ typedef struct KilnUiGemForgeFrame {
 typedef void(KILN_CALL* KilnUiGemForgeFn)(const KilnUiGemForgeFrame*, const KilnUiGemForgeCandidate*, uint32_t,
                                          void* user);
 
+/* ui.gemforge.sources (0.2.0-dev.29.15, GitHub issue 61): one chest gem a server offered to this player, as the GEMS
+ * grid lists it. The page and slot are the gem's real inventory slot on the server (an entity id the client shares);
+ * the grid's row key and the request the player's action sends name it, never a player slot. */
+typedef struct KilnUiGemForgeSource {
+    uint32_t size;        /* sizeof(KilnUiGemForgeSource) */
+    uint32_t page;        /* the inventory page entity that holds the gem (a container's) */
+    uint8_t slot;         /* 0..7 */
+    uint8_t rarity;       /* drawn as the game draws an item's rarity */
+    uint8_t group;        /* the payer group of an action on it (1..), 0: the player pays, as the game does */
+    uint8_t reserved0;    /* 0 */
+    uint32_t item;        /* its item id */
+    uint32_t pide;        /* its item entity */
+    uint32_t level;       /* its level (drawn in the cell, and what the Upgrade price uses) */
+    uint32_t reserved1;   /* 0 */
+    uint32_t reserved2;   /* 0 */
+    uint64_t token;       /* the server's token of the offer (kept for logs; the request names the slot) */
+    uint64_t expires_ms;  /* GetTickCount64 milliseconds after which the row is gone */
+} KilnUiGemForgeSource;
+
+/* What one payer group holds of one material (the button's picture of the price test for a row of that group). */
+typedef struct KilnUiGemForgePayer {
+    uint32_t size;          /* sizeof(KilnUiGemForgePayer) */
+    uint8_t group;          /* 1.. */
+    uint8_t player_first;   /* the player's own count is added (the player pays first, then the group) */
+    uint8_t reserved[2];    /* 0 */
+    uint32_t item;          /* the material */
+    uint32_t count;         /* how many the group's containers hold */
+} KilnUiGemForgePayer;
+
+typedef struct KilnUiGemForgeSourcesState {
+    uint32_t size;          /* set to sizeof(KilnUiGemForgeSourcesState) before calling */
+    uint8_t installed;      /* the hooks are in (they went in with the first rows a server sent) */
+    uint8_t off;            /* the feature is off for this process (why says why) */
+    uint8_t reserved[2];
+    uint32_t rows;          /* live rows now */
+    uint32_t wanted_count;  /* materials the price test asked about that no payer row covers */
+    uint32_t wanted[8];
+    uint64_t injected, resolved, priced; /* grid draws with chest rows, selections resolved, price tests answered */
+    char why[128];
+} KilnUiGemForgeSourcesState;
+
 typedef struct KilnUiValuesApi {
     KilnServiceHeader header; /* { sizeof(KilnUiValuesApi), KILN_UI_VALUES_VERSION }; append-only */
     /* A value provider of `kind` (KilnUiValueKind) for one item id or 0. Any thread. */
@@ -310,6 +352,21 @@ typedef struct KilnUiValuesApi {
      * KILN_ERR_UNAVAILABLE: a server, gems.sockets off, or its hooks could not be installed (a removal with 0 always
      * succeeds on the client); KILN_ERR_REVOKED. Any thread. */
     KilnResult(KILN_CALL* gemforge_sockets)(KilnOwner owner, uint32_t category_mask);
+    /* ---- appended in 0.2.0-dev.29.15: ui.gemforge.sources, client only. Check header.size before accessing. ----
+     * Chest gems a server offered, in the game's own GEMS grid. `rows` replaces this owner's rows (count 0 removes
+     * them); `payers` what each payer group holds of the materials the price test asked about. Rows belong to the
+     * client world they were set in (another session or local player drops them) and lapse at expires_ms. The hooks
+     * (a link on the GEMS grid that appends the rows, a mid hook on the selected-row resolve, two on the action panel's
+     * price tests) go in with the first nonempty rows, each site checked against the measured instruction bytes first;
+     * until then, and whenever no row is live, the forge runs as the game's. A row the player's own views hold already
+     * (same page and slot) is not added. Picture only: the player's action sends the game's own request with the row's
+     * real slot, and the server decides. KILN_ERR_INVALID_ARGUMENT: owner 0, a bad record (size, page 0, slot over 7,
+     * item 0, pide 0, reserved), more than 256 rows or 64 payer rows. KILN_ERR_UNAVAILABLE: a server, the row
+     * ui.gemforge.sources off, or the hooks could not go in (the row then says why). Any thread. */
+    KilnResult(KILN_CALL* gemforge_sources)(KilnOwner owner, const KilnUiGemForgeSource* rows, uint32_t count,
+                                            const KilnUiGemForgePayer* payers, uint32_t payer_count);
+    /* The feature's state for logs and the owner's managed side (which materials to ask the server about). */
+    KilnResult(KILN_CALL* gemforge_sources_state)(KilnUiGemForgeSourcesState* out);
 } KilnUiValuesApi;
 
 #ifdef __cplusplus

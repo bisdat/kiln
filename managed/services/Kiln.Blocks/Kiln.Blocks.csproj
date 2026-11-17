@@ -15,6 +15,8 @@
     <InternalsVisibleTo Include="BlocksTest" />
     <InternalsVisibleTo Include="BlocksAbilitiesTest" />
     <InternalsVisibleTo Include="Kiln.Blocks.Tests" />
+    <!-- kiln.stations' managed side (World/Stations) on a fake kiln.stations -->
+    <InternalsVisibleTo Include="Kiln.Stations.Tests" />
     <InternalsVisibleTo Include="Kiln.Sdk.Bake" />
     <InternalsVisibleTo Include="Kiln.Sdk.Tests" />
     <InternalsVisibleTo Include="Kiln.TestKit" />

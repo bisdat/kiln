@@ -1,5 +1,8 @@
 # The Shroud Forge's gem actions (server 26430253, exe `f0d824be…`; client 26430625, exe `5d9ef2f1…`) **[dis] [refl] [rt]**
 
+Also: two inventories in one action, payers and the return, and the client's GEMS grid for offered chest gems (GitHub
+issue 61, sections below).
+
 Evidence for kiln.gemcraft (gem wave G3: `Gems.Socket`, `Unsocket`, `Upgrade`, `Recycle`, `GemCraftingEvent`,
 `GemCraftedEvent`). Starting points: the gem dossier (`/mnt/Dongus/kiln-wave/dev29/out/gem-system/DOSSIER.md` §1, §5) and
 the Gem Forge report §6 (the hosted copy's Slot branch). Method: capstone, recursive descent from the handler, both exes;
@@ -91,6 +94,70 @@ category is refused).
   `gems/UnslotMove(out, tx, {carrier, 0}, player, 1, 1, 1, 1)`, commit on the handler's condition, else rollback; then the
   socket and the backpack are read again (Unslot's judge). No forge, no cost, no `GemCraftingEvent`.
 
+## Two inventories, payers and the return (GitHub issue 61, 0.2.0-dev.29.15) **[dis]**
+How the handler resolves items in a second inventory: through the transaction's own accessors, never through the player.
+`getItemStack` of the request's `weaponGem` (an `InventorySlotId` = `{EntityId entityId, u8 slotIndex}` **[refl]**) reads
+the named entity's `Inventory` (a chest's page is an entity like the backpack's), and `{weaponPide, 0}` reads the carrier's
+`WeaponGemSlot`, wherever the carrier is. The Slot branch's move (`0x1b4950` / `0x414db0`) takes from the exact source slot
+and puts into the socket on the one transaction; a request naming a chest's slot runs the same code. Only three calls name
+the player (the current entity, `0x65b870` / `0x9bf9e0`):
+
+| call | server | client (hosted copy) | arguments at the call |
+|---|---|---|---|
+| Slot's payment | `0x14544b` | `0x386142` | `PayMaterial` (`0x1b0d60` / `0x411330`, removeItems with no preferred slot): rcx out, rdx tx, r8d owner = the player, r9d item, `[rsp+0x20]` count |
+| Unslot's payment | `0x145332` | `0x386029` | the same (the game skips it while the cost is 0) |
+| Upgrade's payment | `0x1451bf` | `0x385eb6` | the same; the handler commits right after it |
+| Unslot's move | `0x145392` | `0x386089` | `gems/UnslotMove`: rcx out, rdx tx, r8 src `{weaponPide, 0}`, r9d owner = the player |
+| Recycle's give | `0x1450cb` | `0x385dc2` | `items/InventoryAddItems`: rcx out, rdx tx, r8d owner = the player, r9 slot none, `[rsp+0x20]` item, `[rsp+0x28]` count (the server and the client order the stack stores differently: two patterns) |
+
+Each payment call is followed by `cmp byte [out], 0; jne rollback; cmp dword [out+8], 0; jne rollback`: anything
+missing rolls the whole transaction back. Kiln (sigdb feature `gems.payers`) puts a mid hook on each call instruction
+(after `mov r8d/r9d, [rax]`); while a code action with a route runs on that thread it takes from the first payers itself
+(removeItems on the same tx) and points r8 at the last payer with the rest as the count, and r9 / r8 of the move and the
+give at `return_to`. removeItems with a container as the owner is what the game's own crafting fill does (it takes from
+the base's stock containers on a transaction whose operator is the player, docs/re/stations.md 3.1).
+
+The payment is in the request's `materialItemId`, which the handler takes as the client sent it (no check against the
+forge). For a route with payers other than the player Kiln writes the forge's `upgradeMaterial` there (read through the
+handler's own `ShroudForge` template accessor, which also serves `kiln.gemcraft.forge_material`), so a client never
+picks what a chest pays in; the client's material counts only when the player pays, as in the game. The route (mid hooks)
+acts only while `t_in_code` and the route are set on that thread; both are cleared after the handler call, also when it
+faulted.
+
+**Does the forge pay from base storage?** No. The three payments call removeItems with the player as the owner (it walks
+the owner's InventorySetup links, docs/re/items.md 4), not `InventoryPay` / `BaseStockForPlayer` as crafting does. The
+client's price test (below) counts only the player's Generic views.
+
+## The client's GEMS grid, selection and request (client 26430625) **[dis]**
+Evidence for `ui.gemforge.sources` (0.2.0-dev.29.15), continuing the snapshot's (`docs/kiln/ui-gemforge.md`; the #42
+research report `/mnt/Dongus/kiln-wave/dev29/out/gemforge/REPORT.md`):
+- **The grid** `ui/GemForgeGrid` (`0xcaefc0`, `void(state, header, rect, actions, float lower, u8 isWeapons)`) reads only
+  the header's data (`+0`) and count (`+8`) (`0xcaf08a`, `0xcaf15a`, the loop `0xcaf200..0xcaf62f` steps 0x48). A loose gem
+  row (ItemInfo category 15) is its own displayed view; the cell is `ui/ItemSlot` (`0xcaf595`). A click stores the row's
+  first 8 bytes (its `InventorySlotId`) at state+0x10 (`0xcaf5b2`) and, but in mode 3, the row's weapon view at
+  state+0x18 (empty for a loose gem).
+- **The selected view** is resolved each frame in `ui/GemForgeMenu` from state+0x10 in the local model's main views only
+  (`+0x2d8` / `+0x2e0`, the loop `0xcacf36..0xcacf74`); found, the 0x48 bytes go to rbp-0x20 and ecx = the item
+  (`0xcacf83`); not found, the frame keeps an empty view (item 0 at rbp-0x18). Both meet at **`0xcacfa4`** (`mov rax,
+  [UiApp]`), where the item is looked up (`0xe94470`, rcx = item) to tell a weapon (its socket view) from a gem. The
+  selected view is the fourth argument of the action panel `0xd23f90` (`lea r9, [rbp-0x20]`, `0xcad0eb`).
+- **The price test** in `0xd23f90` (r13 = state): the material is resolved from the forge's material selection (state
+  +0xcc / +0xd0, `0xe99d40`), its count summed over the model's Generic index views (`+8` / `+0x10` into `+0x2d8`) into
+  esi, the cost into r15d (`0xe91e60` Slot, `0xe91ee0` Upgrade). Insert: **`0xd243dc`** `cmp esi, r15d; setae [rsp+0x51]`;
+  Upgrade: **`0xd246cc`** `cmp r12d, [r14+8]; jae; cmp esi, r15d; jb`. `[rsp+0x51]` is the confirm entry's enabled
+  byte; the menu calls the dispatcher `0xd50cf0` only for a triggered entry (`0xcae827..0xcae84d`).
+- **The request**: `0xd50cf0` builds UI command 0x5a (Upgrade, `0xda5b00`) or 0x5b (Insert, `0xd61e90`) with the
+  selected view's key at +4, the weapon pide (state+0x2c) at +0xc, the material at +0x10 and the forge (play+0x2c50) at
+  +0x14; Recycle is 0x5d (`0xd71650`). The command processor `0x85c7f0` (switch at `0x85c834`: 0x5a → `0x85dda9` action
+  3, 0x5b → `0x85de13` action 1, 0x5c → `0x85de7d` Unslot, 0x5d → `0x85dec1` action 4) copies them into
+  `ClientPlayerInput.weaponGemAction` (+0x258) with a new version (`0x9bd990`). Entity ids of replicated entities equal
+  the server's (docs/re/network.md), so a row keyed by a chest's real `{page, slot}` arrives as that slot on the server.
+- Kiln's hooks: a raw link on the grid (after the snapshot's) that draws a copy with the offered rows appended; a mid hook
+  at `0xcacfa4` that writes the offered view to rbp-0x20 and rcx = its item when state+0x10 names an offered key and the
+  model found nothing; mid hooks at `0xd243dc` / `0xd246cc` that set esi to what the offer's payer group holds (plus the
+  player's own count for "player first"). Patterns in `sigdb/symbols/client.d/gemforge.json`; at install each site's
+  bytes are compared with the instructions above. Static only: never run in a real client before release.
+
 ## Lab
 `mods/tests/gems-forge-test` (lab `gems-g3`, a copy of the gems-g1 world, server 26430253, no client): a spawned
 `1_Player` and a spawned `Shroud_Gem_Forge_01_Grassland`. Results: see the G3 report
@@ -100,4 +167,7 @@ category is refused).
 - What a joined client's forge screen shows after a canceled action (the client predicts nothing for this host-only
   program; the inventory replicates as it is).
 - Whether a socket on a non-weapon carrier (gem wave G4) behaves the same in the handler (no category read was found).
-- The client's own UI command path (`0xda5b00` / `0xd61e90`) is not used.
+- The client's own UI command path (`0xda5b00` / `0xd61e90`) is not called by Kiln; `ui.gemforge.sources` relies on it
+  sending the selected row's key as it is (above).
+- Whether the detail panel draws everything of an offered chest gem when the gem's item entity is not replicated to the
+  client (a chest far from the player); the cell needs only the item id, level and rarity.

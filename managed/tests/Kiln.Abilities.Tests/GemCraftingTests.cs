@@ -58,6 +58,63 @@ public sealed unsafe class GemCraftingTests : IDisposable
 
         public int Crafted(Span<GemcraftNative.Craft> into, out uint count) => Drain(CraftedQueue, into, out count);
 
+        // 0.2.0-dev.29.15: payers and gem sources
+        public (uint Flags, string Why)? ExtrasResult = (GemcraftNative.HasPayers | GemcraftNative.HasSources, "");
+        public readonly List<(ulong Owner, GemcraftNative.Source[] Sources)> Offers = [];
+        public readonly List<(ulong Owner, uint Player, uint Holder)> Withdrawals = [];
+        public readonly List<GemcraftNative.Source> Live = [];
+        public int OfferResult;
+        public ulong NextToken = 0x7000;
+        public uint[] PayerList = [];
+
+        public (uint Flags, string Why)? Extras() => ExtrasResult;
+
+        public int Offer(ulong owner, Span<GemcraftNative.Source> sources)
+        {
+            if (OfferResult != 0) return OfferResult;
+            for (var i = 0; i < sources.Length; i++)
+            {
+                sources[i].Token = NextToken++;
+                sources[i].ExpiresMs = (ulong)GemSources.NowMs() + sources[i].LifetimeMs;
+                Live.Add(sources[i]);
+            }
+            Offers.Add((owner, sources.ToArray()));
+            return 0;
+        }
+
+        public int Withdraw(ulong owner, uint player, uint holder, out uint count)
+        {
+            Withdrawals.Add((owner, player, holder));
+            count = (uint)Live.RemoveAll(s => (player == 0 || s.Player == player) && (holder == 0 || s.Holder == holder));
+            return 0;
+        }
+
+        public int Sources(uint player, Span<GemcraftNative.Source> into, out uint count)
+        {
+            var mine = Live.Where(s => s.Player == player).ToArray();
+            for (var i = 0; i < mine.Length && i < into.Length; i++) into[i] = mine[i];
+            count = (uint)mine.Length;
+            return mine.Length > into.Length ? GemcraftNative.BufferTooSmall : 0;
+        }
+
+        public int Payers(uint player, uint payFrom, uint payHolder, Span<uint> into, out uint count)
+        {
+            for (var i = 0; i < PayerList.Length && i < into.Length; i++) into[i] = PayerList[i];
+            count = (uint)PayerList.Length;
+            return 0;
+        }
+
+        // forge -> its upgrade material (absent: not read yet, NotFound; 0: no forge, InvalidArgument)
+        public readonly Dictionary<uint, uint> ForgeMaterials = [];
+        public readonly List<uint> ForgeAsks = [];
+
+        public int ForgeMaterial(uint forge, out uint item)
+        {
+            ForgeAsks.Add(forge);
+            if (!ForgeMaterials.TryGetValue(forge, out item)) return GemcraftNative.NotFound;
+            return item != 0 ? 0 : GemcraftNative.InvalidArgument;
+        }
+
         private static int Drain(Queue<GemcraftNative.Craft> q, Span<GemcraftNative.Craft> into, out uint count)
         {
             var n = 0;
@@ -74,7 +131,13 @@ public sealed unsafe class GemCraftingTests : IDisposable
 
     public GemCraftingTests() => GemCrafting.UseBackend(_fake);
 
-    public void Dispose() => GemCrafting.UseBackend(null);
+    public void Dispose()
+    {
+        GemCrafting.UseBackend(null);
+        // a row a test lowered (gems.payers when the fake's extras are gone) is kept per registry binding and would beat
+        // the next test's Capabilities.Override: start the next test on a new binding
+        global::Kiln.Capabilities.Reset();
+    }
 
     private static GemcraftNative.Craft Craft(GemCraftAction action, int status = 0, uint flags = 0, string message = "")
     {
@@ -98,10 +161,16 @@ public sealed unsafe class GemCraftingTests : IDisposable
     public void TheMirrorsKeepTheNativeLayouts()
     {
         // native/core/abi/services/kiln_gemcraft.h; gems.cpp static_asserts the same sizes
-        Assert.Equal(56, sizeof(GemcraftNative.Request));
+        Assert.Equal(80, sizeof(GemcraftNative.Request));  // 56 before 0.2.0-dev.29.15 (KILN_GEM_REQUEST_V1_SIZE)
         Assert.Equal(232, sizeof(GemcraftNative.Craft));
         Assert.Equal(188, sizeof(GemcraftNative.Status));
-        Assert.Equal(8 + 8 * 8, sizeof(GemcraftNative.Table));
+        Assert.Equal(8 + 14 * 8, sizeof(GemcraftNative.Table));  // forge_material appended (review 2026-11-17)
+        Assert.Equal(8 + 8 * 8, (int)GemcraftNative.V1TableSize);
+        Assert.Equal(56, (int)System.Runtime.InteropServices.Marshal.OffsetOf<GemcraftNative.Request>("GemHolder"));
+        Assert.Equal(72, (int)System.Runtime.InteropServices.Marshal.OffsetOf<GemcraftNative.Request>("ReturnTo"));
+        Assert.Equal(80, sizeof(GemcraftNative.Source));
+        Assert.Equal(16, (int)System.Runtime.InteropServices.Marshal.OffsetOf<GemcraftNative.Source>("Slot"));
+        Assert.Equal(64, (int)System.Runtime.InteropServices.Marshal.OffsetOf<GemcraftNative.Source>("Token"));
         Assert.Equal(24, (int)System.Runtime.InteropServices.Marshal.OffsetOf<GemcraftNative.Request>("GemSlot"));
         Assert.Equal(40, (int)System.Runtime.InteropServices.Marshal.OffsetOf<GemcraftNative.Craft>("GemSlot"));
         Assert.Equal(88, (int)System.Runtime.InteropServices.Marshal.OffsetOf<GemcraftNative.Craft>("Ticket"));

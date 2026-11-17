@@ -383,12 +383,14 @@ public sealed unsafe class RenderDraw
         return (w, h);
     }
 
-    /// <summary>An image (<see cref="Ui.LoadImage(string)"/>, a PNG in your mod) stretched over the rectangle. It shows
-    /// from the frame after it was loaded.</summary>
+    /// <summary>An image (<see cref="Ui.LoadImage(string)"/>, a PNG in your mod, or an item's icon from <see cref="Ui.ItemImage"/>)
+    /// stretched over the rectangle. It shows from the frame after it was loaded (an item's icon: its placeholder until then).</summary>
     public void Image(UiImage image, float x0, float y0, float x1, float y1, Color? tint = null)
     {
-        if (T == null || image.Handle == 0) return;
-        T->Image(image.Handle, x0, y0, x1, y1, 0, 0, 1, 1, (tint ?? Color.White).Rgba);
+        ArgumentNullException.ThrowIfNull(image);
+        var handle = image.Item is { } item ? ItemIcons.Handle(item, Math.Max(Math.Abs(x1 - x0), Math.Abs(y1 - y0)), out _, out _) : image.Handle;
+        if (T == null || handle == 0) return;
+        T->Image(handle, x0, y0, x1, y1, 0, 0, 1, 1, (tint ?? Color.White).Rgba);
     }
 
     /// <summary>An image centred on (x, y), <paramref name="width"/> x <paramref name="height"/> pixels (0 = its own

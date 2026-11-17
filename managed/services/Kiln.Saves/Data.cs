@@ -276,14 +276,29 @@ public static class EntityData
         }
     }
 
-    /// <summary>Loaded attachments of the calling mod still waiting for their entity (diagnostics).</summary>
+    /// <summary>Loaded attachments of the calling mod still waiting for their entity: saved with the world, not matched to a
+    /// loaded entity yet (the world loads its entities for some seconds after it starts; Kiln matches for 10 minutes). Before
+    /// 0.2.0-dev.29.15 it counted every mod's.</summary>
     [TickThreadOnly]
     public static int Waiting
     {
         get
         {
-            Keys(EntityId.None, "EntityData.Waiting", create: false);
-            return SavesRuntime.Store.Entities.UnresolvedCount;
+            var (store, mod, _) = Keys(EntityId.None, "EntityData.Waiting", create: false);
+            return store.Entities.UnresolvedFor(mod.Info.Id);
+        }
+    }
+
+    /// <summary>Saved attachments of the calling mod matched to a loaded entity since the world's data was loaded: with
+    /// <see cref="Waiting"/>, whether a mod's saved per-entity settings are back (Waiting 0) or some still wait. Since
+    /// 0.2.0-dev.29.15.</summary>
+    [TickThreadOnly]
+    public static int Matched
+    {
+        get
+        {
+            var (store, mod, _) = Keys(EntityId.None, "EntityData.Matched", create: false);
+            return store.Entities.MatchedFor(mod.Info.Id);
         }
     }
 

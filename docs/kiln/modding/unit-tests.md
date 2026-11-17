@@ -463,6 +463,7 @@ time with them sees almost none pass between steps, and an `await Task.Delay(...
 | kiln.screen | unavailable | `kiln.screen` | no fake: the service finds no native table, so its own Available is false and its row says offline |
 | kiln.settings | unavailable | `kiln.settings` | no fake: the service finds no native table, so its own Available is false and its row says offline |
 | kiln.skills | unavailable | `kiln.skills` | no fake: the service finds no native table, so its own Available is false and its row says offline |
+| kiln.stations | unavailable | `kiln.stations` | no fake: the service finds no native table, so its own Available is false and its row says offline |
 | kiln.steamguard | unavailable | `kiln.steamguard` | no fake: the service finds no native table, so its own Available is false and its row says offline |
 | kiln.surfaces | unavailable | `kiln.surfaces` | no fake: the service finds no native table, so its own Available is false and its row says offline |
 | kiln.tasks | unavailable | `kiln.tasks` | no fake: the service finds no native table, so its own Available is false and its row says offline |

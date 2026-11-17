@@ -293,6 +293,68 @@ internal static unsafe class UiNative
         public delegate* unmanaged[Cdecl]<int, uint, void> MenuFooter;
     }
 
+    /// <summary>The tail after menu_footer (0.2.0-dev.29.15): image_load_rgba, an overlay image from pixels (the game's item
+    /// icons, <see cref="ItemIcons"/>).</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct TableImageRgba
+    {
+        public TableFooter Base;
+        public delegate* unmanaged[Cdecl]<ulong, byte*, uint, uint, ulong> ImageLoadRgba;
+    }
+
+    /// <summary>kiln.ui's image_load_rgba, or null on a table without it (a kiln-ui.dll older than 0.2.0-dev.29.15).</summary>
+    public static delegate* unmanaged[Cdecl]<ulong, byte*, uint, uint, ulong> ImageLoadRgbaSlot
+    {
+        get
+        {
+            var t = T;
+            if (t == null || t->Header.Size < (uint)sizeof(TableImageRgba)) return null;
+            return ((TableImageRgba*)t)->ImageLoadRgba;
+        }
+    }
+
+    /// <summary>The tail after image_load_rgba (0.2.0-dev.29.15): screen_target, a factory screen's station entity.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct TableScreenTarget
+    {
+        public TableImageRgba Base;
+        public delegate* unmanaged[Cdecl]<uint> ScreenTargetFn;
+    }
+
+    /// <summary>kiln.ui's screen_target (a factory screen's station entity of the last UI frame, else 0); 0 on an older kiln.ui.
+    /// Tests: <see cref="ScreenTargetOverride"/>.</summary>
+    public static uint ScreenTarget()
+    {
+        if (ScreenTargetOverride is { } o) return o();
+        var t = T;
+        if (t == null || t->Header.Size < (uint)sizeof(TableScreenTarget)) return 0;
+        var f = ((TableScreenTarget*)t)->ScreenTargetFn;
+        return f == null ? 0 : f();
+    }
+
+    internal static Func<uint>? ScreenTargetOverride;
+
+    /// <summary>The tail after screen_target (0.2.0-dev.29.15): image_state, whether an overlay image is drawn yet.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct TableImageState
+    {
+        public TableScreenTarget Base;
+        public delegate* unmanaged[Cdecl]<ulong, int> ImageStateFn;
+    }
+
+    /// <summary>KILN_UI_IMAGE_WAITING / READY / FAILED (kiln_ui.h image_state).</summary>
+    public const int ImageUnknown = 0, ImageWaiting = 1, ImageReady = 2, ImageFailed = 3;
+
+    /// <summary>kiln.ui's image_state of an image (<see cref="ImageUnknown"/>, waiting, ready, failed); ready on a kiln.ui
+    /// without it (it draws what it has).</summary>
+    public static int ImageState(ulong image)
+    {
+        var t = T;
+        if (t == null || t->Header.Size < (uint)sizeof(TableImageState)) return ImageReady;
+        var f = ((TableImageState*)t)->ImageStateFn;
+        return f == null ? ImageReady : f(image);
+    }
+
     /// <summary>KILN_UI_FOOTER_SHOWN.</summary>
     public const uint FooterShown = 1;
 
