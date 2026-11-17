@@ -44,7 +44,6 @@ chat_focus::Grace g_focus_grace;
 std::filesystem::path g_history_file;
 // UI-thread-only.
 bool g_editing_in_frame = false;
-bool g_was_editing = false;
 bool g_hud_focus_logged = false, g_social_focus_logged = false;
 std::string g_last_applied;
 // SetText changes the editor. The caller-owned widget buffer is updated
@@ -397,7 +396,6 @@ void chat_input_frame_end() {
         if (was_browsing && g_trace_on.load(std::memory_order_relaxed))
             logf(KILN_LOG_INFO, "ui: chat history trace: navigation reset after sustained loss of chat focus");
     }
-    g_was_editing = active;
     g_editing_in_frame = false;
 }
 
