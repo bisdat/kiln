@@ -8,6 +8,8 @@ target_compile_definitions(kiln-imgui PUBLIC IMGUI_IMPL_VULKAN_NO_PROTOTYPES VK_
 target_compile_options(kiln-imgui PRIVATE -w)
 
 kiln_service(ui ui.cpp overlay_guard.cpp vk.cpp input.cpp keys.cpp game.cpp menu_page.cpp menu_scroll.cpp menu_footer.cpp style.cpp render.cpp wheel.cpp chat_input_probe.cpp)
+# The standalone input.cpp host harnesses do not link the chat service.
+target_compile_definitions(kiln-ui PRIVATE KILN_CHAT_HISTORY_ENABLED=1)
 target_link_libraries(kiln-ui PRIVATE kiln-imgui user32 imm32 dwmapi gdi32)
 
 # Opt-in build target, never packaged: real third-party addon against Kiln's production input and startup gate.
