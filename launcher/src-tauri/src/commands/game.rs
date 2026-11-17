@@ -30,11 +30,13 @@ pub async fn game_list() -> Result<Vec<GameInstall>, Error> {
 pub async fn game_detect() -> Result<Vec<GameInstall>, Error> {
     blocking(|| {
         let d = dirs()?;
-        let found = game::detect_in(&crate::state::steam_roots(), &d.root)?;
+        let roots = crate::state::steam_roots();
+        let found = game::detect_in(&roots, &d.root)?;
         let known = game::known(&d)?;
         for g in found {
             if !known.iter().any(|k| k.path == g.path) {
-                game::add(&d, &g.path)?;
+                // the same roots (the settings' extra Steam folders too): an install found there is Steam's copy
+                game::add_with(&d, &g.path, &roots)?;
             }
         }
         game::known(&d)
@@ -69,8 +71,9 @@ pub async fn game_status(game_id: String) -> Result<GameStatus, Error> {
     blocking(move || crate::state::game_status(&crate::state::game(&game_id)?)).await
 }
 
-/// `game_start_get`: how a client starts (through Steam or directly), what the player chose, and on Linux the Proton and
-/// Wine builds found, the one in use, Kiln's own prefix and the command a direct start runs (dev.29.17).
+/// `game_start_get`: how a client starts (through Steam or directly), what the player chose, whether a Steam install was
+/// found, and on Linux the umu-run, Proton and Wine builds found (in the order automatic takes them), the one in use,
+/// Kiln's own prefix and the command a direct start runs (dev.29.17).
 #[tauri::command]
 pub async fn game_start_get(game_id: String) -> Result<kiln_manage::direct::StartSetup, Error> {
     blocking(move || {
@@ -81,7 +84,7 @@ pub async fn game_start_get(game_id: String) -> Result<kiln_manage::direct::Star
 }
 
 /// `game_start_set`: keeps the player's start choice in the install's record and returns the install as it starts now
-/// (its platform and prefix follow a direct start under Proton or Wine). Refused while the game runs.
+/// (its platform and prefix follow a direct start under umu-run, Proton or Wine). Refused while the game runs.
 #[tauri::command]
 pub async fn game_start_set(game_id: String, settings: kiln_manage::direct::StartSettings) -> Result<GameInstall, Error> {
     blocking(move || {
