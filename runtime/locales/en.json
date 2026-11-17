@@ -2,47 +2,6 @@
   "language": {
     "name": "English"
   },
-  "native": {
-    "menu": {
-      "mods": "Mods",
-      "mods_off": "Mods: {reason}"
-    },
-    "footer": {
-      "loaded": {
-        "one": "Kiln {version} - {count} Mod Loaded",
-        "other": "Kiln {version} - {count} Mods Loaded"
-      }
-    },
-    "fallback": {
-      "title": "Kiln {version}",
-      "body": "Kiln's managed host (Kiln.Ui) is not running in this session, so the mod list and mod screens are unavailable here. Check kiln/logs/kiln.log.",
-      "close": "Press {key} to close."
-    }
-  },
-  "settings": {
-    "look": {
-      "caption": "LOOK",
-      "look": "Look",
-      "game": "The game's look",
-      "translucent": "The game's look, translucent",
-      "kiln": "Kiln's classic look (ember)",
-      "theme": "{theme} ({mod})",
-      "theme_missing": "{theme} (its mod is not loaded)",
-      "background": "Background opacity (%)",
-      "opacity": "Opacity (%)",
-      "size": "Size (%)",
-      "game_read": "The game's look uses the game's own colours and font, read from your game.",
-      "game_not_read": "The game's colours could not be read from your game (yet): a neutral dark stand-in is used.",
-      "saved": "Saved in kiln/kiln.json (\"ui\"); the launcher's Settings show the same. Mods may offer more looks."
-    },
-    "language": {
-      "caption": "LANGUAGE",
-      "language": "Language",
-      "auto": "Automatic (the game's language: {language})",
-      "missing": "{language} (Kiln has no texts in this language)",
-      "saved": "Kiln's own menus and messages; mods' texts follow the game's language. Saved in kiln/kiln.json (\"ui\"), as the launcher's Settings show."
-    }
-  },
   "menu": {
     "title": "Mod Manager",
     "game_title": "MODS",
@@ -337,12 +296,6 @@
       "note": "XHL: placed for XHL-Core, a separate host. Kiln never loads these plugin DLLs and does not check here whether XHL-Core is installed."
     }
   },
-  "set": {
-    "about": "SET Mod Settings, Compatibility, Entities, Hooks, Bindings, Console and local support report.",
-    "unavailable": "SET tools are unavailable (kiln-set is not running).",
-    "open": "SET settings and tools",
-    "open_failed": "SET tools are unavailable; check the engine status."
-  },
   "config": {
     "read_only_synced": "Server config: read-only while connected to a server. Synced entries show the server's values.",
     "read_only": "Server config: read-only while connected to a server (it applies when you host).",
@@ -390,14 +343,38 @@
     },
     "saved": "{id}: saved"
   },
-  "shroudlink": {
-    "needs_addon": "This requires a cooperating shroudlink client addon with bridge ABI v1. The stock addon is unchanged.",
-    "waiting": "Waiting for a live shroudlink host, UI protocol 2, recognized world, and presentation lease.",
-    "no_entries": "The host has not sent any menu entries.",
-    "apply": "Apply",
-    "item": "Item {id} × {count}",
-    "close_window": "Close window",
-    "declined": "shroudlink declined the last request ({error}); refreshing its current state."
+  "configpage": {
+    "caption": "SETTINGS"
+  },
+  "settings": {
+    "look": {
+      "caption": "LOOK",
+      "look": "Look",
+      "game": "The game's look",
+      "translucent": "The game's look, translucent",
+      "kiln": "Kiln's classic look (ember)",
+      "theme": "{theme} ({mod})",
+      "theme_missing": "{theme} (its mod is not loaded)",
+      "background": "Background opacity (%)",
+      "opacity": "Opacity (%)",
+      "size": "Size (%)",
+      "game_read": "The game's look uses the game's own colours and font, read from your game.",
+      "game_not_read": "The game's colours could not be read from your game (yet): a neutral dark stand-in is used.",
+      "saved": "Saved in kiln/kiln.json (\"ui\"); the launcher's Settings show the same. Mods may offer more looks."
+    },
+    "language": {
+      "caption": "LANGUAGE",
+      "language": "Language",
+      "auto": "Automatic (the game's language: {language})",
+      "missing": "{language} (Kiln has no texts in this language)",
+      "saved": "Kiln's own menus and messages; mods' texts follow the game's language. Saved in kiln/kiln.json (\"ui\"), as the launcher's Settings show."
+    }
+  },
+  "set": {
+    "about": "SET Mod Settings, Compatibility, Entities, Hooks, Bindings, Console and local support report.",
+    "unavailable": "SET tools are unavailable (kiln-set is not running).",
+    "open": "SET settings and tools",
+    "open_failed": "SET tools are unavailable; check the engine status."
   },
   "shroudforge": {
     "labels": {
@@ -483,40 +460,28 @@
       "value": "value"
     }
   },
-  "classic": {
-    "tab": {
-      "mods": "Mods",
-      "network": "Network",
-      "keys": "Keys",
-      "overlay": "Overlay"
-    },
-    "mods": {
-      "back": "Back to mods",
-      "shroudlink": "shroudlink menus",
-      "count": "{loaded} loaded, {found} found (side: {side})",
-      "kiln_settings": "Kiln settings",
-      "kiln_settings_close": "Close Kiln settings",
-      "col_mod": "Mod",
-      "col_version": "Version",
-      "col_side": "Side",
-      "col_state": "State",
-      "state": {
-        "pending": "pending",
-        "loaded": "loaded",
-        "disabled": "disabled",
-        "failed": "failed",
-        "skipped": "skipped",
-        "unloaded": "unloaded"
-      },
-      "config": "Config",
-      "config_close": "Close",
-      "status": "Status ({count})",
-      "config_of": "Config: {mod}",
-      "no_pages": "Mods add config pages with Ui.AddConfigPage (the config registry's editor plugs in here)."
-    }
+  "shroudlink": {
+    "needs_addon": "This requires a cooperating shroudlink client addon with bridge ABI v1. The stock addon is unchanged.",
+    "waiting": "Waiting for a live shroudlink host, UI protocol 2, recognized world, and presentation lease.",
+    "no_entries": "The host has not sent any menu entries.",
+    "apply": "Apply",
+    "item": "Item {id} × {count}",
+    "close_window": "Close window",
+    "declined": "shroudlink declined the last request ({error}); refreshing its current state."
   },
-  "configpage": {
-    "caption": "SETTINGS"
+  "keys": {
+    "help_mouse": "Click a key, then press the new one: a key, the middle or a side mouse button, or a turn of the wheel, with Ctrl, Shift or Alt if you like (left and right click can't be bound). Click it again to cancel; Escape cancels and closes the menu. Unbind leaves an action without a key. Saved to kiln/config/keybinds.json.",
+    "help": "Click a key, then press the new one. Click it again to cancel; Escape cancels and closes the menu. Unbind leaves an action without a key. Saved to kiln/config/keybinds.json.",
+    "col_action": "Action",
+    "col_key": "Key",
+    "col_default": "Default",
+    "menu": "Kiln: open this menu",
+    "press": "press a key...",
+    "reset": "Reset",
+    "unbind": "Unbind",
+    "toast": {
+      "wheel_menu": "The Kiln menu's key can't be on the wheel ({key}): it would close the menu as you scroll it"
+    }
   },
   "network": {
     "on": "Kiln's network is on: mods can talk between this game and a Kiln server.",
@@ -572,20 +537,6 @@
       "required": "{name} v{version} (required): in {in}, out {out}"
     }
   },
-  "keys": {
-    "help_mouse": "Click a key, then press the new one: a key, the middle or a side mouse button, or a turn of the wheel, with Ctrl, Shift or Alt if you like (left and right click can't be bound). Click it again to cancel; Escape cancels and closes the menu. Unbind leaves an action without a key. Saved to kiln/config/keybinds.json.",
-    "help": "Click a key, then press the new one. Click it again to cancel; Escape cancels and closes the menu. Unbind leaves an action without a key. Saved to kiln/config/keybinds.json.",
-    "col_action": "Action",
-    "col_key": "Key",
-    "col_default": "Default",
-    "menu": "Kiln: open this menu",
-    "press": "press a key...",
-    "reset": "Reset",
-    "unbind": "Unbind",
-    "toast": {
-      "wheel_menu": "The Kiln menu's key can't be on the wheel ({key}): it would close the menu as you scroll it"
-    }
-  },
   "overlay": {
     "surface": "{width}x{height}, format {format}, scale {scale:F2}",
     "frames": "presents {presents}, drawn {drawn}, last overlay frame {ms:F2} ms",
@@ -598,16 +549,37 @@
     "test_toast": "Test toast",
     "test_toast_text": "Kiln overlay works"
   },
-  "refusal": {
-    "server": "The server refused this game.",
-    "named": "{server} refused this game.",
-    "needs_one": "It needs a mod you don't have:",
-    "needs_many": "It needs mods you don't have:",
-    "you_have": "{mod} {version} (you have {have})",
-    "more": "and {count} more",
-    "modpack": "The Kiln launcher offers this server's modpack.",
-    "add": "Add them in the Kiln launcher, then join again.",
-    "no_reason": "Refused by the server."
+  "classic": {
+    "tab": {
+      "mods": "Mods",
+      "network": "Network",
+      "keys": "Keys",
+      "overlay": "Overlay"
+    },
+    "mods": {
+      "back": "Back to mods",
+      "shroudlink": "shroudlink menus",
+      "count": "{loaded} loaded, {found} found (side: {side})",
+      "kiln_settings": "Kiln settings",
+      "kiln_settings_close": "Close Kiln settings",
+      "col_mod": "Mod",
+      "col_version": "Version",
+      "col_side": "Side",
+      "col_state": "State",
+      "state": {
+        "pending": "pending",
+        "loaded": "loaded",
+        "disabled": "disabled",
+        "failed": "failed",
+        "skipped": "skipped",
+        "unloaded": "unloaded"
+      },
+      "config": "Config",
+      "config_close": "Close",
+      "status": "Status ({count})",
+      "config_of": "Config: {mod}",
+      "no_pages": "Mods add config pages with Ui.AddConfigPage (the config registry's editor plugs in here)."
+    }
   },
   "details": {
     "menu": "Item details",
@@ -634,25 +606,16 @@
     "render_off_errors": "{mod}: a render handler was turned off (errors)",
     "render_off_slow": "{mod}: a render handler was turned off (too slow)"
   },
-  "gemforge": {
-    "outcome": "Gem Forge: {message}"
-  },
-  "abilities": {
-    "server_lacks": "the server does not have this ability",
-    "not_connected": "not connected to a Kiln server",
-    "cooldown": "{ability} [{key}]: {seconds:F1} s"
-  },
-  "blocks": {
-    "toast": {
-      "baked_vfx": "{mod}: vfx \"{name}\" differs from the mod's build: rebuild the mod",
-      "baked_material": "{mod}: material \"{name}\" differs from the mod's build: rebuild the mod",
-      "new_vfx": "{mod}: new VFX \"{name}\": restart the game to see it",
-      "new_material": "{mod}: new material \"{name}\": restart the game to see it",
-      "no_window": "{window} is not a window this game has",
-      "too_many": "too many commands waiting: slow down",
-      "command_failed": "{command} failed",
-      "server_value": "{config}: {path} is the server's: it can be changed after leaving"
-    }
+  "refusal": {
+    "server": "The server refused this game.",
+    "named": "{server} refused this game.",
+    "needs_one": "It needs a mod you don't have:",
+    "needs_many": "It needs mods you don't have:",
+    "you_have": "{mod} {version} (you have {have})",
+    "more": "and {count} more",
+    "modpack": "The Kiln launcher offers this server's modpack.",
+    "add": "Add them in the Kiln launcher, then join again.",
+    "no_reason": "Refused by the server."
   },
   "creative": {
     "title": "Creative",
@@ -891,6 +854,26 @@
       "code": "code"
     }
   },
+  "blocks": {
+    "toast": {
+      "baked_vfx": "{mod}: vfx \"{name}\" differs from the mod's build: rebuild the mod",
+      "baked_material": "{mod}: material \"{name}\" differs from the mod's build: rebuild the mod",
+      "new_vfx": "{mod}: new VFX \"{name}\": restart the game to see it",
+      "new_material": "{mod}: new material \"{name}\": restart the game to see it",
+      "no_window": "{window} is not a window this game has",
+      "too_many": "too many commands waiting: slow down",
+      "command_failed": "{command} failed",
+      "server_value": "{config}: {path} is the server's: it can be changed after leaving"
+    }
+  },
+  "abilities": {
+    "server_lacks": "the server does not have this ability",
+    "not_connected": "not connected to a Kiln server",
+    "cooldown": "{ability} [{key}]: {seconds:F1} s"
+  },
+  "gemforge": {
+    "outcome": "Gem Forge: {message}"
+  },
   "dev": {
     "window_key": "{window} window",
     "filter": "Filter",
@@ -949,6 +932,23 @@
       "title": "Kiln: Console",
       "run": "Run",
       "history": "History:"
+    }
+  },
+  "native": {
+    "menu": {
+      "mods": "Mods",
+      "mods_off": "Mods: {reason}"
+    },
+    "footer": {
+      "loaded": {
+        "one": "Kiln {version} - {count} Mod Loaded",
+        "other": "Kiln {version} - {count} Mods Loaded"
+      }
+    },
+    "fallback": {
+      "title": "Kiln {version}",
+      "body": "Kiln's managed host (Kiln.Ui) is not running in this session, so the mod list and mod screens are unavailable here. Check kiln/logs/kiln.log.",
+      "close": "Press {key} to close."
     }
   }
 }
