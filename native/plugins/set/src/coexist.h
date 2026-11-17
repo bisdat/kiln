@@ -74,6 +74,28 @@ inline void WINAPI copy_listed(LDR_DATA_TABLE_ENTRY* entry, void* context, BOOLE
     }
 }
 using LdrEnumerate = LONG(WINAPI*)(void* reserved, void(WINAPI* callback)(LDR_DATA_TABLE_ENTRY*, void*, BOOLEAN*), void* context);
+// A path for a prefix comparison: no \\?\ prefix, backslashes, ASCII lower case.
+inline std::wstring folded_path(std::wstring s) {
+    if (s.rfind(L"\\\\?\\", 0) == 0 && s.rfind(L"\\\\?\\UNC\\", 0) != 0) s.erase(0, 4);
+    for (auto& c : s) {
+        if (c == L'/') c = L'\\';
+        else if (c >= L'A' && c <= L'Z') c = static_cast<wchar_t>(c - L'A' + L'a');
+    }
+    return s;
+}
+// The Windows folder (GetWindowsDirectoryW), folded, with its trailing backslash; empty when it cannot be read (then
+// nothing is skipped by it). Everything below it is Windows' or a driver's: System32, its DriverStore (a graphics
+// driver's DLLs: about 400 MB for an NVIDIA card, loaded at the game's first frames), WinSxS. SET is none of them: it
+// ships as a powrprof.dll in the game folder, and the game loads powrprof.dll from its own folder, else from System32.
+inline std::wstring windows_folder() {
+    std::wstring dir(32768, L'\0');  // on the heap: inspections run on threads with small stacks too
+    const UINT n = GetWindowsDirectoryW(dir.data(), 32768);
+    if (!n || n >= 32768) return {};
+    dir.resize(n);
+    dir = folded_path(std::move(dir));
+    if (dir.back() != L'\\') dir += L'\\';
+    return dir;
+}
 // Both kiln-set and kiln.types use this policy. Kiln plugins are excluded because the detector itself contains
 // SET's branding string; native SET does not export kiln_plugin_main, even when renamed.
 // The list of loaded modules is ntdll's own (LdrEnumerateLoadedModules): read in this process's memory under the
@@ -97,6 +119,7 @@ inline Inspection inspect_runtime() {
         return failed(std::string("the Windows system directory could not be identified: ") +
                       (n ? std::string("GetSystemDirectoryW: the path is too long") : call_failed("GetSystemDirectoryW", GetLastError())));
     const std::filesystem::path system(system_path);
+    const std::wstring windows = windows_folder();
     HMODULE self = nullptr;
     if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
                            reinterpret_cast<LPCWSTR>(&inspect_runtime), &self))
@@ -160,6 +183,9 @@ inline Inspection inspect_runtime() {
                           (length ? std::string("GetModuleFileNameW: the path is too long") : call_failed("GetModuleFileNameW", GetLastError())) +
                           " for " + utf8(mod.name));
         const std::filesystem::path file(module_path);
+        // Windows' and the drivers' own files (windows_folder): not opened, not read. This skips about two thirds of a
+        // game's modules, and the graphics driver's DLLs that the first frames load (a whole-file read each, below).
+        if (!windows.empty() && folded_path(module_path).rfind(windows, 0) == 0) continue;
         // Wine's builtin powrprof.dll reports a game-folder powrprof.dll's path without running that file: only a
         // module whose mapped image is the file at its path counts (module_image.h).
         if (!kcompat::module_is_file(held, file)) continue;

@@ -637,6 +637,29 @@ int main(int argc, char** argv) {
         on_unload(nullptr);
         g_running = false; g_initialized = false;
     }
+    {  // Windows' and the drivers' own files are not opened or read for SET's name (coexist.h windows_folder): at the
+       // first frames a graphics driver loads ~400 MB of DLLs from System32\DriverStore (inbox 50, an HDD player).
+        std::filesystem::create_directories(root / "Windows/System32/DriverStore/FileRepository/nv_dispi");
+        std::filesystem::create_directories(root / "Windows2");
+        const auto driver = root / "Windows/System32/DriverStore/FileRepository/nv_dispi/nvoglv64.dll";
+        std::ofstream(driver) << "a driver DLL whose bytes happen to read Shrouded Engine Tweaks";
+        std::ofstream(root / "Windows2/branded.dll") << "Shrouded Engine Tweaks";
+        loader_test::modules = clean;
+        loader_test::modules.push_back(driver.wstring());
+        loader_test::windows.clear();
+        check(!set_in_process().empty(), "without a Windows folder, a driver's DLL is read like any other module");
+        loader_test::windows = (root / "Windows").wstring();
+        check(set_in_process().empty(), "a module below the Windows folder is not read");
+        loader_test::windows = (root / "Windows").wstring() + L"/";
+        check(set_in_process().empty(), "...with or without the folder's trailing separator");
+        loader_test::modules.back() = (root / "Windows2/branded.dll").wstring();
+        check(set_in_process().find("SET-branded") != std::string::npos,
+              "...and a folder whose name only starts like the Windows folder's is read");
+        check(kset::folded_path(L"\\\\?\\C:/Windows/System32") == L"c:\\windows\\system32",
+              "folded paths: no \\\\?\\ prefix, backslashes, lower case");
+        loader_test::windows.clear();
+        loader_test::modules = clean;
+    }
     check(failures == 0, "all edge cases");
     if (failures) return 1;
     std::puts("plugin coexistence/lifecycle/per-frame cost review: PASS");
