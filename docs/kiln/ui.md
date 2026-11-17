@@ -157,7 +157,7 @@ KeyBindings.Register("mymod.waypoints", "F6", screen.Toggle);       // a key ope
 - Looks: `UiStyle.Player` (the default since 0.2.0-dev.29.16: the look the player chose for Kiln's UI, the game's unless
   they changed it), `UiStyle.Game` (the game's menu colours and **the game's own UI font**, which Kiln reads from the game's
   resources at run time and never ships) or `UiStyle.Kiln` (Kiln's ember theme, branding/palette.json), or a mod's own
-  theme (`Theme = ...`, [Looks and themes](#looks-and-themes-0220-dev2916)). Inside any window:
+  theme (`Theme = ...`, [Looks and themes](#looks-and-themes-020-dev2916)). Inside any window:
   `using (ui.Look(UiStyle.Game)) { … }`.
 - Widgets: everything in `UiDraw` (below) plus `Image` / `ImageButton` (PNG via `Ui.LoadImage`, or an item's icon via
   `Ui.ItemImage`; `ImageTrimmed` / `ImageButtonTrimmed` without its margin, `ImagePart` for part of it), `ItemIcon`
@@ -454,7 +454,7 @@ Appended after `image_state` (the version stays 7; check `header.size` through t
 `pop_style`), `set_look(&KilnUiLook)` (Kiln.Ui only, from the player's setting: a native plugin's call is refused with
 `KILN_ERR_UNAVAILABLE`), `look_info(&KilnUiLookInfo)` (the player's look and the palette in use), `font_load(owner, data,
 len)`, `font_free(font)`, `push_font_handle(font)` (popped by `pop_font`); `push_style(KILN_UI_STYLE_PLAYER)`; roles
-`KILN_UI_ROLE_*`; looks `KILN_UI_LOOK_*`. Details: [services/ui.md](services/ui.md#looks-themes-and-fonts-0220-dev2916).
+`KILN_UI_ROLE_*`; looks `KILN_UI_LOOK_*`. Details: [services/ui.md](services/ui.md#looks-themes-and-fonts-020-dev2916).
 
 ## Item icons and names
 The game's own icon of an item, in any Kiln window, screen or crafting panel (since 0.2.0-dev.29.15), and its name in the
@@ -648,14 +648,14 @@ b.OnRelease = …;  b.IsDown;  b.TakePresses();  b.Consume = false;  b.WhileCapt
 
 ## The Kiln menu (the mod manager)
 A page in the player's look (the game's colours and its UI font unless the player chose another look under **Kiln
-settings > Look**, [Looks and themes](#looks-and-themes-0220-dev2916)), opened by the menu key (Insert), the main menu's and the
+settings > Look**, [Looks and themes](#looks-and-themes-020-dev2916)), opened by the menu key (Insert), the main menu's and the
 pause menu's **Mods** entry; Escape (gamepad B) or the **Back** hint goes back. A title, a tab row of sections, a footer
 of key hints. Tab / Shift+Tab or LB / RB switch sections; arrows or the d-pad move; Enter or A chooses; Ctrl+F jumps to the search box.
 - **Mods**: three columns.
   - Left: **All mods**, **Needs attention** (only when a mod failed or its folder is missing), then one row per engine
     that has mods (Kiln, native DLL mods, Kiln plugins, chain DLLs, EMF, EML, XHL, ShroudForge, SET, Greeneye, Flame,
     Shroudtopia, Enshwick, shroudlink, Ember) with its count and a mark (green fine, grey idle, red a problem), and
-    **Kiln settings**: the **Look** of Kiln's UI (always on a game client; [Looks and themes](#looks-and-themes-0220-dev2916)),
+    **Kiln settings**: the **Look** of Kiln's UI (always on a game client; [Looks and themes](#looks-and-themes-020-dev2916)),
     then Kiln's own configs.
   - Middle: the mods of that row (name, version, a state chip: Loaded, Waiting, Off, Failed, Not loaded, Missing; the
     engine when mixed), a search box that filters as you type (every word must match the name, id or engine), the engine's

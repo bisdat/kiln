@@ -67,8 +67,8 @@ overlay's backend are logged once per error code. Kiln.Ui's item icon cache keep
 
 Eight more slots are appended after `image_state`; the service version stays 7. On x64 `theme_create` is at byte offset 928,
 `theme_free` 936, `push_theme` 944, `set_look` 952, `look_info` 960, `font_load` 968, `font_free` 976, `push_font_handle` 984,
-and the table is 992 bytes (1008 with [the image tail](#part-of-an-image-trimmed-images-0220-dev2916), 1016 with `set_texts`). Readers check `header.size` through the member they call and that its pointer is non-null; the
-managed mirror is `UiNative.TableLooks`. The guide: [Looks and themes](../ui.md#looks-and-themes-0220-dev2916).
+and the table is 992 bytes (1008 with [the image tail](#part-of-an-image-trimmed-images-020-dev2916), 1016 with `set_texts`). Readers check `header.size` through the member they call and that its pointer is non-null; the
+managed mirror is `UiNative.TableLooks`. The guide: [Looks and themes](../ui.md#looks-and-themes-020-dev2916).
 
 - **Looks.** `push_style` takes `KILN_UI_STYLE_PLAYER` (2) too: the look the player chose (`set_look`). Windows that push no
   look are drawn in the player's colours as well (their font stays the overlay's default; a push gives a look's font). An
