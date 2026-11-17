@@ -15,11 +15,17 @@
 // Two steps, as kiln.knowledge's collector:
 //   prepare (kiln.boot's commit, before the game's entry point): the documents are read and checked against the exe's
 //     reflection as far as types go (the type exists, the path names members, it ends in a scalar, the value's shape
-//     fits); two mods that set one field to different values: the later mod is refused (ruling 7). The plan is frozen.
+//     fits; a component is one of the game's; an append's path is a list of scalars); mods that would change one thing
+//     two ways are refused, the later one (ruling 7): one field set to different values, one component added and
+//     removed, one list appended to twice, a component removed that another mod's path starts at, a list appended to
+//     and set with [*] by another mod, a "components[i]" path on a template whose components change. The plan is frozen.
 //   apply (kiln.assets when_resources_ready: the game's resource service is up and nothing has read through it): each
-//     resource is copied, the plan's writes are made in the copy with the game's values as the originals, and the copy is
-//     served as an override. What only the bytes can say (the resource is not there, an index past the array) is a
-//     fault after the publication: kiln.boot activation_fault (recorded; a required mod stops the start).
+//     resource is copied, every document's structural edits are made in the copy (removes, adds, appends), then every
+//     set, with the game's values as the originals, and the copy is served as an override. A document is all or
+//     nothing: when one of its edits fails, the copy is made again from the game's bytes without that document, so the
+//     resource is what the other documents make it. What only the bytes can say (the resource is not there, an index
+//     past the array, a component the template has not got) is a fault after the publication, once per document:
+//     kiln.boot activation_fault (recorded; a required mod stops the start).
 // Nothing here waits, and no lock is held across a call into kiln.boot or kiln.assets.
 #include <algorithm>
 #include <atomic>
@@ -44,31 +50,35 @@ namespace {
 
 constexpr char kRow[] = "mods.boot.resource_patches";
 constexpr char kKind[] = "resourcePatches";
-constexpr size_t kMaxSets = 4096;        // field writes of one generation
+constexpr size_t kMaxSets = 4096;        // changes of one generation: field writes, list appends, components added or removed
 constexpr size_t kMaxResource = 64u << 20;  // bytes of one patched resource
 
 struct Set {
-    std::string mod, key, path;
+    std::string path;
     nlohmann::json value;
 };
 struct StructOp {
-    std::string mod, key;
     char op = 0;                      // '-' removeComponents, '+' addComponents, 'a' append
     std::vector<std::string> names;   // components
     std::string path;                 // append
     std::vector<gjson> values;
     bool above_last = false;
 };
+// One document of one mod: applied whole or not at all.
+struct DocPatch {
+    std::string mod, key;
+    std::vector<StructOp> ops;  // its order; applied removes, adds, appends (every document's), before the sets
+    std::vector<Set> sets;      // its order
+};
 struct ResPatch {
     KilnAssetKey res{};
     std::string type, guid;
     bool tmpl = false;              // keen::ecs::TemplateResource: "set" paths start with a component's name
-    std::vector<StructOp> ops;      // envelope order; applied removes, adds, appends, before the sets
-    std::vector<Set> sets;          // envelope order
+    std::vector<DocPatch> docs;     // envelope order
 };
 struct BootPlan {
     std::vector<ResPatch> resources;
-    size_t sets = 0;
+    size_t sets = 0;  // changes, against kMaxSets
 };
 
 // Process-lifetime latch: readiness is one-shot; a later write would miss the game's first read.
@@ -131,12 +141,91 @@ bool segments(const std::string& path, std::vector<Seg>* out, std::string* err) 
     return true;
 }
 
+std::string folded(std::string s) {
+    for (char& c : s)
+        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+    return s;
+}
+
+// The path's segments as one text for the conflict keys: member names lower-case (the game's names match ignoring
+// case), indices as plain numbers, joined again, so "A.b[03]." and "a.B[3]" are one path. On a template, "#0" of the first
+// segment is the first component of its type, as no "#" is.
+std::vector<Seg> normalised(std::vector<Seg> segs, bool tmpl) {
+    for (Seg& s : segs) {
+        if (!s.index) s.s = folded(s.s);
+        else if (s.s != "*") s.s = std::to_string(std::stoul(s.s));  // nine digits at most (segments)
+    }
+    if (tmpl && !segs.empty() && !segs[0].index) {
+        std::string& f = segs[0].s;
+        const size_t h = f.find('#');
+        const std::string k = h == std::string::npos ? "" : f.substr(h + 1);
+        if (!k.empty() && k.size() <= 9 && std::all_of(k.begin(), k.end(), [](char d) { return d >= '0' && d <= '9'; })) {
+            const unsigned long nth = std::stoul(k);
+            f = f.substr(0, h) + (nth ? "#" + std::to_string(nth) : "");
+        }
+    }
+    return segs;
+}
+std::string text_of(const std::vector<Seg>& segs) {
+    std::string t;
+    for (const Seg& s : segs) t += s.index ? "[" + s.s + "]" : (t.empty() ? "" : ".") + s.s;
+    return t;
+}
+// One place of a resource: the same members, and at each index the same number or a "*" on either side.
+bool same_place(const std::vector<Seg>& a, const std::vector<Seg>& b) {
+    if (a.size() != b.size()) return false;
+    for (size_t i = 0; i < a.size(); ++i)
+        if (a[i].index != b[i].index || (a[i].s != b[i].s && !(a[i].index && (a[i].s == "*" || b[i].s == "*")))) return false;
+    return true;
+}
+
+// On a template, what a path's first segment names: a member of the template itself ("components", "name"), or a component by
+// its type name ("Gravity", "Gravity#1" the second of that type). Without the game's types, "components" and "name" are its members.
+struct Head {
+    bool member = false;            // the template's own member
+    bool components_index = false;  // "components[i]...": a component by its place in the list
+    std::string component;          // the component's type name as written, without "#k"; empty for a member
+    bool bad_nth = false;           // "#k" is not a number
+};
+Head head_of(const gd::TType* tmpl, const std::vector<Seg>& segs) {
+    Head h;
+    if (segs.empty() || segs[0].index) return h.member = true, h;
+    const std::string& first = segs[0].s;
+    const gd::TField* f = tmpl ? tmpl->resolved()->field(first) : nullptr;
+    h.member = f || (!tmpl && (folded(first) == "components" || folded(first) == "name"));
+    if (h.member) {
+        h.components_index = folded(f ? f->name : first) == "components" && segs.size() > 1 && segs[1].index;
+        return h;
+    }
+    const size_t at = first.find('#');
+    h.component = first.substr(0, at);
+    if (at != std::string::npos) {
+        const std::string k = first.substr(at + 1);
+        h.bad_nth = k.empty() || k.size() > 9 || !std::all_of(k.begin(), k.end(), [](char d) { return d >= '0' && d <= '9'; });
+    }
+    return h;
+}
+
+// Where a path's type check starts: the resource's type, or on a template the component its first segment names (and the
+// path below it). false + *err: the component is no type of the game's, or the path stops at it.
+bool type_root(const gd::TType* type, bool tmpl, const std::vector<Seg>& segs, const gd::TType** root, std::vector<Seg>* rest, std::string* err) {
+    *root = type;
+    *rest = segs;
+    if (!tmpl) return true;
+    const Head h = head_of(type, segs);
+    if (h.member) return true;
+    if (h.bad_nth) return *err = "\"" + segs[0].s + "\": a component's \"#k\" is a number (the k-th of that type, from 0)", false;
+    if (!(*root = gd::component_type(h.component, err))) return false;
+    rest->erase(rest->begin());
+    if (rest->empty()) return *err = "a path on a template names a member of a component (\"" + h.component + ".<member>\")", false;
+    return true;
+}
+
 // The path against the types alone. true: it ends in `leaf` (checked), or *unknown (a variant or optional on the way:
-// only the bytes can say). false + *err: no such member, not a list, not a scalar.
-bool check_types(const gd::TType* root, const std::string& path, Field* leaf, bool* unknown, std::string* err) {
+// only the bytes can say). false + *err: no such member, not a list, not a scalar. list: it has to end in a list of scalars
+// instead (an append), and `leaf` is the list's element.
+bool check_types(const gd::TType* root, const std::vector<Seg>& segs, Field* leaf, bool* unknown, std::string* err, bool list = false) {
     *unknown = false;
-    std::vector<Seg> segs;
-    if (!segments(path, &segs, err)) return false;
     const gd::TType* t = root->resolved();
     std::string at = root->brief;
     for (const Seg& s : segs) {
@@ -155,6 +244,15 @@ bool check_types(const gd::TType* root, const std::string& path, Field* leaf, bo
     }
     if (!t) return *unknown = true, true;
     if (t->kind == gd::K_BLOBOPT || t->kind == gd::K_BLOBVAR) return *unknown = true, true;
+    if (list) {
+        if (t->kind != gd::K_BLOBARRAY)
+            return *err = "NotAList: " + at + " is " + t->name + ", not a list (append adds to a list of numbers, bools or enum members)", false;
+        const gd::TType* el = t->inner() ? t->inner()->resolved() : nullptr;
+        if (!el) return *unknown = true, true;
+        if (!gd::leaf_of(el, leaf) || leaf->ref || leaf->vt == KILN_CV_GUID || !leaf->bytes || leaf->bytes > 8)
+            return *err = "NotScalar: " + at + " is a list of " + el->name + ", not of numbers, bools or enum members", false;
+        return true;
+    }
     if (!gd::leaf_of(t, leaf) || leaf->ref || leaf->vt == KILN_CV_GUID)
         return *err = "NotScalar: " + at + " is " + t->name + ", not a number, a bool or an enum (resource patches set scalar members)", false;
     return true;
@@ -269,7 +367,16 @@ KilnResult KILN_CALL prepare_boot(void*, const KilnBootPrepareInputV1* in, KilnB
     struct Claim {
         std::string index, mod, value;
     };
-    std::map<std::string, std::vector<Claim>> claims;  // "<resource key>|<path without indices>"
+    // what the documents so far change, by "<resource key>|...": fields set ("|<normalised path without indices>": its indices,
+    // the mod, the value), components added or removed ("|<component, lower-case>": "+" / "-"), paths that start at a
+    // component ("|<component>": the path, "set" / "append"), documents that add or remove components ("": which), paths
+    // that name a component by its place in the list ("": the path)
+    std::map<std::string, std::vector<Claim>> fields, components, uses, structure, by_place;
+    struct ListClaim {
+        std::string res, mod, path;
+        std::vector<Seg> place;  // normalised
+    };
+    std::vector<ListClaim> appended, starred;  // lists appended to; lists set with [*] (the list's place)
     // each mod's files first, then what its OnBoot staged; a key both have stays the file's
     std::vector<kiln::boot::Doc> docs;
     try {
@@ -316,6 +423,10 @@ KilnResult KILN_CALL prepare_boot(void*, const KilnBootPrepareInputV1* in, KilnB
             // kiln.boot drops this optional participant and prepares again, or stops for a required one.
             return refused("", kMissedDeadline);
         }
+        for (const auto& [k, x] : doc.items())
+            if (k != "format" && k != "resource" && k != "type" && k != "part" && k != "set" && k != "removeComponents" && k != "addComponents" &&
+                k != "append")
+                return refused("", "unknown member \"" + k + "\" (resource, type, part, set, removeComponents, addComponents, append)");
         ResPatch rp;
         rp.guid = doc["resource"].get<std::string>();
         rp.type = doc["type"].get<std::string>();
@@ -326,30 +437,71 @@ KilnResult KILN_CALL prepare_boot(void*, const KilnBootPrepareInputV1* in, KilnB
         const gd::TType* type = types ? gd::type_named(rp.type) : nullptr;
         if (types && (!type || !type->resolved() || type->resolved()->kind != gd::K_STRUCT))
             return refused("", "UnknownType: this game build has no struct type \"" + rp.type + "\" (the qualified name, as keen::BalancingTable)");
-        std::string res_key = guid_text(rp.res.guid) + "/" + rp.type + "/" + std::to_string(rp.res.part);
+        const std::string res_key = guid_text(rp.res.guid) + "/" + rp.type + "/" + std::to_string(rp.res.part);
         rp.tmpl = rp.type == "keen::ecs::TemplateResource";
-        // the structural edits: shapes here, the bytes when they are applied
+        DocPatch dp{d.owner, d.key, {}, {}};
+        // every change counts against the limit: a field write, a list's append, a component added or removed
+        const std::string too_many = "more than " + std::to_string(kMaxSets) + " changes (field writes, appends, components) in one boot generation";
+        auto count = [&]() { return plan->sets < kMaxSets ? (++plan->sets, true) : false; };
+        // A path on a template: a component another mod removes is not one to start at, and "components[i]" names another
+        // component once the list changes.
+        auto template_path = [&](const std::string& path, const std::vector<Seg>& segs, const char* what, std::string* why) {
+            const Head h = head_of(types ? type : nullptr, segs);
+            if (h.components_index) {
+                if (const auto& st = structure[res_key]; !st.empty())
+                    return *why = "\"components[i]\" names a component by its place in the list, which mod " + st.front().mod +
+                                  " changes (" + st.front().value + " of " + res_key + "); name the component by its type (\"Gravity.isActive\")",
+                           false;
+                by_place[res_key].push_back({path, d.owner, what});
+                return true;
+            }
+            if (h.member || h.component.empty()) return true;
+            const std::string c = folded(h.component);
+            for (const Claim& r : components[res_key + "|" + c])
+                if (r.mod != d.owner && r.value == "-")
+                    return *why = "Conflict: mod " + r.mod + " removes the component " + h.component + " of " + res_key +
+                                  " that this path starts at; the later mod is refused",
+                           false;
+            uses[res_key + "|" + c].push_back({path, d.owner, what});
+            return true;
+        };
+        // the structural edits: what can be checked here is, the bytes when they are applied
         for (const char* which : {"removeComponents", "addComponents"}) {
             if (!doc.contains(which) || (doc[which].is_array() && doc[which].empty())) continue;
             const bool add = which[0] == 'a';
-            if (!doc[which].is_array()) return refused("", std::string("\"") + which + "\" is a list of component type names");
-            if (!rp.tmpl) return refused("", std::string("\"") + which + "\": only a template (keen::ecs::TemplateResource) has components");
+            const std::string label = std::string("\"") + which + "\"";
+            if (!doc[which].is_array()) return refused("", label + " is a list of component type names");
+            if (!rp.tmpl) return refused("", label + ": only a template (keen::ecs::TemplateResource) has components");
             StructOp op;
-            op.mod = d.owner, op.key = d.key, op.op = add ? '+' : '-';
+            op.op = add ? '+' : '-';
             for (const auto& n : doc[which]) {
-                if (!n.is_string() || n.get<std::string>().empty()) return refused("", std::string("\"") + which + "\" is a list of component type names");
+                if (!n.is_string() || n.get<std::string>().empty()) return refused("", label + " is a list of component type names");
                 const std::string brief = n.get<std::string>();
-                if (types && !gd::type_named("keen::ecs::" + brief))
-                    return refused("", std::string("\"") + which + "\": \"" + brief + "\" is not a component type of this game build");
+                if (!count()) return refused("", too_many);
+                std::string why;
+                if (types && !gd::component_type(brief, &why)) return refused("", label + ": " + why);
+                const std::string c = folded(brief);
+                if (!add && c == "currenttransform") return refused("", label + ": CurrentTransform is what any entity needs to live");
                 // two mods: one adds what the other removes
-                auto& list = claims[res_key + "|component:" + brief];
-                for (const Claim& c : list)
-                    if (c.mod != d.owner && c.value != (add ? "+" : "-"))
-                        return refused("", "Conflict: mod " + c.mod + (add ? " removes " : " adds ") + brief + " of " + res_key + "; two mods on one component are not combined");
+                auto& list = components[res_key + "|" + c];
+                for (const Claim& cl : list)
+                    if (cl.mod != d.owner && cl.value != (add ? "+" : "-"))
+                        return refused("", "Conflict: mod " + cl.mod + (add ? " removes " : " adds ") + brief + " of " + res_key +
+                                               "; two mods on one component are not combined");
+                // nor is a component taken away under another mod's path
+                if (!add)
+                    for (const Claim& u : uses[res_key + "|" + c])
+                        if (u.mod != d.owner)
+                            return refused("", "Conflict: mod " + u.mod + (u.value == "append" ? " appends to " : " sets ") + "\"" + u.index + "\" of " +
+                                                   res_key + ", and this patch removes " + brief + "; the later mod is refused");
                 list.push_back({"", d.owner, add ? "+" : "-"});
                 op.names.push_back(brief);
             }
-            rp.ops.push_back(std::move(op));
+            if (const auto& ix = by_place[res_key]; !ix.empty())
+                return refused("", label + ": mod " + ix.front().mod + " names a component of " + res_key + " by its place in the list (\"" + ix.front().index +
+                                       "\"), which this changes; the later mod is refused");
+            structure[res_key].push_back({"", d.owner, which});
+            dp.ops.push_back(std::move(op));
         }
         if (doc.contains("append") && !(doc["append"].is_object() && doc["append"].empty())) {
             if (!doc["append"].is_object()) return refused("", "\"append\" is {\"<list path>\": {\"values\": [...], \"aboveLast\": true}}");
@@ -357,6 +509,8 @@ KilnResult KILN_CALL prepare_boot(void*, const KilnBootPrepareInputV1* in, KilnB
                 std::string err;
                 std::vector<Seg> segs;
                 if (!segments(path, &segs, &err)) return refused(path, err);
+                if (std::any_of(segs.begin(), segs.end(), [](const Seg& s) { return s.index && s.s == "*"; }))
+                    return refused(path, "\"append\": the path names one list ([i], not [*])");
                 if (!spec.is_object() || !spec.contains("values") || !spec["values"].is_array() || spec["values"].empty() ||
                     (spec.contains("aboveLast") && !spec["aboveLast"].is_boolean()))
                     return refused(path, "\"append\": a list path takes {\"values\": [<numbers, bools or enum names>], \"aboveLast\": true|false}");
@@ -364,52 +518,164 @@ KilnResult KILN_CALL prepare_boot(void*, const KilnBootPrepareInputV1* in, KilnB
                     if (k != "values" && k != "aboveLast") return refused(path, "\"append\": unknown member \"" + k + "\" (values, aboveLast)");
                 for (const auto& v : spec["values"])
                     if (!(v.is_number() || v.is_boolean() || v.is_string())) return refused(path, "\"append\": a value is a number, a bool or an enum member's name");
-                auto& list = claims[res_key + "|append:" + path];
-                for (const Claim& c : list)
-                    if (c.mod != d.owner) return refused(path, "Conflict: mod " + c.mod + " appends to this list of " + res_key + " too; two mods on one list are not combined");
-                list.push_back({"", d.owner, "append"});
+                if (!count()) return refused(path, too_many);
+                if (rp.tmpl && !template_path(path, segs, "append", &err)) return refused(path, err);
+                // the list and its values against the types (a variant or an optional on the way: the bytes say)
+                Field el;
+                bool unknown = !types;
+                const gd::TType* root = nullptr;
+                std::vector<Seg> rest;
+                if (types && (!type_root(type, rp.tmpl, segs, &root, &rest, &err) || !check_types(root, rest, &el, &unknown, &err, true)))
+                    return refused(path, "\"append\": " + err);
                 StructOp op;
-                op.mod = d.owner, op.key = d.key, op.op = 'a', op.path = path;
-                for (const auto& v : spec["values"]) op.values.push_back(gjson::parse(v.dump()));
-                op.above_last = spec.value("aboveLast", false);
-                rp.ops.push_back(std::move(op));
-                ++plan->sets;
+                op.op = 'a', op.path = path, op.above_last = spec.value("aboveLast", false);
+                for (const auto& v : spec["values"]) {
+                    op.values.push_back(gjson::parse(v.dump()));
+                    uint8_t bytes[16] = {}, zero[16] = {};
+                    bool reset = false;
+                    if (!unknown && !gd::parse_leaf(el, op.values.back(), zero, bytes, &reset, &err)) return refused(path, "\"append\": " + err);
+                }
+                const std::vector<Seg> place = normalised(segs, rp.tmpl);
+                for (const ListClaim& a : appended)
+                    if (a.res == res_key && a.mod != d.owner && same_place(a.place, place))
+                        return refused(path, "Conflict: mod " + a.mod + " appends to this list of " + res_key + " too (\"" + a.path +
+                                                 "\"); two mods on one list are not combined");
+                for (const ListClaim& s : starred)
+                    if (s.res == res_key && s.mod != d.owner && same_place(s.place, place))
+                        return refused(path, "Conflict: mod " + s.mod + " sets every element of this list of " + res_key + " (\"" + s.path +
+                                                 "\"), which would change what is appended here too; the later mod is refused");
+                appended.push_back({res_key, d.owner, path, place});
+                dp.ops.push_back(std::move(op));
             }
         }
         const nlohmann::json no_sets = nlohmann::json::object();
         for (const auto& [path, value] : (doc.contains("set") ? doc["set"] : no_sets).items()) {
-            if (plan->sets >= kMaxSets) return refused(path, "more than " + std::to_string(kMaxSets) + " field writes in one boot generation");
+            if (!count()) return refused(path, too_many);
             std::string err;
             std::vector<Seg> segs;
             if (!segments(path, &segs, &err)) return refused(path, err);
+            if (rp.tmpl && !template_path(path, segs, "set", &err)) return refused(path, err);
+            // a template's path starts at a component (by its type) or at a member of the template
             Field leaf;
-            bool unknown = !types || rp.tmpl;  // a template's paths start with a component: only the bytes can say
-            if (types && !rp.tmpl && !check_types(type, path, &leaf, &unknown, &err)) return refused(path, err);
+            bool unknown = !types;
+            const gd::TType* root = nullptr;
+            std::vector<Seg> rest;
+            if (types && (!type_root(type, rp.tmpl, segs, &root, &rest, &err) || !check_types(root, rest, &leaf, &unknown, &err)))
+                return refused(path, err);
             if (!unknown && !check_value(leaf, value, &err)) return refused(path, err);
             if (unknown && is_op(value) && value.empty()) return refused(path, "an empty operation object");
+            const std::vector<Seg> place = normalised(segs, rp.tmpl);
+            const std::string norm = text_of(place);
             // two mods, one field
-            auto& list = claims[res_key + "|" + base_of(path)];
-            const std::string ix = index_of(path), dump = value.dump();
+            auto& list = fields[res_key + "|" + base_of(norm)];
+            const std::string ix = index_of(norm), dump = value.dump();
             for (const Claim& c : list)
                 if (c.mod != d.owner && overlap(c.index, ix) && (c.value != dump || c.index != ix || is_op(value)))
                     return refused(path, "Conflict: mod " + c.mod + " sets this field of " + res_key + " too (" + c.value +
                                              "); two mods on one field are not combined");
             list.push_back({ix, d.owner, dump});
-            rp.sets.push_back({d.owner, d.key, path, value});
-            ++plan->sets;
+            // [*] over a list another mod appends to would change the appended values too: the later mod is refused
+            // ([i] names the same element either way, and is not)
+            for (size_t j = 0; j < place.size(); ++j) {
+                if (!place[j].index || place[j].s != "*") continue;
+                const std::vector<Seg> listp(place.begin(), place.begin() + static_cast<std::ptrdiff_t>(j));
+                for (const ListClaim& a : appended)
+                    if (a.res == res_key && a.mod != d.owner && same_place(a.place, listp))
+                        return refused(path, "Conflict: mod " + a.mod + " appends to this list of " + res_key + " (\"" + a.path +
+                                                 "\"), and [*] would change the appended values too; the later mod is refused (name elements by index)");
+                starred.push_back({res_key, d.owner, path, listp});
+            }
+            dp.sets.push_back({path, value});
         }
         auto same = std::find_if(plan->resources.begin(), plan->resources.end(), [&](const ResPatch& o) {
             return std::memcmp(&o.res, &rp.res, sizeof rp.res) == 0;
         });
-        if (same == plan->resources.end()) plan->resources.push_back(std::move(rp));
-        else {
-            same->ops.insert(same->ops.end(), std::make_move_iterator(rp.ops.begin()), std::make_move_iterator(rp.ops.end()));
-            same->sets.insert(same->sets.end(), std::make_move_iterator(rp.sets.begin()), std::make_move_iterator(rp.sets.end()));
+        if (same == plan->resources.end()) {
+            rp.docs.push_back(std::move(dp));
+            plan->resources.push_back(std::move(rp));
+        } else {
+            same->docs.push_back(std::move(dp));
         }
     }
-    LOGI("boot generation %llu prepared: %zu resource patch write(s) on %zu resource(s)%s", static_cast<unsigned long long>(input.generation),
+    LOGI("boot generation %llu prepared: %zu resource patch change(s) on %zu resource(s)%s", static_cast<unsigned long long>(input.generation),
          plan->sets, plan->resources.size(), types || !plan->sets ? "" : " (types are checked when they are applied)");
     return kiln::boot::prepared(out, plan.release(), &destroy_plan);
+}
+
+// One build of a resource's copy from the game's bytes, with every document that is not left out: every document's
+// removeComponents, then addComponents, then append (each on the copy as the one before left it), then every document's
+// "set", with the game's values as the originals. false: document *bad failed (*why says how) and this build is worth
+// nothing. *notes: what each change did, logged for the build that is served.
+bool build(const ResPatch& rp, const gd::TType* type, const uint8_t* data, size_t len, const std::vector<char>& left_out, std::vector<uint8_t>* copy,
+           size_t* here, std::vector<std::string>* notes, size_t* bad, std::string* why) {
+    const std::string what = rp.type + " " + guid_text(rp.res.guid);
+    copy->assign(data, data + len);
+    *here = 0;
+    notes->clear();
+    const gd::Root root_kind = rp.tmpl ? gd::Root::Template : gd::Root::Plain;
+    for (const char phase : {'-', '+', 'a'}) {
+        for (size_t i = 0; i < rp.docs.size(); ++i) {
+            if (left_out[i]) continue;
+            const DocPatch& d = rp.docs[i];
+            for (const StructOp& o : d.ops) {
+                if (o.op != phase) continue;
+                std::string err;
+                size_t n = 0;
+                const bool ok = o.op == '-' ? gd::boot_remove_components(type->resolved(), o.names, copy, &n, &err)
+                              : o.op == '+' ? gd::boot_add_components(type->resolved(), o.names, copy, &n, &err)
+                                            : gd::boot_append(root_kind, type->resolved(), o.path, o.values, o.above_last, copy, &n, &err);
+                if (!ok) return *bad = i, *why = err, false;
+                if (copy->size() > kMaxResource)
+                    return *bad = i, *why = "the patched " + what + " would be over " + std::to_string(kMaxResource >> 20) + " MiB", false;
+                *here += n;
+                notes->push_back("boot: resource patch " + d.mod + "/" + d.key + ": " + what +
+                                 (o.op == 'a' ? " \"" + o.path + "\": " + std::to_string(n) + " value(s) appended"
+                                              : ": " + std::to_string(n) + " component(s) " + (o.op == '+' ? "added" : "removed")));
+            }
+        }
+    }
+    const uintptr_t lo = reinterpret_cast<uintptr_t>(copy->data()), hi = lo + copy->size();
+    for (size_t i = 0; i < rp.docs.size(); ++i) {
+        if (left_out[i]) continue;
+        const DocPatch& d = rp.docs[i];
+        for (const Set& s : d.sets) {
+            auto failed = [&](const std::string& e) { return *bad = i, *why = "\"" + s.path + "\": " + e, false; };
+            std::vector<gd::Resolved> found;
+            std::string err;
+            if (!gd::resolve(root_kind, gd::Node{type->resolved(), lo}, s.path, &found, &err)) return failed(err.empty() ? "no such member in " + what : err);
+            if (found.empty()) {
+                if (s.path.find('*') == std::string::npos) return failed(err.empty() ? "IndexPastEnd: no such element in " + what : err);
+                notes->push_back("boot: resource patch " + d.mod + "/" + d.key + " \"" + s.path + "\": the list is empty in " + what + ": nothing to change");
+                continue;
+            }
+            // every element is computed before any is written
+            std::vector<std::pair<uintptr_t, std::vector<uint8_t>>> writes;
+            std::string bad_value;
+            for (const gd::Resolved& r : found) {
+                Field f;
+                if (!r.node.t || !gd::leaf_of(r.node.t, &f) || f.ref || f.vt == KILN_CV_GUID) {
+                    bad_value = "NotScalar: " + r.path + " is not a number, a bool or an enum";
+                    break;
+                }
+                if (!check_value(f, s.value, &bad_value)) break;
+                if (r.node.addr < lo || r.node.addr + f.bytes > hi) {
+                    bad_value = r.path + " lies outside the resource's own bytes";
+                    break;
+                }
+                uint8_t out[16] = {};
+                bool reset = false;
+                if (!gd::parse_leaf(f, gjson::parse(s.value.dump()), reinterpret_cast<const uint8_t*>(r.node.addr), out, &reset, &bad_value)) break;
+                if (reset) continue;  // {"reset": true}: the game's own value stays
+                writes.emplace_back(r.node.addr, std::vector<uint8_t>(out, out + f.bytes));
+            }
+            if (!bad_value.empty()) return failed(bad_value);
+            for (const auto& [addr, bytes] : writes) std::memcpy(reinterpret_cast<void*>(addr), bytes.data(), bytes.size());
+            *here += writes.size();
+            notes->push_back("boot: resource patch " + d.mod + "/" + d.key + ": " + what + " \"" + s.path + "\" = " + s.value.dump() + " (" +
+                             std::to_string(writes.size()) + " value(s))");
+        }
+    }
+    return true;
 }
 
 // kiln.assets when_resources_ready: the game's resource service is up, nothing has read through it yet.
@@ -423,11 +689,11 @@ void KILN_CALL apply(void*) {
     LOGI("boot: the game's resource service is up: resource patches of %zu resource(s) are written into copies of the bytes kiln.assets serves now", plan->resources.size());
     const KilnAssetsApi* A = assets();
     size_t written = 0, failed = 0;
-    // a fault names its mod: for a required mod kiln.boot ends the process inside the call
-    auto fault = [&](const Set& s, const std::string& why) {
+    // one fault per document, naming its mod and key: for a required mod kiln.boot ends the process inside the call
+    auto fault = [&](const DocPatch& d, const std::string& why) {
         ++failed;
-        LOGE("boot: resource patch %s/%s \"%s\": %s", s.mod.c_str(), s.key.c_str(), s.path.c_str(), why.c_str());
-        kiln::boot::activation_fault(g_api, g_owner, s.mod, kKind, s.key, "\"" + s.path + "\": " + why);
+        LOGE("boot: resource patch %s/%s: %s; nothing of this patch was applied", d.mod.c_str(), d.key.c_str(), why.c_str());
+        kiln::boot::activation_fault(g_api, g_owner, d.mod, kKind, d.key, why + "; nothing of this patch was applied");
     };
     for (const ResPatch& rp : plan->resources) {
         const std::string what = rp.type + " " + guid_text(rp.res.guid);
@@ -441,97 +707,35 @@ void KILN_CALL apply(void*) {
         else if (len < type->resolved()->size || len > kMaxResource)
             whole = "the resource " + what + " is " + std::to_string(len) + " bytes, which is not a " + rp.type;
         if (!whole.empty()) {
-            std::set<std::string> said;
-            for (const StructOp& o : rp.ops)
-                if (said.insert(o.mod + "/" + o.key).second) fault(Set{o.mod, o.key, o.path, {}}, whole);
-                else ++failed;
-            for (const Set& s : rp.sets)
-                if (said.insert(s.mod + "/" + s.key).second) fault(s, whole);
-                else ++failed;
+            for (const DocPatch& d : rp.docs) fault(d, whole);
             continue;
         }
-        std::vector<uint8_t> copy(static_cast<const uint8_t*>(data), static_cast<const uint8_t*>(data) + len);
+        // a document that fails is left out and the copy is built again from the game's bytes: the resource is then what
+        // the other documents make it (each failure leaves one more out, so this ends)
+        std::vector<char> left_out(rp.docs.size(), 0);
+        std::vector<uint8_t> copy;
+        std::vector<std::string> notes;
         size_t here = 0;
-        // the structural edits first (removes, adds, appends), each on the copy as the one before left it
-        const gd::Root root_kind = rp.tmpl ? gd::Root::Template : gd::Root::Plain;
-        for (const char phase : {'-', '+', 'a'}) {
-            for (const StructOp& o : rp.ops) {
-                if (o.op != phase) continue;
-                std::string err;
-                size_t n = 0;
-                const bool ok = o.op == '-' ? gd::boot_remove_components(type->resolved(), o.names, &copy, &n, &err)
-                              : o.op == '+' ? gd::boot_add_components(type->resolved(), o.names, &copy, &n, &err)
-                                            : gd::boot_append(root_kind, type->resolved(), o.path, o.values, o.above_last, &copy, &n, &err);
-                if (!ok) {
-                    fault(Set{o.mod, o.key, o.path, {}}, err);
-                    continue;
-                }
-                here += n;
-                if (o.op == 'a')
-                    LOGI("boot: resource patch %s/%s: %s \"%s\": %zu value(s) appended", o.mod.c_str(), o.key.c_str(), what.c_str(), o.path.c_str(), n);
-                else
-                    LOGI("boot: resource patch %s/%s: %s: %zu component(s) %s", o.mod.c_str(), o.key.c_str(), what.c_str(), n, o.op == '+' ? "added" : "removed");
-            }
+        for (;;) {
+            size_t bad = 0;
+            std::string why;
+            if (build(rp, type, static_cast<const uint8_t*>(data), len, left_out, &copy, &here, &notes, &bad, &why)) break;
+            left_out[bad] = 1;
+            fault(rp.docs[bad], why);
         }
-        if (copy.size() > kMaxResource) {
-            for (const Set& s : rp.sets) fault(s, "the patched " + what + " would be over " + std::to_string(kMaxResource >> 20) + " MiB");
-            continue;
-        }
-        const uintptr_t lo = reinterpret_cast<uintptr_t>(copy.data()), hi = lo + copy.size();
-        for (const Set& s : rp.sets) {
-            std::vector<gd::Resolved> found;
-            std::string err;
-            if (!gd::resolve(root_kind, gd::Node{type->resolved(), lo}, s.path, &found, &err)) {
-                fault(s, err.empty() ? "no such member in " + what : err);
-                continue;
-            }
-            if (found.empty()) {
-                if (s.path.find('*') != std::string::npos) LOGI("boot: resource patch %s/%s \"%s\": the list is empty in %s: nothing to change", s.mod.c_str(), s.key.c_str(), s.path.c_str(), what.c_str());
-                else fault(s, err.empty() ? "IndexPastEnd: no such element in " + what : err);
-                continue;
-            }
-            // every element is computed before any is written: a path that fails changes nothing
-            std::vector<std::pair<uintptr_t, std::vector<uint8_t>>> writes;
-            std::string bad;
-            for (const gd::Resolved& r : found) {
-                Field f;
-                if (!r.node.t || !gd::leaf_of(r.node.t, &f) || f.ref || f.vt == KILN_CV_GUID) {
-                    bad = "NotScalar: " + r.path + " is not a number, a bool or an enum";
-                    break;
-                }
-                if (!check_value(f, s.value, &bad)) break;
-                if (r.node.addr < lo || r.node.addr + f.bytes > hi) {
-                    bad = r.path + " lies outside the resource's own bytes";
-                    break;
-                }
-                uint8_t out[16] = {};
-                bool reset = false;
-                if (!gd::parse_leaf(f, gjson::parse(s.value.dump()), reinterpret_cast<const uint8_t*>(r.node.addr), out, &reset, &bad)) break;
-                if (reset) continue;  // {"reset": true}: the game's own value stays
-                writes.emplace_back(r.node.addr, std::vector<uint8_t>(out, out + f.bytes));
-            }
-            if (!bad.empty()) {
-                fault(s, bad);
-                continue;
-            }
-            for (const auto& [addr, bytes] : writes) std::memcpy(reinterpret_cast<void*>(addr), bytes.data(), bytes.size());
-            here += writes.size();
-            LOGI("boot: resource patch %s/%s: %s \"%s\" = %s (%zu value(s))", s.mod.c_str(), s.key.c_str(), what.c_str(), s.path.c_str(),
-                 s.value.dump().c_str(), writes.size());
-        }
+        for (const std::string& n : notes) LOGI("%s", n.c_str());
         if (!here) continue;
         const KilnResult rc = A->resource_put(g_owner, &rp.res, copy.data(), copy.size(), KILN_ASSET_PUT_OVERRIDE);
         if (rc != KILN_OK) {
-            std::set<std::string> said;
-            for (const Set& s : rp.sets)
-                if (said.insert(s.mod + "/" + s.key).second) fault(s, "kiln.assets refused the patched " + what + " (" + std::to_string(rc) + ")");
+            for (size_t i = 0; i < rp.docs.size(); ++i)
+                if (!left_out[i]) fault(rp.docs[i], "kiln.assets refused the patched " + what + " (" + std::to_string(rc) + ")");
             continue;
         }
         written += here;
     }
     LOGI("boot: resource patches applied before the game read its resources: %zu value(s) in %zu resource(s)%s", written, plan->resources.size(),
-         failed ? (", " + std::to_string(failed) + " write(s) not applied (boot.json)").c_str() : "");
-    if (failed) row(KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE, std::to_string(failed) + " write(s) of this start were not applied (state/boot.json)");
+         failed ? (", " + std::to_string(failed) + " patch(es) not applied (boot.json)").c_str() : "");
+    if (failed) row(KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE, std::to_string(failed) + " resource patch(es) of this start were not applied (state/boot.json)");
 }
 
 }  // namespace
