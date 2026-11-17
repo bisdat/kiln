@@ -1189,6 +1189,7 @@ Shared types (TypeScript names, defined in `commands.ts`; Rust in kiln-manage un
 | app | `app_render_set` | software: boolean | `RenderInfo` (sets or clears `state/software-render.json` for the next start; `unsupported` off Linux) |
 | app | `app_settings_get` | - | `LauncherSettings` |
 | app | `app_settings_set` | settings: LauncherSettings | `LauncherSettings` |
+| app | `app_locales` | - | `LocaleFiles` {dir, files: {tag, text}[], errors: {file, message}[]} (translation files in `<data>/locales/<tag>.json`, as text; at most 64, 1 MB each; [translating.md](../translating.md)) |
 | app | `app_open_path` | path: string | null |
 | app | `app_open_url` | url: string (https) | null |
 | app | `task_list` | - | `Task[]` |
@@ -1385,7 +1386,8 @@ that may still run although its mod is off; [app.md](app.md) "Notices about mod 
 number (dev.29, default 1, 0 to 5: "Earlier versions to keep", how many of a mod's earlier versions an update keeps for a
 roll back with their settings; `app_settings_set` refuses more than 5 and trims what is kept to the new count; a
 launcher before dev.29 drops the field when it saves its settings, and dev.29 then keeps 1; [catalog.md](catalog.md)
-"Rolling back an update")}` (`checkUpdates`, never used, is gone;
+"Rolling back an update"), language?: string (dev.29: the launcher's language, "system" or absent = the system's,
+else a tag such as "zh-CN"; [translating.md](../translating.md))}` (`checkUpdates`, never used, is gone;
 readers ignore it), `UpdateStatus` (`launcher/src-tauri/src/selfupdate/mod.rs`; [releasing.md](releasing.md); `distribution`
 "direct", or in the Nexus build "nexus" with `phase: "disabled"`, `commands/update.rs`),
 `Task {id, kind (the command), title, state: 'queued'|'running'|'done'|'failed'|'canceled', progress: number|null,
