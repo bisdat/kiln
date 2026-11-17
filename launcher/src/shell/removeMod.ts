@@ -80,8 +80,6 @@ export function removable(r: ModRow): boolean {
 }
 /** Why a game-folder mod is not removed, in the current language. */
 export const notRemovableText = () => t("shell.removeMod.notRemovable");
-/** The same words in English, for callers not yet on the function above. */
-export const NOT_REMOVABLE = "in the game folder, Kiln did not place it: remove it there";
 
 /** The loaded profile without the rows' entries: one edit, one save. */
 export function withoutRows(p: Profile, rows: ModRow[]): void {

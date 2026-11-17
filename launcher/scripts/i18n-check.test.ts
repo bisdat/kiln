@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { flatten } from "../src/i18n/format";
-import { checkLocale, hasKey, readLocaleFile, sourceKeys, untranslated } from "./i18n-check";
+import { checkLocale, hasKey, pluralShapeProblems, readLocaleFile, sourceKeys, untranslated } from "./i18n-check";
 
 const i18n = join(import.meta.dir, "..", "src", "i18n");
 const en = flatten(JSON.parse(readFileSync(join(i18n, "en.json"), "utf8")));
@@ -30,6 +30,8 @@ test("en.json: every value is text and every t(\"key\") in the source is in it",
   expect(bad).toEqual([]);
   const missing = sourceKeys(join(import.meta.dir, "..", "src")).filter((k) => !hasKey(en, k.key)).map((k) => `${k.file}:${k.line} ${k.key}`);
   expect(missing).toEqual([]);
+  expect(pluralShapeProblems(en)).toEqual([]);
+  expect(pluralShapeProblems(flatten({ type: { kiln: "Kiln mod", other: "Not a Kiln mod" }, n: { one: "x" } }))).toHaveLength(2);
 });
 
 test("every locale file beside en.json passes the check", () => {

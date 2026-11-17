@@ -11,8 +11,6 @@ import { t } from "../i18n";
 
 /** The action's words ("Use the changed files") in the current language. */
 export const changedFilesLabel = () => t("shell.libraryChanged.useChanged");
-/** The same words in English, for callers not yet on the function above. */
-export const USE_CHANGED = "Use the changed files";
 
 /** The Library entry a refusal names as changed in its folder, with the mod's name; null for any other error. */
 export function libraryChangedOf(e: unknown): { entry: LibraryRef; name: string } | null {

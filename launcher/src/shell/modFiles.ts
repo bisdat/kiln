@@ -26,5 +26,3 @@ export const MOD_FILE_FILTERS = modFileFilters(typeof navigator !== "undefined" 
 
 /** "zip, 7z, rar, folder or DLL", for a sentence. */
 export const modFileWords = () => t("shell.modFiles.words");
-/** The same words in English, for callers not yet on the function above. */
-export const MOD_FILE_WORDS = "zip, 7z, rar, folder or DLL";

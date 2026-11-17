@@ -200,8 +200,6 @@ export const elsewhereTitle = () => t("shell.dataFolderText.elsewhereTitle");
 /** The line where the loaded profile is shown (Play, Settings' Profiles, Deck Settings) when the game's profile is
  *  another data folder's. */
 export const otherFolderProfile = () => t("shell.dataFolderText.otherFolderProfile");
-/** The same words in English, for callers not yet on the function above. */
-export const OTHER_FOLDER_PROFILE = "Another data folder's profile is loaded in this game";
 
 /** Its title: the data folder that profile's paths name, when known. */
 export const otherFolderTitle = (o: { id: string; root?: string | null }) =>

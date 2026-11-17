@@ -69,6 +69,9 @@ Buttons, tabs, menu entries and column heads have little room. For Chinese, Japa
 the English character count** on those (`"Settings"` → `"设置"`, `"Check for updates"` → `"检查更新"`). Sentences in
 hints and notices can be as long as they need.
 
+`common.confirmWord.*` are words a player types to confirm a risky action ("uninstall", "delete"): make each one a
+single short word that is easy to type with your language's keyboard or input method.
+
 ## Test your translation
 
 **Launcher** (no build needed):

@@ -79,10 +79,30 @@ export function hasKey(enTable: Table, key: string): boolean {
   return enTable[key] !== undefined || PLURAL_FORMS.some((f) => enTable[`${key}.${f}`] !== undefined);
 }
 
-/** Every literal `t("key")` and `rich("key")` in the source files under `dir` (the save editor aside): key, file, line. */
+/** en.json's own shape: a key ending in a plural word (`.one`, `.other`, ...) is a plural form, so its siblings must
+ * all be plural forms and include `.other` ("x.type.other" beside "x.type.kiln" would be read as a plural of x.type). */
+export function pluralShapeProblems(enTable: Table): string[] {
+  const kids = new Map<string, string[]>();
+  for (const k of Object.keys(enTable)) {
+    const i = k.lastIndexOf(".");
+    if (i > 0) kids.set(k.slice(0, i), [...(kids.get(k.slice(0, i)) ?? []), k.slice(i + 1)]);
+  }
+  const forms = PLURAL_FORMS as readonly string[];
+  const out: string[] = [];
+  for (const [base, ks] of kids) {
+    if (!ks.some((k) => forms.includes(k))) continue;
+    const odd = ks.filter((k) => !forms.includes(k));
+    if (odd.length) out.push(`${base}: ${ks.filter((k) => forms.includes(k)).join(", ")} beside ${odd.join(", ")} (a key ending in a plural word is a plural form: rename it)`);
+    else if (!ks.includes("other")) out.push(`${base}: plural forms without .other`);
+    if (enTable[base] !== undefined) out.push(`${base}: both a text and plural forms`);
+  }
+  return out;
+}
+
+/** Every literal `t("key")`, `tr("key")` (t imported as tr) and `rich("key")` in the source files under `dir` (the save editor aside): key, file, line. */
 export function sourceKeys(dir: string): { key: string; file: string; line: number }[] {
   const out: { key: string; file: string; line: number }[] = [];
-  const re = /(?<![\w$.])(?:t|rich)\(\s*(["'`])([A-Za-z0-9_.-]+)\1/g;
+  const re = /(?<![\w$.])(?:t|tr|rich)\(\s*(["'`])([A-Za-z0-9_.-]+)\1/g;
   const walk = (d: string) => {
     for (const e of readdirSync(d, { withFileTypes: true })) {
       const p = join(d, e.name);
@@ -125,6 +145,8 @@ function main(argv: string[]): number {
   }
   if (!given.length || argv.includes("--source")) {
     const src = join(root, "src");
+    for (const p of pluralShapeProblems(enTable)) console.log(`  en.json ${p}`);
+    wrong += pluralShapeProblems(enTable).length;
     const unknown = sourceKeys(src).filter((k) => !hasKey(enTable, k.key));
     for (const k of unknown) console.log(`  ${relative(root, k.file)}:${k.line}: t("${k.key}") is not in en.json`);
     console.log(`source: ${unknown.length ? `${unknown.length} key(s) not in en.json` : "ok"}`);
