@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Issue #44: validated HUD/Social call-site probe and opt-in native Up/Down history.
-// KILN_CHAT_INPUT_PROBE=1: read-only. KILN_CHAT_HISTORY=1: preview command recall.
+// KILN_CHAT_INPUT_PROBE=1: call sites only (read-only).
+// KILN_CHAT_HISTORY_DIAG=1: read-only key / submit diagnostics (no text logged).
+// KILN_CHAT_HISTORY=1: interactive preview command recall.
 // All game edit operations are scoped to the two confirmed chat call sites.
 #include <windows.h>
 #include <atomic>
@@ -26,6 +28,11 @@ uintptr_t g_hud_ret = 0, g_social_ret = 0;
 uintptr_t g_state_fn = 0, g_set_text_fn = 0;
 std::atomic<bool> g_hud_seen{false}, g_social_seen{false};
 std::atomic<bool> g_history_on{false};
+std::atomic<bool> g_diagnose_on{false};
+std::atomic<bool> g_trace_on{false};
+std::atomic<uint32_t> g_key_log_count{0};
+std::atomic<uint32_t> g_event_log_count{0};
+std::atomic<uint32_t> g_recall_log_count{0};
 std::atomic<bool> g_window_blurred{false};
 chat_keys::Router g_keys;
 chat_history::History g_history;
@@ -179,6 +186,9 @@ void history_before(void* widget) {
     while (g_keys.take(action)) {
         const std::string next = action == chat_keys::Action::Older
                                      ? g_history.older(current) : g_history.newer(current);
+        if (g_trace_on.load(std::memory_order_relaxed) && g_recall_log_count.fetch_add(1) < 24)
+            logf(KILN_LOG_INFO, "ui: chat history trace: recall %s entries=%zu changed=%u",
+                 action == chat_keys::Action::Older ? "older" : "newer", g_history.count(), next != current ? 1u : 0u);
         if (next == current) continue;
         if (!game_set_text(reinterpret_cast<uint8_t*>(state) + kEditOffset, next.data(), next.size())) {
             g_keys.focus(false);
@@ -188,6 +198,8 @@ void history_before(void* widget) {
         }
         current = next;
         g_last_applied = next;
+        if (g_trace_on.load(std::memory_order_relaxed) && g_recall_log_count.fetch_add(1) < 24)
+            logf(KILN_LOG_INFO, "ui: chat history trace: engine edit replacement returned successfully");
     }
 }
 
@@ -195,12 +207,25 @@ void history_before(void* widget) {
 void history_after(void* widget, void* result, bool hud) {
     void* state = game_state(widget);
     if (!state) return;
-    uint32_t event = 0;
-    if (game_read(result, &event) && event == 1) {
-        // Enter may clear the editing flag within TextInputProcess, so record
-        // before checking post-call focus; the outer HUD/Social caller has not sent yet.
+    // The input result is an event discriminant. Only the first byte is
+    // needed (1 = Enter, 2 = Escape); reading a 32-bit word could include
+    // unrelated/uninitialised trailing bytes and miss a valid submission.
+    uint8_t event = 0;
+    if (game_read(result, &event) && event != 0) {
         std::string sent;
-        if (edit_text(state, &sent) && g_history.submit(sent)) save_history();
+        const bool readable = edit_text(state, &sent);
+        if (g_trace_on.load(std::memory_order_relaxed) && g_event_log_count.fetch_add(1) < 24)
+            logf(KILN_LOG_INFO, "ui: chat history trace: %s input event=%u readable=%u bytes=%zu command=%u",
+                 hud ? "HUD" : "Social", static_cast<unsigned>(event), readable ? 1u : 0u,
+                 readable ? sent.size() : 0, readable && !sent.empty() && sent.front() == '/' ? 1u : 0u);
+        if (event == 1 && readable && !g_diagnose_on.load(std::memory_order_relaxed)) {
+            const size_t before = g_history.count();
+            const bool persisted_changed = g_history.submit(sent);
+            if (persisted_changed) save_history();
+            if (g_trace_on.load(std::memory_order_relaxed) && g_event_log_count.fetch_add(1) < 24)
+                logf(KILN_LOG_INFO, "ui: chat history trace: submit processed entries=%zu added=%u persisted=%u",
+                     g_history.count(), g_history.count() != before ? 1u : 0u, persisted_changed ? 1u : 0u);
+        }
         g_last_applied.clear();
         return;
     }
@@ -232,14 +257,22 @@ void __fastcall hk_input(void* widget, void* result, const GameText* label, uint
         logf(KILN_LOG_INFO, "ui: chat input probe: native HUD chat call observed (call-site confirmation)");
     else if (social && !g_social_seen.exchange(true))
         logf(KILN_LOG_INFO, "ui: chat input probe: native Social chat call observed (call-site confirmation)");
-    if (g_history_on.load(std::memory_order_relaxed) && scoped)
+    if (scoped && (g_history_on.load(std::memory_order_relaxed) ||
+                   g_diagnose_on.load(std::memory_order_relaxed)))
         history_after(widget, result, hud);
 }
 } // namespace
 
 // Window thread: the core WndProc already deduplicates raw and legacy key messages.
 bool chat_input_on_key(uint32_t vk, uint32_t mods, bool down) {
-    return g_history_on.load(std::memory_order_acquire) && g_keys.key(vk, mods, down);
+    if (!g_history_on.load(std::memory_order_acquire) && !g_diagnose_on.load(std::memory_order_acquire))
+        return false;
+    const bool kept = g_history_on.load(std::memory_order_acquire) && g_keys.key(vk, mods, down);
+    if (down && (vk == VK_UP || vk == VK_DOWN) && g_trace_on.load(std::memory_order_relaxed) &&
+        g_key_log_count.fetch_add(1) < 24)
+        logf(KILN_LOG_INFO, "ui: chat history trace: key %s mods=%u focus=%u consumed=%u",
+             vk == VK_UP ? "Up" : "Down", mods, g_keys.focused() ? 1u : 0u, kept ? 1u : 0u);
+    return kept;
 }
 
 void chat_input_window_blur() {
@@ -249,7 +282,7 @@ void chat_input_window_blur() {
 
 // UI thread, after the game finishes each GameUiFrame.
 void chat_input_frame_end() {
-    if (!g_history_on.load(std::memory_order_acquire)) return;
+    if (!g_history_on.load(std::memory_order_acquire) && !g_diagnose_on.load(std::memory_order_acquire)) return;
     const bool active = g_editing_in_frame && !g_window_blurred.exchange(false);
     g_keys.focus(active);
     if (!active && g_was_editing) {
@@ -261,9 +294,10 @@ void chat_input_frame_end() {
 }
 
 bool chat_input_probe_install() {
-    const bool history = env_enabled("KILN_CHAT_HISTORY");
+    const bool diag = env_enabled("KILN_CHAT_HISTORY_DIAG");
+    const bool history = env_enabled("KILN_CHAT_HISTORY") && !diag; // diagnostics take precedence: never swallow keys
     const bool probe = env_enabled("KILN_CHAT_INPUT_PROBE");
-    if (!history && !probe) return false;
+    if (!history && !diag && !probe) return false;
     if (!g_api->feature(KilnStr{"chat.ui.input", sizeof("chat.ui.input") - 1})) {
         logf(KILN_LOG_WARN, "ui: chat input probe requested, but chat.ui.input symbols are unavailable");
         return false;
@@ -275,8 +309,8 @@ bool chat_input_probe_install() {
         logf(KILN_LOG_WARN, "ui: chat input probe requested, but scoped call sites were not resolved");
         return false;
     }
-    if (history && (!symbol("chatui/TextInputState", &g_state_fn) ||
-                    !symbol("chatui/EditSetText", &g_set_text_fn))) {
+    if ((history || diag) && (!symbol("chatui/TextInputState", &g_state_fn) ||
+                              (history && !symbol("chatui/EditSetText", &g_set_text_fn)))) {
         logf(KILN_LOG_WARN, "ui: chat history unavailable: edit state/replace symbols unresolved");
         return false;
     }
@@ -286,8 +320,13 @@ bool chat_input_probe_install() {
     }
     if (history) {
         load_history();
+        g_trace_on.store(env_enabled("KILN_CHAT_HISTORY_TRACE"), std::memory_order_release);
         g_history_on.store(true, std::memory_order_release);
         logf(KILN_LOG_INFO, "ui: chat history preview installed (Up/Down, commands persisted; opt-in; no Tab/Ctrl+R)");
+    } else if (diag) {
+        g_trace_on.store(true, std::memory_order_release);
+        g_diagnose_on.store(true, std::memory_order_release);
+        logf(KILN_LOG_INFO, "ui: chat history diagnostic installed (read-only; no keys intercepted or text logged/persisted)");
     } else {
         logf(KILN_LOG_INFO, "ui: chat input probe installed for HUD and Social (read-only; no history keys intercepted)");
     }
