@@ -111,16 +111,15 @@ public static class Bases
         return rows.ToDictionary(r => new ItemId(r.Item), r => (long)r.Count);
     }
 
-    /// <summary><see cref="Stock(BaseId)"/>, and with <paramref name="withStations"/> also the finished items still in the base's
-    /// production stations: each station's <see cref="StationInfo.Outputs"/> (what <see cref="Stations.Collect"/> moves),
+    /// <summary><see cref="Stock(BaseId)"/> plus the finished items still in the base's production stations: each station's
+    /// <see cref="StationInfo.Outputs"/> (what <see cref="Stations.Collect"/> moves),
     /// which the game's own fill and crafting from base storage never take from. For a target such as "keep 200 charcoal"
     /// that counts what is made but not collected yet. Empty when no base has this id now. Since 0.2.0-dev.29.15.</summary>
     /// <remarks>Reads every station of the base (its inventory): poll it every few seconds, not every step.</remarks>
     [ServerOnly, TickThreadOnly, RequiresCapability(Stations.ReadCapability)]
-    public static IReadOnlyDictionary<ItemId, long> Stock(BaseId id, bool withStations)
+    public static IReadOnlyDictionary<ItemId, long> StockWithStations(BaseId id)
     {
         var stock = new Dictionary<ItemId, long>(Stock(id));
-        if (!withStations) return stock;
         foreach (var s in Stations.InBase(id))
             if (Stations.Read(s) is { } info)
                 foreach (var o in info.Outputs)

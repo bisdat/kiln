@@ -85,7 +85,7 @@ internal static partial class KilnApis
         "M:Kiln.Bases.Of(Kiln.EntityId)", // Bases.Of(EntityId): via StationsCore.CheckRead(string)
         "M:Kiln.Bases.Stock(Kiln.BaseId)", // Bases.Stock(BaseId): via StationsCore.CheckRead(string)
         "M:Kiln.Bases.Stock(Kiln.BaseId,Kiln.ItemId)", // Bases.Stock(BaseId, ItemId): via Bases.Stock(BaseId)
-        "M:Kiln.Bases.Stock(Kiln.BaseId,System.Boolean)", // Bases.Stock(BaseId, bool): via Bases.Stock(BaseId)
+        "M:Kiln.Bases.StockWithStations(Kiln.BaseId)", // Bases.StockWithStations(BaseId): via Bases.Stock(BaseId)
         "M:Kiln.Bases.Storage(Kiln.BaseId,System.Boolean)", // Bases.Storage(BaseId, bool): via StationsCore.List(BaseId, bool, string)
         "M:Kiln.Bases.TryGet(Kiln.BaseId,Kiln.BaseInfo@)", // Bases.TryGet(BaseId, out BaseInfo?): via Bases.Get(BaseId)
         "M:Kiln.Bases.WaterSources(Kiln.BaseId)", // Bases.WaterSources(BaseId): via StationsCore.List(BaseId, bool, string)

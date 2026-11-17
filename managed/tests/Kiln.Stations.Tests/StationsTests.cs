@@ -386,11 +386,10 @@ public sealed unsafe class StationsTests : IDisposable
         _fake.Stock = [new StationsNative.Stack { Item = charcoal.Value, Count = 40 }];
         var id = new BaseId(AltarGuid);
         Assert.Equal(40, k.Run(() => Bases.Stock(id))[charcoal]);         // the chests only, as before
-        Assert.Equal(40, k.Run(() => Bases.Stock(id, withStations: false))[charcoal]);
-        var all = k.Run(() => Bases.Stock(id, withStations: true));
+        var all = k.Run(() => Bases.StockWithStations(id));
         Assert.Equal(47, all[charcoal]);
         Assert.False(all.ContainsKey(logs));
-        Assert.Empty(k.Run(() => Bases.Stock(new BaseId(Guid.NewGuid()), withStations: true)));
+        Assert.Empty(k.Run(() => Bases.StockWithStations(new BaseId(Guid.NewGuid()))));
     }
 
     [Fact]
