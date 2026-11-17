@@ -8,7 +8,7 @@
  * game's menus; v7 appends subscribe_key_ex, key callbacks that also get mouse presses.
  *
  * The size-guarded tail after v7 appends set_next_window_size_constraints, menu_footer (0.2.0-dev.29.11) and
- * image_load_rgba and screen_target (0.2.0-dev.29.15).
+ * image_load_rgba, screen_target and image_state (0.2.0-dev.29.15).
  *
  * How (docs/re/client-render.md):
  *  - The game loads vulkan-1.dll at run time and presents with vkQueuePresentKHR on queue family 0 (no static Vulkan
@@ -197,6 +197,14 @@ enum {
 enum {
     KILN_UI_ENTRY_HIDDEN = 1u,
     KILN_UI_ENTRY_ATTENTION = 2u,  /* the game's attention marker (pause menu only) */
+};
+
+/* image_state (size-guarded tail, 0.2.0-dev.29.15) */
+enum {
+    KILN_UI_IMAGE_UNKNOWN = 0,
+    KILN_UI_IMAGE_WAITING = 1,
+    KILN_UI_IMAGE_READY = 2,
+    KILN_UI_IMAGE_FAILED = 3,
 };
 
 /* menu_footer flags (size-guarded tail after set_next_window_size_constraints) */
@@ -873,6 +881,14 @@ typedef struct KilnUiApi {
      * builder (docs/re/game-ui.md section 5), so KilnUiScreen.crafting stays 0 there; its workshop is KilnUiScreen.interaction.
      * Any thread. */
     uint32_t(KILN_CALL* screen_target)(void);
+    /* Additive size-guarded tail (0.2.0-dev.29.15; check header.size >= offsetof(KilnUiApi, image_state) + sizeof(void*) and
+     * the pointer): KILN_UI_IMAGE_* of an image from image_load / image_load_rgba. WAITING: its texture is not uploaded yet
+     * (a new image waits a frame or more: at most 8 are uploaded a frame); READY: uploaded with its descriptor set, drawn;
+     * FAILED: the backend uploaded it without a descriptor set (the overlay's pool was full), it is never drawn: free it;
+     * UNKNOWN: no such image. image / image_button draw nothing (keeping the place) until READY. Any thread.
+     * Kiln lets at most 960 images exist at once (the pool holds 1024 sets: ImGui keeps the rest for its fonts); past that
+     * image_load and image_load_rgba answer 0. */
+    int32_t(KILN_CALL* image_state)(KilnHandle image);
 } KilnUiApi;
 
 /* ====================================================================================================================

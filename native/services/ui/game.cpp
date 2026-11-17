@@ -429,7 +429,10 @@ void after_frame(uintptr_t sys10) {
     s.language = raw.language;
     s.ui_thread = g_ui_thread;
     s.frame = g_frame_no;
-    g_target.store(s.hud_screen == kHudFactory ? raw.target : 0, std::memory_order_relaxed);
+    // a factory screen's station: the game may write play.target a frame after the screen opens; a change of it is a change
+    // of the screen (subscribers read it again through screen_target)
+    const uint32_t target = s.hud_screen == kHudFactory ? raw.target : 0;
+    const bool target_changed = g_target.exchange(target, std::memory_order_relaxed) != target;
     // the builder runs every frame while a crafting menu shows; a frame or two without it (a tab transition) is not a close
     if (g_craft.frame && g_craft.frame + 3 > g_frame_no) {
         s.crafting = g_craft.kind;
@@ -443,7 +446,7 @@ void after_frame(uintptr_t sys10) {
     {
         std::lock_guard lk(g_screen_mu);
         before = g_screen;
-        changed = !g_have_prev || !same_screen(before, s);
+        changed = !g_have_prev || !same_screen(before, s) || target_changed;
         g_prev = before;
         g_screen = s;
         g_have_prev = true;

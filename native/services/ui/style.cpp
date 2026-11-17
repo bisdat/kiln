@@ -19,6 +19,7 @@
 
 #include "imgui.h"
 #include "imgui_internal.h"
+#include "image_budget.h"
 #include "services/kiln_assets.h"
 #include "ui.h"
 
@@ -294,6 +295,7 @@ struct Image {
     int w, h;
     bool registered;
     bool dead;
+    bool failed = false;  // uploaded without a descriptor set (image_budget.h): never drawn
 };
 std::mutex g_img_mu;
 std::unordered_map<KilnHandle, Image*> g_images;
@@ -368,10 +370,11 @@ void style_frame_begin() {
         logf(g_game_font ? KILN_LOG_INFO : KILN_LOG_WARN, "ui: the game's UI font %s (%s)", g_game_font ? "loaded" : "rejected by ImGui",
              g_font_note.c_str());
     }
-    // images: create textures for new ones, drop freed ones
+    // images: textures for new ones (at most img::kUploadsPerFrame a frame: the backend submits and waits for each), a
+    // texture the backend uploaded without a descriptor set marked failed (never drawn), freed ones dropped
     std::lock_guard lk(g_img_mu);
-    for (auto& [h, img] : g_images) {
-        if (img->registered || img->dead) continue;
+    img::upload_some(g_images.begin(), g_images.end(), [](const auto& p) { return !p.second->registered && !p.second->dead; }, [](auto& p) {
+        Image* img = p.second;
         img->tex = IM_NEW(ImTextureData)();
         img->tex->Create(ImTextureFormat_RGBA32, img->w, img->h);
         std::memcpy(img->tex->GetPixels(), img->rgba.data(), img->rgba.size());
@@ -381,7 +384,17 @@ void style_frame_begin() {
         img->registered = true;
         img->rgba.clear();
         img->rgba.shrink_to_fit();
-    }
+    });
+    static bool s_failed_logged = false;
+    for (auto& [h, img] : g_images)
+        if (img->tex && !img->failed && img->tex->Status == ImTextureStatus_OK && img->tex->TexID == ImTextureID_Invalid) {
+            img->failed = true;
+            if (!s_failed_logged) {
+                s_failed_logged = true;
+                logf(KILN_LOG_WARN, "ui: an overlay image got no descriptor set from the Vulkan pool (%u sets): it is not drawn "
+                                    "(image state failed; its owner frees it)", img::kDescriptorPoolSize);
+            }
+        }
     // freed images: the backend destroys a texture marked WantDestroy at its next update and marks it Destroyed;
     // then it leaves ImGui's list and its memory goes
     std::vector<Image*> keep;
@@ -405,8 +418,24 @@ void style_frame_begin() {
     g_img_dead.swap(keep);
 }
 
+// Admission: every image takes a descriptor set once uploaded; past img::kMaxImages (live and freed-not-yet-destroyed) a
+// load is refused (0), logged once, so the pool never runs out (image_budget.h).
+static bool image_room_locked() {
+    if (img::can_add(g_images.size(), g_img_dead.size())) return true;
+    static bool logged = false;
+    if (!logged) {
+        logged = true;
+        logf(KILN_LOG_WARN, "ui: %u overlay images exist: a new one is refused until some are freed", img::kMaxImages);
+    }
+    return false;
+}
+
 KilnHandle image_load(KilnOwner owner, const void* png, size_t len) {
     if (!png || len < 8 || len > (64u << 20)) return 0;
+    {
+        std::lock_guard lk(g_img_mu);
+        if (!image_room_locked()) return 0;
+    }
     int w = 0, h = 0, n = 0;
     stbi_uc* px = stbi_load_from_memory(static_cast<const stbi_uc*>(png), static_cast<int>(len), &w, &h, &n, 4);
     if (!px) return 0;
@@ -418,6 +447,10 @@ KilnHandle image_load(KilnOwner owner, const void* png, size_t len) {
     img->rgba.assign(px, px + static_cast<size_t>(w) * h * 4);
     stbi_image_free(px);
     std::lock_guard lk(g_img_mu);
+    if (!image_room_locked()) {
+        delete img;
+        return 0;
+    }
     g_images[img->handle] = img;
     return img->handle;
 }
@@ -428,8 +461,36 @@ KilnHandle image_load_rgba(KilnOwner owner, const uint8_t* rgba, uint32_t w, uin
     auto* img = new Image{next_handle(), owner, nullptr, {}, static_cast<int>(w), static_cast<int>(h), false, false};
     img->rgba.assign(rgba, rgba + static_cast<size_t>(w) * h * 4);
     std::lock_guard lk(g_img_mu);
+    if (!image_room_locked()) {
+        delete img;
+        return 0;
+    }
     g_images[img->handle] = img;
     return img->handle;
+}
+
+namespace {
+img::State state_locked(const Image* i) {
+    const bool created = i->tex != nullptr;
+    return img::state_of(i->failed, created, created && i->tex->Status == ImTextureStatus_OK,
+                         created && i->tex->TexID != ImTextureID_Invalid);
+}
+
+// The texture to draw for h: only an uploaded one with its descriptor set (else ImGui would bind a null set).
+ImTextureData* drawable(KilnHandle h, float* iw, float* ih) {
+    std::lock_guard lk(g_img_mu);
+    auto it = g_images.find(h);
+    if (it == g_images.end()) return nullptr;
+    *iw = static_cast<float>(it->second->w);
+    *ih = static_cast<float>(it->second->h);
+    return state_locked(it->second) == img::kReady ? it->second->tex : nullptr;
+}
+}  // namespace
+
+int32_t image_state(KilnHandle h) {
+    std::lock_guard lk(g_img_mu);
+    auto it = g_images.find(h);
+    return it == g_images.end() ? img::kUnknown : state_locked(it->second);
 }
 
 bool image_size(KilnHandle h, uint32_t* w, uint32_t* hgt) {
@@ -442,31 +503,24 @@ bool image_size(KilnHandle h, uint32_t* w, uint32_t* hgt) {
 }
 
 void image_draw(KilnHandle h, float w, float hgt) {
-    ImTextureData* tex = nullptr;
     float iw = 0, ih = 0;
-    {
-        std::lock_guard lk(g_img_mu);
-        auto it = g_images.find(h);
-        if (it == g_images.end() || !it->second->tex) return;
-        tex = it->second->tex;
-        iw = static_cast<float>(it->second->w);
-        ih = static_cast<float>(it->second->h);
+    ImTextureData* tex = drawable(h, &iw, &ih);
+    if (iw <= 0) return;  // no such image
+    const ImVec2 size(w > 0 ? w : iw, hgt > 0 ? hgt : ih);
+    if (!tex) {
+        ImGui::Dummy(size);  // not uploaded yet, or without a descriptor set: its place, nothing drawn
+        return;
     }
-    ImGui::Image(tex->GetTexRef(), ImVec2(w > 0 ? w : iw, hgt > 0 ? hgt : ih));
+    ImGui::Image(tex->GetTexRef(), size);
 }
 
 bool image_button(const char* id, KilnHandle h, float w, float hgt) {
-    ImTextureData* tex = nullptr;
     float iw = 0, ih = 0;
-    {
-        std::lock_guard lk(g_img_mu);
-        auto it = g_images.find(h);
-        if (it == g_images.end() || !it->second->tex) return false;
-        tex = it->second->tex;
-        iw = static_cast<float>(it->second->w);
-        ih = static_cast<float>(it->second->h);
-    }
-    return ImGui::ImageButton(id, tex->GetTexRef(), ImVec2(w > 0 ? w : iw, hgt > 0 ? hgt : ih));
+    ImTextureData* tex = drawable(h, &iw, &ih);
+    if (iw <= 0) return false;
+    const ImVec2 size(w > 0 ? w : iw, hgt > 0 ? hgt : ih);
+    if (!tex) return ImGui::InvisibleButton(id, size);  // the button's place and clicks, nothing drawn
+    return ImGui::ImageButton(id, tex->GetTexRef(), size);
 }
 
 void image_free(KilnHandle h) {
@@ -480,10 +534,10 @@ void image_free(KilnHandle h) {
 
 // For kiln.render (render.cpp): the texture of an image once it exists (render thread, inside a frame).
 bool image_texture(KilnHandle h, ImTextureRef* out) {
-    std::lock_guard lk(g_img_mu);
-    auto it = g_images.find(h);
-    if (it == g_images.end() || !it->second->tex) return false;
-    *out = it->second->tex->GetTexRef();
+    float iw = 0, ih = 0;
+    ImTextureData* tex = drawable(h, &iw, &ih);
+    if (!tex) return false;
+    *out = tex->GetTexRef();
     return true;
 }
 
