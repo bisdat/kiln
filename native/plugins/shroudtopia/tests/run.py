@@ -258,6 +258,11 @@ int main(int argc, char** argv) {
 '''
 out = Path(os.environ['KILN_OUT']) / 'shroudtopia-host'
 out.mkdir(parents=True, exist_ok=True)
+# kcompat::ExportCache (compat/export_cache.h): the loader thread's look every updateDelay reads a candidate DLL's export
+# table once per version of the file, not on every look (inbox 50)
+cache_test = root / 'native/plugins/compat/tests/export_cache_test.cpp'
+subprocess.run(['c++', '-std=c++20', '-O1', '-g0', '-pthread', str(cache_test), '-o', str(out / 'export_cache_test')], check=True)
+subprocess.run([str(out / 'export_cache_test'), str(out / 'export-cache')], check=True)
 source = out / 'test.cpp'
 source.write_text(preamble + config + loaded + main.replace('REGISTRATION',registration))
 subprocess.run(['c++','-std=c++20','-O0','-g0','-pthread','-I'+str(root/'native/third_party'),str(source),'-o',str(out/'test')],check=True)
