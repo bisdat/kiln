@@ -143,6 +143,41 @@ persisted (atomic best-effort replace) at `<game>/kiln/user/chat-history.json`.
 The preview does not yet separate histories by server, expose a Clear button,
 implement Ctrl+R, or offer command Tab completion. No typed text is logged.
 
+### Root cause established: invalid private edit representation (17 Nov 2026)
+
+The in-game read-only HUD and Social traces independently confirmed the same
+difference after sending `/help` (5 bytes):
+
+| Source | Prefix | Valid | Control bytes | Length |
+| --- | --- | --- | --- | --- |
+| Internal edit-state bytes at `state+0x10` interpreted as `EditHead` | Slash | **No** | **3** | 5 |
+| Caller-owned outgoing string at `widget+0x150` | Slash | **Yes** | **0** | 5 |
+
+This **explains the empty history**: `History::valid` correctly rejects the
+control bytes; the adapter was reading the wrong representation. The command
+classifier and Up/Down WndProc routing are not the cause of the empty list.
+
+The adapter now uses `widget_text(widget)` for both submitted lines and
+the live unsent draft. The private editor remains the target of the
+game-owned `EditSetText` function, whose behavior is **not yet proven**.
+To avoid false failures from reading the known-invalid private representation,
+the preview verifies the requested replacement against the validated widget
+string **after** calling the original `TextInputProcess`. On a mismatch it
+disables history for the process, leaving subsequent input vanilla.
+`chat_history_test.cpp` includes a host regression test with the observed
+five-byte/control-byte failure shape and an accepted five-byte `/help`.
+
+**Next interactive acceptance test:** Build the fork and use
+`KILN_CHAT_HISTORY=1 KILN_CHAT_HISTORY_TRACE=1` (do **not** include
+`KILN_CHAT_HISTORY_DIAG`). Submit `/help` in HUD. The log must show
+`widget_valid=1 widget_sensitive=0` and
+`submit processed entries=1 added=1 persisted=1`. Reopen chat, type
+`draft`, press Up once, and verify the field displays `/help`; Down must
+restore `draft`. Confirm `engine edit replacement verified (widget readback)`.
+If any edit-replacement warning appears, do not retry: restore the previous DLL
+and investigate the engine SetText ABI. Only then test Social and restart
+persistence. Logs never include the submitted text.
+
 ### Interactive trace after the read-only PASS (17 Nov 2026)
 
 An instrumented `KILN_CHAT_HISTORY=1 KILN_CHAT_HISTORY_TRACE=1` run showed:
