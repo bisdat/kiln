@@ -491,6 +491,8 @@ void core_after_step(EmfWorld* w, uint8_t kind) {
         account(r.mod, qpc_ns() - t0);
     }
     for (TickReg* t : ticks) {
+        // compat_ticks.h: a mod whose on_tick is only for the server world, and races on the others
+        if (kind != EMF_WORLD_SERVER && t->mod && t->mod->server_ticks_only) continue;
         WorldCall c{t->cb, w, t->user};
         ContextScope scope(t->mod, w, true);
         const uint64_t t0 = qpc_ns();
