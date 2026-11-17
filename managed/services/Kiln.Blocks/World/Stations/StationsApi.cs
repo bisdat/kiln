@@ -778,8 +778,14 @@ internal static unsafe partial class StationsCore
         string? name = null;
         try { name = Content.Recipes.Get(r.Id)?.Name; }
         catch (Exception e) when (e is KilnUnavailableException or InvalidOperationException or NotSupportedException) { }
+        string? display = null;
+        try
+        {
+            display = (outputs.Count > 0 ? Items.DisplayName(outputs[0].Item) : null) ?? Stations.RecipeName(r.Id);
+        }
+        catch (Exception e) when (e is KilnUnavailableException or InvalidOperationException or NotSupportedException) { }
         return new StationRecipe(r.Id, r.Workshop, inputs, outputs, TimeSpan.FromTicks(r.DurationNs / 100), (int)r.WaterCharges,
-            r.KnowledgeId == 0) { Name = name };
+            r.KnowledgeId == 0) { Name = name, DisplayName = display };
     }
 
     internal static IngredientCategory? CategoryOf(uint id)
@@ -807,7 +813,19 @@ internal static unsafe partial class StationsCore
             new BaseId(StationsNative.GuidOf(s.Base)), s.BaseIndex, (StationState)s.State, s.StoppedByPlayer != 0, s.UseAllOptions != 0,
             (StationNeeds)s.Needs, s.RunningRecipe, s.SelectedRecipe, choices, (int)s.CraftsLoaded, TimeSpan.FromTicks(s.DurationNs / 100),
             s.Progress, hasWater ? s.Water : null, hasWater ? s.WaterMax : null, slots, outputs, leftovers,
-            (s.Flags & StationsNative.FlagStopPending) != 0, template);
+            (s.Flags & StationsNative.FlagStopPending) != 0, template) { DisplayName = NameOfWorkshop(s.Workshop) };
+    }
+
+    private static string? NameOfWorkshop(uint workshop)
+    {
+        try
+        {
+            return Stations.WorkshopName(workshop);
+        }
+        catch (Exception e) when (e is KilnUnavailableException or InvalidOperationException or NotSupportedException)
+        {
+            return null;
+        }
     }
 
     private static IEnumerable<ItemId> CategoryItems(uint category) =>

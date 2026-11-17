@@ -100,9 +100,19 @@ needs an unlock, `Name`: the game's debug name), `Stations.RecipesOf(station)` (
 `Stations.Categories` and `Stations.Category(id)` (the ingredient categories, "any wood", with their options and scaling),
 and `Stations.ResolveInputs(recipe, choices)` (the concrete items and counts the game asks for one craft).
 
-**Names for players.** None of these are texts in a player's language. Show the outputs' and inputs' item names
-(`Items.Get(id).DisplayName`, in the server's language); categories have ids only. A joined client has no kiln.stations:
-a menu there gets ids and names from its server half.
+**Names for players** (since 0.2.0-dev.29.15). `StationInfo.DisplayName` is the name of the item that places the station
+("Charcoal Kiln"), else its workshop's name; `StationRecipe.DisplayName` is its first output's name ("Charcoal"), else the
+recipe's own name text. They come from the game's own data (its workshop and recipe registries, its texts): in the game's
+text language on a hosting client; on a dedicated server, whose data has no texts, the English names Kiln has (its shipped
+item names, and the catalog's texts when one is built). Categories have ids only; name their options with
+`Items.DisplayName`. The first read starts reading the game's names in the background (a fraction of a second): until then
+the names are null.
+
+**On a joined client** kiln.stations is not there, but the names are: `Stations.WorkshopName(workshop)`,
+`Stations.RecipeName(recipe)` and `Items.DisplayName(item)` read the game's data on any side and any thread, so a menu
+there gets ids from its server half and names them in its own player's language. `Ui.ItemImage(item)` draws the items'
+icons ([ui.md](../ui.md#item-icons)). A new recipe of kiln.content is not in the game's registry: `RecipeName` is null for it
+(name it by its output's `Items.DisplayName`).
 
 ## Fill from chests
 `Stations.Fill(station, options)` runs **the game's own "fill from chests"** (the function behind the station screen's

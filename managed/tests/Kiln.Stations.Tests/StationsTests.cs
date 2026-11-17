@@ -367,6 +367,37 @@ public sealed unsafe class StationsTests : IDisposable
     }
 
     [Fact]
+    public void StationsAndRecipesHaveNamesForPlayers()
+    {
+        // the game's data as Kiln.Items reads it: the kiln's workshop placed by Prop_Production_T1_Charcoal_Kiln, a recipe with no
+        // name of its own whose output is charcoal, and the game's German texts
+        var kiln = new ItemId(0x15e4e52e);
+        GameNames.UseForTests(GameNameLayout.Measured, new() { [kiln.Value] = Guid.NewGuid() }, new() { [0x51] = (5u, kiln.Value), [0x52] = (6u, 0u) },
+            new() { [0x1234] = (0u, 0x162cb6d2u), [0x99] = (7u, 0u) }, "de-de", new() { [6] = "Werkbank", [7] = "Sonderrezept", [8] = "Köhlerofen" },
+            itemTags: new() { [kiln.Value] = 8 });
+        try
+        {
+            using var k = Kiln();
+            var r = _fake.Recipes[0x1234];
+            r.Outputs[0] = 0x162cb6d2;                                      // Material_T1_Charcoal
+            _fake.Recipes[0x1234] = r;
+            Assert.Equal("Köhlerofen", k.Run(() => Stations.Read(new EntityId(3300)))!.DisplayName);  // the placing item, in German
+            Assert.Equal("Charcoal", k.Run(() => Stations.Recipe(0x1234))!.DisplayName);               // the first output (no German text here)
+            // any side, any thread: from the game's data alone (a joined client names the ids its server half sends)
+            Assert.Equal("Köhlerofen", Stations.WorkshopName(0x51));
+            Assert.Equal("Werkbank", Stations.WorkshopName(0x52));         // no item: the workshop's own text
+            Assert.Equal("Charcoal", Stations.RecipeName(0x1234));
+            Assert.Equal("Sonderrezept", Stations.RecipeName(0x99));       // no output: the recipe's own text
+            Assert.Null(Stations.WorkshopName(0x77));                       // not in the game's data (a mod's own workshop)
+            Assert.Null(Stations.RecipeName(0));
+        }
+        finally
+        {
+            GameNames.ResetForTests();
+        }
+    }
+
+    [Fact]
     public void SlotsAreOutputsLeftoversOrInputs()
     {
         var recipe = new StationRecipe(1, 0x51, [new StationInput(new ItemId(0x10), 2, 0, 0), new StationInput(default, 0, 77, 1)],

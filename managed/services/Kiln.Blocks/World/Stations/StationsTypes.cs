@@ -106,6 +106,12 @@ public sealed record StationRecipe(uint Id, uint Workshop, IReadOnlyList<Station
 {
     /// <summary>The game's debug name of the recipe (Kiln.Content); null when the content registry does not list it.</summary>
     public string? Name { get; init; }
+
+    /// <summary>A name for players (since 0.2.0-dev.29.15): its first output's (<see cref="Items.DisplayName"/>), else the
+    /// recipe's own name text (<see cref="Stations.RecipeName"/>): in the game's text language on a hosting client, the English
+    /// names Kiln has on a dedicated server. Null when neither is known (yet: the game's names are read in the background the
+    /// first time).</summary>
+    public string? DisplayName { get; init; }
 }
 
 /// <summary>A production station now. Since 0.2.0-dev.29.14.</summary>
@@ -144,6 +150,11 @@ public sealed record StationInfo(EntityId Entity, uint Workshop, WorldPosition P
 {
     /// <summary>A cycle runs.</summary>
     public bool IsRunning => State == StationState.Running;
+
+    /// <summary>A name for players (since 0.2.0-dev.29.15): the name of the item that places it ("Charcoal Kiln"), else its
+    /// workshop's name text (<see cref="Stations.WorkshopName"/>): in the game's text language on a hosting client, the English
+    /// names Kiln has on a dedicated server. Null when neither is known (yet).</summary>
+    public string? DisplayName { get; init; }
 
     /// <summary>The station in one line, for a log.</summary>
     public override string ToString() =>
