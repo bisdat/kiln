@@ -352,9 +352,13 @@ if (img != null && ui.ImageButton("pick", img, 40 * ui.Scale, 40 * ui.Scale)) Pi
   mip level to RGBA; kiln.ui uploads it as an overlay image). Kiln ships no game art and writes the pixels nowhere.
 - **Cost**: nothing until a mod draws an icon. The first draw of an item at a size loads it on a worker thread (most take
   well under a millisecond; the first frames show the placeholder). Kiln keeps the level that fits the size drawn (32, 64,
-  128 or 256 pixels), at most 512 icons and 24 MiB: past that the icons not drawn for a second are dropped first and read
-  again when drawn. A new client world (another server) drops them all. `Ui.ItemImage` returns one shared object per item:
-  keep it or ask each frame; its `Dispose` does nothing.
+  128 or 256 pixels; a picture with no level that size, such as a mod's one-level PNG icon, is scaled down to it), at most 256
+  icons and 24 MiB: past that the icons not drawn for a second are dropped first and read again when drawn; while every icon
+  in the cache is drawn now, a new one waits on the placeholder without being read. An icon scrolled out of its window is
+  neither read nor drawn. An icon shows once the overlay has uploaded it (a frame or two; at most 8 new pictures a frame); one
+  the overlay could not upload stays the placeholder and is read again later. Whatever fails is tried again later, less often
+  each time. A new client world (another server) drops them all. `Ui.ItemImage` returns one shared object per item: keep it
+  or ask each frame; its `Dispose` does nothing.
 - **Sides**: a game client whose overlay draws. On a dedicated server, and with drawing off (`KILN_UI_OVERLAY=0`, the
   overlay's crash guard), `Ui.ItemImage` is null and `ItemIcon` draws nothing; `Ui.ItemIconsAvailable` says whether icons
   draw here. Works in the main menu, in a hosted world and on a client that joined another's world: the icons come from the

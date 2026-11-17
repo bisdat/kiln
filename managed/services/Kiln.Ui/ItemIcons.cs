@@ -9,8 +9,12 @@
 // written anywhere: the pixels live in this process only.
 //
 // Threads: a draw asks on the render thread and never waits: an icon not loaded yet shows the placeholder, and one worker
-// thread reads and decodes it (most take well under a millisecond). Memory: at most 512 icons and 24 MiB of pixels; past that
-// the icons not drawn for a second go first. A new client world (another session) drops them all.
+// thread reads and decodes it (most take well under a millisecond). An icon scrolled out of its window is not asked for.
+// Memory: at most 256 icons and 24 MiB of pixels (kiln.ui lets 960 overlay images exist: native/services/ui/image_budget.h;
+// the rest are mods' own pictures); past that the icons not drawn for a second go first, and while every icon is drawn now a
+// new one waits without being read. An icon is drawn once kiln.ui uploaded it (image_state ready); one the overlay could not
+// give a descriptor set is freed and read again later. Whatever fails is asked for again later, less often each time. A new
+// client world (another session) drops them all.
 using System.Collections.Concurrent;
 
 namespace Kiln;
@@ -68,6 +72,10 @@ internal sealed class IconTable<TKey> where TKey : notnull
         public long LastUsed;      // Environment.TickCount64 (or a test's clock)
         public long RetryAt;       // a missing icon is looked for again from then on; 0: never
         public bool Loading;
+        public bool Ready;         // kiln.ui uploaded Handle with its descriptor set (image_state): drawn
+        public Guid Texture;       // the texture Handle shows
+        public int Attempts;       // failures in a row (no texture, a failed upload): the wait before the next grows
+        public int Waits;          // loads in a row that found the cache full of icons drawn now
     }
 
     private readonly Dictionary<TKey, Entry> _map = new();
@@ -102,20 +110,22 @@ internal sealed class IconTable<TKey> where TKey : notnull
     /// <summary>Whether one more texture of <paramref name="bytes"/> fits within the limits.</summary>
     public bool Room(long bytes) => Textures < MaxEntries && Bytes + bytes <= MaxBytes;
 
-    private bool Over => Textures > MaxEntries || Bytes > MaxBytes || _map.Count > 4 * MaxEntries;
+    /// <summary>Over a limit: <see cref="Trim"/> has work.</summary>
+    public bool Over => Textures > MaxEntries || Bytes > MaxBytes || _map.Count > 4 * MaxEntries;
 
     /// <summary>Takes out entries that were not used since <paramref name="usedBefore"/> (oldest first; never one that is
-    /// loading) until the limits hold again. Returns what was taken out: their handles are freed by the caller.</summary>
-    public List<Entry> Trim(long usedBefore)
+    /// loading) until the limits hold again. Returns what was taken out (their handles are freed by the caller), null when
+    /// nothing was: within the limits it looks at nothing and makes nothing.</summary>
+    public List<Entry>? Trim(long usedBefore)
     {
-        var gone = new List<Entry>();
-        if (!Over) return gone;
+        if (!Over) return null;
+        List<Entry>? gone = null;
         foreach (var (k, e) in _map.Where(p => !p.Value.Loading && p.Value.LastUsed < usedBefore).OrderBy(p => p.Value.LastUsed).ToList())
         {
             if (!Over) break;
             _map.Remove(k);
             SetBytes(e, 0);
-            gone.Add(e);
+            (gone ??= []).Add(e);
         }
         return gone;
     }
@@ -151,9 +161,13 @@ internal sealed class IconTable<TKey> where TKey : notnull
 /// <summary>The game's item icons as overlay images: the cache, its worker and the placeholder.</summary>
 internal static unsafe class ItemIcons
 {
-    internal const int MaxEntries = 512;
+    internal const int MaxEntries = 256;  // at most half of kiln.ui's 960 images (image_budget.h), the placeholder included
     internal const long MaxBytes = 24L << 20;
-    private const long KeepMs = 1000, RetryMs = 5000, RetryFinalMs = 60_000;
+    private const long KeepMs = 1000;
+    private const long RetryMs = 5000, RetryMostMs = 120_000;            // something that may change soon: 5 s, doubling to 2 min
+    private const long RetryFinalMs = 60_000, RetryFinalMostMs = 600_000; // no texture to read: 1 min, doubling to 10 min
+    private const long WaitMs = 250, WaitMostMs = 2000;                  // the cache is full of icons drawn now
+    private const long TrimEveryMs = 16;                                 // the over-limit scan: about once a frame
 
     private static readonly object Gate = new();
     private static readonly IconTable<(uint Item, int Bucket)> Table = new(MaxEntries, MaxBytes);
@@ -163,10 +177,12 @@ internal static unsafe class ItemIcons
     private static Thread? _worker;
     private static ulong _placeholder;
     private static bool _placeholderTried;
+    private static long _placeholderRetryAt;
     private static uint _session;
     private static long _sessionCheckedAt;
     private static int _queued;
-    private static long _loaded, _missing;
+    private static long _loaded, _missing, _failedUploads;
+    private static long _trimmedAt;
     private static string _lastProblem = "";
 
     // ---- seams for the tests ----
@@ -178,7 +194,13 @@ internal static unsafe class ItemIcons
     internal static Func<byte[], int, int, ulong> Upload = UploadNative;
     internal static Action<ulong> Free = FreeNative;
     internal static Func<uint> Session = () => ClientEvents.Session;
+    internal static Func<ulong, int> ImageState = UiNative.ImageState;
     internal static bool Synchronous;  // tests: load on the asking thread instead of the worker
+
+    /// <summary>Whether an icon's box at (x, y), w x h, shows in its window (wx, wy, ww, wh; screen pixels): one scrolled out
+    /// of a list is neither loaded nor drawn. A window of no known size: shown.</summary>
+    internal static bool OnScreen(float x, float y, float w, float h, float wx, float wy, float ww, float wh) =>
+        ww <= 0 || wh <= 0 || (x < wx + ww && x + w > wx && y < wy + wh && y + h > wy);
 
     /// <summary>Icons can be drawn here: a game client with the overlay drawing (kiln.ui with image_load_rgba) and
     /// kiln.assets with texture_rgba.</summary>
@@ -201,29 +223,58 @@ internal static unsafe class ItemIcons
             var key = (item.Value, ItemIconKey.Bucket(pixels));
             var now = Clock();
             List<IconTable<(uint, int)>.Entry>? drop = null;
-            ulong h = 0;
+            ulong h = 0, failed = 0;
             lock (Gate)
             {
                 CheckSession(now, ref drop);
                 if (Table.TryGet(key, out var e))
                 {
                     e.LastUsed = now;
-                    if (e.Handle != 0)
+                    if (e.Handle != 0 && !e.Ready)
+                    {
+                        // drawn once kiln.ui uploaded it with its descriptor set; without one (the overlay's pool was full) it
+                        // is never drawn: freed, read again later
+                        var state = ImageState(e.Handle);
+                        if (state == UiNative.ImageReady)
+                        {
+                            e.Ready = true;
+                            e.Attempts = 0;
+                        }
+                        else if (state != UiNative.ImageWaiting)
+                        {
+                            failed = e.Handle;
+                            e.Handle = 0;
+                            Table.SetBytes(e, 0);
+                            e.Texture = default;
+                            e.RetryAt = now + RetryDelay.Of(++e.Attempts, RetryMs, RetryMostMs);
+                            _failedUploads++;
+                        }
+                    }
+                    if (e.Handle != 0 && e.Ready)
                     {
                         h = e.Handle;
                         width = e.Width;
                         height = e.Height;
                     }
-                    // a missing icon, or one that may change (a new item's base icon while its own PNG is pending): read again,
-                    // the picture it has stays drawn meanwhile
+                    // a missing icon, or one that may change (a new item's base icon while its own PNG is pending): looked at
+                    // again, the picture it has stays drawn meanwhile
                     if (!e.Loading && e.RetryAt != 0 && now >= e.RetryAt) Request(key, e);
                 }
                 else if (item.Value != 0)
                 {
                     Request(key, Table.Add(key, now));
                 }
-                var trimmed = Table.Trim(now - KeepMs);
-                if (trimmed.Count > 0) (drop ??= []).AddRange(trimmed);
+                // over a limit (missing icons piling up): one scan about once a frame, not one per icon drawn
+                if (Table.Over && now - _trimmedAt >= TrimEveryMs)
+                {
+                    _trimmedAt = now;
+                    if (Table.Trim(now - KeepMs) is { } trimmed) (drop ??= []).AddRange(trimmed);
+                }
+            }
+            if (failed != 0)
+            {
+                Free(failed);
+                Note($"item 0x{item.Value:x8}: the overlay could not upload its icon (no descriptor set); read again later");
             }
             if (drop != null) foreach (var d in drop) if (d.Handle != 0) Free(d.Handle);
             if (Synchronous) Drain();
@@ -247,7 +298,7 @@ internal static unsafe class ItemIcons
         {
             Interlocked.Decrement(ref _queued);
             e.Loading = false;
-            e.RetryAt = Clock() + 250;  // asked again in a moment, when the queue has room
+            e.RetryAt = Clock() + WaitMs;  // asked again in a moment, when the queue has room
             return;
         }
         Queue.Enqueue(key);
@@ -286,9 +337,10 @@ internal static unsafe class ItemIcons
             {
                 Drain();
             }
-            catch (Exception e) when (e is not OutOfMemoryException)
+            catch (Exception e)
             {
-                Note($"the icon worker: {e.Message}");
+                // never out of the thread (an exception there ends the game): out of memory included, the request is dropped
+                Note($"the icon worker: {e.GetType().Name}: {e.Message}");
             }
         }
     }
@@ -305,6 +357,26 @@ internal static unsafe class ItemIcons
 
     private static void Load((uint Item, int Bucket) key)
     {
+        try
+        {
+            LoadCore(key);
+        }
+        catch (Exception e)
+        {
+            // anything unforeseen, out of memory included: the request is dropped and the icon asked for again later, never left
+            // loading (a loading entry is never asked for again nor trimmed)
+            lock (Gate)
+                if (Table.TryGet(key, out var x) && x.Loading)
+                {
+                    x.Loading = false;
+                    x.RetryAt = Clock() + RetryDelay.Of(++x.Attempts, RetryMs, RetryMostMs);
+                }
+            Note($"item 0x{key.Item:x8}: {e.GetType().Name}: {e.Message}");
+        }
+    }
+
+    private static void LoadCore((uint Item, int Bucket) key)
+    {
         var item = new ItemId(key.Item);
         Guid? texture = null;
         var final = false;
@@ -313,69 +385,143 @@ internal static unsafe class ItemIcons
         try
         {
             texture = ItemIconKey.Of(item, Defined, IconState, GameItem, out final);
-            if (texture is { } t)
-            {
-                px = Decode(t, key.Bucket);
-                if (px is null) why = $"no texture {t} to read";
-            }
-            else why = "not an item known here (yet)";
         }
         catch (Exception e) when (e is not OutOfMemoryException)
         {
             why = e.Message;
             final = false;
         }
-        ulong handle = 0;
-        var bytes = 0L;
-        if (px is { } p)
+        if (texture is { } t)
         {
-            List<IconTable<(uint, int)>.Entry> freed;
-            var full = false;
+            List<IconTable<(uint, int)>.Entry>? freed = null;
+            var waiting = false;
             lock (Gate)
             {
-                // room for it: icons not drawn for a second go first, oldest first
-                freed = Table.MakeRoom((long)p.W * p.H * 4, Clock() - KeepMs);
-                if (!Table.Room((long)p.W * p.H * 4) && Table.TryGet(key, out var self) && self.Loading)
+                if (!Table.TryGet(key, out var self) || !self.Loading) return;  // dropped meanwhile (a world change)
+                if (self.Handle != 0 && self.Texture == t)
                 {
-                    // full of icons drawn this second: try again when the draws have moved on
+                    // looked at again (a new item's base icon while its own PNG is pending): the same texture, nothing to read
                     self.Loading = false;
-                    self.RetryAt = Clock() + 250;
-                    full = true;
+                    self.RetryAt = final ? 0 : Clock() + RetryDelay.Of(++self.Attempts, RetryMs, RetryMostMs);
+                    return;
+                }
+                // room before reading: icons not drawn for a second go first, oldest first; while every icon is drawn now
+                // this one waits on the placeholder, its texture not read
+                if (self.Bytes == 0)
+                {
+                    var estimate = (long)key.Bucket * key.Bucket * 4;
+                    freed = Table.MakeRoom(estimate, Clock() - KeepMs);
+                    if (!Table.Room(estimate))
+                    {
+                        Wait(self);
+                        waiting = true;
+                    }
                 }
             }
-            foreach (var f in freed) if (f.Handle != 0) Free(f.Handle);
-            if (full) return;
-            handle = Upload(p.Rgba, p.W, p.H);
+            if (freed != null) foreach (var f in freed) if (f.Handle != 0) Free(f.Handle);
+            if (waiting) return;
+            try
+            {
+                px = Decode(t, key.Bucket);
+                if (px is null) why = $"no texture {t} to read";
+            }
+            catch (OutOfMemoryException)
+            {
+                why = "out of memory reading its texture";
+                final = false;
+            }
+            catch (Exception e)
+            {
+                why = e.Message;
+                final = false;
+            }
+        }
+        else why ??= "not an item known here (yet)";
+        ulong handle = 0;
+        var bytes = 0L;
+        var uploadFailed = false;
+        if (px is { } p)
+        {
             bytes = (long)p.W * p.H * 4;
-            if (handle == 0) why = "the overlay took no image";
+            if (bytes > MaxBytes)
+            {
+                // larger than the whole cache: it never fits, never read again
+                why = $"{p.W}x{p.H} is larger than the item icon cache";
+                px = null;
+                final = true;
+            }
+            else
+            {
+                List<IconTable<(uint, int)>.Entry> freed;
+                var full = false;
+                lock (Gate)
+                {
+                    if (!Table.TryGet(key, out var self) || !self.Loading) return;
+                    freed = self.Bytes > 0 ? [] : Table.MakeRoom(bytes, Clock() - KeepMs);
+                    if (self.Bytes == 0 && !Table.Room(bytes))
+                    {
+                        Wait(self);  // a picture larger than its size class (not square): the draws must move on first
+                        full = true;
+                    }
+                }
+                foreach (var f in freed) if (f.Handle != 0) Free(f.Handle);
+                if (full) return;
+                try
+                {
+                    handle = Upload(p.Rgba, p.W, p.H);
+                    if (handle == 0) why = "the overlay took no image";
+                }
+                catch (Exception e)
+                {
+                    why = $"the overlay took no image: {e.Message}";
+                    handle = 0;
+                }
+                uploadFailed = handle == 0;
+            }
         }
         ulong unused = 0;
         lock (Gate)
         {
+            var now = Clock();
             if (!Table.TryGet(key, out var e)) unused = handle;  // dropped meanwhile (a world change)
             else
             {
                 e.Loading = false;
-                if (handle != 0 && px is { } q)
+                e.Waits = 0;
+                if (handle != 0 && px is { } q && texture is { } shown)
                 {
                     unused = e.Handle;  // the picture it replaces (a re-read)
                     e.Handle = handle;
+                    e.Ready = false;    // drawn once kiln.ui uploaded it (image_state)
+                    e.Texture = shown;
                     e.Width = q.W;
                     e.Height = q.H;
                     Table.SetBytes(e, bytes);
                     // a new item's base icon while its own PNG is pending: look again later, its own may be served by then
-                    e.RetryAt = final ? 0 : Clock() + RetryMs;
+                    e.RetryAt = final ? 0 : now + RetryMs;
                     _loaded++;
                 }
                 else
                 {
-                    e.RetryAt = Clock() + (final ? RetryFinalMs : RetryMs);  // a picture it has stays
+                    // a picture it has stays. No texture to read: looked for again after a minute, then less often; a failed
+                    // read or upload, or an id not known yet: after 5 s, then less often; too large: never
+                    e.Attempts++;
+                    e.RetryAt = bytes > MaxBytes ? 0
+                        : final && !uploadFailed ? now + RetryDelay.Of(e.Attempts, RetryFinalMs, RetryFinalMostMs)
+                        : now + RetryDelay.Of(e.Attempts, RetryMs, RetryMostMs);
                     if (e.Handle == 0) _missing++;
                 }
             }
         }
         if (unused != 0) Free(unused);
         if (why != null && texture is not null) Note($"item 0x{key.Item:x8}: {why}");
+    }
+
+    /// <summary>The cache is full of icons drawn now: asked for again in a moment, a little later each time (Gate held).</summary>
+    private static void Wait(IconTable<(uint, int)>.Entry self)
+    {
+        self.Loading = false;
+        self.RetryAt = Clock() + RetryDelay.Of(++self.Waits, WaitMs, WaitMostMs);
     }
 
     private static (byte[], int, int)? DecodeNative(Guid texture, int bucket)
@@ -403,9 +549,17 @@ internal static unsafe class ItemIcons
         if (_placeholder != 0 || _placeholderTried) return _placeholder;
         lock (Gate)
         {
-            if (_placeholderTried) return _placeholder;
-            _placeholderTried = true;
-            _placeholder = Upload(PlaceholderPixels(), 16, 16);
+            if (_placeholderTried || Clock() < _placeholderRetryAt) return _placeholder;
+            try
+            {
+                _placeholder = Upload(PlaceholderPixels(), 16, 16);
+                _placeholderTried = true;  // 0: no overlay image here at all
+            }
+            catch (Exception e) when (e is not OutOfMemoryException)
+            {
+                _placeholderRetryAt = Clock() + RetryMs;  // tried again in a moment
+                Note($"the placeholder: {e.Message}");
+            }
             return _placeholder;
         }
     }
@@ -451,9 +605,11 @@ internal static unsafe class ItemIcons
             Views.Clear();
             _placeholder = 0;
             _placeholderTried = false;
+            _placeholderRetryAt = 0;
             _session = 0;
             _sessionCheckedAt = 0;
-            _loaded = _missing = 0;
+            _loaded = _missing = _failedUploads = 0;
+            _trimmedAt = 0;
             _lastProblem = "";
             Clock = () => Environment.TickCount64;
             GameItem = id => GameNames.ItemGuid(id, wait: true);
@@ -463,6 +619,7 @@ internal static unsafe class ItemIcons
             Upload = UploadNative;
             Free = FreeNative;
             Session = () => ClientEvents.Session;
+            ImageState = UiNative.ImageState;
             Synchronous = false;
         }
     }

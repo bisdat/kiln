@@ -224,6 +224,11 @@ public sealed unsafe partial class UiDraw
         ArgumentNullException.ThrowIfNull(image);
         if (!UiNative.HasGameUi) return false;
         float w = width > 0 ? width : image.Width * Scale, h = height > 0 ? height : image.Height * Scale;
+        if (image.Item is not null && !IconOnScreen(w, h))
+        {
+            T->Dummy(w, h);  // scrolled out of its window: neither loaded nor drawn
+            return false;
+        }
         var handle = image.Item is { } item ? ItemIcons.Handle(item, Math.Max(w, h), out _, out _) : image.Handle;
         if (handle == 0)
         {
@@ -247,9 +252,26 @@ public sealed unsafe partial class UiDraw
         ItemIconBox(item, s, s);
     }
 
+    /// <summary>Whether a box of w x h at the cursor shows in the current window (an icon scrolled out of a list is neither
+    /// loaded nor drawn). True when the layout calls are missing.</summary>
+    private bool IconOnScreen(float w, float h)
+    {
+        var t3 = UiNative.T3;
+        if (t3 == null) return true;
+        UiNative.Cursor c = default;
+        c.Size = (uint)sizeof(UiNative.Cursor);
+        t3->GetCursor(&c);
+        return ItemIcons.OnScreen(c.ScreenX, c.ScreenY, w, h, c.WindowX, c.WindowY, c.WindowWidth, c.WindowHeight);
+    }
+
     private void ItemIconBox(ItemId item, float width, float height)
     {
         if (!UiNative.HasGameUi) return;
+        if (!IconOnScreen(width, height))
+        {
+            T->Dummy(width, height);  // scrolled out of its window: neither loaded nor drawn
+            return;
+        }
         var handle = ItemIcons.Handle(item, Math.Max(width, height), out var iw, out var ih);
         if (handle == 0)
         {
