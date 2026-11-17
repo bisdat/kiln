@@ -10,7 +10,7 @@ using System.Runtime.InteropServices;
 namespace Kiln;
 
 /// <summary>
-/// The game's bases as its crafting code sees them (since 0.2.0-dev.29): each is the union of overlapping flame-altar
+/// The game's bases as its crafting code sees them (since 0.2.0-dev.29.14): each is the union of overlapping flame-altar
 /// zones, with the crafting-stock containers the game lists for it every server frame (the Magic storage chests and the
 /// player-planted refilling fruit trees: ordinary chests are never in it, as the game's own "fill from chests" and
 /// crafting from base storage never use them) and its water sources. Reads on the tick thread of the server world
@@ -87,7 +87,8 @@ public static class Bases
     /// that take deposits, the containers <see cref="FindRoomFor"/> and <see cref="Stations.CollectToBase"/> use: the
     /// entity's <c>DynamicInventoryCraftingStock</c> override when it is set, else its template's
     /// <c>InventoryCraftingStock.canReceiveAreaDeposit</c> (what the game's area deposit reads).</summary>
-    /// <exception cref="KeyNotFoundException">No base has this id now.</exception>
+    /// <remarks>Empty when no base has this id now: the game rebuilds its bases every frame, and an altar placed or removed
+    /// changes a base's id (<see cref="BasesChangedEvent"/>). Before 0.2.0-dev.29.15 that threw <see cref="KeyNotFoundException"/>.</remarks>
     [ServerOnly, TickThreadOnly, RequiresCapability(Stations.ReadCapability)]
     public static IReadOnlyList<EntityId> Storage(BaseId id, bool deposit = false)
     {
@@ -95,21 +96,35 @@ public static class Bases
         return deposit ? all.Where(StationsCore.TakesDeposits).ToArray() : all;
     }
 
-    /// <summary>The base's water sources that hold water (wells, water barrels), in the game's order.</summary>
-    /// <exception cref="KeyNotFoundException">No base has this id now.</exception>
+    /// <summary>The base's water sources that hold water (wells, water barrels), in the game's order; empty when no base has
+    /// this id now (as <see cref="Storage"/>).</summary>
     [ServerOnly, TickThreadOnly, RequiresCapability(Stations.ReadCapability)]
     public static IReadOnlyList<EntityId> WaterSources(BaseId id) => StationsCore.List(id, water: true, "Bases.WaterSources");
 
-    /// <summary>What the base's crafting-stock containers hold, per item.</summary>
-    /// <exception cref="KeyNotFoundException">No base has this id now.</exception>
+    /// <summary>What the base's crafting-stock containers hold, per item; empty when no base has this id now (as
+    /// <see cref="Storage"/>).</summary>
     [ServerOnly, TickThreadOnly, RequiresCapability(Stations.ReadCapability)]
     public static IReadOnlyDictionary<ItemId, long> Stock(BaseId id)
     {
         StationsCore.CheckRead("Bases.Stock");
-        if (!StationsCore.Find(id, out var nb)) throw new KeyNotFoundException($"Bases.Stock: no base has the id {id} now");
-        var (rc, rows) = StationsCore.Backend.BaseStock(nb.Index);
-        StationsCore.Check(rc, "Bases.Stock");
+        var rows = StationsCore.ByBase(id, StationsCore.Backend.BaseStock, "Bases.Stock");
         return rows.ToDictionary(r => new ItemId(r.Item), r => (long)r.Count);
+    }
+
+    /// <summary><see cref="Stock(BaseId)"/> plus the finished items still in the base's production stations: each station's
+    /// <see cref="StationInfo.Outputs"/> (what <see cref="Stations.Collect"/> moves),
+    /// which the game's own fill and crafting from base storage never take from. For a target such as "keep 200 charcoal"
+    /// that counts what is made but not collected yet. Empty when no base has this id now. Since 0.2.0-dev.29.15.</summary>
+    /// <remarks>Reads every station of the base (its inventory): poll it every few seconds, not every step.</remarks>
+    [ServerOnly, TickThreadOnly, RequiresCapability(Stations.ReadCapability)]
+    public static IReadOnlyDictionary<ItemId, long> StockWithStations(BaseId id)
+    {
+        var stock = new Dictionary<ItemId, long>(Stock(id));
+        foreach (var s in Stations.InBase(id))
+            if (Stations.Read(s) is { } info)
+                foreach (var o in info.Outputs)
+                    stock[o.Item] = stock.GetValueOrDefault(o.Item) + o.Count;
+        return stock;
     }
 
     /// <summary>How many of <paramref name="item"/> the base's crafting-stock containers hold.</summary>
@@ -183,14 +198,14 @@ public static partial class Stations
     [ServerOnly, TickThreadOnly, RequiresCapability(ReadCapability)]
     public static IReadOnlyList<EntityId> All() => StationsCore.StationList(-1, "Stations.All");
 
-    /// <summary>The production stations standing in a base.</summary>
-    /// <exception cref="KeyNotFoundException">No base has this id now.</exception>
+    /// <summary>The production stations standing in a base; empty when no base has this id now (the game rebuilds its bases
+    /// every frame, and an altar placed or removed changes a base's id: <see cref="BasesChangedEvent"/>). Before
+    /// 0.2.0-dev.29.15 that threw <see cref="KeyNotFoundException"/>.</summary>
     [ServerOnly, TickThreadOnly, RequiresCapability(ReadCapability)]
     public static IReadOnlyList<EntityId> InBase(BaseId id)
     {
         StationsCore.CheckRead("Stations.InBase");
-        var b = Bases.Get(id) ?? throw new KeyNotFoundException($"Stations.InBase: no base has the id {id} now");
-        return StationsCore.StationList(b.Index, "Stations.InBase");
+        return StationsCore.ByBase(id, i => StationsCore.Backend.StationIds((int)i), "Stations.InBase").Select(x => new EntityId(x)).ToArray();
     }
 
     /// <summary>Whether the entity is a production station now.</summary>
@@ -736,10 +751,24 @@ internal static unsafe partial class StationsCore
     internal static IReadOnlyList<EntityId> List(BaseId id, bool water, string api)
     {
         CheckRead(api);
-        if (!Find(id, out var b)) throw new KeyNotFoundException($"{api}: no base has the id {id} now");
-        var (rc, ids) = Backend.BaseList(b.Index, water);
-        Check(rc, api);
-        return ids.Select(x => new EntityId(x)).ToArray();
+        return ByBase(id, i => Backend.BaseList(i, water), api).Select(x => new EntityId(x)).ToArray();
+    }
+
+    /// <summary>A read of one base's record by its id: found by id, then read by its record index. The game rebuilds its bases
+    /// every frame, so the index can be gone (or another base's) by the read: then it is found again once, and a base no
+    /// longer there reads as empty, never as an exception (0.2.0-dev.29.15).</summary>
+    internal static T[] ByBase<T>(BaseId id, Func<uint, (int Rc, T[] Rows)> read, string api)
+    {
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            if (!Find(id, out var b)) return [];
+            var (rc, rows) = read(b.Index);
+            if (rc == StationsNative.NotFound) continue;  // rebuilt between the two reads
+            Check(rc, api);
+            // still the same base at that index after the read: else the rows may be another base's
+            if (Backend.BaseAt(b.Index, out var after) == StationsNative.Ok && StationsNative.GuidOf(after.Id) == id.Value) return rows;
+        }
+        return [];
     }
 
     internal static IReadOnlyList<EntityId> StationList(int baseIndex, string api)
@@ -765,8 +794,14 @@ internal static unsafe partial class StationsCore
         string? name = null;
         try { name = Content.Recipes.Get(r.Id)?.Name; }
         catch (Exception e) when (e is KilnUnavailableException or InvalidOperationException or NotSupportedException) { }
+        string? display = null;
+        try
+        {
+            display = (outputs.Count > 0 ? Items.DisplayName(outputs[0].Item) : null) ?? Stations.RecipeName(r.Id);
+        }
+        catch (Exception e) when (e is KilnUnavailableException or InvalidOperationException or NotSupportedException) { }
         return new StationRecipe(r.Id, r.Workshop, inputs, outputs, TimeSpan.FromTicks(r.DurationNs / 100), (int)r.WaterCharges,
-            r.KnowledgeId == 0) { Name = name };
+            r.KnowledgeId == 0) { Name = name, DisplayName = display };
     }
 
     internal static IngredientCategory? CategoryOf(uint id)
@@ -794,7 +829,19 @@ internal static unsafe partial class StationsCore
             new BaseId(StationsNative.GuidOf(s.Base)), s.BaseIndex, (StationState)s.State, s.StoppedByPlayer != 0, s.UseAllOptions != 0,
             (StationNeeds)s.Needs, s.RunningRecipe, s.SelectedRecipe, choices, (int)s.CraftsLoaded, TimeSpan.FromTicks(s.DurationNs / 100),
             s.Progress, hasWater ? s.Water : null, hasWater ? s.WaterMax : null, slots, outputs, leftovers,
-            (s.Flags & StationsNative.FlagStopPending) != 0, template);
+            (s.Flags & StationsNative.FlagStopPending) != 0, template) { DisplayName = NameOfWorkshop(s.Workshop) };
+    }
+
+    private static string? NameOfWorkshop(uint workshop)
+    {
+        try
+        {
+            return Stations.WorkshopName(workshop);
+        }
+        catch (Exception e) when (e is KilnUnavailableException or InvalidOperationException or NotSupportedException)
+        {
+            return null;
+        }
     }
 
     private static IEnumerable<ItemId> CategoryItems(uint category) =>

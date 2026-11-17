@@ -11,7 +11,7 @@ out=$KILN_OUT/assets-host-test
 mkdir -p "$out"
 
 # The service's header is C: it compiles as C11.
-printf '#include "services/kiln_assets.h"\n#include "services/kiln_assets_vfx.h"\n_Static_assert(KILN_ASSET_PUT_PIN == 4, "KILN_ASSET_PUT_PIN");\n_Static_assert(sizeof(KilnBlobCatalogInfo) == 32, "info");\n_Static_assert(sizeof(KilnBlobCatalogEntry) == 48, "entry");\n_Static_assert(sizeof(KilnAssetsVfxBudget) == 16, "vfx budget");\n' |
+printf '#include <stddef.h>\n#include "services/kiln_assets.h"\n#include "services/kiln_assets_vfx.h"\n_Static_assert(KILN_ASSET_PUT_PIN == 4, "KILN_ASSET_PUT_PIN");\n_Static_assert(sizeof(KilnBlobCatalogInfo) == 32, "info");\n_Static_assert(sizeof(KilnBlobCatalogEntry) == 48, "entry");\n_Static_assert(sizeof(KilnAssetsVfxBudget) == 16, "vfx budget");\n_Static_assert(offsetof(KilnAssetsApi, texture_rgba) == offsetof(KilnAssetsApi, blob_catalog_close) + sizeof(void*), "texture_rgba appended");\n_Static_assert(offsetof(KilnAssetsApi, texture_rgba) == 216 && sizeof(KilnAssetsApi) == 224, "x64 layout");\n' |
   gcc -std=c11 -Wall -Wextra -pedantic -fsyntax-only -I"$here/../../../core/abi" -x c -
 echo "PASS kiln_assets.h compiles as C11"
 
@@ -34,6 +34,17 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-r
   -I"$here/.." -I"$here/../../../third_party" \
   "$here/test_cooktrust.cpp" "$here/../cooktrust.cpp" -o "$out/test_cooktrust"
 "$out/test_cooktrust" "$out/cooktrust-scratch"
+
+# A game texture's pixels as RGBA8 (texture_rgba.h, kiln_assets.h texture_rgba): resource layouts, the mip level, decoding.
+# The vendored decoders and encoders are built once, without warnings (they are upstream code).
+bc7=$here/../../../third_party/bc7enc
+for f in bc7decomp rgbcx bc7enc; do
+  [[ $out/$f.o -nt $bc7/$f.cpp ]] || g++ -std=c++20 -O1 -g -w -c "$bc7/$f.cpp" -o "$out/$f.o"
+done
+g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=undefined \
+  -I"$here/.." -I"$here/../../../third_party" \
+  "$here/test_texture_rgba.cpp" "$out/bc7decomp.o" "$out/rgbcx.o" "$out/bc7enc.o" -o "$out/test_texture_rgba"
+"$out/test_texture_rgba"
 
 # Reading a mod's files from its own folder, the portable half (scan.cpp): the identity scan, the alias verdict, the
 # by-name check of the assets folder and below.

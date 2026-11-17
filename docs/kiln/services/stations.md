@@ -6,6 +6,12 @@ actions for code: fill from chests, stop, resume, the recipe a station repeats, 
 chest. C#: `Stations` and `Bases` (`Kiln.Blocks`, `namespace Kiln`). Native: `native/core/abi/services/kiln_stations.h`
 (in kiln-items.dll). Since 0.2.0-dev.29.14 (mod API 0.2.6).
 
+**In a mod project** list `Stations` in `KilnServices` (since 0.2.0-dev.29.15): it references Kiln.Blocks' assembly for
+`Stations` and `Bases`, and leaves the mod `side: server` with no `clients` need, so a server does not refuse players
+without Kiln for a mod that only automates stations. Listing `Blocks` (as with 0.2.0-dev.29.14) also works but makes the mod
+`side: both` and `clients: kiln`, which is right only for a mod that defines blocks. With `Stations` alone, a block type or
+`Blocks.Define` in the code gets the build warning KILN108 asking for `Blocks`.
+
 `Stations` is the class that already had `Stations.Status` and `Stations.Start` (dev.28, [world-blocks.md](../modding/world-blocks.md)).
 `Start` writes the selection without the game's write tracking; for a selection players see at once use `Select`, and
 `Read` gives all that `Status` gives and more.
@@ -39,9 +45,16 @@ BaseInfo? home = Bases.Of(player);                      // the base the entity s
 IReadOnlyList<EntityId> chests = Bases.Storage(home!.Id);
 IReadOnlyList<EntityId> deposit = Bases.Storage(home.Id, deposit: true); // those that take deposits
 IReadOnlyDictionary<ItemId, long> stock = Bases.Stock(home.Id);
+var made = Bases.StockWithStations(home.Id);           // + finished items still in the base's stations (0.2.0-dev.29.15)
 long logs = Bases.Stock(home.Id, Items.Lookup("Material_T1_Wood_Logs")!.Id);
 EntityId? room = Bases.FindRoomFor(home.Id, charcoalId); // a chest that takes deposits and the item (same item first)
 ```
+
+**A base can go between two reads.** The game rebuilds its bases every server frame, and an altar placed or removed changes
+a base's id: an id read from `Bases.All` a moment ago may name no base by the next call. `Storage`, `WaterSources`,
+`Stock`, `Stations.InBase` and `FindRoomFor` then answer empty (or null): no exception to catch in a polling loop (before
+0.2.0-dev.29.15 they threw `KeyNotFoundException`). `Bases.Get`, `Of` and `At` answer null as before. Kiln reads a base by
+its id and then by the game's record index; when the record was rebuilt in between it finds the base again once.
 
 `Storage(id, deposit: true)` keeps the containers that take deposits, by the two values the game's area deposit
 (`area_deposit_trigger`) reads: the entity's `DynamicInventoryCraftingStock` override when it is set
@@ -88,9 +101,19 @@ needs an unlock, `Name`: the game's debug name), `Stations.RecipesOf(station)` (
 `Stations.Categories` and `Stations.Category(id)` (the ingredient categories, "any wood", with their options and scaling),
 and `Stations.ResolveInputs(recipe, choices)` (the concrete items and counts the game asks for one craft).
 
-**Names for players.** None of these are texts in a player's language. Show the outputs' and inputs' item names
-(`Items.Get(id).DisplayName`, in the server's language); categories have ids only. A joined client has no kiln.stations:
-a menu there gets ids and names from its server half.
+**Names for players** (since 0.2.0-dev.29.15). `StationInfo.DisplayName` is the name of the item that places the station
+("Charcoal Kiln"), else its workshop's name; `StationRecipe.DisplayName` is its first output's name ("Charcoal"), else the
+recipe's own name text. They come from the game's own data (its workshop and recipe registries, its texts): in the game's
+text language on a hosting client; on a dedicated server, whose data has no texts, the English names Kiln has (its shipped
+item names, and the catalog's texts when one is built). Categories have ids only; name their options with
+`Items.DisplayName`. The first read starts reading the game's names in the background (a fraction of a second): until then
+the names are null.
+
+**On a joined client** kiln.stations is not there, but the names are: `Stations.WorkshopName(workshop)`,
+`Stations.RecipeName(recipe)` and `Items.DisplayName(item)` read the game's data on any side and any thread, so a menu
+there gets ids from its server half and names them in its own player's language. `Ui.ItemImage(item)` draws the items'
+icons ([ui.md](../ui.md#item-icons-and-names)). A new recipe of kiln.content is not in the game's registry: `RecipeName` is null for it
+(name it by its output's `Items.DisplayName`).
 
 ## Fill from chests
 `Stations.Fill(station, options)` runs **the game's own "fill from chests"** (the function behind the station screen's
@@ -248,7 +271,7 @@ the other bases).
 The actions check nothing about players: they are the server's. A mod that acts for a joined player (its client sends a
 message to its server half: `Kiln.Network` mod messages, handled on the server tick, where these calls work) checks
 there: the station's base is the player's (`Bases.Of(player)?.Id == Stations.Read(station)?.Base`) and the player may
-change it (`Players.Get(player)?.Can(PlayerPermissions.EditBase)`, or `AccessInventories` for fills), or a
+change it (`Players.Find(player)?.Can(PlayerPermissions.EditBase)`, or `AccessInventories` for fills), or a
 `Permissions` node of its own. On a hosting client both halves run in one process and the host's own menu can call
 these directly (`Stations.Available` is true there).
 

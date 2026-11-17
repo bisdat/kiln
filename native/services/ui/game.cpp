@@ -41,7 +41,8 @@ struct Layout {
     int64_t state_ui = 0;           // *(GameUiData) = state; + state.ui_state: u8 keen::UiState
     int64_t state_play = 0;         // state + state.play -> play data
     int64_t play_hud = 0;           // play + play.hud_screen: u8 keen::HudScreenType
-    int64_t play_interaction = 0;   // play + play.interaction: u32 entity
+    int64_t play_interaction = 0;   // play + play.interaction: u32 (the station's keen::WorkshopId at a crafting station [rt])
+    int64_t play_target = 0;        // play + play.target: u32 entity the screen is about (0: the constant did not resolve)
     int64_t data_loca = 0;          // GameUiData + data.loca_pool -> LocaPool*
     int64_t loca_language = 0;      // LocaPool + content/loca.language: u32 keen::LanguageId
     int64_t craft_recipe = 0;       // GameUiData + data.craft_recipe: u32 (the player's own crafting menu)
@@ -169,11 +170,18 @@ bool rd(uintptr_t a, T& out) {
 struct Raw {
     uint8_t ui_state, hud;
     uint32_t interaction, language;
+    uint32_t target;  // play.target, read only while a factory screen shows
 };
+
+// keen::HudScreenType FactoryCrafting: a production station's screen (kiln, smelter, loom). The game draws it with its
+// chest-style transfer screen (PlayStateUi -> 0xb9d0f0 mode 2 on 26430625), not with CraftingMenu (docs/re/game-ui.md
+// section 5): no builder frame names it, so Kiln.Ui reports it from the HUD screen, play.interaction and play.target.
+constexpr uint8_t kHudFactory = 28;
+std::atomic<uint32_t> g_target{0};  // play.target of the last UI frame while a factory screen showed, else 0
 
 bool read_state(uintptr_t sys10, Raw* r) {
     r->ui_state = r->hud = 0;
-    r->interaction = r->language = 0;
+    r->interaction = r->language = r->target = 0;
     uintptr_t data = 0, state = 0, play = 0;
     if (!rd(sys10 + L.sys_data, data) || !data) return false;
     if (!rd(data, state) || !state) return true;  // no state yet
@@ -181,6 +189,7 @@ bool read_state(uintptr_t sys10, Raw* r) {
     if (rd(state + L.state_play, play) && play && r->ui_state == KILN_UI_STATE_PLAY) {
         rd(play + L.play_hud, r->hud);
         rd(play + L.play_interaction, r->interaction);
+        if (r->hud == kHudFactory && L.play_target) rd(play + L.play_target, r->target);
     }
     if (L.language) {
         uintptr_t pool = 0;
@@ -420,6 +429,7 @@ void after_frame(uintptr_t sys10) {
     s.language = raw.language;
     s.ui_thread = g_ui_thread;
     s.frame = g_frame_no;
+    g_target.store(s.hud_screen == kHudFactory ? raw.target : 0, std::memory_order_relaxed);
     // the builder runs every frame while a crafting menu shows; a frame or two without it (a tab transition) is not a close
     if (g_craft.frame && g_craft.frame + 3 > g_frame_no) {
         s.crafting = g_craft.kind;
@@ -533,6 +543,12 @@ bool game_install() {
         logf(KILN_LOG_WARN, "ui: game screens unavailable on this build (feature ui.screens off): no menu entries, no screen events");
         return false;
     }
+    // the entity of a factory screen (0.2.0-dev.29.15): optional; without it Kiln.Ui reports a factory screen with no station
+    if (!cst("ui/play.target", &L.play_target) || L.play_target <= 0 || L.play_target > 0x100000) {
+        L.play_target = 0;
+        logf(KILN_LOG_INFO, "ui: a factory screen's station is not read on this build (constant ui/play.target did not resolve): "
+                            "Kiln.Ui reports factory screens without their station");
+    }
     L.language = feat("ui.language") && cst("ui/data.loca_pool", &L.data_loca) && cst("content/loca.language", &L.loca_language);
     L.main_menu = feat("ui.main_menu") && sym("ui/MainMenuEntry", &main_fn) && sym("ui/MainMenuSettingsA", &L.main_ret_a) &&
                   sym("ui/MainMenuSettingsB", &L.main_ret_b);
@@ -596,6 +612,8 @@ bool game_in_menu() {
     if (!L.screens) return false;
     return g_api->world(KILN_WORLD_SERVER) == 0 && g_api->world(KILN_WORLD_CLIENT) == 0;
 }
+
+uint32_t game_screen_target() { return L.screens ? g_target.load(std::memory_order_relaxed) : 0; }
 
 KilnResult game_screen(KilnUiScreen* out) {
     if (!out || out->size < sizeof(KilnUiScreen)) return KILN_ERR_INVALID_ARGUMENT;

@@ -1,1 +1,8 @@
 #nullable enable
+Kiln.StationInfo.DisplayName.get -> string?
+Kiln.StationInfo.DisplayName.init -> void
+Kiln.StationRecipe.DisplayName.get -> string?
+Kiln.StationRecipe.DisplayName.init -> void
+static Kiln.Stations.RecipeName(uint recipe) -> string?
+static Kiln.Stations.WorkshopName(uint workshop) -> string?
+static Kiln.Bases.StockWithStations(Kiln.BaseId id) -> System.Collections.Generic.IReadOnlyDictionary<Kiln.ItemId, long>!

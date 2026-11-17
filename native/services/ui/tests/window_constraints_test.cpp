@@ -17,7 +17,11 @@ static_assert(offsetof(KilnUiApi, set_next_window_size_constraints) == 888);
 // menu_footer (0.2.0-dev.29.11) is appended after it; the constraints keep their offset
 static_assert(offsetof(KilnUiApi, menu_footer) == offsetof(KilnUiApi, set_next_window_size_constraints) + sizeof(void*));
 static_assert(offsetof(KilnUiApi, menu_footer) == 896);
-static_assert(sizeof(KilnUiApi) == offsetof(KilnUiApi, menu_footer) + sizeof(void*));
+// image_load_rgba (0.2.0-dev.29.15) is appended after it; nothing before it moves
+static_assert(offsetof(KilnUiApi, image_load_rgba) == offsetof(KilnUiApi, menu_footer) + sizeof(void*));
+static_assert(offsetof(KilnUiApi, image_load_rgba) == 904);
+static_assert(offsetof(KilnUiApi, screen_target) == 912);
+static_assert(sizeof(KilnUiApi) == offsetof(KilnUiApi, screen_target) + sizeof(void*));
 int main() {
     // Drawing off: no frame/context, just as KILN_UI_OVERLAY=0. Must not enter ImGui.
     kui_draw::t_set_next_window_size_constraints(300, 0, 300, 918);

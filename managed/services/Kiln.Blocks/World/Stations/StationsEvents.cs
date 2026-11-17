@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: MIT
 // The station events: what changed (kiln.stations' watch: state, placed, removed, the bases), a finished cycle
-// (Kiln.Gameplay's ItemCraftedEvent, once per cycle since 0.2.0-dev.29), a player's own station buttons (Kiln.Players'
+// (Kiln.Gameplay's ItemCraftedEvent, once per cycle since 0.2.0-dev.29.14), a player's own station buttons (Kiln.Players'
 // PlayerClientActionEvent of playerCraftingAction, typed), and the change event of Kiln's own actions.
 using System.Buffers.Binary;
 
 namespace Kiln;
 
 /// <summary>A station's state, stop flag, selected or running recipe changed (seen in Pre, by kiln.stations' watch: the
-/// game, a player or a mod). Posted on the tick thread while a handler listens. Since 0.2.0-dev.29.</summary>
+/// game, a player or a mod). Posted on the tick thread while a handler listens. Since 0.2.0-dev.29.14.</summary>
 [ServerOnly]
 public sealed class StationStateChangedEvent : KilnEvent, IEntityEvent
 {
@@ -66,7 +66,7 @@ public sealed class StationStateChangedEvent : KilnEvent, IEntityEvent
         $"station {Station}: {Before} -> {After}{(Stopped ? " (stopped)" : Resumed ? " (resumed)" : "")} selected 0x{SelectedAfter:x8}{(ByMod is null ? "" : $" by {ByMod}")}{(Player is { } p ? $" by player {p}" : "")}";
 }
 
-/// <summary>A production station appeared in the world (placed, or found by the watch's first scans). Since 0.2.0-dev.29.</summary>
+/// <summary>A production station appeared in the world (placed, or found by the watch's first scans). Since 0.2.0-dev.29.14.</summary>
 [ServerOnly]
 public sealed class StationPlacedEvent : KilnEvent, IEntityEvent
 {
@@ -91,7 +91,7 @@ public sealed class StationPlacedEvent : KilnEvent, IEntityEvent
     public override string ToString() => $"station {Station} placed (workshop 0x{Workshop:x8}, base #{BaseIndex})";
 }
 
-/// <summary>A production station is gone (picked up, destroyed). Since 0.2.0-dev.29.</summary>
+/// <summary>A production station is gone (picked up, destroyed). Since 0.2.0-dev.29.14.</summary>
 [ServerOnly]
 public sealed class StationRemovedEvent : KilnEvent, IEntityEvent
 {
@@ -121,7 +121,7 @@ public sealed class StationRemovedEvent : KilnEvent, IEntityEvent
 /// altar, so a mod can carry its per-base data over; <see cref="Kept"/> lists the ids that are there before and after. A
 /// base that split keeps its id for one part (<see cref="Kept"/>) and shows the other as changed from it; a rename has
 /// no <see cref="Kept"/> entry. A base whose altars Kiln did not find (id <see cref="BaseId.None"/>) is in none of the
-/// lists. The first rebuild a watch sees after a world starts is its baseline and posts nothing. Since 0.2.0-dev.29.</summary>
+/// lists. The first rebuild a watch sees after a world starts is its baseline and posts nothing. Since 0.2.0-dev.29.14.</summary>
 [ServerOnly]
 public sealed class BasesChangedEvent : KilnEvent
 {
@@ -152,7 +152,7 @@ public sealed class BasesChangedEvent : KilnEvent
 }
 
 /// <summary>A production station finished a cycle: its outputs are in its inventory (Kiln.Gameplay's
-/// <c>ItemCraftedEvent</c> of an automated station, once per cycle). Since 0.2.0-dev.29.</summary>
+/// <c>ItemCraftedEvent</c> of an automated station, once per cycle). Since 0.2.0-dev.29.14.</summary>
 [ServerOnly]
 public sealed class StationCraftedEvent : KilnEvent, IEntityEvent
 {
@@ -200,7 +200,7 @@ public enum StationPlayerAction : byte
 /// <see cref="StationPlayerAction.Craft"/>: then <see cref="Station"/> is a workbench, not a production station): the game's
 /// <c>playerCraftingAction</c> as Kiln.Players' <see cref="PlayerClientActionEvent"/> holds it, typed. Posted on the tick
 /// thread in Pre, before the game runs it (while <see cref="CanCancel"/>): cancel it and the game never runs it (the
-/// client is not told). One verdict with the generic event of the same input. Since 0.2.0-dev.29.
+/// client is not told). One verdict with the generic event of the same input. Since 0.2.0-dev.29.14.
 /// </summary>
 [ServerOnly]
 public sealed class StationPlayerActionEvent : CancelableEvent, IEntityEvent
@@ -238,7 +238,7 @@ public sealed class StationPlayerActionEvent : CancelableEvent, IEntityEvent
 
 /// <summary>A Kiln.Stations call changed a station (the contract's change event of every write): a fill that moved
 /// something, a stop, a resume, a selection, a collect. Not posted for a dry run or an action that changed nothing.
-/// Since 0.2.0-dev.29.</summary>
+/// Since 0.2.0-dev.29.14.</summary>
 [ServerOnly]
 public sealed class StationChangedEvent : KilnEvent, IEntityEvent
 {

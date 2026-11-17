@@ -6,7 +6,7 @@ namespace Kiln;
 
 /// <summary>A base's id: the GUID the game gives a flame altar (its <c>BaseIdComponent</c>, kept in the save). A base
 /// made of several overlapping altar zones takes the smallest of its altars' ids (the 16 bytes compared in memory
-/// order), so the id changes when an overlapping altar is added or removed. Since 0.2.0-dev.29.</summary>
+/// order), so the id changes when an overlapping altar is added or removed. Since 0.2.0-dev.29.14.14.</summary>
 /// <param name="Value">The GUID.</param>
 public readonly record struct BaseId(Guid Value)
 {
@@ -22,7 +22,7 @@ public readonly record struct BaseId(Guid Value)
 
 /// <summary>One of the game's bases as its crafting code sees it: the union of overlapping flame-altar zones, with the
 /// crafting-stock containers the game lists for it (the Magic storage chests and the player-planted refilling trees:
-/// ordinary chests are never in it) and its water sources (wells and barrels holding water). Since 0.2.0-dev.29.</summary>
+/// ordinary chests are never in it) and its water sources (wells and barrels holding water). Since 0.2.0-dev.29.14.</summary>
 /// <param name="Id">The base's id (see <see cref="BaseId"/>).</param>
 /// <param name="Index">The game's record index this session (0..15): it changes when the bases are rebuilt.</param>
 /// <param name="Altars">The flame altars whose zones make the base (more than one when their zones overlap), each with its
@@ -58,7 +58,7 @@ public sealed record BaseInfo(BaseId Id, int Index, IReadOnlyList<BaseAltar> Alt
 }
 
 /// <summary>One flame altar of a base: its entity (this session) and its own id (the GUID the game keeps in the save with
-/// the altar; it never changes). Since 0.2.0-dev.29.</summary>
+/// the altar; it never changes). Since 0.2.0-dev.29.14.14.</summary>
 public readonly record struct BaseAltar(EntityId Entity, BaseId Id);
 
 /// <summary>A base whose id changed when the game rebuilt its bases: an overlapping altar came or went
@@ -92,7 +92,7 @@ public readonly record struct StationInput(ItemId Item, int Count, uint Category
     public bool IsCategory => Category != 0;
 }
 
-/// <summary>A recipe as a station runs it. Since 0.2.0-dev.29. <see cref="Name"/> is the game's debug name (Kiln.Content's
+/// <summary>A recipe as a station runs it. Since 0.2.0-dev.29.14. <see cref="Name"/> is the game's debug name (Kiln.Content's
 /// recipe entry), not a text for players: show the outputs' item names instead.</summary>
 /// <param name="Id">The recipe id.</param>
 /// <param name="Workshop">The workshop it belongs to (a station runs the recipes of its <see cref="StationInfo.Workshop"/>).</param>
@@ -106,9 +106,15 @@ public sealed record StationRecipe(uint Id, uint Workshop, IReadOnlyList<Station
 {
     /// <summary>The game's debug name of the recipe (Kiln.Content); null when the content registry does not list it.</summary>
     public string? Name { get; init; }
+
+    /// <summary>A name for players (since 0.2.0-dev.29.15): its first output's (<see cref="Items.DisplayName"/>), else the
+    /// recipe's own name text (<see cref="Stations.RecipeName"/>): in the game's text language on a hosting client, the English
+    /// names Kiln has on a dedicated server. Null when neither is known (yet: the game's names are read in the background the
+    /// first time).</summary>
+    public string? DisplayName { get; init; }
 }
 
-/// <summary>A production station now. Since 0.2.0-dev.29.</summary>
+/// <summary>A production station now. Since 0.2.0-dev.29.14.</summary>
 /// <param name="Entity">The station.</param>
 /// <param name="Workshop">Which recipes it runs (<c>Crafting.workshopId</c>).</param>
 /// <param name="Position">Where it stands.</param>
@@ -145,6 +151,11 @@ public sealed record StationInfo(EntityId Entity, uint Workshop, WorldPosition P
     /// <summary>A cycle runs.</summary>
     public bool IsRunning => State == StationState.Running;
 
+    /// <summary>A name for players (since 0.2.0-dev.29.15): the name of the item that places it ("Charcoal Kiln"), else its
+    /// workshop's name text (<see cref="Stations.WorkshopName"/>): in the game's text language on a hosting client, the English
+    /// names Kiln has on a dedicated server. Null when neither is known (yet).</summary>
+    public string? DisplayName { get; init; }
+
     /// <summary>The station in one line, for a log.</summary>
     public override string ToString() =>
         $"station {Entity} workshop 0x{Workshop:x8} {State}{(StoppedByPlayer ? " (stopped)" : "")} recipe 0x{SelectedRecipe:x8} loaded {CraftsLoaded} progress {Progress:P0} base {Base}";
@@ -159,7 +170,7 @@ public enum FillMode
     Add = 1,
 }
 
-/// <summary>Options of <see cref="Stations.Fill"/>. Since 0.2.0-dev.29.</summary>
+/// <summary>Options of <see cref="Stations.Fill"/>. Since 0.2.0-dev.29.14.</summary>
 public sealed record FillOptions
 {
     /// <summary>Crafts to fill for, 1..1000 (see <see cref="Mode"/>). Default 1.</summary>
@@ -209,7 +220,7 @@ public enum FillLimit
 /// <summary>One input of a fill plan: what one craft needs, what the station holds, what the base's stock can give.</summary>
 public readonly record struct FillInput(ItemId Item, int PerCraft, int Have, long Stock);
 
-/// <summary>What a fill would do now (<see cref="Stations.Plan"/>). Since 0.2.0-dev.29.</summary>
+/// <summary>What a fill would do now (<see cref="Stations.Plan"/>). Since 0.2.0-dev.29.14.</summary>
 /// <param name="Status">Done when <see cref="CraftsPlanned"/> crafts would go in; Partial when fewer than asked; otherwise
 /// why none would.</param>
 /// <param name="Station">The station.</param>
@@ -313,7 +324,7 @@ public enum StationAction
 }
 
 /// <summary>What a station action did. <see cref="Ok"/> when it happened (Partial and Unchanged included); otherwise
-/// <see cref="Reason"/> says why and nothing changed. Since 0.2.0-dev.29.</summary>
+/// <see cref="Reason"/> says why and nothing changed. Since 0.2.0-dev.29.14.</summary>
 /// <param name="Status">The outcome.</param>
 /// <param name="Action">The action.</param>
 /// <param name="Station">The station.</param>

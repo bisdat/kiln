@@ -244,11 +244,49 @@ of 5d9ef2f1. Helper: `kx.py` (copied from the NoClip research) over the exe as a
   in the data (workshop 0: 6 tabs). **[refl] [data]** Corrected 2026-11 (dev.28 RE) **[static]**: current builder
   reads max groups at bundle+0xf0a8 and group walker reserves sets from +0xf0ac; a separate 512-output bound also
   applies (current lookup section below). Kiln's additions must respect each bound.
+- **Factory screens (client 26430625, static analysis, 2026-11-17; nothing of it run)** **[dis]**. The HUD screen dispatcher is
+  `0xbe87d0(type, mode)` on this build (PlayStateUi calls it with mode 3 at `0xc611bf`). Its switch on `type - 2`
+  (`0xbe947b`, tables `0xbea0d8` / `0xbea0b4`) sends **25** (StationBasedCrafting, `0xbe956f`) and **27** (NpcCrafting,
+  `0xbe94a4`) to CraftingMenu (`0xb80130` here); both first need play `+0x2c50` non-zero (else `0xbe9556`, which closes the
+  screen) and read the station's workshop from play `+0x2e48`. **28 (FactoryCrafting) falls to the default case**: no
+  crafting builder runs at a kiln, smelter or loom, so Kiln's `g_craft` never names it. PlayStateUi's own switch on the HUD
+  screen (`0xc61135`, the one `ui/GemForgeSwitch` patterns; cases 22..45) sends 22 StorageChest to `0xb9d0f0(0)`, 41 to
+  `0xb9d0f0(1)` and **28 to `0xb9d0f0(2)`**: the chest-style transfer screen with a mode. `0xb9d0f0` reads play `+0x2c50`
+  and looks it up in the UI's inventory views (play `+0x3060`, `+0x3068` count, stride 0x8f70, keyed by the first dword):
+  the other inventory's entity; play `+0x18` is the player's own. So play `+0x2c50` is **the entity the screen is about**
+  (a chest, a factory station, an NPC: the NPC crafting code at `0x2b88e2` writes it and clears `+0x2e48`); Kiln names it
+  `ui/play.target` (captured by `@ui/HudCrafting.fields` from both dispatcher cases, 2 captures agree on 0x2c50). Play
+  `+0x2e48` (Kiln's `ui/play.interaction`, the same field: **not an entity**, the workshop **[rt]** for a bench) is written at
+  `0x2b990a` from `+0xc` of a component the player-UI update looks up on the interaction target: not `Crafting` (`+0x10`) nor
+  `CraftingInteraction` (`+0x1c`), so whether it holds a factory's workshop is open (client step 4 of docs/kiln/ui.md "Item
+  icons and names"). Kiln 0.2.0-dev.29.15 reports a factory screen as a crafting screen (`IsFactory`, `Station` from
+  `+0x2c50` through kiln.ui's `screen_target`, `Workshop` from `+0x2e48`, `Recipe` 0); the factory's selected recipe is not
+  read (its transfer screen's state was not traced).
 - Extension point (shipped): `kiln.craftmenu` v1, implemented inside content-data's existing `0xd5ade0` hook (no
   second detour): Kiln tabs and subcategories are copies of a workshop's tab array in near memory with Kiln's entries
   appended; the tree header is pointed at the copy; labels are new LocaTagReference GUIDs whose tag ids content's loca
   hooks answer. Info panels next to the menu are Kiln overlay windows (they know station, workshop and selected
   recipe). **[dis] [rt]**
+
+## 5a. Names and icons for mod UIs (client 26430625 / server 26430253; 0.2.0-dev.29.15) **[refl] [data]**
+What Kiln reads to name and draw items, workshops and recipes in mod windows (Kiln.Items' `GameNames`, Kiln.Ui's
+`ItemIcons`), from the game's resident data, so without a world (main menu) and on a joined client:
+- **Item icons**: the `keen::UiTextureResource` under the item's own GUID (docs/re/resources.md section 4, "Item icons as
+  pictures"). `ItemInfo.iconImage` has no reader (docs/re/content.md 8.3).
+- **Texts**: `keen::LocaTagCollectionResource` (one resource, 40 B: `englishData` ResourceContentReference @0, `languages`
+  BlobArray @0x20 of `LocaTagCollectionResourceLanguage` 40 B {`language` keen::LanguageId (sint32) @0, `data`
+  ResourceContentReference @8}). A language's content blob is a `LocaTagCollectionResourceData` {`tags`: BlobArray of
+  `LocaTagResource` 24 B {`id` LocaTagId @0, `text` BlobString @4, `arguments` @0xc, `genericArguments` @0x14}}. keen::LanguageId:
+  1 En_Us, 3 De_De, ... 34 Uk_Ua (the same order as Kiln.Ui's `GameLanguage` keys). A dedicated server's data has none of it.
+- **An item's name**: `ItemInfo.name` @0x48, a NameLocaTag (16-byte GUID); its tag id is FNV-1a-32 of the 16 bytes.
+- **Workshops**: `keen::WorkshopRegistryResource` {`npcs` @0, `workshops` @8: BlobArray of `WorkshopResource` 56 B
+  {`workshopGuid` @4, `workshopId` @0x14, `name` LocaTagId @0x18, `item` ItemId @0x1c (the item that places it), `itemRef`
+  @0x20}}.
+- **Recipes**: `keen::RecipeRegistryResource` `recipes` @0: BlobArray of `RecipeInfo` 168 B {`recipeId` @0x10, `output` @0x30
+  (BlobArray of `RecipeItemStackResource` 24 B {`item` @0x10, `count` @0x14}), `recipeName` NameLocaTag @0x68}; most recipes'
+  `recipeName` is empty (their result names them).
+- **The game's items by id**: every `keen::ItemInfo` resource of the game's data (4,268 on 26430625); id = FNV-1a-32 of its
+  GUID (kiln.items' registry check and kiln.content agree). Kiln reads every offset from the game's reflection (kiln.types).
 
 ## 5b. Main-menu pages (client 26430625, static analysis only)
 Nothing in this section has been seen running. Source: `kiln-wave/dev22/re/REPORT-main-menu.md` (Ghidra headless,

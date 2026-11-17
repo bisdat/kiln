@@ -127,6 +127,7 @@ bool game_screens_on();
 bool game_menu_on(uint32_t menu);
 bool game_in_menu();   // no world steps (boot, main menu, loading)
 KilnResult game_screen(KilnUiScreen* out);
+uint32_t game_screen_target();  // a factory screen's station entity of the last UI frame, else 0
 KilnResult game_subscribe_screen(KilnOwner owner, KilnUiScreenFn fn, void* user, KilnHandle* out);
 KilnResult game_subscribe_tick(KilnOwner owner, KilnUiTickFn fn, void* user, KilnHandle* out);
 KilnResult game_subscribe_frame_tick(KilnOwner owner, KilnUiFrameTickFn fn, void* user, KilnHandle* out);
@@ -182,6 +183,7 @@ void style_frame_begin();                    // render thread, before NewFrame: 
 void style_frame_end();                      // render thread, after the frame: unbalanced pushes
 float style_scale();
 KilnHandle image_load(KilnOwner owner, const void* png, size_t len);
+KilnHandle image_load_rgba(KilnOwner owner, const uint8_t* rgba, uint32_t w, uint32_t h);  // w*h*4 bytes, copied
 bool image_size(KilnHandle h, uint32_t* w, uint32_t* hgt);
 void image_draw(KilnHandle h, float w, float hgt);
 bool image_button(const char* id, KilnHandle h, float w, float hgt);

@@ -101,12 +101,22 @@ internal sealed class EntityTable(bool strict = false)
     public int UnresolvedCount => _unresolved.Count + _strict.Values.Sum(t => t.UnresolvedCount);
     public int Matched => _matched + _strict.Values.Sum(t => t.Matched);
 
+    /// <summary>Loaded attachments of <paramref name="mod"/> (it has keys on them) still waiting for their entity.</summary>
+    public int UnresolvedFor(string mod) =>
+        _unresolved.Count(r => r.ByMod.TryGetValue(mod, out var k) && k.Count > 0) + _strict.Values.Sum(t => t.UnresolvedFor(mod));
+
+    /// <summary>Saved attachments of <paramref name="mod"/> matched to a loaded entity since the world's data was loaded.</summary>
+    public int MatchedFor(string mod) => _matchedByMod.GetValueOrDefault(mod) + _strict.Values.Sum(t => t.MatchedFor(mod));
+
+    private readonly Dictionary<string, int> _matchedByMod = new(StringComparer.Ordinal);
+
     public void Clear()
     {
         foreach (var t in _strict.Values) t.Clear();
         _live.Clear();
         _unresolved.Clear();
         _serviceClaims.Clear();
+        _matchedByMod.Clear();
         _missCounted = false;
     }
 
@@ -370,6 +380,8 @@ internal sealed class EntityTable(bool strict = false)
         }
         _live[e.Value] = u;
         _matched++;
+        foreach (var (mod, keys) in u.ByMod)
+            if (keys.Count > 0) _matchedByMod[mod] = _matchedByMod.GetValueOrDefault(mod) + 1;
         if (u.ByMod.Keys.Any(ServiceEntityData.IsScope)) _serviceClaims.Add(u);
     }
 

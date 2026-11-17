@@ -11,6 +11,7 @@
 #include "cooktrust.h"
 #include "nlohmann/json.hpp"
 #include "services/kiln_profile.h"
+#include "texture_rgba.h"
 
 namespace fs = std::filesystem;
 using nlohmann::json;
@@ -861,6 +862,40 @@ KilnResult KILN_CALL t_cat_read(KilnHandle h, uint64_t first, KilnBlobCatalogEnt
 }
 KilnResult KILN_CALL t_cat_close(KilnHandle h) { return op_catalog_close(h); }
 
+// texture_rgba (0.2.0-dev.29.15): a texture's pixels, one mip level, as RGBA8 (texture_rgba.h). Kiln.Ui draws the game's own
+// item icons with it; nothing is written anywhere. The pixel blob is read whole (an item icon's chain is 87 KB).
+KilnResult KILN_CALL t_tex_rgba(const KilnAssetKey* k, uint32_t min_side, uint8_t* rgba, size_t cap, uint32_t* out_w, uint32_t* out_h) {
+    if (out_w) *out_w = 0;
+    if (out_h) *out_h = 0;
+    if (!k || (cap && !rgba)) return KILN_ERR_INVALID_ARGUMENT;
+    if (!resources_on()) return KILN_ERR_UNAVAILABLE;
+    std::vector<uint8_t> rb(256);
+    size_t rn = 0;
+    KilnResult rr = op_resource_read(k, rb.data(), rb.size(), &rn);
+    if (rr == KILN_ERR_BUFFER_TOO_SMALL && rn <= (1u << 20)) {
+        rb.resize(rn);
+        rr = op_resource_read(k, rb.data(), rb.size(), &rn);
+    }
+    if (rr != KILN_OK) return rr == KILN_ERR_BUFFER_TOO_SMALL ? KILN_ERR_INVALID_ARGUMENT : rr;
+    tex::Desc d;
+    if (!tex::describe(k->type, rb.data(), rn, &d) || !tex::supported(d.format)) return KILN_ERR_INVALID_ARGUMENT;
+    uint32_t lw = 0, lh = 0;
+    const uint32_t level = tex::pick_level(d, min_side);
+    const size_t at = tex::level_offset(d, level, &lw, &lh), need = tex::level_bytes(d.format, lw, lh);
+    if (out_w) *out_w = lw;
+    if (out_h) *out_h = lh;
+    if (!rgba || cap < static_cast<size_t>(lw) * lh * 4) return KILN_ERR_BUFFER_TOO_SMALL;
+    if (at + need > d.blob_size() || d.blob_size() > (64u << 20)) return KILN_ERR_INVALID_ARGUMENT;  // the resource does not add up
+    std::vector<uint8_t> blob(d.blob_size());
+    KilnContentHash h;
+    std::memcpy(&h, d.hash, 16);
+    size_t got = 0;
+    const KilnResult br = op_blob_read(&h, blob.data(), blob.size(), &got);
+    if (br != KILN_OK) return br == KILN_ERR_INTERNAL ? KILN_ERR_INTERNAL : KILN_ERR_NOT_FOUND;
+    if (got < at + need || !tex::decode(d.format, lw, lh, blob.data() + at, got - at, rgba)) return KILN_ERR_NOT_FOUND;
+    return KILN_OK;
+}
+
 const KilnAssetsApi kTable = {
     {sizeof(KilnAssetsApi), KILN_ASSETS_VERSION},
     &t_icon_png, &t_icon_file, &t_icon_remove, &t_icon_state,
@@ -874,6 +909,7 @@ const KilnAssetsApi kTable = {
     &t_when_ready,
     &t_blob_add_ex, &t_blob_over_ex,  // since 0.2.0-dev.28
     &t_cat_open, &t_cat_read, &t_cat_close,
+    &t_tex_rgba,  // since 0.2.0-dev.29.15
 };
 
 const KilnAssetsVfxApi kVfxTable = {
