@@ -398,5 +398,89 @@
     "item": "Item {id} × {count}",
     "close_window": "Close window",
     "declined": "shroudlink declined the last request ({error}); refreshing its current state."
+  },
+  "shroudforge": {
+    "labels": {
+      "waits": "WHAT IT WAITS FOR",
+      "settings": "SWITCH AND SETTINGS"
+    },
+    "waits": {
+      "restart": "The next game start: ShroudForge loads this mod's changed configuration only when the game starts again.",
+      "dependency": "A mod it needs: ShroudForge starts it once that mod runs (the reason above names it).",
+      "write_access": "Write access to the game world. ShroudForge gives it once a world this game hosts is running: your single-player world, or a co-op world you host. In someone else's world or on a dedicated server it may never come; there the mod has to run on the host's game or on the server.",
+      "world": "A world: it starts working once you are in a world this game hosts, not in the main menu.",
+      "player": "Your character in the world.",
+      "glide": "You to glide. It changes the glider only while you are gliding, so between flights (and whenever this menu is open) it says waiting. That is normal: it applies when you take off.",
+      "other": "Something the mod needs is not there yet; its own words are under STATE above."
+    },
+    "reading": "Reading its settings...",
+    "cannot_show": "Its settings cannot be shown: {error}",
+    "files_unreadable": "its files could not be read: {error}",
+    "value_unreadable": "the value of setting {setting} cannot be read ({error})",
+    "too_many": "too many choices, groups or actions for this page (1000 combined at most). Change settings in the mod's extended.mod.json; the file is unchanged.",
+    "value_error": "a value cannot be read ({error})",
+    "on": "On",
+    "off": "Off",
+    "switch_live": "ShroudForge switches it on or off while you play.",
+    "switch_next": "Switching it on or off takes effect at the next game start (it changes game data when the game starts).",
+    "switch_profile": "Your Kiln profile lists this mod: the Kiln launcher sets this switch from the profile when it starts the game. To keep a change, make it in the profile too.",
+    "repair": "ShroudForge refuses this mod until its settings are saved once: an earlier Kiln wrote {settings} without its fraction.",
+    "repair_more": "ShroudForge refuses this mod until its settings are saved once: an earlier Kiln wrote {settings} and {more} more without its fraction.",
+    "repair_here": "{repair} Changing any setting or its switch here repairs it.",
+    "no_settings": "This mod has no settings.",
+    "other_settings": "Other settings",
+    "hidden": {
+      "one": "{count} more setting is not shown here (this mod has {total}; the page shows the first {shown}). Change them in the mod's extended.mod.json.",
+      "other": "{count} more settings are not shown here (this mod has {total}; the page shows the first {shown}). Change them in the mod's extended.mod.json."
+    },
+    "saved_to": "Saved to the mod's extended.mod.json, the file ShroudForge and the Kiln launcher read.",
+    "next_start": "Applies at the next game start.",
+    "only_used_while": "{value}  (only used while {setting} is {want})",
+    "value_on": "on",
+    "value_off": "off",
+    "shortcut": "Shortcut: {key}",
+    "shortcut_help": "Edit the SDL binding below (not key capture): Ctrl+SDL:66 is Ctrl+F9; Mouse:4 is mouse button 4. Empty disables it. SF checks keyboard availability.",
+    "field_nul": "This value holds a NUL character, which a text field cannot show or keep: change it in the mod's extended.mod.json.",
+    "field_long": "Too long to edit here ({length} characters): change it in the mod's extended.mod.json.",
+    "not_a_number": "{setting}: \"{text}\" is not a number",
+    "save": {
+      "switch_live_on": "Saved: {mod} is requested on; a running ShroudForge normally picks this up within a second or two. Check its state above.",
+      "switch_live_off": "Saved: {mod} is requested off; a running ShroudForge normally picks this up within a second or two. Check its state above.",
+      "switch_next_on": "Saved: {mod} is configured on for the next game start.",
+      "switch_next_off": "Saved: {mod} is configured off for the next game start.",
+      "setting_live": "Saved: {setting} can apply while its mod is active; ShroudForge normally picks this up within a second or two.",
+      "setting_next": "Saved: {setting} is configured for the next game start.",
+      "unreadable_after": "extended.mod.json was changed, but it cannot be read back: {error}. ShroudForge may refuse the mod until the file is fixed.",
+      "failed": "Could not save: {error}"
+    },
+    "action": {
+      "confirm": "Confirm: {action}",
+      "not_running": "{action} was not sent: ShroudForge runs actions only while it runs the mod (see its state above). Nothing was queued.",
+      "still_waiting": "{action}: an earlier request for {mod} (from this or an earlier game start) is still waiting for ShroudForge, which runs it once the mod takes it; nothing new was queued.",
+      "requested": "Requested: {action}.",
+      "failed": "{action} could not be sent: {error}"
+    },
+    "binding": "ShroudForge mods: open Kiln's ShroudForge page",
+    "check": {
+      "whole": "{setting} takes a whole number",
+      "type": "{setting} takes a {type}, not a {given}",
+      "keep_one": "{setting} must keep at least one choice so ShroudForge keeps its option type",
+      "finite": "{setting} takes a finite number",
+      "null_first": "{setting}: \"{choice}\" cannot come first in this list (it has no value, and ShroudForge would refuse the mod)",
+      "no_value_choice": "a choice without a value",
+      "shortcut": "{setting}: use an SDL shortcut such as Ctrl+SDL:66 or Mouse:4 (empty disables it; modifier order Ctrl, Alt, Shift, Meta)",
+      "length": "{setting} must be {min} to {max} characters long",
+      "length_min": "{setting} must be {min} to any number of characters long",
+      "range": "{setting} must be between {min} and {max}",
+      "not_option": "{setting}: not one of {options}"
+    },
+    "kind": {
+      "boolean": "yes/no value",
+      "integer": "whole number",
+      "number": "number",
+      "array": "list",
+      "string": "text",
+      "value": "value"
+    }
   }
 }
