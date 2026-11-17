@@ -1,0 +1,43 @@
+{
+  "language": {
+    "name": "English"
+  },
+  "common": {
+    "add": "Add",
+    "back": "Back",
+    "cancel": "Cancel",
+    "close": "Close",
+    "copy": "Copy",
+    "delete": "Delete",
+    "dismiss": "Dismiss",
+    "done": "Done",
+    "install": "Install",
+    "ok": "OK",
+    "open": "Open",
+    "refresh": "Refresh",
+    "remove": "Remove",
+    "reset": "Reset",
+    "retry": "Retry",
+    "save": "Save",
+    "show": "Show",
+    "undo": "Undo",
+    "update": "Update"
+  },
+  "languageSettings": {
+    "title": "Language",
+    "launcher": "Launcher",
+    "system": "System (default)",
+    "launcherHint": "The launcher's own texts. Applies at once; a text a translation lacks shows in English. Messages from Kiln itself stay in English for now.",
+    "files": "Your translation files:",
+    "filesReload": "Read the translation files again",
+    "filesRead.one": "{count} translation file read",
+    "filesRead.other": "{count} translation files read",
+    "filesBad": "{0}: {1}",
+    "game": "Kiln in game",
+    "gameAuto": "Same as the game (default)",
+    "gameHint": "Kiln's own menus and messages in the game (kiln.json ui.language). A language Kiln has no texts for shows English. Mods choose their own.",
+    "gameNoKiln": "Install Kiln on Runtime first.",
+    "gameNoGame": "No game selected.",
+    "saved": "Kiln in game: {0}"
+  }
+}
