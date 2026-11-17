@@ -178,7 +178,7 @@ internal sealed unsafe class BootFake : IKitFake
     }
 
     /// <summary>boot.GameData in the kit: the records the test scripted (KilnHarness.BootPhase.SetRecord), else NotFound.</summary>
-    private sealed class KitGameData(BootFakeState state) : IReadOnlyGameData
+    internal sealed class KitGameData(BootFakeState state) : IReadOnlyGameData
     {
         private static readonly Regex Query = new(@"^(item:.+|template:.+|skill:0x[0-9a-fA-F]{8}|material:.+|names:(items|templates|skills|materials|templates/[A-Za-z0-9_]{1,96})|resource:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/[0-9a-fA-F]{8}/[0-9]+)$",
             RegexOptions.CultureInvariant);
@@ -199,8 +199,14 @@ internal sealed unsafe class BootFake : IKitFake
                     var what = key[6..];
                     var component = what.StartsWith("templates/", StringComparison.Ordinal) ? what[10..] : null;
                     var prefix = (component != null ? "templates" : what)[..^1] + ":";
+                    // names:templates/<component>: the template's own components only, as kiln.boot answers (a variant of that type
+                    // nested in a component's data is not one)
+                    static bool HasComponent(JsonElement record, string component) =>
+                        record.ValueKind == JsonValueKind.Object && record.TryGetProperty("components", out var list) && list.ValueKind == JsonValueKind.Array &&
+                        list.EnumerateArray().Any(c => c.ValueKind == JsonValueKind.Object && c.TryGetProperty("$type", out var t) &&
+                                                       t.ValueKind == JsonValueKind.String && t.GetString() == component);
                     var names = state.Records.Where(r => r.Key.StartsWith(prefix, StringComparison.Ordinal))
-                        .Where(r => component == null || r.Value.Value.GetRawText().Replace(" ", "").Contains($"\"$type\":\"{component}\"", StringComparison.Ordinal))
+                        .Where(r => component == null || HasComponent(r.Value.Value, component))
                         .Select(r => r.Key[prefix.Length..]).Order(StringComparer.Ordinal).ToArray();
                     using var doc = System.Text.Json.JsonDocument.Parse(System.Text.Json.JsonSerializer.Serialize(new { names }));
                     return new BootDataResult(true, null, new BootDataValue(Guid.Empty, 0, 0, doc.RootElement.Clone()));

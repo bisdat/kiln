@@ -1630,6 +1630,11 @@ void gamedata_cases() {
     // a matching snapshot: the row, and each query form found and not found
     f0 = t_fail;
     Snap s = make_snapshot("gd-match");
+    // names:templates/<component>: a template with the component, and one whose component's data nests a variant of that type
+    add(s, "templates", "Test_Template_Zone", R"({"name":"zone","components":[{"$type":"Health","points":5},{"$type":"PickupItemZone","radius":2},null]})",
+        "6f9619ff-8b86-d011-b42d-00c04fc964ff", "0000beef", 0);
+    add(s, "templates", "Test_Template_Zz_Nested", R"({"name":"nested","components":[{"$type":"Spawner","spawn":{"$type":"PickupItemZone"}}]})",
+        "6f9619ff-8b86-d011-b42d-00c04fc964fe", "0000beef", 0);
     flush(s);
     KilnOwner a = open_author();
     CHECK(row_is(KILN_CAP_AVAILABLE, s.key));
@@ -1662,6 +1667,16 @@ void gamedata_cases() {
         // names:templates/<component>: only templates whose record has that component type
         const json none = json::parse(read_all(a, "names:templates/NoSuchComponent", &rc), nullptr, false);
         CHECK(rc == KILN_OK && none["value"]["names"].is_array() && none["value"]["names"].empty());
+        // the template's own components only: a variant nested in a component's data is not one
+        const json zone = json::parse(read_all(a, "names:templates/PickupItemZone", &rc), nullptr, false);
+        CHECK(rc == KILN_OK && zone["value"]["names"] == json::parse(R"(["Test_Template_Zone"])"));
+        const json zone_again = json::parse(read_all(a, "names:templates/PickupItemZone", &rc), nullptr, false);
+        CHECK(rc == KILN_OK && zone_again == zone);  // answered from memory
+        const json spawner = json::parse(read_all(a, "names:templates/Spawner", &rc), nullptr, false);
+        CHECK(rc == KILN_OK && spawner["value"]["names"] == json::parse(R"(["Test_Template_Zz_Nested"])"));
+        // the type's name exactly: a prefix of it is another type
+        const json prefix = json::parse(read_all(a, "names:templates/PickupItem", &rc), nullptr, false);
+        CHECK(rc == KILN_OK && prefix["value"]["names"].empty());
     }
     for (const std::string& q : std::vector<std::string>{"item:Test_Item_Missing", "item:test_item_logs", "template:Test_Item_Logs", "skill:0x00000001",
                                 "material:Cell13", "material:Test_Item_Logs", "resource:" + kGuidItem + "/1a2b3c4d/1",

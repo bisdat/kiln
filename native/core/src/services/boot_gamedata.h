@@ -195,6 +195,7 @@ class Reader {
         for (auto& k : kinds_) k = Kind{};
         resources_loaded_ = false;
         resources_.clear();
+        by_component_.clear();  // answers of another snapshot
         if (!lower_hex(exe_sha256, 64)) return *why = "the game executable's SHA-256 is not known", false;
         std::string version;
         if (!kfc_version(kfc, &version, why)) return false;
@@ -295,7 +296,9 @@ class Reader {
             } else if (const auto hit = by_component_.find(component); hit != by_component_.end()) {
                 names = hit->second;
             } else {
-                // one pass over templates.data (the producer writes compact JSON: "$type":"<name>"), kept for the process
+                // one pass over templates.data. The producer writes compact JSON, a variant as {"$type":"<name>",...}: a
+                // record that has the text at all is read as JSON, and only its own "components" count (a variant of
+                // that type nested in a component's data is not one of the template's components)
                 const auto data = dir_ / "templates.data";
                 std::ifstream in(data, std::ios::binary);
                 if (!in) return *why = "templates.data could not be read", KILN_ERR_UNAVAILABLE;
@@ -306,8 +309,18 @@ class Reader {
                     value.resize(static_cast<size_t>(e.length));
                     in.seekg(static_cast<std::streamoff>(e.offset));
                     if (!in.read(value.data(), static_cast<std::streamsize>(value.size()))) return *why = "templates.data could not be read", KILN_ERR_UNAVAILABLE;
-                    if (value.find(needle) != std::string::npos) names.push_back(name);
+                    if (value.find(needle) == std::string::npos) continue;
+                    const auto record = nlohmann::json::parse(value, nullptr, false);
+                    const auto list = record.is_object() ? record.find("components") : record.end();
+                    if (list == record.end() || !list->is_array()) continue;
+                    for (const auto& c : *list)
+                        if (c.is_object() && c.contains("$type") && c["$type"].is_string() && c["$type"].get_ref<const std::string&>() == component) {
+                            names.push_back(name);
+                            break;
+                        }
                 }
+                // kept for the process; a mod that asks for many types does not grow it past kComponentQueriesKept
+                if (by_component_.size() >= kComponentQueriesKept) by_component_.clear();
                 by_component_[component] = names;
             }
             std::sort(names.begin(), names.end());
@@ -366,6 +379,7 @@ class Reader {
     }
 
    private:
+    static constexpr size_t kComponentQueriesKept = 64;              // names:templates/<component> answers kept at most
     std::map<std::string, std::vector<std::string>> by_component_;  // names:templates/<component> answers (mutex_)
     bool verify_locked(std::string* why) {
         if (!open_) return *why = damaged_.empty() ? "no snapshot" : damaged_, false;
