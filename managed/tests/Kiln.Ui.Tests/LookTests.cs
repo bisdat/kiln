@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Text.Json;
 using Xunit;
 
 namespace Kiln.LookTests;
@@ -90,6 +91,52 @@ public unsafe class LookTests : IDisposable
         Assert.Equal(s, PlayerLook.Read(path));
         Assert.Contains("// keep me", File.ReadAllText(path));
         Assert.Empty(Directory.GetFiles(_dir, "*.tmp"));
+    }
+
+    [Fact]
+    public void The_launcher_s_settings_say_what_Kiln_reads()
+    {
+        // launcher/src/data/kiln-json.snapshot.json: the launcher's Settings form and its checks of kiln.json
+        using var doc = JsonDocument.Parse(File.ReadAllText(Path.Combine(RepoRoot(), "launcher", "src", "data", "kiln-json.snapshot.json")));
+        var entries = doc.RootElement.GetProperty("entries").EnumerateArray().ToDictionary(e => e.GetProperty("path").GetString()!);
+        Assert.Contains(doc.RootElement.GetProperty("sections").EnumerateArray(), e => e.GetProperty("path").GetString() == "ui");
+        var look = entries["ui.look"];
+        Assert.Equal(LookSettings.Default.Look, look.GetProperty("default").GetString());
+        Assert.Equal(LookSettings.Looks, look.GetProperty("options").EnumerateArray().Select(o => o.GetString()!).ToArray());
+        Assert.Equal("string", entries["ui.theme"].GetProperty("type").GetString());
+        void Range(string key, float def, float min, float max)
+        {
+            var e = entries[key];
+            Assert.Equal(def, e.GetProperty("default").GetSingle());
+            Assert.Equal(min, e.GetProperty("min").GetSingle());
+            Assert.Equal(max, e.GetProperty("max").GetSingle());
+            Assert.False(e.GetProperty("requiresRestart").GetBoolean());  // Kiln reads the file again while the game runs
+        }
+        Range("ui.background", LookSettings.Default.Background, 0.1f, 1f);
+        Range("ui.opacity", LookSettings.Default.Opacity, 0.3f, 1f);
+        Range("ui.scale", LookSettings.Default.Scale, 0.75f, 1.5f);
+        var clamped = new LookSettings("game", "", 0f, 0f, 0f).Clamped();
+        Assert.Equal((0.1f, 0.3f, 0.75f), (clamped.Background, clamped.Opacity, clamped.Scale));
+        clamped = new LookSettings("game", "", 9f, 9f, 9f).Clamped();
+        Assert.Equal((1f, 1f, 1.5f), (clamped.Background, clamped.Opacity, clamped.Scale));
+        // the neutral stand-in is the same in kiln.ui (look_palette.h look::neutral) and Kiln.Ui
+        var h = File.ReadAllText(Path.Combine(RepoRoot(), "native", "services", "ui", "look_palette.h"));
+        var body = h[h.IndexOf("inline Palette neutral()", StringComparison.Ordinal)..];
+        body = body[..body.IndexOf("return p;", StringComparison.Ordinal)];
+        var native = System.Text.RegularExpressions.Regex.Matches(body, @"= 0x([0-9a-f]{8})u;").Select(m => Convert.ToUInt32(m.Groups[1].Value, 16)).ToArray();
+        var n = UiPalette.Neutral;
+        Assert.Equal(new[] { n.Text, n.TextMuted, n.WindowBackground, n.PanelBackground, n.FrameBackground, n.Border, n.Accent, n.Button,
+            n.Header, n.Attention, n.Warning, n.Ok }.Select(c => c.Rgba).ToArray(), native);
+    }
+
+    private static string RepoRoot([CallerFilePath] string source = "")
+    {
+        foreach (var start in new[] { AppContext.BaseDirectory, Path.GetDirectoryName(source) ?? "" })
+            for (var d = new DirectoryInfo(start); d != null; d = d.Parent)
+                if (File.Exists(Path.Combine(d.FullName, "native", "services", "ui", "look_palette.h")) &&
+                    Directory.Exists(Path.Combine(d.FullName, "launcher", "src", "data")))
+                    return d.FullName;
+        throw new InvalidOperationException("repository root not found above the test assembly or its source");
     }
 
     // ---- the native tail ----
