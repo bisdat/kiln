@@ -8,7 +8,7 @@
 // A key the active language lacks shows the English text; one English lacks shows the key itself (both logged once in
 // development). The language preference is "system" (the first of the system's languages that has a file) or a tag.
 import { Fragment, createElement, isValidElement, useMemo, useSyncExternalStore, type ReactNode } from "react";
-import en from "./en.json";
+import en from "./en.json" with { type: "json" };
 import { FALLBACK, fill, flatten, lookupOrder, normalizeTag, pluralCount, rawIn, type Table } from "./format";
 
 export { fill, formatNumber, lookupOrder, placeholders, type Table } from "./format";
