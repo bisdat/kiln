@@ -62,3 +62,51 @@ backend submits and waits for each); the rest wait for the next frames. A set th
 one: kiln.log says so once, the image's state is FAILED, and `image`, `image_button` and kiln.render's image draws draw
 nothing for it (keeping its place; a button stays clickable), as they do for an image still WAITING. Vulkan errors of the
 overlay's backend are logged once per error code. Kiln.Ui's item icon cache keeps at most 256 images.
+
+## Looks, themes and fonts (0.2.0-dev.29.16)
+
+Eight more slots are appended after `image_state`; the service version stays 7. On x64 `theme_create` is at byte offset 928,
+`theme_free` 936, `push_theme` 944, `set_look` 952, `look_info` 960, `font_load` 968, `font_free` 976, `push_font_handle` 984,
+and the table is 992 bytes. Readers check `header.size` through the member they call and that its pointer is non-null; the
+managed mirror is `UiNative.TableLooks`. The guide: [Looks and themes](../ui.md#looks-and-themes-0220-dev2916).
+
+- **Looks.** `push_style` takes `KILN_UI_STYLE_PLAYER` (2) too: the look the player chose (`set_look`). Windows that push no
+  look are drawn in the player's colours as well (their font stays the overlay's default; a push gives a look's font). An
+  older kiln.ui draws `PLAYER` as `KILN`.
+- **Palettes.** A look is a palette of `KILN_UI_ROLE_*` colours (text, muted text, window, panel, frame, border, accent,
+  button, header, attention, warning, ok) from which kiln.ui makes ImGui's colours (`native/services/ui/look_palette.h`,
+  `style.cpp`). The game look's palette comes from the game's UI bundle at run time: `keen::FbUiBundle.menu` /
+  `.globalColors` colour fields (`keen::UiColor.value`, A B G R from the high byte), their offsets from `kiln.types`
+  (`type_by_name`, `type_info`, `type_field`, walking base classes) and the bundle's bytes from `kiln.assets`
+  (`resource_list` with the type's hash, `resource_read`), read once on a worker with the game's font. Without them (no
+  `kiln.types` or `kiln.assets`, a field missing, no bundle) the game look keeps a neutral dark stand-in
+  (`look::neutral`): kiln.log `ui: the game's UI colours are not available (...)` or `... loaded (N of 10 colours ...)`.
+- `theme_create(owner, &KilnUiThemeDef, &handle)`: a theme (copied). `base` GAME or KILN; `roles` (by `role_mask`; R G B
+  over the base's palette, the alpha is the base's), `colors` (by `color_mask`, any `KILN_UI_COLOR_*`, set after the roles),
+  `vars` (by `var_mask`, `KILN_UI_VAR_*` in pixels at scale 1), `background` (the windows' opacity, < 0 the base's),
+  `rounding` (every corner, < 0 the base's), `font` (a `font_load` handle, 0 the base's). `INVALID_ARGUMENT` for a short or
+  null `def`, another base, a value that is not finite. Any thread. `theme_free(handle)` (`NOT_FOUND` when gone).
+- `push_theme(handle)`: inside a frame callback, like `push_style`; `pop_style` pops it, and the end of the frame pops what a
+  callback left. False when there is no such theme (nothing pushed). Kiln.Ui pops what a mod's draw callback left before the
+  next window is drawn.
+- `set_look(&KilnUiLook)`: the player's look: `look` (`KILN_UI_LOOK_GAME`, `TRANSLUCENT`, `KILN`, `THEME` with `theme`;
+  another value is GAME), `background` (TRANSLUCENT's windows' opacity, clamped 0.1..1), `opacity` (ImGui's global alpha and
+  the alpha of `draw_rect` / `draw_text` and their layered forms, clamped 0.3..1), `scale` (multiplies the display's scale
+  for every frame: `KilnUiFrame.dpi_scale` includes it; clamped 0.5..2). Any thread; the next frame follows it. **Kiln.Ui
+  only**: a call whose return address is in a native plugin (a module exporting `kiln_plugin_main`) is refused with
+  `KILN_ERR_UNAVAILABLE` (logged once). A theme the look names that does not exist (yet, or any more) draws the game look.
+- `look_info(&KilnUiLookInfo)`: the player's look (`look`, `theme`, `background`, `opacity`, `scale`; `look` is THEME only
+  while that theme exists), whether the game's colours (`game_colors`) and font (`game_font`) are loaded, and `roles`
+  (`role_count` of them): inside a frame callback the palette of the look pushed now (the player's when none is), elsewhere
+  the player's. Any thread.
+- `font_load(owner, data, len)`: a TrueType or OpenType font (TTF, or OTF with CFF outlines; a collection is refused),
+  copied, added to ImGui's font atlas at the next frame. 0 when the overlay does not draw, the bytes are no font, or the
+  budget is used (`native/services/ui/font_budget.h`: 8 fonts, 8 MiB each, 24 MiB together; kiln.log says which). A font
+  takes no overlay image: the atlas is one texture, glyphs are made on demand. `font_free(handle)` drops it at the next frame.
+  `push_font_handle(handle)`: inside a frame, the font at the current size until `pop_font`; false when it is not in the atlas
+  (yet) or unknown.
+- `KILN_UI_COLOR_COUNT` is 28: `TITLE_BG` 20, `TITLE_BG_ACTIVE` 21, `POPUP_BG` 22, `TAB` 23, `TAB_HOVERED` 24, `TAB_SELECTED`
+  25, `TABLE_HEADER_BG` 26, `TEXT_SELECTED_BG` 27 are new (also for `push_color`; an older kiln.ui ignores them, so do not pop
+  them there).
+- Host test: `native/services/ui/tests/style_host_test.cpp` (in `tests/run.sh`) runs style.cpp on a headless ImGui context
+  with a fake `kiln.types` and `kiln.assets`.

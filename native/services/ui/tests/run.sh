@@ -73,5 +73,10 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -pthread -fsanitize=address,undefined \
     -I"$here/stubs" -I"$here/../../../core/abi" -I"$imgui" \
     "$here/wheel_host_test.cpp" "${objs[@]}" -o "$out/wheel_host_test"
 "$out/wheel_host_test"
+# the looks: the game's colours through reflection, the player's look, themes, mod fonts (style.cpp, look_palette.h, font_budget.h)
+g++ -std=c++20 -O1 -g -Wall -Wextra -Wno-unused-function -pthread -fsanitize=address,undefined \
+    -I"$here/stubs" -I"$here/.." -I"$here/../../../core/abi" -I"$imgui" -I"$here/../../../third_party" \
+    "$here/style_host_test.cpp" "${objs[@]}" -o "$out/style_host_test"
+"$out/style_host_test"
 PYTHONDONTWRITEBYTECODE=1 python3 "$here/render_sigdb_test.py"
 PYTHONDONTWRITEBYTECODE=1 python3 "$here/per_caller_test.py"
