@@ -42,5 +42,171 @@
       "missing": "{language} (Kiln has no texts in this language)",
       "saved": "Kiln's own menus and messages; mods' texts follow the game's language. Saved in kiln/kiln.json (\"ui\"), as the launcher's Settings show."
     }
+  },
+  "classic": {
+    "tab": {
+      "mods": "Mods",
+      "network": "Network",
+      "keys": "Keys",
+      "overlay": "Overlay"
+    },
+    "mods": {
+      "back": "Back to mods",
+      "shroudlink": "shroudlink menus",
+      "count": "{loaded} loaded, {found} found (side: {side})",
+      "kiln_settings": "Kiln settings",
+      "kiln_settings_close": "Close Kiln settings",
+      "col_mod": "Mod",
+      "col_version": "Version",
+      "col_side": "Side",
+      "col_state": "State",
+      "state": {
+        "pending": "pending",
+        "loaded": "loaded",
+        "disabled": "disabled",
+        "failed": "failed",
+        "skipped": "skipped",
+        "unloaded": "unloaded"
+      },
+      "config": "Config",
+      "config_close": "Close",
+      "status": "Status ({count})",
+      "config_of": "Config: {mod}",
+      "no_pages": "Mods add config pages with Ui.AddConfigPage (the config registry's editor plugs in here)."
+    }
+  },
+  "configpage": {
+    "caption": "SETTINGS"
+  },
+  "network": {
+    "on": "Kiln's network is on: mods can talk between this game and a Kiln server.",
+    "off": "Kiln's network is not running in this session.",
+    "role": {
+      "both": "server and client",
+      "server": "server",
+      "client": "client",
+      "none": "none"
+    },
+    "stats": "Role: {role}. Messages in {in}, out {out}, dropped {dropped}. Channels: {channels}. Largest message: {largest} bytes.",
+    "server": {
+      "caption": "Server",
+      "ready": "Kiln {version} on the server",
+      "vanilla": "the server has no Kiln (vanilla)",
+      "rejected": "the server refused this client",
+      "handshake": "handshake in progress",
+      "round_trip": "round trip {ms:F0} ms",
+      "mods": "server mods: {mods}",
+      "none": "Not connected to a server."
+    },
+    "sync": {
+      "applied": "content: {count} change(s) from the server{reset}{errors} ({kib:F0} KiB)",
+      "reset": ", {count} own change(s) put back",
+      "errors": ", {count} error(s)",
+      "hosting": "content: hosting (the server's content is this game's)",
+      "waiting": "content: {detail}",
+      "failed": "content: not synced: {detail}",
+      "none": "content: the server sent no content state",
+      "configs": "configs: {count} synced config(s) from the server, {used} in use here",
+      "configs_none": "configs: the server sent no synced configs"
+    },
+    "clients": {
+      "caption": "Clients ({count})",
+      "col_player": "Player",
+      "col_state": "State",
+      "col_mods": "Mods",
+      "col_rtt": "RTT",
+      "col_frames": "Frames in/out"
+    },
+    "peer": {
+      "connecting": "Connecting",
+      "ready": "Ready",
+      "vanilla": "Vanilla",
+      "rejected": "Rejected",
+      "closed": "Closed"
+    },
+    "ms": "{ms:F0} ms",
+    "admission": "Admission",
+    "channels": {
+      "caption": "Channels ({count})",
+      "line": "{name} v{version}: in {in}, out {out}",
+      "required": "{name} v{version} (required): in {in}, out {out}"
+    }
+  },
+  "keys": {
+    "help_mouse": "Click a key, then press the new one: a key, the middle or a side mouse button, or a turn of the wheel, with Ctrl, Shift or Alt if you like (left and right click can't be bound). Click it again to cancel; Escape cancels and closes the menu. Unbind leaves an action without a key. Saved to kiln/config/keybinds.json.",
+    "help": "Click a key, then press the new one. Click it again to cancel; Escape cancels and closes the menu. Unbind leaves an action without a key. Saved to kiln/config/keybinds.json.",
+    "col_action": "Action",
+    "col_key": "Key",
+    "col_default": "Default",
+    "menu": "Kiln: open this menu",
+    "press": "press a key...",
+    "reset": "Reset",
+    "unbind": "Unbind",
+    "toast": {
+      "wheel_menu": "The Kiln menu's key can't be on the wheel ({key}): it would close the menu as you scroll it"
+    }
+  },
+  "overlay": {
+    "surface": "{width}x{height}, format {format}, scale {scale:F2}",
+    "frames": "presents {presents}, drawn {drawn}, last overlay frame {ms:F2} ms",
+    "counts": "windows {windows}, HUD lines {hud}, frame handlers {handlers}",
+    "screen": "game screen: {kind} ({state}/{hud}), language {language}, UI frame {frame}",
+    "screen_station": "game screen: {kind} ({state}/{hud}), language {language}, UI frame {frame}; crafting station workshop 0x{workshop:x8} recipe 0x{recipe:x8}",
+    "screen_own": "game screen: {kind} ({state}/{hud}), language {language}, UI frame {frame}; crafting own workshop 0x{workshop:x8} recipe 0x{recipe:x8}",
+    "panels_on": "screens open {screens}, crafting panels {panels}, menu extension on",
+    "panels_off": "screens open {screens}, crafting panels {panels}, menu extension off",
+    "test_toast": "Test toast",
+    "test_toast_text": "Kiln overlay works"
+  },
+  "refusal": {
+    "server": "The server refused this game.",
+    "named": "{server} refused this game.",
+    "needs_one": "It needs a mod you don't have:",
+    "needs_many": "It needs mods you don't have:",
+    "you_have": "{mod} {version} (you have {have})",
+    "more": "and {count} more",
+    "modpack": "The Kiln launcher offers this server's modpack.",
+    "add": "Add them in the Kiln launcher, then join again.",
+    "no_reason": "Refused by the server."
+  },
+  "details": {
+    "menu": "Item details",
+    "title": "Item details",
+    "snapshot": "Last inspected item — snapshot (item {item:x8}, frame {frame})",
+    "refresh": "Refresh",
+    "close": "Close"
+  },
+  "gamemenu": {
+    "scroll_crashed": "Kiln: the scrolling pause menu ended the game last time, so it stays off; Kiln's Mods page lists the mods' menu entries.",
+    "summary": {
+      "auto_scrolls": "The pause menu shows every one of them and scrolls when they do not fit (Kiln settings, modEntries: Auto).",
+      "auto": "A game menu shows them while it has at most 3, so its own entries (Quit) stay on the screen (Kiln settings, modEntries: Auto; this menu does not scroll here).",
+      "always": "The game's menus show every one of them (Kiln settings, modEntries: Always).",
+      "never": "The game's menus show none of them (Kiln settings, modEntries: Never).",
+      "few": "A game menu shows them while it has at most 3, so its own entries (Quit) stay on the screen (Kiln settings, modEntries: Few).",
+      "not_drawn": {
+        "one": "{how} {count} of them is not in the game's menu now; choose it here.",
+        "other": "{how} {count} of them are not in the game's menu now; choose them here."
+      }
+    }
+  },
+  "toast": {
+    "render_off_errors": "{mod}: a render handler was turned off (errors)",
+    "render_off_slow": "{mod}: a render handler was turned off (too slow)"
+  },
+  "gemforge": {
+    "outcome": "Gem Forge: {message}"
+  },
+  "abilities": {
+    "server_lacks": "the server does not have this ability",
+    "not_connected": "not connected to a Kiln server"
+  },
+  "blocks": {
+    "toast": {
+      "baked_vfx": "{mod}: vfx \"{name}\" differs from the mod's build: rebuild the mod",
+      "baked_material": "{mod}: material \"{name}\" differs from the mod's build: rebuild the mod",
+      "new_vfx": "{mod}: new VFX \"{name}\": restart the game to see it",
+      "new_material": "{mod}: new material \"{name}\": restart the game to see it"
+    }
   }
 }
