@@ -1566,6 +1566,166 @@ std::string read_all(KilnOwner a, const std::string& q, KilnResult* rc) {
     return out;
 }
 
+// resources.index.json + resources.data (kiln-bootsnap 2): `types` as the producer writes it, `data` the values
+void write_resource_list(const Snap& s, const json& types, const std::string& data) {
+    write_text(s.dir / "resources.index.json", json{{"format", 1}, {"kind", "resources"}, {"types", types}}.dump());
+    write_text(s.dir / "resources.data", data);
+}
+
+void add_resource_checksums(const Snap& s) {
+    json idx = json::parse(std::ifstream(s.dir / "index.json"));
+    for (const char* name : {"resources.index.json", "resources.data"})
+        if (fs::exists(s.dir / name)) idx["checksums"][name] = kiln::boot_gd::file_sha256(s.dir / name);
+    write_text(s.dir / "index.json", idx.dump());
+}
+
+std::string hash_hex(const std::string& type) {
+    char b[9];
+    std::snprintf(b, sizeof b, "%08x", kiln::boot_gd::fnv1a32(type));
+    return b;
+}
+
+void resource_list_cases() {
+    t_case = "gamedata-resources";
+    int f0 = t_fail;
+    const auto saved_exe = t_paths.exe, saved_data = t_paths.data;
+    const std::string saved_sha = t_image.sha256;
+    KilnResult rc = KILN_OK;
+    char buf[512];
+    size_t need = 0;
+    // the hash: FNV-1a 32 of the name's bytes, as tools/bootsnap kinds.fnv1a32
+    CHECK(kiln::boot_gd::fnv1a32("") == 0x811C9DC5u && kiln::boot_gd::fnv1a32("a") == 0xe40c292cu);
+    CHECK(kiln::boot_gd::type_name_ok("keen::SceneResource") && kiln::boot_gd::type_name_ok("keen::anim_graph::runtime_graph::AnimationGraphResource2_0"));
+    CHECK(!kiln::boot_gd::type_name_ok("SceneResource") && !kiln::boot_gd::type_name_ok("keen::a/b") && !kiln::boot_gd::type_name_ok("keen::a-b") &&
+          !kiln::boot_gd::type_name_ok("keen::" + std::string(155, 'x')) && kiln::boot_gd::type_name_ok("keen::" + std::string(154, 'x')));
+    const std::string scene = hash_hex("keen::SceneResource"), item_t = hash_hex("keen::ItemInfo"), hidden = hash_hex("keen::Hidden");
+    const std::string g1 = "a0000000-0000-4000-8000-000000000001", g2 = "a0000000-0000-4000-8000-000000000002",
+                      g3 = "a0000000-0000-4000-8000-000000000003";
+    const std::string v1 = R"({"name":"scene one","chunks":3})", v2 = R"({"sky":"none"})", vd = R"({"name":"duplicate"})";
+    const std::string data = v1 + v2 + vd;
+    const json types = {
+        {"keen::SceneResource", {{"hash", scene}, {"entries", json::array({
+            json::array({g2, 0, "", v1.size(), v2.size()}), json::array({g1, 1, "", 0, v1.size()}), json::array({g3, 0, "", -1, 0})})}}},
+        {"keen::ItemInfo", {{"hash", item_t}, {"entries", json::array({
+            json::array({kGuidItem, 0, "Zed_Item", -1, 0}), json::array({g3, 0, "Alpha", v1.size() + v2.size(), vd.size()}),
+            json::array({g2, 0, "Zed_Item", -1, 0})})}}},
+        {"0x" + hidden, {{"hash", hidden}, {"entries", json::array({json::array({g1, 0, "", -1, 0})})}}},
+        {"keen::Empty", {{"hash", hash_hex("keen::Empty")}, {"entries", json::array()}}},
+    };
+    Snap s = make_snapshot("gd-reslist");
+    add(s, "items", "Zed_Item", R"({"name":"Zed_Item"})", kGuidItem, item_t, 0);
+    flush(s);
+    write_resource_list(s, types, data);
+    add_checksums(s);
+    add_resource_checksums(s);
+    KilnOwner a = open_author();
+    CHECK(row_is(KILN_CAP_AVAILABLE, s.key));
+    {
+        // names:resources/<type>: the names (an unnamed resource by its GUID), every resource sorted by (name, GUID, part)
+        const json sc = json::parse(read_all(a, "names:resources/keen::SceneResource", &rc), nullptr, false);
+        CHECK(rc == KILN_OK && sc.value("resourceId", "") == "00000000-0000-0000-0000-000000000000" && sc.value("typeHash", "") == scene &&
+              sc.value("part", -1) == 0);
+        CHECK(sc["value"]["names"] == json::array({g1, g2, g3}));
+        CHECK(sc["value"]["resources"] == json::parse(R"([{"resourceId":")" + g1 + R"(","part":1,"name":""},{"resourceId":")" + g2 +
+                                                      R"(","part":0,"name":""},{"resourceId":")" + g3 + R"(","part":0,"name":""}])"));
+        const json it = json::parse(read_all(a, "names:resources/keen::ItemInfo", &rc), nullptr, false);
+        CHECK(rc == KILN_OK && it["value"]["names"] == json::array({"Alpha", "Zed_Item"}));  // distinct
+        CHECK(it["value"]["resources"].size() == 3 && it["value"]["resources"][1]["resourceId"] == kGuidItem && it["value"]["resources"][2]["resourceId"] == g2);
+        // a type the producer's reflection lacked: found by the name's hash
+        const json hid = json::parse(read_all(a, "names:resources/keen::Hidden", &rc), nullptr, false);
+        CHECK(rc == KILN_OK && hid.value("typeHash", "") == hidden && hid["value"]["names"] == json::array({g1}));
+        // resource: for any type, by the hash or by the qualified name
+        const json r1 = json::parse(read_all(a, "resource:" + g1 + "/" + scene + "/1", &rc), nullptr, false);
+        CHECK(rc == KILN_OK && r1.value("resourceId", "") == g1 && r1.value("typeHash", "") == scene && r1.value("part", -1) == 1 &&
+              r1["value"] == json::parse(v1));
+        CHECK(json::parse(read_all(a, "resource:" + g1 + "/keen::SceneResource/1", &rc), nullptr, false) == r1 && rc == KILN_OK);
+        CHECK(json::parse(read_all(a, "resource:" + g2 + "/keen::SceneResource/0", &rc), nullptr, false)["value"] == json::parse(v2));
+        // an item: from items.data as before, by the hash or the name; a duplicate one from resources.data
+        const json byname = json::parse(read_all(a, "item:Zed_Item", &rc), nullptr, false);
+        CHECK(rc == KILN_OK && json::parse(read_all(a, "resource:" + kGuidItem + "/keen::ItemInfo/0", &rc), nullptr, false) == byname);
+        CHECK(json::parse(read_all(a, "resource:" + g3 + "/keen::ItemInfo/0", &rc), nullptr, false)["value"] == json::parse(vd));
+    }
+    for (const std::string& q : std::vector<std::string>{"names:resources/keen::NoSuch", "names:resources/keen::Empty", "resource:" + g1 + "/keen::SceneResource/0",
+                                                          "resource:" + g1 + "/keen::NoSuch/1", "resource:" + kGuidRows + "/00c0ffee/0"}) {
+        need = 99;
+        CHECK(B.read_resource(a, ks(q), buf, sizeof buf, &need) == KILN_ERR_NOT_FOUND && need == 99);
+    }
+    // listed without a value (not stored: a skipped line): unavailable
+    CHECK(B.read_resource(a, ks("resource:" + g3 + "/keen::SceneResource/0"), buf, sizeof buf, &need) == KILN_ERR_UNAVAILABLE);
+    for (const std::string& q : std::vector<std::string>{"names:resources/", "names:resources/SceneResource", "names:resources/keen::a-b",
+                                                          "names:resources/keen::" + std::string(155, 'x'), "names:resource/keen::SceneResource",
+                                                          "resource:" + g1 + "/SceneResource/1", "resource:" + g1 + "/keen::Scene.Resource/1",
+                                                          "resource:" + g1 + "/keen::SceneResource/x"})
+        CHECK(B.read_resource(a, ks(q), buf, sizeof buf, &need) == KILN_ERR_INVALID_ARGUMENT);
+    pass_line("BOOT-GAMEDATA-RESOURCES names:resources/<type> lists every resource of a type; resource: reads any type by hash or qualified name", f0);
+
+    // the reader directly: the result maximum and the budget count the list's value bytes
+    f0 = t_fail;
+    {
+        kiln::boot_gd::Reader r;
+        std::string why, out;
+        size_t req = 0, vb = 0;
+        CHECK(r.open(t_paths.data / "boot-gamedata", kSha, t_paths.exe.parent_path() / "enshrouded_server.kfc", &why));
+        CHECK(r.read("names:resources/keen::SceneResource", 1 << 20, 1 << 20, 1 << 20, &out, &req, &vb, &why) == KILN_OK && vb > 0 &&
+              out.size() == vb + out.find("\"value\":") + 9);
+        CHECK(r.read("names:resources/keen::SceneResource", 1 << 20, vb + 40, 1 << 20, &out, &req, &vb, &why) == KILN_ERR_UNAVAILABLE &&
+              why.find("larger than one result") != std::string::npos);
+        CHECK(r.read("names:resources/keen::SceneResource", 1 << 20, 1 << 20, 10, &out, &req, &vb, &why) == KILN_ERR_UNAVAILABLE &&
+              why.find("budget") != std::string::npos);
+        // an older snapshot (no checksums, no list): other keys serve, names:resources says what to run
+        flush(s);
+        fs::remove(s.dir / "resources.index.json");
+        fs::remove(s.dir / "resources.data");
+        CHECK(r.open(t_paths.data / "boot-gamedata", kSha, t_paths.exe.parent_path() / "enshrouded_server.kfc", &why));
+        CHECK(r.read("names:resources/keen::SceneResource", 1 << 20, 1 << 20, 1 << 20, &out, &req, &vb, &why) == KILN_ERR_UNAVAILABLE &&
+              why.find("predates the resource list") != std::string::npos && why.find("--force") != std::string::npos);
+        CHECK(r.read("resource:" + g1 + "/keen::SceneResource/1", 1 << 20, 1 << 20, 1 << 20, &out, &req, &vb, &why) == KILN_ERR_UNAVAILABLE &&
+              why.find("predates the resource list") != std::string::npos);
+        CHECK(r.read("item:Zed_Item", 1 << 20, 1 << 20, 1 << 20, &out, &req, &vb, &why) == KILN_OK);
+        // with checksums of the eight, none of the list: the same
+        add_checksums(s);
+        a = open_author();
+        CHECK(row_is(KILN_CAP_AVAILABLE, s.key));
+        CHECK(B.read_resource(a, ks("names:resources/keen::SceneResource"), buf, sizeof buf, &need) == KILN_ERR_UNAVAILABLE);
+        CHECK(json::parse(read_all(a, "item:Zed_Item", &rc), nullptr, false)["value"]["name"] == "Zed_Item" && rc == KILN_OK);
+    }
+    pass_line("BOOT-GAMEDATA-RESOURCES-OLD a snapshot without the resource list serves every other key; the list's answers respect the result max and budget", f0);
+
+    // listed but missing, or a checksum that does not match: the snapshot is damaged
+    f0 = t_fail;
+    {
+        flush(s);
+        write_resource_list(s, types, data);
+        add_checksums(s);
+        add_resource_checksums(s);
+        fs::remove(s.dir / "resources.data");
+        a = open_author();
+        CHECK(row_is(KILN_CAP_UNAVAILABLE, "damaged: index.json lists resources.data, which is missing"));
+        write_resource_list(s, types, data + " ");
+        a = open_author();
+        CHECK(row_is(KILN_CAP_UNAVAILABLE, "damaged: resources.data does not match its checksum"));
+        CHECK(B.read_resource(a, ks("item:Zed_Item"), buf, sizeof buf, &need) == KILN_ERR_UNAVAILABLE);
+        // an entry pointing outside resources.data is refused, never read out of range
+        json bad = types;
+        bad["keen::SceneResource"]["entries"][0][3] = 1000;
+        write_resource_list(s, bad, data);
+        add_resource_checksums(s);
+        a = open_author();
+        CHECK(row_is(KILN_CAP_AVAILABLE, s.key));
+        CHECK(B.read_resource(a, ks("resource:" + g2 + "/keen::SceneResource/0"), buf, sizeof buf, &need) == KILN_ERR_UNAVAILABLE);
+        // a list that is not format 1 breaks names:resources (and says so each time), not the other keys
+        write_text(s.dir / "resources.index.json", R"({"format":1,"kind":"resources","types":{"keen::X":{"hash":"zz","entries":[]}}})");
+        add_resource_checksums(s);
+        a = open_author();
+        CHECK(B.read_resource(a, ks("names:resources/keen::X"), buf, sizeof buf, &need) == KILN_ERR_UNAVAILABLE);
+        CHECK(B.read_resource(a, ks("names:resources/keen::X"), buf, sizeof buf, &need) == KILN_ERR_UNAVAILABLE);
+        CHECK(json::parse(read_all(a, "item:Zed_Item", &rc), nullptr, false)["value"]["name"] == "Zed_Item" && rc == KILN_OK);
+    }
+    pass_line("BOOT-GAMEDATA-RESOURCES-DAMAGED a listed list file that is missing or does not match makes the snapshot not ready", f0);
+    t_paths.exe = saved_exe, t_paths.data = saved_data;
+    t_image.sha256 = saved_sha;
+}
+
 void gamedata_cases() {
     t_case = "gamedata";
     int f0 = t_fail;
@@ -1679,12 +1839,16 @@ void gamedata_cases() {
         CHECK(rc == KILN_OK && prefix["value"]["names"].empty());
     }
     for (const std::string& q : std::vector<std::string>{"item:Test_Item_Missing", "item:test_item_logs", "template:Test_Item_Logs", "skill:0x00000001",
-                                "material:Cell13", "material:Test_Item_Logs", "resource:" + kGuidItem + "/1a2b3c4d/1",
-                                "resource:" + kGuidItem + "/1a2b3c4e/0", "resource:" + kGuidRows + "/00c0ffee/0"}) {
+                                "material:Cell13", "material:Test_Item_Logs"}) {
         need = 99;
         CHECK(B.read_resource(a, ks(q), buf, sizeof buf, &need) == KILN_ERR_NOT_FOUND && need == 99);
     }
     // outside the grammar: refused before any index is touched, also with a snapshot
+    // a resource that is no item or template, in a snapshot without the resource list (kiln-bootsnap 1): unavailable
+    for (const std::string& q : std::vector<std::string>{"resource:" + kGuidRows + "/00c0ffee/0", "resource:" + kGuidItem + "/1a2b3c4d/1",
+                                                          "resource:" + kGuidItem + "/1a2b3c4e/0"})
+        CHECK(B.read_resource(a, ks(q), buf, sizeof buf, &need) == KILN_ERR_UNAVAILABLE);
+    CHECK(B.read_resource(a, ks("names:resources/keen::SceneResource"), buf, sizeof buf, &need) == KILN_ERR_UNAVAILABLE);
     for (const char* q : {"item:", "item:../index", "item:a/b", "skill:8efcc472", "npc:Fisher", "items:Test_Item_Logs", "names:", "names:npcs", "names:items/Health", "names:templates/", "names:templates/a-b",
                           "resource:" "0F8FAD5B-D9CB-469F-A165-70867728950E/1a2b3c4d/0", "index.json", ""})
         CHECK(B.read_resource(a, ks(q), buf, sizeof buf, &need) == KILN_ERR_INVALID_ARGUMENT);
@@ -2064,6 +2228,7 @@ int main(int argc, char** argv) {
     not_committed_cases();
     buffer_cases();
     gamedata_cases();
+    resource_list_cases();
     reset_boot();
     fs::remove_all(t_root);
     std::printf("BOOT SERVICE TESTS %d PASS %d FAIL\n", t_pass, t_fail);

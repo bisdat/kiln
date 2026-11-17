@@ -8,19 +8,21 @@
 // Threads: open() and read() are boot-thread calls (kiln_boot.h); a mutex of the reader's own guards its indexes all
 // the same, and no caller's lock is needed or held across its file IO.
 //
-// Paths: a file name is always "<kind>.index.json" or "<kind>.data" of the four fixed kinds below; the query's text
-// is only ever a key into a loaded index, never part of a path.
+// Paths: a file name is always "<kind>.index.json" or "<kind>.data" of the four fixed kinds below, or
+// "resources.index.json"; the query's text is only ever a key into a loaded index, never part of a path.
 #pragma once
 #include <algorithm>
 #include <map>
 #include <array>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <mutex>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -37,6 +39,28 @@ constexpr size_t kWrapperMax = 256;            // bytes of {"resourceId",...} ar
 constexpr const char* kKinds[4] = {"items", "templates", "skills", "materials"};
 constexpr const char* kHint =
     "no game-data snapshot for this game build: start through the Kiln launcher, or run `kiln boot-snapshot --game <dir>`";
+// Every resource of the archive by type (kiln-bootsnap 2 on): optional, a snapshot of an older producer serves the rest
+constexpr const char* kResources = "resources.index.json";
+constexpr const char* kResourcesData = "resources.data";
+constexpr const char* kNoResources =
+    "this snapshot predates the resource list: start through the Kiln launcher or run `kiln boot-snapshot --game <dir> --force`";
+constexpr size_t kTypeNameMax = 160;
+
+/// 32-bit FNV-1a of a name's bytes: the game's type hash of a qualified type name (tools/bootsnap kinds.fnv1a32).
+inline uint32_t fnv1a32(std::string_view s) {
+    uint32_t h = 0x811C9DC5u;
+    for (const char c : s) h = (h ^ static_cast<uint8_t>(c)) * 0x01000193u;
+    return h;
+}
+
+/// A qualified type name as a query may give it: "keen::SceneResource". Letters, digits, '_' and ':', at least one
+/// "::", at most 160 bytes.
+inline bool type_name_ok(std::string_view s) {
+    if (s.empty() || s.size() > kTypeNameMax || s.find("::") == std::string_view::npos) return false;
+    for (const char c : s)
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == ':')) return false;
+    return true;
+}
 
 // ---- SHA-256 (FIPS 180-4), for the key and the files' checksums: the core's own hash is the OS's and the host test has
 // none. Streaming, so a data file of hundreds of MiB is hashed in blocks.
@@ -196,6 +220,8 @@ class Reader {
         resources_loaded_ = false;
         resources_.clear();
         by_component_.clear();  // answers of another snapshot
+        drop_resource_list();
+        has_resource_list_ = false;
         if (!lower_hex(exe_sha256, 64)) return *why = "the game executable's SHA-256 is not known", false;
         std::string version;
         if (!kfc_version(kfc, &version, why)) return false;
@@ -235,6 +261,23 @@ class Reader {
                         return *why = "the snapshot " + key_ + " is damaged: index.json has no valid checksum of " + name, false;
                     checksums_.emplace_back(name, it->get<std::string>());
                 }
+            // resources.index.json and resources.data (kiln-bootsnap 2): optional; listed, each is checked with the others
+            // and has to be there, and the list serves only with both
+            int listed = 0;
+            for (const char* name : {kResources, kResourcesData}) {
+                const auto it = sums->is_object() ? sums->find(name) : sums->end();
+                if (it == sums->end()) continue;
+                if (!it->is_string() || !lower_hex(it->get_ref<const std::string&>(), 64))
+                    return *why = "the snapshot " + key_ + " is damaged: index.json has no valid checksum of " + name, false;
+                if (!std::filesystem::is_regular_file(dir_ / name, ec))
+                    return *why = "the snapshot " + key_ + " is damaged: index.json lists " + name + ", which is missing", false;
+                checksums_.emplace_back(name, it->get<std::string>());
+                ++listed;
+            }
+            has_resource_list_ = listed == 2;
+        } else {
+            // a snapshot from before checksums: the list is read when it is there
+            has_resource_list_ = std::filesystem::is_regular_file(dir_ / kResources, ec) && std::filesystem::is_regular_file(dir_ / kResourcesData, ec);
         }
         open_ = true;
         return true;
@@ -261,7 +304,8 @@ class Reader {
         return key_;
     }
 
-    /// One query of the grammar kiln.boot checked (item:, template:, skill:, material:, resource:, names:<kind>).
+    /// One query of the grammar kiln.boot checked (item:, template:, skill:, material:, resource:, names:<kind>,
+    /// names:templates/<component type>, names:resources/<qualified type name>).
     ///   KILN_OK              *json holds {"resourceId","typeHash","part","value"}; *value_bytes the value's length
     ///   KILN_ERR_BUFFER_TOO_SMALL  capacity (which counts the NUL) is too small: *required is set, no data is read
     ///   KILN_ERR_NOT_FOUND   no such record in the snapshot
@@ -277,6 +321,8 @@ class Reader {
         const std::string_view form = query.substr(0, colon), arg = query.substr(colon + 1);
         const Entry* e = nullptr;
         size_t kind = 0;
+        if (form == "names" && arg.substr(0, 10) == "resources/")
+            return read_resource_list(arg.substr(10), capacity, result_max, budget_left, json, required, value_bytes, why);
         if (form == "names") {
             // names:<kind>: the names of one kind's index, sorted, as {"names": [...]} (no resource of its own)
             // names:templates/<component type>: the templates whose record has a component of that type
@@ -337,10 +383,29 @@ class Reader {
         }
         if (form == "resource") {
             if (!load_resources(why)) return KILN_ERR_UNAVAILABLE;
-            const auto it = resources_.find(lowered(arg));
-            if (it == resources_.end()) return *why = "not in the boot snapshot", KILN_ERR_NOT_FOUND;
-            kind = it->second.first;
-            e = it->second.second;
+            // <GUID>/<8 hex type hash>/<part>, or <GUID>/<qualified type name>/<part>: the name stands for its FNV-1a hash
+            std::string key = lowered(arg);
+            const auto a = arg.find('/'), b = arg.rfind('/');
+            if (a != std::string_view::npos && b > a && !lower_hex(lowered(arg.substr(a + 1, b - a - 1)), 8)) {
+                char hash[9];
+                std::snprintf(hash, sizeof hash, "%08x", fnv1a32(arg.substr(a + 1, b - a - 1)));
+                key = lowered(arg.substr(0, a)) + "/" + hash + std::string(arg.substr(b));
+            }
+            const auto it = resources_.find(key);
+            if (it != resources_.end()) {
+                kind = it->second.first;
+                e = it->second.second;
+            } else {
+                // any other resource: its value in resources.data (from the list, loaded once)
+                if (!load_resource_list(why)) return KILN_ERR_UNAVAILABLE;
+                const auto hit = res_values_.find(key);
+                if (hit == res_values_.end()) return *why = "not in the boot snapshot", KILN_ERR_NOT_FOUND;
+                if (hit->second.length == 0)
+                    return *why = "the boot snapshot lists this resource but does not hold its value (index.json's skipped says why)",
+                           KILN_ERR_UNAVAILABLE;
+                kind = 4;
+                e = &hit->second;
+            }
         } else {
             kind = form == "item" ? 0 : form == "template" ? 1 : form == "skill" ? 2 : form == "material" ? 3 : 4;
             if (kind == 4) return KILN_ERR_INVALID_ARGUMENT;
@@ -358,19 +423,20 @@ class Reader {
         const size_t need = head.size() + static_cast<size_t>(e->length) + 2;
         if (capacity < need) return *required = need, KILN_ERR_BUFFER_TOO_SMALL;  // the only answer that sets it
         // the entry has to lie inside its data file: never read past it, never answer with a short read
-        const auto data = dir_ / (std::string(kKinds[kind]) + ".data");
+        const std::string file_kind = kind == 4 ? "resources" : kKinds[kind];
+        const auto data = dir_ / (file_kind + ".data");
         std::error_code ec;
         const auto size = std::filesystem::file_size(data, ec);
         if (ec || e->offset > size || e->length > size - e->offset)
-            return *why = std::string("an entry of ") + kKinds[kind] + ".index.json points outside " + kKinds[kind] + ".data",
+            return *why = std::string("an entry of ") + file_kind + ".index.json points outside " + file_kind + ".data",
                    KILN_ERR_UNAVAILABLE;
         std::string value;
         if (!read_at(data, e->offset, static_cast<size_t>(e->length), static_cast<size_t>(e->length), &value))
-            return *why = std::string(kKinds[kind]) + ".data could not be read", KILN_ERR_UNAVAILABLE;
+            return *why = std::string(file_kind) + ".data could not be read", KILN_ERR_UNAVAILABLE;
         // one complete JSON object, as the contract says: anything else would break the result around it
         const auto first = value.find_first_not_of(" \t\r\n");
         if (first == std::string::npos || value[first] != '{' || !nlohmann::json::accept(value))
-            return *why = std::string("an entry of ") + kKinds[kind] + ".data is not one JSON object", KILN_ERR_UNAVAILABLE;
+            return *why = std::string("an entry of ") + file_kind + ".data is not one JSON object", KILN_ERR_UNAVAILABLE;
         *json = head;
         *json += value;
         *json += '}';
@@ -379,6 +445,122 @@ class Reader {
     }
 
    private:
+    // names:resources/<qualified type name>: every resource of that type, from resources.index.json
+    KilnResult read_resource_list(std::string_view type, size_t capacity, size_t result_max, uint64_t budget_left, std::string* json,
+                                  size_t* required, size_t* value_bytes, std::string* why) {
+        if (!type_name_ok(type)) return KILN_ERR_INVALID_ARGUMENT;
+        if (!load_resource_list(why)) return KILN_ERR_UNAVAILABLE;
+        auto it = res_types_.find(std::string(type));
+        if (it == res_types_.end()) {
+            // a type the producer's reflection lacked is listed under its hash: the name's hash finds it
+            char hash[9];
+            std::snprintf(hash, sizeof hash, "%08x", fnv1a32(type));
+            if (const auto h = res_by_hash_.find(hash); h != res_by_hash_.end()) it = res_types_.find(h->second);
+        }
+        if (it == res_types_.end() || it->second.entries.empty()) return *why = "no resource of this type in the boot snapshot", KILN_ERR_NOT_FOUND;
+        const ResType& t = it->second;
+        nlohmann::ordered_json names = nlohmann::ordered_json::array(), list = nlohmann::ordered_json::array();
+        std::vector<std::string_view> distinct;
+        distinct.reserve(t.entries.size());
+        for (const auto& e : t.entries) {
+            distinct.push_back(e.name.empty() ? std::string_view(e.guid) : std::string_view(e.name));
+            list.push_back(nlohmann::ordered_json{{"resourceId", e.guid}, {"part", e.part}, {"name", e.name}});
+        }
+        std::sort(distinct.begin(), distinct.end());
+        distinct.erase(std::unique(distinct.begin(), distinct.end()), distinct.end());
+        for (const auto n : distinct) names.push_back(std::string(n));
+        const std::string value = nlohmann::ordered_json{{"names", std::move(names)}, {"resources", std::move(list)}}.dump();
+        const std::string head = "{\"resourceId\":\"00000000-0000-0000-0000-000000000000\",\"typeHash\":\"" + t.hash + "\",\"part\":0,\"value\":";
+        if (value.size() > result_max || head.size() + value.size() + 2 > result_max)
+            return *why = "the list of resources is larger than one result may be", KILN_ERR_UNAVAILABLE;
+        if (value.size() > budget_left) return *why = "the mod's game-data budget is spent", KILN_ERR_UNAVAILABLE;
+        const size_t need = head.size() + value.size() + 2;
+        if (capacity < need) return *required = need, KILN_ERR_BUFFER_TOO_SMALL;
+        *json = head + value + "}";
+        *value_bytes = value.size();
+        return KILN_OK;
+    }
+
+    struct Res {
+        std::string guid, name;
+        uint32_t part = 0;
+    };
+    struct ResType {
+        std::string hash;          // 8 lower hex digits
+        std::vector<Res> entries;  // sorted by (name, GUID, part)
+    };
+
+    void drop_resource_list() {
+        res_loaded_ = res_ok_ = false;
+        res_why_.clear();
+        res_types_.clear();
+        res_by_hash_.clear();
+        res_values_.clear();
+    }
+
+    // resources.index.json, loaded once at the first names:resources query; a broken file stays broken (and says why)
+    bool load_resource_list(std::string* why) {
+        if (!has_resource_list_) return *why = kNoResources, false;
+        if (!res_loaded_) {
+            res_loaded_ = true;
+            res_ok_ = parse_resource_list();
+            if (!res_ok_) res_types_.clear(), res_by_hash_.clear(), res_values_.clear();
+        }
+        if (!res_ok_) *why = res_why_;
+        return res_ok_;
+    }
+
+    bool parse_resource_list() {
+        const std::string name = kResources;
+        const auto file = dir_ / kResources;
+        std::error_code ec;
+        const auto size = std::filesystem::file_size(file, ec);
+        if (ec) return res_why_ = name + " could not be opened", false;
+        if (size > kIndexMax) return res_why_ = name + " is larger than 64 MiB", false;
+        std::string text;
+        if (!read_at(file, 0, static_cast<size_t>(size), static_cast<size_t>(size), &text)) return res_why_ = name + " could not be read", false;
+        const auto j = nlohmann::json::parse(text, nullptr, false);
+        text = std::string();
+        if (!j.is_object() || !j.contains("format") || !j["format"].is_number_integer() || j["format"] != 1 || !j.contains("kind") ||
+            !j["kind"].is_string() || j["kind"].get_ref<const std::string&>() != "resources" || !j.contains("types") || !j["types"].is_object())
+            return res_why_ = name + " is not a format 1 list of resources", false;
+        for (const auto& [type, v] : j["types"].items()) {
+            const auto bad = [&] {
+                return res_why_ = name + ": the type " + type.substr(0, 64) + " is not {hash, entries [[guid, part, name, offset, length]...]}", false;
+            };
+            if (!v.is_object() || !v.contains("hash") || !v["hash"].is_string() || !lower_hex(v["hash"].get_ref<const std::string&>(), 8) ||
+                !v.contains("entries") || !v["entries"].is_array())
+                return bad();
+            ResType t;
+            t.hash = v["hash"].get<std::string>();
+            t.entries.reserve(v["entries"].size());
+            for (const auto& e : v["entries"]) {
+                if (!e.is_array() || e.size() != 5 || !e[0].is_string() || !guid_ok(e[0].get_ref<const std::string&>()) || !e[1].is_number_unsigned() ||
+                    e[1].get<uint64_t>() > 0x7fffffffu || !e[2].is_string() || !e[3].is_number_integer() || !e[4].is_number_unsigned())
+                    return bad();
+                // offset -1, length 0: no value in resources.data (an item or template read through its kind, or not stored)
+                const bool none = e[3].is_number_integer() && !e[3].is_number_unsigned() && e[3].get<int64_t>() == -1;
+                if (none ? e[4].get<uint64_t>() != 0
+                         : (!e[3].is_number_unsigned() || e[3].get<uint64_t>() >= kOffsetMax || e[4].get<uint64_t>() == 0 || e[4].get<uint64_t>() >= kOffsetMax))
+                    return bad();
+                t.entries.push_back(Res{e[0].get<std::string>(), e[2].get<std::string>(), static_cast<uint32_t>(e[1].get<uint64_t>())});
+                Entry v;
+                v.offset = none ? 0 : e[3].get<uint64_t>();
+                v.length = none ? 0 : e[4].get<uint64_t>();
+                v.guid = t.entries.back().guid;
+                v.type = t.hash;
+                v.part = t.entries.back().part;
+                res_values_[v.guid + "/" + v.type + "/" + std::to_string(v.part)] = std::move(v);
+            }
+            std::sort(t.entries.begin(), t.entries.end(), [](const Res& a, const Res& b) {
+                return std::tie(a.name, a.guid, a.part) < std::tie(b.name, b.guid, b.part);
+            });
+            res_by_hash_.emplace(t.hash, type);
+            res_types_.emplace(type, std::move(t));
+        }
+        return true;
+    }
+
     static constexpr size_t kComponentQueriesKept = 64;              // names:templates/<component> answers kept at most
     std::map<std::string, std::vector<std::string>> by_component_;  // names:templates/<component> answers (mutex_)
     bool verify_locked(std::string* why) {
@@ -392,6 +574,7 @@ class Reader {
                 resources_loaded_ = false;
                 by_component_.clear();
                 resources_.clear();
+                drop_resource_list();
                 return *why = damaged_, false;
             }
         verified_ = true;
@@ -484,6 +667,12 @@ class Reader {
     Kind kinds_[4];
     bool resources_loaded_ = false;
     std::unordered_map<std::string, std::pair<size_t, const Entry*>> resources_;
+    bool has_resource_list_ = false;  // resources.index.json is there (and checked, when index.json has checksums)
+    bool res_loaded_ = false, res_ok_ = false;
+    std::string res_why_;
+    std::unordered_map<std::string, ResType> res_types_;     // qualified type name (or "0x<hash>") -> its resources
+    std::unordered_map<std::string, std::string> res_by_hash_;  // 8 hex type hash -> its key in res_types_
+    std::unordered_map<std::string, Entry> res_values_;         // "<guid>/<8 hex>/<part>" -> its value in resources.data (length 0: none)
 };
 
 }  // namespace kiln::boot_gd

@@ -224,7 +224,8 @@ bool hex_run(std::string_view s, size_t n, bool lower_only) {
     return true;
 }
 
-// The query forms of IReadOnlyGameData.Read (chapter 08 §4.1), and names:<kind> (the names one kind's index holds).
+// The query forms of IReadOnlyGameData.Read (chapter 08 §4.1), names:<kind> (the names one kind's index holds) and
+// names:resources/<qualified type name> (every resource of that type).
 bool query_ok(std::string_view q) {
     const auto colon = q.find(':');
     if (colon == std::string_view::npos) return false;
@@ -232,6 +233,7 @@ bool query_ok(std::string_view q) {
     if (form == "names") {
         // names:<kind>, or names:templates/<component type> (templates that have one: "MiningNode")
         if (arg == "items" || arg == "templates" || arg == "skills" || arg == "materials") return true;
+        if (arg.substr(0, 10) == "resources/") return boot_gd::type_name_ok(arg.substr(10));
         if (arg.substr(0, 10) != "templates/" || arg.size() == 10 || arg.size() > 10 + 96) return false;
         for (const char c : arg.substr(10))
             if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_')) return false;
@@ -241,7 +243,7 @@ bool query_ok(std::string_view q) {
     if (form == "material") return name_ok(arg, false);
     if (form == "skill") return arg.size() == 10 && arg[0] == '0' && arg[1] == 'x' && hex_run(arg.substr(2), 8, false);
     if (form != "resource") return false;
-    // <canonical GUID>/<8 hex typeHash>/<decimal part>
+    // <canonical GUID>/<8 hex typeHash>/<decimal part>, or <canonical GUID>/<qualified type name>/<decimal part>
     const auto a = arg.find('/'), b = a == std::string_view::npos ? a : arg.find('/', a + 1);
     if (a == std::string_view::npos || b == std::string_view::npos) return false;
     const std::string_view guid = arg.substr(0, a), type = arg.substr(a + 1, b - a - 1), part = arg.substr(b + 1);
@@ -250,7 +252,7 @@ bool query_ok(std::string_view q) {
         const bool dash = i == 8 || i == 13 || i == 18 || i == 23;
         if (dash ? guid[i] != '-' : !hex_run(guid.substr(i, 1), 1, true)) return false;
     }
-    if (!hex_run(type, 8, false) || part.empty() || part.size() > 10 || (part.size() > 1 && part[0] == '0')) return false;
+    if (!(hex_run(type, 8, false) || boot_gd::type_name_ok(type)) || part.empty() || part.size() > 10 || (part.size() > 1 && part[0] == '0')) return false;
     uint64_t v = 0;
     for (const char c : part) {
         if (c < '0' || c > '9') return false;
