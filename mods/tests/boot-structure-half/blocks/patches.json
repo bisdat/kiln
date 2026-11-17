@@ -1,0 +1,13 @@
+{
+  "$schema": "../../../../schema/kiln-blocks.schema.json",
+  "format": 1,
+  "resourcePatches": {
+    "half": {
+      "format": 1,
+      "resource": "9dc19a07-a069-41d9-a433-bd015475b82e",
+      "type": "keen::ecs::TemplateResource",
+      "removeComponents": ["SpawnTime"],
+      "set": { "PickupItemZone.lastAttempt.value": 1 }
+    }
+  }
+}

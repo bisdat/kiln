@@ -11,7 +11,8 @@ namespace Kiln;
 
 /// <summary>Fields of one game resource, set before the game reads it. Stage it in <see cref="Mod.OnBoot"/>:
 /// <c>BootDefinitions.For(boot).Define("more-altars", new ResourcePatchBlock { ... })</c>. Numbers, bools and enums
-/// only. Two mods that set one field are not combined: the later mod's boot content is refused.</summary>
+/// only. Two mods that set one field are not combined: the later mod's boot content is refused. A patch is applied whole
+/// or not at all: when one of its changes cannot be written, none of them is kept and the fault names the patch.</summary>
 /// <example>
 /// <code>
 /// new ResourcePatchBlock

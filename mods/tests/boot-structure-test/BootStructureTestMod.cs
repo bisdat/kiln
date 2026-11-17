@@ -1,8 +1,15 @@
 // SPDX-License-Identifier: MIT
 // Lab test of the structural edits of a boot resource patch (docs/kiln/modding/resource-patches.md, "Templates and
-// lists"): in OnBoot it reads names:templates and the game's records, then stages
+// lists"): in OnBoot it reads names:templates (and names:templates/<component>, the templates' own components only) and the
+// game's records, then stages
 //   - LootPickup_Gravity_Twigs: SpawnTime removed, PickupItemZone added (it has none), its lastAttempt and Gravity.isActive set;
-//   - keen::BalancingTable.altarsPerFlameLevel: 17 and 18 appended above its last (the game's ends at 16), 3 not (below).
+//   - keen::BalancingTable.altarsPerFlameLevel: 17 and 18 appended above its last (the game's ends at 16), 3 not (below);
+//   - Projectile_Enemy_Fogger_Elite_Flying_Critter: 2.5 appended to a list inside a component
+//     (EnemyProjectileBehavior.horizontalHitAngles, a BlobArray<keen::Angle>);
+// and checks the patch of the data-only mod boot-structure-half (deploy it next to this one): on LootPickup_Gravity_Aloe,
+// SpawnTime removed and a field of PickupItemZone set, which Aloe has not got. The set fails when it is applied, so the
+// whole patch is left out (SpawnTime stays) and boot.json names the patch once. (A mod whose boot content faulted is not
+// loaded, so the failing patch is another mod's.)
 // Once the world is up it reads the served resources back (ReflectedResources) and logs PASS/FAIL lines.
 using System.Text.Json;
 using Kiln;
@@ -13,6 +20,8 @@ public sealed class BootStructureTestMod : Mod
 {
     internal static readonly Guid Twigs = Guid.Parse("9bf5aac3-6ae0-43b1-9f27-18c2f98abfca");
     internal static readonly Guid Balancing = Guid.Parse("82706b40-61b1-4b8f-8b23-dcec6971bda1");
+    internal static readonly Guid Fogger = Guid.Parse("056fbc9c-cb33-45b3-b8c5-67ed83fec33c");
+    internal static readonly Guid Aloe = Guid.Parse("9dc19a07-a069-41d9-a433-bd015475b82e");
     private int _pass, _fail;
 
     private void Check(bool ok, string what)
@@ -31,6 +40,13 @@ public sealed class BootStructureTestMod : Mod
             Log.Info($"boot-structure-test: INFO names:templates ok={names.Ok} count={count} ({names.Reason})");
             Directory.CreateDirectory(Context.DataDirectory);
             File.WriteAllText(Path.Combine(Context.DataDirectory, "boot-names.txt"), count.ToString());
+            // names:templates/<component>: the templates that hold one (three hold a PickupItemZone on this game build)
+            var zones = boot.GameData.Read("names:templates/PickupItemZone");
+            var zoneNames = zones.Ok ? zones.Data!.Value.GetProperty("names").EnumerateArray().Select(x => x.GetString()).ToList() : [];
+            var spawnTimes = boot.GameData.Read("names:templates/SpawnTime");
+            var twigs = spawnTimes.Ok && spawnTimes.Data!.Value.GetProperty("names").EnumerateArray().Any(x => x.GetString() == "LootPickup_Gravity_Twigs");
+            Log.Info($"boot-structure-test: INFO names:templates/PickupItemZone ok={zones.Ok} [{string.Join(", ", zoneNames)}]; SpawnTime has Twigs: {twigs}");
+            File.WriteAllText(Path.Combine(Context.DataDirectory, "boot-components.txt"), $"{zoneNames.Count} {twigs}");
         }
         catch (Exception e)
         {
@@ -51,6 +67,19 @@ public sealed class BootStructureTestMod : Mod
             Append = new() { ["altarsPerFlameLevel"] = new ResourceListAppend { Values = [17, 3, 18], AboveLast = true } },
         });
         if (!b.Ok) throw new InvalidOperationException(b.Reason);
+        var c = d.Define("fogger", new ResourcePatchBlock
+        {
+            Resource = Fogger, Type = "keen::ecs::TemplateResource",
+            Append = new() { ["EnemyProjectileBehavior.horizontalHitAngles"] = new ResourceListAppend { Values = [2.5] } },
+        });
+        if (!c.Ok) throw new InvalidOperationException(c.Reason);
+    }
+
+    private static List<string> ComponentsOf(ReflectedResource t)
+    {
+        var n = t.Count("components");
+        return Enumerable.Range(0, n).Select(i => t.VariantType($"components[{i}]")?.Name ?? "?")
+            .Select(x => x[(x.LastIndexOf(':') + 1)..]).ToList();
     }
 
     public override void OnLoad()
@@ -98,6 +127,38 @@ public sealed class BootStructureTestMod : Mod
                 var last2 = n >= 2 ? (Convert.ToInt64(bal[$"altarsPerFlameLevel[{n - 2}]"]), Convert.ToInt64(bal[$"altarsPerFlameLevel[{n - 1}]"])) : (0, 0);
                 Check(last2 == (17, 18), $"altarsPerFlameLevel ends 17, 18 ({n} entries; 3 left out)");
             }
+
+            var componentsFile = Path.Combine(Context.DataDirectory, "boot-components.txt");
+            var components = File.Exists(componentsFile) ? File.ReadAllText(componentsFile) : "";
+            Check(components == "3 True", $"names:templates/PickupItemZone lists 3 templates, names:templates/SpawnTime has Twigs ({components})");
+
+            // an append to a list inside a template's component
+            var fog = ReflectedResources.Get(Fogger, "keen::ecs::TemplateResource");
+            Check(fog is { Exists: true }, "Projectile_Enemy_Fogger_Elite_Flying_Critter is served");
+            if (fog is { Exists: true })
+            {
+                var at = ComponentsOf(fog).IndexOf("EnemyProjectileBehavior");
+                var n = at >= 0 ? fog.Count($"components[{at}].horizontalHitAngles") : -1;
+                var last = n > 0 ? Convert.ToDouble(fog[$"components[{at}].horizontalHitAngles[{n - 1}]"]) : double.NaN;
+                Check(n == 7 && Math.Abs(last - 2.5) < 1e-6, $"EnemyProjectileBehavior.horizontalHitAngles has 7 angles, the last 2.5 ({n}, {last})");
+            }
+
+            // a patch that fails when it is applied is left out whole: Aloe keeps its SpawnTime, the fault names the patch once
+            var aloe = ReflectedResources.Get(Aloe, "keen::ecs::TemplateResource");
+            if (aloe is { Exists: true })
+            {
+                var types = ComponentsOf(aloe);
+                Check(types.Contains("SpawnTime") && !types.Contains("PickupItemZone"), $"the failed patch \"half\" changed nothing ({string.Join(", ", types)})");
+            }
+            else
+            {
+                Check(true, "the failed patch \"half\" changed nothing (Aloe is served as the game's own)");
+            }
+            var half = Mods.BootState("boot-structure-half");
+            Log.Info($"boot-structure-test: INFO boot-structure-half: {half.State}, {half.Issues.Count} issue(s)");
+            var faults = half.Issues.Where(i => i.Key == "half").ToList();
+            Check(faults.Count == 1 && faults[0].Reason.Contains("PickupItemZone") && faults[0].Reason.Contains("nothing of this patch was applied"),
+                $"one fault for \"half\" ({string.Join(" | ", faults.Select(f => f.Reason))})");
         }
         catch (Exception e)
         {
