@@ -43,9 +43,21 @@ public static class Bases
         }
     }
 
-    /// <summary>The base with this id; null when none has it now.</summary>
+    /// <summary>The base with this id; null when none has it now. Builds only that base's record.</summary>
     [ServerOnly, TickThreadOnly, RequiresCapability(Stations.ReadCapability)]
-    public static BaseInfo? Get(BaseId id) => id.IsNone ? null : All.FirstOrDefault(b => b.Id == id);
+    public static BaseInfo? Get(BaseId id)
+    {
+        StationsCore.CheckRead("Bases.Get");
+        return StationsCore.Find(id, out var nb) ? StationsCore.InfoOf(nb) : null;
+    }
+
+    /// <summary>The base with this id, when one has it now.</summary>
+    [ServerOnly, TickThreadOnly, RequiresCapability(Stations.ReadCapability)]
+    public static bool TryGet(BaseId id, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out BaseInfo? info)
+    {
+        info = Get(id);
+        return info is not null;
+    }
 
     /// <summary>The base the entity stands in (the game's own lookup by position); null when none.</summary>
     [ServerOnly, TickThreadOnly, RequiresCapability(Stations.ReadCapability)]
@@ -70,10 +82,17 @@ public static class Bases
         return StationsCore.InfoOf(nb);
     }
 
-    /// <summary>The base's crafting-stock containers, in the game's order (the order its fill takes from them).</summary>
+    /// <summary>The base's crafting-stock containers, in the game's order (the order its fill takes from them): the Magic
+    /// storage chests and the player-planted refilling fruit trees and palms. With <paramref name="deposit"/>: only those
+    /// that take deposits (the game's <c>canReceiveAreaDeposit</c>, as a player's quick-stack station switch sets it per
+    /// chest: the trees take none), the containers <see cref="FindRoomFor"/> and <see cref="Stations.CollectToBase"/> use.</summary>
     /// <exception cref="KeyNotFoundException">No base has this id now.</exception>
     [ServerOnly, TickThreadOnly, RequiresCapability(Stations.ReadCapability)]
-    public static IReadOnlyList<EntityId> Storage(BaseId id) => StationsCore.List(id, water: false, "Bases.Storage");
+    public static IReadOnlyList<EntityId> Storage(BaseId id, bool deposit = false)
+    {
+        var all = StationsCore.List(id, water: false, "Bases.Storage");
+        return deposit ? all.Where(StationsCore.TakesDeposits).ToArray() : all;
+    }
 
     /// <summary>The base's water sources that hold water (wells, water barrels), in the game's order.</summary>
     /// <exception cref="KeyNotFoundException">No base has this id now.</exception>
@@ -86,8 +105,8 @@ public static class Bases
     public static IReadOnlyDictionary<ItemId, long> Stock(BaseId id)
     {
         StationsCore.CheckRead("Bases.Stock");
-        var info = Get(id) ?? throw new KeyNotFoundException($"Bases.Stock: no base has the id {id} now");
-        var (rc, rows) = StationsCore.Backend.BaseStock((uint)info.Index);
+        if (!StationsCore.Find(id, out var nb)) throw new KeyNotFoundException($"Bases.Stock: no base has the id {id} now");
+        var (rc, rows) = StationsCore.Backend.BaseStock(nb.Index);
         StationsCore.Check(rc, "Bases.Stock");
         return rows.ToDictionary(r => new ItemId(r.Item), r => (long)r.Count);
     }
@@ -96,12 +115,13 @@ public static class Bases
     [ServerOnly, TickThreadOnly, RequiresCapability(Stations.ReadCapability)]
     public static long Stock(BaseId id, ItemId item) => Stock(id).TryGetValue(item, out var n) ? n : 0;
 
-    /// <summary>A crafting-stock container of the base for <paramref name="item"/>, as the game's quick stack would choose:
-    /// one that holds the item already and has room for it, else one with a free slot; null when none has room.</summary>
+    /// <summary>A crafting-stock container of the base that takes deposits (<see cref="Storage"/> with deposit) for
+    /// <paramref name="item"/>: one that holds the item already and has room for it, else one with a free slot; null when
+    /// none has room.</summary>
     [ServerOnly, TickThreadOnly, RequiresCapability(Stations.ReadCapability)]
     public static EntityId? FindRoomFor(BaseId id, ItemId item)
     {
-        var chests = Storage(id);
+        var chests = Storage(id, deposit: true);
         var max = Items.Get(item)?.MaxStack ?? 1;
         EntityId? free = null;
         foreach (var c in chests)
@@ -130,6 +150,31 @@ public static partial class Stations
     /// <summary>True when kiln.stations reads here (a server world, stations.read on).</summary>
     [AnyThread]
     public static bool Available => StationsCore.Backend.Status() is { Read: true };
+
+    /// <summary>True once Kiln's first scan of the world's stations is done: <see cref="All"/> is complete from then on (a
+    /// watch scans every 32 steps; the world loads its entities for some seconds after its first step). Any thread.</summary>
+    [AnyThread]
+    public static bool Scanned => StationsCore.Backend.Scanned();
+
+    /// <summary>The production station nearest to <paramref name="entity"/> (a player) within <paramref name="radius"/>
+    /// metres, optionally of one workshop; null when none. The server cannot tell which station screen a player has open:
+    /// this is the stand-in (two stations side by side: the nearer one).</summary>
+    [ServerOnly, TickThreadOnly, RequiresCapability(ReadCapability)]
+    public static EntityId? Nearest(EntityId entity, uint? workshop = null, double radius = 8)
+    {
+        StationsCore.CheckRead("Stations.Nearest");
+        if (World.Position(entity) is not { } at) return null;
+        EntityId? best = null;
+        var bestD = radius * radius;
+        foreach (var s in All())
+        {
+            if (Read(s) is not { } info || (workshop is { } w && info.Workshop != w)) continue;
+            var p = info.Position;
+            var d = (p.X - at.X) * (p.X - at.X) + (p.Y - at.Y) * (p.Y - at.Y) + (p.Z - at.Z) * (p.Z - at.Z);
+            if (d <= bestD) { bestD = d; best = s; }
+        }
+        return best;
+    }
 
     /// <summary>Every production station of the world (a scan at most every 32 steps).</summary>
     /// <exception cref="InvalidOperationException">Not on the tick thread.</exception>
@@ -303,33 +348,30 @@ public static partial class Stations
         return StationsCore.Send(r, [], StationAction.Select, "Stations.Select");
     }
 
-    /// <summary>Moves a station's finished items (<see cref="StationInfo.Outputs"/>, or only those of
-    /// <paramref name="item"/>) into <paramref name="to"/> through the game's own slot transfer (Kiln.Items' move: needs
-    /// <c>items.move</c>).</summary>
+    /// <summary>Moves a station's finished items (<see cref="StationInfo.Outputs"/>; <paramref name="what"/> can add or choose
+    /// <see cref="StationInfo.Leftovers"/>), or only those of <paramref name="item"/>, into <paramref name="to"/> through
+    /// the game's own slot transfer (Kiln.Items' move: needs <c>items.move</c> too).</summary>
     /// <returns><see cref="StationActionStatus.Unchanged"/> when there was nothing to move; <see cref="StationActionStatus.NoRoom"/>
     /// when nothing fit; <see cref="StationActionStatus.Partial"/> when some did.</returns>
     /// <exception cref="ArgumentException">An entity is none.</exception>
     /// <exception cref="InvalidOperationException">Not on the tick thread.</exception>
     /// <exception cref="KilnUnavailableException">stations.read or items.move is off.</exception>
     [ServerOnly, TickThreadOnly, RequiresCapability(ReadCapability)]
-    public static Task<StationResult> Collect(EntityId station, EntityId to, ItemId? item = null)
+    public static Task<StationResult> Collect(EntityId station, EntityId to, ItemId? item = null, CollectWhat what = CollectWhat.Outputs)
     {
         StationsCore.CheckRead("Stations.Collect");
         if (to.IsNone) throw new ArgumentException("no target", nameof(to));
-        return StationsCore.Collect(station, item, _ => to);
+        return StationsCore.Collect(station, item, what, _ => to);
     }
 
-    /// <summary>As <see cref="Collect"/>, into the station's base: for each output a crafting-stock chest that holds the
-    /// item already, else one with a free slot (<see cref="Bases.FindRoomFor"/>).</summary>
+    /// <summary>As <see cref="Collect"/>, into the station's base: for each stack a crafting-stock chest that takes
+    /// deposits and holds the item already, else one with a free slot (<see cref="Bases.FindRoomFor"/>).</summary>
     [ServerOnly, TickThreadOnly, RequiresCapability(ReadCapability)]
-    public static Task<StationResult> CollectToBase(EntityId station, ItemId? item = null)
+    public static Task<StationResult> CollectToBase(EntityId station, ItemId? item = null, CollectWhat what = CollectWhat.Outputs)
     {
         StationsCore.CheckRead("Stations.CollectToBase");
-        return StationsCore.Collect(station, item, it =>
-        {
-            var b = Bases.Of(station);
-            return b is null ? null : Bases.FindRoomFor(b.Id, it);
-        });
+        var b = Bases.Of(station);
+        return StationsCore.Collect(station, item, what, it => b is null ? null : Bases.FindRoomFor(b.Id, it));
     }
 }
 
@@ -354,6 +396,7 @@ internal interface IStationsBackend
     int Submit(in StationsNative.Request r, StationsNative.Stack[] keep, ulong owner, long key);
     int Watch(bool on);
     ulong LastSeq();
+    bool Scanned();
     int Events(ulong after, Span<StationsNative.Event> into, out uint count);
 }
 
@@ -557,6 +600,15 @@ internal static unsafe partial class StationsCore
 
         public ulong LastSeq() => T == null ? 0 : T->LastSeq();
 
+        public bool Scanned()
+        {
+            var t = T;
+            if (t == null) return false;
+            StationsNative.Status s = default;
+            s.Size = (uint)sizeof(StationsNative.Status);
+            return t->GetStatus(&s) == StationsNative.Ok && s.Scanned != 0;
+        }
+
         public int Events(ulong after, Span<StationsNative.Event> into, out uint count)
         {
             uint n = 0;
@@ -638,25 +690,53 @@ internal static unsafe partial class StationsCore
     // ---- reads ----
     internal static BaseInfo InfoOf(in StationsNative.Base b)
     {
-        var altars = new List<EntityId>();
+        var altars = new List<BaseAltar>();
         var n = Math.Min(b.AltarCount, (uint)StationsNative.MaxAltars);
         fixed (uint* a = b.Altars)
-            for (var i = 0; i < n; i++) altars.Add(new EntityId(a[i]));
-        string? name = null;
-        if (altars.Count > 0)
-        {
-            try { name = Items.ContainerName(altars[0]); }
-            catch (Exception e) when (e is KilnUnavailableException or InvalidOperationException or NotSupportedException) { }
-        }
+            for (var i = 0; i < n; i++) altars.Add(new BaseAltar(new EntityId(a[i]), new BaseId(StationsNative.AltarIdOf(b, i))));
         return new BaseInfo(new BaseId(StationsNative.GuidOf(b.Id)), (int)b.Index, altars, new WorldPosition(b.Min.X, b.Min.Y, b.Min.Z),
-            new WorldPosition(b.Max.X, b.Max.Y, b.Max.Z), (int)b.StorageCount, (int)b.WaterCount, (int)b.ZoneCount, (int)b.StationCount, name);
+            new WorldPosition(b.Max.X, b.Max.Y, b.Max.Z), (int)b.StorageCount, (int)b.WaterCount, (int)b.ZoneCount, (int)b.StationCount);
+    }
+
+    /// <summary>The native record of the base with this id, without building the others.</summary>
+    internal static bool Find(BaseId id, out StationsNative.Base found)
+    {
+        found = default;
+        if (id.IsNone) return false;
+        var b = Backend;
+        if (b.BaseCount(out var n) != StationsNative.Ok) return false;
+        for (uint i = 0; i < n; i++)
+            if (b.BaseAt(i, out var nb) == StationsNative.Ok && StationsNative.GuidOf(nb.Id) == id.Value)
+            {
+                found = nb;
+                return true;
+            }
+        return false;
+    }
+
+    /// <summary>Whether a crafting-stock container takes deposits: its DynamicInventoryCraftingStock override when set,
+    /// else its template's InventoryCraftingStock.canReceiveAreaDeposit. Unknown: yes (a Magic chest's default).</summary>
+    internal static bool TakesDeposits(EntityId c)
+    {
+        try
+        {
+            if (World.ReadBytes(c, "DynamicInventoryCraftingStock") is { Length: >= 2 } d && d[0] != 0) return d[1] != 0;
+            if (Spawn.Inspect(c)?.Template is { } t && Content.Templates.Get(t) is { } entry)
+            {
+                var v = entry.Get("InventoryCraftingStock.canReceiveAreaDeposit");
+                if (v.Type is ContentValueType.Bool or ContentValueType.Int) return v.Bool;
+            }
+        }
+        catch (Exception e) when (e is KilnUnavailableException or InvalidOperationException or NotSupportedException or KeyNotFoundException
+                                       or ArgumentException) { }
+        return true;
     }
 
     internal static IReadOnlyList<EntityId> List(BaseId id, bool water, string api)
     {
         CheckRead(api);
-        var b = Bases.Get(id) ?? throw new KeyNotFoundException($"{api}: no base has the id {id} now");
-        var (rc, ids) = Backend.BaseList((uint)b.Index, water);
+        if (!Find(id, out var b)) throw new KeyNotFoundException($"{api}: no base has the id {id} now");
+        var (rc, ids) = Backend.BaseList(b.Index, water);
         Check(rc, api);
         return ids.Select(x => new EntityId(x)).ToArray();
     }
@@ -681,8 +761,11 @@ internal static unsafe partial class StationsCore
         var outputs = new List<StationStack>();
         for (var i = 0; i < Math.Min(r.OutputCount, (uint)StationsNative.MaxOutputs); i++)
             outputs.Add(new StationStack(new ItemId(r.Outputs[i * 2]), (int)r.Outputs[i * 2 + 1]));
+        string? name = null;
+        try { name = Content.Recipes.Get(r.Id)?.Name; }
+        catch (Exception e) when (e is KilnUnavailableException or InvalidOperationException or NotSupportedException) { }
         return new StationRecipe(r.Id, r.Workshop, inputs, outputs, TimeSpan.FromTicks(r.DurationNs / 100), (int)r.WaterCharges,
-            r.KnowledgeId == 0);
+            r.KnowledgeId == 0) { Name = name };
     }
 
     internal static IngredientCategory? CategoryOf(uint id)
@@ -700,17 +783,26 @@ internal static unsafe partial class StationsCore
         try { slots = Items.Read(station)?.Slots ?? []; }
         catch (Exception e) when (e is KilnUnavailableException or InvalidOperationException or NotSupportedException) { }
         var shown = s.SelectedRecipe != 0 ? s.SelectedRecipe : s.RunningRecipe;
-        var outputs = OutputSlots(slots, RecipeOf(shown), s.RunningRecipe != shown ? RecipeOf(s.RunningRecipe) : null);
+        var (outputs, leftovers) = SlotRoles(slots, RecipeOf(shown), s.RunningRecipe != shown ? RecipeOf(s.RunningRecipe) : null, CategoryItems);
         var choices = new[] { s.S0, s.S1, s.S2, s.S3 }.Where(c => c.Category != 0).Select(c => new CategoryChoice(c.Category, c.Index)).ToArray();
         var hasWater = s.WaterMax != 0;
+        string? template = null;
+        try { template = Spawn.Inspect(station)?.TemplateName; }
+        catch (Exception e) when (e is KilnUnavailableException or InvalidOperationException or NotSupportedException) { }
         return new StationInfo(station, s.Workshop, new WorldPosition(s.Position.X, s.Position.Y, s.Position.Z),
             new BaseId(StationsNative.GuidOf(s.Base)), s.BaseIndex, (StationState)s.State, s.StoppedByPlayer != 0, s.UseAllOptions != 0,
             (StationNeeds)s.Needs, s.RunningRecipe, s.SelectedRecipe, choices, (int)s.CraftsLoaded, TimeSpan.FromTicks(s.DurationNs / 100),
-            s.Progress, hasWater ? s.Water : null, hasWater ? s.WaterMax : null, slots, outputs);
+            s.Progress, hasWater ? s.Water : null, hasWater ? s.WaterMax : null, slots, outputs, leftovers,
+            (s.Flags & StationsNative.FlagStopPending) != 0, template);
     }
 
-    /// <summary>The slots that hold an output of either recipe that is not also an input of it.</summary>
-    internal static IReadOnlyList<InventorySlot> OutputSlots(IReadOnlyList<InventorySlot> slots, StationRecipe? a, StationRecipe? b)
+    private static IEnumerable<ItemId> CategoryItems(uint category) =>
+        CategoryOf(category)?.Options.Select(o => o.Item) ?? [];
+
+    /// <summary>A station's slots by role for its selected and running recipes: outputs (an output that is no input) and
+    /// leftovers (neither an input, a category input's options included, nor an output).</summary>
+    internal static (IReadOnlyList<InventorySlot> Outputs, IReadOnlyList<InventorySlot> Leftovers) SlotRoles(IReadOnlyList<InventorySlot> slots,
+        StationRecipe? a, StationRecipe? b, Func<uint, IEnumerable<ItemId>> categoryItems)
     {
         var outs = new HashSet<ItemId>();
         var ins = new HashSet<ItemId>();
@@ -718,10 +810,15 @@ internal static unsafe partial class StationsCore
         {
             if (r is null) continue;
             foreach (var o in r.Outputs) outs.Add(o.Item);
-            foreach (var i in r.Inputs) if (!i.IsCategory) ins.Add(i.Item);
+            foreach (var i in r.Inputs)
+                if (i.IsCategory) ins.UnionWith(categoryItems(i.Category));
+                else ins.Add(i.Item);
         }
+        var known = a is not null || b is not null;
         outs.ExceptWith(ins);
-        return slots.Where(s => !s.IsEmpty && outs.Contains(s.Item)).ToArray();
+        var full = slots.Where(x => !x.IsEmpty).ToArray();
+        return (full.Where(x => outs.Contains(x.Item)).ToArray(),
+            known ? full.Where(x => !outs.Contains(x.Item) && !ins.Contains(x.Item)).ToArray() : []);
     }
 
     // ---- requests ----
@@ -788,8 +885,14 @@ internal static unsafe partial class StationsCore
         for (var i = 0; i < Math.Min(p.InputCount, (uint)StationsNative.MaxInputs); i++)
             inputs.Add(new FillInput(new ItemId(p.Inputs[i * 2]), (int)p.Inputs[i * 2 + 1], (int)p.Have[i], p.Stock[i]));
         return new FillPlan(StatusOf(p.Status), new EntityId(p.Station), p.RecipeId, (int)p.CraftsLoaded, (int)p.CraftsAffordable,
-            (int)p.CraftsPlanned, inputs, StationsNative.Text(p.Message, 128));
+            (int)p.CraftsPlanned, inputs, StationsNative.Text(p.Message, 128))
+        {
+            LimitedBy = LimitOf(p.LimitedBy), ShortItem = p.ShortItem != 0 ? new ItemId(p.ShortItem) : null, WaterPerCraft = (int)p.WaterPerCraft,
+            WaterHave = (int)p.WaterHave, WaterStock = (int)p.WaterStock, UseAllOptions = p.UseAllOptions != 0,
+        };
     }
+
+    internal static FillLimit LimitOf(byte b) => b <= (byte)FillLimit.Water ? (FillLimit)b : FillLimit.None;
 
     internal static StationActionStatus StatusOf(int s) => Enum.IsDefined(typeof(StationActionStatus), s) ? (StationActionStatus)s : StationActionStatus.Refused;
 
@@ -812,14 +915,14 @@ internal static unsafe partial class StationsCore
         lock (Gate) InFlight.Remove(key);
         var station = new EntityId(r.Station);
         if (rc == StationsNative.BufferTooSmall)
-            return Task.FromResult(Refusal(StationActionStatus.Refused, action, station, r.RecipeId, "1024 station actions are waiting: try again in a step"));
+            return Task.FromResult(Refusal(StationActionStatus.QueueFull, action, station, r.RecipeId, "1024 station actions are waiting: try again in a step"));
         if (rc == StationsNative.InvalidArgument) throw new ArgumentException($"{api}: kiln.stations refused the request's arguments");
         var cap = action == StationAction.Fill ? Stations.FillCapability : Stations.ControlCapability;
         throw new KilnUnavailableException(cap, WhyOff(Backend.Status()));
     }
 
     internal static StationResult Refusal(StationActionStatus status, StationAction action, EntityId station, uint recipe, string why) =>
-        new(status, action, station, recipe, 0, 0, 0, 0, 0, [], StationState.NoRecipe, StationState.NoRecipe, false, why);
+        new(status, action, station, recipe, 0, 0, 0, 0, 0, [], null, null, false, why);
 
     internal static StationResult ResultOf(in StationsNative.Result r, StationAction action)
     {
@@ -833,9 +936,15 @@ internal static unsafe partial class StationsCore
         }
         string message;
         fixed (byte* m = r.Message) message = StationsNative.Text(m, 128);
+        // a refusal before the station was read carries no state (DROPPED, LOCKED, UNAVAILABLE, a withdrawn stop)
+        var read = r.Status is not (StationsNative.StDropped or StationsNative.StLocked or StationsNative.StUnavailable or StationsNative.StCanceled
+            or StationsNative.StTimedOut) || r.StateBefore != 0 || r.StoppedBefore != 0;
         return new StationResult(StatusOf(r.Status), action, new EntityId(r.Station), r.RecipeId, (int)r.CraftsRequested, (int)r.CraftsBefore,
-            (int)r.CraftsAfter, (int)r.CraftsAdded, r.GameError, changes, (StationState)r.StateBefore, (StationState)r.StateAfter,
-            (r.Flags & StationsNative.DryRun) != 0, message);
+            (int)r.CraftsAfter, (int)r.CraftsAdded, r.GameError, changes, read ? (StationState)r.StateBefore : null,
+            read ? (StationState)r.StateAfter : null, (r.Flags & StationsNative.DryRun) != 0, message)
+        {
+            LimitedBy = LimitOf(r.LimitedBy), ShortItem = r.ShortItem != 0 ? new ItemId(r.ShortItem) : null,
+        };
     }
 
     /// <summary>An action finished (its native callback, or a test).</summary>

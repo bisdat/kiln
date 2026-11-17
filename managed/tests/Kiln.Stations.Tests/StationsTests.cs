@@ -124,6 +124,9 @@ public sealed unsafe class StationsTests : IDisposable
 
         public ulong LastSeq() => Ring.Count == 0 ? 0 : Ring[^1].Seq;
 
+        public bool ScannedFlag = true;
+        public bool Scanned() => ScannedFlag;
+
         public int Events(ulong after, Span<StationsNative.Event> into, out uint count)
         {
             var rest = Ring.Where(e => e.Seq > after).ToArray();
@@ -140,7 +143,7 @@ public sealed unsafe class StationsTests : IDisposable
             {
                 Size = (uint)sizeof(StationsNative.Event), Kind = kind, Seq = seq, Step = 100 + seq, Station = station, Workshop = 0x51,
                 StateBefore = before, StateAfter = after, StoppedAfter = (byte)(after == (byte)StationState.Stopped ? 1 : 0),
-                SelectedAfter = 0x1234, BaseIndex = baseIndex, By = by,
+                SelectedAfter = 0x1234, BaseIndex = baseIndex, By = by, Base = StationsNative.IdOf(AltarGuid),
             });
         }
     }
@@ -158,6 +161,13 @@ public sealed unsafe class StationsTests : IDisposable
         b.Id = StationsNative.IdOf(AltarGuid);
         b.Altars[0] = 900;
         b.Altars[1] = 901;
+        var altar2 = Guid.Parse("ffffffff-0102-0304-0506-0708090a0b0c").ToByteArray();
+        var altar1 = AltarGuid.ToByteArray();
+        for (var i = 0; i < 16; i++)
+        {
+            b.AltarIds[i] = altar1[i];
+            b.AltarIds[16 + i] = altar2[i];
+        }
         _fake.BaseRows.Add(b);
         _fake.Storage[0] = [700, 701];
         _fake.Water[0] = [702];
@@ -204,24 +214,31 @@ public sealed unsafe class StationsTests : IDisposable
         // native/core/abi/services/kiln_stations.h; stations_test.cpp asserts the same sizes and offsets
         Assert.Equal(16, sizeof(StationsNative.BaseId));
         Assert.Equal(8, sizeof(StationsNative.Choice));
-        Assert.Equal(144, sizeof(StationsNative.Base));
-        Assert.Equal(80, (int)Marshal.OffsetOf<StationsNative.Base>("Min"));
+        Assert.Equal(432, sizeof(StationsNative.Base));
+        Assert.Equal(92, (int)Marshal.OffsetOf<StationsNative.Base>("AltarIds"));
+        Assert.Equal(368, (int)Marshal.OffsetOf<StationsNative.Base>("Min"));
         Assert.Equal(200, sizeof(StationsNative.Station));
+        Assert.Equal(180, (int)Marshal.OffsetOf<StationsNative.Station>("Flags"));
         Assert.Equal(16, sizeof(StationsNative.Input));
         Assert.Equal(624, sizeof(StationsNative.Recipe));
         Assert.Equal(88, sizeof(StationsNative.Request));
         Assert.Equal(24, (int)Marshal.OffsetOf<StationsNative.Request>("C0"));
         Assert.Equal(64, (int)Marshal.OffsetOf<StationsNative.Request>("Keep"));
         Assert.Equal(32, sizeof(StationsNative.MoveChange));
-        Assert.Equal(1224, sizeof(StationsNative.Result));
-        Assert.Equal(56, (int)Marshal.OffsetOf<StationsNative.Result>("Ticket"));
-        Assert.Equal(72, (int)Marshal.OffsetOf<StationsNative.Result>("Changes"));
-        Assert.Equal(1096, (int)Marshal.OffsetOf<StationsNative.Result>("Message"));
-        Assert.Equal(680, sizeof(StationsNative.Plan));
-        Assert.Equal(40, (int)Marshal.OffsetOf<StationsNative.Plan>("Inputs"));
-        Assert.Equal(96, sizeof(StationsNative.Event));
+        Assert.Equal(1232, sizeof(StationsNative.Result));
+        Assert.Equal(52, (int)Marshal.OffsetOf<StationsNative.Result>("LimitedBy"));
+        Assert.Equal(56, (int)Marshal.OffsetOf<StationsNative.Result>("ShortItem"));
+        Assert.Equal(64, (int)Marshal.OffsetOf<StationsNative.Result>("Ticket"));
+        Assert.Equal(80, (int)Marshal.OffsetOf<StationsNative.Result>("Changes"));
+        Assert.Equal(1104, (int)Marshal.OffsetOf<StationsNative.Result>("Message"));
+        Assert.Equal(696, sizeof(StationsNative.Plan));
+        Assert.Equal(36, (int)Marshal.OffsetOf<StationsNative.Plan>("ShortItem"));
+        Assert.Equal(44, (int)Marshal.OffsetOf<StationsNative.Plan>("WaterPerCraft"));
+        Assert.Equal(56, (int)Marshal.OffsetOf<StationsNative.Plan>("Inputs"));
+        Assert.Equal(112, sizeof(StationsNative.Event));
         Assert.Equal(64, (int)Marshal.OffsetOf<StationsNative.Event>("By"));
         Assert.Equal(72, (int)Marshal.OffsetOf<StationsNative.Event>("Position"));
+        Assert.Equal(96, (int)Marshal.OffsetOf<StationsNative.Event>("Base"));
         Assert.Equal(188, sizeof(StationsNative.Status));
         Assert.Equal(8 + 21 * 8, sizeof(StationsNative.Table));
     }
@@ -232,6 +249,9 @@ public sealed unsafe class StationsTests : IDisposable
         Assert.Equal(new[] { 0, 1, 2, 3, 4, 5 }, Enum.GetValues<StationState>().Select(v => (int)v));
         Assert.Equal(12, (int)StationActionStatus.Dropped);
         Assert.Equal(9, (int)StationActionStatus.Locked);
+        Assert.Equal((13, 14, 15), ((int)StationActionStatus.TimedOut, (int)StationActionStatus.QueueFull, (int)StationActionStatus.Canceled));
+        Assert.Equal(4, (int)FillLimit.Water);
+        Assert.Equal(FillLimit.None, StationsCore.LimitOf(77));
         Assert.Equal(StationActionStatus.Refused, StationsCore.StatusOf(99));
         Assert.Equal(StopWhen.Now, default(StopWhen));
     }
@@ -252,7 +272,11 @@ public sealed unsafe class StationsTests : IDisposable
         var all = kiln.Run(() => Bases.All);
         var b = Assert.Single(all);
         Assert.Equal(new BaseId(AltarGuid), b.Id);
-        Assert.Equal([new EntityId(900), new EntityId(901)], b.Altars);
+        Assert.Equal([new EntityId(900), new EntityId(901)], b.Altars.Select(a => a.Entity));
+        Assert.Equal(new BaseId(AltarGuid), b.Altars[0].Id);  // each altar's own id: the stable key
+        Assert.Equal(Guid.Parse("ffffffff-0102-0304-0506-0708090a0b0c"), b.Altars[1].Id.Value);
+        Assert.True(kiln.Run(() => Bases.TryGet(b.Id, out var again) && again.Index == 0));
+        Assert.False(kiln.Run(() => Bases.TryGet(new BaseId(Guid.NewGuid()), out _)));
         Assert.Equal((2, 1, 2, 1), (b.StorageCount, b.WaterCount, b.ZoneCount, b.StationCount));
         Assert.True(b.InBox(new WorldPosition(0, 0, 0)));
         Assert.False(b.InBox(new WorldPosition(20, 0, 0)));
@@ -280,6 +304,11 @@ public sealed unsafe class StationsTests : IDisposable
         Assert.Equal([new CategoryChoice(77, 1)], s.SelectedChoices);
         Assert.Null(s.Water);
         Assert.True(s.IsRunning);
+        Assert.False(s.StopPending);
+        var pending = _fake.StationRows[3300];
+        pending.Flags = StationsNative.FlagStopPending;
+        _fake.StationRows[3300] = pending;
+        Assert.True(kiln.Run(() => Stations.Read(new EntityId(3300)))!.StopPending);
         Assert.Null(kiln.Run(() => Stations.Read(new EntityId(5))));
         Assert.True(kiln.Run(() => Stations.IsStation(new EntityId(3300))));
         Assert.False(kiln.Run(() => Stations.IsStation(new EntityId(5))));
@@ -305,16 +334,39 @@ public sealed unsafe class StationsTests : IDisposable
     }
 
     [Fact]
-    public void OutputSlotsAreTheRecipesOutputsThatAreNoInputs()
+    public void SlotsAreOutputsLeftoversOrInputs()
     {
         var recipe = new StationRecipe(1, 0x51, [new StationInput(new ItemId(0x10), 2, 0, 0), new StationInput(default, 0, 77, 1)],
-            [new StationStack(new ItemId(0x20), 1), new StationStack(new ItemId(0x10), 1)], TimeSpan.FromSeconds(1), 0, true);
+            [new StationStack(new ItemId(0x20), 1), new StationStack(new ItemId(0x10), 1), new StationStack(new ItemId(0x7001), 1)],
+            TimeSpan.FromSeconds(1), 0, true);
         var holder = new EntityId(3300);
         InventorySlot Slot(int i, uint item, int count) => new(SlotId.Of(holder, i), new ItemId(item), count, default, 1, ItemRarity.Common, default, 0, true, false, false, 0);
-        var slots = new[] { Slot(0, 0x10, 4), Slot(1, 0x20, 5), Slot(2, 0, 0) };
-        var outs = StationsCore.OutputSlots(slots, recipe, null);
+        // 0x10 input, 0x20 output, 0x7001 an option of category 77 (an input, though also an output), 0x55 an old recipe's
+        var slots = new[] { Slot(0, 0x10, 4), Slot(1, 0x20, 5), Slot(2, 0, 0), Slot(3, 0x7001, 2), Slot(4, 0x55, 9) };
+        IEnumerable<ItemId> Options(uint c) => c == 77 ? [new ItemId(0x7000), new ItemId(0x7001)] : [];
+        var (outs, left) = StationsCore.SlotRoles(slots, recipe, null, Options);
         Assert.Equal(new ItemId(0x20), Assert.Single(outs).Item);
-        Assert.Empty(StationsCore.OutputSlots(slots, null, null));
+        Assert.Equal(new ItemId(0x55), Assert.Single(left).Item);
+        var (none, noLeft) = StationsCore.SlotRoles(slots, null, null, Options);
+        Assert.Empty(none);
+        Assert.Empty(noLeft);  // no recipe: nothing is called a leftover
+    }
+
+    [Fact]
+    public void BaseChangesPairOldAndNewIdsByTheirAltars()
+    {
+        Guid A = Guid.NewGuid(), B = Guid.NewGuid(), C = Guid.NewGuid(), D = Guid.NewGuid();
+        BaseId Id(Guid g) => new(g);
+        var before = new List<(BaseId, HashSet<Guid>)> { (Id(A), [A]), (Id(C), [C, D]) };
+        // a new altar B overlaps A's zone (the merged base takes the smaller id: here B), D is gone, a new base E
+        Guid E = Guid.NewGuid();
+        var after = new List<(BaseId, HashSet<Guid>)> { (Id(B), [A, B]), (Id(C), [C]), (Id(E), [E]) };
+        var (added, removed, changed) = StationsCore.DiffBases(before, after);
+        Assert.Equal([Id(E)], added);
+        Assert.Empty(removed);
+        Assert.Equal([new BaseIdChange(Id(A), Id(B))], changed);
+        var (_, gone, _) = StationsCore.DiffBases(before, [(Id(A), [A])]);
+        Assert.Equal([Id(C)], gone);
     }
 
     [Fact]
@@ -363,6 +415,12 @@ public sealed unsafe class StationsTests : IDisposable
         p.Inputs[1] = 2;
         p.Have[0] = 6;
         p.Stock[0] = 8;
+        p.WaterPerCraft = 64;
+        p.WaterHave = 64;
+        p.WaterStock = 640;
+        p.LimitedBy = 1;
+        p.ShortItem = 0x10;
+        p.UseAllOptions = 1;
         _fake.NextPlan = p;
         var plan = kiln.Run(() => Stations.Plan(new EntityId(3300), new FillOptions { Crafts = 10 }));
         Assert.Equal(10u, _fake.LastPlanned.Crafts);
@@ -370,6 +428,8 @@ public sealed unsafe class StationsTests : IDisposable
         Assert.Null(plan.Reason);
         Assert.Equal((3, 4, 4), (plan.CraftsLoaded, plan.CraftsAffordable, plan.CraftsPlanned));
         Assert.Equal(new FillInput(new ItemId(0x10), 2, 6, 8), Assert.Single(plan.Inputs));
+        Assert.Equal((64, 64, 640, true), (plan.WaterPerCraft, plan.WaterHave, plan.WaterStock, plan.UseAllOptions));
+        Assert.Equal((FillLimit.Stock, (ItemId?)new ItemId(0x10)), (plan.LimitedBy, plan.ShortItem));
         var none = p;
         none.Status = (int)StationActionStatus.NotEnough;
         var why = System.Text.Encoding.UTF8.GetBytes("2 of 9 x 0x00000011 for one craft");
@@ -427,6 +487,7 @@ public sealed unsafe class StationsTests : IDisposable
         _fake.State = null;
         Assert.False(Stations.Available);
         Assert.False(Bases.Available);
+        Assert.True(Stations.Scanned);
         kiln.Run(() => Assert.Throws<KilnUnavailableException>(() => _ = Bases.All));
     }
 
@@ -457,11 +518,15 @@ public sealed unsafe class StationsTests : IDisposable
         kiln.Run(StationsCore.PumpOnce);
         var s = Assert.Single(states);
         Assert.Equal((StationState.Running, StationState.Stopped, true), (s.Before, s.After, s.Stopped));
+        Assert.Equal(new BaseId(AltarGuid), s.Base);
         Assert.Null(s.ByMod);
         Assert.True(s.Involves(new EntityId(3300)));
         Assert.Equal(new EntityId(3301), Assert.Single(placed).Station);
         Assert.Equal(-1, Assert.Single(removed).BaseIndex);
-        Assert.Equal(2, Assert.Single(bases).Count);
+        var changedBases = Assert.Single(bases);
+        Assert.Equal(2, changedBases.Count);
+        Assert.Empty(changedBases.Added);  // the same base as at the watch's start
+        Assert.Equal(new BaseId(AltarGuid), Assert.Single(placed).Base);
         kiln.Run(StationsCore.PumpOnce);  // each record once
         Assert.Single(states);
     }
@@ -492,8 +557,9 @@ public sealed unsafe class StationsTests : IDisposable
     public void OnlyAStationsOwnSuccessfulCycleIsAStationCraft()
     {
         var station = new EntityId(3300);
-        var ev = StationsCore.CraftedOf(station, station, true, 0x1234, 0x51, [(0x20u, 2)]);
+        var ev = StationsCore.CraftedOf(station, station, true, 0x1234, 0x51, [(0x20u, 2)], new BaseId(AltarGuid));
         Assert.NotNull(ev);
+        Assert.Equal(new BaseId(AltarGuid), ev!.Base);
         Assert.Equal(new StationStack(new ItemId(0x20), 2), Assert.Single(ev!.Outputs));
         Assert.Null(StationsCore.CraftedOf(station, station, false, 0x1234, 0x51, []));  // a failed attempt
         Assert.Null(StationsCore.CraftedOf(new EntityId(1), station, true, 0x1234, 0x51, []));  // a player's craft at a bench
@@ -536,19 +602,27 @@ public sealed unsafe class StationsTests : IDisposable
         var c = Assert.Single(x.Changes);
         Assert.Equal((new ItemId(0x10), 8), (c.Item, c.Amount));
         Assert.Equal("the stock covered 4 of 10 crafts", x.Message);
-        var locked = StationsCore.ResultOf(NewResult(StationActionStatus.Locked, "no one on this server has unlocked recipe 0x00005678"), StationAction.Select);
+        var locked = StationsCore.ResultOf(NewResult(StationActionStatus.Locked, "no one on this server has unlocked recipe 0x00005678", read: false), StationAction.Select);
         Assert.False(locked.Ok);
         Assert.Contains("unlocked", locked.Reason);
+        Assert.Null(locked.StateBefore);  // nothing was read
+        var limited = NewResult(StationActionStatus.Partial, "2 of 9");
+        limited.LimitedBy = 2;
+        limited.ShortItem = 0x10;
+        var lx = StationsCore.ResultOf(limited, StationAction.Fill);
+        Assert.Equal((FillLimit.Reserve, (ItemId?)new ItemId(0x10)), (lx.LimitedBy, lx.ShortItem));
+        Assert.True(lx.CanRetry);
+        Assert.False(StationsCore.ResultOf(NewResult(StationActionStatus.WrongWorkshop, "x"), StationAction.Select).CanRetry);
         Assert.True(StationsCore.ResultOf(NewResult(StationActionStatus.Unchanged, ""), StationAction.Stop) is { Ok: true, Changed: false });
     }
 
-    internal static StationsNative.Result NewResult(StationActionStatus status, string message, uint flags = 0)
+    internal static StationsNative.Result NewResult(StationActionStatus status, string message, uint flags = 0, bool read = true)
     {
         var r = new StationsNative.Result
         {
             Size = (uint)sizeof(StationsNative.Result), Status = (int)status, Action = StationsNative.Fill, Flags = flags, Station = 3300,
             RecipeId = 0x1234, CraftsRequested = 10, CraftsBefore = 3, CraftsAfter = 7, CraftsAdded = 4,
-            StateBefore = (byte)StationState.MissingMaterials, StateAfter = (byte)StationState.Running,
+            StateBefore = read ? (byte)StationState.MissingMaterials : (byte)0, StateAfter = read ? (byte)StationState.Running : (byte)0,
         };
         var b = System.Text.Encoding.UTF8.GetBytes(message);
         for (var i = 0; i < b.Length && i < 127; i++) r.Message[i] = b[i];
@@ -616,7 +690,9 @@ public sealed class StationsSubmitTests : IDisposable
         using var kiln = Kiln();
         Fake.SubmitResult = StationsNative.BufferTooSmall;
         var full = await kiln.Run(() => Stations.Resume(new EntityId(3300)));
-        Assert.Equal(StationActionStatus.Refused, full.Status);
+        Assert.Equal(StationActionStatus.QueueFull, full.Status);
+        Assert.True(full.CanRetry);
+        Assert.Null(full.StateBefore);
         Assert.Contains("1024", full.Message);
         Fake.SubmitResult = StationsNative.Unavailable;
         var off = kiln.Run(() => Assert.Throws<KilnUnavailableException>(() => { _ = Stations.Resume(new EntityId(3300)); }));

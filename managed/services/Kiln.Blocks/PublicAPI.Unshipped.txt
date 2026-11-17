@@ -1,4 +1,13 @@
 #nullable enable
+Kiln.BaseAltar
+Kiln.BaseAltar.BaseAltar() -> void
+Kiln.BaseAltar.BaseAltar(Kiln.EntityId Entity, Kiln.BaseId Id) -> void
+Kiln.BaseAltar.Deconstruct(out Kiln.EntityId Entity, out Kiln.BaseId Id) -> void
+Kiln.BaseAltar.Entity.get -> Kiln.EntityId
+Kiln.BaseAltar.Entity.init -> void
+Kiln.BaseAltar.Equals(Kiln.BaseAltar other) -> bool
+Kiln.BaseAltar.Id.get -> Kiln.BaseId
+Kiln.BaseAltar.Id.init -> void
 Kiln.BaseId
 Kiln.BaseId.BaseId() -> void
 Kiln.BaseId.BaseId(System.Guid Value) -> void
@@ -7,12 +16,21 @@ Kiln.BaseId.Equals(Kiln.BaseId other) -> bool
 Kiln.BaseId.IsNone.get -> bool
 Kiln.BaseId.Value.get -> System.Guid
 Kiln.BaseId.Value.init -> void
+Kiln.BaseIdChange
+Kiln.BaseIdChange.BaseIdChange() -> void
+Kiln.BaseIdChange.BaseIdChange(Kiln.BaseId Old, Kiln.BaseId New) -> void
+Kiln.BaseIdChange.Deconstruct(out Kiln.BaseId Old, out Kiln.BaseId New) -> void
+Kiln.BaseIdChange.Equals(Kiln.BaseIdChange other) -> bool
+Kiln.BaseIdChange.New.get -> Kiln.BaseId
+Kiln.BaseIdChange.New.init -> void
+Kiln.BaseIdChange.Old.get -> Kiln.BaseId
+Kiln.BaseIdChange.Old.init -> void
 Kiln.BaseInfo
 Kiln.BaseInfo.<Clone>$() -> Kiln.BaseInfo!
-Kiln.BaseInfo.Altars.get -> System.Collections.Generic.IReadOnlyList<Kiln.EntityId>!
+Kiln.BaseInfo.Altars.get -> System.Collections.Generic.IReadOnlyList<Kiln.BaseAltar>!
 Kiln.BaseInfo.Altars.init -> void
-Kiln.BaseInfo.BaseInfo(Kiln.BaseId Id, int Index, System.Collections.Generic.IReadOnlyList<Kiln.EntityId>! Altars, Kiln.WorldPosition Min, Kiln.WorldPosition Max, int StorageCount, int WaterCount, int ZoneCount, int StationCount, string? Name) -> void
-Kiln.BaseInfo.Deconstruct(out Kiln.BaseId Id, out int Index, out System.Collections.Generic.IReadOnlyList<Kiln.EntityId>! Altars, out Kiln.WorldPosition Min, out Kiln.WorldPosition Max, out int StorageCount, out int WaterCount, out int ZoneCount, out int StationCount, out string? Name) -> void
+Kiln.BaseInfo.BaseInfo(Kiln.BaseId Id, int Index, System.Collections.Generic.IReadOnlyList<Kiln.BaseAltar>! Altars, Kiln.WorldPosition Min, Kiln.WorldPosition Max, int StorageCount, int WaterCount, int ZoneCount, int StationCount) -> void
+Kiln.BaseInfo.Deconstruct(out Kiln.BaseId Id, out int Index, out System.Collections.Generic.IReadOnlyList<Kiln.BaseAltar>! Altars, out Kiln.WorldPosition Min, out Kiln.WorldPosition Max, out int StorageCount, out int WaterCount, out int ZoneCount, out int StationCount) -> void
 Kiln.BaseInfo.Equals(Kiln.BaseInfo? other) -> bool
 Kiln.BaseInfo.Id.get -> Kiln.BaseId
 Kiln.BaseInfo.Id.init -> void
@@ -24,7 +42,6 @@ Kiln.BaseInfo.Max.init -> void
 Kiln.BaseInfo.Min.get -> Kiln.WorldPosition
 Kiln.BaseInfo.Min.init -> void
 Kiln.BaseInfo.Name.get -> string?
-Kiln.BaseInfo.Name.init -> void
 Kiln.BaseInfo.StationCount.get -> int
 Kiln.BaseInfo.StationCount.init -> void
 Kiln.BaseInfo.StorageCount.get -> int
@@ -35,7 +52,10 @@ Kiln.BaseInfo.ZoneCount.get -> int
 Kiln.BaseInfo.ZoneCount.init -> void
 Kiln.Bases
 Kiln.BasesChangedEvent
+Kiln.BasesChangedEvent.Added.get -> System.Collections.Generic.IReadOnlyList<Kiln.BaseId>!
+Kiln.BasesChangedEvent.Changed.get -> System.Collections.Generic.IReadOnlyList<Kiln.BaseIdChange>!
 Kiln.BasesChangedEvent.Count.get -> int
+Kiln.BasesChangedEvent.Removed.get -> System.Collections.Generic.IReadOnlyList<Kiln.BaseId>!
 Kiln.CategoryChoice
 Kiln.CategoryChoice.Category.get -> uint
 Kiln.CategoryChoice.Category.init -> void
@@ -45,6 +65,10 @@ Kiln.CategoryChoice.Deconstruct(out uint Category, out int Index) -> void
 Kiln.CategoryChoice.Equals(Kiln.CategoryChoice other) -> bool
 Kiln.CategoryChoice.Index.get -> int
 Kiln.CategoryChoice.Index.init -> void
+Kiln.CollectWhat
+Kiln.CollectWhat.All = Kiln.CollectWhat.Outputs | Kiln.CollectWhat.Leftovers -> Kiln.CollectWhat
+Kiln.CollectWhat.Leftovers = 2 -> Kiln.CollectWhat
+Kiln.CollectWhat.Outputs = 1 -> Kiln.CollectWhat
 Kiln.FillInput
 Kiln.FillInput.Deconstruct(out Kiln.ItemId Item, out int PerCraft, out int Have, out long Stock) -> void
 Kiln.FillInput.Equals(Kiln.FillInput other) -> bool
@@ -58,6 +82,12 @@ Kiln.FillInput.PerCraft.get -> int
 Kiln.FillInput.PerCraft.init -> void
 Kiln.FillInput.Stock.get -> long
 Kiln.FillInput.Stock.init -> void
+Kiln.FillLimit
+Kiln.FillLimit.None = 0 -> Kiln.FillLimit
+Kiln.FillLimit.Reserve = 2 -> Kiln.FillLimit
+Kiln.FillLimit.Room = 3 -> Kiln.FillLimit
+Kiln.FillLimit.Stock = 1 -> Kiln.FillLimit
+Kiln.FillLimit.Water = 4 -> Kiln.FillLimit
 Kiln.FillMode
 Kiln.FillMode.Add = 1 -> Kiln.FillMode
 Kiln.FillMode.UpTo = 0 -> Kiln.FillMode
@@ -96,16 +126,28 @@ Kiln.FillPlan.Equals(Kiln.FillPlan? other) -> bool
 Kiln.FillPlan.FillPlan(Kiln.StationActionStatus Status, Kiln.EntityId Station, uint Recipe, int CraftsLoaded, int CraftsAffordable, int CraftsPlanned, System.Collections.Generic.IReadOnlyList<Kiln.FillInput>! Inputs, string! Message) -> void
 Kiln.FillPlan.Inputs.get -> System.Collections.Generic.IReadOnlyList<Kiln.FillInput>!
 Kiln.FillPlan.Inputs.init -> void
+Kiln.FillPlan.LimitedBy.get -> Kiln.FillLimit
+Kiln.FillPlan.LimitedBy.init -> void
 Kiln.FillPlan.Message.get -> string!
 Kiln.FillPlan.Message.init -> void
 Kiln.FillPlan.Ok.get -> bool
 Kiln.FillPlan.Reason.get -> string?
 Kiln.FillPlan.Recipe.get -> uint
 Kiln.FillPlan.Recipe.init -> void
+Kiln.FillPlan.ShortItem.get -> Kiln.ItemId?
+Kiln.FillPlan.ShortItem.init -> void
 Kiln.FillPlan.Station.get -> Kiln.EntityId
 Kiln.FillPlan.Station.init -> void
 Kiln.FillPlan.Status.get -> Kiln.StationActionStatus
 Kiln.FillPlan.Status.init -> void
+Kiln.FillPlan.UseAllOptions.get -> bool
+Kiln.FillPlan.UseAllOptions.init -> void
+Kiln.FillPlan.WaterHave.get -> int
+Kiln.FillPlan.WaterHave.init -> void
+Kiln.FillPlan.WaterPerCraft.get -> int
+Kiln.FillPlan.WaterPerCraft.init -> void
+Kiln.FillPlan.WaterStock.get -> int
+Kiln.FillPlan.WaterStock.init -> void
 Kiln.IngredientCategory
 Kiln.IngredientCategory.<Clone>$() -> Kiln.IngredientCategory!
 Kiln.IngredientCategory.Deconstruct(out uint Id, out System.Collections.Generic.IReadOnlyList<Kiln.IngredientOption>! Options) -> void
@@ -131,6 +173,7 @@ Kiln.StationAction.Resume = 3 -> Kiln.StationAction
 Kiln.StationAction.Select = 4 -> Kiln.StationAction
 Kiln.StationAction.Stop = 2 -> Kiln.StationAction
 Kiln.StationActionStatus
+Kiln.StationActionStatus.Canceled = 15 -> Kiln.StationActionStatus
 Kiln.StationActionStatus.Done = 0 -> Kiln.StationActionStatus
 Kiln.StationActionStatus.Dropped = 12 -> Kiln.StationActionStatus
 Kiln.StationActionStatus.Locked = 9 -> Kiln.StationActionStatus
@@ -140,7 +183,9 @@ Kiln.StationActionStatus.NoRoom = 3 -> Kiln.StationActionStatus
 Kiln.StationActionStatus.NotAStation = 4 -> Kiln.StationActionStatus
 Kiln.StationActionStatus.NotEnough = 2 -> Kiln.StationActionStatus
 Kiln.StationActionStatus.Partial = 1 -> Kiln.StationActionStatus
+Kiln.StationActionStatus.QueueFull = 14 -> Kiln.StationActionStatus
 Kiln.StationActionStatus.Refused = 10 -> Kiln.StationActionStatus
+Kiln.StationActionStatus.TimedOut = 13 -> Kiln.StationActionStatus
 Kiln.StationActionStatus.Unavailable = 11 -> Kiln.StationActionStatus
 Kiln.StationActionStatus.Unchanged = 8 -> Kiln.StationActionStatus
 Kiln.StationActionStatus.WrongWorkshop = 7 -> Kiln.StationActionStatus
@@ -151,6 +196,7 @@ Kiln.StationChangedEvent.Involves(Kiln.EntityId entity) -> bool
 Kiln.StationChangedEvent.Result.get -> Kiln.StationResult!
 Kiln.StationChangedEvent.Station.get -> Kiln.EntityId
 Kiln.StationCraftedEvent
+Kiln.StationCraftedEvent.Base.get -> Kiln.BaseId
 Kiln.StationCraftedEvent.Involves(Kiln.EntityId entity) -> bool
 Kiln.StationCraftedEvent.Outputs.get -> System.Collections.Generic.IReadOnlyList<Kiln.StationStack>!
 Kiln.StationCraftedEvent.Recipe.get -> uint
@@ -164,13 +210,15 @@ Kiln.StationInfo.BaseIndex.get -> int
 Kiln.StationInfo.BaseIndex.init -> void
 Kiln.StationInfo.CraftsLoaded.get -> int
 Kiln.StationInfo.CraftsLoaded.init -> void
-Kiln.StationInfo.Deconstruct(out Kiln.EntityId Entity, out uint Workshop, out Kiln.WorldPosition Position, out Kiln.BaseId Base, out int BaseIndex, out Kiln.StationState State, out bool StoppedByPlayer, out bool UseAllOptions, out Kiln.StationNeeds Needs, out uint RunningRecipe, out uint SelectedRecipe, out System.Collections.Generic.IReadOnlyList<Kiln.CategoryChoice>! SelectedChoices, out int CraftsLoaded, out System.TimeSpan Duration, out double Progress, out int? Water, out int? WaterMax, out System.Collections.Generic.IReadOnlyList<Kiln.InventorySlot!>! Slots, out System.Collections.Generic.IReadOnlyList<Kiln.InventorySlot!>! Outputs) -> void
+Kiln.StationInfo.Deconstruct(out Kiln.EntityId Entity, out uint Workshop, out Kiln.WorldPosition Position, out Kiln.BaseId Base, out int BaseIndex, out Kiln.StationState State, out bool StoppedByPlayer, out bool UseAllOptions, out Kiln.StationNeeds Needs, out uint RunningRecipe, out uint SelectedRecipe, out System.Collections.Generic.IReadOnlyList<Kiln.CategoryChoice>! SelectedChoices, out int CraftsLoaded, out System.TimeSpan Duration, out double Progress, out int? Water, out int? WaterMax, out System.Collections.Generic.IReadOnlyList<Kiln.InventorySlot!>! Slots, out System.Collections.Generic.IReadOnlyList<Kiln.InventorySlot!>! Outputs, out System.Collections.Generic.IReadOnlyList<Kiln.InventorySlot!>! Leftovers, out bool StopPending, out string? Template) -> void
 Kiln.StationInfo.Duration.get -> System.TimeSpan
 Kiln.StationInfo.Duration.init -> void
 Kiln.StationInfo.Entity.get -> Kiln.EntityId
 Kiln.StationInfo.Entity.init -> void
 Kiln.StationInfo.Equals(Kiln.StationInfo? other) -> bool
 Kiln.StationInfo.IsRunning.get -> bool
+Kiln.StationInfo.Leftovers.get -> System.Collections.Generic.IReadOnlyList<Kiln.InventorySlot!>!
+Kiln.StationInfo.Leftovers.init -> void
 Kiln.StationInfo.Needs.get -> Kiln.StationNeeds
 Kiln.StationInfo.Needs.init -> void
 Kiln.StationInfo.Outputs.get -> System.Collections.Generic.IReadOnlyList<Kiln.InventorySlot!>!
@@ -189,9 +237,13 @@ Kiln.StationInfo.Slots.get -> System.Collections.Generic.IReadOnlyList<Kiln.Inve
 Kiln.StationInfo.Slots.init -> void
 Kiln.StationInfo.State.get -> Kiln.StationState
 Kiln.StationInfo.State.init -> void
-Kiln.StationInfo.StationInfo(Kiln.EntityId Entity, uint Workshop, Kiln.WorldPosition Position, Kiln.BaseId Base, int BaseIndex, Kiln.StationState State, bool StoppedByPlayer, bool UseAllOptions, Kiln.StationNeeds Needs, uint RunningRecipe, uint SelectedRecipe, System.Collections.Generic.IReadOnlyList<Kiln.CategoryChoice>! SelectedChoices, int CraftsLoaded, System.TimeSpan Duration, double Progress, int? Water, int? WaterMax, System.Collections.Generic.IReadOnlyList<Kiln.InventorySlot!>! Slots, System.Collections.Generic.IReadOnlyList<Kiln.InventorySlot!>! Outputs) -> void
+Kiln.StationInfo.StationInfo(Kiln.EntityId Entity, uint Workshop, Kiln.WorldPosition Position, Kiln.BaseId Base, int BaseIndex, Kiln.StationState State, bool StoppedByPlayer, bool UseAllOptions, Kiln.StationNeeds Needs, uint RunningRecipe, uint SelectedRecipe, System.Collections.Generic.IReadOnlyList<Kiln.CategoryChoice>! SelectedChoices, int CraftsLoaded, System.TimeSpan Duration, double Progress, int? Water, int? WaterMax, System.Collections.Generic.IReadOnlyList<Kiln.InventorySlot!>! Slots, System.Collections.Generic.IReadOnlyList<Kiln.InventorySlot!>! Outputs, System.Collections.Generic.IReadOnlyList<Kiln.InventorySlot!>! Leftovers, bool StopPending, string? Template) -> void
+Kiln.StationInfo.StopPending.get -> bool
+Kiln.StationInfo.StopPending.init -> void
 Kiln.StationInfo.StoppedByPlayer.get -> bool
 Kiln.StationInfo.StoppedByPlayer.init -> void
+Kiln.StationInfo.Template.get -> string?
+Kiln.StationInfo.Template.init -> void
 Kiln.StationInfo.UseAllOptions.get -> bool
 Kiln.StationInfo.UseAllOptions.init -> void
 Kiln.StationInfo.Water.get -> int?
@@ -215,6 +267,7 @@ Kiln.StationInput.Item.init -> void
 Kiln.StationInput.StationInput() -> void
 Kiln.StationInput.StationInput(Kiln.ItemId Item, int Count, uint Category, int CategoryCount) -> void
 Kiln.StationPlacedEvent
+Kiln.StationPlacedEvent.Base.get -> Kiln.BaseId
 Kiln.StationPlacedEvent.BaseIndex.get -> int
 Kiln.StationPlacedEvent.Involves(Kiln.EntityId entity) -> bool
 Kiln.StationPlacedEvent.Position.get -> Kiln.WorldPosition
@@ -249,6 +302,8 @@ Kiln.StationRecipe.Id.get -> uint
 Kiln.StationRecipe.Id.init -> void
 Kiln.StationRecipe.Inputs.get -> System.Collections.Generic.IReadOnlyList<Kiln.StationInput>!
 Kiln.StationRecipe.Inputs.init -> void
+Kiln.StationRecipe.Name.get -> string?
+Kiln.StationRecipe.Name.init -> void
 Kiln.StationRecipe.Outputs.get -> System.Collections.Generic.IReadOnlyList<Kiln.StationStack>!
 Kiln.StationRecipe.Outputs.init -> void
 Kiln.StationRecipe.StationRecipe(uint Id, uint Workshop, System.Collections.Generic.IReadOnlyList<Kiln.StationInput>! Inputs, System.Collections.Generic.IReadOnlyList<Kiln.StationStack>! Outputs, System.TimeSpan Duration, int WaterCharges, bool AlwaysUnlocked) -> void
@@ -257,6 +312,7 @@ Kiln.StationRecipe.WaterCharges.init -> void
 Kiln.StationRecipe.Workshop.get -> uint
 Kiln.StationRecipe.Workshop.init -> void
 Kiln.StationRemovedEvent
+Kiln.StationRemovedEvent.Base.get -> Kiln.BaseId
 Kiln.StationRemovedEvent.BaseIndex.get -> int
 Kiln.StationRemovedEvent.Involves(Kiln.EntityId entity) -> bool
 Kiln.StationRemovedEvent.Position.get -> Kiln.WorldPosition
@@ -266,6 +322,7 @@ Kiln.StationResult
 Kiln.StationResult.<Clone>$() -> Kiln.StationResult!
 Kiln.StationResult.Action.get -> Kiln.StationAction
 Kiln.StationResult.Action.init -> void
+Kiln.StationResult.CanRetry.get -> bool
 Kiln.StationResult.Changed.get -> bool
 Kiln.StationResult.Changes.get -> System.Collections.Generic.IReadOnlyList<Kiln.MoveChange>!
 Kiln.StationResult.Changes.init -> void
@@ -277,25 +334,29 @@ Kiln.StationResult.CraftsBefore.get -> int
 Kiln.StationResult.CraftsBefore.init -> void
 Kiln.StationResult.CraftsRequested.get -> int
 Kiln.StationResult.CraftsRequested.init -> void
-Kiln.StationResult.Deconstruct(out Kiln.StationActionStatus Status, out Kiln.StationAction Action, out Kiln.EntityId Station, out uint Recipe, out int CraftsRequested, out int CraftsBefore, out int CraftsAfter, out int CraftsAdded, out int GameError, out System.Collections.Generic.IReadOnlyList<Kiln.MoveChange>! Changes, out Kiln.StationState StateBefore, out Kiln.StationState StateAfter, out bool DryRun, out string! Message) -> void
+Kiln.StationResult.Deconstruct(out Kiln.StationActionStatus Status, out Kiln.StationAction Action, out Kiln.EntityId Station, out uint Recipe, out int CraftsRequested, out int CraftsBefore, out int CraftsAfter, out int CraftsAdded, out int GameError, out System.Collections.Generic.IReadOnlyList<Kiln.MoveChange>! Changes, out Kiln.StationState? StateBefore, out Kiln.StationState? StateAfter, out bool DryRun, out string! Message) -> void
 Kiln.StationResult.DryRun.get -> bool
 Kiln.StationResult.DryRun.init -> void
 Kiln.StationResult.Equals(Kiln.StationResult? other) -> bool
 Kiln.StationResult.GameError.get -> int
 Kiln.StationResult.GameError.init -> void
+Kiln.StationResult.LimitedBy.get -> Kiln.FillLimit
+Kiln.StationResult.LimitedBy.init -> void
 Kiln.StationResult.Message.get -> string!
 Kiln.StationResult.Message.init -> void
 Kiln.StationResult.Ok.get -> bool
 Kiln.StationResult.Reason.get -> string?
 Kiln.StationResult.Recipe.get -> uint
 Kiln.StationResult.Recipe.init -> void
-Kiln.StationResult.StateAfter.get -> Kiln.StationState
+Kiln.StationResult.ShortItem.get -> Kiln.ItemId?
+Kiln.StationResult.ShortItem.init -> void
+Kiln.StationResult.StateAfter.get -> Kiln.StationState?
 Kiln.StationResult.StateAfter.init -> void
-Kiln.StationResult.StateBefore.get -> Kiln.StationState
+Kiln.StationResult.StateBefore.get -> Kiln.StationState?
 Kiln.StationResult.StateBefore.init -> void
 Kiln.StationResult.Station.get -> Kiln.EntityId
 Kiln.StationResult.Station.init -> void
-Kiln.StationResult.StationResult(Kiln.StationActionStatus Status, Kiln.StationAction Action, Kiln.EntityId Station, uint Recipe, int CraftsRequested, int CraftsBefore, int CraftsAfter, int CraftsAdded, int GameError, System.Collections.Generic.IReadOnlyList<Kiln.MoveChange>! Changes, Kiln.StationState StateBefore, Kiln.StationState StateAfter, bool DryRun, string! Message) -> void
+Kiln.StationResult.StationResult(Kiln.StationActionStatus Status, Kiln.StationAction Action, Kiln.EntityId Station, uint Recipe, int CraftsRequested, int CraftsBefore, int CraftsAfter, int CraftsAdded, int GameError, System.Collections.Generic.IReadOnlyList<Kiln.MoveChange>! Changes, Kiln.StationState? StateBefore, Kiln.StationState? StateAfter, bool DryRun, string! Message) -> void
 Kiln.StationResult.Status.get -> Kiln.StationActionStatus
 Kiln.StationResult.Status.init -> void
 Kiln.StationStack
@@ -309,10 +370,12 @@ Kiln.StationStack.StationStack() -> void
 Kiln.StationStack.StationStack(Kiln.ItemId Item, int Count) -> void
 Kiln.StationStateChangedEvent
 Kiln.StationStateChangedEvent.After.get -> Kiln.StationState
+Kiln.StationStateChangedEvent.Base.get -> Kiln.BaseId
 Kiln.StationStateChangedEvent.BaseIndex.get -> int
 Kiln.StationStateChangedEvent.Before.get -> Kiln.StationState
 Kiln.StationStateChangedEvent.ByMod.get -> string?
 Kiln.StationStateChangedEvent.Involves(Kiln.EntityId entity) -> bool
+Kiln.StationStateChangedEvent.Player.get -> Kiln.EntityId?
 Kiln.StationStateChangedEvent.Resumed.get -> bool
 Kiln.StationStateChangedEvent.RunningAfter.get -> uint
 Kiln.StationStateChangedEvent.RunningBefore.get -> uint
@@ -331,8 +394,10 @@ const Kiln.Stations.ControlCapability = "stations.control" -> string!
 const Kiln.Stations.EventsCapability = "stations.events" -> string!
 const Kiln.Stations.FillCapability = "stations.fill" -> string!
 const Kiln.Stations.ReadCapability = "stations.read" -> string!
+override Kiln.BaseAltar.GetHashCode() -> int
 override Kiln.BaseId.GetHashCode() -> int
 override Kiln.BaseId.ToString() -> string!
+override Kiln.BaseIdChange.GetHashCode() -> int
 override Kiln.BaseInfo.Equals(object? obj) -> bool
 override Kiln.BaseInfo.GetHashCode() -> int
 override Kiln.BaseInfo.ToString() -> string!
@@ -367,9 +432,13 @@ override Kiln.StationResult.ToString() -> string!
 override Kiln.StationStack.GetHashCode() -> int
 override Kiln.StationStack.ToString() -> string!
 override Kiln.StationStateChangedEvent.ToString() -> string!
+static Kiln.BaseAltar.operator !=(Kiln.BaseAltar left, Kiln.BaseAltar right) -> bool
+static Kiln.BaseAltar.operator ==(Kiln.BaseAltar left, Kiln.BaseAltar right) -> bool
 static Kiln.BaseId.None.get -> Kiln.BaseId
 static Kiln.BaseId.operator !=(Kiln.BaseId left, Kiln.BaseId right) -> bool
 static Kiln.BaseId.operator ==(Kiln.BaseId left, Kiln.BaseId right) -> bool
+static Kiln.BaseIdChange.operator !=(Kiln.BaseIdChange left, Kiln.BaseIdChange right) -> bool
+static Kiln.BaseIdChange.operator ==(Kiln.BaseIdChange left, Kiln.BaseIdChange right) -> bool
 static Kiln.BaseInfo.operator !=(Kiln.BaseInfo? left, Kiln.BaseInfo? right) -> bool
 static Kiln.BaseInfo.operator ==(Kiln.BaseInfo? left, Kiln.BaseInfo? right) -> bool
 static Kiln.Bases.All.get -> System.Collections.Generic.IReadOnlyList<Kiln.BaseInfo!>!
@@ -380,7 +449,8 @@ static Kiln.Bases.Get(Kiln.BaseId id) -> Kiln.BaseInfo?
 static Kiln.Bases.Of(Kiln.EntityId entity) -> Kiln.BaseInfo?
 static Kiln.Bases.Stock(Kiln.BaseId id) -> System.Collections.Generic.IReadOnlyDictionary<Kiln.ItemId, long>!
 static Kiln.Bases.Stock(Kiln.BaseId id, Kiln.ItemId item) -> long
-static Kiln.Bases.Storage(Kiln.BaseId id) -> System.Collections.Generic.IReadOnlyList<Kiln.EntityId>!
+static Kiln.Bases.Storage(Kiln.BaseId id, bool deposit = false) -> System.Collections.Generic.IReadOnlyList<Kiln.EntityId>!
+static Kiln.Bases.TryGet(Kiln.BaseId id, out Kiln.BaseInfo? info) -> bool
 static Kiln.Bases.WaterSources(Kiln.BaseId id) -> System.Collections.Generic.IReadOnlyList<Kiln.EntityId>!
 static Kiln.CategoryChoice.operator !=(Kiln.CategoryChoice left, Kiln.CategoryChoice right) -> bool
 static Kiln.CategoryChoice.operator ==(Kiln.CategoryChoice left, Kiln.CategoryChoice right) -> bool
@@ -408,20 +478,26 @@ static Kiln.Stations.All() -> System.Collections.Generic.IReadOnlyList<Kiln.Enti
 static Kiln.Stations.Available.get -> bool
 static Kiln.Stations.Categories.get -> System.Collections.Generic.IReadOnlyList<Kiln.IngredientCategory!>!
 static Kiln.Stations.Category(uint id) -> Kiln.IngredientCategory?
-static Kiln.Stations.Collect(Kiln.EntityId station, Kiln.EntityId to, Kiln.ItemId? item = null) -> System.Threading.Tasks.Task<Kiln.StationResult!>!
-static Kiln.Stations.CollectToBase(Kiln.EntityId station, Kiln.ItemId? item = null) -> System.Threading.Tasks.Task<Kiln.StationResult!>!
+static Kiln.Stations.Collect(Kiln.EntityId station, Kiln.EntityId to, Kiln.ItemId? item = null, Kiln.CollectWhat what = Kiln.CollectWhat.Outputs) -> System.Threading.Tasks.Task<Kiln.StationResult!>!
+static Kiln.Stations.CollectToBase(Kiln.EntityId station, Kiln.ItemId? item = null, Kiln.CollectWhat what = Kiln.CollectWhat.Outputs) -> System.Threading.Tasks.Task<Kiln.StationResult!>!
 static Kiln.Stations.Fill(Kiln.EntityId station, Kiln.FillOptions? options = null) -> System.Threading.Tasks.Task<Kiln.StationResult!>!
 static Kiln.Stations.InBase(Kiln.BaseId id) -> System.Collections.Generic.IReadOnlyList<Kiln.EntityId>!
 static Kiln.Stations.IsStation(Kiln.EntityId entity) -> bool
+static Kiln.Stations.Nearest(Kiln.EntityId entity, uint? workshop = null, double radius = 8) -> Kiln.EntityId?
 static Kiln.Stations.Plan(Kiln.EntityId station, Kiln.FillOptions? options = null) -> Kiln.FillPlan!
 static Kiln.Stations.Read(Kiln.EntityId station) -> Kiln.StationInfo?
 static Kiln.Stations.Recipe(uint id) -> Kiln.StationRecipe?
 static Kiln.Stations.RecipesOf(Kiln.EntityId station) -> System.Collections.Generic.IReadOnlyList<uint>!
 static Kiln.Stations.ResolveInputs(uint recipe, System.Collections.Generic.IReadOnlyList<Kiln.CategoryChoice>? choices = null) -> System.Collections.Generic.IReadOnlyList<Kiln.StationStack>!
 static Kiln.Stations.Resume(Kiln.EntityId station) -> System.Threading.Tasks.Task<Kiln.StationResult!>!
+static Kiln.Stations.Scanned.get -> bool
 static Kiln.Stations.Select(Kiln.EntityId station, uint recipe, System.Collections.Generic.IReadOnlyList<Kiln.CategoryChoice>? choices = null, bool keepStopped = false, bool allowLocked = false) -> System.Threading.Tasks.Task<Kiln.StationResult!>!
 static Kiln.Stations.Stop(Kiln.EntityId station, Kiln.StopWhen when = Kiln.StopWhen.Now) -> System.Threading.Tasks.Task<Kiln.StationResult!>!
+~override Kiln.BaseAltar.Equals(object obj) -> bool
+~override Kiln.BaseAltar.ToString() -> string
 ~override Kiln.BaseId.Equals(object obj) -> bool
+~override Kiln.BaseIdChange.Equals(object obj) -> bool
+~override Kiln.BaseIdChange.ToString() -> string
 ~override Kiln.CategoryChoice.Equals(object obj) -> bool
 ~override Kiln.CategoryChoice.ToString() -> string
 ~override Kiln.FillInput.Equals(object obj) -> bool

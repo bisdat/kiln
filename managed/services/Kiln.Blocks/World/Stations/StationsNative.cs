@@ -10,7 +10,9 @@ internal static unsafe class StationsNative
     public const string Name = "kiln.stations";
     public const uint Version = 1;
     public const int Ok = 0, InvalidArgument = 1, NotFound = 2, Unavailable = 3, WrongThread = 4, BufferTooSmall = 5;
-    public const int MaxBases = 16, MaxAltars = 8, MaxInputs = 32, MaxOutputs = 8, MaxChanges = 32, MaxKeep = 64;
+    // result statuses (KilnStationResult.status) the managed side looks at
+    public const int StLocked = 9, StUnavailable = 11, StDropped = 12, StTimedOut = 13, StCanceled = 15;
+    public const int MaxBases = 16, MaxAltars = 16, MaxInputs = 32, MaxOutputs = 8, MaxChanges = 32, MaxKeep = 64;
 
     // actions
     public const uint Fill = 1, Stop = 2, Resume = 3, Select = 4;
@@ -19,6 +21,8 @@ internal static unsafe class StationsNative
         AllowLocked = 0x40;
     // event kinds
     public const uint EvState = 1, EvPlaced = 2, EvRemoved = 3, EvBases = 4;
+    // KilnStation.flags
+    public const uint FlagStopPending = 0x1;
 
     [StructLayout(LayoutKind.Sequential)]
     public struct BaseId
@@ -51,7 +55,8 @@ internal static unsafe class StationsNative
         public uint Size, Index;
         public BaseId Id;
         public uint AltarCount;
-        public fixed uint Altars[8];
+        public fixed uint Altars[16];
+        public fixed byte AltarIds[16 * 16];
         public uint StorageCount, WaterCount, ZoneCount, StationCount, Version;
         public Vec3 Min, Max;
         public fixed uint Reserved[4];
@@ -71,7 +76,8 @@ internal static unsafe class StationsNative
         public long RecipeStartNs, PauseNs, NowNs, DurationNs;
         public float Progress;
         public int Water, WaterMax;
-        public fixed uint Reserved[5];
+        public uint Flags;
+        public fixed uint Reserved[4];
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -118,7 +124,8 @@ internal static unsafe class StationsNative
         public int GameError;
         public uint ChangeCount;
         public byte StateBefore, StateAfter, StoppedBefore, StoppedAfter;
-        public uint Reserved;
+        public byte LimitedBy, R0, R1, R2;
+        public uint ShortItem, Reserved;
         public ulong Ticket, Step;
         public fixed byte Changes[MaxChanges * 32];  // MoveChange x 32
         public fixed byte Message[128];
@@ -131,7 +138,9 @@ internal static unsafe class StationsNative
         public int Status;
         public uint Station, RecipeId;
         public int BaseIndex;
-        public uint CraftsLoaded, CraftsAffordable, CraftsPlanned, InputCount, Reserved;
+        public uint CraftsLoaded, CraftsAffordable, CraftsPlanned, InputCount, ShortItem;
+        public byte LimitedBy, UseAllOptions, R0, R1;
+        public uint WaterPerCraft, WaterHave, WaterStock;
         public fixed uint Inputs[MaxInputs * 2];  // Stack x 32
         public fixed uint Have[MaxInputs];
         public fixed uint Stock[MaxInputs];
@@ -150,13 +159,14 @@ internal static unsafe class StationsNative
         public uint Reserved0;
         public ulong By;
         public Vec3 Position;
+        public BaseId Base;
     }
 
     [StructLayout(LayoutKind.Sequential)]
     public struct Status
     {
         public uint Size;
-        public byte Read, Fill, Control, Events, Program, Watching, Knowledge, Reserved0;
+        public byte Read, Fill, Control, Events, Program, Watching, Knowledge, Scanned;
         public uint Bases, Stations, Pending, Done;
         public fixed byte Detail[160];
     }
@@ -198,6 +208,11 @@ internal static unsafe class StationsNative
     public static Guid GuidOf(in BaseId id)
     {
         fixed (byte* g = id.Guid) return new Guid(new ReadOnlySpan<byte>(g, 16));
+    }
+
+    public static Guid AltarIdOf(in Base b, int i)
+    {
+        fixed (byte* g = b.AltarIds) return new Guid(new ReadOnlySpan<byte>(g + 16 * i, 16));
     }
 
     public static BaseId IdOf(Guid g)

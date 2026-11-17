@@ -80,12 +80,13 @@ internal static partial class KilnApis
         "M:Kiln.Bans.Add(System.UInt64,System.String,System.Nullable{System.TimeSpan})", // Bans.Add(ulong, string, TimeSpan?): Game.AssertTickThread
         "M:Kiln.Bans.Remove(System.UInt64)", // Bans.Remove(ulong): Game.AssertTickThread
         "M:Kiln.Bases.At(Kiln.WorldPosition)", // Bases.At(WorldPosition): via StationsCore.CheckRead(string)
-        "M:Kiln.Bases.FindRoomFor(Kiln.BaseId,Kiln.ItemId)", // Bases.FindRoomFor(BaseId, ItemId): via Bases.Storage(BaseId)
-        "M:Kiln.Bases.Get(Kiln.BaseId)", // Bases.Get(BaseId): via Bases.All.get
+        "M:Kiln.Bases.FindRoomFor(Kiln.BaseId,Kiln.ItemId)", // Bases.FindRoomFor(BaseId, ItemId): via Bases.Storage(BaseId, bool)
+        "M:Kiln.Bases.Get(Kiln.BaseId)", // Bases.Get(BaseId): via StationsCore.CheckRead(string)
         "M:Kiln.Bases.Of(Kiln.EntityId)", // Bases.Of(EntityId): via StationsCore.CheckRead(string)
         "M:Kiln.Bases.Stock(Kiln.BaseId)", // Bases.Stock(BaseId): via StationsCore.CheckRead(string)
         "M:Kiln.Bases.Stock(Kiln.BaseId,Kiln.ItemId)", // Bases.Stock(BaseId, ItemId): via Bases.Stock(BaseId)
-        "M:Kiln.Bases.Storage(Kiln.BaseId)", // Bases.Storage(BaseId): via StationsCore.List(BaseId, bool, string)
+        "M:Kiln.Bases.Storage(Kiln.BaseId,System.Boolean)", // Bases.Storage(BaseId, bool): via StationsCore.List(BaseId, bool, string)
+        "M:Kiln.Bases.TryGet(Kiln.BaseId,Kiln.BaseInfo@)", // Bases.TryGet(BaseId, out BaseInfo?): via Bases.Get(BaseId)
         "M:Kiln.Bases.WaterSources(Kiln.BaseId)", // Bases.WaterSources(BaseId): via StationsCore.List(BaseId, bool, string)
         "M:Kiln.Bases.get_All", // Bases.All.get: via StationsCore.CheckRead(string)
         "M:Kiln.Blocks.Apply(Kiln.BlockPlan)", // Blocks.Apply(BlockPlan): Services.RequireTickThread
@@ -660,11 +661,12 @@ internal static partial class KilnApis
         "M:Kiln.Spire.get_Unlocked", // Spire.Unlocked.get: via ProgressFact.Holds(EntityId)
         "M:Kiln.Stations.All", // Stations.All(): via StationsCore.StationList(int, string)
         "M:Kiln.Stations.Category(System.UInt32)", // Stations.Category(uint): via StationsCore.CheckRead(string)
-        "M:Kiln.Stations.Collect(Kiln.EntityId,Kiln.EntityId,System.Nullable{Kiln.ItemId})", // Stations.Collect(EntityId, EntityId, ItemId?): via StationsCore.CheckRead(string)
-        "M:Kiln.Stations.CollectToBase(Kiln.EntityId,System.Nullable{Kiln.ItemId})", // Stations.CollectToBase(EntityId, ItemId?): via StationsCore.CheckRead(string)
+        "M:Kiln.Stations.Collect(Kiln.EntityId,Kiln.EntityId,System.Nullable{Kiln.ItemId},Kiln.CollectWhat)", // Stations.Collect(EntityId, EntityId, ItemId?, CollectWhat): via StationsCore.CheckRead(string)
+        "M:Kiln.Stations.CollectToBase(Kiln.EntityId,System.Nullable{Kiln.ItemId},Kiln.CollectWhat)", // Stations.CollectToBase(EntityId, ItemId?, CollectWhat): via StationsCore.CheckRead(string)
         "M:Kiln.Stations.Fill(Kiln.EntityId,Kiln.FillOptions)", // Stations.Fill(EntityId, FillOptions?): via StationsCore.CheckAct(string, string)
         "M:Kiln.Stations.InBase(Kiln.BaseId)", // Stations.InBase(BaseId): via StationsCore.CheckRead(string)
         "M:Kiln.Stations.IsStation(Kiln.EntityId)", // Stations.IsStation(EntityId): via StationsCore.CheckRead(string)
+        "M:Kiln.Stations.Nearest(Kiln.EntityId,System.Nullable{System.UInt32},System.Double)", // Stations.Nearest(EntityId, uint?, double): via StationsCore.CheckRead(string)
         "M:Kiln.Stations.Plan(Kiln.EntityId,Kiln.FillOptions)", // Stations.Plan(EntityId, FillOptions?): via StationsCore.CheckRead(string)
         "M:Kiln.Stations.Read(Kiln.EntityId)", // Stations.Read(EntityId): via StationsCore.CheckRead(string)
         "M:Kiln.Stations.Recipe(System.UInt32)", // Stations.Recipe(uint): via StationsCore.CheckRead(string)

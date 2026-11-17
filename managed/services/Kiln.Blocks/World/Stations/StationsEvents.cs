@@ -14,8 +14,11 @@ public sealed class StationStateChangedEvent : KilnEvent, IEntityEvent
     static StationStateChangedEvent() => StationsCore.EnsureProducers();
 
     internal StationStateChangedEvent(EntityId station, uint workshop, StationState before, StationState after, bool stoppedBefore,
-        bool stoppedAfter, uint selectedBefore, uint selectedAfter, uint runningBefore, uint runningAfter, int baseIndex, string? byMod)
+        bool stoppedAfter, uint selectedBefore, uint selectedAfter, uint runningBefore, uint runningAfter, int baseIndex, string? byMod,
+        BaseId @base = default, EntityId? player = null)
     {
+        Base = @base;
+        Player = player;
         Station = station;
         Workshop = workshop;
         Before = before;
@@ -42,9 +45,15 @@ public sealed class StationStateChangedEvent : KilnEvent, IEntityEvent
     public uint RunningAfter { get; }
     /// <summary>The base's record index this session; -1 when the station stands in none.</summary>
     public int BaseIndex { get; }
-    /// <summary>The mod whose Kiln.Stations call changed the station in the step before; null for the game, a player, or
-    /// native code.</summary>
+    /// <summary>The base the station stands in; <see cref="BaseId.None"/> when none.</summary>
+    public BaseId Base { get; }
+    /// <summary>The mod whose Kiln.Stations stop, resume or select made exactly this change (the stop flag or the selection)
+    /// in the step before; null for the game, a player, native code, and for what the game did afterwards (the state a
+    /// stop or a fill leads to). For "did my own call do this", <see cref="StationChangedEvent"/> is the record of the call.</summary>
     public string? ByMod { get; }
+    /// <summary>The player whose station button made this change, while Kiln holds the players' station buttons (a handler
+    /// of <see cref="StationPlayerActionEvent"/> listens); null otherwise.</summary>
+    public EntityId? Player { get; }
 
     /// <summary>The stop flag went on.</summary>
     public bool Stopped => StoppedAfter && !StoppedBefore;
@@ -54,7 +63,7 @@ public sealed class StationStateChangedEvent : KilnEvent, IEntityEvent
     public bool Involves(EntityId entity) => entity == Station;
 
     public override string ToString() =>
-        $"station {Station}: {Before} -> {After}{(Stopped ? " (stopped)" : Resumed ? " (resumed)" : "")} selected 0x{SelectedAfter:x8}{(ByMod is null ? "" : $" by {ByMod}")}";
+        $"station {Station}: {Before} -> {After}{(Stopped ? " (stopped)" : Resumed ? " (resumed)" : "")} selected 0x{SelectedAfter:x8}{(ByMod is null ? "" : $" by {ByMod}")}{(Player is { } p ? $" by player {p}" : "")}";
 }
 
 /// <summary>A production station appeared in the world (placed, or found by the watch's first scans). Since 0.2.0-dev.29.</summary>
@@ -63,8 +72,9 @@ public sealed class StationPlacedEvent : KilnEvent, IEntityEvent
 {
     static StationPlacedEvent() => StationsCore.EnsureProducers();
 
-    internal StationPlacedEvent(EntityId station, uint workshop, WorldPosition position, int baseIndex)
+    internal StationPlacedEvent(EntityId station, uint workshop, WorldPosition position, int baseIndex, BaseId @base = default)
     {
+        Base = @base;
         Station = station;
         Workshop = workshop;
         Position = position;
@@ -75,6 +85,8 @@ public sealed class StationPlacedEvent : KilnEvent, IEntityEvent
     public uint Workshop { get; }
     public WorldPosition Position { get; }
     public int BaseIndex { get; }
+    /// <summary>The base it stands in; <see cref="BaseId.None"/> when none.</summary>
+    public BaseId Base { get; }
     public bool Involves(EntityId entity) => entity == Station;
     public override string ToString() => $"station {Station} placed (workshop 0x{Workshop:x8}, base #{BaseIndex})";
 }
@@ -85,8 +97,9 @@ public sealed class StationRemovedEvent : KilnEvent, IEntityEvent
 {
     static StationRemovedEvent() => StationsCore.EnsureProducers();
 
-    internal StationRemovedEvent(EntityId station, uint workshop, WorldPosition position, int baseIndex)
+    internal StationRemovedEvent(EntityId station, uint workshop, WorldPosition position, int baseIndex, BaseId @base = default)
     {
+        Base = @base;
         Station = station;
         Workshop = workshop;
         Position = position;
@@ -97,22 +110,38 @@ public sealed class StationRemovedEvent : KilnEvent, IEntityEvent
     public uint Workshop { get; }
     public WorldPosition Position { get; }
     public int BaseIndex { get; }
+    /// <summary>The base it stood in; <see cref="BaseId.None"/> when none.</summary>
+    public BaseId Base { get; }
     public bool Involves(EntityId entity) => entity == Station;
     public override string ToString() => $"station {Station} removed (workshop 0x{Workshop:x8}, base #{BaseIndex})";
 }
 
-/// <summary>The game rebuilt its bases (a flame altar placed, removed or upgraded): base indices and ids may have
-/// changed. Read <see cref="Bases.All"/> again. Since 0.2.0-dev.29.</summary>
+/// <summary>The game rebuilt its bases (a flame altar placed, removed or upgraded): base indices may have changed, and a
+/// base's id changes when an overlapping altar comes or goes. <see cref="Changed"/> pairs old and new ids that share an
+/// altar, so a mod can carry its per-base data over. Since 0.2.0-dev.29.</summary>
 [ServerOnly]
 public sealed class BasesChangedEvent : KilnEvent
 {
     static BasesChangedEvent() => StationsCore.EnsureProducers();
 
-    internal BasesChangedEvent(int count) => Count = count;
+    internal BasesChangedEvent(int count, IReadOnlyList<BaseId> added, IReadOnlyList<BaseId> removed, IReadOnlyList<BaseIdChange> changed)
+    {
+        Count = count;
+        Added = added;
+        Removed = removed;
+        Changed = changed;
+    }
 
     /// <summary>The number of bases now.</summary>
     public int Count { get; }
-    public override string ToString() => $"bases changed: {Count}";
+    /// <summary>Bases that share no altar with a base before.</summary>
+    public IReadOnlyList<BaseId> Added { get; }
+    /// <summary>Bases before that share no altar with a base now.</summary>
+    public IReadOnlyList<BaseId> Removed { get; }
+    /// <summary>Bases whose id changed: old and new share at least one altar (two bases that merged both map to the new
+    /// one; a base that split maps to each part).</summary>
+    public IReadOnlyList<BaseIdChange> Changed { get; }
+    public override string ToString() => $"bases changed: {Count} (+{Added.Count} -{Removed.Count} ~{Changed.Count})";
 }
 
 /// <summary>A production station finished a cycle: its outputs are in its inventory (Kiln.Gameplay's
@@ -122,8 +151,9 @@ public sealed class StationCraftedEvent : KilnEvent, IEntityEvent
 {
     static StationCraftedEvent() => StationsCore.EnsureProducers();
 
-    internal StationCraftedEvent(EntityId station, uint recipe, uint workshop, IReadOnlyList<StationStack> outputs)
+    internal StationCraftedEvent(EntityId station, uint recipe, uint workshop, IReadOnlyList<StationStack> outputs, BaseId @base = default)
     {
+        Base = @base;
         Station = station;
         Recipe = recipe;
         Workshop = workshop;
@@ -135,6 +165,8 @@ public sealed class StationCraftedEvent : KilnEvent, IEntityEvent
     public uint Workshop { get; }
     /// <summary>What the cycle made.</summary>
     public IReadOnlyList<StationStack> Outputs { get; }
+    /// <summary>The base the station stands in; <see cref="BaseId.None"/> when none.</summary>
+    public BaseId Base { get; }
     public bool Involves(EntityId entity) => entity == Station;
     public override string ToString() => $"station {Station} crafted recipe 0x{Recipe:x8}: {string.Join(", ", Outputs)}";
 }
@@ -157,7 +189,8 @@ public enum StationPlayerAction : byte
 }
 
 /// <summary>
-/// A player pressed a station button (fill, select, stop, use-all, water) or crafted at a bench: the game's
+/// A player pressed a station button (fill, select, stop, use-all, water) or crafted at a bench (<see cref="Action"/>
+/// <see cref="StationPlayerAction.Craft"/>: then <see cref="Station"/> is a workbench, not a production station): the game's
 /// <c>playerCraftingAction</c> as Kiln.Players' <see cref="PlayerClientActionEvent"/> holds it, typed. Posted on the tick
 /// thread in Pre, before the game runs it (while <see cref="CanCancel"/>): cancel it and the game never runs it (the
 /// client is not told). One verdict with the generic event of the same input. Since 0.2.0-dev.29.
@@ -227,6 +260,8 @@ internal static partial class StationsCore
     private static bool _watching;
     private static ulong _seq;
     private static EventSubscription? _crafted, _actions;
+    private static List<(BaseId Id, HashSet<Guid> Altars)>? _bases;          // the bases at the last BASES event (or the watch's start)
+    private static readonly Dictionary<uint, (EntityId Player, ulong Step)> Pressed = new();  // station -> the last player button
 
     internal static void Changed(StationResult result, ModContext? mod)
     {
@@ -263,6 +298,8 @@ internal static partial class StationsCore
         _crafted = null;
         _actions?.Dispose();
         _actions = null;
+        _bases = null;
+        lock (Gate) Pressed.Clear();
         lock (Gate) Owners.Clear();
     }
 
@@ -275,7 +312,11 @@ internal static partial class StationsCore
         if (watch != _watching)
         {
             if (Backend.Watch(watch) == StationsNative.Ok || !watch) _watching = watch;
-            if (watch) _seq = Backend.LastSeq();  // start at the newest: events from before the watch are not this handler's
+            if (watch)
+            {
+                _seq = Backend.LastSeq();  // start at the newest: events from before the watch are not this handler's
+                _bases = SnapshotBases();
+            }
         }
         if (_watching) PollEvents();
         Follow(ref _crafted, Events.HasSubscribers<StationCraftedEvent>(), () => Events.On<ItemCraftedEvent>(OnCrafted, EventPriority.Monitor));
@@ -316,40 +357,99 @@ internal static partial class StationsCore
     {
         var station = new EntityId(e.Station);
         var pos = new WorldPosition(e.Position.X, e.Position.Y, e.Position.Z);
+        var baseId = new BaseId(StationsNative.GuidOf(e.Base));
         switch (e.Kind)
         {
             case StationsNative.EvState:
                 string? by = null;
-                if (e.By != 0)
-                    lock (Gate)
-                        by = Owners.GetValueOrDefault(e.By);
+                EntityId? player = null;
+                lock (Gate)
+                {
+                    if (e.By != 0) by = Owners.GetValueOrDefault(e.By);
+                    else if (Pressed.TryGetValue(e.Station, out var p) && ServiceTick.Step <= p.Step + 4)
+                    {
+                        player = p.Player;
+                        Pressed.Remove(e.Station);
+                    }
+                }
                 Events.Post(new StationStateChangedEvent(station, e.Workshop, (StationState)e.StateBefore, (StationState)e.StateAfter,
-                    e.StoppedBefore != 0, e.StoppedAfter != 0, e.SelectedBefore, e.SelectedAfter, e.RunningBefore, e.RunningAfter, e.BaseIndex, by));
+                    e.StoppedBefore != 0, e.StoppedAfter != 0, e.SelectedBefore, e.SelectedAfter, e.RunningBefore, e.RunningAfter, e.BaseIndex, by,
+                    baseId, player));
                 break;
             case StationsNative.EvPlaced:
-                Events.Post(new StationPlacedEvent(station, e.Workshop, pos, e.BaseIndex));
+                Events.Post(new StationPlacedEvent(station, e.Workshop, pos, e.BaseIndex, baseId));
                 break;
             case StationsNative.EvRemoved:
-                Events.Post(new StationRemovedEvent(station, e.Workshop, pos, e.BaseIndex));
+                Events.Post(new StationRemovedEvent(station, e.Workshop, pos, e.BaseIndex, baseId));
                 break;
             case StationsNative.EvBases:
-                Events.Post(new BasesChangedEvent(e.BaseIndex));
+                var now = SnapshotBases();
+                var (added, removed, changed) = DiffBases(_bases ?? [], now ?? []);
+                _bases = now;
+                Events.Post(new BasesChangedEvent(e.BaseIndex, added, removed, changed));
                 break;
         }
+    }
+
+    private static List<(BaseId Id, HashSet<Guid> Altars)>? SnapshotBases()
+    {
+        try
+        {
+            var b = Backend;
+            if (b.BaseCount(out var n) != StationsNative.Ok) return null;
+            var list = new List<(BaseId, HashSet<Guid>)>();
+            for (uint i = 0; i < n; i++)
+            {
+                if (b.BaseAt(i, out var nb) != StationsNative.Ok) continue;
+                var altars = new HashSet<Guid>();
+                for (var k = 0; k < Math.Min(nb.AltarCount, (uint)StationsNative.MaxAltars); k++) altars.Add(StationsNative.AltarIdOf(nb, k));
+                list.Add((new BaseId(StationsNative.GuidOf(nb.Id)), altars));
+            }
+            return list;
+        }
+        catch (Exception e) when (e is KilnUnavailableException or InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Old and new bases by their altars: a pair sharing an altar is the same base (changed when the ids differ).</summary>
+    internal static (IReadOnlyList<BaseId> Added, IReadOnlyList<BaseId> Removed, IReadOnlyList<BaseIdChange> Changed) DiffBases(
+        IReadOnlyList<(BaseId Id, HashSet<Guid> Altars)> before, IReadOnlyList<(BaseId Id, HashSet<Guid> Altars)> after)
+    {
+        var added = new List<BaseId>();
+        var removed = new List<BaseId>();
+        var changed = new List<BaseIdChange>();
+        foreach (var a in after)
+        {
+            var olds = before.Where(o => o.Altars.Overlaps(a.Altars)).ToArray();
+            if (olds.Length == 0) added.Add(a.Id);
+            foreach (var o in olds)
+                if (o.Id != a.Id) changed.Add(new BaseIdChange(o.Id, a.Id));
+        }
+        foreach (var o in before)
+            if (!after.Any(a => a.Altars.Overlaps(o.Altars))) removed.Add(o.Id);
+        return (added, removed, changed);
     }
 
     // An automated station's cycle: operator == station, a success (Kiln.Gameplay reports it once, at the cycle's end).
     internal static void OnCrafted(ItemCraftedEvent e)
     {
-        var ev = CraftedOf(e.Operator, e.Station, e.Succeeded, e.RecipeId, e.WorkshopId, e.Outputs.Select(o => (o.ItemId, o.Count)));
+        var ev = CraftedOf(e.Operator, e.Station, e.Succeeded, e.RecipeId, e.WorkshopId, e.Outputs.Select(o => (o.ItemId, o.Count)), BaseOf(e.Station));
         if (ev is not null) Events.Post(ev);
     }
 
+    private static BaseId BaseOf(EntityId station)
+    {
+        try { return Backend.BaseOf(station.Value, out var b) == StationsNative.Ok ? new BaseId(StationsNative.GuidOf(b.Id)) : default; }
+        catch (Exception e) when (e is KilnUnavailableException or InvalidOperationException) { return default; }
+    }
+
     internal static StationCraftedEvent? CraftedOf(EntityId op, EntityId station, bool succeeded, uint recipe, uint workshop,
-        IEnumerable<(uint Item, int Count)> outputs) =>
+        IEnumerable<(uint Item, int Count)> outputs, BaseId @base = default) =>
         !succeeded || station.IsNone || op != station || op.IsPlayer
             ? null
-            : new StationCraftedEvent(station, recipe, workshop, outputs.Select(o => new StationStack(new ItemId(o.Item), o.Count)).ToArray());
+            : new StationCraftedEvent(station, recipe, workshop, outputs.Select(o => new StationStack(new ItemId(o.Item), o.Count)).ToArray(), @base);
 
     // PlayerCraftingAction (68 bytes, the game's reflection): craftingStationId +0, recipeId +4, itemId +8, amount u16 +0x0c,
     // waterAmount +0x10, waterSourceId +0x14, inputCategorySelections +0x18 (4 x 8), useAll +0x38, version +0x3c, type +0x40.
@@ -377,5 +477,7 @@ internal static partial class StationsCore
         if (ev is null) return;
         Events.Post(ev);
         if (ev.Canceled && e.CanCancel) e.Cancel();
+        else if (ev.Action is StationPlayerAction.Select or StationPlayerAction.Stop or StationPlayerAction.UseAllOptions)
+            lock (Gate) Pressed[ev.Station.Value] = (ev.Player, ServiceTick.Step);  // the state event it leads to names the player
     }
 }

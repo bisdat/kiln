@@ -5,12 +5,14 @@ namespace Kiln;
 internal static partial class StationsCore
 {
     // ---- collect (Kiln.Items' move, one output stack after the other) ----
-    internal static async Task<StationResult> Collect(EntityId station, ItemId? item, Func<ItemId, EntityId?> target)
+    internal static async Task<StationResult> Collect(EntityId station, ItemId? item, CollectWhat what, Func<ItemId, EntityId?> target)
     {
         if (station.IsNone) throw new ArgumentException("no station", nameof(station));
+        if ((what & CollectWhat.All) == 0) throw new ArgumentException("collect what: Outputs, Leftovers or All", nameof(what));
         var info = Stations.Read(station);
         if (info is null) return Refusal(StationActionStatus.NotAStation, StationAction.Collect, station, 0, $"entity {station} is no production station");
-        var outs = info.Outputs.Where(s => item is null || s.Item == item).ToArray();
+        var pick = ((what & CollectWhat.Outputs) != 0 ? info.Outputs : []).Concat((what & CollectWhat.Leftovers) != 0 ? info.Leftovers : []);
+        var outs = pick.Where(s => item is null || s.Item == item).ToArray();
         if (outs.Length == 0)
             return new StationResult(StationActionStatus.Unchanged, StationAction.Collect, station, info.SelectedRecipe, 0, 0, 0, 0, 0, [], info.State,
                 info.State, false, "nothing to collect");
