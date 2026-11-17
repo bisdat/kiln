@@ -2764,11 +2764,25 @@ Kiln.ResolvedBlock<T>.ModId.init -> void
 Kiln.ResolvedBlock<T>.Name.get -> string!
 Kiln.ResolvedBlock<T>.Name.init -> void
 Kiln.ResolvedBlock<T>.ResolvedBlock() -> void
+Kiln.ResourceListAppend
+Kiln.ResourceListAppend.<Clone>$() -> Kiln.ResourceListAppend!
+Kiln.ResourceListAppend.AboveLast.get -> bool
+Kiln.ResourceListAppend.AboveLast.init -> void
+Kiln.ResourceListAppend.Equals(Kiln.ResourceListAppend? other) -> bool
+Kiln.ResourceListAppend.ResourceListAppend() -> void
+Kiln.ResourceListAppend.Values.get -> System.Collections.Generic.List<Kiln.ResourceValue>!
+Kiln.ResourceListAppend.Values.init -> void
 Kiln.ResourcePatchBlock
 Kiln.ResourcePatchBlock.<Clone>$() -> Kiln.ResourcePatchBlock!
+Kiln.ResourcePatchBlock.AddComponents.get -> System.Collections.Generic.List<string!>?
+Kiln.ResourcePatchBlock.AddComponents.init -> void
+Kiln.ResourcePatchBlock.Append.get -> System.Collections.Generic.Dictionary<string!, Kiln.ResourceListAppend!>?
+Kiln.ResourcePatchBlock.Append.init -> void
 Kiln.ResourcePatchBlock.Equals(Kiln.ResourcePatchBlock? other) -> bool
 Kiln.ResourcePatchBlock.Part.get -> int
 Kiln.ResourcePatchBlock.Part.init -> void
+Kiln.ResourcePatchBlock.RemoveComponents.get -> System.Collections.Generic.List<string!>?
+Kiln.ResourcePatchBlock.RemoveComponents.init -> void
 Kiln.ResourcePatchBlock.Resource.get -> System.Guid
 Kiln.ResourcePatchBlock.Resource.init -> void
 Kiln.ResourcePatchBlock.ResourcePatchBlock() -> void
@@ -3097,6 +3111,8 @@ Kiln.StationInfo.BaseIndex.init -> void
 Kiln.StationInfo.CraftsLoaded.get -> int
 Kiln.StationInfo.CraftsLoaded.init -> void
 Kiln.StationInfo.Deconstruct(out Kiln.EntityId Entity, out uint Workshop, out Kiln.WorldPosition Position, out Kiln.BaseId Base, out int BaseIndex, out Kiln.StationState State, out bool StoppedByPlayer, out bool UseAllOptions, out Kiln.StationNeeds Needs, out uint RunningRecipe, out uint SelectedRecipe, out System.Collections.Generic.IReadOnlyList<Kiln.CategoryChoice>! SelectedChoices, out int CraftsLoaded, out System.TimeSpan Duration, out double Progress, out int? Water, out int? WaterMax, out System.Collections.Generic.IReadOnlyList<Kiln.InventorySlot!>! Slots, out System.Collections.Generic.IReadOnlyList<Kiln.InventorySlot!>! Outputs, out System.Collections.Generic.IReadOnlyList<Kiln.InventorySlot!>! Leftovers, out bool StopPending, out string? Template) -> void
+Kiln.StationInfo.DisplayName.get -> string?
+Kiln.StationInfo.DisplayName.init -> void
 Kiln.StationInfo.Duration.get -> System.TimeSpan
 Kiln.StationInfo.Duration.init -> void
 Kiln.StationInfo.Entity.get -> Kiln.EntityId
@@ -3204,6 +3220,8 @@ Kiln.StationRecipe.<Clone>$() -> Kiln.StationRecipe!
 Kiln.StationRecipe.AlwaysUnlocked.get -> bool
 Kiln.StationRecipe.AlwaysUnlocked.init -> void
 Kiln.StationRecipe.Deconstruct(out uint Id, out uint Workshop, out System.Collections.Generic.IReadOnlyList<Kiln.StationInput>! Inputs, out System.Collections.Generic.IReadOnlyList<Kiln.StationStack>! Outputs, out System.TimeSpan Duration, out int WaterCharges, out bool AlwaysUnlocked) -> void
+Kiln.StationRecipe.DisplayName.get -> string?
+Kiln.StationRecipe.DisplayName.init -> void
 Kiln.StationRecipe.Duration.get -> System.TimeSpan
 Kiln.StationRecipe.Duration.init -> void
 Kiln.StationRecipe.Equals(Kiln.StationRecipe? other) -> bool
@@ -4710,6 +4728,9 @@ override Kiln.RequiresBlock.ToString() -> string!
 override Kiln.ResolvedBlock<T>.Equals(object? obj) -> bool
 override Kiln.ResolvedBlock<T>.GetHashCode() -> int
 override Kiln.ResolvedBlock<T>.ToString() -> string!
+override Kiln.ResourceListAppend.Equals(object? obj) -> bool
+override Kiln.ResourceListAppend.GetHashCode() -> int
+override Kiln.ResourceListAppend.ToString() -> string!
 override Kiln.ResourcePatchBlock.Equals(object? obj) -> bool
 override Kiln.ResourcePatchBlock.GetHashCode() -> int
 override Kiln.ResourcePatchBlock.ToString() -> string!
@@ -5133,6 +5154,7 @@ static Kiln.Bases.Get(Kiln.BaseId id) -> Kiln.BaseInfo?
 static Kiln.Bases.Of(Kiln.EntityId entity) -> Kiln.BaseInfo?
 static Kiln.Bases.Stock(Kiln.BaseId id) -> System.Collections.Generic.IReadOnlyDictionary<Kiln.ItemId, long>!
 static Kiln.Bases.Stock(Kiln.BaseId id, Kiln.ItemId item) -> long
+static Kiln.Bases.StockWithStations(Kiln.BaseId id) -> System.Collections.Generic.IReadOnlyDictionary<Kiln.ItemId, long>!
 static Kiln.Bases.Storage(Kiln.BaseId id, bool deposit = false) -> System.Collections.Generic.IReadOnlyList<Kiln.EntityId>!
 static Kiln.Bases.TryGet(Kiln.BaseId id, out Kiln.BaseInfo? info) -> bool
 static Kiln.Bases.WaterSources(Kiln.BaseId id) -> System.Collections.Generic.IReadOnlyList<Kiln.EntityId>!
@@ -5504,6 +5526,8 @@ static Kiln.Req.Quest(string! quest, string! state = "done") -> Kiln.ConditionBl
 static Kiln.Req.Step(string! questDotStep, string! state = "done") -> Kiln.ConditionBlock!
 static Kiln.RequiresBlock.operator !=(Kiln.RequiresBlock? left, Kiln.RequiresBlock? right) -> bool
 static Kiln.RequiresBlock.operator ==(Kiln.RequiresBlock? left, Kiln.RequiresBlock? right) -> bool
+static Kiln.ResourceListAppend.operator !=(Kiln.ResourceListAppend? left, Kiln.ResourceListAppend? right) -> bool
+static Kiln.ResourceListAppend.operator ==(Kiln.ResourceListAppend? left, Kiln.ResourceListAppend? right) -> bool
 static Kiln.ResourcePatchBlock.operator !=(Kiln.ResourcePatchBlock? left, Kiln.ResourcePatchBlock? right) -> bool
 static Kiln.ResourcePatchBlock.operator ==(Kiln.ResourcePatchBlock? left, Kiln.ResourcePatchBlock? right) -> bool
 static Kiln.ResourceValue.AtLeast(double min) -> Kiln.ResourceValue
@@ -5614,6 +5638,7 @@ static Kiln.Stations.Nearest(Kiln.EntityId entity, uint? workshop = null, double
 static Kiln.Stations.Plan(Kiln.EntityId station, Kiln.FillOptions? options = null) -> Kiln.FillPlan!
 static Kiln.Stations.Read(Kiln.EntityId station) -> Kiln.StationInfo?
 static Kiln.Stations.Recipe(uint id) -> Kiln.StationRecipe?
+static Kiln.Stations.RecipeName(uint recipe) -> string?
 static Kiln.Stations.RecipesOf(Kiln.EntityId station) -> System.Collections.Generic.IReadOnlyList<uint>!
 static Kiln.Stations.ResolveInputs(uint recipe, System.Collections.Generic.IReadOnlyList<Kiln.CategoryChoice>? choices = null) -> System.Collections.Generic.IReadOnlyList<Kiln.StationStack>!
 static Kiln.Stations.Resume(Kiln.EntityId station) -> System.Threading.Tasks.Task<Kiln.StationResult!>!
@@ -5622,6 +5647,7 @@ static Kiln.Stations.Select(Kiln.EntityId station, uint recipe, System.Collectio
 static Kiln.Stations.Start(Kiln.EntityId station, uint recipe) -> bool
 static Kiln.Stations.Status(Kiln.EntityId station) -> Kiln.StationStatus?
 static Kiln.Stations.Stop(Kiln.EntityId station, Kiln.StopWhen when = Kiln.StopWhen.Now) -> System.Threading.Tasks.Task<Kiln.StationResult!>!
+static Kiln.Stations.WorkshopName(uint workshop) -> string?
 static Kiln.StatusApply.implicit operator Kiln.StatusApply!(Kiln.BlockHandle<Kiln.StatusBlock!>! status) -> Kiln.StatusApply!
 static Kiln.StatusApply.implicit operator Kiln.StatusApply!(Kiln.StatusBlock! status) -> Kiln.StatusApply!
 static Kiln.StatusApply.implicit operator Kiln.StatusApply!(Kiln.StatusRef! status) -> Kiln.StatusApply!
