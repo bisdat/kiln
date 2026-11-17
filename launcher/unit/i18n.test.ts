@@ -2,6 +2,9 @@ import { afterEach, expect, test } from "bun:test";
 import { fill, flatten, formatNumber, lookupOrder, placeholders, pluralBase, rawIn } from "../src/i18n/format";
 import { currentLanguage, currentLocale, hasKey, languageName, languages, registerLocale, resolveLanguage, setLanguage, setUserLocales, t } from "../src/i18n";
 import en from "../src/i18n/en.json";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { rich } from "../src/i18n";
 
 afterEach(() => {
   setUserLocales([]);
@@ -98,4 +101,12 @@ test("a translator's file in the data folder wins over the built-in one, and goe
   expect(t("common.save")).toBe("Save"); // English stays en.json's
   setUserLocales([]);
   expect(t("languageSettings.title")).toBe("语言");
+});
+
+test("rich: elements in a text, in the translation's order", () => {
+  registerLocale("zh-CN", { languageSettings: { filesBad: "{1}（{0}）" } });
+  setLanguage("zh-CN");
+  const node = rich("languageSettings.filesBad", createElement("code", null, "zh-CN.json"), "not JSON");
+  expect(renderToStaticMarkup(createElement("p", null, node))).toBe("<p>not JSON（<code>zh-CN.json</code>）</p>");
+  expect(rich("languageSettings.filesBad", "a", "b")).toBe("{1}（{0}）".replace("{1}", "b").replace("{0}", "a"));
 });

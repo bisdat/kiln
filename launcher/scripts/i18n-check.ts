@@ -79,10 +79,10 @@ export function hasKey(enTable: Table, key: string): boolean {
   return enTable[key] !== undefined || PLURAL_FORMS.some((f) => enTable[`${key}.${f}`] !== undefined);
 }
 
-/** Every literal `t("key")` in the source files under `dir` (the save editor aside): key, file, line. */
+/** Every literal `t("key")` and `rich("key")` in the source files under `dir` (the save editor aside): key, file, line. */
 export function sourceKeys(dir: string): { key: string; file: string; line: number }[] {
   const out: { key: string; file: string; line: number }[] = [];
-  const re = /(?<![\w$.])t\(\s*(["'`])([A-Za-z0-9_.-]+)\1/g;
+  const re = /(?<![\w$.])(?:t|rich)\(\s*(["'`])([A-Za-z0-9_.-]+)\1/g;
   const walk = (d: string) => {
     for (const e of readdirSync(d, { withFileTypes: true })) {
       const p = join(d, e.name);

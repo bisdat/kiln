@@ -7,7 +7,7 @@
 //
 // A key the active language lacks shows the English text; one English lacks shows the key itself (both logged once in
 // development). The language preference is "system" (the first of the system's languages that has a file) or a tag.
-import { useMemo, useSyncExternalStore } from "react";
+import { Fragment, createElement, isValidElement, useMemo, useSyncExternalStore, type ReactNode } from "react";
 import en from "./en.json";
 import { FALLBACK, fill, flatten, lookupOrder, normalizeTag, pluralCount, rawIn, type Table } from "./format";
 
@@ -154,6 +154,26 @@ export function t(key: string, ...args: unknown[]): string {
   // the chain always ends in English (built in): English lacks it too
   report(key, FALLBACK);
   return key;
+}
+
+/** Like `t`, for a text with elements in it: `rich("play.hint", { button: <b>{t("play.play")}</b> })` for
+ * "Press {button} to start". Element values go in as they are; any other value is filled as `t` fills it. One named
+ * object, or positional values. */
+export function rich(key: string, ...args: unknown[]): ReactNode {
+  const elements: ReactNode[] = [];
+  const mark = (v: unknown) => {
+    if (!isValidElement(v)) return v;
+    elements.push(v);
+    return `\u0000${elements.length - 1}\u0000`;
+  };
+  const named = args.length === 1 && args[0] !== null && typeof args[0] === "object" && Object.getPrototypeOf(args[0]) === Object.prototype;
+  const marked = named
+    ? [Object.fromEntries(Object.entries(args[0] as Record<string, unknown>).map(([k, v]) => [k, mark(v)]))]
+    : args.map(mark);
+  const text = t(key, ...marked);
+  if (elements.length === 0) return text;
+  const parts = text.split(/\u0000(\d+)\u0000/);
+  return createElement(Fragment, null, ...parts.map((p, i) => (i % 2 === 1 ? createElement(Fragment, { key: i }, elements[Number(p)]) : p)));
 }
 
 /** True when English (the fallback) has `key` (or its plural forms). */
