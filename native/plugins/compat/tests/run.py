@@ -510,6 +510,34 @@ def shroudtopia_with_an_eml_part():
     return g
 
 
+def shroudtopia_eml_entry_with_a_module():
+    # inbox 53 (sneh0nja): with a profile, Skill Search and the In Game Ping System are EML entries (mod.json, src/
+    # mod.lua beside their Shroudtopia module) and Shroudtopia's drop-ins are off: only the Lua ran, the module that
+    # draws the search box never loaded. The module of an EML entry that is on is Shroudtopia's; one that is off, and
+    # an EML entry without a module, are not.
+    g = Game("shroudtopia-eml-entry-with-a-module")
+    g.put("kiln/config/shroudtopia/shroudtopia.json",
+          {"active": True, "bootDelay": 0, "updateDelay": 50, "mods": {"Kiln Client Mod": TEST_MOD_CONFIG}})
+    g.put("library/skill-search/mod.json", {"id": "skill-search", "name": "Skill search", "version": "1.5.0"})
+    g.put("library/skill-search/src/mod.lua", "return {}")
+    g.dll("shroudtopia_client.dll", "library/skill-search/skill-search.dll")
+    g.put("library/switched-off/mod.json", {"id": "switched-off", "name": "off", "version": "1.0.0"})
+    g.put("library/switched-off/src/mod.lua", "return {}")
+    g.dll("shroudtopia_test.dll", "library/switched-off/switched-off.dll")
+    g.put("library/eml-helper/mod.json", {"id": "eml-helper", "name": "helper", "version": "1.0.0"})
+    g.put("library/eml-helper/src/mod.lua", "return {}")
+    g.put("library/eml-helper/helper.dll", "MZ not a Shroudtopia module")
+    g.profile({"eml": [{"id": "skill-search", "path": winpath(g.p("library", "skill-search"))},
+                       {"id": "switched-off", "path": winpath(g.p("library", "switched-off")), "enabled": False},
+                       {"id": "eml-helper", "path": winpath(g.p("library", "eml-helper"))}]})
+    g.run(g.plugin("kiln-shroudtopia.dll"), 1200)
+    g.has("Registered mod: Kiln Client Mod 1.0 by kiln (profile-eml")
+    g.has("Activating: Kiln Client Mod")
+    g.lacks("Kiln Test Mod")
+    g.lacks("helper.dll")
+    g.checks_pass("shroudtopia:Kiln Client Mod", 26)
+    return g
+
 def shroudtopia_aside():
     g = Game("shroudtopia-aside")
     g.dll("shroudtopia_test.dll", "mods/shroudtopia_test.dll")
@@ -1273,7 +1301,7 @@ def wine_builtin_not_a_loader():
 SCENARIOS = {f.__name__.replace("_", "-"): f for f in [
     greeneye_legacy_client, greeneye_profile_server, greeneye_hot_reload_server, greeneye_aside, greeneye_nomods,
     flame_legacy, flame_profile, flame_reads_from, flame_manifest_id_differs, flame_aside,
-    shroudtopia_legacy_server, shroudtopia_hooks_full, shroudtopia_hooks_refused, shroudtopia_profile_client, shroudtopia_with_an_eml_part, shroudtopia_aside, idle_without_mods,
+    shroudtopia_legacy_server, shroudtopia_hooks_full, shroudtopia_hooks_refused, shroudtopia_profile_client, shroudtopia_with_an_eml_part, shroudtopia_eml_entry_with_a_module, shroudtopia_aside, idle_without_mods,
     invalid_profiles, path_boundaries, flame_dllmain_fault, flame_fault_running, flame_lifetime, flame_late_loader, flame_dependency_loader,
     greeneye_hot_factory_faults, shroudtopia_late_loader, shroudtopia_lifetime, shroudtopia_renamed_loader,
     shroudtopia_config_replacements, shroudtopia_faults, profile_id_precedence,
