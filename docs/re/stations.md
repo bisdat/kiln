@@ -492,3 +492,15 @@ button need a client half (phase 2).
 Symbols: `@stations/AutoTransferRecipe.take` (scoped to `stations/AutoTransferRecipe`, three patterns) captures
 `stations/stack.item` = 0x10, `stations/stack.size` = 0x18 and `gems/PayMaterial` from the list loop, on both exes;
 feature `stations.output_sources` (`server.d/stations.json`).
+
+**Lab (2026-11-17, server 26430253, `mods/tests/station-outputs-test`, standard lab save, no player): 32 PASS, 0 FAIL,
+and 3 PASS on the run after a SIGINT stop and a start.** A T1 forge's recipe (2 charcoal + 2 metal scraps) filled for 2
+crafts took its 4 charcoal from an opted-in T1 charcoal kiln's outputs, the kiln's 36 queued logs stayed, the Magic chests'
+charcoal (all reserved) was untouched, the ledger names the kiln's slot; with one craft's charcoal let through by the
+reserve the chests gave 2 and the kiln 2; with the chests free the kiln gave nothing; an exact fill beyond both moved
+nothing; the kiln's leftover (metal scraps) and a kiln with no recipe lent nothing; a kiln in a second base (an altar
+placed 565 m away made the game's second base) was never used; a dry run and `UseStationOutputs = false` behaved as
+documented; the opt-in came back after the restart. Scanning all 31 production station templates: **no recipe has an
+item on both sides** (inputs and category options against outputs), so "an output that is also an input" is a guard
+the game's data does not exercise today (host test only). `station-actions-test` on the same build: 64 PASS, 0 FAIL,
+then 4 PASS, 0 FAIL after the restart.
