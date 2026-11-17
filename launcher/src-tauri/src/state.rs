@@ -199,11 +199,13 @@ fn runtime_to_install(d: &DataDirs, install: &GameInstall) -> Option<std::path::
         kiln_manage::game::GameKind::Server => kiln_manage::manifest::RunSide::Server,
         kiln_manage::game::GameKind::Client => kiln_manage::manifest::RunSide::Client,
     };
-    if let Some(v) = crate::commands::runtime::shipped_version()
-        && let Ok(b) = kiln_manage::bundle::find(d, &v)
-        && b.sides.contains(&side)
-    {
-        return Some(b.file);
+    // the shipped one by its file name (no zip is opened: the status runs every few seconds; build_check reads the
+    // manifest once per file change)
+    if let Some(v) = crate::commands::runtime::shipped_version() {
+        let p = d.runtime().join(kiln_manage::bundle::file_name(&v));
+        if p.is_file() {
+            return Some(p);
+        }
     }
     kiln_manage::direct::newest_bundle(d, side)
 }
