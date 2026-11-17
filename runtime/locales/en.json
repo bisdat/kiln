@@ -208,5 +208,141 @@
       "new_vfx": "{mod}: new VFX \"{name}\": restart the game to see it",
       "new_material": "{mod}: new material \"{name}\": restart the game to see it"
     }
+  },
+  "creative": {
+    "title": "Creative",
+    "menu": "Creative",
+    "hud": "Creative",
+    "key": {
+      "category": "Creative",
+      "open": "Open the creative menu",
+      "flight": "Character flight on or off (creative mode)"
+    },
+    "asking": "Asking the server...",
+    "no_server": "This server has no Kiln creative menu (it needs Kiln on the server).",
+    "idle": "This server runs Creative Mode (a Flame mod), so Kiln's creative menu is idle here: use Creative Mode's own menu. Kiln's creative mode cannot be turned on while it runs.",
+    "on": "Creative mode is on",
+    "off": "Creative mode is off",
+    "turn_off": "Turn off",
+    "turn_on": "Turn on",
+    "admin_turns_on": "(an admin turns it on: /creative on <you>)",
+    "refused": "Refused: {reason}",
+    "needs_creative": "Needs creative mode.",
+    "tab": {
+      "items": "Items",
+      "world": "World",
+      "rules": "Rules"
+    },
+    "rules": {
+      "yours": "Your rules: {rules}",
+      "game": "Your rules: the game's",
+      "key": "Key: {key} (Kiln menu > Keys to change it)."
+    },
+    "items": {
+      "cannot_give": "This server's game build cannot give items.",
+      "needs_creative": "Taking items needs creative mode.",
+      "search": "Search",
+      "no_equipment": "Without equipment",
+      "journey": "Only what I have found",
+      "journey_tip": "Journey: items you have picked up, crafted or used. Find or craft the first one as the game intends, then take as many as you like.",
+      "category": "Category",
+      "found_unknown": "This server cannot tell which items you have found.",
+      "loading": "Loading the catalogue...",
+      "of": "{count} of {total} items",
+      "none_found": "Nothing found here yet: pick up or craft items first.",
+      "none_match": "No items match.",
+      "pick": "Pick an item.",
+      "previous": "Previous",
+      "page": "Page {page} of {pages}",
+      "next": "Next"
+    },
+    "category": {
+      "all": "All",
+      "materials": "Materials",
+      "building": "Building",
+      "consumables": "Consumables",
+      "ammunition": "Ammunition",
+      "weapons": "Weapons",
+      "equipment": "Equipment",
+      "tools": "Tools",
+      "instruments": "Instruments",
+      "fishing": "Fishing",
+      "customization": "Customization",
+      "gems": "Gems",
+      "palettes": "Colour palettes",
+      "animal_food": "Animal food",
+      "collectibles": "Collectibles",
+      "blueprints": "Blueprints",
+      "currency": "Currency"
+    },
+    "backpack": {
+      "caption": "Backpack",
+      "holding": "Holding {item} x{count}: click an empty slot (or one with the same item).",
+      "put_back": "Put back",
+      "hint": "Pick an item up with \"Place...\", then click a slot.",
+      "reading": "Reading your backpack..."
+    },
+    "item": {
+      "stacks": "{category}, stacks to {count}",
+      "level": "Level",
+      "level_fixed": "Level {level}",
+      "rarity": "Rarity",
+      "upgrades": "Upgrades",
+      "upgrades_tip": "Upgrades unlocked, as at the workbench (each raises the level by 1). 5: all the item has (its rarity decides how many).",
+      "gem_slot": "Gem slot",
+      "journey_level": "Only what I have found: the level is capped at your character's level.",
+      "count": "Count",
+      "take": "Take {count}",
+      "place": "Place...",
+      "place_tip": "Pick it up, then click a slot in the backpack grid below to put it there."
+    },
+    "rarity": {
+      "common": "Common",
+      "uncommon": "Uncommon",
+      "rare": "Rare",
+      "epic": "Epic",
+      "legendary": "Legendary"
+    },
+    "map": {
+      "caption": "Map reveal",
+      "unavailable": "This game build has no map reveal (Kiln did not find the fog of war here).",
+      "radius": "Reveal radius",
+      "game": "The game's",
+      "r200": "200 m",
+      "r400": "400 m",
+      "whole": "Whole map",
+      "help": "Uncovers the map around you as you move (Whole map: all of it, once). What is uncovered stays uncovered for this character, also after creative mode. Set back to the game's when you leave the world."
+    },
+    "flight": {
+      "caption": "Character flight",
+      "unavailable": "Character flight needs rules.json allowCharacterFlight and matching flight hooks in both games.",
+      "flight": "Flight",
+      "off": "Off",
+      "unlimited": "Unlimited",
+      "building": "Building areas only",
+      "help": "Jump to take off, hold jump to climb, sneak to sink, sprint for speed; sinking onto the ground lands. Key: {key} (Kiln menu > Keys)."
+    },
+    "time": {
+      "caption": "Time of day",
+      "now": "It is {time}.",
+      "unknown": "The time of day is not known.",
+      "cannot": "This build cannot set the time of day.",
+      "admin_only": "Only an admin changes the time of day.",
+      "help": "Jumps forward to the hour you pick.",
+      "hour": "Hour",
+      "set": "Set"
+    },
+    "cycle": {
+      "caption": "Day and night cycle",
+      "now_stopped": "Now: stopped (the sun stands still)",
+      "now_fast": "Now: fast (a day and night in about 90 s)",
+      "now_normal": "Now: normal",
+      "cannot": "This build cannot change the cycle's speed.",
+      "admin_only": "Only an admin changes the cycle.",
+      "normal": "Normal",
+      "stopped": "Stopped",
+      "fast": "Fast",
+      "help": "For the whole world, until it is set back or the server restarts."
+    }
   }
 }
