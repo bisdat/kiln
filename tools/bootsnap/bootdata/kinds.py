@@ -244,14 +244,21 @@ class Source:
         return None
 
     def _name_at(self, key, at):
-        """Blob.blob_string(at) of one resource, reading only its 8 bytes {i32 rel, u32 len} and the string."""
-        off, size = self.kfc.values[self.kfc.index[key]]
-        if not 0 <= at <= size - 8:
+        """Blob.blob_string(at) of one resource, reading only its 8 bytes {i32 rel, u32 len} and the string. A read
+        that fails (a chunk over its budget, a damaged frame) gives no name, never a lost list; only the producer's
+        deadline (TimeoutError) goes on."""
+        try:
+            off, size = self.kfc.values[self.kfc.index[key]]
+            if not 0 <= at <= size - 8:
+                return ""
+            rel, n = struct.unpack("<iI", self.kfc.read_stream(off + at, 8))
+            if rel == 0 or n == 0 or n > 512 or not 0 <= at + rel <= size - n:
+                return ""
+            s = self.kfc.read_stream(off + at + rel, n)
+        except TimeoutError:
+            raise
+        except Exception:
             return ""
-        rel, n = struct.unpack("<iI", self.kfc.read_stream(off + at, 8))
-        if rel == 0 or n == 0 or n > 512 or not 0 <= at + rel <= size - n:
-            return ""
-        s = self.kfc.read_stream(off + at + rel, n)
         return "" if any(c < 0x20 or c >= 0x7F for c in s) else s.decode("ascii")
 
     def resource_types(self):

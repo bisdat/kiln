@@ -1672,6 +1672,9 @@ void resource_list_cases() {
               why.find("larger than one result") != std::string::npos);
         CHECK(r.read("names:resources/keen::SceneResource", 1 << 20, 1 << 20, 10, &out, &req, &vb, &why) == KILN_ERR_UNAVAILABLE &&
               why.find("budget") != std::string::npos);
+        // let go after the generation (review nit): a later read loads the list again, the same
+        r.release_resource_list();
+        CHECK(r.read("names:resources/keen::SceneResource", 1 << 20, 1 << 20, 1 << 20, &out, &req, &vb, &why) == KILN_OK && vb > 0);
         // an older snapshot (no checksums, no list): other keys serve, names:resources says what to run
         flush(s);
         fs::remove(s.dir / "resources.index.json");
@@ -1682,6 +1685,15 @@ void resource_list_cases() {
         CHECK(r.read("resource:" + g1 + "/keen::SceneResource/1", 1 << 20, 1 << 20, 1 << 20, &out, &req, &vb, &why) == KILN_ERR_UNAVAILABLE &&
               why.find("predates the resource list") != std::string::npos);
         CHECK(r.read("item:Zed_Item", 1 << 20, 1 << 20, 1 << 20, &out, &req, &vb, &why) == KILN_OK);
+        // an item or template that is not there is known without the list: not found (review)
+        char th[9];
+        std::snprintf(th, sizeof th, "%08x", kiln::boot_gd::fnv1a32("keen::ecs::TemplateResource"));
+        CHECK(r.read("resource:00000000-0000-0000-0000-0000000000ff/keen::ecs::TemplateResource/0", 1 << 20, 1 << 20, 1 << 20, &out, &req, &vb, &why) ==
+              KILN_ERR_NOT_FOUND);
+        CHECK(r.read("resource:00000000-0000-0000-0000-0000000000ff/" + std::string(th) + "/0", 1 << 20, 1 << 20, 1 << 20, &out, &req, &vb, &why) ==
+              KILN_ERR_NOT_FOUND);
+        CHECK(r.read("resource:00000000-0000-0000-0000-0000000000ff/keen::ItemInfo/0", 1 << 20, 1 << 20, 1 << 20, &out, &req, &vb, &why) ==
+              KILN_ERR_NOT_FOUND);
         // with checksums of the eight, none of the list: the same
         add_checksums(s);
         a = open_author();

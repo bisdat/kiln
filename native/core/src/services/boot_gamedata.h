@@ -33,7 +33,7 @@
 namespace kiln::boot_gd {
 
 constexpr size_t kKfcHeadMax = 64u << 10;      // bytes of <exe stem>.kfc read for its version string
-constexpr uint64_t kIndexMax = 64ull << 20;    // bytes of one <kind>.index.json (and of index.json): larger is refused
+constexpr uint64_t kIndexMax = 32ull << 20;    // bytes of one <kind>.index.json (and of index.json): larger is refused; the producer writes none larger (snapshot.py INDEX_MAX)
 constexpr uint64_t kOffsetMax = 1ull << 53;    // offsets and lengths are below this (the contract)
 constexpr size_t kWrapperMax = 256;            // bytes of {"resourceId",...} around a value
 constexpr const char* kKinds[4] = {"items", "templates", "skills", "materials"};
@@ -294,6 +294,16 @@ class Reader {
         std::lock_guard lk(mutex_);
         return !checksums_.empty();
     }
+    size_t checksum_count() const {  // the files index.json's checksums cover (8, or 10 with the resource list)
+        std::lock_guard lk(mutex_);
+        return checksums_.size();
+    }
+    /// The boot generation is over (published or aborted): nothing reads the snapshot any more in this process, so the
+    /// parsed resource list (several MB of maps on a client) is let go. A later read would load it again.
+    void release_resource_list() {
+        std::lock_guard lk(mutex_);
+        drop_resource_list();
+    }
 
     bool is_open() const {
         std::lock_guard lk(mutex_);
@@ -396,7 +406,11 @@ class Reader {
                 kind = it->second.first;
                 e = it->second.second;
             } else {
-                // any other resource: its value in resources.data (from the list, loaded once)
+                // any other resource: its value in resources.data (from the list, loaded once). A snapshot without the
+                // list still knows every item and template: a miss of those two types is not found, not unavailable
+                if (!has_resource_list_ && (key.find("/" + hex8(fnv1a32("keen::ItemInfo")) + "/") != std::string::npos ||
+                                            key.find("/" + hex8(fnv1a32("keen::ecs::TemplateResource")) + "/") != std::string::npos))
+                    return *why = "not in the boot snapshot", KILN_ERR_NOT_FOUND;
                 if (!load_resource_list(why)) return KILN_ERR_UNAVAILABLE;
                 const auto hit = res_values_.find(key);
                 if (hit == res_values_.end()) return *why = "not in the boot snapshot", KILN_ERR_NOT_FOUND;
@@ -490,6 +504,12 @@ class Reader {
         std::vector<Res> entries;  // sorted by (name, GUID, part)
     };
 
+    static std::string hex8(uint32_t v) {
+        char b[9];
+        std::snprintf(b, sizeof b, "%08x", v);
+        return b;
+    }
+
     void drop_resource_list() {
         res_loaded_ = res_ok_ = false;
         res_why_.clear();
@@ -516,7 +536,7 @@ class Reader {
         std::error_code ec;
         const auto size = std::filesystem::file_size(file, ec);
         if (ec) return res_why_ = name + " could not be opened", false;
-        if (size > kIndexMax) return res_why_ = name + " is larger than 64 MiB", false;
+        if (size > kIndexMax) return res_why_ = name + " is larger than 32 MiB", false;
         std::string text;
         if (!read_at(file, 0, static_cast<size_t>(size), static_cast<size_t>(size), &text)) return res_why_ = name + " could not be read", false;
         const auto j = nlohmann::json::parse(text, nullptr, false);
@@ -609,7 +629,7 @@ class Reader {
         std::error_code ec;
         const auto size = std::filesystem::file_size(file, ec);
         if (ec) return k->why = name + " could not be opened", false;
-        if (size > kIndexMax) return k->why = name + " is larger than 64 MiB", false;
+        if (size > kIndexMax) return k->why = name + " is larger than 32 MiB", false;
         std::string text;
         if (!read_at(file, 0, static_cast<size_t>(size), static_cast<size_t>(size), &text)) return k->why = name + " could not be read", false;
         const auto j = nlohmann::json::parse(text, nullptr, false);

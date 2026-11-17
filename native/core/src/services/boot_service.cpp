@@ -948,6 +948,7 @@ KilnResult KILN_CALL b_commit(KilnOwner host, uint64_t generation, KilnBootCommi
         } else {
             abort_locked(culprits, why);
         }
+        g_gamedata.release_resource_list();  // OnBoot is over: no read of the snapshot follows in this process
         out->status = g_status;
         out->owner_count = static_cast<uint32_t>(g_owners.size());
         out->issue_count = static_cast<uint32_t>(g_issues.size());
@@ -1273,7 +1274,7 @@ void decide(bool hooks, const std::string& safe_idle) {
                 send({{"mods.boot.game_data", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SERVICE_MISSING,
                        std::string(boot_gd::kHint) + " (" + bad + ")"}});
             } else if (g_gamedata.has_checksums()) {
-                KLOG_I("boot: game-data snapshot %s: its eight files match their checksums (%lld ms)", g_gamedata.key().c_str(),
+                KLOG_I("boot: game-data snapshot %s: its %zu files match their checksums (%lld ms)", g_gamedata.key().c_str(), g_gamedata.checksum_count(),
                        static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count()));
             }
         }

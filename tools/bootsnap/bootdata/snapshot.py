@@ -541,7 +541,9 @@ def write_resources(src, out_dir, skipped, stored=(), progress=None):
     list is written empty with one `skipped` line, as a kind is."""
     try:
         types = src.resource_types()
-    except KindError as e:
+    except TimeoutError:
+        raise
+    except Exception as e:  # KindError, or a read that fails: the list is written empty, the four kinds stand
         types = {}
         skipped.append({"kind": "resources", "name": "", "reason": f"kind not read: {e}"})
     todo = []
@@ -586,7 +588,16 @@ def write_resources(src, out_dir, skipped, stored=(), progress=None):
         th, entries = types[name]
         rows = sorted(((key.guid, key[2], n) + where.get(key, (-1, 0)) for key, n in entries), key=lambda e: (e[2], e[0], e[1]))
         out[name] = {"hash": f"{th:08x}", "entries": [list(e) for e in rows]}
-    _write_json(out_dir / RESOURCES, {"format": FORMAT, "kind": "resources", "types": out})
+    try:
+        _write_json(out_dir / RESOURCES, {"format": FORMAT, "kind": "resources", "types": out})
+    except SnapshotError as e:  # over the index budget: an empty list (its values unreachable), the four kinds stand
+        (out_dir / RESOURCES).unlink(missing_ok=True)
+        with open(out_dir / RESOURCES_DATA, "wb") as data:  # no entry points into it any more
+            data.flush()
+            os.fsync(data.fileno())
+        skipped.append({"kind": "resources", "name": "", "reason": f"kind not read: {e}"})
+        _write_json(out_dir / RESOURCES, {"format": FORMAT, "kind": "resources", "types": {}})
+        total = 0
     if progress:
         progress("resources", len(todo), len(todo))
     return total

@@ -71,7 +71,7 @@ producer wrote them.
 ```
 `<kind>.data` holds the entries' values back to back: the `length` bytes at `offset` are one complete JSON object, the
 value. Offsets and lengths are bytes, below 2^53. A read loads one kind's index (once per process; an index file over
-64 MiB is refused) and then reads `length` bytes.
+32 MiB is refused, and the producer writes none larger) and then reads `length` bytes.
 
 The name of an entry, case-sensitive, is exactly the text after the query's prefix:
 
@@ -111,7 +111,7 @@ Written by `kiln-bootsnap 2` and later. They list every resource of the game's a
 
 kiln.boot opens a snapshot without these files (made by an older producer) and serves every other key. When
 `index.json`'s `checksums` lists one of them, it is checked with the others, and listed but missing is damaged. The list
-is loaded at the first query that needs it (one file of at most 64 MiB). The producer requires both files, so a
+is loaded at the first query that needs it (one file of at most 32 MiB). The producer requires both files, so a
 snapshot made without them is made again at the next start through the launcher.
 
 ## The value
@@ -134,9 +134,10 @@ left out, and its path is listed once in `index.json` under `runtimeOnly`.
 | `resource:<GUID>/<qualified type name>/<part>` | the same, the name standing for its hash (`resource:<GUID>/keen::SceneResource/0`) |
 
 A qualified type name in a query has letters, digits, `_` and `:`, at least one `::`, at most 160 characters. Without
-the resource files, `names:resources/...` and a `resource:` that is no stored item or template answer unavailable with
-"this snapshot predates the resource list: start through the Kiln launcher or run `kiln boot-snapshot --game <dir>
---force`".
+the resource files, `names:resources/...` and a `resource:` of a type other than `keen::ItemInfo` and
+`keen::ecs::TemplateResource` answer unavailable with "this snapshot predates the resource list: start through the Kiln
+launcher or run `kiln boot-snapshot --game <dir> --force`". An item or template the snapshot has not got is not found
+either way: those two kinds are complete without the list.
 
 The result is `{"resourceId","typeHash","part","value"}`: the GUID, the type hash as 8 lower-case hex digits, the part
 as a number and the value as stored. For `skill:` the offline view's `resourceId` is the backing resource's; kiln.content's

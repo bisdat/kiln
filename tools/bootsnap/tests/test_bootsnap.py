@@ -949,6 +949,51 @@ class SnapshotTests(unittest.TestCase):
         self.assertIn({"kind": "skills", "name": "", "reason": "kind not read: the archive has no keen::SkillTreeResource"}, idx["skipped"])
         self.assertEqual(self.make()["emptyKinds"], ["skills"], "a reuse says it too")
 
+    def test_a_resource_list_that_cannot_be_read_leaves_the_four_kinds(self):
+        # review: a read_stream that raises while the list reads names must not cost the whole snapshot
+        def failing(exe):
+            src = source_for(exe)
+            src.resource_types = lambda: (_ for _ in ()).throw(ValueError("boot archive zstd frame is damaged"))
+            return src
+        r = snapshot.make(self.game, failing)
+        self.assertEqual(r["status"], "made")
+        d = Path(r["path"])
+        idx = json.loads((d / "index.json").read_text())
+        self.assertEqual(idx["counts"]["resources"], 0)
+        self.assertGreater(idx["counts"]["templates"], 0, "the classic kinds are written")
+        self.assertIn({"kind": "resources", "name": "", "reason": "kind not read: boot archive zstd frame is damaged"}, idx["skipped"])
+        self.assertTrue(snapshot.valid(d, self.key()))
+
+    def test_a_name_read_that_fails_gives_no_name_not_a_lost_list(self):
+        src = source_for(self.exe)
+        try:
+            def broken(offset, size):
+                raise ValueError("boot resource exceeds its 16 MiB budget")
+            src.kfc.read_stream = broken
+            types = src.resource_types()  # nothing of the kinds read first: every name is read, and every read fails
+            self.assertTrue(types["keen::ItemInfo"][1])
+            self.assertTrue(all(n == "" for _, n in types["keen::ItemInfo"][1]))
+            src.kfc.read_stream = lambda offset, size: (_ for _ in ()).throw(TimeoutError("deadline"))
+            with self.assertRaises(TimeoutError):  # the producer's deadline still stops the run
+                src.resource_types()
+        finally:
+            src.close()
+
+    def test_a_resource_list_over_the_index_budget_is_written_empty(self):
+        real = snapshot._write_json
+        def small(path, obj):
+            if path.name == snapshot.RESOURCES and obj.get("types"):
+                raise snapshot.SnapshotError("snapshot index exceeds its 32 MiB budget")
+            return real(path, obj)
+        snapshot._write_json = small
+        try:
+            r = self.make()
+        finally:
+            snapshot._write_json = real
+        d = Path(r["path"])
+        self.assertEqual((d / snapshot.RESOURCES_DATA).stat().st_size, 0)
+        self.assertTrue(snapshot.valid(d, self.key()))
+
     def test_the_archive_is_closed_before_the_rename(self):
         seen, real = [], os.rename
         made = []
