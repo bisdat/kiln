@@ -173,6 +173,13 @@ internal static unsafe class PlayerLook
         t->SetLook(&l);
     }
 
+    /// <summary>Tests and the preview: this setting in use at once (kiln.ui is told), not saved.</summary>
+    internal static void Use(LookSettings s)
+    {
+        _current = s.Clamped();
+        Apply();
+    }
+
     /// <summary>A theme came or went: the player's may be among them.</summary>
     internal static void ThemesChanged()
     {

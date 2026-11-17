@@ -7,6 +7,10 @@
 // The game's UI font: pass a TTF path to kiln_preview_open (preview.sh extracts the game's own at run time with
 // tools/kfc, never into the tree); kiln.assets is faked so style.cpp's real loader picks it up. Without one, the
 // game look uses the base font (a system TTF when found, else ImGui's own).
+// The game's UI colours: kiln_preview_game_colors(bundle, layout) before kiln_preview_open hands style.cpp's real reader
+// the game's keen::FbUiBundle bytes and the reflection layout of the fields it reads (game_colors.py writes both from the
+// local game at run time, outside the tree); kiln.types is faked from that layout. Without them the game look is its
+// neutral stand-in, as on a build where the read fails.
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -15,6 +19,7 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <memory>
 #include <string>
 #include <thread>
 #include <vector>
@@ -23,7 +28,9 @@
 #include "imgui.h"
 #include "imgui_internal.h"
 #include "kiln_api.h"
+#include "look_palette.h"
 #include "services/kiln_assets.h"
+#include "services/kiln_types.h"
 #include "services/kiln_ui.h"
 #include "ui.h"
 
@@ -44,6 +51,9 @@ KilnHandle next_handle() {
     static std::atomic<KilnHandle> h{1};
     return h++;
 }
+uint64_t now_ms() {
+    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
+}
 }  // namespace kui
 
 namespace {
@@ -54,15 +64,74 @@ std::vector<uint8_t> g_ttf, g_bold_ttf;
 std::string g_bold_path;
 std::vector<uint8_t> g_font_res;  // fonts, then (with a bold face) one default language group with a regular and a bold set
 
-KilnResult KILN_CALL a_resource_list(uint32_t, KilnAssetKey* out, size_t cap, size_t* n) {
-    if (n) *n = g_ttf.empty() ? 0 : 1;
-    if (!g_ttf.empty() && out && cap) std::memset(out, 0, sizeof *out);
+// ---- the game's UI bundle and the layout of its colour fields (kiln_preview_game_colors) ----
+std::vector<uint8_t> g_bundle;
+struct FakeType;
+struct FakeField {
+    std::string name;
+    const FakeType* type;
+    uint64_t offset;
+};
+struct FakeType {
+    std::string name;
+    uint32_t size = 0, hash = 0;
+    uint8_t kind = 0;
+    std::vector<FakeField> fields;
+};
+std::vector<std::unique_ptr<FakeType>> g_fake_types;
+FakeType* fake_type(const std::string& name) {
+    for (auto& t : g_fake_types)
+        if (t->name == name) return t.get();
+    g_fake_types.push_back(std::make_unique<FakeType>());
+    g_fake_types.back()->name = name;
+    return g_fake_types.back().get();
+}
+const KilnType* KILN_CALL ty_by_name(KilnStr n) {
+    const std::string s(n.ptr, n.len);
+    for (auto& t : g_fake_types)
+        if (t->name == s && t->size) return reinterpret_cast<const KilnType*>(t.get());
+    return nullptr;
+}
+KilnResult KILN_CALL ty_info(const KilnType* type, KilnTypeInfo* out) {
+    const auto* t = reinterpret_cast<const FakeType*>(type);
+    if (!t || !out) return KILN_ERR_INVALID_ARGUMENT;
+    const uint32_t size = out->size;
+    std::memset(out, 0, sizeof *out);
+    out->size = size;
+    out->name = out->qualified_name = KilnStr{t->name.data(), t->name.size()};
+    out->type_size = t->size;
+    out->kind = t->kind;
+    out->hash = t->hash;
+    out->field_count = static_cast<uint32_t>(t->fields.size());
     return KILN_OK;
 }
-KilnResult KILN_CALL a_resource_read(const KilnAssetKey*, void* buf, size_t cap, size_t* len) {
-    if (g_ttf.empty()) return KILN_ERR_NOT_FOUND;
-    if (len) *len = g_font_res.size();
-    if (buf && cap >= g_font_res.size()) std::memcpy(buf, g_font_res.data(), g_font_res.size());
+KilnResult KILN_CALL ty_field(const KilnType* type, uint32_t i, KilnTypeField* out) {
+    const auto* t = reinterpret_cast<const FakeType*>(type);
+    if (!t || !out || i >= t->fields.size()) return KILN_ERR_NOT_FOUND;
+    out->name = KilnStr{t->fields[i].name.data(), t->fields[i].name.size()};
+    out->type = reinterpret_cast<const KilnType*>(t->fields[i].type);
+    out->offset = t->fields[i].offset;
+    return KILN_OK;
+}
+KilnTypesApi g_types{};
+
+constexpr uint32_t kFontRes = kui::look::fnv1a("keen::UiFontResource");
+constexpr uint32_t kBundleRes = kui::look::fnv1a("keen::FbUiBundle");
+KilnResult KILN_CALL a_resource_list(uint32_t type, KilnAssetKey* out, size_t cap, size_t* n) {
+    const bool have = (type == kFontRes && !g_ttf.empty()) || (type == kBundleRes && !g_bundle.empty());
+    if (n) *n = have ? 1 : 0;
+    if (have && out && cap) {
+        std::memset(out, 0, sizeof *out);
+        out->type = type;
+    }
+    return KILN_OK;
+}
+KilnResult KILN_CALL a_resource_read(const KilnAssetKey* key, void* buf, size_t cap, size_t* len) {
+    const std::vector<uint8_t>* res = !key ? nullptr : key->type == kFontRes && !g_ttf.empty() ? &g_font_res
+                                     : key->type == kBundleRes && !g_bundle.empty() ? &g_bundle : nullptr;
+    if (!res) return KILN_ERR_NOT_FOUND;
+    if (len) *len = res->size();
+    if (buf && cap >= res->size()) std::memcpy(buf, res->data(), res->size());
     return KILN_OK;
 }
 KilnResult KILN_CALL a_blob_read(const KilnContentHash* h, void* buf, size_t cap, size_t* len) {
@@ -78,6 +147,7 @@ KilnApi g_kapi{};
 
 const void* KILN_CALL k_service(KilnStr name, uint32_t) {
     if (std::string_view(name.ptr, name.len) == KILN_ASSETS_SERVICE) return &g_assets;
+    if (std::string_view(name.ptr, name.len) == KILN_TYPES_SERVICE && !g_fake_types.empty()) return &g_types;
     return nullptr;
 }
 
@@ -152,6 +222,7 @@ bool KILN_CALL p_wheel_active() { return false; }
 // ---- the main-menu page (v4): kiln_preview_page() sets it; the canvas is what the game's UI system computes for the
 // window size (1920x1080 UI units at 1 pixel per unit, grown along the longer side; 0xa4fb40) ----
 bool g_page = false;
+float g_applied_scale = 1;  // the dpi the looks were built for (the shim's scale times the player's, set_look)
 int g_backdrop = 1;  // the game page's stand-in: 1 the dark close-up, 2 a bright, busy, high-contrast picture
 uint64_t g_ui_frame = 0;
 int g_page_drawn = 0, g_page_leaves = 0;
@@ -291,6 +362,15 @@ KilnUiApi make_table() {
     t.menu_page_host = &p_menu_page_host;
     t.push_font = &t_push_font;
     t.pop_font = &t_pop_font;
+    // the looks tail (0.2.0-dev.29.16): style.cpp's own functions; set_look without ui.cpp's caller check
+    t.theme_create = &kui::theme_create;
+    t.theme_free = &kui::theme_free;
+    t.push_theme = &t_push_theme;
+    t.set_look = &kui::look_set;
+    t.look_info = &kui::look_info;
+    t.font_load = &kui::font_load;
+    t.font_free = &kui::font_free;
+    t.push_font_handle = &t_push_font_handle;
     return t;
 }
 KilnUiApi g_table;
@@ -565,8 +645,40 @@ __attribute__((visibility("default"))) const KilnUiApi* kiln_preview_open(int wi
     }
     if (!base) io.Fonts->AddFontDefault();
     kui::style_apply_base(g_scale);
+    g_applied_scale = g_scale;
     g_table = make_table();
     return &g_table;
+}
+
+// The game's UI bundle (keen::FbUiBundle bytes) and the layout of the fields style.cpp reads, both from the local game
+// (game_colors.py). Layout lines: "type <name> <size> <hash> <kind>" and "field <owner> <name> <offset> <type>". Call
+// before kiln_preview_open. 0: read; else a file is missing or empty.
+__attribute__((visibility("default"))) int kiln_preview_game_colors(const char* bundle, const char* layout) {
+    if (!bundle || !layout || !read_file(bundle, g_bundle)) return 1;
+    std::ifstream f(layout);
+    std::string line;
+    while (std::getline(f, line)) {
+        char a[256], b[256], c[256];
+        unsigned long long n1 = 0, n2 = 0;
+        unsigned kind = 0;
+        if (std::sscanf(line.c_str(), "type %255s %llu %llx %u", a, &n1, &n2, &kind) == 4) {
+            FakeType* t = fake_type(a);
+            t->size = static_cast<uint32_t>(n1);
+            t->hash = static_cast<uint32_t>(n2);
+            t->kind = static_cast<uint8_t>(kind);
+        } else if (std::sscanf(line.c_str(), "field %255s %255s %llx %255s", a, b, &n1, c) == 4) {
+            fake_type(a)->fields.push_back({b, fake_type(c), n1});
+        }
+    }
+    if (g_fake_types.empty()) {
+        g_bundle.clear();
+        return 1;
+    }
+    g_types.header = {sizeof(KilnTypesApi), KILN_TYPES_VERSION};
+    g_types.type_by_name = &ty_by_name;
+    g_types.type_info = &ty_info;
+    g_types.type_field = &ty_field;
+    return 0;
 }
 
 // The game's bold UI face (call before kiln_preview_open; the game's resource has it as a second glyph set).
@@ -595,13 +707,18 @@ __attribute__((visibility("default"))) const uint8_t* kiln_preview_frame(int men
     io.DisplaySize = ImVec2(g_w, g_h);
     io.DeltaTime = 1.0f / 60.0f;
     ++g_ui_frame;
+    const float dpi = g_scale * kui::user_scale();  // as ui.cpp's build_frame: the player's scale on top
+    if (dpi != g_applied_scale) {
+        kui::style_apply_base(dpi);
+        g_applied_scale = dpi;
+    }
     kui::style_frame_begin();
     ImGui::NewFrame();
     KilnUiFrame f{};
     f.size = sizeof f;
     f.width = g_w;
     f.height = g_h;
-    f.dpi_scale = g_scale;
+    f.dpi_scale = dpi;
     f.delta_seconds = io.DeltaTime;
     f.menu_open = menu_open ? 1 : 0;
     f.capturing = 1;

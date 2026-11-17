@@ -393,8 +393,17 @@ internal static unsafe class UiEngine
             if (!UiModCalls.Invoke(owner, h, ui, "Ui.Frame handler") && Fault(h, owner, "a frame handler")) FrameHandlers.Remove(h);
             ui.RestoreLooks(looks);  // a look the handler left on never reaches the next one
         }
-        DrawHud(ui, hud);
-        DrawToasts(ui);
+        var hudLooks = ui.LookDepth;
+        ui.PushStyleRaw(UiStyle.Player);  // Kiln's HUD lines and toasts: the player's look and its font
+        try
+        {
+            DrawHud(ui, hud);
+            DrawToasts(ui);
+        }
+        finally
+        {
+            ui.RestoreLooks(hudLooks);
+        }
     }
 
     /// <summary>A rebind armed in the Keys tab lasts only while the tab is drawn: kiln.ui closes the menu on Escape
