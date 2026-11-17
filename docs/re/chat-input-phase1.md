@@ -18,14 +18,22 @@ This **closes the HUD/Social Up–Down/draft-restoration defect** for the tested
 Enshrouded client build 26430625. Previous failed traces below are retained
 as diagnostic history, not the current result.
 
-**Still pending full acceptance:** confirm manual typing over a recalled
-command resets browsing; Up/Down does not steal gameplay or unrelated text
-input; Escape and Alt+Tab behave normally; and persisted slash-command history
-survives a complete game restart without persisting normal chat or sensitive
-commands. The earlier `persisted=1` trace confirms the save path was
-invoked, **not** that reload has been verified. The experiment remains
-opt-in (`KILN_CHAT_HISTORY=1`) and PR #2 remains **draft/unmerged**. Do not
-touch upstream `frostdev-ops/kiln`.
+**Full user acceptance (17 Nov 2026): ALL PASS.** Following the HUD/Social
+recall and draft restoration proof, the tester ran and explicitly confirmed
+the remaining scenarios as PASS:
+- Editing a recalled command resets history browsing while retaining edits.
+- Gameplay Up/Down and unrelated text fields are not intercepted; focus/Alt+Tab,
+  Enter and Escape preserve normal behaviour.
+- Previously submitted slash commands survive a complete game restart;
+  ordinary chat does not persist.
+- Multiple distinct history entries navigate in the expected Up/Up/Down/Down
+  order.
+- HUD and Social chat both support Up recall and unsent draft restoration.
+
+This is **user-reported in-game acceptance**, not evidence of a CI job,
+independent review or a release. The feature remains opt-in through
+`KILN_CHAT_HISTORY=1`, and fork PR #2 remains **draft/unmerged** pending
+an explicit merge decision. Do not touch upstream `frostdev-ops/kiln`.
 
 
 ## 12:06 runtime: Down applies an empty draft — post-call capture correction
