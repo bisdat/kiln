@@ -15,6 +15,31 @@ struct Entry {
     bool persisted = false;
 };
 
+// TextInputProcess synchronizes the caller-owned widget after its call.
+// The widget snapshot BEFORE the next call can be stale or empty even when
+// the player has typed a nonempty draft. Cache a validated, post-call
+// snapshot while not browsing and use it for the first Up capture only.
+// Each chat field owns a separate cache; clear it at submit/close/focus exit.
+class DraftCapture {
+public:
+    void observe(std::string_view postcall) {
+        if (postcall.size() > 1024) {
+            clear();
+            return;
+        }
+        value_.assign(postcall);
+        valid_ = true;
+    }
+    void clear() { valid_ = false; value_.clear(); }
+    bool valid() const { return valid_; }
+    std::string_view source(std::string_view precall) const {
+        return valid_ ? std::string_view(value_) : precall;
+    }
+private:
+    bool valid_ = false;
+    std::string value_;
+};
+
 // A native chat widget can report a frame-old text snapshot before the
 // game's TextInputProcess synchronizes it. While browsing, the last text
 // successfully applied through EditSetText is our known displayed value.
