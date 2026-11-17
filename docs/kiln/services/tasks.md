@@ -140,10 +140,41 @@ Once the process's exit begins, queued tasks may never start and a `done` is not
 budget (`KilnPluginInfo.on_unload` in `kiln_api.h`) applies, and nothing waits for tasks beyond it. A mod that frees
 resources in `done` must not rely on `done` at exit; free them in `on_unload`, or leave them to the process exit.
 
-Closing admission at exit happens where Kiln's exit hook runs: today under Wine and Proton (Linux servers, the Steam
-Deck), where every exit refuses new tasks and a normal exit also cancels the queued ones and signals the running
-ones. On native Windows that hook is off by default in this release, so the process exit simply ends the pool's
-threads; that is within the rule above (no `done` guarantee once the exit begins).
+Kiln's exit steps run at the process's exit call (`ntdll!RtlExitUserProcess`), before the loader lock is taken and
+while every other thread still runs:
+
+1. Every exit, a crash's non-zero one too: new submissions are refused (`SHUTDOWN`). One lock-free store, nothing else.
+2. A normal exit (code 0): every owner is sealed, queued tasks are cancelled and running bodies are signalled
+   (`cancelled()` returns 1).
+3. Kiln's own services' exit handlers run: `kiln.engine` closes its write gate for good, so no task can take it any
+   more.
+4. The pool parks: from here no worker starts another body or `done`. The exiting thread waits up to 500 ms for the
+   bodies already running. A body still running after that is named in `kiln.log` (`kiln.tasks: parked at exit; ...`);
+   it can no longer take the engine's gate and ends with the process.
+5. Then the plugins' `on_unload` handlers, where they are on.
+
+The order is the same on every platform. On native Windows the plugins' handlers run only with `kiln.json`
+`"unloadAtExit"`: `"on"`; with `"auto"` (the default) the link runs Kiln's own steps 1 to 4 there. Under Wine and Proton
+(Linux servers, the Steam Deck) every handler runs, after the park: tasks no longer run while the plugins' handlers do,
+which is new in this version (before, every handler ran last loaded first with the pool sealed but not parked).
+`"off"` places no exit link at all, anywhere; the process exit then simply ends the pool's threads.
+
+An exit called from a `DllMain` (the loader lock is held) does steps 1 and 2 only: nothing waits under the loader
+lock. A body that ends the process itself is never waited for. Once the pool is parked, `drain_owner` does not wait:
+it reports what is left (bodies still running, `done`s that will not be delivered). So don't wait for your own tasks in
+`on_unload`.
+
+When the exit call is never reached (a killed process, a crash that does not go through `ExitProcess`,
+`"unloadAtExit": "off"`, or a link that could not be placed), the OS ends every thread at once. What still holds:
+
+- the engine's gate is already closed if the server world stopped first (`KILN_WORLD_STOPPING`);
+- engine reads are guarded copies, so a read of freed memory fails instead of crashing;
+- nothing in Kiln's `DLL_PROCESS_DETACH` takes a pool lock or waits on a thread, so Kiln does not hang the exit;
+- no `done` is promised, as above.
+
+Tests: `native/core/tests/test-unload.sh` (where the link is placed), `test-unload-sequence.sh` (the order, over host
+stubs), `test-tasks.sh` (the park, under ASan/UBSan and TSan) and `test-exit-wine.sh` (the exit block and the pool on
+the Windows code path under headless Wine, ending in a real `ExitProcess` with tasks in flight).
 
 The production pool lives for the whole process: it is never destroyed by a static destructor, and its shutdown comes
 from Kiln's own exit path. A worker that will not stop within the exit bound is detached, never terminated.

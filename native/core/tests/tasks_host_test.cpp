@@ -16,6 +16,20 @@
 #include "tasks_platform_host.h"
 #include "tasks_test_support.h"
 
+// The exit test leaves leases that can never end (a parked pool runs nothing): their host state is the process's to
+// drop at exit, so LeakSanitizer is told not to count what those admissions allocate.
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define KILN_TEST_LSAN 1
+#endif
+#endif
+#if defined(__SANITIZE_ADDRESS__) && !defined(KILN_TEST_LSAN)
+#define KILN_TEST_LSAN 1
+#endif
+#ifdef KILN_TEST_LSAN
+#include <sanitizer/lsan_interface.h>
+#endif
+
 using namespace kiln::tasks;
 using kiln::tasks::test::check;
 using kiln::tasks::test::Gate;
@@ -839,6 +853,57 @@ KILN_TASKS_TEST(resume_after_step_in_racing_a_session_change) {
             return left == 0;
         }), "quiescent");
         on_segment(nullptr);
+    }
+}
+
+// ---- process exit ----
+// The exit parks the pool with a suspended managed task and a pending tick hop: neither holds a worker, so the park
+// returns at once; a continuation resumed after the park is queued and never runs; the hop stays the tick's.
+KILN_TASKS_TEST(exit_park_with_a_suspended_lease_and_a_pending_hop) {
+    HostPlatform p;
+    Env env;
+    Pool pool(config(), &p);
+    Service s(pool, env);
+    s.host_bind(&hop_dispatch);
+    {
+        std::lock_guard lock(g_hops.mutex);
+        g_hops.seen.clear();
+        g_hops.platform = nullptr;
+    }
+    s.session_started(1);
+#ifdef KILN_TEST_LSAN
+    __lsan_disable();  // these two leases never end: the parked pool runs nothing (the process ends them)
+#endif
+    const KilnLease suspended = suspended_lease(s, 1, "suspended");
+    const KilnLease hopping = suspended_lease(s, 2, "hopping");
+#ifdef KILN_TEST_LSAN
+    __lsan_enable();
+#endif
+    check(s.host_tick_hop(hopping) == KILN_OK && s.pending_tick_hops() == 1, "a tick hop is pending");
+    const int segments = g_host.segments.load();
+    s.exiting();
+    const auto t0 = std::chrono::steady_clock::now();
+    const Pool::ParkResult r = s.park(2ull * 1000 * 1000 * 1000);
+    check(r.running_at_start == 0 && r.still_running == 0 && std::chrono::steady_clock::now() - t0 < std::chrono::seconds(1),
+          "nothing held a worker: the park returned at once");
+    const KilnTaskInfo i = info("late");
+    KilnLease late = 0;
+    uint32_t why = 0;
+    check(s.host_admit(3, &i, &g_host, &late, &why) == KILN_ERR_UNAVAILABLE && why == KILN_TASK_REFUSAL_SHUTDOWN,
+          "no new lease after the exit began");
+    check(s.host_resume(suspended, 1) == KILN_OK, "a continuation is still accepted (never refused) ...");
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    check(g_host.segments.load() == segments, "... but no segment runs after the park");
+    uint32_t left = 0;
+    const auto t1 = std::chrono::steady_clock::now();
+    s.drain_owner(1, 5000, &left);
+    check(std::chrono::steady_clock::now() - t1 < std::chrono::seconds(1), "a timed drain after the exit returns at once");
+    check(s.pending_tick_hops() == 1, "the pending hop is left to the tick (a world's STOPPING ends it cancelled)");
+    s.session_stopping(1);
+    {
+        std::lock_guard lock(g_hops.mutex);
+        check(g_hops.seen.size() == 1 && g_hops.seen[0].first == hopping && g_hops.seen[0].second == 1,
+              "the STOPPING after the park dispatched it cancelled, on the stopping thread, not on a worker");
     }
 }
 }  // namespace

@@ -81,6 +81,12 @@ struct Pool::Core : std::enable_shared_from_this<Pool::Core> {
     std::condition_variable work_cv, exit_cv, maintenance_cv;
     uint64_t generation = 0;
     bool stopping = false;
+    // The process exit parked the pool (park): no worker takes another item, the maintenance thread does nothing.
+    // Written under `mutex` (every waiter's predicate reads it there), never cleared; atomic for drain_owner's read.
+    std::atomic<bool> parking{false};
+    uint32_t busy = 0;              // workers past the park's line in run_one: the park waits for them (under mutex)
+    uint32_t in_item = 0;           // ... of which have a body or done in hand: what the park reports (under mutex)
+    bool maintenance_busy = false;  // the maintenance thread is outside its wait (under mutex)
 
     std::unordered_map<KilnHandle, std::shared_ptr<Meta>> meta;
     std::vector<std::weak_ptr<Worker>> roster;  // one slot per logical worker (weak: threads own their Worker)
@@ -136,6 +142,7 @@ struct Pool::Core : std::enable_shared_from_this<Pool::Core> {
     void maintenance_loop();
     void sweep_watchdog(WatchFn fn, void* user);
     void wake_all();
+    void leave_busy(bool had_item);
     void release_meta(KilnHandle task);
     std::shared_ptr<Meta> find_meta(KilnHandle task);
     void shutdown();
@@ -144,6 +151,7 @@ struct Pool::Core : std::enable_shared_from_this<Pool::Core> {
 namespace {
 thread_local Pool::Core* t_core = nullptr;   // the pool core whose worker this thread is, else nullptr
 thread_local bool t_segment_armed = false;  // the running body armed a resumption (managed lease): it suspends
+thread_local KilnHandle t_running_task = 0;  // the task whose body this worker runs now (park's names)
 
 uint32_t KILN_CALL run_cancelled(const TaskRun* run) {
     // `internal` is the Work* of the running segment, valid only during the callback.
@@ -224,8 +232,9 @@ void Pool::Core::worker_loop(Worker& self) {
     bool done = false;
     while (!done) {
         {
+            // parked (the process exit): it waits here, holding nothing, until the process ends (or the destructor)
             std::unique_lock lock(mutex);
-            work_cv.wait(lock, [&] { return stopping || self.faulted || generation != seen; });
+            work_cv.wait(lock, [&] { return stopping || self.faulted || (!parking.load() && generation != seen); });
             if (stopping || self.faulted) done = true;
             seen = generation;
         }
@@ -244,11 +253,22 @@ void Pool::Core::worker_loop(Worker& self) {
 }
 
 bool Pool::Core::run_one(Worker& self) {
+    {
+        // The park's line: an item is taken only while the pool is not parked, and counted from before it is taken,
+        // so park() sees every body or done that can still start.
+        std::lock_guard lock(mutex);
+        if (parking.load()) return false;
+        ++busy;
+    }
     Work work;
-    if (!model.dequeue(self.slot, &work)) return false;
+    if (!model.dequeue(self.slot, &work)) {
+        leave_busy(false);
+        return false;
+    }
     {
         // submit registers the metadata in the same critical section that publishes the task, so it is here
         std::lock_guard lock(mutex);
+        ++in_item;
         const auto it = meta.find(work.task);
         if (it != meta.end() && work.kind != Work::Kind::Done) {
             it->second->running_since = platform.now_ns();
@@ -257,7 +277,17 @@ bool Pool::Core::run_one(Worker& self) {
     }
     if (work.kind == Work::Kind::Done) deliver_done(self, work);
     else deliver_body(self, work);
+    leave_busy(true);
     return true;
+}
+
+void Pool::Core::leave_busy(bool had_item) {
+    {
+        std::lock_guard lock(mutex);
+        --busy;
+        if (had_item) --in_item;
+    }
+    exit_cv.notify_all();  // a park waiting for the running callbacks
 }
 
 std::shared_ptr<Meta> Pool::Core::find_meta(KilnHandle task) {
@@ -278,8 +308,10 @@ void Pool::Core::deliver_body(Worker& self, Work& work) {
     seg.run.cancelled = &run_cancelled;
     seg.run.internal = &work;
     t_segment_armed = false;
+    t_running_task = work.task;
     FaultInfo info{};
     if (work.payload.body) platform.guarded_call(&invoke_body, &seg, &info);
+    t_running_task = 0;
     const bool suspended = t_segment_armed;  // the body armed a resumption (managed lease): it is not terminal
     t_segment_armed = false;
     platform.set_description(self.slot == Slot::Normal ? "kiln-task-N" : "kiln-task-L");
@@ -341,7 +373,11 @@ void Pool::Core::maintenance_loop() {
         void* sweep_user = nullptr;
         {
             std::unique_lock lock(mutex);
-            const auto ready = [&] { return stopping || !retired.empty() || maintenance_kick; };
+            if (maintenance_busy) {
+                maintenance_busy = false;  // back in its wait: a park may go on
+                exit_cv.notify_all();
+            }
+            const auto ready = [&] { return stopping || parking.load() || !retired.empty() || maintenance_kick; };
             // Wake for a retirement, for the retry of a worker that could not start (restart_retry_ns after its
             // failure), and for the watchdog sweep (every watchdog_interval_ns while a sink is set).
             using Clock = std::chrono::steady_clock;
@@ -350,7 +386,11 @@ void Pool::Core::maintenance_loop() {
             if (watch_fn) wake = std::min(wake, next_sweep);
             if (wake == Clock::time_point::max()) maintenance_cv.wait(lock, ready);
             else maintenance_cv.wait_until(lock, wake, ready);
+            // parked (the process exit): no join, no start, no sweep, no note from here on; it waits, holding
+            // nothing, until the process ends (or the destructor stops it)
+            if (parking.load()) maintenance_cv.wait(lock, [&] { return stopping; });
             if (stopping && retired.empty()) return;
+            maintenance_busy = true;
             maintenance_kick = false;
             const auto now = Clock::now();
             for (const Retired& w : retired) {
@@ -615,9 +655,10 @@ KilnResult Pool::drain_owner(KilnOwner owner, uint64_t timeout_ns, uint32_t* out
         return sealed;
     }
     if (timeout_ns > 0) {
-        // a wait budget in real time (the platform clock is the watchdog's and may be a test's fake one)
+        // a wait budget in real time (the platform clock is the watchdog's and may be a test's fake one); none once
+        // the process exit parked the pool: no done runs any more, so what is left now stays left
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::nanoseconds(timeout_ns);
-        while (left > 0 && std::chrono::steady_clock::now() < deadline) {
+        while (left > 0 && !c.parking.load() && std::chrono::steady_clock::now() < deadline) {
             std::this_thread::sleep_for(std::chrono::microseconds(100));
             c.model.outstanding(owner, &left);
         }
@@ -711,6 +752,40 @@ void Pool::close() {
     core_->model.seal_all();
     core_->wake_all();  // the cancelled tasks' dones
 }
+
+Pool::ParkResult Pool::park(uint64_t timeout_ns) {
+    Core& c = *core_;
+    ParkResult r;
+    const auto t0 = std::chrono::steady_clock::now();
+    // a body that ends the process is one of the busy workers: never wait for the caller itself
+    const uint32_t own = t_core == &c ? 1 : 0;
+    std::unique_lock lock(c.mutex);
+    c.parking.store(true);
+    c.work_cv.notify_all();
+    c.maintenance_cv.notify_all();
+    // the wait is for every worker past the line (it may still take an item); the report counts items in hand
+    r.running_at_start = c.in_item - own;
+    c.exit_cv.wait_for(lock, std::chrono::nanoseconds(timeout_ns),
+                       [&] { return c.busy == own && !c.maintenance_busy; });
+    r.still_running = c.in_item - own;
+    r.waited_ns = static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count());
+    if (r.still_running) {
+        // the bodies still in flight, by name (dones are not marked running; they only count)
+        std::size_t named = 0;
+        for (const auto& [task, m] : c.meta) {
+            if (!m->running || (own && task == t_running_task)) continue;
+            if (named == 8) {
+                r.names += ", ...";
+                break;
+            }
+            r.names += (named++ ? ", " : "") + c.model.owner_name(m->owner) + "/" + m->name;  // pool -> model order
+        }
+    }
+    return r;
+}
+
+bool Pool::parked() const { return core_->parking.load(); }
 
 namespace {
 KilnResult refuse(KilnHandle* task, uint32_t* refusal, KilnResult result, Refusal why) {
@@ -1177,6 +1252,11 @@ KilnResult Service::host_snapshot(KilnLeaseSnapshot* rows, uint32_t capacity, ui
 void Service::exiting() {
     exiting_.store(true, std::memory_order_release);
     pool_.close();
+}
+
+Pool::ParkResult Service::park(uint64_t timeout_ns) {
+    exiting_.store(true, std::memory_order_release);
+    return pool_.park(timeout_ns);
 }
 
 }  // namespace kiln::tasks

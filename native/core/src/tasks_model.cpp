@@ -274,8 +274,9 @@ KilnResult Model::ensure_owner(KilnOwner owner, std::string_view name) {
     o->id = owner;
     o->name = bounded_owner_name(name);
     Lock lock(*this);
-    if (closing_) return KILN_ERR_UNAVAILABLE;
+    // an existing instance first: after the exit's seal_all it is sealed, and drain_owner still reports its real count
     if (const auto existing = find_open(owner)) return existing->retired ? KILN_ERR_REVOKED : KILN_OK;
+    if (closing_) return KILN_ERR_UNAVAILABLE;  // the exit refuses only a new instance
     if (next_instance_ > kMaxInstance) return KILN_ERR_UNAVAILABLE;
     instances_.reserve(instances_.size() + 1);  // every allocation before the first change
     ring_.reserve(ring_.size() + 1);

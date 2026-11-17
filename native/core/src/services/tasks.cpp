@@ -314,6 +314,28 @@ void exiting() {
     if (tasks::Service* service = g_service.load(std::memory_order_acquire)) service->exiting();
 }
 
+// A normal exit, after exiting() and Kiln's own services' exit handlers (the engine's gate is closed by then): the
+// pool parks (no body or done starts from here) and the exiting thread waits up to `wait_ms` for the running ones. One
+// kiln.log line says what was running and what is left; a body left running can no longer take the engine's gate and
+// ends with the process.
+void park(uint32_t wait_ms) {
+    tasks::Service* service = g_service.load(std::memory_order_acquire);
+    if (!service) return;
+    try {
+        const tasks::Pool::ParkResult r = service->park(uint64_t{wait_ms} * 1000 * 1000);
+        const double ms = static_cast<double>(r.waited_ns) / 1e6;
+        if (r.still_running)
+            KLOG_W("kiln.tasks: parked at exit; %u task callback(s) still running after %.0f ms (%s): they end with the "
+                   "process",
+                   r.still_running, ms, r.names.empty() ? "done callbacks" : r.names.c_str());
+        else if (r.running_at_start)
+            KLOG_I("kiln.tasks: parked at exit; the %u running task callback(s) returned in %.1f ms", r.running_at_start, ms);
+        else
+            KLOG_I("kiln.tasks: parked at exit; no task callback was running");
+    } catch (...) {  // nothing leaves the exit sequence
+    }
+}
+
 }  // namespace kiln::tasks_svc
 
 KILN_SERVICE(tasks, KILN_TASKS_SERVICE, KILN_TASKS_VERSION, &kiln::tasks_svc::kTable, &kiln::tasks_svc::init);

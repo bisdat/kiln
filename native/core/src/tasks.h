@@ -95,6 +95,19 @@ public:
     KilnResult retire_owner(KilnOwner owner, uint32_t* outstanding);
     // Process exit: seal every owner (queued tasks cancelled, running ones signalled). Never waits.
     void close();
+    // Process exit, after close(): the pool parks for good. From the call on no worker takes another body or done
+    // and the maintenance thread stops (no watchdog sweep, no worker start, no log); then the caller waits up to
+    // `timeout_ns` for the bodies and dones already running to return. Parked threads wait holding no lock until the
+    // process ends them (or the destructor joins them). Never waits for its caller: a body that ends the process
+    // parks the pool around itself. Once parked a timed drain_owner no longer waits (no done runs any more).
+    struct ParkResult {
+        uint32_t running_at_start = 0;  // bodies and dones running when the park began (the caller's own not counted)
+        uint32_t still_running = 0;     // ... and still running when it returned (bound reached)
+        uint64_t waited_ns = 0;
+        std::string names;              // the bodies still running: "<owner>/<task>", comma-separated, at most 8
+    };
+    ParkResult park(uint64_t timeout_ns);
+    bool parked() const;  // lock-free
 
     // ---- task operations (reentrant: safe to call from inside a body or done) ----
     KilnResult submit(KilnOwner owner, const SubmitArgs& args, TaskBodyFn body, TaskDoneFn done, void* user,
@@ -198,6 +211,8 @@ public:
     static void KILN_CALL owner_retiring_observer(KilnOwner retiring, void* service);
     void exiting();                        // the process exit begins: SHUTDOWN from now on, every owner sealed
     void refuse_new();                     // any exit, also a crash's: SHUTDOWN from now on; one atomic store, no lock
+    // A normal exit, after exiting(): the pool parks (Pool::park); tick hops stay the tick's (a STOPPING ends them).
+    Pool::ParkResult park(uint64_t timeout_ns);
 
     struct Snapshot {
         uint32_t session = 0;

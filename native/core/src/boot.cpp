@@ -59,7 +59,9 @@ void stop_writer(void (*write_state)(void* user, const std::string& last_line, c
 namespace kiln {
 
 // api.cpp: KilnPluginInfo.on_unload at process exit. The sequence is there; its trigger is armed below.
-size_t unload_prepare();
+size_t unload_handlers(bool own_services);
+size_t unload_prepare(bool plugins);
+bool unload_prepared();
 DWORD unload_handler_ms();
 DWORD unload_total_ms();
 void unload_run(uint32_t exit_code, const char* via);
@@ -306,14 +308,19 @@ void exit_call(uint32_t code) {
 }
 
 // ---- on_unload: is the exit link armed? ----
-// Proven under Wine only (Linux servers, Proton clients, the Steam Deck). On native Windows it is off by default in
-// this release: a link misplaced there would show as a crash at exit for every player, and dev.24 called no handler
-// there either. kiln.json "unloadAtExit": "auto" (the default: on under Wine, off on native Windows), "on" or "off"
-// (case does not matter); any other value counts as "auto" and is warned about. The block between the markers is pure
-// (no Windows, no Kiln calls): native/core/tests/test-unload.sh cuts it out of this file and runs its decision table.
+// Wherever the link is placed, Kiln's own exit steps run first: the task pool refuses new tasks, kiln.engine closes its
+// write gate and the pool parks, before the process ends the pool's threads (ntdll!RtlExitUserProcess runs the link
+// before the loader lock and before it ends the other threads, on Windows as under Wine); then the plugins' handlers.
+// Those are proven under Wine only (Linux servers, Proton clients, the Steam Deck); on native Windows they are off by
+// default in this release (dev.24 called no handler there either), and the link runs Kiln's own steps only.
+// kiln.json "unloadAtExit": "auto" (the default: every handler under Wine, Kiln's own steps on native Windows), "on"
+// (every handler) or "off" (no link at all, also no step of Kiln's own); case does not matter, and any other value
+// counts as "auto" and is warned about. The block between the markers is pure (no Windows, no Kiln calls):
+// native/core/tests/test-unload.sh cuts it out of this file and runs its decision table.
 // unload-policy:begin
 struct UnloadPolicy {
-    bool armed = false;
+    bool armed = false;    // the link is placed (Kiln's own exit steps: its services' handlers, the task pool's park)
+    bool plugins = false;  // ... and calls the plugins' on_unload handlers after them
     bool warn = false;  // the setting is not auto, on or off: it counts as auto, and the boot log says so
     std::string says;   // the boot line after "unload: ", e.g. "on (Wine 11.0; kiln.json \"unloadAtExit\": auto)"
 };
@@ -332,15 +339,16 @@ inline UnloadPolicy unload_policy(std::string_view wine, const std::string* sett
     if (v == "off") {
         p.says = "off (" + key + ")";
     } else if (v == "on") {
-        p.armed = true;
+        p.armed = p.plugins = true;
         p.says = wine.empty() ? "on on native Windows (" + key + "; proven under Wine only)"
                               : "on (Wine " + std::string(wine) + "; " + key + ")";
     } else if (!wine.empty()) {
-        p.armed = true;
+        p.armed = p.plugins = true;
         p.says = "on (Wine " + std::string(wine) + "; " + key + ")";
     } else {
-        p.says = "off on native Windows by default (not yet proven there; " + key +
-                 "); kiln.json \"unloadAtExit\": \"on\" turns it on";
+        p.armed = true;
+        p.says = "Kiln's own exit steps only on native Windows (plugin on_unload handlers are off there by default, not "
+                 "yet proven; " + key + "); kiln.json \"unloadAtExit\": \"on\" calls them too, \"off\" places no link";
     }
     return p;
 }
@@ -368,19 +376,26 @@ std::optional<std::string> unload_setting() {
     return v.is_string() ? v.get<std::string>() : v.dump();
 }
 
-// After every module ran kiln_plugin_main and on_ready, only with hooks on (no plugin is loaded in safe idle), and only
-// when a loaded module has an on_unload. One line says whether the link is armed and why.
+// After every module ran kiln_plugin_main and on_ready, only with hooks on (no plugin is loaded in safe idle, and the
+// task pool does not run). One line says whether the link is armed and why.
 void arm_unload() {
-    const size_t n = unload_prepare();
-    if (!n) return;
+    const size_t all = unload_handlers(true) + unload_handlers(false);
     const std::optional<std::string> setting = unload_setting();
-    const UnloadPolicy policy = unload_policy(wine_version(), setting ? &*setting : nullptr);
+    const std::string wine = wine_version();
+    const UnloadPolicy policy = unload_policy(wine, setting ? &*setting : nullptr);
     if (policy.warn)
         KLOG_W("unload: kiln.json \"unloadAtExit\": %s is not \"auto\", \"on\" or \"off\"; it counts as \"auto\"",
                setting->c_str());
     if (!policy.armed) {
-        KLOG_I("unload: %s; %zu on_unload handler(s) will not be called at exit", policy.says.c_str(), n);
+        KLOG_I("unload: %s; %zu on_unload handler(s) will not be called at exit, and the task pool is not parked (the "
+               "process exit ends its threads)",
+               policy.says.c_str(), all);
         return;  // no link
+    }
+    const size_t n = unload_prepare(policy.plugins);
+    if (!unload_prepared()) {
+        KLOG_W("unload: %s, but the exit sequence could not be prepared; nothing runs at exit", policy.says.c_str());
+        return;
     }
     if (!hooks::ensure_ready()) {
         KLOG_W("unload: %s, but kiln.hooks is not ready; %zu on_unload handler(s) will not be called",
@@ -402,9 +417,11 @@ void arm_unload() {
         KilnHandle h = 0;
         g_exit_via = a.via;
         if (hooks::chain::install_raw(0, target, o, reinterpret_cast<void*>(&exit_call), &g_exit_next, &h) == KILN_OK) {
-            KLOG_I("unload: %s: %zu on_unload handler(s) will be called when the process exits with code 0 (link on "
-                   "%s; up to %lu ms each, %lu ms in all)",
-                   policy.says.c_str(), n, a.via, unload_handler_ms(), unload_total_ms());
+            KLOG_I("unload: %s: %zu on_unload handler(s) will be called when the process exits with code 0, Kiln's own "
+                   "first: %zu service handler(s), then the task pool parks, then %zu plugin handler(s) (link on %s; up "
+                   "to %lu ms each, %lu ms in all)",
+                   policy.says.c_str(), n, unload_handlers(true), policy.plugins ? unload_handlers(false) : 0, a.via,
+                   unload_handler_ms(), unload_total_ms());
             return;
         }
         KLOG_W("unload: no link on %s", a.via);
