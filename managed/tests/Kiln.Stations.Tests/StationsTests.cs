@@ -67,12 +67,16 @@ public sealed unsafe class StationsTests : IDisposable
         }
 
         public (int Rc, uint[] Ids) BaseList(uint index, bool water) =>
-            (water ? Water : Storage).TryGetValue(index, out var ids) ? (0, ids) : (StationsNative.NotFound, []);
+            !Rebuilt && (water ? Water : Storage).TryGetValue(index, out var ids) ? (0, ids) : (StationsNative.NotFound, []);
 
-        public (int Rc, StationsNative.Stack[] Rows) BaseStock(uint index) => (0, Stock);
+        /// <summary>The game rebuilt its bases between Kiln's reads: a record index read a moment ago is gone.</summary>
+        public bool Rebuilt;
+
+        public (int Rc, StationsNative.Stack[] Rows) BaseStock(uint index) => Rebuilt ? (StationsNative.NotFound, []) : (0, Stock);
 
         public (int Rc, uint[] Ids) StationIds(int baseIndex) =>
-            (0, StationRows.Values.Where(s => baseIndex < 0 || s.BaseIndex == baseIndex).Select(s => s.Entity).ToArray());
+            Rebuilt && baseIndex >= 0 ? (StationsNative.NotFound, [])
+                : (0, StationRows.Values.Where(s => baseIndex < 0 || s.BaseIndex == baseIndex).Select(s => s.Entity).ToArray());
 
         public int StationRead(uint entity, out StationsNative.Station s) =>
             StationRows.TryGetValue(entity, out s) ? 0 : StationsNative.NotFound;
@@ -291,7 +295,35 @@ public sealed unsafe class StationsTests : IDisposable
         Assert.Equal(b.Id, kiln.Run(() => Bases.At(new WorldPosition(1, 0, 1)))!.Id);
         Assert.Null(kiln.Run(() => Bases.At(new WorldPosition(100, 0, 1))));
         Assert.Null(kiln.Run(() => Bases.Get(new BaseId(Guid.NewGuid()))));
-        Assert.Throws<KeyNotFoundException>(() => kiln.Run(() => Bases.Storage(new BaseId(Guid.NewGuid()))));
+        Assert.Empty(kiln.Run(() => Bases.Storage(new BaseId(Guid.NewGuid()))));  // since 0.2.0-dev.29.15: no base, nothing in it
+    }
+
+    [Fact]
+    public void ABaseRebuiltBetweenTwoReadsIsEmptyNotAnException()
+    {
+        // The game rebuilds its bases every server frame: an id read from Bases.All, or a record index found a moment ago, can be
+        // gone by the next read (an altar placed or removed). Consumers polled Bases.Stock and Stations.InBase and got
+        // KeyNotFoundException (Busy Hands, 0.2.0-dev.29.14).
+        using var kiln = Kiln();
+        var id = new BaseId(AltarGuid);
+        _fake.Rebuilt = true;  // found by id, then its record is gone
+        Assert.Empty(kiln.Run(() => Bases.Stock(id)));
+        Assert.Equal(0, kiln.Run(() => Bases.Stock(id, new ItemId(0x10))));
+        Assert.Empty(kiln.Run(() => Bases.Storage(id)));
+        Assert.Empty(kiln.Run(() => Bases.Storage(id, deposit: true)));
+        Assert.Empty(kiln.Run(() => Bases.WaterSources(id)));
+        Assert.Empty(kiln.Run(() => Stations.InBase(id)));
+        Assert.Null(kiln.Run(() => Bases.FindRoomFor(id, new ItemId(0x10))));
+        // an id no base has any more (its altar's zone merged into another base)
+        _fake.Rebuilt = false;
+        var gone = new BaseId(Guid.NewGuid());
+        Assert.Empty(kiln.Run(() => Bases.Stock(gone)));
+        Assert.Empty(kiln.Run(() => Stations.InBase(gone)));
+        Assert.Empty(kiln.Run(() => Bases.WaterSources(gone)));
+        Assert.Null(kiln.Run(() => Bases.FindRoomFor(gone, new ItemId(0x10))));
+        // the base still there: answered as before
+        Assert.Equal(40, kiln.Run(() => Bases.Stock(id, new ItemId(0x10))));
+        Assert.Equal([new EntityId(3300)], kiln.Run(() => Stations.InBase(id)));
     }
 
     [Fact]

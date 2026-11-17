@@ -43,6 +43,12 @@ long logs = Bases.Stock(home.Id, Items.Lookup("Material_T1_Wood_Logs")!.Id);
 EntityId? room = Bases.FindRoomFor(home.Id, charcoalId); // a chest that takes deposits and the item (same item first)
 ```
 
+**A base can go between two reads.** The game rebuilds its bases every server frame, and an altar placed or removed changes
+a base's id: an id read from `Bases.All` a moment ago may name no base by the next call. `Storage`, `WaterSources`,
+`Stock`, `Stations.InBase` and `FindRoomFor` then answer empty (or null): no exception to catch in a polling loop (before
+0.2.0-dev.29.15 they threw `KeyNotFoundException`). `Bases.Get`, `Of` and `At` answer null as before. Kiln reads a base by
+its id and then by the game's record index; when the record was rebuilt in between it finds the base again once.
+
 `Storage(id, deposit: true)` keeps the containers that take deposits, by the two values the game's area deposit
 (`area_deposit_trigger`) reads: the entity's `DynamicInventoryCraftingStock` override when it is set
 (`{bool canReceiveAreaDepositOverrideIsSet, bool canReceiveAreaDepositOverride}`, from the game's type table), else the
@@ -248,7 +254,7 @@ the other bases).
 The actions check nothing about players: they are the server's. A mod that acts for a joined player (its client sends a
 message to its server half: `Kiln.Network` mod messages, handled on the server tick, where these calls work) checks
 there: the station's base is the player's (`Bases.Of(player)?.Id == Stations.Read(station)?.Base`) and the player may
-change it (`Players.Get(player)?.Can(PlayerPermissions.EditBase)`, or `AccessInventories` for fills), or a
+change it (`Players.Find(player)?.Can(PlayerPermissions.EditBase)`, or `AccessInventories` for fills), or a
 `Permissions` node of its own. On a hosting client both halves run in one process and the host's own menu can call
 these directly (`Stations.Available` is true there).
 

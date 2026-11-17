@@ -16,7 +16,7 @@ public sealed record StationStatus(StationState State, uint Running, uint Next, 
 
 /// <summary>
 /// Placed stations that work on their own (kilns, smelters, looms, grinders, seed beds: every entity with the game's
-/// <c>FactoryStation</c>), on the server, on the tick thread. Since 0.2.0-dev.29 also the game's own actions on them for
+/// <c>FactoryStation</c>), on the server, on the tick thread. Since 0.2.0-dev.29.14 also the game's own actions on them for
 /// code (kiln.stations): fill from the base's crafting-stock chests (<see cref="Fill"/>, the code of the game's "fill from
 /// chests" button, with no player), stop and resume (<see cref="Stop"/>, <see cref="Resume"/>: the stop button), the recipe
 /// a station repeats (<see cref="Select"/>, the game's own write of a player's choice: prefer it to <see cref="Start"/>),
