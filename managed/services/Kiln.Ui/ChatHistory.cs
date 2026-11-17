@@ -50,7 +50,7 @@ internal sealed class ChatHistory
     internal void Submit(string? text, string? serverIdentity = null, bool serverSensitive = false)
     {
         if (!Valid(text) || serverSensitive || SensitiveWords.IsMatch(text!)) return;
-        bool command = text!.StartsWith('/', StringComparison.Ordinal);
+        bool command = text!.StartsWith("/", StringComparison.Ordinal);
         string? serverHash = string.IsNullOrEmpty(serverIdentity) ? null : HashServer(serverIdentity);
 
         // Consecutive duplicates are one entry, as in a shell. A repeated command still ends active browsing.
@@ -142,7 +142,7 @@ internal sealed class ChatHistory
                     !row.TryGetProperty("text", out var t) || t.ValueKind != JsonValueKind.String) continue;
                 var text = t.GetString();
                 if (!Valid(text) || SensitiveWords.IsMatch(text!)) continue;
-                bool command = text!.StartsWith('/', StringComparison.Ordinal);
+                bool command = text!.StartsWith("/", StringComparison.Ordinal);
                 if (!command && !_persistChat) continue;
                 string? hash = null;
                 if (row.TryGetProperty("server", out var s) && s.ValueKind == JsonValueKind.String)
