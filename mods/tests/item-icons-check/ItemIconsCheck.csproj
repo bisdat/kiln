@@ -8,7 +8,7 @@
     <KilnModId>item-icons-check</KilnModId>
     <KilnModName>Item icons check</KilnModName>
     <Version>0.1.0</Version>
-    <KilnServices>Ui;Items;Content;Stations</KilnServices>
+    <KilnServices>Ui;Items;Content;Stations;Saves;Client</KilnServices>
     <KilnSide>both</KilnSide>
     <KilnClients>kiln</KilnClients>
   </PropertyGroup>

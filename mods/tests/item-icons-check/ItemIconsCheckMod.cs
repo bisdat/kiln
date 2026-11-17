@@ -13,7 +13,9 @@ namespace ItemIconsCheck;
 /// <item>At any crafting screen a panel "Icon check" shows what Kiln reports (AtStation, IsFactory, Workshop, Station), the
 /// workshop's name and the icons of the station's outputs.</item>
 /// </list>
-/// Every finding is a kiln.log line "iconcheck: ...".
+/// Every finding is a kiln.log line "iconcheck: ...". On a dedicated server (a lab) the headless part runs alone and writes
+/// <c>iconcheck: PASS|FAIL &lt;name&gt;</c> lines: the names from the server's own game data (English: a server has no texts),
+/// no icons there, and the empty answers for a base no one has.
 /// </summary>
 public sealed class ItemIconsCheckMod : Mod
 {
@@ -57,6 +59,11 @@ public sealed class ItemIconsCheckMod : Mod
         if (!Ui.Available)
         {
             Say($"no overlay here (dedicated server {Client.IsDedicatedServer}): Ui.ItemImage = {(Ui.ItemImage(Shown[0].Item) is null ? "null" : "an image")}");
+            if (Client.IsDedicatedServer)
+            {
+                _headlessUntil = Environment.TickCount64 + 90_000;
+                Context.Tick.Pre += Headless;
+            }
             return;
         }
         Say($"Ui.ItemIconsAvailable = {Ui.ItemIconsAvailable}");
@@ -65,6 +72,62 @@ public sealed class ItemIconsCheckMod : Mod
         Ui.Menus.Add(MenuLocation.PauseMenu, "Item icons check", () => _window.Open = true, order: 40);
         Ui.Crafting.AddPanel("Icon check", Panel);
         Context.Tick.Pre += OnPre;
+    }
+
+    // ---- the headless checks (a dedicated server) ----
+    private long _headlessUntil;
+    private readonly HashSet<string> _done = new();
+
+    private void Check(string name, bool ok, string detail)
+    {
+        if (!_done.Add(name)) return;
+        Say($"{(ok ? "PASS" : "FAIL")} {name}: {detail}");
+    }
+
+    private void Headless(in TickInfo t)
+    {
+        if (t.Step % 30 != 0) return;
+        var late = Environment.TickCount64 > _headlessUntil;
+        // a server has no overlay: no image, no icons
+        Check("icons.server", Ui.ItemImage(Shown[0].Item) is null && !Ui.ItemIconsAvailable,
+            $"Ui.ItemImage {(Ui.ItemImage(Shown[0].Item) is null ? "null" : "an image")}, ItemIconsAvailable {Ui.ItemIconsAvailable}");
+        // names: the server's own data (registries, items); English (a server has no texts of the game's)
+        var logs = Items.DisplayName(new ItemId(0x2b0cf1d5));
+        Check("names.item", logs == "Wood Logs", $"Items.DisplayName(Material_T1_Wood_Logs) = {logs ?? "null"}");
+        Check("names.unknown", Items.DisplayName(new ItemId(0xdeadbeef)) is null, "an id that is no item has no name");
+        var shop = Stations.WorkshopName(0x2546ae49);
+        if (shop != null || late) Check("names.workshop", shop == "Charcoal Kiln", $"Stations.WorkshopName(0x2546ae49) = {shop ?? "null"} (read from WorkshopRegistryResource)");
+        var recipe = Stations.RecipeName(0x002c36a0);
+        if (recipe != null || late) Check("names.recipe", recipe is { Length: > 0 }, $"Stations.RecipeName(0x002c36a0) = {recipe ?? "null"} (its first output's name)");
+        var mine = Items.DisplayName(new ItemId(NewContent.IdOf(NewLog)));
+        if (mine != null || late) Check("names.new-item", mine == "Icon Check Log", $"Items.DisplayName(this mod's new item) = {mine ?? "null"}");
+        // a base no one has: empty answers, no KeyNotFoundException (0.2.0-dev.29.15)
+        if (Stations.Available)
+            try
+            {
+                var gone = new BaseId(Guid.NewGuid());
+                Check("bases.unknown-empty", Bases.Stock(gone).Count == 0 && Stations.InBase(gone).Count == 0 && Bases.Storage(gone).Count == 0 &&
+                    Bases.StockWithStations(gone).Count == 0, "Stock, InBase, Storage of an id no base has are empty");
+            }
+            catch (Exception e)
+            {
+                Check("bases.unknown-empty", false, $"{e.GetType().Name}: {e.Message}");
+            }
+        else if (late) Check("bases.unknown-empty", false, "Stations.Available is false on this server");
+        // EntityData: the calling mod's own counts
+        try
+        {
+            Check("saves.waiting", EntityData.Waiting >= 0 && EntityData.Matched >= 0, $"Waiting {EntityData.Waiting}, Matched {EntityData.Matched}");
+        }
+        catch (Exception e) when (e is KilnUnavailableException)
+        {
+            Check("saves.waiting", true, $"kiln.saves not here: {e.Message}");
+        }
+        if (_done.Count >= 8 || late)
+        {
+            Say($"headless checks done: {_done.Count} of 8");
+            Context.Tick.Pre -= Headless;
+        }
     }
 
     private int _namesLogged;
@@ -128,5 +191,9 @@ public sealed class ItemIconsCheckMod : Mod
         }
     }
 
-    public override void OnUnload() => Context.Tick.Pre -= OnPre;
+    public override void OnUnload()
+    {
+        Context.Tick.Pre -= OnPre;
+        Context.Tick.Pre -= Headless;
+    }
 }

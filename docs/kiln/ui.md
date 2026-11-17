@@ -369,6 +369,12 @@ if (img != null && ui.ImageButton("pick", img, 40 * ui.Scale, 40 * ui.Scale)) Pi
   the icon of an item on a server (no pictures there).
 
 ### Client steps (0.2.0-dev.29.15; none of this has run in a real game yet)
+Run headless already: on a dedicated-server lab (server 26430253) the same mod's server half passed 8 of 8 (`iconcheck: PASS
+...`): no image and `ItemIconsAvailable` false there, `Items.DisplayName` from the shipped English names, a new item's name
+from its definition, `Stations.WorkshopName(0x2546ae49)` = "Charcoal Kiln" and `RecipeName` from the server's own
+registries, and empty answers for a base no one has. The decoders ran on the client's real Charcoal icon offline (its 128
+level, the right picture). Everything drawn, the game's texts in a language and the factory screen need a game client.
+
 With `mods/tests/item-icons-check` deployed (`dotnet build mods/tests/item-icons-check/ItemIconsCheck.csproj -t:KilnDeploy
 -p:KilnModsDir=<game>/kiln/mods`), in a hosted world (lines `iconcheck:` in kiln.log):
 1. F9 (or the pause menu's **Item icons check**): the window shows the icons of Wood Logs, Charcoal, the Bronze Sword, the
