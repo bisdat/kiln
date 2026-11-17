@@ -42,6 +42,9 @@ pub struct AppInfo {
     /// next start for software mode (crate::render). Absent elsewhere.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub render: Option<crate::render::RenderInfo>,
+    /// Linux AppImage only: the app menu entry Kiln writes so taskbars show its icon (crate::desktop). Absent elsewhere.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub desktop: Option<crate::desktop::DesktopInfo>,
 }
 
 /// `<data>/settings.json`
@@ -342,6 +345,7 @@ pub async fn app_info(app: AppHandle) -> Result<AppInfo, Error> {
         deck: crate::deck::detect::current(),
         distribution: crate::distribution::CURRENT,
         render: crate::render::info(),
+        desktop: crate::desktop::info(),
     })
 }
 
@@ -358,6 +362,13 @@ pub async fn app_started() -> Result<(), Error> {
 #[tauri::command]
 pub async fn app_render_set(software: bool) -> Result<crate::render::RenderInfo, Error> {
     crate::state::blocking(move || crate::render::set_next(software)).await
+}
+
+/// Settings, "Kiln Launcher in the app menu" (Linux AppImage): on writes the entry and icons (replacing a
+/// `kiln-launcher.desktop` Kiln did not write), off removes Kiln's; kept for the next starts. Elsewhere `unsupported`.
+#[tauri::command]
+pub async fn app_desktop_set(on: bool) -> Result<crate::desktop::DesktopInfo, Error> {
+    crate::state::blocking(move || crate::desktop::set(on)).await
 }
 
 #[tauri::command]

@@ -8,6 +8,8 @@
 pub mod assets;
 pub mod commands;
 pub mod deck;
+/// The window's app id and icon on Linux, the AppImage's app menu entry.
+pub mod desktop;
 pub mod distribution;
 pub mod events;
 /// The process's data folder: found once, its lock, and the hold while a move runs (dev.26).
@@ -235,7 +237,8 @@ pub fn run() {
             commands::data_folder::data_folder_restart,
             commands::app::app_started,
             commands::app::app_render_set,
-            commands::updates::updates_check
+            commands::updates::updates_check,
+            commands::app::app_desktop_set
         ]))
         .build(tauri::generate_context!())
         .expect("error while building the Kiln Launcher")
@@ -283,6 +286,8 @@ pub(crate) fn after_snapshot(app: &tauri::AppHandle) {
     commands::modpack::watch_last_server(app);
     // nxm:// links (Nexus Mods' Mod Manager Download): the instance lock and the link inbox (commands/nexus.rs)
     commands::nexus::start(app);
+    // the AppImage's app menu entry and icons, so taskbars and docks show Kiln's icon (desktop.rs)
+    std::thread::spawn(desktop::start);
     // self-update: the state for this start, then a check after 8 s and every 6 hours (crate::selfupdate)
     #[cfg(feature = "self-update")]
     selfupdate::start(app.clone());

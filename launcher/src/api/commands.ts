@@ -94,6 +94,19 @@ export interface AppInfo {
   distribution?: Distribution;
   /** Linux only: how this start draws the window and whether the next start draws without the GPU (render.rs). */
   render?: RenderInfo;
+  /** Linux AppImage only: the app menu entry Kiln writes so taskbars and docks show its icon (desktop.rs). */
+  desktop?: DesktopInfo;
+}
+/** The AppImage's app menu entry (src-tauri/src/desktop.rs). */
+export interface DesktopInfo {
+  /** The player's choice: on unless turned off in Settings. */
+  on: boolean;
+  /** Kiln's entry is there and starts this AppImage. */
+  installed: boolean;
+  /** A kiln-launcher.desktop Kiln did not write is there; turning the switch on replaces it. */
+  foreign: boolean;
+  /** The entry's path. */
+  file: string;
 }
 /** How the Linux launcher draws its window (src-tauri/src/render.rs). */
 export interface RenderInfo {
@@ -1109,6 +1122,8 @@ export const taskCancel = (taskId: TaskId) => call<null>("task_cancel", { taskId
 export const appStarted = () => call<null>("app_started");
 /** Settings, "Draw the launcher without the GPU": sets or clears the marker for the next start (Linux). */
 export const appRenderSet = (software: boolean) => call<RenderInfo>("app_render_set", { software });
+/** Settings, "Kiln Launcher in the app menu" (Linux AppImage): writes or removes the entry and its icons. */
+export const appDesktopSet = (on: boolean) => call<DesktopInfo>("app_desktop_set", { on });
 /** Local game assets for the save editor and the admin map (`kiln-asset` protocol roots). */
 export interface AssetsStatus {
   root: string;
@@ -1994,6 +2009,7 @@ export const COMMANDS = [
   "data_folder_notice_ack", "data_folder_restart",
   "app_started", "app_render_set",
   "updates_check",
+  "app_desktop_set",
 ] as const;
 export type CommandName = (typeof COMMANDS)[number];
 
