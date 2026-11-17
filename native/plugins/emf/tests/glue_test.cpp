@@ -257,7 +257,10 @@ static void test_window_sizing(KilnUiApi &ui) {
     d.widgets = nullptr; d.count = 0;
     CHECK(table.window_update(&d));
     const auto full = ui.header.size;
-    for (auto short_size : {offsetof(KilnUiApi, set_next_window_size_constraints), sizeof(KilnUiApi) - 1}) {
+    // a table that ends before the constraints slot, and one that ends a byte short of covering it (kiln.ui has grown
+    // past that slot since, so sizeof(KilnUiApi) - 1 no longer is that case)
+    for (auto short_size : {offsetof(KilnUiApi, set_next_window_size_constraints),
+                            offsetof(KilnUiApi, set_next_window_size_constraints) + sizeof(ui.set_next_window_size_constraints) - 1}) {
         ui.header.size = short_size;
         window_calls.clear(); size_calls = constraint_calls = 0;
         frame_fn(&fr, nullptr);
