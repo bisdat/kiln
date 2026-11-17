@@ -62,6 +62,10 @@ pub const BOOT_SNAPSHOT_MAKING: &str = "making the game data snapshot";
 pub const RUNTIME_STEPS: [&str; 11] =
     ["start", "native-early", "early-plugins", "signatures", "services", "plugins", "native", "dotnet", "mods", "content", "game"];
 
+/// The label of the `steam` step when the launcher starts the game itself (`crate::direct`; the window tells a direct
+/// start's slow first start by it: launcher/src/shell/startProgress.ts DIRECT_STEP_LABEL).
+pub const DIRECT_STEP_LABEL: &str = "Starting the game";
+
 /// The label of a step that has not begun yet (a begun one carries its own).
 pub fn default_label(id: &str) -> &'static str {
     match id {

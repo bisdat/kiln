@@ -4,6 +4,9 @@
 import type { PreStart, StartStep, StartTimeline } from "../api/commands";
 import { t } from "../i18n";
 
+/** The label launch_play gives the `steam` step of a direct start (src-tauri commands/launch.rs). */
+export const DIRECT_STEP_LABEL = "Starting the game";
+
 /** Phases in which the start is still going: the bar shows. `quiet` (no word from Kiln for 60 s) is not one: it is
  *  said as what it is, without a bar or a countdown (quietText). */
 export const ACTIVE = new Set(["launcher", "waiting", "booting", "loading"]);
@@ -106,9 +109,11 @@ export function startWords(tl: StartTimeline, prep?: PreStart | null): StartWord
   let left: string;
   let short: string;
   if (tl.steamSlow) {
-    // Steam took the start a minute ago and the game's process does not exist yet: no number, and why
-    left = t("shell.startProgress.steamSlow");
-    short = t("shell.startProgress.steamSlowShort");
+    // Steam took the start a minute ago and the game's process does not exist yet: no number, and why. A direct start
+    // (the launcher's step label for it, launch_play) is slow for another reason: Proton makes the prefix first.
+    const direct = tl.steps.some((s) => s.id === "steam" && s.label === DIRECT_STEP_LABEL);
+    left = direct ? t("shell.startProgress.directSlow") : t("shell.startProgress.steamSlow");
+    short = direct ? t("shell.startProgress.directSlowShort") : t("shell.startProgress.steamSlowShort");
   } else if (first) {
     left = t("shell.startProgress.firstStart", { stepOf });
     short = t("shell.startProgress.stepOfShort", { n: Math.max(1, n), total: e.stepsPlanned });

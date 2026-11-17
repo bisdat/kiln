@@ -217,9 +217,12 @@ crash them that way. A mod that adds items should state `clients`, and then the 
 - No gate (`net.gate` off): nothing is held. A vanilla client gets the world at once, without Kiln-only entities, and a refusal only after `handshakeTimeoutSeconds`; until
   then it can crash on Kiln items, and kiln.log says so.
 
-**Not proven yet with a client without Kiln.** What this section describes for a game without Kiln (the hold, its
-refusal, the let-in, and the two hooks: the gate on the server and the guard on a client's create path) has run in labs
-only, not with a real game client. A **Kiln** client's refusal has been seen in a real game: Kiln's toast, then the
+**Seen with a client without Kiln: the plain join.** A real game client without Kiln joined a Kiln dedicated server
+normally, with Kiln-loaded native mods that all say `"clients": "none"` (MicDrop7, 2026-11-17, Kiln 0.2.0-dev.29.15:
+Smart Workshop's test build and Creative Mode). **Not proven yet with a client without Kiln:** what this section
+describes for a server with Kiln-only templates (the hold, its refusal, the let-in without those entities, and the two
+hooks: the gate on the server and the guard on a client's create path) has run in labs only, not with a real game
+client. A **Kiln** client's refusal has been seen in a real game: Kiln's toast, then the
 game's login failure, back to the main menu and a rejoin afterwards (client build 1285601; see "Lab tests" below, last
 paragraph, and docs/re/network.md "Runtime"). Lab results and the client checks still to run are in docs/re/network.md,
 "Vanilla clients on a Kiln server".

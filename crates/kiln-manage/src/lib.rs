@@ -20,6 +20,7 @@
 //! | [`engines`] | every mod engine Kiln knows: proxy names, markers, Library detection of their mods, loaders |
 //! | [`proc`] | process list (Linux /proc, Windows Toolhelp) |
 //! | [`launch`] | steam:// URIs, the launch flow |
+//! | [`direct`] | starting the client directly (a folder no Steam library knows): per-install start mode, Proton/Wine and prefix on Linux, the command, whether Kiln knows the exe's build |
 //! | [`start_progress`] | what a start is doing (`kiln/state/progress.json` and the launcher's own steps), the history of starts, the time left |
 //! | [`winpath`] | host <-> game path translation (Z:, copy mode) |
 //! | [`bundle`] | runtime bundles (`kiln-runtime.json`) |
@@ -74,6 +75,7 @@ pub mod filecache;
 pub mod hash;
 pub mod hostenv;
 pub mod launch;
+pub mod direct;
 pub mod start_progress;
 pub mod stopped_start;
 pub mod paths;

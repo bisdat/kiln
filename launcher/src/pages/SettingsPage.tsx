@@ -15,6 +15,7 @@ import { NexusCard } from "../components/NexusSettings";
 import { ProfilesCard } from "../components/ProfilesSettings";
 import { LibraryCard } from "../components/LibrarySettings";
 import { LanguageCard } from "../components/LanguageSettings";
+import { StartModal, UnknownBuild, useStartWord } from "../components/GameStart";
 import { rich, t, useT } from "../i18n";
 import {
   Badge, Button, Card, ConfirmDanger, EmptyState, Field, IconButton, NumberInput, Page, PageHeader, PathPicker, SchemaForm, Select, Skeleton,
@@ -170,20 +171,19 @@ function GamesCard() {
   const [path, setPath] = useState("");
   const [rm, setRm] = useState<api.GameInstall | null>(null);
   const detect = useMutation({ mutationFn: api.gameDetect, onSuccess: (g) => { qc.setQueryData(qk.games, g); toast.ok(t("settings.games.found", { count: g.length })); }, onError: (e) => toast.error(e) });
-  const add = useMutation({ mutationFn: () => api.gameAdd(path.trim()), onSuccess: () => { setPath(""); qc.invalidateQueries({ queryKey: qk.games }); toast.ok(t("settings.games.added")); }, onError: (e) => toast.error(e) });
+  const [startFor, setStartFor] = useState<{ game: api.GameInstall; added: boolean } | null>(null);
+  const add = useMutation({ mutationFn: () => api.gameAdd(path.trim()), onSuccess: (g) => {
+    setPath(""); qc.invalidateQueries({ queryKey: qk.games });
+    // a folder no Steam library knows: how it starts is asked right away (directly by default)
+    const custom = g.kind === "client" && g.source === "manual" && !g.library;
+    toast.ok(custom ? t("play.addGame.addedCustom") : t("settings.games.added"));
+    if (custom) setStartFor({ game: g, added: true });
+  }, onError: (e) => toast.error(e) });
   return (
     <Card title={t("settings.games.title")} actions={<Button size="s" icon={<RefreshCw />} loading={detect.isPending} onClick={() => detect.mutate()}>{t("settings.games.detect")}</Button>}>
       {games.length === 0 ? <span className="k-hint">{t("settings.games.none")}</span> : (
         <div className="k-list" style={{ margin: "0 -8px" }}>
-          {games.map((g) => (
-            <div key={g.id} className="k-list-item" style={{ padding: "8px" }}>
-              <span className="k-stack" style={{ gap: 1, flex: 1, minWidth: 0 }}>
-                <span className="k-row" style={{ gap: 6 }}><span className="k-item-title">{g.path.split(/[\\/]/).pop()}</span><Badge>{g.kind}</Badge><Badge>{g.source}</Badge></span>
-                <span className="k-item-sub k-mono k-ellipsis" title={g.path}>{g.path}</span>
-              </span>
-              <IconButton label={t("settings.games.forget")} size="s" icon={<Trash2 />} onClick={() => setRm(g)} />
-            </div>
-          ))}
+          {games.map((g) => <GameRow key={g.id} game={g} onForget={() => setRm(g)} onStart={() => setStartFor({ game: g, added: false })} />)}
         </div>
       )}
       <Field label={t("settings.games.addFolder")}>
@@ -192,9 +192,34 @@ function GamesCard() {
           <IconButton label={t("common.add")} variant="secondary" icon={<FolderPlus />} disabled={!path.trim()} loading={add.isPending} onClick={() => add.mutate()} />
         </div>
       </Field>
+      {startFor && <StartModal game={startFor.game} added={startFor.added} open onClose={() => setStartFor(null)} />}
       <ConfirmDanger open={!!rm} onClose={() => setRm(null)} title={t("settings.games.forgetAsk")} word={t("common.confirmWord.forget")} action={t("settings.games.forget")} message={t("settings.games.forgetMessage")}
         onConfirm={async () => { try { await api.gameRemove(rm!.id); qc.invalidateQueries({ queryKey: qk.games }); } catch (e) { toast.error(e); throw e; } }} />
     </Card>
+  );
+}
+
+/** One install in Settings' game list: its folder, kind, where it came from (a custom folder says so), how it starts,
+ *  and a build Kiln does not know (dev.29.17). */
+function GameRow({ game: g, onForget, onStart }: { game: api.GameInstall; onForget: () => void; onStart: () => void }) {
+  const t = useT();
+  const status = useGameStatus(g.kind === "client" ? g.id : null);
+  const word = useStartWord();
+  const custom = g.kind === "client" && g.source === "manual" && !g.library;
+  const s = status.data;
+  return (
+    <div className="k-list-item" style={{ padding: "8px" }} data-testid={`game-row-${g.id}`}>
+      <span className="k-stack" style={{ gap: 1, flex: 1, minWidth: 0 }}>
+        <span className="k-row" style={{ gap: 6 }}>
+          <span className="k-item-title">{g.path.split(/[\\/]/).pop()}</span><Badge>{g.kind}</Badge>
+          {custom ? <Badge tone="ember">{t("play.source.custom")}</Badge> : <Badge>{g.source}</Badge>}
+          {s?.start && <button type="button" className="k-link" onClick={onStart} title={t("settings.games.startTip")}>{t("play.startsVia", { how: word(s.start) })}</button>}
+        </span>
+        <span className="k-item-sub k-mono k-ellipsis" title={g.path}>{g.path}</span>
+        <UnknownBuild build={s?.build} compact />
+      </span>
+      <IconButton label={t("settings.games.forget")} size="s" icon={<Trash2 />} onClick={onForget} />
+    </div>
   );
 }
 

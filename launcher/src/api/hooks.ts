@@ -15,6 +15,7 @@ export const qk = {
   settings: ["app_settings"] as const,
   games: ["game_list"] as const,
   gameStatus: (g: GameId) => ["game_status", g] as const,
+  startSetup: (g: GameId) => ["game_start_get", g] as const,
   launchState: (g: GameId) => ["launch_state", g] as const,
   runtimeList: ["runtime_list"] as const,
   runtimeStatus: (g: GameId) => ["runtime_status", g] as const,

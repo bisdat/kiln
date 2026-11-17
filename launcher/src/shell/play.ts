@@ -147,7 +147,7 @@ export function usePlayControl(): PlayControl {
       rememberLaunch(gameId, r.mode);
       invalidateGame(qc, gameId);
       toast.ok(r.mode === "vanilla" ? t("shell.play.startingVanilla") : r.mode === "no-mods" ? t("shell.play.startingNoMods") : t("shell.gameState.starting"),
-        r.backup ? t("shell.play.savesBackedUp") : t("shell.play.throughSteam"));
+        r.backup ? t("shell.play.savesBackedUp") : r.via === "direct" ? t("shell.play.directly") : t("shell.play.throughSteam"));
       notifyActivation(r.activation);
     },
     // the re-apply before the start may have kept copies even when the start then failed; a mod changed in its Library

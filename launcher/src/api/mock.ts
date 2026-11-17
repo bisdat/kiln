@@ -9,7 +9,7 @@ import type {
   FoundMod, FoundReport, GameInstall, GameStatus, ImportReport, InstallReceipt, InstallResult, InstallState, Json, KilnError, LastServer, LaunchRequest, NewerKilnMod,
   LaunchResult, LauncherSettings, RenderInfo, DesktopInfo, LibraryEntry, LibraryRef, LibraryVersion, RollbackReport, VersionRef, TakenOver, LogFile, LogTarget, ModKind, ModpackInstallRequest, ModpackInstallResult, ModsJson,
   NativeJson, NativePlanEntry, NativeUserState, PreStart, Profile, ProfileChange, ProfileMod, ProfileSummary, ProxyClass, Rejection, RemoveReport, ResolvePreview, RuntimeBundle, SaveBackup, SaveSlot,
-  SchemaSnapshot, ServerInstance, ServerStatus, Task, TaskState,
+  SchemaSnapshot, ServerInstance, ServerStatus, Task, TaskState, StartMode, StartSettings, StartSetup, RunnerInfo, BuildCheck,
 } from "./commands";
 import { adminMockHandlers } from "../admin/mock";
 import { serverMockHandlers } from "../pages/servers/mockServers";
@@ -515,6 +515,46 @@ function gameOf(id: unknown): GameInstall {
   return games.find((g) => g.id === id) ?? reject("not_found", `No game '${String(id)}'.`);
 }
 
+// ---------------------------------------------------------------- direct starts (kiln_manage::direct, dev.29.17)
+
+/** The player's start choices per game (InstallRecord.start). */
+const startSettings: Record<string, StartSettings> = {};
+const mockRunners: RunnerInfo[] = [
+  { kind: "proton", path: `${STEAM}/compatibilitytools.d/GE-Proton10-25`, label: "GE-Proton10-25", source: "compat" },
+  { kind: "proton", path: `${STEAM}/steamapps/common/Proton 9.0`, label: "Proton 9.0", source: "steam" },
+  { kind: "wine", path: "/usr/bin/wine", label: "Wine (/usr/bin/wine)", source: "system" },
+];
+/** A folder no Steam library knows (direct::is_custom). */
+const isCustom = (g: GameInstall) => g.kind === "client" && g.source === "manual" && !g.library;
+function startOf(g: GameInstall): StartMode {
+  if (g.kind !== "client") return "steam";
+  return startSettings[g.id]?.mode ?? (isCustom(g) ? "direct" : "steam");
+}
+/** The Steam copy's build is known; a folder added by hand holds another build (`?mock=known-custom`: a known one). */
+function buildOf(g: GameInstall): BuildCheck {
+  const sha = g.exeSha256 ?? hex(g.path).padEnd(64, "0").slice(0, 64);
+  const known = g.source === "steam" || MODE === "known-custom";
+  return { sha256: sha, short: sha.slice(0, 12), known, from: runtime[g.id]?.installed ? "game" : "bundle" };
+}
+function startSetup(g: GameInstall): StartSetup {
+  const settings = startSettings[g.id] ?? {};
+  const own = `/home/player/.local/share/kiln-prefixes/${g.id}`;
+  const runner = settings.runner ? mockRunners.find((r) => r.path === settings.runner) ?? { kind: "proton", path: settings.runner, label: settings.runner.split("/").pop() ?? settings.runner, source: "custom" } : mockRunners[0];
+  const compat = settings.prefix ?? own;
+  const proton = runner.kind === "proton";
+  return {
+    mode: startOf(g), settings, custom: isCustom(g), windows: WIN_MOCK, runners: WIN_MOCK ? [] : mockRunners, runner: WIN_MOCK ? null : runner, defaultRunner: WIN_MOCK ? null : mockRunners[0], ownPrefix: WIN_MOCK ? null : own,
+    steamRunning: MODE !== "no-steam",
+    command: WIN_MOCK ? { program: `${g.path}\\enshrouded.exe`, args: [], cwd: g.path, env: [], envRemove: ["KILN_DISABLE"], runner: null, prefix: null } : {
+      program: proton ? `${runner.path}/proton` : runner.path, args: proton ? ["run", `${g.path}/enshrouded.exe`] : [`${g.path}/enshrouded.exe`], cwd: g.path,
+      env: proton ? [["STEAM_COMPAT_DATA_PATH", compat], ["STEAM_COMPAT_CLIENT_INSTALL_PATH", STEAM], ["WINEDLLOVERRIDES", "dinput8=n,b"]] : [["WINEPREFIX", compat], ["WINEDLLOVERRIDES", "mshtml=;dinput8=n,b"]],
+      envRemove: ["WINEPREFIX", "SteamAppId", "SteamGameId"], runner, prefix: proton ? `${compat}/pfx` : compat,
+    },
+  };
+}
+/** `?mock=windows-start`: the start dialog as Windows shows it (no Proton, Wine or prefix). */
+const WIN_MOCK = MODE === "windows-start";
+
 /** Games started in this session (a first run has no boot.json before its first start). */
 const launched = new Set<string>();
 
@@ -546,6 +586,8 @@ function status(gameId: string): GameStatus {
       : { value: 'WINEDLLOVERRIDES="dinput8=n,b" %command%', hasDllOverride: true, chainedOverrideMissing: MODE === "chained-override",
           advice: MODE === "chained-override" ? 'WINEDLLOVERRIDES="dinput8,xinput9_1_0=n,b" %command%' : null },
     newerMods: newerMods[gameId] ?? [],
+    ...(g.kind === "client" ? { start: startOf(g), build: buildOf(g) } : {}),
+    ...(startOf(g) === "direct" ? { launchOptions: null } : {}),
   };
 }
 
@@ -613,7 +655,8 @@ function launch(gameId: string, req: LaunchRequest): LaunchResult {
     setTimeout(() => emitGame(gameId, "boot"), 2600);
     setTimeout(() => emitGame(gameId, "mods"), 3200);
   }
-  return { gameId: g.id, mode: req.mode, nonce, backup, uri: "steam://rungameid/1203620", started: now(), ...(act ? { activation: act } : {}) };
+  const via = startOf(g);
+  return { gameId: g.id, mode: req.mode, nonce, backup, uri: via === "direct" ? "" : "steam://rungameid/1203620", started: now(), via, ...(act ? { activation: act } : {}) };
 }
 
 /** Dev/test helper: the fake game was started outside the launcher (Steam) `secondsAgo` seconds ago. */
@@ -882,6 +925,16 @@ const handlers: Record<string, Handler> = {
   },
   game_remove: (a) => { const i = games.findIndex((g) => g.id === a.gameId); if (i < 0) reject("not_found", "No such game."); games.splice(i, 1); return null; },
   game_status: (a) => status(S(a.gameId)),
+  game_start_get: (a) => startSetup(gameOf(a.gameId)),
+  game_start_set: (a) => {
+    const g = gameOf(a.gameId);
+    if (live(g.id)) reject("game_running", "Close the game first.");
+    if (g.kind !== "client") reject("invalid_argument", "a dedicated server starts on the Servers page; its start is not set here");
+    const set = (a.settings ?? {}) as StartSettings;
+    for (const p of [set.runner, set.prefix]) if (p && !p.startsWith("/")) reject("invalid_argument", `the path must be absolute, not ${p}`);
+    if (set.mode || set.runner || set.prefix) startSettings[g.id] = { ...set }; else delete startSettings[g.id];
+    return g;
+  },
 
   // runtime
   runtime_list: () => bundles,

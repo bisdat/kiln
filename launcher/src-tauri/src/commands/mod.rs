@@ -45,6 +45,8 @@ pub const NAMES: &[&str] = &[
     "game_add",
     "game_remove",
     "game_status",
+    "game_start_get",
+    "game_start_set",
     "runtime_list",
     "runtime_import",
     "runtime_status",

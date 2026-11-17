@@ -77,6 +77,8 @@ pub fn run() {
             commands::game::game_add,
             commands::game::game_remove,
             commands::game::game_status,
+            commands::game::game_start_get,
+            commands::game::game_start_set,
             commands::runtime::runtime_list,
             commands::runtime::runtime_import,
             commands::runtime::runtime_status,

@@ -121,13 +121,14 @@ Root: `$KILN_DATA_DIR`, else the folder the pointer `data-folder.json` in the de
 | `profiles/<pid>/data/` | per-mod data when the profile chooses `dataDir: profile` |
 | `profiles/<pid>/config-sync/<installId>.json` | (0.2.0-dev.29.16) copy mode: the game's config copy of the profile as Kiln last left it (`kiln_manage::profile::config_sync_record`): `{format: 1, files: {"<path below config/, '/'-separated>": {sha256, size, mtimeNs}}}`, written after every copy into the game and every copy back (section 6). The hash decides; size and time are for a reader. Safe to delete: the next copy back then decides by time |
 | `profiles/<pid>/save-backups/<yyyymmddThhmmssZ>/` | automatic save backups, 10 kept (+ `backup.json`) |
-| `installs/<installId>.json` | the launcher's record of a game install: the `GameInstall` + a copy of its receipt |
+| `installs/<installId>.json` | the launcher's record of a game install: the `GameInstall` + a copy of its receipt; (dev.29.17) `start` (`StartSettings {mode?: 'steam'\|'direct', runner?, prefix?}`: how the player wants it started, left out while every choice is Kiln's default; kept whoever writes the record again; [custom-game-folders.md](custom-game-folders.md)) |
 | `installs/<installId>.notices-seen.json` | (dev.26) which activation notices the player has closed in the launcher for that game: `{format: 1, seen: [sha256 hex of each sentence]}`, oldest first, at most 512 (`kiln_manage::notices`, `notices_shown`; written through a temp file of its own random name) |
 | `installs/<installId>.notices-seen.lock` | (dev.27) an empty file two launchers lock while one of them reads, changes and writes the memory above, so neither drops what the other remembered (`kiln_manage::notices::mark_seen`). Never read; safe to delete while no launcher runs |
 | `runtime/kiln-runtime-<version>.zip` | runtime bundles (import, rollback) |
 | `schema-cache/<modid>/<version>+<hash8>/<file>.json` | config schema snapshots cached per mod version |
 | `backups/` | `saves/<gameId>/` (save backups without a profile), `install/<installId>/` (mirror of install backups), `profiles/` (deleted profiles) |
 | `logs/launcher.log` | the launcher's own log |
+| `logs/game-start-<installId>.log` | (dev.29.17) the Proton or Wine output of the last direct start of that install (written again at every one; the support report carries it) |
 | `state/software-render.json` | Linux: there, a start without an override draws without the GPU (`{format, why, at, version}`; written by the launcher when its page did not start, or by Settings; [app.md](app.md), "Drawing without the GPU") |
 | `state/desktop-entry.json` | Linux AppImage: there when the player turned "Kiln Launcher in the app menu" off (`{format, on: false, at}`); absent, every start writes or updates the app menu entry and icons ([app.md](app.md), "Taskbar icon and app menu") |
 | `update.json` | the self-update's state: `{format, skipped, checked, updated: {from, to, at, source, notes}}` (releasing.md) |
@@ -1125,7 +1126,24 @@ cooks nothing); `vanilla` and `no-mods`, nothing. Neither step refuses the start
    play-once.ini `mode=profile`.
 3. Save backup when the kms1 of what will load differs from the game's last launched kms1 (unless `skipBackup`);
    vanilla and no-mods count as the empty set.
-4. Open `steam://rungameid/1203620` (xdg-open / ShellExecute). Never write Steam's config.
+4. Through Steam (the default for Steam's own copy): open `steam://rungameid/1203620` (xdg-open / ShellExecute). Never
+   write Steam's config. Directly (dev.29.17; the default for a folder no Steam library knows, `GameInstall.source`
+   `manual` and `library` null, else the player's `start` in the install record): the launcher starts the folder's
+   `enshrouded.exe` itself (`kiln_manage::direct`): Windows runs it with the game folder as working folder (Kiln's
+   `dinput8.dll` is loaded from there first; nothing is set); Linux runs `<proton> run <exe>` with
+   `STEAM_COMPAT_DATA_PATH` (the compatdata folder) and `STEAM_COMPAT_CLIENT_INSTALL_PATH` (the Steam root), or `wine
+   <exe>` with `WINEPREFIX`, both with `WINEDLLOVERRIDES` `dinput8=n,b` (`dinput8,xinput9_1_0=n,b` with a chained
+   Ultimate ASI Loader; Wine also `mshtml=`), in the game folder, in its own session, output into
+   `logs/game-start-<installId>.log`. The runner is the player's, else the Proton Steam maps to app 1203620 (else app
+   0), else the first found (compatibility-tools folders, GE-Proton newest first; Valve's Protons in the libraries; wine
+   on PATH). The prefix is the player's, else Kiln's own `$XDG_DATA_HOME/kiln-prefixes/<installId>` (outside the data
+   folder: never moved with it); while the install starts directly its `prefix` and `platform` are that prefix's
+   (saves, path mode). The command is built before step 1's files are written (no runner refuses the start as it is).
+   Inherited `WINEPREFIX`, `WINEDLLOVERRIDES`, `STEAM_COMPAT_*`, `SteamAppId`, `SteamGameId`, `LD_PRELOAD` are
+   dropped. Kiln never sets `SteamAppId`/`SteamGameId`, never writes `steam_appid.txt`, never touches the game's Steam
+   DLLs: Steam must run (the game's Steam API), and a copy that asks Steam to restart it is restarted as Steam's own
+   copy ([custom-game-folders.md](custom-game-folders.md)). The `steam` start step is labelled "Starting the game"
+   then; `LaunchResult.via` is `direct` and `uri` empty.
 5. Watch: the process appears -> `kiln://game {kind: "started"}`; `state/boot.json` with a live pid and the nonce ->
    `{kind: "boot"}`; `mods.json`/`native.json` updates -> `{kind: "mods"|"native"}`; exit -> `{kind: "stopped"}`.
    play-once.ini still there after 120 s: the proxy did not run; under Proton show the `WINEDLLOVERRIDES="dinput8=n,b"
@@ -1203,7 +1221,9 @@ Shared types (TypeScript names, defined in `commands.ts`; Rust in kiln-manage un
 | game | `game_detect` | - | `GameInstall[]` (scans Steam, adds new ones) |
 | game | `game_add` | path: string | `GameInstall` |
 | game | `game_remove` | gameId | null |
-| game | `game_status` | gameId | `GameStatus` (+ `started`: RFC 3339 start of the running game's process, null when stopped; + `otherFolderProfile {id, root?}` when another data folder's profile is active in the game, `activeProfile` null then: `profile::game_profile_owner`) |
+| game | `game_status` | gameId | `GameStatus` (+ `started`: RFC 3339 start of the running game's process, null when stopped; + `otherFolderProfile {id, root?}` when another data folder's profile is active in the game, `activeProfile` null then: `profile::game_profile_owner`; (dev.29.17) + `start`: `'steam'\|'direct'` for a client; + `build: BuildCheck {sha256, short, known, from: 'game'\|'bundle'}`: the exe's sha256 against the game's `kiln/sigdb/builds/<side>/` records (`verified: true` counts), else the `builds` index of the runtime Play would install, left out when neither is there; `launchOptions` null for a direct start) |
+| game | `game_start_get` | gameId | (dev.29.17) `StartSetup {mode, settings: StartSettings, custom, windows, runners: RunnerInfo[], runner, defaultRunner, problem?, ownPrefix, command: DirectCommand \| null, steamRunning}` (`RunnerInfo {kind: 'proton'\|'wine', path, label, source: 'steam'\|'compat'\|'system'\|'custom'}`, `DirectCommand {program, args, cwd, env, envRemove, runner, prefix}`: what a direct start runs now) |
+| game | `game_start_set` | gameId, settings: StartSettings | (dev.29.17) `GameInstall` as it starts now (refused while the game runs, for a server, and for a runner or prefix on Windows; a relative path is refused) |
 | runtime | `runtime_list` | - | `RuntimeBundle[]` |
 | runtime | `runtime_import` | path: string | `RuntimeBundle` |
 | runtime | `runtime_status` | gameId | `InstallState` |
@@ -1244,7 +1264,7 @@ Shared types (TypeScript names, defined in `commands.ts`; Rust in kiln-manage un
 | config | `config_kiln_reset` | gameId, path | `ConfigDocument` |
 | config | `config_native_state` | target | `NativeUserState` |
 | config | `config_native_set` | target, modId: string, enabled: boolean \| null | `NativeUserState` |
-| launch | `launch_play` | gameId, request: LaunchRequest {mode: 'profile'\|'vanilla'\|'no-mods'\|'once', profileId?, skipBackup?} | `LaunchResult` |
+| launch | `launch_play` | gameId, request: LaunchRequest {mode: 'profile'\|'vanilla'\|'no-mods'\|'once', profileId?, skipBackup?} | `LaunchResult` (+ `via: 'steam'\|'direct'`, dev.29.17) |
 | launch | `launch_state` | gameId | `BootState` {boot, mods, native, stale} (launcher type) |
 | launch | `launch_prestart` | gameId | `PreStart` or null: what kiln-eml is doing before the game's window exists (`kiln/state/eml.json`, phase running), while the game runs (`kiln_manage::prestart`) |
 | launch | `launch_begin` | gameId, mode: LaunchMode | null: Play was pressed (before the cook); the launcher times the start's own steps from now (`kiln_manage::start_progress`) |
@@ -1524,10 +1544,11 @@ default; the launcher uses `full`. Builds for Linux and `x86_64-pc-windows-msvc`
 | `hash` | `dirhash(&Path) -> Result<String>`, `dirhash_records(impl IntoIterator<Item = Record>)`, `sha256_file`, `sha256_hex`, `hex`, `hash8`, `fingerprint(entries) -> String`, `Record`, `FingerprintEntry` |
 | `vdf` | `parse(&str) -> Result<Vdf>`, `Vdf::{get, path, as_str, entries}` |
 | `steam` | `roots()`, `libraries(&SteamRoot)`, `app_manifest(&Path, u32)`, `compat_tool`, `launch_options`, `compatdata`; `SteamRoot`, `SteamFlavor`, `Library`, `AppManifest`, `LaunchOptions` |
-| `game` | `detect()`, `inspect(&Path)`, `known(&DataDirs)`, `add`, `remove`, `status`, `path_mode`; `GameInstall`, `GameKind`, `Platform`, `PathMode`, `GameStatus` (+ `otherFolderProfile`), `OtherFolderProfile`, `LaunchOptionsInfo` |
+| `game` | `detect()`, `inspect(&Path)`, `known(&DataDirs)`, `add`, `add_with`, `remove`, `status`, `path_mode`, (dev.29.17) `set_start`, `sync_start`, `apply_start`, `asi_loader_chained`; `GameInstall`, `GameKind`, `Platform`, `PathMode`, `GameStatus` (+ `otherFolderProfile`, `start`, `build`), `OtherFolderProfile`, `LaunchOptionsInfo`, `InstallRecord` (+ `start`) |
 | `pe` | `exports(&Path)`, `is_pe64_dll(&[u8])`, `classify_proxy(&Path) -> Result<ProxyClass>`; `ProxyKind {None, Kiln, ShroudForge, Emf, Unknown, NotDll}`, `ProxyClass`, marker constants |
 | `proc` | `list()`, `find_game(&GameInstall)`, `alive(u32)`; `ProcessInfo` |
-| `launch` | `steam_uri(u32)`, `open_uri(&str)`, `play(&DataDirs, &GameInstall, &LaunchRequest) -> Result<LaunchResult>`; `LaunchMode`, `LaunchRequest`, `LaunchResult` |
+| `launch` | `steam_uri(u32)`, `open_uri(&str)`, `play(&DataDirs, &GameInstall, &LaunchRequest) -> Result<LaunchResult>` (through Steam or directly, as the install's record says), `play_with` (Steam, a test's opener), `play_via(.., Starter)`, `direct_log`; `LaunchMode`, `LaunchRequest`, `LaunchResult`, `Starter` |
+| `direct` | (dev.29.17) `StartMode`, `StartSettings`, `is_custom`, `effective_mode`, `settings`, `mode_of`, `prefixes_root`, `own_prefix`, `prefix_paths`, `runner_at`, `runners`, `default_runner`, `resolve_runner`, `command_for` (the command from facts, no I/O), `plan`, `prefix_of`, `spawn`, `steam_running`, `setup` (`StartSetup`), `build_check` (`BuildCheck`), `known_in_game`, `known_in_manifest`, `newest_bundle`, `unknown_build_sentence`; `RunnerInfo`, `RunnerKind`, `DirectCommand`, `SCRUB` |
 | `winpath` | `unix_to_z(&Path)`, `z_to_unix(&str)`, `z_drive_ok(&Path)`, `to_game(&Path, &GameInstall)`, `to_host(&str, &GameInstall)` |
 | `bundle` | `read(&Path)`, `verify(&Path, &mut dyn Progress)`, `create(&Path, &Path, &CreateOptions)`, `list(&DataDirs)`, `import(&DataDirs, &Path)`; `RuntimeManifest`, `RuntimeComponent`, `RuntimeFile`, `RuntimeBuilds`, `RuntimeBuild`, `RuntimeBundle`, `CreateOptions` |
 | `install` | `read_receipt(&Path)`, `status`, `install(&DataDirs, &GameInstall, &Path, &InstallOptions, &mut dyn Progress)`, `uninstall`, `rollback`, `plan`; `InstallReceipt`, `ReceiptRuntime`, `ReceiptGame`, `ReceiptFile`, `ReplacedFile`, `ReplacedClass`, `ReplacedAction`, `InstallOptions`, `InstallState` |
