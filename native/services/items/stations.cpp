@@ -843,17 +843,7 @@ void finish_text(KilnStationResult* res, int32_t status, const char* text) {
     std::snprintf(res->message, sizeof res->message, "%s", text);
 }
 
-KilnStationResult result_base(const Req& q) {
-    KilnStationResult r{};
-    r.size = sizeof r;
-    r.action = q.r.action;
-    r.flags = q.r.flags;
-    r.station = q.r.station;
-    r.recipe = q.r.recipe;
-    r.ticket = q.ticket;
-    r.status = KILN_STATION_DONE;
-    return r;
-}
+KilnStationResult result_base(const Req& q) { return result_for(q); }
 
 void noted_write(KilnEntity station, KilnOwner owner, const uint8_t* fs_after, uint32_t action) {
     Wrote w;
@@ -1081,7 +1071,7 @@ void run_control(const Run& run, Req& q, KilnStationResult* res, bool* keep_wait
             seen.selected = selected;
             seen.start = start;
             seen.now = g_now.load(std::memory_order_relaxed);
-            switch (waiting_stop(seen, q.selected0, q.start0, current_step() - q.waiting_since, kAfterCraftMaxSteps)) {
+            switch (waiting_stop_step(&q, seen, current_step() - q.waiting_since, kAfterCraftMaxSteps)) {
             case StopWait::Wait:
                 *keep_waiting = true;
                 return;
@@ -1201,32 +1191,6 @@ void KILN_CALL each(KilnProgramCtx* ctx, uint64_t* it, KilnEntity, void*) {
         after = g_after;  // the stops waiting for a cycle's end, every step (g_after keeps them listed: stop_pending)
     }
     if (batch.empty() && after.empty()) return;
-    // a RESUME, SELECT or STOP now withdraws the stop waiting on its station; a second STOP after craft finds one waiting
-    std::vector<KilnStationResult> done;
-    std::unordered_map<uint64_t, uint32_t> withdrew;  // ticket of the later action -> stops it withdrew
-    for (auto i = batch.begin(); i != batch.end();) {
-        const KilnEntity st = i->r.station;
-        if (withdraws_waiting(i->r)) {
-            for (const Req& w : take_if(&after, [&](const Req& x) { return x.r.station == st; })) {
-                KilnStationResult res = result_base(w);
-                res.status = KILN_STATION_CANCELED;
-                std::snprintf(res.message, sizeof res.message, "withdrawn by a later %s of the station: nothing written", action_name(i->r.action));
-                res.step = current_step();
-                done.push_back(res);
-                ++withdrew[i->ticket];
-            }
-        } else if (i->r.action == KILN_STATION_STOP && (i->r.flags & KILN_STATION_AFTER_CRAFT) &&
-                   std::any_of(after.begin(), after.end(), [&](const Req& x) { return x.r.station == st; })) {
-            KilnStationResult res = result_base(*i);
-            finish(&res, KILN_STATION_UNCHANGED, "a stop after the current craft already waits on station %u", st);
-            res.step = current_step();
-            done.push_back(res);
-            i = batch.erase(i);
-            continue;
-        }
-        ++i;
-    }
-    for (Req& q : after) batch.push_back(q);
     Run run{};
     char why[160] = "";
     const bool ok = verify(ctx, it, &run, why);
@@ -1236,30 +1200,30 @@ void KILN_CALL each(KilnProgramCtx* ctx, uint64_t* it, KilnEntity, void*) {
     } else if (g_state.exchange(KILN_ITEMS_PROGRAM_RUNNING) != KILN_ITEMS_PROGRAM_RUNNING) {
         LOGI("program %s runs: accessors verified", kProgram);
     }
-    std::vector<Req> still;
-    for (Req& q : batch) {
-        KilnStationResult res = result_base(q);
+    std::vector<KilnStationResult> done;
+    auto act = [&](Req& q, KilnStationResult* res) -> bool {
         if (!ok) {
-            finish(&res, KILN_STATION_UNAVAILABLE, "kiln_items_stations is off (see kiln.log)");
-        } else {
-            ActCall a{&run, &q, &res, false};
-            unsigned long code = 0;
-            if (!guard(&act_impl, &a, &code)) {
-                abandon_tx(g_tx);
-                char b[128];
-                std::snprintf(b, sizeof b, "the game faulted (0x%08lx) in an action on station %u", code, q.r.station);
-                finish_text(&res, KILN_STATION_UNAVAILABLE, b);
-                switch_off(b);
-            } else if (a.keep_waiting) {
-                still.push_back(q);
-                continue;
-            }
+            finish(res, KILN_STATION_UNAVAILABLE, "kiln_items_stations is off (see kiln.log)");
+            return false;
         }
-        if (auto w = withdrew.find(q.ticket); w != withdrew.end() && !res.message[0])
-            std::snprintf(res.message, sizeof res.message, "withdrew the stop that waited for the cycle's end");
-        res.step = current_step();
-        done.push_back(res);
-    }
+        ActCall a{&run, &q, res, false};
+        unsigned long code = 0;
+        if (!guard(&act_impl, &a, &code)) {
+            abandon_tx(g_tx);
+            char b[128];
+            std::snprintf(b, sizeof b, "the game faulted (0x%08lx) in an action on station %u", code, q.r.station);
+            finish_text(res, KILN_STATION_UNAVAILABLE, b);
+            switch_off(b);
+            return false;
+        }
+        return a.keep_waiting;
+    };
+    auto answer = [&](const Req&, const KilnStationResult& r) {
+        KilnStationResult x = r;
+        x.step = current_step();
+        done.push_back(x);
+    };
+    std::vector<Req> still = run_batch(batch, std::move(after), act, answer);
     std::lock_guard lock(g_mu);
     for (auto& r : done) g_done.push_back(r);
     g_after = still;
@@ -1430,9 +1394,11 @@ void watch_pre(uint64_t step) {
     RawBases rb{};
     const bool have_bases = read_bases(&rb);
     void* sys = have_bases ? rb.sys : nullptr;
+    bool rebuilt = false;
     if (have_bases) {
         const uint32_t sig = bases_fingerprint(rb);
         if (sig != g_bases_sig) {
+            rebuilt = true;
             const bool first = g_bases_sig == 0;
             g_bases_sig = sig;
             ++g_bases_version;
@@ -1448,7 +1414,7 @@ void watch_pre(uint64_t step) {
         }
     }
     if (!watching) return;
-    if (!g_scanned || step - g_stations_step >= kScanEvery) {
+    if (scan_due(g_scanned, step, g_stations_step, kScanEvery, rebuilt)) {  // a rebuild moves the stations' base indices
         scan_altars(step, sys);
         scan_stations(step, sys, true);
     }

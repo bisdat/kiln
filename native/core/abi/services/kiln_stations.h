@@ -210,8 +210,11 @@ enum {
     KILN_STATION_DROPPED = 12,      /* not run: the world closed, or kiln_items_stations did not run it in 10 s */
     KILN_STATION_TIMED_OUT = 13,    /* STOP after craft: the cycle did not end in time (about an hour of steps); nothing written */
     KILN_STATION_QUEUE_FULL = 14,   /* not taken: 1024 actions wait (submit's KILN_ERR_BUFFER_TOO_SMALL; a managed result) */
-    KILN_STATION_CANCELED = 15,     /* STOP after craft: withdrawn before it was written (a later resume, select or stop on
-                                       the station, Kiln's or a player's; the message says which); nothing written */
+    KILN_STATION_CANCELED = 15,     /* STOP after craft: withdrawn before it was written, by a later RESUME, SELECT or STOP
+                                       (not after craft) of kiln.stations' on the station that passed its checks (that
+                                       action's message says it withdrew it), or because the station's selected recipe
+                                       changed (a player's or a mod's select); nothing written. A stop meanwhile (a
+                                       player's too) answers UNCHANGED instead */
 };
 
 /* KilnStationResult.limited_by / KilnStationPlan.limited_by: what kept a FILL below what was asked */
@@ -225,7 +228,7 @@ enum {
 
 typedef struct KilnStationResult {
     uint32_t size;          /* sizeof(KilnStationResult) of kiln.stations */
-    int32_t status;         /* KILN_STATION_DONE .. DROPPED */
+    int32_t status;         /* KILN_STATION_DONE .. CANCELED */
     uint32_t action;
     uint32_t flags;         /* the request's flags */
     KilnEntity station;

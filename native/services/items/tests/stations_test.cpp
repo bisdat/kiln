@@ -6,6 +6,7 @@
 
 #include <cstddef>
 #include <cstdio>
+#include <cstring>
 
 using namespace kitems::stations;
 
@@ -267,6 +268,93 @@ int main() {
         CHECK(w.size() == 2 && after.size() == 1 && after[0].r.station == 11);
         auto all = take_if(&after, [](const Req&) { return true; });
         CHECK(all.size() == 1 && after.empty());
+    }
+
+    // ---- one step's requests: withdrawals in order, after the action passed ----
+    {
+        // a fake game: station 10 runs a cycle (a deferred stop waits), station 11's recipe is not this workshop's
+        auto act = [](Req& q, KilnStationResult* res) {
+            if (is_deferred_stop(q.r)) return true;  // the cycle runs: wait
+            if (q.r.action == KILN_STATION_SELECT && q.r.recipe == 0xbad) {
+                res->status = KILN_STATION_WRONG_WORKSHOP;
+                std::snprintf(res->message, sizeof res->message, "recipe 0x00000bad is a recipe of another workshop");
+                return false;
+            }
+            if (q.r.action == KILN_STATION_RESUME) {  // the station is not stopped
+                res->status = KILN_STATION_UNCHANGED;
+                std::snprintf(res->message, sizeof res->message, "the station is not stopped");
+            }
+            return false;
+        };
+        std::vector<std::pair<uint64_t, KilnStationResult>> out;
+        auto done = [&](const Req& q, const KilnStationResult& r) { out.emplace_back(q.ticket, r); };
+        auto mk = [](uint64_t ticket, uint32_t action, uint32_t flags = 0, uint32_t recipe = 0) {
+            Req q;
+            q.ticket = ticket;
+            q.r = req(action);
+            q.r.station = 10;
+            q.r.flags = flags;
+            q.r.recipe = recipe;
+            q.r.crafts = 0;
+            return q;
+        };
+        auto status_of = [&](uint64_t ticket) {
+            for (auto& [t, r] : out)
+                if (t == ticket) return r.status;
+            return -1;
+        };
+        // a deferred stop and a resume in the same step: the resume withdraws it
+        auto w = run_batch({mk(1, KILN_STATION_STOP, KILN_STATION_AFTER_CRAFT), mk(2, KILN_STATION_RESUME)}, {}, act, done);
+        CHECK(w.empty() && status_of(1) == KILN_STATION_CANCELED);
+        // two deferred stops in one step: the second finds the first
+        out.clear();
+        w = run_batch({mk(3, KILN_STATION_STOP, KILN_STATION_AFTER_CRAFT), mk(4, KILN_STATION_STOP, KILN_STATION_AFTER_CRAFT)}, {}, act, done);
+        CHECK(w.size() == 1 && w[0].ticket == 3 && status_of(4) == KILN_STATION_UNCHANGED);
+        // a select that fails its checks leaves the waiting stop alone
+        out.clear();
+        std::vector<Req> waiting{mk(5, KILN_STATION_STOP, KILN_STATION_AFTER_CRAFT)};
+        w = run_batch({mk(6, KILN_STATION_SELECT, 0, 0xbad)}, waiting, act, done);
+        CHECK(w.size() == 1 && w[0].ticket == 5 && status_of(6) == KILN_STATION_WRONG_WORKSHOP && status_of(5) == -1);
+        // a resume answering UNCHANGED still withdraws it, and its message says so
+        out.clear();
+        w = run_batch({mk(7, KILN_STATION_RESUME)}, waiting, act, done);
+        CHECK(w.empty() && status_of(5) == KILN_STATION_CANCELED && status_of(7) == KILN_STATION_UNCHANGED);
+        bool noted = false;
+        for (auto& [t, r] : out)
+            if (t == 7) noted = std::strstr(r.message, "not stopped") && std::strstr(r.message, "withdrew");
+        CHECK(noted);
+        // another station's waiting stop is not touched
+        out.clear();
+        std::vector<Req> other{mk(8, KILN_STATION_STOP, KILN_STATION_AFTER_CRAFT)};
+        other[0].r.station = 11;
+        w = run_batch({mk(9, KILN_STATION_RESUME)}, other, act, done);
+        CHECK(w.size() == 1 && w[0].ticket == 8);
+    }
+    // ---- the watch scans at once when the bases were rebuilt ----
+    CHECK(scan_due(false, 5, 0, 32, false));
+    CHECK(!scan_due(true, 40, 20, 32, false));
+    CHECK(scan_due(true, 40, 20, 32, true));
+    CHECK(scan_due(true, 60, 20, 32, false));
+    // ---- a pause and a resume early in a cycle is the same cycle ----
+    {
+        Req q;
+        q.selected0 = 0x5568cc2b;
+        q.start0 = 1'000'000'000;
+        StopSeen s{};
+        s.present = true;
+        s.running = s.selected = 0x5568cc2b;
+        s.state = KILN_STATION_STATE_PAUSED;
+        s.start = q.start0;
+        s.now = 2'000'000'000;  // paused one second in
+        CHECK(waiting_stop_step(&q, s, 10, 1000) == StopWait::Wait);
+        s.state = KILN_STATION_STATE_RUNNING;
+        s.now = 9'000'000'000;
+        s.start = s.now - 1'000'000'000;  // resumed: start = now - the second it had run
+        CHECK(waiting_stop_step(&q, s, 11, 1000) == StopWait::Wait);
+        CHECK(waiting_stop_step(&q, s, 12, 1000) == StopWait::Wait);  // and the steps after
+        StopSeen next = s;
+        next.state = KILN_STATION_STATE_NO_RECIPE;  // it ended
+        CHECK(waiting_stop_step(&q, next, 13, 1000) == StopWait::Write);
     }
 
     // ---- a base's id ----

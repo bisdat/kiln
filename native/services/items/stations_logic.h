@@ -5,6 +5,7 @@
 #pragma once
 #include <algorithm>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <deque>
 #include <vector>
@@ -293,6 +294,7 @@ struct Req {
     int64_t start0 = 0;
     uint32_t selected0 = 0;
     uint64_t waiting_since = 0;
+    uint8_t last_state = 0xff;  // the state seen the step before (a resume from Paused moves the start)
 };
 // Removes the requests of `list` that match and returns them, in order.
 template <class P>
@@ -307,6 +309,91 @@ std::vector<Req> take_if(std::vector<Req>* list, P pred) {
         }
     }
     return out;
+}
+
+inline bool is_deferred_stop(const KilnStationRequest& r) {
+    return r.action == KILN_STATION_STOP && (r.flags & KILN_STATION_AFTER_CRAFT);
+}
+
+inline KilnStationResult result_for(const Req& q) {
+    KilnStationResult r{};
+    r.size = sizeof r;
+    r.action = q.r.action;
+    r.flags = q.r.flags;
+    r.station = q.r.station;
+    r.recipe = q.r.recipe;
+    r.ticket = q.ticket;
+    r.status = KILN_STATION_DONE;
+    return r;
+}
+
+// One step of the program's requests, in order, then the stops that waited from before. act(q, res) runs q (it may
+// change q: a stop's first look) and returns true when q is a stop that still waits; done(q, res) records an answer.
+// A RESUME, SELECT or STOP now withdraws the stops waiting on its station (from before, or earlier in this step) once
+// it has passed its checks (DONE or UNCHANGED), and says so in its message; a second stop after craft on a station
+// with one waiting is UNCHANGED. Returns the stops still waiting, the older first.
+template <class Act, class Done>
+std::vector<Req> run_batch(const std::vector<Req>& batch, std::vector<Req> after, Act act, Done done) {
+    auto on = [](KilnEntity st) { return [st](const Req& x) { return x.r.station == st; }; };
+    std::vector<Req> fresh;  // this step's stops after craft that wait
+    for (Req q : batch) {
+        const KilnEntity st = q.r.station;
+        if (is_deferred_stop(q.r) &&
+            (std::any_of(after.begin(), after.end(), on(st)) || std::any_of(fresh.begin(), fresh.end(), on(st)))) {
+            KilnStationResult res = result_for(q);
+            res.status = KILN_STATION_UNCHANGED;
+            std::snprintf(res.message, sizeof res.message, "a stop after the current craft already waits on station %u", st);
+            done(q, res);
+            continue;
+        }
+        KilnStationResult res = result_for(q);
+        if (act(q, &res)) {
+            fresh.push_back(q);
+            continue;
+        }
+        if (withdraws_waiting(q.r) && (res.status == KILN_STATION_DONE || res.status == KILN_STATION_UNCHANGED)) {
+            uint32_t withdrawn = 0;
+            std::vector<Req> gone = take_if(&after, on(st));
+            for (const Req& w : take_if(&fresh, on(st))) gone.push_back(w);
+            for (const Req& w : gone) {
+                KilnStationResult c = result_for(w);
+                c.status = KILN_STATION_CANCELED;
+                std::snprintf(c.message, sizeof c.message, "withdrawn by a later action on the station: nothing written");
+                done(w, c);
+                ++withdrawn;
+            }
+            if (withdrawn) {
+                const size_t n = std::strlen(res.message);
+                std::snprintf(res.message + n, sizeof res.message - n, "%swithdrew the stop that waited for the cycle's end",
+                              n ? "; " : "");
+            }
+        }
+        done(q, res);
+    }
+    std::vector<Req> waiting;
+    for (Req q : after) {
+        KilnStationResult res = result_for(q);
+        if (act(q, &res)) waiting.push_back(q);
+        else done(q, res);
+    }
+    waiting.insert(waiting.end(), fresh.begin(), fresh.end());
+    return waiting;
+}
+
+// The watch's station scan: the first, every kScanEvery steps, and at once after the bases were rebuilt (a station's
+// base index changes with them).
+inline bool scan_due(bool scanned, uint64_t step, uint64_t last_scan, uint64_t every, bool bases_changed) {
+    return !scanned || bases_changed || step - last_scan >= every;
+}
+
+// A waiting stop's look at its station this step (updates what it remembers).
+inline StopWait waiting_stop_step(Req* q, const StopSeen& s, uint64_t waited, uint64_t max_steps) {
+    // Paused -> Running is the same cycle resuming: the game moved its start (now - what it had run); a new cycle
+    // follows a state with no cycle in progress, which this stop answers first (Write)
+    if (s.present && q->last_state == KILN_STATION_STATE_PAUSED && s.state == KILN_STATION_STATE_RUNNING) q->start0 = s.start;
+    const StopWait w = waiting_stop(s, q->selected0, q->start0, waited, max_steps);
+    q->last_state = s.state;
+    return w;
 }
 
 // ---- a base's id ----
