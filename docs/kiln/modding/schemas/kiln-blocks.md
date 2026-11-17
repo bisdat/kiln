@@ -56,7 +56,7 @@ A mod's blocks: spells, weapons, wands, armor, items, stations, statuses, effect
 | `props` | object |  | Things placed that stand there: furniture, banners, lamps. |
 | `quests` | object |  | Quest chains in the game's own journal: steps, objectives, conditions, rewards. Needs "clients": "mod". |
 | `recipes` | object |  | Recipes of their own: one more way to make any item at a station, such as a game item at the game's workbench. |
-| `resourcePatches` | object |  | Fields of the game's own resources, set before the game reads them (a mod with "boot": true; docs/kiln/modding/resource-patches.md). Not blocks: kiln.content applies them. |
+| `resourcePatches` | object |  | Changes to the game's own resources, made before the game reads them: fields, a template's components, a list's length (a mod with "boot": true; docs/kiln/modding/resource-patches.md). Not blocks: kiln.content applies them. |
 | `rules` | object |  | Rules, for behaviours to name. |
 | `screenEffects` | object |  | Full-screen effects: colour grading, a tint, a vignette, fades and flashes. Drawn by each Kiln client; players' games need nothing for them. |
 | `seats` | object |  | Seats: the game's sitting, comfort of the chair category. |
@@ -1356,14 +1356,17 @@ What it takes to use it. item, count, uses and time are the game's own lock, sho
 
 ## resourcePatch
 
-One resource and the fields to set in it.
+One resource and what to change in it: fields to set, a template's components, values added to a list. At least one of set, append, addComponents, removeComponents. A patch is applied whole or not at all.
 
 | Key | Type | Required | Notes |
 |---|---|---|---|
+| `addComponents` | array of string |  | Components of the game's types a template gets, zeroed ("PickupItemZone"); one it has already stays. Made after removeComponents; set then fills them in ("PickupItemZone.lastAttempt.value"). min items 1 |
+| `append` | object |  | List path to the values added at its end: a list of numbers, bools or enum members. Made after the components, before set. |
 | `format` | `1` |  |  |
 | `part` | integer |  | The part index; 0 when left out. min 0 |
+| `removeComponents` | array of string |  | A template's (keen::ecs::TemplateResource) components to take out, by type name ("SpawnTime"); one it has not got is skipped. Made first. CurrentTransform, and what an actor needs to live, are refused. min items 1 |
 | `resource` | string | yes | The resource's GUID. |
-| `set` | object | yes | Member path to value. A path: members by name, [i] an element of a list, [*] every element. |
+| `set` | object |  | Member path to value. A path: members by name, [i] an element of a list, [*] every element. |
 | `type` | string | yes | The resource's qualified type name, as keen::BalancingTable. min length 1 |
 
 ## rule
