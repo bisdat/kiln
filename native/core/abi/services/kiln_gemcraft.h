@@ -153,8 +153,9 @@ enum {
     KILN_GEMCRAFT_HAS_SOURCES = 0x0002u, /* offer / withdraw / sources run, and the handler hook takes offered gems */
 };
 
-/* One offered gem (gem sources, 0.2.0-dev.29.15). The caller fills player .. lifetime_steps; offer() fills token and
- * expires_step. The offer is the caller's decision that `player` may use the gem in `holder` at a forge: Kiln checks
+/* One offered gem (gem sources, 0.2.0-dev.29.15). The caller fills player .. lifetime_ms; offer() fills token and
+ * expires_ms. The offer belongs to the player's current session (kiln.players' handle): when the player leaves, a later
+ * player in the same slot (the same entity id) cannot use it. The offer is the caller's decision that `player` may use the gem in `holder` at a forge: Kiln checks
  * that the slot is one of holder's pages and still holds this gem entity, item and level when the player acts. */
 typedef struct KilnGemSource {
     uint32_t size;           /* sizeof(KilnGemSource) */
@@ -167,11 +168,11 @@ typedef struct KilnGemSource {
     uint32_t pay_from;       /* KILN_GEM_PAY_* for actions on it (Slot, Upgrade) */
     KilnEntity pay_holder;   /* KILN_GEM_PAY_HOLDER: the container that pays */
     KilnEntity return_to;    /* where Recycle's essence goes: 0 = the player */
-    uint32_t lifetime_steps; /* 1..3000 (about 2 minutes on a dedicated server) */
+    uint32_t lifetime_ms;    /* 1..120000, real time */
     uint32_t rarity;         /* its rarity byte (what the client draws) */
     uint32_t reserved;       /* 0 */
     uint64_t token;          /* out: Kiln's random, unguessable token (never 0) */
-    uint64_t expires_step;   /* out: the last sim step it is good for */
+    uint64_t expires_ms;     /* out: GetTickCount64 milliseconds after which it is gone */
 } KilnGemSource;
 
 /* One action: what a held action would do (held: before the game runs it), or what one that ran did (crafted, and a
@@ -265,6 +266,11 @@ typedef struct KilnGemcraftApi {
      * in, with the CanAccessInventories right). KILN_ERR_BUFFER_TOO_SMALL: *out_count = how many. Tick thread. */
     KilnResult(KILN_CALL* payers)(KilnEntity player, uint32_t pay_from, KilnEntity pay_holder, KilnEntity* out, uint32_t capacity,
                                   uint32_t* out_count);
+    /* The forge's own upgrade material (ShroudForge.upgradeMaterial), what payers other than the player pay in. KILN_OK:
+     * *out_item is it. KILN_ERR_NOT_FOUND: not known yet; the gem program reads it in a coming step (while a player is in
+     * the world): ask again. KILN_ERR_INVALID_ARGUMENT: `forge` is no Shroud Forge (or its template is unreadable). Tick
+     * thread. */
+    KilnResult(KILN_CALL* forge_material)(KilnEntity forge, uint32_t* out_item);
 } KilnGemcraftApi;
 
 #ifdef __cplusplus

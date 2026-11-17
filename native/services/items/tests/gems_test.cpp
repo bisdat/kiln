@@ -594,37 +594,39 @@ KilnGemSource src(uint32_t player, uint32_t page, uint32_t index, uint32_t gem) 
     s.gem = gem;
     s.item = 0x1234;
     s.level = 3;
-    s.lifetime_steps = 100;
+    s.lifetime_ms = 100;
     return s;
 }
 
 void sources() {
     uint64_t next = 0x1000;
     auto rng = [&] { return next++; };
+    // the session each player is in now (kiln.players' handle); 0x41 for everyone but player 9, who is not in game
+    auto sess = [](uint32_t player) { return player == 9 ? kNoSession : 0x41u; };
     SourceBook b;
     const char* why = "";
     KilnGemSource a[2] = {src(1, 5001, 2, 900), src(1, 5001, 3, 901)};
-    check(!b.used() && b.offer(7, a, 2, 50, rng, &why) && b.used(), "sources: an offer of two gems is taken; the book is in use");
-    check(a[0].token == 0x1000 && a[1].token == 0x1001 && a[0].expires_step == 150, "sources: each gets a token and its expiry");
-    const SourceEntry* e = b.find(1, KILN_SLOT_ID(5001, 2), 120);
+    check(!b.used() && b.offer(7, a, 2, 50, sess, rng, &why) && b.used(), "sources: an offer of two gems is taken; the book is in use");
+    check(a[0].token == 0x1000 && a[1].token == 0x1001 && a[0].expires_ms == 150, "sources: each gets a token and its expiry (milliseconds, real time)");
+    const SourceEntry* e = b.find(1, KILN_SLOT_ID(5001, 2), 120, 0x41);
     check(e && e->s.gem == 900 && e->owner == 7, "sources: the player's request naming the slot finds its offer");
-    check(!b.find(2, KILN_SLOT_ID(5001, 2), 120), "sources: another player naming the same slot finds nothing (forged)");
-    check(!b.find(1, KILN_SLOT_ID(5001, 4), 120), "sources: a slot never offered finds nothing (forged)");
-    check(!b.find(1, KILN_SLOT_ID(5001, 2), 151), "sources: an expired offer finds nothing (stale)");
+    check(!b.find(2, KILN_SLOT_ID(5001, 2), 120, 0x41), "sources: another player naming the same slot finds nothing (forged)");
+    check(!b.find(1, KILN_SLOT_ID(5001, 4), 120, 0x41), "sources: a slot never offered finds nothing (forged)");
+    check(!b.find(1, KILN_SLOT_ID(5001, 2), 151, 0x41), "sources: an expired offer finds nothing (stale)");
     check(b.names_page(1, 5001) && !b.names_page(1, 5002) && !b.names_page(2, 5001), "sources: the pages offered to a player are known");
     check(foreign_verdict(KILN_GEM_ACTION_SLOT, e) == Foreign::Offered && foreign_verdict(KILN_GEM_ACTION_UPGRADE, e) == Foreign::Offered &&
               foreign_verdict(KILN_GEM_ACTION_RECYCLE, e) == Foreign::Offered, "sources: Insert, Upgrade and Recycle may use an offer");
     check(foreign_verdict(KILN_GEM_ACTION_UNSLOT, e) == Foreign::Refuse && foreign_verdict(KILN_GEM_ACTION_SLOT, nullptr) == Foreign::Refuse,
           "sources: an Unslot naming a foreign slot, or no offer, is refused");
     const uint64_t t = e->s.token;
-    check(b.take(t) && !b.find(1, KILN_SLOT_ID(5001, 2), 120) && !b.take(t), "sources: an offer is used once (a duplicate request finds nothing)");
+    check(b.take(t) && !b.find(1, KILN_SLOT_ID(5001, 2), 120, 0x41) && !b.take(t), "sources: an offer is used once (a duplicate request finds nothing)");
     // a newer offer of the same slot replaces the old one, with a new token
     KilnGemSource again = src(1, 5001, 3, 901);
-    check(b.offer(7, &again, 1, 60, rng, &why) && b.size() == 1 && again.token != a[1].token &&
-              b.find(1, KILN_SLOT_ID(5001, 3), 61)->s.token == again.token, "sources: offering a slot again replaces its offer and token");
+    check(b.offer(7, &again, 1, 60, sess, rng, &why) && b.size() == 1 && again.token != a[1].token &&
+              b.find(1, KILN_SLOT_ID(5001, 3), 61, 0x41)->s.token == again.token, "sources: offering a slot again replaces its offer and token");
     // all or nothing
     KilnGemSource bad[2] = {src(1, 5001, 5, 902), src(1, 5001, 6, 0)};
-    check(!b.offer(7, bad, 2, 60, rng, &why) && b.size() == 1, "sources: one bad entry refuses the whole offer");
+    check(!b.offer(7, bad, 2, 60, sess, rng, &why) && b.size() == 1, "sources: one bad entry refuses the whole offer");
     KilnGemSource s = src(1, 5001, 1, 903);
     s.holder = 1;
     check(!source_valid(s), "sources: the player as the holder is refused (a container only)");
@@ -632,8 +634,8 @@ void sources() {
     s.slot = KILN_SLOT_ID(5001, 8);
     check(!source_valid(s), "sources: slot index 8 is refused");
     s = src(1, 5001, 1, 903);
-    s.lifetime_steps = kMaxSourceLifetime + 1;
-    check(!source_valid(s), "sources: a lifetime over 3000 steps is refused");
+    s.lifetime_ms = kMaxSourceLifetimeMs + 1;
+    check(!source_valid(s), "sources: a lifetime over 120 s is refused");
     s = src(1, 5001, 1, 903);
     s.pay_from = KILN_GEM_PAY_HOLDER;
     check(!source_valid(s), "sources: KILN_GEM_PAY_HOLDER needs its container");
@@ -642,30 +644,46 @@ void sources() {
     // limits
     std::vector<KilnGemSource> many;
     for (uint32_t i = 0; i < kMaxSourcesPerPlayer + 1; ++i) many.push_back(src(3, 6000 + i / 8, i % 8, 2000 + i));
-    check(!b.offer(7, many.data(), static_cast<uint32_t>(many.size()), 60, rng, &why), "sources: more than 256 live offers to one player are refused");
-    check(b.offer(7, many.data(), kMaxSourcesPerPlayer, 60, rng, &why), "sources: 256 to one player are fine");
+    check(!b.offer(7, many.data(), static_cast<uint32_t>(many.size()), 60, sess, rng, &why), "sources: more than 256 live offers to one player are refused");
+    check(b.offer(7, many.data(), kMaxSourcesPerPlayer, 60, sess, rng, &why), "sources: 256 to one player are fine");
     // a broken generator (always 0 or repeating): no offer without a fresh token
     SourceBook z;
     auto zero = [] { return uint64_t{0}; };
     KilnGemSource zs = src(1, 5001, 1, 904);
-    check(!z.offer(7, &zs, 1, 60, zero, &why), "sources: a generator that only gives 0 offers nothing");
+    check(!z.offer(7, &zs, 1, 60, sess, zero, &why), "sources: a generator that only gives 0 offers nothing");
     // withdraw, owners, expiry
     KilnGemSource o8 = src(1, 7001, 0, 905);
-    b.offer(8, &o8, 1, 60, rng, &why);
-    check(b.withdraw(7, 3, 0) == kMaxSourcesPerPlayer && b.find(1, KILN_SLOT_ID(7001, 0), 61), "sources: withdraw takes one owner's offers to one player");
+    b.offer(8, &o8, 1, 60, sess, rng, &why);
+    check(b.withdraw(7, 3, 0) == kMaxSourcesPerPlayer && b.find(1, KILN_SLOT_ID(7001, 0), 61, 0x41), "sources: withdraw takes one owner's offers to one player");
     b.drop_owner(8);
-    check(!b.find(1, KILN_SLOT_ID(7001, 0), 61), "sources: a mod's offers go with the mod");
+    check(!b.find(1, KILN_SLOT_ID(7001, 0), 61, 0x41), "sources: a mod's offers go with the mod");
     KilnGemSource o9 = src(4, 7002, 0, 906), o10 = src(4, 7002, 1, 907);
-    b.offer(9, &o9, 1, 60, rng, &why);
-    b.offer(10, &o10, 1, 60, rng, &why);
+    b.offer(9, &o9, 1, 60, sess, rng, &why);
+    b.offer(10, &o10, 1, 60, sess, rng, &why);
     check(b.withdraw(0, 4, 0) == 2, "sources: owner 0 withdraws every owner's offers to a player (the forge closed)");
     b.expire(60 + 100 + 10, 5);
     check(b.size() == 0, "sources: offers past their expiry (and the grace) are dropped");
-    uint32_t live = b.live_for(1, 0, [](const KilnGemSource&) {});
+    uint32_t live = b.live_for(1, 0, 0x41, [](const KilnGemSource&) {});
     check(live == 0 && b.used(), "sources: an empty book stays in use for the world (forged requests stay refused)");
     b.clear();
     check(!b.used(), "sources: a new world starts unused");
 
+    // review 2026-11-17: an offer belongs to the player's session (the entity id is the player slot + 1: another player
+    // can get it within the offer's lifetime)
+    SourceBook sb;
+    KilnGemSource mine = src(2, 5100, 0, 950);
+    check(sb.offer(7, &mine, 1, 50, sess, rng, &why), "sessions: an offer to a player in game");
+    check(sb.find(2, KILN_SLOT_ID(5100, 0), 60, 0x41) != nullptr, "sessions: the same session finds it");
+    check(sb.find(2, KILN_SLOT_ID(5100, 0), 60, 0x42) == nullptr, "sessions: a new session on the same entity finds nothing (the player left, another joined)");
+    check(sb.find(2, KILN_SLOT_ID(5100, 0), 60, kNoSession) == nullptr, "sessions: nobody in game on the entity finds nothing");
+    KilnGemSource gone = src(9, 5100, 1, 951);
+    check(!sb.offer(7, &gone, 1, 50, sess, rng, &why) && sb.size() == 1, "sessions: an offer to a player not in game is refused");
+    KilnGemSource other = src(3, 5100, 2, 952);
+    sb.offer(8, &other, 1, 50, sess, rng, &why);
+    check(sb.live_for(2, 60, 0x41, [](const KilnGemSource&) {}) == 1 && sb.live_for(2, 60, 0x42, [](const KilnGemSource&) {}) == 0,
+          "sessions: a player's live offers are those of the session now");
+    check(sb.drop_player(2) == 1 && sb.find(3, KILN_SLOT_ID(5100, 2), 60, 0x41) != nullptr && sb.size() == 1,
+          "sessions: a player who left loses every owner's offers, nobody else's");
     // own or foreign: the player's pages, a socket of the player's carrier
     const std::vector<uint32_t> pages{2, 6590, 6591, 6576};
     check(own_gem_slot(KILN_SLOT_ID(6591, 4), 0, false, pages), "foreign: a slot of the player's page is the player's own");
@@ -674,6 +692,19 @@ void sources() {
     check(own_gem_slot(KILN_SLOT_ID(2001, 0), 2001, true, pages), "foreign: the socket of a carrier in the player's pages is the player's own");
     check(!own_gem_slot(KILN_SLOT_ID(2001, 0), 2001, false, pages), "foreign: the socket of a carrier elsewhere (a chest's weapon) is not");
     check(own_gem_slot(0, 2001, false, pages), "foreign: no slot (Unslot) is judged by the carrier, not here");
+    // review 2026-11-17: once offers are in use the carrier is judged too (a chest's weapon never takes a player's request)
+    Ownership o = ownership(0, 2001, false, pages);
+    check(o.foreign && o.foreign_carrier, "foreign: Unslot of a carrier outside the player's pages is foreign (the carrier)");
+    o = ownership(KILN_SLOT_ID(6591, 4), 2001, false, pages);
+    check(o.foreign && o.foreign_carrier, "foreign: the player's own gem into a carrier outside the player's pages is foreign");
+    o = ownership(KILN_SLOT_ID(5001, 2), 2001, true, pages);
+    check(o.foreign && !o.foreign_carrier, "foreign: a chest's gem into the player's own carrier is foreign by the gem only (an offer may run it)");
+    o = ownership(KILN_SLOT_ID(6591, 4), 2001, true, pages);
+    check(!o.foreign && !o.foreign_carrier, "foreign: the player's own gem and carrier are the player's own");
+    o = ownership(KILN_SLOT_ID(2001, 0), 2001, true, pages);
+    check(!o.foreign, "foreign: the socketed gem of the player's own (worn) carrier is the player's own (Upgrade, Recycle)");
+    o = ownership(KILN_SLOT_ID(6591, 4), 0, false, pages);
+    check(!o.foreign, "foreign: no carrier named (a loose gem's Upgrade or Recycle) is judged by the gem");
 }
 
 int main() {
