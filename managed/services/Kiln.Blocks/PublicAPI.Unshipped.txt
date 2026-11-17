@@ -16,7 +16,6 @@ override Kiln.ResourceListReplace.GetHashCode() -> int
 override Kiln.ResourceListReplace.ToString() -> string!
 static Kiln.ResourceListReplace.operator !=(Kiln.ResourceListReplace? left, Kiln.ResourceListReplace? right) -> bool
 static Kiln.ResourceListReplace.operator ==(Kiln.ResourceListReplace? left, Kiln.ResourceListReplace? right) -> bool
-||||||| 9a5e69bb
 const Kiln.Stations.OutputSourcesCapability = "stations.output_sources" -> string!
 static Kiln.Stations.SetOutputSource(Kiln.EntityId station, bool on = true) -> bool
 static Kiln.Stations.IsOutputSource(Kiln.EntityId station) -> bool
