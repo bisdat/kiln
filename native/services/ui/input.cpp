@@ -617,8 +617,19 @@ LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
         case WM_CHAR:
         case WM_SYSCHAR:
         case WM_UNICHAR:
+#ifdef KILN_CHAT_HISTORY_ENABLED
+            // Keyboard/IME text is a real manual edit, unlike transient
+            // differences in the game's native widget buffer after SetText.
+            if (!cap && (m != WM_UNICHAR || w != UNICODE_NOCHAR))
+                chat_input_text_edited();
+#endif
             enqueue(h, m, w, l);
             if (cap) return 0;
+            break;
+        case WM_PASTE:
+#ifdef KILN_CHAT_HISTORY_ENABLED
+            if (!cap) chat_input_text_edited();
+#endif
             break;
         case WM_SETFOCUS:
             if (fed) feed_focus_gained();
