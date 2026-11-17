@@ -114,6 +114,7 @@ public sealed class ModContext
         GameLog = new GameLogEvents();
         Scheduler = new Scheduler(this);
         Messages = new ModMessages(this);
+        Tasks = new KilnTasks(this);
     }
 
     public ModInfo Info { get; }
@@ -130,6 +131,10 @@ public sealed class ModContext
 
     /// <summary>Inter-mod messages sent to this mod with <see cref="Mods.Send"/> (Forge's InterModComms).</summary>
     public ModMessages Messages { get; }
+
+    /// <summary>Run heavy work off the tick, on Kiln's own worker threads, attributed to this mod
+    /// (<see cref="KilnTasks"/>).</summary>
+    public KilnTasks Tasks { get; }
 
     /// <summary>Per-mod persistent directory (<c>kiln/data/&lt;id&gt;</c>), created on first use.</summary>
     public string DataDirectory { get; }
