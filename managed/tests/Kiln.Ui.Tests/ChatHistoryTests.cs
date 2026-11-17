@@ -29,10 +29,10 @@ public sealed class ChatHistoryTests : IDisposable
         Assert.Equal("/tp home", h.Older("/time"));
         Assert.Equal("/help", h.Older("/tp home"));
         Assert.Equal("/help", h.Older("/help")); // bounded at the oldest
-        Assert.Equal("/tp home", h.Newer());
-        Assert.Equal("/time", h.Newer());
-        Assert.Equal("/give me something", h.Newer());
-        Assert.Equal("/give me something", h.Newer()); // no more history browsing
+        Assert.Equal("/tp home", h.Newer("/help"));
+        Assert.Equal("/time", h.Newer("/tp home"));
+        Assert.Equal("/give me something", h.Newer("/give me something"));
+        Assert.Equal("/give me something", h.Newer("/give me something")); // no more history browsing
     }
 
     [Fact]
@@ -44,7 +44,7 @@ public sealed class ChatHistoryTests : IDisposable
         Assert.Equal("/b", h.Older("/draft"));
         h.Edited();
         Assert.Equal("/b", h.Older("/different"));
-        Assert.Equal("/different", h.Newer());
+        Assert.Equal("/different", h.Newer("/b"));
     }
 
     [Fact]
@@ -170,6 +170,6 @@ public sealed class ChatHistoryTests : IDisposable
         var h = new ChatHistory(Pathname);
         h.Submit("/help"); // Save cannot replace a directory, and may not throw into the game
         Assert.Equal("/help", h.Older("draft"));
-        Assert.Equal("draft", h.Newer());
+        Assert.Equal("draft", h.Newer("/help"));
     }
 }
