@@ -3,8 +3,8 @@
 Enshrouded's gems for mods, in one guide: what a gem is in the game, how to change one with a data pack, the `Gems`
 API in C# (the catalog, the gems a player's equipment runs, sockets, gem events), new gems with their own effects, the
 Shroud Forge's actions from code, and sockets on rings, armour and shields. Three parts have a page of their own for the
-details; this page says what each part is and how they fit together. Research and evidence:
-`/mnt/Dongus/kiln-wave/dev29/out/gem-system/DOSSIER.md` (the gem system dossier, 2026-11-16).
+details; this page says what each part is and how they fit together. The game-side evidence for the forge (its
+handler, layouts, signatures) is in [docs/re/gems-forge.md](../../re/gems-forge.md).
 
 | Part | Where | API | Row |
 |---|---|---|---|

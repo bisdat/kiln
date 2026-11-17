@@ -493,7 +493,7 @@ in `kiln/chain/`. It then loads, and kiln-eml stands aside, as verified on a lab
 
 ### Modified EML loaders (a dbghelp.dll with code of its own)
 Some mods ship EML's `dbghelp.dll` rebuilt with code of their own. The first known one is "Put Away Your Weapon"
-(Nexus 371, EML mod `holster-toggle`, player report 2026-11-17, analysis in `dev29/out/holster/REPORT.md`): EML's
+(Nexus 371, EML mod `holster-toggle`, player report 2026-11-17; Kiln's analysis of its loader binary): EML's
 `mod-loader-runtime` crate, a stub in EML 0.2.0, grew a `native` layer. With `m182_native.json` next to the game
 (`enabled`, `holster`, `holster_key`, `pvp`, `pvp_friend_checks`) it starts a thread that, on the holster key (default
 F9, the shipped file sets 20 = Caps Lock), finds the weapon poses the mod's Lua part marked in the game data in the
