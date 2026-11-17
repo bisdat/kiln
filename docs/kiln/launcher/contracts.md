@@ -119,6 +119,7 @@ Root: `$KILN_DATA_DIR`, else the folder the pointer `data-folder.json` in the de
 | `profiles/<pid>/meta.json` | the profile definition (`kiln_manage::profile::Profile`; dev.21 adds `late`: native mod ids whose dllmain DLLs go to chain.ini `[late]`, left out when empty; dev.22 adds `dropinsEngines: true`: `dropins` names the engine kinds too, profiles.md "Drop-in folders") |
 | `profiles/<pid>/config/` | the profile's mod configs (its `configDir`), with `.schema/`, `native.json` and the player's `compat-rules.json` |
 | `profiles/<pid>/data/` | per-mod data when the profile chooses `dataDir: profile` |
+| `profiles/<pid>/config-sync/<installId>.json` | (0.2.0-dev.29.16) copy mode: the game's config copy of the profile as Kiln last left it (`kiln_manage::profile::config_sync_record`): `{format: 1, files: {"<path below config/, '/'-separated>": {sha256, size, mtimeNs}}}`, written after every copy into the game and every copy back (section 6). The hash decides; size and time are for a reader. Safe to delete: the next copy back then decides by time |
 | `profiles/<pid>/save-backups/<yyyymmddThhmmssZ>/` | automatic save backups, 10 kept (+ `backup.json`) |
 | `installs/<installId>.json` | the launcher's record of a game install: the `GameInstall` + a copy of its receipt |
 | `installs/<installId>.notices-seen.json` | (dev.26) which activation notices the player has closed in the launcher for that game: `{format: 1, seen: [sha256 hex of each sentence]}`, oldest first, at most 512 (`kiln_manage::notices`, `notices_shown`; written through a temp file of its own random name) |
@@ -1020,6 +1021,18 @@ All additive, appended to v1 tables (check `header.size`). Docs: `docs/kiln/netw
   (verified by kdh1 after the copy; unchanged copies are kept), the profile's config dir to
   `<game>/kiln/profiles/<pid>/config/` (copied back to `<data>/profiles/<pid>/config/` before the next activation and
   after the game exits), and writes relative paths (`profiles/<pid>/kiln/<id>`), resolved against `<game>/kiln/`.
+  The copy back goes file by file against `<data>/profiles/<pid>/config-sync/<installId>.json` (section 1), what the
+  game's copy held when Kiln last copied it in or back (0.2.0-dev.29.16; before, the game's copy overwrote every file,
+  so a Configs edit in the launcher was lost at the next activation, a mod update for one): a file the game changed or
+  created comes back; one only the data folder changed (a launcher edit) stays and goes in at the activation; one both
+  changed keeps the newer by modification time (the data folder's on a tie) and the other is saved beside it in the
+  data folder as `<name>.conflict-<yyyymmddThhmmssZ>` (`-2`, ... when taken), with a sentence in the activation's
+  `warnings` (in the launcher's log for the copy back after the game exits). A file missing from the game's copy is
+  never deleted from the data folder; one deleted from the data folder (a whole-file reset) stays deleted while the
+  game's copy of it is unchanged. Without a record (the first copy back after the update, an unreadable record) or
+  without the profile's `config/` in the data folder, every file the two hold differently is such a conflict, and a
+  file only one holds is kept. The profile's native switches are written into the data folder's `native.json` before
+  the copy in, so both copies are the same afterwards.
   The only paths that leave `<game>/kiln/`: an EML mod a native DLL reads in the game's mods folder and an XHL
   companion as `../mods/<folder>`, an enabled Greeneye mod Kiln placed as `../greeneye/<id>`, an enabled Flame mod Kiln
   placed as `../mods/<id>`, each one folder name under the rule of `schema/fixtures/profile/game-folder-names.json`.
