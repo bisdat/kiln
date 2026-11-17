@@ -16,6 +16,7 @@
 
 #include "nlohmann/json.hpp"
 #include "chat_history.h"
+#include "chat_focus.h"
 #include "chat_keys.h"
 #include "kiln_hook.hpp"
 #include "ui.h"
@@ -39,6 +40,7 @@ std::atomic<bool> g_manual_text_edit{false};
 std::atomic<bool> g_window_blurred{false};
 chat_keys::Router g_keys;
 chat_history::History g_history;
+chat_focus::Grace g_focus_grace;
 std::filesystem::path g_history_file;
 // UI-thread-only.
 bool g_editing_in_frame = false;
@@ -308,6 +310,13 @@ void history_after(void* widget, void* result, bool hud) {
                 logf(KILN_LOG_INFO, "ui: chat history trace: submit processed entries=%zu added=%u persisted=%u",
                      g_history.count(), g_history.count() != before ? 1u : 0u, persisted_changed ? 1u : 0u);
         }
+        // Enter/escape end the active browse session even if focus briefly
+        // lingers while the native widget finishes closing.
+        if (event == 1 || event == 2) {
+            if (event == 2) g_history.edited(); // Enter already calls Submit.
+            g_manual_text_edit.store(false, std::memory_order_release);
+            g_keys.focus(false);
+        }
         g_last_applied.clear();
         return;
     }
@@ -373,11 +382,20 @@ void chat_input_window_blur() {
 void chat_input_frame_end() {
     if (!g_history_on.load(std::memory_order_acquire) && !g_diagnose_on.load(std::memory_order_acquire)) return;
     const bool active = g_editing_in_frame && !g_window_blurred.exchange(false);
+    // Never swallow gameplay arrows when the native chat edit lacks focus.
     g_keys.focus(active);
-    if (!active && g_was_editing) {
+    // A single game UI frame may temporarily fail to render either chat
+    // control during a transition. That must not erase the saved draft.
+    // Exit events explicitly reset the session above; for a real close or
+    // a missing editor, forget the cursor only after sustained absence.
+    const bool focus_expired = g_focus_grace.frame(active);
+    if (focus_expired) {
+        const bool was_browsing = g_history.browsing();
         g_history.edited();
         g_last_applied.clear();
         g_manual_text_edit.store(false, std::memory_order_release);
+        if (was_browsing && g_trace_on.load(std::memory_order_relaxed))
+            logf(KILN_LOG_INFO, "ui: chat history trace: navigation reset after sustained loss of chat focus");
     }
     g_was_editing = active;
     g_editing_in_frame = false;
