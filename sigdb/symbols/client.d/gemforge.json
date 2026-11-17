@@ -1,7 +1,7 @@
 {
   "format": 1,
   "side": "client",
-  "comment": "Read-only GEMS snapshot. Measured client 26430625 SHA-256 5d9ef2f140b8ed49e30dbee655841b89d08baec20f799a1817e171a18a850c77 only. All patterns unique; scoped call edges, screen 45 switch and Win64 ABI are checked. No chest extension.",
+  "comment": "Read-only GEMS snapshot. Measured client 26430625 SHA-256 5d9ef2f140b8ed49e30dbee655841b89d08baec20f799a1817e171a18a850c77 only. All patterns unique; scoped call edges, screen 45 switch and Win64 ABI are checked. No chest extension. ui.gemforge.sources (0.2.0-dev.29.15): the selected-row resolve, the action panel and its two price tests, where Kiln's hooks list a server's offered chest gems in the GEMS grid.",
   "symbols": {
     "ui/GemForgeMenu": {
       "find": [
@@ -156,6 +156,57 @@
           }
         }
       ]
+    },
+    "ui/GemForgeSelectResolve": {
+      "comment": "ui.gemforge.sources (0.2.0-dev.29.15, GitHub issue 61): in ui/GemForgeMenu, the end of the loop that resolves the selected row's InventorySlotId (state+0x10) in the local model's main views (+0x2d8/+0x2e0) into the frame's selected view at rbp-0x20 (item at rbp-0x18); found or not, both paths meet at this mov rax,[UiApp]. Client 26430625 0xcacfa4. Kiln's mid hook fills the selected view for a chest gem the server offered (a key the model does not hold) and sets rcx to its item, as the found path does",
+      "find": [
+        {
+          "scope": {
+            "symbol": "ui/GemForgeMenu",
+            "size": 8192
+          },
+          "pattern": "4C 8B 8B E0 02 00 00 4C 8B C6 48 8B 47 10 48 89 85 ?? ?? 00 00 4D 85 C9 74 ?? 48 8B 93 D8 02 00 00 44 0F B6 95 ?? ?? 00 00 90 39 02 75 06 44 38 52 04 74 0E 49 FF C0 48 83 C2 48 4D 3B C1 72 EA EB 2C 0F 10 02 0F 29 45 E0 0F 10 4A 10 8B 4D E8 0F 29 4D F0 0F 10 42 20 0F 29 45 00 0F 10 4A 30 0F 29 4D 10 F2 0F 10 42 40 F2 0F 11 45 20 48 8B 05 {ui/UiApp:rel32} 48 8B 90 D0 00 00 00",
+          "offset": 110
+        }
+      ]
+    },
+    "@ui/GemForgeActions.call": {
+      "comment": "ui.gemforge.sources: the call of the forge's action panel ui/GemForgeActions void(state = rcx, entries = rdx, ... , selectedView = r9 = rbp-0x20, ...), called by ui/GemForgeMenu right after the selected-view resolve. Client 0xd23f90. It prices the selected action and tests whether the player's own pages hold the material (the button's enabled state)",
+      "find": [
+        {
+          "scope": {
+            "symbol": "ui/GemForgeMenu",
+            "size": 8192
+          },
+          "pattern": "88 54 24 20 4C 8D 4D E0 48 8D 95 98 0C 00 00 40 88 B5 18 11 00 00 4C 8D 85 68 01 00 00 48 8B CF E8 {ui/GemForgeActions:rel32} 48 8B 5F 08"
+        }
+      ]
+    },
+    "ui/GemForgeAffordSlot": {
+      "comment": "ui.gemforge.sources: in ui/GemForgeActions, the Insert price test `cmp esi, r15d; setae [rsp+0x51]` after the loop that sums the material (r10d) over the player's Generic views (esi = have, r15d = cost, r13 = state). Client 0xd243dc. Kiln's mid hook adds what the offer's payers hold for a chest gem the server offered with another payer: picture only, the server pays from them or refuses",
+      "find": [
+        {
+          "scope": {
+            "symbol": "ui/GemForgeActions",
+            "size": 2400
+          },
+          "pattern": "45 39 54 D1 08 75 05 41 03 74 D1 10 48 83 C1 04 49 83 E8 01 75 E4 41 3B F7 0F 93 44 24 51",
+          "offset": 22
+        }
+      ]
+    },
+    "ui/GemForgeAffordUpgrade": {
+      "comment": "ui.gemforge.sources: in ui/GemForgeActions, the Upgrade test `cmp r12d, [r14+8]; jae; cmp esi, r15d; jb` (level below the forge's maximum, have >= cost) after the same material sum. Client 0xd246cc. Same mid hook as ui/GemForgeAffordSlot",
+      "find": [
+        {
+          "scope": {
+            "symbol": "ui/GemForgeActions",
+            "size": 2400
+          },
+          "pattern": "45 39 54 D1 08 75 05 41 03 74 D1 10 48 83 C1 04 49 83 E8 01 75 E4 45 3B 66 08 73 09 41 3B F7 72 04",
+          "offset": 22
+        }
+      ]
     }
   },
   "constants": {
@@ -241,6 +292,35 @@
         "ui/view.durabilityMax",
         "ui/view.fuel",
         "ui/view.fuelMax",
+        "ui/view.level",
+        "ui/view.rarity"
+      ]
+    },
+    "ui.gemforge.sources": {
+      "symbols": [
+        "ui/GameUiFrame",
+        "ui/PlayStateUi",
+        "ui/UiApp",
+        "ui/GemForgeMenu",
+        "ui/GemForgeLists",
+        "ui/GemForgeGrid",
+        "ui/GemForgeGemsCall",
+        "ui/GemForgeSelectResolve",
+        "ui/GemForgeActions",
+        "ui/GemForgeAffordSlot",
+        "ui/GemForgeAffordUpgrade",
+        "@ui/GemForgeActions.call"
+      ],
+      "constants": [
+        "ui/gemforge.selected",
+        "ui/gemforge.arrayData",
+        "ui/gemforge.arrayCount",
+        "ui/view.stride",
+        "ui/view.inventoryPage",
+        "ui/view.slotIndex",
+        "ui/view.item",
+        "ui/view.count",
+        "ui/view.pide",
         "ui/view.level",
         "ui/view.rarity"
       ]

@@ -9,6 +9,7 @@
 //   ui_values_slots.cpp    the drawn slots of each completed UI frame (copy_slots, subscribe_slots)
 //   ui_values_gemforge.cpp the copied GEMS candidate list and selection context
 //   ui_values_sockets.cpp  gems.sockets: the Gem Forge lists' category masks widened for sockets on other gear
+//   ui_values_sources.cpp  ui.gemforge.sources: a server's offered chest gems in the GEMS grid
 //   ui_values_lines.cpp    tooltip lines collected at the item detail view, the details window's snapshots
 //   ui_values_service.cpp  the production environment (owners, kiln.caps, sigdb, kiln.hooks, kiln.client, kiln.ui),
 //                          the SEH guards and the service's registration with the core
@@ -170,6 +171,14 @@ void sockets_owner_retired(KilnOwner owner);
 uint32_t sockets_effective();  // the OR over owners without Weapons (the extra bits the hooks add); 0 = vanilla
 uint32_t sockets_seen();       // every extra bit applied in this process: a list built a frame ago may still hold one
 void sockets_reset_for_tests();
+
+// ---- ui.gemforge.sources: a server's offered chest gems in the GEMS grid (ui_values_sources.cpp) ----
+KilnResult sources_set(KilnOwner owner, const KilnUiGemForgeSource* rows, uint32_t count, const KilnUiGemForgePayer* payers,
+                       uint32_t payer_count);
+KilnResult sources_state(KilnUiGemForgeSourcesState* out);
+void sources_owner_retired(KilnOwner owner);
+void sources_reset_for_tests();
+bool gemforge_grid_hooked();  // ui.gemforge.inspect's link is on the GEMS grid (its entry is Kiln's detour now)
 
 // ---- change publication (ui_values_changes.cpp) ----
 bool changes_wanted();  // a change subscriber exists: the chains stage their results
