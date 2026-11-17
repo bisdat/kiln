@@ -228,7 +228,7 @@ export function MainList({ game, mods, running }: { game: GameInstall; mods: Mod
       return [
         ...(f.fix === "dropins" && f.kind ? [{ label: t("mods.list.loadDropins", { kind: KIND_SHORT[f.kind] }), onSelect: () => void fixFound(r) }] : []),
         ...(f.fix === "add" ? [{ label: t("mods.list.addToMyMods"), onSelect: () => void fixFound(r) }] : []),
-        { label: t("mods.list.openFolder"), onSelect: () => api.appOpenPath(`${game.path}/${f.path}`).catch((e) => toast.error(e)) },
+        { label: t("mods.list.openFolder"), onSelect: () => api.appOpenPath(f.path, game.path).catch((e) => toast.error(e)) },
       ];
     }
     const versions = r.lib?.versions ?? [];
