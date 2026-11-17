@@ -195,13 +195,15 @@ var now = Ui.Crafting.Current;   // CraftingScreen?: AtStation, Workshop (keen::
   Workbench is 0x4da88f73), or the recipes' own workshop (kiln.content). 0 = the player's own crafting menu.
 - **Production stations** (since 0.2.0-dev.29.15): a kiln's, smelter's, loom's or seed bed's screen (`HudScreen.FactoryCrafting`)
   is not the game's crafting menu but a transfer screen ([docs/re/game-ui.md](../re/game-ui.md) section 5), so Kiln's tabs and
-  subcategories never show there. Panels do: `Ui.Crafting.Current` is a `CraftingScreen` with `IsFactory` true, `AtStation`
+  subcategories never show there. A panel shows there when its options ask for it: `new CraftingPanelOptions { AtFactories =
+  true }` (off by default, so a panel written for crafting menus does not appear at a kiln with nothing to show; with no such
+  panel nothing is drawn there at all). `Ui.Crafting.Current` is then a `CraftingScreen` with `IsFactory` true, `AtStation`
   true, `Recipe` 0, `Workshop` the workshop the game keeps for the station in use (its play data, which its crafting code
-  reads as the station's; not yet seen in a game for a factory: it may be 0 or another station's), and `Station` the
-  station's entity (the entity the game's screen is about; the game's replicated ids are the server's, so a mod sends it to
-  its server half, which checks the player is near it before acting). Before 0.2.0-dev.29.15 a panel never showed there.
-  `When = c => c.IsFactory` picks those screens. `Station` is `EntityId.None` on a bench's menu, and on a build where the
-  constant `ui/play.target` does not resolve (kiln.log says so once; the panel still shows).
+  reads as the station's; not yet seen in a game for a factory: **it may be 0 or another station's**, so do not key a factory
+  panel on it alone), and `Station` the station's entity (the entity the game's screen is about, read every frame; the game's
+  replicated ids are the server's, so a mod sends it to its server half, which checks the player is near it before acting).
+  `When = c => c.IsFactory` picks those screens among the ones a panel shows on. `Station` is `EntityId.None` on a bench's
+  menu, and on a build where the constant `ui/play.target` does not resolve (kiln.log says so once; the panel still shows).
 
 ## Values in the game's own UI (dev.28)
 `Ui.Values` replaces what the game itself draws for an item and for the local player: the number and bar of the item
@@ -388,7 +390,7 @@ With `mods/tests/item-icons-check` deployed (`dotnet build mods/tests/item-icons
 2. The names next to them are in the game's language (switch the game to German: `Holzscheite`; the new item:
    `Symbolprüfscheit`); kiln.log's `iconcheck: names (de-de): ...` agrees. Hover an icon: its tooltip names it.
 3. Open a workbench: the **Icon check** panel shows `AtStation True, IsFactory False` and the Workbench's workshop.
-4. Open the charcoal kiln (a production station): the panel shows (it never did before), with `IsFactory True`, `Station`
+4. Open the charcoal kiln (a production station): the panel shows (it never did before; it sets `AtFactories`), with `IsFactory True`, `Station`
    the kiln's entity (in the owner's base the server's id 12205; compare with `/stationcheck show` of stations-client-check),
    and `Workshop` 0x2546ae49 (the kiln's) or 0/another station's (record which: the field is not proven for factories).
 5. Join a Kiln server as a client (or leave and host again): the icons and names still draw; the panel at a kiln still shows.
