@@ -407,10 +407,10 @@ var frost = Ui.Themes.Define("frost", new UiThemeSpec
 var w = Ui.Window("Frost tools", Draw, new UiWindowOptions { Theme = frost });
 var s = Ui.Screen("Frost", Draw, new UiScreenOptions { Theme = frost });
 Ui.Crafting.AddPanel("Frost", DrawPanel, new CraftingPanelOptions { Theme = frost });
-using (ui.Look(frost)) { /* windows begun here */ }
+using (ui.Theme(frost)) { /* windows begun here */ }
 ```
 - **Scope.** A theme applies only where its mod puts it: the mod's own windows, screens and crafting panels (`Theme` in
-  their options), and `ui.Look(theme)` inside its own draw callbacks. After every mod callback Kiln takes off any look the
+  their options), and `ui.Theme(theme)` inside its own draw callbacks. After every mod callback Kiln takes off any look the
   callback left on, so a forgotten `Dispose` never reaches another mod's window or Kiln's. **No call sets the player's
   look**: `OfferToPlayer` only lists the theme; the player picks it (Kiln's menu or kiln.json `ui.look: "theme"`,
   `ui.theme: "<mod id>:<name>"`). Kiln's own UI always uses `UiStyle.Player`.
@@ -427,7 +427,7 @@ using (ui.Look(frost)) { /* windows begun here */ }
 
 ### Fonts
 `Ui.LoadFont(byte[] ttf)` / `Ui.LoadFont(path)` (relative to the mod's folder) loads a TrueType or OpenType font (TTF or
-OTF, CFF outlines too) for the mod's own windows: a theme's `Font`, or `using (ui.Font(font)) { ... }` around some text.
+OTF, CFF outlines too) for the mod's own windows: a theme's `Font`, or `using (ui.ModFont(font)) { ... }` around some text.
 `UiFontFile` is owned by the calling mod (freed when it unloads, or by `Dispose`). It is added to the overlay's font atlas
 at the next frame; until then text keeps the current font.
 - **Budget** (`native/services/ui/font_budget.h`): every font shares ImGui's one font atlas, whose glyphs are made on

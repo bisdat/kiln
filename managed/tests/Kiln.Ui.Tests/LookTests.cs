@@ -274,7 +274,7 @@ public unsafe class LookTests : IDisposable
         var outer = ui.LookDepth;
         ui.PushLookRaw(null, UiStyle.Player);
         var inner = ui.LookDepth;
-        _ = ui.Look(theme);  // a callback that never disposes its scope
+        _ = ui.Theme(theme);  // a callback that never disposes its scope
         _ = ui.Look(UiStyle.Kiln);
         Assert.Equal(3, ui.LookDepth);
         Assert.Equal(3, _pushes);
@@ -292,7 +292,7 @@ public unsafe class LookTests : IDisposable
         ui.RestoreLooks(0);
         // a disposed theme: the player's look instead
         theme.Dispose();
-        using (ui.Look(theme)) Assert.Equal(1, _pushes);
+        using (ui.Theme(theme)) Assert.Equal(1, _pushes);
         Assert.Equal(0, _pushes);
         Assert.Equal((uint)UiStyle.Player, _lastStyle);
     }

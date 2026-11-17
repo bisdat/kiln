@@ -137,7 +137,7 @@ public sealed record UiThemeSpec
 
 /// <summary>A mod's theme (<see cref="Ui.Themes.Define"/>): give it to your windows (<see cref="UiWindowOptions.Theme"/>,
 /// <see cref="UiScreenOptions.Theme"/>, <see cref="CraftingPanelOptions.Theme"/>) or use it inside your own drawing
-/// (<see cref="UiDraw.Look(UiTheme)"/>). Owned by the mod that defined it: gone when it unloads.</summary>
+/// (<see cref="UiDraw.Theme(UiTheme)"/>). Owned by the mod that defined it: gone when it unloads.</summary>
 public sealed class UiTheme : IDisposable
 {
     internal UiTheme(string id, string name, ModContext? owner)
@@ -183,7 +183,7 @@ public sealed class UiTheme : IDisposable
     }
 }
 
-/// <summary>A mod's font (<see cref="Ui.LoadFont(byte[])"/>) for its own windows: <c>using (ui.Font(font)) ...</c> or a theme's
+/// <summary>A mod's font (<see cref="Ui.LoadFont(byte[])"/>) for its own windows: <c>using (ui.ModFont(font)) ...</c> or a theme's
 /// <see cref="UiThemeSpec.Font"/>. Owned by the mod that loaded it: freed when it unloads or by <see cref="Dispose"/>.</summary>
 public sealed class UiFontFile : IDisposable
 {
@@ -383,7 +383,7 @@ public static partial class Ui
         /// <summary>
         /// Defines (or, for a name this mod defined before, changes in place) a theme: the base look's palette with the spec's
         /// roles, colours, spacing, rounding, background and font. Give it to your own windows, screens and crafting panels, or
-        /// use it inside your drawing with <see cref="UiDraw.Look(UiTheme)"/>. With <see cref="UiThemeSpec.OfferToPlayer"/> it is
+        /// use it inside your drawing with <see cref="UiDraw.Theme(UiTheme)"/>. With <see cref="UiThemeSpec.OfferToPlayer"/> it is
         /// also listed in Kiln's Look setting; only the player can pick it for Kiln's UI.
         /// </summary>
         /// <param name="name">1 to 64 of <c>a-z 0-9 . _ -</c>; the theme's <see cref="UiTheme.Id"/> is <c>&lt;mod id&gt;:&lt;name&gt;</c>.</param>
@@ -408,7 +408,7 @@ public static partial class Ui
     }
 
     /// <summary>A TrueType or OpenType font (TTF or OTF) for your own windows (a theme's <see cref="UiThemeSpec.Font"/>, or
-    /// <see cref="UiDraw.Font(UiFontFile)"/>). Null when it is no font, on a server or without drawing, or past Kiln's font
+    /// <see cref="UiDraw.ModFont(UiFontFile)"/>). Null when it is no font, on a server or without drawing, or past Kiln's font
     /// budget (8 mod fonts at once, 8 MiB each, 24 MiB together; kiln.log says why). It joins the overlay's font atlas at the
     /// next frame. Since 0.2.0-dev.29.16.</summary>
     [AnyThread]
@@ -471,9 +471,10 @@ public sealed unsafe partial class UiDraw
     }
 
     /// <summary>Switches to a mod's theme for the windows begun (and the text drawn) inside the scope:
-    /// <c>using (ui.Look(myTheme)) { ... }</c>. A disposed theme, or one kiln.ui cannot draw, switches to the player's look.
+    /// <c>using (ui.Theme(myTheme)) { ... }</c>. A disposed theme, or one kiln.ui cannot draw, switches to the player's look.
+    /// Ended like <see cref="Look(UiStyle)"/>.
     /// Since 0.2.0-dev.29.16.</summary>
-    public LookScope Look(UiTheme theme)
+    public LookScope Theme(UiTheme theme)
     {
         ArgumentNullException.ThrowIfNull(theme);
         return PushLookRaw(theme, UiStyle.Player) ? new LookScope(TopLook) : default;
@@ -502,7 +503,7 @@ public sealed unsafe partial class UiDraw
     /// <summary>Text drawn inside the scope uses a mod's font at the current size. <see cref="FontChoice.Pushed"/> is false (and
     /// nothing changes) until it joined the atlas (the frame after <see cref="Ui.LoadFont(byte[])"/>), or once disposed.
     /// Since 0.2.0-dev.29.16.</summary>
-    public FontChoice Font(UiFontFile font)
+    public FontChoice ModFont(UiFontFile font)
     {
         ArgumentNullException.ThrowIfNull(font);
         var t = UiNative.Looks;

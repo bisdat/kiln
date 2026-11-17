@@ -345,10 +345,10 @@ public sealed unsafe partial class UiDraw
     }
 
     /// <summary>Switches the look (the player's, the game's, Kiln's) for the windows begun inside the scope:
-    /// <c>using (ui.Look(UiStyle.Game)) { ... }</c>. For a mod's own theme: <see cref="Look(UiTheme)"/>.</summary>
+    /// <c>using (ui.Look(UiStyle.Game)) { ... }</c>. For a mod's own theme: <see cref="Theme(UiTheme)"/>.</summary>
     public LookScope Look(UiStyle style) => PushLookRaw(null, style) ? new LookScope(TopLook) : default;
 
-    /// <summary>Ends a <see cref="Look(UiStyle)"/> or <see cref="Look(UiTheme)"/>. It pops only its own look, while it is the
+    /// <summary>Ends a <see cref="Look(UiStyle)"/> or <see cref="Theme(UiTheme)"/>. It pops only its own look, while it is the
     /// one on top: one Kiln already took off (a callback that ended without disposing it) is not popped again.</summary>
     public readonly struct LookScope : IDisposable
     {

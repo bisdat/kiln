@@ -19,8 +19,8 @@ Kiln.UiColorSlot.TabSelected = 25 -> Kiln.UiColorSlot
 Kiln.UiColorSlot.TextSelectedBg = 27 -> Kiln.UiColorSlot
 Kiln.UiColorSlot.TitleBg = 20 -> Kiln.UiColorSlot
 Kiln.UiColorSlot.TitleBgActive = 21 -> Kiln.UiColorSlot
-Kiln.UiDraw.Font(Kiln.UiFontFile! font) -> Kiln.UiDraw.FontChoice
-Kiln.UiDraw.Look(Kiln.UiTheme! theme) -> Kiln.UiDraw.LookScope
+Kiln.UiDraw.ModFont(Kiln.UiFontFile! font) -> Kiln.UiDraw.FontChoice
+Kiln.UiDraw.Theme(Kiln.UiTheme! theme) -> Kiln.UiDraw.LookScope
 Kiln.UiDraw.Palette.get -> Kiln.UiPalette
 Kiln.UiFontFile
 Kiln.UiFontFile.Bytes.get -> int
