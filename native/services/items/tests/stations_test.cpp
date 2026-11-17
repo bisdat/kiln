@@ -62,8 +62,9 @@ int main() {
     static_assert(sizeof(KilnStationEvent) == 112 && offsetof(KilnStationEvent, by) == 64 && offsetof(KilnStationEvent, position) == 72 &&
                   offsetof(KilnStationEvent, base) == 96);
     static_assert(sizeof(KilnStationsStatus) == 188);
-    static_assert(sizeof(KilnStationsApi) == 8 + 24 * 8 && offsetof(KilnStationsApi, set_output_source) == 8 + 21 * 8 &&
-                  offsetof(KilnStationsApi, max_chests) == 8 + 23 * 8);
+    static_assert(sizeof(KilnStationsApi) == 8 + 25 * 8 && offsetof(KilnStationsApi, set_output_source) == 8 + 21 * 8 &&
+                  offsetof(KilnStationsApi, max_chests) == 8 + 23 * 8 && offsetof(KilnStationsApi, collect) == 8 + 24 * 8);
+    static_assert(sizeof(KilnStationCollect) == 24);
     static_assert(offsetof(KilnStationResult, from_outputs) == 60);
 
     // ---- requests ----
@@ -642,6 +643,32 @@ int main() {
         CHECK(water_input(1, false, 0, 640, 640, &wetchest[1]));
         CHECK(pay_layers(wetchest, 2, 0, &csh, &osh) && csh[0] == 2 && csh[1] == 0 && osh[0] == 0);
         CHECK(crafts_after_shares(wetchest, share_sum(csh, osh), 2, 0) == 2);
+
+        // collect: the same split as the managed SlotRoles, and the same result counts
+        SourceRecipes kiln_roles{{CHARCOAL}, {LOGS}};
+        CHECK(slot_role(kiln_roles, CHARCOAL, true) == SlotRole::Output);
+        CHECK(slot_role(kiln_roles, LOGS, true) == SlotRole::None);
+        CHECK(slot_role(kiln_roles, DIRT, true) == SlotRole::Leftover);
+        CHECK(slot_role(kiln_roles, DIRT, false) == SlotRole::None);  // no recipe: leftovers are not named
+        CHECK(collect_status(0, 0) == KILN_STATION_UNCHANGED);
+        CHECK(collect_status(3, 0) == KILN_STATION_NO_ROOM);
+        CHECK(collect_status(3, 2) == KILN_STATION_PARTIAL);
+        CHECK(collect_status(3, 3) == KILN_STATION_DONE);
+        KilnStationCollect col{};
+        col.size = sizeof col;
+        col.station = 1318;
+        col.flags = KILN_STATION_COLLECT_OUTPUTS;
+        col.to = 4000;
+        CHECK(collect_valid(col));
+        col.flags |= KILN_STATION_COLLECT_TO_BASE;
+        CHECK(!collect_valid(col));  // to base: no container named
+        col.to = 0;
+        CHECK(collect_valid(col));
+        col.flags = KILN_STATION_COLLECT_TO_BASE;
+        CHECK(!collect_valid(col));  // outputs or leftovers is required
+        col.to = 1318;
+        col.flags = KILN_STATION_COLLECT_OUTPUTS;
+        CHECK(!collect_valid(col));  // not into itself
     }
 
     std::printf("stations: %d checks, %d failures\n", checks, failed);

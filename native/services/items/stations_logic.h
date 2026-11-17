@@ -290,6 +290,35 @@ struct SourceCandidate {
     int32_t base = -1;
     bool station = false;
 };
+// A station slot's role, the same split as Kiln.Blocks' SlotRoles. `known` is false when the station has no recipe:
+// leftovers are then none (an output that is also an input is neither).
+enum class SlotRole : uint8_t { None, Output, Leftover };
+inline SlotRole slot_role(const SourceRecipes& r, uint32_t item, bool known) {
+    if (item == 0) return SlotRole::None;
+    const bool input = std::find(r.inputs.begin(), r.inputs.end(), item) != r.inputs.end();
+    const bool output = std::find(r.outputs.begin(), r.outputs.end(), item) != r.outputs.end();
+    if (output && !input) return SlotRole::Output;
+    if (known && !input && !output) return SlotRole::Leftover;
+    return SlotRole::None;
+}
+
+// Collect's result from how many matching stacks there were and how many moves succeeded.
+inline int32_t collect_status(uint32_t stacks, uint32_t moved) {
+    if (stacks == 0) return KILN_STATION_UNCHANGED;
+    if (moved == 0) return KILN_STATION_NO_ROOM;
+    if (moved < stacks) return KILN_STATION_PARTIAL;
+    return KILN_STATION_DONE;
+}
+
+inline bool collect_valid(const KilnStationCollect& c) {
+    if (c.size < sizeof(KilnStationCollect) || c.station == 0 || c.reserved != 0) return false;
+    constexpr uint32_t what = KILN_STATION_COLLECT_OUTPUTS | KILN_STATION_COLLECT_LEFTOVERS;
+    constexpr uint32_t all = what | KILN_STATION_COLLECT_TO_BASE;
+    if ((c.flags & ~all) != 0 || (c.flags & what) == 0) return false;
+    if (c.flags & KILN_STATION_COLLECT_TO_BASE) return c.to == 0;
+    return c.to != 0 && c.to != c.station && c.to > kMaxPlayerEntity;
+}
+
 // The stations a fill of `target` in base `base` may use, in entity order: opted in, still a station, in that base, not the
 // target itself. A station of another base is never used.
 inline std::vector<uint32_t> eligible_sources(const std::vector<SourceCandidate>& all, uint32_t target, int32_t base) {
@@ -486,6 +515,9 @@ struct Req {
     KilnStationStack keep[KILN_STATIONS_MAX_KEEP]{};
     KilnEntity chests[KILN_STATIONS_MAX_CHESTS]{};
     uint32_t chest_n = 0;
+    KilnEntity collect_to = 0;
+    uint32_t collect_item = 0;
+    uint32_t collect_flags = 0;
     uint64_t submitted = 0;
     // STOP after craft: what the station showed when it was taken
     bool waiting = false;

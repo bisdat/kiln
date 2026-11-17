@@ -15,7 +15,8 @@ internal static unsafe class StationsNative
     public const int MaxBases = 16, MaxAltars = 16, MaxInputs = 32, MaxOutputs = 8, MaxChanges = 32, MaxKeep = 64, MaxChests = 64;
 
     // actions
-    public const uint Fill = 1, Stop = 2, Resume = 3, Select = 4;
+    public const uint Fill = 1, Stop = 2, Resume = 3, Select = 4, CollectAction = 5;
+    public const uint CollectOutputs = 0x1, CollectLeftovers = 0x2, CollectToBase = 0x4;
     // request flags
     public const uint FillAdd = 0x1, FillExact = 0x2, DryRun = 0x4, NoWater = 0x8, AfterCraft = 0x10, KeepStopped = 0x20,
         AllowLocked = 0x40, FillNoOutputs = 0x80;
@@ -205,12 +206,21 @@ internal static unsafe class StationsNative
         public delegate* unmanaged[Cdecl]<uint, uint, int> SetOutputSource;
         public delegate* unmanaged[Cdecl]<uint*, uint, uint*, int> OutputSources;
         public delegate* unmanaged[Cdecl]<uint> MaxChests;
+        public delegate* unmanaged[Cdecl]<ulong, Collect*, delegate* unmanaged[Cdecl]<Result*, void*, void>, void*, ulong*, int> Collect;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct Collect
+    {
+        public uint Size, Station, To, Item, Flags, Reserved;
     }
 
     /// <summary>The table size up to <see cref="Table.LastSeq"/>: kiln.stations before 0.2.0-dev.29.17.</summary>
     public static readonly int TableV1 = 8 + 21 * sizeof(nint);
     /// <summary>The table size through <see cref="Table.OutputSources"/> (station outputs, before ordinary chests).</summary>
     public static readonly int TableOutputs = TableV1 + 2 * sizeof(nint);
+    /// <summary>The table size through <see cref="Table.MaxChests"/>.</summary>
+    public static readonly int TableChests = TableOutputs + sizeof(nint);
     /// <summary>The plan's size before 0.2.0-dev.29.17 (no <see cref="Plan.Outputs"/>).</summary>
     public static readonly int PlanV1 = sizeof(Plan) - 2 * MaxInputs * sizeof(uint);
     /// <summary>The plan's size with outputs and without <see cref="Plan.Chests"/>.</summary>

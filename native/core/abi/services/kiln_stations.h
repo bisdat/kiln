@@ -182,6 +182,7 @@ enum {
     KILN_STATION_STOP = 2,   /* the stop button */
     KILN_STATION_RESUME = 3, /* clears the stop (the station starts a new cycle) */
     KILN_STATION_SELECT = 4, /* the recipe the station repeats, with its category choices */
+    KILN_STATION_COLLECT = 5, /* finished stacks into a container or the base's Magic chests (collect()) */
 };
 
 /* KilnStationRequest.flags */
@@ -354,6 +355,8 @@ typedef struct KilnStationsStatus {
     char detail[160];       /* why something is off, in words; "" when all works */
 } KilnStationsStatus;
 
+typedef struct KilnStationCollect KilnStationCollect;
+
 typedef struct KilnStationsApi {
     KilnServiceHeader header; /* { sizeof(KilnStationsApi), KILN_STATIONS_VERSION } */
 
@@ -410,7 +413,32 @@ typedef struct KilnStationsApi {
     /* KILN_STATIONS_MAX_CHESTS on this build. A table large enough to hold the slot but built without the feature
      * returns 0; a smaller table has no slot. Any thread. */
     uint32_t(KILN_CALL* max_chests)(void);
+    /* ---- collect (header.size tells whether this is here) ---- */
+    /* Moves a station's finished stacks the way Kiln.Blocks' Stations.Collect does, through kiln.items' move (one
+     * implementation). Any thread; the callback runs on the tick thread. KILN_ERR_INVALID_ARGUMENT: a bad request.
+     * KILN_ERR_UNAVAILABLE: no server world, or items.move is off. KILN_ERR_BUFFER_TOO_SMALL: 1024 actions wait. */
+    KilnResult(KILN_CALL* collect)(KilnOwner owner, const KilnStationCollect* request, KilnStationDoneFn done, void* user,
+                                   uint64_t* out_ticket);
 } KilnStationsApi;
+
+/* KilnStationCollect.flags */
+enum {
+    KILN_STATION_COLLECT_OUTPUTS = 0x1u,    /* stacks of an output that is not also an input */
+    KILN_STATION_COLLECT_LEFTOVERS = 0x2u,  /* stacks that are neither an input nor an output */
+    KILN_STATION_COLLECT_TO_BASE = 0x4u,    /* into the base's Magic chests that take deposits; `to` is 0 */
+};
+
+/* A collect. size is sizeof(KilnStationCollect). The result is a KilnStationResult with action COLLECT:
+ * DONE every stack moved, PARTIAL some did not fit, NO_ROOM none did, UNCHANGED nothing to collect,
+ * NOT_A_STATION, NO_BASE (TO_BASE and the station stands in none). */
+typedef struct KilnStationCollect {
+    uint32_t size;
+    KilnEntity station;
+    KilnEntity to;     /* the container; 0 with KILN_STATION_COLLECT_TO_BASE */
+    uint32_t item;     /* 0: every matching stack; otherwise only this item */
+    uint32_t flags;    /* KILN_STATION_COLLECT_* ; OUTPUTS or LEFTOVERS or both is required */
+    uint32_t reserved; /* 0 */
+} KilnStationCollect;
 
 #ifdef __cplusplus
 }

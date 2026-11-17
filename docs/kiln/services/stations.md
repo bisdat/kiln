@@ -286,7 +286,9 @@ await Stations.Collect(kiln, chest, what: CollectWhat.Leftovers); // what is no 
 await Stations.CollectToBase(kiln);                      // into the base's chests that take deposits
 ```
 Collect moves through Kiln.Items' move (the game's slot transfer; the row `items.move` too), one stack after the other:
-`Done`, `Partial` (some did not fit), `NoRoom` (none did), `Unchanged` (nothing to collect).
+`Done`, `Partial` (some did not fit), `NoRoom` (none did), `Unchanged` (nothing to collect). Native code calls the same
+move through `collect` on `kiln.stations` (`KilnStationCollect`: outputs, leftovers, one container, or the base's Magic
+chests that take deposits). The managed methods call that when the table has it.
 
 ## Results
 Every action returns a `Task<StationResult>` that completes on the tick thread, one step after it ran (a stop after the
@@ -394,7 +396,7 @@ checked by hand with `mods/tests/stations-client-check` (`/stationcheck`, admins
 ## For native code
 `native/core/abi/services/kiln_stations.h` (`kiln.stations` v1, in kiln-items.dll): the same reads (`base_*`, `stations`,
 `station_read`, `recipe*`, `category*`, `workshop_recipes`, `plan`) on the tick thread; `submit(owner, request, done, user,
-&ticket)` from any thread, the result in `done` on the tick thread; `cancel(ticket)` drops the callback; the events by
+&ticket)` from any thread, the result in `done` on the tick thread; `collect` moves finished stacks the way `Stations.Collect` does (through kiln.items' move; into one container, or `KILN_STATION_COLLECT_TO_BASE` for the Magic chests that take deposits); `cancel(ticket)` drops the callback; the events by
 polling: `watch(1)`, then `events(after_seq, ...)` each step (`last_seq()` to start at the newest). A FILL names ordinary
 chests with `chest_count` and `chests` on a request of the current size (`max_chests()` is `KILN_STATIONS_MAX_CHESTS`; a
 request of `KILN_STATION_REQUEST_V1` bytes names none). `from_chests` on the result counts what they gave. A cycle's end

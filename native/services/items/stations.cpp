@@ -155,7 +155,7 @@ std::atomic<int> g_state{KILN_ITEMS_PROGRAM_NONE};
 bool g_slots = false;
 int g_s_sing[7] = {-1, -1, -1, -1, -1, -1, -1};  // Balancing, Items, Attributes, Bases, Recipes, Knowledge, FactoryInfo
 int g_s_acc[A_COUNT] = {};
-int g_s_factory = -1, g_s_netfuel = -1, g_s_transform = -1, g_s_crafting = -1;
+int g_s_factory = -1, g_s_netfuel = -1, g_s_transform = -1, g_s_crafting = -1, g_s_deposit = -1;
 int g_s_ev[2] = {-1, -1};  // PickupEvent, InventoryFull
 uint8_t* g_tx = nullptr;
 std::atomic<int64_t> g_now{0};          // the world's program time of the last step (ns)
@@ -903,6 +903,7 @@ bool resolve_slots() {
     g_s_netfuel = g_w->program_slot(g_prog, KILN_SLOT_OTHER_WRITE, str("NetworkFuel"));
     g_s_transform = g_w->program_slot(g_prog, KILN_SLOT_OTHER_READ, str(kOtherRead[0]));
     g_s_crafting = g_w->program_slot(g_prog, KILN_SLOT_OTHER_READ, str(kOtherRead[1]));
+    g_s_deposit = g_w->program_slot(g_prog, KILN_SLOT_OTHER_READ, str("DynamicInventoryCraftingStock"));
     for (int i = 0; i < 2; ++i) g_s_ev[i] = g_w->program_slot(g_prog, KILN_SLOT_EVENT_OUT, str(kEvents[i]));
     auto good = [](int s) { return s >= 1 && s < 96; };
     bool ok = good(g_s_factory) && good(g_s_netfuel) && good(g_s_transform) && good(g_s_crafting);
@@ -917,7 +918,7 @@ struct Run {
     KilnProgramCtx* ctx;
     uint64_t* it;
     Access a;
-    uint64_t acc_factory, acc_netfuel, acc_transform, acc_crafting;
+    uint64_t acc_factory, acc_netfuel, acc_transform, acc_crafting, acc_deposit;
     void* bases;
     void* recipes;
     void* factory_info;
@@ -959,6 +960,7 @@ bool verify(KilnProgramCtx* ctx, uint64_t* it, Run* run, char* why) {
     run->acc_netfuel = it[g_s_netfuel];
     run->acc_transform = it[g_s_transform];
     run->acc_crafting = it[g_s_crafting];
+    run->acc_deposit = g_s_deposit >= 1 && g_s_deposit < 96 ? it[g_s_deposit] : 0;
     run->bases = reinterpret_cast<void*>(it[g_s_sing[3]]);
     run->recipes = reinterpret_cast<void*>(it[g_s_sing[4]]);
     run->factory_info = reinterpret_cast<void*>(it[g_s_sing[6]]);
@@ -1393,6 +1395,109 @@ void run_control(const Run& run, Req& q, KilnStationResult* res, bool* keep_wait
     res->status = KILN_STATION_DONE;
 }
 
+// Finished stacks into a chest, or into the base's Magic chests that take deposits. Each stack is kiln.items' move
+// (run_move): the same transfer Items.Move uses. One move is its own transaction, as the managed collect does.
+void run_collect(const Run& run, const Req& q, KilnStationResult* res) {
+    res->action = KILN_STATION_COLLECT;
+    if (!E.slot_transfer || !E.move_ok) return finish(res, KILN_STATION_UNAVAILABLE, "items.move is off on this build");
+    const uint8_t* fsp = other(run, run.acc_factory, q.r.station, static_cast<uint64_t>(G.fs_size));
+    if (!fsp) return finish(res, KILN_STATION_NOT_A_STATION, "entity %u has no FactoryStation", q.r.station);
+    FsBytes fs{};
+    std::memcpy(fs.b, fsp, sizeof fs.b);
+    res->state_before = res->state_after = fs.b[kFsState];
+    res->stopped_before = res->stopped_after = fs.b[G.fs_stopped];
+    res->recipe = rd<uint32_t>(fs.b, G.fs_next);
+    SourceRecipes roles;
+    const bool known = source_recipes(fs, run.recipes, &roles);
+    PageSet pages;
+    bool init = false;
+    if (!read_pages(run.a, q.r.station, &pages, &init) || !init)
+        return finish(res, KILN_STATION_NOT_A_STATION, "station %u has no inventory", q.r.station);
+    struct Piece {
+        uint64_t slot;
+        uint32_t item;
+    };
+    std::vector<Piece> pieces;
+    const bool want_out = (q.collect_flags & KILN_STATION_COLLECT_OUTPUTS) != 0;
+    const bool want_left = (q.collect_flags & KILN_STATION_COLLECT_LEFTOVERS) != 0;
+    for (uint32_t p = 0; p < pages.n; ++p) {
+        for (const Stack& s : pages.p[p].s) {
+            if (is_empty(s)) continue;
+            if (q.collect_item && s.item != q.collect_item) continue;
+            const SlotRole role = slot_role(roles, s.item, known);
+            if ((role == SlotRole::Output && want_out) || (role == SlotRole::Leftover && want_left)) pieces.push_back({s.slot, s.item});
+        }
+    }
+    if (pieces.empty()) return finish(res, KILN_STATION_UNCHANGED, "nothing to collect");
+
+    std::vector<KilnEntity> chests;
+    if (q.collect_flags & KILN_STATION_COLLECT_TO_BASE) {
+        const uint8_t* tr = other(run, run.acc_transform, q.r.station, 24);
+        if (!tr) return finish(res, KILN_STATION_NOT_A_STATION, "station %u has no position", q.r.station);
+        KilnVec3 pos{};
+        pos.x = static_cast<double>(rd<int64_t>(tr, 0)) * (1.0 / 4294967296.0);
+        pos.y = static_cast<double>(rd<int64_t>(tr, 8)) * (1.0 / 4294967296.0);
+        pos.z = static_cast<double>(rd<int64_t>(tr, 16)) * (1.0 / 4294967296.0);
+        const int32_t base = base_index_at(run.bases, pos);
+        if (base < 0) return finish(res, KILN_STATION_NO_BASE, "station %u stands in no base", q.r.station);
+        const auto* sys = static_cast<const uint8_t*>(run.bases);
+        const int64_t off = static_cast<int64_t>(base) * G.stride;
+        const uint64_t ptr = rd<uint64_t>(sys, G.stock_items + off);
+        const uint64_t n = rd<uint64_t>(sys, G.stock_items_count + off);
+        for (uint64_t i = 0; i < n && ptr; ++i) {
+            const KilnEntity e = reinterpret_cast<const uint32_t*>(ptr)[i];
+            const uint8_t* dep = run.acc_deposit ? other(run, run.acc_deposit, e, 2) : nullptr;
+            if (dep && dep[0] != 0 && dep[1] == 0) continue;  // the chest is switched off for deposits
+            chests.push_back(e);
+        }
+    } else {
+        chests.push_back(q.collect_to);
+    }
+
+    uint32_t moved = 0;
+    char last[128] = "no container with room";
+    for (const Piece& piece : pieces) {
+        // chests that already hold the item, in the base's order, then the others
+        std::vector<KilnEntity> order = chests;
+        std::stable_partition(order.begin(), order.end(), [&](KilnEntity c) {
+            std::unordered_map<uint32_t, uint64_t> have;
+            count_pages(run.a, c, &have);
+            return have[piece.item] != 0;
+        });
+        bool ok = false;
+        for (KilnEntity dest : order) {
+            KilnItemsMoveRequest mr{};
+            mr.size = sizeof mr;
+            mr.kind = KILN_MOVE_STACK;
+            mr.from = q.r.station;
+            mr.to = dest;
+            mr.slot = piece.slot;
+            MoveJob job{mr};
+            KilnItemsMoveResult mv{};
+            mv.size = sizeof mv;
+            unsigned long code = 0;
+            if (!run_move(run.a, job, g_tx, &mv, &code)) {
+                std::snprintf(last, sizeof last, "the move faulted");
+                continue;
+            }
+            if (mv.status == KILN_ITEMS_DONE || (mv.status == KILN_ITEMS_PARTIAL && mv.done > 0)) {
+                ok = true;
+                for (uint32_t i = 0; i < mv.change_count && res->change_count < KILN_STATIONS_MAX_CHANGES; ++i)
+                    res->changes[res->change_count++] = mv.changes[i];
+                break;
+            }
+            if (mv.message[0]) std::snprintf(last, sizeof last, "%s", mv.message);
+        }
+        if (ok) ++moved;
+    }
+    const int32_t status = collect_status(static_cast<uint32_t>(pieces.size()), moved);
+    if (status == KILN_STATION_DONE) {
+        res->status = KILN_STATION_DONE;
+        return;
+    }
+    finish_text(res, status, last);
+}
+
 struct ActCall {
     const Run* run;
     Req* q;
@@ -1402,6 +1507,7 @@ struct ActCall {
 void act_impl(void* p) {
     auto* a = static_cast<ActCall*>(p);
     if (a->q->r.action == KILN_STATION_FILL) run_fill(*a->run, *a->q, a->res);
+    else if (a->q->r.action == KILN_STATION_COLLECT) run_collect(*a->run, *a->q, a->res);
     else run_control(*a->run, *a->q, a->res, &a->keep_waiting);
 }
 
@@ -2174,6 +2280,34 @@ KilnResult KILN_CALL t_output_sources(KilnEntity* out, uint32_t capacity, uint32
 
 uint32_t KILN_CALL t_max_chests() { return KILN_STATIONS_MAX_CHESTS; }
 
+KilnResult KILN_CALL t_collect(KilnOwner owner, const KilnStationCollect* c, KilnStationDoneFn done, void* user, uint64_t* out_ticket) {
+    if (out_ticket) *out_ticket = 0;
+    if (!c || !collect_valid(*c)) return KILN_ERR_INVALID_ARGUMENT;
+    if (g_off.load() || !G.read || !E.move_ok) return KILN_ERR_UNAVAILABLE;
+    const int state = g_state.load();
+    if (!g_w || !g_tx || state == KILN_ITEMS_PROGRAM_NONE || state == KILN_ITEMS_PROGRAM_BROKEN) return KILN_ERR_UNAVAILABLE;
+    if (!here()) return KILN_ERR_UNAVAILABLE;
+    Req q{};
+    q.ticket = items_next_ticket();
+    q.owner = owner;
+    q.r.action = KILN_STATION_COLLECT;
+    q.r.station = c->station;
+    q.r.flags = c->flags;
+    q.collect_to = c->to;
+    q.collect_item = c->item;
+    q.collect_flags = c->flags;
+    q.submitted = current_step();
+    {
+        std::lock_guard lock(g_mu);
+        if (g_incoming.size() + g_ready.size() + g_after.size() >= kMaxPending) return KILN_ERR_BUFFER_TOO_SMALL;
+        g_incoming.push_back(q);
+        if (done) g_callbacks.emplace(q.ticket, Callback{done, user});
+        g_pending_n.store(static_cast<uint32_t>(g_ready.size() + g_after.size() + g_incoming.size()), std::memory_order_release);
+    }
+    if (out_ticket) *out_ticket = q.ticket;
+    return KILN_OK;
+}
+
 KilnResult KILN_CALL t_cancel(uint64_t ticket) {
     std::lock_guard lock(g_mu);
     return g_callbacks.erase(ticket) ? KILN_OK : KILN_ERR_NOT_FOUND;
@@ -2211,6 +2345,7 @@ const KilnStationsApi kTable = {
     &t_status, &t_base_count, &t_base_at, &t_base_of, &t_base_at_position, &t_base_storage, &t_base_water, &t_base_stock,
     &t_stations, &t_station_read, &t_recipe, &t_recipe_inputs, &t_category, &t_category_at, &t_workshop_recipes, &t_plan,
     &t_submit, &t_cancel, &t_watch, &t_events, &t_last_seq, &t_set_output_source, &t_output_sources, &t_max_chests,
+    &t_collect,
 };
 
 template <typename F>
@@ -2305,6 +2440,7 @@ void stations_register(const KilnWorldApi* w) {
     for (const char* n : kSingRead) sr.push_back(str(n));
     for (const char* n : kSingWrite) sw.push_back(str(n));
     for (const char* n : kOtherRead) orr.push_back(str(n));
+    orr.push_back(str("DynamicInventoryCraftingStock"));
     for (int i = 0; i < A_COUNT; ++i) ow.push_back(str(kAccNames[i]));
     ow.push_back(str("FactoryStation"));
     ow.push_back(str("NetworkFuel"));

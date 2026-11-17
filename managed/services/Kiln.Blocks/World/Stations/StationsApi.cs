@@ -377,7 +377,7 @@ public static partial class Stations
     {
         StationsCore.CheckRead("Stations.Collect");
         if (to.IsNone) throw new ArgumentException("no target", nameof(to));
-        return StationsCore.Collect(station, item, what, _ => to);
+        return StationsCore.Collect(station, item, what, _ => to, toBase: false, chest: to);
     }
 
     /// <summary>As <see cref="Collect"/>, into the station's base: for each stack a crafting-stock chest that takes
@@ -387,7 +387,7 @@ public static partial class Stations
     {
         StationsCore.CheckRead("Stations.CollectToBase");
         var b = Bases.Of(station);
-        return StationsCore.Collect(station, item, what, it => b is null ? null : Bases.FindRoomFor(b.Id, it));
+        return StationsCore.Collect(station, item, what, it => b is null ? null : Bases.FindRoomFor(b.Id, it), toBase: true);
     }
 }
 
@@ -418,6 +418,9 @@ internal interface IStationsBackend
     bool HasOutputSources { get; }
     /// <summary>The table has max_chests (ordinary chests on a fill).</summary>
     bool HasChests { get; }
+    /// <summary>The table has collect (the same move Kiln.Blocks' Collect uses).</summary>
+    bool HasCollect { get; }
+    int Collect(in StationsNative.Collect request, ulong owner, long key);
     int SetOutputSource(uint entity, bool on);
     (int Rc, uint[] Ids) OutputSources();
 }
@@ -629,8 +632,18 @@ internal static unsafe partial class StationsCore
 
         public bool HasOutputSources => T is var t && t != null && t->Header.Size >= (uint)StationsNative.TableOutputs;
 
-        public bool HasChests => T is var t && t != null && t->Header.Size >= (uint)sizeof(StationsNative.Table) &&
+        public bool HasChests => T is var t && t != null && t->Header.Size >= (uint)StationsNative.TableChests &&
                                  t->MaxChests != null && t->MaxChests() == (uint)StationsNative.MaxChests;
+
+        public bool HasCollect => T is var t && t != null && t->Header.Size >= (uint)sizeof(StationsNative.Table) && t->Collect != null;
+
+        public int Collect(in StationsNative.Collect request, ulong owner, long key)
+        {
+            if (!HasCollect) return StationsNative.Unavailable;
+            ulong tk = 0;
+            var copy = request;
+            return T->Collect(owner, &copy, &OnDone, (void*)key, &tk);
+        }
 
         public int SetOutputSource(uint entity, bool on) =>
             HasOutputSources ? T->SetOutputSource(entity, on ? 1u : 0u) : StationsNative.Unavailable;
