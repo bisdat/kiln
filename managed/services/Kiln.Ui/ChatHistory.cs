@@ -80,9 +80,9 @@ internal sealed class ChatHistory
     }
 
     /// <summary>Down moves forward; beyond the newest entry it restores the draft originally typed.</summary>
-    internal string Newer()
+    internal string Newer(string currentText)
     {
-        if (_cursor < 0) return _draft;
+        if (_cursor < 0) return currentText;
         if (++_cursor >= _entries.Count)
         {
             _cursor = -1;
