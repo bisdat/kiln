@@ -107,12 +107,32 @@ public sealed unsafe class StationsTests : IDisposable
 
         public (int Rc, uint[] Ids) WorkshopRecipes(uint workshop) => (0, Recipes.Values.Where(r => r.Workshop == workshop).Select(r => r.Id).ToArray());
 
+        /// <summary>When set, the plan for a request (else <see cref="NextPlan"/>): a fill with and without station outputs.</summary>
+        public Func<StationsNative.Request, StationsNative.Plan>? PlanFor;
+        public readonly List<StationsNative.Request> Planned = [];
+
         public int Plan(in StationsNative.Request r, StationsNative.Stack[] keep, out StationsNative.Plan p)
         {
             LastPlanned = r;
-            p = NextPlan;
+            Planned.Add(r);
+            p = PlanFor is { } f ? f(r) : NextPlan;
             return 0;
         }
+
+        // station outputs as crafting stock (0.2.0-dev.29.17)
+        public bool HasOutputs = true;
+        public readonly SortedSet<uint> Sources = [];
+        public bool HasOutputSources => HasOutputs;
+
+        public int SetOutputSource(uint entity, bool on)
+        {
+            if (!HasOutputs) return StationsNative.Unavailable;
+            if (on) Sources.Add(entity);
+            else Sources.Remove(entity);
+            return 0;
+        }
+
+        public (int Rc, uint[] Ids) OutputSources() => HasOutputs ? (0, Sources.ToArray()) : (StationsNative.Unavailable, []);
 
         public int Submit(in StationsNative.Request r, StationsNative.Stack[] keep, ulong owner, long key)
         {
@@ -199,7 +219,12 @@ public sealed unsafe class StationsTests : IDisposable
         _fake.Recipes[0x1234] = r;
     }
 
-    public void Dispose() => StationsCore.UseBackend(null);
+    public void Dispose()
+    {
+        StationsCore.UseBackend(null);
+        StationOutputKeeper.Reset();
+        StationsCore.CanAccessInventories = static p => p.PermissionsKnown ? p.Can(PlayerPermissions.AccessInventories) : null;
+    }
 
     // The calls return a task but throw before one exists: run them as a plain call.
     private static void Call(Func<Task> f) => _ = f();
@@ -208,7 +233,8 @@ public sealed unsafe class StationsTests : IDisposable
     {
         var k = new KilnHarness();
         if (caps)
-            foreach (var c in new[] { Stations.ReadCapability, Stations.FillCapability, Stations.ControlCapability, Stations.EventsCapability })
+            foreach (var c in new[] { Stations.ReadCapability, Stations.FillCapability, Stations.ControlCapability, Stations.EventsCapability,
+                         Stations.OutputSourcesCapability })
                 k.Capabilities.Override(c, true);
         return k;
     }
@@ -236,7 +262,10 @@ public sealed unsafe class StationsTests : IDisposable
         Assert.Equal(64, (int)Marshal.OffsetOf<StationsNative.Result>("Ticket"));
         Assert.Equal(80, (int)Marshal.OffsetOf<StationsNative.Result>("Changes"));
         Assert.Equal(1104, (int)Marshal.OffsetOf<StationsNative.Result>("Message"));
-        Assert.Equal(696, sizeof(StationsNative.Plan));
+        Assert.Equal(824, sizeof(StationsNative.Plan));
+        Assert.Equal(696, (int)Marshal.OffsetOf<StationsNative.Plan>("Outputs"));
+        Assert.Equal(696, StationsNative.PlanV1);
+        Assert.Equal(60, (int)Marshal.OffsetOf<StationsNative.Result>("FromOutputs"));
         Assert.Equal(36, (int)Marshal.OffsetOf<StationsNative.Plan>("ShortItem"));
         Assert.Equal(44, (int)Marshal.OffsetOf<StationsNative.Plan>("WaterPerCraft"));
         Assert.Equal(56, (int)Marshal.OffsetOf<StationsNative.Plan>("Inputs"));
@@ -245,7 +274,8 @@ public sealed unsafe class StationsTests : IDisposable
         Assert.Equal(72, (int)Marshal.OffsetOf<StationsNative.Event>("Position"));
         Assert.Equal(96, (int)Marshal.OffsetOf<StationsNative.Event>("Base"));
         Assert.Equal(188, sizeof(StationsNative.Status));
-        Assert.Equal(8 + 21 * 8, sizeof(StationsNative.Table));
+        Assert.Equal(8 + 23 * 8, sizeof(StationsNative.Table));
+        Assert.Equal(8 + 21 * 8, StationsNative.TableV1);
     }
 
     [Fact]
@@ -710,6 +740,163 @@ public sealed unsafe class StationsTests : IDisposable
         Assert.Null(StationsCore.CraftedOf(station, station, false, 0x1234, 0x51, []));  // a failed attempt
         Assert.Null(StationsCore.CraftedOf(new EntityId(1), station, true, 0x1234, 0x51, []));  // a player's craft at a bench
         Assert.Null(StationsCore.CraftedOf(EntityId.None, EntityId.None, true, 0x1234, 0x51, []));
+    }
+
+    // ---- station outputs as crafting stock (GitHub #68) ----
+
+    private static byte[] FillPress(uint station = 3300, uint recipe = 0x1234, ushort amount = 3)
+    {
+        var p = new byte[68];
+        BitConverter.TryWriteBytes(p.AsSpan(0), station);
+        BitConverter.TryWriteBytes(p.AsSpan(4), recipe);
+        BitConverter.TryWriteBytes(p.AsSpan(0x0c), amount);
+        BitConverter.TryWriteBytes(p.AsSpan(0x18), 77u);
+        p[0x18 + 4] = 1;
+        p[0x40] = (byte)StationPlayerAction.Fill;
+        return p;
+    }
+
+    private void AddStation(uint entity, int baseIndex, double x = 2)
+    {
+        var s = _fake.StationRows[3300];
+        s.Entity = entity;
+        s.BaseIndex = baseIndex;
+        s.Position = new StationsNative.Vec3 { X = x, Y = 0, Z = 0 };
+        if (baseIndex < 0) s.Base = default;
+        _fake.StationRows[entity] = s;
+    }
+
+    private static StationsNative.Plan PlanWith(StationActionStatus status, uint outputs = 0)
+    {
+        var p = new StationsNative.Plan { Size = (uint)sizeof(StationsNative.Plan), Status = (int)status, Station = 3300, RecipeId = 0x1234, InputCount = 1 };
+        p.Inputs[0] = 0x10;
+        p.Inputs[1] = 2;
+        p.Stock[0] = 4;
+        p.Outputs[0] = outputs;
+        return p;
+    }
+
+    [Fact]
+    public void AFillUsesStationOutputsUnlessTheOptionsSayNo()
+    {
+        var (r, _) = StationsCore.FillRequest(new EntityId(3300), new FillOptions());
+        Assert.Equal(0u, r.Flags & StationsNative.FillNoOutputs);
+        var (n, _) = StationsCore.FillRequest(new EntityId(3300), new FillOptions { UseStationOutputs = false });
+        Assert.Equal(StationsNative.FillNoOutputs, n.Flags & StationsNative.FillNoOutputs);
+        // an older kiln.stations knows no such flag (it would refuse the request): never sent there
+        _fake.HasOutputs = false;
+        var (o, _) = StationsCore.FillRequest(new EntityId(3300), new FillOptions { UseStationOutputs = false });
+        Assert.Equal(0u, o.Flags & StationsNative.FillNoOutputs);
+    }
+
+    [Fact]
+    public void APlanAndAResultSayWhatTheOutputsLend()
+    {
+        using var kiln = Kiln();
+        _fake.NextPlan = PlanWith(StationActionStatus.Done, outputs: 20);
+        var plan = kiln.Run(() => Stations.Plan(new EntityId(3300)));
+        var input = Assert.Single(plan.Inputs);
+        Assert.Equal((4L, 20L), (input.Stock, input.Outputs));
+        var r = NewResult(StationActionStatus.Done, "");
+        r.FromOutputs = 5;
+        Assert.Equal(5, StationsCore.ResultOf(r, StationAction.Fill).FromOutputs);
+    }
+
+    [Fact]
+    public void AStationIsOptedInAndOutAsCraftingStock()
+    {
+        using var kiln = Kiln();
+        AddStation(3301, 0);
+        Assert.False(kiln.Run(() => Stations.IsOutputSource(new EntityId(3301))));
+        kiln.Run(() => Stations.SetOutputSource(new EntityId(3301)));
+        Assert.Equal([3301u], _fake.Sources);
+        Assert.True(kiln.Run(() => Stations.IsOutputSource(new EntityId(3301))));
+        Assert.Equal([new EntityId(3301)], kiln.Run(() => Stations.OutputSources(new BaseId(AltarGuid))));
+        Assert.Empty(kiln.Run(() => Stations.OutputSources(new BaseId(Guid.NewGuid()))));  // another base's list
+        Assert.Equal([new EntityId(3301)], kiln.Run(() => Stations.OutputSources()));
+        kiln.Run(() => Stations.SetOutputSource(new EntityId(3301), on: false));
+        Assert.Empty(_fake.Sources);
+        Assert.False(kiln.Run(() => Stations.IsOutputSource(new EntityId(3301))));
+        // mistakes
+        Assert.Throws<ArgumentException>(() => kiln.Run(() => Stations.SetOutputSource(EntityId.None)));
+        Assert.Throws<ArgumentException>(() => kiln.Run(() => Stations.SetOutputSource(new EntityId(4444))));  // no station
+        Assert.Throws<InvalidOperationException>(() => Stations.SetOutputSource(new EntityId(3301)));  // not the tick thread
+        _fake.HasOutputs = false;  // an older kiln-items.dll
+        Assert.Throws<KilnUnavailableException>(() => kiln.Run(() => Stations.SetOutputSource(new EntityId(3301))));
+        Assert.False(kiln.Run(() => Stations.IsOutputSource(new EntityId(3301))));
+    }
+
+    [Fact]
+    public void WithoutTheCapabilityNothingIsOptedIn()
+    {
+        using var kiln = Kiln(caps: false);
+        kiln.Capabilities.Override(Stations.ReadCapability, true);
+        kiln.Capabilities.Override(Stations.FillCapability, true);
+        kiln.Capabilities.Override(Stations.OutputSourcesCapability, false);
+        Assert.Throws<KilnUnavailableException>(() => kiln.Run(() => Stations.SetOutputSource(new EntityId(3300))));
+        Assert.Empty(_fake.Sources);
+    }
+
+    [Fact]
+    public void AGoneStationNoLongerLends()
+    {
+        using var kiln = Kiln();
+        AddStation(3301, 0);
+        kiln.Run(() => Stations.SetOutputSource(new EntityId(3301)));
+        Assert.Equal(1, StationOutputKeeper.Count);
+        _fake.StationRows.Remove(3301);  // destroyed
+        kiln.Run(StationOutputKeeper.Prune);
+        Assert.Empty(_fake.Sources);
+        Assert.Equal(0, StationOutputKeeper.Count);
+    }
+
+    [Fact]
+    public void TheFillButtonRunsAsKilnsFillOnlyWhenTheOutputsAreNeededAndCoverIt()
+    {
+        using var kiln = Kiln();
+        AddStation(3301, 0);       // the charcoal kiln, opted in
+        AddStation(5, 0, x: 3);    // the player, standing in the same base (BaseOf reads the fake's rows)
+        kiln.Run(() => Stations.SetOutputSource(new EntityId(3301)));
+        var player = new EntityId(5);
+        string? why = null;
+        // the player and the chests cover it: the game's own fill
+        _fake.PlanFor = _ => PlanWith(StationActionStatus.Done);
+        Assert.Null(kiln.Run(() => StationsCore.SourceFill(player, FillPress(), true, out _, out why)));
+        Assert.Contains("cover", why);
+        // they do not, the outputs do: Kiln's fill, the button's meaning (n more, all or nothing, the player's bag first)
+        _fake.PlanFor = r => PlanWith((r.Flags & StationsNative.FillNoOutputs) != 0 ? StationActionStatus.NotEnough : StationActionStatus.Done, 20);
+        var o = kiln.Run(() => StationsCore.SourceFill(player, FillPress(amount: 3), true, out _, out why));
+        Assert.NotNull(o);
+        Assert.Equal((3, FillMode.Add, true, (uint?)0x1234u, player, true), (o!.Crafts, o.Mode, o.Exact, o.Recipe, o.Player, o.UseStationOutputs));
+        Assert.Equal([new CategoryChoice(77, 1)], o.Choices);
+        // not even with the outputs: the game's own fill (it refuses, nothing moves)
+        _fake.PlanFor = _ => PlanWith(StationActionStatus.NotEnough);
+        Assert.Null(kiln.Run(() => StationsCore.SourceFill(player, FillPress(), true, out _, out why)));
+        Assert.Contains("not even", why);
+        _fake.PlanFor = r => PlanWith((r.Flags & StationsNative.FillNoOutputs) != 0 ? StationActionStatus.NotEnough : StationActionStatus.Done, 20);
+        // the game's own checks: CanAccessInventories, the player's base
+        Assert.Null(kiln.Run(() => StationsCore.SourceFill(player, FillPress(), false, out _, out why)));
+        Assert.Null(kiln.Run(() => StationsCore.SourceFill(player, FillPress(), null, out _, out why)));
+        AddStation(6, -1);  // a player in no base
+        Assert.Null(kiln.Run(() => StationsCore.SourceFill(new EntityId(6), FillPress(), true, out _, out why)));
+        Assert.Contains("another base", why);
+        // other presses, item and water fills: not this
+        var stop = FillPress();
+        stop[0x40] = (byte)StationPlayerAction.Stop;
+        Assert.Null(kiln.Run(() => StationsCore.SourceFill(player, stop, true, out _, out why)));
+        var water = FillPress();
+        BitConverter.TryWriteBytes(water.AsSpan(0x10), 64u);
+        Assert.Null(kiln.Run(() => StationsCore.SourceFill(player, water, true, out _, out why)));
+        Assert.Null(kiln.Run(() => StationsCore.SourceFill(player, FillPress(recipe: 0), true, out _, out why)));
+        // the only opted-in station is the one being filled: nothing to lend
+        kiln.Run(() => Stations.SetOutputSource(new EntityId(3301), on: false));
+        kiln.Run(() => Stations.SetOutputSource(new EntityId(3300)));
+        Assert.Null(kiln.Run(() => StationsCore.SourceFill(player, FillPress(), true, out _, out why)));
+        // opted out everywhere: never looked at (vanilla)
+        kiln.Run(() => Stations.SetOutputSource(new EntityId(3300), on: false));
+        _fake.Planned.Clear();
+        Assert.Null(kiln.Run(() => StationsCore.SourceFill(player, FillPress(), true, out _, out why)));
+        Assert.Empty(_fake.Planned);
     }
 
     [Fact]
