@@ -739,9 +739,12 @@ Kiln.Ui follows [the API contract](modding/contract.md) as far as it applies. It
 
 ## Overlay startup crash guard
 
-Before Vulkan hooks are installed, Kiln flushes a versioned record to
+Before Vulkan hooks are installed, Kiln writes a versioned record to
 `kiln/state/overlay-start.guard`. It records hooks installed, instance seen, device seen,
 swapchain created, and completes after the first successful present with the overlay drawn.
+Each record is written (a temporary file, then a rename) before the stage goes on, and forced to the disk
+on a thread of its own, never on the game's present call: a game that dies loses nothing it already
+wrote.
 A game that ends before that frame, however it ends, counts as an interrupted attempt (closing
 the game while it is still loading does too: the cost is one start without the overlay).
 
