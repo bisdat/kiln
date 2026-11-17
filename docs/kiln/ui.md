@@ -354,7 +354,7 @@ another. Mods can give their own windows a theme, and can offer a theme the play
   `tabLabelIdleColor`, `tileBackgroundColor`, `basicWidgetColor`, `tabHighlightColor`, `tileHighlightOutlineColor`,
   `textTabRowBgHighlightColor`, `globalColors.attentionColor`, `warningColor`, `checkmarkGreen`), whose field offsets come
   from the game's reflection (`kiln.types`) and whose bytes come from `kiln.assets`, on a worker thread the first time a
-  look needs them (with the game's font). Until they are read, and wherever they cannot be (no `kiln.types` or
+  look needs them (with the game's font; asked again a few times, 5 s apart, while the game has not listed them yet). Until they are read, and wherever they cannot be (no `kiln.types` or
   `kiln.assets`, a build whose bundle lacks a field, a dedicated server), the game look uses a **neutral dark stand-in**
   close to the game's (greys with a soft gold accent), never the ember red. kiln.log says which (`ui: the game's UI colours
   ...`). The same holds for the font: the system font until the game's is read.

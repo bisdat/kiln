@@ -60,7 +60,7 @@ ImVec4 v4a(uint32_t c, float a) { return ImVec4(look::ch(c, 24) / 255.f, look::c
 float g_scale = 1.0f;
 
 // ---- the game's colours (read on a worker; look_palette.h) ----
-std::atomic<int> g_colors_state{0};  // 0 not asked, 1 loading, 2 read (to apply), 3 applied, 4 the stand-in for good
+std::atomic<int> g_colors_state{0};  // 0 not asked (or to try again), 1 loading, 2 read (to apply), 3 applied, 4 the stand-in for good
 look::Palette g_read_pal;            // the worker's result (published by state 2)
 std::string g_colors_note;
 
@@ -118,7 +118,7 @@ ImFont* mod_font(KilnHandle h) {
 }
 
 // ---- the game's font ----
-std::atomic<int> g_font_state{0};  // 0 not asked, 1 loading, 2 bytes ready, 3 added, 4 failed
+std::atomic<int> g_font_state{0};  // 0 not asked (or to try again), 1 loading, 2 bytes ready, 3 added, 4 failed
 std::vector<uint8_t> g_font_bytes;  // kept alive for the atlas (FontDataOwnedByAtlas = false)
 std::vector<uint8_t> g_bold_bytes;  // the same group's bold face (empty when it has none)
 ImFont* g_game_font = nullptr;
@@ -468,12 +468,26 @@ bool field_offset(const KilnTypesApi* tp, const KilnType* type, const char* path
     return false;
 }
 
+// The game's colours and font are read on one worker, at the first frame in a game-based look (or the first window that
+// asks for the game's look or font). A resource the game has not listed yet (a frame drawn before its UI data loaded) is
+// asked again 5 seconds later, at most kDataTries times in all; any other failure is final.
+constexpr int kDataTries = 4;
+std::atomic<bool> g_data_busy{false};
+std::atomic<int> g_data_tries{0};
+std::atomic<uint64_t> g_data_retry_at{0};
+bool data_retry_left() { return g_data_tries.load() < kDataTries; }
+
 void load_game_colors() {
     const uint64_t started = now_ms();
     auto fail = [](const std::string& why) {
         g_colors_note = why;
         g_colors_state = 4;
         logf(KILN_LOG_WARN, "ui: the game's UI colours are not available (%s): the game look uses its neutral stand-in", why.c_str());
+    };
+    auto not_yet = [&](const std::string& why) {
+        if (!data_retry_left()) return fail(why);
+        g_colors_note = why;
+        g_colors_state = 0;  // asked again in 5 seconds
     };
     const auto* tp = static_cast<const KilnTypesApi*>(g_api->service(KilnStr{KILN_TYPES_SERVICE, sizeof(KILN_TYPES_SERVICE) - 1}, 1));
     if (!tp || tp->header.size < offsetof(KilnTypesApi, type_field) + sizeof(void*) || !tp->type_by_name || !tp->type_info || !tp->type_field)
@@ -498,7 +512,7 @@ void load_game_colors() {
     KilnAssetKey keys[4]{};
     size_t n = 0;
     const uint32_t hash = bi.hash ? bi.hash : look::fnv1a(kBundle);
-    if (a->resource_list(hash, keys, 4, &n) != KILN_OK || n == 0) return fail("no keen::FbUiBundle resource");
+    if (a->resource_list(hash, keys, 4, &n) != KILN_OK || n == 0) return not_yet("no keen::FbUiBundle resource");
     size_t len = 0;
     a->resource_read(&keys[0], nullptr, 0, &len);
     if (len < bi.type_size || len > (16u << 20)) return fail("keen::FbUiBundle unreadable");
@@ -530,11 +544,16 @@ void load_game_font() {
         g_font_state = 4;
         logf(KILN_LOG_WARN, "ui: the game's UI font is not available (%s): game-style windows use the system font", why);
     };
+    auto not_yet = [&](const char* why) {
+        if (!data_retry_left()) return fail(why);
+        g_font_note = why;
+        g_font_state = 0;  // asked again in 5 seconds
+    };
     if (!a) return fail("kiln.assets unavailable");
     constexpr uint32_t kUiFontResource = look::fnv1a("keen::UiFontResource");
     KilnAssetKey keys[8]{};
     size_t n = 0;
-    if (a->resource_list(kUiFontResource, keys, 8, &n) != KILN_OK || n == 0) return fail("no keen::UiFontResource");
+    if (a->resource_list(kUiFontResource, keys, 8, &n) != KILN_OK || n == 0) return not_yet("no keen::UiFontResource");
     size_t len = 0;
     a->resource_read(&keys[0], nullptr, 0, &len);
     if (len < 16 || len > (1u << 20)) return fail("UiFontResource unreadable");
@@ -601,15 +620,21 @@ void load_game_font() {
     g_font_state = 2;
 }
 
-// The game's colours, then its font, on one worker (the first game-based look or game font asked for).
-std::atomic<bool> g_game_data_asked{false};
+// The game's colours, then its font, on one worker (the first game-based look or game font asked for; again while a
+// resource was not listed yet, see kDataTries).
 void ensure_game_data() {
-    if (g_game_data_asked.exchange(true)) return;
-    g_colors_state = 1;
-    g_font_state = 1;
-    std::thread([] {
-        load_game_colors();
-        load_game_font();
+    const bool colors = g_colors_state.load() == 0, font = g_font_state.load() == 0;
+    if (!colors && !font) return;
+    if (g_data_busy.load() || !data_retry_left() || now_ms() < g_data_retry_at.load()) return;
+    if (g_data_busy.exchange(true)) return;
+    g_data_tries.fetch_add(1);
+    if (colors) g_colors_state = 1;
+    if (font) g_font_state = 1;
+    std::thread([colors, font] {
+        if (colors) load_game_colors();
+        if (font) load_game_font();
+        g_data_retry_at = now_ms() + 5000;
+        g_data_busy = false;
     }).detach();
 }
 void ensure_game_font() { ensure_game_data(); }

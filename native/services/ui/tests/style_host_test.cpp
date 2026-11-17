@@ -134,8 +134,10 @@ static void put_color(size_t at, uint32_t rgba) {
     const uint32_t v = keen_of(rgba);
     std::memcpy(&g_bundle[at], &v, 4);
 }
+static std::atomic<int> g_lists{0};
 KilnResult KILN_CALL as_list(uint32_t type, KilnAssetKey* out, size_t cap, size_t* n) {
-    const bool b = type == kBundleHash;
+    // the first ask comes before the game listed its UI bundle (a frame drawn early): kiln.ui asks again 5 s later
+    const bool b = type == kBundleHash && g_lists.fetch_add(1) > 0;
     if (n) *n = b ? 1 : 0;
     if (b && out && cap) std::memset(out, 0, sizeof *out);
     return KILN_OK;
@@ -291,11 +293,18 @@ int main() {
     CHECK(i.look == KILN_UI_LOOK_GAME && i.role_count == KILN_UI_ROLE_COUNT);
     CHECK(i.roles[KILN_UI_ROLE_ACCENT] == look::neutral()[KILN_UI_ROLE_ACCENT]);
     CHECK(same(ImGui::GetStyle().Colors[ImGuiCol_CheckMark], look::neutral()[KILN_UI_ROLE_ACCENT]));
-    // the first frame asks for the game's data; the colours arrive (the font does not exist here: logged, system font)
-    for (int n = 0; n < 400 && !info().game_colors; ++n) {
+    // the first frame asks for the game's data; the bundle is not listed yet, so the stand-in stays and kiln.ui asks again
+    // 5 s later; then the colours arrive (the font does not exist here: logged, system font)
+    for (int n = 0; n < 20; ++n) {
         frame();
-        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
+    CHECK(!info().game_colors && g_lists.load() == 1);
+    for (int n = 0; n < 2000 && !info().game_colors; ++n) {
+        frame();
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    CHECK(g_lists.load() == 2);  // asked twice in all
     i = info();
     CHECK(i.game_colors == 1 && i.game_font == 0);
     CHECK(i.roles[KILN_UI_ROLE_ACCENT] == kOutline);

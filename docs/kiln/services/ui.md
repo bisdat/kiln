@@ -78,7 +78,9 @@ managed mirror is `UiNative.TableLooks`. The guide: [Looks and themes](../ui.md#
   `style.cpp`). The game look's palette comes from the game's UI bundle at run time: `keen::FbUiBundle.menu` /
   `.globalColors` colour fields (`keen::UiColor.value`, A B G R from the high byte), their offsets from `kiln.types`
   (`type_by_name`, `type_info`, `type_field`, walking base classes) and the bundle's bytes from `kiln.assets`
-  (`resource_list` with the type's hash, `resource_read`), read once on a worker with the game's font. Without them (no
+  (`resource_list` with the type's hash, `resource_read`), read on a worker with the game's font at the first frame in a
+  game-based look (asked again 5 s later, at most 4 times in all, while the game has not listed the bundle or the font
+  resource yet). Without them (no
   `kiln.types` or `kiln.assets`, a field missing, no bundle) the game look keeps a neutral dark stand-in
   (`look::neutral`): kiln.log `ui: the game's UI colours are not available (...)` or `... loaded (N of 10 colours ...)`.
 - `theme_create(owner, &KilnUiThemeDef, &handle)`: a theme (copied). `base` GAME or KILN; `roles` (by `role_mask`; R G B
