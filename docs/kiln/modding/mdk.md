@@ -179,7 +179,7 @@ is a game item's` at every start. Your new items still register. Use a fresh wor
 |---|---|
 | `native/cmake/KilnPlugin.cmake` | `kiln_plugin(<name> <sources…> [NATIVE_JSON <file>] [OUTPUT_NAME <dll>])` and the `deploy` target |
 | `native/cmake/clang-cl-xwin.cmake` | The Linux toolchain: clang-cl, lld-link and llvm-rc, with the MSVC CRT and Windows SDK from cargo-xwin |
-| `native/include/` | `kiln_api.h`, `kiln_native.h`, `services/kiln_<name>.h` |
+| `native/include/` | `kiln_api.h`, `kiln_native.h`, `services/kiln_<name>.h`, and the C++ headers `kiln_hook.hpp` (`kiln::RawHook`, `kiln::MidHook2`; since 0.2.0-dev.29.17) and the other `.hpp` helpers (`kiln_blocks_json.hpp` and `kiln_boot_collector.hpp` also need nlohmann/json, which the package does not carry) |
 
 ```sh
 kiln new native MyNative --server <server>
