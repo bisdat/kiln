@@ -1020,6 +1020,7 @@ internal static class ModManagerChrome
     private static string? _subtitle;
     private static long _subtitleAt;
     private static int _subtitleGeneration = -1;
+    private static long _subtitleVersion = -1;
 
     /// <summary>The title at (x, y) in pixels, <paramref name="size"/> pixels high; the subtitle under it (stand-alone) or
     /// right-aligned to <paramref name="right"/> on the title's line (game page).</summary>
@@ -1057,10 +1058,11 @@ internal static class ModManagerChrome
     {
         var now = Environment.TickCount64;
         var generation = KilnText.Generation;
-        if (_subtitle is not null && now - _subtitleAt < 2000 && generation == _subtitleGeneration) return _subtitle;
+        var snap = ModCatalog.Snapshot(TimeSpan.FromSeconds(2));  // the cached list (a read after a language change lands later)
+        if (_subtitle is not null && now - _subtitleAt < 2000 && generation == _subtitleGeneration && snap.Version == _subtitleVersion) return _subtitle;
         _subtitleAt = now;
         _subtitleGeneration = generation;
-        var snap = ModCatalog.Snapshot(TimeSpan.FromSeconds(2));
+        _subtitleVersion = snap.Version;
         var n = snap.Mods.Count(m => m.State == ModRunState.Loaded);
         var parts = new List<string> { $"Kiln {Game.KilnVersion}" };
         if (snap.Profile is { } p) parts.Add(p);

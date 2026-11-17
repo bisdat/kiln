@@ -29,6 +29,15 @@ internal static unsafe class Program
     private static delegate* unmanaged[Cdecl]<int, int, void> _key;
     private static delegate* unmanaged[Cdecl]<float, float, int, void> _mouse;
     private static delegate* unmanaged[Cdecl]<int, void> _page;
+    private static delegate* unmanaged[Cdecl]<int*, int*, int*, int*, void> _atlas;
+
+    /// <summary>The overlay's font atlas now: texture size, glyphs made, font sources.</summary>
+    private static string Atlas()
+    {
+        int w = 0, h = 0, g = 0, s = 0;
+        if (_atlas != null) _atlas(&w, &h, &g, &s);
+        return $"font atlas {w}x{h} ({w * h * 4 / 1024} KiB RGBA), {g} glyphs, {s} font sources";
+    }
 
     private static int Main(string[] args)
     {
@@ -47,6 +56,11 @@ internal static unsafe class Program
         var colors = Arg("--game-colors");   // the game's UI bundle and its layout (game_colors.py), else the neutral stand-in
         var layout = Arg("--game-layout");
         var only = Arg("--scene");
+        var language = Arg("--language");           // Kiln's language (kiln.json ui.language), e.g. zh-CN
+        var locales = Arg("--locales");             // the folder of its locale files (a stub translation, outside the tree)
+        var fontResource = Arg("--font-resource");  // the game's UiFontResource and its font files (game_fonts.py)
+        var fontBlobs = Arg("--font-blobs");
+        var gameLanguage = uint.Parse(Arg("--game-language", "0")!, System.Globalization.CultureInfo.InvariantCulture);
         var suffix = Arg("--suffix", $"{w}x{h}" + (scale != 1 ? $"@{scale:0.##}" : ""))!;
         Directory.CreateDirectory(outDir);
 
@@ -71,6 +85,18 @@ internal static unsafe class Program
             fixed (byte* pl = l)
                 if (setColors(pc, pl) != 0) Console.Error.WriteLine("the game's colours were not read: the game look is its neutral stand-in");
         }
+        if (fontResource is not null && fontBlobs is not null)
+        {
+            var setRes = (delegate* unmanaged[Cdecl]<byte*, byte*, int>)NativeLibrary.GetExport(lib, "kiln_preview_font_resource");
+            var r = System.Text.Encoding.UTF8.GetBytes(fontResource + "\0");
+            var d = System.Text.Encoding.UTF8.GetBytes(fontBlobs + "\0");
+            fixed (byte* pr = r)
+            fixed (byte* pd = d)
+                if (setRes(pr, pd) != 0) Console.Error.WriteLine("the game's font resource was not read");
+        }
+        ((delegate* unmanaged[Cdecl]<uint, void>)NativeLibrary.GetExport(lib, "kiln_preview_game_language"))(gameLanguage);
+        _atlas = (delegate* unmanaged[Cdecl]<int*, int*, int*, int*, void>)NativeLibrary.GetExport(lib, "kiln_preview_atlas");
+        if (locales is not null) KilnText.Directory = Path.GetFullPath(locales);
         nint table;
         var fontBytes = System.Text.Encoding.UTF8.GetBytes((font ?? "") + "\0");
         fixed (byte* f = fontBytes) table = _open(w, h, scale, font is null ? null : f, null);
@@ -102,7 +128,8 @@ internal static unsafe class Program
                 KilnRoot = Path.Combine(root, "kiln"), KilnMods = () => kilnMods, Side = "client", ProcessStartUtc = DateTime.UtcNow.AddMinutes(-5),
             };
             ModCatalog.WaitForSnapshot();
-            PlayerLook.Use(scene.Look ?? LookSettings.Default);  // the player's look of this scene
+            var look = scene.Look ?? LookSettings.Default;
+            PlayerLook.Use(language is null ? look : look with { Language = language });  // the player's look (and language) of this scene
             Samples.Windows(scene.Windows);
             var page = ModManagerHost.Page;
             page.Section = scene.Section;
@@ -118,6 +145,28 @@ internal static unsafe class Program
             for (var i = 0; i < 4; i++) px = _frame(menu);
             Thread.Sleep(250);  // the game font loads on a worker (style.cpp), as in the game
             for (var i = 0; i < 4; i++) px = _frame(menu);
+            if (language is not null && KilnText.NeedsGlyphs(language))
+            {
+                // the language group's font loads on a worker too; Kiln's texts stay English until it joined the atlas
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                while (KilnText.Gated && sw.ElapsedMilliseconds < 60000)
+                {
+                    px = _frame(menu);
+                    Thread.Sleep(20);
+                }
+                var ready = sw.ElapsedMilliseconds;
+                sw.Restart();
+                px = _frame(menu);  // the first frame in the language: its glyphs are made as they are drawn
+                Console.WriteLine($"{scene.Name}: {language} glyphs ready after {ready} ms{(KilnText.Gated ? " (NOT READY: English)" : "")}; " +
+                                  $"first frame in it {sw.ElapsedMilliseconds} ms; {Atlas()}");
+                // the mod list's sentences are made in the language of its read: read again in this one
+                for (var n = 0; n < 250 && ModCatalog.Snapshot(TimeSpan.FromHours(1)).Generation is { } g && g != KilnText.Generation; n++)
+                {
+                    px = _frame(menu);
+                    Thread.Sleep(20);
+                }
+                for (var i = 0; i < 3; i++) px = _frame(menu);
+            }
             foreach (var (key, times) in scene.Keys)
                 for (var t = 0; t < times; t++)
                 {
@@ -127,9 +176,9 @@ internal static unsafe class Program
                     _frame(menu);
                 }
             for (var i = 0; i < 3; i++) px = _frame(menu);
-            var file = Path.Combine(outDir, $"{scene.Name}-{suffix}.png");
+            var file = Path.Combine(outDir, $"{scene.Name}{(language is null ? "" : "-" + language)}-{suffix}.png");
             WritePng(file, px, w, h);
-            Console.WriteLine($"{file}  ({ModCatalog.Snapshot(TimeSpan.FromHours(1)).Mods.Count} mods)");
+            Console.WriteLine($"{file}  ({ModCatalog.Snapshot(TimeSpan.FromHours(1)).Mods.Count} mods; {Atlas()})");
             if (scene.Summary) File.WriteAllText(Path.ChangeExtension(file, ".txt"), ModCatalog.Summary(ModCatalog.Snapshot(TimeSpan.FromHours(1))));
             rendered++;
         }
