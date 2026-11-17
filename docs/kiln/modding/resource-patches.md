@@ -34,8 +34,8 @@ A start in which the game's resource service was already up before the boot gene
 - `resource`: the resource's GUID. `type`: its qualified type name. `part`: the part index, 0 when left out.
   [Typed fields](typed-fields.md), "Any resource", shows how to list a type's resources and their members.
 - `set`: member path to value.
-- A patch needs at least one change: `set`, or `append`, `addComponents`, `removeComponents` (below). A member the patch
-  does not know (`"sett"`) is refused.
+- A patch needs at least one change: `set`, or `clear`, `replace`, `append`, `addComponents`, `removeComponents`,
+  `copyComponents` (below). A member the patch does not know (`"sett"`) is refused.
 - The file is read as every blocks file is: comments (`//`, `/* */`) and trailing commas are fine.
 
 ## Paths
@@ -48,8 +48,8 @@ A start in which the game's resource service was already up before the boot gene
 | `list[*]` | every element of the list, however many this game build has |
 
 A path must end in a number, a bool or an enum. Strings, references to other resources and whole structs cannot be
-patched. A list is made longer with `append`, a template's components changed with `addComponents` and
-`removeComponents` (below).
+set. A list is emptied with `clear`, given new values with `replace` and made longer with `append`; a template's
+components are changed with `addComponents`, `removeComponents` and `copyComponents` (below).
 
 ## Values
 
@@ -88,14 +88,20 @@ public override void OnBoot(BootContext boot)
 ## Templates and lists
 
 Besides `set`, a patch can change the shape of a resource. These are made first, in this order, and `set` then works
-on the result (on one resource, every patch's `removeComponents` come first, then every `addComponents`, then every
-`append`, then every `set`, each group in load order):
+on the result: `removeComponents`, `addComponents`, `copyComponents`, `clear`, `replace`, `append`, `set`. On one
+resource every patch's `removeComponents` come first, then every patch's `addComponents`, and so on, each group in load
+order. The order in which a patch writes its keys does not matter.
 
 | Key | On | Does |
 |---|---|---|
 | `removeComponents` | a template (`keen::ecs::TemplateResource`) | takes out the components of these types (`"SpawnTime"`); one the template hasn't got is skipped. `CurrentTransform`, and what an actor needs to live, are refused. |
 | `addComponents` | a template | gives it components of these game types (`"PickupItemZone"`), zeroed; one it has already stays as it is. The list stays sorted by type name, as the game's lists are. |
-| `append` | a list of numbers, bools or enum members | adds `values` at its end. `"aboveLast": true` adds only a value greater than the list's last (the last added counts), so a sorted list stays sorted and values the game's list already reaches are left out. The path names one list: `[i]` on the way is fine, `[*]` is not. A value is plain: `{ "mul": 2 }` has no game's value to change and is refused. |
+| `copyComponents` | a template | `{ "<component type>": "<template GUID>" }`: copies the whole component, with all its data (references, nested structs, lists, strings, variants), from that other template. Added when the template has none of that type, its own (the first of that type) replaced when it has. The source must have the component. `CurrentTransform` is refused, and on a template that is an actor so is what an actor needs to live. The source is read as the game has it, before any resource patch of this start: another patch on the source template does not carry over. `set` and `append` paths on the copied component then apply. |
+| `clear` | lists of anything | `["<list path>", …]`: each list made empty, whatever its elements are (structs, references, numbers). |
+| `replace` | a list of numbers, bools or enum members | `{ "<list path>": { "values": [ … ] } }`: the list holds exactly these values afterwards, as many as given (fewer or more than before). At least one value; to empty a list use `clear`. A value is plain. |
+| `append` | a list of numbers, bools or enum members | adds `values` at its end. `"aboveLast": true` adds only a value greater than the list's last (the last added counts), so a sorted list stays sorted and values the game's list already reaches are left out. A value is plain: `{ "mul": 2 }` has no game's value to change and is refused. |
+
+A list path of `clear`, `replace` or `append` names one list: `[i]` on the way is fine, `[*]` is not.
 
 On a template, a `set` or `append` path starts with a component's type name, as template paths do elsewhere
 (`"PickupItemZone.lastAttempt.value"`, `"Gravity.isActive"`); that is how the fields of an added component are filled in.
@@ -128,9 +134,62 @@ In C#: `RemoveComponents = ["SpawnTime"]`, `AddComponents = ["PickupItemZone"]`,
 
 (`9bf5aac3-…` is the template `LootPickup_Gravity_Twigs`.)
 
+Copying a component, clearing a list, replacing a list's values (the mod API 0.2.9 and later):
+
+```json
+{
+  "format": 1,
+  "resourcePatches": {
+    "area-deposit-chest": {
+      "resource": "65baa890-022a-454b-9cb7-b92cb8c06cd4",
+      "type": "keen::ecs::TemplateResource",
+      "copyComponents": { "InventoryCraftingStock": "955ba32f-08ea-414d-bd98-ac75990aef04" }
+    },
+    "build-anywhere": {
+      "resource": "509feadb-4c60-425f-9c7c-deeefd9b6920",
+      "type": "keen::SceneResource",
+      "clear": ["noBuildZones", "resetPlayersOutOfBounds.playableAreas"]
+    },
+    "damage-steps": {
+      "resource": "46e14df6-fb8f-4f66-9463-e23b9e19e48e",
+      "type": "keen::FbUiBundle",
+      "replace": { "difficultySettings.settingValues.enemyDamage.steps": { "values": [0.25, 0.5, 1, 2, 4] } }
+    }
+  }
+}
+```
+
+(`65baa890-…` is `Prop_Decoration_T1_Storage_24`, `955ba32f-…` the Magic chest `Prop_Decoration_T1_Storage_24_Magic`;
+`509feadb-…` is the world's `keen::SceneResource`, on the client and on a dedicated server, with 8 no-build zones and 14
+playable areas in November 2026; `names:resources/keen::SceneResource` lists a build's scenes, see
+[Reading the game's data](onboot.md#reading-the-games-data). `46e14df6-…` is the client's `keen::FbUiBundle`, which a
+dedicated server does not have: a patch of it belongs in a mod that runs on the client.)
+
+```csharp
+var d = BootDefinitions.For(boot);
+d.Define("area-deposit-chest", new ResourcePatchBlock
+{
+    Resource = Guid.Parse("65baa890-022a-454b-9cb7-b92cb8c06cd4"), Type = "keen::ecs::TemplateResource",
+    CopyComponents = new() { ["InventoryCraftingStock"] = Guid.Parse("955ba32f-08ea-414d-bd98-ac75990aef04") },
+});
+d.Define("build-anywhere", new ResourcePatchBlock
+{
+    Resource = Guid.Parse("509feadb-4c60-425f-9c7c-deeefd9b6920"), Type = "keen::SceneResource",
+    Clear = ["noBuildZones", "resetPlayersOutOfBounds.playableAreas"],
+});
+d.Define("damage-steps", new ResourcePatchBlock
+{
+    Resource = Guid.Parse("46e14df6-fb8f-4f66-9463-e23b9e19e48e"), Type = "keen::FbUiBundle",
+    Replace = new() { ["difficultySettings.settingValues.enemyDamage.steps"] = new ResourceListReplace { Values = [0.25, 0.5, 1, 2, 4] } },
+});
+```
+
 How it is done: the changed resource is the copy Kiln serves (the game's own bytes stay as they were). A moved list and
 an added component's data go behind the resource's bytes; every offset in the game's data is self-relative, so nothing
-else has to move.
+else has to move. A copied component's data and everything it points at (its lists, strings, optionals, variants, and
+theirs) are laid out behind the bytes the same way, each offset made relative to its new place; the component's layout
+comes from the game's reflection (kiln.types). A cleared list keeps nothing; a replaced list gets a new place behind the
+bytes, as an appended one does.
 
 ### Two mods on one resource
 
@@ -144,6 +203,14 @@ comes later in the load order is refused before the game starts, and the report 
 - one mod appends to a list and another sets every element of it with `[*]` (the `[*]` would change the appended values
   too). Another mod's `[i]` on that list is fine: an index names the same element either way. Within one mod, `set`
   works on the list as its own `append` left it;
+- one mod copies a component that another removes, or two mods copy one component from different templates (the same
+  copy from both is fine). One mod's `addComponents` and another's copy of that component are fine: the copy is made
+  after the add, so the copied data is what the template gets; another mod's `set` on a copied component is fine too;
+- two mods clear or replace one list, unless both make the same change (two `clear`s, or two `replace`s with the same
+  values, are combined);
+- one mod clears or replaces a list and another appends to it, sets one or all of its elements (`list[2]`, `list[*]`),
+  or names a path through it (`list[2].x`, a list inside its elements): the elements the other mod counts on are gone or
+  others. Within one mod this is fine: its `clear` or `replace`, then its `append`, then its `set` are made in that order;
 - a path that names a component by its place (`"components[2]…"`) on a template whose components a patch changes.
 
 Paths are compared as the game reads them: case does not matter, `list[03]` is `list[3]`, and a trailing `.` is dropped.
@@ -153,13 +220,16 @@ Paths are compared as the game reads them: case does not matter, `list[03]` is `
 Before the game starts (a mistake here keeps your mod's boot content out, or stops the start when your mod says
 `"boot": "required"`):
 
-- the patch's shape: `resource` is a GUID, at least one change, no unknown member, `append`'s `values` plain and not
-  empty, at most 4,096 changes in one start (every field set, list appended to, and component added or removed counts);
-- the type exists in this game build, and a path names real members and ends in a scalar (`set`) or in a list of
-  numbers, bools or enum members (`append`, whose values must fit the list's elements);
-- on a template: a component named in `addComponents`, `removeComponents` or at the start of a path is a component type
-  of the game's (`keen::ecs::Component` itself, or a base type that is no component of its own, is refused), the rest
-  of the path is checked against that component's members, and `removeComponents` never takes `CurrentTransform`;
+- the patch's shape: `resource` is a GUID, at least one change, no unknown member, the values of `append` and `replace`
+  plain and not empty, `copyComponents` naming another template by its GUID, at most 4,096 changes in one start (every
+  field set, list cleared, replaced or appended to, and component added, removed or copied counts one);
+- the type exists in this game build, and a path names real members and ends in a scalar (`set`), in a list of
+  numbers, bools or enum members (`append`, `replace`, whose values must fit the list's elements) or in a list of
+  anything (`clear`);
+- on a template: a component named in `addComponents`, `removeComponents`, `copyComponents` or at the start of a path is
+  a component type of the game's (`keen::ecs::Component` itself, or a base type that is no component of its own, is
+  refused), the rest of the path is checked against that component's members, and neither `removeComponents` nor
+  `copyComponents` takes `CurrentTransform`;
 - the value fits the member (an operation on a bool or an enum is refused);
 - no other mod's patch steps on it ([Two mods on one resource](#two-mods-on-one-resource)).
 
@@ -172,8 +242,13 @@ When the write is made (the game's data is in memory only then):
 - the template has the component a path starts at (one of the game's, or added by a patch), and an index like `[25]`
   is inside the list. `[*]` on an empty list changes nothing and is not an error;
 - `removeComponents` does not take what an actor needs to live (`Actor`, `NetworkActor`, its transforms, …) from a
-  template that is an actor;
-- the template's component list and the list an `append` names can be read, and the patched resource stays below 64 MiB;
+  template that is an actor, and `copyComponents` does not copy one of those over onto it;
+- the template `copyComponents` copies from exists and has the component, and everything of the component can be
+  copied: every member's type is in the game's reflection (a variant of a type it does not name, or one of the
+  editor's own `Ds…` kinds, is refused rather than guessed), and every list, string and variant lies inside the source's
+  bytes;
+- the template's component list and the list a `clear`, `replace` or `append` names can be read, and the patched
+  resource stays below 64 MiB;
 - kiln.assets takes the patched copy.
 
 A patch is applied whole or not at all. If any of its changes fails then, none of them is kept: Kiln builds the
@@ -190,3 +265,74 @@ failed). The start goes on without that patch. If your mod is `"boot": "required
 - A patch lasts for the run of the game. It is not written to disk and not stored in a save.
 - The game's own hard limits still hold. Example: the game never allows more than 16 Flame Altars, whatever the table
   says.
+
+## Example: three changes of a data mod, in Kiln
+
+A data mod that edits the game's archive often does three kinds of thing at once. Here is how each looks as a resource
+patch (the EMBER mod's area deposit, Build Anywhere / No Boundary, and longer difficulty sliders; mod API 0.2.9). The
+mod says `"boot": true` and `"side": "both"` in its kiln.mod.json, so its patches are made in the server's process and
+in each player's game.
+
+```csharp
+public override void OnBoot(BootContext boot)
+{
+    var d = BootDefinitions.For(boot);
+
+    // 1. Every storage chest and crafting station takes area deposits: the Magic chest's InventoryCraftingStock,
+    //    copied whole onto each template with Furniture or FactoryStation that has an inventory and has none of its own.
+    var magic = Guid.Parse("955ba32f-08ea-414d-bd98-ac75990aef04");  // Prop_Decoration_T1_Storage_24_Magic
+    var guidOf = boot.GameData.Read("names:resources/keen::ecs::TemplateResource").Data!.Value
+        .GetProperty("resources").EnumerateArray()
+        .GroupBy(r => r.GetProperty("name").GetString()!)
+        .ToDictionary(g => g.Key, g => Guid.Parse(g.First().GetProperty("resourceId").GetString()!));
+    var stocked = Names(boot, "names:templates/InventoryCraftingStock");
+    var storage = Names(boot, "names:templates/InventorySetup");
+    var i = 0;
+    foreach (var name in Names(boot, "names:templates/Furniture").Union(Names(boot, "names:templates/FactoryStation")))
+        if (storage.Contains(name) && !stocked.Contains(name) && guidOf.TryGetValue(name, out var template))
+            d.Define($"deposit-{i++}", new ResourcePatchBlock
+            {
+                Resource = template, Type = "keen::ecs::TemplateResource",
+                CopyComponents = new() { ["InventoryCraftingStock"] = magic },
+            });
+
+    // 2. Build anywhere, no world boundary: every scene's no-build zones and playable areas cleared.
+    var s = 0;
+    foreach (var scene in boot.GameData.Read("names:resources/keen::SceneResource").Data!.Value.GetProperty("resources").EnumerateArray())
+        d.Define($"scene-{s++}", new ResourcePatchBlock
+        {
+            Resource = Guid.Parse(scene.GetProperty("resourceId").GetString()!), Type = "keen::SceneResource",
+            Clear = ["noBuildZones", "resetPlayersOutOfBounds.playableAreas"],
+        });
+
+    // 3. The difficulty slider's steps: 32 values instead of the game's few. The FbUiBundle is the game client's
+    //    (a dedicated server has none), so only where there is one.
+    if (boot.GameData.Read("names:resources/keen::FbUiBundle").Ok)
+        d.Define("damage-steps", new ResourcePatchBlock
+        {
+            Resource = Guid.Parse("46e14df6-fb8f-4f66-9463-e23b9e19e48e"), Type = "keen::FbUiBundle",
+            Replace = new()
+            {
+                ["difficultySettings.settingValues.enemyDamage.steps"] = new ResourceListReplace
+                {
+                    Values = Enumerable.Range(1, 32).Select(x => (ResourceValue)(x * 0.25)).ToList(),
+                },
+            },
+        });
+}
+
+static HashSet<string> Names(BootContext boot, string key)
+{
+    var r = boot.GameData.Read(key);
+    return r.Ok ? r.Data!.Value.GetProperty("names").EnumerateArray().Select(n => n.GetString()!).ToHashSet() : [];
+}
+```
+
+- `names:resources/<type>` lists every resource of a type with its GUID and name; `names:templates/<component>` the
+  templates that have that component (see [Reading the game's data](onboot.md#reading-the-games-data)). Both need the
+  boot snapshot (`mods.boot.game_data`); a mod that can do without checks the row first.
+- The same patches can be written in a blocks file (`copyComponents`, `clear`, `replace`), one per resource, when the
+  list of resources is fixed.
+- Every patch counts against the 4,096 changes of a start; a hundred chests are a hundred changes.
+- Other settings sliders (`enemyHealth`, `playerHealth`, …) are siblings of `enemyDamage` under
+  `difficultySettings.settingValues`; each is its own `replace` path.
