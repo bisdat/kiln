@@ -146,4 +146,14 @@ public sealed class GameNamesTests : IDisposable
         Assert.Null(GameNames.Text(6));                                       // an empty text is no name
         Assert.Null(GameNames.Text(0));
     }
+
+    [Fact]
+    public void ARetriedReadWaitsLongerEachTimeUpToItsLimit()
+    {
+        // the game's names (30 s, doubling to 10 min) and their language tables (5 s to 5 min) back off with RetryDelay
+        Assert.Equal(0, RetryDelay.Of(0, 30_000, 600_000));
+        Assert.Equal([30_000L, 60_000, 120_000, 240_000, 480_000, 600_000, 600_000],
+            Enumerable.Range(1, 7).Select(n => RetryDelay.Of(n, 30_000, 600_000)));
+        Assert.Equal(300_000, RetryDelay.Of(1_000, 5_000, 300_000));         // no overflow however many failures
+    }
 }

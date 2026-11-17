@@ -198,8 +198,10 @@ internal static class GameNames
     private static Loaded? _data;
     private static Task? _loading;
     private static long _failedAt;
+    private static int _failures;
     private static (string Language, Dictionary<uint, string>? Texts)? _texts;
     private static Task? _textsLoading;
+    private static (string Language, long At, int Failures) _textsFailed;  // a language whose table could not be read yet
     private static readonly Dictionary<uint, uint> ItemTags = new();
 
     /// <summary>Tests: the data to answer from (null: the game's again).</summary>
@@ -227,6 +229,8 @@ internal static class GameNames
             _texts = null;
             _loading = _textsLoading = null;
             _failedAt = 0;
+            _failures = 0;
+            _textsFailed = default;
             ItemTags.Clear();
             LanguageOverride = null;
         }
@@ -235,7 +239,8 @@ internal static class GameNames
     /// <summary>The language the texts are wanted in: the game's ("de-de") on a client, "en-us" on a server.</summary>
     public static string Language => LanguageOverride?.Invoke() ?? GameLanguageSource.Current();
 
-    /// <summary>The game's data, or null while it loads (started here) or when it cannot be read (retried after 30 s).</summary>
+    /// <summary>The game's data, or null while it loads (started here) or when it cannot be read (tried again after 30 s,
+    /// then after twice as long each time, at most 10 minutes).</summary>
     private static Loaded? Data(bool wait = false)
     {
         Task? task;
@@ -244,7 +249,7 @@ internal static class GameNames
             if (_data != null) return _data;
             if (_loading == null)
             {
-                if (_failedAt != 0 && Environment.TickCount64 - _failedAt < 30_000) return null;
+                if (_failedAt != 0 && Environment.TickCount64 - _failedAt < RetryDelay.Of(_failures, 30_000, 600_000)) return null;
                 _loading = Task.Run(LoadData);
             }
             task = _loading;
@@ -291,6 +296,7 @@ internal static class GameNames
             _data = d;
             _loading = null;
             _failedAt = d == null ? Environment.TickCount64 : 0;
+            _failures = d == null ? _failures + 1 : 0;
         }
     }
 
@@ -316,6 +322,9 @@ internal static class GameNames
         lock (Gate)
         {
             if (_texts is { } t && t.Language == lang) return t.Texts is { } m && m.TryGetValue(tag, out var s) && s.Length > 0 ? s : null;
+            // a table that could not be read (the game has not opened its content index yet): again after 5 s, doubling, at most 5 min
+            if (_textsFailed.Language == lang && Environment.TickCount64 - _textsFailed.At < RetryDelay.Of(_textsFailed.Failures, 5_000, 300_000))
+                return null;
             if (_textsLoading == null && Data() is { Collection: not null } d)
             {
                 var want = lang;
@@ -340,7 +349,12 @@ internal static class GameNames
         }
         lock (Gate)
         {
-            _texts = (lang, table);
+            if (table != null)
+            {
+                _texts = (lang, table);
+                _textsFailed = default;
+            }
+            else _textsFailed = (lang, Environment.TickCount64, _textsFailed.Language == lang ? _textsFailed.Failures + 1 : 1);
             _textsLoading = null;
         }
     }
