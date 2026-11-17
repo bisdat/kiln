@@ -81,8 +81,11 @@ void set_error(const char* fmt, ...);
 KilnHandle next_handle();                    // one handle space for every kiln.ui subscription (any thread)
 extern std::atomic<uint32_t> g_hover_panels; // Kiln panels that take the mouse only while it is over them
 
-// ---- chat_input_probe.cpp (issue 44: opt-in read-only call-site validation) ----
-bool chat_input_probe_install();  // disabled unless KILN_CHAT_INPUT_PROBE=1
+// ---- chat_input_probe.cpp (issue 44: read-only probe or opt-in Up/Down history) ----
+bool chat_input_probe_install(); // enabled by KILN_CHAT_INPUT_PROBE=1 or KILN_CHAT_HISTORY=1
+bool chat_input_on_key(uint32_t vk, uint32_t mods, bool down); // WndProc thread; focus-gated
+void chat_input_window_blur(); // WndProc thread; clear pending history keys
+void chat_input_frame_end(); // game's UI thread; recompute chat edit focus
 
 // ---- input.cpp ----
 void input_install_iat();       // SetCursorPos / ClipCursor slots of the game exe (plugin main)
