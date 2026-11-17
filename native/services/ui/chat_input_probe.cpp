@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
-// Issue #44: validated HUD/Social call-site probe and opt-in native Up/Down history.
-// KILN_CHAT_INPUT_PROBE=1: call sites only (read-only).
-// KILN_CHAT_HISTORY_DIAG=1: read-only key / submit diagnostics (no text logged).
-// KILN_CHAT_HISTORY=1: interactive preview command recall.
-// All game edit operations are scoped to the two confirmed chat call sites.
+// Chat history (GitHub issue 44, first built by bisdat): Up/Down in the game's HUD and Social chat field recall lines
+// the player sent; commands are kept in kiln/data/kiln.ui/chat-history.json. Off unless kiln.json "ui":
+// {"chatHistory": true}; diagnostics through the environment (chat_input_probe_install). Game side:
+// docs/re/chat-input.md; player side: docs/kiln/chat-history.md. Every game call and read is scoped to the two chat
+// call sites of TextInputProcess, on the game's UI thread; the window thread only queues keys (ChatInputSink).
 #include <windows.h>
 #include <atomic>
 #include <cstdint>
@@ -245,9 +245,7 @@ void history_before(void* widget, bool hud) {
     void* state = game_state(widget);
     if (!editing(state)) return;
     std::string current;
-    // The private edit bytes were proven NOT to be the visible chat string
-    // (3 control bytes in the exact game build). Only use the validated
-    // caller-owned widget buffer for the live draft and submitted text.
+    // The editor's own text is UTF-32 (docs/re/chat-input.md): the draft and the sent line are the caller's string.
     if (!widget_text(widget, &current)) return;
     // A widget readback can legitimately differ for a frame as Enshrouded
     // reconciles the native edit state. A mismatch alone does NOT mean the
