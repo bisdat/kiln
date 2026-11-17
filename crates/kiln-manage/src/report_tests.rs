@@ -654,6 +654,7 @@ fn a_linked_game_file_is_not_followed() {
 /// Review R2: one Greeneye id with logs in two folders (the Library entry it runs from, and a copy that stays in
 /// greeneye/) gave two zip entries of one name, and "Save report" failed with "Duplicate filename".
 #[test]
+#[cfg(feature = "zip")]
 fn one_greeneye_id_in_two_folders_saves_as_a_zip() {
     let f = Fx::healthy("greeneye-two-folders");
     let lib = f.root.join("data/library/greeneye/unlock-map-markers/1.3.48+cccccccc");
