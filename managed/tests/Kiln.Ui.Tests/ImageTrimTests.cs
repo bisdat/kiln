@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
-// Trimmed and part-of-image draws (0.2.0-dev.29.16): UiDraw.ItemIcon(item, size, trim: true), Image / ImageButton with trim
-// or UVs, RenderDraw's trimmed quad (ImageTrim), and kiln.ui's image_ex tail layout. A fake kiln.ui table records what reaches
+// Trimmed and part-of-image draws (0.2.0-dev.29.16): UiDraw.ItemIconTrimmed, ImageTrimmed / ImageButtonTrimmed, ImagePart
+// (UVs), RenderDraw's trimmed quad (ImageTrim), and kiln.ui's image_ex tail layout. A fake kiln.ui table records what reaches
 // the native side; no game.
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -94,7 +94,8 @@ public sealed unsafe class ImageTrimTests : IDisposable
     /// <summary>The icon loaded (the first draw shows the placeholder while it reads).</summary>
     private static void Warm(UiDraw ui, bool trim)
     {
-        ui.ItemIcon(Item, 40, trim);
+        if (trim) ui.ItemIconTrimmed(Item, 40);
+        else ui.ItemIcon(Item, 40);
         ExCalls.Clear();
         Plain.Clear();
     }
@@ -104,7 +105,7 @@ public sealed unsafe class ImageTrimTests : IDisposable
     {
         var ui = NewUi();
         Warm(ui, trim: true);
-        ui.ItemIcon(Item, 40, trim: true);
+        ui.ItemIconTrimmed(Item, 40);
         var c = Assert.Single(ExCalls);
         Assert.Equal(UiNative.ImageDrawTrim | UiNative.ImageDrawFit, c.Flags);
         Assert.Equal((40f, 40f), (c.Width, c.Height));
@@ -121,7 +122,7 @@ public sealed unsafe class ImageTrimTests : IDisposable
         var ui = NewUi();
         Warm(ui, trim: false);
         ui.ItemIcon(Item, 40);
-        ui.ItemIcon(Item, 40, trim: false);
+        ui.ItemIcon(Item, 40);  // drawn again: the same
         Assert.Empty(ExCalls);
         Assert.Equal(2, Plain.Count);
         Assert.All(Plain, p => Assert.Equal((40f, 40f), (p.Width, p.Height)));
@@ -132,7 +133,7 @@ public sealed unsafe class ImageTrimTests : IDisposable
     public void The_placeholder_is_drawn_trimmed_too_and_fills_the_box()
     {
         var ui = NewUi();
-        ui.ItemIcon(Item, 32, trim: true);  // still loading on this draw
+        ui.ItemIconTrimmed(Item, 32);  // still loading on this draw
         var c = Assert.Single(ExCalls);
         Assert.Equal(ItemIcons.Placeholder(), c.Image);
         Assert.Equal((32f, 32f), (c.Width, c.Height));
@@ -144,7 +145,7 @@ public sealed unsafe class ImageTrimTests : IDisposable
         UiNative.ImageExOverride = null;  // the fake kiln.ui is a v4 table: no image_ex
         var ui = NewUi();
         Warm(ui, trim: true);
-        ui.ItemIcon(Item, 40, trim: true);
+        ui.ItemIconTrimmed(Item, 40);
         Assert.Empty(ExCalls);
         Assert.Equal((40f, 40f), (Plain.Single().Width, Plain.Single().Height));
     }
@@ -154,12 +155,12 @@ public sealed unsafe class ImageTrimTests : IDisposable
     {
         var ui = NewUi();
         var mine = new UiImage { Handle = 9, Width = 64, Height = 32 };
-        ui.Image(mine, 40, 20, trim: true);
-        ui.Image(mine, 40, 20, trim: false);
-        ui.Image(mine, 0, 0, 0.5f, 0, 1, 0.5f);       // the top right quarter at its own size
-        ui.Image(mine, 10, 10, 0, 0, 0, 0);           // all 0: the whole image
+        ui.ImageTrimmed(mine, 40, 20);
+        ui.Image(mine, 40, 20);
+        ui.ImagePart(mine, 0, 0, 0.5f, 0, 1, 0.5f);       // the top right quarter at its own size
+        ui.ImagePart(mine, 10, 10, 0, 0, 0, 0);       // all 0: the whole image
         _clicks = true;
-        Assert.True(ui.ImageButton("pick", mine, 24, 24, trim: true));
+        Assert.True(ui.ImageButtonTrimmed("pick", mine, 24, 24));
         Assert.Equal(4, ExCalls.Count);
         Assert.Equal(new ExCall("", 9, UiNative.ImageDrawTrim | UiNative.ImageDrawFit, 40, 20, 0, 0, 0, 0), ExCalls[0]);
         Assert.Equal((9ul, 40f, 20f), Plain.Single());  // untrimmed: image as it always was
@@ -173,8 +174,8 @@ public sealed unsafe class ImageTrimTests : IDisposable
     {
         var ui = NewUi();
         var img = ItemIcons.View(Item)!;  // what Ui.ItemImage hands out
-        ui.Image(img, 40, 40, trim: true);
-        ui.Image(img, 40, 40, trim: true);
+        ui.ImageTrimmed(img, 40, 40);
+        ui.ImageTrimmed(img, 40, 40);
         Assert.Equal(2, ExCalls.Count);
         Assert.All(ExCalls, c => Assert.Equal(UiNative.ImageDrawTrim | UiNative.ImageDrawFit, c.Flags));
         Assert.NotEqual(ExCalls[0].Image, ExCalls[1].Image);  // the placeholder, then the icon
