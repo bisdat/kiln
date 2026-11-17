@@ -32,6 +32,7 @@ RESOURCES_DATA = "resources.data"
 VALUE_MAX = 4 * 1024 * 1024 - 256  # KILN_BOOT_RESULT_MAX less 256 bytes for the result wrapper
 INDEX_MAX = 32 * 1024 * 1024
 DATA_MAX = 1024 * 1024 * 1024
+RESOURCES_DATA_MAX = DATA_MAX       # resources.data: past it no further value is stored (the list and the kinds still are)
 STALE_TMP_SECONDS = 3600            # a .tmp directory of a process that may still run is left alone this long
 
 
@@ -553,6 +554,7 @@ def write_resources(src, out_dir, skipped, stored=(), progress=None):
             continue
         todo += [(name, key) for key, _ in entries if key not in stored]
     where = {}
+    full = 0  # values not stored because resources.data reached RESOURCES_DATA_MAX
     total = sum(len(e) for _, e in types.values())
     with open(out_dir / RESOURCES_DATA, "xb") as data:
         at = 0
@@ -574,8 +576,9 @@ def write_resources(src, out_dir, skipped, stored=(), progress=None):
             if len(raw) > VALUE_MAX:
                 skipped.append({"kind": "resources", "name": label, "reason": "over 4 MiB"})
                 continue
-            if at + len(raw) > DATA_MAX:
-                raise SnapshotError(f"{RESOURCES_DATA} exceeds its 1 GiB data budget")
+            if at + len(raw) > RESOURCES_DATA_MAX:  # full: this and later values are listed without one, the rest stands
+                full += 1
+                continue
             data.write(raw)
             where[key] = (at, len(raw))
             at += len(raw)
@@ -583,6 +586,9 @@ def write_resources(src, out_dir, skipped, stored=(), progress=None):
                 progress("resources", i + 1, len(todo))
         data.flush()
         os.fsync(data.fileno())
+    if full:
+        skipped.append({"kind": "resources", "name": "",
+                        "reason": f"{RESOURCES_DATA} reached its {RESOURCES_DATA_MAX >> 20} MiB budget: {full} more value(s) not stored"})
     out = {}
     for name in sorted(types):
         th, entries = types[name]

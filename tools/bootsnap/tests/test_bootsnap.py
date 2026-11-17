@@ -979,6 +979,26 @@ class SnapshotTests(unittest.TestCase):
         finally:
             src.close()
 
+    def test_resource_values_past_the_data_budget_are_listed_without_a_value(self):
+        # review: crossing the budget of resources.data must not cost the snapshot; later values are not stored
+        real = snapshot.RESOURCES_DATA_MAX
+        snapshot.RESOURCES_DATA_MAX = 1
+        try:
+            r = self.make()
+        finally:
+            snapshot.RESOURCES_DATA_MAX = real
+        self.assertEqual(r["status"], "made")
+        d = Path(r["path"])
+        idx = json.loads((d / "index.json").read_text())
+        self.assertGreater(idx["counts"]["templates"], 0, "the classic kinds are written")
+        self.assertGreater(idx["counts"]["resources"], 0, "the list is written")
+        lines = [x for x in idx["skipped"] if x["kind"] == "resources" and "budget" in x["reason"]]
+        self.assertEqual(len(lines), 1, idx["skipped"])
+        self.assertEqual((d / snapshot.RESOURCES_DATA).stat().st_size, 0)
+        ix = json.loads((d / snapshot.RESOURCES).read_text())
+        self.assertTrue(all(e[3] == -1 and e[4] == 0 for t in ix["types"].values() for e in t["entries"]))
+        self.assertTrue(snapshot.valid(d, self.key()))
+
     def test_a_resource_list_over_the_index_budget_is_written_empty(self):
         real = snapshot._write_json
         def small(path, obj):
