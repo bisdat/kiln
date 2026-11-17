@@ -188,6 +188,15 @@ resource's live loaded bytes (a Kiln override/new resource if registered, else t
 the next tick — for workers that read lots of game resource data cheaply (gamedata, abilities, creatures). Do not
 write through it.
 
+Since 0.2.0-dev.29.15 (check `header.size >= offsetof(KilnAssetsApi, texture_rgba) + sizeof(void*)`): `texture_rgba(key,
+min_side, rgba, cap, &w, &h)`, a texture resource's pixels as the game reads them now (`keen::UiTextureResource` or
+`keen::RenderTextureResource`, a retexture or a mod's icon included), one mip level (the smallest whose sides are both at least
+`min_side`) decoded to RGBA8 (RGBA8, BGRA8, R8, BC1, BC3, BC4, BC5, BC7; others `KILN_ERR_INVALID_ARGUMENT`). Ask the size
+first (`rgba` NULL: `KILN_ERR_BUFFER_TOO_SMALL` with the size, no pixel read). It reads that one blob (an item icon's chain is
+87 KB). Kiln.Ui draws the game's item icons with it ([ui.md](../ui.md#item-icons-and-names)); it is not a managed API, and
+Kiln writes the pixels nowhere. The pure part (layouts, the level, the decoders) is `native/services/assets/texture_rgba.h`,
+host-tested by `tests/test_texture_rgba.cpp` (`tests/run.sh`).
+
 Since 0.2.0-dev.28 (check `header.size` before each): `blob_add_ex` / `blob_override_ex` are `blob_add` /
 `blob_override` with the registration's origin (`KILN_BLOB_ORIGIN_MANAGED` or `_NATIVE_API`; anything else is
 `KILN_ERR_INVALID_ARGUMENT`), and `blob_catalog_open` / `blob_catalog_read` / `blob_catalog_close` are the

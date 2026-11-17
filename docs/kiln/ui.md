@@ -157,7 +157,8 @@ KeyBindings.Register("mymod.waypoints", "F6", screen.Toggle);       // a key ope
 - Looks: `UiStyle.Game` (the game's menu colours and **the game's own UI font**, which Kiln reads from the game's
   resources at run time and never ships) or `UiStyle.Kiln` (Kiln's ember theme, branding/palette.json). Inside any
   window: `using (ui.Look(UiStyle.Game)) { … }`.
-- Widgets: everything in `UiDraw` (below) plus `Image` / `ImageButton` (PNG via `Ui.LoadImage`), `Combo`,
+- Widgets: everything in `UiDraw` (below) plus `Image` / `ImageButton` (PNG via `Ui.LoadImage`, or an item's icon via
+  `Ui.ItemImage`), `ItemIcon` ([Item icons and names](#item-icons-and-names)), `Combo`,
   `InputMultiline`, `Space`, `WindowRect`, `CloseScreen`.
 - Open from the game's menus (`Ui.Menus`), a key binding, a command or code (any thread).
 - `FullScreen = true`: the whole display, no title bar, not movable or resizable (Width/Height are ignored); draw your own
@@ -192,6 +193,15 @@ var now = Ui.Crafting.Current;   // CraftingScreen?: AtStation, Workshop (keen::
   thread every frame while a crafting menu is open.
 - Workshop ids: `Ui.Crafting.Current.Workshop` while a station's menu is open (MenuButtons' panel shows it; the
   Workbench is 0x4da88f73), or the recipes' own workshop (kiln.content). 0 = the player's own crafting menu.
+- **Production stations** (since 0.2.0-dev.29.15): a kiln's, smelter's, loom's or seed bed's screen (`HudScreen.FactoryCrafting`)
+  is not the game's crafting menu but a transfer screen ([docs/re/game-ui.md](../re/game-ui.md) section 5), so Kiln's tabs and
+  subcategories never show there. Panels do: `Ui.Crafting.Current` is a `CraftingScreen` with `IsFactory` true, `AtStation`
+  true, `Recipe` 0, `Workshop` the workshop the game keeps for the station in use (its play data, which its crafting code
+  reads as the station's; not yet seen in a game for a factory: it may be 0 or another station's), and `Station` the
+  station's entity (the entity the game's screen is about; the game's replicated ids are the server's, so a mod sends it to
+  its server half, which checks the player is near it before acting). Before 0.2.0-dev.29.15 a panel never showed there.
+  `When = c => c.IsFactory` picks those screens. `Station` is `EntityId.None` on a bench's menu, and on a build where the
+  constant `ui/play.target` does not resolve (kiln.log says so once; the panel still shows).
 
 ## Values in the game's own UI (dev.28)
 `Ui.Values` replaces what the game itself draws for an item and for the local player: the number and bar of the item
@@ -322,6 +332,56 @@ if (ui.KeyPressed(UiKey.Tab, claim: true)) NextTab();                  // claim:
   `PushColor(UiColorSlot, color)` / `PushVar(UiStyleVar, x, y)` (scopes), `KeyPressed(UiKey, repeat, claim)`, `HeldMods`,
   `ScrollHere(ratio)`.
 - `ui.HasLayout` is false on an older kiln.ui: each call then falls back to the older one or does nothing.
+
+## Item icons and names
+The game's own icon of an item, in any Kiln window, screen or crafting panel (since 0.2.0-dev.29.15), and its name in the
+player's language:
+```csharp
+ui.ItemIcon(item, 48 * ui.Scale);                                   // the icon, 48 pixels square (0: 64 x Scale)
+ui.SameLine();
+ui.Text(Items.DisplayName(item) ?? "?");                            // "Holzscheite" in a German game (Kiln.Items)
+var img = Ui.ItemImage(item);                                       // an image object: Image, ImageButton, RenderDraw.Image
+if (img != null && ui.ImageButton("pick", img, 40 * ui.Scale, 40 * ui.Scale)) Pick(item);
+```
+- **What is drawn**: the picture the game's inventory and crafting menus show for the item. A game item's icon is the
+  `keen::UiTextureResource` under the item's own GUID (every one of the game's 4,268 items has one: BC7, mostly 256x256 with 9
+  mip levels). A new item of kiln.content shows its own PNG icon once the game shows it, its base item's (or its `icon`
+  item's) before, as the game's own menus do. A retexture of an icon (assets.json) shows too. An id that is no item, and an
+  icon that is still loading, draw a neutral placeholder of the same size: the layout never jumps.
+- **Read at run time** from the game's resources (kiln.assets' `texture_rgba` reads that texture's pixels and decodes one
+  mip level to RGBA; kiln.ui uploads it as an overlay image). Kiln ships no game art and writes the pixels nowhere.
+- **Cost**: nothing until a mod draws an icon. The first draw of an item at a size loads it on a worker thread (most take
+  well under a millisecond; the first frames show the placeholder). Kiln keeps the level that fits the size drawn (32, 64,
+  128 or 256 pixels), at most 512 icons and 24 MiB: past that the icons not drawn for a second are dropped first and read
+  again when drawn. A new client world (another server) drops them all. `Ui.ItemImage` returns one shared object per item:
+  keep it or ask each frame; its `Dispose` does nothing.
+- **Sides**: a game client whose overlay draws. On a dedicated server, and with drawing off (`KILN_UI_OVERLAY=0`, the
+  overlay's crash guard), `Ui.ItemImage` is null and `ItemIcon` draws nothing; `Ui.ItemIconsAvailable` says whether icons
+  draw here. Works in the main menu, in a hosted world and on a client that joined another's world: the icons come from the
+  player's own game data.
+- **Names**: `Items.DisplayName(item)` is the item's name in the game's text language, read from the game's own texts (also on
+  a joined client and in the main menu, where `Items.Get` has no catalog); a new item's definition gives its own (its
+  `Texts` for the language, else `DisplayName`). The first call reads the game's texts in the background (a fraction of a
+  second): until then, and on a dedicated server (whose data has no texts), it answers the English name Kiln ships. Stations
+  and recipes: `Stations.WorkshopName`, `Stations.RecipeName` ([services/stations.md](services/stations.md)).
+- Not square (a few lore items: 360x388): the picture keeps its shape inside the square.
+- Not done: icons of buffs, skills or anything that is not an item; the item's rarity frame or count (draw them yourself);
+  the icon of an item on a server (no pictures there).
+
+### Client steps (0.2.0-dev.29.15; none of this has run in a real game yet)
+With `mods/tests/item-icons-check` deployed (`dotnet build mods/tests/item-icons-check/ItemIconsCheck.csproj -t:KilnDeploy
+-p:KilnModsDir=<game>/kiln/mods`), in a hosted world (lines `iconcheck:` in kiln.log):
+1. F9 (or the pause menu's **Item icons check**): the window shows the icons of Wood Logs, Charcoal, the Bronze Sword, the
+   Powder Ball, the Charcoal Kiln and a Wizard chest at 32, 64 and 128 pixels, as the inventory shows them (colours right,
+   not blurred at 128, no black squares); the map piece keeps its tall shape; `Unknown 0xdeadbeef` is the grey placeholder;
+   `New item (this mod)` shows the Wood Logs' icon. The first opening may show placeholders for a frame or two.
+2. The names next to them are in the game's language (switch the game to German: `Holzscheite`; the new item:
+   `Symbolprüfscheit`); kiln.log's `iconcheck: names (de-de): ...` agrees. Hover an icon: its tooltip names it.
+3. Open a workbench: the **Icon check** panel shows `AtStation True, IsFactory False` and the Workbench's workshop.
+4. Open the charcoal kiln (a production station): the panel shows (it never did before), with `IsFactory True`, `Station`
+   the kiln's entity (in the owner's base the server's id 12205; compare with `/stationcheck show` of stations-client-check),
+   and `Workshop` 0x2546ae49 (the kiln's) or 0/another station's (record which: the field is not proven for factories).
+5. Join a Kiln server as a client (or leave and host again): the icons and names still draw; the panel at a kiln still shows.
 
 ## Radial wheel
 A wheel in the middle of the screen: 1 to 64 entries, 8 per page. It is what EMF's `wheel_open` draws. From any thread:

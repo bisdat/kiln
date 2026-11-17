@@ -112,7 +112,7 @@ the names are null.
 **On a joined client** kiln.stations is not there, but the names are: `Stations.WorkshopName(workshop)`,
 `Stations.RecipeName(recipe)` and `Items.DisplayName(item)` read the game's data on any side and any thread, so a menu
 there gets ids from its server half and names them in its own player's language. `Ui.ItemImage(item)` draws the items'
-icons ([ui.md](../ui.md#item-icons)). A new recipe of kiln.content is not in the game's registry: `RecipeName` is null for it
+icons ([ui.md](../ui.md#item-icons-and-names)). A new recipe of kiln.content is not in the game's registry: `RecipeName` is null for it
 (name it by its output's `Items.DisplayName`).
 
 ## Fill from chests
