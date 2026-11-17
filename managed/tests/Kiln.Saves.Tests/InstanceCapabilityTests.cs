@@ -17,6 +17,15 @@ public sealed class InstanceCapabilityTests : IDisposable
     private static readonly FieldInfo State = typeof(SavesRuntime).GetField("_state", BindingFlags.NonPublic | BindingFlags.Static)!;
     private const string Row = "saves.instance_data";
 
+    // A test of this collection that swapped Backend.Current (WriterOrderTests, StageWriteTests) leaves a new registry
+    // binding without the rows Kiln.Items and Kiln.Saves reported at their first use; report them again under it, as the
+    // service tick does in a running host, so these tests don't depend on the order xunit picks.
+    public InstanceCapabilityTests()
+    {
+        Items.Rows.Ensure();
+        SavesCaps.Rows.Ensure();
+    }
+
     public void Dispose() => _h.Dispose();
 
     private static Capability Refreshed()

@@ -131,7 +131,13 @@ public sealed unsafe class GemCraftingTests : IDisposable
 
     public GemCraftingTests() => GemCrafting.UseBackend(_fake);
 
-    public void Dispose() => GemCrafting.UseBackend(null);
+    public void Dispose()
+    {
+        GemCrafting.UseBackend(null);
+        // a row a test lowered (gems.payers when the fake's extras are gone) is kept per registry binding and would beat
+        // the next test's Capabilities.Override: start the next test on a new binding
+        global::Kiln.Capabilities.Reset();
+    }
 
     private static GemcraftNative.Craft Craft(GemCraftAction action, int status = 0, uint flags = 0, string message = "")
     {
