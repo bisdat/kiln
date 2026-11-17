@@ -314,6 +314,7 @@ void history_after(void* widget, void* result, bool hud) {
         if (event == 1 || event == 2) {
             if (event == 2) g_history.edited(); // Enter already calls Submit.
             g_manual_text_edit.store(false, std::memory_order_release);
+            g_editing_in_frame = false; // do not rearm keys at the end of the close/send frame
             g_keys.focus(false);
         }
         g_last_applied.clear();
