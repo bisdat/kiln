@@ -1,1 +1,18 @@
 #nullable enable
+Kiln.ResourceListReplace
+Kiln.ResourceListReplace.<Clone>$() -> Kiln.ResourceListReplace!
+Kiln.ResourceListReplace.Equals(Kiln.ResourceListReplace? other) -> bool
+Kiln.ResourceListReplace.ResourceListReplace() -> void
+Kiln.ResourceListReplace.Values.get -> System.Collections.Generic.List<Kiln.ResourceValue>!
+Kiln.ResourceListReplace.Values.init -> void
+Kiln.ResourcePatchBlock.Clear.get -> System.Collections.Generic.List<string!>?
+Kiln.ResourcePatchBlock.Clear.init -> void
+Kiln.ResourcePatchBlock.CopyComponents.get -> System.Collections.Generic.Dictionary<string!, System.Guid>?
+Kiln.ResourcePatchBlock.CopyComponents.init -> void
+Kiln.ResourcePatchBlock.Replace.get -> System.Collections.Generic.Dictionary<string!, Kiln.ResourceListReplace!>?
+Kiln.ResourcePatchBlock.Replace.init -> void
+override Kiln.ResourceListReplace.Equals(object? obj) -> bool
+override Kiln.ResourceListReplace.GetHashCode() -> int
+override Kiln.ResourceListReplace.ToString() -> string!
+static Kiln.ResourceListReplace.operator !=(Kiln.ResourceListReplace? left, Kiln.ResourceListReplace? right) -> bool
+static Kiln.ResourceListReplace.operator ==(Kiln.ResourceListReplace? left, Kiln.ResourceListReplace? right) -> bool
