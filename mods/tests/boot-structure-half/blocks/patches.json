@@ -8,6 +8,13 @@
       "type": "keen::ecs::TemplateResource",
       "removeComponents": ["SpawnTime"],
       "set": { "PickupItemZone.lastAttempt.value": 1 }
+    },
+    // EMBER's Build Anywhere and No Boundary (mod API 0.2.9): the world scene's lists cleared, written in a blocks file
+    "scene": {
+      "format": 1,
+      "resource": "509feadb-4c60-425f-9c7c-deeefd9b6920",
+      "type": "keen::SceneResource",
+      "clear": ["noBuildZones", "resetPlayersOutOfBounds.playableAreas"]
     }
   }
 }
