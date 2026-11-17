@@ -623,7 +623,7 @@ public:
         uint32_t n = 0;
         for (size_t k = book_.size(); k-- > 0;) {
             const SourceEntry& e = book_[k];
-            if (e.owner == owner && (!player || e.s.player == player) && (!holder || e.s.holder == holder)) {
+            if ((!owner || e.owner == owner) && (!player || e.s.player == player) && (!holder || e.s.holder == holder)) {
                 book_.erase(book_.begin() + static_cast<ptrdiff_t>(k));
                 ++n;
             }

@@ -655,6 +655,10 @@ void sources() {
     check(b.withdraw(7, 3, 0) == kMaxSourcesPerPlayer && b.find(1, KILN_SLOT_ID(7001, 0), 61), "sources: withdraw takes one owner's offers to one player");
     b.drop_owner(8);
     check(!b.find(1, KILN_SLOT_ID(7001, 0), 61), "sources: a mod's offers go with the mod");
+    KilnGemSource o9 = src(4, 7002, 0, 906), o10 = src(4, 7002, 1, 907);
+    b.offer(9, &o9, 1, 60, rng, &why);
+    b.offer(10, &o10, 1, 60, rng, &why);
+    check(b.withdraw(0, 4, 0) == 2, "sources: owner 0 withdraws every owner's offers to a player (the forge closed)");
     b.expire(60 + 100 + 10, 5);
     check(b.size() == 0, "sources: offers past their expiry (and the grace) are dropped");
     uint32_t live = b.live_for(1, 0, [](const KilnGemSource&) {});

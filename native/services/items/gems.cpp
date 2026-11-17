@@ -51,7 +51,7 @@ static_assert(sizeof(KilnGemCraft) == 232 && offsetof(KilnGemCraft, gem_slot) ==
                   offsetof(KilnGemCraft, message) == 104,
               "kiln_gemcraft.h: KilnGemCraft (managed mirror)");
 static_assert(sizeof(KilnGemcraftStatus) == 188, "kiln_gemcraft.h: KilnGemcraftStatus (managed mirror)");
-static_assert(sizeof(KilnGemcraftApi) == 8 + 12 * 8, "kiln_gemcraft.h: the table (managed mirror)");
+static_assert(sizeof(KilnGemcraftApi) == 8 + 13 * 8, "kiln_gemcraft.h: the table (managed mirror)");
 
 namespace kitems {
 namespace {
@@ -1699,10 +1699,26 @@ KilnResult KILN_CALL t_sources(KilnEntity player, KilnGemSource* out, uint32_t c
     return n > capacity ? KILN_ERR_BUFFER_TOO_SMALL : KILN_OK;
 }
 
+KilnResult KILN_CALL t_payers(KilnEntity player, uint32_t pay_from, KilnEntity pay_holder, KilnEntity* out, uint32_t capacity,
+                              uint32_t* out_count) {
+    if (!out_count || !player || (capacity && !out) || pay_from > KILN_GEM_PAY_PLAYER_THEN_BASE ||
+        ((pay_from == KILN_GEM_PAY_HOLDER) != (pay_holder != 0)))
+        return KILN_ERR_INVALID_ARGUMENT;
+    KilnGemRequest r{};
+    r.player = player;
+    r.pay_from = pay_from;
+    r.pay_holder = pay_holder;
+    const std::vector<uint32_t> list = resolve_payers(r);
+    *out_count = static_cast<uint32_t>(list.size());
+    const uint32_t n = std::min<uint32_t>(capacity, *out_count);
+    if (n) std::memcpy(out, list.data(), n * sizeof(KilnEntity));
+    return *out_count > capacity ? KILN_ERR_BUFFER_TOO_SMALL : KILN_OK;
+}
+
 const KilnGemcraftApi kTable = {
     {sizeof(KilnGemcraftApi), KILN_GEMCRAFT_VERSION},
     &t_status, &t_submit, &t_cancel, &t_hold, &t_held, &t_decide, &t_watch, &t_crafted,
-    &t_extras, &t_offer, &t_withdraw, &t_sources,
+    &t_extras, &t_offer, &t_withdraw, &t_sources, &t_payers,
 };
 
 template <typename F>

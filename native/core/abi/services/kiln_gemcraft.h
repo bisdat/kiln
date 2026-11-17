@@ -254,11 +254,17 @@ typedef struct KilnGemcraftApi {
      * a player would hold more than 256 live offers; nothing was offered. KILN_ERR_UNAVAILABLE: sources are off. Tick
      * thread. */
     KilnResult(KILN_CALL* offer)(KilnOwner owner, KilnGemSource* sources, uint32_t count);
-    /* Withdraws the owner's offers to `player` (0: every player) in `holder` (0: every holder). Tick thread. */
+    /* Withdraws the owner's offers (owner 0: every owner's) to `player` (0: every player) in `holder` (0: every
+     * holder). Tick thread. */
     KilnResult(KILN_CALL* withdraw)(KilnOwner owner, KilnEntity player, KilnEntity holder, uint32_t* out_count);
     /* The live offers to `player` (every owner's), in offer order. KILN_ERR_BUFFER_TOO_SMALL: *out_count = how many
      * there are. Tick thread. */
     KilnResult(KILN_CALL* sources)(KilnEntity player, KilnGemSource* out, uint32_t capacity, uint32_t* out_count);
+    /* Who would pay for `player` with pay_from / pay_holder now, in order (what a request resolves in the step it runs:
+     * KILN_GEM_PAY_PLAYER: nobody listed, the player pays as the game does; base storage: the base the player stands
+     * in, with the CanAccessInventories right). KILN_ERR_BUFFER_TOO_SMALL: *out_count = how many. Tick thread. */
+    KilnResult(KILN_CALL* payers)(KilnEntity player, uint32_t pay_from, KilnEntity pay_holder, KilnEntity* out, uint32_t capacity,
+                                  uint32_t* out_count);
 } KilnGemcraftApi;
 
 #ifdef __cplusplus
