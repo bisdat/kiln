@@ -71,3 +71,38 @@ dotnet test managed/tests/Kiln.Ui.Tests/Kiln.Ui.Tests.csproj \
 
 The tests cover model semantics and file safety only. They do not validate
 game signatures, key consumption, native state offsets or the UI display.
+
+
+## Native probing now on this branch (opt-in only)
+
+The fork also has:
+
+- `sigdb/symbols/client.d/chatui.json`: signatures and scoped HUD/Social
+  return addresses transcribed from issue #44 for client Steam build 26430625.
+  Their **runtime validity remains unverified** in this fork.
+- `native/services/ui/chat_input_probe.cpp`: a transparent hook that logs
+  whether the HUD/Social input call sites were actually reached. It does not
+  inspect or log text, consume keys, change the edit buffer or send anything.
+  It is **off by default** and only installs when the game process has
+  `KILN_CHAT_INPUT_PROBE=1` in its environment. If the sigdb feature cannot
+  resolve, it does not hook anything.
+- `native/services/ui/chat_keys.h`: a small, focus-scoped window-thread key
+  queue whose unit test asserts that gameplay keys, modified arrows and
+  releases remain untouched. It is *not* wired to WndProc yet, intentionally:
+  the edit focus and UI-thread text injection must be validated first.
+- `native/services/ui/tests/chat_keys_test.cpp`: included in the regular
+  native host test runner; also built and passed with Linux g++ -std=c++20.
+
+### Probe acceptance before any input mutation
+
+1. Build this **fork** and confirm an ordinary boot with the probe unset
+   yields no chat hooks or unexpected input behaviour.
+2. Launch the game with `KILN_CHAT_INPUT_PROBE=1`; open the HUD chat and
+   Social tab. Confirm one read-only log per call site, then normal typing
+   and sending. Do not include chat message content in logs or support files.
+3. Check that the client build matches the issue's SHA-256 and the sigdb
+   function signatures. Game updates require new verification, not blind
+   reuse of these offsets.
+4. Only after the probe passes should the next step activate focus-tracked
+   Up/Down routing, `EditSetText` on the UI thread, and managed history
+   submission. In a failed hook state, these must revert to vanilla input.
