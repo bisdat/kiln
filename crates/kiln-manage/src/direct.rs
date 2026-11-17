@@ -2,20 +2,23 @@
 //! game in a folder no Steam library knows (an older build kept for mods) cannot be started by Steam, which only ever
 //! starts the copy in its own library.
 //!
+//! A direct start needs no Steam at all: not installed, not running, no library. Kiln starts the exe and nothing else;
+//! whether a given copy of the game needs Steam to run is that copy's business.
+//!
 //! - **Windows**: `<game>\enshrouded.exe`, working directory the game folder. Kiln's proxy is `dinput8.dll` next to the
 //!   exe, which Windows loads first: nothing else is set.
-//! - **Linux**: through a Proton build (`proton run`, with `STEAM_COMPAT_DATA_PATH` and
-//!   `STEAM_COMPAT_CLIENT_INSTALL_PATH`) or a Wine (`wine`, with `WINEPREFIX`) the player picks; by default the Proton
-//!   Steam maps to Enshrouded, else the newest found. The prefix is Kiln's own per install
-//!   (`$XDG_DATA_HOME/kiln-prefixes/<installId>`, outside the data folder: a prefix links `z:` to `/` and holds the
-//!   saves, so it never moves with the data folder) unless the player picks one. `WINEDLLOVERRIDES` loads `dinput8`
-//!   native first, as the Steam launch option Kiln advises does (`game::DLL_OVERRIDE_ADVICE`), with `xinput9_1_0`
-//!   when Ultimate ASI Loader is chained.
+//! - **Linux**: through `umu-run` (umu-launcher: Proton outside Steam, with `WINEPREFIX`, `GAMEID=umu-default` and
+//!   `PROTONPATH`), a Proton build (`proton run`, with `STEAM_COMPAT_DATA_PATH` and `STEAM_COMPAT_CLIENT_INSTALL_PATH`:
+//!   Steam's folder when Steam is installed, else an empty folder of Kiln's own, [`compat_client_dir`]) or a Wine
+//!   (`wine`, with `WINEPREFIX`) the player picks; by default ([`default_runner`]) umu-run when it is on PATH, else the
+//!   newest Proton found, else Wine. The prefix is Kiln's own per install (`$XDG_DATA_HOME/kiln-prefixes/<installId>`,
+//!   outside the data folder: a prefix links `z:` to `/` and holds the saves, so it never moves with the data folder)
+//!   unless the player picks one. `WINEDLLOVERRIDES` loads `dinput8` native first, with `xinput9_1_0` when Ultimate ASI
+//!   Loader is chained.
 //!
-//! The game's own Steam API still talks to Steam: Steam must be running. Kiln never writes or changes
-//! `steam_appid.txt`, never sets `SteamAppId`/`SteamGameId`, never touches `steam_api64.dll` or anything else of the
-//! game's Steam or ownership checks. A copy that asks Steam to restart it is restarted by Steam (Steam's own copy),
-//! which Kiln does not work around (docs/kiln/launcher/custom-game-folders.md).
+//! Kiln never writes or changes `steam_appid.txt`, never sets `SteamAppId`/`SteamGameId` (nor a `GAMEID` from which umu
+//! would derive them: `umu-<appid>` makes umu set `SteamAppId`), never touches `steam_api64.dll` or anything else of
+//! the game's Steam or ownership checks (docs/kiln/launcher/custom-game-folders.md).
 //!
 //! The settings live in the install's record (`InstallRecord.start`, `game::set_start`); [`command_for`] builds the
 //! command without starting anything (tests), [`plan`] resolves the runner and prefix, [`spawn`] starts it.
@@ -55,22 +58,28 @@ pub struct StartSettings {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum RunnerKind {
+    /// `umu-run` (umu-launcher): Proton outside Steam, in its own runtime.
+    Umu,
     Proton,
     Wine,
 }
 
-/// A Proton or Wine the game can run under (Linux).
+/// A umu-run, Proton or Wine the game can run under (Linux).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RunnerInfo {
     pub kind: RunnerKind,
-    /// Proton: the folder with the `proton` script; Wine: the `wine` binary.
+    /// umu: the `umu-run` program; Proton: the folder with the `proton` script; Wine: the `wine` binary.
     pub path: PathBuf,
-    /// The folder name (`GE-Proton10-25`, `Proton 9.0`), or `Wine (<path>)`.
+    /// `umu-run`, the folder name (`GE-Proton10-25`, `Proton 9.0`), or `Wine (<path>)`.
     pub label: String,
-    /// `steam` (Valve's Proton in a Steam library), `compat` (a compatibility-tools folder: GE-Proton and others),
-    /// `system` (wine on PATH), `custom` (a path the player gave).
+    /// `compat` (a compatibility-tools folder: GE-Proton and others), `steam` (Valve's Proton in a Steam library, found
+    /// only when Steam is installed), `system` (umu-run or wine on PATH), `custom` (a path the player gave).
     pub source: String,
+    /// umu: the Proton folder it runs (`PROTONPATH`, the newest found in a compatibility-tools folder); None: umu's
+    /// own (UMU-Proton, which umu downloads at its first start).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proton: Option<PathBuf>,
 }
 
 /// A folder no Steam library knows: added by hand (`source` manual) and outside any library (`library` None).
@@ -97,6 +106,51 @@ pub fn mode_of(dirs: &crate::paths::DataDirs, install: &GameInstall) -> StartMod
     effective_mode(install, Some(&settings(dirs, install)))
 }
 
+/// What a direct start looks at on this host (Linux): the home and data folders (Kiln's prefixes, the usual GE-Proton
+/// folders) and PATH (umu-run, wine). Tests give fixture folders; [`Host::current`] is the process's.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Host {
+    pub home: Option<PathBuf>,
+    /// `XDG_DATA_HOME`, when absolute.
+    pub xdg_data_home: Option<PathBuf>,
+    /// `PATH`.
+    pub path: Option<std::ffi::OsString>,
+    /// Compatibility-tools folders of the system (`/usr/share/steam/compatibilitytools.d`, where distribution packages
+    /// of GE-Proton go).
+    pub shared: Vec<PathBuf>,
+}
+
+impl Host {
+    pub fn current() -> Host {
+        let e = crate::paths::DataEnv::from_process();
+        Host {
+            home: e.home.map(PathBuf::from),
+            xdg_data_home: e.xdg_data_home.map(PathBuf::from).filter(|p| p.is_absolute()),
+            path: std::env::var_os("PATH"),
+            shared: vec![PathBuf::from("/usr/share/steam/compatibilitytools.d")],
+        }
+    }
+
+    fn env(&self) -> crate::paths::DataEnv {
+        crate::paths::DataEnv {
+            home: self.home.clone().map(Into::into),
+            xdg_data_home: self.xdg_data_home.clone().map(Into::into),
+            ..Default::default()
+        }
+    }
+
+    /// `$XDG_DATA_HOME`, else `~/.local/share`.
+    pub fn data_home(&self) -> Option<PathBuf> {
+        self.xdg_data_home.clone().or_else(|| self.home.as_ref().map(|h| h.join(".local/share")))
+    }
+
+    /// A program on this host's PATH.
+    pub fn which(&self, cmd: &str) -> Option<PathBuf> {
+        std::env::split_paths(self.path.as_ref()?).filter(|d| d.is_absolute()).map(|d| d.join(cmd))
+            .find(|p| crate::util::is_executable(p))
+    }
+}
+
 /// Where Kiln keeps its own prefixes (Linux): `$XDG_DATA_HOME/kiln-prefixes`, else `~/.local/share/kiln-prefixes`.
 /// None on Windows.
 pub fn prefixes_root(env: &crate::paths::DataEnv) -> Option<PathBuf> {
@@ -115,13 +169,21 @@ pub fn own_prefix(env: &crate::paths::DataEnv, install_id: &str) -> Option<PathB
     prefixes_root(env).map(|r| r.join(install_id))
 }
 
+/// The folder a Proton start names in `STEAM_COMPAT_CLIENT_INSTALL_PATH` when no Steam is installed: an empty folder of
+/// Kiln's own, `<kiln-prefixes>/_compat-client` (Proton only needs the variable to name a folder; the leading `_` is
+/// never an install id). Made at the start ([`spawn`]).
+pub fn compat_client_dir(env: &crate::paths::DataEnv) -> Option<PathBuf> {
+    prefixes_root(env).map(|r| r.join("_compat-client"))
+}
+
 fn looks_like_prefix(p: &Path) -> bool {
     p.join("system.reg").is_file() || p.join("dosdevices").is_dir()
 }
 
 /// The compatdata folder (`STEAM_COMPAT_DATA_PATH`) and the Wine prefix (`WINEPREFIX`) for a runner kind, from the
 /// player's folder or Kiln's own. A Proton build wants the folder that holds `pfx`; a picked `pfx` itself is taken as
-/// its parent's. A Wine wants the prefix; a picked compatdata folder means the `pfx` in it.
+/// its parent's. A Wine (and umu, which is given the prefix itself) wants the prefix; a picked compatdata folder means
+/// the `pfx` in it.
 pub fn prefix_paths(kind: RunnerKind, chosen: Option<&Path>, own: &Path) -> Result<(PathBuf, PathBuf)> {
     let Some(c) = chosen else { return Ok((own.to_path_buf(), own.join("pfx"))) };
     if !c.is_absolute() {
@@ -135,12 +197,12 @@ pub fn prefix_paths(kind: RunnerKind, chosen: Option<&Path>, own: &Path) -> Resu
                 Ok((parent.to_path_buf(), c.to_path_buf()))
             } else {
                 Err(Error::invalid(format!(
-                    "{} is a Wine prefix: Proton needs the folder that holds its pfx (a compatdata folder). Pick that folder, or run with Wine.",
+                    "{} is a Wine prefix: Proton needs the folder that holds its pfx (a compatdata folder). Pick that folder, or run with Wine or umu-run.",
                     c.display()
                 )))
             }
         }
-        RunnerKind::Wine => {
+        RunnerKind::Wine | RunnerKind::Umu => {
             if looks_like_prefix(&c.join("pfx")) {
                 Ok((c.to_path_buf(), c.join("pfx")))
             } else {
@@ -150,33 +212,54 @@ pub fn prefix_paths(kind: RunnerKind, chosen: Option<&Path>, own: &Path) -> Resu
     }
 }
 
+/// The platform an install runs as under a runner kind (saves, path mode and the report follow it).
+pub fn platform_of(kind: RunnerKind) -> Platform {
+    match kind {
+        RunnerKind::Umu | RunnerKind::Proton => Platform::Proton,
+        RunnerKind::Wine => Platform::Wine,
+    }
+}
+
 // ---------------------------------------------------------------- runners (Linux)
 
-/// What a runner path is: a folder with a `proton` script is a Proton build; a `wine` binary, or a folder with
-/// `bin/wine` or `wine` in it, is a Wine.
+/// The program name of umu-launcher's runner.
+pub const UMU_RUN: &str = "umu-run";
+/// The `GAMEID` a umu start gets: umu's own default (no game-specific fixes). Never `umu-1203620`: umu turns
+/// `umu-<id>` into `SteamAppId`/`SteamGameId`, which Kiln never sets.
+pub const UMU_GAMEID: &str = "umu-default";
+
+/// What a runner path is: a folder with a `proton` script is a Proton build; a program named `umu-run` is umu; a `wine`
+/// binary, or a folder with `bin/wine` or `wine` in it, is a Wine.
 pub fn runner_at(path: &Path) -> Result<RunnerInfo> {
     if !path.is_absolute() {
-        return Err(Error::invalid(format!("the Proton or Wine must be an absolute path, not {}", path.display())));
+        return Err(Error::invalid(format!("the umu-run, Proton or Wine must be an absolute path, not {}", path.display())));
     }
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let info = |kind, path: PathBuf, label: String| RunnerInfo { kind, path, label, source: "custom".into(), proton: None };
     if path.is_dir() {
         if path.join("proton").is_file() {
-            return Ok(RunnerInfo { kind: RunnerKind::Proton, path: path.to_path_buf(), label: name, source: "custom".into() });
+            return Ok(info(RunnerKind::Proton, path.to_path_buf(), name));
+        }
+        if crate::util::is_executable(&path.join(UMU_RUN)) {
+            return Ok(info(RunnerKind::Umu, path.join(UMU_RUN), UMU_RUN.into()));
         }
         for wine in [path.join("bin/wine"), path.join("wine"), path.join("files/bin/wine")] {
             if crate::util::is_executable(&wine) {
-                return Ok(RunnerInfo { kind: RunnerKind::Wine, label: format!("Wine ({})", wine.display()), path: wine, source: "custom".into() });
+                return Ok(info(RunnerKind::Wine, wine.clone(), format!("Wine ({})", wine.display())));
             }
         }
-        return Err(Error::new(ErrorCode::NotFound, format!("{} has no proton script and no wine", path.display())));
+        return Err(Error::new(ErrorCode::NotFound, format!("{} has no proton script, no umu-run and no wine", path.display())));
     }
     if crate::util::is_executable(path) {
         if name == "proton" && let Some(dir) = path.parent() {
             return runner_at(dir);
         }
-        return Ok(RunnerInfo { kind: RunnerKind::Wine, label: format!("Wine ({})", path.display()), path: path.to_path_buf(), source: "custom".into() });
+        if name == UMU_RUN {
+            return Ok(info(RunnerKind::Umu, path.to_path_buf(), UMU_RUN.into()));
+        }
+        return Ok(info(RunnerKind::Wine, path.to_path_buf(), format!("Wine ({})", path.display())));
     }
-    Err(Error::new(ErrorCode::NotFound, format!("{} is not a Proton folder or a wine program", path.display())))
+    Err(Error::new(ErrorCode::NotFound, format!("{} is not a Proton folder, a umu-run or a wine program", path.display())))
 }
 
 fn proton_dirs_in(root: &Path) -> Vec<PathBuf> {
@@ -186,25 +269,54 @@ fn proton_dirs_in(root: &Path) -> Vec<PathBuf> {
     v
 }
 
-/// Every Proton and Wine found: the compatibility-tools folders of the Steam roots and GE-Proton's usual places
-/// (`wine::ge_roots`), Valve's Proton builds in the Steam libraries, and `wine` on PATH. GE-Proton newest first, then
-/// the others by name (newest first).
-pub fn runners(roots: &[SteamRoot], home: &Path) -> Vec<RunnerInfo> {
+/// The compatibility-tools folders a direct start looks in for GE-Proton and other Proton builds, none of which needs
+/// Steam: those of the Steam roots found (when Steam is installed), GE-Proton's usual places (as `wine::ge_roots`:
+/// `~/.local/share/Steam/compatibilitytools.d` whether or not Steam is there, where umu puts its downloads too, and the
+/// system's), `$XDG_DATA_HOME/Steam/compatibilitytools.d`, and the Proton folders of Heroic and Lutris.
+pub fn compat_roots(roots: &[SteamRoot], host: &Host) -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = roots.iter().map(|r| r.path.join("compatibilitytools.d")).collect();
+    if let Some(home) = &host.home {
+        for rel in [".local/share/Steam/compatibilitytools.d", ".steam/root/compatibilitytools.d", ".steam/steam/compatibilitytools.d",
+                    ".config/heroic/tools/proton"] {
+            out.push(home.join(rel));
+        }
+    }
+    out.extend(host.shared.iter().cloned());
+    if let Some(data) = host.data_home() {
+        out.push(data.join("Steam/compatibilitytools.d"));
+        out.push(data.join("lutris/runners/proton"));
+    }
+    let mut seen: Vec<PathBuf> = Vec::new();
+    out.retain(|p| {
+        let c = p.canonicalize().unwrap_or_else(|_| p.clone());
+        let new = !seen.contains(&c);
+        seen.push(c);
+        new
+    });
+    out
+}
+
+/// Every umu-run, Proton and Wine found, in the order "automatic" takes them ([`default_runner`]): umu-run on PATH
+/// (with the newest compatibility-tools Proton as its `PROTONPATH`), the Proton builds of the compatibility-tools
+/// folders (GE-Proton newest first, then the others by name, newest first), Valve's Proton builds in the Steam
+/// libraries (only when Steam is installed), then `wine` on PATH.
+pub fn runners(roots: &[SteamRoot], host: &Host) -> Vec<RunnerInfo> {
     let mut out: Vec<RunnerInfo> = Vec::new();
     let mut push = |kind, path: PathBuf, label: String, source: &str| {
         let canon = path.canonicalize().unwrap_or(path);
         if !out.iter().any(|r: &RunnerInfo| r.path == canon) {
-            out.push(RunnerInfo { kind, path: canon, label, source: source.into() });
+            out.push(RunnerInfo { kind, path: canon, label, source: source.into(), proton: None });
         }
     };
-    let mut compat_roots: Vec<PathBuf> = roots.iter().map(|r| r.path.join("compatibilitytools.d")).collect();
-    compat_roots.extend(crate::wine::ge_roots(home));
-    let mut compat: Vec<PathBuf> = compat_roots.iter().flat_map(|r| proton_dirs_in(r)).collect();
+    let mut compat: Vec<PathBuf> = compat_roots(roots, host).iter().flat_map(|r| proton_dirs_in(r)).collect();
     let name = |p: &Path| p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     compat.sort_by(|a, b| {
         let (na, nb) = (name(a), name(b));
         crate::wine::ge_version(&nb).cmp(&crate::wine::ge_version(&na)).then(nb.cmp(&na))
     });
+    if let Some(u) = host.which(UMU_RUN) {
+        push(RunnerKind::Umu, u, UMU_RUN.into(), "system");
+    }
     for d in compat {
         let n = name(&d);
         push(RunnerKind::Proton, d, n, "compat");
@@ -220,33 +332,28 @@ pub fn runners(roots: &[SteamRoot], home: &Path) -> Vec<RunnerInfo> {
         let n = name(&d);
         push(RunnerKind::Proton, d, n, "steam");
     }
-    if let Some(w) = crate::util::which("wine") {
+    if let Some(w) = host.which("wine") {
         let label = format!("Wine ({})", w.display());
         push(RunnerKind::Wine, w, label, "system");
+    }
+    let proton = umu_proton(&out);
+    for r in out.iter_mut().filter(|r| r.kind == RunnerKind::Umu) {
+        r.proton = proton.clone();
     }
     out
 }
 
-/// The runner a direct start uses when the player chose none: the Proton Steam maps to Enshrouded (or Steam's
-/// default mapping), else the first of `all` (GE-Proton newest first, Valve's Protons, then a system Wine).
-pub fn default_runner(roots: &[SteamRoot], all: &[RunnerInfo]) -> Option<RunnerInfo> {
-    let mut tool_roots: Vec<PathBuf> = roots.iter().map(|r| r.path.join("compatibilitytools.d")).collect();
-    tool_roots.extend(crate::wine::ge_roots(&crate::util::home()));
-    let libraries: Vec<PathBuf> = roots.iter().flat_map(|r| crate::steam::libraries(r).unwrap_or_default().into_iter().map(|l| l.path)).collect();
-    for r in roots {
-        for app in [crate::CLIENT_APP_ID, 0] {
-            if let Some(name) = crate::steam::compat_tool(r, app).ok().flatten()
-                && let Some(dir) = crate::server::proton::find_tool(&name, &tool_roots, &libraries)
-                && dir.join("proton").is_file()
-            {
-                let canon = dir.canonicalize().unwrap_or(dir);
-                return Some(all.iter().find(|x| x.path == canon).cloned().unwrap_or(RunnerInfo {
-                    kind: RunnerKind::Proton, label: name, path: canon, source: "steam".into(),
-                }));
-            }
-        }
-    }
-    all.first().cloned()
+/// The Proton umu runs (`PROTONPATH`): the first compatibility-tools Proton of `all` (GE-Proton newest first), so umu
+/// downloads nothing. Valve's builds are left out: they expect Steam's runtime container, which umu replaces with
+/// its own. None: umu's own Proton.
+pub fn umu_proton(all: &[RunnerInfo]) -> Option<PathBuf> {
+    all.iter().find(|r| r.kind == RunnerKind::Proton && r.source == "compat").map(|r| r.path.clone())
+}
+
+/// The runner a direct start uses when the player chose none ("automatic"): umu-run when it is on PATH, else the newest
+/// Proton found (a compatibility-tools build before Valve's), else a Wine on PATH. Nothing of Steam's config is read.
+pub fn default_runner(all: &[RunnerInfo]) -> Option<RunnerInfo> {
+    [RunnerKind::Umu, RunnerKind::Proton, RunnerKind::Wine].into_iter().find_map(|k| all.iter().find(|r| r.kind == k).cloned())
 }
 
 // ---------------------------------------------------------------- the command
@@ -268,29 +375,33 @@ pub struct DirectCommand {
     pub prefix: Option<PathBuf>,
 }
 
-/// Inherited variables a direct start never passes on (Linux): they would mix another Wine, prefix or Steam app into
-/// this start. `SteamAppId`/`SteamGameId` are Steam's to set when Steam starts a game; Kiln never sets them.
+/// Inherited variables a direct start never passes on (Linux): they would mix another Wine, prefix, umu game or Steam
+/// app into this start. `SteamAppId`/`SteamGameId` are Steam's to set when Steam starts a game; Kiln never sets them.
 pub const SCRUB: &[&str] = &[
     "WINEPREFIX", "WINESERVER", "WINELOADER", "WINEDLLPATH", "WINEARCH", "WINEDLLOVERRIDES",
     "STEAM_COMPAT_DATA_PATH", "STEAM_COMPAT_CLIENT_INSTALL_PATH", "STEAM_COMPAT_APP_ID", "SteamAppId", "SteamGameId",
+    "GAMEID", "UMU_ID", "PROTONPATH", "STORE", "PROTON_VERB", "UMU_NO_PROTON",
     "LD_PRELOAD", "KILN_DISABLE",
 ];
 
-/// The `WINEDLLOVERRIDES` of a direct start: Kiln's proxy native first (as the advised Steam launch option), with
-/// `xinput9_1_0` when Ultimate ASI Loader is chained; for a plain Wine also `mshtml=` (no Gecko prompt; never
-/// `mscoree`: wine.rs).
+/// The `WINEDLLOVERRIDES` of a direct start: Kiln's proxy native first, with `xinput9_1_0` when Ultimate ASI Loader is
+/// chained; for a plain Wine also `mshtml=` (no Gecko prompt; never `mscoree`: wine.rs).
 pub fn dll_overrides(kind: RunnerKind, chained_asi: bool) -> String {
     let proxy = if chained_asi { "dinput8,xinput9_1_0=n,b" } else { "dinput8=n,b" };
     match kind {
-        RunnerKind::Proton => proxy.to_string(),
+        RunnerKind::Umu | RunnerKind::Proton => proxy.to_string(),
         RunnerKind::Wine => format!("mshtml=;{proxy}"),
     }
 }
 
+/// Why nothing can start the game (Linux), said the same way everywhere.
+pub const NO_RUNNER: &str = "No umu-run, Proton or Wine was found to start the game with: install umu-launcher, GE-Proton or Wine, or pick one.";
+
 /// The command of a direct start, from facts only (no file is read, nothing starts). `windows`: the host's rules;
-/// `runner`, `compat` (compatdata for Proton, the Wine prefix for Wine) and `steam_root` are needed on Linux only.
-pub fn command_for(windows: bool, install: &GameInstall, runner: Option<&RunnerInfo>, compat: Option<&Path>,
-                   steam_root: Option<&Path>, chained_asi: bool) -> Result<DirectCommand> {
+/// on Linux `runner` and `prefix` (the compatdata folder for Proton, the Wine prefix for Wine and umu) are needed, and
+/// for Proton `client`, the folder `STEAM_COMPAT_CLIENT_INSTALL_PATH` names (Steam's, or [`compat_client_dir`]).
+pub fn command_for(windows: bool, install: &GameInstall, runner: Option<&RunnerInfo>, prefix: Option<&Path>,
+                   client: Option<&Path>, chained_asi: bool) -> Result<DirectCommand> {
     if install.kind != GameKind::Client {
         return Err(Error::invalid("a direct start is for the game client; servers start through server_start"));
     }
@@ -301,91 +412,124 @@ pub fn command_for(windows: bool, install: &GameInstall, runner: Option<&RunnerI
             env_remove: vec!["KILN_DISABLE".into()], runner: None, prefix: None,
         });
     }
-    let runner = runner.ok_or_else(|| Error::new(ErrorCode::NotFound,
-        "No Proton or Wine was found to start the game with: install GE-Proton or Proton through Steam, or pick a Wine."))?;
-    let compat = compat.ok_or_else(|| Error::invalid("a direct start under Proton or Wine needs a prefix"))?;
+    let runner = runner.ok_or_else(|| Error::new(ErrorCode::NotFound, NO_RUNNER))?;
+    let prefix = prefix.ok_or_else(|| Error::invalid("a direct start under umu-run, Proton or Wine needs a prefix"))?;
     let env_remove = SCRUB.iter().map(|s| s.to_string()).collect();
     let exe_arg = exe.to_string_lossy().into_owned();
+    let overrides = ("WINEDLLOVERRIDES".to_string(), dll_overrides(runner.kind, chained_asi));
     Ok(match runner.kind {
+        RunnerKind::Umu => {
+            let mut env = vec![
+                ("WINEPREFIX".into(), prefix.display().to_string()),
+                ("GAMEID".into(), UMU_GAMEID.into()),
+            ];
+            if let Some(p) = &runner.proton {
+                env.push(("PROTONPATH".into(), p.display().to_string()));
+            }
+            env.push(overrides);
+            DirectCommand {
+                program: runner.path.clone(), args: vec![exe_arg], cwd: install.path.clone(), env, env_remove,
+                runner: Some(runner.clone()), prefix: Some(prefix.to_path_buf()),
+            }
+        }
         RunnerKind::Proton => {
-            let steam = steam_root.ok_or_else(|| Error::new(ErrorCode::NotFound,
-                "Proton needs Steam's folder (STEAM_COMPAT_CLIENT_INSTALL_PATH) and no Steam install was found. Install Steam (it must run for the game anyway), or pick a Wine."))?;
+            let client = client.ok_or_else(|| Error::new(ErrorCode::NotFound,
+                "Proton needs a folder for STEAM_COMPAT_CLIENT_INSTALL_PATH and none was given: HOME is not set"))?;
             DirectCommand {
                 program: runner.path.join("proton"),
                 args: vec!["run".into(), exe_arg],
                 cwd: install.path.clone(),
                 env: vec![
-                    ("STEAM_COMPAT_DATA_PATH".into(), compat.display().to_string()),
-                    ("STEAM_COMPAT_CLIENT_INSTALL_PATH".into(), steam.display().to_string()),
-                    ("WINEDLLOVERRIDES".into(), dll_overrides(RunnerKind::Proton, chained_asi)),
+                    ("STEAM_COMPAT_DATA_PATH".into(), prefix.display().to_string()),
+                    ("STEAM_COMPAT_CLIENT_INSTALL_PATH".into(), client.display().to_string()),
+                    overrides,
                 ],
                 env_remove,
                 runner: Some(runner.clone()),
-                prefix: Some(compat.join("pfx")),
+                prefix: Some(prefix.join("pfx")),
             }
         }
         RunnerKind::Wine => DirectCommand {
             program: runner.path.clone(),
             args: vec![exe_arg],
             cwd: install.path.clone(),
-            env: vec![
-                ("WINEPREFIX".into(), compat.display().to_string()),
-                ("WINEDLLOVERRIDES".into(), dll_overrides(RunnerKind::Wine, chained_asi)),
-            ],
+            env: vec![("WINEPREFIX".into(), prefix.display().to_string()), overrides],
             env_remove,
             runner: Some(runner.clone()),
-            prefix: Some(compat.to_path_buf()),
+            prefix: Some(prefix.to_path_buf()),
         },
     })
 }
 
-/// The runner of an install's settings (Linux): the player's path, else [`default_runner`].
-pub fn resolve_runner(settings: &StartSettings, roots: &[SteamRoot]) -> Result<RunnerInfo> {
+/// The runner of an install's settings (Linux): the player's path, else [`default_runner`]. A umu-run gets the Proton
+/// it runs (`all`'s newest compatibility-tools build).
+pub fn resolve_runner(settings: &StartSettings, all: &[RunnerInfo]) -> Result<RunnerInfo> {
     match &settings.runner {
-        Some(p) => runner_at(p),
-        None => default_runner(roots, &runners(roots, &crate::util::home())).ok_or_else(|| Error::new(ErrorCode::NotFound,
-            "No Proton or Wine was found to start the game with: install GE-Proton or Proton through Steam, or pick a Wine.")),
+        Some(p) => {
+            let mut r = runner_at(p)?;
+            if let Some(found) = all.iter().find(|x| x.path == r.path) {
+                r = found.clone();
+            } else if r.kind == RunnerKind::Umu {
+                r.proton = umu_proton(all);
+            }
+            Ok(r)
+        }
+        None => default_runner(all).ok_or_else(|| Error::new(ErrorCode::NotFound, NO_RUNNER)),
     }
 }
 
-/// The Steam folder Proton is told about: the root of the first Steam install found (a native one first).
+/// The Steam folder Proton is told about when Steam is installed: the root of the first Steam install found (a
+/// native one first). None without Steam ([`compat_client_dir`] then).
 pub fn steam_root_for(roots: &[SteamRoot]) -> Option<PathBuf> {
     roots.iter().find(|r| r.flavor == crate::steam::SteamFlavor::Native).or(roots.first()).map(|r| r.path.clone())
 }
 
 /// The command of a direct start of `install` on this host with its settings.
 pub fn plan(install: &GameInstall, settings: &StartSettings, roots: &[SteamRoot]) -> Result<DirectCommand> {
+    plan_on(install, settings, roots, &Host::current())
+}
+
+/// [`plan`] on a given host (tests: fixture home, data folder and PATH; never the process's).
+pub fn plan_on(install: &GameInstall, settings: &StartSettings, roots: &[SteamRoot], host: &Host) -> Result<DirectCommand> {
     let chained = crate::game::asi_loader_chained(install);
     if cfg!(windows) {
         return command_for(true, install, None, None, None, chained);
     }
-    let runner = resolve_runner(settings, roots)?;
-    let own = own_prefix(&crate::paths::DataEnv::from_process(), &install.id)
+    let runner = resolve_runner(settings, &runners(roots, host))?;
+    let env = host.env();
+    let own = own_prefix(&env, &install.id)
         .ok_or_else(|| Error::new(ErrorCode::NotFound, "HOME is not set: Kiln has no place for the game's prefix"))?;
     let (compat, pfx) = prefix_paths(runner.kind, settings.prefix.as_deref(), &own)?;
     let target = if runner.kind == RunnerKind::Proton { compat } else { pfx };
-    command_for(false, install, Some(&runner), Some(&target), steam_root_for(roots).as_deref(), chained)
+    let client = steam_root_for(roots).or_else(|| compat_client_dir(&env));
+    command_for(false, install, Some(&runner), Some(&target), client.as_deref(), chained)
 }
 
-/// The Wine prefix a direct start of `install` uses on this host (None on Windows, or when no runner is found): what
-/// the install's `prefix` is while it starts directly (saves, path mode).
+/// The Wine prefix a direct start of `install` uses on this host (None on Windows): what the install's `prefix` is
+/// while it starts directly (saves, path mode). With no runner found it is the prefix a Proton or umu start would use.
 pub fn prefix_of(install: &GameInstall, settings: &StartSettings, roots: &[SteamRoot]) -> Option<(Platform, PathBuf)> {
+    prefix_on(install, settings, roots, &Host::current())
+}
+
+/// [`prefix_of`] on a given host.
+pub fn prefix_on(install: &GameInstall, settings: &StartSettings, roots: &[SteamRoot], host: &Host) -> Option<(Platform, PathBuf)> {
     if cfg!(windows) {
         return None;
     }
     let kind = match &settings.runner {
         Some(p) => runner_at(p).ok()?.kind,
-        None => resolve_runner(settings, roots).map(|r| r.kind).unwrap_or(RunnerKind::Proton),
+        None => default_runner(&runners(roots, host)).map(|r| r.kind).unwrap_or(RunnerKind::Proton),
     };
-    let own = own_prefix(&crate::paths::DataEnv::from_process(), &install.id)?;
+    let own = own_prefix(&host.env(), &install.id)?;
     let (_, pfx) = prefix_paths(kind, settings.prefix.as_deref(), &own).ok()?;
-    Some((if kind == RunnerKind::Proton { Platform::Proton } else { Platform::Wine }, pfx))
+    Some((platform_of(kind), pfx))
 }
 
 /// Starts the command, detached: the game outlives the launcher. Linux: its own session, no AppImage environment
-/// (`hostenv`), output into `log` (the Proton/Wine output; None: discarded). Windows: out of the launcher's job when it
-/// may. The child is reaped on a thread. Returns the pid of the started program (Proton's script or wine on Linux, not
-/// the game's: the watcher finds the game by its folder).
+/// (`hostenv`), output into `log` (the umu, Proton or Wine output; None: discarded); the prefix's parent and the
+/// folder `STEAM_COMPAT_CLIENT_INSTALL_PATH` names are made first. Windows: out of the launcher's job when it may.
+/// The child is reaped on a thread. Returns the pid of the started program (umu-run, Proton's script or wine on Linux,
+/// not the game's: the watcher finds the game by its folder).
 pub fn spawn(cmd: &DirectCommand, log: Option<&Path>) -> Result<u32> {
     let mut c = crate::hostenv::command(&cmd.program);
     for k in &cmd.env_remove {
@@ -410,8 +554,12 @@ pub fn spawn(cmd: &DirectCommand, log: Option<&Path>) -> Result<u32> {
     if let Some(prefix) = &cmd.prefix
         && let Some(parent) = prefix.parent()
     {
-        // Proton makes `pfx` itself, in a compatdata folder that exists
+        // Proton makes `pfx` itself, in a compatdata folder that exists; Wine and umu make the prefix in its parent
         std::fs::create_dir_all(parent)?;
+    }
+    if let Some((_, client)) = cmd.env.iter().find(|(k, _)| k == "STEAM_COMPAT_CLIENT_INSTALL_PATH") {
+        // Kiln's own empty folder when Steam is not installed (Steam's exists)
+        std::fs::create_dir_all(client)?;
     }
     let child = spawn_detached(&mut c).map_err(|e| Error::new(ErrorCode::Unsupported, format!("starting {}: {e}", cmd.program.display())))?;
     let pid = child.id();
@@ -457,13 +605,16 @@ pub struct StartSetup {
     pub settings: StartSettings,
     /// A folder no Steam library knows ([`is_custom`]).
     pub custom: bool,
-    /// The launcher runs on Windows (no Proton, Wine or prefix to pick).
+    /// The launcher runs on Windows (no runner or prefix to pick).
     pub windows: bool,
-    /// Linux: every Proton and Wine found ([`runners`]).
+    /// A Steam install was found on this PC: without one the launcher does not offer "through Steam" for an install
+    /// that starts directly. Nothing of a direct start depends on it.
+    pub steam_found: bool,
+    /// Linux: every umu-run, Proton and Wine found ([`runners`]), in the order "automatic" takes them.
     pub runners: Vec<RunnerInfo>,
     /// Linux: the runner a direct start uses now (the player's, else [`default_runner`]); None when there is none.
     pub runner: Option<RunnerInfo>,
-    /// Linux: the runner "automatic" means ([`default_runner`]).
+    /// Linux: the runner "automatic" means ([`default_runner`]: umu-run, else the newest Proton, else Wine).
     pub default_runner: Option<RunnerInfo>,
     /// Why there is no runner, or why the player's choice cannot be used.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -472,31 +623,28 @@ pub struct StartSetup {
     pub own_prefix: Option<PathBuf>,
     /// The command a direct start runs now (None when it cannot be built: `problem`).
     pub command: Option<DirectCommand>,
-    /// A Steam client runs now: the game's Steam API needs it.
-    pub steam_running: bool,
 }
 
 /// [`StartSetup`] of an install.
 pub fn setup(dirs: &crate::paths::DataDirs, install: &GameInstall, roots: &[SteamRoot]) -> StartSetup {
+    setup_on(dirs, install, roots, &Host::current())
+}
+
+/// [`setup`] on a given host.
+pub fn setup_on(dirs: &crate::paths::DataDirs, install: &GameInstall, roots: &[SteamRoot], host: &Host) -> StartSetup {
     let settings = settings(dirs, install);
     let windows = cfg!(windows);
-    let all = if windows { Vec::new() } else { runners(roots, &crate::util::home()) };
-    let auto = if windows { None } else { default_runner(roots, &all) };
+    let all = if windows { Vec::new() } else { runners(roots, host) };
+    let auto = if windows { None } else { default_runner(&all) };
     let (runner, mut problem) = if windows {
         (None, None)
     } else {
-        match &settings.runner {
-            Some(p) => match runner_at(p) {
-                Ok(r) => (Some(all.iter().find(|x| x.path == r.path).cloned().unwrap_or(r)), None),
-                Err(e) => (None, Some(e.message)),
-            },
-            None => match auto.clone() {
-                Some(r) => (Some(r), None),
-                None => (None, Some("No Proton or Wine was found to start the game with: install GE-Proton or Proton through Steam, or pick a Wine.".into())),
-            },
+        match resolve_runner(&settings, &all) {
+            Ok(r) => (Some(r), None),
+            Err(e) => (None, Some(e.message)),
         }
     };
-    let command = match plan(install, &settings, roots) {
+    let command = match plan_on(install, &settings, roots, host) {
         Ok(c) => Some(c),
         Err(e) => {
             problem.get_or_insert(e.message);
@@ -507,23 +655,15 @@ pub fn setup(dirs: &crate::paths::DataDirs, install: &GameInstall, roots: &[Stea
         mode: effective_mode(install, Some(&settings)),
         custom: is_custom(install),
         windows,
+        steam_found: !roots.is_empty(),
         runners: all,
         runner,
         default_runner: auto,
         problem,
-        own_prefix: own_prefix(&crate::paths::DataEnv::from_process(), &install.id),
+        own_prefix: own_prefix(&host.env(), &install.id),
         command,
-        steam_running: steam_running(),
         settings,
     }
-}
-
-/// Whether a Steam client runs on this PC (`steam` / `steam.exe`): a direct start needs it for the game's Steam API.
-pub fn steam_running() -> bool {
-    crate::proc::list().unwrap_or_default().iter().any(|p| {
-        let n = p.name.to_ascii_lowercase();
-        n == "steam" || n == "steam.exe"
-    })
 }
 
 /// The newest runtime bundle of the data folder for `side` (what `build_check` reads when Kiln is not in the game yet).

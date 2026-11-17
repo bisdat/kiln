@@ -289,14 +289,19 @@ pub fn inspect_with(path: &Path, roots: &[SteamRoot], data_root: &Path) -> Resul
     let (kind, exe, app_id) = exe_kind(&dir).ok_or_else(|| {
         Error::invalid(format!("{} has neither {CLIENT_EXE} nor {SERVER_EXE}", dir.display()))
     })?;
-    // inside a Steam library: the same facts detect gives
-    if let Some(lib) = library_of(&dir)
-        && let Ok(Some(m)) = steam::app_manifest(&lib, app_id)
-        && steam::same_path(&canon(&m.install_dir), &dir)
+    // inside a Steam library: the same facts detect gives. Not when no Steam is installed at all: a library left on a
+    // drive (another system's, Steam uninstalled) is a folder Steam's Play cannot start here, so it is a custom folder
+    // (direct.rs), keeping the manifest's build id.
+    let manifest = library_of(&dir).and_then(|lib| {
+        let m = steam::app_manifest(&lib, app_id).ok().flatten()?;
+        steam::same_path(&canon(&m.install_dir), &dir).then_some((lib, m))
+    });
+    if let Some((lib, m)) = &manifest
+        && !roots.is_empty()
     {
-        let root = steam::root_of_library(roots, &lib)
-            .unwrap_or(SteamRoot { path: lib.clone(), flavor: steam::flavor_of(&lib) });
-        if let Some(g) = from_steam(&root, &lib, &m, data_root) {
+        let root = steam::root_of_library(roots, lib)
+            .unwrap_or(SteamRoot { path: lib.clone(), flavor: steam::flavor_of(lib) });
+        if let Some(g) = from_steam(&root, lib, m, data_root) {
             return Ok(g);
         }
     }
@@ -326,7 +331,7 @@ pub fn inspect_with(path: &Path, roots: &[SteamRoot], data_root: &Path) -> Resul
         library: None,
         platform,
         prefix,
-        build_id: None,
+        build_id: manifest.and_then(|(_, m)| m.build_id),
         exe_sha256: None,
         steam_flavor: if cfg!(windows) { Some(SteamFlavor::Windows) } else { None },
         path_mode,
@@ -424,23 +429,34 @@ pub fn add(dirs: &crate::paths::DataDirs, path: &Path) -> Result<GameInstall> {
 /// `add` with explicit Steam roots. A folder that starts directly (a custom folder by default, or the player's choice
 /// kept in its record) gets the platform and prefix of that start ([`apply_start`]).
 pub fn add_with(dirs: &crate::paths::DataDirs, path: &Path, roots: &[SteamRoot]) -> Result<GameInstall> {
+    add_on(dirs, path, roots, &crate::direct::Host::current())
+}
+
+/// [`add_with`] on a given host (the runners and Kiln's prefixes a direct start would use: tests give fixture folders).
+pub fn add_on(dirs: &crate::paths::DataDirs, path: &Path, roots: &[SteamRoot], host: &crate::direct::Host) -> Result<GameInstall> {
     let mut g = inspect_with(path, roots, &dirs.root)?;
     g.exe_sha256 = crate::hash::sha256_file(&g.path.join(&g.exe)).ok().map(|(h, _)| h);
     let settings = record(dirs, &g.id).ok().flatten().and_then(|r| r.start).unwrap_or_default();
-    apply_start(&mut g, &settings, roots, &dirs.root);
+    apply_start_on(&mut g, &settings, roots, &dirs.root, host);
     write_record(dirs, &g, receipt_json(&g.path))?;
     Ok(g)
 }
 
-/// The install as it runs with `settings`: a direct start under Proton or Wine (Linux) runs in its own prefix, which
+/// The install as it runs with `settings`: a direct start under umu-run, Proton or Wine (Linux) runs in its own prefix, which
 /// is the install's `prefix` and `platform` then (saves, path mode, logs follow it); a start through Steam keeps what
 /// `inspect` found. Windows and servers are left as they are.
 pub fn apply_start(install: &mut GameInstall, settings: &crate::direct::StartSettings, roots: &[SteamRoot], data_root: &Path) {
+    apply_start_on(install, settings, roots, data_root, &crate::direct::Host::current())
+}
+
+/// [`apply_start`] on a given host.
+pub fn apply_start_on(install: &mut GameInstall, settings: &crate::direct::StartSettings, roots: &[SteamRoot], data_root: &Path,
+                      host: &crate::direct::Host) {
     if install.kind != GameKind::Client || cfg!(windows) {
         return;
     }
     if crate::direct::effective_mode(install, Some(settings)) == crate::direct::StartMode::Direct
-        && let Some((platform, pfx)) = crate::direct::prefix_of(install, settings, roots)
+        && let Some((platform, pfx)) = crate::direct::prefix_on(install, settings, roots, host)
     {
         install.platform = platform;
         install.prefix = Some(pfx);
@@ -451,13 +467,19 @@ pub fn apply_start(install: &mut GameInstall, settings: &crate::direct::StartSet
 /// Changes how an install starts (`game_start_set`): validates the choice, keeps it in the record and writes the
 /// install's platform and prefix for it again. A server, or a Proton/Wine/prefix choice on Windows, is refused.
 pub fn set_start(dirs: &DataDirs, id: &str, settings: &crate::direct::StartSettings, roots: &[SteamRoot]) -> Result<GameInstall> {
+    set_start_on(dirs, id, settings, roots, &crate::direct::Host::current())
+}
+
+/// [`set_start`] on a given host.
+pub fn set_start_on(dirs: &DataDirs, id: &str, settings: &crate::direct::StartSettings, roots: &[SteamRoot],
+                    host: &crate::direct::Host) -> Result<GameInstall> {
     let rec = record(dirs, id)?.ok_or_else(|| Error::not_found(format!("no game install {id}")))?;
     let old = rec.install.clone();
     if old.kind != GameKind::Client {
         return Err(Error::invalid("a dedicated server starts on the Servers page; its start is not set here"));
     }
     if cfg!(windows) && (settings.runner.is_some() || settings.prefix.is_some()) {
-        return Err(Error::invalid("Proton, Wine and a prefix are for Linux: Windows starts the game itself"));
+        return Err(Error::invalid("umu-run, Proton, Wine and a prefix are for Linux: Windows starts the game itself"));
     }
     if let Some(r) = &settings.runner {
         crate::direct::runner_at(r)?;
@@ -471,7 +493,8 @@ pub fn set_start(dirs: &DataDirs, id: &str, settings: &crate::direct::StartSetti
         }
         let kind = match &settings.runner {
             Some(r) => crate::direct::runner_at(r)?.kind,
-            None => crate::direct::resolve_runner(settings, roots).map(|r| r.kind).unwrap_or(crate::direct::RunnerKind::Proton),
+            None => crate::direct::default_runner(&crate::direct::runners(roots, host))
+                .map(|r| r.kind).unwrap_or(crate::direct::RunnerKind::Proton),
         };
         crate::direct::prefix_paths(kind, Some(p), p)?;
     }
@@ -482,7 +505,7 @@ pub fn set_start(dirs: &DataDirs, id: &str, settings: &crate::direct::StartSetti
         fresh.build_id = fresh.build_id.or(old.build_id.clone());
         fresh
     }).unwrap_or(old);
-    apply_start(&mut g, settings, roots, &dirs.root);
+    apply_start_on(&mut g, settings, roots, &dirs.root, host);
     let mut new = InstallRecord { start: (settings != &crate::direct::StartSettings::default()).then(|| settings.clone()), ..rec };
     new.install = g.clone();
     new.updated = Some(crate::saves::rfc3339(std::time::SystemTime::now()));
