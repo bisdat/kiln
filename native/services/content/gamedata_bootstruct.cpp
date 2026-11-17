@@ -154,9 +154,15 @@ struct Copier {
         std::memcpy(v, src + at, sizeof(T));
         return true;
     }
-    template <class T>
-    void wr(size_t at, T v) { std::memcpy(dst->data() + at, &v, sizeof(T)); }
     bool fail(const std::string& why) { return *err = why, false; }
+    // every write lies inside the bytes placed for the value it belongs to (`end`: where they end), never in the copy's
+    // other data and never past it: a reflected layout that does not fit its bytes is refused
+    template <class T>
+    bool wr(size_t at, T v, size_t end) {
+        if (end > dst->size() || at > end || end - at < sizeof(T)) return fail("a member lies outside the bytes copied for it (its type is larger than its data)");
+        std::memcpy(dst->data() + at, &v, sizeof(T));
+        return true;
+    }
     // n bytes of the source at `from`, behind the copy; *at: where they are now
     bool place(int64_t from, size_t n, size_t* at, const std::string& what) {
         if (from < 0 || static_cast<uint64_t>(from) + n > src_len) return fail(what + " lies outside the source template's bytes");
@@ -167,11 +173,12 @@ struct Copier {
         if (n) std::memcpy(dst->data() + *at, src + from, n);
         return true;
     }
-    // the value of type t at source offset `from`, already copied to `to`
-    bool fix(const TType* t, int64_t from, size_t to, int depth) {
+    // the value of type t at source offset `from`, already copied to `to`; its bytes there end at `end`
+    bool fix(const TType* t, int64_t from, size_t to, size_t end, int depth) {
         const TType* r = t ? t->resolved() : nullptr;
         if (!r) return fail("a member of a type the game's reflection does not name");
         if (depth > 32) return fail(r->name + " is nested too deep to copy");
+        if (to > end || end - to < r->size) return fail(r->name + ": a member lies outside the bytes copied for it (its type is larger than its data)");
         const uint32_t k = r->kind;
         if ((k >= K_BOOL && k <= K_BM64) || k == K_REF || k == K_GUID) return true;  // plain bytes
         switch (k) {
@@ -179,44 +186,45 @@ struct Copier {
                 for (const TField& f : r->fields) {
                     const TType* ft = f.type();
                     if (!ft) return fail(r->name + "." + f.name + " has a type the game's reflection does not name");
-                    if (!fix(ft, from + f.offset, to + f.offset, depth + 1)) return false;
+                    if (!fix(ft, from + f.offset, to + f.offset, end, depth + 1)) return false;
                 }
                 return true;
             case K_ARRAY: {
                 const TType* el = r->inner() ? r->inner()->resolved() : nullptr;
                 if (!el) return fail(r->name + ": its element type is not known");
                 const uint32_t es = el->size ? el->size : (r->count ? r->size / r->count : 0);
+                if (r->count && !es) return fail(r->name + ": the size of its elements is not known");
                 for (uint32_t i = 0; i < r->count && i < 65536; ++i)
-                    if (!fix(el, from + int64_t{i} * es, to + size_t{i} * es, depth + 1)) return false;
+                    if (!fix(el, from + int64_t{i} * es, to + size_t{i} * es, std::min(end, to + size_t{i + 1} * es), depth + 1)) return false;
                 return true;
             }
             case K_BLOBARRAY: {
                 int32_t rel = 0;
                 uint32_t count = 0;
                 if (!rd(from, &rel) || !rd(from + 4, &count)) return fail(r->name + " lies outside the source template's bytes");
-                if (!rel || !count) return wr<int32_t>(to, 0), true;  // empty: nothing to point at
+                if (!rel || !count) return wr<int32_t>(to, 0, end);  // empty: nothing to point at
                 const TType* el = r->inner() ? r->inner()->resolved() : nullptr;
                 if (!el) return fail(r->name + ": its element type is not known");
+                if (!el->size) return fail(r->name + ": the size of its elements is not known");
                 if (count > 1000000) return fail(r->name + " has too many elements to copy");
-                const size_t es = el->size ? el->size : 12;
+                const size_t es = el->size;
                 const int64_t data = from + rel;
                 size_t at = 0;
                 if (!place(data, count * es, &at, r->name)) return false;
-                wr<int32_t>(to, static_cast<int32_t>(static_cast<int64_t>(at) - static_cast<int64_t>(to)));
+                if (!wr<int32_t>(to, static_cast<int32_t>(static_cast<int64_t>(at) - static_cast<int64_t>(to)), end)) return false;
                 for (uint32_t i = 0; i < count; ++i)
-                    if (!fix(el, data + int64_t{i} * static_cast<int64_t>(es), at + size_t{i} * es, depth + 1)) return false;
+                    if (!fix(el, data + int64_t{i} * static_cast<int64_t>(es), at + size_t{i} * es, at + size_t{i + 1} * es, depth + 1)) return false;
                 return true;
             }
             case K_BLOBSTRING: {
                 int32_t rel = 0;
                 uint32_t len = 0;
                 if (!rd(from, &rel) || !rd(from + 4, &len)) return fail(r->name + " lies outside the source template's bytes");
-                if (!rel || !len) return wr<int32_t>(to, 0), true;
+                if (!rel || !len) return wr<int32_t>(to, 0, end);
                 if (len > (1u << 20)) return fail("a string of " + std::to_string(len) + " bytes is too long to copy");
                 size_t at = 0;
                 if (!place(from + rel, len, &at, "a string")) return false;
-                wr<int32_t>(to, static_cast<int32_t>(static_cast<int64_t>(at) - static_cast<int64_t>(to)));
-                return true;
+                return wr<int32_t>(to, static_cast<int32_t>(static_cast<int64_t>(at) - static_cast<int64_t>(to)), end);
             }
             case K_BLOBOPT: {
                 int32_t rel = 0;
@@ -226,8 +234,8 @@ struct Copier {
                 if (!in || !in->size) return fail(r->name + ": its value's type is not known");
                 size_t at = 0;
                 if (!place(from + rel, in->size, &at, r->name)) return false;
-                wr<int32_t>(to, static_cast<int32_t>(static_cast<int64_t>(at) - static_cast<int64_t>(to)));
-                return fix(in, from + rel, at, depth + 1);
+                if (!wr<int32_t>(to, static_cast<int32_t>(static_cast<int64_t>(at) - static_cast<int64_t>(to)), end)) return false;
+                return fix(in, from + rel, at, at + in->size, depth + 1);
             }
             case K_BLOBVAR: {
                 uint32_t hash = 0, size = 0;
@@ -237,11 +245,14 @@ struct Copier {
                 const TType* vt = type_hash(hash);
                 if (!vt && size) return fail(r->name + " holds a type the game's reflection does not name");
                 if (size > (16u << 20)) return fail(r->name + " is too large to copy");
+                const TType* vr = vt ? vt->resolved() : nullptr;
+                if (size && (!vr || size < vr->size))
+                    return fail(r->name + " holds a " + (vr ? vr->name : std::string("value")) + " of " + std::to_string(size) + " bytes, smaller than its type");
                 const int64_t data = from + 4 + rel;
                 size_t at = 0;
                 if (!place(data, size, &at, r->name)) return false;
-                wr<int32_t>(to + 4, static_cast<int32_t>(static_cast<int64_t>(at) - static_cast<int64_t>(to + 4)));
-                return !vt || !size || fix(vt, data, at, depth + 1);
+                if (!wr<int32_t>(to + 4, static_cast<int32_t>(static_cast<int64_t>(at) - static_cast<int64_t>(to + 4)), end)) return false;
+                return !vt || !size || fix(vt, data, at, at + size, depth + 1);
             }
             default: {
                 char kind[16];
@@ -440,7 +451,7 @@ bool boot_copy_components(const TType* type, const std::vector<CopySource>& copi
             return *err = label + ": the " + c.brief + " of " + c.from + " is not readable", false;
         Copier cp{c.data, c.len, bytes, &why};
         size_t at = 0;
-        if (!cp.place(s->data, s->size, &at, c.brief) || !cp.fix(t, s->data, at, 0)) return *err = label + " from " + c.from + ": " + why, false;
+        if (!cp.place(s->data, s->size, &at, c.brief) || !cp.fix(t, s->data, at, at + s->size, 0)) return *err = label + " from " + c.from + ": " + why, false;
         const auto mine = std::find_if(vars.begin(), vars.end(), [&](const Var& v) { return v.brief == c.brief; });
         if (mine != vars.end()) {  // it has one: replaced by the copy (its old data stays where it is, unused)
             mine->hash = s->hash, mine->size = s->size, mine->data = static_cast<int64_t>(at);

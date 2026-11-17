@@ -321,6 +321,28 @@ void copy_components() {
     check(!boot_copy_components(&tmpl, {{"Stock", "magic", broken.data(), broken.size()}}, &c, &n, &err) && err.find("outside") != std::string::npos,
           "a pointer outside the source's bytes is refused");
     check(c == template_bytes(), "a refused copy leaves the list as it was");
+    // a layout that does not fit the bytes placed for it is refused, never written past (review: heap overflow probes)
+    {
+        const auto saved_size = inner.size;
+        const auto saved_fields = inner.fields;
+        inner.size = 48;  // the variant stores 8 bytes of an Inner that claims 48, with a string at 40
+        inner.fields = {{"name", reinterpret_cast<uintptr_t>(&str), 40}};
+        check(!boot_copy_components(&tmpl, one, &c, &n, &err) && err.find("smaller than its type") != std::string::npos,
+              "a variant smaller than its reflected type is refused");
+        inner.size = saved_size, inner.fields = saved_fields;
+        const auto saved_item = item.size;
+        item.size = 0;  // a list of structs whose size the reflection does not give
+        check(!boot_copy_components(&tmpl, one, &c, &n, &err) && err.find("size of its elements is not known") != std::string::npos,
+              "a list whose element size is not known is refused");
+        item.size = saved_item;
+        stock.fields.push_back({"beyond", reinterpret_cast<uintptr_t>(&str), 36});  // an 8-byte member at 36 of the 40 bytes copied
+        check(!boot_copy_components(&tmpl, one, &c, &n, &err) && err.find("outside the bytes copied") != std::string::npos,
+              "a member past the component's bytes is refused, not written");
+        stock.fields.pop_back();
+        check(c == template_bytes(), "the refused copies left the bytes as they were");
+        check(boot_copy_components(&tmpl, one, &c, &n, &err) && n == 1, "the real layout copies again");
+        c = template_bytes();
+    }
     // an actor: what it needs to live is not copied over
     auto actor = template_bytes();
     put<uint32_t>(actor, 0x40 + 2 * 12, 0xe1);  // Gamma's entry is an Actor now
