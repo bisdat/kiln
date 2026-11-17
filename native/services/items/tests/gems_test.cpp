@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstring>
 #include <map>
+#include <vector>
 
 #include "../gems_logic.h"
 
@@ -494,6 +495,183 @@ void backpack_room() {
     check(!f.room(1), "room: a cycle of Virtual links ends (no room, no endless walk)");
 }
 
+// ---- 0.2.0-dev.29.15 (GitHub issue 61): separate holders, payers, the return, gem sources ----
+void holders_and_payers() {
+    // an older caller's 56-byte request: the appended fields read 0, nothing past its size is read
+    struct Old {
+        KilnGemRequest r;
+        uint8_t poison[32];
+    } old{};
+    old.r = req(KILN_GEM_ACTION_SLOT);
+    old.r.size = KILN_GEM_REQUEST_V1_SIZE;
+    old.r.carrier = 2001;
+    old.r.gem_slot = KILN_SLOT_ID(2100, 3);
+    old.r.gem_holder = 777;  // inside the struct but past the caller's size: must not be read
+    old.r.pay_from = 9;
+    KilnGemRequest n{};
+    check(normalize_request(&old.r, &n) && n.size == sizeof n && n.gem_holder == 0 && n.pay_from == 0 && request_valid(n),
+          "request: a 56-byte (dev.29.11..14) request is kept, its appended fields 0");
+    KilnGemRequest tiny = req(KILN_GEM_ACTION_SLOT);
+    tiny.size = KILN_GEM_REQUEST_V1_SIZE - 4;
+    check(!normalize_request(&tiny, &n), "request: shorter than the first version is refused");
+    check(!normalize_request(nullptr, &n), "request: no request is refused");
+
+    KilnGemRequest r = req(KILN_GEM_ACTION_SLOT);
+    r.carrier = 2001;
+    r.gem_slot = KILN_SLOT_ID(2100, 3);
+    r.gem_holder = 5000;
+    r.carrier_holder = 0;
+    check(request_valid(r) && !request_routed(r), "holders: a gem in a chest and the carrier with the player is a plain request");
+    r.pay_from = KILN_GEM_PAY_HOLDER;
+    check(!request_valid(r), "payers: KILN_GEM_PAY_HOLDER without pay_holder is refused");
+    r.pay_holder = 5000;
+    check(request_valid(r) && request_routed(r), "payers: a paying container is a routed request");
+    KilnGemRequest x = r;
+    x.pay_from = KILN_GEM_PAY_PLAYER;
+    check(!request_valid(x), "payers: a pay_holder without KILN_GEM_PAY_HOLDER is refused");
+    x = r;
+    x.pay_from = 4;
+    x.pay_holder = 0;
+    check(!request_valid(x), "payers: an unknown pay_from is refused");
+    x = r;
+    x.pay_from = KILN_GEM_PAY_BASE;
+    x.pay_holder = 0;
+    check(request_valid(x) && request_routed(x), "payers: base storage is a routed request");
+    x.flags = KILN_GEM_FREE;
+    check(request_valid(x) && !request_routed(x), "payers: a free action pays nothing, so it routes nothing");
+    x.flags = KILN_GEM_COST;
+    x.cost_item = 7;
+    x.cost_count = 3;
+    check(!request_valid(x), "payers: a replaced cost with another payer is refused (the replacement is the player's)");
+    x = r;
+    x.reserved2 = 1;
+    check(!request_valid(x), "request: reserved2 must be 0");
+    KilnGemRequest u = req(KILN_GEM_ACTION_UNSLOT);
+    u.carrier = 2001;
+    u.return_to = 5000;
+    check(request_valid(u) && request_routed(u), "return: an Unslot into a chest is a routed request");
+    u.return_to = u.player;
+    check(!request_routed(u), "return: return_to = the player routes nothing");
+    KilnGemRequest rc = req(KILN_GEM_ACTION_RECYCLE);
+    rc.gem_slot = KILN_SLOT_ID(5001, 0);
+    rc.pay_from = KILN_GEM_PAY_BASE;
+    check(request_valid(rc) && !request_routed(rc), "payers: Recycle pays nothing, its pay_from routes nothing");
+    rc.return_to = 5000;
+    check(request_routed(rc), "return: Recycle's essence into a chest is routed");
+    KilnGemRequest ret = req(KILN_GEM_ACTION_UNSLOT);
+    ret.flags = KILN_GEM_RETURN;
+    ret.forge = 0;
+    ret.carrier = 2001;
+    check(request_valid(ret), "return: the forgeless return stays valid");
+    ret.return_to = 5000;
+    check(!request_valid(ret), "return: the forgeless return refuses a return_to (and every appended field)");
+
+    // the payment spread over payers on the game's own transaction
+    using P = std::vector<std::pair<uint32_t, uint32_t>>;
+    PayPlan p = plan_payment(P{{10, 5}, {11, 20}, {12, 3}}, 12);
+    check(p.before.size() == 1 && p.before[0].payer == 10 && p.before[0].take == 5 && p.last == 11 && p.last_take == 7 &&
+              p.short_by == 0, "payers: 12 from 5 + 20: Kiln takes 5 from the first, the game's call 7 from the second");
+    p = plan_payment(P{{10, 30}, {11, 20}}, 12);
+    check(p.before.empty() && p.last == 10 && p.last_take == 12, "payers: one payer covers it: only the game's own call, at that payer");
+    p = plan_payment(P{{10, 2}, {11, 3}}, 12);
+    check(p.short_by == 7 && p.last == 11 && p.last_take == 3 + 7 && p.before.size() == 1,
+          "payers: short by 7: the game's call asks the last payer for its 3 and the 7 missing (the game then rolls back)");
+    p = plan_payment(P{{10, 0}, {11, 0}}, 4);
+    check(p.before.empty() && p.last == 10 && p.last_take == 4 && p.short_by == 4, "payers: nobody has any: the game's call finds all of it missing");
+    p = plan_payment(P{{10, 0}, {11, 9}, {12, 9}}, 9);
+    check(p.before.empty() && p.last == 11 && p.last_take == 9, "payers: an empty payer is skipped");
+    p = plan_payment(P{}, 9);
+    check(p.last == 0 && p.before.empty(), "payers: no payers: no plan (the request ends NOT_ENOUGH before the game runs)");
+    check(payers_have(P{{1, 4}, {2, 6}}) == 10, "payers: the sum of what they have");
+}
+
+KilnGemSource src(uint32_t player, uint32_t page, uint32_t index, uint32_t gem) {
+    KilnGemSource s{};
+    s.size = sizeof s;
+    s.player = player;
+    s.holder = 5000;
+    s.slot = KILN_SLOT_ID(page, index);
+    s.gem = gem;
+    s.item = 0x1234;
+    s.level = 3;
+    s.lifetime_steps = 100;
+    return s;
+}
+
+void sources() {
+    uint64_t next = 0x1000;
+    auto rng = [&] { return next++; };
+    SourceBook b;
+    const char* why = "";
+    KilnGemSource a[2] = {src(1, 5001, 2, 900), src(1, 5001, 3, 901)};
+    check(!b.used() && b.offer(7, a, 2, 50, rng, &why) && b.used(), "sources: an offer of two gems is taken; the book is in use");
+    check(a[0].token == 0x1000 && a[1].token == 0x1001 && a[0].expires_step == 150, "sources: each gets a token and its expiry");
+    const SourceEntry* e = b.find(1, KILN_SLOT_ID(5001, 2), 120);
+    check(e && e->s.gem == 900 && e->owner == 7, "sources: the player's request naming the slot finds its offer");
+    check(!b.find(2, KILN_SLOT_ID(5001, 2), 120), "sources: another player naming the same slot finds nothing (forged)");
+    check(!b.find(1, KILN_SLOT_ID(5001, 4), 120), "sources: a slot never offered finds nothing (forged)");
+    check(!b.find(1, KILN_SLOT_ID(5001, 2), 151), "sources: an expired offer finds nothing (stale)");
+    check(b.names_page(1, 5001) && !b.names_page(1, 5002) && !b.names_page(2, 5001), "sources: the pages offered to a player are known");
+    check(foreign_verdict(KILN_GEM_ACTION_SLOT, e) == Foreign::Offered && foreign_verdict(KILN_GEM_ACTION_UPGRADE, e) == Foreign::Offered &&
+              foreign_verdict(KILN_GEM_ACTION_RECYCLE, e) == Foreign::Offered, "sources: Insert, Upgrade and Recycle may use an offer");
+    check(foreign_verdict(KILN_GEM_ACTION_UNSLOT, e) == Foreign::Refuse && foreign_verdict(KILN_GEM_ACTION_SLOT, nullptr) == Foreign::Refuse,
+          "sources: an Unslot naming a foreign slot, or no offer, is refused");
+    const uint64_t t = e->s.token;
+    check(b.take(t) && !b.find(1, KILN_SLOT_ID(5001, 2), 120) && !b.take(t), "sources: an offer is used once (a duplicate request finds nothing)");
+    // a newer offer of the same slot replaces the old one, with a new token
+    KilnGemSource again = src(1, 5001, 3, 901);
+    check(b.offer(7, &again, 1, 60, rng, &why) && b.size() == 1 && again.token != a[1].token &&
+              b.find(1, KILN_SLOT_ID(5001, 3), 61)->s.token == again.token, "sources: offering a slot again replaces its offer and token");
+    // all or nothing
+    KilnGemSource bad[2] = {src(1, 5001, 5, 902), src(1, 5001, 6, 0)};
+    check(!b.offer(7, bad, 2, 60, rng, &why) && b.size() == 1, "sources: one bad entry refuses the whole offer");
+    KilnGemSource s = src(1, 5001, 1, 903);
+    s.holder = 1;
+    check(!source_valid(s), "sources: the player as the holder is refused (a container only)");
+    s = src(1, 5001, 1, 903);
+    s.slot = KILN_SLOT_ID(5001, 8);
+    check(!source_valid(s), "sources: slot index 8 is refused");
+    s = src(1, 5001, 1, 903);
+    s.lifetime_steps = kMaxSourceLifetime + 1;
+    check(!source_valid(s), "sources: a lifetime over 3000 steps is refused");
+    s = src(1, 5001, 1, 903);
+    s.pay_from = KILN_GEM_PAY_HOLDER;
+    check(!source_valid(s), "sources: KILN_GEM_PAY_HOLDER needs its container");
+    s.pay_holder = 5000;
+    check(source_valid(s), "sources: a paying container is fine");
+    // limits
+    std::vector<KilnGemSource> many;
+    for (uint32_t i = 0; i < kMaxSourcesPerPlayer + 1; ++i) many.push_back(src(3, 6000 + i / 8, i % 8, 2000 + i));
+    check(!b.offer(7, many.data(), static_cast<uint32_t>(many.size()), 60, rng, &why), "sources: more than 256 live offers to one player are refused");
+    check(b.offer(7, many.data(), kMaxSourcesPerPlayer, 60, rng, &why), "sources: 256 to one player are fine");
+    // a broken generator (always 0 or repeating): no offer without a fresh token
+    SourceBook z;
+    auto zero = [] { return uint64_t{0}; };
+    KilnGemSource zs = src(1, 5001, 1, 904);
+    check(!z.offer(7, &zs, 1, 60, zero, &why), "sources: a generator that only gives 0 offers nothing");
+    // withdraw, owners, expiry
+    KilnGemSource o8 = src(1, 7001, 0, 905);
+    b.offer(8, &o8, 1, 60, rng, &why);
+    check(b.withdraw(7, 3, 0) == kMaxSourcesPerPlayer && b.find(1, KILN_SLOT_ID(7001, 0), 61), "sources: withdraw takes one owner's offers to one player");
+    b.drop_owner(8);
+    check(!b.find(1, KILN_SLOT_ID(7001, 0), 61), "sources: a mod's offers go with the mod");
+    b.expire(60 + 100 + 10, 5);
+    check(b.size() == 0, "sources: offers past their expiry (and the grace) are dropped");
+    uint32_t live = b.live_for(1, 0, [](const KilnGemSource&) {});
+    check(live == 0 && b.used(), "sources: an empty book stays in use for the world (forged requests stay refused)");
+    b.clear();
+    check(!b.used(), "sources: a new world starts unused");
+
+    // own or foreign: the player's pages, a socket of the player's carrier
+    const std::vector<uint32_t> pages{2, 6590, 6591, 6576};
+    check(own_gem_slot(KILN_SLOT_ID(6591, 4), 0, false, pages), "foreign: a slot of the player's page is the player's own");
+    check(own_gem_slot(KILN_SLOT_ID(6576, 0), 0, false, pages), "foreign: a worn backpack's page is the player's own");
+    check(!own_gem_slot(KILN_SLOT_ID(5001, 2), 0, false, pages), "foreign: a chest's slot is not");
+    check(own_gem_slot(KILN_SLOT_ID(2001, 0), 2001, true, pages), "foreign: the socket of a carrier in the player's pages is the player's own");
+    check(!own_gem_slot(KILN_SLOT_ID(2001, 0), 2001, false, pages), "foreign: the socket of a carrier elsewhere (a chest's weapon) is not");
+    check(own_gem_slot(0, 2001, false, pages), "foreign: no slot (Unslot) is judged by the carrier, not here");
+}
+
 int main() {
     requests();
     layout();
@@ -504,6 +682,8 @@ int main() {
     gifts();
     setup_block();
     backpack_room();
+    holders_and_payers();
+    sources();
     std::printf("%s: %d failure(s)\n", failures ? "FAILED" : "PASSED", failures);
     return failures ? 1 : 0;
 }
