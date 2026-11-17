@@ -242,9 +242,9 @@
 
     "resourcePatch": {
       "type": "object",
-      "description": "One resource and what to change in it: fields to set, a template's components, values added to a list. At least one of set, append, addComponents, removeComponents. A patch is applied whole or not at all.",
+      "description": "One resource and what to change in it: fields to set, a template's components, lists cleared, replaced or appended to. At least one of set, append, replace, clear, addComponents, removeComponents, copyComponents. Made in the order removeComponents, addComponents, copyComponents, clear, replace, append, set. A patch is applied whole or not at all.",
       "required": ["resource", "type"],
-      "anyOf": [ { "required": ["set"] }, { "required": ["append"] }, { "required": ["addComponents"] }, { "required": ["removeComponents"] } ],
+      "anyOf": [ { "required": ["set"] }, { "required": ["append"] }, { "required": ["replace"] }, { "required": ["clear"] }, { "required": ["addComponents"] }, { "required": ["removeComponents"] }, { "required": ["copyComponents"] } ],
       "additionalProperties": false,
       "properties": {
         "format": { "const": 1 },
@@ -284,10 +284,36 @@
           "items": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
           "description": "Components of the game's types a template gets, zeroed (\"PickupItemZone\"); one it has already stays. Made after removeComponents; set then fills them in (\"PickupItemZone.lastAttempt.value\")."
         },
+        "copyComponents": {
+          "type": "object",
+          "minProperties": 1,
+          "description": "Component type name to the GUID of the template it is copied from, whole (its lists, strings and nested structs with it): added when the template has none of that type, its own replaced when it has. The source must have the component; CurrentTransform, and what an actor needs to live, are refused. Made after addComponents; set can then change the copy's fields.",
+          "propertyNames": { "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
+          "additionalProperties": { "type": "string", "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$" }
+        },
+        "clear": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 },
+          "description": "List paths made empty, any element type (\"noBuildZones\"). A path names one list: [i] on the way is fine, [*] is not. Made after the components, before replace."
+        },
+        "replace": {
+          "type": "object",
+          "minProperties": 1,
+          "description": "List path to the values it holds afterwards, exactly: a list of numbers, bools or enum members. Made after clear, before append.",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["values"],
+            "additionalProperties": false,
+            "properties": {
+              "values": { "type": "array", "minItems": 1, "items": { "type": ["number", "boolean", "string"] }, "description": "Numbers, bools or enum members' names, in order." }
+            }
+          }
+        },
         "append": {
           "type": "object",
           "minProperties": 1,
-          "description": "List path to the values added at its end: a list of numbers, bools or enum members. Made after the components, before set.",
+          "description": "List path to the values added at its end: a list of numbers, bools or enum members. Made after the components, clear and replace, before set.",
           "additionalProperties": {
             "type": "object",
             "required": ["values"],
