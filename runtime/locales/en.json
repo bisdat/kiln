@@ -890,5 +890,65 @@
       "ability": "ability {0}",
       "code": "code"
     }
+  },
+  "dev": {
+    "window_key": "{window} window",
+    "filter": "Filter",
+    "clear": "Clear",
+    "systems": {
+      "title": "Kiln: Systems",
+      "unavailable": "Systems are unavailable on this build: {status}",
+      "off_only": "Off only",
+      "profile": "Profile",
+      "stop_profiling": "Stop profiling",
+      "all_on": "Turn all on",
+      "log_top": "Log top 30",
+      "col_on": "On",
+      "col_system": "System",
+      "col_calls": "calls/s",
+      "col_world": "World"
+    },
+    "types": {
+      "title": "Kiln: Types",
+      "unavailable": "Types are unavailable on this build: {status}",
+      "search": "Search",
+      "base": "Base: {type}"
+    },
+    "bindings": {
+      "title": "Kiln: Bindings",
+      "key_for": "Key for {binding}:",
+      "set": "Set",
+      "unbind": "Unbind",
+      "default": "Default",
+      "col_mod": "Mod",
+      "col_binding": "Binding",
+      "col_key": "Key",
+      "col_description": "Description",
+      "also_bound": "Also bound: {bindings}"
+    },
+    "resources": {
+      "title": "Kiln: Resources",
+      "type": "Type",
+      "list": "List",
+      "more": "... (filter to see more)",
+      "log_guid": "Log GUID"
+    },
+    "hooks": {
+      "title": "Kiln: Hooks"
+    },
+    "log": {
+      "title": "Kiln: Game Log",
+      "hide_noise": "Hide noise",
+      "hidden": "({count} older line(s) not drawn; filter to find them)"
+    },
+    "status": {
+      "title": "Kiln: Status",
+      "none": "No state files in {folder}"
+    },
+    "console": {
+      "title": "Kiln: Console",
+      "run": "Run",
+      "history": "History:"
+    }
   }
 }

@@ -246,12 +246,17 @@ public sealed partial class KilnTextKeysTests
         var used = new HashSet<string>(StringComparer.Ordinal) { KilnText.LanguageNameKey };
         var prefixes = new List<string>();
         foreach (var file in Sources().Concat(NativeSources()))
-            foreach (Match m in KeyLiteral().Matches(File.ReadAllText(file)))
+        {
+            var text = File.ReadAllText(file);
+            foreach (Match m in KeyLiteral().Matches(text))
             {
                 var k = m.Value[1..^1];
                 if (k.EndsWith('.')) prefixes.Add(k);
                 else used.Add(k);
             }
+            foreach (Match m in Regex.Matches(text, @"""([a-z0-9_]+\.)""\s*\+"))  // "dev." + id + ".title": a one-part prefix
+                prefixes.Add(m.Groups[1].Value);
+        }
         var unused = en.Keys.Where(k =>
         {
             if (used.Contains(k) || prefixes.Any(p => k.StartsWith(p, StringComparison.Ordinal))) return false;

@@ -20,6 +20,7 @@
     <InternalsVisibleTo Include="Kiln.Rules" />
     <InternalsVisibleTo Include="Kiln.Skills" />
     <InternalsVisibleTo Include="Kiln.Testing" />
+    <InternalsVisibleTo Include="Kiln.DevTools" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../Kiln.Api/Kiln.Api.csproj" Private="false" />
