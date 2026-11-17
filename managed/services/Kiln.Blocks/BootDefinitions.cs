@@ -123,6 +123,8 @@ public sealed class BootDefinitions
         var kind = KindOf(definition.GetType());
         if (kind == null) return new BootDefinitionResult<T>(false, NotYetReason(BlockJson.SectionOf(definition.GetType())!), null);
         PlainData(definition, definition.GetType().Name, 0, new HashSet<object>(ReferenceEqualityComparer.Instance));
+        if (definition is ResourcePatchBlock { } patch && patch.Problem() is { } problem)
+            throw new ArgumentException($"{kind}/{name}: {problem}", nameof(definition));
         var json = Canonical(JsonSerializer.SerializeToNode(definition, definition.GetType(), BlockJson.SharedOptions));
         var (ok, reason) = Stage(kind, name, json);
         return new BootDefinitionResult<T>(ok, reason, ok ? new BootBlockId<T>(_boot.ModId, kind, name) : null);
@@ -147,6 +149,8 @@ public sealed class BootDefinitions
         try { block = JsonSerializer.Deserialize(json, type, BlockJson.SharedOptions); }
         catch (JsonException e) { throw new ArgumentException($"{kind}/{name}: not a {type.Name}: {e.Message}", nameof(json), e); }
         if (block == null) throw new ArgumentException($"{kind}/{name}: null is not a {type.Name}", nameof(json));
+        if (block is ResourcePatchBlock { } patch && patch.Problem() is { } problem)
+            throw new ArgumentException($"{kind}/{name}: {problem}", nameof(json));
         var canonical = Canonical(JsonSerializer.SerializeToNode(block, type, BlockJson.SharedOptions));
         var (ok, reason) = Stage(kind, name, canonical);
         return new BootJsonDefinitionResult(ok, reason, kind, name);

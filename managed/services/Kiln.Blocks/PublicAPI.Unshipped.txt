@@ -6,3 +6,22 @@ Kiln.StationRecipe.DisplayName.init -> void
 static Kiln.Stations.RecipeName(uint recipe) -> string?
 static Kiln.Stations.WorkshopName(uint workshop) -> string?
 static Kiln.Bases.StockWithStations(Kiln.BaseId id) -> System.Collections.Generic.IReadOnlyDictionary<Kiln.ItemId, long>!
+Kiln.ResourceListAppend
+Kiln.ResourceListAppend.<Clone>$() -> Kiln.ResourceListAppend!
+Kiln.ResourceListAppend.AboveLast.get -> bool
+Kiln.ResourceListAppend.AboveLast.init -> void
+Kiln.ResourceListAppend.Equals(Kiln.ResourceListAppend? other) -> bool
+Kiln.ResourceListAppend.ResourceListAppend() -> void
+Kiln.ResourceListAppend.Values.get -> System.Collections.Generic.List<Kiln.ResourceValue>!
+Kiln.ResourceListAppend.Values.init -> void
+Kiln.ResourcePatchBlock.AddComponents.get -> System.Collections.Generic.List<string!>?
+Kiln.ResourcePatchBlock.AddComponents.init -> void
+Kiln.ResourcePatchBlock.Append.get -> System.Collections.Generic.Dictionary<string!, Kiln.ResourceListAppend!>?
+Kiln.ResourcePatchBlock.Append.init -> void
+Kiln.ResourcePatchBlock.RemoveComponents.get -> System.Collections.Generic.List<string!>?
+Kiln.ResourcePatchBlock.RemoveComponents.init -> void
+override Kiln.ResourceListAppend.Equals(object? obj) -> bool
+override Kiln.ResourceListAppend.GetHashCode() -> int
+override Kiln.ResourceListAppend.ToString() -> string!
+static Kiln.ResourceListAppend.operator !=(Kiln.ResourceListAppend? left, Kiln.ResourceListAppend? right) -> bool
+static Kiln.ResourceListAppend.operator ==(Kiln.ResourceListAppend? left, Kiln.ResourceListAppend? right) -> bool

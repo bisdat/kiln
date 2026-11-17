@@ -111,7 +111,56 @@ public sealed class BootLoweringTests : IDisposable
         Assert.True(d.Define("empty", new ResourcePatchBlock { Resource = Guid.NewGuid(), Type = "keen::BalancingTable" }).Ok);
         var r = Lower(Request(f.Staged));
         Assert.False(r["ok"]!.GetValue<bool>());
-        Assert.Contains("at least one field", (string?)r["reason"]);
+        Assert.Contains("at least one change", (string?)r["reason"]);
+    }
+
+    [Fact]
+    public void A_resource_patch_can_change_a_templates_components_and_append_to_a_list()
+    {
+        var f = new BootContext("boot-gallery", 1, BootRoles.DedicatedServer, new UnavailableGameData());
+        var d = BootDefinitions.For(f);
+        var staged = d.Define("ground-pickup", new ResourcePatchBlock
+        {
+            Resource = Guid.Parse("82706b40-61b1-4b8f-8b23-dcec6971bda1"), Type = "keen::ecs::TemplateResource",
+            RemoveComponents = ["SpawnTime"],
+            AddComponents = ["PickupItemZone"],
+            Set = { ["PickupItemZone.lastAttempt.value"] = 0L },
+        });
+        Assert.True(staged.Ok, staged.Reason);
+        Assert.Equal("""{"addComponents":["PickupItemZone"],"part":0,"removeComponents":["SpawnTime"],"resource":"82706b40-61b1-4b8f-8b23-dcec6971bda1","set":{"PickupItemZone.lastAttempt.value":0},"type":"keen::ecs::TemplateResource"}""",
+            Assert.Single(f.Staged).Json);
+        // an append alone is a change; values above the list's last only
+        Assert.True(d.Define("steps", new ResourcePatchBlock
+        {
+            Resource = Guid.NewGuid(), Type = "keen::FbUiBundle",
+            Append = new() { ["difficultySettings.settingValues.enemyDamage.steps"] = new ResourceListAppend { Values = [2.5, 3, 100], AboveLast = true } },
+        }).Ok);
+        var json = f.Staged[1].Json;
+        Assert.Contains(""""append":{"difficultySettings.settingValues.enemyDamage.steps":{"aboveLast":true,"values":[2.5,3,100]}}"""", json);
+        var r = Lower(Request(f.Staged));
+        Assert.True(r["ok"]!.GetValue<bool>(), (string?)r["reason"]);
+        Assert.Equal(2, r["docs"]!["patches"]!.AsArray().Count);
+    }
+
+    [Fact]
+    public void An_appended_value_is_a_plain_value_not_a_change_of_the_games_value()
+    {
+        var f = new BootContext("boot-gallery", 1, BootRoles.DedicatedServer, new UnavailableGameData());
+        var d = BootDefinitions.For(f);
+        var e = Assert.Throws<ArgumentException>(() => d.Define("doubled", new ResourcePatchBlock
+        {
+            Resource = Guid.NewGuid(), Type = "keen::FbUiBundle",
+            Append = new() { ["steps"] = new ResourceListAppend { Values = [3, ResourceValue.Times(2)] } },
+        }));
+        Assert.Contains("not a change of the game's value", e.Message);
+        Assert.Throws<ArgumentException>(() => d.Define("none", new ResourcePatchBlock
+        {
+            Resource = Guid.NewGuid(), Type = "keen::FbUiBundle", Append = new() { ["steps"] = new ResourceListAppend() },
+        }));
+        e = Assert.Throws<ArgumentException>(() => d.DefineJson("resourcePatches", "doubled-json",
+            """{"resource":"82706b40-61b1-4b8f-8b23-dcec6971bda1","type":"keen::FbUiBundle","append":{"steps":{"values":[{"mul":2}]}}}"""));
+        Assert.Contains("not a change of the game's value", e.Message);
+        Assert.Empty(f.Staged);
     }
 
     [Fact]

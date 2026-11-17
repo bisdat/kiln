@@ -1630,6 +1630,11 @@ void gamedata_cases() {
     // a matching snapshot: the row, and each query form found and not found
     f0 = t_fail;
     Snap s = make_snapshot("gd-match");
+    // names:templates/<component>: a template with the component, and one whose component's data nests a variant of that type
+    add(s, "templates", "Test_Template_Zone", R"({"name":"zone","components":[{"$type":"Health","points":5},{"$type":"PickupItemZone","radius":2},null]})",
+        "6f9619ff-8b86-d011-b42d-00c04fc964ff", "0000beef", 0);
+    add(s, "templates", "Test_Template_Zz_Nested", R"({"name":"nested","components":[{"$type":"Spawner","spawn":{"$type":"PickupItemZone"}}]})",
+        "6f9619ff-8b86-d011-b42d-00c04fc964fe", "0000beef", 0);
     flush(s);
     KilnOwner a = open_author();
     CHECK(row_is(KILN_CAP_AVAILABLE, s.key));
@@ -1653,6 +1658,25 @@ void gamedata_cases() {
         CHECK(rc == KILN_OK && by_item == item);
         const json by_tpl = json::parse(read_all(a, "resource:" + kGuidTemplate + "/0000beef/0", &rc), nullptr, false);
         CHECK(rc == KILN_OK && by_tpl == tpl);
+        // names:<kind>: what one kind's index holds, sorted
+        const json item_names = json::parse(read_all(a, "names:items", &rc), nullptr, false);
+        CHECK(rc == KILN_OK && item_names["value"]["names"] == json::parse(R"(["Test.Item-2","Test_Item_Logs"])"));
+        const json tpl_names = json::parse(read_all(a, "names:templates", &rc), nullptr, false);
+        CHECK(rc == KILN_OK && tpl_names["value"]["names"].is_array() && tpl_names["value"]["names"].size() >= 1 &&
+              tpl_names["value"]["names"][0] == "Test_Template_Trader");
+        // names:templates/<component>: only templates whose record has that component type
+        const json none = json::parse(read_all(a, "names:templates/NoSuchComponent", &rc), nullptr, false);
+        CHECK(rc == KILN_OK && none["value"]["names"].is_array() && none["value"]["names"].empty());
+        // the template's own components only: a variant nested in a component's data is not one
+        const json zone = json::parse(read_all(a, "names:templates/PickupItemZone", &rc), nullptr, false);
+        CHECK(rc == KILN_OK && zone["value"]["names"] == json::parse(R"(["Test_Template_Zone"])"));
+        const json zone_again = json::parse(read_all(a, "names:templates/PickupItemZone", &rc), nullptr, false);
+        CHECK(rc == KILN_OK && zone_again == zone);  // answered from memory
+        const json spawner = json::parse(read_all(a, "names:templates/Spawner", &rc), nullptr, false);
+        CHECK(rc == KILN_OK && spawner["value"]["names"] == json::parse(R"(["Test_Template_Zz_Nested"])"));
+        // the type's name exactly: a prefix of it is another type
+        const json prefix = json::parse(read_all(a, "names:templates/PickupItem", &rc), nullptr, false);
+        CHECK(rc == KILN_OK && prefix["value"]["names"].empty());
     }
     for (const std::string& q : std::vector<std::string>{"item:Test_Item_Missing", "item:test_item_logs", "template:Test_Item_Logs", "skill:0x00000001",
                                 "material:Cell13", "material:Test_Item_Logs", "resource:" + kGuidItem + "/1a2b3c4d/1",
@@ -1661,7 +1685,7 @@ void gamedata_cases() {
         CHECK(B.read_resource(a, ks(q), buf, sizeof buf, &need) == KILN_ERR_NOT_FOUND && need == 99);
     }
     // outside the grammar: refused before any index is touched, also with a snapshot
-    for (const char* q : {"item:", "item:../index", "item:a/b", "skill:8efcc472", "npc:Fisher", "items:Test_Item_Logs",
+    for (const char* q : {"item:", "item:../index", "item:a/b", "skill:8efcc472", "npc:Fisher", "items:Test_Item_Logs", "names:", "names:npcs", "names:items/Health", "names:templates/", "names:templates/a-b",
                           "resource:" "0F8FAD5B-D9CB-469F-A165-70867728950E/1a2b3c4d/0", "index.json", ""})
         CHECK(B.read_resource(a, ks(q), buf, sizeof buf, &need) == KILN_ERR_INVALID_ARGUMENT);
     CHECK(B.read_resource(a, ks("item:Test_Item_Logs"), buf, sizeof buf, nullptr) == KILN_ERR_INVALID_ARGUMENT);
