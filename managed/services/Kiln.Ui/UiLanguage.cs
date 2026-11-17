@@ -17,6 +17,8 @@ internal static unsafe class UiLanguage
     internal static void Start()
     {
         if (Interlocked.Exchange(ref _started, 1) != 0) return;
+        // with the overlay drawing, a Chinese, Japanese or Korean language waits for its glyphs (the first frames say)
+        if (UiNative.DrawingOffReason == null && UiNative.Looks != null) KilnText.Glyphs(false);
         KilnText.Configure(PlayerLook.Current.Language);
         KilnText.Refresh(GameLanguage.Current);
         KilnText.Changed += Push;
@@ -24,8 +26,34 @@ internal static unsafe class UiLanguage
         UiEngine.Log(LogLevel.Info, $"texts: {Describe()}");
     }
 
-    /// <summary>The start of an overlay frame (render thread): the game's language, while the setting is auto.</summary>
-    internal static void Frame() => KilnText.Refresh(GameLanguage.Current);
+    /// <summary>The start of an overlay frame (render thread, after KilnLook.BeginFrame): the game's language while the setting
+    /// is auto, and whether the overlay has the glyphs of the language in use (else Kiln's overlay texts are English).</summary>
+    internal static void Frame()
+    {
+        KilnText.Refresh(GameLanguage.Current);
+        KilnText.Glyphs(GlyphsReady(KilnText.Language, KilnLook.Glyphs));
+    }
+
+    /// <summary>Whether the overlay can draw <paramref name="language"/>: Latin needs nothing; Chinese, Japanese and Korean need
+    /// kiln.ui's glyphs of that language ready. A kiln.ui that does not say (null) is taken at its word.</summary>
+    internal static bool GlyphsReady(string language, (byte State, byte Language)? glyphs)
+    {
+        if (!KilnText.NeedsGlyphs(language) || glyphs is not { } g) return true;
+        if (g.State != UiNative.GlyphsReady) return false;
+        return g.Language == LanguageId(language);
+    }
+
+    /// <summary>The keen::LanguageId kiln.ui loads the glyphs of for a CJK tag (font_group.h language_id): zh-TW, zh-HK,
+    /// zh-MO and zh-Hant 21, every other zh 20, ja 11, ko 13; else 0.</summary>
+    internal static byte LanguageId(string language)
+    {
+        var l = ModLocale.Normalize(language);
+        if (l == "ja" || l.StartsWith("ja-", StringComparison.Ordinal)) return 11;
+        if (l == "ko" || l.StartsWith("ko-", StringComparison.Ordinal)) return 13;
+        if (l is "zh-tw" or "zh-hk" or "zh-mo" || l.StartsWith("zh-hant", StringComparison.Ordinal)) return 21;
+        if (l == "zh" || l.StartsWith("zh-", StringComparison.Ordinal)) return 20;
+        return 0;
+    }
 
     /// <summary>The setting changed (kiln.json, or Kiln's menu): applied at once.</summary>
     internal static void Apply(string setting)

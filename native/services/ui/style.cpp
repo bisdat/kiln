@@ -28,11 +28,13 @@
 #include "imgui.h"
 #include "imgui_internal.h"
 #include "font_budget.h"
+#include "font_group.h"
 #include "image_budget.h"
 #include "look_palette.h"
 #include "services/kiln_assets.h"
 #include "services/kiln_types.h"
 #include "ui.h"
+#include "ui_text.h"
 
 #define STB_IMAGE_STATIC
 #define STB_IMAGE_IMPLEMENTATION
@@ -124,6 +126,28 @@ std::vector<uint8_t> g_bold_bytes;  // the same group's bold face (empty when it
 ImFont* g_game_font = nullptr;
 ImFont* g_game_bold = nullptr;
 std::string g_font_note;
+
+// ---- the game's font of a Chinese, Japanese or Korean language group (font_group.h) ----
+// Read on a worker when Kiln's language or the game's is one of them, merged on the render thread into the overlay's fonts
+// (its default, the game's UI font and bold) after their Latin source; removed again when another group or none is wanted.
+struct GroupFont {
+    uint32_t index = 0;               // in the resource's fonts
+    std::vector<uint8_t> bytes;       // kept alive for the atlas (FontDataOwnedByAtlas = false)
+    std::vector<ImWchar> exclude;     // ImGui's GlyphExcludeRanges (empty: none)
+};
+std::mutex g_group_mu;                               // the worker's result
+std::vector<std::shared_ptr<GroupFont>> g_group_read;
+uint32_t g_group_read_lang = 0;
+std::string g_group_read_note;
+std::atomic<int> g_group_state{0};       // 0 nothing wanted (or to try again), 1 loading, 2 read (to merge), 3 merged, 4 failed
+std::atomic<uint32_t> g_group_lang{0};   // the keen::LanguageId the state is about (0 none)
+std::atomic<bool> g_group_busy{false};
+int g_group_tries = 0;                   // render thread: reads of this language so far
+std::atomic<uint64_t> g_group_retry_at{0};  // a resource not listed yet: asked again then
+bool g_group_said = false;               // render thread: the failure was logged
+std::vector<std::shared_ptr<GroupFont>> g_group_fonts;  // render thread: merged
+std::vector<ImFont*> g_group_into;                      // render thread: the fonts they are merged into
+uint64_t g_group_started = 0;
 
 // ---- built looks (render thread) ----
 struct Built {
@@ -620,6 +644,241 @@ void load_game_font() {
     g_font_state = 2;
 }
 
+// ---- the game's font of a CJK language group ----
+
+// Where the fields of the font resource are: the game's reflection (kiln.types) when it has them, else client 26430625's
+// layout (font_group.h, checked against that build's data offline).
+fontgroup::Layout group_layout(std::string* note) {
+    fontgroup::Layout l;
+    const auto* tp = static_cast<const KilnTypesApi*>(g_api->service(KilnStr{KILN_TYPES_SERVICE, sizeof(KILN_TYPES_SERVICE) - 1}, 1));
+    if (!tp || tp->header.size < offsetof(KilnTypesApi, type_field) + sizeof(void*) || !tp->type_by_name || !tp->type_info || !tp->type_field) {
+        *note = "layout of 26430625 (no kiln.types)";
+        return l;
+    }
+    auto type = [&](const char* name, uint32_t* size) -> const KilnType* {
+        const KilnType* t = tp->type_by_name(KilnStr{name, std::strlen(name)});
+        KilnTypeInfo i{};
+        i.size = sizeof i;
+        if (!t || tp->type_info(t, &i) != KILN_OK || i.type_size == 0 || i.type_size > 4096) return nullptr;
+        if (size) *size = static_cast<uint32_t>(i.type_size);
+        return t;
+    };
+    auto at = [&](const KilnType* t, const char* field, uint32_t* out) {
+        uint64_t o = 0;
+        if (!t || !field_offset(tp, t, field, &o) || o > 4096) return false;
+        *out = static_cast<uint32_t>(o);
+        return true;
+    };
+    fontgroup::Layout r;
+    const KilnType* res = type("keen::UiFontResource", nullptr);
+    const KilnType* group = type("keen::UiFontLanguageGroupResource", &r.group_size);
+    const KilnType* set = type("keen::UiGlyphSetResource", &r.set_size);
+    const KilnType* range = type("keen::UiFontRange", &r.range_size);
+    const bool ok = type("keen::TtfFontResource", &r.font_size) && at(res, "fonts", &r.res_fonts) &&
+                    at(res, "languageGroups", &r.res_groups) && at(group, "groupLanguages", &r.group_mask) &&
+                    at(group, "glyphSets", &r.group_sets) && at(group, "isDefaultLanguageGroup", &r.group_default) &&
+                    at(set, "fontIndex", &r.set_font) && at(set, "ranges", &r.set_ranges) && at(set, "fontVariantMask", &r.set_variant) &&
+                    at(range, "firstRune", &r.range_first) && at(range, "lastRune", &r.range_last) &&
+                    r.group_mask + 8 <= r.group_size && r.group_default < r.group_size && r.set_variant < r.set_size &&
+                    r.set_font + 4 <= r.set_size && r.range_last + 4 <= r.range_size && r.font_size >= 16;
+    if (!ok) {
+        *note = "layout of 26430625 (the reflection lacks a field)";
+        return l;
+    }
+    *note = "layout from the game's reflection";
+    return r;
+}
+
+// The worker: the group of `lang` (a keen::LanguageId) from the game's keen::UiFontResource, its regular fonts' blobs.
+void load_group_fonts(uint32_t lang) {
+    const uint64_t started = now_ms();
+    std::vector<std::shared_ptr<GroupFont>> got;
+    auto done = [&](int state, const std::string& note) {
+        {
+            std::lock_guard lk(g_group_mu);
+            g_group_read = std::move(got);
+            g_group_read_lang = lang;
+            g_group_read_note = note;
+        }
+        if (state == 0) g_group_retry_at = now_ms() + 5000;
+        g_group_state = state;
+    };
+    const auto* a = assets_api();
+    if (!a) return done(4, "kiln.assets unavailable");
+    constexpr uint32_t kUiFontResource = look::fnv1a("keen::UiFontResource");
+    KilnAssetKey keys[8]{};
+    size_t n = 0;
+    if (a->resource_list(kUiFontResource, keys, 8, &n) != KILN_OK || n == 0) return done(0, "no keen::UiFontResource yet");
+    size_t len = 0;
+    a->resource_read(&keys[0], nullptr, 0, &len);
+    if (len < 16 || len > (1u << 20)) return done(4, "UiFontResource unreadable");
+    std::vector<uint8_t> res(len);
+    if (a->resource_read(&keys[0], res.data(), res.size(), &len) != KILN_OK) return done(4, "UiFontResource unreadable");
+    std::string layout_note;
+    const fontgroup::Layout l = group_layout(&layout_note);
+    const fontgroup::Pick p = fontgroup::pick(res.data(), res.size(), lang, l);
+    if (p.sets.empty()) return done(4, p.why + " (" + layout_note + ")");
+    // the blobs' sizes (each font's content hash), then the budget
+    std::vector<KilnContentHash> hashes;
+    std::vector<size_t> sizes;
+    size_t fbase = 0;
+    uint32_t fcount = 0;
+    if (!fontgroup::blob_array(res.data(), res.size(), l.res_fonts, l.font_size, &fbase, &fcount)) return done(4, "fonts out of the resource");
+    for (const fontgroup::Set& set : p.sets) {
+        KilnContentHash h{};
+        std::memcpy(&h, res.data() + fbase + static_cast<size_t>(set.font) * l.font_size, sizeof h);
+        hashes.push_back(h);
+        sizes.push_back(h.size);
+    }
+    const size_t keep = fonts::admit_group(sizes.data(), sizes.size());
+    if (keep == 0) return done(4, "its first font is over the budget (font_budget.h)");
+    std::string which;
+    size_t total = 0;
+    for (size_t i = 0; i < keep; ++i) {
+        auto f = std::make_shared<GroupFont>();
+        f->index = p.sets[i].font;
+        f->bytes.resize(hashes[i].size);
+        size_t read = 0;
+        if (a->blob_read(&hashes[i], f->bytes.data(), f->bytes.size(), &read) != KILN_OK || read != f->bytes.size() ||
+            !fonts::is_font(f->bytes.data(), f->bytes.size()))
+            return done(4, "font " + std::to_string(f->index) + " of the group is unreadable");
+        for (uint16_t c : fontgroup::exclude_ranges(p.sets[i].ranges)) f->exclude.push_back(static_cast<ImWchar>(c));
+        total += f->bytes.size();
+        which += (which.empty() ? "" : ", ") + std::to_string(f->index);
+        got.push_back(std::move(f));
+    }
+    char b[200];
+    std::snprintf(b, sizeof b, "group %d, fonts %s of %u, %.1f MB%s; %s; read in %llu ms", p.group, which.c_str(), p.font_count,
+                  total / 1048576.0, keep < p.sets.size() ? " (the rest over the budget)" : "", layout_note.c_str(),
+                  static_cast<unsigned long long>(now_ms() - started));
+    done(2, b);
+}
+
+// Takes the group's fonts out of the atlas (render thread, outside a frame): their sources leave every font they were
+// merged into, whose glyphs are made again as they are drawn.
+void unmerge_group() {
+    if (g_group_fonts.empty()) return;
+    ImFontAtlas* atlas = ImGui::GetIO().Fonts;
+    for (ImFont* f : g_group_into) ImFontAtlasFontDiscardBakes(atlas, f, 0);  // their bakes hold loader data per source
+    for (int i = atlas->Sources.Size - 1; i >= 0; --i) {
+        ImFontConfig& src = atlas->Sources[i];
+        bool ours = false;
+        for (const auto& g : g_group_fonts) ours = ours || src.FontData == g->bytes.data();
+        if (!ours) continue;
+        const ImFontLoader* loader = src.FontLoader ? src.FontLoader : atlas->FontLoader;
+        if (loader && loader->FontSrcDestroy) loader->FontSrcDestroy(atlas, &src);
+        ImFontAtlasFontDestroySourceData(atlas, &src);
+        atlas->Sources.erase(&atlas->Sources[i]);
+    }
+    ImFontAtlasBuildUpdatePointers(atlas);
+    g_group_into.clear();
+    g_group_fonts.clear();
+}
+
+// Merges the group's fonts into a font of the overlay that does not have them yet (render thread, outside a frame).
+void merge_group_into(ImFont* target) {
+    if (!target || g_group_fonts.empty()) return;
+    for (ImFont* f : g_group_into)
+        if (f == target) return;
+    ImFontAtlas* atlas = ImGui::GetIO().Fonts;
+    for (const auto& g : g_group_fonts) {
+        ImFontConfig cfg;
+        cfg.MergeMode = true;
+        cfg.DstFont = target;
+        cfg.FontDataOwnedByAtlas = false;
+        cfg.GlyphExcludeRanges = g->exclude.empty() ? nullptr : g->exclude.data();
+        std::snprintf(cfg.Name, sizeof cfg.Name, "game font %u (language group)", g->index);
+        atlas->AddFontFromMemoryTTF(g->bytes.data(), static_cast<int>(g->bytes.size()), 0.0f, &cfg);  // 0: the target's size
+    }
+    g_group_into.push_back(target);
+}
+
+// The language whose glyphs the overlay needs now (render thread): Kiln's (set_texts) when it is CJK, else the game's.
+uint32_t group_wanted() {
+    uint32_t game = 0;
+    KilnUiScreen sc{};
+    sc.size = sizeof sc;
+    if (game_screen(&sc) == KILN_OK) game = sc.language;
+    return fontgroup::wanted(text::table().language(), game);
+}
+
+// Each frame (render thread, before NewFrame): start the read of a newly wanted group, merge one that was read, merge into
+// a font that arrived later (the game's), drop a group no longer wanted. True when the atlas changed.
+bool update_group_fonts() {
+    const uint32_t want = group_wanted();
+    bool changed = false;
+    if (want != g_group_lang.load()) {
+        if (g_group_busy.load()) return false;  // the read in flight finishes first
+        if (!g_group_fonts.empty()) {
+            unmerge_group();
+            changed = true;
+            logf(KILN_LOG_INFO, "ui: the game's font of language %u left the overlay's font atlas", g_group_lang.load());
+        }
+        g_group_lang = want;
+        g_group_state = 0;
+        g_group_tries = 0;
+        g_group_retry_at = 0;
+        g_group_said = false;
+    }
+    if (!want) return changed;
+    int st = g_group_state.load();
+    if (st == 0 && !g_group_busy.load() && g_group_tries < kDataTries && now_ms() >= g_group_retry_at) {
+        ++g_group_tries;
+        g_group_busy = true;
+        g_group_state = 1;
+        g_group_started = now_ms();
+        std::thread([want] {
+            load_group_fonts(want);
+            g_group_busy = false;
+        }).detach();
+        return changed;
+    }
+    if (st == 0 && g_group_tries >= kDataTries && !g_group_busy.load()) {  // never listed: give up
+        g_group_state = 4;
+        g_group_said = true;
+        logf(KILN_LOG_WARN, "ui: the game's font of language %u is not available (the game did not list its UI fonts): Kiln's "
+                            "texts stay English, other text in that language shows as boxes", want);
+        return changed;
+    }
+    if (st == 2) {
+        std::string note;
+        uint32_t lang = 0;
+        {
+            std::lock_guard lk(g_group_mu);
+            g_group_fonts = std::move(g_group_read);
+            g_group_read.clear();
+            lang = g_group_read_lang;
+            note = g_group_read_note;
+        }
+        if (lang != want) {  // read for another language meanwhile: read again
+            g_group_fonts.clear();
+            g_group_state = 0;
+            return changed;
+        }
+        g_group_state = 3;
+        logf(KILN_LOG_INFO, "ui: the game's font of language %u joined the overlay's font atlas (%s)", want, note.c_str());
+    }
+    if (st == 4 && !g_group_said) {
+        std::string note;
+        {
+            std::lock_guard lk(g_group_mu);
+            note = g_group_read_note;
+        }
+        g_group_said = true;
+        logf(KILN_LOG_WARN, "ui: the game's font of language %u is not available (%s): Kiln's texts stay English, other text "
+                            "in that language shows as boxes", want, note.c_str());
+    }
+    if (g_group_state.load() == 3) {
+        ImGuiIO& io = ImGui::GetIO();
+        const size_t before = g_group_into.size();
+        if (io.Fonts->Fonts.Size > 0) merge_group_into(io.Fonts->Fonts[0]);
+        merge_group_into(g_game_font);
+        merge_group_into(g_game_bold);
+        changed = changed || g_group_into.size() != before;
+    }
+    return changed;
+}
+
 // The game's colours, then its font, on one worker (the first game-based look or game font asked for; again while a
 // resource was not listed yet, see kDataTries).
 void ensure_game_data() {
@@ -869,6 +1128,12 @@ KilnResult look_info(KilnUiLookInfo* out) {
     out->scale = r.scale;
     out->game_colors = g_colors_state.load() == 3 ? 1 : 0;
     out->game_font = g_font_state.load() == 3 ? 1 : 0;
+    const int gs = g_group_state.load();
+    out->glyphs = static_cast<uint8_t>(g_group_lang.load() == 0 ? KILN_UI_GLYPHS_LATIN
+                                       : gs == 3 ? KILN_UI_GLYPHS_READY
+                                       : gs == 4 ? KILN_UI_GLYPHS_FAILED
+                                                 : KILN_UI_GLYPHS_LOADING);
+    out->glyph_language = static_cast<uint8_t>(g_group_lang.load());
     for (int i = 0; i < look::kRoles; ++i) out->roles[i] = p[i];
     out->role_count = look::kRoles;
     return KILN_OK;
@@ -928,6 +1193,7 @@ void style_frame_begin() {
              g_font_note.c_str());
     }
     if (update_mod_fonts()) stale();
+    if (update_group_fonts()) stale();
     rebuild_if_stale();
     ImGui::GetStyle() = g_player.st;  // windows that push nothing: the player's look
     // images: textures for new ones (at most img::kUploadsPerFrame a frame: the backend submits and waits for each), a

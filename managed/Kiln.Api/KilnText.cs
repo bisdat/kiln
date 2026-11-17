@@ -27,9 +27,18 @@ internal static class KilnText
     private const int MaxReported = 256;
 
     // Table: every key in the language in use (English where it has none). Origin: the language each plural group came from
-    // (its rule picks the form).
+    // (its rule picks the form). Gated: the overlay cannot draw that language yet (its glyphs are loading or failed), so
+    // the overlay's texts are English (EnglishTable) while the texts the game draws (Native) stay the language's.
     private sealed record State(string Setting, string Language, string GameRaw, Dictionary<string, string> Table,
-                                Dictionary<string, string> Origin, int Generation);
+                                Dictionary<string, string> Origin, Dictionary<string, string> EnglishTable,
+                                Dictionary<string, string> EnglishOrigin, bool Gated, int Generation)
+    {
+        public Dictionary<string, string> Shown => Gated ? EnglishTable : Table;
+        public Dictionary<string, string> ShownOrigin => Gated ? EnglishOrigin : Origin;
+        public string ShownLanguage => Gated ? Fallback : Language;
+    }
+
+    private static volatile bool _glyphs = true;
 
     private static readonly object Gate = new();
     private static readonly HashSet<string> Reported = new(StringComparer.Ordinal);
@@ -68,6 +77,29 @@ internal static class KilnText
     /// <summary>Changes each time the table does: a page that keeps text it made compares it.</summary>
     internal static int Generation => Current().Generation;
 
+    /// <summary>The overlay's texts are English for now although <see cref="Language"/> is not: Kiln.Ui's glyphs of that
+    /// language (the game's own Chinese, Japanese or Korean font) are still loading, or could not be loaded.</summary>
+    internal static bool Gated => Current().Gated;
+
+    /// <summary>Whether drawing <paramref name="language"/> needs glyphs the overlay's Latin fonts lack (Chinese, Japanese,
+    /// Korean): kiln.ui loads the game's own font of that language group first.</summary>
+    internal static bool NeedsGlyphs(string language)
+    {
+        var l = ModLocale.Normalize(language);
+        var dash = l.IndexOf('-');
+        return (dash > 0 ? l[..dash] : l) is "zh" or "ja" or "ko";
+    }
+
+    /// <summary>Kiln.Ui, each overlay frame: whether the overlay can draw the language in use (kiln.ui's glyph state). Until it
+    /// can, Kiln's overlay texts are English, so a player never sees boxes.</summary>
+    internal static void Glyphs(bool ready)
+    {
+        if (_glyphs == ready) return;
+        _glyphs = ready;
+        var st = _state;
+        if (st is null || st.Gated != (!ready && NeedsGlyphs(st.Language))) Rebuild(st?.Setting ?? Auto, st?.GameRaw, force: false);
+    }
+
     /// <summary>The player's setting (kiln.json <c>ui.language</c>): <see cref="Auto"/> (also for null, empty or blank) or a
     /// tag. Any thread; a change applies at once.</summary>
     internal static void Configure(string? setting)
@@ -103,7 +135,7 @@ internal static class KilnText
     /// once: the check in Kiln.Ui.Tests keeps that from shipping.</summary>
     internal static string T(string key)
     {
-        if (Current().Table.TryGetValue(key, out var text)) return text;
+        if (Current().Shown.TryGetValue(key, out var text)) return text;
         Report(key);
         return key;
     }
@@ -121,9 +153,10 @@ internal static class KilnText
     internal static string Plural(string key, long count, params (string Name, object? Value)[] values)
     {
         var st = Current();
-        var form = PluralForm(st.Origin.TryGetValue(key, out var from) ? from : st.Language, count);
-        if (!st.Table.TryGetValue(key + "." + form, out var text) && !st.Table.TryGetValue(key + ".other", out text) &&
-            !st.Table.TryGetValue(key + ".one", out text) && !st.Table.TryGetValue(key, out text))
+        var table = st.Shown;
+        var form = PluralForm(st.ShownOrigin.TryGetValue(key, out var from) ? from : st.ShownLanguage, count);
+        if (!table.TryGetValue(key + "." + form, out var text) && !table.TryGetValue(key + ".other", out text) &&
+            !table.TryGetValue(key + ".one", out text) && !table.TryGetValue(key, out text))
         {
             Report(key + ".other");
             return key;
@@ -135,10 +168,12 @@ internal static class KilnText
     }
 
     /// <summary>Whether the table has <paramref name="key"/> (in any language of the lookup, English included).</summary>
-    internal static bool Has(string key) => Current().Table.ContainsKey(key);
+    internal static bool Has(string key) => Current().Shown.ContainsKey(key);
 
-    /// <summary>The keys under <see cref="NativePrefix"/> with their texts now (for kiln.ui). kiln.ui picks a plural form
-    /// as English does (.one for 1, else .other): for a group whose language has no singular form .one is its .other.</summary>
+    /// <summary>The keys under <see cref="NativePrefix"/> with their texts now (for kiln.ui). The game draws them with its own
+    /// fonts, which have every language's glyphs, so they are the language's also while the overlay's texts are gated.
+    /// kiln.ui picks a plural form as English does (.one for 1, else .other): for a group whose language has no singular
+    /// form .one is its .other.</summary>
     internal static IReadOnlyList<KeyValuePair<string, string>> Native()
     {
         var st = Current();
@@ -220,14 +255,17 @@ internal static class KilnText
             var old = _state;
             gameRaw ??= old?.GameRaw ?? SafeGame();
             var language = ModLocale.Normalize(setting == Auto ? gameRaw : setting);
-            if (!force && old is not null && old.Setting == setting && old.Language == language)
+            var gated = !_glyphs && NeedsGlyphs(language);
+            if (!force && old is not null && old.Setting == setting && old.Language == language && old.Gated == gated)
             {
                 if (old.GameRaw != gameRaw) _state = old with { GameRaw = gameRaw };
                 return _state!;
             }
-            var (table, origin) = Build(language);
-            var changed = old is null || force || old.Language != language;
-            made = new State(setting, language, gameRaw, table, origin, changed ? Interlocked.Increment(ref _generation) : old!.Generation);
+            var (table, origin) = !force && old is not null && old.Language == language ? (old.Table, old.Origin) : Build(language);
+            var (english, englishOrigin) = !force && old is not null ? (old.EnglishTable, old.EnglishOrigin) : Build(Fallback);
+            var changed = old is null || force || old.Language != language || old.Gated != gated;
+            made = new State(setting, language, gameRaw, table, origin, english, englishOrigin, gated,
+                             changed ? Interlocked.Increment(ref _generation) : old!.Generation);
             _state = made;
             if (!changed) return made;
         }
@@ -354,6 +392,7 @@ internal static class KilnText
             _directory = null;
             _files = null;
             _state = null;
+            _glyphs = true;
             Reported.Clear();
         }
         Changed = null;

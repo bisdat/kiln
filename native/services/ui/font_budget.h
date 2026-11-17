@@ -43,6 +43,25 @@ inline Refusal admit(const void* data, size_t len, size_t count, size_t bytes) {
     return kOk;
 }
 
+// The game's own font of a Chinese, Japanese or Korean language group (font_group.h), read through kiln.assets when Kiln's
+// language or the game's is one of them and kept for the process while that group is in use. They are no mod fonts and do not
+// count against the limits above. Client 26430625's groups: zh-CN 18.6 MB (Noto Serif SC 11.2 MB + KR 7.4 MB), ja-JP 13.5 MB,
+// zh-TW 13.2 MB, ko-KR 7.4 MB. One group at a time: another language's group replaces it.
+constexpr size_t kMaxGroupFontBytes = 16u << 20;   // one file (the game's largest CJK file: 11.7 MB)
+constexpr size_t kMaxGroupBytes = 24u << 20;       // a group's files together
+constexpr size_t kMaxGroupFonts = 4;               // files of a group (each is merged into the overlay's fonts once)
+
+// Which of a group's files (sizes in the group's order) load: each up to kMaxGroupFontBytes, at most kMaxGroupFonts, and in
+// order while the total stays within kMaxGroupBytes (a file past it is left out; so are the ones after it). The count.
+inline size_t admit_group(const size_t* sizes, size_t n) {
+    size_t total = 0, k = 0;
+    for (; k < n && k < kMaxGroupFonts; ++k) {
+        if (sizes[k] < 1024 || sizes[k] > kMaxGroupFontBytes || total + sizes[k] > kMaxGroupBytes) break;
+        total += sizes[k];
+    }
+    return k;
+}
+
 inline const char* refusal_text(Refusal r) {
     switch (r) {
         case kNotAFont: return "not a TrueType or OpenType font";

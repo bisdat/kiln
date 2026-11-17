@@ -340,6 +340,7 @@ internal static unsafe class KilnLook
 {
     private static UiPalette _player = UiPalette.Neutral;
     private static bool _gameColors, _gameFont;
+    private static (byte State, byte Language)? _glyphs;
 
     /// <summary>The player's palette as of this frame's start.</summary>
     internal static UiPalette Player => Override ?? _player;
@@ -347,6 +348,10 @@ internal static unsafe class KilnLook
     /// <summary>The game's colours (else the stand-in) and font were read from the game, as of this frame's start.</summary>
     internal static bool GameColorsRead => _gameColors;
     internal static bool GameFontRead => _gameFont;
+
+    /// <summary>kiln.ui's glyphs of a Chinese, Japanese or Korean language as of this frame's start (UiNative.Glyphs*, the
+    /// keen::LanguageId); null when this kiln.ui does not say.</summary>
+    internal static (byte State, byte Language)? Glyphs => _glyphs;
 
     /// <summary>Tests and the preview: a palette in place of kiln.ui's.</summary>
     internal static UiPalette? Override;
@@ -359,13 +364,14 @@ internal static unsafe class KilnLook
             _player = i.Palette;
             _gameColors = i.GameColors;
             _gameFont = i.GameFont;
+            _glyphs = (i.Glyphs, i.GlyphLanguage);
         }
     }
 
     /// <summary>Inside a frame: the palette of the look pushed now (the player's when none is).</summary>
     internal static UiPalette PaletteHere() => Override ?? Info()?.Palette ?? _player;
 
-    private static (UiPalette Palette, bool GameColors, bool GameFont)? Info()
+    private static (UiPalette Palette, bool GameColors, bool GameFont, byte Glyphs, byte GlyphLanguage)? Info()
     {
         var t = UiNative.Looks;
         if (t == null || t->GetLookInfo == null) return null;
@@ -373,7 +379,7 @@ internal static unsafe class KilnLook
         i.Size = (uint)sizeof(UiNative.LookInfo);
         if (t->GetLookInfo(&i) != UiNative.Ok) return null;
         var n = (int)Math.Min(i.RoleCount, 16);
-        return (UiPalette.From(new ReadOnlySpan<uint>(i.Roles, n)), i.GameColors != 0, i.GameFont != 0);
+        return (UiPalette.From(new ReadOnlySpan<uint>(i.Roles, n)), i.GameColors != 0, i.GameFont != 0, i.Glyphs, i.GlyphLanguage);
     }
 }
 

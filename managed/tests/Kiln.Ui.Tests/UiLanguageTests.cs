@@ -104,6 +104,27 @@ public sealed unsafe class UiLanguageTests : IDisposable
     }
 
     [Fact]
+    public void The_overlay_has_a_languages_glyphs_when_kiln_ui_says_so_for_that_language()
+    {
+        Assert.True(UiLanguage.GlyphsReady("de-de", (UiNative.GlyphsLoading, 0)));           // Latin needs nothing
+        Assert.False(UiLanguage.GlyphsReady("zh-cn", (UiNative.GlyphsLoading, 20)));
+        Assert.True(UiLanguage.GlyphsReady("zh-cn", (UiNative.GlyphsReady, 20)));
+        Assert.False(UiLanguage.GlyphsReady("zh-cn", (UiNative.GlyphsReady, 11)));             // Japanese glyphs, still
+        Assert.False(UiLanguage.GlyphsReady("ja", (UiNative.GlyphsFailed, 11)));
+        Assert.True(UiLanguage.GlyphsReady("ko-kr", null));                                    // a kiln.ui that does not say
+        Assert.Equal(21, UiLanguage.LanguageId("zh-Hant"));
+        Assert.Equal(21, UiLanguage.LanguageId("zh-HK"));
+        Assert.Equal(20, UiLanguage.LanguageId("zh"));
+        Assert.Equal(13, UiLanguage.LanguageId("ko"));
+        Assert.Equal(0, UiLanguage.LanguageId("en-us"));
+        // the same numbers as kiln.ui's (font_group.h) and the game's keen::LanguageId (GameLanguage)
+        Assert.Equal("zh-cn", GameLanguage.KeyOf(20));
+        Assert.Equal("zh-tw", GameLanguage.KeyOf(21));
+        Assert.Equal("ja-jp", GameLanguage.KeyOf(11));
+        Assert.Equal("ko-kr", GameLanguage.KeyOf(13));
+    }
+
+    [Fact]
     public void Kiln_ui_s_layout_of_the_texts_tail()
     {
         Assert.Equal(40, sizeof(UiNative.Texts));

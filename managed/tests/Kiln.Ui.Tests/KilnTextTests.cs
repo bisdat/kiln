@@ -145,6 +145,27 @@ public sealed class KilnTextTests : IDisposable
     }
 
     [Fact]
+    public void Until_the_overlay_has_the_glyphs_its_texts_are_english_and_the_games_are_not()
+    {
+        File("zh-CN.json", """{ "native": { "menu": { "mods": "模组" } }, "settings": { "look": { "look": "外观" } } }""");
+        KilnText.Glyphs(false);                      // kiln.ui is still reading the game's Chinese font
+        KilnText.Configure("zh-CN");
+        Assert.True(KilnText.Gated);
+        Assert.Equal("Look", KilnText.T("settings.look.look"));                          // the overlay: English, no boxes
+        Assert.Contains(KilnText.Native(), p => p.Key == "native.menu.mods" && p.Value == "模组");  // the game draws these
+        var changes = 0;
+        KilnText.Changed += () => changes++;
+        KilnText.Glyphs(true);                       // the font joined the atlas
+        Assert.False(KilnText.Gated);
+        Assert.Equal("外观", KilnText.T("settings.look.look"));
+        Assert.Equal(1, changes);
+        KilnText.Glyphs(false);                      // a Latin language never waits
+        KilnText.Configure("de");
+        Assert.False(KilnText.Gated);
+        Assert.True(KilnText.NeedsGlyphs("ja-jp") && KilnText.NeedsGlyphs("ko") && !KilnText.NeedsGlyphs("ru-ru"));
+    }
+
+    [Fact]
     public void Tags_are_written_the_canonical_way()
     {
         Assert.Equal("zh-CN", KilnText.Canonical("zh_cn"));
