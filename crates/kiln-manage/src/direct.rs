@@ -133,6 +133,7 @@ impl Host {
 
     fn env(&self) -> crate::paths::DataEnv {
         crate::paths::DataEnv {
+            windows: cfg!(windows),
             home: self.home.clone().map(Into::into),
             xdg_data_home: self.xdg_data_home.clone().map(Into::into),
             ..Default::default()
