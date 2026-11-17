@@ -196,10 +196,17 @@ void history_before(void* widget) {
             logf(KILN_LOG_WARN, "ui: chat history: edit replace failed; preview disabled for this process");
             return;
         }
+        std::string verified;
+        if (!edit_text(state, &verified) || verified != next) {
+            g_keys.focus(false);
+            g_history_on.store(false, std::memory_order_release);
+            logf(KILN_LOG_WARN, "ui: chat history: SetText returned but readback failed; preview disabled for this process");
+            return;
+        }
         current = next;
         g_last_applied = next;
         if (g_trace_on.load(std::memory_order_relaxed) && g_recall_log_count.fetch_add(1) < 24)
-            logf(KILN_LOG_INFO, "ui: chat history trace: engine edit replacement returned successfully");
+            logf(KILN_LOG_INFO, "ui: chat history trace: engine edit replacement verified (no text logged)");
     }
 }
 
