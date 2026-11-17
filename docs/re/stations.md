@@ -434,3 +434,61 @@ Lab dedicated server 26430253 (a copy of the standard lab save: one base, altar 
   with "no one on this server has unlocked" (the world and 0 players checked) and selected with `allowLocked`.
 - **No player** (L6): all of the above ran with no player connected. **Use all options** (L7) was not run. **Cost** (L8):
   the managed reads of 14 stations took 0.6 ms (first call, JIT included); the native per-step diff was not timed apart.
+
+---------------------------------------------------------------------------------------------------------------------
+
+## 8. Station outputs as crafting stock (GitHub #68) [dis][cmp][sig]
+
+Read 2026-11-17 on the same builds (server 26430253 = sigdb f0d824be, client 26430625 = sigdb 5d9ef2f1), static.
+
+**How the fill takes (§3.1, in detail).** `AutoTransferRecipe` (S `0x198d50`, C `0x3f7ab0`) walks the resolved input
+stacks (24 B each: `+0x10` item, `+0x14` count, read together as one qword at S `0x199240`; stride `0x18` at
+S `0x1993ce`). Per input, after `need`: the player first, then every u32 entity of list A in order (loop S
+`0x1992f4`..`0x199331`, C `0x3f8054`..), each through **`PayMaterial(out, tx, entity, item, missing)`** (S `0x1b0d60`,
+C `0x411330`; the game's `removeItems` with no preferred slot, already `gems/PayMaterial`): it takes only stacks of
+the asked item, from every slot of every link of that entity. Still missing: code 4 (a build constant check, S
+`0x95b720`, returns false). Then `InventoryAddItems` (S `0x1b1f60`) into the station; water last through
+`AutoTransferWater(tx, stock, station, units, player)` (S `0x1994a0`, C `0x3f8200`) from list B. `have[i]` reads the
+station's inventory live, so writes earlier in the same transaction count. The caller commits on 0 and rolls the whole
+transaction back on any code.
+
+**So a source is per item.** A list-A entity gives only stacks of the item asked. A production station in the list is
+safe **for item X** exactly when every stack of X in it is an Output: X an output of its selected or running recipe and
+no input of either (all of a category input's options count). Its queued inputs (input items), its leftovers (neither)
+and an output that is also an input (an input item) are then out of reach by construction. No hook is needed: Kiln
+already passes its own `stock` to the function for `Stations.Fill` (§3.2).
+
+**What Kiln does (since 0.2.0-dev.29.17, feature `stations.output_sources`).** Stations are opted in one by one
+(`set_output_source`; managed: `Stations.SetOutputSource`, kept beside the save). In `kiln_items_stations`, at the
+transaction, for a fill of n crafts on top of `loaded`:
+1. the opted-in stations of the fill's base (the game's own `BaseAtPosition`), the target excluded, are read through the
+   program's accessors: their recipes now, their inventories now; for each resolved input item, the stations that lend
+   it and how much;
+2. `short_i = need_i - (player's bag + chests after the reserves)` where positive (the player and the Magic chests pay
+   first);
+3. per input with a shortfall: `AutoTransferRecipe(tx, {lending stations of item i, in entity order}, [stack_i with count
+   1], target, crafts = short_i, water 0, player 0)`: with count 1 the game's `loaded` is what the target holds of the
+   item, so its `need` is exactly `short_i`;
+4. the game's own call for the rest: the base's stock, the real inputs, `crafts = n + loaded - loaded'`, the water and the
+   player: every input ends where a plain fill of n would put it, the player and the chests paying what they would have;
+5. any code: rollback, nothing moved.
+A fill whose resolved inputs repeat an item, a fill with `KILN_STATION_FILL_NO_OUTPUTS`, and every fill while nothing is
+opted in run exactly as before (one plain call).
+
+**Not chosen.** (a) A hook on `PayMaterial` or the list loop with a per-source filter: possible, but it is a shared
+payment function (gem payment and others), and Kiln adds no hook on the fill path (§5). Collect-on-demand (move the
+needed outputs into a Magic chest first, then fill): two commits, not all or nothing, and it needs a chest with room.
+
+**The station screen's button.** The server's `player_crafting` handles it with the **player's** base (§3.1). Kiln does
+not hook it; Kiln.Blocks follows the held client action (`PlayerClientActionEvent`, docs/kiln/services/player-state.md)
+while a station is opted in, and runs a fill the player and the chests cannot cover but the outputs can as its own fill
+(same recipe, choices and amount, the player's bag first, all or nothing), canceling the game's.
+**Client [hyp]:** the client runs `AutoTransferRecipe` as a dry run on its own view of the base (C `0x2be77f`, rolled
+back at C `0x2be78d`) and keeps a status per entry (C `0x2be816`..`0x2bea65`: 1 ok, 2..5 the game's codes). Whether a
+"missing materials" status greys the button or stops the client from sending the action was not traced: a real-client
+check. If it does, the button reaches the server only when the chests alone cover the fill, and station outputs at the
+button need a client half (phase 2).
+
+Symbols: `@stations/AutoTransferRecipe.take` (scoped to `stations/AutoTransferRecipe`, three patterns) captures
+`stations/stack.item` = 0x10, `stations/stack.size` = 0x18 and `gems/PayMaterial` from the list loop, on both exes;
+feature `stations.output_sources` (`server.d/stations.json`).
