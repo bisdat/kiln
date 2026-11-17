@@ -419,6 +419,8 @@ void* __fastcall hk_craft(uint64_t packed, int32_t select) {
 }
 
 void after_frame(uintptr_t sys10) {
+    // Issue #44: end of the game's UI frame decides whether chat really has edit focus.
+    chat_input_frame_end();
     if (!overlay_drawing_on()) input_poll_window();
     ++g_frame_no;
     g_frames.store(g_frame_no, std::memory_order_relaxed);
@@ -607,6 +609,7 @@ bool game_install() {
         L.crafting = static_cast<bool>(g_craft_hook);
     }
     add_builtin_entries();
+    chat_input_probe_install();  // opt-in read-only probe or KILN_CHAT_HISTORY preview; default no hook
     footer_install();  // Kiln's line in the main menu's footer (menu_footer.cpp): its own log line
     logf(KILN_LOG_INFO, "ui: game UI hooked: screens on, main menu %s, pause menu %s, crafting %s, language %s, main-menu page %s",
          L.main_menu ? "on" : "off", L.system_menu ? "on" : "off", L.crafting ? "on" : "off", L.language ? "on" : "off",

@@ -81,6 +81,22 @@ void set_error(const char* fmt, ...);
 KilnHandle next_handle();                    // one handle space for every kiln.ui subscription (any thread)
 extern std::atomic<uint32_t> g_hover_panels; // Kiln panels that take the mouse only while it is over them
 
+// ---- chat_input_probe.cpp (GitHub issue 44: Up/Down history in the game's chat field) ----
+bool chat_input_probe_install();  // game_install: hooks the chat field when chat history (or a diagnostic) is on
+void chat_input_frame_end();      // the game's UI thread, after each GameUiFrame: whether the chat field has focus
+void chat_input_exit();           // on_unload: writes the history file still pending, stops its writer thread
+
+// The window procedure's one hook point for the game's chat field (input.cpp calls it on the window thread, before
+// Kiln's own key handling). Set by chat_input_probe_install while chat history or its diagnostic runs; null otherwise,
+// and in the input.cpp host harnesses, which do not link chat_input_probe.cpp.
+struct ChatInputSink {
+    bool (*key)(uint32_t vk, uint32_t mods, bool down, bool captured);  // a key transition; true keeps a press from the game
+    void (*text)(uint32_t ch);                                           // WM_CHAR / WM_UNICHAR, while Kiln does not capture
+    void (*ime)(bool composing);                                         // an IME composition started (true) or ended
+    void (*blur)();                                                      // the window lost focus / the game was deactivated
+};
+void input_set_chat_sink(const ChatInputSink* sink);  // input.cpp; the sink must live for the process
+
 // ---- input.cpp ----
 void input_install_iat();       // SetCursorPos / ClipCursor slots of the game exe (plugin main)
 void input_hook_xinput();      // after XInput loads: idle pad for the game while Kiln has the input
