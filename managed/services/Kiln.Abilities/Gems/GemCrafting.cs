@@ -42,9 +42,32 @@ public readonly record struct GemCost(ItemId Item, int Count)
 public sealed record GemCraftOptions
 {
     /// <summary>Where the carrier and the gem are: none (the default) for the player's own inventories, or an entity with
-    /// an inventory your mod vouches for (a chest the player may use). The player still pays, and an unsocketed gem or
-    /// Recycle's essence still goes to the player.</summary>
+    /// an inventory your mod vouches for (a chest the player may use). <see cref="GemHolder"/> and
+    /// <see cref="CarrierHolder"/>, when set, name each one's holder instead.</summary>
     public EntityId Holder { get; init; }
+
+    /// <summary>Where the gem is (Socket; a loose gem for Upgrade and Recycle): none (the default) for
+    /// <see cref="Holder"/>, else a container your mod vouches for. The gem and the carrier may be in two different
+    /// holders: the game's own action takes the gem from one and puts it into the carrier in the other in one
+    /// transaction. Since 0.2.0-dev.29.15.</summary>
+    public EntityId GemHolder { get; init; }
+
+    /// <summary>Where the carrier (the item with the socket) is: none (the default) for <see cref="Holder"/>, else a
+    /// container your mod vouches for. Since 0.2.0-dev.29.15.</summary>
+    public EntityId CarrierHolder { get; init; }
+
+    /// <summary>Who pays the game's cost (Socket, Upgrade; Unsocket is free on this game build): the player (the
+    /// default), a container (<see cref="GemPayer.From"/>), or the base's Magic chests as the game's crafting from base
+    /// storage uses them (<see cref="GemPayer.BaseStorage"/>, <see cref="GemPayer.PlayerThenBaseStorage"/>). The game
+    /// still decides the cost and takes it inside the action's own transaction: when the payers cannot pay it, nothing
+    /// is paid and nothing moves (<see cref="GemCraftStatus.NotEnough"/>). Other than the player it needs the capability
+    /// <c>gems.payers</c>, and a replaced <see cref="Cost"/> (not free) is refused with it: Kiln takes a replacement
+    /// from the player. Since 0.2.0-dev.29.15.</summary>
+    public GemPayer PayFrom { get; init; }
+
+    /// <summary>Where an unsocketed gem (Unsocket) and Recycle's essence go: none (the default) for the player, else a
+    /// container your mod vouches for (it needs <c>gems.payers</c>). Since 0.2.0-dev.29.15.</summary>
+    public EntityId ReturnTo { get; init; }
 
     /// <summary>Null (the default): the game's cost, paid by the player in the forge's material. <see cref="GemCost.Free"/>:
     /// the player pays nothing. Any other amount: the player pays that instead. For Recycle it replaces what the player
@@ -346,6 +369,9 @@ internal static unsafe class GemcraftNative
     public const uint ByCode = 0x1, Priced = 0x8;
     public const int MaxCost = 100000;
 
+    public const uint HasPayers = 0x1, HasSources = 0x2;
+    public const uint SourceFlag = 0x10, RoutedFlag = 0x20;
+
     [StructLayout(LayoutKind.Sequential)]
     public struct Request
     {
@@ -353,6 +379,18 @@ internal static unsafe class GemcraftNative
         public ulong GemSlot;
         public uint Gem, Forge, CostItem, CostCount;
         public uint Reserved0, Reserved1;
+        // appended in 0.2.0-dev.29.15
+        public uint GemHolder, CarrierHolder, PayFrom, PayHolder, ReturnTo, Reserved2;
+    }
+
+    /// <summary>KilnGemSource: one offered gem (0.2.0-dev.29.15).</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct Source
+    {
+        public uint Size, Player, Holder;
+        public ulong Slot;
+        public uint Gem, Item, Level, PayFrom, PayHolder, ReturnTo, LifetimeSteps, Rarity, Reserved;
+        public ulong Token, ExpiresStep;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -388,7 +426,16 @@ internal static unsafe class GemcraftNative
         public delegate* unmanaged[Cdecl]<uint, uint, uint, int> Decide;
         public delegate* unmanaged[Cdecl]<uint, int> Watch;
         public delegate* unmanaged[Cdecl]<Craft*, uint, uint*, int> Crafted;
+        // appended in 0.2.0-dev.29.15 (read only when Header.Size covers them)
+        public delegate* unmanaged[Cdecl]<uint*, byte*, uint, int> Extras;
+        public delegate* unmanaged[Cdecl]<ulong, Source*, uint, int> Offer;
+        public delegate* unmanaged[Cdecl]<ulong, uint, uint, uint*, int> Withdraw;
+        public delegate* unmanaged[Cdecl]<uint, Source*, uint, uint*, int> Sources;
+        public delegate* unmanaged[Cdecl]<uint, uint, uint, uint*, uint, uint*, int> Payers;
     }
+
+    /// <summary>The table's size before 0.2.0-dev.29.15 (eight functions).</summary>
+    public static readonly uint V1TableSize = (uint)(sizeof(ServiceHeader) + 8 * sizeof(nint));
 
     public static string Text(byte* p, int max)
     {
@@ -409,6 +456,12 @@ internal interface IGemcraftBackend
     int Decide(uint player, uint version, bool cancel);
     int Watch(bool on);
     int Crafted(Span<GemcraftNative.Craft> into, out uint count);
+    /// <summary>The appended parts (0.2.0-dev.29.15): null when this kiln.gemcraft predates them.</summary>
+    (uint Flags, string Why)? Extras();
+    int Offer(ulong owner, Span<GemcraftNative.Source> sources);
+    int Withdraw(ulong owner, uint player, uint holder, out uint count);
+    int Sources(uint player, Span<GemcraftNative.Source> into, out uint count);
+    int Payers(uint player, uint payFrom, uint payHolder, Span<uint> into, out uint count);
 }
 
 /// <summary>Kiln.Abilities' side of kiln.gemcraft: submissions and results, the pump of held and crafted actions.</summary>
@@ -427,7 +480,7 @@ internal static unsafe class GemCrafting
             {
                 if (_t != null) return _t;
                 var t = Services.Get<GemcraftNative.Table>(GemcraftNative.Name, GemcraftNative.Version);
-                if (t == null || t->Header.Size < (uint)sizeof(GemcraftNative.Table)) return null;
+                if (t == null || t->Header.Size < GemcraftNative.V1TableSize) return null;
                 return _t = t;
             }
         }
@@ -474,9 +527,73 @@ internal static unsafe class GemCrafting
             count = n;
             return rc;
         }
+
+        // the appended functions: only when the table is the 0.2.0-dev.29.15 one
+        private static GemcraftNative.Table* T2
+        {
+            get
+            {
+                var t = T;
+                return t != null && t->Header.Size >= (uint)sizeof(GemcraftNative.Table) ? t : null;
+            }
+        }
+
+        public (uint Flags, string Why)? Extras()
+        {
+            var t = T2;
+            if (t == null) return null;
+            uint f = 0;
+            var why = stackalloc byte[160];
+            why[0] = 0;
+            if (t->Extras(&f, why, 160) != GemcraftNative.Ok) return null;
+            return (f, GemcraftNative.Text(why, 160));
+        }
+
+        public int Offer(ulong owner, Span<GemcraftNative.Source> sources)
+        {
+            var t = T2;
+            if (t == null) return GemcraftNative.Unavailable;
+            fixed (GemcraftNative.Source* p = sources) return t->Offer(owner, p, (uint)sources.Length);
+        }
+
+        public int Withdraw(ulong owner, uint player, uint holder, out uint count)
+        {
+            uint n = 0;
+            var t = T2;
+            var rc = t == null ? GemcraftNative.Unavailable : t->Withdraw(owner, player, holder, &n);
+            count = n;
+            return rc;
+        }
+
+        public int Sources(uint player, Span<GemcraftNative.Source> into, out uint count)
+        {
+            uint n = 0;
+            var t = T2;
+            int rc;
+            if (t == null) rc = GemcraftNative.Unavailable;
+            else
+                fixed (GemcraftNative.Source* p = into) rc = t->Sources(player, p, (uint)into.Length, &n);
+            count = n;
+            return rc;
+        }
+
+        public int Payers(uint player, uint payFrom, uint payHolder, Span<uint> into, out uint count)
+        {
+            uint n = 0;
+            var t = T2;
+            int rc;
+            if (t == null) rc = GemcraftNative.Unavailable;
+            else
+                fixed (uint* p = into) rc = t->Payers(player, payFrom, payHolder, p, (uint)into.Length, &n);
+            count = n;
+            return rc;
+        }
     }
 
     private static IGemcraftBackend _backend = new NativeBackend();
+
+    /// <summary>The backend in use (the native table, or a test's fake).</summary>
+    internal static IGemcraftBackend Backend => _backend;
     private static int _producers;
     private static IDisposable? _tick;
     private static bool _holding, _watching;
@@ -519,7 +636,9 @@ internal static unsafe class GemCrafting
     {
         try
         {
-            if (_backend.Status() is null) ServiceCaps.LowerFeatures(GemcraftNative.Name, Gems.CraftCapability);
+            if (_backend.Status() is null) ServiceCaps.LowerFeatures(GemcraftNative.Name, Gems.CraftCapability, Gems.PayersCapability);
+            else if (_backend.Extras() is null)  // a kiln.gemcraft before 0.2.0-dev.29.15: no payers
+                ServiceCaps.LowerOff(Gems.PayersCapability, CapabilityReason.ServiceOlder, "kiln.gemcraft predates payers (an older kiln-items.dll)");
         }
         catch (Exception e) when (e is ArgumentException or InvalidOperationException)
         {
@@ -564,8 +683,18 @@ internal static unsafe class GemCrafting
     /// of its own.</exception>
     internal static (GemcraftNative.Request Request, GemCraftResult? Refusal) Build(GemCraftAction action, EntityId player,
         ItemInstanceRef first, ItemInstanceRef gem, EntityId forge, GemCraftOptions? options, IReadOnlyList<InventorySlot> slots,
-        Func<ItemId, bool> isGem, Func<ItemId, bool>? isGear = null)
+        Func<ItemId, bool> isGem, Func<ItemId, bool>? isGear = null) =>
+        Build(action, player, first, gem, forge, options, slots, slots, isGem, isGear);
+
+    /// <summary><see cref="Build(GemCraftAction, EntityId, ItemInstanceRef, ItemInstanceRef, EntityId, GemCraftOptions?, IReadOnlyList{InventorySlot}, Func{ItemId, bool}, Func{ItemId, bool}?)"/>
+    /// with the gem's holder's slots (<paramref name="gemSlots"/>) and the carrier's (<paramref name="carrierSlots"/>)
+    /// apart (0.2.0-dev.29.15).</summary>
+    /// <exception cref="ArgumentException">Also: a replaced cost (not free) with a payer other than the player.</exception>
+    internal static (GemcraftNative.Request Request, GemCraftResult? Refusal) Build(GemCraftAction action, EntityId player,
+        ItemInstanceRef first, ItemInstanceRef gem, EntityId forge, GemCraftOptions? options, IReadOnlyList<InventorySlot> gemSlots,
+        IReadOnlyList<InventorySlot> carrierSlots, Func<ItemId, bool> isGem, Func<ItemId, bool>? isGear = null)
     {
+        var pay = options?.PayFrom ?? GemPayer.Player;
         var r = new GemcraftNative.Request
         {
             Size = (uint)sizeof(GemcraftNative.Request),
@@ -573,7 +702,14 @@ internal static unsafe class GemCrafting
             Player = player.Value,
             Holder = options?.Holder.Value ?? 0,
             Forge = forge.Value,
+            GemHolder = options?.GemHolder.Value ?? 0,
+            CarrierHolder = options?.CarrierHolder.Value ?? 0,
+            PayFrom = (uint)pay.Kind,
+            PayHolder = pay.Kind == GemPayerKind.Container ? pay.Container.Value : 0,
+            ReturnTo = options?.ReturnTo.Value ?? 0,
         };
+        if (options?.Cost is { IsFree: false } && action != GemCraftAction.Recycle && pay.Kind != GemPayerKind.Player)
+            throw new ArgumentException("a replaced cost is taken from the player: PayFrom applies to the game's own cost", nameof(options));
         if (options?.Cost is { } cost)
         {
             if (cost.Count < 0 || cost.Count > GemcraftNative.MaxCost) throw new ArgumentException("a cost of 0 to 100000 items", nameof(options));
@@ -591,14 +727,14 @@ internal static unsafe class GemCrafting
         }
         GemCraftResult Refuse(string why) => new(GemCraftStatus.NotFound, action, player, forge, first, gem, 0, 0, default, default, why);
         // a carrier found in the slots must be the item the ref names; one not found there is checked by kiln.gemcraft
-        string? CarrierWrong(ItemInstanceRef x) => SlotOf(slots, x) is { } c ? Mismatch(c, x) : null;
+        string? CarrierWrong(ItemInstanceRef x) => SlotOf(carrierSlots, x) is { } c ? Mismatch(c, x) : null;
         switch (action)
         {
             case GemCraftAction.Socket:
             {
                 r.Carrier = first.Entity.Id.Value;
                 if (CarrierWrong(first) is { } cw) return (r, Refuse(cw));
-                if (SlotOf(slots, gem) is not { } g) return (r, Refuse("the gem is not in the player's (or the holder's) inventories"));
+                if (SlotOf(gemSlots, gem) is not { } g) return (r, Refuse("the gem is not in the player's (or the holder's) inventories"));
                 if (Mismatch(g, gem) is { } gw) return (r, Refuse(gw));
                 if (!isGem(g.Item)) return (r, Refuse("the item to socket is not a gem"));
                 r.GemSlot = g.Slot.Value;
@@ -611,8 +747,8 @@ internal static unsafe class GemCrafting
                 break;
             default:
             {
-                // a loose gem by its slot, a carrier by its entity
-                var s = SlotOf(slots, first);
+                // a loose gem by its slot (in the gem's holder), a carrier by its entity (in the carrier's holder)
+                var s = SlotOf(gemSlots, first);
                 if (s is not null && Mismatch(s, first) is { } fw) return (r, Refuse(fw));
                 if (s is not null && isGem(s.Item))
                 {
@@ -621,6 +757,7 @@ internal static unsafe class GemCrafting
                 }
                 else
                 {
+                    if (CarrierWrong(first) is { } cw2) return (r, Refuse(cw2));
                     r.Carrier = first.Entity.Id.Value;
                 }
                 break;
@@ -635,16 +772,29 @@ internal static unsafe class GemCrafting
         var mod = ModContext.CurrentMod;
         if (mod is { Alive: false }) throw new InvalidOperationException("the mod is unloading");
         var holder = options?.Holder is { IsNone: false } h ? h : player;
-        var slots = Items.Read(holder)?.Slots ?? [];
-        var (r, refusal) = Build(action, player, first, gem, forge, options, slots, id => Items.Get(id)?.Category == ItemCategory.WeaponGem,
-            id => Items.Get(id)?.IsGear == true);
+        var gemHolder = options?.GemHolder is { IsNone: false } gh ? gh : holder;
+        var carrierHolder = options?.CarrierHolder is { IsNone: false } ch ? ch : holder;
+        var gemSlots = Items.Read(gemHolder)?.Slots ?? [];
+        var carrierSlots = carrierHolder == gemHolder ? gemSlots : Items.Read(carrierHolder)?.Slots ?? [];
+        var (r, refusal) = Build(action, player, first, gem, forge, options, gemSlots, carrierSlots,
+            id => Items.Get(id)?.Category == ItemCategory.WeaponGem, id => Items.Get(id)?.IsGear == true);
         if (refusal is not null) return Task.FromResult(refusal);
+        if (Routed(r) && !Capabilities.Is(Gems.PayersCapability))
+            throw ServiceCaps.Unavailable(Gems.PayersCapability, $"{api}: PayFrom or ReturnTo other than the player cannot run");
         // an item ref whose entity is gone, or whose id names another spawn now (found nowhere in the slots above)
         foreach (var x in new[] { first, gem })
             if (!x.IsNone && Alive(x) == false)
                 return Task.FromResult(new GemCraftResult(GemCraftStatus.NotFound, action, player, forge, first, gem, 0, 0, default, default,
                     $"the item {x} no longer exists (a stale ref)"));
         return Send(r, action, player, first, gem, forge, mod, api);
+    }
+
+    /// <summary>Whether a request needs <c>gems.payers</c>: a payer other than the player for a cost the game charges,
+    /// or a return other than the player (gems_logic.h request_routed).</summary>
+    internal static bool Routed(in GemcraftNative.Request r)
+    {
+        var pays = r.Action != (uint)GemCraftAction.Recycle && (r.Flags & (GemcraftNative.Free | GemcraftNative.Cost)) == 0;
+        return (pays && r.PayFrom != 0) || (r.ReturnTo != 0 && r.ReturnTo != r.Player);
     }
 
     // The ref's entity is the spawn it captured; null when Kiln cannot tell here (no entity source).
@@ -827,6 +977,7 @@ internal static unsafe class GemCrafting
 
     internal static void PumpOnce()
     {
+        GemSources.PumpServer();
         var crafting = Events.HasSubscribers<GemCraftingEvent>();
         var crafted = Events.HasSubscribers<GemCraftedEvent>();
         if (crafting) _holding = _backend.Hold(HoldSteps) == GemcraftNative.Ok;
@@ -860,8 +1011,11 @@ internal static unsafe class GemCrafting
             for (var i = 0; i < Batch; i++) buf[i].Size = (uint)sizeof(GemcraftNative.Craft);
             var rc = _backend.Crafted(buf, out var n);
             for (var i = 0; i < (int)n && i < Batch; i++)
+            {
                 if (crafted && buf[i].Status == 0)
                     Events.Post(new GemCraftedEvent(ResultOf(buf[i], SlotsOf(new EntityId(buf[i].Player))), (buf[i].Flags & GemcraftNative.ByCode) != 0));
+                if ((buf[i].Flags & GemcraftNative.SourceFlag) != 0) GemSources.OnSourceResult(buf[i]);  // the player's client is told
+            }
             if (rc != GemcraftNative.BufferTooSmall || n == 0) break;
         }
     }
