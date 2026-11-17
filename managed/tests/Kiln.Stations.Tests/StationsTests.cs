@@ -111,13 +111,17 @@ public sealed unsafe class StationsTests : IDisposable
         public Func<StationsNative.Request, StationsNative.Plan>? PlanFor;
         public readonly List<StationsNative.Request> Planned = [];
 
-        public int Plan(in StationsNative.Request r, StationsNative.Stack[] keep, out StationsNative.Plan p)
+        public int Plan(in StationsNative.Request r, StationsNative.Stack[] keep, uint[] chests, out StationsNative.Plan p)
         {
             LastPlanned = r;
+            LastChests = chests;
             Planned.Add(r);
             p = PlanFor is { } f ? f(r) : NextPlan;
             return 0;
         }
+
+        public uint[] LastChests = [];
+        public bool HasChests { get; set; } = true;
 
         // station outputs as crafting stock (0.2.0-dev.29.17)
         public bool HasOutputs = true;
@@ -134,7 +138,7 @@ public sealed unsafe class StationsTests : IDisposable
 
         public (int Rc, uint[] Ids) OutputSources() => HasOutputs ? (0, Sources.ToArray()) : (StationsNative.Unavailable, []);
 
-        public int Submit(in StationsNative.Request r, StationsNative.Stack[] keep, ulong owner, long key)
+        public int Submit(in StationsNative.Request r, StationsNative.Stack[] keep, uint[] chests, ulong owner, long key)
         {
             if (SubmitResult != 0) return SubmitResult;
             Submitted.Add((r, keep, owner, key));
@@ -252,19 +256,24 @@ public sealed unsafe class StationsTests : IDisposable
         Assert.Equal(180, (int)Marshal.OffsetOf<StationsNative.Station>("Flags"));
         Assert.Equal(16, sizeof(StationsNative.Input));
         Assert.Equal(624, sizeof(StationsNative.Recipe));
-        Assert.Equal(88, sizeof(StationsNative.Request));
+        Assert.Equal(104, sizeof(StationsNative.Request));
         Assert.Equal(24, (int)Marshal.OffsetOf<StationsNative.Request>("C0"));
         Assert.Equal(64, (int)Marshal.OffsetOf<StationsNative.Request>("Keep"));
+        Assert.Equal(88, (int)Marshal.OffsetOf<StationsNative.Request>("ChestCount"));
+        Assert.Equal(96, (int)Marshal.OffsetOf<StationsNative.Request>("Chests"));
         Assert.Equal(32, sizeof(StationsNative.MoveChange));
-        Assert.Equal(1232, sizeof(StationsNative.Result));
+        Assert.Equal(1240, sizeof(StationsNative.Result));
+        Assert.Equal(1232, (int)Marshal.OffsetOf<StationsNative.Result>("FromChests"));
         Assert.Equal(52, (int)Marshal.OffsetOf<StationsNative.Result>("LimitedBy"));
         Assert.Equal(56, (int)Marshal.OffsetOf<StationsNative.Result>("ShortItem"));
         Assert.Equal(64, (int)Marshal.OffsetOf<StationsNative.Result>("Ticket"));
         Assert.Equal(80, (int)Marshal.OffsetOf<StationsNative.Result>("Changes"));
         Assert.Equal(1104, (int)Marshal.OffsetOf<StationsNative.Result>("Message"));
-        Assert.Equal(824, sizeof(StationsNative.Plan));
+        Assert.Equal(952, sizeof(StationsNative.Plan));
         Assert.Equal(696, (int)Marshal.OffsetOf<StationsNative.Plan>("Outputs"));
+        Assert.Equal(824, (int)Marshal.OffsetOf<StationsNative.Plan>("Chests"));
         Assert.Equal(696, StationsNative.PlanV1);
+        Assert.Equal(824, StationsNative.PlanChests);
         Assert.Equal(60, (int)Marshal.OffsetOf<StationsNative.Result>("FromOutputs"));
         Assert.Equal(36, (int)Marshal.OffsetOf<StationsNative.Plan>("ShortItem"));
         Assert.Equal(44, (int)Marshal.OffsetOf<StationsNative.Plan>("WaterPerCraft"));
@@ -274,8 +283,9 @@ public sealed unsafe class StationsTests : IDisposable
         Assert.Equal(72, (int)Marshal.OffsetOf<StationsNative.Event>("Position"));
         Assert.Equal(96, (int)Marshal.OffsetOf<StationsNative.Event>("Base"));
         Assert.Equal(188, sizeof(StationsNative.Status));
-        Assert.Equal(8 + 23 * 8, sizeof(StationsNative.Table));
+        Assert.Equal(8 + 24 * 8, sizeof(StationsNative.Table));
         Assert.Equal(8 + 21 * 8, StationsNative.TableV1);
+        Assert.Equal(8 + 23 * 8, StationsNative.TableOutputs);
     }
 
     [Fact]
@@ -505,7 +515,7 @@ public sealed unsafe class StationsTests : IDisposable
     [Fact]
     public void FillOptionsBecomeTheRequest()
     {
-        var (r, keep) = StationsCore.FillRequest(new EntityId(3300), new FillOptions
+        var (r, keep, chests) = StationsCore.FillRequest(new EntityId(3300), new FillOptions
         {
             Crafts = 10, Mode = FillMode.Add, Exact = true, DryRun = true, Water = false, Recipe = 0x1234,
             Choices = [new CategoryChoice(77, 1)], Player = new EntityId(1),
@@ -519,8 +529,10 @@ public sealed unsafe class StationsTests : IDisposable
         var k = Assert.Single(keep);  // a reserve of 0 is no reserve
         Assert.Equal((0x10u, 20u), (k.Item, k.Count));
         Assert.Equal(1u, r.KeepCount);
+        Assert.Empty(chests);
+        Assert.Equal(0u, r.ChestCount);
 
-        var (d, _) = StationsCore.FillRequest(new EntityId(3300), new FillOptions());
+        var (d, _, _) = StationsCore.FillRequest(new EntityId(3300), new FillOptions());
         Assert.Equal((0u, 1u, 0u, 0u), (d.Flags, d.Crafts, d.RecipeId, d.Player));  // up to 1 craft, water on, no player's bag
 
         Assert.Throws<ArgumentException>(() => StationsCore.FillRequest(new EntityId(3300), new FillOptions { Crafts = 0 }));
@@ -779,13 +791,13 @@ public sealed unsafe class StationsTests : IDisposable
     [Fact]
     public void AFillUsesStationOutputsUnlessTheOptionsSayNo()
     {
-        var (r, _) = StationsCore.FillRequest(new EntityId(3300), new FillOptions());
+        var (r, _, _) = StationsCore.FillRequest(new EntityId(3300), new FillOptions());
         Assert.Equal(0u, r.Flags & StationsNative.FillNoOutputs);
-        var (n, _) = StationsCore.FillRequest(new EntityId(3300), new FillOptions { UseStationOutputs = false });
+        var (n, _, _) = StationsCore.FillRequest(new EntityId(3300), new FillOptions { UseStationOutputs = false });
         Assert.Equal(StationsNative.FillNoOutputs, n.Flags & StationsNative.FillNoOutputs);
         // an older kiln.stations knows no such flag (it would refuse the request): never sent there
         _fake.HasOutputs = false;
-        var (o, _) = StationsCore.FillRequest(new EntityId(3300), new FillOptions { UseStationOutputs = false });
+        var (o, _, _) = StationsCore.FillRequest(new EntityId(3300), new FillOptions { UseStationOutputs = false });
         Assert.Equal(0u, o.Flags & StationsNative.FillNoOutputs);
     }
 
@@ -800,6 +812,36 @@ public sealed unsafe class StationsTests : IDisposable
         var r = NewResult(StationActionStatus.Done, "");
         r.FromOutputs = 5;
         Assert.Equal(5, StationsCore.ResultOf(r, StationAction.Fill).FromOutputs);
+    }
+
+    [Fact]
+    public void AFillCanNameOrdinaryChests()
+    {
+        var chest = new EntityId(9000);
+        var (r, _, ids) = StationsCore.FillRequest(new EntityId(3300), new FillOptions { Chests = [chest, new EntityId(9001)] });
+        Assert.Equal(2u, r.ChestCount);
+        Assert.Equal([9000u, 9001u], ids);
+        Assert.Throws<ArgumentException>(() => StationsCore.FillRequest(new EntityId(3300), new FillOptions { Chests = [new EntityId(1)] }));
+        Assert.Throws<ArgumentException>(() => StationsCore.FillRequest(new EntityId(3300), new FillOptions { Chests = [new EntityId(3300)] }));
+        Assert.Throws<ArgumentException>(() => StationsCore.FillRequest(new EntityId(3300), new FillOptions
+        {
+            Chests = Enumerable.Range(2000, StationsNative.MaxChests + 1).Select(i => new EntityId((uint)i)).ToArray(),
+        }));
+        _fake.HasChests = false;
+        Assert.Throws<InvalidOperationException>(() => StationsCore.FillRequest(new EntityId(3300), new FillOptions { Chests = [chest] }));
+        _fake.HasChests = true;
+
+        using var kiln = Kiln();
+        var planned = PlanWith(StationActionStatus.Done);
+        planned.Chests[0] = 7;
+        _fake.NextPlan = planned;
+        var plan = kiln.Run(() => Stations.Plan(new EntityId(3300), new FillOptions { Chests = [chest] }));
+        Assert.Equal([9000u], _fake.LastChests);
+        var input = Assert.Single(plan.Inputs);
+        Assert.Equal((4L, 7L, 0L), (input.Stock, input.Chests, input.Outputs));
+        var done = NewResult(StationActionStatus.Done, "");
+        done.FromChests = 4;
+        Assert.Equal(4, StationsCore.ResultOf(done, StationAction.Fill).FromChests);
     }
 
     [Fact]

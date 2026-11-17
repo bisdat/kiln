@@ -26,12 +26,18 @@
  *  - Station outputs as crafting stock (since 0.2.0-dev.29.17, capability stations.output_sources): a station opted in
  *    with set_output_source() lends its finished items (its Outputs: the stacks of an output of its selected or running
  *    recipe that is not also an input of either, a category input's options all counting as inputs) to every FILL in its
- *    base, last: after the named player's bag and the base's Magic chests. Revalidated inside the transaction against the
- *    live inventory and the station's current recipes; a station's queued inputs, its leftovers and an output that is
- *    also an input are never taken; a station of another base is never used. Kiln asks the game's own AutoTransferRecipe
- *    for the shortfall with a source list of only the stations whose stacks of that item are all Outputs (the game's
- *    take is per item), then for the rest as usual, in one transaction: all or nothing. Nothing is opted in by default;
- *    the opt-ins are this session's (Kiln.Blocks keeps them with the save). docs/re/stations.md section 8.
+ *    base, last: after the named player's bag, the base's Magic chests, and any ordinary chests the request names.
+ *    Revalidated inside the transaction against the live inventory and the station's current recipes; a station's queued
+ *    inputs, its leftovers and an output that is also an input are never taken; a station of another base is never used.
+ *    Kiln asks the game's own AutoTransferRecipe for each later source's share with a source list of only those entities
+ *    (the game's take is per item), then for the rest as usual, in one transaction: all or nothing. Nothing is opted in
+ *    by default; the opt-ins are this session's (Kiln.Blocks keeps them with the save). docs/re/stations.md section 8.
+ *  - Ordinary chests (since 0.2.0-dev.29.17, on the FILL request, default off): chest_count and chests name storage
+ *    containers in the station's base that are not Magic chests and not refilling plants. Order: the named player's bag,
+ *    the Magic chests (after the reserves), those chests, then opted-in station outputs. Revalidated inside the
+ *    transaction: same base, an initialized inventory, not a production station, not already in the base's crafting-stock
+ *    list. A request of KILN_STATION_REQUEST_V1 bytes names none. The station screen's button does not name chests.
+ *    max_chests() returns KILN_STATIONS_MAX_CHESTS; an older table has no such slot.
  *  - A finished cycle is kiln.gameplay's KILN_GAMEPLAY_CRAFTED with actor == target == the station (once per cycle since
  *    0.2.0-dev.29). This table adds state, placed, removed and base-list events by polling (watch, events).
  *
@@ -57,6 +63,9 @@ extern "C" {
 #define KILN_STATIONS_MAX_OUTPUTS 8u
 #define KILN_STATIONS_MAX_CHANGES 32u /* ledger entries in a result */
 #define KILN_STATIONS_MAX_KEEP 64u    /* reserves in a fill request */
+#define KILN_STATIONS_MAX_CHESTS 64u  /* ordinary chests named on one fill request */
+/* KilnStationRequest through reserved[4]. A caller built before ordinary chests passes this size and names none. */
+#define KILN_STATION_REQUEST_V1 88u
 
 /* A base's id: the 16 bytes of the game's BaseId (a GUID, saved with the altar). All zero: no altar was found. */
 typedef struct KilnBaseId {
@@ -202,6 +211,11 @@ typedef struct KilnStationRequest {
     uint32_t keep_count;    /* FILL: entries in keep (0..64) */
     const KilnStationStack* keep; /* FILL: leave at least this many of each item in the base's stock (copied by submit) */
     uint32_t reserved[4];   /* 0 */
+    /* since ordinary chests (a request of KILN_STATION_REQUEST_V1 bytes has none of these; submit copies the list): */
+    uint32_t chest_count;   /* FILL: 0..KILN_STATIONS_MAX_CHESTS. 0: the game's sources and station outputs only */
+    uint32_t chest_reserved; /* 0 */
+    const KilnEntity* chests; /* the entities, copied by submit; NULL when chest_count is 0. Not a player (1..1023), not
+                                 the station. Whether each is an ordinary chest of this base is checked at the fill. */
 } KilnStationRequest;
 
 /* KilnStationResult.status (also KilnStationPlan.status) */
@@ -259,6 +273,9 @@ typedef struct KilnStationResult {
     KilnItemsMoveChange changes[KILN_STATIONS_MAX_CHANGES]; /* FILL: the transaction's ledger (a take: from_slot set, to_slot
                                0; a put into the station: to_slot set, from_slot 0) */
     char message[128];      /* why, in words, for anything but DONE; NUL-terminated */
+    /* since ordinary chests (a caller that copies the older 1232-byte result leaves these unread): */
+    uint32_t from_chests;   /* FILL: items taken from the named ordinary chests; 0 when they were not needed */
+    uint32_t reserved_tail; /* 0 */
 } KilnStationResult;
 
 typedef void(KILN_CALL* KilnStationDoneFn)(const KilnStationResult* result, void* user);
@@ -289,6 +306,9 @@ typedef struct KilnStationPlan {
     /* since 0.2.0-dev.29.17 (a caller's smaller size, up to message, still works and gets no more): */
     uint32_t outputs[KILN_STATIONS_MAX_INPUTS];        /* what opted-in stations of the base lend of each input (their
                                                           Outputs); crafts_affordable counts it, stock does not */
+    /* since ordinary chests (a caller's size up to outputs still works and gets no chests[]): */
+    uint32_t chests[KILN_STATIONS_MAX_INPUTS];         /* what the named ordinary chests hold of each input; taken after
+                                                          stock and before outputs. crafts_affordable counts it */
 } KilnStationPlan;
 
 /* KilnStationEvent.kind */
@@ -386,6 +406,10 @@ typedef struct KilnStationsApi {
     KilnResult(KILN_CALL* set_output_source)(KilnEntity station, uint32_t on);
     /* The opted-in stations, in the order a fill uses them (entity order). KILN_ERR_BUFFER_TOO_SMALL: *out_count = needed. */
     KilnResult(KILN_CALL* output_sources)(KilnEntity* out, uint32_t capacity, uint32_t* out_count);
+    /* ---- ordinary chests on a FILL (header.size tells whether this is here) ---- */
+    /* KILN_STATIONS_MAX_CHESTS on this build. A table large enough to hold the slot but built without the feature
+     * returns 0; a smaller table has no slot. Any thread. */
+    uint32_t(KILN_CALL* max_chests)(void);
 } KilnStationsApi;
 
 #ifdef __cplusplus

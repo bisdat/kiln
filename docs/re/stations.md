@@ -504,3 +504,17 @@ documented; the opt-in came back after the restart. Scanning all 31 production s
 item on both sides** (inputs and category options against outputs), so "an output that is also an input" is a guard
 the game's data does not exercise today (host test only). `station-actions-test` on the same build: 64 PASS, 0 FAIL,
 then 4 PASS, 0 FAIL after the restart.
+
+## 9. Ordinary chests as a named fill source
+
+Same call as §8, with one more source list. An ordinary chest is a placed storage container in the station's base that
+the game's list A does not contain (no `InventoryCraftingStock`: not a Magic chest and not a refilling plant) and that
+is not a production station. `PayMaterial` takes stacks of the asked item from whatever entity it is given, so Kiln
+passes only those chests, and only for the amount the player and the Magic chests do not cover.
+
+For a fill of n crafts the shares are, per input: the player's bag and the Magic chests (after reserves) first, then
+the named chests, then opted-in station outputs. Inside the one transaction Kiln asks `AutoTransferRecipe` for the
+chest share (source list = those chests, one stack of count 1, crafts = the share, player 0, water 0), then for the
+output share as in §8, then for the remainder with the base's own stock, the real inputs, the water and the player.
+Any code rolls the transaction back. A request that names no chests is the §8 fill. The station screen's button does
+not name chests, so it is unchanged.

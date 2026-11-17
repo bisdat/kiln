@@ -147,7 +147,8 @@ if (p.LimitedBy != FillLimit.None) Log.Info($"short: {p.LimitedBy} {p.ShortItem}
 | `Water` | true | pour the recipe's water from the base's water sources (off: "loaded" counts the items only) |
 | `Recipe`, `Choices` | the station's | fill for another recipe (and its category choices) than the selected one |
 | `Player` | none | also take from this player's inventories, first (a player entity only) |
-| `Keep` | none | reserves: at least this many of each item stay in the chests (up to 64 items) |
+| `Keep` | none | reserves: at least this many of each item stay in the Magic chests (up to 64 items). Not applied to a player's bag, to named ordinary chests, or to station outputs |
+| `Chests` | none | ordinary chests in this base to take from after the Magic chests and before station outputs (up to 64). Empty: not used |
 
 The station must stand in a base (`NoBase`) and have a recipe (`NoRecipe`). When the stock covers fewer crafts than asked,
 or the station has no room for them, Kiln asks the game for fewer (halving, at most 6 calls) and says so: `Partial`, with
@@ -180,8 +181,8 @@ FillPlan p = Stations.Plan(forge);                       // FillInput.Outputs: w
 
 The rules:
 - **Opt-in per station.** Nothing lends by default; a base with no station opted in fills exactly as the game does.
-- **Last.** A fill takes from the player's bag (when it names one), then from the Magic chests (after its reserves), and
-  from the opted-in stations only what those cannot cover, in entity order.
+- **Last.** A fill takes from the player's bag (when it names one), then from the Magic chests (after its reserves), then
+  from ordinary chests named on that fill, and from the opted-in stations only what those cannot cover, in entity order.
 - **Only finished items.** A station lends the stacks `StationInfo.Outputs` lists: an output of its selected or running
   recipe that is not also an input of either. Never its queued inputs (a kiln's logs stay), never its `Leftovers`,
   never an output that is also an input of its recipe.
@@ -209,6 +210,39 @@ and once kiln.stations' managed side has started (the first use of `Stations`, `
 opts stations in should touch `Stations` in `OnLoad`, for example `Stations.OutputSources()` or an event subscription).
 A station removed, or a mod no longer loaded, lends nothing (the record waits for the mod's return). The native set is
 per session (`kiln_stations.h`: `set_output_source`, `output_sources`).
+
+## Ordinary chests
+
+A fill can name ordinary storage chests in the station's base (not Magic chests, not refilling plants) and take from them
+after the player's bag and the Magic chests, and before opted-in station outputs. Nothing is taken from them unless the
+fill names them. The station screen's fill button does not name chests: it stays the player's bag, the Magic chests, and
+opted-in station outputs.
+
+```csharp
+await Stations.Fill(forge, new FillOptions
+{
+    Crafts = 5,
+    Chests = [woodChest, spareChest],   // this base's ordinary chests, up to 64
+});
+FillPlan p = Stations.Plan(forge, new FillOptions { Chests = [woodChest] });
+// FillInput.Chests: what those chests hold of each input. FillInput.Stock is still the Magic chests and the bag.
+```
+
+The rules:
+- **Named on the fill.** An empty list is the fill Kiln already did. There is no per-chest opt-in: a chest that should
+  always be a source is named on each fill that should use it.
+- **This base only.** Each chest is checked again inside the fill's transaction. A chest in another base, a player, the
+  station itself, a production station, a Magic chest, a refilling plant, or an entity with no inventory refuses the
+  fill and nothing moves.
+- **After the Magic chests, before station outputs.** The player's bag (when the fill names a player) and the Magic
+  chests pay first, reserves included on the Magic chests only. Ordinary chests pay the next part. Station outputs pay
+  what is still short.
+- **All or nothing.** One inventory transaction with the game's own fill. A non-exact fill tries fewer crafts, as before.
+- A recipe whose resolved inputs name the same item twice cannot name ordinary chests (the same limit as station outputs).
+- Reserves (`Keep`) apply to the Magic chests, not to these chests.
+
+A fill is still the server's action: it does not consult a player's inventory permission. A mod that fills for a joined
+player checks that itself, as for every other station action. The game's own button keeps its permission check.
 
 ## Stop, resume, select
 ```csharp
@@ -339,6 +373,7 @@ checked by hand with `mods/tests/stations-client-check` (`/stationcheck`, admins
 - **C5** After fills, the base's Magic chests are emptied as expected; ordinary chests are untouched.
 - **C6** At the quick-stack station, switch one Magic chest off for deposits: `/stationcheck base` lists it under
   Magic chests and not under "take deposits", and `collect` puts nothing into it.
+- **C8** `mods/tests/station-chests-test` on a dedicated server: a fill that names an ordinary chest takes from it only after the Magic chests; a short exact fill moves nothing; `CollectToBase` puts the kiln's finished charcoal into the Magic chests and leaves the ordinary chest and the kiln's queued logs.
 - **C7** A charcoal kiln with charcoal and logs in it, opted in (`/stationcheck lend`), next to a forge whose recipe
   needs charcoal, the Magic chests holding none: press the forge's "fill from chests". Expected: the forge gets the
   charcoal, the kiln keeps its logs, kiln.log says the press ran as Kiln's fill. If the button is greyed or nothing
@@ -346,7 +381,7 @@ checked by hand with `mods/tests/stations-client-check` (`/stationcheck`, admins
 
 ## Limits
 - Server world only (dedicated server, hosting client). A joined client has none.
-- Magic chests and refilling plants only, as the game: ordinary chests are not the base's stock.
+- The game's own stock is Magic chests and refilling plants. Ordinary chests are used only when a fill names them.
 - At most 1024 actions wait at once; 16 a step run.
 - `StopWhen.Now` loses the running cycle's progress (the game's rule); `AfterCurrentCraft` keeps it, but is not saved.
 - A base's id changes when an overlapping altar is added or removed (see Base identity).
@@ -360,6 +395,8 @@ checked by hand with `mods/tests/stations-client-check` (`/stationcheck`, admins
 `native/core/abi/services/kiln_stations.h` (`kiln.stations` v1, in kiln-items.dll): the same reads (`base_*`, `stations`,
 `station_read`, `recipe*`, `category*`, `workshop_recipes`, `plan`) on the tick thread; `submit(owner, request, done, user,
 &ticket)` from any thread, the result in `done` on the tick thread; `cancel(ticket)` drops the callback; the events by
-polling: `watch(1)`, then `events(after_seq, ...)` each step (`last_seq()` to start at the newest). A cycle's end for native
-code is kiln.gameplay's `KILN_GAMEPLAY_CRAFTED` (once per cycle since 0.2.0-dev.29.14). The game's facts behind all of it:
-[docs/re/stations.md](../../re/stations.md).
+polling: `watch(1)`, then `events(after_seq, ...)` each step (`last_seq()` to start at the newest). A FILL names ordinary
+chests with `chest_count` and `chests` on a request of the current size (`max_chests()` is `KILN_STATIONS_MAX_CHESTS`; a
+request of `KILN_STATION_REQUEST_V1` bytes names none). `from_chests` on the result counts what they gave. A cycle's end
+for native code is kiln.gameplay's `KILN_GAMEPLAY_CRAFTED` (once per cycle since 0.2.0-dev.29.14). The game's facts behind
+all of it: [docs/re/stations.md](../../re/stations.md).

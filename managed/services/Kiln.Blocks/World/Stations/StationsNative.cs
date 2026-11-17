@@ -12,7 +12,7 @@ internal static unsafe class StationsNative
     public const int Ok = 0, InvalidArgument = 1, NotFound = 2, Unavailable = 3, WrongThread = 4, BufferTooSmall = 5;
     // result statuses (KilnStationResult.status) the managed side looks at
     public const int StLocked = 9, StUnavailable = 11, StDropped = 12, StTimedOut = 13, StCanceled = 15;
-    public const int MaxBases = 16, MaxAltars = 16, MaxInputs = 32, MaxOutputs = 8, MaxChanges = 32, MaxKeep = 64;
+    public const int MaxBases = 16, MaxAltars = 16, MaxInputs = 32, MaxOutputs = 8, MaxChanges = 32, MaxKeep = 64, MaxChests = 64;
 
     // actions
     public const uint Fill = 1, Stop = 2, Resume = 3, Select = 4;
@@ -106,6 +106,8 @@ internal static unsafe class StationsNative
         public uint Player, KeepCount;
         public Stack* Keep;
         public fixed uint Reserved[4];
+        public uint ChestCount, ChestReserved;
+        public uint* Chests;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -129,6 +131,7 @@ internal static unsafe class StationsNative
         public ulong Ticket, Step;
         public fixed byte Changes[MaxChanges * 32];  // MoveChange x 32
         public fixed byte Message[128];
+        public uint FromChests, ReservedTail;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -145,7 +148,8 @@ internal static unsafe class StationsNative
         public fixed uint Have[MaxInputs];
         public fixed uint Stock[MaxInputs];
         public fixed byte Message[128];
-        public fixed uint Outputs[MaxInputs];  // 0.2.0-dev.29.17: an older kiln.stations answers INVALID_ARGUMENT for this size
+        public fixed uint Outputs[MaxInputs];  // 0.2.0-dev.29.17: an older kiln.stations answers INVALID_ARGUMENT for a plan smaller than it knows
+        public fixed uint Chests[MaxInputs];   // ordinary chests named on the fill; 0 when the plan's size stops before this
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -200,12 +204,17 @@ internal static unsafe class StationsNative
         // ---- 0.2.0-dev.29.17 (Header.Size tells whether they are here) ----
         public delegate* unmanaged[Cdecl]<uint, uint, int> SetOutputSource;
         public delegate* unmanaged[Cdecl]<uint*, uint, uint*, int> OutputSources;
+        public delegate* unmanaged[Cdecl]<uint> MaxChests;
     }
 
     /// <summary>The table size up to <see cref="Table.LastSeq"/>: kiln.stations before 0.2.0-dev.29.17.</summary>
-    public static readonly int TableV1 = sizeof(Table) - 2 * sizeof(nint);
+    public static readonly int TableV1 = 8 + 21 * sizeof(nint);
+    /// <summary>The table size through <see cref="Table.OutputSources"/> (station outputs, before ordinary chests).</summary>
+    public static readonly int TableOutputs = TableV1 + 2 * sizeof(nint);
     /// <summary>The plan's size before 0.2.0-dev.29.17 (no <see cref="Plan.Outputs"/>).</summary>
-    public static readonly int PlanV1 = sizeof(Plan) - MaxInputs * sizeof(uint);
+    public static readonly int PlanV1 = sizeof(Plan) - 2 * MaxInputs * sizeof(uint);
+    /// <summary>The plan's size with outputs and without <see cref="Plan.Chests"/>.</summary>
+    public static readonly int PlanChests = sizeof(Plan) - MaxInputs * sizeof(uint);
 
     public static string Text(byte* p, int max)
     {

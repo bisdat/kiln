@@ -291,8 +291,8 @@ public static partial class Stations
     public static FillPlan Plan(EntityId station, FillOptions? options = null)
     {
         StationsCore.CheckRead("Stations.Plan");
-        var (r, keep) = StationsCore.FillRequest(station, options ?? new FillOptions());
-        return StationsCore.PlanOf(r, keep);
+        var (r, keep, chests) = StationsCore.FillRequest(station, options ?? new FillOptions());
+        return StationsCore.PlanOf(r, keep, chests);
     }
 
     /// <summary>
@@ -314,8 +314,8 @@ public static partial class Stations
     public static Task<StationResult> Fill(EntityId station, FillOptions? options = null)
     {
         StationsCore.CheckAct(FillCapability, "Stations.Fill");
-        var (r, keep) = StationsCore.FillRequest(station, options ?? new FillOptions());
-        return StationsCore.Send(r, keep, StationAction.Fill, "Stations.Fill");
+        var (r, keep, chests) = StationsCore.FillRequest(station, options ?? new FillOptions());
+        return StationsCore.Send(r, keep, chests, StationAction.Fill, "Stations.Fill");
     }
 
     /// <summary>Stops a station as its stop button does. <see cref="StopWhen.Now"/> (the default, the button's meaning)
@@ -330,7 +330,7 @@ public static partial class Stations
     {
         StationsCore.CheckAct(ControlCapability, "Stations.Stop");
         var r = StationsCore.Request(station, StationsNative.Stop, when == StopWhen.AfterCurrentCraft ? StationsNative.AfterCraft : 0);
-        return StationsCore.Send(r, [], StationAction.Stop, "Stations.Stop");
+        return StationsCore.Send(r, [], [], StationAction.Stop, "Stations.Stop");
     }
 
     /// <summary>Clears a station's stop (its stop button again): it starts a new cycle with its selected recipe.</summary>
@@ -342,7 +342,7 @@ public static partial class Stations
     {
         StationsCore.CheckAct(ControlCapability, "Stations.Resume");
         var r = StationsCore.Request(station, StationsNative.Resume, 0);
-        return StationsCore.Send(r, [], StationAction.Resume, "Stations.Resume");
+        return StationsCore.Send(r, [], [], StationAction.Resume, "Stations.Resume");
     }
 
     /// <summary>Selects the recipe a station repeats, with its category choices, as a player's choice in the station's
@@ -361,7 +361,7 @@ public static partial class Stations
             (keepStopped ? StationsNative.KeepStopped : 0) | (allowLocked ? StationsNative.AllowLocked : 0));
         r.RecipeId = recipe;
         StationsCore.SetChoices(ref r, choices);
-        return StationsCore.Send(r, [], StationAction.Select, "Stations.Select");
+        return StationsCore.Send(r, [], [], StationAction.Select, "Stations.Select");
     }
 
     /// <summary>Moves a station's finished items (<see cref="StationInfo.Outputs"/>; <paramref name="what"/> can add or choose
@@ -408,14 +408,16 @@ internal interface IStationsBackend
     (int Rc, (uint Item, float Scaling)[] Options) Category(uint id);
     int CategoryAt(uint index, out uint id);
     (int Rc, uint[] Ids) WorkshopRecipes(uint workshop);
-    int Plan(in StationsNative.Request r, StationsNative.Stack[] keep, out StationsNative.Plan p);
-    int Submit(in StationsNative.Request r, StationsNative.Stack[] keep, ulong owner, long key);
+    int Plan(in StationsNative.Request r, StationsNative.Stack[] keep, uint[] chests, out StationsNative.Plan p);
+    int Submit(in StationsNative.Request r, StationsNative.Stack[] keep, uint[] chests, ulong owner, long key);
     int Watch(bool on);
     ulong LastSeq();
     bool Scanned();
     int Events(ulong after, Span<StationsNative.Event> into, out uint count);
     /// <summary>The table has set_output_source / output_sources (kiln.stations of 0.2.0-dev.29.17 or later).</summary>
     bool HasOutputSources { get; }
+    /// <summary>The table has max_chests (ordinary chests on a fill).</summary>
+    bool HasChests { get; }
     int SetOutputSource(uint entity, bool on);
     (int Rc, uint[] Ids) OutputSources();
 }
@@ -591,35 +593,44 @@ internal static unsafe partial class StationsCore
 
         public (int Rc, uint[] Ids) WorkshopRecipes(uint workshop) => Ids(Need()->WorkshopRecipes, workshop);
 
-        public int Plan(in StationsNative.Request r, StationsNative.Stack[] keep, out StationsNative.Plan p)
+        public int Plan(in StationsNative.Request r, StationsNative.Stack[] keep, uint[] chests, out StationsNative.Plan p)
         {
             StationsNative.Plan x = default;
             x.Size = (uint)sizeof(StationsNative.Plan);
             var copy = r;
             int rc;
             fixed (StationsNative.Stack* k = keep)
+            fixed (uint* c = chests)
             {
                 copy.Keep = keep.Length > 0 ? k : null;
+                copy.ChestCount = (uint)chests.Length;
+                copy.Chests = chests.Length > 0 ? c : null;
                 rc = Need()->MakePlan(&copy, &x);
             }
             p = x;
             return rc;
         }
 
-        public int Submit(in StationsNative.Request r, StationsNative.Stack[] keep, ulong owner, long key)
+        public int Submit(in StationsNative.Request r, StationsNative.Stack[] keep, uint[] chests, ulong owner, long key)
         {
             ulong tk = 0;
             var copy = r;
             fixed (StationsNative.Stack* k = keep)
+            fixed (uint* c = chests)
             {
                 copy.Keep = keep.Length > 0 ? k : null;
+                copy.ChestCount = (uint)chests.Length;
+                copy.Chests = chests.Length > 0 ? c : null;
                 return Need()->Submit(owner, &copy, &OnDone, (void*)key, &tk);  // the calling mod's owner: a state event names it
             }
         }
 
         public int Watch(bool on) => T == null ? StationsNative.Unavailable : T->Watch(on ? 1u : 0u);
 
-        public bool HasOutputSources => T is var t && t != null && t->Header.Size >= (uint)sizeof(StationsNative.Table);
+        public bool HasOutputSources => T is var t && t != null && t->Header.Size >= (uint)StationsNative.TableOutputs;
+
+        public bool HasChests => T is var t && t != null && t->Header.Size >= (uint)sizeof(StationsNative.Table) &&
+                                 t->MaxChests != null && t->MaxChests() == (uint)StationsNative.MaxChests;
 
         public int SetOutputSource(uint entity, bool on) =>
             HasOutputSources ? T->SetOutputSource(entity, on ? 1u : 0u) : StationsNative.Unavailable;
@@ -931,7 +942,7 @@ internal static unsafe partial class StationsCore
         r.C3 = c[3];
     }
 
-    internal static (StationsNative.Request Request, StationsNative.Stack[] Keep) FillRequest(EntityId station, FillOptions o)
+    internal static (StationsNative.Request Request, StationsNative.Stack[] Keep, uint[] Chests) FillRequest(EntityId station, FillOptions o)
     {
         if (o.Crafts is < 1 or > 1000) throw new ArgumentException($"Crafts is 1..1000 (got {o.Crafts})", nameof(o));
         if (o.Choices is { Count: > 0 } && o.Recipe is null) throw new ArgumentException("category choices name a recipe's categories: give the Recipe too", nameof(o));
@@ -949,17 +960,28 @@ internal static unsafe partial class StationsCore
             .ToArray();
         if (keep.Length > StationsNative.MaxKeep) throw new ArgumentException($"at most {StationsNative.MaxKeep} reserves", nameof(o));
         r.KeepCount = (uint)keep.Length;
-        return (r, keep);
+        var chests = (o.Chests ?? Array.Empty<EntityId>()).Select(e => e.Value).ToArray();
+        if (chests.Length > StationsNative.MaxChests)
+            throw new ArgumentException($"at most {StationsNative.MaxChests} ordinary chests", nameof(o));
+        if (chests.Any(e => e == 0 || e == station.Value || e <= 1023))
+            throw new ArgumentException("an ordinary chest is a storage container, not the station and not a player", nameof(o));
+        if (chests.Length > 0 && !Backend.HasChests)
+            throw new InvalidOperationException("Stations.Fill: this Kiln does not take from ordinary chests");
+        r.ChestCount = (uint)chests.Length;
+        return (r, keep, chests);
     }
 
-    internal static FillPlan PlanOf(in StationsNative.Request r, StationsNative.Stack[] keep)
+    internal static FillPlan PlanOf(in StationsNative.Request r, StationsNative.Stack[] keep, uint[] chests)
     {
-        var rc = Backend.Plan(r, keep, out var p);
+        var rc = Backend.Plan(r, keep, chests, out var p);
         if (rc == StationsNative.InvalidArgument) throw new ArgumentException("Stations.Plan: kiln.stations refused the request's arguments");
         Check(rc, "Stations.Plan");
         var inputs = new List<FillInput>();
         for (var i = 0; i < Math.Min(p.InputCount, (uint)StationsNative.MaxInputs); i++)
-            inputs.Add(new FillInput(new ItemId(p.Inputs[i * 2]), (int)p.Inputs[i * 2 + 1], (int)p.Have[i], p.Stock[i]) { Outputs = p.Outputs[i] });
+            inputs.Add(new FillInput(new ItemId(p.Inputs[i * 2]), (int)p.Inputs[i * 2 + 1], (int)p.Have[i], p.Stock[i])
+            {
+                Chests = p.Chests[i], Outputs = p.Outputs[i],
+            });
         return new FillPlan(StatusOf(p.Status), new EntityId(p.Station), p.RecipeId, (int)p.CraftsLoaded, (int)p.CraftsAffordable,
             (int)p.CraftsPlanned, inputs, StationsNative.Text(p.Message, 128))
         {
@@ -972,7 +994,7 @@ internal static unsafe partial class StationsCore
 
     internal static StationActionStatus StatusOf(int s) => Enum.IsDefined(typeof(StationActionStatus), s) ? (StationActionStatus)s : StationActionStatus.Refused;
 
-    internal static Task<StationResult> Send(in StationsNative.Request r, StationsNative.Stack[] keep, StationAction action, string api)
+    internal static Task<StationResult> Send(in StationsNative.Request r, StationsNative.Stack[] keep, uint[] chests, StationAction action, string api)
     {
         var mod = ModContext.CurrentMod;
         if (mod is { Alive: false }) throw new InvalidOperationException("the mod is unloading");
@@ -986,7 +1008,7 @@ internal static unsafe partial class StationsCore
         StartPump();
         var owner = Services.CallerOwner;
         if (owner != 0 && mod is not null) lock (Gate) Owners[owner] = mod.Info.Id;
-        var rc = Backend.Submit(r, keep, owner, key);
+        var rc = Backend.Submit(r, keep, chests, owner, key);
         if (rc == StationsNative.Ok) return tcs.Task;
         lock (Gate) InFlight.Remove(key);
         var station = new EntityId(r.Station);
@@ -1019,7 +1041,8 @@ internal static unsafe partial class StationsCore
             (int)r.CraftsAfter, (int)r.CraftsAdded, r.GameError, changes, read ? (StationState)r.StateBefore : null,
             read ? (StationState)r.StateAfter : null, (r.Flags & StationsNative.DryRun) != 0, message)
         {
-            LimitedBy = LimitOf(r.LimitedBy), ShortItem = r.ShortItem != 0 ? new ItemId(r.ShortItem) : null, FromOutputs = (int)Math.Min(r.FromOutputs, int.MaxValue),
+            LimitedBy = LimitOf(r.LimitedBy), ShortItem = r.ShortItem != 0 ? new ItemId(r.ShortItem) : null,
+            FromChests = (int)Math.Min(r.FromChests, int.MaxValue), FromOutputs = (int)Math.Min(r.FromOutputs, int.MaxValue),
         };
     }
 

@@ -30,8 +30,26 @@ inline bool any_choice(const KilnStationChoice* c) {
     return false;
 }
 
+// The request names ordinary chests only when it is the full struct. A KILN_STATION_REQUEST_V1 request has none, and
+// those fields are not read (the caller may not have them).
+inline bool request_names_chests(const KilnStationRequest& r) { return r.size >= sizeof(KilnStationRequest); }
+
+inline bool fill_chests_ok(const KilnStationRequest& r) {
+    if (!request_names_chests(r)) return true;
+    if (r.chest_reserved) return false;
+    if (r.chest_count > KILN_STATIONS_MAX_CHESTS) return false;
+    if (r.chest_count == 0) return r.chests == nullptr;
+    if (!r.chests) return false;
+    for (uint32_t i = 0; i < r.chest_count; ++i) {
+        const uint32_t e = r.chests[i];
+        if (e == 0 || e == r.station || e <= kMaxPlayerEntity) return false;  // not the station, not a player
+    }
+    return true;
+}
+
 inline bool request_valid(const KilnStationRequest& r) {
-    if (r.size < sizeof(KilnStationRequest) || r.station == 0) return false;
+    if (r.size < KILN_STATION_REQUEST_V1 || r.size > sizeof(KilnStationRequest) || r.station == 0) return false;
+    if (r.size != KILN_STATION_REQUEST_V1 && r.size < sizeof(KilnStationRequest)) return false;
     for (uint32_t x : r.reserved)
         if (x) return false;
     for (const auto& c : r.choices)
@@ -48,15 +66,17 @@ inline bool request_valid(const KilnStationRequest& r) {
         if (r.crafts < 1 || r.crafts > kMaxCrafts) return false;
         if (r.keep_count > KILN_STATIONS_MAX_KEEP || (r.keep_count && !r.keep)) return false;
         if (any_choice(r.choices) && r.recipe == 0) return false;  // choices name a recipe's categories
-        return player_ok(r.player);
+        return player_ok(r.player) && fill_chests_ok(r);
     }
     case KILN_STATION_STOP:
-        return (r.flags & ~KILN_STATION_AFTER_CRAFT) == 0 && r.crafts == 0 && r.recipe == 0 && r.keep_count == 0 && r.player == 0;
+        return (r.flags & ~KILN_STATION_AFTER_CRAFT) == 0 && r.crafts == 0 && r.recipe == 0 && r.keep_count == 0 && r.player == 0 &&
+               fill_chests_ok(r) && (!request_names_chests(r) || r.chest_count == 0);
     case KILN_STATION_RESUME:
-        return r.flags == 0 && r.crafts == 0 && r.recipe == 0 && r.keep_count == 0 && r.player == 0;
+        return r.flags == 0 && r.crafts == 0 && r.recipe == 0 && r.keep_count == 0 && r.player == 0 && fill_chests_ok(r) &&
+               (!request_names_chests(r) || r.chest_count == 0);
     case KILN_STATION_SELECT:
         return (r.flags & ~(KILN_STATION_KEEP_STOPPED | KILN_STATION_ALLOW_LOCKED)) == 0 && r.crafts == 0 && r.keep_count == 0 &&
-               r.player == 0;  // recipe 0 clears the selection
+               r.player == 0 && fill_chests_ok(r) && (!request_names_chests(r) || r.chest_count == 0);  // recipe 0 clears
     default:
         return false;
     }
@@ -64,9 +84,10 @@ inline bool request_valid(const KilnStationRequest& r) {
 
 // ---- the fill's arithmetic ----
 // One resolved input: `count` per craft, `have` in the station (every link, partial stacks too), `stock` what the fill may
-// take (the base's stock containers after the reserves, plus the named player's inventories), `kept` what the reserves
-// held back, `room` the most the station can hold of it (water: its capacity; items: not modelled). The recipe's water is
-// an input too (item kWaterItem, count = units per craft): the game counts it in "loaded" (docs/re/stations.md §3.1).
+// take (the base's Magic chests after the reserves, plus the named player's inventories, plus named ordinary chests, plus
+// opted-in station outputs), `kept` what the reserves held back, `room` the most the station can hold of it (water: its
+// capacity; items: not modelled). The recipe's water is an input too (item kWaterItem, count = units per craft): the game
+// counts it in "loaded" (docs/re/stations.md §3.1).
 struct InputNow {
     uint32_t item = 0;
     uint32_t count = 0;
@@ -74,6 +95,7 @@ struct InputNow {
     uint64_t stock = 0;
     uint64_t kept = 0;
     uint64_t room = UINT64_MAX;
+    uint64_t chests = 0;   // of `stock`: named ordinary chests, after the player and the Magic chests, before outputs
     uint64_t outputs = 0;  // of `stock`: what opted-in stations of the base lend (their Outputs), taken last
 };
 
@@ -289,22 +311,114 @@ inline bool inputs_repeat(const uint32_t* items, uint32_t n) {
     return false;
 }
 
-// For a fill of n more crafts on top of `loaded`: what each input's station outputs pay, last. The player's bag and the
-// base's chests (stock - outputs: after the reserves) pay what they can first; the outputs pay only the rest. Water never
-// comes from outputs. False when the outputs do not cover the rest of some input (the plan should not have asked for n).
-inline bool output_shares(const std::vector<InputNow>& in, uint32_t n, uint32_t loaded, std::vector<uint32_t>* shares) {
-    shares->assign(in.size(), 0);
+// What one named entity is, once the world has been read. Ordinary: an initialized inventory in the station's base, not a
+// production station, not a player, not already in the base's Magic-chest list.
+enum class ChestKind : uint8_t { Ordinary, Missing, OtherBase, Magic, Station, NoInventory, Player, IsTarget };
+
+struct ChestFacts {
+    int32_t base = -1;
+    bool present = false;
+    bool station = false;
+    bool magic = false;
+    bool inventory = false;
+};
+
+struct NamedChest {
+    uint32_t entity = 0;
+    int32_t base = -1;
+    ChestKind kind = ChestKind::Missing;
+};
+
+inline ChestKind kind_of(const ChestFacts& f, uint32_t entity, uint32_t target, int32_t station_base) {
+    if (entity == 0) return ChestKind::Missing;
+    if (entity == target) return ChestKind::IsTarget;
+    if (entity <= kMaxPlayerEntity) return ChestKind::Player;
+    if (!f.present) return ChestKind::Missing;
+    if (f.station) return ChestKind::Station;
+    if (f.magic) return ChestKind::Magic;
+    if (!f.inventory) return ChestKind::NoInventory;
+    if (station_base < 0 || f.base != station_base) return ChestKind::OtherBase;
+    return ChestKind::Ordinary;
+}
+
+inline const char* chest_kind_why(ChestKind k) {
+    switch (k) {
+    case ChestKind::IsTarget: return "entity %u is the station being filled";
+    case ChestKind::Player: return "entity %u is a player, not a chest";
+    case ChestKind::Station: return "entity %u is a production station, not an ordinary chest";
+    case ChestKind::Magic: return "entity %u is already one of the base's Magic chests";
+    case ChestKind::NoInventory: return "entity %u has no inventory";
+    case ChestKind::OtherBase: return "entity %u is not in this base";
+    case ChestKind::Missing: return "entity %u is not in this base";
+    case ChestKind::Ordinary: return "";
+    }
+    return "entity %u is not an ordinary chest in this base";
+}
+
+// Every distinct named entity must be an ordinary chest. Duplicates are one entity.
+inline bool check_named_chests(const std::vector<NamedChest>& named, uint32_t* bad, ChestKind* kind) {
+    std::vector<uint32_t> seen;
+    for (const NamedChest& c : named) {
+        if (std::find(seen.begin(), seen.end(), c.entity) != seen.end()) continue;
+        seen.push_back(c.entity);
+        if (c.kind != ChestKind::Ordinary) {
+            *bad = c.entity;
+            *kind = c.kind;
+            return false;
+        }
+    }
+    return true;
+}
+
+// The chests a fill may take from, in entity order, once each.
+inline std::vector<uint32_t> eligible_chests(const std::vector<NamedChest>& all, uint32_t target, int32_t base) {
+    std::vector<uint32_t> out;
+    if (base < 0) return out;
+    for (const NamedChest& c : all)
+        if (c.kind == ChestKind::Ordinary && c.entity != target && c.base == base) out.push_back(c.entity);
+    std::sort(out.begin(), out.end());
+    out.erase(std::unique(out.begin(), out.end()), out.end());
+    return out;
+}
+
+// For a fill of n more crafts on top of `loaded`: what ordinary chests pay, then what station outputs pay. The player's
+// bag and the Magic chests (stock - chests - outputs, after the reserves) pay what they can first; chests pay the next
+// slice; outputs pay only the rest. Water comes from neither. False when those two cannot cover the rest (the plan
+// should not have asked for n). With chests == 0 this is the station-output share alone.
+inline bool pay_layers(const std::vector<InputNow>& in, uint32_t n, uint32_t loaded, std::vector<uint32_t>* chest_shares,
+                       std::vector<uint32_t>* output_shares) {
+    chest_shares->assign(in.size(), 0);
+    output_shares->assign(in.size(), 0);
     for (size_t k = 0; k < in.size(); ++k) {
         const InputNow& i = in[k];
         if (i.item == kWaterItem || i.count == 0) continue;
         const uint64_t need = game_need(i, n, loaded);
-        const uint64_t first = i.stock - std::min(i.stock, i.outputs);
+        const uint64_t extra = std::min(i.stock, i.chests + i.outputs);
+        const uint64_t first = i.stock - extra;
         if (need <= first) continue;
-        const uint64_t rest = need - first;
+        const uint64_t after = need - first;
+        const uint64_t from_chests = std::min(i.chests, after);
+        const uint64_t rest = after - from_chests;
         if (rest > i.outputs) return false;
-        (*shares)[k] = static_cast<uint32_t>(rest);
+        (*chest_shares)[k] = static_cast<uint32_t>(from_chests);
+        (*output_shares)[k] = static_cast<uint32_t>(rest);
     }
     return true;
+}
+
+inline bool output_shares(const std::vector<InputNow>& in, uint32_t n, uint32_t loaded, std::vector<uint32_t>* shares) {
+    std::vector<uint32_t> chests;
+    return pay_layers(in, n, loaded, &chests, shares);
+}
+
+inline std::vector<uint32_t> share_sum(const std::vector<uint32_t>& a, const std::vector<uint32_t>& b) {
+    std::vector<uint32_t> o(std::max(a.size(), b.size()), 0);
+    for (size_t i = 0; i < o.size(); ++i) {
+        const uint32_t x = i < a.size() ? a[i] : 0;
+        const uint32_t y = i < b.size() ? b[i] : 0;
+        o[i] = x + y;
+    }
+    return o;
 }
 inline bool any_share(const std::vector<uint32_t>& shares) {
     return std::any_of(shares.begin(), shares.end(), [](uint32_t s) { return s != 0; });
@@ -370,6 +484,8 @@ struct Req {
     KilnOwner owner = 0;
     KilnStationRequest r{};
     KilnStationStack keep[KILN_STATIONS_MAX_KEEP]{};
+    KilnEntity chests[KILN_STATIONS_MAX_CHESTS]{};
+    uint32_t chest_n = 0;
     uint64_t submitted = 0;
     // STOP after craft: what the station showed when it was taken
     bool waiting = false;
