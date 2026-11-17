@@ -26,7 +26,10 @@ internal static class KilnText
     private const string EnglishResource = "Kiln.locales.en.json";
     private const int MaxReported = 256;
 
-    private sealed record State(string Setting, string Language, string GameRaw, Dictionary<string, string> Table, int Generation);
+    // Table: every key in the language in use (English where it has none). Origin: the language each plural group came from
+    // (its rule picks the form).
+    private sealed record State(string Setting, string Language, string GameRaw, Dictionary<string, string> Table,
+                                Dictionary<string, string> Origin, int Generation);
 
     private static readonly object Gate = new();
     private static readonly HashSet<string> Reported = new(StringComparer.Ordinal);
@@ -118,7 +121,7 @@ internal static class KilnText
     internal static string Plural(string key, long count, params (string Name, object? Value)[] values)
     {
         var st = Current();
-        var form = PluralForm(st.Language, count);
+        var form = PluralForm(st.Origin.TryGetValue(key, out var from) ? from : st.Language, count);
         if (!st.Table.TryGetValue(key + "." + form, out var text) && !st.Table.TryGetValue(key + ".other", out text) &&
             !st.Table.TryGetValue(key + ".one", out text) && !st.Table.TryGetValue(key, out text))
         {
@@ -134,9 +137,17 @@ internal static class KilnText
     /// <summary>Whether the table has <paramref name="key"/> (in any language of the lookup, English included).</summary>
     internal static bool Has(string key) => Current().Table.ContainsKey(key);
 
-    /// <summary>The keys under <see cref="NativePrefix"/> with their texts now (for kiln.ui).</summary>
-    internal static IReadOnlyList<KeyValuePair<string, string>> Native() =>
-        Current().Table.Where(p => p.Key.StartsWith(NativePrefix, StringComparison.Ordinal)).OrderBy(p => p.Key, StringComparer.Ordinal).ToArray();
+    /// <summary>The keys under <see cref="NativePrefix"/> with their texts now (for kiln.ui). kiln.ui picks a plural form
+    /// as English does (.one for 1, else .other): for a group whose language has no singular form .one is its .other.</summary>
+    internal static IReadOnlyList<KeyValuePair<string, string>> Native()
+    {
+        var st = Current();
+        var native = st.Table.Where(p => p.Key.StartsWith(NativePrefix, StringComparison.Ordinal)).ToDictionary(StringComparer.Ordinal);
+        foreach (var (b, from) in st.Origin)
+            if (b.StartsWith(NativePrefix, StringComparison.Ordinal) && PluralForm(from, 1) == "other" && native.TryGetValue(b + ".other", out var other))
+                native[b + ".one"] = other;
+        return native.OrderBy(p => p.Key, StringComparer.Ordinal).ToArray();
+    }
 
     /// <summary>The languages Kiln has texts for: English, then the files in the locales folder, as normalized tags.</summary>
     internal static IReadOnlyList<string> Languages()
@@ -145,12 +156,17 @@ internal static class KilnText
         return new[] { "en" }.Concat(files.Where(l => l != "en")).ToArray();
     }
 
-    /// <summary>A language's own name ("简体中文") as its file gives it (<see cref="LanguageNameKey"/>), else the tag.</summary>
+    /// <summary>A language's own name ("简体中文") as its file gives it (<see cref="LanguageNameKey"/>), else its main
+    /// variety's ("en-us": English), else the tag.</summary>
     internal static string NameOf(string language)
     {
         var tag = ModLocale.Normalize(language);
-        if (Files().TableOf(tag) is { } t && t.TryGetValue(LanguageNameKey, out var name) && name.Length > 0) return name;
-        if (tag == "en" && English().TryGetValue(LanguageNameKey, out var en)) return en;
+        var dash = tag.IndexOf('-');
+        foreach (var t in dash > 0 ? [tag, tag[..dash]] : new[] { tag })
+        {
+            if (Files().TableOf(t) is { } table && table.TryGetValue(LanguageNameKey, out var name) && name.Length > 0) return name;
+            if (t == Fallback && English().TryGetValue(LanguageNameKey, out var en)) return en;
+        }
         return Canonical(tag);
     }
 
@@ -209,9 +225,9 @@ internal static class KilnText
                 if (old.GameRaw != gameRaw) _state = old with { GameRaw = gameRaw };
                 return _state!;
             }
-            var table = Build(language);
+            var (table, origin) = Build(language);
             var changed = old is null || force || old.Language != language;
-            made = new State(setting, language, gameRaw, table, changed ? Interlocked.Increment(ref _generation) : old!.Generation);
+            made = new State(setting, language, gameRaw, table, origin, changed ? Interlocked.Increment(ref _generation) : old!.Generation);
             _state = made;
             if (!changed) return made;
         }
@@ -241,17 +257,20 @@ internal static class KilnText
     // The table of one language: English (built in, then the file), then each language of the lookup from the farthest to
     // the language itself. A language that writes any form of a plural group replaces the whole group, so a Chinese .other
     // is never mixed with the English .one.
-    private static Dictionary<string, string> Build(string language)
+    private static (Dictionary<string, string> Table, Dictionary<string, string> Origin) Build(string language)
     {
         var table = new Dictionary<string, string>(Embedded(), StringComparer.Ordinal);
+        var origin = PluralGroups().ToDictionary(g => g, _ => Fallback, StringComparer.Ordinal);
         var files = Files();
         var chain = ModLocale.LookupOrder(language);
         for (var i = chain.Count - 1; i >= 0; i--)
-            if (files.TableOf(chain[i]) is { } layer) Over(table, layer);
-        return table;
+            if (files.TableOf(chain[i]) is { } layer) Over(table, origin, layer, chain[i]);
+        return (table, origin);
     }
 
-    private static void Over(Dictionary<string, string> table, IReadOnlyDictionary<string, string> layer)
+    private const string Fallback = ModLocale.Fallback;
+
+    private static void Over(Dictionary<string, string> table, Dictionary<string, string> origin, IReadOnlyDictionary<string, string> layer, string tag)
     {
         var groups = PluralGroups();
         HashSet<string>? replaced = null;
@@ -259,8 +278,10 @@ internal static class KilnText
             if (PluralBase(key) is { } b && groups.Contains(b)) (replaced ??= new(StringComparer.Ordinal)).Add(b);
         if (replaced is not null)
             foreach (var b in replaced)
-            foreach (var f in PluralForms)
-                table.Remove(b + "." + f);
+            {
+                foreach (var f in PluralForms) table.Remove(b + "." + f);
+                origin[b] = tag;
+            }
         foreach (var (k, v) in layer) table[k] = v;
     }
 

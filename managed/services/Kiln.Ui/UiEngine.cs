@@ -106,6 +106,7 @@ internal static unsafe class UiEngine
         }
         if (UiNative.DrawingOffReason is { } reason) Log(LogLevel.Info, reason);
         PlayerLook.Start();  // the player's look of Kiln's UI (kiln.json "ui")
+        UiLanguage.Start();  // the language of Kiln's own texts (kiln.json "ui.language"), handed to kiln.ui too
         KeyBindings.Load();
         ApplyMenuKey(KeyBindings.MenuKey);
         // the game page needs the layout calls (v3) for the page itself and v4 for the page state
@@ -344,6 +345,7 @@ internal static unsafe class UiEngine
         Draw.Frame = f;
         var ui = Draw;
         KilnLook.BeginFrame();  // the player's palette for Kiln's own pages
+        UiLanguage.Frame();     // Kiln's own texts follow the game's language (setting auto)
         RenderDispatch.Frame(ui);  // RenderFrameEvent handlers (they draw on the background list, under everything below)
         // the Kiln menu: inside the game's main menu (the game page), or the full-display mod manager over the game; an
         // older kiln.ui without the layout calls keeps the small window

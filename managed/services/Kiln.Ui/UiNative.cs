@@ -408,6 +408,39 @@ internal static unsafe class UiNative
     /// <summary>Tests: a table of the looks tail in place of kiln.ui's.</summary>
     internal static TableLooks* LooksOverride;
 
+    /// <summary>KilnUiTexts (kiln_ui.h, 0.2.0-dev.29.16): Kiln's own texts kiln.ui draws, and the language.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct Texts
+    {
+        public uint Size, Count;
+        public NativeStr Language;
+        public NativeStr* Keys;
+        public NativeStr* Values;
+    }
+
+    /// <summary>The tail after the looks (0.2.0-dev.29.16): set_texts.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct TableTexts
+    {
+        public TableLooks Base;
+        public delegate* unmanaged[Cdecl]<Texts*, int> SetTexts;
+    }
+
+    /// <summary>kiln.ui's set_texts, or null on a table without it (a kiln-ui.dll older than 0.2.0-dev.29.16). Tests:
+    /// <see cref="SetTextsOverride"/>.</summary>
+    public static delegate* unmanaged[Cdecl]<Texts*, int> SetTextsSlot
+    {
+        get
+        {
+            if (SetTextsOverride != null) return SetTextsOverride;
+            var t = T;
+            if (t == null || t->Header.Size < (uint)sizeof(TableTexts)) return null;
+            return ((TableTexts*)t)->SetTexts;
+        }
+    }
+
+    internal static delegate* unmanaged[Cdecl]<Texts*, int> SetTextsOverride;
+
     /// <summary>KILN_UI_IMAGE_WAITING / READY / FAILED (kiln_ui.h image_state).</summary>
     public const int ImageUnknown = 0, ImageWaiting = 1, ImageReady = 2, ImageFailed = 3;
 
@@ -531,6 +564,7 @@ internal static unsafe class UiNative
         _table4 = null;
         _table6 = null;
         LooksOverride = null;
+        SetTextsOverride = null;
         MouseKeysAvailable = false;
     }
 

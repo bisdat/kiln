@@ -158,6 +158,10 @@ bool footer_install();                        // game_install: resolve, copy the
 void footer_set(int32_t mods, uint32_t flags);  // any thread: the mods' count (< 0 unknown) and KILN_UI_FOOTER_* (Kiln.Ui)
 void footer_after_frame(uintptr_t sys10);     // UI thread, after each UI frame: the canvas metrics for the mark
 void footer_overlay();                        // render thread, inside the ImGui frame: the mark
+void footer_texts_changed();                  // any thread: Kiln's texts changed (ui_text.h): the line in the new language
+
+// ---- Kiln's own texts (ui_text.h; set_texts) ----
+void game_texts_changed();                    // any thread: the Mods entry and the drawing-off caption in the new language
 
 // ---- menu_page.cpp (the Kiln menu as a page of the game's main menu: feature ui.menu_page) ----
 bool page_install(bool main_menu_hooked);  // game_install, after the MainMenuEntry hook: resolve, hook Credits

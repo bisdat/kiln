@@ -32,6 +32,7 @@
 #include "overlay_guard_runtime.h"
 #include "ini_file.h"
 #include "draw_slots.h"
+#include "ui_text.h"
 
 namespace kui {
 
@@ -122,13 +123,13 @@ void fallback_menu() {
     bool open = true;
     if (ImGui::Begin("Kiln###kiln.menu.native", &open, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse)) {
         KilnStr v = g_api->version();
-        ImGui::Text("Kiln %.*s", static_cast<int>(v.len), v.ptr);
+        const std::string version(v.ptr ? v.ptr : "", v.ptr ? v.len : 0);
+        ImGui::TextUnformatted(text::fill(text::get("native.fallback.title"), {{"version", version}}).c_str());
         ImGui::Separator();
-        ImGui::TextWrapped("Kiln's managed host (Kiln.Ui) is not running in this session, so the mod list and mod screens are "
-                           "unavailable here. Check kiln/logs/kiln.log.");
+        ImGui::TextWrapped("%s", text::get("native.fallback.body").c_str());
         char key[32];
-        key_name(g_menu_vk.load(), key, sizeof key);
-        ImGui::TextDisabled("Press %s to close.", key);
+        key_name(g_menu_vk.load(), key, sizeof key);  // key names stay as keybinds.json writes them (key_names.h)
+        ImGui::TextDisabled("%s", text::fill(text::get("native.fallback.close"), {{"key", key}}).c_str());
     }
     ImGui::End();
     if (!open) g_menu_open = false;
@@ -506,6 +507,29 @@ KilnResult KILN_CALL t_set_look(const KilnUiLook* look) {
     return look_set(look);
 }
 KilnResult KILN_CALL t_look_info(KilnUiLookInfo* out) { return look_info(out); }
+
+// Kiln's own texts in the player's language (ui_text.h). Like set_look, Kiln.Ui's call only: the player chooses the language.
+KilnResult KILN_CALL t_set_texts(const KilnUiTexts* t) {
+    if (caller_is_plugin(_ReturnAddress())) {
+        static std::atomic<bool> said{false};
+        if (!said.exchange(true)) logf(KILN_LOG_WARN, "ui: a native plugin called set_texts: refused (the player chooses Kiln's language)");
+        return KILN_ERR_UNAVAILABLE;
+    }
+    if (!t || t->size < sizeof(KilnUiTexts) || t->count > 4096 || (t->count && (!t->keys || !t->texts)))
+        return KILN_ERR_INVALID_ARGUMENT;
+    std::vector<std::pair<std::string, std::string>> pairs;
+    pairs.reserve(t->count);
+    for (uint32_t i = 0; i < t->count; ++i) {
+        const KilnStr k = t->keys[i], v = t->texts[i];
+        pairs.emplace_back(std::string(k.ptr ? k.ptr : "", k.ptr ? k.len : 0), std::string(v.ptr ? v.ptr : "", v.ptr ? v.len : 0));
+    }
+    const std::string language(t->language.ptr ? t->language.ptr : "", t->language.ptr ? t->language.len : 0);
+    if (!text::table().set(language, pairs)) return KILN_OK;
+    logf(KILN_LOG_INFO, "ui: Kiln's texts: %s (%u native texts)", language.empty() ? "the game's language" : language.c_str(), t->count);
+    game_texts_changed();
+    footer_texts_changed();
+    return KILN_OK;
+}
 KilnHandle KILN_CALL t_font_load(KilnOwner o, const void* data, size_t len) {
     if (!overlay_drawing_on()) return 0;
     return font_load(o, data, len);
@@ -543,9 +567,13 @@ static_assert(offsetof(KilnUiApi, image_load_rgba) == offsetof(KilnUiApi, menu_f
 static_assert(offsetof(KilnUiApi, theme_create) == 928 && offsetof(KilnUiApi, theme_free) == 936 &&
                   offsetof(KilnUiApi, push_theme) == 944 && offsetof(KilnUiApi, set_look) == 952 &&
                   offsetof(KilnUiApi, look_info) == 960 && offsetof(KilnUiApi, font_load) == 968 &&
-                  offsetof(KilnUiApi, font_free) == 976 && offsetof(KilnUiApi, push_font_handle) == 984 &&
-                  sizeof(KilnUiApi) == 992,
+                  offsetof(KilnUiApi, font_free) == 976 && offsetof(KilnUiApi, push_font_handle) == 984,
               "kiln.ui appends the looks after image_state (0.2.0-dev.29.16; UiNative.TableLooks)");
+static_assert(offsetof(KilnUiApi, set_texts) == 992 && sizeof(KilnUiApi) == 1000,
+              "kiln.ui appends set_texts after the looks (0.2.0-dev.29.16; UiNative.TableTexts)");
+static_assert(sizeof(KilnUiTexts) == 40 && offsetof(KilnUiTexts, language) == 8 && offsetof(KilnUiTexts, keys) == 24 &&
+                  offsetof(KilnUiTexts, texts) == 32,
+              "KilnUiTexts layout (UiNative.Texts)");
 static_assert(sizeof(KilnUiThemeDef) == 360 && offsetof(KilnUiThemeDef, color_mask) == 16 && offsetof(KilnUiThemeDef, roles) == 24 &&
                   offsetof(KilnUiThemeDef, colors) == 88 && offsetof(KilnUiThemeDef, vars) == 216 &&
                   offsetof(KilnUiThemeDef, background) == 344 && offsetof(KilnUiThemeDef, font) == 352,
@@ -608,6 +636,7 @@ const KilnUiApi kTable = {
     &t_image_state,      // 0.2.0-dev.29.15
     // looks, themes and fonts (0.2.0-dev.29.16)
     &t_theme_create, &t_theme_free, &t_push_theme, &t_set_look, &t_look_info, &t_font_load, &t_font_free, &t_push_font_handle,
+    &t_set_texts,  // Kiln's own texts (0.2.0-dev.29.16)
 };
 
 std::string api_path(int kind) {

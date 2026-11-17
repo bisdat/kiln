@@ -18,5 +18,29 @@
       "body": "Kiln's managed host (Kiln.Ui) is not running in this session, so the mod list and mod screens are unavailable here. Check kiln/logs/kiln.log.",
       "close": "Press {key} to close."
     }
+  },
+  "settings": {
+    "look": {
+      "caption": "LOOK",
+      "look": "Look",
+      "game": "The game's look",
+      "translucent": "The game's look, translucent",
+      "kiln": "Kiln's classic look (ember)",
+      "theme": "{theme} ({mod})",
+      "theme_missing": "{theme} (its mod is not loaded)",
+      "background": "Background opacity (%)",
+      "opacity": "Opacity (%)",
+      "size": "Size (%)",
+      "game_read": "The game's look uses the game's own colours and font, read from your game.",
+      "game_not_read": "The game's colours could not be read from your game (yet): a neutral dark stand-in is used.",
+      "saved": "Saved in kiln/kiln.json (\"ui\"); the launcher's Settings show the same. Mods may offer more looks."
+    },
+    "language": {
+      "caption": "LANGUAGE",
+      "language": "Language",
+      "auto": "Automatic (the game's language: {language})",
+      "missing": "{language} (Kiln has no texts in this language)",
+      "saved": "Kiln's own menus and messages; mods' texts follow the game's language. Saved in kiln/kiln.json (\"ui\"), as the launcher's Settings show."
+    }
   }
 }

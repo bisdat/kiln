@@ -11,8 +11,9 @@ using System.Text.Json.Nodes;
 
 namespace Kiln;
 
-/// <summary>kiln.json's <c>ui</c> section, clamped.</summary>
-internal sealed record LookSettings(string Look, string Theme, float Background, float Opacity, float Scale)
+/// <summary>kiln.json's <c>ui</c> section, clamped. <paramref name="Language"/>: the language of Kiln's own texts, "auto" (the
+/// game's) or a tag (UiLanguage, KilnText).</summary>
+internal sealed record LookSettings(string Look, string Theme, float Background, float Opacity, float Scale, string Language = KilnText.Auto)
 {
     public static readonly LookSettings Default = new("game", "", 0.55f, 1f, 1f);
     public static readonly string[] Looks = ["game", "translucent", "kiln", "theme"];
@@ -24,7 +25,14 @@ internal sealed record LookSettings(string Look, string Theme, float Background,
         Background = Clamp(Background, 0.1f, 1f, 0.55f),
         Opacity = Clamp(Opacity, 0.3f, 1f, 1f),
         Scale = Clamp(Scale, 0.75f, 1.5f, 1f),
+        Language = LanguageOf(Language),
     };
+
+    /// <summary>"auto" for null, blank or any spelling of auto; else the tag as written canonically ("zh-CN").</summary>
+    public static string LanguageOf(string? language) =>
+        string.IsNullOrWhiteSpace(language) || string.Equals(language.Trim(), KilnText.Auto, StringComparison.OrdinalIgnoreCase)
+            ? KilnText.Auto
+            : KilnText.Canonical(language);
 
     private static float Clamp(float v, float lo, float hi, float fallback) => float.IsFinite(v) ? Math.Clamp(v, lo, hi) : fallback;
 
@@ -63,7 +71,7 @@ internal static unsafe class PlayerLook
     /// <summary>Reads kiln.json, hands the look to kiln.ui and watches the file (once; a game client with the looks tail).</summary>
     internal static void Start()
     {
-        if (!Available || Interlocked.Exchange(ref _started, 1) != 0) return;
+        if (Interlocked.Exchange(ref _started, 1) != 0) return;  // also without the looks tail: the language is read here
         Reload();
         _watch = new Timer(_ => Poll(), null, 2000, 2000);
     }
@@ -102,6 +110,7 @@ internal static unsafe class PlayerLook
         _current = s;
         UiEngine.Log(LogLevel.Info, $"look: {Describe(s)} (kiln.json)");
         Apply();
+        UiLanguage.Apply(s.Language);
     }
 
     internal static string Describe(LookSettings s) =>
@@ -142,7 +151,8 @@ internal static unsafe class PlayerLook
                 warn?.Invoke($"ui.look \"{look}\" is not game, translucent, kiln or theme: the game's look");
                 look = "game";
             }
-            return new LookSettings(look, Str("theme", "").Trim(), Num("background", d.Background), Num("opacity", d.Opacity), Num("scale", d.Scale)).Clamped();
+            return new LookSettings(look, Str("theme", "").Trim(), Num("background", d.Background), Num("opacity", d.Opacity), Num("scale", d.Scale),
+                Str("language", KilnText.Auto)).Clamped();
         }
         catch (JsonException e)
         {
@@ -178,6 +188,7 @@ internal static unsafe class PlayerLook
     {
         _current = s.Clamped();
         Apply();
+        UiLanguage.Apply(_current.Language);
     }
 
     /// <summary>A theme came or went: the player's may be among them.</summary>
@@ -194,6 +205,7 @@ internal static unsafe class PlayerLook
         if (s == _current) return;
         _current = s;
         Apply();
+        UiLanguage.Apply(s.Language);
         _savePending = true;
         lock (FileLock)
         {
@@ -262,7 +274,11 @@ internal static unsafe class PlayerLook
         {
             ("look", ShroudForgePackages.Quote(s.Look)), ("theme", ShroudForgePackages.Quote(s.Theme)),
             ("background", Num(s.Background)), ("opacity", Num(s.Opacity)), ("scale", Num(s.Scale)),
+            ("language", ShroudForgePackages.Quote(s.Language)),
         };
+        // the language is written once it is not auto (or the file has it already): a file that never chose one keeps its
+        // other lines as they were
+        if (s.Language == KilnText.Auto && !HasLanguage(text)) values = values[..^1];
         if (text.Trim().Length == 0)
         {
             var nl = "\n";
@@ -290,6 +306,20 @@ internal static unsafe class PlayerLook
             else if (text[v.Start..v.End] != json) text = text[..v.Start] + json + text[v.End..];
         }
         return text;
+    }
+
+    private static bool HasLanguage(string text)
+    {
+        try
+        {
+            if (text.Trim().Length == 0) return false;
+            var root = JsonSpans.Parse(text);
+            return root.Kind == '{' && root.Get("ui") is { Kind: '{' } ui && ui.Get("language") is not null;
+        }
+        catch (SfEditException)
+        {
+            return false;
+        }
     }
 
     internal static void ResetForTests()
@@ -358,16 +388,16 @@ internal static class LookPage
     /// <summary>The look choices: the three looks, then the themes mods offer (and the player's theme while it is not).</summary>
     internal static (string[] Labels, string[] Ids) Choices(LookSettings cur, IReadOnlyList<UiTheme> offered)
     {
-        var labels = new List<string> { "The game's look", "The game's look, translucent", "Kiln's classic look (ember)" };
+        var labels = new List<string> { KilnText.T("settings.look.game"), KilnText.T("settings.look.translucent"), KilnText.T("settings.look.kiln") };
         var ids = new List<string> { "game", "translucent", "kiln" };
         foreach (var t in offered)
         {
-            labels.Add($"{t.DisplayName} ({t.ModName})");
+            labels.Add(KilnText.T("settings.look.theme", ("theme", t.DisplayName), ("mod", t.ModName)));
             ids.Add("theme:" + t.Id);
         }
         if (cur.Kind == UiLook.Theme && cur.Theme.Length > 0 && !offered.Any(t => t.Id == cur.Theme))
         {
-            labels.Add($"{cur.Theme} (its mod is not loaded)");
+            labels.Add(KilnText.T("settings.look.theme_missing", ("theme", cur.Theme)));
             ids.Add("theme:" + cur.Theme);
         }
         return (labels.ToArray(), ids.ToArray());
@@ -390,25 +420,25 @@ internal static class LookPage
             _items = UiDraw.ComboItems(labels);
             _ids = ids;
         }
-        caption(ui, "LOOK", s);
+        caption(ui, KilnText.T("settings.look.caption"), s);
         var index = Math.Max(0, Array.IndexOf(_ids, IdOf(cur)));
         ui.NextItemWidth(360 * s);
-        if (ui.Combo("Look##kiln.look", ref index, _items, _ids.Length) && index < _ids.Length)
+        if (ui.Combo(KilnText.T("settings.look.look") + "##kiln.look", ref index, _items, _ids.Length) && index < _ids.Length)
             PlayerLook.Change(Pick(cur, _ids[index]));
         cur = PlayerLook.Current;
         if (cur.Kind == UiLook.Translucent)
         {
             var bg = (int)MathF.Round(cur.Background * 100);
             ui.NextItemWidth(360 * s);
-            if (ui.Slider("Background opacity (%)##kiln.look.bg", ref bg, 10, 100)) PlayerLook.Change(cur with { Background = bg / 100f });
+            if (ui.Slider(KilnText.T("settings.look.background") + "##kiln.look.bg", ref bg, 10, 100)) PlayerLook.Change(cur with { Background = bg / 100f });
         }
         cur = PlayerLook.Current;
         var op = (int)MathF.Round(cur.Opacity * 100);
         ui.NextItemWidth(360 * s);
-        if (ui.Slider("Opacity (%)##kiln.look.opacity", ref op, 30, 100)) PlayerLook.Change(cur with { Opacity = op / 100f });
+        if (ui.Slider(KilnText.T("settings.look.opacity") + "##kiln.look.opacity", ref op, 30, 100)) PlayerLook.Change(cur with { Opacity = op / 100f });
         var size = _scaleDrag >= 0 ? _scaleDrag : (int)MathF.Round(PlayerLook.Current.Scale * 100);
         ui.NextItemWidth(360 * s);
-        ui.Slider("Size (%)##kiln.look.scale", ref size, 75, 150);
+        ui.Slider(KilnText.T("settings.look.size") + "##kiln.look.scale", ref size, 75, 150);
         var it = ui.LastItem;
         if (it.Active) _scaleDrag = size;
         else if (_scaleDrag >= 0 || size != (int)MathF.Round(PlayerLook.Current.Scale * 100))
@@ -416,16 +446,72 @@ internal static class LookPage
             PlayerLook.Change(PlayerLook.Current with { Scale = size / 100f });  // let go (or a keyboard / gamepad step)
             _scaleDrag = -1;
         }
-        ui.TextWrapped(KilnLook.GameColorsRead
-            ? "The game's look uses the game's own colours and font, read from your game."
-            : "The game's colours could not be read from your game (yet): a neutral dark stand-in is used.");
-        ui.TextDisabled("Saved in kiln/kiln.json (\"ui\"); the launcher's Settings show the same. Mods may offer more looks.");
+        ui.TextWrapped(KilnLook.GameColorsRead ? KilnText.T("settings.look.game_read") : KilnText.T("settings.look.game_not_read"));
+        ui.TextDisabled(KilnText.T("settings.look.saved"));
+        ui.Space(1, 14 * s);
+        LanguagePage.Draw(ui, s, caption);
+    }
+
+    internal static void ResetForTests()
+    {
+        LanguagePage.ResetForTests();
+        _scaleDrag = -1;
+        _itemsKey = "\0";
+        _items = [];
+        _ids = [];
+    }
+}
+
+/// <summary>Mods > Kiln settings > Language (beside Look): the language of Kiln's own texts. "Automatic" follows the game's
+/// text language; each language Kiln has texts for is listed in its own name. A change shows at once and is saved with the
+/// look (kiln.json <c>ui.language</c>).</summary>
+internal static class LanguagePage
+{
+    private static string _itemsKey = "\0";
+    private static byte[] _items = [];
+    private static string[] _ids = [];
+
+    /// <summary>The choices: auto (naming the game's language), English, then every locale file, in their own names; the
+    /// player's setting too while no file has it.</summary>
+    internal static (string[] Labels, string[] Ids) Choices(string setting)
+    {
+        var labels = new List<string> { KilnText.T("settings.language.auto", ("language", KilnText.NameOf(KilnText.Setting == KilnText.Auto ? KilnText.Language : GameLanguage.Current))) };
+        var ids = new List<string> { KilnText.Auto };
+        foreach (var tag in KilnText.Languages())
+        {
+            labels.Add(KilnText.NameOf(tag));
+            ids.Add(KilnText.Canonical(tag));
+        }
+        if (setting != KilnText.Auto && !ids.Contains(setting, StringComparer.OrdinalIgnoreCase))
+        {
+            labels.Add(KilnText.T("settings.language.missing", ("language", setting)));
+            ids.Add(setting);
+        }
+        return (labels.ToArray(), ids.ToArray());
+    }
+
+    public static void Draw(UiDraw ui, float s, Action<UiDraw, string, float> caption)
+    {
+        var cur = PlayerLook.Current;
+        var (labels, ids) = Choices(cur.Language);
+        var key = string.Join("\n", labels);
+        if (key != _itemsKey)
+        {
+            _itemsKey = key;
+            _items = UiDraw.ComboItems(labels);
+            _ids = ids;
+        }
+        caption(ui, KilnText.T("settings.language.caption"), s);
+        var index = Math.Max(0, Array.FindIndex(_ids, i => string.Equals(i, cur.Language, StringComparison.OrdinalIgnoreCase)));
+        ui.NextItemWidth(360 * s);
+        if (ui.Combo(KilnText.T("settings.language.language") + "##kiln.language", ref index, _items, _ids.Length) && index < _ids.Length)
+            PlayerLook.Change(PlayerLook.Current with { Language = _ids[index] });
+        ui.TextDisabled(KilnText.T("settings.language.saved"));
         ui.Space(1, 14 * s);
     }
 
     internal static void ResetForTests()
     {
-        _scaleDrag = -1;
         _itemsKey = "\0";
         _items = [];
         _ids = [];

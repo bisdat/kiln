@@ -8,8 +8,9 @@
  * game's menus; v7 appends subscribe_key_ex, key callbacks that also get mouse presses.
  *
  * The size-guarded tail after v7 appends set_next_window_size_constraints, menu_footer (0.2.0-dev.29.11),
- * image_load_rgba, screen_target and image_state (0.2.0-dev.29.15), and looks, themes and fonts (0.2.0-dev.29.16:
- * theme_create, theme_free, push_theme, set_look, look_info, font_load, font_free, push_font_handle).
+ * image_load_rgba, screen_target and image_state (0.2.0-dev.29.15), looks, themes and fonts (0.2.0-dev.29.16:
+ * theme_create, theme_free, push_theme, set_look, look_info, font_load, font_free, push_font_handle), and Kiln's own texts
+ * in the player's language (0.2.0-dev.29.16: set_texts).
  *
  * How (docs/re/client-render.md):
  *  - The game loads vulkan-1.dll at run time and presents with vkQueuePresentKHR on queue family 0 (no static Vulkan
@@ -619,6 +620,16 @@ typedef struct KilnUiLookInfo {
     uint32_t reserved2;
 } KilnUiLookInfo;           /* 104 bytes */
 
+/* set_texts: Kiln's own texts that kiln.ui draws, in the language Kiln's UI shows (docs/kiln/translating-game.md). */
+typedef struct KilnUiTexts {
+    uint32_t size;          /* sizeof(KilnUiTexts) */
+    uint32_t count;         /* entries in keys[] and texts[] */
+    KilnStr language;       /* the language Kiln's UI shows, a lower-case tag ("zh-cn", "en-us"): also picks the overlay's
+                               glyphs (the game's own font of a Chinese, Japanese or Korean language group) */
+    const KilnStr* keys;    /* "native.menu.mods", ... (keys outside "native." are ignored) */
+    const KilnStr* texts;   /* their texts, UTF-8 */
+} KilnUiTexts;              /* 40 bytes */
+
 typedef struct KilnUiApi {
     KilnServiceHeader header; /* { sizeof(KilnUiApi), KILN_UI_VERSION } */
     KilnResult(KILN_CALL* status)(KilnUiStatus* out);
@@ -996,6 +1007,15 @@ typedef struct KilnUiApi {
     KilnHandle(KILN_CALL* font_load)(KilnOwner owner, const void* data, size_t len);
     void(KILN_CALL* font_free)(KilnHandle font);
     bool(KILN_CALL* push_font_handle)(KilnHandle font);
+    /* Additive size-guarded tail (0.2.0-dev.29.16; check header.size >= offsetof(KilnUiApi, set_texts) + sizeof(void*) and
+     * the pointer): Kiln's own texts that kiln.ui draws (the Mods entry, Kiln's line in the main menu's footer, the fallback
+     * window), from runtime/locales/<language>.json's "native." section, and the language Kiln's UI shows. Kiln.Ui calls it
+     * at start and whenever that language changes (kiln.json ui.language, or the game's language with "auto"); the next
+     * frame and the game's next menu frame follow it. Until then, and for a key it lacks, kiln.ui draws English. With a
+     * Chinese, Japanese or Korean language (or the game's), kiln.ui adds the game's own font of that language group to the
+     * overlay's font atlas. Copied; any thread. A call from a native plugin is refused (KILN_ERR_UNAVAILABLE): the player
+     * chooses the language. INVALID_ARGUMENT: NULL, size too small, count over 4096 or NULL arrays with a count. */
+    KilnResult(KILN_CALL* set_texts)(const KilnUiTexts* texts);
 } KilnUiApi;
 
 /* ====================================================================================================================
