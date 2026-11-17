@@ -16,8 +16,8 @@ public:
             missing_ = 0;
             return false;
         }
-        if (missing_ < kMissingFramesBeforeReset) ++missing_;
-        return missing_ == kMissingFramesBeforeReset;
+        if (missing_ >= kMissingFramesBeforeReset) return false;  // already reset: not again every unfocused frame
+        return ++missing_ == kMissingFramesBeforeReset;
     }
 
     unsigned missing() const { return missing_; }
