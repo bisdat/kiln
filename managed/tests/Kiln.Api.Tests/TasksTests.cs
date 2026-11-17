@@ -405,4 +405,58 @@ public sealed class TasksTests : TaskTest
         Assert.Equal(new[] { "Normal", "Low", "High" }, Enum.GetNames<KilnTaskPriority>());
         Assert.Equal(new[] { 0, 1, 2 }, Enum.GetValues<KilnTaskPriority>().Select(s => (int)s));
     }
+
+    // ---- the backend's end notification (TaskBackend's real pool reports a quiescent lease) ----
+
+    [Fact]
+    public void The_end_notification_ends_a_task_whose_lease_the_pool_ended_itself()
+    {
+        var mod = NewMod("alpha");
+        var gate = new TaskCompletionSource();
+        var stuck = mod.Tasks.Run("stuck", async _ => await gate.Task);
+        Pool.WaitIdle();
+        Assert.Equal(KilnTaskState.Running, stuck.State);
+        TaskRun.LeaseEnded(stuck.Run, KilnTaskState.Faulted);  // its worker faulted outside managed code: the core ended the lease
+        Ended(stuck);
+        Assert.Equal(KilnTaskState.Faulted, stuck.State);
+        Assert.Contains("ended by Kiln's task pool", stuck.Fault!.Message);
+        Assert.True(stuck.Run.Token.IsCancellationRequested);
+        TaskRun.LeaseEnded(stuck.Run, KilnTaskState.Faulted);  // once: a second notification changes nothing
+        Assert.Equal(KilnTaskState.Faulted, stuck.State);
+
+        var parked = mod.Tasks.Run("parked", async _ => await gate.Task);
+        Pool.WaitIdle();
+        TaskRun.LeaseEnded(parked.Run, KilnTaskState.Cancelled);
+        Ended(parked);
+        Assert.Equal(KilnTaskState.Cancelled, parked.State);
+    }
+
+    [Fact]
+    public void The_end_notification_of_a_task_that_ended_itself_changes_nothing()
+    {
+        var mod = NewMod("alpha");
+        var done = mod.Tasks.Run("done", _ => { });
+        var faulted = mod.Tasks.Run("faulted", _ => throw new InvalidOperationException("boom"));
+        Ended(done);
+        Ended(faulted);
+        var fault = faulted.Fault;
+        TaskRun.LeaseEnded(done.Run, KilnTaskState.Completed);
+        TaskRun.LeaseEnded(faulted.Run, KilnTaskState.Faulted);
+        TaskRun.LeaseEnded(new object(), KilnTaskState.Faulted);  // not a task: ignored
+        Assert.Equal(KilnTaskState.Completed, done.State);
+        Assert.Same(fault, faulted.Fault);
+    }
+
+    [Fact]
+    public void The_hosts_cancel_asks_the_task_to_stop_like_Cancel()
+    {
+        var mod = NewMod("alpha");
+        var task = mod.Tasks.Run("waits", async ctx => await Task.Delay(Timeout.Infinite, ctx.Cancellation));
+        Pool.WaitIdle();
+        TaskRun.CancelFromHost(task.Run);
+        Ended(task);
+        Assert.Equal(KilnTaskState.Cancelled, task.State);
+        Assert.Same(typeof(TasksTests).Assembly, TaskRun.WorkAssemblyOf(task.Run));
+        Assert.Null(TaskRun.WorkAssemblyOf(new object()));
+    }
 }

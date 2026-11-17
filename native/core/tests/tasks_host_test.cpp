@@ -551,6 +551,296 @@ KILN_TASKS_TEST(tick_hops_not_carried_without_a_stop) {
         return left == 0;
     }), "its hop ended: the lease drains");
 }
+
+// ---- the appended members: bind_ended, resume_after_step_in, on_pool_thread, server_session ----
+struct Ended {
+    Service* service = nullptr;
+    std::mutex mutex;
+    std::vector<std::pair<KilnLease, uint32_t>> seen;  // (lease, state) in callback order
+    std::atomic<int> off_pool{0};                      // callbacks that did not run on a pool worker
+    std::function<void(KilnLease)> inside;             // extra work inside the callback
+};
+Ended g_ended;
+void KILN_CALL ended(KilnLease lease, uint32_t state, void* host_state) {
+    check(host_state == &g_host, "ended gets the host's state");
+    if (g_ended.service && g_ended.service->host_on_pool_thread() != 1) g_ended.off_pool++;
+    std::function<void(KilnLease)> f;
+    {
+        std::lock_guard lock(g_ended.mutex);
+        g_ended.seen.emplace_back(lease, state);
+        f = g_ended.inside;
+    }
+    if (f) f(lease);
+}
+void KILN_CALL other_ended(KilnLease, uint32_t, void*) {}
+void reset_ended(Service* s) {
+    std::lock_guard lock(g_ended.mutex);
+    g_ended.service = s;
+    g_ended.seen.clear();
+    g_ended.off_pool = 0;
+    g_ended.inside = nullptr;
+}
+int ended_count(KilnLease l, uint32_t* state = nullptr) {
+    std::lock_guard lock(g_ended.mutex);
+    int n = 0;
+    for (auto& [lease, st] : g_ended.seen)
+        if (lease == l) {
+            ++n;
+            if (state) *state = st;
+        }
+    return n;
+}
+
+// The host hears of every accepted lease's end once, on a pool worker, and the core drops the record afterwards.
+KILN_TASKS_TEST(ended_notifies_once_and_releases_the_record) {
+    HostPlatform p;
+    Env env;
+    Pool pool(config(2, 2), &p);  // capacity 2: records that stayed would refuse the third lease
+    Service s(pool, env);
+    reset_ended(&s);
+    s.host_bind(&dispatch);
+    check(s.host_bind_ended(nullptr) == KILN_ERR_INVALID_ARGUMENT, "bind_ended needs a callback");
+    check(s.host_bind_ended(&ended) == KILN_OK && s.host_bind_ended(&ended) == KILN_OK, "bind_ended, and the same one again");
+    check(s.host_bind_ended(&other_ended) == KILN_ERR_INVALID_ARGUMENT, "a different one is refused");
+    check(s.host_on_pool_thread() == 0, "the test's thread is no pool worker");
+    std::atomic<int> on_pool{0};
+    const KilnTaskInfo i = info("ends");
+    for (int n = 0; n < 5; ++n) {
+        const uint32_t outcome = static_cast<uint32_t>(n % 2);  // Completed, Faulted
+        on_segment([&, outcome](KilnLease l, uint32_t) {
+            on_pool += s.host_on_pool_thread();
+            s.host_finish(l, outcome);
+        });
+        KilnLease l = 0;
+        uint32_t why = 0;
+        check(s.host_admit(1, &i, &g_host, &l, &why) == KILN_OK, "a lease is admitted (earlier records are gone)");
+        uint32_t st = 0;
+        check(until([&] { return ended_count(l, &st) == 1; }), "its end is reported");
+        check(st == (outcome ? KILN_TASK_FAULTED : KILN_TASK_COMPLETED), "with its final state");
+        check(until([&] { return state_of(s, 1, l) == KILN_TASK_NONE; }), "and its record is released by the core");
+    }
+    check(on_pool.load() == 5, "on_pool_thread is 1 inside a segment");
+    check(g_ended.off_pool.load() == 0, "ended runs on a pool worker");
+    {
+        std::lock_guard lock(g_ended.mutex);
+        check(g_ended.seen.size() == 5, "one ended per lease, never two");
+    }
+    uint32_t left = 9;
+    check(until([&] {
+        s.host_seal_owner(1, &left);
+        return left == 0;
+    }), "quiescent");
+    reset_ended(nullptr);
+}
+
+// A lease cancelled before its first segment never reaches the dispatcher: ended is how the host learns of it,
+// whoever cancelled (cancel, seal, the owner retiring).
+KILN_TASKS_TEST(ended_reports_a_lease_cancelled_before_its_first_segment) {
+    for (int how = 0; how < 3; ++how) {
+        HostPlatform p;
+        Env env;
+        Pool pool(config(1), &p);
+        Service s(pool, env);
+        reset_ended(&s);
+        s.host_bind(&dispatch);
+        s.host_bind_ended(&ended);
+        // the one worker is held by a native body, so the lease stays queued
+        Gate hold;
+        std::atomic<int> started{0};
+        struct Blocker {
+            Gate* hold;
+            std::atomic<int>* started;
+        } blocker{&hold, &started};
+        const KilnTaskInfo normal = info("blocker");
+        KilnHandle b1 = 0;
+        const auto body = +[](const KilnTaskRun*, void* u) {
+            auto* b = static_cast<Blocker*>(u);
+            b->started->fetch_add(1);
+            b->hold->wait();
+        };
+        const auto done = +[](KilnHandle, uint32_t, void*) {};
+        s.submit(1, &normal, body, done, &blocker, &b1, nullptr);
+        check(until([&] { return started.load() == 1; }), "the one worker is busy");
+        const int before = g_host.segments.load();
+        on_segment([&](KilnLease l, uint32_t) { s.host_finish(l, 0); });
+        const KilnTaskInfo i = info("never starts");
+        KilnLease l = 0;
+        check(s.host_admit(1, &i, &g_host, &l, nullptr) == KILN_OK && state_of(s, 1, l) == KILN_TASK_QUEUED, "queued");
+        const std::string t = how == 0 ? "cancel: " : how == 1 ? "seal: " : "retire: ";
+        if (how == 0) {
+            uint32_t st = 0;
+            check(s.cancel(1, l, &st) == KILN_OK && st == KILN_TASK_CANCELLED, t + "CANCELLED at once");
+        } else if (how == 1) {
+            uint32_t left = 0;
+            s.host_seal_owner(1, &left);
+        } else {
+            s.owner_retiring(1);
+        }
+        check(ended_count(l) == 0, t + "no ended while the worker is busy (never inline on the cancelling thread)");
+        hold.open();
+        uint32_t st = 0;
+        check(until([&] { return ended_count(l, &st) == 1; }), t + "ended arrives");
+        check(st == KILN_TASK_CANCELLED, t + "as CANCELLED");
+        check(g_host.segments.load() == before, t + "and no segment was ever dispatched");
+        check(g_ended.off_pool.load() == 0, t + "on a pool worker");
+        reset_ended(nullptr);
+    }
+}
+
+// ended is the lease's quiescence: it waits for a pending tick hop, as the done it rides on does.
+KILN_TASKS_TEST(ended_waits_for_pending_tick_hops) {
+    HostPlatform p;
+    Env env;
+    Pool pool(config(), &p);
+    Service s(pool, env);
+    reset_ended(&s);
+    s.host_bind(&hop_dispatch);
+    s.host_bind_ended(&ended);
+    {
+        std::lock_guard lock(g_hops.mutex);
+        g_hops.seen.clear();
+        g_hops.platform = nullptr;
+    }
+    s.session_started(1);
+    const KilnLease l = suspended_lease(s, 1, "hop then end");
+    check(s.host_tick_hop(l) == KILN_OK, "a hop is queued");
+    on_segment([&](KilnLease lease, uint32_t) { s.host_finish(lease, 0); });
+    s.host_resume(l, 1);
+    check(until([&] { return state_of(s, 1, l) == KILN_TASK_COMPLETED; }), "the lease finished with its hop pending");
+    std::this_thread::sleep_for(std::chrono::milliseconds(30));
+    check(ended_count(l) == 0, "no ended while a hop is pending");
+    check(s.run_tick_hops() == 1 && hops_of(l) == 1, "the hop runs on the tick");
+    uint32_t st = 0;
+    check(until([&] { return ended_count(l, &st) == 1; }) && st == KILN_TASK_COMPLETED, "then ended, once");
+    check(until([&] { return state_of(s, 1, l) == KILN_TASK_NONE; }), "and the record is gone");
+    on_segment(nullptr);
+    reset_ended(nullptr);
+}
+
+// Without bind_ended a lease's record stays until release, as before.
+KILN_TASKS_TEST(without_bind_ended_the_record_stays) {
+    HostPlatform p;
+    Env env;
+    Pool pool(config(), &p);
+    Service s(pool, env);
+    reset_ended(&s);
+    s.host_bind(&dispatch);
+    on_segment([&](KilnLease l, uint32_t) { s.host_finish(l, 0); });
+    const KilnTaskInfo i = info("kept");
+    KilnLease l = 0;
+    s.host_admit(1, &i, &g_host, &l, nullptr);
+    uint32_t left = 9;
+    check(until([&] { return state_of(s, 1, l) == KILN_TASK_COMPLETED; }), "COMPLETED");
+    std::this_thread::sleep_for(std::chrono::milliseconds(30));
+    check(state_of(s, 1, l) == KILN_TASK_COMPLETED, "its record stays after its done");
+    check(until([&] { return s.release(1, l) == KILN_OK; }) && state_of(s, 1, l) == KILN_TASK_NONE,
+          "until the host releases it");
+    s.host_seal_owner(1, &left);
+    reset_ended(nullptr);
+}
+
+// resume_after_step_in arms for the session it names or refuses: a window asked for in one world never moves into
+// the next, and a refusal leaves the registration armed.
+KILN_TASKS_TEST(resume_after_step_in_checks_the_session) {
+    HostPlatform p;
+    Env env;
+    Pool pool(config(), &p);
+    Service s(pool, env);
+    s.host_bind(&dispatch);
+    check(s.host_server_session() == 0, "no live server world: server_session is 0");
+    const KilnLease l = suspended_lease(s, 1, "window");
+    uint32_t why = 0;
+    check(s.host_resume_after_step_in(l, 1, 4, &why) == KILN_ERR_UNAVAILABLE && why == KILN_TASK_REFUSAL_NO_SERVER_WORLD,
+          "no live server world: UNAVAILABLE + NO_SERVER_WORLD");
+    s.session_started(4);
+    check(s.host_server_session() == 4, "server_session is the live session");
+    s.post_edge(4, 10);
+    s.session_stopping(4);
+    check(s.host_server_session() == 0, "0 again once it stops");
+    s.session_started(5);
+    check(s.host_server_session() == 5, "and the next one");
+    why = 0;
+    check(s.host_resume_after_step_in(l, 1, 4, &why) == KILN_ERR_UNAVAILABLE && why == KILN_TASK_REFUSAL_NO_SERVER_WORLD,
+          "asked for session 4 while 5 is live: refused, not moved into the new world");
+    check(s.host_resume_after_step_in(l, 1, 0, &why) == KILN_ERR_UNAVAILABLE, "session 0 is never live");
+    s.post_edge(5, 1);
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    const int before = g_host.segments.load();
+    check(before == g_host.segments.load() && state_of(s, 1, l) == KILN_TASK_RUNNING, "the refused window woke nothing");
+    on_segment([&](KilnLease lease, uint32_t cancelled) {
+        check(cancelled == 0, "woken by its own session's edge");
+        s.host_finish(lease, 0);
+    });
+    check(s.host_resume_after_step_in(l, 1, 5, &why) == KILN_OK, "the registration is still armed: session 5 takes it");
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    check(g_host.segments.load() == before, "nothing runs before the next edge");
+    s.post_edge(5, 2);
+    check(until([&] { return state_of(s, 1, l) == KILN_TASK_COMPLETED; }), "the next edge of session 5 resumed it");
+    on_segment(nullptr);
+    // armed in a session, then that session stops: dispatched cancelled, never in the next world
+    const KilnLease m = suspended_lease(s, 1, "stopped");
+    check(s.host_resume_after_step_in(m, 1, 5, &why) == KILN_OK, "armed for session 5");
+    std::atomic<uint32_t> seen{9};
+    on_segment([&](KilnLease lease, uint32_t cancelled) {
+        seen = cancelled;
+        s.host_finish(lease, 2);
+    });
+    s.session_stopping(5);
+    check(until([&] { return seen.load() == 1; }), "its session's STOPPING resumes it with cancelled = 1");
+    check(until([&] { return state_of(s, 1, m) == KILN_TASK_CANCELLED; }), "it ends CANCELLED");
+    on_segment(nullptr);
+}
+
+// The compare and the arming use one snapshot: a session change racing the call either refuses or arms for the
+// session that was asked for; a wake never comes from another session's edge.
+KILN_TASKS_TEST(resume_after_step_in_racing_a_session_change) {
+    for (int round = 0; round < 50; ++round) {
+        HostPlatform p;
+        Env env;
+        Pool pool(config(), &p);
+        Service s(pool, env);
+        s.host_bind(&dispatch);
+        s.session_started(1);
+        s.post_edge(1, 1);
+        const KilnLease l = suspended_lease(s, 1, "race");
+        std::atomic<uint32_t> seen{9};
+        on_segment([&](KilnLease lease, uint32_t cancelled) {
+            seen = cancelled;
+            s.host_finish(lease, cancelled ? 2 : 0);
+        });
+        kiln::tasks::test::StartLine line(2);
+        KilnResult r = KILN_ERR_INTERNAL;
+        std::thread asker([&] {
+            line.arrive();
+            r = s.host_resume_after_step_in(l, 1, 1, nullptr);
+        });
+        std::thread world([&] {
+            line.arrive();
+            s.session_stopping(1);
+            s.session_started(2);
+            s.post_edge(2, 1);
+            s.post_edge(2, 2);
+        });
+        asker.join();
+        world.join();
+        if (r == KILN_OK) {
+            check(until([&] { return seen.load() != 9; }), "armed for session 1: it is resumed");
+            check(seen.load() == 1, "by session 1's end (cancelled), never by an edge of session 2");
+        } else {
+            check(r == KILN_ERR_UNAVAILABLE, "or refused");
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            check(seen.load() == 9, "a refused window wakes nothing");
+            s.host_resume(l, 1);
+            check(until([&] { return seen.load() != 9; }), "its registration is still armed");
+        }
+        uint32_t left = 9;
+        check(until([&] {
+            s.host_seal_owner(1, &left);
+            return left == 0;
+        }), "quiescent");
+        on_segment(nullptr);
+    }
+}
 }  // namespace
 
 int main(int argc, char** argv) { return kiln::tasks::test::run(argc, argv, "tasks host"); }

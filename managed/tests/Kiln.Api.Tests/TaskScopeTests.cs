@@ -211,6 +211,7 @@ public sealed class TaskScopeTests : TaskTest
             }
         });
         var task = runner.Start();
+        Assert.True(SpinWait.SpinUntil(() => Volatile.Read(ref loops) > 0, Long));  // running: a stop while it is still queued ends it Cancelled
         Assert.True(runner.Stop(Long));
         Assert.Equal(KilnTaskState.Completed, task.State);  // it returned normally after the cancel
         Assert.Null(runner.Running);

@@ -190,6 +190,25 @@ KilnResult KILN_CALL h_seal_owner(KilnOwner owner, uint32_t* outstanding) {
 KilnResult KILN_CALL h_snapshot(KilnLeaseSnapshot* rows, uint32_t capacity, uint32_t* count) {
     return with_service([&](tasks::Service& s) { return s.host_snapshot(rows, capacity, count); });
 }
+KilnResult KILN_CALL h_bind_ended(KilnHostEndedFn ended) {
+    return with_service([&](tasks::Service& s) { return s.host_bind_ended(ended); });
+}
+KilnResult KILN_CALL h_resume_after_step_in(KilnLease lease, uint64_t registration, uint32_t session, uint32_t* refusal) {
+    return with_service(
+        [&](tasks::Service& s) { return s.host_resume_after_step_in(lease, registration, session, refusal); });
+}
+uint32_t KILN_CALL h_on_pool_thread() {
+    const tasks::Service* service = g_service.load(std::memory_order_acquire);
+    return service ? service->host_on_pool_thread() : 0;
+}
+uint32_t KILN_CALL h_server_session() {
+    const tasks::Service* service = g_service.load(std::memory_order_acquire);
+    try {
+        return service ? service->host_server_session() : 0;
+    } catch (...) {
+        return 0;
+    }
+}
 
 const KilnTasksHostApi kHostTable = {{sizeof(KilnTasksHostApi), KILN_TASKS_HOST_VERSION},
                                      &h_build_stamp,
@@ -202,7 +221,11 @@ const KilnTasksHostApi kHostTable = {{sizeof(KilnTasksHostApi), KILN_TASKS_HOST_
                                      &h_finish,
                                      &h_is_cancelled,
                                      &h_seal_owner,
-                                     &h_snapshot};
+                                     &h_snapshot,
+                                     &h_bind_ended,
+                                     &h_resume_after_step_in,
+                                     &h_on_pool_thread,
+                                     &h_server_session};
 
 // tasks.pool's source (caps.cpp reads it lock-free at every registry call): -1 no pool, 0 no worker, 1 available.
 int pool_state() {

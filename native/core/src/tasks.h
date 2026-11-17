@@ -219,6 +219,15 @@ public:
     KilnResult host_seal_owner(KilnOwner owner, uint32_t* outstanding);
     KilnResult host_snapshot(KilnLeaseSnapshot* rows, uint32_t capacity, uint32_t* count);
     KilnHostDispatchFn dispatcher() const { return dispatch_.load(std::memory_order_acquire); }
+    // The appended members (tasks_host.h): the end notification (with it bound the core releases an ended lease's
+    // record itself), the after-step resumption for a named session, and the thread and session facts.
+    KilnResult host_bind_ended(KilnHostEndedFn ended);
+    KilnHostEndedFn ended() const { return ended_.load(std::memory_order_acquire); }
+    KilnResult host_resume_after_step_in(KilnLease lease, uint64_t registration, uint32_t session, uint32_t* refusal);
+    uint32_t host_on_pool_thread() const;
+    uint32_t host_server_session() const;
+    // The core's done trampoline of a lease, after the host's end notification returned: drops the record.
+    void lease_ended(KilnOwner owner, KilnLease lease);
     // A bounded tick hop for the lease: dispatched as KILN_LEASE_TICK_HOP on the live server world's tick, before its
     // Pre subscribers (run_tick_hops). UNAVAILABLE with no live server world (never waits for one); INTERNAL for a
     // lease that is unknown or already quiescent. Allowed after a seal; a retiring lease's hop runs with cancelled=1.
@@ -248,6 +257,7 @@ private:
     uint64_t refused_edges_ = 0;
     std::atomic<bool> exiting_{false};
     std::atomic<KilnHostDispatchFn> dispatch_{nullptr};  // the managed host's one dispatcher (host_bind)
+    std::atomic<KilnHostEndedFn> ended_{nullptr};        // its end notification (host_bind_ended)
     // Pending tick hops (the lease and the host's state for it), per owner.
     struct Hop {
         KilnLease lease;

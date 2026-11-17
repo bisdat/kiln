@@ -80,6 +80,7 @@ first). `mods/samples/build.sh` builds the loader samples (`SampleLib`, `SampleC
 | `SampleConsumer` | a required dependency (`^1.0`), an optional absent one, shared types, an IMC round trip |
 | `SampleTests` | Kiln.Testing: sync/async tests, `await t.Ticks()`, IMC and Mods API checks, a skipped test, auto-run |
 | `SampleFaulty` | the fault policy: throws every 25 steps while `kiln/data/sample-faulty/fault` exists; a `missing-member` file makes it fail at load like a mod built for a newer Kiln |
+| `SampleTasks` | Kiln tasks (`Context.Tasks`): a task that waits for its cancellation and unwinds at unload, one that throws (only that task faults), one that computes on a worker and applies on the tick with `await ctx.ToTick()` |
 | `resolver/*` | manifest-only fixtures: missing dependency, cycle, a dependent of a cycle, version mismatch, incompatible, client-only, feature, API, bad manifest |
 | `HookSample` | `advanced` mods (kiln.hooks): a detour that counts calls of the game's `GetComponent`, a mid hook reading a register, a reversible byte patch, a mod-shipped symbol fragment |
 | `TypedHookVolume` | typed hooks (`Kiln.Sigs`, since 0.2.0-dev.29): a hook of the game's `GetItemVolume` that lets the game answer and doubles the volume it gave (a watering can takes twice the water); built, not run in a game (guided check `06b-typed-hooks.client`) |

@@ -55,6 +55,14 @@ enum {
  * quarantined, kiln.log). */
 typedef void(KILN_CALL* KilnHostDispatchFn)(KilnLease lease, uint32_t what, uint32_t cancelled, void* host_state);
 
+/* The host's end notification (bind_ended): the lease is quiescent. Called once for every accepted lease, from the
+ * core's done trampoline on a pool worker, after its last segment returned and its last tick hop was dispatched; also
+ * for a lease that was cancelled before its first segment (cancel, seal, revoke, its session ending), which never
+ * reaches the dispatcher. `state` is the lease's final KILN_TASK_* state. After it returns nothing of the lease calls
+ * the host again, so this is where the host drops its GCHandle. Like every done, it is not guaranteed once the
+ * process exit began. */
+typedef void(KILN_CALL* KilnHostEndedFn)(KilnLease lease, uint32_t state, void* host_state);
+
 /* Bounded diagnostics snapshot row (tick-stats and crash reports read it). */
 typedef struct KilnLeaseSnapshot {
     uint32_t size, state;      /* KILN_TASK_* */
@@ -101,16 +109,36 @@ typedef struct KilnTasksHostApi {
     /* A bounded copy of the running/suspended leases (at most `capacity` rows); BUFFER_TOO_SMALL sets *count to the
      * number needed. Any thread; never blocks on a task. */
     KilnResult(KILN_CALL* snapshot)(KilnLeaseSnapshot* rows, uint32_t capacity, uint32_t* count);
+    /* ---- appended (same version: the table is checked by size and build stamp) ---- */
+    /* Bind the host's end notification (once per process; INVALID_ARGUMENT if already bound to another). With it
+     * bound, the core releases a lease's record itself right after the notification returned: the host never calls
+     * release, and ended leases do not count against their owner's capacity. Without it nothing changes: a lease's
+     * record stays until release or the owner's drain. Bind it before the first admit. */
+    KilnResult(KILN_CALL* bind_ended)(KilnHostEndedFn ended);
+    /* resume_after_step for the session the host asked the window in: armed only while `session` is the live server
+     * session (one snapshot for the compare and the arming), else UNAVAILABLE + NO_SERVER_WORLD with the registration
+     * still armed. A window asked for in one world is never moved into the next. */
+    KilnResult(KILN_CALL* resume_after_step_in)(KilnLease lease, uint64_t registration, uint32_t session,
+                                                uint32_t* refusal);
+    /* 1 on one of the pool's worker threads (inside a segment or an end notification), else 0. Never blocks. */
+    uint32_t(KILN_CALL* on_pool_thread)(void);
+    /* The live server world's session (the one tick hops and after-step resumptions use); 0 with none, from its
+     * STOPPING on. Any thread; never blocks on a task. */
+    uint32_t(KILN_CALL* server_session)(void);
 } KilnTasksHostApi;
 }
 
 static_assert(sizeof(KilnLeaseSnapshot) == 168, "KilnLeaseSnapshot v1");
-static_assert(sizeof(KilnTasksHostApi) == 96 && offsetof(KilnTasksHostApi, build_stamp) == 8 &&
+static_assert(sizeof(KilnTasksHostApi) == 128 && offsetof(KilnTasksHostApi, build_stamp) == 8 &&
                   offsetof(KilnTasksHostApi, bind) == 16 && offsetof(KilnTasksHostApi, admit) == 24 &&
                   offsetof(KilnTasksHostApi, arm) == 32 && offsetof(KilnTasksHostApi, resume) == 40 &&
                   offsetof(KilnTasksHostApi, resume_after_step) == 48 && offsetof(KilnTasksHostApi, tick_hop) == 56 &&
                   offsetof(KilnTasksHostApi, finish) == 64 && offsetof(KilnTasksHostApi, is_cancelled) == 72 &&
-                  offsetof(KilnTasksHostApi, seal_owner) == 80 && offsetof(KilnTasksHostApi, snapshot) == 88,
+                  offsetof(KilnTasksHostApi, seal_owner) == 80 && offsetof(KilnTasksHostApi, snapshot) == 88 &&
+                  offsetof(KilnTasksHostApi, bind_ended) == 96 &&
+                  offsetof(KilnTasksHostApi, resume_after_step_in) == 104 &&
+                  offsetof(KilnTasksHostApi, on_pool_thread) == 112 &&
+                  offsetof(KilnTasksHostApi, server_session) == 120,
               "kiln.internal.tasks.host v1 (Kiln-internal; checked with the build stamp, not an ABI promise)");
 
 /* Not a member: the core-side bootstrap (api.cpp). Returns the managed host's KilnApi view (a copy of the public one
