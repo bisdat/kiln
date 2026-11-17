@@ -50,4 +50,18 @@ int main() {
     assert(direct.count() == 1);
     assert(direct.older("") == "/help");
 
+    // Exact shape of the 17 Nov in-game failure: the private edit view
+    // contained five bytes with a slash prefix and three control bytes.
+    // The caller-owned widget exposed the valid five-byte /help.
+    const std::string invalid_private{'/', '\x01', '\x02', '\x03', 'p'};
+    assert(invalid_private.size() == 5);
+    assert(!History::valid(invalid_private));
+    History from_widget;
+    assert(!from_widget.submit(invalid_private));
+    assert(from_widget.count() == 0);
+    assert(from_widget.submit("/help"));
+    assert(from_widget.count() == 1);
+    assert(from_widget.older("draft") == "/help");
+    assert(from_widget.newer("/help") == "draft");
+
 }
