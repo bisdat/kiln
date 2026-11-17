@@ -34,10 +34,11 @@ public sealed unsafe class StationsTests : IDisposable
 
         public (bool Read, bool Fill, bool Control, bool Events, string Detail)? Status() => State;
 
+        public bool NoWorld;
         public int BaseCount(out uint n)
         {
             n = (uint)BaseRows.Count;
-            return 0;
+            return NoWorld ? StationsNative.Unavailable : 0;
         }
 
         public int BaseAt(uint index, out StationsNative.Base b)
@@ -143,7 +144,7 @@ public sealed unsafe class StationsTests : IDisposable
             {
                 Size = (uint)sizeof(StationsNative.Event), Kind = kind, Seq = seq, Step = 100 + seq, Station = station, Workshop = 0x51,
                 StateBefore = before, StateAfter = after, StoppedAfter = (byte)(after == (byte)StationState.Stopped ? 1 : 0),
-                SelectedAfter = 0x1234, BaseIndex = baseIndex, By = by, Base = StationsNative.IdOf(AltarGuid),
+                SelectedBefore = 0x1234, SelectedAfter = 0x1234, BaseIndex = baseIndex, By = by, Base = StationsNative.IdOf(AltarGuid),
             });
         }
     }
@@ -361,12 +362,25 @@ public sealed unsafe class StationsTests : IDisposable
         // a new altar B overlaps A's zone (the merged base takes the smaller id: here B), D is gone, a new base E
         Guid E = Guid.NewGuid();
         var after = new List<(BaseId, HashSet<Guid>)> { (Id(B), [A, B]), (Id(C), [C]), (Id(E), [E]) };
-        var (added, removed, changed) = StationsCore.DiffBases(before, after);
+        var (added, removed, changed, kept) = StationsCore.DiffBases(before, after);
         Assert.Equal([Id(E)], added);
         Assert.Empty(removed);
         Assert.Equal([new BaseIdChange(Id(A), Id(B))], changed);
-        var (_, gone, _) = StationsCore.DiffBases(before, [(Id(A), [A])]);
+        Assert.Equal([Id(C)], kept);
+        var (_, gone, _, _) = StationsCore.DiffBases(before, [(Id(A), [A])]);
         Assert.Equal([Id(C)], gone);
+        // a split keeps the old id for one part: Kept tells it from a rename
+        Guid X = Guid.NewGuid();
+        var (_, _, splitChanged, splitKept) = StationsCore.DiffBases([(Id(A), [A, X])], [(Id(A), [A]), (Id(X), [X])]);
+        Assert.Equal([new BaseIdChange(Id(A), Id(X))], splitChanged);
+        Assert.Equal([Id(A)], splitKept);
+        var (_, _, renamed, renameKept) = StationsCore.DiffBases([(Id(A), [A])], [(Id(B), [A, B])]);
+        Assert.Equal([new BaseIdChange(Id(A), Id(B))], renamed);
+        Assert.Empty(renameKept);
+        // a base whose altars were not found (id none) is in no list
+        var (noneAdded, noneRemoved, _, _) = StationsCore.DiffBases([(BaseId.None, [])], [(BaseId.None, []), (Id(E), [E])]);
+        Assert.Equal([Id(E)], noneAdded);
+        Assert.Empty(noneRemoved);
     }
 
     [Fact]
@@ -529,6 +543,49 @@ public sealed unsafe class StationsTests : IDisposable
         Assert.Equal(new BaseId(AltarGuid), Assert.Single(placed).Base);
         kiln.Run(StationsCore.PumpOnce);  // each record once
         Assert.Single(states);
+    }
+
+    [Fact]
+    public void AWatchFromBeforeTheWorldTakesTheFirstRebuildAsItsBaseline()
+    {
+        using var kiln = Kiln();
+        _fake.NoWorld = true;  // subscribed in OnLoad: no bases to read yet
+        var bases = new List<BasesChangedEvent>();
+        kiln.Run(() => Events.On<BasesChangedEvent>(bases.Add));
+        kiln.Run(StationsCore.PumpOnce);
+        _fake.NoWorld = false;  // the world runs; its first rebuild
+        _fake.Push(StationsNative.EvBases, 0, baseIndex: 1);
+        kiln.Run(StationsCore.PumpOnce);
+        Assert.Empty(bases.SelectMany(b => b.Added));  // not every base "added"
+        _fake.Push(StationsNative.EvBases, 0, baseIndex: 1);
+        kiln.Run(StationsCore.PumpOnce);
+        Assert.Empty(bases.SelectMany(b => b.Added));
+    }
+
+    [Fact]
+    public void APlayersPressNamesOnlyTheChangeItLeadsTo()
+    {
+        using var kiln = Kiln();
+        var states = new List<StationStateChangedEvent>();
+        kiln.Run(() => Events.On<StationStateChangedEvent>(states.Add));
+        kiln.Run(StationsCore.PumpOnce);
+        // "use all options" pressed, then an unrelated stop flag change: not the player's
+        kiln.Run(() => StationsCore.Press(new EntityId(3300), new EntityId(1), StationPlayerAction.UseAllOptions));
+        _fake.Push(StationsNative.EvState, 3300, (byte)StationState.Running, (byte)StationState.Stopped);
+        kiln.Run(StationsCore.PumpOnce);
+        Assert.Null(Assert.Single(states).Player);
+        // a stop pressed: the stop flag going on is the player's
+        states.Clear();
+        kiln.Run(() => StationsCore.Press(new EntityId(3300), new EntityId(1), StationPlayerAction.Stop));
+        _fake.Push(StationsNative.EvState, 3300, (byte)StationState.Running, (byte)StationState.Stopped);
+        kiln.Run(StationsCore.PumpOnce);
+        Assert.Equal(new EntityId(1), Assert.Single(states).Player);
+        // a select pressed, then a state change with no selection change and no resume: not the player's
+        states.Clear();
+        kiln.Run(() => StationsCore.Press(new EntityId(3300), new EntityId(2), StationPlayerAction.Select));
+        _fake.Push(StationsNative.EvState, 3300, (byte)StationState.Running, (byte)StationState.MissingMaterials);
+        kiln.Run(StationsCore.PumpOnce);
+        Assert.Null(Assert.Single(states).Player);
     }
 
     [Fact]

@@ -283,8 +283,10 @@ public enum StationActionStatus
     TimedOut = 13,
     /// <summary>Not taken: 1024 actions are waiting. Try again in a step.</summary>
     QueueFull = 14,
-    /// <summary>Stop after the current craft: withdrawn before it was written, by a later resume, select or stop of the
-    /// station (Kiln's or a player's: the message says which); nothing was written.</summary>
+    /// <summary>Stop after the current craft: withdrawn before it was written, by a later <see cref="Stations.Resume"/>,
+    /// <see cref="Stations.Select"/> or <see cref="Stations.Stop"/> now on the station that passed its checks (that call's
+    /// message says it withdrew it), or because the station's selected recipe changed (a player's or a mod's select);
+    /// nothing was written. A stop meanwhile, a player's too, answers <see cref="Unchanged"/> instead.</summary>
     Canceled = 15,
 }
 

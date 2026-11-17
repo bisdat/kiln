@@ -84,8 +84,9 @@ public static class Bases
 
     /// <summary>The base's crafting-stock containers, in the game's order (the order its fill takes from them): the Magic
     /// storage chests and the player-planted refilling fruit trees and palms. With <paramref name="deposit"/>: only those
-    /// that take deposits (the game's <c>canReceiveAreaDeposit</c>, as a player's quick-stack station switch sets it per
-    /// chest: the trees take none), the containers <see cref="FindRoomFor"/> and <see cref="Stations.CollectToBase"/> use.</summary>
+    /// that take deposits, the containers <see cref="FindRoomFor"/> and <see cref="Stations.CollectToBase"/> use: the
+    /// entity's <c>DynamicInventoryCraftingStock</c> override when it is set, else its template's
+    /// <c>InventoryCraftingStock.canReceiveAreaDeposit</c> (what the game's area deposit reads).</summary>
     /// <exception cref="KeyNotFoundException">No base has this id now.</exception>
     [ServerOnly, TickThreadOnly, RequiresCapability(Stations.ReadCapability)]
     public static IReadOnlyList<EntityId> Storage(BaseId id, bool deposit = false)

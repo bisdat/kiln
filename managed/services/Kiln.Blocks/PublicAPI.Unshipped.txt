@@ -55,6 +55,7 @@ Kiln.BasesChangedEvent
 Kiln.BasesChangedEvent.Added.get -> System.Collections.Generic.IReadOnlyList<Kiln.BaseId>!
 Kiln.BasesChangedEvent.Changed.get -> System.Collections.Generic.IReadOnlyList<Kiln.BaseIdChange>!
 Kiln.BasesChangedEvent.Count.get -> int
+Kiln.BasesChangedEvent.Kept.get -> System.Collections.Generic.IReadOnlyList<Kiln.BaseId>!
 Kiln.BasesChangedEvent.Removed.get -> System.Collections.Generic.IReadOnlyList<Kiln.BaseId>!
 Kiln.CategoryChoice
 Kiln.CategoryChoice.Category.get -> uint
