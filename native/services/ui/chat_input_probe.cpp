@@ -264,14 +264,14 @@ void __fastcall hk_input(void* widget, void* result, const GameText* label, uint
 } // namespace
 
 // Window thread: the core WndProc already deduplicates raw and legacy key messages.
-bool chat_input_on_key(uint32_t vk, uint32_t mods, bool down) {
+bool chat_input_on_key(uint32_t vk, uint32_t mods, bool down, bool captured) {
     if (!g_history_on.load(std::memory_order_acquire) && !g_diagnose_on.load(std::memory_order_acquire))
         return false;
-    const bool kept = g_history_on.load(std::memory_order_acquire) && g_keys.key(vk, mods, down);
+    const bool kept = !captured && g_history_on.load(std::memory_order_acquire) && g_keys.key(vk, mods, down);
     if (down && (vk == VK_UP || vk == VK_DOWN) && g_trace_on.load(std::memory_order_relaxed) &&
         g_key_log_count.fetch_add(1) < 24)
-        logf(KILN_LOG_INFO, "ui: chat history trace: key %s mods=%u focus=%u consumed=%u",
-             vk == VK_UP ? "Up" : "Down", mods, g_keys.focused() ? 1u : 0u, kept ? 1u : 0u);
+        logf(KILN_LOG_INFO, "ui: chat history trace: key %s mods=%u focus=%u captured=%u consumed=%u",
+             vk == VK_UP ? "Up" : "Down", mods, g_keys.focused() ? 1u : 0u, captured ? 1u : 0u, kept ? 1u : 0u);
     return kept;
 }
 
