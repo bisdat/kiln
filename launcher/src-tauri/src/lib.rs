@@ -19,6 +19,8 @@ pub mod folder;
 mod perf;
 /// How the window is drawn on Linux (the GPU, or software mode and the fallback to it).
 pub mod render;
+/// "Open folder": a path made safe for Explorer / the file manager, a file shown selected (app_open_path).
+pub mod reveal;
 pub mod selftest;
 /// The self-update: only in direct builds (feature `self-update`); the Nexus Mods build compiles none of it.
 #[cfg(feature = "self-update")]

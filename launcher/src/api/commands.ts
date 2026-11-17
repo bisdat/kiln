@@ -1116,7 +1116,9 @@ export interface ModpackInstallResult {
 export const appInfo = () => call<AppInfo>("app_info");
 export const appSettingsGet = () => call<LauncherSettings>("app_settings_get");
 export const appSettingsSet = (settings: LauncherSettings) => call<LauncherSettings>("app_settings_set", { settings });
-export const appOpenPath = (path: string) => call<null>("app_open_path", { path });
+/** Opens a folder, or shows a file selected in its folder. A relative `path` (a found mod's) is under `base`, the game
+ *  folder: the backend joins and normalises it for Explorer (never `${base}/${path}` here). */
+export const appOpenPath = (path: string, base?: string) => call<null>("app_open_path", { path, base });
 export const appOpenUrl = (url: string) => call<null>("app_open_url", { url });
 export const taskList = () => call<Task[]>("task_list");
 export const taskGet = (taskId: TaskId) => call<Task>("task_get", { taskId });

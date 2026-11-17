@@ -484,13 +484,11 @@ pub async fn app_locales() -> Result<LocaleFiles, Error> {
     crate::state::blocking(|| Ok(read_locales(&crate::state::dirs()?.root.join("locales")))).await
 }
 
+/// Opens a folder, or shows a file selected in its folder. `path` relative (a found mod's game-relative path) is under
+/// `base` (the game folder); a path that is gone opens its nearest existing parent folder (reveal.rs).
 #[tauri::command]
-pub async fn app_open_path(path: String) -> Result<(), Error> {
-    let p = std::path::PathBuf::from(&path);
-    if path.trim().is_empty() || !p.exists() {
-        return Err(Error::not_found(format!("{path} does not exist")));
-    }
-    crate::state::open_external(p.as_os_str())
+pub async fn app_open_path(path: String, base: Option<String>) -> Result<(), Error> {
+    crate::reveal::open(base.as_deref(), &path)
 }
 
 #[tauri::command]
