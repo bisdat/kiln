@@ -2,8 +2,9 @@
 // Host test of on_unload's arming decision: (under Wine or on native Windows) x (kiln.json "unloadAtExit"). The code
 // under test is the block between "unload-policy:begin" and "unload-policy:end" in native/core/src/boot.cpp, which
 // test-unload.sh cuts out of that file as it is (unload_policy_block.inc) and builds into this file with the host's
-// C++ compiler. Every row is checked on its own: armed or not, warned or not, and a piece of the boot line. The exit
-// code is the number of rows that failed.
+// C++ compiler. Every row is checked on its own: armed or not, whether the plugins' handlers are called, whether Kiln's
+// own exit steps (its services' handlers, the task pool's park) come first, warned or not, and a piece of the boot
+// line. The exit code is the number of rows that failed.
 #include <cstdio>
 #include <string>
 #include <string_view>
@@ -18,27 +19,33 @@ struct Row {
     const char* wine;     // "" = native Windows
     const char* setting;  // nullptr = "unloadAtExit" not in kiln.json
     bool armed;
+    bool plugins;         // the plugins' on_unload handlers are called (when armed)
+    bool kiln_first;      // Kiln's own exit steps first, the task pool parks (when armed)
     bool warn;
     const char* says;     // must be the start of the boot line (after "unload: ")
 };
 
 const Row kRows[] = {
-    {"wine, not set", "11.0", nullptr, true, false, "on (Wine 11.0; kiln.json \"unloadAtExit\" not set: auto)"},
-    {"wine, auto", "11.0", "auto", true, false, "on (Wine 11.0; kiln.json \"unloadAtExit\": auto)"},
-    {"wine, on", "11.0", "on", true, false, "on (Wine 11.0; kiln.json \"unloadAtExit\": \"on\")"},
-    {"wine, off", "11.0", "off", false, false, "off (kiln.json \"unloadAtExit\": \"off\")"},
-    {"wine, unknown value", "11.0", "yes", true, true,
+    {"wine, not set", "11.0", nullptr, true, true, false, false,
+     "on (Wine 11.0; kiln.json \"unloadAtExit\" not set: auto)"},
+    {"wine, auto", "11.0", "auto", true, true, false, false, "on (Wine 11.0; kiln.json \"unloadAtExit\": auto)"},
+    {"wine, on", "11.0", "on", true, true, false, false, "on (Wine 11.0; kiln.json \"unloadAtExit\": \"on\")"},
+    {"wine, off", "11.0", "off", false, false, false, false, "off (kiln.json \"unloadAtExit\": \"off\")"},
+    {"wine, unknown value", "11.0", "yes", true, true, false, true,
      "on (Wine 11.0; kiln.json \"unloadAtExit\": \"yes\", counted as auto)"},
-    {"wine, a JSON true", "11.0", "true", true, true, "on (Wine 11.0;"},
-    {"native, not set", "", nullptr, false, false, "off on native Windows by default (not yet proven there;"},
-    {"native, auto", "", "auto", false, false, "off on native Windows by default"},
-    {"native, on", "", "on", true, false,
+    {"wine, a JSON true", "11.0", "true", true, true, false, true, "on (Wine 11.0;"},
+    // native Windows: the link is placed for Kiln's own exit steps; the plugins' handlers only with "on"
+    {"native, not set", "", nullptr, true, false, true, false,
+     "Kiln's own exit steps only on native Windows (plugin on_unload handlers are off there by default, not yet "
+     "proven; kiln.json \"unloadAtExit\" not set: auto)"},
+    {"native, auto", "", "auto", true, false, true, false, "Kiln's own exit steps only on native Windows"},
+    {"native, on", "", "on", true, true, true, false,
      "on on native Windows (kiln.json \"unloadAtExit\": \"on\"; proven under Wine only)"},
-    {"native, off", "", "off", false, false, "off (kiln.json \"unloadAtExit\": \"off\")"},
-    {"native, unknown value", "", "maybe", false, true, "off on native Windows by default"},
-    {"native, empty string", "", "", false, true, "off on native Windows by default"},
-    {"native, \"ON\" (case does not matter)", "", "ON", true, false, "on on native Windows"},
-    {"wine, \"Off\" (case does not matter)", "9.0-ge", "Off", false, false, "off ("},
+    {"native, off", "", "off", false, false, false, false, "off (kiln.json \"unloadAtExit\": \"off\")"},
+    {"native, unknown value", "", "maybe", true, false, true, true, "Kiln's own exit steps only on native Windows"},
+    {"native, empty string", "", "", true, false, true, true, "Kiln's own exit steps only on native Windows"},
+    {"native, \"ON\" (case does not matter)", "", "ON", true, true, true, false, "on on native Windows"},
+    {"wine, \"Off\" (case does not matter)", "9.0-ge", "Off", false, false, false, false, "off ("},
 };
 }  // namespace
 
@@ -47,12 +54,14 @@ int main() {
     for (const Row& r : kRows) {
         const std::string setting = r.setting ? r.setting : "";
         const auto p = kiln_test::unload_policy(r.wine, r.setting ? &setting : nullptr);
-        const bool ok = p.armed == r.armed && p.warn == r.warn && p.says.rfind(r.says, 0) == 0;
+        const bool ok = p.armed == r.armed && (!r.armed || (p.plugins == r.plugins && p.kiln_first == r.kiln_first)) &&
+                        p.warn == r.warn && p.says.rfind(r.says, 0) == 0;
         if (!ok) ++failed;
-        std::printf("%s %-36s armed=%d warn=%d  unload: %s\n", ok ? "PASS" : "FAIL", r.name, p.armed, p.warn,
-                    p.says.c_str());
+        std::printf("%s %-36s armed=%d plugins=%d kiln_first=%d warn=%d  unload: %s\n", ok ? "PASS" : "FAIL", r.name,
+                    p.armed, p.plugins, p.kiln_first, p.warn, p.says.c_str());
         if (!ok)
-            std::printf("     wanted armed=%d warn=%d, a line starting \"%s\"\n", r.armed, r.warn, r.says);
+            std::printf("     wanted armed=%d plugins=%d kiln_first=%d warn=%d, a line starting \"%s\"\n", r.armed,
+                        r.plugins, r.kiln_first, r.warn, r.says);
     }
     std::printf("%zu rows, %d failed\n", sizeof kRows / sizeof kRows[0], failed);
     return failed;
