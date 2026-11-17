@@ -42,6 +42,14 @@ int main() {
     assert(!History::valid("\xf4\x90\x80\x80"));
     assert(History::sensitive("/key ABC"));
     assert(!History::sensitive("/keyboard"));
+    assert(History::sensitive("/set api_key sk-1"));     // '_' and digits split words
+    assert(History::sensitive("/admin password123"));
+    assert(History::sensitive("/connect --passwd=x"));
+    assert(History::sensitive("/auth ABC"));
+    assert(History::sensitive("/srv apiKey x"));          // the whole word "apikey", any case
+    assert(!History::sensitive("/srv myToken x"));        // camelCase is one word: not caught (documented)
+    assert(!History::sensitive("/give monkey"));
+    assert(!History::sensitive("/passage"));
     // A normal five-byte slash command must be accepted. In-game issue #44
     // logging showed bytes=5/command=1 but count stayed zero.
     History direct;

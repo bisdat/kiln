@@ -144,14 +144,14 @@ public:
         return any;
     }
 
+    // A line that may carry a secret is kept nowhere, not even for this session. Words are runs of ASCII letters,
+    // so "api_key", "password123" and "--token=x" match; "keyboard" and "monkey" do not. Case-insensitive.
     static bool sensitive(std::string_view s) {
-        // Whole ASCII words only; conservative, like the managed model's regex.
         constexpr std::string_view words[] = {
-            "login", "register", "password", "pass", "token", "key", "secret"
+            "login", "register", "password", "passwd", "pass", "pwd", "token", "key", "apikey", "secret", "auth"
         };
         const auto ascii_word = [](unsigned char c) {
-            return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-                   (c >= '0' && c <= '9') || c == '_';
+            return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
         };
         for (std::size_t pos = 0; pos < s.size();) {
             if (!ascii_word(static_cast<unsigned char>(s[pos]))) { ++pos; continue; }
