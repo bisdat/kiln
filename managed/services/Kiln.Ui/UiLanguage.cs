@@ -59,6 +59,7 @@ internal static unsafe class UiLanguage
     internal static void Apply(string setting)
     {
         if (string.Equals(KilnText.Setting, string.IsNullOrWhiteSpace(setting) ? KilnText.Auto : setting.Trim(), StringComparison.OrdinalIgnoreCase)) return;
+        KilnText.ForgetFiles();  // a translator's edit shows at the next switch
         KilnText.Configure(setting);
         UiEngine.Log(LogLevel.Info, $"texts: {Describe()}");
     }

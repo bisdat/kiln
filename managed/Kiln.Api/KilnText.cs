@@ -119,6 +119,17 @@ internal static class KilnText
         Rebuild(st?.Setting ?? Auto, game, force: false);
     }
 
+    /// <summary>The files are read again at the next language change (Kiln.Ui, when the player changes the setting: a
+    /// translator switches away and back to see an edit).</summary>
+    internal static void ForgetFiles()
+    {
+        lock (Gate)
+        {
+            _files = null;
+            Reported.Clear();
+        }
+    }
+
     /// <summary>Reads the files again (a translator's edit while the game runs).</summary>
     internal static void Reload()
     {

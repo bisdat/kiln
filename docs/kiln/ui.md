@@ -376,7 +376,8 @@ changes (checked every 2 seconds), so a change in the launcher shows while the g
   "theme": "",          // with look "theme": "<mod id>:<theme>", a theme a mod offers (Kiln's menu lists them)
   "background": 0.55,   // the translucent look's window background opacity, 0.1 to 1
   "opacity": 1,         // Kiln's whole overlay, text included, 0.3 to 1
-  "scale": 1            // the overlay's size on top of the display's scale, 0.75 to 1.5
+  "scale": 1,           // the overlay's size on top of the display's scale, 0.75 to 1.5
+  "language": "auto"    // Kiln's own texts: auto (the game's text language) or a tag, "zh-CN" (Kiln's language, below)
 }
 ```
 - `translucent` is the game's look with the windows' backgrounds (windows, title bars, panels, the Kiln menu's backdrop
@@ -389,6 +390,15 @@ changes (checked every 2 seconds), so a change in the launcher shows while the g
   stays, and the theme shows once its mod offers it.
 - Only the top-level `ui` section is read (not a `client` section). A missing section or key is the default above; a value
   out of range is clamped, an unknown `look` is `game` (kiln.log says so).
+
+### Kiln's language (0.2.0-dev.29.16)
+Kiln's own texts (every page, window, toast and message of Kiln above, and the Mods entry and footer line kiln-ui.dll adds to
+the game's menus) come from `runtime/locales/<language>.json`, shipped as `<game>/kiln/locales/`, in the format of a mod's
+locales. `ui.language` picks the language: `auto` follows the game's text language, a tag forces one; in game **Mods > Kiln
+settings > Language**, under Look, changes it at once. For Chinese, Japanese and Korean the overlay loads the game's own font
+of that language group (never shipped); Kiln's texts are English until it is loaded, and stay English if it cannot be.
+Mods' own texts are theirs (`Mod.Text`, `UiText`) and follow the game's language. For translators and Kiln's developers:
+[translating-game.md](translating-game.md).
 
 ### Mod themes
 ```csharp
