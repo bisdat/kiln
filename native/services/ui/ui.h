@@ -198,6 +198,9 @@ int32_t image_state(KilnHandle h);  // image_budget.h: unknown, waiting, ready, 
 bool image_size(KilnHandle h, uint32_t* w, uint32_t* hgt);
 void image_draw(KilnHandle h, float w, float hgt);
 bool image_button(const char* id, KilnHandle h, float w, float hgt);
+// image_ex: KILN_UI_IMAGE_DRAW_* flags, uv all 0 = whole; id null = an image (false), else a button. Inside a frame.
+bool image_draw_ex(const char* id, KilnHandle h, uint32_t flags, float w, float hgt, float u0, float v0, float u1, float v1);
+bool image_opaque_rect(KilnHandle h, uint32_t* x, uint32_t* y, uint32_t* w, uint32_t* hgt);  // any thread
 void image_free(KilnHandle h);
 }  // namespace kui
 struct ImTextureRef;
