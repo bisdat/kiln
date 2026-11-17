@@ -837,11 +837,11 @@ bool take_foreign(const HookCall& h, uint64_t now, uint32_t session) {
     return true;
 }
 
-void refused_foreign(uint32_t player, uint64_t slot, uint32_t action, const char* why) {
+void refused_foreign(uint32_t player, uint64_t slot, uint32_t action, uint32_t carrier, const char* why) {
     const uint32_t n = g_sources_refused.fetch_add(1);
     if (n < 20 || (n & 0xff) == 0)
-        LOGW("gems: player %u's %s naming the gem slot %u:%u outside the player's inventories was refused (%s); refusals so far: %u",
-             player, gems::action_name(action), KILN_SLOT_INVENTORY(slot), KILN_SLOT_INDEX(slot), why, n + 1);
+        LOGW("gems: player %u's %s (gem slot %u:%u, carrier %u) was refused: %s; refusals so far: %u", player, gems::action_name(action),
+             KILN_SLOT_INVENTORY(slot), KILN_SLOT_INDEX(slot), carrier, why, n + 1);
 }
 
 gems::HoldBook::Now book_on(uint32_t player, uint32_t version, uint64_t step, const KilnGemCraft* info, bool hold_new) {
@@ -874,7 +874,7 @@ void __fastcall hook_gem_action(uint64_t* it) {
                 named = g_sources.names_page(player, KILN_SLOT_INVENTORY(source));
             }
             if (named) {
-                refused_foreign(player, source, 0, "the forge actions are off");
+                refused_foreign(player, source, 0, 0, "the forge actions are off and the gem slot is a page an offer named");
                 return cancel_call(it);
             }
         }
@@ -911,8 +911,9 @@ void __fastcall hook_gem_action(uint64_t* it) {
                                               gems::Foreign::Offered;
         }
         if (!offered) {
-            refused_foreign(h.player, h.act.source, h.act.action,
-                            h.foreign_carrier ? "the carrier is not in the player's own inventories" : "no live offer of that gem to this player (in this session)");
+            refused_foreign(h.player, h.act.source, h.act.action, h.act.weapon,
+                            h.foreign_carrier ? "the carrier is not in the player's own inventories"
+                                              : "the gem slot is outside the player's inventories and no live offer of it to this player (in this session)");
             return cancel_call(it);
         }
         if (holding || book) {  // GemCraftingEvent sees it as any other forge action of the player
@@ -920,7 +921,7 @@ void __fastcall hook_gem_action(uint64_t* it) {
             if (now == gems::HoldBook::Now::Hold) return;
             if (now == gems::HoldBook::Now::Cancel) return cancel_call(it);
         }
-        if (!take_foreign(h, ms, session)) refused_foreign(h.player, h.act.source, h.act.action, "the offer lapsed, was used, or no room to queue it");
+        if (!take_foreign(h, ms, session)) refused_foreign(h.player, h.act.source, h.act.action, h.act.weapon, "the offer lapsed, was used, or no room to queue it");
         return cancel_call(it);
     }
     if (holding || book) {
