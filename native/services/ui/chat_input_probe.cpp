@@ -33,6 +33,9 @@ std::atomic<bool> g_trace_on{false};
 std::atomic<uint32_t> g_key_log_count{0};
 std::atomic<uint32_t> g_event_log_count{0};
 std::atomic<uint32_t> g_recall_log_count{0};
+// A literal user-edit signal, sent by WndProc. Do not infer manual edits from
+// transient differences in the game's widget buffer between UI frames.
+std::atomic<bool> g_manual_text_edit{false};
 std::atomic<bool> g_window_blurred{false};
 chat_keys::Router g_keys;
 chat_history::History g_history;
@@ -210,17 +213,28 @@ void history_before(void* widget) {
     // (3 control bytes in the exact game build). Only use the validated
     // caller-owned widget buffer for the live draft and submitted text.
     if (!widget_text(widget, &current)) return;
-    if (!g_last_applied.empty() && current != g_last_applied) {
+    // A widget readback can legitimately differ for a frame as Enshrouded
+    // reconciles the native edit state. A mismatch alone does NOT mean the
+    // player edited a recalled line: clearing the cursor here lost the draft
+    // before Down could restore it. Only explicit user text-edit input resets.
+    if (g_manual_text_edit.exchange(false, std::memory_order_acq_rel)) {
+        const bool was_browsing = g_history.browsing();
         g_history.edited();
         g_last_applied.clear();
+        if (was_browsing && g_trace_on.load(std::memory_order_relaxed))
+            logf(KILN_LOG_INFO, "ui: chat history trace: navigation reset by user text edit");
     }
     chat_keys::Action action{};
     while (g_keys.take(action)) {
+        const bool browsing_before = g_history.browsing();
         const std::string next = action == chat_keys::Action::Older
                                      ? g_history.older(current) : g_history.newer(current);
-        if (g_trace_on.load(std::memory_order_relaxed) && g_recall_log_count.fetch_add(1) < 24)
-            logf(KILN_LOG_INFO, "ui: chat history trace: recall %s entries=%zu changed=%u",
-                 action == chat_keys::Action::Older ? "older" : "newer", g_history.count(), next != current ? 1u : 0u);
+        if (g_trace_on.load(std::memory_order_relaxed) && g_recall_log_count.fetch_add(1) < 80)
+            logf(KILN_LOG_INFO,
+                 "ui: chat history trace: recall %s entries=%zu changed=%u browsing_before=%u browsing_after=%u",
+                 action == chat_keys::Action::Older ? "older" : "newer",
+                 g_history.count(), next != current ? 1u : 0u,
+                 browsing_before ? 1u : 0u, g_history.browsing() ? 1u : 0u);
         if (next == current) continue;
         if (!game_set_text(reinterpret_cast<uint8_t*>(state) + kEditOffset, next.data(), next.size())) {
             g_keys.focus(false);
@@ -304,13 +318,8 @@ void history_after(void* widget, void* result, bool hud) {
         logged = true;
         logf(KILN_LOG_INFO, "ui: chat history: %s edit focus confirmed (no text logged)", hud ? "HUD" : "Social");
     }
-    if (!g_last_applied.empty()) {
-        std::string now;
-        if (widget_text(widget, &now) && now != g_last_applied) {
-            g_history.edited();
-            g_last_applied.clear();
-        }
-    }
+    // No text-difference reset here. The next history_before observes the
+    // WndProc's explicit text-edit signal, not a transient UI buffer snapshot.
 }
 
 void __fastcall hk_input(void* widget, void* result, const GameText* label, uint32_t mode) {
@@ -332,9 +341,20 @@ void __fastcall hk_input(void* widget, void* result, const GameText* label, uint
 } // namespace
 
 // Window thread: the core WndProc already deduplicates raw and legacy key messages.
+void chat_input_text_edited() {
+    if (g_history_on.load(std::memory_order_acquire) && g_keys.focused())
+        g_manual_text_edit.store(true, std::memory_order_release);
+}
+
 bool chat_input_on_key(uint32_t vk, uint32_t mods, bool down, bool captured) {
     if (!g_history_on.load(std::memory_order_acquire) && !g_diagnose_on.load(std::memory_order_acquire))
         return false;
+    // These keys modify text without necessarily producing WM_CHAR. Modifier
+    // bits follow KilnUiKey; Ctrl+V/X is paste/cut, Ctrl+A is only selection.
+    if (down && !captured && g_history_on.load(std::memory_order_relaxed) && g_keys.focused() &&
+        (vk == VK_BACK || vk == VK_DELETE ||
+         ((mods & KILN_UI_MOD_CTRL) && (vk == 'V' || vk == 'X'))))
+        g_manual_text_edit.store(true, std::memory_order_release);
     const bool kept = !captured && g_history_on.load(std::memory_order_acquire) && g_keys.key(vk, mods, down);
     if (down && (vk == VK_UP || vk == VK_DOWN) && g_trace_on.load(std::memory_order_relaxed) &&
         g_key_log_count.fetch_add(1) < 24)
@@ -345,6 +365,7 @@ bool chat_input_on_key(uint32_t vk, uint32_t mods, bool down, bool captured) {
 
 void chat_input_window_blur() {
     g_keys.focus(false);
+    g_manual_text_edit.store(false, std::memory_order_release);
     g_window_blurred.store(true, std::memory_order_release);
 }
 
@@ -356,6 +377,7 @@ void chat_input_frame_end() {
     if (!active && g_was_editing) {
         g_history.edited();
         g_last_applied.clear();
+        g_manual_text_edit.store(false, std::memory_order_release);
     }
     g_was_editing = active;
     g_editing_in_frame = false;
