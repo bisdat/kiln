@@ -9,7 +9,8 @@
  *
  * The size-guarded tail after v7 appends set_next_window_size_constraints, menu_footer (0.2.0-dev.29.11),
  * image_load_rgba, screen_target and image_state (0.2.0-dev.29.15), and looks, themes and fonts (0.2.0-dev.29.16:
- * theme_create, theme_free, push_theme, set_look, look_info, font_load, font_free, push_font_handle).
+ * theme_create, theme_free, push_theme, set_look, look_info, font_load, font_free, push_font_handle; then image_ex and
+ * image_opaque_rect: part of an image, trimmed item icons).
  *
  * How (docs/re/client-render.md):
  *  - The game loads vulkan-1.dll at run time and presents with vkQueuePresentKHR on queue family 0 (no static Vulkan
@@ -207,6 +208,21 @@ enum {
     KILN_UI_IMAGE_READY = 2,
     KILN_UI_IMAGE_FAILED = 3,
 };
+
+/* image_ex (size-guarded tail, 0.2.0-dev.29.16): how an image is drawn */
+enum {
+    /* only the image's opaque bounds (image_opaque_rect: the pixels with alpha >= 16, found when it was loaded), not its
+     * transparent margin; the UVs are ignored. A fully transparent image is drawn whole. */
+    KILN_UI_IMAGE_DRAW_TRIM = 1u,
+    /* keep the source's aspect ratio inside width x height, as large as fits and centred; the whole box is still taken */
+    KILN_UI_IMAGE_DRAW_FIT = 2u,
+};
+typedef struct KilnUiImageDraw {
+    uint32_t size;         /* sizeof(KilnUiImageDraw) */
+    uint32_t flags;        /* KILN_UI_IMAGE_DRAW_* */
+    float width, height;   /* the box; 0 = the source's pixel size */
+    float u0, v0, u1, v1;  /* the source rectangle in texture coordinates (0..1; u1 < u0 flips); all 0 = the whole image */
+} KilnUiImageDraw;
 
 /* menu_footer flags (size-guarded tail after set_next_window_size_constraints) */
 #define KILN_UI_FOOTER_SHOWN 1u /* draw Kiln's line in the main menu's footer (else the game's footer as it was) */
@@ -996,6 +1012,17 @@ typedef struct KilnUiApi {
     KilnHandle(KILN_CALL* font_load)(KilnOwner owner, const void* data, size_t len);
     void(KILN_CALL* font_free)(KilnHandle font);
     bool(KILN_CALL* push_font_handle)(KilnHandle font);
+    /* Additive size-guarded tail (0.2.0-dev.29.16; check header.size >= offsetof(KilnUiApi, x) + sizeof(void*) and the
+     * pointer for each): part of an image, trimmed images.
+     * image_ex: image / image_button with a source rectangle and KILN_UI_IMAGE_DRAW_* (draw: set draw->size first; NULL or
+     *   too small: nothing drawn). An empty id draws an image (returns false), else a button of that id (true when
+     *   clicked; the box is the image's, as image_button's, plus the frame padding). Inside a frame callback. Not uploaded
+     *   yet (WAITING) or FAILED: the box is kept, nothing drawn (a button stays clickable). TRIM | FIT draws the game's
+     *   item icons (Kiln.Ui's ItemIcon(item, size, trim: true)) without their wide transparent margins.
+     * image_opaque_rect: the image's opaque bounds in pixels (alpha >= 16; the whole image when nothing is that opaque),
+     *   found once when it was loaded. False: no such image. Any thread. */
+    bool(KILN_CALL* image_ex)(KilnStr id, KilnHandle image, const KilnUiImageDraw* draw);
+    bool(KILN_CALL* image_opaque_rect)(KilnHandle image, uint32_t* x, uint32_t* y, uint32_t* width, uint32_t* height);
 } KilnUiApi;
 
 /* ====================================================================================================================

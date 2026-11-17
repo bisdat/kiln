@@ -136,3 +136,9 @@ static Kiln.Ui.Themes.Offered.get -> System.Collections.Generic.IReadOnlyList<Ki
 static Kiln.UiThemeSpec.operator !=(Kiln.UiThemeSpec? left, Kiln.UiThemeSpec? right) -> bool
 static Kiln.UiThemeSpec.operator ==(Kiln.UiThemeSpec? left, Kiln.UiThemeSpec? right) -> bool
 static Kiln.Ui.Themes.Player.get -> Kiln.UiPlayerLook
+Kiln.RenderDraw.Image(Kiln.UiImage! image, float x0, float y0, float x1, float y1, Kiln.Color? tint, bool trim) -> void
+Kiln.RenderDraw.Image(Kiln.UiImage! image, float x0, float y0, float x1, float y1, float u0, float v0, float u1, float v1, Kiln.Color? tint = null) -> void
+Kiln.UiDraw.Image(Kiln.UiImage! image, float width, float height, bool trim) -> void
+Kiln.UiDraw.Image(Kiln.UiImage! image, float width, float height, float u0, float v0, float u1, float v1) -> void
+Kiln.UiDraw.ImageButton(string! id, Kiln.UiImage! image, float width, float height, bool trim) -> bool
+Kiln.UiDraw.ItemIcon(Kiln.ItemId item, float size, bool trim) -> void

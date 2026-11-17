@@ -408,6 +408,71 @@ internal static unsafe class UiNative
     /// <summary>Tests: a table of the looks tail in place of kiln.ui's.</summary>
     internal static TableLooks* LooksOverride;
 
+    /// <summary>KILN_UI_IMAGE_DRAW_TRIM / FIT (kiln_ui.h image_ex, 0.2.0-dev.29.16).</summary>
+    public const uint ImageDrawTrim = 1, ImageDrawFit = 2;
+
+    /// <summary>KilnUiImageDraw (kiln_ui.h, 0.2.0-dev.29.16): how image_ex draws an image.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct ImageDraw
+    {
+        public uint Size, Flags;
+        public float Width, Height, U0, V0, U1, V1;
+    }
+
+    /// <summary>The tail after the looks (0.2.0-dev.29.16): image_ex (part of an image, trimmed images) and
+    /// image_opaque_rect.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct TableImageEx
+    {
+        public TableLooks Base;
+        public delegate* unmanaged[Cdecl]<NativeStr, ulong, ImageDraw*, byte> ImageEx;
+        public delegate* unmanaged[Cdecl]<ulong, uint*, uint*, uint*, uint*, byte> ImageOpaqueRect;
+    }
+
+    /// <summary>kiln.ui's image_ex tail (0.2.0-dev.29.16), or null on a table without it (an older kiln-ui.dll). Each slot
+    /// is still checked for null by its caller.</summary>
+    public static TableImageEx* ImageEx
+    {
+        get
+        {
+            if (ImageExOverride != null) return ImageExOverride;
+            var t = T;
+            if (t == null || t->Header.Size < (uint)sizeof(TableImageEx)) return null;
+            return (TableImageEx*)t;
+        }
+    }
+
+    /// <summary>Tests: a table of the image_ex tail in place of kiln.ui's.</summary>
+    internal static TableImageEx* ImageExOverride;
+
+    /// <summary>Draws through image_ex; false when this kiln.ui has no image_ex (the caller draws the old way).</summary>
+    public static bool DrawImageEx(string? id, ulong image, uint flags, float width, float height, float u0, float v0, float u1,
+        float v1, out bool clicked)
+    {
+        clicked = false;
+        var t = ImageEx;
+        if (t == null || t->ImageEx == null) return false;
+        var d = new ImageDraw
+        {
+            Size = (uint)sizeof(ImageDraw), Flags = flags, Width = width, Height = height, U0 = u0, V0 = v0, U1 = u1, V1 = v1,
+        };
+        clicked = t->ImageEx(id is null ? default : Utf8.Of(id), image, &d) != 0;
+        return true;
+    }
+
+    /// <summary>kiln.ui's image_opaque_rect: the image's opaque bounds in pixels (the whole image when nothing is opaque).
+    /// False: no such image, or a kiln.ui without it.</summary>
+    public static bool ImageOpaqueRect(ulong image, out uint x, out uint y, out uint width, out uint height)
+    {
+        x = y = width = height = 0;
+        var t = ImageEx;
+        if (t == null || t->ImageOpaqueRect == null) return false;
+        uint a, b, c, d;
+        if (t->ImageOpaqueRect(image, &a, &b, &c, &d) == 0) return false;
+        (x, y, width, height) = (a, b, c, d);
+        return true;
+    }
+
     /// <summary>KILN_UI_IMAGE_WAITING / READY / FAILED (kiln_ui.h image_state).</summary>
     public const int ImageUnknown = 0, ImageWaiting = 1, ImageReady = 2, ImageFailed = 3;
 
@@ -531,6 +596,7 @@ internal static unsafe class UiNative
         _table4 = null;
         _table6 = null;
         LooksOverride = null;
+        ImageExOverride = null;
         MouseKeysAvailable = false;
     }
 

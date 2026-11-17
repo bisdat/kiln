@@ -25,7 +25,11 @@ static_assert(offsetof(KilnUiApi, image_state) == 920);
 // the looks tail (0.2.0-dev.29.16) is appended after it; nothing before it moves
 static_assert(offsetof(KilnUiApi, theme_create) == offsetof(KilnUiApi, image_state) + sizeof(void*));
 static_assert(offsetof(KilnUiApi, push_font_handle) == 984);
-static_assert(sizeof(KilnUiApi) == offsetof(KilnUiApi, push_font_handle) + sizeof(void*));
+// image_ex and image_opaque_rect (0.2.0-dev.29.16) after it; nothing before them moves
+static_assert(offsetof(KilnUiApi, image_ex) == offsetof(KilnUiApi, push_font_handle) + sizeof(void*));
+static_assert(offsetof(KilnUiApi, image_ex) == 992);
+static_assert(offsetof(KilnUiApi, image_opaque_rect) == 1000);
+static_assert(sizeof(KilnUiApi) == offsetof(KilnUiApi, image_opaque_rect) + sizeof(void*));
 int main() {
     // Drawing off: no frame/context, just as KILN_UI_OVERLAY=0. Must not enter ImGui.
     kui_draw::t_set_next_window_size_constraints(300, 0, 300, 918);

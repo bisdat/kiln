@@ -447,6 +447,13 @@ KilnHandle KILN_CALL t_image_load_rgba(KilnOwner o, const uint8_t* rgba, uint32_
 }
 bool KILN_CALL t_image_size(KilnHandle h, uint32_t* w, uint32_t* hh) { return image_size(h, w, hh); }
 void KILN_CALL t_image_free(KilnHandle h) { image_free(h); }
+// part of an image, trimmed images (0.2.0-dev.29.16)
+bool KILN_CALL t_image_ex(KilnStr id, KilnHandle h, const KilnUiImageDraw* d) {
+    if (!in_frame() || !d || d->size < sizeof(KilnUiImageDraw)) return false;
+    const std::string label = id.ptr && id.len ? std::string(id.ptr, id.len) : std::string();
+    return image_draw_ex(label.empty() ? nullptr : label.c_str(), h, d->flags, d->width, d->height, d->u0, d->v0, d->u1, d->v1);
+}
+bool KILN_CALL t_image_opaque_rect(KilnHandle h, uint32_t* x, uint32_t* y, uint32_t* w, uint32_t* hh) { return image_opaque_rect(h, x, y, w, hh); }
 void KILN_CALL t_set_hover_capture(uint32_t n) { if (overlay_drawing_on()) g_hover_panels = n; }
 KilnResult KILN_CALL t_wheel_open(KilnOwner o, const KilnUiWheel* def, KilnUiWheelFn fn, void* user, KilnHandle* out) {
     return wheel_open(o, def, fn, user, out);
@@ -544,8 +551,13 @@ static_assert(offsetof(KilnUiApi, theme_create) == 928 && offsetof(KilnUiApi, th
                   offsetof(KilnUiApi, push_theme) == 944 && offsetof(KilnUiApi, set_look) == 952 &&
                   offsetof(KilnUiApi, look_info) == 960 && offsetof(KilnUiApi, font_load) == 968 &&
                   offsetof(KilnUiApi, font_free) == 976 && offsetof(KilnUiApi, push_font_handle) == 984 &&
-                  sizeof(KilnUiApi) == 992,
+                  offsetof(KilnUiApi, image_ex) == 992,
               "kiln.ui appends the looks after image_state (0.2.0-dev.29.16; UiNative.TableLooks)");
+static_assert(offsetof(KilnUiApi, image_ex) == offsetof(KilnUiApi, push_font_handle) + sizeof(void*) &&
+                  offsetof(KilnUiApi, image_opaque_rect) == 1000 && sizeof(KilnUiApi) == 1008,
+              "kiln.ui appends image_ex and image_opaque_rect after the looks (0.2.0-dev.29.16; UiNative.TableImageEx)");
+static_assert(sizeof(KilnUiImageDraw) == 32 && offsetof(KilnUiImageDraw, width) == 8 && offsetof(KilnUiImageDraw, u0) == 16,
+              "KilnUiImageDraw layout (UiNative.ImageDraw)");
 static_assert(sizeof(KilnUiThemeDef) == 360 && offsetof(KilnUiThemeDef, color_mask) == 16 && offsetof(KilnUiThemeDef, roles) == 24 &&
                   offsetof(KilnUiThemeDef, colors) == 88 && offsetof(KilnUiThemeDef, vars) == 216 &&
                   offsetof(KilnUiThemeDef, background) == 344 && offsetof(KilnUiThemeDef, font) == 352,
@@ -608,6 +620,8 @@ const KilnUiApi kTable = {
     &t_image_state,      // 0.2.0-dev.29.15
     // looks, themes and fonts (0.2.0-dev.29.16)
     &t_theme_create, &t_theme_free, &t_push_theme, &t_set_look, &t_look_info, &t_font_load, &t_font_free, &t_push_font_handle,
+    // part of an image, trimmed images (0.2.0-dev.29.16)
+    &t_image_ex, &t_image_opaque_rect,
 };
 
 std::string api_path(int kind) {
