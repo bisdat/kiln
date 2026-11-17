@@ -1,9 +1,12 @@
 # Native chat input: phase-1 history groundwork
 
-**Status (fork experiment):** managed/services/Kiln.Ui/ChatHistory.cs and
-managed/tests/Kiln.Ui.Tests/ChatHistoryTests.cs implement/test the history model.
-**They are not connected to the live Enshrouded chat.** No game process, native
-input hook or completion protocol has been tested by this change.
+**Status (fork experiment, client build 26430625):** The read-only native
+input probe has been validated in-game by a tester for both HUD and Social
+call sites. An opt-in preview now implements Up/Down recall in the native
+service, backed by a portable native history model compatible with the existing
+managed history file format. **The preview itself has not yet been compiled
+and run in-game.** The managed ChatHistory remains a separate reference model;
+the managed/native service bridge, Ctrl+R UI and completion are not implemented.
 
 ## What the model does
 
@@ -26,24 +29,28 @@ input hook or completion protocol has been tested by this change.
 - Corrupt or unwritable history is nonfatal. Clear() clears the in-memory
   history and overwrites the persisted history with an empty list.
 
-## Missing integration (required for a user-visible feature)
+## Remaining integration (for the complete phase-1 feature)
 
-1. Add build-scoped sigdb symbols for the client's chat input and edit-state
-   functions. The proposed TextInputProcess hook must discriminate the HUD
-   and Social chat call sites; other edit controls must be left alone.
+1. Candidate build-scoped sigdb symbols and both call sites now exist and have
+   been validated in a read-only runtime probe. Verify the edit-state and
+   EditSetText ABI in the next opt-in interactive test; until then the preview
+   must remain disabled by default.
 2. Add a narrow native input service that reports focused chat state and text
    on the game's **UI thread**. On that thread, use the game's SetText to
    apply one history result, preserving the game's edit buffer and cursor
    invariants. A hook failure must leave vanilla input entirely intact.
-3. Consume Up/Down in the existing native WndProc only when the actual chat
-   edit has focus. Never consume during gameplay, menu rebinds or an unrelated
-   textbox. Queue requests from the window thread to the UI thread; do not
-   call SetText from the WndProc.
-4. On the native submit path, call Submit with the precise sent line, not
-   with a reflected chat-log line. When the user types over recalled text,
-   call Edited. Keep the history state on one thread.
-5. Add the optional native service tail and managed host lifecycle plumbing
-   without removing or changing existing kiln.ui ABI slots.
+3. The opt-in native preview now consumes Up/Down in the existing WndProc
+   only while TextInputState reports active edit focus. It queues the requests
+   from the window thread to the UI thread; SetText is never called in WndProc.
+   **Actual focus-offset and text replacement behavior require game testing.**
+4. The preview takes submitted text from the scoped native edit after the
+   game's TextInputProcess returns a submit event, before its caller sends or
+   clears the line. It does not record incoming chat or programmatic output.
+   Cross-check that submit event and input layout in-game.
+5. Connect the native preview to the managed history model and settings with
+   an additive native ABI tail; the opt-in preview currently uses a separate
+   native History implementation (same JSON format and privacy policy) so no
+   existing kiln.ui ABI slots change.
 6. Add Ctrl+R search UI and then the separate Tab-completion protocol/list.
    Completion requires permission-filtered server suggestions and a way to
    suppress Tab's WM_CHAR event as well as the physical key.
@@ -106,3 +113,62 @@ The fork also has:
 4. Only after the probe passes should the next step activate focus-tracked
    Up/Down routing, `EditSetText` on the UI thread, and managed history
    submission. In a failed hook state, these must revert to vanilla input.
+
+## Opt-in interactive history preview (not yet runtime validated)
+
+This experimental preview lives in the same `kiln-ui.dll` as the verified
+read-only probe. The dedicated environment flags are mutually optional:
+
+- `KILN_CHAT_INPUT_PROBE=1`: exactly the previously validated read-only
+  hook. No state reads, key interception, edit replacement or persistence.
+- `KILN_CHAT_HISTORY=1`: enables history navigation, state inspection and
+  EditSetText. The first in-game test should use a throwaway hosted world,
+  with a backup of the previous UI DLL. History mode is **off by default**.
+
+Runtime flow: a recognized HUD/Social TextInputProcess call gets that widget's
+persistent edit state. The editing byte at `state+0x1988` gates a focus token
+updated at the end of each GameUiFrame. The window's raw and legacy key paths
+are already deduplicated; focused Up/Down presses are queued, and releases
+always reach the game. The next scoped UI frame applies the queue with the
+game's own EditSetText (not a buffer overwrite). Window focus loss clears the
+queue. An actual submit result saves commands from the game's edit state.
+
+History is bounded to 200 lines, collapses adjacent duplicates, excludes
+common credential-bearing commands from both memory and disk, and retains
+ordinary chat only for the current process. Only submitted slash commands are
+persisted (atomic best-effort replace) at `<game>/kiln/user/chat-history.json`.
+The preview does not yet separate histories by server, expose a Clear button,
+implement Ctrl+R, or offer command Tab completion. No typed text is logged.
+
+### Interactive acceptance checklist
+
+1. Test a boot with both environment flags unset: normal vanilla keys and no
+   chat hook. With `KILN_CHAT_HISTORY=1`, confirm the log says
+   `ui: chat history preview installed`; confirm separate HUD and Social edit
+   focus log messages appear once each. **Abort if the game crashes or an
+   unrelated textbox changes.**
+2. With the chat edit focused, send two harmless commands; Up/Up/Down/Down
+   cycles them and restores an unsent draft. Typing over a recalled command
+   resets browsing. Enter sends and closes chat normally.
+3. Verify Up/Down while gameplay has focus, after closing chat, in inventory
+   search, on the menu, and after Alt+Tab are untouched. Escape and key releases
+   remain normal. If not, disable the history flag immediately.
+4. Quit normally and relaunch. The commands remain in the history JSON; ordinary
+   chat and secret-like commands do not. Do **not** paste the contents of a
+   private chat-history file into a public issue or support report.
+5. Test Social separately and report any focus or text-replacement discrepancy.
+
+#### Local host test
+
+```sh
+# Run from the repository root (Linux g++), without the game.
+g++ -std=c++20 -Wall -Wextra -Werror \
+    native/services/ui/tests/chat_history_test.cpp -o /tmp/kiln-chat-history-test
+/tmp/kiln-chat-history-test
+```
+
+Native Windows cross-build (uses repo's xwin toolchain):
+
+```sh
+native/build.sh kiln-ui
+```
