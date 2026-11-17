@@ -99,5 +99,52 @@ int main() {
     assert(!navigation.browsing());
     assert(navigation.newer("closed chat") == "closed chat");
 
+    // 12:01 in-game reproduction: widget_text() still returns the old
+    // unsent draft on the next pre-TextInputProcess call, even though
+    // EditSetText("/help") was verified against the widget AFTER that call.
+    // Down must issue SetText("draft") despite next == pre-call widget.
+    History stale_snapshot;
+    assert(stale_snapshot.submit("/help"));
+    const std::string old_widget = "draft";
+    std::string applied;
+    const bool before_first_up = stale_snapshot.browsing();
+    const std::string recalled = stale_snapshot.older(old_widget);
+    assert(recalled == "/help");
+    assert(kui::chat_history::needs_replacement(recalled, old_widget,
+                                               applied, before_first_up));
+    applied = recalled; // engine accepted the replacement
+
+    // Another Up at the oldest entry is a no-op, even when widget is stale.
+    const bool before_repeat_up = stale_snapshot.browsing();
+    const std::string repeated = stale_snapshot.older(old_widget);
+    assert(before_repeat_up && repeated == "/help");
+    assert(!kui::chat_history::needs_replacement(repeated, old_widget,
+                                                applied, before_repeat_up));
+
+    // The original bug compared restored == old_widget and skipped SetText.
+    const bool before_down = stale_snapshot.browsing();
+    const std::string restored = stale_snapshot.newer(old_widget);
+    assert(before_down && !stale_snapshot.browsing());
+    assert(restored == old_widget);
+    assert(kui::chat_history::needs_replacement(restored, old_widget,
+                                               applied, before_down));
+
+    // Once restored, further Down is a no-op, using the live widget again.
+    applied = restored;
+    assert(!kui::chat_history::needs_replacement(restored, old_widget,
+                                                applied, stale_snapshot.browsing()));
+
+    // Empty draft is also a real replacement, not skipped by string emptiness.
+    stale_snapshot.edited();
+    const std::string from_empty = stale_snapshot.older("");
+    assert(from_empty == "/help");
+    applied = from_empty;
+    const bool browsing_to_empty = stale_snapshot.browsing();
+    const std::string empty_draft = stale_snapshot.newer("");
+    assert(empty_draft.empty());
+    assert(kui::chat_history::needs_replacement(empty_draft, "",
+                                               applied, browsing_to_empty));
+
+
 
 }
