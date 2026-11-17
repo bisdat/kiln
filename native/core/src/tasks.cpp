@@ -936,13 +936,29 @@ namespace {
 struct LeaseCtx {
     Service* service;
     void* host_state;
+    KilnOwner owner;
 };
 void KILN_CALL lease_segment(const KilnTaskRun* run, void* user) {
     const auto* ctx = static_cast<const LeaseCtx*>(user);
     if (const KilnHostDispatchFn dispatch = ctx->service->dispatcher())
         dispatch(run->task, KILN_LEASE_SEGMENT, run->cancelled(run), ctx->host_state);
 }
-void KILN_CALL lease_done(KilnHandle, uint32_t, void* user) { delete static_cast<LeaseCtx*>(user); }
+// The lease is quiescent (every segment returned, every hop was dispatched). With an end notification bound the host
+// hears of it here, once, also for a lease that never got a segment; then the core drops the record (release is
+// legal inside done), so the host never releases one.
+void KILN_CALL lease_done(KilnHandle task, uint32_t state, void* user) {
+    auto* ctx = static_cast<LeaseCtx*>(user);
+    if (const KilnHostEndedFn ended = ctx->service->ended()) {
+        Service* const service = ctx->service;
+        const KilnOwner owner = ctx->owner;
+        void* const host_state = ctx->host_state;
+        delete ctx;  // before the call: a fault inside the host's callback leaks nothing of the core's
+        ended(task, state, host_state);
+        service->lease_ended(owner, task);
+        return;
+    }
+    delete ctx;
+}
 // The host's state of an outstanding lease, from the core context its record carries (alive until its done ran).
 void* lease_host_state(uintptr_t user) { return user ? reinterpret_cast<const LeaseCtx*>(user)->host_state : nullptr; }
 }  // namespace
@@ -961,7 +977,7 @@ KilnResult Service::host_admit(KilnOwner owner, const KilnTaskInfo* info, void* 
         if (refusal) *refusal = KILN_TASK_REFUSAL_CAPABILITY;
         return KILN_ERR_UNAVAILABLE;
     }
-    auto* ctx = new LeaseCtx{this, host_state};
+    auto* ctx = new LeaseCtx{this, host_state, owner};
     const KilnResult r = submit_as(owner, info, &lease_segment, &lease_done, ctx, true, lease, refusal);
     if (r != KILN_OK) delete ctx;  // a refused admission transfers nothing
     return r;
@@ -977,6 +993,34 @@ KilnResult Service::host_resume_after_step(KilnLease lease, uint64_t registratio
         return KILN_ERR_UNAVAILABLE;
     }
     return pool_.resume_after(lease, registration, snap.session, snap.edge);
+}
+
+KilnResult Service::host_bind_ended(KilnHostEndedFn ended) {
+    if (!ended) return KILN_ERR_INVALID_ARGUMENT;
+    KilnHostEndedFn none = nullptr;
+    if (ended_.compare_exchange_strong(none, ended, std::memory_order_acq_rel)) return KILN_OK;
+    return none == ended ? KILN_OK : KILN_ERR_INVALID_ARGUMENT;  // once per process
+}
+
+void Service::lease_ended(KilnOwner owner, KilnLease lease) {
+    pool_.release(owner, lease);  // inside its done: terminal, no hop pending; a retired owner's records are gone already
+}
+
+KilnResult Service::host_resume_after_step_in(KilnLease lease, uint64_t registration, uint32_t session,
+                                              uint32_t* refusal) {
+    const Snapshot snap = snapshot();  // one consistent (session, edge, live) for the compare and the arming
+    if (!snap.live || !session || snap.session != session) {
+        if (refusal) *refusal = KILN_TASK_REFUSAL_NO_SERVER_WORLD;
+        return KILN_ERR_UNAVAILABLE;
+    }
+    return pool_.resume_after(lease, registration, snap.session, snap.edge);
+}
+
+uint32_t Service::host_on_pool_thread() const { return pool_.is_pool_worker() ? 1 : 0; }
+
+uint32_t Service::host_server_session() const {
+    const Snapshot snap = snapshot();
+    return snap.live ? snap.session : 0;
 }
 
 KilnResult Service::host_finish(KilnLease lease, uint32_t outcome) {
