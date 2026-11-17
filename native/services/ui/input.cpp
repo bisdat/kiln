@@ -197,7 +197,7 @@ bool on_key(uint32_t vk, uint32_t scan, bool down, bool from_mouse = false, hold
     // Issue #44: only a validated, focused native chat edit owns Up/Down.
     // The chat router queues work for the UI thread; this WndProc never writes game memory.
 #ifdef KILN_CHAT_HISTORY_ENABLED
-    const bool chat_kept = !from_mouse && !capturing() && chat_input_on_key(vk, k.mods, down);
+    const bool chat_kept = !from_mouse && chat_input_on_key(vk, k.mods, down, k.captured != 0);
     const bool consumed = chat_kept || dispatch_key(k, from_mouse);
 #else
     const bool consumed = dispatch_key(k, from_mouse);
