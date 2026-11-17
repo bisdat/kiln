@@ -1,0 +1,22 @@
+{
+  "language": {
+    "name": "English"
+  },
+  "native": {
+    "menu": {
+      "mods": "Mods",
+      "mods_off": "Mods: {reason}"
+    },
+    "footer": {
+      "loaded": {
+        "one": "Kiln {version} - {count} Mod Loaded",
+        "other": "Kiln {version} - {count} Mods Loaded"
+      }
+    },
+    "fallback": {
+      "title": "Kiln {version}",
+      "body": "Kiln's managed host (Kiln.Ui) is not running in this session, so the mod list and mod screens are unavailable here. Check kiln/logs/kiln.log.",
+      "close": "Press {key} to close."
+    }
+  }
+}
