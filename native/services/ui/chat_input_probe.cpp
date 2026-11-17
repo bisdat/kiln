@@ -40,6 +40,7 @@ std::atomic<bool> g_manual_text_edit{false};
 std::atomic<bool> g_window_blurred{false};
 chat_keys::Router g_keys;
 chat_history::History g_history;
+chat_history::DraftCapture g_hud_draft, g_social_draft;
 chat_focus::Grace g_focus_grace;
 std::filesystem::path g_history_file;
 // UI-thread-only.
@@ -206,7 +207,8 @@ void save_history() {
 }
 
 // UI-thread-only, before the underlying TextInputProcess.
-void history_before(void* widget) {
+// The live draft cache is refreshed after the original function returns.
+void history_before(void* widget, bool hud) {
     void* state = game_state(widget);
     if (!editing(state)) return;
     std::string current;
@@ -228,8 +230,20 @@ void history_before(void* widget) {
     chat_keys::Action action{};
     while (g_keys.take(action)) {
         const bool browsing_before = g_history.browsing();
+        // Critical: before the input call, widget_text may still be empty
+        // even when the player's unsent draft is visible. TextInputProcess
+        // has already supplied the authoritative post-call snapshot during
+        // previous frames. Use it ONLY when beginning an Up browse.
+        const auto& draft = hud ? g_hud_draft : g_social_draft;
+        const bool first_up = action == chat_keys::Action::Older && !browsing_before;
+        const std::string_view source = first_up ? draft.source(current) : std::string_view(current);
+        if (first_up && g_trace_on.load(std::memory_order_relaxed) &&
+            g_recall_log_count.fetch_add(1) < 80)
+            logf(KILN_LOG_INFO,
+                 "ui: chat history trace: capture draft from_postcall=%u bytes=%zu precall_bytes=%zu",
+                 draft.valid() ? 1u : 0u, source.size(), current.size());
         const std::string next = action == chat_keys::Action::Older
-                                     ? g_history.older(current) : g_history.newer(current);
+                                     ? g_history.older(source) : g_history.newer(current);
         // The widget may still expose the original draft even after the
         // last SetText was successfully displayed. Comparing to that stale
         // snapshot caused Down to skip restoring the draft. Use the last
@@ -283,6 +297,7 @@ void history_after(void* widget, void* result, bool hud) {
     // unrelated/uninitialised trailing bytes and miss a valid submission.
     uint8_t event = 0;
     if (game_read(result, &event) && event != 0) {
+        (hud ? g_hud_draft : g_social_draft).clear(); // next edit session starts fresh
         // The actual chat string is the caller-owned buffer, verified in
         // both HUD and Social. Do not submit the private edit's invalid
         // internal/control bytes to the history model.
@@ -331,6 +346,16 @@ void history_after(void* widget, void* result, bool hud) {
     }
     if (!editing(state)) return;
     g_editing_in_frame = true;
+    // Refresh the live draft ONLY after TextInputProcess synchronizes the
+    // caller-owned widget, and never while history browsing is active.
+    if (!g_history.browsing()) {
+        std::string fresh;
+        if (widget_text(widget, &fresh) &&
+            (fresh.empty() || chat_history::History::valid(fresh)))
+            (hud ? g_hud_draft : g_social_draft).observe(fresh);
+        else
+            (hud ? g_hud_draft : g_social_draft).clear();
+    }
     bool& logged = hud ? g_hud_focus_logged : g_social_focus_logged;
     if (!logged) {
         logged = true;
@@ -346,7 +371,7 @@ void __fastcall hk_input(void* widget, void* result, const GameText* label, uint
     const bool social = caller == g_social_ret;
     const bool scoped = hud || social;
     if (g_history_on.load(std::memory_order_relaxed) && scoped)
-        history_before(widget);
+        history_before(widget, hud);
     g_input.call<void>(widget, result, label, mode);
     if (hud && !g_hud_seen.exchange(true))
         logf(KILN_LOG_INFO, "ui: chat input probe: native HUD chat call observed (call-site confirmation)");
@@ -402,6 +427,8 @@ void chat_input_frame_end() {
         const bool was_browsing = g_history.browsing();
         g_history.edited();
         g_last_applied.clear();
+        g_hud_draft.clear();
+        g_social_draft.clear();
         g_manual_text_edit.store(false, std::memory_order_release);
         if (was_browsing && g_trace_on.load(std::memory_order_relaxed))
             logf(KILN_LOG_INFO, "ui: chat history trace: navigation reset after sustained loss of chat focus");
