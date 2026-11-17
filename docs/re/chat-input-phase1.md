@@ -1,5 +1,33 @@
 # Native chat input: phase-1 history groundwork
 
+## Latest acceptance: HUD and Social draft restoration PASS (17 November 2026)
+
+The tester rebuilt the fork experiment at commit `9950aed` and **confirmed visually that Up/Down and unsent draft restoration work in both HUD and Social chat**. The game trace at 12:14 corroborates the successful capture and application:
+
+```text
+capture draft from_postcall=1 bytes=5 precall_bytes=0
+recall older entries=1 changed=1 browsing_before=0 browsing_after=1 stale_widget=0
+engine edit replacement verified (widget readback)
+recall newer entries=1 changed=1 browsing_before=1 browsing_after=0 stale_widget=1
+engine edit replacement verified (widget readback)
+```
+
+The five-byte post-call snapshot confirms that the earlier failure was due
+to reading an outdated/empty pre-call chat widget when first saving the draft.
+This **closes the HUD/Social Up–Down/draft-restoration defect** for the tested
+Enshrouded client build 26430625. Previous failed traces below are retained
+as diagnostic history, not the current result.
+
+**Still pending full acceptance:** confirm manual typing over a recalled
+command resets browsing; Up/Down does not steal gameplay or unrelated text
+input; Escape and Alt+Tab behave normally; and persisted slash-command history
+survives a complete game restart without persisting normal chat or sensitive
+commands. The earlier `persisted=1` trace confirms the save path was
+invoked, **not** that reload has been verified. The experiment remains
+opt-in (`KILN_CHAT_HISTORY=1`) and PR #2 remains **draft/unmerged**. Do not
+touch upstream `frostdev-ops/kiln`.
+
+
 ## 12:06 runtime: Down applies an empty draft — post-call capture correction
 
 **Observed on 17 November 2026:** HUD Up visibly restored a saved command;
