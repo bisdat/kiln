@@ -31,7 +31,7 @@ int main() {
     assert(h.submit("/third"));
     assert(h.persisted() == std::vector<std::string>({"/second", "/third"}));
     assert(!h.submit("/third"));  // repeated adjacent command
-    assert(!h.submit("plain"));
+    assert(h.submit("plain"));  // eviction of a persisted entry changes the disk snapshot
     assert(h.submit("/fourth"));
     assert(h.persisted() == std::vector<std::string>({"/third", "/fourth"}));
     assert(History::valid("/say café"));
