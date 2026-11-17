@@ -19,7 +19,7 @@ with tempfile.TemporaryDirectory(prefix='kiln-sf-fixtures-', dir=build.parent) a
     env.pop('DISPLAY', None)
     MISSING = object()  # menu_key: no toggleKey in ShroudForge's config (None writes a JSON null)
     only = os.environ.get('KILN_SF_ONLY', '')  # run only the cases whose name starts with this
-    def case(name, installed='good', bundled='good', early=False, fault=False, linked_layout=False, busy=False, reservation=None, extra_env=None, verify=None, helper=False, menu_off=False, self_hosted=False, menu_key=MISSING, runtime='runtime'):
+    def case(name, installed='good', bundled='good', early=False, fault=False, linked_layout=False, linked_game=False, busy=False, reservation=None, extra_env=None, verify=None, helper=False, menu_off=False, self_hosted=False, menu_key=MISSING, runtime='runtime'):
         if only and not name.startswith(only):
             return
         game = root / name
@@ -27,6 +27,11 @@ with tempfile.TemporaryDirectory(prefix='kiln-sf-fixtures-', dir=build.parent) a
             layout = root / (name + '-steam-library')
             layout.symlink_to(root, target_is_directory=True)
             game = layout / name
+        if linked_game:
+            # the game folder itself is a link (a Steam library moved behind a junction; inbox 45): the player's layout
+            real = root / (name + '-real')
+            real.mkdir()
+            game.symlink_to(real, target_is_directory=True)
         for kind, mode in [('shroudforge', installed), ('kiln/plugins/shroudforge', bundled)]:
             dest = game / kind
             dest.mkdir(parents=True)
@@ -76,7 +81,7 @@ with tempfile.TemporaryDirectory(prefix='kiln-sf-fixtures-', dir=build.parent) a
             assert status['mode'] == 'self-hosted' and not log.exists(), (name, status)
             assert status.get('menu') != 'kiln', status
             loader = status['loaderFile']
-            line = ("shroudforge: its own loader (" + loader + ") runs it; Kiln's profile does not decide ShroudForge mods this start").encode()
+            line = ("shroudforge: its own loader (" + loader + ") runs it. Kiln's adapter steps aside. Managed package switches still apply.").encode()
             assert result.stdout.count(line) == 1, result.stdout
             assert loader and loader in status['reason'], status
             print('PASS', name)
@@ -116,6 +121,7 @@ with tempfile.TemporaryDirectory(prefix='kiln-sf-fixtures-', dir=build.parent) a
     case('early-reservation', installed='corrupt', early=True)
     case('faulted-update', installed='corrupt', fault=True)
     case('linked-layout', installed='corrupt', linked_layout=True)
+    case('linked-game-folder', installed='corrupt', linked_game=True)
     case('standalone-busy-install', busy=True)
     case('closed-reservation', installed='corrupt', early=True, reservation='DENY_RESERVATION')
     case('short-eml-table', installed='corrupt', early=True, reservation='SHORT_EML_TABLE')

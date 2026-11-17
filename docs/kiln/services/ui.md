@@ -32,3 +32,33 @@ Kiln.Ui calls it with the count of mods loaded this start (< 0: not known yet, n
 unless the player hid the line (setting `mainMenuFooter`). kiln.ui then draws "Kiln &lt;version&gt; - &lt;N&gt; Mods
 Loaded" above the game's build number, in place of XHL-Core's footer line ([the guide](../ui.md#kilns-line-in-the-main-menus-footer-since-020-dev2911)).
 Any thread; the next UI frame follows it. A native mod has no reason to call it.
+
+## Overlay images from pixels and a factory screen's station (0.2.0-dev.29.15)
+
+Three more slots are appended after `menu_footer`; the service version stays 7. On x64 `image_load_rgba` is at byte offset
+904, `screen_target` at 912, `image_state` at 920, and the table is 928 bytes. Readers check `header.size` through the member
+they call and that its pointer is non-null; the managed mirrors are `UiNative.TableImageRgba`, `UiNative.TableScreenTarget`
+and `UiNative.TableImageState`.
+
+- `image_load_rgba(owner, rgba, width, height)`: `image_load` with pixels instead of a PNG (width * height * 4 bytes, R G B A,
+  rows top down, straight alpha; 1..4096 a side; copied). The same kind of image: `image`, `image_button`, `image_free`, kiln.render's
+  image draws. 0 when the overlay does not draw or the size is out of range. Kiln.Ui loads the game's item icons with it
+  (kiln.assets' `texture_rgba` decodes them; [the guide](../ui.md#item-icons-and-names)).
+- `screen_target()`: while the open screen is a factory screen (`hud_screen` 28, FactoryCrafting), the entity it is about
+  (play data `+play.target`, 0x2c50 on client 26430625: the station's entity id), else 0; also 0 when the constant
+  `ui/play.target` did not resolve (kiln.log says so once at start). Any thread. A factory screen runs no crafting builder, so
+  `KilnUiScreen.crafting` stays 0 there; its workshop is `KilnUiScreen.interaction` (play data +0x2e48). `KilnUiScreen`
+  itself does not grow: kiln.ui.values' structs embed it. A change of the target while the screen stays open counts as a
+  change of the screen (subscribers are called). Kiln.Ui reports the screen as a `CraftingScreen` with `IsFactory`
+  and `Station` ([the guide](../ui.md#crafting-menus)).
+- `image_state(image)`: `KILN_UI_IMAGE_WAITING` (loaded, its texture not uploaded yet), `READY` (uploaded with its descriptor
+  set: drawn), `FAILED` (uploaded without one: never drawn; free it), `UNKNOWN` (no such image). Any thread.
+
+**Image budget** (`native/services/ui/image_budget.h`, every image of `image_load` and `image_load_rgba`): each image is one
+texture with one descriptor set from the overlay's ImGui Vulkan pool, which holds 1024 sets (it held 64 before
+0.2.0-dev.29.15). Kiln lets 960 images exist at once (freed ones count until their texture is destroyed); past that both loads
+answer 0 (kiln.log says so once). ImGui keeps the other 64 for its fonts. At most 8 new textures are uploaded a frame (the
+backend submits and waits for each); the rest wait for the next frames. A set the pool cannot give leaves the texture without
+one: kiln.log says so once, the image's state is FAILED, and `image`, `image_button` and kiln.render's image draws draw
+nothing for it (keeping its place; a button stays clickable), as they do for an image still WAITING. Vulkan errors of the
+overlay's backend are logged once per error code. Kiln.Ui's item icon cache keeps at most 256 images.

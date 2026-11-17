@@ -226,6 +226,58 @@ internal static unsafe class UiValuesNative
         }
     }
 
+    // ---- appended in 0.2.0-dev.29.15: ui.gemforge.sources' gemforge_sources(owner, rows, count, payers, payer_count) ----
+    [StructLayout(LayoutKind.Sequential)]
+    public struct SourcesTable
+    {
+        public SocketsTable Base;
+        public delegate* unmanaged[Cdecl]<ulong, GemSourceRow*, uint, GemSourcePayer*, uint, int> GemForgeSources;
+        public delegate* unmanaged[Cdecl]<GemSourcesState*, int> GemForgeSourcesState;
+    }
+
+    /// <summary>KilnUiGemForgeSource (48 bytes).</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GemSourceRow
+    {
+        public uint Size, Page;
+        public byte Slot, Rarity, Group, Reserved0;
+        public uint Item, Pide, Level, Reserved1, Reserved2;
+        public ulong Token, ExpiresMs;
+    }
+
+    /// <summary>KilnUiGemForgePayer (16 bytes).</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GemSourcePayer
+    {
+        public uint Size;
+        public byte Group, PlayerFirst, Reserved0, Reserved1;
+        public uint Item, Count;
+    }
+
+    /// <summary>KilnUiGemForgeSourcesState (200 bytes).</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GemSourcesState
+    {
+        public uint Size;
+        public byte Installed, Off, Reserved0, Reserved1;
+        public uint Rows, WantedCount;
+        public fixed uint Wanted[8];
+        public ulong Injected, Resolved, Priced;
+        public fixed byte Why[128];
+    }
+
+    /// <summary>The table with gemforge_sources, or null (a server, an older native service).</summary>
+    public static SourcesTable* SourcesT
+    {
+        get
+        {
+            var t = T;
+            if (t == null || t->Header.Size < sizeof(SourcesTable)) return null;
+            var s = (SourcesTable*)t;
+            return s->GemForgeSources != null && s->GemForgeSourcesState != null ? s : null;
+        }
+    }
+
     public static GemForgeTable* GemForgeT
     {
         get

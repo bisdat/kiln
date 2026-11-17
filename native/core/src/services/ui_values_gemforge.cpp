@@ -413,6 +413,8 @@ KilnResult gemforge_copy(KilnOwner owner, uint64_t session, uint64_t frame, Kiln
     for (size_t i = 0; i < out->count; ++i) std::memcpy(reinterpret_cast<uint8_t*>(rows) + i * stride, &pick->rows[i], sizeof(*rows));
     return KILN_OK;
 }
+bool gemforge_grid_hooked() { return g_gem_grid_next != nullptr; }
+
 void gemforge_reset_for_tests() {
     auto& r = gem_ring(); std::lock_guard lk(r.mu);
     r.latest.reset(); r.previous.reset(); r.generation = 0; r.drawing = false;

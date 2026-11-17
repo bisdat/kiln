@@ -555,16 +555,26 @@ pub struct PlaceReport {
 /// Refuse symlinks (including dangling links and Windows junctions) from `root` down to `path`.
 ///
 /// `root` is the folder Kiln manages: the data dir, the game or server folder, a Library entry or a staging folder.
-/// `root` itself and every existing component below it must be a real folder or file. Folders ABOVE `root` belong to the
-/// system and the player and may be links: Fedora Atomic and Bazzite make `/home` a link to `/var/home`, and Steam
-/// libraries are often reached through links. A `path` that is not under `root` gets the strict check from its first
-/// component on, so a caller that passes the wrong root only becomes stricter. Parent traversal (`..`) is refused
+/// Every existing component below `root` must be a real folder or file. `root` itself and the folders ABOVE it belong to
+/// the system and the player and may be links: Fedora Atomic and Bazzite make `/home` a link to `/var/home`, and a
+/// Steam library or game folder that was moved is often a link or junction to where it is now. `root` itself is checked
+/// only when it is the `path` asked about (a caller asking whether that folder is a link), or when it is a bare drive
+/// (`C:`, which means that drive's current directory). A `path` that is not under `root` gets the strict check from its
+/// first component on, so a caller that passes the wrong root only becomes stricter. Parent traversal (`..`) is refused
 /// anywhere in `path`.
 ///
 /// Mutation callers check the parent before creating missing components as well as the leaf.
 pub fn refuse_symlink_path(root: &Path, path: &Path) -> Result<()> {
     // The prefix length (in components) from which links are refused.
-    let first_checked = if path.starts_with(root) { root.components().count() } else { 0 };
+    let root_len = root.components().count();
+    let bare_drive = matches!(root.components().last(), Some(std::path::Component::Prefix(_)));
+    let first_checked = if !path.starts_with(root) {
+        0
+    } else if path.components().count() > root_len && !bare_drive {
+        root_len + 1
+    } else {
+        root_len
+    };
     let mut prefix = PathBuf::new();
     let mut components = path.components().enumerate().peekable();
     while let Some((index, component)) = components.next() {

@@ -1,0 +1,11 @@
+{
+  "id": "boot-structure-half",
+  "name": "resource patch structure lab test, a patch that fails when it is applied",
+  "version": "0.1.0",
+  "apiVersion": "0.2",
+  "side": "server",
+  "clients": "none",
+  "boot": true,
+  "advanced": true,
+  "description": "A data-only mod with one resource patch that passes prepare and fails when it is written: it removes SpawnTime from LootPickup_Gravity_Aloe and sets a field of PickupItemZone, which Aloe has not got. The whole patch is left out (SpawnTime stays) and boot.json names it once; boot-structure-test checks both."
+}

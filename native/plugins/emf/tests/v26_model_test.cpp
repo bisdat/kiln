@@ -65,16 +65,24 @@ static void test_table() {
     const uint32_t sizes[] = {736, 752, 776, 808, 864, 920, 952, 992, 1000, 1016, 1040, 1064, 1088};
     for (uint32_t v = 28; v <= 40; ++v) CHECK(api_size_for(v) == sizes[v - 28]);
     // v41 (EMF 0.6.10) and v42 (0.6.11): the version only, the table stays v40's
-    CHECK(api_size_for(41) == 1088 && api_size_for(42) == 1088 && api_size_for(42) == sizeof(EmfApi));
-    CHECK(api_size_for(43) == 0);
-    CHECK(EMF_API_VERSION == 42);
-    // the "emf" gate of mod.json (mods.cpp refuses a requirement above the table's version): a mod of EMF 0.6.11 loads
-    CHECK(api_requirement(41) <= EMF_API_VERSION && api_requirement(42) <= EMF_API_VERSION &&
-          api_requirement(43) > EMF_API_VERSION);
+    CHECK(api_size_for(41) == 1088 && api_size_for(42) == 1088);
+    // v43 (EMF 0.6.13) to v46 (0.6.14): player_permissions, then three block functions, v45 the version only, then
+    // three villager move functions (EMF's api_sizes.h at 0.6.14)
+    CHECK(api_size_for(43) == 1096 && api_size_for(44) == 1120 && api_size_for(45) == 1120 && api_size_for(46) == 1144);
+    CHECK(api_size_for(46) == sizeof(EmfApi));
+    CHECK(api_size_for(47) == 0);
+    CHECK(EMF_API_VERSION == 46);
+    // the "emf" gate of mod.json (mods.cpp refuses a requirement above the table's version): a mod of EMF 0.6.14 loads
+    for (uint64_t v = 41; v <= 46; ++v) CHECK(api_requirement(v) <= EMF_API_VERSION);
+    CHECK(api_requirement(47) > EMF_API_VERSION);
     CHECK(kRemoveBuildingV36Size == 144 && kPathQueryV37Size == 52 && kEnemyOrderV39Size == 120 && kMoveOrderV40Size == 128);
     // the fields v41 and v42 appended (read by EMF only when a request's or result's `size` covers them)
     CHECK(sizeof(EmfMoveOrder) == 136 && offsetof(EmfMoveOrder, stuck_seconds) == 128 && EMF_MOVE_PEACEFUL_ALL == 0x4u);
     CHECK(kPathResultV37Size == 20 && sizeof(EmfPathResult) == 32 && offsetof(EmfPathResult, doors) == 24);
+    // v44's and v45's structs, and v46's hold_seconds in pad2's place
+    CHECK(kBreakBlocksV44Size == 160 && sizeof(EmfBreakBlocks) == 160 && kBreakResultV44Size == 20);
+    CHECK(kBlockInfoV44Size == 40 && kBlockInfoV45Size == 44 && sizeof(EmfBlockInfo) == 44);
+    CHECK(offsetof(EmfMoveOrder, hold_seconds) == 132 && EMF_MOVE_HOLD == 0x8u && EMF_BREAK_WORLD == 0x4u);
     // the hashes are kiln.world's component_hash: FNV-1a of "keen::ecs::<Name>"
     CHECK(fnv("keen::ecs::ScaleComponent") == kScaleComponent);
     CHECK(fnv("keen::ecs::InteractionPause") == kInteractionPause);

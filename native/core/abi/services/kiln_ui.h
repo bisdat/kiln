@@ -7,7 +7,8 @@
  * the game window's own input records for native plugins (subscribe_window_input); v6 appends the mods' entries in the
  * game's menus; v7 appends subscribe_key_ex, key callbacks that also get mouse presses.
  *
- * The size-guarded tail after v7 appends set_next_window_size_constraints.
+ * The size-guarded tail after v7 appends set_next_window_size_constraints, menu_footer (0.2.0-dev.29.11) and
+ * image_load_rgba, screen_target and image_state (0.2.0-dev.29.15).
  *
  * How (docs/re/client-render.md):
  *  - The game loads vulkan-1.dll at run time and presents with vkQueuePresentKHR on queue family 0 (no static Vulkan
@@ -198,6 +199,14 @@ enum {
     KILN_UI_ENTRY_ATTENTION = 2u,  /* the game's attention marker (pause menu only) */
 };
 
+/* image_state (size-guarded tail, 0.2.0-dev.29.15) */
+enum {
+    KILN_UI_IMAGE_UNKNOWN = 0,
+    KILN_UI_IMAGE_WAITING = 1,
+    KILN_UI_IMAGE_READY = 2,
+    KILN_UI_IMAGE_FAILED = 3,
+};
+
 /* menu_footer flags (size-guarded tail after set_next_window_size_constraints) */
 #define KILN_UI_FOOTER_SHOWN 1u /* draw Kiln's line in the main menu's footer (else the game's footer as it was) */
 
@@ -243,7 +252,8 @@ typedef struct KilnUiScreen {
     uint8_t crafting;     /* KILN_UI_CRAFTING_* */
     uint8_t available;    /* the game-UI hooks run (feature ui.screens) */
     uint32_t interaction; /* play data +0x2e48: for a crafting station its keen::WorkshopId (seen at run time: the
-                             Workbench gives 0x4da88f73); other uses not known; 0 = none */
+                             Workbench gives 0x4da88f73; the game's crafting cases read it as the station's workshop, also
+                             for a factory screen's station, not seen at run time); other uses not known; 0 = none */
     uint32_t station;     /* the crafting menu's station: its keen::WorkshopId (0 = the player's own crafting) */
     uint32_t workshop;    /* keen::WorkshopId of the crafting menu (0 = the player's own crafting) */
     uint32_t recipe;      /* recipe id selected in the crafting menu, 0 = none */
@@ -858,6 +868,27 @@ typedef struct KilnUiApi {
      * a count and SHOWN, and whenever the line is hidden or faulted, the game draws its footer as it always did (with
      * another mod's line there). Any thread; the next frame follows it. */
     void(KILN_CALL* menu_footer)(int32_t mods, uint32_t flags);
+    /* Additive size-guarded tail (0.2.0-dev.29.15; check header.size >= offsetof(KilnUiApi, image_load_rgba) +
+     * sizeof(void*) and the pointer): image_load with pixels instead of a PNG. `rgba` is width * height * 4 bytes (R, G, B,
+     * A, rows top down, straight alpha; copied), 1..4096 a side. The same kind of image as image_load's: drawn with image /
+     * image_button, freed with image_free, uploaded at the next frame. Any thread. 0 = refused (no overlay drawing, a size
+     * out of range, NULL). Kiln.Ui loads the game's own item icons with it (kiln.assets texture_rgba decodes them). */
+    KilnHandle(KILN_CALL* image_load_rgba)(KilnOwner owner, const uint8_t* rgba, uint32_t width, uint32_t height);
+    /* Additive size-guarded tail (0.2.0-dev.29.15; check header.size >= offsetof(KilnUiApi, screen_target) + sizeof(void*)
+     * and the pointer): the entity the open screen is about, as of the last completed UI frame, while it is a factory screen
+     * (hud_screen 28, FactoryCrafting: a kiln's, a smelter's...): the station's entity id (play.target; replicated ids are the
+     * server's), else 0. 0 too on a build where the constant ui/play.target did not resolve. A factory screen runs no crafting
+     * builder (docs/re/game-ui.md section 5), so KilnUiScreen.crafting stays 0 there; its workshop is KilnUiScreen.interaction.
+     * Any thread. */
+    uint32_t(KILN_CALL* screen_target)(void);
+    /* Additive size-guarded tail (0.2.0-dev.29.15; check header.size >= offsetof(KilnUiApi, image_state) + sizeof(void*) and
+     * the pointer): KILN_UI_IMAGE_* of an image from image_load / image_load_rgba. WAITING: its texture is not uploaded yet
+     * (a new image waits a frame or more: at most 8 are uploaded a frame); READY: uploaded with its descriptor set, drawn;
+     * FAILED: the backend uploaded it without a descriptor set (the overlay's pool was full), it is never drawn: free it;
+     * UNKNOWN: no such image. image / image_button draw nothing (keeping the place) until READY. Any thread.
+     * Kiln lets at most 960 images exist at once (the pool holds 1024 sets: ImGui keeps the rest for its fonts); past that
+     * image_load and image_load_rgba answer 0. */
+    int32_t(KILN_CALL* image_state)(KilnHandle image);
 } KilnUiApi;
 
 /* ====================================================================================================================

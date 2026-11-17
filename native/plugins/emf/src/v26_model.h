@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// kiln-emf: the parts of EmfApi v22-v26 (and the table sizes up to v42) that need no game and no Windows, so host tests (tests/run.sh) run them with
+// kiln-emf: the parts of EmfApi v22-v26 (and the table sizes up to v46) that need no game and no Windows, so host tests (tests/run.sh) run them with
 // fakes: the table layout per version, mod windows (v24/v26 definitions as EMF copies them), the component policy and
 // the change queue (v23), E-prompt offers (v25) and picture paths (v26). The glue onto Kiln's services is in
 // api_level.cpp, api_components.cpp and api_windows.cpp.
@@ -58,12 +58,24 @@ constexpr uint32_t kApiV40Size = KEMF_FIELD_END(EmfApi, enemy_moving);
 // v41: EmfMoveOrder.stuck_seconds and EMF_MOVE_PEACEFUL_ALL; v42: EmfPathResult.doors.
 constexpr uint32_t kApiV41Size = kApiV40Size;
 constexpr uint32_t kApiV42Size = kApiV40Size;
+// v43 (EMF 0.6.13) to v46 (0.6.14), EMF's api_sizes.h at 0.6.14: v43 player_permissions; v44 break_blocks, block_at,
+// find_wall; v45 the version only (EmfBlockInfo.world, EMF_BREAK_WORLD); v46 villager_move, villager_move_cancel,
+// villager_moving (and EmfMoveOrder.hold_seconds where pad2 was, EMF_MOVE_HOLD).
+constexpr uint32_t kApiV43Size = KEMF_FIELD_END(EmfApi, player_permissions);
+constexpr uint32_t kApiV44Size = KEMF_FIELD_END(EmfApi, find_wall);
+constexpr uint32_t kApiV45Size = kApiV44Size;
+constexpr uint32_t kApiV46Size = KEMF_FIELD_END(EmfApi, villager_moving);
 // The smallest `size` each v36-v40 request struct may carry (the end of its last field in the version that added it).
 constexpr uint32_t kRemoveBuildingV36Size = KEMF_FIELD_END(EmfRemoveBuilding, why);
 constexpr uint32_t kPathQueryV37Size = KEMF_FIELD_END(EmfPathQuery, max_nodes);
 constexpr uint32_t kEnemyOrderV39Size = KEMF_FIELD_END(EmfEnemyOrder, why);
 constexpr uint32_t kMoveOrderV40Size = KEMF_FIELD_END(EmfMoveOrder, why);
 constexpr uint32_t kPathResultV37Size = KEMF_FIELD_END(EmfPathResult, length);  // before v42's doors
+// v44's structs: the request (refused untouched below this), its result, and a block's facts before v45's `world`
+constexpr uint32_t kBreakBlocksV44Size = KEMF_FIELD_END(EmfBreakBlocks, why);
+constexpr uint32_t kBreakResultV44Size = KEMF_FIELD_END(EmfBreakResult, dropped);
+constexpr uint32_t kBlockInfoV44Size = KEMF_FIELD_END(EmfBlockInfo, z);
+constexpr uint32_t kBlockInfoV45Size = KEMF_FIELD_END(EmfBlockInfo, world);
 constexpr uint32_t kComponentChangeV23Size = KEMF_FIELD_END(EmfComponentChange, user);
 constexpr uint32_t kWindowDefV24Size = KEMF_FIELD_END(EmfWindowDef, user);
 constexpr uint32_t kUiWidgetV24Size = KEMF_FIELD_END(EmfUiWidget, pad);
@@ -81,10 +93,16 @@ static_assert(kApiV28Size == 736 && kApiV29Size == 752 && kApiV30Size == 776 && 
               "EmfApi v28-v32 sizes");
 static_assert(kApiV33Size == 920 && kApiV34Size == 952 && kApiV35Size == 992 && kApiV36Size == 1000 && kApiV37Size == 1016,
               "EmfApi v33-v37 sizes");
-static_assert(kApiV38Size == 1040 && kApiV39Size == 1064 && kApiV40Size == 1088 && sizeof(EmfApi) == kApiV40Size,
-              "EmfApi v38-v40 sizes");
-static_assert(kApiV41Size == 1088 && kApiV42Size == 1088 && sizeof(EmfApi) == kApiV42Size && EMF_API_VERSION == 42,
-              "EmfApi v41-v42: the version only");
+static_assert(kApiV38Size == 1040 && kApiV39Size == 1064 && kApiV40Size == 1088, "EmfApi v38-v40 sizes");
+static_assert(kApiV41Size == 1088 && kApiV42Size == 1088, "EmfApi v41-v42: the version only");
+static_assert(offsetof(EmfApi, player_permissions) == kApiV42Size && kApiV43Size == 1096, "EmfApi v43 appends player_permissions");
+static_assert(offsetof(EmfApi, break_blocks) == kApiV43Size && offsetof(EmfApi, block_at) == 1104 &&
+                  offsetof(EmfApi, find_wall) == 1112 && kApiV44Size == 1120,
+              "EmfApi v44 appends break_blocks, block_at, find_wall");
+static_assert(kApiV45Size == 1120 && offsetof(EmfApi, villager_move) == kApiV45Size &&
+                  offsetof(EmfApi, villager_move_cancel) == 1128 && offsetof(EmfApi, villager_moving) == 1136 &&
+                  kApiV46Size == 1144 && sizeof(EmfApi) == kApiV46Size && EMF_API_VERSION == 46,
+              "EmfApi v45 (the version only) and v46 (villager_move, villager_move_cancel, villager_moving)");
 static_assert(offsetof(EmfApi, chat_tell_ex) == 760 && offsetof(EmfApi, hit_rule_add) == 792 &&
                   offsetof(EmfApi, buff_apply) == 840 && offsetof(EmfApi, world_to_screen) == 896,
               "EmfApi v30-v33 slots");
@@ -111,9 +129,16 @@ static_assert(kPathQueryV37Size == 52 && sizeof(EmfPathQuery) == 52 && offsetof(
 static_assert(kEnemyOrderV39Size == 120 && sizeof(EmfEnemyOrder) == 120 && offsetof(EmfEnemyOrder, why) == 24,
               "EmfEnemyOrder layout (v39)");
 static_assert(kMoveOrderV40Size == 128 && sizeof(EmfMoveOrder) == 136 && offsetof(EmfMoveOrder, stuck_seconds) == 128 &&
-                  offsetof(EmfMoveOrder, points) == 16 &&
+                  offsetof(EmfMoveOrder, hold_seconds) == 132 && offsetof(EmfMoveOrder, points) == 16 &&
                   offsetof(EmfMoveOrder, why) == 32,
-              "EmfMoveOrder layout (v40; v41 stuck_seconds)");
+              "EmfMoveOrder layout (v40; v41 stuck_seconds; v46 hold_seconds where pad2 was)");
+static_assert(kBreakBlocksV44Size == 160 && sizeof(EmfBreakBlocks) == 160 && offsetof(EmfBreakBlocks, damage) == 28 &&
+                  offsetof(EmfBreakBlocks, materials) == 56 && offsetof(EmfBreakBlocks, why) == 64,
+              "EmfBreakBlocks layout (v44)");
+static_assert(kBreakResultV44Size == 20 && sizeof(EmfBreakResult) == 20, "EmfBreakResult layout (v44)");
+static_assert(kBlockInfoV44Size == 40 && offsetof(EmfBlockInfo, damage) == 24 && offsetof(EmfBlockInfo, x) == 28 &&
+                  kBlockInfoV45Size == 44 && sizeof(EmfBlockInfo) == 44 && offsetof(EmfBlockInfo, world) == 40,
+              "EmfBlockInfo layout (v44; v45 world)");
 static_assert(kComponentChangeV23Size == 48 && sizeof(EmfComponentChange) == 48, "EmfComponentChange layout (v23)");
 static_assert(kWindowDefV24Size == 72 && sizeof(EmfWindowDef) == 72 && offsetof(EmfWindowDef, cb) == 56,
               "EmfWindowDef layout (v24)");

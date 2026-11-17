@@ -23,6 +23,7 @@
 #include "../src/services/ui_values_slots.cpp"
 #include "../src/services/ui_values_gemforge.cpp"
 #include "../src/services/ui_values_sockets.cpp"
+#include "../src/services/ui_values_sources.cpp"
 #include "../src/services/ui_values_lines.cpp"
 
 using namespace kiln::uivalues;
@@ -2440,12 +2441,14 @@ void write_layout_validation() {
 
 #include "ui_values_gemforge_test.inc"
 #include "ui_values_sockets_test.inc"
+#include "ui_values_sources_test.inc"
 }  // namespace
 
 int main() {
     fake::install();
     gemforge_tests();
     sockets_tests();
+    sources_tests();
     runtime_write_faults();
     write_layout_validation();
     unknown_layout();

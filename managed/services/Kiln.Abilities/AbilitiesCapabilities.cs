@@ -254,6 +254,7 @@ internal static class AbilitiesStartup
         AbilitiesCaps.Ensure();
         GemsCaps.Ensure();  // gem wave G1: gems.read, gems.triggers
         GemCrafting.EnsureCaps();  // gem wave G3: gems.craft
+        GemSources.Start();        // 0.2.0-dev.29.15 (issue 61): the channel kiln:gemsources; a client's forge screen watch
         GemPlaceholders.Start();   // gem wave: a removed mod's trigger gems run Kiln's trigger program, not none
     }
 }

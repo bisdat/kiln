@@ -6,7 +6,7 @@
 //    makes them return false without running, i.e. the game's own "could not build" path.
 //  - TerraformImpact: the impact function of impact_nodes::Terraforming; a zone makes it return the impact error result
 //    it returns itself when an argument is missing (code 0x18), before any voxel or inventory work.
-//  - CraftRecipe: observed only (result code and recipe).
+//  - CraftRecipe: observed only (result code and recipe); an automated station's cycle once, at its end (craft_phase.h).
 //  - QueueSpawn: called by random_spawner (identified by the call site, kiln.hooks caller()); a zone makes it report "no entity"
 //    (*out = 0), which the spawner handles as it does the engine refusing a template.
 #ifdef _WIN32
@@ -230,10 +230,10 @@ void read_recipe(void* p) {
 
 int32_t __fastcall hk_craft(uint32_t* ctx, const uint8_t* recipe) {
     const int32_t rc = h_craft.call<int32_t>(ctx, recipe);
-    // Automated stations (factory_station: operator == station, not a player) retry every step; report their
-    // successes only. Craft requests (handle_crafting_events) and players report every outcome.
-    const bool factory = ctx && ctx[0] == ctx[1] && !(ctx[0] >= 1 && ctx[0] <= 1023);
-    if (has_subscribers(KILN_GAMEPLAY_CRAFTED) && ctx && recipe && (rc == 0 || !factory)) {
+    // Automated stations (factory_station: operator == station, not a player) retry every step and call the core twice
+    // per cycle (inputs at the start, outputs at the end): report the end of a successful cycle only. Craft requests
+    // (handle_crafting_events) and players report every outcome (craft_phase.h).
+    if (has_subscribers(KILN_GAMEPLAY_CRAFTED) && ctx && recipe && craft_reported(ctx, rc, L.craft_phase)) {
         Record r = make(KILN_GAMEPLAY_CRAFTED, 0, ctx[0]);
         r.target = ctx[1];
         r.id2 = ctx[2];

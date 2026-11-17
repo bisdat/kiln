@@ -20,7 +20,7 @@ internal static unsafe class ItemCatalog
 
     private static Dictionary<uint, Shipped> ShippedNames()
     {
-        if (_shipped != null) return _shipped;
+        if (Volatile.Read(ref _shipped) is { } done) return done;
         var d = new Dictionary<uint, Shipped>();
         using var s = typeof(ItemCatalog).Assembly.GetManifestResourceStream("Kiln.Items.items.tsv");
         if (s != null)
@@ -34,8 +34,12 @@ internal static unsafe class ItemCatalog
                 d[id] = new Shipped(id, f[1], f[2], f.Length > 3 ? f[3] : "");
             }
         }
-        return _shipped = d;
+        Volatile.Write(ref _shipped, d);
+        return d;
     }
+
+    /// <summary>The English name of a game item in the catalog Kiln ships (Data/items.tsv), or null. Any thread.</summary>
+    public static string? ShippedName(uint id) => ShippedNames().TryGetValue(id, out var s) && s.Name.Length > 0 ? s.Name : null;
 
     public static IReadOnlyList<ItemInfo> Load(ItemsNative.Table* t)
     {

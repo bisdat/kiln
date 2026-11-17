@@ -46,7 +46,7 @@ copied); copies NuGet dependencies next to the mod (they load into the mod's own
 | `KilnModName` | `AssemblyName` | `name` |
 | `Version` | 1.0.0 | `version` |
 | `Authors`, `Description`, `PackageLicenseExpression`, `PackageProjectUrl` | | `authors`, `description`, `license`, `url` |
-| `KilnApiVersion` | the SDK's (0.2.5) | `apiVersion` |
+| `KilnApiVersion` | the SDK's (0.2.7) | `apiVersion` |
 | `KilnSide` | server; `both` when `KilnServices` has `Blocks` | `side` |
 | `KilnClients` | from the side: server `none`, otherwise `mod`; with `Blocks` in `KilnServices`, what the blocks need ([blocks.md](blocks.md)) | `clients`: what joining players need (`none`, `kiln`, `mod`; manifest.md) |
 | `KilnEntryType` | | `entryType` |
@@ -54,7 +54,7 @@ copied); copies NuGet dependencies next to the mod (they load into the mod's own
 | `KilnAdvanced` | false | `advanced` |
 | `KilnFeatures`, `KilnExports` | | `features`, `exports` (`;` lists) |
 | `KilnTestsAutoRun`, `KilnTestTimeoutSeconds` | | `tests` |
-| `KilnServices` | | (references) Players, Chat, World, Items, Spawn, Time, Settings, … and `Testing` |
+| `KilnServices` | | (references) Players, Chat, World, Items, Spawn, Time, Settings, … and `Testing`; `Stations` (since 0.2.0-dev.29.15) references Kiln.Blocks for `Stations` and `Bases` alone, without `Blocks`' side and clients defaults ([stations.md](../services/stations.md)). Names may be separated by `;`, `,`, spaces or line breaks; `Stations`, `Testing`, `Game` and `Blocks` are recognised in any case (since 0.2.0-dev.29.15) |
 | `KilnServer` / `KilnModsDir` | | deploy target: a server folder / its `kiln/mods` |
 | `KilnReload` | false | KilnDeploy also writes `kiln/control/deploy-<id>.cmd` = `reload <id>` |
 | `KilnPackageOutputPath` | next to the output folder | where KilnPack writes the zip |

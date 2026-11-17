@@ -81,7 +81,14 @@ IReadOnlyList<EntityId> chests = Items.FindInventories(InventoryKinds.Containers
   `AvailableSlots`, `IsPlayer`, `Count(item)`, `FreeSlots()`.
 - Catalog: `All`, `Get(id)`, `Lookup(nameOrId)`, `Search(text)`; `ItemInfo` = id, debug `Name`, `DisplayName`, `Label`,
   `MaxStack`, `Category`, `Rarity`, `IsGear`, `LevelMin/Max`, `EquipSlot`, `Flags`, `IsBlueprint`, `Guid`.
-  `ItemId.FromGuidBytes(bytes)` computes an id like the game.
+  `ItemId.FromGuidBytes(bytes)` computes an id like the game. The catalog is the server world's registry: on a client that
+  joined another's world (and in the main menu) it is empty.
+- `Items.DisplayName(item)` (since 0.2.0-dev.29.15, any side, any thread, never waits): the item's name for players. On a game
+  client in the game's text language, read from the game's own texts (its loca table of that language), also on a joined
+  client and in the main menu; a new item of kiln.content: its definition's text for that language (`Texts`, then
+  `DisplayName`, else its base item's name). On a dedicated server (no texts in its data), and until the game's texts are read
+  (the first call starts that in the background), the English name Kiln ships (`ItemInfo.DisplayName`). Null for an id Kiln
+  knows no name of. Icons: `Ui.ItemImage` ([ui.md](../ui.md#item-icons-and-names)).
 - `Available` (service loaded), `CanTransact`, `Status()` (program state, pending, commits, detail).
 
 Rules: call on the tick thread (mod code always is; `Read`/`FindInventories` throw `InvalidOperationException`

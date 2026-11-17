@@ -778,7 +778,8 @@ KilnResult op_resource_read(const KilnAssetKey* key, void* buffer, size_t cap, s
                 return KILN_OK;
             }
     }
-    // else the game's own
+    // else the game's own: resident, but read off the game's threads too (the item icon worker, the names task), so the copy
+    // cannot fault: a resource the game moved or dropped meanwhile is not found
     const uintptr_t S = g_S.load();
     const uint32_t h = game_handle(S, k);
     if (!h) return KILN_ERR_NOT_FOUND;
@@ -786,7 +787,7 @@ KilnResult op_resource_read(const KilnAssetKey* key, void* buffer, size_t cap, s
     if (!game_data(S, h, &sp) || !sp.data) return KILN_ERR_NOT_FOUND;
     if (out_len) *out_len = sp.size;
     if (cap < sp.size) return KILN_ERR_BUFFER_TOO_SMALL;
-    std::memcpy(buffer, sp.data, sp.size);
+    if (!game_copy(buffer, sp.data, sp.size)) return KILN_ERR_NOT_FOUND;
     return KILN_OK;
 }
 
@@ -944,7 +945,7 @@ KilnResult op_blob_remove(KilnOwner owner, const KilnContentHash* hash) {
     return KILN_OK;
 }
 
-KilnResult op_blob_read(const KilnContentHash* hash, void* buffer, size_t cap, size_t* out_len) {
+KilnResult op_blob_read(const KilnContentHash* hash, void* buffer, size_t cap, size_t* out_len, bool resident) {
     if (!hash) return KILN_ERR_INVALID_ARGUMENT;
     HashK h;
     std::memcpy(&h, hash, 16);
@@ -966,7 +967,7 @@ KilnResult op_blob_read(const KilnContentHash* hash, void* buffer, size_t cap, s
     // (enshrouded_NNN.dat) is about 1 GB, and reading all of it for kiln.ui's 85 KB font took 24.6 s on a player's hard
     // disk, with the game falling out of borderless fullscreen meanwhile (GitHub #39). A size query reads nothing.
     GameBlob gb;
-    if (!game_blob_find(h, &gb)) return KILN_ERR_NOT_FOUND;
+    if (!game_blob_find(h, &gb, !resident)) return KILN_ERR_NOT_FOUND;
     const std::string path = game_container_path(gb.container);
     if (path.empty()) return KILN_ERR_NOT_FOUND;
     const std::wstring wpath = widen(path);

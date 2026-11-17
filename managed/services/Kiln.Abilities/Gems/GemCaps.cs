@@ -12,6 +12,10 @@ internal static class GemsCaps
     /// <summary>Managed, session: <see cref="GemTriggeredEvent"/> (G1) and gems with their own effects (G2).</summary>
     public const string Triggers = "gems.triggers";
 
+    /// <summary>Managed, session (server): offered chest gems (<see cref="Gems.OfferChestGems"/>, <see cref="GemForgeOpenedEvent"/>),
+    /// 0.2.0-dev.29.15.</summary>
+    public const string Sources = Gems.SourcesCapability;
+
     // every 25 steps (about once a second): items.instances is a session row (pending until a server world runs)
     internal static readonly ServiceCapRows Rows = new("kiln.abilities gems", Report, everySteps: 25);
 
@@ -27,6 +31,9 @@ internal static class GemsCaps
             ServiceCaps.Report(Read, read.State, read.Reason, read.Text);
             var triggers = DecideTriggers(read.State, read.Text, AbilitiesNativeHere(), Row("abilities.natives"));
             ServiceCaps.Report(Triggers, triggers.State, triggers.Reason, triggers.Text);
+            var sources = DecideSources(Row(Gems.CraftCapability), GemCrafting.Backend.Status() is not null, GemCrafting.Backend.Extras(),
+                Network.Available);
+            ServiceCaps.Report(Sources, sources.State, sources.Reason, sources.Text);
         }
         catch (Exception e) when (e is ArgumentException or InvalidOperationException or TypeInitializationException
                                       or FileNotFoundException or FileLoadException or NotSupportedException)
@@ -74,6 +81,22 @@ internal static class GemsCaps
             CapabilityState.Pending => (CapabilityState.Pending, CapabilityReason.Session, $"{Read}: {readText}"),
             _ => (CapabilityState.Available, CapabilityReason.None, ""),
         };
+    }
+
+    /// <summary>The <c>gems.sources</c> row (server): <c>gems.craft</c> (its state), kiln.gemcraft's appended part with
+    /// sources on (<paramref name="extras"/>: null for an older kiln-items.dll), and kiln.net for the players' clients.
+    /// Pending while the forge actions wait for a server world. Pure.</summary>
+    internal static (CapabilityState State, CapabilityReason Reason, string Text) DecideSources(Capability? craft, bool service,
+        (uint Flags, string Why)? extras, bool network)
+    {
+        if (!service) return (CapabilityState.Unavailable, CapabilityReason.ServiceMissing, "kiln.gemcraft is not here (no server world in this process, or no kiln-items.dll)");
+        if (craft is { State: CapabilityState.Unavailable } c)
+            return (CapabilityState.Unavailable, c.Reason, $"needs {Gems.CraftCapability}: {c.ReasonText}");
+        if (extras is not { } x) return (CapabilityState.Unavailable, CapabilityReason.ServiceOlder, "kiln.gemcraft predates gem sources (an older kiln-items.dll)");
+        if (!network) return (CapabilityState.Unavailable, CapabilityReason.ServiceMissing, "needs kiln.net (the players' clients get the offers over it)");
+        if ((x.Flags & GemcraftNative.HasSources) == 0)
+            return (CapabilityState.Pending, CapabilityReason.Session, x.Why.Length > 0 ? x.Why : "waits for the server world");
+        return (CapabilityState.Available, CapabilityReason.None, "");
     }
 
     // Off with the reason of the row it needs when that row is off, else the fallback.

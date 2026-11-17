@@ -48,7 +48,7 @@ struct SocketsFixture {
 
 void sockets_tests() {
     static_assert(offsetof(KilnUiValuesApi, gemforge_sockets) == 104);
-    static_assert(sizeof(KilnUiValuesApi) == 112);
+    static_assert(sizeof(KilnUiValuesApi) >= 112);  // 0.2.0-dev.29.15 appended gemforge_sources (ui_values_sources_test.inc)
     {
         SocketsFixture f;
         CHECK(T()->header.size == sizeof(KilnUiValuesApi) && T()->gemforge_sockets, "sockets: the table's size covers gemforge_sockets");

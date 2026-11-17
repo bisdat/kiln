@@ -80,6 +80,34 @@ public sealed class ServicesTests
     }
 
     [Fact]
+    public async Task Stations_names_the_stations_part_of_Kiln_Blocks()
+    {
+        // KilnServices "Stations" (0.2.0-dev.29.15): Stations and Bases without Blocks' defaults (side both, clients kiln)
+        const string stations = """
+            public sealed class M : Mod
+            {
+                public override void OnLoad()
+                {
+                    if (!Stations.Available || !Bases.Available) return;
+                    var plan = new FillOptions { Crafts = 2, Mode = FillMode.Add };
+                    Events.On<StationCraftedEvent>(e => { });
+                    BaseId none = BaseId.None;
+                }
+            }
+            """;
+        Ids(await Run(A, stations, Props(("KilnServicesList", "Stations"))));
+        Ids(await Run(A, stations, Props(("KilnServicesList", "Blocks"))));                  // Blocks covers them too, as before
+        var d = await Run(A, stations, Props(("KilnServicesList", "Items")));
+        Ids(d, "KILN108");
+        Assert.Contains("Stations", d[0].GetMessage());
+        // Blocks content under Stations alone: Blocks is asked for (its side and clients defaults matter there)
+        d = await Run(A, "public sealed class M : Mod { public override void OnLoad() { Blocks.Define(\"chilled\", new StatusBlock { Name = \"Chilled\", Seconds = 8 }); } }",
+            Props(("KilnServicesList", "Stations")));
+        Ids(d, "KILN108");
+        Assert.Contains("Blocks", d[0].GetMessage());
+    }
+
+    [Fact]
     public async Task No_property_no_diagnostics()
     {
         Ids(await Run(A, "public sealed class M : Mod { public override void OnLoad() => Players.Joined += p => { }; }"));

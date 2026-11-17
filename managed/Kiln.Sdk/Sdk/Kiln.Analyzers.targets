@@ -9,9 +9,12 @@
   -->
   <PropertyGroup>
     <KilnAnalyzers Condition="'$(KilnAnalyzers)' == ''">true</KilnAnalyzers>
-    <!-- .editorconfig (how the compiler sees build properties) cuts a value at ';' (a comment): pass a comma list. -->
-    <KilnServicesList>$(KilnServices.Replace(';', ',').Replace(' ', ''))</KilnServicesList>
-    <KilnFeaturesList>$(KilnFeatures.Replace(';', ',').Replace(' ', ''))</KilnFeaturesList>
+    <!-- .editorconfig (how the compiler sees build properties) cuts a value at ';' (a comment) and at a line break: pass one
+         comma list (the names may be separated by ';', ',', spaces or line breaks). -->
+    <KilnServicesList>$([System.Text.RegularExpressions.Regex]::Replace('$(KilnServices)', '[\s,;]+', ','))</KilnServicesList>
+    <KilnServicesList>$([System.Text.RegularExpressions.Regex]::Replace('$(KilnServicesList)', '^,+|,+$', ''))</KilnServicesList>
+    <KilnFeaturesList>$([System.Text.RegularExpressions.Regex]::Replace('$(KilnFeatures)', '[\s,;]+', ','))</KilnFeaturesList>
+    <KilnFeaturesList>$([System.Text.RegularExpressions.Regex]::Replace('$(KilnFeaturesList)', '^,+|,+$', ''))</KilnFeaturesList>
   </PropertyGroup>
 
   <ItemGroup Condition="'$(KilnAnalyzers)' == 'true' and '$(KilnRepoMode)' != 'true'">
