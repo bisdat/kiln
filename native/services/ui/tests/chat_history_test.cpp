@@ -145,6 +145,41 @@ int main() {
     assert(kui::chat_history::needs_replacement(empty_draft, "",
                                                applied, browsing_to_empty));
 
+    // 12:06 observed defect: pre-call widget is empty, so old code saved
+    // an empty draft even though the UI had shown "draft" before Up.
+    // The previous frame's post-TextInputProcess snapshot is authoritative.
+    kui::chat_history::DraftCapture hud_capture;
+    assert(!hud_capture.valid());
+    hud_capture.observe("draft");
+    assert(hud_capture.valid());
+    History draft_from_widget_after;
+    assert(draft_from_widget_after.submit("/help"));
+    const std::string stale_before_input; // empty although text was visible
+    assert(stale_before_input.empty());
+    const auto snapshot = hud_capture.source(stale_before_input);
+    assert(snapshot == "draft");
+    assert(draft_from_widget_after.older(snapshot) == "/help");
+    assert(draft_from_widget_after.newer(stale_before_input) == "draft");
+    assert(!draft_from_widget_after.browsing());
+
+    // Blank drafts remain valid and must clear recalled text on Down.
+    hud_capture.observe("");
+    assert(hud_capture.valid());
+    assert(hud_capture.source("stale") == "");
+    hud_capture.clear();
+    assert(!hud_capture.valid());
+    assert(hud_capture.source("fallback") == "fallback");
+
+    // HUD and Social editor snapshots must never contaminate one another.
+    kui::chat_history::DraftCapture social_capture;
+    hud_capture.observe("HUD draft");
+    social_capture.observe("Social draft");
+    assert(hud_capture.source("") == "HUD draft");
+    assert(social_capture.source("") == "Social draft");
+    hud_capture.clear();
+    assert(social_capture.source("") == "Social draft");
+
+
 
 
 }
