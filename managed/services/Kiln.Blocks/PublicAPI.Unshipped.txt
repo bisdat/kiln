@@ -1,1 +1,11 @@
 #nullable enable
+const Kiln.Stations.OutputSourcesCapability = "stations.output_sources" -> string!
+static Kiln.Stations.SetOutputSource(Kiln.EntityId station, bool on = true) -> bool
+static Kiln.Stations.IsOutputSource(Kiln.EntityId station) -> bool
+static Kiln.Stations.OutputSources(Kiln.BaseId? base = null) -> System.Collections.Generic.IReadOnlyList<Kiln.EntityId>!
+Kiln.FillOptions.UseStationOutputs.get -> bool
+Kiln.FillOptions.UseStationOutputs.init -> void
+Kiln.FillInput.Outputs.get -> long
+Kiln.FillInput.Outputs.init -> void
+Kiln.StationResult.FromOutputs.get -> int
+Kiln.StationResult.FromOutputs.init -> void

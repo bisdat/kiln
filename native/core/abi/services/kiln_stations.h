@@ -23,6 +23,15 @@
  *    and the game puts its inputs back into the station (progress is lost); KILN_STATION_AFTER_CRAFT waits for the cycle's
  *    end first. Select refuses a recipe no one on the server has unlocked (the world or a player in game, through
  *    kiln.knowledge) unless KILN_STATION_ALLOW_LOCKED.
+ *  - Station outputs as crafting stock (since 0.2.0-dev.29.17, capability stations.output_sources): a station opted in
+ *    with set_output_source() lends its finished items (its Outputs: the stacks of an output of its selected or running
+ *    recipe that is not also an input of either, a category input's options all counting as inputs) to every FILL in its
+ *    base, last: after the named player's bag and the base's Magic chests. Revalidated inside the transaction against the
+ *    live inventory and the station's current recipes; a station's queued inputs, its leftovers and an output that is
+ *    also an input are never taken; a station of another base is never used. Kiln asks the game's own AutoTransferRecipe
+ *    for the shortfall with a source list of only the stations whose stacks of that item are all Outputs (the game's
+ *    take is per item), then for the rest as usual, in one transaction: all or nothing. Nothing is opted in by default;
+ *    the opt-ins are this session's (Kiln.Blocks keeps them with the save). docs/re/stations.md section 8.
  *  - A finished cycle is kiln.gameplay's KILN_GAMEPLAY_CRAFTED with actor == target == the station (once per cycle since
  *    0.2.0-dev.29). This table adds state, placed, removed and base-list events by polling (watch, events).
  *
@@ -176,6 +185,8 @@ enum {
     KILN_STATION_AFTER_CRAFT = 0x0010u,  /* STOP: when the running cycle has ended (nothing is refunded or lost) */
     KILN_STATION_KEEP_STOPPED = 0x0020u, /* SELECT: change the recipe, leave a stopped station stopped */
     KILN_STATION_ALLOW_LOCKED = 0x0040u, /* SELECT: also a recipe no one on the server has unlocked */
+    KILN_STATION_FILL_NO_OUTPUTS = 0x0080u, /* FILL: never take from the outputs of opted-in stations (the game's sources
+                                               only; since 0.2.0-dev.29.17) */
 };
 
 typedef struct KilnStationRequest {
@@ -243,7 +254,7 @@ typedef struct KilnStationResult {
     uint8_t limited_by;     /* FILL, not DONE: KILN_STATION_LIMIT_* */
     uint8_t reserved8[3];
     KilnItemId short_item;  /* FILL, limited by STOCK or RESERVE: the item; 0 otherwise */
-    uint32_t reserved;
+    uint32_t from_outputs;  /* FILL: items taken from opted-in stations' outputs (since 0.2.0-dev.29.17; 0 before) */
     uint64_t ticket, step;
     KilnItemsMoveChange changes[KILN_STATIONS_MAX_CHANGES]; /* FILL: the transaction's ledger (a take: from_slot set, to_slot
                                0; a put into the station: to_slot set, from_slot 0) */
@@ -275,6 +286,9 @@ typedef struct KilnStationPlan {
     uint32_t stock[KILN_STATIONS_MAX_INPUTS];          /* in the base's stock containers, after the reserves (plus the
                                                           named player's inventories) */
     char message[128];
+    /* since 0.2.0-dev.29.17 (a caller's smaller size, up to message, still works and gets no more): */
+    uint32_t outputs[KILN_STATIONS_MAX_INPUTS];        /* what opted-in stations of the base lend of each input (their
+                                                          Outputs); crafts_affordable counts it, stock does not */
 } KilnStationPlan;
 
 /* KilnStationEvent.kind */
@@ -364,6 +378,14 @@ typedef struct KilnStationsApi {
     /* Events with seq > after, oldest first (the last 1024 are kept). KILN_ERR_BUFFER_TOO_SMALL: more wait. */
     KilnResult(KILN_CALL* events)(uint64_t after, KilnStationEvent* out, uint32_t capacity, uint32_t* out_count);
     uint64_t(KILN_CALL* last_seq)(void);
+    /* ---- since 0.2.0-dev.29.17 (header.size tells whether these are here) ---- */
+    /* Station outputs as crafting stock: on = 1 opts the station in (its Outputs become the last source of every FILL in
+     * its base), 0 opts it out. Any thread. KILN_ERR_UNAVAILABLE: stations.output_sources is off; KILN_ERR_INVALID_ARGUMENT:
+     * station 0 or on > 1; KILN_ERR_BUFFER_TOO_SMALL: 4096 stations are opted in already. The set is this session's and
+     * is cleared when the server world closes. Whether the entity is a station is checked at each fill, not here. */
+    KilnResult(KILN_CALL* set_output_source)(KilnEntity station, uint32_t on);
+    /* The opted-in stations, in the order a fill uses them (entity order). KILN_ERR_BUFFER_TOO_SMALL: *out_count = needed. */
+    KilnResult(KILN_CALL* output_sources)(KilnEntity* out, uint32_t capacity, uint32_t* out_count);
 } KilnStationsApi;
 
 #ifdef __cplusplus

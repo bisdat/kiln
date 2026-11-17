@@ -18,7 +18,7 @@ internal static unsafe class StationsNative
     public const uint Fill = 1, Stop = 2, Resume = 3, Select = 4;
     // request flags
     public const uint FillAdd = 0x1, FillExact = 0x2, DryRun = 0x4, NoWater = 0x8, AfterCraft = 0x10, KeepStopped = 0x20,
-        AllowLocked = 0x40;
+        AllowLocked = 0x40, FillNoOutputs = 0x80;
     // event kinds
     public const uint EvState = 1, EvPlaced = 2, EvRemoved = 3, EvBases = 4;
     // KilnStation.flags
@@ -125,7 +125,7 @@ internal static unsafe class StationsNative
         public uint ChangeCount;
         public byte StateBefore, StateAfter, StoppedBefore, StoppedAfter;
         public byte LimitedBy, R0, R1, R2;
-        public uint ShortItem, Reserved;
+        public uint ShortItem, FromOutputs;  // FromOutputs: 0.2.0-dev.29.17 (was reserved, 0)
         public ulong Ticket, Step;
         public fixed byte Changes[MaxChanges * 32];  // MoveChange x 32
         public fixed byte Message[128];
@@ -145,6 +145,7 @@ internal static unsafe class StationsNative
         public fixed uint Have[MaxInputs];
         public fixed uint Stock[MaxInputs];
         public fixed byte Message[128];
+        public fixed uint Outputs[MaxInputs];  // 0.2.0-dev.29.17: an older kiln.stations answers INVALID_ARGUMENT for this size
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -196,7 +197,15 @@ internal static unsafe class StationsNative
         public delegate* unmanaged[Cdecl]<uint, int> Watch;
         public delegate* unmanaged[Cdecl]<ulong, Event*, uint, uint*, int> Events;
         public delegate* unmanaged[Cdecl]<ulong> LastSeq;
+        // ---- 0.2.0-dev.29.17 (Header.Size tells whether they are here) ----
+        public delegate* unmanaged[Cdecl]<uint, uint, int> SetOutputSource;
+        public delegate* unmanaged[Cdecl]<uint*, uint, uint*, int> OutputSources;
     }
+
+    /// <summary>The table size up to <see cref="Table.LastSeq"/>: kiln.stations before 0.2.0-dev.29.17.</summary>
+    public static readonly int TableV1 = sizeof(Table) - 2 * sizeof(nint);
+    /// <summary>The plan's size before 0.2.0-dev.29.17 (no <see cref="Plan.Outputs"/>).</summary>
+    public static readonly int PlanV1 = sizeof(Plan) - MaxInputs * sizeof(uint);
 
     public static string Text(byte* p, int max)
     {
