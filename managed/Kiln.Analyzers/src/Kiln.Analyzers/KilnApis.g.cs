@@ -79,6 +79,15 @@ internal static partial class KilnApis
         "M:Kiln.Bans.Add(Kiln.PlayerRef,System.String,System.Nullable{System.TimeSpan})", // Bans.Add(PlayerRef, string, TimeSpan?): Game.AssertTickThread
         "M:Kiln.Bans.Add(System.UInt64,System.String,System.Nullable{System.TimeSpan})", // Bans.Add(ulong, string, TimeSpan?): Game.AssertTickThread
         "M:Kiln.Bans.Remove(System.UInt64)", // Bans.Remove(ulong): Game.AssertTickThread
+        "M:Kiln.Bases.At(Kiln.WorldPosition)", // Bases.At(WorldPosition): via StationsCore.CheckRead(string)
+        "M:Kiln.Bases.FindRoomFor(Kiln.BaseId,Kiln.ItemId)", // Bases.FindRoomFor(BaseId, ItemId): via Bases.Storage(BaseId)
+        "M:Kiln.Bases.Get(Kiln.BaseId)", // Bases.Get(BaseId): via Bases.All.get
+        "M:Kiln.Bases.Of(Kiln.EntityId)", // Bases.Of(EntityId): via StationsCore.CheckRead(string)
+        "M:Kiln.Bases.Stock(Kiln.BaseId)", // Bases.Stock(BaseId): via StationsCore.CheckRead(string)
+        "M:Kiln.Bases.Stock(Kiln.BaseId,Kiln.ItemId)", // Bases.Stock(BaseId, ItemId): via Bases.Stock(BaseId)
+        "M:Kiln.Bases.Storage(Kiln.BaseId)", // Bases.Storage(BaseId): via StationsCore.List(BaseId, bool, string)
+        "M:Kiln.Bases.WaterSources(Kiln.BaseId)", // Bases.WaterSources(BaseId): via StationsCore.List(BaseId, bool, string)
+        "M:Kiln.Bases.get_All", // Bases.All.get: via StationsCore.CheckRead(string)
         "M:Kiln.Blocks.Apply(Kiln.BlockPlan)", // Blocks.Apply(BlockPlan): Services.RequireTickThread
         "M:Kiln.Blocks.Define(System.String,Kiln.BuildingMaterialPoolBlock,Kiln.DefinitionRegistrationOptions)", // Blocks.Define(string, BuildingMaterialPoolBlock, DefinitionRegistrationOptions): Game.AssertTickThread
         "M:Kiln.Blocks.Define(System.String,Kiln.VfxBlock,Kiln.DefinitionRegistrationOptions)", // Blocks.Define(string, VfxBlock, DefinitionRegistrationOptions): Services.RequireTickThread
@@ -649,6 +658,22 @@ internal static partial class KilnApis
         "M:Kiln.Spire.UnlockedFor(Kiln.Player)", // Spire.UnlockedFor(Player): via ProgressFact.Holds(EntityId)
         "M:Kiln.Spire.get_BeaconLit", // Spire.BeaconLit.get: via ProgressFact.Holds(EntityId)
         "M:Kiln.Spire.get_Unlocked", // Spire.Unlocked.get: via ProgressFact.Holds(EntityId)
+        "M:Kiln.Stations.All", // Stations.All(): via StationsCore.StationList(int, string)
+        "M:Kiln.Stations.Category(System.UInt32)", // Stations.Category(uint): via StationsCore.CheckRead(string)
+        "M:Kiln.Stations.Collect(Kiln.EntityId,Kiln.EntityId,System.Nullable{Kiln.ItemId})", // Stations.Collect(EntityId, EntityId, ItemId?): via StationsCore.CheckRead(string)
+        "M:Kiln.Stations.CollectToBase(Kiln.EntityId,System.Nullable{Kiln.ItemId})", // Stations.CollectToBase(EntityId, ItemId?): via StationsCore.CheckRead(string)
+        "M:Kiln.Stations.Fill(Kiln.EntityId,Kiln.FillOptions)", // Stations.Fill(EntityId, FillOptions?): via StationsCore.CheckAct(string, string)
+        "M:Kiln.Stations.InBase(Kiln.BaseId)", // Stations.InBase(BaseId): via StationsCore.CheckRead(string)
+        "M:Kiln.Stations.IsStation(Kiln.EntityId)", // Stations.IsStation(EntityId): via StationsCore.CheckRead(string)
+        "M:Kiln.Stations.Plan(Kiln.EntityId,Kiln.FillOptions)", // Stations.Plan(EntityId, FillOptions?): via StationsCore.CheckRead(string)
+        "M:Kiln.Stations.Read(Kiln.EntityId)", // Stations.Read(EntityId): via StationsCore.CheckRead(string)
+        "M:Kiln.Stations.Recipe(System.UInt32)", // Stations.Recipe(uint): via StationsCore.CheckRead(string)
+        "M:Kiln.Stations.RecipesOf(Kiln.EntityId)", // Stations.RecipesOf(EntityId): via StationsCore.CheckRead(string)
+        "M:Kiln.Stations.ResolveInputs(System.UInt32,System.Collections.Generic.IReadOnlyList{Kiln.CategoryChoice})", // Stations.ResolveInputs(uint, IReadOnlyList<CategoryChoice>?): via StationsCore.CheckRead(string)
+        "M:Kiln.Stations.Resume(Kiln.EntityId)", // Stations.Resume(EntityId): via StationsCore.CheckAct(string, string)
+        "M:Kiln.Stations.Select(Kiln.EntityId,System.UInt32,System.Collections.Generic.IReadOnlyList{Kiln.CategoryChoice},System.Boolean,System.Boolean)", // Stations.Select(EntityId, uint, IReadOnlyList<CategoryChoice>?, bool, bool): via StationsCore.CheckAct(string, string)
+        "M:Kiln.Stations.Stop(Kiln.EntityId,Kiln.StopWhen)", // Stations.Stop(EntityId, StopWhen): via StationsCore.CheckAct(string, string)
+        "M:Kiln.Stations.get_Categories", // Stations.Categories.get: via StationsCore.CheckRead(string)
         "M:Kiln.Survivor.RescuedFor(Kiln.Player)", // Survivor.RescuedFor(Player): via ProgressFact.Holds(EntityId)
         "M:Kiln.Survivor.get_Rescued", // Survivor.Rescued.get: via ProgressFact.Holds(EntityId)
         "M:Kiln.Systems.Define``1(System.String,Kiln.ProgramOptions,Kiln.EntityHandler{``0})", // Systems.Define<T>(string, ProgramOptions, EntityHandler<T>): Services.RequireTickThread

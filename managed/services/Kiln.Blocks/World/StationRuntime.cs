@@ -14,7 +14,16 @@ public enum StationNeeds { None = 0, Recipe = 1, EnergySourceInRange = 2, Energy
 /// <param name="Started">Its current cycle's start, on the game's clock.</param>
 public sealed record StationStatus(StationState State, uint Running, uint Next, TimeSpan Started, StationNeeds Needs, bool StoppedByPlayer);
 
-/// <summary>Placed stations that work on their own, on the server. On the tick thread.</summary>
+/// <summary>
+/// Placed stations that work on their own (kilns, smelters, looms, grinders, seed beds: every entity with the game's
+/// <c>FactoryStation</c>), on the server, on the tick thread. Since 0.2.0-dev.29 also the game's own actions on them for
+/// code (kiln.stations): fill from the base's crafting-stock chests (<see cref="Fill"/>, the code of the game's "fill from
+/// chests" button, with no player), stop and resume (<see cref="Stop"/>, <see cref="Resume"/>: the stop button), the recipe
+/// a station repeats (<see cref="Select"/>, the game's own write of a player's choice: prefer it to <see cref="Start"/>),
+/// and moving its finished items into a chest (<see cref="Collect"/>). Everything is the server's own state, so other
+/// players see the changes as they see their own. On the server world: a dedicated server or a hosting client; a joined
+/// client has none (<see cref="Available"/> false). docs/kiln/services/stations.md.
+/// </summary>
 public static partial class Stations
 {
     // keen::ecs::FactoryStation on the builds Kiln knows. The size stands in for a layout check: a game update that moves these changes it, and these calls then decline.
