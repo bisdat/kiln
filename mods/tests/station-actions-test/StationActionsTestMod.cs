@@ -192,6 +192,26 @@ public sealed class StationActionsTestMod : Mod
         Check(EntityData.IsPersistent(kiln) && EntityData.IsPersistent(magic), "EntityData.IsPersistent: a placed kiln and Magic chest");
         var deposit = Bases.Storage(baseOf.Id, deposit: true);
         Check(deposit.Contains(magic) && deposit.All(storage.Contains), $"Bases.Storage(deposit): the Magic chest takes deposits ({deposit.Count} of {storage.Count})");
+        // the per-chest deposit override: dump it, write it through the game's tracked write (World.WriteField checks the
+        // field names against the game's own type table), and see Storage(deposit) follow it
+        string Hex(EntityId e) => World.ReadBytes(e, "DynamicInventoryCraftingStock") is { } x ? Convert.ToHexString(x) : "none";
+        Info($"DynamicInventoryCraftingStock of the Magic chest before: {Hex(magic)}");
+        try
+        {
+            var set = await World.WriteField(magic, "DynamicInventoryCraftingStock", "canReceiveAreaDepositOverrideIsSet", true);
+            var off = await World.WriteField(magic, "DynamicInventoryCraftingStock", "canReceiveAreaDepositOverride", false);
+            await Steps(3);
+            Info($"override set off: {set.Status}, {off.Status}; the component now {Hex(magic)}");
+            Check(set.Ok && off.Ok && !Bases.Storage(baseOf.Id, deposit: true).Contains(magic) && Bases.Storage(baseOf.Id).Contains(magic),
+                "a chest whose deposit override is set off is left out of Storage(deposit), still in Storage");
+            var clear = await World.WriteField(magic, "DynamicInventoryCraftingStock", "canReceiveAreaDepositOverrideIsSet", false);
+            await Steps(3);
+            Check(clear.Ok && Bases.Storage(baseOf.Id, deposit: true).Contains(magic), $"the override cleared: the template's value again ({Hex(magic)})");
+        }
+        catch (Exception e) when (e is ArgumentException or KilnUnavailableException or InvalidOperationException)
+        {
+            Info($"the deposit override cannot be written here: {e.GetType().Name}: {e.Message}");
+        }
         Check(Stations.Scanned, "Stations.Scanned: the first scan is done");
         Check(Stations.Nearest(magic, null, 8) == kiln || Stations.Nearest(magic, null, 8) is not null, $"Stations.Nearest from the chest: {Stations.Nearest(magic, null, 8)}");
         Check(Stations.Read(kiln)?.Template == KilnTemplate, $"StationInfo.Template: {Stations.Read(kiln)?.Template}");

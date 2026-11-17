@@ -91,7 +91,11 @@ Templates with `InventoryCraftingStock` (10): `Prop_Decoration_T1_Storage_24_Mag
 `T3_Storage_40_Magic`, `T4_Storage_56_Magic`, `T6_Storage_72_Magic`, and five player-planted refilling harvest plants
 (`Scatter_Loot_Wetland_Above_Bananaplant_01_e_fruits_harvest_PlayerPlanted_Refill`, coffee tree, hazelnut, coconut
 palm, date palm). `InventoryCraftingStock {bool canReceiveAreaDeposit}`, overridable per entity by
-`DynamicInventoryCraftingStock` (the quick-stack station's permission toggle). Templates with `FuelCraftingStock` (13):
+`DynamicInventoryCraftingStock` (2 bytes, reflection: `+0 canReceiveAreaDepositOverrideIsSet`, `+1
+canReceiveAreaDepositOverride`). By the programs' access lists, `area_deposit_trigger` (S update `0x88a50`) reads the
+template's `InventoryCraftingStock` and the entity's `DynamicInventoryCraftingStock`, and `inventory_actions` (S
+`0x1a5af0`, a player's inventory input) writes the latter: the per-chest deposit switch is taken to be that write [refl],
+not seen in a game. Templates with `FuelCraftingStock` (13):
 wells (`Prop_NPC_Water_Well_a/b/c`, desert/wetland wells) and the two water barrels.
 
 Ordinary chests (`Prop_Decoration_T1_Storage_24`, …) have no `InventoryCraftingStock`: **the game's fill never uses them**,
@@ -247,7 +251,7 @@ Kiln does steps 1, 3, 4 itself, **inside its own program**, and replaces step 2:
 - **crafts chosen by Kiln**, so that the all-or-nothing call does not fail for a missing stack: Kiln counts the stock
   (list A, per item, with optional reserves the caller keeps back), computes the largest `n ≤ requested` the stock
   covers for every resolved input, calls with `n`, and on code 2 (no room) or a race tries `n/2`, … (each attempt rolled
-  back) within the same update, at most 5 attempts;
+  back) within the same update, at most 6 attempts (kMaxTries);
 - a dry run = the same call, then rollback (exactly what the client's button does);
 - after a commit: `FactoryInfoInvalidate(station)`.
 

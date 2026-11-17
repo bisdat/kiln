@@ -43,9 +43,13 @@ long logs = Bases.Stock(home.Id, Items.Lookup("Material_T1_Wood_Logs")!.Id);
 EntityId? room = Bases.FindRoomFor(home.Id, charcoalId); // a chest that takes deposits and the item (same item first)
 ```
 
-`Storage(id, deposit: true)` keeps the containers the game lets take deposits: the per-chest switch a player sets at the
-quick-stack station (`DynamicInventoryCraftingStock`), else the template's `InventoryCraftingStock.canReceiveAreaDeposit`.
-`FindRoomFor` and `CollectToBase` use only those.
+`Storage(id, deposit: true)` keeps the containers that take deposits, by the two values the game's area deposit
+(`area_deposit_trigger`) reads: the entity's `DynamicInventoryCraftingStock` override when it is set
+(`{bool canReceiveAreaDepositOverrideIsSet, bool canReceiveAreaDepositOverride}`, from the game's type table), else the
+template's `InventoryCraftingStock.canReceiveAreaDeposit`. The lab wrote that override through the game's tracked write
+and `Storage(deposit)` followed it. That a player's per-chest switch at the quick-stack station is what writes it (the
+game's `inventory_actions` writes the component from a player's input) has not been seen in a game: real-client check C6.
+`FindRoomFor` and `CollectToBase` use only those containers.
 
 **Base identity.** `BaseId` is the GUID the game gave a flame altar (its `BaseIdComponent`, kept in the save). A base made
 of several overlapping altar zones takes the smallest of its altars' ids, so the id of a base **changes when an
@@ -150,8 +154,9 @@ await Stations.Select(kiln, 0);                          // no recipe (the game 
 - **`StopWhen.AfterCurrentCraft`** waits for the cycle in progress to end (its outputs made, nothing lost), also while it
   is paused (no water under it, no power) or its outputs wait for room, and then stops. Its task completes when the stop
   is written. While it waits, `StationInfo.StopPending` is true. It is **withdrawn**, with `Canceled` and nothing written,
-  by a later `Resume`, `Select` or `Stop(Now)` of the station (Kiln's; that call's message says it withdrew it) and by a
-  player's or a mod's change of the selected recipe; if someone stops the station meanwhile it answers `Unchanged`. After
+  by a later `Resume`, `Select` or `Stop(Now)` of Kiln's on the station that passed its checks (also in the same step;
+  that call's message says it withdrew it) and by a player's or a mod's change of the selected recipe (the message names
+  the new recipe); if someone stops the station meanwhile, a player too, it answers `Unchanged`. After
   about an hour of steps it gives up with `TimedOut`, nothing written. A second one on the same station answers
   `Unchanged`. A waiting stop is not saved: a restart forgets it. On a station that runs no cycle it stops at once.
 - `Resume` clears the stop: the station starts a new cycle with its selected recipe when its inputs are there.
@@ -210,9 +215,9 @@ rather than reasoning on a `StationInfo` from before it.
 ## Events
 | Event | When |
 |---|---|
-| `StationStateChangedEvent` | a station's state, stop flag, selected or running recipe changed. `ByMod`: the mod whose stop, resume or select made exactly this change; `Player`: the player whose button made it, while a `StationPlayerActionEvent` handler listens; both null for the game (also for what the game did after a mod's call, like the state a stop leads to) |
+| `StationStateChangedEvent` | a station's state, stop flag, selected or running recipe changed. `ByMod`: the mod whose stop, resume or select made exactly this change; `Player`: the player whose stop (the flag going on) or select (the selection changing, or the stop clearing) made it, while a `StationPlayerActionEvent` handler listens; both null for the game (also for what the game did after a mod's call, like the state a stop leads to) |
 | `StationPlacedEvent`, `StationRemovedEvent` | a production station appeared or is gone (the first scan of a world sets the baseline and posts none) |
-| `BasesChangedEvent` | the game rebuilt its bases (an altar placed, removed or upgraded): `Added`, `Removed`, `Changed` (old and new id) |
+| `BasesChangedEvent` | the game rebuilt its bases (an altar placed, removed or upgraded): `Added`, `Removed`, `Changed` (old and new id), `Kept` (a split keeps the old id for one part, a rename does not); the first rebuild after a world starts is a watch's baseline and posts nothing |
 | `StationCraftedEvent` | a station finished a cycle: its outputs are in its inventory. Once per cycle |
 | `StationPlayerActionEvent` | a player pressed a station button (fill, select, stop, use-all, water) or crafted at a bench (`Action == Craft`: then `Station` is a workbench), before the game runs it: `Cancel()` and the game never runs it |
 | `StationChangedEvent` | a Kiln.Stations call changed a station (not a dry run, not `Unchanged`): the record of the call itself, with the result and `ByMod`, the mod that called. For "did my own call do this", use this one |
@@ -260,6 +265,8 @@ checked by hand with `mods/tests/stations-client-check` (`/stationcheck`, admins
 - **C4** `/stationcheck cancel stop`, then press the kiln's stop button as a player: kiln.log has the
   `StationPlayerActionEvent`, the kiln keeps running, and the screen recovers.
 - **C5** After fills, the base's Magic chests are emptied as expected; ordinary chests are untouched.
+- **C6** At the quick-stack station, switch one Magic chest off for deposits: `/stationcheck base` lists it under
+  Magic chests and not under "take deposits", and `collect` puts nothing into it.
 
 ## Limits
 - Server world only (dedicated server, hosting client). A joined client has none.
