@@ -32,6 +32,16 @@ bash "$here/run-menu-scroll-host.sh"
 # the middle and side mouse buttons and the wheel as key presses: twins of raw records and messages, notches (mouse_press.h)
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/mouse_press_test.cpp" -o "$out/mouse_press_test"
 "$out/mouse_press_test"
+# Issue 44: scoped chat Up/Down and UI-thread queue must never steal gameplay or releases.
+g++ -std=c++20 -O1 -g -Wall -Wextra -pthread -fsanitize=address,undefined "$here/chat_keys_test.cpp" -o "$out/chat_keys_test"
+"$out/chat_keys_test"
+# Issue 44: history draft, commands-only persistence policy, sensitive text, UTF-8.
+g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/chat_history_test.cpp" -o "$out/chat_history_test"
+"$out/chat_history_test"
+# Issue 44: chat-history.json's format, and its writer thread (the UI thread never waits for the disk; chat_store.h)
+g++ -std=c++20 -O1 -g -Wall -Wextra -pthread -fsanitize=address,undefined -I"$here/../../../third_party" "$here/chat_store_test.cpp" \
+    -o "$out/chat_store_test"
+"$out/chat_store_test"
 # one key press counts once, also across a focus loss (key_hold.h, GitHub issue 39): plain logic
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/key_hold_test.cpp" -o "$out/key_hold_test"
 "$out/key_hold_test"
@@ -74,4 +84,6 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -pthread -fsanitize=address,undefined \
     "$here/wheel_host_test.cpp" "${objs[@]}" -o "$out/wheel_host_test"
 "$out/wheel_host_test"
 PYTHONDONTWRITEBYTECODE=1 python3 "$here/render_sigdb_test.py"
+# chat history's sigdb names are all gated by chat.ui.input; with the client exe installed, its layout resolves (read only)
+PYTHONDONTWRITEBYTECODE=1 python3 "$here/chat_sigdb_test.py"
 PYTHONDONTWRITEBYTECODE=1 python3 "$here/per_caller_test.py"
