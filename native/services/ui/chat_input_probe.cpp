@@ -230,13 +230,22 @@ void history_before(void* widget) {
         const bool browsing_before = g_history.browsing();
         const std::string next = action == chat_keys::Action::Older
                                      ? g_history.older(current) : g_history.newer(current);
+        // The widget may still expose the original draft even after the
+        // last SetText was successfully displayed. Comparing to that stale
+        // snapshot caused Down to skip restoring the draft. Use the last
+        // successfully applied text while browsing instead.
+        const bool changed = chat_history::needs_replacement(
+            next, current, g_last_applied, browsing_before);
+        const bool stale_widget = browsing_before && !g_last_applied.empty() &&
+                                  current != g_last_applied;
         if (g_trace_on.load(std::memory_order_relaxed) && g_recall_log_count.fetch_add(1) < 80)
             logf(KILN_LOG_INFO,
-                 "ui: chat history trace: recall %s entries=%zu changed=%u browsing_before=%u browsing_after=%u",
+                 "ui: chat history trace: recall %s entries=%zu changed=%u browsing_before=%u browsing_after=%u stale_widget=%u",
                  action == chat_keys::Action::Older ? "older" : "newer",
-                 g_history.count(), next != current ? 1u : 0u,
-                 browsing_before ? 1u : 0u, g_history.browsing() ? 1u : 0u);
-        if (next == current) continue;
+                 g_history.count(), changed ? 1u : 0u,
+                 browsing_before ? 1u : 0u, g_history.browsing() ? 1u : 0u,
+                 stale_widget ? 1u : 0u);
+        if (!changed) continue;
         if (!game_set_text(reinterpret_cast<uint8_t*>(state) + kEditOffset, next.data(), next.size())) {
             g_keys.focus(false);
             g_history_on.store(false, std::memory_order_release);
