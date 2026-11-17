@@ -9,9 +9,9 @@
   "verified": true,
   "note": "runtime-verified in labs on this exe, 2026-11-11, Kiln 0.2.0-dev+20261112.68988ae, policy any, standard lab save copied fresh for each group, one group per boot (or per run of boots): the running core resolved sigdb 447/447 symbols (355 defined, 92 captured), 542/542 constants (493 defined, 49 captured) and 146/146 features, each to the same value as the offline resolve (compared per name from sigdb-report.json); base world 24/0, players 30/0, chat+time 50/0, hooks 17/0, content 33/0, newcontent 24/0; api 74/0; settings 70/0; items 95/0 (kiln.items self-test on); combat 203/0 (watch-all); spawn 57/0 over 3 boots; gameplay 48/0; creatures 63/0; assets 17/0; rules 53/0; pacing 21/0; types 32/0 + types-peer 8/0; progression 45/0 (no player); net 168/0 with nettest 95 PASS, 0 FAIL; quests 188/0 over 3 boots; skills 124/0 over 2 boots; characters 53/0 over 3 boots; gamedata 71/0 over 2 boots (reload, restart); saves 54/0 over 8 boots (SIGINT, kill -9 x3, restore, game backup); build 79/0 over 4 boots; placeholder 34/0 over 4 boots (kill -9). Failing, so their names stay static: abilities 70/3, 70/3, 71/2 over three runs (the bow shot is refused by the core's PlaySequence guard every time, the Greet emote ran 73/66/79 steps of the 80 the test wants, the staff cast 38/35 then passed, the PC under heavy load); npcai 25/6 twice (force ready unavailable on four spawned creatures, the peacekeeper's relations not applied). Not run: emf (its probe needs third-party EMF mods). Levels: lab 1093 names in 24 services, static 42 (abilities, npcai, emf). With this record under verified-only: build verified, SimStep hooked, every server service loaded (27; audio, screen, ui and vfx skipped as client-only), 0 error lines.",
   "declared": {
-    "symbols": 589,
-    "constants": 682,
-    "features": 182
+    "symbols": 590,
+    "constants": 684,
+    "features": 183
   },
   "features": {
     "abilities.attributes": true,
@@ -169,6 +169,7 @@
     "stations.control": true,
     "stations.events": true,
     "stations.fill": true,
+    "stations.output_sources": true,
     "stations.read": true,
     "tick": true,
     "tick.wait_jobs": true,
@@ -1159,6 +1160,8 @@
     "stations/recipe.duration": "0x38",
     "stations/recipe.water_charges": "0x98",
     "stations/settings.factory_speed": "0x3c",
+    "stations/stack.item": "0x10",
+    "stations/stack.size": "0x18",
     "stations/stock.items": "0x30",
     "stations/stock.items_count": "0x38",
     "stations/stock.water": "0x58",
@@ -2918,6 +2921,7 @@
       "evidence": "lab dev29-stations, policy any, 2 boots, Kiln 0.2.0-dev, 2026-11-16: station-actions-test 66/0 (2 boots of stations-restart) (passed/failed); the core resolved the same values as the offline resolve",
       "symbols": {
         "@stations/AutoTransferAction.calls": "lab",
+        "@stations/AutoTransferRecipe.take": "static",
         "@stations/BaseAtPosition.fields": "lab",
         "@stations/BaseStockForPlayer.fields": "lab",
         "@stations/FactoryComplete.craft": "lab",
@@ -2976,6 +2980,8 @@
         "stations/recipe.duration": "lab",
         "stations/recipe.water_charges": "lab",
         "stations/settings.factory_speed": "lab",
+        "stations/stack.item": "static",
+        "stations/stack.size": "static",
         "stations/stock.items": "lab",
         "stations/stock.items_count": "lab",
         "stations/stock.water": "lab",
@@ -2985,6 +2991,7 @@
         "stations.control": "lab",
         "stations.events": "lab",
         "stations.fill": "lab",
+        "stations.output_sources": "static",
         "stations.read": "lab"
       }
     },

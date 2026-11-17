@@ -531,6 +531,80 @@ public sealed class CommandsTests : KilnTest
         Assert.Null(Commands.Find("build"));
     }
 
+    // Chat.Dispatch returns true when kiln.chat must not hand the line to the game (it was eaten).
+    private static bool Typed(string text) => Chat.Dispatch(new ChatMessage(1, null, 0x41, text, Commands.IsCommandLine(text)));
+
+    private void ChatJson(string? json)
+    {
+        var path = Path.Combine(Root, "config", "chat.json");
+        if (json is null) File.Delete(path);
+        else File.WriteAllText(path, json);
+    }
+
+    [Fact]
+    public void Unknown_slash_lines_pass_through_by_default()
+    {
+        var mod = NewMod("chatmod");
+        As(mod, () => Commands.Register("echo", c => c.Reply("echo"), CommandPermission.Everyone, "<words...>", "echoes", "ec"));
+        Assert.Equal(UnknownCommandPolicy.PassThrough, Commands.UnknownCommands);
+        Assert.False(Typed("/lua print('hi')"));  // EMF Lua, Shroudtopia, Flame, a native mod: theirs, untouched
+        Assert.False(Typed("/st-warp 1 2 3"));
+        Assert.False(Typed("hello all"));
+        // Kiln's commands, by name and alias, are eaten as before
+        Assert.True(Typed("/echo a"));
+        Assert.True(Typed("/EC a"));
+        Assert.True(Typed("/help"));
+        Assert.True(Typed("/?"));
+        // unknown commands from the console or code are still errors: only chat lines pass through
+        Assert.False(Run("lua print('hi')").Found);
+        Assert.StartsWith("Unknown command '/lua'", Run("lua print('hi')").Error);
+    }
+
+    [Fact]
+    public void A_known_command_with_bad_arguments_still_gets_its_usage_error()
+    {
+        var mod = NewMod("attr");
+        As(mod, () => Commands.RegisterAll(new AttributeCommands()));
+        var executed = new List<CommandExecutedEvent>();
+        Events.On<CommandExecutedEvent>(executed.Add);
+        Assert.True(Typed("/pick blue"));  // eaten, and the usage error goes to the player
+        var r = Assert.Single(executed).Result;
+        Assert.True(r.Found);
+        Assert.False(r.Ok);
+        Assert.Contains("Usage: /pick", r.Error);
+    }
+
+    [Fact]
+    public void Kilns_unknown_command_reply_is_an_opt_in_server_setting()
+    {
+        // kiln/config/chat.json "unknownCommands": "reply": Kiln eats the line (and says "Unknown command")
+        ChatJson("""{ "unknownCommands": "reply" }""");
+        Assert.Equal(UnknownCommandPolicy.Reply, Commands.UnknownCommands);
+        Assert.True(Typed("/lua print('hi')"));
+        Assert.True(Backend.Logged("unknown commands get Kiln's reply"));
+
+        // the file wins over code; "pass-through" spellings are accepted
+        Commands.UnknownCommands = UnknownCommandPolicy.Reply;
+        ChatJson("""{ "unknownCommands": "pass-through" }""");
+        File.SetLastWriteTimeUtc(Path.Combine(Root, "config", "chat.json"), DateTime.UtcNow.AddSeconds(1));
+        Assert.Equal(UnknownCommandPolicy.PassThrough, Commands.UnknownCommands);
+        Assert.False(Typed("/lua print('hi')"));
+
+        // without the key, code decides (a mod may still choose Kiln's reply), and the default is pass-through
+        ChatJson("{}");
+        File.SetLastWriteTimeUtc(Path.Combine(Root, "config", "chat.json"), DateTime.UtcNow.AddSeconds(2));
+        Assert.True(Typed("/lua print('hi')"));
+        Commands.UnknownCommands = UnknownCommandPolicy.PassThrough;
+        Assert.False(Typed("/lua print('hi')"));
+
+        // a bad value is reported and ignored
+        ChatJson("""{ "unknownCommands": "eat" }""");
+        File.SetLastWriteTimeUtc(Path.Combine(Root, "config", "chat.json"), DateTime.UtcNow.AddSeconds(3));
+        Assert.Equal(UnknownCommandPolicy.PassThrough, Commands.UnknownCommands);
+        Assert.True(Backend.Logged("not \"eat\"; ignored"));
+        ChatJson(null);
+    }
+
     [Fact]
     public void Tokenizer_is_unchanged()
     {

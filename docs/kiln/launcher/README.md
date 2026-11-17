@@ -7,7 +7,7 @@
 | [../dedicated-servers.md](../dedicated-servers.md) | for server owners: Kiln on a dedicated server (rented with FTP, own Windows PC, own Linux with kilnctl), checking it, admin, mods, game updates, removing it |
 | [releasing.md](releasing.md) | versions, the launcher's self-update (sources, channels, signatures), the release folder and the steps to publish |
 | [catalog.md](catalog.md) | the online catalog on Nexus Mods: the Kiln-mod rule, Nexus's rules for apps, adding and updates, Mod Manager Download (nxm://), tests, the real-API checklist; for mod authors: [catalog-authors.md](catalog-authors.md) |
-| [custom-game-folders.md](custom-game-folders.md) | for players: a copy of the game no Steam library knows (an older build kept for mods): adding it, starting it directly (Windows; Proton or Wine and the prefix on Linux), the Steam requirement, unknown game builds |
+| [custom-game-folders.md](custom-game-folders.md) | for players: a copy of the game no Steam library knows (an older build kept for mods): adding it, starting it directly without Steam (Windows; umu-run, Proton or Wine and the prefix on Linux), what Kiln does and doesn't do, unknown game builds |
 | [support-report.md](support-report.md) | the support report (Logs, "Save report...", `kilnctl report`): what the zip holds, the findings, what is redacted and left out |
 | [deck.md](deck.md) | the Steam Deck UI: how it is chosen, controls, screens, the Steam rule, tests and the Deck tester checklist |
 | [perf.md](perf.md) | what the launcher costs idle and per click, the caches and poll rules that keep it low, and the two harnesses that measure it |

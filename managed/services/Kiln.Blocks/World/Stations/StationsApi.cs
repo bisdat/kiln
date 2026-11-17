@@ -414,6 +414,10 @@ internal interface IStationsBackend
     ulong LastSeq();
     bool Scanned();
     int Events(ulong after, Span<StationsNative.Event> into, out uint count);
+    /// <summary>The table has set_output_source / output_sources (kiln.stations of 0.2.0-dev.29.17 or later).</summary>
+    bool HasOutputSources { get; }
+    int SetOutputSource(uint entity, bool on);
+    (int Rc, uint[] Ids) OutputSources();
 }
 
 /// <summary>Kiln.Stations' side of kiln.stations: requests, results, reads, the event pump.</summary>
@@ -430,7 +434,8 @@ internal static unsafe partial class StationsCore
             {
                 if (_t != null) return _t;
                 var t = Services.Get<StationsNative.Table>(StationsNative.Name, StationsNative.Version);
-                if (t == null || t->Header.Size < (uint)sizeof(StationsNative.Table)) return null;
+                // an older kiln.stations (before 0.2.0-dev.29.17) has the table without the output-source members
+                if (t == null || t->Header.Size < (uint)StationsNative.TableV1) return null;
                 return _t = t;
             }
         }
@@ -614,6 +619,26 @@ internal static unsafe partial class StationsCore
 
         public int Watch(bool on) => T == null ? StationsNative.Unavailable : T->Watch(on ? 1u : 0u);
 
+        public bool HasOutputSources => T is var t && t != null && t->Header.Size >= (uint)sizeof(StationsNative.Table);
+
+        public int SetOutputSource(uint entity, bool on) =>
+            HasOutputSources ? T->SetOutputSource(entity, on ? 1u : 0u) : StationsNative.Unavailable;
+
+        public (int Rc, uint[] Ids) OutputSources()
+        {
+            if (!HasOutputSources) return (StationsNative.Unavailable, []);
+            var buf = new uint[64];
+            for (var round = 0; round < 4; round++)
+            {
+                uint n = 0;
+                int rc;
+                fixed (uint* p = buf) rc = T->OutputSources(p, (uint)buf.Length, &n);
+                if (rc == StationsNative.BufferTooSmall && n > buf.Length) { buf = new uint[n]; continue; }
+                return (rc, buf.AsSpan(0, (int)Math.Min(n, (uint)buf.Length)).ToArray());
+            }
+            return (StationsNative.BufferTooSmall, []);
+        }
+
         public ulong LastSeq() => T == null ? 0 : T->LastSeq();
 
         public bool Scanned()
@@ -656,7 +681,9 @@ internal static unsafe partial class StationsCore
         {
             if (Backend.Status() is null)
                 ServiceCaps.LowerFeatures(StationsNative.Name, Stations.ReadCapability, Stations.FillCapability, Stations.ControlCapability,
-                    Stations.EventsCapability);
+                    Stations.EventsCapability, Stations.OutputSourcesCapability);
+            else if (!Backend.HasOutputSources)
+                ServiceCaps.LowerFeatures(StationsNative.Name, Stations.OutputSourcesCapability);
         }
         catch (Exception e) when (e is ArgumentException or InvalidOperationException)
         {
@@ -909,7 +936,8 @@ internal static unsafe partial class StationsCore
         if (o.Crafts is < 1 or > 1000) throw new ArgumentException($"Crafts is 1..1000 (got {o.Crafts})", nameof(o));
         if (o.Choices is { Count: > 0 } && o.Recipe is null) throw new ArgumentException("category choices name a recipe's categories: give the Recipe too", nameof(o));
         var flags = (o.Mode == FillMode.Add ? StationsNative.FillAdd : 0) | (o.Exact ? StationsNative.FillExact : 0) |
-                    (o.DryRun ? StationsNative.DryRun : 0) | (o.Water ? 0 : StationsNative.NoWater);
+                    (o.DryRun ? StationsNative.DryRun : 0) | (o.Water ? 0 : StationsNative.NoWater) |
+                    (o.UseStationOutputs || !Backend.HasOutputSources ? 0 : StationsNative.FillNoOutputs);
         var r = Request(station, StationsNative.Fill, flags);
         r.Crafts = (uint)o.Crafts;
         r.RecipeId = o.Recipe ?? 0;
@@ -931,7 +959,7 @@ internal static unsafe partial class StationsCore
         Check(rc, "Stations.Plan");
         var inputs = new List<FillInput>();
         for (var i = 0; i < Math.Min(p.InputCount, (uint)StationsNative.MaxInputs); i++)
-            inputs.Add(new FillInput(new ItemId(p.Inputs[i * 2]), (int)p.Inputs[i * 2 + 1], (int)p.Have[i], p.Stock[i]));
+            inputs.Add(new FillInput(new ItemId(p.Inputs[i * 2]), (int)p.Inputs[i * 2 + 1], (int)p.Have[i], p.Stock[i]) { Outputs = p.Outputs[i] });
         return new FillPlan(StatusOf(p.Status), new EntityId(p.Station), p.RecipeId, (int)p.CraftsLoaded, (int)p.CraftsAffordable,
             (int)p.CraftsPlanned, inputs, StationsNative.Text(p.Message, 128))
         {
@@ -991,7 +1019,7 @@ internal static unsafe partial class StationsCore
             (int)r.CraftsAfter, (int)r.CraftsAdded, r.GameError, changes, read ? (StationState)r.StateBefore : null,
             read ? (StationState)r.StateAfter : null, (r.Flags & StationsNative.DryRun) != 0, message)
         {
-            LimitedBy = LimitOf(r.LimitedBy), ShortItem = r.ShortItem != 0 ? new ItemId(r.ShortItem) : null,
+            LimitedBy = LimitOf(r.LimitedBy), ShortItem = r.ShortItem != 0 ? new ItemId(r.ShortItem) : null, FromOutputs = (int)Math.Min(r.FromOutputs, int.MaxValue),
         };
     }
 

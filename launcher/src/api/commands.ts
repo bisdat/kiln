@@ -219,17 +219,21 @@ export type StartMode = "steam" | "direct";
 /** What the player chose for an install's start; a field left out is Kiln's default. */
 export interface StartSettings {
   mode?: StartMode;
-  /** Linux: a Proton folder (with its `proton` script) or a Wine binary; absent: automatic. */
+  /** Linux: umu-run, a Proton folder (with its `proton` script) or a Wine binary; absent: automatic. */
   runner?: string;
   /** Linux: the prefix (Proton: the compatdata folder holding pfx; Wine: the prefix); absent: Kiln's own. */
   prefix?: string;
 }
 export interface RunnerInfo {
-  kind: "proton" | "wine";
+  /** "umu": umu-run (umu-launcher, Proton outside Steam); "proton": a Proton folder; "wine": a wine program. */
+  kind: "umu" | "proton" | "wine";
   path: string;
   label: string;
-  /** "steam" (Valve's Proton), "compat" (compatibility tools: GE-Proton and others), "system", "custom". */
+  /** "compat" (compatibility tools: GE-Proton and others), "steam" (Valve's Proton in a Steam library, only when Steam
+   *  is installed), "system" (umu-run or wine on PATH), "custom" (the player's path). */
   source: "steam" | "compat" | "system" | "custom";
+  /** umu: the Proton folder it runs (PROTONPATH); absent: umu's own. */
+  proton?: string;
 }
 export interface DirectCommand {
   program: string;
@@ -246,14 +250,16 @@ export interface StartSetup {
   settings: StartSettings;
   custom: boolean;
   windows: boolean;
+  /** A Steam install was found on this PC: without one, "Through Steam" is not offered for a direct start. */
+  steamFound: boolean;
+  /** Every umu-run, Proton and Wine found, in the order "automatic" takes them. */
   runners: RunnerInfo[];
   runner: RunnerInfo | null;
-  /** What "automatic" picks: the Proton Steam maps to Enshrouded, else the first found. */
+  /** What "automatic" picks: umu-run when installed, else the newest Proton found, else Wine. */
   defaultRunner: RunnerInfo | null;
   problem?: string;
   ownPrefix: string | null;
   command: DirectCommand | null;
-  steamRunning: boolean;
 }
 /** Whether Kiln knows the build of the game's exe (sigdb's build records by sha256). */
 export interface BuildCheck {

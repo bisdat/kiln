@@ -464,6 +464,9 @@ pub struct LauncherStart {
     /// or the build. No step may run meanwhile (a snapshot found current shows none), and the start is not stalled.
     #[serde(default)]
     pub checking: bool,
+    /// The launcher starts the game itself (`crate::direct`), not Steam: the `steam` step is [`DIRECT_STEP_LABEL`].
+    #[serde(default)]
+    pub direct: bool,
 }
 
 /// A cook job as the start knows it: `<id>@<identity>` and the mod's name.
@@ -474,7 +477,8 @@ pub fn cook_key(id: &str, identity: &str) -> String {
 impl LauncherStart {
     /// Play was pressed at `now`. `cook`: the keys of the mods due for a cook (None: a start that does not cook).
     pub fn new(now: i64, cook: Option<Vec<String>>, kiln: Option<String>, fingerprint: Option<String>) -> Self {
-        let mut s = LauncherStart { began: now, plan: Vec::new(), steps: Vec::new(), kiln, fingerprint, asked: false, seen: false, kept: false, checking: false };
+        let mut s = LauncherStart { began: now, plan: Vec::new(), steps: Vec::new(), kiln, fingerprint, asked: false, seen: false, kept: false, checking: false,
+            direct: false };
         if let Some(keys) = cook {
             s.plan.push("cook".into());
             s.begin("cook", now);
@@ -548,8 +552,14 @@ impl LauncherStart {
         }
         self.end_running(now);
         let at = self.rel(now);
-        self.steps.push(LauncherStep { id: id.into(), label: default_label(id).into(), detail: None, done: None, total: None, ms: at,
+        self.steps.push(LauncherStep { id: id.into(), label: self.label(id).into(), detail: None, done: None, total: None, ms: at,
             took_ms: None, keys: Vec::new(), parts: Vec::new(), part_ms: at });
+    }
+
+    /// The label of one of its steps that has not begun yet: [`default_label`], or for a direct start's `steam` step
+    /// [`DIRECT_STEP_LABEL`].
+    pub fn label(&self, id: &str) -> &'static str {
+        if self.direct && id == "steam" { DIRECT_STEP_LABEL } else { default_label(id) }
     }
 
     /// The cook's progress (`cook::cook_mods`'s `on_event`): mod `index` of `total` (`key`, `name`) began (`line` None)
@@ -1061,7 +1071,7 @@ pub fn timeline(i: &Inputs) -> Option<Timeline> {
     for (k, id) in plan.iter().enumerate() {
         let mut t = match shown.iter().position(|s| &s.id == id) {
             Some(j) => shown[j].clone(),
-            None => TimelineStep { id: id.clone(), label: default_label(id).into(), detail: None, done: None, total: None, ms: None, took_ms: None,
+            None => TimelineStep { id: id.clone(), label: l.map_or_else(|| default_label(id), |l| l.label(id)).into(), detail: None, done: None, total: None, ms: None, took_ms: None,
                 usual_ms: None, state: StepState::Next, launcher: LAUNCHER_STEPS.contains(&id.as_str()) },
         };
         t.usual_ms = est.usual.get(k).copied().flatten();

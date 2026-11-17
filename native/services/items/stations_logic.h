@@ -37,11 +37,13 @@ inline bool request_valid(const KilnStationRequest& r) {
     for (const auto& c : r.choices)
         if (c.reserved[0] || c.reserved[1] || c.reserved[2]) return false;
     constexpr uint32_t all = KILN_STATION_FILL_ADD | KILN_STATION_FILL_EXACT | KILN_STATION_DRY_RUN | KILN_STATION_NO_WATER |
-                             KILN_STATION_AFTER_CRAFT | KILN_STATION_KEEP_STOPPED | KILN_STATION_ALLOW_LOCKED;
+                             KILN_STATION_AFTER_CRAFT | KILN_STATION_KEEP_STOPPED | KILN_STATION_ALLOW_LOCKED |
+                             KILN_STATION_FILL_NO_OUTPUTS;
     if (r.flags & ~all) return false;
     switch (r.action) {
     case KILN_STATION_FILL: {
-        constexpr uint32_t ok = KILN_STATION_FILL_ADD | KILN_STATION_FILL_EXACT | KILN_STATION_DRY_RUN | KILN_STATION_NO_WATER;
+        constexpr uint32_t ok = KILN_STATION_FILL_ADD | KILN_STATION_FILL_EXACT | KILN_STATION_DRY_RUN | KILN_STATION_NO_WATER |
+                                KILN_STATION_FILL_NO_OUTPUTS;
         if (r.flags & ~ok) return false;
         if (r.crafts < 1 || r.crafts > kMaxCrafts) return false;
         if (r.keep_count > KILN_STATIONS_MAX_KEEP || (r.keep_count && !r.keep)) return false;
@@ -72,6 +74,7 @@ struct InputNow {
     uint64_t stock = 0;
     uint64_t kept = 0;
     uint64_t room = UINT64_MAX;
+    uint64_t outputs = 0;  // of `stock`: what opted-in stations of the base lend (their Outputs), taken last
 };
 
 // The water input of a recipe with `charges` per craft (none when 0, or when the request pours no water).
@@ -243,6 +246,85 @@ inline int32_t fill_status(const Attempts& a, uint32_t wanted) {
 
 // Stock after a reserve: what may be taken of `have` when `keep` must stay.
 inline uint64_t after_keep(uint64_t stock, uint64_t keep) { return stock > keep ? stock - keep : 0; }
+
+// ---- station outputs as crafting stock (GitHub #68; docs/re/stations.md section 8) ----
+// A station's recipes as the classification needs them: the outputs, and every item that is an input (a category
+// input: all its options). Of the selected and the running recipe together, as Kiln.Blocks' SlotRoles.
+struct SourceRecipes {
+    std::vector<uint32_t> outputs;
+    std::vector<uint32_t> inputs;
+};
+// Item `item` is an Output of that station: an output of its recipes and no input of them. Then every stack of the item
+// in it is an Output stack, so the game's per-item take from the station can touch nothing else.
+inline bool lends_item(const SourceRecipes& r, uint32_t item) {
+    if (item == 0) return false;
+    if (std::find(r.inputs.begin(), r.inputs.end(), item) != r.inputs.end()) return false;
+    return std::find(r.outputs.begin(), r.outputs.end(), item) != r.outputs.end();
+}
+
+// One opted-in station as a fill sees it: the base it stands in now (-1: none) and whether it is still a station.
+struct SourceCandidate {
+    uint32_t entity = 0;
+    int32_t base = -1;
+    bool station = false;
+};
+// The stations a fill of `target` in base `base` may use, in entity order: opted in, still a station, in that base, not the
+// target itself. A station of another base is never used.
+inline std::vector<uint32_t> eligible_sources(const std::vector<SourceCandidate>& all, uint32_t target, int32_t base) {
+    std::vector<uint32_t> out;
+    if (base < 0) return out;
+    for (const SourceCandidate& c : all)
+        if (c.entity && c.entity != target && c.station && c.base == base) out.push_back(c.entity);
+    std::sort(out.begin(), out.end());
+    out.erase(std::unique(out.begin(), out.end()), out.end());
+    return out;
+}
+
+// The resolved inputs repeat an item: the game then counts and tops up each entry on its own, which Kiln's per-item
+// shortfall call cannot mirror. Such a fill uses no station outputs.
+inline bool inputs_repeat(const uint32_t* items, uint32_t n) {
+    for (uint32_t i = 0; i < n; ++i)
+        for (uint32_t k = i + 1; k < n; ++k)
+            if (items[i] == items[k]) return true;
+    return false;
+}
+
+// For a fill of n more crafts on top of `loaded`: what each input's station outputs pay, last. The player's bag and the
+// base's chests (stock - outputs: after the reserves) pay what they can first; the outputs pay only the rest. Water never
+// comes from outputs. False when the outputs do not cover the rest of some input (the plan should not have asked for n).
+inline bool output_shares(const std::vector<InputNow>& in, uint32_t n, uint32_t loaded, std::vector<uint32_t>* shares) {
+    shares->assign(in.size(), 0);
+    for (size_t k = 0; k < in.size(); ++k) {
+        const InputNow& i = in[k];
+        if (i.item == kWaterItem || i.count == 0) continue;
+        const uint64_t need = game_need(i, n, loaded);
+        const uint64_t first = i.stock - std::min(i.stock, i.outputs);
+        if (need <= first) continue;
+        const uint64_t rest = need - first;
+        if (rest > i.outputs) return false;
+        (*shares)[k] = static_cast<uint32_t>(rest);
+    }
+    return true;
+}
+inline bool any_share(const std::vector<uint32_t>& shares) {
+    return std::any_of(shares.begin(), shares.end(), [](uint32_t s) { return s != 0; });
+}
+inline uint64_t shares_total(const std::vector<uint32_t>& shares) {
+    uint64_t t = 0;
+    for (uint32_t s : shares) t += s;
+    return t;
+}
+
+// Once the shares are in the station: the n the game's own call then needs so that every input ends where a plain fill
+// of n would put it, n + loaded - loaded'. The game's call takes the rest from the player and the chests and pours the
+// water, exactly as it would have.
+inline uint32_t crafts_after_shares(const std::vector<InputNow>& in, const std::vector<uint32_t>& shares, uint32_t n, uint32_t loaded) {
+    std::vector<InputNow> after = in;
+    for (size_t k = 0; k < after.size() && k < shares.size(); ++k) after[k].have += shares[k];
+    const uint32_t l2 = crafts_loaded(after);
+    const uint64_t target = static_cast<uint64_t>(n) + loaded;
+    return l2 >= target ? 0u : static_cast<uint32_t>(target - l2);
+}
 
 // ---- stop after the running craft ----
 // A cycle is in progress while running != 0 in Running, Paused (it resumes where it paused) or OutputFull (its outputs

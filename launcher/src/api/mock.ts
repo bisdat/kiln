@@ -57,7 +57,8 @@ function reject(code: KilnError["code"], message: string, detail?: unknown): nev
 /** `?mock=fresh`: a first start: no game known yet (Detect finds the Steam one), no Kiln in it, no profiles, an empty
  *  library. `?mock=empty`: the same, and Detect finds nothing. Anything else: the seeded launcher below. */
 const MODE = typeof location !== "undefined" ? new URLSearchParams(location.search).get("mock") : null;
-const FRESH = MODE === "fresh" || MODE === "empty";
+/** `?mock=no-steam` (a PC without Steam) starts as empty does: nothing found. */
+const FRESH = MODE === "fresh" || MODE === "empty" || MODE === "no-steam";
 /** `?dist=nexus`: the Nexus Mods build (app_info.distribution "nexus": no self-update; mockUpdate.ts answers
  *  "disabled"). Anything else: a direct build. */
 export const MOCK_DISTRIBUTION: Distribution = typeof location !== "undefined" && new URLSearchParams(location.search).get("dist") === "nexus" ? "nexus" : "direct";
@@ -81,6 +82,8 @@ const steamGame: GameInstall = {
   library: STEAM, platform: "proton", prefix: `${STEAM}/steamapps/compatdata/1203620/pfx`, buildId: "26404966",
   exeSha256: "ce6fdba63e27744943b695921383a29133285d359e07671f6ca33a47e2147618", steamFlavor: "native", pathMode: "z", source: "steam",
 };
+/** `?mock=no-steam`: a PC without Steam: no game found, no Steam folder, umu-run and GE-Proton outside Steam. */
+const NO_STEAM = MODE === "no-steam";
 const games: GameInstall[] = FRESH ? [] : [steamGame];
 const baseReceipt = receiptExample as unknown as InstallReceipt;
 const kilnProxy: ProxyClass = { kind: "kiln", version: "0.2.0-dev", abi: 2, sha256: hex("proxy"), size: 98304, detail: "export KilnProxyInfo" };
@@ -519,7 +522,12 @@ function gameOf(id: unknown): GameInstall {
 
 /** The player's start choices per game (InstallRecord.start). */
 const startSettings: Record<string, StartSettings> = {};
-const mockRunners: RunnerInfo[] = [
+const HEROIC_GE = "/home/player/.config/heroic/tools/proton/GE-Proton10-25";
+const mockRunners: RunnerInfo[] = NO_STEAM ? [
+  { kind: "umu", path: "/usr/bin/umu-run", label: "umu-run", source: "system", proton: HEROIC_GE },
+  { kind: "proton", path: HEROIC_GE, label: "GE-Proton10-25", source: "compat" },
+  { kind: "wine", path: "/usr/bin/wine", label: "Wine (/usr/bin/wine)", source: "system" },
+] : [
   { kind: "proton", path: `${STEAM}/compatibilitytools.d/GE-Proton10-25`, label: "GE-Proton10-25", source: "compat" },
   { kind: "proton", path: `${STEAM}/steamapps/common/Proton 9.0`, label: "Proton 9.0", source: "steam" },
   { kind: "wine", path: "/usr/bin/wine", label: "Wine (/usr/bin/wine)", source: "system" },
@@ -541,14 +549,20 @@ function startSetup(g: GameInstall): StartSetup {
   const own = `/home/player/.local/share/kiln-prefixes/${g.id}`;
   const runner = settings.runner ? mockRunners.find((r) => r.path === settings.runner) ?? { kind: "proton", path: settings.runner, label: settings.runner.split("/").pop() ?? settings.runner, source: "custom" } : mockRunners[0];
   const compat = settings.prefix ?? own;
-  const proton = runner.kind === "proton";
+  const pfx = runner.kind === "proton" || !settings.prefix ? `${compat}/pfx` : compat;
+  const exe = `${g.path}/enshrouded.exe`;
+  // as kiln_manage::direct::command_for builds it (Proton without Steam: Kiln's own empty client folder)
+  const env: [string, string][] = runner.kind === "umu"
+    ? [["WINEPREFIX", pfx], ["GAMEID", "umu-default"], ...(runner.proton ? [["PROTONPATH", runner.proton] as [string, string]] : []), ["WINEDLLOVERRIDES", "dinput8=n,b"]]
+    : runner.kind === "proton"
+      ? [["STEAM_COMPAT_DATA_PATH", compat], ["STEAM_COMPAT_CLIENT_INSTALL_PATH", NO_STEAM ? "/home/player/.local/share/kiln-prefixes/_compat-client" : STEAM], ["WINEDLLOVERRIDES", "dinput8=n,b"]]
+      : [["WINEPREFIX", pfx], ["WINEDLLOVERRIDES", "mshtml=;dinput8=n,b"]];
   return {
-    mode: startOf(g), settings, custom: isCustom(g), windows: WIN_MOCK, runners: WIN_MOCK ? [] : mockRunners, runner: WIN_MOCK ? null : runner, defaultRunner: WIN_MOCK ? null : mockRunners[0], ownPrefix: WIN_MOCK ? null : own,
-    steamRunning: MODE !== "no-steam",
+    mode: startOf(g), settings, custom: isCustom(g), windows: WIN_MOCK, steamFound: !NO_STEAM, runners: WIN_MOCK ? [] : mockRunners, runner: WIN_MOCK ? null : runner,
+    defaultRunner: WIN_MOCK ? null : mockRunners[0], ownPrefix: WIN_MOCK ? null : own,
     command: WIN_MOCK ? { program: `${g.path}\\enshrouded.exe`, args: [], cwd: g.path, env: [], envRemove: ["KILN_DISABLE"], runner: null, prefix: null } : {
-      program: proton ? `${runner.path}/proton` : runner.path, args: proton ? ["run", `${g.path}/enshrouded.exe`] : [`${g.path}/enshrouded.exe`], cwd: g.path,
-      env: proton ? [["STEAM_COMPAT_DATA_PATH", compat], ["STEAM_COMPAT_CLIENT_INSTALL_PATH", STEAM], ["WINEDLLOVERRIDES", "dinput8=n,b"]] : [["WINEPREFIX", compat], ["WINEDLLOVERRIDES", "mshtml=;dinput8=n,b"]],
-      envRemove: ["WINEPREFIX", "SteamAppId", "SteamGameId"], runner, prefix: proton ? `${compat}/pfx` : compat,
+      program: runner.kind === "proton" ? `${runner.path}/proton` : runner.path, args: runner.kind === "proton" ? ["run", exe] : [exe], cwd: g.path,
+      env, envRemove: ["WINEPREFIX", "SteamAppId", "SteamGameId", "GAMEID", "PROTONPATH"], runner, prefix: pfx,
     },
   };
 }

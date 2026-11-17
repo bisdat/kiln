@@ -42,7 +42,7 @@ export function ProfilesCard() {
     onSuccess: (r, pid) => {
       qc.setQueryData(qk.active(game!.id), r);
       invalidateGame(qc, game!.id);
-      toast.ok(pid ? t("profilesSettings.loadedToast", { name: nameOf(pid) }) : t("profilesSettings.noneLoadedToast"), pid ? t("profilesSettings.loadedDetail") : t("profilesSettings.noneLoadedDetail"));
+      toast.ok(pid ? t("profilesSettings.loadedToast", { name: nameOf(pid) }) : t("profilesSettings.noneLoadedToast"), pid ? (status.data?.start === "direct" ? t("profilesSettings.loadedDetailDirect") : t("profilesSettings.loadedDetail")) : t("profilesSettings.noneLoadedDetail"));
       notifyActivation(r);
     },
     onError: (e, pid, undo) => { undo?.(); if (!notifyLibraryChanged(qc, e, () => load.mutate(pid))) toast.error(e); },

@@ -113,9 +113,9 @@ pub async fn launch_play(app: AppHandle, game_id: String, request: LaunchRequest
             open(uri)
         };
         let dirs = dirs()?;
-        // (dev.29.17) a folder that starts directly: the launcher starts its exe (Proton or Wine on Linux) instead of
-        // asking Steam, which only ever starts the copy in its own library. The command is built before anything is
-        // written, so a missing Proton refuses the start as it is.
+        // (dev.29.17) a folder that starts directly: the launcher starts its exe (umu-run, Proton or Wine on Linux)
+        // instead of asking Steam, which only ever starts the copy in its own library; nothing of Steam is needed. The
+        // command is built before anything is written, so a missing runner refuses the start as it is.
         let mut g = g;
         let direct = if kiln_manage::direct::mode_of(&dirs, &g) == kiln_manage::direct::StartMode::Direct {
             // the install as it starts directly (its prefix: the saves backed up, the path mode), then the command
@@ -130,6 +130,8 @@ pub async fn launch_play(app: AppHandle, game_id: String, request: LaunchRequest
                 let log = kiln_manage::launch::direct_log(&dirs, &g);
                 let go = |c: &kiln_manage::direct::DirectCommand| {
                     track(&id, |t| {
+                        // the step keeps its id (the timeline's contract) and says what it is: no Steam in it
+                        t.direct = true;
                         t.begin("steam", now_ms());
                         if let Some(s) = t.steps.iter_mut().rev().find(|s| s.id == "steam") {
                             s.label = kiln_manage::start_progress::DIRECT_STEP_LABEL.into();
@@ -232,7 +234,9 @@ pub async fn launch_begin(game_id: String, mode: kiln_manage::launch::LaunchMode
         });
         let request = LaunchRequest { mode, profile_id: None, skip_backup: true };
         let fp = if mode == LaunchMode::Once { None } else { kiln_manage::launch::launch_fingerprint(&dirs()?, &g, &request).ok() };
-        let t = kiln_manage::start_progress::LauncherStart::new(at, cook, runtime_version(&g), fp);
+        let mut t = kiln_manage::start_progress::LauncherStart::new(at, cook, runtime_version(&g), fp);
+        // a direct start's last launcher step is the launcher starting the game, not Steam (its label before it begins)
+        t.direct = kiln_manage::direct::mode_of(&dirs()?, &g) == kiln_manage::direct::StartMode::Direct;
         STARTS.lock().unwrap_or_else(|e| e.into_inner()).insert(game_id, t);
         Ok(())
     })

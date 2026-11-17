@@ -37,13 +37,16 @@ export default function PlayPage() {
   const t = useT();
   const ctl = usePlayControl();
   const { games, loading, error } = useGame();
+  // a custom folder just added: its start dialog lives here, so it stays when the page turns from "no game" to Play
+  const [added, setAdded] = useState<GameInstall | null>(null);
+  const dialog = added && <StartModal game={added} added open onClose={() => setAdded(null)} />;
   if (loading) return <section className="k-hero" aria-label={t("play.label")} aria-busy />;
-  if (!ctl.game) return <NoGame error={error} hasOther={games.length > 0} />;
-  return <PlayFor game={ctl.game} ctl={ctl} />;
+  if (!ctl.game) return <><NoGame error={error} hasOther={games.length > 0} onAdded={setAdded} />{dialog}</>;
+  return <><PlayFor game={ctl.game} ctl={ctl} onAdded={setAdded} />{dialog}</>;
 }
 
 /** No client known: the launcher is looking by itself (once per start), or found nothing: Add a folder, Look again. */
-function NoGame({ error, hasOther }: { error: unknown; hasOther: boolean }) {
+function NoGame({ error, hasOther, onAdded }: { error: unknown; hasOther: boolean; onAdded: (g: GameInstall) => void }) {
   const t = useT();
   const qc = useQueryClient();
   const [adding, setAdding] = useState(false);
@@ -64,19 +67,18 @@ function NoGame({ error, hasOther }: { error: unknown; hasOther: boolean }) {
           )}
         </div>
       </section>
-      <AddGameModal open={adding} onClose={() => setAdding(false)} />
+      <AddGameModal open={adding} onClose={() => setAdding(false)} onAdded={onAdded} />
     </>
   );
 }
 
 /** Add a game folder: any folder with enshrouded.exe, in a Steam library or not. A folder no Steam library knows is a
  *  custom install: right after adding it, the start dialog shows (Kiln starts it directly by default). */
-function AddGameModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+function AddGameModal({ open, onClose, onAdded }: { open: boolean; onClose: () => void; onAdded: (g: GameInstall) => void }) {
   const t = useT();
   const qc = useQueryClient();
   const setGameId = useGameSel((s) => s.setGameId);
   const [path, setPath] = useState("");
-  const [custom, setCustom] = useState<GameInstall | null>(null);
   const add = useMutation({
     mutationFn: () => api.gameAdd(path.trim()),
     onSuccess: (g) => {
@@ -86,20 +88,17 @@ function AddGameModal({ open, onClose }: { open: boolean; onClose: () => void })
       toast.ok(isCustom ? t("play.addGame.addedCustom") : t("play.addGame.added"));
       setPath("");
       onClose();
-      if (isCustom) setCustom(g);
+      if (isCustom) onAdded(g);
     },
     onError: (e) => toast.error(e),
   });
   return (
-    <>
-      <Modal open={open} onClose={onClose} title={t("play.addGame.title")}
-        footer={<><Button variant="ghost" onClick={onClose}>{t("common.cancel")}</Button><Button variant="primary" disabled={!path.trim()} loading={add.isPending} onClick={() => add.mutate()}>{t("common.add")}</Button></>}>
-        <Field label={t("play.addGame.folder")} hint={t("play.addGame.folderHint")} htmlFor="add-game">
-          <PathPicker id="add-game" value={path} onChange={setPath} directory placeholder={WIN ? "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Enshrouded" : "~/…/steamapps/common/Enshrouded"} />
-        </Field>
-      </Modal>
-      {custom && <StartModal game={custom} added open onClose={() => setCustom(null)} />}
-    </>
+    <Modal open={open} onClose={onClose} title={t("play.addGame.title")}
+      footer={<><Button variant="ghost" onClick={onClose}>{t("common.cancel")}</Button><Button variant="primary" disabled={!path.trim()} loading={add.isPending} onClick={() => add.mutate()}>{t("common.add")}</Button></>}>
+      <Field label={t("play.addGame.folder")} hint={t("play.addGame.folderHint")} htmlFor="add-game">
+        <PathPicker id="add-game" value={path} onChange={setPath} directory placeholder={WIN ? "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Enshrouded" : "~/…/steamapps/common/Enshrouded"} />
+      </Field>
+    </Modal>
   );
 }
 
@@ -124,7 +123,7 @@ const PROXY_PRODUCT: Partial<Record<ProxyKind, string>> = {
   ember: "Ember", livemap: "Live Map", sharedxp: "Shared XP", reshade: "ReShade",
 };
 
-function PlayFor({ game, ctl }: { game: GameInstall; ctl: PlayControl }) {
+function PlayFor({ game, ctl, onAdded }: { game: GameInstall; ctl: PlayControl; onAdded: (g: GameInstall) => void }) {
   const t = useT();
   const qc = useQueryClient();
   const nav = useNavigate();
@@ -275,12 +274,12 @@ function PlayFor({ game, ctl }: { game: GameInstall; ctl: PlayControl }) {
         <button type="button" className="k-link" onClick={() => setAdding(true)} title={t("play.addGame.title")}>{t("common.add")}</button>
         {s?.start && (
           <button type="button" className="k-link" data-testid="start-mode" onClick={() => setStartOpen(true)}
-            title={direct ? t("gameStart.steamRequired") : t("gameStart.steamHint")}>{t("play.startsVia", { how: startWord(s.start) })}</button>
+            title={direct ? t("gameStart.directHint") : t("gameStart.steamHint")}>{t("play.startsVia", { how: startWord(s.start) })}</button>
         )}
       </div>
 
       <VanillaOnceModal open={vanillaOpen} onClose={() => setVanillaOpen(false)} onPlay={() => { setVanillaOpen(false); ctl.play("vanilla"); }} />
-      <AddGameModal open={adding} onClose={() => setAdding(false)} />
+      <AddGameModal open={adding} onClose={() => setAdding(false)} onAdded={onAdded} />
       <StartModal game={game} open={startOpen} onClose={() => setStartOpen(false)} />
       {pending.data && offerOpen && (ModpackOffer ? (
         <Suspense fallback={null}><ModpackOffer gameId={game.id} lastServer={pending.data} open={offerOpen} onClose={() => setOfferOpen(false)} /></Suspense>
@@ -308,9 +307,6 @@ function Banners({ game, ctl, pending, onOffer, boot }: { game: GameInstall; ctl
   const out = [];
   // (dev.29.17) the exe's build is one Kiln has no verified record of: Kiln starts with the game and stays idle
   if (s?.build && !s.build.known) out.push(<UnknownBuild key="build" build={s.build} />);
-  if (direct && setup.data && !setup.data.steamRunning && !ctl.running) {
-    out.push(<Banner key="steam-off" tone="warn" title={t("gameStart.steamNotRunning")}>{t("gameStart.steamNotRunningText")}</Banner>);
-  }
   if (direct && setup.data?.problem && !ctl.running) {
     out.push(<Banner key="start-problem" tone="err" title={t("gameStart.cannotStart")}>{setup.data.problem}</Banner>);
   }

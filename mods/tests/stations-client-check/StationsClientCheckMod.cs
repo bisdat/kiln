@@ -18,6 +18,8 @@ namespace StationsClientCheck;
 /// <item><c>recipes</c>, <c>select &lt;n&gt; [locked]</c>: the station's recipes, and <see cref="Stations.Select"/> of the
 /// n-th (with <c>locked</c>: allowLocked).</item>
 /// <item><c>collect</c>: <see cref="Stations.CollectToBase"/>.</item>
+/// <item><c>lend [off]</c>: the station opted in (or out) as crafting stock (<see cref="Stations.SetOutputSource"/>, check C7);
+/// with the base's lenders listed by <c>base</c>.</item>
 /// <item><c>cancel fill|select|stop|off</c>: the next such button a player presses at a station is canceled
 /// (<see cref="StationPlayerActionEvent"/>).</item>
 /// </list>
@@ -34,7 +36,8 @@ public sealed class StationsClientCheckMod : Mod
     public override void OnLoad()
     {
         Say($"Stations.Available = {Stations.Available}, Bases.Available = {Bases.Available} (dedicated server {Client.IsDedicatedServer})");
-        foreach (var row in new[] { Stations.ReadCapability, Stations.FillCapability, Stations.ControlCapability, Stations.EventsCapability })
+        foreach (var row in new[] { Stations.ReadCapability, Stations.FillCapability, Stations.ControlCapability, Stations.EventsCapability,
+                     Stations.OutputSourcesCapability })
             Say($"{row} = {(Capabilities.Is(row) ? "on" : "off")} ({Capabilities.Why(row)})");
         Try("StationStateChangedEvent", () => _subs.Add(Events.On<StationStateChangedEvent>(e => Say($"event: {e}"))));
         Try("StationCraftedEvent", () => _subs.Add(Events.On<StationCraftedEvent>(e => Say($"event: {e}"))));
@@ -53,7 +56,7 @@ public sealed class StationsClientCheckMod : Mod
             }
         })));
         Try("commands", () => _subs.Add(Commands.Register("stationcheck", c => _ = Run(c), CommandPermission.Admin,
-            usage: "base | show | logs [n] | plan [n] | fill [n] [add] [dry] [exact] | stop [after] | resume | recipes | select <n> [locked] | collect | cancel fill|select|stop|off",
+            usage: "base | show | logs [n] | plan [n] | fill [n] [add] [dry] [exact] | stop [after] | resume | recipes | select <n> [locked] | collect | lend [off] | cancel fill|select|stop|off",
             description: "kiln.stations' real-client check")));
     }
 
@@ -110,6 +113,7 @@ public sealed class StationsClientCheckMod : Mod
                 Out($"  Magic chests: {string.Join(", ", Bases.Storage(home.Id))} (take deposits: {string.Join(", ", Bases.Storage(home.Id, deposit: true))})");
                 Out($"  water: {string.Join(", ", Bases.WaterSources(home.Id))}");
                 foreach (var s in Stations.InBase(home.Id)) Out($"  {Stations.Read(s)}");
+                Out($"  lending their outputs: {string.Join(", ", Stations.OutputSources(home.Id))}");
                 return;
             }
             if (verb == "logs")
@@ -169,8 +173,15 @@ public sealed class StationsClientCheckMod : Mod
                 case "collect":
                     Out($"CollectToBase: {await Stations.CollectToBase(station)}");
                     break;
+                case "lend":
+                {
+                    var on = !Has(c, "off");
+                    var kept = Stations.SetOutputSource(station, on);
+                    Out($"station {station} {(on ? "lends" : "no longer lends")} its outputs as crafting stock{(on ? kept ? " (kept with the save)" : " (this session only)" : "")}");
+                    break;
+                }
                 default:
-                    Out("/stationcheck base | show | logs [n] | plan [n] | fill [n] [add] [dry] [exact] | stop [after] | resume | recipes | select <n> [locked] | collect | cancel fill|select|stop|off");
+                    Out("/stationcheck base | show | logs [n] | plan [n] | fill [n] [add] [dry] [exact] | stop [after] | resume | recipes | select <n> [locked] | collect | lend [off] | cancel fill|select|stop|off");
                     break;
             }
         }

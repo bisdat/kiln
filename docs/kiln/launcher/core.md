@@ -126,9 +126,11 @@ clashes), `get`, `list` (`ProfileSummary.active` = installs whose profile.json n
   `profile`; a save backup (`saves`, reason `launch`) when the kms1 of what loads differs from the last launch
   (`<data>/installs/<id>.launch.json`; vanilla and no-mods are the empty set); then `steam://rungameid/<app>`
   (xdg-open / ShellExecuteW), or for an install that starts directly (dev.29.17, `direct`: a folder no Steam library
-  knows by default, else the record's `start`) the folder's `enshrouded.exe` itself: on Windows in the game folder, on
-  Linux through `proton run` (`STEAM_COMPAT_DATA_PATH`, `STEAM_COMPAT_CLIENT_INSTALL_PATH`) or `wine` (`WINEPREFIX`),
-  with `WINEDLLOVERRIDES` `dinput8=n,b`, in Kiln's own prefix per install unless the player picked one
+  knows by default, else the record's `start`) the folder's `enshrouded.exe` itself, with no Steam needed: on Windows
+  in the game folder, on Linux through `umu-run` (`WINEPREFIX`, `GAMEID=umu-default`, `PROTONPATH`), `proton run`
+  (`STEAM_COMPAT_DATA_PATH`, `STEAM_COMPAT_CLIENT_INSTALL_PATH`: Steam's folder, else Kiln's empty
+  `kiln-prefixes/_compat-client`) or `wine` (`WINEPREFIX`); automatic takes umu-run, else the newest Proton, else
+  Wine; with `WINEDLLOVERRIDES` `dinput8=n,b`, in Kiln's own prefix per install unless the player picked one
   ([custom-game-folders.md](custom-game-folders.md); contracts.md section 7, Launch, step 4). A failure removes the
   flag again. `play_with` takes the save folders and the URI opener (tests), `play_via` a `Starter` (the URI opener or
   the direct command and its starter; tests record the command, nothing runs).

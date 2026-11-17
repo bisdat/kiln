@@ -56,7 +56,7 @@ export function playState(s: GameStatus | null | undefined, launch: BootState | 
   const raw = gameState(s, launch, loading, now);
   const view: GameStateView = s?.running && !s.steamUpdating && vanilla
     ? { phase: "vanilla", label: t("shell.gameState.vanilla"), word: "vanilla", tone: "info", pulse: true, detail: t("shell.gameState.startedWithoutKiln"), detailKiln: false }
-    : kilnMissing ? { phase: "running", label: t("shell.gameState.noKiln"), word: "noKiln", tone: "warn", pulse: true, detail: t("shell.gameState.noKilnDetail"), detailKiln: false } : raw;
+    : kilnMissing ? { phase: "running", label: t("shell.gameState.noKiln"), word: "noKiln", tone: "warn", pulse: true, detail: noKilnDetail(s), detailKiln: false } : raw;
   const starting = !!s?.running && !s.steamUpdating && !vanilla && !boot && !kilnMissing
     && (s.playOncePending || (ours && !noBootLate));
   return { view, kilnMissing, starting };
@@ -75,7 +75,7 @@ export function gameState(s: GameStatus | null | undefined, launch?: BootState |
   if (!s.running) return { phase: "stopped", label: t("shell.gameState.stopped"), word: "stopped", tone: "idle", pulse: false, detail: null };
   const boot = currentBoot(s, launch);
   if (!boot) {
-    if (playOnceMissed(s, now)) return { phase: "running", label: t("shell.gameState.noKiln"), word: "noKiln", tone: "warn", pulse: true, detail: t("shell.gameState.noKilnDetail"), detailKiln: false };
+    if (playOnceMissed(s, now)) return { phase: "running", label: t("shell.gameState.noKiln"), word: "noKiln", tone: "warn", pulse: true, detail: noKilnDetail(s), detailKiln: false };
     return s.playOncePending
       ? { phase: "starting", label: t("shell.gameState.starting"), word: "starting", tone: "ember", pulse: true, detail: t("shell.gameState.waitingBoot"), detailKiln: false }
       : { phase: "running", label: t("shell.gameState.running"), word: "running", tone: "ok", pulse: true, detail: s.pid ? t("shell.gameState.pid", { pid: s.pid }) : null, detailKiln: false };
@@ -87,4 +87,9 @@ export function gameState(s: GameStatus | null | undefined, launch?: BootState |
     tone: boot.safeIdle ? "warn" : "ok", pulse: true,
     detail: what ? t("shell.gameState.kilnWhat", { version: boot.kiln, what }) : t("shell.gameState.kiln", { version: boot.kiln }), detailKiln: true,
   };
+}
+
+/** Why the running game has no Kiln: a start through Steam did not load it; a direct start's game did not load the proxy. */
+function noKilnDetail(s: GameStatus | null | undefined): string {
+  return s?.start === "direct" ? t("shell.gameState.noKilnDetailDirect") : t("shell.gameState.noKilnDetail");
 }

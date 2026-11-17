@@ -1,14 +1,15 @@
 // How Kiln starts a game install (dev.29.17, kiln_manage::direct; docs/kiln/launcher/custom-game-folders.md): through
 // Steam (steam://rungameid, the default for Steam's own copy) or directly (the launcher starts this folder's
-// enshrouded.exe: the default for a folder no Steam library knows). On Linux a direct start runs under a Proton or Wine
-// the player picks, in Kiln's own prefix for the install unless the player picks one. Also the line for a game build
-// Kiln does not know, used on Play and in Settings' game list.
+// enshrouded.exe: the default for a folder no Steam library knows). A direct start needs no Steam and its words never
+// name Steam. On Linux it runs under umu-run, a Proton or a Wine (automatic: in that order), in Kiln's own prefix for
+// the install unless the player picks one. Also the line for a game build Kiln does not know, used on Play and in
+// Settings' game list.
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import * as api from "../api/commands";
-import type { BuildCheck, GameInstall, StartMode, StartSettings } from "../api/commands";
+import type { BuildCheck, GameInstall, RunnerInfo, StartMode, StartSettings } from "../api/commands";
 import { qk } from "../api/hooks";
-import { useT } from "../i18n";
+import { t, useT } from "../i18n";
 import { Banner, Button, Field, Modal, PathPicker, Segmented, Select, toast } from "../ui";
 
 /** The player docs on custom folders (Steam, unknown builds), linked from the launcher. */
@@ -73,12 +74,20 @@ export function StartModal({ game, open, onClose, added }: { game: GameInstall; 
     },
     onError: (e) => toast.error(e),
   });
-  const auto = s?.defaultRunner ? t("gameStart.runnerAuto", { name: s.defaultRunner.label }) : t("gameStart.runnerNone");
+  const auto = s?.defaultRunner ? t("gameStart.runnerAuto", { name: runnerName(s.defaultRunner) }) : t("gameStart.runnerNone");
   const runnerOptions = [
     { value: AUTO, label: auto },
-    ...(s?.runners ?? []).map((r) => ({ value: r.path, label: `${r.label} · ${r.source === "steam" ? t("gameStart.fromSteam") : r.source === "compat" ? t("gameStart.fromCompat") : r.kind === "wine" ? "Wine" : t("gameStart.fromPath")}` })),
+    ...(s?.runners ?? []).map((r) => ({ value: r.path, label: runnerLabel(r) })),
     { value: CUSTOM, label: t("gameStart.runnerOther") },
   ];
+  // "automatic" explained: umu-run, else the newest Proton, else Wine, and what it is now
+  // (none found: the problem banner below says what to install)
+  const autoWhy = !s?.defaultRunner ? null
+    : s.defaultRunner.kind === "umu" ? t("gameStart.autoUmu", { proton: s.defaultRunner.proton ? baseName(s.defaultRunner.proton) : t("gameStart.umuOwnProton") })
+    : s.defaultRunner.kind === "proton" ? t("gameStart.autoProton", { name: s.defaultRunner.label })
+    : t("gameStart.autoWine");
+  // with no Steam on this PC a direct start is the only way: nothing to choose, and no Steam to speak of
+  const offerSteam = !s || s.steamFound || mode === "steam" || s.mode === "steam";
   const cmd = s?.command;
   const preview = cmd ? [...cmd.env.map(([k, v]) => `${k}=${quote(v)}`), quote(cmd.program), ...cmd.args.map(quote)].join(" ") : null;
   return (
@@ -91,20 +100,22 @@ export function StartModal({ game, open, onClose, added }: { game: GameInstall; 
       </>}>
       <div className="k-stack" style={{ gap: 12 }} data-testid="game-start">
         {s?.custom && <span className="k-hint">{t("gameStart.customIntro")}</span>}
-        <Field label={t("gameStart.how")}>
-          <Segmented<StartMode> aria-label={t("gameStart.how")} value={mode} onChange={setMode}
-            options={[{ id: "steam", label: t("gameStart.steam") }, { id: "direct", label: t("gameStart.direct") }]} />
-        </Field>
+        {offerSteam && (
+          <Field label={t("gameStart.how")}>
+            <Segmented<StartMode> aria-label={t("gameStart.how")} value={mode} onChange={setMode}
+              options={[{ id: "steam", label: t("gameStart.steam") }, { id: "direct", label: t("gameStart.direct") }]} />
+          </Field>
+        )}
         <span className="k-hint">{mode === "steam" ? (s?.custom ? t("gameStart.steamCustomHint") : t("gameStart.steamHint")) : t("gameStart.directHint")}</span>
         {mode === "direct" && (
           <>
-            <span className="k-hint" data-testid="steam-required">{t("gameStart.steamRequired")}</span>
-            {s && !s.steamRunning && <Banner tone="warn" title={t("gameStart.steamNotRunning")}>{t("gameStart.steamNotRunningText")}</Banner>}
+            <span className="k-hint" data-testid="direct-only">{t("gameStart.directOnly")}</span>
             {s && !s.windows && (
               <>
                 <Field label={t("gameStart.runner")} hint={t("gameStart.runnerHint")} htmlFor="start-runner">
                   <Select id="start-runner" value={runner} onChange={setRunner} options={runnerOptions} />
                 </Field>
+                {runner === AUTO && autoWhy && <span className="k-hint" data-testid="runner-auto">{autoWhy}</span>}
                 {runner === CUSTOM && (
                   <Field label={t("gameStart.runnerPath")} hint={t("gameStart.runnerPathHint")} htmlFor="start-runner-path">
                     <PathPicker id="start-runner-path" value={customRunner} onChange={setCustomRunner} placeholder="/…/GE-Proton10-25" />
@@ -128,6 +139,22 @@ export function StartModal({ game, open, onClose, added }: { game: GameInstall; 
       </div>
     </Modal>
   );
+}
+
+function baseName(p: string): string {
+  return p.split(/[\\/]/).filter(Boolean).pop() ?? p;
+}
+
+/** A runner's name: umu-run with the Proton it runs, else its label. */
+function runnerName(r: RunnerInfo): string {
+  return r.kind === "umu" ? t("gameStart.umuWith", { proton: r.proton ? baseName(r.proton) : t("gameStart.umuOwnProton") }) : r.label;
+}
+
+/** A runner in the picker: its name and where it was found. */
+function runnerLabel(r: RunnerInfo): string {
+  const from = r.source === "custom" ? t("gameStart.fromPath") : r.kind === "umu" ? t("gameStart.fromUmu")
+    : r.source === "compat" ? t("gameStart.fromCompat") : r.source === "steam" ? t("gameStart.fromValve") : r.kind === "wine" ? "Wine" : t("gameStart.fromPath");
+  return `${runnerName(r)} · ${from}`;
 }
 
 function quote(v: string): string {

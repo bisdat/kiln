@@ -462,12 +462,14 @@ public sealed class CommandRegistration : IDisposable
     }
 }
 
-/// <summary>What a chat line naming an unknown command does.</summary>
+/// <summary>What a chat line naming an unknown command does (<see cref="Commands.UnknownCommands"/>).</summary>
 public enum UnknownCommandPolicy
 {
-    /// <summary>Tell the player it is unknown; the line is not shown in chat.</summary>
+    /// <summary>Kiln eats the line and tells the player "Unknown command": nobody sees it, and the game and other mods
+    /// that read chat never get it. Opt-in (<c>kiln/config/chat.json</c> <c>"unknownCommands": "reply"</c>).</summary>
     Reply = 0,
-    /// <summary>Let the line through to the chat as ordinary text.</summary>
+    /// <summary>The line goes on untouched, as if Kiln weren't there: to the game's chat and to whatever else reads chat
+    /// (EMF Lua, other loaders, native mods). No reply. The default.</summary>
     PassThrough = 1,
 }
 
@@ -537,8 +539,17 @@ public static class Commands
     /// <summary>What starts a command in chat. Default "/".</summary>
     public static string Prefix { get; set; } = "/";
 
-    /// <summary>What a chat line naming an unknown command does.</summary>
-    public static UnknownCommandPolicy UnknownCommands { get; set; } = UnknownCommandPolicy.Reply;
+    private static UnknownCommandPolicy _unknownCommands = UnknownCommandPolicy.PassThrough;
+
+    /// <summary>What a chat line naming an unknown command does. Default <see cref="UnknownCommandPolicy.PassThrough"/>:
+    /// other loaders' and mods' slash commands reach them. The server's <c>kiln/config/chat.json</c>
+    /// <c>"unknownCommands"</c> (<c>"reply"</c> or <c>"passThrough"</c>), when set, wins over the value set here; the
+    /// getter returns the value in effect.</summary>
+    public static UnknownCommandPolicy UnknownCommands
+    {
+        get => ChatConfig.UnknownCommands ?? _unknownCommands;
+        set => _unknownCommands = value;
+    }
 
     /// <summary>Registers a command owned by the calling mod (removed when it unloads). Names are case-insensitive,
     /// made of letters, digits and <c>_ - . :</c>. Throws when the name or an alias is taken by another mod; the
@@ -1021,10 +1032,8 @@ public static class Commands
     /// the sender of <paramref name="message"/>.</summary>
     internal static bool RunFromChat(ChatMessage message, string text)
     {
-        var name = CommandLine.Tokenize(text.StartsWith(Prefix, StringComparison.Ordinal) ? text[Prefix.Length..] : text).FirstOrDefault().Text ?? "";
-        bool known;
-        lock (Lock) known = ByName.ContainsKey(name);
-        if (!known && UnknownCommands == UnknownCommandPolicy.PassThrough) return false;
+        // an unknown name under PassThrough: false, so kiln.chat hands the line to the game exactly as typed
+        if (PassesThrough(text)) return false;
         var source = message.Player is { Entity.IsNone: false } p
             ? CommandSource.ForPlayer(p.Entity, p.Name)
             : CommandSource.ForPlayer(EntityId.None, message.SenderName.Length > 0 ? message.SenderName : $"connection 0x{message.Connection:x}");
@@ -1035,6 +1044,15 @@ public static class Commands
             catch (InvalidOperationException) { }
         }
         return !result.KeepLine;
+    }
+
+    /// <summary>The command line names no Kiln command (name or alias) and unknown commands pass through.</summary>
+    internal static bool PassesThrough(string text)
+    {
+        var name = CommandLine.Tokenize(text.StartsWith(Prefix, StringComparison.Ordinal) ? text[Prefix.Length..] : text).FirstOrDefault().Text ?? "";
+        bool known;
+        lock (Lock) known = ByName.ContainsKey(name);
+        return !known && UnknownCommands == UnknownCommandPolicy.PassThrough;
     }
 
     /// <summary>Splits a command line like a shell: spaces separate, "double" or 'single' quotes group, backslash
@@ -1065,6 +1083,8 @@ public static class Commands
             foreach (var e in All.Where(e => e.Info.Owner != "kiln" || e.Owner is not null || e.Holds is not null).ToList()) RemoveLocked(e);
             _adminCheck = null;
         }
+        _unknownCommands = UnknownCommandPolicy.PassThrough;
+        ChatConfig.ResetForTests();
     }
 
     private static void HelpList(CommandContext ctx)

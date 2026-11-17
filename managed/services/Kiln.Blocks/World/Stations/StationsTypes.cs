@@ -200,6 +200,12 @@ public sealed record FillOptions
 
     /// <summary>Reserves: at least this many of each item stay in the base's stock containers (up to 64 items).</summary>
     public IReadOnlyDictionary<ItemId, long>? Keep { get; init; }
+
+    /// <summary>Also take, last, from the finished items of the base's stations that are opted in as crafting stock
+    /// (<see cref="Stations.SetOutputSource"/>): after <see cref="Player"/>'s bag and the Magic chests, only what they
+    /// cannot cover. Default true; with no station opted in it changes nothing. False: the game's own sources only. Since
+    /// 0.2.0-dev.29.17 (<c>stations.output_sources</c>; without it the fill uses the game's sources only).</summary>
+    public bool UseStationOutputs { get; init; } = true;
 }
 
 /// <summary>What kept a fill below what was asked.</summary>
@@ -217,8 +223,14 @@ public enum FillLimit
     Water = 4,
 }
 
-/// <summary>One input of a fill plan: what one craft needs, what the station holds, what the base's stock can give.</summary>
-public readonly record struct FillInput(ItemId Item, int PerCraft, int Have, long Stock);
+/// <summary>One input of a fill plan: what one craft needs, what the station holds, what the base's stock can give (the
+/// Magic chests after the reserves, and the named player's bag).</summary>
+public readonly record struct FillInput(ItemId Item, int PerCraft, int Have, long Stock)
+{
+    /// <summary>What opted-in stations of the base lend of it (their finished items), taken after <see cref="Stock"/>;
+    /// 0 with none opted in. Since 0.2.0-dev.29.17.</summary>
+    public long Outputs { get; init; }
+}
 
 /// <summary>What a fill would do now (<see cref="Stations.Plan"/>). Since 0.2.0-dev.29.14.</summary>
 /// <param name="Status">Done when <see cref="CraftsPlanned"/> crafts would go in; Partial when fewer than asked; otherwise
@@ -226,7 +238,8 @@ public readonly record struct FillInput(ItemId Item, int PerCraft, int Have, lon
 /// <param name="Station">The station.</param>
 /// <param name="Recipe">The recipe.</param>
 /// <param name="CraftsLoaded">Complete crafts the station holds now.</param>
-/// <param name="CraftsAffordable">More crafts the base's stock covers (after the reserves).</param>
+/// <param name="CraftsAffordable">More crafts the base's stock covers (after the reserves; with the opted-in stations'
+/// outputs, since 0.2.0-dev.29.17).</param>
 /// <param name="CraftsPlanned">More crafts a fill with these options would ask the game for.</param>
 /// <param name="Inputs">The resolved inputs (category choices applied).</param>
 /// <param name="Message">Why, when nothing (or less than asked) would go in.</param>
@@ -352,6 +365,9 @@ public sealed record StationResult(StationActionStatus Status, StationAction Act
     public FillLimit LimitedBy { get; init; }
     /// <summary>Fill limited by <see cref="FillLimit.Stock"/> or <see cref="FillLimit.Reserve"/>: the item; null otherwise.</summary>
     public ItemId? ShortItem { get; init; }
+    /// <summary>Fill: items taken from opted-in stations' finished items (<see cref="Stations.SetOutputSource"/>), all
+    /// inputs together; 0 when the player and the Magic chests covered it. Since 0.2.0-dev.29.17.</summary>
+    public int FromOutputs { get; init; }
 
     /// <summary>The same call may succeed later as it is: <see cref="StationActionStatus.QueueFull"/>,
     /// <see cref="StationActionStatus.Dropped"/>, and the stock or room shortages of a fill (they change as players and
