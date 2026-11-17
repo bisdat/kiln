@@ -1,5 +1,48 @@
 # Native chat input: phase-1 history groundwork
 
+## 12:01 in-game trace: draft restored in model, but SetText skipped
+
+At 12:01 on 17 Nov 2026, user confirmed Up visibly recalled the command
+but Down did not restore the unsent draft. The new browse flags show:
+
+```text
+recall older entries=1 changed=1 browsing_before=0 browsing_after=1
+engine edit replacement verified (widget readback)
+recall newer entries=1 changed=0 browsing_before=1 browsing_after=0
+```
+
+**Root cause:** the model correctly exits browsing and returns the saved
+draft on Down, but the adapter compares it to the pre-`TextInputProcess`
+widget snapshot. That snapshot still equals the original draft even though
+the earlier Up applied and displayed the recalled command. The comparison
+therefore yields `changed=0` and skips `EditSetText`. Repeated Up at the
+oldest history entry was also needlessly resent because it compared against
+the stale snapshot rather than the last applied command.
+
+**Fork-only correction (not yet game-tested):** `needs_replacement()`
+compares against Kiln's last successfully applied text **while browsing**
+and against the live widget text **when starting navigation outside browsing**.
+The Down transition now calls `EditSetText` even when its target equals
+the pre-call stale widget snapshot, and repeated Up on the oldest entry
+becomes a no-op. Logs include `stale_widget=1` when this occurs. The
+`chat_history_test.cpp` regression reproduces a stale `draft` snapshot,
+Up/Down, repeated Up and an empty draft.
+
+**Next test:** rebuild `kiln-ui.dll`, launch with
+`KILN_CHAT_HISTORY=1 KILN_CHAT_HISTORY_TRACE=1`, type unsent `draft`,
+press Up once then Down once. Expect:
+
+```text
+recall older entries=1 changed=1 browsing_before=0 browsing_after=1 stale_widget=0
+engine edit replacement verified (widget readback)
+recall newer entries=1 changed=1 browsing_before=1 browsing_after=0 stale_widget=1
+engine edit replacement verified (widget readback)
+```
+
+Visually `draft` must reappear. Only then test Social, manual editing and
+restart persistence. Keep draft PR #2 unmerged until in-game acceptance.
+
+
 ## Latest game test and draft-restoration fix (17 November 2026)
 
 The 11:47 interactive trace **PASSED** recording submissions (including
