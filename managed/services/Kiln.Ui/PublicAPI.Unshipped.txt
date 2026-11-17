@@ -3,3 +3,7 @@ Kiln.UiDraw.ItemIcon(Kiln.ItemId item, float size = 0) -> void
 Kiln.UiImage.Item.get -> Kiln.ItemId?
 static Kiln.Ui.ItemIconsAvailable.get -> bool
 static Kiln.Ui.ItemImage(Kiln.ItemId item) -> Kiln.UiImage?
+Kiln.CraftingScreen.IsFactory.get -> bool
+Kiln.CraftingScreen.IsFactory.init -> void
+Kiln.CraftingScreen.Station.get -> Kiln.EntityId
+Kiln.CraftingScreen.Station.init -> void

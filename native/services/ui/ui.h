@@ -127,6 +127,7 @@ bool game_screens_on();
 bool game_menu_on(uint32_t menu);
 bool game_in_menu();   // no world steps (boot, main menu, loading)
 KilnResult game_screen(KilnUiScreen* out);
+uint32_t game_screen_target();  // a factory screen's station entity of the last UI frame, else 0
 KilnResult game_subscribe_screen(KilnOwner owner, KilnUiScreenFn fn, void* user, KilnHandle* out);
 KilnResult game_subscribe_tick(KilnOwner owner, KilnUiTickFn fn, void* user, KilnHandle* out);
 KilnResult game_subscribe_frame_tick(KilnOwner owner, KilnUiFrameTickFn fn, void* user, KilnHandle* out);

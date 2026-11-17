@@ -313,6 +313,27 @@ internal static unsafe class UiNative
         }
     }
 
+    /// <summary>The tail after image_load_rgba (0.2.0-dev.29.15): screen_target, a factory screen's station entity.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct TableScreenTarget
+    {
+        public TableImageRgba Base;
+        public delegate* unmanaged[Cdecl]<uint> ScreenTargetFn;
+    }
+
+    /// <summary>kiln.ui's screen_target (a factory screen's station entity of the last UI frame, else 0); 0 on an older kiln.ui.
+    /// Tests: <see cref="ScreenTargetOverride"/>.</summary>
+    public static uint ScreenTarget()
+    {
+        if (ScreenTargetOverride is { } o) return o();
+        var t = T;
+        if (t == null || t->Header.Size < (uint)sizeof(TableScreenTarget)) return 0;
+        var f = ((TableScreenTarget*)t)->ScreenTargetFn;
+        return f == null ? 0 : f();
+    }
+
+    internal static Func<uint>? ScreenTargetOverride;
+
     /// <summary>KILN_UI_FOOTER_SHOWN.</summary>
     public const uint FooterShown = 1;
 

@@ -171,6 +171,9 @@ public static unsafe partial class Ui
             if (was != _visible) Recount();
         }
 
+        /// <summary>Panels draw now: a crafting screen is open (tests).</summary>
+        internal static bool Visible => _visible;
+
         internal static int VisiblePanels
         {
             get
