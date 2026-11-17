@@ -384,6 +384,8 @@ internal sealed unsafe class HostRuntime : IHostServices, IKilnBackend
         _api->OwnerRevoke(owner);
     }
 
+    public bool CanRevokeOwners => true;
+
     // ---- tasks (Tasks.cs) ----
 
     /// <summary>Binds the core's task pool for C# tasks. The lease table comes from the private API view the core hands
@@ -445,7 +447,6 @@ internal sealed unsafe class HostRuntime : IHostServices, IKilnBackend
             }
         }
     }
-    public bool CanRevokeOwners => true;
 
     // ---- game log mirror (core log thread) ----
     public void EnqueueGameLine(int level, string text)

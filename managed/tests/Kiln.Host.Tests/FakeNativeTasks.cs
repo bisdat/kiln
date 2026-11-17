@@ -67,6 +67,7 @@ internal sealed unsafe class FakeNativeTasks : IDisposable
     public int OwnerCapacity = 1024;
     public long HopCostNs;       // what each dispatched hop "takes" on the fake hop clock
     public int Binds, EndedBinds;
+    public int AfterStepCalls, AfterStepInCalls;  // which after-step member the host used
 
     public FakeNativeTasks(int workers = 2, string stamp = Stamp)
     {
@@ -229,7 +230,11 @@ internal sealed unsafe class FakeNativeTasks : IDisposable
     private static int HResumeAfterStep(ulong lease, ulong registration, uint* refusal)
     {
         var f = s_current!;
-        lock (f._lock) return f.ResumeAfter(lease, registration, f._session, refusal);
+        lock (f._lock)
+        {
+            f.AfterStepCalls++;
+            return f.ResumeAfter(lease, registration, f._session, refusal);
+        }
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
@@ -238,6 +243,7 @@ internal sealed unsafe class FakeNativeTasks : IDisposable
         var f = s_current!;
         lock (f._lock)
         {
+            f.AfterStepInCalls++;
             if (session == 0 || session != f._session)
             {
                 if (refusal != null) *refusal = 7;
