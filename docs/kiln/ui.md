@@ -432,6 +432,8 @@ named (else its reason) for 20 s, over the game's login error dialog that follow
 back at its main menu (`ui: refusal shown` in kiln.log). Mods don't need to handle `Network.Rejected` for that.
 
 ## Key bindings
+The game's chat field keeps Up/Down (no modifiers) while it has typing focus when the player has chat history on
+([chat-history.md](chat-history.md)): key subscribers do not get those presses then.
 ```csharp
 var b = KeyBindings.Register("mymod.toggle", "F8", () => w.Toggle(), "Toggle my window");
 b.OnRelease = …;  b.IsDown;  b.TakePresses();  b.Consume = false;  b.WhileCapturing = true;
