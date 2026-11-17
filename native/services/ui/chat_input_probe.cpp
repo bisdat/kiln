@@ -171,7 +171,6 @@ void history_before(void* widget) {
     if (!editing(state)) return;
     std::string current;
     if (!edit_text(state, &current)) return;
-    g_editing_in_frame = true;
     if (!g_last_applied.empty() && current != g_last_applied) {
         g_history.edited();
         g_last_applied.clear();
@@ -183,7 +182,8 @@ void history_before(void* widget) {
         if (next == current) continue;
         if (!game_set_text(reinterpret_cast<uint8_t*>(state) + kEditOffset, next.data(), next.size())) {
             g_keys.focus(false);
-            logf(KILN_LOG_WARN, "ui: chat history: edit replace failed; future input is vanilla");
+            g_history_on.store(false, std::memory_order_release);
+            logf(KILN_LOG_WARN, "ui: chat history: edit replace failed; preview disabled for this process");
             return;
         }
         current = next;
@@ -194,6 +194,16 @@ void history_before(void* widget) {
 // The submit result is set by TextInputProcess, before the caller sends and clears.
 void history_after(void* widget, void* result, bool hud) {
     void* state = game_state(widget);
+    if (!state) return;
+    uint32_t event = 0;
+    if (game_read(result, &event) && event == 1) {
+        // Enter may clear the editing flag within TextInputProcess, so record
+        // before checking post-call focus; the outer HUD/Social caller has not sent yet.
+        std::string sent;
+        if (edit_text(state, &sent) && g_history.submit(sent)) save_history();
+        g_last_applied.clear();
+        return;
+    }
     if (!editing(state)) return;
     g_editing_in_frame = true;
     bool& logged = hud ? g_hud_focus_logged : g_social_focus_logged;
@@ -201,12 +211,7 @@ void history_after(void* widget, void* result, bool hud) {
         logged = true;
         logf(KILN_LOG_INFO, "ui: chat history: %s edit focus confirmed (no text logged)", hud ? "HUD" : "Social");
     }
-    uint32_t event = 0;
-    if (game_read(result, &event) && event == 1) {
-        std::string sent;
-        if (edit_text(state, &sent) && g_history.submit(sent)) save_history();
-        g_last_applied.clear();
-    } else if (!g_last_applied.empty()) {
+    if (!g_last_applied.empty()) {
         std::string now;
         if (edit_text(state, &now) && now != g_last_applied) {
             g_history.edited();
