@@ -9,8 +9,13 @@ const KilnApi* g_api = nullptr;
 KilnOwner g_owner = 7;
 void logf(int, const char*, ...) {}
 std::vector<std::filesystem::path> mod_folder_list() { return {}; }
-bool guid_parse(const std::string&, uint8_t out[16]) { std::memset(out, 1, 16); return true; }
-std::string guid_text(const uint8_t*) { return "fixture"; }
+// "fixture" is the patched resource; any other text a GUID of its own (by its length), "bad" none
+bool guid_parse(const std::string& s, uint8_t out[16]) {
+    if (s == "bad") return false;
+    std::memset(out, s == "fixture" ? 1 : static_cast<int>(2 + s.size() % 200), 16);
+    return true;
+}
+std::string guid_text(const uint8_t* g) { return g[0] == 1 ? "fixture" : "g" + std::to_string(g[0]); }
 uint32_t fnv1a(const void*, size_t) { return 1; }
 namespace gd {
 // The types (g_types: the exe's reflection is readable). "fixture" {value: u32 at 0, list: BlobArray<u32>}; a template
@@ -50,9 +55,11 @@ bool parse_leaf(const Field&, const gjson& v, const uint8_t*, uint8_t* out, bool
 }
 // The structural edits have their own test (bootstruct_test.cpp). Here each leaves a mark in the resource's second u32:
 // removing Alpha +100, adding Beta +1000, appending to "list" +10000; removing "Stuck", adding "Broken" and appending to "bad" fail, "huge" grows the copy over 64 MiB.
+std::vector<std::string> trace;  // the structural edits in the order they were made
 void mark(std::vector<uint8_t>* b, uint32_t add) { uint32_t v; std::memcpy(&v, b->data() + 4, 4); v += add; std::memcpy(b->data() + 4, &v, 4); }
 bool boot_remove_components(const TType*, const std::vector<std::string>& names, std::vector<uint8_t>* b, size_t* n, std::string* err) {
     *n = 0;
+    trace.push_back("remove");
     for (const auto& x : names) {
         if (x == "Stuck") return *err = "\"removeComponents\": Stuck cannot go", false;
         if (x == "Alpha") mark(b, 100), ++*n;
@@ -61,13 +68,37 @@ bool boot_remove_components(const TType*, const std::vector<std::string>& names,
 }
 bool boot_add_components(const TType*, const std::vector<std::string>& names, std::vector<uint8_t>* b, size_t* n, std::string* err) {
     *n = 0;
+    trace.push_back("add");
     for (const auto& x : names) {
         if (x == "Broken") return *err = "\"addComponents\": \"Broken\" cannot be added", false;
         if (x == "Beta") mark(b, 1000), ++*n;
     }
     return true;
 }
+bool boot_copy_components(const TType*, const std::vector<CopySource>& copies, std::vector<uint8_t>* b, size_t* n, std::string* err) {
+    *n = 0;
+    for (const auto& c : copies) {
+        trace.push_back("copy " + c.brief);
+        if (c.brief == "Broken") return *err = "\"copyComponents\": Broken: the template has no Broken", false;
+        if (!c.data) return *err = "\"copyComponents\": MissingResource", false;
+        mark(b, 100000), ++*n;
+    }
+    return true;
+}
+bool boot_clear(Root, const TType*, const std::string& path, std::vector<uint8_t>* b, size_t* n, std::string* err) {
+    trace.push_back("clear " + path);
+    if (path == "bad") return *err = "\"clear\": bad is not a list", false;
+    mark(b, 1000000), *n = 1;
+    return true;
+}
+bool boot_replace(Root, const TType*, const std::string& path, const std::vector<gjson>& v, std::vector<uint8_t>* b, size_t* n, std::string* err) {
+    trace.push_back("replace " + path);
+    if (path == "bad") return *err = "\"replace\": bad is not a list", false;
+    mark(b, 10000000), *n = v.size();
+    return true;
+}
 bool boot_append(Root, const TType*, const std::string& path, const std::vector<gjson>&, bool, std::vector<uint8_t>* b, size_t* n, std::string* err) {
+    trace.push_back("append " + path);
     *n = 0;
     if (path == "bad") return *err = "\"append\": bad: not a list", false;
     if (path == "huge") b->resize((64u << 20) + 16), *n = 1;
@@ -90,7 +121,8 @@ KilnBootApiV1 boot{};
 KilnAssetsApi asset{};
 KilnCapsApi caps{};
 KilnApi api{};
-void check(bool ok, const char* why) { if (!ok) throw std::runtime_error(why); ++checks; }
+std::string issue_reason();
+void check(bool ok, const char* why) { if (!ok) throw std::runtime_error(std::string(why) + " [" + issue_reason() + "]"); ++checks; }
 std::string str(KilnStr s) { return std::string(s.ptr, s.len); }
 bool has(const std::string& s, const std::string& part) { return s.find(part) != std::string::npos; }
 const void* KILN_CALL service(KilnStr name, uint32_t) {
@@ -122,6 +154,7 @@ nlohmann::json docs_of(std::initializer_list<std::tuple<const char*, const char*
 nlohmann::json plain(nlohmann::json body) { body["resource"] = "fixture"; body["type"] = "fixture"; return body; }
 nlohmann::json templ(nlohmann::json body) { body["resource"] = "fixture"; body["type"] = "keen::ecs::TemplateResource"; return body; }
 KilnBootIssueV1 issue{};
+std::string issue_reason() { return issue.reason; }
 // prepare only: true when the plan is accepted (issue holds the refusal otherwise)
 bool accepted(const nlohmann::json& e) {
     issue = {}; issue.size = sizeof(issue);
@@ -165,6 +198,75 @@ void types() {
     comp(beta, "Beta", 0xb2);
     beta.fields = {{"y", rec(scalar), 0}};
     comp(transform, "CurrentTransform", 0xd4);
+}
+
+// copyComponents, clear and replace: their shapes, the order of the edits, all or nothing, and two mods.
+void copy_clear_replace() {
+    auto one = [&](nlohmann::json doc) { return accepted(docs_of({{"a", "k", doc}})); };
+    check(one(templ({{"copyComponents", {{"Stock", "magic-chest"}}}})), "a copy alone is a patch");
+    check(one(plain({{"clear", {"list"}}})) && one(plain({{"replace", {{"list", {{"values", {1, 2}}}}}}})), "a clear alone, a replace alone");
+    check(!one(plain({{"copyComponents", {{"Stock", "magic-chest"}}}})) && has(issue.reason, "only a template"), "a copy on a non-template is refused");
+    check(!one(templ({{"copyComponents", {{"Stock", "bad"}}}})) && has(issue.reason, "takes the GUID"), "a copy takes a GUID");
+    check(!one(templ({{"copyComponents", {{"Stock", "fixture"}}}})) && has(issue.reason, "the template it patches"), "a copy from itself is refused");
+    check(!one(templ({{"copyComponents", {{"currentTransform", "magic-chest"}}}})) && has(issue.reason, "CurrentTransform"), "CurrentTransform is never copied over");
+    check(!one(templ({{"copyComponents", {"Stock"}}})), "copyComponents is an object");
+    check(!one(plain({{"clear", "list"}})) && has(issue.reason, "a list of list paths"), "clear is a list");
+    check(!one(plain({{"clear", {"list[*]"}}})) && has(issue.reason, "one list"), "a clear names one list");
+    check(one(plain({{"clear", {"outer[2].list"}}})), "[i] on the way is fine");
+    check(!one(plain({{"replace", {{"list", {{"values", nlohmann::json::array()}}}}}})) && has(issue.reason, "\"clear\" empties"), "a replace without values points to clear");
+    check(!one(plain({{"replace", {{"list", {{"values", {1}}, {"aboveLast", true}}}}}})) && has(issue.reason, "unknown member \"aboveLast\""),
+          "aboveLast is append's only");
+    check(!one(plain({{"replace", {{"list", {{"values", {{{"mul", 2}}}}}}}}})), "a replace takes plain values");
+    check(!one(plain({{"clear", {"list"}}, {"clears", {"list"}}})) && has(issue.reason, "unknown member \"clears\""), "a misspelt member is refused");
+    // apply: the order is remove, add, copy, clear, replace, append (whatever order the document wrote them in)
+    gd::trace.clear();
+    run(docs_of({{"a", "k1", templ({{"append", {{"list", {{"values", {1}}}}}}, {"replace", {{"steps", {{"values", {1}}}}}}, {"clear", {"zones"}},
+                                    {"copyComponents", {{"Stock", "magic-chest"}}}, {"addComponents", {"Beta"}}, {"removeComponents", {"Alpha"}}})}}));
+    check(faults.empty() && put_count == 1 && patched.marks == 100 + 1000 + 100000 + 1000000 + 10000000 + 10000, "every edit made, once");
+    check(gd::trace == std::vector<std::string>{"remove", "add", "copy Stock", "clear zones", "replace steps", "append list"}, "in the order of the docs");
+    // all or nothing: a failing copy, clear or replace takes its document's other edits with it; the other mod's stay
+    run(docs_of({{"a", "k1", templ({{"clear", {"zones"}}, {"copyComponents", {{"Broken", "magic-chest"}}}})}, {"b", "k2", templ({{"replace", {{"list", {{"values", {3}}}}}}})}}));
+    check(faults.size() == 1 && faults[0].mod == "a" && has(faults[0].reason, "Broken") && patched.marks == 10000000, "a's clear is not kept, b's replace is");
+    run(docs_of({{"a", "k1", plain({{"replace", {{"bad", {{"values", {3}}}}}}, {"set", {{"value", 5}}}})}}));
+    check(faults.size() == 1 && has(faults[0].reason, "bad is not a list") && put_count == 0, "a failing replace: nothing of its patch");
+    // a clear of a list that changes nothing else is still a change that is served
+    run(docs_of({{"a", "k1", plain({{"clear", {"list"}}})}}));
+    check(faults.empty() && put_count == 1 && patched.marks == 1000000, "a clear alone is served");
+}
+
+// Two mods on one component copied, or one list cleared or replaced: the later is refused; the same outcome is combined.
+void reshape_conflicts() {
+    auto both = [&](nlohmann::json a, nlohmann::json b) { return docs_of({{"a", "k1", a}, {"b", "k2", b}}); };
+    check(refused(both(templ({{"copyComponents", {{"Stock", "magic-chest"}}}}), templ({{"removeComponents", {"Stock"}}})), "b", "copies Stock"),
+          "removing a component another mod copies is refused");
+    check(refused(both(templ({{"removeComponents", {"Stock"}}}), templ({{"copyComponents", {{"stock", "magic-chest"}}}})), "b", "removes stock"),
+          "copying a component another mod removes is refused");
+    check(refused(both(templ({{"copyComponents", {{"Stock", "magic-chest"}}}}), templ({{"copyComponents", {{"Stock", "other-chest-of-another-length"}}}})), "b",
+                  "copies from another template"), "one component copied from two templates is refused");
+    check(accepted(both(templ({{"copyComponents", {{"Stock", "magic-chest"}}}}), templ({{"copyComponents", {{"Stock", "magic-chest"}}}}))),
+          "the same copy from both is combined");
+    check(accepted(both(templ({{"addComponents", {"Stock"}}}), templ({{"copyComponents", {{"Stock", "magic-chest"}}}}))), "an add and a copy combine (the copy's data stays)");
+    check(accepted(both(templ({{"copyComponents", {{"Stock", "magic-chest"}}}}), templ({{"set", {{"Stock.x", 1}}}}))), "another mod's set on the copy is fine");
+    check(refused(both(templ({{"set", {{"components[0].x", 1}}}}), templ({{"copyComponents", {{"Stock", "magic-chest"}}}})), "b", "by its place"),
+          "a copy after another mod's components[i] is refused");
+    // lists
+    check(refused(both(plain({{"clear", {"list"}}}), plain({{"append", {{"list", {{"values", {1}}}}}}})), "b", "clears this list"), "an append to a cleared list is refused");
+    check(refused(both(plain({{"append", {{"list", {{"values", {1}}}}}}}), plain({{"clear", {"List"}}})), "b", "appends to"), "a clear of an appended list is refused");
+    check(accepted(both(plain({{"clear", {"list"}}}), plain({{"clear", {"list."}}}))), "the same clear from both is combined");
+    check(refused(both(plain({{"clear", {"list"}}}), plain({{"replace", {{"list", {{"values", {1}}}}}}})), "b", "clears this list"), "a clear and a replace are refused");
+    check(refused(both(plain({{"replace", {{"list", {{"values", {1}}}}}}}), plain({{"replace", {{"list", {{"values", {2}}}}}}})), "b", "replaces this list"),
+          "two replaces with other values are refused");
+    check(accepted(both(plain({{"replace", {{"list", {{"values", {1, 2}}}}}}}), plain({{"replace", {{"list", {{"values", {1, 2}}}}}}}))), "the same values from both are combined");
+    check(refused(both(plain({{"replace", {{"list", {{"values", {1}}}}}}}), plain({{"set", {{"list[0]", 2}}}})), "b", "goes through"),
+          "a set of an element of a replaced list is refused");
+    check(refused(both(plain({{"set", {{"list[*]", 2}}}}), plain({{"clear", {"list"}}})), "b", "sets \"list[*]\""), "a clear of a list another mod sets is refused");
+    check(refused(both(plain({{"clear", {"outer"}}}), plain({{"set", {{"outer[2].x", 1}}}})), "b", "goes through"), "a path through a cleared list is refused");
+    check(refused(both(plain({{"clear", {"outer[1].inner"}}}), plain({{"clear", {"outer"}}})), "b", "goes through or holds"), "a clear of a list that holds a cleared one is refused");
+    check(accepted(both(plain({{"clear", {"list"}}}), plain({{"set", {{"value", 1}}}}))), "a set elsewhere is fine");
+    check(accepted(docs_of({{"a", "k1", plain({{"clear", {"list"}}, {"append", {{"list", {{"values", {1}}}}}}, {"set", {{"list[0]", 4}}}})}})),
+          "one mod's own clear, append and set of one list are fine (made in that order)");
+    check(refused(both(templ({{"clear", {"Alpha.steps"}}}), templ({{"removeComponents", {"Alpha"}}})), "b", "clears \"Alpha.steps\""),
+          "removing a component another mod clears a list of is refused");
 }
 
 // A document is applied whole or not at all, and the resource is what the other documents make it.
@@ -254,6 +356,11 @@ void limit() {
                   "more than 4096 changes"), "a component over the limit is refused");
     check(refused(docs_of({{"a", "k1", templ({{"append", {{"list", {{"values", {1}}}}, {"list2", {{"values", {1}}}}, {"list3", {{"values", {1}}}}}}, {"set", sets}})}}),
                   "a", "more than 4096 changes"), "appends count against the limit");
+    check(refused(docs_of({{"a", "k1", templ({{"clear", {"l1", "l2"}}, {"replace", {{"l3", {{"values", {1, 2, 3}}}}}}, {"set", sets}})}}), "a", "more than 4096 changes"),
+          "a clear and a replace count one each against the limit");
+    check(accepted(docs_of({{"a", "k1", templ({{"clear", {"l1"}}, {"replace", {{"l3", {{"values", {1, 2, 3}}}}}}, {"set", sets}})}})), "4096 with a clear and a replace");
+    check(refused(docs_of({{"a", "k1", templ({{"copyComponents", {{"A", "x1"}, {"B", "x22"}, {"C", "x333"}}}, {"set", sets}})}}), "a", "more than 4096 changes"),
+          "each copied component counts");
 }
 
 // With the game's types: what can be checked before the game starts is.
@@ -276,6 +383,15 @@ void typed_prepare() {
     check(refused(docs_of({{"a", "k1", templ({{"append", {{"Alpha.x", {{"values", {1}}}}}}})}}), "a", "NotAList"), "an append to a scalar is refused");
     check(refused(docs_of({{"a", "k1", plain({{"append", {{"list", {{"values", {"Hard"}}}}}}})}}), "a", "not a number"), "a value that does not fit is refused");
     check(refused(docs_of({{"a", "k1", plain({{"append", {{"value", {{"values", {1}}}}}}})}}), "a", "NotAList"), "a plain resource's scalar is no list");
+    // clear: a list of anything; replace: a list of scalars, its values fit; copy: a component of the game's
+    check(accepted(docs_of({{"a", "k1", plain({{"clear", {"list"}}, {"replace", {{"list", {{"values", {4, 5}}}}}}})}})), "a clear and a replace of a list");
+    check(refused(docs_of({{"a", "k1", plain({{"clear", {"value"}}})}}), "a", "NotAList"), "a scalar is not cleared");
+    check(refused(docs_of({{"a", "k1", plain({{"replace", {{"list", {{"values", {"Hard"}}}}}}})}}), "a", "not a number"), "a replace's value that does not fit is refused");
+    check(refused(docs_of({{"a", "k1", plain({{"clear", {"nope"}}})}}), "a", "has no member nope"), "an unknown list is refused");
+    check(accepted(docs_of({{"a", "k1", templ({{"copyComponents", {{"Beta", "magic-chest"}}}, {"set", {{"Beta.y", 1}}}})}})), "a copy of a component of the game's, then a set");
+    check(refused(docs_of({{"a", "k1", templ({{"copyComponents", {{"Nope", "magic-chest"}}}})}}), "a", "not a component type"), "a copy of an unknown type is refused");
+    check(refused(docs_of({{"a", "k1", templ({{"clear", {"Alpha.x"}}})}}), "a", "NotAList"), "a component's scalar is not cleared");
+    check(accepted(docs_of({{"a", "k1", templ({{"clear", {"Alpha.steps"}}})}})), "a component's list is cleared");
     gd::g_types = false;
 }
 }
@@ -321,6 +437,8 @@ int main() {
         all_or_nothing();
         put_and_size_faults();
         conflicts();
+        copy_clear_replace();
+        reshape_conflicts();
         limit();
         typed_prepare();
         // Readiness without a published plan (also the immediate callback at a late bind).
