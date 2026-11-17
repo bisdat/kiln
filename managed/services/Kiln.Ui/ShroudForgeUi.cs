@@ -1124,6 +1124,8 @@ internal static class ShroudForgeMenu
                 var key = SdlKeys.ToKilnKey(sfKey ?? "SDL:66") ?? "None";
                 _binding = KeyBindings.Register(BindingId, key, Toggle, KilnText.T("shroudforge.binding"), "ShroudForge");
                 _binding.WhileCapturing = true;
+                var bound = _binding;
+                KilnText.Changed += () => bound.Description = KilnText.T("shroudforge.binding");  // the Keys page in Kiln's language
                 UiEngine.Log(LogLevel.Info, $"ShroudForge has no Modloader window: key {_binding.Key} and shroudforge.ui.toggle_modloader() toggle Kiln's ShroudForge page (remap in Keys; Mods is always available)");
             }
             finally { ModContext.CurrentMod = mod; }
