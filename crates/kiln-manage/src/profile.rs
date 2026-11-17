@@ -223,6 +223,11 @@ pub struct ProfileFile {
     pub eml_runtime: Vec<String>,
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub eml_runtime_blocked: std::collections::BTreeMap<String, String>,
+    /// Enabled EML mods of which only part runs under Kiln, by Library id (and manifest id when that differs): what
+    /// does not run, from the Library record (`ImportRecord::loader_part`: a modified EML loader in the mod's package
+    /// carries the rest). kiln-eml logs it with the mod and adds it to the mod's line in its state file.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub eml_partial: std::collections::BTreeMap<String, String>,
     #[serde(default, rename = "$schema", skip_serializing_if = "Option::is_none")]
     pub schema: Option<String>,
     pub format: u32,
@@ -1229,9 +1234,20 @@ pub fn render(dirs: &DataDirs, profile: &Profile, install: &GameInstall, mode: P
             }
         }
     }
+    let mut eml_partial = std::collections::BTreeMap::new();
+    for m in profile.mods.list(ModKind::Eml).iter().filter(|m| m.enabled) {
+        let r = crate::library::LibraryRef { kind: ModKind::Eml, id: m.id.clone(), version: m.version.clone(), hash: m.hash.clone() };
+        let Ok(rec) = crate::library::record(dirs, &r) else { continue };
+        let Some(note) = rec.loader_part else { continue };
+        if let Some(own) = rec.manifest_id.filter(|own| *own != m.id) {
+            eml_partial.insert(own, note.clone());
+        }
+        eml_partial.insert(m.id.clone(), note);
+    }
     Ok(ProfileFile {
         eml_runtime,
         eml_runtime_blocked,
+        eml_partial,
         schema: None,
         format: 1,
         id: profile.id.clone(),

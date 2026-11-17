@@ -154,6 +154,10 @@ export function buildRows(x: ModInputs): ModRow[] {
     }
     // its files were changed in its Library folder (a mod.json edited by hand): what Play would refuse, so it comes first
     const used = entry ? lib?.versions.find((v) => v.hash === entry.hash) : defaultVersion(lib);
+    // an EML mod whose package carried a modified EML loader (Holster Toggle's dbghelp.dll): only its EML part runs
+    if (on && !row.note && used?.loaderPart) {
+      row.note = { text: "Only partly runs", tone: "warn", title: asSentence(used.loaderPart) };
+    }
     if (used?.changed) {
       row.changed = { kind, id, version: used.version, hash: used.hash };
       row.note = { text: "Changed on disk", tone: "warn",
