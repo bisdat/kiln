@@ -23,7 +23,7 @@ internal static unsafe class SetTools
         ui.TextWrapped(KilnText.T("set.about"));
         var table = Services.Get<Table>("kiln.set.ui", 1);
         if (table is null) ui.TextDisabled(KilnText.T("set.unavailable"));
-        else if (ui.Button(KilnText.T("set.open") + "###set.tools"))
+        else if (ui.Button(KilnText.T("set.open")))
         {
             if (Open(table, Path.GetFileName(mod.Folder ?? mod.Id)) != 0)
                 Hud.Toast(KilnText.T("set.open_failed"), ToastKind.Warning);

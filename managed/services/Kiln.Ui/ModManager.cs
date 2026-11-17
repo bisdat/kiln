@@ -819,7 +819,7 @@ internal sealed class ModManagerPage
                 {
                     using var id = ui.Id("menu." + row.Handle);
                     // the button has a fixed label: a mod's text goes beside it as text ("##" in it is ImGui's id syntax)
-                    if (ui.Button(KilnText.T("mods.menus.open") + "###menu.open", 0, 40 * s))
+                    if (ui.Button(KilnText.T("mods.menus.open"), 0, 40 * s))
                     {
                         // out of the entry's way first: its action runs after the next game UI frame and may open a Kiln
                         // view of its own, which a close after it would shut again

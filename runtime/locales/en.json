@@ -342,5 +342,52 @@
     "unavailable": "SET tools are unavailable (kiln-set is not running).",
     "open": "SET settings and tools",
     "open_failed": "SET tools are unavailable; check the engine status."
+  },
+  "config": {
+    "read_only_synced": "Server config: read-only while connected to a server. Synced entries show the server's values.",
+    "read_only": "Server config: read-only while connected to a server (it applies when you host).",
+    "server_values": {
+      "one": "{count} entry holds the server's value while connected (read-only).",
+      "other": "{count} entries hold the server's value while connected (read-only)."
+    },
+    "file_error": "file: {error}",
+    "not_saved": "not saved: {error}",
+    "columns": {
+      "entry": "Entry",
+      "value": "Value"
+    },
+    "marks": {
+      "server": " [server]",
+      "synced": " (synced)",
+      "restart": " (restart)"
+    },
+    "server_value": "The server's value. Yours: {value} (back when you leave).",
+    "hint": {
+      "duration": "a duration: 30s, 5m, 1h30m",
+      "list": "a list: [1, 2, 3] or 1, 2, 3"
+    },
+    "read_only_nul": "Read-only here: it holds a NUL character. Change it in the config file.",
+    "read_only_long": "Read-only here: longer than 512 bytes. Change it in the config file.",
+    "default": "default",
+    "default_tip": "Default: {value}",
+    "type_here": "Type the value here.",
+    "range": "a number from {min} to {max}",
+    "describe": {
+      "entry": "{path}: {type}, default {default}",
+      "entry_range": "{path}: {type}, default {default}, range {min}..{max}",
+      "options": "options: {options}",
+      "synced": "Synced: a server sends its value to clients.",
+      "restart": "Requires a restart: a change applies when the mod loads again.",
+      "from_server": "Holds the server's value while connected."
+    },
+    "apply": "Apply ({count})",
+    "undo": "Undo",
+    "saved_later": "(saved when a world runs)",
+    "all_defaults": "All to defaults",
+    "applied": {
+      "one": "{count} change applied (saved when a world runs)",
+      "other": "{count} changes applied (saved when a world runs)"
+    },
+    "saved": "{id}: saved"
   }
 }
