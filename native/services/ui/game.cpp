@@ -575,7 +575,7 @@ bool game_install() {
         L.crafting = static_cast<bool>(g_craft_hook);
     }
     add_builtin_entries();
-    chat_input_probe_install();  // opt-in only; does not read text or consume game input
+    chat_input_probe_install();  // opt-in read-only probe or KILN_CHAT_HISTORY preview; default no hook
     footer_install();  // Kiln's line in the main menu's footer (menu_footer.cpp): its own log line
     logf(KILN_LOG_INFO, "ui: game UI hooked: screens on, main menu %s, pause menu %s, crafting %s, language %s, main-menu page %s",
          L.main_menu ? "on" : "off", L.system_menu ? "on" : "off", L.crafting ? "on" : "off", L.language ? "on" : "off",
