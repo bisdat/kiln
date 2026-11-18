@@ -108,6 +108,32 @@ public sealed unsafe class SystemsTests
     }
 
     [Fact]
+    public void A_prediction_wraps_WhenArchetype_answers_end_with_its_prediction_storage_not_only_its_client_world()
+    {
+        using var w = new FakeWorld(n => n is "systems.wraps" or "systems.wraps.client" or "systems.wraps.prediction");
+        w.KindSession[1] = 5;  // the prediction storage's session
+        w.KindSession[2] = 9;  // the client world's
+        var ran = 0;
+        var wrap = Systems.Wrap("fuel_setup", new WrapOptions { World = WorldKind.Prediction }).Wrap!
+            .WhenArchetype(["Fuel"]).Before((ref Slice s) => ran++);
+        var stage = Assert.Single(w.Wraps);
+        ProgramWrap.Poll();
+        w.Layout = 0x6000;
+        w.LayoutHas.Add(Hash("Fuel"));
+        w.Call(stage);
+        Assert.Equal(1, ran);  // decided for layout 0x6000: it has Fuel
+        w.LayoutHas.Clear();
+        w.Call(stage);
+        Assert.Equal(2, ran);  // cached for this prediction storage
+        // a new prediction storage under the same client world (the core starts a prediction session when its pointer
+        // changes): its layout 0x6000 is another archetype, decided again
+        w.KindSession[1] = 6;
+        w.Call(stage);
+        Assert.Equal(2, ran);
+        wrap.Dispose();
+    }
+
+    [Fact]
     public void Stages_reach_kiln_world_with_the_mod_s_owner_stage_and_priority()
     {
         using var w = new FakeWorld();

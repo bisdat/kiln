@@ -30,6 +30,8 @@ internal sealed unsafe class FakeWorld : IDisposable
     internal readonly HashSet<uint> LayoutHas = new();
     internal bool InRunOriginal;
     internal ulong Session = 1;
+    // game_world_session per world kind where set (0: Session): a prediction storage's own session, say
+    internal readonly ulong[] KindSession = new ulong[3];
     internal bool NewDescriptor;
     // per-entity storage of fuel_setup's slots, row r: a Fuel attribute block {root, offset, flags, count, s32 current,
     // s32 max} (16 bytes) and a CurrentTransform (8 bytes; row 2 has none: an optional slot that is absent)
@@ -236,7 +238,7 @@ internal sealed unsafe class FakeWorld : IDisposable
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
-    private static ulong WorldSession(uint kind) => F.Session;
+    private static ulong WorldSession(uint kind) => kind < 3 && F.KindSession[kind] != 0 ? F.KindSession[kind] : F.Session;
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static uint EcsCaps() => 4;  // KILN_WORLD_CAP_BIND_PROGRAM
