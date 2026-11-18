@@ -490,28 +490,56 @@ pub fn webkit_version() -> (u32, u32, u32) {
     unsafe { (ffi::webkit_get_major_version(), ffi::webkit_get_minor_version(), ffi::webkit_get_micro_version()) }
 }
 
+/// What [`prepare`] does with the environment (`env`: a variable's value), before anything else.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Plan {
+    pub choice: Choice,
+    /// What happens to [`VAR`]: only [`Var::Set`] sets it.
+    pub var: Var,
+    /// The [`VAR`] there is the one the launcher that started this one set ([`SET_BY_US`]): it goes first.
+    pub drop_ours: bool,
+    /// A message's restart reason ([`RESTARTED`]).
+    pub restarted: Option<String>,
+}
+
+pub fn plan(args: &[String], env: impl Fn(&str) -> Option<String>, marker: bool) -> Plan {
+    // a launcher started from another Kiln (a restart): the variable it set is not the player's
+    let drop_ours = env(SET_BY_US).is_some_and(|l| l.split(',').any(|x| x.trim() == VAR));
+    let restarted = env(RESTARTED).filter(|r| !r.is_empty());
+    let choice = decide(args, env(ENV).as_deref(), restarted.is_some(), marker);
+    let yours = if drop_ours { None } else { env(VAR) };
+    let var = variable(&choice, yours.as_deref());
+    Plan { choice, var, drop_ours, restarted }
+}
+
+/// Debug and QA builds: [`TEST_PROBE`]'s result instead of the probe's.
+#[cfg(all(target_os = "linux", any(debug_assertions, feature = "dev-eval")))]
+fn test_probe() -> Option<Probe> {
+    let v = std::env::var(TEST_PROBE).ok()?;
+    log(&format!("test: the probe's result is replaced ({TEST_PROBE}={v})"));
+    Some(match v.as_str() {
+        "works" => Probe::Works,
+        "fails" => Probe::Fails { line: "bwrap: setting up uid map: Permission denied (test)".into() },
+        "missing" => Probe::Missing { path: "/nonexistent/bwrap (test)".into() },
+        _ => Probe::Unknown { why: "test".into() },
+    })
+}
+
 /// Linux, in `main` after crate::render's `prepare`, before any thread exists and before Tauri: the choice and the
 /// variable, the probe, the log line, and the message when WebKit would run a sandbox that cannot start.
 #[cfg(target_os = "linux")]
 pub fn prepare(args: &[String]) {
-    // a launcher started from another Kiln (a restart): the variable it set is not the player's
-    let ours = std::env::var(SET_BY_US).is_ok_and(|l| l.split(',').any(|x| x.trim() == VAR));
-    let restarted = std::env::var(RESTARTED).ok().filter(|r| !r.is_empty());
+    let dirs = crate::folder::found_dirs();
+    let has_marker = dirs.as_ref().is_some_and(|d| marker(d).is_file());
+    let Plan { choice: c, var, drop_ours, restarted } = plan(args, |k| std::env::var(k).ok(), has_marker);
     // SAFETY: main, before any thread exists (the caller's contract).
     unsafe {
-        if ours {
+        if drop_ours {
             std::env::remove_var(VAR);
         }
         std::env::remove_var(SET_BY_US);
         std::env::remove_var(RESTARTED);
-    }
-    let dirs = crate::folder::found_dirs();
-    let has_marker = dirs.as_ref().is_some_and(|d| marker(d).is_file());
-    let c = decide(args, std::env::var(ENV).ok().as_deref(), restarted.is_some(), has_marker);
-    let var = variable(&c, std::env::var(VAR).ok().as_deref());
-    if var == Var::Set {
-        // SAFETY: as above.
-        unsafe {
+        if var == Var::Set {
             std::env::set_var(VAR, "1");
             std::env::set_var(SET_BY_US, VAR);
         }
@@ -519,21 +547,13 @@ pub fn prepare(args: &[String]) {
     let version = webkit_version();
     let using = webkit_use(version, std::env::var(FORCE_VAR).ok().as_deref(), std::env::var(VAR).ok().as_deref());
     let t = Instant::now();
-    let (bwrap, mut probe) = match bwrap_path() {
+    let (bwrap, probe) = match bwrap_path() {
         Ok((full, built)) => (Some(built), probe_with(&full, PROBE_TIMEOUT)),
         Err(why) => (None, Probe::Unknown { why }),
     };
     let took = t.elapsed();
     #[cfg(any(debug_assertions, feature = "dev-eval"))]
-    if let Ok(v) = std::env::var(TEST_PROBE) {
-        probe = match v.as_str() {
-            "works" => Probe::Works,
-            "fails" => Probe::Fails { line: "bwrap: setting up uid map: Permission denied (test)".into() },
-            "missing" => Probe::Missing { path: "/nonexistent/bwrap (test)".into() },
-            _ => Probe::Unknown { why: "test".into() },
-        };
-        log(&format!("test: the probe's result is replaced ({TEST_PROBE}={v})"));
-    }
+    let probe = test_probe().unwrap_or(probe);
     let s = State {
         choice: c,
         var,
@@ -884,6 +904,38 @@ mod tests {
         assert_eq!(decide(&args(&[]), None, false, false).want, Want::On);
     }
 
+    /// The start's environment as `prepare` reads it: only a click (a message's restart), a flag, the setting or the
+    /// marker sets the variable; the one a launcher set before this one (a restart, an update's) goes and is not set again
+    /// without a choice; the player's own stays, also when a Kiln that set it before names other variables.
+    #[test]
+    fn the_environment_gets_the_variable_only_from_a_choice() {
+        let env = |pairs: &'static [(&'static str, &'static str)]| move |k: &str| pairs.iter().find(|(n, _)| *n == k).map(|(_, v)| v.to_string());
+        let plain = plan(&args(&[]), env(&[]), false);
+        assert_eq!((plain.var, plain.drop_ours, plain.restarted), (Var::Untouched, false, None));
+        // started from a launcher that had set it (the marker then), now without one: it goes and is not set again
+        let ours: &[(&str, &str)] = &[(VAR, "1"), (SET_BY_US, VAR), ("KILN_LAUNCHER_RENDER_SET", "LIBGL_ALWAYS_SOFTWARE")];
+        let p = plan(&args(&["--deck"]), env(ours), false);
+        assert_eq!((p.choice.why, p.var, p.drop_ours), (Why::Default, Var::Untouched, true));
+        // with the marker it is set again, as the launcher's own
+        assert_eq!(plan(&args(&[]), env(ours), true).var, Var::Set);
+        // the player's own value: alone, or next to a list that does not name it
+        assert_eq!(plan(&args(&[ARG_OFF]), env(&[(VAR, "0")]), true).var, Var::Yours("0".into()));
+        let p = plan(&args(&[]), env(&[(VAR, "1"), (SET_BY_US, "WEBKIT_DISABLE_COMPOSITING_MODE")]), false);
+        assert_eq!((p.var, p.drop_ours), (Var::Yours("1".into()), false));
+        // a message's restart: off without a marker yet; an empty value is no restart
+        let p = plan(&args(&[]), env(&[(RESTARTED, "probe")]), false);
+        assert_eq!((p.choice.why, p.var, p.restarted.as_deref()), (Why::Restart, Var::Set, Some("probe")));
+        assert_eq!(plan(&args(&[]), env(&[(RESTARTED, "")]), false).var, Var::Untouched);
+        // the setting and the flags, both ways, over the marker
+        assert_eq!(plan(&args(&[]), env(&[(ENV, "off")]), false).var, Var::Set);
+        assert_eq!(plan(&args(&[]), env(&[(ENV, "on")]), true).var, Var::Untouched);
+        assert_eq!(plan(&args(&[ARG_ON]), env(&[(RESTARTED, "late")]), true).var, Var::Untouched);
+        // WEBKIT_FORCE_SANDBOX, the render variables and an odd setting decide nothing about it
+        let p = plan(&args(&["--software-render"]), env(&[(FORCE_VAR, "1"), (ENV, "disabled"), ("LIBGL_ALWAYS_SOFTWARE", "1")]), false);
+        assert_eq!(p.var, Var::Untouched);
+        assert!(p.choice.ignored.is_some());
+    }
+
     #[test]
     fn the_arguments_win_then_the_environment_then_a_restart_then_the_marker() {
         // the marker alone
@@ -980,6 +1032,7 @@ mod tests {
         assert!(elf_rodata(Path::new("/nonexistent/libwebkit2gtk-4.1.so.0")).is_err());
     }
 
+    #[cfg(unix)]
     #[test]
     fn the_probe_tells_works_fails_missing_and_unknown_apart() {
         assert_eq!(probe_with(Path::new("/nonexistent/bin/bwrap"), PROBE_TIMEOUT), Probe::Missing { path: "/nonexistent/bin/bwrap".into() });
