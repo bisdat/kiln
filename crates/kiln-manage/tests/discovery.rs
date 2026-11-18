@@ -307,6 +307,23 @@ fn native_dinput8_advice_uses_selected_steam_runner() {
     let unknown = game::launch_options_info(&install, &roots).unwrap();
     assert!(unknown.advice.is_some() && !unknown.dinput8_native_by_runner);
 
+    // Steam's global runner (CompatToolMapping/0) applies without a per-app mapping.
+    write(&mapping, "\"InstallConfigStore\" { \"Software\" { \"Valve\" { \"Steam\" { \"CompatToolMapping\" { \"0\" { \"name\" \"GE-Proton11-12-x86_64\" } } } } } }");
+    let global = game::launch_options_info(&install, &roots).unwrap();
+    assert!(!global.has_dll_override && global.dinput8_native_by_runner);
+    assert!(global.advice.is_none());
+    assert_eq!(global.fallback_advice.as_deref(), Some(game::DLL_OVERRIDE_ADVICE));
+
+    // An older app-specific Proton overrides the newer global default.
+    write(&mapping, "\"InstallConfigStore\" { \"Software\" { \"Valve\" { \"Steam\" { \"CompatToolMapping\" { \"0\" { \"name\" \"GE-Proton11-12-x86_64\" } \"1203620\" { \"name\" \"GE-Proton11-10-x86_64\" } } } } } }");
+    let app_older = game::launch_options_info(&install, &roots).unwrap();
+    assert!(!app_older.dinput8_native_by_runner && app_older.advice.is_some());
+
+    // A newer app-specific Proton also takes priority over the older global default.
+    write(&mapping, "\"InstallConfigStore\" { \"Software\" { \"Valve\" { \"Steam\" { \"CompatToolMapping\" { \"0\" { \"name\" \"GE-Proton11-10-x86_64\" } \"1203620\" { \"name\" \"GE-Proton11-12-x86_64\" } } } } } }");
+    let app_newer = game::launch_options_info(&install, &roots).unwrap();
+    assert!(app_newer.dinput8_native_by_runner && app_newer.advice.is_none());
+
     // The Steam mapping cannot be inferred for an install detached from its library.
     write(&mapping, "\"InstallConfigStore\" { \"Software\" { \"Valve\" { \"Steam\" { \"CompatToolMapping\" { \"1203620\" { \"name\" \"GE-Proton11-12-x86_64\" } } } } } }");
     let mut detached = install.clone();

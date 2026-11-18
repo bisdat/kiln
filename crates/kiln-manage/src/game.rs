@@ -676,9 +676,14 @@ pub fn launch_options_info(install: &GameInstall, roots: &[SteamRoot]) -> Option
         return None;
     }
     // Having GE-Proton installed does not mean Steam selected it for this app.
+    // Prefer the per-app mapping, then Steam's global default (CompatToolMapping/0).
+    // Keep compat_tool itself per-app-only for every other caller.
     let root = install.library.as_deref().and_then(|l| steam::root_of_library(roots, l));
     let dinput8_native_by_runner = root.as_ref()
-        .and_then(|r| steam::compat_tool(r, install.app_id).ok().flatten())
+        .and_then(|r| {
+            steam::compat_tool(r, install.app_id).ok().flatten()
+                .or_else(|| steam::compat_tool(r, 0).ok().flatten())
+        })
         .as_deref()
         .is_some_and(runner_loads_native_dinput8);
     let candidates: Vec<SteamRoot> = match root {

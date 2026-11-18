@@ -29,8 +29,9 @@ Measured (kiln.log, tick-stats.jsonl, probe mod):
   and the `kiln.json` section for that side.
 - Steam launch options: none are needed with GE-Proton11-11 or newer. Its wine loads a native `dinput8.dll` from the game folder
   without an override (tested on 11-11, see `docs/re/client.md`; also tested on 11-12 by a user, issue #77).
-  The launcher checks Steam's explicit GE-Proton11-11+ per-app compatibility-tool mapping in `kiln-manage::game` and
-  suppresses the routine warning; unknown or older runners keep it. **If Kiln does not load**, the launcher still offers
+  The launcher checks Steam's GE-Proton11-11+ per-app compatibility mapping, or the global
+  `CompatToolMapping/0` default when no app-specific mapping exists, in `kiln-manage::game`.
+  It suppresses the routine warning for known compatible runners; unknown or older runners keep it. **If Kiln does not load**, the launcher still offers
   `WINEDLLOVERRIDES="dinput8=n,b" %command%` as the fallback, regardless of the runner. The user's entry already has
   `WINEDLLOVERRIDES="dinput8,dbghelp,winmm=n,b" DXVK_FRAME_RATE=117 %command%`, which works as is.
 - The game's crash reporter is its own exe started again (`enshrouded.exe --upload-dump "<dir>" --process_duration <t>`, also on the

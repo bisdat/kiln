@@ -141,8 +141,9 @@ steps instead:
 
 - **Proton:** if Kiln does not load, Enshrouded's launch options can use `WINEDLLOVERRIDES="dinput8=n,b" %command%`
   to load Kiln's `dinput8.dll` (unnecessary with GE-Proton 11-11 and newer, and some recent Valve builds). The launcher
-  suppresses routine `dinput8` advice for an explicitly selected GE-Proton11-11+ runner, but keeps a fallback on the
-  **No Kiln** path and keeps the separate chained loader warning (issue #77). The state comes from `game_status.launchOptions` (a
+  suppresses routine `dinput8` advice for GE-Proton11-11+ selected per game, or as Steam's global
+  default (`CompatToolMapping/0`) without an app-specific mapping. It keeps a fallback on the
+  **No Kiln** path when the override is missing, plus the separate chained-loader warning (issue #77). The state comes from `game_status.launchOptions` (a
   read-only look at Steam's config). Steps: Steam button, Library, Enshrouded, the gear (or ☰), Properties, General,
   Launch Options; Steam + X for the keyboard. Measured 2026-11-07 (desktop, outside Steam's launch, Proton's loaddll
   trace): Proton Experimental 11.0-20261027b and UMU-Proton 10.0-4 load the game folder's `DINPUT8.dll` as native

@@ -1071,6 +1071,7 @@ pub fn build(input: &ReportInput) -> Report {
         if let Some(lo) = (!direct).then(|| crate::game::launch_options_info(i, &roots)).flatten() {
             let _ = writeln!(g, "Launch opts:   {} (dinput8 override: {}; chained xinput9_1_0 override missing: {})", lo.value.as_deref().unwrap_or("(none)"), if lo.has_dll_override { "yes" } else { "no" }, if lo.chained_override_missing { "yes" } else { "no" });
             facts.override_missing = !lo.has_dll_override && !lo.dinput8_native_by_runner;
+            facts.has_dinput8_override = lo.has_dll_override;
             if lo.chained_override_missing {
                 cx.find("proton-chained-override", Level::Warning, format!("Ultimate ASI Loader is chained as xinput9_1_0.dll and neither Steam's launch options nor the prefix registry sets xinput9_1_0 to native first: under Valve's Proton, Wine loads its own xinput9_1_0 instead and the loader with its .asi plugins does not start (GE-Proton loads it without). Set: {}", lo.advice.as_deref().unwrap_or(crate::game::CHAINED_DLL_OVERRIDE_ADVICE)));
             }
@@ -1589,6 +1590,8 @@ struct Facts {
     kiln: Option<String>,
     proton: Option<String>,
     override_missing: bool,
+    /// Whether an explicit dinput8 override is already configured, not whether the runner needs one.
+    has_dinput8_override: bool,
     override_advice: Option<String>,
     /// The launcher starts this client directly (direct.rs), not through Steam.
     direct: bool,
@@ -1823,6 +1826,9 @@ fn check_not_loaded(cx: &mut Ctx, install: Option<&GameInstall>, dirs: Option<&D
     let why = if facts.direct && i.platform != Platform::Windows {
         // a direct start sets WINEDLLOVERRIDES itself (direct.rs): its own output says what went wrong
         " The launcher starts this game directly with dinput8 native first: see launcher/game-start.log for what umu-run, Proton or Wine said, and check that dinput8.dll in the game folder is Kiln's.".to_string()
+    } else if proton && facts.has_dinput8_override {
+        // The override is already set: repeating it cannot fix a failed start.
+        " Check Steam's launch options for Enshrouded (WINEDLLOVERRIDES) and the Proton version.".to_string()
     } else if proton {
         format!(" If Steam did not load Kiln's dinput8.dll, try this fallback in Enshrouded's Steam launch options: {}. If Kiln still does not load, check the Proton version and kiln/logs/proxy.log.", facts.override_advice.as_deref().unwrap_or(crate::game::DLL_OVERRIDE_ADVICE))
     } else {
