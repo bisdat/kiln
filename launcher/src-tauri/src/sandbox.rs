@@ -154,6 +154,11 @@ pub struct Use {
     pub forced: bool,
 }
 
+/// WebKitGTK reads [`VAR`] (2.40 and later).
+pub fn has_switch(version: (u32, u32, u32)) -> bool {
+    (version.0, version.1) >= (2, 40)
+}
+
 /// What WebKitGTK `version` (the GTK 3 API) does with its sandbox, given [`FORCE_VAR`] and [`VAR`] as this start has them.
 /// WebKitGTK's own rules (WebProcessPoolGLib.cpp since 2.46, ProcessLauncherGLib.cpp before).
 pub fn webkit_use(version: (u32, u32, u32), force: Option<&str>, disable: Option<&str>) -> Use {
@@ -433,9 +438,23 @@ impl State {
     pub fn probe_is_news(&self) -> bool {
         self.probe.failed() && !(self.appimage_without_bwrap() && self.using.webkit != Webkit::On)
     }
-    /// The player can still turn it off for this start's restart: WebKit runs it, and no variable of theirs decides.
+    /// The player can still turn it off for this start's restart: WebKit runs it, it reads [`VAR`] (2.40 and later), and
+    /// no variable of theirs decides. Else a restart "without the sandbox" would run it again (and show the same message).
     pub fn can_turn_off(&self) -> bool {
-        self.using.webkit == Webkit::On && !matches!(self.var, Var::Yours(_))
+        self.using.webkit == Webkit::On && !matches!(self.var, Var::Yours(_)) && has_switch(self.webkit_version)
+    }
+    /// Why the launcher cannot turn it off in this start (None: it can, or WebKit does not run it).
+    pub fn cannot_turn_off(&self) -> Option<String> {
+        if self.using.webkit != Webkit::On {
+            return None;
+        }
+        match &self.var {
+            Var::Yours(v) => Some(format!(
+                "Your own {VAR}={v} keeps it on, and the launcher leaves a variable you set alone: unset it, and the launcher can turn the sandbox off.")),
+            _ if !has_switch(self.webkit_version) => Some(format!(
+                "This WebKitGTK ({}.{}) has no switch to turn its sandbox off ({VAR} came with 2.40).", self.webkit_version.0, self.webkit_version.1)),
+            _ => None,
+        }
     }
 }
 
@@ -655,8 +674,9 @@ pub fn finding(s: &State) -> Option<kiln_manage::report::Finding> {
     }
     let aa = s.apparmor.as_deref().filter(|a| *a == "1").map(|_| " AppArmor restricts user namespaces here (kernel.apparmor_restrict_unprivileged_userns = 1).").unwrap_or_default();
     let (level, text) = if s.using.webkit == Webkit::On {
+        let off = s.cannot_turn_off().unwrap_or_else(|| format!("Turn it off in the launcher's message or with {ARG_OFF}."));
         (Level::Problem, format!("WebKit's sandbox cannot start on this system ({}), and this start uses it ({}): the launcher's page cannot open.{aa} \
-            Turn it off in the launcher's message or with {ARG_OFF}; app.md, \"WebKit's sandbox (Linux)\", has the proper fix.", s.probe_says(), s.using.why))
+            {off} app.md, \"WebKit's sandbox (Linux)\", has the proper fix.", s.probe_says(), s.using.why))
     } else {
         (Level::Info, format!("bwrap cannot set up WebKit's sandbox on this system ({}).{aa} This start does not use the sandbox ({}), so this is not why a launcher window stays empty.",
             s.probe_says(), s.using.why))
@@ -733,10 +753,16 @@ pub fn start_message(s: &State) -> Message {
             w
         }
     };
+    // the button only where its restart really runs without the sandbox (else the same message comes back)
+    let (off, mut buttons) = match s.cannot_turn_off() {
+        None => (OFF_MEANS.to_string(), vec![(Action::SandboxOff, "Turn the sandbox off and start")]),
+        Some(why) => (why, Vec::new()),
+    };
+    buttons.extend([(Action::StartAnyway, "Start anyway"), (Action::Quit, "Quit")]);
     Message {
         title: "Kiln Launcher: WebKit's sandbox cannot start".into(),
-        body: format!("{what}\nWebKit runs its sandbox in this start because {}.\n\n{OFF_MEANS}\n\n{}", s.using.why, proper_fix(s)),
-        buttons: vec![(Action::SandboxOff, "Turn the sandbox off and start"), (Action::StartAnyway, "Start anyway"), (Action::Quit, "Quit")],
+        body: format!("{what}\nWebKit runs its sandbox in this start because {}.\n\n{off}\n\n{}", s.using.why, proper_fix(s)),
+        buttons,
     }
 }
 
@@ -773,6 +799,10 @@ pub fn late_message(s: Option<&State>, render: &crate::render::Choice, what: &st
             };
             if s.using.webkit == Webkit::On || s.probe_is_news() {
                 w += &format!("; {}", s.probe_says());
+            }
+            // why "Start without WebKit's sandbox" is not offered although WebKit runs it
+            if let Some(why) = s.cannot_turn_off() {
+                w += &format!(". {}", why.trim_end_matches('.'));
             }
             w
         }
@@ -1041,6 +1071,44 @@ mod tests {
         // a .deb without bubblewrap
         let s4 = state(forced(), Probe::Missing { path: "/usr/bin/bwrap".into() });
         assert!(start_message(&s4).body.contains("install bubblewrap"));
+    }
+
+    /// "Turn the sandbox off" restarts into a start that has it off: not offered where that restart would run it again
+    /// (the player's own variable, which the launcher leaves alone; a WebKitGTK without the switch), so clicking it can
+    /// never bring the same message back.
+    #[test]
+    fn turning_the_sandbox_off_is_offered_only_where_the_restart_has_it_off() {
+        use crate::render::{Choice as R, Mode, Why as RW};
+        let soft = R { mode: Mode::Software, why: RW::Restart, ignored: None };
+        let what = "the page did not start within 15 s of the window";
+        let offered = |m: &Message| m.buttons.iter().any(|b| b.0 == Action::SandboxOff);
+        // the restart the button asks for: the variable set, so WebKit 2.40 and later has it off and no message comes
+        let restart = decide(&args(&[]), None, true, false);
+        assert_eq!(variable(&restart, None), Var::Set);
+        assert_eq!(webkit_use((2, 50, 4), Some("1"), Some("1")).webkit, Webkit::Off);
+        assert_eq!(webkit_use((2, 40, 0), Some("1"), Some("1")).webkit, Webkit::Off);
+        // the player's own WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=0: it stays, so the button would only come back
+        let mut yours = state(webkit_use((2, 50, 4), Some("1"), Some("0")), uid_map());
+        yours.var = Var::Yours("0".into());
+        let m = start_message(&yours);
+        assert!(!offered(&m), "{:?}", m.buttons);
+        assert_eq!(m.buttons, vec![(Action::StartAnyway, "Start anyway"), (Action::Quit, "Quit")]);
+        assert!(m.body.contains("Your own WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=0 keeps it on") && !m.body.contains("Turning the sandbox off:"), "{}", m.body);
+        assert!(m.body.contains("Or start the launcher without WEBKIT_FORCE_SANDBOX=1"), "{}", m.body);
+        let late = late_message(Some(&yours), &soft, what, "/x/launcher.log");
+        assert!(!offered(&late) && late.body.contains("Your own WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=0 keeps it on"), "{}", late.body);
+        assert!(finding(&yours).unwrap().text.contains("Your own WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=0"));
+        // WebKitGTK 2.38 reads no WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS: the launcher's variable would change nothing
+        let mut old = state(webkit_use((2, 38, 6), Some("1"), None), uid_map());
+        old.webkit_version = (2, 38, 6);
+        assert!(!old.can_turn_off() && !offered(&start_message(&old)) && !offered(&late_message(Some(&old), &soft, what, "/x")));
+        assert!(start_message(&old).body.contains("This WebKitGTK (2.38) has no switch to turn its sandbox off"), "{}", start_message(&old).body);
+        // where it works, it is offered and says what off means
+        let ok = state(forced(), uid_map());
+        assert!(ok.can_turn_off() && ok.cannot_turn_off().is_none() && offered(&start_message(&ok)));
+        assert!(start_message(&ok).body.contains("Turning the sandbox off:"));
+        // WebKit does not run it: nothing to say either way
+        assert!(state(webkit_use((2, 50, 4), None, None), uid_map()).cannot_turn_off().is_none());
     }
 
     #[test]
