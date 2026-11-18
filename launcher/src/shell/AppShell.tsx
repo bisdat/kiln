@@ -133,6 +133,11 @@ function Mouth({ isPlay, ctl }: { isPlay: boolean; ctl: PlayControl }) {
     const time = ctl.elapsed !== null ? clock(ctl.elapsed) : v.label;
     word = time; sub = v.label; heat = v.word === "safeIdle" ? "low" : "embers"; act = null;
     aria = ctl.elapsed !== null ? t("shell.appShell.labelFor", { label: v.label, time }) : v.label;
+  } else if (ctl.applying) {
+    // (29.18) a profile is being applied to the game, whatever started it: Play waits for it (shell/applying.ts)
+    const what = ctl.applying.what === "kiln" ? t("shell.play.installingKiln") : t("shell.play.applyingProfile");
+    word = t("nav.play"); sub = what; heat = "low"; act = null;
+    aria = ctl.applying.title ? t("shell.play.applyingAria", { what, title: ctl.applying.title }) : what;
   } else {
     word = t("nav.play"); sub = ""; heat = "idle"; act = ctl.canPlay ? () => ctl.play("profile") : null; aria = t("shell.appShell.playName", { name });
   }

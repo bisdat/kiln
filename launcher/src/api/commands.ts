@@ -1853,7 +1853,7 @@ export const configKilnReset = (gameId: GameId, path: string) => call<ConfigDocu
 
 // launch.rs
 /** Through the activation guard (./oneActivation.ts): the start applies the active profile again (refresh_active). */
-export const launchPlay = (gameId: GameId, request: LaunchRequest) => oneActivation(gameId, () => call<LaunchResult>("launch_play", { gameId, request }));
+export const launchPlay = (gameId: GameId, request: LaunchRequest) => oneActivation(gameId, () => call<LaunchResult>("launch_play", { gameId, request }), { play: true });
 export const launchState = (gameId: GameId) => call<BootState>("launch_state", { gameId });
 export const launchPrestart = (gameId: GameId) => call<PreStart | null>("launch_prestart", { gameId });
 /** Play was pressed (before the cook): the launcher times the start's own steps from now. */

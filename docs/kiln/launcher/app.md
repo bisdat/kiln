@@ -346,7 +346,13 @@ window, Play. The mod is in the list on Play, switched on.
   the drop until the add worked (a profile made by "New profile…" whose add failed is listed, to pick again). One
   activation per game at a time (`api/oneActivation.ts`, inside `profileActivate`, `profileDeactivate`,
   `profileEnsureDefault`, `libraryAddToProfile` and `launchPlay`): another one while it runs is refused with "Kiln is
-  still loading a profile in this game". A drop takes a
+  still loading a profile in this game". Since 0.2.0-dev.29.18 Play does not wait for the click to say so: while an
+  activation runs, whatever started it, the mouth (desktop and Deck) reads Play with "Applying profile…" under it
+  ("Installing Kiln…" for `runtime_install` and `runtime_rollback`) and is off, and so are Vanilla and Without mods;
+  it comes back when the activation ends or fails. `src/shell/applying.ts` decides it from two places only: the task
+  list (`library_add`, `modpack_install`, `found_add`, `nexus_install`, `runtime_install`, `runtime_rollback` queued or
+  running; tasks name no game, so one holds Play in every game) and the guard above (`useDirectActivations`, Play's own
+  `launchPlay` aside). `tests/applying.spec.ts` holds each kind with `__kilnMock.holdTasks(kind, {gate, fail?})`. A drop takes a
   zip, 7z or rar (`library::archive_kind`), a folder or a DLL. Modpack zips open the consent dialog (`ModpackDropOffer`: tick the box, then
   `modpack_install` with `{path}`). A drop on a DropZone (Runtime's bundle row) or while a dialog is
   open is not the window's; a covered or busy DropZone takes no drops. Overlapping identical drops run once; other

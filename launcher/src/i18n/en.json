@@ -3397,6 +3397,9 @@
       "kilnWhat": "Kiln {version} · {what}"
     },
     "play": {
+      "applyingProfile": "Applying profile…",
+      "installingKiln": "Installing Kiln…",
+      "applyingAria": "{what} ({title})",
       "stoppedStart": "Kiln stopped the start",
       "waitingForKiln": "Waiting for Kiln",
       "noWord": "No word from Kiln",
