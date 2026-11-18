@@ -16,6 +16,7 @@ import type { CatalogFile, InstallReport, NexusAccount } from "../api/nexus";
 import { runTask, toast } from "../ui";
 import { notifyAdd } from "./notices";
 import { t } from "../i18n";
+import { allUpdated } from "./addWords";
 
 export const useNexusAccount = () => useQuery({ queryKey: nx.nk.account, queryFn: nx.nexusAccount, staleTime: 60_000, retry: false, enabled: useNexusEnabled() });
 
@@ -114,7 +115,8 @@ export function useReportToast() {
       ...(r.add.changes.length ? [{ label: t("common.undo"), onClick: () => void undo(r) }] : []),
       ...need.slice(0, 2).map((q) => ({ label: t("shell.catalogInstall.get", { name: q.name }), onClick: () => nav(`/catalog?mod=${q.modId}`) })),
     ];
-    if (r.add.added.length) toast.ok(update ? t("shell.catalogInstall.updated", { name: r.name }) : t("shell.catalogInstall.added", { name: r.name }), more || undefined, { actions });
+    // a file of a mod the profile had in another version is an update too (a Mod Manager Download link; 29.18, inbox 90)
+    if (r.add.added.length) toast.ok(update || allUpdated(r.add) ? t("shell.catalogInstall.updated", { name: r.name }) : t("shell.catalogInstall.added", { name: r.name }), more || undefined, { actions });
     else if (r.add.already.length) toast.info(t("shell.catalogInstall.onAlready", { name: r.name }), more || undefined, { actions });
     else toast.info(t("shell.catalogInstall.inListOff", { name: r.name }), more || undefined, { actions });
   };

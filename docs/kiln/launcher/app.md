@@ -352,7 +352,9 @@ window, Play. The mod is in the list on Play, switched on.
   it comes back when the activation ends or fails. `src/shell/applying.ts` decides it from two places only: the task
   list (`library_add`, `modpack_install`, `found_add`, `nexus_install`, `runtime_install`, `runtime_rollback` queued or
   running; tasks name no game, so one holds Play in every game) and the guard above (`useDirectActivations`, Play's own
-  `launchPlay` aside). `tests/applying.spec.ts` holds each kind with `__kilnMock.holdTasks(kind, {gate, fail?})`. A drop takes a
+  `launchPlay` aside). `tests/applying.spec.ts` holds each kind with `__kilnMock.holdTasks(kind, {gate, fail?})`. A
+  drop's toast says "Updated <name>: <old> → <new>" (desktop and Deck) when the profile had another version of the mod
+  (`AddReport.changes[].before`; `src/shell/addWords.ts`), "Added <name>" for a new one as before. A drop takes a
   zip, 7z or rar (`library::archive_kind`), a folder or a DLL. Modpack zips open the consent dialog (`ModpackDropOffer`: tick the box, then
   `modpack_install` with `{path}`). A drop on a DropZone (Runtime's bundle row) or while a dialog is
   open is not the window's; a covered or busy DropZone takes no drops. Overlapping identical drops run once; other

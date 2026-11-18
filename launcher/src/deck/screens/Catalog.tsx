@@ -14,6 +14,7 @@ import { toast } from "../../ui";
 import type { DeckAction } from "../layers";
 import { DeckButton, Dialog, Row, Screen, Word } from "../ui";
 import { t, useT } from "../../i18n";
+import { allUpdated } from "../../shell/addWords";
 
 const FILTERS: CatalogFilter[] = ["kiln", "all", "installed"];
 const SORTS = ["endorsements", "updated", "name"] as const satisfies readonly CatalogSort[];
@@ -152,7 +153,8 @@ export function AddedDialog({ report, onClose, onGet }: { report: InstallReport;
   const t = useT();
   const { undo } = useCatalogInstall();
   const need = offered(report).slice(0, 2);
-  const title = report.add.added.length ? t("deck.catalog.added", { name: report.name }) : report.add.already.length ? t("deck.shared.isOn", { name: report.name }) : t("deck.catalog.inListOff", { name: report.name });
+  // a file of a mod the profile had in another version is an update (29.18, inbox 90)
+  const title = report.add.added.length ? (allUpdated(report.add) ? t("deck.catalog.updated", { name: report.name }) : t("deck.catalog.added", { name: report.name })) : report.add.already.length ? t("deck.shared.isOn", { name: report.name }) : t("deck.catalog.inListOff", { name: report.name });
   return (
     <Dialog name="catalog-added" title={title} onClose={onClose} backLabel={t("common.ok")}
       buttons={<>
