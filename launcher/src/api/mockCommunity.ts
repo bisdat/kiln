@@ -8,6 +8,7 @@
 //   offline     no network           relaydown   frostdev.io does not answer
 //   ratelimit   the next send is refused (3 reports this hour)   toobig   the report zip is over the limit
 //   ratelimitday   the next send is refused (10 in 24 hours)     ratelimitnet   (too many from this network)
+//   toonew      the Discord account is under 3 days old (a send is refused)
 //   known       the report matches a known problem with a fix     nodiscord   the Discord app is not running
 //   presence    Rich Presence on     notify      reply notifications on
 //   cancel      sign-in: cancelled on Discord's page              expire   sign-in: the code runs out
@@ -274,6 +275,7 @@ export function communityMockHandlers({ emit, gameRunning }: CommunityMockDeps):
       needSession();
       relay("reports");
       if (!account!.member) err("refused", "You're not in the Kiln Discord yet.", "not_member");
+      if (has("toonew")) err("refused", "This Discord account is too new to send reports.", "too_young");
       // the relay's 429 as kiln_manage::community::relay::refusal words it
       if (rateLimited) err("busy", "Kiln support asks you to wait before sending again.", "rate_limited", { limit: rateLimited, sent: { hour: 3, day: 10, network: 20 }[rateLimited],
         waitMin: rateLimited === "hour" ? 38 : 300, last: posts[0]?.url ?? null });
@@ -345,6 +347,8 @@ export function communityMockHooks(emit: Emit) {
     join: () => { joined = true; },
     readResults: () => { if (testPlan?.sent) testPlan = { ...testPlan, sent: { ...testPlan.sent, read: { by: "Rowan", at: new Date().toISOString() } } }; emit("kiln://community", { kind: "changed" }); },
     requests: () => [...requests],
+    /** The prepared reports run out (the backend keeps one 30 minutes). */
+    forgetPrepared: () => prepared.clear(),
     signins: () => signins.map((x) => ({ ...x })),
   };
 }

@@ -145,8 +145,8 @@ Bearer <session key>`. JSON bodies are `Content-Type: application/json`.
 | 503 `unavailable`, 5xx, 422 `bad-zip`, 409, 403 `refused`, a body that is not JSON, a redirect, an answer over its bound | `relay` | "Kiln support can't be reached"; Retry |
 | 401 `signed-out` | `signin` | forgets the session key (signed out) |
 | 403 `not-member` | `not_member` | "You're not in the Kiln Discord yet", Join and "I've joined" |
-| 403 `too-new` | `too_young` | shown as the relay's refusal |
-| 404 `not-found` | `not_found` | the post is gone |
+| 403 `too-new` | `too_young` | "This Discord account is too new" (reports from accounts 3 days old and more), Save report; the draft is kept |
+| 404 `not-found` | `not_found` | the post is gone (a report prepared over 30 minutes ago, gone from the launcher, is made again for the player to check) |
 | 410 `expired` | `expired` | a sign-in that ran out |
 | 413 `too-big` (`size`, `limit`) | `too_big` | "The report is too big to send", Send without the zip |
 | 429 `rate-limited` (`limit` hour/day/network, `retryAt`, `lastPost`) | `rate_limited` | "That's a lot of reports", worded for the limit (`detail.limit`): 3 in the last hour, 10 in the last 24 hours, or too many from the network in the last 24 hours; the time until `retryAt` (minutes, else hours); Open my last post (`lastPost` only if it is a `https://discord.com/channels/...` link) |

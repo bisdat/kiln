@@ -56,7 +56,10 @@ export function SendDialog() {
       ui.setSend({ step: "sent", sentUrl: post.url });
       void refreshCommunity(qc);
     } catch (e) {
-      setErr({ kind: errKind(e) ?? "relay", detail: ((e as { detail?: Record<string, unknown> }).detail ?? {}) });
+      const kind = errKind(e) ?? "relay";
+      setErr({ kind, detail: ((e as { detail?: Record<string, unknown> }).detail ?? {}) });
+      // the prepared report is gone (over 30 minutes): a new one is made, for the player to check again
+      if (kind === "not_found") void qc.resetQueries({ queryKey: ["community", "prepare", s.session] });
       void refreshCommunity(qc);
     } finally { setBusy(false); }
   };
@@ -155,7 +158,7 @@ export function SendDialog() {
           <div ref={errRef} className="k-stack" style={{ gap: 8 }} data-testid="kc-send-state">
             {!canSend && <Banner tone="info" title={t("community.account.out")}>{t("community.send.check.signInHint")}</Banner>}
             {!err && st.data && !st.data.online && <Banner tone="warn" title={t("community.send.err.offlineTitle")} actions={<Button size="s" onClick={save}>{t("community.send.err.saveReport")}</Button>}>{t("community.send.err.offline")}</Banner>}
-            {err && <SendError err={err} retry={() => send()} sendWithout={() => send("none")} save={save} recheck={async () => {
+            {err && <SendError err={err} size={p.size} retry={() => send()} sendWithout={() => send("none")} save={save} recheck={async () => {
               const a = await api.communityCheckMember().catch(() => null);
               await refreshCommunity(qc);
               if (a?.member) setErr(null); else toast.info(t("community.send.err.stillNot"));
@@ -185,7 +188,7 @@ function Known({ known, onAction }: { known: NonNullable<ReportPreview["known"]>
   );
 }
 
-function SendError({ err, retry, sendWithout, save, recheck }: { err: NonNullable<SendErr>; retry: () => void; sendWithout: () => void; save: () => void; recheck: () => void }) {
+function SendError({ err, size, retry, sendWithout, save, recheck }: { err: NonNullable<SendErr>; size: number; retry: () => void; sendWithout: () => void; save: () => void; recheck: () => void }) {
   const t = useT();
   const d = err.detail;
   switch (err.kind) {
@@ -205,7 +208,11 @@ function SendError({ err, retry, sendWithout, save, recheck }: { err: NonNullabl
       return <Banner tone="warn" title={t("community.send.err.bigTitle")} actions={<>
         <Button size="s" onClick={sendWithout}>{t("community.send.err.sendWithout")}</Button>
         <button type="button" className="k-link" onClick={save}>{t("community.send.err.saveReport")}</button>
-      </>}>{t("community.send.err.big", { size: fmtBytes(Number(d.size)), limit: fmtBytes(Number(d.limit)) })}</Banner>;
+      </>}>{t("community.send.err.big", { size: fmtBytes(Number(d.size ?? size)), limit: fmtBytes(Number(d.limit ?? 8 * 1024 * 1024)) })}</Banner>;
+    case "too_young":
+      return <Banner tone="warn" title={t("community.send.err.tooNewTitle")} actions={<Button size="s" onClick={save}>{t("community.send.err.saveReport")}</Button>}>{t("community.send.err.tooNew")}</Banner>;
+    case "not_found":
+      return <Banner tone="info" title={t("community.send.err.staleTitle")}>{t("community.send.err.stale")}</Banner>;
     default:
       return <Banner tone="err" title={t("community.send.err.relayTitle")} actions={<Button size="s" onClick={retry}>{t("common.retry")}</Button>}>{t("community.send.err.relay")}</Banner>;
   }

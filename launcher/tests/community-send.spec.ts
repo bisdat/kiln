@@ -4,7 +4,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 type Hooks = {
-  community: { requests: () => string[]; approve: () => void; setOnline: (on: boolean) => void; setRelay: (up: boolean) => void; join: () => void };
+  community: { requests: () => string[]; approve: () => void; setOnline: (on: boolean) => void; setRelay: (up: boolean) => void; join: () => void; forgetPrepared: () => void };
   opened: () => string[]; setNoProxy: (on: boolean) => void; crash: () => void; externalStart: (id: string, at?: number) => void;
 };
 const mock = <T,>(page: Page, f: (h: Hooks) => T) => page.evaluate((src) => (new Function("h", `return (${src})(h)`))((window as unknown as { __kilnMock: Hooks }).__kilnMock), f.toString()) as Promise<T>;
@@ -150,6 +150,31 @@ test.describe("desktop", () => {
     await writeAndCheck(page);
     await page.getByTestId("kc-send-now").click();
     await expect(state).toContainText("Many reports came from your network in the last 24 hours, so sending is paused for now. You can send again in 5 hours.");
+  });
+
+  test("an account under 3 days old: the relay's refusal in words, the draft kept", async ({ page }) => {
+    await open(page, "/?mock=1&discord=in,toonew#/community");
+    await page.getByTestId("kc-send").click();
+    await writeAndCheck(page);
+    await page.getByTestId("kc-send-now").click();
+    const state = page.getByTestId("kc-send-state");
+    await expect(state).toContainText("This Discord account is too new");
+    await expect(state).toContainText("Kiln support takes reports from Discord accounts that are at least 3 days old.");
+    await expect(state).not.toContainText("can't be reached");
+    await expect(state.getByRole("button", { name: "Save report" })).toBeVisible();
+  });
+
+  test("a report prepared over 30 minutes ago is made again, then sends", async ({ page }) => {
+    await open(page, "/?mock=1&discord=in#/community");
+    await page.getByTestId("kc-send").click();
+    await writeAndCheck(page);
+    await mock(page, (h) => h.community.forgetPrepared());
+    await page.getByTestId("kc-send-now").click();
+    const state = page.getByTestId("kc-send-state");
+    await expect(state).toContainText("The report was made again");
+    await expect(page.getByTestId("kc-postmock")).toContainText("The game crashes when I open the map");
+    await page.getByTestId("kc-send-now").click();
+    await expect(page.getByTestId("kc-sent")).toBeVisible();
   });
 
   test("too big: the size and the limit, Send without the zip", async ({ page }) => {
