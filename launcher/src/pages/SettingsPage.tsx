@@ -20,6 +20,7 @@ import { LanguageCard } from "../components/LanguageSettings";
 import { GraphicsCard, isGraphicsPath } from "../components/GraphicsSettings";
 import { StartModal, UnknownBuild, useStartWord } from "../components/GameStart";
 import { rich, t, useT } from "../i18n";
+import { CommunityToggle } from "../community/parts";
 import {
   Badge, Button, Card, ConfirmDanger, EmptyState, Field, IconButton, NumberInput, Page, PageHeader, PathPicker, SchemaForm, Select, Skeleton,
   Toggle, errorText, fmtAgo, fmtBytes, setTypeToConfirm, toast, typeToConfirm,
@@ -85,6 +86,7 @@ function LauncherCard() {
       <Toggle checked={v.modFolderNotes !== false} onChange={(on) => set({ modFolderNotes: on })} label={t("settings.launcher.folderNotes")}
         hint={t("settings.launcher.folderNotesHint")} />
       <Toggle checked={v.allowHttpModpacks} onChange={(on) => set({ allowHttpModpacks: on })} label={t("settings.launcher.httpModpacks")} hint={t("settings.launcher.httpModpacksHint")} />
+      <CommunityToggle />
       <Toggle checked={v.modUpdatesDaily === true} onChange={(on) => set({ modUpdatesDaily: on })} label={t("settings.launcher.dailyUpdates")}
         hint={t("settings.launcher.dailyUpdatesHint")} />
       <TypeToConfirmToggle />

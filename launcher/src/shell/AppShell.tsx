@@ -26,6 +26,9 @@ import { applyingWord } from "./applying";
 import { Stage, stageInput, wakeStage, type Heat } from "./Stage";
 import { startWords } from "./startProgress";
 import { useT } from "../i18n";
+import { CommunityDesktopHost } from "../community/Host";
+import { NavCount } from "../community/parts";
+import { useShown } from "../community/state";
 
 const MOTION = "(prefers-reduced-motion: reduce)";
 const reduced = () => typeof window !== "undefined" && !!window.matchMedia?.(MOTION).matches;
@@ -60,7 +63,8 @@ function Header({ isPlay, ctl }: { isPlay: boolean; ctl: PlayControl }) {
   const nav = useRef<HTMLElement>(null);
   const active = navFor(loc.pathname);
   const nexusEnabled = useNexusEnabled();
-  const main = NAV_MAIN.filter((n) => nexusEnabled || n.to !== "/catalog");
+  const community = useShown();
+  const main = NAV_MAIN.filter((n) => (nexusEnabled || n.to !== "/catalog") && (community || n.to !== "/community"));
   // the gold diamond sits under the active word (placed from its offset: words differ in width)
   useLayoutEffect(() => {
     const place = () => {
@@ -71,7 +75,7 @@ function Header({ isPlay, ctl }: { isPlay: boolean; ctl: PlayControl }) {
     window.addEventListener("resize", place);
     document.fonts?.ready.then(place).catch(() => {});
     return () => window.removeEventListener("resize", place);
-  }, [active?.to, nexusEnabled]);
+  }, [active?.to, nexusEnabled, community]);
   const v = ctl.view;
   // a start that says what it does: its step, and the time left (else how far, in percent)
   const tl = ctl.timeline;
@@ -89,7 +93,7 @@ function Header({ isPlay, ctl }: { isPlay: boolean; ctl: PlayControl }) {
       <nav ref={nav} className="k-nav" aria-label={t("shell.appShell.navAria")}>
         {main.map((n) => (
           <NavLink key={n.to} to={n.to} end={n.to === "/"} className={"k-navb" + (active?.to === n.to ? " on" : "")} aria-current={active?.to === n.to ? "page" : undefined}>
-            <span>{n.label}</span>
+            <span>{n.label}</span>{n.to === "/community" && <NavCount />}
           </NavLink>
         ))}
         {active && main.includes(active) && <span className="k-nav-dia" aria-hidden><i className="k-dia" /></span>}
@@ -259,6 +263,7 @@ export function AppShell() {
       <NxmListener />
       <ModUpdatesWatcher />
       <DataFolderNotice />
+      <CommunityDesktopHost />
       <Toaster />
       <Splash done={ready} />
     </div>

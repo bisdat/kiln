@@ -34,6 +34,7 @@ import { FolderNotesList, useGameFolderNotes } from "../../components/FolderNote
 import { folderNotesCount } from "../../shell/notices";
 import { languageName, languages, t, useT } from "../../i18n";
 import { applyLanguage } from "../../i18n/LanguageSync";
+import { DeckCommunityRow } from "../../community/parts";
 
 const MODES: { id: UiMode }[] = [{ id: "auto" }, { id: "deck" }, { id: "desktop" }];
 const GLYPHS: { id: GlyphPref }[] = [{ id: "auto" }, { id: "deck" }, { id: "xbox" }];
@@ -197,6 +198,7 @@ export default function Settings() {
           sub={t("deck.settings.notesSwitchSub")}
           end={<Word tone="ember">{settings.data?.modFolderNotes !== false ? t("deck.shared.on") : t("deck.shared.off")}</Word>}
           onClick={() => void saveSettings(qc, (cur) => ({ modFolderNotes: cur.modFolderNotes === false }))} />
+        <DeckCommunityRow />
         {game && (
           <Row id="set-notes" title={t("deck.settings.modNotes")} a={t("deck.shared.read")} disabled={!noteCount} sub={t("deck.settings.modNotesSub")}
             end={<Word tone={noteCount ? "info" : "idle"}>{String(noteCount)}</Word>} onClick={() => setNotesOpen(true)} />
