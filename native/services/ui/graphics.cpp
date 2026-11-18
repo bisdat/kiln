@@ -728,9 +728,10 @@ KilnResult graphics_set(const KilnUiGraphics* in) {
 }
 
 KilnResult graphics_status(KilnUiGraphicsStatus* out) {
-    if (!out || out->size < sizeof(KilnUiGraphicsStatus)) return KILN_ERR_INVALID_ARGUMENT;
+    // 72 bytes (phase A's callers) or more: the phase B fields are filled when the caller's struct has them
+    if (!out || out->size < KILN_UI_GRAPHICS_STATUS_SIZE_V1) return KILN_ERR_INVALID_ARGUMENT;
     const uint32_t size = out->size;
-    std::memset(out, 0, sizeof(KilnUiGraphicsStatus));
+    std::memset(out, 0, std::min<size_t>(size, sizeof(KilnUiGraphicsStatus)));
     out->size = size;
     gfx::Settings s;
     uint32_t aside = 0;
