@@ -300,12 +300,69 @@ mod tests {
     #[test]
     fn the_relays_shapes_read_too_a_single_word_a_min_max_range_an_action_object() {
         let l = list(r#"{ "issues": [
-            { "id": "night", "title": "Night Sky", "fix": "Turn it off.", "action": { "label": "Show my mods", "to": "play" },
+            { "id": "settings", "title": "A setting", "fix": "Change it.", "action": { "label": "Open Settings", "to": "settings" }, "match": { "findings": ["crash"] } },
+        { "id": "night", "title": "Night Sky", "fix": "Turn it off.", "action": { "label": "Show my mods", "to": "play" },
               "match": { "findings": ["mod-failed"], "text": "night-sky", "kiln": { "min": "0.2.0-dev.29" } } }
         ], "updated": "2026-11-18T12:00:00Z" }"#);
-        let i = &l.issues[0];
+        assert_eq!((l.issues[0].action, l.issues[0].label.as_deref()), (Some(KnownAction::Settings), Some("Open Settings")));
+        let i = &l.issues[1];
         assert_eq!((l.format, i.action, i.matches.text.clone(), i.matches.kiln.clone()), (1, Some(KnownAction::Mods), vec!["night-sky".to_string()], Some(">=0.2.0-dev.29".to_string())));
         assert!(i.matches(&report(&[("mod-failed", "night-sky failed")], false), NOW));
+    }
+
+    /// The support session's first list (dev29/out/known-issues/known-issues.json, 18 November 2026), as it is:
+    /// every entry is read, and each one matches a report that has its finding on its system and Kiln version.
+    #[test]
+    fn the_support_sessions_list_reads_whole_and_each_entry_meets_its_report() {
+        let l = KnownList::parse(include_bytes!("known-issues.example.json")).unwrap();
+        assert_eq!(l.issues.len(), 6, "an entry was left out");
+        for i in &l.issues {
+            let f: Vec<(&str, &str)> = i.matches.findings.iter().map(|id| (id.as_str(), "x")).collect();
+            let deck_only = !i.matches.os.is_empty() && !i.matches.os.iter().any(|o| o == "linux");
+            let mut r = report(&f, deck_only);
+            if let Some(max) = i.matches.kiln.as_deref().and_then(|k| k.strip_prefix("<=")) {
+                assert_eq!(max, "0.2.0-dev.29.17");
+                r.facts.kiln = Some("0.2.0-dev.29.16".into());
+            }
+            assert_eq!(best(&l, &r, NOW).map(|x| x.id.as_str()), Some(i.id.as_str()), "{}", i.id);
+        }
+        let at = |id: &str| l.issues.iter().find(|i| i.id == id).unwrap();
+        assert_eq!((at("antivirus-files-missing").action, at("antivirus-files-missing").label.as_deref()), (Some(KnownAction::Runtime), Some("Open Runtime")));
+        assert!(at("proton-override").copy.as_deref().is_some_and(|c| c.starts_with("WINEDLLOVERRIDES=")));
+        // the OptiScaler entry is for Kiln up to 0.2.0-dev.29.17 only
+        let mut new = report(&[("optiscaler", "x")], false);
+        new.facts.kiln = Some("0.2.0-dev.29.18".into());
+        assert!(best(&l, &new, NOW).is_none());
+        // the Proton entries are not for Windows
+        let mut w = report(&[("proton-override", "x")], false);
+        w.facts.os = "Windows 11".into();
+        w.facts.runner = Some("Windows".into());
+        assert!(best(&l, &w, NOW).is_none());
+    }
+
+    /// The Linux launcher's own finding (`ReportInput::findings`, the WebKit sandbox) goes through the report like the
+    /// report's own, so the send dialog's known problem finds it.
+    #[test]
+    fn the_launchers_webkit_sandbox_finding_reaches_the_known_problem() {
+        let input = crate::report::ReportInput {
+            tool: "kiln-launcher 0.2.0-dev.29.18".into(),
+            roots: Some(Vec::new()),
+            deck: Some(false),
+            redactor: Some(crate::report::Redactor::new(None, None, None)),
+            launcher_log: Some(super::super::testing::tmp("known-webkit").path().join("none.log")),
+            findings: vec![Finding { id: "webkit-sandbox".into(), level: Level::Problem, text: "WebKit's sandbox cannot start on this system.".into() }],
+            ..Default::default()
+        };
+        let r = crate::report::build(&input);
+        assert!(r.findings.iter().any(|f| f.id == "webkit-sandbox"), "{:?}", r.findings);
+        let l = KnownList::parse(include_bytes!("known-issues.example.json")).unwrap();
+        let hit = best(&l, &r, NOW).map(|i| i.id.clone());
+        // the entry is for Linux and the Deck: on those it matches; elsewhere nothing does
+        if crate::report::os_info().name.to_ascii_lowercase().contains("windows") {
+            assert_eq!(hit, None);
+        } else {
+            assert_eq!(hit.as_deref(), Some("webkit-sandbox"));
+        }
     }
 
     #[test]
@@ -316,6 +373,11 @@ mod tests {
             { "id": "notitle", "title": "", "fix": "y", "match": { "findings": ["crash"] } }
         ] }"#);
         assert_eq!(l.issues.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), ["ok"]);
+        // the relay's limits: a title of 120 and a fix of 1000 are kept, longer ones are left out
+        let at = |t: usize, f: usize| format!(r#"{{ "issues": [{{ "id": "x", "title": "{}", "fix": "{}", "match": {{ "findings": ["crash"] }} }}] }}"#, "t".repeat(t), "f".repeat(f));
+        assert_eq!(KnownList::parse(at(120, 1000).as_bytes()).unwrap().issues.len(), 1);
+        assert_eq!(KnownList::parse(at(121, 10).as_bytes()).unwrap().issues.len(), 0);
+        assert_eq!(KnownList::parse(at(10, 1001).as_bytes()).unwrap().issues.len(), 0);
         assert!(KnownList::parse(br#"{ "format": 2, "issues": [] }"#).is_err());
         assert!(KnownList::parse(b"not json").is_err());
     }

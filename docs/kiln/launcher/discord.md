@@ -107,7 +107,8 @@ and kept" says it in short; `unit/community.test.ts` checks that its words keep 
   unused), the name and picture while signed in. The launcher keeps the session key (keyring, else an owner-only file)
   and the account as last read; sign out removes both here whatever the relay says.
 - Reports: the public post as shown; the zip to the team (deleted from their channel after 30 days), to everyone, or
-  not sent. The zip is redacted by `kiln_manage::report` (user, machine and Steam names, Steam ID, IP addresses, the
+  not sent. Not sent means report.json alone goes to the relay instead, holding only what the post shows (the
+  launcher's version, the findings, the versions line's facts), so the relay can write the post. The zip is redacted by `kiln_manage::report` (user, machine and Steam names, Steam ID, IP addresses, the
   home folder in paths); saves and mod settings are never in it.
 - Testers: the hardware lines shown, sent by Volunteer only; results to the build's post; an attached report to the
   team only. Stop testing removes the role and the hardware.
@@ -115,120 +116,79 @@ and kept" says it in short; `unit/community.test.ts` checks that its words keep 
 
 ## The contract with the relay
 
-The relay runs on frostdev.io (the kilnbot repo; its own contract is `docs/relay-api.md` there). Both sides build to
-PLAN.md section 7.2; this is what the launcher sends and expects. Paths and shapes the relay settles differently are
-reconciled by the owner.
+The relay runs on frostdev.io (the kilnbot repo). Its contract is the relay's own: `docs/relay-api.md` and the 36
+examples of `docs/relay-contract.json` there (master 3eb30a7, live since 18 November 2026). This is how the launcher
+uses it. The launcher's tests talk to a fake relay on 127.0.0.1, never to frostdev.io.
 
-**Base address:** `https://frostdev.io/kiln/relay` by default. It is a setting (`relay` in `<data>/community.json`);
-only https on frostdev.io or one of its subdomains is used, so a staging relay can be tried and the session key never
-goes to another site. Debug builds can send the same requests in plain HTTP to a relay on this machine with
+**Base address:** `https://frostdev.io/kiln/relay`. It is a setting (`relay` in `<data>/community.json`); only https on
+frostdev.io or one of its subdomains is used, so a staging relay can be tried and the session key never goes to
+another site. Debug builds can send the same requests in plain HTTP to a relay on this machine with
 `KILN_COMMUNITY_RELAY_LOOPBACK=127.0.0.1:<port>` (the `Host` header stays `frostdev.io`); release builds ignore it.
 
-**Every request:** https to that one host through `kiln_manage::net` (no redirects followed, public addresses only, no
-proxy, no cookies, bounded answers: 256 KiB, the known-problems list 512 KiB). Headers: `User-Agent:
-kiln-launcher/<version>` (nothing else about the player or the PC), `Accept: application/json`, and for the calls
-marked "session" `Authorization: Bearer <session key>`. JSON bodies are `Content-Type: application/json`, UTF-8.
-Field names are camelCase.
+**Every request:** https to that one host through `kiln_manage::net` (no redirects, public addresses only, no proxy,
+no cookies, bounded answers: 256 KiB, the known-problems list 512 KiB). Headers: `User-Agent: kiln-launcher/<version>`
+(nothing else about the player or the PC), `Accept: application/json`, and for the session's calls `Authorization:
+Bearer <session key>`. JSON bodies are `Content-Type: application/json`.
 
-**Errors:** any non-2xx answer, with a JSON body `{"error": "<reason>", ...}` where the launcher reads one. The
-launcher turns them into the error kinds the UI words (`detail.kind`):
+**Errors** (`{error, message, ...}`; the launcher reads `error`, never `message`) become the kinds the UI words
+(`detail.kind`):
 
 | Answer | Kind | What the launcher does |
 |---|---|---|
 | no answer (DNS, refused, reset, timeout before connecting) | `offline` | "You're offline"; the draft is kept |
-| 5xx, a body that is not the shape below, a redirect, an answer over its bound | `relay` | "Kiln support can't be reached"; Retry |
-| 401 | `signin` | forgets the session key (signed out) |
-| 403 `{"error": "not_member"}` | `not_member` | "You're not in the Kiln Discord yet", Join and "I've joined" |
-| 403 `{"error": "too_young"}` | `too_young` | the account is under 3 days old (shown as the relay's refusal) |
-| 403 any other reason (a blocked account) | `relay` | the same words as a relay that is down (PLAN 7.3) |
-| 404 | `not_found` | the post or the attempt is gone |
-| 410 | `expired` | a sign-in that ran out |
-| 413 `{"error": "too_big", "size": n, "limit": n}` | `too_big` | "The report is too big to send", Send without the zip |
-| 429 `{"error": "rate_limited", "sent": n, "waitMin": n, "last": "<post url>"}` | `rate_limited` | "That's a lot of reports", Open my last post (`last` only if it is a `https://discord.com/channels/...` link) |
-| 400 | `bad_request` | a launcher bug; shown as the relay's refusal |
+| 503 `unavailable`, 5xx, 422 `bad-zip`, 409, 403 `refused`, a body that is not JSON, a redirect, an answer over its bound | `relay` | "Kiln support can't be reached"; Retry |
+| 401 `signed-out` | `signin` | forgets the session key (signed out) |
+| 403 `not-member` | `not_member` | "You're not in the Kiln Discord yet", Join and "I've joined" |
+| 403 `too-new` | `too_young` | shown as the relay's refusal |
+| 404 `not-found` | `not_found` | the post is gone |
+| 410 `expired` | `expired` | a sign-in that ran out |
+| 413 `too-big` (`size`, `limit`) | `too_big` | "The report is too big to send", Send without the zip |
+| 429 `rate-limited` (`limit` hour/day/network, `retryAt`, `lastPost`) | `rate_limited` | "That's a lot of reports": the count (3 for `hour`, 10 for `day`), the minutes until `retryAt`, Open my last post (`lastPost` only if it is a `https://discord.com/channels/...` link) |
+| 429 `slow-down` | (sign-in poll: still waiting) | |
+| 400 `bad-request` | `bad_request` | a launcher bug; shown as the relay's refusal |
 
-Reasons are read with dashes or underscores (`not-member` = `not_member`); `too-new` is `too_young`, `signed-out` any
-401, and a 429's `limit` (`hour`: 3 sent, `day`: 10), `retryAt` and `lastPost` stand in for `sent`, `waitMin` and
-`last` (the relay's own contract, docs/relay-api.md in the kilnbot repo, spells them so).
+Reasons are read with dashes or underscores. Ids that go into a path are `[A-Za-z0-9_-]{1,64}` (the relay's are
+Discord snowflakes); the launcher refuses anything else before sending.
 
-**Shapes used below:**
+**Endpoints, as the launcher calls them:**
 
-- `Account` = `{id: "<snowflake>", name: string (1 to 64), member: boolean, tester: boolean}`.
-- `SupportPost` = `{id: [A-Za-z0-9_-]{1,64}, title (≤120), url: "https://discord.com/channels/<guild>/<thread>",
-  created: RFC 3339, status: "waiting"|"replied"|"solved"|"closed", replies: n, unread: n (replies the player has not
-  seen in the launcher), lastReply: {name, team: boolean (Kiln Team role), at: RFC 3339} | null, tags: string[] (≤8),
-  zip: "team"|"public"|"none"}`. A post that breaks these limits is left out of the list.
-- Ids that go into a path are `[A-Za-z0-9_-]{1,64}`; the launcher refuses anything else before sending.
-
-### Sign-in (no session)
-
-| Method, path | Request | Answer |
+| Method, path | The launcher sends | It reads |
 |---|---|---|
-| `POST /signin` | `{mode: "browser"\|"qr", join: boolean, challenge: base64url(sha256(secret)) without padding, port?: number (browser only: the loopback port), device: "desktop"\|"deck", version: "<launcher version>"}` | `{id, code: string ("HV3R-9TCW"; empty in browser mode), url: https on frostdev.io (browser: the page the browser opens, e.g. `/kiln/signin/<id>`; qr: the phone link, e.g. `/link/HV3R9TCW`), expiresAt: RFC 3339}` |
-| `POST /signin/exchange` | `{id, code: "<one-time code from the loopback>", verifier: "<secret>"}` | `{session: "<key>", account: Account}` (`token` is read as `session`) |
-| `POST /signin/poll` | `{id, secret: "<secret>"}` | `{state: "waiting"}` \| `{state: "approved", session, account: Account}` \| `{state: "denied"\|"expired"\|"canceled"}`; 404 or 410 also read as expired, 429 `slow-down` as waiting |
+| `POST /signin` | `{mode: "browser"\|"qr", join, challenge, port? (browser), device: "desktop"\|"deck", version}` | `{id, code, url (https on frostdev.io), expiresAt}` (`pollEvery` ignored: the launcher polls every 2 s on the Deck, every 4 s from 8 s on the desktop) |
+| `POST /signin/exchange` | `{id, code (the loopback's c), verifier (the secret)}` | `{token, account}` |
+| `POST /signin/poll` | `{id, secret}` | `{state: waiting\|approved (token, account)\|denied\|canceled\|expired}` |
+| `GET /me` | | `{account: {id, name, username, avatar, avatarUrl, member, tester}}` (id, name, member, tester are used) |
+| `DELETE /session` | | `{ok}` |
+| `DELETE /me?posts=1` / `?posts=0` | | `{ok, forgotten}` |
+| `POST /reports` | multipart: `draft` `{title (3 to 90), kind, when?, text? (1500, 40 lines), zip: team\|public\|none, known?}` and either `zip` (the report zip, file `kiln-report-YYYY-MM-DD.zip`) or, with `zip: none`, `report` (report.json alone, file `report.json`: `{format, written, tool, findings, versions}`) | `{post, tags, reportId, known}` (post used) |
+| `GET /posts` | | `{posts: [Post], unread}` (posts used; at most 200) |
+| `POST /posts/{id}/seen`, `POST /posts/{id}/solved` | no body | `{post}` (not used: the list is read again) |
+| `DELETE /posts/{id}` | | `{ok}` |
+| `GET /feed` (no session) | | `{releases: [{title, version, date, line, url}], events: [{title, when, where, url}], updated}`; at most 3 releases and 5 events; an event without `when` or `url` is not shown |
+| `GET /known-issues` (no session) | | `{issues, updated}` (format: `kiln_manage::community::known`) |
+| `GET /tester` | | `{tester, hardware, results: [{build, sentAt, url, read, replied}]}`; a `plan` beside them is read when the relay serves one |
+| `POST /tester` | `{hardware: {gpu, driver?, vram?, os?, runner?, covers: ["FSR 4", ...]}, beta}` (the lines the volunteer screen showed; a fact it could not read is left out, the card then says "Not known") | answer not used |
+| `DELETE /tester` | | answer not used |
+| `POST /tester/results` | multipart: `results` `{build (the build's version), steps: [{id, title, result, note?}]}` and, when ticked, `zip` | `{result: {build, sentAt, url, read, replied}}` |
 
-- The secret is 32 random bytes in base64url (43 characters); the challenge is its SHA-256 in base64url. The session
-  goes only to whoever proves the secret.
-- **Browser (desktop):** the launcher listens once on `127.0.0.1:<random port>` before `POST /signin`, then opens
-  `url` in the system browser. After Discord, the relay sends the browser to
-  `http://127.0.0.1:<port>/done?c=<one-time code>` (an `id=<id>` beside it is allowed and must match), or
-  `?error=canceled|denied|expired` when it did not finish. The launcher answers that request with a small page ("Signed in. You can close this tab and go back to the
-  launcher.") and calls `/signin/exchange`. Any other request on the port (another path, another id, another `Host`
-  than `127.0.0.1:<port>`, a repeated parameter) gets a 404 and changes nothing. If the redirect never arrives (a
-  firewall), the launcher also polls `/signin/poll` from 8 seconds on, every 4 seconds: the relay may answer
-  `approved` there too.
-- **QR (Deck):** no port; the Deck shows `url` as a QR code and `code` as text, and polls `/signin/poll` at most every
-  2 seconds until an ending. An attempt lasts at most 10 minutes on the launcher's side.
-- The session key the launcher keeps is printable ASCII without spaces, 16 to 512 characters.
+`Post` = `{id, title, url: "https://discord.com/channels/<guild>/<thread>", created, status:
+waiting|replied|solved|closed, replies, unread, lastReply: {name, team, at} | null, zip}`; a post that breaks the
+launcher's limits (title 120, a Discord link) is left out of the list.
 
-### The account (session)
+**The desktop sign-in round trip:** the launcher listens once on `127.0.0.1:<random port>` before `POST /signin` and
+opens `url` in the system browser. After Discord the relay sends the browser to `http://127.0.0.1:<port>/done?c=<one-time
+code>` (an `id` beside it must match when there is one; `?error=canceled|denied|expired` ends the attempt). The
+launcher answers that request with a small page ("Signed in. You can close this tab and go back to the launcher.")
+and calls `/signin/exchange`. Any other request on the port (another path or id, another `Host` than
+`127.0.0.1:<port>`, a repeated parameter) gets a 404 and changes nothing. With a port, the relay gives the session only
+to the exchange; the launcher's poll from 8 seconds on only reads "waiting" then.
 
-| Method, path | Request | Answer |
-|---|---|---|
-| `GET /me` | - | `{account: Account}` |
-| `DELETE /session` | - | 2xx (sign out: the relay deletes the session) |
-| `DELETE /me?posts=0` / `DELETE /me?posts=1` | - | 2xx ("Sign out and forget me"; `posts=1` also deletes the player's support posts on Discord) |
-
-Sign out always deletes the key on this PC, also when the relay can't be reached. "Forget me" reports a failure (it
-must reach frostdev.io), but the key is gone either way.
-
-### Reports and posts (session)
-
-| Method, path | Request | Answer |
-|---|---|---|
-| `POST /reports` | `multipart/form-data`: part `draft` (`application/json`, the object below) and, unless the player chose Nobody, part `zip` (`application/zip`, `filename="kiln-report-YYYY-MM-DD.zip"`, at most 8 MiB; the launcher refuses a bigger one before sending) | 2xx `{post: SupportPost}` |
-| `GET /posts` | - | `{posts: SupportPost[]}` (at most 200 are read) |
-| `POST /posts/{id}/seen` | - | 2xx (the player opened it: its replies are seen) |
-| `POST /posts/{id}/solved` | - | 2xx ("It's fixed": the Solved tag) |
-| `DELETE /posts/{id}` | - | 2xx ("Delete my post": the thread, and the team's copy of the zip) |
-
-The `draft` part (filled in by the send step; see "Send to Kiln support" below):
-`{title, kind: "noload"|"mod"|"crash"|"launcher"|"server"|"other", when?: "start"|"menu"|"load"|"play"|"join"|"other",
-words, zip: "team"|"public"|"none", from: "logs"|"banner"|"crash"|"community"|"deck", known?: "<known problem id>",
-post: PublicPost}` where `PublicPost = {title, tags: string[], kind, words, findings: [{id, level:
-"problem"|"warning"|"info", text}], versions: [["Kiln", "0.2.0-dev.29.18"], ["Launcher", ...], ["System", ...], ["Runs
-on", ...], ["Game build", ...], ["Mods", "12 on"]]}`: exactly what the check step showed.
-
-### Public (never a session, even when signed in)
-
-| Method, path | Answer |
-|---|---|
-| `GET /feed` | `{releases: [{title, date: RFC 3339, line, url: https}], events: [{title, start: RFC 3339, end?: RFC 3339, where: string, url: https}]}`; the launcher shows at most 3 releases and 5 events |
-| `GET /known-issues` | the known-problems list (format below) |
-
-### Testers (session)
-
-| Method, path | Request | Answer |
-|---|---|---|
-| `GET /tester` | - | `{tester: boolean, plan: Plan \| null, sent: SentMark \| null}` (the current test build's plan and this tester's results for it) |
-| `POST /tester` | `{hardware: {gpu, driver, vram, os, runner, covers: ("fsr4"\|"xess"\|"framegen"\|"deck")[]}, beta: boolean}` | 2xx (the Tester role is given) |
-| `DELETE /tester` | - | 2xx ("Stop testing": the role and the hardware go) |
-| `POST /tester/results` | `multipart/form-data`: part `results` (`application/json`: `{build, steps: [{id, result: "worked"\|"failed"\|"skipped", note}], hardware}`) and, when "Attach a support report" is ticked, part `zip` as for reports | `{sent: SentMark}` |
-
-`Plan = {build: "0.2.0-dev.30 Beta 2", url: "<the build's #testing post>", until: RFC 3339, steps: [{id, title, how:
-string[], for: {label: "AMD RX 6000 and newer", needs: Capability[]} | null}]}`; `SentMark = {at, read: {by, at} |
-null, replied: boolean}`.
+**The public post** is built by the relay from report.json (the zip's, or report.json alone): the player's line and
+words, the kind, the findings (problems, then warnings, then notes), the versions line from report.json's `versions`
+object (`{kiln, launcher, os, runner, gameBuild, modsOn, deck}`, written by `kiln_manage::report`), where the zip went,
+and the player's mention. The check step draws the same from the same report (`kiln_manage::community::post`): the
+relay's versions line ("Kiln 0.2.0-dev.29.18 · Launcher 0.2.0-dev.29.18 · Arch Linux · GE-Proton10-3 · game build
+26404966 · 12 mods on") and its tags (the kind's, then Windows, Linux, or Steam Deck and Linux).
 
 ## What the launcher keeps on this PC
 
