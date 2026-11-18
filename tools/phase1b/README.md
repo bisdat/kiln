@@ -30,6 +30,7 @@ install-test-overlay.sh
 kiln/services/kiln-ui.dll
 kiln/host/Kiln.Ui.dll
 kiln/host/Kiln.Chat.dll
+kiln/locales/en.json
 ```
 
 Then run from the extracted folder:
@@ -44,21 +45,68 @@ is stopped. It copies each installed DLL into
 `$GAME/kiln/data/phase1b-test-backup/` before replacing anything, and
 refuses repeated installations while a backup is active.
 
+### Updating an existing test installation
+
+If you installed an earlier Phase 1b overlay, **restore that overlay
+first**, while Enshrouded is closed, using the installer in its
+originally extracted directory. This preserves the first overlay's
+original three-DLL backup.
+
+Only then install this newer artifact. The new package backs up and
+replaces **four** files: the three DLLs plus
+`<game>/kiln/locales/en.json`. It contains the two missing UI
+translations (`chat.completion.title`, `chat.completion.hint`) and
+restores the old locale automatically when rolled back.
+
 ### Enable completion (opt-in)
 
-Edit the installed `$GAME/kiln/kiln.json` and add **one property** inside
-the existing `"ui"` object:
+If completion is already enabled in your valid `kiln.json`, leave it
+unchanged. Otherwise the launcher offers **Chat completion** under
+Kiln settings (off by default), or a Steam launch option can enable the
+native side without editing JSON:
+`KILN_CHAT_COMPLETION=1 %command%`.
 
-```json
-"chatCompletion": true
+To enable completion explicitly in the existing `kiln.json` without
+hand-editing JSON, run this entire command **with the game closed**.
+It backs up the file, validates the original JSON and preserves other
+settings. It refuses a JSONC file with comments or trailing commas
+rather than risking a bad rewrite:
+
+```bash
+GAME="$HOME/.local/share/Steam/steamapps/common/Enshrouded"
+python3 - "$GAME/kiln/kiln.json" <<'PY'
+import json
+import shutil
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+config = json.loads(path.read_text(encoding="utf-8"))
+if not isinstance(config, dict):
+    raise SystemExit("kiln.json must contain a JSON object")
+ui = config.setdefault("ui", {})
+if not isinstance(ui, dict):
+    raise SystemExit("kiln.json: ui must be a JSON object")
+backup = path.with_suffix(path.suffix + ".before-chat-completion")
+if backup.exists():
+    raise SystemExit(f"Backup exists: {backup}; refusing to overwrite")
+shutil.copy2(path, backup)
+ui["chatCompletion"] = True
+updated = json.dumps(config, ensure_ascii=False, indent=2) + "\n"
+json.loads(updated)
+temporary = path.with_suffix(path.suffix + ".phase1b-new")
+try:
+    temporary.write_text(updated, encoding="utf-8")
+    temporary.replace(path)
+except BaseException:
+    temporary.unlink(missing_ok=True)
+    raise
+print(f"Valid configuration installed; prior file: {backup}")
+PY
 ```
 
-Preserve all of your existing options, including `"chatHistory"`.
-If you prefer not to edit the config, the native override
-`KILN_CHAT_COMPLETION=1` can be passed to the game's process, e.g.
-through Steam Launch Options: `KILN_CHAT_COMPLETION=1 %command%`.
-The feature remains OFF when neither option is set. Reopen the game
-after changing this boot-time option.
+Do not paste a lone JSON key/value fragment into a file. Restart
+Enshrouded after changing the boot-time setting.
 
 ## In-game checks
 
@@ -97,7 +145,7 @@ GAME="$HOME/.local/share/Steam/steamapps/common/Enshrouded"
 bash ./install-test-overlay.sh "$GAME" restore
 ```
 
-The script restores the three original DLLs, preserves a timestamped
+The script restores the three original DLLs and the locale file, preserves a timestamped
 copy of the backup, and reminds you to disable `ui.chatCompletion`.
 The launcher can subsequently update Kiln normally.
 
