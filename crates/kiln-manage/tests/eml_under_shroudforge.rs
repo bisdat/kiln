@@ -1236,6 +1236,36 @@ fn inbox86_a_copy_whose_placement_failed_late_has_its_ini_aside_while_off() {
     assert_eq!(std::fs::read(copy.join("native-plugin.ini.kiln-off")).unwrap(), BT_INI);
 }
 
+/// inbox 86, a rename that cannot be done (here a folder of the player's under the set-aside name, which a rename never
+/// replaces): where Kiln finds XHL-Core, the copy is one that may still run; where it finds none, XHL-Core may be there
+/// all the same (XHL's Kiln build, a Wine drive Kiln cannot map), so a plain note says so. Nothing is renamed over.
+#[test]
+fn inbox86_a_rename_that_fails_is_said_with_or_without_xhl_core() {
+    for xhl in [XhlCore::ByHand, XhlCore::Absent] {
+        let s = setup(&format!("inbox86-fails-{xhl:?}"));
+        xhl_core(&s, xhl);
+        let tools = building_tools(&s, "native-plugin.ini");
+        let mut p = s.profile(vec![]);
+        p.mods.shroudforge.push(pm(&tools, true));
+        engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+        let copy = s.game.join("mods/building-tools");
+        std::fs::create_dir(copy.join("native-plugin.ini.kiln-off")).unwrap();
+        p.mods.shroudforge[1].enabled = false;
+        let rep = engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+        assert!(!shroudforge::read_mod(&copy).unwrap().enabled, "{xhl:?}: {rep:?}");
+        assert_eq!(xhl_core_reads(&copy).as_deref(), Some(BT_INI), "{xhl:?}: nothing is renamed over the folder");
+        assert!(copy.join("native-plugin.ini.kiln-off").is_dir());
+        if xhl == XhlCore::Absent {
+            let said = rep.warnings.iter().find(|w| w.starts_with("shroudforge:building-tools:")).unwrap_or_else(|| panic!("{rep:?}"));
+            assert!(said.contains("could not rename its native-plugin.ini") && said.contains("If the game has XHL-Core"), "{said}");
+            assert!(rep.retained.is_empty(), "{rep:?}");
+        } else {
+            let kept = rep.retained.iter().find(|r| r.path == copy).unwrap_or_else(|| panic!("{rep:?}"));
+            assert!(kept.may_run && kept.off && kept.reason.contains("could not rename"), "{kept:?}");
+        }
+    }
+}
+
 #[test]
 fn runtime_eml_environment_note() {
     const CHILD: &str = "KILN_TEST_SFOFF_NOTE_CHILD";

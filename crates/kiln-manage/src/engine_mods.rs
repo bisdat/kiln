@@ -2245,9 +2245,10 @@ fn own_xhl_folder_off(rep: &mut PlaceReport, tag: String, path: &Path) {
 /// reads no profile and no ShroudForge switch: it loaded the DLL from there without its ShroudForge side (inbox 86:
 /// every start of the profile without it crashed while the mods loaded). So while the mod is off the ini is set aside
 /// ([`park_plugin_ini`]) and XHL-Core skips the folder; switched on, it goes back as it was ([`unpark_plugin_ini`]).
-/// Whether or not the game has XHL-Core now (`xhl`, asked once per placement, and only here for what is said): it may
-/// be installed later, or run for one start only, and nothing else reads that ini while the mod is off (ShroudForge's
-/// DLL manager loads no DLL of a mod it does not run). Only a copy Kiln placed, unchanged ([`owned`]), gets here.
+/// Whether or not the game has XHL-Core now (`xhl`, asked once per placement, and only here for what is said: a rename
+/// that fails is a folder that may still run where it has, a plain note where Kiln finds none): it may be installed
+/// later, or run for one start only, and nothing else reads that ini while the mod is off (ShroudForge's DLL manager
+/// loads no DLL of a mod it does not run). Only a copy Kiln placed, unchanged ([`owned`]), gets here.
 /// `on`: the profile has the mod on; `gone`: it is not in the profile at all (for what is said). On, the ini is back
 /// under its own name only while ShroudForge runs the copy (its switch on, the file as ShroudForge reads it): call it
 /// after the switch is set. A copy ShroudForge does not run (an earlier version that stays switched off, a switch that
@@ -2272,8 +2273,10 @@ fn sf_plugin_ini(rep: &mut PlaceReport, xhl: &mut Option<bool>, game: &Path, dst
         Ok(Some((ini, parked))) if xhl_core() => rep.warnings.push(format!("{tag}: {why}, so Kiln renamed its {ini} in {} to {parked}, \
             and XHL-Core does not load it. Kiln renames it back when {back}.", dst.display())),
         Ok(_) => {}
-        // nothing else reads that ini while the mod is off
-        Err(_) if !xhl_core() => {}
+        // XHL-Core not found: it may be there all the same (a start of another profile, a Wine drive Kiln cannot map, a
+        // build of it Kiln does not know), so a plain note rather than a folder that may run
+        Err(e) if !xhl_core() => rep.warnings.push(format!("{tag}: {why}, but Kiln could not rename its native-plugin.ini in {} ({}). If the \
+            game has XHL-Core, it may still load the mod from there.", dst.display(), reason_at(dst, e.message))),
         Err(e) => rep.retained.push(RetainedPlacement { path: dst.to_path_buf(), may_run: true, off: !on, reason: format!(
             "{}, but Kiln could not rename its native-plugin.ini ({}), and {XHL_LOADS}, so the mod may still run from there",
             starts, reason_at(dst, e.message)) }),

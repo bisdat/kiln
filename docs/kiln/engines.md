@@ -347,7 +347,8 @@ engines' mods") and 5.8.
   copy stays Kiln's. The ini of such a copy that the plugin (or the player) changed is its settings file while it
   still names a DLL Kiln placed there, unchanged, as for an XHL companion: it is kept through the rename and carried
   to the next version. Where the game has XHL-Core, the activation says once what Kiln renamed; if the rename cannot
-  be done, the folder is in the result as one that may still run. A copy that stays when Kiln stops managing the game
+  be done, the folder is in the result as one that may still run (where Kiln finds no XHL-Core, a note says that it
+  could not, since an XHL-Core Kiln does not recognize may still load it). A copy that stays when Kiln stops managing the game
   (Deactivate, uninstall) keeps the renamed file, and the result says how to name it back.
 - **A player's own ShroudForge folder.** A folder in ShroudForge's mods folder that Kiln did not place and that serves a
   profile entry (it is called `<library id>`, or its mod.json holds the entry's package id under any folder name) is
