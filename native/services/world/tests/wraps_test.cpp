@@ -2485,6 +2485,49 @@ void prediction_wraps() {
     wpre(KILN_WORLD_CLIENT);
     check(update_of(wentry(fuel)) == reinterpret_cast<uintptr_t>(kWUpdates[0]) && winfo(hp).state == KILN_WRAP_REMOVED,
           "prediction wraps: unwrapped, the game's update is back");
+
+    // Beside a client world's Replace of the same program: a client slice runs the Replace, a prediction slice the game's
+    // update between its own stages (the chain's one Replace is the client world's); prediction Befores by priority.
+    char r[] = "R", p5[] = "P5";
+    KilnHandle hr = 0, hq = 0, hq5 = 0, hqa = 0;
+    check(game_program_wrap(2, KILN_WORLD_CLIENT, fuel, KILN_WRAP_REPLACE, 0, &st_kind, r, &hr) == KILN_OK &&
+              game_program_wrap(3, KILN_WORLD_PREDICTION, fuel, KILN_WRAP_BEFORE, 0, &st_kind, p, &hq) == KILN_OK &&
+              game_program_wrap(3, KILN_WORLD_PREDICTION, fuel, KILN_WRAP_BEFORE, 5, &st_kind, p5, &hq5) == KILN_OK &&
+              game_program_wrap(3, KILN_WORLD_PREDICTION, fuel, KILN_WRAP_AFTER, 0, &st_kind, pa, &hqa) == KILN_OK,
+          "prediction wraps: taken beside a client world's Replace of the program");
+    wpre(KILN_WORLD_CLIENT);
+    g_tracing = true;
+    g_trace.clear();
+    run_slice(wentry(fuel), cj);
+    check(g_trace == std::vector<std::string>{"R@c"}, "prediction wraps: a client slice runs the client world's Replace only");
+    g_trace.clear();
+    run_slice(wentry(fuel), pj);
+    check(g_trace == std::vector<std::string>{"P5@p", "P@p", "orig", "PA@p"},
+          "prediction wraps: a prediction slice runs the game's update, not the client world's Replace; Befores by priority");
+    g_trace.clear();
+    // the owner of the prediction stages goes (a mod's unload): nothing of it is running, the client Replace stays
+    uint32_t pending = 9;
+    check(game_wraps_release(3, &pending) == KILN_OK && pending == 0, "prediction wraps: released, none of them running");
+    run_slice(wentry(fuel), pj);
+    check(g_trace == std::vector<std::string>{"orig"}, "prediction wraps: a released owner's stages are not called any more");
+    g_trace.clear();
+    wpre(KILN_WORLD_CLIENT);
+    check(winfo(hq).state == KILN_WRAP_REMOVED && winfo(hq5).state == KILN_WRAP_REMOVED && winfo(hqa).state == KILN_WRAP_REMOVED &&
+              winfo(hr).state == KILN_WRAP_ACTIVE && update_of(wentry(fuel)) != reinterpret_cast<uintptr_t>(kWUpdates[0]),
+          "prediction wraps: out of the chain in the next client Pre; the client world's Replace keeps the trampoline");
+    // a chain of client stages only: a prediction slice goes to the game's update untouched, counted as forwarded
+    game_program_info(KILN_WORLD_CLIENT, fuel, &pi);
+    const uint64_t forwarded2 = pi.forwarded;
+    run_slice(wentry(fuel), pj);
+    game_program_info(KILN_WORLD_CLIENT, fuel, &pi);
+    check(g_trace == std::vector<std::string>{"orig"} && pi.forwarded == forwarded2 + 1 && winfo(hr).calls == 1,
+          "prediction wraps: with client stages only, a prediction slice is forwarded");
+    g_trace.clear();
+    g_tracing = false;
+    game_program_unwrap(hr);
+    wpre(KILN_WORLD_CLIENT);
+    check(update_of(wentry(fuel)) == reinterpret_cast<uintptr_t>(kWUpdates[0]) && wraps_test_in_flight(1) == 0,
+          "prediction wraps: the last stage gone, the game's update is back");
     world_event(KILN_WORLD_STOPPING, KILN_WORLD_CLIENT);
     g_live_world[KILN_WORLD_CLIENT] = 0;
     g_wdesc[5].flags = g_wdesc[6].flags = g_wdesc[7].flags = 0;
