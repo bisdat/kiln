@@ -429,6 +429,44 @@ static void core_only_fields() {
     CHECK(r.added_extensions.empty());  // a field of a core struct needs no extension
 }
 
+static void core_and_promoted_added_together() {
+    // on an empty chain: a core-only 1.2 field (a new Vulkan12Features) and a 1.2-promoted one asked as its extension
+    // struct, in either order: one Vulkan12Features holds both, no Float16Int8 next to it
+    for (int order = 0; order < 2; ++order) {
+        upscale::DeviceNeeds n;
+        auto fi = make<VkPhysicalDeviceShaderFloat16Int8Features>(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES);
+        fi.shaderInt8 = VK_TRUE;
+        auto v12 = make<VkPhysicalDeviceVulkan12Features>(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES);
+        v12.drawIndirectCount = VK_TRUE;
+        if (order == 0) n.want(fi, true), n.want(v12, true);
+        else n.want(v12, true), n.want(fi, true);
+        auto ci = make<VkDeviceCreateInfo>(VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO);
+        DeviceMerge m;
+        Report r;
+        const VkDeviceCreateInfo* out = m.merge(&ci, n, rtx(), &r);
+        CHECK(r.ok() && r.changed);
+        valid_chain(out);
+        const auto* got = find(out, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES);
+        CHECK(got && on(got, offsetof(VkPhysicalDeviceVulkan12Features, drawIndirectCount)) && on(got, offsetof(VkPhysicalDeviceVulkan12Features, shaderInt8)));
+        CHECK(!find(out, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES) && chain_of(out).size() == 1);
+    }
+    // two needs naming the same new extension struct by its two names: one struct
+    upscale::DeviceNeeds n;
+    auto v13 = make<VkPhysicalDeviceVulkan13Features>(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES);
+    v13.shaderIntegerDotProduct = VK_TRUE;
+    n.want(v13);
+    auto dp = make<VkPhysicalDeviceShaderIntegerDotProductFeatures>(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_DOT_PRODUCT_FEATURES);
+    dp.shaderIntegerDotProduct = VK_TRUE;
+    n.want(dp, true);
+    GameDevice g;
+    DeviceMerge m;
+    Report r;
+    const VkDeviceCreateInfo* out = m.merge(&g.ci, n, rtx(), &r);
+    CHECK(r.ok());
+    valid_chain(out);
+    CHECK(find(out, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_DOT_PRODUCT_FEATURES) && r.added_extensions.size() == 1);
+}
+
 static void extensions_once() {
     GameDevice g;
     upscale::DeviceNeeds n;
@@ -600,6 +638,7 @@ int main() {
     enabled_features_path();
     unknown_structs();
     core_only_fields();
+    core_and_promoted_added_together();
     extensions_once();
     instance_merge();
     queries();

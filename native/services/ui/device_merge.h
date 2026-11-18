@@ -538,6 +538,14 @@ class DeviceMerge {
             const StructInfo* s = find_struct(t);
             return s && bool_at(reinterpret_cast<const uint8_t*>(chain[static_cast<size_t>(i)]), s->size, o);
         };
+        // core-only features first: they need a VulkanXYFeatures struct, which a promoted struct Kiln added before would
+        // block; promoted features placed after them go into that core struct
+        auto core_only = [](const Want& w) {
+            const StructInfo* s = find_struct(w.type);
+            const Promoted* p = find_promoted(w.type, w.offset);
+            return s && s->core && s->type != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 && !(p && p->ext);
+        };
+        std::stable_sort(wants.begin(), wants.end(), [&](const Want& a, const Want& b) { return core_only(a) && !core_only(b); });
         for (const Want& w : wants) {
             const std::string name = field_name(w.type, w.offset);
             if (w.type == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2) {
@@ -559,12 +567,20 @@ class DeviceMerge {
                 if (!already_on(w.type, w.offset)) plan.push_back({Where::chain, in_chain(w.type), w.offset, name});
                 continue;
             }
+            if (added_index(w.type) >= 0) {
+                plan.push_back({Where::added, added_index(w.type), w.offset, name});
+                continue;
+            }
             if (pr) {
                 const bool is_core = pr->core == w.type;
                 const VkStructureType other = is_core ? pr->ext : pr->core;
                 const uint32_t other_offset = is_core ? pr->ext_offset : pr->core_offset;
                 if (other && in_chain(other) >= 0) {
                     if (!already_on(other, other_offset)) plan.push_back({Where::chain, in_chain(other), other_offset, field_name(other, other_offset)});
+                    continue;
+                }
+                if (other && added_index(other) >= 0) {
+                    plan.push_back({Where::added, added_index(other), other_offset, field_name(other, other_offset)});
                     continue;
                 }
             }
