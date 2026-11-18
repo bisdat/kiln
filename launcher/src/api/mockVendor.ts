@@ -1,9 +1,9 @@
 // Mock answers for the vendor_* commands (browser mock mode; src/api/mock.ts registers them), from the launcher's real
-// manifest and licence texts (src/data/vendor-components.json, src/data/vendor-licenses/). Like this build, nothing is
-// pinned at first, so both rows read "Not available in this build"; `?vendor=pinned` or `__kilnVendorMock.pin(true)`
-// pins every file (fake hashes) so the download flow can be seen. The preview is `?preview=upscalers` (app_info).
-// Tests and the console: `__kilnVendorMock.pin(on)`, `.failNext(message, code?)`, `.pace(ms)`, `.changeLicense(id)`,
-// `.damage(id)`, `.install(id, version)`, `.calls()`, `.agreed()`.
+// manifest and licence texts (src/data/vendor-components.json, src/data/vendor-licenses/): its pins decide, as in the
+// app. `?vendor=unpinned` (or `__kilnVendorMock.pin(false)`) reads every file as not pinned ("Not available in this
+// build"), `?vendor=pinned` (`.pin(true)`) every file as pinned; `.pin(null)` goes back to the manifest's. The preview is
+// `?preview=upscalers` (app_info). Tests and the console: `__kilnVendorMock.pin(on)`, `.failNext(message, code?)`,
+// `.pace(ms)`, `.changeLicense(id)`, `.damage(id, file?)`, `.install(id, version)`, `.calls()`, `.agreed()`.
 import type { KilnError } from "./commands";
 import type { VendorComponent, VendorDownloadReport, VendorLicenseText, VendorRemoveReport, VendorStatus } from "./vendor";
 import manifestJson from "../data/vendor-components.json";
@@ -31,7 +31,8 @@ const human = (n: number) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : 
 
 export function vendorMockHandlers(startTask: StartTask, gameKind: (gameId: string) => string): Record<string, Handler> {
   const components: ManifestComponent[] = JSON.parse(JSON.stringify((manifestJson as { components: ManifestComponent[] }).components));
-  let pinned = params.get("vendor") === "pinned";
+  const asked = params.get("vendor");
+  let pinOverride: boolean | null = asked === "pinned" ? true : asked === "unpinned" ? false : null;
   let failNext: KilnError | null = null;
   let stepMs = 300;
   const agreed = new Set<string>();
@@ -43,7 +44,7 @@ export function vendorMockHandlers(startTask: StartTask, gameKind: (gameId: stri
   const client = (gameId: unknown) => {
     if (gameKind(String(gameId)) !== "client") reject("unsupported", "A dedicated server draws no frames: upscalers are for the game client only.");
   };
-  const isPinned = (c: ManifestComponent) => pinned || c.files.every((f) => /^[0-9a-f]{64}$/.test(f.sha256));
+  const isPinned = (c: ManifestComponent) => pinOverride ?? c.files.every((f) => /^[0-9a-f]{64}$/.test(f.sha256));
   const status = (gameId: string, c: ManifestComponent): VendorComponent => {
     const i = installed.get(`${gameId}/${c.id}`);
     const size = c.files.reduce((n, f) => n + f.size, 0);
@@ -116,7 +117,7 @@ export function vendorMockHandlers(startTask: StartTask, gameKind: (gameId: stri
   };
 
   if (typeof window !== "undefined") (window as unknown as { __kilnVendorMock?: unknown }).__kilnVendorMock = {
-    pin: (on = true) => { pinned = on; },
+    pin: (on: boolean | null = true) => { pinOverride = on; },
     failNext: (message: string, code: KilnError["code"] = "hash_mismatch") => { failNext = { code, message }; },
     pace: (ms: number) => { stepMs = ms; },
     changeLicense: (id: string) => { const c = comp(id); c.license = { ...c.license, sha256: c.license.sha256.replace(/^./, (x) => (x === "0" ? "1" : "0")) }; },

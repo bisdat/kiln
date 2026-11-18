@@ -79,11 +79,11 @@ test("the section is a preview: only app_info's 'upscalers' shows it", () => {
   expect(upscalersPreview({ preview: ["upscalers"] } as never)).toBe(true);
 });
 
-test("the shipped manifest's components never say DLSS and pin nothing yet", () => {
+test("the shipped manifest's components never say DLSS and pin every file", () => {
   for (const c of manifest.components) {
     expect(c.name).not.toMatch(/dlss/i);
     expect(c.enables).not.toMatch(/dlss/i);
-    expect(c.files.every((f) => f.sha256 === "not-pinned")).toBe(true);
+    expect(c.files.every((f) => /^[0-9a-f]{64}$/.test(f.sha256))).toBe(true);
   }
   expect(manifest.components.map((c) => c.license.name)).toEqual(["MIT licence", "Intel Simplified Software License (October 2022)"]);
 });

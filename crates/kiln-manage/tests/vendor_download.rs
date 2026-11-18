@@ -510,14 +510,22 @@ fn a_component_that_is_not_pinned_is_never_downloaded() {
     let t = tmp("unpinned");
     let offline = net::fake::FakeTransport::offline();
     let client = Client::new(download::policy(), &offline, &download::user_agent());
+    let store = Store::at(t.0.join("game"));
+    // the shipped components with one file not pinned (a fake: the shipped manifest pins every file)
     let m = manifest::builtin().unwrap();
-    for c in &m.components {
-        let st = Store::at(t.0.join("game")).component_status(c, &Agreements::default());
+    for shipped in &m.components {
+        assert!(shipped.pinned(), "{}", shipped.id);
+        let mut c = shipped.clone();
+        c.files[0].sha256 = NOT_PINNED.into();
+        let st = store.component_status(&c, &Agreements::default());
         assert_eq!(st.state, VendorState::Unavailable);
         assert!(st.reason.as_deref().unwrap().contains("checksums"));
-        let e = download::download(&Store::at(t.0.join("game")), c, &client, "t", &mut Recorder::default()).unwrap_err();
+        assert!(!st.files[0].pinned);
+        let e = download::download(&store, &c, &client, "t", &mut Recorder::default()).unwrap_err();
         assert_eq!(e.code, ErrorCode::Refused);
         assert!(e.message.contains("not available in this build"), "{}", e.message);
+        // the pinned original would download
+        assert_eq!(store.component_status(shipped, &Agreements::default()).state, VendorState::NotDownloaded);
     }
     assert!(offline.requests().is_empty(), "nothing was asked");
     assert!(!t.0.join("game/kiln/vendor").exists(), "nothing was written");
@@ -526,7 +534,7 @@ fn a_component_that_is_not_pinned_is_never_downloaded() {
     let mut c = amd(&manifest_for(&a, &b));
     c.files[1].sha256 = NOT_PINNED.into();
     assert!(!c.pinned());
-    assert_eq!(Store::at(t.0.join("game")).component_status(&c, &Agreements::default()).state, VendorState::Unavailable);
+    assert_eq!(store.component_status(&c, &Agreements::default()).state, VendorState::Unavailable);
 }
 
 #[test]

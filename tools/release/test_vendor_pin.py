@@ -78,6 +78,16 @@ class Pin(unittest.TestCase):
         self.assertTrue(all("matches" in l for l in lines))
         self.assertEqual(self.run_pin(m, check=True)[1], [])
 
+    def test_a_folder_per_component_and_version(self):
+        self.put("amd-fsr-1.0.0/a.dll", A)
+        self.put("amd-fsr-1.0.0/b.dll", B)
+        self.put("intel-xess-1.0.0/libxess.dll", C)
+        # another version's folder is not this one's copy
+        self.put("intel-xess-0.9.0/libxess.dll", b"old")
+        m = manifest()
+        changed, problems, _ = self.run_pin(m)
+        self.assertEqual((changed, problems), (3, []))
+
     def test_one_component_alone(self):
         self.put("libxess.dll", C)
         m = manifest()

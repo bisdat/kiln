@@ -174,13 +174,16 @@ mod tests {
     #[test]
     fn a_download_is_refused_with_the_preview_off_on_a_server_and_when_not_pinned() {
         let m = vendor::builtin().unwrap();
-        let c = m.component("amd-fsr").unwrap();
-        let e = admit(&install(GameKind::Client), c, None, false).unwrap_err();
+        let shipped = m.component("amd-fsr").unwrap();
+        assert!(shipped.pinned());
+        let e = admit(&install(GameKind::Client), shipped, None, false).unwrap_err();
         assert_eq!(e.code, ErrorCode::Refused);
         assert!(e.message.contains("preview"));
-        assert_eq!(admit(&install(GameKind::Server), c, None, true).unwrap_err().code, ErrorCode::Unsupported);
-        // the shipped manifest pins nothing yet: refused before any licence or data folder is looked at
-        let e = admit(&install(GameKind::Client), c, Some(&c.license.sha256), true).unwrap_err();
+        assert_eq!(admit(&install(GameKind::Server), shipped, None, true).unwrap_err().code, ErrorCode::Unsupported);
+        // a component with a file not pinned (a fake): refused before any licence or data folder is looked at
+        let mut c = shipped.clone();
+        c.files[2].sha256 = vendor::manifest::NOT_PINNED.into();
+        let e = admit(&install(GameKind::Client), &c, Some(&c.license.sha256), true).unwrap_err();
         assert_eq!(e.code, ErrorCode::Refused);
         assert!(e.message.contains("not available in this build"), "{}", e.message);
     }

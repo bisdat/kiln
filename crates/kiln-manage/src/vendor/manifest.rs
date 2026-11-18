@@ -322,7 +322,7 @@ mod tests {
     }
 
     #[test]
-    fn the_builtin_manifest_parses_and_nothing_in_it_is_pinned_yet() {
+    fn the_builtin_manifest_parses_and_pins_every_file() {
         let m = builtin().unwrap();
         assert_eq!(m.components.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(), ["amd-fsr", "intel-xess"]);
         let amd = m.component("amd-fsr").unwrap();
@@ -335,13 +335,33 @@ mod tests {
         assert!(intel.license.name.starts_with("Intel Simplified Software License"));
         assert_eq!(intel.files.len(), 1);
         assert_eq!((intel.files[0].name.as_str(), intel.files[0].size), ("libxess.dll", 77_795_704));
-        // the owner's yes to one download comes first: until then every file is "not pinned" and nothing downloads
+        // pinned (tools/release/vendor_pin.py) from the vendors' files at the tags, each checked by its git blob
+        let pins: Vec<(&str, &str)> = m.components.iter().flat_map(|c| c.files.iter().map(|f| (f.name.as_str(), f.sha256.as_str()))).collect();
+        assert_eq!(pins, [
+            ("amd_fidelityfx_loader_vk.dll", "38a56a01fb3565c0757d9f5c1e4e69de4b65e5f2e5769b323b200dc1f142bab9"),
+            ("amd_fidelityfx_upscaler_vk.dll", "4a7e895af6e0b615d40a84d59eb8c2b1054ad91cdd0c739567940270d51bdab7"),
+            ("amd_fidelityfx_framegeneration_vk.dll", "d002dabff8c5e71eaa715fc99438cd4dc81230262a7897b16bc402efec3498b4"),
+            ("libxess.dll", "251659dd84a3e84de67c886a4186e01f3eca49b00641906fe38bb6b807e5d5b7"),
+        ]);
         for c in &m.components {
-            assert!(!c.pinned(), "{} is pinned", c.id);
-            assert!(c.files.iter().all(|f| f.sha256 == NOT_PINNED && f.git_blob.is_some()));
+            assert!(c.pinned(), "{} is not pinned", c.id);
+            assert!(c.files.iter().all(|f| f.git_blob.is_some()));
             assert_eq!(c.hosts(), ["raw.githubusercontent.com"]);
             assert!(!c.name.to_ascii_lowercase().contains("dlss"));
         }
+    }
+
+    #[test]
+    fn a_component_with_one_file_not_pinned_is_not_pinned() {
+        let mut c = builtin().unwrap().component("amd-fsr").unwrap().clone();
+        assert!(c.pinned());
+        c.files[1].sha256 = NOT_PINNED.into();
+        assert!(!c.pinned() && c.files[0].pinned() && !c.files[1].pinned());
+        // and a manifest saying so parses
+        let mut v: serde_json::Value = serde_json::from_str(BUILTIN).unwrap();
+        v["components"][0]["files"][1]["sha256"] = NOT_PINNED.into();
+        let m = parse(&v.to_string()).unwrap();
+        assert!(!m.component("amd-fsr").unwrap().pinned() && m.component("intel-xess").unwrap().pinned());
     }
 
     #[test]
@@ -445,13 +465,13 @@ mod tests {
         for (what, patch) in cases {
             assert!(one(patch).is_err(), "accepted {what}");
         }
-        // unknown keys are ignored; a pinned file makes a pinned component
+        // unknown keys are ignored; one file not pinned makes its component not pinned
         let m = one(|v| {
             v["later"] = true.into();
-            v["components"][1]["files"][0]["sha256"] = "ab".repeat(32).into();
+            v["components"][1]["files"][0]["sha256"] = NOT_PINNED.into();
         }).unwrap();
-        assert!(m.component("intel-xess").unwrap().pinned());
-        assert!(!m.component("amd-fsr").unwrap().pinned());
+        assert!(!m.component("intel-xess").unwrap().pinned());
+        assert!(m.component("amd-fsr").unwrap().pinned());
         assert_eq!(parse("{").unwrap_err().code, ErrorCode::Parse);
     }
 }

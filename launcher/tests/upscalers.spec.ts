@@ -1,9 +1,10 @@
 // Settings, Upscalers in mock mode (src/api/mockVendor.ts; docs/kiln/graphics.md "Upscaler files"): hidden while the
-// preview is off; with it on (`?preview=upscalers`) both rows say "Not available in this build", as this build has no
-// pinned hashes; with the mock's files pinned (`?vendor=pinned`): the licence dialog (what, size, host, where, the text
-// in full, the privacy line), Cancel there sends nothing, "I agree, download" with the text's hash, progress, Cancel,
-// a second download without the dialog, Downloaded, Remove; a failed download with its reason and Try again; a
-// changed licence text asks again. Screenshots go to .out/launcher/shots/ (SHOTS=0 skips them).
+// preview is off; with it on (`?preview=upscalers`) the shipped manifest's two components can be downloaded; a build
+// whose files are not pinned (`?vendor=unpinned`) says "Not available in this build" and offers no button. Then the
+// licence dialog (what, size, host, where, the text in full, the privacy line), Cancel there sends nothing, "I agree,
+// download" with the text's hash, progress, Cancel, a second download without the dialog, Downloaded, Remove; a
+// failed download with its reason and Try again; an update, missing files, and a changed licence text that asks
+// again. Screenshots go to .out/launcher/shots/ (SHOTS=0 skips them).
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -33,8 +34,22 @@ test("no Upscalers section while the preview is off", async ({ page }) => {
   expect(await vmock<Call[]>(page, "calls")).toEqual([]);
 });
 
-test("with the preview on, this build's rows are not available and nothing can be downloaded", async ({ page }) => {
+test("with the preview on, the shipped components can be downloaded", async ({ page }) => {
   await open(page, "?preview=upscalers");
+  const s = section(page);
+  await expect(s).toBeVisible();
+  await expect(row(page, "AMD FSR")).toContainText("Not downloaded");
+  await expect(row(page, "AMD FSR").getByTestId("upscaler-detail")).toHaveText("70 MB from raw.githubusercontent.com.");
+  await expect(row(page, "Intel XeSS").getByTestId("upscaler-detail")).toHaveText("74 MB from raw.githubusercontent.com.");
+  await expect(s.getByRole("button", { name: /^Download (AMD FSR|Intel XeSS)$/ })).toHaveCount(2);
+  // nothing is asked of a vendor until a click
+  expect(await downloads(page)).toEqual([]);
+  await s.scrollIntoViewIfNeeded();
+  await shot(page, "section");
+});
+
+test("a build whose files are not pinned offers nothing to download", async ({ page }) => {
+  await open(page, "?preview=upscalers&vendor=unpinned");
   const s = section(page);
   await expect(s).toBeVisible();
   await expect(s.getByText("Preview", { exact: true })).toBeVisible();
@@ -52,7 +67,7 @@ test("with the preview on, this build's rows are not available and nothing can b
 });
 
 test("download with the licence dialog, progress and cancel, then Downloaded and Remove", async ({ page }) => {
-  await open(page, "?preview=upscalers&vendor=pinned");
+  await open(page, "?preview=upscalers");
   await vmock(page, "pace", 250);
   const amd = row(page, "AMD FSR");
   await expect(amd).toContainText("Not downloaded");
@@ -121,7 +136,7 @@ test("download with the licence dialog, progress and cancel, then Downloaded and
 });
 
 test("a failed download says why, and Try again downloads it", async ({ page }) => {
-  await open(page, "?preview=upscalers&vendor=pinned");
+  await open(page, "?preview=upscalers");
   await vmock(page, "pace", 40);
   const why = "libxess.dll from Intel (raw.githubusercontent.com) is not the file Kiln expects: its size or SHA-256 differs from the one this build of Kiln pinned. Kiln deleted it.";
   await vmock(page, "failNext", why);
@@ -147,7 +162,7 @@ async function again(page: Page) {
 }
 
 test("an update, missing files, and a changed licence text that asks again", async ({ page }) => {
-  await open(page, "?preview=upscalers&vendor=pinned");
+  await open(page, "?preview=upscalers");
   await vmock(page, "pace", 40);
   await vmock(page, "install", "amd-fsr", "2.3.0");
   await again(page);

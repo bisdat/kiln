@@ -6,8 +6,9 @@ SHA-256 from a copy the release process downloaded once, by hand, from the URL t
   python3 -I tools/release/vendor_pin.py --dir <folder> [--component amd-fsr ...] [--manifest <file>] [--write]
   python3 -I tools/release/vendor_pin.py --check --dir <folder>
 
-<folder> holds the downloaded files by their manifest names, either side by side or one folder per component
-(<folder>/<component id>/<name>). For every file of the chosen components (all of them by default) the tool checks
+<folder> holds the downloaded files by their manifest names: one folder per component and version
+(<folder>/<component id>-<version>/<name>, as the release process keeps them), one per component
+(<folder>/<component id>/<name>), or side by side. For every file of the chosen components (all of them by default) the tool checks
 that the copy is there, has the manifest's size and, when the manifest has a gitBlob, the git blob SHA-1 GitHub lists
 for the file at the tag (so the copy is the vendor's file at that tag, not whatever came down the wire). Only then does
 it compute the SHA-256. Without --write it prints what it would write; with --write it writes the manifest (the same
@@ -47,8 +48,8 @@ def git_blob_of(path, size):
     return h.hexdigest()
 
 
-def find_copy(folder, component, name):
-    for p in (folder / component / name, folder / name):
+def find_copy(folder, component, version, name):
+    for p in (folder / f"{component}-{version}" / name, folder / component / name, folder / name):
         if p.is_file() and not p.is_symlink():
             return p
     return None
@@ -69,7 +70,7 @@ def pin(manifest, folder, components=None, check=False, out=print):
         for f in c["files"]:
             name, size = f["name"], f["size"]
             label = f"{c['id']}/{name}"
-            copy = find_copy(folder, c["id"], name)
+            copy = find_copy(folder, c["id"], c.get("version", ""), name)
             if copy is None:
                 problems.append(f"{label}: no copy in {folder} (download {f['url']} there first)")
                 continue
