@@ -753,6 +753,7 @@ SHA-256 checksum. On the game client these are:
 - `kiln\plugins\*.dll`, the parts that run other loaders' mods (EMF, EML, ShroudForge, Greeneye, SET and others), and
   the folders `kiln\plugins\shroudforge\` and `kiln\plugins\enshwick\`.
 - `kiln\host\`, Kiln's C# host and services, and `kiln\dotnet\`, the .NET runtime Kiln brings with it.
+- Data files: `kiln\kiln.json` (Kiln's settings), `kiln\compat-rules.json` and `kiln\sigdb\`.
 
 Mods can bring DLLs of their own. Kiln keeps your mods in the launcher's data folder (Settings, Library, Data folder)
 and places some of them in the game folder.
