@@ -421,7 +421,7 @@ fn kiln_did_not_load() {
     i.install = Some(f.install(Platform::Proton));
     let r = build(&i);
     let n = finding(&r, "not-loaded");
-    assert!(n.text.contains("Launch options") || n.text.contains("launch options"), "{}", n.text);
+    assert!(n.text.contains("launch options") && n.text.contains(crate::game::DLL_OVERRIDE_ADVICE), "{}", n.text);
     // a launch from the launcher after the last boot.json
     let g = Fx::healthy("stale");
     let old = SystemTime::now() - std::time::Duration::from_secs(3600);

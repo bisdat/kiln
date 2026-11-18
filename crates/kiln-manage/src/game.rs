@@ -75,6 +75,12 @@ pub struct LaunchOptionsInfo {
     pub chained_override_missing: bool,
     /// What the user should change, e.g. `WINEDLLOVERRIDES="dinput8=n,b" %command%`.
     pub advice: Option<String>,
+    /// The remedy retained for a real "No Kiln" failure, even on a runner that normally loads dinput8.
+    #[serde(default)]
+    pub fallback_advice: Option<String>,
+    /// The selected, known Steam compatibility tool prefers native dinput8 without an override.
+    #[serde(default)]
+    pub dinput8_native_by_runner: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -658,12 +664,24 @@ pub fn user_reg_native(user_reg: &str, name: &str) -> bool {
     native
 }
 
+/// Known Steam runners that load the game's native dinput8.dll without WINEDLLOVERRIDES.
+/// Keep this in one place: unknown runners still get conservative advice.
+fn runner_loads_native_dinput8(tool: &str) -> bool {
+    matches!(crate::wine::ge_version(tool).as_deref(), Some([major, minor, ..]) if (*major, *minor) >= (11, 11))
+}
+
 /// Launch options facts of an install (read-only): Proton clients only; None elsewhere.
 pub fn launch_options_info(install: &GameInstall, roots: &[SteamRoot]) -> Option<LaunchOptionsInfo> {
     if install.platform != Platform::Proton {
         return None;
     }
-    let candidates: Vec<SteamRoot> = match install.library.as_deref().and_then(|l| steam::root_of_library(roots, l)) {
+    // Having GE-Proton installed does not mean Steam selected it for this app.
+    let root = install.library.as_deref().and_then(|l| steam::root_of_library(roots, l));
+    let dinput8_native_by_runner = root.as_ref()
+        .and_then(|r| steam::compat_tool(r, install.app_id).ok().flatten())
+        .as_deref()
+        .is_some_and(runner_loads_native_dinput8);
+    let candidates: Vec<SteamRoot> = match root {
         Some(r) => vec![r],
         None => roots.to_vec(),
     };
@@ -682,11 +700,15 @@ pub fn launch_options_info(install: &GameInstall, roots: &[SteamRoot]) -> Option
     let chained = asi_loader_chained(install);
     let has = native("dinput8");
     let chained_override_missing = chained && !native("xinput9_1_0");
+    let remedy = if chained { CHAINED_DLL_OVERRIDE_ADVICE } else { DLL_OVERRIDE_ADVICE };
     Some(LaunchOptionsInfo {
         value,
         has_dll_override: has,
         chained_override_missing,
-        advice: (!has || chained_override_missing).then(|| if chained { CHAINED_DLL_OVERRIDE_ADVICE } else { DLL_OVERRIDE_ADVICE }.to_string()),
+        advice: ((!has && !dinput8_native_by_runner) || chained_override_missing).then(|| remedy.to_string()),
+        // If the game actually fails to load Kiln, always offer the override as a fallback.
+        fallback_advice: (!has || chained_override_missing).then(|| remedy.to_string()),
+        dinput8_native_by_runner,
     })
 }
 
@@ -791,8 +813,20 @@ mod override_tests {
     }
 
     #[test]
+    fn native_dinput8_runner_policy() {
+        for tool in ["GE-Proton11-11-x86_64", "GE-Proton11-12-x86_64", "GE-Proton12-1-x86_64"] {
+            assert!(runner_loads_native_dinput8(tool), "{tool}");
+        }
+        for tool in ["GE-Proton11-10-x86_64", "GE-Proton11-0.2", "GE-Proton10-25", "proton_experimental", "UMU-Proton10-4", ""] {
+            assert!(!runner_loads_native_dinput8(tool), "{tool}");
+        }
+    }
+
+    #[test]
     fn older_launch_options_info_defaults_chained_flag() {
         let info: LaunchOptionsInfo = serde_json::from_str(r#"{"value":null,"hasDllOverride":false,"advice":null}"#).unwrap();
         assert!(!info.chained_override_missing);
+        assert!(!info.dinput8_native_by_runner);
+        assert!(info.fallback_advice.is_none());
     }
 }
