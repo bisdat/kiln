@@ -13,7 +13,7 @@
 //! removed.
 
 use super::agreements::Agreements;
-use super::manifest::{Component, VendorManifest};
+use super::manifest::{file_name_ok, version_ok, Component, VendorManifest};
 use crate::game::{GameInstall, GameKind};
 use crate::{Error, ErrorCode, Result};
 use serde::{Deserialize, Serialize};
@@ -218,7 +218,9 @@ impl Store {
     }
 
     /// Every version folder of `vendor` with a receipt of `component`, newest version first. Folders without a
-    /// readable receipt are not installs (an interrupted download, another build's files).
+    /// readable receipt are not installs (an interrupted download, another build's files), and neither are folders
+    /// whose receipt has a version that is no version or a file name that is not a plain one ([`file_name_ok`]): the
+    /// receipt sits in the game folder where anything can write it, and removal joins its names to the folder.
     pub fn receipts(&self, vendor: &str, component: &str) -> Vec<(PathBuf, Receipt)> {
         let dir = self.root().join(vendor);
         let mut out: Vec<(PathBuf, Receipt)> = std::fs::read_dir(&dir).into_iter().flatten().flatten()
@@ -226,7 +228,8 @@ impl Store {
             .filter_map(|e| {
                 let p = e.path();
                 let r: Receipt = crate::util::read_json(&p.join(RECEIPT)).ok().flatten()?;
-                (r.format == RECEIPT_FORMAT && r.component == component && r.vendor == vendor && e.file_name().to_string_lossy() == r.version).then_some((p, r))
+                (r.format == RECEIPT_FORMAT && r.component == component && r.vendor == vendor && e.file_name().to_string_lossy() == r.version
+                    && receipt_names_ok(&r)).then_some((p, r))
             })
             .collect();
         out.sort_by(|a, b| version_cmp(&b.1.version, &a.1.version));
@@ -336,6 +339,8 @@ impl Store {
             if version == c.version {
                 names.extend(c.files.iter().map(|f| f.name.clone()));
             }
+            // plain names only, whatever a receipt says ([`Store::receipts`] already skips one that is not)
+            names.retain(|n| file_name_ok(n));
             names.sort();
             names.dedup();
             let mut ours: Vec<String> = names.iter().flat_map(|n| [n.clone(), format!("{n}{PART_SUFFIX}")]).collect();
@@ -376,6 +381,12 @@ impl Store {
         }
         Ok(report)
     }
+}
+
+/// A receipt's version is a version and its files plain names, each once (case aside, as on Windows).
+fn receipt_names_ok(r: &Receipt) -> bool {
+    let mut seen = std::collections::BTreeSet::new();
+    version_ok(&r.version) && r.files.iter().all(|f| file_name_ok(&f.name) && seen.insert(f.name.to_ascii_lowercase()))
 }
 
 /// Orders two dotted versions by their numbers (a part that is not a number orders as 0; more parts order after).

@@ -737,3 +737,41 @@ fn the_licence_agreement_is_what_the_status_reports() {
     assert_eq!(s.license.name, "Intel Simplified Software License (October 2022)");
     assert!(!store.component_status(m.component("amd-fsr").unwrap(), &Agreements::load(&dirs)).license.agreed);
 }
+
+#[test]
+fn a_receipt_naming_files_outside_its_folder_is_not_an_install_and_remove_stays_inside() {
+    let lab = Lab::new("receipt-escape");
+    let (a, b) = (bytes(1, 500), bytes(2, 300));
+    let c = amd(&manifest_for(&a, &b));
+    lab.server.on(A_URL, &[Behave::Serve(a.clone())]);
+    lab.server.on(B_URL, &[Behave::Serve(b.clone())]);
+    lab.get(&c, &mut Recorder::default()).unwrap();
+    // files a crafted or damaged receipt could name: above the version folder, in the game's own folder, absolute
+    let outside = lab.t.0.join("outside.txt");
+    let in_game = lab.game().join("enshrouded.exe");
+    std::fs::write(&outside, "not Kiln's").unwrap();
+    std::fs::write(&in_game, "the game").unwrap();
+    let receipt_path = lab.folder().join(RECEIPT);
+    let good: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&receipt_path).unwrap()).unwrap();
+    for bad in ["../../../../../outside.txt", "../../../../enshrouded.exe", outside.to_str().unwrap(), "sub/a.dll", "a.dll."] {
+        let mut r = good.clone();
+        r["files"].as_array_mut().unwrap().push(serde_json::json!({ "name": bad, "size": 10, "sha256": "ab".repeat(32), "url": A_URL }));
+        std::fs::write(&receipt_path, r.to_string()).unwrap();
+        assert!(lab.store().receipts("amd", "amd-fsr").is_empty(), "a receipt naming {bad} was read as an install");
+    }
+    // a receipt whose version is no version is not one either
+    let mut r = good.clone();
+    r["version"] = "..".into();
+    std::fs::write(&receipt_path, r.to_string()).unwrap();
+    assert!(lab.store().receipts("amd", "amd-fsr").is_empty());
+    // remove takes only Kiln's names from this build's manifest, and nothing outside the folder
+    let mut r = good.clone();
+    r["files"].as_array_mut().unwrap().push(serde_json::json!({ "name": "../../../../enshrouded.exe", "size": 8, "sha256": "ab".repeat(32), "url": A_URL }));
+    r["files"].as_array_mut().unwrap().push(serde_json::json!({ "name": outside.to_str().unwrap(), "size": 10, "sha256": "ab".repeat(32), "url": A_URL }));
+    std::fs::write(&receipt_path, r.to_string()).unwrap();
+    let report = lab.store().remove(&c).unwrap();
+    assert_eq!(report.removed, ["kiln/vendor/amd/2.4.0"]);
+    assert_eq!(std::fs::read_to_string(&outside).unwrap(), "not Kiln's");
+    assert_eq!(std::fs::read_to_string(&in_game).unwrap(), "the game");
+    assert!(!lab.folder().exists());
+}

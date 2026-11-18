@@ -1067,7 +1067,10 @@ A client only: a dedicated server is `unsupported`.
 - **The receipt** `kiln-vendor.json` (`vendor-receipt.schema.json`): `{format: 1, component, vendor, version, installed,
   installer, license: {name, sha256}, files: [{name, size, sha256, url}]}`, written last and atomically, after every file
   verified, and removed first when a download of that folder starts. A folder without one is not complete and is not an
-  install; its `version` is the folder's name.
+  install; its `version` is the folder's name. Anything can write the game folder, so a reader trusts no name in it: a
+  receipt whose `version` is not a version or that names a file that is not a plain manifest-style name (a folder, `..`,
+  an absolute path, a trailing dot, a Windows device name) is not an install, and removal deletes only plain names
+  inside the version folder.
 - **What Kiln in the game will read (phase B, not in this release).** A component's newest folder with a receipt of that
   `component`; before it loads a file it checks that the file is there with the receipt's size and computes its SHA-256
   again (about 0.1 s for 80 MB, once per start), and it compares the receipt's hashes with the ones it was built with (the

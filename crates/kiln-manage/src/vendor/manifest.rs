@@ -187,18 +187,24 @@ fn plain_id(s: &str, max: usize) -> bool {
         && s.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
 
-fn version_ok(v: &str) -> bool {
+pub(crate) fn version_ok(v: &str) -> bool {
     let parts: Vec<&str> = v.split('.').collect();
     (2..=4).contains(&parts.len())
         && parts.iter().all(|p| !p.is_empty() && p.len() <= 9 && p.bytes().all(|b| b.is_ascii_digit()) && (p.len() == 1 || !p.starts_with('0')))
 }
 
-/// A file name in a version folder: letters, digits, `.`, `_`, `-`, not starting with a dot, at most 128 bytes, and
-/// not one of Kiln's own names there.
+/// A file name in a version folder: letters, digits, `.`, `_`, `-`, not starting or ending with a dot, at most 128
+/// bytes, not a Windows device name (`nul.dll`), and not one of Kiln's own names there. The store also reads the
+/// names of a receipt with it, so a receipt on disk cannot point outside its folder.
 pub fn file_name_ok(n: &str) -> bool {
+    let stem = n.split('.').next().unwrap_or("").to_ascii_lowercase();
+    let device = matches!(stem.as_str(), "con" | "prn" | "aux" | "nul")
+        || (stem.len() == 4 && (stem.starts_with("com") || stem.starts_with("lpt")) && stem.as_bytes()[3].is_ascii_digit());
     !n.is_empty() && n.len() <= 128
         && n.bytes().next().is_some_and(|b| b.is_ascii_alphanumeric())
+        && !n.ends_with('.')
         && n.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'_' || b == b'-')
+        && !device
         && !n.eq_ignore_ascii_case(super::store::RECEIPT)
         && !n.to_ascii_lowercase().ends_with(super::store::PART_SUFFIX)
         && !n.to_ascii_lowercase().ends_with(".tmp")
@@ -454,6 +460,9 @@ mod tests {
             ("Kiln's own receipt as a file name", Box::new(|v| v["components"][0]["files"][0]["name"] = "kiln-vendor.json".into())),
             ("a part file as a file name", Box::new(|v| v["components"][0]["files"][0]["name"] = "a.dll.part".into())),
             ("a file name twice", Box::new(|v| v["components"][0]["files"][1]["name"] = "AMD_fidelityfx_loader_vk.dll".into())),
+            ("a file name ending with a dot (Windows drops it)", Box::new(|v| v["components"][0]["files"][0]["name"] = "a.dll.".into())),
+            ("a Windows device name", Box::new(|v| v["components"][0]["files"][0]["name"] = "NUL.dll".into())),
+            ("a Windows port name", Box::new(|v| v["components"][0]["files"][0]["name"] = "com1.dll".into())),
             ("a branch URL", Box::new(|v| v["components"][1]["files"][0]["url"] = "https://raw.githubusercontent.com/intel/xess/main/bin/libxess.dll".into())),
             ("a size of 0", Box::new(|v| v["components"][1]["files"][0]["size"] = 0.into())),
             ("a size over the cap", Box::new(|v| v["components"][1]["files"][0]["size"] = (MAX_FILE + 1).into())),
