@@ -193,6 +193,69 @@ bool widget_text(void* widget, std::string* out) {
     return true;
 }
 
+// The native UI thread owns every game pointer. Overlay and network code
+// receive only value snapshots and may queue a full-line replacement.
+void completion_capture(void* widget, void* state, bool hud) {
+    if (!g_completion_on.load(std::memory_order_acquire) || !editing(state)) return;
+    std::string line;
+    if (!widget_text(widget, &line) || !safe_line(line)) return;
+    uint32_t cursor = 0;
+    if (!game_read(reinterpret_cast<const uint8_t*>(state) + L.edit + kEditorCursor, &cursor) ||
+        cursor > codepoints(line)) return;
+    uintptr_t node = 0;
+    float rect[4]{};
+    bool valid = false;
+    if (g_rect_fn && game_read(reinterpret_cast<const uint8_t*>(widget) + 8, &node) && node) {
+        __try {
+            const float* raw = reinterpret_cast<RectFn>(g_rect_fn)(reinterpret_cast<void*>(node));
+            valid = raw && game_copy(reinterpret_cast<const char*>(raw), reinterpret_cast<char*>(rect), sizeof rect);
+        } __except (EXCEPTION_EXECUTE_HANDLER) { valid = false; }
+    }
+    if (!valid || !std::isfinite(rect[0]) || !std::isfinite(rect[1]) ||
+        !std::isfinite(rect[2]) || !std::isfinite(rect[3]) ||
+        rect[2] <= 0 || rect[3] <= 0 || rect[2] > 4000 || rect[3] > 4000) return;
+    std::lock_guard lock(g_completion_mu);
+    auto& snap = g_completion_snapshot;
+    const uint32_t field = hud ? 1u : 2u;
+    if (!snap.focused || snap.field != field || snap.text != line || snap.cursor != cursor)
+        ++snap.revision;
+    snap.focused = true; snap.field = field; snap.text = std::move(line); snap.cursor = cursor;
+    for (int i = 0; i < 4; ++i) snap.raw[i] = rect[i];
+    snap.has_rect = true;
+}
+
+void completion_before(void* widget, bool hud) {
+    if (!g_completion_on.load(std::memory_order_acquire)) return;
+    void* state = game_state(widget);
+    if (!editing(state)) return;
+    PendingEdit pending;
+    bool queued = false;
+    {
+        std::lock_guard lock(g_completion_mu);
+        if (g_pending_valid) {
+            pending = std::move(g_pending_edit);
+            g_pending_valid = false;
+            queued = true;
+        }
+    }
+    if (queued && pending.field == (hud ? 1u : 2u)) {
+        std::string old;
+        if (widget_text(widget, &old) && old == pending.expected && safe_line(pending.replacement) &&
+            game_set_text(reinterpret_cast<uint8_t*>(state) + L.edit,
+                pending.replacement.data(), pending.replacement.size())) {
+            g_last_applied = pending.replacement;
+            g_set_text_pending = true; // game widget readback in history_after
+            g_history.edited();
+        }
+    }
+    if (!g_history_on.load(std::memory_order_acquire)) {
+        chat_keys::Action action{};
+        while (g_keys.take(action))
+            if (action != chat_keys::Action::Older && action != chat_keys::Action::Newer)
+                completion_action(action);
+    }
+}
+
 size_t controls(std::string_view line) {
     size_t n = 0;
     for (const unsigned char c : line)
@@ -311,6 +374,10 @@ void history_before(void* widget, bool hud) {
     }
     chat_keys::Action action{};
     while (g_keys.take(action)) {
+        if (action != chat_keys::Action::Older && action != chat_keys::Action::Newer) {
+            completion_action(action);
+            continue;
+        }
         const bool browsing_before = g_history.browsing();
         // Critical: before the input call, widget_text may still be empty
         // even when the player's unsent draft is visible. TextInputProcess
@@ -393,7 +460,7 @@ void history_after(void* widget, void* result, bool hud) {
                  readable && chat_history::History::valid(sent) ? 1u : 0u,
                  readable && chat_history::History::sensitive(sent) ? 1u : 0u,
                  readable ? controls(sent) : 0);
-        if (event == 1 && readable && !g_diagnose_on.load(std::memory_order_relaxed)) {
+        if (event == 1 && readable && g_history_on.load(std::memory_order_relaxed) && !g_diagnose_on.load(std::memory_order_relaxed)) {
             const size_t before = g_history.count();
             const bool persisted_changed = g_history.submit(sent);
             if (persisted_changed) save_history();
@@ -414,6 +481,7 @@ void history_after(void* widget, void* result, bool hud) {
     }
     if (!editing(state)) return;
     g_editing_in_frame = true;
+    completion_capture(widget, state, hud);
     // Refresh the live draft ONLY after TextInputProcess synchronizes the
     // caller-owned widget, and never while history browsing is active.
     if (!g_history.browsing()) {
@@ -440,6 +508,7 @@ void* __fastcall hk_input(void* widget, void* result, const GameText* label, uin
     const bool hud = caller == g_hud_ret;
     const bool social = caller == g_social_ret;
     const bool scoped = hud || social;
+    if (scoped && g_completion_on.load(std::memory_order_relaxed)) completion_before(widget, hud);
     if (g_history_on.load(std::memory_order_relaxed) && scoped)
         history_before(widget, hud);
     void* const out = g_input.call<void*>(widget, result, label, mode);
@@ -448,6 +517,7 @@ void* __fastcall hk_input(void* widget, void* result, const GameText* label, uin
     else if (social && !g_social_seen.exchange(true))
         logf(KILN_LOG_INFO, "ui: chat input probe: native Social chat call observed (call-site confirmation)");
     if (scoped && (g_history_on.load(std::memory_order_relaxed) ||
+                   g_completion_on.load(std::memory_order_relaxed) ||
                    g_diagnose_on.load(std::memory_order_relaxed)))
         history_after(widget, result, hud);
     return out;
