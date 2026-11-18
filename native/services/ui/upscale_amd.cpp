@@ -236,6 +236,15 @@ class AmdBackend final : public Backend {
         }
         frame_ = f.frame;
         reap(false);
+        // never a frame larger than the context it was made for (AMD's DLL is not known to check: the GPU would read and
+        // write past its resources); the core makes a new context first, so this only catches a frame that slipped past
+        if (!frame_fits(ci_, f) || f.render_width > ci_.max_render_width || f.render_height > ci_.max_render_height) {
+            *detail = "a frame of " + std::to_string(f.color.width) + "x" + std::to_string(f.color.height) + " -> " +
+                      std::to_string(f.output_width) + "x" + std::to_string(f.output_height) + " for a context made for " +
+                      std::to_string(ci_.max_render_width) + "x" + std::to_string(ci_.max_render_height) + " -> " +
+                      std::to_string(ci_.output_width) + "x" + std::to_string(ci_.output_height);
+            return false;
+        }
         Texture motion = f.motion;
         if (f.motion.format == VK_FORMAT_R16G16_SNORM && !mv_.record(f.cb, f.motion, f.frame, &motion, detail)) return false;
         ffxDispatchDescUpscale d = amd::dispatch(f, motion, reset_);
