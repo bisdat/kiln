@@ -39,20 +39,44 @@ internal sealed record ChatCompletionReply(uint Id, string Text, ushort Start, s
 internal static class ChatCompletionRules
 {
     internal const int MaxTextBytes = 256, MaxSuggestions = 20;
+    private static readonly UTF8Encoding StrictUtf8 = new(false, true);
+
+    // The default Encoding.UTF8 silently replaces unpaired UTF-16 surrogates.
+    // A completion request or suggestion must instead be valid Unicode before
+    // it crosses the managed/network/native chat boundaries.
+    private static bool Utf8LengthWithin(string text, int max)
+    {
+        try { return StrictUtf8.GetByteCount(text) <= max; }
+        catch (EncoderFallbackException) { return false; }
+    }
+
     internal static bool RequestText(string? text) =>
         text is { Length: > 1 } &&
         text[0] == '/' &&
-        Encoding.UTF8.GetByteCount(text) <= MaxTextBytes &&
-        !text.Any(c => char.IsControl(c));
+        !text.Any(char.IsControl) &&
+        Utf8LengthWithin(text, MaxTextBytes);
 
     internal static bool Candidate(string? word) =>
         !string.IsNullOrEmpty(word) &&
-        Encoding.UTF8.GetByteCount(word) <= 128 &&
-        !word.Any(c => char.IsControl(c));
+        !word.Any(char.IsControl) &&
+        Utf8LengthWithin(word, 128);
+
+    // Commands.Complete returns a UTF-8 byte start, never an offset into the
+    // middle of a codepoint. Verify that at the protocol boundary as well as
+    // in the managed UI, so malformed replies cannot enter the active model.
+    internal static bool StartBoundary(string text, ushort start)
+    {
+        if (!RequestText(text)) return false;
+        byte[] bytes;
+        try { bytes = StrictUtf8.GetBytes(text); }
+        catch (EncoderFallbackException) { return false; }
+        return start <= bytes.Length &&
+            (start == bytes.Length || (bytes[start] & 0xC0) != 0x80);
+    }
 
     internal static bool Matches(ChatCompletionReply reply, uint id, string text) =>
         reply.Id == id && reply.Text == text &&
-        reply.Start <= Encoding.UTF8.GetByteCount(text) &&
+        StartBoundary(text, reply.Start) &&
         reply.Suggestions.Length <= MaxSuggestions &&
         reply.Suggestions.All(Candidate);
 }
