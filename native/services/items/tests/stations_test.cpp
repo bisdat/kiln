@@ -610,6 +610,15 @@ int main() {
         ChestFacts bare = plain;
         bare.inventory = false;
         CHECK(kind_of(bare, 4000, 10, 0) == ChestKind::NoInventory);
+        // a villager or a player's inventory in the base is not a storage chest (InventorySetup flags bit 0 / bit 1)
+        ChestFacts villager = plain;
+        villager.person = setup_is_person(0x02);
+        CHECK(villager.person && kind_of(villager, 4000, 10, 0) == ChestKind::Person);
+        ChestFacts body = plain;
+        body.person = setup_is_person(0x01);
+        CHECK(kind_of(body, 4000, 10, 0) == ChestKind::Person);
+        CHECK(!setup_is_person(0x00) && !setup_is_person(0x04));
+        CHECK(std::strstr(chest_kind_why(ChestKind::Person), "NPC") != nullptr);
         const std::vector<NamedChest> boxes = {{4002, 0, ChestKind::Ordinary},
                                                 {4000, 0, ChestKind::Ordinary},
                                                 {4000, 0, ChestKind::Ordinary},
@@ -620,7 +629,7 @@ int main() {
         const std::vector<NamedChest> okboxes = {{4002, 0, ChestKind::Ordinary}, {4000, 0, ChestKind::Ordinary}, {4000, 0, ChestKind::Ordinary}};
         CHECK(check_named_chests(okboxes, &bad, &why));
         const std::vector<uint32_t> got = eligible_chests(okboxes, 10, 0);
-        CHECK(got.size() == 2 && got[0] == 4000 && got[1] == 4002);
+        CHECK(got.size() == 2 && got[0] == 4002 && got[1] == 4000);  // the request's order, a repeat once
 
         // 3 crafts need 9 charcoal. Magic chests hold 2, an ordinary chest 3, a kiln lends 20.
         std::vector<InputNow> layered(1);

@@ -860,6 +860,8 @@ void plan_tick(const KilnStationRequest& r, const KilnEntity* chest_ids, uint32_
             uint32_t size = 0;
             const auto* setup = g_w ? static_cast<const uint8_t*>(g_w->component(e, H_SETUP, &size)) : nullptr;
             f.inventory = setup && size > static_cast<uint32_t>(E.setup_initialized) && setup[E.setup_initialized] != 0;
+            // a player's or an NPC's inventory is no storage chest; a setup too short to tell is not one either
+            f.person = f.inventory && (size <= kSetupFlags || setup_is_person(setup[kSetupFlags]));
             return f;
         },
         [](KilnEntity e, std::unordered_map<uint32_t, uint64_t>* m) { count_items(e, m); });
@@ -1146,6 +1148,8 @@ void run_fill(const Run& run, const Req& q, KilnStationResult* res) {
             PageSet pages;
             bool init = false;
             f.inventory = read_pages(run.a, e, &pages, &init) && init;
+            uint8_t flags = 0;
+            f.person = f.inventory && (!setup_flags(run.a, e, &flags) || setup_is_person(flags));
             return f;
         },
         [&](KilnEntity e, std::unordered_map<uint32_t, uint64_t>* m) { count_pages(run.a, e, m); });

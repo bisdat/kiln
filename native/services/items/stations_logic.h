@@ -405,8 +405,11 @@ inline bool inputs_repeat(const uint32_t* items, uint32_t n) {
 inline bool use_named_chests(const uint32_t* items, uint32_t n) { return n != 0 && !inputs_repeat(items, n); }
 
 // What one named entity is, once the world has been read. Ordinary: an initialized inventory in the station's base, not a
-// production station, not a player, not already in the base's Magic-chest list.
-enum class ChestKind : uint8_t { Ordinary, Missing, OtherBase, Magic, Station, NoInventory, Player, IsTarget };
+// production station, not a player's or an NPC's inventory, not already in the base's Magic-chest list.
+enum class ChestKind : uint8_t { Ordinary, Missing, OtherBase, Magic, Station, NoInventory, Player, IsTarget, Person };
+
+// InventorySetup's flags byte (kiln.items' KILN_ITEMS_FIND_* split): bit 0 a player's inventory, bit 1 an NPC's.
+inline bool setup_is_person(uint8_t flags) { return (flags & 3u) != 0; }
 
 struct ChestFacts {
     int32_t base = -1;
@@ -414,6 +417,7 @@ struct ChestFacts {
     bool station = false;
     bool magic = false;
     bool inventory = false;
+    bool person = false;  // the inventory is a player's or an NPC's (InventorySetup flags), not a storage container
 };
 
 struct NamedChest {
@@ -430,6 +434,7 @@ inline ChestKind kind_of(const ChestFacts& f, uint32_t entity, uint32_t target, 
     if (f.station) return ChestKind::Station;
     if (f.magic) return ChestKind::Magic;
     if (!f.inventory) return ChestKind::NoInventory;
+    if (f.person) return ChestKind::Person;
     if (station_base < 0 || f.base != station_base) return ChestKind::OtherBase;
     return ChestKind::Ordinary;
 }
@@ -441,6 +446,7 @@ inline const char* chest_kind_why(ChestKind k) {
     case ChestKind::Station: return "entity %u is a production station, not an ordinary chest";
     case ChestKind::Magic: return "entity %u is already one of the base's Magic chests";
     case ChestKind::NoInventory: return "entity %u has no inventory";
+    case ChestKind::Person: return "entity %u is a player's or an NPC's inventory, not a storage chest";
     case ChestKind::OtherBase: return "entity %u is not in this base";
     case ChestKind::Missing: return "entity %u is not in this base";
     case ChestKind::Ordinary: return "";
@@ -463,14 +469,14 @@ inline bool check_named_chests(const std::vector<NamedChest>& named, uint32_t* b
     return true;
 }
 
-// The chests a fill may take from, in entity order, once each.
+// The chests a fill may take from, in the order the request names them, once each (a repeat keeps its first place).
 inline std::vector<uint32_t> eligible_chests(const std::vector<NamedChest>& all, uint32_t target, int32_t base) {
     std::vector<uint32_t> out;
     if (base < 0) return out;
     for (const NamedChest& c : all)
-        if (c.kind == ChestKind::Ordinary && c.entity != target && c.base == base) out.push_back(c.entity);
-    std::sort(out.begin(), out.end());
-    out.erase(std::unique(out.begin(), out.end()), out.end());
+        if (c.kind == ChestKind::Ordinary && c.entity != target && c.base == base &&
+            std::find(out.begin(), out.end(), c.entity) == out.end())
+            out.push_back(c.entity);
     return out;
 }
 
