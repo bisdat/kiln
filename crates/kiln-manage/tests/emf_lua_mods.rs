@@ -214,6 +214,8 @@ fn a_lua_mod_folder_on_its_own_is_an_emf_mod() {
         ("not-lua", r#"{"id":"x","version":"1.0.0","emf":14,"main":"main.js"}"#, "is not Lua"),
         ("no-main", r#"{"id":"x","version":"1.0.0","emf":14,"main":"gone.lua"}"#, "without its main file (gone.lua)"),
         ("api", r#"{"id":"x","version":"1.0.0","emf":"14","main":"main.lua"}"#, "\"emf\" as something other than a whole number"),
+        ("id", r#"{"id":"Beast","version":"1.0.0","emf":14,"main":"main.lua"}"#, "whose id (Beast) EMF does not take"),
+        ("version", r#"{"id":"x","version":"1.0.0-beta","emf":14,"main":"main.lua"}"#, "whose version (1.0.0-beta) EMF does not take"),
     ] {
         let d = t.0.join("odd").join(tag);
         put(&d, "mod.json", manifest.as_bytes());
@@ -223,6 +225,11 @@ fn a_lua_mod_folder_on_its_own_is_an_emf_mod() {
         assert_eq!(found.kind, DetectKind::Unknown, "{tag}: {found:?}");
         assert!(found.reason.contains(why), "{tag}: {}", found.reason);
     }
+    // another engine's folder stays that engine's: SET's init.lua beside such a mod.json
+    let d = t.0.join("set");
+    lua_mod(&d, "x", "N", "1.0.0");
+    put(&d, "init.lua", b"");
+    assert_eq!(library::detect(&d).unwrap().kind, DetectKind::Set);
 }
 
 #[test]
@@ -267,8 +274,10 @@ fn the_lua_mods_copy_follows_the_profile() {
     assert_eq!((rep.placed.len(), rep.own.clone()), (0, vec!["emf:beastmaster".to_string()]), "{rep:#?}");
     assert!(engine_mods::marker(&copy).is_none());
     assert_eq!(engine_mods::game_path_of(&dirs, ModKind::Emf, &p.mods.emf[0], &g.path), Some(copy.clone()));
-    // ... under another folder name too
+    // ... under another folder name too, also behind an EMF DLL mod of the same id
     std::fs::rename(&copy, g.path.join("emf/mods/Beastmaster-1.16")).unwrap();
+    put(&g.path, "emf/mods/A-dll/mod.json", br#"{"id":"beastmaster","name":"B","version":"1.0.0","emf":14}"#);
+    put(&g.path, "emf/mods/A-dll/beastmaster.dll", &build_test_dll(&["emf_mod_load"], b""));
     let rep = engine_mods::place(&dirs, &p, &g.path).unwrap();
     assert_eq!((rep.placed.len(), rep.own.clone()), (0, vec!["emf:beastmaster".to_string()]), "{rep:#?}");
     assert_eq!(engine_mods::game_path_of(&dirs, ModKind::Emf, &p.mods.emf[0], &g.path), Some(g.path.join("emf/mods/Beastmaster-1.16")));
@@ -289,12 +298,27 @@ fn copy_mode_names_the_copy_under_kiln_profiles() {
     let beast = import_one(&dirs, &src, "beastmaster");
     let mut p = profile::create(&dirs, "copy", None).unwrap();
     p.mods.emf = vec![pm(&beast, true)];
-    profile::save(&dirs, &p).unwrap();
+    let mut p = profile::save(&dirs, &p).unwrap();
     profile::activate(&dirs, &p.id, &g).unwrap();
     let file = profile::read_game_profile(&g.path).unwrap().unwrap();
     assert_eq!(file.mods.emf[0].path, format!("profiles/{}/emf/beastmaster", p.id));
     assert!(g.path.join("kiln").join(&file.mods.emf[0].path).join("main.lua").is_file());
     assert!(g.path.join("emf/mods/beastmaster/main.lua").is_file());
+    // the player's own folder of the mod under another name: the copy under kiln/profiles/ takes that folder's name, the
+    // one kiln-emf gives EMF's lua mod, which then reads the Lua files from that folder
+    p.mods.emf[0].enabled = false;
+    let mut p = profile::save(&dirs, &p).unwrap();
+    profile::activate(&dirs, &p.id, &g).unwrap();
+    assert!(!g.path.join("emf/mods/beastmaster").exists());
+    lua_mod(&g.path.join("emf/mods/Beastmaster-1.16"), "beastmaster", "Beastmaster", "1.16.0");
+    p.mods.emf[0].enabled = true;
+    let p = profile::save(&dirs, &p).unwrap();
+    profile::activate(&dirs, &p.id, &g).unwrap();
+    let file = profile::read_game_profile(&g.path).unwrap().unwrap();
+    assert_eq!(file.mods.emf[0].path, format!("profiles/{}/emf/Beastmaster-1.16", p.id));
+    assert!(g.path.join("kiln").join(&file.mods.emf[0].path).join("main.lua").is_file());
+    assert!(!g.path.join("kiln/profiles").join(&p.id).join("emf/beastmaster").exists(), "the copy by the old name went");
+    assert!(!g.path.join("emf/mods/beastmaster").exists());
 }
 
 #[test]

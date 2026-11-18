@@ -478,13 +478,17 @@ pub(crate) fn emf_dll_mod_id(dir: &Path) -> Option<String> {
 /// it. EMF's own release zip has nine (beastmaster, bounty, champion, grave, handover, kill_counter, life_skills,
 /// minimap, necromancer) in `game/emf/mods/`.
 pub(crate) fn emf_lua_manifest(dir: &Path) -> Option<(serde_json::Value, String)> {
+    // another engine's folder stays that engine's, as before (SET's init.lua, Flame, Enshwick, ShroudForge, XHL-Core)
+    if MOD_MANIFESTS.iter().any(|m| *m != EMF_MANIFEST && dir.join(m).is_file()) || crate::engine_mods::has_xhl_plugin_ini(dir) {
+        return None;
+    }
     let text = crate::manifest::read_text(&dir.join(EMF_MANIFEST)).ok()?;
     let v = crate::jsonc::parse(text.trim_start_matches('\u{feff}')).ok()?;
     if !v.is_object() || v.get("dll").is_some() {
         return None;
     }
-    let given = |k: &str| v.get(k).and_then(|x| x.as_str()).is_some_and(|s| !s.trim().is_empty());
-    if !given("id") || !given("version") || v.get("emf").is_some_and(|e| !e.is_i64() && !e.is_u64()) {
+    let s = |k: &str| v.get(k).and_then(|x| x.as_str());
+    if !s("id").is_some_and(emf_id) || !s("version").is_some_and(emf_version) || v.get("emf").is_some_and(|e| !e.is_i64() && !e.is_u64()) {
         return None;
     }
     let main = v.get("main")?.as_str()?.to_string();
@@ -494,6 +498,19 @@ pub(crate) fn emf_lua_manifest(dir: &Path) -> Option<(serde_json::Value, String)
     }
     // Windows (and EMF) find the file whatever the case of its name
     rel_ignoring_case(dir, &rel).is_some().then_some((v, main))
+}
+
+/// An id EMF takes (EMF src/core/manifest.cpp `valid_mod_id`, kiln-emf the same): 1 to 48 of a-z 0-9 _ . -, and not
+/// `emf`, EMF's own.
+fn emf_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 48 && id != "emf" && id.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, b'_' | b'.' | b'-'))
+}
+
+/// A version EMF takes (EMF `parse_version`, kiln-emf the same): "1", "1.2" or "1.2.3", numbers only.
+fn emf_version(v: &str) -> bool {
+    let parts: Vec<&str> = v.split('.').collect();
+    parts.len() <= 3 && parts.iter().all(|p| !p.is_empty() && p.len() <= 7 && p.bytes().all(|c| c.is_ascii_digit())
+        && p.parse::<u32>().is_ok_and(|n| n <= 1_000_000))
 }
 
 /// Is `dir` an EMF Lua mod ([`emf_lua_manifest`])? Its Library entry is placed in `<game>/emf/mods/<id>/`, where EMF's
@@ -510,12 +527,17 @@ fn emf_problem(dir: &Path) -> Option<String> {
     if v.get("emf").is_none() && v.get("main").is_none() {
         return None;
     }
-    let s = |k: &str| v.get(k).and_then(|x| x.as_str()).map(str::trim).filter(|x| !x.is_empty());
+    let raw = |k: &str| v.get(k).and_then(|x| x.as_str());
+    let s = |k: &str| raw(k).map(str::trim).filter(|x| !x.is_empty());
     let main = s("main");
     Some(if v.get("dll").is_some() && v.get("main").is_some() {
         "an EMF mod whose mod.json names both a DLL and a main file, which EMF refuses".into()
     } else if s("id").is_none() || s("version").is_none() {
         "an EMF mod whose mod.json has no id or no version, which EMF needs".into()
+    } else if let Some(id) = raw("id").filter(|id| !emf_id(id)) {
+        format!("an EMF mod whose id ({id}) EMF does not take: it needs 1 to 48 of a-z 0-9 _ . -")
+    } else if let Some(version) = raw("version").filter(|v| !emf_version(v)) {
+        format!("an EMF mod whose version ({version}) EMF does not take: it needs numbers like 1.2.3")
     } else if v.get("emf").is_some_and(|e| !e.is_i64() && !e.is_u64()) {
         "an EMF mod whose mod.json gives \"emf\" as something other than a whole number, which EMF refuses".into()
     } else if let Some(main) = main.filter(|m| !m.to_ascii_lowercase().ends_with(".lua")) {

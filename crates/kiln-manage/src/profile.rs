@@ -1113,6 +1113,19 @@ fn game_or_copy(host: &Path, install: &GameInstall, mode: PathMode, rel: impl Fn
     }
 }
 
+/// The folder name of a mod's copy under `kiln/profiles/<pid>/<kind>/` in Copy mode: the mod's id, except for an EMF Lua
+/// mod that runs from a folder of another name in emf/mods (`game_path`, the player's own: engine_mods::game_path_of).
+/// kiln-emf tells EMF's lua mod the copy's folder name, and the lua mod reads the Lua files from `emf/mods/<that name>`,
+/// so the copy takes the name of the folder that is there. A name another mod of the list has stays the id.
+fn copy_name(profile: &Profile, kind: ModKind, m: &ProfileMod, game_path: Option<&Path>) -> String {
+    let name = game_path.filter(|_| kind == ModKind::Emf).and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned());
+    match name {
+        Some(n) if n != m.id && !n.starts_with('.') && crate::engine_mods::is_game_folder_name(&n)
+            && !profile.mods.list(kind).iter().any(|o| o.id.eq_ignore_ascii_case(&n)) => n,
+        _ => m.id.clone(),
+    }
+}
+
 fn copy_rel(pid: &str, kind: ModKind, id: &str) -> String {
     format!("{}/{pid}/{}/{id}", COPY_ROOT_REL, kind.as_str())
 }
@@ -1192,7 +1205,7 @@ pub fn render(dirs: &DataDirs, profile: &Profile, install: &GameInstall, mode: P
                 Some(placed) if game_path.is_some() && outside_kiln_ok(k, &placed) => format!("../{}", placed.strip_prefix(&install.path)
                     .map_err(|_| Error::invalid("EML game folder is outside the install"))?.to_string_lossy().replace('\\', "/")),
                 _ if mode == PathMode::Copy && crate::engine_mods::run_folder(k).is_some() => run_folder_copy_rel(profile, install, k, m, &folder)?,
-                _ => game_or_copy(&folder, install, mode, || copy_rel(pid, k, &m.id))?,
+                _ => game_or_copy(&folder, install, mode, || copy_rel(pid, k, &copy_name(profile, k, m, game_path.as_deref())))?,
             };
             let enabled = m.enabled && !(k == ModKind::Native && crate::engines::own_loader_in(&folder)
                 .is_some_and(|(engine, _)| engine == crate::engines::Engine::Set));
@@ -1410,7 +1423,10 @@ fn sync_copies(dirs: &DataDirs, profile: &Profile, install: &GameInstall, warnin
         let wanted = list_of(&profile.mods, k).iter().filter(|m| m.enabled && !runs_placed(k, m)).map(|m| {
             let rel = if crate::engine_mods::run_folder(k).is_some() {
                 run_folder_copy_rel(profile, install, k, m, &crate::library::path_of(dirs, &lref(k, m))?)?
-            } else { copy_rel(&profile.id, k, &m.id) };
+            } else {
+                let game_path = (k == ModKind::Emf).then(|| crate::engine_mods::game_path_of(dirs, k, m, &install.path)).flatten();
+                copy_rel(&profile.id, k, &copy_name(profile, k, m, game_path.as_deref()))
+            };
             Ok((m, install.path.join(crate::paths::game::KILN).join(rel)))
         }).collect::<Result<Vec<_>>>()?;
         for e in std::fs::read_dir(&kdir).into_iter().flatten().flatten() {

@@ -3142,14 +3142,16 @@ fn emf_lua_path(dirs: &DataDirs, m: &crate::profile::ProfileMod, game: &Path) ->
     if have.as_ref() == Some(&want) && placements(game).ok()?.iter().any(|r| r.path == dst && r.marker == want) {
         return Some(dst);
     }
-    // a player's folder: the one under the mod's id holding the same mod, or the same mod under another name
+    // a player's folder: the one under the mod's id holding the same Lua mod, or the same Lua mod under another name
     let id = manifest_id_raw(&src)?;
     let same = |p: &Path| !p.is_symlink() && p.is_dir() && marker(p).is_none() && crate::library::is_emf_lua(p)
         && manifest_id_raw(p).is_some_and(|o| o.eq_ignore_ascii_case(&id));
     if same(&dst) {
         return Some(dst);
     }
-    same_mod_elsewhere(&root, ModKind::Emf, &src, &dst).filter(|p| same(p))
+    let mut others: Vec<PathBuf> = std::fs::read_dir(&root).ok()?.flatten().map(|e| e.path()).filter(|p| *p != dst).collect();
+    others.sort();
+    others.into_iter().find(|p| same(p))
 }
 
 /// Kiln 0.2.0-dev.23 and earlier ran Greeneye mods from their Library entry, and a Greeneye mod writes its settings and
