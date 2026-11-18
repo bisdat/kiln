@@ -391,6 +391,9 @@ public sealed class ModCatalogTests : IDisposable
         var row = Mod(s, "shroudforge", "unifiedemltweaks");
         Assert.Equal(("profile", placed), (row.Source, row.Folder));  // the details' FOLDER line names the folder ShroudForge runs
         Assert.False(row.Missing);
+        // listed once: ShroudForge's own DLL loader loads its native-plugin.ini, it is no XHL-Core plugin of its own
+        Assert.DoesNotContain(s.Mods, m => m.Engine == "xhl");
+        Assert.Single(s.Mods, m => m.Folder is { } f && ModCatalog.SamePath(f, placed));
 
         // the page writes the row's folder (ShroudForgeUi.Edit -> ShroudForgePackages.SetSetting)
         var before = ExtendedOf(copy);
@@ -426,8 +429,36 @@ public sealed class ModCatalogTests : IDisposable
         var s = Read();
         var row = Mod(s, "shroudforge", "unifiedemltweaks");
         Assert.Equal(("profile", placed), (row.Source, row.Folder));
+        Assert.DoesNotContain(s.Mods, m => m.Engine == "xhl");
         ShroudForgePackages.SetSetting(row.Folder!, "stackSize", System.Text.Json.Nodes.JsonValue.Create(true));
         Assert.True(ShroudForgePackages.Read(placed).Values["stackSize"]!.GetValue<bool>());
+    }
+
+    [Fact]
+    public void A_shroudforge_package_with_a_native_plugin_ini_is_listed_once_and_a_real_xhl_plugin_still_shows()
+    {
+        Profile([]);
+        Write("shroudforge.json", new { pid = Pid, mode = "hosted", menu = "kiln", runtime = "running", modsDir = Path.Combine(_root, "mods"), startupPrepared = true });
+        // a ShroudForge package the player put there (no marker), with its own DLL loader file
+        var sf = SfPackage(Path.Combine(_root, "mods", "unifiedemltweaks"));
+        // an XHL-Core plugin: an EML mod with native-plugin.ini, no ShroudForge file of its own
+        var xhl = Dir("mods", "XHL-Auto-Loot");
+        File.WriteAllText(Path.Combine(xhl, "mod.json"), """{"id":"XHL-Auto-Loot","name":"XHL Auto Loot","version":"1.0.0"}""");
+        File.WriteAllText(Path.Combine(xhl, "native-plugin.ini"), "[Plugin]\nEnabled=1\nDll=auto-loot.dll\n");
+        // an XHL-Core plugin that ShroudForge runs as an EML package (its switch: launcher EML): still an XHL-Core plugin
+        var switched = Dir("mods", "XHL-Stacks");
+        File.WriteAllText(Path.Combine(switched, "mod.json"), """{"id":"XHL-Stacks","name":"XHL Stacks","version":"1.0.0"}""");
+        File.WriteAllText(Path.Combine(switched, "native-plugin.ini"), "[Plugin]\nEnabled=1\nDll=stacks.dll\n");
+        File.WriteAllText(Path.Combine(switched, "extended.mod.json"), """{"schemaVersion":1,"enabled":true,"launcher":"EML"}""");
+        var s = Read();
+        Assert.Equal("shroudforge", Assert.Single(s.Mods, m => m.Folder is { } f && ModCatalog.SamePath(f, sf)).Engine);
+        Assert.Contains(s.Mods, m => m.Engine == "xhl" && m.Folder is { } f && ModCatalog.SamePath(f, xhl));
+        Assert.Contains(s.Mods, m => m.Engine == "xhl" && m.Folder is { } f && ModCatalog.SamePath(f, switched));
+        // ShroudForge configured to another mods folder: the game's mods folder is XHL-Core's alone again
+        Write("shroudforge.json", new { pid = Pid, mode = "hosted", menu = "kiln", runtime = "running", modsDir = Dir("elsewhere") });
+        Directory.CreateDirectory(Path.Combine(_root, "shroudforge", "config"));
+        File.WriteAllText(Path.Combine(_root, "shroudforge", "config", "modloader-config.json"), JsonSerializer.Serialize(new { paths = new { mods = Dir("elsewhere") } }));
+        Assert.Contains(Read().Mods, m => m.Engine == "xhl" && m.Folder is { } f && ModCatalog.SamePath(f, sf));
     }
 
     [Fact]

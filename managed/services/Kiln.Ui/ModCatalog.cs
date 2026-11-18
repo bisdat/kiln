@@ -1521,7 +1521,11 @@ internal static class ModCatalog
         var taken = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var (kind, entries) in b.Profile.Mods)
             if (!kind.Equals(except, StringComparison.OrdinalIgnoreCase))
-                foreach (var e in entries) taken.Add(NormPath(e.Path));
+                foreach (var e in entries)
+                {
+                    taken.Add(NormPath(e.Path));
+                    taken.Add(NormPath(b.FolderOf(e)));  // the folder its engine runs (ShroudForge's copy in <game>/mods)
+                }
         foreach (var (kind, rows) in b.Mods)
             if (!kind.Equals(except, StringComparison.OrdinalIgnoreCase))
                 foreach (var m in rows)
@@ -1565,12 +1569,16 @@ internal static class ModCatalog
         // XHL-Core plugins put into the game's mods folder by hand
         var taken = TakenFolders(b, "xhl");
         var listed = new HashSet<string>(b.Profile.Of("xhl").Select(e => NormPath(e.Path)), StringComparer.OrdinalIgnoreCase);
-        foreach (var sub in SubDirs(Path.Combine(b.Src.GameDir, "mods")))
+        var mods = Path.Combine(b.Src.GameDir, "mods");
+        // ShroudForge reads this folder too when it is its mods folder: its packages are ShroudForge's rows
+        var sfReads = PlacedRoot(b.Src, "shroudforge") is { } sfRoot && SamePath(sfRoot, mods);
+        foreach (var sub in SubDirs(mods))
         {
             bool plugin;
             try { plugin = File.Exists(Path.Combine(sub, XhlPluginIni)); }
             catch (Exception) { plugin = false; }
             if (!plugin || listed.Contains(NormPath(sub)) || taken.Contains(NormPath(sub))) continue;
+            if (sfReads && IsSfPackage(sub)) continue;
             var name = LeafName(sub);
             b.Add(new CatalogMod
             {
@@ -1581,6 +1589,27 @@ internal static class ModCatalog
         }
         if (b.Mods.ContainsKey("xhl") || b.Profile.Of("xhl").Count > 0)
             b.Engine("xhl", null, EngineHealth.Idle, core ? KilnText.T("catalog.xhl.note_core") : KilnText.T("catalog.xhl.note"), true);
+    }
+
+    /// <summary>A ShroudForge package with a <c>native-plugin.ini</c> is not an XHL-Core plugin of its own: ShroudForge's own
+    /// DLL loader reads that file and loads the DLL it names (its dll_manager), and the folder is ShroudForge's row. Told
+    /// apart from an XHL-Core plugin (an EML mod with that file) by ShroudForge's own file: a package is ShroudForge's when
+    /// Kiln's marker says so, or, with no marker of another kind, when its <c>extended.mod.json</c> is ShroudForge's own
+    /// and not the switch of an EML package (<c>"launcher": "EML"</c>, which ShroudForge and Kiln write into an EML
+    /// mod's folder so ShroudForge runs it; that mod stays an XHL-Core plugin too). The test kiln-shroudforge and the
+    /// server's advertised list use (plugin.cpp legacy_wanted, AdvertiseEngines EngineKindOf).</summary>
+    internal static bool IsSfPackage(string dir)
+    {
+        if (PlacedKind(dir) is { } kind) return kind.Equals("shroudforge", StringComparison.OrdinalIgnoreCase);
+        JsonElement? ext;
+        try
+        {
+            var path = Path.Combine(dir, "extended.mod.json");
+            if (!File.Exists(path) || new FileInfo(path).Length > 4 << 20) return false;
+            ext = ReadJson(path, out _);
+        }
+        catch (Exception) { return false; }
+        return ext is { ValueKind: JsonValueKind.Object } e && Str(e, "launcher") != "EML";
     }
 
     private static IEnumerable<string> SubDirs(string dir)
