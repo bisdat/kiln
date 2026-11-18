@@ -25,6 +25,8 @@ Capabilities (sigdb features, `server.d/stations.json`, the client's hosted worl
 | `stations.control` | `Stations.Stop`, `Resume`, `Select` |
 | `stations.events` | `StationStateChangedEvent`, `StationPlacedEvent`, `StationRemovedEvent`, `BasesChangedEvent`, `StationCraftedEvent`, `StationPlayerActionEvent` (a subscription is taken before a world runs, in `OnLoad`) |
 | `stations.output_sources` | `Stations.SetOutputSource`, and fills taking from opted-in stations' finished items ([Station outputs as crafting stock](#station-outputs-as-crafting-stock), since 0.2.0-dev.29.17) |
+| `stations.craft_sources` | the same opt-in, as the last source of a player's craft ([Station outputs in a craft](#station-outputs-in-a-craft)); lowered at the first world when kiln.rules' payment hook is not in (Creative Mode runs, kiln-rules.dll missing) |
+| `stations.craft_ui` | a Kiln client's crafting menu counts those outputs (`client.d/stations-craft-ui.json`); lowered when kiln.rules' crafting-count hook is not in. A vanilla client has neither |
 
 Where: the server world, on its tick thread: a dedicated server, or a game client while it hosts. A client that joined
 another's world has no server world: `Stations.Available` is false there and every call throws `KilnUnavailableException`.
@@ -199,10 +201,13 @@ The rules:
 player's bag and the Magic chests cannot cover but the base's opted-in outputs can is run as Kiln's fill (the same
 recipe, category choices and amount, all or nothing, the player's bag first) and the game's own is canceled; kiln.log
 says so. Every other press runs as the game's. Kiln keeps the game's checks: the player must stand in the station's base
-and have the right to access inventories. Not checked yet with a real client: whether the game's client greys its fill
-button, or does not send the press, when its own view of the chests is short (the client checks the fill itself before
-it sends). If it does, the button reaches the server only when the chests alone would do, and station outputs at the
-button need a client half; `Stations.Fill` from a mod works either way (real-client check C7).
+and have the right to access inventories. But the game's client **disables** its fill button when the player's bag and the
+Magic chests alone cannot cover the fill (a dry run that does not see the outputs:
+[the client code](../../re/stations.md#103-c7-the-station-screens-fill-button)), and Kiln does not change that screen. So a
+fill that needs station outputs cannot be started with that button: it lights only when the bag and the chests cover
+the fill, and then the game's own fill runs. Station outputs serve `Stations.Fill` (a mod's fill: a command, a Kiln
+menu) and crafts. Whether the fill hotkey still sends a press the button refuses is C7; if it does, the server runs it as
+Kiln's fill.
 
 **Kept with the save.** An opt-in is kept beside the save (kiln.saves' entity attachments, the station known by its
 template and place, as `EntityData`) with the mod that set it, and comes back after a restart while that mod is loaded
@@ -243,6 +248,77 @@ The rules:
 
 A fill is still the server's action: it does not consult a player's inventory permission. A mod that fills for a joined
 player checks that itself, as for every other station action. The game's own button keeps its permission check.
+
+## Station outputs in a craft
+The same opt-in (`Stations.SetOutputSource`) is the last source when a **player** crafts: at a crafting station, by hand,
+from any crafting menu. There is no second switch, and the server never reads the client's numbers: it counts again
+at the payment.
+
+The game pays a player's craft from the bag, then the base's Magic chests (`rules/InventoryPay`, stock mode 2). It builds
+one stock list and uses it for every cost line, so a station cannot be added to that list the way a fill adds one: a
+later cost line would take the station's queued inputs. Kiln instead pays the whole recipe itself, inside the game's own
+transaction, when all of this holds:
+- it is the craft's own payment (the call returns to `rules/RecipePaid`: not a chest upgrade, not the alternate payer);
+- it is the server world's transaction (a hosting client's station screen runs a dry run of its own, which stays the
+  game's);
+- the game's own base and permission test passes: the player stands in a base and has the right to access inventories
+  (`BaseStockForPlayer`; a visitor without it, or a payer that is no logged-in player, stays the game's);
+- the bag and the chests cannot cover every line, and the opted-in outputs of **that base** cover every line's
+  shortfall.
+
+Then it pays line by line: the bag and the chests first, in the game's order, then from the stations that lend that
+item, only the rest. A station lends only an output of its selected or running recipe that is not also an input of it,
+never its queued inputs, never its Leftovers. When anything fails after a take, the payment answers the game's "not
+enough" and the craft rolls back: nothing moves. When the outputs cannot cover every shortfall, Kiln takes nothing and
+the game's own payment runs (and refuses the craft). When the bag and the chests cover the craft, the game pays as
+always. A recipe that names the same item twice, and a base stock list over 4096 containers, are left to the game.
+
+Only players' crafts use it. A production station's own cycle pays from that station alone (stock mode 0) and never
+takes from another. The station being crafted at is never a source: kiln.gameplay's craft hook names it, and
+kiln.stations asks for that hook group once a station is opted in (until it is in, a few steps, only a non-player payer
+is left out; a player crafts at a crafting station, which lends nothing unless it is also a production station).
+
+Each craft of a "craft x10" is its own payment: the first ones the bag and the chests cover are the game's, the ones
+they no longer cover take from the outputs, each all or nothing.
+
+kiln.log (server): `stations: a craft paid N from opted-in station outputs (base B, payer P)`; when Kiln looked and the
+outputs were short, `stations: a craft left to the game: base B's opted-in outputs cannot cover it (short by N; payer
+P)`; for the first few calls it leaves for another reason, `stations: craft payment left to the game (<why>; ...)`. The
+counters of every outcome are kiln-items.dll's `kiln_stations_craft_stats` (labs and support, not an API).
+
+This rides on kiln.rules' hook on the game's inventory payment (installed for this alone when neither free crafting nor
+the storage upgrade needs it). With Creative Mode running that hook stands aside, and `stations.craft_sources` is lowered
+at the first world with the reason. When Kiln pays a craft, a detour another loader put on `InventoryPay` *before*
+Kiln's does not run for that call; one put on it *after* Kiln's makes Kiln stand aside (the return address it sees is
+no longer `RecipePaid`), which is safe.
+
+### What each client shows
+A crafting menu's "how many" and its craft button follow a count the game's client computes from its own view of the
+bag and the base's Magic chests; it does not see a station. Without help it greys a craft only the outputs can complete,
+and it does not send a craft its own count does not allow.
+
+A **Kiln client** helps it while a crafting menu is open: it tells the server (on the channel `kiln:craftstock`,
+`required: false`) when a menu opens, every 5 s that it is still open, and when it closes. The server then sends that
+player, while the player stands in a base where they may access inventories, what the base can pay: per item, the bag,
+the Magic chests and the opted-in stations' finished items, only for the items of the recipes that take something those
+stations make, again whenever a count changes. The client's count is then the greater of the game's count and the
+snapshot's, so a craft only the outputs can complete is offered. When the menu closes the counts are the game's again.
+A hosting player's own client gets the same in process. kiln.log on the client: `stations: crafting stock from the
+server: N item(s) the crafting menu may count`, `stations: the crafting menu's count for recipe 0x... raised a -> b by
+station outputs`, `stations: crafting stock cleared: ...`.
+
+A session ends when the player leaves, when someone else joins into that entity, when the menu closes or stops saying it
+is open (15 s), and with a new world; a send that did not go out is sent again. A visitor without the right to access
+the base's inventories is sent nothing (as the payment refuses them). A base with any number of item types works: the
+snapshot holds only the items those recipes take (up to 1024; beyond that the menu keeps the game's counts and the
+server logs it once).
+
+A **vanilla client** has no Kiln, so it never asks and is never sent anything (the channel is not required, and its
+connection has none). Its menu shows the game's counts and does not offer a craft only the outputs can complete. A craft
+it does send (its count said the bag and the chests cover it) is paid as for anyone: when the server finds the chests
+short after all, the outputs still finish it.
+
+The station screen's fill button is not part of this (see [Fill from chests](#station-outputs-as-crafting-stock), C7).
 
 ## Stop, resume, select
 ```csharp
@@ -400,10 +476,57 @@ checked by hand with `mods/tests/stations-client-check` (`/stationcheck`, admins
 - **C5** After fills, the base's Magic chests are emptied as expected; ordinary chests are untouched.
 - **C6** At the quick-stack station, switch one Magic chest off for deposits: `/stationcheck base` lists it under
   Magic chests and not under "take deposits", and `collect` puts nothing into it.
-- **C7** A charcoal kiln with charcoal and logs in it, opted in (`/stationcheck lend`), next to a forge whose recipe
-  needs charcoal, the Magic chests holding none: press the forge's "fill from chests". Expected: the forge gets the
-  charcoal, the kiln keeps its logs, kiln.log says the press ran as Kiln's fill. If the button is greyed or nothing
-  reaches the server, note it: the button then needs the client half (phase 2).
+
+Station outputs (GitHub #68). Common setup for C7 to C15, unless a check says otherwise: Kiln 0.2.0-dev.29.17 on every
+Kiln machine, the check mod installed where the world runs (the hosting client, or the dedicated server), you an admin.
+In a base: a Magic chest, a production station that makes an item a crafting recipe takes (a Smelter with finished
+copper bars and copper ore and charcoal still queued, or a Charcoal Kiln with finished charcoal and logs queued), and the
+crafting station of that recipe (for copper bars, the Forge). Stand by the production station:
+`/stationcheck show` lists its `Outputs` (the finished stacks) and `Leftovers`; `/stationcheck lend` opts it in
+(kiln.log: `kiln.stations: station N lends its outputs as crafting stock`). Keep the bag and the Magic chests short of
+one craft of the recipe you test by less than the station's finished stack. Startup lines to find in kiln.log first:
+server or host `stations: reads on, fill on, ..., craft sources on`, then at the first opt-in `stations: a station is
+opted in: kiln.gameplay's craft hook asked for`; a Kiln client `stations: the crafting menu counts opted-in station
+outputs when a Kiln server sends them`. A line `stations: station outputs in a craft are off: ...` or `the crafting menu
+does not count station outputs here: ...` means a check below cannot pass; note its reason.
+
+- **C7** The station screen's fill button (step 1). A forge (or smelter) whose recipe needs the lent item, the bag and
+  the Magic chests holding none of it, the lending station opted in. Expected: the fill button is greyed and a click does
+  nothing (the game's client disables it: [the client code](../../re/stations.md#103-c7-the-station-screens-fill-button)).
+  Then try the fill hotkey on that screen. Note whether anything happens. If it fills: the server's kiln.log has
+  `kiln.stations: player P's fill of station S ran as Kiln's fill with station outputs: ...` and the lending station kept
+  its queued inputs. If nothing happens: expected, the button needs the bag and the chests; record it.
+- **C8** Hosting, Kiln client. Open the crafting station's menu and pick the recipe. Expected: its count and craft button
+  allow one craft that the bag and the chests alone could not (kiln.log: `crafting stock from the server: N item(s)` and
+  `the crafting menu's count for recipe 0x... raised 0 -> 1 by station outputs`). Craft it. Expected: it completes; the
+  lending station's finished stack is lower by exactly the shortfall; its queued inputs are unchanged; the bag and the
+  Magic chests are empty of that item (they paid first); kiln.log `stations: a craft paid N from opted-in station outputs
+  (base B, payer P)` with N the shortfall. Then a recipe the outputs cannot finish either: its button stays greyed, and
+  nothing moves. Close the menu: kiln.log `crafting stock cleared`.
+- **C9** A Kiln client joined to a dedicated server with Kiln, the same layout, the client's player in the base with the
+  default rights. Expected as C8: the client's kiln.log has the `crafting stock from the server` and `raised` lines, the
+  server's the `a craft paid N` line, and the station keeps its queued inputs.
+- **C10** A vanilla client (no Kiln) joined to that server. Expected: the count does not include the station and the
+  craft button is greyed for the craft only the outputs complete; nothing moves; the server's kiln.log has no `craft paid`
+  line for it. A craft the bag and the chests cover still works as always.
+- **C11** Rejoin and world switch. On C9's client: leave the server and join again, open the menu: the raised count is
+  back (a new `crafting stock from the server` line). On C8's host: load another world with a base set up the same way,
+  then this one again: the count follows the world you are in; never a count from the other world.
+- **C12** Craft x10. Bag and chests for 8 crafts, the opted-in station's outputs for 2 more. Expected: the menu offers 10;
+  "craft 10" makes 10; the server's kiln.log has two `a craft paid` lines (the last two crafts), the station gave exactly
+  the two crafts' shortfall and kept its queued inputs. With outputs for only 1 more: the menu offers 9, and a craft of 10
+  stops at 9 (the tenth is refused, nothing of it moves).
+- **C13** A visitor. A second player (Kiln client) in someone else's base, in a user group without "access
+  inventories" (enshrouded_server.json `userGroups`, `canAccessInventories: false`). Expected: their menu shows the game's
+  counts (no `crafting stock from the server` line on their client), and a craft they send is not paid from the outputs
+  (server kiln.log: `craft payment left to the game (the payer may not access the base's inventories; ...)` the first few
+  times). The base owner's own client in the same base still gets the raised counts.
+- **C14** A large base: Magic chests holding several hundred different item types (more than 256), and the opted-in
+  station. Expected: as C8 (the snapshot names only the items of the recipes that take the lent item), and no
+  `crafting stock names more than 1024 items` warning on the server.
+- **C15** Nothing opted in (`/stationcheck lend off`). A Kiln client's menu shows the game's counts (a `crafting stock
+  cleared` or no `crafting stock from the server` line at all), crafts work as always, and the server's kiln.log has no
+  `craft paid` line.
 
 ## Limits
 - Server world only (dedicated server, hosting client). A joined client has none.
@@ -412,10 +535,13 @@ checked by hand with `mods/tests/stations-client-check` (`/stationcheck`, admins
 - `StopWhen.Now` loses the running cycle's progress (the game's rule); `AfterCurrentCraft` keeps it, but is not saved.
 - A base's id changes when an overlapping altar is added or removed (see Base identity).
 - No "which station screen is open" read (`Stations.Nearest` stands in), and no event when a chest's contents change.
-- Kiln adds no hook for this: it calls the game's functions and writes the bytes its own code writes; the only hook
-  involved is kiln.gameplay's existing craft hook.
-- Station outputs as crafting stock cover fills (`Stations.Fill`, the fill button on the server), not a player's craft
-  at a workbench (that needs a client half: the client counts what the craft button may use).
+- Hooks: the fills and the station actions call the game's own functions and write the bytes its own code writes.
+  Station outputs in a craft ride on kiln.rules' hook on the inventory payment (server or host) and, on a Kiln client,
+  its crafting-count hook; kiln.stations also asks for kiln.gameplay's craft hook (the station crafted at) once a station
+  is opted in.
+- Station outputs pay `Stations.Fill` and players' crafts. The crafting menu counts them on Kiln clients only (a vanilla
+  client keeps the game's counts). The station screen's fill button stays the game's: it needs the bag and the chests to
+  cover the fill (C7).
 
 ## For native code
 `native/core/abi/services/kiln_stations.h` (`kiln.stations` v1, in kiln-items.dll): the same reads (`base_*`, `stations`,
@@ -429,6 +555,13 @@ moves nothing. `from_chests` on the result counts what they gave: read it only w
 kiln.stations passes a shorter result). Since 0.2.0-dev.29.17 `submit` and `plan` take a request of exactly
 `KILN_STATION_REQUEST_V1` or `sizeof(KilnStationRequest)` bytes; 29.16 also took a larger size. `base_stock_with_stations` (check `header.size`) is
 `Bases.StockWithStations`: the Magic-chest stock plus finished outputs still in the base's stations, on the tick thread.
+`set_output_source(station, on)` and `output_sources(...)` are the opt-in (any thread). For station outputs in a craft
+(check `header.size`): `set_craft_stock(rows, n)` is a Kiln client's crafting-menu snapshot (up to
+`KILN_STATIONS_MAX_CRAFT_STOCK` rows; any thread; the server's payment never reads it) and `craft_items(items, n, ...)`
+the items a client must have counted for those lent items (the inputs of every recipe that takes one; server, tick
+thread). kiln-items.dll also exports, for Kiln's own DLLs and labs (not an ABI): `kiln_stations_craft_pay` (kiln.rules'
+payment hook), `kiln_stations_craft_adjust` (kiln.rules' crafting-count hook), `kiln_stations_set_craft_context`
+(kiln.gameplay's craft hook) and `kiln_stations_craft_stats` (the payment's counters).
 A cycle's end
 for native code is kiln.gameplay's `KILN_GAMEPLAY_CRAFTED` (once per cycle since 0.2.0-dev.29.14). The game's facts behind
 all of it: [docs/re/stations.md](../../re/stations.md).
