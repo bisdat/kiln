@@ -379,4 +379,13 @@ fn optiscaler_ini_decides_kilns_overlay() {
     assert_eq!(OptiScalerIni::read(&t.0), OptiScalerIni::default());
     put(&t.0, "optiscaler.INI", b"[Menu]\nOverlayMenu=false\n");
     assert!(OptiScalerIni::read(&t.0).kiln_overlay_draws(), "its name in any case");
+    // larger than kiln.ui reads: neither reads it, both take OptiScaler's menu for on
+    let big = tmp("optiscaler-ini-big");
+    let mut text = b"[Menu]\nOverlayMenu=false\n".to_vec();
+    text.resize(kiln_manage::engines::OPTISCALER_INI_MAX as usize + 1, b'\n');
+    put(&big.0, "OptiScaler.ini", &text);
+    assert_eq!(OptiScalerIni::read(&big.0), OptiScalerIni::default());
+    text.truncate(kiln_manage::engines::OPTISCALER_INI_MAX as usize);
+    put(&big.0, "OptiScaler.ini", &text);
+    assert!(OptiScalerIni::read(&big.0).kiln_overlay_draws(), "up to the limit it is read");
 }

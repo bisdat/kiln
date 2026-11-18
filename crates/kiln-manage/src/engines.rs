@@ -46,6 +46,9 @@ pub const PROXY_NAMES: [&str; 13] = [
 pub const OPTISCALER_NAMES: [&str; 7] =
     ["dxgi.dll", "winmm.dll", "version.dll", "dbghelp.dll", "d3d12.dll", "wininet.dll", "winhttp.dll"];
 
+/// The largest OptiScaler.ini read (the shipped one is tens of KiB); kiln.ui reads none larger either.
+pub const OPTISCALER_INI_MAX: u64 = 4 * 1024 * 1024;
+
 /// What OptiScaler.ini sets that decides for Kiln's in-game overlay (kiln.ui reads it the same way:
 /// native/services/ui/overlay_optiscaler.h). Sections and keys case ignored, `;`/`#` comment lines, the last key wins.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -82,13 +85,15 @@ impl OptiScalerIni {
         OptiScalerIni { overlay_menu: menu, frame_gen: !none(&input) && !none(&output) }
     }
 
-    /// OptiScaler.ini in `dir` (any spelling of its name); the default settings when there is none.
+    /// OptiScaler.ini in `dir` (any spelling of its name); the default settings when there is none, or when it is not a
+    /// file or larger than [`OPTISCALER_INI_MAX`] (kiln.ui's limit: both then take OptiScaler's menu for on).
     pub fn read(dir: &Path) -> Self {
         std::fs::read_dir(dir)
             .into_iter()
             .flatten()
             .flatten()
             .find(|e| e.file_name().to_string_lossy().eq_ignore_ascii_case("OptiScaler.ini"))
+            .filter(|e| e.metadata().is_ok_and(|m| m.is_file() && m.len() <= OPTISCALER_INI_MAX))
             .and_then(|e| std::fs::read(e.path()).ok())
             .map(|b| Self::parse(&String::from_utf8_lossy(&b)))
             .unwrap_or_default()
@@ -150,7 +155,7 @@ pub enum Engine {
     ReShade,
     ChainLoader,
     /// OptiScaler (github.com/optiscaler/OptiScaler): an upscaler and frame generation tool under one of its own proxy
-    /// names ([`OPTISCALER_NAMES`]). Added last: a new variant never moves the others.
+    /// names ([`OPTISCALER_NAMES`]). Serialized by its name ("optiscaler"), like every variant: the position is no contract.
     #[serde(rename = "optiscaler")]
     OptiScaler,
     NativeFolders,
