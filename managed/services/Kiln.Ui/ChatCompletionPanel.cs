@@ -6,6 +6,18 @@ using System.Text;
 
 namespace Kiln;
 
+// Pure rules shared with the regression tests. An already completed command
+// should not display a self-suggestion, whether typed, recalled from history
+// or accepted through Tab.
+internal static class ChatCompletionDisplayRules
+{
+    internal static bool AlreadyComplete(string text, string prefix, string[] suggestions) =>
+        suggestions.Any(choice => string.Equals(prefix + choice, text, StringComparison.Ordinal));
+
+    internal static float PopupHeight(float scale, int visible) =>
+        (30f + 24f + 40f * Math.Clamp(visible, 0, 10)) * scale;
+}
+
 internal static unsafe class ChatCompletionPanel
 {
     private const int MaxVisible = 10;
@@ -72,8 +84,13 @@ internal static unsafe class ChatCompletionPanel
         var replacement = _prefix + _suggestions[index];
         if (Encoding.UTF8.GetByteCount(replacement) > 256 || replacement == text) return false;
         if (!UiNative.ChatReplace(input, text, replacement)) return false;
-        _expectedEdit = replacement;   // preserve candidate list through our own EditSetText
+        _expectedEdit = replacement;
         _selected = index;
+        _active = false;
+        // A selected candidate is a complete token; the popup must not
+        // survive on /help, nor reappear when Up recalls /help from history.
+        _dismissed = true;
+        UiNative.ChatCandidates(false, false);
         return true;
     }
 
@@ -104,8 +121,12 @@ internal static unsafe class ChatCompletionPanel
             {
                 _line = text;
                 _expectedEdit = null;
-                // Preserve the original candidates while Tab cycles through
-                // completions, instead of asking for a new prefix every frame.
+                // A completion was applied: keep the popup dismissed until
+                // the player actually edits the line again.
+                _suggestions = [];
+                _active = false;
+                _dismissed = true;
+                UiNative.ChatCandidates(false, false);
             }
             else Changed(text, input.Field, now);
         }
@@ -131,7 +152,8 @@ internal static unsafe class ChatCompletionPanel
             TryPrefix(reply, out var prefix))
         {
             _prefix = prefix;
-            _suggestions = reply.Suggestions;
+            _suggestions = ChatCompletionDisplayRules.AlreadyComplete(text, prefix, reply.Suggestions)
+                ? [] : reply.Suggestions;
             _selected = 0;
             _requestId = 0;
             _active = false;
@@ -182,12 +204,15 @@ internal static unsafe class ChatCompletionPanel
         // Use the player's current Kiln look, including game-style themes.
         // NoFocusOnAppearing | NoNavInputs | NoNavFocus leaves the game's chat
         // widget in control of keyboard typing and Enter/Escape.
+        // Explicitly sized anchored popup; AlwaysAutoResize (1<<6) fought
+        // SetNextWindowSize and clipped its first row at the top of chat.
         const uint flags = (1u << 0) | (1u << 1) | (1u << 2) | (1u << 3) |
-                           (1u << 6) | (1u << 8) | (1u << 12) |
+                           (1u << 8) | (1u << 12) |
                            (1u << 18) | (1u << 19);
-        var width = MathF.Min(MathF.Max(input.Width, 260 * ui.Scale), MathF.Min(520 * ui.Scale, ui.Width - 8));
+        var width = MathF.Min(MathF.Max(input.Width, 320 * ui.Scale), MathF.Min(620 * ui.Scale, ui.Width - 8));
         var count = Math.Min(MaxVisible, _suggestions.Length);
-        var height = (count + 1) * 24f * ui.Scale + 16f * ui.Scale;
+        var height = ChatCompletionDisplayRules.PopupHeight(ui.Scale, count);
+        var rowHeight = 40f * ui.Scale;
         var x = Math.Clamp(input.X, 4, Math.Max(4, ui.Width - width - 4));
         var y = input.Y >= height + 12
             ? input.Y - height - 5
@@ -202,19 +227,28 @@ internal static unsafe class ChatCompletionPanel
             ui.NextWindowSize(width, height, 1);
             if (ui.BeginWindowNoClose(KilnText.T("chat.completion.title") + "###kiln.chat.complete", flags))
             {
-                ui.TextDisabled(KilnText.T("chat.completion.hint"));
-                // Show at most ten rows at once, but keep the other permitted
-                // suggestions reachable by mouse-wheel scrolling.
-                if (ui.BeginChild("##kiln.chat.completion.rows", 0, count * 24f * ui.Scale))
+                // Use the same game font through Kiln's v3 font-size API.
+                // Keep the hint fully legible and candidates comparable to
+                // the original native chat edit, instead of tiny defaults.
+                using (ui.FontSize(20))
+                    ui.Text(KilnText.T("chat.completion.hint"));
+
+                // Show at most ten rows, with enough height for the larger
+                // game font; additional candidates remain scrollable.
+                if (ui.BeginChild("##kiln.chat.completion.rows", 0, count * rowHeight + 4 * ui.Scale))
                 {
-                    for (var i = 0; i < _suggestions.Length; ++i)
+                    using (ui.FontSize(26))
                     {
-                        if (ui.Selectable(_suggestions[i] + "##chat-candidate-" + i, _active && i == _selected))
+                        for (var i = 0; i < _suggestions.Length; ++i)
                         {
-                            _active = true;
-                            Accept(input, text, i);
+                            if (ui.Selectable(_suggestions[i] + "##chat-candidate-" + i,
+                                              _active && i == _selected, 0, rowHeight))
+                            {
+                                _active = true;
+                                Accept(input, text, i);
+                            }
+                            if (ui.ItemHovered) hovered = true;
                         }
-                        if (ui.ItemHovered) hovered = true;
                     }
                 }
                 ui.EndChild();
