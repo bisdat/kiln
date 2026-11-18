@@ -95,3 +95,24 @@ fn every_kind_in_order_and_as_json() {
     let json = serde_json::to_value(&all[0]).unwrap();
     assert_eq!(json, serde_json::json!({ "kind": "optiscaler", "file": "OptiScaler.asi", "frameCap": true }));
 }
+
+#[cfg(unix)]
+#[test]
+fn a_linked_file_or_folder_counts_as_the_game_sees_it() {
+    // Linux mod managers deploy by symbolic links; Wine (and kiln.ui's own check in the game) follows them
+    let t = tmp("links");
+    let store = tmp("links-store");
+    put(&store.0, "dlsstweaks.ini", b"");
+    put(&store.0, "Streamline/sl.interposer.dll", b"x");
+    std::os::unix::fs::symlink(store.0.join("dlsstweaks.ini"), t.0.join("dlsstweaks.ini")).unwrap();
+    assert_eq!(graphics_step_aside(&t.0), [aside("dlsstweaks", "dlsstweaks.ini", false)]);
+    std::os::unix::fs::symlink(store.0.join("Streamline"), t.0.join("Streamline")).unwrap();
+    assert_eq!(
+        graphics_step_aside(&t.0),
+        [aside("streamline", "Streamline/sl.interposer.dll", true), aside("dlsstweaks", "dlsstweaks.ini", false)]
+    );
+    // a link to nothing is no tool
+    std::fs::remove_file(t.0.join("dlsstweaks.ini")).unwrap();
+    std::os::unix::fs::symlink(store.0.join("gone.ini"), t.0.join("dlsstweaks.ini")).unwrap();
+    assert_eq!(graphics_step_aside(&t.0), [aside("streamline", "Streamline/sl.interposer.dll", true)]);
+}

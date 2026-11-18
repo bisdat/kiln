@@ -139,33 +139,30 @@ pub struct GraphicsStepAside {
     pub frame_cap: bool,
 }
 
-/// The file in `dir` whose name is `name` in any case (Windows and Wine match names so; the game folder may sit on a
-/// case-sensitive file system). The first in sorted order when several match.
-fn file_named(dir: &Path, name: &str) -> Option<String> {
+/// The entry in `dir` whose name is `name` in any case (Windows and Wine match names so; the game folder may sit on a
+/// case-sensitive file system) and that is a file (`want_dir` false) or a folder, a symbolic link followed as the game
+/// follows it (Linux mod managers link mods into the game folder). The first in sorted order when several match.
+fn entry_named(dir: &Path, name: &str, want_dir: bool) -> Option<String> {
     let mut found: Vec<String> = std::fs::read_dir(dir)
         .into_iter()
         .flatten()
         .flatten()
-        .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+        .filter(|e| e.file_name().to_string_lossy().eq_ignore_ascii_case(name))
+        .filter(|e| std::fs::metadata(e.path()).is_ok_and(|m| if want_dir { m.is_dir() } else { m.is_file() }))
         .map(|e| e.file_name().to_string_lossy().into_owned())
-        .filter(|n| n.eq_ignore_ascii_case(name))
         .collect();
     found.sort();
     found.into_iter().next()
 }
 
-/// The directory in `dir` whose name is `name` in any case.
+/// The file in `dir` whose name is `name` in any case (`entry_named`).
+fn file_named(dir: &Path, name: &str) -> Option<String> {
+    entry_named(dir, name, false)
+}
+
+/// The directory in `dir` whose name is `name` in any case (`entry_named`).
 fn dir_named(dir: &Path, name: &str) -> Option<String> {
-    let mut found: Vec<String> = std::fs::read_dir(dir)
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
-        .map(|e| e.file_name().to_string_lossy().into_owned())
-        .filter(|n| n.eq_ignore_ascii_case(name))
-        .collect();
-    found.sort();
-    found.into_iter().next()
+    entry_named(dir, name, true)
 }
 
 /// The tools in a game folder next to which Kiln's graphics tools (kiln.json "graphics") step aside, in this order:
