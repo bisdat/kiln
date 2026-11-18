@@ -125,12 +125,12 @@ export function UpscalerChoiceBlock({ values, disabled, onSet, state, aside, fil
     <div className="k-stack k-upscaler-choice" style={{ gap: 8 }} role="group" aria-label={t("settings.graphics.upscaler.title")} data-testid="upscaler-choice">
       <span className="k-panel-title">{t("settings.graphics.upscaler.title")}</span>
       <Field label={t("settings.graphics.upscaler.label")} hint={t(`settings.graphics.upscaler.choiceHint.${choice}`)} htmlFor="gfx-upscaler">
-        <Select id="gfx-upscaler" value={choice} disabled={disabled} onChange={(v) => onSet("graphics.upscaler", v)}
+        <Select style={{ maxWidth: 420 }} id="gfx-upscaler" value={choice} disabled={disabled} onChange={(v) => onSet("graphics.upscaler", v)}
           options={UPSCALER_CHOICES.map((v) => ({ value: v, label: t(`settings.graphics.upscaler.choice.${v}`) }))} />
       </Field>
       {choice === "amd" && (
         <Field label={t("settings.graphics.upscaler.amdLabel")} hint={t("settings.graphics.upscaler.amdHint")} htmlFor="gfx-amd-upscaler">
-          <Select id="gfx-amd-upscaler" value={amd} disabled={disabled} onChange={(v) => onSet("graphics.amdUpscaler", v)}
+          <Select style={{ maxWidth: 420 }} id="gfx-amd-upscaler" value={amd} disabled={disabled} onChange={(v) => onSet("graphics.amdUpscaler", v)}
             options={AMD_MODES.map((v) => ({ value: v, label: t(`settings.graphics.upscaler.amd.${v}`) }))} />
         </Field>
       )}

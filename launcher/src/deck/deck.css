@@ -247,3 +247,5 @@
 .deck-beta { font-size: .85rem; line-height: 1; white-space: nowrap; }
 /* (dev.29.18) the vendor licence screen (Upscaler.tsx): the text in full, scrolled by the right stick */
 .deck-license { margin: 0; max-height: 18rem; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--k-font-mono); font-size: 1rem; line-height: 1.45; color: var(--k-text-1); background: var(--k-well); padding: .75rem 1rem; border-radius: .5rem; }
+/* the upscaler's rows (Upscaler.tsx): their lines wrap (several sentences); a long one-line sub would widen the screen */
+.deck-row-sub .deck-wrap { white-space: normal; }

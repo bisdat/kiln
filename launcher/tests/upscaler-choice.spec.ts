@@ -193,6 +193,8 @@ test.describe("Steam Deck: Settings", () => {
     await expect.poll(async () => (await kilnJson(page)).amdUpscaler).toBe("auto");
     const now = row(page, "set-upscaler-now");
     await expect(now).toContainText("When you play");
+    // the rows' long lines wrap: the screen stays the Deck's 1280 pixels wide
+    expect(await page.evaluate(() => Math.round(document.querySelector(".deck-top")!.getBoundingClientRect().right))).toBeLessThanOrEqual(1280);
     await expect(now).toContainText("AMD FSR's files are not downloaded yet, so the game's own FSR 3 runs.");
 
     // the files' row: A opens the licence screen; the right stick scrolls the text; B goes back without a download

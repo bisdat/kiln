@@ -322,6 +322,10 @@ KilnResult KILN_CALL t_graphics_status(KilnUiGraphicsStatus* out) {
     // (phase B) the upscaler behind the game's FSR 3: AMD FSR 4 runs; Intel XeSS's files are not downloaded
     st.upscaler = g_graphics.upscaler;
     st.amd_upscaler = g_graphics.amd_upscaler;
+    if (g_graphics.upscaler != KILN_UI_UPSCALER_GAME) {  // the game upscales with FSR 3 then, not DLSS
+        st.flags &= ~(KILN_UI_GFX_DLSS_ACTIVE | KILN_UI_GFX_DLSS_PRESET);
+        st.dlss_quality = -1;
+    }
     if (g_graphics.upscaler == KILN_UI_UPSCALER_AMD) {
         const bool pinned = g_graphics.amd_upscaler == KILN_UI_AMD_UPSCALER_FSR3;
         st.upscale_running = pinned ? KILN_UI_UPSCALE_RUN_AMD_FSR3 : KILN_UI_UPSCALE_RUN_AMD_FSR4;

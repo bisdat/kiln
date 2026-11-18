@@ -55,17 +55,17 @@ function Rows({ game }: { game: GameInstall }) {
   return (
     <>
       <Row id="set-upscaler" title={t("deck.settings.upscaler")} a={t("deck.shared.change")} disabled={!ready}
-        sub={t(`settings.graphics.upscaler.choiceHint.${choice}`)}
+        sub={<span className="deck-wrap">{t(`settings.graphics.upscaler.choiceHint.${choice}`)}</span>}
         end={<Word tone="ember">{t(`settings.graphics.upscaler.choice.${choice}`)}</Word>}
         onClick={() => change("graphics.upscaler", next(UPSCALER_CHOICES, choice))} />
       {choice === "amd" && (
         <Row id="set-amd-upscaler" title={t("settings.graphics.upscaler.amdLabel")} a={t("deck.shared.change")} disabled={!ready}
-          sub={t("settings.graphics.upscaler.amdHint")} end={<Word tone="ember">{t(`settings.graphics.upscaler.amd.${amd}`)}</Word>}
+          sub={<span className="deck-wrap">{t("settings.graphics.upscaler.amdHint")}</span>} end={<Word tone="ember">{t(`settings.graphics.upscaler.amd.${amd}`)}</Word>}
           onClick={() => change("graphics.amdUpscaler", next(AMD_MODES, amd))} />
       )}
       {view.heading && (
         <Row id="set-upscaler-now" title={t("deck.settings.upscalerNow")} aria-label={t("deck.settings.upscalerNow")}
-          sub={[...view.lines, ...(view.detail ? [t("settings.graphics.upscaler.detail", { detail: view.detail })] : [])].join(" ")}
+          sub={<span className="deck-wrap" data-testid="deck-upscaler-now">{[...view.lines, ...(view.detail ? [t("settings.graphics.upscaler.detail", { detail: view.detail })] : [])].join(" ")}</span>}
           end={<Word tone={view.heading === "now" ? "ok" : "info"}>{t(`settings.graphics.upscaler.heading.${view.heading}`)}</Word>} />
       )}
       {(files.status.data?.components ?? []).map((c) => {
@@ -76,7 +76,7 @@ function Rows({ game }: { game: GameInstall }) {
         return (
           <Row key={c.id} id={`set-vendor-${c.id}`} title={`${c.name} ${c.version}`} disabled={!a} dim={!a}
             a={a ? (a === "remove" ? t("common.remove") : a === "cancel" ? t("common.cancel") : t(`settings.upscalers.action.${a}`)) : undefined}
-            sub={row.reason ?? (row.state === "notDownloaded" || row.state === "unavailable" ? `${c.enables} ${row.detail}` : row.detail)}
+            sub={<span className="deck-wrap">{row.reason ?? row.detail}</span>}
             end={<Word tone={TONE[row.state]}>{t(`settings.upscalers.state.${row.state}`) + pct}</Word>}
             onClick={() => act(c, a)} />
         );
