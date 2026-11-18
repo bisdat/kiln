@@ -105,10 +105,31 @@ an in-progress Hold action. A disabled focused control returns focus to the curr
 | Kiln | the runtime in the game: version, when, files, runs on | Install, Update to the newest bundle, Hold to uninstall (1.2 s, the Deck's stand-in for the typed word); the running step and the outcome |
 | Editor | the save editor ([its own section](#the-save-editor)): the newest character opens; Equipment, Backpack, Skills, Knowledge; Characters, Backups, Discard, Save at the top | A the focused control; X Save; Y the part's own (Move, −1 level); L2 / R2 the previous / next part; B back out of the inspector or a move, else Home |
 | Help | the Steam launch option for Valve's Proton (state: needed, set, not needed), how to add the launcher to Steam, the controls | D-pad walks the blocks, right stick scrolls |
-| Settings | Desktop UI (now), Start in (Auto / Deck mode / Desktop), Button glyphs, Fullscreen (Desktop Mode only), Launcher updates (check, install, restart; the Nexus Mods build instead: New versions, Nexus Mods, A opens the Kiln page there, no update check), Profile (the loaded one; A opens the list: load one, or No profile), Notes about mod folders (On/Off, the desktop's "Show notes about mod folders"), Mod notes (how many the last activation said; A opens them: [app.md](app.md) "Notices about mod folders"), Data folder (its path and size; A browses to a folder with `deck_browse`, "Use this folder", then the move or "use this one" in the Deck's dialogs, as on the desktop, [app.md](app.md) "The data folder"), Quit; the last line shows the version, what the detection saw and the controller | A |
+| Settings | Desktop UI (now), Start in (Auto / Deck mode / Desktop), Button glyphs, Fullscreen (Desktop Mode only), Launcher updates (check, install, restart; the Nexus Mods build instead: New versions, Nexus Mods, A opens the Kiln page there, no update check), Profile (the loaded one; A opens the list: load one, or No profile), Notes about mod folders (On/Off, the desktop's "Show notes about mod folders"), Mod notes (how many the last activation said; A opens them: [app.md](app.md) "Notices about mod folders"), (dev.29.18, a client with Kiln in it) the upscaler behind the game's FSR 3 ([Upscaler](#upscaler)), Data folder (its path and size; A browses to a folder with `deck_browse`, "Use this folder", then the move or "use this one" in the Deck's dialogs, as on the desktop, [app.md](app.md) "The data folder"), Quit; the last line shows the version, what the detection saw and the controller | A |
 
 Text input is avoided everywhere. Where Steam needs typing (launch options), Help says Steam + X opens the keyboard.
 Notices are a short title and buttons. An error is a line at the top that goes after six seconds, with up to four lines of its text. One that needs more (a backend error that names several paths) opens as a dialog instead since dev.27: all its text, scrolled with the right stick, closed with A on OK or B; before, it ran off the screen's lower edge. A dialog never grows past the screen: its body scrolls. The six seconds count only for an error that the bar has drawn and that fits it: one waiting behind the two the bar shows gets its turn first, and one folded into the earlier notices stays there until the player closes them.
+
+### Upscaler
+(dev.29.18; `src/deck/Upscaler.tsx`; what it does in the game: [../graphics.md](../graphics.md) "Behind the game's FSR
+3"). Rows in Settings, after Mod notes, for a client with Kiln in it:
+- **Upscaler behind the game's FSR 3**: the choice on the right ("The game's own FSR 3", "AMD FSR", "Intel XeSS"), its
+  line under the title; A takes the next one and writes kiln.json `graphics.upscaler` (the row stays focused while it
+  saves, so A can be pressed again at once).
+- **AMD FSR version** (with AMD FSR): "Auto (FSR 4 where it runs)" or "FSR 3.1"; A switches (`graphics.amdUpscaler`).
+- **Upscaler now**: the heading on the right (Now, Last game, When you play) and the desktop card's lines under the
+  title ([app.md](app.md) "Upscaler behind FSR 3 and the upscaler files"); not there while the game's own is chosen and
+  nothing ran.
+- One row per vendor component ("AMD FSR 2.4.0", "Intel XeSS 3.0.2"): the state on the right ("Not downloaded",
+  "Downloading 40%", "Downloaded", "Update available", "Failed", "Not available in this build"), the size and host or
+  the reason under the title. A downloads (or goes on, updates, tries again), cancels while it downloads, and asks to
+  remove when it is downloaded ("Remove AMD FSR?", the folder and size, Remove or Cancel).
+- **The licence screen** before a vendor's first download: "Download AMD FSR", what, size, from, where it goes, "AMD
+  licenses these files under the MIT licence. Here is its text in full. Read it before you agree.", the text in full
+  (the right stick scrolls it), the privacy line, then **I agree, download** and Cancel; B goes back without a download.
+  The agreement is the desktop's (one per vendor and text, in the data folder).
+- The flow, the tasks and the texts are the desktop's (`useUpscalerFiles`, `upscalerView`); a download started on one
+  shows on the other.
 
 ### The save editor
 `/deck/editor` (`src/editor/deck/DeckEditor.jsx`, lazy: its item data is about 2 MB). One session with the desktop page
@@ -181,6 +202,9 @@ steps instead:
   consent, Mods on/off/remove, the hold to uninstall, Find game by hand, Help, the fire (on in Deck mode, the pilot
   light away from Home, Settings turns it off and the CSS arch takes over).
   `KILN_DECK_SHOTS=<dir>` saves a screenshot of every screen.
+- `bun x playwright test tests/upscaler-choice.spec.ts` (Deck part, 1280×800): the upscaler rows with the pad, the
+  licence screen scrolled by the right stick, B without a download, agree, progress, Downloaded, Remove, the status row
+  while the game runs.
 - Mock mode: `?deck=steamdeck` (Game Mode env and DMI), `?deck=forced` (`--deck`), `?deck=desktop` (`--desktop`);
   gamepad events from the console: `__kilnMock.emit("kiln://gamepad", {kind: "button", button: "rb", pressed: true,
   repeat: false, device: "x"})`.
@@ -266,4 +290,7 @@ launcher knows which UI to show, so it is the desktop's dialog on the Deck too: 
     In the game, is the stack 200? (Close the game before saving; the editor refuses while it runs.)
 18. Editor, an empty slot: A opens the catalog. Steam + X: does the keyboard type into the search? A on an item, A again:
     is it added?
-19. Anything too small to read, hard to reach, or confusing?
+19. (0.2.0-dev.29.18) Settings, "Upscaler behind the game's FSR 3": A to AMD FSR. A on "AMD FSR 2.4.0": can you read the
+    whole licence with the right stick? "I agree, download": does it finish? Start the game, choose FSR 3 in its
+    graphics settings, load a world, quit: what does "Upscaler now" say (a photo helps)? Did the picture look right?
+20. Anything too small to read, hard to reach, or confusing?
