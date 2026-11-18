@@ -137,10 +137,14 @@ fn copy_mode_profile_copies_are_writable() {
     assert_eq!(a.path_mode, PathMode::Copy);
     let second = g.path.join(format!("kiln/profiles/{}/shroudforge/unifiedemltweaks", p.id));
     assert_eq!(mode(&second.join("extended.mod.json")), 0o644);
-    // kept by the next activation (unchanged), and made writable when an older Kiln left it read-only
+    // kept by the next activation (unchanged), and made writable when an older Kiln left it read-only; a file the
+    // player added there and keeps read-only is not Kiln's to change
     chmod(&second.join("extended.mod.json"), 0o444);
+    put(&second, "notes/mine.txt", b"mine");
+    chmod(&second.join("notes/mine.txt"), 0o444);
     profile::activate(&dirs, &p.id, &g).unwrap();
     assert_eq!(mode(&second.join("extended.mod.json")), 0o644);
+    assert_eq!(mode(&second.join("notes/mine.txt")), 0o444);
     assert_eq!(mode(&g.path.join("mods/unifiedemltweaks/extended.mod.json")), 0o644);
 }
 

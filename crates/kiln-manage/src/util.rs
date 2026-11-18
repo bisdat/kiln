@@ -505,6 +505,24 @@ pub fn make_tree_writable(root: &Path) -> std::io::Result<u32> {
     Ok(n)
 }
 
+/// [`make_writable`] for what [`copy_tree`] copied from `from` into `to`: `to`, and each file and folder of `from` at the
+/// same place in `to` (links are left alone, never followed). What else is in `to` (a mod's own output, a file the
+/// player keeps read-only there on purpose) stays as it is. The number of entries it changed.
+pub fn make_copy_writable(from: &Path, to: &Path) -> std::io::Result<u32> {
+    let mut n = u32::from(make_writable(to)?);
+    if std::fs::symlink_metadata(from)?.is_dir() {
+        for e in std::fs::read_dir(from)? {
+            let e = e?;
+            if e.file_type()?.is_symlink() { continue; }
+            let there = to.join(e.file_name());
+            if std::fs::symlink_metadata(&there).is_ok_and(|m| !m.file_type().is_symlink()) {
+                n += make_copy_writable(&e.path(), &there)?;
+            }
+        }
+    }
+    Ok(n)
+}
+
 /// Copies a folder tree (regular files and folders; symlinks are refused). Returns the number of files.
 pub fn copy_tree(from: &Path, to: &Path) -> Result<u64> {
     std::fs::create_dir_all(to).map_err(io_at(to, "creating"))?;
