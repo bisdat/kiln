@@ -137,6 +137,21 @@ test.describe("desktop", () => {
     await expect.poll(() => opened(page)).toContain("https://discord.com/channels/1568454645683195976/15731308842100003");
   });
 
+  test("the day's and the network's limits say so, not \"in the last hour\"", async ({ page }) => {
+    await open(page, "/?mock=1&discord=in,ratelimitday#/community");
+    await page.getByTestId("kc-send").click();
+    await writeAndCheck(page);
+    await page.getByTestId("kc-send-now").click();
+    const state = page.getByTestId("kc-send-state");
+    await expect(state).toContainText("You sent 10 reports in the last 24 hours. Wait for a reply, or add to your last post on Discord. You can send again in 5 hours.");
+    await expect(state).not.toContainText("in the last hour");
+    await open(page, "/?mock=1&discord=in,ratelimitnet#/community");
+    await page.getByTestId("kc-send").click();
+    await writeAndCheck(page);
+    await page.getByTestId("kc-send-now").click();
+    await expect(state).toContainText("Many reports came from your network in the last 24 hours, so sending is paused for now. You can send again in 5 hours.");
+  });
+
   test("too big: the size and the limit, Send without the zip", async ({ page }) => {
     await open(page, "/?mock=1&discord=in,toobig#/community");
     await page.getByTestId("kc-send").click();
@@ -231,6 +246,16 @@ test.describe("Steam Deck", () => {
     const sent = page.getByTestId("deck-sent");
     await expect(sent).toContainText("Your post is up in #support: “The game crashes when I load a world”.");
     await expect(sent.locator("svg")).toHaveAttribute("data-qr", /^https:\/\/discord\.com\/channels\//);
+  });
+
+  test("too many reports in a day: the day's words", async ({ page }) => {
+    await page.goto("/?mock=1&deck=steamdeck&discord=in,ratelimitday#/deck/community");
+    await page.locator('[data-deck-id="send"]').click();
+    await page.locator('[data-deck-id="kind-noload"]').click();
+    await page.locator('[data-deck-id="when-start"]').click();
+    await page.locator('[data-deck-dialog="send-check"]').getByRole("button", { name: "Send to Kiln support" }).click();
+    await expect(page.getByTestId("deck-send-err")).toContainText("You sent 10 reports in the last 24 hours.");
+    await expect(page.getByTestId("deck-send-err")).toContainText("You can send again in 5 hours.");
   });
 
   test("Deck Home after a crash: the line and Send to Kiln support", async ({ page }) => {

@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { LogTarget, PostStatus, ProblemKind, SendFrom, SupportPost } from "../api/commands";
 import { Button, Mark, Toggle, toast, type ButtonProps } from "../ui";
-import { useT } from "../i18n";
+import { t, useT } from "../i18n";
 import { qrEncode, qrPath } from "./qr";
 import { DeckButton, Dialog, Row, Word } from "../deck/ui";
 import { openSendReport, setCommunity, useCommunity, useCommunitySettings, useShown } from "./state";
@@ -128,6 +128,21 @@ export function DeckSendToSupport({ target, kind }: { target: LogTarget | null; 
   const t = useT();
   if (!useShown()) return null;
   return <DeckButton id="send-support" onClick={() => openSendReport("deck", target, kind)}>{t("community.banner.send")}</DeckButton>;
+}
+
+/** "38 minutes", "5 hours": how long until the relay takes a report again. */
+export function waitWords(minutes: number): string {
+  const m = Math.max(1, Math.round(minutes));
+  return m < 90 ? t("community.banner.afterMinutes", { count: m }) : t("community.banner.afterHours", { count: Math.round(m / 60) });
+}
+
+/** The words for a report the relay's sending limits refused (`detail` of a `rate_limited` error): the hour's and the
+ *  day's limits per account, or the network's (docs/relay-api.md). */
+export function rateText(d: Record<string, unknown>): string {
+  const wait = waitWords(typeof d.waitMin === "number" ? d.waitMin : 60);
+  if (d.limit === "network") return t("community.send.err.rateNetwork", { wait });
+  if (d.limit === "day") return t("community.send.err.rateDay", { sent: typeof d.sent === "number" ? d.sent : 10, wait });
+  return t("community.send.err.rate", { sent: typeof d.sent === "number" ? d.sent : 3, wait });
 }
 
 /** The post's versions line as the relay writes it: "Kiln 0.2.0 · Launcher 0.2.0 · Arch Linux · game build 1 · 12 mods on". */

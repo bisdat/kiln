@@ -10,7 +10,7 @@ import { t as tt, useT } from "../i18n";
 import { fmtBytes } from "../ui";
 import { DeckButton, Dialog, Word } from "../deck/ui";
 import { errKind, refreshCommunity, useCommunity, useCommunityUi, useSendOpen } from "./state";
-import { KINDS, QrCode, kindKey, versionsLine, whenKey } from "./parts";
+import { KINDS, QrCode, kindKey, rateText, versionsLine, whenKey } from "./parts";
 import { Pick } from "./DeckCommunity";
 import { DeckSignIn } from "./SignIn";
 
@@ -124,7 +124,7 @@ function DeckSend() {
   const errWord = (k: string) => k === "offline" ? t("community.send.err.offlineTitle") : k === "not_member" ? t("community.send.err.notMemberTitle") : k === "rate_limited" ? t("community.send.err.rateTitle")
     : k === "too_big" ? t("community.send.err.bigTitle") : k === "signin" ? t("community.account.out") : t("community.send.err.relayTitle");
   const errText = (k: string, x: Record<string, unknown>) => k === "offline" ? t("community.send.err.offline") : k === "not_member" ? t("community.send.err.notMember")
-    : k === "rate_limited" ? t("community.send.err.rate", { sent: x.sent ?? 3, wait: x.waitMin ?? 60 }) : k === "too_big" ? t("community.send.err.big", { size: fmtBytes(Number(x.size)), limit: fmtBytes(Number(x.limit)) })
+    : k === "rate_limited" ? rateText(x) : k === "too_big" ? t("community.send.err.big", { size: fmtBytes(Number(x.size)), limit: fmtBytes(Number(x.limit)) })
     : k === "signin" ? t("community.send.check.signInHint") : t("community.send.err.relay");
   return (
     <Dialog key="check" name="send-check" title={t("community.deck.check")} wide onClose={() => setStep("when")} backLabel={t("common.back")}

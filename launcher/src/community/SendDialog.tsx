@@ -11,7 +11,7 @@ import type { KnownAction, ReportDraft, ReportPreview } from "../api/commands";
 import { useT } from "../i18n";
 import { Banner, Button, Cones, Field, KeyValue, Modal, Skeleton, StatusPill, TextArea, TextInput, fmtBytes, toast } from "../ui";
 import { INVITE, errKind, refreshCommunity, useCommunity, useCommunityUi, useSendOpen } from "./state";
-import { KINDS, kindKey, versionsLine } from "./parts";
+import { KINDS, kindKey, rateText, versionsLine } from "./parts";
 
 const MAX = 90;
 const WORDS_MAX = 1500;
@@ -200,7 +200,7 @@ function SendError({ err, retry, sendWithout, save, recheck }: { err: NonNullabl
       </>}>{t("community.send.err.notMember")}</Banner>;
     case "rate_limited":
       return <Banner tone="warn" title={t("community.send.err.rateTitle")} actions={d.last ? <Button size="s" onClick={() => open(String(d.last))}>{t("community.send.err.openLast")}</Button> : undefined}>
-        {t("community.send.err.rate", { sent: d.sent ?? 3, wait: d.waitMin ?? 60 })}</Banner>;
+        {rateText(d)}</Banner>;
     case "too_big":
       return <Banner tone="warn" title={t("community.send.err.bigTitle")} actions={<>
         <Button size="s" onClick={sendWithout}>{t("community.send.err.sendWithout")}</Button>

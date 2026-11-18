@@ -99,14 +99,17 @@ pub fn refusal(status: u16, body: &[u8]) -> Error {
             .with_detail(json!({ "kind": Kind::TooBig.as_str(), "size": num("size"), "limit": num("limit").unwrap_or(ZIP_MAX) })),
         (429, _) => {
             let last = v.get("last").or_else(|| v.get("lastPost")).and_then(Value::as_str).filter(|u| super::is_discord_url(u));
-            // the relay may say which limit and until when instead (`limit` hour or day, `retryAt`)
-            let sent = num("sent").or_else(|| match v.get("limit").and_then(Value::as_str) { Some("hour") => Some(3), Some("day") => Some(10), _ => None });
+            // which limit (docs/relay-api.md: `hour` and `day` per account, `network` per network, a rolling 24 hours for
+            // the last two) and until when (`retryAt`); the UI words each limit apart
+            let limit = v.get("limit").and_then(Value::as_str).filter(|l| matches!(*l, "hour" | "day" | "network"));
+            let sent = num("sent").or(match limit { Some("hour") => Some(3), Some("day") => Some(10), Some("network") => Some(20), _ => None });
             let wait = num("waitMin").or_else(|| {
                 let at = crate::util::parse_rfc3339(v.get("retryAt")?.as_str()?)?;
                 Some(((at - crate::util::now_unix()).max(60) as u64).div_ceil(60))
             });
-            Error::new(ErrorCode::Busy, "Too many reports.")
-                .with_detail(json!({ "kind": Kind::RateLimited.as_str(), "sent": sent, "waitMin": wait, "last": last }))
+            // the words fit every sending limit (reports, test results, Volunteer): the UI says more for a report
+            Error::new(ErrorCode::Busy, "Kiln support asks you to wait before sending again.")
+                .with_detail(json!({ "kind": Kind::RateLimited.as_str(), "limit": limit, "sent": sent, "waitMin": wait, "last": last }))
         }
         (400, _) => err(ErrorCode::InvalidArgument, Kind::BadRequest, "Kiln support could not read the request."),
         // a blocked account gets the same words as a relay that is down (PLAN 7.3)
@@ -600,6 +603,15 @@ mod tests {
         let e = refusal(429, format!(r#"{{"error":"rate-limited","limit":"hour","retryAt":"{at}","lastPost":"https://discord.com/channels/1/2"}}"#).as_bytes());
         let d = e.detail.unwrap();
         assert_eq!((d["kind"].as_str(), d["sent"].as_u64(), d["waitMin"].as_u64(), d["last"].as_str()), (Some("rate_limited"), Some(3), Some(38), Some("https://discord.com/channels/1/2")));
+        assert_eq!(d["limit"], "hour");
+        // the day's and the network's limits say which they are (the UI words them apart: not "in the last hour")
+        let at = crate::util::rfc3339(crate::util::now_unix() + 5 * 3600);
+        for (limit, sent) in [("day", 10), ("network", 20)] {
+            let d = refusal(429, format!(r#"{{"error":"rate-limited","limit":"{limit}","retryAt":"{at}","lastPost":null}}"#).as_bytes()).detail.unwrap();
+            assert_eq!((d["limit"].as_str(), d["sent"].as_u64(), d["waitMin"].as_u64(), d["last"].is_null()), (Some(limit), Some(sent), Some(300), true));
+        }
+        // a limit the launcher doesn't know is left out, not guessed
+        assert!(refusal(429, br#"{"error":"rate-limited","limit":"week"}"#).detail.unwrap()["limit"].is_null());
         // the session's field may be called token
         let g: Grant = serde_json::from_value(json!({ "token": KEY, "account": account() })).unwrap();
         assert_eq!(g.session, KEY);

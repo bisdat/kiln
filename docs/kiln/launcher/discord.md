@@ -144,7 +144,7 @@ Bearer <session key>`. JSON bodies are `Content-Type: application/json`.
 | 404 `not-found` | `not_found` | the post is gone |
 | 410 `expired` | `expired` | a sign-in that ran out |
 | 413 `too-big` (`size`, `limit`) | `too_big` | "The report is too big to send", Send without the zip |
-| 429 `rate-limited` (`limit` hour/day/network, `retryAt`, `lastPost`) | `rate_limited` | "That's a lot of reports": the count (3 for `hour`, 10 for `day`), the minutes until `retryAt`, Open my last post (`lastPost` only if it is a `https://discord.com/channels/...` link) |
+| 429 `rate-limited` (`limit` hour/day/network, `retryAt`, `lastPost`) | `rate_limited` | "That's a lot of reports", worded for the limit (`detail.limit`): 3 in the last hour, 10 in the last 24 hours, or too many from the network in the last 24 hours; the time until `retryAt` (minutes, else hours); Open my last post (`lastPost` only if it is a `https://discord.com/channels/...` link) |
 | 429 `slow-down` | (sign-in poll: still waiting) | |
 | 400 `bad-request` | `bad_request` | a launcher bug; shown as the relay's refusal |
 

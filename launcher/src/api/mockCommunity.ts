@@ -6,7 +6,8 @@
 //   (none)      signed out          in          signed in, in the Kiln Discord, three posts, one new reply
 //   empty       signed in, no posts  notmember   signed in, not in the Kiln Discord yet
 //   offline     no network           relaydown   frostdev.io does not answer
-//   ratelimit   the next send is refused (too many reports)      toobig   the report zip is over the limit
+//   ratelimit   the next send is refused (3 reports this hour)   toobig   the report zip is over the limit
+//   ratelimitday   the next send is refused (10 in 24 hours)     ratelimitnet   (too many from this network)
 //   known       the report matches a known problem with a fix     nodiscord   the Discord app is not running
 //   presence    Rich Presence on     notify      reply notifications on
 //   cancel      sign-in: cancelled on Discord's page              expire   sign-in: the code runs out
@@ -48,7 +49,8 @@ let tester = TESTER;
 let account: CommunityAccount | null = SIGNED_IN ? me() : null;
 let online = !has("offline");
 let relayUp = !has("relaydown");
-let rateLimited = has("ratelimit");
+/** The relay's sending limit the next report meets (docs/relay-api.md: hour, day, network), or none. */
+let rateLimited: "hour" | "day" | "network" | null = has("ratelimit") ? "hour" : has("ratelimitday") ? "day" : has("ratelimitnet") ? "network" : null;
 let postsAsOf: string | null = SIGNED_IN ? min(has("offline") ? 38 : 0) : null;
 let mods: number | null = null;
 /** Every call that would reach the relay (tests: `__kilnMock.community.requests()`). */
@@ -263,7 +265,9 @@ export function communityMockHandlers({ emit, gameRunning }: CommunityMockDeps):
       needSession();
       relay("reports");
       if (!account!.member) err("refused", "You're not in the Kiln Discord yet.", "not_member");
-      if (rateLimited) err("busy", "Too many reports.", "rate_limited", { sent: 3, waitMin: 38, last: posts[0]?.url ?? null });
+      // the relay's 429 as kiln_manage::community::relay::refusal words it
+      if (rateLimited) err("busy", "Kiln support asks you to wait before sending again.", "rate_limited", { limit: rateLimited, sent: { hour: 3, day: 10, network: 20 }[rateLimited],
+        waitMin: rateLimited === "hour" ? 38 : 300, last: posts[0]?.url ?? null });
       if (has("toobig") && d.zip !== "none") err("refused", "The report is too big to send.", "too_big", { size: 21_400_000, limit: 8 * 1024 * 1024 });
       const post: SupportPost = { id: `p${Date.now()}`, title: d.title, url: thread(9), created: new Date().toISOString(), status: "waiting", replies: 0, unread: 0,
         lastReply: null, tags: [...new Set([({ noload: "Mods", mod: "Mods", crash: "Crash", launcher: "Launcher", server: "Server", other: null } as Record<string, string | null>)[d.kind], ...p!.tags].filter((x): x is string => !!x))], zip: d.zip };
@@ -327,7 +331,7 @@ export function communityMockHooks(emit: Emit) {
     approve: () => { for (const p of pending.values()) p.done = "approved"; },
     setOnline: (on: boolean) => { online = on; emit("kiln://community", { kind: "changed" }); },
     setRelay: (up: boolean) => { relayUp = up; emit("kiln://community", { kind: "changed" }); },
-    setRateLimited: (on: boolean) => { rateLimited = on; },
+    setRateLimited: (on: boolean | "hour" | "day" | "network") => { rateLimited = on === true ? "hour" : on || null; },
     /** "I've joined": the next membership check finds the player in the server. */
     join: () => { joined = true; },
     readResults: () => { if (testPlan?.sent) testPlan = { ...testPlan, sent: { ...testPlan.sent, read: { by: "Rowan", at: new Date().toISOString() } } }; emit("kiln://community", { kind: "changed" }); },
