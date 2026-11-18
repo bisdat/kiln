@@ -1,1 +1,3 @@
 #nullable enable
+Kiln.EcsProgramContext.TryGetWritable<T>(out T value) -> bool
+Kiln.EcsProgramContext.TryReadWritable<T>(string! component, out T value) -> bool

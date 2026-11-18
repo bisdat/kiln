@@ -463,8 +463,15 @@ typedef struct KilnGameProgramsStatus {
  * Lifetime: install is queued and done in the target world's next Pre (state PENDING -> ACTIVE); an unwrap stops new
  * calls at once and takes the stage out of the chain in the next Pre (-> REMOVED). When the world stops, its wraps go back to PENDING and are applied again, by program name, in the next
  * world of that kind. A server world runs its own wraps; a CLIENT-world wrap needs capability systems.wraps.client;
- * prediction slices that pass a client-world trampoline go to the game's update untouched. While native SET is loaded
- * (kiln.types' external_runner), every wrap is refused and the live ones are removed in the next Pre. */
+ * prediction slices that pass a client-world trampoline go to the game's update untouched, unless a PREDICTION wrap is
+ * on that program. A PREDICTION wrap (since 0.2.0-dev.29.18, capability systems.wraps.prediction, on where
+ * systems.wraps.client is) is a BEFORE or AFTER stage in the client world's table, which the prediction storage runs:
+ * `index` is the program's index in the CLIENT directory, the program's descriptor has none of the flags 0x1 (client),
+ * 0x10 (HOST_ONLY) and 0x40 (the engine bit the prediction step skips), it is applied in the client world's Pre and
+ * runs on the prediction storage's slices only (slice.world_kind KILN_WORLD_PREDICTION, on the main thread; step and
+ * thread_is_world are the client world's), while CLIENT stages on the same program run on the client world's slices
+ * only. While native SET is loaded (kiln.types' external_runner), every wrap is refused and the live ones are removed
+ * in the next Pre. */
 enum {
     KILN_WRAP_BEFORE = 0,
     KILN_WRAP_REPLACE = 1,
@@ -706,14 +713,17 @@ typedef struct KilnWorldApi {
      * existed when Kiln started (KILN_ERR_UNAVAILABLE), and only on a dedicated server. A bit 15 that a real player 16
      * set is left alone. Any thread outside a program update; it takes effect in the next Pre. */
     KilnResult(KILN_CALL* lab_parallel)(uint32_t on, uint32_t steps);
-    /* Wraps program `index` of the live world of `world_kind` (SERVER or CLIENT) with a `stage` (KILN_WRAP_*) that
+    /* Wraps program `index` of the live world of `world_kind` (SERVER or CLIENT; PREDICTION since 0.2.0-dev.29.18:
+     * `index` of the CLIENT directory, BEFORE or AFTER, see "wraps" above) with a `stage` (KILN_WRAP_*) that
      * calls fn(slice, user). Lifetime: call game_wraps_release and wait for it before freeing anything a stage uses.
      * Owner retirement closes admission but does not wait for an already-running stage. Poll release until
      * out_pending is zero, outside every stage. *out = its handle. It is PENDING until the target world's next Pre, where kiln.world
      * applies it (or refuses it: game_wrap_info says why); later worlds of that kind get it again by program name.
      * Any thread outside a stage or program update. A second Replace of a program is not an error: *out is a handle
      * that is REFUSED at once (reason KILN_WRAP_REPLACE_TAKEN, detail names the owner and wrap that replace it).
-     * KILN_ERR_INVALID_ARGUMENT: no owner, fn or out, a bad stage or kind, a program with no update in that world;
+     * KILN_ERR_INVALID_ARGUMENT: no owner, fn or out, a bad stage or kind, a program with no update in that world,
+     * PREDICTION while systems.wraps.prediction is not available (as before 0.2.0-dev.29.18), a PREDICTION Replace or a
+     * program the prediction storage never steps;
      * KILN_ERR_NOT_FOUND: no such index in the live directory; KILN_ERR_UNAVAILABLE: wraps are off on this build,
      * native SET is loaded, or (CLIENT) capability systems.wraps.client is not available; KILN_ERR_WRONG_THREAD:
      * from inside a stage or program update. */

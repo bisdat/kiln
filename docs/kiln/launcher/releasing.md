@@ -589,7 +589,10 @@ publishing status.
   becomes the release version. The API can't set that field on its own.
 - `--sync-description` compares the page's description with `docs/kiln/launcher/nexus-description.bbcode` (the site
   stores line breaks as `<br />`; those are ignored); with `--publish` it replaces it (`PATCH /mods/{id}`, an
-  experimental endpoint).
+  experimental endpoint). The file is the one in the checkout nexus.py runs in (or `--description FILE`), not the
+  release folder's: run it from a checkout at the release commit. A text that does not name the release's version
+  (a text naming 0.2.0-dev.29.17 does not count for 0.2.0-dev.29.1) is refused before any API call (0.2.0-dev.29.2's
+  first sync put 29.1's text up).
 - The key: `NEXUS_API_KEY` in `~/.config/kiln-release/nexus.env` (chmod 600). It is sent only to the API host (over
   https), never to the storage URLs the uploads go to, and never printed or written.
 - `--only launcher-linux,runtime` limits the files. Tests: `python3 -I tools/release/test_nexus.py` (a local mock of the

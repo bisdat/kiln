@@ -251,7 +251,8 @@ engines' mods") and 5.8.
   needs). The engine's own loader in it is never installed and is not an error: the result carries one line of
   information, `EML's own loader is in this package: not needed, Kiln runs EML mods` (the loaders of EMF, EML,
   ShroudForge, SET, Greeneye, Flame, Shroudtopia, Enshwick, shroudlink and Ember; DLL chain loaders get "not needed, Kiln
-  loads DLL mods itself"). A tool that runs on its own next to Kiln (Aldrich's mod menu, ReShade, OptiScaler, Live Map, Shared XP) is
+  loads DLL mods itself"). EMF's own DLLs beside its loader (`emf_core.dll`, `emf_content.dll`, `emf_frametime.dll` in
+  its download's `game/emf/`, known by their exports) get such a line too, never a DLL mod's entry. A tool that runs on its own next to Kiln (Aldrich's mod menu, ReShade, OptiScaler, Live Map, Shared XP) is
   left out whole with what to do (copy its files into the Enshrouded folder yourself). Folders such as `fomod/`,
   `screenshots/`, `__MACOSX/` and the readme, licence and script files around a mod are ignored.
 - **Ids.** An engine manifest has no id rule of Kiln's (`HoardersHelper`, `XHL-Max-Stack-65535`, `Less Dense Shroud Fog`,
@@ -433,6 +434,19 @@ engines' mods") and 5.8.
   or Ember mods. Kiln.Network adds the same mods to the advertised
   `required[]`, each with its `kind` (`AdvertiseEngines.cs`), so a joining player's launcher learns what the server
   runs. The HELLO check still covers Kiln mods only: clients don't announce other engines' mods.
+  Their hash stays the same while the mod runs (0.2.0-dev.29.18, `AdvertiseIdentity.cs` and
+  `modpack::engine_identity`, one rule): Kiln's copy whose files are still the ones placed (its marker in the folder, its
+  receipt outside it: `library-placements.json` or the server's `server-library.json`) is advertised by its Library
+  entry's kdh1; any other folder by the kdh1 of its files without logs (`*.log`), ShroudForge's `extended.mod.json` and
+  the kind's settings files. Before, it was the kdh1 of the whole folder with the player's settings and what the mod
+  writes there (logs, `bin/native-status.txt`), so it changed every minute and was never the Library's. A modpack packs the
+  mod as the server runs it, with the owner's settings and without the files the mod wrote, and names the advertised
+  hash as the mod's `identity` when its own kdh1 is another (`modpack::build`). The rule in full (which receipt entries count, what may change, an
+  EMF mod keeping the kdh1 of its folder) is the head of `schema/fixtures/engine-identity/engine_identity.py`, a Python
+  reference whose `cases.json` (34 trees and their hashes) both Kiln.Network's and kiln-manage's tests read. Files the
+  mod adds next to Kiln's copy (a status file, a second DLL) do not make it another mod; a file Kiln placed that changed
+  (its Lua, its DLL, its `native-plugin.ini`) does. A player's install of a modpack checks another engine's mod by
+  its hash, its `identity` or its version (`modpack::check_against`; the join never compares these mods).
 - **Licences.** The launcher (MIT) only copies files. It never links or runs EML's GPL code or any other engine's code.
 
 An enabled EML package declaring `runtime` or `runtime-register-dll` also requires hosted ShroudForge, even without

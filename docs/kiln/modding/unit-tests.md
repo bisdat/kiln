@@ -286,7 +286,7 @@ false)`; the fake then answers as the native service does without it. The table 
   thread, `IsWorldThread` is true; `systems.threads` and `LabSystems` are offline), the order of the game's programs
   among themselves (table order), singleton slots (empty: `Read` of `impact::AttributeRegistry` throws), the attribute
   formulas (`Attribute32.Changed()` checks the block and the program's registry declaration and changes nothing),
-  native faults, client and prediction worlds (`systems.wraps.client` is offline), boot reservations
+  native faults, client and prediction worlds (`systems.wraps.client` and `systems.wraps.prediction` are offline), boot reservations
   (`Systems.Define`: `systems.define` is offline), native SET.
 - **Impact natives** (`kiln.ImpactNatives`, since 0.2.0-dev.29) <a id="impact-natives"></a>. The kit's kiln.abilities has
   its natives only: `Abilities.Natives.RegisterSync`, an `[ImpactNative]` method's generated registration, `DeclareTyped`,

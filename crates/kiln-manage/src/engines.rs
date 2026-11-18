@@ -605,6 +605,13 @@ const FLAME_MOD_EXPORT: &str = "FlameStartRuntime";
 /// shroudlink's mod DLLs (its server looks for `shroudlink_mod_v2`, then `_v1`).
 const SHROUDLINK_MOD_EXPORTS: [&str; 2] = ["shroudlink_mod_v2", "shroudlink_mod_v1"];
 
+/// EMF's own DLLs beside its loader in `<game>/emf/` (EMF scripts/package.ps1), by their exports, with what each is:
+/// its core (`emf_core.dll`: `emf_core_start`, which the loader calls, and its console's Vulkan layer), its builder of
+/// EML content (`emf_content.dll`) and its frame-time recorder (`emf_frametime.dll`, a Vulkan layer). They are EMF, not
+/// mods: Kiln's EMF support runs EMF's mods.
+const EMF_OWN_FILES: [(&str, &str); 4] = [("emf_core_start", "its core"), ("emf_vk_negotiate", "its core"),
+    ("emf_content_abi", "its builder of EML content"), ("emf_ft_negotiate", "its frame-time recorder")];
+
 /// shroudlink's client addon: its `dinput8.dll` draws the in-game MODS tab, the chest search and the slot locks. It
 /// is a mod of its own, not a loader Kiln replaces: kiln-shroudlink is shroudlink's server core, and the addon is what
 /// shows that core's windows. The core is told apart by the export `CrashHandlerFactory` (it also runs as
@@ -661,6 +668,11 @@ pub fn detect_dll(path: &Path, bytes: &[u8], exports: &[String]) -> Option<Detec
     if !crate::pe::is_pe64_dll(bytes) { return None; }
     let has = |e: &str| exports.iter().any(|x| x == e);
     let file = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    // EMF's own files beside its loader (its download's game/emf/): left out as its loader is, never plain DLL mods
+    if let Some((_, what)) = EMF_OWN_FILES.iter().find(|(e, _)| has(e)) {
+        return Some(detected(DetectKind::Proxy, Some(Engine::Emf), path,
+            format!("{file} is part of EMF itself ({what}): not needed, Kiln runs EMF mods")));
+    }
     let mod_dll = |engine: Engine| Some(detected(engine_kind(engine), Some(engine), path, mod_reason(engine, &file)));
     if has(GREENEYE_MOD_EXPORT) {
         return mod_dll(Engine::Greeneye);

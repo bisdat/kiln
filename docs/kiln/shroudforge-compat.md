@@ -163,7 +163,8 @@ for the packages left out with it: "needs <id>, which failed in the pregame pass
 `retryError`; `error` stays the first failure's, so a reader that knows neither field reads the record as before.
 A pass that ran without a package is `applied` with the configuration's own fingerprint: the next start keeps the data
 and the record while nothing changes; switching the package off, or any other change, runs the pass again. SF's log
-(`startup-assets`, W, so kiln.log's `[sf]` lines) says `ShroudForge: <name> (<id> <version>) failed in the pregame pass
+(`startup-assets`, W, so kiln.log's `[sf]` lines, as warnings from 0.2.0-dev.29.18: the mirror reads the level from
+the start of ShroudForge's line, `[W <date> <time> UTC]`, `native/plugins/shroudforge/src/log_level.h`) says `ShroudForge: <name> (<id> <version>) failed in the pregame pass
 (<error>); running the pass once more without it`, then `...; started the game without it, the other N mods loaded` or
 `ShroudForge: the pregame pass failed again without <name> (<error>); the game starts without the mods of the pregame
 pass`. SF's in-game Modloader page shows the package failed (`asset-preparation-skipped`), the packages left out with it

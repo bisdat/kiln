@@ -278,6 +278,31 @@ public sealed unsafe class EcsProgramsClientTests : KilnTest
     }
 
     [Fact]
+    public void A_program_reads_its_write_slot_before_and_after_it_writes_and_only_a_declared_one()
+    {
+        var seen = new List<int>();
+        var undeclared = false;
+        var r = As(NewMod("pinner"), () => EcsPrograms.TryBind("pin", c =>
+        {
+            if (!c.TryReadWritable("Health", out int before)) return;
+            if (c.TryReadWritable("Health", out long _)) return;  // not the game's size: false, as TryRead
+            c.TryWrite("Health", before + 7);
+            if (!c.TryReadWritable("Health", out int after)) return;
+            seen.Add(before);
+            seen.Add(after);
+            try { c.TryReadWritable("Mana", out int _); }
+            catch (ArgumentException) { undeclared = true; }
+        }, WorldKind.Client));
+        Sized(r.Handle!, "Health");
+        *_native.Component = 12;
+        _native.Run("pin");
+        Assert.Equal([12, 19], seen);
+        Assert.True(undeclared);
+        Assert.False(((EcsPrograms.Binding)r.Handle!).Failed);
+        r.Handle!.Dispose();
+    }
+
+    [Fact]
     public void A_server_programs_write_is_marked_as_before()
     {
         var r = As(NewMod("pinner"), () => EcsPrograms.TryBind("server_only", c => Assert.True(c.TryWrite("Health", 5)), WorldKind.Server));

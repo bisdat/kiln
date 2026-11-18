@@ -5,6 +5,9 @@ namespace Kiln.MainMenuFooterTests;
 
 // Kiln's line in the main menu's footer: the count it shows, what kiln.ui is told, and the table slot (kiln_ui.h:
 // menu_footer after set_next_window_size_constraints).
+// It installs the fake kiln.ui table and its backend, which every Kiln.Ui test class shares: it runs alone, as they do
+// (FakeUiTable.Install frees a table another class's test may be drawing with).
+[Collection(Kiln.FakeUi.UiSerial.Name)]
 public unsafe class MainMenuFooterTests
 {
     private static CatalogMod Mod(string engine, string id, ModRunState state) => new() { Engine = engine, Id = id, Name = id, State = state };

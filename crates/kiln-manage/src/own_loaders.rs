@@ -253,8 +253,9 @@ pub(crate) fn check_runtime_eml_loader(loaders: &[OwnLoader], ids: &[String]) ->
 }
 
 /// The kinds whose own loader reads a fixed folder of the game. EML, EMF and Shroudtopia mods are copied there only
-/// while that loader is installed; Greeneye and Flame mods always run from Kiln's copy there
-/// (engine_mods::run_folder), and SF and SET are always placed as well (their Kiln plugins read only their own folder).
+/// while that loader is installed (EMF's Lua mods always: EMF's lua mod reads them only there, engine_mods::EMF_MODS);
+/// Greeneye and Flame mods always run from Kiln's copy there (engine_mods::run_folder), and SF and SET are always placed
+/// as well (their Kiln plugins read only their own folder).
 pub const PLACED_FOR_LOADER: [ModKind; 5] = [ModKind::Eml, ModKind::Emf, ModKind::Greeneye, ModKind::Flame, ModKind::Shroudtopia];
 
 /// The (id, enabled) lists of a profile, from a launcher profile or from the game's `kiln/profile.json`.
