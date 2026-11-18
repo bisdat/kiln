@@ -21,4 +21,26 @@ int main() {
     assert(!valid(std::string("/\xc0\x80", 3)));
     assert(!valid(std::string("/\xed\xa0\x80", 4)));
     assert(!valid(std::string("/\xf4\x90\x80\x80", 5)));
+
+    // A validated post-call snapshot permits replacing /he even if the
+    // pre-call widget string is empty/stale: that string is not consulted.
+    using kui::chat_completion_text::can_apply_editor_snapshot;
+    assert(can_apply_editor_snapshot(1, 42, "/he", 3, 1, 42, "/he",
+                                     true, true, false, false));
+    assert(!can_apply_editor_snapshot(1, 43, "/he", 3, 1, 42, "/he",
+                                      true, true, false, false));
+    assert(!can_apply_editor_snapshot(2, 42, "/he", 3, 1, 42, "/he",
+                                      true, true, false, false));
+    assert(!can_apply_editor_snapshot(1, 42, "/hex", 4, 1, 42, "/he",
+                                      true, true, false, false));
+    assert(!can_apply_editor_snapshot(1, 42, "/he", 2, 1, 42, "/he",
+                                      true, true, false, false));
+    assert(!can_apply_editor_snapshot(1, 42, "/he", 3, 1, 42, "/he",
+                                      false, true, false, false));
+    assert(!can_apply_editor_snapshot(1, 42, "/he", 3, 1, 42, "/he",
+                                      true, true, true, false));
+    assert(!can_apply_editor_snapshot(1, 42, "/he", 3, 1, 42, "/he",
+                                      true, true, false, true));
+    assert(can_apply_editor_snapshot(1, 42, "/say café", 9, 1, 42, "/say café",
+                                     true, true, false, false));
 }
