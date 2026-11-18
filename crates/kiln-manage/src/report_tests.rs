@@ -226,8 +226,6 @@ fn healthy_install_finds_nothing() {
     }
 }
 
-// The state files of Kiln's deliberate stops (roster, the mods' NPCs and quests not built) go into the zip whole, the
-// next start's .last copies too: a support thread can tell which stop it was (dev.29).
 /// OptiScaler next to the game (an upscaler with its own overlay, inbox 80): one Info finding with what Kiln's overlay
 /// does next to it, its ini in the zip, nothing found when it is not there.
 #[test]
@@ -244,11 +242,29 @@ fn optiscaler_is_named_with_what_kilns_overlay_does() {
     assert!(r.summary.contains("Graphics tool: OptiScaler (winmm.dll): Kiln's overlay drawing steps aside"), "{}", r.summary);
     assert!(r.summary.contains("winmm.dll        OptiScaler"), "{}", r.summary);
     assert!(file(&r, "game/OptiScaler.ini").is_some_and(|t| t.contains("OverlayMenu=auto")));
+    assert!(file(&r, "game/OptiScaler.log").is_none() && r.errors.is_empty(), "no log: nothing, no error: {:?}", r.errors);
     f.w("OptiScaler.ini", "[Menu]\nOverlayMenu=false\n");
     let r = build(&f.input());
     assert!(finding(&r, "optiscaler").text.contains("draws next to it"));
+    // its log can grow large (debug level): only its tail, within a log's budget, as for the other tools' logs
+    let old = "[info] an earlier line of OptiScaler's log\n";
+    f.w("OptiScaler.log", old.repeat(SMALL_LOG_MAX as usize / old.len() + 1) + "[info] HookDevice: the newest line\n");
+    let r = build(&f.input());
+    let log = file(&r, "game/OptiScaler.log").expect("its log is in the zip");
+    assert!(log.starts_with("... (older lines left out") && log.len() as u64 <= SMALL_LOG_MAX + 200, "{}", log.len());
+    assert!(log.contains("the newest line"));
+    // a Linux folder is case sensitive: the files under their names on disk
+    std::fs::remove_file(f.game.join("OptiScaler.ini")).unwrap();
+    std::fs::rename(f.game.join("OptiScaler.log"), f.game.join("optiscaler.log")).unwrap();
+    f.w("optiscaler.ini", "[menu]\noverlaymenu=false\n");
+    let r = build(&f.input());
+    assert!(finding(&r, "optiscaler").text.contains("draws next to it"));
+    assert!(file(&r, "game/optiscaler.ini").is_some_and(|t| t.contains("overlaymenu=false")), "{:?}", r.files.iter().map(|x| &x.0).collect::<Vec<_>>());
+    assert!(file(&r, "game/optiscaler.log").is_some() && r.errors.is_empty(), "{:?}", r.errors);
 }
 
+// The state files of Kiln's deliberate stops (roster, the mods' NPCs and quests not built) go into the zip whole, the
+// next start's .last copies too: a support thread can tell which stop it was (dev.29).
 #[test]
 fn stop_state_files_are_in_the_report() {
     let f = Fx::healthy("stops");

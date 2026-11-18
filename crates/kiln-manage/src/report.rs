@@ -1146,10 +1146,17 @@ pub fn build(input: &ReportInput) -> Report {
         let _ = writeln!(k, "Graphics tool: {} ({}): Kiln's overlay {}", g.engine.name(), g.file,
             if g.kiln_overlay { "draws next to it (its own menu is off in OptiScaler.ini)" } else { "drawing steps aside" });
         cx.find("optiscaler", Level::Info, format!("{} is installed ({}). {}", g.engine.name(), g.file, g.text));
-        // its settings (OverlayMenu, frame generation) and its own log when it writes one ([Log] LogToFile=true)
-        for name in ["OptiScaler.ini", "OptiScaler.log"] {
-            cx.add_file(name);
-        }
+        // its settings (OverlayMenu, frame generation), and the tail of its own log when it writes one ([Log]
+        // LogToFile=true; it can grow large, so a log's budget, as for the other tools' logs), under their names on disk
+        // (a Linux folder is case sensitive; the finding read the ini in any case)
+        let on_disk = |name: &str| {
+            std::fs::read_dir(&game).into_iter().flatten().flatten()
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .find(|n| n.eq_ignore_ascii_case(name))
+                .unwrap_or_else(|| name.to_string())
+        };
+        cx.add_file(&on_disk("OptiScaler.ini"));
+        cx.add_tail(&on_disk("OptiScaler.log"), SMALL_LOG_MAX);
     }
     match crate::chain::read_raw(&game) {
         Ok(t) if t.trim().is_empty() => {
