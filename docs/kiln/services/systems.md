@@ -10,6 +10,7 @@ world. Since 0.2.0-dev.29.
 | `systems.wraps` | wraps work on this build; unavailable while native SET is loaded (reason `policy`) |
 | `systems.wraps.typed` | typed wraps (`Systems.Wrap<T>` with a view of Kiln.Game's `Ecs.Programs`); follows `systems.wraps` (each wrap checks its view's contract against the live descriptor) |
 | `systems.wraps.client` | wraps on the client world's programs (`WrapOptions.World = WorldKind.Client`), in a game client; `wrong-side` on a dedicated server. On since 0.2.0-dev.29 (held in dev.28), not yet confirmed in a real game: guided check `06a-wraps.client` |
+| `systems.wraps.prediction` | wraps on the programs the prediction storage runs (`WrapOptions.World = WorldKind.Prediction`, since 0.2.0-dev.29.18, mod API 0.2.10): on where `systems.wraps.client` is, off where it is off, with the same reason. Not yet run in a real game ([below](#the-prediction-storage-worldkindprediction-since-020-dev2918)) |
 | `systems.define` | `Systems.Define`: a program of the mod's own over a `[Query]` struct, reserved at boot (kiln.world's own programs, `world.programs`) |
 | `systems.threads` | the server world's players mask can be read (what puts program slices on the game's workers) |
 | `world.systems` | the sigdb feature behind them: the program scheduler and the players mask |
@@ -77,7 +78,57 @@ wrap.Dispose();   // or let the mod's unload remove it
   runs, up to 2 s; a still-running callback remains rooted and is reaped after it finishes). `Stats` sums calls, entities, time, faults and budget overruns over the wrap's stages.
 - **Refusals.** `Ok = false`: the program is not in that world, it has no update there, native SET is loaded (it
   replaces the game's program runner, so Kiln stays out of it and takes existing wraps out). A capability that is off
-  throws `KilnUnavailableException`; the prediction world has no table of its own (`ArgumentException`).
+  throws `KilnUnavailableException`. `WorldKind.Prediction` throws `ArgumentException` where `systems.wraps.prediction`
+  is off (the prediction storage has no table of its own; before 0.2.0-dev.29.18 always); where it is on, see
+  [the prediction storage](#the-prediction-storage-worldkindprediction-since-020-dev2918).
+
+### The prediction storage (`WorldKind.Prediction`, since 0.2.0-dev.29.18)
+
+A game client runs the local player's own character ahead of the server in its **prediction storage**: every
+prediction step (on the main thread, more often than the client world steps), it runs the programs of the client
+world's table that are not client programs and not `hostOnly` (descriptor flags without 0x1, 0x10 and the engine's
+0x40), on the entities the server lets it predict, the local player's character among them. What the server computes
+for that character, the player's own client computes again there, and the player's own screen follows it:
+`equipment_visuals` recomputes `EquipmentAnimationSets` (the stance) from the held item there too, and
+`locomotion_animation` reads it there. A server wrap that changes the stance is seen by everyone else and not by that
+player, unless the same change is made in the prediction storage as well
+([docs/re/world.md](../../re/world.md#the-prediction-storage-recomputes-the-stance)).
+
+```csharp
+// the server half: everyone's view of player P (server world, the default)
+var server = Systems.Wrap<Ecs.Programs.EquipmentVisuals>().Wrap!;
+// the client half: this player's own view, in the prediction storage (a client or both mod, on a game client)
+if (Capabilities.Is(Systems.PredictionCapability))
+{
+    var predicted = Systems.Wrap<Ecs.Programs.EquipmentVisuals>(new WrapOptions { World = WorldKind.Prediction }).Wrap!;
+    predicted.AfterEach((ref Ecs.Programs.EquipmentVisuals v) =>
+    {
+        if (!holstered) return;                                          // your state, shared through a volatile/atomic
+        ref var sets = ref v.EquipmentAnimationSets;                     // after the game's own write of this step
+        sets.primaryAnimationSet = Ecs.PrimaryAnimationSet.None;
+        sets.secondaryAnimationSet = Ecs.SecondaryAnimationSet.None;
+    });
+}
+```
+
+- **What it is.** A wrap of a program of the **client world's table** whose stages run on the prediction storage's
+  slices only (`Slice.World` and `SliceInfo.World` say `Prediction`); a client-world wrap of the same program runs on
+  the client world's slices only. `Systems.Find(name, WorldKind.Client)` finds the program (the prediction storage has
+  no directory of its own: `Systems.Find(name, WorldKind.Prediction)` is null, as before).
+- **What it takes.** `Before`, `After`, `BeforeEach`, `AfterEach` (with an `EntityView` or a typed view) and the
+  filters. No `Replace` (`Ok = false`). A program the prediction storage never steps (a client program, a `hostOnly` one,
+  one with the engine's 0x40) is `Ok = false` with its flags in the reason.
+- **When.** Applied in the client world's Pre, like a client wrap; again in every later client world by name (the
+  prediction storage starts and stops with its client world); gone with `Dispose` or the mod's unload.
+- **Threads.** The prediction storage steps serially on the main thread. `Slice.Step` is the client world's step at its
+  last Pre and `IsWorldThread` compares with the client world's thread. No tick-thread API inside a stage, as anywhere.
+- **Writes** go to the prediction storage only and are marked with the job's tracker, as the game's own update there
+  marks them. No `ComponentWrittenEvent` (server world only). The next server state the client receives for the
+  predicted entity can put the game's value back until your stage runs again; write in every step you mean it.
+- **WhenArchetype** reads the slice's archetype from the engine's slice record and the prediction storage's own
+  component indices (no entity-map read, as for the client world).
+- Not run in a game yet. What a real client shows: the local player's stance follows a write in an After of
+  `equipment_visuals` there, with no flicker against the server's state.
 
 ## Threads, budget, faults
 

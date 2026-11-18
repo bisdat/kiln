@@ -335,6 +335,58 @@ presentation; a program that must change what others see belongs in the server w
   end of the kiln.world table (offsets 496 to 520, after the foreign views at 448 to 488; the table is 528 bytes;
   [kiln_world.h](../../../native/core/abi/services/kiln_world.h)).
 
+#### A client program on the game's entities: what holds (0.2.0-dev.29.18)
+Checked statically against the client build 26430625 (evidence and addresses:
+[docs/re/world.md](../../re/world.md#a-mods-client-world-program-and-wraps-checked-for-their-first-real-use-020-dev2918-client-26430625)),
+for a program that changes how the game draws an entity it did not make (the weapon visual of a character).
+- **It is there.** Every symbol on the path resolves on that build, the hook on `RegisterAllPrograms` is called for each
+  client world (seen in a real client of 0.2.0-dev.29.17), and the client world steps every program flagged for it.
+- **Its place in the step.** After every game program it conflicts with: a program that writes `SlotAttachment` runs after
+  the game's `slot_attachment` and `slot_attachment_init`. The game reads what you wrote in the **next** client step, so a
+  change shows one client step late, and a new entity shows its template's values for its first step. To act before the
+  game's program in the same step, wrap it: a client-world `BeforeEach` on `slot_attachment` (and `slot_attachment_init`
+  for new entities) with `WrapOptions.World = WorldKind.Client` ([systems.md](systems.md)). The wrap sees only that
+  program's lists; keep what only your program can see (a template's `ModelResource`, say) in your program and share the
+  answer per entity.
+- **Entity ids.** An entity the server sends has the **server's id** in your client world, on a joined client and on a
+  host alike: the game creates it under the id in the server's message. The entity id of a player's character that your
+  server half has (`Players`, `ctx.Entity` in a server program) names that character in every client's world, and its
+  equipment visuals name it as their parent (`DespawnLink.parentEntityId`, and `SlotAttachment.attachedToEntityId` once
+  the game's `slot_attachment` filled it in). Ids of entities a client makes by itself are its own.
+- **Reading and writing the entity.** `TryWrite` writes the current entity's own component; nothing marks it for the save
+  or replication, and a component that is not replicated (`SlotAttachment`) is never sent. Read a component you also
+  write with `TryReadWritable` / `TryGetWritable` (since 0.2.0-dev.29.18): declare it once, under `write`. `TryReadOther`
+  works in a client program; `TryWriteOther` stays refused there.
+- **Template data.** `tpl` gives the entity's template value of a template component: `tpl: ["ModelResource"]` is what the
+  game's own client programs use (40 of its 197 client programs have a `tpl` list). No game program uses `tpl` on a
+  component that also changes per entity (`SlotAttachment`, `Hide`), so that is not proven: read such a template's values
+  from its data (`Content.Templates`) or keep the live value before your first write.
+- **Typed.** Kiln.Game's `Ecs.SlotAttachment` (with `Ecs.Offset`, `Ecs.AttachmentSlot`, `Ecs.AttachmentTarget`),
+  `Ecs.EquipmentAnimationSets` (`Ecs.PrimaryAnimationSet`, `Ecs.SecondaryAnimationSet`), `Ecs.DespawnLink` and
+  `Ecs.ModelResource` are the game's layouts on the client build too (its type table equals the server's, 1839 types),
+  checked against the running game on first use:
+
+```json
+{ "format": 1, "programs": { "weapon_pose": { "world": "client",
+    "with": ["VisualEquipment"], "write": ["SlotAttachment"], "tpl": ["ModelResource"] } } }
+```
+
+```csharp
+binding = EcsPrograms.TryBind("weapon_pose", c =>
+{
+    if (!c.TryGetWritable(out Ecs.SlotAttachment sa) || !c.TryGet(out Ecs.ModelResource model, template: true)) return;
+    if ((uint)sa.attachedToEntityId != localPlayer) return;            // the owner's id: the server's (above)
+    sa.attachmentSlot = Ecs.AttachmentSlot.Chest;                      // your pose; the game re-reads it every step
+    c.TrySet(sa);
+}, WorldKind.Client).Handle;
+```
+
+- **The prediction storage** runs the server programs of the client world's table for the local player (the stance's
+  `equipment_visuals` among them), so a server-side change to the local player's own animation input needs the same
+  change there: a prediction wrap ([systems.md](systems.md#the-prediction-storage-worldkindprediction-since-020-dev2918)).
+- **Only a real client shows** that the write moves the model on screen (guided check `programs.client-visual`), that a
+  client-world wrap's and a prediction wrap's stages run there, and that a joined client's ids match in practice.
+
 ## Native (other services)
 
 Look the table up in `on_ready` (services load in file-name order, so `kiln.world` may not exist yet in your
