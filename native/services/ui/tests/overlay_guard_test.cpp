@@ -55,6 +55,45 @@ int main() {
         retry.stage = Stage::swapchain;
         check(begin(rearm(idle(retry)), "m").record.phase == Phase::locked);
     }
+    // Inbox 80 (0.2.0-dev.29.18): the game died right after the overlay's first submit failed. The record of that start
+    // (kiln/state/overlay-start.guard in the player's report: 32 bytes, trying at "swapchain created") guards the next
+    // start; overlay_guard_failed keeps a start that turned the drawing off armed for a while, overlay_guard_drawn keeps
+    // it armed through the overlay's first drawn frames.
+    {
+        // the player's start: swapchain, a draw attempt that failed (no frame presented), the game died
+        auto start = begin({}, "w2-x").record;
+        start.stage = Stage::swapchain;
+        auto next = begin(start, "w2-x");
+        check(next.off && next.record.phase == Phase::guarded && next.record.failed_stage == Stage::swapchain);
+        // the same, but OptiScaler's DLL replaced in between (0.9.5 <-> a nightly): one fresh attempt, by design
+        auto other = begin(start, "w2-y");
+        check(!other.off && other.record.wrapper_retry);
+        other.record.stage = Stage::swapchain;
+        check(begin(other.record, "w2-y").off);  // and the start after a second death is guarded again
+        // drawn frames presented, but fewer than the guard waits for: still trying, a death guards the next start
+        auto drawn = begin({}, "m").record;
+        drawn.stage = Stage::swapchain;  // overlay_guard_drawn changes nothing before kDrawnFrames or its timer
+        check(begin(drawn, "m").off);
+        // the drawing went off after the start had counted as fine (a failed submit an hour in): armed again, a death in
+        // the window guards the next start, a game that went on counts as fine and keeps no new failure
+        auto fine = begin({}, "m").record;
+        fine.stage = Stage::frame;
+        fine = finish(fine);
+        auto armed = rearm(fine);
+        check(armed.phase == Phase::trying && armed.stage == Stage::swapchain);
+        check(begin(armed, "m").off);
+        auto went_on = idle(armed);
+        check(went_on.phase == Phase::complete && went_on.failures == 0 && !begin(went_on, "m").off);
+        // a start that turned the drawing off and went on, after an earlier death at the same stage: the history stays,
+        // so a second death there would still lock
+        auto retry = begin(finish(next.record), "w2-x").record;
+        retry.stage = Stage::swapchain;
+        auto survived = idle(retry);
+        check(survived.failures == 1 && !begin(survived, "w2-x").off);
+        auto again = begin(survived, "w2-x").record;
+        again.stage = Stage::swapchain;
+        check(begin(again, "w2-x").record.phase == Phase::locked);
+    }
     // the owner's record after the false alarm (retry, one failure at the swapchain): a start that idles, or exits
     // normally (idle() too), is fine
     {
