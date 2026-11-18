@@ -4600,6 +4600,8 @@
       "forgetAsk": "Sign out and forget you?",
       "forgetText": "frostdev.io deletes your name, your ID, your hardware, the list of your posts and the Kiln team's copies of your report zips. Your posts stay on Discord until you delete them.",
       "alsoDelete": "Also delete my support posts from Discord",
+      "forgetFailedTitle": "Signed out on this PC only",
+      "forgetFailed": "frostdev.io didn't hear it, so it still keeps what it had. Sign in again and use Sign out and forget me, or write to admin@frostdev.io.",
       "ai": "The Kiln team uses AI assistants. They help read support posts and reports, and they write many of the replies. The privacy page names them.",
       "page": "The full privacy page",
       "terms": "Terms",

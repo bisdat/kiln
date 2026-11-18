@@ -243,12 +243,16 @@ export function communityMockHandlers({ emit, gameRunning }: CommunityMockDeps):
     },
     community_signin_cancel: (a) => { pending.delete(String(a.id)); return null; },
     community_signout: (a) => {
-      if (account && settings.shown) requests.push(a.forget ? (a.posts ? "forget+posts" : "forget") : "signout");
+      const told = !!account && settings.shown;
+      if (told) requests.push(a.forget ? (a.posts ? "forget+posts" : "forget") : "signout");
+      // as the backend does: the key goes here whatever frostdev.io answers; a forget it did not hear is the answer
+      const heard = told && online && relayUp;
       account = null;
       postsAsOf = null;
+      changed();
+      if (a.forget && told && !heard) err("network", online ? "Kiln support isn't answering right now." : "You're offline.", online ? "relay" : "offline");
       if (a.forget) { tester = false; testPlan = null; }
       if (a.forget && a.posts) posts = [];
-      changed();
       return null;
     },
     community_check_member: () => {

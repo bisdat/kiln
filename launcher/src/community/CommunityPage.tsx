@@ -61,7 +61,8 @@ export default function CommunityPage() {
             {acct && (
               <div className="kc-links-row">
                 <button type="button" className="k-link" data-testid="kc-signout" onClick={() => api.communitySignOut(false).then(refresh).then(() => toast.ok(t("community.account.signedOut"), t("community.account.signedOutDetail"))).catch((e) => toast.error(e))}>{t("community.account.signOut")}</button>
-                <button type="button" className="k-link" data-testid="kc-forget" onClick={() => setForget(true)}>{t("community.account.forget")}</button>
+                {/* it must reach frostdev.io: not while offline or with frostdev.io not answering */}
+                <button type="button" className="k-link" data-testid="kc-forget" disabled={!net} onClick={() => setForget(true)}>{t("community.account.forget")}</button>
               </div>
             )}
             {acct && <Toggle checked={!!s?.notify} onChange={(on) => { setCommunity(qc, { notify: on }).catch((e) => toast.error(e)); }} label={t("community.notify.label")} hint={t("community.notify.hint")} />}
@@ -123,7 +124,8 @@ export default function CommunityPage() {
           <label className="kc-tick"><input type="checkbox" className="k-check" checked={alsoDelete} onChange={(e) => setAlsoDelete(e.target.checked)} data-testid="kc-also-delete" /> {t("community.privacy.alsoDelete")}</label>
         </>}
         onConfirm={async () => {
-          try { await api.communitySignOut(true, alsoDelete); } catch (e) { toast.error(errorText(e)); throw e; } finally { await refresh(); }
+          // the key goes from this PC whatever frostdev.io answers; when it did not hear it, the player is told plainly
+          try { await api.communitySignOut(true, alsoDelete); } catch { toast.error(t("community.privacy.forgetFailed"), t("community.privacy.forgetFailedTitle")); return; } finally { await refresh(); }
           toast.ok(t("community.account.signedOut"), t("community.account.signedOutDetail"));
         }} />
     </Page>

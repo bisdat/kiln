@@ -58,15 +58,20 @@ export function DeckPrivacyRow() {
 export function DeckAccountDialog({ onClose }: { onClose: () => void }) {
   const t = useT();
   const qc = useQueryClient();
-  const acct = useCommunity().data?.account ?? null;
+  const st = useCommunity().data;
+  const acct = st?.account ?? null;
+  // forgetting must reach frostdev.io: not while offline or with frostdev.io not answering
+  const net = st ? st.online && st.relay === "ok" : true;
   const [page, setPage] = useState(false);
-  const out = (forget: boolean) => api.communitySignOut(forget).then(() => refreshCommunity(qc)).then(() => { toast.ok(t("community.account.signedOut")); onClose(); }).catch((e) => toast.error(e));
+  const out = (forget: boolean) => api.communitySignOut(forget).then(() => { toast.ok(t("community.account.signedOut")); })
+    .catch((e) => (forget ? toast.error(t("community.privacy.forgetFailed"), t("community.privacy.forgetFailedTitle")) : toast.error(e)))
+    .finally(() => { void refreshCommunity(qc); onClose(); });
   if (page) return <QrDialog title={t("community.privacy.page")} text={t("community.deck.privacyQr")} url={PRIVACY_URL} onClose={() => setPage(false)} />;
   return (
     <Dialog name="community-privacy" title={t("community.privacy.title")} wide onClose={onClose} backLabel={t("common.close")}
       actions={[{ button: "y", label: t("community.privacy.page"), run: () => setPage(true) }]}
       buttons={acct
-        ? <><DeckButton id="signout" onClick={() => void out(false)}>{t("community.account.signOut")}</DeckButton><HoldButton id="forget" onConfirm={() => void out(true)}>{t("community.account.forget")}</HoldButton></>
+        ? <><DeckButton id="signout" onClick={() => void out(false)}>{t("community.account.signOut")}</DeckButton><HoldButton id="forget" disabled={!net} onConfirm={() => void out(true)}>{t("community.account.forget")}</HoldButton></>
         : <DeckButton primary onClick={onClose}>{t("common.ok")}</DeckButton>}>
       <div className="deck-scroll kdc-sent-list" tabIndex={0} data-deck-a="-" data-deck-id="privacy-text" data-testid="deck-privacy">
         <p><b>{t("community.privacy.never")}</b></p>

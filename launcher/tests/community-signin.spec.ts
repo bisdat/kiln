@@ -87,6 +87,35 @@ test.describe("desktop", () => {
   });
 });
 
+test.describe("forget needs frostdev.io", () => {
+  test("offline or frostdev.io down: Sign out and forget me waits; a forget that frostdev.io did not hear says so", async ({ page }) => {
+    await open(page, "/?mock=1&discord=in,offline#/community");
+    await expect(page.getByTestId("kc-forget")).toBeDisabled();
+    await expect(page.getByTestId("kc-signout")).toBeEnabled();
+    await open(page, "/?mock=1&discord=in#/community");
+    await page.getByTestId("kc-forget").click();
+    const arch = page.getByRole("dialog", { name: "Sign out and forget you?" });
+    await arch.getByRole("textbox").fill("forget");
+    // frostdev.io stops answering while the dialog is open
+    await mock(page, (h) => h.community.setRelay(false));
+    await arch.getByRole("button", { name: "Sign out and forget me" }).click();
+    const toast = page.locator(".k-toast").filter({ hasText: "Signed out on this PC only" });
+    await expect(toast).toBeVisible();
+    await expect(toast).toContainText("frostdev.io didn't hear it, so it still keeps what it had. Sign in again and use Sign out and forget me, or write to admin@frostdev.io.");
+    // the key is gone here all the same
+    await expect(page.getByTestId("kc-account")).toContainText("Not signed in.");
+  });
+
+  test("Deck: the hold to forget waits for frostdev.io", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto("/?mock=1&deck=steamdeck&discord=in,relaydown#/deck/community");
+    await page.locator('[data-deck-id="account"]').click();
+    const d = page.locator('[data-deck-dialog="community-privacy"]');
+    await expect(d.getByRole("button", { name: "Sign out and forget me" })).toBeDisabled();
+    await expect(d.getByRole("button", { name: "Sign out", exact: true })).toBeEnabled();
+  });
+});
+
 test.describe("Steam Deck", () => {
   test.use({ viewport: { width: 1280, height: 800 } });
 

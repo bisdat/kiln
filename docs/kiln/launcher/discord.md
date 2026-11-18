@@ -40,7 +40,10 @@ dialog waits and moves on by itself; endings: signed in (a toast), cancelled on 
 minutes, offline, frostdev.io not answering, each with Try again. Deck: a QR code and a short code for a phone, the time
 left, X for a new code; expired, declined, offline. The Deck asks with `join` on, so frostdev.io's Approve page on the
 phone offers "Also join the Kiln Discord" (ticked) to a player who isn't in it: the choice is made there. Sign out has no confirmation; "Sign out and forget me" takes the
-typed word on the desktop (a tick also deletes the player's support posts from Discord) and a hold on the Deck. The
+typed word on the desktop (a tick also deletes the player's support posts from Discord) and a hold on the Deck. It
+must reach frostdev.io, so it is off while offline or with frostdev.io not answering; when frostdev.io doesn't hear it
+all the same, the key still goes from this PC and the launcher says "Signed out on this PC only" (frostdev.io keeps what
+it had: sign in again and forget, or write to admin@frostdev.io). The
 page re-reads the account and membership when it opens.
 
 **Send to Kiln support.** Entry points: the Logs page's support report row, Play's problem banners after the fix they
