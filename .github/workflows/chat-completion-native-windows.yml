@@ -16,7 +16,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: chat-win-${{ github.ref }}
+  # Separate the validated popup candidate from a superseded Windows job
+  # that GitHub Actions left in progress despite cancel-in-progress.
+  group: chat-win-phase1b-polish-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
