@@ -336,7 +336,7 @@ inline DeviceSupport query_support(const upscale::PhysicalDevice& gpu, const ups
     VkPhysicalDeviceProperties p = gpu.props;
     if (!p.apiVersion && props) props(gpu.physical, &p);
     const uint32_t inst = gpu.instance_api ? gpu.instance_api : VK_API_VERSION_1_0;
-    s.api_version = std::min(inst, p.apiVersion);
+    s.api_version = (std::min)(inst, p.apiVersion);
     uint32_t n = 0;
     if (enum_ext && enum_ext(gpu.physical, nullptr, &n, nullptr) == VK_SUCCESS && n) {
         std::vector<VkExtensionProperties> e(n);
@@ -614,7 +614,7 @@ class DeviceMerge {
         // 4. copy the start of the game's chain up to the last struct Kiln changes
         int last = -1;
         for (const Place& p : plan)
-            if (p.where == Where::chain) last = std::max(last, p.index);
+            if (p.where == Where::chain) last = (std::max)(last, p.index);
         for (int i = 0; i <= last; ++i) {
             const StructInfo* s = find_struct(chain[static_cast<size_t>(i)]->sType);
             if (!s) {

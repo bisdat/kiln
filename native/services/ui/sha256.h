@@ -17,7 +17,7 @@ public:
         const auto* p = static_cast<const uint8_t*>(data);
         total_ += len;
         if (fill_) {
-            const size_t take = std::min(len, sizeof buf_ - fill_);
+            const size_t take = (std::min)(len, sizeof buf_ - fill_);
             std::memcpy(buf_ + fill_, p, take);
             fill_ += take;
             p += take;
