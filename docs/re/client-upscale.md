@@ -15,15 +15,21 @@ below) and of the `nvngx_dlss.dll` it ships (310.9.1.0, sha256 `3975567b…`, im
   (`Dlss`, ...), `render.dlss` / `fsr3` / `xess` (the quality mode), `renderScale`, `automaticRenderScale`, `vsync`,
   `tripleBuffering`, `fpsCap` (the game's own frame limit; 0 off), `nvidiaReflex`, `amdAntiLag`,
   `renderPreferences.sharpness`. The types `keen::pc::RenderDlssPresetSetting` / `RenderFsr3PresetSetting` exist.
-- **No frame generation** of any kind, and no `VK_NV_low_latency2` or `VK_AMD_anti_lag` strings: Reflex goes through
-  NVAPI (no names; functions by id).
+- **No frame generation** of any kind.
+- **No Reflex and no Anti-Lag code** in the PC client: no `nvapi64.dll` or `nvapi_QueryInterface` string, none of NVAPI's
+  interface ids as immediates, no `VK_NV_low_latency2` and no `VK_AMD_anti_lag`. `nvidiaReflex` and `amdAntiLag` exist
+  only as option and UI data (shared with the console builds). Its one latency control is `vkWaitForPresent2KHR`
+  (at most one present in flight, with V-Sync on).
 
 ## How the game reaches NGX
 - The static SDK loads the core with `LoadLibraryExW` (import call at `0x12f8375`), trying `\_nvngx.dll` then
   `\nvngx.dll` (wide strings at `0x1e5adb0` / `0x1e5adc8`, list built at `0x12f50eb`) next to the game first ("NGXCore
   not found next to the application"), then in the folder from the registry (`NGXCore\NGXPath`) or the display
-  driver's query (`NGXGetPathUsingQAI`). So an `nvngx.dll` in the game folder takes NGX over: that is how DLSS
-  replacements load.
+  driver's query (`NGXGetPathUsingQAI`). A core next to the game is taken first, but only when NVIDIA signed it: the
+  library checks the file's signature there (`0x12f8260` with verify on, WinVerifyTrust at `0x12f8f00`, a signer name
+  starting "NVIDIA " at `0x12f4400`). The driver's and the registry's folders are loaded without that check. So an
+  unsigned `nvngx.dll` in the game folder is refused unless the system's signature override for NGX is set, which
+  is what DLSS replacements ask their users to do.
 - It takes the core's functions with `GetProcAddress` (wrapper `0x12f4b30`, the table filled at `0x12f0708..0x12f084c`:
   `NVSDK_NGX_VULKAN_CreateFeature` at `0x12f074f` -> global `0x2846c38`, `CreateFeature1` at `0x12f0769`,
   `EvaluateFeature` `0x12f0783`, `ReleaseFeature` `0x12f079d`, `AllocateParameters` `0x12f0805`,
@@ -80,15 +86,19 @@ below) and of the `nvngx_dlss.dll` it ships (310.9.1.0, sha256 `3975567b…`, im
   an app hint. There is no parameter to read back which preset runs. Kiln offers default, J, K, L, M.
 
 ## FSR 3
-The FSR 3 upscaler is compiled into the game: no DLL, no export to hook. Its quality-mode ratio is not a constant table
-(no float runs 1.5/1.7/2.0/3.0 in the image), the RCAS sharpness is computed into `Fsr3UpscalerRcasConstants` in game
-code, and the game's own `renderScale` / `sharpness` settings already change the render size and sharpening. Changing
-FSR 3's ratio or RCAS sharpness needs a hook in game code (a sigdb pattern per game build, the dispatch's constants or
-the ratio function), found and tested per build. Not done in phase A.
+The FSR 3 upscaler is compiled into the game: no DLL, no export to hook. It is the studio's own port of FSR 3's
+passes, not AMD's SDK: context creation at `0x805d0`, dispatch at `0x81900`. The function that records the upscaler
+pass, `0x11a870` (called at `0x13d5ab`), holds every input of both upscalers in one struct: jitter, the colour, depth
+and motion-vector textures, render and output size, frame time, camera near and far, the vertical field of view and
+pre-exposure. `0xfa440` is likely the preset-to-ratio function (3.0, 2.0, 1.7, 1.5, 1.0 as a switch, not a float
+table). The RCAS sharpness is computed into `Fsr3UpscalerRcasConstants` in game code, and the game's own
+`renderScale` / `sharpness` settings already change the render size and sharpening. Changing FSR 3's ratio or RCAS
+sharpness needs a hook in game code (a sigdb pattern per game build), found and tested per build. Not done in
+phase A. More in the phase B and C client dossier (the wave's `out/upscale-bc/client/DOSSIER.md`).
 
 ## Latency
-The game's Reflex runs through NVAPI's Vulkan functions (fetched by id, no strings) and it sets no
-`VK_NV_low_latency2` markers Kiln could read. Kiln shows no latency number.
+The client has no Reflex or Anti-Lag code and sets no latency markers (see "What the game ships"), so there is
+nothing honest to read. Kiln shows no latency number.
 
 ## NVIDIA's own files (the driver's Wine copies in /usr/lib/nvidia/wine/, read only)
 `_nvngx.dll`'s five exports Kiln hooks start with ordinary prologues (no false "already patched"). `nvngx.dll` there is

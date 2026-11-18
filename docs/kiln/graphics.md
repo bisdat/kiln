@@ -90,7 +90,7 @@ A few lines in the top right corner of the game, drawn by Kiln's overlay:
   dynamic resolution may lower it); else "Not DLSS now" (the game's FSR 3, XeSS or no upscaler: Kiln does not read the
   game's own upscalers) or, without Kiln's DLSS hooks, "read from the next game start";
 - the frame cap and whether it is on.
-No latency: the game's Reflex runs through NVAPI and gives Kiln nothing to read honestly. Turning the readout on makes
+No latency: the game sets no latency markers, so there is nothing for Kiln to read honestly. Turning the readout on makes
 the overlay draw every frame (an ImGui frame and one submit per present); off, it costs nothing.
 
 ## Living next to other tools
