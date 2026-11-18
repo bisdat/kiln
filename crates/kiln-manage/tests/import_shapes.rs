@@ -150,6 +150,11 @@ pub mod shapes {
                 put(root, "setup_windows.bat", b"@echo off\n");
                 put(root, "remove_optiscaler.bat", b"@echo off\n");
             }
+            // the same DLL renamed OptiScaler.asi for Ultimate ASI Loader, packed with its settings only
+            "optiscaler-asi" => {
+                put(root, "OptiScaler.asi", &optiscaler_dll());
+                put(root, "OptiScaler.ini", b"[Menu]\nOverlayMenu=false\n");
+            }
             "141-dlss-fg" => {
                 put(root, "powrprof.dll", &plain_powrprof());
                 put(root, "EnshroudedVKFG.ini", b"[fg]\n");
@@ -525,14 +530,30 @@ fn a_tools_package_is_left_out_whole_with_one_reason() {
 #[test]
 fn optiscalers_package_is_left_out_whole_with_one_reason() {
     // a player imports OptiScaler's archive: it runs on its own next to Kiln, none of its upscaler DLLs is a mod
-    let (_t, ways) = ways("optiscaler");
-    for (how, path) in ways {
+    let (_t, packed) = ways("optiscaler");
+    for (how, path) in packed {
         let (_k, _d, r) = import(&[path]);
         assert!(r.imported.is_empty(), "{how}: OptiScaler's DLLs are no mods: {r:?}");
         assert_eq!(r.skipped.len(), 1, "{how}: {:?}", r.skipped);
         assert!(r.skipped[0].reason.contains("OptiScaler") && r.skipped[0].reason.contains("runs on its own next to Kiln"),
             "{}", r.skipped[0].reason);
     }
+    // its .asi build with its settings (renamed for Ultimate ASI Loader): left out as the tool, never an .asi package that
+    // Kiln places in scripts\ and loads (a lone OptiScaler.asi is left out the same way: engines::detect_file)
+    let (_t, ways_asi) = ways("optiscaler-asi");
+    for (how, path) in ways_asi {
+        let (_k, _d, r) = import(&[path]);
+        assert!(r.imported.is_empty(), "{how}: OptiScaler.asi is no .asi package: {r:?}");
+        assert_eq!(r.skipped.len(), 1, "{how}: {:?}", r.skipped);
+        assert!(r.skipped[0].reason.contains("is OptiScaler, which runs on its own next to Kiln"), "{how}: {}", r.skipped[0].reason);
+    }
+    // in a scripts folder of its package, as Ultimate ASI Loader reads it, and next to the upscaler DLLs it loads
+    let s = tmp("optiscaler-scripts");
+    put(&s.0, "pack/scripts/OptiScaler.asi", &optiscaler_dll());
+    put(&s.0, "pack/amd_fidelityfx_vk.dll", &build_test_dll(&["ffxCreateContext"], b""));
+    let (_k, _d, r) = import(&[s.0.join("pack")]);
+    assert!(r.imported.is_empty() && r.skipped.len() == 1, "{r:?}");
+    assert!(r.skipped[0].reason.contains("OptiScaler.asi is OptiScaler"), "{}", r.skipped[0].reason);
     // renamed to one of its proxy names, alone: OptiScaler too, never a DLL mod and never ReShade
     let t = tmp("optiscaler-renamed");
     for name in ["dxgi.dll", "winmm.dll", "version.dll", "dbghelp.dll", "d3d12.dll", "winhttp.dll", "wininet.dll"] {
