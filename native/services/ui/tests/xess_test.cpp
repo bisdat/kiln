@@ -775,6 +775,36 @@ static void motion_copy() {
     }
 }
 
+static void lifetime() {
+    // the backend object goes while its last frames may still run (a core that deletes it early): the context in use and
+    // the recently retired one are left alone, an old retired one goes, and the log says so; XeSS's log callback stops
+    fx::reset();
+    std::vector<std::string> log;
+    upscale::Why why;
+    std::string detail;
+    {
+        XessBackend b(std::make_unique<FakeHost>(&log));
+        CHECK(b.load(files(), &why, &detail));
+        b.device_needs(gpu());
+        CHECK(b.device_ready(device(true), &why, &detail));
+        CHECK(b.create(game_ci(), &detail));  // context 0: retired, then 4 records of context 1 -> destroyed
+        b.destroy();
+        CHECK(b.create(game_ci(), &detail));
+        for (int i = 0; i < 4; ++i) CHECK(b.record(game_frame(static_cast<uint64_t>(i)), &detail));
+        CHECK(fx::all[0]->destroyed);
+        b.destroy();  // context 1: retired just now
+        CHECK(b.create(game_ci(), &detail));  // context 2: in use
+        CHECK(b.record(game_frame(9), &detail));
+    }
+    CHECK(!fx::all[1]->destroyed && !fx::all[2]->destroyed);
+    bool said = false;
+    for (const auto& l : log) said |= has(l, "may still run on the GPU");
+    CHECK(said);
+    const size_t n = log.size();
+    fx::logger("after the backend", kLogError);  // XeSS calling back late: nobody listens, nothing breaks
+    CHECK(log.size() == n);
+}
+
 static void ratios_of_the_game() {
     // every FSR 3 preset of the game (0xfa440: 3.0, 2.0, 1.7, 1.5, 1.0) at 1080p and 4K, as the core creates them
     fx::reset();
@@ -830,6 +860,7 @@ int main() {
     contexts();
     knobs_reach_xess();
     motion_copy();
+    lifetime();
     ratios_of_the_game();
     fx::reset();
     std::printf("xess_test: %d checks passed\n", g_checks);
