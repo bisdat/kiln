@@ -121,6 +121,81 @@ pub struct GameStatus {
     /// overlay does (OptiScaler: `graphics_tools`), one note each. Left out when there is none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub graphics_tools: Vec<GraphicsToolNote>,
+    /// (dev.29.18) Tools in the game folder that hook what Kiln's graphics tools hook (kiln.json "graphics": the frame
+    /// cap, DLSS settings): Kiln's step aside next to them (`graphics_step_aside`). Left out when there is none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub graphics_step_aside: Vec<GraphicsStepAside>,
+}
+
+/// `GameStatus.graphics_step_aside`: a tool in the game folder that makes Kiln's graphics tools step aside.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphicsStepAside {
+    /// "optiscaler", "streamline", "vkfg", "dlsstweaks" or "nvngx".
+    pub kind: String,
+    /// The tool's file relative to the game folder, forward slashes, as it is named on disk.
+    pub file: String,
+    /// Kiln's frame cap steps aside too (else only Kiln's DLSS settings do; the readout always works).
+    pub frame_cap: bool,
+}
+
+/// The file in `dir` whose name is `name` in any case (Windows and Wine match names so; the game folder may sit on a
+/// case-sensitive file system). The first in sorted order when several match.
+fn file_named(dir: &Path, name: &str) -> Option<String> {
+    let mut found: Vec<String> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.eq_ignore_ascii_case(name))
+        .collect();
+    found.sort();
+    found.into_iter().next()
+}
+
+/// The directory in `dir` whose name is `name` in any case.
+fn dir_named(dir: &Path, name: &str) -> Option<String> {
+    let mut found: Vec<String> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.eq_ignore_ascii_case(name))
+        .collect();
+    found.sort();
+    found.into_iter().next()
+}
+
+/// The tools in a game folder next to which Kiln's graphics tools (kiln.json "graphics") step aside, in this order:
+/// OptiScaler (`engines::optiscaler_in`), NVIDIA Streamline (`sl.interposer.dll` in the folder or `Streamline/`), a DLSS
+/// frame generation mod (`EnshroudedVKFG.ini`), DLSSTweaks (`dlsstweaks.ini`) and another DLSS loader (`nvngx.dll` or
+/// `_nvngx.dll`; the game's own `nvngx_dlss.dll` is not one). The first three take the frame cap too. Names match in
+/// any case.
+pub fn graphics_step_aside(game_dir: &Path) -> Vec<GraphicsStepAside> {
+    let entry = |kind: &str, file: String, frame_cap: bool| GraphicsStepAside { kind: kind.to_string(), file, frame_cap };
+    let mut out = Vec::new();
+    if let Some(file) = crate::engines::optiscaler_in(game_dir) {
+        out.push(entry("optiscaler", file, true));
+    }
+    let streamline = file_named(game_dir, "sl.interposer.dll").or_else(|| {
+        let sub = dir_named(game_dir, "Streamline")?;
+        file_named(&game_dir.join(&sub), "sl.interposer.dll").map(|f| format!("{sub}/{f}"))
+    });
+    if let Some(file) = streamline {
+        out.push(entry("streamline", file, true));
+    }
+    if let Some(file) = file_named(game_dir, "EnshroudedVKFG.ini") {
+        out.push(entry("vkfg", file, true));
+    }
+    if let Some(file) = file_named(game_dir, "dlsstweaks.ini") {
+        out.push(entry("dlsstweaks", file, false));
+    }
+    if let Some(file) = file_named(game_dir, "nvngx.dll").or_else(|| file_named(game_dir, "_nvngx.dll")) {
+        out.push(entry("nvngx", file, false));
+    }
+    out
 }
 
 /// `GameStatus.graphics_tools`: one tool and what to expect from Kiln's overlay next to it.
@@ -775,6 +850,7 @@ pub fn status_with(dirs: &DataDirs, install: &GameInstall, roots: &[SteamRoot]) 
         start,
         build,
         graphics_tools: if install.kind == GameKind::Client { graphics_tools(&install.path) } else { Vec::new() },
+        graphics_step_aside: if install.kind == GameKind::Client { graphics_step_aside(&install.path) } else { Vec::new() },
     })
 }
 
