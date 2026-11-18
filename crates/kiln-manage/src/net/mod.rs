@@ -195,6 +195,11 @@ pub fn too_large(url: &Url) -> Error {
     Error::new(ErrorCode::Refused, format!("The answer from {} was larger than allowed.", url.redacted()))
 }
 
+/// Whether an error is [`too_large`]'s (a download that would pass its bound).
+pub fn is_too_large(e: &Error) -> bool {
+    e.code == ErrorCode::Refused && e.message.starts_with("The answer from ") && e.message.ends_with(" was larger than allowed.")
+}
+
 /// The error for a failed exchange. Transport diagnostics are dropped on purpose: they can hold the full URL.
 pub fn network_error(url: &Url) -> Error {
     Error::new(ErrorCode::Network, format!("The request to {} failed. Check your connection and try again.", url.redacted()))

@@ -64,6 +64,7 @@
 //! | [`publish`] | `kiln publish`: the artifact policy and audit of a mod zip (`zip`) |
 //! | [`release_binding`] | `kiln-release.json`: which mod, version and zip a release holds |
 //! | [`updates`] | update checks for installed mods: source receipts, one status per mod from every provider; a notice and a link, never a download |
+//! | [`vendor`] | vendor upscaler files the player asks the launcher for (AMD FSR, Intel XeSS): the shipped manifest with its pins and licences, downloads checked by size and SHA-256, `<game>/kiln/vendor/`, removal |
 
 pub mod error;
 pub mod task;
@@ -154,6 +155,7 @@ pub mod net;
 pub mod release_binding;
 pub mod publish;
 pub mod updates;
+pub mod vendor;
 
 pub use error::{Error, ErrorCode, Result};
 
