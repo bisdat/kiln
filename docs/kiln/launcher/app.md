@@ -560,9 +560,11 @@ is a webview that never painted the page (a player on NVIDIA / X11 with 0.2.0-de
 - **Choosing the mode**: `--software-render` / `--gpu-render` (the last one given wins), then
   `KILN_LAUNCHER_RENDER=software|gpu`, then the marker, then the GPU. Settings > Appearance, "Draw the launcher without
   the GPU", sets or clears the marker (`app_render_set`) for the next start. A start with an nxm link takes no other
-  argument (main.rs). The marker is read from the data folder as found (`folder::found_dirs`, read only): 0.2.0-dev.29.15
+  argument (main.rs). The marker is read from the data folder as found (`folder::found_dirs`, read only): 0.2.0-dev.29
   to 29.17 read it through `state::dirs()`, which refuses until the beta copy's gate opens (after the window exists),
-  so those starts never saw it.
+  so those starts never saw it. A marker written then (by Settings, or by a fallback whose next starts drew with the
+  GPU again) takes effect from 0.2.0-dev.29.18: such a start says on stderr and in `launcher.log` that it stays so until
+  the switch is off, and the switch's hint says the same.
 - **What it says**: at the start, one line on stderr with the log's path and the mode. `launcher.log`, `render:` lines:
   the mode and why, the WebKitGTK version, `XDG_SESSION_TYPE` and whether `DISPLAY` / `WAYLAND_DISPLAY` are set, the
   first line of `/proc/driver/nvidia/version` (or that there is none), WebKit's sandbox and the probe of bwrap, when the
@@ -648,7 +650,10 @@ most three custom buttons, so the launcher calls GTK itself.
 - *At the start*, before the window: only when WebKit runs its sandbox in this start and the probe found bwrap failing
   or missing. It says what is wrong (bwrap's line, the AppArmor value), why WebKit runs it, what turning it off means and
   the proper fix (below). Buttons: "Turn the sandbox off and start" (a restart without it; the marker is written once the
-  beta copy's gate is open, by the new start), "Start anyway", "Quit". Closing it starts as before.
+  beta copy's gate is open, by the new start), "Start anyway", "Quit". Closing it starts as before. The first button is
+  there only when its restart really runs without the sandbox: not with the player's own
+  `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=0` (which the launcher leaves alone) and not with a WebKitGTK before 2.40
+  (no such switch); the message then says why, and the same holds for the late message's button.
 - *When the page did not start* and the launcher has nothing left to try by itself (a software-mode start, a mode the
   player forced, a fallback whose restart failed): what was tried, WebKit's sandbox in this start, where `launcher.log`
   is, and that each button is a try (the cause is not known; offered also when the probe passed). Buttons: "Start
@@ -656,6 +661,9 @@ most three custom buttons, so the launcher calls GTK itself.
   (only when this start drew with the GPU; the player's click wins over `--gpu-render`), "Open the log folder" (the
   message stays), "Quit". Closing it leaves the window as it is. It goes up over the window through its main loop; with
   no answer from that loop within 5 s, through the tools above.
+- Enter (GTK's default button, zenity's and kdialog's first) never turns the sandbox off: that is always a button the
+  player picks. A zenity that cannot open a display (it ends with 1, as for Cancel; its stderr says "open display") is
+  not taken as an answer: the next tool is asked.
 - What turning the sandbox off means (checked): the launcher's page is its own bundle. Its CSP (`tauri.conf.json`)
   allows scripts, styles, fonts and connections only from the bundle, the IPC and `kiln-asset:`, and from the internet
   only images from `staticdelivery.nexusmods.com` and `images.nexusmods.com`; the page renders no remote HTML and
@@ -677,8 +685,11 @@ only when the start runs the sandbox.
 **The proper fix** (Ubuntu 24.04 and systems built on it, for a launcher that runs WebKit's sandbox: the .deb or any
 install at `/usr/bin/kiln-launcher`): an AppArmor profile that allows user namespaces for the launcher, as Ubuntu ships
 for GNOME Web. WebKit's bwrap is the launcher's child and runs under its profile; Ubuntu fixed GNOME Web, Devhelp and
-Geary, whose WebKit starts bwrap the same way, with exactly such profiles (Launchpad bug 2046844). Not tried on Ubuntu
-from here.
+Geary, whose WebKit starts bwrap the same way, with exactly such profiles (Launchpad bug 2046844).
+
+**Not run on Ubuntu.** Nobody has tried these steps with the launcher on Ubuntu yet. The profile below is AppArmor 4.0's `epiphany`
+profile, which Ubuntu 24.04 ships as `/etc/apparmor.d/epiphany`, with the name and the path changed; loading it with
+`apparmor_parser -r` is AppArmor's usual way. Check it against Ubuntu's documentation before you point a player at it.
 ```sh
 sudo tee /etc/apparmor.d/kiln-launcher >/dev/null <<'EOF'
 abi <abi/4.0>,
@@ -695,9 +706,9 @@ sudo apparmor_parser -r /etc/apparmor.d/kiln-launcher
 Another path: put the launcher's own in the profile line. Not for the AppImage: its WebKit cannot run the sandbox on any
 system (above); leave `WEBKIT_FORCE_SANDBOX` unset or use the .deb. A .deb without bwrap: install the system's
 `bubblewrap` package. The blunt alternative, `kernel.apparmor_restrict_unprivileged_userns=0` (until the next boot:
-`sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`; for good: that line in
-`/etc/sysctl.d/60-apparmor-namespace.conf`, read at boot), lifts the restriction for every program; AppArmor's wiki
-does not recommend it.
+`sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`; for good, AppArmor's wiki puts that line in
+`/etc/sysctl.d/60-apparmor-namespace.conf`), lifts the restriction for every program on the system, not only the
+launcher: the protection Ubuntu turned on in 24.04 is then gone.
 
 **An AppArmor profile in the .deb** (a packaging decision, not built): `/etc/apparmor.d/kiln-launcher` as above, loaded
 by the package's postinst (`apparmor_parser -r`, dh_apparmor) and removed with it. Today it would change nothing: the

@@ -155,7 +155,7 @@ mod tests {
         assert!(super::super::info(&root).is_none());
         let _ = std::fs::remove_dir_all(root);
     }
-    /// 29.15 to 29.17: the start's render lines went to stderr only and its marker was never read, because both came
+    /// 0.2.0-dev.29 to 29.17: the start's render lines went to stderr only and its marker was never read, because both came
     /// before this gate opened. The marker is read from the folder as found; the lines reach launcher.log once it opens.
     #[test]
     fn the_starts_lines_and_markers_do_not_wait_for_the_gate() {

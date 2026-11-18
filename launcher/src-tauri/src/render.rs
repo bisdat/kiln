@@ -420,7 +420,7 @@ pub fn prepare(args: &[String]) {
         std::env::remove_var(SET_BY_US);
         std::env::remove_var(RESTARTED);
     }
-    // read only, before the beta copy's gate opens (state::dirs() refuses until then: 29.15 to 29.17 never saw the marker)
+    // read only, before the beta copy's gate opens (state::dirs() refuses until then: 0.2.0-dev.29 to 29.17 never saw the marker)
     let dirs = crate::folder::found_dirs();
     let has_marker = dirs.as_ref().is_some_and(|d| marker(d).is_file());
     let c = decide(args, std::env::var(ENV).ok().as_deref(), restarted, has_marker);
@@ -450,7 +450,7 @@ pub fn prepare(args: &[String]) {
         }
     }
     if c.why == Why::Marker {
-        // a marker can be old: 0.2.0-dev.29 to 29.17 never read it at the start (crate::folder::found_dirs)
+        // a marker can be old: 0.2.0-dev.29 to 29.17 never read it at the start
         line += &format!("; {UNDO_MARKER}");
     }
     if let Some(i) = &c.ignored {
