@@ -35,6 +35,7 @@
 #include "safetyhook.hpp"
 #include "image_budget.h"
 #include "ui.h"
+#include "upscale.h"
 #include "vk_hooks.h"
 
 namespace kui {

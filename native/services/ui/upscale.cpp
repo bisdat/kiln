@@ -39,6 +39,7 @@
 #include "graphics_settings.h"
 #include "kiln_hook.hpp"
 #include "ui.h"
+#include "upscale.h"
 #include "upscale_backend.h"
 #include "upscale_logic.h"
 #include "vendor_file.h"

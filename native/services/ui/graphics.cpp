@@ -42,6 +42,7 @@
 #include "nlohmann/json.hpp"
 #include "safetyhook.hpp"
 #include "ui.h"
+#include "upscale.h"
 #include "ui_text.h"
 #include "upscale_logic.h"
 
