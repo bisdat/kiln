@@ -26,6 +26,10 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/overlay_
 "$out/overlay_guard_test"
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/overlay_mode_test.cpp" -o "$out/overlay_mode_test"
 "$out/overlay_mode_test"
+# which present queue the overlay draws on, queues handed out while the device is made, one present's semaphores
+# (vk_present.h, inbox 80)
+g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/vk_present_test.cpp" -o "$out/vk_present_test"
+"$out/vk_present_test"
 # imgui.ini read and written on its own thread, never on the present call (ini_file.h, inbox 50)
 g++ -std=c++20 -O1 -g -Wall -Wextra -pthread -fsanitize=thread "$here/ini_file_test.cpp" -o "$out/ini_file_test"
 "$out/ini_file_test"

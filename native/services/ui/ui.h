@@ -64,8 +64,21 @@ extern std::atomic<bool> g_want_mouse;       // ImGui wants the mouse (last fram
 extern std::atomic<bool> g_wheel_active;     // a radial wheel is open (wheel.cpp)
 extern std::atomic<bool> g_page_capture;     // the Kiln page in the game's main menu is opening or shown (menu_page.cpp)
 inline bool wheel_active() { return g_wheel_active.load(std::memory_order_relaxed); }
+// The overlay's drawing turned off during this session (vk.cpp: a failed Vulkan submit, a fault, a present queue Kiln
+// cannot draw with; ui.cpp overlay_turned_off). Set once, never cleared: from then on nothing of Kiln's captures the
+// game's input or asks to draw, and the Mods entry shows the reason as with the drawing off from the start.
+extern std::atomic<bool> g_overlay_failed;
+inline bool overlay_failed() { return g_overlay_failed.load(std::memory_order_acquire); }
+// The overlay draws in this session: its drawing was on at the start and has not turned off since.
+inline bool overlay_draws() { return overlay_drawing_on() && !overlay_failed(); }
+// vk.cpp, once, on the present call after the overlay's drawing turned off, outside the overlay's locks: the one log
+// line (at `level`: an error for a failure, a warning for a present Kiln cannot draw in), kiln.ui's status, the Mods
+// caption, the capability rows and the crash guard (ui.cpp). `reason` is short (the Mods caption and Ui.Status.Error
+// carry it), `detail` goes into kiln.log only.
+void overlay_turned_off(int level, const char* reason, const char* detail);
+const std::string& overlay_off_reason();  // the reason (after overlay_failed() said true), else ""
 inline bool capturing() {
-    return overlay_drawing_on() && (g_menu_open.load(std::memory_order_relaxed) || g_page_capture.load(std::memory_order_relaxed) ||
+    return overlay_draws() && (g_menu_open.load(std::memory_order_relaxed) || g_page_capture.load(std::memory_order_relaxed) ||
            g_interactive.load(std::memory_order_relaxed) > 0 || wheel_active());
 }
 // Something to draw this frame. The native fallback menu counts too.
@@ -73,7 +86,7 @@ extern std::atomic<uint32_t> g_render_demand;  // kiln.render acquire_frames han
 extern std::atomic<uint32_t> g_footer_demand;  // Kiln's mark next to its line in the main menu's footer (menu_footer.cpp)
 extern std::atomic<uint32_t> g_graphics_demand;  // the graphics readout (graphics.cpp)
 inline bool want_draw() {
-    return overlay_drawing_on() && (capturing() || g_demand.load(std::memory_order_relaxed) > 0 || g_render_demand.load(std::memory_order_relaxed) > 0 ||
+    return overlay_draws() && (capturing() || g_demand.load(std::memory_order_relaxed) > 0 || g_render_demand.load(std::memory_order_relaxed) > 0 ||
                                     g_footer_demand.load(std::memory_order_relaxed) > 0 || g_graphics_demand.load(std::memory_order_relaxed) > 0);
 }
 bool in_frame();  // the calling thread is inside the overlay frame's callbacks (drawing calls work)
@@ -179,6 +192,7 @@ void footer_texts_changed();                  // any thread: Kiln's texts change
 
 // ---- Kiln's own texts (ui_text.h; set_texts) ----
 void game_texts_changed();                    // any thread: the Mods entry and the drawing-off caption in the new language
+void game_overlay_turned_off();               // any thread, once: the Mods entry shows why the overlay's drawing went off
 
 // ---- menu_page.cpp (the Kiln menu as a page of the game's main menu: feature ui.menu_page) ----
 bool page_install(bool main_menu_hooked);  // game_install, after the MainMenuEntry hook: resolve, hook Credits
