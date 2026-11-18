@@ -39,7 +39,7 @@ generated [../status.generated.md](../status.generated.md); what has no API yet 
 | [materials.md](materials.md) | New surfaces for models from PNGs and numbers, on the game's own shaders: no base to name, or made from a glTF's materials |
 | [animations.md](animations.md) | Clips, skeletons and state-machine graphs from glTF: tools/animcook, cook.json animation steps, clips reworked from other clips (`from`); states of a mod's own in the player's animation graph (`assets/player-states.json`) |
 | [quests.md](quests.md) | Quest chains, conversations and NPCs: QuestBlock/DialogueBlock, quests/*.json, Quests.Define, rewards and client requirements |
-| [texts.md](texts.md) | The game's English texts by loca tag (`Texts.Get`, `GetPlain`), also on a dedicated server from a local catalog |
+| [texts.md](texts.md) | The game's English texts by loca tag (`Texts.Get`, `GetPlain`), also on a dedicated server from a local catalog; on a game client, the game's own texts in the player's language and an item's tooltip rows (`Content.Text`, `Content.TooltipValues`, since 0.2.0-dev.29.18) |
 | [lint.md](lint.md) | `kiln lint`: usage, output, JSON dialects, every rule with an example and the fix; [schemas/](schemas/) is the field reference of each format |
 | [vscode.md](vscode.md) | The VS Code extension (tools/vscode): schemas, lint, game ids, build/deploy/reload, Testing view, kiln.log, KAP/1 console, Impact assembly |
 | [cli.md](cli.md) | The `kiln` command: new, build, cook, deploy, run, reload, test, debug, lint, pack, publish, logs, blocks, catalog, vfx, skeleton |

@@ -10,7 +10,8 @@
 //! - [`write_zip`] (feature `zip`) writes the zip.
 //!
 //! Layout of the zip: `summary.txt` (for a forum post), `report.json` (findings and failed sections), `game/<path>`
-//! (tails of kiln.log, proxy.log, eml.log, tick-stats.jsonl, shroudlink_client.log, the newest crash report; `kiln/state/*.json`, `kiln/profile.json`,
+//! (tails of kiln.log, proxy.log, eml.log, tick-stats.jsonl, shroudlink_client.log, XHL-Core's XHL-Native-Plugin-Host.log, the newest crash
+//! report; `kiln/state/*.json`, `kiln/profile.json`,
 //! `kiln/chain.ini`, `kiln/kiln.json`, `kiln/.install.json`), `greeneye-mods/<id>/<game|library>/*.log|*.status` (tails of each Greeneye
 //! mod's own log and status files, with Greeneye Loader's logs under `game/`), `launcher/launcher.log` (tail), `listings/*.txt` (names,
 //! sizes and times of the game folder's top level, `kiln/` two levels deep, each engine's mods folder).
@@ -472,6 +473,9 @@ pub struct ReportInput {
     pub roots: Option<Vec<SteamRoot>>,
     /// Extra facts for summary.txt (kilnctl: the instance's Wine runner).
     pub facts: Vec<(String, String)>,
+    /// (dev.29.18) Findings only the caller can know (the Linux launcher: WebKit's sandbox, `webkit-sandbox`), listed
+    /// with the report's own (redacted like them).
+    pub findings: Vec<Finding>,
     /// (dev.29) The launcher's update channel: summary.txt, the short summary and report.json say it (a tester's report
     /// says which test build). None: not a launcher (kilnctl) or not known.
     pub channel: Option<ReportChannel>,
@@ -521,7 +525,7 @@ pub struct Finding {
     /// Stable name: `not-installed`, `proxy-not-kiln`, `files-missing`, `files-changed`, `not-loaded`,
     /// `proton-override`, `proton-chained-override`, `unknown-build`, `safe-idle`, `own-loader`, `loader-in-folder`, `unlisted-mods`,
     /// `mod-failed`, `hosted-mods`, `hosted-off`, `crash`, `profile-invalid`, `newer-mods`, `no-game`, `sf-startup-failed`, `sf-startup-skipped`,
-    /// `optiscaler`.
+    /// `optiscaler`; from the launcher ([`ReportInput::findings`]): `webkit-sandbox`.
     pub id: String,
     pub level: Level,
     pub text: String,
@@ -990,6 +994,9 @@ pub fn build(input: &ReportInput) -> Report {
     }
     for (k, v) in &input.facts {
         let _ = writeln!(sys, "{:<15}{v}", format!("{k}:"));
+    }
+    for f in &input.findings {
+        cx.find(&f.id, f.level, f.text.clone());
     }
 
     let Some(game) = game_dir.as_deref() else {
@@ -1502,6 +1509,7 @@ pub fn build(input: &ReportInput) -> Report {
     // Native UI initialization and later player-menu visibility are separate addon paths; kiln.log alone cannot
     // distinguish them. Read only this bounded log, not the addon's key bindings or per-server mod settings.
     cx.add_tail("shroudlink_client.log", SMALL_LOG_MAX);
+    xhl_core_logs(&mut cx, game);
     check_not_loaded(&mut cx, install.as_ref(), dirs.as_ref(), receipt.is_some() || dinput8.as_ref().is_some_and(|d| d.kind == ProxyKind::Kiln),
         boot.as_ref(), boot_time, proxy_log.is_some(), &facts);
     if receipt.is_some() {
@@ -1624,6 +1632,29 @@ fn mod_roots(game: &Path) -> Vec<String> {
     }
     v
 }
+
+/// XHL-Core's own log, `XHL-Native-Plugin-Host.log` ([`engine_mods::XHL_CORE_LOG`]): which plugin folders of `mods/` it
+/// loaded, skipped or refused (inbox 86: a mod the profile had off that XHL-Core loaded anyway). XHL-Core writes it next
+/// to the DLL it runs as: the game's `dinput8.dll` (its author's instructions) or Kiln's copy of it,
+/// `kiln/chain/<id>/xhl-core.dll` (a Native mod of the profile). The tail of each that is there, at most
+/// [`XHL_CORE_LOGS`], redacted as Kiln's logs are; a link is not followed (neither the folder nor the file).
+fn xhl_core_logs(cx: &mut Ctx, game: &Path) {
+    cx.add_tail(engine_mods::XHL_CORE_LOG, SMALL_LOG_MAX);
+    let chain = rel(game, crate::paths::game::CHAIN_DIR);
+    let real_dir = |p: &Path| std::fs::symlink_metadata(p).is_ok_and(|m| m.is_dir() && !crate::quick::import_is_link(&m));
+    if !real_dir(&chain) { return; }
+    let mut ids: Vec<String> = std::fs::read_dir(&chain).into_iter().flatten().flatten()
+        .filter(|e| real_dir(&e.path()) && e.path().join(engine_mods::XHL_CORE_LOG).exists())
+        .filter_map(|e| e.file_name().to_str().filter(|id| crate::manifest::is_mod_id(id)).map(str::to_owned))
+        .collect();
+    ids.sort();
+    for id in ids.into_iter().take(XHL_CORE_LOGS) {
+        cx.add_tail(&format!("{}/{id}/{}", crate::paths::game::CHAIN_DIR, engine_mods::XHL_CORE_LOG), SMALL_LOG_MAX);
+    }
+}
+
+/// Kiln's copies of XHL-Core whose logs [`xhl_core_logs`] reads (a profile has one; more are copies of other profiles).
+const XHL_CORE_LOGS: usize = 4;
 
 /// Greeneye's logs (docs/kiln/engines/greeneye.md): kiln-greeneye's `kiln/logs/greeneye-loader.log`, Greeneye Loader's own
 /// `greeneye/loader.log` (and `loader.second-copy.log`), and each Greeneye mod's own `*.log` and `*.status` files in its

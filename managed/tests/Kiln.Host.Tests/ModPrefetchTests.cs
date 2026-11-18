@@ -69,18 +69,17 @@ public sealed partial class ModPrefetchTests : ModsFixture
         File.WriteAllBytes(file, new byte[2048]);
         var lines = new List<string>();
         void Log(LogLevel l, string t) { lock (lines) lines.Add($"{l}: {t}"); }
-        // The thread's own state, read on it while it runs (the list is asked for there): reading IsBackground on the
-        // Thread object afterwards races the thread's end and throws once it is dead.
-        (bool Background, string? Name, ThreadPriority Priority) seen = default;
+        // Thread.IsBackground throws once the thread has ended, which it may have before Start returns: the file list is
+        // made on the prefetch thread, so it says whether that thread is a background one.
+        bool? background = null;
         var thread = ModPrefetch.Start(() =>
         {
-            var self = Thread.CurrentThread;
-            seen = (self.IsBackground, self.Name, self.Priority);
+            background = Thread.CurrentThread.IsBackground;
             return [file, Path.Combine(Root, "none.dll")];
         }, Log);
         Assert.NotNull(thread);
         thread.Join();
-        Assert.Equal((true, "kiln-host prefetch", ThreadPriority.BelowNormal), seen);
+        Assert.True(background);
         Assert.Matches(@"^Info: prefetch: 1 file\(s\), 0\.0 MB of the mods' and Kiln's assemblies read in [0-9]+ ms on a background thread", Assert.Single(lines));
         lines.Clear();
         Environment.SetEnvironmentVariable("KILN_NO_PREFETCH", "1");

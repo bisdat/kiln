@@ -8,6 +8,9 @@
 pub mod assets;
 pub mod commands;
 pub mod deck;
+/// The launcher's own messages when its page cannot start (Linux: GTK, else the desktop's tools).
+#[cfg(target_os = "linux")]
+pub mod dialog;
 /// The window's app id and icon on Linux, the AppImage's app menu entry.
 pub mod desktop;
 pub mod distribution;
@@ -21,6 +24,8 @@ mod perf;
 pub mod render;
 /// "Open folder": a path made safe for Explorer / the file manager, a file shown selected (app_open_path).
 pub mod reveal;
+/// WebKit's process sandbox on Linux: the player's choice, the probe of bwrap (dev.29.18).
+pub mod sandbox;
 pub mod selftest;
 /// The self-update: only in direct builds (feature `self-update`); the Nexus Mods build compiles none of it.
 #[cfg(feature = "self-update")]
@@ -243,7 +248,12 @@ pub fn run() {
             commands::app::app_render_set,
             commands::updates::updates_check,
             commands::app::app_desktop_set,
-            commands::app::app_locales
+            commands::app::app_locales,
+            commands::app::app_sandbox_set,
+            commands::vendor::vendor_status,
+            commands::vendor::vendor_license,
+            commands::vendor::vendor_download,
+            commands::vendor::vendor_remove
         ]))
         .build(tauri::generate_context!())
         .expect("error while building the Kiln Launcher")
@@ -276,6 +286,10 @@ pub(crate) fn snapshot_channel(version: &str) -> &str {
 }
 
 pub(crate) fn after_snapshot(app: &tauri::AppHandle) {
+    // the start's own lines (how the window is drawn, WebKit's sandbox) came before the gate opened
+    commands::app::flush_early_log();
+    // a message's "off" from the start before, when its marker could not be written then
+    sandbox::after_gate();
     // the installed runtime's and the bundles' sha256s from the last run (a start does not hash 1.5 GB again)
     if let Ok(d) = state::dirs() {
         kiln_manage::filecache::persist_at(&state::file_hashes(&d));

@@ -1,0 +1,14 @@
+{
+  "format": 1,
+  "vendors": {
+    "intel": [
+      {
+        "license": "Intel Simplified Software License (October 2022)",
+        "sha256": "e15ca2a10f34d836cfff59922c35dd9277ae8068353abb588c851f9d16d4737d",
+        "component": "intel-xess",
+        "version": "3.0.2",
+        "agreed": "2026-11-18T11:59:30Z"
+      }
+    ]
+  }
+}

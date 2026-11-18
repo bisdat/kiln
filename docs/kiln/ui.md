@@ -692,7 +692,13 @@ of key hints. Tab / Shift+Tab or LB / RB switch sections; arrows or the d-pad mo
 Where the list comes from (`ModCatalog.cs`, internal; usable on a dedicated server, which has no menu):
 `Mods.All` for Kiln mods; `<game>/kiln/state/` for the rest: `boot.json` (chain DLLs, Kiln plugins, the profile in use),
 `native.json`, and each engine plugin's file (`emf.json`, `eml.json`, `set.json`, `greeneye.json`, `flame.json`,
-`shroudtopia.json`, `shroudlink.json`, `ember.json`; contracts.md 5.9). ShroudForge's packages come from the profile and
+`shroudtopia.json`, `shroudlink.json`, `ember.json`; contracts.md 5.9). A profile entry of an engine that reads its mods
+only from its own folder in the game (ShroudForge's configured mods folder, SET's `shrouded_engine_tweaks/mods`;
+kiln-manage `engine_mods::placed_folder`) is shown as the copy that engine runs, `<folder>/<id>`, when Kiln's marker
+there names the entry's kind and id or the player's own folder there holds the same package (`EngineRunFolder`,
+0.2.0-dev.29.18): its details' FOLDER line names that folder, and the ShroudForge panel reads and writes the settings
+there, which profile updates keep. In Copy path mode the profile names a second copy under `kiln/profiles/` that the
+engine never reads; before, the page showed and edited that one. ShroudForge's packages come from the profile and
 its configured mods folder; its host state comes from `shroudforge.json`, with actual per-mod activation/errors and
 reported effect state/detail from SF's own `state.json` runtime section (matching PID, running, heartbeat from this
 process start and no older than 30 s). A mod reports `waiting`, `no-target`, `no-change`, `write-confirmed` or `write-failed`; ShroudForge's
@@ -725,7 +731,9 @@ folder and add the mod with Add mods in the Kiln launcher."; `ModCatalog.HandEml
 come from the profile and mods folder, with loader state from `enshwick.json`; a folder there that another kind owns
 (a profile entry of another kind, a `native-plugin.ini`, a `mod.json`, or Kiln's placement marker of another kind) is
 not listed as Enshwick's. XHL companions (the profile's `mods.xhl`, and folders with XHL-Core's `native-plugin.ini` in
-`<game>/mods/`) are their own group: "placed for XHL-Core; Kiln does not load it", with the XHL-Core prerequisite, never
+`<game>/mods/`, but not a ShroudForge package there while ShroudForge reads that folder: Kiln's marker says
+shroudforge, or its `extended.mod.json` is ShroudForge's own and not an EML package's switch; ShroudForge's own DLL
+loader loads that file's DLL, so the package is one ShroudForge row, 0.2.0-dev.29.18) are their own group: "placed for XHL-Core; Kiln does not load it", with the XHL-Core prerequisite, never
 Loaded, since Kiln never runs them and nothing reports whether XHL-Core did. A switched-off entry whose folder is still
 in `<game>/mods/` (XHL, EML mods a DLL reads there, Kiln's copy for Enshwick) says that a loader reading that folder may
 still run it. A mod the

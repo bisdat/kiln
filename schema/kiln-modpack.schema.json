@@ -29,6 +29,7 @@
           "name": { "type": "string" },
           "path": { "$ref": "common.schema.json#/$defs/relPath", "description": "Folder (or plugin DLL) inside the zip, e.g. kiln/isle-icons" },
           "hash": { "oneOf": [{ "$ref": "common.schema.json#/$defs/kdh1" }, { "$ref": "common.schema.json#/$defs/sha256" }], "description": "kdh1 of the folder; sha256 for a plugin DLL." },
+          "identity": { "$ref": "common.schema.json#/$defs/kdh1", "description": "What the server advertises for this mod when that is not hash (0.2.0-dev.29.18): another engine's mod whose advertised hash leaves out what changes while it runs (the launcher's copy: its Library entry's kdh1; any other folder: its files without logs and settings). A player's launcher accepts the server's hash when it is hash or identity." },
           "clients": { "$ref": "common.schema.json#/$defs/clients" },
           "side": { "$ref": "common.schema.json#/$defs/side" }
         }

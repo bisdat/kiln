@@ -2742,9 +2742,24 @@
       "desktopOn": "Kiln Launcher is in the app menu",
       "desktopOff": "Kiln Launcher is out of the app menu"
     },
+    "sandbox": {
+      "label": "WebKit's sandbox",
+      "intro": "Applies at the next start. Off: the launcher's page runs without WebKit's process sandbox; it shows only the launcher's own pages and, from the internet, only images from Nexus Mods.",
+      "unused": "This start: WebKit does not use its sandbox (its version for this launcher uses it only when WEBKIT_FORCE_SANDBOX=1 is set).",
+      "on": "This start: WebKit's sandbox is on (WEBKIT_FORCE_SANDBOX=1 is set).",
+      "off": "This start: WebKit's sandbox is off.",
+      "argOff": "This start: off, because {flag} was given; it wins over this switch.",
+      "argOn": "This start: {flag} was given and wins over this switch.",
+      "env": "This start: KILN_LAUNCHER_WEBKIT_SANDBOX is set and wins over this switch.",
+      "yours": "This start: WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS={value} is set in your environment and decides, whatever this switch says.",
+      "probe": "On this system: {says}.",
+      "nextOn": "The next start leaves WebKit's sandbox on",
+      "nextOff": "The next start turns WebKit's sandbox off"
+    },
     "render": {
       "intro": "For a window that stays black. Applies at the next start.",
       "noGpu": "This start draws without the GPU.",
+      "noGpuMarker": "This start draws without the GPU because this switch is on, and every start does until you turn it off.",
       "gpu": "This start draws with the GPU.",
       "noGpuRestart": "This start draws without the GPU: the page did not start with it.",
       "gpuRestart": "This start draws with the GPU: the page did not start with it.",
@@ -2801,6 +2816,71 @@
         "dlssPerformanceScale": "DLSS render scale, Performance",
         "dlssUltraPerformanceScale": "DLSS render scale, Ultra Performance",
         "readout": "Readout"
+      }
+    },
+    "upscalers": {
+      "title": "Upscalers",
+      "preview": "Preview",
+      "sub": "Vendor upscaler files. Kiln downloads them only when you ask, into the game's kiln/vendor folder.",
+      "purpose": "Kiln can run these behind the game's FSR 3 option. That arrives in a later update: until then, downloading them changes nothing in the game.",
+      "unreadable": "The upscaler files could not be read",
+      "starting": "Starting the download",
+      "unavailable": "Not available in this build of Kiln.",
+      "damaged": "A file of it is missing or changed. Download it again.",
+      "failedUnknown": "The download failed.",
+      "failedTitle": "{name} was not downloaded",
+      "size": "{size} from {host}.",
+      "partial": "{done} of it arrived already: the download goes on from there.",
+      "installed": "Version {version}, {size} on disk.",
+      "update": "Version {installed} is downloaded. Version {version} is out: {size} from {host}.",
+      "state": {
+        "notDownloaded": "Not downloaded",
+        "downloading": "Downloading",
+        "downloaded": "Downloaded",
+        "updateAvailable": "Update available",
+        "unavailable": "Not available in this build",
+        "failed": "Failed"
+      },
+      "action": {
+        "download": "Download",
+        "continue": "Continue download",
+        "update": "Update",
+        "tryAgain": "Try again",
+        "downloadAgain": "Download again"
+      },
+      "actionLabel": {
+        "download": "Download {name}",
+        "continue": "Continue the download of {name}",
+        "update": "Update {name}",
+        "tryAgain": "Try the download of {name} again",
+        "downloadAgain": "Download {name} again",
+        "remove": "Remove {name}",
+        "cancel": "Cancel the download of {name}"
+      },
+      "done": "{name} is downloaded",
+      "doneDetail": "Kiln checked every file. They are in {folder} in the game folder.",
+      "removeTitle": "Remove {name}?",
+      "removeText": "Kiln deletes {folder} ({size}) from the game folder. You can download it again later.",
+      "removed": "{name} is removed",
+      "removedDetail": "{size} freed.",
+      "removeFailed": "{name} was not removed",
+      "dialog": {
+        "title": "Download {name}",
+        "what": "What",
+        "size": "Size",
+        "files": {
+          "one": "{size}, {count} file",
+          "other": "{size}, {count} files"
+        },
+        "from": "From",
+        "fromText": "{host}: {vendor}'s own repository on GitHub, version {version}",
+        "to": "Goes to",
+        "toText": "{folder} in the game folder",
+        "licenseLead": "{vendor} licenses these files under the {license}. Here is its text in full. Read it before you agree.",
+        "licenseFrom": "Where this text is",
+        "unreadable": "The licence text could not be read",
+        "privacy": "Kiln asks {host} for these files and sends nothing else. {host} sees your IP address and a user agent that names Kiln and its version.",
+        "agree": "I agree, download"
       }
     },
     "art": {

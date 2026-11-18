@@ -24,6 +24,7 @@ Code: `crates/kiln-manage/src/report.rs` (`build`, `redact`, `write_zip`), the T
 | `game/kiln/logs/kiln.log` | the last 1 MiB |
 | `game/kiln/logs/proxy.log`, `game/kiln/logs/eml.log`, `game/shroudlink_client.log` | the last 192 KiB of each, when present (a link in its place is not followed: the report says "a link, not followed"); the shroudlink addon's own log gets the same redaction as Kiln's logs and nothing more (see below) |
 | `game/kiln/logs/tick-stats.jsonl` | the last 1 MiB (whole lines), when present: Kiln's step times per world and minute, rewritten at every game start (since dev.29) |
+| `game/XHL-Native-Plugin-Host.log`, `game/kiln/chain/<id>/XHL-Native-Plugin-Host.log` | (dev.29.18) XHL-Core's own log, when present, next to the DLL it runs as: the game's `dinput8.dll` (its author's instructions) or Kiln's copy of it for a Native mod of the profile (`kiln/chain/<id>/xhl-core.dll`, at most 4 such folders, each a Kiln mod id): which plugin folders it loaded, skipped or refused. The last 192 KiB of each, redacted as Kiln's logs; a link in the file's or the folder's place is not followed |
 | `game/kiln/logs/greeneye-loader.log`, `game/greeneye/loader.log`, `game/greeneye/loader.second-copy.log` | kiln-greeneye's log and Greeneye Loader's own, the last 64 KiB of each, when present |
 | `greeneye-mods/<id>/game/*.log`, `.../game/*.status`, `greeneye-mods/<id>/library/...` | each Greeneye mod's own log and status files, one zip folder per mod folder (`game`: its folder in `greeneye/`, `library`: a Library entry; one id may have both) (top level of its folder, at most 4 per mod and 12 mods, the last 64 KiB of each): a Greeneye mod writes what it found and patched only there (The Worst Map Mod: `unlock_map_markers.log`, `UnlockMapMarkers.status`). The folders are those `kiln/state/greeneye.json` names and those in `greeneye/`, read only inside `<game>/greeneye/` or the launcher's `library/greeneye/` (resolved, no links); any other folder is left out with a note (`greeneye-log-skipped`). Compared resolved, so a different spelling of the same folder is the same. Its settings (`.ini`) and data are not read |
 | `game/OptiScaler.ini`, `game/OptiScaler.log` | (dev.29.18) only with OptiScaler in the game folder (`engines::optiscaler_in`): its settings as they are, redacted, at most 1 MiB, and the last 192 KiB of its own log when it writes one (`[Log] LogToFile=true`), each under its name on disk |
@@ -42,7 +43,9 @@ lines. A file that is cut says so in its first line.
 ### summary.txt
 
 - **System:** OS (Windows edition, version and build from the registry; on Linux `/etc/os-release` and the kernel), a
-  Steam Deck (the launcher's own detection; kilnctl: DMI `Jupiter`/`Galileo`, SteamOS, `SteamDeck=1`).
+  Steam Deck (the launcher's own detection; kilnctl: DMI `Jupiter`/`Galileo`, SteamOS, `SteamDeck=1`). The Linux
+  launcher adds how it draws its window (`Launcher:`) and (dev.29.18) WebKit's sandbox in this start and the probe of
+  bwrap (`WebKit sandbox:`).
 - **Game:** the folder (redacted), client or server, platform, Steam build, the Proton prefix, the compat tool from
   Steam's `config.vdf` and the prefix's `version` file, Steam's launch options (not for a direct start), running or not,
   the exe's sha256 and whether `kiln/sigdb/builds/<side>/<sha256>.json` says Kiln verified this build. (dev.29.17)
@@ -84,6 +87,7 @@ Each is one plain sentence. `problem` explains why mods don't load, `warning` ma
 | `newer-mods` | Kiln mods of the profile built against a newer Kiln (`game::newer_mods`, the Play page's "Update Kiln") |
 | `optiscaler` | (dev.29.18) a note: OptiScaler is in the game folder (`game::graphics_tools`), with the file and what Kiln's overlay does next to it with its OptiScaler.ini (the Play page's words): steps aside with OptiScaler's own menu on or frame generation set, draws with `OverlayMenu=false`. summary.txt says the same in a "Graphics tool:" line under the proxies |
 | `no-game` | the report was made without a game (note) |
+| `webkit-sandbox` | (dev.29.18, from the Linux launcher: `ReportInput.findings`, `sandbox::finding`) the start's probe found that the bwrap WebKit runs cannot start (its line) or is missing: a problem when this start runs WebKit's sandbox (the launcher's page cannot open; turn it off in the launcher's message or with `--no-webkit-sandbox`), a note when it does not (a default start: then it is not why a window stays empty); the AppImage's own missing bwrap (it has none on any system) only when the start runs the sandbox. With the AppArmor value when it restricts user namespaces. summary.txt's system has a `WebKit sandbox:` line in every Linux launcher report ([app.md](app.md), "WebKit's sandbox (Linux)") |
 
 ## Privacy
 

@@ -251,7 +251,8 @@ engines' mods") and 5.8.
   needs). The engine's own loader in it is never installed and is not an error: the result carries one line of
   information, `EML's own loader is in this package: not needed, Kiln runs EML mods` (the loaders of EMF, EML,
   ShroudForge, SET, Greeneye, Flame, Shroudtopia, Enshwick, shroudlink and Ember; DLL chain loaders get "not needed, Kiln
-  loads DLL mods itself"). A tool that runs on its own next to Kiln (Aldrich's mod menu, ReShade, OptiScaler, Live Map, Shared XP) is
+  loads DLL mods itself"). EMF's own DLLs beside its loader (`emf_core.dll`, `emf_content.dll`, `emf_frametime.dll` in
+  its download's `game/emf/`, known by their exports) get such a line too, never a DLL mod's entry. A tool that runs on its own next to Kiln (Aldrich's mod menu, ReShade, OptiScaler, Live Map, Shared XP) is
   left out whole with what to do (copy its files into the Enshrouded folder yourself). Folders such as `fomod/`,
   `screenshots/`, `__MACOSX/` and the readme, licence and script files around a mod are ignored.
 - **Ids.** An engine manifest has no id rule of Kiln's (`HoardersHelper`, `XHL-Max-Stack-65535`, `Less Dense Shroud Fog`,
@@ -331,6 +332,25 @@ engines' mods") and 5.8.
   to a file without one). A marker alone never grants deletion or replacement rights;
   older marker-only copies and folders changed by the player are left alone. Replacement is staged beside the
   destination and rolls the previous copy back if placement fails. Activation is refused while the game runs.
+- **A ShroudForge mod that is an XHL-Core plugin too** (0.2.0-dev.29.18; Building Tools for ShroudForge: its DLL and
+  XHL-Core's `native-plugin.ini`, which ShroudForge's DLL manager also reads). ShroudForge's switch does not stop
+  XHL-Core: XHL-Core 2.1.0 opens `<mods>\<folder>\native-plugin.ini` in every folder of `mods/` and loads the DLL it
+  names, whatever the profile or ShroudForge says (inbox 86: a profile without the mod crashed at every start, XHL-Core
+  having loaded the DLL without its ShroudForge side). So while the profile has such a mod off, or no longer has it,
+  Kiln's copy has that ini renamed `native-plugin.ini.kiln-off` (its own spelling kept, its bytes as they are), and
+  XHL-Core skips the folder (with a `mod.json` it lists it as a resource-only mod). On again, the file gets its name
+  back once ShroudForge runs the copy: a copy ShroudForge does not run (an earlier version that stays switched off
+  because the profile's version cannot be placed, a switch Kiln could not set) keeps it renamed, so XHL-Core never
+  loads the DLL without its ShroudForge side. This is done whether or not the game has XHL-Core at that moment (it
+  may be installed later, or run for one start), only in Kiln's own copies (marker and receipt; a player's folder is
+  never renamed, as before), and needs no Library entry: a copy whose profile version is gone from the Library
+  follows the profile by its receipt, and is switched off in ShroudForge's file too when the mod is off. Kiln reads the renamed file as the copy's ini, so the
+  copy stays Kiln's. The ini of such a copy that the plugin (or the player) changed is its settings file while it
+  still names a DLL Kiln placed there, unchanged, as for an XHL companion: it is kept through the rename and carried
+  to the next version. Where the game has XHL-Core, the activation says once what Kiln renamed; if the rename cannot
+  be done, the folder is in the result as one that may still run (where Kiln finds no XHL-Core, a note says that it
+  could not, since an XHL-Core Kiln does not recognize may still load it). A copy that stays when Kiln stops managing the game
+  (Deactivate, uninstall) keeps the renamed file, and the result says how to name it back.
 - **A player's own ShroudForge folder.** A folder in ShroudForge's mods folder that Kiln did not place and that serves a
   profile entry (it is called `<library id>`, or its mod.json holds the entry's package id under any folder name) is
   the player's: activation says so ("the game uses your own folder …"), places no second copy, and neither switches,
@@ -414,6 +434,19 @@ engines' mods") and 5.8.
   or Ember mods. Kiln.Network adds the same mods to the advertised
   `required[]`, each with its `kind` (`AdvertiseEngines.cs`), so a joining player's launcher learns what the server
   runs. The HELLO check still covers Kiln mods only: clients don't announce other engines' mods.
+  Their hash stays the same while the mod runs (0.2.0-dev.29.18, `AdvertiseIdentity.cs` and
+  `modpack::engine_identity`, one rule): Kiln's copy whose files are still the ones placed (its marker in the folder, its
+  receipt outside it: `library-placements.json` or the server's `server-library.json`) is advertised by its Library
+  entry's kdh1; any other folder by the kdh1 of its files without logs (`*.log`), ShroudForge's `extended.mod.json` and
+  the kind's settings files. Before, it was the kdh1 of the whole folder with the player's settings and what the mod
+  writes there (logs, `bin/native-status.txt`), so it changed every minute and was never the Library's. A modpack packs the
+  mod as the server runs it, with the owner's settings and without the files the mod wrote, and names the advertised
+  hash as the mod's `identity` when its own kdh1 is another (`modpack::build`). The rule in full (which receipt entries count, what may change, an
+  EMF mod keeping the kdh1 of its folder) is the head of `schema/fixtures/engine-identity/engine_identity.py`, a Python
+  reference whose `cases.json` (34 trees and their hashes) both Kiln.Network's and kiln-manage's tests read. Files the
+  mod adds next to Kiln's copy (a status file, a second DLL) do not make it another mod; a file Kiln placed that changed
+  (its Lua, its DLL, its `native-plugin.ini`) does. A player's install of a modpack checks another engine's mod by
+  its hash, its `identity` or its version (`modpack::check_against`; the join never compares these mods).
 - **Licences.** The launcher (MIT) only copies files. It never links or runs EML's GPL code or any other engine's code.
 
 An enabled EML package declaring `runtime` or `runtime-register-dll` also requires hosted ShroudForge, even without

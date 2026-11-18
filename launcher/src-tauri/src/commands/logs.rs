@@ -92,6 +92,11 @@ fn report_input(app: &tauri::AppHandle, target: Option<LogTarget>) -> Result<kil
     if let Some(c) = crate::render::choice() {
         input.facts.push(("Launcher".into(), crate::render::says(c)));
     }
+    // Linux: WebKit's sandbox in this start and the probe of bwrap; a finding when bwrap cannot start (crate::sandbox)
+    if let Some(s) = crate::sandbox::state() {
+        input.facts.push(("WebKit sandbox".into(), s.says()));
+        input.findings.extend(crate::sandbox::finding(s));
+    }
     match target {
         Some(LogTarget::Game(id)) => input.install = Some(crate::state::game(&id)?),
         Some(t @ LogTarget::Server(_)) => input.game_dir = Some(target_dir(&t)?),

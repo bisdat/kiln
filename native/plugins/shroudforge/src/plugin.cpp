@@ -46,6 +46,7 @@
 
 #include "nlohmann/json.hpp"
 #include "services/kiln_profile.h"
+#include "log_level.h"
 #include "sf_internal.h"
 #include "contract.h"
 #include "kfc_host.h"
@@ -346,12 +347,7 @@ struct LogTail {
             start = nl + 1;
             while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) line.pop_back();
             if (line.empty()) continue;
-            const int32_t level = line.find("[E]") != std::string::npos || line.find(" ERROR ") != std::string::npos
-                                      ? KILN_LOG_ERROR
-                                  : line.find("[W]") != std::string::npos || line.find(" WARN ") != std::string::npos
-                                      ? KILN_LOG_WARN
-                                      : KILN_LOG_INFO;
-            logf(level, "[sf] %s", line.c_str());
+            logf(sf_line_level(line), "[sf] %s", line.c_str());
         }
         partial.erase(0, start);
         if (partial.size() > 65536) partial.erase(0, partial.size() - 65536);

@@ -128,6 +128,44 @@ Two slots after `set_texts` (byte offsets 1016 and 1024; the table is 1032 bytes
   `KILN_ERR_UNAVAILABLE`.
 There is no managed (mod API) member for it in this release.
 
+## Upscaler files (part D, a preview)
+What phase B (an upscaler swap behind the game's FSR 3 option) and later frame generation will load: AMD's FSR DLLs and
+Intel's XeSS DLL. **They do nothing yet**: no code in the game loads them in this release. The launcher downloads them
+only when the player asks, on a screen that says what will happen. Contract: [launcher/contracts.md](launcher/contracts.md)
+section 5.15; code `crates/kiln-manage/src/vendor/`, `launcher/src/components/UpscalerSettings.tsx`.
+
+| component | version | files | size | licence | from |
+|---|---|---|---|---|---|
+| AMD FSR (`amd-fsr`) | FidelityFX SDK 2.4.0 | `amd_fidelityfx_loader_vk.dll`, `amd_fidelityfx_upscaler_vk.dll` (FSR 3.1.6 and FSR 4.1.2), `amd_fidelityfx_framegeneration_vk.dll` | 72,981,808 bytes | MIT licence | `GPUOpen-LibrariesAndSDKs/FidelityFX-SDK` at tag `v2.4.0`, `Kits/FidelityFX/signedbin/` |
+| Intel XeSS (`intel-xess`) | XeSS SDK 3.0.2 | `libxess.dll` | 77,795,704 bytes | Intel Simplified Software License (October 2022) | `intel/xess` at tag `v3.0.2`, `bin/` |
+
+- **Where the player sees it:** the launcher's Settings, section **Upscalers** right under Graphics, for a client only
+  (a dedicated server draws no frames). It is behind the launcher's preview `upscalers` and hidden by default: put
+  `"preview": ["upscalers"]` into the launcher's `settings.json` (in its data folder: Settings, Library, data folder)
+  while the launcher is closed, or start it once with `KILN_LAUNCHER_PREVIEW=upscalers`. One row per component: not
+  downloaded (with the size and the host), downloading (progress, Cancel), downloaded (version, size on disk, Remove),
+  update available, not available in this build, failed (the reason, Try again). The line under the title says what
+  they are for and that downloading them changes nothing yet.
+- **On demand, AMD's too:** nothing ships inside Kiln (the owner's decision, although AMD's MIT licence would allow it),
+  and nothing is downloaded before the player's click.
+- **The licence:** before a vendor's first download a dialog shows what it is, the size, the host
+  (`raw.githubusercontent.com`), where it goes, the vendor's licence text in full and what the host sees, with "I agree,
+  download" and Cancel. The agreement is kept in the launcher (`<data>/state/vendor-licenses.json`) with the hash of the
+  text; a changed text asks again. The names are true: AMD's files are under the MIT licence, Intel's under Intel's own
+  licence; nothing here is called DLSS.
+- **Checked:** the files come only from the tag-pinned URLs of Kiln's manifest on the vendor's own GitHub organisation;
+  each is accepted only with the size and SHA-256 Kiln pinned (`tools/release/vendor_pin.py`, from copies checked against
+  the vendors' git blobs); one that differs is deleted and the row says so.
+- **Stored** in `<game>/kiln/vendor/<vendor>/<version>/` with a receipt, never in the game's own folder (other loaders
+  and Kiln's step-aside list look there). Remove deletes that folder; an update keeps the old version until the new one
+  verified. Phase B checks each file's SHA-256 again before it loads it, against the hashes built into the runtime, never
+  the receipt's (contracts.md 5.15, "What Kiln in the game will read").
+- **Steam Deck UI:** no matching screen yet. It would take a Deck Settings row per component (the same `vendor_*`
+  commands), a licence screen that scrolls the text with the stick and takes A for "I agree, download", and progress in
+  the Deck's task line. The desktop UI on the Deck has the section as it is.
+- **Later:** NVIDIA's frame generation (`nvidia-dlssg`, from NVIDIA's own GitHub, never inside Kiln) is a new component
+  in the same manifest, with NVIDIA's licence.
+
 ## Not in phase A
 FSR 3's ratio and RCAS sharpness (compiled into the game: game-code hooks per build, [client-upscale.md](../re/client-upscale.md#fsr-3)),
 an upscaler swap (phase B) and frame generation (phase C).

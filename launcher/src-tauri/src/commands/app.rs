@@ -45,6 +45,14 @@ pub struct AppInfo {
     /// Linux AppImage only: the app menu entry Kiln writes so taskbars show its icon (crate::desktop). Absent elsewhere.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub desktop: Option<crate::desktop::DesktopInfo>,
+    /// (dev.29.18) Linux only: WebKit's sandbox in this start (the player's choice, what WebKit does, the probe of bwrap)
+    /// and whether the marker turns it off at the next start (crate::sandbox). Absent elsewhere.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandbox: Option<crate::sandbox::SandboxInfo>,
+    /// (dev.29) The previews on for this start (settings.json `preview` and `KILN_LAUNCHER_PREVIEW`;
+    /// commands/vendor.rs `previews`): `"upscalers"` shows Settings, Upscalers. Left out while none is on.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub preview: Vec<String>,
 }
 
 /// `<data>/settings.json`
@@ -96,6 +104,11 @@ pub struct LauncherSettings {
     /// else a tag ("zh-CN"). Only the page reads it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub language: Option<String>,
+    /// (dev.29) Previews of unfinished features, by name: `"upscalers"` shows Settings, Upscalers (vendor upscaler
+    /// downloads, commands/vendor.rs). Not in the UI: set by hand while the launcher is closed; `KILN_LAUNCHER_PREVIEW`
+    /// adds names for one start. Left out while empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub preview: Vec<String>,
 }
 
 impl Default for LauncherSettings {
@@ -114,6 +127,7 @@ impl Default for LauncherSettings {
             mod_updates_daily: false,
             keep_versions: kiln_manage::kept::KEEP_DEFAULT,
             language: None,
+            preview: Vec::new(),
         }
     }
 }
@@ -351,6 +365,8 @@ pub async fn app_info(app: AppHandle) -> Result<AppInfo, Error> {
         distribution: crate::distribution::CURRENT,
         render: crate::render::info(),
         desktop: crate::desktop::info(),
+        sandbox: crate::sandbox::info(),
+        preview: super::vendor::previews(),
     })
 }
 
@@ -367,6 +383,13 @@ pub async fn app_started() -> Result<(), Error> {
 #[tauri::command]
 pub async fn app_render_set(software: bool) -> Result<crate::render::RenderInfo, Error> {
     crate::state::blocking(move || crate::render::set_next(software)).await
+}
+
+/// Settings, "WebKit's sandbox": on removes the marker, off writes it; applies at the next start. Linux only (else
+/// `unsupported`).
+#[tauri::command]
+pub async fn app_sandbox_set(on: bool) -> Result<crate::sandbox::SandboxInfo, Error> {
+    crate::state::blocking(move || crate::sandbox::set_next(on)).await
 }
 
 /// Settings, "Kiln Launcher in the app menu" (Linux AppImage): on writes the entry and icons (replacing a
@@ -769,6 +792,10 @@ pub async fn app_assets_import(app: AppHandle, kind: String, from: Option<String
 /// `flush_held_log`; a move that committed restarts, and they end with the process). At most HELD_MAX.
 static HELD_LOG: Mutex<Vec<String>> = Mutex::new(Vec::new());
 const HELD_MAX: usize = 500;
+/// Lines of the start that came before the beta copy's gate opened (crate::snapshot::startup: `state::dirs()` refuses
+/// until then, and the start's render and sandbox lines come before it): on stderr at once, and into launcher.log when
+/// the gate opens (`flush_early_log`, lib.rs `after_snapshot`). At most HELD_MAX.
+static EARLY_LOG: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 /// Appends one line to `<data>/logs/launcher.log`: `<time> <area>: <msg>`. Best effort. While the data folder is held
 /// nothing is written there (the move copies and verifies `logs/`): during a move of this process the line waits in
@@ -789,7 +816,25 @@ pub fn launcher_log(area: &str, msg: &str) {
     }
     match f.dirs() {
         Ok(d) => append_log(&d, &[line]),
-        Err(_) => eprintln!("{line}"),
+        Err(_) => {
+            // the folder is fine and only the beta copy's gate is not open yet: the line goes into the log later
+            if f.held_error().is_none() && crate::snapshot::startup::refusal().is_some() {
+                let mut h = EARLY_LOG.lock().unwrap_or_else(|e| e.into_inner());
+                if h.len() < HELD_MAX {
+                    h.push(line.clone());
+                }
+            }
+            eprintln!("{line}");
+        }
+    }
+}
+
+/// Writes the start's lines from before the beta copy's gate opened (they were on stderr already).
+pub fn flush_early_log() {
+    let _writing = crate::state::writing();
+    let lines = std::mem::take(&mut *EARLY_LOG.lock().unwrap_or_else(|e| e.into_inner()));
+    if let (false, Ok(d)) = (lines.is_empty(), crate::state::dirs()) {
+        append_log(&d, &lines);
     }
 }
 

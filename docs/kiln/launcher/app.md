@@ -49,7 +49,7 @@ the enabled implementation; no personal API key flow is supported. See [catalog.
 | `/logs` | the support report above the tabs ("Save report...", "Copy summary": [support-report.md](support-report.md)); kiln.log, game log, proxy.log, mod logs (follow, filter), crash reports, tick stats (sparklines); Engines: one line per engine plugin that wrote `kiln/state/<engine>.json` or has mods in the active profile (EML `phase`, ShroudForge `mode`, `reason`, each mod's state and reason; ShroudForge's own per-mod runtime report while it is current, never shown as proof of a gameplay effect; the XHL-Core check when the profile has XHL companions or the host was recognized), plus read-only shared archive backup guidance | `logs_*`, `report_save`, `report_summary`, `engine_status`, `eml_backup` |
 | `/saves` | save files, backups, manual backup, restore (refused while running; Steam Cloud hint), delete | `saves_*` |
 | `/editor` | the Save Editor (lazy chunk) | `editor_*`, `kiln-asset://` |
-| `/settings` | **Profiles** (`components/ProfilesSettings.tsx`; `#profiles`): every saved profile with its mod count over every kind and the server it is for, which one is loaded, Load (the main list then shows it), "Save current as..." (`profile_create` with the loaded one as `copyFrom`; the loaded one stays loaded), Rename, Folders and notes (name, mod data, drop-in folders, notes), Delete (typed; never a loaded one), and "No profile" (the game folder decides: `profile_deactivate`); the modpack flow's "Server: <name>" profiles are listed too. **Library** (`components/LibrarySettings.tsx`): how many mods and versions, the size on disk, its folder (Open), Clean up (every version no profile and no game's profile file uses, one `library_remove_many`; typed; never a version kept for a roll back), and (dev.29) the earlier versions an update kept for a roll back, each with its size, its settings files and Remove ([catalog.md](catalog.md), "Rolling back an update"). Launcher settings also hold "Earlier versions to keep" (`keepVersions`, 0 to 5, default 1). Launcher settings ("Switch new mods on", default on; "Type a mod's name to remove it", default off), Appearance ("Animated fire": off draws the plain Play button), games (detect/add/forget; each row says "custom folder" for one no Steam library knows, how it starts with the start dialog behind it, and an unknown game build), Nexus Mods in enabled builds only (OAuth account sign-in/sign-out and "Mod Manager Download links"; `components/NexusSettings.tsx`), Kiln's `kiln.json` via SchemaForm (without `ui.language` and `graphics.*`); (dev.29.18) **Graphics** (`components/GraphicsSettings.tsx`, `#graphics`, a client only): kiln.json's `graphics` section (Kiln's frame cap, DLSS preset and render scale, readout; the same document and `config_kiln_*` calls as the kiln.json card), then one line per tool next to which Kiln's frame cap and DLSS settings step aside (`GameStatus.graphicsStepAside`: "OptiScaler is installed (dxgi.dll): Kiln's frame cap and DLSS settings step aside; the readout still works.") | `profile_*`, `library_unused`, `library_remove_many`, `app_settings_*`, `game_*`, `config_kiln_*`, `nexus_account`, `nexus_sign_in`, `nexus_sign_out`, `nexus_handler_*` |
+| `/settings` | **Profiles** (`components/ProfilesSettings.tsx`; `#profiles`): every saved profile with its mod count over every kind and the server it is for, which one is loaded, Load (the main list then shows it), "Save current as..." (`profile_create` with the loaded one as `copyFrom`; the loaded one stays loaded), Rename, Folders and notes (name, mod data, drop-in folders, notes), Delete (typed; never a loaded one), and "No profile" (the game folder decides: `profile_deactivate`); the modpack flow's "Server: <name>" profiles are listed too. **Library** (`components/LibrarySettings.tsx`): how many mods and versions, the size on disk, its folder (Open), Clean up (every version no profile and no game's profile file uses, one `library_remove_many`; typed; never a version kept for a roll back), and (dev.29) the earlier versions an update kept for a roll back, each with its size, its settings files and Remove ([catalog.md](catalog.md), "Rolling back an update"). Launcher settings also hold "Earlier versions to keep" (`keepVersions`, 0 to 5, default 1). Launcher settings ("Switch new mods on", default on; "Type a mod's name to remove it", default off), Appearance ("Animated fire": off draws the plain Play button), games (detect/add/forget; each row says "custom folder" for one no Steam library knows, how it starts with the start dialog behind it, and an unknown game build), Nexus Mods in enabled builds only (OAuth account sign-in/sign-out and "Mod Manager Download links"; `components/NexusSettings.tsx`), Kiln's `kiln.json` via SchemaForm (without `ui.language` and `graphics.*`); (dev.29.18) **Graphics** (`components/GraphicsSettings.tsx`, `#graphics`, a client only): kiln.json's `graphics` section (Kiln's frame cap, DLSS preset and render scale, readout; the same document and `config_kiln_*` calls as the kiln.json card), then one line per tool next to which Kiln's frame cap and DLSS settings step aside (`GameStatus.graphicsStepAside`: "OptiScaler is installed (dxgi.dll): Kiln's frame cap and DLSS settings step aside; the readout still works."); (dev.29, preview `upscalers`) **Upscalers** right under it (`components/UpscalerSettings.tsx`, `#upscalers`, a client only; section "Upscalers" below) | `profile_*`, `library_unused`, `library_remove_many`, `app_settings_*`, `game_*`, `config_kiln_*`, `nexus_account`, `nexus_sign_in`, `nexus_sign_out`, `nexus_handler_*`, `vendor_*` |
 | `/about` | versions, CREDITS.md, "Theme and design: frostdev"; Updates (the state, Check now), in the Nexus Mods build "New versions: Nexus Mods" | `app_info` |
 | `/servers` | every server, one line each (or a redirect to the first server when there is no `ServersPage.tsx`) | `server_list` |
 
@@ -430,7 +430,8 @@ Test runs against game copies: `KILN_DATA_DIR=<scratch>` and `KILN_STEAM_ROOTS=<
 from the real launcher data and Steam libraries, and `KILN_LAUNCH_DRY_RUN=1` makes `launch_play` do everything but open
 `steam://` (which would start the real game). `KILN_LAUNCHER_NO_WEBGL=1` forces the fire's no-WebGL fallback (the plain
 Play button) for one start, without touching the saved "Animated fire" setting. Linux: `KILN_LAUNCHER_RENDER=software`
-or `--software-render` draws without the GPU ("Drawing without the GPU" below). GUI and Wine tests run on a private Xvfb display, never the desktop's. Debug builds only: `KILN_DEV_EVAL_DIR=<dir>` runs each `*.js`
+or `--software-render` draws without the GPU ("Drawing without the GPU" below); `--no-webkit-sandbox` or
+`KILN_LAUNCHER_WEBKIT_SANDBOX=off` turns WebKit's sandbox off ("WebKit's sandbox (Linux)"). GUI and Wine tests run on a private Xvfb display, never the desktop's. Debug builds only: `KILN_DEV_EVAL_DIR=<dir>` runs each `*.js`
 dropped there in the webview (headless checks on Xvfb drive the real app with it).
 
 ## Build prerequisites
@@ -553,22 +554,179 @@ is a webview that never painted the page (a player on NVIDIA / X11 with 0.2.0-de
   (`{format, why, at, version}`), logs why and starts again in software mode, in the same process (exec): `$APPIMAGE`
   when it is set (the AppImage file, with the environment a fresh start has), else the executable, with the same
   arguments. A start in software mode, or with a mode the user forced, never restarts: it writes
-  `PROBLEM: the page did not start ...` to `launcher.log` and stderr. One restart at most, never a loop.
+  `PROBLEM: the page did not start ...` to `launcher.log` and stderr and (0.2.0-dev.29.18) shows the launcher's own
+  message instead of leaving an empty window, also when the restart itself failed ("WebKit's sandbox (Linux)" below,
+  "The messages"). One restart at most, never a loop.
 - **Choosing the mode**: `--software-render` / `--gpu-render` (the last one given wins), then
   `KILN_LAUNCHER_RENDER=software|gpu`, then the marker, then the GPU. Settings > Appearance, "Draw the launcher without
   the GPU", sets or clears the marker (`app_render_set`) for the next start. A start with an nxm link takes no other
-  argument (main.rs).
+  argument (main.rs). The marker is read from the data folder as found (`folder::found_dirs`, read only): 0.2.0-dev.29
+  to 29.17 read it through `state::dirs()`, which refuses until the beta copy's gate opens (after the window exists),
+  so those starts never saw it. A marker written then (by Settings, or by a fallback whose next starts drew with the
+  GPU again) takes effect from 0.2.0-dev.29.18: such a start says on stderr and in `launcher.log` that it stays so until
+  the switch is off, and the switch's hint says the same.
 - **What it says**: at the start, one line on stderr with the log's path and the mode. `launcher.log`, `render:` lines:
   the mode and why, the WebKitGTK version, `XDG_SESSION_TYPE` and whether `DISPLAY` / `WAYLAND_DISPLAY` are set, the
-  first line of `/proc/driver/nvidia/version` (or that there is none), when the page started, a web process that
-  ended. The support report's summary.txt has a `Launcher:` line with the mode.
+  first line of `/proc/driver/nvidia/version` (or that there is none), WebKit's sandbox and the probe of bwrap, when the
+  page started, a web process that ended. Lines from before the beta copy's gate opens (the start's own) go to stderr at
+  once and into `launcher.log` when it opens (`flush_early_log`; a start that restarts or quits before that leaves them
+  on stderr only). The support report's summary.txt has a `Launcher:` line with the mode.
 - **Tests**: `cargo test -p kiln-launcher render::`, `bun test unit/started.test.ts`. Debug and QA (`dev-eval`) builds
   only: `KILN_LAUNCHER_TEST_WITHHOLD_READY=gpu|software|all` ignores `app_started` in that mode, so the fallback can be
   watched on a machine that renders (on a private Xvfb display).
-- **Troubleshooting a black window**: start the launcher from a terminal; its first line names `launcher.log`. Within
-  15 s it should start again without the GPU by itself. If the window stays black, start it with `--software-render`
-  (`./Kiln*.AppImage --software-render`, or `kiln-launcher --software-render` for the .deb) and send `launcher.log`
-  (the `render:` lines) and, once the window works, a support report.
+- **Troubleshooting a black or empty window** (what players are pointed to): start the launcher from a terminal; its
+  first line names `launcher.log`. Within 15 s it should start again without the GPU by itself. If the window stays
+  empty, the launcher shows a message (0.2.0-dev.29.18) with what it tried, where `launcher.log` is and what is left to
+  try ("Start without the GPU", "Start without WebKit's sandbox" when WebKit runs it, "Open the log folder", "Quit").
+  Without that message, start it with `--software-render` (`./Kiln*.AppImage --software-render`, or
+  `kiln-launcher --software-render` for the .deb). Send `launcher.log` (the `render:`, `sandbox:` and `message:` lines),
+  the terminal's output and, once the window works, a support report. The launcher ending at once with a `bwrap:` line
+  and "Failed to start dbus proxy" in the terminal is WebKit's sandbox: see the next section.
+
+## WebKit's sandbox (Linux)
+`src-tauri/src/sandbox.rs` (the choice, the probe, the messages' words), `src-tauri/src/dialog.rs` (the messages),
+0.2.0-dev.29.18. The launcher never turns the sandbox off by itself: only the player's click, flag, variable or
+Settings does.
+
+**What WebKitGTK does** (read in its source at the tags webkitgtk-2.38.0 to webkitgtk-2.54.1: `BubblewrapLauncher.cpp`,
+`ProcessLauncherGLib.cpp`, `WebProcessPoolGLib.cpp`, `WebKitWebContext.cpp`; and seen in the process tree):
+- Its sandbox starts the web process, and `xdg-dbus-proxy`, inside bubblewrap: `bwrap` at the path WebKit was built
+  with (`BWRAP_EXECUTABLE`: `/usr/bin/bwrap` on Debian, Ubuntu and Arch). bwrap is not setuid there, so it creates a user
+  namespace, then uts, ipc, pid and (for the web process) net namespaces, binds /etc and the system's libraries read
+  only and adds a seccomp filter. The network process is never sandboxed.
+- WebKitGTK runs it by default only for its GTK 4 API (webkitgtk-6.0, `ENABLE(2022_GLIB_API)`). The launcher uses the
+  GTK 3 API (webkit2gtk-4.1, through wry), where it is off unless the program calls
+  `webkit_web_context_set_sandbox_enabled(TRUE)` (wry and Kiln never do) or `WEBKIT_FORCE_SANDBOX=1` is set. **A default
+  start does not use the sandbox**: the 29.17 AppImage (its WebKitGTK 2.50.4) and a build against Arch's 2.54.1 run
+  WebKitWebProcess as a plain child of the launcher. With `WEBKIT_FORCE_SANDBOX=1` the same build runs it under
+  `/usr/bin/bwrap` (and the web context says so).
+- `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS` exists since 2.39.4 (2.40 stable): 2.40 to 2.44 read only the value `1`;
+  since 2.46 any value but `0` turns the sandbox off, and it wins over `WEBKIT_FORCE_SANDBOX=1`. Before 2.40,
+  `WEBKIT_FORCE_SANDBOX=0` turned it off; since then a value other than `1` only warns.
+- When bwrap cannot start, WebKit ends the whole program (`g_error`: SIGTRAP, a core dump), with bwrap's own line on
+  stderr ("bwrap: setting up uid map: Permission denied" under Ubuntu 24.04's restriction; "bwrap: Creating new
+  namespace failed: Permission denied" where user namespaces are not allowed at all) and then "Failed to start dbus
+  proxy" or "Failed to fully launch dbus-proxy". No empty window and no watchdog line: the launcher is gone. GNOME Web
+  and other WebKitGTK programs crashed exactly so on Ubuntu 24.04 (Launchpad bug 2046844).
+- Which bwrap: the .deb, the rpm and a plain build use the system's WebKitGTK, so the system's bwrap. The AppImage
+  carries Ubuntu 22.04's WebKitGTK with every "/usr" in it replaced by "././" (Tauri's AppImage bundler; AppImageKit's
+  AppRun changes into `$APPDIR/usr`, which is how WebKit finds its helper processes there), so its bwrap is
+  `$APPDIR/usr/bin/bwrap`, and the AppImage has none. With `WEBKIT_FORCE_SANDBOX=1` the 29.17 AppImage ends at once:
+  `Failed to start dbus proxy: Failed to spawn child process "././/bin/bwrap" (No such file or directory)`.
+- Ubuntu 24.04 sets `kernel.apparmor_restrict_unprivileged_userns=1` at boot (`/usr/lib/sysctl.d/10-apparmor.conf`,
+  with the AppArmor userspace). An unconfined program that creates a user namespace is moved into the
+  `unprivileged_userns` profile, which denies every capability, so bwrap cannot write its uid map. A program needs an
+  AppArmor profile with a `userns` rule; Ubuntu ships such profiles (unconfined, `userns,`) for its own WebKitGTK
+  programs: `/etc/apparmor.d/epiphany`, `devhelp`, `geary`, `evolution`. Sources: AppArmor's wiki,
+  "unprivileged_userns_restriction"; Ubuntu Discourse, "Understanding AppArmor User Namespace Restriction"; Ubuntu's
+  blog on 23.10's restricted user namespaces; Launchpad bug 2046844.
+- So in a default start the AppArmor restriction cannot stop the launcher's page, and
+  `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1` changes nothing. An empty window on such a system has another cause.
+
+**The choice** (`sandbox::decide`, as the render mode's): `--no-webkit-sandbox` / `--webkit-sandbox` (the last one given
+wins), then `KILN_LAUNCHER_WEBKIT_SANDBOX=off|on`, then a message's restart (`KILN_LAUNCHER_WEBKIT_SANDBOX_RESTARTED`,
+set only by the launcher for that restart), then `<data>/state/webkit-sandbox.json` (`{format, why, at, version}`),
+then on. Off: before GTK and WebKit start the launcher sets `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1` and names it in
+`KILN_LAUNCHER_SANDBOX_SET`, so a restart tells it from the player's own and programs the launcher starts (a browser,
+Steam) never get it (`kiln_manage::hostenv`). A value the player set is left alone whatever the choice; the log says
+"(yours)". Without a click, a flag, the variable or the marker, the launcher never sets it (tested).
+
+**The probe** (every start on Linux, before the window, at most 2 s; about 4 ms for bwrap itself): the bwrap path is
+read from the loaded libwebkit2gtk's `.rodata` (a relative one against the working directory, as the system resolves
+it: the AppImage's `$APPDIR/usr/././/bin/bwrap`) and run as WebKit runs it, as a no-op (`--unshare-uts --unshare-ipc
+--unshare-pid --unshare-net`, /etc, /usr and /lib read only, /dev, /proc, a /tmp, then `true`). It judges by bwrap itself,
+not by the launcher calling `unshare`: AppArmor profiles are per program. Results: works; fails (bwrap's line); missing
+(the path is not there); could not tell (why). Also `/proc/sys/kernel/apparmor_restrict_unprivileged_userns` when the
+kernel has it. Whether WebKit runs its sandbox in this start comes from its version and the variables (the rules above,
+`sandbox::webkit_use`); after the window the web context's own answer is logged, and a context that runs it although
+nothing asked (a future WebKitGTK default) says so. On a system with the restriction, each probe leaves one AppArmor
+denial in the kernel log.
+
+**The messages** (native: GTK 3's MessageDialog in the launcher's process, the toolkit the window already uses, never
+through the web page or WebKit's processes; when GTK cannot show one: zenity, then kdialog, then notify-send without
+buttons, whose text names the flags instead; always the same text on stderr and in `launcher.log`, `message:` lines).
+tauri-plugin-dialog shows the same GTK dialog underneath (rfd's `gtk3` backend), but only after Tauri is up and with at
+most three custom buttons, so the launcher calls GTK itself.
+- *At the start*, before the window: only when WebKit runs its sandbox in this start and the probe found bwrap failing
+  or missing. It says what is wrong (bwrap's line, the AppArmor value), why WebKit runs it, what turning it off means and
+  the proper fix (below). Buttons: "Turn the sandbox off and start" (a restart without it; the marker is written once the
+  beta copy's gate is open, by the new start), "Start anyway", "Quit". Closing it starts as before. The first button is
+  there only when its restart really runs without the sandbox: not with the player's own
+  `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=0` (which the launcher leaves alone) and not with a WebKitGTK before 2.40
+  (no such switch); the message then says why, and the same holds for the late message's button.
+- *When the page did not start* and the launcher has nothing left to try by itself (a software-mode start, a mode the
+  player forced, a fallback whose restart failed): what was tried, WebKit's sandbox in this start, where `launcher.log`
+  is, and that each button is a try (the cause is not known; offered also when the probe passed). Buttons: "Start
+  without WebKit's sandbox" (only when WebKit runs it and no variable of the player's decides), "Start without the GPU"
+  (only when this start drew with the GPU; the player's click wins over `--gpu-render`), "Open the log folder" (the
+  message stays), "Quit". Closing it leaves the window as it is. It goes up over the window through its main loop; with
+  no answer from that loop within 5 s, through the tools above.
+- Enter (GTK's default button, zenity's and kdialog's first) never turns the sandbox off: that is always a button the
+  player picks. A zenity that cannot open a display (it ends with 1, as for Cancel; its stderr says "open display") is
+  not taken as an answer: the next tool is asked.
+- What turning the sandbox off means (checked): the launcher's page is its own bundle. Its CSP (`tauri.conf.json`)
+  allows scripts, styles, fonts and connections only from the bundle, the IPC and `kiln-asset:`, and from the internet
+  only images from `staticdelivery.nexusmods.com` and `images.nexusmods.com`; the page renders no remote HTML and
+  navigates nowhere (links open in the browser, `app_open_url`). Off removes WebKit's process sandbox around that page
+  only.
+
+**Settings > Appearance, "WebKit's sandbox"** (`app_sandbox_set`, next to "Draw the launcher without the GPU"): on
+removes the marker, off writes it, for the next start; the hint says what off means, what WebKit does in this start and
+why, who turned it off, and what the probe found when bwrap fails. `unsupported` off Linux; absent from `app_info` there.
+
+**What it says**: `sandbox:` lines (the choice and why, the variable, WebKit's version and whether it runs its sandbox,
+the probe with its path and time, the AppArmor value; the web context's answer; the marker a message's restart wrote),
+the window's facts line (`render: WebKitGTK ...; WebKit's sandbox: ...`), `message:` lines. The support report's
+summary.txt has a `WebKit sandbox:` line, and the finding `webkit-sandbox` when bwrap cannot start: a problem when this
+start runs the sandbox, a note when it does not (then it is not why a window stays empty). The AppImage's own missing
+bwrap (so on every system) is said in those words, and is a finding, a line in the late message or a sentence in Settings
+only when the start runs the sandbox.
+
+**The proper fix** (Ubuntu 24.04 and systems built on it, for a launcher that runs WebKit's sandbox: the .deb or any
+install at `/usr/bin/kiln-launcher`): an AppArmor profile that allows user namespaces for the launcher, as Ubuntu ships
+for GNOME Web. WebKit's bwrap is the launcher's child and runs under its profile; Ubuntu fixed GNOME Web, Devhelp and
+Geary, whose WebKit starts bwrap the same way, with exactly such profiles (Launchpad bug 2046844).
+
+**Not run on Ubuntu.** Nobody has tried these steps with the launcher on Ubuntu yet. The profile below is AppArmor 4.0's `epiphany`
+profile, which Ubuntu 24.04 ships as `/etc/apparmor.d/epiphany`, with the name and the path changed; loading it with
+`apparmor_parser -r` is AppArmor's usual way. Check it against Ubuntu's documentation before you point a player at it.
+```sh
+sudo tee /etc/apparmor.d/kiln-launcher >/dev/null <<'EOF'
+abi <abi/4.0>,
+include <tunables/global>
+
+profile kiln-launcher /usr/bin/kiln-launcher flags=(unconfined) {
+  userns,
+
+  include if exists <local/kiln-launcher>
+}
+EOF
+sudo apparmor_parser -r /etc/apparmor.d/kiln-launcher
+```
+Another path: put the launcher's own in the profile line. Not for the AppImage: its WebKit cannot run the sandbox on any
+system (above); leave `WEBKIT_FORCE_SANDBOX` unset or use the .deb. A .deb without bwrap: install the system's
+`bubblewrap` package. The blunt alternative, `kernel.apparmor_restrict_unprivileged_userns=0` (until the next boot:
+`sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`; for good, AppArmor's wiki puts that line in
+`/etc/sysctl.d/60-apparmor-namespace.conf`), lifts the restriction for every program on the system, not only the
+launcher: the protection Ubuntu turned on in 24.04 is then gone.
+
+**An AppArmor profile in the .deb** (a packaging decision, not built): `/etc/apparmor.d/kiln-launcher` as above, loaded
+by the package's postinst (`apparmor_parser -r`, dh_apparmor) and removed with it. Today it would change nothing: the
+launcher does not run WebKit's sandbox. It matters only if the launcher ever turns the sandbox on (a security gain for
+the page). Costs: a conffile under /etc and maintainer scripts; `abi <abi/4.0>` needs AppArmor 4 (Ubuntu 24.04 and
+later), so Ubuntu 22.04 needs another file or none; it lets the launcher and the programs it starts without a profile of
+their own (Wine, Proton, the game) create user namespaces again, as they could before 24.04; it covers only
+`/usr/bin/kiln-launcher`, never the AppImage.
+
+**Tests**: `cargo test -p kiln-launcher sandbox::` (the decision with flags, the variable and the marker, nothing set
+without a choice, the player's own variable, WebKit's rules by version, the bwrap path in a real libwebkit2gtk and in
+`KILN_TEST_WEBKIT_LIB`, the probe against fake bwraps (works, fails, missing, silent, hangs), the marker, the messages'
+words, the report's finding, the restart's arguments), `render::` (the restart a click asks for),
+`snapshot::startup::tests::the_starts_lines_and_markers_do_not_wait_for_the_gate`, kiln-manage `hostenv::` and
+`report::tests::the_callers_findings_are_listed_with_the_reports_own`, `bun x playwright test tests/sandbox.spec.ts`.
+Debug and QA (`dev-eval`) builds only: `KILN_LAUNCHER_TEST_SANDBOX_PROBE=works|fails|missing|unknown` replaces the
+probe's result, and `KILN_LAUNCHER_TEST_DIALOG=tools` skips GTK (the tools) or `=<button>@<seconds>` presses a GTK
+message's button by itself, so the messages can be checked on a private Xvfb display.
 
 ## Taskbar icon and app menu
 Taskbars, docks and app menus show the launcher with Kiln's icon (`launcher/src-tauri/src/desktop.rs`).
@@ -615,6 +773,47 @@ JSONC edits (comments kept, range refused); zstd round trip; play-once render/de
 Exit 0 when every check passes; the JSON report lists each check with its detail. Release builds are GUI programs on
 Windows: `--selftest` attaches to the console it was started from, so `kiln-launcher.exe --selftest --out r.json` prints
 there too (cmd does not wait for GUI programs; `start /wait` does).
+
+## Upscalers (preview, dev.29)
+Settings, **Upscalers**, right under Graphics (`src/components/UpscalerSettings.tsx`; API `src/api/vendor.ts`; backend
+`src-tauri/src/commands/vendor.rs` on `kiln_manage::vendor`; contract [contracts.md](contracts.md) section 5.15; what the
+files are for: [../graphics.md](../graphics.md) "Upscaler files"). Vendor upscaler files (AMD FSR 2.4.0, Intel XeSS
+3.0.2) that Kiln downloads into the game's `kiln/vendor/` only when the player asks. Nothing in the game uses them yet,
+so the section is a preview:
+- **The preview switch.** Off by default: the section is not there and `vendor_download` is refused. On: settings.json
+  (in the data folder) `"preview": ["upscalers"]`, written while the launcher is closed (a running launcher writes its
+  own settings back), or `KILN_LAUNCHER_PREVIEW=upscalers` for one start. `app_info.preview` says which previews are on;
+  Settings never writes the list. Browser mock: `?preview=upscalers`.
+- **Texts** (`settings.upscalers.*` in `src/i18n/en.json`). Title "Upscalers", a "Preview" badge, the line "Vendor upscaler
+  files. Kiln downloads them only when you ask, into the game's kiln/vendor folder.", and under it "Kiln can run these
+  behind the game's FSR 3 option. That arrives in a later update: until then, downloading them changes nothing in the
+  game." Then one row per component: its name and version, a state word, its sentence from the manifest, and one line:
+  - not downloaded: "70 MB from raw.githubusercontent.com." and **Download** (an interrupted download: "… arrived
+    already: the download goes on from there." and **Continue download**);
+  - downloading: a progress bar, the percentage, "Downloading <file>: <done> of <size>", **Cancel**;
+  - downloaded: "Version 2.4.0, 70 MB on disk." and **Remove** (a dialog: "Kiln deletes kiln/vendor/amd/2.4.0 (70 MB) from
+    the game folder. You can download it again later.");
+  - update available: "Version <old> is downloaded. Version <new> is out: <size> from <host>.", **Update**, **Remove**;
+  - not available in this build: "This build of Kiln does not have the files' checksums yet, so it does not download
+    them." (a manifest file not pinned), no button;
+  - failed: the reason in a red line (the task's error, or "<file> of it is missing or changed. Download it again."),
+    **Try again** / **Download again**, and Remove when files are there.
+- **The licence dialog** opens on Download when the player has not agreed to that vendor's text yet: "Download <name>",
+  then What (the manifest's sentence), Size ("70 MB, 3 files"), From ("raw.githubusercontent.com: AMD's own repository
+  on GitHub, version 2.4.0"), Goes to ("kiln/vendor/amd/2.4.0 in the game folder"), the licence's name with "Where this
+  text is" (opens the vendor's page in the browser), "AMD licenses these files under the MIT licence. Here is its text in
+  full. Read it before you agree.", the text in a scrolling box, and the small print "Kiln asks raw.githubusercontent.com
+  for these files and sends nothing else. raw.githubusercontent.com sees your IP address and a user agent that names Kiln
+  and its version." Buttons: Cancel, **I agree, download** (passes the hash of the text shown). Later downloads of the
+  same vendor's text start from the row, whose line already names the size and the host.
+- A download is a task (`kiln://task`, the header's tray too); the row keeps its task id for this window. Done: a toast
+  "<name> is downloaded" ("Kiln checked every file. They are in <folder> in the game folder."). The status is asked again
+  when the page comes back (no polling).
+- Tests: `unit/upscalers.test.tsx` (the row of every state), `tests/upscalers.spec.ts` (mock: hidden without the
+  preview, available, not pinned, the dialog, agree, progress, cancel, downloaded, remove, a failure and Try again, an
+  update, missing files, a changed licence). Mock: `src/api/mockVendor.ts` (`?vendor=unpinned|pinned`,
+  `__kilnVendorMock`).
+- No Deck screen yet ([../graphics.md](../graphics.md) says what one would take).
 
 ## Known limits
 - Profiles/library depend on kiln-manage M3; until then those screens show `not_implemented` (or mock data in dev

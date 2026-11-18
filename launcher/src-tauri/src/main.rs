@@ -78,6 +78,13 @@ fn main() {
     // no other argument), `KILN_LAUNCHER_RENDER`, the marker; software mode's variables, the watchdog (render.rs).
     #[cfg(target_os = "linux")]
     kiln_launcher_lib::render::prepare(&args);
+    // WebKit's sandbox (`--no-webkit-sandbox` / `--webkit-sandbox`, KILN_LAUNCHER_WEBKIT_SANDBOX, the marker; its
+    // variable before GTK and WebKit start), the probe of bwrap and, when WebKit would run a sandbox that cannot start,
+    // the player's message (sandbox.rs, dialog.rs). Then the render watchdog.
+    #[cfg(target_os = "linux")]
+    kiln_launcher_lib::sandbox::prepare(&args);
+    #[cfg(target_os = "linux")]
+    kiln_launcher_lib::render::watch();
     kiln_launcher_lib::run()
 }
 
@@ -92,7 +99,7 @@ mod tests {
         assert_eq!(nxm_argument(&args(&[url])), Ok(Some(url)));
         assert_eq!(nxm_argument(&args(&["--selftest"])), Ok(None));
         for tail in [vec!["--nxm"], vec!["--nxm", "--selftest"], vec!["--nxm", url, "--kiln-ctrl-c", "1"], vec!["--kiln-ctrl-c", "1", url], vec![url, "--selftest"],
-            vec!["--nxm", url, "--software-render"], vec!["--gpu-render", url]] {
+            vec!["--nxm", url, "--software-render"], vec!["--gpu-render", url], vec!["--nxm", url, "--no-webkit-sandbox"]] {
             assert!(nxm_argument(&args(&tail)).is_err());
         }
     }

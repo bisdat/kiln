@@ -66,6 +66,91 @@ public sealed unsafe class SystemsTests
     }
 
     [Fact]
+    public void A_prediction_wrap_is_a_stage_of_the_client_worlds_table_for_the_prediction_storage()
+    {
+        using var w = new FakeWorld(n => n is "systems.wraps" or "systems.wraps.client" or "systems.wraps.prediction");
+        var made = Systems.Wrap("fuel_setup", new WrapOptions { World = WorldKind.Prediction });
+        Assert.True(made.Ok, made.Reason);
+        var wrap = made.Wrap!;
+        Assert.Equal(WorldKind.Prediction, wrap.World);
+        WorldKind? seen = null;
+        wrap.After((ref Slice s) => seen = s.World);
+        var stage = Assert.Single(w.Wraps);
+        Assert.Equal((1u, 0, SystemsNative.After), (stage.Kind, stage.Index, stage.Stage));  // kind 1, the client table's index
+        ProgramWrap.Poll();
+        Assert.Equal(WrapState.Active, wrap.State);
+        w.Call(stage);
+        Assert.Equal(WorldKind.Prediction, seen);
+        // no Replace there; a program the prediction storage never steps is refused with the reason
+        var replace = wrap.Replace((ref Slice s) => { });
+        Assert.False(replace.Ok);
+        Assert.Contains("no Replace", replace.Reason);
+        Assert.Single(w.Wraps);
+        var client = Systems.Wrap("client_program", new WrapOptions { World = WorldKind.Prediction });
+        Assert.False(client.Ok);
+        Assert.Contains("does not run in the prediction storage", client.Reason);
+        Assert.Contains("a client-world program", client.Reason);
+        wrap.Dispose();
+    }
+
+    [Fact]
+    public void A_prediction_wrap_is_an_argument_error_where_its_capability_is_off_and_off_once_it_goes()
+    {
+        using var w = new FakeWorld(n => n is "systems.wraps" or "systems.wraps.client");
+        var e = Assert.Throws<ArgumentException>(() => Systems.Wrap("fuel_setup", new WrapOptions { World = WorldKind.Prediction }));
+        Assert.Contains(Systems.PredictionCapability, e.Message);
+        Capabilities.Report(Systems.PredictionCapability, CapabilityState.Available);
+        var wrap = Systems.Wrap("fuel_setup", new WrapOptions { World = WorldKind.Prediction }).Wrap!;
+        Capabilities.Report(Systems.PredictionCapability, CapabilityState.Unavailable, CapabilityReason.Faulted, "the tick hook faulted");
+        var off = Assert.Throws<KilnUnavailableException>(() => wrap.Before((ref Slice s) => { }));
+        Assert.Equal(Systems.PredictionCapability, off.Capability);
+        wrap.Dispose();
+    }
+
+    [Fact]
+    public void A_client_worlds_program_lists_its_prediction_wraps_too()
+    {
+        using var w = new FakeWorld(n => n is "systems.wraps" or "systems.wraps.client" or "systems.wraps.prediction");
+        var predicted = Systems.Wrap("fuel_setup", new WrapOptions { World = WorldKind.Prediction }).Wrap!.After((ref Slice s) => { });
+        var client = Systems.Wrap("fuel_setup", new WrapOptions { World = WorldKind.Client }).Wrap!.Before((ref Slice s) => { });
+        var server = Systems.Wrap("fuel_setup").Wrap!.Before((ref Slice s) => { });
+        var listed = Systems.Find("fuel_setup", WorldKind.Client)!.Wraps;
+        Assert.Equal([(WorldKind.Client, WrapStage.Before), (WorldKind.Prediction, WrapStage.After)],
+            listed.Select(i => (i.World, i.Stage)).OrderBy(x => x.World == WorldKind.Prediction).ToArray());
+        Assert.Equal([WorldKind.Server], Systems.Find("fuel_setup")!.Wraps.Select(i => i.World).ToArray());
+        Assert.Null(Systems.Find("fuel_setup", WorldKind.Prediction));  // no directory of its own, as before
+        predicted.Dispose();
+        client.Dispose();
+        server.Dispose();
+    }
+
+    [Fact]
+    public void A_prediction_wraps_WhenArchetype_answers_end_with_its_prediction_storage_not_only_its_client_world()
+    {
+        using var w = new FakeWorld(n => n is "systems.wraps" or "systems.wraps.client" or "systems.wraps.prediction");
+        w.KindSession[1] = 5;  // the prediction storage's session
+        w.KindSession[2] = 9;  // the client world's
+        var ran = 0;
+        var wrap = Systems.Wrap("fuel_setup", new WrapOptions { World = WorldKind.Prediction }).Wrap!
+            .WhenArchetype(["Fuel"]).Before((ref Slice s) => ran++);
+        var stage = Assert.Single(w.Wraps);
+        ProgramWrap.Poll();
+        w.Layout = 0x6000;
+        w.LayoutHas.Add(Hash("Fuel"));
+        w.Call(stage);
+        Assert.Equal(1, ran);  // decided for layout 0x6000: it has Fuel
+        w.LayoutHas.Clear();
+        w.Call(stage);
+        Assert.Equal(2, ran);  // cached for this prediction storage
+        // a new prediction storage under the same client world (the core starts a prediction session when its pointer
+        // changes): its layout 0x6000 is another archetype, decided again
+        w.KindSession[1] = 6;
+        w.Call(stage);
+        Assert.Equal(2, ran);
+        wrap.Dispose();
+    }
+
+    [Fact]
     public void Stages_reach_kiln_world_with_the_mod_s_owner_stage_and_priority()
     {
         using var w = new FakeWorld();

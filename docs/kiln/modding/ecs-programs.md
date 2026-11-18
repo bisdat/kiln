@@ -54,8 +54,9 @@ entities. `flags` is an optional array of `system`, `init`, `hostOnly`, `exclusi
 its default is `system, hostOnly`. A system program gets entity zero and cannot declare entity query lists. For a
 per-entity query, supply flags such as `["hostOnly"]` and at least one required component/filter.
 
-`context.TryRead<T>` and `TryWrite<T>` access the current entity's declared slots. `TryReadOther<T>` and
-`TryWriteOther<T>` use declared accessors for another entity. Sizes must match the game's reflected component size.
+`context.TryRead<T>` and `TryWrite<T>` access the current entity's declared slots; `TryReadWritable<T>` (since
+0.2.0-dev.29.18, mod API 0.2.10) reads a `write`/`writeOptional` slot, so a component you read and change is declared
+once, under `write`. `TryReadOther<T>` and `TryWriteOther<T>` use declared accessors for another entity. Sizes must match the game's reflected component size.
 `TryRead`/`TryWrite` get that size from kiln.types: on a build without it they return false (the mod log says so once
 per program). Each name is looked up once per program, so calling them per entity costs no allocation or lock.
 Writes mark the game's replication/save tracker. `otherWrite` is passed to the engine's descriptor before it builds
@@ -64,7 +65,8 @@ the dependency plan. A component may appear in both other-read and other-write l
 
 With Kiln.Game (`KilnServices` `Game`) the same four calls take a generated type and no name (since 0.2.0-dev.27):
 `context.TryGet(out Ecs.Health h)`, `context.TrySet(h)`, `context.TryGetOther(entity, out Ecs.Fuel f)` and
-`context.TrySetOther(entity, f)`. The declaration in `kiln.programs.json` is still by name, and the size check is the
+`context.TrySetOther(entity, f)`; `context.TryGetWritable(out Ecs.SlotAttachment a)` reads a write slot (since
+0.2.0-dev.29.18). The declaration in `kiln.programs.json` is still by name, and the size check is the
 same. A mod that only wants to change a component now and then needs no program of its own: `World.Write<T>` and
 `World.Update<T>` queue the change into Kiln's write program ([../services/world.md](../services/world.md#tracked-writes)).
 
@@ -85,6 +87,10 @@ A program of the mod's own can also run in this player's **client world** or **p
 0.2.0-dev.29): `"world": "client"`, `"both"` or `"prediction"` in `kiln.programs.json`, bound with
 `EcsPrograms.TryBind(key, callback, WorldKind.Client)` on the game's main thread; see
 [services/world.md](../services/world.md#client-world-programs-since-020-dev29) (template `kiln-client-program`).
+
+A client program runs after the game's client programs it conflicts with (so a write to what `slot_attachment` reads is
+drawn from the next client step), and the entities the server sends keep the server's ids in your client world: see
+[services/world.md](../services/world.md#a-client-program-on-the-games-entities-what-holds-020-dev2918).
 
 `systems.wraps.client` is open since 0.2.0-dev.29. Managed callers select `WrapOptions.World = WorldKind.Client`; native plugins can select the client world too, when symbols and lifecycle support resolve and no conflicting runtime disables wraps. Native callers must release and drain before freeing callback memory. The implemented `06a-wraps.client` guided check counts callbacks and filtered admissions on workers; real-game confirmation is still pending.
 
@@ -134,4 +140,7 @@ wrap.AfterEach((ref EntityView e) =>
 The same thread rules hold for all three: handlers run on the game's workers once a player is in the world, tick-thread
 APIs throw inside them, `Slice.Post` (or `Context.Scheduler.Post`) hands work to the tick thread. A wrap's fault or
 exception turns off that stage only. Wraps are refused while native SET is loaded, and target the server world by
-default; a game client's own world takes `WrapOptions.World = WorldKind.Client` (`systems.wraps.client`).
+default; a game client's own world takes `WrapOptions.World = WorldKind.Client` (`systems.wraps.client`), and the
+prediction storage, which runs the local player's server programs again on the player's own screen, takes
+`WorldKind.Prediction` since 0.2.0-dev.29.18 (`systems.wraps.prediction`, Before and After only:
+[services/systems.md](../services/systems.md#the-prediction-storage-worldkindprediction-since-020-dev2918)).

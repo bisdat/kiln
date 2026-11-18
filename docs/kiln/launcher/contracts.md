@@ -66,6 +66,9 @@ Machine-readable copies:
 | `*.kschem` header | Kiln.Build | Kiln.Build, `kiln lint` | `kschem-header.schema.json` |
 | `schema/schemas.json`, `schema/idrefs.json` | `kiln lint` (`idrefs.json` is generated) | `kiln lint`, tools/vscode | which schema and JSON dialect each file has; where files name game entries |
 | `kiln lint --json`, `library_lint` result | `kiln lint` | tools/vscode, launcher | `lint-report.schema.json`, `fixtures/lint/output.json` |
+| `launcher/src/data/vendor-components.json` (compiled into the launcher) | Kiln's release process (`tools/release/vendor_pin.py` pins the hashes) | launcher | `vendor-components.schema.json`, `examples/vendor-components.json`; section 5.15 |
+| `<game>/kiln/vendor/<vendor>/<version>/kiln-vendor.json` | launcher (vendor downloads, 0.2.0-dev.29) | launcher; Kiln in the game from phase B | `vendor-receipt.schema.json`, `examples/vendor-receipt.json`; section 5.15 |
+| `<data>/state/vendor-licenses.json` | launcher (the licence dialog, 0.2.0-dev.29) | launcher | `vendor-licenses.schema.json`, `examples/vendor-licenses.json`; section 5.15 |
 
 ### Start progress (`kiln/state/progress.json`, 0.2.0-dev.27)
 What a start is doing from `kiln_boot` until the game can be used, for the launcher's progress bar and time estimate.
@@ -112,7 +115,7 @@ Root: `$KILN_DATA_DIR`, else the folder the pointer `data-folder.json` in the de
 | Path | What |
 |---|---|
 | `settings.json` | launcher settings (`LauncherSettings`, section 9) |
-| `library/<kind>/<id>/<version>+<hash8>/` | immutable library entries; kind `kiln`, `native`, `plugin`, `emf`, or another engine's (`eml`, `shroudforge`, `set`, `greeneye`, `flame`, `shroudtopia`, `enshwick`, `shroudlink`, `ember`), see 5.1; hash8 = the first 8 hex chars of the folder's hash: its kdh1, for a Kiln mod its identity (5.11: kdh1 without what a cook left in `assets/cooked`, so an entry cooked in place is still the entry that was imported); of the DLL's sha256 for a plugin, whose folder holds the one DLL |
+| `library/<kind>/<id>/<version>+<hash8>/` | immutable library entries (their files writable by the owner from 0.2.0-dev.29.18: an import from a folder no longer keeps a read-only file read-only, and neither does a placement from the entry); kind `kiln`, `native`, `plugin`, `emf`, or another engine's (`eml`, `shroudforge`, `set`, `greeneye`, `flame`, `shroudtopia`, `enshwick`, `shroudlink`, `ember`), see 5.1; hash8 = the first 8 hex chars of the folder's hash: its kdh1, for a Kiln mod its identity (5.11: kdh1 without what a cook left in `assets/cooked`, so an entry cooked in place is still the entry that was imported); of the DLL's sha256 for a plugin, whose folder holds the one DLL |
 | `library/<kind>/<id>/<version>+<hash8>.json` | import record next to the folder: `{format, kind, id, version, hash, imported, source:{type,from}, size, name?, side?, clients?, file?, manifestId?}`. `manifestId` (dev.22): an engine mod whose own manifest id is no Kiln id (`Hoarders Helper`, `antisocialian's tweaks`) is filed under a Kiln id made from it (`hoarders-helper`) and keeps its own id here; the files in the folder are the author's, byte for byte, because the engine plugin reads that manifest and reports its state rows (`kiln/state/<engine>.json`) under it. Rows that carry a `path` match their profile entry by it; the mod manager (`ModCatalog`) also matches a row by the slug of its id. Two manifest ids with one slug get a short hash added to the second one's id |
 | `library/kiln-kept.json` | (dev.29) the earlier versions an update kept for a roll back (`kiln_manage::kept`; `kiln-kept.schema.json`, `examples/kiln-kept.json`): per mod (`kind`, `id`) the kept entries, newest first (`version`, `hash`, `kept` time, `replacedBy`, `profile`: the profile whose change left it, and the `settings` kept with it: their folder `dir`, the files copied and their bytes, ShroudForge setting values, the game folder they came from), at most `keepVersions` (`settings.json`, default 1, at most 5; 0 keeps none), and `restores`: the settings a roll back left for its version's next placement, one per profile, in the game folder they came from (`preimages`: `files[gameRelativePath]` and `values[copyRelativePath][settingKey]` each hold `{before: sha256 | null, snapshot: sha256}`; `null` means absent; hashes of values use their serialized JSON. These guards are captured in the first durable restore record before settings writes. Each attempt settles matching snapshot content, writes only matching preimage content, and preserves/notes everything else. A missing preimage block is a legacy record: differing current content is preserved and settled, never overwritten. If both the preimage and current state are absent, retry writes the snapshot; a later deletion is preserved when the preimage was present. `applied`: its files and values are settled, restored content is flushed, and only the record is left to drop; a restore is marked so, then dropped, so a stop between the two never puts the files back again over a later change). `pending`: the record of a change written with the new state before its profile is saved (the profile, each mod's version before and after, each touched mod's state before, and `profileBefore`: the prior profile mod entries, including removals). **Recovery:** the file is written in one durable write (`util::write_atomic_durable_exclusive`, through the one seam `kiln_manage::durable`) only after what it names is flushed (a settings copy's files and folders, the name of its folder, the folders above it; for a commit, the profile's `meta.json` and its folder; for a restore marked done, the restored files and the folder entries naming them), under `library/kiln-kept.lock`, held from before the profile save until the record is dropped; at every later look under that lock (the launcher's start, every change, every placement) a `pending` change is undone when its touched profile entries still match `profileBefore` (legacy records compare the replaced versions), else finished; an entry whose Library entry is gone is dropped, and a missing settings copy is dropped with a note, a kept entry its own profile uses again is dropped, and every folder below `library/kiln-kept/` the file does not name is deleted (never through a link). Nothing else is touched by it. A kept entry is an ordinary Library entry (folder and record): a launcher before dev.29 does not read this file, lists a kept entry as another version of the mod ("Use <version>") and its Clean up may remove it; dev.29 then forgets it. An unreadable, malformed, or newer-format index is left untouched and its settings copies are not swept. Entries owned by a profile whose file is demonstrably absent are dropped. A file of another format is left as it is and nothing is kept |
 | `library/kiln-kept/<kind>/<id>/<dir>/` | (dev.29) one settings copy, `<dir>` = `<version>+<hash8>.<12 hex>` (a new copy always gets a new folder; it is made in `.stage-<12 hex>` beside it and renamed once whole): each file at its path relative to the game folder (`greeneye/worstmap/minimap_config.ini`), copied from Kiln's game-folder copies of the version (`kiln/state/library-placements.json`) at the update: the files not as Kiln placed them (changed or added since) that are settings files or logs (`txt`, `ini`, `cfg`, `json`, `toml`, `yaml`, `yml`, `log`) and no manifest (`mod.json`, `extended.mod.json`, `native-plugin.ini`, the other engines' manifests at the top), never Lua, `src/` or anything else (scripts, DLLs), at most 16 MiB each and 64 MiB per version. Deleted once `kiln-kept.json` no longer names it |
@@ -130,7 +133,9 @@ Root: `$KILN_DATA_DIR`, else the folder the pointer `data-folder.json` in the de
 | `logs/launcher.log` | the launcher's own log |
 | `logs/game-start-<installId>.log` | (dev.29.17) the umu-run, Proton or Wine output of the last direct start of that install (written again at every one; the support report carries it) |
 | `state/software-render.json` | Linux: there, a start without an override draws without the GPU (`{format, why, at, version}`; written by the launcher when its page did not start, or by Settings; [app.md](app.md), "Drawing without the GPU") |
+| `state/webkit-sandbox.json` | (dev.29.18) Linux: there, a start without an override turns WebKit's process sandbox off (sets `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1` before GTK and WebKit start; a value the player set stays). `{format, why, at, version}`, the same shape as `software-render.json`; written by Settings, or after the player's click in one of the launcher's messages (by the restart it starts, once the beta copy's gate is open); never without such a choice. `--webkit-sandbox` / `--no-webkit-sandbox` and `KILN_LAUNCHER_WEBKIT_SANDBOX=on\|off` win over it ([app.md](app.md), "WebKit's sandbox (Linux)") |
 | `state/desktop-entry.json` | Linux AppImage: there when the player turned "Kiln Launcher in the app menu" off (`{format, on: false, at}`); absent, every start writes or updates the app menu entry and icons ([app.md](app.md), "Taskbar icon and app menu") |
+| `state/vendor-licenses.json` | (0.2.0-dev.29) the vendor licences the player agreed to in Settings, Upscalers, per vendor and SHA-256 of the text (`kiln_manage::vendor::agreements`; section 5.15). Here and not in a game's `kiln.json`: the player agrees once on this PC, the game never reads it, and `kiln.json` is per install and written by the game and other tools. Lost or unreadable: the dialog comes again |
 | `update.json` | the self-update's state: `{format, skipped, checked, updated: {from, to, at, source, notes}}` (releasing.md) |
 | `servers/<id>.json` | launcher records of servers that are not kilnctl instances (steam, windows, remote) and renames (`ServerInstance`) |
 | `modpacks/downloads/<sha256>.zip`, `modpacks/built/<serverId>/`, `modpacks/staging/`, `modpacks/dismissed.json` | modpack downloads (reused when the sha256 matches), built server modpacks, unpack staging, offers and refusals the user dismissed (`{gameId: {serverId: modpack sha256 | "refused <written>"}}`) |
@@ -386,6 +391,7 @@ Today's layout stays (`tools/deploy-server.sh`): `kiln-core.dll`, `kiln.json`, `
 | `backups/install-<yyyymmddThhmmssZ>/` | what the installer replaced, byte-identical |
 | `.staging-<random>/` | installer staging; deleted at the end, stale ones deleted by the next install |
 | `logs/proxy.log` | the proxy's decisions |
+| `vendor/<vendor>/<version>/` | (0.2.0-dev.29) vendor upscaler files the player downloaded in Settings, Upscalers, with their receipt `kiln-vendor.json` (section 5.15); `vendor/.lock` while a download or a removal runs. A client only |
 
 Servers keep their layout: the launcher syncs library mods into `<server>/kiln/mods/<id>/` with
 `.kiln-source.json` (`{format, library:{kind,id,version,hash}, synced, by}`) and switches them off with an empty
@@ -521,7 +527,14 @@ the activation of the others). The launcher displays paths/reasons until dismiss
 Kiln's engine plugin (such as SET's) or another loader. Copies are staged beside the destination and
 the previous folder is restored if replacement fails. Activation refuses while the game runs.
 In copy mode, the ShroudForge and SET profile entry paths name the verified source copies under
-`kiln/profiles/<profile>/<kind>/<id>`; their plugins still read the separately placed fixed engine folders.
+`kiln/profiles/<profile>/<kind>/<id>`; their plugins still read the separately placed fixed engine folders. Nothing
+reads those copies' files: the core only checks that the folder is there (a missing one is "missing; skipped" in
+kiln.log and `boot.json`, and the engine's plugin reads only the list), and since 0.2.0-dev.29.18 the in-game Mods page
+shows and edits the copy the engine runs (Kiln.Ui `ModCatalog.EngineRunFolder`: Kiln's copy in the engine's folder whose
+marker names the entry's kind and id, or the player's own folder of the same package there). Settings changed in that
+copy survive every activation and reconcile, as the launcher's editor's do (`engine_settings_set` writes the same
+file): placement compares `extended.mod.json` without its switch and settings, and carries the values to a new
+version. The profile's switch is the one Kiln sets there at every activation.
 Play once cannot select different ShroudForge or SET mods, versions or switches from the active profile: activate
 that profile first to change their fixed folders. A refused play-once request leaves those folders unchanged.
 
@@ -1013,6 +1026,92 @@ All additive, appended to v1 tables (check `header.size`). Docs: `docs/kiln/netw
   tests), `net.client_ready` (client exe). The build records' symbol lists don't have the new symbols yet: the core resolves them from the patterns at boot and reads only
   `verified` from a record. Regenerate them at the next `build_record.py` run.
 
+### 5.15 Vendor files (`<game>/kiln/vendor/`, 0.2.0-dev.29)
+Vendor upscaler files the launcher downloads when the player asks for them (Settings, Upscalers, behind the preview
+`upscalers`: [app.md](app.md) "Upscalers"; [../graphics.md](../graphics.md) "Upscaler files"). `kiln_manage::vendor`.
+A client only: a dedicated server is `unsupported`.
+- **The manifest** `launcher/src/data/vendor-components.json` (compiled into the launcher; `vendor-components.schema.json`):
+  `{format: 1, components: [{id, vendor, vendorName, name, enables, version, source?, license: {name, file, sha256,
+  from}, files: [{name, url, size, sha256, gitBlob?}]}]}`. In 0.2.0-dev.29.18: `amd-fsr` 2.4.0 (AMD FSR:
+  `amd_fidelityfx_loader_vk.dll`, `amd_fidelityfx_upscaler_vk.dll`, `amd_fidelityfx_framegeneration_vk.dll`, 72,981,808
+  bytes, "MIT licence") and `intel-xess` 3.0.2 (Intel XeSS: `libxess.dll`, 77,795,704 bytes, "Intel Simplified Software
+  License (October 2022)"), every file pinned. A `sha256` is 64 lower-case hex digits or `"not-pinned"`: a component with
+  any file not pinned is `unavailable` and is never downloaded. Rules beyond the schema (`manifest::parse`): ids unique;
+  one component per vendor and version (they share a folder); `vendor` is `amd`, `intel` or `nvidia`, and every URL is on
+  that vendor's own GitHub organisation (in code, not data: `GPUOpen-LibrariesAndSDKs`; `intel`; `NVIDIA`, `NVIDIA-RTX`)
+  at the tag `<version>` or `v<version>`; file names without a folder, not `kiln-vendor.json`, `*.part` or `*.tmp`;
+  sizes from 1 byte to 512 MiB; the licence text bundled (`launcher/src/data/vendor-licenses/`: the vendor's words
+  verbatim, LF line ends; AMD's is the MIT section of `Kits/FidelityFX/docs/license.md`, which lists the signed DLLs
+  under it) and `license.sha256` the SHA-256 of that text with LF line ends; only NVIDIA's own files may be called DLSS
+  (in the name, the vendor's name, the sentence or the licence's name); no key outside the schema (the manifest ships
+  inside the build, so an unknown key is a typo, and both the schema and the parser refuse it).
+- **Pinning.** `python3 -I tools/release/vendor_pin.py --dir <folder> [--component <id>] [--write | --check]`, with copies
+  downloaded once by hand from the manifest's URLs (`<folder>/<id>-<version>/<name>`, `<folder>/<id>/<name>` or
+  `<folder>/<name>`): each copy must have the manifest's size and git blob SHA-1 (GitHub's for the file at the tag) before
+  its SHA-256 is written; a pinned hash is never replaced (a different one is an error: the file changed under the tag).
+  The tool downloads nothing.
+- **Hosts.** Only the manifest's URLs are fetched, each in one of three forms:
+  `https://raw.githubusercontent.com/<org>/<repo>/<tag>/<path>` (a file at a tag, served directly: **no redirect is
+  followed**; every file of 0.2.0-dev.29.18 is one of these), `https://media.githubusercontent.com/media/<org>/<repo>/<tag>/<path>`
+  (a Git LFS file at a tag; no redirect either), or `https://github.com/<org>/<repo>/releases/download/<tag>/<asset>` (a
+  release asset: exactly one redirect, carrying nothing but the user agent, to GitHub's asset storage
+  `release-assets.githubusercontent.com` or `objects.githubusercontent.com`). Any other redirect, a second one, or one to
+  `http` fails the download (`refused`). Through `kiln_manage::net`: https on port 443, public addresses only, no proxy,
+  no cookie, no credential; the headers are the User-Agent `kiln/<version>`, `Accept-Encoding: identity` (the file's own
+  bytes, so the size bound, the hash and a range count the same bytes; kept on the release asset's redirect), `Range`
+  when a download goes on, and the transport's `Accept: */*`, nothing else; the real transport gives up after 10 s
+  without a connection and 60 s without a byte. What the host sees: the player's IP address, that user agent and the
+  file asked for.
+- **The download** (`vendor_download`, a task). Each file goes to `<name>.part` in its version folder, is hashed as it
+  arrives, may not pass the manifest's size (a longer answer stops it), and becomes `<name>` only when its size and
+  SHA-256 are the manifest's; a file that differs is deleted (`hash_mismatch`, the message names the file and the host).
+  Cancel and a broken connection keep the `.part`; the next download goes on with `Range: bytes=<n>-` (a raw file; a
+  release asset starts again, since its redirect carries no range). An answer that does not continue the same file (a
+  200, a 416, another range, or a whole that does not verify) starts that file again once, from byte 0. A file already in
+  the folder with the manifest's size and SHA-256 is kept. Refused while the game runs (`game_running`), while the
+  preview is off (`refused`), for a component not pinned (`refused`), without the player's agreement to the licence
+  text (`consent_required`), and when the game's disk has less free space than the bytes still to come plus 256 MiB and
+  5 % (`refused`, before anything is fetched; `data_folder::needed_bytes`). A write that fails mid-download is `io`.
+- **Layout.** `<game>/kiln/vendor/<vendor>/<version>/` holds the component's files by their manifest names and the
+  receipt; nothing goes into the game's own folder (other loaders and Kiln's step-aside list look there).
+  `<game>/kiln/vendor/.lock` is locked while a download or a removal of that game runs (`busy` for a second one); it is
+  never removed. Nothing below the game folder is reached through a link.
+- **The receipt** `kiln-vendor.json` (`vendor-receipt.schema.json`): `{format: 1, component, vendor, version, installed,
+  installer, license: {name, sha256}, files: [{name, size, sha256, url}]}`, written last and atomically, after every file
+  verified, and removed first when a download of that folder starts. A folder without one is not complete and is not an
+  install; its `version` is the folder's name. Anything can write the game folder, so a reader trusts no name in it: a
+  receipt whose `version` is not a version or that names a file that is not a plain manifest-style name (a folder, `..`,
+  an absolute path, a trailing dot, a Windows device name) is not an install, and removal deletes only plain names
+  inside the version folder.
+- **What Kiln in the game will read (phase B, not in this release).** The game side trusts nothing in the game folder,
+  the receipt included (anything can write it), only the list it was built with: the same manifest, shipped with the
+  runtime of the same release, as `(component, version, file name, size, sha256)`.
+  - **Which folder:** for each component, the newest version on that list whose folder has a receipt of that `component`
+    and `format` 1. A folder of a version the list does not have is skipped (a launcher newer than the game's runtime
+    downloads a version the runtime cannot check: no upscaler, never an unchecked one). `*.part` and `*.tmp` files and a
+    folder without a receipt are never used.
+  - **Which files:** the names, sizes and hashes come from the built-in list, never from the receipt (a receipt's names
+    are never joined to a path).
+  - **The check:** every file of the component, before the first one loads (AMD's loader loads the other two by name).
+    Each is opened with sharing that refuses writes and deletes (`FILE_SHARE_READ` only), hashed through that handle
+    (about 0.1 s for 80 MB, once per start) and kept open until it is loaded, so the bytes checked are the bytes loaded.
+    A size or SHA-256 other than the list's: that component is not used this start, and the log says which file.
+  - **Loading:** by the full path in that folder with `LoadLibraryExW(..., LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR |
+    LOAD_LIBRARY_SEARCH_SYSTEM32)`, never from the game's folder or `PATH`; AMD's upscaler and frame generation DLLs
+    before its loader, so the loader's loads by name find the modules already checked and loaded. A file of one of these
+    names in the game's own folder is another tool's: step aside (as `graphicsStepAside` does) rather than load next to it.
+  - **Never:** a hook in or a change to `libxess.dll` (Intel's licence), a write into `kiln/vendor/` (the launcher's).
+- **Update.** A newer manifest version downloads into its own folder; the earlier versions of the component go only
+  after the new one verified, so a failed update keeps the old one.
+- **Remove** (`vendor_remove`): every version folder of the component (found by their receipts) and an interrupted
+  download of its manifest version, by the names Kiln put there (the receipt's and the manifest's files, their `.part`
+  files, the receipt): the receipt first, then the files, then the folder and `<vendor>/` when they are empty. Anything
+  else in a folder stays, named in the result, and so does the folder.
+- **The licence agreements** `<data>/state/vendor-licenses.json` (`vendor-licenses.schema.json`): `{format: 1, vendors:
+  {<vendor>: [{license, sha256, component, version, agreed}]}}`, added to when the player clicks "I agree, download". A
+  download needs its vendor's entry with the component's `license.sha256`; a changed text asks again. Not read by the
+  game. A file of another format counts as none and is replaced at the next agreement.
+
 ## 6. Path translation
 `kiln_manage::winpath`, `kiln_manage::game::PathMode`:
 - **Z mode** (Proton): `/home/u/x` <-> `Z:\home\u\x`, used only when `<pfx>/dosdevices/z:` resolves to `/` and the
@@ -1021,7 +1120,14 @@ All additive, appended to v1 tables (check `header.size`). Docs: `docs/kiln/netw
 - **Native mode** (Windows): real paths as they are (no `\\?\` prefix).
 - **Copy mode**: Flatpak or Snap Steam (the sandbox cannot see `~/.local/share/kiln`), a missing or redirected `Z:`,
   or an untranslatable path. Activation copies each enabled mod folder to `<game>/kiln/profiles/<pid>/<kind>/<id>/`
-  (verified by kdh1 after the copy; unchanged copies are kept), the profile's config dir to
+  (verified by kdh1 after the copy; unchanged copies are kept; files are made writable by their owner, 0.2.0-dev.29.18),
+  a copy that changed in the game folder is never replaced without a word (0.2.0-dev.29.18): one that still holds a
+  Library version of the mod is replaced as before; one whose only change is its kind's settings files
+  (`engine_mods::settings_files`) and the mod's own output stays as it is; any other is moved to
+  `<game>/kiln/backups/profile-copy-<pid>-<kind>-<id>-<yyyymmddThhmmssZ>/` (the three newest of each mod are kept)
+  before the Library's files go in, with a
+  sentence in the activation's `warnings` naming the files and that folder (for ShroudForge and SET also that the engine
+  never read that copy and where settings apply). The profile's config dir goes to
   `<game>/kiln/profiles/<pid>/config/` (copied back to `<data>/profiles/<pid>/config/` before the next activation and
   after the game exits), and writes relative paths (`profiles/<pid>/kiln/<id>`), resolved against `<game>/kiln/`.
   The copy back goes file by file against `<data>/profiles/<pid>/config-sync/<installId>.json` (section 1), what the
@@ -1212,9 +1318,10 @@ Shared types (TypeScript names, defined in `commands.ts`; Rust in kiln-manage un
 
 | File | Command | Arguments | Returns |
 |---|---|---|---|
-| app | `app_info` | - | `AppInfo` {version, kiln, platform, arch, dataDir, commit, mock, noWebgl, deck: `DeckInfo`, distribution: "direct" \| "nexus", render?: `RenderInfo` (Linux), desktop?: `DesktopInfo` {on, installed, foreign, file} (Linux AppImage)} |
+| app | `app_info` | - | `AppInfo` {version, kiln, platform, arch, dataDir, commit, mock, noWebgl, deck: `DeckInfo`, distribution: "direct" \| "nexus", render?: `RenderInfo` (Linux), desktop?: `DesktopInfo` {on, installed, foreign, file} (Linux AppImage), sandbox?: `SandboxInfo` (Linux, dev.29.18), preview?: string[] (dev.29)} |
 | app | `app_started` | - | null (the page's first screen is up; once per start; ends the Linux render watchdog) |
 | app | `app_render_set` | software: boolean | `RenderInfo` (sets or clears `state/software-render.json` for the next start; `unsupported` off Linux) |
+| app | `app_sandbox_set` | on: boolean | `SandboxInfo` (dev.29.18; on removes `state/webkit-sandbox.json`, off writes it, for the next start; `unsupported` off Linux) |
 | app | `app_desktop_set` | on: boolean | `DesktopInfo` (on: writes `kiln-launcher.desktop` and the icons, replacing a file of that name Kiln did not write; off: removes Kiln's, and `state/desktop-entry.json` keeps it off; `unsupported` outside a Linux AppImage) |
 | app | `app_settings_get` | - | `LauncherSettings` |
 | app | `app_settings_set` | settings: LauncherSettings | `LauncherSettings` |
@@ -1393,6 +1500,10 @@ or emits `kiln://update`; its UI calls none of these commands.
 | data_folder | `data_folder_reset` | - | `DataFolder` at the default place (`reset`; only with a broken pointer); the restart follows |
 | data_folder | `data_folder_notice_ack` | - | null, never fails (the notice is gone for this process; the move's journal is acknowledged only for a finished removal; an unclear record stays until its committed folder is in use again; a removal that stopped or was refused, and an unfinished move's partial copy that could not be removed, keep it for the next start) |
 | data_folder | `data_folder_restart` | - | does not return (the watcher stops, the lock goes, Tauri's `restart()`) |
+| vendor | `vendor_status` | gameId | `VendorStatus {preview, folder: "kiln/vendor", components: ComponentStatus[]}` (dev.29; section 5.15): per component of the manifest `{id, vendor, vendorName, name, enables, version, source?, license: {name, sha256, from, agreed, agreedAt?}, hosts, size, files: {name, size, pinned}[], state: "notDownloaded"\|"downloaded"\|"updateAvailable"\|"unavailable"\|"damaged", installed?: {version, folder, sizeOnDisk, installed, problems?}, partial (bytes of an interrupted download), reason?}`, from the receipts and the files' sizes and SHA-256 (a hash is kept for the launcher's run while the file's size and modification time stay). `unsupported` for a server |
+| vendor | `vendor_license` | componentId | `LicenseText {component, vendor, name, text (the bundled text in full), sha256, from, agreed}`; nothing is fetched |
+| vendor | `vendor_download` | gameId, componentId, licenseSha256: string \| null | `TaskId` -> `DownloadReport {receipt, folder, fetched, kept, replaced, warnings}`. `licenseSha256`: the hash of the licence text the dialog showed, on the vendor's first download of that text; it is recorded before anything is fetched. Refused (before the task) while the preview `upscalers` is off, for a server, a component not pinned, without the agreement (`consent_required`), while the game runs |
+| vendor | `vendor_remove` | gameId, componentId | `RemoveReport {removed: string[] (folders, relative to the game), freed (bytes), kept: string[] (what stayed, one sentence each)}`; refused while the game runs; answers with the preview off too |
 | updates | `updates_check` | request?: `{offline?, refresh?, automatic?, providers?, source?}`; `providers`: the providers asked (`"github"`, `"nexus"`; absent: all), the others answer from what is remembered with no request; `source`: `{action: "map", kind, id, spec, confirm?}` (spec: the manifest's `updates` shape), `{action: "confirm", kind, id}` or `{action: "unmap", kind, id}` | `CheckReport {format, checkedAt, offline, mods: ModUpdateStatus[]}` (dev.28; the document of `kiln updates check --json`, [../modding/updates.md](../modding/updates.md)); also emitted as `kiln://mod-updates`. The source change is applied first: a mapping to another place than the mod is checked against is `conflict` without `confirm`, a spec the manifest's rules refuse is `invalid_argument`. `offline`: no request to any provider. Nothing is downloaded, installed or switched |
 `ImportReport {imported: LibraryRef[], existing: LibraryRef[], skipped: {path, reason}[], notes: {path, text}[], names:
 {"<kind>/<id>": string}}`, `AddReport {import: ImportReport, profileId, profileName, created (My mods made now), added:
@@ -1404,9 +1515,18 @@ before Kiln was reinstalled is active again), libraryOnly: string | null (why th
 Launcher-only types (Rust in `launcher/src-tauri/src/commands/app.rs` and `launch.rs`): `AppInfo` (`noWebgl`:
 KILN_LAUNCHER_NO_WEBGL=1 for this start, or the launcher draws without the GPU; `render` (Linux only): `RenderInfo {mode:
 "gpu"|"software", why: "default"|"marker"|"restart"|"environment"|"argument", marker: boolean, markerWhy?: string}`
-(`src-tauri/src/render.rs`); `distribution`: "direct" for the frostdev.io/GitHub build that updates itself,
+(`src-tauri/src/render.rs`); `sandbox` (Linux only, dev.29.18): `SandboxInfo {want: "on"|"off", why:
+"default"|"marker"|"restart"|"environment"|"argument", marker: boolean, markerWhy?: string, webkit: "on"|"off"|"unused"
+(what WebKit does in this start: its GTK 3 API runs the sandbox only with WEBKIT_FORCE_SANDBOX=1), webkitWhy: string,
+yours?: string (the player's own WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS, which decides), probe:
+"works"|"fails"|"missing"|"unknown" (the probe of the bwrap WebKit runs), probeSays: string, probeFailed: boolean (bwrap
+cannot start, and it says something about this system: not the AppImage's own missing bwrap while the sandbox is not
+used)}` (`src-tauri/src/sandbox.rs`);
+`distribution`: "direct" for the frostdev.io/GitHub build that updates itself,
 "nexus" for the Nexus Mods build, which has no self-update and whose UI shows only a link to the Kiln page there
-(`src-tauri/src/distribution.rs`; absent from an older backend: direct)), `LauncherSettings {steamRoots: string[], defaultGameId: string|null,
+(`src-tauri/src/distribution.rs`; absent from an older backend: direct); `preview` (dev.29): the previews on for this
+start, from settings.json `preview` and `KILN_LAUNCHER_PREVIEW` (names separated by commas or spaces), left out when
+none is on: `"upscalers"` shows Settings, Upscalers (`src-tauri/src/commands/vendor.rs`)), `LauncherSettings {steamRoots: string[], defaultGameId: string|null,
 allowHttpModpacks: boolean, savesKeep: number, updateCheck: boolean (default true), updateChannel?: "stable"|"dev"
 (absent: the running build's channel), animatedFire: boolean (default true), addToActiveProfile: boolean (default true;
 a dropped mod goes through `library_add`; off: `library_import` only), uiMode?: "auto"|"deck"|"desktop" (the UI to start
@@ -1418,7 +1538,9 @@ number (dev.29, default 1, 0 to 5: "Earlier versions to keep", how many of a mod
 roll back with their settings; `app_settings_set` refuses more than 5 and trims what is kept to the new count; a
 launcher before dev.29 drops the field when it saves its settings, and dev.29 then keeps 1; [catalog.md](catalog.md)
 "Rolling back an update"), language?: string (dev.29: the launcher's language, "system" or absent = the system's,
-else a tag such as "zh-CN"; [translating.md](../translating.md))}` (`checkUpdates`, never used, is gone;
+else a tag such as "zh-CN"; [translating.md](../translating.md)), preview?: string[] (dev.29: previews of unfinished
+features by name, set by hand with the launcher closed and kept by every save: `"upscalers"` shows Settings, Upscalers;
+left out while empty)}` (`checkUpdates`, never used, is gone;
 readers ignore it), `UpdateStatus` (`launcher/src-tauri/src/selfupdate/mod.rs`; [releasing.md](releasing.md); `distribution`
 "direct", or in the Nexus build "nexus" with `phase: "disabled"`, `commands/update.rs`),
 `Task {id, kind (the command), title, state: 'queued'|'running'|'done'|'failed'|'canceled', progress: number|null,
@@ -1548,7 +1670,7 @@ default; the launcher uses `full`. Builds for Linux and `x86_64-pc-windows-msvc`
 | `error` | `Error {code, message, detail}`, `ErrorCode`, `Result<T>`, `Error::{new, not_implemented, with_detail, invalid, not_found}` |
 | `task` | `trait Progress { report(Option<f32>, &str); canceled() }`, `NoProgress` |
 | `paths` | `DataDirs::{at, locate, library, profiles, installs, runtime, schema_cache, backups, logs, settings, library_entry, profile}`, `DataEnv::{from_process, default_root, locate, locate_checked, home_dir, state_dir, config_dir}`, `Located {dirs, source, default_root}`, `RootSource {Env, Pointer, Default}`, `LocateProblem::into_error`, `ProblemKind`, `paths::game::*` constants |
-| `data_folder` | `recognize(&Path, &DataEnv) -> Result<FolderState>`, `inventory(&Path, &DataEnv) -> Result<Inventory>`, `own_entries`, `foreign_entries`, `is_top_lock`, `check(&CheckInput, &dyn SystemFacts) -> Result<Plan, Refusal>`, `check_here`, `target_rule`, `check_form`, `relation_to_current`, `game_path_too_long`, `needed_bytes`, `written_in_place`, `is_own_file`, `canonical`, `known_servers`, `read_pointer`, `write_pointer`, `remove_pointer`, `check_pointed`, `DataLock::{shared, exclusive, upgrade, downgrade, is_exclusive, path}`; `FolderState`, `Evidence`, `Inventory`, `EntrySize`, `LongestPath`, `Plan`, `Action`, `Refusal`, `RefusalCode`, `Target`, `CheckInput`, `SystemFacts`, `Facts`, `RealFacts`, `Space`, `Pointer`, `PathParts`, `PathRoot`, `PathStyle`; constants `POINTER`, `POINTER_OLD`, `JOURNAL`, `FILE_RECORD`, `MARKER`, `MOVE_MARKER`, `LOCK`, `KNOWN_ENTRIES`, `HASH_CACHE`, `WINDOWS_MAX_PATH`, `MARGIN_BYTES` |
+| `data_folder` | `recognize(&Path, &DataEnv) -> Result<FolderState>`, `inventory(&Path, &DataEnv) -> Result<Inventory>`, `own_entries`, `foreign_entries`, `is_top_lock`, `check(&CheckInput, &dyn SystemFacts) -> Result<Plan, Refusal>`, `check_here`, `target_rule`, `check_form`, `relation_to_current`, `game_path_too_long`, `needed_bytes`, `space_at`, `written_in_place`, `is_own_file`, `canonical`, `known_servers`, `read_pointer`, `write_pointer`, `remove_pointer`, `check_pointed`, `DataLock::{shared, exclusive, upgrade, downgrade, is_exclusive, path}`; `FolderState`, `Evidence`, `Inventory`, `EntrySize`, `LongestPath`, `Plan`, `Action`, `Refusal`, `RefusalCode`, `Target`, `CheckInput`, `SystemFacts`, `Facts`, `RealFacts`, `Space`, `Pointer`, `PathParts`, `PathRoot`, `PathStyle`; constants `POINTER`, `POINTER_OLD`, `JOURNAL`, `FILE_RECORD`, `MARKER`, `MOVE_MARKER`, `LOCK`, `KNOWN_ENTRIES`, `HASH_CACHE`, `WINDOWS_MAX_PATH`, `MARGIN_BYTES` |
 | `data_folder_move` | `move_to(&Located, &DataEnv, &Path, &dyn SystemFacts, Option<&mut DataLock>, &MoveOptions, &mut dyn Progress) -> Result<MoveResult>`, `use_folder(&Located, &DataEnv, &Path, &dyn SystemFacts, Option<&mut DataLock>) -> Result<Located>`, `reset(&DataEnv) -> Result<Located>`, `repoint(&DataEnv, &Path, &dyn SystemFacts) -> Result<Located>`, `pending(&DataEnv) -> Result<Pending>`, `remove_old_copy(&DataEnv, &mut dyn Progress) -> Result<Cleanup>`, `remove_partial_copy(&DataEnv) -> Result<Cleanup>`, `remove_partial_copy_with(&DataEnv, &mut dyn Progress) -> Result<Cleanup>`, `partial_reason`, `acknowledge(&DataEnv)`, `read_journal`, `MAX_ROUNDS`; `Journal`, `JournalEntry`, `FileRecord`, `RecordedFile`, `Rewrite`, `MoveOptions`, `MoveResult`, `Stayed`, `Pending`, `Cleanup`, `Kept` |
 | `hash` | `dirhash(&Path) -> Result<String>`, `dirhash_records(impl IntoIterator<Item = Record>)`, `sha256_file`, `sha256_hex`, `hex`, `hash8`, `fingerprint(entries) -> String`, `Record`, `FingerprintEntry` |
 | `vdf` | `parse(&str) -> Result<Vdf>`, `Vdf::{get, path, as_str, entries}` |
@@ -1585,6 +1707,7 @@ default; the launcher uses `full`. Builds for Linux and `x86_64-pc-windows-msvc`
 | `gameart` (feature `gameart`) | `extract_editor`, `extract_map`, `status`, `game_build`, `build_of`, `read_source`, `write_source`, `recipe_of`, `GameData::open`; `SourceInfo`, `GameSource`, `ArtStatus`, `GameBuild`, `EditorOptions`, `MapOptions`, `LayoutSource`; `kfc::Kfc`, `refl::{PeFile, TypeDb}`, `res`, `texture`, `image`, `work` ([gameart.md](gameart.md)) |
 | `modpack` | `inspect`, `download`, `verify`, `extract`, `check_against`, `install`, `build`, `publish`, `publish_state`, `client_mods`, `required`, `server_identity`; `ModpackManifest`, `ModpackMod`, `ModpackServer`, `ModpackSource`, `ModpackPreview`, `ModpackInstallRequest`, `ModpackInstallResult`, `BuiltModpack`, `ModpackPublishState`, `ClientMod` |
 | `lint` | `lint_paths`, `lint_text`, `lint_profile`, `lint_library_entry`, `rules`, `schema_for`, `docs::{idrefs, schema_markdown}`; `LintOptions`, `LintReport`, `Diagnostic`, `Severity`, `Span`, `Fix`, `TextEdit`, `Related` |
+| `vendor` (`manifest agreements store download`; 0.2.0-dev.29) | `builtin()`, `manifest::{parse, check_url, license_text, license_sha256, vendor_orgs, redirect_hosts, file_name_ok, BUILTIN, LICENSE_TEXTS, HOSTS, NOT_PINNED, MAX_FILE, VendorManifest, Component, License, VendorFile}`, `agreements::{Agreements::{load, agreed, agreed_at}, record, path, Agreement}`, `store::{Store::{at, for_game, root, folder, rel, lock, receipts, problems, partial, status, component_status, remove}, version_cmp, Receipt, ReceiptFile, ReceiptLicense, VendorState, ComponentStatus, LicenseInfo, FileInfo, Installed, RemoveReport, DIR, RECEIPT, PART_SUFFIX, LOCK}`, `download::{download, policy, user_agent, DownloadReport}` (section 5.15) |
 | `nexus` (`api catalog install nxm handler keystore oauth version`; network: feature `http`) | `client(token, app_version)`; `api::{Client::{new, with_credentials, has_credentials, search, mod_details, mod_files, file_versions, file_version_by_gsid, dependencies, download_links, validate, manifest, open_download, rate}, Credentials, Transport, UreqTransport, AppId, Account, ManifestEntry, RateState, parse_manifest}`, `catalog::{Catalog::{new, search, details, verify, files, requirements, installed, check_updates, record_install, cached_verdict}, classify, newest, bbcode_to_text, files_url, mod_url, root_of, refuse_kiln, GAME, KILN_MOD, KILN_EPOCH, CHECK_BATCH, Query, Filter, Sort, Page, CatalogMod, Details, CatalogFile, Requirement, InstallRecord, InstalledMod, InstalledInfo, ModType, Verdict}`, `install::{install, download, check_zip, InstallRequest, InstallReport, CheckReport}`, `nxm::{parse, game_of, NxmLink}`, `handler::{register, unregister, status, state, forward, platform, acquire_instance, queue_link, take_links, exec_argv, exec_quote, fill_command, split_command, LinuxMime, HandlerPlatform, HandlerState, HandlerStatus, Previous}`, `keystore::{TokenStore::{new, with_backend, get, set, clear, file_path}, TokenPlace, SecretBackend, retire_legacy, write_private}`, `oauth::{Config::{registered, new}, Login::{bind, authorize_url, wait}, Session::{new, save, clear, place}, Tokens}`, `version::{compare, is_newer}` ([catalog.md](catalog.md)) |
 
 kilnctl is built on the crate; it also has `bundle`, `client`, `admin` and `deploy --bundle`.

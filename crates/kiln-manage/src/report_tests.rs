@@ -323,6 +323,48 @@ fn addon_log_is_optional_bounded_and_redacted() {
         old.repeat(SMALL_LOG_MAX as usize / old.len() + 1) + last, "collection is read-only");
 }
 
+/// inbox 86: XHL-Core loaded a mod the profile had off, and the report had nothing of XHL-Core's own. Its log,
+/// XHL-Native-Plugin-Host.log, written next to the DLL it runs as (the game's dinput8.dll, or Kiln's copy in
+/// kiln/chain/<id>/), is in the zip now when it is there: bounded and redacted as Kiln's logs, never through a link.
+#[test]
+fn xhl_cores_own_log_is_collected_where_it_runs_from() {
+    let f = Fx::healthy("xhl-core-log");
+    let absent = build(&f.input());
+    assert!(!absent.files.iter().any(|(n, _)| n.ends_with("XHL-Native-Plugin-Host.log")), "nothing without XHL-Core");
+    assert!(absent.errors.is_empty(), "{:?}", absent.errors);
+
+    let old = "[XHL-Native-Host] an older line\n";
+    let last = "[XHL-Native-Host] loaded plugin: BuildingTools 0.34.0 (Z:\\var\\home\\frostling\\Enshrouded\\mods\\building-tools)\n";
+    f.w("kiln/chain/xhl-core/xhl-core.dll", b"MZ");
+    f.w("kiln/chain/xhl-core/XHL-Native-Plugin-Host.log", old.repeat(SMALL_LOG_MAX as usize / old.len() + 1) + last);
+    f.w("XHL-Native-Plugin-Host.log", "[XHL-Native-Host] core: DirectInput8Create is forwarded to System32 dinput8.dll.\n");
+    // the copy of another profile without a log, and a folder that is no mod id: nothing, no error
+    f.w("kiln/chain/xhl-core-old/xhl-core.dll", b"MZ");
+    f.w("kiln/chain/Not An Id/XHL-Native-Plugin-Host.log", "not read\n");
+    let r = build(&f.input());
+    let log = file(&r, "game/kiln/chain/xhl-core/XHL-Native-Plugin-Host.log").expect("Kiln's copy's log is in the zip");
+    assert!(log.starts_with("... (older lines left out") && log.len() as u64 <= SMALL_LOG_MAX + 200, "bounded");
+    assert!(log.contains("loaded plugin: BuildingTools 0.34.0") && log.contains(r"<home>\Enshrouded") && !log.contains("frostling"), "{log}");
+    assert!(file(&r, "game/XHL-Native-Plugin-Host.log").is_some_and(|l| l.contains("forwarded to System32")), "the game's own XHL-Core's log");
+    let xhl: Vec<&str> = r.files.iter().map(|(n, _)| n.as_str()).filter(|n| n.ends_with("XHL-Native-Plugin-Host.log")).collect();
+    assert_eq!(xhl.len(), 2, "{xhl:?}");
+    assert!(r.errors.is_empty(), "{:?}", r.errors);
+    #[cfg(unix)]
+    {
+        // a link in place of the log or of the copy's folder is not followed
+        let secret = f.root.join("secret.log");
+        std::fs::write(&secret, "SECRET\n").unwrap();
+        f.rm("XHL-Native-Plugin-Host.log");
+        std::os::unix::fs::symlink(&secret, f.game.join("XHL-Native-Plugin-Host.log")).unwrap();
+        std::os::unix::fs::symlink(f.root.join("elsewhere"), f.game.join("kiln/chain/linked")).unwrap();
+        std::fs::create_dir_all(f.root.join("elsewhere")).unwrap();
+        std::fs::write(f.root.join("elsewhere/XHL-Native-Plugin-Host.log"), "SECRET\n").unwrap();
+        let r = build(&f.input());
+        assert!(!r.files.iter().any(|(_, b)| String::from_utf8_lossy(b).contains("SECRET")), "a link was followed");
+        assert!(file(&r, "game/kiln/chain/linked/XHL-Native-Plugin-Host.log").is_none());
+    }
+}
+
 /// GitHub issue 39: a player's "slow motion" report could not be told apart from the save cycle because the zip had no
 /// tick-stats.jsonl (Kiln's per-minute step times, rewritten at every game start). It is in the zip now: the newest lines,
 /// whole, within [`TICK_STATS_MAX`].
@@ -881,6 +923,31 @@ fn no_game_folder_or_a_missing_one() {
     let r = build(&i);
     assert!(r.errors.iter().any(|e| e.contains("does not exist")), "{:?}", r.errors);
     assert!(r.summary.contains("Left out"));
+}
+
+/// (dev.29.18) A finding the launcher knows (WebKit's sandbox) is listed with the report's own, problems first, in
+/// summary.txt, report.json and the short summary, redacted like them; with a game and without one.
+#[test]
+fn the_callers_findings_are_listed_with_the_reports_own() {
+    let f = Fx::new("caller-findings");
+    let mut i = f.input();
+    i.findings.push(Finding { id: "webkit-sandbox".into(), level: Level::Problem,
+        text: format!("WebKit's sandbox cannot start on this system (bwrap: setting up uid map: Permission denied); launcher.log: {HOME}/.local/share/kiln/logs/launcher.log") });
+    for game in [true, false] {
+        if !game {
+            i.install = None;
+        }
+        let r = build(&i);
+        let w = r.findings.iter().find(|x| x.id == "webkit-sandbox").expect("listed");
+        assert_eq!(w.level, Level::Problem);
+        assert!(w.text.contains("<home>/.local/share/kiln/logs/launcher.log") && !w.text.contains(HOME), "{}", w.text);
+        assert_eq!(r.findings[0].level, Level::Problem, "problems first");
+        assert!(r.summary.contains("[problem] WebKit's sandbox cannot start"), "{}", r.summary);
+        assert!(r.short.contains("WebKit's sandbox cannot start"), "{}", r.short);
+        assert!(file(&r, "report.json").unwrap().contains("\"webkit-sandbox\""));
+    }
+    // none given: none listed
+    assert!(build(&f.input()).findings.iter().all(|x| x.id != "webkit-sandbox"));
 }
 
 #[test]
