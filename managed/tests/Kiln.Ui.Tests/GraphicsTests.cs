@@ -534,7 +534,28 @@ public unsafe class GraphicsTests : IDisposable
             using var f = File.Create(Path.Combine(dir, name));
             f.SetLength(size);
         }
+        // every file, but no receipt yet (a download that did not finish: the game does not use the folder)
+        Assert.Equal(VendorFilesState.Changed, VendorFiles.Look(amd));
+        var receipt = Path.Combine(dir, VendorFiles.Receipt);
+        File.WriteAllText(receipt, """{"format": 1, "component": "intel-xess"}""");
+        Assert.Equal(VendorFilesState.Changed, VendorFiles.Look(amd));
+        File.WriteAllText(receipt, """{"format": 2, "component": "amd-fsr"}""");
+        Assert.Equal(VendorFilesState.Changed, VendorFiles.Look(amd));
+        File.WriteAllText(receipt, "{ half");
+        Assert.Equal(VendorFilesState.Changed, VendorFiles.Look(amd));
+        File.WriteAllText(receipt, """{"format": 1, "component": "amd-fsr", "vendor": "amd", "version": "2.4.0"}""");
         Assert.Equal(VendorFilesState.Present, VendorFiles.Look(amd));
+        // the launcher's receipt as kiln-manage writes it (schema/examples/vendor-receipt.json, Intel's)
+        var intel = VendorFiles.Of("intel")!;
+        var idir = Directory.CreateDirectory(Path.Combine(_dir, "vendor", "intel", "3.0.2")).FullName;
+        foreach (var (name, size) in intel.Files)
+        {
+            using var f = File.Create(Path.Combine(idir, name));
+            f.SetLength(size);
+        }
+        File.Copy(Path.Combine(RepoRoot(), "schema", "examples", "vendor-receipt.json"), Path.Combine(idir, VendorFiles.Receipt));
+        Assert.Equal(VendorFilesState.Present, VendorFiles.Look(intel));
+        Directory.Delete(idir, recursive: true);
         using (var f = File.OpenWrite(Path.Combine(dir, amd.Files[1].Name))) f.SetLength(10);
         Assert.Equal(VendorFilesState.Changed, VendorFiles.Look(amd));
         File.Delete(Path.Combine(dir, amd.Files[1].Name));

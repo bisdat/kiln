@@ -134,9 +134,11 @@ internal enum VendorFilesState
 {
     /// <summary>No file of this build's version is there.</summary>
     Missing = 0,
-    /// <summary>Every file is there with the size this build pinned (the game checks the SHA-256 before it loads them).</summary>
+    /// <summary>Every file is there with the size this build pinned, with the launcher's receipt of the component (the
+    /// game loads only such a folder, and checks the SHA-256 before it loads them).</summary>
     Present,
-    /// <summary>Some are there, some are missing or of another size.</summary>
+    /// <summary>Some are there, some are missing or of another size, or the receipt is missing (a download that did not
+    /// finish: the game does not use the folder).</summary>
     Changed,
 }
 
@@ -198,6 +200,9 @@ internal static class VendorFiles
         }
     }
 
+    /// <summary>The launcher's receipt in a version folder (kiln_manage::vendor::store::RECEIPT).</summary>
+    internal const string Receipt = "kiln-vendor.json";
+
     internal static VendorFilesState Look(Component c)
     {
         var dir = Path.Combine(Root, "vendor", c.Vendor, c.Version);
@@ -213,8 +218,28 @@ internal static class VendorFiles
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
         }
-        if (right == c.Files.Count && c.Files.Count > 0) return VendorFilesState.Present;
+        if (right == c.Files.Count && c.Files.Count > 0) return HasReceipt(dir, c) ? VendorFilesState.Present : VendorFilesState.Changed;
         return there == 0 ? VendorFilesState.Missing : VendorFilesState.Changed;
+    }
+
+    /// <summary>The folder has the launcher's receipt of this component, format 1: what the game asks of a folder before
+    /// it checks the files (native/services/ui/vendor_file.h; the launcher writes it last, after every file verified).</summary>
+    private static bool HasReceipt(string dir, Component c)
+    {
+        try
+        {
+            var f = new FileInfo(Path.Combine(dir, Receipt));
+            if (!f.Exists || f.Length > 64 * 1024) return false;
+            using var doc = JsonDocument.Parse(File.ReadAllBytes(f.FullName));
+            var r = doc.RootElement;
+            return r.ValueKind == JsonValueKind.Object && r.TryGetProperty("format", out var fmt) && fmt.ValueKind == JsonValueKind.Number &&
+                fmt.TryGetInt32(out var n) && n == 1 && r.TryGetProperty("component", out var id) && id.ValueKind == JsonValueKind.String &&
+                id.GetString() == c.Id;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return false;
+        }
     }
 
     internal static void ResetForTests()

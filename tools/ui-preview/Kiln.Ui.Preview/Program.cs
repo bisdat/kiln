@@ -315,8 +315,8 @@ internal static unsafe class Program
         return len >= 3003 ? 0 : 1;
     }
 
-    /// <summary>A vendor's files in a scene's kiln/vendor/ with the sizes the manifest pins (empty, sparse): the Graphics
-    /// page reads names and sizes only.</summary>
+    /// <summary>A vendor's files in a scene's kiln/vendor/ with the sizes the manifest pins (empty, sparse) and the
+    /// launcher's receipt: the Graphics page reads names, sizes and the receipt's component only.</summary>
     private static void PreviewVendorFiles(string kilnRoot, string vendor)
     {
         if (VendorFiles.Of(vendor) is not { } c) return;
@@ -326,6 +326,7 @@ internal static unsafe class Program
             using var f = File.Create(Path.Combine(dir, name));
             f.SetLength(size);
         }
+        File.WriteAllText(Path.Combine(dir, VendorFiles.Receipt), $"{{\"format\": 1, \"component\": \"{c.Id}\"}}\n");
     }
 
     // The guided check runner's screen and HUD line (Kiln.Testing's CheckScreen) drawn from sample state: the list with a
