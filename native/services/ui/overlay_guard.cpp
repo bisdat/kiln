@@ -15,6 +15,7 @@ std::mutex mu;
 overlay_guard::Record record;
 std::wstring path;
 bool active = false, said_error = false, error_unresolved = false, began_written = false, idle_done = false;
+bool found_optiscaler = false, found_streamline = false;  // overlay_guard_tools
 // set (under mu) by the overlay's first draw attempt of this process, before any of its work: from then on only the
 // presented frame (or a normal exit) completes the start, never the idle timer
 std::atomic<bool> draw_seen{false};
@@ -177,6 +178,8 @@ bool overlay_guard_start() noexcept {
         bool sl = false;
         overlay_guard::OptiScaler optiscaler;
         const auto wrapper_set = modules(sl, optiscaler);
+        found_optiscaler = optiscaler.found();
+        found_streamline = sl;
         // OptiScaler with its own overlay menu (or frame generation) patches the game's presents and swapchains too:
         // Kiln's drawing steps aside on its own, as for Streamline (overlay_optiscaler.h)
         const bool optiscaler_off = optiscaler.found() && !optiscaler.coexists();
@@ -287,6 +290,10 @@ void overlay_guard_first_draw() noexcept {
         save();
         logf(KILN_LOG_INFO, "ui: overlay crash guard: the overlay's first draw; watched until its frame is presented");
     } catch (...) { error(); }
+}
+void overlay_guard_tools(bool* optiscaler, bool* streamline) noexcept {
+    if (optiscaler) *optiscaler = found_optiscaler;
+    if (streamline) *streamline = found_streamline;
 }
 void overlay_guard_exit() noexcept {
     try {

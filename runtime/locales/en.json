@@ -949,6 +949,16 @@
       "title": "Kiln {version}",
       "body": "Kiln's managed host (Kiln.Ui) is not running in this session, so the mod list and mod screens are unavailable here. Check kiln/logs/kiln.log.",
       "close": "Press {key} to close."
+    },
+    "graphics": {
+      "fps": "Rendered {rendered} fps | Output {output} fps | {ms} ms",
+      "dlss": "DLSS {mode}: {render} -> {output}, preset {preset}",
+      "preset_default": "default",
+      "not_dlss": "Not DLSS now (the game's FSR 3, XeSS or none): {output}",
+      "unknown": "Upscaler: read from the next game start: {output}",
+      "aside": "Upscaler: left to {tools}: {output}",
+      "cap": "Frame cap {fps} fps",
+      "cap_aside": "Frame cap {fps} fps: off for {tools}"
     }
   }
 }

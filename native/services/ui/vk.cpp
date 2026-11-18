@@ -906,6 +906,7 @@ VkResult VKAPI_CALL hk_present(VkQueue queue, const VkPresentInfoKHR* info) {
         if (g_failed && wheel_active()) wheel_cancel_undrawable();  // it can never be drawn or picked: release the input
         // capture just ended with nothing left to draw: still give the game its cursor clip back (render thread)
         if (imgui_ready()) input_capture_changed();
+        graphics_present();  // Kiln's frame cap: the game's frame waits for its turn (one load while off)
         return R.present.load()(queue, info);
     }
     // the crash guard watches the overlay's first draw attempt of this process (its resources and ImGui are made there,
@@ -926,6 +927,8 @@ VkResult VKAPI_CALL hk_present(VkQueue queue, const VkPresentInfoKHR* info) {
                   wcsrchr(path, L'\\') ? wcsrchr(path, L'\\') + 1 : path,
                   m ? static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(g_fault_addr) - reinterpret_cast<uintptr_t>(m)) : 0ull);
     }
+    // Kiln's frame cap after the overlay's work: the frame goes at its turn, with the overlay already recorded
+    graphics_present();
     if (!drew) return R.present.load()(queue, info);
     VkPresentInfoKHR p = *info;
     p.waitSemaphoreCount = 1;
@@ -1312,6 +1315,10 @@ void vk_set_pre_overlay_demand(uint32_t count) { if (!overlay_drawing_on()) retu
 void vk_add_swapchain_usage(uint32_t usage) { if (!overlay_drawing_on()) return; g_extra_usage.fetch_or(usage); }
 
 uint64_t vk_presents() { return g_presents.load(std::memory_order_relaxed); }
+void vk_extent(uint32_t* width, uint32_t* height) {
+    if (width) *width = g_width.load();
+    if (height) *height = g_height.load();
+}
 
 void vk_status(KilnUiStatus* out) {
     if (!overlay_drawing_on()) return;
