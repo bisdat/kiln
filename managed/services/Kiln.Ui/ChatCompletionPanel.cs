@@ -15,7 +15,7 @@ internal static class ChatCompletionDisplayRules
         suggestions.Any(choice => string.Equals(prefix + choice, text, StringComparison.Ordinal));
 
     internal static float PopupHeight(float scale, int visible) =>
-        (30f + 24f + 40f * Math.Clamp(visible, 0, 10)) * scale;
+        (42f + 24f + 40f * Math.Clamp(visible, 0, 10)) * scale;
 }
 
 internal static unsafe class ChatCompletionPanel
@@ -227,6 +227,10 @@ internal static unsafe class ChatCompletionPanel
             ui.NextWindowSize(width, height, 1);
             if (ui.BeginWindowNoClose(KilnText.T("chat.completion.title") + "###kiln.chat.complete", flags))
             {
+                // The native chat look can have almost zero window padding.
+                // Keep the hint's glyphs clear of the top border at all UI scales.
+                var top = ui.Cursor;
+                ui.SetCursor(top.X, top.Y + 8f * ui.Scale);
                 // Use the same game font through Kiln's v3 font-size API.
                 // Keep the hint fully legible and candidates comparable to
                 // the original native chat edit, instead of tiny defaults.
