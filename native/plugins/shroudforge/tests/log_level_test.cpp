@@ -24,17 +24,24 @@ int main() {
     expect("[I 2026-11-18 16:34:22,103 UTC] [startup-assets] Early startup asset pass completed in 557 ms", KILN_LOG_INFO);
     expect("[D 2026-11-18 16:34:22,103 UTC] [dll_manager] Inspected native components", KILN_LOG_INFO);
     expect("[T 2026-11-18 16:34:22,103 UTC] [runtime] tick", KILN_LOG_INFO);
-    // a message that only mentions a level letter is not that level
+    // a message that only mentions a level is not that level: the tag decides
     expect("[I 2026-11-18 16:34:22,103 UTC] [unified-tweaks] [W 2] slot", KILN_LOG_INFO);
     expect("[I 2026-11-18 16:34:22,103 UTC] [mod] Error count 0", KILN_LOG_INFO);
+    expect("[I 2026-11-18 16:34:22,103 UTC] [unified-tweaks] [E] in the mod's own log: handled", KILN_LOG_INFO);
+    expect("[I 2026-11-18 16:34:22,103 UTC] [unified-tweaks] setting Enable_ERROR LOG = true; mode ERROR off", KILN_LOG_INFO);
+    expect("[D 2026-11-18 16:34:22,103 UTC] [dll_manager] native log: WARN low memory", KILN_LOG_INFO);
+    expect("[W 2026-11-18 16:34:22,103 UTC] [runtime] retry: [E] earlier ERROR cleared", KILN_LOG_WARN);
+    expect("[E 2026-11-18 16:34:22,103 UTC] [runtime] [W] was only a warning before", KILN_LOG_ERROR);
     // the forms the mirror read before
     expect("[E] fake runtime failed", KILN_LOG_ERROR);
     expect("[W] fake runtime slow", KILN_LOG_WARN);
     expect("[I] fake runtime created", KILN_LOG_INFO);
     expect("bootstrap: ERROR could not open", KILN_LOG_ERROR);
     expect("bootstrap: WARN slow disk", KILN_LOG_WARN);
-    // too short to be a tag
+    // not ShroudForge's tag: the older rule
     expect("[E", KILN_LOG_INFO);
+    expect("[E x] no date", KILN_LOG_INFO);
+    expect("[X 2026-11-18 16:34:22,103 UTC] unknown letter, says [W]", KILN_LOG_WARN);
     expect("", KILN_LOG_INFO);
     if (failures) return 1;
     std::printf("sf log level: all lines as expected\n");
