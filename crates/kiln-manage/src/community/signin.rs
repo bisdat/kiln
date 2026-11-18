@@ -150,7 +150,8 @@ fn read_back(stream: &mut TcpStream, port: u16, id: &str) -> Option<Back> {
         }
         *slot = Some(v);
     }
-    if got_id? != id {
+    // PLAN 3.3's redirect names only the code (the port is this attempt's own); an id, when there is one, must match
+    if got_id.is_some_and(|g| g != id) {
         return None;
     }
     let token_ok = |s: &str| !s.is_empty() && s.len() <= 512 && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.');
@@ -308,15 +309,15 @@ mod tests {
         assert_eq!(start["mode"], "browser");
         assert_eq!(start["join"], true);
         assert_eq!(start["port"], port);
-        assert_eq!(start["device"], "pc");
+        assert_eq!(start["device"], "desktop");
         // not the redirect: another attempt, a wrong Host, a second code; each answered 404, the attempt waits
         for (q, host) in [("id=s2&c=abc", None), ("id=s1&c=abc", Some("evil.example")), ("id=s1&c=a&c=b", None)] {
             let (page, got) = knock(&mut a, &relay, q, host);
             assert!(page.starts_with("HTTP/1.1 404"), "{q}: {page}");
             assert_eq!(got, Progress::Waiting);
         }
-        // the redirect
-        let (page, got) = knock(&mut a, &relay, "id=s1&c=onetime-code_1", None);
+        // the redirect (PLAN 3.3: the code alone)
+        let (page, got) = knock(&mut a, &relay, "c=onetime-code_1", None);
         assert!(page.starts_with("HTTP/1.1 200") && page.contains("Signed in. You can close this tab"), "{page}");
         let Progress::Approved(g) = got else { panic!("{got:?}") };
         assert_eq!(g.account.name, "emberfox");

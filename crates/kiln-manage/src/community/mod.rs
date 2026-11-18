@@ -250,7 +250,8 @@ pub struct FeedRelease {
 #[serde(rename_all = "camelCase")]
 pub struct FeedEvent {
     pub title: String,
-    /// RFC 3339: when it starts.
+    /// RFC 3339: when it starts (the relay may call it `when`).
+    #[serde(alias = "when")]
     pub start: String,
     #[serde(default)]
     pub end: Option<String>,

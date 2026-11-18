@@ -84,20 +84,29 @@ pub fn relay_down() -> Error {
 /// An answer that is not a success, as an error with the relay's reason (`{"error": kind, ...}`).
 pub fn refusal(status: u16, body: &[u8]) -> Error {
     let v: Value = serde_json::from_slice(body).unwrap_or(Value::Null);
-    let reason = v.get("error").and_then(Value::as_str).unwrap_or("");
+    // the relay may spell its reasons with dashes (`not-member`)
+    let reason = v.get("error").and_then(Value::as_str).unwrap_or("").replace('-', "_");
+    let reason = reason.as_str();
     let num = |k: &str| v.get(k).and_then(Value::as_u64);
     match (status, reason) {
         (401, _) => err(ErrorCode::AuthFailed, Kind::Signin, "Sign in with Discord again."),
         (403, "not_member") => err(ErrorCode::Refused, Kind::NotMember, "You're not in the Kiln Discord yet."),
-        (403, "too_young") => err(ErrorCode::Refused, Kind::TooYoung, "This Discord account is too new to send reports."),
+        (403, "too_young" | "too_new") => err(ErrorCode::Refused, Kind::TooYoung, "This Discord account is too new to send reports."),
+        (429, "slow_down") => Error::new(ErrorCode::Busy, "Asked too soon.").with_detail(json!({ "kind": Kind::Relay.as_str(), "slow": true })),
         (404, _) => err(ErrorCode::NotFound, Kind::NotFound, "Kiln support doesn't know this any more."),
         (410, _) => err(ErrorCode::Timeout, Kind::Expired, "This has expired."),
         (413, _) => Error::new(ErrorCode::Refused, "The report is too big to send.")
             .with_detail(json!({ "kind": Kind::TooBig.as_str(), "size": num("size"), "limit": num("limit").unwrap_or(ZIP_MAX) })),
         (429, _) => {
-            let last = v.get("last").and_then(Value::as_str).filter(|u| super::is_discord_url(u));
+            let last = v.get("last").or_else(|| v.get("lastPost")).and_then(Value::as_str).filter(|u| super::is_discord_url(u));
+            // the relay may say which limit and until when instead (`limit` hour or day, `retryAt`)
+            let sent = num("sent").or_else(|| match v.get("limit").and_then(Value::as_str) { Some("hour") => Some(3), Some("day") => Some(10), _ => None });
+            let wait = num("waitMin").or_else(|| {
+                let at = crate::util::parse_rfc3339(v.get("retryAt")?.as_str()?)?;
+                Some(((at - crate::util::now_unix()).max(60) as u64).div_ceil(60))
+            });
             Error::new(ErrorCode::Busy, "Too many reports.")
-                .with_detail(json!({ "kind": Kind::RateLimited.as_str(), "sent": num("sent"), "waitMin": num("waitMin"), "last": last }))
+                .with_detail(json!({ "kind": Kind::RateLimited.as_str(), "sent": sent, "waitMin": wait, "last": last }))
         }
         (400, _) => err(ErrorCode::InvalidArgument, Kind::BadRequest, "Kiln support could not read the request."),
         // a blocked account gets the same words as a relay that is down (PLAN 7.3)
@@ -137,6 +146,8 @@ pub enum SigninMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Device {
+    /// A desktop or laptop (the relay's word: `desktop`).
+    #[serde(rename = "desktop")]
     Pc,
     Deck,
 }
@@ -185,6 +196,8 @@ impl SigninStarted {
 /// A session the relay handed out.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct Grant {
+    /// The session key (the relay's field may be `token`).
+    #[serde(alias = "token")]
     pub session: String,
     pub account: Account,
 }
@@ -354,7 +367,7 @@ impl<'a> Relay<'a> {
         #[derive(Deserialize)]
         struct Answer {
             state: String,
-            #[serde(default)]
+            #[serde(default, alias = "token")]
             session: Option<String>,
             #[serde(default)]
             account: Option<Account>,
@@ -362,6 +375,8 @@ impl<'a> Relay<'a> {
         let v = json!({ "id": check_id(id)?, "secret": secret });
         let a: Answer = match self.json(Method::Post, "/signin/poll", Payload::Json(v), false, ANSWER_MAX) {
             Err(e) if kind_of(&e) == Some("expired") || kind_of(&e) == Some("not_found") => return Ok(PollState::Expired),
+            // asked again too soon: still waiting
+            Err(e) if e.detail.as_ref().and_then(|d| d.get("slow")).is_some() => return Ok(PollState::Waiting),
             r => r?,
         };
         Ok(match a.state.as_str() {
@@ -562,6 +577,21 @@ mod tests {
                 assert_eq!(e.detail.unwrap()["limit"], 8_388_608);
             }
         }
+    }
+
+    #[test]
+    fn the_relays_dashed_reasons_and_its_retry_time_read_the_same() {
+        assert_eq!(kind_of(&refusal(403, br#"{"error":"not-member","invite":"https://discord.gg/7pjr8SMTfU"}"#)), Some("not_member"));
+        assert_eq!(kind_of(&refusal(403, br#"{"error":"too-new","retryAt":"2026-11-20T00:00:00.000Z"}"#)), Some("too_young"));
+        assert_eq!(kind_of(&refusal(401, br#"{"error":"signed-out"}"#)), Some("signin"));
+        assert_eq!(kind_of(&refusal(503, br#"{"error":"unavailable"}"#)), Some("relay"));
+        let at = crate::util::rfc3339(crate::util::now_unix() + 38 * 60 - 10);
+        let e = refusal(429, format!(r#"{{"error":"rate-limited","limit":"hour","retryAt":"{at}","lastPost":"https://discord.com/channels/1/2"}}"#).as_bytes());
+        let d = e.detail.unwrap();
+        assert_eq!((d["kind"].as_str(), d["sent"].as_u64(), d["waitMin"].as_u64(), d["last"].as_str()), (Some("rate_limited"), Some(3), Some(38), Some("https://discord.com/channels/1/2")));
+        // the session's field may be called token
+        let g: Grant = serde_json::from_value(json!({ "token": KEY, "account": account() })).unwrap();
+        assert_eq!(g.session, KEY);
     }
 
     #[test]

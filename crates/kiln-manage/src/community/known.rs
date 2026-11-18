@@ -40,14 +40,15 @@ pub struct Match {
     pub findings: Vec<String>,
     #[serde(default)]
     pub all: bool,
-    /// Words that must appear in a finding's text (case-insensitive); any one is enough.
-    #[serde(default)]
+    /// Words that must appear in a finding's text (case-insensitive); any one is enough. A single string is one word.
+    #[serde(default, deserialize_with = "one_or_many")]
     pub text: Vec<String>,
     /// `windows`, `linux`, `deck`; empty: every system.
     #[serde(default)]
     pub os: Vec<String>,
-    /// A Kiln version range (`>=0.2.0-dev.29, <0.2.0-dev.30`); absent: every version.
-    #[serde(default)]
+    /// A Kiln version range (`>=0.2.0-dev.29, <0.2.0-dev.30`), or `{min, max}` (both kept: `>=min <=max`); absent:
+    /// every version.
+    #[serde(default, deserialize_with = "range")]
     pub kiln: Option<String>,
 }
 
@@ -60,7 +61,8 @@ pub struct KnownIssue {
     /// A line to copy (a launch option).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub copy: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// The fix's button: `"mods"`, or `{label, to}` with `to` `play` (the mods on Play), `runtime` or `logs`.
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "action")]
     pub action: Option<KnownAction>,
     #[serde(rename = "match", default)]
     pub matches: Match,
@@ -77,9 +79,50 @@ pub struct KnownIssue {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct KnownList {
+    /// 1 (absent: 1).
+    #[serde(default = "one")]
     pub format: u32,
     #[serde(default)]
     pub issues: Vec<KnownIssue>,
+}
+
+fn one() -> u32 {
+    1
+}
+
+fn one_or_many<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {
+    Ok(match serde_json::Value::deserialize(d)? {
+        serde_json::Value::String(s) => vec![s],
+        serde_json::Value::Array(a) => a.into_iter().filter_map(|v| v.as_str().map(str::to_string)).collect(),
+        _ => Vec::new(),
+    })
+}
+
+fn range<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    Ok(match serde_json::Value::deserialize(d)? {
+        serde_json::Value::String(s) => Some(s),
+        serde_json::Value::Object(o) => {
+            let part = |k: &str, op: &str| o.get(k).and_then(|v| v.as_str()).map(|v| format!("{op}{v}"));
+            let r: Vec<String> = [part("min", ">="), part("max", "<=")].into_iter().flatten().collect();
+            (!r.is_empty()).then(|| r.join(" "))
+        }
+        _ => None,
+    })
+}
+
+fn action<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<KnownAction>, D::Error> {
+    let v = serde_json::Value::deserialize(d)?;
+    let to = match &v {
+        serde_json::Value::String(s) => s.as_str(),
+        serde_json::Value::Object(o) => o.get("to").and_then(|t| t.as_str()).unwrap_or(""),
+        _ => "",
+    };
+    Ok(match to {
+        "mods" | "play" => Some(KnownAction::Mods),
+        "runtime" => Some(KnownAction::Runtime),
+        "logs" => Some(KnownAction::Logs),
+        _ => None,
+    })
 }
 
 impl KnownList {
@@ -224,6 +267,17 @@ mod tests {
         // "gone" is past its date; "everything" names no finding
         assert!(best(&l, &report(&[("crash", "x")], false), NOW).is_none());
         assert!(l.issues.iter().find(|i| i.id == "gone").unwrap().matches(&report(&[("crash", "x")], false), 1_700_000_000), "before its date it did");
+    }
+
+    #[test]
+    fn the_relays_shapes_read_too_a_single_word_a_min_max_range_an_action_object() {
+        let l = list(r#"{ "issues": [
+            { "id": "night", "title": "Night Sky", "fix": "Turn it off.", "action": { "label": "Show my mods", "to": "play" },
+              "match": { "findings": ["mod-failed"], "text": "night-sky", "kiln": { "min": "0.2.0-dev.29" } } }
+        ], "updated": "2026-11-18T12:00:00Z" }"#);
+        let i = &l.issues[0];
+        assert_eq!((l.format, i.action, i.matches.text.clone(), i.matches.kiln.clone()), (1, Some(KnownAction::Mods), vec!["night-sky".to_string()], Some(">=0.2.0-dev.29".to_string())));
+        assert!(i.matches(&report(&[("mod-failed", "night-sky failed")], false), NOW));
     }
 
     #[test]

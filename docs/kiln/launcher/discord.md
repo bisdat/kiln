@@ -147,6 +147,10 @@ launcher turns them into the error kinds the UI words (`detail.kind`):
 | 429 `{"error": "rate_limited", "sent": n, "waitMin": n, "last": "<post url>"}` | `rate_limited` | "That's a lot of reports", Open my last post (`last` only if it is a `https://discord.com/channels/...` link) |
 | 400 | `bad_request` | a launcher bug; shown as the relay's refusal |
 
+Reasons are read with dashes or underscores (`not-member` = `not_member`); `too-new` is `too_young`, `signed-out` any
+401, and a 429's `limit` (`hour`: 3 sent, `day`: 10), `retryAt` and `lastPost` stand in for `sent`, `waitMin` and
+`last` (the relay's own contract, docs/relay-api.md in the kilnbot repo, spells them so).
+
 **Shapes used below:**
 
 - `Account` = `{id: "<snowflake>", name: string (1 to 64), member: boolean, tester: boolean}`.
@@ -160,16 +164,16 @@ launcher turns them into the error kinds the UI words (`detail.kind`):
 
 | Method, path | Request | Answer |
 |---|---|---|
-| `POST /signin` | `{mode: "browser"\|"qr", join: boolean, challenge: base64url(sha256(secret)) without padding, port?: number (browser only: the loopback port), device: "pc"\|"deck", version: "<launcher version>"}` | `{id, code: string ("HV3R-9TCW"; empty in browser mode), url: https on frostdev.io (browser: the page the browser opens, e.g. `/kiln/signin/<id>`; qr: the phone link, e.g. `/link/HV3R9TCW`), expiresAt: RFC 3339}` |
-| `POST /signin/exchange` | `{id, code: "<one-time code from the loopback>", verifier: "<secret>"}` | `{session: "<key>", account: Account}` |
-| `POST /signin/poll` | `{id, secret: "<secret>"}` | `{state: "waiting"}` \| `{state: "approved", session, account: Account}` \| `{state: "denied"\|"expired"\|"canceled"}`; 404 or 410 also read as expired |
+| `POST /signin` | `{mode: "browser"\|"qr", join: boolean, challenge: base64url(sha256(secret)) without padding, port?: number (browser only: the loopback port), device: "desktop"\|"deck", version: "<launcher version>"}` | `{id, code: string ("HV3R-9TCW"; empty in browser mode), url: https on frostdev.io (browser: the page the browser opens, e.g. `/kiln/signin/<id>`; qr: the phone link, e.g. `/link/HV3R9TCW`), expiresAt: RFC 3339}` |
+| `POST /signin/exchange` | `{id, code: "<one-time code from the loopback>", verifier: "<secret>"}` | `{session: "<key>", account: Account}` (`token` is read as `session`) |
+| `POST /signin/poll` | `{id, secret: "<secret>"}` | `{state: "waiting"}` \| `{state: "approved", session, account: Account}` \| `{state: "denied"\|"expired"\|"canceled"}`; 404 or 410 also read as expired, 429 `slow-down` as waiting |
 
 - The secret is 32 random bytes in base64url (43 characters); the challenge is its SHA-256 in base64url. The session
   goes only to whoever proves the secret.
 - **Browser (desktop):** the launcher listens once on `127.0.0.1:<random port>` before `POST /signin`, then opens
   `url` in the system browser. After Discord, the relay sends the browser to
-  `http://127.0.0.1:<port>/done?id=<id>&c=<one-time code>`, or `...&error=canceled|denied|expired` when it did not
-  finish. The launcher answers that request with a small page ("Signed in. You can close this tab and go back to the
+  `http://127.0.0.1:<port>/done?c=<one-time code>` (an `id=<id>` beside it is allowed and must match), or
+  `?error=canceled|denied|expired` when it did not finish. The launcher answers that request with a small page ("Signed in. You can close this tab and go back to the
   launcher.") and calls `/signin/exchange`. Any other request on the port (another path, another id, another `Host`
   than `127.0.0.1:<port>`, a repeated parameter) gets a 404 and changes nothing. If the redirect never arrives (a
   firewall), the launcher also polls `/signin/poll` from 8 seconds on, every 4 seconds: the relay may answer

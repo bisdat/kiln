@@ -31,6 +31,8 @@ export interface CommunityMockDeps {
 const q = typeof location !== "undefined" ? new URLSearchParams(location.search) : new URLSearchParams();
 const FLAGS = new Set((q.get("discord") ?? "").split(",").map((s) => s.trim()).filter(Boolean));
 const DECK = !!q.get("deck");
+/** `&problem=crash|nokiln` (mock.ts plays it): the report the launcher prepares then is about it. */
+const PROBLEM = q.get("problem");
 const has = (f: string) => FLAGS.has(f);
 
 const GUILD = "1568454645683195976";
@@ -100,8 +102,8 @@ let preparedSeq = 0;
 const prepared = new Map<string, { from: SendFrom; tags: string[] }>();
 
 function preview(from: SendFrom): ReportPreview {
-  const crash = from === "crash" || has("crash");
-  const noKiln = from === "banner" || has("nokiln");
+  const crash = from === "crash" || PROBLEM === "crash" || has("crash");
+  const noKiln = from === "banner" || PROBLEM === "nokiln" || has("nokiln");
   const kindTags = { noload: "Mods", mod: "Mods", crash: "Crash", launcher: "Launcher", server: "Server", other: null };
   const tags = [DECK ? "Steam Deck" : "Linux"];
   const id = `r${++preparedSeq}`;

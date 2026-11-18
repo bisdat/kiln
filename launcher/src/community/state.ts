@@ -150,7 +150,9 @@ export const clockTime = (iso: string | null) => (iso ? new Date(iso).toLocaleTi
 /** "Saturday 21 November, 20:00" in the player's time zone. */
 export const eventTime = (iso: string) => {
   const d = new Date(iso);
-  return `${d.toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" })}, ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+  // a time the relay gave in words is shown as it is
+  if (Number.isNaN(d.getTime())) return iso;
+  return `${d.toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" })}, ${d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
 };
 
 /** The `detail.kind` of a community error ("offline", "relay", "not_member", ...). */
