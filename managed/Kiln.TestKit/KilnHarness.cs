@@ -108,6 +108,7 @@ public sealed partial class KilnHarness : IDisposable
             };
             TaskScheduler.UnobservedTaskException += _unobserved;
             _tick = new TickThread($"kiln-testkit tick {_serial}", _options.CallTimeout);
+            StartTasks();  // KilnHarness.Tasks.cs: the mods' Kiln tasks run on the kit's pool
             StartServicesOnce();  // KilnHarness.Fakes.cs: the process's first service tick, at a budget of its own
             _tick.Invoke(() =>
             {
@@ -166,6 +167,8 @@ public sealed partial class KilnHarness : IDisposable
 
     /// <summary>The harness's tick thread (the watchdog's handle on it).</summary>
     internal TickThread TickThread => _tick;
+
+    internal KilnHarnessOptions Options => _options;
 
     /// <summary>The real loader the harness drives.</summary>
     internal ModManager Manager => _mods;
@@ -415,6 +418,7 @@ public sealed partial class KilnHarness : IDisposable
             if (_tick.AbandonReason is not null) RetireAbandoned();  // the watchdog stopped the tick thread: retire the mods without it (KilnHarness.Tests.cs)
             TaskScheduler.UnobservedTaskException -= _unobserved;
             _mods.Dispose();
+            EndTasks();  // after the mods: an unloading mod's cancelled tasks still finish on the pool
             EndFakes(faults);  // every fake ends; what one threw waits until the harness has let go
             RemoveTestSubscriptions();
             if (ReferenceEquals(ModsBackend.Current, _mods)) ModsBackend.Current = null;
