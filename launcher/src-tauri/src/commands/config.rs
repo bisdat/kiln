@@ -288,7 +288,7 @@ mod kiln_graphics_tests {
         assert!(doc.text.contains("// keep me"));
         for (key, bad) in [("graphics.fpsCap", json!(501)), ("graphics.fpsCap", json!(1.5)), ("graphics.dlssPreset", json!("N")),
             ("graphics.dlssRenderScale", json!(0.2)), ("graphics.dlssRenderScale", json!(1.1)), ("graphics.readout", json!(1)),
-            ("graphics.upscaler", json!("dlss")), ("graphics.upscaler", json!(1)), ("graphics.amdUpscaler", json!("fsr4"))] {
+            ("graphics.upscaler", json!("dlss")), ("graphics.upscaler", json!(7)), ("graphics.amdUpscaler", json!("fsr4"))] {
             assert!(kiln_set(&path, key, Some(&bad)).is_err(), "{key} = {bad}");
         }
         let doc = kiln_set(&path, "graphics.fpsCap", None).unwrap();
