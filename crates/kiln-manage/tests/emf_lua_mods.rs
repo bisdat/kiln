@@ -230,6 +230,18 @@ fn a_lua_mod_folder_on_its_own_is_an_emf_mod() {
     lua_mod(&d, "x", "N", "1.0.0");
     put(&d, "init.lua", b"");
     assert_eq!(library::detect(&d).unwrap().kind, DetectKind::Set);
+    // ... and a folder whose DLL is another engine's mod, or Shroudtopia's setup, as before this rule
+    for (tag, export, kind) in [("greeneye", "GreeneyeModStart", DetectKind::Greeneye), ("shroudtopia", "CreateModInstance", DetectKind::Shroudtopia),
+                                ("enshwick", "enshwick_mod_query", DetectKind::Enshwick), ("shroudlink", "shroudlink_mod_v2", DetectKind::Shroudlink)] {
+        let d = t.0.join("engines").join(tag);
+        lua_mod(&d, "x", "N", "1.0.0");
+        put(&d, "plugin.dll", &build_test_dll(&[export], b""));
+        assert_eq!(library::detect(&d).unwrap().kind, kind, "{tag}");
+    }
+    let d = t.0.join("engines/shroudtopia-setup");
+    lua_mod(&d, "x", "N", "1.0.0");
+    put(&d, "shroudtopia.json", b"{}");
+    assert_eq!(library::detect(&d).unwrap().kind, DetectKind::Shroudtopia);
 }
 
 #[test]

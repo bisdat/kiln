@@ -802,11 +802,6 @@ fn detect_folder_at(dir: &Path, depth: usize, top_name: Option<&str>) -> Detecte
         let s = |k: &str| v.get(k).and_then(|x| x.as_str()).map(str::to_string);
         return mk(DetectKind::Emf, s("id"), s("version"), s("name"), format!("an EMF mod (mod.json, EMF API {})", v["emf"]));
     }
-    if let Some((v, main)) = emf_lua_manifest(dir) {
-        let s = |k: &str| v.get(k).and_then(|x| x.as_str()).map(str::to_string);
-        let api = v.get("emf").map(|e| format!(", EMF API {e}")).unwrap_or_default();
-        return mk(DetectKind::Emf, s("id"), s("version"), s("name"), format!("an EMF Lua mod (mod.json, {main}{api}): EMF's lua mod runs it"));
-    }
     // Ultimate ASI Loader and/or .asi plugins (in the folder or a folder of it, as Smart Workshop's Scripts/): one
     // package, a native mod placed in the game folder (game_files).
     // A native.json anywhere under the package is that mod. The .asi beside it is the same mod's other build, not a
@@ -821,6 +816,13 @@ fn detect_folder_at(dir: &Path, depth: usize, top_name: Option<&str>) -> Detecte
     }
     if let Some(d) = crate::engines::detect_folder(dir) {
         return d;
+    }
+    // after every other engine's folder rule, so a folder one of them takes (its mod DLL beside a mod.json naming a
+    // main file, shroudtopia.json) stays that engine's: only a folder that was left out before is an EMF Lua mod
+    if let Some((v, main)) = emf_lua_manifest(dir) {
+        let s = |k: &str| v.get(k).and_then(|x| x.as_str()).map(str::to_string);
+        let api = v.get("emf").map(|e| format!(", EMF API {e}")).unwrap_or_default();
+        return mk(DetectKind::Emf, s("id"), s("version"), s("name"), format!("an EMF Lua mod (mod.json, {main}{api}): EMF's lua mod runs it"));
     }
     let has_lua = dir.join("src/mod.lua").is_file()
         || std::fs::read_dir(dir).into_iter().flatten().flatten().any(|e| e.path().extension().is_some_and(|x| x.eq_ignore_ascii_case("lua")));
