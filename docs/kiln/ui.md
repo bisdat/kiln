@@ -892,7 +892,16 @@ Kiln.Ui follows [the API contract](modding/contract.md) as far as it applies. It
 
 Before Vulkan hooks are installed, Kiln writes a versioned record to
 `kiln/state/overlay-start.guard`. It records hooks installed, instance seen, device seen,
-swapchain created, and completes after the first successful present with the overlay drawn.
+swapchain created, and completes once the overlay's frames have been presented for a while: 60 presents with the
+overlay drawn, or a 20 second window after the first in which the game presented at least 60 frames (watched window
+after window while it presents fewer, as during loading). Since 0.2.0-dev.29.18; before, the first present with the
+overlay drawn completed it, so a game that died a few frames later was not caught. When the overlay's drawing turns
+off during a session because its own work failed ([below](#when-the-overlay-fails-during-a-session); not for a present
+from a queue Kiln does not draw on, which comes before any work of its own), the record is armed again: a game that
+closes before it has presented 60 more frames in a 30 second window counts as an interrupted attempt. A game that goes
+on presenting does not, and neither does a normal exit where Kiln sees it (`on_unload`: under Wine, and on Windows with
+kiln.json `"unloadAtExit": "on"`). On Windows by default a quit in the first second of the overlay's drawing, or in
+the 30 seconds after it failed, counts as an interrupted attempt: one start without the overlay, then it tries again.
 Each record is written (a temporary file, then a rename) before the stage goes on, and forced to the disk
 on a thread of its own, never on the game's present call: a game that dies loses nothing it already
 wrote.
@@ -926,6 +935,41 @@ may need the guard deleted manually. Unknown/unreadable records permit normal st
 and do not prevent startup. This guard does not make Streamline and the overlay compatible.
 
 
+## When the overlay fails during a session
+
+Since 0.2.0-dev.29.18 the first failure of the overlay's own Vulkan work turns its drawing off for the rest of the game
+session, and every present after it goes on as the game made it. Kiln does not try again in that session; the next
+start does. The failures are: the overlay's submit fails, its resources or ImGui cannot be made, a Vulkan call of
+ImGui's backend reports the device lost or `VK_ERROR_UNKNOWN`, the overlay faults, and a present that comes from a
+queue Kiln cannot draw on. kiln.log says it once:
+
+> ui: Kiln's overlay drawing is off for the rest of this game session: its Vulkan submit failed; vkQueueSubmit of the overlay's frame returned -13 (VK_ERROR_UNKNOWN) on queue family 0. The game's frames go on as the game made them (Kiln hands each present on untouched); key bindings and the Mods menu still work, Kiln's windows and HUDs do not show. The next start tries the overlay again
+
+From then on it is the [drawing-off](#frame-generation-mods-and-drawing-off) state for this session: nothing of
+Kiln's takes the game's keyboard or mouse (an open Kiln menu, the Mods page or a wheel lets go at once), the Mods entry
+shows "Mods: the overlay's drawing is off: <reason>", `Ui.Status.Error` carries the same text, and the drawing
+capability rows (`ui.windows`, `ui.draw`, `ui.menu_page`, `render.draw`, `kiln.screen`) turn unavailable with it.
+
+The present queue. Kiln's frame is submitted on the queue the game presents from, in the same call. Kiln draws only on
+a queue the game got (`vkGetDeviceQueue`, `vkGetDeviceQueue2`) whose family has graphics. Frame generation presents
+from queues of its own: OptiScaler's (its nightly builds since October 2026) adds them to the game's device while it is
+made, a present queue in the family with the fewest abilities that can present (a compute or transfer family on most
+GPUs) for FSR frame generation, a graphics queue of Streamline's for DLSS frame generation, and its thread presents both
+the game's frames and the generated ones there, through Kiln's present hook. A queue handed out while the device is
+being made is a tool's (the game can only ask once its `vkCreateDevice` returned), unless the game asks for it too
+afterwards; Kiln does not draw on a tool's queue, whatever its family. Until 0.2.0-dev.29.18 Kiln did not know such a
+queue and drew for the game's first queue family: its submit (and ImGui's texture upload before it) went to a queue of
+another family and failed with `VK_ERROR_UNKNOWN`, and the game died right after (inbox 80). Now kiln.log names the
+tool's queues when the device is made, Kiln draws nothing on them, and says so with the reason "frame generation
+presents the game's frames from its own queue". Pre-overlay subscribers (kiln_ui.h) are not called for such a present
+either.
+
+The semaphores. When Kiln's frame goes in, its submit waits on the game's semaphores and signals Kiln's own, and the
+present waits on Kiln's. When it does not go in, or its submit fails, the present goes on with the game's own
+semaphores, untouched: Vulkan leaves the semaphores of a failed submit as they were (or reports the device lost).
+Each semaphore is signalled once and waited on once (`native/services/ui/vk_present.h`, host test
+`tests/vk_present_test.cpp`).
+
 ## Frame generation mods and drawing off
 
 When `sl.interposer.dll` is loaded, or installed directly next to the game or under
@@ -933,14 +977,19 @@ When `sl.interposer.dll` is loaded, or installed directly next to the game or un
 any Vulkan hooks. No first crash is needed. The log explains the choice and the override.
 
 - `KILN_UI_OVERLAY=0`: drawing off; keep keys, native menu rows, game UI state and UI ticks.
+- kiln.json `"ui": {"overlay": "off"}` (since 0.2.0-dev.29.18; the launcher's Settings, the kiln.json card, "Overlay"):
+  the same as `KILN_UI_OVERLAY=0`, for Windows, where Steam's launch options cannot set an environment variable for
+  the game. `"auto"`, the default, lets Kiln decide as above. Read at the game's start (top level only, not in a side
+  section). `KILN_UI_OVERLAY`, where it is set, wins over it. The Mods entry then reads "Mods: the overlay's drawing is
+  off: turned off in Kiln's settings (kiln.json ui.overlay)".
 - `KILN_UI_OVERLAY=1`: try drawing even with Streamline or a guarded/locked record. This
   can crash; the crash guard still records this attempt.
 - Unset (or another value): automatic choice, including crash-guard protection.
 - `KILN_UI_DISABLE=1`: turn the whole UI service off; wins over both overlay switches.
 
-These are environment switches. kiln.ui does not read a kiln.json setting for them.
-For Steam, set the variable in the game's launch environment using your platform's usual
-method, and remove the old `KILN_UI_DISABLE=1` workaround to keep keys and menus.
+The `KILN_UI_*` switches are environment variables; `ui.overlay` is the one kiln.json setting among them.
+For Steam on Linux, set the variable in the game's launch options (`KILN_UI_OVERLAY=0 %command%`); on Windows use
+`ui.overlay`. Remove the old `KILN_UI_DISABLE=1` workaround to keep keys and menus.
 
 Drawing off preserves the game's Mods entry and mods' native menu rows, including scrolling,
 keyboard/mouse/wheel bindings and native input subscriptions, game screen/language/crafting
@@ -972,18 +1021,28 @@ decides about its overlay's drawing before any Vulkan hook, from OptiScaler's ow
 | OptiScaler.ini | Kiln's overlay drawing |
 |---|---|
 | `[Menu] OverlayMenu=auto` or `true` (OptiScaler's default), or no OptiScaler.ini | off, on its own, as for Streamline |
-| `[FrameGen]` with an `FGInput` and an `FGOutput` other than `nofg`/`auto` | off, on its own |
+| `[FrameGen]` with an `FGInput` and an `FGOutput` other than `nofg`/`auto`, with its menu on or off | off, on its own |
 | `[Menu] OverlayMenu=false`, no frame generation | on, next to OptiScaler |
+
+Frame generation needs both keys: OptiScaler drops an input without an output, and makes none for an output without an
+input. `[FrameGen] Enabled` does not matter: it only switches frame generation while it runs, and its own present queue
+and stand-in swapchain are there with `Enabled=false` too.
 
 `KILN_UI_OVERLAY=1` and `KILN_UI_OVERLAY=0` win over both, as everywhere. Drawing off keeps what
 [drawing off](#frame-generation-mods-and-drawing-off) keeps: keys, the Mods entry (its caption then reads
-"Mods: the overlay's drawing is off: OptiScaler is installed"), mods' native menu rows and `kiln.ui.tick`. The
+"Mods: the overlay's drawing is off: OptiScaler's own overlay menu is on", or "... OptiScaler's frame generation is
+on"), mods' native menu rows and `kiln.ui.tick`. The
 capability rows and `Ui.Status.Error` carry the same reason. kiln.log says which file is OptiScaler, what its ini sets,
 and how to get Kiln's overlay:
 
-> ui: OptiScaler is installed (winmm.dll) with OverlayMenu=auto (on), no frame generation in OptiScaler.ini: it draws its own overlay in the game's presents and opens its menu with Insert, so Kiln's overlay drawing steps aside (keys and the Mods menu still work). For Kiln's overlay, set OverlayMenu=false under [Menu] in OptiScaler.ini (OptiScaler's menu and frame generation go off with it), or KILN_UI_OVERLAY=1 to try both at your own risk
+> ui: OptiScaler is installed (winmm.dll) with OverlayMenu=auto (on), no frame generation in OptiScaler.ini: it draws its own overlay in the game's presents and opens its menu with Insert, so Kiln's overlay drawing steps aside (keys and the Mods menu still work). For Kiln's overlay, set OverlayMenu=false under [Menu] in OptiScaler.ini and leave FGInput and FGOutput under [FrameGen] at auto (OptiScaler's menu and frame generation off, its upscaling on), or KILN_UI_OVERLAY=1 to try both at your own risk
 
-Why (from OptiScaler's source, release v0.9.5, commit 2df7ad9f; not yet seen on a PC with OptiScaler):
+With its menu off and frame generation set:
+
+> ui: OptiScaler is installed (winmm.dll) with OverlayMenu=false, frame generation set (FGInput=upscaler, FGOutput=fsrfg) in OptiScaler.ini: with frame generation the game's frames are presented from OptiScaler's own queue and swapchain, where Kiln cannot draw, so Kiln's overlay drawing steps aside (keys and the Mods menu still work). For Kiln's overlay, set FGInput and FGOutput under [FrameGen] in OptiScaler.ini to auto (frame generation off, its upscaling stays), or KILN_UI_OVERLAY=1 to try at your own risk
+
+Why (from OptiScaler's source: release v0.9.5, commit 90d9568d, and master 2df7ad9f of 2026-11-17, which its nightly
+builds come from; not yet seen on a PC with OptiScaler):
 
 - OptiScaler's profile for `enshrouded.exe` loads `vulkan-1.dll` in OptiScaler's own DllMain, through ntdll
   (`LdrLoadDll`, not `LoadLibraryExW`), and patches its exports there. When OptiScaler loads with the game, as a proxy
@@ -994,12 +1053,18 @@ Why (from OptiScaler's source, release v0.9.5, commit 2df7ad9f; not yet seen on 
   wait semaphores with its own; when its menu fails it returns `VK_ERROR_OUT_OF_DATE_KHR` without presenting.
 - Both menus open with **Insert**. OptiScaler subclasses the game window and hooks raw input, the keyboard state and
   the cursor; while its menu is open it keeps keyboard and mouse from the game, and from Kiln.
-- With frame generation on, the game draws into FFX's stand-in swapchain and the real presents come from FFX's own
-  thread, past other overlays' hooks on purpose.
+- Frame generation for Vulkan is in master since 2026-10-13 (and so in the nightlies), not in 0.9.5. It is made with the game's device
+  whenever `[FrameGen]` names an input and an output, with OptiScaler's menu on or off: OptiScaler.ini's own line
+  under `[Menu]` ("without this option OptiScaler will disable all FG features") no longer holds for it. It adds
+  queues of its own to the device, the game draws into FFX's stand-in swapchain, and FFX's thread presents the game's
+  frames and the generated ones from its own present queue, through the present function Kiln handed out. Kiln cannot
+  draw there ([When the overlay fails during a session](#when-the-overlay-fails-during-a-session)): should frame
+  generation be on in a way OptiScaler.ini does not show, Kiln sees that queue at its first draw and turns its drawing
+  off for the session before it submits anything.
 
-With `OverlayMenu=false` OptiScaler makes none of the device, present or window patches (and its frame generation is
-off: OptiScaler.ini says so), so Kiln's overlay works as it does without OptiScaler. Its upscaling still works; set
-it up in OptiScaler.ini instead of its menu.
+With `OverlayMenu=false` and no frame generation OptiScaler makes none of the device, present or window patches, so
+Kiln's overlay works as it does without OptiScaler. Its upscaling still works; set it up in OptiScaler.ini instead of
+its menu.
 
 Detection, by contents and never by a name alone (`dxgi.dll`, `winmm.dll`, `version.dll` and `dbghelp.dll` are ReShade's,
 ShroudForge's, EML's and Shroudtopia's names too): a file under one of OptiScaler's names (those four, `d3d12.dll`,
