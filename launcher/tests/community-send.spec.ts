@@ -45,7 +45,7 @@ test.describe("desktop", () => {
     await expect(post.locator(".kc-postmock-tags")).toHaveText("CrashLinux");
     await expect(post).toContainText("It worked yesterday.");
     await expect(post).toContainText("Night Sky 0.3.1 did not load: incompatible with Weather Plus 1.4.2.");
-    await expect(post).toContainText("Kiln 0.2.0-dev.29.18 · Launcher 0.2.0-dev.29.18 · System Arch Linux · Runs on GE-Proton10-3 · Game build 26404966 · Mods");
+    await expect(post).toContainText(/Kiln 0\.2\.0-dev\.29\.18 · Launcher 0\.2\.0-dev\.29\.18 · Arch Linux · GE-Proton10-3 · game build 26404966 · \d+ mods? on/);
     await expect(page.getByTestId("kc-check")).toContainText("Posting as emberfox. Posted by the Kiln bot with you mentioned, so Discord tells you about replies.");
     await page.getByTestId("kc-files-toggle").click();
     await expect(page.getByTestId("kc-files")).toContainText("game/kiln/logs/kiln.log");

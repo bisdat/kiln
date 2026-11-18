@@ -11,6 +11,9 @@
 
 use serde::{Deserialize, Serialize};
 
+/// What the screens say for a fact the launcher could not read (en.json `community.tester.unknown`).
+pub const NOT_KNOWN: &str = "Not known";
+
 /// Hardware the team wants tested.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -52,9 +55,22 @@ pub struct Hardware {
 }
 
 impl Hardware {
-    /// What `POST /tester` sends: the lines the screen showed.
+    /// What `POST /tester` sends (the relay's `{gpu, driver?, vram?, os?, runner?, covers?}`, one line of at most 120
+    /// characters each, `gpu` required): the lines the screen showed. A fact the launcher could not read is left out
+    /// (the screen said "Not known"; for the card, that word goes).
     pub fn wire(&self) -> serde_json::Value {
-        serde_json::json!({ "gpu": self.gpu, "driver": self.driver, "vram": self.vram, "os": self.os, "runner": self.runner, "covers": self.caps })
+        let cut = |s: &str| s.chars().filter(|c| !c.is_control()).take(120).collect::<String>().trim().to_string();
+        let mut v = serde_json::Map::new();
+        let gpu = cut(&self.gpu);
+        v.insert("gpu".into(), serde_json::json!(if gpu.is_empty() { NOT_KNOWN.to_string() } else { gpu }));
+        for (k, x) in [("driver", &self.driver), ("vram", &self.vram), ("os", &self.os), ("runner", &self.runner)] {
+            let x = cut(x);
+            if !x.is_empty() {
+                v.insert(k.into(), serde_json::json!(x));
+            }
+        }
+        v.insert("covers".into(), serde_json::json!(self.covers.iter().take(8).collect::<Vec<_>>()));
+        serde_json::Value::Object(v)
     }
 }
 
@@ -431,6 +447,11 @@ mod tests {
     #[test]
     fn what_volunteer_sends_is_the_lines_shown() {
         let hw = Hardware { gpu: "g".into(), driver: "d".into(), vram: "v".into(), os: "o".into(), runner: "r".into(), caps: vec![Capability::Fsr4], covers: vec!["FSR 4".into()] };
-        assert_eq!(hw.wire(), serde_json::json!({ "gpu": "g", "driver": "d", "vram": "v", "os": "o", "runner": "r", "covers": ["fsr4"] }));
+        assert_eq!(hw.wire(), serde_json::json!({ "gpu": "g", "driver": "d", "vram": "v", "os": "o", "runner": "r", "covers": ["FSR 4"] }));
+        // what could not be read is left out; the card, which the relay needs, says so
+        let bare = Hardware { os: "Arch Linux".into(), ..Default::default() };
+        assert_eq!(bare.wire(), serde_json::json!({ "gpu": "Not known", "os": "Arch Linux", "covers": [] }));
+        let en: serde_json::Value = serde_json::from_str(include_str!("../../../../launcher/src/i18n/en.json")).unwrap();
+        assert_eq!(en["community"]["tester"]["unknown"], NOT_KNOWN);
     }
 }

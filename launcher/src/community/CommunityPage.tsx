@@ -110,7 +110,7 @@ export default function CommunityPage() {
             {feed.isLoading ? <Skeleton lines={2} /> : feed.error || !feed.data ? <EmptyState title={t("community.news.offline")} /> : !feed.data.events.length ? <EmptyState title={t("community.events.empty")} /> : (
               <ul className="kc-feed">
                 {feed.data.events.map((e) => (
-                  <li key={e.title}><button type="button" className="kc-feed-title" onClick={() => openUrl(e.url)}>{e.title}</button><div className="kc-feed-line">{eventTime(e.start)}. {e.where}.</div></li>
+                  <li key={e.title}><button type="button" className="kc-feed-title" onClick={() => openUrl(e.url)}>{e.title}</button><div className="kc-feed-line">{eventTime(e.start)}.{e.where ? ` ${e.where}.` : ""}</div></li>
                 ))}
               </ul>
             )}

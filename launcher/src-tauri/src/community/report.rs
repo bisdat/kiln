@@ -6,7 +6,7 @@
 use crate::state::blocking;
 use kiln_manage::community::known::{KnownAction, KnownList};
 use kiln_manage::community::post::{self, PostFinding, PublicPost};
-use kiln_manage::community::relay::ZIP_MAX;
+use kiln_manage::community::relay::{Attachment, ZIP_MAX};
 use kiln_manage::community::{ProblemKind, ReportDraft, SendFrom, SupportPost, ZipAudience};
 use kiln_manage::{Error, ErrorCode};
 use serde::Serialize;
@@ -19,6 +19,8 @@ const KEEP: Duration = Duration::from_secs(30 * 60);
 
 struct Prepared {
     zip: Vec<u8>,
+    /// report.json alone (the tool, the findings, the versions): what goes instead of the zip when nobody gets it.
+    alone: Vec<u8>,
     name: String,
     post: PublicPost,
     from: SendFrom,
@@ -45,6 +47,9 @@ pub struct KnownView {
     pub copy: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub action: Option<KnownAction>,
+    /// The button's words from the list; absent: the launcher's own for the action.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -97,7 +102,7 @@ pub async fn prepare(app: tauri::AppHandle, target: Option<crate::commands::logs
             size: zip.len() as u64,
             limit: ZIP_MAX,
             files: r.files.iter().map(|(n, b)| FileLine { path: n.clone(), size: b.len() as u64 }).collect(),
-            known: known.as_ref().map(|k| KnownView { id: k.id.clone(), title: k.title.clone(), fix: k.fix.clone(), copy: k.copy.clone(), action: k.action }),
+            known: known.as_ref().map(|k| KnownView { id: k.id.clone(), title: k.title.clone(), fix: k.fix.clone(), copy: k.copy.clone(), action: k.action, label: k.label.clone() }),
         };
         let mut map = PREPARED.lock().unwrap();
         map.retain(|_, p| p.at.elapsed() < KEEP);
@@ -106,7 +111,7 @@ pub async fn prepare(app: tauri::AppHandle, target: Option<crate::commands::logs
             let oldest = map.iter().min_by_key(|(_, p)| p.at).map(|(k, _)| k.clone());
             match oldest { Some(k) => { map.remove(&k); } None => break }
         }
-        map.insert(id, Prepared { zip, name: kiln_manage::report::file_name(std::time::SystemTime::now()), post, from, known: known.map(|k| k.id), at: Instant::now() });
+        map.insert(id, Prepared { zip, alone: kiln_manage::report::public_json(&r), name: kiln_manage::report::file_name(std::time::SystemTime::now()), post, from, known: known.map(|k| k.id), at: Instant::now() });
         Ok(preview)
     })
     .await
@@ -123,14 +128,15 @@ pub fn matching(r: &kiln_manage::report::Report) -> Option<kiln_manage::communit
 /// too many, too big) can be tried again with the same zip and words.
 pub fn send(prepared: &str, draft: &ReportDraft) -> Result<SupportPost, Error> {
     let d = draft.checked()?;
-    let (wire, zip, name) = {
+    let (wire, bytes, name) = {
         let map = PREPARED.lock().unwrap();
         let p = map.get(prepared).filter(|p| p.at.elapsed() < KEEP)
             .ok_or_else(|| Error::new(ErrorCode::NotFound, "This report was prepared too long ago. Open Send to Kiln support again.").with_detail(serde_json::json!({ "kind": "not_found" })))?;
-        let zip = (d.zip != ZipAudience::None).then(|| p.zip.clone());
-        (post::wire(&p.post, &d, p.from, p.known.as_deref()), zip, p.name.clone())
+        let bytes = if d.zip == ZipAudience::None { p.alone.clone() } else { p.zip.clone() };
+        (post::wire(&d, p.from, p.known.as_deref()), bytes, p.name.clone())
     };
-    let post = crate::commands::community::relay_call(|r| r.report(wire, zip.as_deref().map(|z| (name.as_str(), z))))?;
+    let with = if d.zip == ZipAudience::None { Attachment::ReportJson(&bytes) } else { Attachment::Zip(&name, &bytes) };
+    let post = crate::commands::community::relay_call(|r| r.report(wire, with))?;
     PREPARED.lock().unwrap().remove(prepared);
     crate::commands::app::launcher_log("community", &format!("support report sent to Kiln support (zip: {})", match d.zip { ZipAudience::Team => "team", ZipAudience::Public => "public", ZipAudience::None => "not sent" }));
     Ok(post)

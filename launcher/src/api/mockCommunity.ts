@@ -105,7 +105,7 @@ function preview(from: SendFrom): ReportPreview {
   const crash = from === "crash" || PROBLEM === "crash" || has("crash");
   const noKiln = from === "banner" || PROBLEM === "nokiln" || has("nokiln");
   const kindTags = { noload: "Mods", mod: "Mods", crash: "Crash", launcher: "Launcher", server: "Server", other: null };
-  const tags = [DECK ? "Steam Deck" : "Linux"];
+  const tags = DECK ? ["Steam Deck", "Linux"] : ["Linux"];
   const id = `r${++preparedSeq}`;
   prepared.set(id, { from, tags });
   return {
@@ -117,9 +117,10 @@ function preview(from: SendFrom): ReportPreview {
       { id: "mod-failed", level: "problem", text: "Night Sky 0.3.1 did not load: incompatible with Weather Plus 1.4.2." },
       { id: "crash", level: "warning", text: "Kiln wrote a crash report on 2026-11-18 at 22:10 (1 in all; the newest is in this report)." },
     ],
+    // the relay's versions line (relay/post.mjs): a word and a value, or the value alone
     versions: [
-      ["Kiln", "0.2.0-dev.29.18"], ["Launcher", "0.2.0-dev.29.18"], ["System", DECK ? "SteamOS 3.7 (Steam Deck)" : "Arch Linux"],
-      ["Runs on", DECK ? "Proton 10.0" : "GE-Proton10-3"], ["Game build", "26404966"], ["Mods", `${mods ?? 12} on`],
+      ["Kiln", "0.2.0-dev.29.18"], ["Launcher", "0.2.0-dev.29.18"], ["", DECK ? "SteamOS 3.7" : "Arch Linux"],
+      ["", DECK ? "Proton 10.0" : "GE-Proton10-3"], ["game build", "26404966"], ["", `${mods ?? 12} mods on`],
     ],
     tags,
     kindTags,
@@ -258,7 +259,7 @@ export function communityMockHandlers({ emit, gameRunning }: CommunityMockDeps):
       const d = a.draft as ReportDraft;
       const p = prepared.get(String(a.prepared));
       if (!p) err("not_found", "This report was not prepared.", "not_found");
-      if (!d.title?.trim()) err("invalid_argument", "Write one line first.", "title");
+      if ((d.title?.trim().length ?? 0) < 3) err("invalid_argument", "Write one line first.", "title");
       needSession();
       relay("reports");
       if (!account!.member) err("refused", "You're not in the Kiln Discord yet.", "not_member");

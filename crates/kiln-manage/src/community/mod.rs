@@ -187,8 +187,11 @@ pub struct ReportDraft {
     pub zip: ZipAudience,
 }
 
-/// The longest title (the post's title; Discord allows 100).
+/// The longest title (the post's title; Discord allows 100) and the shortest (the relay's).
 pub const TITLE_MAX: usize = 90;
+pub const TITLE_MIN: usize = 3;
+/// The most lines of "anything else" (the relay's).
+pub const WORDS_LINES: usize = 40;
 /// The longest "anything else".
 pub const WORDS_MAX: usize = 1500;
 
@@ -197,13 +200,22 @@ impl ReportDraft {
     /// characters but line breaks in the words, a `when` from the Deck's list.
     pub fn checked(&self) -> crate::Result<ReportDraft> {
         let title: String = self.title.split_whitespace().collect::<Vec<_>>().join(" ");
-        if title.is_empty() {
+        // the relay takes 3 to 90 characters
+        if title.chars().count() < TITLE_MIN {
             return Err(crate::Error::invalid("Write one line first.").with_detail(serde_json::json!({ "kind": "title" })));
         }
         if title.chars().count() > TITLE_MAX || title.chars().any(char::is_control) {
             return Err(crate::Error::invalid("The line is too long.").with_detail(serde_json::json!({ "kind": "title" })));
         }
-        let text = self.text.trim().replace("\r\n", "\n");
+        let mut text = self.text.trim().replace("\r\n", "\n");
+        // the relay takes at most 40 lines: runs of empty lines go first, then the last lines join the 40th
+        while text.contains("\n\n\n") {
+            text = text.replace("\n\n\n", "\n\n");
+        }
+        let lines: Vec<&str> = text.split('\n').collect();
+        if lines.len() > WORDS_LINES {
+            text = format!("{}\n{}", lines[..WORDS_LINES - 1].join("\n"), lines[WORDS_LINES - 1..].join(" "));
+        }
         if text.chars().count() > WORDS_MAX || text.chars().any(|c| c.is_control() && c != '\n') {
             return Err(crate::Error::invalid("Your words are too long.").with_detail(serde_json::json!({ "kind": "words" })));
         }
@@ -250,15 +262,17 @@ pub struct FeedRelease {
 #[serde(rename_all = "camelCase")]
 pub struct FeedEvent {
     pub title: String,
-    /// RFC 3339: when it starts (the relay may call it `when`).
-    #[serde(alias = "when")]
-    pub start: String,
+    /// RFC 3339: when it starts (the relay calls it `when`; it may be null: such an event is not shown).
+    #[serde(alias = "when", default)]
+    pub start: Option<String>,
     #[serde(default)]
     pub end: Option<String>,
     /// Where: a channel or a place, in words.
     #[serde(rename = "where", default)]
-    pub place: String,
-    pub url: String,
+    pub place: Option<String>,
+    /// May be null on the relay: such an event is not shown.
+    #[serde(default)]
+    pub url: Option<String>,
 }
 
 impl Feed {
@@ -268,7 +282,8 @@ impl Feed {
         let link = |u: &str| u.starts_with("https://") && u.len() <= 300 && !u.chars().any(|c| c.is_whitespace() || c.is_control());
         Feed {
             releases: self.releases.into_iter().filter(|r| ok(&r.title, 80) && ok(&r.date, 40) && r.line.chars().count() <= 200 && link(&r.url)).take(3).collect(),
-            events: self.events.into_iter().filter(|e| ok(&e.title, 100) && ok(&e.start, 40) && e.place.chars().count() <= 100 && link(&e.url)).take(5).collect(),
+            events: self.events.into_iter().filter(|e| ok(&e.title, 100) && e.start.as_deref().is_some_and(|s| ok(s, 40))
+                && e.place.as_deref().is_none_or(|p| p.chars().count() <= 100) && e.url.as_deref().is_some_and(link)).take(5).collect(),
         }
     }
 }
@@ -314,11 +329,16 @@ mod tests {
         let d = |title: &str, text: &str| ReportDraft { title: title.into(), kind: ProblemKind::Crash, when: None, text: text.into(), zip: ZipAudience::Team };
         assert_eq!(d("  ", "").checked().unwrap_err().detail.unwrap()["kind"], "title");
         assert_eq!(d("  The game\tcrashes  ", "").checked().unwrap().title, "The game crashes");
+        assert!(d("ab", "").checked().is_err(), "the relay takes 3 characters or more");
+        let many = (0..50).map(|i| format!("line {i}")).collect::<Vec<_>>().join("\n");
+        let t = d("ok!", &many).checked().unwrap().text;
+        assert_eq!(t.split('\n').count(), WORDS_LINES);
+        assert!(t.ends_with("line 39 line 40 line 41 line 42 line 43 line 44 line 45 line 46 line 47 line 48 line 49"));
         assert!(d(&"x".repeat(TITLE_MAX + 1), "").checked().is_err());
-        assert!(d("ok", &"y".repeat(WORDS_MAX + 1)).checked().is_err());
-        assert_eq!(d("ok", "line one\r\nline two ").checked().unwrap().text, "line one\nline two");
-        assert!(d("ok", "bell\u{7}").checked().is_err());
-        let mut w = d("ok", "");
+        assert!(d("ok!", &"y".repeat(WORDS_MAX + 1)).checked().is_err());
+        assert_eq!(d("ok!", "line one\r\nline two ").checked().unwrap().text, "line one\nline two");
+        assert!(d("ok!", "bell\u{7}").checked().is_err());
+        let mut w = d("ok!", "");
         w.when = Some("dance".into());
         assert!(w.checked().is_err());
         w.when = Some("load".into());
@@ -330,5 +350,12 @@ mod tests {
         let r = |n: u32, url: &str| FeedRelease { title: format!("Kiln {n}"), date: "2026-11-18T10:00:00Z".into(), line: "x".into(), url: url.into() };
         let f = Feed { releases: vec![r(1, "https://frostdev.io/kiln"), r(2, "javascript:x"), r(3, "https://a.b"), r(4, "https://a.b"), r(5, "https://a.b")], events: vec![] }.cleaned();
         assert_eq!(f.releases.iter().map(|r| r.title.as_str()).collect::<Vec<_>>(), ["Kiln 1", "Kiln 3", "Kiln 4"]);
+        // the relay's shape: `when`, `version`, `updated`; an event without a time or a link is left out
+        let f: Feed = serde_json::from_value(serde_json::json!({ "releases": [{ "title": "Kiln 0.2.0-dev.29.18", "version": "0.2.0-dev.29.18", "date": "2026-11-18T12:00:00.000Z", "line": "x", "url": "https://frostdev.io/kiln/downloads/0.2.0-dev.29.18/RELEASE-NOTES.md" }],
+            "events": [{ "title": "Kiln test night", "when": "2026-11-21T20:00:00.000Z", "where": "Kiln Discord, voice", "url": "https://discord.com/events/1/2" },
+                       { "title": "No time", "when": null, "where": "", "url": "https://discord.com/events/1/3" }, { "title": "No link", "when": "2026-11-21T20:00:00.000Z", "where": "", "url": null }],
+            "updated": "2026-11-18T12:00:00.000Z" })).unwrap();
+        let f = f.cleaned();
+        assert_eq!((f.releases.len(), f.events.len(), f.events[0].start.as_deref()), (1, 1, Some("2026-11-21T20:00:00.000Z")));
     }
 }

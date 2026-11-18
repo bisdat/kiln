@@ -8,8 +8,9 @@ use crate::report::{Level, Report};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-/// At most this many findings go in the post (the relay cuts what would pass Discord's 2000 characters).
-pub const FINDINGS_MAX: usize = 12;
+/// At most this many findings go in the post, as the relay takes them (it cuts what would pass Discord's 2000
+/// characters with "and N more in the report").
+pub const FINDINGS_MAX: usize = 60;
 /// A finding's text is cut to this many characters.
 pub const FINDING_TEXT_MAX: usize = 300;
 
@@ -33,7 +34,8 @@ pub struct PublicPost {
     /// The player's words (may be empty).
     pub words: String,
     pub findings: Vec<PostFinding>,
-    /// ("Kiln", "0.2.0-dev.29.18"), ("Launcher", ...), ("System", ...), ("Runs on", ...), ("Game build", ...), ("Mods", "12 on").
+    /// The versions line as the relay writes it, a word and a value each: ("Kiln", "0.2.0-dev.29.18"), ("Launcher", ...),
+    /// ("", "Arch Linux"), ("", "GE-Proton10-3"), ("game build", "26404966"), ("", "12 mods on"); shown joined with " · ".
     pub versions: Vec<(String, String)>,
 }
 
@@ -51,44 +53,48 @@ fn cut(s: &str, max: usize) -> String {
     if s.chars().count() <= max { s.to_string() } else { s.chars().take(max - 1).collect::<String>() + "…" }
 }
 
-/// The system's `#support` tag: Steam Deck, Windows or Linux.
-pub fn os_tag(r: &Report) -> &'static str {
-    if r.facts.deck {
-        "Steam Deck"
-    } else if r.facts.runner.as_deref() == Some("Windows") || r.facts.os.to_ascii_lowercase().starts_with("windows") {
-        "Windows"
+/// The system's `#support` tags, as the relay picks them: a Steam Deck is "Steam Deck" and "Linux".
+pub fn os_tags(r: &Report) -> Vec<String> {
+    let t: &[&str] = if r.facts.deck {
+        &["Steam Deck", "Linux"]
+    } else if r.facts.runner.as_deref() == Some("Windows") || r.facts.os.to_ascii_lowercase().contains("windows") {
+        &["Windows"]
     } else {
-        "Linux"
-    }
+        &["Linux"]
+    };
+    t.iter().map(|x| x.to_string()).collect()
 }
 
 /// The post a report becomes, before the player's words: the findings as the report has them (redacted, at most
 /// [`FINDINGS_MAX`]) and the versions. `launcher`: the launcher's version.
 pub fn build(r: &Report, launcher: &str) -> PublicPost {
-    let f = &r.facts;
-    let mut versions: Vec<(String, String)> = vec![
-        ("Kiln".into(), f.kiln.clone().unwrap_or_else(|| "not installed".into())),
-        ("Launcher".into(), launcher.to_string()),
-    ];
-    let system = if f.deck && !f.os.to_ascii_lowercase().contains("deck") { format!("{} (Steam Deck)", f.os) } else { f.os.clone() };
-    if !system.trim().is_empty() {
-        versions.push(("System".into(), system));
+    // the relay's versions line (relay/post.mjs versionsLine): from report.json's `versions`, the same facts
+    let v = r.facts.versions();
+    let get = |k: &str| v.get(k).and_then(|x| x.as_str()).map(str::to_string);
+    let mut versions: Vec<(String, String)> = Vec::new();
+    if let Some(k) = get("kiln") {
+        versions.push(("Kiln".into(), k));
     }
-    if let Some(run) = f.runner.as_ref().filter(|r| r.as_str() != "Windows") {
-        versions.push(("Runs on".into(), run.clone()));
+    versions.push(("Launcher".into(), get("launcher").unwrap_or_else(|| launcher.to_string())));
+    for k in ["os", "runner"] {
+        if let Some(x) = get(k) {
+            versions.push((String::new(), x));
+        }
     }
-    if let Some(b) = &f.game_build {
-        versions.push(("Game build".into(), b.clone()));
+    if let Some(b) = get("gameBuild") {
+        versions.push(("game build".into(), b));
     }
-    if let Some(n) = f.mods_on {
-        versions.push(("Mods".into(), format!("{n} on")));
+    if let Some(n) = r.facts.mods_on {
+        versions.push((String::new(), if n == 1 { "1 mod on".into() } else { format!("{n} mods on") }));
     }
+    let mut findings: Vec<PostFinding> = r.findings.iter().take(FINDINGS_MAX).map(|x| PostFinding { id: x.id.clone(), level: x.level, text: cut(&x.text, FINDING_TEXT_MAX) }).collect();
+    findings.sort_by_key(|f| f.level);
     PublicPost {
         title: String::new(),
-        tags: vec![os_tag(r).to_string()],
+        tags: os_tags(r),
         kind: ProblemKind::Other,
         words: String::new(),
-        findings: r.findings.iter().take(FINDINGS_MAX).map(|x| PostFinding { id: x.id.clone(), level: x.level, text: cut(&x.text, FINDING_TEXT_MAX) }).collect(),
+        findings,
         versions,
     }
 }
@@ -107,11 +113,14 @@ impl PublicPost {
     }
 }
 
-/// The `draft` part of `POST /reports` (docs/kiln/launcher/discord.md): the player's draft and the post exactly as
-/// the check step showed it.
-pub fn wire(post: &PublicPost, d: &ReportDraft, from: SendFrom, known: Option<&str>) -> Value {
-    let p = PublicPost { tags: post.tags_for(d.kind), ..post.clone() }.with_draft(d);
-    let mut v = json!({ "title": d.title, "kind": d.kind, "words": d.text, "zip": d.zip, "from": from, "post": p });
+/// The `draft` part of `POST /reports` as the relay takes it (docs/relay-api.md: exactly `title`, `kind`, `when?`,
+/// `text?`, `zip`, `known?`). The relay builds the post from report.json (the zip's, or report.json alone when the
+/// player chose that nobody gets the zip: [`crate::report::public_json`]) the same way [`build`] did for the check step.
+pub fn wire(d: &ReportDraft, _from: SendFrom, known: Option<&str>) -> Value {
+    let mut v = json!({ "title": d.title, "kind": d.kind, "zip": d.zip });
+    if !d.text.is_empty() {
+        v["text"] = json!(d.text);
+    }
     if let Some(w) = &d.when {
         v["when"] = json!(w);
     }
@@ -142,14 +151,21 @@ mod tests {
         ReportDraft { title: "Mods don't load since the game update".into(), kind: ProblemKind::Noload, when: None, text: "It worked yesterday.".into(), zip: super::super::ZipAudience::Team }
     }
 
+    fn line(p: &PublicPost) -> String {
+        p.versions.iter().map(|(k, v)| if k.is_empty() { v.clone() } else { format!("{k} {v}") }).collect::<Vec<_>>().join(" · ")
+    }
+
     #[test]
-    fn the_post_names_versions_the_system_and_how_many_mods_are_on() {
+    fn the_versions_line_is_the_relays() {
+        // relay/post.mjs versionsLine: "Kiln x · Launcher y · <os> · <runner> · game build z · N mods on"
         let p = build(&report(), "0.2.0-dev.29.18");
-        let v: Vec<(&str, &str)> = p.versions.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
-        assert_eq!(v, [("Kiln", "0.2.0-dev.29.18"), ("Launcher", "0.2.0-dev.29.18"), ("System", "Arch Linux"), ("Runs on", "GE-Proton10-3"), ("Game build", "26404966"), ("Mods", "12 on")]);
+        assert_eq!(line(&p), "Kiln 0.2.0-dev.29.18 · Launcher 0.2.0-dev.29.18 · Arch Linux · GE-Proton10-3 · game build 26404966 · 12 mods on");
         assert_eq!(p.tags, ["Linux"]);
         assert_eq!(p.findings.len(), 2);
         assert_eq!(p.findings[0].text, report().findings[0].text);
+        let mut one = report();
+        one.facts.mods_on = Some(1);
+        assert!(line(&build(&one, "1")).ends_with("1 mod on"));
     }
 
     #[test]
@@ -158,59 +174,59 @@ mod tests {
         let mut r = report();
         r.summary = "Profile: My mods\n  kiln  big-stacks  1.2.0  on\n  kiln  secret-base-mod  0.1  on\n".into();
         r.files = vec![("game/kiln/profile.json".into(), b"{\"mods\":[\"secret-base-mod\"]}".to_vec())];
-        let text = serde_json::to_string(&wire(&build(&r, "1"), &draft(), SendFrom::Logs, None)).unwrap();
-        assert!(!text.contains("big-stacks") && !text.contains("secret-base-mod"), "{text}");
-        assert!(text.contains("night-sky"), "a mod a finding names is in the post");
-        assert!(text.contains("\"12 on\""));
+        let post = serde_json::to_string(&build(&r, "1")).unwrap();
+        let alone = String::from_utf8(crate::report::public_json(&r)).unwrap();
+        for text in [&post, &alone] {
+            assert!(!text.contains("big-stacks") && !text.contains("secret-base-mod"), "{text}");
+            assert!(text.contains("night-sky"), "a mod a finding names is in it");
+        }
+        assert!(post.contains("12 mods on"));
     }
 
     #[test]
-    fn the_deck_and_windows_say_so_and_windows_has_no_runs_on_line() {
+    fn the_deck_and_windows_say_so_and_windows_has_no_runner_word() {
         let mut r = report();
         r.facts.deck = true;
         r.facts.os = "SteamOS 3.7".into();
         r.facts.runner = Some("Proton 10.0".into());
         let p = build(&r, "1");
-        assert_eq!(p.tags, ["Steam Deck"]);
-        assert!(p.versions.contains(&("System".into(), "SteamOS 3.7 (Steam Deck)".into())));
+        assert_eq!(p.tags, ["Steam Deck", "Linux"]);
+        assert!(line(&p).contains("SteamOS 3.7 · Proton 10.0"));
         r.facts.deck = false;
         r.facts.os = "Windows 11".into();
         r.facts.runner = Some("Windows".into());
         let p = build(&r, "1");
         assert_eq!(p.tags, ["Windows"]);
-        assert!(!p.versions.iter().any(|(k, _)| k == "Runs on"));
         r.facts.kiln = None;
         r.facts.mods_on = None;
         let p = build(&r, "1");
-        assert!(p.versions.contains(&("Kiln".into(), "not installed".into())) && !p.versions.iter().any(|(k, _)| k == "Mods"));
+        assert!(!line(&p).contains("Kiln ") && !line(&p).contains("mods on"));
     }
 
     #[test]
-    fn findings_are_capped_and_cut() {
+    fn findings_are_capped_cut_and_problems_come_first() {
         let mut r = report();
-        r.findings = (0..20).map(|i| Finding { id: format!("f{i}"), level: Level::Info, text: "x".repeat(400) }).collect();
+        r.findings = (0..80).map(|i| Finding { id: format!("f{i}"), level: if i == 79 { Level::Problem } else { Level::Info }, text: "x".repeat(400) }).collect();
         let p = build(&r, "1");
         assert_eq!(p.findings.len(), FINDINGS_MAX);
         assert_eq!(p.findings[0].text.chars().count(), FINDING_TEXT_MAX);
     }
 
     #[test]
-    fn the_wire_draft_is_the_post_as_shown_with_the_kinds_tag_first() {
+    fn the_wire_draft_has_exactly_the_relays_fields() {
         let mut d = draft();
         d.when = Some("load".into());
-        let v = wire(&build(&report(), "0.2.0"), &d, SendFrom::Banner, Some("proton-override"));
-        assert_eq!(v["title"], "Mods don't load since the game update");
-        assert_eq!(v["kind"], "noload");
-        assert_eq!(v["when"], "load");
-        assert_eq!(v["zip"], "team");
-        assert_eq!(v["from"], "banner");
-        assert_eq!(v["known"], "proton-override");
-        assert_eq!(v["post"]["title"], v["title"]);
-        assert_eq!(v["post"]["words"], "It worked yesterday.");
-        assert_eq!(v["post"]["tags"], json!(["Mods", "Linux"]));
-        assert_eq!(v["post"]["versions"][5], json!(["Mods", "12 on"]));
-        // "something else" has no kind tag
-        d.kind = ProblemKind::Other;
-        assert_eq!(wire(&build(&report(), "0.2.0"), &d, SendFrom::Logs, None)["post"]["tags"], json!(["Linux"]));
+        let v = wire(&d, SendFrom::Banner, Some("proton-override"));
+        let mut keys: Vec<&str> = v.as_object().unwrap().keys().map(String::as_str).collect();
+        keys.sort();
+        assert_eq!(keys, ["kind", "known", "text", "title", "when", "zip"]);
+        assert_eq!((v["title"].as_str(), v["kind"].as_str(), v["text"].as_str(), v["zip"].as_str()), (Some("Mods don't load since the game update"), Some("noload"), Some("It worked yesterday."), Some("team")));
+        d.text = String::new();
+        d.when = None;
+        let v = wire(&d, SendFrom::Logs, None);
+        assert!(v.get("text").is_none() && v.get("when").is_none() && v.get("known").is_none());
+        // the kind's tag first, then the system's
+        assert_eq!(build(&report(), "1").tags_for(ProblemKind::Crash), ["Crash", "Linux"]);
+        assert_eq!(build(&report(), "1").tags_for(ProblemKind::Other), ["Linux"]);
     }
 }

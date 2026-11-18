@@ -2333,7 +2333,7 @@ export interface CommunityStatus {
   postsAsOf: string | null;
 }
 export interface FeedRelease { title: string; date: string; line: string; url: string }
-export interface FeedEvent { title: string; start: string; end?: string | null; where: string; url: string }
+export interface FeedEvent { title: string; start: string; end?: string | null; where?: string | null; url: string }
 export interface CommunityFeed { releases: FeedRelease[]; events: FeedEvent[] }
 export type SignInMode = "browser" | "qr";
 export interface SignInStart {
@@ -2363,7 +2363,7 @@ export interface ReportDraft {
 }
 export type FindingLevel = "problem" | "warning" | "info";
 export interface PostFinding { id: string; level: FindingLevel; text: string }
-export type KnownAction = "mods" | "runtime" | "logs";
+export type KnownAction = "mods" | "runtime" | "logs" | "settings";
 export interface KnownProblem {
   id: string;
   title: string;
@@ -2372,6 +2372,8 @@ export interface KnownProblem {
   copy?: string | null;
   /** The fix's own button. */
   action?: KnownAction | null;
+  /** The button's words from the list; absent: the launcher's own for the action. */
+  label?: string | null;
 }
 /** A support report prepared for sending: exactly what the check step shows and what Send sends. */
 export interface ReportPreview {

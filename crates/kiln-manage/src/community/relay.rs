@@ -292,6 +292,14 @@ pub enum Payload {
     Form(Vec<(String, String, Option<String>, Vec<u8>)>),
 }
 
+/// What goes with a report's draft.
+pub enum Attachment<'z> {
+    /// (file name, the zip): the team's copy, or attached to the public post.
+    Zip(&'z str, &'z [u8]),
+    /// report.json alone, for the post, when nobody gets the zip.
+    ReportJson(&'z [u8]),
+}
+
 pub struct Relay<'a> {
     client: net::Client<'a>,
     base: RelayBase,
@@ -415,17 +423,18 @@ impl<'a> Relay<'a> {
 
     // ---- reports and posts
 
-    /// `draft`: the post as the check step showed it (see [`super::post::wire`]); `zip`: (file name, bytes) unless the
-    /// player chose Nobody.
-    pub fn report(&self, draft: Value, zip: Option<(&str, &[u8])>) -> Result<SupportPost> {
-        if let Some((_, z)) = zip
+    /// `draft`: [`super::post::wire`]; `with`: the zip (file name, bytes), or report.json alone when the player chose
+    /// that nobody gets the zip ([`crate::report::public_json`]): the relay builds the post from either.
+    pub fn report(&self, draft: Value, with: Attachment) -> Result<SupportPost> {
+        if let Attachment::Zip(_, z) = &with
             && z.len() as u64 > ZIP_MAX
         {
             return Err(refusal(413, json!({ "error": "too_big", "size": z.len(), "limit": ZIP_MAX }).to_string().as_bytes()));
         }
         let mut parts = vec![("draft".to_string(), "application/json".to_string(), None, draft.to_string().into_bytes())];
-        if let Some((name, z)) = zip {
-            parts.push(("zip".to_string(), "application/zip".to_string(), Some(name.to_string()), z.to_vec()));
+        match with {
+            Attachment::Zip(name, z) => parts.push(("zip".to_string(), "application/zip".to_string(), Some(name.to_string()), z.to_vec())),
+            Attachment::ReportJson(j) => parts.push(("report".to_string(), "application/json".to_string(), Some("report.json".to_string()), j.to_vec())),
         }
         #[derive(Deserialize)]
         struct Answer {
@@ -482,20 +491,22 @@ impl<'a> Relay<'a> {
         self.call(Method::Post, "/tester", Payload::Json(v), true, ANSWER_MAX).map(drop)
     }
 
+    // (`GET /tester` answers `{tester, hardware, results}`; a `plan` beside them is read when the relay serves one.)
+
     pub fn tester_leave(&self) -> Result<()> {
         self.call(Method::Delete, "/tester", Payload::None, true, ANSWER_MAX).map(drop)
     }
 
-    pub fn tester_results(&self, results: Value, zip: Option<(&str, &[u8])>) -> Result<super::testers::SentMark> {
+    pub fn tester_results(&self, results: Value, zip: Option<(&str, &[u8])>) -> Result<super::testers::ResultMark> {
         let mut parts = vec![("results".to_string(), "application/json".to_string(), None, results.to_string().into_bytes())];
         if let Some((name, z)) = zip {
             parts.push(("zip".to_string(), "application/zip".to_string(), Some(name.to_string()), z.to_vec()));
         }
         #[derive(Deserialize)]
         struct Answer {
-            sent: super::testers::SentMark,
+            result: super::testers::ResultMark,
         }
-        Ok(self.json::<Answer>(Method::Post, "/tester/results", Payload::Form(parts), true, ANSWER_MAX)?.sent)
+        Ok(self.json::<Answer>(Method::Post, "/tester/results", Payload::Form(parts), true, ANSWER_MAX)?.result)
     }
 }
 
@@ -661,7 +672,7 @@ mod tests {
     fn a_report_is_a_form_with_the_draft_and_the_zip() {
         let fake = FakeRelay::start(|_| status(201, json!({ "post": { "id": "p9", "title": "The game crashes", "url": "https://discord.com/channels/1/9", "created": "2026-11-18T12:00:00Z", "status": "waiting" } })));
         let t = fake.transport();
-        let post = Relay::new(base(), &t, "1").with_session(KEY).report(json!({ "title": "The game crashes" }), Some(("kiln-report-2026-11-18.zip", b"PK\x03\x04zip"))).unwrap();
+        let post = Relay::new(base(), &t, "1").with_session(KEY).report(json!({ "title": "The game crashes" }), Attachment::Zip("kiln-report-2026-11-18.zip", b"PK\x03\x04zip")).unwrap();
         assert_eq!(post.id, "p9");
         let seen = &fake.seen()[0];
         assert_eq!(seen.path(), "/reports");
@@ -673,11 +684,22 @@ mod tests {
     }
 
     #[test]
+    fn without_the_zip_report_json_goes_alone_as_the_report_part() {
+        let fake = FakeRelay::start(|_| status(201, json!({ "post": { "id": "1573990884210000077", "title": "x y z", "url": "https://discord.com/channels/1/9", "created": "2026-11-18T12:00:00.000Z", "status": "waiting", "replies": 0, "unread": 0, "lastReply": null, "zip": "none" }, "tags": ["Mods", "Linux"], "reportId": "KR-7F3Q", "known": null })));
+        let t = fake.transport();
+        Relay::new(base(), &t, "1").with_session(KEY).report(json!({ "title": "x y z", "kind": "mod", "zip": "none" }), Attachment::ReportJson(br#"{"format":1}"#)).unwrap();
+        let parts = multipart(&fake.seen()[0]);
+        assert_eq!(parts.iter().map(|p| p.0.as_str()).collect::<Vec<_>>(), ["draft", "report"]);
+        let head = String::from_utf8_lossy(&fake.seen()[0].body).into_owned();
+        assert!(head.contains("name=\"report\"; filename=\"report.json\""), "the relay takes it as a file");
+    }
+
+    #[test]
     fn a_zip_over_the_limit_is_refused_before_sending() {
         let fake = FakeRelay::start(|_| status(201, json!({})));
         let t = fake.transport();
         let big = vec![0u8; ZIP_MAX as usize + 1];
-        let e = Relay::new(base(), &t, "1").with_session(KEY).report(json!({}), Some(("r.zip", &big))).unwrap_err();
+        let e = Relay::new(base(), &t, "1").with_session(KEY).report(json!({}), Attachment::Zip("r.zip", &big)).unwrap_err();
         assert_eq!(kind_of(&e), Some("too_big"));
         assert!(fake.seen().is_empty());
     }

@@ -39,6 +39,9 @@ pub struct PlanStep {
 pub struct Plan {
     /// "0.2.0-dev.30 Beta 2"
     pub build: String,
+    /// The build's Kiln version ("0.2.0-dev.30"): what results name (absent: `build`).
+    #[serde(default)]
+    pub version: Option<String>,
     /// The build's `#testing` post.
     pub url: String,
     /// RFC 3339.
@@ -64,16 +67,50 @@ pub struct SentMark {
     pub replied: bool,
 }
 
-/// `GET /tester`.
+/// One build's results as the relay keeps them (`Result`: `{build, sentAt, url, read, replied}`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResultMark {
+    pub build: String,
+    pub sent_at: String,
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default)]
+    pub read: Option<ReadMark>,
+    #[serde(default)]
+    pub replied: bool,
+}
+
+impl ResultMark {
+    pub fn mark(&self) -> SentMark {
+        SentMark { at: self.sent_at.clone(), read: self.read.clone(), replied: self.replied }
+    }
+}
+
+/// `GET /tester`: `{tester, hardware, results}`. The relay serves no test plan yet; one beside them (`plan`) is read.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteTester {
     #[serde(default)]
     pub tester: bool,
     #[serde(default)]
-    pub plan: Option<Plan>,
+    pub results: Vec<ResultMark>,
     #[serde(default)]
-    pub sent: Option<SentMark>,
+    pub plan: Option<Plan>,
+}
+
+impl Plan {
+    /// What results for this build are filed under.
+    pub fn version(&self) -> &str {
+        self.version.as_deref().unwrap_or(&self.build)
+    }
+}
+
+impl RemoteTester {
+    /// The results sent for the plan's build, if any.
+    pub fn sent_for(&self, plan: &Plan) -> Option<SentMark> {
+        self.results.iter().find(|r| r.build == plan.version()).map(ResultMark::mark)
+    }
 }
 
 /// A change of a step's result: one of the three, or back to "not tried".
@@ -155,9 +192,9 @@ impl Results {
         Ok(())
     }
 
-    /// What `POST /tester/results` sends: every step of this PC's with its result and line. Refused while a step has
-    /// no result.
-    pub fn wire(&self, plan: &Plan, caps: &[Capability], hardware: &super::hardware::Hardware) -> crate::Result<serde_json::Value> {
+    /// What `POST /tester/results` sends (the relay's `{build, steps: [{id, title, result, note?}]}`): every step of this
+    /// PC's with its result and line. Refused while a step has no result.
+    pub fn wire(&self, plan: &Plan, caps: &[Capability]) -> crate::Result<serde_json::Value> {
         let (mine, _) = steps_for(plan, caps);
         let mut steps = Vec::new();
         for s in mine {
@@ -165,9 +202,13 @@ impl Results {
             let Some(r) = l.result else {
                 return Err(crate::Error::invalid("Try each step, or mark it Couldn't try.").with_detail(serde_json::json!({ "kind": "untried" })));
             };
-            steps.push(serde_json::json!({ "id": s.id, "result": r, "note": l.note }));
+            let mut step = serde_json::json!({ "id": s.id, "title": s.title.chars().take(100).collect::<String>(), "result": r });
+            if !l.note.is_empty() {
+                step["note"] = serde_json::json!(l.note);
+            }
+            steps.push(step);
         }
-        Ok(serde_json::json!({ "build": plan.build, "steps": steps, "hardware": hardware.wire() }))
+        Ok(serde_json::json!({ "build": plan.version(), "steps": steps }))
     }
 }
 
@@ -178,8 +219,19 @@ mod tests {
     fn plan() -> Plan {
         let step = |id: &str, needs: Option<Vec<Capability>>| PlanStep { id: id.into(), title: id.into(), how: vec!["Do it.".into()],
             for_: needs.map(|n| StepFor { label: "x".into(), needs: n }) };
-        Plan { build: "0.2.0-dev.30 Beta 2".into(), url: "https://discord.com/channels/1/2".into(), until: "2026-11-21T00:00:00Z".into(),
+        Plan { build: "0.2.0-dev.30 Beta 2".into(), version: Some("0.2.0-dev.30".into()), url: "https://discord.com/channels/1/2".into(), until: "2026-11-21T00:00:00Z".into(),
             steps: vec![step("start", None), step("fsr4", Some(vec![Capability::Fsr4])), step("xess", Some(vec![Capability::Xess])), step("deck", Some(vec![Capability::Deck])), step("reload", None)] }
+    }
+
+    #[test]
+    fn the_relays_results_list_gives_the_builds_sent_and_read_marks() {
+        let r: RemoteTester = serde_json::from_value(serde_json::json!({ "tester": true, "hardware": { "gpu": "x" }, "results": [
+            { "build": "0.2.0-dev.29", "sentAt": "2026-11-01T00:00:00.000Z", "url": "https://discord.com/channels/1/1", "read": null, "replied": false },
+            { "build": "0.2.0-dev.30", "sentAt": "2026-11-18T10:00:00.000Z", "url": "https://discord.com/channels/1/2", "read": { "by": "Rowan", "at": "2026-11-18T12:00:00.000Z" }, "replied": true }
+        ] })).unwrap();
+        assert!(r.tester && r.plan.is_none());
+        let s = r.sent_for(&plan()).unwrap();
+        assert_eq!((s.at.as_str(), s.read.unwrap().by.as_str(), s.replied), ("2026-11-18T10:00:00.000Z", "Rowan", true));
     }
 
     #[test]
@@ -199,7 +251,7 @@ mod tests {
         let t = super::super::testing::tmp("tester-results");
         let d = crate::paths::DataDirs::at(t.path());
         let p = plan();
-        let hw = super::super::hardware::Hardware { gpu: "AMD Radeon RX 7800 XT".into(), caps: vec![Capability::Fsr4], ..Default::default() };
+        let caps = vec![Capability::Fsr4];
         let mut r = Results::load(&d, &p.build);
         r.set(&p, "start", Some(ResultChange::Worked), None).unwrap();
         r.set(&p, "fsr4", Some(ResultChange::Failed), Some("Water smears when I turn the camera")).unwrap();
@@ -207,17 +259,20 @@ mod tests {
         r.set(&p, "fsr4", None, Some("Water smears")).unwrap();
         assert_eq!(r.steps["fsr4"].result, Some(StepResult::Failed));
         assert!(r.set(&p, "nope", Some(ResultChange::Worked), None).is_err());
-        let e = r.wire(&p, &hw.caps, &hw).unwrap_err();
+        let e = r.wire(&p, &caps).unwrap_err();
         assert_eq!(e.detail.unwrap()["kind"], "untried");
         r.set(&p, "reload", Some(ResultChange::Skipped), Some(&"n".repeat(300))).unwrap();
         r.save(&d).unwrap();
         let back = Results::load(&d, &p.build);
         assert_eq!(back.steps["reload"].note.chars().count(), NOTE_MAX);
-        let v = back.wire(&p, &hw.caps, &hw).unwrap();
-        assert_eq!(v["build"], "0.2.0-dev.30 Beta 2");
+        let v = back.wire(&p, &caps).unwrap();
+        assert_eq!(v["build"], "0.2.0-dev.30", "results name the build's version");
         assert_eq!(v["steps"].as_array().unwrap().len(), 3, "the steps for other hardware are not sent");
-        assert_eq!(v["steps"][1], serde_json::json!({ "id": "fsr4", "result": "failed", "note": "Water smears" }));
-        assert_eq!(v["hardware"]["gpu"], "AMD Radeon RX 7800 XT");
+        assert_eq!(v["steps"][0], serde_json::json!({ "id": "start", "title": "start", "result": "worked" }));
+        assert_eq!(v["steps"][1], serde_json::json!({ "id": "fsr4", "title": "fsr4", "result": "failed", "note": "Water smears" }));
+        let mut keys: Vec<&str> = v.as_object().unwrap().keys().map(String::as_str).collect();
+        keys.sort();
+        assert_eq!(keys, ["build", "steps"]);
         // another build starts fresh; clearing a result goes back to not tried
         assert!(Results::load(&d, "0.2.0-dev.30 Beta 3").steps.is_empty());
         let mut c = back.clone();

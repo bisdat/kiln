@@ -23,12 +23,14 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum KnownAction {
-    /// Play's mod list ("Show my mods").
+    /// Play's mod list ("Show my mods"; the relay's `play`).
     Mods,
     /// The Runtime page.
     Runtime,
     /// The Logs page.
     Logs,
+    /// The Settings page.
+    Settings,
 }
 
 /// When an entry applies.
@@ -61,9 +63,13 @@ pub struct KnownIssue {
     /// A line to copy (a launch option).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub copy: Option<String>,
-    /// The fix's button: `"mods"`, or `{label, to}` with `to` `play` (the mods on Play), `runtime` or `logs`.
+    /// The fix's button: `"mods"`, or `{label, to}` with `to` `play` (the mods on Play), `runtime`, `logs` or
+    /// `settings`.
     #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "action")]
     pub action: Option<KnownAction>,
+    /// The button's words from the list (`action.label`, at most 40 characters); absent: the launcher's own.
+    #[serde(skip)]
+    pub label: Option<String>,
     #[serde(rename = "match", default)]
     pub matches: Match,
     /// Also a banner on Play (an idea for later; kept, not shown yet).
@@ -121,21 +127,43 @@ fn action<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<KnownAction>,
         "mods" | "play" => Some(KnownAction::Mods),
         "runtime" => Some(KnownAction::Runtime),
         "logs" => Some(KnownAction::Logs),
+        "settings" => Some(KnownAction::Settings),
         _ => None,
     })
 }
 
+/// `action.label` when the action is an object.
+fn action_label(e: &serde_json::Value) -> Option<String> {
+    let l = e.get("action")?.get("label")?.as_str()?.trim();
+    (!l.is_empty() && l.chars().count() <= 40 && !l.chars().any(char::is_control)).then(|| l.to_string())
+}
+
 impl KnownList {
     /// Parses the list; entries that break the format's limits are left out (one bad entry never hides the rest).
+    /// Every shape the relay serves is read (docs/relay-api.md, relay/known.mjs: `{issues}` or a bare list, `text` as
+    /// one string, `kiln: {min, max}`, `action: {label, to}`), and the launcher's own (`format`, `text` as a list,
+    /// `all`). An entry that doesn't fit is left out on its own.
     pub fn parse(bytes: &[u8]) -> crate::Result<KnownList> {
-        let mut list: KnownList = serde_json::from_slice(bytes).map_err(|e| crate::Error::new(crate::ErrorCode::Parse, format!("known-issues.json: {e}")))?;
-        if list.format != 1 {
+        let doc: serde_json::Value = serde_json::from_slice(bytes).map_err(|e| crate::Error::new(crate::ErrorCode::Parse, format!("known-issues.json: {e}")))?;
+        let (format, entries) = match &doc {
+            serde_json::Value::Array(a) => (1, a.clone()),
+            serde_json::Value::Object(o) => (o.get("format").and_then(|f| f.as_u64()).unwrap_or(1) as u32, o.get("issues").and_then(|i| i.as_array()).cloned().unwrap_or_default()),
+            _ => return Err(crate::Error::new(crate::ErrorCode::Parse, "known-issues.json: not a list")),
+        };
+        if format != 1 {
             return Err(crate::Error::new(crate::ErrorCode::Parse, "known-issues.json: unknown format"));
         }
+        let issues = entries.iter().filter_map(|e| {
+            let mut i: KnownIssue = serde_json::from_value(e.clone()).ok()?;
+            i.label = action_label(e);
+            Some(i)
+        }).collect();
+        let mut list = KnownList { format, issues };
         let short = |s: &str, n: usize| !s.trim().is_empty() && s.chars().count() <= n && !s.chars().any(|c| c.is_control() && c != '\n');
+        // the relay's limits (relay/known.mjs knownEntry): title 120, fix 1000, a one-line copy of 300, 20 findings
         list.issues.retain(|i| {
-            super::relay::check_id(&i.id).is_ok() && short(&i.title, 100) && short(&i.fix, 600)
-                && i.copy.as_deref().is_none_or(|c| short(c, 200)) && i.matches.findings.len() <= 20 && i.matches.text.len() <= 20
+            super::relay::check_id(&i.id).is_ok() && short(&i.title, 120) && short(&i.fix, 1000)
+                && i.copy.as_deref().is_none_or(|c| short(c, 300) && !c.contains('\n')) && i.matches.findings.len() <= 20 && i.matches.text.len() <= 20
         });
         list.issues.truncate(200);
         Ok(list)

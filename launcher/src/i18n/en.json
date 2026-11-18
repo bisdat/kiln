@@ -4513,7 +4513,8 @@
         "action": {
           "mods": "Show my mods",
           "runtime": "Open Runtime",
-          "logs": "Open the Logs page"
+          "logs": "Open the Logs page",
+          "settings": "Open Settings"
         }
       },
       "check": {

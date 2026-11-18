@@ -119,8 +119,9 @@ pub fn status() -> Result<TesterStatus, Error> {
         (Some(p), true) if kiln_manage::community::is_discord_url(&p.url) => Some(p.clone()),
         _ => None,
     };
-    *REMOTE.lock().unwrap() = plan.clone().map(|p| (p, remote.sent.clone()));
-    let plan = match plan { Some(p) => Some(view(&p, remote.sent.clone(), &hw)?), None => None };
+    let sent = plan.as_ref().and_then(|p| remote.sent_for(p));
+    *REMOTE.lock().unwrap() = plan.clone().map(|p| (p, sent.clone()));
+    let plan = match plan { Some(p) => Some(view(&p, sent, &hw)?), None => None };
     Ok(TesterStatus { tester: remote.tester, beta, hardware: hw, plan })
 }
 
@@ -153,7 +154,7 @@ pub async fn send_results(app: tauri::AppHandle, with_report: bool) -> Result<Op
     let Some((plan, _)) = REMOTE.lock().unwrap().clone() else { return Ok(None) };
     let hw = hardware();
     let d = crate::state::dirs()?;
-    let wire = Results::load(&d, &plan.build).wire(&plan, &hw.caps, &hw)?;
+    let wire = Results::load(&d, &plan.build).wire(&plan, &hw.caps)?;
     // the support report for the team, as "Send to Kiln support" builds it (the first client game)
     let input = if with_report {
         let game = kiln_manage::game::known(&d).unwrap_or_default().into_iter().find(|g| g.kind == kiln_manage::game::GameKind::Client);
@@ -173,7 +174,7 @@ pub async fn send_results(app: tauri::AppHandle, with_report: bool) -> Result<Op
             None => None,
         };
         let name = kiln_manage::report::file_name(std::time::SystemTime::now());
-        let sent = crate::commands::community::relay_call(|r| r.tester_results(wire, zip.as_deref().map(|z| (name.as_str(), z))))?;
+        let sent = crate::commands::community::relay_call(|r| r.tester_results(wire, zip.as_deref().map(|z| (name.as_str(), z))))?.mark();
         *REMOTE.lock().unwrap() = Some((plan.clone(), Some(sent.clone())));
         crate::commands::app::launcher_log("community", &format!("test results sent for {}", plan.build));
         Ok(Some(view(&plan, Some(sent), &hardware())?))

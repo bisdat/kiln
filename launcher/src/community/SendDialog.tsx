@@ -11,14 +11,14 @@ import type { KnownAction, ReportDraft, ReportPreview } from "../api/commands";
 import { useT } from "../i18n";
 import { Banner, Button, Cones, Field, KeyValue, Modal, Skeleton, StatusPill, TextArea, TextInput, fmtBytes, toast } from "../ui";
 import { INVITE, errKind, refreshCommunity, useCommunity, useCommunityUi, useSendOpen } from "./state";
-import { KINDS, kindKey } from "./parts";
+import { KINDS, kindKey, versionsLine } from "./parts";
 
 const MAX = 90;
 const WORDS_MAX = 1500;
 const open = (url: string) => { api.appOpenUrl(url).catch((e) => toast.error(e)); };
 
 /** Where a known problem's own button goes. */
-export const KNOWN_ROUTE: Record<KnownAction, string> = { mods: "/", runtime: "/runtime", logs: "/logs" };
+export const KNOWN_ROUTE: Record<KnownAction, string> = { mods: "/", runtime: "/runtime", logs: "/logs", settings: "/settings" };
 
 /** The public post's tags for the kind the player picked: the kind's, then the system's. */
 export const postTags = (p: ReportPreview, kind: ReportDraft["kind"]) => [...new Set([p.kindTags?.[kind], ...p.tags].filter((x): x is string => !!x))].slice(0, 5);
@@ -76,7 +76,8 @@ export function SendDialog() {
   }
 
   if (s.step === "write") {
-    const short = !d.title.trim();
+    // the relay takes a line of 3 characters or more
+    const short = d.title.trim().length < 3;
     return (
       <Modal open onClose={close} title={t("community.send.title")} width={640}
         footer={<>
@@ -127,7 +128,7 @@ export function SendDialog() {
               <KeyValue rows={[
                 [t("community.send.check.kind"), t(`community.kind.${kindKey(d.kind)}`)],
                 [t("community.send.check.found"), <ul className="kc-found">{p.findings.map((f) => <li key={f.id}><span className={`k-sc k-tone-${f.level === "problem" ? "err" : f.level === "warning" ? "warn" : "info"}`}>{t(`community.send.check.level.${f.level}`)}</span> {f.text}</li>)}</ul>],
-                [t("community.send.check.versions"), <span className="kc-versions">{p.versions.map(([k, v]) => `${k} ${v}`).join(" · ")}</span>],
+                [t("community.send.check.versions"), <span className="kc-versions">{versionsLine(p.versions)}</span>],
               ]} />
             </div>
             <span className="k-hint">{acct ? `${t("community.send.check.as", { name: acct.name })}. ` : ""}{t("community.send.check.publicHint")}</span>
@@ -178,7 +179,7 @@ function Known({ known, onAction }: { known: NonNullable<ReportPreview["known"]>
           <Button size="s" onClick={() => navigator.clipboard?.writeText(known.copy!).then(() => toast.ok(t("community.send.known.copied"))).catch(() => {})}>{t("community.send.known.copy")}</Button>
         </div>
       )}
-      {known.action && <div><Button size="s" onClick={() => onAction(KNOWN_ROUTE[known.action!])}>{t(`community.send.known.action.${known.action}`)}</Button></div>}
+      {known.action && <div><Button size="s" onClick={() => onAction(KNOWN_ROUTE[known.action!])}>{known.label || t(`community.send.known.action.${known.action}`)}</Button></div>}
       <span className="k-hint">{t("community.send.known.fixes")}</span>
     </div>
   );

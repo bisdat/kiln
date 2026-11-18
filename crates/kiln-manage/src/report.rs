@@ -533,7 +533,7 @@ pub struct Finding {
 
 /// What a public post about the report may say of the setup (the launcher's "Send to Kiln support",
 /// docs/kiln/launcher/discord.md): versions, the system and how the game runs, how many mods are on. Never which mods.
-/// Also in report.json as `facts`.
+/// In report.json as `versions` ([`PublicFacts::versions`]).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PublicFacts {
@@ -550,6 +550,49 @@ pub struct PublicFacts {
     pub game_build: Option<String>,
     /// Mods on in the active profile, every kind (None: no profile).
     pub mods_on: Option<usize>,
+}
+
+impl PublicFacts {
+    /// The launcher's version from `tool` (`kiln-launcher 0.2.0-dev.29.18 beta 3` -> `0.2.0-dev.29.18`).
+    pub fn launcher(&self) -> Option<&str> {
+        self.tool.strip_prefix("kiln-launcher ")?.split_whitespace().next().filter(|v| v.starts_with(|c: char| c.is_ascii_digit()))
+    }
+
+    /// report.json's `versions` (the relay's contract, docs/relay-api.md in the kilnbot repo: `{kiln, launcher, os,
+    /// runner, gameBuild, modsOn, deck}`, strings of at most 60 characters, `modsOn` a number, `deck` a boolean). A
+    /// fact that is not known is left out.
+    pub fn versions(&self) -> serde_json::Value {
+        let cut = |s: &str, n: usize| -> Option<String> {
+            let s: String = s.chars().filter(|c| !c.is_control()).collect::<String>().trim().chars().take(n).collect();
+            (!s.is_empty()).then_some(s)
+        };
+        let mut v = serde_json::Map::new();
+        let mut put = |k: &str, x: Option<String>| {
+            if let Some(x) = x {
+                v.insert(k.to_string(), serde_json::Value::String(x));
+            }
+        };
+        put("kiln", self.kiln.as_deref().and_then(|x| cut(x, 40)));
+        put("launcher", self.launcher().and_then(|x| cut(x, 40)));
+        put("os", cut(&self.os, 60));
+        put("runner", self.runner.as_deref().and_then(|x| cut(x, 60)));
+        put("gameBuild", self.game_build.as_deref().and_then(|x| cut(x, 20)));
+        if let Some(n) = self.mods_on {
+            v.insert("modsOn".into(), serde_json::json!(n));
+        }
+        v.insert("deck".into(), serde_json::json!(self.deck));
+        serde_json::Value::Object(v)
+    }
+}
+
+/// report.json alone with only what a public post shows (the tool, the findings, the versions): what "Send to Kiln
+/// support" sends in place of the zip when the player chooses that nobody gets the zip (the relay builds the post from
+/// it). Not the sections that could not be read, not the channel.
+pub fn public_json(r: &Report) -> Vec<u8> {
+    serde_json::to_vec_pretty(&serde_json::json!({
+        "format": 1, "written": r.written, "tool": r.facts.tool, "findings": r.findings, "versions": r.facts.versions(),
+    }))
+    .unwrap_or_default()
 }
 
 /// A built report. Everything in it is redacted.
@@ -2006,7 +2049,7 @@ fn finish(mut cx: Ctx, mut s: String, sys: String, body: String, input: &ReportI
     let mut report = Report { written: rfc(now), summary, short, findings: cx.findings, errors: cx.errors, facts: public, files: Vec::new() };
     let json = serde_json::to_vec_pretty(&serde_json::json!({
         "format": 1, "written": report.written, "tool": redact(tool, cx.red), "channel": input.channel, "findings": report.findings, "errors": report.errors,
-        "facts": report.facts,
+        "versions": report.facts.versions(),
     }))
     .unwrap_or_default();
     let mut files = vec![("summary.txt".to_string(), report.summary.clone().into_bytes()), ("report.json".to_string(), json)];

@@ -10,7 +10,7 @@ import { t as tt, useT } from "../i18n";
 import { fmtBytes } from "../ui";
 import { DeckButton, Dialog, Word } from "../deck/ui";
 import { errKind, refreshCommunity, useCommunity, useCommunityUi, useSendOpen } from "./state";
-import { KINDS, QrCode, kindKey, whenKey } from "./parts";
+import { KINDS, QrCode, kindKey, versionsLine, whenKey } from "./parts";
 import { Pick } from "./DeckCommunity";
 import { DeckSignIn } from "./SignIn";
 
@@ -95,7 +95,7 @@ function DeckSend() {
         <div className="deck-scroll kdc-sent-list" tabIndex={0} data-deck-a="-" data-deck-id="sent-list" data-testid="deck-what-is-sent">
           <p className="deck-label">{t("community.send.check.public")}</p>
           <p>{d.title || pickedTitle(d.kind, d.when)}. {t(`community.kind.${kindKey(d.kind)}`)}. {p.findings.map((f) => f.text).join(" ")}</p>
-          <p className="deck-dim">{p.versions.map(([k, v]) => `${k} ${v}`).join(" · ")}</p>
+          <p className="deck-dim">{versionsLine(p.versions)}</p>
           <p className="deck-label">{t("community.send.check.zip")} · {fmtBytes(p.size)}</p>
           <ul>{p.files.map((f) => <li key={f.path} className="deck-mono">{f.path}</li>)}</ul>
           <p className="deck-dim">{t("community.send.check.redacted")}</p>

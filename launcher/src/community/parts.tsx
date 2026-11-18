@@ -129,3 +129,6 @@ export function DeckSendToSupport({ target, kind }: { target: LogTarget | null; 
   if (!useShown()) return null;
   return <DeckButton id="send-support" onClick={() => openSendReport("deck", target, kind)}>{t("community.banner.send")}</DeckButton>;
 }
+
+/** The post's versions line as the relay writes it: "Kiln 0.2.0 · Launcher 0.2.0 · Arch Linux · game build 1 · 12 mods on". */
+export const versionsLine = (v: [string, string][]) => v.map(([k, x]) => (k ? `${k} ${x}` : x)).join(" · ");

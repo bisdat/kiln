@@ -236,8 +236,23 @@ fn the_public_facts_name_versions_and_a_mod_count_not_the_mods() {
     assert_eq!(r.facts.mods_on, Some(1));
     assert!(!r.facts.os.is_empty());
     let json: serde_json::Value = serde_json::from_str(file(&r, "report.json").unwrap()).unwrap();
-    assert_eq!(json["facts"]["modsOn"], 1);
-    assert!(!json["facts"].to_string().contains("chat-plus"), "{}", json["facts"]);
+    // the relay's shape (docs/relay-api.md): {kiln, launcher, os, runner, gameBuild, modsOn, deck}
+    let v = &json["versions"];
+    assert_eq!((v["kiln"].as_str(), v["modsOn"].as_u64(), v["deck"].as_bool()), (Some("0.2.0-dev.22"), Some(1), Some(false)));
+    assert_eq!(v["runner"], "Windows");
+    assert!(v.get("launcher").is_none(), "the tool here is not a launcher's");
+    assert!(!v.to_string().contains("chat-plus"), "{v}");
+    // with the launcher as the tool, its version
+    let mut input = f.input();
+    input.tool = "kiln-launcher 0.2.0-dev.29.18 beta 3".into();
+    let r = build(&input);
+    assert_eq!(r.facts.versions()["launcher"], "0.2.0-dev.29.18");
+    // report.json alone for a post without the zip: the tool, the findings, the versions, nothing else
+    let alone: serde_json::Value = serde_json::from_slice(&public_json(&r)).unwrap();
+    let mut keys: Vec<&str> = alone.as_object().unwrap().keys().map(String::as_str).collect();
+    keys.sort();
+    assert_eq!(keys, ["findings", "format", "tool", "versions", "written"]);
+    assert_eq!(alone["format"], 1);
 }
 
 /// OptiScaler next to the game (an upscaler with its own overlay, inbox 80): one Info finding with what Kiln's overlay
