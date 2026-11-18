@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "state-graphics.schema.json",
+  "title": "Kiln's graphics tools now (<game>/kiln/state/graphics.json), format 1",
+  "description": "What Kiln's graphics tools do in the game client (docs/kiln/graphics.md): the upscaler behind the game's FSR 3 option (what the player chose, what runs, why the choice does not), the vendor files Kiln found in kiln/vendor/, the frame cap and the DLSS settings. Written by Kiln.Ui (managed/services/Kiln.Ui/UiUpscaler.cs, GraphicsStateFile) at start and, checked every 2 seconds, again only when something in it changed (frame rates are left out); atomically (a temporary file, then a rename). Reader: the launcher (Settings, Graphics; GameStatus.graphicsState): 'Now' while the process that wrote it runs (kiln_manage::launch::state_file_is_current), 'Last game' after. A client only.",
+  "type": "object",
+  "required": ["format", "pid", "written", "upscaler", "files"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "format": { "const": 1 },
+    "pid": { "type": "integer", "minimum": 1, "description": "The game's process id as the game sees it (under Proton, the Windows pid: the launcher compares the file's write time with the process's start)." },
+    "written": { "$ref": "common.schema.json#/$defs/time" },
+    "kiln": { "type": ["string", "null"], "description": "Kiln version of the runtime that wrote it." },
+    "upscaler": {
+      "type": "object",
+      "required": ["chosen", "amdUpscaler", "running", "reason"],
+      "properties": {
+        "chosen": { "enum": ["game", "amd", "xess"], "description": "kiln.json graphics.upscaler in use." },
+        "amdUpscaler": { "enum": ["auto", "fsr3"], "description": "kiln.json graphics.amdUpscaler in use." },
+        "running": {
+          "enum": ["off", "notFsr", "gameFsr3", "amdFsr4", "amdFsr31", "xess", "unknown"],
+          "description": "What upscales behind the game's FSR 3 option now (kiln_ui.h KILN_UI_UPSCALE_RUN_*). off: Kiln's swap is not in (the game's own chosen, or see reason). notFsr: the swap is in but the game did not upscale with FSR 3 in the last two seconds (FSR 3 not chosen in the game's settings, or no world). unknown: a kiln-ui.dll without the phase B status."
+        },
+        "reason": {
+          "type": ["string", "null"],
+          "description": "Why the chosen upscaler does not run, null when it runs or the game's own is chosen (kiln_ui.h KILN_UI_UPSCALE_WHY_* in camelCase; texts: docs/kiln/graphics.md). Known codes: restart, filesMissing, filesBad, loadFailed, device, createFailed, runtimeFailed, fault, aside, noSignatures, inputs, unavailable, waiting, noVulkan; unknown (with reasonNumber) for a number this Kiln.Ui has no name for. Later versions add codes: show a code you do not know as unknown."
+        },
+        "reasonNumber": { "type": "integer", "minimum": 0, "description": "With reason unknown: kiln.ui's number." },
+        "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$", "description": "The version that runs (FSR 4.1.2, FSR 3.1.6, XeSS 3.0.2); absent for the game's FSR 3 or nothing." },
+        "hooked": { "type": "boolean", "description": "Kiln's hooks on the game's FSR 3 pass are in (KILN_UI_UPSCALE_HOOKED)." },
+        "fsrSeen": { "type": "boolean", "description": "The game upscaled with FSR 3 in the last two seconds." },
+        "filesOk": { "type": "boolean", "description": "The chosen upscaler's files are there and match their pinned SHA-256." },
+        "deviceOk": { "type": "boolean", "description": "The game's Vulkan device has what the chosen upscaler needs." },
+        "fellBack": { "type": "boolean", "description": "The chosen upscaler failed in this session: the game's FSR 3 until a restart." },
+        "amdPinned": { "type": "boolean", "description": "AMD FSR 3.1 runs because the player pinned it (FSR 4 would run)." },
+        "aside": { "$ref": "#/$defs/aside", "description": "The tools Kiln's upscaler steps aside for." },
+        "detail": { "type": "string", "maxLength": 127, "description": "kiln.ui's English detail of the reason (a file's or a Vulkan extension's name, a fault), for tooltips and support." }
+      },
+      "additionalProperties": false
+    },
+    "files": {
+      "type": "object",
+      "description": "Per vendor folder (amd, intel): this runtime's version of its files and what of them is in kiln/vendor/<vendor>/<version>/, by name and size (the game checks the SHA-256 before it loads them).",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["version", "state"],
+        "properties": {
+          "version": { "type": "string" },
+          "state": { "enum": ["present", "missing", "changed"] }
+        },
+        "additionalProperties": false
+      }
+    },
+    "frameCap": {
+      "type": "object",
+      "required": ["fps", "active", "aside"],
+      "properties": {
+        "fps": { "type": "integer", "minimum": 0, "maximum": 500, "description": "The cap set (0: off)." },
+        "active": { "type": "boolean", "description": "The cap paces the game's frames now." },
+        "aside": { "$ref": "#/$defs/aside" }
+      },
+      "additionalProperties": false
+    },
+    "dlss": {
+      "type": "object",
+      "required": ["hooked", "active", "restart", "aside"],
+      "properties": {
+        "hooked": { "type": "boolean" },
+        "active": { "type": "boolean", "description": "The game upscaled with DLSS in the last two seconds." },
+        "restart": { "type": "boolean", "description": "A DLSS setting is on now but was not at start: it applies from the next start." },
+        "mode": { "enum": ["performance", "balanced", "quality", "ultraPerformance", "ultraQuality", "dlaa", null] },
+        "preset": { "type": "string", "description": "The render preset asked for: default, or a letter." },
+        "aside": { "$ref": "#/$defs/aside" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "aside": {
+      "type": "array",
+      "description": "kiln_ui.h KILN_UI_GFX_ASIDE_* by name.",
+      "items": { "enum": ["optiscaler", "streamline", "vkfg", "dlsstweaks", "nvngx", "ngxPatched", "overlayOff", "upscaler"] }
+    }
+  }
+}

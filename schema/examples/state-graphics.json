@@ -1,0 +1,26 @@
+{
+  "format": 1,
+  "pid": 4242,
+  "written": "2026-11-18T22:10:04Z",
+  "kiln": "0.2.0-dev.29.18",
+  "upscaler": {
+    "chosen": "amd",
+    "amdUpscaler": "auto",
+    "running": "amdFsr4",
+    "reason": null,
+    "version": "4.1.2",
+    "hooked": true,
+    "fsrSeen": true,
+    "filesOk": true,
+    "deviceOk": true,
+    "fellBack": false,
+    "amdPinned": false,
+    "aside": []
+  },
+  "files": {
+    "amd": { "version": "2.4.0", "state": "present" },
+    "intel": { "version": "3.0.2", "state": "missing" }
+  },
+  "frameCap": { "fps": 141, "active": true, "aside": [] },
+  "dlss": { "hooked": false, "active": false, "restart": false, "aside": [] }
+}
