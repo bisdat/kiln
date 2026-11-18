@@ -6,7 +6,7 @@ import type { LogTarget, PostStatus, ProblemKind, SendFrom, SupportPost } from "
 import { Button, Mark, Toggle, toast, type ButtonProps } from "../ui";
 import { useT } from "../i18n";
 import { qrEncode, qrPath } from "./qr";
-import { Row, Word } from "../deck/ui";
+import { DeckButton, Dialog, Row, Word } from "../deck/ui";
 import { openSendReport, setCommunity, useCommunity, useCommunitySettings, useShown } from "./state";
 
 export const KINDS: ProblemKind[] = ["noload", "mod", "crash", "launcher", "server", "other"];
@@ -109,3 +109,16 @@ export function DeckCommunityRow() {
 export const kindKey = (k: ProblemKind) => (k === "other" ? "something" : k);
 /** The i18n key part of a Deck "when" pick ("other" is "another"). */
 export const whenKey = (w: string) => (w === "other" ? "another" : w);
+
+/** A link for the phone: its QR code and the address as text. */
+export function QrDialog({ title, text, url, onClose }: { title: string; text: string; url: string; onClose: () => void }) {
+  const t = useT();
+  return (
+    <Dialog name="community-qr" title={title} wide onClose={onClose} backLabel={t("common.close")} buttons={<DeckButton primary onClick={onClose}>{t("community.deck.done")}</DeckButton>}>
+      <div className="kdc-qr" data-testid="deck-qr-link">
+        <div className="kdc-qr-code"><QrCode text={url} size={232} title={url} /></div>
+        <div className="kdc-qr-text"><p className="deck-say">{text}</p><p className="deck-mono kdc-url">{url.replace(/^https:\/\//, "")}</p></div>
+      </div>
+    </Dialog>
+  );
+}

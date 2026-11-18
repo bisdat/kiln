@@ -330,6 +330,30 @@ mod tests {
     }
 
     #[test]
+    fn the_session_of_an_approved_attempt_is_kept_and_signs_the_next_calls() {
+        use super::super::session::{SessionStore, Stored};
+        let fake = FakeRelay::start(|r| match r.path() {
+            "/signin" => ok(json!({ "id": "q1", "code": "HV3R-9TCW", "url": "https://frostdev.io/link/HV3R9TCW", "expiresAt": "2026-11-18T12:10:00Z" })),
+            "/signin/poll" => ok(json!({ "state": "approved", "session": "kiln_s_0123456789abcdefghijklmnop", "account": account() })),
+            "/me" if r.header("authorization") == Some("Bearer kiln_s_0123456789abcdefghijklmnop") => ok(json!({ "account": account() })),
+            _ => super::super::testing::status(401, json!({})),
+        });
+        let t = fake.transport();
+        let base = relay_base(DEFAULT_RELAY).unwrap();
+        let relay = Relay::new(base.clone(), &t, "0.2.0");
+        let mut a = Attempt::start(&relay, SigninMode::Qr, false, Device::Deck, "0.2.0", texts()).unwrap();
+        let Progress::Approved(g) = a.poll(&relay).unwrap() else { panic!() };
+        let dir = super::super::testing::tmp("signin-kept");
+        let store = SessionStore::with_vault(&crate::paths::DataDirs::at(dir.path()), None);
+        store.save(&Stored { format: 1, relay: base.host.clone(), session: g.session.clone(), account: g.account.clone() }).unwrap();
+        let kept = store.load(&base.host).unwrap();
+        assert_eq!(Relay::new(base, &t, "0.2.0").with_session(&kept.session).me().unwrap().name, "emberfox");
+        // no Discord token anywhere in what was kept: the relay's key and the account only
+        let text = std::fs::read_to_string(store.file_path()).unwrap();
+        assert!(!text.contains("access_token") && !text.contains("refresh_token"));
+    }
+
+    #[test]
     fn cancelled_on_discords_page_ends_the_attempt_without_an_exchange() {
         let fake = FakeRelay::start(|_| ok(json!({ "id": "s1", "url": "https://frostdev.io/kiln/signin/s1", "expiresAt": "2026-11-18T12:10:00Z" })));
         let t = fake.transport();

@@ -234,20 +234,17 @@ pub async fn community_check_member(app: AppHandle) -> Result<Option<Account>, E
 pub async fn community_signout(app: AppHandle, forget: bool, posts: Option<bool>) -> Result<(), Error> {
     let r = blocking(move || {
         let (d, s) = settings()?;
-        let remote = if stored(&d, &s).is_some() && s.shown {
-            call(true, |r| if forget { r.forget(posts.unwrap_or(false)) } else { r.signout() })
-        } else {
-            Ok(())
-        };
-        SessionStore::new(&d).clear()?;
+        let has = stored(&d, &s).is_some() && s.shown;
+        let r = kiln_manage::community::session::sign_out(&SessionStore::new(&d), forget, || {
+            if has { call(true, |r| if forget { r.forget(posts.unwrap_or(false)) } else { r.signout() }) } else { Ok(()) }
+        });
         let mut h = HUB.lock().unwrap();
         h.account = None;
         h.posts.clear();
         h.posts_at = None;
         drop(h);
         crate::community::testers::forget_local();
-        // "forget" must reach frostdev.io; a plain sign-out is done once the key is gone here
-        if forget { remote } else { Ok(()) }
+        r
     })
     .await;
     emit_changed(&app);

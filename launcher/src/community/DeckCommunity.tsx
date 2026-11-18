@@ -10,7 +10,7 @@ import { useT } from "../i18n";
 import { toast } from "../ui";
 import { DeckButton, Dialog, HoldButton, Row, Screen, Word } from "../deck/ui";
 import { INVITE, ago, openSendReport, refreshCommunity, sayLine, useCommunity, usePosts } from "./state";
-import { QrCode, statusWord } from "./parts";
+import { QrCode, QrDialog, statusWord } from "./parts";
 import { DeckPresenceRow } from "./Presence";
 import { DeckTesterRow } from "./Testers";
 import { DeckSignInRow } from "./SignIn";
@@ -73,19 +73,6 @@ export default function DeckCommunity() {
       {join && <QrDialog title={t("community.deck.joinQr.title")} text={t("community.deck.joinQr.text")} url={INVITE} onClose={() => setJoin(false)} />}
       {post && <DeckPost post={post} onClose={() => setPost(null)} />}
     </Screen>
-  );
-}
-
-/** A link for the phone: its QR code and the address as text. */
-export function QrDialog({ title, text, url, onClose }: { title: string; text: string; url: string; onClose: () => void }) {
-  const t = useT();
-  return (
-    <Dialog name="community-qr" title={title} wide onClose={onClose} backLabel={t("common.close")} buttons={<DeckButton primary onClick={onClose}>{t("community.deck.done")}</DeckButton>}>
-      <div className="kdc-qr" data-testid="deck-qr-link">
-        <div className="kdc-qr-code"><QrCode text={url} size={232} title={url} /></div>
-        <div className="kdc-qr-text"><p className="deck-say">{text}</p><p className="deck-mono kdc-url">{url.replace(/^https:\/\//, "")}</p></div>
-      </div>
-    </Dialog>
   );
 }
 

@@ -98,6 +98,15 @@ impl SessionStore {
     }
 }
 
+/// Signs out: `remote` asks the relay to end the session (or, for "Sign out and forget me", to delete what it keeps),
+/// then the key goes from this PC whatever the relay said. A plain sign-out is done once the key is gone here; a
+/// "forget" must reach frostdev.io, so its failure is the answer.
+pub fn sign_out(store: &SessionStore, forget: bool, remote: impl FnOnce() -> Result<()>) -> Result<()> {
+    let r = remote();
+    store.clear()?;
+    if forget { r } else { Ok(()) }
+}
+
 /// Writes a file only the user can read (0600 on Unix), atomically.
 fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
     use std::io::Write;
@@ -338,6 +347,21 @@ mod tests {
         s.save(&stored("staging.frostdev.io")).unwrap();
         assert!(s.load("frostdev.io").is_none());
         assert!(s.load("staging.frostdev.io").is_some());
+    }
+
+    #[test]
+    fn signing_out_always_removes_the_key_and_forget_reports_a_relay_that_did_not_hear_it() {
+        let t = super::super::testing::tmp("session-signout");
+        let d = DataDirs::at(t.path());
+        let s = SessionStore::with_vault(&d, None);
+        let down = || Err(crate::community::relay::offline());
+        s.save(&stored("frostdev.io")).unwrap();
+        assert!(sign_out(&s, false, down).is_ok(), "a sign-out while offline still signs out here");
+        assert!(s.load("frostdev.io").is_none());
+        s.save(&stored("frostdev.io")).unwrap();
+        let e = sign_out(&s, true, down).unwrap_err();
+        assert_eq!(crate::community::relay::kind_of(&e), Some("offline"));
+        assert!(s.load("frostdev.io").is_none(), "forget's key is gone too");
     }
 
     #[test]
