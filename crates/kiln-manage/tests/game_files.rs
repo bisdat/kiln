@@ -304,6 +304,64 @@ fn two_asi_files_in_one_scripts_folder_drop_only_the_matching_one() {
     assert!(!text.contains("SmartWorkshop.asi"), "{text}");
 }
 
+/// The left-out .asi of a zip is named `<zip>/<entry>`, not by the folder the zip was unpacked to.
+#[cfg(feature = "zip")]
+#[test]
+fn a_zip_with_a_native_mod_and_the_same_asi_names_the_left_out_file_inside_the_zip() {
+    use std::io::Write;
+    let t = tmp("both-zip");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let zip_path = t.0.join("SmartWorkshop.zip");
+    let mut w = zip::ZipWriter::new(std::fs::File::create(&zip_path).unwrap());
+    let dll = build_test_dll(&["kiln_native_init"], b"workshop");
+    let native = br#"{"format":1,"id":"smart-workshop","version":"1.2.0","dlls":["SmartWorkshop.dll"],"phase":"boot","init":"kiln_native_init"}"#;
+    for (name, data) in [
+        ("mod/native.json", native.to_vec()),
+        ("mod/SmartWorkshop.dll", dll),
+        ("Scripts/SmartWorkshop.asi", asi(b"the asi build")),
+        ("Scripts/Other.asi", asi(b"someone else")),
+    ] {
+        w.start_file(name, zip::write::SimpleFileOptions::default()).unwrap();
+        w.write_all(&data).unwrap();
+    }
+    w.finish().unwrap();
+    let r = library::import(&dirs, std::slice::from_ref(&zip_path), &mut NoProgress).unwrap();
+    assert!(r.imported.iter().any(|x| x.kind == ModKind::Native && x.id == "smart-workshop"), "{r:#?}");
+    assert!(r.imported.iter().any(|x| x.id == "scripts"), "the other .asi is still imported: {r:#?}");
+    let left_out: Vec<_> = r.skipped.iter().filter(|s| s.path.contains("SmartWorkshop.asi")).collect();
+    assert_eq!(left_out.len(), 1, "{r:#?}");
+    let shown = zip_path.join("Scripts").join("SmartWorkshop.asi").display().to_string();
+    assert_eq!(left_out[0].path, shown, "{r:#?}");
+    assert!(left_out[0].reason.contains("smart-workshop"), "{r:#?}");
+    // the zip is unpacked in the library folder: none of that path is shown
+    let library = dirs.library().display().to_string();
+    assert!(r.skipped.iter().all(|s| !s.path.starts_with(&library)), "no unpack folder in a skipped path: {r:#?}");
+    assert!(!r.skipped.iter().any(|s| s.path.contains("Other.asi")), "{r:#?}");
+}
+
+/// Without a native.json, a folder of another engine's manifest beside a top-level .asi does not change detection: the
+/// package is one .asi package, as before native.json was looked for (docs/kiln/engines.md, `asi`).
+#[test]
+fn an_asi_with_a_non_native_mod_folder_beside_it_stays_one_asi_package() {
+    let t = tmp("asi-other-manifest");
+    for (tag, rel, body) in [
+        ("kiln", "KilnPart/kiln.mod.json", br#"{"format":1,"id":"kiln-part","version":"1.0.0"}"#.as_slice()),
+        ("emf", "EmfPart/mod.json", br#"{"id":"emf-part","version":"1.0.0","emf":1}"#.as_slice()),
+    ] {
+        let pkg = t.0.join(format!("Plugin-{tag}"));
+        put(&pkg, "Plugin.asi", &asi(b"plugin"));
+        put(&pkg, rel, body);
+        let d = library::detect(&pkg).unwrap();
+        assert_eq!(d.kind, library::DetectKind::Asi, "{tag}: {d:#?}");
+        assert!(d.items.is_empty() && d.asi_omit.is_empty(), "{tag}: {d:#?}");
+        let dirs = DataDirs::at(t.0.join(format!("data-{tag}")));
+        let r = library::import(&dirs, &[pkg], &mut NoProgress).unwrap();
+        assert_eq!(r.imported.len(), 1, "{tag}: {r:#?}");
+        assert_eq!((r.imported[0].kind, r.imported[0].id.as_str()), (ModKind::Native, format!("plugin-{tag}").as_str()), "{tag}: {r:#?}");
+        assert!(r.skipped.is_empty(), "{tag}: {r:#?}");
+    }
+}
+
 #[test]
 fn a_nested_native_json_is_imported_and_the_sibling_asi_is_not() {
     let t = tmp("nested-native");

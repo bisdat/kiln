@@ -150,6 +150,19 @@ pub struct Detected {
     /// The engine it was made for (other engines' kinds, and loaders under proxy names).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub engine: Option<crate::engines::Engine>,
+    /// An `.asi` package only: its `.asi` files that are the same mod as a Kiln native mod in the same import
+    /// (drop_asi_copies_of_native_mods). The import leaves them out and names each in `skipped`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub asi_omit: Vec<AsiOmit>,
+}
+
+/// An `.asi` file an `.asi` package leaves out because the package's Kiln native mod `native_id` is the same mod.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AsiOmit {
+    /// Shown as [`Detected::path`] is: the real path, or `<archive>/<entry>` for a file inside an archive.
+    pub path: String,
+    pub native_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -244,10 +257,10 @@ fn detect_dll(path: &Path) -> Detected {
     let stem_id = id_from_name(path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default().as_str());
     let bytes = match std::fs::read(path) {
         Ok(b) => b,
-        Err(e) => return Detected { kind: DetectKind::Unknown, path: p, id: None, version: None, name: None, reason: e.to_string(), items: vec![], engine: None },
+        Err(e) => return Detected { kind: DetectKind::Unknown, path: p, id: None, version: None, name: None, reason: e.to_string(), items: vec![], asi_omit: vec![], engine: None },
     };
     if !crate::pe::is_pe64_dll(&bytes) {
-        return Detected { kind: DetectKind::Unknown, path: p, id: None, version: None, name: None, reason: "not a 64-bit Windows DLL".into(), items: vec![], engine: None };
+        return Detected { kind: DetectKind::Unknown, path: p, id: None, version: None, name: None, reason: "not a 64-bit Windows DLL".into(), items: vec![], asi_omit: vec![], engine: None };
     }
     let exports = crate::pe::parse(&bytes).map(|i| i.exports).unwrap_or_default();
     let has = |e: &str| exports.iter().any(|x| x == e);
@@ -258,7 +271,7 @@ fn detect_dll(path: &Path) -> Detected {
         version: Some("0.0.0".into()),
         name: path.file_name().map(|n| n.to_string_lossy().into_owned()),
         reason: reason.into(),
-        items: vec![],
+        items: vec![], asi_omit: vec![],
         engine: None,
     };
     // A DLL under a proxy name says nothing about what mod it is (`winmm.dll`, `dinput8.dll`): two of them must not
@@ -676,7 +689,7 @@ fn rel_ignoring_case(dir: &Path, rel: &str) -> Option<String> {
 fn detect_folder_at(dir: &Path, depth: usize, top_name: Option<&str>) -> Detected {
     let p = dir.display().to_string();
     let mk = |kind, id: Option<String>, version: Option<String>, name: Option<String>, reason: String| Detected {
-        kind, path: p.clone(), id, version, name, reason, items: vec![], engine: None,
+        kind, path: p.clone(), id, version, name, reason, items: vec![], asi_omit: vec![], engine: None,
     };
     if dir.is_symlink() || depth > 32 {
         return mk(DetectKind::Unknown, None, None, None, "links or folders deeper than 32 levels are not mod imports".into());
@@ -708,11 +721,10 @@ fn detect_folder_at(dir: &Path, depth: usize, top_name: Option<&str>) -> Detecte
     // Ultimate ASI Loader and/or .asi plugins (in the folder or a folder of it, as Smart Workshop's Scripts/): one
     // package, a native mod placed in the game folder (game_files).
     // A native.json anywhere under the package is that mod. The .asi beside it is the same mod's other build, not a
-    // reason to take the whole package as only an .asi (drop_asi_copies_of_native_mods leaves the Kiln mod).
-    if depth == 0 {
-        clear_asi_omit();
-    }
-    if !has_mod_manifest(dir) && !has_mod_subfolder(dir)
+    // reason to take the whole package as only an .asi (drop_asi_copies_of_native_mods leaves the Kiln mod). Only
+    // native.json does this: a folder of another manifest (kiln.mod.json, mod.json ...) beside the .asi stays part of
+    // the one .asi package, as before.
+    if !has_mod_manifest(dir)
         && let Some(d) = crate::game_files::detect_asi_package(dir, depth, top_name)
         && !contains_native_json(dir)
     {
@@ -864,23 +876,6 @@ pub(crate) fn native_settings_dirs(dir: &Path) -> Vec<PathBuf> {
     out
 }
 
-// An .asi import should leave these files out: each matching file with the native id it duplicates.
-// Set while a package is detected; take_asi_omit reads it when that package is imported.
-std::thread_local! {
-    static ASI_OMIT: std::cell::RefCell<std::collections::HashMap<String, Vec<(PathBuf, String)>>> =
-        std::cell::RefCell::new(std::collections::HashMap::new());
-}
-
-fn clear_asi_omit() {
-    ASI_OMIT.with(|m| m.borrow_mut().clear());
-}
-
-/// Files inside an `.asi` package that duplicate a Kiln native mod in the same import. Empty when this package
-/// was not a partial drop.
-pub(crate) fn take_asi_omit(dir: &Path) -> Vec<(PathBuf, String)> {
-    ASI_OMIT.with(|m| m.borrow_mut().remove(&dir.display().to_string()).unwrap_or_default())
-}
-
 /// `top_name`: what `dir` is called when it is an unpacked archive at depth 0 (detect_folder_at).
 /// An `.asi` in this package is the same mod as a `native.json` sibling when the native id matches the file, or a
 /// listed DLL has the same name or the same bytes. Only that file is left out. Another `.asi` in the same folder
@@ -917,8 +912,7 @@ fn drop_asi_copies_of_native_mods(items: &mut [Detected]) {
             item.reason = format!("the same mod is already this package's Kiln native mod ({shown}): only that one is added, so it is not also loaded as an .asi");
             continue;
         }
-        let key = item.path.clone();
-        ASI_OMIT.with(|m| m.borrow_mut().insert(key, matching));
+        item.asi_omit = matching.into_iter().map(|(file, native_id)| AsiOmit { path: file.display().to_string(), native_id }).collect();
     }
 }
 
@@ -988,7 +982,7 @@ fn children(dir: &Path, depth: usize, top_name: Option<&str>) -> Vec<Detected> {
         }
         if e.is_symlink() {
             out.push(Detected { kind: DetectKind::Unknown, path: e.display().to_string(), id: None, version: None, name: None,
-                reason: "links are not mod imports".into(), items: vec![], engine: None });
+                reason: "links are not mod imports".into(), items: vec![], asi_omit: vec![], engine: None });
             continue;
         }
         if native.as_ref().is_some_and(|p| &e != p && (native_companion(&e, p)
@@ -1052,7 +1046,7 @@ pub fn detect(path: &Path) -> Result<Detected> {
     let meta = std::fs::symlink_metadata(path).map_err(io(path, "reading"))?;
     if crate::quick::import_is_link(&meta) {
         return Ok(Detected { kind: DetectKind::Unknown, path: path.display().to_string(), id: None, version: None, name: None,
-            reason: "links are not mod imports".into(), items: vec![], engine: None });
+            reason: "links are not mod imports".into(), items: vec![], asi_omit: vec![], engine: None });
     }
     crate::quick::validate_import_path(path)?;
     if meta.is_dir() {
@@ -1078,7 +1072,7 @@ pub fn detect(path: &Path) -> Result<Detected> {
         version: None,
         name: None,
         reason: "not a folder, .zip, .7z, .rar or .dll".into(),
-        items: vec![],
+        items: vec![], asi_omit: vec![],
         engine: None,
     })
 }
@@ -1088,6 +1082,11 @@ fn relabel(d: &mut Detected, tmp: &Path, zip: &Path) {
     if let Ok(rest) = Path::new(&d.path).strip_prefix(tmp) {
         // Path::join, not "/": a verbatim Windows path (\\?\C:\...) does not read '/' as a separator
         d.path = if rest.as_os_str().is_empty() { zip.display().to_string() } else { zip.join(rest).display().to_string() };
+    }
+    for o in &mut d.asi_omit {
+        if let Ok(rest) = Path::new(&o.path).strip_prefix(tmp) {
+            o.path = zip.join(rest).display().to_string();
+        }
     }
     for i in &mut d.items {
         relabel(i, tmp, zip);
