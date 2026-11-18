@@ -115,6 +115,17 @@ class AmdBackend final : public Backend {
             *detail = "the GPU offers " + m + ", which AMD FSR uses, but it could not be turned on for the game";
             return false;
         }
+        // another tool may have mapped its own copy since load() checked (AMD's loader would take an already mapped one):
+        // step aside, as load() does. Kiln's own copies (a device the game makes again) are fine.
+        for (const wchar_t* n : {kLoader, kUpscaler}) {
+            HMODULE m = GetModuleHandleW(n);
+            if (!m || m == up_ || m == loader_) continue;
+            wchar_t got[MAX_PATH] = {};
+            GetModuleFileNameW(m, got, MAX_PATH);
+            *why = Why::aside;
+            *detail = std::string("another copy of ") + vendor::narrow(n) + " is already loaded (" + vendor::narrow(got) + ")";
+            return false;
+        }
         // AMD's DLLs: the upscaler first, then the loader (which then finds it mapped)
         // AMD's DLLs need Microsoft's Visual C++ runtime (msvcp140, vcruntime140, vcruntime140_1) in System32
         constexpr const char* kRuntime = ". AMD's DLLs need the Microsoft Visual C++ Redistributable 14.40 or later (x64) installed";

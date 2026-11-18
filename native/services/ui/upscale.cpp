@@ -243,6 +243,7 @@ void load_backend() {
     bool ok = false;
     if (!KUI_GUARD("the backend's load", ok = g_backend->load(files, &why, &detail))) return;
     if (!ok) {
+        if (why == Why::aside) g_aside_run.fetch_or(gfx::kAsideUpscaler);  // another tool's copy of the vendor's DLLs
         say_why(why, detail);
         return;
     }
@@ -457,6 +458,7 @@ void upscale_device_end(void* scope, const VkDeviceCreateInfo* used, VkResult r,
     bool ok = false;
     if (!KUI_GUARD("the backend's device set-up", ok = g_backend->device_ready(g_vk, &why, &detail))) return;
     if (!ok) {
+        if (why == Why::aside) g_aside_run.fetch_or(gfx::kAsideUpscaler);
         say_why(why, detail);
         return;
     }
@@ -961,7 +963,8 @@ void upscale_start(const gfx::Settings& s, uint32_t aside, const std::string& as
         if (h.h->install(g_api, g_owner, h.at, h.fn, h.name)) continue;
         logf(KILN_LOG_ERROR, "graphics: upscaler: hooking %s failed (%s): the game's own FSR 3 runs", h.name, h.h->error() ? h.h->error() : "?");
         for (auto& o : hs) o.h->revoke();
-        g_why = static_cast<uint32_t>(Why::load_failed);
+        // the pass could not be taken over on this game build (LOAD_FAILED would say the vendor's files did not load)
+        g_why = static_cast<uint32_t>(Why::no_signatures);
         set_detail(std::string("hooking ") + h.name + " failed");
         g_backend.reset();
         return;
