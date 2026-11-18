@@ -1509,7 +1509,7 @@ pub fn build(input: &ReportInput) -> Report {
     // Native UI initialization and later player-menu visibility are separate addon paths; kiln.log alone cannot
     // distinguish them. Read only this bounded log, not the addon's key bindings or per-server mod settings.
     cx.add_tail("shroudlink_client.log", SMALL_LOG_MAX);
-    xhl_core_logs(&mut cx, &game);
+    xhl_core_logs(&mut cx, game);
     check_not_loaded(&mut cx, install.as_ref(), dirs.as_ref(), receipt.is_some() || dinput8.as_ref().is_some_and(|d| d.kind == ProxyKind::Kiln),
         boot.as_ref(), boot_time, proxy_log.is_some(), &facts);
     if receipt.is_some() {

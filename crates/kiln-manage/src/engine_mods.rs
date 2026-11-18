@@ -2276,7 +2276,7 @@ fn sf_plugin_ini(rep: &mut PlaceReport, xhl: &mut Option<bool>, game: &Path, dst
 /// placed (its Library entry is gone or unreadable, or its publication failed): it follows the profile's switch all the
 /// same, by its marker and receipt alone. Off: switched off in ShroudForge's file, its XHL-Core ini set aside; on: its
 /// ini back where XHL-Core and ShroudForge read it (its ShroudForge switch stays as it is, so the earlier version runs).
-fn sf_old_copy_follows(rep: &mut PlaceReport, receipts: &mut Vec<Placement>, xhl: &mut Option<bool>, game: &Path, dst: &Path, tag: String, on: bool) {
+fn sf_old_copy_follows(rep: &mut PlaceReport, receipts: &mut [Placement], xhl: &mut Option<bool>, game: &Path, dst: &Path, tag: String, on: bool) {
     if !on && crate::shroudforge::read_mod(dst).is_ok_and(|sf| sf.enabled) {
         match switch_copy(game, receipts, dst, false) {
             Ok(()) => rep.switched.push(tag.clone()),
