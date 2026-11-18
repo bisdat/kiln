@@ -13,6 +13,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <functional>
 #include <map>
 #include <string>
 #include <thread>
@@ -95,12 +96,22 @@ const KilnEngineNativeApi* boot_engine(const Profile& p, KilnApi& api) {
 #include "ecs_fake_world.h"
 namespace {
 using namespace fakeworld;
+// kiln.internal.engine's copy with a test hook in front: called with each address before the real copy reads it.
+const KilnEngineNativeApi* g_real = nullptr;
+std::function<void(uintptr_t)> g_copy_hook;
+KilnResult KILN_CALL hooked_copy(std::uintptr_t address, void* out, std::size_t bytes) {
+    if (g_copy_hook) g_copy_hook(address);
+    return g_real->copy(address, out, bytes);
+}
+
 // Kiln's own world facts as ecs_prod.cpp samples them, scripted: the live world per kind and its session.
 struct Worlds {
     std::atomic<uintptr_t> world[KILN_WORLD_KINDS]{};
     std::atomic<uint64_t> session[KILN_WORLD_KINDS]{};
     std::atomic<uint64_t> steps[KILN_WORLD_KINDS]{};
     std::atomic<bool> step_each_read{false};  // every look at the counter finds a step that ran since the last one
+    std::atomic<int> release_after{-1};         // after this many more world samples, the Scene word is let go
+    std::atomic<std::int32_t>* word = nullptr;
     OwnerEpochs epochs;
 };
 bool steps_of(void* u, uint32_t kind, uint64_t* out) {
@@ -112,6 +123,7 @@ bool steps_of(void* u, uint32_t kind, uint64_t* out) {
 uint32_t world_fact(void* u, uint32_t kind, WorldFact* out) {
     auto& w = *static_cast<Worlds*>(u);
     if (kind >= KILN_WORLD_KINDS) return KILN_ECS_UNAVAILABLE;
+    if (w.release_after.load() >= 0 && w.release_after.fetch_sub(1) == 0 && w.word) w.word->store(0);
     out->world = w.world[kind].load();
     out->session = w.session[kind].load();
     return KILN_ECS_OK;
@@ -280,6 +292,32 @@ void mutations(const Profile& p, World& w, Reader& reader, Worlds& worlds) {
     const size_t s = w.slot_of(4097);
     put<uint64_t>(w.occ.at((s / 64) * 8), get<uint64_t>(w.occ.at((s / 64) * 8)) | (uint64_t{1} << (s % 64)));
     check(entity_validate(b, kOwner, &chest, &info) == KILN_OK, "back in the table: valid");
+
+    // A slot whose record names another id: the record is not the key's (unreadable, never that record's facts).
+    const uint32_t real_id = get<uint32_t>(rec + E.entity_id);
+    put<uint32_t>(rec + E.entity_id, 9999);
+    check(entity_validate(b, kOwner, &chest, &info) == KILN_ECS_ERR_UNREADABLE, "a record whose id is not its key's: unreadable");
+    put<uint32_t>(rec + E.entity_id, real_id);
+    // The id gets a new record while its old one is being read (the slot is rewritten under the read): the old record's
+    // facts must not be answered as the id's.
+    {
+        const uintptr_t fresh = w.recs.at(900 * kRecord);
+        std::memcpy(reinterpret_cast<void*>(fresh), reinterpret_cast<const void*>(rec), kRecord);
+        put<uint32_t>(fresh + E.entity_generation, 4);
+        const size_t slot = w.slot_of(4097);
+        bool armed = true;
+        g_copy_hook = [&](uintptr_t address) {
+            if (armed && address == rec + E.entity_generation) {
+                armed = false;
+                put<uint64_t>(w.slots.at(slot * 8), fresh);
+            }
+        };
+        check(entity_validate(b, kOwner, &chest, &info) != KILN_OK,
+              "the slot rewritten while the old record is read: not answered as the id's entity");
+        g_copy_hook = nullptr;
+        put<uint64_t>(w.slots.at(slot * 8), rec);
+        check(entity_validate(b, kOwner, &chest, &info) == KILN_OK, "the slot back: valid");
+    }
 
     // Faulting pages: the record, the chunk, the occupancy words. Unreadable, never a crash, nothing copied.
     const uintptr_t saved_slot = get<uint64_t>(w.slots.at(s * 8));
@@ -475,8 +513,18 @@ void frame_quiet(const Profile& p, World& w, Reader& reader, Worlds& worlds, fak
     word->store(static_cast<std::int32_t>(0x80000000u));  // a writer holds it exclusively (the write gate)
     check(ecs_snapshot_many(b, kOwner, &chest, quiet, 1, buf.data(), 48, &req, presence) == KILN_ECS_ERR_BUSY && all_eq(buf, 0xAA),
           "frame-quiet: an exclusive holder: busy");
+    // A frame that was running when the read began and ends during it, its step already counted: busy.
+    worlds.word = word;
+    word->store(1);
+    // Released at the ninth world sample: after the two validations before the window opens, inside the window.
+    worlds.release_after = 8;
+    buf.assign(48, 0xAA);
+    check(ecs_snapshot_many(b, kOwner, &chest, quiet, 1, buf.data(), 48, &req, presence) == KILN_ECS_ERR_BUSY && all_eq(buf, 0xAA),
+          "frame-quiet: a frame running at the start that ends during the read: busy");
+    worlds.release_after = -1;
     word->store(0);
     worlds.step_each_read = true;
+    buf.assign(48, 0xAA);
     check(ecs_snapshot_many(b, kOwner, &chest, quiet, 1, buf.data(), 48, &req, presence) == KILN_ECS_ERR_BUSY &&
               presence[0] == KILN_ECS_BUSY && all_eq(buf, 0xAA),
           "frame-quiet: the server step moved across the copy: busy, nothing copied");
@@ -597,7 +645,10 @@ void exact(const Profile& p) {
                                          e.main_exec.at(p.layout.entity_manager_offset));
         populate(*client);
     }
-    Reader reader(source_of(native, worlds));
+    g_real = native;
+    KilnEngineNativeApi hooked = *native;
+    hooked.copy = &hooked_copy;
+    Reader reader(source_of(&hooked, worlds));
     reads(p, server, reader, worlds, KILN_WORLD_SERVER);
     if (client) {
         reads(p, *client, reader, worlds, KILN_WORLD_CLIENT);
