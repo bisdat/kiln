@@ -415,7 +415,8 @@ struct Export {
     void* target = nullptr;
 };
 
-// NGX's core is loaded: hook its exports, or step aside when another module patched them first. Once a process.
+// NGX's core is loaded: hook its exports, or step aside when another module patched them first. Once for each load of
+// the core (graphics_after_load).
 void hook_ngx(HMODULE core) {
     const std::string file = module_file(core);
     Export ex[] = {
@@ -582,12 +583,29 @@ bool graphics_wants_load_hook() {
 }
 
 void graphics_after_load() {
-    if (!g_ngx_wanted || g_ngx_tried.load(std::memory_order_relaxed)) return;
+    if (!g_ngx_wanted) return;
+    // stepped aside, or the hooks could not be made: so for the session
+    if (g_ngx_tried.load(std::memory_order_relaxed) && !g_ngx_hooked.load(std::memory_order_relaxed)) return;
     HMODULE core = GetModuleHandleW(L"_nvngx.dll");
     if (!core) core = GetModuleHandleW(L"nvngx.dll");
-    if (!core || !GetProcAddress(core, "NVSDK_NGX_VULKAN_CreateFeature")) return;
-    if (g_ngx_tried.exchange(true)) return;
-    hook_ngx(core);
+    const auto* create = core ? reinterpret_cast<const uint8_t*>(GetProcAddress(core, "NVSDK_NGX_VULKAN_CreateFeature")) : nullptr;
+    if (!create) return;
+    // one thread at a time; another thread's load passes (nothing here waits: the thread may hold the loader lock)
+    static std::atomic_flag busy;
+    if (busy.test_and_set()) return;
+    if (!g_ngx_tried.exchange(true)) {
+        hook_ngx(core);
+    } else if (g_ngx_hooked.load()) {
+        // Kiln's hook puts a jump at CreateFeature's entry. Plain code there again: the game unloaded NGX's core and loaded
+        // it anew (Kiln's hooks went with the old one), so it is hooked again, by the same rules as the first time.
+        uint8_t b[16] = {};
+        if (read_bytes(create, b, sizeof b) && !gfx::patched_entry(b)) {
+            logf(KILN_LOG_INFO, "graphics: NVIDIA's DLSS core %s was loaded again: Kiln hooks it again", module_file(core).c_str());
+            g_ngx_hooked = false;
+            hook_ngx(core);
+        }
+    }
+    busy.clear();
 }
 
 void graphics_present() {
