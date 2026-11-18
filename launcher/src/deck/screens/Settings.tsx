@@ -2,6 +2,8 @@
 // profile (a background feature: the Mods screen shows its switches), the notes about mod folders (the switch, and
 // the last activation's notes to read again: components/FolderNotes.tsx), the data folder (../DataFolder.tsx), Quit.
 // The last line names what the Deck detection saw (for testers' reports).
+// (dev.29.18) For a client with Kiln in it: the upscaler behind the game's FSR 3 option, what runs, and the vendor
+// files with their licence screen, progress and Remove (../Upscaler.tsx).
 // (dev.29) Channel: Release or Beta (test builds); A on it switches (DeckSwitchDialog: what happens, the build installed
 // now, Restart now), both ways; a test build says so in the row.
 // The Nexus Mods build (api/distribution.ts) has no launcher updates: its row is "New versions: Nexus Mods" (A opens
@@ -19,6 +21,7 @@ import * as nx from "../../api/nexus";
 import { useNexusAccount } from "../../shell/catalogInstall";
 import { runTask, toast } from "../../ui";
 import { DeckDataFolderRow } from "../DataFolder";
+import { DeckUpscalerRows } from "../Upscaler";
 import { otherFolderProfile } from "../../shell/dataFolderText";
 import { ProfileDialog, QuitDialog } from "../dialogs";
 import { useGlyphPref, type GlyphPref } from "../glyphs";
@@ -185,6 +188,7 @@ export default function Settings() {
           <Row id="set-notes" title={t("deck.settings.modNotes")} a={t("deck.shared.read")} disabled={!noteCount} sub={t("deck.settings.modNotesSub")}
             end={<Word tone={noteCount ? "info" : "idle"}>{String(noteCount)}</Word>} onClick={() => setNotesOpen(true)} />
         )}
+        {game && <DeckUpscalerRows game={game} />}
         <DeckDataFolderRow />
         <Row id="set-quit" title={t("deck.dialogs.quit")} a={t("deck.dialogs.quit")} onClick={() => setQuit(true)} />
       </div>

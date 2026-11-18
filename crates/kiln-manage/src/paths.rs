@@ -29,6 +29,8 @@ pub mod game {
     pub const MODS_JSON: &str = "kiln/state/mods.json";
     pub const NATIVE_JSON: &str = "kiln/state/native.json";
     pub const LAST_SERVER_JSON: &str = "kiln/state/last-server.json";
+    /// (0.2.0-dev.29.18) What Kiln's graphics tools do in the client (Kiln.Ui; `state::GraphicsState`).
+    pub const GRAPHICS_JSON: &str = "kiln/state/graphics.json";
     pub const CONFIG: &str = "kiln/config";
     pub const DATA: &str = "kiln/data";
     pub const LOGS: &str = "kiln/logs";

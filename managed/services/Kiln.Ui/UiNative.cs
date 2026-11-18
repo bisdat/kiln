@@ -514,10 +514,12 @@ internal static unsafe class UiNative
         public float CustomScale;
         public fixed float ModeScale[4];
         public uint Readout;
-        public fixed uint Reserved[2];
+        /// <summary>(phase B) KILN_UI_UPSCALER_* and KILN_UI_AMD_UPSCALER_* (were reserved; 0: the game's own, AMD's auto).</summary>
+        public uint Upscaler, AmdUpscaler;
     }
 
-    /// <summary>KilnUiGraphicsStatus (kiln_ui.h, 0.2.0-dev.29.18): what Kiln's graphics tools do now (graphics_status).</summary>
+    /// <summary>KilnUiGraphicsStatus (kiln_ui.h, 0.2.0-dev.29.18): what Kiln's graphics tools do now (graphics_status). 248
+    /// bytes with phase B's upscaler fields from offset 72; kiln.ui fills them when the size says they are there.</summary>
     [StructLayout(LayoutKind.Sequential)]
     public struct GraphicsStatus
     {
@@ -527,7 +529,19 @@ internal static unsafe class UiNative
         public int DlssQuality;
         public uint DlssPreset, RenderWidth, RenderHeight, DlssOutputWidth, DlssOutputHeight;
         public fixed uint Reserved[2];
+        // ---- phase B (KILN_UI_GRAPHICS_STATUS_SIZE_V2): the upscaler behind the game's FSR 3 option ----
+        public uint Upscaler, AmdUpscaler, UpscaleRunning, UpscaleReason, UpscaleFlags, AsideUpscale, UpscaleVersion;
+        public uint UpscaleRenderWidth, UpscaleRenderHeight, UpscaleOutputWidth, UpscaleOutputHeight;
+        public uint Reserved2;
+        /// <summary>The reason in English words, UTF-8, NUL-terminated (for logs and tooltips).</summary>
+        public fixed byte UpscaleDetail[UpscaleDetailBytes];
     }
+
+    /// <summary>KILN_UI_GRAPHICS_STATUS_SIZE_V1 / _V2: phase A's status, and with phase B's fields.</summary>
+    public const uint GraphicsStatusSizeV1 = 72, GraphicsStatusSizeV2 = 248;
+
+    /// <summary>KilnUiGraphicsStatus.upscale_detail's size.</summary>
+    public const int UpscaleDetailBytes = 128;
 
     /// <summary>The tail after set_texts (0.2.0-dev.29.18): graphics_set, graphics_status.</summary>
     [StructLayout(LayoutKind.Sequential)]

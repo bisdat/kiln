@@ -301,7 +301,7 @@ KilnResult KILN_CALL t_graphics_set(const KilnUiGraphics* g) {
     return KILN_OK;
 }
 KilnResult KILN_CALL t_graphics_status(KilnUiGraphicsStatus* out) {
-    if (!out || out->size < sizeof(KilnUiGraphicsStatus)) return KILN_ERR_INVALID_ARGUMENT;
+    if (!out || out->size < KILN_UI_GRAPHICS_STATUS_SIZE_V1) return KILN_ERR_INVALID_ARGUMENT;
     KilnUiGraphicsStatus st{};
     st.size = sizeof st;
     st.fps_cap = g_graphics.fps_cap;
@@ -319,7 +319,34 @@ KilnResult KILN_CALL t_graphics_status(KilnUiGraphicsStatus* out) {
     st.render_height = static_cast<uint32_t>(1440 * k + 0.5f);
     st.dlss_output_width = 2560;
     st.dlss_output_height = 1440;
-    *out = st;
+    // (phase B) the upscaler behind the game's FSR 3: AMD FSR 4 runs; Intel XeSS's files are not downloaded
+    st.upscaler = g_graphics.upscaler;
+    st.amd_upscaler = g_graphics.amd_upscaler;
+    if (g_graphics.upscaler != KILN_UI_UPSCALER_GAME) {  // the game upscales with FSR 3 then, not DLSS
+        st.flags &= ~(KILN_UI_GFX_DLSS_ACTIVE | KILN_UI_GFX_DLSS_PRESET);
+        st.dlss_quality = -1;
+    }
+    if (g_graphics.upscaler == KILN_UI_UPSCALER_AMD) {
+        const bool pinned = g_graphics.amd_upscaler == KILN_UI_AMD_UPSCALER_FSR3;
+        st.upscale_running = pinned ? KILN_UI_UPSCALE_RUN_AMD_FSR3 : KILN_UI_UPSCALE_RUN_AMD_FSR4;
+        st.upscale_flags = KILN_UI_UPSCALE_HOOKED | KILN_UI_UPSCALE_FSR_SEEN | KILN_UI_UPSCALE_FILES_OK | KILN_UI_UPSCALE_DEVICE_OK |
+                           (pinned ? KILN_UI_UPSCALE_AMD_PINNED : 0u);
+        st.upscale_version = pinned ? (3u << 22) | (1u << 12) | 6u : (4u << 22) | (1u << 12) | 2u;
+    } else if (g_graphics.upscaler == KILN_UI_UPSCALER_XESS) {
+        st.upscale_running = KILN_UI_UPSCALE_RUN_GAME_FSR3;
+        st.upscale_reason = KILN_UI_UPSCALE_WHY_FILES_MISSING;
+        st.upscale_flags = KILN_UI_UPSCALE_HOOKED | KILN_UI_UPSCALE_FSR_SEEN;
+        std::snprintf(st.upscale_detail, sizeof st.upscale_detail, "kiln/vendor/intel/3.0.2/libxess.dll is not there");
+    }
+    if (st.upscale_flags & KILN_UI_UPSCALE_FSR_SEEN) {
+        st.upscale_render_width = 1707;
+        st.upscale_render_height = 960;
+        st.upscale_output_width = 2560;
+        st.upscale_output_height = 1440;
+    }
+    const uint32_t size = out->size;
+    std::memcpy(out, &st, std::min<size_t>(size, sizeof st));
+    out->size = size;
     return KILN_OK;
 }
 

@@ -1,10 +1,11 @@
-// Settings, Upscalers in mock mode (src/api/mockVendor.ts; docs/kiln/graphics.md "Upscaler files"): hidden while the
-// preview is off; with it on (`?preview=upscalers`) the shipped manifest's two components can be downloaded; a build
-// whose files are not pinned (`?vendor=unpinned`) says "Not available in this build" and offers no button. Then the
-// licence dialog (what, size, host, where, the text in full, the privacy line), Cancel there sends nothing, "I agree,
-// download" with the text's hash, progress, Cancel, a second download without the dialog, Downloaded, Remove; a
-// failed download with its reason and Try again; an update, missing files, and a changed licence text that asks
-// again. Screenshots go to .out/launcher/shots/ (SHOTS=0 skips them).
+// Settings, Graphics, "Upscaler files" in mock mode (src/api/mockVendor.ts; docs/kiln/graphics.md "Upscaler files"):
+// out of preview since dev.29.18, so it shows without `?preview=`; the shipped manifest's two components can be
+// downloaded; a build whose files are not pinned (`?vendor=unpinned`) says "Not available in this build" and offers no
+// button. Then the licence dialog (what, size, host, where, the text in full, the privacy line), Cancel there sends
+// nothing, "I agree, download" with the text's hash, progress, Cancel, a second download without the dialog,
+// Downloaded, Remove; a failed download with its reason and Try again; an update, missing files, and a changed licence
+// text that asks again. The upscaler choice itself: tests/upscaler-choice.spec.ts. Screenshots go to
+// .out/launcher/shots/ (SHOTS=0 skips them).
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -19,7 +20,7 @@ type Call = { cmd: string; args: Record<string, unknown> };
 const vmock = <T,>(page: Page, fn: string, ...args: unknown[]) =>
   page.evaluate(([f, a]) => (window as unknown as { __kilnVendorMock: Record<string, (...x: unknown[]) => unknown> }).__kilnVendorMock[f as string](...(a as unknown[])), [fn, args] as const) as Promise<T>;
 const downloads = async (page: Page) => (await vmock<Call[]>(page, "calls")).filter((c) => c.cmd === "vendor_download");
-const section = (page: Page) => page.getByRole("region", { name: "Upscalers" });
+const section = (page: Page) => page.getByRole("region", { name: "Upscaler files" });
 const row = (page: Page, name: string) => section(page).getByRole("listitem", { name });
 async function shot(page: Page, name: string) {
   if (process.env.SHOTS === "0") return;
@@ -27,15 +28,17 @@ async function shot(page: Page, name: string) {
   await page.screenshot({ path: join(SHOTS, `upscalers-${name}.png`) });
 }
 
-test("no Upscalers section while the preview is off", async ({ page }) => {
+test("out of preview: the files are part of the Graphics card, and nothing is asked of a vendor by itself", async ({ page }) => {
   await open(page, "");
-  await expect(page.getByRole("region", { name: "Graphics" })).toBeVisible();
-  await expect(section(page)).toHaveCount(0);
-  expect(await vmock<Call[]>(page, "calls")).toEqual([]);
+  const g = page.getByRole("region", { name: "Graphics" });
+  await expect(g).toBeVisible();
+  await expect(g.getByRole("region", { name: "Upscaler files" })).toBeVisible();
+  await expect(g.getByText("Preview", { exact: true })).toHaveCount(0);
+  expect((await vmock<Call[]>(page, "calls")).filter((c) => c.cmd !== "vendor_status")).toEqual([]);
 });
 
-test("with the preview on, the shipped components can be downloaded", async ({ page }) => {
-  await open(page, "?preview=upscalers");
+test("the shipped components can be downloaded", async ({ page }) => {
+  await open(page, "");
   const s = section(page);
   await expect(s).toBeVisible();
   await expect(row(page, "AMD FSR")).toContainText("Not downloaded");
@@ -49,12 +52,11 @@ test("with the preview on, the shipped components can be downloaded", async ({ p
 });
 
 test("a build whose files are not pinned offers nothing to download", async ({ page }) => {
-  await open(page, "?preview=upscalers&vendor=unpinned");
+  await open(page, "?vendor=unpinned");
   const s = section(page);
   await expect(s).toBeVisible();
-  await expect(s.getByText("Preview", { exact: true })).toBeVisible();
   await expect(s.getByTestId("upscalers-purpose")).toHaveText(
-    "Kiln can run these behind the game's FSR 3 option. That arrives in a later update: until then, downloading them changes nothing in the game.");
+    "Kiln checks every file against the size and SHA-256 it pinned, and the game checks them again before it loads them. Remove deletes them again.");
   for (const name of ["AMD FSR", "Intel XeSS"]) {
     const r = row(page, name);
     await expect(r).toContainText("Not available in this build");
@@ -67,7 +69,7 @@ test("a build whose files are not pinned offers nothing to download", async ({ p
 });
 
 test("download with the licence dialog, progress and cancel, then Downloaded and Remove", async ({ page }) => {
-  await open(page, "?preview=upscalers");
+  await open(page, "");
   await vmock(page, "pace", 250);
   const amd = row(page, "AMD FSR");
   await expect(amd).toContainText("Not downloaded");
@@ -136,7 +138,7 @@ test("download with the licence dialog, progress and cancel, then Downloaded and
 });
 
 test("a failed download says why, and Try again downloads it", async ({ page }) => {
-  await open(page, "?preview=upscalers");
+  await open(page, "");
   await vmock(page, "pace", 40);
   const why = "libxess.dll from Intel (raw.githubusercontent.com) is not the file Kiln expects: its size or SHA-256 differs from the one this build of Kiln pinned. Kiln deleted it.";
   await vmock(page, "failNext", why);
@@ -162,7 +164,7 @@ async function again(page: Page) {
 }
 
 test("an update, missing files, and a changed licence text that asks again", async ({ page }) => {
-  await open(page, "?preview=upscalers");
+  await open(page, "");
   await vmock(page, "pace", 40);
   await vmock(page, "install", "amd-fsr", "2.3.0");
   await again(page);

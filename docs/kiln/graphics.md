@@ -1,8 +1,10 @@
-# Kiln's graphics tools: frame cap, DLSS settings, readout (0.2.0-dev.29.18)
+# Kiln's graphics tools: frame cap, DLSS settings, readout, an upscaler behind FSR 3 (0.2.0-dev.29.18)
 
 Kiln's own versions of what players use OptiScaler, DLSSTweaks and frame cap mods for, on Kiln's own hooks. Client
 only. Everything is off until the player turns it on: a player who changes nothing gets the game as before, with no
-hook on DLSS, no new hook on the game's library loads, and nothing done in a frame but two reads of a flag. Code:
+hook on DLSS or on the game's FSR 3, no new hook on the game's library loads, and nothing done in a frame but two reads
+of a flag. Phase B adds the choice of what runs behind the game's own FSR 3 option: the game's FSR 3, AMD FSR (FSR 4
+where the card runs it) or Intel XeSS ([below](#behind-the-games-fsr-3-phase-b)). Code:
 `native/services/ui/graphics.cpp` (plain logic in `frame_pacer.h`, `graphics_settings.h`, `graphics_aside.h`,
 `ngx_param.h`; host test `tests/graphics_test.cpp`), `managed/services/Kiln.Ui/UiGraphics.cs`. How the game uses DLSS:
 [docs/re/client-upscale.md](../re/client-upscale.md).
@@ -10,10 +12,12 @@ hook on DLSS, no new hook on the game's library loads, and nothing done in a fra
 ## Where the player sets them
 - In the game: the Kiln menu (Insert, or **Mods** in the game's menus), tab **Graphics**. Changes apply at once and are
   saved to `kiln/kiln.json` half a second later (the file's comments and other settings stay). Under "Now" the page says
-  what the tools do: the cap, the frame rates, the DLSS in use (mode, render and output size, preset), what they step
-  aside for, and when a restart is needed.
-- In the launcher: Settings, card **Graphics** (the same `kiln.json` entries; it also names the tools Kiln steps aside
-  for, from the game folder).
+  what the tools do: the cap, the frame rates, the DLSS in use (mode, render and output size, preset), the upscaler
+  behind the game's FSR 3 and why the chosen one does not run, what they step aside for, and when a restart is needed.
+- In the launcher: Settings, card **Graphics** (the same `kiln.json` entries, the upscaler choice with its files and
+  what ran in the last game; it also names the tools Kiln steps aside for, from the game folder). On the Steam Deck:
+  Deck mode's Settings, rows **Upscaler behind the game's FSR 3**, **AMD FSR version**, the files' rows and **Upscaler
+  now** ([launcher/deck.md](launcher/deck.md#upscaler)).
 - By hand: `kiln/kiln.json`, section `graphics` (the game reads the file again every 2 seconds; a file that is not valid
   JSON keeps the settings in use, with a warning in kiln.log):
 
@@ -25,8 +29,8 @@ hook on DLSS, no new hook on the game's library loads, and nothing done in a fra
 | `dlssRenderScale` | 0.33..1: with `custom`, the render width and height as a share of the output | 0.67 | " |
 | `dlssQualityScale`, `dlssBalancedScale`, `dlssPerformanceScale`, `dlssUltraPerformanceScale` | 0.33..1 each: with `perMode` | DLSS's own: 0.667, 0.58, 0.5, 0.333 | " |
 | `readout` | `true` / `false` | `false` | at once |
-| `upscaler` | `game` (the game's own FSR 3), `amd` (AMD FSR: FSR 4 where the GPU runs it, else FSR 3.1), `xess` (Intel XeSS) | `game` | at the game's next FSR 3 set-up; Kiln's hooks go in only when it is not `game` at the game's start ([below](#upscaler-behind-the-games-fsr-3-020-dev2918)) |
-| `amdUpscaler` | `auto` (AMD's own choice), `fsr3` (FSR 3.1 even where FSR 4 runs) | `auto` | at the game's next FSR 3 set-up |
+| `upscaler` | `game` (the game's own FSR 3), `amd` (AMD FSR: FSR 4 where the GPU runs it, else FSR 3.1), `xess` (Intel XeSS): what runs in place of the game's FSR 3 | `game` | at the game's next FSR 3 set-up; Kiln's hooks go in only when it is not `game` at the game's start ([below](#behind-the-games-fsr-3-phase-b)) |
+| `amdUpscaler` | `auto` (AMD's selection: FSR 4 where it runs, else FSR 3.1), `fsr3` (FSR 3.1 even where FSR 4 runs): with `amd` | `auto` | at the game's next FSR 3 set-up |
 
 "When the game next sets DLSS up": loading a world, or changing the DLSS mode or the resolution in the game's own
 settings. One more rule: Kiln hooks DLSS only when a DLSS setting or the readout is on **when the game starts**. A DLSS
@@ -85,6 +89,105 @@ the game never sets DLSS up and these settings do nothing (the page says "The ga
   core and load it again, Kiln hooks the new one by the same rules (`graphics: NVIDIA's DLSS core ... was loaded
   again`).
 
+## Behind the game's FSR 3 (phase B)
+The game offers its own FSR 3 on every graphics card. With FSR 3 chosen as the upscaler in the game's graphics settings,
+Kiln can run another upscaler in its place, on the same inputs (colour, depth, motion vectors, jitter, camera, frame
+time, exposure), into the same command buffer. Nothing is called DLSS, and nothing gets around a vendor's hardware
+limits: AMD's and Intel's own libraries decide what runs on a card.
+
+### The choice
+- **The game's own FSR 3** (`game`, the default): nothing changes, and Kiln puts no hook on the game's FSR 3.
+- **AMD FSR** (`amd`): AMD's FidelityFX SDK 2.4.0. With `amdUpscaler` `auto`, AMD's own selection runs FSR 4 (4.1.2)
+  where the card and driver run it, else FSR 3.1 (3.1.6). `fsr3` keeps FSR 3.1 even where FSR 4 would run (some players
+  prefer its look, or its cost on an older card).
+- **Intel XeSS** (`xess`): Intel's XeSS 3.0.2 (super resolution only), on Intel, AMD and NVIDIA cards.
+
+**When it applies:** at the game's next FSR set-up: a world load, or a change of FSR's quality, the resolution or the 3D
+render scale in the game's settings. Kiln hooks the game's FSR 3 pass and adds what the chosen upscaler needs to the
+game's Vulkan device only when an upscaler other than the game's own is chosen **when the game starts**: one chosen for
+the first time while the game runs applies from the next start (the reason `restart`). The game's own FSR quality modes
+and render scale stay what decides the render size.
+
+**What each graphics card gets** (AMD's and Intel's lists; nothing of it has run in a real game yet):
+
+| card | AMD FSR (`auto`) | AMD FSR (`fsr3`) | Intel XeSS |
+|---|---|---|---|
+| AMD RX 9000 | FSR 4 (FP8 model) | FSR 3.1 | XeSS |
+| AMD RX 7000, RX 6000 | FSR 4 (INT8 model, new in SDK 2.4.0) | FSR 3.1 | XeSS |
+| AMD Strix Halo, Strix Point, Ryzen Z2 handhelds | FSR 4 (INT8, a lightweight model on the smaller chips) | FSR 3.1 | XeSS |
+| Steam Deck (Van Gogh) and older AMD cards | FSR 3.1 (AMD's list has no FSR 4 for them; AMD's selection decides) | FSR 3.1 | XeSS |
+| NVIDIA, Intel | FSR 3.1 | FSR 3.1 | XeSS |
+
+AMD's selection needs no particular driver version for FSR 4 on Vulkan (AMD's notes); whether a card gets it is AMD's
+answer at the FSR set-up, and the status says which ran.
+
+### The files
+AMD's and Intel's libraries are not inside Kiln. The launcher downloads them when the player asks: Settings, Graphics,
+"Upscaler files" (or the offer under the choice), on the Deck the files' rows in Settings. Before a vendor's first
+download the vendor's licence is shown in full with "I agree, download"; then progress with Cancel, and Remove.
+Details: [Upscaler files](#upscaler-files) below.
+- Choosing AMD FSR or Intel XeSS without the files is allowed: the game's own FSR 3 runs, and the status says why
+  (`filesMissing`). The launcher offers the download right under the choice.
+- The game loads them only from `<game>/kiln/vendor/<vendor>/<version>/`, never from the game's own folder, and only
+  after each file's SHA-256 matched the one built into the runtime (the same values as the launcher's manifest). A file
+  that differs is not loaded (`filesBad`).
+- The game's Graphics page says whether the chosen vendor's files are there ("AMD FSR 2.4.0: the files are in
+  kiln/vendor/amd/2.4.0", or "not in this game yet. Download them in the Kiln launcher").
+
+### What runs now, and why not
+The Graphics page's "Now" block, the launcher's Graphics card and the Deck's "Upscaler now" row say what upscales behind
+the game's FSR 3 option: the game's own FSR 3, AMD FSR 4, AMD FSR 3.1, Intel XeSS, or nothing because FSR 3 is not the
+game's chosen upscaler right now (DLSS or none chosen, or no world loaded). With the version and the render and output
+size while it runs. When the chosen one does not run, one of these reasons follows (the same English in the game and
+the launcher; shown here for AMD FSR):
+
+| code | number | text |
+|---|---|---|
+| `restart` | 1 | AMD FSR runs from the next start of the game: Kiln sets it up when the game starts. |
+| `filesMissing` | 2 | AMD FSR's files are not downloaded yet, so the game's own FSR 3 runs. |
+| `filesBad` | 3 | A file of AMD FSR is not the one Kiln expects (its size or SHA-256 differs), so Kiln does not load it. Download it again. |
+| `loadFailed` | 4 | A file of AMD FSR did not load, so the game's own FSR 3 runs. |
+| `device` | 5 | Your graphics card or driver lacks a Vulkan feature AMD FSR needs, so the game's own FSR 3 runs. |
+| `createFailed` | 6 | AMD FSR could not be set up for this resolution, so the game's own FSR 3 runs. |
+| `runtimeFailed` | 7 | AMD FSR failed while it upscaled. The game's own FSR 3 runs until you restart the game. |
+| `fault` | 8 | AMD FSR or Kiln's code around it faulted. The game's own FSR 3 runs until you restart the game. |
+| `aside` | 9 | Kiln steps aside for OptiScaler, so it does not change the game's FSR 3. |
+| `noSignatures` | 10 | Kiln does not know this game build's FSR 3 yet, so the game's own FSR 3 runs. A Kiln update for this game build fixes that. |
+| `inputs` | 11 | The game's images are not what AMD FSR takes, so the game's own FSR 3 runs. |
+| `unavailable` | 12 | AMD FSR is not available in this build of Kiln or on this system, so the game's own FSR 3 runs. |
+| `waiting` | 13 | AMD FSR is ready. It starts when the game next sets FSR 3 up: load a world, or change FSR's quality in the game's settings. |
+| `noVulkan` | 14 | Kiln did not see the game set up its graphics device in this session. Restart the game for AMD FSR. |
+| `unknown` | any other | AMD FSR does not run (reason 15 from a newer Kiln), so the game's own FSR 3 runs. |
+
+A reason that ends the chosen upscaler for the session (`runtimeFailed`, `fault`) leaves the game's own FSR 3 running
+until the game restarts. The game's English detail (a missing file's or Vulkan extension's name, a fault) is shown as a
+muted "Details:" line and written to kiln.log. The numbers are kiln_ui.h's `KILN_UI_UPSCALE_WHY_*`; the codes are the
+state file's.
+
+**In the launcher:** "Now" while the game runs, from what Kiln in the game wrote to `<game>/kiln/state/graphics.json`
+(rewritten only when it changes; `schema/state-graphics.schema.json`); "Last game" after the game closed, while the
+choice is still the one that game had and its reason still holds; otherwise "When you play": what Kiln will do from the
+choice, the files in `kiln/vendor/` and the tools in the game folder ("With FSR 3 chosen in the game's graphics
+settings, Kiln runs AMD FSR in its place: FSR 4 where your graphics card and driver run it, else FSR 3.1.").
+
+### Stepping aside
+Kiln's upscaler stays off, with the reason `aside` and the tool's name, next to: OptiScaler, NVIDIA Streamline
+(`sl.interposer.dll`), a DLSS frame generation mod (`EnshroudedVKFG.ini`), another tool's upscaler DLLs next to the game
+(`amd_fidelityfx_*.dll`, `libxess*.dll` in the game's own folder: AMD's loader would find those first), the game's FSR 3
+pass already patched by another module, and Kiln's overlay hooks off. DLSSTweaks and another DLSS loader leave it alone
+(they only touch DLSS). See the table in [Living next to other tools](#living-next-to-other-tools).
+
+### Limits
+- Only behind the game's **FSR 3** option. With DLSS chosen in the game, Kiln's DLSS settings apply instead; the game's
+  XeSS entry is a name only (the game has no XeSS code) and is not where Kiln's XeSS runs.
+- Upscaling only: no frame generation in this release (AMD's frame generation DLL is downloaded with AMD FSR for a later
+  phase, and not loaded).
+- Kiln does not change the render size or sharpness of FSR: the game's FSR quality and render scale decide.
+- Kiln finds the game's FSR 3 pass by pattern in each game build; on a build it does not know yet the swap is off
+  (`noSignatures`) until a Kiln update.
+- Steam Deck: AMD FSR 3.1 and XeSS; FSR 4 only where AMD's selection says it runs.
+- Not yet run in a real game on an AMD, Intel or NVIDIA card. First reports from testers decide the defaults.
+
 ## Readout
 A few lines in the top right corner of the game, drawn by Kiln's overlay:
 - rendered and output frames a second and the mean frame time over the last half second;
@@ -100,18 +203,20 @@ Kiln's frame cap and DLSS settings step aside, with one kiln.log line (when one 
 the Graphics page, when another tool does the same (the files are looked up in the game folder at start;
 `graphics_aside.h`):
 
-| found | frame cap | DLSS settings |
-|---|---|---|
-| OptiScaler's DLL (any name; [ui.md](ui.md#optiscaler)), with or without its overlay menu | aside | aside |
-| `sl.interposer.dll` in the game folder or `Streamline/` (NVIDIA Streamline, frame generation mods) | aside | aside |
-| `EnshroudedVKFG.ini` (a DLSS frame generation mod) | aside | aside |
-| `dlsstweaks.ini` (DLSSTweaks) | stays | aside |
-| `nvngx.dll` or `_nvngx.dll` next to the game (another DLSS loader: NGX loads it before the driver's) | stays | aside |
-| NGX's exports already patched when the core loads (another tool hooks DLSS) | stays | aside |
-| Kiln's overlay hooks off (`KILN_UI_OVERLAY=0`, the crash guard) | aside | aside |
+| found | frame cap | DLSS settings | upscaler behind FSR 3 |
+|---|---|---|---|
+| OptiScaler's DLL (any name; [ui.md](ui.md#optiscaler)), with or without its overlay menu | aside | aside | aside |
+| `sl.interposer.dll` in the game folder or `Streamline/` (NVIDIA Streamline, frame generation mods) | aside | aside | aside |
+| `EnshroudedVKFG.ini` (a DLSS frame generation mod) | aside | aside | aside |
+| `dlsstweaks.ini` (DLSSTweaks) | stays | aside | stays |
+| `nvngx.dll` or `_nvngx.dll` next to the game (another DLSS loader: NGX loads it before the driver's) | stays | aside | stays |
+| NGX's exports already patched when the core loads (another tool hooks DLSS) | stays | aside | stays |
+| another tool's upscaler DLLs next to the game (`amd_fidelityfx_*.dll`, `libxess*.dll`), or the game's FSR 3 pass already patched | stays | stays | aside |
+| Kiln's overlay hooks off (`KILN_UI_OVERLAY=0`, the crash guard) | aside | aside | aside |
 
 The readout stays where Kiln's overlay draws. Kiln never patches over another tool's hook and never changes another
-loader's files or mods. Example log line:
+loader's files or mods. The launcher's Graphics card names the same tools from the game folder, and which of Kiln's
+tools step aside for each (`GameStatus.graphicsStepAside`, with `upscaler` for the third column). Example log line:
 > graphics: frame cap 60 fps, DLSS preset K; Kiln's frame cap and DLSS settings step aside for OptiScaler (dxgi.dll)
 
 ## Wine and Proton
@@ -137,24 +242,26 @@ Two slots after `set_texts` (byte offsets 1016 and 1024; the table is 1032 bytes
   patch`), the FSR 3 pass's render and output size, and `upscale_detail` (128 bytes, English).
 There is no managed (mod API) member for it in this release.
 
-## Upscaler files (part D, a preview)
-What phase B (an upscaler swap behind the game's FSR 3 option) and later frame generation will load: AMD's FSR DLLs and
-Intel's XeSS DLL. **They do nothing yet**: no code in the game loads them in this release. The launcher downloads them
-only when the player asks, on a screen that says what will happen. Contract: [launcher/contracts.md](launcher/contracts.md)
-section 5.15; code `crates/kiln-manage/src/vendor/`, `launcher/src/components/UpscalerSettings.tsx`.
+## Upscaler files
+What Kiln runs behind the game's FSR 3 option (phase B) and a later frame generation phase loads: AMD's FSR DLLs and
+Intel's XeSS DLL. The launcher downloads them only when the player asks, on a screen that says what will happen.
+Contract: [launcher/contracts.md](launcher/contracts.md) section 5.15; code `crates/kiln-manage/src/vendor/`,
+`launcher/src/components/UpscalerSettings.tsx`.
 
 | component | version | files | size | licence | from |
 |---|---|---|---|---|---|
-| AMD FSR (`amd-fsr`) | FidelityFX SDK 2.4.0 | `amd_fidelityfx_loader_vk.dll`, `amd_fidelityfx_upscaler_vk.dll` (FSR 3.1.6 and FSR 4.1.2), `amd_fidelityfx_framegeneration_vk.dll` | 72,981,808 bytes | MIT licence | `GPUOpen-LibrariesAndSDKs/FidelityFX-SDK` at tag `v2.4.0`, `Kits/FidelityFX/signedbin/` |
-| Intel XeSS (`intel-xess`) | XeSS SDK 3.0.2 | `libxess.dll` | 77,795,704 bytes | Intel Simplified Software License (October 2022) | `intel/xess` at tag `v3.0.2`, `bin/` |
+| AMD FSR (`amd-fsr`) | FidelityFX SDK 2.4.0 | `amd_fidelityfx_loader_vk.dll`, `amd_fidelityfx_upscaler_vk.dll` (FSR 3.1.6 and FSR 4.1.2), `amd_fidelityfx_framegeneration_vk.dll` (not loaded in this release) | 72,981,808 bytes | MIT licence | `GPUOpen-LibrariesAndSDKs/FidelityFX-SDK` at tag `v2.4.0`, `Kits/FidelityFX/signedbin/` |
+| Intel XeSS (`intel-xess`) | XeSS SDK 3.0.2 | `libxess.dll` (needs the VC++ runtime 14.40 or later, as Proton and current Windows have) | 77,795,704 bytes | Intel Simplified Software License (October 2022) | `intel/xess` at tag `v3.0.2`, `bin/` |
 
-- **Where the player sees it:** the launcher's Settings, section **Upscalers** right under Graphics, for a client only
-  (a dedicated server draws no frames). It is behind the launcher's preview `upscalers` and hidden by default: put
-  `"preview": ["upscalers"]` into the launcher's `settings.json` (in its data folder: Settings, Library, data folder)
-  while the launcher is closed, or start it once with `KILN_LAUNCHER_PREVIEW=upscalers`. One row per component: not
-  downloaded (with the size and the host), downloading (progress, Cancel), downloaded (version, size on disk, Remove),
-  update available, not available in this build, failed (the reason, Try again). The line under the title says what
-  they are for and that downloading them changes nothing yet.
+- **Where the player sees it:** the launcher's Settings, card **Graphics**, part **Upscaler files** (`#upscalers`)
+  under the upscaler choice, for a client only (a dedicated server draws no frames). Out of preview since 0.2.0-dev.29.18
+  (it was behind the launcher's preview `upscalers` before; that setting now changes nothing). One row per component:
+  not downloaded (with the size and the host), downloading (progress, Cancel), downloaded (version, size on disk,
+  Remove), update available, not available in this build, failed (the reason, Try again). Choosing AMD FSR or Intel
+  XeSS without its files shows an offer right under the choice with a Download button, which takes the same steps.
+- **On the Steam Deck:** Deck mode's Settings has a row per component (A downloads, cancels a download, or asks to
+  remove; the row's end says the state, with the percentage while it downloads). The licence screen shows the whole
+  text (the right stick scrolls it), with "I agree, download" and B to go back.
 - **On demand, AMD's too:** nothing ships inside Kiln (the owner's decision, although AMD's MIT licence would allow it),
   and nothing is downloaded before the player's click.
 - **The licence:** before a vendor's first download a dialog shows what it is, the size, the host
@@ -167,16 +274,14 @@ section 5.15; code `crates/kiln-manage/src/vendor/`, `launcher/src/components/Up
   the vendors' git blobs); one that differs is deleted and the row says so.
 - **Stored** in `<game>/kiln/vendor/<vendor>/<version>/` with a receipt, never in the game's own folder (other loaders
   and Kiln's step-aside list look there). Remove deletes that folder; an update keeps the old version until the new one
-  verified. Phase B checks each file's SHA-256 again before it loads it, against the hashes built into the runtime, never
-  the receipt's (contracts.md 5.15, "What Kiln in the game will read").
-- **Steam Deck UI:** no matching screen yet. It would take a Deck Settings row per component (the same `vendor_*`
-  commands), a licence screen that scrolls the text with the stick and takes A for "I agree, download", and progress in
-  the Deck's task line. The desktop UI on the Deck has the section as it is.
+  verified. The game checks each file's SHA-256 again before it loads it, against the hashes built into the runtime,
+  never the receipt's (contracts.md 5.15, "What Kiln in the game reads"). The game's Graphics page reads only names and
+  sizes, from the same manifest built into Kiln.Ui.
 - **Later:** NVIDIA's frame generation (`nvidia-dlssg`, from NVIDIA's own GitHub, never inside Kiln) is a new component
   in the same manifest, with NVIDIA's licence.
 
-## Upscaler behind the game's FSR 3 (0.2.0-dev.29.18)
-Phase B. In the game's own settings the player chooses FSR 3, as before; `graphics.upscaler` chooses what runs behind
+## How the upscaler swap works (0.2.0-dev.29.18)
+Phase B, for the curious and for testers ([the player's side above](#behind-the-games-fsr-3-phase-b)). In the game's own settings the player chooses FSR 3, as before; `graphics.upscaler` chooses what runs behind
 it: the game's own FSR 3 (`game`, the default: nothing changes), AMD FSR (`amd`) or Intel XeSS (`xess`). Kiln never calls
 any of it DLSS. Code: `native/services/ui/upscale.cpp` (the swap), `upscale_amd.cpp` (AMD FSR), `upscale_xess.cpp`
 (XeSS), the interface `upscale_backend.h`, plain logic `upscale_logic.h` and `upscale_amd_map.h` (host test
@@ -196,7 +301,7 @@ any of it DLSS. Code: `native/services/ui/upscale.cpp` (the swap), `upscale_amd.
   field of view, pre-exposure and frame time (Kiln's own measured time while the game's is 0, about 500 frames after
   a world load). History is dropped when the game sets FSR 3 up, after a load and when a size changes.
 - **AMD FSR.** AMD's signed Vulkan DLLs from the FidelityFX SDK 2.4.0, from `<game>/kiln/vendor/amd/2.4.0/` (the
-  launcher's Settings, Upscalers). Kiln checks each file's size and SHA-256 against the pins built into Kiln (the same
+  launcher's Settings, Graphics card). Kiln checks each file's size and SHA-256 against the pins built into Kiln (the same
   values as the launcher's manifest; `tools/release/vendor_pins_header.py --check`) before it maps them, keeps them
   open so they cannot change (on Windows; under Proton that binds only Wine's own programs, contracts.md 5.15), and
   maps them only from that folder. AMD's own selection picks FSR 4 where the GPU and driver run it (RX 9000, RX 7000
@@ -222,12 +327,9 @@ any of it DLSS. Code: `native/services/ui/upscale.cpp` (the swap), `upscale_amd.
 - **Not proven yet:** a real game with AMD FSR on any GPU; FSR 4 needs an AMD tester (RX 9000, or RX 6000/7000), the
   Steam Deck too. The swap itself was proven on the real client with a plain stretch (spike B0, RTX 3080 Ti, Proton).
 
-Status reasons (`KilnUiGraphicsStatus.upscale_reason`, stable numbers): 0 none, 1 restart, 2 files missing, 3 files
-not the pinned ones, 4 did not load, 5 the GPU or driver lacks a Vulkan feature, 6 set-up failed, 7 failed while
-upscaling, 8 fault, 9 stepped aside, 10 this game build's FSR 3 pass not found (or not hooked), 11 the game's textures
-are not what it takes, 12 not in this build or system, 13 waiting for the next FSR 3 set-up, 14 the game's Vulkan device
-not seen.
+Status reasons (`KilnUiGraphicsStatus.upscale_reason`, stable numbers): the table in
+[What runs now, and why not](#what-runs-now-and-why-not); its texts are the game's and the launcher's.
 
-## Not in phase A
-FSR 3's ratio and RCAS sharpness (compiled into the game: game-code hooks per build, [client-upscale.md](../re/client-upscale.md#fsr-3))
-and frame generation (phase C). The upscaler swap is phase B, above.
+## Not in this release
+FSR 3's ratio and RCAS sharpness (compiled into the game: game-code hooks per build, [client-upscale.md](../re/client-upscale.md#fsr-3)),
+Kiln's own render scale for the FSR option (phase B3) and frame generation (phase C).

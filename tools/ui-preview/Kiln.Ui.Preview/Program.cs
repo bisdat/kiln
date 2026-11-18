@@ -131,6 +131,9 @@ internal static unsafe class Program
             var look = scene.Look ?? LookSettings.Default;
             PlayerLook.Use(language is null ? look : look with { Language = language });  // the player's look (and language) of this scene
             GraphicsTools.Use(scene.Graphics ?? GraphicsSettings.Default);  // Kiln's graphics settings of this scene
+            if (scene.Graphics?.Upscaler == UpscalerChoice.Amd) PreviewVendorFiles(Path.Combine(root, "kiln"), "amd");  // AMD's files are there
+            VendorFiles.ResetForTests();  // this scene's folder, looked at afresh
+            VendorFiles.RootOverride = Path.Combine(root, "kiln");
             Samples.Windows(scene.Windows);
             var page = ModManagerHost.Page;
             page.Section = scene.Section;
@@ -310,6 +313,19 @@ internal static unsafe class Program
         _key(526, 0);
         _frame(1);
         return len >= 3003 ? 0 : 1;
+    }
+
+    /// <summary>A vendor's files in a scene's kiln/vendor/ with the sizes the manifest pins (empty, sparse): the Graphics
+    /// page reads names and sizes only.</summary>
+    private static void PreviewVendorFiles(string kilnRoot, string vendor)
+    {
+        if (VendorFiles.Of(vendor) is not { } c) return;
+        var dir = Directory.CreateDirectory(Path.Combine(kilnRoot, "vendor", c.Vendor, c.Version)).FullName;
+        foreach (var (name, size) in c.Files)
+        {
+            using var f = File.Create(Path.Combine(dir, name));
+            f.SetLength(size);
+        }
     }
 
     // The guided check runner's screen and HUD line (Kiln.Testing's CheckScreen) drawn from sample state: the list with a
@@ -567,6 +583,15 @@ internal static class Scenes
         {
             Section = ModManagerSection.Graphics, OnlyAt = "1920x1080",
             Graphics = GraphicsSettings.Default with { DlssScale = DlssScaleMode.PerMode, PerformanceScale = 0.6f },
+        },
+        // (phase B) AMD FSR behind the game's FSR 3 (the shim says FSR 4 runs); Intel XeSS without its files
+        new("graphics-amd", Typical)
+        {
+            Section = ModManagerSection.Graphics, OnlyAt = "1920x1080", Graphics = GraphicsSettings.Default with { Upscaler = UpscalerChoice.Amd },
+        },
+        new("graphics-xess", Typical)
+        {
+            Section = ModManagerSection.Graphics, OnlyAt = "1920x1080", Graphics = GraphicsSettings.Default with { Upscaler = UpscalerChoice.Xess },
         },
         new("game-page", Typical) { Selected = "kiln/storage-labels", GamePage = true },
         new("game-page-bright", Typical) { Selected = "kiln/storage-labels", GamePage = true, Bright = true },

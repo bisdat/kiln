@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { SchemaSnapshot } from "../src/api/commands";
-import { graphicsAsideText, graphicsLabels, graphicsSchema, isGraphicsPath } from "../src/components/GraphicsSettings";
+import { UPSCALER_PATHS, graphicsAsideText, graphicsLabels, graphicsSchema, isGraphicsPath } from "../src/components/GraphicsSettings";
 import snapshot from "../src/data/kiln-json.snapshot.json";
 import { SchemaForm } from "../src/ui/SchemaForm";
 
@@ -14,6 +14,9 @@ test("the Graphics card edits the graphics.* entries of kiln.json, the kiln.json
     "graphics.fpsCap", "graphics.dlssPreset", "graphics.dlssScale", "graphics.dlssRenderScale", "graphics.dlssQualityScale",
     "graphics.dlssBalancedScale", "graphics.dlssPerformanceScale", "graphics.dlssUltraPerformanceScale", "graphics.readout",
   ]);
+  // (phase B) the upscaler's two entries have the card's own block, not the form
+  expect(UPSCALER_PATHS).toEqual(["graphics.upscaler", "graphics.amdUpscaler"]);
+  expect(UPSCALER_PATHS.every((p) => isGraphicsPath(p) && schema.entries.some((e) => e.path === p))).toBe(true);
   expect(schema.entries.filter((e) => !isGraphicsPath(e.path)).some((e) => e.path.startsWith("graphics"))).toBe(false);
   expect(isGraphicsPath("graphics")).toBe(false);
   expect(isGraphicsPath("graphicsX.a")).toBe(false);
@@ -29,6 +32,9 @@ test("the snapshot's graphics entries are the ones the game reads", () => {
     ["dlssUltraPerformanceScale", 0.333]] as const)
     expect(by[`graphics.${k}`]).toMatchObject({ type: "float", default: d, min: 0.33, max: 1 });
   expect(by["graphics.readout"]).toMatchObject({ type: "bool", default: false });
+  expect(by["graphics.upscaler"]).toMatchObject({ type: "enum", default: "game", options: ["game", "amd", "xess"] });
+  expect(by["graphics.amdUpscaler"]).toMatchObject({ type: "enum", default: "auto", options: ["auto", "fsr3"] });
+  expect(by["graphics.upscaler"].comment).not.toMatch(/dlss|unlock/i);
   for (const e of schema.entries.filter((e) => isGraphicsPath(e.path))) {
     expect(e.requiresRestart).toBe(false);
     expect(e.comment?.length ?? 0).toBeGreaterThan(10);
@@ -43,6 +49,11 @@ test("a step-aside line names the tool's file and what steps aside", () => {
   expect(graphicsAsideText({ kind: "streamline", file: "Streamline/sl.interposer.dll", frameCap: true })).toContain("Streamline/sl.interposer.dll");
   expect(graphicsAsideText({ kind: "vkfg", file: "EnshroudedVKFG.ini", frameCap: true })).toContain("frame generation");
   expect(graphicsAsideText({ kind: "nvngx", file: "_nvngx.dll", frameCap: false })).toContain("Another DLSS loader");
+  // (dev.29.18) what the upscaler swap does next to each
+  expect(graphicsAsideText({ kind: "optiscaler", file: "dxgi.dll", frameCap: true, upscaler: true })).toBe(
+    "OptiScaler is installed (dxgi.dll): Kiln's frame cap, DLSS settings and upscaler choice step aside; the readout still works.");
+  expect(graphicsAsideText({ kind: "upscaler", file: "libxess.dll", frameCap: false, upscaler: true })).toBe(
+    "Another upscaler tool's files are next to the game (libxess.dll): Kiln's upscaler choice steps aside; the frame cap, DLSS settings and readout still work.");
   // a kind a later backend adds still reads as a sentence
   expect(graphicsAsideText({ kind: "future", file: "x.dll", frameCap: false })).toStartWith("Another graphics tool is in the game folder (x.dll)");
 });

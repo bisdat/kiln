@@ -1,4 +1,6 @@
 using System.Runtime.CompilerServices;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Runtime.InteropServices;
 using Xunit;
 
@@ -25,6 +27,8 @@ public unsafe class GraphicsTests : IDisposable
     public void Dispose()
     {
         GraphicsTools.ResetForTests();
+        GraphicsStateFile.ResetForTests();
+        VendorFiles.ResetForTests();
         GraphicsPage.ResetForTests();
         UiNative.ResetForTests();
         if (_table != null) NativeMemory.Free(_table);
@@ -200,10 +204,25 @@ public unsafe class GraphicsTests : IDisposable
         Assert.Equal(48, sizeof(UiNative.Graphics));
         Assert.Equal(16, (int)Marshal.OffsetOf<UiNative.Graphics>(nameof(UiNative.Graphics.CustomScale)));
         Assert.Equal(36, (int)Marshal.OffsetOf<UiNative.Graphics>(nameof(UiNative.Graphics.Readout)));
-        Assert.Equal(72, sizeof(UiNative.GraphicsStatus));
+        Assert.Equal(40, (int)Marshal.OffsetOf<UiNative.Graphics>(nameof(UiNative.Graphics.Upscaler)));
+        Assert.Equal(44, (int)Marshal.OffsetOf<UiNative.Graphics>(nameof(UiNative.Graphics.AmdUpscaler)));
+        Assert.Equal(248, sizeof(UiNative.GraphicsStatus));
+        Assert.Equal((int)UiNative.GraphicsStatusSizeV2, sizeof(UiNative.GraphicsStatus));
         Assert.Equal(20, (int)Marshal.OffsetOf<UiNative.GraphicsStatus>(nameof(UiNative.GraphicsStatus.RenderedFps)));
         Assert.Equal(40, (int)Marshal.OffsetOf<UiNative.GraphicsStatus>(nameof(UiNative.GraphicsStatus.DlssQuality)));
         Assert.Equal(56, (int)Marshal.OffsetOf<UiNative.GraphicsStatus>(nameof(UiNative.GraphicsStatus.DlssOutputWidth)));
+        // phase B's fields (kiln_ui.h; ui.cpp pins the same offsets)
+        foreach (var (field, at) in new[]
+                 {
+                     (nameof(UiNative.GraphicsStatus.Upscaler), 72), (nameof(UiNative.GraphicsStatus.AmdUpscaler), 76),
+                     (nameof(UiNative.GraphicsStatus.UpscaleRunning), 80), (nameof(UiNative.GraphicsStatus.UpscaleReason), 84),
+                     (nameof(UiNative.GraphicsStatus.UpscaleFlags), 88), (nameof(UiNative.GraphicsStatus.AsideUpscale), 92),
+                     (nameof(UiNative.GraphicsStatus.UpscaleVersion), 96), (nameof(UiNative.GraphicsStatus.UpscaleRenderWidth), 100),
+                     (nameof(UiNative.GraphicsStatus.UpscaleRenderHeight), 104), (nameof(UiNative.GraphicsStatus.UpscaleOutputWidth), 108),
+                     (nameof(UiNative.GraphicsStatus.UpscaleOutputHeight), 112), (nameof(UiNative.GraphicsStatus.Reserved2), 116),
+                     (nameof(UiNative.GraphicsStatus.UpscaleDetail), 120),
+                 })
+            Assert.Equal(at, (int)Marshal.OffsetOf<UiNative.GraphicsStatus>(field));
         var h = File.ReadAllText(Path.Combine(RepoRoot(), "native", "core", "abi", "services", "kiln_ui.h"));
         Assert.Contains("KilnResult(KILN_CALL* graphics_status)(KilnUiGraphicsStatus* out);\n} KilnUiApi;", h, StringComparison.Ordinal);
         // a kiln.ui without the tail: nothing to call, nothing happens
@@ -279,6 +298,321 @@ public unsafe class GraphicsTests : IDisposable
         Assert.Equal("Ultra Performance", GraphicsPage.ModeName(3));
         Assert.Equal("default", GraphicsPage.PresetName(0));
         Assert.Equal("M", GraphicsPage.PresetName(13));
+    }
+
+    // ---- phase B: the upscaler behind the game's FSR 3 option ----
+
+    [Fact]
+    public void Reads_and_writes_the_upscaler_choice()
+    {
+        Assert.Equal(UpscalerChoice.Game, GraphicsSettings.Default.Upscaler);
+        Assert.Equal(AmdUpscalerMode.Auto, GraphicsSettings.Default.AmdUpscaler);
+        var s = GraphicsTools.Parse("{ \"graphics\": { \"upscaler\": \"amd\", \"amdUpscaler\": \"fsr3\" } }");
+        Assert.Equal(UpscalerChoice.Amd, s.Upscaler);
+        Assert.Equal(AmdUpscalerMode.Fsr3, s.AmdUpscaler);
+        Assert.Equal(UpscalerChoice.Xess, GraphicsTools.Parse("{ \"graphics\": { \"upscaler\": \"xess\" } }").Upscaler);
+        var warnings = new List<string>();
+        var bad = GraphicsTools.Parse("{ \"graphics\": { \"upscaler\": \"DLSS\", \"amdUpscaler\": 4 } }", warnings.Add);
+        Assert.Equal(GraphicsSettings.Default, bad);
+        Assert.Equal(["graphics.upscaler is not game, amd or xess: game", "graphics.amdUpscaler is not auto or fsr3: auto"], warnings);
+        // written with the rest of the section; comments stay; an older section gains the two keys
+        var mine = GraphicsSettings.Default with { FpsCap = 90, Upscaler = UpscalerChoice.Xess, AmdUpscaler = AmdUpscalerMode.Fsr3 };
+        const string old = "{\n  \"graphics\": {\n    \"fpsCap\": 60 // mine\n  }\n}\n";
+        var text = GraphicsTools.Splice(old, mine);
+        Assert.Contains("\"fpsCap\": 90, // mine", text);
+        Assert.Contains("\"upscaler\": \"xess\"", text);
+        Assert.Contains("\"amdUpscaler\": \"fsr3\"", text);
+        Assert.Equal(mine, GraphicsTools.Parse(text));
+        Assert.Equal(mine, GraphicsTools.Parse(GraphicsTools.Splice("", mine)));
+        Assert.Contains("Intel XeSS behind the game's FSR 3", GraphicsTools.Describe(mine));
+        Assert.Equal("AMD FSR (auto) behind the game's FSR 3", GraphicsTools.Describe(GraphicsSettings.Default with { Upscaler = UpscalerChoice.Amd }));
+        Assert.Equal("all off", GraphicsTools.Describe(GraphicsSettings.Default with { AmdUpscaler = AmdUpscalerMode.Fsr3 }));
+    }
+
+    [Fact]
+    public void The_choice_goes_to_kiln_ui_in_graphics_set()
+    {
+        Install();
+        GraphicsTools.PathOverride = Path.Combine(_dir, "kiln.json");
+        GraphicsStateFile.PathOverride = Path.Combine(_dir, "state", "graphics.json");
+        File.WriteAllText(GraphicsTools.PathOverride, "{ \"graphics\": { \"upscaler\": \"amd\" } }");
+        GraphicsTools.Start();
+        Assert.Equal(1u, Set[^1].Upscaler);
+        Assert.Equal(0u, Set[^1].AmdUpscaler);
+        GraphicsTools.Change(GraphicsTools.Current with { AmdUpscaler = AmdUpscalerMode.Fsr3 });
+        Assert.Equal(1u, Set[^1].AmdUpscaler);
+        GraphicsTools.Change(GraphicsTools.Current with { Upscaler = UpscalerChoice.Xess });
+        Assert.Equal(2u, Set[^1].Upscaler);
+        // kiln.json is written half a second later, with both keys
+        var until = DateTime.UtcNow.AddSeconds(5);
+        while (DateTime.UtcNow < until && GraphicsTools.Read(GraphicsTools.PathOverride).Upscaler != UpscalerChoice.Xess) Thread.Sleep(50);
+        var saved = GraphicsTools.Read(GraphicsTools.PathOverride);
+        Assert.Equal((UpscalerChoice.Xess, AmdUpscalerMode.Fsr3), (saved.Upscaler, saved.AmdUpscaler));
+    }
+
+    [Fact]
+    public void Graphics_set_carries_the_upscaler_and_amd_s_version_at_offsets_40_and_44_for_every_choice()
+    {
+        // kiln.ui takes the choice from graphics_set at every call (every 2 seconds and on every change): left at 0, it would
+        // turn the player's choice back to the game's own FSR 3 at the next FSR set-up
+        foreach (var (name, choice, native) in new[] { ("game", UpscalerChoice.Game, 0u), ("amd", UpscalerChoice.Amd, 1u), ("xess", UpscalerChoice.Xess, 2u) })
+            foreach (var (amdName, amd, amdNative) in new[] { ("auto", AmdUpscalerMode.Auto, 0u), ("fsr3", AmdUpscalerMode.Fsr3, 1u) })
+            {
+                var s = GraphicsTools.Parse($"{{ \"graphics\": {{ \"upscaler\": \"{name}\", \"amdUpscaler\": \"{amdName}\", \"fpsCap\": 60 }} }}");
+                Assert.Equal((choice, amd), (s.Upscaler, s.AmdUpscaler));
+                var g = GraphicsTools.ToNative(s);
+                var bytes = new byte[sizeof(UiNative.Graphics)];
+                fixed (byte* b = bytes) *(UiNative.Graphics*)b = g;
+                Assert.Equal(native, BitConverter.ToUInt32(bytes, 40));
+                Assert.Equal(amdNative, BitConverter.ToUInt32(bytes, 44));
+                Assert.Equal(60u, BitConverter.ToUInt32(bytes, 4));  // phase A's fields as before
+                Assert.Equal((uint)sizeof(UiNative.Graphics), BitConverter.ToUInt32(bytes, 0));
+            }
+        // and through the table: at start, on a change, and on every later apply
+        Install();
+        GraphicsTools.PathOverride = Path.Combine(_dir, "kiln.json");
+        GraphicsStateFile.PathOverride = Path.Combine(_dir, "state", "graphics.json");
+        File.WriteAllText(GraphicsTools.PathOverride, "{ \"graphics\": { \"upscaler\": \"xess\", \"amdUpscaler\": \"fsr3\" } }");
+        GraphicsTools.Start();
+        Assert.Equal((2u, 1u), (Set[^1].Upscaler, Set[^1].AmdUpscaler));
+        GraphicsTools.Apply();
+        Assert.Equal((2u, 1u), (Set[^1].Upscaler, Set[^1].AmdUpscaler));
+        GraphicsTools.Change(GraphicsTools.Current with { FpsCap = 90 });  // another setting: the choice stays in the struct
+        Assert.Equal((2u, 1u, 90u), (Set[^1].Upscaler, Set[^1].AmdUpscaler, Set[^1].FpsCap));
+    }
+
+    private static IEnumerable<(string Name, uint Value)> HeaderEnum(string header, string prefix)
+    {
+        foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(header,
+                     @"\b" + prefix + @"([A-Z0-9_]+)\s*=\s*(?:(\d+)u?|1u\s*<<\s*(\d+))\s*,"))
+            yield return (m.Groups[1].Value, m.Groups[2].Success ? uint.Parse(m.Groups[2].Value) : 1u << int.Parse(m.Groups[3].Value));
+    }
+
+    private static string CamelOf(string upper)
+    {
+        var parts = upper.ToLowerInvariant().Split('_');
+        return parts[0] + string.Concat(parts.Skip(1).Select(p => char.ToUpperInvariant(p[0]) + p[1..]));
+    }
+
+    [Fact]
+    public void The_upscaler_codes_are_kiln_ui_h_s()
+    {
+        var h = File.ReadAllText(Path.Combine(RepoRoot(), "native", "core", "abi", "services", "kiln_ui.h"));
+        // every reason by its number and its name in camelCase; none missing either way
+        var why = HeaderEnum(h, "KILN_UI_UPSCALE_WHY_").ToList();
+        Assert.Equal(15, why.Count);
+        foreach (var (name, value) in why)
+        {
+            Assert.Equal(name.Replace("_", ""), ((UpscalerReason)value).ToString().ToUpperInvariant());
+            if (value == 0) continue;
+            Assert.Equal(CamelOf(name), UpscalerCodes.Reason((UpscalerReason)value));
+        }
+        Assert.Equal(why.Count - 1, UpscalerCodes.Reasons.Length);
+        var run = HeaderEnum(h, "KILN_UI_UPSCALE_RUN_").ToDictionary(x => x.Name, x => x.Value);
+        Assert.Equal(new Dictionary<string, uint> { ["OFF"] = 0, ["NOT_FSR"] = 1, ["GAME_FSR3"] = 2, ["AMD_FSR4"] = 3, ["AMD_FSR3"] = 4, ["XESS"] = 5 }, run);
+        Assert.Equal((uint)UpscalerRunning.AmdFsr31, run["AMD_FSR3"]);
+        Assert.Equal((uint)UpscalerRunning.NotFsr, run["NOT_FSR"]);
+        var flags = HeaderEnum(h, "KILN_UI_UPSCALE_").Where(x => !x.Name.StartsWith("RUN_", StringComparison.Ordinal) && !x.Name.StartsWith("WHY_", StringComparison.Ordinal))
+            .ToDictionary(x => x.Name, x => x.Value);
+        Assert.Equal(new Dictionary<string, uint>
+        {
+            ["HOOKED"] = UpscalerNow.Hooked, ["FSR_SEEN"] = UpscalerNow.FsrSeen, ["FILES_OK"] = UpscalerNow.FilesOk,
+            ["DEVICE_OK"] = UpscalerNow.DeviceOk, ["FELL_BACK"] = UpscalerNow.FellBack, ["AMD_PINNED"] = UpscalerNow.AmdPinned,
+        }, flags);
+        var aside = HeaderEnum(h, "KILN_UI_GFX_ASIDE_").ToDictionary(x => x.Name, x => x.Value);
+        Assert.Equal(aside.Count, GraphicsPage.AsideKeys.Length);
+        foreach (var (bit, key) in GraphicsPage.AsideKeys) Assert.Equal(bit, aside[key.ToUpperInvariant()]);
+        Assert.Equal(1u, HeaderEnum(h, "KILN_UI_UPSCALER_").Single(x => x.Name == "AMD").Value);
+        Assert.Equal(1u, HeaderEnum(h, "KILN_UI_AMD_UPSCALER_").Single(x => x.Name == "FSR3").Value);
+    }
+
+    [Fact]
+    public void Every_reason_has_a_text_in_kiln_s_english_and_a_row_in_the_docs()
+    {
+        using var en = JsonDocument.Parse(File.ReadAllText(Path.Combine(RepoRoot(), "runtime", "locales", "en.json")));
+        var reasons = en.RootElement.GetProperty("graphics").GetProperty("upscaler").GetProperty("reason");
+        var docs = File.ReadAllText(Path.Combine(RepoRoot(), "docs", "kiln", "graphics.md"));
+        foreach (var (_, code) in UpscalerCodes.Reasons.Append((UpscalerReason.None, "unknown")))
+        {
+            var text = reasons.GetProperty(UpscalerCodes.Key(code)).GetString()!;
+            Assert.DoesNotContain("DLSS", text, StringComparison.Ordinal);
+            // the docs' table has the code with the same English
+            Assert.Contains($"| `{code}` |", docs, StringComparison.Ordinal);
+            Assert.Contains(text.Replace("{upscaler}", "AMD FSR", StringComparison.Ordinal).Replace("{tools}", "OptiScaler", StringComparison.Ordinal)
+                .Replace("{number}", "15", StringComparison.Ordinal), docs, StringComparison.Ordinal);
+        }
+        Assert.Equal(UpscalerCodes.Reasons.Length + 1, reasons.EnumerateObject().Count());
+    }
+
+    private static UiNative.GraphicsStatus Phase(uint running, uint reason, uint flags = 0, uint aside = 0, uint version = 0, string detail = "")
+    {
+        var st = new UiNative.GraphicsStatus
+        {
+            Size = UiNative.GraphicsStatusSizeV2, UpscaleRunning = running, UpscaleReason = reason, UpscaleFlags = flags, AsideUpscale = aside,
+            UpscaleVersion = version, UpscaleRenderWidth = 1707, UpscaleRenderHeight = 960, UpscaleOutputWidth = 2560, UpscaleOutputHeight = 1440,
+        };
+        var bytes = System.Text.Encoding.UTF8.GetBytes(detail);
+        for (var i = 0; i < bytes.Length && i < UiNative.UpscaleDetailBytes - 1; i++) st.UpscaleDetail[i] = bytes[i];
+        return st;
+    }
+
+    [Fact]
+    public void The_status_is_read_from_kiln_ui_s_phase_b_fields()
+    {
+        // phase A's 72 bytes: nothing said about the upscaler
+        Assert.Null(UpscalerStatus.FromNative(new UiNative.GraphicsStatus { Size = UiNative.GraphicsStatusSizeV1 }));
+        var now = UpscalerStatus.FromNative(Phase(3, 0, UpscalerNow.Hooked | UpscalerNow.FsrSeen | UpscalerNow.FilesOk, version: (4u << 22) | (1u << 12) | 2u))!;
+        Assert.Equal(UpscalerRunning.AmdFsr4, now.Running);
+        Assert.Equal(UpscalerReason.None, now.Reason);
+        Assert.Equal("4.1.2", now.VersionText);
+        Assert.Equal((1707u, 960u, 2560u, 1440u), (now.RenderWidth, now.RenderHeight, now.OutputWidth, now.OutputHeight));
+        var bad = UpscalerStatus.FromNative(Phase(2, 5, detail: "VK_KHR_shader_float16_int8 is missing"))!;
+        Assert.Equal((UpscalerRunning.GameFsr3, UpscalerReason.Device), (bad.Running, bad.Reason));
+        Assert.Equal("VK_KHR_shader_float16_int8 is missing", bad.Detail);
+        // a number from a newer kiln-ui.dll
+        var newer = UpscalerStatus.FromNative(Phase(9, 40))!;
+        Assert.Equal(UpscalerRunning.Unknown, newer.Running);
+        Assert.Equal("unknown", UpscalerCodes.Reason(newer.Reason));
+        Assert.Equal(40u, newer.Code);
+        // a detail of 127 bytes without its NUL in the last place still ends
+        Assert.Equal(127, UpscalerStatus.FromNative(Phase(2, 3, detail: new string('x', 200)))!.Detail.Length);
+    }
+
+    [Fact]
+    public void The_page_says_what_runs_behind_fsr_3_and_why_the_choice_does_not()
+    {
+        var amd = GraphicsSettings.Default with { Upscaler = UpscalerChoice.Amd };
+        // the game's own chosen and the swap off: nothing said (phase A's lines alone)
+        Assert.Empty(GraphicsPage.StatusLines(GraphicsSettings.Default, Phase(0, 0)));
+        Assert.Empty(GraphicsPage.UpscalerLines(GraphicsSettings.Default, UpscalerStatus.FromNative(Phase(0, 0)), available: true));
+        var running = GraphicsPage.StatusLines(amd, Phase(3, 0, UpscalerNow.Hooked | UpscalerNow.FsrSeen, version: (4u << 22) | (1u << 12) | 2u));
+        Assert.Equal(["AMD FSR 4 runs in place of the game's FSR 3.", "Version 4.1.2, rendering at 1707x960 for 2560x1440."], running);
+        // FSR 3.1 by AMD's selection, and pinned
+        Assert.Equal(["AMD FSR 3.1 runs in place of the game's FSR 3.", "Version 3.1.6, rendering at 1707x960 for 2560x1440.",
+            "AMD's selection chose FSR 3.1: FSR 4 does not run on this graphics card or driver."],
+            GraphicsPage.StatusLines(amd, Phase(4, 0, UpscalerNow.FsrSeen, version: (3u << 22) | (1u << 12) | 6u)));
+        Assert.Equal(2, GraphicsPage.StatusLines(amd with { AmdUpscaler = AmdUpscalerMode.Fsr3 },
+            Phase(4, 0, UpscalerNow.FsrSeen | UpscalerNow.AmdPinned, version: (3u << 22) | (1u << 12) | 6u)).Count);
+        // files missing: the game's FSR 3 and why
+        Assert.Equal(["The game's own FSR 3 runs.", "It renders at 1707x960 for 2560x1440.", "AMD FSR's files are not downloaded yet, so the game's own FSR 3 runs."],
+            GraphicsPage.StatusLines(amd, Phase(2, 2, UpscalerNow.FsrSeen)));
+        // OptiScaler: Kiln steps aside, by name
+        Assert.Equal(["Kiln's upscaler is not in use behind the game's FSR 3 now.", "Kiln steps aside for OptiScaler, so it does not change the game's FSR 3."],
+            GraphicsPage.StatusLines(amd with { Upscaler = UpscalerChoice.Xess }, Phase(0, 9, aside: 1)));
+        // not FSR 3 in the game's settings; chosen while the game runs
+        Assert.Equal(KilnText.T("graphics.upscaler.running.not_fsr"), GraphicsPage.StatusLines(amd, Phase(1, 0))[0]);
+        Assert.Equal("Intel XeSS runs from the next start of the game: Kiln sets it up when the game starts.",
+            GraphicsPage.StatusLines(GraphicsSettings.Default with { Upscaler = UpscalerChoice.Xess }, Phase(0, 1))[1]);
+        // a newer reason; a kiln-ui.dll without phase B
+        Assert.Equal("AMD FSR does not run (reason 40 from a newer Kiln), so the game's own FSR 3 runs.", GraphicsPage.StatusLines(amd, Phase(2, 40))[^1]);
+        Assert.Equal([KilnText.T("graphics.upscaler.running.unknown")],
+            GraphicsPage.StatusLines(amd, new UiNative.GraphicsStatus { Size = UiNative.GraphicsStatusSizeV1 }));
+        // the English detail, for a muted line
+        Assert.Equal("Details: VK_KHR_shader_float16_int8 is missing",
+            GraphicsPage.UpscalerDetail(UpscalerStatus.FromNative(Phase(2, 5, detail: "VK_KHR_shader_float16_int8 is missing"))));
+        Assert.Null(GraphicsPage.UpscalerDetail(UpscalerStatus.FromNative(Phase(3, 0, detail: "x"))));
+    }
+
+    [Fact]
+    public void The_vendor_files_are_the_launcher_s_list_and_their_state_is_read_from_kiln_vendor()
+    {
+        var list = VendorFiles.Components;
+        Assert.Equal(["amd-fsr", "intel-xess"], list.Select(c => c.Id));
+        var amd = VendorFiles.Of("amd")!;
+        Assert.Equal("2.4.0", amd.Version);
+        Assert.Equal(["amd_fidelityfx_loader_vk.dll", "amd_fidelityfx_upscaler_vk.dll", "amd_fidelityfx_framegeneration_vk.dll"], amd.Files.Select(f => f.Name));
+        Assert.Equal(72_981_808, amd.Files.Sum(f => f.Size));
+        Assert.Equal("kiln/vendor/intel/3.0.2", VendorFiles.Folder(VendorFiles.Of("intel")!));
+        using (var m = JsonDocument.Parse(File.ReadAllText(Path.Combine(RepoRoot(), "launcher", "src", "data", "vendor-components.json"))))
+            Assert.Equal(m.RootElement.GetProperty("components").GetArrayLength(), list.Count);
+
+        VendorFiles.RootOverride = _dir;
+        Assert.Equal(VendorFilesState.Missing, VendorFiles.Look(amd));
+        var dir = Directory.CreateDirectory(Path.Combine(_dir, "vendor", "amd", "2.4.0")).FullName;
+        foreach (var (name, size) in amd.Files)
+        {
+            using var f = File.Create(Path.Combine(dir, name));
+            f.SetLength(size);
+        }
+        Assert.Equal(VendorFilesState.Present, VendorFiles.Look(amd));
+        using (var f = File.OpenWrite(Path.Combine(dir, amd.Files[1].Name))) f.SetLength(10);
+        Assert.Equal(VendorFilesState.Changed, VendorFiles.Look(amd));
+        File.Delete(Path.Combine(dir, amd.Files[1].Name));
+        Assert.Equal(VendorFilesState.Changed, VendorFiles.Look(amd));
+
+        // the page's line for the chosen one, none for the game's own
+        Assert.Null(GraphicsPage.FilesLine(GraphicsSettings.Default));
+        Assert.Equal("Some of AMD FSR's files in kiln/vendor/amd/2.4.0 are missing or changed. Download them again in the Kiln launcher (Settings, Graphics) while the game is closed. Until then the game's own FSR 3 runs.",
+            GraphicsPage.FilesLine(GraphicsSettings.Default with { Upscaler = UpscalerChoice.Amd }));
+        Assert.Equal("Intel XeSS's files are not in this game yet. Download them in the Kiln launcher (Settings, Graphics) while the game is closed. Until then the game's own FSR 3 runs.",
+            GraphicsPage.FilesLine(GraphicsSettings.Default with { Upscaler = UpscalerChoice.Xess }));
+    }
+
+    [Fact]
+    public void The_state_file_is_written_when_it_changes_and_only_then()
+    {
+        var path = GraphicsStateFile.PathOverride = Path.Combine(_dir, "state", "graphics.json");
+        VendorFiles.RootOverride = _dir;
+        var s = GraphicsSettings.Default with { FpsCap = 60, Upscaler = UpscalerChoice.Amd };
+        var st = Phase(2, 2, UpscalerNow.Hooked | UpscalerNow.FsrSeen);
+        st.Flags = GraphicsPage.CapActive | GraphicsPage.Counting;
+        st.RenderedFps = 59.9f;
+        Assert.True(GraphicsStateFile.Update(s, st, UpscalerStatus.FromNative(st)));
+        var json = JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        Assert.Equal(1, (int)json["format"]!);
+        Assert.Equal(Environment.ProcessId, (int)json["pid"]!);
+        Assert.Matches(@"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$", (string)json["written"]!);
+        var up = json["upscaler"]!.AsObject();
+        Assert.Equal("amd", (string)up["chosen"]!);
+        Assert.Equal("auto", (string)up["amdUpscaler"]!);
+        Assert.Equal("gameFsr3", (string)up["running"]!);
+        Assert.Equal("filesMissing", (string)up["reason"]!);
+        Assert.True((bool)up["hooked"]! && (bool)up["fsrSeen"]! && !(bool)up["filesOk"]!);
+        Assert.Equal("missing", (string)json["files"]!["amd"]!["state"]!);
+        Assert.Equal("2.4.0", (string)json["files"]!["amd"]!["version"]!);
+        Assert.Equal(60, (int)json["frameCap"]!["fps"]!);
+        Assert.True((bool)json["frameCap"]!["active"]!);
+        Assert.False((bool)json["dlss"]!["hooked"]!);
+        Assert.DoesNotContain("59.9", File.ReadAllText(path));  // no frame rates: they change all the time
+        Assert.Empty(Directory.GetFiles(Path.GetDirectoryName(path)!, "*.tmp"));
+        // the same again (another frame rate): not written
+        st.RenderedFps = 30;
+        File.WriteAllText(path, "sentinel");
+        Assert.False(GraphicsStateFile.Update(s, st, UpscalerStatus.FromNative(st)));
+        Assert.Equal("sentinel", File.ReadAllText(path));
+        // AMD FSR 4 now: written again
+        var on = Phase(3, 0, UpscalerNow.Hooked | UpscalerNow.FsrSeen | UpscalerNow.FilesOk | UpscalerNow.DeviceOk, version: (4u << 22) | (1u << 12) | 2u);
+        Assert.True(GraphicsStateFile.Update(s, on, UpscalerStatus.FromNative(on)));
+        up = JsonNode.Parse(File.ReadAllText(path))!["upscaler"]!.AsObject();
+        Assert.Equal("amdFsr4", (string)up["running"]!);
+        Assert.Null(up["reason"]);
+        Assert.Equal("4.1.2", (string)up["version"]!);
+        // aside bits by name; a kiln-ui.dll without phase B
+        var aside = Phase(0, 9, aside: 1 | 128, detail: "dxgi.dll");
+        Assert.True(GraphicsStateFile.Update(s, aside, UpscalerStatus.FromNative(aside)));
+        up = JsonNode.Parse(File.ReadAllText(path))!["upscaler"]!.AsObject();
+        Assert.Equal(["optiscaler", "upscaler"], up["aside"]!.AsArray().Select(x => (string)x!));
+        Assert.Equal("dxgi.dll", (string)up["detail"]!);
+        Assert.True(GraphicsStateFile.Update(s, null, null));
+        up = JsonNode.Parse(File.ReadAllText(path))!["upscaler"]!.AsObject();
+        Assert.Equal(("unknown", "unavailable"), ((string)up["running"]!, (string)up["reason"]!));
+        Assert.Null(JsonNode.Parse(File.ReadAllText(path))!["frameCap"]);
+    }
+
+    [Fact]
+    public void The_state_example_follows_the_schema_s_names()
+    {
+        // schema/examples/state-graphics.json is what this code writes (the launcher's check-schemas validates it)
+        var example = JsonNode.Parse(File.ReadAllText(Path.Combine(RepoRoot(), "schema", "examples", "state-graphics.json")))!.AsObject();
+        GraphicsStateFile.PathOverride = Path.Combine(_dir, "graphics.json");
+        VendorFiles.RootOverride = _dir;
+        var on = Phase(3, 0, UpscalerNow.Hooked | UpscalerNow.FsrSeen | UpscalerNow.FilesOk | UpscalerNow.DeviceOk, version: (4u << 22) | (1u << 12) | 2u);
+        on.Flags = GraphicsPage.CapActive;
+        GraphicsStateFile.Update(GraphicsSettings.Default with { FpsCap = 141, Upscaler = UpscalerChoice.Amd }, on, UpscalerStatus.FromNative(on));
+        var mine = JsonNode.Parse(File.ReadAllText(GraphicsStateFile.PathOverride))!.AsObject();
+        static IEnumerable<string> Keys(JsonNode? n, string at) => n is JsonObject o
+            ? o.SelectMany(kv => Keys(kv.Value, at + "/" + kv.Key).Prepend(at + "/" + kv.Key)) : [];
+        Assert.Equal(Keys(example, "").Order(StringComparer.Ordinal), Keys(mine, "").Order(StringComparer.Ordinal));
     }
 
     private static string RepoRoot([CallerFilePath] string source = "")
