@@ -71,9 +71,11 @@ inline bool capturing() {
 // Something to draw this frame. The native fallback menu counts too.
 extern std::atomic<uint32_t> g_render_demand;  // kiln.render acquire_frames handles (render.cpp)
 extern std::atomic<uint32_t> g_footer_demand;  // Kiln's mark next to its line in the main menu's footer (menu_footer.cpp)
+extern std::atomic<uint32_t> g_chat_completion_demand; // focused native slash-command suggestions (issue #44)
 inline bool want_draw() {
     return overlay_drawing_on() && (capturing() || g_demand.load(std::memory_order_relaxed) > 0 || g_render_demand.load(std::memory_order_relaxed) > 0 ||
-                                    g_footer_demand.load(std::memory_order_relaxed) > 0);
+                                    g_footer_demand.load(std::memory_order_relaxed) > 0 ||
+                                    g_chat_completion_demand.load(std::memory_order_relaxed) > 0);
 }
 bool in_frame();  // the calling thread is inside the overlay frame's callbacks (drawing calls work)
 
