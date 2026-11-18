@@ -2453,6 +2453,7 @@
         "one": "{names} needs a newer Kiln.",
         "other": "{names} need a newer Kiln."
       },
+      "graphicsTool": "{name} is installed ({file})",
       "settingAsi": "One Steam setting for Ultimate ASI Loader",
       "notLoading": "Kiln is not loading",
       "didNotStart": "Kiln did not start",

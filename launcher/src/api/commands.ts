@@ -192,6 +192,16 @@ export interface LaunchOptionsInfo {
   chainedOverrideMissing?: boolean;
   advice: string | null;
 }
+/** A graphics tool in the game folder that runs on its own next to Kiln (kiln_manage::game::GraphicsToolNote). */
+export interface GraphicsToolNote {
+  engine: EngineId;
+  /** The tool's file directly in the game folder ("dxgi.dll", "OptiScaler.asi"). */
+  file: string;
+  /** What to expect from Kiln's overlay next to it (English, from the launcher's backend). */
+  text: string;
+  /** Kiln's overlay draws next to it (OptiScaler's own menu is off); false: Kiln's drawing steps aside. */
+  kilnOverlay: boolean;
+}
 export interface GameStatus {
   id: GameId;
   running: boolean;
@@ -213,6 +223,9 @@ export interface GameStatus {
   start?: StartMode;
   /** (dev.29.17) Whether Kiln knows the exe's build; absent when it cannot be told. */
   build?: BuildCheck;
+  /** (dev.29.18) Graphics tools next to the game that change what Kiln's in-game overlay does (OptiScaler); absent or
+   *  empty: none (kiln_manage::game::graphics_tools). */
+  graphicsTools?: GraphicsToolNote[];
 }
 /** How an install starts (kiln_manage::direct). */
 export type StartMode = "steam" | "direct";
@@ -297,7 +310,7 @@ export interface BundlePart {
 export type ProxyKind = "none" | "kiln" | "shroudforge" | "emf" | "unknown" | "notdll"
   // other engines' loaders and tools under a proxy name (kiln_manage::engines)
   | "eml" | "set" | "enshwick" | "greeneye" | "shroudtopia" | "flame" | "shroudlink" | "ember" | "modloaderproxy"
-  | "ultimateasiloader" | "aldrich" | "livemap" | "sharedxp" | "reshade" | "chainloader" | "nativefolders";
+  | "ultimateasiloader" | "aldrich" | "livemap" | "sharedxp" | "reshade" | "chainloader" | "nativefolders" | "optiscaler";
 export interface ProxyClass {
   kind: ProxyKind;
   version: string | null;
@@ -593,7 +606,7 @@ export type DetectKind = "kiln" | "native" | "plugin" | "emf" | "modpack" | "run
 /** kiln_manage::engines::Engine */
 export type EngineId = "kiln" | "emf" | "shroudforge" | "eml" | "set" | "enshwick" | "greeneye" | "shroudtopia" | "flame"
   | "shroudlink" | "ember" | "mod-loader-proxy" | "ultimate-asi-loader" | "aldrich" | "live-map" | "shared-xp" | "reshade"
-  | "chain-loader" | "native-folders";
+  | "chain-loader" | "native-folders" | "optiscaler";
 export interface Detected {
   kind: DetectKind;
   path: string;

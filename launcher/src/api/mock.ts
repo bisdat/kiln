@@ -6,7 +6,7 @@ import { mockStoppedFile, readMockStop, type StopScript } from "./mockStoppedSta
 // Commands without a mock reject with not_implemented, like the wave-0 Rust stubs.
 import type {
   Activation, AddReport, BootSnapshot, BundlePart, RunSide, AddedMod, AdminEndpoint, AppInfo, BootJson, BootState, ConfigDocument, CookJob, CookReason, CookedMod, ConfigFileInfo, ConfigTarget, CrashReport, ReportFinding, ReportSaved, Detected, Distribution,
-  FoundMod, FoundReport, GameInstall, GameStatus, ImportReport, InstallReceipt, InstallResult, InstallState, Json, KilnError, LastServer, LaunchRequest, NewerKilnMod,
+  FoundMod, FoundReport, GameInstall, GameStatus, ImportReport, InstallReceipt, InstallResult, InstallState, Json, KilnError, LastServer, LaunchRequest, NewerKilnMod, GraphicsToolNote,
   LaunchResult, LauncherSettings, RenderInfo, DesktopInfo, LibraryEntry, LibraryRef, LibraryVersion, RollbackReport, VersionRef, TakenOver, LogFile, LogTarget, ModKind, ModpackInstallRequest, ModpackInstallResult, ModsJson,
   NativeJson, NativePlanEntry, NativeUserState, PreStart, Profile, ProfileChange, ProfileMod, ProfileSummary, ProxyClass, Rejection, RemoveReport, ResolvePreview, RuntimeBundle, SaveBackup, SaveSlot,
   SchemaSnapshot, ServerInstance, ServerStatus, Task, TaskState, StartMode, StartSettings, StartSetup, RunnerInfo, BuildCheck,
@@ -110,6 +110,8 @@ let preStart: PreStart | null = null;
 const otherFolder: Record<string, { id: string; root?: string | null } | null> = {};
 /** GameStatus.newerMods per game (tests: `__kilnMock.setNewerMods`). */
 const newerMods: Record<string, NewerKilnMod[]> = {};
+/** GameStatus.graphicsTools per game (tests: `__kilnMock.setGraphicsTools`). */
+const graphicsTools: Record<string, GraphicsToolNote[]> = {};
 
 function mockPart(name: string, sides: RunSide[] = ["server", "client"], isDefault = true): BundlePart {
   return { name, sides, default: isDefault, requires: name === "core" ? [] : ["core"] };
@@ -600,6 +602,7 @@ function status(gameId: string): GameStatus {
       : { value: 'WINEDLLOVERRIDES="dinput8=n,b" %command%', hasDllOverride: true, chainedOverrideMissing: MODE === "chained-override",
           advice: MODE === "chained-override" ? 'WINEDLLOVERRIDES="dinput8,xinput9_1_0=n,b" %command%' : null },
     newerMods: newerMods[gameId] ?? [],
+    ...(graphicsTools[gameId]?.length ? { graphicsTools: graphicsTools[gameId] } : {}),
     ...(g.kind === "client" ? { start: startOf(g), build: buildOf(g) } : {}),
     ...(startOf(g) === "direct" ? { launchOptions: null } : {}),
   };
@@ -1882,6 +1885,7 @@ if (typeof window !== "undefined") (window as unknown as { __kilnMock?: unknown 
   setNoProxy: (on: boolean, gameId = "client-steam") => { noProxy = on; emitGame(gameId, "status"); },
   setOtherFolderProfile: (o: { id: string; root?: string | null } | null, gameId = "client-steam") => { otherFolder[gameId] = o; emitGame(gameId, "status"); },
   setNewerMods: (mods: NewerKilnMod[], gameId = "client-steam") => { newerMods[gameId] = mods; emitGame(gameId, "status"); },
+  setGraphicsTools: (tools: GraphicsToolNote[], gameId = "client-steam") => { graphicsTools[gameId] = tools; emitGame(gameId, "status"); },
   /** A hand edit of the game's kiln.json (a key the launcher's Settings do not list, such as `mods.hosted`). */
   setKilnJson: (path: string, value: Json, gameId = "client-steam") => {
     const f = kilnFile(gameId);

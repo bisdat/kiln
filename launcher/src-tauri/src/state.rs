@@ -189,6 +189,8 @@ pub fn game_status(install: &GameInstall) -> Result<kiln_manage::game::GameStatu
         newer_mods,
         start,
         build,
+        // (dev.29.18) OptiScaler next to the game: what Kiln's overlay does with it
+        graphics_tools: if client { kiln_manage::game::graphics_tools(&install.path) } else { Vec::new() },
     })
 }
 

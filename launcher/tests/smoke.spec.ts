@@ -513,6 +513,17 @@ test("a mod built for a newer Kiln than the game has says Update Kiln on Play", 
   await expect(page).toHaveURL(/\/runtime/);
 });
 
+test("OptiScaler next to the game says what Kiln's overlay does on Play", async ({ page }) => {
+  await open(page, "/");
+  const banner = page.locator(".k-hero-banner .k-banner").filter({ has: page.locator(".k-banner-title", { hasText: /^OptiScaler is installed/ }) });
+  await expect(banner).toHaveCount(0);
+  await page.evaluate(() => (window as unknown as { __kilnMock: { setGraphicsTools: (t: unknown) => void } }).__kilnMock.setGraphicsTools([
+    { engine: "optiscaler", file: "winmm.dll", kilnOverlay: false, text: "Kiln's in-game overlay steps aside while OptiScaler's own menu is on." },
+  ]));
+  await expect(banner.locator(".k-banner-title")).toHaveText("OptiScaler is installed (winmm.dll)");
+  await expect(banner.getByTestId("graphics-tool-note")).toHaveText("Kiln's in-game overlay steps aside while OptiScaler's own menu is on.");
+});
+
 test("destructive actions need the typed word, in the arch", async ({ page }) => {
   // a profile's Delete (Settings, Profiles) keeps its typed word whatever "Type a mod's name to remove it" says
   await open(page, "/settings");

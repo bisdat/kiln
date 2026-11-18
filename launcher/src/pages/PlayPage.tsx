@@ -120,7 +120,7 @@ const PROXY_PRODUCT: Partial<Record<ProxyKind, string>> = {
   eml: "EML", flame: "Flame (Creative Mode)", shroudlink: "shroudlink", modloaderproxy: "ModLoader Proxy",
   ultimateasiloader: "Ultimate ASI Loader", aldrich: "Aldrich Mod Menu",
   set: "Shrouded Engine Tweaks", enshwick: "Enshwick", greeneye: "Greeneye Loader", shroudtopia: "Shroudtopia",
-  ember: "Ember", livemap: "Live Map", sharedxp: "Shared XP", reshade: "ReShade",
+  ember: "Ember", livemap: "Live Map", sharedxp: "Shared XP", reshade: "ReShade", optiscaler: "OptiScaler",
 };
 
 function PlayFor({ game, ctl, onAdded }: { game: GameInstall; ctl: PlayControl; onAdded: (g: GameInstall) => void }) {
@@ -375,6 +375,14 @@ function Banners({ game, ctl, pending, onOffer, boot }: { game: GameInstall; ctl
     out.push(
       <Banner key="nokiln" tone="warn" title={ctl.kilnMissing ? t("play.banner.notLoading") : t("play.banner.didNotStart")} actions={<Button size="s" onClick={() => nav("/logs")}>{t("play.banner.supportReport")}</Button>}>
         {t("play.banner.noKiln")}
+      </Banner>,
+    );
+  }
+  // (dev.29.18) a graphics tool next to the game that changes what Kiln's overlay does (OptiScaler): what to expect
+  for (const g of s?.runtime.installed ? s.graphicsTools ?? [] : []) {
+    out.push(
+      <Banner key={`gfx-${g.engine}`} tone="info" title={t("play.banner.graphicsTool", { name: g.engine === "optiscaler" ? "OptiScaler" : g.engine, file: g.file })}>
+        <span data-testid="graphics-tool-note">{g.text}</span>
       </Banner>,
     );
   }

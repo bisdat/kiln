@@ -228,6 +228,27 @@ fn healthy_install_finds_nothing() {
 
 // The state files of Kiln's deliberate stops (roster, the mods' NPCs and quests not built) go into the zip whole, the
 // next start's .last copies too: a support thread can tell which stop it was (dev.29).
+/// OptiScaler next to the game (an upscaler with its own overlay, inbox 80): one Info finding with what Kiln's overlay
+/// does next to it, its ini in the zip, nothing found when it is not there.
+#[test]
+fn optiscaler_is_named_with_what_kilns_overlay_does() {
+    let f = Fx::healthy("optiscaler");
+    f.w("OptiScaler.ini", "[Menu]\nOverlayMenu=auto\n");
+    let r = build(&f.input());
+    assert!(!r.findings.iter().any(|x| x.id == "optiscaler"), "its ini alone is no OptiScaler: {:#?}", r.findings);
+    f.w("winmm.dll", crate::pe::build_test_dll(&["timeGetTime"], b"OptiScaler.ini"));
+    let r = build(&f.input());
+    assert_eq!(ids(&r), Vec::<&str>::new(), "an Info finding only: {}", r.summary);
+    let x = finding(&r, "optiscaler");
+    assert!(x.text.contains("OptiScaler is installed (winmm.dll)") && x.text.contains("steps aside"), "{}", x.text);
+    assert!(r.summary.contains("Graphics tool: OptiScaler (winmm.dll): Kiln's overlay drawing steps aside"), "{}", r.summary);
+    assert!(r.summary.contains("winmm.dll        OptiScaler"), "{}", r.summary);
+    assert!(file(&r, "game/OptiScaler.ini").is_some_and(|t| t.contains("OverlayMenu=auto")));
+    f.w("OptiScaler.ini", "[Menu]\nOverlayMenu=false\n");
+    let r = build(&f.input());
+    assert!(finding(&r, "optiscaler").text.contains("draws next to it"));
+}
+
 #[test]
 fn stop_state_files_are_in_the_report() {
     let f = Fx::healthy("stops");

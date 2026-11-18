@@ -520,7 +520,8 @@ pub enum Level {
 pub struct Finding {
     /// Stable name: `not-installed`, `proxy-not-kiln`, `files-missing`, `files-changed`, `not-loaded`,
     /// `proton-override`, `proton-chained-override`, `unknown-build`, `safe-idle`, `own-loader`, `loader-in-folder`, `unlisted-mods`,
-    /// `mod-failed`, `hosted-mods`, `hosted-off`, `crash`, `profile-invalid`, `newer-mods`, `no-game`, `sf-startup-failed`.
+    /// `mod-failed`, `hosted-mods`, `hosted-off`, `crash`, `profile-invalid`, `newer-mods`, `no-game`, `sf-startup-failed`,
+    /// `optiscaler`.
     pub id: String,
     pub level: Level,
     pub text: String,
@@ -1138,6 +1139,17 @@ pub fn build(input: &ReportInput) -> Report {
     }
     for p in &proxies {
         let _ = writeln!(k, "  {:<16} {}", p.name, proxy_text(&p.class));
+    }
+    // (dev.29.18) OptiScaler next to the game, under any of its names: what Kiln's overlay does next to it (kiln.ui
+    // decides the same from the same OptiScaler.ini: native/services/ui/overlay_optiscaler.h)
+    for g in crate::game::graphics_tools(&game) {
+        let _ = writeln!(k, "Graphics tool: {} ({}): Kiln's overlay {}", g.engine.name(), g.file,
+            if g.kiln_overlay { "draws next to it (its own menu is off in OptiScaler.ini)" } else { "drawing steps aside" });
+        cx.find("optiscaler", Level::Info, format!("{} is installed ({}). {}", g.engine.name(), g.file, g.text));
+        // its settings (OverlayMenu, frame generation) and its own log when it writes one ([Log] LogToFile=true)
+        for name in ["OptiScaler.ini", "OptiScaler.log"] {
+            cx.add_file(name);
+        }
     }
     match crate::chain::read_raw(&game) {
         Ok(t) if t.trim().is_empty() => {

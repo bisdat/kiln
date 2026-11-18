@@ -111,6 +111,40 @@ pub struct GameStatus {
     /// told (the exe unreadable, no runtime in the game and none in the launcher).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub build: Option<crate::direct::BuildCheck>,
+    /// (dev.29.18) Graphics tools in the game folder that run on their own next to Kiln and change what Kiln's in-game
+    /// overlay does (OptiScaler: `graphics_tools`), one note each. Left out when there is none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub graphics_tools: Vec<GraphicsToolNote>,
+}
+
+/// `GameStatus.graphics_tools`: one tool and what to expect from Kiln's overlay next to it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphicsToolNote {
+    pub engine: crate::engines::Engine,
+    /// The tool's file directly in the game folder (`dxgi.dll`, `OptiScaler.asi`).
+    pub file: String,
+    /// What to expect from Kiln's overlay, one or two sentences for the Play page (its title names the tool and file).
+    pub text: String,
+    /// Kiln's overlay draws next to it (OptiScaler: its own overlay menu off in OptiScaler.ini); false: kiln.ui's
+    /// drawing steps aside on its own.
+    pub kiln_overlay: bool,
+}
+
+/// The graphics tools in a game folder that change what Kiln's overlay does (`GameStatus.graphics_tools`).
+pub fn graphics_tools(game_dir: &Path) -> Vec<GraphicsToolNote> {
+    crate::engines::optiscaler_in(game_dir)
+        .map(|file| {
+            let ini = crate::engines::OptiScalerIni::read(game_dir);
+            GraphicsToolNote {
+                engine: crate::engines::Engine::OptiScaler,
+                text: crate::engines::optiscaler_overlay_note(&ini),
+                kiln_overlay: ini.kiln_overlay_draws(),
+                file,
+            }
+        })
+        .into_iter()
+        .collect()
 }
 
 /// `GameStatus.other_folder_profile`: the id of another data folder's profile active in the game, and the data folder
@@ -713,6 +747,7 @@ pub fn status_with(dirs: &DataDirs, install: &GameInstall, roots: &[SteamRoot]) 
         newer_mods,
         start,
         build,
+        graphics_tools: if install.kind == GameKind::Client { graphics_tools(&install.path) } else { Vec::new() },
     })
 }
 
