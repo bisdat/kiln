@@ -108,8 +108,9 @@ and kept" says it in short; `unit/community.test.ts` checks that its words keep 
   and the account as last read; sign out removes both here whatever the relay says.
 - Reports: the public post as shown; the zip to the team (deleted from their channel after 30 days), to everyone, or
   not sent. Not sent means report.json alone goes to the relay instead, holding only what the post shows (the
-  launcher's version, the findings, the versions line's facts), so the relay can write the post. The zip is redacted by `kiln_manage::report` (user, machine and Steam names, Steam ID, IP addresses, the
-  home folder in paths); saves and mod settings are never in it.
+  launcher's version, the findings, the versions line's facts), so the relay can write the post. The zip is redacted
+  by `kiln_manage::report` (user, machine and Steam names, Steam ID, IP addresses, the home folder in paths); saves and
+  mod settings are never in it.
 - Testers: the hardware lines shown, sent by Volunteer only; results to the build's post; an attached report to the
   team only. Stop testing removes the role and the hardware.
 - Rich Presence: only to the Discord app on this PC, nothing to Frostdev.
