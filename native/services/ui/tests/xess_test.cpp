@@ -676,6 +676,14 @@ static void contexts() {
     upscale::Frame small = game_frame(5);
     small.render_width = 800, small.render_height = 450, small.mv_scale_x = 800, small.mv_scale_y = 450;
     CHECK(b.record(small, &detail) && fx::set_vel == 2 && fx::all[0]->vx == 800 && fx::last.input_width == 800);
+    // below Balanced's range for 1920 (960 and up): said once, XeSS still gets the frame
+    int range_lines = 0;
+    for (const auto& l : log) range_lines += has(l, "this frame, outside XeSS's Balanced range 960x540 to 1920x1080");
+    CHECK(range_lines == 1);
+    CHECK(b.record(small, &detail));
+    range_lines = 0;
+    for (const auto& l : log) range_lines += has(l, "this frame, outside XeSS's");
+    CHECK(range_lines == 1);
     // a quality change: Fsr3Create again (the core destroys first): a new context, the old one retired, not destroyed
     b.destroy();
     upscale::CreateInfo q = game_ci();
@@ -827,8 +835,8 @@ static void motion_copy() {
 }
 
 static void lifetime() {
-    // the backend object goes while its last frames may still run (a core that deletes it early): the context in use and
-    // the recently retired one are left alone, an old retired one goes, and the log says so; XeSS's log callback stops
+    // the backend object goes (the process's end, or a core that deletes it early): it calls nothing of XeSS's, so the
+    // context in use and the retired one stay; XeSS's log callback stops reaching kiln.log
     fx::reset();
     std::vector<std::string> log;
     upscale::Why why;
@@ -848,10 +856,7 @@ static void lifetime() {
         CHECK(b.create(game_ci(), &detail));  // context 2: in use
         CHECK(b.record(game_frame(6), &detail));
     }
-    CHECK(!fx::all[1]->destroyed && !fx::all[2]->destroyed);
-    bool said = false;
-    for (const auto& l : log) said |= has(l, "may still run on the GPU");
-    CHECK(said);
+    CHECK(!fx::all[1]->destroyed && !fx::all[2]->destroyed);  // the destructor calls nothing of XeSS's
     const size_t n = log.size();
     fx::logger("after the backend", kLogError);  // XeSS calling back late: nobody listens, nothing breaks
     CHECK(log.size() == n);

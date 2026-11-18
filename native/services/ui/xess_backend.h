@@ -83,14 +83,14 @@ class XessBackend final : public upscale::Backend {
   public:
     explicit XessBackend(std::unique_ptr<Host> host) : host_(std::move(host)) {}
     ~XessBackend() override {
-        // Contexts the GPU may still use are left alone (their memory goes with the device); idle ones go.
-        if (device_ok_) {
-            collect(false);
-            if (ctx_ || !retired_.empty())
-                host_->log(2, "the XeSS backend went while its last frames may still run on the GPU: their XeSS objects stay until the game's device goes");
-        }
+        // No call into XeSS here: this runs at the process's end too, when the game's device or libxess.dll itself may
+        // be gone, and after a fault (when the core calls nothing more). Contexts still here stay (device_lost frees
+        // them in a normal session; at the end the process takes them).
         Host* me = host_.get();
         log_host().compare_exchange_strong(me, nullptr);
+        // A XeSS thread may be inside on_xess_log with this host right now: the host is never freed once XeSS has it
+        // (kept where the process can still reach it).
+        if (loaded_) kept_hosts().push_back(host_.release());
     }
 
     upscale::Choice choice() const override { return upscale::Choice::xess; }
@@ -290,6 +290,9 @@ class XessBackend final : public upscale::Backend {
         }
         if (beyond) host_->log(2, "the game's ratio " + ratio_text(ratio) + " is past XeSS's Ultra Performance (3.0): XeSS runs outside its range");
         ctx_ = ctx;
+        ctx_lo_ = lo;
+        ctx_hi_ = hi;
+        warned_range_ = false;
         ctx_w_ = ci.output_width;
         ctx_h_ = ci.output_height;
         ctx_flags_ = flags;
@@ -313,6 +316,13 @@ class XessBackend final : public upscale::Backend {
         if (!ctx_) return fail("XeSS has no context to record with");
         std::string why;
         if (!check_frame(f, ctx_w_, ctx_h_, ctx_flags_, &why)) return fail("XeSS cannot take this frame: " + why);
+        if (!warned_range_ && ctx_hi_.x &&
+            (f.render_width < ctx_lo_.x || f.render_height < ctx_lo_.y || f.render_width > ctx_hi_.x || f.render_height > ctx_hi_.y)) {
+            // dynamic resolution below the preset's range: XeSS decides (it may refuse the frame, then the core falls back)
+            warned_range_ = true;
+            host_->log(2, "the game renders " + size_text(f.render_width, f.render_height) + " this frame, outside XeSS's " + preset_of(ctx_quality_).name +
+                              " range " + size_text(ctx_lo_.x, ctx_lo_.y) + " to " + size_text(ctx_hi_.x, ctx_hi_.y));
+        }
         float vx = 0, vy = 0;
         velocity_scale(f, tuning_, &vx, &vy);
         if (vx != vel_x_ || vy != vel_y_) {
@@ -400,6 +410,10 @@ class XessBackend final : public upscale::Backend {
         uint64_t last;  // the core's frame count of the last frame that used it
     };
 
+    static std::vector<Host*>& kept_hosts() {
+        static auto* v = new std::vector<Host*>();  // never freed: see ~XessBackend
+        return *v;
+    }
     static std::atomic<Host*>& log_host() {
         static std::atomic<Host*> h{nullptr};
         return h;
@@ -530,6 +544,8 @@ class XessBackend final : public upscale::Backend {
     Context ctx_ = nullptr;
     uint32_t ctx_w_ = 0, ctx_h_ = 0, ctx_flags_ = 0;
     Quality ctx_quality_ = kNativeAA;
+    Dim ctx_lo_{}, ctx_hi_{};  // XeSS's input range for the context's preset (0: XeSS gave none)
+    bool warned_range_ = false;
     float vel_x_ = NAN, vel_y_ = NAN;
     bool pending_reset_ = true, logged_first_ = false;
     uint64_t records_ = 0;
