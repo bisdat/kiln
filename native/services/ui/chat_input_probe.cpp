@@ -588,11 +588,37 @@ const ChatInputSink kSink{&on_key, &on_text, &on_ime, &on_blur};
 } // namespace
 
 // UI thread, after the game finishes each GameUiFrame.
-void chat_input_frame_end() {
-    if (!g_history_on.load(std::memory_order_acquire) && !g_diagnose_on.load(std::memory_order_acquire)) return;
+void chat_input_frame_end(uintptr_t sys10) {
+    if (!g_history_on.load(std::memory_order_acquire) &&
+        !g_completion_on.load(std::memory_order_acquire) &&
+        !g_diagnose_on.load(std::memory_order_acquire)) return;
     const bool active = g_editing_in_frame && !g_window_blurred.exchange(false);
     // Never swallow gameplay arrows when the native chat edit lacks focus.
     g_keys.focus(active);
+    if (g_completion_on.load(std::memory_order_relaxed)) {
+        std::lock_guard lock(g_completion_mu);
+        auto& snap = g_completion_snapshot;
+        if (!active) {
+            snap.focused = false;
+            snap.has_rect = false;
+            g_pending_valid = false;
+            g_completion_actions.clear();
+            g_keys.completion(false, false, false);
+        } else if (g_rect_metrics && snap.focused && snap.has_rect &&
+                   sys10 > static_cast<uintptr_t>(g_frame_arg)) {
+            const uintptr_t sys = sys10 - static_cast<uintptr_t>(g_frame_arg);
+            float viewport[4]{}, ppu = 0;
+            if (game_copy(reinterpret_cast<const char*>(sys + g_viewport),
+                          reinterpret_cast<char*>(viewport), sizeof viewport) &&
+                game_read(reinterpret_cast<const void*>(sys + g_ppu), &ppu) &&
+                std::isfinite(ppu) && ppu > 0 && ppu < 128) {
+                snap.pixels[0] = viewport[0] + snap.raw[0] * ppu;
+                snap.pixels[1] = viewport[1] + snap.raw[1] * ppu;
+                snap.pixels[2] = snap.raw[2] * ppu;
+                snap.pixels[3] = snap.raw[3] * ppu;
+            } else snap.has_rect = false;
+        }
+    }
     // A single game UI frame may temporarily fail to render either chat
     // control during a transition. That must not erase the saved draft.
     // Exit events explicitly reset the session above; for a real close or
@@ -609,6 +635,54 @@ void chat_input_frame_end() {
             logf(KILN_LOG_INFO, "ui: chat history trace: navigation reset after sustained loss of chat focus");
     }
     g_editing_in_frame = false;
+}
+
+// Only managed Kiln.Ui may call this, enforced by ui.cpp. All game edit
+// functions execute on the scoped UI thread in completion_before(), NEVER here.
+KilnResult chat_completion_io(KilnUiChatCompletion* io) {
+    if (!io || io->size < sizeof(KilnUiChatCompletion)) return KILN_ERR_INVALID_ARGUMENT;
+    if (!g_completion_on.load(std::memory_order_acquire)) return KILN_ERR_UNAVAILABLE;
+    switch (io->operation) {
+    case 1: { // read: one stable snapshot and one queued navigation action
+        std::lock_guard lock(g_completion_mu);
+        const auto& s = g_completion_snapshot;
+        if (!s.focused || !s.has_rect || s.text.size() > 256) return KILN_ERR_UNAVAILABLE;
+        io->focused = 1; io->field = s.field; io->revision = s.revision;
+        io->cursor = s.cursor; io->text_len = static_cast<uint32_t>(s.text.size());
+        std::memset(io->text, 0, sizeof io->text);
+        std::memcpy(io->text, s.text.data(), s.text.size());
+        io->x = s.pixels[0]; io->y = s.pixels[1];
+        io->width = s.pixels[2]; io->height = s.pixels[3];
+        io->action = 0;
+        if (!g_completion_actions.empty()) {
+            io->action = static_cast<uint32_t>(g_completion_actions.front());
+            g_completion_actions.pop_front();
+        }
+        return KILN_OK;
+    }
+    case 2: // set suggestion/list state; atomics safe on render thread
+        g_keys.completion(true, io->suggestions != 0, io->list_open != 0);
+        return KILN_OK;
+    case 3: { // replace: expected text, matching revision and focused field
+        if (io->text_len > 256 || io->replacement_len > 256) return KILN_ERR_INVALID_ARGUMENT;
+        const std::string expected(io->text, io->text_len), replacement(io->replacement, io->replacement_len);
+        if (!safe_line(expected) || !safe_line(replacement) || replacement.empty() || replacement.front() != '/')
+            return KILN_ERR_INVALID_ARGUMENT;
+        std::lock_guard lock(g_completion_mu);
+        const auto& snap = g_completion_snapshot;
+        if (!snap.focused || io->field != snap.field || io->revision != snap.revision ||
+            expected != snap.text) return KILN_ERR_UNAVAILABLE;
+        g_pending_edit = PendingEdit{snap.field, snap.revision, expected, replacement};
+        g_pending_valid = true;
+        g_keys.completion(true, false, false);
+        return KILN_OK;
+    }
+    case 4: // reset UI candidates; never turn history off
+        g_keys.completion(true, false, false);
+        return KILN_OK;
+    default:
+        return KILN_ERR_INVALID_ARGUMENT;
+    }
 }
 
 // on_unload (ui.cpp): the last list is written and the writer thread joined, while the process still runs.
