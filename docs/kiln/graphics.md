@@ -2,9 +2,10 @@
 
 Kiln's own versions of what players use OptiScaler, DLSSTweaks and frame cap mods for, on Kiln's own hooks. Client
 only. Everything is off until the player turns it on: a player who changes nothing gets the game as before, with no
-hook on DLSS and nothing done in a frame but one read of a setting. Code: `native/services/ui/graphics.cpp` (plain logic in
-`frame_pacer.h`, `graphics_settings.h`, `graphics_aside.h`, `ngx_param.h`; host test `tests/graphics_test.cpp`),
-`managed/services/Kiln.Ui/UiGraphics.cs`. How the game uses DLSS: [docs/re/client-upscale.md](../re/client-upscale.md).
+hook on DLSS, no new hook on the game's library loads, and nothing done in a frame but two reads of a flag. Code:
+`native/services/ui/graphics.cpp` (plain logic in `frame_pacer.h`, `graphics_settings.h`, `graphics_aside.h`,
+`ngx_param.h`; host test `tests/graphics_test.cpp`), `managed/services/Kiln.Ui/UiGraphics.cs`. How the game uses DLSS:
+[docs/re/client-upscale.md](../re/client-upscale.md).
 
 ## Where the player sets them
 - In the game: the Kiln menu (Insert, or **Mods** in the game's menus), tab **Graphics**. Changes apply at once and are
@@ -13,7 +14,8 @@ hook on DLSS and nothing done in a frame but one read of a setting. Code: `nativ
   aside for, and when a restart is needed.
 - In the launcher: Settings, card **Graphics** (the same `kiln.json` entries; it also names the tools Kiln steps aside
   for, from the game folder).
-- By hand: `kiln/kiln.json`, section `graphics`:
+- By hand: `kiln/kiln.json`, section `graphics` (the game reads the file again every 2 seconds; a file that is not valid
+  JSON keeps the settings in use, with a warning in kiln.log):
 
 | key | values | default | applies |
 |---|---|---|---|
@@ -77,7 +79,9 @@ the game never sets DLSS up and these settings do nothing (the page says "The ga
   `GetCapabilityParameters`, `CreateFeature`, `CreateFeature1`, `EvaluateFeature`, `ReleaseFeature`. The game's
   statically linked NGX SDK reaches them through `GetProcAddress`; no game code is patched and only NGX's own parameter
   object is used, through the documented parameter names. Kiln's work inside those calls runs under a fault guard: a
-  fault turns Kiln's DLSS settings off for the session (logged), never the game's call.
+  fault turns Kiln's DLSS settings off for the session (logged), never the game's call. Should the game unload the
+  core and load it again, Kiln hooks the new one by the same rules (`graphics: NVIDIA's DLSS core ... was loaded
+  again`).
 
 ## Readout
 A few lines in the top right corner of the game, drawn by Kiln's overlay:
@@ -90,8 +94,9 @@ No latency: the game's Reflex runs through NVAPI and gives Kiln nothing to read 
 the overlay draw every frame (an ImGui frame and one submit per present); off, it costs nothing.
 
 ## Living next to other tools
-Kiln's frame cap and DLSS settings step aside, with one kiln.log line and a line on the Graphics page, when another tool
-does the same (the files are looked up in the game folder at start; `graphics_aside.h`):
+Kiln's frame cap and DLSS settings step aside, with one kiln.log line (when one of them is on at start) and a line on
+the Graphics page, when another tool does the same (the files are looked up in the game folder at start;
+`graphics_aside.h`):
 
 | found | frame cap | DLSS settings |
 |---|---|---|

@@ -18,8 +18,9 @@
 //    changes: the settings follow then.
 //  - The readout: a few lines of ImGui text in the top right corner of the overlay.
 // Nothing of it runs for a player who changes nothing: no NGX hook and no new LoadLibraryExW hook unless a DLSS setting
-// or the readout is on at start; with the cap and the readout off, one relaxed load per present (ui.h
-// graphics_after_present). Every tool steps aside for tools that do the same (graphics_aside.h).
+// or the readout is on at start; with the cap and the readout off, a present costs one relaxed load here (ui.h
+// graphics_after_present) and one in the overlay's want_draw (g_graphics_demand). Every tool steps aside for tools that
+// do the same (graphics_aside.h).
 #include <windows.h>
 
 #include <algorithm>
