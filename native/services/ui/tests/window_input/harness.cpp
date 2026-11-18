@@ -47,7 +47,7 @@
 namespace kui {
 const KilnApi* g_api = nullptr;
 KilnOwner g_owner = 0;
-std::atomic<uint32_t> g_demand{0}, g_interactive{0}, g_render_demand{0}, g_hover_panels{0}, g_footer_demand{0};
+std::atomic<uint32_t> g_demand{0}, g_interactive{0}, g_render_demand{0}, g_hover_panels{0}, g_footer_demand{0}, g_graphics_demand{0};
 std::atomic<bool> g_menu_open{false}, g_text_input{false}, g_want_mouse{false}, g_wheel_active{false}, g_page_capture{false};
 std::atomic<bool> g_overlay_failed{false};  // ui.cpp: the overlay turned off during the session (never here)
 std::atomic<HWND> g_hwnd{nullptr};  // input_poll_window's (drawing off); never called here
