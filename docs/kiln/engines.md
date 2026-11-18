@@ -440,7 +440,12 @@ engines' mods") and 5.8.
   the kind's settings files. Before, it was the kdh1 of the whole folder with the player's settings and what the mod
   writes there (logs, `bin/native-status.txt`), so it changed every minute and was never the Library's. A modpack carries
   what is advertised: the launcher packs the Library entry of Kiln's copy (`modpack::build_with`), else the placed files
-  with the advertised hash in the mod's `identity`.
+  with the advertised hash in the mod's `identity`. The rule in full (which receipt entries count, what may change, an
+  EMF mod keeping the kdh1 of its folder) is the head of `schema/fixtures/engine-identity/engine_identity.py`, a Python
+  reference whose `cases.json` (34 trees and their hashes) both Kiln.Network's and kiln-manage's tests read. Files the
+  mod adds next to Kiln's copy (a status file, a second DLL) do not make it another mod; a file Kiln placed that changed
+  (its Lua, its DLL, its `native-plugin.ini`) does. A player's install of a modpack checks another engine's mod by
+  its hash, its `identity` or its version (`modpack::check_against`; the join never compares these mods).
 - **Licences.** The launcher (MIT) only copies files. It never links or runs EML's GPL code or any other engine's code.
 
 An enabled EML package declaring `runtime` or `runtime-register-dll` also requires hosted ShroudForge, even without

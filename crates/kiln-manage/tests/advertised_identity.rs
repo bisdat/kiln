@@ -127,6 +127,55 @@ fn an_owners_own_folder_is_advertised_without_its_logs_and_settings() {
     assert!(!zip_names(&built.file).iter().any(|n| n.ends_with(".log")));
 }
 
+/// Launchers and servers of 0.2.0-dev.29.17 and 0.2.0-dev.29.18 together, for a server with Kiln's copy of a
+/// ShroudForge mod. 0.2.0-dev.29.17 advertised the kdh1 of the whole folder (Kiln.Network DirHash.Compute, the same as
+/// hash::dirhash: schema/fixtures/dirhash), built modpacks with that hash, and installed one only when each required
+/// hash was a mod's hash in it. The join never compares engine mods in either version, so only modpack installs can
+/// be refused; this is who is.
+#[test]
+fn modpacks_between_0_2_0_dev_29_17_and_0_2_0_dev_29_18() {
+    let t = tmp("compat");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let r = library::import(&dirs, &[package(&t.0)], &mut NoProgress).unwrap();
+    let lib: LibraryRef = r.imported.iter().find(|x| x.kind == ModKind::ShroudForge).cloned().unwrap();
+    let (server, inst) = server(&t.0);
+    control::sync(&dirs, &inst, std::slice::from_ref(&lib), &mut NoProgress).unwrap();
+    let copy = server.join("mods/unifiedemltweaks");
+    // what each server version advertises, now
+    let new_server = || modpack::required(&server).unwrap();
+    let old_server = || -> Vec<kiln_manage::state::RequiredMod> {
+        new_server().into_iter().map(|mut r| { r.hash = kiln_manage::hash::dirhash(&copy).unwrap(); r }).collect()
+    };
+    // a modpack as each launcher version builds it (only the manifest matters to the install check)
+    let new_pack = modpack::verify(&modpack::build_with(Some(&dirs), &server, &t.0.join("out"), "Isles", "1", &mut NoProgress).unwrap().file, None).unwrap();
+    let old_pack = || {
+        let mut m = new_pack.clone();
+        for x in &mut m.mods { x.hash = kiln_manage::hash::dirhash(&copy).unwrap(); x.identity = None; }
+        m
+    };
+    let old_check = |m: &modpack::ModpackManifest, req: &[kiln_manage::state::RequiredMod]| {
+        req.iter().all(|r| m.mods.iter().any(|x| x.kind == r.kind.unwrap_or(ModKind::Kiln) && x.id == r.id && x.hash == r.hash))
+    };
+    let new_check = |m: &modpack::ModpackManifest, req: &[kiln_manage::state::RequiredMod]| modpack::check_against(m, req).is_ok();
+
+    // a mod that writes nothing into its folder
+    let built_17 = old_pack();
+    assert!(old_check(&built_17, &old_server()) && new_check(&built_17, &old_server()), "29.17 pack, 29.17 server: as before");
+    assert!(!old_check(&built_17, &new_server()), "29.17 pack, 29.18 server, 29.17 launcher: refused (build it again)");
+    assert!(new_check(&built_17, &new_server()), "29.17 pack, 29.18 server, 29.18 launcher: installs");
+    assert!(old_check(&new_pack, &new_server()) && new_check(&new_pack, &new_server()), "29.18 pack, 29.18 server: every launcher");
+    assert!(!old_check(&new_pack, &old_server()), "29.18 pack, 29.17 server, 29.17 launcher: refused (update the server)");
+    assert!(new_check(&new_pack, &old_server()), "29.18 pack, 29.17 server, 29.18 launcher: installs");
+
+    // a mod that writes logs and a status file while it runs, and an owner who changes a setting
+    run(&copy);
+    assert!(!old_check(&built_17, &old_server()), "29.17 pack, 29.17 server: refused a minute later already (the old bug)");
+    assert!(new_check(&built_17, &old_server()) && new_check(&built_17, &new_server()), "29.18 launcher: installs");
+    assert!(old_check(&new_pack, &new_server()) && new_check(&new_pack, &new_server()), "29.18 pack, 29.18 server: still every launcher");
+    // the join itself: last-server.json's required list is informational for engine mods on both sides
+    assert_eq!(new_server()[0].hash, lib.hash);
+}
+
 fn zip_names(file: &Path) -> Vec<String> {
     let mut z = zip::ZipArchive::new(std::fs::File::open(file).unwrap()).unwrap();
     (0..z.len()).map(|i| z.by_index(i).unwrap().name().unwrap().to_string()).collect()

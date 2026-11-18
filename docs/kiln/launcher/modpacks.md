@@ -22,7 +22,9 @@ launcher downloads, checks and installs it into a profile. Formats: [contracts.m
    launcher does not cook yet. The manifest has the server's id and name (the
    id file is created in Kiln.Network's format if the server never ran), `kiln: ">=<the server's Kiln>"`, and each mod's
    kind, id, version, name, path, kdh1, clients, side. Another engine's mod that is the launcher's copy of a Library
-   entry is packed from that entry, so its kdh1 is the one the server advertises (0.2.0-dev.29.18); one without its
+   entry is packed from that entry, so its kdh1 is the one the server advertises (0.2.0-dev.29.18); the pack then has
+   that entry's own settings (a ShroudForge mod's `extended.mod.json` as shipped), not the values set on the server,
+   which a pack before 0.2.0-dev.29.18 carried; one without its
    Library entry is packed as placed, without the files the mod wrote, and gets `identity`, the hash the server
    advertises for it, which a player's launcher accepts beside `hash` (an older launcher only `hash`). Logs (`*.log`)
    of other engines' mods are not packed. A modpack built before 0.2.0-dev.29.18 for a server that runs a ShroudForge
