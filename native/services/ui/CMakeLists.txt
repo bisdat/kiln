@@ -10,13 +10,6 @@ target_compile_options(kiln-imgui PRIVATE -w)
 kiln_service(ui ui.cpp overlay_guard.cpp vk.cpp input.cpp keys.cpp game.cpp menu_page.cpp menu_scroll.cpp menu_footer.cpp style.cpp render.cpp wheel.cpp chat_input_probe.cpp)
 target_link_libraries(kiln-ui PRIVATE kiln-imgui user32 imm32 dwmapi gdi32)
 
-# Windows ClangCL 19 intermittently crashes in the x86 assembly printer for
-# chat_input_probe.cpp at Release -O3 (observed in Phase 1b CI run 44269918037).
-# Keep optimizations for the rest of kiln.ui; compile only this hook translation
-# unit at -O1 to avoid that compiler backend bug, without changing the ABI.
-if(WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    set_source_files_properties(chat_input_probe.cpp PROPERTIES COMPILE_OPTIONS "-O1")
-endif()
 
 # Opt-in build target, never packaged: real third-party addon against Kiln's production input and startup gate.
 add_executable(ui-addon-harness EXCLUDE_FROM_ALL tests/addon_harness/harness.cpp input.cpp keys.cpp
