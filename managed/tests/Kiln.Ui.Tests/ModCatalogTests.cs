@@ -344,6 +344,92 @@ public sealed class ModCatalogTests : IDisposable
         Assert.Equal(EngineHealth.Problem, s.Engines.Single(e => e.Kind == "shroudforge").Health);
     }
 
+    // ---- inbox 84: in Copy path mode a ShroudForge profile entry names Kiln's second copy under kiln/profiles/, which
+    // ShroudForge never reads; the row is the copy ShroudForge runs (in <game>/mods), and a setting written there sticks ----
+
+    private const string UtHash = "kdh1:a516c609cfc5672f9ac9484f92f28b0280024635510c7c0630ec9f6b33fc2668";
+
+    /// <summary>A ShroudForge package shaped like Unified EML Tweaks 2.1.1: mod.json, extended.mod.json with one setting,
+    /// native-plugin.ini naming bin/ut_native.dll (ShroudForge's own DLL loader loads it), and Kiln's marker when placed.</summary>
+    private string SfPackage(string folder, bool on = true, string? marker = null)
+    {
+        Directory.CreateDirectory(Path.Combine(folder, "bin"));
+        File.WriteAllText(Path.Combine(folder, "mod.json"), """{"id":"unifiedemltweaks","name":"Unified EML Tweaks","version":"2.1.1","capabilities":["patch","export"]}""");
+        File.WriteAllText(Path.Combine(folder, "extended.mod.json"), "{\n  \"schemaVersion\": 1,\n  \"enabled\": " + (on ? "true" : "false") +
+            ",\n  \"settings\": {\n    \"stackSize\": { \"value\": false, \"label\": \"Bigger stacks\", \"control\": \"toggle\" }\n  }\n}\n");
+        File.WriteAllText(Path.Combine(folder, "native-plugin.ini"), "[Plugin]\nEnabled=1\nDll=bin/ut_native.dll\n");
+        File.WriteAllBytes(Path.Combine(folder, "bin", "ut_native.dll"), [0x4d, 0x5a]);
+        if (marker is not null)
+            File.WriteAllText(Path.Combine(folder, ".kiln-library.json"), JsonSerializer.Serialize(new { format = 1, kind = marker, id = "unifiedemltweaks", version = "2.1.1", hash = UtHash }));
+        return folder;
+    }
+
+    /// <summary>The player's kiln/profile.json (pathMode copy, a ShroudForge entry with a path relative to kiln/, no
+    /// "enabled" key), ShroudForge hosted with its mods folder in the game's mods folder.</summary>
+    private void CopyModeProfile(string path)
+    {
+        var file = Path.Combine(Kiln, "profile.json");
+        File.WriteAllText(file, $$"""
+            {"configDir":"profiles/my-mods/config","dataDir":null,"dropins":true,"format":1,"generation":14,"id":"my-mods",
+             "mods":{"emf":[],"kiln":[],"native":[],"plugin":[],
+               "shroudforge":[{"hash":"{{UtHash}}","id":"unifiedemltweaks","path":{{JsonSerializer.Serialize(path)}},"version":"2.1.1"}]},
+             "name":"My mods","pathMode":"copy","writer":"kiln-manage 0.2.0-dev"}
+            """);
+        Write("boot.json", new { format = 1, pid = Pid, side = "client", profile = new { mode = "active", id = "my-mods", name = "My mods", file, missing = Array.Empty<object>() }, plugins = Array.Empty<object>(), chain = Array.Empty<object>() });
+        Write("shroudforge.json", new { pid = Pid, mode = "hosted", menu = "kiln", runtime = "running", modsDir = Path.Combine(_root, "mods"), startupPrepared = true });
+    }
+
+    private static string ExtendedOf(string folder) => File.ReadAllText(Path.Combine(folder, "extended.mod.json"));
+
+    [Fact]
+    public void In_copy_mode_a_shroudforge_profile_row_is_the_copy_shroudforge_runs_and_a_setting_lands_there()
+    {
+        var copy = SfPackage(Path.Combine(Kiln, "profiles", "my-mods", "shroudforge", "unifiedemltweaks"));
+        var placed = SfPackage(Path.Combine(_root, "mods", "unifiedemltweaks"), marker: "shroudforge");
+        CopyModeProfile("profiles/my-mods/shroudforge/unifiedemltweaks");
+        var s = Read();
+        var row = Mod(s, "shroudforge", "unifiedemltweaks");
+        Assert.Equal(("profile", placed), (row.Source, row.Folder));  // the details' FOLDER line names the folder ShroudForge runs
+        Assert.False(row.Missing);
+
+        // the page writes the row's folder (ShroudForgeUi.Edit -> ShroudForgePackages.SetSetting)
+        var before = ExtendedOf(copy);
+        ShroudForgePackages.SetSetting(row.Folder!, "stackSize", System.Text.Json.Nodes.JsonValue.Create(true));
+        Assert.True(ShroudForgePackages.Read(placed).Values["stackSize"]!.GetValue<bool>());
+        Assert.Equal(before, ExtendedOf(copy));  // Kiln's second copy under kiln/profiles/ is not touched
+        // read again (the page reads the row's folder once a second): the value it shows is the one ShroudForge reads
+        Assert.True(ShroudForgePackages.Read(Mod(Read(), "shroudforge", "unifiedemltweaks").Folder!).Values["stackSize"]!.GetValue<bool>());
+    }
+
+    [Fact]
+    public void In_copy_mode_without_kilns_copy_in_the_mods_folder_the_row_keeps_the_profile_path()
+    {
+        var copy = SfPackage(Path.Combine(Kiln, "profiles", "my-mods", "shroudforge", "unifiedemltweaks"));
+        // another kind's copy of that name (Kiln's marker says xhl): not this entry's
+        SfPackage(Path.Combine(_root, "mods", "unifiedemltweaks"), marker: "xhl");
+        CopyModeProfile("profiles/my-mods/shroudforge/unifiedemltweaks");
+        Assert.Equal(copy, Mod(Read(), "shroudforge", "unifiedemltweaks").Folder);
+        // no folder of that name at all
+        Directory.Delete(Path.Combine(_root, "mods", "unifiedemltweaks"), true);
+        Assert.Equal(copy, Mod(Read(), "shroudforge", "unifiedemltweaks").Folder);
+        // the player's own folder of the same package (no marker), as the launcher's settings editor finds it
+        var own = SfPackage(Path.Combine(_root, "mods", "unifiedemltweaks"));
+        Assert.Equal(own, Mod(Read(), "shroudforge", "unifiedemltweaks").Folder);
+    }
+
+    [Fact]
+    public void In_normal_path_mode_a_shroudforge_profile_row_is_unchanged()
+    {
+        var placed = SfPackage(Path.Combine(_root, "mods", "unifiedemltweaks"), marker: "shroudforge");
+        Profile(new() { ["shroudforge"] = [new { id = "unifiedemltweaks", version = "2.1.1", hash = UtHash, path = placed }] });
+        Write("shroudforge.json", new { pid = Pid, mode = "hosted", menu = "kiln", runtime = "running", modsDir = Path.Combine(_root, "mods"), startupPrepared = true });
+        var s = Read();
+        var row = Mod(s, "shroudforge", "unifiedemltweaks");
+        Assert.Equal(("profile", placed), (row.Source, row.Folder));
+        ShroudForgePackages.SetSetting(row.Folder!, "stackSize", System.Text.Json.Nodes.JsonValue.Create(true));
+        Assert.True(ShroudForgePackages.Read(placed).Values["stackSize"]!.GetValue<bool>());
+    }
+
     [Fact]
     public void Shroudforge_reports_real_activation_errors_side_and_switches_not_just_the_host()
     {
