@@ -286,6 +286,12 @@ outputs were short, `stations: a craft left to the game: base B's opted-in outpu
 P)`; for the first few calls it leaves for another reason, `stations: craft payment left to the game (<why>; ...)`. The
 counters of every outcome are kiln-items.dll's `kiln_stations_craft_stats` (labs and support, not an API).
 
+Tested: `stations_test.cpp` (the order, the lenders, all or nothing, a fault or a remainder after a take) and the lab
+test `mods/tests/station-craft-test` on a dedicated server (33 PASS: [docs/re/stations.md §10.6](../../re/stations.md#106-lab-dev29-sc2)).
+A lab has no logged-in player, so it starts the server with `KILN_STATIONS_CRAFT_LAB=1`: then a spawned player character
+(an id outside the player range, so never a real player) gets the base's stock list the game gives a player with the
+right. Never set it on a real server; kiln.log warns at start when it is set.
+
 This rides on kiln.rules' hook on the game's inventory payment (installed for this alone when neither free crafting nor
 the storage upgrade needs it). With Creative Mode running that hook stands aside, and `stations.craft_sources` is lowered
 at the first world with the reason. When Kiln pays a craft, a detour another loader put on `InventoryPay` *before*

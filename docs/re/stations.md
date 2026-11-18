@@ -620,18 +620,23 @@ snapshot does not carry. `Stations.Fill` from a mod and crafts use the outputs; 
 
 ### 10.4 Which transaction, which thread
 
-`tx+0x68` is the bases system the transaction holds. `InventoryPay` passes it as `BaseStockForPlayer`'s third argument
-(r8); there it is kept in `rbp` (S `0x2081d7`), its `+0x10` is the permission table (S `0x2081e9`), it is `BaseAtPosition`'s
-system (S `0x20821b`..`0x208234`), and the base records it indexes (`rbp + index*0x130 + 0x30`, S `0x208256`) are
-`PlayerBasesSystemServer`'s (stride and offsets as `stations/bases.*`). `handle_crafting_events` puts the bases system it
-holds into its setup at S `0x8b23b` (`[rbp+0x148]`, setup+0xD8 for the setup at `rbp+0x70`), which the transaction keeps
-at `+0x68`. Kiln acts only when that word is the server world's `PlayerBasesSystemServer` (read by the tick thread every
-Pre) and kiln.items' `access_from_tx` accepts the transaction (its job's storage is the server world's: storage kind 0).
+`InventoryPay` passes two words of the transaction to `BaseStockForPlayer`: `tx+0x68` (r8) and `tx+0x70` (r9). The
+function uses r8 when it is set (kept in `rbp` at S `0x2081d7`) and r9 otherwise (`rdi`, S `0x208281`); with both null
+it answers 0x12. Either way the word is a bases system: its `+0x10` is the permission table (S `0x2081e9` / `0x208291`), it
+is `BaseAtPosition`'s system (S `0x20821b` / `0x2082b8`), and the base records it indexes (`+ index*0x130 + 0x30`,
+S `0x208256` / `0x2082ef`) are `PlayerBasesSystemServer`'s (stride and offsets as `stations/bases.*`). The server's craft
+transaction (`handle_crafting_events`) leaves `+0x68` zero and holds `PlayerBasesSystemServer` at `+0x70` **[lab]**
+(dev29-sc2, kiln.log: "bases words 0 / 0x1246a0b20, the server's 0x1246a0b20" on a spawned character's craft; the first
+build of this check read only `+0x68` and so left every player's craft to the game, §10.6). Kiln acts only when the word
+`BaseStockForPlayer` reads is the server world's `PlayerBasesSystemServer` (read by the tick thread every Pre) and
+kiln.items' `access_from_tx` accepts the transaction (its job's storage is the server world's: storage kind 0). A
+factory's own craft (stock mode 0) never reaches this test.
 
 The client's own `RecipeApply` dry run (C `0x2be03a`, inside the station screen's status function `FUN_1402b8430`, stock
 mode 2 set at C `0x2bdd01`, rolled back at C `0x2be048`) also returns to `RecipePaid` (C `0x3f8fec`). On a hosting Kiln
-client with a station opted in, the payment hook sees it. Its transaction is the client world's: its bases word is not the
-server's and its storage kind is 2, so Kiln leaves it to the game (counter `other_world`).
+client with a station opted in, the payment hook sees it. Its transaction is the client world's: its storage kind is 2
+(and its bases words are not the server's), so Kiln leaves it to the game (counter `other_world`). Read from the code,
+not run: a hosting client is the real-client check C8.
 
 Thread. On a dedicated server the game's programs, `handle_crafting_events` among them, run on the tick thread
 (docs/kiln/services/world.md). In a hosted game the server world's programs may run on a game worker thread. Kiln does
@@ -656,3 +661,22 @@ options from the `RecipeRegistry` map, `content/recipes.*`), at most 1024 rows, 
 steps it looks). A vanilla client never says its menu opened and is sent nothing.
 
 ### 10.6 Lab (dev29-sc2)
+
+**Lab (2026-11-17, server 26430253, `mods/tests/station-craft-test`, standard lab save, kiln.log build
+`0.2.0-dev+20261118.0248a86`): 33 PASS, 0 FAIL [lab].** A lab has no logged-in player, so the server ran with
+`KILN_STATIONS_CRAFT_LAB=1` and the payer was a spawned player character (`1_Player`, entity 2618: a bag and a place in the
+base); the switch gives only such a character the base's stock list (§10.1: the game's permission test never answers
+for it). Each case is read against Kiln's counters (`kiln_stations_craft_stats`), not only the inventories:
+- opted out: `idle` for every payment, the craft refused, nothing moved;
+- opted in, one craft of 200 charcoal: the bag's 20 and the base's chests' 57 first, then 123 from an opted-in T1
+  charcoal kiln (`paid +1, from_outputs +123`; kiln.log `stations: a craft paid 123 from opted-in station outputs`); the
+  kiln kept its 36 queued logs; the craft completed;
+- not enough (the kiln's 30 left): `considered +1, short +1`, nothing moved (kiln.log `...cannot cover it (short by 170)`);
+- the bag covers it: `covered +1`, the game's own payment took the bag's charcoal, the kiln was untouched;
+- craft x3: `covered +2, paid +1, from_outputs +150` (each craft its own payment), three crafts made;
+- a kiln opted in in a second base (an altar 565 m away): `considered +1, short +1`, that kiln untouched;
+- a Magic chest as the payer: `no_access +1` (stock error 0x16), the switch does not apply to it, nothing moved.
+The same run without the switch (control): every craft of the character `no_access`, `paid 0`, `lab 0`, the kiln
+untouched. The first run of this branch had every player craft `other_world`: it read only `tx+0x68` (§10.4).
+Factories' own cycles show as `mode0` (about 11 a step in that save). Not run in a lab: anything on a client (C7 to C15).
+
