@@ -549,6 +549,14 @@ internal static unsafe class UiNative
         return slot(&result) == Ok && result.Focused != 0 ? result : null;
     }
 
+    // One stable native call site: kiln.ui's hover capture is per caller.
+    // Always clear it when suggestions disappear or focus changes.
+    internal static void ChatHover(bool hovering)
+    {
+        var t = T;
+        if (t != null) t->SetHoverCapture(hovering ? 1u : 0u);
+    }
+
     internal static bool ChatCandidates(bool hasSuggestions, bool active)
     {
         var slot = ChatCompletionSlot;
