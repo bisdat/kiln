@@ -24,7 +24,8 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/wheel_ma
 "$out/render_math_test"
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/overlay_guard_test.cpp" -o "$out/overlay_guard_test"
 "$out/overlay_guard_test"
-g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/overlay_mode_test.cpp" -o "$out/overlay_mode_test"
+# the overlay's mode, and the player's kiln.json ui.overlay switch (overlay_mode.h, overlay_setting.h)
+g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -I"$here/../../../third_party" "$here/overlay_mode_test.cpp" -o "$out/overlay_mode_test"
 "$out/overlay_mode_test"
 # which present queue the overlay draws on, queues handed out while the device is made, one present's semaphores
 # (vk_present.h, inbox 80)

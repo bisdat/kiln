@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT
 #include <windows.h>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <string>
 #include <atomic>
 #include <mutex>
 #include "services/kiln_caps.h"
@@ -9,6 +12,7 @@
 #include "overlay_guard_file.h"
 #include "overlay_wrappers.h"
 #include "overlay_optiscaler.h"
+#include "overlay_setting.h"
 namespace kui {
 namespace {
 std::mutex mu;
@@ -242,6 +246,21 @@ VOID CALLBACK failed_proof(PVOID, BOOLEAN) {
              static_cast<unsigned long long>(presented), unsigned(kFailedProofMs / 1000));
     } catch (...) { error(); }
 }
+// kiln.json "ui": {"overlay": "off"} (the launcher's Settings, "Kiln"): 0 = drawing off, -1 = Kiln decides
+// (overlay_setting.h). Read once at start; a missing or unreadable file, section or key is -1.
+int kiln_json_overlay() {
+    try {
+        const auto dir = api_path(KILN_PATH_KILN);
+        if (dir.empty()) return -1;
+        std::ifstream in(dir / L"kiln.json", std::ios::binary);
+        if (!in) return -1;
+        const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        return overlay_setting(text);
+    } catch (...) {
+        return -1;
+    }
+}
+
 }
 bool overlay_guard_start() noexcept {
     try {
@@ -256,11 +275,16 @@ bool overlay_guard_start() noexcept {
         char option[8] = {};
         const DWORD option_size = GetEnvironmentVariableA("KILN_UI_OVERLAY", option, sizeof option);
         const int environment = option_size == 1 && option[0] == '0' ? 0 : option_size == 1 && option[0] == '1' ? 1 : -1;
+        // kiln.json ui.overlay "off": the same as KILN_UI_OVERLAY=0, for players who cannot set the environment (Steam's
+        // launch options on Windows); KILN_UI_OVERLAY wins over it
+        const int setting = kiln_json_overlay();
         auto apply_mode = [&](bool guarded) {
-            g_overlay_mode = choose_overlay_mode(false, guarded, sl || optiscaler_off, environment);
+            g_overlay_mode = choose_overlay_mode(false, guarded, sl || optiscaler_off, environment, setting);
             if (!overlay_drawing_on()) {
                 g_overlay_reason = "the overlay's drawing is off: ";
-                g_overlay_reason += environment == 0 ? "KILN_UI_OVERLAY=0" : guarded ? "an earlier overlay start was interrupted"
+                g_overlay_reason += environment == 0 ? "KILN_UI_OVERLAY=0"
+                    : environment == -1 && setting == 0 ? "turned off in Kiln's settings (kiln.json ui.overlay)"
+                    : guarded ? "an earlier overlay start was interrupted"
                     : sl ? "NVIDIA Streamline is installed" : "OptiScaler is installed";
             }
         };
