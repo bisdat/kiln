@@ -595,7 +595,18 @@ LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
             if (g_raw_keyboard_seen && !raw_input::registered_for(6, h)) g_raw_keyboard_seen = false;
             if (!g_raw_keyboard_seen)
                 consumed = on_key(vk, (static_cast<uint32_t>(l) >> 16) & 0x1FF, true, false, hold::prev_of_lparam(l));
-            else consumed = g_consumed[vk];
+            else {
+                consumed = g_consumed[vk];
+                // A previous raw keyboard event does not guarantee that
+                // Proton will deliver the *current Tab* as WM_INPUT. Do
+                // not skip this chat-only keydown if raw Tab wasn't taken.
+                // Router deduplicates any subsequent raw report.
+                if (!consumed && vk == VK_TAB && !cap) {
+                    if (const ChatInputSink* chat = g_chat_sink.load(std::memory_order_acquire))
+                        consumed = chat->key(vk, current_mods(), true, false);
+                    if (consumed) g_consumed[vk] = true;
+                }
+            }
             enqueue(h, m, w, l);
             if (cap || consumed) {
                 if (m == WM_SYSKEYDOWN && vk == VK_F4) break;  // Alt+F4 still closes the game
@@ -609,6 +620,13 @@ LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
             const uint32_t vk = static_cast<uint32_t>(w) & 0xFF;
             if (g_raw_keyboard_seen && !raw_input::registered_for(6, h)) g_raw_keyboard_seen = false;
             if (!g_raw_keyboard_seen) on_key(vk, (static_cast<uint32_t>(l) >> 16) & 0x1FF, false);
+            else if (vk == VK_TAB) {
+                // The paired raw release may be absent. Always release the
+                // chat router's one-press guard on the legacy Tab keyup.
+                if (const ChatInputSink* chat = g_chat_sink.load(std::memory_order_acquire))
+                    chat->key(vk, current_mods(), false, cap);
+                g_consumed[vk] = false;
+            }
             enqueue(h, m, w, l);
             break;  // releases always reach the game
         }
