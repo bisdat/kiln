@@ -871,9 +871,12 @@ const assets = { root: "/home/player/.local/share/kiln", editor: { present: true
 const runtimeInstalls: string[] = [];
 let settings: LauncherSettings = { steamRoots: [], defaultGameId: FRESH ? null : "client-steam", allowHttpModpacks: false, savesKeep: 10, updateCheck: true, animatedFire: true,
   addToActiveProfile: true, modFolderNotes: true, keepVersions: 1 };
-// how the (Linux) launcher draws its window; `?render=software` as after the fallback
-let render: RenderInfo = typeof location !== "undefined" && new URLSearchParams(location.search).get("render") === "software"
-  ? { mode: "software", why: "restart", marker: true, markerWhy: "The launcher turned this on by itself: the page did not start within 15 s of the window with the GPU (2026-11-11T21:04:10Z)" }
+// how the (Linux) launcher draws its window
+// `?render=software`: the fallback's restart; `?render=marker`: a later start, from the marker the fallback wrote
+const RENDER_Q = typeof location !== "undefined" ? new URLSearchParams(location.search).get("render") : null;
+const FELL_BACK = "The launcher turned this on by itself: the page did not start within 15 s of the window with the GPU (2026-11-11T21:04:10Z)";
+let render: RenderInfo = RENDER_Q === "software" ? { mode: "software", why: "restart", marker: true, markerWhy: FELL_BACK }
+  : RENDER_Q === "marker" ? { mode: "software", why: "marker", marker: true, markerWhy: FELL_BACK }
   : { mode: "gpu", why: "default", marker: false };
 // WebKit's sandbox (sandbox.rs): a default start does not use it; `?sandbox=off` as after a message's "off" on a
 // system where bwrap cannot start

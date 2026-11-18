@@ -43,6 +43,10 @@ const SET_BY_US: &str = kiln_manage::hostenv::RENDER_SET;
 #[cfg(any(debug_assertions, feature = "dev-eval"))]
 const TEST_WITHHOLD: &str = "KILN_LAUNCHER_TEST_WITHHOLD_READY";
 
+/// What a start that draws without the GPU because of the marker says, on stderr and in launcher.log.
+pub const UNDO_MARKER: &str =
+    "it stays so until Settings > Appearance > \"Draw the launcher without the GPU\" is turned off (--gpu-render: one start with the GPU)";
+
 /// What software mode sets before GTK starts.
 pub const SOFTWARE_ENV: [(&str, &str); 3] =
     [("WEBKIT_DISABLE_COMPOSITING_MODE", "1"), ("WEBKIT_SKIA_ENABLE_CPU_RENDERING", "1"), ("LIBGL_ALWAYS_SOFTWARE", "1")];
@@ -433,13 +437,21 @@ pub fn prepare(args: &[String]) {
         }
     }
     let log_path = dirs.as_ref().map(|d| d.logs().join("launcher.log").display().to_string()).unwrap_or_else(|| "(no data folder)".into());
-    let hint = match c.mode { Mode::Gpu => format!("; a black window: {ARG_SOFTWARE}"), Mode::Software => String::new() };
+    let hint = match c.why {
+        _ if c.mode == Mode::Gpu => format!("; a black window: {ARG_SOFTWARE}"),
+        Why::Marker => format!("; {UNDO_MARKER}"),
+        _ => String::new(),
+    };
     eprintln!("Kiln Launcher: log {log_path}; {}{hint}", says(&c));
     let mut line = says(&c);
     if c.why == Why::Marker || c.why == Why::Restart {
         if let Some(w) = dirs.as_ref().and_then(marker_why) {
             line += &format!(" ({}: {w})", marker(dirs.as_ref().unwrap()).display());
         }
+    }
+    if c.why == Why::Marker {
+        // a marker can be old: 0.2.0-dev.29 to 29.17 never read it at the start (crate::folder::found_dirs)
+        line += &format!("; {UNDO_MARKER}");
     }
     if let Some(i) = &c.ignored {
         line += &format!("; {i}");

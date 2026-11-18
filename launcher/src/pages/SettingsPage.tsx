@@ -159,6 +159,7 @@ function renderHint(r: RenderInfo): string {
   const now = r.why === "restart" ? (sw ? t("settings.render.noGpuRestart") : t("settings.render.gpuRestart"))
     : r.why === "environment" ? (sw ? t("settings.render.noGpuEnv") : t("settings.render.gpuEnv"))
     : r.why === "argument" ? (sw ? t("settings.render.noGpuArg", { flag: "--software-render" }) : t("settings.render.gpuArg", { flag: "--gpu-render" }))
+    : r.why === "marker" && sw && r.marker ? t("settings.render.noGpuMarker")
     : sw ? t("settings.render.noGpu") : t("settings.render.gpu");
   // markerWhy: the backend's sentence, as it is
   return `${t("settings.render.intro")} ${now}${r.marker && r.markerWhy ? ` ${r.markerWhy}.` : ""}`;

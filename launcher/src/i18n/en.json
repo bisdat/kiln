@@ -2759,6 +2759,7 @@
     "render": {
       "intro": "For a window that stays black. Applies at the next start.",
       "noGpu": "This start draws without the GPU.",
+      "noGpuMarker": "This start draws without the GPU because this switch is on, and every start does until you turn it off.",
       "gpu": "This start draws with the GPU.",
       "noGpuRestart": "This start draws without the GPU: the page did not start with it.",
       "gpuRestart": "This start draws with the GPU: the page did not start with it.",
