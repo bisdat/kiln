@@ -1451,6 +1451,9 @@ export interface EngineStatus {
   /** ShroudForge's startup pass failed at the last start (sf_startup.rs): on the shroudforge row whoever ran it, on the
    *  eml row as a pointer while ShroudForge runs the EML mods. */
   startupFailed?: SfStartupNote | null;
+  /** ShroudForge's startup pass failed in one mod and ran again without it (sf_startup.rs `skipped`): on the shroudforge
+   *  row, a warning (the other mods of the pass loaded). */
+  startupSkipped?: SfSkipNote | null;
 }
 /** ShroudForge's own record of a failed startup pass: the mods it writes into the game data did not load. `text` is the
  *  sentence for the row (no full stop): what happened, which mods, what to change (`cure`). */
@@ -1462,6 +1465,27 @@ export interface SfStartupNote {
   build?: string;
   mods: string[];
   cure?: string;
+  /** Kiln's ShroudForge tried the pass once more without the mod it failed in (first), and that failed too. */
+  skipped?: SfSkippedMod[];
+  retryError?: string;
+  text: string;
+}
+/** A mod ShroudForge's startup pass ran without: the one it failed in, then any left out because they need it. */
+export interface SfSkippedMod {
+  id: string;
+  name?: string;
+  version?: string;
+  error: string;
+}
+/** ShroudForge's startup pass ran without a mod (it failed in it); the other mods loaded. `text`: the sentence for the
+ *  row (no full stop), with the mod, its error and what to do. */
+export interface SfSkipNote {
+  skipped: SfSkippedMod[];
+  loaded: number;
+  at?: string;
+  ownLoader: boolean;
+  version?: string;
+  build?: string;
   text: string;
 }
 /** Shared `.kfc.bak`; `patched` means the `.kfc` differs, not that EML owns it. */
