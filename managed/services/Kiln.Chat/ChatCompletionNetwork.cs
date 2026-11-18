@@ -71,7 +71,7 @@ internal static class ChatCompletionNetwork
     private static readonly Dictionary<uint, Queue<long>> Rates = new();
     private static readonly object ReplyGate = new();
     private static ChatCompletionReply? _reply;
-    private static uint _nextId;
+    private static int _nextId;
     private static bool _startedTick;
 
     internal static void Start()
