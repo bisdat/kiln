@@ -1063,6 +1063,35 @@ fn a_start_without_shroudforge_does_not_repeat_an_earlier_starts_failed_pass() {
     }
 }
 
+/// dev.29.18 (inbox 79): Kiln's ShroudForge ran its startup pass again without the one mod it failed in. The report
+/// names the mod and its error as a warning; the other mods loaded, so it is no `sf-startup-failed`.
+#[test]
+fn a_startup_pass_that_ran_without_one_mod_is_a_warning() {
+    let f = Fx::healthy("sf-skipped");
+    f.w("kiln/plugins/kiln-shroudforge.dll", b"adapter");
+    f.w("kiln/plugins/shroudforge/shroudforge-runtime.dll", b"runtime");
+    for id in ["bone-caller", "wisp"] {
+        f.w(&format!("mods/{id}/mod.json"), serde_json::to_vec(&serde_json::json!({"id": id, "name": id, "version": "1.0.0", "capabilities": ["patch"]})).unwrap());
+        f.w(&format!("mods/{id}/extended.mod.json"), br#"{"schemaVersion":1,"enabled":true,"targets":["client"],"settings":{}}"#);
+        f.w(&format!("mods/{id}/src/mod.lua"), "return {}");
+    }
+    f.w("kiln/state/shroudforge.json", br#"{"format":1,"mode":"hosted","source":"bundled","pid":412,"side":"client","updated":1794308430,
+        "bundled":{"version":"1.7.9","build":"kiln.4b1ab16"},"startupPrepared":true}"#);
+    f.w("shroudforge/state.json", br#"{"schemaVersion":1,"assets":{"schemaVersion":1,"status":"applied","phase":"startup","target":"enshrouded",
+        "completedAt":1794308405,"fingerprint":"f","mods":[{"id":"bone-caller","version":"1.0.0"}],
+        "skipped":[{"id":"wisp","name":"Wisp Light Timer","version":"1.0.3","error":"runtime error: Missing base localization: keenglish"}]}}"#);
+    let r = build(&f.input());
+    let s = finding(&r, "sf-startup-skipped");
+    assert_eq!(s.level, Level::Warning);
+    assert!(s.text.starts_with("ShroudForge 1.7.9, hosted by Kiln, left Wisp Light Timer (wisp 1.0.3) out of its startup pass"), "{}", s.text);
+    assert!(s.text.contains("(runtime error: Missing base localization: keenglish)") && s.text.contains("The other mod that needs that step loaded")
+        && s.text.ends_with("Turn Wisp Light Timer off, or check whether it clashes with another mod: one that changes the same game data can make its check fail."),
+        "{}", s.text);
+    assert!(!r.findings.iter().any(|x| x.id == "sf-startup-failed"), "{:#?}", r.findings);
+    assert!(r.summary.contains("ShroudForge's record of its startup pass (state.json \"assets\"): applied at 2026-11-10T11:00:05Z without Wisp Light Timer"),
+        "{}", r.summary);
+}
+
 #[test]
 fn print_fixture_summary() {
     // `cargo test -p kiln-manage report::tests::print_fixture_summary -- --nocapture` shows a fixture's summary.txt
