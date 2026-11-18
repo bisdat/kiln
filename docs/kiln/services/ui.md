@@ -210,4 +210,5 @@ No table change. Player side: [ui.md](../ui.md#frame-generation-mods-and-drawing
   `kiln.ui.tick` and the window's input subscriptions go on.
 - **Pre-overlay callbacks** (`subscribe_pre_overlay`) are called only for a present on a queue the game got (not one a
   tool added to the device while it was made, such as frame generation's present queue) whose family has graphics;
-  `queue_family` is that queue's own family, never a guess.
+  `queue_family` is that queue's own family, never a guess. A queue Kiln did not see the game get is looked up among the
+  queues the game asked for when it made its device, so the game's own counts wherever it got it.

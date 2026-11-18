@@ -177,6 +177,10 @@ struct Device {
     std::map<VkQueue, uint32_t> queue_family;  // the queues seen handed out on it, with their families (vk_present.h)
     std::vector<uint32_t> families;            // each queue family's VkQueueFlags (empty: not read)
     std::vector<VkQueue> tool_queues;          // handed out while it was being made: a tool's own, never drawn on
+    // the queues the game asked for in its create info (hk_create_device), looked up once a present's queue is not
+    // known (present_queue)
+    std::vector<vk_present::Requested> requested;
+    bool looked_up = false;
     // Kiln did not see this device being created and took it over at its swapchain (adopt_device): only the queues
     // it saw handed out are drawn with, never a guessed family.
     bool adopted = false;
@@ -445,6 +449,44 @@ bool ensure_imgui_vulkan(Device& d, Swap& s, VkQueue queue, uint32_t family) {
     return true;
 }
 
+// Kiln's own lookup of the game's queues (present_queue, g_mu held) on this thread: hk_get_queue does not remember them
+// again (it would take g_mu), should the real vkGetDeviceQueue lead back into Kiln's hook through another tool's patch.
+thread_local bool t_looking_up = false;
+
+bool guarded_get_queue(PFN_vkGetDeviceQueue fn, VkDevice dev, uint32_t family, uint32_t index, VkQueue* out) {
+    __try {
+        fn(dev, family, index, out);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        *out = VK_NULL_HANDLE;
+        return false;
+    }
+}
+
+// What the overlay may do with a present's queue (draw, run_pre_overlay; g_mu held): vk_present::classify. A queue Kiln
+// did not see the game get, or saw only while the device was being made, is looked up once per device among the queues
+// the game asked for when it made it (vk_present.h look_up_requested): the game's own are drawn on as before
+// 0.2.0-dev.29.18, with their own family; a tool's are not.
+vk_present::QueueUse present_queue(Device& d, VkQueue queue, uint32_t* family) {
+    using vk_present::QueueUse;
+    QueueUse use = vk_present::classify(d.queue_family, d.families, d.tool_queues, queue, family);
+    if ((use != QueueUse::unknown && use != QueueUse::tool) || d.adopted || d.looked_up || d.requested.empty()) return use;
+    d.looked_up = true;
+    const auto get = R.get_queue.load();
+    if (!get) return use;
+    const QueueUse before = use;
+    t_looking_up = true;
+    vk_present::look_up_requested(d.requested, [&](uint32_t f, uint32_t i, VkQueue* q) { return guarded_get_queue(get, d.device, f, i, q); },
+                                  d.queue_family, d.tool_queues);
+    t_looking_up = false;
+    use = vk_present::classify(d.queue_family, d.families, d.tool_queues, queue, family);
+    const bool own = use != QueueUse::unknown && use != QueueUse::tool;
+    logf(own ? KILN_LOG_INFO : KILN_LOG_WARN, "ui: the game presents with a queue Kiln %s; among the queues it asked for when it made device %p "
+         "(%zu queue families) it is %s", before == QueueUse::unknown ? "did not see it get" : "saw handed out only while the device was being made",
+         reinterpret_cast<void*>(d.device), d.requested.size(), own ? "there: the game's own" : "not there: a tool's own");
+    return use;
+}
+
 // The overlay's work inside one present. False = present as the game asked.
 bool draw(VkQueue queue, const VkPresentInfoKHR* info, VkSemaphore* out_wait, uint64_t t0) {
     Swap* s = nullptr;
@@ -464,12 +506,13 @@ bool draw(VkQueue queue, const VkPresentInfoKHR* info, VkSemaphore* out_wait, ui
     // Kiln's frame goes to the queue the frame is presented from: only one the game got, of a family with graphics,
     // never a tool's own or a guessed family (vk_present.h)
     uint32_t family = 0;
-    switch (vk_present::classify(d.queue_family, d.families, d.tool_queues, queue, &family)) {
+    switch (present_queue(d, queue, &family)) {
         case vk_present::QueueUse::unknown:
             return fail(KILN_LOG_WARN, "the game presents from a queue Kiln does not know",
                         d.adopted ? "the game presents with a queue Kiln did not see handed out on the device it took over, so its family is not known"
-                                  : "the game presents with a queue Kiln did not see handed out (one a tool between the game and Vulkan made), "
-                                    "so its family is not known and a frame drawn for another family would fail on it");
+                                  : "the game presents with a queue Kiln did not see handed out and that is not one the game asked for when it "
+                                    "made its device (a tool between the game and Vulkan added it), so its family is not known and a frame "
+                                    "drawn for another family would fail on it");
         case vk_present::QueueUse::tool:
             return fail(KILN_LOG_WARN, "frame generation presents the game's frames from its own queue",
                         "the game's frames are presented from a queue a tool under Kiln added to the game's device while it was being "
@@ -649,7 +692,7 @@ bool run_pre_overlay(VkQueue queue, const VkPresentInfoKHR* info, VkSemaphore* w
     Device& d = *dit->second;
     // the subscribers' work goes to the present's queue with its family: never a guessed one (vk_present.h)
     uint32_t family = 0;
-    if (vk_present::classify(d.queue_family, d.families, d.tool_queues, queue, &family) != vk_present::QueueUse::drawable) return false;
+    if (present_queue(d, queue, &family) != vk_present::QueueUse::drawable) return false;
     if (s->listed.empty()) {
         uint32_t n = 0;
         if (d.fn.vkGetSwapchainImagesKHR(d.device, s->swapchain, &n, nullptr) != VK_SUCCESS || n == 0) return false;
@@ -770,6 +813,7 @@ VkResult VKAPI_CALL hk_create_device(VkPhysicalDevice phys, const VkDeviceCreate
     d->device = *out;
     d->gdpa = R.gdpa;
     d->families = std::move(families);
+    d->requested = vk_present::requested_queues(ci ? ci->pQueueCreateInfos : nullptr, ci ? ci->queueCreateInfoCount : 0);
     load_device_fns(*d);
     g_unseen_queues.erase(*out);  // of an older device that had this handle
     vk_present::take_handed(handed, *out, d->queue_family, d->tool_queues);
@@ -840,12 +884,12 @@ void remember_queue(VkDevice dev, uint32_t family, VkQueue q) {
 
 void VKAPI_CALL hk_get_queue(VkDevice dev, uint32_t family, uint32_t index, VkQueue* out) {
     R.get_queue.load()(dev, family, index, out);
-    if (out) remember_queue(dev, family, *out);
+    if (out && !t_looking_up) remember_queue(dev, family, *out);
 }
 
 void VKAPI_CALL hk_get_queue2(VkDevice dev, const VkDeviceQueueInfo2* info, VkQueue* out) {
     R.get_queue2.load()(dev, info, out);
-    if (out && info) remember_queue(dev, info->queueFamilyIndex, *out);
+    if (out && info && !t_looking_up) remember_queue(dev, info->queueFamilyIndex, *out);
 }
 
 VkResult VKAPI_CALL hk_create_surface(VkInstance inst, const VkWin32SurfaceCreateInfoKHR* ci, const VkAllocationCallbacks* a,

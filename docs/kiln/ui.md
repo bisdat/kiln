@@ -959,10 +959,20 @@ the game's frames and the generated ones there, through Kiln's present hook. A q
 being made is a tool's (the game can only ask once its `vkCreateDevice` returned), unless the game asks for it too
 afterwards; Kiln does not draw on a tool's queue, whatever its family. Until 0.2.0-dev.29.18 Kiln did not know such a
 queue and drew for the game's first queue family: its submit (and ImGui's texture upload before it) went to a queue of
-another family and failed with `VK_ERROR_UNKNOWN`, and the game died right after (inbox 80). Now kiln.log names the
-tool's queues when the device is made, Kiln draws nothing on them, and says so with the reason "frame generation
-presents the game's frames from its own queue". Pre-overlay subscribers (kiln_ui.h) are not called for such a present
-either.
+another family. In the player's report it failed with `VK_ERROR_UNKNOWN` and the game died right after (inbox 80; the
+most likely cause, not yet confirmed on his PC). Now kiln.log says how many queues a tool handed out when the device is
+made, Kiln draws nothing on them, and says so with the reason "frame generation presents the game's frames from its own
+queue". Pre-overlay subscribers (kiln_ui.h) are not called for such a present either.
+
+A present from a queue Kiln did not see the game get (another tool's patch on `vkGetDeviceQueue` that does not pass
+the call on to Kiln's, say), or saw handed out only while the device was being made, does not turn the drawing off by
+itself: Kiln looks it up once among the queues the game asked for when it made its device (the `VkDeviceCreateInfo`
+Kiln's `vkCreateDevice` hook saw), with the real `vkGetDeviceQueue`. One of those is the game's own and is drawn on with
+its own family, as before 0.2.0-dev.29.18. kiln.log says so once ("ui: the game presents with a queue Kiln did not see
+it get; ... it is there: the game's own"). A queue a tool added under Kiln is not among them (OptiScaler adds create
+infos for its own queues, or raises a family's count), and Kiln does not draw on it. A device Kiln did not see being
+made (taken over at its swapchain) has no create info to look in: there Kiln draws only with the queues it saw handed
+out, as before.
 
 The semaphores. When Kiln's frame goes in, its submit waits on the game's semaphores and signals Kiln's own, and the
 present waits on Kiln's. When it does not go in, or its submit fails, the present goes on with the game's own

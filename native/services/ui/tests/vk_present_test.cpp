@@ -100,6 +100,62 @@ int main() {
     check(classify(q2, nvidia, t2, 10, &family) == QueueUse::drawable && t2.size() == 1, "the game asked for it: its own again");
     check(classify(q2, nvidia, t2, 20, &family) == QueueUse::tool, "the tool's present queue stays the tool's");
 
+    // The lookup among the queues the game asked for (present_queue: a present from a queue Kiln did not see the game
+    // get, or saw only during the device's creation). The device: family 0 (graphics) with 2 queues, family 2 (compute)
+    // with 1, a protected family 0 entry; a tool under Kiln appended family 2 index 1 (OptiScaler raises the family's
+    // count) and family 1 index 0 for itself.
+    {
+        struct Info {
+            uint32_t queueFamilyIndex, queueCount, flags;
+        };
+        const Info infos[] = {{0, 2, 0}, {2, 1, 0}, {0, 1, 1}, {3, 0, 0}};
+        const auto requested = requested_queues(infos, 4);
+        check(requested.size() == 2 && requested[0].family == 0 && requested[0].count == 2 && requested[1].family == 2,
+              "the create info's entries without flags and with queues");
+        check(requested_queues<Info>(nullptr, 3).empty(), "no create info: nothing to look up");
+        // the driver's queues: (family, index) -> handle
+        const std::map<std::pair<uint32_t, uint32_t>, int> driver = {{{0, 0}, 10}, {{0, 1}, 11}, {{2, 0}, 40}, {{2, 1}, 41}, {{1, 0}, 50}};
+        std::vector<std::pair<uint32_t, uint32_t>> asked;
+        auto get = [&](uint32_t f, uint32_t i, int* q) {
+            asked.push_back({f, i});
+            const auto it = driver.find({f, i});
+            *q = it == driver.end() ? 0 : it->second;
+            return true;
+        };
+        // a normal game whose vkGetDeviceQueue went past Kiln's hook: Kiln saw no queue at all; its present queue is its own
+        std::map<int, uint32_t> seen;
+        std::vector<int> tools;
+        check(classify(seen, nvidia, tools, 10, &family) == QueueUse::unknown, "before the lookup: not known");
+        look_up_requested(requested, get, seen, tools);
+        check(asked.size() == 3 && asked[2] == std::make_pair(2u, 0u), "only the families and indices the game asked for");
+        check(classify(seen, nvidia, tools, 10, &family) == QueueUse::drawable && family == 0, "the game's queue: drawn on, family 0");
+        check(classify(seen, nvidia, tools, 11, &family) == QueueUse::drawable && family == 0, "its second queue of family 0 too");
+        check(classify(seen, nvidia, tools, 40, &family) == QueueUse::no_graphics && family == 2, "its compute queue: known, cannot draw");
+        check(classify(seen, nvidia, tools, 41, &family) == QueueUse::unknown, "the tool's appended index: still not known");
+        check(classify(seen, nvidia, tools, 50, &family) == QueueUse::unknown, "the tool's own family: still not known");
+        // the tool under Kiln got the game's queue and its own while the device was made (FFX's game queue and present
+        // queue); the game's own get went past Kiln: the lookup gives the game its queue back, the tool keeps its own
+        std::map<int, uint32_t> made;
+        std::vector<int> made_tools;
+        std::vector<Handed<int, int>> during = {{1, 0, 10}, {1, 2, 41}, {1, 1, 50}};
+        take_handed(during, 1, made, made_tools);
+        check(classify(made, nvidia, made_tools, 10, &family) == QueueUse::tool, "before the lookup: the tool's");
+        look_up_requested(requested, get, made, made_tools);
+        check(classify(made, nvidia, made_tools, 10, &family) == QueueUse::drawable && family == 0, "the game's queue: its own again");
+        check(classify(made, nvidia, made_tools, 41, &family) == QueueUse::tool && family == 2, "the tool's present queue: the tool's");
+        check(classify(made, nvidia, made_tools, 50, &family) == QueueUse::tool && family == 1, "the tool's queue of its own family: the tool's");
+        // a lookup that faulted or got nothing changes nothing; a family's count is bounded
+        std::map<int, uint32_t> none_seen;
+        std::vector<int> none_tools;
+        look_up_requested(requested, [](uint32_t, uint32_t, int* q) { *q = 0; return true; }, none_seen, none_tools);
+        look_up_requested(requested, [](uint32_t, uint32_t, int* q) { *q = 99; return false; }, none_seen, none_tools);
+        check(none_seen.empty(), "a null queue or a faulted call is not a queue");
+        unsigned calls = 0;
+        look_up_requested(std::vector<Requested>{{0, 1000}}, [&](uint32_t, uint32_t, int* q) { ++calls; *q = 0; return true; },
+                          none_seen, none_tools);
+        check(calls == kMaxLookUpPerFamily, "at most kMaxLookUpPerFamily queues of one family");
+    }
+
     // the semaphores of one present: each signalled once and waited on once, nothing left signalled
     for (const auto& game : std::vector<std::vector<int>>{{1}, {1, 2}, {}}) {
         for (Submit s : {Submit::none, Submit::ok, Submit::failed}) {

@@ -17,6 +17,14 @@
 // its family, as it does not on a queue it never saw. Until 0.2.0-dev.29.18 Kiln did not know such a queue and drew for the
 // first family the game asked for: its submit (and ImGui's texture upload) went to a queue of another family and failed
 // with VK_ERROR_UNKNOWN (inbox 80).
+// A queue Kiln did not see the game get, or saw only while the device was being made, is looked up once per device
+// among the queues the game asked for in the VkDeviceCreateInfo Kiln's vkCreateDevice hook saw (look_up_requested: the
+// real vkGetDeviceQueue for each family and index there). Those are the game's own, whoever asked for them first, and
+// keep their families, so a game whose vkGetDeviceQueue went past Kiln's hook (a tool's or loader's patch on top of it,
+// vkGetDeviceQueue2 where Kiln could not hook it) is drawn on as before 0.2.0-dev.29.18, without a guess. A queue a tool
+// added to the device under Kiln is not among them (OptiScaler appends create infos or raises a family's count:
+// IFGFeature_Vk.cpp PrepareDevice) and stays unknown or a tool's. A device Kiln did not see being made (adopt_device)
+// has no create info to look in: only the queues seen handed out, as before.
 //
 // The semaphores. With Kiln's frame submitted, the submit waits on the present's semaphores (the game's, or a
 // pre-overlay subscriber's when one submitted first) and signals Kiln's own, and the present waits on Kiln's instead:
@@ -94,6 +102,35 @@ void take_handed(const std::vector<Handed<Device, Queue>>& handed, Device device
             bool known = false;
             for (const Queue& t : tool) known = known || t == h.queue;
             if (!known) tool.push_back(h.queue);
+        }
+}
+
+// The queues the game asked for when it made its device, as Kiln's vkCreateDevice hook saw the create info: a family and
+// how many of its queues. Entries with flags (protected queues) are left out: vkGetDeviceQueue cannot get those.
+struct Requested {
+    uint32_t family;
+    uint32_t count;
+};
+inline constexpr uint32_t kMaxLookUpPerFamily = 64;  // more than any GPU has in a family
+
+// `Info`: VkDeviceQueueCreateInfo (queueFamilyIndex, queueCount, flags).
+template <class Info>
+std::vector<Requested> requested_queues(const Info* infos, uint32_t count) {
+    std::vector<Requested> out;
+    for (uint32_t i = 0; infos && i < count; ++i)
+        if (infos[i].flags == 0 && infos[i].queueCount > 0) out.push_back({infos[i].queueFamilyIndex, infos[i].queueCount});
+    return out;
+}
+
+// The game's own queues, looked up (`get(family, index, &queue)`: the real vkGetDeviceQueue; false when it faulted):
+// each becomes known with its family and is not a tool's any more. A queue a tool added under Kiln is not among them.
+template <class Queue, class Get>
+void look_up_requested(const std::vector<Requested>& requested, Get&& get, std::map<Queue, uint32_t>& queues,
+                       std::vector<Queue>& tool) {
+    for (const Requested& r : requested)
+        for (uint32_t i = 0; i < r.count && i < kMaxLookUpPerFamily; ++i) {
+            Queue q{};
+            if (get(r.family, i, &q) && q) game_got(q, r.family, queues, tool);
         }
 }
 
