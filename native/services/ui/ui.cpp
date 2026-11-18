@@ -601,12 +601,18 @@ static_assert(offsetof(KilnUiApi, set_texts) == 1008,
 static_assert(offsetof(KilnUiApi, graphics_set) == 1016 && offsetof(KilnUiApi, graphics_status) == 1024 && sizeof(KilnUiApi) == 1032,
               "kiln.ui appends graphics_set and graphics_status after set_texts (0.2.0-dev.29.18; UiNative.TableGraphics)");
 static_assert(sizeof(KilnUiGraphics) == 48 && offsetof(KilnUiGraphics, custom_scale) == 16 && offsetof(KilnUiGraphics, mode_scale) == 20 &&
-                  offsetof(KilnUiGraphics, readout) == 36,
+                  offsetof(KilnUiGraphics, readout) == 36 && offsetof(KilnUiGraphics, upscaler) == 40 &&
+                  offsetof(KilnUiGraphics, amd_upscaler) == 44,
               "KilnUiGraphics layout (UiNative.Graphics)");
-static_assert(sizeof(KilnUiGraphicsStatus) == 72 && offsetof(KilnUiGraphicsStatus, rendered_fps) == 20 &&
+static_assert(sizeof(KilnUiGraphicsStatus) == KILN_UI_GRAPHICS_STATUS_SIZE_V2 && offsetof(KilnUiGraphicsStatus, rendered_fps) == 20 &&
                   offsetof(KilnUiGraphicsStatus, output_width) == 32 && offsetof(KilnUiGraphicsStatus, dlss_quality) == 40 &&
-                  offsetof(KilnUiGraphicsStatus, render_width) == 48 && offsetof(KilnUiGraphicsStatus, dlss_output_width) == 56,
-              "KilnUiGraphicsStatus layout (UiNative.GraphicsStatus)");
+                  offsetof(KilnUiGraphicsStatus, render_width) == 48 && offsetof(KilnUiGraphicsStatus, dlss_output_width) == 56 &&
+                  offsetof(KilnUiGraphicsStatus, upscaler) == KILN_UI_GRAPHICS_STATUS_SIZE_V1 &&
+                  offsetof(KilnUiGraphicsStatus, upscale_running) == 80 && offsetof(KilnUiGraphicsStatus, upscale_reason) == 84 &&
+                  offsetof(KilnUiGraphicsStatus, upscale_flags) == 88 && offsetof(KilnUiGraphicsStatus, aside_upscale) == 92 &&
+                  offsetof(KilnUiGraphicsStatus, upscale_version) == 96 && offsetof(KilnUiGraphicsStatus, upscale_render_width) == 100 &&
+                  offsetof(KilnUiGraphicsStatus, upscale_output_width) == 108 && offsetof(KilnUiGraphicsStatus, upscale_detail) == 120,
+              "KilnUiGraphicsStatus layout (UiNative.GraphicsStatus; phase B fields from 72)");
 static_assert(sizeof(KilnUiTexts) == 40 && offsetof(KilnUiTexts, language) == 8 && offsetof(KilnUiTexts, keys) == 24 &&
                   offsetof(KilnUiTexts, texts) == 32,
               "KilnUiTexts layout (UiNative.Texts)");
