@@ -36,8 +36,8 @@ public sealed class ChatCompletionDisplayTests
     [Theory]
     [InlineData(0, 54f)]
     [InlineData(1, 94f)]
-    [InlineData(10, 414f)]
-    [InlineData(20, 414f)]
+    [InlineData(10, 454f)]
+    [InlineData(20, 454f)]
     public void PopupHeightAllowsHintAndLargeRows(int rows, float height)
     {
         Assert.Equal(height, ChatCompletionDisplayRules.PopupHeight(1f, rows));
