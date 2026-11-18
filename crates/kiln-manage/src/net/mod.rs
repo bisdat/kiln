@@ -12,7 +12,9 @@
 //! - A download ([`Client::download`]) passes the body of a success answer to a sink as it arrives instead of
 //!   holding it in memory, under the same bound and the same host, credential and redirect rules.
 //! - No message, `Debug` output or error holds a URL's query, a header value or a body.
-//! - There is no DELETE: nothing built on this layer can remove anything at a provider.
+//! - DELETE is refused unless the client was made with [`Client::allow_delete`]: no publish or update provider can
+//!   remove anything at a provider. Only the Kiln relay's client allows it (signing out, deleting a post the player
+//!   asked to delete: `crate::community::relay`).
 //!
 //! Tests use [`fake::FakeTransport`], which records every request, plays scripted responses and can lose a response
 //! after the request was sent. The real transport ([`UreqTransport`], feature `http`) is only ever made by a command
@@ -37,6 +39,8 @@ pub enum Method {
     Post,
     Patch,
     Put,
+    /// Refused unless the client allows it ([`Client::allow_delete`]).
+    Delete,
 }
 
 impl Method {
@@ -46,6 +50,7 @@ impl Method {
             Method::Post => "POST",
             Method::Patch => "PATCH",
             Method::Put => "PUT",
+            Method::Delete => "DELETE",
         }
     }
 }
@@ -210,12 +215,21 @@ pub struct Client<'a> {
     policy: Policy,
     transport: &'a dyn Transport,
     user_agent: String,
+    /// DELETE may be sent ([`Client::allow_delete`]).
+    delete: bool,
 }
 
 impl<'a> Client<'a> {
     /// `user_agent` names the tool and its version only (`kiln/0.2.0`): nothing about the user or the machine.
     pub fn new(policy: Policy, transport: &'a dyn Transport, user_agent: &str) -> Client<'a> {
-        Client { policy, transport, user_agent: user_agent.to_string() }
+        Client { policy, transport, user_agent: user_agent.to_string(), delete: false }
+    }
+
+    /// Lets this client send DELETE. Only a provider that removes something on the user's own request (the Kiln
+    /// relay: a sign-out, a post the player deletes) makes one so; every other client refuses DELETE before sending.
+    pub fn allow_delete(mut self) -> Client<'a> {
+        self.delete = true;
+        self
     }
 
     pub fn policy(&self) -> &Policy {
@@ -247,6 +261,9 @@ impl<'a> Client<'a> {
     }
 
     fn dispatch<'s>(&self, req: Request, mut sink: Option<&mut (dyn Write + 's)>) -> Result<Response> {
+        if req.method == Method::Delete && !self.delete {
+            return Err(Error::new(ErrorCode::Refused, format!("{} may not delete anything. Nothing was sent.", self.policy.provider)));
+        }
         let url = policy::parse_url(&req.url)?;
         let provider = &self.policy.provider;
         let rule = self.policy.rule(&url.host).ok_or_else(|| {

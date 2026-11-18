@@ -16,6 +16,7 @@ import { serverMockHandlers } from "../pages/servers/mockServers";
 import { updateMockHandlers } from "./mockUpdate";
 import { deckMockHandlers } from "../deck/mockDeck";
 import { nexusMockHandlers, NEXUS_MOCK_ENABLED } from "./mockNexus";
+import { communityMockHandlers, communityMockHooks } from "./mockCommunity";
 import { updatesMockHandlers } from "./mockUpdates";
 import { MOCK_PREVIEW, vendorMockHandlers } from "./mockVendor";
 import { chainMockHandlers } from "./mockChain";
@@ -1538,6 +1539,8 @@ const handlers: Record<string, Handler> = {
 Object.assign(handlers, adminMockHandlers(mockEmit));
 Object.assign(handlers, updateMockHandlers(mockEmit, MOCK_DISTRIBUTION, () => settings.updateChannel));
 Object.assign(handlers, deckMockHandlers(handlers));
+// the Discord features: the relay, Discord and the Discord app, faked (./mockCommunity.ts, `?discord=` flags)
+Object.assign(handlers, communityMockHandlers({ emit: mockEmit, gameRunning: () => Object.keys(running).some((g) => !!live(g)) }));
 Object.assign(handlers, nexusMockHandlers(handlers, mockEmit, startTask, quickAdd));
 Object.assign(handlers, updatesMockHandlers(handlers, mockEmit));
 Object.assign(handlers, vendorMockHandlers(startTask, (id) => gameOf(id).kind));
@@ -1890,7 +1893,7 @@ export function mockEmit(name: string, payload: unknown): void {
 }
 
 // Playwright and the dev console reach the fake game through this (mock mode only).
-if (typeof window !== "undefined") (window as unknown as { __kilnMock?: unknown }).__kilnMock = { scriptStoppedStart, externalStart: mockExternalStart, stopGame: mockStopGame, emit: mockEmit, setLastServer: mockSetLastServer,
+if (typeof window !== "undefined") (window as unknown as { __kilnMock?: unknown }).__kilnMock = { community: communityMockHooks(mockEmit), scriptStoppedStart, externalStart: mockExternalStart, stopGame: mockStopGame, emit: mockEmit, setLastServer: mockSetLastServer,
   calls: () => [...commandCalls],
   planCommand: (cmd: string, plan: CommandPlan) => { (commandPlans[cmd] ??= []).push(plan); },
   openGate: (name: string) => { const g = gateOf(name); g.open = true; g.waiters.splice(0).forEach((w) => w()); },

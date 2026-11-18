@@ -7,6 +7,8 @@
 
 pub mod assets;
 pub mod commands;
+/// The optional Discord features beside their commands: Rich Presence, the posts' refresh, reports, testers.
+pub mod community;
 pub mod deck;
 /// The launcher's own messages when its page cannot start (Linux: GTK, else the desktop's tools).
 #[cfg(target_os = "linux")]
@@ -253,7 +255,28 @@ pub fn run() {
             commands::vendor::vendor_status,
             commands::vendor::vendor_license,
             commands::vendor::vendor_download,
-            commands::vendor::vendor_remove
+            commands::vendor::vendor_remove,
+            commands::community::community_settings_get,
+            commands::community::community_settings_set,
+            commands::community::community_status,
+            commands::community::community_feed,
+            commands::community::community_check_member,
+            commands::community::community_signout,
+            commands::community::community_signin_start,
+            commands::community::community_signin_poll,
+            commands::community::community_signin_cancel,
+            commands::community::community_posts,
+            commands::community::community_post_seen,
+            commands::community::community_post_solved,
+            commands::community::community_post_delete,
+            commands::community::community_presence_facts,
+            commands::community::community_report_prepare,
+            commands::community::community_report_send,
+            commands::community::tester_status,
+            commands::community::tester_join,
+            commands::community::tester_leave,
+            commands::community::tester_result_set,
+            commands::community::tester_results_send
         ]))
         .build(tauri::generate_context!())
         .expect("error while building the Kiln Launcher")
