@@ -2790,6 +2790,17 @@
         "unknown": "Another graphics tool is in the game folder ({file})",
         "frameCap": "Kiln's frame cap and DLSS settings step aside; the readout still works.",
         "dlss": "Kiln's DLSS settings step aside; the frame cap and the readout still work."
+      },
+      "labels": {
+        "fpsCap": "Frame cap",
+        "dlssPreset": "DLSS render preset",
+        "dlssScale": "DLSS render size",
+        "dlssRenderScale": "DLSS render scale, every mode",
+        "dlssQualityScale": "DLSS render scale, Quality",
+        "dlssBalancedScale": "DLSS render scale, Balanced",
+        "dlssPerformanceScale": "DLSS render scale, Performance",
+        "dlssUltraPerformanceScale": "DLSS render scale, Ultra Performance",
+        "readout": "Readout"
       }
     },
     "art": {

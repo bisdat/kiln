@@ -532,6 +532,10 @@ test("Settings, Graphics edits kiln.json's graphics section and says which tools
   for (const key of ["graphics.fpsCap", "graphics.dlssPreset", "graphics.dlssScale", "graphics.dlssRenderScale", "graphics.dlssQualityScale",
     "graphics.dlssBalancedScale", "graphics.dlssPerformanceScale", "graphics.dlssUltraPerformanceScale", "graphics.readout"])
     await expect(card.getByText(key, { exact: true })).toBeVisible();
+  // labelled in words, not from the key names ("Fps Cap")
+  await expect(card.locator(".k-sform-label label")).toHaveText(["Frame cap", "DLSS render preset", "DLSS render size", "DLSS render scale, every mode",
+    "DLSS render scale, Quality", "DLSS render scale, Balanced", "DLSS render scale, Performance", "DLSS render scale, Ultra Performance", "Readout"]);
+  await expect(card.getByText(/Fps Cap|Dlss /)).toHaveCount(0);
   // the kiln.json card leaves them to this one
   await expect(page.getByText("graphics.fpsCap", { exact: true })).toHaveCount(1);
   // a change is saved into the game's kiln.json
@@ -539,7 +543,7 @@ test("Settings, Graphics edits kiln.json's graphics section and says which tools
   await expect.poll(() => page.evaluate(() => (window as unknown as Mock).__kilnMock.kilnJsonValues().graphics?.dlssPreset)).toBe("K");
   await card.locator("label.k-toggle[for=\"sf-graphics-readout\"]").click();
   await expect.poll(() => page.evaluate(() => (window as unknown as Mock).__kilnMock.kilnJsonValues().graphics?.readout)).toBe(true);
-  await card.getByRole("button", { name: /Reset/ }).first().click();
+  await card.getByRole("button", { name: "Reset DLSS render preset to its default" }).click();
   await expect.poll(() => page.evaluate(() => (window as unknown as Mock).__kilnMock.kilnJsonValues().graphics?.dlssPreset)).toBeUndefined();
   // the preview's DLSSTweaks, then OptiScaler: one line each
   const lines = card.getByTestId("graphics-step-aside");

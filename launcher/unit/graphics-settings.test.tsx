@@ -1,7 +1,9 @@
 import { expect, test } from "bun:test";
+import { renderToStaticMarkup } from "react-dom/server";
 import type { SchemaSnapshot } from "../src/api/commands";
-import { graphicsAsideText, graphicsSchema, isGraphicsPath } from "../src/components/GraphicsSettings";
+import { graphicsAsideText, graphicsLabels, graphicsSchema, isGraphicsPath } from "../src/components/GraphicsSettings";
 import snapshot from "../src/data/kiln-json.snapshot.json";
+import { SchemaForm } from "../src/ui/SchemaForm";
 
 const schema = snapshot as unknown as SchemaSnapshot;
 
@@ -43,4 +45,37 @@ test("a step-aside line names the tool's file and what steps aside", () => {
   expect(graphicsAsideText({ kind: "nvngx", file: "_nvngx.dll", frameCap: false })).toContain("Another DLSS loader");
   // a kind a later backend adds still reads as a sentence
   expect(graphicsAsideText({ kind: "future", file: "x.dll", frameCap: false })).toStartWith("Another graphics tool is in the game folder (x.dll)");
+});
+
+test("the Graphics card's fields have labels in words, not their key names", () => {
+  const labels = graphicsLabels();
+  const paths = graphicsSchema(schema).entries.map((e) => e.path);
+  // one label per entry the card shows, and no label for an entry it does not
+  expect(Object.keys(labels).sort()).toEqual([...paths].sort());
+  expect(labels["graphics.fpsCap"]).toBe("Frame cap");
+  expect(labels["graphics.dlssPreset"]).toBe("DLSS render preset");
+  expect(labels["graphics.dlssScale"]).toBe("DLSS render size");
+  expect(labels["graphics.dlssUltraPerformanceScale"]).toBe("DLSS render scale, Ultra Performance");
+  for (const p of paths) expect(labels[p]).not.toMatch(/^(Fps|Dlss) /);
+  // the form shows them (and names Reset by them); the key stays under each, as on every card
+  const noop = () => {};
+  const html = renderToStaticMarkup(<SchemaForm schema={graphicsSchema(schema)} values={{ graphics: { fpsCap: 60 } }} onChange={noop} onReset={noop}
+    labels={labels} />);
+  for (const p of paths) expect(html).toContain(`>${labels[p]}</label>`);
+  expect(html).not.toContain("Fps Cap");
+  expect(html).not.toContain("Dlss Preset");
+  expect(html).toContain('aria-label="Reset Frame cap to its default"');
+  expect(html).toContain(">graphics.fpsCap<");
+});
+
+test("a SchemaForm without labels still names its fields from their keys", () => {
+  const noop = () => {};
+  const one = { ...schema, sections: [], entries: schema.entries.filter((e) => e.path === "ui.chatHistory" || e.path === "graphics.fpsCap") };
+  const html = renderToStaticMarkup(<SchemaForm schema={one} values={{}} onChange={noop} />);
+  expect(html).toContain(">Chat History</label>");
+  expect(html).toContain(">Fps Cap</label>");
+  // a labels map that leaves an entry out: that one is named from its key
+  const some = renderToStaticMarkup(<SchemaForm schema={one} values={{}} onChange={noop} labels={{ "graphics.fpsCap": "Frame cap" }} />);
+  expect(some).toContain(">Frame cap</label>");
+  expect(some).toContain(">Chat History</label>");
 });

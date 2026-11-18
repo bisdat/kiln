@@ -21,6 +21,22 @@ export function graphicsSchema(schema: SchemaSnapshot): SchemaSnapshot {
   return { ...schema, sections: [], entries: schema.entries.filter((e) => isGraphicsPath(e.path)) };
 }
 
+/** The card's field labels by kiln.json path (SchemaForm's `labels`): the key names ("fpsCap", "dlssScale") do not read as
+ *  words. Every `graphics.*` entry of the snapshot has one (unit/graphics-settings.test.tsx). */
+export function graphicsLabels(): Record<string, string> {
+  return {
+    "graphics.fpsCap": tr("settings.graphics.labels.fpsCap"),
+    "graphics.dlssPreset": tr("settings.graphics.labels.dlssPreset"),
+    "graphics.dlssScale": tr("settings.graphics.labels.dlssScale"),
+    "graphics.dlssRenderScale": tr("settings.graphics.labels.dlssRenderScale"),
+    "graphics.dlssQualityScale": tr("settings.graphics.labels.dlssQualityScale"),
+    "graphics.dlssBalancedScale": tr("settings.graphics.labels.dlssBalancedScale"),
+    "graphics.dlssPerformanceScale": tr("settings.graphics.labels.dlssPerformanceScale"),
+    "graphics.dlssUltraPerformanceScale": tr("settings.graphics.labels.dlssUltraPerformanceScale"),
+    "graphics.readout": tr("settings.graphics.labels.readout"),
+  };
+}
+
 /** One line for a tool Kiln's graphics tools step aside for: what it is (naming the file) and what steps aside. */
 export function graphicsAsideText(a: GraphicsStepAside): string {
   const tools: Record<string, string> = {
@@ -54,7 +70,7 @@ export function GraphicsCard() {
     <Card id="graphics" title={t("settings.graphics.title")} sub={t("settings.graphics.sub")} aria-label={t("settings.graphics.title")}>
       {status.data && !installed ? <EmptyState title={t("settings.kilnJson.notInstalled")} hint={t("settings.kilnJson.notInstalledHint")} /> :
         doc.isLoading ? <Skeleton lines={4} /> : doc.error ? <EmptyState title={t("settings.kilnJson.unavailable")} hint={errorText(doc.error)} /> : schema && (
-          <SchemaForm schema={schema} values={doc.data!.values} errors={doc.data!.errors.filter((e) => isGraphicsPath(e.path))} disabled={set.isPending || reset.isPending}
+          <SchemaForm schema={schema} values={doc.data!.values} errors={doc.data!.errors.filter((e) => isGraphicsPath(e.path))} disabled={set.isPending || reset.isPending} labels={graphicsLabels()}
             onChange={(path, value) => set.mutate({ path, value })} onReset={(path) => reset.mutate(path)} />
         )}
       {aside.length > 0 && (
