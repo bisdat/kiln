@@ -90,7 +90,7 @@ function Graphics({ gameId }: { gameId: GameId }) {
             <SchemaForm schema={schema} values={doc.data!.values} errors={doc.data!.errors.filter((e) => isGraphicsPath(e.path) && !UPSCALER_PATHS.includes(e.path))} disabled={busy} labels={graphicsLabels()}
               onChange={(path, value) => set.mutate({ path, value })} onReset={(path) => reset.mutate(path)} />
             <UpscalerChoiceBlock values={doc.data!.values} disabled={busy} onSet={(path, value) => set.mutate({ path, value })}
-              state={status.data?.graphicsState} aside={aside} files={files} />
+              state={status.data?.graphicsState} aside={aside} files={files} running={!!status.data?.running} />
             <UpscalerFilesList files={files} />
           </>
         )}
@@ -109,8 +109,10 @@ function Graphics({ gameId }: { gameId: GameId }) {
 }
 
 /** "Behind the game's FSR 3": the choice, AMD's version, the offer of the chosen vendor's files, what runs and why. */
-export function UpscalerChoiceBlock({ values, disabled, onSet, state, aside, files }: {
+export function UpscalerChoiceBlock({ values, disabled, onSet, state, aside, files, running }: {
   values: Json; disabled?: boolean; onSet: (path: string, value: Json) => void; state?: GraphicsNow; aside: GraphicsStepAside[]; files: UpscalerFiles;
+  /** The game runs: the launcher downloads nothing into it now (vendor_download refuses). */
+  running?: boolean;
 }) {
   const t = useT();
   const choice = choiceOf(values);
@@ -135,8 +137,9 @@ export function UpscalerChoiceBlock({ values, disabled, onSet, state, aside, fil
       {offer && (
         <Banner tone="warn" actions={downloading
           ? <Button size="s" variant="ghost" aria-label={t("settings.upscalers.actionLabel.cancel", { name: offer.name })} onClick={() => files.cancel(offer)}>{t("common.cancel")}</Button>
-          : <Button size="s" variant="primary" onClick={() => files.download(offer)}>{t("settings.upscalers.actionLabel.download", { name: offer.name })}</Button>}>
+          : <Button size="s" variant="primary" disabled={running} onClick={() => files.download(offer)}>{t("settings.upscalers.actionLabel.download", { name: offer.name })}</Button>}>
           <span data-testid="upscaler-offer">{t(offer.state === "damaged" ? "settings.graphics.upscaler.offerDamaged" : "settings.graphics.upscaler.offer", { name: offer.name })}</span>
+          {running && !downloading && <span className="k-hint" data-testid="upscaler-offer-running"> {t("settings.graphics.upscaler.offerRunning")}</span>}
           {downloading && <ProgressBar value={task!.progress ?? 0} />}
         </Banner>
       )}

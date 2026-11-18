@@ -118,6 +118,13 @@ test.describe("desktop: Settings, Graphics", () => {
     await mock(page, "setGraphicsState", state({ running: "amdFsr4", version: "4.1.2" }));
     await mock(page, "startOutside", 5);
     await expect(b.getByTestId("upscaler-status")).toHaveAttribute("data-heading", "now");
+    // Intel XeSS chosen while the game runs: its files cannot come now, and the offer says so
+    await b.getByLabel("Upscaler").selectOption("xess");
+    await expect(b.getByTestId("upscaler-offer-running")).toHaveText("Close the game to download them: the launcher does not change the game's files while it runs.");
+    await expect(b.getByRole("button", { name: "Download Intel XeSS" })).toBeDisabled();
+    await expect(b.getByTestId("upscaler-status-line").last()).toHaveText("You chose Intel XeSS since: the game applies it when it next sets FSR up, or from its next start.");
+    await b.getByLabel("Upscaler").selectOption("amd");
+    await expect(b.getByTestId("upscaler-offer")).toHaveCount(0);
     await expect(b.getByTestId("upscaler-status")).toContainText("Now");
     await expect(b.getByTestId("upscaler-status-line")).toHaveText(["AMD FSR 4 runs in place of the game's FSR 3.", "Version 4.1.2."]);
     await b.scrollIntoViewIfNeeded();

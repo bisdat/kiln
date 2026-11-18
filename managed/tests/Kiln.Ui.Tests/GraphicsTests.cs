@@ -542,9 +542,9 @@ public unsafe class GraphicsTests : IDisposable
 
         // the page's line for the chosen one, none for the game's own
         Assert.Null(GraphicsPage.FilesLine(GraphicsSettings.Default));
-        Assert.Equal("Some of AMD FSR's files in kiln/vendor/amd/2.4.0 are missing or changed. Download them again in the Kiln launcher (Settings, Graphics). Until then the game's own FSR 3 runs.",
+        Assert.Equal("Some of AMD FSR's files in kiln/vendor/amd/2.4.0 are missing or changed. Download them again in the Kiln launcher (Settings, Graphics) while the game is closed. Until then the game's own FSR 3 runs.",
             GraphicsPage.FilesLine(GraphicsSettings.Default with { Upscaler = UpscalerChoice.Amd }));
-        Assert.Equal("Intel XeSS's files are not in this game yet. Download them in the Kiln launcher (Settings, Graphics). Until then the game's own FSR 3 runs.",
+        Assert.Equal("Intel XeSS's files are not in this game yet. Download them in the Kiln launcher (Settings, Graphics) while the game is closed. Until then the game's own FSR 3 runs.",
             GraphicsPage.FilesLine(GraphicsSettings.Default with { Upscaler = UpscalerChoice.Xess }));
     }
 

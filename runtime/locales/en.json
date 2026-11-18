@@ -1007,8 +1007,8 @@
       "hint": "Choose FSR 3 as the upscaler in the game's graphics settings: Kiln runs your choice in its place. A change applies when the game next sets FSR up: when a world loads, or when you change FSR's quality, the resolution or the 3D render scale. Kiln needs the vendor's files for AMD FSR and Intel XeSS; the Kiln launcher downloads them (Settings, Graphics).",
       "files": {
         "present": "{name} {version}: the files are in {folder}.",
-        "missing": "{name}'s files are not in this game yet. Download them in the Kiln launcher (Settings, Graphics). Until then the game's own FSR 3 runs.",
-        "changed": "Some of {name}'s files in {folder} are missing or changed. Download them again in the Kiln launcher (Settings, Graphics). Until then the game's own FSR 3 runs."
+        "missing": "{name}'s files are not in this game yet. Download them in the Kiln launcher (Settings, Graphics) while the game is closed. Until then the game's own FSR 3 runs.",
+        "changed": "Some of {name}'s files in {folder} are missing or changed. Download them again in the Kiln launcher (Settings, Graphics) while the game is closed. Until then the game's own FSR 3 runs."
       },
       "running": {
         "off": "Kiln's upscaler is not in use behind the game's FSR 3 now.",
