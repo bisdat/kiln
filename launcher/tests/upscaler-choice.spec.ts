@@ -186,8 +186,10 @@ test.describe("Steam Deck: Settings", () => {
     await expect(choice).toContainText("Upscaler behind the game's FSR 3");
     await expect(choice).toContainText("The game's own FSR 3");
     await expect(row(page, "set-upscaler-now")).toHaveCount(0);
-    // A: the next choice, written to kiln.json
+    // A: the next choice, written to kiln.json (the row waits for kiln.json: focus it once it can take the focus)
+    await expect(choice).toBeEnabled();
     await choice.focus();
+    await expect(choice).toBeFocused();
     await pad(page, "a");
     await expect(choice).toContainText("AMD FSR");
     await expect.poll(async () => (await kilnJson(page)).upscaler).toBe("amd");
