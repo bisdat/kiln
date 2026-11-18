@@ -47,6 +47,7 @@ public sealed class ChatCompletionProtocolTests
         Assert.False(ChatCompletionRules.Matches(reply, 11, "/hea"));
         Assert.False(ChatCompletionRules.Matches(reply, 12, "/heal"));
         Assert.False(ChatCompletionRules.Matches(reply with { Start = 100 }, 12, "/hea"));
+        Assert.False(ChatCompletionRules.Matches(reply with { Suggestions = ["\\ud800"] }, 12, "/hea"));
         Assert.False(ChatCompletionRules.Matches(reply with { Suggestions = ["bad\tword"] }, 12, "/hea"));
         Assert.False(ChatCompletionRules.Matches(reply with { Suggestions = Enumerable.Repeat("x", 21).ToArray() }, 12, "/hea"));
     }
@@ -60,6 +61,19 @@ public sealed class ChatCompletionProtocolTests
         var utf8Length = System.Text.Encoding.UTF8.GetByteCount(text);
         Assert.Equal(10, utf8Length);
         Assert.False(ChatCompletionRules.Matches(
+            new ChatCompletionReply(1, text, (ushort)(utf8Length - 1), ["ok"]), 1, text));
+        Assert.False(ChatCompletionRules.Matches(
             new ChatCompletionReply(1, text, (ushort)(utf8Length + 1), ["ok"]), 1, text));
     }
+    [Fact]
+    public void Unpaired_surrogates_are_never_accepted_as_wire_or_native_text()
+    {
+        Assert.False(ChatCompletionRules.RequestText("/bad" + (char)0xD800));
+        Assert.False(ChatCompletionRules.RequestText("/bad" + (char)0xDC00));
+        Assert.False(ChatCompletionRules.Candidate("bad" + (char)0xD800));
+        Assert.False(ChatCompletionRules.Candidate("bad" + (char)0xDC00));
+        Assert.True(ChatCompletionRules.RequestText("/say 😀"));
+    }
+
+
 }
