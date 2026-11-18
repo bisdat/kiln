@@ -3,6 +3,9 @@ using Xunit;
 
 namespace Kiln.WindowConstraintsTests;
 
+// It installs the fake kiln.ui table and its backend, which every Kiln.Ui test class shares: it runs alone, as they do
+// (FakeUiTable.Install frees a table another class's test may be drawing with).
+[Collection(Kiln.FakeUi.UiSerial.Name)]
 public unsafe class WindowConstraintsTests
 {
     [Fact]
