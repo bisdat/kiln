@@ -47,7 +47,7 @@ public sealed class ChatCompletionProtocolTests
         Assert.False(ChatCompletionRules.Matches(reply, 11, "/hea"));
         Assert.False(ChatCompletionRules.Matches(reply, 12, "/heal"));
         Assert.False(ChatCompletionRules.Matches(reply with { Start = 100 }, 12, "/hea"));
-        Assert.False(ChatCompletionRules.Matches(reply with { Suggestions = ["\\ud800"] }, 12, "/hea"));
+        Assert.False(ChatCompletionRules.Matches(reply with { Suggestions = ["bad" + (char)0xD800] }, 12, "/hea"));
         Assert.False(ChatCompletionRules.Matches(reply with { Suggestions = ["bad\tword"] }, 12, "/hea"));
         Assert.False(ChatCompletionRules.Matches(reply with { Suggestions = Enumerable.Repeat("x", 21).ToArray() }, 12, "/hea"));
     }
