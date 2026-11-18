@@ -339,7 +339,8 @@ public sealed unsafe class ProgramWrap : IDisposable
                 off = $"WhenArchetype cannot read a slice's archetype on this build (kiln.world answered {rc})";
                 return false;
             }
-            var key = (t->GameWorldSession((uint)World), layout);
+            // a prediction storage's archetypes live as long as its client world: keyed by the client world's session
+            var key = (t->GameWorldSession((uint)Table), layout);
             if (!archetype.Cache.TryGetValue(key, out var ok))
             {
                 ok = true;
