@@ -193,6 +193,8 @@ pub fn game_status(install: &GameInstall) -> Result<kiln_manage::game::GameStatu
         graphics_tools: if client { kiln_manage::game::graphics_tools(&install.path) } else { Vec::new() },
         // (dev.29.18) tools next to which Kiln's frame cap and DLSS settings step aside
         graphics_step_aside: if client { kiln_manage::game::graphics_step_aside(&install.path) } else { Vec::new() },
+        // (dev.29.18) state/graphics.json: what Kiln's graphics tools did in the last run ("Now" while it runs)
+        graphics_state: kiln_manage::game::graphics_now(install, proc.as_ref().map(|p| p.pid)),
     })
 }
 
