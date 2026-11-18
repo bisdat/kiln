@@ -26,6 +26,7 @@
 #include "ui.h"
 
 namespace kui {
+std::atomic<uint32_t> g_chat_completion_demand{0};
 namespace {
 
 kiln::RawHook g_input;
@@ -642,6 +643,14 @@ void chat_input_frame_end(uintptr_t sys10) {
         g_manual_text_edit.store(false, std::memory_order_release);
         if (was_browsing && g_trace_on.load(std::memory_order_relaxed))
             logf(KILN_LOG_INFO, "ui: chat history trace: navigation reset after sustained loss of chat focus");
+    }
+    {
+        std::lock_guard lock(g_completion_mu);
+        const auto& snap = g_completion_snapshot;
+        g_chat_completion_demand.store(
+            g_completion_on.load(std::memory_order_relaxed) && active &&
+            snap.focused && snap.has_rect && !snap.text.empty() && snap.text[0] == '/'
+                ? 1u : 0u, std::memory_order_relaxed);
     }
     g_editing_in_frame = false;
 }
