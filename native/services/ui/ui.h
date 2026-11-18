@@ -91,7 +91,7 @@ void chat_input_exit();           // on_unload: writes the history file still pe
 // and in the input.cpp host harnesses, which do not link chat_input_probe.cpp.
 struct ChatInputSink {
     bool (*key)(uint32_t vk, uint32_t mods, bool down, bool captured);  // a key transition; true keeps a press from the game
-    void (*text)(uint32_t ch);                                           // WM_CHAR / WM_UNICHAR, while Kiln does not capture
+    bool (*text)(uint32_t ch);                                           // WM_CHAR / WM_UNICHAR; true drops a consumed Tab's character
     void (*ime)(bool composing);                                         // an IME composition started (true) or ended
     void (*blur)();                                                      // the window lost focus / the game was deactivated
 };
