@@ -1,11 +1,12 @@
 //! "Send to Kiln support": a support report (kiln_manage::report, the same one "Save report..." writes) is prepared
 //! once, shown on the check step (the public post as it will look, the zip's files and size, who sees the zip), and
-//! sent exactly as prepared: the zip's bytes and the post are kept here between the two, for 30 minutes at most. The
-//! known problem that matches the report's findings comes from the last copy of the public list, matched here.
+//! sent exactly as prepared: the zip's bytes and report.json alone are kept here (in memory) between the two, for 30
+//! minutes at most. The known problem that matches the report's findings comes from the last copy of the public list,
+//! matched here.
 
 use crate::state::blocking;
 use kiln_manage::community::known::{KnownAction, KnownList};
-use kiln_manage::community::post::{self, PostFinding, PublicPost};
+use kiln_manage::community::post::{self, PostFinding};
 use kiln_manage::community::relay::{Attachment, ZIP_MAX};
 use kiln_manage::community::{ProblemKind, ReportDraft, SendFrom, SupportPost, ZipAudience};
 use kiln_manage::{Error, ErrorCode};
@@ -22,7 +23,6 @@ struct Prepared {
     /// report.json alone (the tool, the findings, the versions): what goes instead of the zip when nobody gets it.
     alone: Vec<u8>,
     name: String,
-    post: PublicPost,
     from: SendFrom,
     known: Option<String>,
     at: Instant,
@@ -85,11 +85,8 @@ pub async fn prepare(app: tauri::AppHandle, target: Option<crate::commands::logs
     let input = crate::commands::logs::report_input(&app, target)?;
     blocking(move || {
         let r = kiln_manage::report::build(&input);
-        let tmp = std::env::temp_dir().join(format!(".kiln-community-{}.zip", kiln_manage::hash::hex(&kiln_manage::util::random_bytes::<8>()?)));
-        let written = kiln_manage::report::write_zip(&r, &tmp);
-        let zip = written.and_then(|_| std::fs::read(&tmp).map_err(kiln_manage::util::io_at(&tmp, "reading")));
-        let _ = std::fs::remove_file(&tmp);
-        let zip = zip?;
+        // in memory: the zip is never written to a temp folder other users of this PC could read
+        let zip = kiln_manage::report::zip_bytes(&r)?;
         let post = post::build(&r, crate::commands::community::version());
         let known = crate::community::report::matching(&r);
         let id = kiln_manage::hash::hex(&kiln_manage::util::random_bytes::<12>()?);
@@ -111,7 +108,7 @@ pub async fn prepare(app: tauri::AppHandle, target: Option<crate::commands::logs
             let oldest = map.iter().min_by_key(|(_, p)| p.at).map(|(k, _)| k.clone());
             match oldest { Some(k) => { map.remove(&k); } None => break }
         }
-        map.insert(id, Prepared { zip, alone: kiln_manage::report::public_json(&r), name: kiln_manage::report::file_name(std::time::SystemTime::now()), post, from, known: known.map(|k| k.id), at: Instant::now() });
+        map.insert(id, Prepared { zip, alone: kiln_manage::report::public_json(&r), name: kiln_manage::report::file_name(std::time::SystemTime::now()), from, known: known.map(|k| k.id), at: Instant::now() });
         Ok(preview)
     })
     .await

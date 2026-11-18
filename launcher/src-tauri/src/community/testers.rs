@@ -165,11 +165,8 @@ pub async fn send_results(app: tauri::AppHandle, with_report: bool) -> Result<Op
     blocking(move || {
         let zip = match input {
             Some(input) => {
-                let r = kiln_manage::report::build(&input);
-                let tmp = std::env::temp_dir().join(format!(".kiln-community-{}.zip", kiln_manage::hash::hex(&kiln_manage::util::random_bytes::<8>()?)));
-                let w = kiln_manage::report::write_zip(&r, &tmp).and_then(|_| std::fs::read(&tmp).map_err(kiln_manage::util::io_at(&tmp, "reading")));
-                let _ = std::fs::remove_file(&tmp);
-                Some(w?)
+                // in memory, as Send to Kiln support builds it: never in a temp folder other users could read
+                Some(kiln_manage::report::zip_bytes(&kiln_manage::report::build(&input))?)
             }
             None => None,
         };

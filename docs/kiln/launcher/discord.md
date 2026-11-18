@@ -112,7 +112,8 @@ and kept" says it in short; `unit/community.test.ts` checks that its words keep 
   and the account as last read; sign out removes both here whatever the relay says.
 - Reports: the public post as shown; the zip to the team (deleted from their channel after 30 days), to everyone, or
   not sent. Not sent means report.json alone goes to the relay instead, holding only what the post shows (the
-  launcher's version, the findings, the versions line's facts), so the relay can write the post. The zip is redacted
+  launcher's version without a test build's number, the findings, the versions line's facts; not when it was written),
+  so the relay can write the post. The zip is built in memory, never in a shared temp folder. The zip is redacted
   by `kiln_manage::report` (user, machine and Steam names, Steam ID, IP addresses, the home folder in paths); saves and
   mod settings are never in it.
 - Testers: the hardware lines shown, sent by Volunteer only; results to the build's post; an attached report to the
@@ -165,7 +166,7 @@ Discord snowflakes); the launcher refuses anything else before sending.
 | `GET /me` | | `{account: {id, name, username, avatar, avatarUrl, member, tester}}` (id, name, member, tester are used) |
 | `DELETE /session` | | `{ok}` |
 | `DELETE /me?posts=1` / `?posts=0` | | `{ok, forgotten}` |
-| `POST /reports` | multipart: `draft` `{title (3 to 90), kind, when?, text? (1500, 40 lines), zip: team\|public\|none, known?}` and either `zip` (the report zip, file `kiln-report-YYYY-MM-DD.zip`) or, with `zip: none`, `report` (report.json alone, file `report.json`: `{format, written, tool, findings, versions}`) | `{post, tags, reportId, known}` (post used) |
+| `POST /reports` | multipart: `draft` `{title (3 to 90), kind, when?, text? (1500, 40 lines), zip: team\|public\|none, known?}` and either `zip` (the report zip, file `kiln-report-YYYY-MM-DD.zip`) or, with `zip: none`, `report` (report.json alone, file `report.json`: `{format, tool, findings, versions}`, `tool` `kiln-launcher <version>`) | `{post, tags, reportId, known}` (post used) |
 | `GET /posts` | | `{posts: [Post], unread}` (posts used; at most 200) |
 | `POST /posts/{id}/seen`, `POST /posts/{id}/solved` | no body | `{post}` (not used: the list is read again) |
 | `DELETE /posts/{id}` | | `{ok}` |

@@ -247,12 +247,29 @@ fn the_public_facts_name_versions_and_a_mod_count_not_the_mods() {
     input.tool = "kiln-launcher 0.2.0-dev.29.18 beta 3".into();
     let r = build(&input);
     assert_eq!(r.facts.versions()["launcher"], "0.2.0-dev.29.18");
-    // report.json alone for a post without the zip: the tool, the findings, the versions, nothing else
+    // report.json alone for a post without the zip: the launcher's version, the findings, the versions, nothing else
+    // (not when it was written, not the test build's number: the post shows neither)
     let alone: serde_json::Value = serde_json::from_slice(&public_json(&r)).unwrap();
     let mut keys: Vec<&str> = alone.as_object().unwrap().keys().map(String::as_str).collect();
     keys.sort();
-    assert_eq!(keys, ["findings", "format", "tool", "versions", "written"]);
-    assert_eq!(alone["format"], 1);
+    assert_eq!(keys, ["findings", "format", "tool", "versions"]);
+    assert_eq!((alone["format"].as_u64(), alone["tool"].as_str()), (Some(1), Some("kiln-launcher 0.2.0-dev.29.18")));
+}
+
+/// (0.2.0-dev.29.18) The zip in memory is the zip on disk: the same files with the same bytes (the launcher sends it
+/// without writing it to a shared temp folder).
+#[test]
+fn the_zip_in_memory_holds_what_the_zip_on_disk_holds() {
+    let f = Fx::healthy("zip-bytes");
+    let r = build(&f.input());
+    let bytes = zip_bytes(&r).unwrap();
+    let mut z = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+    assert_eq!(z.len(), r.files.len());
+    for (name, data) in &r.files {
+        let mut got = Vec::new();
+        std::io::Read::read_to_end(&mut z.by_name(name).unwrap(), &mut got).unwrap();
+        assert_eq!(&got, data, "{name}");
+    }
 }
 
 /// OptiScaler next to the game (an upscaler with its own overlay, inbox 80): one Info finding with what Kiln's overlay

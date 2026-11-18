@@ -585,12 +585,15 @@ impl PublicFacts {
     }
 }
 
-/// report.json alone with only what a public post shows (the tool, the findings, the versions): what "Send to Kiln
-/// support" sends in place of the zip when the player chooses that nobody gets the zip (the relay builds the post from
-/// it). Not the sections that could not be read, not the channel.
+/// report.json alone with only what a public post shows (the launcher's version, the findings, the versions): what
+/// "Send to Kiln support" sends in place of the zip when the player chooses that nobody gets the zip (the relay builds
+/// the post from it; the privacy page: "only the facts shown in the post go to frostdev.io"). Not when the report was
+/// written, not a test build's number, not the sections that could not be read, not the channel.
 pub fn public_json(r: &Report) -> Vec<u8> {
+    // the relay takes `kiln-launcher <version>`: the version the post shows, without a test build's " beta N"
+    let tool = r.facts.launcher().map(|v| format!("kiln-launcher {v}")).unwrap_or_else(|| r.facts.tool.clone());
     serde_json::to_vec_pretty(&serde_json::json!({
-        "format": 1, "written": r.written, "tool": r.facts.tool, "findings": r.findings, "versions": r.facts.versions(),
+        "format": 1, "tool": tool, "findings": r.findings, "versions": r.facts.versions(),
     }))
     .unwrap_or_default()
 }
@@ -2077,14 +2080,7 @@ pub fn write_zip(report: &Report, out: &Path) -> crate::Result<u64> {
     let f = std::fs::File::create(&tmp).map_err(crate::util::io_at(&tmp, "writing"))?;
     let zerr = |e: zip::result::ZipError| crate::Error::new(crate::ErrorCode::Io, format!("{}: {e}", out.display()));
     let mut w = zip::ZipWriter::new(std::io::BufWriter::new(f));
-    let (y, mo, d, h, mi, s) = crate::util::utc(SystemTime::now());
-    let when = zip::DateTime::from_date_and_time(y.clamp(1980, 2107) as u16, mo as u8, d as u8, h as u8, mi as u8, s as u8)
-        .unwrap_or_else(|_| zip::DateTime::default_for_write());
-    let opts = zip::write::SimpleFileOptions::default()
-        .compression_method(zip::CompressionMethod::Deflated)
-        .compression_level(Some(6))
-        .last_modified_time(when)
-        .unix_permissions(0o644);
+    let opts = zip_options();
     let result = (|| -> crate::Result<()> {
         for (name, data) in &report.files {
             w.start_file(name.as_str(), opts).map_err(zerr)?;
@@ -2101,6 +2097,32 @@ pub fn write_zip(report: &Report, out: &Path) -> crate::Result<u64> {
     }
     crate::util::rename_replace(&tmp, out)?;
     Ok(std::fs::metadata(out)?.len())
+}
+
+/// Each file's options in a report zip: deflated, the time of writing.
+fn zip_options() -> zip::write::SimpleFileOptions {
+    let (y, mo, d, h, mi, s) = crate::util::utc(SystemTime::now());
+    let when = zip::DateTime::from_date_and_time(y.clamp(1980, 2107) as u16, mo as u8, d as u8, h as u8, mi as u8, s as u8)
+        .unwrap_or_else(|_| zip::DateTime::default_for_write());
+    zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated)
+        .compression_level(Some(6))
+        .last_modified_time(when)
+        .unix_permissions(0o644)
+}
+
+/// The report zip [`write_zip`] writes, in memory: for a caller that sends it on (the launcher's "Send to Kiln
+/// support") and must not leave it in a shared temp folder, even for a moment.
+pub fn zip_bytes(report: &Report) -> crate::Result<Vec<u8>> {
+    use std::io::Write;
+    let zerr = |e: zip::result::ZipError| crate::Error::new(crate::ErrorCode::Io, format!("the report zip: {e}"));
+    let mut w = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    let opts = zip_options();
+    for (name, data) in &report.files {
+        w.start_file(name.as_str(), opts).map_err(zerr)?;
+        w.write_all(data)?;
+    }
+    Ok(w.finish().map_err(zerr)?.into_inner())
 }
 
 #[cfg(test)]
