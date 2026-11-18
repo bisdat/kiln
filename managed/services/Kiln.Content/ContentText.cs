@@ -46,6 +46,8 @@ public enum TooltipValueFormat
 /// Duration, milliseconds for DurationMilliseconds, <see cref="Raw"/> / 100 for Float, 0 for Numberless.</param>
 /// <param name="Display">Kiln's rendering of the number ("53", "+5%", "2.5s", "2.6", "" for Numberless), invariant culture.
 /// The game's own formatting (decimal separator, spacing) may differ; format <see cref="Value"/> yourself to match it.</param>
+/// <param name="Format">How the game shows the number (the row's format in its data); <see cref="TooltipValueFormat.Unknown"/>
+/// for a format a later game build adds.</param>
 /// <param name="IsSigned">The game shows a sign ("+5").</param>
 /// <param name="IsScaled">The game scales this number when it shows it (by the weapon's power, an attribute:
 /// <c>scaleData</c>); <see cref="Raw"/> and <see cref="Value"/> are the unscaled base.</param>
