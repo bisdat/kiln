@@ -9,19 +9,23 @@
 // Before 29.18 Play was refused only after the click (the guard), and the task-based activations not at all.
 import type { Task } from "../api/commands";
 import { useDirectActivations } from "../api/oneActivation";
+import { t } from "../i18n";
 import { useTasks } from "../ui/TaskProgress";
 
 /** Task kinds that activate a profile in a game folder: library_add (a resumed or first profile, the add itself),
- *  modpack_install, found_add, nexus_install (they put mods into the active profile and write it), and runtime_install
- *  and runtime_rollback (Kiln's files, then the profile again). Cooks are not here: cook_run holds the game's own lock,
- *  which the backend's start refuses. */
+ *  modpack_install, found_add, nexus_install (they put mods into the active profile and write it), runtime_install
+ *  and runtime_rollback (Kiln's files, then the profile again), and runtime_uninstall (Kiln's files and the mods it
+ *  placed come out, the game's own files go back). Cooks are not here: cook_run holds the game's own lock, which the
+ *  backend's start refuses. */
 export const PROFILE_TASKS: readonly string[] = ["library_add", "modpack_install", "found_add", "nexus_install"];
 export const KILN_TASKS: readonly string[] = ["runtime_install", "runtime_rollback"];
+export const UNINSTALL_TASKS: readonly string[] = ["runtime_uninstall"];
+const HOLDS: readonly string[] = [...PROFILE_TASKS, ...KILN_TASKS, ...UNINSTALL_TASKS];
 
 export interface Applying {
   /** "profile": a profile is written into the game ("Applying profile…"); "kiln": Kiln's own files go in first
-   *  ("Installing Kiln…"). */
-  what: "profile" | "kiln";
+   *  ("Installing Kiln…"); "uninstall": Kiln's files come out ("Removing Kiln…"). */
+  what: "profile" | "kiln" | "uninstall";
   /** The task's title ("Add night-owl-1.2.0.zip", "Install Kiln 0.2.0-dev"); null for an activation that is no task. */
   title: string | null;
 }
@@ -32,7 +36,7 @@ const busy = (task: Task) => task.state === "queued" || task.state === "running"
 export function applyingTask(tasks: Record<string, Task>): Task | null {
   let first: Task | null = null;
   for (const task of Object.values(tasks)) {
-    if (!busy(task) || (!PROFILE_TASKS.includes(task.kind) && !KILN_TASKS.includes(task.kind))) continue;
+    if (!busy(task) || !HOLDS.includes(task.kind)) continue;
     if (!first || task.started < first.started) first = task;
   }
   return first;
@@ -40,8 +44,13 @@ export function applyingTask(tasks: Record<string, Task>): Task | null {
 
 /** What Play waits for: a running activation-like task, else a guarded activation of this game, else null. */
 export function applyingNow(task: Pick<Task, "kind" | "title"> | null, direct: boolean): Applying | null {
-  if (task) return { what: KILN_TASKS.includes(task.kind) ? "kiln" : "profile", title: task.title || null };
+  if (task) return { what: KILN_TASKS.includes(task.kind) ? "kiln" : UNINSTALL_TASKS.includes(task.kind) ? "uninstall" : "profile", title: task.title || null };
   return direct ? { what: "profile", title: null } : null;
+}
+
+/** The line under Play while it waits: "Applying profile…", "Installing Kiln…", "Removing Kiln…". */
+export function applyingWord(a: Pick<Applying, "what">): string {
+  return a.what === "kiln" ? t("shell.play.installingKiln") : a.what === "uninstall" ? t("shell.play.removingKiln") : t("shell.play.applyingProfile");
 }
 
 /** applyingNow for the selected game, re-rendering only when the answer changes (not at each progress report). */

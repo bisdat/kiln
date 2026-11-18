@@ -1,6 +1,7 @@
 // Inbox 89 (29.18): Play while a profile switch was still copying files. Play now says "Applying profile…" and stays
 // off while any activation runs, whatever started it: the task-based ones (library_add, modpack_install, found_add,
-// runtime_install, runtime_rollback), read from the task list, and the guarded commands (a Load in Settings), on the
+// runtime_install, runtime_rollback, runtime_uninstall), read from the task list, and the guarded commands (a Load in
+// Settings), on the
 // desktop and the Deck; it comes back when the activation ends or fails. The mock holds a task kind before its last
 // step until a test opens the gate (`__kilnMock.holdTasks`).
 import { expect, test, type Page } from "@playwright/test";
@@ -34,6 +35,7 @@ async function startTask(page: Page, kind: string) {
     else if (k === "found_add") await api.foundAdd(g, "ember-run", "mods/pack-mule");
     else if (k === "runtime_install") await api.runtimeInstall(g, "0.2.0-dev+20261104.0f1ffa6", {});
     else if (k === "runtime_rollback") await api.runtimeRollback(g, "0.1.9+20261101.a41c2d0");
+    else if (k === "runtime_uninstall") await api.runtimeUninstall(g);
     else throw new Error(`no start for ${k}`);
   }, [kind, G] as const);
 }
@@ -70,6 +72,35 @@ test.describe("desktop", () => {
       await expect(mouth.locator(".k-door-sub")).toHaveCount(0);
     });
   }
+
+  test("Kiln's uninstall holds Play with Removing Kiln…, then Install Kiln is offered", async ({ page }) => {
+    await desktop(page);
+    await hold(page, "runtime_uninstall", "slow-uninstall");
+    await startTask(page, "runtime_uninstall");
+    const mouth = page.locator(".k-door");
+    await expect(mouth).toBeDisabled();
+    await expect(mouth).toHaveAccessibleName("Removing Kiln… (Uninstall Kiln)");
+    await expect(mouth.locator(".k-door-sub")).toHaveText("Removing Kiln…");
+    await expect(page.getByRole("button", { name: "Without mods" })).toBeDisabled();
+    await openGate(page, "slow-uninstall");
+    await expect(mouth).toHaveAccessibleName("Install Kiln", { timeout: 8000 });
+    await expect(mouth).toBeEnabled();
+  });
+
+  test("a dialog opened before an activation began does not start the game while it runs", async ({ page }) => {
+    await desktop(page);
+    await page.getByRole("button", { name: "Vanilla", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Play vanilla once" });
+    await expect(dialog).toBeVisible();
+    await hold(page, "library_add", "slow-under-dialog");
+    await startTask(page, "library_add");
+    await expect(page.locator(".k-door")).toBeDisabled();
+    await dialog.getByRole("button", { name: "Play vanilla" }).click();
+    await expect(page.locator(".k-toast", { hasText: "Kiln is still loading a profile in this game" })).toBeVisible();
+    await expect(page.locator(".k-door")).toHaveAccessibleName("Applying profile… (Add night-owl-1.2.0.zip)");
+    await openGate(page, "slow-under-dialog");
+    await expect(page.locator(".k-door")).toBeEnabled({ timeout: 8000 });
+  });
 
   test("a failed activation gives Play back too", async ({ page }) => {
     await desktop(page);
@@ -135,6 +166,38 @@ test.describe("deck", () => {
       await expect(mouth).toHaveAccessibleName("Play");
     });
   }
+
+  test("Kiln's uninstall holds Home's Play, which keeps the focus, then Install is offered", async ({ page }) => {
+    await deck(page);
+    await hold(page, "runtime_uninstall", "deck-uninstall");
+    await startTask(page, "runtime_uninstall");
+    const mouth = page.locator(".deck-mouth");
+    await expect(mouth).toHaveAttribute("aria-disabled", "true");
+    await expect(mouth).toHaveAccessibleName("Play: Removing Kiln…");
+    await expect.poll(() => page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset?.deckId ?? null)).toBe("mouth");
+    await openGate(page, "deck-uninstall");
+    await expect(mouth).toHaveAccessibleName(/^Install/, { timeout: 8000 });
+    await expect(mouth).not.toHaveAttribute("aria-disabled", "true");
+  });
+
+  test("Home's Play keeps the focus after an install's task ended and before its change has", async ({ page }) => {
+    await deck(page);
+    const focused = () => page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset?.deckId ?? null);
+    await expect.poll(focused).toBe("mouth");
+    // shell/runtimeChange.ts marks the change done a moment after the task's end event: the mouth waits, focused
+    const put = (state: "running" | "done") => page.evaluate(async (st) => {
+      const { useRuntimeChanges } = await import("/src/api/hooks.ts");
+      useRuntimeChanges.getState().put("client-steam", { what: "Update to 0.2.0-dev+20261104.0f1ffa6", version: "0.2.0-dev+20261104.0f1ffa6", taskId: null, state: st, error: null, at: Date.now() });
+    }, state);
+    await put("running");
+    const mouth = page.locator(".deck-mouth");
+    await expect(mouth).toHaveAttribute("aria-disabled", "true");
+    await expect(mouth).toHaveJSProperty("disabled", false);
+    await expect.poll(focused).toBe("mouth");
+    await put("done");
+    await expect(mouth).not.toHaveAttribute("aria-disabled", "true");
+    await expect.poll(focused).toBe("mouth");
+  });
 
   test("a failed activation gives Home's Play back too", async ({ page }) => {
     await deck(page);

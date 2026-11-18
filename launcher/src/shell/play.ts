@@ -19,6 +19,7 @@ import { invalidateGame, useActiveProfile, useGame, useGameStatus, useLaunchStat
 import { runTask, toast } from "../ui";
 import { bootSnapshotBeforeOnce, cookBeforePlay, cookingNotice } from "./cook";
 import { notifyLibraryChanged } from "./libraryChanged";
+import { activationBusy } from "../api/oneActivation";
 import { useApplying, type Applying } from "./applying";
 import { gameState, playState, runStarted, type GameStateView } from "./gameState";
 import { notifyActivation, notifyActivationOf, notifyInstall } from "./notices";
@@ -210,7 +211,11 @@ export function usePlayControl(): PlayControl {
     stoppedStart,
     dismissStop: () => clearStop(id),
     profileName: activeProfile?.name ?? null,
-    play: (mode, profileId) => launch.mutate({ gameId: id, req: { mode, profileId: profileId ?? null } }),
+    play: (mode, profileId) => {
+      // a dialog opened before an activation began (Vanilla once, the Deck's Play once) waits for it too (29.18)
+      if (applying) { toast.info(activationBusy()); return; }
+      launch.mutate({ gameId: id, req: { mode, profileId: profileId ?? null } });
+    },
   };
 }
 

@@ -22,6 +22,7 @@ import { NxmListener } from "./catalogInstall";
 import { ModUpdatesWatcher } from "./modUpdates";
 import { InstallKilnModal, detectGames, useAutoDetect, useDetect, useInstallPrompt, useKilnInstall } from "./firstRun";
 import { clock, usePlayControl, type PlayControl } from "./play";
+import { applyingWord } from "./applying";
 import { Stage, stageInput, type Heat } from "./Stage";
 import { startWords } from "./startProgress";
 import { useT } from "../i18n";
@@ -135,7 +136,7 @@ function Mouth({ isPlay, ctl }: { isPlay: boolean; ctl: PlayControl }) {
     aria = ctl.elapsed !== null ? t("shell.appShell.labelFor", { label: v.label, time }) : v.label;
   } else if (ctl.applying) {
     // (29.18) a profile is being applied to the game, whatever started it: Play waits for it (shell/applying.ts)
-    const what = ctl.applying.what === "kiln" ? t("shell.play.installingKiln") : t("shell.play.applyingProfile");
+    const what = applyingWord(ctl.applying);
     word = t("nav.play"); sub = what; heat = "low"; act = null;
     aria = ctl.applying.title ? t("shell.play.applyingAria", { what, title: ctl.applying.title }) : what;
   } else {

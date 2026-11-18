@@ -4,7 +4,7 @@
 import { beforeEach, expect, test } from "bun:test";
 import type { Task } from "../src/api/commands";
 import { oneActivation, useDirectActivations } from "../src/api/oneActivation";
-import { applyingNow, applyingTask, KILN_TASKS, PROFILE_TASKS } from "../src/shell/applying";
+import { applyingNow, applyingTask, applyingWord, KILN_TASKS, PROFILE_TASKS, UNINSTALL_TASKS } from "../src/shell/applying";
 import { useTasks } from "../src/ui/TaskProgress";
 
 const task = (id: string, kind: string, state: Task["state"], started = "2026-11-18T20:00:00Z"): Task =>
@@ -16,15 +16,16 @@ beforeEach(() => {
 });
 
 test("every activation-like task kind holds Play while it is queued or running, and none after it ended", () => {
-  for (const kind of [...PROFILE_TASKS, ...KILN_TASKS]) {
+  for (const kind of [...PROFILE_TASKS, ...KILN_TASKS, ...UNINSTALL_TASKS]) {
     for (const state of ["queued", "running"] as const) expect(applyingTask({ a: task("a", kind, state) })?.kind).toBe(kind);
     for (const state of ["done", "failed", "canceled"] as const) expect(applyingTask({ a: task("a", kind, state) })).toBeNull();
   }
-  expect([...PROFILE_TASKS, ...KILN_TASKS].sort()).toEqual(["found_add", "library_add", "modpack_install", "nexus_install", "runtime_install", "runtime_rollback"]);
+  expect([...PROFILE_TASKS, ...KILN_TASKS, ...UNINSTALL_TASKS].sort())
+    .toEqual(["found_add", "library_add", "modpack_install", "nexus_install", "runtime_install", "runtime_rollback", "runtime_uninstall"]);
 });
 
 test("tasks that write no profile into a game do not hold Play", () => {
-  for (const kind of ["library_import", "cook_run", "boot_snapshot_run", "vendor_download", "server_mods_sync", "update_install", "app_assets_import", "runtime_uninstall"])
+  for (const kind of ["library_import", "cook_run", "boot_snapshot_run", "vendor_download", "server_mods_sync", "update_install", "app_assets_import"])
     expect(applyingTask({ a: task("a", kind, "running") })).toBeNull();
 });
 
@@ -35,6 +36,10 @@ test("the oldest running one is said; Kiln's install says so, a profile write sa
   expect(applyingNow(task("x", "found_add", "running"), false)).toEqual({ what: "profile", title: "found_add x" });
   expect(applyingNow(null, true)).toEqual({ what: "profile", title: null });
   expect(applyingNow(null, false)).toBeNull();
+  // Kiln's uninstall takes its files and the mods it placed out of the game: Play waits, and says so
+  expect(applyingNow(task("u", "runtime_uninstall", "running"), false)).toEqual({ what: "uninstall", title: "runtime_uninstall u" });
+  expect([applyingWord({ what: "profile" }), applyingWord({ what: "kiln" }), applyingWord({ what: "uninstall" })])
+    .toEqual(["Applying profile…", "Installing Kiln…", "Removing Kiln…"]);
 });
 
 test("the task list feeds it: a task's start, progress and end as kiln://task brings them", () => {

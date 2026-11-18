@@ -3403,6 +3403,7 @@
     "play": {
       "applyingProfile": "Applying profile…",
       "installingKiln": "Installing Kiln…",
+      "removingKiln": "Removing Kiln…",
       "applyingAria": "{what} ({title})",
       "stoppedStart": "Kiln stopped the start",
       "waitingForKiln": "Waiting for Kiln",
