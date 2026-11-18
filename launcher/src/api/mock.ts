@@ -7,7 +7,7 @@ import { mockStoppedFile, readMockStop, type StopScript } from "./mockStoppedSta
 import type {
   Activation, AddReport, BootSnapshot, BundlePart, RunSide, AddedMod, AdminEndpoint, AppInfo, BootJson, BootState, ConfigDocument, CookJob, CookReason, CookedMod, ConfigFileInfo, ConfigTarget, CrashReport, ReportFinding, ReportSaved, Detected, Distribution,
   FoundMod, FoundReport, GameInstall, GameStatus, ImportReport, InstallReceipt, InstallResult, InstallState, Json, KilnError, LastServer, LaunchRequest, NewerKilnMod, GraphicsToolNote, GraphicsStepAside,
-  LaunchResult, LauncherSettings, RenderInfo, DesktopInfo, LibraryEntry, LibraryRef, LibraryVersion, RollbackReport, VersionRef, TakenOver, LogFile, LogTarget, ModKind, ModpackInstallRequest, ModpackInstallResult, ModsJson,
+  LaunchResult, LauncherSettings, RenderInfo, SandboxInfo, DesktopInfo, LibraryEntry, LibraryRef, LibraryVersion, RollbackReport, VersionRef, TakenOver, LogFile, LogTarget, ModKind, ModpackInstallRequest, ModpackInstallResult, ModsJson,
   NativeJson, NativePlanEntry, NativeUserState, PreStart, Profile, ProfileChange, ProfileMod, ProfileSummary, ProxyClass, Rejection, RemoveReport, ResolvePreview, RuntimeBundle, SaveBackup, SaveSlot,
   SchemaSnapshot, ServerInstance, ServerStatus, Task, TaskState, StartMode, StartSettings, StartSetup, RunnerInfo, BuildCheck,
 } from "./commands";
@@ -875,6 +875,13 @@ let settings: LauncherSettings = { steamRoots: [], defaultGameId: FRESH ? null :
 let render: RenderInfo = typeof location !== "undefined" && new URLSearchParams(location.search).get("render") === "software"
   ? { mode: "software", why: "restart", marker: true, markerWhy: "The launcher turned this on by itself: the page did not start within 15 s of the window with the GPU (2026-11-11T21:04:10Z)" }
   : { mode: "gpu", why: "default", marker: false };
+// WebKit's sandbox (sandbox.rs): a default start does not use it; `?sandbox=off` as after a message's "off" on a
+// system where bwrap cannot start
+const SANDBOX_UNUSED = "WebKitGTK's GTK 3 API, which the launcher uses, runs it only when WEBKIT_FORCE_SANDBOX=1 is set";
+let sandbox: SandboxInfo = typeof location !== "undefined" && new URLSearchParams(location.search).get("sandbox") === "off"
+  ? { want: "off", why: "marker", marker: true, markerWhy: "Turned off by the player in the launcher's message at the start: WebKit's sandbox could not start (2026-11-18T16:04:10Z)",
+    webkit: "off", webkitWhy: "WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1 is set", probe: "fails", probeSays: "bwrap fails: bwrap: setting up uid map: Permission denied", probeFailed: true }
+  : { want: "on", why: "default", marker: false, webkit: "unused", webkitWhy: SANDBOX_UNUSED, probe: "works", probeSays: "bwrap works", probeFailed: false };
 // the AppImage's app menu entry (desktop.rs)
 let desktop: DesktopInfo = { on: true, installed: true, foreign: false, file: "/home/player/.local/share/applications/kiln-launcher.desktop" };
 
@@ -913,11 +920,15 @@ const handlers: Record<string, Handler> = {
   snapshot_continue: () => null,
   // app
   app_info: (): AppInfo => ({ version: "0.2.0-dev", kiln: "0.2.0-dev", platform: "linux", arch: "x86_64", dataDir: mockDataDir(), commit: "0f1ffa6", mock: true,
-    noWebgl: render.mode === "software", distribution: MOCK_DISTRIBUTION, nexusEnabled: NEXUS_MOCK_ENABLED, render: { ...render }, desktop: { ...desktop } }),
+    noWebgl: render.mode === "software", distribution: MOCK_DISTRIBUTION, nexusEnabled: NEXUS_MOCK_ENABLED, render: { ...render }, desktop: { ...desktop }, sandbox: { ...sandbox } }),
   app_started: () => null,
   app_render_set: (a) => {
     render = { ...render, marker: !!a.software, markerWhy: a.software ? `Turned on in Settings (${new Date().toISOString()})` : undefined };
     return { ...render };
+  },
+  app_sandbox_set: (a) => {
+    sandbox = { ...sandbox, marker: !a.on, markerWhy: a.on ? undefined : `Turned off in Settings (${new Date().toISOString()})` };
+    return { ...sandbox };
   },
   app_desktop_set: (a) => (desktop = { ...desktop, on: !!a.on, installed: !!a.on, foreign: false }),
   app_locales: () => ({ dir: `${mockDataDir()}/locales`, files: [], errors: [] }),

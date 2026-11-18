@@ -6,7 +6,7 @@ import { FolderPlus, Plus, RefreshCw, Trash2, X } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { useLocation } from "react-router-dom";
 import * as api from "../api/commands";
-import { KEEP_MAX, type ConfigDocument, type DesktopInfo, type Json, type LauncherSettings, type RenderInfo } from "../api/commands";
+import { KEEP_MAX, type ConfigDocument, type DesktopInfo, type Json, type LauncherSettings, type RenderInfo, type SandboxInfo } from "../api/commands";
 import { qk, useAppInfo, useGame, useGameStatus, useNexusEnabled, useSettings } from "../api/hooks";
 import { fallbackEnabled } from "../api/fallback";
 import { useAssetsStatus, useExtractTask } from "../components/GameArt";
@@ -107,8 +107,9 @@ function LauncherCard() {
 }
 
 /** Appearance: the fire on Play. Off (or KILN_LAUNCHER_NO_WEBGL=1 for one start) draws the plain Play button, the same
- *  one a machine without WebGL gets. On Linux also "Draw the launcher without the GPU" (the render marker, render.rs) and,
- *  in the AppImage, "Kiln Launcher in the app menu" (desktop.rs). */
+ *  one a machine without WebGL gets. On Linux also "Draw the launcher without the GPU" (the render marker, render.rs),
+ *  "WebKit's sandbox" (the sandbox marker, sandbox.rs) and, in the AppImage, "Kiln Launcher in the app menu"
+ *  (desktop.rs). */
 function AppearanceCard() {
   const t = useT();
   const qc = useQueryClient();
@@ -126,11 +127,17 @@ function AppearanceCard() {
     qc.setQueryData(qk.appInfo, (cur: api.AppInfo | undefined) => (cur ? { ...cur, render: next } : cur));
     toast.ok(on ? t("settings.appearance.nextNoGpu") : t("settings.appearance.nextGpu"));
   }).catch((e) => toast.error(e));
+  const sandbox = info.data?.sandbox;
+  const setSandbox = (on: boolean) => api.appSandboxSet(on).then((next) => {
+    qc.setQueryData(qk.appInfo, (cur: api.AppInfo | undefined) => (cur ? { ...cur, sandbox: next } : cur));
+    toast.ok(on ? t("settings.sandbox.nextOn") : t("settings.sandbox.nextOff"));
+  }).catch((e) => toast.error(e));
   return (
     <Card title={t("settings.appearance.title")}>
       <Toggle checked={!forced && s.data.animatedFire !== false} disabled={forced} onChange={(on) => void saveSettings(qc, () => ({ animatedFire: on }))}
         label={t("settings.appearance.fire")} hint={forced ? fireOff(info.data) : t("settings.appearance.fireHint")} />
       {render && <Toggle checked={render.marker} onChange={(on) => void setRender(on)} label={t("settings.appearance.noGpu")} hint={renderHint(render)} />}
+      {sandbox && <Toggle checked={!sandbox.marker} onChange={(on) => void setSandbox(on)} label={t("settings.sandbox.label")} hint={sandboxHint(sandbox)} />}
       {desktop && <Toggle checked={desktop.on && desktop.installed} onChange={(on) => void setDesktop(on)} label={t("settings.appearance.desktop")} hint={desktopHint(desktop)} />}
     </Card>
   );
@@ -155,6 +162,20 @@ function renderHint(r: RenderInfo): string {
     : sw ? t("settings.render.noGpu") : t("settings.render.gpu");
   // markerWhy: the backend's sentence, as it is
   return `${t("settings.render.intro")} ${now}${r.marker && r.markerWhy ? ` ${r.markerWhy}.` : ""}`;
+}
+
+/** What the sandbox switch says: what off means and when it applies, what WebKit does in this start and why, who turned
+ *  it off, what the probe of bwrap found when it failed. */
+function sandboxHint(sb: SandboxInfo): string {
+  const now = sb.yours !== undefined ? t("settings.sandbox.yours", { value: sb.yours })
+    : sb.why === "argument" ? (sb.want === "off" ? t("settings.sandbox.argOff", { flag: "--no-webkit-sandbox" }) : t("settings.sandbox.argOn", { flag: "--webkit-sandbox" }))
+    : sb.why === "environment" ? t("settings.sandbox.env")
+    : sb.webkit === "unused" ? t("settings.sandbox.unused")
+    : sb.webkit === "on" ? t("settings.sandbox.on")
+    : t("settings.sandbox.off");
+  const probe = sb.probeFailed ? ` ${t("settings.sandbox.probe", { says: sb.probeSays })}` : "";
+  // markerWhy: the backend's sentence, as it is
+  return `${t("settings.sandbox.intro")} ${now}${sb.marker && sb.markerWhy ? ` ${sb.markerWhy}.` : ""}${probe}`;
 }
 
 function DevCard() {

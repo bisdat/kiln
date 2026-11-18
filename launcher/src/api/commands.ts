@@ -121,6 +121,9 @@ export interface SandboxInfo {
   /** The probe of the bwrap WebKit runs: "works", "fails", "missing" or "unknown", and its sentence. */
   probe: "works" | "fails" | "missing" | "unknown";
   probeSays: string;
+  /** bwrap cannot start here and that says something about this system (not the AppImage's own missing bwrap while the
+   *  start does not run the sandbox): Settings shows probeSays. */
+  probeFailed?: boolean;
 }
 /** The AppImage's app menu entry (src-tauri/src/desktop.rs). */
 export interface DesktopInfo {

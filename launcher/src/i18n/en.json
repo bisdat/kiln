@@ -2742,6 +2742,20 @@
       "desktopOn": "Kiln Launcher is in the app menu",
       "desktopOff": "Kiln Launcher is out of the app menu"
     },
+    "sandbox": {
+      "label": "WebKit's sandbox",
+      "intro": "Applies at the next start. Off: the launcher's page runs without WebKit's process sandbox; it shows only the launcher's own pages and, from the internet, only images from Nexus Mods.",
+      "unused": "This start: WebKit does not use its sandbox (its version for this launcher uses it only when WEBKIT_FORCE_SANDBOX=1 is set).",
+      "on": "This start: WebKit's sandbox is on (WEBKIT_FORCE_SANDBOX=1 is set).",
+      "off": "This start: WebKit's sandbox is off.",
+      "argOff": "This start: off, because {flag} was given; it wins over this switch.",
+      "argOn": "This start: {flag} was given and wins over this switch.",
+      "env": "This start: KILN_LAUNCHER_WEBKIT_SANDBOX is set and wins over this switch.",
+      "yours": "This start: WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS={value} is set in your environment and decides, whatever this switch says.",
+      "probe": "On this system: {says}.",
+      "nextOn": "The next start leaves WebKit's sandbox on",
+      "nextOff": "The next start turns WebKit's sandbox off"
+    },
     "render": {
       "intro": "For a window that stays black. Applies at the next start.",
       "noGpu": "This start draws without the GPU.",
