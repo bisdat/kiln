@@ -518,3 +518,141 @@ chest share (source list = those chests, one stack of count 1, crafts = the shar
 output share as in §8, then for the remainder with the base's own stock, the real inputs, the water and the player.
 Any code rolls the transaction back. A request that names no chests is the §8 fill. The station screen's button does
 not name chests, so it is unchanged.
+
+## 10. Station outputs in a craft
+
+GitHub #68 step 2. Same two builds as §8: server **26430253** (`f0d824be7fcd48ebfe2458ff5c28da26060c2074e3ec1fcac587e5a1d508aeb2`,
+svn 1287369) and client **26430625** (`5d9ef2f140b8ed49e30dbee655841b89d08baec20f799a1817e171a18a850c77`). Image base
+`0x140000000`; the numbers below are RVAs. Static only. `rules/InventoryPay` was also decompiled with Ghidra 12.1.2
+through `rea` 6.7.0 (evidence `ev_750028c865fbccdf76fe105c80640bbd9eb1426d6efffb10c89024d4351839f8`, subject the server
+sha256 above). The pseudocode is the decompiler's, not the game's source. The other sites are disassembly.
+
+### 10.1 How InventoryPay builds its sources
+
+A craft that is only short of materials does enter `InventoryPay`. `RecipeApply` returns 4 at S `0x19a208`, before any payment, when `0x91de90` returns 0. That function compares the recipe's workshop (`+0x24`) with the station's, then `requiresSheltered` (recipe `+0xa1` on this build: skipped when that byte is 0, otherwise the context byte `+0x1d` must be set and `+0x1c` must not be 0), then a level (recipe `+0x8c`), then three requirement words (recipe `+0x9c`, `+0x9d`, `+0x9e`: level, comfort, server progress). It does not read an inventory. A props mismatch returns 5 at S `0x19a228`, still before payment. Being short of an item is `InventoryPay`'s own 4, tested at S `0x19a293` and taken to the failure path at S `0x19a41a`. A player's or a request's craft (`handle_crafting_events`) sets the transaction's stock mode to 2 at S `0x8b226`: the owner, then the base's chests. `BaseStockForPlayer` then requires permission bit 0x02 (`CanAccessInventories`) at S `0x2081fb`; without it, it writes error 0x16 at S `0x208209` and Kiln leaves the payment to the game. A Magic chest is not a player, so a dedicated server with nobody joined cannot take from a station this way. A factory's start (`TryStart` S `0xe4330`) sets the inputs-only flag `0x08` at S `0xe43a7` and does not set that mode.
+
+`rules/InventoryPay` is S `0x199c80` (returns at `0x199f05`). `rules/RecipeApply` (S `0x19a1d0`) calls it at S `0x19a287`;
+the return address is `rules/RecipePaid` S `0x19a28c` (the sigdb pattern already on both builds; client `0x3f8fec`).
+The fifth argument, when non-null, replaces the cost line's item. Each cost line is 0x18 bytes, item at +0x10, count
+at +0x14. `tx+0xb1` is the stock mode.
+
+Mode 0 pays the owner only, one `gems/PayMaterial` (S `0x1b0d60`) per line, and returns 4 when a line is short.
+Any other mode calls `stations/BaseStockForPlayer` (S `0x2081c0`) **once**, then walks the lines. Mode 2 pays the
+owner before the list; mode 1 pays the owner after it. The list is one list for every line. `PayMaterial` takes only
+stacks of the asked item, but a station put on that shared list is asked for every line, so a line whose item is also
+queued in the station would take those inputs. Fill's option (b) (a different entity list per item, passed into
+`AutoTransferRecipe`) is not available here: `InventoryPay` builds the list itself and does not take one.
+
+A take before the original call does not work either. The original still tries to take the full cost from the owner
+and the chests. When they can pay, both takes would run. When they cannot, the original returns 4 and `CraftRecipe`
+(S `0x210f00`) rolls the transaction back at S `0x2112d4` (`rules/InventoryRollback` S `0x1b8310`), which undoes the
+earlier take, so the outputs would never actually pay.
+
+Two more facts of the decompile. `InventoryPay` does not test `BaseStockForPlayer`'s error byte: the stock list is
+zeroed before the call, so on 0x16 or 0x1f mode 2 pays from the owner alone. And the test it makes before returning 4
+for a short line, `0x95b720`, is `xor al,al; ret` on this build (a compiled-out cheat): a shortfall is always 4.
+
+The permission test inside `BaseStockForPlayer` is `0x163040(out, player, [bases+0x10])` (S `0x2081f6`): it answers 0
+for any id outside 1..1023 (`cmp eax,0x3fe; ja`), otherwise the byte at `+0x9d` of the 0xa0-byte record `player-1` of
+the table at `[bases+0x10]` (BasicPlayerInfos, `docs/re/gameplay.md`), whose first dword must be the id. So only a
+logged-in player can pass it: a character spawned by a lab (an id from 1024 up) and a Magic chest never do.
+
+**What Kiln does.** Only when the return address is `RecipePaid` (not `RecipePayAlt` S `0x19a9b0`, which `RecipeApply`
+calls instead when `tx+0xb0` has bit 0x40, and not any other caller), on the server world's own transaction (§10.4), when
+the mode is not 0, and `BaseStockForPlayer` succeeds (its error byte stays 0; 0x16 and 0x1f are the permission and the
+"no base" the game already returns), and the opted-in outputs cover every line's shortfall after the owner and the
+chests are counted in the game's order: Kiln pays the whole recipe with `PayMaterial` inside the same transaction (owner
+and chests first, then the lending stations for that line's remainder) and returns 0 or 4 without calling the original.
+A fault or a remainder returns 4 so `CraftRecipe` rolls back. When the outputs cannot cover, or a line's item repeats,
+or the mode is 0, or nothing is opted in, or the stock list is longer than 4096 entries, the original runs unchanged.
+The decision and the loop are `stations_logic.h` (`craft_order`, `craft_lenders`, `craft_pay`) and are host-tested.
+
+Only players' crafts reach this path. A production station's own cycle (`factory_station` -> `TryStart` S `0xe4330`)
+pays with stock mode 0, and a request whose operator is not a player fails the permission test above, so neither ever
+takes from another station.
+
+The station being crafted at is `CraftContext+4`, noted by kiln.gameplay's `CraftRecipe` hook for the duration of the
+call (`native/services/gameplay/craft_phase.h`: a factory crafting into itself has operator == station, and player
+entities are 1..1023). That hook group is installed on demand; kiln.stations asks for it (`request_hooks`,
+`KILN_GAMEPLAY_HOOK_CRAFT`) once a station is opted in. Until it is in, only a non-player owner is left out. A player
+crafts at a crafting station (a Crafting component), and only a station with a FactoryStation lends, so this matters
+only for an entity that has both.
+
+### 10.2 How the client counts a recipe
+
+`ui/CraftingMenu` is C `0xb80130`. `rules/client.CraftableAmount` (C `0xb2ddd0`) is a cache read at the game UI data
++0x14f70, keyed by the recipe, the cap and the selections; it returns the cached count or 0 until the cache is filled.
+The crafting screen stores the cap-1 count on the selected entry at +8 (the call at C `0xc79652`). The hints path
+(C `0xd21120`) receives the cap-10 count. At C `0xd2127a` the screen compares that entry's count with 1 and, when it
+is not 1, sets the bit that disables the action. The handler C `0xd13120` (called from the screen at C `0xc79a63`)
+queues a craft (`UiQueueCraftRecipe` C `0xd6e460`) only for an action whose activation byte is set: type 0 crafts 1,
+type 0x1b crafts 10. So the client does not send the one-craft when its own count is not enough.
+
+The cache is the client's view of the replicated chests and the bag. It does not include a station. Kiln's existing
+`CraftableAmount` hook (kiln.rules, installed for `rules.craft_ui` and, now, for `stations.craft_ui`) returns the
+greater of the game's count and a count from a snapshot the server pushed. The snapshot is not authority.
+
+The count needs the recipe's resolved inputs (`content/RecipeFind`, `stations/ResolveRecipeInputs`, both on the client
+build: `sigdb/symbols/client.d/stations-craft-ui.json`) and a `g38_items::RecipeRegistry`. A joined client has no server
+world, so the registry is the client world's own singleton, read on the client world's thread (its Pre) and kept for the
+UI thread. The client world registers it: kiln.content's client pass already reads it there on a joined client
+(`native/services/content/content.cpp`, `on_client_pre`).
+
+### 10.3 C7, the station screen's fill button
+
+The dry run is inside client `FUN_1402b8430` (Ghidra 12.1.2, `rea` 6.7.0, evidence
+`ev_44de36cc918e87a4a86e5e7d08c29ddc33e2debbd5cc1b00b49705dc3857b8b2`). It calls `AutoTransferRecipe`
+(`FUN_1403f7ab0`) and then `FUN_140418150` before it breaks out of the case: the disassembly of that site is the call
+at C `0x2be77f` and the rollback at C `0x2be78d`. The decompiler does not keep the result through the rest of the
+function; the status stores below are from the disassembly. The call at C `0x2be77f` keeps the code in `edi` and always
+rolls back at C `0x2be78d`. Status 0 is stored as 1 (ok) at C `0x2bea65`. Codes 2, 3, 4 and 5 are stored as themselves
+(C `0x2be836`..`0x2be87e`); 4 is missing materials. The station screen reads that dword at C `0xbda1fd`. At
+C `0xbda219` it compares with 1: the byte it then stores at `[rbp+0x520]` (C `0xbda22d`) is 1 only for status 1 (and
+two other conditions, `r12b` and `[r13+0x218] == 0`), else 0. That byte is the enabled flag the widget calls get
+(C `0xbdaa90`, `0xbdaac8`). At C `0xbdab1c` a status other than 1 selects the missing-materials style (`rbx+0x4b90`).
+
+So the button is **disabled**, not only restyled, when the bag and the chests alone cannot cover the fill: a fill only
+station outputs can complete cannot be pressed there, and the server's handling of that press (step 1) is reached only
+if something else sends it. The hotkey poll C `0xd68510` does not receive the status; whether the fill hotkey still
+sends the press was not shown by the static trace. Kiln does not hook this screen: enabling the button for Kiln clients
+would need the fill's own plan (the station's loaded inputs, the amount on the slider) on the client, which the craft
+snapshot does not carry. `Stations.Fill` from a mod and crafts use the outputs; the button does not. C7 checks the hotkey.
+
+### 10.4 Which transaction, which thread
+
+`tx+0x68` is the bases system the transaction holds. `InventoryPay` passes it as `BaseStockForPlayer`'s third argument
+(r8); there it is kept in `rbp` (S `0x2081d7`), its `+0x10` is the permission table (S `0x2081e9`), it is `BaseAtPosition`'s
+system (S `0x20821b`..`0x208234`), and the base records it indexes (`rbp + index*0x130 + 0x30`, S `0x208256`) are
+`PlayerBasesSystemServer`'s (stride and offsets as `stations/bases.*`). `handle_crafting_events` puts the bases system it
+holds into its setup at S `0x8b23b` (`[rbp+0x148]`, setup+0xD8 for the setup at `rbp+0x70`), which the transaction keeps
+at `+0x68`. Kiln acts only when that word is the server world's `PlayerBasesSystemServer` (read by the tick thread every
+Pre) and kiln.items' `access_from_tx` accepts the transaction (its job's storage is the server world's: storage kind 0).
+
+The client's own `RecipeApply` dry run (C `0x2be03a`, inside the station screen's status function `FUN_1402b8430`, stock
+mode 2 set at C `0x2bdd01`, rolled back at C `0x2be048`) also returns to `RecipePaid` (C `0x3f8fec`). On a hosting Kiln
+client with a station opted in, the payment hook sees it. Its transaction is the client world's: its bases word is not the
+server's and its storage kind is 2, so Kiln leaves it to the game (counter `other_world`).
+
+Thread. On a dedicated server the game's programs, `handle_crafting_events` among them, run on the tick thread
+(docs/kiln/services/world.md). In a hosted game the server world's programs may run on a game worker thread. Kiln does
+not rely on either: inside the payment it calls nothing of kiln.world (tick thread only) and not the core's singleton
+lookup. It reads inventories through the transaction's own accessors (`ReadOther`, the view `PayMaterial` takes from),
+a lender's `FactoryStation` and `CurrentTransform` through the game's `GetComponent` under an exception guard (as
+`read_inventory` does), the base through `BaseAtPosition` on the transaction's bases system (what `BaseStockForPlayer`
+itself calls), and the recipe registry and the server's bases system from what the tick thread cached. Writes from
+other programs at the same time: the craft program holds write access to `Inventory` (its transaction's accessors);
+`factory_station` and `player_crafting`, which write `FactoryStation`, also write inventories (a cycle's inputs and
+outputs, a fill), and so does Kiln's `kiln_items_stations`, so the scheduler does not run them beside it; a station's
+`CurrentTransform` does not change. That last part is reasoning from what those programs do, not a traced access list.
+
+### 10.5 What a Kiln client is sent
+
+While a Kiln client's crafting menu is open (any `ScreenKind.Crafting`: the player's own, a crafting station's, an NPC's,
+a production station's screen), it says so on `kiln:craftstock` (`required: false`) every 5 s and when the menu closes.
+For such a player, standing in a base where they have `CanAccessInventories` (the test the payment relies on), the
+server sends per item the bag, the base's Magic chests and the opted-in stations' Outputs, only for the items of the
+recipes that take an item those stations lend (native `craft_items`, an index of every recipe's inputs and category
+options from the `RecipeRegistry` map, `content/recipes.*`), at most 1024 rows, again when a count changes (every 30
+steps it looks). A vanilla client never says its menu opened and is sent nothing.
+
+### 10.6 Lab (dev29-sc2)
