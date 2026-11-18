@@ -26,6 +26,93 @@ Code: `launcher/src/community/` (the UI), `launcher/src/api/commands.ts` (the co
 - **Rich Presence** talks only to the Discord app on this PC (its local IPC socket), only while the switch is on and the
   game runs with Kiln. Nothing goes to Frostdev for it. It never shows a server, world, character or mod name.
 
+## What it does
+
+**Where it lives.** Desktop: "Community", the last word of the header (after Servers), with a flame numeral for new
+replies from Kiln support. Deck: a Community tab between Editor and Help, with the same numeral. Both are hidden, with
+every "Send to Kiln support", while Settings' "Show the Community page" is off (desktop Settings, Launcher; Deck
+Settings). The page and tab: Get help, your support posts, the tester programme, news and events, the Discord account,
+Rich Presence with its preview, links, and "What is sent and kept".
+
+**Sign in with Discord** (always through frostdev.io; the launcher never holds a Discord token). Desktop: the dialog
+says what Kiln gets ("Also join the Kiln Discord" ticked by default), the system browser opens the relay's page, the
+dialog waits and moves on by itself; endings: signed in (a toast), cancelled on Discord's page, timed out after 10
+minutes, offline, frostdev.io not answering, each with Try again. Deck: a QR code and a short code for a phone, the time
+left, X for a new code; expired, declined, offline. Sign out has no confirmation; "Sign out and forget me" takes the
+typed word on the desktop (a tick also deletes the player's support posts from Discord) and a hold on the Deck. The
+page re-reads the account and membership when it opens.
+
+**Send to Kiln support.** Entry points: the Logs page's support report row, Play's problem banners after the fix they
+already offer (Kiln is not loading, Kiln did not start, Kiln update failed, No mods loaded), ShroudForge's failed
+startup pass on Engines, the crash notice (a banner on Play after the game closed while Kiln wrote a crash report in
+that run; a line on Deck Home), the Community page and the Deck's tab and Home. Each preselects a kind. Desktop: write
+(one line of up to 90 characters, the kind, up to 1500 more), check what is sent (the public post as it will look, the
+zip's size and files, who sees the zip: the Kiln team only, everyone in #support, or nobody; what is never in it), sent
+(Open in Discord). Deck: pick what went wrong and when, check and send (Type asks Steam for its keyboard), sent with a
+QR code. The report is the existing support report (`kiln_manage::report`), built once when the dialog opens and sent
+as built. Its public post (`kiln_manage::community::post`) holds the player's words, the kind, the report's findings
+and the versions: Kiln, the launcher, the system and the Proton or Wine build, the game's build, how many mods are on.
+Never the mod list: a mod is named only when a finding names it. Every error keeps the draft (not signed in: the
+sign-in comes back to the check step; not in the server: Join and "I've joined"; offline: Save report; frostdev.io down:
+Retry; too many reports: when again and the last post; too big: Send without the zip). A draft with words survives
+closing the dialog.
+
+**Known problems** (`known-issues`, format in `kiln_manage::community::known`): the launcher keeps the last copy of
+the public list, fetched with the news when the Community page opens, and matches it against the report's findings on
+this PC. A match shows its fix first (a line to copy, or a button to the mods, Runtime or Logs) with "If this fixes it,
+there's nothing to send"; sending stays possible.
+
+**Your support posts**: Waiting, New reply (unread, flame), Replied, Solved, Closed; who replied last and when ("of the
+Kiln team" for the Kiln Team role); Open in Discord (the Deck: a QR code); `···` Copy link, It's fixed (the Solved
+tag), Delete my post (typed on the desktop, held on the Deck). Opening a post marks its replies seen. The list is read
+when the page opens and every 5 minutes while signed in with the page shown. "Tell me when Kiln support replies" (off
+by default) adds a system notification with Open in Discord: `notify-send` (or the notification service through
+`gdbus`) on Linux, a toast through PowerShell on Windows.
+
+**Testers.** "Help test Kiln" says what this PC can test (FSR 4 on AMD RX 6000 and newer, XeSS on Intel Arc, frame
+generation on NVIDIA RTX 40 and 50, the Steam Deck). Volunteer shows first exactly what is shared: graphics card,
+driver, video memory, system, how the game runs (`kiln_manage::community::hardware`: sysfs and pci.ids, Mesa's library
+name, NVIDIA's version file and `nvidia-smi` on Linux; the display adapter's registry key on Windows; nothing needs new
+privileges). A tick (on) switches the launcher to test builds through the existing channel switch. A tester sees the
+current test build's checklist with only this hardware's steps ("2 steps are for other hardware"), sets Worked,
+Didn't work or Couldn't try with one line per step (on the Deck a pick for what happened), and sends the results
+(with a support report for the team only, ticked by default) once every step has one. The team's check mark shows as
+"read". Stop testing is in the checklist's `···` (the Deck: X).
+
+**Rich Presence** (`kiln_manage::community::presence`, `launcher/src-tauri/src/community/presence.rs`): one switch,
+off by default, with the preview card. While a client game runs with Kiln (its boot.json from this run), the switch is
+on and the page is shown, the Discord app on this PC shows "Playing Kiln / Enshrouded with Kiln / N mods on / elapsed"
+with Get Kiln and Join the Discord. Never a server, world, character or mod name. The socket: Windows
+`\\.\pipe\discord-ipc-N`; Linux `discord-ipc-N` in `$XDG_RUNTIME_DIR` and its Flatpak (Discord, Vesktop) and Snap
+folders, then `$TMPDIR`, `$TMP`, `$TEMP`, `/tmp`. Art keys `kiln-hearth` and `kiln-mark` (an activity Discord refuses
+for its art goes again without it). Its own thread follows the watcher, tries the socket every 30 seconds while the game
+runs, and clears the activity at once when anything ends; it never holds up a start. "Discord isn't running on this
+PC" (or Deck) when the switch is on and no socket is there.
+
+**Mock mode** (`?mock=1&discord=<flags>`, `src/api/mockCommunity.ts`): `in`, `empty`, `notmember`, `offline`,
+`relaydown`, `ratelimit`, `toobig`, `known`, `nodiscord`, `presence`, `notify`, `cancel`, `expire`, `deny`, `tester`,
+`sent`, `read`, `noplan`, `hidden`; `&problem=crash` (the game runs four minutes and closes with a crash report) or
+`&problem=nokiln` (the next Play starts without Kiln); `__kilnMock.community.{reply, approve, setOnline, setRelay,
+join, readResults, requests}` and `__kilnMock.crash()`.
+
+## Privacy
+
+What the launcher does stays within <https://frostdev.io/kiln/privacy> (published 18 November 2026). "What is sent
+and kept" says it in short; `unit/community.test.ts` checks that its words keep the page's promises and times.
+
+- Nothing about the player is sent until they press a button on a screen that shows what goes. Signed out, the only
+  requests are the public news and the known-problems list when the page opens (`tests/community.spec.ts` checks the
+  mock's record of relay calls; the backend refuses everything while the page is hidden).
+- Sign-in: Kiln gets the Discord ID, name and picture; frostdev.io keeps a fingerprint of the session key (90 days
+  unused), the name and picture while signed in. The launcher keeps the session key (keyring, else an owner-only file)
+  and the account as last read; sign out removes both here whatever the relay says.
+- Reports: the public post as shown; the zip to the team (deleted from their channel after 30 days), to everyone, or
+  not sent. The zip is redacted by `kiln_manage::report` (user, machine and Steam names, Steam ID, IP addresses, the
+  home folder in paths); saves and mod settings are never in it.
+- Testers: the hardware lines shown, sent by Volunteer only; results to the build's post; an attached report to the
+  team only. Stop testing removes the role and the hardware.
+- Rich Presence: only to the Discord app on this PC, nothing to Frostdev.
+
 ## The contract with the relay
 
 The relay runs on frostdev.io (the kilnbot repo; its own contract is `docs/relay-api.md` there). Both sides build to
@@ -146,6 +233,7 @@ null, replied: boolean}`.
 | `community.json` | `{format: 1, shown, presence, notify, relay?}` | the player changes it |
 | keyring entry, or `community-session.json` (0600) | `{format: 1, relay: "<host>", session, account}` | sign out |
 | `community-known.json` | the last known-problems list (public) | replaced at the next page open |
+| `community-tester.json` | a tester's results for the current test build `{build, steps: {id: {result, note}}}` | the next build, Stop testing, sign out |
 
 The account and the posts as last read stay in memory while the launcher runs, so the page can say "as of 11:47" when
 offline. Nothing about the player's Discord account stays after sign-out.

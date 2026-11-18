@@ -83,3 +83,17 @@ test("the post's tags follow the kind the player picks, then the system's", asyn
   expect(postTags(p, "crash")).toEqual(["Crash", "Linux"]);
   expect(postTags(p, "other")).toEqual(["Linux"]);
 });
+
+test("What is sent and kept makes the privacy page's promises, with its times", async () => {
+  const { t } = await import("../src/i18n");
+  const { PRIVACY_SECTIONS } = await import("../src/community/Privacy");
+  const all = [t("community.privacy.never"), ...PRIVACY_SECTIONS.flatMap(([, ps]) => ps.map((p) => t(`community.privacy.${p}`)))].join(" ");
+  // frostdev.io/kiln/privacy, "What frostdev.io keeps" and around it
+  for (const promise of ["fingerprint of your sign-in", "90 days unused", "while you're signed in", "for 10 minutes", "for a day",
+    "90 days after it's solved or closed", "after 30 days", "Report zips are never stored on frostdev.io", "how many mods are on",
+    "Never server or world names, your character, or which mods you use", "AI assistants", "Stop testing", "Sign out and forget me"]) {
+    expect(all).toContain(promise);
+  }
+  // nothing promised that the page does not say: no email, password or messages are received
+  expect(t("community.privacy.signIn")).toContain("It never gets your email, your password, your messages");
+});

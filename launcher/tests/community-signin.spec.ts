@@ -75,7 +75,7 @@ test.describe("desktop", () => {
     await open(page, "/?mock=1&discord=in#/community");
     await page.getByTestId("kc-forget").click();
     const arch = page.getByRole("dialog", { name: "Sign out and forget you?" });
-    await expect(arch).toContainText("frostdev.io deletes your name, your ID, your hardware and the list of your posts. Your posts stay on Discord until you delete them.");
+    await expect(arch).toContainText("frostdev.io deletes your name, your ID, your hardware, the list of your posts and the Kiln team's copies of your report zips. Your posts stay on Discord until you delete them.");
     await page.getByTestId("kc-also-delete").check();
     const confirm = arch.getByRole("button", { name: "Sign out and forget me" });
     await expect(confirm).toBeDisabled();
