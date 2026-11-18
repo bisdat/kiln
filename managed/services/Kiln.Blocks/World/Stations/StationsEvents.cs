@@ -305,6 +305,7 @@ internal static partial class StationsCore
         _crafted = null;
         _actions?.Dispose();
         _actions = null;
+        ResetOutputs();
         _bases = null;
         lock (Gate) Pressed.Clear();
         lock (Gate) Owners.Clear();
@@ -332,6 +333,7 @@ internal static partial class StationsCore
         }
         Follow(ref _crafted, Events.HasSubscribers<StationCraftedEvent>(), () => Events.On<ItemCraftedEvent>(OnCrafted, EventPriority.Monitor));
         Follow(ref _actions, Events.HasSubscribers<StationPlayerActionEvent>(), () => Events.On<PlayerClientActionEvent>(OnClientAction));
+        PumpOutputs(ServiceTick.Step);
     }
 
     private static void Follow(ref EventSubscription? sub, bool want, Func<EventSubscription> make)

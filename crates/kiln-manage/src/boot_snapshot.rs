@@ -4,7 +4,7 @@
 //!
 //! kiln.boot never decompresses the game's archive itself: the snapshot is made before the start, from the game's own
 //! files, by `tools/bootsnap/bootsnap.py` (one of the Python tools this crate carries, run like the cook tools:
-//! [`crate::cooktools`]). It lands in `<game>/kiln/data/boot-gamedata/<key>/` (about 200 MB per game build), once per
+//! [`crate::cooktools`]). It lands in `<game>/kiln/data/boot-gamedata/<key>/` (about 300 MB per game build), once per
 //! game build: a later start finds it by its key in well under a second. The launcher makes it at Play right after the
 //! cook, before a single start with another profile ("play once": [`boot_mods_once`]), and `tools/deploy-server.sh` at
 //! a deploy, each only when an enabled mod of the start asks for the boot phase ([`boot_mods`]; otherwise [`make_if_needed`] skips it and leaves a snapshot that is there alone);
@@ -33,7 +33,7 @@ pub const SCRIPT: &str = "tools/bootsnap/bootsnap.py";
 pub const LAUNCHER_LIMIT: Duration = Duration::from_secs(10 * 60);
 
 /// How big a snapshot is on disk, for the lines a player reads (a real server archive of game build 1287369: 199 MB).
-pub const SIZE_TEXT: &str = "about 200 MB";
+pub const SIZE_TEXT: &str = "about 300 MB";
 
 /// Why the Play step and the deploy step made none: no enabled mod of the start asks for the boot phase.
 pub const NOT_NEEDED: &str = "no mod needs the boot snapshot";

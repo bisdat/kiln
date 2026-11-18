@@ -4,6 +4,10 @@
 `docs/kiln/services/chat.md` keeps working unchanged; typed commands add parsing, help, completion and permissions.
 Tests: `managed/tests/Kiln.Api.Tests/CommandsTests.cs`; lab: `mods/tests/api-test`.
 
+In chat, a slash line naming no Kiln command passes through to the game and other mods untouched; Kiln's "Unknown
+command" reply is the server setting `"unknownCommands": "reply"` in `kiln/config/chat.json`
+([chat.md](services/chat.md#server-settings)).
+
 ## Declaring
 Attribute methods (Kiln registers them on a `Mod` before `OnLoad`; elsewhere `Commands.RegisterAll(obj)`):
 ```csharp

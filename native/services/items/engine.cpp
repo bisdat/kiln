@@ -503,7 +503,7 @@ void read_impl(uintptr_t world, void* registry, KilnEntity e, ReadOut* out) {
     KilnItemsInventory& inf = out->info;
     inf.entity = e;
     inf.initialized = setup[E.setup_initialized];
-    inf.setup_flags = setup[0x50];
+    inf.setup_flags = setup[kSetupFlags];
     inf.generic_slots = setup[0x51];
     inf.available_slots = setup[0x52];
     Tree t{};
@@ -556,7 +556,7 @@ void read_impl(uintptr_t world, void* registry, KilnEntity e, ReadOut* out) {
 bool matches(uintptr_t world, KilnEntity e, uint32_t flags) {
     const auto* setup = static_cast<const uint8_t*>(component(world, kHashInventorySetup, e, kSetupSize));
     if (!setup || !setup[E.setup_initialized]) return false;
-    const uint8_t f = setup[0x50];
+    const uint8_t f = setup[kSetupFlags];
     const uint32_t kinds = flags & 7u;
     if (kinds) {
         const bool player = (f & 1u) != 0, npc = (f & 2u) != 0;
@@ -1191,6 +1191,21 @@ bool read_pages(const Access& a, KilnEntity e, PageSet* out, bool* initialized) 
         return read_pages_impl(a, e, out, initialized);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         out->n = 0;
+        return false;
+    }
+}
+
+static bool setup_flags_impl(const Access& a, KilnEntity e, uint8_t* flags) {
+    const auto* setup = static_cast<const uint8_t*>(other_sized(a, A_SETUP, e, kSetupSize));
+    if (!setup) return false;
+    *flags = setup[kSetupFlags];
+    return true;
+}
+
+bool setup_flags(const Access& a, KilnEntity e, uint8_t* flags) {
+    __try {
+        return setup_flags_impl(a, e, flags);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
 }

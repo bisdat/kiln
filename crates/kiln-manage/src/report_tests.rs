@@ -124,7 +124,8 @@ impl Fx {
             exe_sha256: None,
             steam_flavor: None,
             path_mode: PathMode::Native,
-            source: "manual".into(),
+            // a Steam install (the usual player): a custom folder starts directly and has no Steam launch options
+            source: "steam".into(),
         }
     }
 
@@ -413,7 +414,8 @@ fn unknown_build_and_safe_idle() {
     f.rm(&format!("kiln/sigdb/builds/client/{sha}.json"));
     f.boot(Some("build abc is not verified (no build record) and policy is verified-only"));
     let r = build(&f.input());
-    assert!(finding(&r, "unknown-build").text.contains("does not know"));
+    // the launcher's words for it (Play, the Settings row): the same sentence
+    assert!(finding(&r, "unknown-build").text.starts_with(&crate::direct::unknown_build_sentence(&sha[..12])), "{}", finding(&r, "unknown-build").text);
     assert!(finding(&r, "safe-idle").text.contains("no build record"));
     assert!(r.short.contains("known to Kiln: no"), "{}", r.short);
 }
@@ -1140,4 +1142,30 @@ fn a_runtime_blocked_eml_mod_reads_on_not_applied() {
     assert!(line.contains(&format!("on, not applied: {why}")), "{}", r.summary);
     let other = r.summary.lines().find(|l| l.contains("other-eml")).unwrap_or_default();
     assert!(other.trim_end().ends_with("off"), "{}", r.summary);
+}
+
+/// (dev.29.17) A custom folder that starts directly: the report says so, has no Steam launch-option finding (a direct
+/// start sets the override itself), keeps the build check, and carries the Proton/Wine output of the last direct start.
+#[test]
+fn a_custom_folder_started_directly() {
+    let f = Fx::healthy("direct");
+    let mut i = f.input();
+    let mut inst = f.install(Platform::Proton);
+    inst.source = "manual".into();
+    i.install = Some(inst.clone());
+    let dirs = i.dirs.clone().unwrap();
+    std::fs::create_dir_all(dirs.logs()).unwrap();
+    std::fs::write(crate::launch::direct_log(&dirs, &inst), "wine: created the configuration directory\n").unwrap();
+    let r = build(&i);
+    assert!(r.summary.contains("Custom folder: yes"), "{}", r.summary);
+    assert!(r.summary.contains("Start:         directly"), "{}", r.summary);
+    assert!(!r.summary.contains("Launch opts:"), "{}", r.summary);
+    assert!(!ids(&r).contains(&"proton-override"));
+    assert!(r.files.iter().any(|(n, _)| n == "launcher/game-start.log"), "{:?}", r.files.iter().map(|(n, _)| n).collect::<Vec<_>>());
+    // through Steam after all: the launch options count again
+    crate::game::write_record(&dirs, &inst, None).unwrap();
+    crate::game::set_start(&dirs, &inst.id, &crate::direct::StartSettings { mode: Some(crate::direct::StartMode::Steam), ..Default::default() }, &[]).unwrap();
+    let r = build(&i);
+    assert!(r.summary.contains("Start:         through Steam"), "{}", r.summary);
+    assert!(finding(&r, "proton-override").text.contains(crate::game::DLL_OVERRIDE_ADVICE));
 }

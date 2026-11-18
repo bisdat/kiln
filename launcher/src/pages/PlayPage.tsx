@@ -24,6 +24,7 @@ import { channelNotice } from "../api/channel";
 import { useUpdate } from "../api/update";
 import { rich, t, useT } from "../i18n";
 import { ArchText, Banner, Button, Cones, Field, KeyValue, Modal, PathPicker, TaskProgress, errorText, toast } from "../ui";
+import { StartModal, UnknownBuild, useStartSetup, useStartWord } from "../components/GameStart";
 
 /** Windows (WebView2): path examples in Windows form. */
 const WIN = /Windows/i.test(navigator.userAgent);
@@ -36,13 +37,16 @@ export default function PlayPage() {
   const t = useT();
   const ctl = usePlayControl();
   const { games, loading, error } = useGame();
+  // a custom folder just added: its start dialog lives here, so it stays when the page turns from "no game" to Play
+  const [added, setAdded] = useState<GameInstall | null>(null);
+  const dialog = added && <StartModal game={added} added open onClose={() => setAdded(null)} />;
   if (loading) return <section className="k-hero" aria-label={t("play.label")} aria-busy />;
-  if (!ctl.game) return <NoGame error={error} hasOther={games.length > 0} />;
-  return <PlayFor game={ctl.game} ctl={ctl} />;
+  if (!ctl.game) return <><NoGame error={error} hasOther={games.length > 0} onAdded={setAdded} />{dialog}</>;
+  return <><PlayFor game={ctl.game} ctl={ctl} onAdded={setAdded} />{dialog}</>;
 }
 
 /** No client known: the launcher is looking by itself (once per start), or found nothing: Add a folder, Look again. */
-function NoGame({ error, hasOther }: { error: unknown; hasOther: boolean }) {
+function NoGame({ error, hasOther, onAdded }: { error: unknown; hasOther: boolean; onAdded: (g: GameInstall) => void }) {
   const t = useT();
   const qc = useQueryClient();
   const [adding, setAdding] = useState(false);
@@ -63,19 +67,29 @@ function NoGame({ error, hasOther }: { error: unknown; hasOther: boolean }) {
           )}
         </div>
       </section>
-      <AddGameModal open={adding} onClose={() => setAdding(false)} />
+      <AddGameModal open={adding} onClose={() => setAdding(false)} onAdded={onAdded} />
     </>
   );
 }
 
-function AddGameModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+/** Add a game folder: any folder with enshrouded.exe, in a Steam library or not. A folder no Steam library knows is a
+ *  custom install: right after adding it, the start dialog shows (Kiln starts it directly by default). */
+function AddGameModal({ open, onClose, onAdded }: { open: boolean; onClose: () => void; onAdded: (g: GameInstall) => void }) {
   const t = useT();
   const qc = useQueryClient();
   const setGameId = useGameSel((s) => s.setGameId);
   const [path, setPath] = useState("");
   const add = useMutation({
     mutationFn: () => api.gameAdd(path.trim()),
-    onSuccess: (g) => { qc.invalidateQueries({ queryKey: qk.games }); setGameId(g.id); toast.ok(t("play.addGame.added")); onClose(); },
+    onSuccess: (g) => {
+      qc.invalidateQueries({ queryKey: qk.games });
+      setGameId(g.id);
+      const isCustom = g.kind === "client" && g.source === "manual" && !g.library;
+      toast.ok(isCustom ? t("play.addGame.addedCustom") : t("play.addGame.added"));
+      setPath("");
+      onClose();
+      if (isCustom) onAdded(g);
+    },
     onError: (e) => toast.error(e),
   });
   return (
@@ -109,7 +123,7 @@ const PROXY_PRODUCT: Partial<Record<ProxyKind, string>> = {
   ember: "Ember", livemap: "Live Map", sharedxp: "Shared XP", reshade: "ReShade",
 };
 
-function PlayFor({ game, ctl }: { game: GameInstall; ctl: PlayControl }) {
+function PlayFor({ game, ctl, onAdded }: { game: GameInstall; ctl: PlayControl; onAdded: (g: GameInstall) => void }) {
   const t = useT();
   const qc = useQueryClient();
   const nav = useNavigate();
@@ -122,7 +136,10 @@ function PlayFor({ game, ctl }: { game: GameInstall; ctl: PlayControl }) {
   const [vanillaOpen, setVanillaOpen] = useState(false);
   const [offerOpen, setOfferOpen] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [startOpen, setStartOpen] = useState(false);
+  const startWord = useStartWord();
   const s = status.data;
+  const direct = s?.start === "direct";
   const v = ctl.view;
   const boot = state.data?.boot ?? null;
   const fresh = !!boot && !state.data?.stale;
@@ -155,9 +172,9 @@ function PlayFor({ game, ctl }: { game: GameInstall; ctl: PlayControl }) {
   const safeIdle = (why: string | null | undefined) => (why != null ? t("play.run.safeIdle", { why }) : t("play.run.safeIdleOff"));
   const runLine = v.word === "noWord" ? v.detail ?? "" : prep && !fresh ? prep.message
     : v.word === "kilnStopped" ? (ctl.lastTimeline?.why != null ? t("play.run.stopped", { why: ctl.lastTimeline.why }) : t("play.run.stoppedSeeLog"))
-    : v.word === "safeIdle" && !fresh ? safeIdle(ctl.lastTimeline?.why) : v.phase === "vanilla" ? t("play.run.vanilla") : ctl.kilnMissing ? t("play.run.kilnMissing") : !fresh ? t("play.run.noBootRecord") : boot?.profile?.mode === "no-mods" ? t("play.run.noMods", { version: String(boot?.kiln) })
+    : v.word === "safeIdle" && !fresh ? safeIdle(ctl.lastTimeline?.why) : v.phase === "vanilla" ? t("play.run.vanilla") : ctl.kilnMissing ? (direct ? t("play.run.kilnMissingDirect") : t("play.run.kilnMissing")) : !fresh ? t("play.run.noBootRecord") : boot?.profile?.mode === "no-mods" ? t("play.run.noMods", { version: String(boot?.kiln) })
     : v.word === "safeIdle" ? safeIdle(boot?.safeIdle ?? ctl.lastTimeline?.why) : mods.profile ? t("play.run.withMods", { version: kiln ?? "", count: on }) : t("play.run.with", { version: kiln ?? "" });
-  const stages = [{ id: "steam", label: "Steam" }, { id: "game", label: t("play.stage.game") }, { id: "kiln", label: "Kiln" }, { id: "mods", label: t("play.stage.mods") }];
+  const stages = [{ id: "steam", label: direct ? t("play.stage.start") : "Steam" }, { id: "game", label: t("play.stage.game") }, { id: "kiln", label: "Kiln" }, { id: "mods", label: t("play.stage.mods") }];
   const starting = ctl.starting;
   const stageAt = !ctl.running ? 0 : !fresh ? 1 : 3;
   // the last boot, running or not: boot.json plus what the same run wrote after it (mods.json, native.json)
@@ -180,7 +197,7 @@ function PlayFor({ game, ctl }: { game: GameInstall; ctl: PlayControl }) {
           <span>Enshrouded · {build}</span>
           {clients.length > 1 && (
             <select className="k-kicker-select" aria-label={t("play.game")} value={game.id} onChange={(e) => setGameId(e.target.value)}>
-              {clients.map((g) => <option key={g.id} value={g.id}>{g.path.split(/[\\/]/).filter(Boolean).slice(-3).join("/")} · {g.source}</option>)}
+              {clients.map((g) => <option key={g.id} value={g.id}>{g.path.split(/[\\/]/).filter(Boolean).slice(-3).join("/")} · {sourceWord(g)}</option>)}
             </select>
           )}
           {s?.otherFolderProfile ? (
@@ -255,10 +272,15 @@ function PlayFor({ game, ctl }: { game: GameInstall; ctl: PlayControl }) {
         <button type="button" className="k-link" onClick={() => api.appOpenPath(game.path).catch((e) => toast.error(e))}>{t("common.open")}</button>
         <button type="button" className="k-link" disabled={detect.isPending} onClick={() => detect.mutate()}>{t("play.detect")}</button>
         <button type="button" className="k-link" onClick={() => setAdding(true)} title={t("play.addGame.title")}>{t("common.add")}</button>
+        {s?.start && (
+          <button type="button" className="k-link" data-testid="start-mode" onClick={() => setStartOpen(true)}
+            title={direct ? t("gameStart.directHint") : t("gameStart.steamHint")}>{t("play.startsVia", { how: startWord(s.start) })}</button>
+        )}
       </div>
 
       <VanillaOnceModal open={vanillaOpen} onClose={() => setVanillaOpen(false)} onPlay={() => { setVanillaOpen(false); ctl.play("vanilla"); }} />
-      <AddGameModal open={adding} onClose={() => setAdding(false)} />
+      <AddGameModal open={adding} onClose={() => setAdding(false)} onAdded={onAdded} />
+      <StartModal game={game} open={startOpen} onClose={() => setStartOpen(false)} />
       {pending.data && offerOpen && (ModpackOffer ? (
         <Suspense fallback={null}><ModpackOffer gameId={game.id} lastServer={pending.data} open={offerOpen} onClose={() => setOfferOpen(false)} /></Suspense>
       ) : (
@@ -280,7 +302,14 @@ function Banners({ game, ctl, pending, onOffer, boot }: { game: GameInstall; ctl
   const change = useRuntimeChanges((x) => x.last[game.id]);
   const update = useUpdate();
   const s = status.data;
+  const direct = s?.start === "direct";
+  const setup = useStartSetup(game.id, direct);
   const out = [];
+  // (dev.29.17) the exe's build is one Kiln has no verified record of: Kiln starts with the game and stays idle
+  if (s?.build && !s.build.known) out.push(<UnknownBuild key="build" build={s.build} />);
+  if (direct && setup.data?.problem && !ctl.running) {
+    out.push(<Banner key="start-problem" tone="err" title={t("gameStart.cannotStart")}>{setup.data.problem}</Banner>);
+  }
   if (pending?.outcome === "rejected") {
     out.push(
       <Banner key="refused" tone="err" title={t("play.banner.refused")} actions={<>
@@ -409,6 +438,11 @@ function bootProblems(st: BootState | undefined): { count: number; text: string;
 function platform(g: GameInstall): string {
   const p = g.platform === "proton" ? "Proton" : g.platform === "wine" ? "Wine" : g.platform === "windows" ? "Windows" : String(g.platform);
   return g.pathMode === "copy" ? t("play.copyMode", { platform: p }) : p;
+}
+/** Where an install came from, for the game picker: a folder no Steam library knows says "custom". */
+function sourceWord(g: GameInstall): string {
+  if (g.source === "manual" && !g.library) return t("play.source.custom");
+  return g.source === "steam" ? "Steam" : g.source;
 }
 function shortPath(p: string): string {
   const parts = p.split(/[\\/]/).filter(Boolean);

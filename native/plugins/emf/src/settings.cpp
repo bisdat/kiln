@@ -160,9 +160,13 @@ const char* kHeader =
     "; EMF mod settings, kept by Kiln (kiln-emf). Section [<mod>]: enabled=0/1 switches the mod at the next start;\n"
     "; the other keys are the mod's settings (mod.json). Kiln mirrors this section to <game>/emf/config/<mod>.ini.\n";
 
+// On kiln-emf's disk thread (0.2.0-dev.29.17): a mod's setting_set or the `set` command runs on the tick. The store is
+// copied; the writes of one file keep their order (one thread), so the last value set is the one on disk.
 void persist(const Store& st) {
-    write_section(st, st.ini, kHeader);
-    write_section(st, st.mirror, nullptr);
+    io_post("writing EMF mod settings", [copy = st] {
+        write_section(copy, copy.ini, kHeader);
+        write_section(copy, copy.mirror, nullptr);
+    });
 }
 
 // ---------------------------------------------------------------------------------------------- values --------

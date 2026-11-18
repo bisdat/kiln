@@ -535,7 +535,7 @@ fn detected(kind: DetectKind, engine: Option<Engine>, path: &Path, reason: Strin
         version: None,
         name,
         reason,
-        items: vec![],
+        items: vec![], asi_omit: vec![],
         engine,
     }
 }

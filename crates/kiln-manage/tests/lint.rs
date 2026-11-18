@@ -708,7 +708,8 @@ fn effect_run_names_obey_the_registry_byte_limit() {
 }
 
 /// docs/kiln/modding/resource-patches.md: every blocks-file example passes the schema, and a patch is at least one change
-/// of set, append, addComponents, removeComponents (with nothing else, or an appended change of the game's value, refused).
+/// of set, append, replace, clear, addComponents, removeComponents, copyComponents (with nothing else, or an appended change of the
+/// game's value, refused).
 #[test]
 fn resource_patch_examples_pass_and_a_patch_needs_a_change() {
     let doc = std::fs::read_to_string(repo().join("docs/kiln/modding/resource-patches.md")).unwrap();
@@ -731,6 +732,12 @@ fn resource_patch_examples_pass_and_a_patch_needs_a_change() {
         (serde_json::json!({"resource": guid, "type": "keen::ecs::TemplateResource", "addComponents": []}), true),
         (serde_json::json!({"resource": guid, "type": "keen::ecs::TemplateResource", "removeComponents": ["SpawnTime"]}), false),
         (serde_json::json!({"resource": guid, "type": "keen::BalancingTable", "append": {"steps": {"values": [3, 5], "aboveLast": true}}}), false),
+        (serde_json::json!({"resource": guid, "type": "keen::SceneResource", "clear": ["noBuildZones"]}), false),
+        (serde_json::json!({"resource": guid, "type": "keen::SceneResource", "clear": []}), true),
+        (serde_json::json!({"resource": guid, "type": "keen::FbUiBundle", "replace": {"steps": {"values": [0.5, 1]}}}), false),
+        (serde_json::json!({"resource": guid, "type": "keen::FbUiBundle", "replace": {"steps": {"values": [1], "aboveLast": true}}}), true),
+        (serde_json::json!({"resource": guid, "type": "keen::ecs::TemplateResource", "copyComponents": {"InventoryCraftingStock": guid}}), false),
+        (serde_json::json!({"resource": guid, "type": "keen::ecs::TemplateResource", "copyComponents": {"InventoryCraftingStock": "magic"}}), true),
     ];
     for (i, (patch, bad)) in cases.iter().enumerate() {
         let e = tmp(&format!("resource-patch-case-{i}"));

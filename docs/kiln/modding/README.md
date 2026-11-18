@@ -55,6 +55,8 @@ generated [../status.generated.md](../status.generated.md); what has no API yet 
 | [player-states.md](player-states.md) | Every state and action a player can be in: `player.Is(...)`, `PlayerStateChangedEvent`, `PlayerActionEvent`, and what is left out |
 | [../services/steamguard.md](../services/steamguard.md) | The achievement guard (experimental, game client only): keep tests and admin commands from unlocking Steam achievements |
 | [debugging.md](debugging.md) | Breakpoints in a running server: `kiln debug` and netcoredbg |
+| [../native-mods.md](../native-mods.md) | Native mods (DLL mods): `native.json`, load phases, `kiln_native_init` and the Kiln API from C or C++ |
+| [native-asi.md](native-asi.md) | One DLL that runs as a Kiln native mod and as an `.asi` under Ultimate ASI Loader, and starts once |
 
 ## Five-minute start
 ```sh

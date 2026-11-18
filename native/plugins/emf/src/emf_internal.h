@@ -242,8 +242,9 @@ void core_after_step(EmfWorld* w, uint8_t kind);
 void events_after_step(EmfWorld* w, uint8_t kind);
 void commands_after_step(EmfWorld* w, uint8_t kind);
 void settings_after_step(EmfWorld* w, uint8_t kind);
-void game_server_pre();
-void commands_server_pre();
+class SlowParts;                     // slow_parts.h
+void game_server_pre(SlowParts* parts);  // marks saves, world settings, teleport timers in `parts`
+void commands_server_pre();          // no disk: tells the disk thread that the server world steps (commands_poll_files)
 void events_on_ready();    // registers the kiln.world programs that on_event / register_program asked for
 void commands_on_ready();  // subscribes to kiln.chat
 void game_on_ready();
@@ -307,6 +308,14 @@ struct CommandRun {
 };
 void command_reply_text(const std::shared_ptr<CommandRun>& run, std::string_view text);
 bool run_builtin_or_mod_command(EmfWorld* w, const std::shared_ptr<CommandRun>& run);
+
+// ---------------------------------------------------------------------------------------------- disk thread -----
+// io.cpp (io_worker.h): the tick never waits for the disk (0.2.0-dev.29.17). io_start in on_ready; io_stop in on_unload.
+void io_start();
+void io_write(const std::filesystem::path& p, std::string text);  // atomic; a newer text of a waiting file replaces it
+void io_post(const char* what, std::function<void()> job);       // in order with the writes, on the disk thread
+void io_stop(uint64_t timeout_ms);
+void commands_poll_files();  // commands.cpp, on the disk thread: emf_core.ini and emf/commands.txt while the server steps
 
 // ---------------------------------------------------------------------------------------------- status ----------
 void write_status();

@@ -1,0 +1,14 @@
+{
+  "format": 1,
+  "side": "client",
+  "comment": "GitHub #68 step 2, Kiln clients: the crafting menu's craftable count (rules/client.CraftableAmount) can include the server's snapshot of bag, Magic chests and opted-in station outputs. The count is not authority. A vanilla client has no hook. docs/re/stations.md section 10.",
+  "features": {
+    "stations.craft_ui": {
+      "symbols": [
+        "rules/client.CraftableAmount",
+        "stations/ResolveRecipeInputs",
+        "content/RecipeFind"
+      ]
+    }
+  }
+}

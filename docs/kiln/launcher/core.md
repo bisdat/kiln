@@ -125,8 +125,18 @@ clashes), `get`, `list` (`ProfileSummary.active` = installs whose profile.json n
   / `no-mods` write `kiln/play-once.ini`, `once` renders `profile.once.json` + `chain/once.ini` and writes mode
   `profile`; a save backup (`saves`, reason `launch`) when the kms1 of what loads differs from the last launch
   (`<data>/installs/<id>.launch.json`; vanilla and no-mods are the empty set); then `steam://rungameid/<app>`
-  (xdg-open / ShellExecuteW). A failure removes the flag again. `play_with` takes the save folders and the opener
-  (tests). Then `wait_started`, `read_boot_for(install, nonce)`, `boot_is_current` (boot.json was written after the
+  (xdg-open / ShellExecuteW), or for an install that starts directly (dev.29.17, `direct`: a folder no Steam library
+  knows by default, else the record's `start`) the folder's `enshrouded.exe` itself, with no Steam needed: on Windows
+  in the game folder, on Linux through `umu-run` (`WINEPREFIX`, `GAMEID=umu-default`, `PROTONPATH`), `proton run`
+  (`STEAM_COMPAT_DATA_PATH`, `STEAM_COMPAT_CLIENT_INSTALL_PATH`: Steam's folder, else Kiln's empty
+  `kiln-prefixes/_compat-client`) or `wine` (`WINEPREFIX`); automatic takes umu-run, else the newest Proton, else
+  Wine; with `WINEDLLOVERRIDES` `dinput8=n,b`, in Kiln's own prefix per install unless the player picked one
+  ([custom-game-folders.md](custom-game-folders.md); contracts.md section 7, Launch, step 4). A failure removes the
+  flag again. `play_with` takes the save folders and the URI opener (tests), `play_via` a `Starter` (the URI opener or
+  the direct command and its starter; tests record the command, nothing runs).
+- `direct::build_check(install, bundle)`: the exe's sha256 (remembered while the file is unchanged) against the
+  game's `kiln/sigdb/builds/<side>/<sha256>.json` (`verified: true`), else the `builds` index of the runtime zip
+  `bundle` gives; `unknown_build_sentence` is the sentence the launcher and the support report say for an unknown one. Then `wait_started`, `read_boot_for(install, nonce)`, `boot_is_current` (boot.json was written after the
   running game's process started; on Windows its pid must also be that process's).
 - `hostenv::{command, clean, clean_with, changes}`: every program of the host the crate starts (xdg-open and with it
   Steam, Wine, SteamCMD, tar, cp, ssh, systemctl, archive tools, xdg-mime, secret-tool, a forwarded nxm handler) gets

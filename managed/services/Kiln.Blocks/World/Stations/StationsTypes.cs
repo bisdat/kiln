@@ -198,8 +198,22 @@ public sealed record FillOptions
     /// a player's bag, only the base's stock containers.</summary>
     public EntityId Player { get; init; }
 
-    /// <summary>Reserves: at least this many of each item stay in the base's stock containers (up to 64 items).</summary>
+    /// <summary>Reserves: at least this many of each item stay in the base's stock containers (up to 64 items). They do
+    /// not apply to <see cref="Chests"/> or to a player's bag.</summary>
     public IReadOnlyDictionary<ItemId, long>? Keep { get; init; }
+
+    /// <summary>Ordinary chests in the station's base to take from after the Magic chests and before opted-in station
+    /// outputs. Null or empty (the default): those chests are not used. At most 64. A Magic chest, a refilling plant, a
+    /// production station, a player, or a container in another base is refused and nothing moves. Since 0.2.0-dev.29.17.
+    /// The station screen's fill button does not name chests.</summary>
+    public IReadOnlyList<EntityId>? Chests { get; init; }
+
+    /// <summary>Also take, last, from the finished items of the base's stations that are opted in as crafting stock
+    /// (<see cref="Stations.SetOutputSource"/>): after <see cref="Player"/>'s bag, the Magic chests and any named ordinary
+    /// chests, only what they cannot cover. Default true; with no station opted in it changes nothing. False: no station
+    /// outputs (named chests are still used). Since
+    /// 0.2.0-dev.29.17 (<c>stations.output_sources</c>; without it the fill uses the game's sources only).</summary>
+    public bool UseStationOutputs { get; init; } = true;
 }
 
 /// <summary>What kept a fill below what was asked.</summary>
@@ -217,8 +231,18 @@ public enum FillLimit
     Water = 4,
 }
 
-/// <summary>One input of a fill plan: what one craft needs, what the station holds, what the base's stock can give.</summary>
-public readonly record struct FillInput(ItemId Item, int PerCraft, int Have, long Stock);
+/// <summary>One input of a fill plan: what one craft needs, what the station holds, what the base's stock can give (the
+/// Magic chests after the reserves, and the named player's bag).</summary>
+public readonly record struct FillInput(ItemId Item, int PerCraft, int Have, long Stock)
+{
+    /// <summary>What the named ordinary chests hold of it, taken after <see cref="Stock"/> and before
+    /// <see cref="Outputs"/>. 0 when the fill names none. Since 0.2.0-dev.29.17.</summary>
+    public long Chests { get; init; }
+
+    /// <summary>What opted-in stations of the base lend of it (their finished items), taken after <see cref="Stock"/>
+    /// and <see cref="Chests"/>; 0 with none opted in. Since 0.2.0-dev.29.17.</summary>
+    public long Outputs { get; init; }
+}
 
 /// <summary>What a fill would do now (<see cref="Stations.Plan"/>). Since 0.2.0-dev.29.14.</summary>
 /// <param name="Status">Done when <see cref="CraftsPlanned"/> crafts would go in; Partial when fewer than asked; otherwise
@@ -226,7 +250,8 @@ public readonly record struct FillInput(ItemId Item, int PerCraft, int Have, lon
 /// <param name="Station">The station.</param>
 /// <param name="Recipe">The recipe.</param>
 /// <param name="CraftsLoaded">Complete crafts the station holds now.</param>
-/// <param name="CraftsAffordable">More crafts the base's stock covers (after the reserves).</param>
+/// <param name="CraftsAffordable">More crafts the base's stock covers (after the reserves; with the opted-in stations'
+/// outputs, since 0.2.0-dev.29.17).</param>
 /// <param name="CraftsPlanned">More crafts a fill with these options would ask the game for.</param>
 /// <param name="Inputs">The resolved inputs (category choices applied).</param>
 /// <param name="Message">Why, when nothing (or less than asked) would go in.</param>
@@ -352,6 +377,13 @@ public sealed record StationResult(StationActionStatus Status, StationAction Act
     public FillLimit LimitedBy { get; init; }
     /// <summary>Fill limited by <see cref="FillLimit.Stock"/> or <see cref="FillLimit.Reserve"/>: the item; null otherwise.</summary>
     public ItemId? ShortItem { get; init; }
+    /// <summary>Fill: items taken from the ordinary chests named on the request, all inputs together; 0 when the player
+    /// and the Magic chests covered that part, or none were named. Since 0.2.0-dev.29.17.</summary>
+    public int FromChests { get; init; }
+
+    /// <summary>Fill: items taken from opted-in stations' finished items (<see cref="Stations.SetOutputSource"/>), all
+    /// inputs together; 0 when the earlier sources covered it. Since 0.2.0-dev.29.17.</summary>
+    public int FromOutputs { get; init; }
 
     /// <summary>The same call may succeed later as it is: <see cref="StationActionStatus.QueueFull"/>,
     /// <see cref="StationActionStatus.Dropped"/>, and the stock or room shortages of a fill (they change as players and

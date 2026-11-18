@@ -8,5 +8,5 @@
   "clients": "none",
   "boot": true,
   "advanced": true,
-  "description": "PASS/FAIL lines: boot resource patches that remove and add a template's components, set an added component's field, and append to a list (keen::BalancingTable.altarsPerFlameLevel); names:templates in OnBoot."
+  "description": "PASS/FAIL lines: boot resource patches that remove and add a template's components, set an added component's field, append to a list (keen::BalancingTable.altarsPerFlameLevel), copy a component from another template, clear lists, replace a list's values; names:templates, names:resources and resource:<GUID>/<type name>/<part> in OnBoot."
 }

@@ -662,6 +662,12 @@ KilnItemsRequest r = { sizeof r, KILN_ITEMS_LEVEL | KILN_ITEMS_RARITY, chest, 0x
 uint64_t ticket;
 it->give(owner, &r, on_done, user, &ticket);       /* on_done(const KilnItemsResult*, user): tick thread, Pre */
 ```
+There is no native `DisplayName`. `Items.DisplayName` on a dedicated server returns the English string from the managed
+assembly's embedded item catalog (`items.tsv`), because that server's game data has no loca texts. On a client it is
+the game's loca text for the current language, read in the background, with a kiln.content text for a mod item. A
+native reader of the game's loca table would return null on a dedicated server where `Items.DisplayName` returns the
+shipped English name, and a second copy of that catalog inside kiln-items would drift from the managed one.
+
 `give`/`take` (any thread; refused at once with `KILN_ERR_INVALID_ARGUMENT` / `KILN_ERR_UNAVAILABLE`), `cancel`,
 `cancel_owner`, `read` / `find_inventories` (tick thread, Pre or Post), `item_count` / `item_at` / `item_info` /
 `find_item` / `item_id_of_guid`, `status`. v2 (check `header.size`): `fuel` (a `KilnItemsFuelRequest`: `SET`, `FILL` or

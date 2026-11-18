@@ -158,6 +158,10 @@ target_link_libraries(kiln-tickprobe PRIVATE kiln-safetyhook)
 
 # Samples and spikes with their own CMakeLists.txt (native/samples/<name>/, native/spikes/<name>/): test harnesses,
 # test DLLs and sample native mods. native-hello and tickprobe have none and stay listed above.
+if(EXISTS "${CMAKE_SOURCE_DIR}/../mods/tests/station-native-test/CMakeLists.txt")
+    add_subdirectory("${CMAKE_SOURCE_DIR}/../mods/tests/station-native-test" "${CMAKE_BINARY_DIR}/station-native-test")
+endif()
+
 file(GLOB KILN_EXTRA_DIRS LIST_DIRECTORIES true CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/samples/*" "${CMAKE_SOURCE_DIR}/spikes/*")
 foreach(dir ${KILN_EXTRA_DIRS})
     if(EXISTS "${dir}/CMakeLists.txt")

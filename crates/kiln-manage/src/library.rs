@@ -150,6 +150,19 @@ pub struct Detected {
     /// The engine it was made for (other engines' kinds, and loaders under proxy names).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub engine: Option<crate::engines::Engine>,
+    /// An `.asi` package only: its `.asi` files that are the same mod as a Kiln native mod in the same import
+    /// (drop_asi_copies_of_native_mods). The import leaves them out and names each in `skipped`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub asi_omit: Vec<AsiOmit>,
+}
+
+/// An `.asi` file an `.asi` package leaves out because the package's Kiln native mod `native_id` is the same mod.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AsiOmit {
+    /// Shown as [`Detected::path`] is: the real path, or `<archive>/<entry>` for a file inside an archive.
+    pub path: String,
+    pub native_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -244,10 +257,10 @@ fn detect_dll(path: &Path) -> Detected {
     let stem_id = id_from_name(path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default().as_str());
     let bytes = match std::fs::read(path) {
         Ok(b) => b,
-        Err(e) => return Detected { kind: DetectKind::Unknown, path: p, id: None, version: None, name: None, reason: e.to_string(), items: vec![], engine: None },
+        Err(e) => return Detected { kind: DetectKind::Unknown, path: p, id: None, version: None, name: None, reason: e.to_string(), items: vec![], asi_omit: vec![], engine: None },
     };
     if !crate::pe::is_pe64_dll(&bytes) {
-        return Detected { kind: DetectKind::Unknown, path: p, id: None, version: None, name: None, reason: "not a 64-bit Windows DLL".into(), items: vec![], engine: None };
+        return Detected { kind: DetectKind::Unknown, path: p, id: None, version: None, name: None, reason: "not a 64-bit Windows DLL".into(), items: vec![], asi_omit: vec![], engine: None };
     }
     let exports = crate::pe::parse(&bytes).map(|i| i.exports).unwrap_or_default();
     let has = |e: &str| exports.iter().any(|x| x == e);
@@ -258,7 +271,7 @@ fn detect_dll(path: &Path) -> Detected {
         version: Some("0.0.0".into()),
         name: path.file_name().map(|n| n.to_string_lossy().into_owned()),
         reason: reason.into(),
-        items: vec![],
+        items: vec![], asi_omit: vec![],
         engine: None,
     };
     // A DLL under a proxy name says nothing about what mod it is (`winmm.dll`, `dinput8.dll`): two of them must not
@@ -484,10 +497,39 @@ fn is_docs_file(name: &str) -> bool {
 /// The manifest files that make a folder a mod of some engine.
 const MOD_MANIFESTS: [&str; 8] = ["mod.json", "kiln.mod.json", "native.json", "flame.json", "pack.toml", "init.lua", "extended.mod.json", "native-plugin.ini"];
 
-/// Is one of `dir`'s folders a mod on its own?
+/// Is one of `dir`'s folders a mod on its own? Immediate children only. A `native.json` deeper than that is
+/// [`contains_native_json`].
 fn has_mod_subfolder(dir: &Path) -> bool {
     std::fs::read_dir(dir).into_iter().flatten().flatten().map(|e| e.path())
         .any(|p| p.is_dir() && !p.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.')) && has_mod_manifest(&p))
+}
+
+/// A `native.json` anywhere under `dir` (not only an immediate child). Links are not followed.
+fn contains_native_json(dir: &Path) -> bool {
+    fn walk(dir: &Path, depth: usize) -> bool {
+        if depth > 32 {
+            return false;
+        }
+        for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            let p = e.path();
+            if p.is_symlink() {
+                continue;
+            }
+            let name = e.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with('.') {
+                continue;
+            }
+            if p.is_file() && name.eq_ignore_ascii_case(crate::manifest::NATIVE_MANIFEST) {
+                return true;
+            }
+            if p.is_dir() && walk(&p, depth + 1) {
+                return true;
+            }
+        }
+        false
+    }
+    walk(dir, 0)
 }
 
 /// Does `dir` hold one of [`MOD_MANIFESTS`]? XHL-Core's native-plugin.ini in any case, as detection finds it.
@@ -647,7 +689,7 @@ fn rel_ignoring_case(dir: &Path, rel: &str) -> Option<String> {
 fn detect_folder_at(dir: &Path, depth: usize, top_name: Option<&str>) -> Detected {
     let p = dir.display().to_string();
     let mk = |kind, id: Option<String>, version: Option<String>, name: Option<String>, reason: String| Detected {
-        kind, path: p.clone(), id, version, name, reason, items: vec![], engine: None,
+        kind, path: p.clone(), id, version, name, reason, items: vec![], asi_omit: vec![], engine: None,
     };
     if dir.is_symlink() || depth > 32 {
         return mk(DetectKind::Unknown, None, None, None, "links or folders deeper than 32 levels are not mod imports".into());
@@ -677,8 +719,15 @@ fn detect_folder_at(dir: &Path, depth: usize, top_name: Option<&str>) -> Detecte
         return mk(DetectKind::Emf, s("id"), s("version"), s("name"), format!("an EMF mod (mod.json, EMF API {})", v["emf"]));
     }
     // Ultimate ASI Loader and/or .asi plugins (in the folder or a folder of it, as Smart Workshop's Scripts/): one
-    // package, a native mod placed in the game folder (game_files)
-    if !has_mod_manifest(dir) && let Some(d) = crate::game_files::detect_asi_package(dir, depth, top_name) {
+    // package, a native mod placed in the game folder (game_files).
+    // A native.json anywhere under the package is that mod. The .asi beside it is the same mod's other build, not a
+    // reason to take the whole package as only an .asi (drop_asi_copies_of_native_mods leaves the Kiln mod). Only
+    // native.json does this: a folder of another manifest (kiln.mod.json, mod.json ...) beside the .asi stays part of
+    // the one .asi package, as before.
+    if !has_mod_manifest(dir)
+        && let Some(d) = crate::game_files::detect_asi_package(dir, depth, top_name)
+        && !contains_native_json(dir)
+    {
         return d;
     }
     if let Some(d) = crate::engines::detect_folder(dir) {
@@ -766,6 +815,9 @@ fn detect_folder_at(dir: &Path, depth: usize, top_name: Option<&str>) -> Detecte
             only.name = Some(name);
         }
     }
+    // A package that ships one mod twice (native.json and the same DLL as an .asi for Ultimate ASI Loader) keeps the
+    // Kiln native mod. The .asi would also be placed in the game folder and loaded again.
+    drop_asi_copies_of_native_mods(&mut items);
     if items.iter().any(|i| i.kind != DetectKind::Unknown) {
         let n = items.iter().filter(|i| i.kind.importable()).count();
         // a loader the package carries that Kiln does not need (it runs that engine's mods itself) is not something
@@ -825,6 +877,87 @@ pub(crate) fn native_settings_dirs(dir: &Path) -> Vec<PathBuf> {
 }
 
 /// `top_name`: what `dir` is called when it is an unpacked archive at depth 0 (detect_folder_at).
+/// An `.asi` in this package is the same mod as a `native.json` sibling when the native id matches the file, or a
+/// listed DLL has the same name or the same bytes. Only that file is left out. Another `.asi` in the same folder
+/// is still imported.
+fn drop_asi_copies_of_native_mods(items: &mut [Detected]) {
+    let natives: Vec<(std::path::PathBuf, Option<String>)> = items.iter()
+        .filter(|i| i.kind == DetectKind::Native)
+        .map(|i| (std::path::PathBuf::from(&i.path), i.id.clone()))
+        .collect();
+    if natives.is_empty() {
+        return;
+    }
+    for item in items.iter_mut() {
+        if item.kind != DetectKind::Asi {
+            continue;
+        }
+        let path = std::path::PathBuf::from(&item.path);
+        let asis = asi_files_of(&path);
+        let mut matching: Vec<(PathBuf, String)> = Vec::new();
+        for asi in &asis {
+            if let Some(id) = natives.iter().find_map(|(dir, id)| {
+                asi_file_matches(dir, id.as_deref(), asi).then(|| id.clone().unwrap_or_else(|| "its native mod".into()))
+            }) {
+                matching.push((asi.clone(), id));
+            }
+        }
+        if matching.is_empty() {
+            continue;
+        }
+        if matching.len() == asis.len() {
+            let shown = &matching[0].1;
+            item.kind = DetectKind::Unknown;
+            item.engine = None;
+            item.reason = format!("the same mod is already this package's Kiln native mod ({shown}): only that one is added, so it is not also loaded as an .asi");
+            continue;
+        }
+        item.asi_omit = matching.into_iter().map(|(file, native_id)| AsiOmit { path: file.display().to_string(), native_id }).collect();
+    }
+}
+
+fn asi_file_matches(native_dir: &Path, native_id: Option<&str>, asi: &Path) -> bool {
+    let stem = asi.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+    if native_id.is_some_and(|id| id.eq_ignore_ascii_case(stem) || id.eq_ignore_ascii_case(&id_from_name(stem))) {
+        return true;
+    }
+    let dlls = crate::manifest::read_native(native_dir).map(|m| m.dlls).unwrap_or_default();
+    let asi_hash = crate::hash::sha256_file(asi).ok().map(|h| h.0);
+    for dll in dlls {
+        let path = native_dir.join(dll.replace('/', std::path::MAIN_SEPARATOR_STR));
+        let same_name = path.file_stem().and_then(|s| s.to_str()).is_some_and(|s| s.eq_ignore_ascii_case(stem));
+        let same_bytes = asi_hash.as_ref().is_some_and(|a| crate::hash::sha256_file(&path).ok().is_some_and(|h| &h.0 == a));
+        if same_name || same_bytes {
+            return true;
+        }
+    }
+    false
+}
+
+fn asi_files_of(item: &Path) -> Vec<std::path::PathBuf> {
+    let is_asi = |p: &Path| p.is_file() && p.extension().is_some_and(|x| x.eq_ignore_ascii_case("asi"));
+    if is_asi(item) {
+        return vec![item.to_path_buf()];
+    }
+    if !item.is_dir() {
+        return vec![];
+    }
+    let mut out = Vec::new();
+    for e in std::fs::read_dir(item).into_iter().flatten().flatten() {
+        let p = e.path();
+        if is_asi(&p) {
+            out.push(p);
+        } else if p.is_dir() {
+            for inner in std::fs::read_dir(&p).into_iter().flatten().flatten() {
+                if is_asi(&inner.path()) {
+                    out.push(inner.path());
+                }
+            }
+        }
+    }
+    out
+}
+
 fn children(dir: &Path, depth: usize, top_name: Option<&str>) -> Vec<Detected> {
     let mut entries: Vec<PathBuf> = std::fs::read_dir(dir).into_iter().flatten().flatten().map(|e| e.path()).collect();
     entries.sort();
@@ -849,7 +982,7 @@ fn children(dir: &Path, depth: usize, top_name: Option<&str>) -> Vec<Detected> {
         }
         if e.is_symlink() {
             out.push(Detected { kind: DetectKind::Unknown, path: e.display().to_string(), id: None, version: None, name: None,
-                reason: "links are not mod imports".into(), items: vec![], engine: None });
+                reason: "links are not mod imports".into(), items: vec![], asi_omit: vec![], engine: None });
             continue;
         }
         if native.as_ref().is_some_and(|p| &e != p && (native_companion(&e, p)
@@ -913,7 +1046,7 @@ pub fn detect(path: &Path) -> Result<Detected> {
     let meta = std::fs::symlink_metadata(path).map_err(io(path, "reading"))?;
     if crate::quick::import_is_link(&meta) {
         return Ok(Detected { kind: DetectKind::Unknown, path: path.display().to_string(), id: None, version: None, name: None,
-            reason: "links are not mod imports".into(), items: vec![], engine: None });
+            reason: "links are not mod imports".into(), items: vec![], asi_omit: vec![], engine: None });
     }
     crate::quick::validate_import_path(path)?;
     if meta.is_dir() {
@@ -939,7 +1072,7 @@ pub fn detect(path: &Path) -> Result<Detected> {
         version: None,
         name: None,
         reason: "not a folder, .zip, .7z, .rar or .dll".into(),
-        items: vec![],
+        items: vec![], asi_omit: vec![],
         engine: None,
     })
 }
@@ -949,6 +1082,11 @@ fn relabel(d: &mut Detected, tmp: &Path, zip: &Path) {
     if let Ok(rest) = Path::new(&d.path).strip_prefix(tmp) {
         // Path::join, not "/": a verbatim Windows path (\\?\C:\...) does not read '/' as a separator
         d.path = if rest.as_os_str().is_empty() { zip.display().to_string() } else { zip.join(rest).display().to_string() };
+    }
+    for o in &mut d.asi_omit {
+        if let Ok(rest) = Path::new(&o.path).strip_prefix(tmp) {
+            o.path = zip.join(rest).display().to_string();
+        }
     }
     for i in &mut d.items {
         relabel(i, tmp, zip);

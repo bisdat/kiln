@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Mod.OnBoot's lowering (chapter 08 §4.3 steps 1-3, S5): staged definitions become the collectors' documents through the same Compiler.Lower
 // a runtime Define uses, with a sink that registers nothing; the same input gives the same ids; a data file of the mod wins.
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Xunit;
 
@@ -140,6 +141,67 @@ public sealed class BootLoweringTests : IDisposable
         var r = Lower(Request(f.Staged));
         Assert.True(r["ok"]!.GetValue<bool>(), (string?)r["reason"]);
         Assert.Equal(2, r["docs"]!["patches"]!.AsArray().Count);
+    }
+
+    [Fact]
+    public void A_resource_patch_can_copy_a_component_and_clear_or_replace_lists()
+    {
+        var f = new BootContext("boot-gallery", 1, BootRoles.DedicatedServer, new UnavailableGameData());
+        var d = BootDefinitions.For(f);
+        var magic = Guid.Parse("955ba32f-08ea-414d-bd98-ac75990aef04");
+        var staged = d.Define("stock", new ResourcePatchBlock
+        {
+            Resource = Guid.Parse("65baa890-022a-454b-9cb7-b92cb8c06cd4"), Type = "keen::ecs::TemplateResource",
+            CopyComponents = new() { ["InventoryCraftingStock"] = magic },
+            Set = { ["InventoryCraftingStock.canReceiveAreaDeposit"] = true },
+        });
+        Assert.True(staged.Ok, staged.Reason);
+        Assert.Equal("""{"copyComponents":{"InventoryCraftingStock":"955ba32f-08ea-414d-bd98-ac75990aef04"},"part":0,"resource":"65baa890-022a-454b-9cb7-b92cb8c06cd4","set":{"InventoryCraftingStock.canReceiveAreaDeposit":true},"type":"keen::ecs::TemplateResource"}""",
+            Assert.Single(f.Staged).Json);
+        // a clear alone and a replace alone are changes
+        Assert.True(d.Define("anywhere", new ResourcePatchBlock
+        {
+            Resource = Guid.NewGuid(), Type = "keen::SceneResource", Clear = ["noBuildZones", "resetPlayersOutOfBounds.playableAreas"],
+        }).Ok);
+        Assert.Contains(""""clear":["noBuildZones","resetPlayersOutOfBounds.playableAreas"]"""", f.Staged[1].Json);
+        Assert.True(d.Define("steps", new ResourcePatchBlock
+        {
+            Resource = Guid.NewGuid(), Type = "keen::FbUiBundle",
+            Replace = new() { ["difficultySettings.settingValues.enemyDamage.steps"] = new ResourceListReplace { Values = [0.5, 1, 2] } },
+        }).Ok);
+        Assert.Contains(""""replace":{"difficultySettings.settingValues.enemyDamage.steps":{"values":[0.5,1,2]}}"""", f.Staged[2].Json);
+        var r = Lower(Request(f.Staged));
+        Assert.True(r["ok"]!.GetValue<bool>(), (string?)r["reason"]);
+        Assert.Equal(3, r["docs"]!["patches"]!.AsArray().Count);
+        // the JSON form reads back into the record
+        var back = JsonSerializer.Deserialize<ResourcePatchBlock>(f.Staged[0].Json, BlockJson.SharedOptions)!;
+        Assert.Equal(magic, back.CopyComponents!["InventoryCraftingStock"]);
+    }
+
+    [Fact]
+    public void A_replace_takes_plain_values_and_a_copy_names_another_template()
+    {
+        var f = new BootContext("boot-gallery", 1, BootRoles.DedicatedServer, new UnavailableGameData());
+        var d = BootDefinitions.For(f);
+        var self = Guid.NewGuid();
+        Assert.Contains("not a change of the game's value", Assert.Throws<ArgumentException>(() => d.Define("doubled", new ResourcePatchBlock
+        {
+            Resource = self, Type = "keen::FbUiBundle", Replace = new() { ["steps"] = new ResourceListReplace { Values = [ResourceValue.Times(2)] } },
+        })).Message);
+        Assert.Contains("Clear empties a list", Assert.Throws<ArgumentException>(() => d.Define("none", new ResourcePatchBlock
+        {
+            Resource = self, Type = "keen::FbUiBundle", Replace = new() { ["steps"] = new ResourceListReplace() },
+        })).Message);
+        Assert.Contains("not the one patched", Assert.Throws<ArgumentException>(() => d.Define("itself", new ResourcePatchBlock
+        {
+            Resource = self, Type = "keen::ecs::TemplateResource", CopyComponents = new() { ["Gravity"] = self },
+        })).Message);
+        Assert.Throws<ArgumentException>(() => d.Define("empty-path", new ResourcePatchBlock { Resource = self, Type = "keen::SceneResource", Clear = [""] }));
+        Assert.Throws<ArgumentException>(() => d.DefineJson("resourcePatches", "bad-copy",
+            """{"resource":"82706b40-61b1-4b8f-8b23-dcec6971bda1","type":"keen::ecs::TemplateResource","copyComponents":{"Gravity":"not-a-guid"}}"""));
+        Assert.Throws<ArgumentException>(() => d.DefineJson("resourcePatches", "bad-replace",
+            """{"resource":"82706b40-61b1-4b8f-8b23-dcec6971bda1","type":"keen::FbUiBundle","replace":{"steps":{"values":[1],"aboveLast":true}}}"""));
+        Assert.Empty(f.Staged);
     }
 
     [Fact]

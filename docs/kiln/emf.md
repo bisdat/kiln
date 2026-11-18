@@ -121,6 +121,11 @@ What that means for EMF's own mods of 0.6.8, read from their source (not seen wi
 In the lab, server-admin cost about 1.1 ms per step and the lua mod with 8 scripts about 0.8 ms. Every other shipped
 mod cost 0.1 ms or less.
 
+kiln-emf never waits for the disk on the server world's step (since 0.2.0-dev.29.17): `emf.json`, the mods' settings
+files and `emf/commands.txt` are written and read on a thread of its own. When its part of a step still takes over
+100 ms, `kiln.log` names the part (`slow tick: kiln-emf's server Pre took ...`, at most once a minute); a file that took
+the disk thread over a second is logged too (`disk: ... took ... ms`).
+
 ## Commands
 EMF mods register commands (`tp`, `herald.say`, `raids.status`, ...). On Kiln they run from two places:
 - **Players' chat:** `/<command> args`. The line is consumed, so nobody else sees it. Replies come back as chat lines

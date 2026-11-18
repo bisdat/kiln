@@ -382,7 +382,7 @@ fn entry(cx: &Ctx, root: &Root, abs: &Path, file_name: &str, is_zip: bool) -> Fo
         // the zip is not opened here: EML's runner takes a zip in its folders as one mod
         let stem = Path::new(file_name).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| shown.clone());
         Detected { kind: DetectKind::Eml, path: path.clone(), id: None, version: None, name: Some(stem),
-            reason: "a .zip in EML's folder".into(), items: vec![], engine: Some(Engine::Eml) }
+            reason: "a .zip in EML's folder".into(), items: vec![], asi_omit: vec![], engine: Some(Engine::Eml) }
     } else if too_large(abs) {
         return found(shown, path, FoundState::CannotRun, format!("A DLL here is larger than {} MiB, too large to inspect.", MAX_DLL >> 20));
     } else {

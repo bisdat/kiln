@@ -897,3 +897,29 @@ fn a_runtime_changed_during_the_steam_wait_drops_the_old_builds_basis() {
     assert_eq!(after.kiln.as_deref(), Some(new), "the runtime's own version");
     assert!(!after.estimate.same, "no same-version basis of the old build");
 }
+
+/// A start the launcher makes itself (`crate::direct`): its last launcher step keeps the id `steam` (the timeline's
+/// contract) but never says Steam, before it begins and while it runs.
+#[test]
+fn a_direct_starts_launcher_step_never_says_steam() {
+    let mut l = LauncherStart::new(BASE, None, Some(KILN.into()), Some(FP.into()));
+    l.direct = true;
+    l.begin("profile", BASE);
+    let tl = |l: &LauncherStart, now: i64| timeline(&Inputs { launcher: Some(l), progress: None, written: None, process: None, running: false,
+        boot: false, now, history: &[], kiln: Some(KILN), fingerprint: Some(FP) }).unwrap();
+    let step = |t: &Timeline| t.steps.iter().find(|s| s.id == "steam").cloned().unwrap();
+    let before = step(&tl(&l, BASE + 500));
+    assert_eq!((before.label.as_str(), before.state), (DIRECT_STEP_LABEL, StepState::Next));
+    l.begin("steam", BASE + 1_000);
+    l.asked = true;
+    let running = step(&tl(&l, BASE + 1_500));
+    assert_eq!((running.label.as_str(), running.state), (DIRECT_STEP_LABEL, StepState::Running));
+    // through Steam it says so
+    let mut s = LauncherStart::new(BASE, None, Some(KILN.into()), Some(FP.into()));
+    s.begin("profile", BASE);
+    assert_eq!(step(&tl(&s, BASE + 500)).label, default_label("steam"));
+    // a record from before the flag reads as through Steam
+    let old: LauncherStart = serde_json::from_value(serde_json::json!({"began": 1, "plan": [], "steps": [], "kiln": null,
+        "fingerprint": null, "asked": false, "seen": false, "kept": false})).unwrap();
+    assert!(!old.direct);
+}

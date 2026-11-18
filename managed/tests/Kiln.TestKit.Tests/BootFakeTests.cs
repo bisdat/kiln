@@ -164,4 +164,36 @@ public sealed class BootFakeTests
         Assert.Empty(Names("names:templates/PickupItem"));
         Assert.Equal(["Nested", "Zone"], Names("names:templates"));
     }
+
+    [Fact]
+    public void ResourceQueriesTakeAQualifiedTypeNameAndNamesResourcesListsTheScriptedResources()
+    {
+        using var kiln = new KilnHarness();
+        var scene = Guid.Parse("509feadb-4c60-425f-9c7c-deeefd9b6920");
+        var hash = BootFake.KitGameData.TypeHash("keen::SceneResource");
+        Assert.Equal(0x2bc68ebeu, hash);  // the game's type hash of keen::SceneResource
+        kiln.BootPhase.SetRecord($"resource:{scene}/{hash:x8}/0", """{"chunks": 3}""", scene, hash, 0);
+        kiln.BootPhase.SetRecord("item:Zed", """{"debugName": "Zed"}""", Guid.Parse("00000000-0000-4000-8000-000000000002"), BootFake.KitGameData.TypeHash("keen::ItemInfo"), 0);
+        var data = new BootFake.KitGameData(BootFake.StateOf(kiln));
+
+        // resource: with the qualified name is the hash form
+        var byName = data.Read($"resource:{scene}/keen::SceneResource/0");
+        Assert.True(byName.Ok, byName.Reason);
+        Assert.Equal(3, byName.Data!.Value.GetProperty("chunks").GetInt32());
+        Assert.False(data.Read($"resource:{scene}/keen::SceneResource/1").Ok);
+        Assert.Throws<ArgumentException>(() => data.Read($"resource:{scene}/SceneResource/0"));
+
+        // names:resources/<type>: the scripted resources of that type, unnamed ones by their GUID
+        var list = data.Read("names:resources/keen::SceneResource");
+        Assert.True(list.Ok, list.Reason);
+        Assert.Equal(hash, list.Data!.TypeHash);
+        Assert.Equal([scene.ToString("D")], list.Data.Value.GetProperty("names").EnumerateArray().Select(x => x.GetString()!));
+        var row = Assert.Single(list.Data.Value.GetProperty("resources").EnumerateArray());
+        Assert.Equal((scene.ToString("D"), 0, ""), (row.GetProperty("resourceId").GetString(), row.GetProperty("part").GetInt32(), row.GetProperty("name").GetString()));
+        var items = data.Read("names:resources/keen::ItemInfo");
+        Assert.True(items.Ok, items.Reason);
+        Assert.Equal(["Zed"], items.Data!.Value.GetProperty("names").EnumerateArray().Select(x => x.GetString()!));
+        Assert.False(data.Read("names:resources/keen::BalancingTable").Ok);
+        Assert.Throws<ArgumentException>(() => data.Read("names:resources/SceneResource"));
+    }
 }

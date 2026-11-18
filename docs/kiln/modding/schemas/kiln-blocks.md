@@ -1356,15 +1356,18 @@ What it takes to use it. item, count, uses and time are the game's own lock, sho
 
 ## resourcePatch
 
-One resource and what to change in it: fields to set, a template's components, values added to a list. At least one of set, append, addComponents, removeComponents. A patch is applied whole or not at all.
+One resource and what to change in it: fields to set, a template's components, lists cleared, replaced or appended to. At least one of set, append, replace, clear, addComponents, removeComponents, copyComponents. Made in the order removeComponents, addComponents, copyComponents, clear, replace, append, set. A patch is applied whole or not at all.
 
 | Key | Type | Required | Notes |
 |---|---|---|---|
 | `addComponents` | array of string |  | Components of the game's types a template gets, zeroed ("PickupItemZone"); one it has already stays. Made after removeComponents; set then fills them in ("PickupItemZone.lastAttempt.value"). min items 1 |
-| `append` | object |  | List path to the values added at its end: a list of numbers, bools or enum members. Made after the components, before set. |
+| `append` | object |  | List path to the values added at its end: a list of numbers, bools or enum members. Made after the components, clear and replace, before set. |
+| `clear` | array of string |  | List paths made empty, any element type ("noBuildZones"). A path names one list: [i] on the way is fine, [*] is not. Made after the components, before replace. min items 1 |
+| `copyComponents` | object |  | Component type name to the GUID of the template it is copied from, whole (its lists, strings and nested structs with it): added when the template has none of that type, its own replaced when it has. The source must have the component; CurrentTransform, and what an actor needs to live, are refused. Made after addComponents; set can then change the copy's fields. |
 | `format` | `1` |  |  |
 | `part` | integer |  | The part index; 0 when left out. min 0 |
 | `removeComponents` | array of string |  | A template's (keen::ecs::TemplateResource) components to take out, by type name ("SpawnTime"); one it has not got is skipped. Made first. CurrentTransform, and what an actor needs to live, are refused. min items 1 |
+| `replace` | object |  | List path to the values it holds afterwards, exactly: a list of numbers, bools or enum members. Made after clear, before append. |
 | `resource` | string | yes | The resource's GUID. |
 | `set` | object |  | Member path to value. A path: members by name, [i] an element of a list, [*] every element. |
 | `type` | string | yes | The resource's qualified type name, as keen::BalancingTable. min length 1 |

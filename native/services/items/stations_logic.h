@@ -8,6 +8,8 @@
 #include <cstdio>
 #include <cstring>
 #include <deque>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "services/kiln_stations.h"
@@ -30,31 +32,53 @@ inline bool any_choice(const KilnStationChoice* c) {
     return false;
 }
 
+// The request names ordinary chests only when it is the full struct. A KILN_STATION_REQUEST_V1 request has none, and
+// those fields are not read (the caller may not have them).
+inline bool request_names_chests(const KilnStationRequest& r) { return r.size >= sizeof(KilnStationRequest); }
+
+inline bool fill_chests_ok(const KilnStationRequest& r) {
+    if (!request_names_chests(r)) return true;
+    if (r.chest_reserved) return false;
+    if (r.chest_count > KILN_STATIONS_MAX_CHESTS) return false;
+    if (r.chest_count == 0) return r.chests == nullptr;
+    if (!r.chests) return false;
+    for (uint32_t i = 0; i < r.chest_count; ++i) {
+        const uint32_t e = r.chests[i];
+        if (e == 0 || e == r.station || e <= kMaxPlayerEntity) return false;  // not the station, not a player
+    }
+    return true;
+}
+
 inline bool request_valid(const KilnStationRequest& r) {
-    if (r.size < sizeof(KilnStationRequest) || r.station == 0) return false;
+    if (r.size < KILN_STATION_REQUEST_V1 || r.size > sizeof(KilnStationRequest) || r.station == 0) return false;
+    if (r.size != KILN_STATION_REQUEST_V1 && r.size < sizeof(KilnStationRequest)) return false;
     for (uint32_t x : r.reserved)
         if (x) return false;
     for (const auto& c : r.choices)
         if (c.reserved[0] || c.reserved[1] || c.reserved[2]) return false;
     constexpr uint32_t all = KILN_STATION_FILL_ADD | KILN_STATION_FILL_EXACT | KILN_STATION_DRY_RUN | KILN_STATION_NO_WATER |
-                             KILN_STATION_AFTER_CRAFT | KILN_STATION_KEEP_STOPPED | KILN_STATION_ALLOW_LOCKED;
+                             KILN_STATION_AFTER_CRAFT | KILN_STATION_KEEP_STOPPED | KILN_STATION_ALLOW_LOCKED |
+                             KILN_STATION_FILL_NO_OUTPUTS;
     if (r.flags & ~all) return false;
     switch (r.action) {
     case KILN_STATION_FILL: {
-        constexpr uint32_t ok = KILN_STATION_FILL_ADD | KILN_STATION_FILL_EXACT | KILN_STATION_DRY_RUN | KILN_STATION_NO_WATER;
+        constexpr uint32_t ok = KILN_STATION_FILL_ADD | KILN_STATION_FILL_EXACT | KILN_STATION_DRY_RUN | KILN_STATION_NO_WATER |
+                                KILN_STATION_FILL_NO_OUTPUTS;
         if (r.flags & ~ok) return false;
         if (r.crafts < 1 || r.crafts > kMaxCrafts) return false;
         if (r.keep_count > KILN_STATIONS_MAX_KEEP || (r.keep_count && !r.keep)) return false;
         if (any_choice(r.choices) && r.recipe == 0) return false;  // choices name a recipe's categories
-        return player_ok(r.player);
+        return player_ok(r.player) && fill_chests_ok(r);
     }
     case KILN_STATION_STOP:
-        return (r.flags & ~KILN_STATION_AFTER_CRAFT) == 0 && r.crafts == 0 && r.recipe == 0 && r.keep_count == 0 && r.player == 0;
+        return (r.flags & ~KILN_STATION_AFTER_CRAFT) == 0 && r.crafts == 0 && r.recipe == 0 && r.keep_count == 0 && r.player == 0 &&
+               fill_chests_ok(r) && (!request_names_chests(r) || r.chest_count == 0);
     case KILN_STATION_RESUME:
-        return r.flags == 0 && r.crafts == 0 && r.recipe == 0 && r.keep_count == 0 && r.player == 0;
+        return r.flags == 0 && r.crafts == 0 && r.recipe == 0 && r.keep_count == 0 && r.player == 0 && fill_chests_ok(r) &&
+               (!request_names_chests(r) || r.chest_count == 0);
     case KILN_STATION_SELECT:
         return (r.flags & ~(KILN_STATION_KEEP_STOPPED | KILN_STATION_ALLOW_LOCKED)) == 0 && r.crafts == 0 && r.keep_count == 0 &&
-               r.player == 0;  // recipe 0 clears the selection
+               r.player == 0 && fill_chests_ok(r) && (!request_names_chests(r) || r.chest_count == 0);  // recipe 0 clears
     default:
         return false;
     }
@@ -62,9 +86,10 @@ inline bool request_valid(const KilnStationRequest& r) {
 
 // ---- the fill's arithmetic ----
 // One resolved input: `count` per craft, `have` in the station (every link, partial stacks too), `stock` what the fill may
-// take (the base's stock containers after the reserves, plus the named player's inventories), `kept` what the reserves
-// held back, `room` the most the station can hold of it (water: its capacity; items: not modelled). The recipe's water is
-// an input too (item kWaterItem, count = units per craft): the game counts it in "loaded" (docs/re/stations.md §3.1).
+// take (the base's Magic chests after the reserves, plus the named player's inventories, plus named ordinary chests, plus
+// opted-in station outputs), `kept` what the reserves held back, `room` the most the station can hold of it (water: its
+// capacity; items: not modelled). The recipe's water is an input too (item kWaterItem, count = units per craft): the game
+// counts it in "loaded" (docs/re/stations.md §3.1).
 struct InputNow {
     uint32_t item = 0;
     uint32_t count = 0;
@@ -72,6 +97,8 @@ struct InputNow {
     uint64_t stock = 0;
     uint64_t kept = 0;
     uint64_t room = UINT64_MAX;
+    uint64_t chests = 0;   // of `stock`: named ordinary chests, after the player and the Magic chests, before outputs
+    uint64_t outputs = 0;  // of `stock`: what opted-in stations of the base lend (their Outputs), taken last
 };
 
 // The water input of a recipe with `charges` per craft (none when 0, or when the request pours no water).
@@ -244,6 +271,460 @@ inline int32_t fill_status(const Attempts& a, uint32_t wanted) {
 // Stock after a reserve: what may be taken of `have` when `keep` must stay.
 inline uint64_t after_keep(uint64_t stock, uint64_t keep) { return stock > keep ? stock - keep : 0; }
 
+// ---- station outputs as crafting stock (GitHub #68; docs/re/stations.md section 8) ----
+// A station's recipes as the classification needs them: the outputs, and every item that is an input (a category
+// input: all its options). Of the selected and the running recipe together, as Kiln.Blocks' SlotRoles.
+struct SourceRecipes {
+    std::vector<uint32_t> outputs;
+    std::vector<uint32_t> inputs;
+};
+// Item `item` is an Output of that station: an output of its recipes and no input of them. Then every stack of the item
+// in it is an Output stack, so the game's per-item take from the station can touch nothing else.
+inline bool lends_item(const SourceRecipes& r, uint32_t item) {
+    if (item == 0) return false;
+    if (std::find(r.inputs.begin(), r.inputs.end(), item) != r.inputs.end()) return false;
+    return std::find(r.outputs.begin(), r.outputs.end(), item) != r.outputs.end();
+}
+
+// One opted-in station as a fill sees it: the base it stands in now (-1: none) and whether it is still a station.
+struct SourceCandidate {
+    uint32_t entity = 0;
+    int32_t base = -1;
+    bool station = false;
+};
+// A station slot's role, the same split as Kiln.Blocks' SlotRoles. `known` is false when the station has no recipe:
+// leftovers are then none (an output that is also an input is neither).
+enum class SlotRole : uint8_t { None, Output, Leftover };
+inline SlotRole slot_role(const SourceRecipes& r, uint32_t item, bool known) {
+    if (item == 0) return SlotRole::None;
+    const bool input = std::find(r.inputs.begin(), r.inputs.end(), item) != r.inputs.end();
+    const bool output = std::find(r.outputs.begin(), r.outputs.end(), item) != r.outputs.end();
+    if (output && !input) return SlotRole::Output;
+    if (known && !input && !output) return SlotRole::Leftover;
+    return SlotRole::None;
+}
+
+// Collect's result. `finished` is stacks whose move completed (a partial move is not finished). `any_moved` is set when
+// some items left a stack that was not finished: that is PARTIAL, not DONE and not NO_ROOM.
+inline int32_t collect_status(uint32_t stacks, uint32_t finished, bool any_moved = false) {
+    if (stacks == 0) return KILN_STATION_UNCHANGED;
+    if (finished >= stacks) return KILN_STATION_DONE;
+    if (finished > 0 || any_moved) return KILN_STATION_PARTIAL;
+    return KILN_STATION_NO_ROOM;
+}
+
+// CollectToBase when the station stands in no base. The managed call answered NoRoom: every stack's target was null.
+inline int32_t collect_without_base() { return KILN_STATION_NO_ROOM; }
+
+// A move of a collect faulted. Stacks moved before it stay moved (each move is its own transaction): that is PARTIAL,
+// so the caller sees that something changed. Nothing moved yet: UNAVAILABLE.
+inline int32_t collect_fault_status(bool any_moved_before) {
+    return any_moved_before ? KILN_STATION_PARTIAL : KILN_STATION_UNAVAILABLE;
+}
+
+// DynamicInventoryCraftingStock when the override is set (byte 0, byte 1), else the template's
+// InventoryCraftingStock.canReceiveAreaDeposit. Unknown (no template bit) stays allowed, as the managed TakesDeposits.
+struct DepositRead {
+    bool component = false;
+    bool override_set = false;
+    bool override_on = false;
+    bool template_known = false;
+    bool template_on = false;
+};
+inline bool takes_deposits(const DepositRead& d) {
+    if (d.component && d.override_set) return d.override_on;
+    if (d.template_known) return d.template_on;
+    return true;
+}
+
+// FindRoomFor's order: a chest that already holds the item with room, else one with a free slot. A chest with neither
+// is not a destination.
+struct ChestOffer {
+    uint32_t entity = 0;
+    bool holds_with_room = false;
+    bool free_slot = false;
+};
+inline int chest_rank(const ChestOffer& c) {
+    if (c.holds_with_room) return 0;
+    if (c.free_slot) return 1;
+    return 2;
+}
+inline std::vector<uint32_t> collect_chest_order(const std::vector<ChestOffer>& chests) {
+    std::vector<uint32_t> idx(chests.size());
+    for (uint32_t i = 0; i < static_cast<uint32_t>(idx.size()); ++i) idx[i] = i;
+    std::stable_sort(idx.begin(), idx.end(), [&](uint32_t a, uint32_t b) { return chest_rank(chests[a]) < chest_rank(chests[b]); });
+    std::vector<uint32_t> out;
+    for (uint32_t i : idx)
+        if (chest_rank(chests[i]) < 2) out.push_back(chests[i].entity);
+    return out;
+}
+
+// One stack across chests in order. `room[i]` is how many of the remaining count chest i takes (0: this chest takes
+// nothing, try the next). Finished only when nothing of the stack remains.
+struct StackCollect {
+    bool finished = false;
+    bool any = false;
+    uint32_t left = 0;
+};
+inline StackCollect collect_stack(uint32_t count, const uint32_t* room, uint32_t n) {
+    StackCollect s;
+    s.left = count;
+    for (uint32_t i = 0; i < n && s.left; ++i) {
+        uint32_t take = room[i];
+        if (take > s.left) take = s.left;
+        if (!take) continue;
+        s.any = true;
+        s.left -= take;
+    }
+    s.finished = count > 0 && s.left == 0;
+    return s;
+}
+
+inline bool collect_valid(const KilnStationCollect& c) {
+    if (c.size < sizeof(KilnStationCollect) || c.station == 0 || c.reserved != 0) return false;
+    constexpr uint32_t what = KILN_STATION_COLLECT_OUTPUTS | KILN_STATION_COLLECT_LEFTOVERS;
+    constexpr uint32_t all = what | KILN_STATION_COLLECT_TO_BASE;
+    if ((c.flags & ~all) != 0 || (c.flags & what) == 0) return false;
+    if (c.flags & KILN_STATION_COLLECT_TO_BASE) return c.to == 0;
+    return c.to != 0 && c.to != c.station;  // a player's bag too, as Items.Move (run_move guards its own slots)
+}
+
+// The stations a fill of `target` in base `base` may use, in entity order: opted in, still a station, in that base, not the
+// target itself. A station of another base is never used.
+inline std::vector<uint32_t> eligible_sources(const std::vector<SourceCandidate>& all, uint32_t target, int32_t base) {
+    std::vector<uint32_t> out;
+    if (base < 0) return out;
+    for (const SourceCandidate& c : all)
+        if (c.entity && c.entity != target && c.station && c.base == base) out.push_back(c.entity);
+    std::sort(out.begin(), out.end());
+    out.erase(std::unique(out.begin(), out.end()), out.end());
+    return out;
+}
+
+// The resolved inputs repeat an item: the game then counts and tops up each entry on its own, which Kiln's per-item
+// shortfall call cannot mirror. Such a fill uses no station outputs and ignores named ordinary chests (the plain fill
+// still runs).
+inline bool inputs_repeat(const uint32_t* items, uint32_t n) {
+    for (uint32_t i = 0; i < n; ++i)
+        for (uint32_t k = i + 1; k < n; ++k)
+            if (items[i] == items[k]) return true;
+    return false;
+}
+inline bool use_named_chests(const uint32_t* items, uint32_t n) { return n != 0 && !inputs_repeat(items, n); }
+
+// What one named entity is, once the world has been read. Ordinary: an initialized inventory in the station's base, not a
+// production station, not a player's or an NPC's inventory, not already in the base's Magic-chest list.
+enum class ChestKind : uint8_t { Ordinary, Missing, OtherBase, Magic, Station, NoInventory, Player, IsTarget, Person };
+
+// InventorySetup's flags byte (kiln.items' KILN_ITEMS_FIND_* split): bit 0 a player's inventory, bit 1 an NPC's.
+inline bool setup_is_person(uint8_t flags) { return (flags & 3u) != 0; }
+
+struct ChestFacts {
+    int32_t base = -1;
+    bool present = false;
+    bool station = false;
+    bool magic = false;
+    bool inventory = false;
+    bool person = false;  // the inventory is a player's or an NPC's (InventorySetup flags), not a storage container
+};
+
+struct NamedChest {
+    uint32_t entity = 0;
+    int32_t base = -1;
+    ChestKind kind = ChestKind::Missing;
+};
+
+inline ChestKind kind_of(const ChestFacts& f, uint32_t entity, uint32_t target, int32_t station_base) {
+    if (entity == 0) return ChestKind::Missing;
+    if (entity == target) return ChestKind::IsTarget;
+    if (entity <= kMaxPlayerEntity) return ChestKind::Player;
+    if (!f.present) return ChestKind::Missing;
+    if (f.station) return ChestKind::Station;
+    if (f.magic) return ChestKind::Magic;
+    if (!f.inventory) return ChestKind::NoInventory;
+    if (f.person) return ChestKind::Person;
+    if (station_base < 0 || f.base != station_base) return ChestKind::OtherBase;
+    return ChestKind::Ordinary;
+}
+
+inline const char* chest_kind_why(ChestKind k) {
+    switch (k) {
+    case ChestKind::IsTarget: return "entity %u is the station being filled";
+    case ChestKind::Player: return "entity %u is a player, not a chest";
+    case ChestKind::Station: return "entity %u is a production station, not an ordinary chest";
+    case ChestKind::Magic: return "entity %u is already one of the base's Magic chests";
+    case ChestKind::NoInventory: return "entity %u has no inventory";
+    case ChestKind::Person: return "entity %u is a player's or an NPC's inventory, not a storage chest";
+    case ChestKind::OtherBase: return "entity %u is not in this base";
+    case ChestKind::Missing: return "entity %u is not in this base";
+    case ChestKind::Ordinary: return "";
+    }
+    return "entity %u is not an ordinary chest in this base";
+}
+
+// Every distinct named entity must be an ordinary chest. Duplicates are one entity.
+inline bool check_named_chests(const std::vector<NamedChest>& named, uint32_t* bad, ChestKind* kind) {
+    std::vector<uint32_t> seen;
+    for (const NamedChest& c : named) {
+        if (std::find(seen.begin(), seen.end(), c.entity) != seen.end()) continue;
+        seen.push_back(c.entity);
+        if (c.kind != ChestKind::Ordinary) {
+            *bad = c.entity;
+            *kind = c.kind;
+            return false;
+        }
+    }
+    return true;
+}
+
+// The chests a fill may take from, in the order the request names them, once each (a repeat keeps its first place).
+inline std::vector<uint32_t> eligible_chests(const std::vector<NamedChest>& all, uint32_t target, int32_t base) {
+    std::vector<uint32_t> out;
+    if (base < 0) return out;
+    for (const NamedChest& c : all)
+        if (c.kind == ChestKind::Ordinary && c.entity != target && c.base == base &&
+            std::find(out.begin(), out.end(), c.entity) == out.end())
+            out.push_back(c.entity);
+    return out;
+}
+
+// For a fill of n more crafts on top of `loaded`: what ordinary chests pay, then what station outputs pay. The player's
+// bag and the Magic chests (stock - chests - outputs, after the reserves) pay what they can first; chests pay the next
+// slice; outputs pay only the rest. Water comes from neither. False when those two cannot cover the rest (the plan
+// should not have asked for n). With chests == 0 this is the station-output share alone.
+inline bool pay_layers(const std::vector<InputNow>& in, uint32_t n, uint32_t loaded, std::vector<uint32_t>* chest_shares,
+                       std::vector<uint32_t>* output_shares) {
+    chest_shares->assign(in.size(), 0);
+    output_shares->assign(in.size(), 0);
+    for (size_t k = 0; k < in.size(); ++k) {
+        const InputNow& i = in[k];
+        if (i.item == kWaterItem || i.count == 0) continue;
+        const uint64_t need = game_need(i, n, loaded);
+        const uint64_t extra = std::min(i.stock, i.chests + i.outputs);
+        const uint64_t first = i.stock - extra;
+        if (need <= first) continue;
+        const uint64_t after = need - first;
+        const uint64_t from_chests = std::min(i.chests, after);
+        const uint64_t rest = after - from_chests;
+        if (rest > i.outputs) return false;
+        (*chest_shares)[k] = static_cast<uint32_t>(from_chests);
+        (*output_shares)[k] = static_cast<uint32_t>(rest);
+    }
+    return true;
+}
+
+inline bool output_shares(const std::vector<InputNow>& in, uint32_t n, uint32_t loaded, std::vector<uint32_t>* shares) {
+    std::vector<uint32_t> chests;
+    return pay_layers(in, n, loaded, &chests, shares);
+}
+
+inline std::vector<uint32_t> share_sum(const std::vector<uint32_t>& a, const std::vector<uint32_t>& b) {
+    std::vector<uint32_t> o(std::max(a.size(), b.size()), 0);
+    for (size_t i = 0; i < o.size(); ++i) {
+        const uint32_t x = i < a.size() ? a[i] : 0;
+        const uint32_t y = i < b.size() ? b[i] : 0;
+        o[i] = x + y;
+    }
+    return o;
+}
+inline bool any_share(const std::vector<uint32_t>& shares) {
+    return std::any_of(shares.begin(), shares.end(), [](uint32_t s) { return s != 0; });
+}
+inline uint64_t shares_total(const std::vector<uint32_t>& shares) {
+    uint64_t t = 0;
+    for (uint32_t s : shares) t += s;
+    return t;
+}
+
+// One line of a crafting payment (docs/re/stations.md §10). `game` is what the game's own sources can pay
+// (the owner and the base's Magic chests, already in the game's order). `outputs` is what opted-in stations
+// can lend of this item. `need` is the line's cost. Outputs pay only the shortfall, and only when every line
+// is covered: otherwise Kiln takes nothing and the game's own payment runs.
+struct CraftCost {
+    uint32_t item = 0;
+    uint32_t need = 0;
+    uint64_t game = 0;
+    uint64_t outputs = 0;
+};
+// False when some line is still short with the outputs counted in: `*from_outputs` is then all zero.
+// True when every line is covered. A line the game's sources already cover takes nothing from outputs.
+inline bool craft_output_takes(const std::vector<CraftCost>& lines, std::vector<uint32_t>* from_outputs) {
+    from_outputs->assign(lines.size(), 0);
+    for (size_t i = 0; i < lines.size(); ++i) {
+        const CraftCost& c = lines[i];
+        if (c.need == 0 || c.game >= c.need) continue;
+        const uint64_t rest = static_cast<uint64_t>(c.need) - c.game;
+        if (rest > c.outputs) {
+            from_outputs->assign(lines.size(), 0);
+            return false;
+        }
+        (*from_outputs)[i] = static_cast<uint32_t>(rest);
+    }
+    return true;
+}
+
+// ---- a craft's payment, without game memory (stations.cpp craft_pay_impl; docs/re/stations.md §10) ----
+constexpr uint64_t kMaxCraftStock = 4096;  // a longer stock list than this is left to the game
+
+// Who pays a craft before any station, in the game's order (InventoryPay): stock mode 2 pays the owner first and then
+// the base's stock list, mode 1 the list and then the owner. Each entity once: the owner can be one of the list's
+// chests, and counting it twice would hide a shortfall. False (the game's own payment) for any other mode (0 has no
+// base stock) and for a list longer than kMaxCraftStock, so outputs never pay before a chest the game would ask.
+inline bool craft_order(uint8_t mode, uint32_t owner, const uint32_t* list, uint64_t n, std::vector<uint32_t>* out) {
+    out->clear();
+    if ((mode != 1 && mode != 2) || n > kMaxCraftStock || (n && !list)) return false;
+    std::unordered_set<uint32_t> seen;
+    auto push = [&](uint32_t e) {
+        if (e && seen.insert(e).second) out->push_back(e);
+    };
+    if (mode == 2) push(owner);
+    for (uint64_t i = 0; i < n; ++i) push(list[i]);
+    if (mode == 1) push(owner);
+    return true;
+}
+
+// One opted-in station as a craft's payment reads it, at the payment.
+struct CraftLender {
+    uint32_t entity = 0;
+    int32_t base = -1;      // the base it stands in now (-1: none, or its place was not read)
+    bool station = false;   // still a station, and its recipes were read
+    SourceRecipes recipes;  // its selected and running recipes
+};
+// What the lenders of one craft hold: per item, the count and the stations (in entity order).
+struct CraftLent {
+    std::unordered_map<uint32_t, uint64_t> count;
+    std::unordered_map<uint32_t, std::vector<uint32_t>> by;
+};
+// What opted-in stations lend to a craft in base `base`, of `items`: only stations of that base (eligible_sources),
+// never `exclude` (the station crafted at, or a non-player owner), never an entity the game's own sources already pay
+// from (`order`), and of each station only an item that is an output and no input of its recipes (lends_item: its
+// queued inputs, its Leftovers and an output that is also an input stay where they are). `count(entity, item)` is what
+// that entity holds of the item.
+template <class Count>
+void craft_lenders(const std::vector<CraftLender>& all, uint32_t exclude, int32_t base, const std::vector<uint32_t>& order,
+                   const std::vector<uint32_t>& items, Count count, CraftLent* out) {
+    std::vector<SourceCandidate> cands;
+    cands.reserve(all.size());
+    for (const CraftLender& l : all) cands.push_back(SourceCandidate{l.entity, l.base, l.station});
+    for (uint32_t e : eligible_sources(cands, exclude, base)) {
+        if (std::find(order.begin(), order.end(), e) != order.end()) continue;
+        const auto it = std::find_if(all.begin(), all.end(), [e](const CraftLender& l) { return l.entity == e; });
+        if (it == all.end()) continue;
+        for (uint32_t item : items) {
+            if (!lends_item(it->recipes, item)) continue;
+            const uint64_t n = count(e, item);
+            if (!n) continue;
+            out->count[item] += n;
+            out->by[item].push_back(e);
+        }
+    }
+}
+
+// The items a Kiln client must have counted to raise a recipe's count with station outputs (GitHub #68, the crafting
+// menu): every input (an item, or every option of a category input) of every recipe that takes one of `lent`, and the
+// `lent` items themselves. A recipe that takes none of them keeps the game's own count, so its other inputs are not
+// needed. `recipe_inputs`: per recipe, its input items and options. Sorted, unique.
+inline std::vector<uint32_t> craft_stock_items(const std::vector<std::vector<uint32_t>>& recipe_inputs, const std::vector<uint32_t>& lent) {
+    std::unordered_set<uint32_t> want(lent.begin(), lent.end());
+    want.erase(0);
+    std::unordered_set<uint32_t> out(want.begin(), want.end());
+    if (!want.empty())
+        for (const auto& inputs : recipe_inputs)
+            if (std::any_of(inputs.begin(), inputs.end(), [&](uint32_t i) { return want.count(i) != 0; }))
+                for (uint32_t i : inputs)
+                    if (i) out.insert(i);
+    std::vector<uint32_t> v(out.begin(), out.end());
+    std::sort(v.begin(), v.end());
+    return v;
+}
+
+enum CraftVerdict : int {
+    kCraftGame = 0,      // Kiln took nothing: the game's own payment runs (`why` says why)
+    kCraftPaid = 1,      // every line paid, station outputs last: InventoryPay's 0
+    kCraftRollback = 2,  // a take faulted, or a line stayed short after a take: InventoryPay's 4 (the craft rolls back)
+};
+enum CraftWhy : uint32_t {
+    kCraftWhyNone = 0,
+    kCraftWhyCovered = 1,    // the game's own sources cover every line: no outputs needed
+    kCraftWhyShort = 2,      // a line's shortfall is more than this base's opted-in outputs hold
+    kCraftWhyFault = 3,      // a take faulted
+    kCraftWhyRemainder = 4,  // a line was still short after every source paid (the counts did not hold)
+};
+
+// One craft paid as the game's InventoryPay pays it, with the opted-in outputs as the very last source. Every line is
+// counted first: `have(entity, item)` for the game's own sources in `order`, `lent` for the stations. Kiln pays only
+// when some line is short of the game's own sources and the outputs cover every line's shortfall (all or nothing);
+// otherwise it takes nothing and the game pays (or refuses) as always. It pays line by line: the game's sources in their
+// order as far as they pay, then that line's lenders for what is left. `pay(entity, item, &left)` takes up to *left of
+// the item from the entity and lowers *left; false when it faulted. *from_outputs: what the lenders paid.
+template <class Have, class Pay>
+int craft_pay(std::vector<CraftCost>* lines, const std::vector<uint32_t>& order, const CraftLent& lent, Have have, Pay pay,
+              uint64_t* from_outputs, uint32_t* why) {
+    *from_outputs = 0;
+    *why = kCraftWhyNone;
+    for (CraftCost& line : *lines) {
+        line.game = 0;
+        uint64_t still = line.need;
+        for (uint32_t e : order) {
+            if (!still) break;
+            const uint64_t take = std::min<uint64_t>(have(e, line.item), still);
+            line.game += take;
+            still -= take;
+        }
+        const auto it = lent.count.find(line.item);
+        line.outputs = it == lent.count.end() ? 0 : it->second;
+    }
+    std::vector<uint32_t> takes;
+    if (!craft_output_takes(*lines, &takes)) {
+        *why = kCraftWhyShort;
+        return kCraftGame;
+    }
+    if (!any_share(takes)) {
+        *why = kCraftWhyCovered;
+        return kCraftGame;
+    }
+    for (size_t i = 0; i < lines->size(); ++i) {
+        const CraftCost& line = (*lines)[i];
+        uint32_t left = line.need;
+        for (uint32_t e : order) {
+            if (!left) break;
+            if (!pay(e, line.item, &left)) {
+                *why = kCraftWhyFault;
+                return kCraftRollback;  // a take may already be in the transaction: the caller rolls it back
+            }
+        }
+        if (left && takes[i]) {
+            const auto by = lent.by.find(line.item);
+            if (by != lent.by.end())
+                for (uint32_t e : by->second) {
+                    if (!left) break;
+                    const uint32_t before = left;
+                    if (!pay(e, line.item, &left)) {
+                        *why = kCraftWhyFault;
+                        return kCraftRollback;
+                    }
+                    *from_outputs += before - left;
+                }
+        }
+        if (left) {
+            *why = kCraftWhyRemainder;
+            return kCraftRollback;
+        }
+    }
+    return kCraftPaid;
+}
+
+// Once the shares are in the station: the n the game's own call then needs so that every input ends where a plain fill
+// of n would put it, n + loaded - loaded'. The game's call takes the rest from the player and the chests and pours the
+// water, exactly as it would have.
+inline uint32_t crafts_after_shares(const std::vector<InputNow>& in, const std::vector<uint32_t>& shares, uint32_t n, uint32_t loaded) {
+    std::vector<InputNow> after = in;
+    for (size_t k = 0; k < after.size() && k < shares.size(); ++k) after[k].have += shares[k];
+    const uint32_t l2 = crafts_loaded(after);
+    const uint64_t target = static_cast<uint64_t>(n) + loaded;
+    return l2 >= target ? 0u : static_cast<uint32_t>(target - l2);
+}
+
 // ---- stop after the running craft ----
 // A cycle is in progress while running != 0 in Running, Paused (it resumes where it paused) or OutputFull (its outputs
 // wait for room); a stop then makes the game refund the inputs and lose the cycle. Due: no cycle in progress, or a new
@@ -288,6 +769,11 @@ struct Req {
     KilnOwner owner = 0;
     KilnStationRequest r{};
     KilnStationStack keep[KILN_STATIONS_MAX_KEEP]{};
+    KilnEntity chests[KILN_STATIONS_MAX_CHESTS]{};
+    uint32_t chest_n = 0;
+    KilnEntity collect_to = 0;
+    uint32_t collect_item = 0;
+    uint32_t collect_flags = 0;
     uint64_t submitted = 0;
     // STOP after craft: what the station showed when it was taken
     bool waiting = false;

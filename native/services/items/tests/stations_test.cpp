@@ -48,18 +48,34 @@ int main() {
                   offsetof(KilnStation, crafts_loaded) == 132 && offsetof(KilnStation, recipe_start_ns) == 136 &&
                   offsetof(KilnStation, progress) == 168 && offsetof(KilnStation, flags) == 180);
     static_assert(sizeof(KilnStationInput) == 16 && sizeof(KilnStationRecipe) == 624 && offsetof(KilnStationRecipe, inputs) == 48);
-    static_assert(sizeof(KilnStationRequest) == 88 && offsetof(KilnStationRequest, choices) == 24 &&
-                  offsetof(KilnStationRequest, keep) == 64);
+    static_assert(sizeof(KilnStationRequest) == 104 && offsetof(KilnStationRequest, choices) == 24 &&
+                  offsetof(KilnStationRequest, keep) == 64 && offsetof(KilnStationRequest, chest_count) == KILN_STATION_REQUEST_V1 &&
+                  offsetof(KilnStationRequest, chests) == 96);
     static_assert(sizeof(KilnItemsMoveChange) == 32);
-    static_assert(sizeof(KilnStationResult) == 1232 && offsetof(KilnStationResult, limited_by) == 52 &&
+    static_assert(sizeof(KilnStationResult) == 1240 && offsetof(KilnStationResult, limited_by) == 52 &&
                   offsetof(KilnStationResult, short_item) == 56 && offsetof(KilnStationResult, ticket) == 64 &&
-                  offsetof(KilnStationResult, changes) == 80 && offsetof(KilnStationResult, message) == 1104);
-    static_assert(sizeof(KilnStationPlan) == 696 && offsetof(KilnStationPlan, short_item) == 36 &&
-                  offsetof(KilnStationPlan, water_per_craft) == 44 && offsetof(KilnStationPlan, inputs) == 56);
+                  offsetof(KilnStationResult, changes) == 80 && offsetof(KilnStationResult, message) == 1104 &&
+                  offsetof(KilnStationResult, from_chests) == 1232);
+    static_assert(sizeof(KilnStationPlan) == 952 && offsetof(KilnStationPlan, outputs) == 696 && offsetof(KilnStationPlan, chests) == 824 &&
+                  offsetof(KilnStationPlan, short_item) == 36 && offsetof(KilnStationPlan, water_per_craft) == 44 &&
+                  offsetof(KilnStationPlan, inputs) == 56);
     static_assert(sizeof(KilnStationEvent) == 112 && offsetof(KilnStationEvent, by) == 64 && offsetof(KilnStationEvent, position) == 72 &&
                   offsetof(KilnStationEvent, base) == 96);
     static_assert(sizeof(KilnStationsStatus) == 188);
-    static_assert(sizeof(KilnStationsApi) == 8 + 21 * 8);
+    static_assert(sizeof(KilnStationsApi) == 8 + 28 * 8 && offsetof(KilnStationsApi, set_output_source) == 8 + 21 * 8 &&
+                  offsetof(KilnStationsApi, max_chests) == 8 + 23 * 8 && offsetof(KilnStationsApi, collect) == 8 + 24 * 8 &&
+                  offsetof(KilnStationsApi, base_stock_with_stations) == 8 + 25 * 8 &&
+                  offsetof(KilnStationsApi, set_craft_stock) == 8 + 26 * 8 && offsetof(KilnStationsApi, craft_items) == 8 + 27 * 8);
+    static_assert(KILN_STATIONS_MAX_CRAFT_STOCK == 1024);
+    static_assert(sizeof(KilnStationCollect) == 24 && offsetof(KilnStationCollect, flags) == 16);
+    // a collect's flags travel in KilnStationResult.flags: they share no bit with a request flag (DRY_RUN above all)
+    static_assert(((KILN_STATION_COLLECT_OUTPUTS | KILN_STATION_COLLECT_LEFTOVERS | KILN_STATION_COLLECT_TO_BASE) &
+                   (KILN_STATION_FILL_ADD | KILN_STATION_FILL_EXACT | KILN_STATION_DRY_RUN | KILN_STATION_NO_WATER |
+                    KILN_STATION_AFTER_CRAFT | KILN_STATION_KEEP_STOPPED | KILN_STATION_ALLOW_LOCKED |
+                    KILN_STATION_FILL_NO_OUTPUTS)) == 0);
+    static_assert(KILN_STATION_COLLECT_OUTPUTS == 0x10000u && KILN_STATION_COLLECT_LEFTOVERS == 0x20000u &&
+                  KILN_STATION_COLLECT_TO_BASE == 0x40000u);
+    static_assert(offsetof(KilnStationResult, from_outputs) == 60);
 
     // ---- requests ----
     CHECK(request_valid(req(KILN_STATION_FILL)));
@@ -112,6 +128,34 @@ int main() {
     CHECK(request_valid(r));
     r.player = 1023;
     CHECK(request_valid(r));
+    // ordinary chests: a full request may name them; a request of the older size names none and is not read past
+    KilnEntity named[2] = {4000, 4001};
+    r = req(KILN_STATION_FILL);
+    r.chest_count = 2;
+    r.chests = named;
+    CHECK(request_valid(r));
+    r.chests = nullptr;
+    CHECK(!request_valid(r));
+    r.chests = named;
+    named[0] = 3;  // a player
+    CHECK(!request_valid(r));
+    named[0] = r.station;
+    CHECK(!request_valid(r));
+    named[0] = 4000;
+    r.chest_count = KILN_STATIONS_MAX_CHESTS + 1;
+    CHECK(!request_valid(r));
+    r.chest_count = 2;
+    r.chest_reserved = 1;
+    CHECK(!request_valid(r));
+    r.chest_reserved = 0;
+    r.size = 96;  // between the older request and this one
+    CHECK(!request_valid(r));
+    r.size = KILN_STATION_REQUEST_V1;
+    CHECK(request_valid(r));  // the chest fields are not part of this request
+    r = req(KILN_STATION_STOP);
+    r.chest_count = 1;
+    r.chests = named;
+    CHECK(!request_valid(r));
 
     // ---- the fill's arithmetic: the charcoal kiln (12 of category wood, 3 of another per craft) ----
     std::vector<InputNow> in{{0x2b0cf1d5, 12, 30, 100}, {0x07e67b5b, 3, 4, 20}};
@@ -418,6 +462,428 @@ int main() {
         CHECK(broken.read && !broken.fill && !broken.control && broken.events);
         CHECK(!status_bits(false, true, true, true, true, true).events);              // no reads, no watch
         CHECK(!status_bits(true, true, true, false, true, true).events);
+    }
+
+    // ---- station outputs as crafting stock (GitHub #68) ----
+    {
+        // the request flag: FILL only
+        KilnStationRequest r = req(KILN_STATION_FILL);
+        r.flags = KILN_STATION_FILL_NO_OUTPUTS;
+        CHECK(request_valid(r));
+        KilnStationRequest s2 = req(KILN_STATION_STOP);
+        s2.flags = KILN_STATION_FILL_NO_OUTPUTS;
+        CHECK(!request_valid(s2));
+        r.flags = 0x0100;  // unknown
+        CHECK(!request_valid(r));
+
+        // classification: a charcoal kiln (logs -> charcoal) lends charcoal only; never its logs (an input), never a
+        // leftover (dirt: neither), never an output that is also an input (seed -> seed + fibre: the seed)
+        const uint32_t LOGS = 11, CHARCOAL = 12, DIRT = 13, SEED = 14, FIBRE = 15, ORE = 16, OAK = 17, PINE = 18;
+        SourceRecipes kiln{{CHARCOAL}, {LOGS}};
+        CHECK(lends_item(kiln, CHARCOAL));
+        CHECK(!lends_item(kiln, LOGS));
+        CHECK(!lends_item(kiln, DIRT));
+        CHECK(!lends_item(kiln, 0));
+        SourceRecipes bed{{SEED, FIBRE}, {SEED}};
+        CHECK(!lends_item(bed, SEED));
+        CHECK(lends_item(bed, FIBRE));
+        // a category input: every option counts as an input (an "any wood" kiln never lends oak or pine)
+        SourceRecipes anywood{{CHARCOAL, OAK}, {OAK, PINE}};
+        CHECK(!lends_item(anywood, OAK) && !lends_item(anywood, PINE) && lends_item(anywood, CHARCOAL));
+        // the running recipe counts too: selected makes charcoal, running still makes logs from ... (both recipes' sets)
+        SourceRecipes both{{CHARCOAL, LOGS}, {LOGS, ORE}};
+        CHECK(!lends_item(both, LOGS) && !lends_item(both, ORE) && lends_item(both, CHARCOAL));
+        SourceRecipes none{};
+        CHECK(!lends_item(none, CHARCOAL));
+
+        // eligibility: opted in, still a station, the same base, not the target; entity order, once each
+        const std::vector<SourceCandidate> cands = {{40, 0, true}, {30, 0, true}, {50, 1, true}, {60, 0, false},
+                                                    {20, -1, true}, {10, 0, true}, {30, 0, true}};
+        const std::vector<uint32_t> el = eligible_sources(cands, 10, 0);
+        CHECK(el.size() == 2 && el[0] == 30 && el[1] == 40);  // 50: another base; 60: no station; 20: no base; 10: target
+        CHECK(eligible_sources(cands, 10, -1).empty());
+        CHECK(eligible_sources(cands, 99, 1).size() == 1);
+
+        const uint32_t rep[3] = {LOGS, CHARCOAL, LOGS}, norep[2] = {ORE, CHARCOAL};
+        CHECK(inputs_repeat(rep, 3) && !inputs_repeat(norep, 2) && !inputs_repeat(norep, 0));
+        CHECK(!use_named_chests(rep, 3) && use_named_chests(norep, 2));
+        // chests were named, but the resolved inputs repeat an item: they are ignored and the plain fill runs
+        std::vector<InputNow> repeated(1);
+        repeated[0].item = CHARCOAL;
+        repeated[0].count = 1;
+        repeated[0].stock = 4;  // Magic chests and the bag only; the named chests are not added
+        repeated[0].chests = 0;
+        std::vector<uint32_t> rep_chests, rep_outs;
+        CHECK(pay_layers(repeated, 4, 0, &rep_chests, &rep_outs) && rep_chests[0] == 0 && !any_share(rep_chests));
+        CHECK(plan_math(KILN_STATION_FILL_ADD, 4, repeated).status == KILN_STATION_DONE);
+
+        // bisdat's case: a forge (ore 2 + charcoal 3 a craft) holds nothing; the chests have 10 ore and 4 charcoal,
+        // an opted-in kiln lends 20 charcoal. A fill of 3 crafts: chests pay 4 charcoal first, the kiln the other 5.
+        std::vector<InputNow> in(2);
+        in[0].item = ORE, in[0].count = 2, in[0].stock = 10;
+        in[1].item = CHARCOAL, in[1].count = 3, in[1].stock = 4 + 20, in[1].outputs = 20;
+        PlanMath m = plan_math(KILN_STATION_FILL_ADD, 3, in);
+        CHECK(m.status == KILN_STATION_DONE && m.planned == 3 && m.affordable == 5);  // ore covers 5, charcoal 8
+        std::vector<uint32_t> shares;
+        CHECK(output_shares(in, 3, m.loaded, &shares) && shares[0] == 0 && shares[1] == 5 && shares_total(shares) == 5);
+        CHECK(any_share(shares));
+        // after the share is in the forge (5 charcoal), the game's own call for the rest is still 3 crafts on top of 0
+        CHECK(crafts_after_shares(in, shares, 3, m.loaded) == 3);
+
+        // the two game calls together put exactly what a plain fill of n puts, the chests paying first
+        auto both_calls = [&](std::vector<InputNow> v, uint32_t n, std::vector<uint64_t>* first_paid, std::vector<uint64_t>* outs_paid) {
+            const uint32_t loaded = crafts_loaded(v);
+            std::vector<uint32_t> sh;
+            if (!output_shares(v, n, loaded, &sh)) return -1;
+            first_paid->assign(v.size(), 0);
+            outs_paid->assign(v.size(), 0);
+            // call 1 per share: one stack with count 1, crafts = share -> the game moves exactly the share
+            for (size_t k = 0; k < v.size(); ++k) {
+                if (!sh[k]) continue;
+                InputNow one = v[k];
+                one.count = 1;
+                one.stock = v[k].outputs;
+                std::vector<uint32_t> mv;
+                if (game_fill({one}, sh[k], &mv) != 0 || mv[0] != sh[k]) return -2;
+                v[k].have += mv[0];
+                (*outs_paid)[k] = mv[0];
+            }
+            // call 2: the base's own sources only, n' = n + loaded - loaded'
+            std::vector<InputNow> rest = v;
+            for (auto& x : rest) x.stock -= std::min(x.stock, x.outputs);
+            const uint32_t n2 = crafts_after_shares(v, std::vector<uint32_t>(v.size(), 0), n, loaded);
+            std::vector<uint32_t> mv;
+            if (n2 > 0) {
+                if (game_fill(rest, n2, &mv) != 0) return -3;
+                for (size_t k = 0; k < v.size(); ++k) {
+                    v[k].have += mv[k];
+                    (*first_paid)[k] = mv[k];
+                }
+            }
+            // every input ends where a plain fill of n would put it
+            for (const auto& x : v)
+                if (x.count && x.have < static_cast<uint64_t>(n + loaded) * x.count) return -4;
+            return static_cast<int>(crafts_loaded(v));
+        };
+        std::vector<uint64_t> fp, op;
+        CHECK(both_calls(in, 3, &fp, &op) == 3 && fp[0] == 6 && fp[1] == 4 && op[0] == 0 && op[1] == 5);
+        // outputs taken last: chests that cover it all leave the kiln untouched
+        in[1].stock = 30 + 20;
+        CHECK(output_shares(in, 3, 0, &shares) && !any_share(shares));
+        CHECK(both_calls(in, 3, &fp, &op) == 3 && fp[1] == 9 && op[1] == 0);
+        // a forge that already holds a partial load: have counts, so only the top-up is paid
+        in[0].have = 3, in[1].have = 4, in[1].stock = 2 + 20;  // loaded = min(3/2, 4/3) = 1
+        CHECK(crafts_loaded(in) == 1);
+        CHECK(output_shares(in, 2, 1, &shares) && shares[1] == 3);  // need 3*3-4 = 5, chests 2, kiln 3
+        CHECK(crafts_after_shares(in, shares, 2, 1) == 2);          // charcoal 7 -> loaded' 1 still (ore): 2 more
+        CHECK(both_calls(in, 2, &fp, &op) == 3 && op[1] == 3 && fp[1] == 2 && fp[0] == 3);
+        // the share lifts the bottleneck: then the game's own call asks for fewer crafts on top of a higher loaded
+        std::vector<InputNow> one(1);
+        one[0].item = CHARCOAL, one[0].count = 3, one[0].have = 2, one[0].stock = 0 + 20, one[0].outputs = 20;
+        CHECK(output_shares(one, 2, 0, &shares) && shares[0] == 4);
+        CHECK(crafts_after_shares(one, shares, 2, 0) == 0);  // the outputs alone reach the target: no second call
+        CHECK(both_calls(one, 2, &fp, &op) == 2 && op[0] == 4);
+        // not enough: the outputs do not cover the rest -> no share at all (the fill tries fewer or nothing moves)
+        std::vector<InputNow> shortv(1);
+        shortv[0].item = CHARCOAL, shortv[0].count = 3, shortv[0].stock = 2 + 4, shortv[0].outputs = 4;
+        m = plan_math(KILN_STATION_FILL_ADD | KILN_STATION_FILL_EXACT, 3, shortv);
+        CHECK(m.status == KILN_STATION_NOT_ENOUGH && m.planned == 0 && m.limit.why == KILN_STATION_LIMIT_STOCK);
+        CHECK(!output_shares(shortv, 3, 0, &shares));
+        m = plan_math(KILN_STATION_FILL_ADD, 3, shortv);
+        CHECK(m.status == KILN_STATION_PARTIAL && m.planned == 2);
+        // water never comes from outputs: the game's own call pours it
+        std::vector<InputNow> wet(2);
+        wet[0].item = CHARCOAL, wet[0].count = 1, wet[0].stock = 5, wet[0].outputs = 5;
+        CHECK(water_input(1, false, 0, 640, 640, &wet[1]));
+        CHECK(output_shares(wet, 2, 0, &shares) && shares[0] == 2 && shares[1] == 0);
+        CHECK(crafts_after_shares(wet, shares, 2, 0) == 2);  // the water still holds loaded at 0: the game's call pours 2 crafts' water
+        // reserves: the chests' stock already excludes the reserve, so outputs pay before the reserve is touched
+        std::vector<InputNow> kept(1);
+        kept[0].item = CHARCOAL, kept[0].count = 1, kept[0].kept = 10, kept[0].stock = 2 + 8, kept[0].outputs = 8;
+        CHECK(output_shares(kept, 6, 0, &shares) && shares[0] == 4);
+
+        // ordinary chests pay after the Magic chests and before station outputs
+        ChestFacts plain;
+        plain.present = true;
+        plain.inventory = true;
+        plain.base = 0;
+        CHECK(kind_of(plain, 4000, 10, 0) == ChestKind::Ordinary);
+        CHECK(kind_of(plain, 10, 10, 0) == ChestKind::IsTarget);
+        CHECK(kind_of(plain, 4, 10, 0) == ChestKind::Player);
+        ChestFacts magic = plain;
+        magic.magic = true;
+        CHECK(kind_of(magic, 4000, 10, 0) == ChestKind::Magic);
+        ChestFacts away = plain;
+        away.base = 1;
+        CHECK(kind_of(away, 4000, 10, 0) == ChestKind::OtherBase);
+        ChestFacts bare = plain;
+        bare.inventory = false;
+        CHECK(kind_of(bare, 4000, 10, 0) == ChestKind::NoInventory);
+        // a villager or a player's inventory in the base is not a storage chest (InventorySetup flags bit 0 / bit 1)
+        ChestFacts villager = plain;
+        villager.person = setup_is_person(0x02);
+        CHECK(villager.person && kind_of(villager, 4000, 10, 0) == ChestKind::Person);
+        ChestFacts body = plain;
+        body.person = setup_is_person(0x01);
+        CHECK(kind_of(body, 4000, 10, 0) == ChestKind::Person);
+        CHECK(!setup_is_person(0x00) && !setup_is_person(0x04));
+        CHECK(std::strstr(chest_kind_why(ChestKind::Person), "NPC") != nullptr);
+        const std::vector<NamedChest> boxes = {{4002, 0, ChestKind::Ordinary},
+                                                {4000, 0, ChestKind::Ordinary},
+                                                {4000, 0, ChestKind::Ordinary},
+                                                {4005, 1, ChestKind::OtherBase}};
+        uint32_t bad = 0;
+        ChestKind why = ChestKind::Ordinary;
+        CHECK(!check_named_chests(boxes, &bad, &why) && bad == 4005 && why == ChestKind::OtherBase);
+        const std::vector<NamedChest> okboxes = {{4002, 0, ChestKind::Ordinary}, {4000, 0, ChestKind::Ordinary}, {4000, 0, ChestKind::Ordinary}};
+        CHECK(check_named_chests(okboxes, &bad, &why));
+        const std::vector<uint32_t> got = eligible_chests(okboxes, 10, 0);
+        CHECK(got.size() == 2 && got[0] == 4002 && got[1] == 4000);  // the request's order, a repeat once
+
+        // 3 crafts need 9 charcoal. Magic chests hold 2, an ordinary chest 3, a kiln lends 20.
+        std::vector<InputNow> layered(1);
+        layered[0].item = CHARCOAL;
+        layered[0].count = 3;
+        layered[0].stock = 2 + 3 + 20;
+        layered[0].chests = 3;
+        layered[0].outputs = 20;
+        std::vector<uint32_t> csh, osh;
+        CHECK(pay_layers(layered, 3, 0, &csh, &osh) && csh[0] == 3 && osh[0] == 4);
+        CHECK(output_shares(layered, 3, 0, &shares) && shares[0] == 4);
+        CHECK(crafts_after_shares(layered, share_sum(csh, osh), 3, 0) == 1);  // 7 in: loaded' is 2, one more craft takes the 2 from the Magic chests
+        // the Magic chests cover it: neither later source is touched
+        layered[0].stock = 9 + 3 + 20;
+        CHECK(pay_layers(layered, 3, 0, &csh, &osh) && !any_share(csh) && !any_share(osh));
+        // chests cover the rest and the kiln is not owed anything
+        layered[0].stock = 4 + 5;
+        layered[0].chests = 5;
+        layered[0].outputs = 0;
+        CHECK(pay_layers(layered, 3, 0, &csh, &osh) && csh[0] == 5 && osh[0] == 0);
+        // short even with the chest: nothing is taken
+        layered[0].stock = 4 + 2;
+        layered[0].chests = 2;
+        CHECK(!pay_layers(layered, 3, 0, &csh, &osh));
+        // water is never taken from a chest
+        std::vector<InputNow> wetchest(2);
+        wetchest[0].item = CHARCOAL;
+        wetchest[0].count = 1;
+        wetchest[0].stock = 0 + 2;
+        wetchest[0].chests = 2;
+        CHECK(water_input(1, false, 0, 640, 640, &wetchest[1]));
+        CHECK(pay_layers(wetchest, 2, 0, &csh, &osh) && csh[0] == 2 && csh[1] == 0 && osh[0] == 0);
+        CHECK(crafts_after_shares(wetchest, share_sum(csh, osh), 2, 0) == 2);
+
+        // collect: the same split as the managed SlotRoles, and the same result counts
+        SourceRecipes kiln_roles{{CHARCOAL}, {LOGS}};
+        CHECK(slot_role(kiln_roles, CHARCOAL, true) == SlotRole::Output);
+        CHECK(slot_role(kiln_roles, LOGS, true) == SlotRole::None);
+        CHECK(slot_role(kiln_roles, DIRT, true) == SlotRole::Leftover);
+        CHECK(slot_role(kiln_roles, DIRT, false) == SlotRole::None);  // no recipe: leftovers are not named
+        CHECK(collect_status(0, 0) == KILN_STATION_UNCHANGED);
+        CHECK(collect_status(3, 0) == KILN_STATION_NO_ROOM);
+        CHECK(collect_status(3, 2) == KILN_STATION_PARTIAL);
+        CHECK(collect_status(3, 3) == KILN_STATION_DONE);
+        // a stack of 64: the first chest takes 10, a later chest takes the rest → Done only when nothing remains
+        const uint32_t both_chests[2] = {10, 54};
+        StackCollect moved = collect_stack(64, both_chests, 2);
+        CHECK(moved.finished && moved.any && moved.left == 0);
+        CHECK(collect_status(1, moved.finished ? 1u : 0u, moved.any && !moved.finished) == KILN_STATION_DONE);
+        const uint32_t one_chest[2] = {10, 0};
+        moved = collect_stack(64, one_chest, 2);
+        CHECK(!moved.finished && moved.any && moved.left == 54);
+        CHECK(collect_status(1, 0, moved.any) == KILN_STATION_PARTIAL);
+        CHECK(collect_status(1, 0, false) == KILN_STATION_NO_ROOM);
+        // no base: the managed CollectToBase answered NoRoom
+        CHECK(collect_without_base() == KILN_STATION_NO_ROOM);
+        // override unset: the template deposit bit. Unknown stays allowed. A set override wins.
+        DepositRead dep;
+        CHECK(takes_deposits(dep));
+        dep.template_known = true;
+        dep.template_on = false;
+        CHECK(!takes_deposits(dep));
+        dep.template_on = true;
+        CHECK(takes_deposits(dep));
+        dep.component = true;
+        dep.override_set = true;
+        dep.override_on = false;
+        CHECK(!takes_deposits(dep));
+        // a partial stack is preferred to an empty slot in another chest; a chest with neither is not used
+        const std::vector<ChestOffer> offers = {{7, false, true}, {9, true, true}, {8, false, false}};
+        const std::vector<uint32_t> ord = collect_chest_order(offers);
+        CHECK(ord.size() == 2 && ord[0] == 9 && ord[1] == 7);
+        KilnStationCollect col{};
+        col.size = sizeof col;
+        col.station = 1318;
+        col.flags = KILN_STATION_COLLECT_OUTPUTS;
+        col.to = 4000;
+        CHECK(collect_valid(col));
+        col.flags |= KILN_STATION_COLLECT_TO_BASE;
+        CHECK(!collect_valid(col));  // to base: no container named
+        col.to = 0;
+        CHECK(collect_valid(col));
+        col.flags = KILN_STATION_COLLECT_TO_BASE;
+        CHECK(!collect_valid(col));  // outputs or leftovers is required
+        col.to = 1318;
+        col.flags = KILN_STATION_COLLECT_OUTPUTS;
+        CHECK(!collect_valid(col));  // not into itself
+        col.to = 5;
+        CHECK(collect_valid(col));   // a player's bag, as Stations.Collect(station, player) through Items.Move
+        col.to = 4000;
+        col.flags = KILN_STATION_COLLECT_OUTPUTS | 0x4u;  // the old TO_BASE bit is no collect flag
+        CHECK(!collect_valid(col));
+        col.flags = KILN_STATION_COLLECT_LEFTOVERS;
+        col.reserved = 1;
+        CHECK(!collect_valid(col));
+        col.reserved = 0;
+        col.size = sizeof col - 4;
+        CHECK(!collect_valid(col));
+        // a fault after earlier stacks moved is PARTIAL (they stay moved); before anything moved, UNAVAILABLE
+        CHECK(collect_fault_status(true) == KILN_STATION_PARTIAL && collect_fault_status(false) == KILN_STATION_UNAVAILABLE);
+        // crafting payment: outputs cover only the shortfall, and a line they cannot cover takes nothing
+        std::vector<CraftCost> craft = {{0xaaa, 4, 2, 4}, {0xbbb, 2, 2, 9}};
+        std::vector<uint32_t> took;
+        CHECK(craft_output_takes(craft, &took) && took[0] == 2 && took[1] == 0);
+        craft = {{0xaaa, 4, 1, 2}};  // short by 3, outputs hold 2
+        CHECK(!craft_output_takes(craft, &took) && took[0] == 0);
+        craft = {{0xaaa, 4, 4, 9}};  // the game's sources already cover it
+        CHECK(craft_output_takes(craft, &took) && took[0] == 0);
+        craft = {{0xaaa, 0, 0, 5}};
+        CHECK(craft_output_takes(craft, &took) && took[0] == 0);
+    }
+
+    // ---- a craft's payment (craft_pay_impl's logic; docs/re/stations.md §10) ----
+    {
+        constexpr uint32_t COAL = 0xc0a1, LOGS = 0x1095, SCRAP = 0x5c4a, LEFT = 0x1eff, BOTH = 0xb074;
+        constexpr uint32_t P = 5, C1 = 2001, C2 = 2002, K1 = 3001, K2 = 3002, K3 = 3003, W = 3004;
+        // who pays before any station, in the game's order
+        std::vector<uint32_t> order;
+        const uint32_t list[3] = {C1, P, C2};
+        CHECK(craft_order(2, P, list, 3, &order) && order == std::vector<uint32_t>({P, C1, C2}));  // owner first, once
+        CHECK(craft_order(1, P, list, 3, &order) && order == std::vector<uint32_t>({C1, P, C2}));  // list first
+        const uint32_t chests[2] = {C1, C2};
+        CHECK(craft_order(1, P, chests, 2, &order) && order == std::vector<uint32_t>({C1, C2, P}));
+        CHECK(!craft_order(0, P, chests, 2, &order) && order.empty());  // mode 0: the owner only, the game's own
+        CHECK(!craft_order(3, P, chests, 2, &order));
+        CHECK(!craft_order(2, P, nullptr, 2, &order));
+        std::vector<uint32_t> big(kMaxCraftStock + 1, C1);
+        CHECK(!craft_order(2, P, big.data(), big.size(), &order));  // longer than the cap: the game pays
+        CHECK(craft_order(2, P, nullptr, 0, &order) && order == std::vector<uint32_t>({P}));
+
+        // the world: what each entity holds, and the stations' recipes
+        std::unordered_map<uint32_t, std::unordered_map<uint32_t, uint64_t>> inv;
+        auto reset = [&] {
+            inv.clear();
+            inv[P][COAL] = 3, inv[P][SCRAP] = 2;
+            inv[C1][COAL] = 4;
+            inv[K1][COAL] = 8, inv[K1][LOGS] = 6, inv[K1][LEFT] = 9;  // finished coal, queued logs, a Leftover
+            inv[K2][COAL] = 50;                                          // the same kiln in another base
+            inv[K3][BOTH] = 7, inv[K3][COAL] = 0;                        // an output that is also an input
+            inv[W][COAL] = 40;                                           // the station being crafted at
+        };
+        reset();
+        auto count = [&](uint32_t e, uint32_t item) -> uint64_t {
+            const auto it = inv.find(e);
+            if (it == inv.end()) return 0;
+            const auto n = it->second.find(item);
+            return n == it->second.end() ? 0 : n->second;
+        };
+        SourceRecipes kiln_r{{COAL}, {LOGS}};        // logs -> charcoal
+        SourceRecipes both_r{{BOTH, COAL}, {BOTH}};  // an output that is also an input stays; its coal would lend
+        SourceRecipes bench_r{{COAL}, {LOGS}};
+        std::vector<CraftLender> lenders = {{K1, 0, true, kiln_r}, {K2, 1, true, kiln_r}, {K3, 0, true, both_r},
+                                            {W, 0, true, bench_r}, {C2, 0, false, {}}};
+        CraftLent lent;
+        craft_order(2, P, chests, 2, &order);
+        craft_lenders(lenders, W, 0, order, {COAL, LOGS, LEFT, BOTH, SCRAP}, count, &lent);
+        CHECK(lent.count[COAL] == 8 && lent.by[COAL] == std::vector<uint32_t>({K1}));  // not K2 (other base), not W, not K3 (0)
+        CHECK(lent.count.find(LOGS) == lent.count.end());  // queued inputs never lend
+        CHECK(lent.count.find(LEFT) == lent.count.end());  // nor Leftovers
+        CHECK(lent.count.find(BOTH) == lent.count.end());  // nor an output that is also an input
+        CHECK(lent.count.find(SCRAP) == lent.count.end());
+        CraftLent lent_in_order;  // a station the game's own sources already list is not lent twice
+        const std::vector<uint32_t> order_with_k1 = {P, K1};
+        craft_lenders(lenders, W, 0, order_with_k1, {COAL}, count, &lent_in_order);
+        CHECK(lent_in_order.count.empty());
+        CraftLent lent_no_exclude;  // without a known station crafted at, W lends like any opted-in station
+        craft_lenders(lenders, 0, 0, order, {COAL}, count, &lent_no_exclude);
+        CHECK(lent_no_exclude.count[COAL] == 48 && lent_no_exclude.by[COAL] == std::vector<uint32_t>({K1, W}));
+
+        // pay: a fake PayMaterial over `inv`, with a log of every take and an optional fault
+        struct Take {
+            uint32_t e, item, n;
+        };
+        std::vector<Take> log;
+        uint32_t fault_at = 0;
+        std::unordered_map<uint32_t, bool> empty_pay;  // pay finds nothing there, whatever have() said
+        auto pay = [&](uint32_t e, uint32_t item, uint32_t* left) {
+            if (e == fault_at) return false;
+            const uint64_t has = empty_pay[e] ? 0 : count(e, item);
+            const uint32_t n = static_cast<uint32_t>(std::min<uint64_t>(has, *left));
+            if (n) {
+                inv[e][item] -= n;
+                log.push_back({e, item, n});
+            }
+            *left -= n;
+            return true;
+        };
+        uint64_t from = 0;
+        uint32_t why = 0;
+        // the bag, then the chest, then the kiln's outputs for the rest only; logs and the Leftover stay
+        std::vector<CraftCost> lines = {{COAL, 10, 0, 0}, {SCRAP, 2, 0, 0}};
+        CHECK(craft_pay(&lines, order, lent, count, pay, &from, &why) == kCraftPaid && why == kCraftWhyNone && from == 3);
+        CHECK(log.size() == 4 && log[0].e == P && log[0].n == 3 && log[1].e == C1 && log[1].n == 4 && log[2].e == K1 &&
+              log[2].item == COAL && log[2].n == 3 && log[3].e == P && log[3].item == SCRAP && log[3].n == 2);
+        CHECK(inv[K1][COAL] == 5 && inv[K1][LOGS] == 6 && inv[K1][LEFT] == 9 && inv[K2][COAL] == 50 && inv[W][COAL] == 40);
+        CHECK(lines[0].game == 7 && lines[0].outputs == 8);
+
+        // not enough: 7 from the bag and the chest, 8 from outputs, 20 asked -> nothing taken, the game's own payment
+        reset();
+        log.clear();
+        lines = {{COAL, 20, 0, 0}};
+        CHECK(craft_pay(&lines, order, lent, count, pay, &from, &why) == kCraftGame && why == kCraftWhyShort && log.empty());
+        // all or nothing over every line: one line short of the outputs keeps the other's outputs too
+        lines = {{COAL, 10, 0, 0}, {SCRAP, 5, 0, 0}};
+        CHECK(craft_pay(&lines, order, lent, count, pay, &from, &why) == kCraftGame && why == kCraftWhyShort && log.empty());
+        // the bag and the chests cover it: the game pays, Kiln takes nothing
+        lines = {{COAL, 6, 0, 0}, {SCRAP, 2, 0, 0}};
+        CHECK(craft_pay(&lines, order, lent, count, pay, &from, &why) == kCraftGame && why == kCraftWhyCovered && log.empty());
+        // another base is never used: only base 1's kiln could cover it
+        CraftLent other;
+        craft_lenders(lenders, W, 1, order, {COAL}, count, &other);
+        CHECK(other.count[COAL] == 50 && other.by[COAL] == std::vector<uint32_t>({K2}));
+        CraftLent none;
+        craft_lenders(lenders, W, 2, order, {COAL}, count, &none);  // a base with no opted-in station
+        lines = {{COAL, 10, 0, 0}};
+        CHECK(craft_pay(&lines, order, none, count, pay, &from, &why) == kCraftGame && why == kCraftWhyShort && log.empty());
+        // a fault after a take: InventoryPay's 4, the craft's rollback undoes the bag's take
+        fault_at = K1;
+        lines = {{COAL, 10, 0, 0}};
+        CHECK(craft_pay(&lines, order, lent, count, pay, &from, &why) == kCraftRollback && why == kCraftWhyFault);
+        fault_at = 0;
+        // the counts did not hold (the bag pays nothing, the kiln holds less than counted): the outputs pay what they
+        // hold and the line stays short -> 4, never a partial craft
+        reset();
+        log.clear();
+        empty_pay[P] = true;
+        inv[K1][COAL] = 3;
+        lines = {{COAL, 10, 0, 0}};
+        CHECK(craft_pay(&lines, order, lent, count, pay, &from, &why) == kCraftRollback && why == kCraftWhyRemainder);
+        empty_pay.clear();
+        // mode 1: the chests before the owner
+        reset();
+        log.clear();
+        craft_order(1, P, chests, 2, &order);
+        lines = {{COAL, 10, 0, 0}};
+        CHECK(craft_pay(&lines, order, lent, count, pay, &from, &why) == kCraftPaid && from == 3 && log.size() == 3 &&
+              log[0].e == C1 && log[1].e == P && log[2].e == K1);
+
+        // what a Kiln client is sent: the inputs of the recipes that take a lent item, and the lent items
+        const std::vector<std::vector<uint32_t>> recipes = {{COAL, SCRAP}, {LOGS}, {BOTH, LEFT}, {0x777, COAL}};
+        std::vector<uint32_t> want = {COAL, SCRAP, 0x777};
+        std::sort(want.begin(), want.end());
+        CHECK(craft_stock_items(recipes, {COAL}) == want);
+        CHECK(craft_stock_items(recipes, {}).empty());
+        CHECK(craft_stock_items(recipes, {0x999}) == std::vector<uint32_t>({0x999}));  // lent, used by no recipe
     }
 
     std::printf("stations: %d checks, %d failures\n", checks, failed);

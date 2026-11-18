@@ -3,7 +3,8 @@
 A native mod is one or more DLLs that Kiln loads with `LoadLibrary`. It may know nothing about Kiln (a plain DLL mod
 whose `DllMain` does the work) or be Kiln-aware (an `init` export that gets the Kiln API). Each mod folder has a
 `native.json`. Contract: [launcher/contracts.md](launcher/contracts.md) 5.4 and 5.9, `schema/native.schema.json`,
-`native/core/abi/kiln_native.h`. Profiles and chain.ini: [profiles.md](profiles.md).
+`native/core/abi/kiln_native.h`. Profiles and chain.ini: [profiles.md](profiles.md). One DLL that also runs under
+Ultimate ASI Loader when Kiln is not installed: [modding/native-asi.md](modding/native-asi.md).
 
 ## Where they come from
 - The profile's `mods.native` entries (folders, usually in the launcher library), in profile mode.

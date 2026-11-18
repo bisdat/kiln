@@ -1262,7 +1262,7 @@ pub fn detect_asi_package(dir: &Path, depth: usize, top_name: Option<&str>) -> O
     };
     let id = if asi { crate::library::id_from_name(&name) } else { UAL_ID.to_string() };
     Some(Detected { kind: DetectKind::Asi, path: dir.display().to_string(), id: Some(id), version: Some("0.0.0".into()),
-        name: Some(if asi { name } else { UAL_NAME.to_string() }), reason: ASI_REASON.into(), items: vec![],
+        name: Some(if asi { name } else { UAL_NAME.to_string() }), reason: ASI_REASON.into(), items: vec![], asi_omit: vec![],
         engine: Some(crate::engines::Engine::UltimateAsiLoader) })
 }
 
@@ -1292,6 +1292,30 @@ pub fn import_asi(ctx: &mut crate::engines::ImportCtx) -> Result<()> {
         std::fs::create_dir_all(&work).map_err(io_at(&work, "creating"))?;
         std::fs::copy(src, work.join(&file_name)).map_err(io_at(src, "copying"))?
     };
+    // A Scripts folder can hold this mod's .asi and someone else's. Only the matching file is left out.
+    // The omitted files are named as `d.path` is (a zip's entry as `<zip>/<entry>`), so their place in the package is
+    // taken relative to it, and `skipped` shows the path the player knows.
+    if src.is_dir() {
+        for omit in &d.asi_omit {
+            let Ok(rel) = Path::new(&omit.path).strip_prefix(&d.path) else { continue };
+            if rel.as_os_str().is_empty() || rel.components().any(|c| !matches!(c, std::path::Component::Normal(_))) {
+                continue;
+            }
+            let (file, id) = (&omit.path, &omit.native_id);
+            let in_work = work.join(rel);
+            if !in_work.is_file() {
+                continue;
+            }
+            let len = std::fs::metadata(&in_work).map(|m| m.len()).unwrap_or(0);
+            if std::fs::remove_file(&in_work).is_ok() {
+                size = size.saturating_sub(len);
+                ctx.report.skipped.push(crate::library::Skipped {
+                    path: file.clone(),
+                    reason: format!("the same mod is already this package's Kiln native mod ({id}): only that one is added, so it is not also loaded as an .asi"),
+                });
+            }
+        }
+    }
     let files = files_of(&work).ok_or_else(|| Error::new(ErrorCode::Refused, "links or too many files in the package"))?;
     let ual = ual_in(&work, &files);
     let asi: Vec<String> = files.iter().filter(|f| ext(f) == "asi").cloned().collect();

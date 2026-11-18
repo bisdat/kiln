@@ -165,6 +165,7 @@ constexpr uint32_t kSetupBlock = 0xF0;  // InventoryTx setup block (InventoryTx_
 constexpr uint32_t kOpStride = 0x34;    // commit op record
 constexpr uint32_t kInventorySize = 96; // 8 x ItemStack {u32 id; u32 count; u32 pide}
 constexpr uint32_t kSetupSize = 84;     // InventorySetup
+constexpr uint32_t kSetupFlags = 0x50;  // InventorySetup: u8 flags (bit 0 a player's, bit 1 an NPC's inventory)
 constexpr uint32_t kItemStateSize = 20; // ItemState (on a pide)
 constexpr uint32_t kMaxPlayer = 1023;
 constexpr uint32_t kRecipeWorkshopId = 0x24;  // RecipeInfo.workshopId (the recipe function compares it with its argument)
@@ -277,6 +278,8 @@ struct PageSet {
     uint32_t n = 0;
 };
 bool read_pages(const Access& a, KilnEntity e, PageSet* out, bool* initialized);
+// InventorySetup's flags byte (kSetupFlags) through the accessors of `a`. False: no setup (or a fault).
+bool setup_flags(const Access& a, KilnEntity e, uint8_t* flags);
 
 // A player's own stacks, from the entity's SlotSelection: whether it is a player at all (an action-bar page is set), the
 // two action-bar pages, and the equipped slots plus the item in hand (each a slot id).

@@ -1,7 +1,7 @@
 {
   "format": 1,
   "side": "server",
-  "comment": "kiln.stations (in kiln-items.dll): the production stations of a base (FactoryStation entities) and the game's own station actions. player_crafting's PlayerCraftingAction dispatch (types 2 select recipe / resume, 4 stop: plain FactoryStation writes after ServerFactoryInfo invalidation; type 1 AutomaticTransfer = the 'fill from chests' button), the fill core AutoTransferRecipe (tx, base stock, resolved inputs, station, u16 crafts, waterCharges, player), recipe-input resolution with category selections (ResolveRecipeInputs / ResolveInput / FindInputCategory over RecipeRegistry+0xA0), PlayerBasesSystem's base lookup by position and per-base stock lists (InventoryCraftingStock containers +0x30, water sources +0x58, stride 0x130), factory_station's start and completion, the factory speed getter. Identical code on server 26430253 and client 26430625 (one file for both). Evidence: docs/re/stations.md.",
+  "comment": "kiln.stations (in kiln-items.dll): the production stations of a base (FactoryStation entities) and the game's own station actions. player_crafting's PlayerCraftingAction dispatch (types 2 select recipe / resume, 4 stop: plain FactoryStation writes after ServerFactoryInfo invalidation; type 1 AutomaticTransfer = the 'fill from chests' button), the fill core AutoTransferRecipe (tx, base stock, resolved inputs, station, u16 crafts, waterCharges, player), recipe-input resolution with category selections (ResolveRecipeInputs / ResolveInput / FindInputCategory over RecipeRegistry+0xA0), PlayerBasesSystem's base lookup by position and per-base stock lists (InventoryCraftingStock containers +0x30, water sources +0x58, stride 0x130), factory_station's start and completion, the factory speed getter. Identical code on server 26430253 and client 26430625 (one file for both). Evidence: docs/re/stations.md. Since 0.2.0-dev.29.17 (GitHub #68): @stations/AutoTransferRecipe.take pins the per-item take Kiln's station outputs rely on: the fill reads each 24-byte resolved input stack's item at stations/stack.item (its count the next dword), steps by stations/stack.size, and takes every missing unit from each list-A entity in order through gems/PayMaterial (removeItems of that item with no preferred slot), so an entity in the list gives only stacks of the asked item (feature stations.output_sources; docs/re/stations.md section 8).",
   "symbols": {
     "stations/PlayerCraftingUpdate": {
       "find": [
@@ -240,6 +240,31 @@
           "pattern": "48 8B 81 {stations/balancing.settings:d32} F3 0F 10 48 {stations/settings.factory_speed:d8} 0F 28 C1"
         }
       ]
+    },
+    "@stations/AutoTransferRecipe.take": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "stations/AutoTransferRecipe",
+            "size": 1792
+          },
+          "pattern": "F2 0F 10 4A {stations/stack.item:d8} 0F 10 02 F2 0F 11 4D ?? 8B 5D ?? 0F 11 45 ?? 85 DB 0F 84 ?? ?? ?? ?? 48 8B 45 ?? 48 C1 E8 20"
+        },
+        {
+          "scope": {
+            "symbol": "stations/AutoTransferRecipe",
+            "size": 1792
+          },
+          "pattern": "48 8B 7D ?? 45 33 E4 48 8B B5 ?? ?? ?? ?? B1 0E 84 C9 44 0F 44 F8 45 85 FF 74 ?? 4D 3B E5 73 ?? 46 8B 04 A7 48 8D 4D ?? 44 8B CB 44 89 7C 24 20 48 8B D6 E8 {gems/PayMaterial:rel32}"
+        },
+        {
+          "scope": {
+            "symbol": "stations/AutoTransferRecipe",
+            "size": 1792
+          },
+          "pattern": "49 FF C4 48 83 C2 {stations/stack.size:d8} 4C 89 65 ?? 48 89 54 24 ?? 4D 3B E6 0F 82"
+        }
+      ]
     }
   },
   "constants": {
@@ -353,6 +378,12 @@
     },
     "stations/recipe.duration": {
       "min_votes": 1
+    },
+    "stations/stack.item": {
+      "min_votes": 1
+    },
+    "stations/stack.size": {
+      "min_votes": 1
     }
   },
   "features": {
@@ -422,6 +453,29 @@
       ],
       "constants": [
         "stations/craft.outputs_only"
+      ]
+    },
+    "stations.output_sources": {
+      "symbols": [
+        "stations/AutoTransferRecipe",
+        "@stations/AutoTransferRecipe.take",
+        "stations/ResolveRecipeInputs",
+        "stations/BaseAtPosition",
+        "@stations/FindInputCategory.fields"
+      ],
+      "constants": [
+        "stations/stack.item",
+        "stations/stack.size",
+        "stations/recipe.water_charges"
+      ]
+    },
+    "stations.craft_sources": {
+      "comment": "GitHub #68 step 2: opted-in station outputs are the last source of the recipe function's payment (InventoryPay called from RecipeApply). The take is gems/PayMaterial, per item, after the owner and the base's Magic chests. docs/re/stations.md section 10.",
+      "symbols": [
+        "rules/InventoryPay",
+        "rules/RecipePaid",
+        "gems/PayMaterial",
+        "stations/BaseStockForPlayer"
       ]
     }
   }

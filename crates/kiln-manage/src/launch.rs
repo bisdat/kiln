@@ -1,6 +1,7 @@
-//! Starting the game through Steam (`steam://rungameid/<app>`; never Steam's config), with the launch flow of
-//! contracts.md: refuse while running, play-once for vanilla / no-mods / once, save backup when the mod-set
-//! fingerprint changed, open the URI, then watch for the process and state/boot.json.
+//! Starting the game through Steam (`steam://rungameid/<app>`; never Steam's config) or directly (`crate::direct`: a
+//! folder no Steam library knows), with the launch flow of contracts.md: refuse while running, play-once for vanilla /
+//! no-mods / once, save backup when the mod-set fingerprint changed, open the URI or start the exe, then watch for the
+//! process and state/boot.json.
 
 use crate::game::GameInstall;
 use crate::paths::DataDirs;
@@ -50,6 +51,21 @@ pub struct LaunchResult {
     /// (profile::refresh_active), with what it kept in the game folder (`retained`, `keptFiles`, `warnings`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub activation: Option<crate::profile::Activation>,
+    /// (dev.29.17) How the game was started: `steam` (`uri` was opened) or `direct` (the launcher started the exe;
+    /// `uri` is empty).
+    #[serde(default = "steam_start")]
+    pub via: crate::direct::StartMode,
+}
+
+fn steam_start() -> crate::direct::StartMode {
+    crate::direct::StartMode::Steam
+}
+
+/// What asks for the game once the start's files are written: Steam (the URI goes to the opener: the desktop, a test's
+/// recorder) or the launcher itself (the command goes to the starter: `direct::spawn`, a test's recorder).
+pub enum Starter<'a> {
+    Steam(&'a dyn Fn(&str) -> Result<()>),
+    Direct(&'a crate::direct::DirectCommand, &'a dyn Fn(&crate::direct::DirectCommand) -> Result<()>),
 }
 
 /// `steam://rungameid/<app_id>`
@@ -244,9 +260,15 @@ pub fn launch_fingerprint(dirs: &DataDirs, install: &GameInstall, request: &Laun
     })
 }
 
-/// The launch flow (contracts.md 7) with explicit save folders (None: the install's) and URI opener.
+/// The launch flow (contracts.md 7) through Steam with explicit save folders (None: the install's) and URI opener.
 pub fn play_with(dirs: &DataDirs, install: &GameInstall, request: &LaunchRequest, saves: Option<&[crate::saves::SaveDir]>,
                  opener: &dyn Fn(&str) -> Result<()>) -> Result<LaunchResult> {
+    play_via(dirs, install, request, saves, Starter::Steam(opener))
+}
+
+/// The launch flow (contracts.md 7) with explicit save folders (None: the install's) and what starts the game.
+pub fn play_via(dirs: &DataDirs, install: &GameInstall, request: &LaunchRequest, saves: Option<&[crate::saves::SaveDir]>,
+                starter: Starter<'_>) -> Result<LaunchResult> {
     if let Some(p) = crate::proc::find_game(install)? {
         return Err(Error::new(ErrorCode::GameRunning, format!("{} is already running (pid {})", install.exe, p.pid))
             .with_detail(serde_json::json!({ "pid": p.pid })));
@@ -293,7 +315,7 @@ pub fn play_with(dirs: &DataDirs, install: &GameInstall, request: &LaunchRequest
         }
     } else { Vec::new() };
     // what the re-apply kept in the game folder is the player's to see, also when the start then fails
-    let mut r = start(dirs, install, request, saves, opener).map_err(|e| match &activation {
+    let mut r = start(dirs, install, request, saves, starter).map_err(|e| match &activation {
         Some(a) => with_activation(e, a),
         None => e,
     })?;
@@ -327,9 +349,9 @@ fn with_activation(mut e: Error, a: &crate::profile::Activation) -> Error {
     e
 }
 
-/// The start itself (play-once flag, save backup, Steam), after the profile is as it should be.
+/// The start itself (play-once flag, save backup, Steam or the exe), after the profile is as it should be.
 fn start(dirs: &DataDirs, install: &GameInstall, request: &LaunchRequest, saves: Option<&[crate::saves::SaveDir]>,
-         opener: &dyn Fn(&str) -> Result<()>) -> Result<LaunchResult> {
+         starter: Starter<'_>) -> Result<LaunchResult> {
     let fingerprint = launch_fingerprint(dirs, install, request)?;
     // 1. the files the proxy reads at this start
     let now = crate::util::now_unix();
@@ -379,20 +401,42 @@ fn start(dirs: &DataDirs, install: &GameInstall, request: &LaunchRequest, saves:
             }
         }
     }
-    // 3. Steam starts the game (never its config)
-    let uri = steam_uri(install.app_id);
-    if let Err(e) = open_uri_with(&uri, opener) {
+    // 3. Steam starts the game (never its config), or the launcher starts the exe itself
+    let (uri, via, asked) = match starter {
+        Starter::Steam(opener) => {
+            let uri = steam_uri(install.app_id);
+            let r = open_uri_with(&uri, opener);
+            (uri, crate::direct::StartMode::Steam, r)
+        }
+        Starter::Direct(cmd, go) => (String::new(), crate::direct::StartMode::Direct, go(cmd)),
+    };
+    if let Err(e) = asked {
         let _ = crate::playonce::clear(&install.path);
         return Err(e);
     }
     let started = crate::util::rfc3339(now);
     let rec = LastLaunch { fingerprint, mode: request.mode, profile_id: request.profile_id.clone(), launched: started.clone() };
     let _ = crate::util::write_json_atomic(&last_launch_path(dirs, install), &rec);
-    Ok(LaunchResult { game_id: install.id.clone(), mode: request.mode, nonce, backup, uri, started, activation: None })
+    Ok(LaunchResult { game_id: install.id.clone(), mode: request.mode, nonce, backup, uri, started, activation: None, via })
 }
 
+/// Where a direct start's umu-run, Proton or Wine output goes: `<data>/logs/game-start-<installId>.log` (written again at every
+/// direct start; the support report reads it).
+pub fn direct_log(dirs: &DataDirs, install: &GameInstall) -> std::path::PathBuf {
+    dirs.logs().join(format!("game-start-{}.log", install.id))
+}
+
+/// The launch flow as the install starts (its record: through Steam, or directly with its Proton/Wine and prefix).
 pub fn play(dirs: &DataDirs, install: &GameInstall, request: &LaunchRequest) -> Result<LaunchResult> {
-    play_with(dirs, install, request, None, &desktop_open)
+    let roots = crate::steam::roots().unwrap_or_default();
+    match crate::direct::mode_of(dirs, install) {
+        crate::direct::StartMode::Steam => play_with(dirs, install, request, None, &desktop_open),
+        crate::direct::StartMode::Direct => {
+            let cmd = crate::direct::plan(install, &crate::direct::settings(dirs, install), &roots)?;
+            let log = direct_log(dirs, install);
+            play_via(dirs, install, request, None, Starter::Direct(&cmd, &|c| crate::direct::spawn(c, Some(&log)).map(|_| ())))
+        }
+    }
 }
 
 #[cfg(test)]

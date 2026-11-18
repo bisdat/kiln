@@ -1014,15 +1014,60 @@ pub fn build(input: &ReportInput) -> Report {
         if let Some(p) = &i.prefix {
             let _ = writeln!(g, "Prefix:        {}", p.display());
         }
-        // compat tool and Proton version: Steam's config.vdf and the prefix's version file, read only
+        // how the launcher starts it: through Steam, or directly (direct.rs) with its umu-run, Proton or Wine and prefix
+        let start = (i.kind == GameKind::Client).then(|| {
+            let settings = dirs.as_ref().map(|d| crate::direct::settings(d, i)).unwrap_or_default();
+            (crate::direct::effective_mode(i, Some(&settings)), settings)
+        });
+        let direct = matches!(start, Some((crate::direct::StartMode::Direct, _)));
+        facts.direct = direct;
+        // compat tool and Proton version: Steam's config.vdf (a start through Steam only) and the prefix's version file, read only
         if i.platform == Platform::Proton {
-            let tool = roots.iter().find_map(|r| crate::steam::compat_tool(r, i.app_id).ok().flatten());
+            let tool = (!direct).then(|| roots.iter().find_map(|r| crate::steam::compat_tool(r, i.app_id).ok().flatten())).flatten();
             let version = i.prefix.as_ref().and_then(|p| p.parent()).and_then(|c| std::fs::read_to_string(c.join("version")).ok())
                 .map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
-            let _ = writeln!(g, "Compat tool:   {} (prefix version: {})", tool.as_deref().unwrap_or("Steam's default"), version.as_deref().unwrap_or("unknown"));
+            if direct {
+                let _ = writeln!(g, "Prefix Proton: {}", version.as_deref().unwrap_or("unknown (no version file yet)"));
+            } else {
+                let _ = writeln!(g, "Compat tool:   {} (prefix version: {})", tool.as_deref().unwrap_or("Steam's default"), version.as_deref().unwrap_or("unknown"));
+            }
             facts.proton = tool.or(version);
         }
-        if let Some(lo) = crate::game::launch_options_info(i, &roots) {
+        if crate::direct::is_custom(i) {
+            let _ = writeln!(g, "Custom folder: yes (no Steam library knows it)");
+        }
+        match &start {
+            Some((crate::direct::StartMode::Direct, settings)) => {
+                let how = if cfg!(windows) {
+                    "the launcher starts enshrouded.exe itself".to_string()
+                } else {
+                    match crate::direct::plan(i, settings, &roots) {
+                        Ok(c) => {
+                            let r = c.runner.as_ref();
+                            let env = |k: &str| c.env.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone());
+                            if let Some(r) = r && r.kind != crate::direct::RunnerKind::Wine {
+                                facts.proton.get_or_insert_with(|| r.proton.as_ref().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned())
+                                    .unwrap_or_else(|| r.label.clone()));
+                            }
+                            format!("{}{}{} (WINEDLLOVERRIDES {})", r.map(|r| format!("{:?} {}", r.kind, r.label)).unwrap_or_default(),
+                                r.and_then(|r| r.proton.as_ref()).map(|p| format!(" with {}", p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())).unwrap_or_default(),
+                                r.map(|r| if r.source == "custom" { ", the player's choice" } else if settings.runner.is_none() { ", automatic" } else { "" }).unwrap_or_default(),
+                                env("WINEDLLOVERRIDES").unwrap_or_else(|| "-".into()))
+                        }
+                        Err(e) => format!("cannot start: {}", e.message),
+                    }
+                };
+                let _ = writeln!(g, "Start:         directly ({how})");
+                if let Some(d) = dirs.as_ref() {
+                    cx.add_tail_at("launcher/game-start.log", &crate::launch::direct_log(d, i), SMALL_LOG_MAX);
+                }
+            }
+            Some((crate::direct::StartMode::Steam, _)) => {
+                let _ = writeln!(g, "Start:         through Steam (steam://rungameid/{})", i.app_id);
+            }
+            None => {}
+        }
+        if let Some(lo) = (!direct).then(|| crate::game::launch_options_info(i, &roots)).flatten() {
             let _ = writeln!(g, "Launch opts:   {} (dinput8 override: {}; chained xinput9_1_0 override missing: {})", lo.value.as_deref().unwrap_or("(none)"), if lo.has_dll_override { "yes" } else { "no" }, if lo.chained_override_missing { "yes" } else { "no" });
             facts.override_missing = !lo.has_dll_override;
             if lo.chained_override_missing {
@@ -1436,9 +1481,9 @@ pub fn build(input: &ReportInput) -> Report {
         boot.as_ref(), boot_time, proxy_log.is_some(), &facts);
     if receipt.is_some() {
         match facts.known_build {
-            Some(None) => cx.find("unknown-build", Level::Problem, format!(
-                "This game build ({}, Steam build {}) is one this Kiln does not know: Kiln stays idle and loads no mods until a Kiln update adds it.",
-                facts.exe_sha.as_deref().map(|h| &h[..12.min(h.len())]).unwrap_or("?"), facts.build.as_deref().unwrap_or("unknown"))),
+            Some(None) => cx.find("unknown-build", Level::Problem, format!("{} (Steam build {}; a Kiln update that knows the build fixes it.)",
+                crate::direct::unknown_build_sentence(facts.exe_sha.as_deref().map(|h| &h[..12.min(h.len())]).unwrap_or("?")),
+                facts.build.as_deref().unwrap_or("unknown"))),
             Some(Some(false)) => cx.find("unknown-build", Level::Warning, "Kiln has a record of this game build but it is not verified: with the policy verified-only Kiln stays idle."),
             _ => {}
         }
@@ -1521,6 +1566,8 @@ struct Facts {
     proton: Option<String>,
     override_missing: bool,
     override_advice: Option<String>,
+    /// The launcher starts this client directly (direct.rs), not through Steam.
+    direct: bool,
     running: bool,
     profile: Option<String>,
     profile_broken: bool,
@@ -1749,7 +1796,10 @@ fn check_not_loaded(cx: &mut Ctx, install: Option<&GameInstall>, dirs: Option<&D
         return;
     }
     let proton = i.platform == Platform::Proton;
-    let why = if proton && facts.override_missing {
+    let why = if facts.direct && i.platform != Platform::Windows {
+        // a direct start sets WINEDLLOVERRIDES itself (direct.rs): its own output says what went wrong
+        " The launcher starts this game directly with dinput8 native first: see launcher/game-start.log for what umu-run, Proton or Wine said, and check that dinput8.dll in the game folder is Kiln's.".to_string()
+    } else if proton && facts.override_missing {
         format!(" Under Proton the game loads Kiln's dinput8.dll only with this in Steam's launch options for Enshrouded: {}", facts.override_advice.as_deref().unwrap_or(crate::game::DLL_OVERRIDE_ADVICE))
     } else if proton {
         " Check Steam's launch options for Enshrouded (WINEDLLOVERRIDES) and the Proton version.".to_string()

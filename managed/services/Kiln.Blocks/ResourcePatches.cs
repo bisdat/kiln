@@ -11,7 +11,8 @@ namespace Kiln;
 
 /// <summary>Fields of one game resource, set before the game reads it. Stage it in <see cref="Mod.OnBoot"/>:
 /// <c>BootDefinitions.For(boot).Define("more-altars", new ResourcePatchBlock { ... })</c>. Numbers, bools and enums
-/// only. Two mods that set one field are not combined: the later mod's boot content is refused. A patch is applied whole
+/// only; lists are cleared, replaced or appended to, a template's components removed, added or copied from another
+/// template. Two mods that set one field are not combined: the later mod's boot content is refused. A patch is applied whole
 /// or not at all: when one of its changes cannot be written, none of them is kept and the fault names the patch.</summary>
 /// <example>
 /// <code>
@@ -55,7 +56,28 @@ public sealed record ResourcePatchBlock : IBlock
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Dictionary<string, ResourceListAppend>? Append { get; init; }
 
-    internal bool HasWork => Set.Count > 0 || RemoveComponents?.Count > 0 || AddComponents?.Count > 0 || Append?.Count > 0;
+    /// <summary>Component type name to the GUID of another template it is copied from, whole: its data with its lists,
+    /// strings and nested structs (<c>CopyComponents = new() { ["InventoryCraftingStock"] = magicChest }</c>). Added when
+    /// the template has none of that type, its own replaced when it has. The source template must have the component;
+    /// <c>CurrentTransform</c>, and what an actor needs to live, are refused. Made after <see cref="AddComponents"/>,
+    /// before <see cref="Clear"/>, <see cref="Replace"/>, <see cref="Append"/> and <see cref="Set"/> (which can change
+    /// fields of the copy). Since mod API 0.2.9.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, Guid>? CopyComponents { get; init; }
+
+    /// <summary>List paths made empty, any element type (<c>"noBuildZones"</c>,
+    /// <c>"resetPlayersOutOfBounds.playableAreas"</c>). The path names one list: <c>[i]</c> on the way is fine,
+    /// <c>[*]</c> is not. Made after <see cref="CopyComponents"/>, before <see cref="Replace"/>. Since mod API 0.2.9.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<string>? Clear { get; init; }
+
+    /// <summary>List path to the values it holds afterwards, exactly: a list of numbers, bools or enum members, as long
+    /// as the values given. Made after <see cref="Clear"/>, before <see cref="Append"/>. Since mod API 0.2.9.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, ResourceListReplace>? Replace { get; init; }
+
+    internal bool HasWork => Set.Count > 0 || RemoveComponents?.Count > 0 || AddComponents?.Count > 0 || Append?.Count > 0 ||
+                             CopyComponents?.Count > 0 || Clear?.Count > 0 || Replace?.Count > 0;
 
     /// <summary>What kiln.content would refuse in the patch's shape that Kiln.Blocks can see first; null when nothing.</summary>
     internal string? Problem()
@@ -67,8 +89,21 @@ public sealed record ResourcePatchBlock : IBlock
             if (append.Values.Any(v => v.IsChange))
                 return $"append \"{path}\": a value is a number, a bool or an enum member's name, not a change of the game's value ({{ mul, add, min, max }})";
         }
+        foreach (var (path, replace) in Replace ?? [])
+        {
+            if (replace is null || replace.Values is null || replace.Values.Count == 0) return $"replace \"{path}\": no values (Clear empties a list)";
+            if (replace.Values.Any(v => v.IsChange))
+                return $"replace \"{path}\": a value is a number, a bool or an enum member's name, not a change of the game's value ({{ mul, add, min, max }})";
+        }
+        if (Clear?.Any(string.IsNullOrEmpty) == true) return "clear: a list path is empty";
         foreach (var (name, list) in new[] { ("removeComponents", RemoveComponents), ("addComponents", AddComponents) })
             if (list?.Any(string.IsNullOrEmpty) == true) return $"{name}: a component's type name is empty";
+        foreach (var (name, from) in CopyComponents ?? [])
+        {
+            if (string.IsNullOrEmpty(name)) return "copyComponents: a component's type name is empty";
+            if (from == Guid.Empty) return $"copyComponents \"{name}\": the template it is copied from is the empty GUID";
+            if (from == Resource) return $"copyComponents \"{name}\": a component is copied from another template, not the one patched";
+        }
         return null;
     }
 }
@@ -83,6 +118,14 @@ public sealed record ResourceListAppend
     /// <summary>Only a value greater than the list's last (the last one added counts) is added: a sorted list stays sorted,
     /// and values the game's list already reaches are left out.</summary>
     public bool AboveLast { get; init; }
+}
+
+/// <summary>The values a list holds after a resource patch (<see cref="ResourcePatchBlock.Replace"/>). Since mod API 0.2.9.</summary>
+public sealed record ResourceListReplace
+{
+    /// <summary>The values, in order: numbers, bools or enum members' names (a change such as <see cref="ResourceValue.Times"/> is
+    /// refused). At least one; to empty a list use <see cref="ResourcePatchBlock.Clear"/>.</summary>
+    public List<ResourceValue> Values { get; init; } = [];
 }
 
 /// <summary>What a resource patch writes into one field: a plain value, or a change of the game's own value

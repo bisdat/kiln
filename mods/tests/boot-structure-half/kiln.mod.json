@@ -7,5 +7,5 @@
   "clients": "none",
   "boot": true,
   "advanced": true,
-  "description": "A data-only mod with one resource patch that passes prepare and fails when it is written: it removes SpawnTime from LootPickup_Gravity_Aloe and sets a field of PickupItemZone, which Aloe has not got. The whole patch is left out (SpawnTime stays) and boot.json names it once; boot-structure-test checks both."
+  "description": "A data-only mod with one resource patch that passes prepare and fails when it is written: it removes SpawnTime from LootPickup_Gravity_Aloe and sets a field of PickupItemZone, which Aloe has not got. The whole patch is left out (SpawnTime stays) and boot.json names it once; boot-structure-test checks both. Its second patch \"scene\" (mod API 0.2.9) clears the world scene's noBuildZones and playable areas from a blocks file; boot-structure-test reads them back."
 }

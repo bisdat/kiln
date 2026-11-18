@@ -2,7 +2,7 @@
 //! `kiln boot-snapshot --game <dir> [--force]`: makes the game-data snapshot `Mod.OnBoot` reads (kiln_manage::boot_snapshot,
 //! docs/kiln/modding/boot-snapshot.md) for a game folder: a dedicated server's or the client's. The launcher does the
 //! same at Play; this is for a server started by hand, a lab, or to make it again (`--force`). Once per game build:
-//! about a minute and about 200 MB the first time, well under a second when it is there already.
+//! about a minute and about 300 MB the first time, well under a second when it is there already.
 //!
 //! Exit 0 when the snapshot is in place (made or current), also when some kind could not be read (a warning names it);
 //! 1 when there is none (the reason is printed). `--json`: the result as one document.

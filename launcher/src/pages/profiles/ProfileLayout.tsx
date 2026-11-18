@@ -39,7 +39,8 @@ export function useActivation() {
     onMutate: () => showActive(qc, game!.id, id),
     onSuccess: (a) => {
       invalidateGame(qc, game!.id);
-      toast.ok(stale ? t("profiles.layout.applied") : t("profiles.layout.loaded"), t("profiles.layout.steamToo"));
+      // Steam's Play button starts Steam's copy: said only for a game that starts through Steam
+      toast.ok(stale ? t("profiles.layout.applied") : t("profiles.layout.loaded"), status.data?.start === "direct" ? undefined : t("profiles.layout.steamToo"));
       notifyActivation(a);
     },
     onError: (e, _v, undo) => { undo?.(); toast.error(e); },

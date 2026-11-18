@@ -2345,7 +2345,8 @@
       "added": "Game added",
       "title": "Add a game folder",
       "folder": "Folder",
-      "folderHint": "The folder with enshrouded.exe."
+      "folderHint": "The folder with enshrouded.exe: Steam's copy, or any other copy of the game, for example an older build kept for mods.",
+      "addedCustom": "Game folder added: Kiln starts it directly"
     },
     "proxy": {
       "kiln": "In place",
@@ -2381,11 +2382,13 @@
       "withMods": {
         "one": "Running with Kiln {version} and {count} mod.",
         "other": "Running with Kiln {version} and {count} mods."
-      }
+      },
+      "kilnMissingDirect": "Running without Kiln: the game did not load Kiln's proxy this start."
     },
     "stage": {
       "game": "Game",
-      "mods": "Mods"
+      "mods": "Mods",
+      "start": "Start"
     },
     "lastBoot": {
       "time": "{seconds} s, {problems}",
@@ -2498,7 +2501,11 @@
     "names": {
       "pair": "{0} and {1}",
       "more": "{a}, {b} and {count} more"
-    }
+    },
+    "source": {
+      "custom": "custom folder"
+    },
+    "startsVia": "Starts {how}"
   },
   "catalog": {
     "updateTo": "Update {version}",
@@ -2753,7 +2760,8 @@
       "forget": "Forget",
       "addFolder": "Add a folder",
       "forgetAsk": "Forget this game?",
-      "forgetMessage": "Only the launcher's record goes. The game folder and Kiln stay."
+      "forgetMessage": "Only the launcher's record goes. The game folder and Kiln stay.",
+      "startTip": "How Kiln starts this game: through Steam, or directly"
     },
     "kilnJson": {
       "title": "Kiln",
@@ -2973,6 +2981,7 @@
     "loadedToast": "{name} is loaded",
     "noneLoadedToast": "No profile is loaded",
     "loadedDetail": "The main screen's switches show it. Steam's Play button uses it too.",
+    "loadedDetailDirect": "The main screen's switches show it.",
     "noneLoadedDetail": "The mods in the game folder load as they are.",
     "findGame": "Find the game on Play first",
     "installKiln": "Install Kiln first",
@@ -3240,6 +3249,7 @@
       "startedWithoutKiln": "Started without Kiln",
       "noKiln": "No Kiln",
       "noKilnDetail": "The game runs without Kiln: Steam did not load it",
+      "noKilnDetailDirect": "The game runs without Kiln: it did not load Kiln's proxy this start",
       "checking": "Checking",
       "noGame": "No game",
       "updating": "Updating",
@@ -3268,7 +3278,8 @@
       "throughSteam": "Through Steam.",
       "kilnInstalled": "Kiln {version} installed",
       "switchBackDetail": "This game had Kiln {from} from the beta; the release's goes with this launcher.",
-      "switchBackFailed": "Kiln {to} could not be installed: the game starts with Kiln {from} from the beta"
+      "switchBackFailed": "Kiln {to} could not be installed: the game starts with Kiln {from} from the beta",
+      "directly": "Started directly."
     },
     "startProgress": {
       "quietMods": "The game is waiting at its menu: Kiln loads the mods when the game asks for them (on some PCs only once a world loads).",
@@ -3305,7 +3316,9 @@
       "done": "done",
       "usually": "usually {took}",
       "now": "now",
-      "notNeeded": "not needed"
+      "notNeeded": "not needed",
+      "directSlow": "The game is still starting: a first direct start makes its prefix, which can take minutes.",
+      "directSlowShort": "Preparing the prefix"
     },
     "appShell": {
       "headStart": "{progress} · {step}",
@@ -3418,6 +3431,7 @@
       "loaded": "{name} is loaded",
       "loadedProfile": "The profile is loaded",
       "loadedDetail": "The main screen's switches show it. Steam's Play button uses it too.",
+      "loadedDetailDirect": "The main screen's switches show it.",
       "loadFailed": "Could not load {name}",
       "loadFailedProfile": "Could not load the profile",
       "loadIt": "Load it",
@@ -4056,5 +4070,52 @@
     "subs": "{pre} pre, {post} post",
     "world": "World",
     "perMinute": "Tick stats per minute"
+  },
+  "gameStart": {
+    "title": "How Kiln starts this game",
+    "titleAdded": "A custom game folder",
+    "docs": "About custom folders",
+    "later": "Keep the default",
+    "customIntro": "This copy of the game is one Kiln starts itself.",
+    "how": "Start",
+    "steam": "Through Steam",
+    "direct": "Start the game directly",
+    "steamHint": "Play asks Steam to start Enshrouded, as Steam's own Play button does.",
+    "steamCustomHint": "Steam starts the copy in its own library, not this folder: Play would start another copy of the game.",
+    "directHint": "Play starts this folder's enshrouded.exe itself, after the profile and save backup steps. Kiln's proxy is in the folder, so Kiln loads with the game.",
+    "directOnly": "Kiln starts the exe and sets up nothing else: whatever this copy of the game needs to run is up to the copy.",
+    "runner": "Proton or Wine",
+    "runnerHint": "What runs the Windows game on Linux: umu-run, a Proton build or Wine.",
+    "runnerAuto": "Automatic ({name})",
+    "runnerNone": "Automatic (none found)",
+    "autoUmu": "Automatic picks umu-run when it is installed, else the newest Proton found, else Wine. Now: umu-run, running {proton}.",
+    "autoProton": "Automatic picks umu-run when it is installed, else the newest Proton found, else Wine. Now: {name}, the newest Proton found.",
+    "autoWine": "Automatic picks umu-run when it is installed, else the newest Proton found, else Wine. Now: Wine, as neither umu-run nor a Proton was found.",
+    "umuWith": "umu-run with {proton}",
+    "umuOwnProton": "umu's own Proton",
+    "fromCompat": "compatibility tools",
+    "fromUmu": "umu-launcher",
+    "fromValve": "Valve",
+    "fromPath": "your path",
+    "runnerOther": "Another umu-run, Proton or Wine…",
+    "runnerPath": "umu-run, Proton folder or wine program",
+    "runnerPathHint": "A umu-run program, a Proton folder (the one with the proton script), or a wine program.",
+    "prefix": "Prefix",
+    "prefixOwn": "Kiln's own",
+    "prefixPick": "Pick a folder",
+    "prefixOwnHint": "A prefix of its own for this game, made at the first start: {path}. Saves of this copy live in it.",
+    "prefixPickHint": "For Proton the folder that holds pfx (a compatdata folder), for umu-run and Wine the prefix itself.",
+    "cannotStart": "Kiln can't start it directly yet",
+    "command": "What Play runs",
+    "commandWindows": "What Play runs (in the game folder)",
+    "savedDirect": "Kiln starts this game directly now",
+    "savedSteam": "Kiln starts this game through Steam now",
+    "unknownBuild": "Kiln doesn't know this game build ({hash}). Kiln starts with the game but stays idle: no mods load.",
+    "unknownBuildTitle": "Unknown game build",
+    "readMore": "Read more",
+    "word": {
+      "steam": "through Steam",
+      "direct": "directly"
+    }
   }
 }

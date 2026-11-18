@@ -5,7 +5,7 @@ What a player is doing right now, and an event for anything that changes. Part o
 | Layer | File |
 |---|---|
 | Managed | `managed/services/Kiln.Players/PlayerStates.cs`, `PlayerStateEvents.cs`, `PlayerStateIds.g.cs` (generated) |
-| Native | `native/services/players/playerstate.cpp`, `kiln_playerstate.h`, service `kiln.playerstate` in `kiln-players.dll` |
+| Native | `native/services/players/playerstate.cpp`, `native/core/abi/services/kiln_playerstate.h` (in the SDK at `native/include/services/kiln_playerstate.h`), service `kiln.playerstate` in `kiln-players.dll` |
 | Symbols | `sigdb/symbols/server.d/players.json` (features `players.reflection`, `players.action_cancel`, `players.sequence_names`) |
 | Test mod | `mods/tests/playerstate-test` |
 | Evidence | `docs/re/player-state.md` |
@@ -171,6 +171,74 @@ Health and the other vitals are `NetworkPlayerAttributes`, updated once per step
 - A state a new build adds fires `PlayerStateChangedEvent` with a raw id: `(PlayerStateId)0x0140` and `e.Name` the game's name. `PlayerStates.All` lists it with `NamedByKiln == false`.
 - A state a new build drops reads as unknown.
 - Regenerate the constants: `python3 tools/typegen/playerstates.py --exe <enshrouded.exe> managed/services/Kiln.Players/PlayerStateIds.g.cs`. `--check` lists what changed first.
+
+## For native code
+
+`kiln.playerstate` is published to native mods (`api->service("kiln.playerstate", 1)`). The header is in the SDK. A station button is one of the game's client actions (`client_action_info` names it; the crafting screen's is `playerCraftingAction`). Its payload is the game's `PlayerCraftingAction` (68 bytes, from the game's reflection; [docs/re/stations.md](../../re/stations.md) section 2.3):
+
+| Offset | Field |
+|---|---|
+| `+0x00` | `u32 craftingStationId`: the station's entity (a `KilnEntity`) |
+| `+0x04` | `u32 recipeId` |
+| `+0x0C` | `u16 amount` |
+| `+0x18` | ingredient selections (4 x 8 bytes) |
+| `+0x3C` | `u32 version` |
+| `+0x40` | `u8 type`: 0 craft at a workbench, 1 fill from chests, 2 select a recipe (also the button that starts a stopped station), 3 "use all ingredient options", 4 stop, 5 pour water |
+
+Holding and canceling the fill, select and stop buttons of one station:
+
+```c
+#include <stddef.h>
+#include <string.h>
+#include "services/kiln_playerstate.h"
+
+/* playerCraftingAction's client_action_info index on this build; UINT32_MAX when it has none or Kiln cannot hold it. */
+static uint32_t crafting_action_index(const KilnPlayerStateApi* ps) {
+    KilnPlayerClientAction a;
+    for (uint32_t i = 0;; i++) {
+        a.size = sizeof a;
+        if (ps->client_action_info(i, &a) != KILN_OK) return UINT32_MAX; /* KILN_ERR_NOT_FOUND past the last one */
+        if (strcmp(a.name, "playerCraftingAction") == 0) return a.cancelable ? i : UINT32_MAX;
+    }
+}
+
+/* Fill (1), select (2) or stop (4) at `station`. Type 0 (a craft at a workbench) and the others are left alone. */
+static int is_station_button(const KilnPlayerHeldAction* h, uint32_t crafting_index, KilnEntity station) {
+    if (h->index != crafting_index || h->bytes < 0x41 || h->bytes > sizeof h->payload) return 0;
+    uint32_t id;
+    memcpy(&id, h->payload + 0x00, sizeof id); /* craftingStationId */
+    uint8_t type = h->payload[0x40];
+    return id == station && (type == 1 || type == 2 || type == 4);
+}
+
+/* Every server-world Pre, while you want the next press held (8 steps without a call ends it). */
+static void hold_station_buttons(const KilnApi* api, KilnOwner owner, KilnEntity player, KilnEntity station) {
+    const KilnPlayerStateApi* ps = (const KilnPlayerStateApi*)api->service(
+        (KilnStr){KILN_PLAYERSTATE_SERVICE, sizeof KILN_PLAYERSTATE_SERVICE - 1}, 1);
+    /* client_action_interest is after aim. A check that stops at client_action_decide does not cover it. */
+    if (!ps || ps->header.size < offsetof(KilnPlayerStateApi, client_action_interest) + sizeof(void*)) return;
+    KilnPlayerStateStatus st;
+    st.size = sizeof st;
+    if (ps->status(&st) != KILN_OK || !st.client_hold) return; /* status writes the struct; it does not return it */
+    uint32_t crafting = crafting_action_index(ps); /* the index is fixed for the process: look it up once */
+    if (crafting == UINT32_MAX) return;
+    ps->client_action_interest(owner, &player, 1, &crafting, 1); /* only playerCraftingAction waits a step */
+    KilnPlayerHeldAction held[8];
+    for (;;) {
+        for (int i = 0; i < 8; i++) held[i].size = sizeof held[i];
+        uint32_t n = 0;
+        KilnResult rc = ps->client_action_held(held, 8, &n);
+        /* the entries that fit are already written on KILN_OK and on KILN_ERR_BUFFER_TOO_SMALL */
+        if (rc != KILN_OK && rc != KILN_ERR_BUFFER_TOO_SMALL) break;
+        for (uint32_t i = 0; i < n; i++)
+            if (is_station_button(&held[i], crafting, station))
+                ps->client_action_decide(held[i].entity, held[i].index, held[i].version, 1); /* 1 cancels; 0 lets it run */
+        if (rc == KILN_OK) break; /* call again until every held action has been listed. One nobody answers runs. */
+    }
+}
+```
+
+`st.client_hold` is 0 when this build cannot hold (then `client_action_interest` and `client_action_hold` return `KILN_ERR_UNAVAILABLE` and a cancel changes nothing). Call these on the server world's thread in Pre, with the owner from your `KilnNativeContext`. `client_action_interest` holds only the actions you name; `client_action_hold` holds every client action of those players for a step. `client_action_held` lists each held action once, to the first caller in that step, and an unanswered held action runs. The example cancels only types 1, 2 and 4: type 0 is a craft at a workbench (`craftingStationId` is then the workbench), and canceling it would stop the player crafting there. Types 3 and 5 are the "use all ingredient options" switch and pouring water.
 
 ## One verdict with the typed equipment event (since 0.2.0-dev.29)
 For `changeEquipmentAction` and `swapEquipmentSetAction`, while a `PlayerEquippingEvent` handler (Kiln.Items) listens,

@@ -175,7 +175,7 @@ json.dump(cfg, open(path, "w"), indent=2)
 PY
 fi
 # The game data Mod.OnBoot reads (tools/bootsnap, docs/kiln/modding/boot-snapshot.md): made once per game build into
-# kiln/data/boot-gamedata (about a minute and about 200 MB the first time, under a second after), before the server's
+# kiln/data/boot-gamedata (about a minute and about 300 MB the first time, under a second after), before the server's
 # first start lets EML patch the archive (it reads EML's backup pair after that), and only when an enabled profile mod
 # or an allowed, unlisted drop-in in kiln/mods asks
 # for the boot phase (--if-needed: "no mod needs the boot snapshot" otherwise, and nothing is touched). A failure is a

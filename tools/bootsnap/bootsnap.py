@@ -4,6 +4,8 @@
 
     bootsnap.py make --game <dir> [--force] [--if-needed] [--exe <file>] [--root <dir>] [--json]
     bootsnap.py show --game <dir> [--root <dir>] <query>...      item:<name> template:<name> skill:0x<hex> material:<name>
+                                                                 names:resources/<qualified type name>
+                                                                 resource:<GUID>/<8 hex type hash or qualified name>/<part>
     bootsnap.py key  --game <dir> [--exe <file>]
 
 `make` reads the game's own archive (snapshot.archive_files: the backup another loader kept aside, else the live pair) and the game
@@ -205,7 +207,7 @@ def cmd_make(a):
     def building(exe):
         # none of this game build yet: a build begins (the launcher shows its own step of the start from this line:
         # kiln_manage::start_progress::BOOT_SNAPSHOT_MAKING); a current snapshot never gets here
-        print(f"boot-snapshot: {MAKING} (about 200 MB, once per game build)", file=sys.stderr, flush=True)
+        print(f"boot-snapshot: {MAKING} (about 300 MB, once per game build)", file=sys.stderr, flush=True)
         return open_source(exe)
 
     r = snapshot.make(a.game, building, exe=a.exe, force=a.force, root=a.root, progress=progress)
@@ -219,7 +221,8 @@ def cmd_make(a):
     else:
         c = r["counts"]
         print(f"boot-snapshot: wrote {r['path']} ({r['bytes'] / 1e6:.0f} MB, from the {r['archive']} archive) in {r['seconds']} s: "
-              f"{c['items']} items, {c['templates']} templates, {c['skills']} skills, {c['materials']} materials ({r['skipped']} skipped)")
+              f"{c['items']} items, {c['templates']} templates, {c['skills']} skills, {c['materials']} materials, "
+              f"{c.get('resources', 0)} resources ({r['skipped']} skipped)")
     return 0
 
 
@@ -238,10 +241,21 @@ def cmd_show(a):
         return 1
     rc = 0
     for q in a.query:
+        if q.startswith("names:resources/"):
+            got = snapshot.read_resource_names(path, q[len("names:resources/"):])
+            print(json.dumps({"query": q, "found": False} if got is None else {"query": q, **got}, indent=1))
+            rc = rc if got is not None else 1
+            continue
+        if q.startswith("resource:"):
+            parts = q[len("resource:"):].split("/")
+            got = snapshot.read_resource(path, parts[0], parts[1], int(parts[2])) if len(parts) == 3 and parts[2].isdigit() else None
+            print(json.dumps({"query": q, "found": False} if got is None else {"query": q, "from": got[0], "value": got[1]}, indent=1))
+            rc = rc if got is not None else 1
+            continue
         prefix, _, name = q.partition(":")
         kind = QUERY_KINDS.get(prefix)
         if kind is None or not name:
-            print(f"boot-snapshot: {q}: not item:/template:/skill:/material:", file=sys.stderr)
+            print(f"boot-snapshot: {q}: not item:/template:/skill:/material:/names:resources/", file=sys.stderr)
             return 2
         if kind == "skills":
             name = name.lower()

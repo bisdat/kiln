@@ -49,7 +49,7 @@ fn registry_is_safe_for_concurrent_registration_lookup_and_reentrant_import() {
         }
     });
     let d = library::Detected { kind: DetectKind::Set, path: String::new(), id: None, version: None, name: None,
-        reason: String::new(), items: vec![], engine: None };
+        reason: String::new(), items: vec![], asi_omit: vec![], engine: None };
     (engines::loader_for(DetectKind::Set).unwrap().import)(&mut ImportCtx {
         dirs: &DataDirs::at(std::env::temp_dir()), detected: &d, src: std::path::Path::new("."),
         from: &library::ImportSource { kind: "folder".into(), from: String::new() }, report: &mut Default::default(),
