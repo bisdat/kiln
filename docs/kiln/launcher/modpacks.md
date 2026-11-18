@@ -26,7 +26,10 @@ launcher downloads, checks and installs it into a profile. Formats: [contracts.m
    Library entry is packed as placed, without the files the mod wrote, and gets `identity`, the hash the server
    advertises for it, which a player's launcher accepts beside `hash` (an older launcher only `hash`). Logs (`*.log`)
    of other engines' mods are not packed. A modpack built before 0.2.0-dev.29.18 for a server that runs a ShroudForge
-   or another engine's mod has to be built again after the update. The build record goes to
+   or another engine's mod still installs for players whose launcher is 0.2.0-dev.29.18 or later (the engine mod's
+   version is enough, below); a player's older launcher compares the hash and refuses it once the server runs
+   0.2.0-dev.29.18 ("the modpack lacks what the server requires"), so build it again after updating the server. Built
+   from the Library entry, it then installs for older launchers too. The build record goes to
    `<server>/kiln/data/kiln-network/modpack-build.json`.
 3. **Publish** (`server_modpack_publish(serverId, url)`): the admin uploads the zip anywhere players can reach (https)
    and enters the URL. The launcher writes `modpack {url, sha256, name, version, size}` into `kiln/config/network.json`
@@ -55,7 +58,11 @@ launcher downloads, checks and installs it into a profile. Formats: [contracts.m
      recomputed from the zip's entries (a Kiln mod's identity). A Kiln mod with entries under `assets/cooked/` is
      refused (`refused`): no hash covers them. A pack built by 0.2.0-dev.26 or older from a cooked server folder is such
      a pack; the message says the server's operator has to build it again;
-   - when last-server.json is about this server: every mod the server requires must be in the pack with the same hash;
+   - when last-server.json is about this server: every mod the server requires must be in the pack: a Kiln or native
+     mod with the same hash; another engine's mod with the same hash or `identity`, or else in the same version
+     (0.2.0-dev.29.18: the server's join never compares other engines' mods, and a pack built before 0.2.0-dev.29.18
+     carries an older hash of the very same mod). Otherwise `hash_mismatch`, and the message names the mods and says to
+     ask the server's owner to build the modpack again and publish it;
    - unpack into `<data>/modpacks/staging/<random>/`, kdh1 checked again on disk, `library::import`;
    - the profile bound to the server id (reused), else a new "Server: <name>", with exactly the pack's mods and
      `server {id, name, address, modpack}`;

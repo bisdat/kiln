@@ -951,19 +951,30 @@ pub fn extract(zip_file: &Path, manifest: &ModpackManifest, staging: &Path) -> R
     Err(err(ErrorCode::Unsupported, "kiln-manage was built without the zip feature"))
 }
 
-/// The required mods the server advertised must all be in the modpack with the same hash (a modpack that does not
-/// carry what the server checks would refuse the player again).
+/// The required mods the server advertised must all be in the modpack (a modpack that does not carry what the server
+/// checks would refuse the player again): a Kiln or native mod with the same hash; another engine's mod with the same
+/// hash or [`ModpackMod::identity`], else in the same version. The server's join never compares other engines' mods
+/// (its HELLO check covers Kiln's own), and what a server advertises for them changed in 0.2.0-dev.29.18
+/// ([`engine_identity`]): a modpack built before then carries the hash of the whole folder as it was at the build, its
+/// settings and logs included, for the very mod the server now names by its Library entry. Only a launcher of
+/// 0.2.0-dev.29.18 or later accepts that; an older one needs the modpack built again.
 pub fn check_against(manifest: &ModpackManifest, required: &[RequiredMod]) -> Result<()> {
+    let carries = |r: &RequiredMod| {
+        let kind = r.kind.unwrap_or(ModKind::Kiln);
+        manifest.mods.iter().any(|m| m.kind == kind && m.id == r.id
+            && (m.hash == r.hash || m.identity.as_ref() == Some(&r.hash) || (kind.is_engine() && m.version == r.version)))
+    };
     let bad: Vec<String> = required
         .iter()
-        .filter(|r| r.unknown_kind.is_some() || !manifest.mods.iter().any(|m| m.kind == r.kind.unwrap_or(ModKind::Kiln) && m.id == r.id
-            && (m.hash == r.hash || m.identity.as_ref() == Some(&r.hash))))
+        .filter(|r| r.unknown_kind.is_some() || !carries(r))
         .map(|r| format!("{} {} ({})", r.id, r.version, r.hash))
         .collect();
     if bad.is_empty() {
         Ok(())
     } else {
-        Err(err(ErrorCode::HashMismatch, format!("the modpack lacks what the server requires: {}", bad.join(", "))).with_detail(serde_json::json!(bad)))
+        Err(err(ErrorCode::HashMismatch, format!(
+            "the modpack does not carry what the server runs now: {}. It is older than the server's mods: ask the server's owner to build the \
+             modpack again and publish it", bad.join(", "))).with_detail(serde_json::json!(bad)))
     }
 }
 
@@ -1102,6 +1113,31 @@ mod tests {
         std::fs::create_dir_all(s.join("kiln/config")).unwrap();
         std::fs::write(s.join("kiln/config/network.json"), "{\n  // mod sync\n  \"modSync\": \"refuse\",\n  \"serverName\": \"Ember Isles\",\n}\n").unwrap();
         s
+    }
+
+    /// A modpack built before 0.2.0-dev.29.18 carries an engine mod's hash of the whole folder at the build; a server of
+    /// 0.2.0-dev.29.18 names the same mod by its Library entry. Its join never compares engine mods, so the same version
+    /// is enough for them; Kiln's own mods keep their hash check, and the refusal says what to do.
+    #[test]
+    fn an_engine_mod_is_carried_in_its_version_whatever_hash_an_older_build_gave_it() {
+        let h = |c: char| format!("kdh1:{}", c.to_string().repeat(64));
+        let packed = |kind: ModKind, id: &str, version: &str, hash: String| ModpackMod {
+            kind, id: id.into(), version: version.into(), name: None, path: zip_path(kind, id), hash, identity: None, clients: None, side: None };
+        let manifest = ModpackManifest {
+            format: 1, name: "Isles".into(), version: "1".into(), created: None, server: ModpackServer { id: "isles".into(), name: None }, kiln: None,
+            mods: vec![packed(ModKind::ShroudForge, "unifiedemltweaks", "2.1.1", h('a')), packed(ModKind::Kiln, "isle-icons", "1.1.0", h('b'))],
+        };
+        let need = |kind: ModKind, id: &str, version: &str, hash: String| RequiredMod {
+            id: id.into(), version: version.into(), hash, kind: Some(kind), unknown_kind: None, name: None };
+        check_against(&manifest, &[need(ModKind::ShroudForge, "unifiedemltweaks", "2.1.1", h('c')), need(ModKind::Kiln, "isle-icons", "1.1.0", h('b'))])
+            .unwrap();
+        // another version of the engine mod, or a Kiln mod with another hash: the owner builds the modpack again
+        let e = check_against(&manifest, &[need(ModKind::ShroudForge, "unifiedemltweaks", "2.2.0", h('c'))]).unwrap_err();
+        assert_eq!(e.code, ErrorCode::HashMismatch);
+        assert!(e.message.contains("unifiedemltweaks 2.2.0") && e.message.contains("ask the server's owner to build the modpack again"), "{}", e.message);
+        assert_eq!(check_against(&manifest, &[need(ModKind::Kiln, "isle-icons", "1.1.0", h('d'))]).unwrap_err().code, ErrorCode::HashMismatch);
+        // an engine mod the modpack does not carry at all
+        assert!(check_against(&manifest, &[need(ModKind::Set, "unifiedemltweaks", "2.1.1", h('a'))]).is_err());
     }
 
     #[test]
