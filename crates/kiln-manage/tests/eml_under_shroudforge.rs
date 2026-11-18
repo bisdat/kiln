@@ -1296,6 +1296,93 @@ fn inbox86_an_update_that_spells_its_ini_otherwise_never_leaves_two() {
     assert!(xhl_core_reads(&copy).is_none() && copy.join("Native-Plugin.ini.kiln-off").is_file() && rep.retained.is_empty(), "{rep:?}");
 }
 
+/// Every file under `root` whose name has the set-aside suffix (any case), relative to `root` with '/'.
+fn set_aside_under(root: &Path) -> Vec<String> {
+    fn walk(root: &Path, dir: &Path, out: &mut Vec<String>) {
+        for e in std::fs::read_dir(dir).unwrap().flatten() {
+            let path = e.path();
+            if e.file_type().unwrap().is_dir() { walk(root, &path, out); }
+            if e.file_name().to_string_lossy().to_ascii_lowercase().ends_with(".kiln-off") {
+                out.push(path.strip_prefix(root).unwrap().to_string_lossy().into_owned());
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(root, root, &mut out);
+    out.sort();
+    out
+}
+
+/// inbox 86: what the rename may touch. Only Kiln's own copy of a ShroudForge mod in ShroudForge's mods folder, while
+/// ShroudForge does not run it. Never an XHL companion of the profile while it is on (Kiln's copy in mods/; off, it goes
+/// whole, as before), the player's own XHL-Core plugin folder (XHL's XHL-Area-Harvest, whose ini the Kiln port of Area
+/// Harvest reads its first values from), or a Kiln mod (kiln.mod.json, as XHL's Kiln builds are) with a
+/// native-plugin.ini, in the Library or in the game's kiln/mods.
+#[test]
+fn inbox86_only_kilns_shroudforge_copy_ever_has_its_ini_renamed() {
+    let s = setup("inbox86-only-sf");
+    let core = xhl_core(&s, XhlCore::InProfile);
+    let tools = building_tools(&s, "native-plugin.ini");
+    let climb_ini: &[u8] = b"[Plugin]\r\nEnabled=1\r\nDll=XHL-Free-Climb.dll\r\n\r\n[Climbing]\r\nHoldKeyVk=72\r\n";
+    let d = s.t.0.join("src/XHL-Free-Climb");
+    put(&d, "mod.json", br#"{"id":"xhl-free-climb","name":"XHL Free Climbing","version":"2.1.0","capabilities":[]}"#);
+    put(&d, "XHL-Free-Climb.dll", &build_test_dll(&["XhlPluginEntry"], b"XHL plugin"));
+    put(&d, "native-plugin.ini", climb_ini);
+    let climb = import(&s.dirs, &d, ModKind::Xhl, "xhl-free-climb");
+    let kiln_ini: &[u8] = b"[Planting]\r\nMode=Square\r\nSquareSize=7\r\n";
+    let k = s.t.0.join("src/xhl-kiln-area-harvest");
+    put(&k, "kiln.mod.json", br#"{ "id": "xhl-kiln-area-harvest", "version": "0.1.0", "apiVersion": "0.2", "entryAssembly": "M.dll", "side": "both" }"#);
+    put(&k, "M.dll", b"a Kiln mod");
+    put(&k, "native-plugin.ini", kiln_ini);
+    let harvest = import(&s.dirs, &k, ModKind::Kiln, "xhl-kiln-area-harvest");
+    // the player's own: XHL's Area Harvest in mods/, a Kiln mod unzipped into kiln/mods/
+    let own_ini: &[u8] = b"[Plugin]\r\nEnabled=1\r\nDll=XHL-Area-Harvest.dll\r\n[Planting]\r\nMode=Square\r\n";
+    put(&s.game, "mods/XHL-Area-Harvest/native-plugin.ini", own_ini);
+    put(&s.game, "mods/XHL-Area-Harvest/XHL-Area-Harvest.dll", &build_test_dll(&["XhlPluginEntry"], b"harvest"));
+    put(&s.game, "kiln/mods/xhl-kiln-vein-mining/kiln.mod.json",
+        br#"{ "id": "xhl-kiln-vein-mining", "version": "0.1.0", "apiVersion": "0.2", "entryAssembly": "M.dll", "side": "both" }"#);
+    put(&s.game, "kiln/mods/xhl-kiln-vein-mining/native-plugin.ini", kiln_ini);
+    let install = runtime_install(&s.game);
+    let mut building = profile::create(&s.dirs, "Building", None).unwrap();
+    building.mods.shroudforge = vec![pm(&s.sf, true), pm(&tools, true)];
+    building.mods.native = core.into_iter().collect();
+    building.mods.xhl = vec![pm(&climb, true)];
+    building.mods.kiln = vec![pm(&harvest, true)];
+    let building = profile::save(&s.dirs, &building).unwrap();
+    let mut default = profile::create(&s.dirs, "Default", None).unwrap();
+    default.mods = building.mods.clone();
+    default.mods.shroudforge[1].enabled = false;
+    let default = profile::save(&s.dirs, &default).unwrap();
+    let untouched = |case: &str| {
+        assert_eq!(std::fs::read(s.game.join("mods/XHL-Area-Harvest/native-plugin.ini")).unwrap(), own_ini, "{case}");
+        assert_eq!(std::fs::read(s.game.join("kiln/mods/xhl-kiln-vein-mining/native-plugin.ini")).unwrap(), kiln_ini, "{case}");
+        assert_eq!(std::fs::read(library::path_of(&s.dirs, &harvest).unwrap().join("native-plugin.ini")).unwrap(), kiln_ini, "{case}");
+        assert_eq!(std::fs::read(library::path_of(&s.dirs, &climb).unwrap().join("native-plugin.ini")).unwrap(), climb_ini, "{case}");
+    };
+    let copy = s.game.join("mods/building-tools");
+    let a = profile::activate(&s.dirs, &building.id, &install).unwrap();
+    assert!(xhl_core_reads(&copy).is_some() && set_aside_under(&s.t.0).is_empty(), "{a:?}");
+    untouched("Building");
+    let a = profile::activate(&s.dirs, &default.id, &install).unwrap();
+    assert_eq!(set_aside_under(&s.t.0), ["game/mods/building-tools/native-plugin.ini.kiln-off"], "{a:?}");
+    assert_eq!(std::fs::read(s.game.join("mods/XHL-Free-Climb/native-plugin.ini")).unwrap(), climb_ini, "the companion is on: {a:?}");
+    untouched("Default");
+    // the companion off too: its copy goes whole, as before (nothing of it renamed), and the Kiln mod off changes nothing
+    let mut default = profile::get(&s.dirs, &default.id).unwrap();
+    default.mods.xhl[0].enabled = false;
+    default.mods.kiln[0].enabled = false;
+    let default = profile::save(&s.dirs, &default).unwrap();
+    let a = profile::activate(&s.dirs, &default.id, &install).unwrap();
+    assert!(!s.game.join("mods/XHL-Free-Climb").exists(), "{a:?}");
+    assert_eq!(set_aside_under(&s.t.0), ["game/mods/building-tools/native-plugin.ini.kiln-off"], "{a:?}");
+    untouched("Default, the companion and the Kiln mod off");
+    // and back: every ini where its reader looks, nothing set aside anywhere
+    let a = profile::activate(&s.dirs, &building.id, &install).unwrap();
+    assert!(set_aside_under(&s.t.0).is_empty() && xhl_core_reads(&copy).is_some(), "{a:?}");
+    assert_eq!(std::fs::read(s.game.join("mods/XHL-Free-Climb/native-plugin.ini")).unwrap(), climb_ini, "{a:?}");
+    untouched("Building again");
+}
+
 #[test]
 fn runtime_eml_environment_note() {
     const CHILD: &str = "KILN_TEST_SFOFF_NOTE_CHILD";
