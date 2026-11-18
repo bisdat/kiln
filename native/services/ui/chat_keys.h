@@ -34,6 +34,7 @@ public:
             std::lock_guard lock(mu_);
             pending_.clear();
             tab_character_.store(false, std::memory_order_release);
+            tab_down_.store(false, std::memory_order_release);
             completion_.store(0, std::memory_order_release);
         } else {
             active_.store(true, std::memory_order_release);
@@ -61,8 +62,14 @@ public:
     // Raw/legacy keydown is deduplicated by input.cpp. This method MUST never
     // swallow key releases; native game input needs those to avoid stuck keys.
     bool key(uint32_t vk, uint32_t mods, bool down) {
-        if (!down || !focused()) return false;
         constexpr uint32_t kUp = 0x26, kDown = 0x28, kTab = 0x09, kEscape = 0x1b;
+        // WM_INPUT and WM_KEYDOWN can both report the same physical Tab
+        // under Proton. Both release paths must clear the one-press guard.
+        if (vk == kTab && !down) {
+            tab_down_.store(false, std::memory_order_release);
+            return false;
+        }
+        if (!down || !focused()) return false;
         constexpr uint32_t kCtrl = 1, kShift = 2;
         constexpr uint8_t kEnabled = 1, kSuggestions = 2, kList = 4;
         const uint8_t comp = completion_.load(std::memory_order_acquire);
@@ -90,8 +97,16 @@ public:
 
         std::lock_guard lock(mu_);
         if (!active_.load(std::memory_order_acquire) || pending_.size() >= 32) return false;
+        if (vk == kTab) {
+            // Only the first event of a physical Tab press adds an action.
+            // An accompanying WM_CHAR or redundant raw/legacy keydown must
+            // still be swallowed, but never advance suggestions twice.
+            if (!tab_down_.exchange(true, std::memory_order_acq_rel))
+                pending_.push_back(action);
+            tab_character_.store(true, std::memory_order_release);
+            return true;
+        }
         pending_.push_back(action);
-        if (vk == kTab) tab_character_.store(true, std::memory_order_release);
         return true;
     }
 
@@ -116,6 +131,7 @@ private:
     std::atomic<bool> history_{true};
     std::atomic<uint8_t> completion_{0};
     std::atomic<bool> tab_character_{false};
+    std::atomic<bool> tab_down_{false};
     std::mutex mu_;
     std::deque<Action> pending_;
 };
