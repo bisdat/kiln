@@ -244,6 +244,7 @@ function KilnJsonCard() {
             onChange={(path, value) => set.mutate({ path, value })} onReset={(path) => reset.mutate(path)} />
         )}
       {doc.data && <span className="k-hint">{t("settings.kilnJson.overrides")}</span>}
+      {doc.data && <span className="k-hint">{t("settings.kilnJson.chatCompletionHint")}</span>}
     </Card>
   );
 }
