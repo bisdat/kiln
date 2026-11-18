@@ -30,6 +30,7 @@ internal static unsafe class ChatCompletionPanel
         _active = _dismissed = false;
         _field = 0;
         UiNative.ChatCandidates(false, false);
+        UiNative.ChatHover(false);
     }
 
     private static void Changed(string text, uint field, long now)
@@ -78,6 +79,7 @@ internal static unsafe class ChatCompletionPanel
 
     internal static void Draw(UiDraw ui)
     {
+        UiNative.ChatHover(false); // clear last frame's mouse capture
         // A completely unsupported ABI or a closed/nonfocused game chat
         // leaves the original native chat and PR #63 history untouched.
         var result = UiNative.ChatInput();
@@ -188,6 +190,7 @@ internal static unsafe class ChatCompletionPanel
             : Math.Min(ui.Height - height - 4, input.Y + input.Height + 5);
         y = Math.Max(4, y);
 
+        var hovered = false;
         ui.PushStyleRaw(UiStyle.Player);
         try
         {
@@ -203,12 +206,11 @@ internal static unsafe class ChatCompletionPanel
                         _active = true;
                         Accept(input, text, i);
                     }
-                    if (ui.ItemHovered)
-                        UiNative.T->SetHoverCapture(1);
+                    if (ui.ItemHovered) hovered = true;
                 }
             }
             ui.EndWindow();
         }
-        finally { ui.PopStyleRaw(); }
+        finally { UiNative.ChatHover(hovered); ui.PopStyleRaw(); }
     }
 }
