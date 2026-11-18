@@ -194,12 +194,12 @@ bool overlay_guard_start() noexcept {
         apply_mode(false);
         if (optiscaler.found()) {
             const std::string file = utf8(optiscaler.file.filename());
-            if (optiscaler.coexists())
-                logf(KILN_LOG_INFO, "ui: OptiScaler is installed (%s) with %s: it leaves the game's presents alone, so Kiln's overlay draws next to it",
-                     file.c_str(), optiscaler_settings(optiscaler).c_str());
-            else if (environment != -1)  // KILN_UI_OVERLAY decides (its own lines below)
+            if (environment != -1)  // KILN_UI_OVERLAY decides, with or without OptiScaler's menu (its own lines below)
                 logf(KILN_LOG_INFO, "ui: OptiScaler is installed (%s) with %s; KILN_UI_OVERLAY=%d decides for Kiln's overlay",
                      file.c_str(), optiscaler_settings(optiscaler).c_str(), environment);
+            else if (optiscaler.coexists())  // the crash guard may still keep drawing off for this start (its own line)
+                logf(KILN_LOG_INFO, "ui: OptiScaler is installed (%s) with %s: it leaves the game's presents alone, so it does not turn Kiln's overlay drawing off",
+                     file.c_str(), optiscaler_settings(optiscaler).c_str());
             else
                 logf(KILN_LOG_INFO, "ui: OptiScaler is installed (%s) with %s: it draws its own overlay in the game's presents and opens its menu with Insert, "
                      "so Kiln's overlay drawing steps aside (keys and the Mods menu still work). For Kiln's overlay, set OverlayMenu=false under [Menu] "
