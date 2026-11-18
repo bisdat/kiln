@@ -3,7 +3,7 @@
 // pairing (approved on the phone, expired with a new code, declined), sign out, and sign out and forget me.
 import { expect, test, type Page } from "@playwright/test";
 
-type Hooks = { community: { requests: () => string[]; approve: () => void; setOnline: (on: boolean) => void; setRelay: (up: boolean) => void }; opened: () => string[] };
+type Hooks = { community: { requests: () => string[]; signins: () => { mode: string; join: boolean }[]; approve: () => void; setOnline: (on: boolean) => void; setRelay: (up: boolean) => void }; opened: () => string[] };
 const mock = <T,>(page: Page, f: (h: Hooks) => T) => page.evaluate((src) => (new Function("h", `return (${src})(h)`))((window as unknown as { __kilnMock: Hooks }).__kilnMock), f.toString()) as Promise<T>;
 const requests = (page: Page) => mock(page, (h) => h.community.requests());
 const opened = (page: Page) => mock(page, (h) => h.opened());
@@ -30,6 +30,7 @@ test.describe("desktop", () => {
     await expect(page.getByTestId("kc-signin-wait")).toHaveCount(0);
     await expect(page.getByTestId("kc-account")).toContainText("emberfox");
     expect(await requests(page)).toEqual(expect.arrayContaining(["signin", "signin-poll"]));
+    expect(await mock(page, (h) => h.community.signins())).toEqual([{ mode: "browser", join: true }]);
   });
 
   test("cancelled on Discord's page: the dialog stays with Try again", async ({ page }) => {
@@ -101,6 +102,9 @@ test.describe("Steam Deck", () => {
     await mock(page, (h) => h.community.approve());
     await expect(page.locator(".deck-toast").filter({ hasText: "Signed in as emberfox" })).toBeVisible();
     await expect(page.locator('[data-deck-id="account"]')).toContainText("emberfox");
+    // the Deck asks with join, so frostdev.io's phone page offers "Also join the Kiln Discord" (ticked) to a player who
+    // isn't in it: the choice is made on the phone (PLAN 3.2, docs/relay-api.md)
+    expect(await mock(page, (h) => h.community.signins())).toEqual([{ mode: "qr", join: true }]);
   });
 
   test("an expired code is struck out; X or New code makes another", async ({ page }) => {

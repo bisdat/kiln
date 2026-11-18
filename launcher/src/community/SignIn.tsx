@@ -129,7 +129,9 @@ export function DeckSignIn({ onClose, onDone }: { onClose: () => void; onDone?: 
   const fresh = () => {
     setState("waiting");
     setPair(null);
-    api.communitySignInStart("qr", false).then(setPair).catch((e) => setState(errKind(e) === "offline" ? "offline" : "relay"));
+    // join: frostdev.io's phone page then offers "Also join the Kiln Discord" (ticked) to a player who isn't in it; the
+    // choice is made there, on the Approve page (PLAN 3.2, docs/relay-api.md)
+    api.communitySignInStart("qr", true).then(setPair).catch((e) => setState(errKind(e) === "offline" ? "offline" : "relay"));
   };
   // one pairing per opening (a development double mount must not start a second one)
   const begun = useRef(false);

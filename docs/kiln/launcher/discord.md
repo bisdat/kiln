@@ -38,7 +38,8 @@ Rich Presence with its preview, links, and "What is sent and kept".
 says what Kiln gets ("Also join the Kiln Discord" ticked by default), the system browser opens the relay's page, the
 dialog waits and moves on by itself; endings: signed in (a toast), cancelled on Discord's page, timed out after 10
 minutes, offline, frostdev.io not answering, each with Try again. Deck: a QR code and a short code for a phone, the time
-left, X for a new code; expired, declined, offline. Sign out has no confirmation; "Sign out and forget me" takes the
+left, X for a new code; expired, declined, offline. The Deck asks with `join` on, so frostdev.io's Approve page on the
+phone offers "Also join the Kiln Discord" (ticked) to a player who isn't in it: the choice is made there. Sign out has no confirmation; "Sign out and forget me" takes the
 typed word on the desktop (a tick also deletes the player's support posts from Discord) and a hold on the Deck. The
 page re-reads the account and membership when it opens.
 
@@ -155,7 +156,7 @@ Discord snowflakes); the launcher refuses anything else before sending.
 
 | Method, path | The launcher sends | It reads |
 |---|---|---|
-| `POST /signin` | `{mode: "browser"\|"qr", join, challenge, port? (browser), device: "desktop"\|"deck", version}` | `{id, code, url (https on frostdev.io), expiresAt}` (`pollEvery` ignored: the launcher polls every 2 s on the Deck, every 4 s from 8 s on the desktop) |
+| `POST /signin` | `{mode: "browser"\|"qr", join (desktop: the tick; Deck: always true, the phone page asks), challenge, port? (browser), device: "desktop"\|"deck", version}` | `{id, code, url (https on frostdev.io), expiresAt}` (`pollEvery` ignored: the launcher polls every 2 s on the Deck, every 4 s from 8 s on the desktop) |
 | `POST /signin/exchange` | `{id, code (the loopback's c), verifier (the secret)}` | `{token, account}` |
 | `POST /signin/poll` | `{id, secret}` | `{state: waiting\|approved (token, account)\|denied\|canceled\|expired}` |
 | `GET /me` | | `{account: {id, name, username, avatar, avatarUrl, member, tester}}` (id, name, member, tester are used) |

@@ -15,7 +15,7 @@
 //   sent        tester: results sent, not read yet                read     tester: results read by the team
 //   hidden      Settings' "Show the Community page" is off        noplan   tester, no test build open
 // Tests and the console: __kilnMock.community.reply(), .approve(), .setOnline(bool), .setRelay(bool), .readResults(),
-// .requests() (every call that would reach the relay, in order: what the "nothing is sent" tests check).
+// .requests() (every call that would reach the relay, in order: what the "nothing is sent" tests check), .signins().
 import type {
   CommunityAccount, CommunityFeed, CommunitySettings, CommunityStatus, Hardware, KnownProblem, ReportDraft, ReportPreview, SendFrom, SignInStart,
   SignInState, StepResult, SupportPost, TesterStatus, TestPlan, TestStep,
@@ -55,6 +55,8 @@ let postsAsOf: string | null = SIGNED_IN ? min(has("offline") ? 38 : 0) : null;
 let mods: number | null = null;
 /** Every call that would reach the relay (tests: `__kilnMock.community.requests()`). */
 const requests: string[] = [];
+/** Each sign-in's start as the launcher asks the relay (tests: `__kilnMock.community.signins()`). */
+const signins: { mode: string; join: boolean }[] = [];
 
 const thread = (n: number) => `https://discord.com/channels/${GUILD}/15731${n}0884210000${n}`;
 let posts: SupportPost[] = !SIGNED_IN || has("empty") ? [] : [
@@ -216,6 +218,7 @@ export function communityMockHandlers({ emit, gameRunning }: CommunityMockDeps):
       const id = `s${++seq}`;
       const code = CODES[(seq - 1) % CODES.length];
       const mode = a.mode === "qr" ? "qr" : "browser";
+      signins.push({ mode, join: a.join === true });
       pending.set(id, { id, code, mode, at: Date.now(), done: null });
       return { id, code: mode === "qr" ? code : "", url: mode === "qr" ? `https://frostdev.io/link/${code.replace("-", "")}` : `https://frostdev.io/kiln/signin/${id}`, expiresAt: later(10) };
     },
@@ -336,5 +339,6 @@ export function communityMockHooks(emit: Emit) {
     join: () => { joined = true; },
     readResults: () => { if (testPlan?.sent) testPlan = { ...testPlan, sent: { ...testPlan.sent, read: { by: "Rowan", at: new Date().toISOString() } } }; emit("kiln://community", { kind: "changed" }); },
     requests: () => [...requests],
+    signins: () => signins.map((x) => ({ ...x })),
   };
 }
