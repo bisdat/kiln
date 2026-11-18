@@ -228,8 +228,21 @@ void read_recipe(void* p) {
     }
 }
 
+// kiln.stations excludes this station from a craft's output sources. No-op when kiln-items.dll has no such export. Looked
+// up once, at the first craft: every service DLL is loaded before a world runs.
+void note_craft_station(uint32_t station, int active) {
+    using SetFn = void (*)(uint32_t, int);
+    static const SetFn set = [] {
+        const HMODULE m = GetModuleHandleW(L"kiln-items.dll");
+        return m ? reinterpret_cast<SetFn>(GetProcAddress(m, "kiln_stations_set_craft_context")) : nullptr;
+    }();
+    if (set) set(station, active);
+}
+
 int32_t __fastcall hk_craft(uint32_t* ctx, const uint8_t* recipe) {
+    if (ctx) note_craft_station(ctx[1], 1);
     const int32_t rc = h_craft.call<int32_t>(ctx, recipe);
+    if (ctx) note_craft_station(0, 0);
     // Automated stations (factory_station: operator == station, not a player) retry every step and call the core twice
     // per cycle (inputs at the start, outputs at the end): report the end of a successful cycle only. Craft requests
     // (handle_crafting_events) and players report every outcome (craft_phase.h).
