@@ -117,7 +117,11 @@ function Checklist({ plan, net }: { plan: TestPlan; net: boolean }) {
   const steps = plan.steps;
   const done = steps.filter((s) => s.result).length;
   const setResult = (s: TestStep, result: StepResult | "clear" | undefined, note?: string) =>
-    api.testerResultSet(s.id, result, note).then((p) => { if (p) qc.setQueryData(cq.tester, (old: unknown) => ({ ...(old as object), plan: p })); }).catch((e) => toast.error(e));
+    api.testerResultSet(s.id, result, note).then(async (p) => {
+      // a read of the tester's state still on its way would land after this change and undo it on screen
+      await qc.cancelQueries({ queryKey: cq.tester });
+      if (p) qc.setQueryData(cq.tester, (old: unknown) => ({ ...(old as object), plan: p }));
+    }).catch((e) => toast.error(e));
   const send = async () => {
     setBusy(true);
     try {

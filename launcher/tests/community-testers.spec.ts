@@ -57,6 +57,7 @@ test.describe("desktop", () => {
     await step("reload").getByRole("radio", { name: "Couldn't try" }).click();
     await expect(step("reload")).toContainText("Not tried");
     await step("reload").getByRole("radio", { name: "Couldn't try" }).click();
+    await expect(step("reload").locator(".kc-step-head")).toContainText("Couldn't try");
     await expect(page.getByTestId("kc-send-results")).toBeEnabled();
     await page.getByTestId("kc-send-results").click();
     await expect(page.locator(".k-toast").filter({ hasText: "Results sent" })).toContainText("They're in the build's post in #testing. The team marks them when they've read them.");
