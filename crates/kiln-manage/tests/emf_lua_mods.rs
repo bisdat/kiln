@@ -65,6 +65,15 @@ fn lua_mod(dir: &Path, id: &str, name: &str, version: &str) {
 fn emf_release(root: &Path) -> PathBuf {
     let r = root.join("EMF-0.6.8");
     put(&r, "game/dinput8.dll", &build_test_dll(&["DirectInput8Create", "emf_loader_identity"], b""));
+    // EMF itself beside its loader: the core (it holds the loader's marker text, known_tools.cpp), the builder of EML
+    // content, the frame-time recorder, their Vulkan layer files, fonts, EMF.exe and its page, the tools
+    put(&r, "game/emf/emf_core.dll", &build_test_dll(&["emf_core_start", "emf_vk_negotiate", "emf_vk_shim_proc"], b"emf_core 0.6.8\0EMF-LOADER-7d3c9f"));
+    put(&r, "game/emf/emf_content.dll", &build_test_dll(&["emf_content_abi", "emf_content_build", "emf_content_portraits"], b""));
+    put(&r, "game/emf/emf_frametime.dll", &build_test_dll(&["emf_ft_negotiate"], b""));
+    for f in ["vk/VkLayer_EMF_console.json", "vk/VkLayer_EMF_frametime.json", "fonts/Alegreya-Regular.ttf", "EMF.exe", "ui/index.html",
+              "ui/app.js", "setup/install.ps1", "tools/emf_bridge.ps1", "tools/emf_bridge.py"] {
+        put(&r.join("game/emf"), f, b"x");
+    }
     put(&r, "game/emf/known_tools.txt", b"dinput8.dll\n");
     lua_host(&r.join("game/emf/mods/lua"));
     put(&r, "game/emf/mods/big_stacks/mod.json", br#"{"id":"big_stacks","name":"Big Stacks","version":"1.0.0","emf":14,"enabled":false}"#);
@@ -83,6 +92,15 @@ fn emf_release(root: &Path) -> PathBuf {
     // EML content (EMF's Emberbrand example): an EML mod, imported as before
     put(&r, "content/emberbrand/mod.json", br#"{"id":"emf_emberbrand","name":"Emberbrand (EMF content example)","version":"1.1.0","capabilities":["patch"]}"#);
     put(&r, "content/emberbrand/src/mod.lua", b"return {}\n");
+    // the modder files: headers, the C++ starter and examples (sources, no DLL), the signature checker, docs
+    put(&r, "sdk/include/emf/emf.h", b"#pragma once\n");
+    put(&r, "template/mod.json", br#"{"id":"mymod","name":"My Mod","version":"1.0.0","emf":14}"#);
+    put(&r, "template/src/mymod.cpp", b"// source\n");
+    put(&r, "examples/hello/hello.cpp", b"// source\n");
+    put(&r, "examples/cpp/waypoints/mod.json", br#"{"id":"waypoints","name":"Waypoints","version":"1.0.0","emf":14}"#);
+    put(&r, "examples/cpp/waypoints/src/waypoints.cpp", b"// source\n");
+    put(&r, "tools/emf_sigcheck.exe", b"MZ");
+    put(&r, "docs/modding/README.md", b"# docs\n");
     r
 }
 
@@ -133,6 +151,13 @@ fn drop_brings_the_lua_mods(src: impl Fn(&Path) -> PathBuf, tag: &str) {
     let imp = &rep.import;
     assert_eq!(ids(&imp.imported, ModKind::Emf), ["beastmaster", "big_stacks", "kill_counter", "lua"], "{imp:#?}");
     assert_eq!(ids(&imp.imported, ModKind::Eml), ["emf_emberbrand"], "EML content stays EML: {imp:#?}");
+    // EMF itself is no mod: its loader and its own files beside it are left out, each with a line that says so
+    assert_eq!(imp.imported.len(), 5, "nothing else, EMF's own DLLs least of all: {imp:#?}");
+    for (file, what) in [("emf_core.dll", "its core"), ("emf_content.dll", "its builder of EML content"), ("emf_frametime.dll", "its frame-time recorder")] {
+        let line = format!("{file} is part of EMF itself ({what}): not needed, Kiln runs EMF mods");
+        assert!(imp.notes.iter().any(|n| n.text == line), "{line}: {:#?}", imp.notes);
+    }
+    assert!(imp.notes.iter().any(|n| n.text == "EMF's own loader is in this package: not needed, Kiln runs EMF mods"), "{:#?}", imp.notes);
     assert!(!imp.skipped.iter().any(|s| s.reason.contains("does not describe a recognised mod package")), "{:#?}", imp.skipped);
     let beast = imp.imported.iter().find(|r| r.id == "beastmaster").unwrap();
     assert_eq!(beast.version, "1.17.1");
