@@ -207,6 +207,7 @@ internal static unsafe class StationsNative
         public delegate* unmanaged[Cdecl]<uint*, uint, uint*, int> OutputSources;
         public delegate* unmanaged[Cdecl]<uint> MaxChests;
         public delegate* unmanaged[Cdecl]<ulong, Collect*, delegate* unmanaged[Cdecl]<Result*, void*, void>, void*, ulong*, int> Collect;
+        public delegate* unmanaged[Cdecl]<uint, Stack*, uint, uint*, int> BaseStockWithStations;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -221,6 +222,10 @@ internal static unsafe class StationsNative
     public static readonly int TableOutputs = TableV1 + 2 * sizeof(nint);
     /// <summary>The table size through <see cref="Table.MaxChests"/>.</summary>
     public static readonly int TableChests = TableOutputs + sizeof(nint);
+    /// <summary>The table size through <see cref="Table.Collect"/>.</summary>
+    public static readonly int TableCollect = TableChests + sizeof(nint);
+    /// <summary>The table size through <see cref="Table.BaseStockWithStations"/>.</summary>
+    public static readonly int TableStock = TableCollect + sizeof(nint);
     /// <summary>The plan's size before 0.2.0-dev.29.17 (no <see cref="Plan.Outputs"/>).</summary>
     public static readonly int PlanV1 = sizeof(Plan) - 2 * MaxInputs * sizeof(uint);
     /// <summary>The plan's size with outputs and without <see cref="Plan.Chests"/>.</summary>

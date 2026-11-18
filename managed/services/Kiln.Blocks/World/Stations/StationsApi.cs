@@ -119,6 +119,12 @@ public static class Bases
     [ServerOnly, TickThreadOnly, RequiresCapability(Stations.ReadCapability)]
     public static IReadOnlyDictionary<ItemId, long> StockWithStations(BaseId id)
     {
+        if (StationsCore.Backend.HasStockWithStations)
+        {
+            StationsCore.CheckRead("Bases.StockWithStations");
+            var rows = StationsCore.ByBase(id, i => StationsCore.Backend.BaseStockWithStations(i), "Bases.StockWithStations");
+            return rows.ToDictionary(r => new ItemId(r.Item), r => (long)r.Count);
+        }
         var stock = new Dictionary<ItemId, long>(Stock(id));
         foreach (var s in Stations.InBase(id))
             if (Stations.Read(s) is { } info)
@@ -420,6 +426,9 @@ internal interface IStationsBackend
     bool HasChests { get; }
     /// <summary>The table has collect (the same move Kiln.Blocks' Collect uses).</summary>
     bool HasCollect { get; }
+    /// <summary>The table has base_stock_with_stations (Magic-chest stock plus finished station outputs).</summary>
+    bool HasStockWithStations { get; }
+    (int Rc, StationsNative.Stack[] Rows) BaseStockWithStations(uint index);
     int Collect(in StationsNative.Collect request, ulong owner, long key);
     int SetOutputSource(uint entity, bool on);
     (int Rc, uint[] Ids) OutputSources();
@@ -632,10 +641,27 @@ internal static unsafe partial class StationsCore
 
         public bool HasOutputSources => T is var t && t != null && t->Header.Size >= (uint)StationsNative.TableOutputs;
 
-        public bool HasChests => T is var t && t != null && t->Header.Size >= (uint)StationsNative.TableChests &&
-                                 t->MaxChests != null && t->MaxChests() == (uint)StationsNative.MaxChests;
+        public bool HasChests => T is var t && t != null && t->Header.Size >= (uint)StationsNative.TableChests;
 
-        public bool HasCollect => T is var t && t != null && t->Header.Size >= (uint)sizeof(StationsNative.Table) && t->Collect != null;
+        public bool HasCollect => T is var t && t != null && t->Header.Size >= (uint)StationsNative.TableCollect && t->Collect != null;
+
+        public bool HasStockWithStations => T is var t && t != null && t->Header.Size >= (uint)StationsNative.TableStock &&
+                                             t->BaseStockWithStations != null;
+
+        public (int Rc, StationsNative.Stack[] Rows) BaseStockWithStations(uint index)
+        {
+            if (!HasStockWithStations) return (StationsNative.Unavailable, []);
+            var buf = new StationsNative.Stack[512];
+            for (var round = 0; round < 4; round++)
+            {
+                uint n = 0;
+                int rc;
+                fixed (StationsNative.Stack* p = buf) rc = T->BaseStockWithStations(index, p, (uint)buf.Length, &n);
+                if (rc == StationsNative.BufferTooSmall && n > buf.Length) { buf = new StationsNative.Stack[n]; continue; }
+                return (rc, buf.AsSpan(0, (int)Math.Min(n, (uint)buf.Length)).ToArray());
+            }
+            return (StationsNative.BufferTooSmall, []);
+        }
 
         public int Collect(in StationsNative.Collect request, ulong owner, long key)
         {

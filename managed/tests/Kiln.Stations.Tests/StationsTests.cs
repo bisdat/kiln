@@ -123,6 +123,8 @@ public sealed unsafe class StationsTests : IDisposable
         public uint[] LastChests = [];
         public bool HasChests { get; set; } = true;
         public bool HasCollect => false;
+        public bool HasStockWithStations => false;
+        public (int Rc, StationsNative.Stack[] Rows) BaseStockWithStations(uint index) => (StationsNative.Unavailable, []);
         public int Collect(in StationsNative.Collect request, ulong owner, long key) => StationsNative.Unavailable;
 
         // station outputs as crafting stock (0.2.0-dev.29.17)
@@ -285,7 +287,10 @@ public sealed unsafe class StationsTests : IDisposable
         Assert.Equal(72, (int)Marshal.OffsetOf<StationsNative.Event>("Position"));
         Assert.Equal(96, (int)Marshal.OffsetOf<StationsNative.Event>("Base"));
         Assert.Equal(188, sizeof(StationsNative.Status));
-        Assert.Equal(8 + 25 * 8, sizeof(StationsNative.Table));
+        Assert.Equal(8 + 26 * 8, sizeof(StationsNative.Table));
+        Assert.Equal(8 + 24 * 8, StationsNative.TableChests);
+        Assert.Equal(8 + 25 * 8, StationsNative.TableCollect);
+        Assert.Equal(8 + 26 * 8, StationsNative.TableStock);
         Assert.Equal(24, sizeof(StationsNative.Collect));
         Assert.Equal(8 + 21 * 8, StationsNative.TableV1);
         Assert.Equal(8 + 23 * 8, StationsNative.TableOutputs);
