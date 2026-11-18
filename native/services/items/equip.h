@@ -13,6 +13,9 @@ namespace kitems {
 
 // A ticket from the service's one counter (items.cpp), so cancel() can tell every kind of request apart.
 uint64_t items_next_ticket();
+// A move that another program of the service ran (kiln.stations' collect): kiln.items' move and commit counters, as
+// its own moves count. moved: committed with items moved; otherwise a rollback.
+void items_count_move(bool moved);
 
 // on_ready: registers kiln_items_equip through kiln.world. Without kiln.world (w null) or without feature items.equip
 // equip stays off and equip_status says why.

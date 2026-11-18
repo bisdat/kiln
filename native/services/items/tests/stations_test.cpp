@@ -65,7 +65,14 @@ int main() {
     static_assert(sizeof(KilnStationsApi) == 8 + 26 * 8 && offsetof(KilnStationsApi, set_output_source) == 8 + 21 * 8 &&
                   offsetof(KilnStationsApi, max_chests) == 8 + 23 * 8 && offsetof(KilnStationsApi, collect) == 8 + 24 * 8 &&
                   offsetof(KilnStationsApi, base_stock_with_stations) == 8 + 25 * 8);
-    static_assert(sizeof(KilnStationCollect) == 24);
+    static_assert(sizeof(KilnStationCollect) == 24 && offsetof(KilnStationCollect, flags) == 16);
+    // a collect's flags travel in KilnStationResult.flags: they share no bit with a request flag (DRY_RUN above all)
+    static_assert(((KILN_STATION_COLLECT_OUTPUTS | KILN_STATION_COLLECT_LEFTOVERS | KILN_STATION_COLLECT_TO_BASE) &
+                   (KILN_STATION_FILL_ADD | KILN_STATION_FILL_EXACT | KILN_STATION_DRY_RUN | KILN_STATION_NO_WATER |
+                    KILN_STATION_AFTER_CRAFT | KILN_STATION_KEEP_STOPPED | KILN_STATION_ALLOW_LOCKED |
+                    KILN_STATION_FILL_NO_OUTPUTS)) == 0);
+    static_assert(KILN_STATION_COLLECT_OUTPUTS == 0x10000u && KILN_STATION_COLLECT_LEFTOVERS == 0x20000u &&
+                  KILN_STATION_COLLECT_TO_BASE == 0x40000u);
     static_assert(offsetof(KilnStationResult, from_outputs) == 60);
 
     // ---- requests ----
@@ -717,6 +724,19 @@ int main() {
         col.to = 1318;
         col.flags = KILN_STATION_COLLECT_OUTPUTS;
         CHECK(!collect_valid(col));  // not into itself
+        col.to = 5;
+        CHECK(collect_valid(col));   // a player's bag, as Stations.Collect(station, player) through Items.Move
+        col.to = 4000;
+        col.flags = KILN_STATION_COLLECT_OUTPUTS | 0x4u;  // the old TO_BASE bit is no collect flag
+        CHECK(!collect_valid(col));
+        col.flags = KILN_STATION_COLLECT_LEFTOVERS;
+        col.reserved = 1;
+        CHECK(!collect_valid(col));
+        col.reserved = 0;
+        col.size = sizeof col - 4;
+        CHECK(!collect_valid(col));
+        // a fault after earlier stacks moved is PARTIAL (they stay moved); before anything moved, UNAVAILABLE
+        CHECK(collect_fault_status(true) == KILN_STATION_PARTIAL && collect_fault_status(false) == KILN_STATION_UNAVAILABLE);
     }
 
     std::printf("stations: %d checks, %d failures\n", checks, failed);

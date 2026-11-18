@@ -2141,6 +2141,14 @@ KilnOwner items_owner() { return g_owner; }
 uint64_t current_step() { return g_step.load(std::memory_order_relaxed); }
 uintptr_t items_server_world() { return g_world.load() ? g_world.load() : g_api->server_world(); }
 uint64_t items_next_ticket() { return g_next_ticket.fetch_add(1); }
+void items_count_move(bool moved) {
+    if (moved) {
+        g_commits.fetch_add(1);
+        g_moves_done.fetch_add(1);
+    } else {
+        g_rollbacks.fetch_add(1);
+    }
+}
 }  // namespace kitems
 
 extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api, KilnOwner owner, KilnPluginInfo* info) {

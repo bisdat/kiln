@@ -1473,9 +1473,10 @@ void copy_move_changes(KilnStationResult* res, const KilnItemsMoveResult& mv) {
         res->changes[res->change_count++] = mv.changes[i];
 }
 
-// Finished stacks into a chest, or into the base's Magic chests that take deposits. Each stack is kiln.items' move
-// (run_move): the same transfer Items.Move uses. One move is its own transaction, as the managed collect does.
-// A stack counts as moved only when the move is DONE. A partial move keeps the slot and tries a later chest.
+// Finished stacks into an inventory, or into the base's Magic chests that take deposits. Each stack is kiln.items' move
+// (run_move): the same transfer Items.Move uses, one transaction per move, noted for component watchers and counted as
+// kiln.items' own moves. A stack counts as moved only when the move is DONE. A partial move keeps the slot and tries a
+// later chest. A fault switches the service's actions off, as a faulted fill does (kiln_stations.h KilnStationCollect).
 void run_collect(const Run& run, const Req& q, KilnStationResult* res) {
     res->action = KILN_STATION_COLLECT;
     if (!E.slot_transfer || !E.move_ok) return finish(res, KILN_STATION_UNAVAILABLE, "items.move is off on this build");
@@ -1563,12 +1564,25 @@ void run_collect(const Run& run, const Req& q, KilnStationResult* res) {
             KilnItemsMoveResult mv{};
             mv.size = sizeof mv;
             unsigned long code = 0;
+            NoteLease note;  // a component watch sees kiln.items as the writer, as for Items.Move
+            if (note_wanted()) {
+                const KilnEntity holders[2] = {q.r.station, dest};
+                note.begin(run.a, holders, 2);
+            }
             if (!run_move(run.a, job, g_tx, &mv, &code)) {
                 abandon_tx(g_tx);
                 char why[160];
-                std::snprintf(why, sizeof why, "the game's inventory transaction faulted (0x%08lx)", code);
-                return finish_text(res, KILN_STATION_UNAVAILABLE, why);
+                std::snprintf(why, sizeof why, "the game's inventory transaction faulted (0x%08lx) on a collect from %u", code,
+                              q.r.station);
+                switch_off(why);
+                const bool before = finished > 0 || any_moved || piece_any;
+                const int32_t st = collect_fault_status(before);
+                if (st == KILN_STATION_PARTIAL)
+                    std::snprintf(why, sizeof why, "earlier stacks moved, then the inventory transaction faulted (0x%08lx)", code);
+                return finish_text(res, st, why);
             }
+            if (note) note.end(run.a);
+            items_count_move((mv.status == KILN_ITEMS_DONE || mv.status == KILN_ITEMS_PARTIAL) && mv.done > 0);
             if (mv.status == KILN_ITEMS_DONE) {
                 copy_move_changes(res, mv);
                 done = true;
@@ -1625,6 +1639,7 @@ const char* action_name(uint32_t a) {
     case KILN_STATION_STOP: return "stop";
     case KILN_STATION_RESUME: return "resume";
     case KILN_STATION_SELECT: return "select";
+    case KILN_STATION_COLLECT: return "collect";
     default: return "?";
     }
 }

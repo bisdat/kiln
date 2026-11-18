@@ -314,6 +314,12 @@ inline int32_t collect_status(uint32_t stacks, uint32_t finished, bool any_moved
 // CollectToBase when the station stands in no base. The managed call answered NoRoom: every stack's target was null.
 inline int32_t collect_without_base() { return KILN_STATION_NO_ROOM; }
 
+// A move of a collect faulted. Stacks moved before it stay moved (each move is its own transaction): that is PARTIAL,
+// so the caller sees that something changed. Nothing moved yet: UNAVAILABLE.
+inline int32_t collect_fault_status(bool any_moved_before) {
+    return any_moved_before ? KILN_STATION_PARTIAL : KILN_STATION_UNAVAILABLE;
+}
+
 // DynamicInventoryCraftingStock when the override is set (byte 0, byte 1), else the template's
 // InventoryCraftingStock.canReceiveAreaDeposit. Unknown (no template bit) stays allowed, as the managed TakesDeposits.
 struct DepositRead {
@@ -378,7 +384,7 @@ inline bool collect_valid(const KilnStationCollect& c) {
     constexpr uint32_t all = what | KILN_STATION_COLLECT_TO_BASE;
     if ((c.flags & ~all) != 0 || (c.flags & what) == 0) return false;
     if (c.flags & KILN_STATION_COLLECT_TO_BASE) return c.to == 0;
-    return c.to != 0 && c.to != c.station && c.to > kMaxPlayerEntity;
+    return c.to != 0 && c.to != c.station;  // a player's bag too, as Items.Move (run_move guards its own slots)
 }
 
 // The stations a fill of `target` in base `base` may use, in entity order: opted in, still a station, in that base, not the

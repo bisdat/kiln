@@ -34,15 +34,20 @@
  *    by default; the opt-ins are this session's (Kiln.Blocks keeps them with the save). docs/re/stations.md section 8.
  *  - Ordinary chests (since 0.2.0-dev.29.17, on the FILL request, default off): chest_count and chests name storage
  *    containers in the station's base that are not Magic chests and not refilling plants. Order: the named player's bag,
- *    the Magic chests (after the reserves), those chests, then opted-in station outputs. Revalidated inside the
- *    transaction: same base, an initialized inventory, not a production station, not already in the base's crafting-stock
- *    list. A request of KILN_STATION_REQUEST_V1 bytes names none. The station screen's button does not name chests.
- *    max_chests() returns KILN_STATIONS_MAX_CHESTS; an older table has no such slot.
+ *    the Magic chests (after the reserves), those chests in the order the request names them, then opted-in station
+ *    outputs. Revalidated inside the transaction: same base, an initialized inventory that is neither a player's nor an
+ *    NPC's (InventorySetup's own flags, as KILN_ITEMS_FIND_CONTAINERS), not a production station, not already in the
+ *    base's crafting-stock list. A request of KILN_STATION_REQUEST_V1 bytes names none. The station screen's button does
+ *    not name chests. max_chests() returns KILN_STATIONS_MAX_CHESTS; an older table has no such slot.
+ *  - Collect (since 0.2.0-dev.29.17, collect()): a station's finished stacks into one inventory or the base's Magic
+ *    chests, each stack through kiln.items' move (the game's slot transfer, the same one Items.Move uses). Its own rules,
+ *    which are not Kiln.Blocks' Stations.Collect (that managed call keeps its own Items.Move loop): see KilnStationCollect.
  *  - A finished cycle is kiln.gameplay's KILN_GAMEPLAY_CRAFTED with actor == target == the station (once per cycle since
  *    0.2.0-dev.29). This table adds state, placed, removed and base-list events by polling (watch, events).
  *
- * Threads: status, submit, cancel, watch, last_seq: any thread. Every read (base_*, stations, station_read, recipe*,
- * category*, workshop_recipes, plan, events): the tick thread, Pre or Post (KILN_ERR_WRONG_THREAD otherwise). Actions run
+ * Threads: status, submit, cancel, watch, last_seq, set_output_source, output_sources, max_chests, collect: any thread.
+ * Every read (base_* including base_stock_with_stations, stations, station_read, recipe*, category*, workshop_recipes,
+ * plan, events): the tick thread, Pre or Post (KILN_ERR_WRONG_THREAD otherwise). Actions (submit, collect) run
  * inside kiln.items' program kiln_items_stations (registered through kiln.world, after the game's programs, so a player's
  * own action in the same step runs first); their callbacks come on the tick thread in Pre, one step after they ran.
  * The table only grows at the end. */
@@ -200,8 +205,9 @@ enum {
 };
 
 typedef struct KilnStationRequest {
-    uint32_t size;          /* sizeof(KilnStationRequest) */
-    uint32_t action;        /* KILN_STATION_FILL .. SELECT */
+    uint32_t size;          /* sizeof(KilnStationRequest), or KILN_STATION_REQUEST_V1 (no chests). Since 0.2.0-dev.29.17
+                               exactly one of those two: 29.16 also took any larger size and read the first 88 bytes */
+    uint32_t action;        /* KILN_STATION_FILL .. SELECT (COLLECT is collect()'s, not submit's) */
     uint32_t flags;         /* KILN_STATION_* request flags */
     KilnEntity station;
     uint32_t crafts;        /* FILL: 1..1000 */
@@ -256,9 +262,10 @@ typedef struct KilnStationResult {
     uint32_t size;          /* sizeof(KilnStationResult) of kiln.stations */
     int32_t status;         /* KILN_STATION_DONE .. CANCELED */
     uint32_t action;
-    uint32_t flags;         /* the request's flags */
+    uint32_t flags;         /* the request's flags; COLLECT: the KilnStationCollect's flags (KILN_STATION_COLLECT_*, which
+                               share no bit with the request flags: a collect never has KILN_STATION_DRY_RUN) */
     KilnEntity station;
-    uint32_t recipe;        /* FILL / SELECT: the recipe */
+    uint32_t recipe;        /* FILL / SELECT: the recipe; COLLECT: the station's selected recipe */
     uint32_t crafts_requested; /* FILL: what the request asked (after the UpTo arithmetic: crafts to add) */
     uint32_t crafts_before, crafts_after; /* FILL: complete crafts loaded before and after */
     uint32_t crafts_added;  /* FILL: the n the game's function ran with */
@@ -274,7 +281,8 @@ typedef struct KilnStationResult {
     KilnItemsMoveChange changes[KILN_STATIONS_MAX_CHANGES]; /* FILL: the transaction's ledger (a take: from_slot set, to_slot
                                0; a put into the station: to_slot set, from_slot 0) */
     char message[128];      /* why, in words, for anything but DONE; NUL-terminated */
-    /* since ordinary chests (a caller that copies the older 1232-byte result leaves these unread): */
+    /* since ordinary chests: read these only when size >= offsetof(KilnStationResult, reserved_tail) + 4 (a 29.16
+       kiln.stations passes a 1232-byte result, which ends at message): */
     uint32_t from_chests;   /* FILL: items taken from the named ordinary chests; 0 when they were not needed */
     uint32_t reserved_tail; /* 0 */
 } KilnStationResult;
@@ -413,11 +421,10 @@ typedef struct KilnStationsApi {
     /* KILN_STATIONS_MAX_CHESTS. A smaller table has no slot. Any thread. */
     uint32_t(KILN_CALL* max_chests)(void);
     /* ---- collect (header.size tells whether this is here) ---- */
-    /* Moves a station's finished stacks the way Kiln.Blocks' Stations.Collect does, through kiln.items' move (one
-     * implementation). Joins the same action queue as submit (1024 waiting; KILN_ERR_BUFFER_TOO_SMALL when it is
-     * full). The result copies at most KILN_STATIONS_MAX_CHANGES ledger rows. Any thread; the callback runs on the
-     * tick thread. KILN_ERR_INVALID_ARGUMENT: a bad request. KILN_ERR_UNAVAILABLE: no server world, or items.move is
-     * off. */
+    /* Moves a station's finished stacks, each through kiln.items' move (the game's slot transfer; KilnStationCollect has
+     * the rules). Joins the same action queue as submit (1024 waiting; KILN_ERR_BUFFER_TOO_SMALL when it is full). Any
+     * thread; `done` (may be NULL) runs once, on the tick thread. KILN_ERR_INVALID_ARGUMENT: a bad request.
+     * KILN_ERR_UNAVAILABLE: no server world, stations.read is off, or items.move is off. */
     KilnResult(KILN_CALL* collect)(KilnOwner owner, const KilnStationCollect* request, KilnStationDoneFn done, void* user,
                                    uint64_t* out_ticket);
     /* ---- stock plus finished station outputs (header.size tells whether this is here) ---- */
@@ -427,21 +434,32 @@ typedef struct KilnStationsApi {
                                                     uint32_t* out_count);
 } KilnStationsApi;
 
-/* KilnStationCollect.flags */
+/* KilnStationCollect.flags. Bits 16 and up, so a result's flags never read as a request flag (KILN_STATION_DRY_RUN). */
 enum {
-    KILN_STATION_COLLECT_OUTPUTS = 0x1u,    /* stacks of an output that is not also an input */
-    KILN_STATION_COLLECT_LEFTOVERS = 0x2u,  /* stacks that are neither an input nor an output */
-    KILN_STATION_COLLECT_TO_BASE = 0x4u,    /* into the base's Magic chests that take deposits; `to` is 0 */
+    KILN_STATION_COLLECT_OUTPUTS = 0x10000u,   /* stacks of an output that is not also an input */
+    KILN_STATION_COLLECT_LEFTOVERS = 0x20000u, /* stacks that are neither an input nor an output (none without a recipe) */
+    KILN_STATION_COLLECT_TO_BASE = 0x40000u,   /* into the base's Magic chests that take deposits; `to` is 0 */
 };
 
-/* A collect. size is sizeof(KilnStationCollect). The result is a KilnStationResult with action COLLECT:
- * DONE every stack moved (a stack counts only when its move is DONE), PARTIAL some items moved but a stack was not
- * finished, NO_ROOM none did (also TO_BASE when the station stands in no base), UNCHANGED nothing to collect,
- * NOT_A_STATION, UNAVAILABLE when the deposit accessor is missing or a move faulted. */
+/* A collect. size is sizeof(KilnStationCollect). The stacks are the station's slots whose item is an output of its
+ * selected or running recipe and no input of either (OUTPUTS), or neither (LEFTOVERS), the same split as
+ * StationInfo.Outputs / Leftovers; `item` narrows them to one item. Each stack is one kiln.items move (its own
+ * transaction, as Items.Move; component watchers see kiln.items as the writer), in the station's slot order:
+ *  - into `to`: any inventory holder but the station (a chest, a player's bag: a player's equipped and action-bar slots
+ *    are never filled, as Items.Move);
+ *  - TO_BASE: the base's Magic chests that take deposits (the DynamicInventoryCraftingStock override when set, else the
+ *    template's canReceiveAreaDeposit), a chest that holds the item with room first, then one with a free slot, each
+ *    group in the base's order. A stack that one chest takes only in part goes on into the next chest.
+ * The result is a KilnStationResult with action COLLECT and flags = this request's flags: DONE every stack moved whole,
+ * PARTIAL some items moved and a stack is not finished (or a move faulted after earlier stacks moved: the message says
+ * so), NO_ROOM nothing moved (also TO_BASE when the station stands in no base), UNCHANGED nothing to collect,
+ * NOT_A_STATION, UNAVAILABLE (items.move off, the deposit flag unreadable on this build, or a fault before anything
+ * moved). A fault switches kiln.stations' actions off, as a faulted fill does. changes holds the first
+ * KILN_STATIONS_MAX_CHANGES ledger rows of all the moves; change_count says how many it holds. */
 typedef struct KilnStationCollect {
     uint32_t size;
     KilnEntity station;
-    KilnEntity to;     /* the container; 0 with KILN_STATION_COLLECT_TO_BASE */
+    KilnEntity to;     /* the inventory holder (a chest, a player 1..1023); 0 with KILN_STATION_COLLECT_TO_BASE */
     uint32_t item;     /* 0: every matching stack; otherwise only this item */
     uint32_t flags;    /* KILN_STATION_COLLECT_* ; OUTPUTS or LEFTOVERS or both is required */
     uint32_t reserved; /* 0 */
