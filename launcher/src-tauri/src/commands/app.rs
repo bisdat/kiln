@@ -49,6 +49,10 @@ pub struct AppInfo {
     /// and whether the marker turns it off at the next start (crate::sandbox). Absent elsewhere.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sandbox: Option<crate::sandbox::SandboxInfo>,
+    /// (dev.29) The previews on for this start (settings.json `preview` and `KILN_LAUNCHER_PREVIEW`;
+    /// commands/vendor.rs `previews`): `"upscalers"` shows Settings, Upscalers. Left out while none is on.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub preview: Vec<String>,
 }
 
 /// `<data>/settings.json`
@@ -100,6 +104,11 @@ pub struct LauncherSettings {
     /// else a tag ("zh-CN"). Only the page reads it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub language: Option<String>,
+    /// (dev.29) Previews of unfinished features, by name: `"upscalers"` shows Settings, Upscalers (vendor upscaler
+    /// downloads, commands/vendor.rs). Not in the UI: set by hand while the launcher is closed; `KILN_LAUNCHER_PREVIEW`
+    /// adds names for one start. Left out while empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub preview: Vec<String>,
 }
 
 impl Default for LauncherSettings {
@@ -118,6 +127,7 @@ impl Default for LauncherSettings {
             mod_updates_daily: false,
             keep_versions: kiln_manage::kept::KEEP_DEFAULT,
             language: None,
+            preview: Vec::new(),
         }
     }
 }
@@ -356,6 +366,7 @@ pub async fn app_info(app: AppHandle) -> Result<AppInfo, Error> {
         render: crate::render::info(),
         desktop: crate::desktop::info(),
         sandbox: crate::sandbox::info(),
+        preview: super::vendor::previews(),
     })
 }
 

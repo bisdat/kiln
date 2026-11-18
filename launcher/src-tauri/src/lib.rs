@@ -249,7 +249,11 @@ pub fn run() {
             commands::updates::updates_check,
             commands::app::app_desktop_set,
             commands::app::app_locales,
-            commands::app::app_sandbox_set
+            commands::app::app_sandbox_set,
+            commands::vendor::vendor_status,
+            commands::vendor::vendor_license,
+            commands::vendor::vendor_download,
+            commands::vendor::vendor_remove
         ]))
         .build(tauri::generate_context!())
         .expect("error while building the Kiln Launcher")

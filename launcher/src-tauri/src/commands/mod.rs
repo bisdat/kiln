@@ -24,6 +24,7 @@ pub mod found;
 pub mod cook;
 pub mod data_folder;
 pub mod updates;
+pub mod vendor;
 
 /// A background task id; the task reports through `kiln://task`.
 pub type TaskId = String;
@@ -213,6 +214,10 @@ pub const NAMES: &[&str] = &[
     "app_desktop_set",
     "app_locales",
     "app_sandbox_set",
+    "vendor_status",
+    "vendor_license",
+    "vendor_download",
+    "vendor_remove",
 ];
 
 #[cfg(test)]

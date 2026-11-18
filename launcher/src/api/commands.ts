@@ -99,6 +99,9 @@ export interface AppInfo {
   desktop?: DesktopInfo;
   /** (dev.29.18) Linux only: WebKit's sandbox in this start and whether the next start turns it off (sandbox.rs). */
   sandbox?: SandboxInfo;
+  /** (dev.29) The previews on for this start (settings.json `preview`, KILN_LAUNCHER_PREVIEW): "upscalers" shows
+   *  Settings, Upscalers (api/vendor.ts). Absent: none. */
+  preview?: string[];
 }
 /** WebKit's process sandbox on Linux (src-tauri/src/sandbox.rs). */
 export interface SandboxInfo {
@@ -176,6 +179,8 @@ export interface LauncherSettings {
   keepVersions?: number;
   /** The launcher's language (Settings, Language; src/i18n): "system" or absent = the system's, else a tag ("zh-CN"). */
   language?: string | null;
+  /** (dev.29) Previews of unfinished features ("upscalers"), set by hand in settings.json; kept as it is by every save. */
+  preview?: string[];
 }
 /** The most `keepVersions` may be (kiln_manage::kept::KEEP_MAX). */
 export const KEEP_MAX = 5;
@@ -2171,6 +2176,7 @@ export const COMMANDS = [
   "app_desktop_set",
   "app_locales",
   "app_sandbox_set",
+  "vendor_status", "vendor_license", "vendor_download", "vendor_remove",
 ] as const;
 export type CommandName = (typeof COMMANDS)[number];
 
