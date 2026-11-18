@@ -18,7 +18,8 @@
 //                output size, the preset for the game's ratio and the flags. A context is never re-initialised in place
 //                (that needs the GPU idle): the old one is retired and destroyed once 4 more frames were recorded (the
 //                game alternates two command buffers, so its last frame is done by then), or at device_lost.
-//  record        xessVKExecute into the game's command buffer (velocity scale first when it changed).
+//  record        xessVKExecute into the game's command buffer (velocity scale first when it changed), after the core's
+//                copy of the motion vectors into R16G16_SFLOAT when the build has it (MotionCopy).
 //  destroy       retires the context; device_lost destroys everything (the device is idle then).
 // The class is plain C++ over Vulkan's headers and the Host below, so the host test (tests/xess_test.cpp) runs it
 // against a fake libxess; upscale_xess.cpp is the Windows host.
@@ -42,6 +43,18 @@
 
 namespace kui::xess {
 
+// The core's copy of the game's motion vectors (R16G16_SNORM, UV units) into an image of Kiln's own in R16G16_SFLOAT, the
+// format XeSS's guide names, values unchanged (upscale_mv.h MotionConverter). Optional: without it XeSS reads the
+// game's image through its own view.
+class MotionCopy {
+  public:
+    virtual ~MotionCopy() = default;
+    virtual bool init(const upscale::VkContext& vk, std::string* detail) = 0;
+    // Records the copy into cb; `out` is Kiln's image in SHADER_READ_ONLY_OPTIMAL once the copy has run.
+    virtual bool record(VkCommandBuffer cb, const upscale::Texture& in, uint64_t frame, upscale::Texture* out, std::string* detail) = 0;
+    virtual void destroy() = 0;  // the device is idle
+};
+
 // What the backend needs from Kiln around it.
 class Host {
   public:
@@ -53,6 +66,8 @@ class Host {
     virtual std::string read_tuning(const upscale::Files& files) = 0;
     // One line for kiln.log; level KILN_LOG_* (1 error, 2 warning, 3 info, 4 debug). Any thread.
     virtual void log(int level, const std::string& line) = 0;
+    // The motion-vector copy, when this build has one (nullptr: none).
+    virtual std::unique_ptr<MotionCopy> motion_copy() { return nullptr; }
 };
 
 inline constexpr uint64_t kRetireRecords = 4;  // a retired context is destroyed after this many more records
@@ -182,6 +197,14 @@ class XessBackend final : public upscale::Backend {
             ci.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
             if (create_cache_(vk.device, &ci, nullptr, &cache_) != VK_SUCCESS) cache_ = VK_NULL_HANDLE;
         }
+        if (tuning_.motion_copy && !mv_) {
+            mv_ = host_->motion_copy();
+            std::string d;
+            if (mv_ && !mv_->init(vk, &d)) {
+                host_->log(2, "the motion-vector copy for XeSS could not start (" + d + "): XeSS reads the game's motion vectors as they are");
+                mv_.reset();
+            }
+        }
         device_ok_ = true;
         host_->log(3, std::string("XeSS is ready on ") + vk.props.deviceName + (vendor_is_intel(vk) ? " (Intel: XMX path where the GPU has it)" : " (its cross-vendor DP4a path)"));
         return true;
@@ -275,7 +298,13 @@ class XessBackend final : public upscale::Backend {
             vel_x_ = vx;
             vel_y_ = vy;
         }
-        const ExecuteParams p = execute_params(f, tuning_, ctx_flags_, pending_reset_);
+        ExecuteParams p = execute_params(f, tuning_, ctx_flags_, pending_reset_);
+        if (mv_ && tuning_.motion_copy) {
+            upscale::Texture copy;
+            std::string d;
+            if (!mv_->record(f.cb, f.motion, f.frame, &copy, &d) || !copy.present()) return fail("the motion-vector copy for XeSS failed: " + d);
+            p.velocity = image_info(copy);
+        }
         const int32_t r = api_.vk_execute(ctx_, f.cb, &p);
         if (r < 0) return fail(std::string("xessVKExecute failed: ") + result_name(r));
         pending_reset_ = false;
@@ -304,6 +333,8 @@ class XessBackend final : public upscale::Backend {
         if (vk_.device && device && device != vk_.device) return;
         destroy();
         collect(true);
+        if (mv_) mv_->destroy();
+        mv_.reset();
         if (cache_ && destroy_cache_) destroy_cache_(vk_.device, cache_, nullptr);
         cache_ = VK_NULL_HANDLE;
         device_ok_ = false;
@@ -451,6 +482,7 @@ class XessBackend final : public upscale::Backend {
     PFN_vkCreatePipelineCache create_cache_ = nullptr;
     PFN_vkDestroyPipelineCache destroy_cache_ = nullptr;
     VkPipelineCache cache_ = VK_NULL_HANDLE;
+    std::unique_ptr<MotionCopy> mv_;
     bool warned_driver_ = false;
     // the context
     Context ctx_ = nullptr;

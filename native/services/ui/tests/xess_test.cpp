@@ -65,6 +65,7 @@ static void knobs() {
     CHECK(t.notes.size() == 1 && t.notes[0] == "what is this");
     CHECK(parse_tuning("EXPOSURE AUTO\nJitter-X -1\n").exposure == Exposure::automatic);
     CHECK(parse_tuning("jitter-x -1\n").jitter_x == -1 && parse_tuning("jitter-x 1\n").jitter_x == 1);
+    CHECK(!parse_tuning("motion-copy off\n").motion_copy && parse_tuning("motion-copy off\n").tuned() && parse_tuning("motion-copy on").motion_copy);
     CHECK(has(t.describe(), "jitter +x -y") && has(t.describe(), "motion -x +y") && has(t.describe(), "exposure inverse") && has(t.describe(), "mask off"));
 }
 
@@ -387,12 +388,42 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL gdpa(VkDevice, const char* n) {
 }
 }  // namespace fx
 
+// The core's motion-vector copy, faked: hands out Kiln's image 0x700 in R16G16_SFLOAT.
+struct FakeCopy final : MotionCopy {
+    bool fail_init = false, fail_record = false;
+    int *inits, *records, *destroys;
+    FakeCopy(int* i, int* r, int* d) : inits(i), records(r), destroys(d) {}
+    bool init(const upscale::VkContext& vk, std::string* detail) override {
+        CHECK(vk.device != VK_NULL_HANDLE);
+        ++*inits;
+        if (fail_init) return *detail = "no memory type", false;
+        return true;
+    }
+    bool record(VkCommandBuffer cb, const upscale::Texture& in, uint64_t, upscale::Texture* out, std::string* detail) override {
+        CHECK(cb != VK_NULL_HANDLE && in.format == VK_FORMAT_R16G16_SNORM);
+        ++*records;
+        if (fail_record) return *detail = "a descriptor set", false;
+        *out = tex(0x700, VK_FORMAT_R16G16_SFLOAT, in.width, in.height);
+        return true;
+    }
+    void destroy() override { ++*destroys; }
+};
+
 struct FakeHost final : Host {
     Api api;
     bool fail_load = false;
     std::string tuning;
     std::vector<std::string>* lines;
+    bool copy = false, copy_fail_init = false, copy_fail_record = false;
+    int copy_inits = 0, copy_records = 0, copy_destroys = 0;
     explicit FakeHost(std::vector<std::string>* l) : api(fx::api()), lines(l) {}
+    std::unique_ptr<MotionCopy> motion_copy() override {
+        if (!copy) return nullptr;
+        auto c = std::make_unique<FakeCopy>(&copy_inits, &copy_records, &copy_destroys);
+        c->fail_init = copy_fail_init;
+        c->fail_record = copy_fail_record;
+        return c;
+    }
     bool load_library(const std::wstring& path, Api* out, std::string* detail) override {
         CHECK(path.size() > 11 && path.substr(path.size() - 11) == L"LibXeSS.dll");  // found whatever its case
         if (fail_load) return *detail = "libxess.dll did not load (Windows error 126: a library it needs is missing)", false;
@@ -669,6 +700,69 @@ static void knobs_reach_xess() {
     b.device_lost(h<VkDevice>(0x33));
 }
 
+static void motion_copy() {
+    std::vector<std::string> log;
+    upscale::Why why;
+    std::string detail;
+    // with the core's copy: XeSS reads Kiln's R16G16_SFLOAT image, the game's own stays as it is
+    {
+        fx::reset();
+        auto host = std::make_unique<FakeHost>(&log);
+        host->copy = true;
+        FakeHost* hp = host.get();
+        XessBackend b(std::move(host));
+        CHECK(b.load(files(), &why, &detail));
+        b.device_needs(gpu());
+        CHECK(b.device_ready(device(true), &why, &detail) && hp->copy_inits == 1);
+        CHECK(b.create(game_ci(), &detail));
+        CHECK(b.record(game_frame(), &detail) && hp->copy_records == 1);
+        CHECK(fx::last.velocity.image == h<VkImage>(0x700) && fx::last.velocity.format == VK_FORMAT_R16G16_SFLOAT && fx::last.velocity.width == 960);
+        CHECK(fx::last.color.image == h<VkImage>(0x100));
+        CHECK(fx::all[0]->vx == 960);  // values unchanged: the same velocity scale
+        // the knob turns it off at the next set-up
+        hp->tuning = "motion-copy off\n";
+        b.destroy();
+        CHECK(b.create(game_ci(), &detail) && b.record(game_frame(2), &detail) && hp->copy_records == 1);
+        CHECK(fx::last.velocity.image == h<VkImage>(0x300) && fx::last.velocity.format == VK_FORMAT_R16G16_SNORM);
+        hp->tuning = "";
+        b.destroy();
+        CHECK(b.create(game_ci(), &detail) && b.record(game_frame(3), &detail) && hp->copy_records == 2);
+        b.device_lost(h<VkDevice>(0x33));
+        CHECK(hp->copy_destroys == 1);
+    }
+    // a copy that cannot start: XeSS reads the game's image
+    {
+        fx::reset();
+        auto host = std::make_unique<FakeHost>(&log);
+        host->copy = true;
+        host->copy_fail_init = true;
+        FakeHost* hp = host.get();
+        XessBackend b(std::move(host));
+        CHECK(b.load(files(), &why, &detail));
+        b.device_needs(gpu());
+        CHECK(b.device_ready(device(true), &why, &detail) && hp->copy_inits == 1);
+        CHECK(b.create(game_ci(), &detail) && b.record(game_frame(), &detail) && fx::last.velocity.image == h<VkImage>(0x300));
+        bool said = false;
+        for (const auto& l : log) said |= has(l, "motion-vector copy for XeSS could not start (no memory type)");
+        CHECK(said);
+        b.device_lost(h<VkDevice>(0x33));
+        CHECK(hp->copy_destroys == 0);
+    }
+    // a copy that fails in a frame: that frame fails (the core falls back), XeSS is not called with half a frame
+    {
+        fx::reset();
+        auto host = std::make_unique<FakeHost>(&log);
+        host->copy = true;
+        host->copy_fail_record = true;
+        XessBackend b(std::move(host));
+        CHECK(b.load(files(), &why, &detail));
+        b.device_needs(gpu());
+        CHECK(b.device_ready(device(true), &why, &detail) && b.create(game_ci(), &detail));
+        CHECK(!b.record(game_frame(), &detail) && has(detail, "motion-vector copy for XeSS failed: a descriptor set") && fx::all[0]->executes == 0);
+        b.device_lost(h<VkDevice>(0x33));
+    }
+}
+
 static void ratios_of_the_game() {
     // every FSR 3 preset of the game (0xfa440: 3.0, 2.0, 1.7, 1.5, 1.0) at 1080p and 4K, as the core creates them
     fx::reset();
@@ -723,6 +817,7 @@ int main() {
     needs_and_device();
     contexts();
     knobs_reach_xess();
+    motion_copy();
     ratios_of_the_game();
     fx::reset();
     std::printf("xess_test: %d checks passed\n", g_checks);

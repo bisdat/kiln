@@ -21,7 +21,7 @@
 // dynamic range (1.0x up to its ratio) holds it; the game's render size is kept, so its jitter phases (8 * ratio^2),
 // mip bias and frame budget stay as they are.
 // Test knobs (kiln/control/xess, one per line, for the real-client check; nothing reads them in normal play): flips of
-// the jitter and motion axes, the exposure mode, the responsive mask, XeSS's own log level.
+// the jitter and motion axes, the exposure mode, the responsive mask, the motion-vector copy, XeSS's own log level.
 #pragma once
 #ifndef VK_NO_PROTOTYPES
 #define VK_NO_PROTOTYPES
@@ -89,21 +89,23 @@ struct Tuning {
     float mv_x = 1, mv_y = 1;
     Exposure exposure = Exposure::one;
     bool mask = true;                  // the game's reactive mask as XeSS's responsive pixel mask
+    bool motion_copy = true;           // the motion vectors copied into R16G16_SFLOAT first (where the build can)
     int32_t log_level = kLogWarning;   // XeSS's own log callback: this level and up
     std::vector<std::string> notes;    // lines not understood
     bool tuned() const {
-        return jitter_x != 1 || jitter_y != 1 || mv_x != 1 || mv_y != 1 || exposure != Exposure::one || !mask || log_level != kLogWarning;
+        return jitter_x != 1 || jitter_y != 1 || mv_x != 1 || mv_y != 1 || exposure != Exposure::one || !mask || !motion_copy ||
+               log_level != kLogWarning;
     }
     std::string describe() const {
         std::string s = "jitter " + std::string(jitter_x < 0 ? "-x" : "+x") + (jitter_y < 0 ? " -y" : " +y") + ", motion " +
                         (mv_x < 0 ? "-x" : "+x") + (mv_y < 0 ? " -y" : " +y") + ", exposure " + exposure_name(exposure) + ", mask " +
-                        (mask ? "on" : "off");
+                        (mask ? "on" : "off") + ", motion copy " + (motion_copy ? "on" : "off");
         return s;
     }
 };
 
 // kiln/control/xess: "jitter-x flip", "jitter-y flip", "motion-x flip", "motion-y flip", "exposure one|inverse|auto",
-// "mask on|off", "log debug|info|warning|error"; '#' starts a comment.
+// "mask on|off", "motion-copy on|off", "log debug|info|warning|error"; '#' starts a comment.
 inline Tuning parse_tuning(std::string_view text) {
     Tuning t;
     size_t at = 0;
@@ -134,6 +136,7 @@ inline Tuning parse_tuning(std::string_view text) {
         else if (w[0] == "exposure" && v == "inverse") t.exposure = Exposure::inverse;
         else if (w[0] == "exposure" && v == "auto") t.exposure = Exposure::automatic;
         else if (w[0] == "mask" && (v == "on" || v == "off")) t.mask = v == "on";
+        else if (w[0] == "motion-copy" && (v == "on" || v == "off")) t.motion_copy = v == "on";
         else if (w[0] == "log" && v == "debug") t.log_level = kLogDebug;
         else if (w[0] == "log" && v == "info") t.log_level = kLogInfo;
         else if (w[0] == "log" && v == "warning") t.log_level = kLogWarning;
