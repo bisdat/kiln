@@ -1,0 +1,9 @@
+{
+  "id": "station-craft-test",
+  "name": "kiln.stations craft payment lab test",
+  "version": "0.1.0",
+  "apiVersion": "0.2",
+  "entryAssembly": "StationCraftTest.dll",
+  "side": "server",
+  "description": "PASS/FAIL lines: opted-in station outputs as the last source of a player's craft (GitHub #68 step 2) on a dedicated server started with KILN_STATIONS_CRAFT_LAB=1. A spawned player character pays from its bag, the base's chests, then a kiln's finished charcoal while the kiln's queued logs stay; opted out, not enough, covered, craft x3, another base and a non-player payer, each against Kiln's own payment counters."
+}
