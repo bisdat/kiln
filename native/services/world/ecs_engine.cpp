@@ -98,6 +98,8 @@ uint32_t op_has(void* u, const ContextFact& c, const EntityFact& e, KilnEntity, 
 bool op_copy(void* u, uintptr_t a, void* out, size_t n) { return R(u).copy(a, out, n); }
 uint32_t op_ids(void* u, const ContextFact& c, std::vector<KilnEntity>* out) { return R(u).entity_ids(c, out); }
 uint32_t op_position(void* u, const ContextFact& c, KilnEntity id, double out[3]) { return R(u).position(c, id, out); }
+uint32_t op_quiet_begin(void* u, const ContextFact& c, uint64_t* token) { return R(u).quiet_begin(c, token); }
+uint32_t op_quiet_end(void* u, const ContextFact& c, uint64_t token) { return R(u).quiet_end(c, token); }
 uint64_t op_open_epoch(void* u, KilnOwner o, uint64_t e) {
     const Source& s = R(u).source();
     return s.open_epoch ? s.open_epoch(s.user, o, e) : e;
@@ -153,6 +155,8 @@ Backend Reader::backend() {
     Backend b{this, &op_context, &op_entity, &op_component, &op_copy, &op_ids, &op_position};
     b.has = &op_has;
     b.open_epoch = &op_open_epoch;
+    b.quiet_begin = &op_quiet_begin;
+    b.quiet_end = &op_quiet_end;
     return b;
 }
 
@@ -222,6 +226,11 @@ uint32_t Reader::context(KilnOwner owner, uint32_t kind, ContextFact* out) {
     out->revision = mix({table.count, table.slots, table.bits, table.keys});
     out->manager = view.manager;
     out->registry = view.registry_owner;
+    // The local authority's Scene word (the gate's: it checks that this view's scene owner is the registered
+    // GameServer Scene before it takes the word), for frame-quiet reads of the server world.
+    uintptr_t word = 0;
+    if (kind == KILN_WORLD_SERVER && view.scene_owner && add(view.scene_owner, src_.layout->write.scene_lock, word))
+        out->scene_word = word;
     out->engine_status = KILN_ECS_OK;
     return KILN_ECS_OK;
 }
@@ -307,10 +316,21 @@ uint32_t Reader::entity(const ContextFact& ctx, KilnEntity id, EntityFact* out) 
 uint32_t Reader::catalog(uintptr_t registry, std::shared_ptr<const Catalog>& out) {
     uint64_t head[2] = {};  // records, count
     if (!copy(registry + kRegRecords, head, sizeof head)) return KILN_ECS_UNREADABLE;
+    // This thread's last catalog first: no lock on the way of a read (a frame-quiet window takes none).
+    thread_local uint64_t t_reader = 0;
+    thread_local std::shared_ptr<const Catalog> t_catalog;
+    if (t_reader == id_ && t_catalog && t_catalog->owner == registry && t_catalog->records == head[0] &&
+        t_catalog->count == head[1] && !dropped_.load(std::memory_order_acquire)) {
+        out = t_catalog;
+        return KILN_ECS_OK;
+    }
     {
         std::lock_guard lock(mu_);
         if (catalog_ && catalog_->owner == registry && catalog_->records == head[0] && catalog_->count == head[1]) {
             out = catalog_;
+            t_reader = id_;
+            t_catalog = catalog_;
+            dropped_.store(false, std::memory_order_release);
             return KILN_ECS_OK;
         }
     }
@@ -365,6 +385,9 @@ uint32_t Reader::catalog(uintptr_t registry, std::shared_ptr<const Catalog>& out
         std::lock_guard lock(mu_);
         catalog_ = published;
     }
+    dropped_.store(false, std::memory_order_release);
+    t_reader = id_;
+    t_catalog = published;
     out = std::move(published);
     return KILN_ECS_OK;
 }
@@ -389,8 +412,11 @@ uint32_t Reader::component(const ContextFact& ctx, const EntityFact& entity, uin
     std::memcpy(&live_hash, prefix + kRowHash, 4);
     std::memcpy(&live_size, prefix + kRowSize, 4);
     if (head[0] != cat->records || head[1] != cat->count || live_hash != hash || (live_size & 0xffffu) != row.size) {
-        std::lock_guard lock(mu_);
-        if (catalog_ == cat) catalog_.reset();
+        {
+            std::lock_guard lock(mu_);
+            if (catalog_ == cat) catalog_.reset();
+        }
+        dropped_.store(true, std::memory_order_release);  // every thread's cached copy is rebuilt or re-fetched
         return refuse(KILN_ECS_UNREADABLE, "the component registration catalog changed during the read");
     }
     // Presence from the archetype layout's bits; offset and stride from its tables (GetComponentByType).
@@ -412,9 +438,15 @@ uint32_t Reader::component(const ContextFact& ctx, const EntityFact& entity, uin
     if (stamp && stride) {
         // The engine keeps no version per component: the stamp is the bytes' own hash, so stamp, copy, stamp is a
         // series of equal reads of the same bytes.
-        std::vector<uint8_t> bytes(stride);
-        if (!copy(out->address, bytes.data(), bytes.size())) return KILN_ECS_UNREADABLE;
-        out->content_stamp = fnv1a64(bytes.data(), bytes.size());
+        uint8_t chunk[256];
+        uint64_t h = 0xcbf29ce484222325ull;
+        for (size_t done = 0; done < stride;) {
+            const size_t n = std::min<size_t>(sizeof chunk, stride - done);
+            if (!copy(out->address + done, chunk, n)) return KILN_ECS_UNREADABLE;
+            h = fnv1a64(chunk, n, h);
+            done += n;
+        }
+        out->content_stamp = h;
     }
     return KILN_ECS_OK;
 }
@@ -455,6 +487,32 @@ uint32_t Reader::position(const ContextFact& ctx, KilnEntity id, double out[3]) 
     out[1] = t.position.y;
     out[2] = t.position.z;
     return KILN_ECS_OK;
+}
+
+// The frame-quiet window: the server step, then the Scene word (the word the GameServer frame holds Shared for its
+// whole update and the write gate takes exclusively) free; at the end the word free again and the step unmoved. A frame
+// that overlaps the copies either holds the word at one of the two looks or runs entirely between them, and then Kiln's
+// Pre of its step moved the counter. Read-only: two guarded word reads and two counter reads, no CAS, no gate.
+uint32_t Reader::quiet_begin(const ContextFact& ctx, uint64_t* token) {
+    if (ctx.world_kind != KILN_WORLD_SERVER) return KILN_ECS_UNSUPPORTED;
+    if (ctx.engine_status != KILN_ECS_OK) return ctx.engine_status;
+    uint64_t step = 0;
+    if (!ctx.scene_word || !src_.steps || !src_.steps(src_.user, KILN_WORLD_SERVER, &step))
+        return refuse(KILN_ECS_UNAVAILABLE, "frame-quiet reads need the server's Scene word and step counter");
+    int32_t word = 0;
+    if (!copy(ctx.scene_word, &word, sizeof word)) return KILN_ECS_UNREADABLE;
+    if (word != 0) return KILN_ECS_BUSY;
+    *token = step;
+    return KILN_ECS_OK;
+}
+
+uint32_t Reader::quiet_end(const ContextFact& ctx, uint64_t token) {
+    int32_t word = 0;
+    uint64_t step = 0;
+    if (!ctx.scene_word || !copy(ctx.scene_word, &word, sizeof word)) return KILN_ECS_UNREADABLE;
+    if (word != 0) return KILN_ECS_BUSY;
+    if (!src_.steps || !src_.steps(src_.user, KILN_WORLD_SERVER, &step)) return KILN_ECS_UNAVAILABLE;
+    return step == token ? KILN_ECS_OK : KILN_ECS_BUSY;
 }
 
 }  // namespace kw::ecs::engine

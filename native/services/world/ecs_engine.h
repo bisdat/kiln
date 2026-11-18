@@ -43,6 +43,9 @@ struct Source {
     uint32_t (*world)(void* user, uint32_t kind, WorldFact* out) = nullptr;
     uint64_t (*epoch)(void* user, KilnOwner owner) = nullptr;                      // the owner's current epoch
     uint64_t (*open_epoch)(void* user, KilnOwner owner, uint64_t epoch) = nullptr; // see Backend::open_epoch
+    // The server step counter (KilnSessionInfo.steps): bumped once per server sim step, inside the GameServer frame.
+    // false when unknown (frame-quiet reads are then unavailable).
+    bool (*steps)(void* user, uint32_t kind, uint64_t* out) = nullptr;
 };
 
 // Why `layout` cannot serve entity reads, or nullptr when it can: the profile's read section with its entity id index
@@ -67,7 +70,7 @@ struct Catalog;
 
 class Reader {
 public:
-    explicit Reader(const Source& source) : src_(source) {}
+    explicit Reader(const Source& source) : src_(source), id_(next_id_.fetch_add(1) + 1) {}
     Reader(const Reader&) = delete;
     Reader& operator=(const Reader&) = delete;
     ~Reader();
@@ -87,6 +90,8 @@ public:
     uint32_t entity_ids(const ContextFact& ctx, std::vector<KilnEntity>* out);
     uint32_t position(const ContextFact& ctx, KilnEntity id, double out[3]);
     bool copy(uintptr_t address, void* out, size_t bytes) const;
+    uint32_t quiet_begin(const ContextFact& ctx, uint64_t* token);
+    uint32_t quiet_end(const ContextFact& ctx, uint64_t token);
     const Source& source() const { return src_; }
 
 private:
@@ -102,6 +107,9 @@ private:
     Source src_;
     std::mutex mu_; // guards catalog_ only (held for a pointer copy, never across an engine read)
     std::shared_ptr<const Catalog> catalog_;
+    const uint64_t id_;                // this reader's identity for threads' cached catalogs (never reused)
+    static inline std::atomic<uint64_t> next_id_{0};
+    std::atomic<bool> dropped_{false}; // a catalog row stopped matching: threads' cached catalogs are not trusted
     std::atomic<const char*> last_{""};
     std::atomic<uintptr_t> image_{0};
 };

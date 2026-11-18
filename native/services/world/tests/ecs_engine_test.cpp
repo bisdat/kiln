@@ -99,8 +99,16 @@ using namespace fakeworld;
 struct Worlds {
     std::atomic<uintptr_t> world[KILN_WORLD_KINDS]{};
     std::atomic<uint64_t> session[KILN_WORLD_KINDS]{};
+    std::atomic<uint64_t> steps[KILN_WORLD_KINDS]{};
+    std::atomic<bool> step_each_read{false};  // every look at the counter finds a step that ran since the last one
     OwnerEpochs epochs;
 };
+bool steps_of(void* u, uint32_t kind, uint64_t* out) {
+    auto& w = *static_cast<Worlds*>(u);
+    if (kind >= KILN_WORLD_KINDS) return false;
+    *out = w.step_each_read.load() ? w.steps[kind].fetch_add(1) + 1 : w.steps[kind].load();
+    return true;
+}
 uint32_t world_fact(void* u, uint32_t kind, WorldFact* out) {
     auto& w = *static_cast<Worlds*>(u);
     if (kind >= KILN_WORLD_KINDS) return KILN_ECS_UNAVAILABLE;
@@ -121,6 +129,7 @@ Source source_of(const KilnEngineNativeApi* native, Worlds& w) {
     s.world = &world_fact;
     s.epoch = &epoch_of;
     s.open_epoch = &open_epoch;
+    s.steps = &steps_of;
     return s;
 }
 
@@ -445,6 +454,125 @@ void concurrent(const Profile& p, World& w, Reader& reader, bool byte_stores) {
     put<uint32_t>(rec + E.entity_generation, 3);
 }
 
+// Frame-quiet reads over the fake engine's own Scene word (the word the gate takes) and Kiln's server step counter.
+void frame_quiet(const Profile& p, World& w, Reader& reader, Worlds& worlds, fake::Engine& e, World* client) {
+    Backend b = reader.backend();
+    KilnObjectRef chest{};
+    check(entity_open(b, kOwner, 11, KILN_WORLD_SERVER, 0, 4097, &chest) == KILN_OK, "frame-quiet: open the chest");
+    KilnEcsSnapshotSpec quiet[1] = {{H(w, "Inventory"), KILN_ECS_READ_FRAME_QUIET}};
+    std::vector<uint8_t> buf(48, 0xAA);
+    uint32_t req = 0, presence[1] = {9};
+    std::atomic<std::int32_t>* word = reinterpret_cast<std::atomic<std::int32_t>*>(e.scene_word());
+    word->store(0);
+    check(ecs_snapshot_many(b, kOwner, &chest, quiet, 1, buf.data(), 48, &req, presence) == KILN_OK && req == 48 &&
+              presence[0] == KILN_ECS_OK && all_eq(buf, 1),
+          "frame-quiet: between frames the read succeeds");
+    word->store(1);  // the GameServer frame holds the word Shared
+    buf.assign(48, 0xAA);
+    check(ecs_snapshot_many(b, kOwner, &chest, quiet, 1, buf.data(), 48, &req, presence) == KILN_ECS_ERR_BUSY &&
+              presence[0] == KILN_ECS_BUSY && all_eq(buf, 0xAA),
+          "frame-quiet: a frame holding the Scene word: busy, nothing copied");
+    word->store(static_cast<std::int32_t>(0x80000000u));  // a writer holds it exclusively (the write gate)
+    check(ecs_snapshot_many(b, kOwner, &chest, quiet, 1, buf.data(), 48, &req, presence) == KILN_ECS_ERR_BUSY && all_eq(buf, 0xAA),
+          "frame-quiet: an exclusive holder: busy");
+    word->store(0);
+    worlds.step_each_read = true;
+    check(ecs_snapshot_many(b, kOwner, &chest, quiet, 1, buf.data(), 48, &req, presence) == KILN_ECS_ERR_BUSY &&
+              presence[0] == KILN_ECS_BUSY && all_eq(buf, 0xAA),
+          "frame-quiet: the server step moved across the copy: busy, nothing copied");
+    worlds.step_each_read = false;
+    uint64_t step_before = worlds.steps[KILN_WORLD_SERVER].load();
+    KilnEcsQueryRequest q{}; q.size = sizeof q; q.world_kind = KILN_WORLD_SERVER;
+    q.flags = KILN_ECS_QUERY_FRAME_QUIET | KILN_ECS_QUERY_BOUNDS; q.center = {100, 50, -20}; q.radius = 5;
+    uint32_t comps[2] = {kw::kCurrentTransformHash, H(w, "Inventory")};
+    q.components = comps; q.component_count = 2;
+    KilnObjectRef refs[8] = {};
+    uint32_t state = 0;
+    check(ecs_query(b, kOwner, &q, refs, 8, &req, &state) == KILN_OK && req == 2 && state == KILN_ECS_OK,
+          "frame-quiet query with bounds between frames");
+    word->store(1);
+    check(ecs_query(b, kOwner, &q, refs, 8, &req, &state) == KILN_ECS_ERR_BUSY && state == KILN_ECS_BUSY,
+          "frame-quiet query during a frame: busy");
+    word->store(0);
+    check(worlds.steps[KILN_WORLD_SERVER].load() == step_before, "frame-quiet only reads the step counter");
+    if (client) {
+        KilnObjectRef c{};
+        check(entity_open(b, kOwner, 11, KILN_WORLD_CLIENT, 0, 4097, &c) == KILN_OK, "frame-quiet: open in the client world");
+        buf.assign(48, 0xAA);
+        presence[0] = 9;
+        check(ecs_snapshot_many(b, kOwner, &c, quiet, 1, buf.data(), 48, &req, presence) == KILN_ECS_ERR_UNSUPPORTED &&
+                  presence[0] == KILN_ECS_UNSUPPORTED && all_eq(buf, 0xAA),
+              "frame-quiet on the client world: unsupported, nothing copied, no stable copy instead");
+        q.world_kind = KILN_WORLD_CLIENT;
+        check(ecs_query(b, kOwner, &q, refs, 8, &req, &state) == KILN_ECS_ERR_UNSUPPORTED && state == KILN_ECS_UNSUPPORTED,
+              "frame-quiet query on the client world: unsupported");
+    }
+    (void)p;
+}
+
+// The adversarial writer again (byte stores, descheduled half way), now inside frames: it holds the Scene word Shared
+// and bumps the server step, as the GameServer update does. Frame-quiet reads never return a mixed value.
+void frame_quiet_writer(const Profile& p, World& w, Reader& reader, Worlds& worlds, fake::Engine& e, int round) {
+    Backend b = reader.backend();
+    const auto& E = p.layout.entities;
+    KilnObjectRef chest{};
+    check(entity_open(b, kOwner, 12, KILN_WORLD_SERVER, 0, 4097, &chest) == KILN_OK, "frame-quiet writer: open");
+    const uintptr_t rec = w.rec_of[4097];
+    const uintptr_t lay = get<uint64_t>(rec + E.entity_layout);
+    const uintptr_t row0 = w.row_address(lay, 0, "keen::ecs::Inventory");
+    const uintptr_t row6 = w.row_address(lay, 6, "keen::ecs::Inventory");
+    std::memset(reinterpret_cast<void*>(row0), 1, 48);
+    std::memset(reinterpret_cast<void*>(row6), 1, 48);
+    auto* word = reinterpret_cast<std::atomic<std::int32_t>*>(e.scene_word());
+    word->store(0);
+    std::atomic<bool> stop{false};
+    std::atomic<int> whole{0}, busy{0}, other{0}, torn{0};
+    std::atomic<int> codes[128] = {};
+    std::thread writer([&] {
+        unsigned n = 0;
+        while (!stop.load(std::memory_order_relaxed)) {
+            word->fetch_add(1);                                 // the frame starts: the word is held Shared
+            worlds.steps[KILN_WORLD_SERVER].fetch_add(1);       // Kiln's Pre of the step, inside the frame
+            const uint8_t v = (n & 1) ? 2 : 1;
+            auto* a = reinterpret_cast<volatile uint8_t*>(row0);
+            auto* c = reinterpret_cast<volatile uint8_t*>(row6);
+            for (int i = 0; i < 48; ++i) {
+                a[i] = v; c[i] = v;
+                if (i == 24 && n % 3 == 0) std::this_thread::yield();  // descheduled half way through the value
+            }
+            if (n % 7 == 0) put<uint32_t>(rec + E.entity_row, get<uint32_t>(rec + E.entity_row) ? 0 : 6);
+            word->fetch_sub(1);                                 // the frame ends
+            ++n;
+            std::this_thread::sleep_for(std::chrono::microseconds(n % 2 ? 50 : 8000));
+        }
+    });
+    std::vector<std::thread> readers;
+    for (int t = 0; t < 2; ++t)
+        readers.emplace_back([&] {
+            std::vector<uint8_t> buf(48);
+            KilnEcsSnapshotSpec quiet[1] = {{H(w, "Inventory"), KILN_ECS_READ_FRAME_QUIET}};
+            for (int i = 0; i < 300; ++i) {
+                uint32_t req = 0, presence[1] = {9};
+                const KilnResult rc = ecs_snapshot_many(b, kOwner, &chest, quiet, 1, buf.data(), 48, &req, presence);
+                if (rc == KILN_ECS_ERR_BUSY) { busy.fetch_add(1); continue; }
+                if (rc != KILN_OK) { other.fetch_add(1); codes[rc % 128].fetch_add(1); continue; }
+                if (all_eq(buf, 1) || all_eq(buf, 2)) whole.fetch_add(1);
+                else torn.fetch_add(1);
+            }
+        });
+    for (auto& r : readers) r.join();
+    stop = true;
+    writer.join();
+    for (int c = 0; c < 128; ++c) if (codes[c].load()) std::printf("    refusal %d: %d\n", c, codes[c].load());
+    const std::string counts = std::to_string(whole.load()) + " whole, " + std::to_string(busy.load()) + " busy, " +
+                               std::to_string(other.load()) + " other refusals, " + std::to_string(torn.load()) + " mixed";
+    std::printf("  [%s] frame-quiet round %d against the adversarial writer: %s\n", p.id, round, counts.c_str());
+    check(torn.load() == 0, "frame-quiet: never a mixed value against the adversarial writer (" + counts + ")");
+    check(whole.load() > 0, "frame-quiet: whole values between frames (" + counts + ")");
+    std::memset(reinterpret_cast<void*>(row0), 1, 48);
+    put<uint32_t>(rec + E.entity_row, 0);
+}
+
 void exact(const Profile& p) {
     g_case = p.id;
     KilnApi api = make_api();
@@ -486,6 +614,8 @@ void exact(const Profile& p) {
     mutations(p, server, reader, worlds);
     concurrent(p, server, reader, false);
     concurrent(p, server, reader, true);
+    frame_quiet(p, server, reader, worlds, e, client.get());
+    for (int round = 1; round <= 3; ++round) frame_quiet_writer(p, server, reader, worlds, e, round);
     kiln::engine::mem::test_image = 0;
 }
 

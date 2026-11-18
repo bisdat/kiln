@@ -17,6 +17,7 @@ bool bad_ref(const KilnObjectRef* ref) {
 uint32_t get_context(const Backend& b, KilnOwner owner, uint32_t kind, ContextFact& c) {
     c = ContextFact{};
     const uint32_t s = b.context(b.user, owner, kind, &c);
+    c.world_kind = kind;
     if (s != KILN_ECS_OK) return s;
     return c.present ? KILN_ECS_OK : KILN_ECS_UNAVAILABLE;
 }
@@ -65,10 +66,11 @@ void fill_info(const KilnObjectRef& ref, uint32_t status, const ContextFact& ctx
 
 // Stamp, copy, stamp, and do that twice. The stamp has to match on both sides of each copy and the two copies
 // have to be identical. `out` is filled only then.
-uint32_t copy_stable(const Backend& b, KilnOwner owner, const KilnObjectRef& ref, uint32_t hash, const ComponentFact& cf,
-                     std::vector<uint8_t>& out) {
-    // Stamp, then copy, then stamp, twice. The stamp has to be the same value on both sides of a copy, and the
-    // two copies have to be identical. A writer that bumps content_stamp around its store cannot hide a tear.
+// Stamp, copy, stamp, and do that twice, into the caller's two buffers of cf.size bytes (`first` holds the result on
+// OK). The stamp has to match on both sides of each copy and the two copies have to be identical. No allocation: a
+// frame-quiet window calls it with buffers it sized before the window opened.
+uint32_t copy_stable_into(const Backend& b, KilnOwner owner, const KilnObjectRef& ref, uint32_t hash,
+                          const ComponentFact& cf, uint8_t* first, uint8_t* second) {
     auto sample = [&](ComponentFact& got) -> uint32_t {
         ContextFact ctx{};
         EntityFact fact{};
@@ -81,18 +83,23 @@ uint32_t copy_stable(const Backend& b, KilnOwner owner, const KilnObjectRef& ref
         if (got.content_stamp != cf.content_stamp) return KILN_ECS_UNREADABLE;
         return KILN_ECS_OK;
     };
-    auto take = [&](std::vector<uint8_t>& dest) -> uint32_t {
+    auto take = [&](uint8_t* dest) -> uint32_t {
         ComponentFact before{};
         if (uint32_t s = sample(before); s != KILN_ECS_OK) return s;
-        dest.assign(cf.size, 0);
-        if (cf.size && !b.copy(b.user, cf.address, dest.data(), cf.size)) return KILN_ECS_UNREADABLE;
+        if (cf.size && !b.copy(b.user, cf.address, dest, cf.size)) return KILN_ECS_UNREADABLE;
         ComponentFact after{};
         return sample(after);
     };
-    std::vector<uint8_t> first, second;
     if (uint32_t s = take(first); s != KILN_ECS_OK) return s;
     if (uint32_t s = take(second); s != KILN_ECS_OK) return s;
-    if (first != second) return KILN_ECS_UNREADABLE;
+    if (cf.size && std::memcmp(first, second, cf.size) != 0) return KILN_ECS_UNREADABLE;
+    return KILN_ECS_OK;
+}
+
+uint32_t copy_stable(const Backend& b, KilnOwner owner, const KilnObjectRef& ref, uint32_t hash, const ComponentFact& cf,
+                     std::vector<uint8_t>& out) {
+    std::vector<uint8_t> first(cf.size), second(cf.size);
+    if (uint32_t s = copy_stable_into(b, owner, ref, hash, cf, first.data(), second.data()); s != KILN_ECS_OK) return s;
     out = std::move(first);
     return KILN_ECS_OK;
 }
@@ -117,6 +124,8 @@ uint32_t result_of(uint32_t status) {
         case KILN_ECS_ABSENT: return KILN_ERR_NOT_FOUND;
         case KILN_ECS_STALE: return KILN_ECS_ERR_STALE;
         case KILN_ECS_UNREADABLE: return KILN_ECS_ERR_UNREADABLE;
+        case KILN_ECS_BUSY: return KILN_ECS_ERR_BUSY;
+        case KILN_ECS_UNSUPPORTED: return KILN_ECS_ERR_UNSUPPORTED;
         default: return KILN_ERR_UNAVAILABLE;
     }
 }
@@ -239,12 +248,25 @@ KilnResult ecs_snapshot_many(const Backend& b, KilnOwner owner, const KilnObject
     // KILN_ECS_OK is 0, so presence must not be cleared before the arguments are accepted: a zeroed slot reads as OK.
     if (bad_backend(b) || bad_ref(ref) || !count || !specs || (capacity && !out)) return KILN_ERR_INVALID_ARGUMENT;
     for (uint32_t i = 0; i < count; ++i)
-        if (!specs[i].component || specs[i].reserved) return KILN_ERR_INVALID_ARGUMENT;
+        if (!specs[i].component || (specs[i].flags & ~static_cast<uint32_t>(KILN_ECS_READ_FRAME_QUIET)))
+            return KILN_ERR_INVALID_ARGUMENT;
+    bool quiet = false;
+    for (uint32_t i = 0; i < count; ++i) quiet = quiet || (specs[i].flags & KILN_ECS_READ_FRAME_QUIET);
     ContextFact ctx{};
     EntityFact fact{};
-    if (uint32_t s = validate(b, owner, *ref, ctx, fact); s != KILN_ECS_OK) {
+    const auto refuse_all = [&](uint32_t s) -> KilnResult {
         if (presence) for (uint32_t i = 0; i < count; ++i) presence[i] = s;
         return result_of(s);
+    };
+    // A frame-quiet request is never served by a stable copy: without the window it is unsupported.
+    if (quiet && (!b.quiet_begin || !b.quiet_end)) return refuse_all(KILN_ECS_UNSUPPORTED);
+    if (uint32_t s = validate(b, owner, *ref, ctx, fact); s != KILN_ECS_OK) return refuse_all(s);
+    if (quiet) {
+        // Whether this world has a frame-quiet window at all is an answer about the request: give it first (a busy
+        // look here means nothing yet; the window that counts opens right before the copies).
+        uint64_t probe = 0;
+        const uint32_t s = b.quiet_begin(b.user, ctx, &probe);
+        if (s != KILN_ECS_OK && s != KILN_ECS_BUSY) return refuse_all(s);
     }
     // Pass 1: look every spec up (presence and size, no copy). Presence depends only on the entity's layout, which
     // the ref pins, so the total is exact for this ref; a later change of it is stale in the copies' own checks.
@@ -280,17 +302,43 @@ KilnResult ecs_snapshot_many(const Backend& b, KilnOwner owner, const KilnObject
         if (required) *required = static_cast<uint32_t>(total);
         return KILN_ERR_BUFFER_TOO_SMALL;
     }
-    // Pass 2: each present spec is copied with its own validation before and after (copy_stable).
-    std::vector<uint8_t> packed;
-    packed.reserve(static_cast<size_t>(total));
+    // Pass 2: each present spec is copied with its own validation before and after (copy_stable_into), into
+    // buffers sized here. Frame-quiet: every copy runs inside one window no server frame may touch, which allocates
+    // nothing and takes no lock (presence and sizes above come from the archetype layout, not from component bytes).
+    std::vector<uint8_t> packed(static_cast<size_t>(total)), second;
+    uint32_t largest = 0;
+    for (uint32_t i = 0; i < count; ++i)
+        if (facts[i].present) largest = std::max(largest, facts[i].size);
+    second.resize(largest);
+    uint64_t token = 0;
+    if (quiet)
+        if (uint32_t s = b.quiet_begin(b.user, ctx, &token); s != KILN_ECS_OK) return fail(s);
+    size_t at = 0;
     for (uint32_t i = 0; i < count; ++i) {
         if (!facts[i].present) continue;
-        std::vector<uint8_t> staging;
-        if (uint32_t s = copy_stable(b, owner, *ref, specs[i].component, facts[i], staging); s != KILN_ECS_OK)
+        if (quiet) {
+            // The content stamp of pass 1 was taken before the window: take it again inside, so a value a frame
+            // changed before the window opened is read now rather than refused.
+            ContextFact here{};
+            EntityFact still{};
+            ComponentFact now{};
+            if (uint32_t s = validate(b, owner, *ref, here, still); s != KILN_ECS_OK) return fail(s);
+            if (uint32_t s = b.component(b.user, here, still, ref->entity, specs[i].component, &now); s != KILN_ECS_OK)
+                return fail(s);
+            if (!now.present || now.size != facts[i].size) return fail(KILN_ECS_STALE);
+            facts[i] = now;
+        }
+        if (uint32_t s = copy_stable_into(b, owner, *ref, specs[i].component, facts[i], packed.data() + at, second.data());
+            s != KILN_ECS_OK) {
+            // A frame that ran during the copy is the reason the copy failed: busy (retry after the step).
+            if (quiet && b.quiet_end(b.user, ctx, token) == KILN_ECS_BUSY) return fail(KILN_ECS_BUSY);
             return fail(s);
-        packed.insert(packed.end(), staging.begin(), staging.end());
+        }
+        at += facts[i].size;
     }
-    if (packed.size() != total) return fail(KILN_ECS_STALE);
+    if (at != total) return fail(KILN_ECS_STALE);
+    if (quiet)
+        if (uint32_t s = b.quiet_end(b.user, ctx, token); s != KILN_ECS_OK) return fail(s);
     if (presence) std::memcpy(presence, got.data(), count * sizeof(uint32_t));
     if (required) *required = static_cast<uint32_t>(packed.size());
     if (!packed.empty()) std::memcpy(out, packed.data(), packed.size());
@@ -306,9 +354,15 @@ KilnResult ecs_query(const Backend& b, KilnOwner owner, const KilnEcsQueryReques
                                        !std::isfinite(request->center.z) || !std::isfinite(request->radius * request->radius));
     if (bad_backend(b) || !request || request->size < sizeof(KilnEcsQueryRequest) ||
         request->world_kind >= KILN_WORLD_KINDS || (request->component_count && !request->components) ||
-        (capacity && !out) || (request->flags & ~KILN_ECS_QUERY_BOUNDS) || bad_bounds)
+        (capacity && !out) ||
+        (request->flags & ~static_cast<uint32_t>(KILN_ECS_QUERY_BOUNDS | KILN_ECS_QUERY_FRAME_QUIET)) || bad_bounds)
         return KILN_ERR_INVALID_ARGUMENT;
     if (state) *state = KILN_ECS_UNAVAILABLE;
+    const bool quiet = request->flags & KILN_ECS_QUERY_FRAME_QUIET;
+    if (quiet && (!b.quiet_begin || !b.quiet_end)) {
+        if (state) *state = KILN_ECS_UNSUPPORTED;
+        return KILN_ECS_ERR_UNSUPPORTED;
+    }
     ContextFact ctx{};
     if (uint32_t s = get_context(b, owner, request->world_kind, ctx); s != KILN_ECS_OK) {
         if (state) *state = s;
@@ -369,6 +423,13 @@ KilnResult ecs_query(const Backend& b, KilnOwner owner, const KilnEcsQueryReques
         }
         return KILN_ECS_OK;
     };
+    // Frame-quiet: both walks run inside one window that no server frame may touch.
+    uint64_t token = 0;
+    if (quiet)
+        if (uint32_t s = b.quiet_begin(b.user, ctx, &token); s != KILN_ECS_OK) {
+            if (state) *state = s;
+            return result_of(s);
+        }
     std::vector<KilnObjectRef> matches;
     if (uint32_t s = collect(ctx, &matches); s != KILN_ECS_OK) {
         if (state) *state = s;
@@ -382,7 +443,14 @@ KilnResult ecs_query(const Backend& b, KilnOwner owner, const KilnEcsQueryReques
         return result_of(s);
     }
     std::vector<KilnObjectRef> again;
-    if (uint32_t s = collect(ctx2, &again); s != KILN_ECS_OK) {
+    const uint32_t second = collect(ctx2, &again);
+    // A frame that ran during the walks is the reason for whatever else differs: busy.
+    if (quiet)
+        if (uint32_t s = b.quiet_end(b.user, ctx2, token); s != KILN_ECS_OK) {
+            if (state) *state = s;
+            return result_of(s);
+        }
+    if (uint32_t s = second; s != KILN_ECS_OK) {
         if (state) *state = s == KILN_ECS_STALE ? (uint32_t)KILN_ECS_UNREADABLE : s;
         return s == KILN_ECS_STALE ? KILN_WORLD_ERR_CHANGED : result_of(s);
     }

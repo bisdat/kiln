@@ -47,6 +47,10 @@ struct Fake {
     bool owner_epochs = false;           // per-owner reload epochs (open_epoch), as the production backend keeps them
     std::map<KilnOwner, uint64_t> epochs; // owner -> current epoch
     int move_on_component = 0;           // comp_op number N (from 1) moves entity 10's kA bytes to a new address
+    bool client_present = false;         // a client world (the same entities) beside the server world
+    bool frame = false;                  // a server frame runs (its word is held)
+    uint64_t step = 1;                   // the server step
+    bool step_on_copy = false;           // every copy lets a whole frame run (the step moves, the word is free again)
     int recycle_on_copy = 0;  // copy_op number N (from 1) recycles entity 10 right after copying its bytes
     uint32_t recycle_on = 0; // comp_op for this hash first recycles entity 10 (new generation), then looks it up
     uint64_t stamp = 1;
@@ -74,7 +78,7 @@ struct Fake {
 Status ctx_op(void* u, KilnOwner owner, uint32_t kind, ContextFact* f) {
     auto& F = *static_cast<Fake*>(u);
     if (F.context_status != KILN_ECS_OK) return F.context_status;
-    if (kind != KILN_WORLD_SERVER) { f->exact_profile = F.exact; return KILN_ECS_OK; }
+    if (kind != KILN_WORLD_SERVER && !(kind == KILN_WORLD_CLIENT && F.client_present)) { f->exact_profile = F.exact; return KILN_ECS_OK; }
     f->session = F.session; f->layout_stamp = F.layout_stamp; f->revision = F.revision;
     if (F.owner_epochs) {
         std::unique_lock lock(F.mu);
@@ -141,6 +145,7 @@ bool copy_op(void* u, uintptr_t at, void* out, size_t n) {
             if (F.diverge && ++F.copies == 1 && n) reinterpret_cast<uint8_t*>(at)[0] ^= 0xff;
             else if (F.bump && ++F.copies == 1) ++F.stamp;
             else if (F.recycle_on_copy && ++F.copies == F.recycle_on_copy && F.ents.count(10)) ++F.ents[10].generation;
+            if (F.step_on_copy) ++F.step;
         }
     }
     F.fire();
@@ -183,6 +188,19 @@ uint64_t open_epoch_op(void* u, KilnOwner owner, uint64_t epoch) {
     if (epoch > current) current = epoch;
     return current;
 }
+Status quiet_begin_op(void* u, const ContextFact& ctx, uint64_t* token) {
+    auto& F = *static_cast<Fake*>(u);
+    if (ctx.world_kind != KILN_WORLD_SERVER) return KILN_ECS_UNSUPPORTED;
+    std::unique_lock lock(F.mu);
+    if (F.frame) return KILN_ECS_BUSY;
+    *token = F.step;
+    return KILN_ECS_OK;
+}
+Status quiet_end_op(void* u, const ContextFact&, uint64_t token) {
+    auto& F = *static_cast<Fake*>(u);
+    std::unique_lock lock(F.mu);
+    return !F.frame && F.step == token ? KILN_ECS_OK : KILN_ECS_BUSY;
+}
 Backend backend(Fake& F) {
     return Backend{&F, &ctx_op, &ent_op, &comp_op, &copy_op, &ids_op, &pos_op};
 }
@@ -191,6 +209,12 @@ Backend owner_backend(Fake& F) {
     Backend b = backend(F);
     b.has = &has_op;
     b.open_epoch = &open_epoch_op;
+    return b;
+}
+Backend quiet_backend(Fake& F) {
+    Backend b = backend(F);
+    b.quiet_begin = &quiet_begin_op;
+    b.quiet_end = &quiet_end_op;
     return b;
 }
 constexpr KilnOwner kOwner = 3, kOther = 4;
@@ -323,7 +347,7 @@ void snapshots() {
               ecs_template_uuid(b, kOwner, &wild, guid) == KILN_ERR_INVALID_ARGUMENT,
           "a ref with an unknown world kind is refused as an argument");
     uint32_t kept[2] = {7, 7};
-    KilnEcsSnapshotSpec bad_spec[1] = {{kA, 1}};
+    KilnEcsSnapshotSpec bad_spec[1] = {{kA, 4}};  // a flag bit no Kiln knows
     check(ecs_snapshot_many(b, kOwner, &r, bad_spec, 1, buf.data(), 8, &req, kept) == KILN_ERR_INVALID_ARGUMENT && kept[0] == 7 && kept[1] == 7,
           "a bad snapshot_many leaves presence untouched");
 }
@@ -467,10 +491,76 @@ void query_presence() {
           "query with a presence op");
     check(F.component_calls == 0 && F.has_calls > 0, "the query asked presence only");
 }
+
+// Frame-quiet reads: refused while a frame holds the word or when the step moved across the copy (busy, nothing
+// copied); unsupported off the server world and on a backend without the window (never a stable copy instead).
+void frame_quiet() {
+    Fake F; F.add(10, kA, {1, 2, 3, 4}); F.add(20, kA, {5, 6, 7, 8}); F.client_present = true;
+    Backend b = quiet_backend(F);
+    KilnObjectRef r = open_ok(b, 10);
+    KilnEcsSnapshotSpec quiet[1] = {{kA, KILN_ECS_READ_FRAME_QUIET}};
+    std::vector<uint8_t> buf(4, 0xAA); uint32_t req = 0, presence[1] = {99};
+    check(ecs_snapshot_many(b, kOwner, &r, quiet, 1, buf.data(), 4, &req, presence) == KILN_OK && req == 4 &&
+              presence[0] == KILN_ECS_OK && buf[0] == 1 && buf[3] == 4,
+          "frame-quiet: between frames the read succeeds");
+    F.frame = true; F.copy_calls = 0; buf.assign(4, 0xAA);
+    check(ecs_snapshot_many(b, kOwner, &r, quiet, 1, buf.data(), 4, &req, presence) == KILN_ECS_ERR_BUSY &&
+              presence[0] == KILN_ECS_BUSY && req == 0 && all_eq(buf, 0xAA) && F.copy_calls == 0,
+          "frame-quiet: a frame holding the word refuses busy before any copy");
+    KilnEcsSnapshotSpec plain[1] = {{kA, 0}};
+    check(ecs_snapshot_many(b, kOwner, &r, plain, 1, buf.data(), 4, &req, presence) == KILN_OK && buf[0] == 1,
+          "a stable copy does not look at frames");
+    F.frame = false; F.step_on_copy = true; buf.assign(4, 0xAA);
+    check(ecs_snapshot_many(b, kOwner, &r, quiet, 1, buf.data(), 4, &req, presence) == KILN_ECS_ERR_BUSY &&
+              presence[0] == KILN_ECS_BUSY && all_eq(buf, 0xAA),
+          "frame-quiet: the step moved across the copy: busy, nothing copied");
+    F.step_on_copy = false;
+    KilnObjectRef c{};
+    check(entity_open(b, kOwner, 5, KILN_WORLD_CLIENT, 0, 20, &c) == KILN_OK, "frame-quiet: open in the client world");
+    presence[0] = 99;
+    check(ecs_snapshot_many(b, kOwner, &c, quiet, 1, buf.data(), 4, &req, presence) == KILN_ECS_ERR_UNSUPPORTED &&
+              presence[0] == KILN_ECS_UNSUPPORTED && all_eq(buf, 0xAA),
+          "frame-quiet on a client world: unsupported, nothing copied");
+    check(ecs_snapshot_many(b, kOwner, &c, plain, 1, buf.data(), 4, &req, presence) == KILN_OK && buf[0] == 5,
+          "a stable copy in the client world still works");
+    buf.assign(4, 0xAA);
+    Backend no_window = backend(F);
+    check(ecs_snapshot_many(no_window, kOwner, &r, quiet, 1, buf.data(), 4, &req, presence) == KILN_ECS_ERR_UNSUPPORTED &&
+              all_eq(buf, 0xAA),
+          "frame-quiet without a window: unsupported, never a stable copy instead");
+    KilnEcsSnapshotSpec unknown[1] = {{kA, 2}};
+    uint32_t kept[1] = {7};
+    check(ecs_snapshot_many(b, kOwner, &r, unknown, 1, buf.data(), 4, &req, kept) == KILN_ERR_INVALID_ARGUMENT && kept[0] == 7,
+          "an unknown spec flag is an invalid argument");
+    // Queries.
+    KilnEcsQueryRequest q{}; q.size = sizeof q; q.world_kind = KILN_WORLD_SERVER; q.flags = KILN_ECS_QUERY_FRAME_QUIET;
+    uint32_t comps[1] = {kA}; q.components = comps; q.component_count = 1;
+    KilnObjectRef refs[4] = {}; uint32_t state = 0;
+    check(ecs_query(b, kOwner, &q, refs, 4, &req, &state) == KILN_OK && req == 2 && state == KILN_ECS_OK,
+          "frame-quiet query between frames");
+    F.frame = true;
+    for (auto& o : refs) o.entity = 0xFFFF;
+    check(ecs_query(b, kOwner, &q, refs, 4, &req, &state) == KILN_ECS_ERR_BUSY && state == KILN_ECS_BUSY &&
+              refs[0].entity == 0xFFFF,
+          "frame-quiet query during a frame: busy, nothing copied");
+    F.frame = false; F.step_on_copy = false;
+    F.hook = [&](int p) { if (p == 3) { std::unique_lock lock(F.mu); ++F.step; } };
+    F.phase = 0;
+    check(ecs_query(b, kOwner, &q, refs, 4, &req, &state) == KILN_ECS_ERR_BUSY && state == KILN_ECS_BUSY &&
+              refs[0].entity == 0xFFFF,
+          "frame-quiet query across a step: busy, nothing copied");
+    F.hook = nullptr;
+    q.world_kind = KILN_WORLD_CLIENT;
+    check(ecs_query(b, kOwner, &q, refs, 4, &req, &state) == KILN_ECS_ERR_UNSUPPORTED && state == KILN_ECS_UNSUPPORTED,
+          "frame-quiet query on a client world: unsupported");
+    q.world_kind = KILN_WORLD_SERVER; q.flags = 1u << 2; state = 7;
+    check(ecs_query(b, kOwner, &q, refs, 4, &req, &state) == KILN_ERR_INVALID_ARGUMENT && state == 7,
+          "an unknown query flag is an invalid argument");
+}
 } // namespace
 
 int main() {
-    identity(); snapshots(); queries(); concurrent(); epochs(); many_sizes_first(); moved_row(); query_presence();
+    identity(); snapshots(); queries(); concurrent(); epochs(); many_sizes_first(); moved_row(); query_presence(); frame_quiet();
     std::printf("ecs_reads: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }

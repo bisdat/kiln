@@ -56,6 +56,16 @@ uint32_t world_fact(void*, uint32_t kind, ecs::engine::WorldFact* out) {
     out->session = session_a;
     return KILN_ECS_OK;
 }
+// The core's step counter of a world kind (bumped in the sim step's Pre, inside the GameServer frame): atomics only.
+bool steps_of(void*, uint32_t kind, uint64_t* out) {
+    if (kind >= KILN_WORLD_KINDS || !g_api || g_api->size < offsetof(KilnApi, session) + sizeof(void*) || !g_api->session)
+        return false;
+    KilnSessionInfo s{};
+    s.size = sizeof s;
+    if (g_api->session(&s) != KILN_OK) return false;
+    *out = s.steps[kind];
+    return true;
+}
 uint64_t epoch_of(void*, KilnOwner owner) { return g_epochs.current(owner); }
 uint64_t open_epoch(void*, KilnOwner owner, uint64_t epoch) { return g_epochs.open(owner, epoch); }
 void KILN_CALL owner_retiring(KilnOwner owner, void*) { g_epochs.retire(owner); }
@@ -65,6 +75,7 @@ ecs::engine::Source base_source() {
     s.world = &world_fact;
     s.epoch = &epoch_of;
     s.open_epoch = &open_epoch;
+    s.steps = &steps_of;
     return s;
 }
 

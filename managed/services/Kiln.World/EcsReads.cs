@@ -59,5 +59,16 @@ internal struct EcsQueryRequestNative
 internal struct EcsSnapshotSpecNative
 {
     public uint Component;
-    public uint Reserved;
+    public uint Flags; // EcsReadConstants.ReadFrameQuiet
+}
+
+// kiln_world.h's ECS-read statuses, result codes and flags (abi.json "KilnEcsReadConstants", checked by Kiln.World.Tests).
+internal static class EcsReadConstants
+{
+    public const uint Ok = 0, Absent = 1, Stale = 2, Unreadable = 3, Unavailable = 4, Busy = 5, Unsupported = 6;
+    public const int ErrChanged = 100, ErrStale = 101, ErrUnreadable = 102, ErrBusy = 103, ErrUnsupported = 104;
+    public const uint QueryBounds = 1u << 0, QueryFrameQuiet = 1u << 1; // KilnEcsQueryRequest.flags
+    public const uint ReadFrameQuiet = 1u << 0;                         // KilnEcsSnapshotSpec.flags
+    public const uint ObjectAlive = 1u << 0, ObjectHasTemplate = 1u << 1;
+    public const uint CapEcsRead = 1u << 4;                             // KILN_WORLD_CAP_ECS_READ
 }

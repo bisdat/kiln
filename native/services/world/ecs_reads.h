@@ -26,7 +26,8 @@ struct ContextFact {
     // Backend-private: what the entity and component ops of this context read (the engine backend: the world's
     // entity manager and component registry). The logic never reads these.
     uint32_t engine_status = 0; // KILN_ECS_* of the backend's view of this world (OK: entity reads can run)
-    uintptr_t manager = 0, registry = 0;
+    uintptr_t manager = 0, registry = 0, scene_word = 0;
+    uint32_t world_kind = 0;    // set by the logic: the kind this context was read for
 };
 
 struct EntityFact {
@@ -68,6 +69,12 @@ struct Backend {
     uint32_t (*has)(void* user, const ContextFact& ctx, const EntityFact& entity, KilnEntity id, uint32_t component,
                     bool* present) = nullptr;
     uint64_t (*open_epoch)(void* user, KilnOwner owner, uint64_t epoch) = nullptr;
+    // The frame-quiet window (both may be null: frame-quiet reads are then unsupported, never a stable copy instead).
+    // quiet_begin: KILN_ECS_OK with a token when no frame runs now, KILN_ECS_BUSY when one does, KILN_ECS_UNSUPPORTED
+    // for a world without a frame word, another refusal as it is. quiet_end: KILN_ECS_OK when no frame ran since the
+    // token was taken, else KILN_ECS_BUSY (or a refusal). Both only observe: they take no lock or gate and write nothing.
+    uint32_t (*quiet_begin)(void* user, const ContextFact& ctx, uint64_t* token) = nullptr;
+    uint32_t (*quiet_end)(void* user, const ContextFact& ctx, uint64_t token) = nullptr;
 };
 
 uint32_t result_of(uint32_t status); // KILN_ECS_* -> KilnResult (changed queries refine it at the call site)

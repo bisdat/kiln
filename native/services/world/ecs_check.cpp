@@ -6,8 +6,9 @@
 //      tick-thread path): the players (ids 1..1023 with a CurrentTransform), their positions and Inventory sizes, and
 //      the nearest entity with an Inventory within 10 m of the first player that is not a player (a container);
 //   2. one kiln.tasks task then reads the same entities through kiln.world's task-thread members (ecs_context_snapshot,
-//      entity_open, entity_validate, ecs_snapshot, ecs_snapshot_many, ecs_template_uuid, ecs_query with bounds, and on a
-//      client the client world's query) and compares them with the truth.
+//      entity_open, entity_validate, ecs_snapshot, ecs_snapshot_many, ecs_template_uuid, ecs_query with bounds, a
+//      frame-quiet read of the player's CurrentTransform, and on a client the client world's query, whose frame-quiet
+//      form must refuse unsupported) and compares them with the truth.
 // Results: "world ecs-read check: ..." lines in kiln.log with the values read, and one PASS or FAIL line per round.
 #include <chrono>
 #include <cmath>
@@ -15,6 +16,7 @@
 #include <filesystem>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "services/kiln_tasks.h"
@@ -154,6 +156,29 @@ void KILN_CALL check_body(const KilnTaskRun*, void* user) {
              "player %s, container %s",
              kNear, p.id, result_name(qrc), req, player_in ? "in" : "missing", container_in ? "in" : "missing");
         if (qrc != KILN_OK || !player_in || !container_in) { pass = false; why += "the bounded query missed an entity; "; }
+        // Frame-quiet: the player's CurrentTransform copied only while no server frame runs (busy is retried; the
+        // task starts right after a step, between frames).
+        {
+            KilnObjectRef ref{};
+            const KilnEcsSnapshotSpec quiet[1] = {{kCurrentTransformHash, KILN_ECS_READ_FRAME_QUIET}};
+            uint8_t t[56] = {};
+            uint32_t presence[1] = {9}, busy = 0;
+            KilnResult frc = t_entity_open(g_owner, 1, KILN_WORLD_SERVER, 0, p.id, &ref);
+            for (int i = 0; frc == KILN_OK && i < 200; ++i) {
+                const KilnResult r = t_ecs_snapshot_many(g_owner, &ref, quiet, 1, t, sizeof t, &req, presence);
+                if (r != KILN_ECS_ERR_BUSY && r != KILN_ECS_ERR_UNREADABLE) { frc = r; break; }
+                frc = r;
+                ++busy;
+                std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            }
+            KilnTransform tr{};
+            const bool got = frc == KILN_OK && transform_decode(t, sizeof t, &tr);
+            const double off = got ? distance(tr.position, p.pos) : -1;
+            KW_I("world ecs-read check: frame-quiet CurrentTransform of player %u: %s after %u busy look(s), position "
+                 "(%.2f, %.2f, %.2f), %.3f m from the tick's",
+                 p.id, result_name(frc), busy, tr.position.x, tr.position.y, tr.position.z, off);
+            if (!got || off > kSamePlace) { pass = false; why += "the frame-quiet read failed; "; }
+        }
         // Several components at once.
         KilnObjectRef ref{};
         if (t_entity_open(g_owner, 1, KILN_WORLD_SERVER, 0, p.id, &ref) == KILN_OK) {
@@ -191,6 +216,12 @@ void KILN_CALL check_body(const KilnTaskRun*, void* user) {
                  "at (%.2f, %.2f, %.2f)",
                  req, result_name(cq), cq == KILN_OK && req ? refs[0].entity : 0u, x, y, z);
             if (cq != KILN_OK || !req) { pass = false; why += "the client world query found nothing near the player; "; }
+            // Frame-quiet is the server world's only: on the client world it must refuse unsupported, never fall back.
+            q.flags = KILN_ECS_QUERY_BOUNDS | KILN_ECS_QUERY_FRAME_QUIET;
+            const KilnResult uq = t_ecs_query(g_owner, &q, refs.data(), static_cast<uint32_t>(refs.size()), &req, &state);
+            KW_I("world ecs-read check: frame-quiet query of the client world: %s (state %u; unsupported expected)",
+                 uq == KILN_ECS_ERR_UNSUPPORTED ? "unsupported" : result_name(uq), state);
+            if (uq != KILN_ECS_ERR_UNSUPPORTED) { pass = false; why += "a frame-quiet client-world read was not refused unsupported; "; }
         }
     }
     if (round->players.empty()) { pass = false; why += "no player in the server world yet; "; }
@@ -267,6 +298,7 @@ void ecs_check_pre(const KilnTickInfo*) {
     KilnTaskInfo info{};
     info.size = sizeof info;
     info.name = KilnStr{"world ecs-read check", sizeof "world ecs-read check" - 1};
+    info.flags = KILN_TASK_AFTER_STEP;  // starts right after a server step: between frames
     KilnHandle task = 0;
     uint32_t refusal = 0;
     g_busy.store(true);
