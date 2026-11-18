@@ -13,7 +13,7 @@
     { "path": "native", "comment": "Native mods", "synced": false },
     { "path": "mods", "comment": "Managed mods", "synced": false },
     { "path": "shroudforge", "comment": "ShroudForge mods", "synced": false },
-    { "path": "ui", "comment": "In the game: Kiln's look and language (also in game: Mods, Kiln settings, Look) and chat history", "synced": false }
+    { "path": "ui", "comment": "In the game: Kiln's look and language (also in game: Mods, Kiln settings, Look), chat history and completion", "synced": false }
   ],
   "entries": [
     { "path": "policy", "type": "enum", "comment": "Hook only verified game builds, or any build", "default": "verified-only", "options": ["verified-only", "any"], "requiresRestart": false, "synced": false },
@@ -33,6 +33,7 @@
     { "path": "ui.opacity", "type": "float", "comment": "Opacity of Kiln's whole in-game UI, text included", "default": 1, "min": 0.3, "max": 1, "requiresRestart": false, "synced": false },
     { "path": "ui.scale", "type": "float", "comment": "Size of Kiln's in-game UI on top of the display's scale", "default": 1, "min": 0.75, "max": 1.5, "requiresRestart": false, "synced": false },
     { "path": "ui.language", "type": "string", "comment": "Language of Kiln's in-game texts: \"auto\" follows the game's text language, or a language tag such as \"zh-CN\" (the texts are Kiln's locales/<tag>.json; a language without a file shows English)", "default": "auto", "requiresRestart": false, "synced": false },
-    { "path": "ui.chatHistory", "type": "bool", "comment": "Chat history: Up and Down in the chat field bring back what you sent; your / commands are kept for next time", "default": false, "requiresRestart": true, "synced": false }
+    { "path": "ui.chatHistory", "type": "bool", "comment": "Chat history: Up and Down in the chat field bring back what you sent; your / commands are kept for next time", "default": false, "requiresRestart": true, "synced": false },
+    { "path": "ui.chatCompletion", "type": "bool", "comment": "Chat completion: Tab suggests permitted Kiln commands in HUD and Social chat; leave off until you've tested it", "default": false, "requiresRestart": true, "synced": false }
   ]
 }
