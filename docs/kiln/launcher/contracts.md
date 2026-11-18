@@ -1096,8 +1096,9 @@ A client only: a dedicated server is `unsupported`.
     `kiln-ui.dll` or `dinput8.dll` (the same stance as `cooktrust.h` takes for cooked files), so the check guards against
     damaged, unfinished or mixed-up downloads and other tools' files, not against such a program.
   - **Loading:** by the full path in that folder with `LoadLibraryExW(..., LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR |
-    LOAD_LIBRARY_SEARCH_SYSTEM32)`, never from the game's folder or `PATH`; AMD's upscaler and frame generation DLLs
-    before its loader, so the loader's loads by name find the modules already checked and loaded. A file of one of these
+    LOAD_LIBRARY_SEARCH_SYSTEM32)`, never from the game's folder or `PATH`; AMD's upscaler DLL before its loader, so the
+    loader's load by name finds the module already checked and loaded (the frame generation DLL is checked with them;
+    Kiln makes no frame generation context in 0.2.0-dev.29.18 and does not map it). A file of one of these
     names in the game's own folder is another tool's: step aside (as `graphicsStepAside` does) rather than load next to it.
   - **Never:** a hook in or a change to `libxess.dll` (Intel's licence), a write into `kiln/vendor/` (the launcher's).
 - **Update.** A newer manifest version downloads into its own folder; the earlier versions of the component go only

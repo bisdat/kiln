@@ -774,7 +774,8 @@ enum {
     KILN_UI_UPSCALE_WHY_RUNTIME_FAILED = 7,  /* it failed while upscaling: the game's FSR 3 for the rest of the session */
     KILN_UI_UPSCALE_WHY_FAULT = 8,           /* a fault in it or in Kiln's code around it: the game's FSR 3 for the session */
     KILN_UI_UPSCALE_WHY_ASIDE = 9,           /* Kiln steps aside for another tool (aside_upscale) */
-    KILN_UI_UPSCALE_WHY_NO_SIGNATURES = 10,  /* this game build's FSR 3 pass was not found: the swap is off */
+    KILN_UI_UPSCALE_WHY_NO_SIGNATURES = 10,  /* this game build's FSR 3 pass was not found (or could not be hooked): the
+                                                swap is off */
     KILN_UI_UPSCALE_WHY_INPUTS = 11,         /* the game's textures are not what it takes (format, size, a missing one) */
     KILN_UI_UPSCALE_WHY_UNAVAILABLE = 12,    /* not in this build of Kiln, or not on this system */
     KILN_UI_UPSCALE_WHY_WAITING = 13,        /* ready: it starts at the game's next FSR 3 set-up (load a world, or change

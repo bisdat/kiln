@@ -198,8 +198,9 @@ any of it DLSS. Code: `native/services/ui/upscale.cpp` (the swap), `upscale_amd.
 - **AMD FSR.** AMD's signed Vulkan DLLs from the FidelityFX SDK 2.4.0, from `<game>/kiln/vendor/amd/2.4.0/` (the
   launcher's Settings, Upscalers). Kiln checks each file's size and SHA-256 against the pins built into Kiln (the same
   values as the launcher's manifest; `tools/release/vendor_pins_header.py --check`) before it maps them, keeps them
-  open so they cannot change, and maps them only from that folder. AMD's own selection picks FSR 4 where the GPU and
-  driver run it (RX 9000, RX 7000 and 6000, some recent APUs), else FSR 3.1; `fsr3` pins FSR 3.1. Where FSR 4 is
+  open so they cannot change (on Windows; under Proton that binds only Wine's own programs, contracts.md 5.15), and
+  maps them only from that folder. AMD's own selection picks FSR 4 where the GPU and driver run it (RX 9000, RX 7000
+  and 6000, some recent APUs), else FSR 3.1; `fsr3` pins FSR 3.1. Where FSR 4 is
   chosen but does not start, Kiln runs FSR 3.1 instead and says so in kiln.log. The device additions: everything AMD's
   Vulkan backend uses when the GPU offers it (subgroup size control, 16-bit floats, synchronization2, AMD's buffer
   markers and coherent memory, descriptor indexing) and FSR 4's set (cooperative matrix, FP8, integer dot product,
@@ -223,8 +224,9 @@ any of it DLSS. Code: `native/services/ui/upscale.cpp` (the swap), `upscale_amd.
 
 Status reasons (`KilnUiGraphicsStatus.upscale_reason`, stable numbers): 0 none, 1 restart, 2 files missing, 3 files
 not the pinned ones, 4 did not load, 5 the GPU or driver lacks a Vulkan feature, 6 set-up failed, 7 failed while
-upscaling, 8 fault, 9 stepped aside, 10 this game build's FSR 3 pass not found, 11 the game's textures are not what it
-takes, 12 not in this build or system, 13 waiting for the next FSR 3 set-up, 14 the game's Vulkan device not seen.
+upscaling, 8 fault, 9 stepped aside, 10 this game build's FSR 3 pass not found (or not hooked), 11 the game's textures
+are not what it takes, 12 not in this build or system, 13 waiting for the next FSR 3 set-up, 14 the game's Vulkan device
+not seen.
 
 ## Not in phase A
 FSR 3's ratio and RCAS sharpness (compiled into the game: game-code hooks per build, [client-upscale.md](../re/client-upscale.md#fsr-3))
