@@ -2769,7 +2769,8 @@
       "notInstalled": "Kiln is not installed",
       "notInstalledHint": "Install it on Runtime first.",
       "unavailable": "kiln.json unavailable",
-      "overrides": "\"client\" and \"server\" override sections are kept as they are."
+      "overrides": "\"client\" and \"server\" override sections are kept as they are.",
+      "chatCompletionHint": "Tab completion is experimental and off by default. Enable ui.chatCompletion to suggest Kiln commands in the game's chat; restart after changing it."
     },
     "art": {
       "icons": "{count:N0} icons",
