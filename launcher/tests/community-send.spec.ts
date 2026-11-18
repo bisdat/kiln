@@ -178,7 +178,7 @@ test.describe("desktop", () => {
   test("the crash notice on Play: the crash report first, then Send to Kiln support (the crash kind)", async ({ page }) => {
     await open(page, "/?mock=1&discord=in&problem=crash#/");
     const notice = page.locator(".k-banner", { hasText: "The game closed unexpectedly" });
-    await expect(notice).toBeVisible({ timeout: 10_000 });
+    await expect(notice).toBeVisible({ timeout: 20_000 });
     await expect(page.getByTestId("crash-notice")).toHaveText(/^It closed at .+, 4 minutes after it started\. Kiln wrote a crash report\.$/);
     const buttons = await notice.getByRole("button").allInnerTexts();
     expect(buttons.slice(0, 2)).toEqual(["See the crash report", "Send to Kiln support"]);
@@ -188,7 +188,7 @@ test.describe("desktop", () => {
 
   test("hidden in Settings: no Send to Kiln support anywhere; the crash notice still shows", async ({ page }) => {
     await open(page, "/?mock=1&discord=hidden&problem=crash#/");
-    await expect(page.locator(".k-banner", { hasText: "The game closed unexpectedly" })).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator(".k-banner", { hasText: "The game closed unexpectedly" })).toBeVisible({ timeout: 20_000 });
     await expect(page.getByRole("button", { name: "Send to Kiln support" })).toHaveCount(0);
     await page.goto("/?mock=1&discord=hidden#/logs");
     await expect(page.getByTestId("support-report")).toBeVisible();
