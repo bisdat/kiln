@@ -422,6 +422,8 @@ struct FakeCopy final : MotionCopy {
     }
     void destroy() override { ++*destroys; }
     void want(upscale::DeviceNeeds* needs) override { needs->want_extension("VK_KILN_test_copy"); }
+    void tick(uint64_t) override { ++*ticks; }
+    int* ticks = nullptr;
 };
 
 struct FakeHost final : Host {
@@ -430,11 +432,12 @@ struct FakeHost final : Host {
     std::string tuning;
     std::vector<std::string>* lines;
     bool copy = false, copy_fail_init = false, copy_fail_record = false;
-    int copy_inits = 0, copy_records = 0, copy_destroys = 0;
+    int copy_inits = 0, copy_records = 0, copy_destroys = 0, copy_ticks = 0;
     explicit FakeHost(std::vector<std::string>* l) : api(fx::api()), lines(l) {}
     std::unique_ptr<MotionCopy> motion_copy() override {
         if (!copy) return nullptr;
         auto c = std::make_unique<FakeCopy>(&copy_inits, &copy_records, &copy_destroys);
+        c->ticks = &copy_ticks;
         c->fail_init = copy_fail_init;
         c->fail_record = copy_fail_record;
         return c;
@@ -683,11 +686,14 @@ static void contexts() {
     f.color.width = f.depth.width = f.motion.width = f.reactive.width = 1280;
     f.color.height = f.depth.height = f.motion.height = f.reactive.height = 720;
     f.render_width = 1280, f.render_height = 720, f.mv_scale_x = 1280, f.mv_scale_y = 720;
+    // the old context last ran in frame 5: frames 6, 7 and 8 may still have it on the GPU, frame 9 does not
     for (int i = 0; i < 3; ++i) {
+        f.frame = 6 + static_cast<uint64_t>(i);
         CHECK(b.record(f, &detail));
         CHECK(!fx::all[0]->destroyed);  // its last frame may still run on the GPU
     }
     CHECK(fx::all[1]->executes == 3 && fx::last.reset_history == 0);
+    f.frame = 9;
     CHECK(b.record(f, &detail) && fx::all[0]->destroyed && b.retired() == 0 && fx::destroyed == 1);
     // the first frame of the new context reset history
     CHECK(fx::all[1]->executes == 4);
@@ -832,14 +838,15 @@ static void lifetime() {
         CHECK(b.load(files(), &why, &detail));
         b.device_needs(gpu());
         CHECK(b.device_ready(device(true), &why, &detail));
-        CHECK(b.create(game_ci(), &detail));  // context 0: retired, then 4 records of context 1 -> destroyed
+        CHECK(b.create(game_ci(), &detail));  // context 0: used in frame 1, retired, gone by frame 5
+        CHECK(b.record(game_frame(1), &detail));
         b.destroy();
         CHECK(b.create(game_ci(), &detail));
-        for (int i = 0; i < 4; ++i) CHECK(b.record(game_frame(static_cast<uint64_t>(i)), &detail));
+        for (uint64_t i = 2; i <= 5; ++i) CHECK(b.record(game_frame(i), &detail));
         CHECK(fx::all[0]->destroyed);
-        b.destroy();  // context 1: retired just now
+        b.destroy();  // context 1: last used in frame 5, retired just now
         CHECK(b.create(game_ci(), &detail));  // context 2: in use
-        CHECK(b.record(game_frame(9), &detail));
+        CHECK(b.record(game_frame(6), &detail));
     }
     CHECK(!fx::all[1]->destroyed && !fx::all[2]->destroyed);
     bool said = false;
@@ -848,6 +855,44 @@ static void lifetime() {
     const size_t n = log.size();
     fx::logger("after the backend", kLogError);  // XeSS calling back late: nobody listens, nothing breaks
     CHECK(log.size() == n);
+}
+
+static void ticks() {
+    // the core's tick on every FSR frame frees retired contexts with no record of XeSS's (a fall back, "game" chosen);
+    // a context never recorded goes at once; the motion copy is ticked too
+    fx::reset();
+    std::vector<std::string> log;
+    upscale::Why why;
+    std::string detail;
+    auto host = std::make_unique<FakeHost>(&log);
+    host->copy = true;
+    FakeHost* hp = host.get();
+    XessBackend b(std::move(host));
+    CHECK(b.load(files(), &why, &detail));
+    b.device_needs(gpu());
+    CHECK(b.device_ready(device(true), &why, &detail));
+    CHECK(b.create(game_ci(), &detail));
+    b.destroy();  // never recorded: destroyed at once
+    CHECK(fx::all[0]->destroyed && b.retired() == 0);
+    CHECK(b.create(game_ci(), &detail) && b.record(game_frame(100), &detail));
+    b.destroy();  // the core falls back: no more records
+    CHECK(b.retired() == 1);
+    b.tick(101), b.tick(102), b.tick(103);
+    CHECK(!fx::all[1]->destroyed && hp->copy_ticks == 3);
+    b.tick(104);
+    CHECK(fx::all[1]->destroyed && b.retired() == 0 && hp->copy_ticks == 4);
+    // a record that fails still counts as a use of that frame
+    CHECK(b.create(game_ci(), &detail));
+    fx::execute_result = kErrDevice;
+    CHECK(!b.record(game_frame(105), &detail));
+    fx::execute_result = kOk;
+    b.destroy();
+    CHECK(b.retired() == 1 && !fx::all[2]->destroyed);
+    b.tick(108);
+    CHECK(!fx::all[2]->destroyed);
+    b.tick(109);
+    CHECK(fx::all[2]->destroyed);
+    b.device_lost(h<VkDevice>(0x33));
 }
 
 static void ratios_of_the_game() {
@@ -907,6 +952,7 @@ int main() {
     knobs_reach_xess();
     motion_copy();
     lifetime();
+    ticks();
     ratios_of_the_game();
     fx::reset();
     std::printf("xess_test: %d checks passed\n", g_checks);

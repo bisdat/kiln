@@ -14,10 +14,11 @@
 //  device_ready  checks the created device has every required need (under either name of a promoted feature); a device
 //                created without XeSS's needs (XeSS chosen after the game started) means Why::restart. Makes Kiln's
 //                VkPipelineCache for XeSS's pipelines (so a new context reuses them).
-//  create        a new XeSS context for each of the game's Fsr3Create calls: xessVKCreateContext, xessVKInit with the
-//                output size, the preset for the game's ratio and the flags. A context is never re-initialised in place
-//                (that needs the GPU idle): the old one is retired and destroyed once 4 more frames were recorded (the
-//                game alternates two command buffers, so its last frame is done by then), or at device_lost.
+//  create        a new XeSS context for each of the core's set-ups: xessVKCreateContext, xessVKInit with the upscale
+//                size, the preset for the game's ratio and the flags. A context is never re-initialised in place (that
+//                needs the GPU idle): the old one is retired and destroyed 4 of the game's FSR frames after the last one
+//                that used it (tick, every FSR frame; the game alternates two command buffers, so that frame is done by
+//                then), or at device_lost.
 //  record        xessVKExecute into the game's command buffer (velocity scale first when it changed), after the core's
 //                copy of the motion vectors into R16G16_SFLOAT when the build has it (MotionCopy).
 //  destroy       retires the context; device_lost destroys everything (the device is idle then).
@@ -55,6 +56,8 @@ class MotionCopy {
     // Records the copy into cb; `out` is Kiln's image in SHADER_READ_ONLY_OPTIMAL once the copy has run.
     virtual bool record(VkCommandBuffer cb, const upscale::Texture& in, uint64_t frame, upscale::Texture* out, std::string* detail) = 0;
     virtual void destroy() = 0;  // the device is idle
+    // Each of the game's FSR 3 frames: images the GPU is surely done with go (upscale_mv.h MotionConverter::tick).
+    virtual void tick(uint64_t frame) { (void)frame; }
 };
 
 // What the backend needs from Kiln around it.
@@ -72,7 +75,9 @@ class Host {
     virtual std::unique_ptr<MotionCopy> motion_copy() { return nullptr; }
 };
 
-inline constexpr uint64_t kRetireRecords = 4;  // a retired context is destroyed after this many more records
+// A retired context is destroyed once the core's frame count is this far past the last frame that used it (the game
+// alternates two command buffers, so that frame's is done; the core's own kRetireFrames, upscale_logic.h).
+inline constexpr uint64_t kRetireFrames = 4;
 
 class XessBackend final : public upscale::Backend {
   public:
@@ -323,10 +328,16 @@ class XessBackend final : public upscale::Backend {
             if (!mv_->record(f.cb, f.motion, f.frame, &copy, &d) || !copy.present()) return fail("the motion-vector copy for XeSS failed: " + d);
             p.velocity = image_info(copy);
         }
+        used_ = true;  // from here on the command buffer may hold XeSS's commands, even if XeSS says it failed
         const int32_t r = api_.vk_execute(ctx_, f.cb, &p);
-        if (r < 0) return fail(std::string("xessVKExecute failed: ") + result_name(r));
+        if (r < 0) {
+            last_frame_ = (std::max)(last_frame_, f.frame);
+            return fail(std::string("xessVKExecute failed: ") + result_name(r));
+        }
         pending_reset_ = false;
         ++records_;
+        last_frame_ = f.frame;
+        now_frame_ = (std::max)(now_frame_, f.frame);
         if (!logged_first_) {
             logged_first_ = true;
             host_->log(3, "XeSS upscales the game's frames: " + size_text(f.render_width, f.render_height) + " -> " +
@@ -339,11 +350,22 @@ class XessBackend final : public upscale::Backend {
 
     void reset() override { pending_reset_ = true; }
 
+    // Each of the game's FSR 3 frames, recorded by XeSS or not: retired contexts (and the copy's old images) the GPU is
+    // done with go.
+    void tick(uint64_t frame) override {
+        now_frame_ = (std::max)(now_frame_, frame);
+        collect(false);
+        if (mv_ && mv_ready_) mv_->tick(frame);
+    }
+
     // ---- 6. the end -----------------------------------------------------------------------------------------------
     void destroy() override {
         if (!ctx_) return;
-        retired_.push_back({ctx_, records_});
+        // never used in a command buffer: nothing on the GPU can still use it
+        if (!used_) api_.destroy_context(ctx_);
+        else retired_.push_back({ctx_, last_frame_});
         ctx_ = nullptr;
+        used_ = false;
         logged_first_ = false;
     }
 
@@ -375,7 +397,7 @@ class XessBackend final : public upscale::Backend {
   private:
     struct Retired {
         Context ctx;
-        uint64_t at;  // records_ when it was retired
+        uint64_t last;  // the core's frame count of the last frame that used it
     };
 
     static std::atomic<Host*>& log_host() {
@@ -454,7 +476,7 @@ class XessBackend final : public upscale::Backend {
     // Destroys retired contexts the GPU is done with (all with `all`: the device is idle).
     void collect(bool all) {
         for (size_t i = 0; i < retired_.size();) {
-            if (all || records_ >= retired_[i].at + kRetireRecords) {
+            if (all || now_frame_ >= retired_[i].last + kRetireFrames) {
                 api_.destroy_context(retired_[i].ctx);
                 retired_.erase(retired_.begin() + static_cast<ptrdiff_t>(i));
             } else {
@@ -511,6 +533,8 @@ class XessBackend final : public upscale::Backend {
     float vel_x_ = NAN, vel_y_ = NAN;
     bool pending_reset_ = true, logged_first_ = false;
     uint64_t records_ = 0;
+    uint64_t last_frame_ = 0, now_frame_ = 0;  // the core's frame counts: the context's last use, the newest seen
+    bool used_ = false;                        // the context was recorded into a command buffer
     uint32_t contexts_ = 0;
     std::vector<Retired> retired_;
 };

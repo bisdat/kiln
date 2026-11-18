@@ -29,6 +29,7 @@ class CoreMotionCopy final : public xess::MotionCopy {
         return c_.record(cb, in, frame, out, detail);
     }
     void destroy() override { c_.destroy(); }
+    void tick(uint64_t frame) override { c_.tick(frame); }
 
   private:
     MotionConverter c_;
