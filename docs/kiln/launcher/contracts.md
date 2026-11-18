@@ -1089,6 +1089,12 @@ A client only: a dedicated server is `unsupported`.
     Each is opened with sharing that refuses writes and deletes (`FILE_SHARE_READ` only), hashed through that handle
     (about 0.1 s for 80 MB, once per start) and kept open until it is loaded, so the bytes checked are the bytes loaded.
     A size or SHA-256 other than the list's: that component is not used this start, and the log says which file.
+  - **What binds the check to the load:** the path. On Windows the open handle refuses writes and deletes, and Windows
+    refuses to rename a folder with an open file in it, so the file that loads is the file that was hashed. Under Proton
+    those sharing rules bind only Wine's own processes: a native Linux program running as the player could swap the
+    folder between the check and the load. That is accepted. A program with the player's rights can already replace
+    `kiln-ui.dll` or `dinput8.dll` (the same stance as `cooktrust.h` takes for cooked files), so the check guards against
+    damaged, unfinished or mixed-up downloads and other tools' files, not against such a program.
   - **Loading:** by the full path in that folder with `LoadLibraryExW(..., LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR |
     LOAD_LIBRARY_SEARCH_SYSTEM32)`, never from the game's folder or `PATH`; AMD's upscaler and frame generation DLLs
     before its loader, so the loader's loads by name find the modules already checked and loaded. A file of one of these

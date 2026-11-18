@@ -14,6 +14,8 @@
 //  - each file is opened with writes and deletes denied, hashed through that very handle, and the handle stays open for
 //    the session: what loads is what was hashed (LoadLibraryExW maps the same file; nobody can change it meanwhile);
 //  - a file the manifest has not pinned is never loaded.
+// Under Proton the hash and the load are bound by path only (wineserver's sharing rules do not bind native Linux
+// programs): accepted, as written in docs/kiln/launcher/contracts.md 5.15 ("What binds the check to the load").
 // The logic is plain C++ over a small file interface (Fs), so the host test (tests/vendor_file_test.cpp) runs it on
 // Linux files; the Windows interface and the loader are at the end, under _WIN32.
 #pragma once
