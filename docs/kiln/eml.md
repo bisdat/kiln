@@ -721,7 +721,7 @@ focused test commands are in `gpl/kiln-eml/README.md`; the existing 89-function 
   prints the state JSON.
 
 ### Offline content check (2026-11-07, server build 1287369)
-Test mods (in `/mnt/Dongus/kiln-wave/eml/testmods/`, not in the repo):
+Test mods (kept outside the repository):
 - `kiln_eml_slice` sets `keen::BalancingTable.playerBaseStamina` = 777;
 - `kiln_eml_verify` (export) reads it back;
 - `kiln_eml_probe` calls the whole API;
