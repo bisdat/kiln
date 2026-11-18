@@ -9,7 +9,7 @@
     "format": { "const": 1 },
     "component": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,31}$", "description": "The manifest's component id (amd-fsr)." },
     "vendor": { "enum": ["amd", "intel", "nvidia"] },
-    "version": { "type": "string", "description": "The vendor's version: the folder's name." },
+    "version": { "type": "string", "pattern": "^(0|[1-9][0-9]*)(\\.(0|[1-9][0-9]*)){1,3}$", "description": "The vendor's version: the folder's name. A receipt with another version is not an install." },
     "installed": { "$ref": "common.schema.json#/$defs/time" },
     "installer": { "type": "string", "description": "kiln-launcher <version>." },
     "license": {
@@ -27,7 +27,7 @@
         "type": "object",
         "required": ["name", "size", "sha256", "url"],
         "properties": {
-          "name": { "type": "string", "description": "The file in this folder." },
+          "name": { "type": "string", "pattern": "^[A-Za-z0-9]([A-Za-z0-9._-]{0,126}[A-Za-z0-9_-])?$", "description": "The file in this folder: a plain name, no folder (kiln_manage::vendor::manifest::file_name_ok; a receipt naming anything else is not an install, and no reader joins such a name to a path)." },
           "size": { "type": "integer", "minimum": 1 },
           "sha256": { "$ref": "common.schema.json#/$defs/sha256" },
           "url": { "type": "string", "description": "Where it was downloaded from." }

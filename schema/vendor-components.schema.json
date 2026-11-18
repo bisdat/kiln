@@ -43,7 +43,7 @@
       "additionalProperties": false,
       "required": ["name", "url", "size", "sha256"],
       "properties": {
-        "name": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$", "description": "The file's name in kiln/vendor/<vendor>/<version>/ (no folder)." },
+        "name": { "type": "string", "pattern": "^[A-Za-z0-9]([A-Za-z0-9._-]{0,126}[A-Za-z0-9_-])?$", "description": "The file's name in kiln/vendor/<vendor>/<version>/ (no folder, no trailing dot; the parser also refuses Windows device names and Kiln's own names there)." },
         "url": { "type": "string", "pattern": "^https://(raw\\.githubusercontent\\.com|media\\.githubusercontent\\.com/media|github\\.com/[^/]+/[^/]+/releases/download)/", "description": "A raw file at a tag (raw.githubusercontent.com/<org>/<repo>/<tag>/<path>), a Git LFS file at a tag (media.githubusercontent.com/media/<org>/<repo>/<tag>/<path>) or a release asset (github.com/<org>/<repo>/releases/download/<tag>/<asset>)." },
         "size": { "type": "integer", "minimum": 1, "maximum": 536870912, "description": "Bytes. Also the most a download may send." },
         "sha256": {
