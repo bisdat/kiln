@@ -779,3 +779,26 @@ fn a_receipt_naming_files_outside_its_folder_is_not_an_install_and_remove_stays_
     assert_eq!(std::fs::read_to_string(&in_game).unwrap(), "the game");
     assert!(!lab.folder().exists());
 }
+
+#[test]
+fn a_disk_without_room_is_refused_before_anything_is_fetched() {
+    let lab = Lab::new("space");
+    let (a, b) = (bytes(1, 70_000), bytes(2, 1_234));
+    let c = amd(&manifest_for(&a, &b));
+    lab.server.on(A_URL, &[Behave::Serve(a.clone())]);
+    lab.server.on(B_URL, &[Behave::Serve(b.clone())]);
+    // the bytes alone fit, the margin (256 MiB and 5 %) does not: refused, nothing asked, no version folder
+    let e = download::with_free_space_for_tests(Some(1024 * 1024), || lab.get(&c, &mut Recorder::default())).unwrap_err();
+    assert_eq!(e.code, ErrorCode::Refused);
+    assert!(e.message.starts_with("The game's disk has 1.0 MB free. AMD FSR needs"), "{}", e.message);
+    assert!(e.message.ends_with("Nothing was downloaded."), "{}", e.message);
+    assert!(lab.server.seen().is_empty());
+    assert!(!lab.folder().exists());
+    // room for it (or a disk whose space is not known): it downloads
+    download::with_free_space_for_tests(Some(300 * 1024 * 1024), || lab.get(&c, &mut Recorder::default())).unwrap();
+    std::fs::remove_file(lab.folder().join("b.dll")).unwrap();
+    download::with_free_space_for_tests(None, || lab.get(&c, &mut Recorder::default())).unwrap();
+    // what is there already needs no room: a full disk still checks a complete folder
+    let r = download::with_free_space_for_tests(Some(0), || lab.get(&c, &mut Recorder::default())).unwrap();
+    assert_eq!((r.fetched, r.kept.len()), (0, 2));
+}

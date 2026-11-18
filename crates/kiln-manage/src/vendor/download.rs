@@ -82,6 +82,7 @@ pub fn download(store: &Store, c: &Component, client: &Client, installer: &str, 
     let _lock = store.lock()?;
     let folder = store.folder(&c.vendor, &c.version);
     store.guard(&folder)?;
+    check_space(&folder, c)?;
     std::fs::create_dir_all(&folder).map_err(crate::util::io_at(&folder, "creating"))?;
     store.guard(&folder)?;
     // a receipt goes first: the folder is not complete while its files change
@@ -137,6 +138,51 @@ pub fn download(store: &Store, c: &Component, client: &Client, installer: &str, 
         Err(e) => (Vec::new(), vec![format!("The earlier version of {} stays in the game folder: {}", c.name, e.message)]),
     };
     Ok(DownloadReport { receipt, folder: Store::rel(&c.vendor, &c.version), fetched, kept, replaced, warnings })
+}
+
+thread_local! {
+    static FREE: std::cell::Cell<Option<Option<u64>>> = const { std::cell::Cell::new(None) };
+}
+
+/// Runs `f` with the game disk's free space answered as `free` (None: not known), for tests of the disk check.
+#[doc(hidden)]
+pub fn with_free_space_for_tests<R>(free: Option<u64>, f: impl FnOnce() -> R) -> R {
+    let before = FREE.with(|c| c.replace(Some(free)));
+    let out = f();
+    FREE.with(|c| c.set(before));
+    out
+}
+
+/// Refuses a download the game's disk has no room for, before anything is written or fetched: the bytes still to
+/// come (a file there with the manifest's size counts as there, a part file as arrived) need the data folder's
+/// margin on top ([`crate::data_folder::needed_bytes`]: 256 MiB and 5 %), so a download never fills the disk the
+/// game saves to. A disk whose free space is not known is not refused.
+fn check_space(folder: &Path, c: &Component) -> Result<()> {
+    let len = |p: &Path| std::fs::symlink_metadata(p).ok().filter(|m| m.is_file()).map(|m| m.len());
+    let (mut bytes, mut files) = (0u64, 0u64);
+    for f in &c.files {
+        if len(&folder.join(&f.name)) == Some(f.size) {
+            continue;
+        }
+        let part = len(&folder.join(format!("{}{PART_SUFFIX}", f.name))).filter(|n| *n < f.size).unwrap_or(0);
+        bytes += f.size - part;
+        files += 1;
+    }
+    if bytes == 0 {
+        return Ok(());
+    }
+    let space = match FREE.with(|c| c.get()) {
+        Some(free) => free.map(|free| crate::data_folder::Space { free, unit: 4096 }),
+        None => folder.ancestors().find(|p| p.is_dir()).and_then(crate::data_folder::space_at),
+    };
+    let Some(s) = space else { return Ok(()) };
+    let need = crate::data_folder::needed_bytes(bytes, files, s.unit);
+    if s.free < need {
+        return Err(Error::new(ErrorCode::Refused, format!(
+            "The game's disk has {} free. {} needs {} there, with room to spare so the disk does not fill up. Free some space, then try again. Nothing was downloaded.",
+            crate::util::human_size(s.free), c.name, crate::util::human_size(need))));
+    }
+    Ok(())
 }
 
 fn canceled() -> Error {
@@ -289,6 +335,14 @@ fn fetch_once(part: &Path, c: &Component, f: &VendorFile, client: &Client, meter
             drop_empty(part);
             return Err(Error::new(ErrorCode::Refused, format!("{} Nothing more was downloaded.", e.message)));
         }
+        // the part file could not be written (a full disk, a folder made read-only): the disk, not the network
+        Err(e) if e.code == ErrorCode::Io => {
+            drop(sink);
+            drop_empty(part);
+            return Err(Error::new(ErrorCode::Io, format!(
+                "Kiln could not write {} into {}. Check the game's disk has room and can be written to, then try again. What arrived is kept.",
+                f.name, folder_of(part))));
+        }
         Err(e) => {
             let _ = sink.file.sync_all();
             drop(sink);
@@ -336,6 +390,10 @@ fn fetch_once(part: &Path, c: &Component, f: &VendorFile, client: &Client, meter
     } else {
         mismatch(c, f)
     })
+}
+
+fn folder_of(part: &Path) -> String {
+    part.parent().map(|p| p.display().to_string()).unwrap_or_default()
 }
 
 /// `Content-Range: bytes <start>-<size-1>/<size>`
