@@ -643,6 +643,7 @@ static void knobs_reach_xess() {
     std::string detail;
     auto host = std::make_unique<FakeHost>(&log);
     host->tuning = "jitter-y flip\nmotion-y flip\nexposure inverse\nmask off\n";
+    Host* host_ptr = host.get();
     XessBackend b(std::move(host));
     CHECK(b.load(files(), &why, &detail));
     bool said = false;
@@ -656,6 +657,13 @@ static void knobs_reach_xess() {
     CHECK(b.record(f, &detail));
     CHECK(fx::last.jitter_y == 0.375f && fx::last.exposure_scale == 2.0f && fx::last.responsive.image == VK_NULL_HANDLE);
     CHECK(fx::all[0]->vy == -540);
+    // a knob changed during the test applies at the next create (the game's next FSR set-up), and is said
+    static_cast<FakeHost*>(host_ptr)->tuning = "mask on\n";
+    b.destroy();
+    CHECK(b.create(game_ci(), &detail) && b.flags() == (kFlagInvertedDepth | kFlagResponsivePixelMask) && !b.tuning().tuned());
+    bool said_default = false;
+    for (const auto& l : log) said_default |= has(l, "every knob at its default");
+    CHECK(said_default);
     b.device_lost(h<VkDevice>(0x33));
 }
 

@@ -5,7 +5,8 @@
 // (DP4a) path.
 //
 // Life of it (the core calls in this order, all on the game's main thread):
-//  load          libxess.dll's exports (Host::load_library), XeSS's version, the test knobs (kiln/control/xess).
+//  load          libxess.dll's exports (Host::load_library), XeSS's version, the test knobs (kiln/control/xess; read
+//                again at each create, so a knob changed during a test applies at the game's next FSR set-up).
 //  instance_needs / device_needs
 //                XeSS's own answers (xessVKGetRequiredInstanceExtensions / DeviceExtensions / DeviceFeatures) once the
 //                DLL is loaded; the SDK guide's list before that (xess_map.h documented_*_needs). What XeSS lists is
@@ -143,9 +144,8 @@ class XessBackend final : public upscale::Backend {
         api_ = api;
         version_ = v;
         loaded_ = true;
-        tuning_ = parse_tuning(host_->read_tuning(files));
-        for (const auto& n : tuning_.notes) host_->log(2, "kiln/control/xess: not understood: " + n);
-        if (tuning_.tuned()) host_->log(2, "kiln/control/xess test knobs in use: " + tuning_.describe());
+        files_ = files;
+        read_tuning();
         log_host().store(host_.get());
         host_->log(3, "libxess.dll loaded: XeSS " + name_version());
         return true;
@@ -199,6 +199,7 @@ class XessBackend final : public upscale::Backend {
         collect(false);
         std::string why;
         if (!check_create(ci, &why)) return fail(why);
+        read_tuning();  // a knob changed in a test applies at the game's next FSR set-up (a quality change)
         bool beyond = false;
         const float ratio = ratio_of(ci);
         const Quality q = quality_for_ratio(ratio, &beyond);
@@ -328,6 +329,18 @@ class XessBackend final : public upscale::Backend {
         h->log(k, std::string("XeSS says: ") + message);
     }
 
+    // kiln/control/xess, read at load and at each create; said in kiln.log when it changes.
+    void read_tuning() {
+        const std::string text = host_->read_tuning(files_);
+        if (text == tuning_text_ && tuning_read_) return;
+        tuning_read_ = true;
+        tuning_text_ = text;
+        tuning_ = parse_tuning(text);
+        for (const auto& n : tuning_.notes) host_->log(2, "kiln/control/xess: not understood: " + n);
+        if (tuning_.tuned()) host_->log(2, "kiln/control/xess test knobs in use: " + tuning_.describe());
+        else if (!text.empty()) host_->log(3, "kiln/control/xess: every knob at its default");
+    }
+
     bool query_device_needs(VkInstance inst, VkPhysicalDevice phys, upscale::DeviceNeeds* out) {
         uint32_t n = 0;
         const char* const* names = nullptr;
@@ -390,7 +403,10 @@ class XessBackend final : public upscale::Backend {
     Api api_{};
     Version version_{};
     bool loaded_ = false;
+    upscale::Files files_;
     Tuning tuning_;
+    std::string tuning_text_;
+    bool tuning_read_ = false;
     // needs
     upscale::DeviceNeeds device_needs_;
     bool needs_asked_ = false, needs_documented_ = false;
