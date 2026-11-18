@@ -210,5 +210,6 @@ relay's versions line ("Kiln 0.2.0-dev.29.18 · Launcher 0.2.0-dev.29.18 · Arch
 | `community-tester.json` | a tester's results for the current test build `{build, steps: {id: {result, note}}}` | the next build, Stop testing, sign out |
 
 The account and the posts as last read stay in memory while the launcher runs, so the page can say "as of 11:47" when
-offline. Nothing about the player's Discord account stays
+offline. The keyring is read once a run (again after a sign-in, a sign-out, or 5 minutes after it held no session), so
+the status the page reads every minute never starts `secret-tool`. Nothing about the player's Discord account stays
 after sign-out.

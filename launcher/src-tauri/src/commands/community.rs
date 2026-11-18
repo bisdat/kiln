@@ -95,9 +95,36 @@ fn settings() -> Result<(DataDirs, CommunitySettings), Error> {
     Ok((d, s))
 }
 
+/// The kept session as last read: (data folder, relay host, the session, when read). The keyring is read once and
+/// then again only after a save or a clear here, so the status the page asks for every minute never starts
+/// `secret-tool` (a locked keyring would ask to be unlocked each time). "No session" is read again after 5 minutes.
+static KEPT: LazyLock<Mutex<Option<(std::path::PathBuf, String, Option<Stored>, std::time::Instant)>>> = LazyLock::new(|| Mutex::new(None));
+
 /// The kept session for the relay the settings name.
 fn stored(d: &DataDirs, s: &CommunitySettings) -> Option<Stored> {
-    SessionStore::new(d).load(&s.relay().host)
+    let host = s.relay().host;
+    if let Some((root, h, v, at)) = &*KEPT.lock().unwrap()
+        && *root == d.root
+        && *h == host
+        && (v.is_some() || at.elapsed() < std::time::Duration::from_secs(5 * 60))
+    {
+        return v.clone();
+    }
+    let v = SessionStore::new(d).load(&host);
+    *KEPT.lock().unwrap() = Some((d.root.clone(), host, v.clone(), std::time::Instant::now()));
+    v
+}
+
+/// Keeps the session (keyring, else the owner-only file) and what [`stored`] answers.
+fn keep_session(d: &DataDirs, k: &Stored) -> Result<(), Error> {
+    *KEPT.lock().unwrap() = None;
+    SessionStore::new(d).save(k)?;
+    Ok(())
+}
+
+/// Forgets what [`stored`] answers (the key itself is removed by the caller, or was just saved).
+fn session_changed() {
+    *KEPT.lock().unwrap() = None;
 }
 
 /// Notes how a call went: the page's offline and relay-down words follow the last answer.
@@ -133,6 +160,7 @@ fn call<T>(auth: bool, f: impl FnOnce(&Relay) -> Result<T, Error>) -> Result<T, 
         && relay::kind_of(e) == Some("signin")
     {
         let _ = SessionStore::new(&d).clear();
+        session_changed();
         let mut h = HUB.lock().unwrap();
         h.account = None;
         h.posts.clear();
@@ -234,7 +262,7 @@ pub async fn community_check_member(app: AppHandle) -> Result<Option<Account>, E
         let a = call(true, |r| r.me())?;
         if let Some(mut k) = stored(&d, &s) {
             k.account = a.clone();
-            let _ = SessionStore::new(&d).save(&k);
+            let _ = keep_session(&d, &k);
         }
         HUB.lock().unwrap().account = Some(a.clone());
         Ok(Some(a))
@@ -255,6 +283,7 @@ pub async fn community_signout(app: AppHandle, forget: bool, posts: Option<bool>
         let r = kiln_manage::community::session::sign_out(&SessionStore::new(&d), forget, || {
             if has { call(true, |r| if forget { r.forget(posts.unwrap_or(false)) } else { r.signout() }) } else { Ok(()) }
         });
+        session_changed();
         let mut h = HUB.lock().unwrap();
         h.account = None;
         h.posts.clear();
@@ -326,7 +355,7 @@ pub async fn community_signin_poll(app: AppHandle, id: String) -> Result<SignInS
         let state = match p {
             Progress::Waiting => return Ok(SignInState::Waiting),
             Progress::Approved(g) => {
-                SessionStore::new(&d).save(&Stored { format: 1, relay: s.relay().host, session: g.session, account: g.account.clone() })?;
+                keep_session(&d, &Stored { format: 1, relay: s.relay().host, session: g.session, account: g.account.clone() })?;
                 let mut h = HUB.lock().unwrap();
                 h.account = Some(g.account.clone());
                 h.posts.clear();
@@ -518,6 +547,28 @@ pub async fn community_steam_keyboard() -> Result<(), Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The keyring (or the file) is read once, and again after a save or a clear here: the status the page reads every
+    /// minute starts no `secret-tool`.
+    #[test]
+    fn the_kept_session_is_read_once_and_again_after_a_save_or_a_clear() {
+        // SAFETY: no other test of this crate reads the variable or the session store (the file, never the keyring)
+        unsafe { std::env::set_var("KILN_NO_KEYRING", "1") };
+        let tmp = std::env::temp_dir().join(format!("kiln-launcher-kept-{}", std::process::id()));
+        let d = DataDirs::at(&tmp);
+        let s = CommunitySettings::default();
+        assert!(stored(&d, &s).is_none());
+        let k = Stored { format: 1, relay: "frostdev.io".into(), session: "kiln_s_0123456789abcdefghijklmnop".into(),
+            account: Account { id: "731204485922648124".into(), name: "emberfox".into(), member: true, tester: false } };
+        keep_session(&d, &k).unwrap();
+        assert_eq!(stored(&d, &s).unwrap().account.name, "emberfox");
+        // read once: the file going behind the launcher's back changes nothing until the launcher itself changes it
+        std::fs::remove_file(SessionStore::new(&d).file_path()).unwrap();
+        assert!(stored(&d, &s).is_some());
+        session_changed();
+        assert!(stored(&d, &s).is_none());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
 
     /// The relay hears the version About shows (the app's package version, a release's 0.2.0-dev.29.18), not Cargo's
     /// 0.2.0-dev: the User-Agent and the sign-in request take it from [`version`].
