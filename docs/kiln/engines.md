@@ -433,6 +433,14 @@ engines' mods") and 5.8.
   or Ember mods. Kiln.Network adds the same mods to the advertised
   `required[]`, each with its `kind` (`AdvertiseEngines.cs`), so a joining player's launcher learns what the server
   runs. The HELLO check still covers Kiln mods only: clients don't announce other engines' mods.
+  Their hash stays the same while the mod runs (0.2.0-dev.29.18, `AdvertiseIdentity.cs` and
+  `modpack::engine_identity`, one rule): Kiln's copy whose files are still the ones placed (its marker in the folder, its
+  receipt outside it: `library-placements.json` or the server's `server-library.json`) is advertised by its Library
+  entry's kdh1; any other folder by the kdh1 of its files without logs (`*.log`), ShroudForge's `extended.mod.json` and
+  the kind's settings files. Before, it was the kdh1 of the whole folder with the player's settings and what the mod
+  writes there (logs, `bin/native-status.txt`), so it changed every minute and was never the Library's. A modpack carries
+  what is advertised: the launcher packs the Library entry of Kiln's copy (`modpack::build_with`), else the placed files
+  with the advertised hash in the mod's `identity`.
 - **Licences.** The launcher (MIT) only copies files. It never links or runs EML's GPL code or any other engine's code.
 
 An enabled EML package declaring `runtime` or `runtime-register-dll` also requires hosted ShroudForge, even without

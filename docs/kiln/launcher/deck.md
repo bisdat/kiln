@@ -210,9 +210,15 @@ steps instead:
 - No real Steam Deck has run it: the checklist below is for the first one.
 - The modpack offer after a server refused you (`kiln://last-server`) shows only in the desktop UI; a modpack zip in
   Downloads works in Deck mode.
-- Not in Deck mode: mod editing beyond on/off/remove (order, saving a profile under a new name, configs), world saves and
-  their backups, logs, servers and admin, rollback, "switch from ShroudForge" (typed), runtime bundle import, opening a
-  save file by path in the editor. Settings has "Desktop UI" for those.
+- Not in Deck mode: mod editing beyond on/off/remove (order, saving a profile under a new name, configs, mod
+  settings), world saves and their backups, logs, servers and admin, rollback, "switch from ShroudForge" (typed),
+  runtime bundle import, opening a save file by path in the editor. Settings has "Desktop UI" for those.
+- A ShroudForge mod's settings, on a Deck: in the game's own Kiln menu (MODS in the main menu, or the Kiln menu in a
+  world: the mod, then its settings), or in the launcher's desktop screens (Settings, Desktop UI, then Mods, the mod,
+  Settings, with the game closed). Both change the copy ShroudForge runs (`<game>/mods/<id>/extended.mod.json`), and
+  profile updates keep what you set. A Deck with the game on an SD card is often in Copy path mode
+  ([contracts.md](contracts.md) section 6); before 0.2.0-dev.29.18 the in-game page there changed a second copy under
+  `kiln/profiles/` that ShroudForge never read, so the values looked saved but did not apply.
 - The game-art extraction runs in Deck mode only for the save editor, when its tab opens.
 - No on-screen keyboard of our own: no screen needs typing. The Catalog has no text search in Deck mode (X and Y
   filter and sort); the save editor's search fields take Steam's keyboard, and its numbers have a number pad. In an enabled build, Nexus account sign-in uses OAuth in desktop Settings; dev.20, dev.21 and dev.22 have neither Catalog nor account controls.

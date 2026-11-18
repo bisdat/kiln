@@ -9,7 +9,9 @@ launcher downloads, checks and installs it into a profile. Formats: [contracts.m
 ## Server admin: build and publish (`/servers/:id/modpack`)
 1. **What players need**: the server's mods with `clients: "mod"` (the same rule as Kiln.Network's advertised list:
    `kiln/mods/*` and `kiln/native/*`, not `.disabled`, not failed), each with the kdh1 of its folder; a Kiln mod with
-   its identity (contracts.md 5.11: what a cook left in `assets/cooked` does not count).
+   its identity (contracts.md 5.11: what a cook left in `assets/cooked` does not count); another engine's mod with what
+   stays the same while it runs (0.2.0-dev.29.18, [../engines.md](../engines.md)): the Library entry's kdh1 for the
+   launcher's copy, else its files without logs and settings.
 2. **Build** (`server_modpack_build(serverId, name, version)`, a task): a deterministic zip in
    `<data>/modpacks/built/<serverId>/<name>-<version>.zip`: `kiln-modpack.json` first, then `<kind>/<id>/...` sorted
    bytewise, one fixed time (the newest file's), mode 0644, deflate level 6. The same mods give the same bytes and
@@ -19,7 +21,12 @@ launcher downloads, checks and installs it into a profile. Formats: [contracts.m
    who gets a mod with a cook recipe from a pack has to cook it (`kiln cook`) for its models and animations: the
    launcher does not cook yet. The manifest has the server's id and name (the
    id file is created in Kiln.Network's format if the server never ran), `kiln: ">=<the server's Kiln>"`, and each mod's
-   kind, id, version, name, path, kdh1, clients, side. The build record goes to
+   kind, id, version, name, path, kdh1, clients, side. Another engine's mod that is the launcher's copy of a Library
+   entry is packed from that entry, so its kdh1 is the one the server advertises (0.2.0-dev.29.18); one without its
+   Library entry is packed as placed, without the files the mod wrote, and gets `identity`, the hash the server
+   advertises for it, which a player's launcher accepts beside `hash` (an older launcher only `hash`). Logs (`*.log`)
+   of other engines' mods are not packed. A modpack built before 0.2.0-dev.29.18 for a server that runs a ShroudForge
+   or another engine's mod has to be built again after the update. The build record goes to
    `<server>/kiln/data/kiln-network/modpack-build.json`.
 3. **Publish** (`server_modpack_publish(serverId, url)`): the admin uploads the zip anywhere players can reach (https)
    and enters the URL. The launcher writes `modpack {url, sha256, name, version, size}` into `kiln/config/network.json`
