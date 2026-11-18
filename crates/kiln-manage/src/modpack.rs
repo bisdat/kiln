@@ -248,7 +248,7 @@ fn advertised(server_dir: &Path, kind: ModKind, dir: &Path) -> Result<String> {
 /// - Kiln's copy (the launcher synced it to the server, `.kiln-source.json` and the server's receipt; or placed it in
 ///   a game folder, `.kiln-library.json` and the placements receipt) whose files are still the ones placed: the Library
 ///   entry's kdh1. The settings and the switch in it, its logs and the files the mod writes into its folder
-///   (`bin/native-status.txt`) do not count. The files placed are packed.
+///   (`bin/native-status.txt`) do not count. The files placed are packed, with the owner's settings in them.
 /// - Any other folder (the player's own): the kdh1 of its files without logs (`*.log`), ShroudForge's
 ///   `extended.mod.json` (its switch and settings) and the kind's settings files (engine_mods::settings_files). Every
 ///   file but the logs is packed.
@@ -256,9 +256,6 @@ fn advertised(server_dir: &Path, kind: ModKind, dir: &Path) -> Result<String> {
 /// What may change in Kiln's copy without making it another mod is what placement allows ([`left_out`]).
 pub(crate) struct EngineIdentity {
     pub advertised: String,
-    /// The Library entry of Kiln's copy.
-    #[cfg_attr(not(feature = "zip"), allow(dead_code))]
-    pub library: Option<LibraryRef>,
     /// What a modpack packs of the folder: (zip-relative name, file), as [`mod_files`] lists them.
     #[cfg_attr(not(feature = "zip"), allow(dead_code))]
     pub files: Vec<(String, PathBuf)>,
@@ -386,11 +383,11 @@ pub(crate) fn engine_identity(server_dir: &Path, kind: ModKind, dir: &Path) -> R
             .filter(|(_, p)| std::fs::symlink_metadata(p).is_ok_and(|m| m.file_type().is_file()))
             .collect();
         packed.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
-        return Ok(EngineIdentity { advertised: copy.library.hash.clone(), library: Some(copy.library), files: packed });
+        return Ok(EngineIdentity { advertised: copy.library.hash, files: packed });
     }
     let files: Vec<(String, PathBuf)> = mod_files(kind, dir)?.into_iter().filter(|(rel, _)| !crate::settings_files::is_log(rel)).collect();
     let counted: Vec<(String, PathBuf)> = files.iter().filter(|(rel, _)| !left_out(kind, rel, false)).cloned().collect();
-    Ok(EngineIdentity { advertised: crate::hash::of_mod_records(kind, records(&counted)?)?, library: None, files })
+    Ok(EngineIdentity { advertised: crate::hash::of_mod_records(kind, records(&counted)?)?, files })
 }
 
 /// kdh1's records of a list of [`mod_files`].
@@ -492,19 +489,15 @@ fn zip_path(kind: ModKind, id: &str) -> String {
 
 /// Deterministic zip of a server's client mods: `kiln-modpack.json` + `<kind>/<id>/...`, entries sorted bytewise,
 /// one fixed time (the newest file's), mode 0644, deflate level 6. Same input, same bytes, same sha256.
+///
+/// Another engine's mod is packed as the server runs it ([`engine_identity`]): Kiln's copy with the files placed, the
+/// server owner's switch and settings in them, and none of the files the mod wrote there; any other folder with its
+/// files but its logs. When that is not the hash the server advertises (Kiln's copy is advertised by its Library entry,
+/// another folder without its settings), the advertised hash goes into [`ModpackMod::identity`]: a player's launcher of
+/// 0.2.0-dev.29.18 or later accepts either; an older one compares `hash` alone and refuses the pack (the player updates
+/// the launcher).
 #[cfg(feature = "zip")]
 pub fn build(server_dir: &Path, out_dir: &Path, name: &str, version: &str, progress: &mut dyn Progress) -> Result<BuiltModpack> {
-    build_with(None, server_dir, out_dir, name, version, progress)
-}
-
-/// [`build`] with the launcher's data folder: another engine's mod that is the launcher's copy of a Library entry
-/// ([`engine_identity`]) is packed from that entry, as the Library has it, when the entry is there and unchanged. Its
-/// hash is then the one the server advertises, which a player's launcher of any version accepts, and a player who has
-/// that version already has it in the Library. Without it, the copy's placed files are packed (with the server's
-/// switch and settings) and the advertised hash goes into [`ModpackMod::identity`].
-#[cfg(feature = "zip")]
-pub fn build_with(dirs: Option<&DataDirs>, server_dir: &Path, out_dir: &Path, name: &str, version: &str, progress: &mut dyn Progress)
-                  -> Result<BuiltModpack> {
     use std::io::Write;
     if name.trim().is_empty() || name.len() > 128 || version.trim().is_empty() || version.len() > 64 {
         return Err(Error::invalid("modpack name: 1 to 128 characters; version: 1 to 64"));
@@ -522,19 +515,12 @@ pub fn build_with(dirs: Option<&DataDirs>, server_dir: &Path, out_dir: &Path, na
             return Err(err(ErrorCode::Canceled, "canceled"));
         }
         progress.report(Some(i as f32 / mods.len() as f32 * 0.5), &format!("hashing {}", m.id));
-        // another engine's mod: what it advertises, and what is packed of it (engine_identity)
+        // another engine's mod: packed as the server runs it, with the owner's settings, and what it advertises
         let (files, hash, identity) = if m.kind.is_engine() {
             let id = engine_identity(server_dir, m.kind, &m.dir)?;
-            let library = id.library.as_ref().zip(dirs).and_then(|(r, d)| crate::library::path_of(d, r).ok())
-                .filter(|lib| crate::hash::dirhash(lib).ok().as_deref() == Some(id.advertised.as_str()));
-            match library {
-                Some(lib) => (mod_files(m.kind, &lib)?, id.advertised, None),
-                None => {
-                    let hash = crate::hash::of_mod_records(m.kind, records(&id.files)?)?;
-                    let identity = (hash != id.advertised).then_some(id.advertised);
-                    (id.files, hash, identity)
-                }
-            }
+            let hash = crate::hash::of_mod_records(m.kind, records(&id.files)?)?;
+            let identity = (hash != id.advertised).then_some(id.advertised);
+            (id.files, hash, identity)
         } else {
             (mod_files(m.kind, &m.dir)?, crate::hash::of_mod(m.kind, &m.dir)?, None)
         };
@@ -625,12 +611,6 @@ pub fn build_with(dirs: Option<&DataDirs>, server_dir: &Path, out_dir: &Path, na
 pub fn build(server_dir: &Path, out_dir: &Path, name: &str, version: &str, progress: &mut dyn Progress) -> Result<BuiltModpack> {
     let _ = (server_dir, out_dir, name, version, progress);
     Err(err(ErrorCode::Unsupported, "kiln-manage was built without the zip feature"))
-}
-
-#[cfg(not(feature = "zip"))]
-pub fn build_with(_dirs: Option<&DataDirs>, server_dir: &Path, out_dir: &Path, name: &str, version: &str, progress: &mut dyn Progress)
-                  -> Result<BuiltModpack> {
-    build(server_dir, out_dir, name, version, progress)
 }
 
 fn check_url(url: &str, allow_http: bool) -> Result<()> {
@@ -952,30 +932,39 @@ pub fn extract(zip_file: &Path, manifest: &ModpackManifest, staging: &Path) -> R
 }
 
 /// The required mods the server advertised must all be in the modpack (a modpack that does not carry what the server
-/// checks would refuse the player again): a Kiln or native mod with the same hash; another engine's mod with the same
-/// hash or [`ModpackMod::identity`], else in the same version. The server's join never compares other engines' mods
-/// (its HELLO check covers Kiln's own), and what a server advertises for them changed in 0.2.0-dev.29.18
-/// ([`engine_identity`]): a modpack built before then carries the hash of the whole folder as it was at the build, its
-/// settings and logs included, for the very mod the server now names by its Library entry. Only a launcher of
-/// 0.2.0-dev.29.18 or later accepts that; an older one needs the modpack built again.
+/// checks would refuse the player again): a Kiln or native mod with the same hash; another engine's mod (every kind
+/// [`ModKind::is_engine`]) with the same hash or [`ModpackMod::identity`], else in the same version. The server's join
+/// never compares other engines' mods (its HELLO check covers Kiln's own), and from 0.2.0-dev.29.18 a pack carries such a
+/// mod as the server runs it, with the owner's settings, while the server advertises what stays the same while it runs
+/// ([`engine_identity`]); a pack built before then carries the hash of the whole folder at the build. A launcher before
+/// 0.2.0-dev.29.18 compares `hash` alone and refuses both: its player updates the launcher.
+///
+/// The refusal says what to do, in that order: a kind of mod this launcher does not know, update the launcher; a mod the
+/// pack lacks or has in another version, update the launcher, and if it is up to date, ask the server's owner to build
+/// the modpack again.
 pub fn check_against(manifest: &ModpackManifest, required: &[RequiredMod]) -> Result<()> {
     let carries = |r: &RequiredMod| {
         let kind = r.kind.unwrap_or(ModKind::Kiln);
         manifest.mods.iter().any(|m| m.kind == kind && m.id == r.id
             && (m.hash == r.hash || m.identity.as_ref() == Some(&r.hash) || (kind.is_engine() && m.version == r.version)))
     };
-    let bad: Vec<String> = required
-        .iter()
-        .filter(|r| r.unknown_kind.is_some() || !carries(r))
-        .map(|r| format!("{} {} ({})", r.id, r.version, r.hash))
-        .collect();
-    if bad.is_empty() {
-        Ok(())
-    } else {
-        Err(err(ErrorCode::HashMismatch, format!(
-            "the modpack does not carry what the server runs now: {}. It is older than the server's mods: ask the server's owner to build the \
-             modpack again and publish it", bad.join(", "))).with_detail(serde_json::json!(bad)))
+    let named = |r: &RequiredMod| format!("{} {} ({})", r.id, r.version, r.hash);
+    let unknown: Vec<String> = required.iter().filter(|r| r.unknown_kind.is_some()).map(named).collect();
+    let lacking: Vec<String> = required.iter().filter(|r| r.unknown_kind.is_none() && !carries(r)).map(named).collect();
+    if unknown.is_empty() && lacking.is_empty() {
+        return Ok(());
     }
+    let mut text = Vec::new();
+    if !unknown.is_empty() {
+        text.push(format!("The server runs a kind of mod this launcher does not know: {}. Update the Kiln launcher.", unknown.join(", ")));
+    }
+    if !lacking.is_empty() {
+        text.push(format!(
+            "The modpack does not have what the server runs now: {}. Update the Kiln launcher and try again. If the launcher is up to date, ask \
+             the server's owner to build the modpack again and publish it.", lacking.join(", ")));
+    }
+    let bad: Vec<String> = unknown.into_iter().chain(lacking).collect();
+    Err(err(ErrorCode::HashMismatch, text.join(" ")).with_detail(serde_json::json!(bad)))
 }
 
 /// Consent -> download (or a local zip) -> zip sha256 -> kiln-modpack.json -> each mod's kdh1 -> library import ->
@@ -1134,10 +1123,31 @@ mod tests {
         // another version of the engine mod, or a Kiln mod with another hash: the owner builds the modpack again
         let e = check_against(&manifest, &[need(ModKind::ShroudForge, "unifiedemltweaks", "2.2.0", h('c'))]).unwrap_err();
         assert_eq!(e.code, ErrorCode::HashMismatch);
-        assert!(e.message.contains("unifiedemltweaks 2.2.0") && e.message.contains("ask the server's owner to build the modpack again"), "{}", e.message);
+        assert!(e.message.contains("unifiedemltweaks 2.2.0") && e.message.contains("Update the Kiln launcher and try again")
+            && e.message.contains("ask the server's owner to build the modpack again"), "{}", e.message);
         assert_eq!(check_against(&manifest, &[need(ModKind::Kiln, "isle-icons", "1.1.0", h('d'))]).unwrap_err().code, ErrorCode::HashMismatch);
         // an engine mod the modpack does not carry at all
         assert!(check_against(&manifest, &[need(ModKind::Set, "unifiedemltweaks", "2.1.1", h('a'))]).is_err());
+        // a kind this launcher does not know (a newer server's): update the launcher
+        let newer = RequiredMod { kind: None, unknown_kind: Some("newkind".into()), ..need(ModKind::Kiln, "thing", "1.0.0", h('e')) };
+        let e = check_against(&manifest, &[newer]).unwrap_err();
+        assert!(e.message.contains("does not know: thing 1.0.0") && e.message.contains("Update the Kiln launcher."), "{}", e.message);
+        // every other engine's kind: carried in the server's version whatever its hash, or by its identity
+        for kind in ModKind::ALL.into_iter().filter(|k| k.is_engine()) {
+            let mut pack = manifest.clone();
+            pack.mods = vec![packed(kind, "some-mod", "1.0.0", h('a'))];
+            check_against(&pack, &[need(kind, "some-mod", "1.0.0", h('b'))]).unwrap_or_else(|e| panic!("{kind:?}: {}", e.message));
+            pack.mods[0].version = "0.9.0".into();
+            assert!(check_against(&pack, &[need(kind, "some-mod", "1.0.0", h('b'))]).is_err(), "{kind:?}");
+            pack.mods[0].identity = Some(h('b'));
+            check_against(&pack, &[need(kind, "some-mod", "1.0.0", h('b'))]).unwrap_or_else(|e| panic!("{kind:?} identity: {}", e.message));
+        }
+        // Kiln's own kinds keep the hash check
+        for kind in ModKind::CORE.into_iter().filter(|k| *k != ModKind::Plugin) {
+            let mut pack = manifest.clone();
+            pack.mods = vec![packed(kind, "some-mod", "1.0.0", h('a'))];
+            assert!(check_against(&pack, &[need(kind, "some-mod", "1.0.0", h('b'))]).is_err(), "{kind:?}");
+        }
     }
 
     #[test]

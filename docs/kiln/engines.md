@@ -438,9 +438,9 @@ engines' mods") and 5.8.
   receipt outside it: `library-placements.json` or the server's `server-library.json`) is advertised by its Library
   entry's kdh1; any other folder by the kdh1 of its files without logs (`*.log`), ShroudForge's `extended.mod.json` and
   the kind's settings files. Before, it was the kdh1 of the whole folder with the player's settings and what the mod
-  writes there (logs, `bin/native-status.txt`), so it changed every minute and was never the Library's. A modpack carries
-  what is advertised: the launcher packs the Library entry of Kiln's copy (`modpack::build_with`), else the placed files
-  with the advertised hash in the mod's `identity`. The rule in full (which receipt entries count, what may change, an
+  writes there (logs, `bin/native-status.txt`), so it changed every minute and was never the Library's. A modpack packs the
+  mod as the server runs it, with the owner's settings and without the files the mod wrote, and names the advertised
+  hash as the mod's `identity` when its own kdh1 is another (`modpack::build`). The rule in full (which receipt entries count, what may change, an
   EMF mod keeping the kdh1 of its folder) is the head of `schema/fixtures/engine-identity/engine_identity.py`, a Python
   reference whose `cases.json` (34 trees and their hashes) both Kiln.Network's and kiln-manage's tests read. Files the
   mod adds next to Kiln's copy (a status file, a second DLL) do not make it another mod; a file Kiln placed that changed

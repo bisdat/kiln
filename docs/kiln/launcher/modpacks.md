@@ -21,18 +21,19 @@ launcher downloads, checks and installs it into a profile. Formats: [contracts.m
    who gets a mod with a cook recipe from a pack has to cook it (`kiln cook`) for its models and animations: the
    launcher does not cook yet. The manifest has the server's id and name (the
    id file is created in Kiln.Network's format if the server never ran), `kiln: ">=<the server's Kiln>"`, and each mod's
-   kind, id, version, name, path, kdh1, clients, side. Another engine's mod that is the launcher's copy of a Library
-   entry is packed from that entry, so its kdh1 is the one the server advertises (0.2.0-dev.29.18); the pack then has
-   that entry's own settings (a ShroudForge mod's `extended.mod.json` as shipped), not the values set on the server,
-   which a pack before 0.2.0-dev.29.18 carried; one without its
-   Library entry is packed as placed, without the files the mod wrote, and gets `identity`, the hash the server
-   advertises for it, which a player's launcher accepts beside `hash` (an older launcher only `hash`). Logs (`*.log`)
-   of other engines' mods are not packed. A modpack built before 0.2.0-dev.29.18 for a server that runs a ShroudForge
-   or another engine's mod still installs for players whose launcher is 0.2.0-dev.29.18 or later (the engine mod's
-   version is enough, below); a player's older launcher compares the hash and refuses it once the server runs
-   0.2.0-dev.29.18 ("the modpack lacks what the server requires"), so build it again after updating the server. Built
-   from the Library entry, it then installs for older launchers too. The build record goes to
+   kind, id, version, name, path, kdh1, clients, side. Another engine's mod is packed as the server runs it
+   (0.2.0-dev.29.18): Kiln's copy with the files it placed and the owner's switch and settings in them (a ShroudForge
+   mod's `extended.mod.json`, an EML mod's `config.txt`), never the files the mod wrote there, and a folder of the
+   owner's own with every file but its logs (`*.log`). Its kdh1 is then often not what the server advertises (that leaves
+   the settings out), so the mod also gets `identity`, the advertised hash. The build record goes to
    `<server>/kiln/data/kiln-network/modpack-build.json`.
+
+   **Which launcher installs which pack.** A pack built by 0.2.0-dev.29.18 or later, and a pack built before it, both
+   install with a player's launcher of 0.2.0-dev.29.18 or later. A player's older launcher compares `hash` alone. So it
+   refuses a pack whose engine mod has an `identity`. It also refuses an older pack once the server runs
+   0.2.0-dev.29.18 and advertises that mod by another hash (Kiln's copy, or a folder with settings files). It says "the
+   modpack lacks what the server requires". The fix is the same for both: the player updates the Kiln launcher. The
+   pack does not have to be built again for this.
 3. **Publish** (`server_modpack_publish(serverId, url)`): the admin uploads the zip anywhere players can reach (https)
    and enters the URL. The launcher writes `modpack {url, sha256, name, version, size}` into `kiln/config/network.json`
    by editing only that value (comments and other keys stay) and asks a running server to re-read it (`network_reload`).
@@ -63,8 +64,10 @@ launcher downloads, checks and installs it into a profile. Formats: [contracts.m
    - when last-server.json is about this server: every mod the server requires must be in the pack: a Kiln or native
      mod with the same hash; another engine's mod with the same hash or `identity`, or else in the same version
      (0.2.0-dev.29.18: the server's join never compares other engines' mods, and a pack built before 0.2.0-dev.29.18
-     carries an older hash of the very same mod). Otherwise `hash_mismatch`, and the message names the mods and says to
-     ask the server's owner to build the modpack again and publish it;
+     carries an older hash of the very same mod). Otherwise `hash_mismatch`. The message names the mods and says what to
+     do, in order: update the Kiln launcher and try again; if the launcher is up to date, ask the server's owner to build
+     the modpack again and publish it. A kind of mod the launcher does not know (a newer server's) says to update the
+     launcher;
    - unpack into `<data>/modpacks/staging/<random>/`, kdh1 checked again on disk, `library::import`;
    - the profile bound to the server id (reused), else a new "Server: <name>", with exactly the pack's mods and
      `server {id, name, address, modpack}`;

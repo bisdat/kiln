@@ -191,10 +191,8 @@ pub async fn server_modpack_status(server_id: String) -> Result<ModpackPublishSt
 pub async fn server_modpack_build(app: AppHandle, server_id: String, name: String, version: String) -> Result<TaskId, Error> {
     Ok(spawn_task(&app, "server_modpack_build", format!("Building modpack {name} {version}"), move |p| {
         let inst = instance::get(&server_id)?;
-        let dirs = dirs()?;
-        let out = dirs.root.join("modpacks").join("built").join(&inst.id);
-        // engine mods the launcher synced to the server are packed from the Library (modpack::build_with)
-        to_value(kiln_manage::modpack::build_with(Some(&dirs), inst.local_dir()?, &out, &name, &version, p)?)
+        let out = dirs()?.root.join("modpacks").join("built").join(&inst.id);
+        to_value(kiln_manage::modpack::build(inst.local_dir()?, &out, &name, &version, p)?)
     }))
 }
 

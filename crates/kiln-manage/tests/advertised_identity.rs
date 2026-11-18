@@ -1,7 +1,8 @@
 //! What a server advertises for another engine's mod stays the same while the mod runs (inbox 84): the launcher's copy
 //! is advertised by its Library entry's kdh1, whatever the mod writes into its folder and whatever the owner sets; a
-//! folder of the owner's own by its files without logs and settings. The modpack built from the server carries what it
-//! advertises (Kiln.Network AdvertiseIdentity.cs computes the same hash in the game).
+//! folder of the owner's own by its files without logs and settings. The modpack built from the server carries the mod as
+//! the server runs it, with the owner's settings, and what the server advertises as its identity (Kiln.Network
+//! AdvertiseIdentity.cs computes the same hash in the game).
 #![cfg(all(unix, feature = "zip", feature = "server"))]
 
 use kiln_manage::library::{self, LibraryRef};
@@ -64,7 +65,7 @@ fn sf_hash(server: &Path) -> String {
 }
 
 #[test]
-fn a_synced_copy_is_advertised_by_its_library_entry_and_its_modpack_carries_that() {
+fn a_synced_copy_is_advertised_by_its_library_entry_and_its_modpack_carries_the_owners_settings() {
     let t = tmp("synced");
     let dirs = DataDirs::at(t.0.join("data"));
     let r = library::import(&dirs, &[package(&t.0)], &mut NoProgress).unwrap();
@@ -80,23 +81,19 @@ fn a_synced_copy_is_advertised_by_its_library_entry_and_its_modpack_carries_that
     run(&copy);
     assert_eq!(sf_hash(&server), lib.hash);
 
-    // the launcher's modpack packs the Library entry: its hash is what the server advertises, for any player's launcher
-    let built = modpack::build_with(Some(&dirs), &server, &t.0.join("out"), "Isles", "1", &mut NoProgress).unwrap();
-    let m = built.manifest.mods.iter().find(|m| m.id == "unifiedemltweaks").unwrap();
-    assert_eq!((&m.hash, &m.identity), (&lib.hash, &None));
-    let verified = modpack::verify(&built.file, Some(&built.sha256)).unwrap();
-    modpack::check_against(&verified, &modpack::required(&server).unwrap()).unwrap();
-    // without the Library (an older build call): the placed files, and what the server advertises beside their hash
-    let built = modpack::build(&server, &t.0.join("out2"), "Isles", "1", &mut NoProgress).unwrap();
+    // the modpack packs the copy as the server runs it: the owner's switch and settings, not the files the mod wrote;
+    // its hash is those files', and what the server advertises is its identity (a launcher of 0.2.0-dev.29.18 or later)
+    let built = modpack::build(&server, &t.0.join("out"), "Isles", "1", &mut NoProgress).unwrap();
     let m = built.manifest.mods.iter().find(|m| m.id == "unifiedemltweaks").unwrap();
     assert_ne!(m.hash, lib.hash);
     assert_eq!(m.identity.as_deref(), Some(lib.hash.as_str()));
     let verified = modpack::verify(&built.file, Some(&built.sha256)).unwrap();
     modpack::check_against(&verified, &modpack::required(&server).unwrap()).unwrap();
-    // the files the mod wrote are not packed
     let names = zip_names(&built.file);
     assert!(names.iter().any(|n| n == "shroudforge/unifiedemltweaks/bin/ut_native.dll"), "{names:?}");
     assert!(!names.iter().any(|n| n.ends_with("ut_native.log") || n.ends_with("native-status.txt")), "{names:?}");
+    let ext: serde_json::Value = serde_json::from_slice(&zip_file(&built.file, "shroudforge/unifiedemltweaks/extended.mod.json")).unwrap();
+    assert_eq!((&ext["enabled"], &ext["settings"]["speed"]["value"]), (&serde_json::json!(true), &serde_json::json!(8)), "the owner's switch and setting");
 
     // its code changed on the server: no longer the Library's files, so not advertised as them
     put(&copy, "src/mod.lua", b"return { edited = true }");
@@ -129,9 +126,11 @@ fn an_owners_own_folder_is_advertised_without_its_logs_and_settings() {
 
 /// Launchers and servers of 0.2.0-dev.29.17 and 0.2.0-dev.29.18 together, for a server with Kiln's copy of a
 /// ShroudForge mod. 0.2.0-dev.29.17 advertised the kdh1 of the whole folder (Kiln.Network DirHash.Compute, the same as
-/// hash::dirhash: schema/fixtures/dirhash), built modpacks with that hash, and installed one only when each required
-/// hash was a mod's hash in it. The join never compares engine mods in either version, so only modpack installs can
-/// be refused; this is who is.
+/// hash::dirhash: schema/fixtures/dirhash), built modpacks of the whole folder with that hash, and installed one only
+/// when each required hash was a mod's hash in it. 0.2.0-dev.29.18 advertises the Library entry, packs the copy as the
+/// server runs it (the owner's settings, not the files the mod wrote) with the advertised hash as its identity, and
+/// installs a pack whose engine mod has that hash, that identity or the server's version. The join never compares
+/// engine mods in either version, so only modpack installs can be refused; this is who is.
 #[test]
 fn modpacks_between_0_2_0_dev_29_17_and_0_2_0_dev_29_18() {
     let t = tmp("compat");
@@ -146,10 +145,10 @@ fn modpacks_between_0_2_0_dev_29_17_and_0_2_0_dev_29_18() {
     let old_server = || -> Vec<kiln_manage::state::RequiredMod> {
         new_server().into_iter().map(|mut r| { r.hash = kiln_manage::hash::dirhash(&copy).unwrap(); r }).collect()
     };
-    // a modpack as each launcher version builds it (only the manifest matters to the install check)
-    let new_pack = modpack::verify(&modpack::build_with(Some(&dirs), &server, &t.0.join("out"), "Isles", "1", &mut NoProgress).unwrap().file, None).unwrap();
+    // a modpack as each launcher version builds it, now (only the manifest matters to the install check)
+    let new_pack = || modpack::verify(&modpack::build(&server, &t.0.join("out"), "Isles", "1", &mut NoProgress).unwrap().file, None).unwrap();
     let old_pack = || {
-        let mut m = new_pack.clone();
+        let mut m = new_pack();
         for x in &mut m.mods { x.hash = kiln_manage::hash::dirhash(&copy).unwrap(); x.identity = None; }
         m
     };
@@ -159,21 +158,35 @@ fn modpacks_between_0_2_0_dev_29_17_and_0_2_0_dev_29_18() {
     let new_check = |m: &modpack::ModpackManifest, req: &[kiln_manage::state::RequiredMod]| modpack::check_against(m, req).is_ok();
 
     // a mod that writes nothing into its folder
-    let built_17 = old_pack();
+    let (built_17, built_18) = (old_pack(), new_pack());
     assert!(old_check(&built_17, &old_server()) && new_check(&built_17, &old_server()), "29.17 pack, 29.17 server: as before");
-    assert!(!old_check(&built_17, &new_server()), "29.17 pack, 29.18 server, 29.17 launcher: refused (build it again)");
+    assert!(!old_check(&built_17, &new_server()), "29.17 pack, 29.18 server, 29.17 launcher: refused (update the launcher)");
     assert!(new_check(&built_17, &new_server()), "29.17 pack, 29.18 server, 29.18 launcher: installs");
-    assert!(old_check(&new_pack, &new_server()) && new_check(&new_pack, &new_server()), "29.18 pack, 29.18 server: every launcher");
-    assert!(!old_check(&new_pack, &old_server()), "29.18 pack, 29.17 server, 29.17 launcher: refused (update the server)");
-    assert!(new_check(&new_pack, &old_server()), "29.18 pack, 29.17 server, 29.18 launcher: installs");
+    assert!(!old_check(&built_18, &new_server()), "29.18 pack, 29.18 server, 29.17 launcher: refused (update the launcher)");
+    assert!(new_check(&built_18, &new_server()), "29.18 pack, 29.18 server, 29.18 launcher: installs");
+    assert!(old_check(&built_18, &old_server()), "29.18 pack, 29.17 server, 29.17 launcher: installs (the same files)");
+    assert!(new_check(&built_18, &old_server()), "29.18 pack, 29.17 server, 29.18 launcher: installs");
 
     // a mod that writes logs and a status file while it runs, and an owner who changes a setting
     run(&copy);
     assert!(!old_check(&built_17, &old_server()), "29.17 pack, 29.17 server: refused a minute later already (the old bug)");
-    assert!(new_check(&built_17, &old_server()) && new_check(&built_17, &new_server()), "29.18 launcher: installs");
-    assert!(old_check(&new_pack, &new_server()) && new_check(&new_pack, &new_server()), "29.18 pack, 29.18 server: still every launcher");
+    assert!(!old_check(&built_18, &old_server()), "29.18 pack, 29.17 server, 29.17 launcher: refused once the mod wrote its logs");
+    assert!(new_check(&built_17, &old_server()) && new_check(&built_17, &new_server()), "29.17 pack, 29.18 launcher: installs");
+    assert!(new_check(&built_18, &old_server()) && new_check(&built_18, &new_server()), "29.18 pack, 29.18 launcher: installs");
+    // built again now: the owner's new setting, and still what a 29.18 launcher installs from either server
+    let rebuilt = new_pack();
+    assert!(new_check(&rebuilt, &new_server()) && new_check(&rebuilt, &old_server()) && !old_check(&rebuilt, &new_server()));
+    assert_ne!(rebuilt.mods[0].hash, built_18.mods[0].hash, "the setting it carries changed");
     // the join itself: last-server.json's required list is informational for engine mods on both sides
     assert_eq!(new_server()[0].hash, lib.hash);
+}
+
+fn zip_file(file: &Path, name: &str) -> Vec<u8> {
+    use std::io::Read;
+    let mut z = zip::ZipArchive::new(std::fs::File::open(file).unwrap()).unwrap();
+    let mut out = Vec::new();
+    z.by_name(name).unwrap().read_to_end(&mut out).unwrap();
+    out
 }
 
 fn zip_names(file: &Path) -> Vec<String> {
