@@ -20,10 +20,12 @@ public sealed unsafe class ImageTrimTests : IDisposable
     private static bool _clicks;
     private static UiNative.TableImageEx* _tail;
     private readonly List<int> _buckets = [];
+    private readonly IKilnBackend _previous;
     private ulong _next = 100;
 
     public ImageTrimTests()
     {
+        _previous = Backend.Current;
         FakeUi.FakeUiTable.Install();
         Backend.Current = new FakeUi.FakeUiTable.Backend();
         UiNative.ResetForTests();
@@ -53,7 +55,9 @@ public sealed unsafe class ImageTrimTests : IDisposable
     public void Dispose()
     {
         ItemIcons.ResetForTests();
+        Backend.Current = _previous;
         UiNative.ResetForTests();
+        FakeUi.FakeUiTable.Free();
         NativeMemory.Free(_tail);
         _tail = null;
     }

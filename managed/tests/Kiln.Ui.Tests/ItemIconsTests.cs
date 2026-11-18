@@ -279,6 +279,29 @@ public sealed class ItemIconsTests : IDisposable
         Assert.Null(ContentNames.FindNow(0x5));                              // read less than 2 s ago: not again
     }
 
+    [Fact]
+    public void FindNowOnSeveralWorkersAnswersWhatTheirReadFound()
+    {
+        // a worker that missed and looked again just after the read ended saw no read running and a fresh read time,
+        // and answered null for the item that read had found (the test above failed now and then on its FindNow)
+        var listing = $$"""[{"kind": "item", "guid": "{{Mine}}", "id": "0x{{NewContent.IdOf(Mine):x8}}", "name": "frost_edge", "state": "registered"}]""";
+        var misses = 0;
+        for (var round = 0; round < 300; round++)
+        {
+            ContentNames.ResetForTests();
+            ContentNames.ListingOverride = () => listing;
+            using var start = new Barrier(8);
+            var workers = Enumerable.Range(0, 8).Select(_ => new Thread(() =>
+            {
+                start.SignalAndWait();
+                if (ContentNames.FindNow(NewContent.IdOf(Mine)) == null) Interlocked.Increment(ref misses);
+            })).ToList();
+            workers.ForEach(t => t.Start());
+            workers.ForEach(t => t.Join());
+        }
+        Assert.Equal(0, misses);
+    }
+
     // ---- review of 0.2.0-dev.29.15: the overlay's image budget, failed uploads, wasted reads ----
 
     private static string RepoRoot([CallerFilePath] string source = "")
