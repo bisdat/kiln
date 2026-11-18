@@ -282,6 +282,7 @@ struct StatusIn {
     bool failed = false;            // the chosen backend failed this session (fell back)
     Why why = Why::none;            // the chosen backend's own reason (files, device, load...), none when fine
     Running backend_running = Running::off;  // what the backend says it runs (while started)
+    bool device_ready = false;      // the start's backend is set up on the game's Vulkan device (device_ready said yes)
 };
 struct StatusOut {
     Running running = Running::off;
@@ -316,6 +317,9 @@ inline StatusOut decide_status(const StatusIn& s) {
     o.running = Running::game_fsr3;
     if (s.failed) o.why = s.why != Why::none ? s.why : Why::runtime_failed;
     else if (s.why != Why::none) o.why = s.why;
+    // nothing went wrong that Kiln saw, yet the backend is not on the game's device: Kiln never saw the game make its
+    // instance or device (its Vulkan hooks came after them). Waiting would last for ever.
+    else if (!s.device_ready && s.chosen == s.hooked_for) o.why = Why::no_vulkan;
     else o.why = Why::waiting;
     return o;
 }

@@ -1002,6 +1002,7 @@ void upscale_status(KilnUiGraphicsStatus* out) {
     in.latched = static_cast<Choice>(g_latched.load());
     in.started = kiln_live && in.latched == g_start;
     in.backend_running = static_cast<Running>(g_running.load());
+    in.device_ready = g_device_ready.load();
     if (!g_started.load() && chosen != Choice::game) in.why = Why::restart;
     const StatusOut o = decide_status(in);
     out->upscale_running = static_cast<uint32_t>(o.running);

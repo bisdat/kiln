@@ -313,8 +313,16 @@ static void status() {
     in.fsr_seen = true;
     o = st(in);
     CHECK(o.running == Running::game_fsr3 && o.why == Why::files_missing);
-    // ready, waiting for the next set-up
+    // no reason of the backend's own, but Kiln never saw the game's device made (its Vulkan hooks came after it): not
+    // "waiting" (it would wait for ever), NO_VULKAN
     in.why = Why::none;
+    o = st(in);
+    CHECK(o.running == Running::game_fsr3 && o.why == Why::no_vulkan);
+    in.fsr_seen = false;  // the game not upscaling with FSR 3: nothing to say yet
+    CHECK(st(in).running == Running::not_fsr && st(in).why == Why::none);
+    in.fsr_seen = true;
+    // ready, waiting for the next set-up
+    in.device_ready = true;
     o = st(in);
     CHECK(o.running == Running::game_fsr3 && o.why == Why::waiting);
     // running FSR 4
