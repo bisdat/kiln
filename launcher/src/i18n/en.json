@@ -4674,8 +4674,10 @@
         "sentToast": "Results sent",
         "sentToastDetail": "They're in the build's post in #testing. The team marks them when they've read them.",
         "how": "How",
-        "untried": "Try each step, or mark it Couldn't try."
-      }
+        "untried": "Try each step, or mark it Couldn't try.",
+        "more": "More for this test build"
+      },
+      "unknown": "Not known"
     },
     "deck": {
       "tab": "Community",
