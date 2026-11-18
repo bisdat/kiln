@@ -104,3 +104,8 @@ export function DeckCommunityRow() {
       onClick={() => { setCommunity(qc, { shown: !on }).catch((e) => toast.error(e)); }} />
   );
 }
+
+/** The i18n key part of a kind ("other" reads as a plural form to the i18n check, so its texts are "something"). */
+export const kindKey = (k: ProblemKind) => (k === "other" ? "something" : k);
+/** The i18n key part of a Deck "when" pick ("other" is "another"). */
+export const whenKey = (w: string) => (w === "other" ? "another" : w);

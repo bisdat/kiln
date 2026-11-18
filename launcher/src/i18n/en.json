@@ -4485,7 +4485,7 @@
       "crash": "The game crashes",
       "launcher": "The launcher",
       "server": "My server",
-      "other": "Something else"
+      "something": "Something else"
     },
     "send": {
       "title": "Send to Kiln support",
@@ -4497,7 +4497,7 @@
         "crash": "The game crashes when I open the map",
         "launcher": "The launcher shows a black window",
         "server": "My server turns away players with Kiln",
-        "other": "Say it in a few words"
+        "something": "Say it in a few words"
       },
       "lineCount": "{count} of {max}",
       "lineNeeded": "Write one line first.",
@@ -4705,7 +4705,7 @@
         "load": "when I load a world",
         "play": "while I play",
         "join": "when I join a server",
-        "other": "at another time"
+        "another": "at another time"
       },
       "titles": {
         "noload": "Kiln doesn't load",
@@ -4713,7 +4713,7 @@
         "crash": "The game crashes",
         "launcher": "The launcher has a problem",
         "server": "My server has a problem",
-        "other": "Something is wrong"
+        "something": "Something is wrong"
       },
       "what": "What went wrong?",
       "check": "Check and send",
