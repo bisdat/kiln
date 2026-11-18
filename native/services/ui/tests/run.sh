@@ -12,6 +12,12 @@ bash "$here/run-window-constraints.sh"
 # parameter slots (frame_pacer.h, graphics_settings.h, graphics_aside.h, ngx_param.h): plain logic
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -I"$here/../../../third_party" "$here/graphics_test.cpp" -o "$out/graphics_test"
 "$out/graphics_test" "$out"
+# the upscaler swap (phase B): kiln.json "upscaler", the game's FSR description and Kiln's render command, history,
+# contexts, the status, AMD FSR's device needs and dispatch mapping (upscale_logic.h, upscale_amd_map.h): plain logic
+g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -DVK_NO_PROTOTYPES '-D__declspec(x)=' -I"$here/../../../third_party" \
+    -I"$here/../../../third_party/imgui/vulkan-headers/include" -I"$here/../../../third_party/ffx" -I"$here/../../../core/abi" \
+    "$here/upscale_test.cpp" -o "$out/upscale_test"
+"$out/upscale_test" "$out"
 # the overlay's image budget: the descriptor pool holds every image Kiln lets exist, uploads spread over frames (image_budget.h)
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/image_budget_test.cpp" -o "$out/image_budget_test"
 "$out/image_budget_test" "$here/../vk.cpp"

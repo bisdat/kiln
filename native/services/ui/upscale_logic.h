@@ -203,13 +203,30 @@ inline const char* check_frame(const Frame& f, std::string* detail) {
 // quality, ...) only drops history.
 inline bool same_context(const CreateInfo& a, const CreateInfo& b) {
     return a.max_render_width == b.max_render_width && a.max_render_height == b.max_render_height && a.output_width == b.output_width &&
-           a.output_height == b.output_height && a.amd == b.amd && a.color_format == b.color_format && a.output_format == b.output_format;
+           a.output_height == b.output_height && a.output_texture_width == b.output_texture_width &&
+           a.output_texture_height == b.output_texture_height && a.amd == b.amd && a.color_format == b.color_format &&
+           a.output_format == b.output_format;
 }
-// A frame whose textures are larger than the context was made for (the game grew them without an Fsr3Create): make it
-// again for the textures' sizes.
+// The context fits this frame: its textures are no larger than it was made for, and the upscale size is the one it was
+// made with (XeSS takes no other; the game changes it only with an Fsr3Create, but a frame is never trusted to).
 inline bool frame_fits(const CreateInfo& ci, const Frame& f) {
-    return f.color.width <= ci.max_render_width && f.color.height <= ci.max_render_height && f.output_width <= ci.output_width &&
-           f.output_height <= ci.output_height;
+    return f.color.width <= ci.max_render_width && f.color.height <= ci.max_render_height && f.output_width == ci.output_width &&
+           f.output_height == ci.output_height && f.output.width <= ci.output_texture_width && f.output.height <= ci.output_texture_height;
+}
+// The context for a frame's sizes and formats.
+inline CreateInfo context_for(const Frame& f, AmdPin pin) {
+    CreateInfo ci;
+    ci.max_render_width = f.color.width;
+    ci.max_render_height = f.color.height;
+    ci.output_width = f.output_width;
+    ci.output_height = f.output_height;
+    ci.output_texture_width = f.output.width;
+    ci.output_texture_height = f.output.height;
+    ci.ratio = f.render_width ? static_cast<float>(f.output_width) / static_cast<float>(f.render_width) : 0;
+    ci.amd = pin;
+    ci.color_format = f.color.format;
+    ci.output_format = f.output.format;
+    return ci;
 }
 
 // History is dropped on the first frame after a create, after a world load, when the render or output size changes

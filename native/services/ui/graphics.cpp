@@ -43,6 +43,7 @@
 #include "safetyhook.hpp"
 #include "ui.h"
 #include "ui_text.h"
+#include "upscale_logic.h"
 
 namespace kui {
 
@@ -504,6 +505,11 @@ std::string describe(const gfx::Settings& s) {
         out += b;
     }
     if (s.readout) out += out.empty() ? "readout on" : ", readout on";
+    if (s.upscaler != gfx::Upscaler::game) {
+        out += out.empty() ? "" : ", ";
+        out += std::string("upscaler ") + gfx::upscaler_name(s.upscaler);
+        if (s.upscaler == gfx::Upscaler::amd && s.amd_pin == gfx::AmdPin::fsr3) out += " (FSR 3.1 pinned)";
+    }
     return out.empty() ? "all off" : out;
 }
 
@@ -563,6 +569,11 @@ void graphics_start(bool optiscaler, bool streamline) {
         g_started = true;
     }
     publish(s);
+    {
+        std::string found;
+        for (const auto& f : files.files) found += (found.empty() ? "" : ", ") + f;
+        upscale_start(s, g_aside, found);  // upscale.cpp: nothing unless an upscaler other than the game's own is chosen
+    }
     std::string line = describe(s);
     if (g_ngx_wanted) line += "; DLSS is hooked when the game loads NVIDIA's DLSS core";
     if (const uint32_t aside = g_aside & gfx::kAsideDlss) {
@@ -659,10 +670,33 @@ void graphics_present() {
     g_frame_ms.store(g_stats.frame_ms(), std::memory_order_relaxed);
 }
 
+// The upscaler swap's line (phase B): what upscales behind the game's FSR 3 option, else why the chosen one does not.
+static void upscale_readout(const KilnUiGraphicsStatus& st) {
+    const auto running = static_cast<upscale::Running>(st.upscale_running);
+    const std::string render = fmt_size(st.upscale_render_width, st.upscale_render_height);
+    const std::string output = fmt_size(st.upscale_output_width, st.upscale_output_height);
+    if (running == upscale::Running::amd_fsr4 || running == upscale::Running::amd_fsr3 || running == upscale::Running::xess) {
+        std::string name = upscale::running_name(running);
+        if (st.upscale_version) name += " (" + upscale::version_text(st.upscale_version) + ")";
+        ImGui::TextUnformatted(text::fill(text::get("native.graphics.upscale"), {{"upscaler", name}, {"render", render}, {"output", output}}).c_str());
+        return;
+    }
+    if (running == upscale::Running::game_fsr3)
+        ImGui::TextUnformatted(text::fill(text::get("native.graphics.upscale"), {{"upscaler", text::get("native.graphics.game_fsr3")},
+            {"render", render}, {"output", output}}).c_str());
+    if (st.upscale_reason) {
+        const auto chosen = static_cast<gfx::Upscaler>(st.upscaler);
+        const std::string key = "native.graphics.why." + std::to_string(st.upscale_reason);
+        std::string why = text::get(key);
+        if (why.empty() || why == key) why = upscale::why_text(static_cast<upscale::Why>(st.upscale_reason));
+        ImGui::TextUnformatted(text::fill(text::get("native.graphics.upscale_why"), {{"upscaler", gfx::upscaler_name(chosen)}, {"why", why}}).c_str());
+    }
+}
+
 void graphics_overlay() {
     if (!g_readout.load(std::memory_order_relaxed)) return;
     KilnUiGraphicsStatus st{};
-    st.size = sizeof st;
+    st.size = sizeof st;  // the whole struct: the upscaler's fields too
     graphics_status(&st);
     const ImVec2 ds = ImGui::GetIO().DisplaySize;
     const float pad = 10.0f * style_scale();
@@ -689,6 +723,7 @@ void graphics_overlay() {
             // DLSS hooked and not in use now, or the game never set DLSS up (another GPU, or another upscaler chosen)
             ImGui::TextUnformatted(text::fill(text::get("native.graphics.not_dlss"), {{"output", output}}).c_str());
         }
+        if (st.upscale_flags & KILN_UI_UPSCALE_HOOKED || st.upscaler != KILN_UI_UPSCALER_GAME) upscale_readout(st);
         if (st.fps_cap) {
             if (st.aside_cap)
                 ImGui::TextUnformatted(text::fill(text::get("native.graphics.cap_aside"), {{"fps", std::to_string(st.fps_cap)},
@@ -709,6 +744,8 @@ KilnResult graphics_set(const KilnUiGraphics* in) {
     s.custom_scale = in->custom_scale;
     for (size_t i = 0; i < 4; ++i) s.mode_scale[i] = in->mode_scale[i];
     s.readout = in->readout != 0;
+    s.upscaler = static_cast<gfx::Upscaler>(in->upscaler);
+    s.amd_pin = static_cast<gfx::AmdPin>(in->amd_upscaler);
     s = gfx::clamped(s);
     bool say = false;
     {
@@ -716,13 +753,14 @@ KilnResult graphics_set(const KilnUiGraphics* in) {
         static uint64_t last_said = 0;
         const uint64_t t = now_ms();
         if (s != g_settings && (t - last_said >= 2000 || s.dlss_preset != g_settings.dlss_preset || s.dlss_scale != g_settings.dlss_scale ||
-                                s.readout != g_settings.readout)) {
+                                s.readout != g_settings.readout || s.upscaler != g_settings.upscaler || s.amd_pin != g_settings.amd_pin)) {
             say = true;
             last_said = t;
         }
         g_settings = s;
     }
     publish(s);
+    upscale_settings(s);
     if (say) logf(KILN_LOG_INFO, "graphics: settings now: %s", describe(s).c_str());
     return KILN_OK;
 }
@@ -767,6 +805,7 @@ KilnResult graphics_status(KilnUiGraphicsStatus* out) {
         out->dlss_output_height = g_dlss_out_h.load();
     }
     out->flags = flags;
+    upscale_status(out);  // the phase B fields, for a caller whose struct has them
     return KILN_OK;
 }
 

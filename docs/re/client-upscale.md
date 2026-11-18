@@ -96,6 +96,29 @@ table). The RCAS sharpness is computed into `Fsr3UpscalerRcasConstants` in game 
 sharpness needs a hook in game code (a sigdb pattern per game build), found and tested per build. Not done in
 phase A. More in the phase B and C client dossier (the wave's `out/upscale-bc/client/DOSSIER.md`).
 
+What phase B's swap relies on (sigdb `client.d/upscale.json`, proven on 26430625 by spike B0, the wave's
+`out/upscale-b0/REPORT.md`):
+- `0x81900` (Fsr3Dispatch) does not call Vulkan: it writes FSR's seven compute passes as render commands into the pass
+  context's writer (`ctx+0x10`; current chunk at `writer+0x28`; chunks `{next, write, end, count}`; a command is
+  `{u16 size, u8 type, ...}`). The executor `0x101f9e0` (CmdExecute) runs them on the main thread with the frame's
+  VkCommandBuffer; it ignores types above `0x2e` (the switch's bound, captured), so a command of type `0xF0` is Kiln's.
+- The DLSS branch of `0x11a870` is the template: `0x47a70(ctx, 0x7ffffffff)` flushes the pending barriers, then the
+  command goes into the chunk (`0xfc6190` gives a new chunk when it is full). After the flush the six textures are in
+  SHADER_READ_ONLY_OPTIMAL (colour, depth, motion vectors, two masks) and GENERAL (output); the game's next barrier
+  takes the output from GENERAL.
+- The description (Fsr3Dispatch's r8), captured: jitter `+0x128`, previous render size `+0x118`, render size `+0x110`,
+  upscale size `+0x120`, reset `+0x138` (always 0), FOV `+0x100`, the two planes `+0xF8`/`+0xFC` (min and max taken),
+  pre-exposure `+0x13C`, MV scale `+0x130`, frame time ns `+0x108`, sharpness `+0x140`. The resources sit at `+0x00`,
+  `+0x28`, `+0x50`, `+0x78`, `+0xA0`, `+0xC8` (a kind byte, the 16-byte handle at `+8`), the same handles as the input
+  struct's `+0x10`..`+0x60` (Kiln checks that every frame).
+- A texture object (`[[handle.owner + 0x178] + index * 8]`): VkImage `+0x30`, VkImageView `+0x38`, width/height
+  `+0x10`/`+0x14`, format byte `+0x21` (the VkFormat number). Formats on 26430625: colour R16G16B16A16_SFLOAT, depth
+  R32_SFLOAT (D32_SFLOAT on the first frame), motion vectors R16G16_SNORM, masks R8_UNORM, output R16G16B16A16_SFLOAT.
+- `0x805d0` (Fsr3Create, from `0x105d3d`) runs at each FSR set-up; its params hold the max render size at `+4` and the
+  output size at `+0xC`. It often gives back the same pointer.
+- The game's DLSS execute (command `0x2c`) already has NVIDIA's library record its compute work into the same command
+  buffer in the middle of the stream, so foreign compute state there is something the game's later commands live with.
+
 ## Latency
 The client has no Reflex or Anti-Lag code and sets no latency markers (see "What the game ships"), so there is
 nothing honest to read. Kiln shows no latency number.

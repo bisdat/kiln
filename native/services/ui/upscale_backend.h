@@ -3,14 +3,18 @@
 // (docs/kiln/graphics.md "Upscaler behind the game's FSR 3"; 0.2.0-dev.29.18, phase B).
 //
 // The core (upscale.cpp) hooks the game's FSR 3 pass (sigdb client.d/upscale.json: PassRecord, Fsr3Dispatch,
-// CmdExecute, Fsr3Create) and vk.cpp's instance and device hooks. A backend never hooks anything itself. It is:
-//  1. asked what it needs of the Vulkan instance and device (instance_needs, device_needs): DECLARATIVE needs, merged
-//     by the core into the game's create infos in vk.cpp's vkCreateInstance / vkCreateDevice hooks, only when the
-//     player chose this backend at that moment (device_merge.h, B2's merger, folds them in without writing the game's
-//     memory);
-//  2. loaded (load) from its verified vendor files (vendor_file.h: <game>/kiln/vendor/<vendor>/<version>/, SHA-256
-//     pinned by vendor_pins.h, generated from launcher/src/data/vendor-components.json);
-//  3. told the game's device (device_ready) once it exists, with what was really enabled on it;
+// CmdExecute, Fsr3Create) and vk.cpp's instance and device hooks. A backend never hooks anything itself. The order:
+//  1. load: at the game's first vkCreateInstance while this backend is the choice, the core checks its vendor files
+//     (vendor_file.h verify_component: <game>/kiln/vendor/<vendor>/<version>/, size and SHA-256 pinned by vendor_pins.h,
+//     generated from launcher/src/data/vendor-components.json; the handles stay open with writes denied for the
+//     session) and hands them to load(). A backend whose needs come from its DLL (XeSS: xessVKGetRequired*) maps it
+//     here with vendor::load_verified; one whose needs are fixed (AMD FSR: FFX's Vulkan API has no requirements query)
+//     may keep the paths and map its DLLs later, in device_ready (the game unloads vulkan-1.dll and maps it again
+//     early in its start, and AMD's DLLs import vulkan-1.dll).
+//  2. instance_needs, device_needs: DECLARATIVE needs, merged by the core into the game's create infos in vk.cpp's
+//     vkCreateInstance / vkCreateDevice hooks (device_merge.h InstanceMerge / DeviceMerge fold them in without writing
+//     the game's memory), only for the backend chosen at that moment;
+//  3. device_ready: the game's device exists, with what was really enabled on it (DeviceMerge's Report);
 //  4. created (create) at each of the game's Fsr3Create calls (world load, FSR 3 chosen, FSR quality, resolution and
 //     3D render scale changes), with the sizes; destroy() comes first when a context exists;
 //  5. asked to record (record) each frame into the game's own VkCommandBuffer, at the place the game's FSR 3 passes
@@ -102,7 +106,8 @@ struct PhysicalDevice {
     VkInstance instance = VK_NULL_HANDLE;
     VkPhysicalDevice physical = VK_NULL_HANDLE;
     PFN_vkGetInstanceProcAddr gipa = nullptr;  // unhooked
-    uint32_t instance_api = 0;                 // the instance's apiVersion as created (after Kiln's merge)
+    uint32_t instance_api = 0;                 // the apiVersion of the instance the physical device came from, as
+                                               // created (after Kiln's merge)
     VkPhysicalDeviceProperties props{};
 };
 
@@ -113,14 +118,23 @@ struct VkContext {
     VkDevice device = VK_NULL_HANDLE;
     PFN_vkGetInstanceProcAddr gipa = nullptr;  // unhooked: Vulkan's own (winevulkan's under Proton)
     PFN_vkGetDeviceProcAddr gdpa = nullptr;    // unhooked
-    uint32_t instance_api = 0;                 // apiVersion of the instance (1.2 on the game, unless a backend raised it)
+    uint32_t instance_api = 0;                 // apiVersion of the device's instance as created (after Kiln's merge)
+    std::vector<std::string> instance_extensions;  // enabled on the device's instance as created (after Kiln's merge)
     uint32_t graphics_family = 0;              // the family of the game's first queue (its graphics queue)
     VkPhysicalDeviceProperties props{};
     std::vector<std::string> extensions;       // enabled on the device
     std::vector<FeatureNeed> features;         // enabled on the device, one struct per type (VK_TRUE = on); 1.0 features
                                                // as a VkPhysicalDeviceFeatures2
+    bool needs_merged = false;                 // the device was made with this backend's device_needs merged in (false:
+                                               // the backend was not the choice at the game's start, or the merge was
+                                               // refused): a backend that relies on its optional needs says RESTART
     bool has_extension(const char* name) const {
         for (const auto& e : extensions)
+            if (e == name) return true;
+        return false;
+    }
+    bool has_instance_extension(const char* name) const {
+        for (const auto& e : instance_extensions)
             if (e == name) return true;
         return false;
     }
@@ -141,7 +155,8 @@ struct VkContext {
 
 // ---- the vendor files ---------------------------------------------------------------------------------------------
 // What load gets: the component's folder and its files, in vendor-components.json's order, each verified (size and
-// SHA-256 through a handle that denies writes) and kept open with writes denied for the session (vendor_file.h).
+// SHA-256 through a handle that denies writes) and kept open with writes denied for the session: vendor::Verified's
+// {dir, paths, version} (vendor_file.h).
 struct Files {
     std::wstring dir;                // <game>\kiln\vendor\<vendor>\<version>
     std::vector<std::wstring> paths; // full paths
@@ -184,11 +199,14 @@ struct Frame {
 // ---- creation -----------------------------------------------------------------------------------------------------
 struct CreateInfo {
     uint32_t max_render_width = 0, max_render_height = 0;  // the colour texture's size
-    uint32_t output_width = 0, output_height = 0;          // the output texture's size
+    uint32_t output_width = 0, output_height = 0;          // the upscale size (the FSR description's, = the game's
+                                               // Fsr3Create output; the 3D render scale makes it smaller than the output
+                                               // texture). A frame with another upscale size gets a new context first.
+    uint32_t output_texture_width = 0, output_texture_height = 0;  // the output texture's size
     float ratio = 0;            // output / render width at creation (1.5 Quality ... 3.0 Ultra Performance; 1 native)
     bool hdr = true;            // the colour is linear HDR (R16G16B16A16_SFLOAT)
     bool depth_inverted = true; // reverse-Z
-    bool depth_infinite = true; // effectively an infinite far plane
+    bool depth_infinite = false;  // the game's own FSR 3 port takes its two planes as they are (far 10000)
     bool dynamic_resolution = true;  // the render size may be below the texture size
     AmdPin amd = AmdPin::automatic;  // the AMD backend's pin (ignored by others)
     VkFormat color_format = VK_FORMAT_UNDEFINED, output_format = VK_FORMAT_UNDEFINED;
@@ -201,11 +219,12 @@ class Backend {
     // The vendor component it loads from (vendor-components.json id: "amd-fsr", "intel-xess").
     virtual const char* component() const = 0;
 
-    // 1. Before the game's instance, then its device, are created (only when this backend is the choice then).
+    // 1. Its verified files (vendor::Verified's dir, paths, version), before any needs are asked. False: `why`
+    //    (load_failed, unavailable...) and `detail` (English, for kiln.log and the status); nothing else is called then.
+    virtual bool load(const Files& files, Why* why, std::string* detail) = 0;
+    // 2. Before the game's instance, then its device, are created (only when this backend is the choice then).
     virtual InstanceNeeds instance_needs() = 0;
     virtual DeviceNeeds device_needs(const PhysicalDevice& gpu) = 0;
-    // 2. Load the DLLs. False: `why` (load_failed, files_bad...) and `detail` (English, for kiln.log and the status).
-    virtual bool load(const Files& files, Why* why, std::string* detail) = 0;
     // 3. The game's device exists, with what is enabled on it. False: the device lacks something the backend must
     //    have (why = device or restart, detail names it).
     virtual bool device_ready(const VkContext& vk, Why* why, std::string* detail) = 0;

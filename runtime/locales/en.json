@@ -1019,7 +1019,10 @@
       "unknown": "Upscaler: read from the next game start: {output}",
       "aside": "Upscaler: left to {tools}: {output}",
       "cap": "Frame cap {fps} fps",
-      "cap_aside": "Frame cap {fps} fps: off for {tools}"
+      "cap_aside": "Frame cap {fps} fps: off for {tools}",
+      "upscale": "Behind FSR 3: {upscaler}: {render} -> {output}",
+      "game_fsr3": "the game's own FSR 3",
+      "upscale_why": "{upscaler} is not running: {why}"
     }
   }
 }

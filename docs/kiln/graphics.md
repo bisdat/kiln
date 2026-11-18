@@ -25,6 +25,8 @@ hook on DLSS, no new hook on the game's library loads, and nothing done in a fra
 | `dlssRenderScale` | 0.33..1: with `custom`, the render width and height as a share of the output | 0.67 | " |
 | `dlssQualityScale`, `dlssBalancedScale`, `dlssPerformanceScale`, `dlssUltraPerformanceScale` | 0.33..1 each: with `perMode` | DLSS's own: 0.667, 0.58, 0.5, 0.333 | " |
 | `readout` | `true` / `false` | `false` | at once |
+| `upscaler` | `game` (the game's own FSR 3), `amd` (AMD FSR: FSR 4 where the GPU runs it, else FSR 3.1), `xess` (Intel XeSS) | `game` | at the game's next FSR 3 set-up; Kiln's hooks go in only when it is not `game` at the game's start ([below](#upscaler-behind-the-games-fsr-3-020-dev2918)) |
+| `amdUpscaler` | `auto` (AMD's own choice), `fsr3` (FSR 3.1 even where FSR 4 runs) | `auto` | at the game's next FSR 3 set-up |
 
 "When the game next sets DLSS up": loading a world, or changing the DLSS mode or the resolution in the game's own
 settings. One more rule: Kiln hooks DLSS only when a DLSS setting or the readout is on **when the game starts**. A DLSS
@@ -125,7 +127,14 @@ Two slots after `set_texts` (byte offsets 1016 and 1024; the table is 1032 bytes
   the readout counts), the swapchain's size, and the DLSS in use: its mode (`NVSDK_NGX_PerfQuality_Value`, -1 none), the
   preset asked for, this frame's render size and the output size. Set `size` first.
 - `graphics_set(&KilnUiGraphics)`: Kiln.Ui's only (the player's settings); a native plugin's call is refused with
-  `KILN_ERR_UNAVAILABLE`.
+  `KILN_ERR_UNAVAILABLE`. Since phase B its two last words are `upscaler` (`KILN_UI_UPSCALER_GAME` 0, `_AMD` 1,
+  `_XESS` 2) and `amd_upscaler` (`KILN_UI_AMD_UPSCALER_AUTO` 0, `_FSR3` 1); still 48 bytes.
+- Phase B's status fields follow at offset 72 (`KilnUiGraphicsStatus` is 248 bytes, `KILN_UI_GRAPHICS_STATUS_SIZE_V2`;
+  a 72-byte caller gets the fields before only): `upscaler`, `amd_upscaler`, `upscale_running`
+  (`KILN_UI_UPSCALE_RUN_OFF` 0, `_NOT_FSR` 1, `_GAME_FSR3` 2, `_AMD_FSR4` 3, `_AMD_FSR3` 4, `_XESS` 5), `upscale_reason`
+  (`KILN_UI_UPSCALE_WHY_*`, the list above), `upscale_flags` (`KILN_UI_UPSCALE_HOOKED`, `_FSR_SEEN`, `_FILES_OK`,
+  `_DEVICE_OK`, `_FELL_BACK`, `_AMD_PINNED`), `aside_upscale`, `upscale_version` (`(major << 22) | (minor << 12) |
+  patch`), the FSR 3 pass's render and output size, and `upscale_detail` (128 bytes, English).
 There is no managed (mod API) member for it in this release.
 
 ## Upscaler files (part D, a preview)
@@ -166,6 +175,55 @@ section 5.15; code `crates/kiln-manage/src/vendor/`, `launcher/src/components/Up
 - **Later:** NVIDIA's frame generation (`nvidia-dlssg`, from NVIDIA's own GitHub, never inside Kiln) is a new component
   in the same manifest, with NVIDIA's licence.
 
+## Upscaler behind the game's FSR 3 (0.2.0-dev.29.18)
+Phase B. In the game's own settings the player chooses FSR 3, as before; `graphics.upscaler` chooses what runs behind
+it: the game's own FSR 3 (`game`, the default: nothing changes), AMD FSR (`amd`) or Intel XeSS (`xess`). Kiln never calls
+any of it DLSS. Code: `native/services/ui/upscale.cpp` (the swap), `upscale_amd.cpp` (AMD FSR), `upscale_xess.cpp`
+(XeSS), the interface `upscale_backend.h`, plain logic `upscale_logic.h` and `upscale_amd_map.h` (host test
+`tests/upscale_test.cpp`), the vendor files `vendor_file.h`, the device set-up `device_merge.h`; sigdb
+`client.d/upscale.json` (feature `upscale.swap`).
+- **When it applies.** Kiln hooks the game's FSR 3 pass only when an upscaler other than `game` is chosen **when the
+  game starts**, and only then adds what that upscaler needs to the game's Vulkan device (extensions and features, as
+  the game's device is made). A choice made while the game runs applies at the game's next FSR 3 set-up (loading a
+  world, changing FSR's quality, the resolution or the 3D render scale) when it is the start's choice or `game`, else
+  from the next start (status reason `RESTART`). `amdUpscaler` applies at the next set-up.
+- **What happens.** The game builds its frame as a list of its own render commands, then runs them. Where the game would
+  write its FSR 3 passes, Kiln makes the game flush its pending barriers (as the game does for DLSS) and writes one
+  command of its own instead; when the game runs that command, Kiln has the chosen upscaler record its work into the
+  frame's own Vulkan command buffer, at the same place. Its inputs are the game's own, as the game's FSR 3 gets them:
+  colour (linear HDR), depth (reverse-Z), motion vectors (Kiln copies them into a format AMD's API takes; the values
+  are unchanged), the reactive and transparency masks the game makes for its FSR, the jitter, sizes, camera planes,
+  field of view, pre-exposure and frame time (Kiln's own measured time while the game's is 0, about 500 frames after
+  a world load). History is dropped when the game sets FSR 3 up, after a load and when a size changes.
+- **AMD FSR.** AMD's signed Vulkan DLLs from the FidelityFX SDK 2.4.0, from `<game>/kiln/vendor/amd/2.4.0/` (the
+  launcher's Settings, Upscalers). Kiln checks each file's size and SHA-256 against the pins built into Kiln (the same
+  values as the launcher's manifest; `tools/release/vendor_pins_header.py --check`) before it maps them, keeps them
+  open so they cannot change, and maps them only from that folder. AMD's own selection picks FSR 4 where the GPU and
+  driver run it (RX 9000, RX 7000 and 6000, some recent APUs), else FSR 3.1; `fsr3` pins FSR 3.1. Where FSR 4 is
+  chosen but does not start, Kiln runs FSR 3.1 instead and says so in kiln.log. The device additions: everything AMD's
+  Vulkan backend uses when the GPU offers it (subgroup size control, 16-bit floats, synchronization2, AMD's buffer
+  markers and coherent memory, descriptor indexing) and FSR 4's set (cooperative matrix, FP8, integer dot product,
+  compute-shader derivatives, 8- and 16-bit storage), each only where the GPU has it.
+- **Failures.** A missing or changed file, a GPU without what the upscaler needs, a set-up that fails: the game's own
+  FSR 3 runs and the status says why. A failure while upscaling: that frame gets a plain stretch of the image, then
+  the game's own FSR 3 for the rest of the session. Every call of Kiln's around the game's runs under a fault guard.
+- **Stepping aside.** The swap stays off, with the reason, for OptiScaler, NVIDIA Streamline, a DLSS frame generation
+  mod (`EnshroudedVKFG.ini`), AMD FidelityFX or Intel XeSS DLLs in the game folder (another tool's; `ASIDE_UPSCALER`),
+  the game's FSR 3 pass already patched by another module, and Kiln's overlay hooks being off (the swap needs Kiln's
+  Vulkan hooks).
+- **What the player sees.** The readout's line `Behind FSR 3: AMD FSR 4 (4.1.2): 960x540 -> 1920x1080`, or the game's
+  own FSR 3 with the reason the chosen one does not run; the Graphics page and the launcher read the same status.
+- **kiln.log** (`graphics: upscaler: ...`): the choice at start and the hooks, the files' check, what was added to the
+  Vulkan device and what the GPU lacks, the versions AMD offers for the GPU, each set-up (`AMD FSR 4.1.2 set up for
+  960x540 -> 1920x1080`), and every fallback with its reason.
+- **Not proven yet:** a real game with AMD FSR on any GPU; FSR 4 needs an AMD tester (RX 9000, or RX 6000/7000), the
+  Steam Deck too. The swap itself was proven on the real client with a plain stretch (spike B0, RTX 3080 Ti, Proton).
+
+Status reasons (`KilnUiGraphicsStatus.upscale_reason`, stable numbers): 0 none, 1 restart, 2 files missing, 3 files
+not the pinned ones, 4 did not load, 5 the GPU or driver lacks a Vulkan feature, 6 set-up failed, 7 failed while
+upscaling, 8 fault, 9 stepped aside, 10 this game build's FSR 3 pass not found, 11 the game's textures are not what it
+takes, 12 not in this build or system, 13 waiting for the next FSR 3 set-up, 14 the game's Vulkan device not seen.
+
 ## Not in phase A
-FSR 3's ratio and RCAS sharpness (compiled into the game: game-code hooks per build, [client-upscale.md](../re/client-upscale.md#fsr-3)),
-an upscaler swap (phase B) and frame generation (phase C).
+FSR 3's ratio and RCAS sharpness (compiled into the game: game-code hooks per build, [client-upscale.md](../re/client-upscale.md#fsr-3))
+and frame generation (phase C). The upscaler swap is phase B, above.
