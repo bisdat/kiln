@@ -240,6 +240,7 @@ pub const NAMES: &[&str] = &[
     "tester_leave",
     "tester_result_set",
     "tester_results_send",
+    "community_steam_keyboard",
 ];
 
 #[cfg(test)]

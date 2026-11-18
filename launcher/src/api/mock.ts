@@ -711,6 +711,13 @@ export function mockStartOutside(secondsAgo: number, gameId = "client-steam") {
 }
 
 /** Dev/test helper: the fake game exits. */
+/** A crash: Kiln writes a crash report now, and the game closes (tests: `__kilnMock.crash()`). */
+function mockCrash(gameId = "client-steam") {
+  const now = new Date();
+  crashes.unshift({ name: `${now.toISOString().slice(0, 19).replace(/:/g, "-")}Z-crash.txt`, created: now.toISOString(), size: 4_211 });
+  mockStopGame(gameId);
+}
+
 export function mockStopGame(gameId = "client-steam") {
   if (!running[gameId]) return;
   running[gameId] = null;
@@ -1893,7 +1900,7 @@ export function mockEmit(name: string, payload: unknown): void {
 }
 
 // Playwright and the dev console reach the fake game through this (mock mode only).
-if (typeof window !== "undefined") (window as unknown as { __kilnMock?: unknown }).__kilnMock = { community: communityMockHooks(mockEmit), scriptStoppedStart, externalStart: mockExternalStart, stopGame: mockStopGame, emit: mockEmit, setLastServer: mockSetLastServer,
+if (typeof window !== "undefined") (window as unknown as { __kilnMock?: unknown }).__kilnMock = { community: communityMockHooks(mockEmit), crash: mockCrash, scriptStoppedStart, externalStart: mockExternalStart, stopGame: mockStopGame, emit: mockEmit, setLastServer: mockSetLastServer,
   calls: () => [...commandCalls],
   planCommand: (cmd: string, plan: CommandPlan) => { (commandPlans[cmd] ??= []).push(plan); },
   openGate: (name: string) => { const g = gateOf(name); g.open = true; g.waiters.splice(0).forEach((w) => w()); },
@@ -1978,4 +1985,13 @@ if (slNotice) {
   }
   if (slNotice !== "missing") library.push({ kind: "native", id: "shroudlink-addon", name: "Shroudlink client addon", versions: [{ version: "1", hash: "sl-addon", folder: "/mock/addon", imported: "2026-11-15", side: "client", clients: "none", size: 1, source: null, manifestId: null, manifest: null }] });
   if (slNotice === "server") for (const g of games) g.kind = "server";
+}
+
+// `?problem=crash` (the Discord work's demo): the game runs for four minutes, then closes with a crash report, so Play
+// and Deck Home show the crash notice with its "Send to Kiln support". `?problem=nokiln`: the next Play starts the
+// game without Kiln ("Kiln is not loading").
+if (typeof location !== "undefined") {
+  const problem = new URLSearchParams(location.search).get("problem");
+  if (problem === "crash") setTimeout(() => { mockExternalStart("client-steam", Date.now() - 4 * 60_000); setTimeout(() => mockCrash(), 900); }, 600);
+  if (problem === "nokiln") noProxy = true;
 }

@@ -2237,7 +2237,7 @@ export const COMMANDS = [
   "vendor_status", "vendor_license", "vendor_download", "vendor_remove",
   "community_settings_get", "community_settings_set", "community_status", "community_feed", "community_check_member", "community_signout", "community_signin_start", "community_signin_poll", "community_signin_cancel",
   "community_posts", "community_post_seen", "community_post_solved", "community_post_delete", "community_presence_facts", "community_report_prepare", "community_report_send",
-  "tester_status", "tester_join", "tester_leave", "tester_result_set", "tester_results_send",
+  "tester_status", "tester_join", "tester_leave", "tester_result_set", "tester_results_send", "community_steam_keyboard",
 ] as const;
 export type CommandName = (typeof COMMANDS)[number];
 
@@ -2379,7 +2379,10 @@ export interface ReportPreview {
   prepared: string;
   findings: PostFinding[];
   versions: [string, string][];
+  /** The system's #support tag ("Linux", "Windows", "Steam Deck"). */
   tags: string[];
+  /** Each kind's tag ("Mods", "Crash", ...; null: none): the post's first tag follows the kind the player picks. */
+  kindTags: Record<ProblemKind, string | null>;
   /** The zip's size; `limit` what the relay takes. */
   size: number;
   limit: number;
@@ -2461,3 +2464,5 @@ export const testerLeave = () => call<null>("tester_leave");
  *  back to Not tried. */
 export const testerResultSet = (step: string, result?: StepResult | "clear", note?: string) => call<TestPlan | null>("tester_result_set", { step, result, note });
 export const testerResultsSend = (withReport: boolean) => call<TestPlan | null>("tester_results_send", { withReport });
+/** Deck: asks Steam for its on-screen keyboard (steam://open/keyboard) for a field that takes words; nothing elsewhere. */
+export const communitySteamKeyboard = () => call<null>("community_steam_keyboard");

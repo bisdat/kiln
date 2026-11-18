@@ -479,3 +479,13 @@ pub async fn tester_results_send(app: AppHandle, with_report: bool) -> Result<Op
     emit_changed(&app);
     Ok(r)
 }
+
+/// Deck: asks Steam for its on-screen keyboard (`steam://open/keyboard`) when a field that takes words opens. Only on a
+/// Steam Deck, SteamOS or gamescope; elsewhere nothing happens. Nothing leaves the PC.
+#[tauri::command]
+pub async fn community_steam_keyboard() -> Result<(), Error> {
+    if !cfg!(target_os = "linux") || !crate::deck::detect::current().detected {
+        return Ok(());
+    }
+    crate::state::open_external(std::ffi::OsStr::new("steam://open/keyboard"))
+}

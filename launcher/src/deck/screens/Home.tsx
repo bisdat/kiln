@@ -25,6 +25,8 @@ import { bootLine, kilnLabel } from "../status";
 import { deckFire } from "../Fire";
 import type { DeckAction } from "../layers";
 import { useT } from "../../i18n";
+import { DeckSendToSupport } from "../../community/parts";
+import { crashLine, useCrashNotice } from "../../community/crash";
 
 type Open = null | "install" | "update" | "once" | "find";
 
@@ -99,6 +101,7 @@ export default function Home() {
   else if (rt.switchBack) kilnWord = { text: t("deck.home.kilnFromBeta", { version: kilnLabel(kilnVer ?? ""), to: kilnLabel(rt.switchBack.to) }), tone: "warn" };
   else if (rt.upgradeAvailable) kilnWord = { text: t("deck.home.kilnUpdateReady", { version: kilnLabel(kilnVer ?? "") }), tone: "warn" };
   else kilnWord = { text: t("deck.home.kilnVersion", { version: kilnLabel(kilnVer ?? "") }), tone: "ok" };
+  const crash = useCrashNotice(game?.id);
   const advice = rt?.installed && s?.launchOptions?.advice && (!s.launchOptions.hasDllOverride || s.launchOptions.chainedOverrideMissing);
 
   const actions: DeckAction[] = [];
@@ -120,10 +123,15 @@ export default function Home() {
           </div>
         )}
         {game && !tl && <p className="deck-line" data-testid="deck-last-boot"><span className="deck-label">{t("deck.home.lastBoot")}</span> <Word tone={boot.tone}>{boot.text}</Word></p>}
+        {game && crash && !ctl.running && <p className="deck-line" data-testid="deck-crash"><Word tone="err">{t("community.banner.crashTitle")}</Word> <span className="deck-dim">{crashLine(crash)}</span></p>}
         {game && sfNote && (
           <p className="deck-line" data-testid="deck-sf-startup"><span className="deck-label">{t("deck.home.shroudforge")}</span> <Word tone="warn">{sfNote.word}</Word></p>
         )}
         <div className="deck-home-actions">
+          {/* (Discord) a problem offers Kiln support next to its fix; nothing while the Community page is hidden */}
+          {game && rt && v.phase !== "none" && ((crash && !ctl.running) || (ctl.stuck && rt.installed) || ctl.kilnMissing || change?.state === "failed" || !!sfNote) && (
+            <DeckSendToSupport target={{ game: game.id }} kind={crash && !ctl.running ? "crash" : sfNote ? "mod" : "noload"} />
+          )}
           {/* once the game's state is known, as the other actions: the arch takes the first focus (it is disabled before) */}
           {game && rt && v.phase !== "none" && sfNote && <DeckButton id="sf-startup" a={t("deck.shared.read")} onClick={() => setSfOpen(sfNote)}>{t("deck.home.sfWhy")}</DeckButton>}
           {!game && !looking && tried && <DeckButton id="pick-folder" a={t("common.open")} onClick={() => setOpen("find")}>{t("deck.home.pickFolder")}</DeckButton>}

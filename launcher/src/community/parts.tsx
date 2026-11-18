@@ -122,3 +122,10 @@ export function QrDialog({ title, text, url, onClose }: { title: string; text: s
     </Dialog>
   );
 }
+
+/** Deck Home's "Send to Kiln support" next to a problem (nothing while the Community page is hidden). */
+export function DeckSendToSupport({ target, kind }: { target: LogTarget | null; kind: ProblemKind }) {
+  const t = useT();
+  if (!useShown()) return null;
+  return <DeckButton id="send-support" onClick={() => openSendReport("deck", target, kind)}>{t("community.banner.send")}</DeckButton>;
+}

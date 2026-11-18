@@ -531,6 +531,27 @@ pub struct Finding {
     pub text: String,
 }
 
+/// What a public post about the report may say of the setup (the launcher's "Send to Kiln support",
+/// docs/kiln/launcher/discord.md): versions, the system and how the game runs, how many mods are on. Never which mods.
+/// Also in report.json as `facts`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublicFacts {
+    /// Kiln's version in the game (None: not installed).
+    pub kiln: Option<String>,
+    /// Who wrote the report (`kiln-launcher 0.2.0-dev.29.18`).
+    pub tool: String,
+    /// The operating system's name (`Arch Linux`, `SteamOS 3.7`, `Windows 11`).
+    pub os: String,
+    pub deck: bool,
+    /// How the game runs: the Proton or Wine build, or `Windows`.
+    pub runner: Option<String>,
+    /// The game's Steam build.
+    pub game_build: Option<String>,
+    /// Mods on in the active profile, every kind (None: no profile).
+    pub mods_on: Option<usize>,
+}
+
 /// A built report. Everything in it is redacted.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -543,6 +564,9 @@ pub struct Report {
     pub findings: Vec<Finding>,
     /// Sections that could not be read, with why.
     pub errors: Vec<String>,
+    /// (0.2.0-dev.29.18+) The setup a public post may name.
+    #[serde(default)]
+    pub facts: PublicFacts,
     /// (path in the zip, bytes), summary.txt and report.json included.
     #[serde(skip)]
     pub files: Vec<(String, Vec<u8>)>,
@@ -1226,6 +1250,7 @@ pub fn build(input: &ReportInput) -> Report {
                 let _ = writeln!(pr, "  (no mods)");
             }
             facts.profile = Some(format!("{} ({}{})", p.name.as_deref().unwrap_or(&p.id), plural(n, "mod", "mods"), if off > 0 { format!(", {off} off") } else { String::new() }));
+            facts.mods_on = Some(n.saturating_sub(off));
         }
         None if !facts.profile_broken => {
             let _ = writeln!(pr, "Active:        none (legacy layout: the drop-in folders load)");
@@ -1607,6 +1632,8 @@ struct Facts {
     profile: Option<String>,
     profile_broken: bool,
     last_start: Option<String>,
+    /// Mods on in the active profile (every kind).
+    mods_on: Option<usize>,
 }
 
 fn plural(n: usize, one: &str, many: &str) -> String {
@@ -1962,9 +1989,24 @@ fn finish(mut cx: Ctx, mut s: String, sys: String, body: String, input: &ReportI
         short = short.chars().take(SHORT_MAX).collect::<String>() + "\n... (more in the report's summary.txt)\n";
     }
 
-    let mut report = Report { written: rfc(now), summary, short, findings: cx.findings, errors: cx.errors, files: Vec::new() };
+    let deck = input.deck.unwrap_or(os.deck);
+    let runner = match facts.platform {
+        Some(Platform::Windows) => Some("Windows".to_string()),
+        _ => facts.proton.clone(),
+    };
+    let public = PublicFacts {
+        kiln: facts.kiln.as_deref().map(|k| redact(k, cx.red)),
+        tool: redact(tool, cx.red),
+        os: redact(&os.name, cx.red),
+        deck,
+        runner: runner.map(|r| redact(&r, cx.red)),
+        game_build: facts.build.clone(),
+        mods_on: facts.mods_on,
+    };
+    let mut report = Report { written: rfc(now), summary, short, findings: cx.findings, errors: cx.errors, facts: public, files: Vec::new() };
     let json = serde_json::to_vec_pretty(&serde_json::json!({
         "format": 1, "written": report.written, "tool": redact(tool, cx.red), "channel": input.channel, "findings": report.findings, "errors": report.errors,
+        "facts": report.facts,
     }))
     .unwrap_or_default();
     let mut files = vec![("summary.txt".to_string(), report.summary.clone().into_bytes()), ("report.json".to_string(), json)];

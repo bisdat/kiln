@@ -4509,7 +4509,12 @@
         "word": "Known problem",
         "fixes": "If this fixes it, there's nothing to send. If it doesn't, carry on.",
         "copy": "Copy the line",
-        "copied": "Line copied"
+        "copied": "Line copied",
+        "action": {
+          "mods": "Show my mods",
+          "runtime": "Open Runtime",
+          "logs": "Open the Logs page"
+        }
       },
       "check": {
         "title": "Check what is sent",
@@ -4599,11 +4604,21 @@
     },
     "banner": {
       "send": "Send to Kiln support",
-      "nokilnTitle": "Kiln is not loading",
-      "nokiln": "Steam started the game without Kiln. Add this line to Enshrouded's launch options in Steam: {option}",
       "crashTitle": "The game closed unexpectedly",
-      "crash": "It closed at 22:10, four minutes after it started. Kiln wrote a crash report.",
-      "crashReport": "See the crash report"
+      "crash": "It closed at {time}, {after} after it started. Kiln wrote a crash report.",
+      "crashReport": "See the crash report",
+      "afterSeconds": {
+        "one": "{count} second",
+        "other": "{count} seconds"
+      },
+      "afterMinutes": {
+        "one": "{count} minute",
+        "other": "{count} minutes"
+      },
+      "afterHours": {
+        "one": "{count} hour",
+        "other": "{count} hours"
+      }
     },
     "tester": {
       "title": "Help test Kiln",

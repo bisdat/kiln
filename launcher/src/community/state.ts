@@ -51,7 +51,7 @@ export const useTester = (enabled = true) => useQuery({ queryKey: cq.tester, que
 
 /** Everything the page shows that may have changed, but not the public news (it is read once when the page opens). */
 export const refreshCommunity = (qc: ReturnType<typeof useQueryClient>) =>
-  qc.invalidateQueries({ predicate: (q) => q.queryKey[0] === "community" && q.queryKey[1] !== "feed" });
+  qc.invalidateQueries({ predicate: (q) => q.queryKey[0] === "community" && q.queryKey[1] !== "feed" && q.queryKey[1] !== "prepare" });
 
 export async function setCommunity(qc: ReturnType<typeof useQueryClient>, patch: Partial<Pick<CommunitySettings, "shown" | "presence" | "notify">>) {
   const s = await api.communitySettingsSet(patch);
@@ -63,7 +63,10 @@ export async function setCommunity(qc: ReturnType<typeof useQueryClient>, patch:
 /** Where a report was started: its preselected kind. */
 const KIND_OF: Record<SendFrom, ProblemKind> = { logs: "noload", banner: "noload", crash: "crash", community: "noload", deck: "noload" };
 
-interface SendState { from: SendFrom; target: LogTarget | null; step: "write" | "check" | "sent"; draft: ReportDraft; sentUrl: string | null }
+/** `session`: the prepared report this dialog shows and sends (a new one for another place or a new report). */
+interface SendState { from: SendFrom; target: LogTarget | null; step: "write" | "check" | "sent"; draft: ReportDraft; sentUrl: string | null; session: number }
+let sendSession = 0;
+const sameTarget = (a: LogTarget | null, b: LogTarget | null) => JSON.stringify(a) === JSON.stringify(b);
 interface CommunityUi {
   send: SendState | null;
   signIn: { resumeSend: boolean } | null;
@@ -84,8 +87,12 @@ export const useCommunityUi = create<CommunityUi>((set, get) => ({
   openSend: (from, target, kind) => {
     const was = get().send;
     // a draft started earlier and not sent is offered again (the same words)
-    if (was && was.step !== "sent") { set({ send: { ...was, step: "write", from, target } }); return; }
-    set({ send: { from, target, step: "write", sentUrl: null, draft: { title: "", kind: kind ?? KIND_OF[from], text: "", zip: "team", when: null } } });
+    if (was && was.step !== "sent") {
+      const same = was.from === from && sameTarget(was.target, target);
+      set({ send: { ...was, step: "write", from, target, session: same ? was.session : ++sendSession } });
+      return;
+    }
+    set({ send: { from, target, step: "write", sentUrl: null, session: ++sendSession, draft: { title: "", kind: kind ?? KIND_OF[from], text: "", zip: "team", when: null } } });
   },
   setSend: (s) => { const cur = get().send; if (cur) set({ send: { ...cur, ...s } }); },
   setDraft: (d) => { const cur = get().send; if (cur) set({ send: { ...cur, draft: { ...cur.draft, ...d } } }); },

@@ -226,6 +226,20 @@ fn healthy_install_finds_nothing() {
     }
 }
 
+/// (0.2.0-dev.29.18) The facts a public post may name: Kiln's version, the system, the game's build and how many mods
+/// are on (never which), also in report.json.
+#[test]
+fn the_public_facts_name_versions_and_a_mod_count_not_the_mods() {
+    let f = Fx::healthy("public-facts");
+    let r = build(&f.input());
+    assert_eq!(r.facts.kiln.as_deref(), Some("0.2.0-dev.22"));
+    assert_eq!(r.facts.mods_on, Some(1));
+    assert!(!r.facts.os.is_empty());
+    let json: serde_json::Value = serde_json::from_str(file(&r, "report.json").unwrap()).unwrap();
+    assert_eq!(json["facts"]["modsOn"], 1);
+    assert!(!json["facts"].to_string().contains("chat-plus"), "{}", json["facts"]);
+}
+
 /// OptiScaler next to the game (an upscaler with its own overlay, inbox 80): one Info finding with what Kiln's overlay
 /// does next to it, its ini in the zip, nothing found when it is not there.
 #[test]

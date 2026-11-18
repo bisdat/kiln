@@ -276,7 +276,8 @@ pub fn run() {
             commands::community::tester_join,
             commands::community::tester_leave,
             commands::community::tester_result_set,
-            commands::community::tester_results_send
+            commands::community::tester_results_send,
+            commands::community::community_steam_keyboard
         ]))
         .build(tauri::generate_context!())
         .expect("error while building the Kiln Launcher")

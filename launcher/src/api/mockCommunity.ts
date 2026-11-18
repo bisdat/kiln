@@ -102,7 +102,8 @@ const prepared = new Map<string, { from: SendFrom; tags: string[] }>();
 function preview(from: SendFrom): ReportPreview {
   const crash = from === "crash" || has("crash");
   const noKiln = from === "banner" || has("nokiln");
-  const tags = [noKiln ? "Mods" : crash ? "Crash" : "Mods", DECK ? "Steam Deck" : "Linux"];
+  const kindTags = { noload: "Mods", mod: "Mods", crash: "Crash", launcher: "Launcher", server: "Server", other: null };
+  const tags = [DECK ? "Steam Deck" : "Linux"];
   const id = `r${++preparedSeq}`;
   prepared.set(id, { from, tags });
   return {
@@ -119,6 +120,7 @@ function preview(from: SendFrom): ReportPreview {
       ["Runs on", DECK ? "Proton 10.0" : "GE-Proton10-3"], ["Game build", "26404966"], ["Mods", `${mods ?? 12} on`],
     ],
     tags,
+    kindTags,
     size: has("toobig") ? 21_400_000 : 48_213,
     limit: 8 * 1024 * 1024,
     files: [
@@ -247,6 +249,7 @@ export function communityMockHandlers({ emit, gameRunning }: CommunityMockDeps):
       changed();
       return account;
     },
+    community_steam_keyboard: () => null,
     community_presence_facts: (a) => { mods = typeof a.mods === "number" ? a.mods : null; return null; },
     community_report_prepare: (a) => preview((a.from as SendFrom) ?? "community"),
     community_report_send: (a) => {
@@ -260,7 +263,7 @@ export function communityMockHandlers({ emit, gameRunning }: CommunityMockDeps):
       if (rateLimited) err("busy", "Too many reports.", "rate_limited", { sent: 3, waitMin: 38, last: posts[0]?.url ?? null });
       if (has("toobig") && d.zip !== "none") err("refused", "The report is too big to send.", "too_big", { size: 21_400_000, limit: 8 * 1024 * 1024 });
       const post: SupportPost = { id: `p${Date.now()}`, title: d.title, url: thread(9), created: new Date().toISOString(), status: "waiting", replies: 0, unread: 0,
-        lastReply: null, tags: p!.tags, zip: d.zip };
+        lastReply: null, tags: [...new Set([({ noload: "Mods", mod: "Mods", crash: "Crash", launcher: "Launcher", server: "Server", other: null } as Record<string, string | null>)[d.kind], ...p!.tags].filter((x): x is string => !!x))], zip: d.zip };
       posts = [post, ...posts];
       prepared.delete(String(a.prepared));
       changed();

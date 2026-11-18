@@ -146,7 +146,7 @@ impl SupportPost {
 }
 
 /// The kind of problem a report is about (the send dialog's six choices).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ProblemKind {
     Noload,

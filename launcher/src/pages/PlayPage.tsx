@@ -25,6 +25,8 @@ import { useUpdate } from "../api/update";
 import { rich, t, useT } from "../i18n";
 import { ArchText, Banner, Button, Cones, Field, KeyValue, Modal, PathPicker, TaskProgress, errorText, toast } from "../ui";
 import { StartModal, UnknownBuild, useStartSetup, useStartWord } from "../components/GameStart";
+import { SendToSupport } from "../community/parts";
+import { crashLine, useCrash, useCrashNotice } from "../community/crash";
 
 /** Windows (WebView2): path examples in Windows form. */
 const WIN = /Windows/i.test(navigator.userAgent);
@@ -305,6 +307,17 @@ function Banners({ game, ctl, pending, onOffer, boot }: { game: GameInstall; ctl
   const direct = s?.start === "direct";
   const setup = useStartSetup(game.id, direct);
   const out = [];
+  // the game closed and Kiln wrote a crash report in that run (community/crash.ts): the report first, then support
+  const crash = useCrashNotice(game.id);
+  if (crash && !ctl.running) {
+    out.push(
+      <Banner key="crash" tone="err" title={t("community.banner.crashTitle")} actions={<>
+        <Button size="s" onClick={() => nav("/logs")}>{t("community.banner.crashReport")}</Button>
+        <SendToSupport from="crash" target={{ game: game.id }} kind="crash" />
+        <button type="button" className="k-link" onClick={() => useCrash.getState().dismiss(game.id)}>{t("common.dismiss")}</button>
+      </>}><span data-testid="crash-notice">{crashLine(crash)}</span></Banner>,
+    );
+  }
   // (dev.29.17) the exe's build is one Kiln has no verified record of: Kiln starts with the game and stays idle
   if (s?.build && !s.build.known) out.push(<UnknownBuild key="build" build={s.build} />);
   if (direct && setup.data?.problem && !ctl.running) {
@@ -327,6 +340,7 @@ function Banners({ game, ctl, pending, onOffer, boot }: { game: GameInstall; ctl
     out.push(
       <Banner key="rt" tone="err" title={t("play.banner.changeFailed", { what: change.what })} actions={<>
         <Button size="s" onClick={() => nav("/runtime")}>{t("play.banner.runtime")}</Button>
+        <SendToSupport from="banner" target={{ game: game.id }} kind="noload" />
         <button type="button" className="k-link" onClick={() => useRuntimeChanges.getState().clear(game.id)}>{t("common.dismiss")}</button>
       </>}>
         <span style={{ overflowWrap: "anywhere" }}>{change.error?.message ?? t("play.banner.noReason")}</span>{" "}
@@ -362,13 +376,13 @@ function Banners({ game, ctl, pending, onOffer, boot }: { game: GameInstall; ctl
   if (advice && (!s?.launchOptions?.hasDllOverride || s.launchOptions.chainedOverrideMissing)) {
     out.push(
       <Banner key="adv" tone="warn" title={s?.launchOptions?.hasDllOverride && s.launchOptions.chainedOverrideMissing ? t("play.banner.settingAsi") : ctl.kilnMissing ? t("play.banner.notLoading") : ctl.stuck ? t("play.banner.didNotStart") : t("play.banner.setting")}
-        actions={<Button size="s" onClick={async () => {
+        actions={<><Button size="s" onClick={async () => {
           try {
             if (!navigator.clipboard) throw new Error(t("play.banner.noClipboard"));
             await navigator.clipboard.writeText(advice);
             toast.ok(t("play.banner.copied"), t("play.banner.copiedDetail"));
           } catch (e) { toast.error(e, t("play.banner.copyFailed")); }
-        }}>{t("common.copy")}</Button>}>
+        }}>{t("common.copy")}</Button>{(ctl.kilnMissing || ctl.stuck) && <SendToSupport from="banner" target={{ game: game.id }} kind="noload" />}</>}>
         {!s?.launchOptions?.hasDllOverride && ctl.stuck ? rich("play.banner.adviceStuck", { option: <span className="k-mono">{advice}</span> })
           : s?.launchOptions?.hasDllOverride && s.launchOptions.chainedOverrideMissing ? rich("play.banner.adviceAsi", { option: <span className="k-mono">{advice}</span> })
           : rich("play.banner.advice", { option: <span className="k-mono">{advice}</span> })}
@@ -377,7 +391,7 @@ function Banners({ game, ctl, pending, onOffer, boot }: { game: GameInstall; ctl
   } else if (ctl.stuck && s?.runtime.installed) {
     // the launch option is set (or not needed here) and Kiln still did not load: say so, never "Starting" forever
     out.push(
-      <Banner key="nokiln" tone="warn" title={ctl.kilnMissing ? t("play.banner.notLoading") : t("play.banner.didNotStart")} actions={<Button size="s" onClick={() => nav("/logs")}>{t("play.banner.supportReport")}</Button>}>
+      <Banner key="nokiln" tone="warn" title={ctl.kilnMissing ? t("play.banner.notLoading") : t("play.banner.didNotStart")} actions={<><Button size="s" onClick={() => nav("/logs")}>{t("play.banner.supportReport")}</Button><SendToSupport from="banner" target={{ game: game.id }} kind="noload" /></>}>
         {t("play.banner.noKiln")}
       </Banner>,
     );
@@ -391,7 +405,7 @@ function Banners({ game, ctl, pending, onOffer, boot }: { game: GameInstall; ctl
     );
   }
   if (boot?.safeIdle) out.push(<Banner key="safe" tone="warn" title={t("play.banner.safeIdle")}>{boot.safeIdle}</Banner>);
-  else if (boot?.profile.mode === "invalid") out.push(<Banner key="inv" tone="err" title={t("play.banner.noModsLoaded")}>{boot.profile.error ?? t("play.banner.profileInvalid")}</Banner>);
+  else if (boot?.profile.mode === "invalid") out.push(<Banner key="inv" tone="err" title={t("play.banner.noModsLoaded")} actions={<SendToSupport from="banner" target={{ game: game.id }} kind="mod" />}>{boot.profile.error ?? t("play.banner.profileInvalid")}</Banner>);
   if (!out.length) return null;
   return <div className="k-stack k-hero-banner" style={{ gap: 6 }}>{out}</div>;
 }

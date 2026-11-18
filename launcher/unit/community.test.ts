@@ -63,3 +63,23 @@ test("signed out, nothing but the public news reaches the relay; hidden, not eve
   expect(requests().length).toBe(before);
   await api.communitySettingsSet({ shown: true });
 });
+
+test("the crash notice: a crash report written during the run, the time it ran", async () => {
+  const { afterWords, crashLine, crashOfRun } = await import("../src/community/crash");
+  const start = Date.parse("2026-11-18T22:06:00Z"), end = Date.parse("2026-11-18T22:10:30Z");
+  const r = (created: string) => ({ name: created, created, size: 1 });
+  expect(crashOfRun([r("2026-11-17T22:10:00Z")], start, end)).toBeNull();
+  expect(crashOfRun([r("2026-11-18T22:08:00Z"), r("2026-11-18T22:10:04Z"), r("2026-11-03T22:10:04Z")], start, end)?.created).toBe("2026-11-18T22:10:04Z");
+  expect(afterWords(30_000)).toBe("30 seconds");
+  expect(afterWords(1_000)).toBe("1 second");
+  expect(afterWords(4 * 60_000)).toBe("4 minutes");
+  expect(afterWords(3 * 3600_000)).toBe("3 hours");
+  expect(crashLine({ gameId: "g", startedAt: start, closedAt: end, report: "x" })).toMatch(/^It closed at .+, 5 minutes after it started\. Kiln wrote a crash report\.$/);
+});
+
+test("the post's tags follow the kind the player picks, then the system's", async () => {
+  const { postTags } = await import("../src/community/SendDialog");
+  const p = { tags: ["Linux"], kindTags: { noload: "Mods", mod: "Mods", crash: "Crash", launcher: "Launcher", server: "Server", other: null } } as unknown as api.ReportPreview;
+  expect(postTags(p, "crash")).toEqual(["Crash", "Linux"]);
+  expect(postTags(p, "other")).toEqual(["Linux"]);
+});

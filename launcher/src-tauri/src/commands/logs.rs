@@ -74,7 +74,7 @@ pub struct ReportSaved {
 
 /// What a report covers: a game, a local server, or (None) the system and the launcher only. Reads every time, keeps
 /// nothing between calls.
-fn report_input(app: &tauri::AppHandle, target: Option<LogTarget>) -> Result<kiln_manage::report::ReportInput, Error> {
+pub(crate) fn report_input(app: &tauri::AppHandle, target: Option<LogTarget>) -> Result<kiln_manage::report::ReportInput, Error> {
     let version = app.package_info().version.to_string();
     let mut input = kiln_manage::report::ReportInput {
         // a test build says so in the tool's name and in the channel line (dev.29)
