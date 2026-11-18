@@ -313,6 +313,11 @@ KilnResult ecs_snapshot_many(const Backend& b, KilnOwner owner, const KilnObject
     uint64_t token = 0;
     if (quiet)
         if (uint32_t s = b.quiet_begin(b.user, ctx, &token); s != KILN_ECS_OK) return fail(s);
+    // Inside the window a frame that ran is the reason for any failure: busy (nothing copied; retry after the step).
+    const auto fail_inside = [&](uint32_t s) -> KilnResult {
+        if (quiet && b.quiet_end(b.user, ctx, token) == KILN_ECS_BUSY) return fail(KILN_ECS_BUSY);
+        return fail(s);
+    };
     size_t at = 0;
     for (uint32_t i = 0; i < count; ++i) {
         if (!facts[i].present) continue;
@@ -322,21 +327,18 @@ KilnResult ecs_snapshot_many(const Backend& b, KilnOwner owner, const KilnObject
             ContextFact here{};
             EntityFact still{};
             ComponentFact now{};
-            if (uint32_t s = validate(b, owner, *ref, here, still); s != KILN_ECS_OK) return fail(s);
+            if (uint32_t s = validate(b, owner, *ref, here, still); s != KILN_ECS_OK) return fail_inside(s);
             if (uint32_t s = b.component(b.user, here, still, ref->entity, specs[i].component, &now); s != KILN_ECS_OK)
-                return fail(s);
-            if (!now.present || now.size != facts[i].size) return fail(KILN_ECS_STALE);
+                return fail_inside(s);
+            if (!now.present || now.size != facts[i].size) return fail_inside(KILN_ECS_STALE);
             facts[i] = now;
         }
         if (uint32_t s = copy_stable_into(b, owner, *ref, specs[i].component, facts[i], packed.data() + at, second.data());
-            s != KILN_ECS_OK) {
-            // A frame that ran during the copy is the reason the copy failed: busy (retry after the step).
-            if (quiet && b.quiet_end(b.user, ctx, token) == KILN_ECS_BUSY) return fail(KILN_ECS_BUSY);
-            return fail(s);
-        }
+            s != KILN_ECS_OK)
+            return fail_inside(s);
         at += facts[i].size;
     }
-    if (at != total) return fail(KILN_ECS_STALE);
+    if (at != total) return fail_inside(KILN_ECS_STALE);
     if (quiet)
         if (uint32_t s = b.quiet_end(b.user, ctx, token); s != KILN_ECS_OK) return fail(s);
     if (presence) std::memcpy(presence, got.data(), count * sizeof(uint32_t));
