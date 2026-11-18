@@ -181,18 +181,38 @@ internal static class KilnText
     /// <summary>Whether the table has <paramref name="key"/> (in any language of the lookup, English included).</summary>
     internal static bool Has(string key) => Current().Shown.ContainsKey(key);
 
-    /// <summary>The keys under <see cref="NativePrefix"/> with their texts now (for kiln.ui). The game draws them with its own
-    /// fonts, which have every language's glyphs, so they are the language's also while the overlay's texts are gated.
-    /// kiln.ui picks a plural form as English does (.one for 1, else .other): for a group whose language has no singular
-    /// form .one is its .other.</summary>
+    /// <summary>The native keys the game draws with its own fonts, which have every language's glyphs: the Mods entry of its
+    /// menus and the main menu's footer. Every other native key is drawn by kiln.ui in the overlay (the graphics readout, the
+    /// fallback window) with the overlay's fonts.</summary>
+    internal static readonly string[] GameDrawnPrefixes = [NativePrefix + "menu.", NativePrefix + "footer."];
+
+    /// <summary>The keys under <see cref="NativePrefix"/> with their texts now (for kiln.ui). Those the game draws
+    /// (<see cref="GameDrawnPrefixes"/>) are the language's also while the overlay's texts are gated; those kiln.ui draws in
+    /// the overlay are English then, as every other overlay text, so they never show as boxes. kiln.ui picks a plural form as
+    /// English does (.one for 1, else .other): for a group whose language has no singular form .one is its .other.</summary>
     internal static IReadOnlyList<KeyValuePair<string, string>> Native()
     {
         var st = Current();
-        var native = st.Table.Where(p => p.Key.StartsWith(NativePrefix, StringComparison.Ordinal)).ToDictionary(StringComparer.Ordinal);
-        foreach (var (b, from) in st.Origin)
-            if (b.StartsWith(NativePrefix, StringComparison.Ordinal) && PluralForm(from, 1) == "other" && native.TryGetValue(b + ".other", out var other))
-                native[b + ".one"] = other;
+        var native = new Dictionary<string, string>(StringComparer.Ordinal);
+        void Take(Dictionary<string, string> table, Dictionary<string, string> origin, bool game)
+        {
+            foreach (var (k, v) in table)
+                if (k.StartsWith(NativePrefix, StringComparison.Ordinal) && GameDrawn(k) == game) native[k] = v;
+            foreach (var (b, from) in origin)
+                if (b.StartsWith(NativePrefix, StringComparison.Ordinal) && GameDrawn(b) == game && PluralForm(from, 1) == "other" &&
+                    native.TryGetValue(b + ".other", out var other))
+                    native[b + ".one"] = other;
+        }
+        Take(st.Table, st.Origin, game: true);
+        Take(st.Shown, st.ShownOrigin, game: false);
         return native.OrderBy(p => p.Key, StringComparer.Ordinal).ToArray();
+    }
+
+    private static bool GameDrawn(string key)
+    {
+        foreach (var p in GameDrawnPrefixes)
+            if (key.StartsWith(p, StringComparison.Ordinal)) return true;
+        return false;
     }
 
     /// <summary>The languages Kiln has texts for: English, then the files in the locales folder, as normalized tags.</summary>
