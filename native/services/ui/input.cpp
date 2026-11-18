@@ -614,13 +614,18 @@ LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
         }
         case WM_CHAR:
         case WM_SYSCHAR:
-        case WM_UNICHAR:
+        case WM_UNICHAR: {
+            // The game inserts '\\t' from WM_CHAR even if Tab keydown was
+            // intercepted. The scoped native chat hook may drop only the
+            // character paired with a consumed completion Tab press.
+            bool chat_consumed = false;
             if (const ChatInputSink* chat = g_chat_sink.load(std::memory_order_acquire);
                 chat && !cap && m != WM_SYSCHAR && !(m == WM_UNICHAR && w == UNICODE_NOCHAR))
-                chat->text(static_cast<uint32_t>(w));  // typed text ends a history browse (chat_input_probe.cpp)
+                chat_consumed = chat->text(static_cast<uint32_t>(w));
             enqueue(h, m, w, l);
-            if (cap) return 0;
+            if (cap || chat_consumed) return 0;
             break;
+        }
         case WM_IME_STARTCOMPOSITION:
         case WM_IME_ENDCOMPOSITION:
             if (const ChatInputSink* chat = g_chat_sink.load(std::memory_order_acquire))
