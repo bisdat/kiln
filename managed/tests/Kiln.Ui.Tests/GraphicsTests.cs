@@ -136,6 +136,58 @@ public unsafe class GraphicsTests : IDisposable
         Assert.Empty(Directory.GetFiles(_dir, "*.tmp"));
     }
 
+    [Fact]
+    public void A_file_that_is_not_json_keeps_the_settings_in_use()
+    {
+        var path = Path.Combine(_dir, "kiln.json");
+        File.WriteAllText(path, "{ \"graphics\": { \"fpsCap\": 72 ");  // half saved, or mistyped
+        var warnings = new List<string>();
+        Assert.Equal(GraphicsSettings.Default, GraphicsTools.Read(path, warnings.Add));  // at start: the defaults
+        Assert.Contains("not valid JSON", Assert.Single(warnings));
+        var mine = GraphicsSettings.Default with { FpsCap = 141, Readout = true };
+        GraphicsTools.Use(mine);
+        Assert.Equal(mine, GraphicsTools.Read(path));  // in a game: the cap stays on
+        File.WriteAllText(path, "{ \"graphics\": { \"fpsCap\": 72 } }");
+        Assert.Equal(72, GraphicsTools.Read(path).FpsCap);
+    }
+
+    [Fact]
+    public void The_look_and_the_graphics_settings_write_kiln_json_under_one_lock()
+    {
+        // each reads the file, changes its own section and writes the file back: two at once would lose one's change
+        Assert.Same(PlayerLook.FileLock, GraphicsTools.FileLock);
+    }
+
+    [Fact]
+    public void A_change_on_the_page_is_not_undone_by_a_read_of_the_file_before_it_is_saved()
+    {
+        Install();
+        GraphicsTools.PathOverride = Path.Combine(_dir, "kiln.json");
+        File.WriteAllText(GraphicsTools.PathOverride, "{ \"graphics\": { \"fpsCap\": 72 } }");
+        GraphicsTools.Start();
+        Assert.Equal(72, GraphicsTools.Current.FpsCap);
+        GraphicsTools.Change(GraphicsTools.Current with { FpsCap = 90 });
+        // the launcher writes the file in the half second before the page's change is saved, and the game reads it
+        File.WriteAllText(GraphicsTools.PathOverride, "{ \"graphics\": { \"fpsCap\": 30 } }");
+        GraphicsTools.Reload(quiet: true);
+        Assert.Equal(90, GraphicsTools.Current.FpsCap);
+        Assert.Equal(90u, Set[^1].FpsCap);  // kiln.ui keeps the player's
+        var until = DateTime.UtcNow.AddSeconds(5);
+        while (DateTime.UtcNow < until && GraphicsTools.Read(GraphicsTools.PathOverride).FpsCap != 90) Thread.Sleep(50);
+        Assert.Equal(90, GraphicsTools.Read(GraphicsTools.PathOverride).FpsCap);
+        // saved: a later edit of the file is read again
+        until = DateTime.UtcNow.AddSeconds(5);
+        do
+        {
+            File.WriteAllText(GraphicsTools.PathOverride, "{ \"graphics\": { \"fpsCap\": 30 } }");
+            GraphicsTools.Reload(quiet: true);
+            if (GraphicsTools.Current.FpsCap == 30) break;
+            Thread.Sleep(50);
+        } while (DateTime.UtcNow < until);
+        Assert.Equal(30, GraphicsTools.Current.FpsCap);
+        Assert.Equal(30u, Set[^1].FpsCap);
+    }
+
     // ---- the native tail ----
 
     [Fact]

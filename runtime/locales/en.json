@@ -940,7 +940,7 @@
       "caption": "Frame cap",
       "on": "Limit the frame rate",
       "fps": "Frames a second",
-      "hint": "The game renders at most this many frames a second, evenly paced. Applies at once. With the game's own frame limit or V-Sync on too, the lowest limit decides."
+      "hint": "The game renders at most this many frames a second: Kiln spaces out the starts of its frames evenly. Applies at once. With the game's own frame limit or V-Sync on too, the lowest limit decides."
     },
     "dlss": {
       "caption": "DLSS (NVIDIA RTX cards)",

@@ -76,7 +76,11 @@ internal sealed record GraphicsSettings(int FpsCap, string DlssPreset, DlssScale
 /// <summary>kiln.json "graphics": reading, saving, and handing it to kiln.ui.</summary>
 internal static unsafe class GraphicsTools
 {
-    private static readonly object FileLock = new();
+    /// <summary>kiln.json's lock, the look's too (PlayerLook.FileLock): both write their sections of the one file.</summary>
+    internal static object FileLock => PlayerLook.FileLock;
+    // _current and _savePending change together under it, and kiln.ui is told under it: a reload of the file never
+    // overwrites a change the player just made, and kiln.ui ends with the setting in use
+    private static readonly object StateLock = new();
     private static volatile GraphicsSettings _current = GraphicsSettings.Default;
     private static int _started;
     private static Timer? _watch, _save;
@@ -131,7 +135,8 @@ internal static unsafe class GraphicsTools
         catch (UnauthorizedAccessException) { return default; }
     }
 
-    private static void Reload(bool quiet)
+    /// <summary>Reads kiln.json and uses its settings (the 2-second look at the file; tests call it at once).</summary>
+    internal static void Reload(bool quiet)
     {
         GraphicsSettings s;
         lock (FileLock)
@@ -139,10 +144,14 @@ internal static unsafe class GraphicsTools
             _stamp = Stamp();
             s = Read(KilnJson, quiet ? null : w => UiEngine.Log(LogLevel.Warn, "kiln.json: " + w));
         }
-        if (s == _current) return;
-        _current = s;
+        lock (StateLock)
+        {
+            // a change on the Graphics page since: it is saved soon, and the file read here is older than it
+            if (_savePending || s == _current) return;
+            _current = s;
+            ApplyLocked();
+        }
         if (!quiet) UiEngine.Log(LogLevel.Info, $"graphics: {Describe(s)} (kiln.json)");
-        Apply();
     }
 
     internal static string Describe(GraphicsSettings s)
@@ -159,6 +168,8 @@ internal static unsafe class GraphicsTools
     }
 
     /// <summary>kiln.json's <c>graphics</c> section (the defaults for what it lacks; values clamped).</summary>
+    /// <remarks>A file that is not valid JSON keeps the settings in use (at start, the defaults), as one that cannot be read
+    /// does: a half-saved or mistyped file does not turn the player's frame cap off in the middle of a game.</remarks>
     internal static GraphicsSettings Read(string path, Action<string>? warn = null)
     {
         string text;
@@ -172,10 +183,12 @@ internal static unsafe class GraphicsTools
             warn?.Invoke($"not readable ({e.Message}): Kiln's graphics settings stay as they were at start");
             return _current;
         }
-        return Parse(text, warn);
+        return Parse(text, warn, _current);
     }
 
-    internal static GraphicsSettings Parse(string text, Action<string>? warn = null)
+    /// <summary>kiln.json's text: its <c>graphics</c> section, clamped; <paramref name="whenInvalid"/> (else the defaults)
+    /// for text that is not JSON.</summary>
+    internal static GraphicsSettings Parse(string text, Action<string>? warn = null, GraphicsSettings? whenInvalid = null)
     {
         try
         {
@@ -208,8 +221,8 @@ internal static unsafe class GraphicsTools
         }
         catch (JsonException e)
         {
-            warn?.Invoke($"not valid JSON ({e.Message}): Kiln's graphics settings stay at their defaults");
-            return GraphicsSettings.Default;
+            warn?.Invoke($"not valid JSON ({e.Message}): Kiln's graphics settings stay {(whenInvalid is null ? "at their defaults" : "as they are")}");
+            return whenInvalid ?? GraphicsSettings.Default;
         }
     }
 
@@ -233,6 +246,11 @@ internal static unsafe class GraphicsTools
     /// <summary>Hands the setting in use to kiln.ui. Any thread.</summary>
     internal static void Apply()
     {
+        lock (StateLock) ApplyLocked();
+    }
+
+    private static void ApplyLocked()
+    {
         var t = UiNative.GraphicsTable;
         if (t == null || t->GraphicsSet == null) return;
         var g = ToNative(_current);
@@ -252,8 +270,11 @@ internal static unsafe class GraphicsTools
     /// <summary>Tests and the preview: this setting in use at once (kiln.ui is told), not saved.</summary>
     internal static void Use(GraphicsSettings s)
     {
-        _current = s.Clamped();
-        Apply();
+        lock (StateLock)
+        {
+            _current = s.Clamped();
+            ApplyLocked();
+        }
     }
 
     /// <summary>The player changed a setting on the Graphics page: applied at once, saved to kiln.json half a second after the
@@ -261,12 +282,12 @@ internal static unsafe class GraphicsTools
     internal static void Change(GraphicsSettings s)
     {
         s = s.Clamped();
-        if (s == _current) return;
-        _current = s;
-        Apply();
-        _savePending = true;
-        lock (FileLock)
+        lock (StateLock)
         {
+            if (s == _current) return;
+            _savePending = true;
+            _current = s;
+            ApplyLocked();
             _save ??= new Timer(_ => SaveNow(), null, Timeout.Infinite, Timeout.Infinite);
             _save.Change(500, Timeout.Infinite);
         }
@@ -274,11 +295,12 @@ internal static unsafe class GraphicsTools
 
     private static void SaveNow()
     {
+        var s = _current;
         try
         {
             lock (FileLock)
             {
-                var s = _current;
+                s = _current;
                 if (Save(KilnJson, s) is { } error) UiEngine.Log(LogLevel.Warn, $"graphics: not saved to kiln.json: {error}");
                 else UiEngine.Log(LogLevel.Info, $"graphics: {Describe(s)} saved to kiln.json");
                 _stamp = Stamp();
@@ -286,7 +308,9 @@ internal static unsafe class GraphicsTools
         }
         finally
         {
-            _savePending = false;
+            // a change while this one was written: its own save follows, and the file is not read back before it
+            lock (StateLock)
+                if (s == _current) _savePending = false;
         }
     }
 
