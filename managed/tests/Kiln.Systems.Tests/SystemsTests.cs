@@ -108,6 +108,23 @@ public sealed unsafe class SystemsTests
     }
 
     [Fact]
+    public void A_client_worlds_program_lists_its_prediction_wraps_too()
+    {
+        using var w = new FakeWorld(n => n is "systems.wraps" or "systems.wraps.client" or "systems.wraps.prediction");
+        var predicted = Systems.Wrap("fuel_setup", new WrapOptions { World = WorldKind.Prediction }).Wrap!.After((ref Slice s) => { });
+        var client = Systems.Wrap("fuel_setup", new WrapOptions { World = WorldKind.Client }).Wrap!.Before((ref Slice s) => { });
+        var server = Systems.Wrap("fuel_setup").Wrap!.Before((ref Slice s) => { });
+        var listed = Systems.Find("fuel_setup", WorldKind.Client)!.Wraps;
+        Assert.Equal([(WorldKind.Client, WrapStage.Before), (WorldKind.Prediction, WrapStage.After)],
+            listed.Select(i => (i.World, i.Stage)).OrderBy(x => x.World == WorldKind.Prediction).ToArray());
+        Assert.Equal([WorldKind.Server], Systems.Find("fuel_setup")!.Wraps.Select(i => i.World).ToArray());
+        Assert.Null(Systems.Find("fuel_setup", WorldKind.Prediction));  // no directory of its own, as before
+        predicted.Dispose();
+        client.Dispose();
+        server.Dispose();
+    }
+
+    [Fact]
     public void A_prediction_wraps_WhenArchetype_answers_end_with_its_prediction_storage_not_only_its_client_world()
     {
         using var w = new FakeWorld(n => n is "systems.wraps" or "systems.wraps.client" or "systems.wraps.prediction");

@@ -377,9 +377,11 @@ public sealed unsafe class ProgramWrap : IDisposable
         catch (Exception x) { Mod?.Log.Error($"a WrapDisabled handler threw: {x.Message}"); }
     }
 
+    // The wraps on a program of that world's table: a client world's program lists its prediction wraps too (their
+    // WrapInfo.World says Prediction), as the prediction storage has no table of its own.
     internal static IReadOnlyList<WrapInfo> InfosOf(string program, WorldKind world) =>
-        [.. Systems.Live.Keys.Where(s => s.Wrap.Program == program && s.Wrap.World == world)
-            .Select(s => new WrapInfo(s.Wrap.ModId, program, world, s.Kind, s.Priority, s.State, s.PerEntity))];
+        [.. Systems.Live.Keys.Where(s => s.Wrap.Program == program && s.Wrap.Table == world)
+            .Select(s => new WrapInfo(s.Wrap.ModId, program, s.Wrap.World, s.Kind, s.Priority, s.State, s.PerEntity))];
 
     // The mod unloads: every stage of its owner goes, and the unload waits until no call of one runs (a stage that runs
     // finishes; none starts). Tick thread (ModContext.Retire).

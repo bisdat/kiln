@@ -13,7 +13,8 @@ namespace Kiln;
 /// <param name="UpdateRva">Its update in the game's image (0: none in this world).</param>
 /// <param name="Runs">True when it has an update in this world (a client program on a server has none).</param>
 /// <param name="Writes">The components its descriptor writes (write and optional write lists).</param>
-/// <param name="Wraps">The managed wraps on it now.</param>
+/// <param name="Wraps">The managed wraps on it now. A client world's program lists its prediction wraps too
+/// (<see cref="WrapInfo.World"/> = <see cref="WorldKind.Prediction"/>, since 0.2.0-dev.29.18).</param>
 public sealed record SystemInfo(string Name, int Index, WorldKind World, uint Flags, ulong UpdateRva, bool Runs,
     IReadOnlyList<string> Writes, IReadOnlyList<WrapInfo> Wraps);
 
