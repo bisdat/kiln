@@ -50,7 +50,8 @@ export default function Home() {
   const sfNote: SfNote | null = sfStartup
     ? { title: sfStartup.mods.length ? t("deck.home.sfModsTitle") : t("deck.home.sfPassTitle"), text: sfStartup.text,
         word: sfStartup.mods.length ? t("deck.home.sfModsFailed") : t("deck.home.sfPassFailed") }
-    : sfSkipped ? { title: t("deck.home.sfSkippedTitle"), text: sfSkipped.text, word: t("deck.home.sfModSkipped") } : null;
+    : sfSkipped ? { title: t("deck.home.sfSkippedTitle"), text: sfSkipped.text,
+        word: t("deck.home.sfModSkipped", { count: Math.max(1, sfSkipped.skipped.length) }) } : null;
   const [open, setOpen] = useState<Open>(null);
   // the note the dialog shows: the one A was pressed on (a poll that changes it neither closes nor reopens the dialog)
   const [sfOpen, setSfOpen] = useState<SfNote | null>(null);

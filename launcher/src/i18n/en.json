@@ -1344,7 +1344,10 @@
       "lastBoot": "Last boot",
       "sfModsFailed": "mods did not load",
       "sfPassFailed": "startup pass failed",
-      "sfModSkipped": "one mod left out, the others loaded",
+      "sfModSkipped": {
+        "one": "one mod left out, the others loaded",
+        "other": "{count} mods left out, the others loaded"
+      },
       "sfWhy": "ShroudForge: why, and what to do",
       "pickFolder": "Pick folder",
       "updateKiln": "Update Kiln",

@@ -184,6 +184,13 @@ test.describe("the Deck", () => {
     await expect(dialog).toHaveCount(0);
   });
 
+  test("Home counts the mods left out with it, those that need the failed one", async ({ page }) => {
+    const lamp = { id: "lamp-pack", name: "Lamp Pack", version: "2.0.0", error: "needs wisp, which failed in the pregame pass" };
+    await plan(page, engines(null, { ...SKIPPED, skipped: [...SKIPPED.skipped, lamp] }));
+    await openDeck(page);
+    await expect(page.getByTestId("deck-sf-startup")).toContainText("2 mods left out, the others loaded");
+  });
+
   test("Home stays as it was while ShroudForge's pass is fine", async ({ page }) => {
     await plan(page, engines(null));
     await openDeck(page);
