@@ -2905,6 +2905,7 @@
       "unreadable": "The upscaler files could not be read",
       "starting": "Starting the download",
       "unavailable": "Not available in this build of Kiln.",
+      "gameRunning": "Close the game to download or remove these files: the launcher does not change the game's files while it runs.",
       "damaged": "A file of it is missing or changed. Download it again.",
       "failedUnknown": "The download failed.",
       "failedTitle": "{name} was not downloaded",

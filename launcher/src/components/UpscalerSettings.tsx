@@ -185,8 +185,9 @@ export function licenseFacts(c: VendorComponent): [string, string][] {
   ];
 }
 
-/** Settings, Graphics: the upscaler files' list (`#upscalers`), under the choice. */
-export function UpscalerFilesList({ files }: { files: UpscalerFiles }) {
+/** Settings, Graphics: the upscaler files' list (`#upscalers`), under the choice. `running`: the game runs, so the
+ *  launcher neither downloads nor removes (vendor_download and vendor_remove refuse): the buttons wait, and say why. */
+export function UpscalerFilesList({ files, running }: { files: UpscalerFiles; running?: boolean }) {
   const t = useT();
   const st = files.status;
   return (
@@ -197,7 +198,7 @@ export function UpscalerFilesList({ files }: { files: UpscalerFiles }) {
       {st.isLoading ? <Skeleton lines={2} /> : st.error ? <EmptyState title={t("settings.upscalers.unreadable")} hint={errorText(st.error)} /> : (
         <ul className="k-upscalers" aria-label={t("settings.upscalers.title")}>
           {st.data!.components.map((c) => (
-            <UpscalerRowView key={c.id} c={c} row={files.row(c)} onDownload={() => files.download(c)} onRemove={() => files.remove(c)} onCancel={() => files.cancel(c)} />
+            <UpscalerRowView key={c.id} c={c} row={files.row(c)} running={running} onDownload={() => files.download(c)} onRemove={() => files.remove(c)} onCancel={() => files.cancel(c)} />
           ))}
         </ul>
       )}
@@ -205,14 +206,19 @@ export function UpscalerFilesList({ files }: { files: UpscalerFiles }) {
   );
 }
 
-export function UpscalerRowView({ c, row, onDownload, onRemove, onCancel }: { c: VendorComponent; row: UpscalerRow; onDownload: () => void; onRemove: () => void; onCancel: () => void }) {
+/** True when a row's actions wait for the game to close (all but Cancel: the launcher does not change the game's files
+ *  while it runs). */
+export const waitsForGame = (row: UpscalerRow, running: boolean | undefined) => !!running && row.actions.some((a) => a !== "cancel");
+
+export function UpscalerRowView({ c, row, running, onDownload, onRemove, onCancel }: { c: VendorComponent; row: UpscalerRow; running?: boolean; onDownload: () => void; onRemove: () => void; onCancel: () => void }) {
   const t = useT();
+  const wait = waitsForGame(row, running);
   const button = (a: UpscalerAction) => {
     switch (a) {
       case "download": case "continue": case "update": case "tryAgain": case "downloadAgain":
-        return <Button key={a} size="s" variant={a === "download" || a === "update" ? "primary" : "secondary"} aria-label={t(`settings.upscalers.actionLabel.${a}`, { name: c.name })} onClick={onDownload}>{t(`settings.upscalers.action.${a}`)}</Button>;
+        return <Button key={a} size="s" variant={a === "download" || a === "update" ? "primary" : "secondary"} disabled={wait} aria-label={t(`settings.upscalers.actionLabel.${a}`, { name: c.name })} onClick={onDownload}>{t(`settings.upscalers.action.${a}`)}</Button>;
       case "remove":
-        return <Button key={a} size="s" variant="ghost" aria-label={t("settings.upscalers.actionLabel.remove", { name: c.name })} onClick={onRemove}>{t("common.remove")}</Button>;
+        return <Button key={a} size="s" variant="ghost" disabled={wait} aria-label={t("settings.upscalers.actionLabel.remove", { name: c.name })} onClick={onRemove}>{t("common.remove")}</Button>;
       case "cancel":
         return <Button key={a} size="s" variant="ghost" aria-label={t("settings.upscalers.actionLabel.cancel", { name: c.name })} onClick={onCancel}>{t("common.cancel")}</Button>;
     }
@@ -232,6 +238,7 @@ export function UpscalerRowView({ c, row, onDownload, onRemove, onCancel }: { c:
         </div>
       )}
       <div className="k-upscaler-detail" data-testid="upscaler-detail">{row.detail}</div>
+      {wait && <div className="k-hint" data-testid="upscaler-wait">{t("settings.upscalers.gameRunning")}</div>}
       {row.reason && <Banner tone="err"><span data-testid="upscaler-reason">{row.reason}</span></Banner>}
     </li>
   );

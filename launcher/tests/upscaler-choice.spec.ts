@@ -118,6 +118,11 @@ test.describe("desktop: Settings, Graphics", () => {
     await mock(page, "setGraphicsState", state({ running: "amdFsr4", version: "4.1.2" }));
     await mock(page, "startOutside", 5);
     await expect(b.getByTestId("upscaler-status")).toHaveAttribute("data-heading", "now");
+    // the files' rows wait for the game to close too (vendor_download and vendor_remove refuse while it runs), and say why
+    const amdRow = files(page).getByRole("listitem", { name: "AMD FSR" });
+    await expect(amdRow.getByRole("button", { name: "Remove AMD FSR" })).toBeDisabled();
+    await expect(amdRow.getByTestId("upscaler-wait")).toHaveText("Close the game to download or remove these files: the launcher does not change the game's files while it runs.");
+    await expect(files(page).getByRole("listitem", { name: "Intel XeSS" }).getByRole("button", { name: "Download Intel XeSS" })).toBeDisabled();
     // Intel XeSS chosen while the game runs: its files cannot come now, and the offer says so
     await b.getByLabel("Upscaler").selectOption("xess");
     await expect(b.getByTestId("upscaler-offer-running")).toHaveText("Close the game to download them: the launcher does not change the game's files while it runs.");
@@ -134,9 +139,11 @@ test.describe("desktop: Settings, Graphics", () => {
     await expect(b.getByTestId("upscaler-status-line")).toHaveText(["The game's own FSR 3 runs.",
       "Your graphics card or driver lacks a Vulkan feature AMD FSR needs, so the game's own FSR 3 runs."]);
     await expect(b.getByTestId("upscaler-status-detail")).toHaveText("Details: VK_KHR_shader_float16_int8 is missing");
-    // the game closed: the last game's
+    // the game closed: the last game's, and the files' buttons work again
     await mock(page, "stopGame");
     await expect(b.getByTestId("upscaler-status")).toHaveAttribute("data-heading", "last");
+    await expect(amdRow.getByRole("button", { name: "Remove AMD FSR" })).toBeEnabled();
+    await expect(amdRow.getByTestId("upscaler-wait")).toHaveCount(0);
     await expect(b.getByTestId("upscaler-status")).toContainText("Last game");
     // another choice since: the plan for it
     await b.getByLabel("Upscaler").selectOption("xess");
@@ -248,5 +255,13 @@ test.describe("Steam Deck: Settings", () => {
     const now = row(page, "set-upscaler-now");
     await expect(now).toContainText("Now");
     await expect(now).toContainText("AMD FSR 3.1 runs in place of the game's FSR 3. Version 3.1.6. AMD's selection chose FSR 3.1: FSR 4 does not run on this graphics card or driver.");
+    // the files' row while the game runs: it keeps the focus, A asks nothing, and it says why
+    const amd = row(page, "set-vendor-amd-fsr");
+    await expect(amd.getByTestId("deck-vendor-wait")).toHaveText("Close the game to download or remove these files: the launcher does not change the game's files while it runs.");
+    await amd.focus();
+    await pad(page, "a");
+    await expect(amd).toBeFocused();
+    await expect(page.locator('[data-deck-dialog="vendor-remove"]')).toHaveCount(0);
+    expect((await vmock<{ cmd: string }[]>(page, "calls")).filter((c) => c.cmd === "vendor_remove" || c.cmd === "vendor_download")).toEqual([]);
   });
 });

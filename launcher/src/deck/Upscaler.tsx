@@ -2,7 +2,8 @@
 // FSR 3"), for a client with Kiln in it. Rows: "Upscaler" (A: the game's own FSR 3, AMD FSR, Intel XeSS, in turn; the
 // game's kiln.json graphics.upscaler), "AMD FSR version" with AMD FSR (auto, FSR 3.1), "Upscaler now" (what ran or
 // runs, why not: the desktop card's words, components/upscalerStatus.ts), and one row per vendor component (A:
-// download, update, go on, try again; cancel while it downloads; remove when downloaded). A first download of a vendor's
+// download, update, go on, try again; cancel while it downloads; remove when downloaded; while the game runs A waits
+// and the row says why). A first download of a vendor's
 // licence opens the licence screen (the text in full; the right stick scrolls it; "I agree, download", B back); Remove
 // asks first. The flow is the desktop's (components/UpscalerSettings.tsx useUpscalerFiles): the same commands, tasks
 // and agreements.
@@ -13,7 +14,7 @@ import { qk, useGameStatus } from "../api/hooks";
 import { vendorLicense, vk, type VendorComponent } from "../api/vendor";
 import { useT } from "../i18n";
 import { toast } from "../ui";
-import { licenseFacts, removeText, useUpscalerFiles, type UpscalerAction, type UpscalerRowState } from "../components/UpscalerSettings";
+import { licenseFacts, removeText, useUpscalerFiles, waitsForGame, type UpscalerAction, type UpscalerRowState } from "../components/UpscalerSettings";
 import { AMD_MODES, UPSCALER_CHOICES, amdModeOf, choiceOf, upscalerView } from "../components/upscalerStatus";
 import { DeckButton, Dialog, Row, Word } from "./ui";
 
@@ -70,13 +71,15 @@ function Rows({ game }: { game: GameInstall }) {
       )}
       {(files.status.data?.components ?? []).map((c) => {
         const row = files.row(c);
+        // while the game runs the launcher neither downloads nor removes: A waits (the row keeps the focus) and says why
+        const wait = waitsForGame(row, status.data?.running);
         // the action A takes: the row's first (Remove when downloaded)
-        const a = row.actions[0];
+        const a = wait ? undefined : row.actions[0];
         const pct = row.state === "downloading" && row.progress != null ? ` ${Math.round(row.progress * 100)}%` : "";
         return (
-          <Row key={c.id} id={`set-vendor-${c.id}`} title={`${c.name} ${c.version}`} disabled={!a} dim={!a}
+          <Row key={c.id} id={`set-vendor-${c.id}`} title={`${c.name} ${c.version}`} disabled={!a && !wait} dim={!a}
             a={a ? (a === "remove" ? t("common.remove") : a === "cancel" ? t("common.cancel") : t(`settings.upscalers.action.${a}`)) : undefined}
-            sub={<span className="deck-wrap">{row.reason ?? row.detail}</span>}
+            sub={<span className="deck-wrap" data-testid={wait ? "deck-vendor-wait" : undefined}>{wait ? t("settings.upscalers.gameRunning") : row.reason ?? row.detail}</span>}
             end={<Word tone={TONE[row.state]}>{t(`settings.upscalers.state.${row.state}`) + pct}</Word>}
             onClick={() => act(c, a)} />
         );

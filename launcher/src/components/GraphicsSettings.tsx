@@ -91,7 +91,7 @@ function Graphics({ gameId }: { gameId: GameId }) {
               onChange={(path, value) => set.mutate({ path, value })} onReset={(path) => reset.mutate(path)} />
             <UpscalerChoiceBlock values={doc.data!.values} disabled={busy} onSet={(path, value) => set.mutate({ path, value })}
               state={status.data?.graphicsState} aside={aside} files={files} running={!!status.data?.running} />
-            <UpscalerFilesList files={files} />
+            <UpscalerFilesList files={files} running={!!status.data?.running} />
           </>
         )}
       {files.dialogs}
