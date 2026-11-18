@@ -61,9 +61,3 @@ export function deckAddTitle(r: Pick<AddReport, "added" | "changes">): string {
   if (!s.added.length) return t("deck.addMods.updatedMany", { count: s.updated.length });
   return t("deck.addMods.addedAndUpdated", { added: s.added.length, updated: s.updated.length });
 }
-
-/** The mods of an add were all another version of one the profile had (Nexus: a file of a mod already in the list). */
-export const allUpdated = (r: Pick<AddReport, "added" | "changes">): boolean => {
-  const s = splitAdded(r);
-  return s.updated.length > 0 && s.added.length === 0;
-};

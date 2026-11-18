@@ -1458,7 +1458,6 @@
       "needInstalled": "{name} (installed)",
       "freeAccounts": "Free accounts download on the site.",
       "added": "Added {name}",
-      "updated": "Updated {name}",
       "inListOff": "{name} is in your list, off",
       "get": "Get {name}",
       "typeNative": "Native",
