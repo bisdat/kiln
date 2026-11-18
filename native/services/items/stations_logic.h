@@ -8,6 +8,8 @@
 #include <cstdio>
 #include <cstring>
 #include <deque>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "services/kiln_stations.h"
@@ -532,6 +534,184 @@ inline uint64_t shares_total(const std::vector<uint32_t>& shares) {
     uint64_t t = 0;
     for (uint32_t s : shares) t += s;
     return t;
+}
+
+// One line of a crafting payment (docs/re/stations.md §10). `game` is what the game's own sources can pay
+// (the owner and the base's Magic chests, already in the game's order). `outputs` is what opted-in stations
+// can lend of this item. `need` is the line's cost. Outputs pay only the shortfall, and only when every line
+// is covered: otherwise Kiln takes nothing and the game's own payment runs.
+struct CraftCost {
+    uint32_t item = 0;
+    uint32_t need = 0;
+    uint64_t game = 0;
+    uint64_t outputs = 0;
+};
+// False when some line is still short with the outputs counted in: `*from_outputs` is then all zero.
+// True when every line is covered. A line the game's sources already cover takes nothing from outputs.
+inline bool craft_output_takes(const std::vector<CraftCost>& lines, std::vector<uint32_t>* from_outputs) {
+    from_outputs->assign(lines.size(), 0);
+    for (size_t i = 0; i < lines.size(); ++i) {
+        const CraftCost& c = lines[i];
+        if (c.need == 0 || c.game >= c.need) continue;
+        const uint64_t rest = static_cast<uint64_t>(c.need) - c.game;
+        if (rest > c.outputs) {
+            from_outputs->assign(lines.size(), 0);
+            return false;
+        }
+        (*from_outputs)[i] = static_cast<uint32_t>(rest);
+    }
+    return true;
+}
+
+// ---- a craft's payment, without game memory (stations.cpp craft_pay_impl; docs/re/stations.md §10) ----
+constexpr uint64_t kMaxCraftStock = 4096;  // a longer stock list than this is left to the game
+
+// Who pays a craft before any station, in the game's order (InventoryPay): stock mode 2 pays the owner first and then
+// the base's stock list, mode 1 the list and then the owner. Each entity once: the owner can be one of the list's
+// chests, and counting it twice would hide a shortfall. False (the game's own payment) for any other mode (0 has no
+// base stock) and for a list longer than kMaxCraftStock, so outputs never pay before a chest the game would ask.
+inline bool craft_order(uint8_t mode, uint32_t owner, const uint32_t* list, uint64_t n, std::vector<uint32_t>* out) {
+    out->clear();
+    if ((mode != 1 && mode != 2) || n > kMaxCraftStock || (n && !list)) return false;
+    std::unordered_set<uint32_t> seen;
+    auto push = [&](uint32_t e) {
+        if (e && seen.insert(e).second) out->push_back(e);
+    };
+    if (mode == 2) push(owner);
+    for (uint64_t i = 0; i < n; ++i) push(list[i]);
+    if (mode == 1) push(owner);
+    return true;
+}
+
+// One opted-in station as a craft's payment reads it, at the payment.
+struct CraftLender {
+    uint32_t entity = 0;
+    int32_t base = -1;      // the base it stands in now (-1: none, or its place was not read)
+    bool station = false;   // still a station, and its recipes were read
+    SourceRecipes recipes;  // its selected and running recipes
+};
+// What the lenders of one craft hold: per item, the count and the stations (in entity order).
+struct CraftLent {
+    std::unordered_map<uint32_t, uint64_t> count;
+    std::unordered_map<uint32_t, std::vector<uint32_t>> by;
+};
+// What opted-in stations lend to a craft in base `base`, of `items`: only stations of that base (eligible_sources),
+// never `exclude` (the station crafted at, or a non-player owner), never an entity the game's own sources already pay
+// from (`order`), and of each station only an item that is an output and no input of its recipes (lends_item: its
+// queued inputs, its Leftovers and an output that is also an input stay where they are). `count(entity, item)` is what
+// that entity holds of the item.
+template <class Count>
+void craft_lenders(const std::vector<CraftLender>& all, uint32_t exclude, int32_t base, const std::vector<uint32_t>& order,
+                   const std::vector<uint32_t>& items, Count count, CraftLent* out) {
+    std::vector<SourceCandidate> cands;
+    cands.reserve(all.size());
+    for (const CraftLender& l : all) cands.push_back(SourceCandidate{l.entity, l.base, l.station});
+    for (uint32_t e : eligible_sources(cands, exclude, base)) {
+        if (std::find(order.begin(), order.end(), e) != order.end()) continue;
+        const auto it = std::find_if(all.begin(), all.end(), [e](const CraftLender& l) { return l.entity == e; });
+        if (it == all.end()) continue;
+        for (uint32_t item : items) {
+            if (!lends_item(it->recipes, item)) continue;
+            const uint64_t n = count(e, item);
+            if (!n) continue;
+            out->count[item] += n;
+            out->by[item].push_back(e);
+        }
+    }
+}
+
+// The items a Kiln client must have counted to raise a recipe's count with station outputs (GitHub #68, the crafting
+// menu): every input (an item, or every option of a category input) of every recipe that takes one of `lent`, and the
+// `lent` items themselves. A recipe that takes none of them keeps the game's own count, so its other inputs are not
+// needed. `recipe_inputs`: per recipe, its input items and options. Sorted, unique.
+inline std::vector<uint32_t> craft_stock_items(const std::vector<std::vector<uint32_t>>& recipe_inputs, const std::vector<uint32_t>& lent) {
+    std::unordered_set<uint32_t> want(lent.begin(), lent.end());
+    want.erase(0);
+    std::unordered_set<uint32_t> out(want.begin(), want.end());
+    if (!want.empty())
+        for (const auto& inputs : recipe_inputs)
+            if (std::any_of(inputs.begin(), inputs.end(), [&](uint32_t i) { return want.count(i) != 0; }))
+                for (uint32_t i : inputs)
+                    if (i) out.insert(i);
+    std::vector<uint32_t> v(out.begin(), out.end());
+    std::sort(v.begin(), v.end());
+    return v;
+}
+
+enum CraftVerdict : int {
+    kCraftGame = 0,      // Kiln took nothing: the game's own payment runs (`why` says why)
+    kCraftPaid = 1,      // every line paid, station outputs last: InventoryPay's 0
+    kCraftRollback = 2,  // a take faulted, or a line stayed short after a take: InventoryPay's 4 (the craft rolls back)
+};
+enum CraftWhy : uint32_t {
+    kCraftWhyNone = 0,
+    kCraftWhyCovered = 1,    // the game's own sources cover every line: no outputs needed
+    kCraftWhyShort = 2,      // a line's shortfall is more than this base's opted-in outputs hold
+    kCraftWhyFault = 3,      // a take faulted
+    kCraftWhyRemainder = 4,  // a line was still short after every source paid (the counts did not hold)
+};
+
+// One craft paid as the game's InventoryPay pays it, with the opted-in outputs as the very last source. Every line is
+// counted first: `have(entity, item)` for the game's own sources in `order`, `lent` for the stations. Kiln pays only
+// when some line is short of the game's own sources and the outputs cover every line's shortfall (all or nothing);
+// otherwise it takes nothing and the game pays (or refuses) as always. It pays line by line: the game's sources in their
+// order as far as they pay, then that line's lenders for what is left. `pay(entity, item, &left)` takes up to *left of
+// the item from the entity and lowers *left; false when it faulted. *from_outputs: what the lenders paid.
+template <class Have, class Pay>
+int craft_pay(std::vector<CraftCost>* lines, const std::vector<uint32_t>& order, const CraftLent& lent, Have have, Pay pay,
+              uint64_t* from_outputs, uint32_t* why) {
+    *from_outputs = 0;
+    *why = kCraftWhyNone;
+    for (CraftCost& line : *lines) {
+        line.game = 0;
+        uint64_t still = line.need;
+        for (uint32_t e : order) {
+            if (!still) break;
+            const uint64_t take = std::min<uint64_t>(have(e, line.item), still);
+            line.game += take;
+            still -= take;
+        }
+        const auto it = lent.count.find(line.item);
+        line.outputs = it == lent.count.end() ? 0 : it->second;
+    }
+    std::vector<uint32_t> takes;
+    if (!craft_output_takes(*lines, &takes)) {
+        *why = kCraftWhyShort;
+        return kCraftGame;
+    }
+    if (!any_share(takes)) {
+        *why = kCraftWhyCovered;
+        return kCraftGame;
+    }
+    for (size_t i = 0; i < lines->size(); ++i) {
+        const CraftCost& line = (*lines)[i];
+        uint32_t left = line.need;
+        for (uint32_t e : order) {
+            if (!left) break;
+            if (!pay(e, line.item, &left)) {
+                *why = kCraftWhyFault;
+                return kCraftRollback;  // a take may already be in the transaction: the caller rolls it back
+            }
+        }
+        if (left && takes[i]) {
+            const auto by = lent.by.find(line.item);
+            if (by != lent.by.end())
+                for (uint32_t e : by->second) {
+                    if (!left) break;
+                    const uint32_t before = left;
+                    if (!pay(e, line.item, &left)) {
+                        *why = kCraftWhyFault;
+                        return kCraftRollback;
+                    }
+                    *from_outputs += before - left;
+                }
+        }
+        if (left) {
+            *why = kCraftWhyRemainder;
+            return kCraftRollback;
+        }
+    }
+    return kCraftPaid;
 }
 
 // Once the shares are in the station: the n the game's own call then needs so that every input ends where a plain fill

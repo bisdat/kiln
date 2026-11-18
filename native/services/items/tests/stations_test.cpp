@@ -737,6 +737,151 @@ int main() {
         CHECK(!collect_valid(col));
         // a fault after earlier stacks moved is PARTIAL (they stay moved); before anything moved, UNAVAILABLE
         CHECK(collect_fault_status(true) == KILN_STATION_PARTIAL && collect_fault_status(false) == KILN_STATION_UNAVAILABLE);
+        // crafting payment: outputs cover only the shortfall, and a line they cannot cover takes nothing
+        std::vector<CraftCost> craft = {{0xaaa, 4, 2, 4}, {0xbbb, 2, 2, 9}};
+        std::vector<uint32_t> took;
+        CHECK(craft_output_takes(craft, &took) && took[0] == 2 && took[1] == 0);
+        craft = {{0xaaa, 4, 1, 2}};  // short by 3, outputs hold 2
+        CHECK(!craft_output_takes(craft, &took) && took[0] == 0);
+        craft = {{0xaaa, 4, 4, 9}};  // the game's sources already cover it
+        CHECK(craft_output_takes(craft, &took) && took[0] == 0);
+        craft = {{0xaaa, 0, 0, 5}};
+        CHECK(craft_output_takes(craft, &took) && took[0] == 0);
+    }
+
+    // ---- a craft's payment (craft_pay_impl's logic; docs/re/stations.md §10) ----
+    {
+        constexpr uint32_t COAL = 0xc0a1, LOGS = 0x1095, SCRAP = 0x5c4a, LEFT = 0x1eff, BOTH = 0xb074;
+        constexpr uint32_t P = 5, C1 = 2001, C2 = 2002, K1 = 3001, K2 = 3002, K3 = 3003, W = 3004;
+        // who pays before any station, in the game's order
+        std::vector<uint32_t> order;
+        const uint32_t list[3] = {C1, P, C2};
+        CHECK(craft_order(2, P, list, 3, &order) && order == std::vector<uint32_t>({P, C1, C2}));  // owner first, once
+        CHECK(craft_order(1, P, list, 3, &order) && order == std::vector<uint32_t>({C1, P, C2}));  // list first
+        const uint32_t chests[2] = {C1, C2};
+        CHECK(craft_order(1, P, chests, 2, &order) && order == std::vector<uint32_t>({C1, C2, P}));
+        CHECK(!craft_order(0, P, chests, 2, &order) && order.empty());  // mode 0: the owner only, the game's own
+        CHECK(!craft_order(3, P, chests, 2, &order));
+        CHECK(!craft_order(2, P, nullptr, 2, &order));
+        std::vector<uint32_t> big(kMaxCraftStock + 1, C1);
+        CHECK(!craft_order(2, P, big.data(), big.size(), &order));  // longer than the cap: the game pays
+        CHECK(craft_order(2, P, nullptr, 0, &order) && order == std::vector<uint32_t>({P}));
+
+        // the world: what each entity holds, and the stations' recipes
+        std::unordered_map<uint32_t, std::unordered_map<uint32_t, uint64_t>> inv;
+        auto reset = [&] {
+            inv.clear();
+            inv[P][COAL] = 3, inv[P][SCRAP] = 2;
+            inv[C1][COAL] = 4;
+            inv[K1][COAL] = 8, inv[K1][LOGS] = 6, inv[K1][LEFT] = 9;  // finished coal, queued logs, a Leftover
+            inv[K2][COAL] = 50;                                          // the same kiln in another base
+            inv[K3][BOTH] = 7, inv[K3][COAL] = 0;                        // an output that is also an input
+            inv[W][COAL] = 40;                                           // the station being crafted at
+        };
+        reset();
+        auto count = [&](uint32_t e, uint32_t item) -> uint64_t {
+            const auto it = inv.find(e);
+            if (it == inv.end()) return 0;
+            const auto n = it->second.find(item);
+            return n == it->second.end() ? 0 : n->second;
+        };
+        SourceRecipes kiln_r{{COAL}, {LOGS}};        // logs -> charcoal
+        SourceRecipes both_r{{BOTH, COAL}, {BOTH}};  // an output that is also an input stays; its coal would lend
+        SourceRecipes bench_r{{COAL}, {LOGS}};
+        std::vector<CraftLender> lenders = {{K1, 0, true, kiln_r}, {K2, 1, true, kiln_r}, {K3, 0, true, both_r},
+                                            {W, 0, true, bench_r}, {C2, 0, false, {}}};
+        CraftLent lent;
+        craft_order(2, P, chests, 2, &order);
+        craft_lenders(lenders, W, 0, order, {COAL, LOGS, LEFT, BOTH, SCRAP}, count, &lent);
+        CHECK(lent.count[COAL] == 8 && lent.by[COAL] == std::vector<uint32_t>({K1}));  // not K2 (other base), not W, not K3 (0)
+        CHECK(lent.count.find(LOGS) == lent.count.end());  // queued inputs never lend
+        CHECK(lent.count.find(LEFT) == lent.count.end());  // nor Leftovers
+        CHECK(lent.count.find(BOTH) == lent.count.end());  // nor an output that is also an input
+        CHECK(lent.count.find(SCRAP) == lent.count.end());
+        CraftLent lent_in_order;  // a station the game's own sources already list is not lent twice
+        const std::vector<uint32_t> order_with_k1 = {P, K1};
+        craft_lenders(lenders, W, 0, order_with_k1, {COAL}, count, &lent_in_order);
+        CHECK(lent_in_order.count.empty());
+        CraftLent lent_no_exclude;  // without a known station crafted at, W lends like any opted-in station
+        craft_lenders(lenders, 0, 0, order, {COAL}, count, &lent_no_exclude);
+        CHECK(lent_no_exclude.count[COAL] == 48 && lent_no_exclude.by[COAL] == std::vector<uint32_t>({K1, W}));
+
+        // pay: a fake PayMaterial over `inv`, with a log of every take and an optional fault
+        struct Take {
+            uint32_t e, item, n;
+        };
+        std::vector<Take> log;
+        uint32_t fault_at = 0;
+        std::unordered_map<uint32_t, bool> empty_pay;  // pay finds nothing there, whatever have() said
+        auto pay = [&](uint32_t e, uint32_t item, uint32_t* left) {
+            if (e == fault_at) return false;
+            const uint64_t has = empty_pay[e] ? 0 : count(e, item);
+            const uint32_t n = static_cast<uint32_t>(std::min<uint64_t>(has, *left));
+            if (n) {
+                inv[e][item] -= n;
+                log.push_back({e, item, n});
+            }
+            *left -= n;
+            return true;
+        };
+        uint64_t from = 0;
+        uint32_t why = 0;
+        // the bag, then the chest, then the kiln's outputs for the rest only; logs and the Leftover stay
+        std::vector<CraftCost> lines = {{COAL, 10, 0, 0}, {SCRAP, 2, 0, 0}};
+        CHECK(craft_pay(&lines, order, lent, count, pay, &from, &why) == kCraftPaid && why == kCraftWhyNone && from == 3);
+        CHECK(log.size() == 4 && log[0].e == P && log[0].n == 3 && log[1].e == C1 && log[1].n == 4 && log[2].e == K1 &&
+              log[2].item == COAL && log[2].n == 3 && log[3].e == P && log[3].item == SCRAP && log[3].n == 2);
+        CHECK(inv[K1][COAL] == 5 && inv[K1][LOGS] == 6 && inv[K1][LEFT] == 9 && inv[K2][COAL] == 50 && inv[W][COAL] == 40);
+        CHECK(lines[0].game == 7 && lines[0].outputs == 8);
+
+        // not enough: 7 from the bag and the chest, 8 from outputs, 20 asked -> nothing taken, the game's own payment
+        reset();
+        log.clear();
+        lines = {{COAL, 20, 0, 0}};
+        CHECK(craft_pay(&lines, order, lent, count, pay, &from, &why) == kCraftGame && why == kCraftWhyShort && log.empty());
+        // all or nothing over every line: one line short of the outputs keeps the other's outputs too
+        lines = {{COAL, 10, 0, 0}, {SCRAP, 5, 0, 0}};
+        CHECK(craft_pay(&lines, order, lent, count, pay, &from, &why) == kCraftGame && why == kCraftWhyShort && log.empty());
+        // the bag and the chests cover it: the game pays, Kiln takes nothing
+        lines = {{COAL, 6, 0, 0}, {SCRAP, 2, 0, 0}};
+        CHECK(craft_pay(&lines, order, lent, count, pay, &from, &why) == kCraftGame && why == kCraftWhyCovered && log.empty());
+        // another base is never used: only base 1's kiln could cover it
+        CraftLent other;
+        craft_lenders(lenders, W, 1, order, {COAL}, count, &other);
+        CHECK(other.count[COAL] == 50 && other.by[COAL] == std::vector<uint32_t>({K2}));
+        CraftLent none;
+        craft_lenders(lenders, W, 2, order, {COAL}, count, &none);  // a base with no opted-in station
+        lines = {{COAL, 10, 0, 0}};
+        CHECK(craft_pay(&lines, order, none, count, pay, &from, &why) == kCraftGame && why == kCraftWhyShort && log.empty());
+        // a fault after a take: InventoryPay's 4, the craft's rollback undoes the bag's take
+        fault_at = K1;
+        lines = {{COAL, 10, 0, 0}};
+        CHECK(craft_pay(&lines, order, lent, count, pay, &from, &why) == kCraftRollback && why == kCraftWhyFault);
+        fault_at = 0;
+        // the counts did not hold (the bag pays nothing, the kiln holds less than counted): the outputs pay what they
+        // hold and the line stays short -> 4, never a partial craft
+        reset();
+        log.clear();
+        empty_pay[P] = true;
+        inv[K1][COAL] = 3;
+        lines = {{COAL, 10, 0, 0}};
+        CHECK(craft_pay(&lines, order, lent, count, pay, &from, &why) == kCraftRollback && why == kCraftWhyRemainder);
+        empty_pay.clear();
+        // mode 1: the chests before the owner
+        reset();
+        log.clear();
+        craft_order(1, P, chests, 2, &order);
+        lines = {{COAL, 10, 0, 0}};
+        CHECK(craft_pay(&lines, order, lent, count, pay, &from, &why) == kCraftPaid && from == 3 && log.size() == 3 &&
+              log[0].e == C1 && log[1].e == P && log[2].e == K1);
+
+        // what a Kiln client is sent: the inputs of the recipes that take a lent item, and the lent items
+        const std::vector<std::vector<uint32_t>> recipes = {{COAL, SCRAP}, {LOGS}, {BOTH, LEFT}, {0x777, COAL}};
+        std::vector<uint32_t> want = {COAL, SCRAP, 0x777};
+        std::sort(want.begin(), want.end());
+        CHECK(craft_stock_items(recipes, {COAL}) == want);
+        CHECK(craft_stock_items(recipes, {}).empty());
+        CHECK(craft_stock_items(recipes, {0x999}) == std::vector<uint32_t>({0x999}));  // lent, used by no recipe
     }
 
     std::printf("stations: %d checks, %d failures\n", checks, failed);
