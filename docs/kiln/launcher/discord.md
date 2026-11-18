@@ -124,7 +124,11 @@ and kept" says it in short; `unit/community.test.ts` checks that its words keep 
 
 The relay runs on frostdev.io (the kilnbot repo). Its contract is the relay's own: `docs/relay-api.md` and the 36
 examples of `docs/relay-contract.json` there (master 3eb30a7, live since 18 November 2026). This is how the launcher
-uses it. The launcher's tests talk to a fake relay on 127.0.0.1, never to frostdev.io.
+uses it. The launcher's tests talk to a fake relay on 127.0.0.1, never to frostdev.io. A copy of the examples is
+`crates/kiln-manage/src/community/relay-contract.json`; `community::contract` makes the launcher's call for each one
+(all but `/health`, which the launcher never calls) against a strict fake relay that holds every request to the real
+relay's rules (unknown fields, queries, bodies on bodiless calls, content types, the session key's form, the uploads'
+parts: `testing::relay_rules`) and answers with the example's answer. Update the copy with the relay's file.
 
 **Base address:** `https://frostdev.io/kiln/relay`. It is a setting (`relay` in `<data>/community.json`); only https on
 frostdev.io or one of its subdomains is used, so a staging relay can be tried and the session key never goes to
@@ -206,4 +210,5 @@ relay's versions line ("Kiln 0.2.0-dev.29.18 · Launcher 0.2.0-dev.29.18 · Arch
 | `community-tester.json` | a tester's results for the current test build `{build, steps: {id: {result, note}}}` | the next build, Stop testing, sign out |
 
 The account and the posts as last read stay in memory while the launcher runs, so the page can say "as of 11:47" when
-offline. Nothing about the player's Discord account stays after sign-out.
+offline. Nothing about the player's Discord account stays
+after sign-out.

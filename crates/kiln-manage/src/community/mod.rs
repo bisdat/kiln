@@ -35,6 +35,8 @@ pub mod signin;
 pub mod testers;
 #[cfg(test)]
 pub(crate) mod testing;
+#[cfg(test)]
+mod contract;
 
 use serde::{Deserialize, Serialize};
 
