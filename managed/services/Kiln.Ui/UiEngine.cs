@@ -389,6 +389,7 @@ internal static unsafe class UiEngine
             DrawWindow(ui, w);
         }
         Ui.Crafting.DrawPanels(ui);
+        ChatCompletionPanel.Draw(ui); // non-focusable suggestions over native HUD/Social chat
         DrawScreens(ui);
         foreach (var (h, owner) in FrameHandlers.Snapshot())
         {
