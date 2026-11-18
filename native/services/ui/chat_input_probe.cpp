@@ -59,10 +59,24 @@ CompletionSnapshot g_completion_snapshot;
 std::deque<chat_keys::Action> g_completion_actions;
 PendingEdit g_pending_edit;
 bool g_pending_valid = false;
+std::atomic<uint32_t> g_completion_edit_log_count{0};
+
+// No chat text, player identity, or candidate names in these diagnostics.
+void completion_edit_log(const char* stage, uint32_t a, uint32_t b = 0, uint32_t c = 0) {
+    if (g_completion_edit_log_count.fetch_add(1, std::memory_order_relaxed) < 24)
+        logf(KILN_LOG_INFO, "ui: chat completion: edit %s a=%u b=%u c=%u", stage, a, b, c);
+}
 
 void completion_action(chat_keys::Action action) {
-    std::lock_guard lock(g_completion_mu);
-    if (g_completion_actions.size() < 32) g_completion_actions.push_back(action);
+    bool queued = false;
+    {
+        std::lock_guard lock(g_completion_mu);
+        if (g_completion_actions.size() < 32) {
+            g_completion_actions.push_back(action);
+            queued = true;
+        }
+    }
+    completion_edit_log("action-queued", static_cast<uint32_t>(action), queued ? 1u : 0u);
 }
 
 // Unicode codepoints are the game's UTF-32 cursor units. We only complete
@@ -250,22 +264,47 @@ void completion_before(void* widget, bool hud) {
     void* state = game_state(widget);
     if (!editing(state)) return;
     PendingEdit pending;
-    bool queued = false;
+    bool queued = false, matching_snapshot = false;
     {
         std::lock_guard lock(g_completion_mu);
         if (g_pending_valid) {
             pending = std::move(g_pending_edit);
             g_pending_valid = false;
             queued = true;
+            const auto& snap = g_completion_snapshot;
+            // The last completed TextInputProcess provided this authoritative
+            // UTF-8 text and cursor. The caller-owned StringHead is NOT a
+            // reliable source before the next TextInputProcess runs.
+            matching_snapshot = snap.has_rect &&
+                chat_completion_text::can_apply_editor_snapshot(
+                    snap.field, snap.revision, snap.text, snap.cursor,
+                    pending.field, pending.revision, pending.expected,
+                    snap.focused, true, false, false);
         }
     }
-    if (queued && pending.field == (hud ? 1u : 2u)) {
-        std::string old;
-        if (widget_text(widget, &old) && old == pending.expected && safe_line(pending.replacement) &&
-            game_set_text(reinterpret_cast<uint8_t*>(state) + L.edit,
-                pending.replacement.data(), pending.replacement.size())) {
+    if (queued) {
+        const bool same_field = pending.field == (hud ? 1u : 2u);
+        const bool no_user_edit = !g_manual_text_edit.load(std::memory_order_acquire) &&
+            !g_ime_composing.load(std::memory_order_acquire) &&
+            !g_window_blurred.load(std::memory_order_acquire);
+        uint32_t cursor = 0;
+        const bool cursor_matches = game_read(
+            reinterpret_cast<const uint8_t*>(state) + L.edit + kEditorCursor, &cursor) &&
+            cursor == codepoints(pending.expected);
+        const bool valid_replacement = safe_line(pending.replacement) &&
+            !pending.replacement.empty() && pending.replacement.front() == '/';
+        const bool allowed = same_field && matching_snapshot && no_user_edit &&
+            cursor_matches && valid_replacement;
+        const bool applied = allowed && game_set_text(
+            reinterpret_cast<uint8_t*>(state) + L.edit,
+            pending.replacement.data(), pending.replacement.size());
+        completion_edit_log("apply",
+            (same_field ? 1u : 0u) | (matching_snapshot ? 2u : 0u) |
+            (no_user_edit ? 4u : 0u) | (cursor_matches ? 8u : 0u) |
+            (valid_replacement ? 16u : 0u), applied ? 1u : 0u);
+        if (applied) {
             g_last_applied = pending.replacement;
-            g_set_text_pending = true; // game widget readback in history_after
+            g_set_text_pending = true; // post-call widget verification in history_after
             g_history.edited();
         }
     }
@@ -725,6 +764,7 @@ KilnResult chat_completion_io(KilnUiChatCompletion* io) {
         if (!g_completion_actions.empty()) {
             io->action = static_cast<uint32_t>(g_completion_actions.front());
             g_completion_actions.pop_front();
+            completion_edit_log("action-delivered", io->action);
         }
         return KILN_OK;
     }
@@ -742,6 +782,7 @@ KilnResult chat_completion_io(KilnUiChatCompletion* io) {
             expected != snap.text) return KILN_ERR_UNAVAILABLE;
         g_pending_edit = PendingEdit{snap.field, snap.revision, expected, replacement};
         g_pending_valid = true;
+        completion_edit_log("replace-queued", snap.field, snap.revision);
         g_keys.completion(true, false, false);
         return KILN_OK;
     }
