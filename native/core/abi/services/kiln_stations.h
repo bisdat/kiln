@@ -42,12 +42,16 @@
  *  - Collect (since 0.2.0-dev.29.17, collect()): a station's finished stacks into one inventory or the base's Magic
  *    chests, each stack through kiln.items' move (the game's slot transfer, the same one Items.Move uses). Its own rules,
  *    which are not Kiln.Blocks' Stations.Collect (that managed call keeps its own Items.Move loop): see KilnStationCollect.
+ *  - Station outputs in a craft (since 0.2.0-dev.29.17, capabilities stations.craft_sources and stations.craft_ui): the
+ *    same opt-in is the last source of a player's craft. kiln-items pays such a craft inside the game's own payment
+ *    (through kiln.rules' hook on it), only when the base's opted-in outputs cover every line's shortfall; a Kiln client's
+ *    crafting menu counts what the server sends it (set_craft_stock, craft_items). docs/re/stations.md section 10.
  *  - A finished cycle is kiln.gameplay's KILN_GAMEPLAY_CRAFTED with actor == target == the station (once per cycle since
  *    0.2.0-dev.29). This table adds state, placed, removed and base-list events by polling (watch, events).
  *
- * Threads: status, submit, cancel, watch, last_seq, set_output_source, output_sources, max_chests, collect: any thread.
- * Every read (base_* including base_stock_with_stations, stations, station_read, recipe*, category*, workshop_recipes,
- * plan, events): the tick thread, Pre or Post (KILN_ERR_WRONG_THREAD otherwise). Actions (submit, collect) run
+ * Threads: status, submit, cancel, watch, last_seq, set_output_source, output_sources, max_chests, collect,
+ * set_craft_stock: any thread. Every read (base_* including base_stock_with_stations, stations, station_read, recipe*,
+ * category*, workshop_recipes, plan, events, craft_items): the tick thread, Pre or Post (KILN_ERR_WRONG_THREAD otherwise). Actions (submit, collect) run
  * inside kiln.items' program kiln_items_stations (registered through kiln.world, after the game's programs, so a player's
  * own action in the same step runs first); their callbacks come on the tick thread in Pre, one step after they ran.
  * The table only grows at the end. */
@@ -71,6 +75,7 @@ extern "C" {
 #define KILN_STATIONS_MAX_CHESTS 64u  /* ordinary chests named on one fill request */
 /* KilnStationRequest through reserved[4]. A caller built before ordinary chests passes this size and names none. */
 #define KILN_STATION_REQUEST_V1 88u
+#define KILN_STATIONS_MAX_CRAFT_STOCK 1024u /* rows in a Kiln client's crafting-stock snapshot (set_craft_stock) */
 
 /* A base's id: the 16 bytes of the game's BaseId (a GUID, saved with the altar). All zero: no altar was found. */
 typedef struct KilnBaseId {
@@ -433,6 +438,18 @@ typedef struct KilnStationsApi {
      * Tick thread. KILN_ERR_BUFFER_TOO_SMALL: *out_count = what is needed. */
     KilnResult(KILN_CALL* base_stock_with_stations)(uint32_t index, KilnStationStack* out, uint32_t capacity,
                                                     uint32_t* out_count);
+    /* ---- the crafting menu's snapshot for Kiln clients, GitHub #68 step 2 (header.size tells whether these are here) ---- */
+    /* A Kiln client's snapshot of the crafting stock its crafting menu may count: per item, the player's bag, the base's
+     * Magic chests and the opted-in stations' Outputs, for the items craft_items names. count 0 clears it (the game's own
+     * counts again). Any thread. The server's payment never reads it. KILN_ERR_INVALID_ARGUMENT: count over
+     * KILN_STATIONS_MAX_CRAFT_STOCK, or rows null with count set. */
+    KilnResult(KILN_CALL* set_craft_stock)(const KilnStationStack* rows, uint32_t count);
+    /* The items a Kiln client must have counted to raise a recipe's count with station outputs: every input (an item, or
+     * every option of a category input) of every recipe that takes one of `items` (the lent outputs), and `items`
+     * themselves; sorted. A recipe that takes none of them keeps the game's own count. Server world, tick thread.
+     * KILN_ERR_BUFFER_TOO_SMALL: *out_count = needed. */
+    KilnResult(KILN_CALL* craft_items)(const KilnItemId* items, uint32_t count, KilnItemId* out, uint32_t capacity,
+                                       uint32_t* out_count);
 } KilnStationsApi;
 
 /* KilnStationCollect.flags. Bits 16 and up, so a result's flags never read as a request flag (KILN_STATION_DRY_RUN). */
