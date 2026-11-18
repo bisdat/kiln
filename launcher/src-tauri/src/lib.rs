@@ -55,6 +55,8 @@ pub fn run() {
     builder
         .register_uri_scheme_protocol("kiln-asset", |_ctx, req| assets::serve(req.uri().path()))
         .setup(|app| {
+            // the release version the relay hears, as About shows it (commands/community.rs)
+            commands::community::set_version(app.handle());
             // the window exists: the render watchdog's clock starts, software mode reaches the webview (render.rs)
             render::window_created(app.handle());
             // the data folder first (commands/data_folder.rs): found once, its lock, an unfinished move. The start-up

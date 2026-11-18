@@ -18,13 +18,21 @@ use kiln_manage::paths::DataDirs;
 use kiln_manage::{Error, ErrorCode};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::{LazyLock, Mutex};
+use std::sync::{LazyLock, Mutex, OnceLock};
 use tauri::{AppHandle, Emitter};
 
 /// `kiln://community`: something the Community page shows changed (`changed`), or Kiln support replied (`reply`).
 pub const EVENT: &str = "kiln://community";
 
-const VERSION: &str = env!("CARGO_PKG_VERSION");
+/// The launcher's release version as About and Settings show it (the app's package version: a release build gets
+/// 0.2.0-dev.29.18 there from tools/release; Cargo's own version is only VERSION, 0.2.0-dev). It goes to the relay in
+/// the User-Agent and at sign-in. Set when the app starts ([`set_version`]); Cargo's until then.
+static APP_VERSION: OnceLock<String> = OnceLock::new();
+
+/// Called once in the app's setup, before any command can run.
+pub fn set_version<R: tauri::Runtime>(app: &AppHandle<R>) {
+    let _ = APP_VERSION.set(app.package_info().version.to_string());
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -112,7 +120,7 @@ fn call<T>(auth: bool, f: impl FnOnce(&Relay) -> Result<T, Error>) -> Result<T, 
     let (d, s) = settings()?;
     s.network_allowed()?;
     let t = transport();
-    let mut r = Relay::new(s.relay(), t.as_ref(), VERSION);
+    let mut r = Relay::new(s.relay(), t.as_ref(), version());
     let kept = stored(&d, &s);
     if auth {
         let k = kept.as_ref().ok_or_else(|| Error::new(ErrorCode::AuthFailed, "Sign in with Discord first.").with_detail(serde_json::json!({ "kind": "signin" })))?;
@@ -273,7 +281,7 @@ pub struct SignInStart {
 pub async fn community_signin_start(mode: SigninMode, join: bool, texts: Option<PageTexts>) -> Result<SignInStart, Error> {
     blocking(move || {
         let device = if crate::deck::detect::current().detected { Device::Deck } else { Device::Pc };
-        let a = call(false, |r| Attempt::start(r, mode, join, device, VERSION, texts.unwrap_or_default()))?;
+        let a = call(false, |r| Attempt::start(r, mode, join, device, version(), texts.unwrap_or_default()))?;
         let out = SignInStart { id: a.started.id.clone(), code: a.started.code.clone(), url: a.started.url.clone(), expires_at: a.started.expires_at.clone() };
         let mut h = HUB.lock().unwrap();
         // one attempt at a time: a new one ends the old (its listener closes)
@@ -303,7 +311,7 @@ pub async fn community_signin_poll(app: AppHandle, id: String) -> Result<SignInS
         // another poll of this attempt is still asking: this one waits its turn
         let Ok(mut a) = slot.try_lock() else { return Ok(SignInState::Waiting) };
         let t = transport();
-        let relay = Relay::new(s.relay(), t.as_ref(), VERSION);
+        let relay = Relay::new(s.relay(), t.as_ref(), version());
         let p = a.poll(&relay);
         drop(a);
         note(&p);
@@ -431,7 +439,7 @@ pub(crate) fn signed_in() -> bool {
 }
 
 pub(crate) fn version() -> &'static str {
-    VERSION
+    APP_VERSION.get().map(String::as_str).unwrap_or(env!("CARGO_PKG_VERSION"))
 }
 
 // ---------------------------------------------------------------- Rich Presence (step 3), reports (step 5), testers (step 8)
@@ -501,4 +509,25 @@ pub async fn community_steam_keyboard() -> Result<(), Error> {
         return Ok(());
     }
     crate::state::open_external(std::ffi::OsStr::new("steam://open/keyboard"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The relay hears the version About shows (the app's package version, a release's 0.2.0-dev.29.18), not Cargo's
+    /// 0.2.0-dev: the User-Agent and the sign-in request take it from [`version`].
+    #[test]
+    fn the_relay_hears_the_release_version_about_shows() {
+        let mut ctx = tauri::test::mock_context(tauri::test::noop_assets());
+        ctx.package_info_mut().version = "0.2.0-dev.29.18".parse().unwrap();
+        let app = tauri::test::mock_builder().build(ctx).unwrap();
+        set_version(app.handle());
+        assert_eq!(version(), "0.2.0-dev.29.18");
+        assert_eq!(version(), app.handle().package_info().version.to_string());
+        // every request to the relay is made with it: no other version in this file
+        let src = include_str!("community.rs");
+        assert_eq!(src.matches(concat!("env!(\"CARGO_", "PKG_VERSION\")")).count(), 1, "only the fallback before set_version");
+        assert!(src.contains(concat!("Relay::new(s.relay(), t.as_ref(), ", "version())")) && src.contains(concat!("device, ", "version(), ")));
+    }
 }

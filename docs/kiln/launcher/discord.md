@@ -127,8 +127,8 @@ another site. Debug builds can send the same requests in plain HTTP to a relay o
 `KILN_COMMUNITY_RELAY_LOOPBACK=127.0.0.1:<port>` (the `Host` header stays `frostdev.io`); release builds ignore it.
 
 **Every request:** https to that one host through `kiln_manage::net` (no redirects, public addresses only, no proxy,
-no cookies, bounded answers: 256 KiB, the known-problems list 512 KiB). Headers: `User-Agent: kiln-launcher/<version>`
-(nothing else about the player or the PC), `Accept: application/json`, and for the session's calls `Authorization:
+no cookies, bounded answers: 256 KiB, the known-problems list 512 KiB). Headers: `User-Agent: kiln-launcher/<version>`,
+the release version About shows, such as 0.2.0-dev.29.18, as at sign-in (nothing else about the player or the PC), `Accept: application/json`, and for the session's calls `Authorization:
 Bearer <session key>`. JSON bodies are `Content-Type: application/json`.
 
 **Errors** (`{error, message, ...}`; the launcher reads `error`, never `message`) become the kinds the UI words
