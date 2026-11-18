@@ -17,7 +17,7 @@ internal static unsafe class ChatCompletionPanel
     private static uint _requestId;
     private static int _selected;
     private static long _changedAt, _lastAttempt;
-    private static bool _active, _dismissed;
+    private static bool _active, _dismissed, _askedForLine;
     private static uint _field;
 
     private static void Reset()
@@ -27,7 +27,7 @@ internal static unsafe class ChatCompletionPanel
         _suggestions = [];
         _requestId = 0;
         _selected = 0;
-        _active = _dismissed = false;
+        _active = _dismissed = _askedForLine = false;
         _field = 0;
         UiNative.ChatCandidates(false, false);
         UiNative.ChatHover(false);
@@ -42,7 +42,7 @@ internal static unsafe class ChatCompletionPanel
         _requestId = 0;
         _suggestions = [];
         _selected = 0;
-        _active = _dismissed = false;
+        _active = _dismissed = _askedForLine = false;
         _changedAt = now;
         UiNative.ChatCandidates(false, false);
     }
@@ -111,13 +111,17 @@ internal static unsafe class ChatCompletionPanel
         }
 
         ChatCompletionNetwork.Start();
-        if (!_active && _suggestions.Length == 0 && _requestId == 0 &&
+        if (!_active && !_askedForLine && _suggestions.Length == 0 && _requestId == 0 &&
             now - _changedAt >= DebounceMs && now - _lastAttempt >= DebounceMs &&
             ChatCompletionRules.RequestText(text))
         {
             _lastAttempt = now;
             _requestId = ChatCompletionNetwork.Ask(text);
-            if (_requestId != 0) _requestText = text;
+            if (_requestId != 0)
+            {
+                _requestText = text;
+                _askedForLine = true; // no repeated identical requests without an edit
+            }
         }
 
         if (ChatCompletionNetwork.TakeReply(out var reply) &&
