@@ -205,6 +205,11 @@ fn emf_lua_mods_load_under_emfs_lua_mod() {
     let b = scan(&dirs, &win, &emf).mods.into_iter().find(|m| m.path == "emf/mods/beastmaster").unwrap();
     assert_eq!((b.state, b.via), (FoundState::Loads, Some(FoundVia::OwnLoader)), "{b:?}");
     assert!(b.reason.contains("EMF's lua mod runs its Lua"), "{}", b.reason);
+    // ... also with the profile's lua entry off: EMF's own loader reads emf/mods/lua itself, whatever the profile says
+    let mut off = emf.clone();
+    off.mods.emf.push(ProfileMod { enabled: false, ..pm("lua") });
+    let b = scan(&dirs, &win, &off).mods.into_iter().find(|m| m.path == "emf/mods/beastmaster").unwrap();
+    assert_eq!((b.state, b.via), (FoundState::Loads, Some(FoundVia::OwnLoader)), "{b:?}");
     std::fs::remove_file(g.path.join("kiln/chain.ini")).unwrap();
     // the profile's lua entry decides: off there, nothing runs the Lua mod; on there, without the folder, it runs
     let mut p = emf.clone();

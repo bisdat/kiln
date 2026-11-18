@@ -504,15 +504,19 @@ fn found_loads(cx: &Ctx, kind: ModKind, mut m: FoundMod) -> FoundMod {
 
 /// Is EMF's `lua` mod, the host of EMF's Lua mods, there for this profile: Some(on) when the profile lists it (kiln-emf
 /// takes the profile's entry first, and a copy in emf/mods is then ignored); else Some(true) for a folder in emf/mods
-/// whose mod.json gives the id `lua` beside its DLL, or a loose emf/mods/lua.dll; None when there is none.
+/// whose mod.json gives the id `lua` beside its DLL, or a loose emf/mods/lua.dll; None when there is none. While EMF's
+/// own loader runs (as [`found_loads`] tells it), that folder counts first: EMF reads emf/mods itself, whatever the
+/// profile says, and Kiln copies the profile's entry there when it is on.
 fn emf_lua_host(cx: &Ctx) -> Option<bool> {
-    if let Some(m) = cx.profile.mods.emf.iter().find(|m| m.id == EMF_LUA_HOST) {
-        return Some(m.enabled);
+    let own = cx.loaders.iter().any(|l| l.kinds.contains(&ModKind::Emf) && !(cx.wine && !l.file.contains('/')));
+    let listed = cx.profile.mods.emf.iter().find(|m| m.id == EMF_LUA_HOST).map(|m| m.enabled);
+    if !own && listed.is_some() {
+        return listed;
     }
     let dir = cx.game.join(crate::paths::game::DROPIN_EMF);
     let folder = || std::fs::read_dir(&dir).into_iter().flatten().flatten().take(MAX_ENTRIES)
         .any(|e| e.path().is_dir() && crate::library::emf_dll_mod_id(&e.path()).as_deref() == Some(EMF_LUA_HOST));
-    (dir.join(format!("{EMF_LUA_HOST}.dll")).is_file() || folder()).then_some(true)
+    if dir.join(format!("{EMF_LUA_HOST}.dll")).is_file() || folder() { Some(true) } else { listed }
 }
 
 /// The id of EMF's `lua` mod (EMF's mods/lua/mod.json).
