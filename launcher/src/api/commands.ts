@@ -205,6 +205,17 @@ export interface GraphicsToolNote {
   /** Kiln's overlay draws next to it (OptiScaler's own menu is off); false: Kiln's drawing steps aside. */
   kilnOverlay: boolean;
 }
+/** (dev.29.18) A tool in the game folder next to which Kiln's graphics tools (kiln.json "graphics") step aside
+ *  (kiln_manage::game::GraphicsStepAside). */
+export interface GraphicsStepAside {
+  /** "optiscaler", "streamline" (sl.interposer.dll), "vkfg" (EnshroudedVKFG.ini), "dlsstweaks" (dlsstweaks.ini) or
+   *  "nvngx" (nvngx.dll or _nvngx.dll: another DLSS loader); a kind this launcher does not know reads as another tool. */
+  kind: "optiscaler" | "streamline" | "vkfg" | "dlsstweaks" | "nvngx" | (string & {});
+  /** The tool's file relative to the game folder, forward slashes ("dxgi.dll", "Streamline/sl.interposer.dll"). */
+  file: string;
+  /** Kiln's frame cap steps aside too; false: only Kiln's DLSS settings do. The readout always works. */
+  frameCap: boolean;
+}
 export interface GameStatus {
   id: GameId;
   running: boolean;
@@ -229,6 +240,10 @@ export interface GameStatus {
   /** (dev.29.18) Graphics tools next to the game that change what Kiln's in-game overlay does (OptiScaler); absent or
    *  empty: none (kiln_manage::game::graphics_tools). */
   graphicsTools?: GraphicsToolNote[];
+  /** (dev.29.18) Tools next to the game that make Kiln's frame cap and DLSS settings step aside (OptiScaler,
+   *  Streamline, a DLSS frame generation mod, DLSSTweaks, another DLSS loader), in that order; absent or empty: none
+   *  (kiln_manage::game::graphics_step_aside). */
+  graphicsStepAside?: GraphicsStepAside[];
 }
 /** How an install starts (kiln_manage::direct). */
 export type StartMode = "steam" | "direct";
