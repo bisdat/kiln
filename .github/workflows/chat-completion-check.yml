@@ -62,6 +62,8 @@ jobs:
         run: dotnet build managed/services/Kiln.Ui/Kiln.Ui.csproj -c Release
       - name: Run completion and existing command regression tests
         run: dotnet test managed/tests/Kiln.Api.Tests/Kiln.Api.Tests.csproj -c Release
+      - name: Run chat completion panel presentation regressions
+        run: dotnet test managed/tests/Kiln.Ui.Tests/Kiln.Ui.Tests.csproj -c Release
 
   launcher-i18n:
     runs-on: ubuntu-24.04
