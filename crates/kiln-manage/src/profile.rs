@@ -1474,8 +1474,16 @@ fn sync_copies(dirs: &DataDirs, profile: &Profile, install: &GameInstall, warnin
                     if dst.is_dir() && matches(&dst).unwrap_or(false) {
                         continue;
                     }
+                    // changed in the game folder since Kiln copied it: never thrown away without a word (changed_copy)
+                    let changed = if dst.is_dir() { changed_copy(dirs, k, m, &src, &dst) } else { None };
+                    if changed.as_ref().is_some_and(|c| c.settings_only) {
+                        continue; // only its own settings files changed: the player's, kept as they are
+                    }
                     _cook = hold_copy(k, &dst, &m.id)?;
-                    let _ = std::fs::remove_dir_all(&dst);
+                    match changed {
+                        Some(c) => warnings.push(set_aside_copy(install, profile, k, m, &dst, &c)?),
+                        None => { let _ = std::fs::remove_dir_all(&dst); }
+                    }
                 }
                 crate::util::copy_tree(&src, &dst)?;
                 if !matches(&dst)? {
@@ -1490,6 +1498,74 @@ fn sync_copies(dirs: &DataDirs, profile: &Profile, install: &GameInstall, warnin
         }
     }
     Ok(copied)
+}
+
+/// How a copy under `<game>/kiln/profiles/` differs from what Kiln copied there ([`changed_copy`]).
+struct ChangedCopy {
+    /// The files that are not as the Library has them (changed, missing, or added and not the mod's own output), relative.
+    files: Vec<String>,
+    /// The same version, and only its kind's settings files changed (engine_mods::settings_files: EML's config.txt and
+    /// config.ini, SET's settings.json) or the mod added its own output: the player's settings, kept as they are, as
+    /// placement keeps them in a placed copy.
+    settings_only: bool,
+}
+
+/// Whether Kiln's copy `dst` of the profile entry `m` (Library folder `src`) was changed in the game folder: None when it
+/// holds exactly a Library version of this mod (the profile's, or the version an earlier activation copied there, which
+/// an update replaces), or when it cannot be read (it is replaced as before). Some(what changed) otherwise, compared
+/// with the version its manifest names when the Library has it, else with the profile's.
+fn changed_copy(dirs: &DataDirs, k: ModKind, m: &ProfileMod, src: &Path, dst: &Path) -> Option<ChangedCopy> {
+    crate::engine_mods::refuse_symlink_path(dst, dst).ok()?;
+    let versions: Vec<_> = crate::library::records(dirs, k).into_iter().filter(|(_, rec)| rec.id == m.id).collect();
+    for (folder, rec) in &versions {
+        let output = crate::library::own_output(folder, rec).ok().flatten().unwrap_or_default();
+        if crate::library::matches_import(dst, rec, &output).unwrap_or(false) { return None; }
+    }
+    let records = |dir: &Path| crate::hash::dir_records(dir).ok()
+        .map(|r| r.into_iter().map(|f| (f.path, f.sha256)).collect::<std::collections::BTreeMap<_, _>>());
+    let now = records(dst)?;
+    // the version the copy says it is, when the Library has it: what changed since Kiln copied it there
+    let own = crate::engine_mods::identity(dst).1.or_else(|| crate::manifest::read_kiln(dst).ok().map(|x| x.version));
+    let base = versions.iter().find(|(_, rec)| own.as_deref() == Some(rec.version.as_str())).map(|(f, _)| f.as_path()).unwrap_or(src);
+    let listed = records(base)?;
+    let mut files: Vec<String> = listed.iter().filter(|(rel, hash)| now.get(*rel) != Some(hash)).map(|(rel, _)| rel.clone()).collect();
+    let added: Vec<String> = now.keys().filter(|rel| !listed.contains_key(*rel)).cloned().collect();
+    let output = added.iter().all(|rel| crate::engine_mods::is_runtime_output(rel));
+    let settings = |rel: &String| crate::engine_mods::settings_files(k).iter().any(|s| s.eq_ignore_ascii_case(rel));
+    let settings_only = base == src && output && files.iter().all(settings);
+    files.extend(added.into_iter().filter(|rel| !crate::engine_mods::is_runtime_output(rel)));
+    files.sort();
+    Some(ChangedCopy { files, settings_only })
+}
+
+/// A copy [`changed_copy`] found changed, about to be replaced from the Library: moved aside to
+/// `<game>/kiln/backups/profile-copy-<profile>-<kind>-<id>-<time>/` (nothing the player changed is lost), and one
+/// sentence for the activation's notes (launcher.log and the launcher's notice) that says what was replaced and where it
+/// is. ShroudForge and SET never read this copy (they run the one placed in their own folder,
+/// engine_mods::placed_folder), so what changed there never applied; the sentence says where settings do apply.
+fn set_aside_copy(install: &GameInstall, profile: &Profile, k: ModKind, m: &ProfileMod, dst: &Path, c: &ChangedCopy) -> Result<String> {
+    let base = install.path.join(crate::paths::game::BACKUPS)
+        .join(format!("profile-copy-{}-{}-{}-{}", profile.id, k.as_str(), m.id, ts_compact(crate::util::now_unix())));
+    let aside = (1..).map(|n| if n == 1 { base.clone() } else { crate::util::with_suffix(&base, &format!("-{n}")) })
+        .find(|p| std::fs::symlink_metadata(p).is_err()).expect("a free name");
+    crate::engine_mods::refuse_symlink_path(&install.path, &aside)?;
+    std::fs::create_dir_all(aside.parent().expect("parent")).map_err(io_at(&aside, "creating"))?;
+    std::fs::rename(dst, &aside).map_err(io_at(&aside, "moving the changed profile copy to"))?;
+    let shown: Vec<&str> = c.files.iter().take(3).map(String::as_str).collect();
+    let what = match c.files.len() {
+        0 => String::new(),
+        n if n <= 3 => format!(" ({})", shown.join(", ")),
+        n => format!(" ({} and {} more)", shown.join(", "), n - 3),
+    };
+    let placed = crate::engine_mods::placed_folder(k, &install.path, &m.id);
+    Ok(match (placed, k.engine().map(|e| e.name())) {
+        (Some(placed), Some(engine)) => format!("{}:{}: Kiln's copy in {} was changed in the game folder{what}. {engine} never reads that copy (it runs \
+            {}), so those changes did not apply. Kiln replaced it with the Library's files and kept the changed copy in {}. Change the mod's settings \
+            in the game's Mods page or in the Kiln launcher: both change the copy {engine} runs, and profile updates keep them.",
+            k.as_str(), m.id, dst.display(), placed.display(), aside.display()),
+        _ => format!("{}:{}: its copy in {} was changed in the game folder{what}. Kiln replaced it with the Library's files and kept the changed \
+            copy in {}.", k.as_str(), m.id, dst.display(), aside.display()),
+    })
 }
 
 /// A Kiln mod's copy in the game is the folder its cook writes (and sets aside, and puts back): it is replaced or

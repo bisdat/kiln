@@ -2170,7 +2170,7 @@ pub fn import(dirs: &DataDirs, paths: &[PathBuf], progress: &mut dyn Progress) -
     Ok(report)
 }
 
-fn records(dirs: &DataDirs, kind: ModKind) -> Vec<(PathBuf, ImportRecord)> {
+pub(crate) fn records(dirs: &DataDirs, kind: ModKind) -> Vec<(PathBuf, ImportRecord)> {
     let mut out = Vec::new();
     for idd in std::fs::read_dir(kind_dir(dirs, kind)).into_iter().flatten().flatten() {
         for f in std::fs::read_dir(idd.path()).into_iter().flatten().flatten() {

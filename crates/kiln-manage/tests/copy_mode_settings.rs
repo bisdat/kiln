@@ -1,7 +1,8 @@
 //! Copy path mode (the launcher's data folder has no Windows path in the game's prefix: a Steam Deck with the game on an
 //! SD card) and the settings of engine mods (inbox 84). ShroudForge reads its mods only from its own folder in the game,
 //! where activation places Kiln's copy; the profile file names a second copy under `<game>/kiln/profiles/`, which
-//! ShroudForge never reads. A setting changed in the copy ShroudForge runs survives the launcher's next profile update.
+//! ShroudForge never reads. A setting changed in the copy ShroudForge runs survives the launcher's next profile update;
+//! a profile copy that was changed in the game folder is never replaced without a word.
 #![cfg(all(unix, feature = "zip"))]
 
 use kiln_manage::engine_mods;
@@ -133,4 +134,66 @@ fn in_copy_mode_a_setting_changed_in_the_copy_shroudforge_runs_survives_profile_
     profile::activate(&dirs, &p3.id, &g).unwrap();
     assert!(!kiln_manage::shroudforge::read_mod(&placed).unwrap().enabled);
     assert_eq!(value(&placed, "speed"), 9);
+}
+
+#[test]
+fn a_profile_copy_changed_in_the_game_folder_is_kept_aside_and_named() {
+    let t = tmp("changed-copy");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let g = copy_mode_game(&t.0);
+    let sf = import_one(&dirs, &sf_package(&t.0, "2.1.1"), ModKind::ShroudForge);
+    let mut p = profile::create(&dirs, "My mods", None).unwrap();
+    p.mods.shroudforge.push(pm(&sf));
+    let p = profile::save(&dirs, &p).unwrap();
+    profile::activate(&dirs, &p.id, &g).unwrap();
+    let second = g.path.join(format!("kiln/profiles/{}/shroudforge/unifiedemltweaks", p.id));
+    // what an older in-game page did: it wrote the second copy, which ShroudForge never reads
+    set_in_game(&second, "speed", 8.into());
+    let a = profile::activate(&dirs, &p.id, &g).unwrap();
+    let note = a.warnings.iter().find(|w| w.starts_with("shroudforge:unifiedemltweaks:")).unwrap_or_else(|| panic!("no word of it: {a:?}"));
+    assert!(note.contains("extended.mod.json") && note.contains("ShroudForge never reads that copy") && note.contains("kept the changed copy in"), "{note}");
+    assert!(note.contains(&g.path.join("mods/unifiedemltweaks").display().to_string()), "where it runs: {note}");
+    // the copy is the Library's again, the changed one is kept in the game's backups, and the note names it
+    assert_eq!(value(&second, "speed"), 3);
+    let prefix = format!("profile-copy-{}-shroudforge-unifiedemltweaks-", p.id);
+    let backups: Vec<PathBuf> = std::fs::read_dir(g.path.join("kiln/backups")).unwrap().flatten().map(|e| e.path())
+        .filter(|b| b.file_name().unwrap().to_string_lossy().starts_with(&prefix)).collect();
+    assert_eq!(backups.len(), 1, "{backups:?}");
+    assert_eq!(value(&backups[0], "speed"), 8);
+    assert!(note.contains(&backups[0].display().to_string()), "{note}");
+    // the placed copy ShroudForge runs was never touched by either
+    assert_eq!(value(&g.path.join("mods/unifiedemltweaks"), "speed"), 3);
+    // said once: the next update finds the Library's copy and says nothing
+    let a = profile::activate(&dirs, &p.id, &g).unwrap();
+    assert!(!a.warnings.iter().any(|w| w.contains("unifiedemltweaks")), "{a:?}");
+}
+
+#[test]
+fn an_eml_copy_whose_settings_file_changed_keeps_the_players_settings() {
+    let t = tmp("eml-settings");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let g = copy_mode_game(&t.0);
+    let eml = t.0.join("src/stacks");
+    put(&eml, "mod.json", br#"{"id":"stacks","name":"Bigger Stacks","version":"1.2.0","capabilities":["patch"]}"#);
+    put(&eml, "src/mod.lua", b"return {}");
+    put(&eml, "config.txt", b"stack=100\n");
+    let r = import_one(&dirs, &eml, ModKind::Eml);
+    let mut p = profile::create(&dirs, "My mods", None).unwrap();
+    p.mods.eml.push(pm(&r));
+    let p = profile::save(&dirs, &p).unwrap();
+    profile::activate(&dirs, &p.id, &g).unwrap();
+    let copy = g.path.join(format!("kiln/profiles/{}/eml/stacks", p.id));
+    assert_eq!(game_profile(&g)["mods"]["eml"][0]["path"], format!("profiles/{}/eml/stacks", p.id));
+    // kiln-eml runs this copy in Copy mode; the mod (or the player) writes its settings file there
+    put(&copy, "config.txt", b"stack=999\n");
+    let a = profile::activate(&dirs, &p.id, &g).unwrap();
+    assert_eq!(std::fs::read(copy.join("config.txt")).unwrap(), b"stack=999\n", "{a:?}");
+    assert!(!a.warnings.iter().any(|w| w.contains("eml:stacks")), "{a:?}");
+    assert!(!g.path.join("kiln/backups").exists() || std::fs::read_dir(g.path.join("kiln/backups")).unwrap().next().is_none());
+    // its code changed there: replaced from the Library, and the changed copy kept and named
+    put(&copy, "src/mod.lua", b"return { edited = true }");
+    let a = profile::activate(&dirs, &p.id, &g).unwrap();
+    let note = a.warnings.iter().find(|w| w.starts_with("eml:stacks:")).unwrap_or_else(|| panic!("{a:?}"));
+    assert!(note.contains("src/mod.lua") && note.contains("kept the changed copy in"), "{note}");
+    assert_eq!(std::fs::read(copy.join("src/mod.lua")).unwrap(), b"return {}");
 }
