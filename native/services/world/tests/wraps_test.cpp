@@ -2314,7 +2314,7 @@ void abi(const char* path) {
     }
     {
         auto& l = list("KilnEcsSnapshotSpec", sizeof(KilnEcsSnapshotSpec));
-        F(KilnEcsSnapshotSpec, component); F(KilnEcsSnapshotSpec, reserved);
+        F(KilnEcsSnapshotSpec, component); F(KilnEcsSnapshotSpec, flags);
     }
     {
         auto& l = list("KilnForeignLayout", sizeof(KilnForeignLayout));
@@ -2360,6 +2360,31 @@ void abi(const char* path) {
         const std::string what = std::string("abi.json: ") + name + " field for field";
         check(fx.contains(name) && fx.at(name) == shape, what.c_str());
         if (std::getenv("KILN_ABI_DUMP")) std::printf("\"%s\": %s\n", name.c_str(), shape.dump().c_str());
+    }
+    // The ECS reads' constants by value: the header against abi.json (and Kiln.World.Tests the C# mirror against it).
+    {
+        const std::map<std::string, long long> header = {
+            {"KILN_ECS_OK", KILN_ECS_OK}, {"KILN_ECS_ABSENT", KILN_ECS_ABSENT}, {"KILN_ECS_STALE", KILN_ECS_STALE},
+            {"KILN_ECS_UNREADABLE", KILN_ECS_UNREADABLE}, {"KILN_ECS_UNAVAILABLE", KILN_ECS_UNAVAILABLE},
+            {"KILN_ECS_BUSY", KILN_ECS_BUSY}, {"KILN_ECS_UNSUPPORTED", KILN_ECS_UNSUPPORTED},
+            {"KILN_WORLD_ERR_CHANGED", KILN_WORLD_ERR_CHANGED}, {"KILN_ECS_ERR_STALE", KILN_ECS_ERR_STALE},
+            {"KILN_ECS_ERR_UNREADABLE", KILN_ECS_ERR_UNREADABLE}, {"KILN_ECS_ERR_BUSY", KILN_ECS_ERR_BUSY},
+            {"KILN_ECS_ERR_UNSUPPORTED", KILN_ECS_ERR_UNSUPPORTED}, {"KILN_ECS_QUERY_BOUNDS", KILN_ECS_QUERY_BOUNDS},
+            {"KILN_ECS_QUERY_FRAME_QUIET", KILN_ECS_QUERY_FRAME_QUIET},
+            {"KILN_ECS_READ_FRAME_QUIET", KILN_ECS_READ_FRAME_QUIET}, {"KILN_OBJECT_ALIVE", KILN_OBJECT_ALIVE},
+            {"KILN_OBJECT_HAS_TEMPLATE", KILN_OBJECT_HAS_TEMPLATE}, {"KILN_WORLD_CAP_ECS_READ", KILN_WORLD_CAP_ECS_READ}};
+        std::map<std::string, long long> listed;
+        for (const auto& v : fx.at("KilnEcsReadConstants").at("values")) listed[v.at(0).get<std::string>()] = v.at(1).get<long long>();
+        check(listed == header, "abi.json: the ECS reads' constants by value");
+        // Result codes are distinct among themselves and from the core's (1..7).
+        const long long codes[] = {KILN_WORLD_ERR_CHANGED, KILN_ECS_ERR_STALE, KILN_ECS_ERR_UNREADABLE, KILN_ECS_ERR_BUSY,
+                                   KILN_ECS_ERR_UNSUPPORTED};
+        bool distinct = true;
+        for (size_t i = 0; i < 5; ++i) {
+            distinct = distinct && codes[i] > KILN_ERR_INTERNAL;
+            for (size_t j = i + 1; j < 5; ++j) distinct = distinct && codes[i] != codes[j];
+        }
+        check(distinct, "the ECS reads' result codes are distinct and above the core's");
     }
     // v4 only appends: the v3 table (the "KilnWorldApi" entry) is a prefix of it, entry for entry.
     const auto& v3 = fx.at("KilnWorldApi").at("fields");

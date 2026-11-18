@@ -210,6 +210,7 @@ void KILN_CALL on_pre(const KilnTickInfo* tick, void*) {
     teleport_pre(tick);
     writes_pre(tick);
     selftest_pre(tick);
+    ecs_check_pre(tick);
 }
 
 // ---- the table ----
@@ -403,6 +404,8 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     g_owner = owner;
     if (info->size >= offsetof(KilnPluginInfo, on_ready) + sizeof(info->on_ready))
         info->on_ready = [](void*) {
+            ecs_prod_ready();
+            ecs_check_init();
             boot_programs_init();
             in_program_resolve(program_types());
         };
