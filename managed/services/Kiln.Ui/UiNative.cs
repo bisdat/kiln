@@ -506,6 +506,88 @@ internal static unsafe class UiNative
 
     internal static delegate* unmanaged[Cdecl]<Texts*, int> SetTextsOverride;
 
+    /// <summary>Issue #44: internal completion handoff at kiln.ui offset 1016.</summary>
+    /// <remarks>Native writes text and the native-chat rectangle on its UI
+    /// thread. Only managed Kiln.Ui may use this slot. No game pointers cross
+    /// threads. Layout: 44-byte header, 16-byte rect, two 257-byte buffers;
+    /// total 576 bytes after 2-byte padding.</remarks>
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct ChatCompletion
+    {
+        public uint Size, Operation;
+        public uint Focused, Action, Cursor, TextLen, ReplacementLen;
+        public uint Suggestions, ListOpen, Field, Revision;
+        public float X, Y, Width, Height;
+        public fixed byte Text[257];
+        public fixed byte Replacement[257];
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct TableChat
+    {
+        public TableTexts Base;
+        public delegate* unmanaged[Cdecl]<ChatCompletion*, int> ChatCompletion;
+    }
+
+    private static delegate* unmanaged[Cdecl]<ChatCompletion*, int> ChatCompletionSlot
+    {
+        get
+        {
+            var t = T;
+            if (t == null || t->Header.Size < (uint)sizeof(TableChat)) return null;
+            return ((TableChat*)t)->ChatCompletion;
+        }
+    }
+
+    /// <summary>Native read: 1 (snapshot). Null when chat is not focused,
+    /// disabled, unsupported or the input rectangle could not be validated.</summary>
+    internal static ChatCompletion? ChatInput()
+    {
+        var slot = ChatCompletionSlot;
+        if (slot == null) return null;
+        var result = new ChatCompletion { Size = (uint)sizeof(ChatCompletion), Operation = 1 };
+        return slot(&result) == Ok && result.Focused != 0 ? result : null;
+    }
+
+    internal static bool ChatCandidates(bool hasSuggestions, bool active)
+    {
+        var slot = ChatCompletionSlot;
+        if (slot == null) return false;
+        var request = new ChatCompletion {
+            Size = (uint)sizeof(ChatCompletion), Operation = 2,
+            Suggestions = hasSuggestions ? 1u : 0u, ListOpen = active ? 1u : 0u,
+        };
+        return slot(&request) == Ok;
+    }
+
+    internal static bool ChatReplace(in ChatCompletion snapshot, string expected, string replacement)
+    {
+        var slot = ChatCompletionSlot;
+        if (slot == null || System.Text.Encoding.UTF8.GetByteCount(expected) > 256 ||
+            System.Text.Encoding.UTF8.GetByteCount(replacement) > 256) return false;
+        var request = new ChatCompletion {
+            Size = (uint)sizeof(ChatCompletion), Operation = 3,
+            Field = snapshot.Field, Revision = snapshot.Revision,
+        };
+        var left = System.Text.Encoding.UTF8.GetBytes(expected);
+        var right = System.Text.Encoding.UTF8.GetBytes(replacement);
+        request.TextLen = (uint)left.Length;
+        request.ReplacementLen = (uint)right.Length;
+        for (var i = 0; i < left.Length; ++i) request.Text[i] = left[i];
+        for (var i = 0; i < right.Length; ++i) request.Replacement[i] = right[i];
+        return slot(&request) == Ok;
+    }
+
+    internal static string ChatText(in ChatCompletion snapshot)
+    {
+        if (snapshot.TextLen > 256) return "";
+        // A fixed buffer cannot be used from an unfixed in parameter: copy
+        // the blittable value to a local before pinning.
+        var copy = snapshot;
+        return System.Text.Encoding.UTF8.GetString(copy.Text, (int)copy.TextLen);
+    }
+
+
     /// <summary>KILN_UI_GLYPHS_* (kiln_ui.h look_info): the overlay's glyphs of a Chinese, Japanese or Korean language.</summary>
     public const byte GlyphsLatin = 0, GlyphsLoading = 1, GlyphsReady = 2, GlyphsFailed = 3;
 
