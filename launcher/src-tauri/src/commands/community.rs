@@ -62,7 +62,8 @@ struct Hub {
     /// When `posts` was read (RFC 3339).
     posts_at: Option<String>,
     reach: Reach,
-    attempts: HashMap<String, Attempt>,
+    /// One lock each: a poll that is still asking the relay keeps the next one waiting instead of ending the attempt.
+    attempts: HashMap<String, std::sync::Arc<Mutex<Attempt>>>,
 }
 
 static HUB: LazyLock<Mutex<Hub>> = LazyLock::new(|| Mutex::new(Hub::default()));
@@ -277,7 +278,7 @@ pub async fn community_signin_start(mode: SigninMode, join: bool, texts: Option<
         let mut h = HUB.lock().unwrap();
         // one attempt at a time: a new one ends the old (its listener closes)
         h.attempts.clear();
-        h.attempts.insert(out.id.clone(), a);
+        h.attempts.insert(out.id.clone(), std::sync::Arc::new(Mutex::new(a)));
         Ok(out)
     })
     .await
@@ -298,16 +299,20 @@ pub async fn community_signin_poll(app: AppHandle, id: String) -> Result<SignInS
     let r = blocking(move || {
         let (d, s) = settings()?;
         s.network_allowed()?;
-        let Some(mut a) = HUB.lock().unwrap().attempts.remove(&id) else { return Ok(SignInState::Expired) };
+        let Some(slot) = HUB.lock().unwrap().attempts.get(&id).cloned() else { return Ok(SignInState::Expired) };
+        // another poll of this attempt is still asking: this one waits its turn
+        let Ok(mut a) = slot.try_lock() else { return Ok(SignInState::Waiting) };
         let t = transport();
         let relay = Relay::new(s.relay(), t.as_ref(), VERSION);
         let p = a.poll(&relay);
+        drop(a);
         note(&p);
-        let state = match p? {
-            Progress::Waiting => {
-                HUB.lock().unwrap().attempts.insert(id, a);
-                return Ok(SignInState::Waiting);
-            }
+        let p = p?;
+        if p != Progress::Waiting {
+            HUB.lock().unwrap().attempts.remove(&id);
+        }
+        let state = match p {
+            Progress::Waiting => return Ok(SignInState::Waiting),
             Progress::Approved(g) => {
                 SessionStore::new(&d).save(&Stored { format: 1, relay: s.relay().host, session: g.session, account: g.account.clone() })?;
                 let mut h = HUB.lock().unwrap();
