@@ -1,9 +1,10 @@
 //! The vendor files of one game folder: `<game>/kiln/vendor/<vendor>/<version>/`, each version folder with its
 //! receipt `kiln-vendor.json` (`schema/vendor-receipt.schema.json`), written last.
 //!
-//! - [`Store::status`]: one [`ComponentStatus`] per manifest component, from the receipts and the files' presence
-//!   and sizes (no hashing: it runs whenever the page asks). The full SHA-256 check is the download's, and Kiln's in
-//!   the game before it loads a file.
+//! - [`Store::status`]: one [`ComponentStatus`] per manifest component, from the receipts and the files' presence,
+//!   sizes and SHA-256 (a file's hash is kept for this process while its size and modification time stay, so only the
+//!   first look after a start or a change reads the files). The checks that count are the download's (never cached)
+//!   and Kiln's in the game before it loads a file; the status is what the page shows.
 //! - [`Store::remove`]: a component's version folders, by the names Kiln put there (the receipt's and the manifest's
 //!   files, their `.part` files and the receipt). Anything else in a folder stays, named, and so does the folder.
 //! - The download is [`super::download`].
@@ -72,7 +73,8 @@ pub enum VendorState {
     UpdateAvailable,
     /// A file of the manifest's version is not pinned in this build: never downloaded.
     Unavailable,
-    /// The manifest's version has a receipt, but a file is missing, is not a plain file or has another size.
+    /// The manifest's version has a receipt, but a file is missing, is not a plain file, has another size or another
+    /// SHA-256, or the receipt's hashes are not this build's.
     Damaged,
 }
 
@@ -135,7 +137,7 @@ pub struct Installed {
     pub size_on_disk: u64,
     /// The receipt's time.
     pub installed: String,
-    /// The files that are missing, not plain files or of another size than the receipt's.
+    /// The files that are missing, not plain files, or of another size or SHA-256 than the receipt's.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub problems: Vec<String>,
 }
@@ -236,9 +238,14 @@ impl Store {
         out
     }
 
-    /// The files of a receipt that are not there as the receipt says (missing, not a plain file, another size).
+    /// The files of a receipt that are not there as the receipt says (missing, not a plain file, another size or
+    /// another SHA-256).
     pub fn problems(folder: &Path, r: &Receipt) -> Vec<String> {
-        r.files.iter().filter(|f| !std::fs::symlink_metadata(folder.join(&f.name)).is_ok_and(|m| m.is_file() && m.len() == f.size))
+        r.files.iter()
+            .filter(|f| {
+                let p = folder.join(&f.name);
+                !std::fs::symlink_metadata(&p).is_ok_and(|m| m.is_file() && m.len() == f.size && sha256_seen(&p, &m).is_some_and(|h| h == f.sha256))
+            })
             .map(|f| f.name.clone()).collect()
     }
 
@@ -383,6 +390,32 @@ impl Store {
     }
 }
 
+/// SHA-256 of files the status read, by path, with the size and modification time they had: the page asks often and
+/// the files change rarely (150 MB is a fraction of a second to hash, every time).
+static SEEN: std::sync::Mutex<std::collections::BTreeMap<PathBuf, (u64, std::time::SystemTime, String)>> =
+    std::sync::Mutex::new(std::collections::BTreeMap::new());
+
+/// A file's SHA-256 for the status, from [`SEEN`] while its size and modification time are the ones hashed. A file
+/// changed in the last 2 seconds is hashed every time: a change within the file system's time step would keep its time.
+fn sha256_seen(p: &Path, m: &std::fs::Metadata) -> Option<String> {
+    let modified = m.modified().ok();
+    let settled = modified.filter(|t| t.elapsed().is_ok_and(|age| age >= std::time::Duration::from_secs(2)));
+    if let Some(t) = settled
+        && let Some((len, at, sha)) = SEEN.lock().ok()?.get(p)
+        && *len == m.len()
+        && *at == t
+    {
+        return Some(sha.clone());
+    }
+    let (sha, n) = crate::hash::sha256_file(p).ok()?;
+    if let (Some(t), true) = (settled, n == m.len())
+        && let Ok(mut seen) = SEEN.lock()
+    {
+        seen.insert(p.to_path_buf(), (n, t, sha.clone()));
+    }
+    Some(sha)
+}
+
 /// A receipt's version is a version and its files plain names, each once (case aside, as on Windows).
 fn receipt_names_ok(r: &Receipt) -> bool {
     let mut seen = std::collections::BTreeSet::new();
@@ -398,6 +431,34 @@ pub fn version_cmp(a: &str, b: &str) -> std::cmp::Ordering {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_status_keeps_a_settled_files_hash_until_its_size_or_time_changes() {
+        let dir = std::env::temp_dir().join(format!("kiln-vendor-seen-{}", crate::hash::hex(&crate::util::random_bytes::<6>().unwrap())));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("a.dll");
+        let meta = || std::fs::symlink_metadata(&p).unwrap();
+        let set_time = |t: std::time::SystemTime| std::fs::File::options().write(true).open(&p).unwrap().set_modified(t).unwrap();
+        let (one, two) = (crate::hash::sha256_hex(b"one"), crate::hash::sha256_hex(b"two"));
+        // just written: hashed every time, nothing kept
+        std::fs::write(&p, b"one").unwrap();
+        assert_eq!(sha256_seen(&p, &meta()).as_deref(), Some(one.as_str()));
+        assert!(!SEEN.lock().unwrap().contains_key(&p));
+        // settled: kept
+        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+        set_time(old);
+        assert_eq!(sha256_seen(&p, &meta()).as_deref(), Some(one.as_str()));
+        assert!(SEEN.lock().unwrap().contains_key(&p));
+        // the same size and time with other bytes still reads as kept: the status trusts them, the download and the
+        // game's check never do
+        std::fs::write(&p, b"two").unwrap();
+        set_time(old);
+        assert_eq!(sha256_seen(&p, &meta()).as_deref(), Some(one.as_str()));
+        // another time: read again
+        set_time(old + std::time::Duration::from_secs(1));
+        assert_eq!(sha256_seen(&p, &meta()).as_deref(), Some(two.as_str()));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn versions_order_by_their_numbers() {

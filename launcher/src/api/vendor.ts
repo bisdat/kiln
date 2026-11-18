@@ -37,7 +37,7 @@ export interface VendorInstalled {
   folder: string;
   sizeOnDisk: number;
   installed: string;
-  /** Files missing, not plain files or of another size than the receipt's. */
+  /** Files missing, not plain files, or of another size or SHA-256 than the receipt's. */
   problems?: string[];
 }
 

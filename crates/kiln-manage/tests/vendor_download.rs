@@ -641,7 +641,10 @@ fn a_missing_or_changed_file_reads_as_damaged_and_a_download_mends_only_it() {
     assert_eq!((r.kept.as_slice(), r.fetched), (&["a.dll".to_string()][..], 300));
     // a file of the right size and the wrong content: found by the download's check, fetched again
     std::fs::write(lab.folder().join("a.dll"), vec![0u8; 5_000]).unwrap();
-    assert_eq!(lab.store().component_status(&c, &Agreements::default()).state, VendorState::Downloaded, "the status does not hash");
+    let s = lab.store().component_status(&c, &Agreements::default());
+    assert_eq!(s.state, VendorState::Damaged, "the status hashes: a file of the right size and another content is not the download");
+    assert_eq!(s.installed.as_ref().unwrap().problems, ["a.dll"]);
+    assert_eq!(s.reason.as_deref(), Some("a.dll of it is missing or changed. Download it again."));
     let r = lab.get(&c, &mut Recorder::default()).unwrap();
     assert_eq!(r.kept, ["b.dll"]);
     assert_eq!(std::fs::read(lab.folder().join("a.dll")).unwrap(), a);
