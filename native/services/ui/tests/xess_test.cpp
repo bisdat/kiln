@@ -341,10 +341,12 @@ int32_t destroy(Context c) {
     ++destroyed;
     return kOk;
 }
+// XeSS's ranges as the guide gives them: 1.0x down to the preset's ratio, the low end rounded up (strict); Native AA
+// only the output size itself
 int32_t optimal(Context, const Dim* o, int32_t q, Dim* opt, Dim* lo, Dim* hi) {
     const float r = preset_of(static_cast<Quality>(q)).ratio;
-    *opt = {static_cast<uint32_t>(o->x / r), static_cast<uint32_t>(o->y / r)};
-    *lo = *opt;
+    *opt = {static_cast<uint32_t>(std::lround(o->x / r)), static_cast<uint32_t>(std::lround(o->y / r))};
+    *lo = {static_cast<uint32_t>(std::ceil(o->x / r - 1e-3)), static_cast<uint32_t>(std::ceil(o->y / r - 1e-3))};
     *hi = *o;
     return kOk;
 }
@@ -677,22 +679,38 @@ static void ratios_of_the_game() {
     CHECK(b.load(files(), &why, &detail));
     b.device_needs(gpu());
     CHECK(b.device_ready(device(true), &why, &detail));
-    const std::pair<float, Quality> want[] = {{3.0f, kUltraPerformance}, {2.0f, kBalanced}, {1.7f, kQuality}, {1.5f, kUltraQuality}, {1.0f, kNativeAA}};
-    for (uint32_t out_w : {1920u, 3840u})
-        for (const auto& [r, q] : want) {
-            upscale::CreateInfo ci = game_ci();
-            ci.output_width = out_w, ci.output_height = out_w * 9 / 16;
-            ci.max_render_width = static_cast<uint32_t>(std::lround(ci.output_width / r));
-            ci.max_render_height = static_cast<uint32_t>(std::lround(ci.output_height / r));
-            ci.ratio = r;
-            b.destroy();
-            CHECK(b.create(ci, &detail) && b.quality() == q);
-        }
+    // the game's render size rounded down (as a floor would): 1920 / 1.7 = 1129.4 -> 1129, a pixel below Quality's
+    // 1130, so Balanced takes it; 1080 / 1.5 = 720 exactly, so Ultra Quality does
+    struct Case {
+        uint32_t out_w;
+        float r;
+        Quality q;
+    };
+    const Case want[] = {{1920, 3.0f, kUltraPerformance}, {1920, 2.0f, kBalanced}, {1920, 1.7f, kBalanced}, {1920, 1.5f, kUltraQuality},
+                         {1920, 1.0f, kNativeAA},         {3840, 3.0f, kUltraPerformance}, {3840, 2.0f, kBalanced}, {3840, 1.7f, kBalanced},
+                         {3840, 1.5f, kUltraQuality},     {3840, 1.0f, kNativeAA}};
+    for (const auto& c : want) {
+        upscale::CreateInfo ci = game_ci();
+        ci.output_width = c.out_w, ci.output_height = c.out_w * 9 / 16;
+        ci.max_render_width = static_cast<uint32_t>(ci.output_width / c.r);
+        ci.max_render_height = static_cast<uint32_t>(ci.output_height / c.r);
+        ci.ratio = c.r;
+        b.destroy();
+        CHECK(b.create(ci, &detail) && b.quality() == c.q);
+    }
     bool outside = false;
     for (const auto& l : log) outside |= has(l, "outside XeSS's range");
     CHECK(!outside);
+    // a render size no preset holds (larger than the output is refused before; here below Ultra Performance's low end)
+    upscale::CreateInfo tiny = game_ci();
+    tiny.max_render_width = 400, tiny.max_render_height = 225, tiny.ratio = 4.8f;
+    b.destroy();
+    CHECK(b.create(tiny, &detail) && b.quality() == kUltraPerformance);
+    outside = false;
+    for (const auto& l : log) outside |= has(l, "outside XeSS's range for every preset from Ultra Performance");
+    CHECK(outside);
     b.device_lost(h<VkDevice>(0x33));
-    CHECK(b.contexts_made() == 10);
+    CHECK(b.contexts_made() == 11);
 }
 
 int main() {

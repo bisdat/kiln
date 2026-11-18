@@ -202,12 +202,32 @@ class XessBackend final : public upscale::Backend {
         read_tuning();  // a knob changed in a test applies at the game's next FSR set-up (a quality change)
         bool beyond = false;
         const float ratio = ratio_of(ci);
-        const Quality q = quality_for_ratio(ratio, &beyond);
         const uint32_t flags = init_flags(ci, tuning_);
         Context ctx = nullptr;
         int32_t r = api_.vk_create_context(vk_.instance, vk_.physical, vk_.device, &ctx);
         if (r < 0 || !ctx) return fail(std::string("xessVKCreateContext failed: ") + result_name(r));
         if (api_.set_logging_callback) api_.set_logging_callback(ctx, tuning_.log_level, &XessBackend::on_xess_log);
+        // The preset for the game's ratio, then the next larger ones until XeSS's own input range for the output holds
+        // the game's render size (1920 / 1.7 renders 1129 wide, a pixel below what Quality may take)
+        Quality q = quality_for_ratio(ratio, &beyond);
+        Dim out{ci.output_width, ci.output_height}, opt{}, lo{}, hi{};
+        std::string range;
+        bool fits = false;
+        for (const Quality first = q; !fits;) {
+            fits = in_range(ctx, out, q, ci, &opt, &lo, &hi);
+            if (fits) break;
+            const Quality next = larger(q);
+            if (next == q) {
+                q = first;  // none holds it: the ratio's own preset, said below
+                in_range(ctx, out, q, ci, &opt, &lo, &hi);
+                break;
+            }
+            q = next;
+        }
+        if (hi.x) range = "; XeSS takes " + size_text(lo.x, lo.y) + " to " + size_text(hi.x, hi.y) + " for it (best " + size_text(opt.x, opt.y) + ")";
+        if (!fits && hi.x)
+            host_->log(2, "the game renders " + size_text(ci.max_render_width, ci.max_render_height) + ", outside XeSS's range for every preset from " +
+                              preset_of(q).name + range.substr(1));
         if (api_.is_optimal_driver && api_.is_optimal_driver(ctx) == kWarnOldDriver && !warned_driver_) {
             warned_driver_ = true;
             host_->log(2, "XeSS says the graphics driver is old: a newer one may run it faster or better (also seen with Vulkan's validation layer on)");
@@ -221,14 +241,6 @@ class XessBackend final : public upscale::Backend {
         if (r < 0) {
             api_.destroy_context(ctx);  // never used in a command buffer: safe at once
             return fail("xessVKInit failed for " + size_text(ci.output_width, ci.output_height) + " (" + preset_of(q).name + "): " + result_name(r));
-        }
-        Dim out{ci.output_width, ci.output_height}, opt{}, lo{}, hi{};
-        std::string range;
-        if (api_.optimal_input_resolution(ctx, &out, q, &opt, &lo, &hi) >= 0 && hi.x) {
-            range = "; XeSS takes " + size_text(lo.x, lo.y) + " to " + size_text(hi.x, hi.y) + " for it (best " + size_text(opt.x, opt.y) + ")";
-            if (ci.max_render_width < lo.x || ci.max_render_height < lo.y || ci.max_render_width > hi.x || ci.max_render_height > hi.y)
-                host_->log(2, "the game renders " + size_text(ci.max_render_width, ci.max_render_height) + ", outside XeSS's range for " +
-                                  preset_of(q).name + range.substr(1));
         }
         if (beyond) host_->log(2, "the game's ratio " + ratio_text(ratio) + " is past XeSS's Ultra Performance (3.0): XeSS runs outside its range");
         ctx_ = ctx;
@@ -327,6 +339,28 @@ class XessBackend final : public upscale::Backend {
         if (!h || !message) return;
         const int k = level >= kLogError ? 1 : level == kLogWarning ? 2 : level == kLogInfo ? 3 : 4;
         h->log(k, std::string("XeSS says: ") + message);
+    }
+
+    // Whether XeSS's input range for `out` at preset `q` holds the game's render size. A range XeSS does not give
+    // (an error, zeros) counts as holding it: XeSS itself then has the last word at execute.
+    bool in_range(Context ctx, const Dim& out, Quality q, const upscale::CreateInfo& ci, Dim* opt, Dim* lo, Dim* hi) {
+        *opt = *lo = *hi = Dim{};
+        if (api_.optimal_input_resolution(ctx, &out, q, opt, lo, hi) < 0 || !hi->x || !hi->y) {
+            *opt = *lo = *hi = Dim{};
+            return true;
+        }
+        return ci.max_render_width >= lo->x && ci.max_render_height >= lo->y && ci.max_render_width <= hi->x && ci.max_render_height <= hi->y;
+    }
+    // The preset with the next larger ratio (itself for Ultra Performance; Native AA is never left: its range is fixed).
+    static Quality larger(Quality q) {
+        switch (q) {
+            case kUltraQualityPlus: return kUltraQuality;
+            case kUltraQuality: return kQuality;
+            case kQuality: return kBalanced;
+            case kBalanced: return kPerformance;
+            case kPerformance: return kUltraPerformance;
+            default: return q;
+        }
     }
 
     // kiln/control/xess, read at load and at each create; said in kiln.log when it changes.
