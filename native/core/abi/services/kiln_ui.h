@@ -654,6 +654,27 @@ typedef struct KilnUiTexts {
     const KilnStr* texts;   /* their texts, UTF-8 */
 } KilnUiTexts;              /* 40 bytes */
 
+/* Issue #44: internal Kiln.Ui chat-completion transport, NOT for native plugins.
+ * Appended after set_texts at byte 1016; kiln.ui v1's earlier slots never move.
+ * The caller sets size and operation:
+ *  1: snapshot the focused native HUD/Social chat input, plus one queued key action.
+ *  2: set whether suggestions exist and whether the list is active.
+ *  3: queue one safe full-line replacement: text is the expected current input;
+ *     replacement is the new input. Applied ONLY by the game UI thread if
+ *     the expected text and input field still match.
+ * Completion key actions: 3 Tab, 4 Shift+Tab, 5 Up, 6 Down, 7 Escape.
+ * Text strings are UTF-8 byte sequences with explicit lengths, bounded to
+ * 256 bytes; never NUL-terminated by assumption. No player identity on wire.
+ */
+typedef struct KilnUiChatCompletion {
+    uint32_t size, operation;
+    uint32_t focused, action, cursor, text_len, replacement_len;
+    uint32_t suggestions, list_open, field, revision;
+    float x, y, width, height; /* screen pixels; field's native UiNodeRect */
+    char text[257];
+    char replacement[257];
+} KilnUiChatCompletion;
+
 typedef struct KilnUiApi {
     KilnServiceHeader header; /* { sizeof(KilnUiApi), KILN_UI_VERSION } */
     KilnResult(KILN_CALL* status)(KilnUiStatus* out);
@@ -1051,6 +1072,10 @@ typedef struct KilnUiApi {
      * overlay's font atlas. Copied; any thread. A call from a native plugin is refused (KILN_ERR_UNAVAILABLE): the player
      * chooses the language. INVALID_ARGUMENT: NULL, size too small, count over 4096 or NULL arrays with a count. */
     KilnResult(KILN_CALL* set_texts)(const KilnUiTexts* texts);
+    /* Appended internal-only slot (issue #44). Native plugins are refused;
+     * Kiln.Ui uses this on its render thread, never calls game input itself.
+     * The game UI thread owns all reads and actual EditSetText replacements. */
+    KilnResult(KILN_CALL* chat_completion)(KilnUiChatCompletion* io);
 } KilnUiApi;
 
 /* ====================================================================================================================
