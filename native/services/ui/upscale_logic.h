@@ -257,6 +257,18 @@ struct HistoryGuard {
 inline constexpr uint64_t kRetireFrames = 4;
 inline bool retire_due(uint64_t last_used_frame, uint64_t now_frame) { return now_frame >= last_used_frame + kRetireFrames; }
 
+// ---- which backend calls are still made -----------------------------------------------------------------------------
+// The core asks this before every call into the backend (upscale_backend.h "Faults" and "Lifetime"). After a fault in
+// it: none, ever (it may hold a lock; also no needs for a later Vulkan instance and no device_ready for a device the game
+// makes again). After a session fall-back (create or record failed, bad frames, another device): only the calls that
+// free what it holds; nothing that sets it up or runs it again.
+enum class Call { load, instance_needs, device_needs, device_ready, create, record, reset, tick, destroy, device_lost };
+inline bool may_call(Call c, bool faulted, bool failed) {
+    if (faulted) return false;
+    if (!failed) return true;
+    return c == Call::tick || c == Call::destroy || c == Call::device_lost;
+}
+
 // ---- the status -----------------------------------------------------------------------------------------------------
 struct StatusIn {
     Choice chosen = Choice::game;

@@ -169,6 +169,9 @@ void fall_back(Why w, const std::string& detail) {
 }
 
 Choice choice_now() { return static_cast<Choice>(g_choice.load(std::memory_order_relaxed)); }
+// Whether the core may still call the backend this way (upscale_logic.h may_call: nothing after a fault, only what frees
+// its objects after a session fall-back).
+bool may(Call c) { return may_call(c, g_faulted.load(), g_failed.load()); }
 // The swap runs a frame: hooked, the backend chosen at start is the latched choice, it loaded, the device has it,
 // nothing failed.
 bool swap_on() {
@@ -218,7 +221,7 @@ bool guarded(F&& f) {
     }())
 
 void load_backend() {
-    if (g_load_tried.exchange(true) || !g_backend) return;
+    if (!g_backend || !may(Call::load) || g_load_tried.exchange(true)) return;
     vendor::Verified v;
     try {
         v = vendor::verify_component(g_fs, api_wpath(KILN_PATH_KILN), g_backend->component());
@@ -318,7 +321,7 @@ const VkInstanceCreateInfo* upscale_instance_begin(const VkInstanceCreateInfo* c
     auto* s = new InstanceScope();
     s->api = ci->pApplicationInfo && ci->pApplicationInfo->apiVersion ? ci->pApplicationInfo->apiVersion : VK_API_VERSION_1_0;
     *scope = s;
-    if (!g_loaded.load() || !gipa) return ci;
+    if (!g_loaded.load() || !gipa || !may(Call::instance_needs)) return ci;
     InstanceNeeds needs;
     if (!KUI_GUARD("the backend's instance needs", needs = g_backend->instance_needs())) return ci;
     if (needs.extensions.empty() && (!needs.min_api_version || needs.min_api_version <= s->api)) return ci;
@@ -371,7 +374,7 @@ const VkDeviceCreateInfo* upscale_device_begin(VkInstance instance, VkPhysicalDe
     s->gpu.instance = s->inst.instance ? s->inst.instance : instance;  // the instance phys came from (vk.cpp gives the latest)
     s->gpu.instance_api = s->inst.api;
     if (auto props = reinterpret_cast<PFN_vkGetPhysicalDeviceProperties>(gipa(instance, "vkGetPhysicalDeviceProperties"))) props(phys, &s->gpu.props);
-    if (!g_loaded.load()) return ci;
+    if (!g_loaded.load() || !may(Call::device_needs)) return ci;
     DeviceNeeds needs;
     if (!KUI_GUARD("the backend's device needs", needs = g_backend->device_needs(s->gpu))) return ci;
     const VkDeviceCreateInfo* use = ci;
@@ -443,6 +446,12 @@ void upscale_device_end(void* scope, const VkDeviceCreateInfo* used, VkResult r,
         say_why(Why::device, "the graphics driver refused the Vulkan extensions and features the upscaler needs (the game's own device was made)");
         return;
     }
+    if (!may(Call::device_ready)) {
+        // the session fell back (or the backend faulted) before this device: it is not set up again
+        logf(KILN_LOG_INFO, "graphics: upscaler: %s is off for this session: Kiln does not set it up on the game's new device",
+             gfx::upscaler_name(static_cast<gfx::Upscaler>(g_start)));
+        return;
+    }
     Why why = Why::device;
     std::string detail;
     bool ok = false;
@@ -462,9 +471,10 @@ void upscale_device_destroy(VkDevice device) {
     if (!device || g_device.load() != device) return;
     g_device_ready = false;
     if (p_wait_idle) guarded([&]() { p_wait_idle(device); });
-    if (g_backend && !g_faulted.load()) {
-        if (g_ctx) KUI_GUARD("the backend's destroy", g_backend->destroy());
-        KUI_GUARD("the backend's device end", g_backend->device_lost(device));
+    if (g_backend) {
+        // each checked on its own: a fault in destroy means no device_lost after it
+        if (g_ctx && may(Call::destroy)) KUI_GUARD("the backend's destroy", g_backend->destroy());
+        if (may(Call::device_lost)) KUI_GUARD("the backend's device end", g_backend->device_lost(device));
     }
     g_ctx = false;
     g_running = static_cast<uint32_t>(Running::off);
@@ -706,12 +716,11 @@ void hk_fsr(void* ctx, uint8_t* fsr, uint8_t* desc) {
         }
     }
     // what the backend kept for the GPU goes once the GPU is done with it, whether or not it records this frame
-    if (g_backend && g_loaded.load(std::memory_order_relaxed) && !g_faulted.load(std::memory_order_relaxed))
-        KUI_GUARD("the backend's tick", g_backend->tick(n));
+    if (g_backend && g_loaded.load(std::memory_order_relaxed) && may(Call::tick)) KUI_GUARD("the backend's tick", g_backend->tick(n));
     if (!swap_on()) {
         // the context goes once nothing uses it (the choice changed, a failure): the GPU memory back to the game
         if (g_ctx && g_backend) {
-            if (!g_faulted.load()) KUI_GUARD("the backend's destroy", g_backend->destroy());
+            if (may(Call::destroy)) KUI_GUARD("the backend's destroy", g_backend->destroy());
             g_ctx = false;
             g_running = static_cast<uint32_t>(Running::off);
         }
@@ -842,7 +851,7 @@ void run_cmd(VkCommandBuffer cb, const KCmd& c) {
     f.cb = cb;
     std::string detail;
     bool ok = false;
-    const bool live = g_ctx && g_backend && !g_failed.load() && !g_faulted.load();
+    const bool live = g_ctx && g_backend && may(Call::record);
     if (live && KUI_GUARD("the backend's upscale", ok = g_backend->record(f, &detail)) && ok) {
         const uint64_t k = g_kiln_frames.fetch_add(1, std::memory_order_relaxed) + 1;
         g_last_kiln_ms.store(now_ms(), std::memory_order_relaxed);

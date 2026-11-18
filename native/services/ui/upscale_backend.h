@@ -28,10 +28,12 @@
 // Faults: the core calls every method under a fault guard; a fault, or `false` from create or record, puts the
 // game's own FSR 3 back for the session (Status reason FAULT / CREATE_FAILED / RUNTIME_FAILED). The frame in which
 // record fails gets a plain blit of the colour to the output, so it is never empty.
-// Lifetime: the backend object lives for the whole session. After `false` from create or record it gets destroy() and,
-// later, device_lost() as usual. After a FAULT inside the backend the core never calls it again (no destroy, tick or
-// device_lost: it may hold a lock), so its contexts and Vulkan objects outlive the device until the game ends: a known
-// leak, accepted (a fault is rare and the session ends with the game). A backend's destructor must not call its vendor.
+// Lifetime: the backend object lives for the whole session. After `false` from create or record (a session fall-back)
+// it gets only what frees its objects: destroy(), tick() and, later, device_lost(); never needs, device_ready, create,
+// record or reset again, also not for a Vulkan instance or device the game makes after that. After a FAULT inside the
+// backend the core never calls it again (no destroy, tick or device_lost: it may hold a lock), so its contexts and
+// Vulkan objects outlive the device until the game ends: a known leak, accepted (a fault is rare and the session ends
+// with the game). upscale_logic.h may_call holds these rules. A backend's destructor must not call its vendor.
 #pragma once
 #ifndef VK_NO_PROTOTYPES
 #define VK_NO_PROTOTYPES

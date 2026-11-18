@@ -268,6 +268,22 @@ static void frames() {
     CHECK(!retire_due(10, 12) && !retire_due(10, 13) && retire_due(10, 14) && retire_due(0, 4));
 }
 
+// Which backend calls the core still makes (upscale_backend.h "Faults"): after a fault none at all (the backend may hold
+// a lock: also no needs or device_ready for a later instance or a re-created device); after a session fall-back only
+// the calls that free what it holds.
+static void calls() {
+    const Call all[] = {Call::load, Call::instance_needs, Call::device_needs, Call::device_ready, Call::create, Call::record,
+                        Call::reset, Call::tick, Call::destroy, Call::device_lost};
+    for (Call c : all) {
+        CHECK(may_call(c, false, false));
+        CHECK(!may_call(c, true, false) && !may_call(c, true, true));
+    }
+    CHECK(may_call(Call::destroy, false, true) && may_call(Call::device_lost, false, true) && may_call(Call::tick, false, true));
+    CHECK(!may_call(Call::instance_needs, false, true) && !may_call(Call::device_needs, false, true));
+    CHECK(!may_call(Call::device_ready, false, true) && !may_call(Call::create, false, true) && !may_call(Call::record, false, true));
+    CHECK(!may_call(Call::reset, false, true) && !may_call(Call::load, false, true));
+}
+
 static StatusOut st(StatusIn in) { return decide_status(in); }
 static void status() {
     StatusIn in;
@@ -486,6 +502,7 @@ int main(int argc, char** argv) {
     command();
     frame_values();
     frames();
+    calls();
     status();
     amd_map();
     std::printf("upscale_test: %d checks passed\n", g_checks);
