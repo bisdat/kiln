@@ -946,8 +946,9 @@ queue Kiln cannot draw on. kiln.log says it once:
 > ui: Kiln's overlay drawing is off for the rest of this game session: its Vulkan submit failed; vkQueueSubmit of the overlay's frame returned -13 (VK_ERROR_UNKNOWN) on queue family 0. The game's frames go on as the game made them (Kiln hands each present on untouched); key bindings and the Mods menu still work, Kiln's windows and HUDs do not show. The next start tries the overlay again
 
 From then on it is the [drawing-off](#frame-generation-mods-and-drawing-off) state for this session: nothing of
-Kiln's takes the game's keyboard or mouse (an open Kiln menu, the Mods page or a wheel lets go at once), the Mods entry
-shows "Mods: the overlay's drawing is off: <reason>", `Ui.Status.Error` carries the same text, and the drawing
+Kiln's takes the game's keyboard or mouse (an open Kiln menu closes; a Kiln text field, the Mods page or a wheel lets
+go at once, so key bindings see no typing and Escape reaches the game), the Mods entry shows "Mods: the overlay's
+drawing is off: <reason>", `Ui.Status.Error` carries the same text, and the drawing
 capability rows (`ui.windows`, `ui.draw`, `ui.menu_page`, `render.draw`, `kiln.screen`) turn unavailable with it.
 
 The present queue. Kiln's frame is submitted on the queue the game presents from, in the same call. Kiln draws only on

@@ -194,6 +194,7 @@ void overlay_turned_off(int level, const char* reason, const char* detail) {
     try {
         g_off_reason = std::string("the overlay's drawing is off: ") + (reason && *reason ? reason : "a Vulkan error");
         g_overlay_failed.store(true, std::memory_order_release);
+        release_input_after_turn_off();
         logf(level, "ui: Kiln's overlay drawing is off for the rest of this game session: %s%s%s. The game's frames go on "
              "as the game made them (Kiln hands each present on untouched); key bindings and the Mods menu still work, Kiln's "
              "windows and HUDs do not show. The next start tries the overlay again", reason && *reason ? reason : "a Vulkan error",
@@ -210,6 +211,7 @@ void overlay_turned_off(int level, const char* reason, const char* detail) {
         if (!QueueUserWorkItem(&report_drawing_off_later, copy, WT_EXECUTEDEFAULT)) delete copy;
     } catch (...) {
         g_overlay_failed.store(true, std::memory_order_release);
+        release_input_after_turn_off();
     }
 }
 

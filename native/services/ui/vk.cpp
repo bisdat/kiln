@@ -489,6 +489,9 @@ vk_present::QueueUse present_queue(Device& d, VkQueue queue, uint32_t* family) {
 
 // The overlay's work inside one present. False = present as the game asked.
 bool draw(VkQueue queue, const VkPresentInfoKHR* info, VkSemaphore* out_wait, uint64_t t0) {
+    // the drawing went off on another present thread (frame generation's) while this one waited for g_mu: no frame
+    // callbacks, no ImGui frame (it would set the input flags overlay_turned_off clears), no submit
+    if (g_failed.load(std::memory_order_acquire)) return false;
     Swap* s = nullptr;
     uint32_t index = 0;
     for (uint32_t i = 0; i < info->swapchainCount; ++i) {
@@ -675,7 +678,7 @@ bool guarded_pre_overlay_fn(KilnUiPreOverlayFn fn, const KilnUiPreOverlay* p, vo
 // True: *wait replaces the game's semaphores in this present.
 bool run_pre_overlay(VkQueue queue, const VkPresentInfoKHR* info, VkSemaphore* wait) {
     std::lock_guard<std::mutex> lk(g_mu);
-    if (g_pre_overlay.empty()) return false;
+    if (g_pre_overlay.empty() || g_failed.load(std::memory_order_acquire)) return false;  // off since (another thread)
     Swap* s = nullptr;
     uint32_t index = 0;
     for (uint32_t i = 0; i < info->swapchainCount; ++i) {

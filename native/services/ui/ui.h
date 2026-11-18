@@ -77,6 +77,14 @@ inline bool overlay_draws() { return overlay_drawing_on() && !overlay_failed(); 
 // carry it), `detail` goes into kiln.log only.
 void overlay_turned_off(int level, const char* reason, const char* detail);
 const std::string& overlay_off_reason();  // the reason (after overlay_failed() said true), else ""
+// overlay_turned_off, with g_overlay_failed set: what the last drawn frame left set lets go of the game's input. ImGui's
+// text field flag is not built again (key bindings would take every press for typing: KilnUiKey.text_input), and
+// Kiln's menu, no longer shown, is closed (Escape would close it instead of reaching the game; a Keys page that was
+// waiting for a key would take the next press). The menu key opens the Mods entry's caption, as with drawing off.
+inline void release_input_after_turn_off() {
+    g_text_input.store(false);
+    g_menu_open.store(false);
+}
 inline bool capturing() {
     return overlay_draws() && (g_menu_open.load(std::memory_order_relaxed) || g_page_capture.load(std::memory_order_relaxed) ||
            g_interactive.load(std::memory_order_relaxed) > 0 || wheel_active());
