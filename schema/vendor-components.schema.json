@@ -2,8 +2,9 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "vendor-components.schema.json",
   "title": "Vendor components the launcher can download (launcher/src/data/vendor-components.json), format 1",
-  "description": "Shipped with Kiln, read by the launcher (kiln_manage::vendor::manifest). Per component (AMD FSR, Intel XeSS, later NVIDIA's frame generation): what it is, its version, the vendor's licence (bundled verbatim next to this file) and every file with a tag-pinned URL on the vendor's own GitHub organisation, its size and its SHA-256. A file whose sha256 is \"not-pinned\" makes its whole component \"not available in this build\": it is never downloaded. tools/release/vendor_pin.py fills the hashes in from files the release process downloaded once. Rules the parser adds (not expressible here): ids unique, one component per vendor and version (they share a folder), URLs on the vendor's own organisation at a tag named after the version, the licence file bundled and its hash right. docs/kiln/launcher/contracts.md, \"Vendor files\".",
+  "description": "Shipped with Kiln, read by the launcher (kiln_manage::vendor::manifest). Per component (AMD FSR, Intel XeSS, later NVIDIA's frame generation): what it is, its version, the vendor's licence (bundled verbatim next to this file) and every file with a tag-pinned URL on the vendor's own GitHub organisation, its size and its SHA-256. A file whose sha256 is \"not-pinned\" makes its whole component \"not available in this build\": it is never downloaded. tools/release/vendor_pin.py fills the hashes in from files the release process downloaded once. No key outside this schema (the manifest ships inside the build, so an unknown key is a typo). Rules the parser adds (not expressible here): ids unique, one component per vendor and version (they share a folder), URLs on the vendor's own organisation at a tag named after the version, the licence file bundled and its hash right. docs/kiln/launcher/contracts.md, \"Vendor files\".",
   "type": "object",
+  "additionalProperties": false,
   "required": ["format", "components"],
   "properties": {
     "format": { "const": 1 },
@@ -12,6 +13,7 @@
   "$defs": {
     "component": {
       "type": "object",
+      "additionalProperties": false,
       "required": ["id", "vendor", "vendorName", "name", "enables", "version", "license", "files"],
       "properties": {
         "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,31}$", "description": "amd-fsr, intel-xess, later nvidia-dlssg." },
@@ -27,6 +29,7 @@
     },
     "license": {
       "type": "object",
+      "additionalProperties": false,
       "required": ["name", "file", "sha256", "from"],
       "properties": {
         "name": { "type": "string", "minLength": 1, "description": "The licence's own name, as the vendor names it (MIT licence; Intel Simplified Software License (October 2022))." },
@@ -37,6 +40,7 @@
     },
     "file": {
       "type": "object",
+      "additionalProperties": false,
       "required": ["name", "url", "size", "sha256"],
       "properties": {
         "name": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$", "description": "The file's name in kiln/vendor/<vendor>/<version>/ (no folder)." },

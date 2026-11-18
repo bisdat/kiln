@@ -1035,7 +1035,9 @@ A client only: a dedicated server is `unsupported`.
   at the tag `<version>` or `v<version>`; file names without a folder, not `kiln-vendor.json`, `*.part` or `*.tmp`;
   sizes from 1 byte to 512 MiB; the licence text bundled (`launcher/src/data/vendor-licenses/`: the vendor's words
   verbatim, LF line ends; AMD's is the MIT section of `Kits/FidelityFX/docs/license.md`, which lists the signed DLLs
-  under it) and `license.sha256` the SHA-256 of that text with LF line ends; only NVIDIA's own files may be called DLSS.
+  under it) and `license.sha256` the SHA-256 of that text with LF line ends; only NVIDIA's own files may be called DLSS
+  (in the name, the vendor's name, the sentence or the licence's name); no key outside the schema (the manifest ships
+  inside the build, so an unknown key is a typo, and both the schema and the parser refuse it).
 - **Pinning.** `python3 -I tools/release/vendor_pin.py --dir <folder> [--component <id>] [--write | --check]`, with copies
   downloaded once by hand from the manifest's URLs (`<folder>/<id>-<version>/<name>`, `<folder>/<id>/<name>` or
   `<folder>/<name>`): each copy must have the manifest's size and git blob SHA-1 (GitHub's for the file at the tag) before

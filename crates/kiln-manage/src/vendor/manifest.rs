@@ -8,7 +8,10 @@
 //!   or `v<version>`;
 //! - sizes from 1 byte to [`MAX_FILE`];
 //! - the licence text bundled ([`license_text`]) and its SHA-256 the manifest's ([`license_sha256`]);
-//! - a sha256 is 64 lower-case hex digits or [`NOT_PINNED`].
+//! - a sha256 is 64 lower-case hex digits or [`NOT_PINNED`];
+//! - no key the format does not have (the manifest ships inside this build, so a key it does not know is a typo, such
+//!   as a `gitblob` that would skip the pinning tool's check);
+//! - only NVIDIA's components may say DLSS, in any text the page shows.
 //!
 //! A component with any file not pinned is not available in this build: [`Component::pinned`] is false and nothing
 //! downloads it.
@@ -36,14 +39,14 @@ pub const LICENSE_TEXTS: &[(&str, &str)] = &[
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct VendorManifest {
     pub format: u32,
     pub components: Vec<Component>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Component {
     /// `amd-fsr`, `intel-xess`, later `nvidia-dlssg`.
     pub id: String,
@@ -65,7 +68,7 @@ pub struct Component {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct License {
     /// The vendor's own name for it (MIT licence; Intel Simplified Software License (October 2022)).
     pub name: String,
@@ -78,7 +81,7 @@ pub struct License {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct VendorFile {
     pub name: String,
     pub url: String,
@@ -274,7 +277,8 @@ pub fn parse(text: &str) -> Result<VendorManifest> {
                 return Err(bad(format!("{}: {what} is empty", c.id)));
             }
         }
-        if c.vendor != "nvidia" && c.name.to_ascii_lowercase().contains("dlss") {
+        // every text the page shows: only NVIDIA's own files may be called DLSS
+        if c.vendor != "nvidia" && [&c.name, &c.vendor_name, &c.enables, &c.license.name].iter().any(|t| t.to_ascii_lowercase().contains("dlss")) {
             return Err(bad(format!("{}: only NVIDIA's own files may be called DLSS", c.id)));
         }
         if let Some(s) = &c.source
@@ -453,6 +457,12 @@ mod tests {
             ("one folder for two components", Box::new(|v| { v["components"][1]["vendor"] = "amd".into(); v["components"][1]["version"] = "2.4.0".into(); })),
             ("a version that is no version", Box::new(|v| v["components"][0]["version"] = "latest".into())),
             ("a DLSS name for AMD's files", Box::new(|v| v["components"][0]["name"] = "DLSS for AMD".into())),
+            ("DLSS in what AMD's files enable", Box::new(|v| v["components"][0]["enables"] = "A DLSS stand-in.".into())),
+            ("DLSS in Intel's licence name", Box::new(|v| v["components"][1]["license"]["name"] = "DLSS licence".into())),
+            ("a key the format does not have", Box::new(|v| v["later"] = true.into())),
+            ("a component key the format does not have", Box::new(|v| v["components"][0]["signature"] = "x".into())),
+            ("a licence key the format does not have", Box::new(|v| v["components"][0]["license"]["url"] = "x".into())),
+            ("a misspelt gitBlob", Box::new(|v| v["components"][1]["files"][0]["gitblob"] = "0".repeat(40).into())),
             ("an empty sentence", Box::new(|v| v["components"][0]["enables"] = " ".into())),
             ("a licence not bundled", Box::new(|v| v["components"][0]["license"]["file"] = "vendor-licenses/nope.txt".into())),
             ("a licence hash that is not the text's", Box::new(|v| v["components"][0]["license"]["sha256"] = "0".repeat(64).into())),
@@ -474,9 +484,8 @@ mod tests {
         for (what, patch) in cases {
             assert!(one(patch).is_err(), "accepted {what}");
         }
-        // unknown keys are ignored; one file not pinned makes its component not pinned
+        // one file not pinned makes its component not pinned
         let m = one(|v| {
-            v["later"] = true.into();
             v["components"][1]["files"][0]["sha256"] = NOT_PINNED.into();
         }).unwrap();
         assert!(!m.component("intel-xess").unwrap().pinned());
