@@ -73,9 +73,11 @@ uint32_t codepoints(std::string_view bytes) {
 }
 
 bool safe_line(std::string_view bytes) {
-    if (bytes.size() > 256) return false;
-    for (unsigned char c : bytes) if (c < 0x20 || c == 0x7F) return false;
-    return true;
+    // The native game edit uses UTF-8 text and a UTF-32 cursor. Reject
+    // malformed sequences before counting codepoints or queuing SetText.
+    // Reuse the already-tested strict history decoder, with completion's
+    // smaller network/text limit imposed independently.
+    return bytes.size() <= 256 && chat_history::History::valid(bytes);
 }
 
 std::atomic<bool> g_diagnose_on{false};
