@@ -900,7 +900,7 @@ off during a session because its own work failed ([below](#when-the-overlay-fail
 from a queue Kiln does not draw on, which comes before any work of its own), the record is armed again: a game that
 closes before it has presented 60 more frames in a 30 second window counts as an interrupted attempt. A game that goes
 on presenting does not, and neither does a normal exit where Kiln sees it (`on_unload`: under Wine, and on Windows with
-kiln.json `"unloadAtExit": "on"`). On Windows by default a quit in the first second of the overlay's drawing, or in
+kiln.json `"unloadAtExit": "on"`). On Windows by default a quit during the overlay's first drawn frames (about a second at 60 frames a second), or in
 the 30 seconds after it failed, counts as an interrupted attempt: one start without the overlay, then it tries again.
 Each record is written (a temporary file, then a rename) before the stage goes on, and forced to the disk
 on a thread of its own, never on the game's present call: a game that dies loses nothing it already
