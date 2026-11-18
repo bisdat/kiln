@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "chat_history.h"
+#include "chat_completion_text.h"
 #include "chat_focus.h"
 #include "chat_keys.h"
 #include "chat_store.h"
@@ -73,11 +74,18 @@ uint32_t codepoints(std::string_view bytes) {
 }
 
 bool safe_line(std::string_view bytes) {
-    // The native game edit uses UTF-8 text and a UTF-32 cursor. Reject
-    // malformed sequences before counting codepoints or queuing SetText.
-    // Reuse the already-tested strict history decoder, with completion's
-    // smaller network/text limit imposed independently.
-    return bytes.size() <= 256 && chat_history::History::valid(bytes);
+    // Snapshotting an empty editor must clear old completion candidates.
+    // History::valid alone intentionally rejects empty history entries.
+    return chat_completion_text::valid(bytes);
+}
+
+void invalidate_completion_snapshot() {
+    std::lock_guard lock(g_completion_mu);
+    g_completion_snapshot.focused = false;
+    g_completion_snapshot.has_rect = false;
+    g_pending_valid = false;
+    g_completion_actions.clear();
+    g_keys.completion(false, false, false);
 }
 
 std::atomic<bool> g_diagnose_on{false};
@@ -202,10 +210,16 @@ bool widget_text(void* widget, std::string* out) {
 void completion_capture(void* widget, void* state, bool hud) {
     if (!g_completion_on.load(std::memory_order_acquire) || !editing(state)) return;
     std::string line;
-    if (!widget_text(widget, &line) || !safe_line(line)) return;
+    if (!widget_text(widget, &line) || !safe_line(line)) {
+        invalidate_completion_snapshot();
+        return;
+    }
     uint32_t cursor = 0;
     if (!game_read(reinterpret_cast<const uint8_t*>(state) + L.edit + kEditorCursor, &cursor) ||
-        cursor > codepoints(line)) return;
+        cursor > codepoints(line)) {
+        invalidate_completion_snapshot();
+        return;
+    }
     uintptr_t node = 0;
     float rect[4]{};
     bool valid = false;
@@ -217,7 +231,10 @@ void completion_capture(void* widget, void* state, bool hud) {
     }
     if (!valid || !std::isfinite(rect[0]) || !std::isfinite(rect[1]) ||
         !std::isfinite(rect[2]) || !std::isfinite(rect[3]) ||
-        rect[2] <= 0 || rect[3] <= 0 || rect[2] > 4000 || rect[3] > 4000) return;
+        rect[2] <= 0 || rect[3] <= 0 || rect[2] > 4000 || rect[3] > 4000) {
+        invalidate_completion_snapshot();
+        return;
+    }
     std::lock_guard lock(g_completion_mu);
     auto& snap = g_completion_snapshot;
     const uint32_t field = hud ? 1u : 2u;
