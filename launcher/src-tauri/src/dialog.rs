@@ -97,7 +97,7 @@ fn ask_gtk_here(m: &Message) -> Option<Option<Action>> {
     let d = build(m, None::<&gtk::Window>);
     auto_answer(&d);
     d.show_all();
-    focus_first(&d);
+    focus_default(&d, &m);
     let r = d.run();
     d.hide();
     while gtk::events_pending() {
@@ -151,6 +151,7 @@ fn show_late(app: &tauri::AppHandle, m: Message, shown: std::sync::mpsc::Sender<
     let parent = app.get_webview_window("main").and_then(|w| w.gtk_window().ok());
     let d = build(&m, parent.as_ref());
     auto_answer(&d);
+    let focus = default_button(&m);
     d.connect_response(move |d, r| {
         let Some(a) = index(r).and_then(|i| m.buttons.get(i)).map(|b| b.0) else {
             log("the message was closed: the window stays as it is");
@@ -162,7 +163,9 @@ fn show_late(app: &tauri::AppHandle, m: Message, shown: std::sync::mpsc::Sender<
         }
     });
     d.show_all();
-    focus_first(&d);
+    if let Some(b) = d.widget_for_response(gtk::ResponseType::Other(focus as u16)) {
+        b.grab_focus();
+    }
     let _ = shown.send(());
 }
 
@@ -225,7 +228,7 @@ fn build(m: &Message, parent: Option<&impl gtk::prelude::IsA<gtk::Window>>) -> g
     for (i, (_, label)) in m.buttons.iter().enumerate() {
         d.add_button(label, gtk::ResponseType::Other(i as u16));
     }
-    d.set_default_response(gtk::ResponseType::Other(0));
+    d.set_default_response(gtk::ResponseType::Other(default_button(m) as u16));
     d.set_keep_above(true);
     // the log's path and the link can be selected and copied
     if let Ok(area) = d.message_area().downcast::<gtk::Box>() {
@@ -239,10 +242,16 @@ fn build(m: &Message, parent: Option<&impl gtk::prelude::IsA<gtk::Window>>) -> g
     d
 }
 
-/// The first button has the focus (a selectable text would otherwise get it, all selected).
-fn focus_first(d: &gtk::MessageDialog) {
+/// The button Enter presses: the first one that does not lower protection. Turning WebKit's sandbox off is always a
+/// button of its own the player picks, never what a stray Enter does.
+fn default_button(m: &Message) -> usize {
+    m.buttons.iter().position(|b| b.0 != Action::SandboxOff).unwrap_or(0)
+}
+
+/// The default button has the focus (a selectable text would otherwise get it, all selected).
+fn focus_default(d: &gtk::MessageDialog, m: &Message) {
     use gtk::prelude::*;
-    if let Some(b) = d.widget_for_response(gtk::ResponseType::Other(0)) {
+    if let Some(b) = d.widget_for_response(gtk::ResponseType::Other(default_button(m) as u16)) {
         b.grab_focus();
     }
 }
@@ -301,13 +310,27 @@ fn ask_tools(m: &Message, closed: Closed) -> Option<Option<Action>> {
     ok.then_some(None)
 }
 
-/// The buttons as a tool shows them: the first action, the label of the button that means what closing means, the rest.
-fn tool_buttons(m: &Message, closed: Closed) -> (Action, &'static str, Vec<(Action, &'static str)>) {
-    let first = m.buttons[0].0;
-    match closed {
-        Closed::StartAnyway => (first, label_of(m, Action::StartAnyway), m.buttons[1..].iter().copied().filter(|b| b.0 != Action::StartAnyway).collect()),
-        Closed::Nothing => (first, "Close", m.buttons[1..].to_vec()),
+/// The buttons as a tool shows them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ToolButtons {
+    /// Its OK button, the one Enter presses: never "Turn the sandbox off" while another is there.
+    ok: (Action, &'static str),
+    /// The label of its Cancel button, which means what closing means.
+    cancel: &'static str,
+    /// The rest, in the message's order.
+    extra: Vec<(Action, &'static str)>,
+}
+
+fn tool_buttons(m: &Message, closed: Closed) -> Option<ToolButtons> {
+    let (cancel, mut left): (&'static str, Vec<(Action, &'static str)>) = match closed {
+        Closed::StartAnyway => (label_of(m, Action::StartAnyway), m.buttons.iter().copied().filter(|b| b.0 != Action::StartAnyway).collect()),
+        Closed::Nothing => ("Close", m.buttons.clone()),
+    };
+    if left.is_empty() {
+        return None;
     }
+    let ok = left.remove(left.iter().position(|b| b.0 != Action::SandboxOff).unwrap_or(0));
+    Some(ToolButtons { ok, cancel, extra: left })
 }
 
 fn closed_means(closed: Closed) -> Option<Action> {
@@ -318,18 +341,27 @@ fn closed_means(closed: Closed) -> Option<Action> {
 }
 
 fn zenity(m: &Message, closed: Closed) -> Option<Option<Action>> {
-    let (first, cancel, rest) = tool_buttons(m, closed);
+    let b = tool_buttons(m, closed)?;
     let mut cmd = kiln_manage::hostenv::command("zenity");
     cmd.args(["--question", "--no-markup", "--width=640", "--title", &m.title, "--text", &m.body])
-        .arg(format!("--ok-label={}", label_of(m, first))).arg(format!("--cancel-label={cancel}"));
-    for (_, l) in &rest {
+        .arg(format!("--ok-label={}", b.ok.1)).arg(format!("--cancel-label={}", b.cancel));
+    for (_, l) in &b.extra {
         cmd.arg(format!("--extra-button={l}"));
     }
-    let out = cmd.stdin(std::process::Stdio::null()).stderr(std::process::Stdio::null()).output().ok()?;
-    let said = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    match out.status.code() {
-        Some(0) => Some(Some(first)),
-        Some(1) if !said.is_empty() => Some(rest.iter().find(|b| b.1 == said).map(|b| b.0).or(closed_means(closed))),
+    // stdout: an extra button's label; stderr: why it showed nothing
+    let out = cmd.stdin(std::process::Stdio::null()).output().ok()?;
+    zenity_answer(&b, closed, out.status.code(), &String::from_utf8_lossy(&out.stdout), &String::from_utf8_lossy(&out.stderr))
+}
+
+/// What zenity's end means. None: it showed nothing (the next tool is asked); Some(None): shown, no choice.
+fn zenity_answer(b: &ToolButtons, closed: Closed, code: Option<i32>, stdout: &str, stderr: &str) -> Option<Option<Action>> {
+    let said = stdout.trim();
+    match code {
+        Some(0) => Some(Some(b.ok.0)),
+        Some(1) if !said.is_empty() => Some(b.extra.iter().find(|x| x.1 == said).map(|x| x.0).or(closed_means(closed))),
+        // 1 is also GTK's exit when zenity cannot open a display ("Failed to open display", GTK 3's "cannot open
+        // display"): nothing was up, nobody chose
+        Some(1) if stderr.contains("open display") => None,
         Some(1) => Some(closed_means(closed)),
         // ended by a signal: it was up and someone closed it
         None => Some(closed_means(closed)),
@@ -339,16 +371,107 @@ fn zenity(m: &Message, closed: Closed) -> Option<Option<Action>> {
 }
 
 fn kdialog(m: &Message, closed: Closed) -> Option<Option<Action>> {
-    let (first, cancel, rest) = tool_buttons(m, closed);
-    // three buttons: the first action, then Quit (or the next one), then what closing means
-    let second = rest.iter().find(|b| b.0 == Action::Quit).or(rest.first()).copied()?;
-    let out = kiln_manage::hostenv::command("kdialog")
-        .args(["--title", &m.title, "--yesnocancel", &m.body, "--yes-label", label_of(m, first), "--no-label", second.1, "--cancel-label", cancel])
-        .stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status().ok()?;
-    match out.code() {
-        Some(0) => Some(Some(first)),
-        Some(1) => Some(Some(second.0)),
-        Some(2) => Some(closed_means(closed)),
+    let b = tool_buttons(m, closed)?;
+    let mut cmd = kiln_manage::hostenv::command("kdialog");
+    cmd.args(["--title", &m.title]);
+    // at most three buttons: OK, the next one ("Turn the sandbox off" when it is there, else Quit), what closing means
+    match kdialog_second(&b) {
+        Some(second) => cmd.args(["--yesnocancel", &m.body, "--yes-label", b.ok.1, "--no-label", second.1, "--cancel-label", b.cancel]),
+        None => cmd.args(["--yesno", &m.body, "--yes-label", b.ok.1, "--no-label", b.cancel]),
+    };
+    let out = cmd.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status().ok()?;
+    kdialog_answer(&b, closed, out.code())
+}
+
+fn kdialog_second(b: &ToolButtons) -> Option<(Action, &'static str)> {
+    let find = |a: Action| b.extra.iter().find(|x| x.0 == a);
+    find(Action::SandboxOff).or_else(|| find(Action::Quit)).or(b.extra.first()).copied()
+}
+
+/// kdialog's exit: 0 yes, 1 no, 2 cancel (a `--yesno` has no cancel: its no is what closing means); a crash or no
+/// display (Qt aborts): it showed nothing.
+fn kdialog_answer(b: &ToolButtons, closed: Closed, code: Option<i32>) -> Option<Option<Action>> {
+    match (code, kdialog_second(b)) {
+        (Some(0), _) => Some(Some(b.ok.0)),
+        (Some(1), Some(second)) => Some(Some(second.0)),
+        (Some(1), None) | (Some(2), _) => Some(closed_means(closed)),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sandbox::{Action as A, Message};
+
+    fn msg(buttons: &[(A, &'static str)]) -> Message {
+        Message { title: "t".into(), body: "b".into(), buttons: buttons.to_vec() }
+    }
+    const OFF: (A, &str) = (A::SandboxOff, "Turn the sandbox off and start");
+    const ANYWAY: (A, &str) = (A::StartAnyway, "Start anyway");
+    const QUIT: (A, &str) = (A::Quit, "Quit");
+    const NO_GPU: (A, &str) = (A::NoGpu, "Start without the GPU");
+    const LOGS: (A, &str) = (A::OpenLogs, "Open the log folder");
+
+    /// Enter (GTK's default button, zenity's and kdialog's first) never turns WebKit's sandbox off: that is always a
+    /// button the player picks.
+    #[test]
+    fn enter_never_turns_the_sandbox_off() {
+        let start = msg(&[OFF, ANYWAY, QUIT]);
+        assert_eq!(start.buttons[default_button(&start)].0, A::StartAnyway);
+        let late = msg(&[(A::SandboxOff, "Start without WebKit's sandbox"), NO_GPU, LOGS, QUIT]);
+        assert_eq!(late.buttons[default_button(&late)].0, A::NoGpu);
+        assert_eq!(default_button(&msg(&[LOGS, QUIT])), 0);
+        // the tools: OK is not the off button; closing means what it meant
+        let b = tool_buttons(&start, Closed::StartAnyway).unwrap();
+        assert_eq!(b, ToolButtons { ok: QUIT, cancel: "Start anyway", extra: vec![OFF] });
+        let b = tool_buttons(&late, Closed::Nothing).unwrap();
+        assert_eq!((b.ok, b.cancel), (NO_GPU, "Close"));
+        assert_eq!(b.extra.iter().map(|x| x.0).collect::<Vec<_>>(), [A::SandboxOff, A::OpenLogs, A::Quit]);
+        // the start's message where the launcher cannot turn it off: Quit, and closing starts as before
+        let b = tool_buttons(&msg(&[ANYWAY, QUIT]), Closed::StartAnyway).unwrap();
+        assert_eq!(b, ToolButtons { ok: QUIT, cancel: "Start anyway", extra: vec![] });
+    }
+
+    /// zenity ends with 1 for Cancel, a closed window, an extra button (its label on stdout) and also when it cannot
+    /// open a display at all: then nothing was shown and nobody chose, so the next tool is asked and the log does not
+    /// say the player chose.
+    #[test]
+    fn zenity_without_a_display_is_not_an_answer() {
+        let start = msg(&[OFF, ANYWAY, QUIT]);
+        let b = tool_buttons(&start, Closed::StartAnyway).unwrap();
+        let z = |code, out: &str, err: &str| zenity_answer(&b, Closed::StartAnyway, code, out, err);
+        assert_eq!(z(Some(1), "", "(zenity:3025286): Gtk-WARNING **: 13:17:15.740: Failed to open display\n"), None);
+        assert_eq!(z(Some(1), "", "Gtk-WARNING **: cannot open display: :99"), None);
+        // shown, then: OK, the off button (an extra), Cancel or closed, killed, its own timeout
+        assert_eq!(z(Some(0), "", ""), Some(Some(A::Quit)));
+        assert_eq!(z(Some(1), "Turn the sandbox off and start\n", ""), Some(Some(A::SandboxOff)));
+        assert_eq!(z(Some(1), "", "Gtk-Message: GtkDialog mapped without a transient parent"), Some(Some(A::StartAnyway)));
+        assert_eq!(z(None, "", ""), Some(Some(A::StartAnyway)));
+        assert_eq!(z(Some(5), "", ""), None);
+        // a late message: closing chooses nothing
+        let late = tool_buttons(&msg(&[LOGS, QUIT]), Closed::Nothing).unwrap();
+        assert_eq!(zenity_answer(&late, Closed::Nothing, Some(1), "", ""), Some(None));
+        assert_eq!(zenity_answer(&late, Closed::Nothing, Some(1), "", "Failed to open display"), None);
+        assert_eq!(zenity_answer(&late, Closed::Nothing, Some(1), "Quit", ""), Some(Some(A::Quit)));
+    }
+
+    #[test]
+    fn kdialogs_three_buttons_keep_the_choice_the_message_is_about() {
+        let start = tool_buttons(&msg(&[OFF, ANYWAY, QUIT]), Closed::StartAnyway).unwrap();
+        assert_eq!(kdialog_second(&start), Some(OFF));
+        assert_eq!(kdialog_answer(&start, Closed::StartAnyway, Some(0)), Some(Some(A::Quit)));
+        assert_eq!(kdialog_answer(&start, Closed::StartAnyway, Some(1)), Some(Some(A::SandboxOff)));
+        assert_eq!(kdialog_answer(&start, Closed::StartAnyway, Some(2)), Some(Some(A::StartAnyway)));
+        // Qt without a display aborts: nothing shown
+        assert_eq!(kdialog_answer(&start, Closed::StartAnyway, None), None);
+        // two buttons (--yesno): its no is what closing means
+        let two = tool_buttons(&msg(&[ANYWAY, QUIT]), Closed::StartAnyway).unwrap();
+        assert_eq!(kdialog_second(&two), None);
+        assert_eq!(kdialog_answer(&two, Closed::StartAnyway, Some(1)), Some(Some(A::StartAnyway)));
+        // a late message without the off button: OK is the first try, the second is Quit
+        let late = tool_buttons(&msg(&[NO_GPU, LOGS, QUIT]), Closed::Nothing).unwrap();
+        assert_eq!((late.ok, kdialog_second(&late)), (NO_GPU, Some(QUIT)));
+        assert_eq!(kdialog_answer(&late, Closed::Nothing, Some(2)), Some(None));
     }
 }
