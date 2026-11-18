@@ -642,12 +642,14 @@ void graphics_overlay() {
             ImGui::TextUnformatted(text::fill(text::get("native.graphics.dlss"), {{"mode", gfx::mode_name(st.dlss_quality)},
                 {"render", fmt_size(st.render_width, st.render_height)}, {"output", fmt_size(st.dlss_output_width, st.dlss_output_height)},
                 {"preset", preset}}).c_str());
-        } else if (st.flags & KILN_UI_GFX_DLSS_HOOKED) {
-            ImGui::TextUnformatted(text::fill(text::get("native.graphics.not_dlss"), {{"output", output}}).c_str());
         } else if (st.aside_dlss) {
             ImGui::TextUnformatted(text::fill(text::get("native.graphics.aside"), {{"tools", gfx::aside_names(st.aside_dlss)}, {"output", output}}).c_str());
-        } else {
+        } else if (st.flags & KILN_UI_GFX_DLSS_RESTART) {
+            // the readout was turned on in this session: DLSS is read from the next start
             ImGui::TextUnformatted(text::fill(text::get("native.graphics.unknown"), {{"output", output}}).c_str());
+        } else {
+            // DLSS hooked and not in use now, or the game never set DLSS up (another GPU, or another upscaler chosen)
+            ImGui::TextUnformatted(text::fill(text::get("native.graphics.not_dlss"), {{"output", output}}).c_str());
         }
         if (st.fps_cap) {
             if (st.aside_cap)
