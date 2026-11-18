@@ -977,7 +977,9 @@ out, as before.
 
 The semaphores. When Kiln's frame goes in, its submit waits on the game's semaphores and signals Kiln's own, and the
 present waits on Kiln's. When it does not go in, or its submit fails, the present goes on with the game's own
-semaphores, untouched: Vulkan leaves the semaphores of a failed submit as they were (or reports the device lost).
+semaphores, untouched: Vulkan leaves the semaphores of a submit that failed for lack of memory as they were (or
+reports the device lost). `VK_ERROR_UNKNOWN` comes with no such promise, which is why Kiln checks the queue before it
+submits and draws no more after any failure. A fault after Kiln's submit went in still presents on Kiln's semaphore.
 Each semaphore is signalled once and waited on once (`native/services/ui/vk_present.h`, host test
 `tests/vk_present_test.cpp`).
 
