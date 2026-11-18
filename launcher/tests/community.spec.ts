@@ -101,7 +101,7 @@ test.describe("desktop", () => {
     await open(page, "/?mock=1&discord=hidden,in#/community");
     // the route goes to Play
     await expect(page).toHaveURL(/#\/$/);
-    await expect(nav(page).getByRole("link", { name: "Community", exact: true })).toHaveCount(0);
+    await expect(nav(page).getByRole("link", { name: /^Community\b/ })).toHaveCount(0);
     await expect(page.getByTestId("nav-community-count")).toHaveCount(0);
     await page.goto("/?mock=1&discord=hidden,in#/settings");
     const toggle = page.getByTestId("community-shown").getByRole("switch");
@@ -109,10 +109,11 @@ test.describe("desktop", () => {
     await page.waitForTimeout(500);
     expect(await requests(page)).toEqual([]);
     await toggle.click({ force: true });
-    await expect(nav(page).getByRole("link", { name: "Community", exact: true })).toBeVisible();
+    // signed in with a new reply: the link's name carries the count ("Community 1 new reply from Kiln support")
+    await expect(nav(page).getByRole("link", { name: /^Community\b/ })).toBeVisible();
     await expect(page.getByTestId("nav-community-count")).toHaveText("1");
     await toggle.click({ force: true });
-    await expect(nav(page).getByRole("link", { name: "Community", exact: true })).toHaveCount(0);
+    await expect(nav(page).getByRole("link", { name: /^Community\b/ })).toHaveCount(0);
   });
 
   test("at 1024x640 the page still fits its two columns", async ({ page }) => {
