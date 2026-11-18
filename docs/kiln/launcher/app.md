@@ -794,14 +794,16 @@ FSR 3"). A client with Kiln in it only.
   - **Now**: the game runs and wrote `kiln/state/graphics.json` after it started (`GameStatus.graphicsState.current`):
     what upscales ("AMD FSR 4 runs in place of the game's FSR 3."), the version, AMD's selection's note for FSR 3.1,
     the reason the choice does not run (the shared table, [../graphics.md](../graphics.md) "What runs now, and why
-    not"), and "You chose Intel XeSS since: ..." when the choice changed in the launcher meanwhile. The game's English
+    not"), and "You have chosen Intel XeSS since that game started: ..." when the choice changed in the launcher
+    meanwhile. The game's English
     detail goes on a muted "Details:" line.
   - **Last game**: the game closed; shown while the choice is the one that game had and its reason still holds (files
     missing then and downloaded since, or a tool gone since, give the plan).
   - **When you play**: no such file, or another choice: what Kiln will do from the choice, the files and
     `GameStatus.graphicsStepAside` ("With FSR 3 chosen in the game's graphics settings, Kiln runs AMD FSR in its place:
     FSR 4 where your graphics card and driver run it, else FSR 3.1."), or why it will not (files missing, files
-    changed, not in this build, a tool Kiln steps aside for).
+    changed, not in this build, a tool Kiln steps aside for). Nothing about the files while their status is not read
+    yet (`vendor_status` hashes downloaded files once per launcher run) or could not be read.
   - Nothing while the game's own is chosen and nothing ran.
 - **Upscaler files.** Out of preview since dev.29.18: the preview `upscalers` (settings.json `preview`,
   `KILN_LAUNCHER_PREVIEW`) no longer exists, `vendor_status` has no `preview` field and `vendor_download` needs none
@@ -820,6 +822,9 @@ FSR 3"). A client with Kiln in it only.
     them." (a manifest file not pinned), no button;
   - failed: the reason in a red line (the task's error, or "<file> of it is missing or changed. Download it again."),
     **Try again** / **Download again**, and Remove when files are there.
+  - while the game runs: the same row with its buttons greyed out (Cancel aside) and "Close the game to download or
+    remove these files: the launcher does not change the game's files while it runs." (`vendor_download` and
+    `vendor_remove` refuse then); the offer's Download waits the same way.
 - **The licence dialog** opens on Download when the player has not agreed to that vendor's text yet: "Download <name>",
   then What (the manifest's sentence), Size ("70 MB, 3 files"), From ("raw.githubusercontent.com: AMD's own repository
   on GitHub, version 2.4.0"), Goes to ("kiln/vendor/amd/2.4.0 in the game folder"), the licence's name with "Where this

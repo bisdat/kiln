@@ -40,7 +40,7 @@
     },
     "files": {
       "type": "object",
-      "description": "Per vendor folder (amd, intel): this runtime's version of its files and what of them is in kiln/vendor/<vendor>/<version>/, by name and size (the game checks the SHA-256 before it loads them).",
+      "description": "Per vendor folder (amd, intel): this runtime's version of its files and what of them is in kiln/vendor/<vendor>/<version>/, by name and size, with the launcher's receipt (present: all of them and the receipt; the game checks the SHA-256 before it loads them).",
       "additionalProperties": {
         "type": "object",
         "required": ["version", "state"],

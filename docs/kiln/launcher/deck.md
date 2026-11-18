@@ -123,7 +123,8 @@ Notices are a short title and buttons. An error is a line at the top that goes a
 - One row per vendor component ("AMD FSR 2.4.0", "Intel XeSS 3.0.2"): the state on the right ("Not downloaded",
   "Downloading 40%", "Downloaded", "Update available", "Failed", "Not available in this build"), the size and host or
   the reason under the title. A downloads (or goes on, updates, tries again), cancels while it downloads, and asks to
-  remove when it is downloaded ("Remove AMD FSR?", the folder and size, Remove or Cancel).
+  remove when it is downloaded ("Remove AMD FSR?", the folder and size, Remove or Cancel). While the game runs A does
+  nothing on it (Cancel aside) and the line under the title says to close the game first; the row keeps the focus.
 - **The licence screen** before a vendor's first download: "Download AMD FSR", what, size, from, where it goes, "AMD
   licenses these files under the MIT licence. Here is its text in full. Read it before you agree.", the text in full
   (the right stick scrolls it), the privacy line, then **I agree, download** and Cancel; B goes back without a download.
