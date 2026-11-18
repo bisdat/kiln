@@ -1,4 +1,4 @@
-name: Phase 1b native Windows DLL verification
+name: Phase 1b native Windows DLL and test overlay
 
 on:
   push:
@@ -6,6 +6,8 @@ on:
       - dev/chat-tab-completion
     paths:
       - 'native/**'
+      - 'managed/**'
+      - 'tools/phase1b/**'
       - '.github/workflows/chat-completion-native-windows.yml'
   workflow_dispatch:
 
@@ -19,31 +21,83 @@ concurrency:
 jobs:
   windows-native:
     runs-on: windows-2022
-    timeout-minutes: 30
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
       - name: Configure native Windows x64 project
         shell: pwsh
         run: cmake -S native -B build/chat-windows -G "Visual Studio 17 2022" -A x64 -T ClangCL
       - name: Build native Kiln UI, core and proxy DLLs
         shell: pwsh
         run: cmake --build build/chat-windows --config Release --target kiln-ui kiln-core kiln-proxy --parallel 3
-      - name: Verify compiled DLLs
+      - name: Build matching managed Kiln.Ui and Kiln.Chat services
+        shell: pwsh
+        run: dotnet build managed/services/Kiln.Ui/Kiln.Ui.csproj -c Release -o build/chat-managed -v minimal
+      - name: Assemble reversible Linux test overlay
         shell: pwsh
         run: |
-          $ui = Get-ChildItem build/chat-windows/bin -Recurse -Filter kiln-ui.dll
-          $core = Get-ChildItem build/chat-windows/bin -Recurse -Filter kiln-core.dll
-          $proxy = Get-ChildItem build/chat-windows/bin -Recurse -Filter dinput8.dll
+          $root = "build/chat-overlay"
+          New-Item -Force -ItemType Directory "$root/kiln/services", "$root/kiln/host" | Out-Null
+          $ui = Get-ChildItem build/chat-windows/bin/services -Recurse -File -Filter kiln-ui.dll | Select-Object -First 1
+          $core = Get-ChildItem build/chat-windows/bin -Recurse -File -Filter kiln-core.dll | Select-Object -First 1
+          $proxy = Get-ChildItem build/chat-windows/bin -Recurse -File -Filter dinput8.dll | Select-Object -First 1
           if (!$ui -or !$core -or !$proxy) { throw "Missing a required Windows native DLL" }
-          $ui | ForEach-Object { Write-Host "UI: $($_.FullName)" }
-          $core | ForEach-Object { Write-Host "Core: $($_.FullName)" }
-          $proxy | ForEach-Object { Write-Host "Proxy: $($_.FullName)" }
+          if (!(Test-Path "build/chat-managed/Kiln.Chat.dll") -or !(Test-Path "build/chat-managed/Kiln.Ui.dll")) {
+            throw "Missing matched managed Kiln.Chat.dll or Kiln.Ui.dll"
+          }
+          Copy-Item $ui.FullName "$root/kiln/services/kiln-ui.dll"
+          Copy-Item "build/chat-managed/Kiln.Ui.dll" "$root/kiln/host/Kiln.Ui.dll"
+          Copy-Item "build/chat-managed/Kiln.Chat.dll" "$root/kiln/host/Kiln.Chat.dll"
+          Copy-Item "tools/phase1b/README.md" "$root/README.md"
+          Copy-Item "tools/phase1b/install-test-overlay.sh" "$root/install-test-overlay.sh"
+          "git-commit=$(git rev-parse HEAD)" | Set-Content "$root/SOURCE_COMMIT.txt"
+          "target-base=v0.2.0-dev.29.17" | Add-Content "$root/SOURCE_COMMIT.txt"
+          Get-ChildItem "$root/kiln" -Recurse -File | ForEach-Object {
+            $hash = (Get-FileHash -Algorithm SHA256 $_.FullName).Hash.ToLowerInvariant()
+            Write-Host "$hash  $($_.FullName)"
+          }
+      - name: Syntax-check Linux installer
+        shell: bash
+        run: bash -n tools/phase1b/install-test-overlay.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: kiln-chat-phase1b-native-windows
-          path: |
-            build/chat-windows/bin/**/kiln-ui.dll
-            build/chat-windows/bin/**/kiln-core.dll
-            build/chat-windows/bin/**/dinput8.dll
+          name: kiln-phase1b-test-overlay
+          path: build/chat-overlay/
           if-no-files-found: error
           retention-days: 7
+
+  installer-smoke:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check fail-closed installer backup/restore cycle
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n tools/phase1b/install-test-overlay.sh
+          root=$(mktemp -d)
+          trap 'rm -rf -- "$root"' EXIT
+          mkdir -p "$root/overlay" "$root/game"
+          cp tools/phase1b/install-test-overlay.sh "$root/overlay/"
+          touch "$root/game/enshrouded.exe"
+          for file in kiln/services/kiln-ui.dll kiln/host/Kiln.Ui.dll kiln/host/Kiln.Chat.dll; do
+            mkdir -p "$root/overlay/$(dirname "$file")" "$root/game/$(dirname "$file")"
+            printf 'new\n' > "$root/overlay/$file"
+            printf 'old\n' > "$root/game/$file"
+          done
+          bash "$root/overlay/install-test-overlay.sh" "$root/game" install
+          for file in kiln/services/kiln-ui.dll kiln/host/Kiln.Ui.dll kiln/host/Kiln.Chat.dll; do
+            cmp "$root/overlay/$file" "$root/game/$file"
+            [[ $(cat "$root/game/kiln/data/phase1b-test-backup/$file") == old ]]
+          done
+          if bash "$root/overlay/install-test-overlay.sh" "$root/game" install; then
+            echo 'ERROR: repeated installation overwrote a prior backup' >&2
+            exit 1
+          fi
+          bash "$root/overlay/install-test-overlay.sh" "$root/game" restore
+          for file in kiln/services/kiln-ui.dll kiln/host/Kiln.Ui.dll kiln/host/Kiln.Chat.dll; do
+            [[ $(cat "$root/game/$file") == old ]]
+          done
