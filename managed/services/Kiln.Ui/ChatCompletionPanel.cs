@@ -6,7 +6,7 @@ using System.Text;
 
 namespace Kiln;
 
-internal static class ChatCompletionPanel
+internal static unsafe class ChatCompletionPanel
 {
     private const int MaxVisible = 10;
     private const long DebounceMs = 90;
@@ -46,8 +46,12 @@ internal static class ChatCompletionPanel
         UiNative.ChatCandidates(false, false);
     }
 
-    private static bool ValidCursor(string text, uint cursor) =>
-        cursor == (uint)text.EnumerateRunes().Count();
+    private static bool ValidCursor(string text, uint cursor)
+    {
+        uint count = 0;
+        foreach (var rune in text.EnumerateRunes()) count++;
+        return cursor == count;
+    }
 
     private static bool TryPrefix(ChatCompletionReply reply, out string prefix)
     {
