@@ -275,6 +275,54 @@ fn records_status_and_launch_options_info() {
     let _ = fs::remove_dir_all(&f.home);
 }
 
+/// Steam's selected GE-Proton can load Kiln's dinput8.dll without an override
+/// from 11-11 onwards. Merely installing a newer GE build must not change advice.
+#[cfg(unix)]
+#[test]
+fn ge_proton_dinput8_advice_follows_selected_version() {
+    let f = fake_steam("ge-proton-dinput8");
+    let roots = [root_of(&f)];
+    let install = game::inspect_with(&f.client, &roots, &f.home.join("data")).unwrap();
+    let mapping = f.root.join("config/config.vdf");
+    let options = f.root.join("userdata/111/config/localconfig.vdf");
+    // Remove the override set by this fixture. Do not edit the real Steam config.
+    fs::remove_file(&options).unwrap();
+
+    for (tool, needs_advice) in [
+        ("GE-Proton11-10-x86_64", true),
+        ("GE-Proton11-11-x86_64", false),
+        ("GE-Proton11-12-x86_64", false),
+        ("GE-Proton12-1-x86_64", false),
+        ("GE-Proton10-25", true),
+        ("proton_experimental", true),
+    ] {
+        write(&mapping, format!(
+            "\"InstallConfigStore\" {{ \"Software\" {{ \"Valve\" {{ \"Steam\" {{ \"CompatToolMapping\" {{ \"1203620\" {{ \"name\" \"{tool}\" }} }} }} }} }} }}"
+        ));
+        let info = game::launch_options_info(&install, &roots).unwrap();
+        assert!(!info.has_dll_override, "test fixture has no override, tool={tool}");
+        assert_eq!(info.advice.is_some(), needs_advice, "tool={tool}, info={info:?}");
+    }
+
+    // An unknown/automatic tool, and an install detached from its Steam library,
+    // retain the conservative advice (do not infer a runner from another root).
+    fs::remove_file(&mapping).unwrap();
+    assert!(game::launch_options_info(&install, &roots).unwrap().advice.is_some());
+    let mut detached = install.clone();
+    detached.library = None;
+    write(&mapping, "\"InstallConfigStore\" { \"Software\" { \"Valve\" { \"Steam\" { \"CompatToolMapping\" { \"1203620\" { \"name\" \"GE-Proton11-12-x86_64\" } } } } } }");
+    assert!(game::launch_options_info(&detached, &roots).unwrap().advice.is_some());
+
+    // A chained Ultimate ASI Loader still needs its separate xinput override,
+    // including when GE-Proton already loads dinput8 without a launch option.
+    write(&install.path.join("xinput9_1_0.dll"), b"fixture");
+    write(&install.path.join("kiln/chain.ini"), "[chain]\n..\\XINPUT9_1_0.DLL\n");
+    let chained = game::launch_options_info(&install, &roots).unwrap();
+    assert!(chained.chained_override_missing);
+    assert_eq!(chained.advice.as_deref(), Some(game::CHAINED_DLL_OVERRIDE_ADVICE));
+    fs::remove_dir_all(f.home).unwrap();
+}
+
 #[test]
 fn chained_loader_launch_advice() {
     let f = fake_steam("chained-advice");
