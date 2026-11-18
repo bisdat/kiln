@@ -1,7 +1,7 @@
 //! "Send to Kiln support": a support report (kiln_manage::report, the same one "Save report..." writes) is prepared
 //! once, shown on the check step (the public post as it will look, the zip's files and size, who sees the zip), and
 //! sent exactly as prepared: the zip's bytes and the post are kept here between the two, for 30 minutes at most. The
-//! known problem that matches the report's findings comes from the last copy of the public list (step 7).
+//! known problem that matches the report's findings comes from the last copy of the public list, matched here.
 
 use crate::state::blocking;
 use kiln_manage::community::known::{KnownAction, KnownList};
@@ -112,9 +112,11 @@ pub async fn prepare(app: tauri::AppHandle, target: Option<crate::commands::logs
     .await
 }
 
-/// The known problem the report matches, from the last copy of the list (none yet: step 7).
-pub fn matching(_r: &kiln_manage::report::Report) -> Option<kiln_manage::community::known::KnownIssue> {
-    None
+/// The known problem the report matches, from the last copy of the public list (kept when the Community page opened:
+/// matching it sends nothing).
+pub fn matching(r: &kiln_manage::report::Report) -> Option<kiln_manage::community::known::KnownIssue> {
+    let list = load_known()?;
+    kiln_manage::community::known::best(&list, r, kiln_manage::util::now_unix()).cloned()
 }
 
 /// Sends a prepared report with the player's draft. The prepared report stays until it is sent, so a refusal (offline,

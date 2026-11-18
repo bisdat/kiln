@@ -10,6 +10,12 @@
 //!     "match": { "findings": ["proton-override", "not-loaded"], "all": false, "text": ["dinput8"], "os": ["linux", "deck"], "kiln": ">=0.2.0-dev.29" },
 //!     "added": "2026-11-18", "until": null } ] }
 //! ```
+//!
+//! An entry matches a report ([`best`]) when every part of its `match` that is given holds: one of its finding ids is
+//! among the report's findings (all of them with `all`), one of its words is in a finding's text, the system is one of
+//! `os` (a Steam Deck counts as `deck` and `linux`), Kiln's version is in the `kiln` range (the manifests' range
+//! syntax), and `until` (a date) has not passed. An entry that names neither findings nor words never matches: the list
+//! cannot put a fix in front of every report. The first matching entry in the list's order wins.
 
 use serde::{Deserialize, Serialize};
 
@@ -90,5 +96,145 @@ impl KnownList {
         });
         list.issues.truncate(200);
         Ok(list)
+    }
+}
+
+/// The systems a report's facts count as.
+fn systems(f: &crate::report::PublicFacts) -> Vec<&'static str> {
+    if f.deck {
+        vec!["deck", "linux"]
+    } else if f.runner.as_deref() == Some("Windows") || f.os.to_ascii_lowercase().starts_with("windows") {
+        vec!["windows"]
+    } else {
+        vec!["linux"]
+    }
+}
+
+/// `until` ("2026-12-01" or RFC 3339) has passed at `now` (unix seconds).
+fn expired(until: Option<&str>, now: i64) -> bool {
+    let Some(u) = until.map(str::trim).filter(|u| !u.is_empty()) else { return false };
+    let secs = crate::util::parse_rfc3339(u).or_else(|| crate::util::parse_rfc3339(&format!("{u}T23:59:59Z")));
+    secs.is_some_and(|s| s < now)
+}
+
+impl KnownIssue {
+    /// Whether this entry is about the report.
+    pub fn matches(&self, r: &crate::report::Report, now: i64) -> bool {
+        let m = &self.matches;
+        if m.findings.is_empty() && m.text.is_empty() {
+            return false;
+        }
+        if expired(self.until.as_deref(), now) {
+            return false;
+        }
+        if !m.findings.is_empty() {
+            let has = |id: &String| r.findings.iter().any(|f| &f.id == id);
+            let ok = if m.all { m.findings.iter().all(has) } else { m.findings.iter().any(has) };
+            if !ok {
+                return false;
+            }
+        }
+        if !m.text.is_empty() {
+            let texts: Vec<String> = r.findings.iter().map(|f| f.text.to_lowercase()).collect();
+            if !m.text.iter().any(|w| { let w = w.trim().to_lowercase(); !w.is_empty() && texts.iter().any(|t| t.contains(&w)) }) {
+                return false;
+            }
+        }
+        if !m.os.is_empty() {
+            let sys = systems(&r.facts);
+            if !m.os.iter().any(|o| sys.contains(&o.to_ascii_lowercase().as_str())) {
+                return false;
+            }
+        }
+        if let Some(range) = m.kiln.as_deref().map(str::trim).filter(|x| !x.is_empty()) {
+            let (Ok(range), Some(v)) = (crate::semver::VersionRange::try_parse(range), r.facts.kiln.as_deref().and_then(crate::semver::SemVersion::try_parse)) else { return false };
+            if !range.satisfies(&v) {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+/// The known problem the report is about, if any: the first matching entry.
+pub fn best<'a>(list: &'a KnownList, r: &crate::report::Report, now: i64) -> Option<&'a KnownIssue> {
+    list.issues.iter().find(|i| i.matches(r, now))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::report::{Finding, Level, PublicFacts, Report};
+
+    const NOW: i64 = 1_763_480_000; // 2025-11-18
+
+    fn report(ids: &[(&str, &str)], deck: bool) -> Report {
+        Report {
+            findings: ids.iter().map(|(id, text)| Finding { id: id.to_string(), level: Level::Problem, text: text.to_string() }).collect(),
+            facts: PublicFacts { kiln: Some("0.2.0-dev.29.18".into()), os: if deck { "SteamOS 3.7".into() } else { "Arch Linux".into() }, deck, runner: Some("GE-Proton10-3".into()), ..Default::default() },
+            ..Default::default()
+        }
+    }
+
+    fn list(json: &str) -> KnownList {
+        KnownList::parse(json.as_bytes()).unwrap()
+    }
+
+    const LIST: &str = r#"{ "format": 1, "issues": [
+        { "id": "night-sky-weather-plus", "title": "Night Sky and Weather Plus crash together", "fix": "Turn one of them off until Night Sky 0.4 is out.", "action": "mods",
+          "match": { "findings": ["mod-failed", "crash"], "all": true, "text": ["night-sky"] } },
+        { "id": "proton-override", "title": "Steam's launch option is missing", "fix": "Copy the line into Steam's launch options.", "copy": "WINEDLLOVERRIDES=\"dinput8=n,b\" %command%",
+          "match": { "findings": ["proton-override", "not-loaded"], "os": ["linux"] } },
+        { "id": "old-runtime", "title": "This Kiln is too old", "fix": "Update Kiln.", "match": { "findings": ["newer-mods"], "kiln": "<0.2.0-dev.29" } },
+        { "id": "gone", "title": "Fixed long ago", "fix": "x", "until": "2025-01-01", "match": { "findings": ["crash"] } },
+        { "id": "everything", "title": "Catch-all", "fix": "x", "match": { "os": ["linux"] } }
+    ] }"#;
+
+    #[test]
+    fn a_report_meets_the_first_entry_whose_findings_and_words_it_has() {
+        let l = list(LIST);
+        let r = report(&[("mod-failed", "night-sky 0.3.1 failed at the last start"), ("crash", "Kiln wrote a crash report")], false);
+        assert_eq!(best(&l, &r, NOW).unwrap().id, "night-sky-weather-plus");
+        // all: one of the two findings is not enough
+        let r = report(&[("mod-failed", "night-sky failed")], false);
+        assert!(best(&l, &r, NOW).is_none());
+        // the word must be in a finding's text
+        let r = report(&[("mod-failed", "big-stacks failed"), ("crash", "x")], false);
+        assert!(best(&l, &r, NOW).is_none());
+    }
+
+    #[test]
+    fn the_system_counts_and_a_deck_is_linux_too() {
+        let l = list(LIST);
+        assert_eq!(best(&l, &report(&[("not-loaded", "Kiln did not start")], false), NOW).unwrap().id, "proton-override");
+        assert_eq!(best(&l, &report(&[("not-loaded", "Kiln did not start")], true), NOW).unwrap().id, "proton-override");
+        let mut w = report(&[("not-loaded", "Kiln did not start")], false);
+        w.facts.runner = Some("Windows".into());
+        w.facts.os = "Windows 11".into();
+        assert!(best(&l, &w, NOW).is_none(), "the Proton fix is not shown on Windows");
+    }
+
+    #[test]
+    fn a_kiln_range_a_passed_date_and_an_entry_without_findings_never_match_wrongly() {
+        let l = list(LIST);
+        assert!(best(&l, &report(&[("newer-mods", "x")], false), NOW).is_none(), "0.2.0-dev.29.18 is not below 0.2.0-dev.29");
+        let mut old = report(&[("newer-mods", "x")], false);
+        old.facts.kiln = Some("0.2.0-dev.27".into());
+        assert_eq!(best(&l, &old, NOW).unwrap().id, "old-runtime");
+        // "gone" is past its date; "everything" names no finding
+        assert!(best(&l, &report(&[("crash", "x")], false), NOW).is_none());
+        assert!(l.issues.iter().find(|i| i.id == "gone").unwrap().matches(&report(&[("crash", "x")], false), 1_700_000_000), "before its date it did");
+    }
+
+    #[test]
+    fn the_list_keeps_good_entries_and_drops_broken_ones() {
+        let l = list(r#"{ "format": 1, "issues": [
+            { "id": "ok", "title": "Fine", "fix": "Do this.", "match": { "findings": ["crash"] } },
+            { "id": "bad id!", "title": "x", "fix": "y", "match": { "findings": ["crash"] } },
+            { "id": "notitle", "title": "", "fix": "y", "match": { "findings": ["crash"] } }
+        ] }"#);
+        assert_eq!(l.issues.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), ["ok"]);
+        assert!(KnownList::parse(br#"{ "format": 2, "issues": [] }"#).is_err());
+        assert!(KnownList::parse(b"not json").is_err());
     }
 }
