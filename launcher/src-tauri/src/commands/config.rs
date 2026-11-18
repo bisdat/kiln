@@ -265,7 +265,7 @@ mod kiln_graphics_tests {
         let keys: Vec<&str> = schema.entries.iter().map(|e| e.path.as_str()).filter(|p| p.starts_with("graphics.")).collect();
         assert_eq!(keys, ["graphics.fpsCap", "graphics.dlssPreset", "graphics.dlssScale", "graphics.dlssRenderScale",
             "graphics.dlssQualityScale", "graphics.dlssBalancedScale", "graphics.dlssPerformanceScale",
-            "graphics.dlssUltraPerformanceScale", "graphics.readout"]);
+            "graphics.dlssUltraPerformanceScale", "graphics.readout", "graphics.upscaler", "graphics.amdUpscaler"]);
         let dir = std::env::temp_dir().join(format!("kiln-launcher-graphics-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -279,11 +279,16 @@ mod kiln_graphics_tests {
         assert_eq!(doc.values["graphics"]["dlssScale"], "perMode");
         let doc = kiln_set(&path, "graphics.dlssQualityScale", Some(&json!(0.75))).unwrap();
         assert_eq!(doc.values["graphics"]["dlssQualityScale"], 0.75);
+        let doc = kiln_set(&path, "graphics.upscaler", Some(&json!("amd"))).unwrap();
+        assert_eq!(doc.values["graphics"]["upscaler"], "amd");
+        let doc = kiln_set(&path, "graphics.amdUpscaler", Some(&json!("fsr3"))).unwrap();
+        assert_eq!(doc.values["graphics"]["amdUpscaler"], "fsr3");
         let doc = kiln_set(&path, "graphics.readout", Some(&json!(true))).unwrap();
         assert!(doc.errors.is_empty(), "{:?}", doc.errors);
         assert!(doc.text.contains("// keep me"));
         for (key, bad) in [("graphics.fpsCap", json!(501)), ("graphics.fpsCap", json!(1.5)), ("graphics.dlssPreset", json!("N")),
-            ("graphics.dlssRenderScale", json!(0.2)), ("graphics.dlssRenderScale", json!(1.1)), ("graphics.readout", json!(1))] {
+            ("graphics.dlssRenderScale", json!(0.2)), ("graphics.dlssRenderScale", json!(1.1)), ("graphics.readout", json!(1)),
+            ("graphics.upscaler", json!("dlss")), ("graphics.upscaler", json!(1)), ("graphics.amdUpscaler", json!("fsr4"))] {
             assert!(kiln_set(&path, key, Some(&bad)).is_err(), "{key} = {bad}");
         }
         let doc = kiln_set(&path, "graphics.fpsCap", None).unwrap();
