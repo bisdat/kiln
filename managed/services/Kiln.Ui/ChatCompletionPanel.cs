@@ -199,15 +199,21 @@ internal static unsafe class ChatCompletionPanel
             if (ui.BeginWindowNoClose(KilnText.T("chat.completion.title") + "###kiln.chat.complete", flags))
             {
                 ui.TextDisabled(KilnText.T("chat.completion.hint"));
-                for (var i = 0; i < count; ++i)
+                // Show at most ten rows at once, but keep the other permitted
+                // suggestions reachable by mouse-wheel scrolling.
+                if (ui.BeginChild("##kiln.chat.completion.rows", 0, count * 24f * ui.Scale))
                 {
-                    if (ui.Selectable(_suggestions[i] + "##chat-candidate-" + i, _active && i == _selected))
+                    for (var i = 0; i < _suggestions.Length; ++i)
                     {
-                        _active = true;
-                        Accept(input, text, i);
+                        if (ui.Selectable(_suggestions[i] + "##chat-candidate-" + i, _active && i == _selected))
+                        {
+                            _active = true;
+                            Accept(input, text, i);
+                        }
+                        if (ui.ItemHovered) hovered = true;
                     }
-                    if (ui.ItemHovered) hovered = true;
                 }
+                ui.EndChild();
             }
             ui.EndWindow();
         }
