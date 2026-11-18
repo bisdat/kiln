@@ -710,8 +710,9 @@ bool pay_one(void* tx, uint32_t entity, uint32_t item, uint32_t* left) {
     return true;
 }
 
-// The words of the game's transaction the payment reads (docs/re/stations.md §10): the bases system BaseStockForPlayer is
-// given (+0x68), its other setup word (+0x70), the position (+0x80, 12 bytes) and the stock mode (+0xb1).
+// The words of the game's transaction the payment reads (docs/re/stations.md §10.4): BaseStockForPlayer's two bases-system
+// words (+0x68, used when set, else +0x70: the server's craft transaction leaves +0x68 zero), the position (+0x80,
+// 12 bytes) and the stock mode (+0xb1).
 struct TxHead {
     uint8_t* tx;
     uint64_t bases, arg4;
@@ -724,6 +725,15 @@ void tx_head_impl(void* p) {
     std::memcpy(&h->arg4, h->tx + 0x70, 8);
     std::memcpy(h->pos, h->tx + 0x80, 12);
     h->mode = h->tx[0xb1];
+}
+// The transaction's first 0x20 words (a diagnostic line when the server-world test refuses one).
+struct TxWords {
+    const uint8_t* tx;
+    uint64_t w[0x20];
+};
+void tx_words_impl(void* p) {
+    auto* t = static_cast<TxWords*>(p);
+    std::memcpy(t->w, t->tx, sizeof t->w);
 }
 struct StockJob {
     const TxHead* head;
@@ -886,15 +896,31 @@ int craft_pay_impl(void* tx, void* costs, uint32_t owner, uint32_t multiplier, v
     void* const srv_bases = g_srv_bases.load(std::memory_order_acquire);
     TxHead head{static_cast<uint8_t*>(tx), 0, 0, {}, 0};
     unsigned long fault = 0;
-    Access a{};
-    if (!guard(&tx_head_impl, &head, &fault) || !srv_bases || head.bases != reinterpret_cast<uint64_t>(srv_bases) ||
-        !access_from_tx(tx, &a)) {
-        CS.other_world.fetch_add(1, std::memory_order_relaxed);
-        left_to_game("not the server world's transaction", head.mode, 0, owner);
+    if (!guard(&tx_head_impl, &head, &fault)) {
+        CS.skipped.fetch_add(1, std::memory_order_relaxed);
+        left_to_game("the transaction could not be read", 0, 0, owner);
         return 0;
     }
     if (head.mode == 0) {  // no base stock: the owner pays alone (a factory's own craft)
         CS.mode0.fetch_add(1, std::memory_order_relaxed);
+        return 0;
+    }
+    Access a{};
+    const uint64_t used = head.bases ? head.bases : head.arg4;  // the bases system BaseStockForPlayer reads (S 0x208281)
+    const bool same_bases = srv_bases && used == reinterpret_cast<uint64_t>(srv_bases);
+    if (!same_bases || !access_from_tx(tx, &a)) {
+        CS.other_world.fetch_add(1, std::memory_order_relaxed);
+        if (const uint32_t n = g_log_left.take()) {
+            TxWords w{static_cast<const uint8_t*>(tx), {}};
+            guard(&tx_words_impl, &w, &fault);
+            LOGI("stations: craft payment left to the game (not the server world's transaction: bases words %p / %p, the "
+                 "server's %p, accessors %s; words 0:%p 1:%p 3:%p 4:%p 5:%p 7:%p 12:%p 14:%p 1d:%p; mode %u, payer %u)%s",
+                 reinterpret_cast<void*>(head.bases), reinterpret_cast<void*>(head.arg4), srv_bases, same_bases ? "refused" : "not read",
+                 reinterpret_cast<void*>(w.w[0]), reinterpret_cast<void*>(w.w[1]), reinterpret_cast<void*>(w.w[3]),
+                 reinterpret_cast<void*>(w.w[4]), reinterpret_cast<void*>(w.w[5]), reinterpret_cast<void*>(w.w[7]),
+                 reinterpret_cast<void*>(w.w[0x12]), reinterpret_cast<void*>(w.w[0x14]), reinterpret_cast<void*>(w.w[0x1d]),
+                 head.mode, owner, n > 1 ? " (more held back)" : "");
+        }
         return 0;
     }
     StockJob stock{&head, owner, {}, {}};
