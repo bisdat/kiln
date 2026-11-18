@@ -1266,6 +1266,36 @@ fn inbox86_a_rename_that_fails_is_said_with_or_without_xhl_core() {
     }
 }
 
+/// inbox 86, an update while the mod is on whose new version spells its ini otherwise (Native-Plugin.ini): the copy never
+/// gets a second ini beside it (a Linux folder holds both, and Wine's XHL-Core would read one of them by chance). The new
+/// version has its own; the values the plugin wrote wait in the kept folder, and the result says so. Off, the one ini
+/// is set aside.
+#[test]
+fn inbox86_an_update_that_spells_its_ini_otherwise_never_leaves_two() {
+    let s = setup("inbox86-respelt");
+    xhl_core(&s, XhlCore::ByHand);
+    let old = building_tools_version(&s, "native-plugin.ini", "0.33.2");
+    let new = building_tools_version(&s, "Native-Plugin.ini", "0.34.0");
+    let mut p = s.profile(vec![]);
+    p.mods.shroudforge.push(pm(&old, true));
+    engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+    let copy = s.game.join("mods/building-tools");
+    let edited = [BT_INI, b"\r\n[BuildingTools]\r\nSnapKey=71\r\n"].concat();
+    std::fs::write(copy.join("native-plugin.ini"), &edited).unwrap();
+    p.mods.shroudforge[1] = pm(&new, true);
+    let rep = engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+    assert!(rep.placed.contains(&"shroudforge:building-tools".to_string()) && rep.retained.is_empty(), "{rep:?}");
+    let inis: Vec<String> = std::fs::read_dir(&copy).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.to_ascii_lowercase().starts_with("native-plugin.ini")).collect();
+    assert_eq!(inis, ["Native-Plugin.ini"], "{rep:?}");
+    assert_eq!(std::fs::read(copy.join("Native-Plugin.ini")).unwrap(), BT_INI);
+    assert_eq!(std::fs::read(s.game.join("kiln/kept-mod-files/shroudforge/building-tools/native-plugin.ini")).unwrap(), edited);
+    assert!(rep.kept_files.iter().any(|k| k.contains("native-plugin.ini") && k.contains("ships its own file")), "{rep:?}");
+    p.mods.shroudforge[1].enabled = false;
+    let rep = engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+    assert!(xhl_core_reads(&copy).is_none() && copy.join("Native-Plugin.ini.kiln-off").is_file() && rep.retained.is_empty(), "{rep:?}");
+}
+
 #[test]
 fn runtime_eml_environment_note() {
     const CHILD: &str = "KILN_TEST_SFOFF_NOTE_CHILD";

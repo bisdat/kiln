@@ -1377,9 +1377,13 @@ pub(crate) fn carry_in(game: &Path, kind: ModKind, id: &str, c: &Carry, staged: 
         let dangling = rel.eq_ignore_ascii_case(XHL_PLUGIN_INI) && std::fs::read(c.from.join(rel)).ok().and_then(|b| xhl_ini_dll(&b))
             .is_some_and(|dll| !has_file_any_case(staged, &dll));
         // a ShroudForge copy's XHL-Core ini is among the player's files only as its plugin's settings ([`player_entries`]):
-        // the new version gets it, as a game-folder copy does
-        let setting = is_settings_file(kind, rel) || (kind == ModKind::ShroudForge && rel.eq_ignore_ascii_case(XHL_PLUGIN_INI));
-        if blocked || to.is_dir() || dangling || (to.is_file() && !setting) {
+        // the new version gets it, as a game-folder copy does, unless that version ships its ini under another spelling.
+        // On a Linux folder that would be a second ini (Wine's XHL-Core reads one of them by chance, and Kiln can set
+        // neither aside while the mod is off): the player's then waits in the kept folder, as for a file it ships.
+        let sf_ini = kind == ModKind::ShroudForge && rel.eq_ignore_ascii_case(XHL_PLUGIN_INI);
+        let respelt = sf_ini && !to.is_file() && has_file_any_case(staged, rel);
+        let setting = is_settings_file(kind, rel) || sf_ini;
+        if blocked || to.is_dir() || dangling || respelt || (to.is_file() && !setting) {
             if dangling { held.push(rel.clone()); }
             aside.push(rel.clone());
         } else {
