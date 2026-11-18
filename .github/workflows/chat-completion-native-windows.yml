@@ -1,0 +1,49 @@
+name: Phase 1b native Windows DLL verification
+
+on:
+  push:
+    branches:
+      - dev/chat-tab-completion
+    paths:
+      - 'native/**'
+      - '.github/workflows/chat-completion-native-windows.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chat-win-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-native:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure native Windows x64 project
+        shell: pwsh
+        run: cmake -S native -B build/chat-windows -G "Visual Studio 17 2022" -A x64
+      - name: Build native Kiln UI, core and proxy DLLs
+        shell: pwsh
+        run: cmake --build build/chat-windows --config Release --target kiln-ui kiln-core kiln-proxy --parallel 3
+      - name: Verify compiled DLLs
+        shell: pwsh
+        run: |
+          $ui = Get-ChildItem build/chat-windows/bin -Recurse -Filter kiln-ui.dll
+          $core = Get-ChildItem build/chat-windows/bin -Recurse -Filter kiln-core.dll
+          $proxy = Get-ChildItem build/chat-windows/bin -Recurse -Filter dinput8.dll
+          if (!$ui -or !$core -or !$proxy) { throw "Missing a required Windows native DLL" }
+          $ui | ForEach-Object { Write-Host "UI: $($_.FullName)" }
+          $core | ForEach-Object { Write-Host "Core: $($_.FullName)" }
+          $proxy | ForEach-Object { Write-Host "Proxy: $($_.FullName)" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kiln-chat-phase1b-native-windows
+          path: |
+            build/chat-windows/bin/**/kiln-ui.dll
+            build/chat-windows/bin/**/kiln-core.dll
+            build/chat-windows/bin/**/dinput8.dll
+          if-no-files-found: error
+          retention-days: 7
