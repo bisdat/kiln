@@ -85,6 +85,9 @@ export function upscalerView(choice: UpscalerChoice, amd: AmdUpscalerMode, state
   if (choice === "game") return { heading: null, lines: [], offer: null };
   const lines: string[] = [];
   if (tools.length) lines.push(reasonText("aside", choice, tools));
+  // the files' status not known (vendor_status still hashing on the first open, or unreadable): say nothing about them,
+  // rather than "not available in this build" for a moment
+  else if (!components) return { heading: null, lines: [], offer: null };
   else if (!c || c.state === "unavailable") lines.push(reasonText("unavailable", choice));
   else if (c.state === "damaged") lines.push(reasonText("filesBad", choice));
   else if (!filesThere) lines.push(reasonText("filesMissing", choice));

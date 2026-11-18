@@ -66,6 +66,11 @@ test("the plan: what Kiln will run, or why not, and the offer of the files", () 
   const none = upscalerView("amd", "auto", undefined, both("unavailable"));
   expect(none.lines[0]).toBe("AMD FSR is not available in this build of Kiln or on this system, so the game's own FSR 3 runs.");
   expect(none.offer).toBeNull();
+  // the files' status not read yet (vendor_status hashes the files on the first open) or unreadable: nothing said
+  // about them, no "not available in this build" for a moment
+  expect(upscalerView("amd", "auto", undefined, undefined)).toEqual({ heading: null, lines: [], offer: null });
+  expect(upscalerView("xess", "auto", undefined, undefined, [{ kind: "optiscaler", file: "dxgi.dll", frameCap: true, upscaler: true }]).lines)
+    .toEqual(["Kiln steps aside for OptiScaler, so it does not change the game's FSR 3."]);
   // a tool Kiln steps aside for wins over the files; DLSSTweaks does not count
   const aside = upscalerView("amd", "auto", undefined, both("downloaded"), [
     { kind: "dlsstweaks", file: "dlsstweaks.ini", frameCap: false, upscaler: false },
