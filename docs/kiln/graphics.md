@@ -158,7 +158,8 @@ section 5.15; code `crates/kiln-manage/src/vendor/`, `launcher/src/components/Up
   the vendors' git blobs); one that differs is deleted and the row says so.
 - **Stored** in `<game>/kiln/vendor/<vendor>/<version>/` with a receipt, never in the game's own folder (other loaders
   and Kiln's step-aside list look there). Remove deletes that folder; an update keeps the old version until the new one
-  verified. Phase B checks each file's SHA-256 again before it loads it.
+  verified. Phase B checks each file's SHA-256 again before it loads it, against the hashes built into the runtime, never
+  the receipt's (contracts.md 5.15, "What Kiln in the game will read").
 - **Steam Deck UI:** no matching screen yet. It would take a Deck Settings row per component (the same `vendor_*`
   commands), a licence screen that scrolls the text with the stick and takes A for "I agree, download", and progress in
   the Deck's task line. The desktop UI on the Deck has the section as it is.

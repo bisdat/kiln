@@ -1076,11 +1076,24 @@ A client only: a dedicated server is `unsupported`.
   receipt whose `version` is not a version or that names a file that is not a plain manifest-style name (a folder, `..`,
   an absolute path, a trailing dot, a Windows device name) is not an install, and removal deletes only plain names
   inside the version folder.
-- **What Kiln in the game will read (phase B, not in this release).** A component's newest folder with a receipt of that
-  `component`; before it loads a file it checks that the file is there with the receipt's size and computes its SHA-256
-  again (about 0.1 s for 80 MB, once per start), and it compares the receipt's hashes with the ones it was built with (the
-  same manifest, shipped with the runtime): a file of any other hash is never loaded. It loads by the full path in that
-  folder, never from the game's folder, and never hooks or changes `libxess.dll` (Intel's licence).
+- **What Kiln in the game will read (phase B, not in this release).** The game side trusts nothing in the game folder,
+  the receipt included (anything can write it), only the list it was built with: the same manifest, shipped with the
+  runtime of the same release, as `(component, version, file name, size, sha256)`.
+  - **Which folder:** for each component, the newest version on that list whose folder has a receipt of that `component`
+    and `format` 1. A folder of a version the list does not have is skipped (a launcher newer than the game's runtime
+    downloads a version the runtime cannot check: no upscaler, never an unchecked one). `*.part` and `*.tmp` files and a
+    folder without a receipt are never used.
+  - **Which files:** the names, sizes and hashes come from the built-in list, never from the receipt (a receipt's names
+    are never joined to a path).
+  - **The check:** every file of the component, before the first one loads (AMD's loader loads the other two by name).
+    Each is opened with sharing that refuses writes and deletes (`FILE_SHARE_READ` only), hashed through that handle
+    (about 0.1 s for 80 MB, once per start) and kept open until it is loaded, so the bytes checked are the bytes loaded.
+    A size or SHA-256 other than the list's: that component is not used this start, and the log says which file.
+  - **Loading:** by the full path in that folder with `LoadLibraryExW(..., LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR |
+    LOAD_LIBRARY_SEARCH_SYSTEM32)`, never from the game's folder or `PATH`; AMD's upscaler and frame generation DLLs
+    before its loader, so the loader's loads by name find the modules already checked and loaded. A file of one of these
+    names in the game's own folder is another tool's: step aside (as `graphicsStepAside` does) rather than load next to it.
+  - **Never:** a hook in or a change to `libxess.dll` (Intel's licence), a write into `kiln/vendor/` (the launcher's).
 - **Update.** A newer manifest version downloads into its own folder; the earlier versions of the component go only
   after the new one verified, so a failed update keeps the old one.
 - **Remove** (`vendor_remove`): every version folder of the component (found by their receipts) and an interrupted
