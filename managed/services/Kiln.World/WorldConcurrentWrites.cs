@@ -406,15 +406,15 @@ public static unsafe partial class WorldConcurrent
         Volatile.Write(ref _writeState, 0);
     }
 
-    // The owner the write is for, and its mod's id (for ComponentExchangedEvent.Mod).
-    private static (ulong Owner, string? Mod) Writer(string api)
+    // The owner the write is for, and its mod (for ComponentExchangedEvent.Mod).
+    private static (ulong Owner, ModContext? Mod) Writer(string api)
     {
         var owner = Caller(api);
         var mod = TaskExecutionScope.Current is { } run ? run.Mod : ModContext.CurrentMod;
-        return (owner, mod?.Info.Id);
+        return (owner, mod);
     }
 
-    private static (ExchangeStatus, ExchangeFlags, WriteReason, TimeSpan) Exchange(ulong owner, string? mod, EcsObjectRefNative* r, uint hash,
+    private static (ExchangeStatus, ExchangeFlags, WriteReason, TimeSpan) Exchange(ulong owner, ModContext? mod, EcsObjectRefNative* r, uint hash,
         byte* expected, byte* mask, byte* desired, uint bytes, byte* current, string api)
     {
         var t = WriteMembers();
@@ -423,7 +423,7 @@ public static unsafe partial class WorldConcurrent
         if (OnServerTick) return (ExchangeStatus.Busy, ExchangeFlags.None, WriteReason.InFrame, TimeSpan.Zero);
         // Bind first: a new backend's binding forgets the last one's writers, and this write's event must name its mod.
         WorldExchanges.Rebind();
-        if (mod is not null) WorldExchanges.Writers[owner] = mod;
+        if (mod is not null) WorldExchanges.Remember(owner, mod);
         MutationReplyNative reply = default;
         reply.Size = (uint)sizeof(MutationReplyNative);
         var rc = t->CompareExchange(owner, r, hash, expected, mask, desired, bytes, current, &reply);
@@ -450,6 +450,11 @@ internal static unsafe class WorldExchanges
     internal const int MaxQueued = 65536;
 
     internal static readonly ConcurrentDictionary<ulong, string> Writers = new();  // owner -> mod id
+    // owners whose mod unloaded, with the pump count then: their names go two pumps later, once the events their writes
+    // committed before the unload (kiln.world drains them in the next Pre) have been posted
+    private static readonly ConcurrentDictionary<ulong, long> Leaving = new();
+    private static long _pumps;
+    private static int _leaving;  // 1: Leaving may hold an owner (set before the pump that reads it clears it)
     private static readonly ConcurrentQueue<EcsWriteEventNative> Queue = new();
     private static readonly object Gate = new();
     private static object? _backend;
@@ -468,7 +473,13 @@ internal static unsafe class WorldExchanges
         Bind();
     }
 
-    private static string? Off() => WorldConcurrent.WriteTable() == null ? "kiln.world has no compare-exchange writes here" : null;
+    // Asked at every subscription to the event: binds first (a later harness's backend, or a subscription kiln.world
+    // refused before), so a mod that subscribes is subscribed natively too, not only once it writes.
+    private static string? Off()
+    {
+        Rebind();
+        return WorldConcurrent.WriteTable() == null ? "kiln.world has no compare-exchange writes here" : null;
+    }
 
     // Once the event type is in use, a new backend (a test kit's next harness) gets its own subscription.
     internal static void Rebind()
@@ -494,9 +505,13 @@ internal static unsafe class WorldExchanges
                 _tick?.Dispose();
                 _tick = null;
                 Writers.Clear();
+                Leaving.Clear();
                 while (Queue.TryDequeue(out _)) Interlocked.Decrement(ref _queued);
                 _backend = backend;
             }
+            // The service tick first: a subscription kiln.world refused now (no table yet, or a kiln.world that refuses
+            // before its on_ready) is tried again on every tick until it is taken, instead of only at the next write.
+            _tick ??= ServiceTick.Add("kiln world exchanges", static (in TickInfo _) => Pump());
             var t = WorldConcurrent.WriteTable();
             if (t == null || t->WriteSubscribe == null) return;
             if (_owner == 0) _owner = backend.OwnerCreate("kiln.world.exchanges");  // once: a refused subscribe is tried again with it
@@ -505,7 +520,6 @@ internal static unsafe class WorldExchanges
             if (t->WriteSubscribe(_owner, &OnEvent, null, &h) != WorldNative.Ok || h == 0) return;
             _handle = h;
             _table = t;
-            _tick = ServiceTick.Add("kiln world exchanges", static (in TickInfo _) => Pump());
         }
     }
 
@@ -539,9 +553,26 @@ internal static unsafe class WorldExchanges
     /// <summary>Tests: the events waiting for the service tick.</summary>
     internal static int Queued => Volatile.Read(ref _queued);
 
+    // A mod that writes: its name for the events of its writes, dropped two pumps after it unloads. A write that races
+    // the unload (a task thread still writing while the mod retires) may add its name after the Retiring cleanup ran, or
+    // while it runs: Retire marks the mod dead before it runs the cleanup, so the check after the += sees one or the other.
+    internal static void Remember(ulong owner, ModContext mod)
+    {
+        if (!Writers.TryAdd(owner, mod.Info.Id)) return;
+        mod.Retiring += () => Leave(owner);
+        if (!mod.Alive) Leave(owner);
+    }
+
+    private static void Leave(ulong owner)
+    {
+        Leaving[owner] = Interlocked.Read(ref _pumps);
+        Volatile.Write(ref _leaving, 1);
+    }
+
     // The service tick: the events queued since the last one, in their order.
     internal static void Pump()
     {
+        if (Volatile.Read(ref _handle) == 0) Rebind();  // not subscribed yet: try again
         if (Interlocked.Exchange(ref _dropped, 0) is var lost and > 0)
             Backend.Current.Log(0, LogLevel.Warn, $"kiln.world: {lost} ComponentExchangedEvent(s) were dropped: more than {MaxQueued} waited " +
                 "for Kiln's service tick (did it stop running?)");
@@ -550,6 +581,14 @@ internal static unsafe class WorldExchanges
             Interlocked.Decrement(ref _queued);
             Events.Post(new ComponentExchangedEvent(new EntityId(e.Entity), e.Generation, e.Component, e.Session, e.Step,
                 Writers.TryGetValue(e.Owner, out var mod) ? mod : null));
+        }
+        var pumps = Interlocked.Increment(ref _pumps);
+        // Only when a mod left: enumerating the dictionary allocates, and this runs every step.
+        if (Interlocked.Exchange(ref _leaving, 0) == 0) return;
+        foreach (var (owner, at) in Leaving)
+        {
+            if (pumps - at < 2) Volatile.Write(ref _leaving, 1);  // look again at the next pump
+            else if (Leaving.TryRemove(owner, out _)) Writers.TryRemove(owner, out _);
         }
     }
 }
