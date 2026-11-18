@@ -50,12 +50,27 @@ int main() {
     assert(q.key(0x09, 0, true));
     assert(q.take_tab_character());     // drop only the paired WM_CHAR '\\t'
     assert(!q.take_tab_character());
+    assert(q.key(0x09, 0, true)); // duplicate raw/legacy down: swallow, no extra action
+    assert(q.take_tab_character());
+    assert(!q.key(0x09, 0, false)); // real key-up permits the next press
     assert(q.key(0x09, 2, true));
     assert(q.take_tab_character());
     assert(!q.key(0x09, 0, false));  // never steal Tab key release
     assert(q.take(action) && action == kui::chat_keys::Action::CompleteNext);
     assert(q.take(action) && action == kui::chat_keys::Action::CompletePrevious);
+    assert(!q.take(action)); // duplicated down cannot cycle twice
+
+    // When Proton supplies WM_CHAR before any usable Tab keydown, the text
+    // fallback routes it via key(). If a delayed raw keydown follows, it
+    // must not add a second completion action for the same press.
+    assert(q.key(0x09, 0, true));
+    assert(q.take_tab_character());
+    assert(q.key(0x09, 0, true)); // delayed raw keydown
+    assert(q.take_tab_character());
+    assert(q.take(action) && action == kui::chat_keys::Action::CompleteNext);
     assert(!q.take(action));
+    assert(!q.key(0x09, 0, false));
+
 
     // Once Tab activates the panel, arrows navigate it instead of history.
     q.completion(true, true, true);
