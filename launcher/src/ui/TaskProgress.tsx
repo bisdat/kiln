@@ -61,8 +61,11 @@ export function useTaskFeed() {
   useEffect(() => {
     let off: (() => void) | undefined;
     let live = true;
-    onKilnEvent("kiln://task", (task) => useTasks.getState().upsert(task)).then((f) => (live ? (off = f) : f()));
-    taskList().then((ts) => ts.forEach((task) => useTasks.getState().upsert(task))).catch(() => {});
+    // the list is read once the listener is in: a task that ends between the list's answer and the listener would
+    // otherwise stay running here for good, and Play waits for running activations (shell/applying.ts)
+    onKilnEvent("kiln://task", (task) => useTasks.getState().upsert(task)).then((f) => (live ? (off = f) : f()), () => {})
+      .then(() => (live ? taskList() : []))
+      .then((ts) => ts.forEach((task) => useTasks.getState().upsert(task))).catch(() => {});
     return () => { live = false; off?.(); };
   }, []);
 }
