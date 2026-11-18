@@ -1752,9 +1752,10 @@ pub fn unplace(dirs: &DataDirs, game_dir: &Path) -> Result<PlacementCleanup> {
                 .ok_or_else(|| Error::new(ErrorCode::Refused, "placement ownership could not be verified"))?;
             // Greeneye and Flame: a copy its mod only added files to (settings, logs) goes, those files wait in kept_dir
             // as on a switch-off: left in greeneye/ or mods/ it would run without the profile (the plugins' drop-in
-            // scan of the legacy layout, the engines' own loaders). A changed file Kiln placed still keeps the whole
-            // copy (owned refuses).
-            if run_folder(kind).is_some() { return Ok(have.player); }
+            // scan of the legacy layout, the engines' own loaders). An EMF Lua mod's copy, placed with or without
+            // EMF's own loader, the same: left in emf/mods, kiln-emf's drop-in scan would run it. A changed file Kiln
+            // placed still keeps the whole copy (owned refuses).
+            if run_folder(kind).is_some() || (kind == ModKind::Emf && crate::library::is_emf_lua(dst)) { return Ok(have.player); }
             if !have.player.is_empty() {
                 return Err(Error::new(ErrorCode::Refused, format!(
                     "player files or runtime settings were added or changed: {}", some_names(&have.player))));
@@ -5142,12 +5143,19 @@ mod tests {
         let rep = place(&dirs, &p, &game).unwrap();
         assert!(rep.own == ["emf:beastmaster"] && rep.placed.is_empty(), "{rep:?}");
         assert_eq!(game_path_of(&dirs, ModKind::Emf, &p.mods.emf[0], &game), Some(copy.clone()));
-        // Kiln's own copy, edited by the player, while the profile moves to another version: it stays, and runs
+        // Kiln's own copy: placed, and updated with the profile
         std::fs::remove_dir_all(&copy).unwrap();
         let rep = place(&dirs, &p, &game).unwrap();
         assert_eq!(rep.placed, ["emf:beastmaster"], "{rep:?}");
-        std::fs::write(copy.join("main.lua"), "-- mine\n").unwrap();
         p.mods.emf = vec![emf_lua_mod(&dirs, tmp.path(), "2.0.0")];
+        let rep = place(&dirs, &p, &game).unwrap();
+        assert_eq!(rep.placed, ["emf:beastmaster"], "{rep:?}");
+        assert_eq!((marker(&copy).map(|m| m.version), std::fs::read_to_string(copy.join("main.lua")).unwrap()),
+            (Some("2.0.0".to_string()), "-- 2.0.0\n".to_string()));
+        assert_eq!(game_path_of(&dirs, ModKind::Emf, &p.mods.emf[0], &game), Some(copy.clone()));
+        // ... edited by the player, while the profile moves to another version: it stays, and runs
+        std::fs::write(copy.join("main.lua"), "-- mine\n").unwrap();
+        p.mods.emf = vec![emf_lua_mod(&dirs, tmp.path(), "3.0.0")];
         let rep = place(&dirs, &p, &game).unwrap();
         assert!(rep.retained.iter().any(|r| r.path == copy) && rep.placed.is_empty(), "{rep:?}");
         assert_eq!(std::fs::read_to_string(copy.join("main.lua")).unwrap(), "-- mine\n");
@@ -5157,6 +5165,33 @@ mod tests {
         place(&dirs, &p, &game).unwrap();
         assert_eq!(game_path_of(&dirs, ModKind::Emf, &p.mods.emf[0], &game), None);
         assert!(copy.join("main.lua").is_file());
+    }
+
+    /// inbox 61 review: Deactivate and uninstall (unplace) take Kiln's copy of an EMF Lua mod out of emf/mods also when
+    /// the mod added a file to it, as a switch-off does: left there, kiln-emf's drop-in scan would run it without the
+    /// profile. What the mod added waits in kept_dir and comes back with the next placement; the player's own folder
+    /// beside it stays as it is.
+    #[test]
+    fn unplace_takes_an_emf_lua_mods_copy_out_and_keeps_what_the_mod_added() {
+        let tmp = crate::library::TempDir::new(&std::env::temp_dir(), "emf-lua-unplace").unwrap();
+        let dirs = DataDirs::at(tmp.path().join("data"));
+        let game = tmp.path().join("game");
+        std::fs::create_dir_all(game.join("kiln")).unwrap();
+        let mut p = crate::profile::create(&dirs, "p", None).unwrap();
+        p.mods.emf = vec![emf_lua_mod(&dirs, tmp.path(), "1.0.0")];
+        assert_eq!(place(&dirs, &p, &game).unwrap().placed, ["emf:beastmaster"]);
+        let copy = game.join("emf/mods/beastmaster");
+        std::fs::write(copy.join("notes.txt"), "mine").unwrap();
+        let own = game.join("emf/mods/kill_counter");
+        std::fs::create_dir_all(&own).unwrap();
+        std::fs::write(own.join("mod.json"), r#"{"id":"kill_counter","name":"Kill Counter","version":"1.0.0","emf":14,"main":"main.lua"}"#).unwrap();
+        std::fs::write(own.join("main.lua"), "-- the player's\n").unwrap();
+        let cleaned = unplace(&dirs, &game).unwrap();
+        assert!(cleaned.removed == [copy.clone()] && cleaned.retained.is_empty() && !cleaned.kept_files.is_empty(), "{cleaned:?}");
+        assert!(!copy.exists() && std::fs::read_to_string(own.join("main.lua")).unwrap() == "-- the player's\n");
+        assert_eq!(std::fs::read_to_string(kept_dir(&game, ModKind::Emf, "beastmaster").join("notes.txt")).unwrap(), "mine");
+        assert_eq!(place(&dirs, &p, &game).unwrap().placed, ["emf:beastmaster"]);
+        assert_eq!(std::fs::read_to_string(copy.join("notes.txt")).unwrap(), "mine");
     }
 
     #[test]
