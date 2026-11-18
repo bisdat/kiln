@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
@@ -297,6 +298,74 @@ public sealed partial class KilnTextKeysTests
             }
         }
         Assert.True(problems.Count == 0, string.Join("\n", problems));
+    }
+
+    [GeneratedRegex(@"\{\{|\}\}|\{([^{}:]+):([^{}]*)\}")]
+    private static partial Regex Formatted();
+
+    // A translation is a player's file, read as data. What it never needs and English has not at the same key: "##" (an ImGui
+    // label's id starts there: the rest would vanish and two widgets could share an id), "%" (the game's own menus draw the
+    // native texts), markup and links, and invisible or control characters (kiln.ui takes texts as C strings, kiln.log lines
+    // hold some, a bidi override turns text around).
+    private static readonly (string What, Regex Pattern)[] NotData =
+    [
+        ("an ImGui id (##)", new Regex("##")),
+        ("a % sign", new Regex("%")),
+        ("an HTML tag", new Regex(@"<\s*/?\s*[A-Za-z!?]")),
+        ("an HTML entity", new Regex(@"&(?:#\d+|#x[0-9A-Fa-f]+|[A-Za-z][A-Za-z0-9]*);")),
+        ("a Markdown link", new Regex(@"\]\s*\(")),
+        ("a link", new Regex(@"\b[A-Za-z][A-Za-z0-9+.-]*://|\b(?:javascript|data|vbscript|file|mailto):|\bwww\.", RegexOptions.IgnoreCase)),
+    ];
+
+    private static string Formats(string template) =>
+        string.Join(" ", Formatted().Matches(template).Where(m => m.Groups[1].Success).Select(m => m.Groups[1].Value.Trim() + ":" + m.Groups[2].Value.Trim()).Order(StringComparer.Ordinal));
+
+    [Fact]
+    public void Translations_are_plain_text()
+    {
+        var en = Table(En);
+        var problems = Directory.EnumerateFiles(Path.GetDirectoryName(En)!, "*.json").Where(f => Path.GetFileName(f) != "en.json")
+            .SelectMany(f => NotPlainText(en, Path.GetFileName(f), Table(f))).ToList();
+        Assert.True(problems.Count == 0, string.Join("\n", problems));
+        // and the check finds what it is for
+        var bad = NotPlainText(Flat("""{ "a": { "b": "Press {key}", "n": { "one": "{count:N0} mod", "other": "{count:N0} mods" } } }"""), "xx.json",
+            Flat("""{ "a": { "b": "按 {key}##x <b>见</b> https://evil.example \u202e", "n": { "other": "{count} 个" } } }"""));
+        Assert.Equal(4, bad.Count(x => x.Contains("'a.b'", StringComparison.Ordinal)));
+        Assert.Contains(bad, x => x.Contains("U+202E", StringComparison.Ordinal));
+        Assert.Contains(bad, x => x.Contains("'a.n.other' formats its numbers", StringComparison.Ordinal));
+    }
+
+    private static Dictionary<string, string> Flat(string json) => Flatten(Encoding.UTF8.GetBytes(json), []);
+
+    // the data problems of one translation's table against English's
+    private static List<string> NotPlainText(Dictionary<string, string> en, string name, Dictionary<string, string> table)
+    {
+        var problems = new List<string>();
+        foreach (var (key, text) in table)
+        {
+            var dot = key.LastIndexOf('.');
+            var b = dot > 0 ? key[..dot] : key;
+            string[] english = en.TryGetValue(key, out var same) ? [same]
+                : dot > 0 && KilnText.PluralForms.Contains(key[(dot + 1)..]) && en.ContainsKey(b + ".other")
+                    ? KilnText.PluralForms.Select(f => en.GetValueOrDefault(b + "." + f)).OfType<string>().ToArray()
+                    : [];
+            if (english.Length == 0) continue;  // not a key of en.json: Translations_have_englishs_keys_and_placeholders says so
+            if (!english.Any(e => Formats(e) == Formats(text)))
+                problems.Add($"{name}: '{key}' formats its numbers as {{{Formats(text)}}}, English {{{Formats(english[^1])}}}");
+            foreach (var (what, pattern) in NotData)
+                if (pattern.Count(text) > english.Max(e => pattern.Count(e))) problems.Add($"{name}: '{key}' has {what}, which English has not");
+            foreach (var r in text.EnumerateRunes().Distinct())
+            {
+                var cat = Rune.GetUnicodeCategory(r);
+                var odd = r == Rune.ReplacementChar || cat is UnicodeCategory.Control or UnicodeCategory.Format or UnicodeCategory.PrivateUse
+                    or UnicodeCategory.OtherNotAssigned or UnicodeCategory.LineSeparator or UnicodeCategory.ParagraphSeparator;
+                if (odd && !english.Any(e => e.Contains(r.ToString(), StringComparison.Ordinal)))
+                    problems.Add($"{name}: '{key}' has U+{r.Value:X4} ({cat}), which English has not");
+            }
+            if (text.Trim().Length == 0 && english.Any(e => e.Trim().Length > 0)) problems.Add($"{name}: '{key}' is empty (leave it out: English shows)");
+            if (text.Length > 4 * english.Max(e => e.Length) + 80) problems.Add($"{name}: '{key}' has {text.Length} characters, English {english.Max(e => e.Length)}");
+        }
+        return problems;
     }
 
     [Fact]
