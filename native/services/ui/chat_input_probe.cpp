@@ -8,6 +8,10 @@
 #include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <cmath>
+#include <algorithm>
+#include <deque>
+#include <mutex>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -29,6 +33,49 @@ uintptr_t g_hud_ret = 0, g_social_ret = 0;
 uintptr_t g_state_fn = 0, g_set_text_fn = 0;
 std::atomic<bool> g_hud_seen{false}, g_social_seen{false};
 std::atomic<bool> g_history_on{false};
+std::atomic<bool> g_completion_on{false};
+// Read only on the game's UI thread. Never let the overlay render thread
+// dereference a game widget or its native editor.
+uintptr_t g_rect_fn = 0;
+int64_t g_frame_arg = 0, g_viewport = 0, g_ppu = 0;
+bool g_rect_metrics = false;
+using RectFn = const float*(__fastcall*)(void*);
+struct CompletionSnapshot {
+    bool focused = false;
+    uint32_t field = 0, revision = 0, cursor = 0;
+    std::string text;
+    float raw[4]{}, pixels[4]{};
+    bool has_rect = false;
+};
+struct PendingEdit {
+    uint32_t field = 0, revision = 0;
+    std::string expected, replacement;
+};
+std::mutex g_completion_mu;
+CompletionSnapshot g_completion_snapshot;
+std::deque<chat_keys::Action> g_completion_actions;
+PendingEdit g_pending_edit;
+bool g_pending_valid = false;
+
+void completion_action(chat_keys::Action action) {
+    std::lock_guard lock(g_completion_mu);
+    if (g_completion_actions.size() < 32) g_completion_actions.push_back(action);
+}
+
+// Unicode codepoints are the game's UTF-32 cursor units. We only complete
+// at the end of the current line; cursor-in-middle is deferred to a later PR.
+uint32_t codepoints(std::string_view bytes) {
+    uint32_t n = 0;
+    for (unsigned char c : bytes) if ((c & 0xC0) != 0x80) ++n;
+    return n;
+}
+
+bool safe_line(std::string_view bytes) {
+    if (bytes.size() > 256) return false;
+    for (unsigned char c : bytes) if (c < 0x20 || c == 0x7F) return false;
+    return true;
+}
+
 std::atomic<bool> g_diagnose_on{false};
 std::atomic<bool> g_trace_on{false};
 std::atomic<uint32_t> g_key_log_count{0};
@@ -53,6 +100,10 @@ std::string g_last_applied;
 bool g_set_text_pending = false;
 
 constexpr uint64_t kMaxEditBytes = 1024;
+// Captured on the verified client 26430625 and gated by chat.ui.input's
+// signature-backed layout. The editor is UTF-32; cursor index is at +0x1938.
+constexpr uintptr_t kEditorCursor = 0x1938;
+
 
 // The game's layout, from sigdb (chatui.json, feature chat.ui.input; docs/re/chat-input.md), read once at install.
 struct Layout {
