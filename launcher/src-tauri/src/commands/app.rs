@@ -769,6 +769,10 @@ pub async fn app_assets_import(app: AppHandle, kind: String, from: Option<String
 /// `flush_held_log`; a move that committed restarts, and they end with the process). At most HELD_MAX.
 static HELD_LOG: Mutex<Vec<String>> = Mutex::new(Vec::new());
 const HELD_MAX: usize = 500;
+/// Lines of the start that came before the beta copy's gate opened (crate::snapshot::startup: `state::dirs()` refuses
+/// until then, and the start's render and sandbox lines come before it): on stderr at once, and into launcher.log when
+/// the gate opens (`flush_early_log`, lib.rs `after_snapshot`). At most HELD_MAX.
+static EARLY_LOG: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 /// Appends one line to `<data>/logs/launcher.log`: `<time> <area>: <msg>`. Best effort. While the data folder is held
 /// nothing is written there (the move copies and verifies `logs/`): during a move of this process the line waits in
@@ -789,7 +793,25 @@ pub fn launcher_log(area: &str, msg: &str) {
     }
     match f.dirs() {
         Ok(d) => append_log(&d, &[line]),
-        Err(_) => eprintln!("{line}"),
+        Err(_) => {
+            // the folder is fine and only the beta copy's gate is not open yet: the line goes into the log later
+            if f.held_error().is_none() && crate::snapshot::startup::refusal().is_some() {
+                let mut h = EARLY_LOG.lock().unwrap_or_else(|e| e.into_inner());
+                if h.len() < HELD_MAX {
+                    h.push(line.clone());
+                }
+            }
+            eprintln!("{line}");
+        }
+    }
+}
+
+/// Writes the start's lines from before the beta copy's gate opened (they were on stderr already).
+pub fn flush_early_log() {
+    let _writing = crate::state::writing();
+    let lines = std::mem::take(&mut *EARLY_LOG.lock().unwrap_or_else(|e| e.into_inner()));
+    if let (false, Ok(d)) = (lines.is_empty(), crate::state::dirs()) {
+        append_log(&d, &lines);
     }
 }
 

@@ -276,6 +276,8 @@ pub(crate) fn snapshot_channel(version: &str) -> &str {
 }
 
 pub(crate) fn after_snapshot(app: &tauri::AppHandle) {
+    // the start's own lines (how the window is drawn, WebKit's sandbox) came before the gate opened
+    commands::app::flush_early_log();
     // the installed runtime's and the bundles' sha256s from the last run (a start does not hash 1.5 GB again)
     if let Ok(d) = state::dirs() {
         kiln_manage::filecache::persist_at(&state::file_hashes(&d));

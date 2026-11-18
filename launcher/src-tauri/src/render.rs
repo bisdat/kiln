@@ -359,7 +359,8 @@ pub fn prepare(args: &[String]) {
         std::env::remove_var(SET_BY_US);
         std::env::remove_var(RESTARTED);
     }
-    let dirs = crate::state::dirs().ok();
+    // read only, before the beta copy's gate opens (state::dirs() refuses until then: 29.15 to 29.17 never saw the marker)
+    let dirs = crate::folder::found_dirs();
     let has_marker = dirs.as_ref().is_some_and(|d| marker(d).is_file());
     let c = decide(args, std::env::var(ENV).ok().as_deref(), restarted, has_marker);
     let mut set = Vec::new();

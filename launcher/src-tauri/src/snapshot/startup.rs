@@ -155,6 +155,29 @@ mod tests {
         assert!(super::super::info(&root).is_none());
         let _ = std::fs::remove_dir_all(root);
     }
+    /// 29.15 to 29.17: the start's render lines went to stderr only and its marker was never read, because both came
+    /// before this gate opened. The marker is read from the folder as found; the lines reach launcher.log once it opens.
+    #[test]
+    fn the_starts_lines_and_markers_do_not_wait_for_the_gate() {
+        let _serial = crate::folder::test_serial();
+        struct Reset;
+        impl Drop for Reset { fn drop(&mut self) { set("ready", vec![]); } }
+        let _reset = Reset;
+        let (t, folder) = open_test_folder("early-log");
+        set("preparing", vec![]);
+        assert!(crate::state::dirs().is_err());
+        assert_eq!(crate::folder::found_dirs().map(|d| d.root), Some(folder.located().unwrap().dirs.root.clone()));
+        let line = format!("early line {}", std::process::id());
+        crate::commands::app::launcher_log("render", &line);
+        let log = t.0.join("logs").join("launcher.log");
+        assert!(!log.exists(), "nothing is written before the gate opens");
+        set("ready", vec![]);
+        crate::commands::app::flush_early_log();
+        crate::commands::app::flush_early_log();
+        let text = std::fs::read_to_string(&log).unwrap();
+        assert_eq!(text.matches(&format!("render: {line}")).count(), 1, "{text}");
+    }
+
     fn open_test_folder(tag: &str) -> (super::super::tests::Tmp, std::sync::Arc<crate::folder::Folder>) {
         let t = super::super::tests::tmp(tag);
         let folder = std::sync::Arc::new(crate::folder::Folder::open(kiln_manage::paths::DataEnv {
