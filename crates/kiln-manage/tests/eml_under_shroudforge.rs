@@ -1165,7 +1165,8 @@ fn inbox86_deactivating_with_a_switched_off_xhl_plugin_leaves_nothing_that_loads
 /// inbox 86 (b): the profile names a version whose Library entry is gone (the player's "Building" named Building Tools
 /// 0.33.2 after its Library folder was deleted), while Kiln's copy of another version stays in the game. That copy is
 /// still Kiln's by its marker and receipt: it follows the profile's switch all the same. Off: switched off in
-/// ShroudForge's file and its ini set aside; on: its ini back, and it runs as it is. The result says so.
+/// ShroudForge's file and its ini set aside; on: it runs as it is, so its ini is back only while ShroudForge runs it
+/// (a copy that was switched off before stays so, and XHL-Core must not load its DLL alone). The result says so.
 #[test]
 fn inbox86_a_copy_whose_profile_version_is_gone_from_the_library_follows_the_profile() {
     let s = setup("inbox86-gone");
@@ -1184,13 +1185,18 @@ fn inbox86_a_copy_whose_profile_version_is_gone_from_the_library_follows_the_pro
         let said = rep.warnings.iter().find(|w| w.contains("version 0.33.2 is not placed")).unwrap_or_else(|| panic!("on {on}: {rep:?}"));
         assert!(said.contains("Kiln's copy of version 0.34.0 stays in") && said.contains(if on { "as it is" } else { "switched off" }), "on {on}: {said}");
         assert_eq!(engine_mods::marker(&copy).unwrap().version, "0.34.0", "on {on}: the copy stays");
-        if on {
-            assert_eq!(xhl_core_reads(&copy).as_deref(), Some(BT_INI), "on {on}: {rep:?}");
-        } else {
-            assert!(!shroudforge::read_mod(&copy).unwrap().enabled && xhl_core_reads(&copy).is_none() && rep.retained.is_empty(), "on {on}: {rep:?}");
-            assert!(rep.switched.contains(&"shroudforge:building-tools".to_string()), "on {on}: {rep:?}");
-        }
+        // on: the earlier copy was switched off above and stays so, ShroudForge does not run it, and XHL-Core does
+        // not load BuildingTools.dll without it
+        assert!(!shroudforge::read_mod(&copy).unwrap().enabled && xhl_core_reads(&copy).is_none() && rep.retained.is_empty(), "on {on}: {rep:?}");
+        assert_eq!(rep.switched.contains(&"shroudforge:building-tools".to_string()), !on, "on {on}: {rep:?}");
     }
+    // a copy switched on that stays while the profile's version is gone runs as it is, its ini where both read it
+    p.mods.shroudforge[1] = pm(&here, true);
+    engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+    p.mods.shroudforge[1] = pm(&gone, true);
+    let rep = engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+    assert!(shroudforge::read_mod(&copy).unwrap().enabled && rep.retained.is_empty(), "{rep:?}");
+    assert_eq!(xhl_core_reads(&copy).as_deref(), Some(BT_INI), "{rep:?}");
     // the copy's own version gone from the Library too: the marker and receipt are enough to switch it off
     p.mods.shroudforge[1] = pm(&here, true);
     let rep = engine_mods::place(&s.dirs, &p, &s.game).unwrap();
@@ -1200,6 +1206,34 @@ fn inbox86_a_copy_whose_profile_version_is_gone_from_the_library_follows_the_pro
     let rep = engine_mods::place(&s.dirs, &p, &s.game).unwrap();
     assert!(!shroudforge::read_mod(&copy).unwrap().enabled && xhl_core_reads(&copy).is_none() && rep.retained.is_empty(), "{rep:?}");
     assert!(rep.kept.contains(&"shroudforge:building-tools".to_string()), "{rep:?}");
+}
+
+/// inbox 86, a new copy whose placement failed after its receipt was written (the files it took back from the kept
+/// folder could not be tidied there): it is Kiln's copy, in place, and follows the profile all the same. Off, its ini is
+/// set aside, or XHL-Core would load its DLL at the next start (a Steam start does not reconcile first) while ShroudForge
+/// does not run it.
+#[test]
+fn inbox86_a_copy_whose_placement_failed_late_has_its_ini_aside_while_off() {
+    use std::os::unix::fs::PermissionsExt;
+    let s = setup("inbox86-late");
+    xhl_core(&s, XhlCore::ByHand);
+    let tools = building_tools(&s, "native-plugin.ini");
+    // what the mod wrote into an earlier copy, kept when that copy went, in a folder Kiln cannot tidy now
+    let kept = s.game.join("kiln/kept-mod-files/shroudforge/building-tools");
+    put(&kept, "notes.txt", b"the mod's notes");
+    let mode = |m: u32| std::fs::set_permissions(&kept, std::fs::Permissions::from_mode(m)).unwrap();
+    mode(0o555);
+    let mut p = s.profile(vec![]);
+    p.mods.shroudforge.push(pm(&tools, false));
+    let rep = engine_mods::place(&s.dirs, &p, &s.game);
+    mode(0o755);
+    let rep = rep.unwrap();
+    let copy = s.game.join("mods/building-tools");
+    assert!(rep.retained.iter().any(|r| r.path == copy), "the placement failed late: {rep:?}");
+    assert_eq!(engine_mods::marker(&copy).map(|m| m.version).as_deref(), Some("0.33.2"), "{rep:?}");
+    assert!(!shroudforge::read_mod(&copy).unwrap().enabled && copy.join("notes.txt").is_file(), "{rep:?}");
+    assert!(xhl_core_reads(&copy).is_none(), "XHL-Core would load BuildingTools.dll while ShroudForge does not run it: {rep:?}");
+    assert_eq!(std::fs::read(copy.join("native-plugin.ini.kiln-off")).unwrap(), BT_INI);
 }
 
 #[test]

@@ -2248,10 +2248,13 @@ fn own_xhl_folder_off(rep: &mut PlaceReport, tag: String, path: &Path) {
 /// Whether or not the game has XHL-Core now (`xhl`, asked once per placement, and only here for what is said): it may
 /// be installed later, or run for one start only, and nothing else reads that ini while the mod is off (ShroudForge's
 /// DLL manager loads no DLL of a mod it does not run). Only a copy Kiln placed, unchanged ([`owned`]), gets here.
-/// `on`: the profile has the mod on; `gone`: it is not in the profile at all (for what is said).
+/// `on`: the profile has the mod on; `gone`: it is not in the profile at all (for what is said). On, the ini is back
+/// under its own name only while ShroudForge runs the copy (its switch on, the file as ShroudForge reads it): call it
+/// after the switch is set. A copy ShroudForge does not run (an earlier version that stays switched off, a switch that
+/// could not be set, settings it cannot read) keeps it aside, or XHL-Core would load the DLL alone, as in inbox 86.
 fn sf_plugin_ini(rep: &mut PlaceReport, xhl: &mut Option<bool>, game: &Path, dst: &Path, tag: &str, on: bool, gone: bool) {
     let mut xhl_core = || *xhl.get_or_insert_with(|| xhl_host(game).available);
-    if on {
+    if on && crate::shroudforge::read_mod(dst).is_ok_and(|sf| sf.enabled && sf.repair.is_empty()) {
         if let Err(e) = unpark_plugin_ini(game, dst) {
             rep.warnings.push(format!("{tag}: Kiln could not rename its native-plugin.ini{PARKED_INI_SUFFIX} in {} back to native-plugin.ini \
                 ({}), so XHL-Core and ShroudForge do not load its DLL. Close the game and rename that file by hand.",
@@ -2259,14 +2262,19 @@ fn sf_plugin_ini(rep: &mut PlaceReport, xhl: &mut Option<bool>, game: &Path, dst
         }
         return;
     }
-    let (off, starts) = if gone { ("it is not in the profile", "It is not in the profile") } else { ("it is off in the profile", OFF_IN_PROFILE) };
+    let (why, starts, back) = match (on, gone) {
+        (true, _) => ("ShroudForge does not run this copy (its switch is off, or ShroudForge cannot read it)", "ShroudForge does not run this copy",
+            "ShroudForge runs it again"),
+        (false, true) => ("it is not in the profile", "It is not in the profile", "you switch the mod on"),
+        (false, false) => ("it is off in the profile", OFF_IN_PROFILE, "you switch the mod on"),
+    };
     match park_plugin_ini(game, dst) {
-        Ok(Some((ini, parked))) if xhl_core() => rep.warnings.push(format!("{tag}: {off}, so Kiln renamed its {ini} in {} to {parked}, \
-            and XHL-Core does not load it. Kiln renames it back when you switch the mod on.", dst.display())),
+        Ok(Some((ini, parked))) if xhl_core() => rep.warnings.push(format!("{tag}: {why}, so Kiln renamed its {ini} in {} to {parked}, \
+            and XHL-Core does not load it. Kiln renames it back when {back}.", dst.display())),
         Ok(_) => {}
         // nothing else reads that ini while the mod is off
         Err(_) if !xhl_core() => {}
-        Err(e) => rep.retained.push(RetainedPlacement { path: dst.to_path_buf(), may_run: true, off: true, reason: format!(
+        Err(e) => rep.retained.push(RetainedPlacement { path: dst.to_path_buf(), may_run: true, off: !on, reason: format!(
             "{}, but Kiln could not rename its native-plugin.ini ({}), and {XHL_LOADS}, so the mod may still run from there",
             starts, reason_at(dst, e.message)) }),
     }
@@ -2275,7 +2283,8 @@ fn sf_plugin_ini(rep: &mut PlaceReport, xhl: &mut Option<bool>, game: &Path, dst
 /// Kiln's copy of another version of a ShroudForge mod `dst` stays where it is, because the profile's version cannot be
 /// placed (its Library entry is gone or unreadable, or its publication failed): it follows the profile's switch all the
 /// same, by its marker and receipt alone. Off: switched off in ShroudForge's file, its XHL-Core ini set aside; on: its
-/// ini back where XHL-Core and ShroudForge read it (its ShroudForge switch stays as it is, so the earlier version runs).
+/// ShroudForge switch stays as it is (the earlier version runs as it did), and its ini is where XHL-Core and ShroudForge
+/// read it only while that switch is on ([`sf_plugin_ini`]).
 fn sf_old_copy_follows(rep: &mut PlaceReport, receipts: &mut [Placement], xhl: &mut Option<bool>, game: &Path, dst: &Path, tag: String, on: bool) {
     if !on && crate::shroudforge::read_mod(dst).is_ok_and(|sf| sf.enabled) {
         match switch_copy(game, receipts, dst, false) {
@@ -2391,29 +2400,35 @@ fn place_with(dirs: &DataDirs, profile: &crate::profile::Profile, game_dir: &Pat
             }
             if have.as_ref().is_some_and(|h| h.receipt.marker == want) {
                 if kind == ModKind::ShroudForge {
-                    // XHL-Core's ini first: it follows the profile whatever ShroudForge's file says
-                    sf_plugin_ini(&mut rep, &mut xhl_core, game_dir, &dst, &tag(&m.id), m.enabled, false);
-                    match crate::shroudforge::read_mod(&dst) {
+                    // off: XHL-Core's ini first, whatever ShroudForge's file says (XHL-Core reads no switch)
+                    if !m.enabled { sf_plugin_ini(&mut rep, &mut xhl_core, game_dir, &dst, &tag(&m.id), false, false); }
+                    let switched = match crate::shroudforge::read_mod(&dst) {
                         Err(e) => {
                             retain_runs(&mut rep, tag(&m.id), &dst, format!("its ShroudForge settings cannot be read, so its switch was left as it is: {}", e.message), still_runs(kind, m.enabled, Some(&want), Some(&want)));
-                            continue;
+                            false
                         }
                         // also a copy that already has the wanted switch but waits for its fractions to be put back
                         // (an earlier Kiln's write): ShroudForge refuses the whole mod until the file is written again,
                         // and writing the switch does that (shroudforge::set_enabled)
-                        Ok(sf) if sf.enabled != m.enabled || !sf.repair.is_empty() => {
-                            if let Err(e) = switch_copy(game_dir, &mut receipts, &dst, m.enabled) {
+                        Ok(sf) if sf.enabled != m.enabled || !sf.repair.is_empty() => match switch_copy(game_dir, &mut receipts, &dst, m.enabled) {
+                            Err(e) => {
                                 retain_runs(&mut rep, tag(&m.id), &dst, e.message, still_runs(kind, m.enabled, Some(&want), Some(&want)));
-                                continue;
+                                false
                             }
-                            if sf.enabled != m.enabled { rep.switched.push(tag(&m.id)); }
-                            if !sf.repair.is_empty() {
-                                rep.warnings.push(format!("{}: repaired its settings file (an earlier Kiln wrote {} without the fraction, and ShroudForge refused the mod until now); your values are unchanged",
-                                    tag(&m.id), sf.repair.join(", ")));
+                            Ok(()) => {
+                                if sf.enabled != m.enabled { rep.switched.push(tag(&m.id)); }
+                                if !sf.repair.is_empty() {
+                                    rep.warnings.push(format!("{}: repaired its settings file (an earlier Kiln wrote {} without the fraction, and ShroudForge refused the mod until now); your values are unchanged",
+                                        tag(&m.id), sf.repair.join(", ")));
+                                }
+                                true
                             }
-                        }
-                        Ok(_) => {}
-                    }
+                        },
+                        Ok(_) => true,
+                    };
+                    // on: back under its own name once ShroudForge runs the copy (a switch that failed keeps it aside)
+                    if m.enabled { sf_plugin_ini(&mut rep, &mut xhl_core, game_dir, &dst, &tag(&m.id), true, false); }
+                    if !switched { continue; }
                 }
                 rep.kept.push(tag(&m.id));
             } else {
@@ -2461,8 +2476,17 @@ fn place_with(dirs: &DataDirs, profile: &crate::profile::Profile, game_dir: &Pat
                     copy_in(roots, &src, &dst, &want, &kept, m.enabled, carry,
                         |receipt| put_placement(game_dir, &mut receipts, receipt))
                 })();
-                if kind == ModKind::ShroudForge && published.is_err() && let Some(h) = &have && marker(&dst).as_ref() == Some(&h.receipt.marker) {
-                    sf_old_copy_follows(&mut rep, &mut receipts, &mut xhl_core, game_dir, &dst, tag(&m.id), m.enabled);
+                if kind == ModKind::ShroudForge && published.is_err() {
+                    match marker(&dst) {
+                        // the copy it was to replace stays
+                        Some(mk) if have.as_ref().is_some_and(|h| h.receipt.marker == mk) =>
+                            sf_old_copy_follows(&mut rep, &mut receipts, &mut xhl_core, game_dir, &dst, tag(&m.id), m.enabled),
+                        // the new copy is in place with its receipt, and a later step failed (the kept files it took
+                        // back could not be tidied): it follows the profile as a placed one does
+                        Some(mk) if mk == want && receipts.iter().any(|r| r.path == dst && r.marker == want) =>
+                            sf_plugin_ini(&mut rep, &mut xhl_core, game_dir, &dst, &tag(&m.id), m.enabled, false),
+                        _ => {}
+                    }
                 }
                 let (said, warned) = match published {
                     Ok(done) => done,
@@ -4505,6 +4529,37 @@ mod tests {
             assert!(!crate::shroudforge::read_mod(&a).unwrap().enabled);
             assert_eq!(unplace(&dirs, &game).unwrap().removed.len(), 2, "successful switches keep exact cleanup receipts");
         }
+    }
+
+    /// inbox 86: the XHL-Core ini of Kiln's ShroudForge copy goes back under its own name only once ShroudForge runs the
+    /// copy. A switch that cannot be turned on (its receipt cannot be written) leaves the copy off for ShroudForge and its
+    /// ini aside, so XHL-Core does not load the DLL without its ShroudForge side; the next activation does both.
+    #[test]
+    fn an_xhl_plugin_ini_stays_aside_while_its_shroudforge_switch_cannot_be_turned_on() {
+        let tmp = crate::library::TempDir::new(&std::env::temp_dir(), "sf-ini-switch").unwrap();
+        let dirs = DataDirs::at(tmp.path().join("data"));
+        let src = tmp.path().join("building-tools");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(src.join("mod.json"), br#"{"id":"building-tools","name":"Building Tools","version":"0.33.2"}"#).unwrap();
+        std::fs::write(src.join("extended.mod.json"), br#"{"schemaVersion":1,"launcher":"SF","enabled":true,"settings":{}}"#).unwrap();
+        std::fs::write(src.join("BuildingTools.dll"), crate::pe::build_test_dll(&["XhlPluginEntry"], b"plugin")).unwrap();
+        std::fs::write(src.join("native-plugin.ini"), b"[Plugin]\r\nDll=BuildingTools.dll\r\n").unwrap();
+        let imported = crate::library::import(&dirs, &[src], &mut crate::task::NoProgress).unwrap();
+        let r = imported.imported.iter().find(|r| r.kind == ModKind::ShroudForge).unwrap_or_else(|| panic!("{imported:?}"));
+        let game = tmp.path().join("game");
+        let mut p = crate::profile::create(&dirs, "ini-switch", None).unwrap();
+        p.mods.shroudforge = vec![crate::profile::ProfileMod { id: r.id.clone(), version: r.version.clone(), hash: r.hash.clone(), enabled: false }];
+        place(&dirs, &p, &game).unwrap();
+        let copy = game.join("mods/building-tools");
+        assert!(copy.join("native-plugin.ini.kiln-off").is_file() && !has_xhl_plugin_ini(&copy));
+        p.mods.shroudforge[0].enabled = true;
+        FAIL_SAVE_PLACEMENTS.with(|f| f.set(true));
+        let rep = place(&dirs, &p, &game).unwrap();
+        assert!(!crate::shroudforge::read_mod(&copy).unwrap().enabled && rep.retained.iter().any(|x| x.path == copy), "{rep:?}");
+        assert!(!has_xhl_plugin_ini(&copy) && copy.join("native-plugin.ini.kiln-off").is_file(), "XHL-Core would load the DLL alone: {rep:?}");
+        let rep = place(&dirs, &p, &game).unwrap();
+        assert!(crate::shroudforge::read_mod(&copy).unwrap().enabled && has_xhl_plugin_ini(&copy) && rep.retained.is_empty(), "{rep:?}");
+        assert!(!copy.join("native-plugin.ini.kiln-off").exists());
     }
 
     /// A failure for one stale copy must not leak its rolled-back removal into the next copy's saved receipt list.

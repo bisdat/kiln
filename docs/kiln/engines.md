@@ -338,10 +338,12 @@ engines' mods") and 5.8.
   having loaded the DLL without its ShroudForge side). So while the profile has such a mod off, or no longer has it,
   Kiln's copy has that ini renamed `native-plugin.ini.kiln-off` (its own spelling kept, its bytes as they are), and
   XHL-Core skips the folder (with a `mod.json` it lists it as a resource-only mod). On again, the file gets its name
-  back. This is done whether or not the game has XHL-Core at that moment (it may be installed later, or run for one
-  start), only in Kiln's own copies (marker and receipt; a player's folder is never renamed, as before), and needs no
-  Library entry: a copy whose profile version is gone from the Library follows the profile by its receipt, and is
-  switched off in ShroudForge's file too when the mod is off. Kiln reads the renamed file as the copy's ini, so the
+  back once ShroudForge runs the copy: a copy ShroudForge does not run (an earlier version that stays switched off
+  because the profile's version cannot be placed, a switch Kiln could not set) keeps it renamed, so XHL-Core never
+  loads the DLL without its ShroudForge side. This is done whether or not the game has XHL-Core at that moment (it
+  may be installed later, or run for one start), only in Kiln's own copies (marker and receipt; a player's folder is
+  never renamed, as before), and needs no Library entry: a copy whose profile version is gone from the Library
+  follows the profile by its receipt, and is switched off in ShroudForge's file too when the mod is off. Kiln reads the renamed file as the copy's ini, so the
   copy stays Kiln's. The ini of such a copy that the plugin (or the player) changed is its settings file while it
   still names a DLL Kiln placed there, unchanged, as for an XHL companion: it is kept through the rename and carried
   to the next version. Where the game has XHL-Core, the activation says once what Kiln renamed; if the rename cannot
