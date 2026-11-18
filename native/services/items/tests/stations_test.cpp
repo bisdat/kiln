@@ -62,8 +62,9 @@ int main() {
     static_assert(sizeof(KilnStationEvent) == 112 && offsetof(KilnStationEvent, by) == 64 && offsetof(KilnStationEvent, position) == 72 &&
                   offsetof(KilnStationEvent, base) == 96);
     static_assert(sizeof(KilnStationsStatus) == 188);
-    static_assert(sizeof(KilnStationsApi) == 8 + 25 * 8 && offsetof(KilnStationsApi, set_output_source) == 8 + 21 * 8 &&
-                  offsetof(KilnStationsApi, max_chests) == 8 + 23 * 8 && offsetof(KilnStationsApi, collect) == 8 + 24 * 8);
+    static_assert(sizeof(KilnStationsApi) == 8 + 26 * 8 && offsetof(KilnStationsApi, set_output_source) == 8 + 21 * 8 &&
+                  offsetof(KilnStationsApi, max_chests) == 8 + 23 * 8 && offsetof(KilnStationsApi, collect) == 8 + 24 * 8 &&
+                  offsetof(KilnStationsApi, base_stock_with_stations) == 8 + 25 * 8);
     static_assert(sizeof(KilnStationCollect) == 24);
     static_assert(offsetof(KilnStationResult, from_outputs) == 60);
 
@@ -496,6 +497,16 @@ int main() {
 
         const uint32_t rep[3] = {LOGS, CHARCOAL, LOGS}, norep[2] = {ORE, CHARCOAL};
         CHECK(inputs_repeat(rep, 3) && !inputs_repeat(norep, 2) && !inputs_repeat(norep, 0));
+        CHECK(!use_named_chests(rep, 3) && use_named_chests(norep, 2));
+        // chests were named, but the resolved inputs repeat an item: they are ignored and the plain fill runs
+        std::vector<InputNow> repeated(1);
+        repeated[0].item = CHARCOAL;
+        repeated[0].count = 1;
+        repeated[0].stock = 4;  // Magic chests and the bag only; the named chests are not added
+        repeated[0].chests = 0;
+        std::vector<uint32_t> rep_chests, rep_outs;
+        CHECK(pay_layers(repeated, 4, 0, &rep_chests, &rep_outs) && rep_chests[0] == 0 && !any_share(rep_chests));
+        CHECK(plan_math(KILN_STATION_FILL_ADD, 4, repeated).status == KILN_STATION_DONE);
 
         // bisdat's case: a forge (ore 2 + charcoal 3 a craft) holds nothing; the chests have 10 ore and 4 charcoal,
         // an opted-in kiln lends 20 charcoal. A fill of 3 crafts: chests pay 4 charcoal first, the kiln the other 5.
@@ -654,6 +665,34 @@ int main() {
         CHECK(collect_status(3, 0) == KILN_STATION_NO_ROOM);
         CHECK(collect_status(3, 2) == KILN_STATION_PARTIAL);
         CHECK(collect_status(3, 3) == KILN_STATION_DONE);
+        // a stack of 64: the first chest takes 10, a later chest takes the rest → Done only when nothing remains
+        const uint32_t both_chests[2] = {10, 54};
+        StackCollect moved = collect_stack(64, both_chests, 2);
+        CHECK(moved.finished && moved.any && moved.left == 0);
+        CHECK(collect_status(1, moved.finished ? 1u : 0u, moved.any && !moved.finished) == KILN_STATION_DONE);
+        const uint32_t one_chest[2] = {10, 0};
+        moved = collect_stack(64, one_chest, 2);
+        CHECK(!moved.finished && moved.any && moved.left == 54);
+        CHECK(collect_status(1, 0, moved.any) == KILN_STATION_PARTIAL);
+        CHECK(collect_status(1, 0, false) == KILN_STATION_NO_ROOM);
+        // no base: the managed CollectToBase answered NoRoom
+        CHECK(collect_without_base() == KILN_STATION_NO_ROOM);
+        // override unset: the template deposit bit. Unknown stays allowed. A set override wins.
+        DepositRead dep;
+        CHECK(takes_deposits(dep));
+        dep.template_known = true;
+        dep.template_on = false;
+        CHECK(!takes_deposits(dep));
+        dep.template_on = true;
+        CHECK(takes_deposits(dep));
+        dep.component = true;
+        dep.override_set = true;
+        dep.override_on = false;
+        CHECK(!takes_deposits(dep));
+        // a partial stack is preferred to an empty slot in another chest; a chest with neither is not used
+        const std::vector<ChestOffer> offers = {{7, false, true}, {9, true, true}, {8, false, false}};
+        const std::vector<uint32_t> ord = collect_chest_order(offers);
+        CHECK(ord.size() == 2 && ord[0] == 9 && ord[1] == 7);
         KilnStationCollect col{};
         col.size = sizeof col;
         col.station = 1318;

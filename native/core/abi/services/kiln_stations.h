@@ -410,15 +410,21 @@ typedef struct KilnStationsApi {
     /* The opted-in stations, in the order a fill uses them (entity order). KILN_ERR_BUFFER_TOO_SMALL: *out_count = needed. */
     KilnResult(KILN_CALL* output_sources)(KilnEntity* out, uint32_t capacity, uint32_t* out_count);
     /* ---- ordinary chests on a FILL (header.size tells whether this is here) ---- */
-    /* KILN_STATIONS_MAX_CHESTS on this build. A table large enough to hold the slot but built without the feature
-     * returns 0; a smaller table has no slot. Any thread. */
+    /* KILN_STATIONS_MAX_CHESTS. A smaller table has no slot. Any thread. */
     uint32_t(KILN_CALL* max_chests)(void);
     /* ---- collect (header.size tells whether this is here) ---- */
     /* Moves a station's finished stacks the way Kiln.Blocks' Stations.Collect does, through kiln.items' move (one
-     * implementation). Any thread; the callback runs on the tick thread. KILN_ERR_INVALID_ARGUMENT: a bad request.
-     * KILN_ERR_UNAVAILABLE: no server world, or items.move is off. KILN_ERR_BUFFER_TOO_SMALL: 1024 actions wait. */
+     * implementation). Joins the same action queue as submit (1024 waiting; KILN_ERR_BUFFER_TOO_SMALL when it is
+     * full). The result copies at most KILN_STATIONS_MAX_CHANGES ledger rows. Any thread; the callback runs on the
+     * tick thread. KILN_ERR_INVALID_ARGUMENT: a bad request. KILN_ERR_UNAVAILABLE: no server world, or items.move is
+     * off. */
     KilnResult(KILN_CALL* collect)(KilnOwner owner, const KilnStationCollect* request, KilnStationDoneFn done, void* user,
                                    uint64_t* out_ticket);
+    /* ---- stock plus finished station outputs (header.size tells whether this is here) ---- */
+    /* base_stock plus the finished outputs still in this base's production stations (Bases.StockWithStations).
+     * Tick thread. KILN_ERR_BUFFER_TOO_SMALL: *out_count = what is needed. */
+    KilnResult(KILN_CALL* base_stock_with_stations)(uint32_t index, KilnStationStack* out, uint32_t capacity,
+                                                    uint32_t* out_count);
 } KilnStationsApi;
 
 /* KilnStationCollect.flags */
@@ -429,8 +435,9 @@ enum {
 };
 
 /* A collect. size is sizeof(KilnStationCollect). The result is a KilnStationResult with action COLLECT:
- * DONE every stack moved, PARTIAL some did not fit, NO_ROOM none did, UNCHANGED nothing to collect,
- * NOT_A_STATION, NO_BASE (TO_BASE and the station stands in none). */
+ * DONE every stack moved (a stack counts only when its move is DONE), PARTIAL some items moved but a stack was not
+ * finished, NO_ROOM none did (also TO_BASE when the station stands in no base), UNCHANGED nothing to collect,
+ * NOT_A_STATION, UNAVAILABLE when the deposit accessor is missing or a move faulted. */
 typedef struct KilnStationCollect {
     uint32_t size;
     KilnEntity station;

@@ -302,12 +302,74 @@ inline SlotRole slot_role(const SourceRecipes& r, uint32_t item, bool known) {
     return SlotRole::None;
 }
 
-// Collect's result from how many matching stacks there were and how many moves succeeded.
-inline int32_t collect_status(uint32_t stacks, uint32_t moved) {
+// Collect's result. `finished` is stacks whose move completed (a partial move is not finished). `any_moved` is set when
+// some items left a stack that was not finished: that is PARTIAL, not DONE and not NO_ROOM.
+inline int32_t collect_status(uint32_t stacks, uint32_t finished, bool any_moved = false) {
     if (stacks == 0) return KILN_STATION_UNCHANGED;
-    if (moved == 0) return KILN_STATION_NO_ROOM;
-    if (moved < stacks) return KILN_STATION_PARTIAL;
-    return KILN_STATION_DONE;
+    if (finished >= stacks) return KILN_STATION_DONE;
+    if (finished > 0 || any_moved) return KILN_STATION_PARTIAL;
+    return KILN_STATION_NO_ROOM;
+}
+
+// CollectToBase when the station stands in no base. The managed call answered NoRoom: every stack's target was null.
+inline int32_t collect_without_base() { return KILN_STATION_NO_ROOM; }
+
+// DynamicInventoryCraftingStock when the override is set (byte 0, byte 1), else the template's
+// InventoryCraftingStock.canReceiveAreaDeposit. Unknown (no template bit) stays allowed, as the managed TakesDeposits.
+struct DepositRead {
+    bool component = false;
+    bool override_set = false;
+    bool override_on = false;
+    bool template_known = false;
+    bool template_on = false;
+};
+inline bool takes_deposits(const DepositRead& d) {
+    if (d.component && d.override_set) return d.override_on;
+    if (d.template_known) return d.template_on;
+    return true;
+}
+
+// FindRoomFor's order: a chest that already holds the item with room, else one with a free slot. A chest with neither
+// is not a destination.
+struct ChestOffer {
+    uint32_t entity = 0;
+    bool holds_with_room = false;
+    bool free_slot = false;
+};
+inline int chest_rank(const ChestOffer& c) {
+    if (c.holds_with_room) return 0;
+    if (c.free_slot) return 1;
+    return 2;
+}
+inline std::vector<uint32_t> collect_chest_order(const std::vector<ChestOffer>& chests) {
+    std::vector<uint32_t> idx(chests.size());
+    for (uint32_t i = 0; i < static_cast<uint32_t>(idx.size()); ++i) idx[i] = i;
+    std::stable_sort(idx.begin(), idx.end(), [&](uint32_t a, uint32_t b) { return chest_rank(chests[a]) < chest_rank(chests[b]); });
+    std::vector<uint32_t> out;
+    for (uint32_t i : idx)
+        if (chest_rank(chests[i]) < 2) out.push_back(chests[i].entity);
+    return out;
+}
+
+// One stack across chests in order. `room[i]` is how many of the remaining count chest i takes (0: this chest takes
+// nothing, try the next). Finished only when nothing of the stack remains.
+struct StackCollect {
+    bool finished = false;
+    bool any = false;
+    uint32_t left = 0;
+};
+inline StackCollect collect_stack(uint32_t count, const uint32_t* room, uint32_t n) {
+    StackCollect s;
+    s.left = count;
+    for (uint32_t i = 0; i < n && s.left; ++i) {
+        uint32_t take = room[i];
+        if (take > s.left) take = s.left;
+        if (!take) continue;
+        s.any = true;
+        s.left -= take;
+    }
+    s.finished = count > 0 && s.left == 0;
+    return s;
 }
 
 inline bool collect_valid(const KilnStationCollect& c) {
@@ -332,13 +394,15 @@ inline std::vector<uint32_t> eligible_sources(const std::vector<SourceCandidate>
 }
 
 // The resolved inputs repeat an item: the game then counts and tops up each entry on its own, which Kiln's per-item
-// shortfall call cannot mirror. Such a fill uses no station outputs.
+// shortfall call cannot mirror. Such a fill uses no station outputs and ignores named ordinary chests (the plain fill
+// still runs).
 inline bool inputs_repeat(const uint32_t* items, uint32_t n) {
     for (uint32_t i = 0; i < n; ++i)
         for (uint32_t k = i + 1; k < n; ++k)
             if (items[i] == items[k]) return true;
     return false;
 }
+inline bool use_named_chests(const uint32_t* items, uint32_t n) { return n != 0 && !inputs_repeat(items, n); }
 
 // What one named entity is, once the world has been read. Ordinary: an initialized inventory in the station's base, not a
 // production station, not a player, not already in the base's Magic-chest list.
