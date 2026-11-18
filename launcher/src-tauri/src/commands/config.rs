@@ -309,9 +309,11 @@ mod kiln_graphics_tests {
         assert_eq!(doc.values["ui"]["overlay"], "off");
         assert_eq!(doc.values["ui"]["look"], "game");
         assert!(doc.errors.is_empty() && doc.text.contains("// keep me"), "{:?}", doc.errors);
-        for bad in [json!("on"), json!(false), json!(0)] {
+        // (an enum also takes its option's index and any case, as Kiln.Api's ConfigSchema does: written as "off" then)
+        for bad in [json!("on"), json!(false), json!(2)] {
             assert!(kiln_set(&path, "ui.overlay", Some(&bad)).is_err(), "{bad}");
         }
+        assert_eq!(kiln_set(&path, "ui.overlay", Some(&json!("OFF"))).unwrap().values["ui"]["overlay"], "off");
         let doc = kiln_set(&path, "ui.overlay", None).unwrap();
         assert!(doc.values["ui"].get("overlay").is_none());
         let _ = std::fs::remove_dir_all(&dir);
