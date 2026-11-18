@@ -14,10 +14,10 @@ if [[ "${1:-}" == "--inside" ]]; then
   command -v dnf >/dev/null || { echo "Expected a Fedora Distrobox with dnf" >&2; exit 1; }
   sudo dnf install -y \
     bash git curl wget file unzip zip xz tar gzip \
-    gcc gcc-c++ make cmake ninja-build clang lld \
+    gcc gcc-c++ make cmake ninja-build clang llvm lld \
     pkgconf-pkg-config openssl-devel webkit2gtk4.1-devel gtk3-devel \
     libappindicator-gtk3-devel librsvg2-devel libxdo-devel \
-    patchelf python3 nodejs npm
+    patchelf python3 nodejs npm dotnet-sdk-10.0
 
   mkdir -p "$CARGO_HOME" "$RUSTUP_HOME" "$KILN_TOOL_ROOT/npm"
   if [[ ! -x "$CARGO_HOME/bin/rustup" ]]; then
@@ -41,12 +41,14 @@ if [[ "${1:-}" == "--inside" ]]; then
   printf '  Cargo: '; cargo --version
   printf '  Bun: '; bun --version
   printf '  Node: '; node --version
+  printf '  .NET: '; dotnet --version
   printf '  WebKitGTK: '; pkg-config --modversion webkit2gtk-4.1
   printf '  Projects: %s\n' "$KILN_PROJECTS_DIR"
   exit 0
 fi
 
 [[ $# == 0 ]] || { echo "Usage: bash tools/launcher/distrobox-setup.sh" >&2; exit 2; }
+bash -n "$here/distrobox-env.sh" "$here/distrobox-setup.sh" "$here/distrobox-build.sh"
 command -v distrobox >/dev/null || { echo "Install Distrobox on Bazzite first" >&2; exit 1; }
 command -v podman >/dev/null || { echo "Podman is required for this Bazzite workflow" >&2; exit 1; }
 
