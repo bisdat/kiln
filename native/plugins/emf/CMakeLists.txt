@@ -25,7 +25,8 @@ kiln_plugin(emf
     src/net/net_peers.cpp
     src/v26_model.cpp
     src/seh.cpp
-    src/util.cpp)
+    src/util.cpp
+    src/io.cpp)
 target_include_directories(kiln-emf PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include"
                                             "${CMAKE_SOURCE_DIR}/services/players")  # kiln_progression.h
 

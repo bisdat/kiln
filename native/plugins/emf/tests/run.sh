@@ -29,3 +29,7 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -pthread -DKEMF
     -I"$here/host" -I"$here/../include" -I"$here/../src" -I"$here/../../../core/abi" -I"$here/../../../services/players" -I"$here/../../../third_party" \
     "$here/portraits_test.cpp" "$here/../src/api_portraits.cpp" "$here/../src/v26_model.cpp" -o "$out/portraits_test"
 "$out/portraits_test" "$out"
+# kiln-emf's disk thread and the slow-Pre line (0.2.0-dev.29.17); argv[1]: the sources the no-disk-on-tick check reads
+g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -pthread -I"$here/../src" \
+    "$here/io_worker_test.cpp" -o "$out/io_worker_test"
+"$out/io_worker_test" "$here/../src"

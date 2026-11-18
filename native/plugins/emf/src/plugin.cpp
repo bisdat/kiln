@@ -15,6 +15,7 @@
 
 #include "emf_internal.h"
 #include "nlohmann/json.hpp"
+#include "slow_parts.h"
 
 #include <psapi.h>
 
@@ -36,7 +37,10 @@ std::string commands_json();
 namespace {
 
 std::atomic<bool> g_dirty{true};
+std::mutex g_status_mutex;  // g_emf_idle (the disk thread sets it while kiln-emf stands aside)
 std::string g_emf_idle;  // set when the real EMF (that kiln-emf stepped aside for) went idle: no EMF mod runs
+bool g_any_loaded = false;  // at least one EMF mod loaded: emf.json's per-mod tick times are worth a refresh
+SlowParts g_pre_parts;      // the server world's Pre, by part (a line when it takes over 100 ms)
 KilnHandle g_aside_tick = 0;
 uint64_t g_aside_steps = 0;
 uint64_t g_last_status = 0;
@@ -123,22 +127,27 @@ void note_chain_lists() {
 }
 
 // After stepping aside: EMF 0.3.3 goes idle on a game build whose required signatures it cannot find (it says so in
-// emf/emf_core.log). Then no EMF mod runs at all; tell the user how to let kiln-emf load them instead.
+// emf/emf_core.log). Then no EMF mod runs at all; tell the user how to let kiln-emf load them instead. The log is read
+// on the disk thread, never on the tick.
 void KILN_CALL on_aside_pre(const KilnTickInfo*, void*) {
     if (++g_aside_steps != 50) return;  // ~2 s into the world: EMF has long decided
-    std::string log;
-    read_file(P.emf / L"emf_core.log", &log);
-    if (log.find("EMF stays idle") != std::string::npos) {
-        g_emf_idle = "EMF's core went idle on this game build (emf/emf_core.log: \"a required signature is missing: EMF "
-                     "stays idle\"): no EMF mod runs";
-        logf(KILN_LOG_WARN,
-             "%s. To run them with kiln-emf instead, switch EMF's loader off: put ';' in front of its line in "
-             "kiln/chain.ini (or remove it from dinput8-chain.ini), then restart",
-             g_emf_idle.c_str());
-    } else {
-        logf(KILN_LOG_INFO, "EMF's core runs the EMF mods (kiln-emf stays out of the way)");
-    }
-    write_status();
+    io_post("reading emf\\emf_core.log", [] {
+        std::string log;
+        read_file(P.emf / L"emf_core.log", &log);
+        if (log.find("EMF stays idle") != std::string::npos) {
+            std::string idle = "EMF's core went idle on this game build (emf/emf_core.log: \"a required signature is missing: "
+                               "EMF stays idle\"): no EMF mod runs";
+            logf(KILN_LOG_WARN,
+                 "%s. To run them with kiln-emf instead, switch EMF's loader off: put ';' in front of its line in "
+                 "kiln/chain.ini (or remove it from dinput8-chain.ini), then restart",
+                 idle.c_str());
+            std::lock_guard lock(g_status_mutex);
+            g_emf_idle = std::move(idle);
+        } else {
+            logf(KILN_LOG_INFO, "EMF's core runs the EMF mods (kiln-emf stays out of the way)");
+        }
+        write_status();
+    });
 }
 
 // ---------------------------------------------------------------------------------------------- ticks ---------
@@ -177,6 +186,7 @@ void KILN_CALL on_world_event(const KilnWorldEvent* e, void*) {
 }
 
 void KILN_CALL on_ready(void*) {
+    io_start();  // the disk thread: no file work on the world's tick
     // paths
     P.game = api_path(KILN_PATH_GAME);
     P.kiln = api_path(KILN_PATH_KILN);
@@ -240,6 +250,7 @@ void KILN_CALL on_ready(void*) {
 
     size_t loaded = 0;
     for (const auto& m : g_mods) loaded += m->status == EMF_MOD_LOADED;
+    g_any_loaded = loaded > 0;
     logf(KILN_LOG_INFO, "kiln-emf: %zu of %zu EMF mod(s) loaded", loaded, g_mods.size());
     write_status();
 }
@@ -251,6 +262,7 @@ void KILN_CALL on_unload(void*) {
     components_world_stopping();
     windows_shutdown();
     write_status();
+    io_stop(2000);  // the last emf.json (on_unload's own limit is 3 s)
 }
 
 }  // namespace
@@ -271,15 +283,24 @@ void install_ticks() {
     }
 }
 
+// The server world's Pre. Nothing here waits for the disk (0.2.0-dev.29.17): emf.json goes to the disk thread, and
+// commands.txt is looked for there. The minute's emf.json refresh (the mods' tick times) is only for loaded mods; a
+// change (a fault, an unsupported call) is written within 5 s either way. A Pre over 100 ms says which part took it.
 void dispatch_server_pre() {
+    g_pre_parts.begin(qpc_ns());
     net_server_pre();
-    game_server_pre();
+    g_pre_parts.part("net", qpc_ns());
+    game_server_pre(&g_pre_parts);
     commands_server_pre();
+    g_pre_parts.part("commands", qpc_ns());
     const uint64_t now = now_ms();
-    if ((g_dirty.load() && now - g_last_status > 5000) || now - g_last_status > 60000) {
+    if ((g_dirty.load() && now - g_last_status > 5000) || (g_any_loaded && now - g_last_status > 60000)) {
         g_last_status = now;
         write_status();
     }
+    g_pre_parts.part("status", qpc_ns());
+    if (auto line = g_pre_parts.end(qpc_ns(), now))
+        logf(KILN_LOG_WARN, "slow tick: kiln-emf's server Pre took %s", line->c_str());
 }
 
 void mark_status_dirty() { g_dirty = true; }
@@ -322,7 +343,10 @@ void write_status() {
                 {"side", g_side == KILN_SIDE_SERVER ? "server" : "client"},
                 {"steppedAside", !g_stepped_aside.empty()},
                 {"steppedAsideReason", g_stepped_aside},
-                {"emfIdle", g_emf_idle},
+                {"emfIdle", [] {
+                     std::lock_guard lock(g_status_mutex);
+                     return g_emf_idle;
+                 }()},
                 {"configDir", path_utf8(P.config)},
                 {"updatedUnixMs", static_cast<int64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
                                                            std::chrono::system_clock::now().time_since_epoch())
@@ -337,8 +361,7 @@ void write_status() {
         } catch (...) {
         }
     }
-    const auto file = P.state / L"emf.json";
-    if (!write_file_atomic(file, doc.dump(2) + "\n")) logf(KILN_LOG_WARN, "cannot write %s", path_utf8(file).c_str());
+    io_write(P.state / L"emf.json", doc.dump(2) + "\n");  // on the disk thread (it logs a failed write)
 }
 
 }  // namespace kemf
