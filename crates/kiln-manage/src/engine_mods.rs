@@ -708,17 +708,6 @@ struct Placement {
     game_folder: bool,
 }
 
-/// Kiln's copy `dir` of a `kind` mod as its receipt (`kiln/state/library-placements.json`, outside the folder) lists
-/// it: the marker (the Library entry), the files placed (relative path to hash, as [`placement_files`] lists them:
-/// `extended.mod.json` without its switch and settings) and whether it is a copy in `<game>/mods/` for a DLL that
-/// reads it there ([`Placement::game_folder`]). None when no receipt names this folder with the marker it holds.
-/// Whether the files are still the placed ones is the caller's to check (modpack::engine_identity).
-pub(crate) fn placed_copy(game: &Path, dir: &Path, kind: ModKind) -> Option<(Marker, std::collections::BTreeMap<String, String>, bool)> {
-    let have = marker(dir).filter(|m| m.format == 1 && m.kind == kind)?;
-    let r = placements(game).ok()?.into_iter().find(|r| r.path == dir && r.marker == have)?;
-    Some((r.marker, r.files, r.game_folder))
-}
-
 /// `managed` is the folder links are refused from (see [`refuse_symlink_path`]); the lock lives in `root` below it.
 fn engine_lock(managed: &Path, root: &Path) -> Result<std::fs::File> {
     let path = root.join("engine-mods.lock");

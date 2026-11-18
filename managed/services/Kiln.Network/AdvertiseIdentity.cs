@@ -6,13 +6,15 @@
 //
 //   Kiln's copy (the launcher placed it in this game folder: .kiln-library.json and kiln/state/library-placements.json;
 //   or synced it to this server: .kiln-source.json and kiln/state/server-library.json), whose files are still the ones
-//   placed: the Library entry's kdh1. Its settings, its switch and the files the mod adds do not count.
+//   placed: the Library entry's kdh1. Its settings, its switch, its logs and the files the mod adds do not count.
 //   Any other folder: the kdh1 of its files without logs (*.log), ShroudForge's extended.mod.json (switch and settings)
 //   and the kind's settings files.
 //
 // The receipts are kept outside the mod folders (a package cannot forge one). They name the folder by the launcher's
 // path (a Linux path under Wine or Proton, where this side sees D:\ or Z:\), so a receipt is matched by the folder's name
-// and its parent's name together with the marker in the folder.
+// and its parent's name together with the marker in the folder; kiln-manage matches them the same way. The fixture
+// schema/fixtures/engine-identity (a Python reference wrote its expected hashes) is read by this side's tests and by
+// kiln-manage's: change the rule in all three.
 using System.Security.Cryptography;
 using System.Text.Json;
 
@@ -65,8 +67,10 @@ internal static partial class NetAdvertise
     /// server folder (its kiln/state holds the receipts).</summary>
     internal static string EngineHash(string kind, string dir, string game)
     {
-        if (KilnsCopy(kind, dir, game) is { } copy && copy.Files.All(f => SameFile(dir, f.Rel, f.Sha)))
-            return copy.Library;
+        // any receipt that names this folder with the marker it holds, while the files it lists are still there as listed
+        foreach (var copy in KilnsCopies(kind, dir, game))
+            if (copy.Files.All(f => SameFile(dir, f.Rel, f.Sha)))
+                return copy.Library;
         var files = DirHash.Files(dir).Where(f => !IsLog(Rel(f.Key)) && !LeftOut(kind, Rel(f.Key), false)).ToList();
         return DirHash.HashOf(files);
     }
@@ -101,42 +105,56 @@ internal static partial class NetAdvertise
     }
 
     /// <summary>Kiln's copy: the Library entry's hash and the files to check (relative path, sha256), without the ones
-    /// that may change (<see cref="LeftOut"/>); null when no receipt names this folder with the marker it holds, and for a
-    /// server receipt from before its file list.</summary>
+    /// that may change (<see cref="LeftOut"/>, logs).</summary>
     internal sealed record KilnCopy(string Library, List<(string Rel, string Sha)> Files);
 
-    internal static KilnCopy? KilnsCopy(string kind, string dir, string game)
+    /// <summary>What the receipts say this folder is: one copy for each receipt entry that names the folder (by its
+    /// name and its parent's, case ignored for ASCII letters) with the marker the folder holds and has a file list.
+    /// Server sync first, then activation (kiln-manage modpack::kilns_copies, the same order). A receipt that cannot be
+    /// read gives none; one entry that is not as expected is passed over, the others still count.</summary>
+    internal static List<KilnCopy> KilnsCopies(string kind, string dir, string game)
     {
+        var list = new List<KilnCopy>();
         var name = Path.GetFileName(Path.TrimEndingDirectorySeparator(dir));
         var parent = Path.GetFileName(Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(dir)) ?? "");
+        // synced to this server by the launcher
         try
         {
-            // placed in this game folder by the launcher's activation
-            if (Json(Path.Combine(dir, ".kiln-library.json")) is { ValueKind: JsonValueKind.Object } m && Ref(m) is { } want && want.Kind == kind &&
-                want.Id == name && Json(Path.Combine(game, "kiln", "state", "library-placements.json")) is { ValueKind: JsonValueKind.Array } placed)
-                foreach (var r in placed.EnumerateArray())
-                    if (r.ValueKind == JsonValueKind.Object && r.TryGetProperty("marker", out var rm) && Ref(rm) == want && Names(r, "path", name, parent) &&
-                        Format(rm) == 1 && Format(m) == 1)
-                        return Copy(want.Hash, r, kind, r.TryGetProperty("gameFolder", out var g) && g.ValueKind == JsonValueKind.True);
-            // synced to this server by the launcher
             if (Json(Path.Combine(dir, ".kiln-source.json")) is { ValueKind: JsonValueKind.Object } s && Format(s) == 1 &&
                 s.TryGetProperty("library", out var sl) && Ref(sl) is { } lib && lib.Kind == kind && lib.Id == name &&
                 Json(Path.Combine(game, "kiln", "state", "server-library.json")) is { ValueKind: JsonValueKind.Object } synced)
                 foreach (var e in synced.EnumerateObject())
                     if (e.Value.ValueKind == JsonValueKind.Object && e.Value.TryGetProperty("library", out var el) && Ref(el) == lib &&
-                        LeafNames(e.Name, name, parent))
-                        return Copy(lib.Hash, e.Value, kind, false);
+                        LeafNames(e.Name, name, parent) && Copy(lib.Hash, e.Value, kind, false) is { } c)
+                        list.Add(c);
         }
         catch (Exception x) when (x is IOException or UnauthorizedAccessException or JsonException or ArgumentException) { }
-        return null;
+        // placed in this game folder by the launcher's activation
+        try
+        {
+            if (Json(Path.Combine(dir, ".kiln-library.json")) is { ValueKind: JsonValueKind.Object } m && Format(m) == 1 && Ref(m) is { } want &&
+                want.Kind == kind && want.Id == name &&
+                Json(Path.Combine(game, "kiln", "state", "library-placements.json")) is { ValueKind: JsonValueKind.Array } placed)
+                foreach (var r in placed.EnumerateArray())
+                    if (r.ValueKind == JsonValueKind.Object && r.TryGetProperty("marker", out var rm) && rm.ValueKind == JsonValueKind.Object &&
+                        Format(rm) == 1 && Ref(rm) == want && Names(r, "path", name, parent) &&
+                        Copy(want.Hash, r, kind, GameFolder(r)) is { } c)
+                        list.Add(c);
+        }
+        catch (Exception x) when (x is IOException or UnauthorizedAccessException or JsonException or ArgumentException) { }
+        return list;
     }
+
+    // kiln-manage writes the receipt's field as game_folder (engine_mods::Placement has no serde rename)
+    private static bool GameFolder(JsonElement r) =>
+        (r.TryGetProperty("game_folder", out var g) || r.TryGetProperty("gameFolder", out g)) && g.ValueKind == JsonValueKind.True;
 
     private static KilnCopy? Copy(string hash, JsonElement receipt, string kind, bool gameFolder)
     {
         if (!receipt.TryGetProperty("files", out var files) || files.ValueKind != JsonValueKind.Object) return null;
         var list = new List<(string, string)>();
         foreach (var f in files.EnumerateObject())
-            if (!f.Name.EndsWith('/') && f.Value.ValueKind == JsonValueKind.String && !LeftOut(kind, f.Name, gameFolder))
+            if (!f.Name.EndsWith('/') && f.Value.ValueKind == JsonValueKind.String && !LeftOut(kind, f.Name, gameFolder) && !IsLog(f.Name))
                 list.Add((f.Name, f.Value.GetString()!));
         return new KilnCopy(hash, list);
     }
@@ -153,12 +171,12 @@ internal static partial class NetAdvertise
 
     private static bool Names(JsonElement r, string key, string name, string parent) => Str(r, key) is { } p && LeafNames(p, name, parent);
 
-    /// <summary>The receipt's path (either slash) ends in <c>&lt;parent&gt;/&lt;name&gt;</c>, case ignored as Windows does.</summary>
+    /// <summary>The receipt's path (either slash) ends in <c>&lt;parent&gt;/&lt;name&gt;</c>, the case of ASCII letters
+    /// ignored (as kiln-manage's leaf_names: Windows paths of one folder may differ in case).</summary>
     internal static bool LeafNames(string path, string name, string parent)
     {
         var parts = path.Replace('\\', '/').TrimEnd('/').Split('/');
-        return parts.Length >= 2 && string.Equals(parts[^1], name, StringComparison.OrdinalIgnoreCase)
-            && string.Equals(parts[^2], parent, StringComparison.OrdinalIgnoreCase);
+        return parts.Length >= 2 && AsciiLower(parts[^1]) == AsciiLower(name) && AsciiLower(parts[^2]) == AsciiLower(parent);
     }
 
     private static JsonElement? Json(string path)

@@ -242,12 +242,13 @@ fn advertised(server_dir: &Path, kind: ModKind, dir: &Path) -> Result<String> {
 }
 
 /// What a server advertises for another engine's mod and what a modpack packs of it (0.2.0-dev.29.18; Kiln.Network
-/// AdvertiseIdentity.cs computes the same, keep in step). The hash stays the same while the mod runs:
+/// AdvertiseIdentity.cs computes the same, and schema/fixtures/engine-identity holds trees and the hashes both must
+/// give, written by a Python reference). The hash stays the same while the mod runs:
 ///
 /// - Kiln's copy (the launcher synced it to the server, `.kiln-source.json` and the server's receipt; or placed it in
 ///   a game folder, `.kiln-library.json` and the placements receipt) whose files are still the ones placed: the Library
-///   entry's kdh1. The settings and the switch in it and the files the mod writes into its folder (logs,
-///   `bin/native-status.txt`) do not count. The files placed are packed.
+///   entry's kdh1. The settings and the switch in it, its logs and the files the mod writes into its folder
+///   (`bin/native-status.txt`) do not count. The files placed are packed.
 /// - Any other folder (the player's own): the kdh1 of its files without logs (`*.log`), ShroudForge's
 ///   `extended.mod.json` (its switch and settings) and the kind's settings files (engine_mods::settings_files). Every
 ///   file but the logs is packed.
@@ -256,8 +257,10 @@ fn advertised(server_dir: &Path, kind: ModKind, dir: &Path) -> Result<String> {
 pub(crate) struct EngineIdentity {
     pub advertised: String,
     /// The Library entry of Kiln's copy.
+    #[cfg_attr(not(feature = "zip"), allow(dead_code))]
     pub library: Option<LibraryRef>,
     /// What a modpack packs of the folder: (zip-relative name, file), as [`mod_files`] lists them.
+    #[cfg_attr(not(feature = "zip"), allow(dead_code))]
     pub files: Vec<(String, PathBuf)>,
 }
 
@@ -273,21 +276,119 @@ fn left_out(kind: ModKind, rel: &str, game_folder: bool) -> bool {
         || (game_folder && crate::engine_mods::is_game_settings_file(rel))
 }
 
-pub(crate) fn engine_identity(server_dir: &Path, kind: ModKind, dir: &Path) -> Result<EngineIdentity> {
-    let all = mod_files(kind, dir)?;
-    let synced = crate::server::control::synced_copy(server_dir, dir, kind).map(|(l, f)| (l, f, false));
-    let placed = || crate::engine_mods::placed_copy(server_dir, dir, kind)
-        .map(|(m, f, g)| (LibraryRef { kind: m.kind, id: m.id, version: m.version, hash: m.hash }, f, g));
-    if let Some((library, files, game_folder)) = synced.or_else(placed) {
-        // still the files placed: every one the receipt lists, as it lists it (what may change aside)
-        let same = files.iter().filter(|(rel, _)| !rel.ends_with('/') && !left_out(kind, rel, game_folder))
-            .all(|(rel, hash)| crate::hash::sha256_file(&dir.join(rel)).is_ok_and(|(h, _)| h == *hash));
-        if same {
-            let packed = all.into_iter().filter(|(rel, _)| files.contains_key(rel)).collect();
-            return Ok(EngineIdentity { advertised: library.hash.clone(), library: Some(library), files: packed });
+/// One receipt entry's word that a folder is Kiln's copy: the Library entry's kdh1 and the files placed or synced
+/// (relative path, `/`-separated, to sha256; folders end in `/`), as `engine_mods::placement_files` and
+/// `server::control::payload_files` list them.
+struct KilnsCopy {
+    library: LibraryRef,
+    files: serde_json::Map<String, serde_json::Value>,
+    game_folder: bool,
+}
+
+impl KilnsCopy {
+    /// The files to compare: not folders, not what may change ([`left_out`]) and no logs.
+    fn checked(&self, kind: ModKind) -> impl Iterator<Item = (&String, &str)> {
+        self.files.iter().filter(move |(rel, _)| !rel.ends_with('/') && !left_out(kind, rel, self.game_folder) && !crate::settings_files::is_log(rel))
+            .filter_map(|(rel, v)| v.as_str().map(|h| (rel, h)))
+    }
+
+    /// Every file it lists is still in `dir` as a regular file (no link) with the listed sha256.
+    fn current(&self, kind: ModKind, dir: &Path) -> bool {
+        self.checked(kind).all(|(rel, sha)| {
+            let path = dir.join(rel);
+            std::fs::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_file() && !is_reparse(&m))
+                && crate::hash::sha256_file(&path).is_ok_and(|(h, _)| h.eq_ignore_ascii_case(sha))
+        })
+    }
+}
+
+#[cfg(windows)]
+fn is_reparse(m: &std::fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    m.file_attributes() & 0x400 != 0
+}
+#[cfg(not(windows))]
+fn is_reparse(_: &std::fs::Metadata) -> bool { false }
+
+/// A receipt or marker as JSON (at most 16 MiB, strict JSON as Kiln writes it), None when absent or unreadable.
+fn receipt_json(path: &Path) -> Option<serde_json::Value> {
+    let meta = std::fs::metadata(path).ok()?;
+    if !meta.is_file() || meta.len() > 16 << 20 { return None; }
+    serde_json::from_slice(&std::fs::read(path).ok()?).ok()
+}
+
+/// `{kind, id, version, hash}` of a marker or receipt (all four strings), for comparing.
+fn library_of(v: &serde_json::Value) -> Option<LibraryRef> {
+    let s = |k: &str| v.get(k).and_then(|x| x.as_str()).map(str::to_owned);
+    Some(LibraryRef { kind: ModKind::parse(&s("kind")?)?, id: s("id")?, version: s("version")?, hash: s("hash")? })
+}
+
+fn format_1(v: &serde_json::Value) -> bool {
+    v.get("format").and_then(serde_json::Value::as_i64) == Some(1)
+}
+
+/// The receipt's path (either slash) ends in `<parent>/<name>`, the case of ASCII letters ignored. The receipts name a
+/// folder by the launcher's path, which the game under Wine or Proton sees as another (`D:\…`, `Z:\…`), so both sides
+/// match a receipt by these two names and the marker in the folder (Kiln.Network NetAdvertise.LeafNames).
+fn leaf_names(path: &str, name: &str, parent: &str) -> bool {
+    let p = path.replace('\\', "/");
+    let mut parts = p.trim_end_matches('/').rsplit('/');
+    matches!((parts.next(), parts.next()), (Some(n), Some(pa)) if n.eq_ignore_ascii_case(name) && pa.eq_ignore_ascii_case(parent))
+}
+
+/// What the receipts say `dir` is: one [`KilnsCopy`] for each receipt entry that names the folder with the marker it
+/// holds and has a file list. Server sync (`.kiln-source.json`, `kiln/state/server-library.json`) first, then activation
+/// (`.kiln-library.json`, `kiln/state/library-placements.json`); a marker's kind and id must be the folder's. The
+/// receipts are kept outside the mod folders, so a package cannot forge one. A receipt that cannot be read gives none;
+/// an entry that is not as expected is passed over (Kiln.Network NetAdvertise.KilnsCopies, the same rule).
+fn kilns_copies(root: &Path, kind: ModKind, dir: &Path) -> Vec<KilnsCopy> {
+    let mut out = Vec::new();
+    let (Some(name), Some(parent)) = (dir.file_name().and_then(|n| n.to_str()), dir.parent().and_then(|p| p.file_name()).and_then(|n| n.to_str()))
+    else { return out };
+    let state = root.join("kiln/state");
+    let files = |v: &serde_json::Value| v.get("files").and_then(|f| f.as_object()).cloned();
+    if let Some(m) = receipt_json(&dir.join(crate::server::control::MARKER)).filter(format_1)
+        && let Some(lib) = m.get("library").and_then(library_of).filter(|l| l.kind == kind && l.id == name)
+        && let Some(serde_json::Value::Object(synced)) = receipt_json(&state.join("server-library.json"))
+    {
+        for (path, e) in &synced {
+            if e.get("library").and_then(library_of).as_ref() == Some(&lib) && leaf_names(path, name, parent)
+                && let Some(files) = files(e)
+            {
+                out.push(KilnsCopy { library: lib.clone(), files, game_folder: false });
+            }
         }
     }
-    let files: Vec<(String, PathBuf)> = all.into_iter().filter(|(rel, _)| !crate::settings_files::is_log(rel)).collect();
+    if let Some(m) = receipt_json(&dir.join(crate::engine_mods::MARKER)).filter(format_1)
+        && let Some(want) = library_of(&m).filter(|l| l.kind == kind && l.id == name)
+        && let Some(serde_json::Value::Array(placed)) = receipt_json(&state.join("library-placements.json"))
+    {
+        for r in &placed {
+            let marker = r.get("marker").filter(|x| format_1(x));
+            if marker.and_then(library_of).as_ref() == Some(&want) && r.get("path").and_then(|p| p.as_str()).is_some_and(|p| leaf_names(p, name, parent))
+                && let Some(files) = files(r)
+            {
+                // kiln-manage writes `game_folder` (engine_mods::Placement has no serde rename)
+                let game_folder = r.get("game_folder").or_else(|| r.get("gameFolder")).and_then(|g| g.as_bool()) == Some(true);
+                out.push(KilnsCopy { library: want.clone(), files, game_folder });
+            }
+        }
+    }
+    out
+}
+
+pub(crate) fn engine_identity(server_dir: &Path, kind: ModKind, dir: &Path) -> Result<EngineIdentity> {
+    if let Some(copy) = kilns_copies(server_dir, kind, dir).into_iter().find(|c| c.current(kind, dir)) {
+        // the files placed, as a modpack's entries name them (kdh1's rules: dot entries skipped, NFC names), sorted
+        let mut packed: Vec<(String, PathBuf)> = copy.files.keys()
+            .filter(|rel| !rel.ends_with('/') && !rel.split('/').any(|c| c.starts_with('.')))
+            .map(|rel| (rel.split('/').map(|c| unicode_normalization::UnicodeNormalization::nfc(c).collect::<String>()).collect::<Vec<_>>().join("/"), dir.join(rel)))
+            .filter(|(_, p)| std::fs::symlink_metadata(p).is_ok_and(|m| m.file_type().is_file()))
+            .collect();
+        packed.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
+        return Ok(EngineIdentity { advertised: copy.library.hash.clone(), library: Some(copy.library), files: packed });
+    }
+    let files: Vec<(String, PathBuf)> = mod_files(kind, dir)?.into_iter().filter(|(rel, _)| !crate::settings_files::is_log(rel)).collect();
     let counted: Vec<(String, PathBuf)> = files.iter().filter(|(rel, _)| !left_out(kind, rel, false)).cloned().collect();
     Ok(EngineIdentity { advertised: crate::hash::of_mod_records(kind, records(&counted)?)?, library: None, files })
 }
