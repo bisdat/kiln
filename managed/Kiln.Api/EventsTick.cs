@@ -62,7 +62,9 @@ internal static class ServiceTick
          ("Kiln.ClientOptions", "Kiln.ClientOptionsStartup"),
          ("Kiln.CreatureControl", "Kiln.CreatureControlStartup"),  // 19d-creature-control (not in the reserved set)
          ("Kiln.SlotUi", "Kiln.SlotUiStartup"),
-         ("Kiln.World", "Kiln.WorldStartup")];
+         ("Kiln.World", "Kiln.WorldStartup"),
+         // 0.2.0-dev.29.17 (GitHub #68): the channel kiln:craftstock only, before anyone joins; not Kiln.Blocks' data tick
+         ("Kiln.Blocks", "Kiln.CraftStockStartup")];
 
     /// <summary>Of <see cref="AutoStart"/>, the services the host starts right before the mods load (their OnLoad runs
     /// before the first service tick): rows a mod reads in OnLoad and that depend on no mod. Kiln.World's

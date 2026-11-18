@@ -17,6 +17,8 @@ override Kiln.ResourceListReplace.ToString() -> string!
 static Kiln.ResourceListReplace.operator !=(Kiln.ResourceListReplace? left, Kiln.ResourceListReplace? right) -> bool
 static Kiln.ResourceListReplace.operator ==(Kiln.ResourceListReplace? left, Kiln.ResourceListReplace? right) -> bool
 const Kiln.Stations.OutputSourcesCapability = "stations.output_sources" -> string!
+const Kiln.Stations.CraftSourcesCapability = "stations.craft_sources" -> string!
+const Kiln.Stations.CraftUiCapability = "stations.craft_ui" -> string!
 static Kiln.Stations.SetOutputSource(Kiln.EntityId station, bool on = true) -> bool
 static Kiln.Stations.IsOutputSource(Kiln.EntityId station) -> bool
 static Kiln.Stations.OutputSources(Kiln.BaseId? base = null) -> System.Collections.Generic.IReadOnlyList<Kiln.EntityId>!

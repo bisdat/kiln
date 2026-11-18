@@ -429,6 +429,11 @@ internal interface IStationsBackend
     (int Rc, StationsNative.Stack[] Rows) BaseStockWithStations(uint index);
     int SetOutputSource(uint entity, bool on);
     (int Rc, uint[] Ids) OutputSources();
+    /// <summary>The table has <c>set_craft_stock</c> and <c>craft_items</c> (the Kiln clients' crafting-menu snapshot).</summary>
+    bool HasCraftStock { get; }
+    int SetCraftStock(StationsNative.Stack[] rows);
+    /// <summary>The items a Kiln client needs counted for these lent items (native <c>craft_items</c>).</summary>
+    (int Rc, uint[] Items) CraftItems(uint[] lent);
 }
 
 /// <summary>Kiln.Stations' side of kiln.stations: requests, results, reads, the event pump.</summary>
@@ -658,6 +663,32 @@ internal static unsafe partial class StationsCore
             return (StationsNative.BufferTooSmall, []);
         }
 
+        public bool HasCraftStock => T is var t && t != null && t->Header.Size >= (uint)StationsNative.TableCraftStock;
+
+        public int SetCraftStock(StationsNative.Stack[] rows)
+        {
+            if (!HasCraftStock) return StationsNative.Unavailable;
+            if (rows.Length == 0) return T->SetCraftStock(null, 0);
+            fixed (StationsNative.Stack* p = rows) return T->SetCraftStock(p, (uint)rows.Length);
+        }
+
+        public (int Rc, uint[] Items) CraftItems(uint[] lent)
+        {
+            if (!HasCraftStock) return (StationsNative.Unavailable, []);
+            var buf = new uint[256];
+            for (var round = 0; round < 4; round++)
+            {
+                uint n = 0;
+                int rc;
+                fixed (uint* l = lent)
+                fixed (uint* p = buf)
+                    rc = T->CraftItems(l, (uint)lent.Length, p, (uint)buf.Length, &n);
+                if (rc == StationsNative.BufferTooSmall && n > buf.Length) { buf = new uint[n]; continue; }
+                return (rc, buf.AsSpan(0, (int)Math.Min(n, (uint)buf.Length)).ToArray());
+            }
+            return (StationsNative.BufferTooSmall, []);
+        }
+
         public int SetOutputSource(uint entity, bool on) =>
             HasOutputSources ? T->SetOutputSource(entity, on ? 1u : 0u) : StationsNative.Unavailable;
 
@@ -718,9 +749,11 @@ internal static unsafe partial class StationsCore
         {
             if (Backend.Status() is null)
                 ServiceCaps.LowerFeatures(StationsNative.Name, Stations.ReadCapability, Stations.FillCapability, Stations.ControlCapability,
-                    Stations.EventsCapability, Stations.OutputSourcesCapability);
+                    Stations.EventsCapability, Stations.OutputSourcesCapability, Stations.CraftSourcesCapability, Stations.CraftUiCapability);
             else if (!Backend.HasOutputSources)
-                ServiceCaps.LowerFeatures(StationsNative.Name, Stations.OutputSourcesCapability);
+                ServiceCaps.LowerFeatures(StationsNative.Name, Stations.OutputSourcesCapability, Stations.CraftSourcesCapability, Stations.CraftUiCapability);
+            else if (!Backend.HasCraftStock)
+                ServiceCaps.LowerFeatures(StationsNative.Name, Stations.CraftSourcesCapability, Stations.CraftUiCapability);
         }
         catch (Exception e) when (e is ArgumentException or InvalidOperationException)
         {

@@ -136,6 +136,24 @@ public sealed unsafe class StationsTests : IDisposable
         public bool HasOutputs = true;
         public readonly SortedSet<uint> Sources = [];
         public bool HasOutputSources => HasOutputs;
+        public bool HasCraftStock => HasOutputs;
+        public StationsNative.Stack[] CraftStock = [];
+        public int SetCraftStock(StationsNative.Stack[] rows)
+        {
+            if (!HasCraftStock) return StationsNative.Unavailable;
+            CraftStock = rows;
+            return 0;
+        }
+
+        /// <summary>craft_items: per lent item, the other inputs of the recipes that take it.</summary>
+        public readonly Dictionary<uint, uint[]> CraftInputs = new();
+        public (int Rc, uint[] Items) CraftItems(uint[] lent)
+        {
+            var set = new SortedSet<uint>(lent);
+            foreach (var l in lent)
+                if (CraftInputs.TryGetValue(l, out var more)) set.UnionWith(more);
+            return (0, set.ToArray());
+        }
 
         public int SetOutputSource(uint entity, bool on)
         {
@@ -292,13 +310,15 @@ public sealed unsafe class StationsTests : IDisposable
         Assert.Equal(72, (int)Marshal.OffsetOf<StationsNative.Event>("Position"));
         Assert.Equal(96, (int)Marshal.OffsetOf<StationsNative.Event>("Base"));
         Assert.Equal(188, sizeof(StationsNative.Status));
-        Assert.Equal(8 + 26 * 8, sizeof(StationsNative.Table));
+        Assert.Equal(8 + 28 * 8, sizeof(StationsNative.Table));
         Assert.Equal(8 + 24 * 8, StationsNative.TableChests);
         Assert.Equal(8 + 25 * 8, StationsNative.TableCollect);
         Assert.Equal(8 + 26 * 8, StationsNative.TableStock);
+        Assert.Equal(8 + 28 * 8, StationsNative.TableCraftStock);
         Assert.Equal(24, sizeof(StationsNative.Collect));
         Assert.Equal(8 + 21 * 8, StationsNative.TableV1);
         Assert.Equal(8 + 23 * 8, StationsNative.TableOutputs);
+        Assert.Equal(1024, StationsNative.MaxCraftStock);
     }
 
     [Fact]
@@ -855,6 +875,15 @@ public sealed unsafe class StationsTests : IDisposable
         var done = NewResult(StationActionStatus.Done, "");
         done.FromChests = 4;
         Assert.Equal(4, StationsCore.ResultOf(done, StationAction.Fill).FromChests);
+    }
+
+    [Fact]
+    public void CraftStockKeyChangesWhenACountChanges()
+    {
+        var a = new CraftStockRows([new CraftStockRow(0x10, 2), new CraftStockRow(0x20, 4)]);
+        var b = new CraftStockRows([new CraftStockRow(0x10, 2), new CraftStockRow(0x20, 5)]);
+        Assert.NotEqual(CraftStock.Key(a), CraftStock.Key(b));
+        Assert.Equal(CraftStock.Key(a), CraftStock.Key(new CraftStockRows([new CraftStockRow(0x10, 2), new CraftStockRow(0x20, 4)])));
     }
 
     [Fact]

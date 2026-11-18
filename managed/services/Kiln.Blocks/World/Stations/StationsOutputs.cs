@@ -17,6 +17,14 @@ public static partial class Stations
     /// <summary><see cref="SetOutputSource"/> and the fills that take from opted-in stations (sigdb feature).</summary>
     public const string OutputSourcesCapability = "stations.output_sources";
 
+    /// <summary>The same opt-in, as the last source of a player's craft (sigdb feature; it also needs kiln.rules' payment
+    /// hook, and is lowered at the first world without it). A station's own craft never takes from other stations.</summary>
+    public const string CraftSourcesCapability = "stations.craft_sources";
+
+    /// <summary>A Kiln client's crafting menu counts the opted-in outputs the server sends (sigdb feature, client; it also
+    /// needs kiln.rules' crafting-count hook). A vanilla client keeps the game's counts.</summary>
+    public const string CraftUiCapability = "stations.craft_ui";
+
     /// <summary>
     /// Opts a station in (or out) as crafting stock: its finished items (<see cref="StationInfo.Outputs"/>) become the last
     /// source of every fill in its base, the game's "fill from chests" button included: after the player's bag and the

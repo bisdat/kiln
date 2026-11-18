@@ -208,6 +208,9 @@ internal static unsafe class StationsNative
         public delegate* unmanaged[Cdecl]<uint> MaxChests;
         public delegate* unmanaged[Cdecl]<ulong, Collect*, delegate* unmanaged[Cdecl]<Result*, void*, void>, void*, ulong*, int> Collect;
         public delegate* unmanaged[Cdecl]<uint, Stack*, uint, uint*, int> BaseStockWithStations;
+        // ---- the crafting menu's snapshot for Kiln clients (GitHub #68 step 2). Header.Size tells whether they are here. ----
+        public delegate* unmanaged[Cdecl]<Stack*, uint, int> SetCraftStock;
+        public delegate* unmanaged[Cdecl]<uint*, uint, uint*, uint, uint*, int> CraftItems;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -215,6 +218,9 @@ internal static unsafe class StationsNative
     {
         public uint Size, Station, To, Item, Flags, Reserved;
     }
+
+    /// <summary>The rows of one crafting-stock snapshot (KILN_STATIONS_MAX_CRAFT_STOCK).</summary>
+    public const int MaxCraftStock = 1024;
 
     /// <summary>The table size up to <see cref="Table.LastSeq"/>: kiln.stations before 0.2.0-dev.29.17.</summary>
     public static readonly int TableV1 = 8 + 21 * sizeof(nint);
@@ -226,6 +232,8 @@ internal static unsafe class StationsNative
     public static readonly int TableCollect = TableChests + sizeof(nint);
     /// <summary>The table size through <see cref="Table.BaseStockWithStations"/>.</summary>
     public static readonly int TableStock = TableCollect + sizeof(nint);
+    /// <summary>The table size through <see cref="Table.CraftItems"/>: the crafting menu's snapshot (GitHub #68 step 2).</summary>
+    public static readonly int TableCraftStock = TableStock + 2 * sizeof(nint);
     /// <summary>The plan's size before 0.2.0-dev.29.17 (no <see cref="Plan.Outputs"/>).</summary>
     public static readonly int PlanV1 = sizeof(Plan) - 2 * MaxInputs * sizeof(uint);
     /// <summary>The plan's size with outputs and without <see cref="Plan.Chests"/>.</summary>
