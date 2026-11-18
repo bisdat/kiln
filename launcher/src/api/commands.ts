@@ -191,6 +191,9 @@ export interface LaunchOptionsInfo {
   hasDllOverride: boolean;
   chainedOverrideMissing?: boolean;
   advice: string | null;
+  /** Explicit override to try after a real "No Kiln" failure, even on known-native runners. */
+  fallbackAdvice?: string | null;
+  dinput8NativeByRunner?: boolean;
 }
 /** A graphics tool in the game folder that runs on its own next to Kiln (kiln_manage::game::GraphicsToolNote). */
 export interface GraphicsToolNote {

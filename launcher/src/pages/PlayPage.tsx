@@ -354,7 +354,11 @@ function Banners({ game, ctl, pending, onOffer, boot }: { game: GameInstall; ctl
       </Banner>,
     );
   }
-  const advice = s?.runtime.installed && ctl.view.phase !== "vanilla" ? s.launchOptions?.advice : null;
+  const options = s?.launchOptions;
+  // Suppress routine advice for known-native runners, but restore the explicit fix
+  // if Kiln actually failed to start (including GE-Proton 11-11+).
+  const advice = s?.runtime.installed && ctl.view.phase !== "vanilla"
+    ? ((ctl.kilnMissing || ctl.stuck) ? options?.advice ?? options?.fallbackAdvice : options?.advice) : null;
   if (advice && (!s?.launchOptions?.hasDllOverride || s.launchOptions.chainedOverrideMissing)) {
     out.push(
       <Banner key="adv" tone="warn" title={s?.launchOptions?.hasDllOverride && s.launchOptions.chainedOverrideMissing ? t("play.banner.settingAsi") : ctl.kilnMissing ? t("play.banner.notLoading") : ctl.stuck ? t("play.banner.didNotStart") : t("play.banner.setting")}
