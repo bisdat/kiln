@@ -3122,10 +3122,12 @@ fn emf_lua_root(game: &Path, id: &str) -> Result<PathBuf> {
     Ok(root)
 }
 
-/// Where the profile's enabled EMF Lua mod `m` runs: Kiln's copy `<game>/emf/mods/<id>/` once [`place`] has made it for
-/// this version (its receipt and marker name it), else the player's own folder of the same mod there, which activation
-/// leaves as it is and places nothing beside. None for an EMF DLL mod, a mod switched off, or a Lua mod with neither (the
-/// Library entry, which EMF's lua mod does not find; the activation's result says why it was not placed).
+/// Where the profile's enabled EMF Lua mod `m` runs: the folder `<game>/emf/mods/<id>/` when it holds that Lua mod (its
+/// manifest id), whoever's it is: Kiln's copy once [`place`] has made it, or a folder activation leaves as it is there
+/// (the player's own, a copy whose first placement stopped before its receipt, Kiln's copy the player edited), since
+/// EMF's lua mod reads Lua mods only there; else the player's own folder of the same mod under another name, which
+/// activation leaves as it is and places nothing beside. None for an EMF DLL mod, a mod switched off, or a Lua mod with
+/// neither (the Library entry, which EMF's lua mod does not find; the activation's result says why it was not placed).
 fn emf_lua_path(dirs: &DataDirs, m: &crate::profile::ProfileMod, game: &Path) -> Option<PathBuf> {
     if !m.enabled {
         return None;
@@ -3137,21 +3139,16 @@ fn emf_lua_path(dirs: &DataDirs, m: &crate::profile::ProfileMod, game: &Path) ->
     }
     let root = emf_lua_root(game, &m.id).ok()?;
     let dst = root.join(&m.id);
-    let want = Marker { format: 1, kind: ModKind::Emf, id: m.id.clone(), version: m.version.clone(), hash: m.hash.clone() };
-    let have = marker(&dst);
-    if have.as_ref() == Some(&want) && placements(game).ok()?.iter().any(|r| r.path == dst && r.marker == want) {
-        return Some(dst);
-    }
-    // a player's folder: the one under the mod's id holding the same Lua mod, or the same Lua mod under another name
     let id = manifest_id_raw(&src)?;
-    let same = |p: &Path| !p.is_symlink() && p.is_dir() && marker(p).is_none() && crate::library::is_emf_lua(p)
+    let holds = |p: &Path| !p.is_symlink() && p.is_dir() && crate::library::is_emf_lua(p)
         && manifest_id_raw(p).is_some_and(|o| o.eq_ignore_ascii_case(&id));
-    if same(&dst) {
+    if holds(&dst) {
         return Some(dst);
     }
+    // under another name only a folder that is no copy of Kiln's, as for placing (same_mod_elsewhere)
     let mut others: Vec<PathBuf> = std::fs::read_dir(&root).ok()?.flatten().map(|e| e.path()).filter(|p| *p != dst).collect();
     others.sort();
-    others.into_iter().find(|p| same(p))
+    others.into_iter().find(|p| holds(p) && !marker(p).is_some_and(|k| k.kind == ModKind::Emf))
 }
 
 /// Kiln 0.2.0-dev.23 and earlier ran Greeneye mods from their Library entry, and a Greeneye mod writes its settings and
@@ -5111,6 +5108,55 @@ mod tests {
         assert_eq!(s["properties"]["zoom"]["type"], "integer");
         assert_eq!(s["properties"]["alpha"]["type"], "number");
         assert_eq!(s["properties"]["title"]["type"], "string");
+    }
+
+    /// An EMF Lua mod (Beastmaster's mod.json keys, shortened) of `version` in a test Library; the profile entry for it.
+    fn emf_lua_mod(dirs: &DataDirs, root: &Path, version: &str) -> crate::profile::ProfileMod {
+        let src = root.join(format!("pkg-{version}/beastmaster"));
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(src.join("mod.json"), format!(r#"{{"id":"beastmaster","name":"Beastmaster","version":"{version}","emf":14,"main":"main.lua"}}"#)).unwrap();
+        std::fs::write(src.join("main.lua"), format!("-- {version}\n")).unwrap();
+        let r = crate::library::import(dirs, &[src], &mut crate::task::NoProgress).unwrap();
+        let r = r.imported.iter().chain(&r.existing).find(|x| x.kind == ModKind::Emf).cloned().unwrap_or_else(|| panic!("{r:?}"));
+        crate::profile::ProfileMod { id: r.id, version: r.version, hash: r.hash, enabled: true }
+    }
+
+    /// inbox 61 review: EMF's lua mod reads a Lua mod only in emf/mods/<folder>, and activation leaves a folder there that
+    /// is not Kiln's to replace as it is. A first copy whose placement stopped after it was published and before its
+    /// receipt (a marker and no receipt: the player's, as markers never grant ownership), and Kiln's copy that stays
+    /// because the player edited it, are what the profile runs: naming the Library entry, which EMF's lua mod never
+    /// finds, ran nothing while the result said the folder is used or may still run.
+    #[test]
+    fn the_emf_lua_mod_folder_activation_leaves_is_the_one_the_profile_runs() {
+        let tmp = crate::library::TempDir::new(&std::env::temp_dir(), "emf-lua-left").unwrap();
+        let dirs = DataDirs::at(tmp.path().join("data"));
+        let game = tmp.path().join("game");
+        std::fs::create_dir_all(game.join("kiln")).unwrap();
+        let mut p = crate::profile::create(&dirs, "p", None).unwrap();
+        p.mods.emf = vec![emf_lua_mod(&dirs, tmp.path(), "1.0.0")];
+        let copy = game.join("emf/mods/beastmaster");
+        crate::kept::hooks::STOP_AT.with(|s| s.set(Some(crate::kept::Step::Published)));
+        let stopped = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { let _ = place(&dirs, &p, &game); })).is_err();
+        crate::kept::hooks::STOP_AT.with(|s| s.set(None));
+        assert!(stopped && copy.join("main.lua").is_file() && marker(&copy).is_some(), "the first placement did not reach Published");
+        let rep = place(&dirs, &p, &game).unwrap();
+        assert!(rep.own == ["emf:beastmaster"] && rep.placed.is_empty(), "{rep:?}");
+        assert_eq!(game_path_of(&dirs, ModKind::Emf, &p.mods.emf[0], &game), Some(copy.clone()));
+        // Kiln's own copy, edited by the player, while the profile moves to another version: it stays, and runs
+        std::fs::remove_dir_all(&copy).unwrap();
+        let rep = place(&dirs, &p, &game).unwrap();
+        assert_eq!(rep.placed, ["emf:beastmaster"], "{rep:?}");
+        std::fs::write(copy.join("main.lua"), "-- mine\n").unwrap();
+        p.mods.emf = vec![emf_lua_mod(&dirs, tmp.path(), "2.0.0")];
+        let rep = place(&dirs, &p, &game).unwrap();
+        assert!(rep.retained.iter().any(|r| r.path == copy) && rep.placed.is_empty(), "{rep:?}");
+        assert_eq!(std::fs::read_to_string(copy.join("main.lua")).unwrap(), "-- mine\n");
+        assert_eq!(game_path_of(&dirs, ModKind::Emf, &p.mods.emf[0], &game), Some(copy.clone()));
+        // switched off: none, and the edited copy stays as it is
+        p.mods.emf[0].enabled = false;
+        place(&dirs, &p, &game).unwrap();
+        assert_eq!(game_path_of(&dirs, ModKind::Emf, &p.mods.emf[0], &game), None);
+        assert!(copy.join("main.lua").is_file());
     }
 
     #[test]
