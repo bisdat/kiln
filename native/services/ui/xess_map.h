@@ -184,6 +184,9 @@ inline bool check_create(const upscale::CreateInfo& ci, std::string* why) {
         return no("XeSS upscales only: the render size " + std::to_string(ci.max_render_width) + "x" + std::to_string(ci.max_render_height) +
                   " is larger than the output " + std::to_string(ci.output_width) + "x" + std::to_string(ci.output_height));
     if (ci.output_width > 16384 || ci.output_height > 16384) return no("the output is larger than 16384 pixels a side");
+    if (ci.output_texture_width && ci.output_texture_height && (ci.output_texture_width < ci.output_width || ci.output_texture_height < ci.output_height))
+        return no("the output texture " + std::to_string(ci.output_texture_width) + "x" + std::to_string(ci.output_texture_height) +
+                  " is smaller than the upscale size");
     if (ci.color_format != VK_FORMAT_UNDEFINED && ci.output_format != VK_FORMAT_UNDEFINED && ci.color_format != ci.output_format)
         return no("XeSS writes the output in the colour's format; the game's output has another one");
     return true;

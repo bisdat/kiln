@@ -106,6 +106,8 @@ class XessBackend final : public upscale::Backend {
         out.min_api_version = api;
         for (uint32_t i = 0; i < n && names; ++i)
             if (names[i] && *names[i]) out.extensions.push_back({names[i], true});
+        instance_needs_ = out;
+        instance_asked_ = true;
         std::string list;
         for (const auto& e : out.extensions) list += (list.empty() ? "" : ", ") + e.name;
         host_->log(3, "XeSS asks the Vulkan instance for API " + version_text(api) + (list.empty() ? " and no extension" : " and " + list));
@@ -188,10 +190,20 @@ class XessBackend final : public upscale::Backend {
         if (!needs_asked_ || needs_documented_) {
             if (!query_device_needs(vk.instance, vk.physical, &needs)) return fail(upscale::Why::device, needs_error_);
         }
-        const auto missing = missing_on_device(vk, needs);
+        auto missing = missing_on_device(vk, needs);
+        // what XeSS asked of the instance, on the instance the device was made from
+        if (instance_asked_) {
+            if (instance_needs_.min_api_version && vk.instance_api && vk.instance_api < instance_needs_.min_api_version)
+                missing.push_back("a Vulkan " + version_text(instance_needs_.min_api_version) + " instance");
+            for (const auto& e : instance_needs_.extensions)
+                if (e.required && !vk.has_instance_extension(e.name.c_str())) missing.push_back(e.name + " (instance)");
+        }
         if (!missing.empty()) {
+            // asked nothing at the device's creation: XeSS was not the choice at the game's start; a restart has it asked
             if (!needs_asked_)
                 return fail(upscale::Why::restart, "XeSS was chosen after the game's start: it runs from the next start (the device lacks " + join(missing) + ")");
+            if (!vk.needs_merged)
+                return fail(upscale::Why::device, "Kiln could not give the game's Vulkan device what XeSS needs: " + join(missing));
             return fail(upscale::Why::device, "the game's Vulkan device lacks what XeSS needs: " + join(missing));
         }
         vk_ = vk;
@@ -480,7 +492,8 @@ class XessBackend final : public upscale::Backend {
     bool tuning_read_ = false;
     // needs
     upscale::DeviceNeeds device_needs_;
-    bool needs_asked_ = false, needs_documented_ = false;
+    upscale::InstanceNeeds instance_needs_;
+    bool needs_asked_ = false, needs_documented_ = false, instance_asked_ = false;
     std::string needs_error_;
     // the device
     upscale::VkContext vk_;

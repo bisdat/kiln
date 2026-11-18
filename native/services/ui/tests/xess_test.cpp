@@ -101,6 +101,11 @@ static void flags_and_create_checks() {
     bad = ci;
     bad.output_format = VK_FORMAT_B10G11R11_UFLOAT_PACK32;
     CHECK(!check_create(bad, &why) && has(why, "format"));
+    bad = ci;
+    bad.output_texture_width = 1280, bad.output_texture_height = 720;
+    CHECK(!check_create(bad, &why) && has(why, "smaller than the upscale size"));
+    bad.output_texture_width = 1920, bad.output_texture_height = 1080;
+    CHECK(check_create(bad, &why));
 }
 
 // Fake Vulkan handles
@@ -461,6 +466,8 @@ static upscale::VkContext device(bool with_xess) {
     vk.props.vendorID = 0x10de;
     std::strcpy(vk.props.deviceName, "NVIDIA GeForce RTX 3080 Ti");
     vk.extensions = {"VK_KHR_swapchain"};
+    vk.instance_extensions = {"VK_KHR_surface", "VK_KHR_win32_surface", "VK_KHR_get_physical_device_properties2"};
+    vk.needs_merged = with_xess;
     VkPhysicalDeviceFeatures2 f2{};
     f2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
     f2.features.shaderStorageImageWriteWithoutFormat = VK_TRUE;
@@ -573,6 +580,15 @@ static void needs_and_device() {
         CHECK(dn.extensions.size() == 1 && dn.features.size() == 2 && dn.features[0].required && dn.features[1].required);
         // the device without them: device
         CHECK(!b.device_ready(device(false), &why, &detail) && why == upscale::Why::device);
+        // the merge refused (needs_merged false): Kiln could not give them, no restart helps
+        CHECK(!b.device_ready(device(false), &why, &detail) && why == upscale::Why::device && has(detail, "Kiln could not give"));
+        // an instance without XeSS's instance extension, or below its API version
+        upscale::VkContext no_ext = device(true);
+        no_ext.instance_extensions.pop_back();
+        CHECK(!b.device_ready(no_ext, &why, &detail) && why == upscale::Why::device && has(detail, "VK_KHR_get_physical_device_properties2 (instance)"));
+        upscale::VkContext old = device(true);
+        old.instance_api = VK_API_VERSION_1_0;
+        CHECK(!b.device_ready(old, &why, &detail) && has(detail, "a Vulkan 1.1 instance"));
         // with them: ready, and Kiln's pipeline cache made
         fx::caches = fx::caches_destroyed = 0;
         CHECK(b.device_ready(device(true), &why, &detail) && fx::caches == 1);
