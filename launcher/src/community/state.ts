@@ -49,10 +49,14 @@ export function usePosts(enabled: boolean) {
 export const useFeed = () => useQuery({ queryKey: cq.feed, queryFn: api.communityFeed, retry: false, staleTime: 10 * 60_000 });
 export const useTester = (enabled = true) => useQuery({ queryKey: cq.tester, queryFn: api.testerStatus, enabled, retry: false });
 
+/** Everything the page shows that may have changed, but not the public news (it is read once when the page opens). */
+export const refreshCommunity = (qc: ReturnType<typeof useQueryClient>) =>
+  qc.invalidateQueries({ predicate: (q) => q.queryKey[0] === "community" && q.queryKey[1] !== "feed" });
+
 export async function setCommunity(qc: ReturnType<typeof useQueryClient>, patch: Partial<Pick<CommunitySettings, "shown" | "presence" | "notify">>) {
   const s = await api.communitySettingsSet(patch);
   qc.setQueryData(cq.settings, s);
-  await qc.invalidateQueries({ queryKey: ["community"] });
+  await refreshCommunity(qc);
   return s;
 }
 
@@ -113,7 +117,7 @@ export function useCommunityFeed() {
     let off: (() => void) | undefined;
     let live = true;
     api.onKilnEvent("kiln://community", (e) => {
-      qc.invalidateQueries({ queryKey: ["community"] });
+      void refreshCommunity(qc);
       if (e.kind !== "reply" || api.isTauri()) return;
       const st = qc.getQueryData<{ notify: boolean }>(cq.status);
       if (st?.notify) toast.info(t("community.notify.title"), t("community.notify.detail", { by: e.by ?? "", title: e.title ?? "" }),

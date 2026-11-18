@@ -173,3 +173,43 @@ test.describe("Steam Deck", () => {
     await expect(page.locator(".deck-tab", { hasText: "Community" })).toBeVisible();
   });
 });
+
+test.describe("Rich Presence", () => {
+  test("off by default; on shows the preview lit and asks the relay for nothing", async ({ page }) => {
+    await open(page, "/?mock=1#/community");
+    const card = page.getByTestId("kc-presence");
+    await expect(card.getByRole("switch")).not.toBeChecked();
+    await expect(page.getByTestId("kc-presence-card")).toHaveClass(/dim/);
+    await expect(page.getByTestId("kc-presence-card")).toContainText("Enshrouded with Kiln");
+    await expect(page.getByTestId("kc-presence-card")).toContainText(/\d+ mods? on/);
+    await expect(card).toContainText("Never shown: server names, world names, your character, or which mods you use.");
+    const before = (await requests(page)).length;
+    await card.getByRole("switch").click({ force: true });
+    await expect(page.locator(".k-toast").filter({ hasText: "Rich Presence is on" })).toBeVisible();
+    await expect(page.getByTestId("kc-presence-state")).toHaveText("On. It shows while you play.");
+    await expect(page.getByTestId("kc-presence-card")).not.toHaveClass(/dim/);
+    expect((await requests(page)).length).toBe(before);
+    await card.getByRole("switch").click({ force: true });
+    await expect(page.locator(".k-toast").filter({ hasText: "Rich Presence is off" })).toBeVisible();
+    await expect(page.getByTestId("kc-presence-state")).toHaveCount(0);
+  });
+
+  test("Discord not running: the page says so", async ({ page }) => {
+    await open(page, "/?mock=1&discord=presence,nodiscord#/community");
+    await expect(page.getByTestId("kc-presence-state")).toHaveText("Discord isn't running on this PC. It shows once Discord is open.");
+  });
+
+  test("the Deck's dialog: the preview, on this Deck, Turn on and off", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto("/?mock=1&deck=steamdeck&discord=nodiscord#/deck/community");
+    const row = page.locator('[data-deck-id="presence"]');
+    await expect(row).toContainText("Off");
+    await row.click();
+    const d = page.getByTestId("deck-presence");
+    await expect(d).toContainText("Off.");
+    await page.locator('[data-deck-dialog="community-presence"]').getByRole("button", { name: "Turn on" }).click();
+    await expect(d).toContainText("Discord isn't running on this Deck. It shows once Discord is open.");
+    await page.locator('[data-deck-dialog="community-presence"]').getByRole("button", { name: "Turn off" }).click();
+    await expect(d).toContainText("Off.");
+  });
+});

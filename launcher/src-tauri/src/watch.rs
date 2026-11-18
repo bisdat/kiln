@@ -261,6 +261,8 @@ pub fn start(app: AppHandle) {
                         progress: mtime(&g.path.join(kiln_manage::start_progress::PROGRESS_JSON)),
                     };
                     crate::commands::launch::observe_stop(g, now.pid);
+                    // Rich Presence follows the game from here (its own thread does the rest: never in this loop)
+                    crate::community::presence::seen(&g.id, now.pid, now.boot);
                     if now.pid.is_none() {
                         follow_profile(&app, g, &mut profiles);
                     }

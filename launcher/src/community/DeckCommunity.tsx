@@ -9,7 +9,7 @@ import { useGame } from "../api/hooks";
 import { useT } from "../i18n";
 import { toast } from "../ui";
 import { DeckButton, Dialog, HoldButton, Row, Screen, Word } from "../deck/ui";
-import { INVITE, ago, openSendReport, sayLine, useCommunity, usePosts } from "./state";
+import { INVITE, ago, openSendReport, refreshCommunity, sayLine, useCommunity, usePosts } from "./state";
 import { QrCode, statusWord } from "./parts";
 import { DeckPresenceRow } from "./Presence";
 import { DeckTesterRow } from "./Testers";
@@ -98,8 +98,8 @@ function DeckPost({ post, onClose }: { post: SupportPost; onClose: () => void })
   const net = s ? s.online && s.relay === "ok" : true;
   const w = statusWord(post);
   // opening it marks its replies seen
-  useEffect(() => { if (post.unread) api.communityPostSeen(post.id).then(() => qc.invalidateQueries({ queryKey: ["community"] })).catch(() => {}); }, []);
-  const refresh = () => qc.invalidateQueries({ queryKey: ["community"] });
+  useEffect(() => { if (post.unread) api.communityPostSeen(post.id).then(() => refreshCommunity(qc)).catch(() => {}); }, []);
+  const refresh = () => refreshCommunity(qc);
   return (
     <Dialog name="community-post" title={post.title} wide onClose={onClose} backLabel={t("common.close")}
       buttons={<>
