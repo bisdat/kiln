@@ -798,6 +798,9 @@ thread_local std::vector<HandedQueue>* t_creating = nullptr;
 VkResult VKAPI_CALL hk_create_device(VkPhysicalDevice phys, const VkDeviceCreateInfo* ci, const VkAllocationCallbacks* a,
                                      VkDevice* out) {
     std::vector<HandedQueue> handed;
+    // the queues the game asks for, read before the call: a tool under Kiln may change the create info it passes on
+    std::vector<vk_present::Requested> requested =
+        vk_present::requested_queues(ci ? ci->pQueueCreateInfos : nullptr, ci ? ci->queueCreateInfoCount : 0);
     std::vector<HandedQueue>* const outer = t_creating;
     t_creating = &handed;
     const VkResult r = R.create_device.load()(phys, ci, a, out);
@@ -816,7 +819,7 @@ VkResult VKAPI_CALL hk_create_device(VkPhysicalDevice phys, const VkDeviceCreate
     d->device = *out;
     d->gdpa = R.gdpa;
     d->families = std::move(families);
-    d->requested = vk_present::requested_queues(ci ? ci->pQueueCreateInfos : nullptr, ci ? ci->queueCreateInfoCount : 0);
+    d->requested = std::move(requested);
     load_device_fns(*d);
     g_unseen_queues.erase(*out);  // of an older device that had this handle
     vk_present::take_handed(handed, *out, d->queue_family, d->tool_queues);
