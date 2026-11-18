@@ -47,6 +47,14 @@ test("the task list feeds it: a task's start, progress and end as kiln://task br
   expect(applyingTask(useTasks.getState().tasks)).toBeNull();
 });
 
+test("a late task_list answer does not bring an ended task back to running (Play would wait for it forever)", () => {
+  const t = task("t2", "runtime_install", "running");
+  useTasks.getState().upsert({ ...t, state: "done", progress: 1, finished: "2026-11-18T20:01:00Z" });
+  useTasks.getState().upsert(t); // the snapshot, taken while it ran
+  expect(useTasks.getState().tasks.t2.state).toBe("done");
+  expect(applyingTask(useTasks.getState().tasks)).toBeNull();
+});
+
 test("a guarded activation marks its game while it runs and lets go when it ends or fails; Play's own start does not", async () => {
   let finish!: (v: string) => void;
   const load = oneActivation("g", () => new Promise<string>((ok) => { finish = ok; }));

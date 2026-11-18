@@ -42,6 +42,10 @@ export const useTasks = create<TaskStore>((set, get) => ({
   order: [],
   upsert: (task) => {
     const s = get();
+    // a task never runs again once it ended: task_list's answer at start can arrive after the event of its end, and
+    // must not bring it back to running (Play waits for running activations, shell/applying.ts)
+    const was = s.tasks[task.id];
+    if (was && finished(was) && !finished(task)) return;
     set({ tasks: { ...s.tasks, [task.id]: task }, order: s.order.includes(task.id) ? s.order : [task.id, ...s.order].slice(0, 30) });
     settle(task);
   },
