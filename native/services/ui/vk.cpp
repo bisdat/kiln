@@ -909,7 +909,7 @@ VkResult VKAPI_CALL hk_present(VkQueue queue, const VkPresentInfoKHR* info) {
         const VkResult result = R.present.load()(queue, info);
         // Kiln's frame cap: the frame is shown as soon as it is done, then the game waits for its next slot before it
         // starts the next one, as a limiter in the game would (one relaxed load while off). No lock is held here.
-        graphics_present();
+        graphics_after_present();
         return result;
     }
     // the crash guard watches the overlay's first draw attempt of this process (its resources and ImGui are made there,
@@ -932,7 +932,7 @@ VkResult VKAPI_CALL hk_present(VkQueue queue, const VkPresentInfoKHR* info) {
     }
     if (!drew) {
         const VkResult result = R.present.load()(queue, info);
-        graphics_present();  // Kiln's frame cap after the present (g_mu was released by guarded_draw)
+        graphics_after_present();  // Kiln's frame cap after the present (g_mu was released by guarded_draw)
         return result;
     }
     VkPresentInfoKHR p = *info;
@@ -940,7 +940,7 @@ VkResult VKAPI_CALL hk_present(VkQueue queue, const VkPresentInfoKHR* info) {
     p.pWaitSemaphores = &wait;
     const VkResult result = R.present.load()(queue, &p);
     if (result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR) overlay_guard_stage(overlay_guard::Stage::frame);
-    graphics_present();  // Kiln's frame cap after the present (g_mu was released by guarded_draw)
+    graphics_after_present();  // Kiln's frame cap after the present (g_mu was released by guarded_draw)
     return result;
 }
 

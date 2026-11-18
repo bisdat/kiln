@@ -238,6 +238,12 @@ bool graphics_wants_load_hook();  // DLSS is to be hooked when NVIDIA's DLSS cor
 void graphics_after_load();       // after every library load (load_hook.h; may hold the loader lock): NVIDIA's DLSS core
 void graphics_present();          // render thread, right after the game's frame went to vkQueuePresentKHR (no lock held):
                                   // the frame counts, and the frame cap's wait for the game's next slot
+extern std::atomic<bool> g_graphics_present;  // graphics_present has work: the cap or the readout is on, or was just
+                                              // turned off (its counts are cleared once)
+// vk.cpp's present hook, after the game's present: one relaxed load while the frame cap and the readout are off.
+inline void graphics_after_present() {
+    if (g_graphics_present.load(std::memory_order_relaxed)) graphics_present();
+}
 void graphics_overlay();          // render thread, inside the ImGui frame: the readout
 KilnResult graphics_set(const KilnUiGraphics* settings);  // any thread (Kiln.Ui; ui.cpp refuses native plugins)
 KilnResult graphics_status(KilnUiGraphicsStatus* out);     // any thread

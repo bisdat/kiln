@@ -17,8 +17,9 @@
 //    patched. The game sets DLSS up again (and so asks again) when a world loads and when its DLSS mode or resolution
 //    changes: the settings follow then.
 //  - The readout: a few lines of ImGui text in the top right corner of the overlay.
-// Nothing of it runs for a player who changes nothing: no NGX hook unless a DLSS setting or the readout is on at start;
-// with the cap off, one relaxed load per present. Every tool steps aside for tools that do the same (graphics_aside.h).
+// Nothing of it runs for a player who changes nothing: no NGX hook and no new LoadLibraryExW hook unless a DLSS setting
+// or the readout is on at start; with the cap and the readout off, one relaxed load per present (ui.h
+// graphics_after_present). Every tool steps aside for tools that do the same (graphics_aside.h).
 #include <windows.h>
 
 #include <algorithm>
@@ -45,6 +46,7 @@
 namespace kui {
 
 std::atomic<uint32_t> g_graphics_demand{0};
+std::atomic<bool> g_graphics_present{false};
 
 namespace {
 
@@ -503,10 +505,17 @@ std::string describe(const gfx::Settings& s) {
     return out.empty() ? "all off" : out;
 }
 
+// The frame cap (not stepped aside) or the readout is on: the present hook calls graphics_present. Any thread.
+bool present_wanted() {
+    return (g_fps_cap.load() && !(g_aside & gfx::kAsideCap)) || g_readout.load();
+}
+
 void publish(const gfx::Settings& s) {
-    g_fps_cap.store(s.fps_cap, std::memory_order_relaxed);
-    g_readout.store(s.readout, std::memory_order_relaxed);
+    g_fps_cap.store(s.fps_cap);
+    g_readout.store(s.readout);
     g_graphics_demand.store(s.readout && overlay_drawing_on() ? 1u : 0u, std::memory_order_relaxed);
+    // turned off: left on until graphics_present clears the counts and turns it off itself (render thread)
+    if (present_wanted()) g_graphics_present.store(true);
 }
 
 std::string fmt_fps(float v) {
@@ -563,7 +572,8 @@ void graphics_start(bool optiscaler, bool streamline) {
         if (aside & gfx::kAsideOverlayOff) line += ": " + g_overlay_reason;
         if (s.readout && (aside & gfx::kAsideOverlayOff)) line += "; the readout needs Kiln's overlay too";
     }
-    if (s.fps_cap || s.dlss_set() || s.readout || g_aside) logf(KILN_LOG_INFO, "graphics: %s", line.c_str());
+    // only when the player turned something on: a player who changed nothing gets no line, whatever is installed
+    if (s.fps_cap || s.wants_ngx()) logf(KILN_LOG_INFO, "graphics: %s", line.c_str());
 }
 
 bool graphics_wants_load_hook() {
@@ -581,6 +591,11 @@ void graphics_after_load() {
 }
 
 void graphics_present() {
+    // The pacer, the counts and the timer are the presenting thread's. A game presents from one thread; should a second
+    // present at the same moment, it passes unpaced instead of racing for them.
+    static std::atomic_flag busy;
+    if (busy.test_and_set(std::memory_order_acquire)) return;
+    struct Leave { ~Leave() { busy.clear(std::memory_order_release); } } leave;
     const uint32_t fps = g_fps_cap.load(std::memory_order_relaxed);
     const bool readout = g_readout.load(std::memory_order_relaxed);
     const bool cap = fps && !(g_aside & gfx::kAsideCap);
@@ -593,6 +608,10 @@ void graphics_present() {
             g_output_fps.store(0, std::memory_order_relaxed);
             g_frame_ms.store(0, std::memory_order_relaxed);
         }
+        // off from the next present on (one relaxed load in vk.cpp); a setting turned on meanwhile on another thread
+        // (graphics_set) turns it on again: both sides store, then read the other's (sequentially consistent)
+        g_graphics_present.store(false);
+        if (present_wanted()) g_graphics_present.store(true);
         return;
     }
     if (!g_freq) {
