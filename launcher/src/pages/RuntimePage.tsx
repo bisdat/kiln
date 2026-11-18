@@ -113,7 +113,7 @@ export default function RuntimePage() {
       )}
       {files.missing.length > 0 && change?.state !== "running" && (
         <Banner tone="err" title={t("runtime.filesMissing")} actions={installedBundle && (
-          <Button size="s" disabled={running || busy || !!status.data?.steamUpdating} onClick={() => setPick(installedBundle)}>{t("runtime.repair")}</Button>
+          <Button size="s" disabled={running || busy || !!status.data?.steamUpdating} onClick={() => (sf ? setSwitchSf(installedBundle) : setPick(installedBundle))}>{t("runtime.repair")}</Button>
         )}>
           <div data-testid="runtime-missing-files">{rich("runtime.filesMissingText", { count: files.missing.length, files: <span className="k-mono">{fewPaths(files.missing, game.platform)}</span> })}</div>
           <div>
