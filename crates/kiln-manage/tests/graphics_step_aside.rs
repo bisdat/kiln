@@ -116,13 +116,18 @@ fn another_tools_upscaler_dlls_next_to_the_game_take_kilns_upscaler_swap() {
     let all = graphics_step_aside(&t.0);
     assert_eq!(all, [aside("dlsstweaks", "dlsstweaks.ini", false),
         GraphicsStepAside { file: "amd_fidelityfx_vk.dll".into(), ..up }]);
-    // the same names as kiln.ui's list (graphics_aside.h has it from phase B's native side on)
+}
+
+/// The launcher's list of another tool's upscaler DLLs is kiln.ui's (`native/services/ui/graphics_aside.h`
+/// `kUpscalerFiles`), name for name and in order: the Graphics card names what the game steps aside for.
+#[test]
+fn the_upscaler_files_are_kiln_ui_s_k_upscaler_files() {
     let h = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../native/services/ui/graphics_aside.h")).unwrap();
-    if let Some(start) = h.find("kUpscalerFiles[] = {") {
-        let end = start + h[start..].find("};").unwrap();
-        let list: Vec<&str> = h[start..end].split('"').skip(1).step_by(2).collect();
-        assert_eq!(list, kiln_manage::game::UPSCALER_FILES);
-    }
+    let start = h.find("kUpscalerFiles[] = {").expect("graphics_aside.h has kUpscalerFiles");
+    let end = start + h[start..].find("};").expect("kUpscalerFiles ends");
+    let list: Vec<&str> = h[start..end].split('"').skip(1).step_by(2).collect();
+    assert!(!list.is_empty());
+    assert_eq!(list, kiln_manage::game::UPSCALER_FILES);
 }
 
 #[cfg(unix)]
