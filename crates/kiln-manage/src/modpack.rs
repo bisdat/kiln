@@ -37,6 +37,11 @@ pub struct ModpackMod {
     pub path: String,
     /// kdh1 (sha256 for a plugin DLL).
     pub hash: String,
+    /// What the server advertises for this mod when that is not [`ModpackMod::hash`] (0.2.0-dev.29.18): another
+    /// engine's mod whose advertised hash leaves out what changes while it runs ([`engine_identity`]). Players'
+    /// launchers accept the server's hash when it is either. Absent: the server advertises `hash`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clients: Option<Clients>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -223,12 +228,76 @@ pub fn client_mods(server_dir: &Path) -> Result<Vec<ClientMod>> {
 }
 
 /// What the server advertises: each client mod's hash (`hash::of_mod`: a Kiln mod's identity, its files without what
-/// the cook made in `assets/cooked`; the kdh1 of any other kind's folder).
+/// the cook made in `assets/cooked`; a native mod's folder kdh1; another engine's mod: [`engine_identity`]).
 pub fn required(server_dir: &Path) -> Result<Vec<RequiredMod>> {
     client_mods(server_dir)?
         .into_iter()
-        .map(|m| Ok(RequiredMod { hash: crate::hash::of_mod(m.kind, &m.dir)?, id: m.id, version: m.version, kind: Some(m.kind), unknown_kind: None, name: m.name }))
+        .map(|m| Ok(RequiredMod { hash: advertised(server_dir, m.kind, &m.dir)?, id: m.id, version: m.version, kind: Some(m.kind), unknown_kind: None, name: m.name }))
         .collect()
+}
+
+/// The hash a server advertises for one of its client mods ([`required`]).
+fn advertised(server_dir: &Path, kind: ModKind, dir: &Path) -> Result<String> {
+    if kind.is_engine() { Ok(engine_identity(server_dir, kind, dir)?.advertised) } else { crate::hash::of_mod(kind, dir) }
+}
+
+/// What a server advertises for another engine's mod and what a modpack packs of it (0.2.0-dev.29.18; Kiln.Network
+/// AdvertiseIdentity.cs computes the same, keep in step). The hash stays the same while the mod runs:
+///
+/// - Kiln's copy (the launcher synced it to the server, `.kiln-source.json` and the server's receipt; or placed it in
+///   a game folder, `.kiln-library.json` and the placements receipt) whose files are still the ones placed: the Library
+///   entry's kdh1. The settings and the switch in it and the files the mod writes into its folder (logs,
+///   `bin/native-status.txt`) do not count. The files placed are packed.
+/// - Any other folder (the player's own): the kdh1 of its files without logs (`*.log`), ShroudForge's
+///   `extended.mod.json` (its switch and settings) and the kind's settings files (engine_mods::settings_files). Every
+///   file but the logs is packed.
+///
+/// What may change in Kiln's copy without making it another mod is what placement allows ([`left_out`]).
+pub(crate) struct EngineIdentity {
+    pub advertised: String,
+    /// The Library entry of Kiln's copy.
+    pub library: Option<LibraryRef>,
+    /// What a modpack packs of the folder: (zip-relative name, file), as [`mod_files`] lists them.
+    pub files: Vec<(String, PathBuf)>,
+}
+
+/// A file of an engine mod's folder that is not part of what it advertises: ShroudForge's file of a ShroudForge or EML
+/// package (`extended.mod.json`, its switch and setting values), the kind's settings files at its top
+/// (engine_mods::settings_files), and in a game-folder copy any settings file a DLL may write
+/// (engine_mods::is_game_settings_file: not its manifest, its Lua or XHL-Core's native-plugin.ini). Case is ignored, as
+/// Windows does. Kiln.Network's NetAdvertise.LeftOut is the same rule.
+fn left_out(kind: ModKind, rel: &str, game_folder: bool) -> bool {
+    let top = !rel.contains('/');
+    (top && matches!(kind, ModKind::ShroudForge | ModKind::Eml) && rel.eq_ignore_ascii_case("extended.mod.json"))
+        || (top && crate::engine_mods::settings_files(kind).iter().any(|s| s.eq_ignore_ascii_case(rel)))
+        || (game_folder && crate::engine_mods::is_game_settings_file(rel))
+}
+
+pub(crate) fn engine_identity(server_dir: &Path, kind: ModKind, dir: &Path) -> Result<EngineIdentity> {
+    let all = mod_files(kind, dir)?;
+    let synced = crate::server::control::synced_copy(server_dir, dir, kind).map(|(l, f)| (l, f, false));
+    let placed = || crate::engine_mods::placed_copy(server_dir, dir, kind)
+        .map(|(m, f, g)| (LibraryRef { kind: m.kind, id: m.id, version: m.version, hash: m.hash }, f, g));
+    if let Some((library, files, game_folder)) = synced.or_else(placed) {
+        // still the files placed: every one the receipt lists, as it lists it (what may change aside)
+        let same = files.iter().filter(|(rel, _)| !rel.ends_with('/') && !left_out(kind, rel, game_folder))
+            .all(|(rel, hash)| crate::hash::sha256_file(&dir.join(rel)).is_ok_and(|(h, _)| h == *hash));
+        if same {
+            let packed = all.into_iter().filter(|(rel, _)| files.contains_key(rel)).collect();
+            return Ok(EngineIdentity { advertised: library.hash.clone(), library: Some(library), files: packed });
+        }
+    }
+    let files: Vec<(String, PathBuf)> = all.into_iter().filter(|(rel, _)| !crate::settings_files::is_log(rel)).collect();
+    let counted: Vec<(String, PathBuf)> = files.iter().filter(|(rel, _)| !left_out(kind, rel, false)).cloned().collect();
+    Ok(EngineIdentity { advertised: crate::hash::of_mod_records(kind, records(&counted)?)?, library: None, files })
+}
+
+/// kdh1's records of a list of [`mod_files`].
+fn records(files: &[(String, PathBuf)]) -> Result<Vec<crate::hash::Record>> {
+    files.iter().map(|(rel, p)| {
+        let (sha256, size) = crate::hash::sha256_file(p)?;
+        Ok(crate::hash::Record { path: rel.clone(), size, sha256 })
+    }).collect()
 }
 
 /// `kiln/config/network.json` of a server (Kiln's relaxed JSON); an empty object when absent.
@@ -279,7 +348,6 @@ pub fn server_identity(server_dir: &Path) -> Result<ModpackServer> {
     Ok(ModpackServer { id, name })
 }
 
-#[cfg_attr(not(feature = "zip"), allow(dead_code))]
 /// Zip-relative file list of a mod folder with kdh1's rules (dot entries skipped, symlinks refused), sorted: the files
 /// its hash counts. A Kiln mod's cook outputs (`assets/cooked`) are left out: they are made from the server's game
 /// files, differ on a player's machine and are never shipped; each player's own cook makes them.
@@ -325,6 +393,17 @@ fn zip_path(kind: ModKind, id: &str) -> String {
 /// one fixed time (the newest file's), mode 0644, deflate level 6. Same input, same bytes, same sha256.
 #[cfg(feature = "zip")]
 pub fn build(server_dir: &Path, out_dir: &Path, name: &str, version: &str, progress: &mut dyn Progress) -> Result<BuiltModpack> {
+    build_with(None, server_dir, out_dir, name, version, progress)
+}
+
+/// [`build`] with the launcher's data folder: another engine's mod that is the launcher's copy of a Library entry
+/// ([`engine_identity`]) is packed from that entry, as the Library has it, when the entry is there and unchanged. Its
+/// hash is then the one the server advertises, which a player's launcher of any version accepts, and a player who has
+/// that version already has it in the Library. Without it, the copy's placed files are packed (with the server's
+/// switch and settings) and the advertised hash goes into [`ModpackMod::identity`].
+#[cfg(feature = "zip")]
+pub fn build_with(dirs: Option<&DataDirs>, server_dir: &Path, out_dir: &Path, name: &str, version: &str, progress: &mut dyn Progress)
+                  -> Result<BuiltModpack> {
     use std::io::Write;
     if name.trim().is_empty() || name.len() > 128 || version.trim().is_empty() || version.len() > 64 {
         return Err(Error::invalid("modpack name: 1 to 128 characters; version: 1 to 64"));
@@ -342,7 +421,22 @@ pub fn build(server_dir: &Path, out_dir: &Path, name: &str, version: &str, progr
             return Err(err(ErrorCode::Canceled, "canceled"));
         }
         progress.report(Some(i as f32 / mods.len() as f32 * 0.5), &format!("hashing {}", m.id));
-        let files = mod_files(m.kind, &m.dir)?;
+        // another engine's mod: what it advertises, and what is packed of it (engine_identity)
+        let (files, hash, identity) = if m.kind.is_engine() {
+            let id = engine_identity(server_dir, m.kind, &m.dir)?;
+            let library = id.library.as_ref().zip(dirs).and_then(|(r, d)| crate::library::path_of(d, r).ok())
+                .filter(|lib| crate::hash::dirhash(lib).ok().as_deref() == Some(id.advertised.as_str()));
+            match library {
+                Some(lib) => (mod_files(m.kind, &lib)?, id.advertised, None),
+                None => {
+                    let hash = crate::hash::of_mod_records(m.kind, records(&id.files)?)?;
+                    let identity = (hash != id.advertised).then_some(id.advertised);
+                    (id.files, hash, identity)
+                }
+            }
+        } else {
+            (mod_files(m.kind, &m.dir)?, crate::hash::of_mod(m.kind, &m.dir)?, None)
+        };
         for (rel, p) in &files {
             if let Ok(t) = std::fs::metadata(p).and_then(|md| md.modified()) {
                 newest = newest.max(crate::util::unix(t));
@@ -355,7 +449,8 @@ pub fn build(server_dir: &Path, out_dir: &Path, name: &str, version: &str, progr
             version: m.version.clone(),
             name: m.name.clone(),
             path: zip_path(m.kind, &m.id),
-            hash: crate::hash::of_mod(m.kind, &m.dir)?,
+            hash,
+            identity,
             clients: Some(Clients::Mod),
             side: Some(m.side),
         });
@@ -429,6 +524,12 @@ pub fn build(server_dir: &Path, out_dir: &Path, name: &str, version: &str, progr
 pub fn build(server_dir: &Path, out_dir: &Path, name: &str, version: &str, progress: &mut dyn Progress) -> Result<BuiltModpack> {
     let _ = (server_dir, out_dir, name, version, progress);
     Err(err(ErrorCode::Unsupported, "kiln-manage was built without the zip feature"))
+}
+
+#[cfg(not(feature = "zip"))]
+pub fn build_with(_dirs: Option<&DataDirs>, server_dir: &Path, out_dir: &Path, name: &str, version: &str, progress: &mut dyn Progress)
+                  -> Result<BuiltModpack> {
+    build(server_dir, out_dir, name, version, progress)
 }
 
 fn check_url(url: &str, allow_http: bool) -> Result<()> {
@@ -754,7 +855,8 @@ pub fn extract(zip_file: &Path, manifest: &ModpackManifest, staging: &Path) -> R
 pub fn check_against(manifest: &ModpackManifest, required: &[RequiredMod]) -> Result<()> {
     let bad: Vec<String> = required
         .iter()
-        .filter(|r| r.unknown_kind.is_some() || !manifest.mods.iter().any(|m| m.kind == r.kind.unwrap_or(ModKind::Kiln) && m.id == r.id && m.hash == r.hash))
+        .filter(|r| r.unknown_kind.is_some() || !manifest.mods.iter().any(|m| m.kind == r.kind.unwrap_or(ModKind::Kiln) && m.id == r.id
+            && (m.hash == r.hash || m.identity.as_ref() == Some(&r.hash))))
         .map(|r| format!("{} {} ({})", r.id, r.version, r.hash))
         .collect();
     if bad.is_empty() {

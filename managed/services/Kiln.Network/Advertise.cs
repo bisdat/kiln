@@ -246,6 +246,7 @@ internal static partial class NetAdvertise
                 if (NativeIdentity(manifest) is { } ident) candidates.Add(new Candidate("native", ident.Id, ident.Version, ident.Name, dir));
             }
         candidates.AddRange(EngineCandidates(kilnRoot));  // other engines' mods (AdvertiseEngines.cs)
+        var game = Path.GetDirectoryName(Path.GetFullPath(kilnRoot)) ?? kilnRoot;
         var oldKilnClient = _kilnClientMods;
         _kilnClientMods = [.. kilnClient.Distinct()];
         _statedModClients = [.. statedMod.Distinct()];
@@ -258,16 +259,18 @@ internal static partial class NetAdvertise
             try
             {
                 // a Kiln mod is advertised by its identity: its files without what the cook made on this machine (assets/cooked),
-                // so a server's cooked folder and a player's give the same hash; other kinds' folders are all theirs
+                // so a server's cooked folder and a player's give the same hash; another engine's mod by what stays the same
+                // while it runs (AdvertiseIdentity.cs: the Library entry of Kiln's copy); a native mod's folder is all its own
                 var mod = c.Kind == "kiln";
-                var tree = DirHash.Signature(c.Dir, mod);
+                var engine = !mod && c.Kind != "native";
+                var tree = engine ? EngineSignature(c.Dir, game) : DirHash.Signature(c.Dir, mod);
                 lock (HashCache)
                     if (HashCache.TryGetValue(c.Dir, out var cached) && cached.Sig == tree)
                     {
                         list.Add(new NetRequiredMod(c.Id, c.Version, cached.Hash, c.Kind, c.Name));
                         continue;
                     }
-                hash = mod ? DirHash.ModIdentity(c.Dir) : DirHash.Compute(c.Dir);
+                hash = mod ? DirHash.ModIdentity(c.Dir) : engine ? EngineHash(c.Kind, c.Dir, game) : DirHash.Compute(c.Dir);
                 lock (HashCache) HashCache[c.Dir] = (tree, hash);
             }
             catch (Exception e) when (e is DirHashException or IOException or UnauthorizedAccessException)

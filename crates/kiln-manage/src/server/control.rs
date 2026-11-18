@@ -100,6 +100,21 @@ fn payload_files(dir: &Path, kind: ModKind) -> Result<BTreeMap<String, String>> 
     Ok(files)
 }
 
+/// The Library entry and the synced files (relative path to hash, as [`payload_files`] lists them) of the launcher's
+/// copy `dir` of a `kind` mod on a server: its `.kiln-source.json` names the entry, and the server's receipt
+/// (`kiln/state/server-library.json`, kept outside the folder, so a package cannot forge it) names the same entry for
+/// this folder. Whether the files are still the synced ones is the caller's to check (modpack::engine_identity).
+/// None for a folder the launcher did not sync, and for a receipt from before the file list.
+pub(crate) fn synced_copy(server: &Path, dir: &Path, kind: ModKind) -> Option<(LibraryRef, BTreeMap<String, String>)> {
+    let marker = read_marker(dir)?;
+    if !(marker.format == 1 && marker.library.kind == kind && dir.file_name().and_then(|n| n.to_str()) == Some(marker.library.id.as_str())) {
+        return None;
+    }
+    let saved = engine_copies(server).ok()?.remove(dir)?;
+    (saved.library == marker.library).then_some(())?;
+    Some((saved.library, saved.files?))
+}
+
 /// `server` is the managed root `dir` lies under.
 fn owned_engine(server: &Path, dir: &Path, kind: ModKind, copies: &EngineCopies) -> Result<bool> {
     Ok(engine_player_files(server, dir, kind, copies, None)?.is_some())
