@@ -933,44 +933,273 @@ fn an_xhl_plugin_eml_package_holding_shroudforge_values_goes_when_it_stops_and_i
 
 /// A ShroudForge package that is an XHL-Core plugin too (Building Tools for ShroudForge: BuildingTools.dll with XHL-Core's
 /// native-plugin.ini). Switched off in the profile it is switched off in ShroudForge's file and its folder stays, as for
-/// every ShroudForge mod; but where the game has XHL-Core, XHL-Core loads it from there whatever that switch says. The
-/// result says so (a folder that may still run while its mod is off, which the launcher raises even with its notes about
-/// mod folders off). Without XHL-Core it is a plain switch.
+/// every ShroudForge mod; XHL-Core reads no such switch, so its ini is set aside too (inbox 86), and nothing is left
+/// that may still run. Where the game has XHL-Core the result says what Kiln did, once; without it there is nothing to
+/// say. On again (or back in the profile), the ini is back.
 #[test]
 fn a_switched_off_shroudforge_copy_xhl_core_loads_is_named() {
     for xhl in [true, false] {
         let s = setup(&format!("sf-xhl-{xhl}"));
-        let d = s.t.0.join("src/building-tools");
-        put(&d, "mod.json", br#"{"id":"building-tools","name":"Building Tools","version":"0.33.2","capabilities":[]}"#);
-        put(&d, "extended.mod.json", br#"{"schemaVersion":1,"enabled":true,"targets":["client","server"]}"#);
-        put(&d, "BuildingTools.dll", &build_test_dll(&["XhlPluginEntry"], b"plugin"));
-        put(&d, "native-plugin.ini", b"[Plugin]\nEnabled=1\nDll=BuildingTools.dll\n");
-        let tools = import(&s.dirs, &d, ModKind::ShroudForge, "building-tools");
+        let tools = building_tools(&s, "native-plugin.ini");
         if xhl {
-            // XHL-Core as the game's dinput8.dll (installed by its author's instructions)
-            put(&s.game, "dinput8.dll", &build_test_dll(&["DirectInput8Create"], b"XHL-Native-Plugin-Host.log\0dinput8-chain.ini\0native-plugin.ini"));
+            xhl_core(&s, XhlCore::ByHand);
             assert!(engine_mods::xhl_host(&s.game).available);
         }
         let mut p = s.profile(vec![]);
         p.mods.shroudforge.push(pm(&tools, true));
         engine_mods::place(&s.dirs, &p, &s.game).unwrap();
         let copy = s.game.join("mods/building-tools");
-        assert!(shroudforge::read_mod(&copy).unwrap().enabled);
+        assert!(shroudforge::read_mod(&copy).unwrap().enabled && xhl_core_reads(&copy).is_some());
         for gone in [false, true] {
             if gone { p.mods.shroudforge.retain(|m| m.id != "building-tools") } else { p.mods.shroudforge[1].enabled = false }
             let rep = engine_mods::place(&s.dirs, &p, &s.game).unwrap();
             assert!(!shroudforge::read_mod(&copy).unwrap().enabled, "xhl {xhl}, gone {gone}: {rep:?}");
-            let kept = rep.retained.iter().find(|r| r.path == copy);
+            assert!(xhl_core_reads(&copy).is_none() && rep.retained.is_empty() && rep.changed.is_empty(), "xhl {xhl}, gone {gone}: {rep:?}");
+            let said: Vec<&String> = rep.warnings.iter().filter(|w| w.starts_with("shroudforge:building-tools:")).collect();
+            assert_eq!(said.len(), usize::from(xhl), "xhl {xhl}, gone {gone}: {rep:?}");
             if xhl {
-                let kept = kept.unwrap_or_else(|| panic!("gone {gone}: XHL-Core loads {} but nothing says so: {rep:?}", copy.display()));
-                assert!(kept.may_run && kept.off && kept.reason.contains("XHL-Core"), "gone {gone}: {kept:?}");
-            } else {
-                assert!(kept.is_none() && rep.retained.is_empty(), "gone {gone}: {rep:?}");
+                let off = if gone { "it is not in the profile" } else { "it is off in the profile" };
+                assert!(said[0].contains(off) && said[0].contains("native-plugin.ini.kiln-off"), "gone {gone}: {said:?}");
             }
             p.mods.shroudforge = vec![pm(&s.sf, true), pm(&tools, true)];
-            engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+            let rep = engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+            assert!(shroudforge::read_mod(&copy).unwrap().enabled && rep.warnings.is_empty() && rep.retained.is_empty(), "xhl {xhl}, gone {gone}: {rep:?}");
+            assert_eq!(xhl_core_reads(&copy).as_deref(), Some(BT_INI), "xhl {xhl}, gone {gone}");
         }
     }
+}
+
+/// XHL-Core 2.1.0's DLL: the markers xhl_host looks for (its log's name as Windows' wide text, as 2.x has it).
+fn xhl_core_dll() -> Vec<u8> {
+    let mut text = b"dinput8-chain.ini\0native-plugin.ini\0".to_vec();
+    for c in "XHL-Native-Plugin-Host.log".encode_utf16() { text.extend_from_slice(&c.to_le_bytes()); }
+    build_test_dll(&["DirectInput8Create"], &text)
+}
+
+/// How a test game has XHL-Core: none, the game's dinput8.dll (its author's instructions), or a Native mod of the
+/// profile (Kiln chain-loads its copy, kiln/chain/xhl-core/xhl-core.dll, as in the player's report of inbox 86).
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum XhlCore { Absent, ByHand, InProfile }
+
+/// XHL-Core installed `how` in `s.game`: the profile entry to add when it is a Native mod of the profile.
+fn xhl_core(s: &Setup, how: XhlCore) -> Option<ProfileMod> {
+    match how {
+        XhlCore::Absent => None,
+        XhlCore::ByHand => { put(&s.game, "dinput8.dll", &xhl_core_dll()); None }
+        XhlCore::InProfile => {
+            put(&s.t.0, "XHL-Core/dinput8.dll", &xhl_core_dll());
+            let r = library::import(&s.dirs, &[s.t.0.join("XHL-Core/dinput8.dll")], &mut NoProgress).unwrap();
+            let core = r.imported.iter().find(|x| x.kind == ModKind::Native).cloned().unwrap_or_else(|| panic!("XHL-Core not imported: {r:?}"));
+            Some(pm(&core, true))
+        }
+    }
+}
+
+/// Building Tools for ShroudForge as a Library ShroudForge mod: BuildingTools.dll with XHL-Core's ini, spelled `ini`, as
+/// its package has them (no Lua: ShroudForge's DLL manager loads the DLL that ini names).
+fn building_tools(s: &Setup, ini: &str) -> LibraryRef {
+    building_tools_version(s, ini, "0.33.2")
+}
+
+fn building_tools_version(s: &Setup, ini: &str, version: &str) -> LibraryRef {
+    let d = s.t.0.join(format!("src/building-tools-{version}"));
+    put(&d, "mod.json", format!(r#"{{"id":"building-tools","name":"Building Tools","version":"{version}","capabilities":[]}}"#).as_bytes());
+    put(&d, "extended.mod.json", br#"{"schemaVersion":1,"enabled":true,"targets":["client","server"],"links":{"website":"https://www.nexusmods.com/enshrouded/mods/221"}}"#);
+    put(&d, "BuildingTools.dll", &build_test_dll(&["XhlPluginEntry"], format!("plugin {version}").as_bytes()));
+    put(&d, ini, BT_INI);
+    import(&s.dirs, &d, ModKind::ShroudForge, "building-tools")
+}
+const BT_INI: &[u8] = b"[Plugin]\r\nEnabled=1\r\nDll=BuildingTools.dll\r\n";
+
+/// The file XHL-Core 2.1.0 opens in a folder of mods: `<folder>\native-plugin.ini`, by that name (Windows and Wine
+/// match it in any case). None: XHL-Core finds no plugin there and skips the folder.
+fn xhl_core_reads(folder: &Path) -> Option<Vec<u8>> {
+    std::fs::read_dir(folder).ok()?.flatten()
+        .find(|e| e.file_name().to_str().is_some_and(|n| n.eq_ignore_ascii_case("native-plugin.ini")))
+        .map(|e| std::fs::read(e.path()).unwrap())
+}
+
+/// inbox 86: two profiles, "Building" with Building Tools for ShroudForge (a ShroudForge mod whose folder is an
+/// XHL-Core plugin too), "Default" with it off or without it, and XHL-Core installed. After a session in "Building",
+/// "Default" left Kiln's copy in mods/ switched off only in ShroudForge's file: XHL-Core reads no profile and no
+/// ShroudForge switch, found the copy's native-plugin.ini and loaded BuildingTools.dll without its ShroudForge side
+/// (every start of "Default" crashed while the mods loaded, until XHL-Core was switched off). While the mod is off
+/// Kiln now sets that ini aside in Kiln's own copy, so XHL-Core skips the folder, and puts it back as it was (the
+/// values the mod or the player wrote into it too) when the mod is on again.
+#[test]
+fn inbox86_a_switched_off_shroudforge_copy_is_no_xhl_plugin_while_the_mod_is_off() {
+    use XhlCore::*;
+    for (xhl, gone, ini, edited) in [(InProfile, true, "native-plugin.ini", false), (ByHand, false, "native-plugin.ini", false),
+                                     (InProfile, false, "Native-Plugin.INI", false), (InProfile, true, "native-plugin.ini", true),
+                                     (ByHand, false, "native-plugin.ini", true), (Absent, false, "native-plugin.ini", false),
+                                     (Absent, true, "native-plugin.ini", true)] {
+        let case = format!("XHL-Core {xhl:?}, gone {gone}, {ini}, edited {edited}");
+        let s = setup(&format!("inbox86-{xhl:?}-{gone}-{ini}-{edited}"));
+        let core = xhl_core(&s, xhl);
+        let tools = building_tools(&s, ini);
+        let install = runtime_install(&s.game);
+        let mut building = profile::create(&s.dirs, "Building", None).unwrap();
+        building.mods.shroudforge = vec![pm(&s.sf, true), pm(&tools, true)];
+        building.mods.native = core.clone().into_iter().collect();
+        let building = profile::save(&s.dirs, &building).unwrap();
+        // "Default": the player's usual mods, without Building Tools (or with it switched off)
+        let mut default = profile::create(&s.dirs, "Default", None).unwrap();
+        default.mods.shroudforge = if gone { vec![pm(&s.sf, true)] } else { vec![pm(&s.sf, true), pm(&tools, false)] };
+        default.mods.native = core.into_iter().collect();
+        let default = profile::save(&s.dirs, &default).unwrap();
+
+        let a = profile::activate(&s.dirs, &building.id, &install).unwrap();
+        assert_eq!(engine_mods::xhl_host(&s.game).available, xhl != Absent, "{case}");
+        let copy = s.game.join("mods/building-tools");
+        assert!(shroudforge::read_mod(&copy).unwrap().enabled && a.retained.is_empty(), "{case}: {a:?}");
+        assert_eq!(xhl_core_reads(&copy).as_deref(), Some(BT_INI), "{case}");
+        // a session: the plugin keeps its settings in its ini (as the XHL plugins do), still naming its own DLL
+        let mut ini_now = BT_INI.to_vec();
+        if edited {
+            ini_now.extend_from_slice(b"\r\n[BuildingTools]\r\nSnapKey=71\r\n");
+            std::fs::write(copy.join(ini), &ini_now).unwrap();
+        }
+
+        let a = profile::activate(&s.dirs, &default.id, &install).unwrap();
+        assert!(!shroudforge::read_mod(&copy).unwrap().enabled, "{case}: {a:?}");
+        assert_eq!(xhl_core_reads(&copy), None, "{case}: XHL-Core still loads BuildingTools.dll from {}: {a:?}", copy.display());
+        assert!(a.retained.is_empty() && a.safety_notes.is_empty(), "{case}: nothing may still run, nothing to warn about: {a:?}");
+        assert!(copy.join("BuildingTools.dll").is_file(), "{case}: the copy stays, as every ShroudForge copy does");
+        assert_eq!(std::fs::read(copy.join(format!("{ini}.kiln-off"))).unwrap(), ini_now, "{case}: set aside as it was");
+        // said once, in plain words, where the game has XHL-Core; nothing to say without it
+        let said: Vec<&String> = a.warnings.iter().filter(|w| w.starts_with("shroudforge:building-tools:")).collect();
+        if xhl == Absent {
+            assert!(said.is_empty(), "{case}: {said:?}");
+        } else {
+            assert!(said.len() == 1 && said[0].contains(&format!("renamed its {ini}")) && said[0].contains(&format!("to {ini}.kiln-off"))
+                && said[0].contains("XHL-Core does not load it"), "{case}: {said:?}");
+        }
+        // again (Play's reconcile): nothing to do, nothing to say
+        let a = profile::activate(&s.dirs, &default.id, &install).unwrap();
+        assert!(a.retained.is_empty() && a.kept_files.is_empty() && xhl_core_reads(&copy).is_none(), "{case}: {a:?}");
+        assert!(!a.warnings.iter().any(|w| w.contains("building-tools")), "{case}: {a:?}");
+
+        // on again: the ini is back where XHL-Core reads it, as it was
+        let a = profile::activate(&s.dirs, &building.id, &install).unwrap();
+        assert!(shroudforge::read_mod(&copy).unwrap().enabled && a.retained.is_empty(), "{case}: {a:?}");
+        assert_eq!(xhl_core_reads(&copy), Some(ini_now.clone()), "{case}");
+        assert!(copy.join(ini).is_file(), "{case}: under its own name");
+        let names: Vec<String> = std::fs::read_dir(&copy).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        assert!(!names.iter().any(|n| n.to_ascii_lowercase().contains("kiln-off")), "{case}: {names:?}");
+    }
+}
+
+/// inbox 86, a new version while the mod is off: the copy it replaces has its ini back for a moment, so the values the
+/// plugin wrote there go over to the new version (as for a game-folder copy), and the new copy has it set aside again.
+/// On, the new version's copy has the values in its ini. An ini the plugin never changed is the new version's own.
+#[test]
+fn inbox86_a_new_version_of_a_switched_off_xhl_plugin_keeps_its_ini_aside_and_its_values() {
+    for edited in [false, true] {
+        let s = setup(&format!("inbox86-update-{edited}"));
+        xhl_core(&s, XhlCore::ByHand);
+        let old = building_tools_version(&s, "native-plugin.ini", "0.33.2");
+        let new = building_tools_version(&s, "native-plugin.ini", "0.34.0");
+        let mut p = s.profile(vec![]);
+        p.mods.shroudforge.push(pm(&old, true));
+        engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+        let copy = s.game.join("mods/building-tools");
+        let mut ini_now = BT_INI.to_vec();
+        if edited {
+            ini_now.extend_from_slice(b"\r\n[BuildingTools]\r\nSnapKey=71\r\n");
+            std::fs::write(copy.join("native-plugin.ini"), &ini_now).unwrap();
+        }
+        p.mods.shroudforge[1].enabled = false;
+        let rep = engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+        assert!(xhl_core_reads(&copy).is_none() && rep.retained.is_empty(), "edited {edited}: {rep:?}");
+        // the update, still off
+        p.mods.shroudforge[1] = pm(&new, false);
+        let rep = engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+        assert!(rep.placed.contains(&"shroudforge:building-tools".to_string()) && rep.retained.is_empty(), "edited {edited}: {rep:?}");
+        assert_eq!(engine_mods::marker(&copy).unwrap().version, "0.34.0");
+        assert!(!shroudforge::read_mod(&copy).unwrap().enabled && xhl_core_reads(&copy).is_none(), "edited {edited}: {rep:?}");
+        assert_eq!(std::fs::read(copy.join("native-plugin.ini.kiln-off")).unwrap(), ini_now, "edited {edited}");
+        assert!(!s.game.join("kiln/kept-mod-files/shroudforge/building-tools").exists(), "edited {edited}: nothing set aside elsewhere");
+        // on: the new version runs, with the plugin's values
+        p.mods.shroudforge[1].enabled = true;
+        let rep = engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+        assert!(rep.kept.contains(&"shroudforge:building-tools".to_string()) && rep.retained.is_empty(), "edited {edited}: {rep:?}");
+        assert!(shroudforge::read_mod(&copy).unwrap().enabled, "edited {edited}");
+        assert_eq!(xhl_core_reads(&copy), Some(ini_now.clone()), "edited {edited}");
+        assert_eq!(std::fs::read(copy.join("BuildingTools.dll")).unwrap(), std::fs::read(library::path_of(&s.dirs, &new).unwrap().join("BuildingTools.dll")).unwrap());
+        // and a new version while it is on: the values go over too (an ini that names a DLL the new version has)
+        let newer = building_tools_version(&s, "native-plugin.ini", "0.35.0");
+        p.mods.shroudforge[1] = pm(&newer, true);
+        let rep = engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+        assert!(rep.placed.contains(&"shroudforge:building-tools".to_string()) && rep.retained.is_empty(), "edited {edited}: {rep:?}");
+        assert_eq!(xhl_core_reads(&copy), Some(ini_now.clone()), "edited {edited}");
+    }
+}
+
+/// inbox 86, Kiln's copy when Kiln stops managing the game (Deactivate, uninstall): one with nothing of the player's goes
+/// whole, its set-aside ini with it; one with the plugin's values in its ini stays, its ini still set aside (the mod was
+/// off), and the result says how to get it back.
+#[test]
+fn inbox86_deactivating_with_a_switched_off_xhl_plugin_leaves_nothing_that_loads() {
+    for edited in [false, true] {
+        let s = setup(&format!("inbox86-unplace-{edited}"));
+        xhl_core(&s, XhlCore::ByHand);
+        let tools = building_tools(&s, "native-plugin.ini");
+        let mut p = s.profile(vec![]);
+        p.mods.shroudforge.push(pm(&tools, true));
+        engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+        let copy = s.game.join("mods/building-tools");
+        if edited { std::fs::write(copy.join("native-plugin.ini"), [BT_INI, b"[BuildingTools]\r\nSnapKey=71\r\n"].concat()).unwrap(); }
+        p.mods.shroudforge[1].enabled = false;
+        engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+        let cleanup = engine_mods::unplace(&s.dirs, &s.game).unwrap();
+        if edited {
+            let kept = cleanup.retained.iter().find(|r| r.path == copy).unwrap_or_else(|| panic!("{cleanup:?}"));
+            assert!(kept.reason.contains("native-plugin.ini is renamed native-plugin.ini.kiln-off") && kept.reason.contains("rename it back"), "{kept:?}");
+            assert!(xhl_core_reads(&copy).is_none() && copy.join("native-plugin.ini.kiln-off").is_file());
+        } else {
+            assert!(!copy.exists() && cleanup.removed.contains(&copy) && cleanup.retained.is_empty(), "{cleanup:?}");
+        }
+    }
+}
+
+/// inbox 86 (b): the profile names a version whose Library entry is gone (the player's "Building" named Building Tools
+/// 0.33.2 after its Library folder was deleted), while Kiln's copy of another version stays in the game. That copy is
+/// still Kiln's by its marker and receipt: it follows the profile's switch all the same. Off: switched off in
+/// ShroudForge's file and its ini set aside; on: its ini back, and it runs as it is. The result says so.
+#[test]
+fn inbox86_a_copy_whose_profile_version_is_gone_from_the_library_follows_the_profile() {
+    let s = setup("inbox86-gone");
+    xhl_core(&s, XhlCore::ByHand);
+    let gone = building_tools_version(&s, "native-plugin.ini", "0.33.2");
+    let here = building_tools_version(&s, "native-plugin.ini", "0.34.0");
+    let mut p = s.profile(vec![]);
+    p.mods.shroudforge.push(pm(&here, true));
+    engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+    let copy = s.game.join("mods/building-tools");
+    assert!(shroudforge::read_mod(&copy).unwrap().enabled && xhl_core_reads(&copy).is_some());
+    std::fs::remove_dir_all(library::path_of(&s.dirs, &gone).unwrap()).unwrap();
+    for on in [false, true] {
+        p.mods.shroudforge[1] = pm(&gone, on);
+        let rep = engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+        let said = rep.warnings.iter().find(|w| w.contains("version 0.33.2 is not placed")).unwrap_or_else(|| panic!("on {on}: {rep:?}"));
+        assert!(said.contains("Kiln's copy of version 0.34.0 stays in") && said.contains(if on { "as it is" } else { "switched off" }), "on {on}: {said}");
+        assert_eq!(engine_mods::marker(&copy).unwrap().version, "0.34.0", "on {on}: the copy stays");
+        if on {
+            assert_eq!(xhl_core_reads(&copy).as_deref(), Some(BT_INI), "on {on}: {rep:?}");
+        } else {
+            assert!(!shroudforge::read_mod(&copy).unwrap().enabled && xhl_core_reads(&copy).is_none() && rep.retained.is_empty(), "on {on}: {rep:?}");
+            assert!(rep.switched.contains(&"shroudforge:building-tools".to_string()), "on {on}: {rep:?}");
+        }
+    }
+    // the copy's own version gone from the Library too: the marker and receipt are enough to switch it off
+    p.mods.shroudforge[1] = pm(&here, true);
+    let rep = engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+    assert!(xhl_core_reads(&copy).is_some(), "{rep:?}");
+    std::fs::remove_dir_all(library::path_of(&s.dirs, &here).unwrap()).unwrap();
+    p.mods.shroudforge[1] = pm(&here, false);
+    let rep = engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+    assert!(!shroudforge::read_mod(&copy).unwrap().enabled && xhl_core_reads(&copy).is_none() && rep.retained.is_empty(), "{rep:?}");
+    assert!(rep.kept.contains(&"shroudforge:building-tools".to_string()), "{rep:?}");
 }
 
 #[test]

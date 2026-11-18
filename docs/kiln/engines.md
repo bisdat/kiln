@@ -331,6 +331,22 @@ engines' mods") and 5.8.
   to a file without one). A marker alone never grants deletion or replacement rights;
   older marker-only copies and folders changed by the player are left alone. Replacement is staged beside the
   destination and rolls the previous copy back if placement fails. Activation is refused while the game runs.
+- **A ShroudForge mod that is an XHL-Core plugin too** (0.2.0-dev.29.18; Building Tools for ShroudForge: its DLL and
+  XHL-Core's `native-plugin.ini`, which ShroudForge's DLL manager also reads). ShroudForge's switch does not stop
+  XHL-Core: XHL-Core 2.1.0 opens `<mods>\<folder>\native-plugin.ini` in every folder of `mods/` and loads the DLL it
+  names, whatever the profile or ShroudForge says (inbox 86: a profile without the mod crashed at every start, XHL-Core
+  having loaded the DLL without its ShroudForge side). So while the profile has such a mod off, or no longer has it,
+  Kiln's copy has that ini renamed `native-plugin.ini.kiln-off` (its own spelling kept, its bytes as they are), and
+  XHL-Core skips the folder (with a `mod.json` it lists it as a resource-only mod). On again, the file gets its name
+  back. This is done whether or not the game has XHL-Core at that moment (it may be installed later, or run for one
+  start), only in Kiln's own copies (marker and receipt; a player's folder is never renamed, as before), and needs no
+  Library entry: a copy whose profile version is gone from the Library follows the profile by its receipt, and is
+  switched off in ShroudForge's file too when the mod is off. Kiln reads the renamed file as the copy's ini, so the
+  copy stays Kiln's. The ini of such a copy that the plugin (or the player) changed is its settings file while it
+  still names a DLL Kiln placed there, unchanged, as for an XHL companion: it is kept through the rename and carried
+  to the next version. Where the game has XHL-Core, the activation says once what Kiln renamed; if the rename cannot
+  be done, the folder is in the result as one that may still run. A copy that stays when Kiln stops managing the game
+  (Deactivate, uninstall) keeps the renamed file, and the result says how to name it back.
 - **A player's own ShroudForge folder.** A folder in ShroudForge's mods folder that Kiln did not place and that serves a
   profile entry (it is called `<library id>`, or its mod.json holds the entry's package id under any folder name) is
   the player's: activation says so ("the game uses your own folder …"), places no second copy, and neither switches,

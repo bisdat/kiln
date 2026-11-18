@@ -493,6 +493,72 @@ pub fn has_xhl_plugin_ini(dir: &Path) -> bool {
         .any(|e| e.file_name().to_str().is_some_and(|n| n.eq_ignore_ascii_case(XHL_PLUGIN_INI)) && e.path().is_file())
 }
 
+/// What the XHL-Core ini of Kiln's copy of a ShroudForge mod is renamed to while the profile has the mod off
+/// ([`park_plugin_ini`]): `<its name>.kiln-off` (`native-plugin.ini.kiln-off`). XHL-Core 2.1.0 opens
+/// `<mods>\<folder>\native-plugin.ini` by that name only (Windows and Wine match it in any case) and skips a folder
+/// without it (one with a `mod.json` it lists as a resource-only mod); ShroudForge's DLL manager reads that name too.
+/// Kiln reads the renamed file as the copy's ini ([`player_entries`]), so the copy is still the one its receipt lists.
+const PARKED_INI_SUFFIX: &str = ".kiln-off";
+
+/// The ini name a top-level file name `name` holds set aside ([`PARKED_INI_SUFFIX`], in any case), if it is one.
+fn parked_ini_name(name: &str) -> Option<&str> {
+    let (ini, suffix) = name.split_at_checked(name.len().checked_sub(PARKED_INI_SUFFIX.len())?)?;
+    (suffix.eq_ignore_ascii_case(PARKED_INI_SUFFIX) && ini.eq_ignore_ascii_case(XHL_PLUGIN_INI)).then_some(ini)
+}
+
+/// The top-level files of `dir` that are XHL-Core's ini (any case) and the ones set aside ([`parked_ini_name`]).
+fn plugin_ini_files(dir: &Path) -> Result<(Vec<String>, Vec<String>)> {
+    let (mut inis, mut parked) = (Vec::new(), Vec::new());
+    for e in std::fs::read_dir(dir).map_err(io_at(dir, "reading"))? {
+        let e = e?;
+        let Some(name) = e.file_name().to_str().map(str::to_owned) else { continue };
+        if !std::fs::symlink_metadata(e.path()).is_ok_and(|m| m.is_file()) { continue; }
+        if name.eq_ignore_ascii_case(XHL_PLUGIN_INI) { inis.push(name); } else if parked_ini_name(&name).is_some() { parked.push(name); }
+    }
+    Ok((inis, parked))
+}
+
+/// Sets the XHL-Core ini of Kiln's ShroudForge copy `dst` (under `game`) aside while the profile has the mod off: it is
+/// renamed `<name>.kiln-off` in the same folder, its bytes as they are (the values the plugin or the player wrote into
+/// it too). Some((ini, new name)) when it was renamed now; None when there is nothing to set aside (no ini, or it is
+/// set aside already). Refused, with nothing changed, when the folder has two of them or a set-aside one is in the way.
+fn park_plugin_ini(game: &Path, dst: &Path) -> Result<Option<(String, String)>> {
+    refuse_symlink_path(game, dst)?;
+    let (inis, parked) = plugin_ini_files(dst)?;
+    let ini = match (inis.as_slice(), parked.as_slice()) {
+        ([], _) => return Ok(None),
+        ([ini], []) => ini.clone(),
+        ([_], [p, ..]) => return Err(Error::new(ErrorCode::Refused, format!("{p} is there already, beside its native-plugin.ini"))),
+        _ => return Err(Error::new(ErrorCode::Refused, format!("it has more than one native-plugin.ini ({})", inis.join(", ")))),
+    };
+    let to = format!("{ini}{PARKED_INI_SUFFIX}");
+    let (from_path, to_path) = (dst.join(&ini), dst.join(&to));
+    refuse_symlink_path(game, &from_path)?;
+    refuse_symlink_path(game, &to_path)?;
+    crate::durable::rename_dir(&from_path, &to_path)?;
+    Ok(Some((ini, to)))
+}
+
+/// Puts the XHL-Core ini [`park_plugin_ini`] set aside in `dst` back under its own name. Some((set-aside name, ini)) when
+/// it was renamed now; None when nothing is set aside. Refused, with nothing changed, when an ini of that name is there
+/// again (the player put one back) or more than one is set aside.
+fn unpark_plugin_ini(game: &Path, dst: &Path) -> Result<Option<(String, String)>> {
+    refuse_symlink_path(game, dst)?;
+    let (inis, parked) = plugin_ini_files(dst)?;
+    let from = match (inis.as_slice(), parked.as_slice()) {
+        (_, []) => return Ok(None),
+        ([], [p]) => p.clone(),
+        ([ini, ..], [p, ..]) => return Err(Error::new(ErrorCode::Refused, format!("it has a {ini} again beside {p}"))),
+        _ => return Err(Error::new(ErrorCode::Refused, format!("it has more than one of them ({})", parked.join(", ")))),
+    };
+    let ini = parked_ini_name(&from).expect("a set-aside ini").to_string();
+    let (from_path, to_path) = (dst.join(&from), dst.join(&ini));
+    refuse_symlink_path(game, &from_path)?;
+    refuse_symlink_path(game, &to_path)?;
+    crate::durable::rename_dir(&from_path, &to_path)?;
+    Ok(Some((from, ini)))
+}
+
 // ---- placing mods in their engine's folder: ShroudForge and SET always, the others for their own loader ----
 
 /// The folder a kind's mod `id` is placed in for its engine (None: the plugin reads the library folder itself).
@@ -1133,8 +1199,14 @@ fn keep_sf_values(dirs: &DataDirs, game: &Path, receipts: &mut Vec<Placement>, r
 /// `now` and `listed` are file inventories (relative path to content hash; `<rel>/` with "" for folders).
 pub(crate) fn player_entries_of(now: std::collections::BTreeMap<String, String>, listed: &std::collections::BTreeMap<String, String>,
                                 kind: ModKind) -> Option<Vec<String>> {
+    player_entries_with(now, listed, |rel| is_settings_file(kind, rel))
+}
+
+/// [`player_entries_of`], with `setting` saying which listed files may differ (the player's settings).
+fn player_entries_with(now: std::collections::BTreeMap<String, String>, listed: &std::collections::BTreeMap<String, String>,
+                       setting: impl Fn(&str) -> bool) -> Option<Vec<String>> {
     for (rel, hash) in listed {
-        if now.get(rel) != Some(hash) && !is_settings_file(kind, rel) {
+        if now.get(rel) != Some(hash) && !setting(rel) {
             return None;
         }
     }
@@ -1151,7 +1223,22 @@ fn player_entries(dst: &Path, kind: ModKind, receipt: &Placement) -> Result<Opti
     {
         now.insert(EXT.into(), listed.clone());
     }
-    Ok(player_entries_of(now, &receipt.files, kind))
+    if kind != ModKind::ShroudForge { return Ok(player_entries_of(now, &receipt.files, kind)); }
+    // A ShroudForge mod that is an XHL-Core plugin too (Building Tools for ShroudForge). Its ini set aside while the mod
+    // is off ([`park_plugin_ini`]) is the copy's ini, under its own name, while no other ini is there.
+    let parked: Vec<String> = now.keys().filter(|k| !k.contains('/') && parked_ini_name(k).is_some()).cloned().collect();
+    let mut ini_at = None;
+    if let [one] = parked.as_slice() && !now.keys().any(|k| k.eq_ignore_ascii_case(XHL_PLUGIN_INI)) {
+        let hash = now.remove(one).expect("listed");
+        now.insert(parked_ini_name(one).expect("a set-aside ini").to_string(), hash);
+        ini_at = Some(one.clone());
+    }
+    // That ini changed since Kiln placed it is the plugin's settings file (the XHL plugins keep their settings in it)
+    // while it still names a DLL Kiln placed there, unchanged, as for a game-folder copy ([`plugin_ini_is_setting`]).
+    let ini_setting = receipt.files.keys().find(|rel| rel.eq_ignore_ascii_case(XHL_PLUGIN_INI)
+        && now.get(*rel).is_some_and(|h| Some(h) != receipt.files.get(*rel))
+        && plugin_ini_names_placed_dll(&dst.join(ini_at.as_deref().unwrap_or(rel.as_str())), receipt, &now)).cloned();
+    Ok(player_entries_with(now, &receipt.files, |rel| is_settings_file(kind, rel) || ini_setting.as_deref() == Some(rel)))
 }
 
 /// A copy [`place`] made, as its receipt says, with what the mod wrote into it since ([`player_entries`]).
@@ -1289,7 +1376,10 @@ pub(crate) fn carry_in(game: &Path, kind: ModKind, id: &str, c: &Carry, staged: 
         let blocked = rel.match_indices('/').any(|(i, _)| staged.join(&rel[..i]).is_file());
         let dangling = rel.eq_ignore_ascii_case(XHL_PLUGIN_INI) && std::fs::read(c.from.join(rel)).ok().and_then(|b| xhl_ini_dll(&b))
             .is_some_and(|dll| !has_file_any_case(staged, &dll));
-        if blocked || to.is_dir() || dangling || (to.is_file() && !is_settings_file(kind, rel)) {
+        // a ShroudForge copy's XHL-Core ini is among the player's files only as its plugin's settings ([`player_entries`]):
+        // the new version gets it, as a game-folder copy does
+        let setting = is_settings_file(kind, rel) || (kind == ModKind::ShroudForge && rel.eq_ignore_ascii_case(XHL_PLUGIN_INI));
+        if blocked || to.is_dir() || dangling || (to.is_file() && !setting) {
             if dangling { held.push(rel.clone()); }
             aside.push(rel.clone());
         } else {
@@ -1680,7 +1770,9 @@ pub fn unplace(dirs: &DataDirs, game_dir: &Path) -> Result<PlacementCleanup> {
         let player = match check {
             Ok(player) => player,
             Err(e) => {
-                report.retained.push(RetainedPlacement { path: dst.clone(), reason: reason_at(dst, e.message), may_run: true, off: true });
+                // a ShroudForge copy keeps its XHL-Core ini set aside, as it was while the mod was off: the result says so
+                let parked = if kind == ModKind::ShroudForge { parked_ini_note(dst) } else { String::new() };
+                report.retained.push(RetainedPlacement { path: dst.clone(), reason: format!("{}{parked}", reason_at(dst, e.message)), may_run: true, off: true });
                 continue;
             }
         };
@@ -2147,15 +2239,62 @@ fn own_xhl_folder_off(rep: &mut PlaceReport, tag: String, path: &Path) {
     rep.own.push(tag);
 }
 
-/// Kiln's ShroudForge copy `dst` stays switched off in ShroudForge's file ([`switch_copy`]), as every ShroudForge mod's
-/// does, but its folder has XHL-Core's native-plugin.ini (Building Tools for ShroudForge): where the game has XHL-Core
-/// (`xhl`, asked once per placement), XHL-Core loads it from there whatever that switch says. A folder that may still run
-/// while its mod is off ([`RetainedPlacement::off`]); it is no changed copy, so not in [`PlaceReport::changed`].
-fn sf_copy_xhl_loads(rep: &mut PlaceReport, xhl: &mut Option<bool>, game: &Path, dst: &Path) {
-    if !has_xhl_plugin_ini(dst) || !*xhl.get_or_insert_with(|| xhl_host(game).available) { return; }
-    rep.retained.push(RetainedPlacement { path: dst.to_path_buf(), may_run: true, off: true, reason: format!(
-        "Kiln switched it off in ShroudForge's settings, but its folder has a native-plugin.ini, and {XHL_LOADS}, so the mod may still \
-        run from there") });
+/// XHL-Core's ini in Kiln's ShroudForge copy `dst` follows the profile's switch, as ShroudForge's switch in the copy does
+/// ([`switch_copy`]). A ShroudForge mod that is an XHL-Core plugin too (Building Tools for ShroudForge: its DLL with
+/// XHL-Core's native-plugin.ini) stays in the mods folder while it is off, as every ShroudForge copy does, and XHL-Core
+/// reads no profile and no ShroudForge switch: it loaded the DLL from there without its ShroudForge side (inbox 86:
+/// every start of the profile without it crashed while the mods loaded). So while the mod is off the ini is set aside
+/// ([`park_plugin_ini`]) and XHL-Core skips the folder; switched on, it goes back as it was ([`unpark_plugin_ini`]).
+/// Whether or not the game has XHL-Core now (`xhl`, asked once per placement, and only here for what is said): it may
+/// be installed later, or run for one start only, and nothing else reads that ini while the mod is off (ShroudForge's
+/// DLL manager loads no DLL of a mod it does not run). Only a copy Kiln placed, unchanged ([`owned`]), gets here.
+/// `on`: the profile has the mod on; `gone`: it is not in the profile at all (for what is said).
+fn sf_plugin_ini(rep: &mut PlaceReport, xhl: &mut Option<bool>, game: &Path, dst: &Path, tag: &str, on: bool, gone: bool) {
+    let mut xhl_core = || *xhl.get_or_insert_with(|| xhl_host(game).available);
+    if on {
+        if let Err(e) = unpark_plugin_ini(game, dst) {
+            rep.warnings.push(format!("{tag}: Kiln could not rename its native-plugin.ini{PARKED_INI_SUFFIX} in {} back to native-plugin.ini \
+                ({}), so XHL-Core and ShroudForge do not load its DLL. Close the game and rename that file by hand.",
+                dst.display(), reason_at(dst, e.message)));
+        }
+        return;
+    }
+    let (off, starts) = if gone { ("it is not in the profile", "It is not in the profile") } else { ("it is off in the profile", OFF_IN_PROFILE) };
+    match park_plugin_ini(game, dst) {
+        Ok(Some((ini, parked))) if xhl_core() => rep.warnings.push(format!("{tag}: {off}, so Kiln renamed its {ini} in {} to {parked}, \
+            and XHL-Core does not load it. Kiln renames it back when you switch the mod on.", dst.display())),
+        Ok(_) => {}
+        // nothing else reads that ini while the mod is off
+        Err(_) if !xhl_core() => {}
+        Err(e) => rep.retained.push(RetainedPlacement { path: dst.to_path_buf(), may_run: true, off: true, reason: format!(
+            "{}, but Kiln could not rename its native-plugin.ini ({}), and {XHL_LOADS}, so the mod may still run from there",
+            starts, reason_at(dst, e.message)) }),
+    }
+}
+
+/// Kiln's copy of another version of a ShroudForge mod `dst` stays where it is, because the profile's version cannot be
+/// placed (its Library entry is gone or unreadable, or its publication failed): it follows the profile's switch all the
+/// same, by its marker and receipt alone. Off: switched off in ShroudForge's file, its XHL-Core ini set aside; on: its
+/// ini back where XHL-Core and ShroudForge read it (its ShroudForge switch stays as it is, so the earlier version runs).
+fn sf_old_copy_follows(rep: &mut PlaceReport, receipts: &mut Vec<Placement>, xhl: &mut Option<bool>, game: &Path, dst: &Path, tag: String, on: bool) {
+    if !on && crate::shroudforge::read_mod(dst).is_ok_and(|sf| sf.enabled) {
+        match switch_copy(game, receipts, dst, false) {
+            Ok(()) => rep.switched.push(tag.clone()),
+            Err(e) => rep.warnings.push(format!("{tag}: its earlier copy in {} could not be switched off in ShroudForge's settings ({}), so \
+                ShroudForge may still run it", dst.display(), reason_at(dst, e.message))),
+        }
+    }
+    sf_plugin_ini(rep, xhl, game, dst, &tag, on, false);
+}
+
+/// For a ShroudForge copy that stays where it is when Kiln stops managing the game ([`unplace`]): the sentence about its
+/// XHL-Core ini set aside while its mod was off ([`park_plugin_ini`]), which stays so. Empty: none is set aside.
+fn parked_ini_note(dst: &Path) -> String {
+    let Ok((inis, parked)) = plugin_ini_files(dst) else { return String::new() };
+    let ([], [p]) = (inis.as_slice(), parked.as_slice()) else { return String::new() };
+    let ini = parked_ini_name(p).unwrap_or(XHL_PLUGIN_INI);
+    format!(". Its {ini} is renamed {p}, as it was while the mod was off, so XHL-Core does not load it; rename it back to {ini} to use \
+        the mod with XHL-Core")
 }
 
 /// How [`still_runs`] starts for a mod the profile has off.
@@ -2252,6 +2391,8 @@ fn place_with(dirs: &DataDirs, profile: &crate::profile::Profile, game_dir: &Pat
             }
             if have.as_ref().is_some_and(|h| h.receipt.marker == want) {
                 if kind == ModKind::ShroudForge {
+                    // XHL-Core's ini first: it follows the profile whatever ShroudForge's file says
+                    sf_plugin_ini(&mut rep, &mut xhl_core, game_dir, &dst, &tag(&m.id), m.enabled, false);
                     match crate::shroudforge::read_mod(&dst) {
                         Err(e) => {
                             retain_runs(&mut rep, tag(&m.id), &dst, format!("its ShroudForge settings cannot be read, so its switch was left as it is: {}", e.message), still_runs(kind, m.enabled, Some(&want), Some(&want)));
@@ -2273,14 +2414,23 @@ fn place_with(dirs: &DataDirs, profile: &crate::profile::Profile, game_dir: &Pat
                         }
                         Ok(_) => {}
                     }
-                    if !m.enabled { sf_copy_xhl_loads(&mut rep, &mut xhl_core, game_dir, &dst); }
                 }
                 rep.kept.push(tag(&m.id));
             } else {
                 // a Library package the reader refuses (imported by an older Kiln with a laxer reader): ShroudForge would
                 // refuse it too. It is not placed, the result names it, and the other mods go on.
                 if kind == ModKind::ShroudForge && let Err(e) = crate::shroudforge::read_mod(&src) {
-                    rep.warnings.push(format!("{}: version {} is not placed: its package files cannot be read ({}); ShroudForge would refuse them too",
+                    // Kiln's copy of another version stays in the game (inbox 86: the Library entry was gone): it follows
+                    // the profile all the same, by its marker and receipt alone
+                    let stays = match &have {
+                        Some(h) => {
+                            sf_old_copy_follows(&mut rep, &mut receipts, &mut xhl_core, game_dir, &dst, tag(&m.id), m.enabled);
+                            format!(" Kiln's copy of version {} stays in {}, {}.", h.receipt.marker.version, dst.display(),
+                                if m.enabled { "as it is" } else { "switched off" })
+                        }
+                        None => String::new(),
+                    };
+                    rep.warnings.push(format!("{}: version {} is not placed: its package files cannot be read ({}); ShroudForge would refuse them too.{stays}",
                         tag(&m.id), m.version, e.message));
                     continue;
                 }
@@ -2288,6 +2438,8 @@ fn place_with(dirs: &DataDirs, profile: &crate::profile::Profile, game_dir: &Pat
                     match crate::shroudforge::read_mod(&dst) {
                         Ok(sf) => sf.settings.into_iter().map(|s| (s.key, s.value)).collect(),
                         Err(e) => {
+                            // Kiln's copy of another version stays: its XHL-Core ini follows the profile all the same
+                            sf_plugin_ini(&mut rep, &mut xhl_core, game_dir, &dst, &tag(&m.id), m.enabled, false);
                             retain_runs(&mut rep, tag(&m.id), &dst, format!("its ShroudForge settings cannot be read, so version {} was not placed: {}", m.version, e.message), still_runs(kind, m.enabled, marker_at(&receipts, &dst), Some(&want)));
                             continue;
                         }
@@ -2296,6 +2448,10 @@ fn place_with(dirs: &DataDirs, profile: &crate::profile::Profile, game_dir: &Pat
                 // Library path/integrity failures keep their hard-refusal contract; publication and recovery I/O
                 // failures belong to this mod, not to the rest of the profile.
                 refuse_symlink_path(roots.data, &src)?;
+                // The copy this one replaces has its XHL-Core ini under its own name again, so the values its plugin
+                // wrote there go over to the new version (carry_in reads them there). The new copy then follows the
+                // profile (below), and so does the old one when it stays.
+                if kind == ModKind::ShroudForge && have.is_some() { let _ = unpark_plugin_ini(game_dir, &dst); }
                 let kept_at = kept_dir(game_dir, kind, &m.id);
                 let published = (|| {
                     let carry = match &have {
@@ -2305,6 +2461,9 @@ fn place_with(dirs: &DataDirs, profile: &crate::profile::Profile, game_dir: &Pat
                     copy_in(roots, &src, &dst, &want, &kept, m.enabled, carry,
                         |receipt| put_placement(game_dir, &mut receipts, receipt))
                 })();
+                if kind == ModKind::ShroudForge && published.is_err() && let Some(h) = &have && marker(&dst).as_ref() == Some(&h.receipt.marker) {
+                    sf_old_copy_follows(&mut rep, &mut receipts, &mut xhl_core, game_dir, &dst, tag(&m.id), m.enabled);
+                }
                 let (said, warned) = match published {
                     Ok(done) => done,
                     Err(e) if e.code == ErrorCode::HashMismatch => return Err(e),
@@ -2315,7 +2474,7 @@ fn place_with(dirs: &DataDirs, profile: &crate::profile::Profile, game_dir: &Pat
                 };
                 rep.kept_files.extend(said);
                 rep.warnings.extend(warned);
-                if kind == ModKind::ShroudForge && !m.enabled { sf_copy_xhl_loads(&mut rep, &mut xhl_core, game_dir, &dst); }
+                if kind == ModKind::ShroudForge { sf_plugin_ini(&mut rep, &mut xhl_core, game_dir, &dst, &tag(&m.id), m.enabled, false); }
                 rep.placed.push(tag(&m.id));
             }
         }
@@ -2347,19 +2506,18 @@ fn place_with(dirs: &DataDirs, profile: &crate::profile::Profile, game_dir: &Pat
                 }
                 continue;
             }
+            // (a copy with a receipt is Kiln's: `owned` refused any other above)
+            if have.is_some() { sf_plugin_ini(&mut rep, &mut xhl_core, game_dir, dst, &tag(&receipt.marker.id), false, true); }
             match crate::shroudforge::read_mod(dst) {
                 Err(e) => retain_runs(&mut rep, tag(&receipt.marker.id), dst,
                     format!("its ShroudForge settings cannot be read, so it was not switched off: {}", e.message), still_runs(kind, false, None, None)),
                 Ok(sf) if sf.enabled => {
                     match switch_copy(game_dir, &mut receipts, dst, false) {
-                        Ok(()) => {
-                            rep.switched.push(tag(&receipt.marker.id));
-                            sf_copy_xhl_loads(&mut rep, &mut xhl_core, game_dir, dst);
-                        }
+                        Ok(()) => rep.switched.push(tag(&receipt.marker.id)),
                         Err(e) => retain_runs(&mut rep, tag(&receipt.marker.id), dst, e.message, still_runs(kind, false, None, None)),
                     }
                 }
-                Ok(_) => sf_copy_xhl_loads(&mut rep, &mut xhl_core, game_dir, dst),
+                Ok(_) => {}
             }
         }
     }
@@ -3030,9 +3188,14 @@ fn is_game_settings_file(rel: &str) -> bool {
 /// there. One that names another DLL, or none, is code ([`is_game_code`]); so is one the copy did not have.
 fn plugin_ini_is_setting(dst: &Path, rel: &str, receipt: &Placement, now: &std::collections::BTreeMap<String, String>) -> bool {
     if !rel.eq_ignore_ascii_case(XHL_PLUGIN_INI) || !receipt.files.contains_key(rel) { return false; }
-    let path = dst.join(rel);
-    let Some(dll) = std::fs::metadata(&path).ok().filter(|m| m.len() <= 64 * 1024)
-        .and_then(|_| std::fs::read(&path).ok()).and_then(|b| xhl_ini_dll(&b)) else { return false };
+    plugin_ini_names_placed_dll(&dst.join(rel), receipt, now)
+}
+
+/// The XHL-Core ini at `path` names (`Dll=` in `[Plugin]`, [`xhl_ini_dll`]) a `.dll` file `receipt` lists that is
+/// unchanged in the copy (`now`, its inventory).
+fn plugin_ini_names_placed_dll(path: &Path, receipt: &Placement, now: &std::collections::BTreeMap<String, String>) -> bool {
+    let Some(dll) = std::fs::metadata(path).ok().filter(|m| m.len() <= 64 * 1024)
+        .and_then(|_| std::fs::read(path).ok()).and_then(|b| xhl_ini_dll(&b)) else { return false };
     receipt.files.iter().any(|(r, hash)| r.eq_ignore_ascii_case(&dll) && r.to_ascii_lowercase().ends_with(".dll") && now.get(r) == Some(hash))
 }
 
@@ -3498,8 +3661,8 @@ pub fn set_setting(kind: ModKind, id: &str, key: &str, value: &serde_json::Value
 pub const XHL_CORE_COPIES: &str = crate::paths::game::CHAIN_DIR;
 /// XHL-Core's DLL in that copy.
 pub const XHL_CORE_DLL: &str = "xhl-core.dll";
-/// The log XHL-Core writes next to its DLL.
-const XHL_CORE_LOG: &str = "XHL-Native-Plugin-Host.log";
+/// The log XHL-Core writes next to its DLL (the support report reads it: report::xhl_core_logs).
+pub(crate) const XHL_CORE_LOG: &str = "XHL-Native-Plugin-Host.log";
 
 /// The DLLs of the dllmain native mod in the Library folder `folder` as Kiln chain-loads them, `(Library file, file in
 /// the copy)`, when one of them is XHL-Core named `dinput8.dll` (known by its bytes, so an entry imported before Kiln
@@ -3938,6 +4101,59 @@ mod tests {
         pub(super) static FAIL_SAVE_PLACEMENTS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
         /// [`adopt`] on this thread stops before this step, as a crash would (a panic: nothing is taken back).
         pub(super) static STOP_ADOPT_BEFORE: std::cell::Cell<Option<AdoptStep>> = const { std::cell::Cell::new(None) };
+    }
+
+    /// inbox 86: the name an XHL-Core ini is set aside under, read back in any case (a Windows folder, or Wine's, has
+    /// one file however it is spelt), and only for XHL-Core's ini.
+    #[test]
+    fn a_set_aside_ini_is_known_by_its_name_in_any_case() {
+        assert_eq!(parked_ini_name("native-plugin.ini.kiln-off"), Some("native-plugin.ini"));
+        assert_eq!(parked_ini_name("Native-Plugin.INI.KILN-OFF"), Some("Native-Plugin.INI"));
+        for name in ["native-plugin.ini", "native-plugin.ini.kiln-of", "config.ini.kiln-off", ".kiln-off", "native-plugin.ini.kiln-off.bak",
+                     "native-plugin.ini.kept-1", "", "é.kiln-off", "ünative-plugin.ini.kiln-off"] {
+            assert_eq!(parked_ini_name(name), None, "{name}");
+        }
+    }
+
+    /// Setting the ini aside and back is a rename in the copy's folder, its bytes as they are; it never overwrites a
+    /// file (an ini put back by hand beside the set-aside one, or two inis), and a folder without an ini is left alone.
+    #[test]
+    fn an_ini_is_set_aside_and_back_by_rename_and_never_over_another_file() {
+        let t = std::env::temp_dir().join(format!("km-park-ini-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&t);
+        let dst = t.join("mods/building-tools");
+        std::fs::create_dir_all(&dst).unwrap();
+        let game = t.as_path();
+        assert_eq!(park_plugin_ini(game, &dst).unwrap(), None, "no ini: nothing to set aside");
+        assert_eq!(unpark_plugin_ini(game, &dst).unwrap(), None);
+        std::fs::write(dst.join("Native-Plugin.ini"), b"[Plugin]\r\nDll=BuildingTools.dll\r\n[Mine]\r\nKey=1\r\n").unwrap();
+        assert_eq!(park_plugin_ini(game, &dst).unwrap(), Some(("Native-Plugin.ini".into(), "Native-Plugin.ini.kiln-off".into())));
+        assert!(!has_xhl_plugin_ini(&dst));
+        assert_eq!(std::fs::read(dst.join("Native-Plugin.ini.kiln-off")).unwrap(), b"[Plugin]\r\nDll=BuildingTools.dll\r\n[Mine]\r\nKey=1\r\n");
+        assert_eq!(park_plugin_ini(game, &dst).unwrap(), None, "set aside already");
+        // the player put an ini back by hand: neither file is overwritten, either way
+        std::fs::write(dst.join("native-plugin.ini"), b"by hand").unwrap();
+        let e = park_plugin_ini(game, &dst).unwrap_err();
+        assert!(e.code == ErrorCode::Refused && e.message.contains("is there already"), "{e:?}");
+        let e = unpark_plugin_ini(game, &dst).unwrap_err();
+        assert!(e.code == ErrorCode::Refused && e.message.contains("again"), "{e:?}");
+        assert_eq!(std::fs::read(dst.join("native-plugin.ini")).unwrap(), b"by hand");
+        std::fs::remove_file(dst.join("native-plugin.ini")).unwrap();
+        assert_eq!(unpark_plugin_ini(game, &dst).unwrap(), Some(("Native-Plugin.ini.kiln-off".into(), "Native-Plugin.ini".into())));
+        assert_eq!(std::fs::read(dst.join("Native-Plugin.ini")).unwrap(), b"[Plugin]\r\nDll=BuildingTools.dll\r\n[Mine]\r\nKey=1\r\n");
+        #[cfg(unix)]
+        {
+            // two inis (a Linux folder can hold both spellings): which one XHL-Core reads under Wine is not ours to pick
+            std::fs::write(dst.join("native-plugin.ini"), b"other").unwrap();
+            assert!(park_plugin_ini(game, &dst).unwrap_err().message.contains("more than one"));
+            std::fs::remove_file(dst.join("native-plugin.ini")).unwrap();
+            // a link in the ini's place is never renamed
+            std::fs::remove_file(dst.join("Native-Plugin.ini")).unwrap();
+            std::os::unix::fs::symlink(t.join("elsewhere.ini"), dst.join("native-plugin.ini")).unwrap();
+            assert_eq!(park_plugin_ini(game, &dst).unwrap(), None, "a link is no ini of the copy");
+            assert!(std::fs::symlink_metadata(dst.join("native-plugin.ini")).unwrap().file_type().is_symlink());
+        }
+        let _ = std::fs::remove_dir_all(&t);
     }
 
     #[test]
