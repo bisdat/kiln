@@ -111,13 +111,15 @@ Enshrouded after changing the boot-time setting.
 ## In-game checks
 
 1. **HUD chat:** type `/he`; suggestions appear without consuming Up or
-   Down. Tab accepts the first suggestion, repeated Tab cycles,
-   Shift+Tab goes backward, Up/Down navigate when selection is active,
-   and Esc dismisses only an active suggestion list. Enter should still
-   submit through Enshrouded's normal chat widget.
-2. **Social chat:** repeat all key tests. The overlay should follow the
-   current skin and render within bounds at different UI scales /
-   resolutions; click and scroll through suggestions.
+   Down. Tab accepts a suggestion into the game's editor and dismisses the
+   popup. A fully typed or recalled `/help` must not open a self-suggestion
+   popup. Esc dismisses an active suggestion list; Enter must still submit
+   through Enshrouded's normal chat widget. Steam captures Shift+Tab to
+   open its own overlay by default, so completion does not advertise it.
+2. **Social chat:** repeat the key tests. Verify the hint is fully visible,
+   the command choices use the game's font at a readable size, the popup
+   does not overlap the input, and the window stays within bounds at
+   different UI scales/resolutions. Click and scroll through suggestions.
 3. **Empty/no match:** Tab and Esc behave as before; gameplay controls,
    gamepad, unrelated text fields and held/released keys are unaffected.
 4. **History regression:** with `ui.chatHistory` enabled, passive Up/Down
