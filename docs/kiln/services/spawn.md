@@ -110,7 +110,9 @@ on a server in dev.27: `TryEntity`, `TryItem` and `DestroyIfAlive` call the same
 
 Every spawn without `NoTrack` is recorded in `kiln/data/spawn/<world GUID>.json` (world GUID from the save header of
 `<saveDirectory>/world*.ksd`; `Spawn.WorldKey`). The file is rewritten atomically on every change, and at most every
-10 s for position updates.
+10 s for position updates. Since 0.2.0-dev.29.17 the writes run on a thread of the tracker's own, so a busy disk never
+holds up the server's step; a Pre of kiln.spawn over 100 ms is logged with the part that took it
+(`slow tick: kiln.spawn's Pre took ...`, at most once a minute).
 
 ```json
 { "format": 1, "world": "11111111-…", "save": "…\\savegame\\world0.ksd", "next_serial": 6,
