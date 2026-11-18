@@ -424,7 +424,8 @@ typedef struct KilnStationsApi {
     /* Moves a station's finished stacks, each through kiln.items' move (the game's slot transfer; KilnStationCollect has
      * the rules). Joins the same action queue as submit (1024 waiting; KILN_ERR_BUFFER_TOO_SMALL when it is full). Any
      * thread; `done` (may be NULL) runs once, on the tick thread. KILN_ERR_INVALID_ARGUMENT: a bad request.
-     * KILN_ERR_UNAVAILABLE: no server world, stations.read is off, or items.move is off. */
+     * KILN_ERR_UNAVAILABLE: no server world, stations.read is off, items.move is off, or a fault switched the service's
+     * actions off. */
     KilnResult(KILN_CALL* collect)(KilnOwner owner, const KilnStationCollect* request, KilnStationDoneFn done, void* user,
                                    uint64_t* out_ticket);
     /* ---- stock plus finished station outputs (header.size tells whether this is here) ---- */
