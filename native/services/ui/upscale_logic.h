@@ -171,7 +171,8 @@ inline bool motion_format_ok(VkFormat f) {
     return f == VK_FORMAT_R16G16_SFLOAT || f == VK_FORMAT_R32G32_SFLOAT || f == VK_FORMAT_R16G16_SNORM;
 }
 inline bool mask_format_ok(VkFormat f) { return f == VK_FORMAT_R8_UNORM || f == VK_FORMAT_R16_SFLOAT || f == VK_FORMAT_R16_UNORM; }
-inline bool output_format_ok(VkFormat f) { return color_format_ok(f); }
+// The output is written as a storage image (and blitted to when a frame falls back): E5B9G9R9 is neither on most GPUs.
+inline bool output_format_ok(VkFormat f) { return color_format_ok(f) && f != VK_FORMAT_E5B9G9R9_UFLOAT_PACK32; }
 
 // The frame as the core built it: every texture there, formats known, the render size inside the input textures and
 // the output size inside the output. Null when fine.
@@ -264,7 +265,8 @@ struct StatusIn {
     uint32_t aside = 0;             // KILN_UI_GFX_ASIDE_* keeping the swap off
     bool signatures = true;         // sigdb feature upscale.swap on
     bool fsr_seen = false;          // the game ran its FSR 3 pass in the last two seconds
-    bool started = false;           // a backend context exists for the chosen backend and recorded a frame recently
+    Choice latched = Choice::game;  // the choice as of the game's last FSR 3 set-up (what frames follow)
+    bool started = false;           // the start's backend upscaled a frame in the last two seconds
     bool failed = false;            // the chosen backend failed this session (fell back)
     Why why = Why::none;            // the chosen backend's own reason (files, device, load...), none when fine
     Running backend_running = Running::off;  // what the backend says it runs (while started)
@@ -289,12 +291,14 @@ inline StatusOut decide_status(const StatusIn& s) {
         if (s.chosen != Choice::game) o.why = s.failed ? (s.why != Why::none ? s.why : Why::runtime_failed) : s.why;
         return o;
     }
-    if (s.chosen == Choice::game) {
-        o.running = Running::game_fsr3;
+    if (s.started && !s.failed) {
+        // what really upscales now; a new choice applies at the next FSR 3 set-up (or, for another backend, the start)
+        o.running = s.backend_running;
+        if (s.chosen != s.latched) o.why = s.chosen == Choice::game || s.chosen == s.hooked_for ? Why::waiting : Why::restart;
         return o;
     }
-    if (s.started && !s.failed) {
-        o.running = s.backend_running;
+    if (s.chosen == Choice::game) {
+        o.running = Running::game_fsr3;
         return o;
     }
     o.running = Running::game_fsr3;

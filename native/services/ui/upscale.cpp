@@ -64,6 +64,8 @@ kiln::RawHook h_record, h_fsr, h_exec, h_create;
 uint32_t g_fault_code = 0;
 int fault_filter(EXCEPTION_POINTERS* ep) {
     g_fault_code = ep->ExceptionRecord->ExceptionCode;
+    // a stack overflow is not recovered from here (its guard page would be gone): the game's own handling
+    if (g_fault_code == EXCEPTION_STACK_OVERFLOW) return EXCEPTION_CONTINUE_SEARCH;
     return EXCEPTION_EXECUTE_HANDLER;
 }
 bool copy_guarded(void* dst, const void* src, size_t n) {
@@ -97,6 +99,7 @@ vendor::Verified g_files;             // kept for the session: the handles deny 
 std::atomic<bool> g_load_tried{false}, g_loaded{false};
 std::atomic<uint32_t> g_why{0};       // the backend's own Why (files, device, load, create...)
 std::atomic<bool> g_failed{false};    // fell back to the game's FSR 3 for the session
+std::atomic<bool> g_faulted{false};   // a fault in the backend: Kiln never calls into it again (it may hold a lock)
 std::atomic<uint32_t> g_running{0}, g_version{0};
 std::atomic<bool> g_amd_pinned{false};
 
@@ -135,6 +138,8 @@ std::atomic<uint32_t> g_seq{0};
 PFN_vkCmdPipelineBarrier p_barrier = nullptr;
 PFN_vkCmdBlitImage p_blit = nullptr;
 PFN_vkDeviceWaitIdle p_wait_idle = nullptr;
+PFN_vkGetPhysicalDeviceFormatProperties p_format_props = nullptr;
+VkPhysicalDevice g_phys = VK_NULL_HANDLE;
 
 void set_detail(const std::string& d) {
     std::lock_guard lk(g_mu);
@@ -152,7 +157,7 @@ void say_why(Why w, const std::string& detail, int level = KILN_LOG_WARN) {
         fresh = w != logged_why || detail != logged;
         if (fresh) logged_why = w, logged = detail;
     }
-    if (fresh) logf(level, "graphics: upscaler: %s%s%s", why_text(w), detail.empty() ? "" : ": ", detail.c_str());
+    if (fresh && w != Why::none) logf(level, "graphics: upscaler: %s%s%s", why_text(w), detail.empty() ? "" : ": ", detail.c_str());
 }
 // The session falls back to the game's FSR 3.
 void fall_back(Why w, const std::string& detail) {
@@ -206,6 +211,7 @@ bool guarded(F&& f) {
         if (guarded([&]() { __VA_ARGS__; })) return true;                                                          \
         char b_[96];                                                                                               \
         std::snprintf(b_, sizeof b_, "a fault (0x%08x) in %s", g_fault_code, what);                                \
+        g_faulted = true;                                                                                          \
         fall_back(Why::fault, b_);                                                                                 \
         return false;                                                                                              \
     }())
@@ -351,30 +357,32 @@ void upscale_instance_destroyed(VkInstance instance) {
 const VkDeviceCreateInfo* upscale_device_begin(VkInstance instance, VkPhysicalDevice phys, const VkDeviceCreateInfo* ci,
                                                PFN_vkGetInstanceProcAddr gipa, void** scope) {
     *scope = nullptr;
-    if (!g_hooked.load() || !g_backend || !ci || !gipa || !instance) return ci;
+    if (!g_hooked.load() || !g_backend || !ci || !gipa) return ci;
     // the game's own device: the first one with a swapchain while Kiln has none (the client also makes a second device
     // with 79 extensions next to its own, B0; it is left alone)
     if (g_device.load() || !has_swapchain_ext(ci)) return ci;
     load_backend();
     auto* s = new DeviceScope();
     *scope = s;
-    s->gpu.instance = instance;
     s->gpu.physical = phys;
     s->gpu.gipa = gipa;
     s->inst = instance_of(phys, gipa);
+    s->gpu.instance = s->inst.instance ? s->inst.instance : instance;  // the instance phys came from (vk.cpp gives the latest)
     s->gpu.instance_api = s->inst.api;
     if (auto props = reinterpret_cast<PFN_vkGetPhysicalDeviceProperties>(gipa(instance, "vkGetPhysicalDeviceProperties"))) props(phys, &s->gpu.props);
     if (!g_loaded.load()) return ci;
     DeviceNeeds needs;
     if (!KUI_GUARD("the backend's device needs", needs = g_backend->device_needs(s->gpu))) return ci;
     const VkDeviceCreateInfo* use = ci;
+    bool threw = false;
     try {
         use = s->merge.merge(ci, needs, s->gpu, &s->report);
     } catch (...) {
         use = ci;
+        threw = true;
     }
-    s->merged = s->report.ok();
-    s->kiln_ci = use;
+    s->merged = !threw && s->report.ok();
+    s->kiln_ci = threw ? nullptr : use;
     log_report("the game's Vulkan device", s->report);
     if (!s->report.ok()) {
         std::string missing;
@@ -411,11 +419,14 @@ void upscale_device_end(void* scope, const VkDeviceCreateInfo* used, VkResult r,
         vk.features = device_merge::enabled_features(*used);
     }
     vk.needs_merged = s->merged && kiln_used;
+    const bool refused = s->kiln_ci && s->report.changed && !kiln_used;  // vk.cpp tried Kiln's copy, the driver refused it
     if (gdpa) {
         p_barrier = reinterpret_cast<PFN_vkCmdPipelineBarrier>(gdpa(device, "vkCmdPipelineBarrier"));
         p_blit = reinterpret_cast<PFN_vkCmdBlitImage>(gdpa(device, "vkCmdBlitImage"));
         p_wait_idle = reinterpret_cast<PFN_vkDeviceWaitIdle>(gdpa(device, "vkDeviceWaitIdle"));
     }
+    p_format_props = reinterpret_cast<PFN_vkGetPhysicalDeviceFormatProperties>(vk.gipa(vk.instance, "vkGetPhysicalDeviceFormatProperties"));
+    g_phys = vk.physical;
     g_vk = vk;
     logf(KILN_LOG_INFO, "graphics: upscaler: the game's device %p on %s (Vulkan %u.%u, instance %p %u.%u with %zu extensions): %zu extensions",
          reinterpret_cast<void*>(device), vk.props.deviceName, VK_API_VERSION_MAJOR(vk.props.apiVersion), VK_API_VERSION_MINOR(vk.props.apiVersion),
@@ -427,6 +438,10 @@ void upscale_device_end(void* scope, const VkDeviceCreateInfo* used, VkResult r,
     logf(KILN_LOG_INFO, "graphics: upscaler: vulkan-1.dll was mapped %d time%s before the game's device: %s", maps, maps == 1 ? "" : "s",
          maps > 1 ? "the game's unload and reload happened" : "no unload and reload seen (a DLL mapped at the first vkCreateInstance may keep it mapped)");
     if (!g_loaded.load() || !g_backend) return;
+    if (refused) {
+        say_why(Why::device, "the graphics driver refused the Vulkan extensions and features the upscaler needs (the game's own device was made)");
+        return;
+    }
     Why why = Why::device;
     std::string detail;
     bool ok = false;
@@ -446,7 +461,7 @@ void upscale_device_destroy(VkDevice device) {
     if (!device || g_device.load() != device) return;
     g_device_ready = false;
     if (p_wait_idle) guarded([&]() { p_wait_idle(device); });
-    if (g_backend) {
+    if (g_backend && !g_faulted.load()) {
         if (g_ctx) KUI_GUARD("the backend's destroy", g_backend->destroy());
         KUI_GUARD("the backend's device end", g_backend->device_lost(device));
     }
@@ -663,6 +678,18 @@ void* hk_create(void* a, void* b, void* c, const uint8_t* p) {
     return r;
 }
 
+// The game's own FSR 3 for this frame. Its first frame after Kiln's has the game's history from before them: the
+// description's reset byte asks the game's FSR 3 to drop it (the game supports it; it never sets it itself).
+bool g_kiln_recorded = false;  // the last FSR frame was Kiln's (main thread)
+void game_fsr(void* ctx, uint8_t* fsr, uint8_t* desc) {
+    if (g_kiln_recorded) {
+        g_kiln_recorded = false;
+        const uint8_t one = 1;
+        copy_guarded(desc + L.desc.reset, &one, 1);
+    }
+    h_fsr.call<void>(ctx, fsr, desc);
+}
+
 void hk_fsr(void* ctx, uint8_t* fsr, uint8_t* desc) {
     const uint64_t t = now_ms();
     g_last_fsr_ms.store(t, std::memory_order_relaxed);
@@ -677,14 +704,17 @@ void hk_fsr(void* ctx, uint8_t* fsr, uint8_t* desc) {
             g_oh.store(sz[3], std::memory_order_relaxed);
         }
     }
+    // what the backend kept for the GPU goes once the GPU is done with it, whether or not it records this frame
+    if (g_backend && g_loaded.load(std::memory_order_relaxed) && !g_faulted.load(std::memory_order_relaxed))
+        KUI_GUARD("the backend's tick", g_backend->tick(n));
     if (!swap_on()) {
         // the context goes once nothing uses it (the choice changed, a failure): the GPU memory back to the game
         if (g_ctx && g_backend) {
-            KUI_GUARD("the backend's destroy", g_backend->destroy());
+            if (!g_faulted.load()) KUI_GUARD("the backend's destroy", g_backend->destroy());
             g_ctx = false;
             g_running = static_cast<uint32_t>(Running::off);
         }
-        h_fsr.call<void>(ctx, fsr, desc);
+        game_fsr(ctx, fsr, desc);
         return;
     }
     Frame f;
@@ -694,22 +724,27 @@ void hk_fsr(void* ctx, uint8_t* fsr, uint8_t* desc) {
     static uint64_t prev_ms = 0;
     if (prev_ms && t - prev_ms > 500) ++g_world;
     prev_ms = t;
+    static uint64_t bad = 0, bad_logged = 0;  // unusable frames in a row (a load or a size change may give a few)
     if (!build_frame(desc, t_in, &f, &why, &detail)) {
-        static uint64_t bad = 0;
-        if (++bad <= 3 || bad % 600 == 0) logf(KILN_LOG_WARN, "graphics: upscaler: frame %llu: %s: the game's FSR 3 runs this frame",
-                                                static_cast<unsigned long long>(n), detail.c_str());
-        if (bad >= 120) fall_back(why, detail);  // the same every frame for two seconds: for the session
+        ++bad;
+        if (bad_logged++ < 3 || bad_logged % 600 == 0)
+            logf(KILN_LOG_WARN, "graphics: upscaler: frame %llu: %s: the game's FSR 3 runs this frame", static_cast<unsigned long long>(n), detail.c_str());
+        if (bad >= 120) fall_back(why, detail);  // every frame for about two seconds: for the session
         say_why(why, detail);
-        h_fsr.call<void>(ctx, fsr, desc);
+        game_fsr(ctx, fsr, desc);
         return;
+    }
+    if (bad) {
+        bad = 0;
+        if (static_cast<Why>(g_why.load()) == Why::inputs) say_why(Why::none, {}, KILN_LOG_INFO);
     }
     if (VkDevice sd = vk_swapchain_device(); sd && sd != g_device.load()) {
         fall_back(Why::no_vulkan, "the game draws with another Vulkan device than the one Kiln set the upscaler up on");
-        h_fsr.call<void>(ctx, fsr, desc);
+        game_fsr(ctx, fsr, desc);
         return;
     }
     if (!ensure_context(f)) {
-        h_fsr.call<void>(ctx, fsr, desc);
+        game_fsr(ctx, fsr, desc);
         return;
     }
     f.frame = n;
@@ -730,20 +765,39 @@ void hk_fsr(void* ctx, uint8_t* fsr, uint8_t* desc) {
     s.seq.store(0, std::memory_order_relaxed);
     s.frame = f;
     s.seq.store(seq, std::memory_order_release);
-    if (!flush_guarded(ctx) || !write_cmd(ctx, make_cmd(kUpscale, seq, seq % kSlots))) {
+    if (!flush_guarded(ctx)) {
+        // a fault in the game's own flush: its barrier list may be half written, so Kiln writes nothing more there
+        s.seq.store(0, std::memory_order_relaxed);
+        fall_back(Why::fault, "a fault in the game's barrier flush before Kiln's command");
+        game_fsr(ctx, fsr, desc);
+        return;
+    }
+    if (!write_cmd(ctx, make_cmd(kUpscale, seq, seq % kSlots))) {
         s.seq.store(0, std::memory_order_relaxed);
         static uint32_t said = 0;
         if (said++ < 3) logf(KILN_LOG_WARN, "graphics: upscaler: writing Kiln's render command failed: the game's FSR 3 runs this frame");
-        h_fsr.call<void>(ctx, fsr, desc);
+        game_fsr(ctx, fsr, desc);
         return;
     }
+    g_kiln_recorded = true;
     // the game's FSR 3 passes are not recorded for this frame
 }
 
 // A plain linear blit of the colour (render size) to the output: a frame whose backend failed is never left empty.
 // Both textures have the transfer usage the game gave them (B0: colour TRANSFER_SRC, output TRANSFER_DST).
+bool blit_formats_ok(VkFormat src, VkFormat dst) {
+    static VkFormat last_src = VK_FORMAT_UNDEFINED, last_dst = VK_FORMAT_UNDEFINED;
+    static bool last_ok = false;
+    if (src == last_src && dst == last_dst) return last_ok;
+    VkFormatProperties s{}, d{};
+    if (p_format_props && g_phys) p_format_props(g_phys, src, &s), p_format_props(g_phys, dst, &d);
+    last_src = src, last_dst = dst;
+    last_ok = (s.optimalTilingFeatures & VK_FORMAT_FEATURE_BLIT_SRC_BIT) && (s.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT) &&
+              (d.optimalTilingFeatures & VK_FORMAT_FEATURE_BLIT_DST_BIT);
+    return last_ok;
+}
 void blit_fallback(VkCommandBuffer cb, const Frame& f) {
-    if (!p_barrier || !p_blit) return;
+    if (!p_barrier || !p_blit || !blit_formats_ok(f.color.format, f.output.format)) return;
     VkImageMemoryBarrier b[2]{};
     for (auto& x : b) {
         x.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -787,7 +841,7 @@ void run_cmd(VkCommandBuffer cb, const KCmd& c) {
     f.cb = cb;
     std::string detail;
     bool ok = false;
-    const bool live = g_ctx && g_backend && !g_failed.load();
+    const bool live = g_ctx && g_backend && !g_failed.load() && !g_faulted.load();
     if (live && KUI_GUARD("the backend's upscale", ok = g_backend->record(f, &detail)) && ok) {
         const uint64_t k = g_kiln_frames.fetch_add(1, std::memory_order_relaxed) + 1;
         g_last_kiln_ms.store(now_ms(), std::memory_order_relaxed);
@@ -932,9 +986,11 @@ void upscale_status(KilnUiGraphicsStatus* out) {
     // the choice now is not the one the hooks and the device were made for: from the next start
     if (in.hooked && chosen != Choice::game && chosen != g_start) in.why = Why::restart;
     // the latched choice (the game's last FSR 3 set-up) is not the one now: it applies at the next set-up
-    else if (in.hooked && chosen == g_start && in.why == Why::none && g_latched_any.load() && static_cast<Choice>(g_latched.load()) != chosen)
+    else if (in.hooked && chosen == g_start && (in.why == Why::none || in.why == Why::waiting) && g_latched_any.load() &&
+             static_cast<Choice>(g_latched.load()) != chosen)
         in.why = Why::waiting;
-    in.started = kiln_live && chosen == g_start && static_cast<Choice>(g_latched.load()) == chosen;
+    in.latched = static_cast<Choice>(g_latched.load());
+    in.started = kiln_live && in.latched == g_start;
     in.backend_running = static_cast<Running>(g_running.load());
     if (!g_started.load() && chosen != Choice::game) in.why = Why::restart;
     const StatusOut o = decide_status(in);

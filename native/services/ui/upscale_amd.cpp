@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <cwchar>
@@ -80,6 +81,8 @@ class AmdBackend final : public Backend {
 
     bool device_ready(const VkContext& vk, Why* why, std::string* detail) override {
         vk_ = vk;
+        version_ids_.clear();
+        version_names_.clear();
         if (!vk.needs_merged) {
             *why = Why::restart;
             *detail = "the game's device was made before AMD FSR was chosen (or without its Vulkan extensions)";
@@ -113,17 +116,19 @@ class AmdBackend final : public Backend {
             return false;
         }
         // AMD's DLLs: the upscaler first, then the loader (which then finds it mapped)
+        // AMD's DLLs need Microsoft's Visual C++ runtime (msvcp140, vcruntime140, vcruntime140_1) in System32
+        constexpr const char* kRuntime = ". AMD's DLLs need the Microsoft Visual C++ Redistributable 14.40 or later (x64) installed";
         std::string d;
         up_ = vendor::load_verified(upscaler_path_, &d);
         if (!up_) {
             *why = Why::load_failed;
-            *detail = d.empty() ? "amd_fidelityfx_upscaler_vk.dll did not load" : d;
+            *detail = (d.empty() ? std::string("amd_fidelityfx_upscaler_vk.dll did not load") : d) + kRuntime;
             return false;
         }
         loader_ = vendor::load_verified(loader_path_, &d);
         if (!loader_) {
             *why = Why::load_failed;
-            *detail = d.empty() ? "amd_fidelityfx_loader_vk.dll did not load" : d;
+            *detail = (d.empty() ? std::string("amd_fidelityfx_loader_vk.dll did not load") : d) + kRuntime;
             return false;
         }
         fx_.CreateContext = reinterpret_cast<PfnFfxCreateContext>(GetProcAddress(loader_, "ffxCreateContext"));
@@ -161,6 +166,13 @@ class AmdBackend final : public Backend {
         if (version_names_.empty()) {
             *why = Why::device;
             *detail = "AMD FSR offers no upscaler version for this GPU";
+            return false;
+        }
+        // Kiln's motion-vector pass writes its image without a format in the shader (upscale_mv.h)
+        if (!vk.has_feature(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+                            offsetof(VkPhysicalDeviceFeatures2, features) + offsetof(VkPhysicalDeviceFeatures, shaderStorageImageWriteWithoutFormat))) {
+            *why = Why::device;
+            *detail = "the game's device lacks shaderStorageImageWriteWithoutFormat (Kiln's motion-vector pass)";
             return false;
         }
         std::string mv;
@@ -226,6 +238,12 @@ class AmdBackend final : public Backend {
     }
 
     void reset() override { reset_ = true; }
+
+    void tick(uint64_t frame) override {
+        if (frame > frame_) frame_ = frame;
+        reap(false);
+        mv_.tick(frame);
+    }
 
     void destroy() override {
         if (ctx_) retired_.push_back({ctx_, frame_});

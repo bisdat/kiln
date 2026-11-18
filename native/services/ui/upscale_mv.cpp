@@ -29,16 +29,24 @@ bool MotionConverter::init(const VkContext& vk, std::string* detail) {
     KUI_MV_LOAD(vkCmdBindDescriptorSets) KUI_MV_LOAD(vkCmdPushConstants) KUI_MV_LOAD(vkCmdDispatch)
 #undef KUI_MV_LOAD
     auto mem_props = vk.gipa ? reinterpret_cast<PFN_vkGetPhysicalDeviceMemoryProperties>(vk.gipa(vk.instance, "vkGetPhysicalDeviceMemoryProperties")) : nullptr;
-    if (!ok || !mem_props) {
+    vkGetPhysicalDeviceFormatProperties =
+        vk.gipa ? reinterpret_cast<PFN_vkGetPhysicalDeviceFormatProperties>(vk.gipa(vk.instance, "vkGetPhysicalDeviceFormatProperties")) : nullptr;
+    if (!ok || !mem_props || !vkGetPhysicalDeviceFormatProperties) {
         if (detail) *detail = "a Vulkan function for the motion-vector pass is missing";
         return false;
     }
     mem_props(phys_, &mem_);
+    VkFormatProperties fp{};
+    vkGetPhysicalDeviceFormatProperties(phys_, VK_FORMAT_R16G16_SFLOAT, &fp);
+    if (!(fp.optimalTilingFeatures & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT) || !(fp.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT)) {
+        if (detail) *detail = "the GPU cannot write R16G16_SFLOAT storage images (Kiln's motion-vector pass)";
+        return false;
+    }
     return true;
 }
 
 bool MotionConverter::pipeline(std::string* detail) {
-    if (pipe_) return true;
+    if (ready_) return true;
     auto fail = [&](const char* what) {
         if (detail) *detail = std::string("the motion-vector pass: ") + what + " failed";
         return false;
@@ -79,7 +87,7 @@ bool MotionConverter::pipeline(std::string* detail) {
     cp.stage.module = shader_;
     cp.stage.pName = "main";
     cp.layout = layout_;
-    if (vkCreateComputePipelines(dev_, VK_NULL_HANDLE, 1, &cp, nullptr, &pipe_) != VK_SUCCESS) {
+    if (!pipe_ && vkCreateComputePipelines(dev_, VK_NULL_HANDLE, 1, &cp, nullptr, &pipe_) != VK_SUCCESS) {
         pipe_ = VK_NULL_HANDLE;
         return fail("vkCreateComputePipelines");
     }
@@ -88,7 +96,7 @@ bool MotionConverter::pipeline(std::string* detail) {
     pi.maxSets = kSets;
     pi.poolSizeCount = 2;
     pi.pPoolSizes = ps;
-    if (vkCreateDescriptorPool(dev_, &pi, nullptr, &pool_) != VK_SUCCESS) return fail("vkCreateDescriptorPool");
+    if (!pool_ && vkCreateDescriptorPool(dev_, &pi, nullptr, &pool_) != VK_SUCCESS) return fail("vkCreateDescriptorPool");
     VkDescriptorSetLayout layouts[kSets];
     std::fill(std::begin(layouts), std::end(layouts), set_layout_);
     VkDescriptorSetAllocateInfo ai{}; ai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -96,6 +104,7 @@ bool MotionConverter::pipeline(std::string* detail) {
     ai.descriptorSetCount = kSets;
     ai.pSetLayouts = layouts;
     if (vkAllocateDescriptorSets(dev_, &ai, sets_) != VK_SUCCESS) return fail("vkAllocateDescriptorSets");
+    ready_ = true;
     return true;
 }
 
@@ -123,7 +132,6 @@ bool MotionConverter::image_for(uint32_t w, uint32_t h, uint64_t frame, std::str
         old_.push_back(cur_);  // the GPU may still read it: freed 4 frames on
         cur_ = Image{};
     }
-    in_read_ = false;
     auto fail = [&](const char* what) {
         if (detail) *detail = std::string("the motion-vector image: ") + what + " failed";
         free_image(cur_);
@@ -209,7 +217,6 @@ bool MotionConverter::record(VkCommandBuffer cb, const Texture& in, uint64_t fra
     b.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
     b.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &b);
-    in_read_ = true;
     out->image = cur_.image;
     out->view = cur_.view;
     out->format = VK_FORMAT_R16G16_SFLOAT;
@@ -238,7 +245,7 @@ void MotionConverter::destroy() {
     set_layout_ = VK_NULL_HANDLE;
     sampler_ = VK_NULL_HANDLE;
     std::fill(std::begin(sets_), std::end(sets_), VkDescriptorSet{VK_NULL_HANDLE});
-    in_read_ = false;
+    ready_ = false;
 }
 
 }  // namespace kui::upscale

@@ -240,6 +240,9 @@ class Backend {
     virtual void destroy() = 0;
     // Every Vulkan object of the backend goes; the device is idle and about to be destroyed (vk.cpp's hook).
     virtual void device_lost(VkDevice device) = 0;
+    // Each of the game's FSR 3 frames, whether or not the backend records it (the core's frame count, as Frame::frame):
+    // free what destroy() kept for the GPU once it is surely done (a context last used kRetireFrames frames ago).
+    virtual void tick(uint64_t frame) { (void)frame; }
 
     // What it runs now (amd_fsr4 / amd_fsr3 / xess) and its version: (major << 22) | (minor << 12) | patch.
     virtual Running running() const = 0;

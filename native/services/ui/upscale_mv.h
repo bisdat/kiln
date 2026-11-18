@@ -31,6 +31,8 @@ class MotionConverter {
     // (R16G16_SFLOAT, SHADER_READ_ONLY_OPTIMAL after the pass, the same size). `frame`: the core's frame count (old
     // images and descriptor sets are freed only once the GPU is done with them). False: nothing usable recorded.
     bool record(VkCommandBuffer cb, const Texture& in, uint64_t frame, Texture* out, std::string* detail);
+    // Old images the GPU is surely done with go (each FSR frame, whether or not the pass ran).
+    void tick(uint64_t frame) { if (dev_) reap(frame); }
     // Every Vulkan object goes (the device is idle).
     void destroy();
 
@@ -61,7 +63,7 @@ class MotionConverter {
     uint32_t next_set_ = 0;
     Image cur_;
     std::vector<Image> old_;
-    bool in_read_ = false;  // cur_ is in SHADER_READ_ONLY_OPTIMAL (else UNDEFINED: never written)
+    bool ready_ = false;    // the pipeline, the pool and its sets are made
 
 #define KUI_MV_FN(n) PFN_##n n = nullptr;
     KUI_MV_FN(vkCreateImage) KUI_MV_FN(vkDestroyImage) KUI_MV_FN(vkCreateImageView) KUI_MV_FN(vkDestroyImageView)
@@ -71,6 +73,7 @@ class MotionConverter {
     KUI_MV_FN(vkCreateComputePipelines) KUI_MV_FN(vkDestroyPipeline) KUI_MV_FN(vkCreateDescriptorPool) KUI_MV_FN(vkDestroyDescriptorPool)
     KUI_MV_FN(vkAllocateDescriptorSets) KUI_MV_FN(vkUpdateDescriptorSets) KUI_MV_FN(vkCmdPipelineBarrier) KUI_MV_FN(vkCmdBindPipeline)
     KUI_MV_FN(vkCmdBindDescriptorSets) KUI_MV_FN(vkCmdPushConstants) KUI_MV_FN(vkCmdDispatch)
+    PFN_vkGetPhysicalDeviceFormatProperties vkGetPhysicalDeviceFormatProperties = nullptr;
 #undef KUI_MV_FN
 };
 

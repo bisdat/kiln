@@ -53,7 +53,9 @@ inline std::string missing_used_if_offered(const VkContext& vk, const std::vecto
         if (u.type && !supported(u.type, u.offset)) continue;  // FFX reads the feature as off: it does not use it
         const bool feature_on = !u.type || vk.has_feature(u.type, u.offset) ||
                                 (u.core13 && vk.has_feature(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES, u.core13));
-        const bool ext_on = vk.has_extension(u.extension) || (u.core13 && vk.instance_api >= VK_API_VERSION_1_3 && feature_on);
+        // promoted to 1.3: core on a device that runs as 1.3 (the lower of the instance's and the device's versions)
+        const uint32_t api = std::min(vk.instance_api, vk.props.apiVersion ? vk.props.apiVersion : vk.instance_api);
+        const bool ext_on = vk.has_extension(u.extension) || (u.core13 && api >= VK_API_VERSION_1_3 && feature_on);
         if (!ext_on || !feature_on) return u.extension;
     }
     return {};

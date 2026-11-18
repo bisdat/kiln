@@ -220,6 +220,9 @@ static void frames() {
     f = b0_frame();
     f.output_width = 2560;
     CHECK(check_frame(f, &d) && d.find("output size") != std::string::npos);
+    f = b0_frame();
+    f.output.format = VK_FORMAT_E5B9G9R9_UFLOAT_PACK32;  // fine as colour, not as a storage output
+    CHECK(check_frame(f, &d) && d.find("output") != std::string::npos && color_format_ok(VK_FORMAT_E5B9G9R9_UFLOAT_PACK32));
 
     // contexts: for the colour texture, the upscale size (the description's) and the output texture
     f = b0_frame();
@@ -299,9 +302,17 @@ static void status() {
     o = st(in);
     CHECK(o.running == Running::game_fsr3 && o.why == Why::waiting);
     // running FSR 4
-    in.started = true, in.backend_running = Running::amd_fsr4;
+    in.started = true, in.backend_running = Running::amd_fsr4, in.latched = Choice::amd;
     o = st(in);
     CHECK(o.running == Running::amd_fsr4 && o.why == Why::none);
+    // the player chose "game" (or pinned another): AMD runs until the next FSR 3 set-up, and the status says so
+    in.chosen = Choice::game;
+    o = st(in);
+    CHECK(o.running == Running::amd_fsr4 && o.why == Why::waiting);
+    in.chosen = Choice::xess;  // another backend: from the next start, AMD still runs now
+    o = st(in);
+    CHECK(o.running == Running::amd_fsr4 && o.why == Why::restart);
+    in.chosen = Choice::amd;
     // failed in this session
     in.failed = true, in.why = Why::runtime_failed;
     o = st(in);
@@ -404,9 +415,10 @@ static void amd_map() {
     CHECK(amd::missing_used_if_offered(bare, offered, none).empty());
     // buffer marker: offering it is enough for FFX to use it
     CHECK(amd::missing_used_if_offered(bare, {VK_AMD_BUFFER_MARKER_EXTENSION_NAME}, none) == VK_AMD_BUFFER_MARKER_EXTENSION_NAME);
-    // on a 1.3 instance the core struct counts
+    // on a 1.3 instance and device the core struct counts
     VkContext core;
     core.instance_api = VK_API_VERSION_1_3;
+    core.props.apiVersion = VK_API_VERSION_1_4;
     {
         VkPhysicalDeviceVulkan13Features v13{}; v13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
         v13.subgroupSizeControl = VK_TRUE;
@@ -417,6 +429,8 @@ static void amd_map() {
         core.features.push_back(fv);
     }
     CHECK(amd::missing_used_if_offered(core, offered, all).empty());
+    core.props.apiVersion = VK_API_VERSION_1_2;  // a 1.2 device under a 1.3 instance: the core struct does not count
+    CHECK(amd::missing_used_if_offered(core, offered, all) == VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME);
 
     // creation
     CreateInfo ci;  // the defaults are the game's: linear HDR colour, reverse-Z with a far plane, dynamic resolution
