@@ -238,7 +238,7 @@ The rules:
   chests pay first, reserves included on the Magic chests only. Ordinary chests pay the next part. Station outputs pay
   what is still short.
 - **All or nothing.** One inventory transaction with the game's own fill. A non-exact fill tries fewer crafts, as before.
-- A recipe whose resolved inputs name the same item twice cannot name ordinary chests (the same limit as station outputs).
+- A recipe whose resolved inputs name the same item twice does not use the named chests: they are ignored and the plain fill runs (nothing is taken from them). Station outputs are skipped for the same reason. The fill is not `Refused`.
 - Reserves (`Keep`) apply to the Magic chests, not to these chests.
 
 A fill is still the server's action: it does not consult a player's inventory permission. A mod that fills for a joined
@@ -285,10 +285,19 @@ await Stations.Collect(kiln, chest, charcoalId);         // only this item
 await Stations.Collect(kiln, chest, what: CollectWhat.Leftovers); // what is no input and no output of its recipe
 await Stations.CollectToBase(kiln);                      // into the base's chests that take deposits
 ```
-Collect moves through Kiln.Items' move (the game's slot transfer; the row `items.move` too), one stack after the other:
-`Done`, `Partial` (some did not fit), `NoRoom` (none did), `Unchanged` (nothing to collect). Native code calls the same
-move through `collect` on `kiln.stations` (`KilnStationCollect`: outputs, leftovers, one container, or the base's Magic
-chests that take deposits). The managed methods call that when the table has it.
+Collect moves through Kiln.Items' move (the game's slot transfer; the row `items.move` too), one stack after the other.
+A stack counts as moved only when the whole stack moved. A chest that takes part of a stack does not finish it: the
+rest stays in that slot and a later chest is tried. `Done` is every stack finished. `Partial` is some items moved
+while a stack is not finished (including a later chest that cannot take the rest). `NoRoom` is nothing moved, which
+is also the result when `CollectToBase` is asked of a station that stands in no base. `Unchanged` is nothing to
+collect. Native code calls the same move through `collect` on `kiln.stations` (`KilnStationCollect`: outputs,
+leftovers, one container, or the base's Magic chests that take deposits). The managed methods call that when the
+table has it, so the chest rules live in one place.
+
+`collect` joins the same station action queue as fill, stop, resume and select: 1024 actions can wait, and a full
+queue is `QueueFull` (`KILN_ERR_BUFFER_TOO_SMALL` from the call, before anything moves). The result copies at most
+`KILN_STATIONS_MAX_CHANGES` (32) ledger rows; rows past that are not in `Changes`. The older `Items.Move` loop did
+neither. There is no second, unqueued collect.
 
 ## Results
 Every action returns a `Task<StationResult>` that completes on the tick thread, one step after it ran (a stop after the
@@ -300,13 +309,13 @@ and `StateAfter` are null where nothing was read.
 | `StationActionStatus` | When |
 |---|---|
 | `Done` | it happened |
-| `Partial` | fill: fewer crafts than asked (`LimitedBy`); collect: some stacks did not fit |
+| `Partial` | fill: fewer crafts than asked (`LimitedBy`); collect: some items moved and a stack was not finished |
 | `NotEnough` | fill: the stock covers not even one craft (or `Exact` and not all) |
-| `NoRoom` | fill: no room in the station; collect: none fit |
-| `NotAStation`, `NoBase`, `NoRecipe`, `WrongWorkshop` | as named |
+| `NoRoom` | fill: no room in the station; collect: none fit, or `CollectToBase` and the station stands in no base |
+| `NotAStation`, `NoBase`, `NoRecipe`, `WrongWorkshop` | as named (`NoBase` is a fill whose station stands in no base) |
 | `Unchanged` | nothing to do |
 | `Locked` | select: no one on the server has unlocked the recipe |
-| `Refused` | the game refused it, or a category choice does not fit the recipe |
+| `Refused` | the game refused it, a category choice does not fit the recipe, or a named chest is not an ordinary chest of this base (nothing moves) |
 | `Unavailable` | the capability went off after the call |
 | `Dropped` | not run: the world closed, or the program did not run it in time |
 | `TimedOut` | a stop after the current craft waited about an hour; nothing written |
@@ -396,9 +405,20 @@ checked by hand with `mods/tests/stations-client-check` (`/stationcheck`, admins
 ## For native code
 `native/core/abi/services/kiln_stations.h` (`kiln.stations` v1, in kiln-items.dll): the same reads (`base_*`, `stations`,
 `station_read`, `recipe*`, `category*`, `workshop_recipes`, `plan`) on the tick thread; `submit(owner, request, done, user,
-&ticket)` from any thread, the result in `done` on the tick thread; `collect` moves finished stacks the way `Stations.Collect` does (through kiln.items' move; into one container, or `KILN_STATION_COLLECT_TO_BASE` for the Magic chests that take deposits); `cancel(ticket)` drops the callback; the events by
+&ticket)` from any thread, the result in `done` on the tick thread; `collect` moves finished stacks the way `Stations.Collect` does (through kiln.items' move; into one container, or `KILN_STATION_COLLECT_TO_BASE` for the Magic chests that take deposits). It waits on the same queue as `submit` (a full queue is `KILN_ERR_BUFFER_TOO_SMALL`, `QueueFull` on the managed side) and the result keeps at most 32 ledger rows. `cancel(ticket)` drops the callback; the events by
 polling: `watch(1)`, then `events(after_seq, ...)` each step (`last_seq()` to start at the newest). A FILL names ordinary
 chests with `chest_count` and `chests` on a request of the current size (`max_chests()` is `KILN_STATIONS_MAX_CHESTS`; a
-request of `KILN_STATION_REQUEST_V1` bytes names none). `from_chests` on the result counts what they gave. A cycle's end
+request of `KILN_STATION_REQUEST_V1` bytes names none). A recipe whose resolved inputs name one item twice ignores those
+chests and runs the plain fill. A named entity that is not an ordinary chest of this base is `KILN_STATION_REFUSED` and
+moves nothing. `from_chests` on the result counts what they gave. `base_stock_with_stations` (check `header.size`) is
+`Bases.StockWithStations`: the Magic-chest stock plus finished outputs still in the base's stations, on the tick thread.
+A cycle's end
 for native code is kiln.gameplay's `KILN_GAMEPLAY_CRAFTED` (once per cycle since 0.2.0-dev.29.14). The game's facts behind
 all of it: [docs/re/stations.md](../../re/stations.md).
+
+**Names are not on this table.** `Stations.WorkshopName` and `Stations.RecipeName` stay managed. On a dedicated server
+the game's data has no loca texts, and those calls return the English name from Kiln's shipped item catalog and, for a
+recipe or workshop tag, from Kiln.Content's English text table. Both live in the managed assemblies. A native reader of
+the game's loca table would return null there, which is not what the managed calls return, and a second copy of the
+catalog in kiln-items would drift from `Items.DisplayName` (workshop and recipe names ask that first). There is no
+native slot for them.

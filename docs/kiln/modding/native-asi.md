@@ -37,21 +37,22 @@ __declspec(dllexport) int KILN_CALL kiln_native_init(const KilnNativeContext* ct
 
 /* Ultimate ASI Loader calls this when Kiln did not load the DLL. */
 __declspec(dllexport) void InitializeASI(void) {
-    if (already_started()) return;                 /* kiln_native_init already started it */
     HMODULE proxy = GetModuleHandleA("dinput8.dll");
     KilnProxyInfoFn info = proxy ? (KilnProxyInfoFn)GetProcAddress(proxy, KILN_PROXY_INFO) : NULL;
     if (info && info() && info()->abi >= KILN_PROXY_ABI) {
-        /* Kiln is here and did not load this DLL: the profile has no native.json for it.
+        /* Kiln is in the process. Return before the mutex, so kiln_native_init can still start.
            Do not look for KilnApi. Ask the player to enable the Kiln mod. */
         return;
     }
-    /* no Kiln in the process: the ASI build's own start */
+    if (already_started()) return;                 /* this ASI entry already started it */
+    /* no Kiln in the process: the ASI build's own start. The mutex is taken only here. */
 }
 ```
 
 `native.json` lists that DLL and `"init": "kiln_native_init"`. Kiln calls it once, on the phase's thread, and the
-context lives for the process ([native mods](../native-mods.md)). The mutex is taken there first, so a later
-`InitializeASI` from an `.asi` copy of the same file returns immediately.
+context lives for the process ([native mods](../native-mods.md)). That start takes the mutex. `InitializeASI` takes
+it only when Kiln's proxy is not in the process and this entry is the one that starts. If the proxy is present it
+returns first, without creating the mutex, so a later `kiln_native_init` can still start.
 
 If the profile does not enable the native mod, Kiln's proxy can still be loaded and Ultimate ASI Loader can still load
 the `.asi`. `KilnProxyInfo` is how that `.asi` sees Kiln and stays quiet instead of starting a second copy with no API.

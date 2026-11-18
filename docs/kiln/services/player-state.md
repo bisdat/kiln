@@ -177,20 +177,31 @@ Health and the other vitals are `NetworkPlayerAttributes`, updated once per step
 `kiln.playerstate` is published to native mods (`api->service("kiln.playerstate", 1)`). The header is in the SDK. A station button is one of the game's client actions (`client_action_info` names it; the crafting screen's is `playerCraftingAction`). Holding and canceling it:
 
 ```c
-const KilnPlayerStateApi* ps = (const KilnPlayerStateApi*)api->service("kiln.playerstate", 1);
-if (!ps || ps->header.size < offsetof(KilnPlayerStateApi, client_action_decide) + sizeof(void*)) return;
+#include <stddef.h>
+const KilnPlayerStateApi* ps = (const KilnPlayerStateApi*)api->service(
+    (KilnStr){KILN_PLAYERSTATE_SERVICE, sizeof KILN_PLAYERSTATE_SERVICE - 1}, 1);
+/* client_action_interest is after aim. A check that stops at client_action_decide does not cover it. */
+if (!ps || ps->header.size < offsetof(KilnPlayerStateApi, client_action_interest) + sizeof(void*)) return;
+KilnPlayerStateStatus st;
+st.size = sizeof st;
+if (ps->status(&st) != KILN_OK || !st.client_hold) return; /* status writes the struct; it does not return it */
 /* every server-world Pre, while you want the next press held (8 steps without a call ends it): */
 ps->client_action_hold(&player, 1);
 KilnPlayerHeldAction held[8];
-for (int i = 0; i < 8; i++) held[i].size = sizeof held[i];
-uint32_t n = 0;
-if (ps->client_action_held(held, 8, &n) == KILN_OK)
+for (;;) {
+    for (int i = 0; i < 8; i++) held[i].size = sizeof held[i];
+    uint32_t n = 0;
+    KilnResult rc = ps->client_action_held(held, 8, &n);
+    /* the entries that fit are already written on KILN_OK and on KILN_ERR_BUFFER_TOO_SMALL */
+    if (rc != KILN_OK && rc != KILN_ERR_BUFFER_TOO_SMALL) break;
     for (uint32_t i = 0; i < n; i++)
         if (is_station_button(held[i]))
             ps->client_action_decide(held[i].entity, held[i].index, held[i].version, 1); /* 1 cancels; 0 lets it run */
+    if (rc == KILN_OK) break; /* call again until every held action has been listed. One nobody answers runs. */
+}
 ```
 
-`status().client_hold` is 0 when this build cannot hold (then `client_action_hold` returns `KILN_ERR_UNAVAILABLE` and a cancel changes nothing). Call these on the server world's thread in Pre. `client_action_interest` is the narrower hold: name the crafting action's index and only that action waits a step.
+`st.client_hold` is 0 when this build cannot hold (then `client_action_hold` returns `KILN_ERR_UNAVAILABLE` and a cancel changes nothing). Call these on the server world's thread in Pre. `client_action_interest` is the narrower hold: name the crafting action's index and only that action waits a step. An unanswered held action runs.
 
 ## One verdict with the typed equipment event (since 0.2.0-dev.29)
 For `changeEquipmentAction` and `swapEquipmentSetAction`, while a `PlayerEquippingEvent` handler (Kiln.Items) listens,
