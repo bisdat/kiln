@@ -135,8 +135,10 @@ public sealed unsafe class UiLanguageTests : IDisposable
         Assert.Contains("KilnResult(KILN_CALL* set_texts)(const KilnUiTexts* texts);", h, StringComparison.Ordinal);
         // The internal completion slot was appended after the texts tail;
         // preserve the previous field layout rather than requiring end-of-struct.
-        Assert.Contains("KilnResult(KILN_CALL* chat_completion)(KilnUiChatCompletion* io);\\n} KilnUiApi;",
+        Assert.Contains("KilnResult(KILN_CALL* chat_completion)(KilnUiChatCompletion* io);",
                         h, StringComparison.Ordinal);
+        Assert.True(h.IndexOf("chat_completion)(KilnUiChatCompletion* io)", StringComparison.Ordinal) >
+                    h.IndexOf("set_texts)(const KilnUiTexts* texts)", StringComparison.Ordinal));
     }
 
     private static string RepoRoot([CallerFilePath] string source = "")
