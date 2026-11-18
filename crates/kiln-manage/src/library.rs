@@ -1213,6 +1213,9 @@ fn copy_mod_tree_inner(from: &Path, to: &Path, skip: Option<&Path>, skipped: &mu
             size += copy_mod_tree_inner(&e.path(), &dst, skip, skipped)?;
         } else if ft.is_file() {
             size += std::fs::copy(e.path(), &dst).map_err(io(&dst, "copying to"))?;
+            // std::fs::copy keeps a read-only file read-only: the Library's files and the copies placed from them are
+            // the player's to change (a mod saves its settings there), as a zip import's are
+            crate::util::make_writable(&dst).map_err(io(&dst, "making writable"))?;
         } else {
             return Err(Error::new(ErrorCode::Refused, format!("{}: not a regular file or folder", e.path().display())));
         }

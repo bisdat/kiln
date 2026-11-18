@@ -2109,6 +2109,9 @@ pub fn adopt(dirs: &DataDirs, profile: &crate::profile::Profile, game_dir: &Path
     // The receipt lists the Library copy only: the switch and the setting values in the folder remain the player's.
     let receipt = Placement { path: dst.clone(), marker: plan.want.clone(), files: plan.listed.clone(), extension: Some(extension), game_folder: false };
     if let Err(e) = adopt_step(AdoptStep::Receipt, || put_placement(game_dir, &mut receipts, &receipt)) { return Err(undo(e)); }
+    // Kiln's from now on: the files the receipt lists are writable like a copy Kiln places (a read-only one kept
+    // the player's settings from being saved)
+    writable_placed_files(game_dir, std::slice::from_ref(&receipt));
     Ok(done(dst.clone(), renamed.then(|| own.clone()), false, plan.kept))
 }
 
@@ -2845,7 +2848,22 @@ fn place_with(dirs: &DataDirs, profile: &crate::profile::Profile, game_dir: &Pat
     }
     // XHL-Core named dinput8.dll runs from its copy under its own name (xhl_core_chain_dlls)
     place_xhl_core_copies(dirs, profile, game_dir, &mut receipts, &mut rep, true)?;
+    writable_placed_files(game_dir, &receipts);
     Ok(rep)
+}
+
+/// Makes the files Kiln placed writable by the player where a copy placed before 0.2.0-dev.29.18 (or a folder taken over
+/// with [`adopt`]) holds them read-only ([`crate::util::make_writable`]): the files each receipt lists, in each copy
+/// whose marker is still the receipt's. Files the mod or the player added are left as they are (a player may keep a
+/// settings file read-only on purpose). Best effort: a file that cannot be changed stays as it is.
+fn writable_placed_files(game: &Path, receipts: &[Placement]) {
+    for r in receipts {
+        if !r.path.is_dir() || marker(&r.path).as_ref() != Some(&r.marker) { continue; }
+        for rel in r.files.keys().filter(|rel| !rel.ends_with('/')) {
+            let path = r.path.join(rel);
+            if refuse_symlink_path(game, &path).is_ok() { let _ = crate::util::make_writable(&path); }
+        }
+    }
 }
 
 // ---- Greeneye and Flame mods: always in <game>/<run folder>/<library id>/ ----

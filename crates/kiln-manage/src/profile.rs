@@ -1463,7 +1463,10 @@ fn sync_copies(dirs: &DataDirs, profile: &Profile, install: &GameInstall, warnin
                     crate::engine_mods::refuse_symlink_path(&install.path, &dst)?;
                     match std::fs::symlink_metadata(&dst) {
                         // the Library entry is the profile's version and the copy still holds all of it
-                        Ok(_) if crate::hash::dirhash(&src)? == m.hash && holds_copy_tree(&src, &dst)? => continue,
+                        Ok(_) if crate::hash::dirhash(&src)? == m.hash && holds_copy_tree(&src, &dst)? => {
+                            let _ = crate::util::make_tree_writable(&dst);
+                            continue;
+                        }
                         Ok(_) => return Err(Error::new(ErrorCode::Refused,
                             format!("{}: the fallback copy changed while preparing it; its files were kept", dst.display()))),
                         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
@@ -1471,12 +1474,15 @@ fn sync_copies(dirs: &DataDirs, profile: &Profile, install: &GameInstall, warnin
                     }
                 } else {
                     // a Kiln mod's copy the player cooked (assets/cooked) is still that mod: kept with its cooked files
+                    // (made writable where an earlier copy kept a Library file read-only: the mod runs from this copy)
                     if dst.is_dir() && matches(&dst).unwrap_or(false) {
+                        let _ = crate::util::make_tree_writable(&dst);
                         continue;
                     }
                     // changed in the game folder since Kiln copied it: never thrown away without a word (changed_copy)
                     let changed = if dst.is_dir() { changed_copy(dirs, k, m, &src, &dst) } else { None };
                     if changed.as_ref().is_some_and(|c| c.settings_only) {
+                        let _ = crate::util::make_tree_writable(&dst);
                         continue; // only its own settings files changed: the player's, kept as they are
                     }
                     _cook = hold_copy(k, &dst, &m.id)?;
@@ -1486,6 +1492,8 @@ fn sync_copies(dirs: &DataDirs, profile: &Profile, install: &GameInstall, warnin
                     }
                 }
                 crate::util::copy_tree(&src, &dst)?;
+                // copy_tree keeps a read-only Library file read-only (an entry an older Kiln imported from a folder)
+                crate::util::make_tree_writable(&dst).map_err(io_at(&dst, "making writable"))?;
                 if !matches(&dst)? {
                     if matches(&src).is_ok_and(|same| !same) {
                         // the player changed the files in the Library folder: which mod, and the way to take it over
