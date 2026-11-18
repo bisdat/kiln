@@ -425,6 +425,54 @@ fn an_upgrade_reports_the_hand_changed_files_it_backed_up() {
     assert!(rep3.changed_backed_up.is_empty(), "{rep3:?}");
 }
 
+/// Inbox 85: an antivirus deleted one of Kiln's plugin DLLs. The status names it as missing (and still as modified, as
+/// before), apart from a file that is there with other bytes and from a deleted config file; installing the same
+/// bundle again (Runtime's Repair) puts it back.
+#[test]
+fn a_deleted_runtime_file_is_missing_and_a_reinstall_of_the_same_bundle_puts_it_back() {
+    let t = tmp("missing-file");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let game = t.0.join("Enshrouded");
+    put(&game, "enshrouded.exe", b"MZ fake game");
+    let inst = client(&game);
+    let b = bundle::create(&stage(&t.0, "a", false), &t.0.join("out"), &opts(1_793_793_600, "aaaaaaa")).unwrap();
+    let b = bundle::import(&dirs, &b).unwrap().file;
+    install::install(&dirs, &inst, &b, &InstallOptions::default(), &mut NoProgress).unwrap();
+    let st = install::status(&dirs, &inst).unwrap();
+    assert!(st.modified.is_empty() && st.missing_files.is_empty(), "{st:?}");
+
+    std::fs::remove_file(game.join("kiln/plugins/kiln-emf.dll")).unwrap();
+    std::fs::write(game.join("kiln/kiln-core.dll"), b"changed by hand").unwrap();
+    std::fs::remove_file(game.join("kiln/kiln.json")).unwrap();
+    let st = install::status(&dirs, &inst).unwrap();
+    let mut modified = st.modified.clone();
+    modified.sort();
+    assert_eq!(modified, ["kiln/kiln-core.dll", "kiln/plugins/kiln-emf.dll"], "a deleted config file is neither");
+    assert_eq!(st.missing_files, ["kiln/plugins/kiln-emf.dll"], "only the deleted file is missing");
+    // the JSON the launcher reads
+    let json = serde_json::to_value(&st).unwrap();
+    assert_eq!(json["missingFiles"], serde_json::json!(["kiln/plugins/kiln-emf.dll"]));
+    // an older backend's answer, without the field, still reads
+    let mut old = json.clone();
+    old.as_object_mut().unwrap().remove("missingFiles");
+    assert!(serde_json::from_value::<install::InstallState>(old).unwrap().missing_files.is_empty());
+
+    install::install(&dirs, &inst, &b, &InstallOptions::default(), &mut NoProgress).unwrap();
+    assert_eq!(std::fs::read(game.join("kiln/plugins/kiln-emf.dll")).unwrap(), b"emf plugin");
+    assert_eq!(std::fs::read(game.join("kiln/kiln-core.dll")).unwrap(), b"core a");
+    let st = install::status(&dirs, &inst).unwrap();
+    assert!(st.modified.is_empty() && st.missing_files.is_empty(), "{st:?}");
+}
+
+#[test]
+fn only_files_that_are_gone_are_missing() {
+    let t = tmp("missing-only");
+    put(&t.0, "kiln/there.dll", b"x");
+    let modified = vec!["kiln/there.dll".to_string(), "kiln/plugins/gone.dll".to_string(), "dinput8.dll".to_string()];
+    assert_eq!(install::missing_files(&t.0, &modified), ["kiln/plugins/gone.dll", "dinput8.dll"]);
+    assert!(install::missing_files(&t.0, &[]).is_empty());
+}
+
 /// Kiln's proxy changed since the install (a hand-deployed build: tools' client.sh, deploy-server.sh): uninstall moves it
 /// aside and puts the chained original loader back, as before dev.24. Keeping it would leave a Kiln proxy without its
 /// runtime in the game folder while the original loader is unchained and the receipt is gone.
