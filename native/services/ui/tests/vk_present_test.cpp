@@ -177,6 +177,11 @@ int main() {
         twice.signal(100);
         twice.wait(1);
         check(!twice.errors.empty() && twice.signalled[100], "a present on the game's semaphore after Kiln's submit waits twice");
+        // hk_present asks with "Kiln's submit went in" (draw() set its semaphore), not "draw() returned true": a fault
+        // after the submit (the draw did not return) still hands the present Kiln's semaphore
+        const Model faulted_after_submit = one_present({1, 2}, 100, Submit::ok);
+        check(faulted_after_submit.errors.empty() && all_unsignalled(faulted_after_submit),
+              "a fault after the submit: the present waits on Kiln's semaphore");
     }
     std::printf("vk_present: %u checks passed\n", checks);
 }

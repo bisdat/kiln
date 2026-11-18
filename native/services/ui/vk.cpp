@@ -1116,12 +1116,14 @@ VkResult VKAPI_CALL hk_present(VkQueue queue, const VkPresentInfoKHR* info) {
     }
     announce_failure();  // once, after the draw that turned the drawing off (g_mu was released by guarded_draw)
     // Kiln's frame went in: the present waits on Kiln's semaphore. It did not (nothing to draw, or the drawing failed):
-    // the game's present goes on untouched, with the game's own semaphores (vk_present.h)
-    const auto waits = vk_present::present_waits(drew, info->pWaitSemaphores, info->waitSemaphoreCount, &wait);
+    // the game's present goes on untouched, with the game's own semaphores (vk_present.h). draw() sets `wait` right after
+    // its submit succeeded, so a fault after that still presents on Kiln's semaphore: the game's were waited on by it.
+    const bool submitted = wait != VK_NULL_HANDLE;
+    const auto waits = vk_present::present_waits(submitted, info->pWaitSemaphores, info->waitSemaphoreCount, &wait);
     VkPresentInfoKHR p = *info;
     p.waitSemaphoreCount = waits.count;
     p.pWaitSemaphores = waits.semaphores;
-    const VkResult result = R.present.load()(queue, drew ? &p : info);
+    const VkResult result = R.present.load()(queue, submitted ? &p : info);
     if (drew && (result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR)) overlay_guard_drawn();
     graphics_after_present();  // Kiln's frame cap after the present (g_mu was released by guarded_draw)
     return result;
