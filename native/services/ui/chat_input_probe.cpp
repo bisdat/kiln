@@ -79,15 +79,6 @@ bool safe_line(std::string_view bytes) {
     return chat_completion_text::valid(bytes);
 }
 
-void invalidate_completion_snapshot() {
-    std::lock_guard lock(g_completion_mu);
-    g_completion_snapshot.focused = false;
-    g_completion_snapshot.has_rect = false;
-    g_pending_valid = false;
-    g_completion_actions.clear();
-    g_keys.completion(false, false, false);
-}
-
 std::atomic<bool> g_diagnose_on{false};
 std::atomic<bool> g_trace_on{false};
 std::atomic<uint32_t> g_key_log_count{0};
@@ -99,6 +90,15 @@ std::atomic<bool> g_manual_text_edit{false};
 std::atomic<bool> g_window_blurred{false};
 std::atomic<bool> g_ime_composing{false};  // window thread: between WM_IME_STARTCOMPOSITION and its end
 chat_keys::Router g_keys;
+void invalidate_completion_snapshot() {
+    std::lock_guard lock(g_completion_mu);
+    g_completion_snapshot.focused = false;
+    g_completion_snapshot.has_rect = false;
+    g_pending_valid = false;
+    g_completion_actions.clear();
+    g_keys.completion(false, false, false);
+}
+
 chat_history::History g_history;
 chat_history::DraftCapture g_hud_draft, g_social_draft;
 chat_focus::Grace g_focus_grace;
