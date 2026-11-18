@@ -262,18 +262,28 @@ uint32_t Reader::entity(const ContextFact& ctx, KilnEntity id, EntityFact* out) 
     // The engine's own lookup: hash, linear probe over the occupied slots, the first free one ends it. Bounded:
     // exhausting the bound is unreadable, never an absent answer.
     const uint64_t mask = t.count - 1;
-    uint64_t slot = id_hash(id) & mask;
-    bool found = false;
-    const uint64_t bound = std::min<uint64_t>(t.count, kMaxProbe);
-    for (uint64_t visited = 0; visited < bound; ++visited, slot = (slot + 1) & mask) {
-        uint64_t bits = 0;
-        uint32_t key = 0;
-        if (!copy(t.bits + (slot / 64) * 8, &bits, sizeof bits)) return KILN_ECS_UNREADABLE;
-        if (!((bits >> (slot % 64)) & 1)) return KILN_ECS_ABSENT;
-        if (!copy(t.keys + slot * sizeof key, &key, sizeof key)) return KILN_ECS_UNREADABLE;
-        if (key == id) { found = true; break; }
+    uint64_t slot = 0;
+    const auto probe = [&]() -> uint32_t {
+        slot = id_hash(id) & mask;
+        const uint64_t bound = std::min<uint64_t>(t.count, kMaxProbe);
+        for (uint64_t visited = 0; visited < bound; ++visited, slot = (slot + 1) & mask) {
+            uint64_t bits = 0;
+            uint32_t key = 0;
+            if (!copy(t.bits + (slot / 64) * 8, &bits, sizeof bits)) return KILN_ECS_UNREADABLE;
+            if (!((bits >> (slot % 64)) & 1)) return KILN_ECS_ABSENT;
+            if (!copy(t.keys + slot * sizeof key, &key, sizeof key)) return KILN_ECS_UNREADABLE;
+            if (key == id) return KILN_ECS_OK;
+        }
+        return refuse(KILN_ECS_UNREADABLE, "the entity id probe did not end within its bound");
+    };
+    if (const uint32_t s = probe(); s != KILN_ECS_OK) {
+        // Absent only from two lookups that agree in the same table (ShroudForge's rule): an insertion or a move
+        // during the first one may hide the id.
+        if (s != KILN_ECS_ABSENT) return s;
+        Table t2{};
+        return probe() == KILN_ECS_ABSENT && table(ctx.manager, t2) == KILN_ECS_OK && t2 == t ? KILN_ECS_ABSENT
+                                                                                              : KILN_ECS_UNREADABLE;
     }
-    if (!found) return refuse(KILN_ECS_UNREADABLE, "the entity id probe did not end within its bound");
     uintptr_t record = 0;
     if (!copy(t.slots + slot * sizeof record, &record, sizeof record) || !record) return KILN_ECS_UNREADABLE;
     uint32_t seen_id = 0, generation = 0, row = 0;

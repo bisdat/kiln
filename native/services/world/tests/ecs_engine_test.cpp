@@ -319,6 +319,27 @@ void mutations(const Profile& p, World& w, Reader& reader, Worlds& worlds) {
         check(entity_validate(b, kOwner, &chest, &info) == KILN_OK, "the slot back: valid");
     }
 
+    // An id inserted while its first lookup runs: absent is answered only by two lookups that agree.
+    {
+        const uint32_t late = 6001;
+        const size_t home = id_hash(late) & (w.cap - 1);
+        // The first lookup reads the home word with the bit clear; the entity appears as the second one reads it.
+        bool armed = true;
+        int seen = 0;
+        g_copy_hook = [&](uintptr_t address) {
+            if (address == w.occ.at((home / 64) * 8) && ++seen == 2 && armed) {
+                armed = false;
+                w.add(late, 1, get<uint64_t>(rec + E.entity_layout), 9, nullptr);
+            }
+        };
+        KilnObjectRef r{};
+        const KilnResult rc = entity_open(b, kOwner, 1, KILN_WORLD_SERVER, 0, late, &r);
+        g_copy_hook = nullptr;
+        check(rc != KILN_ERR_NOT_FOUND, "an id inserted during its first lookup is not answered absent (" + std::to_string(rc) + ")");
+        check(entity_open(b, kOwner, 1, KILN_WORLD_SERVER, 0, late, &r) == KILN_OK, "the inserted id opens afterwards");
+        w.remove(late);
+    }
+
     // Faulting pages: the record, the chunk, the occupancy words. Unreadable, never a crash, nothing copied.
     const uintptr_t saved_slot = get<uint64_t>(w.slots.at(s * 8));
     put<uint64_t>(w.slots.at(s * 8), faulting());
