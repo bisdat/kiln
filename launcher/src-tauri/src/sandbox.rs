@@ -319,11 +319,23 @@ pub fn elf_rodata(path: &Path) -> Result<Vec<u8>, String> {
     Err(format!("{}: no .rodata", path.display()))
 }
 
+/// The file of a `/proc/<pid>/maps` line: everything after its first five fields. A path keeps its spaces there (an
+/// AppImage's mount point takes the first six characters of the file's name: `/tmp/.mount_Kiln L...`).
+pub fn maps_path(line: &str) -> Option<&str> {
+    let mut rest = line;
+    for _ in 0..5 {
+        rest = rest.trim_start();
+        rest = &rest[rest.find(char::is_whitespace)?..];
+    }
+    let p = rest.trim();
+    (!p.is_empty()).then_some(p)
+}
+
 /// The libwebkit2gtk this process loaded (`/proc/self/maps`).
 #[cfg(target_os = "linux")]
 fn loaded_webkit() -> Option<PathBuf> {
     let maps = std::fs::read_to_string("/proc/self/maps").ok()?;
-    maps.lines().filter_map(|l| l.split_whitespace().nth(5)).find(|p| {
+    maps.lines().filter_map(maps_path).find(|p| {
         Path::new(p).file_name().is_some_and(|n| n.to_string_lossy().starts_with("libwebkit2gtk-4.1.so"))
     }).map(PathBuf::from)
 }
@@ -902,6 +914,26 @@ mod tests {
         // a Nix store path, at the very start
         assert_eq!(find_bwrap(b"/nix/store/abc-bubblewrap-0.11/bin/bwrap\0").as_deref(), Some("/nix/store/abc-bubblewrap-0.11/bin/bwrap"));
         assert_eq!(find_bwrap(b"bwrap\0no path here\0"), None);
+    }
+
+    /// `/proc/self/maps` pads before the path and keeps the path's own spaces: an AppImage named "Kiln Launcher..."
+    /// is mounted at `/tmp/.mount_Kiln L<random>`.
+    #[test]
+    fn the_loaded_webkit_is_found_in_a_path_with_spaces() {
+        let line = "7f2a1c000000-7f2a1c400000 r--p 00000000 00:2f 1234                       /tmp/.mount_Kiln LMJEMBn/usr/lib/libwebkit2gtk-4.1.so.0";
+        assert_eq!(maps_path(line), Some("/tmp/.mount_Kiln LMJEMBn/usr/lib/libwebkit2gtk-4.1.so.0"));
+        assert_eq!(maps_path("55aae9a82000-55aae9a84000 r--p 00000000 103:04 52037750 /usr/lib/libwebkit2gtk-4.1.so.0.24.4"),
+            Some("/usr/lib/libwebkit2gtk-4.1.so.0.24.4"));
+        // an anonymous mapping has no path
+        assert_eq!(maps_path("7ffc8e9f1000-7ffc8ea12000 rw-p 00000000 00:00 0 "), None);
+        assert_eq!(maps_path("7ffc8e9f1000-7ffc8ea12000 rw-p 00000000 00:00 0"), None);
+        // this process's own maps parse, and name at least its own executable
+        #[cfg(target_os = "linux")]
+        {
+            let me = std::env::current_exe().unwrap();
+            let maps = std::fs::read_to_string("/proc/self/maps").unwrap();
+            assert!(maps.lines().filter_map(maps_path).any(|p| Path::new(p) == me), "{}", me.display());
+        }
     }
 
     /// The real library, where this machine has one (the system's WebKitGTK; `KILN_TEST_WEBKIT_LIB` names another, such
