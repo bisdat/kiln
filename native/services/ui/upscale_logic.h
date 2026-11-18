@@ -328,7 +328,7 @@ inline const char* why_text(Why w) {
     switch (w) {
         case Why::none: return "";
         case Why::restart: return "it runs from the next start of the game";
-        case Why::files_missing: return "its files are not downloaded (launcher: Settings, Upscalers)";
+        case Why::files_missing: return "its files are not downloaded (launcher: Settings, Graphics)";
         case Why::files_bad: return "its files are not the ones Kiln pins: download them again";
         case Why::load_failed: return "its files did not load";
         case Why::device: return "the graphics card or driver lacks a Vulkan feature it needs";

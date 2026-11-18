@@ -364,6 +364,9 @@ static void status() {
         CHECK(!t.empty() && t.find("DLSS") == std::string::npos && t.find("unlock") == std::string::npos);
     }
     CHECK(std::string(running_name(Running::amd_fsr3)) == "AMD FSR 3.1");
+    // the files are downloaded on the launcher's Settings > Graphics card (phase B took them out of the Upscalers preview)
+    CHECK(std::string(why_text(Why::files_missing)).find("Settings, Graphics") != std::string::npos);
+    for (uint32_t w = 1; w <= 14; ++w) CHECK(std::string(why_text(static_cast<Why>(w))).find("Upscalers") == std::string::npos);
 
     CHECK(parse_version("4.1.2") == make_version(4, 1, 2) && parse_version("3.1.6") == make_version(3, 1, 6));
     CHECK(parse_version("3.1.6*") == make_version(3, 1, 6) && parse_version("x") == 0 && parse_version(nullptr) == 0);

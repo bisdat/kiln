@@ -192,7 +192,7 @@ inline Verified verify_component(Fs& fs, const std::wstring& kiln_dir, std::stri
     const char* names[] = {"kiln/vendor", "kiln/vendor/", ""};
     for (int i = 0; i < 3; ++i) {
         if (!fs.exists(folders[i])) {
-            return fail(Check::missing, where + " is not there: download " + v.component + " in the launcher (Settings, Upscalers)");
+            return fail(Check::missing, where + " is not there: download " + v.component + " in the launcher (Settings, Graphics)");
         }
         if (fs.is_link(folders[i])) {
             const std::string n = i == 0 ? names[0] : i == 1 ? std::string(names[1]) + v.vendor : where;

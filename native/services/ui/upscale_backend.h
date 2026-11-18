@@ -62,7 +62,7 @@ enum class Why : uint32_t {
     none = 0,             // it runs (or "game" is chosen)
     restart = 1,          // chosen while the game runs, on a device created without its needs (or before Kiln's hooks
                           // went in): it runs from the next start of the game
-    files_missing = 2,    // its vendor files are not downloaded (the launcher's Settings, Upscalers)
+    files_missing = 2,    // its vendor files are not downloaded (the launcher's Settings, Graphics)
     files_bad = 3,        // a vendor file is not the pinned one (size or SHA-256), or is a link
     load_failed = 4,      // a vendor DLL did not load, or lacks an export
     device = 5,           // the GPU or driver lacks an extension or feature the backend must have

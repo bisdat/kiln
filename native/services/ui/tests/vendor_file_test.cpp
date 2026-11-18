@@ -173,6 +173,7 @@ static void wrong_files(const fs::path& out) {
     Verified v = verify_component(pfs, kw, "intel-xess");
     CHECK(v.check == Check::missing && !v.ok() && v.handles.empty() && v.paths.empty());
     CHECK(v.detail.find("kiln/vendor/intel/3.0.2 is not there") != std::string::npos);
+    CHECK(v.detail.find("(Settings, Graphics)") != std::string::npos && v.detail.find("Upscalers") == std::string::npos);
     // no such component
     v = verify_component(pfs, kw, "nvidia-dlss");
     CHECK(v.check == Check::no_pins);
