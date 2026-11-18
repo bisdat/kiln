@@ -1344,6 +1344,10 @@
       "lastBoot": "Last boot",
       "sfModsFailed": "mods did not load",
       "sfPassFailed": "startup pass failed",
+      "sfModSkipped": {
+        "one": "one mod left out, the others loaded",
+        "other": "{count} mods left out, the others loaded"
+      },
       "sfWhy": "ShroudForge: why, and what to do",
       "pickFolder": "Pick folder",
       "updateKiln": "Update Kiln",
@@ -1352,7 +1356,8 @@
       "notLoading": "Kiln is not loading",
       "mouthAria": "{word}: {sub}",
       "sfModsTitle": "ShroudForge mods did not load",
-      "sfPassTitle": "ShroudForge's startup pass failed"
+      "sfPassTitle": "ShroudForge's startup pass failed",
+      "sfSkippedTitle": "ShroudForge left a mod out"
     },
     "mods": {
       "notTaken": "not taken",

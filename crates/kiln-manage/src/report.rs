@@ -520,7 +520,7 @@ pub enum Level {
 pub struct Finding {
     /// Stable name: `not-installed`, `proxy-not-kiln`, `files-missing`, `files-changed`, `not-loaded`,
     /// `proton-override`, `proton-chained-override`, `unknown-build`, `safe-idle`, `own-loader`, `loader-in-folder`, `unlisted-mods`,
-    /// `mod-failed`, `hosted-mods`, `hosted-off`, `crash`, `profile-invalid`, `newer-mods`, `no-game`, `sf-startup-failed`,
+    /// `mod-failed`, `hosted-mods`, `hosted-off`, `crash`, `profile-invalid`, `newer-mods`, `no-game`, `sf-startup-failed`, `sf-startup-skipped`,
     /// `optiscaler`.
     pub id: String,
     pub level: Level,
@@ -1426,6 +1426,11 @@ pub fn build(input: &ReportInput) -> Report {
     if let Some(f) = crate::sf_startup::failure(&game, under_wine).map(|f| f.redacted(|t| redact(t, cx.red))) {
         let _ = writeln!(ls, "ShroudForge's record of its startup pass (state.json \"assets\"): {}", f.line());
         cx.find("sf-startup-failed", Level::Problem, format!("{}.", f.text()));
+    }
+    // Kiln's ShroudForge ran the pass once more without the mod it failed in: the others loaded, that one did not.
+    if let Some(s) = crate::sf_startup::skipped(game).map(|s| s.redacted(|t| redact(t, cx.red))) {
+        let _ = writeln!(ls, "ShroudForge's record of its startup pass (state.json \"assets\"): {}", s.line());
+        cx.find("sf-startup-skipped", Level::Warning, format!("{}.", s.text()));
     }
     let aside: Vec<ModKind> = engines.iter()
         .filter(|e| e.state.as_ref().is_some_and(|st| stood_aside(st) && !eml_under_hosted_shroudforge(e.kind, st, sf_hosted_pid)))
