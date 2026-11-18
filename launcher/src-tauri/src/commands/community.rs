@@ -151,6 +151,10 @@ pub async fn community_settings_get() -> Result<CommunitySettings, Error> {
 #[tauri::command]
 pub async fn community_settings_set(app: AppHandle, patch: SettingsPatch) -> Result<CommunitySettings, Error> {
     let s = blocking(move || CommunitySettings::update(&crate::state::dirs()?, &patch)).await?;
+    // hidden: a sign-in on its way ends here, and its listener on 127.0.0.1 closes with it
+    if !s.shown {
+        HUB.lock().unwrap().attempts.clear();
+    }
     crate::community::presence::settings_changed(&s);
     emit_changed(&app);
     Ok(s)

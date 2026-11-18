@@ -2,9 +2,12 @@
 //!
 //! **Desktop (browser):** a one-time listener on `127.0.0.1:<random port>` ([`Loopback`]); `POST /signin` with the
 //! port and the challenge; the system browser opens the answer's page; after Discord the relay sends the browser to
-//! `http://127.0.0.1:<port>/done?id=<id>&c=<one-time code>` (or `&error=canceled|denied|expired`); the launcher trades the
-//! code and the secret for a session (`POST /signin/exchange`). When the loopback is blocked (a firewall, a sandbox)
-//! the attempt also polls the relay with the secret, as the Deck does.
+//! `http://127.0.0.1:<port>/done?c=<one-time code>`; the launcher trades the code and the secret for a session (`POST
+//! /signin/exchange`). A code the exchange could not take for want of a network is kept and tried again; a code that is
+//! not this attempt's (the relay refuses it: a page or program on this PC made it up) is dropped and the attempt waits
+//! on. From 8 seconds on the attempt also polls the relay: with a port the poll only learns a cancel on Discord's page
+//! (the relay gives the session only to the exchange). When the launcher can't listen at all, it asks without a port:
+//! the player presses Approve on the relay's page and the poll collects the session.
 //!
 //! **Deck (QR):** `POST /signin` without a port; the Deck shows the QR code and the short code, and polls
 //! (`POST /signin/poll`, at most every 2 seconds) until the phone approves or declines.
@@ -183,6 +186,9 @@ pub struct Attempt {
     texts: PageTexts,
     begun: Instant,
     last_poll: Option<Instant>,
+    /// The loopback's one-time code while the exchange has not taken it (no network, the relay down): tried again.
+    code: Option<String>,
+    last_exchange: Option<Instant>,
     done: Option<Progress>,
 }
 
@@ -190,10 +196,30 @@ impl Attempt {
     /// Starts an attempt: binds the loopback (browser mode) and asks the relay.
     pub fn start(relay: &Relay, mode: SigninMode, join: bool, device: super::relay::Device, version: &str, texts: PageTexts) -> Result<Attempt> {
         let secret = Secret::new()?;
-        let loopback = if mode == SigninMode::Browser { Some(Loopback::bind()?) } else { None };
+        // a listener that can't be opened is no dead end: the relay then shows its Approve page and the poll collects
+        let loopback = if mode == SigninMode::Browser { Loopback::bind().ok() } else { None };
         let req = SigninRequest { mode, join, challenge: secret.challenge(), port: loopback.as_ref().map(Loopback::port), device, version: version.to_string() };
         let started = relay.signin_start(&req)?;
-        Ok(Attempt { started, mode, secret, loopback, texts, begun: Instant::now(), last_poll: None, done: None })
+        Ok(Attempt { started, mode, secret, loopback, texts, begun: Instant::now(), last_poll: None, code: None, last_exchange: None, done: None })
+    }
+
+    /// Trades the loopback's code for the session. `Ok(None)`: no session yet (the code was not this attempt's and is
+    /// dropped, or an earlier try was too recent); an error with no network or the relay down keeps the code.
+    fn exchange(&mut self, relay: &Relay) -> Result<Option<Progress>> {
+        let Some(code) = self.code.clone() else { return Ok(None) };
+        if self.last_exchange.is_some_and(|t| t.elapsed() < POLL_EVERY) {
+            return Ok(None);
+        }
+        self.last_exchange = Some(Instant::now());
+        match relay.signin_exchange(&self.started.id, &code, self.secret.reveal()) {
+            Ok(grant) => Ok(Some(self.end(Progress::Approved(grant)))),
+            Err(e) if super::relay::kind_of(&e) == Some("expired") => Ok(Some(self.end(Progress::Expired))),
+            Err(e) if e.detail.as_ref().and_then(|d| d.get("refused")).is_some() => {
+                self.code = None;
+                Ok(None)
+            }
+            Err(e) => Err(e),
+        }
     }
 
     /// Looks once: the loopback (browser), the relay (QR; browser after [`FALLBACK_AFTER`]), the clock. Never waits
@@ -205,25 +231,32 @@ impl Attempt {
         if self.begun.elapsed() > ATTEMPT_MAX {
             return Ok(self.end(Progress::Expired));
         }
-        if let Some(l) = &self.loopback {
-            // drain what the browser sent; the redirect for this attempt ends it
-            for _ in 0..8 {
-                match l.accept(&self.started.id, &self.texts) {
-                    None => break,
-                    Some(None) => continue,
-                    Some(Some(Back::Code(code))) => {
-                        let grant = relay.signin_exchange(&self.started.id, &code, self.secret.reveal())?;
-                        return Ok(self.end(Progress::Approved(grant)));
+        // a code an earlier exchange could not take (no network, the relay down)
+        if let Some(p) = self.exchange(relay)? {
+            return Ok(p);
+        }
+        // drain what the browser sent; the redirect for this attempt ends it
+        for _ in 0..8 {
+            let Some(l) = &self.loopback else { break };
+            match l.accept(&self.started.id, &self.texts) {
+                None => break,
+                Some(None) => continue,
+                Some(Some(Back::Code(code))) => {
+                    self.code = Some(code);
+                    self.last_exchange = None;
+                    if let Some(p) = self.exchange(relay)? {
+                        return Ok(p);
                     }
-                    Some(Some(Back::Canceled)) => return Ok(self.end(Progress::Canceled)),
-                    Some(Some(Back::Denied)) => return Ok(self.end(Progress::Denied)),
-                    Some(Some(Back::Expired)) => return Ok(self.end(Progress::Expired)),
                 }
+                Some(Some(Back::Canceled)) => return Ok(self.end(Progress::Canceled)),
+                Some(Some(Back::Denied)) => return Ok(self.end(Progress::Denied)),
+                Some(Some(Back::Expired)) => return Ok(self.end(Progress::Expired)),
             }
         }
         let ask = match self.mode {
             SigninMode::Qr => true,
-            SigninMode::Browser => self.begun.elapsed() >= FALLBACK_AFTER,
+            // without a listener the poll is the only way back (after Approve on the relay's page)
+            SigninMode::Browser => self.loopback.is_none() || self.begun.elapsed() >= FALLBACK_AFTER,
         };
         let spaced = self.last_poll.is_none_or(|t| t.elapsed() >= if self.mode == SigninMode::Qr { POLL_EVERY } else { POLL_EVERY * 2 });
         if ask && spaced {
@@ -242,8 +275,14 @@ impl Attempt {
 
     fn end(&mut self, p: Progress) -> Progress {
         self.loopback = None;
+        self.code = None;
         self.done = Some(p.clone());
         p
+    }
+
+    /// Whether the attempt still listens on 127.0.0.1 (it stops at its end, and when it is dropped).
+    pub fn listening(&self) -> bool {
+        self.loopback.is_some()
     }
 }
 
@@ -328,6 +367,89 @@ mod tests {
         assert_eq!(start["challenge"].as_str().unwrap(), super::super::b64url(&Sha256::digest(verifier.as_bytes())));
         // the listener is gone with the attempt's end
         assert!(TcpStream::connect(("127.0.0.1", port)).is_err());
+    }
+
+    #[test]
+    fn a_code_that_is_not_this_attempts_is_dropped_and_the_attempt_waits_on() {
+        // a page or program on this PC knows the port and knocks with a made-up code: the relay refuses it
+        let fake = FakeRelay::start(|r| match (r.path(), r.json()["code"].as_str()) {
+            ("/signin", _) => ok(json!({ "id": "s1", "url": "https://frostdev.io/kiln/signin/s1", "expiresAt": "2026-11-18T12:10:00Z" })),
+            ("/signin/exchange", Some("the-real-code")) => ok(json!({ "token": "kiln_s_0123456789abcdefghijklmnop", "account": account() })),
+            ("/signin/exchange", _) => super::super::testing::status(403, json!({ "error": "refused", "message": "That does not match this sign-in." })),
+            _ => super::super::testing::status(404, json!({})),
+        });
+        let t = fake.transport();
+        let relay = Relay::new(relay_base(DEFAULT_RELAY).unwrap(), &t, "0.2.0");
+        let mut a = Attempt::start(&relay, SigninMode::Browser, true, Device::Pc, "0.2.0", texts()).unwrap();
+        let (_, got) = knock(&mut a, &relay, "c=made-up", None);
+        assert_eq!(got, Progress::Waiting);
+        assert!(a.listening(), "the listener stays for the real redirect");
+        let (page, got) = knock(&mut a, &relay, "c=the-real-code", None);
+        assert!(page.contains("Signed in."), "{page}");
+        assert!(matches!(got, Progress::Approved(_)), "{got:?}");
+        assert!(!a.listening());
+    }
+
+    #[test]
+    fn a_code_the_exchange_could_not_take_is_tried_again() {
+        // the relay is down at the first exchange and answers at the next
+        let tries = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let t2 = tries.clone();
+        let fake = FakeRelay::start(move |r| match r.path() {
+            "/signin" => ok(json!({ "id": "s1", "url": "https://frostdev.io/kiln/signin/s1", "expiresAt": "2026-11-18T12:10:00Z" })),
+            "/signin/exchange" if t2.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 => super::super::testing::status(503, json!({ "error": "unavailable" })),
+            "/signin/exchange" => ok(json!({ "token": "kiln_s_0123456789abcdefghijklmnop", "account": account() })),
+            _ => super::super::testing::status(404, json!({})),
+        });
+        let t = fake.transport();
+        let relay = Relay::new(relay_base(DEFAULT_RELAY).unwrap(), &t, "0.2.0");
+        let mut a = Attempt::start(&relay, SigninMode::Browser, true, Device::Pc, "0.2.0", texts()).unwrap();
+        let port = a.loopback.as_ref().unwrap().port();
+        let tab = std::thread::spawn(move || browser(port, "c=onetime-code_1", None));
+        let first = loop {
+            match a.poll(&relay) {
+                Ok(Progress::Waiting) => std::thread::sleep(Duration::from_millis(10)),
+                other => break other,
+            }
+        };
+        tab.join().unwrap();
+        assert_eq!(first.map_err(|e| super::super::relay::kind_of(&e).map(str::to_string)), Err(Some("relay".into())));
+        // within 2 s nothing is asked again; after, the kept code goes again and signs in
+        assert_eq!(a.poll(&relay).unwrap(), Progress::Waiting);
+        assert_eq!(tries.load(std::sync::atomic::Ordering::SeqCst), 1);
+        a.last_exchange = Some(Instant::now() - POLL_EVERY);
+        assert!(matches!(a.poll(&relay).unwrap(), Progress::Approved(_)));
+        let codes: Vec<String> = fake.seen().iter().filter(|s| s.path() == "/signin/exchange").map(|s| s.json()["code"].as_str().unwrap().to_string()).collect();
+        assert_eq!(codes, ["onetime-code_1", "onetime-code_1"]);
+    }
+
+    #[test]
+    fn a_code_the_relay_says_has_expired_ends_the_attempt() {
+        let fake = FakeRelay::start(|r| match r.path() {
+            "/signin" => ok(json!({ "id": "s1", "url": "https://frostdev.io/kiln/signin/s1", "expiresAt": "2026-11-18T12:10:00Z" })),
+            _ => super::super::testing::status(410, json!({ "error": "expired" })),
+        });
+        let t = fake.transport();
+        let relay = Relay::new(relay_base(DEFAULT_RELAY).unwrap(), &t, "0.2.0");
+        let mut a = Attempt::start(&relay, SigninMode::Browser, false, Device::Pc, "0.2.0", texts()).unwrap();
+        let (_, got) = knock(&mut a, &relay, "c=onetime-code_1", None);
+        assert_eq!(got, Progress::Expired);
+        assert!(!a.listening());
+    }
+
+    #[test]
+    fn without_a_listener_the_desktop_polls_from_the_start() {
+        // the launcher could not listen: no port goes to the relay, which then shows its Approve page; the poll collects
+        let fake = FakeRelay::start(|r| match r.path() {
+            "/signin" => ok(json!({ "id": "s1", "url": "https://frostdev.io/kiln/signin/s1", "expiresAt": "2026-11-18T12:10:00Z" })),
+            "/signin/poll" => ok(json!({ "state": "approved", "token": "kiln_s_0123456789abcdefghijklmnop", "account": account() })),
+            _ => super::super::testing::status(404, json!({})),
+        });
+        let t = fake.transport();
+        let relay = Relay::new(relay_base(DEFAULT_RELAY).unwrap(), &t, "0.2.0");
+        let mut a = Attempt::start(&relay, SigninMode::Browser, false, Device::Pc, "0.2.0", texts()).unwrap();
+        a.loopback = None;
+        assert!(matches!(a.poll(&relay).unwrap(), Progress::Approved(_)), "asked at once, not after 8 seconds");
     }
 
     #[test]

@@ -46,7 +46,11 @@ export function SignInDialog({ resumeSend }: { resumeSend: boolean }) {
     let live = true;
     const timer = setInterval(async () => {
       let r: api.SignInState | null;
-      try { r = await api.communitySignInPoll(pend.id); } catch (e) { r = null; if (errKind(e) === "offline") { clearInterval(timer); if (live) { setPend(null); setPhase("offline"); } } }
+      try { r = await api.communitySignInPoll(pend.id); } catch (e) {
+        r = null;
+        // offline ends the attempt here and in the backend (its listener on 127.0.0.1 closes); Try again starts anew
+        if (errKind(e) === "offline") { clearInterval(timer); api.communitySignInCancel(pend.id).catch(() => {}); if (live) { setPend(null); setPhase("offline"); } }
+      }
       if (!live || !r || r.state === "waiting") return;
       clearInterval(timer);
       if (r.state === "approved") {

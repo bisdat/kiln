@@ -185,6 +185,8 @@ export function communityMockHandlers({ emit, gameRunning }: CommunityMockDeps):
     community_settings_set: (a) => {
       const p = (a.patch ?? {}) as Partial<CommunitySettings>;
       settings = { ...settings, ...(p.shown !== undefined ? { shown: !!p.shown } : {}), ...(p.presence !== undefined ? { presence: !!p.presence } : {}), ...(p.notify !== undefined ? { notify: !!p.notify } : {}) };
+      // hidden: a sign-in on its way ends (the backend closes its listener)
+      if (!settings.shown) pending.clear();
       changed();
       return { ...settings };
     },

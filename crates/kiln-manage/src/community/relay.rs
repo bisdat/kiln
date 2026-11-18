@@ -92,6 +92,9 @@ pub fn refusal(status: u16, body: &[u8]) -> Error {
         (401, _) => err(ErrorCode::AuthFailed, Kind::Signin, "Sign in with Discord again."),
         (403, "not_member") => err(ErrorCode::Refused, Kind::NotMember, "You're not in the Kiln Discord yet."),
         (403, "too_young" | "too_new") => err(ErrorCode::Refused, Kind::TooYoung, "This Discord account is too new to send reports."),
+        // the verifier, secret or one-time code is not this sign-in's: the UI words it as a relay that answered badly,
+        // the sign-in tells it apart (a code a local page made up must not end the attempt)
+        (403, "refused") => Error::new(ErrorCode::Refused, "Kiln support isn't answering right now.").with_detail(json!({ "kind": Kind::Relay.as_str(), "refused": true })),
         (429, "slow_down") => Error::new(ErrorCode::Busy, "Asked too soon.").with_detail(json!({ "kind": Kind::Relay.as_str(), "slow": true })),
         (404, _) => err(ErrorCode::NotFound, Kind::NotFound, "Kiln support doesn't know this any more."),
         (410, _) => err(ErrorCode::Timeout, Kind::Expired, "This has expired."),
