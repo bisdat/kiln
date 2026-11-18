@@ -71,6 +71,26 @@ public static class Descriptors
         "game's tick thread (Kiln's UI and client callbacks on the game's other threads). A blocking wait there " +
         "freezes the server, and a test that blocks cannot be timed out.");
 
+    // The task rows of KILN105 share its id: one severity setting covers every way of waiting on, or
+    // escaping, a Kiln task. Their messages differ because the fixes differ.
+    public static readonly DiagnosticDescriptor BlockingTaskCall = Rule("KILN105",
+        "Blocking call in a Kiln task",
+        "'{0}' blocks {1}: Kiln refuses a blocking wait on the tick and in a Kiln task (it can deadlock the tick or starve the task pool), and the Task that KilnTask.AsTask() hands out escapes that refusal; await the KilnTask instead",
+        Threading, DiagnosticSeverity.Warning,
+        "KilnTask.Wait is refused on the tick thread and on Kiln's task workers, and inside a task body a " +
+        "blocking wait holds a pool worker (or a tick hop) that other tasks and the tick may need. AsTask() " +
+        "gives a plain Task for composition (Task.WhenAll); Kiln cannot intercept Wait, Result or " +
+        "GetAwaiter().GetResult() on it, so blocking on that Task in a task is the same mistake.");
+
+    public static readonly DiagnosticDescriptor TickHopDiscarded = Rule("KILN105",
+        "Tick hop result is never awaited",
+        "'{0}' is never awaited: a tick hop does not happen until it is awaited, so the code after it still runs where it ran before; write 'await {0}'",
+        Threading, DiagnosticSeverity.Warning,
+        "KilnTaskContext.ToTick() only makes the hop: nothing is queued for the tick until the returned " +
+        "TickHop is awaited (its awaiter is what hands the continuation to the tick). A ToTick() call whose " +
+        "result is dropped, or kept in a local that nobody awaits, never hops, and the code after it runs on " +
+        "a worker (or wherever it ran) with no warning from the tick-thread rules about that fact alone.");
+
     public static readonly DiagnosticDescriptor Unreleased = Rule("KILN106",
         "Thread, timer or subscription is never released",
         "{0} is not released: Kiln does not stop threads, timers, watchers, sockets or external subscriptions a mod creates itself; dispose/stop it in OnUnload",
