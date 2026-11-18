@@ -97,6 +97,30 @@ export interface AppInfo {
   render?: RenderInfo;
   /** Linux AppImage only: the app menu entry Kiln writes so taskbars and docks show its icon (desktop.rs). */
   desktop?: DesktopInfo;
+  /** (dev.29.18) Linux only: WebKit's sandbox in this start and whether the next start turns it off (sandbox.rs). */
+  sandbox?: SandboxInfo;
+}
+/** WebKit's process sandbox on Linux (src-tauri/src/sandbox.rs). */
+export interface SandboxInfo {
+  /** This start's choice: on (the launcher leaves WebKit as it is) or off (it sets WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS). */
+  want: "on" | "off";
+  /** Why: nothing asked; the marker (Settings, or a message's button at an earlier start); the restart after such a
+   *  button; KILN_LAUNCHER_WEBKIT_SANDBOX; --no-webkit-sandbox / --webkit-sandbox. */
+  why: "default" | "marker" | "restart" | "environment" | "argument";
+  /** The marker is there: a start without KILN_LAUNCHER_WEBKIT_SANDBOX or an argument turns the sandbox off. */
+  marker: boolean;
+  /** Who set the marker, why and when. */
+  markerWhy?: string;
+  /** What WebKit does in this start: runs its sandbox, has it turned off, or does not use it (its GTK 3 API runs it
+   *  only when WEBKIT_FORCE_SANDBOX=1 is set). */
+  webkit: "on" | "off" | "unused";
+  /** Why, in the backend's words. */
+  webkitWhy: string;
+  /** The player's own WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS value: it decides, the switch does not. */
+  yours?: string;
+  /** The probe of the bwrap WebKit runs: "works", "fails", "missing" or "unknown", and its sentence. */
+  probe: "works" | "fails" | "missing" | "unknown";
+  probeSays: string;
 }
 /** The AppImage's app menu entry (src-tauri/src/desktop.rs). */
 export interface DesktopInfo {
@@ -1218,6 +1242,8 @@ export const taskCancel = (taskId: TaskId) => call<null>("task_cancel", { taskId
 export const appStarted = () => call<null>("app_started");
 /** Settings, "Draw the launcher without the GPU": sets or clears the marker for the next start (Linux). */
 export const appRenderSet = (software: boolean) => call<RenderInfo>("app_render_set", { software });
+/** Settings, "WebKit's sandbox": on removes the marker, off writes it, for the next start (Linux). */
+export const appSandboxSet = (on: boolean) => call<SandboxInfo>("app_sandbox_set", { on });
 /** Settings, "Kiln Launcher in the app menu" (Linux AppImage): writes or removes the entry and its icons. */
 export const appDesktopSet = (on: boolean) => call<DesktopInfo>("app_desktop_set", { on });
 /** Translation files a player put in the data folder's `locales/` (docs/kiln/translating.md): `<tag>.json` each, read
@@ -2141,6 +2167,7 @@ export const COMMANDS = [
   "updates_check",
   "app_desktop_set",
   "app_locales",
+  "app_sandbox_set",
 ] as const;
 export type CommandName = (typeof COMMANDS)[number];
 

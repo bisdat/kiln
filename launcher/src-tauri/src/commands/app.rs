@@ -45,6 +45,10 @@ pub struct AppInfo {
     /// Linux AppImage only: the app menu entry Kiln writes so taskbars show its icon (crate::desktop). Absent elsewhere.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub desktop: Option<crate::desktop::DesktopInfo>,
+    /// (dev.29.18) Linux only: WebKit's sandbox in this start (the player's choice, what WebKit does, the probe of bwrap)
+    /// and whether the marker turns it off at the next start (crate::sandbox). Absent elsewhere.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandbox: Option<crate::sandbox::SandboxInfo>,
 }
 
 /// `<data>/settings.json`
@@ -351,6 +355,7 @@ pub async fn app_info(app: AppHandle) -> Result<AppInfo, Error> {
         distribution: crate::distribution::CURRENT,
         render: crate::render::info(),
         desktop: crate::desktop::info(),
+        sandbox: crate::sandbox::info(),
     })
 }
 
@@ -367,6 +372,13 @@ pub async fn app_started() -> Result<(), Error> {
 #[tauri::command]
 pub async fn app_render_set(software: bool) -> Result<crate::render::RenderInfo, Error> {
     crate::state::blocking(move || crate::render::set_next(software)).await
+}
+
+/// Settings, "WebKit's sandbox": on removes the marker, off writes it; applies at the next start. Linux only (else
+/// `unsupported`).
+#[tauri::command]
+pub async fn app_sandbox_set(on: bool) -> Result<crate::sandbox::SandboxInfo, Error> {
+    crate::state::blocking(move || crate::sandbox::set_next(on)).await
 }
 
 /// Settings, "Kiln Launcher in the app menu" (Linux AppImage): on writes the entry and icons (replacing a

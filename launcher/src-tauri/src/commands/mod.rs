@@ -212,6 +212,7 @@ pub const NAMES: &[&str] = &[
     "updates_check",
     "app_desktop_set",
     "app_locales",
+    "app_sandbox_set",
 ];
 
 #[cfg(test)]

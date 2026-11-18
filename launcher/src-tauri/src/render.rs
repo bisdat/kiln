@@ -32,7 +32,7 @@ pub const ENV: &str = "KILN_LAUNCHER_RENDER";
 pub const ARG_SOFTWARE: &str = "--software-render";
 pub const ARG_GPU: &str = "--gpu-render";
 /// Set only for the process the fallback starts: it draws without the GPU even when the marker could not be written.
-const RESTARTED: &str = "KILN_LAUNCHER_RENDER_RESTARTED";
+pub(crate) const RESTARTED: &str = "KILN_LAUNCHER_RENDER_RESTARTED";
 /// The [`SOFTWARE_ENV`] names this process set itself (comma-separated), so a launcher started from it (the fallback, an
 /// update's restart) tells them from the user's own.
 /// Programs of the host never get these (kiln_manage::hostenv: a Steam the launcher starts draws with its GPU).
@@ -130,9 +130,46 @@ pub fn restart_target(appimage: Option<OsString>, exe: Option<PathBuf>) -> Optio
     }
 }
 
-/// The restart: `target` with this start's arguments (without argv[0]) and [`RESTARTED`]. An AppImage is a program of
-/// the host: it gets `vars` (this process's environment) without the running image's entries, as a fresh start does.
-pub fn restart_command<I>(target: &Path, appimage: bool, args: &[OsString], vars: I) -> Command
+/// What a restart changes for the new start: the arguments it leaves out and the variables it removes (a choice a
+/// click replaces), and the variables it sets (why the new start is what it is).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Relaunch {
+    pub drop_args: Vec<&'static str>,
+    pub unset: Vec<&'static str>,
+    pub set: Vec<(&'static str, String)>,
+}
+
+impl Relaunch {
+    /// The fallback's restart: the same arguments, [`RESTARTED`].
+    pub fn software_fallback() -> Relaunch {
+        Relaunch { set: vec![(RESTARTED, "1".into())], ..Default::default() }
+    }
+    /// The player clicked "Start without the GPU" (crate::sandbox's message): their click wins over a GPU they asked
+    /// for with an argument or `KILN_LAUNCHER_RENDER`, for this restart.
+    pub fn software_by_click() -> Relaunch {
+        Relaunch { drop_args: vec![ARG_SOFTWARE, ARG_GPU], unset: vec![ENV], set: vec![(RESTARTED, "1".into())] }
+    }
+    /// What this start's render and sandbox choices took from a restart's variable (their markers may not have been
+    /// written) goes along to the next restart, whatever it is for.
+    pub fn keeping(mut self) -> Relaunch {
+        if choice().is_some_and(|c| c.why == Why::Restart) {
+            self.add(RESTARTED, "1");
+        }
+        crate::sandbox::keep(&mut self);
+        self
+    }
+
+    /// Sets `k` unless this restart already sets or removes it.
+    pub fn add(&mut self, k: &'static str, v: &str) {
+        if !self.set.iter().any(|(x, _)| *x == k) && !self.unset.contains(&k) {
+            self.set.push((k, v.into()));
+        }
+    }
+}
+
+/// The restart: `target` with this start's arguments (without argv[0]) as `how` says. An AppImage is a program of the
+/// host: it gets `vars` (this process's environment) without the running image's entries, as a fresh start does.
+pub fn restart_command<I>(target: &Path, appimage: bool, args: &[OsString], vars: I, how: &Relaunch) -> Command
 where
     I: IntoIterator<Item = (OsString, OsString)>,
 {
@@ -140,7 +177,13 @@ where
     if appimage {
         kiln_manage::hostenv::clean_with(&mut cmd, vars);
     }
-    cmd.args(args).env(RESTARTED, "1");
+    cmd.args(args.iter().filter(|a| !how.drop_args.iter().any(|d| a.as_os_str() == std::ffi::OsStr::new(d))));
+    for k in &how.unset {
+        cmd.env_remove(k);
+    }
+    for (k, v) in &how.set {
+        cmd.env(k, v);
+    }
     cmd
 }
 
@@ -173,21 +216,35 @@ struct Marker {
 }
 
 pub fn write_marker(d: &DataDirs, why: &str) -> Result<(), Error> {
-    let m = Marker { format: 1, why: why.into(), at: kiln_manage::util::now_rfc3339(), version: env!("CARGO_PKG_VERSION").into() };
-    kiln_manage::util::write_json_atomic(&marker(d), &m)?;
-    Ok(())
+    write_marker_file(&marker(d), why)
 }
 
 pub fn clear_marker(d: &DataDirs) -> Result<(), Error> {
-    match std::fs::remove_file(marker(d)) {
-        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(Error::from(e).with_detail(marker(d).display().to_string())),
-        _ => Ok(()),
-    }
+    clear_marker_file(&marker(d))
 }
 
 /// The marker's sentence (None: no marker, or not readable as one).
 fn marker_why(d: &DataDirs) -> Option<String> {
-    kiln_manage::util::read_json::<Marker>(&marker(d)).ok().flatten().map(|m| format!("{} ({})", m.why, m.at))
+    marker_file_why(&marker(d))
+}
+
+/// A start's marker file (`{format, why, at, version}`): this one, and crate::sandbox's `state/webkit-sandbox.json`.
+pub(crate) fn write_marker_file(path: &Path, why: &str) -> Result<(), Error> {
+    let m = Marker { format: 1, why: why.into(), at: kiln_manage::util::now_rfc3339(), version: env!("CARGO_PKG_VERSION").into() };
+    kiln_manage::util::write_json_atomic(path, &m)?;
+    Ok(())
+}
+
+pub(crate) fn clear_marker_file(path: &Path) -> Result<(), Error> {
+    match std::fs::remove_file(path) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(Error::from(e).with_detail(path.display().to_string())),
+        _ => Ok(()),
+    }
+}
+
+/// "<why> (<at>)" of a marker file (None: none, or not readable as one).
+pub(crate) fn marker_file_why(path: &Path) -> Option<String> {
+    kiln_manage::util::read_json::<Marker>(path).ok().flatten().map(|m| format!("{} ({})", m.why, m.at))
 }
 
 // ---------------------------------------------------------------- the watchdog
@@ -344,8 +401,8 @@ pub fn says(c: &Choice) -> String {
 
 // ---------------------------------------------------------------- Linux: before GTK, and at the setup
 
-/// Linux, in `main` before any thread exists and before Tauri: decides the mode, sets software mode's variables,
-/// prints the log's path and the mode to stderr, and starts the watchdog.
+/// Linux, in `main` before any thread exists and before Tauri: decides the mode, sets software mode's variables and
+/// prints the log's path and the mode to stderr. [`watch`] starts the watchdog after crate::sandbox's start.
 #[cfg(target_os = "linux")]
 pub fn prepare(args: &[String]) {
     // a launcher started from another Kiln (the fallback, an update's restart): its variables are not the user's
@@ -395,13 +452,23 @@ pub fn prepare(args: &[String]) {
         line += &format!("; {}", vars.join(", "));
     }
     log(&line);
-    let _ = CHOICE.set(c.clone());
+    let _ = CHOICE.set(c);
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn prepare(_args: &[String]) {}
+
+/// Linux, in `main` after [`prepare`] and crate::sandbox's start (its message may have been up): the watchdog. Its
+/// clock for a start without a window begins here.
+#[cfg(target_os = "linux")]
+pub fn watch() {
+    let Some(c) = choice().cloned() else { return };
     let begun = Instant::now();
     std::thread::Builder::new().name("kiln-render-watch".into()).spawn(move || watchdog(c, begun)).ok();
 }
 
 #[cfg(not(target_os = "linux"))]
-pub fn prepare(_args: &[String]) {}
+pub fn watch() {}
 
 /// The watchdog: the page's ready call in time, or the fallback.
 #[cfg(target_os = "linux")]
@@ -422,9 +489,11 @@ fn watchdog(c: Choice, begun: Instant) {
                 Ok(p) => log(&format!("{what} ({}); wrote {}; starting again without the GPU", says(&c), p.display())),
                 Err(e) => log(&format!("{what} ({}); could not write the marker ({}); starting again without the GPU", says(&c), e.message)),
             }
-            let err = restart();
+            let err = restart(&Relaunch::software_fallback().keeping());
             log(&format!("PROBLEM: could not start again without the GPU: {err}"));
             eprintln!("Kiln Launcher: {what}; could not start again without the GPU: {err}. Start it with {ARG_SOFTWARE}.");
+            // nothing left the launcher can try by itself: the player's message (crate::dialog)
+            crate::dialog::late(&c, &what, Some(&err.to_string()));
         }
         Late::Report => {
             let next = match c.mode {
@@ -433,15 +502,18 @@ fn watchdog(c: Choice, begun: Instant) {
             };
             log(&format!("PROBLEM: {what} ({}); {next}", says(&c)));
             eprintln!("Kiln Launcher: PROBLEM: {what} ({}); {next}.", says(&c));
+            // instead of a blank window: what was tried, where the log is, what the player can still try (crate::dialog)
+            crate::dialog::late(&c, &what, None);
         }
     }
     let after = WATCH.wait_late(begun);
     log(&format!("the page started late, {} ms after the window was made", after.as_millis()));
 }
 
-/// Replaces this process with a new start in software mode; returns only when that failed.
+/// Replaces this process with a new start as `how` says (the fallback's software mode, or the player's choice in a
+/// message, crate::dialog); returns only when that failed.
 #[cfg(target_os = "linux")]
-fn restart() -> std::io::Error {
+pub(crate) fn restart(how: &Relaunch) -> std::io::Error {
     use std::os::unix::process::CommandExt;
     let Some((target, appimage)) = restart_target(std::env::var_os("APPIMAGE"), std::env::current_exe().ok()) else {
         return std::io::Error::other("neither $APPIMAGE nor this executable's path is known");
@@ -449,7 +521,7 @@ fn restart() -> std::io::Error {
     let args: Vec<OsString> = std::env::args_os().skip(1).collect();
     log(&format!("restart: {}{}", target.display(), if appimage { " (the AppImage)" } else { "" }));
     // exec: the same process (a terminal keeps waiting for it), and the instance lock goes with the old image
-    restart_command(&target, appimage, &args, std::env::vars_os()).exec()
+    restart_command(&target, appimage, &args, std::env::vars_os(), how).exec()
 }
 
 /// Linux, in Tauri's setup (the window exists): the watchdog's clock, the webview's acceleration policy in software
@@ -458,6 +530,8 @@ fn restart() -> std::io::Error {
 pub fn window_created(app: &tauri::AppHandle) {
     use tauri::Manager;
     WATCH.window_created();
+    // a late message goes up through this window's main loop (crate::dialog)
+    crate::dialog::set_app(app);
     let Some(c) = choice().cloned() else { return };
     let webkit = {
         use webkit2gtk::ffi;
@@ -467,8 +541,9 @@ pub fn window_created(app: &tauri::AppHandle) {
     let var = |k: &str| match std::env::var_os(k) { Some(v) if !v.is_empty() => "set", Some(_) => "empty", None => "not set" };
     let nvidia = std::fs::read_to_string("/proc/driver/nvidia/version").ok().as_deref().and_then(nvidia_line)
         .map_or("no /proc/driver/nvidia/version".to_string(), |l| format!("/proc/driver/nvidia/version: {l}"));
+    let sandbox = crate::sandbox::state().map(|s| format!("; WebKit's sandbox: {}", s.says())).unwrap_or_default();
     log(&format!(
-        "WebKitGTK {webkit}; XDG_SESSION_TYPE={}, DISPLAY {}, WAYLAND_DISPLAY {}; {nvidia}; WEBKIT_DISABLE_DMABUF_RENDERER={}",
+        "WebKitGTK {webkit}; XDG_SESSION_TYPE={}, DISPLAY {}, WAYLAND_DISPLAY {}; {nvidia}; WEBKIT_DISABLE_DMABUF_RENDERER={}{sandbox}",
         std::env::var("XDG_SESSION_TYPE").unwrap_or_else(|_| "(not set)".into()), var("DISPLAY"), var("WAYLAND_DISPLAY"),
         std::env::var("WEBKIT_DISABLE_DMABUF_RENDERER").unwrap_or_default()
     ));
@@ -484,6 +559,16 @@ pub fn window_created(app: &tauri::AppHandle) {
             s.set_enable_webgl(false);
             log(&format!("the webview's hardware acceleration policy: {:?}, WebGL: {}", s.hardware_acceleration_policy(),
                 if s.enables_webgl() { "on" } else { "off" }));
+        }
+        // what the web context itself says about its sandbox: crate::sandbox read the variables, this is WebKit's own
+        // answer (a WebKitGTK that ran the sandbox by default would show here)
+        if let Some(ctx) = WebViewExt::context(&wv) {
+            use webkit2gtk::WebContextExt;
+            let said = ctx.is_sandbox_enabled();
+            // before 2.46 the variables act later (when a process starts), so only "on" without any asking is news
+            let unused = crate::sandbox::state().is_some_and(|s| s.using.webkit == crate::sandbox::Webkit::Unused);
+            let note = if said && unused { " although nothing asked for it: this WebKitGTK runs it by default (sandbox.rs expects not)" } else { "" };
+            crate::commands::app::launcher_log("sandbox", &format!("the web context says its sandbox is {}{note}", if said { "on" } else { "off" }));
         }
         wv.connect_web_process_terminated(|_, reason| log(&format!("PROBLEM: the page's web process ended ({reason:?})")));
     });
@@ -599,7 +684,7 @@ mod tests {
         ];
         let a = [os("--deck"), os("--nxm"), os("nxm://enshrouded/mods/1/files/2")];
         let envs = |cmd: &Command| cmd.get_envs().map(|(k, v)| (k.to_os_string(), v.map(|v| v.to_os_string()))).collect::<Vec<_>>();
-        let cmd = restart_command(Path::new("/games/Kiln.AppImage"), true, &a, vars.clone());
+        let cmd = restart_command(Path::new("/games/Kiln.AppImage"), true, &a, vars.clone(), &Relaunch::software_fallback());
         assert_eq!(cmd.get_program(), "/games/Kiln.AppImage");
         assert_eq!(cmd.get_args().collect::<Vec<_>>(), a.iter().map(|x| x.as_os_str()).collect::<Vec<_>>());
         let e = envs(&cmd);
@@ -608,8 +693,23 @@ mod tests {
         assert!(e.contains(&(os("APPDIR"), None)) && e.contains(&(os("APPIMAGE"), None)), "{e:?}");
         assert!(e.contains(&(os("LD_LIBRARY_PATH"), Some(os("/opt/host/lib")))), "{e:?}");
         // a plain executable inherits the environment as it is
-        let plain = restart_command(Path::new("/usr/bin/kiln-launcher"), false, &a, vars);
+        let plain = restart_command(Path::new("/usr/bin/kiln-launcher"), false, &a, vars, &Relaunch::software_fallback());
         assert_eq!(envs(&plain), vec![(os(RESTARTED), Some(os("1")))]);
+    }
+
+    /// The player's click in a message (crate::dialog) wins over a mode they asked for: the restart leaves the render
+    /// arguments and KILN_LAUNCHER_RENDER out; everything else goes along.
+    #[test]
+    fn a_click_restart_replaces_the_choice_it_answers_and_keeps_the_rest() {
+        let os = |s: &str| OsString::from(s);
+        let a = [os("--deck"), os(ARG_GPU), os("--no-webkit-sandbox")];
+        let cmd = restart_command(Path::new("/usr/bin/kiln-launcher"), false, &a, Vec::new(), &Relaunch::software_by_click());
+        assert_eq!(cmd.get_args().collect::<Vec<_>>(), ["--deck", "--no-webkit-sandbox"]);
+        let envs: Vec<_> = cmd.get_envs().map(|(k, v)| (k.to_os_string(), v.map(|v| v.to_os_string()))).collect();
+        assert!(envs.contains(&(os(ENV), None)) && envs.contains(&(os(RESTARTED), Some(os("1")))), "{envs:?}");
+        // the restart's own start decides software mode from the flag, whatever the arguments said before
+        let next: Vec<String> = std::iter::once("kiln-launcher".to_string()).chain(cmd.get_args().map(|a| a.to_string_lossy().into_owned())).collect();
+        assert_eq!(decide(&next, None, true, false), c(Mode::Software, Why::Restart));
     }
 
     #[test]
