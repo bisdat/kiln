@@ -6,6 +6,8 @@
 #define __try try
 #define __except(...) catch (...)
 #define EXCEPTION_EXECUTE_HANDLER 1
-inline void* GetModuleHandleW(const wchar_t*) { return nullptr; }
+using HMODULE = void*;
+inline HMODULE GetModuleHandleW(const wchar_t*) { return nullptr; }
+inline void* GetProcAddress(HMODULE, const char*) { return nullptr; }
 inline thread_local uintptr_t test_return_address = 0;
 #define _ReturnAddress() reinterpret_cast<void*>(test_return_address)

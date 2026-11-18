@@ -233,8 +233,12 @@ void read_recipe(void* p) {
 void note_craft_station(uint32_t station, int active) {
     using SetFn = void (*)(uint32_t, int);
     static const SetFn set = [] {
+#ifdef _WIN32
         const HMODULE m = GetModuleHandleW(L"kiln-items.dll");
         return m ? reinterpret_cast<SetFn>(GetProcAddress(m, "kiln_stations_set_craft_context")) : nullptr;
+#else
+        return SetFn{};  // the host test has no kiln-items.dll
+#endif
     }();
     if (set) set(station, active);
 }
