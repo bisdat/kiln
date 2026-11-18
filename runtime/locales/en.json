@@ -2,7 +2,7 @@
   "chat": {
     "completion": {
       "title": "Command suggestions",
-      "hint": "Tab: complete · Shift+Tab: previous · Esc: close"
+      "hint": "Tab: complete · Esc: close"
     }
   },
   "language": {
