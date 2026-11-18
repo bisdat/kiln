@@ -282,6 +282,50 @@ fn a_package_with_a_native_mod_and_the_same_asi_keeps_only_the_native_mod() {
 }
 
 #[test]
+fn two_asi_files_in_one_scripts_folder_drop_only_the_matching_one() {
+    let t = tmp("both-scripts");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let pkg = t.0.join("workshop");
+    let dll = build_test_dll(&["kiln_native_init"], b"workshop");
+    put(&pkg, "mod/native.json", br#"{"format":1,"id":"smart-workshop","version":"1.2.0","dlls":["SmartWorkshop.dll"],"phase":"boot","init":"kiln_native_init"}"#);
+    put(&pkg, "mod/SmartWorkshop.dll", &dll);
+    put(&pkg, "Scripts/SmartWorkshop.asi", &asi(b"the asi build"));
+    put(&pkg, "Scripts/Other.asi", &asi(b"someone else"));
+    let r = library::import(&dirs, &[pkg], &mut NoProgress).unwrap();
+    assert!(r.imported.iter().any(|x| x.kind == ModKind::Native && x.id == "smart-workshop"), "{r:#?}");
+    assert!(r.skipped.iter().any(|s| s.path.contains("SmartWorkshop.asi") && s.reason.contains("smart-workshop")), "{r:#?}");
+    assert!(!r.skipped.iter().any(|s| s.path.contains("Other.asi")), "the other .asi stays: {r:#?}");
+    let scripts = r.imported.iter().find(|x| x.id == "scripts").expect("the Scripts package is still imported");
+    let manifest = std::fs::read_dir(dirs.library().join("native").join(&scripts.id)).unwrap()
+        .flatten().flat_map(|e| std::fs::read_dir(e.path()).into_iter().flatten().flatten())
+        .find(|e| e.file_name() == "native.json").expect("generated native.json");
+    let text = String::from_utf8(std::fs::read(manifest.path()).unwrap()).unwrap();
+    assert!(text.contains("Other.asi"), "{text}");
+    assert!(!text.contains("SmartWorkshop.asi"), "{text}");
+}
+
+#[test]
+fn a_nested_native_json_is_imported_and_the_sibling_asi_is_not() {
+    let t = tmp("nested-native");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let dll = build_test_dll(&["kiln_native_init"], b"workshop");
+    for (tag, native_rel, dll_rel) in [
+        ("one", "inner/native.json", "inner/SmartWorkshop.dll"),
+        ("deep", "pack/inner/native.json", "pack/inner/SmartWorkshop.dll"),
+    ] {
+        let pkg = t.0.join(tag);
+        put(&pkg, native_rel, br#"{"format":1,"id":"smart-workshop","version":"1.2.0","dlls":["SmartWorkshop.dll"],"phase":"boot","init":"kiln_native_init"}"#);
+        put(&pkg, dll_rel, &dll);
+        put(&pkg, "SmartWorkshop.asi", &asi(b"the asi build"));
+        let r = library::import(&dirs, &[pkg], &mut NoProgress).unwrap();
+        let kept = r.imported.iter().chain(&r.existing).any(|x| x.id == "smart-workshop");
+        assert!(kept, "{tag}: the Kiln mod is imported: {r:#?}");
+        assert!(r.skipped.iter().any(|s| s.path.contains("SmartWorkshop.asi") && s.reason.contains("smart-workshop")), "{tag}: {r:#?}");
+        assert!(!r.imported.iter().any(|x| x.id != "smart-workshop" && x.kind == ModKind::Native), "{tag}: the package is not only an .asi: {r:#?}");
+    }
+}
+
+#[test]
 fn ultimate_asi_loader_with_its_plugins_is_imported_and_placed() {
     let t = tmp("ual");
     let dirs = DataDirs::at(t.0.join("data"));

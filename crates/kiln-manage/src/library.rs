@@ -484,10 +484,39 @@ fn is_docs_file(name: &str) -> bool {
 /// The manifest files that make a folder a mod of some engine.
 const MOD_MANIFESTS: [&str; 8] = ["mod.json", "kiln.mod.json", "native.json", "flame.json", "pack.toml", "init.lua", "extended.mod.json", "native-plugin.ini"];
 
-/// Is one of `dir`'s folders a mod on its own?
+/// Is one of `dir`'s folders a mod on its own? Immediate children only. A `native.json` deeper than that is
+/// [`contains_native_json`].
 fn has_mod_subfolder(dir: &Path) -> bool {
     std::fs::read_dir(dir).into_iter().flatten().flatten().map(|e| e.path())
         .any(|p| p.is_dir() && !p.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.')) && has_mod_manifest(&p))
+}
+
+/// A `native.json` anywhere under `dir` (not only an immediate child). Links are not followed.
+fn contains_native_json(dir: &Path) -> bool {
+    fn walk(dir: &Path, depth: usize) -> bool {
+        if depth > 32 {
+            return false;
+        }
+        for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            let p = e.path();
+            if p.is_symlink() {
+                continue;
+            }
+            let name = e.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with('.') {
+                continue;
+            }
+            if p.is_file() && name.eq_ignore_ascii_case(crate::manifest::NATIVE_MANIFEST) {
+                return true;
+            }
+            if p.is_dir() && walk(&p, depth + 1) {
+                return true;
+            }
+        }
+        false
+    }
+    walk(dir, 0)
 }
 
 /// Does `dir` hold one of [`MOD_MANIFESTS`]? XHL-Core's native-plugin.ini in any case, as detection finds it.
@@ -677,10 +706,16 @@ fn detect_folder_at(dir: &Path, depth: usize, top_name: Option<&str>) -> Detecte
         return mk(DetectKind::Emf, s("id"), s("version"), s("name"), format!("an EMF mod (mod.json, EMF API {})", v["emf"]));
     }
     // Ultimate ASI Loader and/or .asi plugins (in the folder or a folder of it, as Smart Workshop's Scripts/): one
-    // package, a native mod placed in the game folder (game_files)
-    // A native.json in a subfolder is that mod. The .asi beside it is the same mod's other build, not a reason to
-    // take the whole package as only an .asi (drop_asi_copies_of_native_mods leaves the Kiln mod).
-    if !has_mod_manifest(dir) && !has_mod_subfolder(dir) && let Some(d) = crate::game_files::detect_asi_package(dir, depth, top_name) {
+    // package, a native mod placed in the game folder (game_files).
+    // A native.json anywhere under the package is that mod. The .asi beside it is the same mod's other build, not a
+    // reason to take the whole package as only an .asi (drop_asi_copies_of_native_mods leaves the Kiln mod).
+    if depth == 0 {
+        clear_asi_omit();
+    }
+    if !has_mod_manifest(dir) && !has_mod_subfolder(dir)
+        && let Some(d) = crate::game_files::detect_asi_package(dir, depth, top_name)
+        && !contains_native_json(dir)
+    {
         return d;
     }
     if let Some(d) = crate::engines::detect_folder(dir) {
@@ -829,9 +864,27 @@ pub(crate) fn native_settings_dirs(dir: &Path) -> Vec<PathBuf> {
     out
 }
 
+// An .asi import should leave these files out: each matching file with the native id it duplicates.
+// Set while a package is detected; take_asi_omit reads it when that package is imported.
+std::thread_local! {
+    static ASI_OMIT: std::cell::RefCell<std::collections::HashMap<String, Vec<(PathBuf, String)>>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+fn clear_asi_omit() {
+    ASI_OMIT.with(|m| m.borrow_mut().clear());
+}
+
+/// Files inside an `.asi` package that duplicate a Kiln native mod in the same import. Empty when this package
+/// was not a partial drop.
+pub(crate) fn take_asi_omit(dir: &Path) -> Vec<(PathBuf, String)> {
+    ASI_OMIT.with(|m| m.borrow_mut().remove(&dir.display().to_string()).unwrap_or_default())
+}
+
 /// `top_name`: what `dir` is called when it is an unpacked archive at depth 0 (detect_folder_at).
 /// An `.asi` in this package is the same mod as a `native.json` sibling when the native id matches the file, or a
-/// listed DLL has the same name or the same bytes.
+/// listed DLL has the same name or the same bytes. Only that file is left out. Another `.asi` in the same folder
+/// is still imported.
 fn drop_asi_copies_of_native_mods(items: &mut [Detected]) {
     let natives: Vec<(std::path::PathBuf, Option<String>)> = items.iter()
         .filter(|i| i.kind == DetectKind::Native)
@@ -845,33 +898,43 @@ fn drop_asi_copies_of_native_mods(items: &mut [Detected]) {
             continue;
         }
         let path = std::path::PathBuf::from(&item.path);
-        let Some((_, id)) = natives.iter().find(|(dir, id)| asi_is_native_mod(dir, id.as_deref(), &path)) else { continue };
-        let shown = id.as_deref().unwrap_or("its native mod");
-        item.kind = DetectKind::Unknown;
-        item.engine = None;
-        item.reason = format!("the same mod is already this package's Kiln native mod ({shown}): only that one is added, so it is not also loaded as an .asi");
+        let asis = asi_files_of(&path);
+        let mut matching: Vec<(PathBuf, String)> = Vec::new();
+        for asi in &asis {
+            if let Some(id) = natives.iter().find_map(|(dir, id)| {
+                asi_file_matches(dir, id.as_deref(), asi).then(|| id.clone().unwrap_or_else(|| "its native mod".into()))
+            }) {
+                matching.push((asi.clone(), id));
+            }
+        }
+        if matching.is_empty() {
+            continue;
+        }
+        if matching.len() == asis.len() {
+            let shown = &matching[0].1;
+            item.kind = DetectKind::Unknown;
+            item.engine = None;
+            item.reason = format!("the same mod is already this package's Kiln native mod ({shown}): only that one is added, so it is not also loaded as an .asi");
+            continue;
+        }
+        let key = item.path.clone();
+        ASI_OMIT.with(|m| m.borrow_mut().insert(key, matching));
     }
 }
 
-fn asi_is_native_mod(native_dir: &Path, native_id: Option<&str>, asi_item: &Path) -> bool {
-    let asis = asi_files_of(asi_item);
-    if asis.is_empty() {
-        return false;
+fn asi_file_matches(native_dir: &Path, native_id: Option<&str>, asi: &Path) -> bool {
+    let stem = asi.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+    if native_id.is_some_and(|id| id.eq_ignore_ascii_case(stem) || id.eq_ignore_ascii_case(&id_from_name(stem))) {
+        return true;
     }
     let dlls = crate::manifest::read_native(native_dir).map(|m| m.dlls).unwrap_or_default();
-    let dll_paths: Vec<std::path::PathBuf> = dlls.iter().map(|d| native_dir.join(d.replace('/', std::path::MAIN_SEPARATOR_STR))).collect();
-    for asi in &asis {
-        let stem = asi.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-        if native_id.is_some_and(|id| id.eq_ignore_ascii_case(stem) || id.eq_ignore_ascii_case(&id_from_name(stem))) {
+    let asi_hash = crate::hash::sha256_file(asi).ok().map(|h| h.0);
+    for dll in dlls {
+        let path = native_dir.join(dll.replace('/', std::path::MAIN_SEPARATOR_STR));
+        let same_name = path.file_stem().and_then(|s| s.to_str()).is_some_and(|s| s.eq_ignore_ascii_case(stem));
+        let same_bytes = asi_hash.as_ref().is_some_and(|a| crate::hash::sha256_file(&path).ok().is_some_and(|h| &h.0 == a));
+        if same_name || same_bytes {
             return true;
-        }
-        let asi_hash = crate::hash::sha256_file(asi).ok().map(|h| h.0);
-        for dll in &dll_paths {
-            let same_name = dll.file_stem().and_then(|s| s.to_str()).is_some_and(|s| s.eq_ignore_ascii_case(stem));
-            let same_bytes = asi_hash.as_ref().is_some_and(|a| crate::hash::sha256_file(dll).ok().is_some_and(|h| &h.0 == a));
-            if same_name || same_bytes {
-                return true;
-            }
         }
     }
     false

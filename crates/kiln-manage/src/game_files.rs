@@ -1292,6 +1292,24 @@ pub fn import_asi(ctx: &mut crate::engines::ImportCtx) -> Result<()> {
         std::fs::create_dir_all(&work).map_err(io_at(&work, "creating"))?;
         std::fs::copy(src, work.join(&file_name)).map_err(io_at(src, "copying"))?
     };
+    // A Scripts folder can hold this mod's .asi and someone else's. Only the matching file is left out.
+    if src.is_dir() {
+        for (file, id) in crate::library::take_asi_omit(src) {
+            let Ok(rel) = file.strip_prefix(src) else { continue };
+            let in_work = work.join(rel);
+            if !in_work.is_file() {
+                continue;
+            }
+            let len = std::fs::metadata(&in_work).map(|m| m.len()).unwrap_or(0);
+            if std::fs::remove_file(&in_work).is_ok() {
+                size = size.saturating_sub(len);
+                ctx.report.skipped.push(crate::library::Skipped {
+                    path: file.display().to_string(),
+                    reason: format!("the same mod is already this package's Kiln native mod ({id}): only that one is added, so it is not also loaded as an .asi"),
+                });
+            }
+        }
+    }
     let files = files_of(&work).ok_or_else(|| Error::new(ErrorCode::Refused, "links or too many files in the package"))?;
     let ual = ual_in(&work, &files);
     let asi: Vec<String> = files.iter().filter(|f| ext(f) == "asi").cloned().collect();
