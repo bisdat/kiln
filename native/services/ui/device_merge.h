@@ -543,7 +543,7 @@ class DeviceMerge {
             if (w.type == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2) {
                 const int i = in_chain(w.type);
                 if (i >= 0) {
-                    if (!already_on(w.type, w.offset)) plan.push_back({Where::chain, i, w.offset, name});
+                    if (!already_on(w.type, w.offset)) plan.push_back({Where::chain, i, w.offset, name});  // same type: same name
                 } else {
                     const uint32_t o = w.offset - kHeader;  // into VkPhysicalDeviceFeatures
                     if (!(game->pEnabledFeatures && bool_at(reinterpret_cast<const uint8_t*>(game->pEnabledFeatures), sizeof(VkPhysicalDeviceFeatures), o))) {
@@ -564,7 +564,7 @@ class DeviceMerge {
                 const VkStructureType other = is_core ? pr->ext : pr->core;
                 const uint32_t other_offset = is_core ? pr->ext_offset : pr->core_offset;
                 if (other && in_chain(other) >= 0) {
-                    if (!already_on(other, other_offset)) plan.push_back({Where::chain, in_chain(other), other_offset, name});
+                    if (!already_on(other, other_offset)) plan.push_back({Where::chain, in_chain(other), other_offset, field_name(other, other_offset)});
                     continue;
                 }
             }
@@ -602,7 +602,7 @@ class DeviceMerge {
                 added.push_back(put);
                 a = static_cast<int>(added.size()) - 1;
             }
-            plan.push_back({Where::added, a, put_offset, name});
+            plan.push_back({Where::added, a, put_offset, field_name(put, put_offset)});
         }
         if (!r.ok()) {
             r.notes.push_back("the game's device is created as the game asked: a required need is missing");
