@@ -280,9 +280,11 @@ impl<'a> Client<'a> {
         if !req.redirect_hosts.contains(&target.host) || self.policy.rule(&target.host).is_none() {
             return Err(Error::new(ErrorCode::Refused, format!("{} redirected to a host that is not allowed.", url.redacted())));
         }
-        // The second request starts from nothing: no credential, no cookie, no referrer, only what a download needs.
-        let mut clean: Vec<(String, String)> =
-            headers.into_iter().filter(|(k, _)| k.eq_ignore_ascii_case("accept") || k.eq_ignore_ascii_case("user-agent")).collect();
+        // The second request starts from nothing: no credential, no cookie, no referrer, only what a download needs
+        // (the type and encoding it accepts, the user agent).
+        let mut clean: Vec<(String, String)> = headers.into_iter()
+            .filter(|(k, _)| k.eq_ignore_ascii_case("accept") || k.eq_ignore_ascii_case("accept-encoding") || k.eq_ignore_ascii_case("user-agent"))
+            .collect();
         clean.retain(|(k, _)| !policy::is_credential_header(k));
         let second = self.wire(WireRequest { method: Method::Get, url: target.clone(), headers: clean, body: Body::Empty, max_response: req.max_response }, sink)?;
         if second.is_redirect() {

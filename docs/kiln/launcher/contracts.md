@@ -1048,9 +1048,11 @@ A client only: a dedicated server is `unsupported`.
   release asset: exactly one redirect, carrying nothing but the user agent, to GitHub's asset storage
   `release-assets.githubusercontent.com` or `objects.githubusercontent.com`). Any other redirect, a second one, or one to
   `http` fails the download (`refused`). Through `kiln_manage::net`: https on port 443, public addresses only, no proxy,
-  no cookie, no credential, the User-Agent `kiln/<version>` and no other header of the launcher's own; the real transport
-  gives up after 10 s without a connection and 60 s without a byte. What the host sees: the player's IP address, that user
-  agent and the file asked for.
+  no cookie, no credential; the headers are the User-Agent `kiln/<version>`, `Accept-Encoding: identity` (the file's own
+  bytes, so the size bound, the hash and a range count the same bytes; kept on the release asset's redirect), `Range`
+  when a download goes on, and the transport's `Accept: */*`, nothing else; the real transport gives up after 10 s
+  without a connection and 60 s without a byte. What the host sees: the player's IP address, that user agent and the
+  file asked for.
 - **The download** (`vendor_download`, a task). Each file goes to `<name>.part` in its version folder, is hashed as it
   arrives, may not pass the manifest's size (a longer answer stops it), and becomes `<name>` only when its size and
   SHA-256 are the manifest's; a file that differs is deleted (`hash_mismatch`, the message names the file and the host).

@@ -1,7 +1,9 @@
 //! Downloading a component into its version folder, checked file by file.
 //!
 //! - Only the manifest's URLs are fetched, through [`crate::net::Client`] with [`policy`]: https on port 443, public
-//!   addresses only, no proxy, no cookie, no credential, a User-Agent naming Kiln and its version and nothing else.
+//!   addresses only, no proxy, no cookie, no credential, a User-Agent naming Kiln and its version, `Accept-Encoding:
+//!   identity` (the file's own bytes, never a compressed answer), `Range` when it goes on, and nothing else of Kiln's
+//!   (the transport adds `Accept: */*`).
 //!   A redirect is followed once, only where [`super::manifest::redirect_hosts`] allows it (a release asset to GitHub's
 //!   asset storage); a raw file is never redirected.
 //! - Each file goes to `<name>.part` in the version folder, never more than the manifest's size (a longer answer
@@ -251,7 +253,9 @@ fn fetch_once(part: &Path, c: &Component, f: &VendorFile, client: &Client, meter
     }
     let start = have;
     let url = crate::net::policy::parse_url(&f.url)?;
-    let mut req = Request::get(&f.url).max_response(f.size - start).allow_redirect_to(redirect_hosts(&url.host));
+    // identity: the bytes on the wire are the file's, so the size bound, the hash and a range all count the same
+    // bytes (the real transport would otherwise ask for gzip, and a range of a compressed answer is not the file's)
+    let mut req = Request::get(&f.url).header("Accept-Encoding", "identity").max_response(f.size - start).allow_redirect_to(redirect_hosts(&url.host));
     if start > 0 {
         req = req.header("Range", &format!("bytes={start}-"));
     }

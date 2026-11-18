@@ -363,7 +363,8 @@ fn a_component_downloads_is_checked_and_gets_a_receipt() {
         assert_eq!(s.host, "raw.githubusercontent.com");
         assert_eq!(s.header("user-agent").unwrap(), format!("kiln/{}", kiln_manage::VERSION));
         let names: Vec<String> = s.headers.iter().map(|(k, _)| k.to_ascii_lowercase()).collect();
-        assert_eq!(names, ["host", "user-agent", "connection"], "only what a plain request needs");
+        assert_eq!(names, ["host", "accept-encoding", "user-agent", "connection"], "only what a plain request needs");
+        assert_eq!(s.header("accept-encoding"), Some("identity"), "the file's own bytes, never a compressed answer");
     }
     let after = lab.store().component_status(&c, &none);
     assert_eq!(after.state, VendorState::Downloaded);
@@ -559,6 +560,9 @@ fn redirects_go_only_to_github_asset_storage_and_only_from_a_release_asset() {
     assert_eq!(std::fs::read(lab.folder().join("a.zip")).unwrap(), data);
     let last = lab.server.seen().last().unwrap().clone();
     assert_eq!(last.host, "release-assets.githubusercontent.com");
+    let names: Vec<String> = last.headers.iter().map(|(k, _)| k.to_ascii_lowercase()).collect();
+    assert_eq!(names, ["host", "accept-encoding", "user-agent", "connection"], "the redirect's request keeps only what a download needs");
+    assert_eq!(last.header("accept-encoding"), Some("identity"));
 
     // anywhere else, or a second hop: refused
     let lab = Lab::new("redirect2");
