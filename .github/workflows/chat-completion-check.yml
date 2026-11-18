@@ -27,6 +27,11 @@ jobs:
           g++ -std=c++20 -O2 -g -Wall -Wextra -pthread \
             native/services/ui/tests/chat_keys_test.cpp -o /tmp/chat_keys_test
           /tmp/chat_keys_test
+      - name: Check completion text clear-to-empty and Unicode safety
+        run: |
+          g++ -std=c++20 -O2 -g -Wall -Wextra -Werror -pthread \
+            native/services/ui/tests/chat_completion_text_test.cpp -o /tmp/chat_completion_text_test
+          /tmp/chat_completion_text_test
       - name: Compile native and managed shared ABI layout
         run: |
           g++ -std=c++20 -O2 -Wall -Wextra -I native/core/abi \
