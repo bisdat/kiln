@@ -2153,7 +2153,9 @@ pub(crate) fn same_mod_elsewhere(root: &Path, kind: ModKind, src: &Path, dst: &P
 /// because that loader reads only its own folder and never the Library. Then the profile's enabled mods are copied
 /// there as `<folder>/<library id>/` with the marker, current copies are kept, Kiln's copies of mods switched off or
 /// gone from the profile are removed. Without that loader Kiln's copies of the kind are removed again (the plugin runs
-/// the mods from the Library and skips marked copies). Player folders are never touched.
+/// the mods from the Library and skips marked copies). EMF's Lua mods are the exception: EMF's lua mod reads their files
+/// only in emf/mods, so they are copied there with or without EMF's own loader ([`EMF_MODS`]). Player folders are never
+/// touched.
 ///
 /// When that loader is ShroudForge (Kiln hosts it, or its own loader is installed), Kiln's EML copies in its mods folder
 /// (the game-folder ones too) carry ShroudForge's switch: ShroudForge runs a package there only while its
@@ -2596,7 +2598,18 @@ fn place_with(dirs: &DataDirs, profile: &crate::profile::Profile, game_dir: &Pat
                 }
                 continue;
             }
-            if kind != ModKind::Native && root.is_none() && game_folder_of(dirs, kind, m).is_none() { continue; }
+            // EMF's Lua mods run where EMF's lua mod reads their files, `<game>/emf/mods/<folder>/` ([`emf_lua_root`]),
+            // with or without EMF's own loader
+            let lua = if root.is_none() && kind == ModKind::Emf && crate::library::is_emf_lua(&src) {
+                match emf_lua_root(game_dir, &m.id) {
+                    Ok(r) => Some(r),
+                    Err(e) => {
+                        if placing { rep.warnings.push(format!("{}: not placed: {}", tag(&m.id), e.message)); }
+                        continue;
+                    }
+                }
+            } else { None };
+            if kind != ModKind::Native && root.is_none() && lua.is_none() && game_folder_of(dirs, kind, m).is_none() { continue; }
             if kind == ModKind::Native {
                 for folder in crate::library::native_settings_dirs(&src) {
                     let dst = game_dir.join(EML_GAME_MODS).join(folder.file_name().expect("settings folder"));
@@ -2604,7 +2617,7 @@ fn place_with(dirs: &DataDirs, profile: &crate::profile::Profile, game_dir: &Pat
                 }
                 continue;
             }
-            match (game_folder_of(dirs, kind, m), &root) {
+            match (game_folder_of(dirs, kind, m), root.as_ref().or(lua.as_ref())) {
                 (Some(folder), _) => targets.push((m, src, game_dir.join(EML_GAME_MODS).join(folder), true)),
                 (None, Some(root)) => targets.push((m, src, root.join(&m.id), false)),
                 (None, None) => {}
@@ -3068,7 +3081,12 @@ pub fn game_folder_of(dirs: &DataDirs, kind: ModKind, m: &crate::profile::Profil
 /// Greeneye and Flame: Kiln's copy in `<game>/greeneye/<id>/` or `<game>/mods/<id>/` ([`run_folder`]) once [`place`]
 /// has made it for this version (its receipt and marker name it), else None (the Library entry: a folder the player put
 /// there, a play-once version, a switched-off mod).
+/// EMF: an enabled Lua mod's copy in `<game>/emf/mods/` ([`emf_lua_path`]); None for EMF's DLL mods, which run from the
+/// Library.
 pub fn game_path_of(dirs: &DataDirs, kind: ModKind, m: &crate::profile::ProfileMod, game: &Path) -> Option<PathBuf> {
+    if kind == ModKind::Emf {
+        return emf_lua_path(dirs, m, game);
+    }
     if let Some(folder) = run_folder(kind) {
         if !m.enabled || !is_game_folder_name(&m.id) { return None; }
         let dst = game.join(folder).join(&m.id);
@@ -3082,6 +3100,56 @@ pub fn game_path_of(dirs: &DataDirs, kind: ModKind, m: &crate::profile::ProfileM
     let r = crate::library::LibraryRef { kind, id: m.id.clone(), version: m.version.clone(), hash: m.hash.clone() };
     let src = crate::library::path_of(dirs, &r).ok()?;
     Some(same_mod_elsewhere(&root, kind, &src, &dst).unwrap_or(dst))
+}
+
+// ---- EMF Lua mods: always in <game>/emf/mods/<library id>/ ----
+
+/// EMF's mods folder, relative to the game: where EMF's `lua` mod reads the files of every Lua mod. It finds a Lua mod
+/// by the folder name EMF's core reports for it (`emf\mods\<folder>\`), never by a path, so a Lua mod in the Library
+/// does not run: activation copies an enabled one to `<game>/emf/mods/<library id>/` with its marker, with or without
+/// EMF's own loader ([`place`]), and the profile names that copy ([`game_path_of`]). EMF's DLL mods still run from the
+/// Library.
+pub const EMF_MODS: &str = "emf/mods";
+
+/// The folder Kiln's copy of the EMF Lua mod `id` goes into ([`EMF_MODS`]), when nothing stands in the way: no link on the
+/// way, and an id Windows can hold as a folder name.
+fn emf_lua_root(game: &Path, id: &str) -> Result<PathBuf> {
+    let root = game.join(EMF_MODS);
+    refuse_symlink_path(game, &root)?;
+    if !is_game_folder_name(id) {
+        return Err(Error::invalid("the id is no folder name Windows can hold, and EMF's lua mod reads Lua mods only from emf/mods"));
+    }
+    Ok(root)
+}
+
+/// Where the profile's enabled EMF Lua mod `m` runs: Kiln's copy `<game>/emf/mods/<id>/` once [`place`] has made it for
+/// this version (its receipt and marker name it), else the player's own folder of the same mod there, which activation
+/// leaves as it is and places nothing beside. None for an EMF DLL mod, a mod switched off, or a Lua mod with neither (the
+/// Library entry, which EMF's lua mod does not find; the activation's result says why it was not placed).
+fn emf_lua_path(dirs: &DataDirs, m: &crate::profile::ProfileMod, game: &Path) -> Option<PathBuf> {
+    if !m.enabled {
+        return None;
+    }
+    let r = crate::library::LibraryRef { kind: ModKind::Emf, id: m.id.clone(), version: m.version.clone(), hash: m.hash.clone() };
+    let src = crate::library::path_of(dirs, &r).ok()?;
+    if !crate::library::is_emf_lua(&src) {
+        return None;
+    }
+    let root = emf_lua_root(game, &m.id).ok()?;
+    let dst = root.join(&m.id);
+    let want = Marker { format: 1, kind: ModKind::Emf, id: m.id.clone(), version: m.version.clone(), hash: m.hash.clone() };
+    let have = marker(&dst);
+    if have.as_ref() == Some(&want) && placements(game).ok()?.iter().any(|r| r.path == dst && r.marker == want) {
+        return Some(dst);
+    }
+    // a player's folder: the one under the mod's id holding the same mod, or the same mod under another name
+    let id = manifest_id_raw(&src)?;
+    let same = |p: &Path| !p.is_symlink() && p.is_dir() && marker(p).is_none() && crate::library::is_emf_lua(p)
+        && manifest_id_raw(p).is_some_and(|o| o.eq_ignore_ascii_case(&id));
+    if same(&dst) {
+        return Some(dst);
+    }
+    same_mod_elsewhere(&root, ModKind::Emf, &src, &dst).filter(|p| same(p))
 }
 
 /// Kiln 0.2.0-dev.23 and earlier ran Greeneye mods from their Library entry, and a Greeneye mod writes its settings and

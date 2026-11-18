@@ -466,6 +466,68 @@ fn emf_manifest(dir: &Path) -> Option<(serde_json::Value, String)> {
     dir.join(&dll).is_file().then_some((v, dll))
 }
 
+/// The id an EMF DLL mod's mod.json gives (its DLL beside it), as [`detect`] reads it. found.rs looks for EMF's `lua`
+/// mod with it.
+pub(crate) fn emf_dll_mod_id(dir: &Path) -> Option<String> {
+    emf_manifest(dir).and_then(|(v, _)| v.get("id").and_then(|x| x.as_str()).map(str::to_string))
+}
+
+/// An EMF Lua mod, which EMF's `lua` mod runs (EMF's core takes a `main` as a script for a script host, and its `lua`
+/// mod hosts the `.lua` ones): mod.json gives an `id`, a `version` and a `main` naming a `.lua` file in the folder, and
+/// no `dll` (EMF refuses both); an `emf` it gives is a whole number. The manifest and the main file as mod.json names
+/// it. EMF's own release zip has nine (beastmaster, bounty, champion, grave, handover, kill_counter, life_skills,
+/// minimap, necromancer) in `game/emf/mods/`.
+pub(crate) fn emf_lua_manifest(dir: &Path) -> Option<(serde_json::Value, String)> {
+    let text = crate::manifest::read_text(&dir.join(EMF_MANIFEST)).ok()?;
+    let v = crate::jsonc::parse(text.trim_start_matches('\u{feff}')).ok()?;
+    if !v.is_object() || v.get("dll").is_some() {
+        return None;
+    }
+    let given = |k: &str| v.get(k).and_then(|x| x.as_str()).is_some_and(|s| !s.trim().is_empty());
+    if !given("id") || !given("version") || v.get("emf").is_some_and(|e| !e.is_i64() && !e.is_u64()) {
+        return None;
+    }
+    let main = v.get("main")?.as_str()?.to_string();
+    let rel = main.replace('\\', "/");
+    if !rel.to_ascii_lowercase().ends_with(".lua") || crate::bundle::safe_rel_path(&rel).is_err() {
+        return None;
+    }
+    // Windows (and EMF) find the file whatever the case of its name
+    rel_ignoring_case(dir, &rel).is_some().then_some((v, main))
+}
+
+/// Is `dir` an EMF Lua mod ([`emf_lua_manifest`])? Its Library entry is placed in `<game>/emf/mods/<id>/`, where EMF's
+/// `lua` mod reads its files (engine_mods::place).
+pub fn is_emf_lua(dir: &Path) -> bool {
+    emf_lua_manifest(dir).is_some()
+}
+
+/// Why a folder whose mod.json is EMF's (it gives `emf` or `main`; a `dll` alone is Greeneye's too) is no EMF mod Kiln
+/// can add, in plain words. None for any other mod.json.
+fn emf_problem(dir: &Path) -> Option<String> {
+    let text = crate::manifest::read_text(&dir.join(EMF_MANIFEST)).ok()?;
+    let v = crate::jsonc::parse(text.trim_start_matches('\u{feff}')).ok()?;
+    if v.get("emf").is_none() && v.get("main").is_none() {
+        return None;
+    }
+    let s = |k: &str| v.get(k).and_then(|x| x.as_str()).map(str::trim).filter(|x| !x.is_empty());
+    let main = s("main");
+    Some(if v.get("dll").is_some() && v.get("main").is_some() {
+        "an EMF mod whose mod.json names both a DLL and a main file, which EMF refuses".into()
+    } else if s("id").is_none() || s("version").is_none() {
+        "an EMF mod whose mod.json has no id or no version, which EMF needs".into()
+    } else if v.get("emf").is_some_and(|e| !e.is_i64() && !e.is_u64()) {
+        "an EMF mod whose mod.json gives \"emf\" as something other than a whole number, which EMF refuses".into()
+    } else if let Some(main) = main.filter(|m| !m.to_ascii_lowercase().ends_with(".lua")) {
+        format!("an EMF script mod whose main file ({main}) is not Lua: Kiln knows only EMF's Lua mods, so it cannot tell whether a host runs it")
+    } else if let Some(main) = main {
+        format!("an EMF Lua mod without its main file ({main})")
+    } else {
+        let dll = s("dll").map(str::to_string).unwrap_or_else(|| format!("{}.dll", s("id").unwrap_or_default()));
+        format!("an EMF mod without its DLL ({dll}): the source files of an EMF mod, or a copy missing its DLL")
+    })
+}
+
 /// Why a Kiln or native manifest can't be used, for the player: an id that is not a Kiln id gets its own sentence.
 fn manifest_problem(file: &str, message: &str) -> String {
     let id = message.split_once("id '").and_then(|(_, rest)| rest.split_once("' must match")).map(|(id, _)| id);
@@ -718,6 +780,11 @@ fn detect_folder_at(dir: &Path, depth: usize, top_name: Option<&str>) -> Detecte
         let s = |k: &str| v.get(k).and_then(|x| x.as_str()).map(str::to_string);
         return mk(DetectKind::Emf, s("id"), s("version"), s("name"), format!("an EMF mod (mod.json, EMF API {})", v["emf"]));
     }
+    if let Some((v, main)) = emf_lua_manifest(dir) {
+        let s = |k: &str| v.get(k).and_then(|x| x.as_str()).map(str::to_string);
+        let api = v.get("emf").map(|e| format!(", EMF API {e}")).unwrap_or_default();
+        return mk(DetectKind::Emf, s("id"), s("version"), s("name"), format!("an EMF Lua mod (mod.json, {main}{api}): EMF's lua mod runs it"));
+    }
     // Ultimate ASI Loader and/or .asi plugins (in the folder or a folder of it, as Smart Workshop's Scripts/): one
     // package, a native mod placed in the game folder (game_files).
     // A native.json anywhere under the package is that mod. The .asi beside it is the same mod's other build, not a
@@ -767,7 +834,7 @@ fn detect_folder_at(dir: &Path, depth: usize, top_name: Option<&str>) -> Detecte
     }
     // A package with an unknown/broken manifest is one item, never a bag of helper DLLs to execute.
     if dir.join(EMF_MANIFEST).is_file() || has_lua {
-        return mk(DetectKind::Unknown, None, None, None, crate::shroudforge::skip_reason(dir));
+        return mk(DetectKind::Unknown, None, None, None, emf_problem(dir).unwrap_or_else(|| crate::shroudforge::skip_reason(dir)));
     }
     // `mods/<name>/` with nothing but settings files: the settings of a DLL that reads them in the game folder
     // (Auto Loot Plus Lite: dinput8.dll + mods/auto-loot-plus/config.txt)
@@ -804,6 +871,11 @@ fn detect_folder_at(dir: &Path, depth: usize, top_name: Option<&str>) -> Detecte
     }
     // a folder of mods (an unpacked zip): what is inside
     let mut items = children(dir, depth, top_name);
+    // EMF's own download (EMF-<version>.zip): EMF installs what is in game/, never the Lua examples and the Lua starter
+    // beside it (its scripts/package.ps1), so they are not added either
+    if dir.join("game/emf/mods").is_dir() {
+        leave_out_emf_examples(dir, &mut items);
+    }
     // A package shaped like the game folder whose own DLL sits under a proxy name next to its `mods` folder (Auto Loot
     // Plus: dinput8.dll + mods/auto-loot-plus): the DLL is named after the package, not "dinput8.dll".
     if let (0, Some(n)) = (depth, top_name) {
@@ -850,6 +922,21 @@ fn detect_folder_at(dir: &Path, depth: usize, top_name: Option<&str>) -> Detecte
 }
 
 const SETTINGS_WORDS: &str = "holds only settings";
+
+/// In EMF's download (`dir` holds `game/emf/mods/`), the EMF Lua mods outside `game/` are left out, each with the reason:
+/// its `examples/lua/` and its starter `template_lua/`, which EMF does not install. Dropped on their own they are added.
+fn leave_out_emf_examples(dir: &Path, items: &mut [Detected]) {
+    let installed = dir.join("game");
+    for i in items.iter_mut().filter(|i| i.kind == DetectKind::Emf) {
+        let p = Path::new(&i.path);
+        if !p.starts_with(&installed) && p.is_dir() && is_emf_lua(p) {
+            i.kind = DetectKind::Unknown;
+            i.id = None;
+            i.version = None;
+            i.reason = "an example in EMF's download, which EMF does not install: to use it, add its folder on its own".into();
+        }
+    }
+}
 
 /// A folder with files and nothing but settings files (`.txt`, `.ini`, `.cfg`, `.json`, `.toml`, `.yaml`) in it.
 fn only_settings(dir: &Path) -> bool {

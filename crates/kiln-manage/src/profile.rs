@@ -1130,7 +1130,13 @@ pub const PROFILE_READER_FLAME_MODS: u32 = 3;
 
 /// The reader revision a Copy-mode path into the game folder outside kiln/ needs for mods of `kind`.
 fn reader_for_game_path(kind: ModKind) -> u32 {
-    if kind == ModKind::Flame { PROFILE_READER_FLAME_MODS } else { PROFILE_READER_GAME_MODS }
+    match kind {
+        ModKind::Flame => PROFILE_READER_FLAME_MODS,
+        // no core reads `../emf/mods/<id>` (native/core/src/profile.cpp): Copy mode names an EMF Lua mod's copy under
+        // kiln/profiles/, and EMF's lua mod reads the Lua files from Kiln's copy in emf/mods, the folder of that name
+        ModKind::Emf => u32::MAX,
+        _ => PROFILE_READER_GAME_MODS,
+    }
 }
 
 /// The profile.json reader revision of the runtime in the game: what the kiln-runtime.json of the bundle its install
@@ -2155,23 +2161,30 @@ pub fn write_once(dirs: &DataDirs, profile_id: &str, install: &GameInstall) -> R
                 format!("{why}; activate this profile to change them before playing (play-once keeps the active selection)")));
         }
     }
-    // EML/native companions a DLL reads in the game's mods folder are fixed copies there too.
+    // EML/native companions a DLL reads in the game's mods folder are fixed copies there too, and so are EMF's Lua mods
+    // in emf/mods (engine_mods::EMF_MODS)
     let in_game = |kind, mods: Vec<ProfileMod>| {
         let mut v: Vec<_> = mods.into_iter().filter(|m| match kind {
             ModKind::Eml | ModKind::Xhl => crate::engine_mods::game_folder_of(dirs, kind, m).is_some(),
             ModKind::Native => crate::library::path_of(dirs, &lref(kind, m)).is_ok_and(|p| !crate::library::native_settings_dirs(&p).is_empty()),
+            ModKind::Emf => crate::library::path_of(dirs, &lref(kind, m)).is_ok_and(|p| crate::library::is_emf_lua(&p)),
             _ => false,
         }).map(|m| (m.id, m.version, m.hash, m.enabled)).collect();
         v.sort_unstable();
         v
     };
-    for kind in [ModKind::Eml, ModKind::Native, ModKind::Xhl] {
+    for kind in [ModKind::Eml, ModKind::Native, ModKind::Xhl, ModKind::Emf] {
         let current = active.as_ref().and_then(|f| f.mods.folders(kind)).map(|list| list.iter().map(|m| ProfileMod {
             id: m.id.clone(), version: m.version.clone().unwrap_or_default(), hash: m.hash.clone().unwrap_or_default(), enabled: m.enabled,
         }).collect()).unwrap_or_default();
         if in_game(kind, profile.mods.list(kind).clone()) != in_game(kind, current) {
-            return Err(Error::new(ErrorCode::Unsupported, "Mods that a DLL reads in the game's mods folder (Auto Loot Plus, the XHL mods) are \
-                copies there; activate this profile to change them before playing (play-once keeps the active selection)"));
+            let what = if kind == ModKind::Emf {
+                "EMF's Lua mods run from Kiln's copies in emf/mods, where EMF's lua mod reads them"
+            } else {
+                "Mods that a DLL reads in the game's mods folder (Auto Loot Plus, the XHL mods) are copies there"
+            };
+            return Err(Error::new(ErrorCode::Unsupported, format!("{what}; activate this profile to change them before playing (play-once \
+                keeps the active selection)")));
         }
     }
     // Compare with verified placements, since the active profile may have unapplied edits.
