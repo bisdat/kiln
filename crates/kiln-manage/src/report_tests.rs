@@ -425,7 +425,7 @@ fn kiln_did_not_load() {
     // If the dinput8 override is already present, don't recommend setting it again.
     let prefix = f.root.join("pfx");
     std::fs::create_dir_all(&prefix).unwrap();
-    std::fs::write(prefix.join("user.reg"), "[Software\\Wine\\DllOverrides]\n\"dinput8\"=\"native,builtin\"\n").unwrap();
+    std::fs::write(prefix.join("user.reg"), "[Software\\\\Wine\\\\DllOverrides]\n\"dinput8\"=\"native,builtin\"\n").unwrap();
     i.install.as_mut().unwrap().prefix = Some(prefix);
     let r = build(&i);
     let n = finding(&r, "not-loaded");
