@@ -1,0 +1,198 @@
+// SPDX-License-Identifier: MIT
+// Issue #44 phase 1b. Internal, optional native-chat completion transport.
+// Uses the existing Kiln.Commands command tree and the requesting PLAYER's
+// permissions. No new mod API and no command execution over this channel.
+using System.Collections.Concurrent;
+using System.Text;
+
+namespace Kiln;
+
+internal sealed record ChatCompletionRequest(uint Id, string Text)
+{
+    internal const ushort MessageId = 1;
+    internal static void Encode(ChatCompletionRequest m, NetWriter w) => w.UInt32(m.Id).String(m.Text);
+    internal static ChatCompletionRequest Decode(ref NetReader r) => new(r.UInt32(), r.String(256));
+}
+
+internal sealed record ChatCompletionReply(uint Id, string Text, ushort Start, string[] Suggestions)
+{
+    internal const ushort MessageId = 2;
+    internal static void Encode(ChatCompletionReply m, NetWriter w)
+    {
+        w.UInt32(m.Id).String(m.Text).UInt16(m.Start).Byte((byte)Math.Min(m.Suggestions.Length, 20));
+        foreach (var suggestion in m.Suggestions.Take(20)) w.String(suggestion);
+    }
+
+    internal static ChatCompletionReply Decode(ref NetReader r)
+    {
+        var id = r.UInt32();
+        var text = r.String(256);
+        var start = r.UInt16();
+        var count = Math.Min((int)r.Byte(), 20);
+        var words = new string[count];
+        for (var i = 0; i < count; i++) words[i] = r.String(128);
+        return new ChatCompletionReply(id, text, start, words);
+    }
+}
+
+/// <summary>Pure bounded rules: never take user identity from a request message.</summary>
+internal static class ChatCompletionRules
+{
+    internal const int MaxTextBytes = 256, MaxSuggestions = 20;
+    internal static bool RequestText(string? text) =>
+        text is { Length: > 1 } &&
+        text[0] == '/' &&
+        Encoding.UTF8.GetByteCount(text) <= MaxTextBytes &&
+        !text.Any(c => char.IsControl(c));
+
+    internal static bool Candidate(string? word) =>
+        !string.IsNullOrEmpty(word) &&
+        Encoding.UTF8.GetByteCount(word) <= 128 &&
+        !word.Any(c => char.IsControl(c));
+
+    internal static bool Matches(ChatCompletionReply reply, uint id, string text) =>
+        reply.Id == id && reply.Text == text &&
+        reply.Start <= Encoding.UTF8.GetByteCount(text) &&
+        reply.Suggestions.Length <= MaxSuggestions &&
+        reply.Suggestions.All(Candidate);
+}
+
+/// <summary>
+/// Kiln-owned optional channel; one request at a time from the active native
+/// chat editor. Server commands are completed, NEVER executed. The server
+/// derives its source from NetContext.Player (or the actual hosted player).
+/// </summary>
+internal static class ChatCompletionNetwork
+{
+    private const string ChannelName = "kiln:chat";
+    private static readonly object Gate = new();
+    private static NetChannel? _channel;
+    private static readonly ConcurrentQueue<(EntityId Player, ChatCompletionRequest Request)> Local = new();
+    private static readonly Dictionary<uint, Queue<long>> Rates = new();
+    private static readonly object ReplyGate = new();
+    private static ChatCompletionReply? _reply;
+    private static uint _nextId;
+    private static bool _startedTick;
+
+    internal static void Start()
+    {
+        if (_channel is not null || !Network.Available) return;
+        lock (Gate)
+        {
+            if (_channel is not null) return;
+            var original = ModContext.CurrentMod;
+            ModContext.CurrentMod = null;
+            try
+            {
+                _channel = Network.Channel(ChannelName, "1", required: false)
+                    .Register<ChatCompletionRequest>(ChatCompletionRequest.MessageId,
+                        static (m, w) => ChatCompletionRequest.Encode(m, w),
+                        static (ref NetReader r) => ChatCompletionRequest.Decode(ref r),
+                        static (m, ctx) => Request(ctx.Player, m, ctx.Sender), NetDirection.ToServer)
+                    .Register<ChatCompletionReply>(ChatCompletionReply.MessageId,
+                        static (m, w) => ChatCompletionReply.Encode(m, w),
+                        static (ref NetReader r) => ChatCompletionReply.Decode(ref r),
+                        static (m, _) => Receive(m), NetDirection.ToClient);
+            }
+            catch (Exception e)
+            {
+                Backend.Current.Log(0, LogLevel.Warn, "chat completion channel unavailable: " + e.GetType().Name);
+            }
+            finally { ModContext.CurrentMod = original; }
+        }
+    }
+
+    // Called from Kiln.Ui's render frame (client). SendToServer is any-thread.
+    // A hosting client's local request uses the exact same tick-thread handler
+    // as a remote client but has no network peer to impersonate.
+    internal static uint Ask(string text)
+    {
+        if (!ChatCompletionRules.RequestText(text)) return 0;
+        Start();
+        var id = unchecked((uint)Interlocked.Increment(ref _nextId));
+        var request = new ChatCompletionRequest(id, text);
+        if (Client.IsHosting && Client.HasLocalPlayer)
+        {
+            Local.Enqueue((Client.LocalPlayer, request));
+            return id;
+        }
+        return _channel?.SendToServer(request) == true ? id : 0;
+    }
+
+    internal static bool TakeReply(out ChatCompletionReply reply)
+    {
+        lock (ReplyGate)
+        {
+            reply = _reply!;
+            _reply = null;
+            return reply is not null;
+        }
+    }
+
+    private static void Receive(ChatCompletionReply reply)
+    {
+        if (!ChatCompletionRules.Matches(reply, reply.Id, reply.Text)) return;
+        lock (ReplyGate) _reply = reply; // latest wins; UI validates id AND text
+    }
+
+    // Server tick: once at a time, no sleep or disk I/O.
+    internal static void StartServer()
+    {
+        if (_startedTick) return;
+        _startedTick = true;
+        ServiceTick.Add("kiln chat completion", OnServerTick);
+        Start();
+    }
+
+    private static void OnServerTick(in TickInfo tick)
+    {
+        if (_channel is null) Start();
+        while (Local.TryDequeue(out var local))
+            Request(local.Player, local.Request, null);
+    }
+
+    // Server handler runs on Kiln.Network's tick thread. No player identity,
+    // elevated source, or permission bit can be supplied on the wire.
+    private static void Request(EntityId player, ChatCompletionRequest request, NetPeer? peer)
+    {
+        if (player.IsNone || !ChatCompletionRules.RequestText(request.Text)) return;
+        uint key = peer?.Id ?? uint.MaxValue;  // local host has a distinct bucket
+        lock (Gate)
+        {
+            if (!Rates.TryGetValue(key, out var q)) Rates[key] = q = new Queue<long>();
+            var now = Environment.TickCount64;
+            while (q.Count > 0 && now - q.Peek() >= 1000) q.Dequeue();
+            if (q.Count >= 10) return;
+            q.Enqueue(now);
+            // Prune stale peer buckets occasionally (the queue is bounded).
+            if (Rates.Count > 128)
+                foreach (var old in Rates.Where(kv => kv.Value.Count == 0).Select(kv => kv.Key).ToArray())
+                    Rates.Remove(old);
+        }
+
+        try
+        {
+            var source = CommandSource.ForPlayer(player); // NEVER HostConsole or Console
+            var suggestions = Commands.Complete(source, request.Text, ChatCompletionRules.MaxSuggestions);
+            var start = suggestions.Start;
+            if (start < 0 || start > request.Text.Length) return;
+            var utf8Start = Encoding.UTF8.GetByteCount(request.Text.AsSpan(0, start));
+            var safe = suggestions.Suggestions.Where(ChatCompletionRules.Candidate).Take(20).ToArray();
+            var response = new ChatCompletionReply(request.Id, request.Text, (ushort)utf8Start, safe);
+            if (peer is null) Receive(response);
+            else _channel?.SendTo(peer, response);
+        }
+        catch (Exception e)
+        {
+            // No typed text, names or command payload in logs.
+            Backend.Current.Log(0, LogLevel.Warn, "chat completion refused: " + e.GetType().Name);
+        }
+    }
+
+    internal static void ResetForTests()
+    {
+        lock (Gate) Rates.Clear();
+        while (Local.TryDequeue(out _)) { }
+        lock (ReplyGate) _reply = null;
+    }
+}
