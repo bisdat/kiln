@@ -572,7 +572,27 @@ namespace {
 bool on_text(uint32_t ch) {
     // Tab's WM_CHAR is separate from the raw key. Swallow it only if the
     // shared router took that key for completion. Plain chat is unchanged.
-    if (ch == '\t' && g_keys.take_tab_character()) return true;
+    if (ch == '\t') {
+        if (g_keys.take_tab_character()) return true;
+        // Some Proton keyboard routes deliver WM_CHAR for Tab without a
+        // matching raw VK_TAB event (input.cpp skips WM_KEYDOWN once raw
+        // keyboard input was seen). Recover ONLY inside a focused native
+        // chat with live suggestions; never steal ordinary chat or Alt+Tab.
+        if (!g_ime_composing.load(std::memory_order_acquire) &&
+            !g_diagnose_on.load(std::memory_order_acquire)) {
+            uint32_t mods = 0;
+            if (GetKeyState(VK_CONTROL) & 0x8000) mods |= 1u;
+            if (GetKeyState(VK_SHIFT) & 0x8000) mods |= 2u;
+            if (GetKeyState(VK_MENU) & 0x8000) mods |= 4u;
+            if (g_keys.key(VK_TAB, mods, true)) {
+                g_keys.take_tab_character(); // this WM_CHAR was the Tab
+                static std::atomic<unsigned> reported{0};
+                if (reported.fetch_add(1, std::memory_order_relaxed) < 4)
+                    logf(KILN_LOG_INFO, "ui: chat completion: recovered Tab through WM_CHAR (focused suggestions)");
+                return true;
+            }
+        }
+    }
     if (chat_keys::inserts_text(ch) && g_history_on.load(std::memory_order_acquire) && g_keys.focused())
         g_manual_text_edit.store(true, std::memory_order_release);
     return false;
@@ -591,6 +611,13 @@ bool on_key(uint32_t vk, uint32_t mods, bool down, bool captured) {
     const bool kept = !captured && !composing &&
         (g_history_on.load(std::memory_order_acquire) || g_completion_on.load(std::memory_order_acquire)) &&
         g_keys.key(vk, mods, down);
+    if (down && vk == VK_TAB && g_completion_on.load(std::memory_order_relaxed)) {
+        static std::atomic<unsigned> reported{0};
+        if (reported.fetch_add(1, std::memory_order_relaxed) < 6)
+            logf(KILN_LOG_INFO,
+                 "ui: chat completion: Tab keydown mods=%u focus=%u captured=%u ime=%u consumed=%u",
+                 mods, g_keys.focused() ? 1u : 0u, captured ? 1u : 0u, composing ? 1u : 0u, kept ? 1u : 0u);
+    }
     if (down && (vk == VK_UP || vk == VK_DOWN) && g_trace_on.load(std::memory_order_relaxed) &&
         g_key_log_count.fetch_add(1) < 24)
         logf(KILN_LOG_INFO, "ui: chat history trace: key %s mods=%u focus=%u captured=%u ime=%u consumed=%u",
