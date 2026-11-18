@@ -1021,8 +1021,9 @@ const handlers: Record<string, Handler> = {
       const components = opts.components ? selectParts(b, g.kind, opts.components) : resolveParts(b, g.kind, prev);
       const deselected = opts.components ? deselectedFor(b, g.kind, components, prev) : prev?.side === g.kind ? prev.runtime.deselected ?? [] : [];
       const receipt: InstallReceipt = { ...baseReceipt, side: g.kind, installed: st?.receipt?.installed ?? now(), updated: now(), runtime: { version: b.version, sha256: b.sha256, components, deselected } };
-      // like the backend: Kiln files changed by hand are replaced, their copies kept in the install's backup
-      const changed = st?.modified ?? [];
+      // like the backend: Kiln files changed by hand are replaced, their copies kept in the install's backup; missing
+      // ones are put back (there is nothing to keep)
+      const changed = (st?.modified ?? []).filter((f) => !(st?.missingFiles ?? []).includes(f));
       runtime[gameId] = { installed: true, receipt, proxy: kilnProxy, modified: [], upgradeAvailable: null };
       emitGame(g.id, "status");
       const backup = changed.length ? `/home/player/.local/share/kiln/backups/install/${receipt.installId}/install-${now().replace(/[-:]/g, "").slice(0, 15)}Z` : null;
@@ -1900,6 +1901,13 @@ if (typeof window !== "undefined") (window as unknown as { __kilnMock?: unknown 
     edited.set(editKey(kind, id, e.versions[0].hash), change);
   },
   setModified: (files: string[], gameId = "client-steam") => { if (runtime[gameId]) runtime[gameId] = { ...runtime[gameId], modified: files }; emitGame(gameId, "status"); },
+  /** Receipt files gone from the game folder (an antivirus took them): missing, and changed as the backend counts them
+   *  (install::status). An install puts them back. */
+  setMissing: (files: string[], gameId = "client-steam") => {
+    const st = runtime[gameId];
+    if (st) runtime[gameId] = { ...st, modified: [...new Set([...st.modified, ...files])], missingFiles: files };
+    emitGame(gameId, "status");
+  },
   startOutside: mockStartOutside, setServer: mockSetServer, opened: () => [...openedUrls],
   setPreStart: (p: PreStart | null) => { preStart = p; },
   /** The next Play plays the owner's start of 13 Nov (mockProgress.ts), compressed and changed by `o`; null: off. */

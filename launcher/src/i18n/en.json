@@ -2628,6 +2628,25 @@
     },
     "partsMissing": "Parts missing",
     "partsMissingText": "Kiln {version} has parts this game does not: {parts}. Mods that need them do not load until they are in.",
+    "repair": "Repair",
+    "filesMissing": "Files missing",
+    "filesMissingText": {
+      "one": "{count} of Kiln's files is missing: {files}",
+      "other": "{count} of Kiln's files are missing: {files}"
+    },
+    "filesMissingAntivirus": {
+      "one": "An antivirus may have removed it.",
+      "other": "An antivirus may have removed them."
+    },
+    "filesMissingRepair": {
+      "one": "Repair puts it back.",
+      "other": "Repair puts them back."
+    },
+    "filesMissingNoBundle": {
+      "one": "Kiln {version} is not among the bundles below: update Kiln, or add its bundle, to put it back.",
+      "other": "Kiln {version} is not among the bundles below: update Kiln, or add its bundle, to put them back."
+    },
+    "antivirusHelp": "Antivirus help",
     "chainTitle": "What the game loads, in order",
     "chainLive": "Live, from this boot.",
     "chainNotLive": "Live statuses show after a start.",
