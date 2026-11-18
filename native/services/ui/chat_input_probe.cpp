@@ -27,6 +27,7 @@
 
 namespace kui {
 std::atomic<uint32_t> g_chat_completion_demand{0};
+uint32_t g_chat_completion_cleanup_frames = 0; // UI thread: let the overlay clear hover state after chat closes
 namespace {
 
 kiln::RawHook g_input;
@@ -647,10 +648,13 @@ void chat_input_frame_end(uintptr_t sys10) {
     {
         std::lock_guard lock(g_completion_mu);
         const auto& snap = g_completion_snapshot;
+        const bool visible = g_completion_on.load(std::memory_order_relaxed) && active &&
+            snap.focused && snap.has_rect && !snap.text.empty() && snap.text[0] == '/';
+        if (visible) g_chat_completion_cleanup_frames = 3;
+        else if (g_chat_completion_cleanup_frames > 0) --g_chat_completion_cleanup_frames;
         g_chat_completion_demand.store(
-            g_completion_on.load(std::memory_order_relaxed) && active &&
-            snap.focused && snap.has_rect && !snap.text.empty() && snap.text[0] == '/'
-                ? 1u : 0u, std::memory_order_relaxed);
+            visible || g_chat_completion_cleanup_frames > 0 ? 1u : 0u,
+            std::memory_order_relaxed);
     }
     g_editing_in_frame = false;
 }
