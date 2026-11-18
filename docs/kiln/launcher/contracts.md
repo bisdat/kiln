@@ -662,6 +662,7 @@ case ignored. Table and markers: `engines::ENGINES` ([engines.md](../engines.md)
 | `modloaderproxy` | `modloader-proxy.dll`, `chainloader.ini` | chain | load |
 | `ultimateasiloader` | export or text `IsUltimateASILoader` | chained as `..\xinput9_1_0.dll` next to the game (refused when that name is taken) | load |
 | `aldrich`, `livemap`, `sharedxp`, `reshade` | `aldrich` / `livemap.ini` / `xpshare.ini` / `reshade` | chain | load |
+| `optiscaler` | `optiscaler.ini`, `optiscaler.log` (checked before ReShade: OptiScaler can load ReShade); its other names `d3d12.dll`, `wininet.dll`, `winhttp.dll`, `OptiScaler.asi` are found by `engines::optiscaler_in`, never by `scan_proxies` (dev.29.18) | chain | load |
 | `chainloader` | `dinput8-chain.ini` | chain | load |
 | `nativefolders` | `native-loader.log` (CharosDX's loader of `mods\<mod>\native\*.dll`) | chain | load |
 | `unknown` | any other 64-bit PE DLL | chain | load |

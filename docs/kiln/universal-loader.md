@@ -82,7 +82,8 @@ Creative Mode's loader has no public source. Its facts come from the static note
 | `dbgcore.dll` / `umpdc.dll` / `cfgmgr32.dll` | Greeneye Loader |
 | `iphlpapi.dll` | Live Map (and Ember as an option) |
 | `steam_api64.dll` | shroudlink server (replaces Steam's own DLL: a Steam file check or game update puts the original back) |
-| `dxgi.dll` | ReShade |
+| `dxgi.dll` | ReShade, OptiScaler |
+| `version.dll`, `dbghelp.dll`, `winmm.dll`, `d3d12.dll`, `wininet.dll`, `winhttp.dll` | OptiScaler (any of them; found by its contents, Kiln's overlay steps aside for its menu: [ui.md](ui.md#optiscaler)) |
 | `xinput9_1_0.dll` | Ultimate ASI Loader, as EMF chains it |
 
 ## 2. Per engine: API surface, Kiln coverage, and the work to full parity
