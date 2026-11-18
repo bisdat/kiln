@@ -77,23 +77,29 @@ function DeckPresence({ onClose, name }: { onClose: () => void; name: string }) 
   );
 }
 
-/** Mounted by the shells while the switch is on: sends the mods on (the Play page's count, every kind) and the words
- *  in the launcher's language whenever they change. */
+/** Mounted by the shells while the Community page is shown: sends the words in the launcher's language (Rich
+ *  Presence's and the reply notification's) and, while Rich Presence is on, the mods on (the Play page's count, every
+ *  kind) whenever they change. */
 export function PresenceFacts() {
   const s = useCommunitySettings().data;
-  return s?.presence && s.shown ? <PresenceFactsOn /> : null;
+  if (!s?.shown) return null;
+  return s.presence ? <PresenceFactsOn /> : <FactsPush count={null} />;
 }
 
 function PresenceFactsOn() {
-  const t = useT();
   const { game } = useGame();
   const mods = useMods(game);
-  const count = mods.count ? mods.count.on : null;
+  return <FactsPush count={mods.count ? mods.count.on : null} />;
+}
+
+function FactsPush({ count }: { count: number | null }) {
+  const t = useT();
   const texts: api.PresenceTexts = {
     details: t("community.presence.details"), stateOne: t("community.presence.state.one"), stateOther: t("community.presence.state.other"),
     getKiln: t("community.presence.getKiln"), joinDiscord: t("community.presence.joinDiscord"),
   };
-  const key = JSON.stringify([count, texts]);
-  useEffect(() => { api.communityPresenceFacts(count, texts).catch(() => {}); }, [key]);
+  const notify: api.NotifyTexts = { title: t("community.notify.title"), detail: t("community.notify.detail"), open: t("community.posts.open") };
+  const key = JSON.stringify([count, texts, notify]);
+  useEffect(() => { api.communityPresenceFacts(count, texts, notify).catch(() => {}); }, [key]);
   return null;
 }

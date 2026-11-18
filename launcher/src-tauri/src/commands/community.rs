@@ -163,10 +163,14 @@ pub struct CommunityStatus {
 }
 
 #[tauri::command]
-pub async fn community_status() -> Result<CommunityStatus, Error> {
-    blocking(|| {
+pub async fn community_status(app: AppHandle) -> Result<CommunityStatus, Error> {
+    blocking(move || {
         let (d, s) = settings()?;
         let kept = if s.shown { stored(&d, &s) } else { None };
+        // signed in with the page shown: the posts are read every 5 minutes from now on (community/posts.rs)
+        if kept.is_some() {
+            crate::community::posts::start(&app);
+        }
         let mut h = HUB.lock().unwrap();
         if kept.is_none() {
             h.account = None;
@@ -427,11 +431,15 @@ pub(crate) fn version() -> &'static str {
 
 // ---------------------------------------------------------------- Rich Presence (step 3), reports (step 5), testers (step 8)
 
-/// The facts Rich Presence shows that only the window knows: how many mods are on (the Play page's count, every kind),
-/// and its words in the launcher's language.
+/// What only the window knows: how many mods are on (the Play page's count, every kind) for Rich Presence, and the
+/// words in the launcher's language (Rich Presence's lines, the reply notification's).
 #[tauri::command]
-pub async fn community_presence_facts(mods: Option<u32>, texts: Option<kiln_manage::community::presence::PresenceTexts>) -> Result<(), Error> {
+pub async fn community_presence_facts(mods: Option<u32>, texts: Option<kiln_manage::community::presence::PresenceTexts>,
+    notify: Option<crate::community::posts::NotifyTexts>) -> Result<(), Error> {
     crate::community::presence::facts(mods, texts);
+    if let Some(n) = notify {
+        crate::community::posts::set_texts(n);
+    }
     Ok(())
 }
 

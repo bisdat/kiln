@@ -2452,8 +2452,11 @@ export const communitySignInCancel = (id: string) => call<null>("community_signi
 export const communitySignOut = (forget: boolean, posts = false) => call<null>("community_signout", { forget, posts });
 /** The account and membership again (the page opens, "I've joined"). */
 export const communityCheckMember = () => call<CommunityAccount | null>("community_check_member");
-/** What only the window knows for Rich Presence: the mods on (the Play page's count) and the words. */
-export const communityPresenceFacts = (mods: number | null, texts: PresenceTexts) => call<null>("community_presence_facts", { mods, texts });
+/** The reply notification's words in the launcher's language. */
+export interface NotifyTexts { title: string; detail: string; open: string }
+/** What only the window knows: the mods on (the Play page's count; null when Rich Presence is off) and the words of
+ *  Rich Presence and of the reply notification. */
+export const communityPresenceFacts = (mods: number | null, texts: PresenceTexts, notify?: NotifyTexts) => call<null>("community_presence_facts", { mods, texts, notify });
 export const communityReportPrepare = (target: LogTarget | null, from: SendFrom) => call<ReportPreview>("community_report_prepare", { target, from });
 export const communityReportSend = (prepared: string, draft: ReportDraft) => call<SupportPost>("community_report_send", { prepared, draft });
 export const testerStatus = () => call<TesterStatus>("tester_status");
