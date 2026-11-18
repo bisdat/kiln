@@ -13,7 +13,7 @@ namespace {
 std::mutex mu;
 overlay_guard::Record record;
 std::wstring path;
-bool active = false, said_error = false, began_written = false, idle_done = false;
+bool active = false, said_error = false, error_unresolved = false, began_written = false, idle_done = false;
 // set (under mu) by the overlay's first draw attempt of this process, before any of its work: from then on only the
 // presented frame (or a normal exit) completes the start, never the idle timer
 std::atomic<bool> draw_seen{false};
@@ -25,10 +25,13 @@ constexpr DWORD kRanFineMs = 60'000;
 // to count as fine (overlay_guard::idle), and how many frames it must present in that time (not hung).
 constexpr DWORD kIdleProofMs = 30'000;
 constexpr uint64_t kIdleProofPresents = 60;
-void error() {
+// what: the step that failed ("read", "write", "replace", ...); code: its Win32 error, 0 when there is none.
+void error(const char* what = "update", unsigned long code = 0) {
+    error_unresolved = true;
     if (!said_error) {
         said_error = true;
-        logf(KILN_LOG_WARN, "ui: overlay crash guard could not read or write kiln/state/overlay-start.guard; continuing without that update");
+        logf(KILN_LOG_WARN, "ui: overlay crash guard could not %s kiln/state/overlay-start.guard (Windows error %lu); continuing without that update",
+             what, code);
     }
 }
 std::filesystem::path api_path(int kind) {
@@ -72,16 +75,24 @@ DWORD WINAPI flush_record(void*) {
 // The record's file operations (overlay_guard_file.h): nothing is forced to the disk on the caller's thread, the
 // game's present call for most stages.
 struct GuardFs {
+    const char* failed = "write";
+    DWORD code = 0;
+    bool fail(const char* what) { failed = what; code = GetLastError(); return false; }
     bool write_new(const std::wstring& file, std::string_view text) {
         HANDLE h = CreateFileW(file.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-        if (h == INVALID_HANDLE_VALUE) return false;
+        if (h == INVALID_HANDLE_VALUE) return fail("create the temporary file of");
         DWORD n = 0;
         const bool ok = WriteFile(h, text.data(), DWORD(text.size()), &n, nullptr) && n == text.size();
+        if (!ok) fail("write the temporary file of");
         CloseHandle(h);
         return ok;
     }
     bool replace(const std::wstring& from, const std::wstring& to) {
-        return MoveFileExW(from.c_str(), to.c_str(), MOVEFILE_REPLACE_EXISTING) != 0;
+        // Another process reading the record without delete sharing (a scanner, a backup) makes the rename fail for
+        // that moment; one more try after a short wait (only on that failure: a normal save never waits).
+        if (MoveFileExW(from.c_str(), to.c_str(), MOVEFILE_REPLACE_EXISTING)) return true;
+        Sleep(20);
+        return MoveFileExW(from.c_str(), to.c_str(), MOVEFILE_REPLACE_EXISTING) != 0 || fail("replace");
     }
     void flush_later(const std::wstring&) {
         if (flush_queued.exchange(true)) return;
@@ -90,7 +101,11 @@ struct GuardFs {
 };
 void save() {
     GuardFs fs;
-    if (!overlay_guard::write_record(fs, path, overlay_guard::encode(record))) error();
+    if (!overlay_guard::write_record(fs, path, overlay_guard::encode(record))) { error(fs.failed, fs.code); return; }
+    if (error_unresolved) {
+        error_unresolved = false;
+        logf(KILN_LOG_INFO, "ui: overlay crash guard: kiln/state/overlay-start.guard written after the earlier failure; the guard is up to date again");
+    }
 }
 // A guarded start earns the next attempt by RUNNING, not by exiting cleanly: whether a client's normal quit reaches the
 // process's exit call with code 0 is not confirmed (kiln_api.h, on_unload), so a rule that waits for a clean exit
@@ -146,15 +161,17 @@ bool overlay_guard_start() noexcept {
         };
         apply_mode(false);
         auto dir = api_path(KILN_PATH_STATE);
-        if (dir.empty()) { error(); return !overlay_drawing_on(); }
+        if (dir.empty()) { error("find the folder of", 0); return !overlay_drawing_on(); }
         path = (dir / L"overlay-start.guard").wstring();
         char b[513]; DWORD n = 0;
         HANDLE h = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, 0, nullptr);
         if (h != INVALID_HANDLE_VALUE) {
             const bool ok = ReadFile(h, b, sizeof b, &n, nullptr);
+            const DWORD read_error = ok ? 0 : GetLastError();
             CloseHandle(h);
-            if (!ok || !overlay_guard::parse(std::string(b, n), record)) error();
-        } else if (GetLastError() != ERROR_FILE_NOT_FOUND && GetLastError() != ERROR_PATH_NOT_FOUND) error();
+            if (!ok) error("read", read_error);
+            else if (!overlay_guard::parse(std::string(b, n), record)) error("understand", 0);
+        } else if (const DWORD e = GetLastError(); e != ERROR_FILE_NOT_FOUND && e != ERROR_PATH_NOT_FOUND) error("open", e);
         if (!record.modules.empty() && record.modules != wrapper_set)
             logf(KILN_LOG_INFO, record.wrapper_retry
                 ? "ui: overlay crash guard: graphics wrappers changed again before an overlay frame succeeded; keeping earlier startup failures"
