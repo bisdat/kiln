@@ -49,7 +49,7 @@ the enabled implementation; no personal API key flow is supported. See [catalog.
 | `/logs` | the support report above the tabs ("Save report...", "Copy summary": [support-report.md](support-report.md)); kiln.log, game log, proxy.log, mod logs (follow, filter), crash reports, tick stats (sparklines); Engines: one line per engine plugin that wrote `kiln/state/<engine>.json` or has mods in the active profile (EML `phase`, ShroudForge `mode`, `reason`, each mod's state and reason; ShroudForge's own per-mod runtime report while it is current, never shown as proof of a gameplay effect; the XHL-Core check when the profile has XHL companions or the host was recognized), plus read-only shared archive backup guidance | `logs_*`, `report_save`, `report_summary`, `engine_status`, `eml_backup` |
 | `/saves` | save files, backups, manual backup, restore (refused while running; Steam Cloud hint), delete | `saves_*` |
 | `/editor` | the Save Editor (lazy chunk) | `editor_*`, `kiln-asset://` |
-| `/settings` | **Profiles** (`components/ProfilesSettings.tsx`; `#profiles`): every saved profile with its mod count over every kind and the server it is for, which one is loaded, Load (the main list then shows it), "Save current as..." (`profile_create` with the loaded one as `copyFrom`; the loaded one stays loaded), Rename, Folders and notes (name, mod data, drop-in folders, notes), Delete (typed; never a loaded one), and "No profile" (the game folder decides: `profile_deactivate`); the modpack flow's "Server: <name>" profiles are listed too. **Library** (`components/LibrarySettings.tsx`): how many mods and versions, the size on disk, its folder (Open), Clean up (every version no profile and no game's profile file uses, one `library_remove_many`; typed; never a version kept for a roll back), and (dev.29) the earlier versions an update kept for a roll back, each with its size, its settings files and Remove ([catalog.md](catalog.md), "Rolling back an update"). Launcher settings also hold "Earlier versions to keep" (`keepVersions`, 0 to 5, default 1). Launcher settings ("Switch new mods on", default on; "Type a mod's name to remove it", default off), Appearance ("Animated fire": off draws the plain Play button), games (detect/add/forget; each row says "custom folder" for one no Steam library knows, how it starts with the start dialog behind it, and an unknown game build), Nexus Mods in enabled builds only (OAuth account sign-in/sign-out and "Mod Manager Download links"; `components/NexusSettings.tsx`), Kiln's `kiln.json` via SchemaForm (without `ui.language` and `graphics.*`); (dev.29.18) **Graphics** (`components/GraphicsSettings.tsx`, `#graphics`, a client only): kiln.json's `graphics` section (Kiln's frame cap, DLSS preset and render scale, readout; the same document and `config_kiln_*` calls as the kiln.json card), then one line per tool next to which Kiln's frame cap and DLSS settings step aside (`GameStatus.graphicsStepAside`: "OptiScaler is installed (dxgi.dll): Kiln's frame cap and DLSS settings step aside; the readout still works.") | `profile_*`, `library_unused`, `library_remove_many`, `app_settings_*`, `game_*`, `config_kiln_*`, `nexus_account`, `nexus_sign_in`, `nexus_sign_out`, `nexus_handler_*` |
+| `/settings` | **Profiles** (`components/ProfilesSettings.tsx`; `#profiles`): every saved profile with its mod count over every kind and the server it is for, which one is loaded, Load (the main list then shows it), "Save current as..." (`profile_create` with the loaded one as `copyFrom`; the loaded one stays loaded), Rename, Folders and notes (name, mod data, drop-in folders, notes), Delete (typed; never a loaded one), and "No profile" (the game folder decides: `profile_deactivate`); the modpack flow's "Server: <name>" profiles are listed too. **Library** (`components/LibrarySettings.tsx`): how many mods and versions, the size on disk, its folder (Open), Clean up (every version no profile and no game's profile file uses, one `library_remove_many`; typed; never a version kept for a roll back), and (dev.29) the earlier versions an update kept for a roll back, each with its size, its settings files and Remove ([catalog.md](catalog.md), "Rolling back an update"). Launcher settings also hold "Earlier versions to keep" (`keepVersions`, 0 to 5, default 1). Launcher settings ("Switch new mods on", default on; "Type a mod's name to remove it", default off), Appearance ("Animated fire": off draws the plain Play button), games (detect/add/forget; each row says "custom folder" for one no Steam library knows, how it starts with the start dialog behind it, and an unknown game build), Nexus Mods in enabled builds only (OAuth account sign-in/sign-out and "Mod Manager Download links"; `components/NexusSettings.tsx`), Kiln's `kiln.json` via SchemaForm (without `ui.language` and `graphics.*`); (dev.29.18) **Graphics** (`components/GraphicsSettings.tsx`, `#graphics`, a client only): kiln.json's `graphics` section (Kiln's frame cap, DLSS preset and render scale, readout; the same document and `config_kiln_*` calls as the kiln.json card), then one line per tool next to which Kiln's frame cap and DLSS settings step aside (`GameStatus.graphicsStepAside`: "OptiScaler is installed (dxgi.dll): Kiln's frame cap and DLSS settings step aside; the readout still works."); (dev.29, preview `upscalers`) **Upscalers** right under it (`components/UpscalerSettings.tsx`, `#upscalers`, a client only; section "Upscalers" below) | `profile_*`, `library_unused`, `library_remove_many`, `app_settings_*`, `game_*`, `config_kiln_*`, `nexus_account`, `nexus_sign_in`, `nexus_sign_out`, `nexus_handler_*`, `vendor_*` |
 | `/about` | versions, CREDITS.md, "Theme and design: frostdev"; Updates (the state, Check now), in the Nexus Mods build "New versions: Nexus Mods" | `app_info` |
 | `/servers` | every server, one line each (or a redirect to the first server when there is no `ServersPage.tsx`) | `server_list` |
 
@@ -773,6 +773,47 @@ JSONC edits (comments kept, range refused); zstd round trip; play-once render/de
 Exit 0 when every check passes; the JSON report lists each check with its detail. Release builds are GUI programs on
 Windows: `--selftest` attaches to the console it was started from, so `kiln-launcher.exe --selftest --out r.json` prints
 there too (cmd does not wait for GUI programs; `start /wait` does).
+
+## Upscalers (preview, dev.29)
+Settings, **Upscalers**, right under Graphics (`src/components/UpscalerSettings.tsx`; API `src/api/vendor.ts`; backend
+`src-tauri/src/commands/vendor.rs` on `kiln_manage::vendor`; contract [contracts.md](contracts.md) section 5.15; what the
+files are for: [../graphics.md](../graphics.md) "Upscaler files"). Vendor upscaler files (AMD FSR 2.4.0, Intel XeSS
+3.0.2) that Kiln downloads into the game's `kiln/vendor/` only when the player asks. Nothing in the game uses them yet,
+so the section is a preview:
+- **The preview switch.** Off by default: the section is not there and `vendor_download` is refused. On: settings.json
+  (in the data folder) `"preview": ["upscalers"]`, written while the launcher is closed (a running launcher writes its
+  own settings back), or `KILN_LAUNCHER_PREVIEW=upscalers` for one start. `app_info.preview` says which previews are on;
+  Settings never writes the list. Browser mock: `?preview=upscalers`.
+- **Texts** (`settings.upscalers.*` in `src/i18n/en.json`). Title "Upscalers", a "Preview" badge, the line "Vendor upscaler
+  files. Kiln downloads them only when you ask, into the game's kiln/vendor folder.", and under it "Kiln can run these
+  behind the game's FSR 3 option. That arrives in a later update: until then, downloading them changes nothing in the
+  game." Then one row per component: its name and version, a state word, its sentence from the manifest, and one line:
+  - not downloaded: "70 MB from raw.githubusercontent.com." and **Download** (an interrupted download: "… arrived
+    already: the download goes on from there." and **Continue download**);
+  - downloading: a progress bar, the percentage, "Downloading <file>: <done> of <size>", **Cancel**;
+  - downloaded: "Version 2.4.0, 70 MB on disk." and **Remove** (a dialog: "Kiln deletes kiln/vendor/amd/2.4.0 (70 MB) from
+    the game folder. You can download it again later.");
+  - update available: "Version <old> is downloaded. Version <new> is out: <size> from <host>.", **Update**, **Remove**;
+  - not available in this build: "This build of Kiln does not have the files' checksums yet, so it does not download
+    them." (a manifest file not pinned), no button;
+  - failed: the reason in a red line (the task's error, or "<file> of it is missing or changed. Download it again."),
+    **Try again** / **Download again**, and Remove when files are there.
+- **The licence dialog** opens on Download when the player has not agreed to that vendor's text yet: "Download <name>",
+  then What (the manifest's sentence), Size ("70 MB, 3 files"), From ("raw.githubusercontent.com: AMD's own repository
+  on GitHub, version 2.4.0"), Goes to ("kiln/vendor/amd/2.4.0 in the game folder"), the licence's name with "Where this
+  text is" (opens the vendor's page in the browser), "AMD licenses these files under the MIT licence. Here is its text in
+  full. Read it before you agree.", the text in a scrolling box, and the small print "Kiln asks raw.githubusercontent.com
+  for these files and sends nothing else. raw.githubusercontent.com sees your IP address and a user agent that names Kiln
+  and its version." Buttons: Cancel, **I agree, download** (passes the hash of the text shown). Later downloads of the
+  same vendor's text start from the row, whose line already names the size and the host.
+- A download is a task (`kiln://task`, the header's tray too); the row keeps its task id for this window. Done: a toast
+  "<name> is downloaded" ("Kiln checked every file. They are in <folder> in the game folder."). The status is asked again
+  when the page comes back (no polling).
+- Tests: `unit/upscalers.test.tsx` (the row of every state), `tests/upscalers.spec.ts` (mock: hidden without the
+  preview, available, not pinned, the dialog, agree, progress, cancel, downloaded, remove, a failure and Try again, an
+  update, missing files, a changed licence). Mock: `src/api/mockVendor.ts` (`?vendor=unpinned|pinned`,
+  `__kilnVendorMock`).
+- No Deck screen yet ([../graphics.md](../graphics.md) says what one would take).
 
 ## Known limits
 - Profiles/library depend on kiln-manage M3; until then those screens show `not_implemented` (or mock data in dev
