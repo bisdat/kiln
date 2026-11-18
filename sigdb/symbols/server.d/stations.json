@@ -468,6 +468,15 @@
         "stations/stack.size",
         "stations/recipe.water_charges"
       ]
+    },
+    "stations.craft_sources": {
+      "comment": "GitHub #68 step 2: opted-in station outputs are the last source of the recipe function's payment (InventoryPay called from RecipeApply). The take is gems/PayMaterial, per item, after the owner and the base's Magic chests. docs/re/stations.md section 10.",
+      "symbols": [
+        "rules/InventoryPay",
+        "rules/RecipePaid",
+        "gems/PayMaterial",
+        "stations/BaseStockForPlayer"
+      ]
     }
   }
 }

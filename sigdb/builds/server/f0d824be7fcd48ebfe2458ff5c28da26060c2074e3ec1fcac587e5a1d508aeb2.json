@@ -11,7 +11,7 @@
   "declared": {
     "symbols": 590,
     "constants": 684,
-    "features": 183
+    "features": 184
   },
   "features": {
     "abilities.attributes": true,
@@ -167,6 +167,7 @@
     "spawn.entities": true,
     "spawn.templates": true,
     "stations.control": true,
+    "stations.craft_sources": true,
     "stations.events": true,
     "stations.fill": true,
     "stations.output_sources": true,
@@ -2989,6 +2990,7 @@
       },
       "features": {
         "stations.control": "lab",
+        "stations.craft_sources": "static",
         "stations.events": "lab",
         "stations.fill": "lab",
         "stations.output_sources": "static",

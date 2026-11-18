@@ -11,7 +11,7 @@
   "declared": {
     "symbols": 778,
     "constants": 869,
-    "features": 226
+    "features": 228
   },
   "features": {
     "abilities.attributes": true,
@@ -189,6 +189,8 @@
     "spawn.entities": true,
     "spawn.templates": true,
     "stations.control": true,
+    "stations.craft_sources": true,
+    "stations.craft_ui": true,
     "stations.events": true,
     "stations.fill": true,
     "stations.output_sources": true,
@@ -3691,10 +3693,21 @@
       },
       "features": {
         "stations.control": "static",
+        "stations.craft_sources": "static",
         "stations.events": "static",
         "stations.fill": "static",
         "stations.output_sources": "static",
         "stations.read": "static"
+      }
+    },
+    "stations-craft-ui": {
+      "level": "static",
+      "date": "2026-11-17",
+      "evidence": "resolved offline (tools/sigport/build_record.py)",
+      "symbols": {},
+      "constants": {},
+      "features": {
+        "stations.craft_ui": "static"
       }
     },
     "steamguard": {
