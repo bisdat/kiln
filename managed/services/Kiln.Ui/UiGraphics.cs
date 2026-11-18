@@ -249,6 +249,13 @@ internal static unsafe class GraphicsTools
         return t->GraphicsStatusFn(&st) == UiNative.Ok ? st : null;
     }
 
+    /// <summary>Tests and the preview: this setting in use at once (kiln.ui is told), not saved.</summary>
+    internal static void Use(GraphicsSettings s)
+    {
+        _current = s.Clamped();
+        Apply();
+    }
+
     /// <summary>The player changed a setting on the Graphics page: applied at once, saved to kiln.json half a second after the
     /// last change (a worker).</summary>
     internal static void Change(GraphicsSettings s)
