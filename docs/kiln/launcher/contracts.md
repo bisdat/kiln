@@ -130,6 +130,7 @@ Root: `$KILN_DATA_DIR`, else the folder the pointer `data-folder.json` in the de
 | `logs/launcher.log` | the launcher's own log |
 | `logs/game-start-<installId>.log` | (dev.29.17) the umu-run, Proton or Wine output of the last direct start of that install (written again at every one; the support report carries it) |
 | `state/software-render.json` | Linux: there, a start without an override draws without the GPU (`{format, why, at, version}`; written by the launcher when its page did not start, or by Settings; [app.md](app.md), "Drawing without the GPU") |
+| `state/webkit-sandbox.json` | (dev.29.18) Linux: there, a start without an override turns WebKit's process sandbox off (sets `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1` before GTK and WebKit start; a value the player set stays). `{format, why, at, version}`, the same shape as `software-render.json`; written by Settings, or after the player's click in one of the launcher's messages (by the restart it starts, once the beta copy's gate is open); never without such a choice. `--webkit-sandbox` / `--no-webkit-sandbox` and `KILN_LAUNCHER_WEBKIT_SANDBOX=on\|off` win over it ([app.md](app.md), "WebKit's sandbox (Linux)") |
 | `state/desktop-entry.json` | Linux AppImage: there when the player turned "Kiln Launcher in the app menu" off (`{format, on: false, at}`); absent, every start writes or updates the app menu entry and icons ([app.md](app.md), "Taskbar icon and app menu") |
 | `update.json` | the self-update's state: `{format, skipped, checked, updated: {from, to, at, source, notes}}` (releasing.md) |
 | `servers/<id>.json` | launcher records of servers that are not kilnctl instances (steam, windows, remote) and renames (`ServerInstance`) |
@@ -1212,9 +1213,10 @@ Shared types (TypeScript names, defined in `commands.ts`; Rust in kiln-manage un
 
 | File | Command | Arguments | Returns |
 |---|---|---|---|
-| app | `app_info` | - | `AppInfo` {version, kiln, platform, arch, dataDir, commit, mock, noWebgl, deck: `DeckInfo`, distribution: "direct" \| "nexus", render?: `RenderInfo` (Linux), desktop?: `DesktopInfo` {on, installed, foreign, file} (Linux AppImage)} |
+| app | `app_info` | - | `AppInfo` {version, kiln, platform, arch, dataDir, commit, mock, noWebgl, deck: `DeckInfo`, distribution: "direct" \| "nexus", render?: `RenderInfo` (Linux), desktop?: `DesktopInfo` {on, installed, foreign, file} (Linux AppImage), sandbox?: `SandboxInfo` (Linux, dev.29.18)} |
 | app | `app_started` | - | null (the page's first screen is up; once per start; ends the Linux render watchdog) |
 | app | `app_render_set` | software: boolean | `RenderInfo` (sets or clears `state/software-render.json` for the next start; `unsupported` off Linux) |
+| app | `app_sandbox_set` | on: boolean | `SandboxInfo` (dev.29.18; on removes `state/webkit-sandbox.json`, off writes it, for the next start; `unsupported` off Linux) |
 | app | `app_desktop_set` | on: boolean | `DesktopInfo` (on: writes `kiln-launcher.desktop` and the icons, replacing a file of that name Kiln did not write; off: removes Kiln's, and `state/desktop-entry.json` keeps it off; `unsupported` outside a Linux AppImage) |
 | app | `app_settings_get` | - | `LauncherSettings` |
 | app | `app_settings_set` | settings: LauncherSettings | `LauncherSettings` |
@@ -1404,7 +1406,14 @@ before Kiln was reinstalled is active again), libraryOnly: string | null (why th
 Launcher-only types (Rust in `launcher/src-tauri/src/commands/app.rs` and `launch.rs`): `AppInfo` (`noWebgl`:
 KILN_LAUNCHER_NO_WEBGL=1 for this start, or the launcher draws without the GPU; `render` (Linux only): `RenderInfo {mode:
 "gpu"|"software", why: "default"|"marker"|"restart"|"environment"|"argument", marker: boolean, markerWhy?: string}`
-(`src-tauri/src/render.rs`); `distribution`: "direct" for the frostdev.io/GitHub build that updates itself,
+(`src-tauri/src/render.rs`); `sandbox` (Linux only, dev.29.18): `SandboxInfo {want: "on"|"off", why:
+"default"|"marker"|"restart"|"environment"|"argument", marker: boolean, markerWhy?: string, webkit: "on"|"off"|"unused"
+(what WebKit does in this start: its GTK 3 API runs the sandbox only with WEBKIT_FORCE_SANDBOX=1), webkitWhy: string,
+yours?: string (the player's own WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS, which decides), probe:
+"works"|"fails"|"missing"|"unknown" (the probe of the bwrap WebKit runs), probeSays: string, probeFailed: boolean (bwrap
+cannot start, and it says something about this system: not the AppImage's own missing bwrap while the sandbox is not
+used)}` (`src-tauri/src/sandbox.rs`);
+`distribution`: "direct" for the frostdev.io/GitHub build that updates itself,
 "nexus" for the Nexus Mods build, which has no self-update and whose UI shows only a link to the Kiln page there
 (`src-tauri/src/distribution.rs`; absent from an older backend: direct)), `LauncherSettings {steamRoots: string[], defaultGameId: string|null,
 allowHttpModpacks: boolean, savesKeep: number, updateCheck: boolean (default true), updateChannel?: "stable"|"dev"
