@@ -537,6 +537,12 @@ KilnResult KILN_CALL t_set_texts(const KilnUiTexts* t) {
     footer_texts_changed();
     return KILN_OK;
 }
+// Managed-only chat completion; native plugins cannot read typed chat or
+// submit a replacement through the appended internal UI table slot.
+KilnResult KILN_CALL t_chat_completion(KilnUiChatCompletion* io) {
+    if (caller_is_plugin(_ReturnAddress())) return KILN_ERR_UNAVAILABLE;
+    return chat_completion_io(io);
+}
 KilnHandle KILN_CALL t_font_load(KilnOwner o, const void* data, size_t len) {
     if (!overlay_drawing_on()) return 0;
     return font_load(o, data, len);
@@ -582,8 +588,14 @@ static_assert(offsetof(KilnUiApi, image_ex) == offsetof(KilnUiApi, push_font_han
               "kiln.ui appends image_ex and image_opaque_rect after the looks (0.2.0-dev.29.16; UiNative.TableImageEx)");
 static_assert(sizeof(KilnUiImageDraw) == 32 && offsetof(KilnUiImageDraw, width) == 8 && offsetof(KilnUiImageDraw, u0) == 16,
               "KilnUiImageDraw layout (UiNative.ImageDraw)");
-static_assert(offsetof(KilnUiApi, set_texts) == 1008 && sizeof(KilnUiApi) == 1016,
+static_assert(offsetof(KilnUiApi, set_texts) == 1008,
               "kiln.ui appends set_texts after image_opaque_rect (0.2.0-dev.29.16; UiNative.TableTexts)");
+static_assert(offsetof(KilnUiApi, chat_completion) == 1016 && sizeof(KilnUiApi) == 1024,
+              "chat completion must append after the unchanged 1016-byte v29.16 table");
+static_assert(offsetof(KilnUiChatCompletion, text) == 60 &&
+              offsetof(KilnUiChatCompletion, replacement) == 317 &&
+              sizeof(KilnUiChatCompletion) == 576,
+              "chat completion ABI payload matches managed UiNative.ChatCompletion");
 static_assert(sizeof(KilnUiTexts) == 40 && offsetof(KilnUiTexts, language) == 8 && offsetof(KilnUiTexts, keys) == 24 &&
                   offsetof(KilnUiTexts, texts) == 32,
               "KilnUiTexts layout (UiNative.Texts)");
@@ -652,6 +664,7 @@ const KilnUiApi kTable = {
     // part of an image, trimmed images (0.2.0-dev.29.16)
     &t_image_ex, &t_image_opaque_rect,
     &t_set_texts,  // Kiln's own texts (0.2.0-dev.29.16)
+    &t_chat_completion,  // issue #44 internal managed completion
 };
 
 std::string api_path(int kind) {
