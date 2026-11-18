@@ -389,15 +389,14 @@ mod tests {
         assert!(read_frame(&mut &huge[..]).is_err());
     }
 
-    /// A fake Discord app on a socket in a temp folder: answers the handshake, then each command, refusing an activity
-    /// with art when `refuse_art`. Returns what it received.
+    /// A fake Discord app on the other end of a connected socket pair (not a socket file: a long TMPDIR would pass the
+    /// path's length limit, SUN_LEN): answers the handshake, then each command, refusing an activity with art when
+    /// `refuse_art`. Returns the launcher's end and what the fake received.
     #[cfg(unix)]
-    fn fake_discord(dir: &std::path::Path, refuse_art: bool) -> (PathBuf, std::thread::JoinHandle<Vec<Value>>) {
-        use std::os::unix::net::UnixListener;
-        let path = dir.join("discord-ipc-0");
-        let l = UnixListener::bind(&path).unwrap();
+    fn fake_discord(refuse_art: bool) -> (std::os::unix::net::UnixStream, std::thread::JoinHandle<Vec<Value>>) {
+        let (mine, mut s) = std::os::unix::net::UnixStream::pair().unwrap();
+        mine.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
         let t = std::thread::spawn(move || {
-            let (mut s, _) = l.accept().unwrap();
             let mut got = Vec::new();
             while let Ok((op, v)) = read_frame(&mut s) {
                 got.push(v.clone());
@@ -414,15 +413,13 @@ mod tests {
             }
             got
         });
-        (path, t)
+        (mine, t)
     }
 
     #[cfg(unix)]
     #[test]
     fn the_handshake_names_the_public_client_id_and_set_activity_carries_the_launchers_pid() {
-        let t = super::super::testing::tmp("presence-ipc");
-        let (path, fake) = fake_discord(t.path(), false);
-        let s = std::os::unix::net::UnixStream::connect(&path).unwrap();
+        let (s, fake) = fake_discord(false);
         let mut ipc = Ipc::handshake(Box::new(s), 4242).unwrap();
         ipc.set(&PresenceTexts::default(), Some(&facts(Some(12)))).unwrap();
         ipc.set(&PresenceTexts::default(), None).unwrap();
@@ -439,9 +436,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn missing_art_is_harmless_the_activity_goes_again_without_it() {
-        let t = super::super::testing::tmp("presence-art");
-        let (path, fake) = fake_discord(t.path(), true);
-        let s = std::os::unix::net::UnixStream::connect(&path).unwrap();
+        let (s, fake) = fake_discord(true);
         let mut ipc = Ipc::handshake(Box::new(s), 1).unwrap();
         ipc.set(&PresenceTexts::default(), Some(&facts(Some(2)))).unwrap();
         // later updates go without art at once
@@ -457,16 +452,13 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn discord_closing_the_handshake_is_an_error_not_a_hang() {
-        use std::os::unix::net::UnixListener;
-        let t = super::super::testing::tmp("presence-close");
-        let path = t.path().join("discord-ipc-0");
-        let l = UnixListener::bind(&path).unwrap();
+        // a connected pair, not a socket file: a long TMPDIR would pass the socket path's length limit (SUN_LEN)
+        let (s, mut discord) = std::os::unix::net::UnixStream::pair().unwrap();
         let fake = std::thread::spawn(move || {
-            let (mut s, _) = l.accept().unwrap();
-            let _ = read_frame(&mut s);
-            let _ = s.write_all(&encode(OP_CLOSE, &json!({ "code": 4000, "message": "Invalid Client ID" })));
+            let _ = read_frame(&mut discord);
+            let _ = discord.write_all(&encode(OP_CLOSE, &json!({ "code": 4000, "message": "Invalid Client ID" })));
         });
-        let s = std::os::unix::net::UnixStream::connect(&path).unwrap();
+        s.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
         assert!(Ipc::handshake(Box::new(s), 1).is_err());
         fake.join().unwrap();
     }
