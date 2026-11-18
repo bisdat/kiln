@@ -121,6 +121,40 @@ static void pacer_settings() {
     CHECK(clamp_fps(237) == 237 && clamp_fps(500) == 500 && clamp_fps(501) == 500 && clamp_fps(100000) == 500);
 }
 
+// Edges: the highest cap, a cap changed while frames run, and any mix of frame times: a frame is never held longer than
+// one interval, never earlier than its slot, and late ones never bring a burst.
+static void pacer_edges() {
+    FramePacer p;
+    p.set(kMaxFps, kFreq);
+    CHECK(p.interval() == 20'000);  // 2 ms
+    int64_t go = p.plan(1'000);
+    for (int i = 0; i < 100; ++i) {
+        const int64_t g = p.plan(go + 1'000);  // a game at 10000 fps: every frame waits for its 2 ms slot
+        CHECK(g - go == 20'000);
+        go = g;
+    }
+    // a cap changed while running: the next frame goes at once and starts the new schedule
+    p.set(60, kFreq);
+    bool resynced = false;
+    CHECK(p.plan(go + 1'000, &resynced) == go + 1'000 && resynced);
+    CHECK(p.plan(go + 2'000, &resynced) == go + 1'000 + 166'667 && !resynced);
+    // random frame times between 0.1 ms and 3 intervals at a 144 fps cap
+    p.set(144, kFreq);
+    uint64_t seed = 12345;
+    auto rnd = [&](int64_t n) { seed = seed * 6364136223846793005ull + 1442695040888963407ull; return static_cast<int64_t>((seed >> 33) % static_cast<uint64_t>(n)); };
+    int64_t now = 9'000'000, last_go = 0, slot = 0;
+    for (int i = 0; i < 20'000; ++i) {
+        const int64_t g = p.plan(now, &resynced);
+        CHECK(g >= now);                     // never before the frame is there
+        CHECK(g - now <= p.interval());      // never held longer than one interval
+        if (last_go && !resynced) CHECK(g - last_go >= p.interval() - p.interval() / 2);  // no burst after a late frame
+        if (resynced) slot = g;
+        else CHECK((g - slot) % p.interval() == 0 || g == now);  // on the schedule, or late (then at once)
+        last_go = g;
+        now = g + 1'000 + rnd(3 * p.interval());
+    }
+}
+
 static void wait_plans() {
     const int64_t ms = kFreq / 1000;
     auto w = wait_plan(0, ms);
@@ -400,6 +434,7 @@ int main(int argc, char** argv) {
     pacer_never_holds_a_slower_game();
     pacer_resyncs_after_a_hitch();
     pacer_settings();
+    pacer_edges();
     wait_plans();
     timer_margin();
     stats();
