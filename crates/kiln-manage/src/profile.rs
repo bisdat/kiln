@@ -1559,6 +1559,7 @@ fn set_aside_copy(install: &GameInstall, profile: &Profile, k: ModKind, m: &Prof
     crate::engine_mods::refuse_symlink_path(&install.path, &aside)?;
     std::fs::create_dir_all(aside.parent().expect("parent")).map_err(io_at(&aside, "creating"))?;
     std::fs::rename(dst, &aside).map_err(io_at(&aside, "moving the changed profile copy to"))?;
+    prune_profile_copies(aside.parent().expect("parent"), &format!("profile-copy-{}-{}-{}-", profile.id, k.as_str(), m.id));
     let shown: Vec<&str> = c.files.iter().take(3).map(String::as_str).collect();
     let what = match c.files.len() {
         0 => String::new(),
@@ -1574,6 +1575,31 @@ fn set_aside_copy(install: &GameInstall, profile: &Profile, k: ModKind, m: &Prof
         _ => format!("{}:{}: its copy in {} was changed in the game folder{what}. Kiln replaced it with the Library's files and kept the changed \
             copy in {}.", k.as_str(), m.id, dst.display(), aside.display()),
     })
+}
+
+/// How many changed copies of one profile's mod [`set_aside_copy`] keeps in `<game>/kiln/backups/`: a mod that changes
+/// its own files in its copy at every run would otherwise leave one more at every activation.
+const PROFILE_COPY_BACKUPS: usize = 3;
+
+/// Deletes all but the newest [`PROFILE_COPY_BACKUPS`] folders named `<prefix><yyyymmddThhmmssZ>` or
+/// `<prefix><yyyymmddThhmmssZ>-<n>` in `dir` (the names [`set_aside_copy`] gives one mod's copies; another mod's id that
+/// starts with this one's is never one of them). Best effort: a folder that cannot be read or deleted stays.
+fn prune_profile_copies(dir: &Path, prefix: &str) {
+    fn stamp(rest: &str) -> Option<(String, u32)> {
+        let (ts, n) = match rest.split_once('-') { Some((ts, n)) => (ts, n.parse::<u32>().ok().filter(|n| *n >= 2)?), None => (rest, 1) };
+        let b = ts.as_bytes();
+        (b.len() == 16 && b[8] == b'T' && b[15] == b'Z' && b[..8].iter().chain(&b[9..15]).all(u8::is_ascii_digit)).then(|| (ts.to_string(), n))
+    }
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    let mut found: Vec<((String, u32), PathBuf)> = rd.flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+        .filter_map(|e| { let name = e.file_name().into_string().ok()?; Some((stamp(name.strip_prefix(prefix)?)?, e.path())) })
+        .collect();
+    found.sort();
+    let old = found.len().saturating_sub(PROFILE_COPY_BACKUPS);
+    for (_, p) in found.into_iter().take(old) {
+        let _ = std::fs::remove_dir_all(p);
+    }
 }
 
 /// A Kiln mod's copy in the game is the folder its cook writes (and sets aside, and puts back): it is replaced or

@@ -1124,7 +1124,8 @@ A client only: a dedicated server is `unsupported`.
   a copy that changed in the game folder is never replaced without a word (0.2.0-dev.29.18): one that still holds a
   Library version of the mod is replaced as before; one whose only change is its kind's settings files
   (`engine_mods::settings_files`) and the mod's own output stays as it is; any other is moved to
-  `<game>/kiln/backups/profile-copy-<pid>-<kind>-<id>-<yyyymmddThhmmssZ>/` before the Library's files go in, with a
+  `<game>/kiln/backups/profile-copy-<pid>-<kind>-<id>-<yyyymmddThhmmssZ>/` (the three newest of each mod are kept)
+  before the Library's files go in, with a
   sentence in the activation's `warnings` naming the files and that folder (for ShroudForge and SET also that the engine
   never read that copy and where settings apply). The profile's config dir goes to
   `<game>/kiln/profiles/<pid>/config/` (copied back to `<data>/profiles/<pid>/config/` before the next activation and

@@ -168,6 +168,37 @@ fn a_profile_copy_changed_in_the_game_folder_is_kept_aside_and_named() {
     assert!(!a.warnings.iter().any(|w| w.contains("unifiedemltweaks")), "{a:?}");
 }
 
+/// A copy changed again before every activation (a mod that rewrites its own files there) leaves at most three backups
+/// of it, the newest ones; another mod's backups whose id starts with this one's are not its own.
+#[test]
+fn changed_profile_copies_keep_the_three_newest_backups_of_a_mod() {
+    let t = tmp("changed-copy-bound");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let g = copy_mode_game(&t.0);
+    let sf = import_one(&dirs, &sf_package(&t.0, "2.1.1"), ModKind::ShroudForge);
+    let mut p = profile::create(&dirs, "My mods", None).unwrap();
+    p.mods.shroudforge.push(pm(&sf));
+    let p = profile::save(&dirs, &p).unwrap();
+    profile::activate(&dirs, &p.id, &g).unwrap();
+    let backups = g.path.join("kiln/backups");
+    let other = backups.join(format!("profile-copy-{}-shroudforge-unifiedemltweaks-live-20200101T000000Z", p.id));
+    std::fs::create_dir_all(&other).unwrap();
+    let second = g.path.join(format!("kiln/profiles/{}/shroudforge/unifiedemltweaks", p.id));
+    for speed in 4..=8 {
+        set_in_game(&second, "speed", speed.into());
+        let a = profile::activate(&dirs, &p.id, &g).unwrap();
+        assert!(a.warnings.iter().any(|w| w.starts_with("shroudforge:unifiedemltweaks:")), "{a:?}");
+    }
+    let prefix = format!("profile-copy-{}-shroudforge-unifiedemltweaks-2", p.id);
+    let mut kept: Vec<PathBuf> = std::fs::read_dir(&backups).unwrap().flatten().map(|e| e.path())
+        .filter(|b| b.file_name().unwrap().to_string_lossy().starts_with(&prefix)).collect();
+    kept.sort();
+    let mut values: Vec<i64> = kept.iter().map(|b| value(b, "speed").as_i64().unwrap()).collect();
+    values.sort();
+    assert_eq!(values, [6, 7, 8], "{kept:?}");
+    assert!(other.is_dir(), "another mod's backup stays");
+}
+
 #[test]
 fn an_eml_copy_whose_settings_file_changed_keeps_the_players_settings() {
     let t = tmp("eml-settings");
