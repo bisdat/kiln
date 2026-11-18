@@ -94,11 +94,11 @@ test("now: what the running game wrote, with the version and the reason", () => 
   expect(upscalerView("amd", "auto", now({ running: "notFsr" }), both("downloaded")).lines[0]).toContain("not upscaling with FSR 3 right now");
   // a newer runtime's reason and running state
   const newer = upscalerView("amd", "auto", now({ running: "amdFsr5", reason: "brandNew", reasonNumber: 40 }), both("downloaded"));
-  expect(newer.lines).toEqual(["This kiln-ui.dll does not say what upscales behind the game's FSR 3.", "AMD FSR does not run (reason 40 from a newer Kiln), so the game's own FSR 3 runs."]);
+  expect(newer.lines).toEqual(["Kiln cannot tell what upscales behind the game's FSR 3: its parts are of different versions.", "AMD FSR does not run (reason 40 from a newer Kiln), so the game's own FSR 3 runs."]);
   // the choice changed in the launcher while that game runs: when it applies
   const changed = upscalerView("xess", "auto", now({ running: "amdFsr4" }), both("downloaded", "downloaded"));
   expect(changed.heading).toBe("now");
-  expect(changed.lines.at(-1)).toBe("You chose Intel XeSS since: the game applies it when it next sets FSR up, or from its next start.");
+  expect(changed.lines.at(-1)).toBe("You have chosen Intel XeSS since that game started: it applies when the game next sets FSR up, or from its next start.");
 });
 
 test("the last game: shown while its choice is the one set and what it said still holds", () => {

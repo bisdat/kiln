@@ -1017,7 +1017,7 @@
         "amd_fsr4": "AMD FSR 4 runs in place of the game's FSR 3.",
         "amd_fsr31": "AMD FSR 3.1 runs in place of the game's FSR 3.",
         "xess": "Intel XeSS runs in place of the game's FSR 3.",
-        "unknown": "This kiln-ui.dll does not say what upscales behind the game's FSR 3."
+        "unknown": "Kiln cannot tell what upscales behind the game's FSR 3: its parts are of different versions."
       },
       "size": "It renders at {render} for {output}.",
       "size_version": "Version {version}, rendering at {render} for {output}.",

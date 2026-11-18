@@ -127,7 +127,7 @@ test.describe("desktop: Settings, Graphics", () => {
     await b.getByLabel("Upscaler").selectOption("xess");
     await expect(b.getByTestId("upscaler-offer-running")).toHaveText("Close the game to download them: the launcher does not change the game's files while it runs.");
     await expect(b.getByRole("button", { name: "Download Intel XeSS" })).toBeDisabled();
-    await expect(b.getByTestId("upscaler-status-line").last()).toHaveText("You chose Intel XeSS since: the game applies it when it next sets FSR up, or from its next start.");
+    await expect(b.getByTestId("upscaler-status-line").last()).toHaveText("You have chosen Intel XeSS since that game started: it applies when the game next sets FSR up, or from its next start.");
     await b.getByLabel("Upscaler").selectOption("amd");
     await expect(b.getByTestId("upscaler-offer")).toHaveCount(0);
     await expect(b.getByTestId("upscaler-status")).toContainText("Now");
