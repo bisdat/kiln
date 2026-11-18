@@ -139,6 +139,15 @@ static void frame_mapping() {
     CHECK(aspect_of(VK_FORMAT_R32_SFLOAT) == VK_IMAGE_ASPECT_COLOR_BIT);  // the game's depth copy
     CHECK(aspect_of(VK_FORMAT_D32_SFLOAT) == VK_IMAGE_ASPECT_DEPTH_BIT);  // the first frame's
     CHECK(aspect_of(VK_FORMAT_D24_UNORM_S8_UINT) == VK_IMAGE_ASPECT_DEPTH_BIT);
+    {
+        // the first frame after a load: depth is the D32_SFLOAT image itself; XeSS gets its depth aspect
+        upscale::Frame d32 = game_frame();
+        d32.depth = tex(0x210, VK_FORMAT_D32_SFLOAT, 960, 540);
+        std::string w;
+        CHECK(check_frame(d32, 1920, 1080, kFlagInvertedDepth, &w));
+        const ExecuteParams e = execute_params(d32, Tuning{}, kFlagInvertedDepth, true);
+        CHECK(e.depth.format == VK_FORMAT_D32_SFLOAT && e.depth.range.aspectMask == VK_IMAGE_ASPECT_DEPTH_BIT && e.depth.image == h<VkImage>(0x210));
+    }
     upscale::Frame f = game_frame();
     const uint32_t flags = kFlagInvertedDepth | kFlagResponsivePixelMask;
     std::string why;
@@ -407,6 +416,7 @@ struct FakeCopy final : MotionCopy {
         return true;
     }
     void destroy() override { ++*destroys; }
+    void want(upscale::DeviceNeeds* needs) override { needs->want_extension("VK_KILN_test_copy"); }
 };
 
 struct FakeHost final : Host {
@@ -712,7 +722,9 @@ static void motion_copy() {
         FakeHost* hp = host.get();
         XessBackend b(std::move(host));
         CHECK(b.load(files(), &why, &detail));
-        b.device_needs(gpu());
+        const upscale::DeviceNeeds dn = b.device_needs(gpu());
+        CHECK(dn.extensions.size() == 2 && dn.extensions[1].name == "VK_KILN_test_copy" && !dn.extensions[1].required);
+        // the copy's optional need is not something device_ready insists on
         CHECK(b.device_ready(device(true), &why, &detail) && hp->copy_inits == 1);
         CHECK(b.create(game_ci(), &detail));
         CHECK(b.record(game_frame(), &detail) && hp->copy_records == 1);

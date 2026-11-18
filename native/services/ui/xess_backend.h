@@ -49,6 +49,8 @@ namespace kui::xess {
 class MotionCopy {
   public:
     virtual ~MotionCopy() = default;
+    // What the copy needs on the device, added to XeSS's own (upscale_mv.h want_mv_needs).
+    virtual void want(upscale::DeviceNeeds* needs) { (void)needs; }
     virtual bool init(const upscale::VkContext& vk, std::string* detail) = 0;
     // Records the copy into cb; `out` is Kiln's image in SHADER_READ_ONLY_OPTIMAL once the copy has run.
     virtual bool record(VkCommandBuffer cb, const upscale::Texture& in, uint64_t frame, upscale::Texture* out, std::string* detail) = 0;
@@ -119,13 +121,15 @@ class XessBackend final : public upscale::Backend {
             return device_needs_;
         }
         if (!query_device_needs(gpu.instance, gpu.physical, &out)) return {};
+        upscale::DeviceNeeds with_copy = out;
+        if (mv_) mv_->want(&with_copy);
         std::string list;
         for (const auto& e : out.extensions) list += (list.empty() ? "" : ", ") + e.name;
         host_->log(3, "XeSS asks the device (" + std::string(gpu.props.deviceName) + ") for " + std::to_string(out.extensions.size()) +
                           " extension(s)" + (list.empty() ? "" : " (" + list + ")") + " and " + std::to_string(out.features.size()) + " feature struct(s)");
         needs_documented_ = false;
-        device_needs_ = out;
-        return out;
+        device_needs_ = out;  // XeSS's own: what device_ready insists on
+        return with_copy;
     }
 
     // ---- 2. load --------------------------------------------------------------------------------------------------
@@ -161,6 +165,7 @@ class XessBackend final : public upscale::Backend {
         loaded_ = true;
         files_ = files;
         read_tuning();
+        if (tuning_.motion_copy) mv_ = host_->motion_copy();
         log_host().store(host_.get());
         host_->log(3, "libxess.dll loaded: XeSS " + name_version());
         return true;
@@ -197,10 +202,11 @@ class XessBackend final : public upscale::Backend {
             ci.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
             if (create_cache_(vk.device, &ci, nullptr, &cache_) != VK_SUCCESS) cache_ = VK_NULL_HANDLE;
         }
-        if (tuning_.motion_copy && !mv_) {
-            mv_ = host_->motion_copy();
+        if (mv_ && !mv_ready_) {
             std::string d;
-            if (mv_ && !mv_->init(vk, &d)) {
+            if (mv_->init(vk, &d)) {
+                mv_ready_ = true;
+            } else {
                 host_->log(2, "the motion-vector copy for XeSS could not start (" + d + "): XeSS reads the game's motion vectors as they are");
                 mv_.reset();
             }
@@ -299,7 +305,7 @@ class XessBackend final : public upscale::Backend {
             vel_y_ = vy;
         }
         ExecuteParams p = execute_params(f, tuning_, ctx_flags_, pending_reset_);
-        if (mv_ && tuning_.motion_copy) {
+        if (mv_ && mv_ready_ && tuning_.motion_copy) {
             upscale::Texture copy;
             std::string d;
             if (!mv_->record(f.cb, f.motion, f.frame, &copy, &d) || !copy.present()) return fail("the motion-vector copy for XeSS failed: " + d);
@@ -333,8 +339,8 @@ class XessBackend final : public upscale::Backend {
         if (vk_.device && device && device != vk_.device) return;
         destroy();
         collect(true);
-        if (mv_) mv_->destroy();
-        mv_.reset();
+        if (mv_ && mv_ready_) mv_->destroy();
+        mv_ready_ = false;  // the object stays: a new device starts it again
         if (cache_ && destroy_cache_) destroy_cache_(vk_.device, cache_, nullptr);
         cache_ = VK_NULL_HANDLE;
         device_ok_ = false;
@@ -482,7 +488,8 @@ class XessBackend final : public upscale::Backend {
     PFN_vkCreatePipelineCache create_cache_ = nullptr;
     PFN_vkDestroyPipelineCache destroy_cache_ = nullptr;
     VkPipelineCache cache_ = VK_NULL_HANDLE;
-    std::unique_ptr<MotionCopy> mv_;
+    std::unique_ptr<MotionCopy> mv_;  // made at load (its needs go with XeSS's), started at device_ready
+    bool mv_ready_ = false;
     bool warned_driver_ = false;
     // the context
     Context ctx_ = nullptr;
