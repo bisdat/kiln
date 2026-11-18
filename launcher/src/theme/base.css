@@ -206,6 +206,17 @@ html[data-covered] .k-app ::-webkit-scrollbar, html[data-covered] [data-deck-scr
 .k-kept-row { display: flex; align-items: center; gap: 10px; padding: 3px 0; }
 .k-kept-row .k-kept-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .k-kept-row .k-muted { flex: 1 1 auto; font-size: 14.5px; }
+/* Settings, Upscalers (components/UpscalerSettings.tsx) */
+.k-upscalers { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+.k-upscaler { display: flex; flex-direction: column; gap: 4px; }
+.k-upscaler-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.k-upscaler-name { flex: 0 1 auto; min-width: 0; font-size: 17.5px; color: var(--k-text-0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.k-upscaler-actions { margin-left: auto; display: flex; gap: 6px; flex: 0 0 auto; }
+.k-upscaler-enables, .k-upscaler-detail { font-size: 14.5px; line-height: 1.35; color: var(--k-text-2); }
+.k-upscaler-progress { display: flex; align-items: center; gap: 10px; }
+.k-upscaler-progress .k-progress { flex: 1 1 auto; }
+.k-upscaler-license-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.k-upscaler-license { margin: 0; max-height: 240px; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--k-font-mono); font-size: 13px; line-height: 1.45; color: var(--k-text-1); background: var(--k-bg-1); border: 1px solid var(--k-line); padding: 10px 12px; }
 .k-mod:hover { background: rgba(255, 150, 80, .05); }
 .k-mod.first-found { margin-top: 6px; border-top: 1px solid var(--k-line); padding-top: 8px; }
 .k-mod-text { display: flex; flex-direction: column; min-width: 0; gap: 0; }

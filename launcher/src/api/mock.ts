@@ -17,6 +17,7 @@ import { updateMockHandlers } from "./mockUpdate";
 import { deckMockHandlers } from "../deck/mockDeck";
 import { nexusMockHandlers, NEXUS_MOCK_ENABLED } from "./mockNexus";
 import { updatesMockHandlers } from "./mockUpdates";
+import { MOCK_PREVIEW, vendorMockHandlers } from "./mockVendor";
 import { chainMockHandlers } from "./mockChain";
 import { dataFolderBlocks, dataFolderMockHandlers, mockDataDir, mockPickFolder } from "./mockDataFolder";
 import { mockSpeak, bootJsonAt, clearStartHistory, mockBegin, mockProgress, mockStartEnded, ownerScript, processAt, scriptedStart, setStartScript, type StartScript } from "./mockProgress";
@@ -923,7 +924,8 @@ const handlers: Record<string, Handler> = {
   snapshot_continue: () => null,
   // app
   app_info: (): AppInfo => ({ version: "0.2.0-dev", kiln: "0.2.0-dev", platform: "linux", arch: "x86_64", dataDir: mockDataDir(), commit: "0f1ffa6", mock: true,
-    noWebgl: render.mode === "software", distribution: MOCK_DISTRIBUTION, nexusEnabled: NEXUS_MOCK_ENABLED, render: { ...render }, desktop: { ...desktop }, sandbox: { ...sandbox } }),
+    noWebgl: render.mode === "software", distribution: MOCK_DISTRIBUTION, nexusEnabled: NEXUS_MOCK_ENABLED, render: { ...render }, desktop: { ...desktop }, sandbox: { ...sandbox },
+    ...(MOCK_PREVIEW.length ? { preview: [...MOCK_PREVIEW] } : {}) }),
   app_started: () => null,
   app_render_set: (a) => {
     render = { ...render, marker: !!a.software, markerWhy: a.software ? `Turned on in Settings (${new Date().toISOString()})` : undefined };
@@ -1519,6 +1521,7 @@ Object.assign(handlers, updateMockHandlers(mockEmit, MOCK_DISTRIBUTION, () => se
 Object.assign(handlers, deckMockHandlers(handlers));
 Object.assign(handlers, nexusMockHandlers(handlers, mockEmit, startTask, quickAdd));
 Object.assign(handlers, updatesMockHandlers(handlers, mockEmit));
+Object.assign(handlers, vendorMockHandlers(startTask, (id) => gameOf(id).kind));
 Object.assign(handlers, chainMockHandlers({ profiles, library, reject }));
 Object.assign(handlers, dataFolderMockHandlers(startTask, (id) => tasks.get(id)));
 // the save editor: synthetic character saves in memory, or a local fixture with ?editor=fixture (mockEditor.ts). Loaded
