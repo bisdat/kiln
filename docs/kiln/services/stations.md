@@ -231,12 +231,12 @@ FillPlan p = Stations.Plan(forge, new FillOptions { Chests = [woodChest] });
 The rules:
 - **Named on the fill.** An empty list is the fill Kiln already did. There is no per-chest opt-in: a chest that should
   always be a source is named on each fill that should use it.
-- **This base only.** Each chest is checked again inside the fill's transaction. A chest in another base, a player, the
-  station itself, a production station, a Magic chest, a refilling plant, or an entity with no inventory refuses the
-  fill and nothing moves.
+- **This base only.** Each chest is checked again inside the fill's transaction. A chest in another base, a player, an
+  NPC (a villager's inventory), the station itself, a production station, a Magic chest, a refilling plant, or an entity
+  with no inventory refuses the fill and nothing moves.
 - **After the Magic chests, before station outputs.** The player's bag (when the fill names a player) and the Magic
-  chests pay first, reserves included on the Magic chests only. Ordinary chests pay the next part. Station outputs pay
-  what is still short.
+  chests pay first, reserves included on the Magic chests only. Ordinary chests pay the next part, in the order the fill
+  names them (a chest named twice counts once, at its first place). Station outputs pay what is still short.
 - **All or nothing.** One inventory transaction with the game's own fill. A non-exact fill tries fewer crafts, as before.
 - A recipe whose resolved inputs name the same item twice does not use the named chests: they are ignored and the plain fill runs (nothing is taken from them). Station outputs are skipped for the same reason. The fill is not `Refused`.
 - Reserves (`Keep`) apply to the Magic chests, not to these chests.
@@ -285,19 +285,34 @@ await Stations.Collect(kiln, chest, charcoalId);         // only this item
 await Stations.Collect(kiln, chest, what: CollectWhat.Leftovers); // what is no input and no output of its recipe
 await Stations.CollectToBase(kiln);                      // into the base's chests that take deposits
 ```
-Collect moves through Kiln.Items' move (the game's slot transfer; the row `items.move` too), one stack after the other.
-A stack counts as moved only when the whole stack moved. A chest that takes part of a stack does not finish it: the
-rest stays in that slot and a later chest is tried. `Done` is every stack finished. `Partial` is some items moved
-while a stack is not finished (including a later chest that cannot take the rest). `NoRoom` is nothing moved, which
-is also the result when `CollectToBase` is asked of a station that stands in no base. `Unchanged` is nothing to
-collect. Native code calls the same move through `collect` on `kiln.stations` (`KilnStationCollect`: outputs,
-leftovers, one container, or the base's Magic chests that take deposits). The managed methods call that when the
-table has it, so the chest rules live in one place.
+Collect is one `Items.Move` per stack (Kiln.Items' move, the game's slot transfer; it needs the row `items.move`, and
+without it the call throws `KilnUnavailableException` for `items.move`), one stack after the other. The target can be
+any inventory holder, a player's bag too (`Items.Move` never fills a player's equipped or action-bar slots).
+`CollectToBase` asks `Bases.FindRoomFor` for each stack: the first Magic chest that takes deposits and holds the item
+with room, else the first with a free slot. The stack goes into that one chest; what it cannot take stays in the station.
+`Done` is every stack's move went through (a move that fit only part of its stack counts too), `Partial` some moves went
+through and some did not (or found no chest), `NoRoom` none did (also `CollectToBase` of a station that stands in no
+base), `Unchanged` nothing to collect. `Changes` lists the rows of every move. A collect that moved items posts a
+`StationChangedEvent`.
 
-`collect` joins the same station action queue as fill, stop, resume and select: 1024 actions can wait, and a full
-queue is `QueueFull` (`KILN_ERR_BUFFER_TOO_SMALL` from the call, before anything moves). The result copies at most
-`KILN_STATIONS_MAX_CHANGES` (32) ledger rows; rows past that are not in `Changes`. The older `Items.Move` loop did
-neither. There is no second, unqueued collect.
+### Native collect
+Native code has `collect` on `kiln.stations` (`KilnStationCollect`, since 0.2.0-dev.29.17). The managed calls above do
+not use it. It moves the same stacks (outputs, leftovers, one item) with the same kiln.items move, and its own rules:
+
+- **Target**: `to`, any inventory holder but the station (a player's bag too), or `KILN_STATION_COLLECT_TO_BASE`: the
+  base's Magic chests that take deposits, the chests that hold the item with room first, then those with a free slot.
+  A stack that one chest takes only in part goes on into the next chest, so one stack can end up in several chests.
+- **Status**: `DONE` every stack moved whole. `PARTIAL` some items moved and a stack is not finished. `NO_ROOM` nothing
+  moved (also `TO_BASE` and no base). `UNCHANGED` nothing to collect.
+- **Ledger**: the result keeps the first 32 ledger rows (`KILN_STATIONS_MAX_CHANGES`) of all the moves.
+- **Flags**: the result's `flags` are the collect's own (`KILN_STATION_COLLECT_*`, bits 16 and up). They never read as
+  `KILN_STATION_DRY_RUN`.
+- **Queue**: it joins the station action queue of `submit` (1024 can wait; a full queue is `KILN_ERR_BUFFER_TOO_SMALL`
+  from the call, before anything moves). The callback comes on the tick thread.
+- **Watchers and counters**: each move is noted for component watchers as kiln.items' write and counted in kiln.items'
+  move and commit counters, as `Items.Move` is.
+- **A fault** in a move switches kiln.stations' actions off (as a faulted fill does). Stacks moved before it stay
+  moved: the result is `PARTIAL` and says so; with nothing moved yet it is `UNAVAILABLE`.
 
 ## Results
 Every action returns a `Task<StationResult>` that completes on the tick thread, one step after it ran (a stop after the
@@ -309,7 +324,7 @@ and `StateAfter` are null where nothing was read.
 | `StationActionStatus` | When |
 |---|---|
 | `Done` | it happened |
-| `Partial` | fill: fewer crafts than asked (`LimitedBy`); collect: some items moved and a stack was not finished |
+| `Partial` | fill: fewer crafts than asked (`LimitedBy`); collect: some stacks moved and others did not |
 | `NotEnough` | fill: the stock covers not even one craft (or `Exact` and not all) |
 | `NoRoom` | fill: no room in the station; collect: none fit, or `CollectToBase` and the station stands in no base |
 | `NotAStation`, `NoBase`, `NoRecipe`, `WrongWorkshop` | as named (`NoBase` is a fill whose station stands in no base) |
@@ -370,7 +385,8 @@ change it (`Players.Find(player)?.Can(PlayerPermissions.EditBase)`, or `AccessIn
 these directly (`Stations.Available` is true there).
 
 ## Real-client checks
-The lab test (`mods/tests/station-actions-test`) runs on a dedicated server with no player. What only a real game shows is
+The lab tests (`mods/tests/station-actions-test`; ordinary chests and collect: `mods/tests/station-chests-test` together
+with the native `mods/tests/station-native-test`) run on a dedicated server with no player. What only a real game shows is
 checked by hand with `mods/tests/stations-client-check` (`/stationcheck`, admins; events in kiln.log as `stationcheck:`):
 
 - **C1** Host a world with the check mod, in a base with a Magic chest and a charcoal kiln: `/stationcheck logs 100`,
@@ -384,7 +400,6 @@ checked by hand with `mods/tests/stations-client-check` (`/stationcheck`, admins
 - **C5** After fills, the base's Magic chests are emptied as expected; ordinary chests are untouched.
 - **C6** At the quick-stack station, switch one Magic chest off for deposits: `/stationcheck base` lists it under
   Magic chests and not under "take deposits", and `collect` puts nothing into it.
-- **C8** `mods/tests/station-chests-test` on a dedicated server: a fill that names an ordinary chest takes from it only after the Magic chests; a short exact fill moves nothing; `CollectToBase` puts the kiln's finished charcoal into the Magic chests and leaves the ordinary chest and the kiln's queued logs.
 - **C7** A charcoal kiln with charcoal and logs in it, opted in (`/stationcheck lend`), next to a forge whose recipe
   needs charcoal, the Magic chests holding none: press the forge's "fill from chests". Expected: the forge gets the
   charcoal, the kiln keeps its logs, kiln.log says the press ran as Kiln's fill. If the button is greyed or nothing
@@ -405,12 +420,14 @@ checked by hand with `mods/tests/stations-client-check` (`/stationcheck`, admins
 ## For native code
 `native/core/abi/services/kiln_stations.h` (`kiln.stations` v1, in kiln-items.dll): the same reads (`base_*`, `stations`,
 `station_read`, `recipe*`, `category*`, `workshop_recipes`, `plan`) on the tick thread; `submit(owner, request, done, user,
-&ticket)` from any thread, the result in `done` on the tick thread; `collect` moves finished stacks the way `Stations.Collect` does (through kiln.items' move; into one container, or `KILN_STATION_COLLECT_TO_BASE` for the Magic chests that take deposits). It waits on the same queue as `submit` (a full queue is `KILN_ERR_BUFFER_TOO_SMALL`, `QueueFull` on the managed side) and the result keeps at most 32 ledger rows. `cancel(ticket)` drops the callback; the events by
+&ticket)` from any thread, the result in `done` on the tick thread; `collect` moves finished stacks through kiln.items' move, with its own rules ([Native collect](#native-collect)). `cancel(ticket)` drops the callback; the events by
 polling: `watch(1)`, then `events(after_seq, ...)` each step (`last_seq()` to start at the newest). A FILL names ordinary
 chests with `chest_count` and `chests` on a request of the current size (`max_chests()` is `KILN_STATIONS_MAX_CHESTS`; a
 request of `KILN_STATION_REQUEST_V1` bytes names none). A recipe whose resolved inputs name one item twice ignores those
 chests and runs the plain fill. A named entity that is not an ordinary chest of this base is `KILN_STATION_REFUSED` and
-moves nothing. `from_chests` on the result counts what they gave. `base_stock_with_stations` (check `header.size`) is
+moves nothing. `from_chests` on the result counts what they gave: read it only when `result->size` reaches it (a 29.16
+kiln.stations passes a shorter result). Since 0.2.0-dev.29.17 `submit` and `plan` take a request of exactly
+`KILN_STATION_REQUEST_V1` or `sizeof(KilnStationRequest)` bytes; 29.16 also took a larger size. `base_stock_with_stations` (check `header.size`) is
 `Bases.StockWithStations`: the Magic-chest stock plus finished outputs still in the base's stations, on the tick thread.
 A cycle's end
 for native code is kiln.gameplay's `KILN_GAMEPLAY_CRAFTED` (once per cycle since 0.2.0-dev.29.14). The game's facts behind
