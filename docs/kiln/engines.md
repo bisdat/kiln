@@ -155,6 +155,10 @@ native, builtin: `WINEDLLOVERRIDES="dinput8=n,b"`, or `dinput8` as "native, buil
 - Proton 10 and 11 build their `dinput8` with Wine's "prefer native" flag, so Steam starts need no launch option
   there (tested with GE-Proton11-11, [client.md](client.md); Valve's builds read from their source). Proton 9 and
   upstream Wine do not have that flag (read from their source). The override does no harm where it is not needed.
+  The launcher suppresses routine `dinput8` advice for **Steam's selected GE-Proton11-11+**,
+  preferring the explicit per-game mapping and falling back to the global `CompatToolMapping/0`
+  default. The centralized rule is `kiln-manage::game::runner_loads_native_dinput8`. Other runners
+  keep the reminder until verified; a **No Kiln** failure offers the override if it is missing.
 - Untested: Bottles' and Lutris' own runners. Keep the override.
 
 ### Ultimate ASI Loader next to Kiln on Wine

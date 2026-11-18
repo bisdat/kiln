@@ -421,7 +421,16 @@ fn kiln_did_not_load() {
     i.install = Some(f.install(Platform::Proton));
     let r = build(&i);
     let n = finding(&r, "not-loaded");
-    assert!(n.text.contains("Launch options") || n.text.contains("launch options"), "{}", n.text);
+    assert!(n.text.contains("launch options") && n.text.contains(crate::game::DLL_OVERRIDE_ADVICE), "{}", n.text);
+    // If the dinput8 override is already present, don't recommend setting it again.
+    let prefix = f.root.join("pfx");
+    std::fs::create_dir_all(&prefix).unwrap();
+    std::fs::write(prefix.join("user.reg"), "[Software\\\\Wine\\\\DllOverrides]\n\"dinput8\"=\"native,builtin\"\n").unwrap();
+    i.install.as_mut().unwrap().prefix = Some(prefix);
+    let r = build(&i);
+    let n = finding(&r, "not-loaded");
+    assert!(n.text.contains("Check Steam's launch options for Enshrouded (WINEDLLOVERRIDES) and the Proton version."), "{}", n.text);
+    assert!(!n.text.contains("try this fallback") && !n.text.contains(crate::game::DLL_OVERRIDE_ADVICE), "{}", n.text);
     // a launch from the launcher after the last boot.json
     let g = Fx::healthy("stale");
     let old = SystemTime::now() - std::time::Duration::from_secs(3600);
