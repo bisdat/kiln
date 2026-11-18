@@ -465,8 +465,9 @@ join/respawn spikes: client messages applied in the first reached step after arr
   not a state value. Session 2 Merge counts tracked channel-5 decodes. Interpolation was not decoded in this research.
 
 Ids are u32 server ids, preserved by client creation (0.2.0-dev.29.18 static read, client 26430625: ProcessClientMessage's
-create case passes the header's `u32 entity` at `msg+8`, after a lookup of that id in the client storage's entity map,
-to createEntityWithId 0x987e50 at 0x9dbcb8; docs/re/world.md "A mod's client-world program and wraps"). Bit-31 ids are **world-group**, not a client-local range:
+create case passes the header's `u32 entity` at `msg+8` to createEntityWithId 0x987e50 at 0x9dbcb8, which keeps a
+nonzero id as given; an id already in the client storage's entity map is updated instead; docs/re/world.md "A mod's
+client-world program and wraps"). Bit-31 ids are **world-group**, not a client-local range:
 `group=(id>>20)&0x7ff`, `index=id&0x3ffff`. Two appeared on the real prediction channel; pure client-created id
 allocation is still open. Prediction carried a small control/touch-related set; observations do not identify every
 member or establish a distance-only policy.

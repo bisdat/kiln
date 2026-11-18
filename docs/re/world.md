@@ -547,8 +547,13 @@ writing its `SlotAttachment`, and a server wrap of `equipment_visuals`). **[seen
   `+0x188` records) and is passed as the id to `createEntityWithId` 0x987e50 (call at 0x9dbcb8; `[rbp+0x8c8]` set at
   0x9dba59); the header's `u32 parent` (`msg+0xC`) and GUID (`msg+0x10`) go with it. A host's own client gets its
   entities through the same pipeline (machine 0, docs/re/network.md). So the server's id of a player's character names
-  the same character in every client's world, and that character's visual entities name it as their parent. Entities a
-  client creates by itself (bit-31 world-group ids) are not covered. **[static]**
+  the same character in every client's world, and that character's visual entities name it as their parent. An id that
+  is already in that map is not created again: its record's tick (`+0x80`) is compared and a newer state updates the
+  entity (0x9dbc17..0x9dbc47). `createEntityWithId` uses any nonzero id it is given as the entity's id (looked up in
+  the storage's entity map at `storage+0x148` with the map's find 0x9b4dc0, at 0x988954), takes the next value of the
+  storage's own counter (`lock xadd [storage+0x498]`, 0x988933) only for id 0, and hands a bit-31 id to its world
+  group (0x98884e; bit-31 ids are world-group ids, docs/re/network.md). Ids a client makes for itself are not
+  covered, and whether that counter can reach an id the server sends was not read. **[static]**
 - The current entity's components: through the program's own iterator slots (`TryRead` read lists, `TryWrite` and
   since 0.2.0-dev.29.18 `TryReadWritable` write lists). A client job's slot for a write component is a pointer into the
   entity's chunk, as on the server (one IterNext, 0x9c2780, builds the slots for every world of the client). Writes there are local:

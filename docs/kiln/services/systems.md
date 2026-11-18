@@ -97,10 +97,12 @@ player, unless the same change is made in the prediction storage as well
 ```csharp
 // the server half: everyone's view of player P (server world, the default)
 var server = Systems.Wrap<Ecs.Programs.EquipmentVisuals>().Wrap!;
-// the client half: this player's own view, in the prediction storage (a client or both mod, on a game client)
-if (Capabilities.Is(Systems.PredictionCapability))
+// the client half: this player's own view, in the prediction storage (a client or both mod, on a game client, from
+// Context.Tick once a client world runs: Ok is false before that, so try again in a later tick)
+var made = Capabilities.Is(Systems.PredictionCapability)
+    ? Systems.Wrap<Ecs.Programs.EquipmentVisuals>(new WrapOptions { World = WorldKind.Prediction }) : null;
+if (made is { Ok: true, Wrap: { } predicted })
 {
-    var predicted = Systems.Wrap<Ecs.Programs.EquipmentVisuals>(new WrapOptions { World = WorldKind.Prediction }).Wrap!;
     predicted.AfterEach((ref Ecs.Programs.EquipmentVisuals v) =>
     {
         if (!holstered) return;                                          // your state, shared through a volatile/atomic
@@ -113,15 +115,24 @@ if (Capabilities.Is(Systems.PredictionCapability))
 
 - **What it is.** A wrap of a program of the **client world's table** whose stages run on the prediction storage's
   slices only (`Slice.World` and `SliceInfo.World` say `Prediction`); a client-world wrap of the same program runs on
-  the client world's slices only. `Systems.Find(name, WorldKind.Client)` finds the program (the prediction storage has
-  no directory of its own: `Systems.Find(name, WorldKind.Prediction)` is null, as before).
+  the client world's slices only, and the client world steps only programs with the client flag 0x1, so a program the
+  prediction storage steps (`equipment_visuals`) has no client-world slices: `WorldKind.Client` there never runs.
+  `Systems.Find(name, WorldKind.Client)` finds the program and lists its prediction wraps with its client ones
+  (`WrapInfo.World` says which); the prediction storage has no directory of its own:
+  `Systems.Find(name, WorldKind.Prediction)` is null, as before.
 - **What it takes.** `Before`, `After`, `BeforeEach`, `AfterEach` (with an `EntityView` or a typed view) and the
   filters. No `Replace` (`Ok = false`). A program the prediction storage never steps (a client program, a `hostOnly` one,
   one with the engine's 0x40) is `Ok = false` with its flags in the reason.
-- **When.** Applied in the client world's Pre, like a client wrap; again in every later client world by name (the
-  prediction storage starts and stops with its client world); gone with `Dispose` or the mod's unload.
-- **Threads.** The prediction storage steps serially on the main thread. `Slice.Step` is the client world's step at its
-  last Pre and `IsWorldThread` compares with the client world's thread. No tick-thread API inside a stage, as anywhere.
+- **When.** Make it while a client world runs: in the main menu (and on a host before its client world's first step)
+  there is no client world's directory, so `Wrap` answers `Ok = false` ("no such program in the client world").
+  Applied in the client world's Pre, like a client wrap; again in every later client world by name (the prediction
+  storage starts and stops with its client world); gone with `Dispose` or the mod's unload.
+- **Threads.** `Wrap`, adding a stage and `Dispose` are tick-thread calls, as for every wrap. On a joined client the
+  client world drives the mods, on the main thread (`Context.Tick`). On a host the tick thread is the server world's
+  (`Context.Tick`, `Context.Scheduler.Post`; its `OnLoad` comes before the client world starts); `Client.Tick` and
+  `Client.Post` run on the main thread there and these calls throw from them. The prediction storage steps serially on
+  the main thread. `Slice.Step` is the client world's step at its last Pre (several prediction steps can share it) and
+  `IsWorldThread` compares with the client world's thread. No tick-thread API inside a stage, as anywhere.
 - **Writes** go to the prediction storage only and are marked with the job's tracker, as the game's own update there
   marks them. No `ComponentWrittenEvent` (server world only). The next server state the client receives for the
   predicted entity can put the game's value back until your stage runs again; write in every step you mean it.
