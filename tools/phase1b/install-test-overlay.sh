@@ -29,6 +29,7 @@ files=(
   "kiln/services/kiln-ui.dll"
   "kiln/host/Kiln.Chat.dll"
   "kiln/host/Kiln.Ui.dll"
+  "kiln/locales/en.json"
 )
 
 for path in "${files[@]}"; do
@@ -39,6 +40,23 @@ for path in "${files[@]}"; do
 done
 
 if [[ "$mode" == install ]]; then
+  # An old development artifact omitted this locale and showed raw text
+  # identifiers on screen. Validate the complete new locale before any
+  # installed files or backups are changed.
+  command -v python3 >/dev/null || {
+    echo "Refusing: python3 is required to validate Kiln's locale JSON." >&2
+    exit 2
+  }
+  python3 - "$base/kiln/locales/en.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+doc = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+completion = doc.get("chat", {}).get("completion", {})
+for key in ("title", "hint"):
+    if not isinstance(completion.get(key), str) or not completion[key].strip():
+        raise SystemExit(f"Invalid completion locale: chat.completion.{key}")
+PY
   [[ ! -e "$backup" ]] || {
     echo "Existing Phase 1b backup: $backup" >&2
     echo "Restore before installing a different candidate (backups are preserved)." >&2
@@ -59,7 +77,7 @@ if [[ "$mode" == install ]]; then
     mv -f -- "$staged" "$game/$path"
     echo "Installed: $path"
   done
-  echo "Phase 1b native + managed overlay installed. Originals saved under: $backup"
+  echo "Phase 1b native + managed + locale overlay installed. Originals saved under: $backup"
   echo "Completion is still OFF until you enable ui.chatCompletion in kiln/kiln.json."
 else
   [[ -d "$backup" ]] || { echo "No Phase 1b backup to restore: $backup" >&2; exit 2; }
@@ -76,6 +94,6 @@ else
   archive="$backup.restored.$stamp"
   [[ ! -e "$archive" ]] || { echo "Restore succeeded, but backup remains at $backup" >&2; exit 0; }
   mv -- "$backup" "$archive"
-  echo "Original binaries restored. Recovery copy kept: $archive"
+  echo "Original binaries and locale restored. Recovery copy kept: $archive"
   echo "Remove ui.chatCompletion from kiln/kiln.json (or set it to false) after testing."
 fi
