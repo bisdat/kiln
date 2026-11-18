@@ -6,8 +6,11 @@
 // against the size and SHA-256 Kiln pinned (launcher/src/data/vendor-components.json). The game checks again, here,
 // with the same pins (vendor_pins.h, generated from that manifest), because anything may have written the folder since:
 //  - only <game>/kiln/vendor/<vendor>/<version>/<name>, never the game's root or the search path;
+//  - only a version folder with the launcher's receipt kiln-vendor.json of this component and format 1 (written last,
+//    after every file verified: a folder without one is an unfinished download, not an install). Nothing else of the
+//    receipt is used: the names, sizes and hashes come from the pins (docs/kiln/launcher/contracts.md 5.15);
 //  - no link (a reparse point, which includes Wine's Unix links) on kiln\vendor, the vendor's folder, the version's
-//    folder or the file;
+//    folder, the receipt or a file;
 //  - each file is opened with writes and deletes denied, hashed through that very handle, and the handle stays open for
 //    the session: what loads is what was hashed (LoadLibraryExW maps the same file; nobody can change it meanwhile);
 //  - a file the manifest has not pinned is never loaded.
@@ -20,6 +23,7 @@
 #include <string_view>
 #include <vector>
 
+#include "nlohmann/json.hpp"
 #include "sha256.h"
 #include "vendor_pins.h"
 
@@ -38,16 +42,18 @@ enum class Check : uint32_t {
     ok = 0,
     no_pins,     // the manifest pins no file of this component (or names no such component)
     missing,     // a file is not there (not downloaded, or removed)
-    link,        // a folder on the way or the file is a link
+    link,        // a folder on the way, the receipt or a file is a link
     unreadable,  // there, but could not be opened or read (in use by something that denies reading, no access)
     size,        // not the pinned size
     hash,        // not the pinned SHA-256
+    no_receipt,  // the folder has no receipt of this component (format 1): a download that did not finish, not an install
 };
 inline const char* check_name(Check c) {
     switch (c) {
         case Check::ok: return "ok";
         case Check::no_pins: return "no_pins";
         case Check::missing: return "missing";
+        case Check::no_receipt: return "no_receipt";
         case Check::link: return "link";
         case Check::unreadable: return "unreadable";
         case Check::size: return "size";
@@ -55,12 +61,14 @@ inline const char* check_name(Check c) {
     }
     return "?";
 }
-// Which upscale::Why a failed check is (upscale_backend.h): missing files -> files_missing (2), every other problem with
-// the files -> files_bad (3), no pins -> unavailable (12). Kept as numbers so this header needs nothing of the backends.
+// Which upscale::Why a failed check is (upscale_backend.h): missing files or no receipt -> files_missing (2), every
+// other problem with the files -> files_bad (3), no pins -> unavailable (12). Kept as numbers so this header needs nothing
+// of the backends.
 inline uint32_t check_why(Check c) {
     switch (c) {
         case Check::ok: return 0;
-        case Check::missing: return 2;
+        case Check::missing:
+        case Check::no_receipt: return 2;
         case Check::no_pins: return 12;
         default: return 3;
     }
@@ -189,6 +197,33 @@ inline Verified verify_component(Fs& fs, const std::wstring& kiln_dir, std::stri
             return fail(Check::link, n + " is a link: Kiln loads vendor files only from its own folder (download " + v.component + " again)");
         }
     }
+    // the launcher's receipt: this component, format 1 (at most 64 KB, read through a handle, never a link)
+    {
+        const std::wstring receipt = v.dir + L"\\kiln-vendor.json";
+        const std::string label = where + "/kiln-vendor.json";
+        const std::string again = ": download " + v.component + " again in the launcher (Settings, Graphics)";
+        if (!fs.exists(receipt)) return fail(Check::no_receipt, where + " has no receipt (kiln-vendor.json): a download that did not finish" + again);
+        if (fs.is_link(receipt)) return fail(Check::link, label + " is a link" + again);
+        uint32_t err = 0;
+        Fs::Handle h = fs.open_locked(receipt, &err);
+        if (!h) return fail(Check::no_receipt, label + " could not be opened (error " + std::to_string(err) + ")" + again);
+        std::string text;
+        uint64_t size = 0;
+        bool ok = !fs.handle_is_link(h) && fs.size(h, &size) && size <= 65536;
+        if (ok) {
+            text.resize(static_cast<size_t>(size));
+            uint32_t got = 0, at = 0;
+            while (ok && at < size && fs.read(h, text.data() + at, static_cast<uint32_t>(size - at), &got) && got) at += got;
+            ok = at == size;
+        }
+        fs.close(h);
+        if (!ok) return fail(Check::no_receipt, label + " could not be read" + again);
+        const nlohmann::json j = nlohmann::json::parse(text, nullptr, false);
+        const bool format1 = j.is_object() && j.contains("format") && j["format"].is_number_integer() && j["format"].get<int64_t>() == 1;
+        if (!format1) return fail(Check::no_receipt, label + " is not a receipt Kiln reads (format 1)" + again);
+        if (!j.contains("component") || !j["component"].is_string() || j["component"].get<std::string>() != v.component)
+            return fail(Check::no_receipt, label + " is not " + v.component + "'s receipt" + again);
+    }
     for (const Pin* p : pins) {
         const std::wstring path = v.dir + L"\\" + widen(p->name);
         const std::string label = where + "/" + p->name;
@@ -268,13 +303,13 @@ class WinFs final : public Fs {
     void close(Handle h) override { CloseHandle(static_cast<HANDLE>(h)); }
 };
 
-// Loads one verified file (a path of Verified::paths, while its handle is open). Its own folder is searched for the
-// libraries it imports, then the system's (LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | DEFAULT_DIRS); never the game's root
-// first or the PATH. Checks that the module the loader returns was mapped from that path (not some other module of
-// the same name already in the process). nullptr: `detail` says why (English).
+// Loads one verified file (a path of Verified::paths, while its handle is open). The libraries it imports come from its
+// own folder or System32 (LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32, contracts.md 5.15): never the
+// game's folder or the PATH. Checks that the module the loader returns was mapped from that path (not some other module
+// of the same name already in the process). nullptr: `detail` says why (English).
 inline HMODULE load_verified(const std::wstring& path, std::string* detail) {
     const std::string name = narrow(path.substr(path.find_last_of(L"\\/") + 1));
-    HMODULE m = LoadLibraryExW(path.c_str(), nullptr, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+    HMODULE m = LoadLibraryExW(path.c_str(), nullptr, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
     if (!m) {
         const DWORD e = GetLastError();
         char b[96];

@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 // Host test of the vendor file check (vendor_file.h) and its SHA-256 (sha256.h): the standard's vectors and the padding
-// boundaries, streaming in any piece sizes, every way a component's files can be wrong (missing, a link on the way, the
-// wrong size, the wrong bytes, unreadable), the handles kept open on success and closed on failure. With the folder of
+// boundaries, streaming in any piece sizes, every way a component's files can be wrong (missing, no receipt or not this
+// component's, a link on the way, the wrong size, the wrong bytes, unreadable), the handles kept open on success and closed on failure. With the folder of
 // the real vendor files as the first argument (dev29/vendor-files), also their hashes against Kiln's pins, through the
 // same check the game runs. Linux files stand in for Windows': a Unix link is what Wine shows as a reparse point.
-//   tests/vendor_file_test <out dir> [<vendor-files dir>]
+//   tests/vendor_file_test <out dir> [<vendor-files dir>]   (built with -I native/third_party, for nlohmann/json)
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -131,6 +131,11 @@ static void sparse_file(const fs::path& path, uint64_t size) {  // `size` zero b
     std::ofstream(path, std::ios::binary).close();
     fs::resize_file(path, size);
 }
+// The launcher's receipt (vendor-receipt.schema.json); Kiln reads only `format` and `component`.
+static void receipt(const fs::path& dir, const std::string& component, int format = 1) {
+    write_file(dir / "kiln-vendor.json", "{\n  \"format\": " + std::to_string(format) + ",\n  \"component\": \"" + component +
+                                            "\",\n  \"vendor\": \"x\",\n  \"version\": \"1\",\n  \"files\": [{\"name\": \"../../evil.dll\"}]\n}\n");
+}
 static void place(const fs::path& from, const fs::path& to) {  // the real file, without copying 78 MB when it can
     fs::create_directories(to.parent_path());
     std::error_code ec;
@@ -171,10 +176,39 @@ static void wrong_files(const fs::path& out) {
     // no such component
     v = verify_component(pfs, kw, "nvidia-dlss");
     CHECK(v.check == Check::no_pins);
-    // the folder, but not the file
+    // the folder, but no receipt (a download that did not finish), even with the right file in it
     fs::create_directories(dll.parent_path());
     v = verify_component(pfs, kw, "intel-xess");
-    CHECK(v.check == Check::missing && v.detail.find("libxess.dll is missing") != std::string::npos);
+    CHECK(v.check == Check::no_receipt && v.detail.find("has no receipt") != std::string::npos && check_why(v.check) == 2);
+    // a receipt of another component, of another format, broken, too big, not an object
+    const fs::path ver = dll.parent_path();
+    receipt(ver, "amd-fsr");
+    v = verify_component(pfs, kw, "intel-xess");
+    CHECK(v.check == Check::no_receipt && v.detail.find("is not intel-xess's receipt") != std::string::npos && pfs.open == 0);
+    receipt(ver, "intel-xess", 2);
+    v = verify_component(pfs, kw, "intel-xess");
+    CHECK(v.check == Check::no_receipt && v.detail.find("format 1") != std::string::npos);
+    write_file(ver / "kiln-vendor.json", "{\"format\": 1, \"component\": \"intel-xe");
+    v = verify_component(pfs, kw, "intel-xess");
+    CHECK(v.check == Check::no_receipt && pfs.open == 0);
+    write_file(ver / "kiln-vendor.json", "{\"format\": \"1\", \"component\": \"intel-xess\"}");
+    CHECK(verify_component(pfs, kw, "intel-xess").check == Check::no_receipt);
+    write_file(ver / "kiln-vendor.json", "[1, \"intel-xess\"]");
+    CHECK(verify_component(pfs, kw, "intel-xess").check == Check::no_receipt);
+    write_file(ver / "kiln-vendor.json", "{\"format\": 1, \"component\": \"intel-xess\", \"pad\": \"" + std::string(70000, 'x') + "\"}");
+    v = verify_component(pfs, kw, "intel-xess");
+    CHECK(v.check == Check::no_receipt && v.detail.find("could not be read") != std::string::npos);
+    // a receipt that is a link
+    fs::remove(ver / "kiln-vendor.json");
+    receipt(root / "elsewhere", "intel-xess");
+    fs::create_symlink(root / "elsewhere" / "kiln-vendor.json", ver / "kiln-vendor.json");
+    v = verify_component(pfs, kw, "intel-xess");
+    CHECK(v.check == Check::link && v.detail.find("kiln-vendor.json is a link") != std::string::npos);
+    fs::remove(ver / "kiln-vendor.json");
+    // the right receipt (its file list, with a path in it, is never used), but not the file
+    receipt(ver, "intel-xess");
+    v = verify_component(pfs, kw, "intel-xess");
+    CHECK(v.check == Check::missing && v.detail.find("libxess.dll is missing") != std::string::npos && pfs.open == 0);
     // the wrong size
     write_file(dll, "not xess");
     v = verify_component(pfs, kw, "intel-xess");
@@ -197,6 +231,7 @@ static void wrong_files(const fs::path& out) {
     fs::create_directories(root / "other" / "3.0.2");
     fs::create_directories(kiln / "vendor" / "intel");
     fs::create_directory_symlink(root / "other" / "3.0.2", kiln / "vendor" / "intel" / "3.0.2");
+    receipt(root / "other" / "3.0.2", "intel-xess");
     v = verify_component(pfs, kw, "intel-xess");
     CHECK(v.check == Check::link && v.detail.find("kiln/vendor/intel/3.0.2 is a link") != std::string::npos);
     fs::remove_all(kiln / "vendor");
@@ -211,6 +246,7 @@ static void wrong_files(const fs::path& out) {
     fs::remove(kiln / "vendor");
     // unreadable (not as root, who reads anything)
     if (geteuid() != 0) {
+        receipt(dll.parent_path(), "intel-xess");
         write_file(dll, "x");
         fs::permissions(dll, fs::perms::none);
         v = verify_component(pfs, kw, "intel-xess");
@@ -219,6 +255,7 @@ static void wrong_files(const fs::path& out) {
     }
     // a component of several files: the first wrong one is reported, and every handle opened before it is closed again
     const fs::path amd = kiln / "vendor" / "amd" / "2.4.0";
+    receipt(amd, "amd-fsr");
     write_file(amd / "amd_fidelityfx_loader_vk.dll", "short");
     v = verify_component(pfs, kw, "amd-fsr");
     CHECK(v.check == Check::size && v.detail.find("amd_fidelityfx_loader_vk.dll") != std::string::npos && pfs.open == 0);
@@ -239,6 +276,11 @@ static void real_files(const fs::path& out, const fs::path& vendor_files) {
     const fs::path kiln = root / "kiln";
     place(xess, kiln / "vendor" / "intel" / "3.0.2" / "libxess.dll");
     for (const Pin* p : component_pins("amd-fsr")) place(amd / p->name, kiln / "vendor" / "amd" / "2.4.0" / p->name);
+    // receipts as the launcher writes them (schema/examples/vendor-receipt.json is intel-xess's)
+    const fs::path example = fs::path(__FILE__).parent_path() / ".." / ".." / ".." / ".." / "schema" / "examples" / "vendor-receipt.json";
+    if (fs::is_regular_file(example)) fs::copy_file(example, kiln / "vendor" / "intel" / "3.0.2" / "kiln-vendor.json");
+    else receipt(kiln / "vendor" / "intel" / "3.0.2", "intel-xess");
+    receipt(kiln / "vendor" / "amd" / "2.4.0", "amd-fsr");
     Verified x = verify_component(pfs, widen(kiln.string()), "intel-xess");
     CHECK(x.ok() && x.handles.size() == 1 && x.paths.size() == 1 && pfs.open == 1);
     CHECK(x.vendor == "intel" && x.version == "3.0.2" && PosixFs::p(x.paths[0]).ends_with("/kiln/vendor/intel/3.0.2/libxess.dll"));
