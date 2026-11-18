@@ -27,7 +27,7 @@ uncommitted changes. After this tooling PR is merged, use `main` instead of
 the temporary tooling branch.
 
 Setup is repeatable. The installer adds Fedora packages **inside Distrobox**
-and Rust stable (rustup) and Bun (npm) into `~/Projects/.kiln-tools`. It checks
+and .NET 10 inside the container, plus Rust stable (rustup) and Bun (npm) into\n`~/Projects/.kiln-tools`. It checks
 for WebKitGTK 4.1. Setup needs network access to download packages/toolchains.
 
 ## Test PR #3
