@@ -766,7 +766,7 @@ enum {
     KILN_UI_UPSCALE_WHY_NONE = 0,            /* it runs, or GAME is chosen */
     KILN_UI_UPSCALE_WHY_RESTART = 1,         /* chosen while the game runs: it needs Kiln's hooks or device features from
                                                 the game's start, so it runs from the next start of the game */
-    KILN_UI_UPSCALE_WHY_FILES_MISSING = 2,   /* its files are not downloaded (launcher: Settings, Upscalers) */
+    KILN_UI_UPSCALE_WHY_FILES_MISSING = 2,   /* its files are not downloaded (launcher: Settings, Graphics) */
     KILN_UI_UPSCALE_WHY_FILES_BAD = 3,       /* a file is not the pinned one (size or SHA-256), or is a link: download again */
     KILN_UI_UPSCALE_WHY_LOAD_FAILED = 4,     /* a vendor DLL did not load */
     KILN_UI_UPSCALE_WHY_DEVICE = 5,          /* the GPU or driver lacks a Vulkan extension or feature it needs */

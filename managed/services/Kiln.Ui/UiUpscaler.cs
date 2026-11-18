@@ -52,7 +52,7 @@ internal enum UpscalerRunning
 
 /// <summary>Why the chosen upscaler does not run: <c>KILN_UI_UPSCALE_WHY_*</c> (kiln_ui.h; stable numbers, only ever
 /// added to). One list for the Graphics page, the state file, the launcher and the docs (docs/kiln/graphics.md
-/// "Why the chosen upscaler does not run").</summary>
+/// "What runs now, and why not").</summary>
 internal enum UpscalerReason
 {
     /// <summary>It runs, or the game's own is chosen.</summary>

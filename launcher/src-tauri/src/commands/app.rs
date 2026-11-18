@@ -50,7 +50,7 @@ pub struct AppInfo {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sandbox: Option<crate::sandbox::SandboxInfo>,
     /// (dev.29) The previews on for this start (settings.json `preview` and `KILN_LAUNCHER_PREVIEW`;
-    /// commands/vendor.rs `previews`): `"upscalers"` shows Settings, Upscalers. Left out while none is on.
+    /// commands/vendor.rs `previews`): none is used since 0.2.0-dev.29.18 (`"upscalers"` ended with phase B). Left out while none is on.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub preview: Vec<String>,
 }
@@ -104,8 +104,8 @@ pub struct LauncherSettings {
     /// else a tag ("zh-CN"). Only the page reads it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub language: Option<String>,
-    /// (dev.29) Previews of unfinished features, by name: `"upscalers"` shows Settings, Upscalers (vendor upscaler
-    /// downloads, commands/vendor.rs). Not in the UI: set by hand while the launcher is closed; `KILN_LAUNCHER_PREVIEW`
+    /// (dev.29) Previews of unfinished features, by name (none since 0.2.0-dev.29.18: `"upscalers"` ended with phase B;
+    /// commands/vendor.rs). Not in the UI: set by hand while the launcher is closed; `KILN_LAUNCHER_PREVIEW`
     /// adds names for one start. Left out while empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub preview: Vec<String>,

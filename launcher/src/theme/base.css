@@ -206,7 +206,7 @@ html[data-covered] .k-app ::-webkit-scrollbar, html[data-covered] [data-deck-scr
 .k-kept-row { display: flex; align-items: center; gap: 10px; padding: 3px 0; }
 .k-kept-row .k-kept-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .k-kept-row .k-muted { flex: 1 1 auto; font-size: 14.5px; }
-/* Settings, Upscalers (components/UpscalerSettings.tsx) */
+/* Settings, Graphics: the upscaler files (components/UpscalerSettings.tsx) */
 .k-upscalers { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
 .k-upscaler { display: flex; flex-direction: column; gap: 4px; }
 .k-upscaler-head { display: flex; align-items: center; gap: 10px; min-width: 0; }

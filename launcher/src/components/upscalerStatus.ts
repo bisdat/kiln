@@ -3,7 +3,7 @@
 // "Now" while the game that wrote it runs, "Last game" after), else what Kiln will do from the choice, the files in
 // kiln/vendor/ and the tools in the game folder. The reason texts are the game's own (runtime/locales/en.json
 // graphics.upscaler.reason.*, the same English in src/i18n/en.json; unit/upscaler-status.test.ts keeps them one table)
-// and docs/kiln/graphics.md "Why the chosen upscaler does not run" lists them.
+// and docs/kiln/graphics.md "What runs now, and why not" lists them.
 import { UPSCALER_REASONS, type AmdUpscalerMode, type GraphicsNow, type GraphicsStepAside, type Json, type UpscalerChoice, type UpscalerReason } from "../api/commands";
 import type { VendorComponent } from "../api/vendor";
 import { t } from "../i18n";

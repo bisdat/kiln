@@ -29,7 +29,7 @@ fn previews_in(env: Option<&str>) -> Vec<String> {
     env.unwrap_or("").split([',', ' ']).map(|s| s.trim().to_ascii_lowercase()).filter(|s| !s.is_empty()).collect()
 }
 
-/// `vendor_status`: what the Upscalers section shows for a game.
+/// `vendor_status`: what Settings, Graphics shows of the upscaler files for a game (the Deck's rows too).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VendorStatus {
