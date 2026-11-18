@@ -12,9 +12,28 @@
 #include "upscale_backend.h"
 #include "vendor_file.h"
 #include "xess_backend.h"
+#if __has_include("upscale_mv.h")
+#include "upscale_mv.h"  // the core's motion-vector copy (B1): XeSS gets R16G16_SFLOAT, the format Intel's guide names
+#define KUI_XESS_MOTION_COPY 1
+#endif
 
 namespace kui::upscale {
 namespace {
+
+#ifdef KUI_XESS_MOTION_COPY
+class CoreMotionCopy final : public xess::MotionCopy {
+  public:
+    void want(DeviceNeeds* needs) override { want_mv_needs(needs); }
+    bool init(const VkContext& vk, std::string* detail) override { return c_.init(vk, detail); }
+    bool record(VkCommandBuffer cb, const Texture& in, uint64_t frame, Texture* out, std::string* detail) override {
+        return c_.record(cb, in, frame, out, detail);
+    }
+    void destroy() override { c_.destroy(); }
+
+  private:
+    MotionConverter c_;
+};
+#endif
 
 template <class T>
 T proc(HMODULE m, const char* name) {
@@ -70,6 +89,14 @@ class WinHost final : public xess::Host {
     }
 
     void log(int level, const std::string& line) override { logf(level, "upscale: xess: %s", line.c_str()); }
+
+    std::unique_ptr<xess::MotionCopy> motion_copy() override {
+#ifdef KUI_XESS_MOTION_COPY
+        return std::make_unique<CoreMotionCopy>();
+#else
+        return nullptr;
+#endif
+    }
 };
 
 }  // namespace
