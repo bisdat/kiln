@@ -874,6 +874,31 @@ fn no_game_folder_or_a_missing_one() {
     assert!(r.summary.contains("Left out"));
 }
 
+/// (dev.29.18) A finding the launcher knows (WebKit's sandbox) is listed with the report's own, problems first, in
+/// summary.txt, report.json and the short summary, redacted like them; with a game and without one.
+#[test]
+fn the_callers_findings_are_listed_with_the_reports_own() {
+    let f = Fx::new("caller-findings");
+    let mut i = f.input();
+    i.findings.push(Finding { id: "webkit-sandbox".into(), level: Level::Problem,
+        text: format!("WebKit's sandbox cannot start on this system (bwrap: setting up uid map: Permission denied); launcher.log: {HOME}/.local/share/kiln/logs/launcher.log") });
+    for game in [true, false] {
+        if !game {
+            i.install = None;
+        }
+        let r = build(&i);
+        let w = r.findings.iter().find(|x| x.id == "webkit-sandbox").expect("listed");
+        assert_eq!(w.level, Level::Problem);
+        assert!(w.text.contains("<home>/.local/share/kiln/logs/launcher.log") && !w.text.contains(HOME), "{}", w.text);
+        assert_eq!(r.findings[0].level, Level::Problem, "problems first");
+        assert!(r.summary.contains("[problem] WebKit's sandbox cannot start"), "{}", r.summary);
+        assert!(r.short.contains("WebKit's sandbox cannot start"), "{}", r.short);
+        assert!(file(&r, "report.json").unwrap().contains("\"webkit-sandbox\""));
+    }
+    // none given: none listed
+    assert!(build(&f.input()).findings.iter().all(|x| x.id != "webkit-sandbox"));
+}
+
 #[test]
 fn size_bounds() {
     let f = Fx::healthy("big");

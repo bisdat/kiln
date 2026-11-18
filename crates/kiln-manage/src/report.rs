@@ -472,6 +472,9 @@ pub struct ReportInput {
     pub roots: Option<Vec<SteamRoot>>,
     /// Extra facts for summary.txt (kilnctl: the instance's Wine runner).
     pub facts: Vec<(String, String)>,
+    /// (dev.29.18) Findings only the caller can know (the Linux launcher: WebKit's sandbox, `webkit-sandbox`), listed
+    /// with the report's own (redacted like them).
+    pub findings: Vec<Finding>,
     /// (dev.29) The launcher's update channel: summary.txt, the short summary and report.json say it (a tester's report
     /// says which test build). None: not a launcher (kilnctl) or not known.
     pub channel: Option<ReportChannel>,
@@ -521,7 +524,7 @@ pub struct Finding {
     /// Stable name: `not-installed`, `proxy-not-kiln`, `files-missing`, `files-changed`, `not-loaded`,
     /// `proton-override`, `proton-chained-override`, `unknown-build`, `safe-idle`, `own-loader`, `loader-in-folder`, `unlisted-mods`,
     /// `mod-failed`, `hosted-mods`, `hosted-off`, `crash`, `profile-invalid`, `newer-mods`, `no-game`, `sf-startup-failed`, `sf-startup-skipped`,
-    /// `optiscaler`.
+    /// `optiscaler`; from the launcher ([`ReportInput::findings`]): `webkit-sandbox`.
     pub id: String,
     pub level: Level,
     pub text: String,
@@ -990,6 +993,9 @@ pub fn build(input: &ReportInput) -> Report {
     }
     for (k, v) in &input.facts {
         let _ = writeln!(sys, "{:<15}{v}", format!("{k}:"));
+    }
+    for f in &input.findings {
+        cx.find(&f.id, f.level, f.text.clone());
     }
 
     let Some(game) = game_dir.as_deref() else {
