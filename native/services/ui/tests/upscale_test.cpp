@@ -264,6 +264,11 @@ static void frames() {
     CHECK(h.frame(f, 1, false));
     h.drop();                       // Fsr3Create
     CHECK(h.frame(f, 1, false) && !h.frame(f, 1, false));
+    // a frame the game's FSR 3 upscaled in between (an unusable frame, a command Kiln could not write): the core drops
+    // the backend's history, so the next of Kiln's frames does not blend in a picture from before the game's
+    CHECK(!h.frame(f, 1, false));
+    h.drop();
+    CHECK(h.frame(f, 1, false) && !h.frame(f, 1, false));
 
     CHECK(!retire_due(10, 12) && !retire_due(10, 13) && retire_due(10, 14) && retire_due(0, 4));
 }

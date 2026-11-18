@@ -743,6 +743,7 @@ void hk_fsr(void* ctx, uint8_t* fsr, uint8_t* desc) {
             logf(KILN_LOG_WARN, "graphics: upscaler: frame %llu: %s: the game's FSR 3 runs this frame", static_cast<unsigned long long>(n), detail.c_str());
         if (bad >= 120) fall_back(why, detail);  // every frame for about two seconds: for the session
         say_why(why, detail);
+        g_hist.drop();  // the game's FSR 3 has this frame: the backend's history is older than the picture after it
         game_fsr(ctx, fsr, desc);
         return;
     }
@@ -788,6 +789,7 @@ void hk_fsr(void* ctx, uint8_t* fsr, uint8_t* desc) {
         s.seq.store(0, std::memory_order_relaxed);
         static uint32_t said = 0;
         if (said++ < 3) logf(KILN_LOG_WARN, "graphics: upscaler: writing Kiln's render command failed: the game's FSR 3 runs this frame");
+        g_hist.drop();
         game_fsr(ctx, fsr, desc);
         return;
     }
