@@ -400,7 +400,7 @@ internal sealed unsafe class ViewContext
         _spare = null;
         ctx._stage = stage;
         ctx.Program = stage.Wrap.Program;
-        ctx.Lists = ProgramLists.Of(t, stage.Wrap.World, stage.Wrap.Program, s->ProgramIndex);
+        ctx.Lists = ProgramLists.Of(t, stage.Wrap.Table, stage.Wrap.Program, s->ProgramIndex);
         ctx._step = s->Step;
         // the change events: server worlds only (a client world's are chapter 14's), and only while someone listens
         // the bytes before are kept for ComponentWrittenEvent and, since 07 S7, for a component watch (its Kiln origin)

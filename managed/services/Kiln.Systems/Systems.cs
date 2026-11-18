@@ -50,7 +50,11 @@ public enum WrapState
 public sealed record WrapOptions
 {
     /// <summary>The world (default the server world). <see cref="WorldKind.Client"/> needs capability
-    /// <c>systems.wraps.client</c>; <see cref="WorldKind.Prediction"/> has no program table.</summary>
+    /// <c>systems.wraps.client</c>. <see cref="WorldKind.Prediction"/> (since 0.2.0-dev.29.18, mod API 0.2.10) needs
+    /// capability <c>systems.wraps.prediction</c>: the stages run on the prediction storage's slices of a program of the
+    /// client world's table (the prediction storage has no table of its own), Before and After only, on a program the
+    /// prediction storage steps (descriptor flags without 0x1, 0x10 and 0x40). Where that capability is off a prediction
+    /// wrap throws <see cref="ArgumentException"/>, as before 0.2.0-dev.29.18.</summary>
     public WorldKind World { get; init; } = WorldKind.Server;
 
     /// <summary>The priority of the stages whose call gives none.</summary>
@@ -128,7 +132,7 @@ public static unsafe partial class Systems
     /// <returns><c>Ok = false</c>: the program is not in that world (a client program on a server), native SET is
     /// loaded.</returns>
     /// <exception cref="ArgumentException"><paramref name="program"/> is null or empty, or the world is
-    /// <see cref="WorldKind.Prediction"/>.</exception>
+    /// <see cref="WorldKind.Prediction"/> while <see cref="PredictionCapability"/> is off.</exception>
     /// <exception cref="KilnUnavailableException"><c>systems.wraps</c> (or <c>systems.wraps.client</c>) is off.</exception>
     [TickThreadOnly, RequiresCapability("systems.wraps")]
     public static WrapResult<ProgramWrap> Wrap(string program, WrapOptions? options = null)
@@ -147,7 +151,7 @@ public static unsafe partial class Systems
     /// <returns><c>Ok = false</c>: the program is not in that world, native SET is loaded, or its live descriptor differs
     /// from the view's (the reason names each list that changed: <c>"fuel_setup: write list changed: +X -Y"</c>).</returns>
     /// <exception cref="ArgumentException">The view has no name or no contract, or the world is
-    /// <see cref="WorldKind.Prediction"/>.</exception>
+    /// <see cref="WorldKind.Prediction"/> while <see cref="PredictionCapability"/> is off.</exception>
     /// <exception cref="KilnUnavailableException"><c>systems.wraps.typed</c> (or <c>systems.wraps.client</c>) is off.</exception>
     [TickThreadOnly, RequiresCapability("systems.wraps.typed")]
     public static WrapResult<ProgramWrap<T>> Wrap<T>(WrapOptions? options = null) where T : IGameProgram<T>, allows ref struct
@@ -166,7 +170,7 @@ public static unsafe partial class Systems
         uint live = 0, length = 0;
         int rc;
         fixed (byte* text = buffer)
-            rc = t->GameProgramContract((uint)options.World, index, &live, text, (uint)buffer.Length, &length);
+            rc = t->GameProgramContract((uint)TableOf(options.World), index, &live, text, (uint)buffer.Length, &length);
         if (rc != SystemsNative.Ok)
             return new WrapResult<ProgramWrap<T>>(false, $"{program}: kiln.world cannot read its descriptor (result {rc})", null);
         if (live != T.Contract)
@@ -181,20 +185,25 @@ public static unsafe partial class Systems
     {
         t = null;
         index = -1;
-        if (options.World == WorldKind.Prediction)
-            throw new ArgumentException("the prediction world has no program table of its own (it runs the client world's)", nameof(options));
+        if (options.World == WorldKind.Prediction && !Capabilities.Is(PredictionCapability))
+            throw new ArgumentException("the prediction world has no program table of its own (it runs the client world's); " +
+                $"prediction wraps need capability {PredictionCapability}: {Capabilities.Why(PredictionCapability)}", nameof(options));
         Services.RequireTickThread(member);
         if (ModContext.CurrentMod is { Alive: false }) throw new InvalidOperationException("the mod is unloading");
         var why = WhyOff(options.World);
         if (why.Refuse is { } refuse) return refuse;
         t = SystemsNative.T;
         if (t == null) throw new KilnUnavailableException("systems.wraps", "kiln.world v4 is not here");
-        index = FindIndex(t, program, options.World);
+        var table = TableOf(options.World);
+        index = FindIndex(t, program, table);
         if (index < 0)
-            return $"{program}: no such program in the {Lower(options.World)} world" +
+            return $"{program}: no such program in the {Lower(table)} world" +
                 (options.World == WorldKind.Server ? " (it may be a client program)" : "");
-        var info = Info(t, options.World, index)!;
-        if (!info.Runs) return $"{program} has no update in the {Lower(options.World)} world";
+        var info = Info(t, table, index)!;
+        if (!info.Runs) return $"{program} has no update in the {Lower(table)} world";
+        if (options.World == WorldKind.Prediction && (info.Flags & NotPredicted) != 0)
+            return $"{program} does not run in the prediction storage (descriptor flags 0x{info.Flags:x}: " +
+                ((info.Flags & 0x1) != 0 ? "a client-world program" : (info.Flags & 0x10) != 0 ? "hostOnly" : "the engine's bit 0x40") + ")";
         return null;
     }
 
@@ -214,8 +223,21 @@ public static unsafe partial class Systems
         }
         if (world == WorldKind.Client && (Capabilities.IsHeld("systems.wraps.client") || !Capabilities.Is("systems.wraps.client")))
             throw new KilnUnavailableException("systems.wraps.client", Capabilities.Why("systems.wraps.client"));
+        if (world == WorldKind.Prediction && (Capabilities.IsHeld(PredictionCapability) || !Capabilities.Is(PredictionCapability)))
+            throw new KilnUnavailableException(PredictionCapability, Capabilities.Why(PredictionCapability));
         return new Off(null);
     }
+
+    /// <summary>The capability of prediction wraps (<see cref="WrapOptions.World"/> = <see cref="WorldKind.Prediction"/>):
+    /// on where <c>systems.wraps.client</c> is. Since 0.2.0-dev.29.18 (mod API 0.2.10).</summary>
+    public const string PredictionCapability = "systems.wraps.prediction";
+
+    // the descriptor flags that keep a program out of the prediction storage's step (client StepPrograms: kind 1 skips the
+    // engine's 0x40 and runs only programs without the client flag 0x1 and HOST_ONLY 0x10)
+    internal const uint NotPredicted = 0x1 | 0x10 | 0x40;
+
+    // The world whose table holds a wrap's program: the prediction storage runs the client world's.
+    internal static WorldKind TableOf(WorldKind w) => w == WorldKind.Prediction ? WorldKind.Client : w;
 
     internal static string Lower(WorldKind w) => w switch { WorldKind.Client => "client", WorldKind.Prediction => "prediction", _ => "server" };
 

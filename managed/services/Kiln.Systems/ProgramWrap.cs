@@ -95,6 +95,10 @@ public sealed unsafe class ProgramWrap : IDisposable
     /// <summary>The wrap's world.</summary>
     public WorldKind World => _options.World;
 
+    // The world whose program table holds the program: the client world's for a prediction wrap (the prediction storage
+    // runs that table's programs and has none of its own), else the wrap's own.
+    internal WorldKind Table => Systems.TableOf(World);
+
     internal ModContext? Mod { get; }
     internal string ModId => Mod?.Info.Id ?? "kiln";
     private string? _writer;
@@ -159,6 +163,8 @@ public sealed unsafe class ProgramWrap : IDisposable
     {
         ArgumentNullException.ThrowIfNull(handler);
         Services.RequireTickThread("ProgramWrap.Replace");
+        if (World == WorldKind.Prediction)  // kiln.world takes Before and After there (since 0.2.0-dev.29.18)
+            return new WrapResult<ProgramWrap>(false, $"{Program}: a prediction wrap has no Replace (Before and After only)", null);
         foreach (var other in Systems.Live.Keys)
             if (other.Kind == WrapStage.Replace && other.Wrap.Program == Program && other.Wrap.World == World &&
                 other.State is WrapState.Pending or WrapState.Active && !other.Removing)
@@ -466,7 +472,7 @@ internal sealed unsafe class ManagedStage
 
     private bool DirectoryReady(SystemsNative.Table* t, SystemsNative.Slice* s)
     {
-        var session = t->GameWorldSession((uint)Wrap.World);
+        var session = t->GameWorldSession((uint)Wrap.Table);
         // Successful lists are session-cached: concurrent steady-state slices need no retry gate at all.
         if (Volatile.Read(ref _directorySession) == session && _directoryReady) return true;
         // No worker waits for another worker performing the bounded directory reads.
@@ -481,7 +487,7 @@ internal sealed unsafe class ManagedStage
             if (_directoryReady) return true;
             if (_directoryAttempts != 0 && _directoryStep == s->Step) return false;
             _directoryStep = s->Step;
-            var lists = ProgramLists.Of(t, Wrap.World, Wrap.Program, s->ProgramIndex);
+            var lists = ProgramLists.Of(t, Wrap.Table, Wrap.Program, s->ProgramIndex);
             if (lists.Complete && (lists.Contract is not null || !lists.ContractUnread))
             {
                 _directoryReady = true; _directorySuspended = false; Detail = null;
@@ -511,10 +517,10 @@ internal sealed unsafe class ManagedStage
     {
         var t = SystemsNative.T;
         if (t == null) throw new KilnUnavailableException("systems.wraps", "kiln.world v4 is not here");
-        var index = Systems.FindIndex(t, Wrap.Program, Wrap.World);
+        var index = Systems.FindIndex(t, Wrap.Program, Wrap.Table);
         if (index < 0)
         {
-            Refuse($"{Wrap.Program}: no such program in the {Systems.Lower(Wrap.World)} world");
+            Refuse($"{Wrap.Program}: no such program in the {Systems.Lower(Wrap.Table)} world");
             return;
         }
         _self = GCHandle.Alloc(this);
