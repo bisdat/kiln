@@ -55,7 +55,11 @@ pub const OPTISCALER_INI_MAX: u64 = 4 * 1024 * 1024;
 pub struct OptiScalerIni {
     /// `[Menu] OverlayMenu`: None for auto (OptiScaler's default: on).
     pub overlay_menu: Option<bool>,
-    /// `[FrameGen] FGInput` and `FGOutput` both set to something other than nofg/auto.
+    /// `[FrameGen] FGInput` and `FGOutput` both set to something other than nofg/auto: OptiScaler's frame generation is
+    /// made with the game's device (its nightly builds since October 2026, with its menu on or off; 0.9.5 has none for
+    /// Vulkan).
+    /// An input without an output or the other way round makes none. `[FrameGen] Enabled` does not matter: it only
+    /// switches frame generation while it runs, its own present queue and swapchain are there either way.
     pub frame_gen: bool,
 }
 
@@ -99,8 +103,9 @@ impl OptiScalerIni {
             .unwrap_or_default()
     }
 
-    /// Kiln's overlay draws next to OptiScaler: its own overlay menu is off, so it patches none of the game's presents
-    /// or swapchains, and no frame generation is set. Otherwise kiln.ui's drawing steps aside on its own.
+    /// Kiln's overlay draws next to OptiScaler: its own overlay menu is off and no frame generation is set, so it
+    /// patches none of the game's presents or swapchains. Otherwise kiln.ui's drawing steps aside on its own (with frame
+    /// generation the game's frames are presented from OptiScaler's own queue, where Kiln cannot draw).
     pub fn kiln_overlay_draws(&self) -> bool {
         self.overlay_menu == Some(false) && !self.frame_gen
     }
@@ -109,12 +114,21 @@ impl OptiScalerIni {
 /// What a player can expect from Kiln's in-game overlay next to OptiScaler with these settings (the Play page's note).
 pub fn optiscaler_overlay_note(ini: &OptiScalerIni) -> String {
     if ini.kiln_overlay_draws() {
-        return "OptiScaler's own overlay menu is off in OptiScaler.ini (OverlayMenu=false), so Kiln's in-game overlay draws next to it.".into();
+        return "OptiScaler's own overlay menu is off in OptiScaler.ini (OverlayMenu=false) and no frame generation is set, so Kiln's \
+                in-game overlay draws next to it."
+            .into();
+    }
+    if ini.overlay_menu == Some(false) {
+        return "Kiln's in-game overlay steps aside while OptiScaler's frame generation is set in OptiScaler.ini (FGInput and FGOutput \
+                under [FrameGen]): the game's frames are then presented from OptiScaler's own queue, where Kiln cannot draw. Kiln's key \
+                bindings and the Mods entry still work, Kiln's windows and Mods page don't show. For Kiln's overlay, set FGInput and \
+                FGOutput to auto (frame generation off, upscaling stays), or try both with the launch option KILN_UI_OVERLAY=1."
+            .into();
     }
     "Kiln's in-game overlay steps aside while OptiScaler's own menu is on (its default; both open with Insert): Kiln's key \
      bindings and the Mods entry still work, Kiln's windows and Mods page don't show. For Kiln's overlay, set OverlayMenu=false \
-     under [Menu] in OptiScaler.ini (OptiScaler's menu and frame generation go off with it), or try both with the launch \
-     option KILN_UI_OVERLAY=1."
+     under [Menu] in OptiScaler.ini and leave FGInput and FGOutput under [FrameGen] at auto (OptiScaler's menu and frame \
+     generation off, its upscaling on), or try both with the launch option KILN_UI_OVERLAY=1."
         .into()
 }
 

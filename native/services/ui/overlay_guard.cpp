@@ -285,7 +285,8 @@ bool overlay_guard_start() noexcept {
                 g_overlay_reason += environment == 0 ? "KILN_UI_OVERLAY=0"
                     : environment == -1 && setting == 0 ? "turned off in Kiln's settings (kiln.json ui.overlay)"
                     : guarded ? "an earlier overlay start was interrupted"
-                    : sl ? "NVIDIA Streamline is installed" : "OptiScaler is installed";
+                    : sl ? "NVIDIA Streamline is installed"
+                    : optiscaler.ini.overlay_menu != 0 ? "OptiScaler's own overlay menu is on" : "OptiScaler's frame generation is on";
             }
         };
         apply_mode(false);
@@ -297,10 +298,17 @@ bool overlay_guard_start() noexcept {
             else if (optiscaler.coexists())  // the crash guard may still keep drawing off for this start (its own line)
                 logf(KILN_LOG_INFO, "ui: OptiScaler is installed (%s) with %s: it leaves the game's presents alone, so it does not turn Kiln's overlay drawing off",
                      file.c_str(), optiscaler_settings(optiscaler).c_str());
-            else
+            else if (optiscaler.ini.overlay_menu != 0)
                 logf(KILN_LOG_INFO, "ui: OptiScaler is installed (%s) with %s: it draws its own overlay in the game's presents and opens its menu with Insert, "
                      "so Kiln's overlay drawing steps aside (keys and the Mods menu still work). For Kiln's overlay, set OverlayMenu=false under [Menu] "
-                     "in OptiScaler.ini (OptiScaler's menu and frame generation go off with it), or KILN_UI_OVERLAY=1 to try both at your own risk",
+                     "in OptiScaler.ini and leave FGInput and FGOutput under [FrameGen] at auto (OptiScaler's menu and frame generation off, its "
+                     "upscaling on), or KILN_UI_OVERLAY=1 to try both at your own risk",
+                     file.c_str(), optiscaler_settings(optiscaler).c_str());
+            else  // its menu off, its frame generation on: its nightly builds since October 2026 run it without the menu
+                logf(KILN_LOG_INFO, "ui: OptiScaler is installed (%s) with %s: with frame generation the game's frames are presented from OptiScaler's "
+                     "own queue and swapchain, where Kiln cannot draw, so Kiln's overlay drawing steps aside (keys and the Mods menu still work). "
+                     "For Kiln's overlay, set FGInput and FGOutput under [FrameGen] in OptiScaler.ini to auto (frame generation off, its upscaling "
+                     "stays), or KILN_UI_OVERLAY=1 to try at your own risk",
                      file.c_str(), optiscaler_settings(optiscaler).c_str());
         } else if (optiscaler.ini_only) {
             logf(KILN_LOG_INFO, "ui: OptiScaler.ini is in the game folder, but no OptiScaler DLL next to it; Kiln's overlay is not changed by it");
