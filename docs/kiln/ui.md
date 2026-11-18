@@ -686,6 +686,8 @@ of key hints. Tab / Shift+Tab or LB / RB switch sections; arrows or the d-pad mo
 - **Network**: Kiln.Network's status, the server's Kiln version, warnings and mods, and clients and channels when hosting.
 - **Keys**: every binding, with remap and reset.
 - **Overlay**: resolution, scale, frame cost, error, a test toast.
+- **Graphics** (0.2.0-dev.29.18): Kiln's own frame cap, DLSS render preset and render scale, and a readout of frame rates
+  and the upscaler in use, with what they do now and what they step aside for: [graphics.md](graphics.md).
 
 Where the list comes from (`ModCatalog.cs`, internal; usable on a dedicated server, which has no menu):
 `Mods.All` for Kiln mods; `<game>/kiln/state/` for the rest: `boot.json` (chain DLLs, Kiln plugins, the profile in use),
@@ -1007,5 +1009,9 @@ present hook below OptiScaler's whatever the order of patches (hook the device's
 does, instead of the loader's export and the `vkGetDeviceProcAddr` wrapper), follow the semaphore OptiScaler substitutes,
 share the Insert key, and stay out of FFX's present thread with frame generation on. That is a rework of `vk.cpp`'s
 Windows path that no test can check without OptiScaler in a real game.
+
+OptiScaler also hooks DLSS and has its own frame limiter: Kiln's own graphics tools (frame cap, DLSS settings) step
+aside while it is installed, whatever its ini says; the readout stays where Kiln's overlay draws
+([graphics.md](graphics.md#living-next-to-other-tools)).
 
 The additive window size-constraints slot after v7 is described in the [UI service reference](services/ui.md).
