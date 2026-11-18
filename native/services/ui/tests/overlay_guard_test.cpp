@@ -372,11 +372,12 @@ int main() {
         o = detect_optiscaler(game);
         expect(o.found() && !o.ini.read && !o.coexists(), "OptiScaler.asi without an ini: found by its name and contents, menu on");
         std::filesystem::remove(game / "OptiScaler.asi");
-        // a loaded copy elsewhere (Ultimate ASI Loader's plugins folder), its ini spelled in another case
+        // a loaded copy elsewhere (Ultimate ASI Loader's plugins folder), with its ini next to it (looked up by name: the
+        // host's folders are case sensitive, Windows and Wine find any spelling of it)
         const auto plugins = game / "plugins";
         std::filesystem::create_directories(plugins);
         std::ofstream(plugins / "d3d12.dll", std::ios::binary) << opti_bytes;
-        write(plugins / "optiscaler.INI", "[menu]\noverlaymenu=false\n");
+        write(plugins / "OptiScaler.ini", "[menu]\noverlaymenu=false\n");
         expect(!detect_optiscaler(game).found(), "subfolders are not scanned");
         o = detect_optiscaler(game, {plugins / "d3d12.dll", game / "missing.dll"});
         expect(o.found() && o.file == plugins / "d3d12.dll" && o.coexists(), "a loaded copy counts, with the ini next to it");

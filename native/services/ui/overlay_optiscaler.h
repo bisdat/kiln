@@ -20,7 +20,8 @@
 // Found by contents, never by a name alone: dxgi.dll, winmm.dll, version.dll and dbghelp.dll are other tools' and
 // loaders' names too (ReShade, ShroudForge, EML, Shroudtopia). A candidate under one of OptiScaler's names is read only
 // when OptiScaler.ini is next to it or the file is named OptiScaler*; it is OptiScaler when it names its own
-// "OptiScaler.ini" (ASCII or UTF-16, case ignored). A game without OptiScaler.ini reads no extra file.
+// "OptiScaler.ini" (ASCII or UTF-16, case ignored). A game without OptiScaler.ini reads no extra file and lists no
+// folder: one look-up of the ini's name per candidate.
 #pragma once
 #include <algorithm>
 #include <array>
@@ -133,18 +134,13 @@ inline bool optiscaler_named(const std::filesystem::path& file) {
     return name.starts_with(u8"optiscaler");
 }
 
-// The ini next to `file` (exact name first, then any spelling: Wine and Linux folders are case sensitive).
+// The ini next to `file`: one look-up by name, never a listing of the folder. Windows matches the name in any case, and
+// so does Wine (its own case-insensitive look-up), so every spelling is found in the game; this runs at the game's entry
+// point for each candidate, Windows' own copies in System32 included, where a listing would cost thousands of entries.
 inline std::filesystem::path optiscaler_ini_next_to(const std::filesystem::path& file) {
     std::error_code ec;
-    const auto dir = file.parent_path();
-    const auto exact = dir / std::filesystem::path(std::u8string(optiscaler_ini_name.begin(), optiscaler_ini_name.end()));
-    if (std::filesystem::is_regular_file(exact, ec)) return exact;
-    for (std::filesystem::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
-        auto name = it->path().filename().u8string();
-        for (auto& c : name) if (c >= u8'A' && c <= u8'Z') c = char8_t(c - u8'A' + u8'a');
-        if (name == u8"optiscaler.ini" && it->is_regular_file(ec)) return it->path();
-    }
-    return {};
+    const auto ini = file.parent_path() / std::filesystem::path(std::u8string(optiscaler_ini_name.begin(), optiscaler_ini_name.end()));
+    return std::filesystem::is_regular_file(ini, ec) ? ini : std::filesystem::path{};
 }
 
 inline OptiScalerIni read_optiscaler_ini(const std::filesystem::path& ini) {
