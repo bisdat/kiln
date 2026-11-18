@@ -1,8 +1,9 @@
 // Mock answers for the vendor_* commands (browser mock mode; src/api/mock.ts registers them), from the launcher's real
 // manifest and licence texts (src/data/vendor-components.json, src/data/vendor-licenses/): its pins decide, as in the
 // app. `?vendor=unpinned` (or `__kilnVendorMock.pin(false)`) reads every file as not pinned ("Not available in this
-// build"), `?vendor=pinned` (`.pin(true)`) every file as pinned; `.pin(null)` goes back to the manifest's. The preview is
-// `?preview=upscalers` (app_info). Tests and the console: `__kilnVendorMock.pin(on)`, `.failNext(message, code?)`,
+// build"), `?vendor=pinned` (`.pin(true)`) every file as pinned; `.pin(null)` goes back to the manifest's. (dev.29.18:
+// out of the preview "upscalers"; `?preview=` still fills app_info.preview.) Tests and the console:
+// `__kilnVendorMock.pin(on)`, `.failNext(message, code?)`,
 // `.pace(ms)`, `.changeLicense(id)`, `.damage(id, file?)`, `.install(id, version)`, `.calls()`, `.agreed()`.
 import type { KilnError } from "./commands";
 import type { VendorComponent, VendorDownloadReport, VendorLicenseText, VendorRemoveReport, VendorStatus } from "./vendor";
@@ -24,7 +25,7 @@ const TEXTS: Record<string, string> = {
 };
 
 const params = typeof location !== "undefined" ? new URLSearchParams(location.search) : new URLSearchParams();
-/** `?preview=upscalers` (comma-separated names): app_info.preview. */
+/** `?preview=<names>` (comma-separated): app_info.preview. */
 export const MOCK_PREVIEW: string[] = (params.get("preview") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 
 const human = (n: number) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${(n / 1024).toFixed(1)} KB`);
@@ -72,7 +73,7 @@ export function vendorMockHandlers(startTask: StartTask, gameKind: (gameId: stri
     vendor_status: (a): VendorStatus => {
       calls.push({ cmd: "vendor_status", args: a });
       client(a.gameId);
-      return { preview: MOCK_PREVIEW.includes("upscalers"), folder: "kiln/vendor", components: components.map((c) => status(String(a.gameId), c)) };
+      return { folder: "kiln/vendor", components: components.map((c) => status(String(a.gameId), c)) };
     },
     vendor_license: (a): VendorLicenseText => {
       calls.push({ cmd: "vendor_license", args: a });
@@ -83,7 +84,6 @@ export function vendorMockHandlers(startTask: StartTask, gameKind: (gameId: stri
     vendor_download: (a): string => {
       calls.push({ cmd: "vendor_download", args: a });
       const c = comp(a.componentId);
-      if (!MOCK_PREVIEW.includes("upscalers")) reject("refused", "Upscaler downloads are a preview that is off in this launcher. Nothing was downloaded.");
       client(a.gameId);
       if (!isPinned(c)) reject("refused", `${c.name} is not available in this build of Kiln. Nothing was downloaded.`);
       const key = `${c.vendor}:${c.license.sha256}`;

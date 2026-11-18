@@ -1600,7 +1600,9 @@
       "restoreGoes": "Your profiles and settings from before the beta go back before the restart.",
       "settingsStay": "Your current profiles and settings stay.",
       "noCopy": "No complete copy from before the beta: {warnings}",
-      "downloadingDots": "Downloading…"
+      "downloadingDots": "Downloading…",
+      "upscaler": "Upscaler behind the game's FSR 3",
+      "upscalerNow": "Upscaler now"
     }
   },
   "mods": {
@@ -2794,7 +2796,7 @@
     },
     "graphics": {
       "title": "Graphics",
-      "sub": "Kiln's own graphics tools in the game, also in the game's Kiln menu (Insert) under Graphics. The frame cap and the readout apply at once, DLSS settings when the game next sets up DLSS.",
+      "sub": "Kiln's own graphics tools in the game, also in the game's Kiln menu (Insert) under Graphics. The frame cap and the readout apply at once, DLSS settings when the game next sets up DLSS, the upscaler when the game next sets up FSR.",
       "aside": {
         "line": "{tool}: {effect}",
         "optiscaler": "OptiScaler is installed ({file})",
@@ -2804,7 +2806,10 @@
         "nvngx": "Another DLSS loader is in the game folder ({file})",
         "unknown": "Another graphics tool is in the game folder ({file})",
         "frameCap": "Kiln's frame cap and DLSS settings step aside; the readout still works.",
-        "dlss": "Kiln's DLSS settings step aside; the frame cap and the readout still work."
+        "frameCapUpscaler": "Kiln's frame cap, DLSS settings and upscaler choice step aside; the readout still works.",
+        "dlss": "Kiln's DLSS settings step aside; the frame cap and the readout still work.",
+        "upscaler": "Another upscaler tool's files are next to the game ({file})",
+        "upscalerOnly": "Kiln's upscaler choice steps aside; the frame cap, DLSS settings and readout still work."
       },
       "labels": {
         "fpsCap": "Frame cap",
@@ -2816,13 +2821,86 @@
         "dlssPerformanceScale": "DLSS render scale, Performance",
         "dlssUltraPerformanceScale": "DLSS render scale, Ultra Performance",
         "readout": "Readout"
+      },
+      "upscaler": {
+        "title": "Behind the game's FSR 3",
+        "label": "Upscaler",
+        "hint": "Choose FSR 3 as the upscaler in the game's graphics settings: Kiln runs your choice in its place. A change applies when the game next sets FSR up: when a world loads, or when you change FSR's quality, the resolution or the 3D render scale. Chosen for the first time while the game runs, it applies from the next game start.",
+        "choice": {
+          "game": "The game's own FSR 3",
+          "amd": "AMD FSR",
+          "xess": "Intel XeSS"
+        },
+        "choiceHint": {
+          "game": "Nothing changes: the game's FSR 3 runs as it does without Kiln.",
+          "amd": "FSR 4 on graphics cards and drivers that run it (AMD's own selection), FSR 3.1 on the others. Needs AMD's files (70 MB).",
+          "xess": "Intel's XeSS, on Intel, AMD and NVIDIA cards. Needs Intel's file (74 MB)."
+        },
+        "amdLabel": "AMD FSR version",
+        "amd": {
+          "auto": "Auto (FSR 4 where it runs)",
+          "fsr3": "FSR 3.1"
+        },
+        "amdHint": "Auto lets AMD choose: FSR 4 on graphics cards and drivers that run it, FSR 3.1 on the others. FSR 3.1 keeps FSR 3.1 even where FSR 4 would run.",
+        "heading": {
+          "now": "Now",
+          "last": "Last game",
+          "plan": "When you play"
+        },
+        "offer": "{name}'s files are not in this game yet. Until they are, the game's own FSR 3 runs.",
+        "offerDamaged": "Some of {name}'s files are missing or changed. Until you download them again, the game's own FSR 3 runs.",
+        "running": {
+          "off": "Kiln's upscaler is not in use behind the game's FSR 3 now.",
+          "notFsr": "The game is not upscaling with FSR 3 right now: FSR 3 is not chosen in the game's graphics settings, or no world is loaded.",
+          "gameFsr3": "The game's own FSR 3 runs.",
+          "amdFsr4": "AMD FSR 4 runs in place of the game's FSR 3.",
+          "amdFsr31": "AMD FSR 3.1 runs in place of the game's FSR 3.",
+          "xess": "Intel XeSS runs in place of the game's FSR 3.",
+          "unknown": "This kiln-ui.dll does not say what upscales behind the game's FSR 3."
+        },
+        "version": "Version {version}.",
+        "amdFsr3Auto": "AMD's selection chose FSR 3.1: FSR 4 does not run on this graphics card or driver.",
+        "changedNow": "You chose {upscaler} since: the game applies it when it next sets FSR up, or from its next start.",
+        "detail": "Details: {detail}",
+        "plan": {
+          "amd": "With FSR 3 chosen in the game's graphics settings, Kiln runs AMD FSR in its place: FSR 4 where your graphics card and driver run it, else FSR 3.1.",
+          "amdFsr3": "With FSR 3 chosen in the game's graphics settings, Kiln runs AMD FSR 3.1 in its place.",
+          "xess": "With FSR 3 chosen in the game's graphics settings, Kiln runs Intel XeSS in its place."
+        },
+        "reason": {
+          "restart": "{upscaler} runs from the next start of the game: Kiln sets it up when the game starts.",
+          "filesMissing": "{upscaler}'s files are not downloaded yet, so the game's own FSR 3 runs.",
+          "filesBad": "A file of {upscaler} is not the one Kiln expects (its size or SHA-256 differs), so Kiln does not load it. Download it again.",
+          "loadFailed": "A file of {upscaler} did not load, so the game's own FSR 3 runs.",
+          "device": "Your graphics card or driver lacks a Vulkan feature {upscaler} needs, so the game's own FSR 3 runs.",
+          "createFailed": "{upscaler} could not be set up for this resolution, so the game's own FSR 3 runs.",
+          "runtimeFailed": "{upscaler} failed while it upscaled. The game's own FSR 3 runs until you restart the game.",
+          "fault": "{upscaler} or Kiln's code around it faulted. The game's own FSR 3 runs until you restart the game.",
+          "aside": "Kiln steps aside for {tools}, so it does not change the game's FSR 3.",
+          "noSignatures": "Kiln does not know this game build's FSR 3 yet, so the game's own FSR 3 runs. A Kiln update for this game build fixes that.",
+          "inputs": "The game's images are not what {upscaler} takes, so the game's own FSR 3 runs.",
+          "unavailable": "{upscaler} is not available in this build of Kiln or on this system, so the game's own FSR 3 runs.",
+          "waiting": "{upscaler} is ready. It starts when the game next sets FSR 3 up: load a world, or change FSR's quality in the game's settings.",
+          "noVulkan": "Kiln did not see the game set up its graphics device in this session. Restart the game for {upscaler}.",
+          "unknown": "{upscaler} does not run (reason {number} from a newer Kiln), so the game's own FSR 3 runs."
+        },
+        "tools": {
+          "optiscaler": "OptiScaler",
+          "streamline": "NVIDIA Streamline (a frame generation mod)",
+          "vkfg": "a DLSS frame generation mod (EnshroudedVKFG.ini)",
+          "dlsstweaks": "DLSSTweaks",
+          "nvngx": "another DLSS loader (nvngx.dll next to the game)",
+          "ngxPatched": "another tool that hooks DLSS",
+          "overlayOff": "Kiln's overlay being off",
+          "upscaler": "another upscaler tool (AMD's or Intel's upscaler files next to the game, or a changed FSR 3 pass)",
+          "unknown": "another graphics tool"
+        }
       }
     },
     "upscalers": {
-      "title": "Upscalers",
-      "preview": "Preview",
-      "sub": "Vendor upscaler files. Kiln downloads them only when you ask, into the game's kiln/vendor folder.",
-      "purpose": "Kiln can run these behind the game's FSR 3 option. That arrives in a later update: until then, downloading them changes nothing in the game.",
+      "title": "Upscaler files",
+      "sub": "AMD's and Intel's upscaler files, for Kiln to run behind the game's FSR 3 option. Kiln downloads them only when you ask, into the game's kiln/vendor folder.",
+      "purpose": "Kiln checks every file against the size and SHA-256 it pinned, and the game checks them again before it loads them. Remove deletes them again.",
       "unreadable": "The upscaler files could not be read",
       "starting": "Starting the download",
       "unavailable": "Not available in this build of Kiln.",

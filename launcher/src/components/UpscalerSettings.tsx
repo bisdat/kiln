@@ -1,19 +1,20 @@
-// Settings, Upscalers (dev.29, behind the preview "upscalers": api/vendor.ts `upscalersPreview`): the vendor upscaler
-// files Kiln downloads only when the player asks (AMD FSR, Intel XeSS), one row per component of the launcher's
-// manifest, right under the Graphics card, for a client only. A first download of a vendor's licence text opens the
-// licence dialog (what, size, host, where it goes, the text in full, the privacy line; "I agree, download"); later
-// ones start from the row, which says the size and the host. Downloads run as tasks (progress, Cancel); a failed one
-// shows its reason with Try again. Remove deletes the component's folder in kiln/vendor/ after a confirmation.
-// kiln_manage::vendor does the work (commands/vendor.rs); docs/kiln/graphics.md "Upscaler files".
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+// The vendor upscaler files (dev.29; out of preview in dev.29.18, when phase B runs them behind the game's FSR 3
+// option): AMD FSR and Intel XeSS, which Kiln downloads only when the player asks, one row per component of the
+// launcher's manifest, in Settings, Graphics under the upscaler choice (components/GraphicsSettings.tsx), for a client
+// only. A first download of a vendor's licence text opens the licence dialog (what, size, host, where it goes, the text
+// in full, the privacy line; "I agree, download"); later ones start from the row, which says the size and the host.
+// Downloads run as tasks (progress, Cancel); a failed one shows its reason with Try again. Remove deletes the
+// component's folder in kiln/vendor/ after a confirmation. `useUpscalerFiles` holds that flow for a game (the Graphics
+// card's offer and the list share it). kiln_manage::vendor does the work (commands/vendor.rs); docs/kiln/graphics.md
+// "Upscaler files".
+import { useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
+import { useState, type ReactNode } from "react";
 import { create } from "zustand";
 import * as api from "../api/commands";
 import type { GameId, KilnError, Task } from "../api/commands";
-import { useAppInfo, useGame, useGameStatus } from "../api/hooks";
-import { upscalersPreview, vendorDownload, vendorLicense, vendorRemove, vendorStatus, vk, type VendorComponent, type VendorDownloadReport } from "../api/vendor";
+import { vendorDownload, vendorLicense, vendorRemove, vendorStatus, vk, type VendorComponent, type VendorDownloadReport, type VendorStatus } from "../api/vendor";
 import { t as tr, useT } from "../i18n";
-import { Badge, Banner, Button, Card, EmptyState, KeyValue, Modal, ProgressBar, Skeleton, StatusPill, errorText, fmtBytes, toast, useTasks, waitTask, type Tone } from "../ui";
+import { Banner, Button, EmptyState, KeyValue, Modal, ProgressBar, Skeleton, StatusPill, errorText, fmtBytes, toast, useTasks, waitTask, type Tone } from "../ui";
 
 /** What a row shows. `failed` is a download that failed (its task's reason) or files that are missing or changed. */
 export type UpscalerRowState = "notDownloaded" | "downloading" | "downloaded" | "updateAvailable" | "unavailable" | "failed";
@@ -56,32 +57,56 @@ export function upscalerRow(c: VendorComponent, task?: Task): UpscalerRow {
 
 const TONE: Record<UpscalerRowState, Tone> = { notDownloaded: "idle", downloading: "ember", downloaded: "ok", updateAvailable: "info", unavailable: "idle", failed: "err" };
 
-/** The download task of each row in this window, by game and component (the task store keeps the tasks). */
-const useRowTasks = create<{ ids: Record<string, string>; set: (key: string, id: string) => void }>((set) => ({
+/** The download task of each row in this window, by game and component (the task store keeps the tasks; the Deck's
+ *  rows read the same). */
+export const useRowTasks = create<{ ids: Record<string, string>; set: (key: string, id: string) => void }>((set) => ({
   ids: {},
   set: (key, id) => set((s) => ({ ids: { ...s.ids, [key]: id } })),
 }));
-const rowKey = (gameId: GameId, id: string) => `${gameId}/${id}`;
+export const rowKey = (gameId: GameId, id: string) => `${gameId}/${id}`;
 
-export function UpscalersCard() {
-  const info = useAppInfo();
-  const { game } = useGame();
-  // a dedicated server draws no frames; the preview is off unless the player turned it on
-  if (!game || game.kind !== "client" || !upscalersPreview(info.data)) return null;
-  return <Upscalers gameId={game.id} />;
+/** The download task of a component in this window, if any. */
+export function useRowTask(gameId: GameId, id: string | undefined): Task | undefined {
+  const tid = useRowTasks((s) => (id ? s.ids[rowKey(gameId, id)] : undefined));
+  return useTasks((s) => (tid ? s.tasks[tid] : undefined));
 }
 
-function Upscalers({ gameId }: { gameId: GameId }) {
+export interface UpscalerFiles {
+  status: UseQueryResult<VendorStatus>;
+  /** The row of a component now. */
+  row: (c: VendorComponent) => UpscalerRow;
+  task: (c: VendorComponent) => Task | undefined;
+  /** Download (the licence dialog first when its text is not agreed to yet), update, go on, try again. */
+  download: (c: VendorComponent) => void;
+  /** Asks, then removes. */
+  remove: (c: VendorComponent) => void;
+  cancel: (c: VendorComponent) => void;
+  /** The licence dialog and the removal's question as the desktop shows them: render once. The Deck shows its own from
+   *  the fields below. */
+  dialogs: ReactNode;
+  /** The component whose licence the player is asked to agree to (its first download), or null. */
+  asking: VendorComponent | null;
+  /** "I agree, download": the hash of the licence text shown. */
+  agree: (sha256: string) => void;
+  cancelAsk: () => void;
+  /** The component the player is asked to remove, or null. */
+  removing: VendorComponent | null;
+  confirmRemove: () => void;
+  cancelRemove: () => void;
+}
+
+/** The vendor files of a client: their status, the download flow (licence first, progress, Cancel), Remove. */
+export function useUpscalerFiles(gameId: GameId): UpscalerFiles {
   const t = useT();
   const qc = useQueryClient();
-  const gs = useGameStatus(gameId);
-  const st = useQuery({ queryKey: vk.status(gameId), queryFn: () => vendorStatus(gameId) });
+  const status = useQuery({ queryKey: vk.status(gameId), queryFn: () => vendorStatus(gameId) });
   const ids = useRowTasks((s) => s.ids);
   const setTask = useRowTasks((s) => s.set);
   const tasks = useTasks((s) => s.tasks);
   const [ask, setAsk] = useState<VendorComponent | null>(null);
   const [drop, setDrop] = useState<VendorComponent | null>(null);
   const refresh = () => qc.invalidateQueries({ queryKey: vk.status(gameId) });
+  const taskOf = (c: VendorComponent) => (ids[rowKey(gameId, c.id)] ? tasks[ids[rowKey(gameId, c.id)]] : undefined);
 
   const start = async (c: VendorComponent, licenseSha256: string | null) => {
     let id: string;
@@ -106,48 +131,81 @@ function Upscalers({ gameId }: { gameId: GameId }) {
       void refresh();
     }
   };
-  const download = (c: VendorComponent) => (c.license.agreed ? void start(c, null) : setAsk(c));
-
-  const installed = gs.data?.runtime.installed;
-  return (
-    <Card id="upscalers" title={t("settings.upscalers.title")} sub={t("settings.upscalers.sub")} aria-label={t("settings.upscalers.title")}
-      actions={<Badge tone="ember">{t("settings.upscalers.preview")}</Badge>}>
-      <p className="k-hint" data-testid="upscalers-purpose">{t("settings.upscalers.purpose")}</p>
-      {gs.data && !installed ? <EmptyState title={t("settings.kilnJson.notInstalled")} hint={t("settings.kilnJson.notInstalledHint")} /> :
-        st.isLoading ? <Skeleton lines={2} /> : st.error ? <EmptyState title={t("settings.upscalers.unreadable")} hint={errorText(st.error)} /> : (
-          <ul className="k-upscalers" aria-label={t("settings.upscalers.title")}>
-            {st.data!.components.map((c) => {
-              const task = ids[rowKey(gameId, c.id)] ? tasks[ids[rowKey(gameId, c.id)]] : undefined;
-              const row = upscalerRow(c, task);
-              return <UpscalerRowView key={c.id} c={c} row={row} task={task} onDownload={() => download(c)} onRemove={() => setDrop(c)} />;
-            })}
-          </ul>
-        )}
-      {ask && <LicenseDialog c={ask} onClose={() => setAsk(null)} onAgree={(sha) => { const c = ask; setAsk(null); void start(c, sha); }} />}
+  const download = (c: VendorComponent) => {
+    if (taskOf(c)?.state === "running" || taskOf(c)?.state === "queued") return;
+    if (c.license.agreed) void start(c, null);
+    else setAsk(c);
+  };
+  const agree = (sha: string) => { const c = ask; setAsk(null); if (c) void start(c, sha); };
+  const confirmRemove = async () => {
+    const c = drop;
+    setDrop(null);
+    if (!c) return;
+    try {
+      const r = await vendorRemove(gameId, c.id);
+      toast.ok(t("settings.upscalers.removed", { name: c.name }), t("settings.upscalers.removedDetail", { size: fmtBytes(r.freed) }));
+      for (const k of r.kept) toast.error({ code: "io", message: k });
+    } catch (e) {
+      toast.error(e, t("settings.upscalers.removeFailed", { name: c.name }));
+    } finally {
+      void refresh();
+    }
+  };
+  const dialogs = (
+    <>
+      {ask && <LicenseDialog c={ask} onClose={() => setAsk(null)} onAgree={agree} />}
       <Modal open={!!drop} onClose={() => setDrop(null)} title={drop ? t("settings.upscalers.removeTitle", { name: drop.name }) : ""} width={480}
         footer={<>
           <Button onClick={() => setDrop(null)}>{t("common.cancel")}</Button>
-          <Button variant="danger" onClick={async () => {
-            const c = drop!;
-            setDrop(null);
-            try {
-              const r = await vendorRemove(gameId, c.id);
-              toast.ok(t("settings.upscalers.removed", { name: c.name }), t("settings.upscalers.removedDetail", { size: fmtBytes(r.freed) }));
-              for (const k of r.kept) toast.error({ code: "io", message: k });
-            } catch (e) {
-              toast.error(e, t("settings.upscalers.removeFailed", { name: c.name }));
-            } finally {
-              void refresh();
-            }
-          }}>{t("common.remove")}</Button>
+          <Button variant="danger" onClick={() => void confirmRemove()}>{t("common.remove")}</Button>
         </>}>
-        {drop && t("settings.upscalers.removeText", { folder: drop.installed?.folder ?? `kiln/vendor/${drop.vendor}/${drop.version}`, size: fmtBytes(drop.installed?.sizeOnDisk ?? 0) })}
+        {drop && removeText(drop)}
       </Modal>
-    </Card>
+    </>
+  );
+  return {
+    status, row: (c) => upscalerRow(c, taskOf(c)), task: taskOf, download, remove: setDrop,
+    cancel: (c) => { const task = taskOf(c); if (task) api.taskCancel(task.id).catch((e) => toast.error(e)); },
+    dialogs, asking: ask, agree, cancelAsk: () => setAsk(null), removing: drop, confirmRemove: () => void confirmRemove(), cancelRemove: () => setDrop(null),
+  };
+}
+
+/** What Remove deletes, one sentence. */
+export const removeText = (c: VendorComponent) =>
+  tr("settings.upscalers.removeText", { folder: c.installed?.folder ?? `kiln/vendor/${c.vendor}/${c.version}`, size: fmtBytes(c.installed?.sizeOnDisk ?? 0) });
+
+/** The licence dialog's facts: what, size, from, to (the desktop's and the Deck's). */
+export function licenseFacts(c: VendorComponent): [string, string][] {
+  const host = c.hosts.join(", ");
+  return [
+    [tr("settings.upscalers.dialog.what"), c.enables],
+    [tr("settings.upscalers.dialog.size"), tr("settings.upscalers.dialog.files", { count: c.files.length, size: fmtBytes(c.size) })],
+    [tr("settings.upscalers.dialog.from"), tr("settings.upscalers.dialog.fromText", { host, vendor: c.vendorName, version: c.version })],
+    [tr("settings.upscalers.dialog.to"), tr("settings.upscalers.dialog.toText", { folder: `kiln/vendor/${c.vendor}/${c.version}` })],
+  ];
+}
+
+/** Settings, Graphics: the upscaler files' list (`#upscalers`), under the choice. */
+export function UpscalerFilesList({ files }: { files: UpscalerFiles }) {
+  const t = useT();
+  const st = files.status;
+  return (
+    <section id="upscalers" className="k-stack" style={{ gap: 6 }} aria-label={t("settings.upscalers.title")}>
+      <span className="k-panel-title">{t("settings.upscalers.title")}</span>
+      <span className="k-hint">{t("settings.upscalers.sub")}</span>
+      <p className="k-hint" data-testid="upscalers-purpose">{t("settings.upscalers.purpose")}</p>
+      {st.isLoading ? <Skeleton lines={2} /> : st.error ? <EmptyState title={t("settings.upscalers.unreadable")} hint={errorText(st.error)} /> : (
+        <ul className="k-upscalers" aria-label={t("settings.upscalers.title")}>
+          {st.data!.components.map((c) => (
+            <UpscalerRowView key={c.id} c={c} row={files.row(c)} onDownload={() => files.download(c)} onRemove={() => files.remove(c)} onCancel={() => files.cancel(c)} />
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 
-function UpscalerRowView({ c, row, task, onDownload, onRemove }: { c: VendorComponent; row: UpscalerRow; task?: Task; onDownload: () => void; onRemove: () => void }) {
+export function UpscalerRowView({ c, row, onDownload, onRemove, onCancel }: { c: VendorComponent; row: UpscalerRow; onDownload: () => void; onRemove: () => void; onCancel: () => void }) {
   const t = useT();
   const button = (a: UpscalerAction) => {
     switch (a) {
@@ -156,7 +214,7 @@ function UpscalerRowView({ c, row, task, onDownload, onRemove }: { c: VendorComp
       case "remove":
         return <Button key={a} size="s" variant="ghost" aria-label={t("settings.upscalers.actionLabel.remove", { name: c.name })} onClick={onRemove}>{t("common.remove")}</Button>;
       case "cancel":
-        return <Button key={a} size="s" variant="ghost" aria-label={t("settings.upscalers.actionLabel.cancel", { name: c.name })} onClick={() => task && api.taskCancel(task.id).catch((e) => toast.error(e))}>{t("common.cancel")}</Button>;
+        return <Button key={a} size="s" variant="ghost" aria-label={t("settings.upscalers.actionLabel.cancel", { name: c.name })} onClick={onCancel}>{t("common.cancel")}</Button>;
     }
   };
   return (
@@ -185,7 +243,6 @@ function LicenseDialog({ c, onClose, onAgree }: { c: VendorComponent; onClose: (
   const t = useT();
   const lic = useQuery({ queryKey: vk.license(c.id), queryFn: () => vendorLicense(c.id) });
   const host = c.hosts.join(", ");
-  const folder = `kiln/vendor/${c.vendor}/${c.version}`;
   return (
     <Modal open onClose={onClose} title={t("settings.upscalers.dialog.title", { name: c.name })} width={640}
       footer={<>
@@ -193,12 +250,7 @@ function LicenseDialog({ c, onClose, onAgree }: { c: VendorComponent; onClose: (
         <Button variant="primary" disabled={!lic.data} onClick={() => lic.data && onAgree(lic.data.sha256)}>{t("settings.upscalers.dialog.agree")}</Button>
       </>}>
       <div className="k-stack" style={{ gap: 10 }}>
-        <KeyValue rows={[
-          [t("settings.upscalers.dialog.what"), c.enables],
-          [t("settings.upscalers.dialog.size"), t("settings.upscalers.dialog.files", { count: c.files.length, size: fmtBytes(c.size) })],
-          [t("settings.upscalers.dialog.from"), t("settings.upscalers.dialog.fromText", { host, vendor: c.vendorName, version: c.version })],
-          [t("settings.upscalers.dialog.to"), t("settings.upscalers.dialog.toText", { folder })],
-        ]} />
+        <KeyValue rows={licenseFacts(c)} />
         <div className="k-upscaler-license-head">
           <span className="k-panel-title">{c.license.name}</span>
           <button type="button" className="k-link" onClick={() => api.appOpenUrl(c.license.from).catch((e) => toast.error(e))}>{t("settings.upscalers.dialog.licenseFrom")}</button>

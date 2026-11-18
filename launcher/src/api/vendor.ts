@@ -1,9 +1,9 @@
 // Vendor upscaler files (AMD FSR, Intel XeSS): types and wrappers of the vendor_* commands
 // (launcher/src-tauri/src/commands/vendor.rs, kiln_manage::vendor; docs/kiln/launcher/contracts.md "Vendor files").
-// Settings, Upscalers (components/UpscalerSettings.tsx) is their only user, behind the preview "upscalers"
-// (app_info.preview). The browser mock answers from ./mockVendor.ts.
+// Settings, Graphics (components/UpscalerSettings.tsx, GraphicsSettings.tsx) and the Deck's Settings use them (out of
+// the preview "upscalers" since dev.29.18). The browser mock answers from ./mockVendor.ts.
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
-import { isTauri, loadMock, toKilnError, type AppInfo, type GameId, type TaskId } from "./commands";
+import { isTauri, loadMock, toKilnError, type GameId, type TaskId } from "./commands";
 
 async function call<T>(cmd: string, args: Record<string, unknown> = {}): Promise<T> {
   try {
@@ -12,10 +12,6 @@ async function call<T>(cmd: string, args: Record<string, unknown> = {}): Promise
     throw toKilnError(e);
   }
 }
-
-/** The preview of the Upscalers section (settings.json `"preview": ["upscalers"]`, or KILN_LAUNCHER_PREVIEW=upscalers). */
-export const UPSCALERS_PREVIEW = "upscalers";
-export const upscalersPreview = (info: AppInfo | null | undefined) => !!info?.preview?.includes(UPSCALERS_PREVIEW);
 
 /** kiln_manage::vendor::VendorState */
 export type VendorState = "notDownloaded" | "downloaded" | "updateAvailable" | "unavailable" | "damaged";
@@ -67,8 +63,6 @@ export interface VendorComponent {
 }
 
 export interface VendorStatus {
-  /** The preview is on (downloads allowed). */
-  preview: boolean;
   /** kiln/vendor */
   folder: string;
   components: VendorComponent[];

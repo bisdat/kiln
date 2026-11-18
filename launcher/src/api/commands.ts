@@ -99,8 +99,8 @@ export interface AppInfo {
   desktop?: DesktopInfo;
   /** (dev.29.18) Linux only: WebKit's sandbox in this start and whether the next start turns it off (sandbox.rs). */
   sandbox?: SandboxInfo;
-  /** (dev.29) The previews on for this start (settings.json `preview`, KILN_LAUNCHER_PREVIEW): "upscalers" shows
-   *  Settings, Upscalers (api/vendor.ts). Absent: none. */
+  /** (dev.29) The previews on for this start (settings.json `preview`, KILN_LAUNCHER_PREVIEW). None uses it in
+   *  0.2.0-dev.29.18 (the upscaler files are out of preview). Absent: none. */
   preview?: string[];
 }
 /** WebKit's process sandbox on Linux (src-tauri/src/sandbox.rs). */
@@ -179,7 +179,7 @@ export interface LauncherSettings {
   keepVersions?: number;
   /** The launcher's language (Settings, Language; src/i18n): "system" or absent = the system's, else a tag ("zh-CN"). */
   language?: string | null;
-  /** (dev.29) Previews of unfinished features ("upscalers"), set by hand in settings.json; kept as it is by every save. */
+  /** (dev.29) Previews of unfinished features, set by hand in settings.json; kept as it is by every save. */
   preview?: string[];
 }
 /** The most `keepVersions` may be (kiln_manage::kept::KEEP_MAX). */
@@ -240,13 +240,63 @@ export interface GraphicsToolNote {
 /** (dev.29.18) A tool in the game folder next to which Kiln's graphics tools (kiln.json "graphics") step aside
  *  (kiln_manage::game::GraphicsStepAside). */
 export interface GraphicsStepAside {
-  /** "optiscaler", "streamline" (sl.interposer.dll), "vkfg" (EnshroudedVKFG.ini), "dlsstweaks" (dlsstweaks.ini) or
-   *  "nvngx" (nvngx.dll or _nvngx.dll: another DLSS loader); a kind this launcher does not know reads as another tool. */
-  kind: "optiscaler" | "streamline" | "vkfg" | "dlsstweaks" | "nvngx" | (string & {});
+  /** "optiscaler", "streamline" (sl.interposer.dll), "vkfg" (EnshroudedVKFG.ini), "dlsstweaks" (dlsstweaks.ini),
+   *  "nvngx" (nvngx.dll or _nvngx.dll: another DLSS loader) or (dev.29.18) "upscaler" (AMD's or Intel's upscaler DLLs
+   *  next to the game: another tool's); a kind this launcher does not know reads as another tool. */
+  kind: "optiscaler" | "streamline" | "vkfg" | "dlsstweaks" | "nvngx" | "upscaler" | (string & {});
   /** The tool's file relative to the game folder, forward slashes ("dxgi.dll", "Streamline/sl.interposer.dll"). */
   file: string;
   /** Kiln's frame cap steps aside too; false: only Kiln's DLSS settings do. The readout always works. */
   frameCap: boolean;
+  /** (dev.29.18) Kiln's upscaler behind the game's FSR 3 option steps aside too. Absent from an older backend: false. */
+  upscaler?: boolean;
+}
+
+/** (dev.29.18) kiln.json `graphics.upscaler`: what runs behind the game's FSR 3 option. */
+export type UpscalerChoice = "game" | "amd" | "xess";
+/** kiln.json `graphics.amdUpscaler`. */
+export type AmdUpscalerMode = "auto" | "fsr3";
+/** What upscales behind the game's FSR 3 option (kiln_ui.h KILN_UI_UPSCALE_RUN_*; "unknown": a runtime that does not say). */
+export type UpscalerRunning = "off" | "notFsr" | "gameFsr3" | "amdFsr4" | "amdFsr31" | "xess" | "unknown";
+/** Why the chosen upscaler does not run (kiln_ui.h KILN_UI_UPSCALE_WHY_* in camelCase; docs/kiln/graphics.md); a code
+ *  this launcher does not know reads as "unknown". */
+export const UPSCALER_REASONS = ["restart", "filesMissing", "filesBad", "loadFailed", "device", "createFailed", "runtimeFailed", "fault", "aside",
+  "noSignatures", "inputs", "unavailable", "waiting", "noVulkan"] as const;
+export type UpscalerReason = (typeof UPSCALER_REASONS)[number] | "unknown";
+
+/** (dev.29.18) `<game>/kiln/state/graphics.json` (Kiln.Ui; schema/state-graphics.schema.json, kiln_manage::state::GraphicsState). */
+export interface GraphicsStateFile {
+  format: 1;
+  pid: number;
+  written: string;
+  kiln?: string | null;
+  upscaler: {
+    chosen: UpscalerChoice | (string & {});
+    amdUpscaler: AmdUpscalerMode | (string & {});
+    running: UpscalerRunning | (string & {});
+    reason?: string | null;
+    reasonNumber?: number;
+    version?: string;
+    hooked?: boolean;
+    fsrSeen?: boolean;
+    filesOk?: boolean;
+    deviceOk?: boolean;
+    fellBack?: boolean;
+    amdPinned?: boolean;
+    /** The tools it steps aside for (KILN_UI_GFX_ASIDE_* by name: "optiscaler", "upscaler", ...). */
+    aside?: string[];
+    /** kiln.ui's English detail of the reason (a file's or a Vulkan extension's name). */
+    detail?: string;
+  };
+  /** Per vendor folder (amd, intel): this runtime's version and what of it is in kiln/vendor/. */
+  files?: Record<string, { version: string; state: "present" | "missing" | "changed" | (string & {}) }>;
+  frameCap?: unknown;
+  dlss?: unknown;
+}
+/** GameStatus.graphicsState: the file, and whether the game that wrote it runs now ("Now"; false: "Last game"). */
+export interface GraphicsNow {
+  current: boolean;
+  state: GraphicsStateFile;
 }
 export interface GameStatus {
   id: GameId;
@@ -276,6 +326,9 @@ export interface GameStatus {
    *  Streamline, a DLSS frame generation mod, DLSSTweaks, another DLSS loader), in that order; absent or empty: none
    *  (kiln_manage::game::graphics_step_aside). */
   graphicsStepAside?: GraphicsStepAside[];
+  /** (dev.29.18) kiln/state/graphics.json: what Kiln's graphics tools did in the game's last run (`current`: it runs
+   *  now). Absent for a server and while there is none. */
+  graphicsState?: GraphicsNow;
 }
 /** How an install starts (kiln_manage::direct). */
 export type StartMode = "steam" | "direct";
