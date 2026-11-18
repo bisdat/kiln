@@ -13,6 +13,9 @@
 // is published in Pre, the old one is freed once the slot's in-flight count reads 0 after the publish (the slice
 // path increments before it loads the chain, both sequentially consistent, so a slice either holds the new chain or
 // was counted). A stage that faults (SEH) or overruns its budget 10 times in a row is disabled at once, on its own.
+// Prediction wraps (since 0.2.0-dev.29.18): the prediction storage has no table of its own and runs the client world's
+// (StepPrograms, kind 1: no 0x1, 0x10 or 0x40), so a prediction stage lives in the client pool's chain with its own kind;
+// a slice runs only the stages of its own storage kind (Chain::kinds), and a kind with none is forwarded as before.
 // A stage is entered only through call()'s gate: count up (calls_in), then check `gone`; an unwrap, a release or a
 // revoked owner sets `gone` first and then reads calls_in (both sequentially consistent), so once it reads 0 no call
 // of that stage runs or can start, also while its world steps; taking it out of the chain waits for the next Pre.
@@ -64,6 +67,9 @@ struct Chain {  // immutable once published
     const std::string* program = nullptr;
     int32_t index = -1;
     std::shared_ptr<const View> view;
+    // The storage kinds its stages are for, bit (1 << KILN_WORLD_*): the client pool's chain may hold stages of the client
+    // world and of the prediction storage (prediction wraps, since 0.2.0-dev.29.18), and a slice runs only its own kind's.
+    uint32_t kinds = 0;
 };
 
 struct Stage {
@@ -116,6 +122,15 @@ struct Pool {
     Slot slots[kWrapSlots];
 };
 Pool g_pools[kWrapPools];
+
+// The pool and the table of a stage's kind: a prediction wrap (since 0.2.0-dev.29.18) is a stage in the client world's
+// table, because the prediction storage has none of its own and runs that table's programs without the client flag
+// (StepPrograms, storage kind 1: no 0x1, 0x10 or 0x40; docs/re/world.md "Client and prediction registration").
+int stage_pool(uint32_t kind) { return kind == KILN_WORLD_PREDICTION ? wrap_pool(KILN_WORLD_CLIENT) : wrap_pool(kind); }
+uint32_t table_kind(uint32_t kind) { return kind == KILN_WORLD_PREDICTION ? uint32_t{KILN_WORLD_CLIENT} : kind; }
+// The descriptor flags that keep a program out of the prediction storage's step: the client flag, HOST_ONLY and the
+// engine bit 0x40 (client StepPrograms 0x9ade50: kind 1 skips 0x40, then runs only programs without 0x1 and 0x10).
+constexpr uint32_t kNotPredicted = 0x1 | 0x10 | 0x40;
 
 // Per pool and program (g_mu): the slot it holds in the current world, what earlier slots of this world counted, and
 // its view (made once per world).
@@ -289,8 +304,11 @@ void finish_index(ProgramCtx* ctx, uint32_t count) {
     if (ctx->index != 0 && ctx->index < count) ctx->index = count;
 }
 
-void run(int pool, Slot& s, const Chain& c, ProgramCtx* ctx, UpdateFn orig, uintptr_t record) {
-    const uint32_t kind = g_pools[pool].kind;
+void run(int pool, Slot& s, const Chain& c, ProgramCtx* ctx, UpdateFn orig, uintptr_t record, uint32_t kind) {
+    (void)pool;
+    // a prediction slice: the prediction storage steps on the main thread, the client world's thread, at the client
+    // world's Pre (it has no Pre of its own here), so the thread test and the step are the client world's
+    const uint32_t table = table_kind(kind);
     uint64_t count64 = 0;
     std::memcpy(&count64, ctx->job + L.job_entity_count, 8);
     const uint32_t count = count64 > UINT32_MAX ? UINT32_MAX : static_cast<uint32_t>(count64);
@@ -302,20 +320,20 @@ void run(int pool, Slot& s, const Chain& c, ProgramCtx* ctx, UpdateFn orig, uint
     slice.world_kind = kind;
     slice.program_ctx = reinterpret_cast<KilnProgramCtx*>(ctx);
     slice.count = count;
-    slice.thread_is_world = current_thread_id() == game_programs_world_tid(kind);
+    slice.thread_is_world = current_thread_id() == game_programs_world_tid(table);
     if (count) std::memcpy(&slice.entity_ids, ctx->job + L.job_entity_list, sizeof(void*));
     slice.entity_stride = 16;
     slice.program_index = c.index;
-    slice.step = game_programs_step(kind);
+    slice.step = game_programs_step(table);
     slice.program = kstr(*c.program);
     slice.internal = &f;
 
     for (Stage* st : c.before) {
-        if (!live(st)) continue;
+        if (st->kind != kind || !live(st)) continue;
         call(s, *st, slice, f, KILN_WRAP_BEFORE);
         ctx->index = 0;  // the update starts from the slice's first entity, also after a Before that faulted mid-way
     }
-    if (c.replace && live(c.replace)) {
+    if (c.replace && c.replace->kind == kind && live(c.replace)) {
         const CallResult r = call(s, *c.replace, slice, f, KILN_WRAP_REPLACE);
         if (r == CALL_RAN) {
             finish_index(ctx, count);
@@ -329,16 +347,17 @@ void run(int pool, Slot& s, const Chain& c, ProgramCtx* ctx, UpdateFn orig, uint
         orig(ctx);
     }
     for (Stage* st : c.after) {
-        if (!live(st)) continue;
+        if (st->kind != kind || !live(st)) continue;
         if (call(s, *st, slice, f, KILN_WRAP_AFTER) == CALL_FAULTED) finish_index(ctx, count);
     }
     finish_index(ctx, count);
 }
 
-bool kind_is(const ProgramCtx* ctx, uint32_t kind) {
+// The slice's storage kind (J+0: its storage, the kind byte at storage.kind), 0xFF without a storage.
+uint32_t slice_kind_of(const ProgramCtx* ctx) {
     const uint8_t* storage = nullptr;
     std::memcpy(&storage, ctx->job, sizeof storage);  // J+0: the slice's storage
-    return storage && storage[L.storage_kind] == kind;
+    return storage ? storage[L.storage_kind] : 0xFFu;
 }
 
 // The core's tick faulted: tick.cpp's disable() clears every world pointer and stops tick and world-event delivery, so
@@ -348,6 +367,7 @@ bool kind_is(const ProgramCtx* ctx, uint32_t kind) {
 // has its world: trampolines go in only in that world's Pre, after the core set it, and STOPPING closes admission
 // before the core clears it.
 void report_row(const char* name, uint32_t state, uint32_t reason, const char* text);
+void report_client_rows(uint32_t state, uint32_t reason, const char* text);
 
 bool tick_gone(int pool) {
     const auto world_of = g_world_of;
@@ -359,7 +379,7 @@ bool tick_gone(int pool) {
         // No registry lock is held; kiln.caps permits reports and notifications on this thread.
         const char* why = "the tick hook faulted: wrap admission is closed until a restart";
         if (g_pools[pool].kind == KILN_WORLD_CLIENT)
-            report_row("systems.wraps.client", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_FAULTED, why);
+            report_client_rows(KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_FAULTED, why);
         else {
             report_row("systems.wraps", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_FAULTED, why);
             report_row("systems.wraps.typed", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_FAULTED, why);
@@ -375,13 +395,19 @@ void dispatch(int pool, int slot, void* raw) {
     const Chain* c = s.chain.load(std::memory_order_seq_cst);
     auto* ctx = static_cast<ProgramCtx*>(raw);
     const uintptr_t record = g_record_live.load(std::memory_order_relaxed) ? std::exchange(t_runner_record, 0) : 0;
-    if (!c || g_pools[pool].stopping.load(std::memory_order_seq_cst) || !kind_is(ctx, g_pools[pool].kind) || tick_gone(pool)) {
-        // no stage left, a slot kept for a foreign swap on top, another storage (the prediction world runs the client
-        // world's table) or a faulted tick: the game's update, untouched
+    // The slice's own kind: the pool's world, or (client pool) the prediction storage, which runs the client world's
+    // table; a slice runs the stages of its kind only (Chain::kinds), the prediction storage's only when a prediction
+    // wrap is on the program (since 0.2.0-dev.29.18).
+    const uint32_t kind = slice_kind_of(ctx);
+    const bool mine = kind < KILN_WORLD_KINDS &&
+                      (kind == g_pools[pool].kind || (kind == KILN_WORLD_PREDICTION && pool == wrap_pool(KILN_WORLD_CLIENT)));
+    if (!c || g_pools[pool].stopping.load(std::memory_order_seq_cst) || !mine || !(c->kinds >> kind & 1u) || tick_gone(pool)) {
+        // no stage left, a slot kept for a foreign swap on top, another storage with no stage of its own (the
+        // prediction storage runs the client world's table) or a faulted tick: the game's update, untouched
         s.forwarded.fetch_add(1, std::memory_order_relaxed);
         if (orig) orig(raw);
     } else if (orig) {
-        run(pool, s, *c, ctx, orig, record);
+        run(pool, s, *c, ctx, orig, record, kind);
     }
     s.in_flight.fetch_sub(1, std::memory_order_release);
 }
@@ -434,6 +460,19 @@ std::string wraps_text(const char* what, uint32_t kind) { return std::string(wha
 void report_row(const char* name, uint32_t state, uint32_t reason, const char* text) {
     if (g_wrap_caps && g_wrap_caps->report)
         g_wrap_caps->report(g_owner, KilnStr{name, std::strlen(name)}, state, reason, KilnStr{text, std::strlen(text)});
+}
+
+// systems.wraps.client and, with it, systems.wraps.prediction (since 0.2.0-dev.29.18): a prediction wrap is a stage in the
+// client world's table that runs on the prediction storage's slices only, so it is on exactly when client wraps are; its
+// own text when on (the prediction storage's stop row), the client row's reason when off.
+constexpr const char* kPredictionText =
+    "native Before and After on the programs the prediction storage runs (in the client world's table)";
+void report_client_rows(uint32_t state, uint32_t reason, const char* text) {
+    report_row("systems.wraps.client", state, reason, text);
+    if (state == KILN_CAP_AVAILABLE)
+        report_row("systems.wraps.prediction", state, reason, wraps_text(kPredictionText, KILN_WORLD_PREDICTION).c_str());
+    else
+        report_row("systems.wraps.prediction", state, reason, text);
 }
 
 void count_states() {
@@ -559,9 +598,9 @@ Chain* build_chain(int pool, const std::string* name, int32_t index) {
     std::sort(befores.begin(), befores.end(), first);
     std::sort(afters.begin(), afters.end(), [&](const Stage* a, const Stage* b) { return first(b, a); });
     auto* c = new Chain{std::move(befores), std::move(afters), replace, name, index, nullptr};
-    for (Stage* st : c->before) ++st->refs;
-    for (Stage* st : c->after) ++st->refs;
-    if (c->replace) ++c->replace->refs;
+    for (Stage* st : c->before) ++st->refs, c->kinds |= 1u << st->kind;
+    for (Stage* st : c->after) ++st->refs, c->kinds |= 1u << st->kind;
+    if (c->replace) ++c->replace->refs, c->kinds |= 1u << c->replace->kind;
     return c;
 }
 
@@ -794,15 +833,15 @@ void wraps_init() {
     }
     const bool client = g_api->size >= offsetof(KilnApi, session) + sizeof(void*) && g_api->side() == KILN_SIDE_CLIENT;
     if (!client)
-        report_row("systems.wraps.client", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_WRONG_SIDE, "a client world runs only in the game client");
+        report_client_rows(KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_WRONG_SIDE, "a client world runs only in the game client");
     else if (!g_api->feature(kstr("world.lifecycle")))
-        report_row("systems.wraps.client", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SYMBOL_MISSING,
+        report_client_rows(KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SYMBOL_MISSING,
                    "client wraps need world.lifecycle to retire destroyed program tables");
     else if (g_ok)
-        report_row("systems.wraps.client", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SERVICE_OLDER,
+        report_client_rows(KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SERVICE_OLDER,
                    "client wrap tick and world-stop subscriptions are not ready");
     else
-        report_row("systems.wraps.client", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SYMBOL_MISSING,
+        report_client_rows(KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SYMBOL_MISSING,
                "the program table or job layout did not resolve on this build (world.programs)");
 }
 
@@ -821,12 +860,12 @@ void wraps_client_ready(bool tick, bool events) {
     if (g_api->side() != KILN_SIDE_CLIENT || !g_ok || !g_api->feature(kstr("world.lifecycle"))) return;
     g_client_ready = tick && events;
     if (!g_client_ready)
-        report_row("systems.wraps.client", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_FAULTED,
+        report_client_rows(KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_FAULTED,
                    "client wrap tick or world-stop subscription failed");
     else if (external_runner())
-        report_row("systems.wraps.client", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_POLICY, game_wraps_off_reason());
+        report_client_rows(KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_POLICY, game_wraps_off_reason());
     else
-        report_row("systems.wraps.client", KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE,
+        report_client_rows(KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE,
                    wraps_text("native Before, After and Replace on the client world's programs", KILN_WORLD_CLIENT).c_str());
 }
 
@@ -1004,7 +1043,7 @@ void wraps_pre(uint32_t kind, uintptr_t) {
             on ? wraps_text("native Before, After and Replace on the client world's programs", KILN_WORLD_CLIENT) : row.text;
         report_row("systems.wraps", row.state, row.reason, server.c_str());
         report_row("systems.wraps.typed", row.state, row.reason, on ? kTypedText : row.text);
-        if (g_client_ready) report_row("systems.wraps.client", row.state, row.reason, client.c_str());
+        if (g_client_ready) report_client_rows(row.state, row.reason, client.c_str());
     }
 }
 
@@ -1107,10 +1146,26 @@ void game_wraps_status(KilnGameProgramsStatus* out) {
 
 // ---- the table ----
 
+namespace {
+// systems.wraps.prediction is available (and not held by the game-test gate): kiln.caps' row, as for the client world.
+bool prediction_wraps_on() {
+    const KilnCapsApi* caps = g_wrap_caps;
+    if (!caps || kiln_caps_held(caps, kstr("systems.wraps.prediction"))) return false;
+    KilnCapRow row{};
+    row.size = sizeof row;
+    return caps->find && caps->find(kstr("systems.wraps.prediction"), &row) == KILN_OK && row.state == KILN_CAP_AVAILABLE;
+}
+}  // namespace
+
 KilnResult KILN_CALL game_program_wrap(KilnOwner owner, uint32_t kind, int32_t index, int32_t stage, int32_t priority,
                                        KilnWrapStageFn fn, void* user, KilnHandle* out) {
     if (out) *out = 0;
-    const int pool = wrap_pool(kind);
+    const bool prediction = kind == KILN_WORLD_PREDICTION;
+    // A prediction wrap (since 0.2.0-dev.29.18) is taken only while systems.wraps.prediction is available; elsewhere the
+    // kind is the invalid argument it was in 0.2.0-dev.29 (no table of its own). It is a Before or an After: the
+    // client world's chain holds at most one Replace per program, for the client world.
+    if (prediction && (stage == KILN_WRAP_REPLACE || !prediction_wraps_on())) return KILN_ERR_INVALID_ARGUMENT;
+    const int pool = stage_pool(kind);
     if (!out || !fn || !owner || stage < KILN_WRAP_BEFORE || stage > KILN_WRAP_AFTER || pool < 0)
         return KILN_ERR_INVALID_ARGUMENT;
     if (t_in_slice || t_in_program) return KILN_ERR_WRONG_THREAD;
@@ -1128,8 +1183,14 @@ KilnResult KILN_CALL game_program_wrap(KilnOwner owner, uint32_t kind, int32_t i
             return KILN_ERR_UNAVAILABLE;
     }
     ProgramRef ref;
-    if (!game_program_at(kind, index, &ref)) return KILN_ERR_NOT_FOUND;
+    if (!game_program_at(table_kind(kind), index, &ref)) return KILN_ERR_NOT_FOUND;
     if (ref.no_update) return KILN_ERR_INVALID_ARGUMENT;
+    if (prediction) {  // a program the prediction storage never steps would never call the stage
+        uint32_t flags = 0;
+        if (!ref.desc || !seh_copy(&flags, reinterpret_cast<const void*>(ref.desc + offsetof(EngineDesc, flags)), 4) ||
+            (flags & kNotPredicted))
+            return KILN_ERR_INVALID_ARGUMENT;
+    }
     std::lock_guard lock(g_mu);
     auto st = std::make_unique<Stage>();
     st->handle = g_next++;
@@ -1405,7 +1466,7 @@ KilnResult KILN_CALL game_slice_archetype(KilnGameSlice* slice, uintptr_t* out_l
     Frame* f = frame_of(slice);
     if (!f) return KILN_ERR_WRONG_THREAD;
     if (!out_layout) return KILN_ERR_INVALID_ARGUMENT;
-    const int pool = wrap_pool(slice->world_kind);
+    const int pool = stage_pool(slice->world_kind);  // a prediction slice counts with the client pool's
     if (pool < 0) return KILN_ERR_INVALID_ARGUMENT;
     // Client network/replication mutation is not excluded by the map's count/id checks. Only the server's
     // quiescent-step fallback is retained; a client without a current runner capture skips or refuses the filter.
@@ -1463,7 +1524,8 @@ KilnResult KILN_CALL game_slice_archetype(KilnGameSlice* slice, uintptr_t* out_l
 }
 
 int32_t KILN_CALL game_archetype_has(uint32_t kind, uintptr_t layout, uint32_t hash) {
-    if (!layout || wrap_pool(kind) < 0 || L.reg_components < 0) return -1;
+    // the prediction storage's own registry (KilnApi.world(1) + world.storage is its storage), since 0.2.0-dev.29.18
+    if (!layout || stage_pool(kind) < 0 || L.reg_components < 0) return -1;
     const uintptr_t world = g_api->size >= offsetof(KilnApi, session) + sizeof(void*) ? g_api->world(kind) : g_world.load();
     if (!world) return -1;
     uint16_t type = 0;

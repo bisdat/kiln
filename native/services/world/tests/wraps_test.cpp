@@ -2371,6 +2371,126 @@ void directory_read_in_stage() {
 }
 }  // namespace
 
+// Prediction wraps (since 0.2.0-dev.29.18): a stage in the client world's table that runs on the prediction storage's
+// slices only (storage kind 1), next to client-world stages on the same program, which run on the client world's slices
+// only. Taken while systems.wraps.prediction is available: a Before or an After, on a program the prediction storage
+// steps (no client flag 0x1, HOST_ONLY 0x10 or engine bit 0x40); refused as an invalid argument otherwise, as the kind
+// was before.
+int g_pred_row = KILN_CAP_AVAILABLE;  // the row's state, -1: no row
+KilnResult KILN_CALL pred_caps_find(KilnStr name, KilnCapRow* out) {
+    const std::string_view n(name.ptr, name.len);
+    if (n == "systems.wraps.client" || (n == "systems.wraps.prediction" && g_pred_row >= 0)) {
+        out->state = n == "systems.wraps.client" ? uint32_t{KILN_CAP_AVAILABLE} : static_cast<uint32_t>(g_pred_row);
+        out->reason = KILN_CAP_REASON_NONE;
+        out->name = name;
+        out->text = KilnStr{"", 0};
+        return KILN_OK;
+    }
+    return KILN_ERR_NOT_FOUND;
+}
+void KILN_CALL st_kind(KilnGameSlice* s, void* user) {
+    trace(std::string(static_cast<const char*>(user)) + (s->world_kind == KILN_WORLD_PREDICTION ? "@p" : s->world_kind == KILN_WORLD_CLIENT ? "@c" : "@?"));
+}
+void prediction_wraps() {
+    world_event(KILN_WORLD_STOPPING, KILN_WORLD_SERVER);
+    world_event(KILN_WORLD_STOPPING, KILN_WORLD_CLIENT);
+    g_live_world[KILN_WORLD_SERVER] = 0;
+    wworld(0);
+    g_wdesc[6].flags = 0x1;   // client_only: a client program (and no update): never predicted
+    g_wdesc[7].flags = 0x10;  // base_comfort: HOST_ONLY, not predicted
+    g_wdesc[5].flags = 0x40;  // move_colliders: the engine bit the prediction step skips
+    g_live_world[KILN_WORLD_CLIENT] = reinterpret_cast<uintptr_t>(g_wworld);
+    world_event(KILN_WORLD_STARTED, KILN_WORLD_CLIENT);
+    wpre(KILN_WORLD_CLIENT);
+    const int32_t fuel = game_program_find(KILN_WORLD_CLIENT, kstr("fuel_setup"));
+    const int32_t net = game_program_find(KILN_WORLD_CLIENT, kstr("fuel_network"));
+    check(fuel == 0 && net == 1 && game_program_find(KILN_WORLD_PREDICTION, kstr("fuel_setup")) == -1,
+          "prediction wraps: the client world's directory holds the table (the prediction storage has none)");
+    KilnCapsApi caps{};
+    caps.header = {sizeof caps, 1};
+    caps.report = [](KilnOwner, KilnStr, uint32_t, uint32_t, KilnStr) -> KilnResult { return KILN_OK; };
+    caps.find = &pred_caps_find;
+    g_wrap_caps = &caps;
+    KilnHandle h = 0;
+    char p[] = "P", c[] = "C", pa[] = "PA";
+    g_pred_row = KILN_CAP_UNAVAILABLE;
+    check(game_program_wrap(1, KILN_WORLD_PREDICTION, fuel, KILN_WRAP_BEFORE, 0, &st_kind, p, &h) == KILN_ERR_INVALID_ARGUMENT && !h,
+          "prediction wraps: refused as an invalid argument while systems.wraps.prediction is off (as before 29.18)");
+    g_pred_row = -1;
+    check(game_program_wrap(1, KILN_WORLD_PREDICTION, fuel, KILN_WRAP_BEFORE, 0, &st_kind, p, &h) == KILN_ERR_INVALID_ARGUMENT,
+          "prediction wraps: refused where kiln.caps has no such row (an older core)");
+    g_pred_row = KILN_CAP_AVAILABLE;
+    check(game_program_wrap(1, KILN_WORLD_PREDICTION, fuel, KILN_WRAP_REPLACE, 0, &st_kind, p, &h) == KILN_ERR_INVALID_ARGUMENT,
+          "prediction wraps: no Replace");
+    check(game_program_wrap(1, KILN_WORLD_PREDICTION, game_program_find(KILN_WORLD_CLIENT, kstr("base_comfort")), KILN_WRAP_BEFORE, 0,
+                            &st_kind, p, &h) == KILN_ERR_INVALID_ARGUMENT &&
+              game_program_wrap(1, KILN_WORLD_PREDICTION, game_program_find(KILN_WORLD_CLIENT, kstr("move_colliders")),
+                                KILN_WRAP_BEFORE, 0, &st_kind, p, &h) == KILN_ERR_INVALID_ARGUMENT &&
+              game_program_wrap(1, KILN_WORLD_PREDICTION, game_program_find(KILN_WORLD_CLIENT, kstr("client_only")),
+                                KILN_WRAP_BEFORE, 0, &st_kind, p, &h) == KILN_ERR_INVALID_ARGUMENT,
+          "prediction wraps: refused on a program the prediction storage never steps (0x10, 0x40, a client program)");
+    check(game_program_wrap(1, KILN_WORLD_PREDICTION, 99, KILN_WRAP_BEFORE, 0, &st_kind, p, &h) == KILN_ERR_NOT_FOUND,
+          "prediction wraps: an index outside the client world's directory");
+    KilnHandle hp = 0, hc = 0, hpa = 0;
+    check(game_program_wrap(1, KILN_WORLD_PREDICTION, fuel, KILN_WRAP_BEFORE, 0, &st_kind, p, &hp) == KILN_OK && hp &&
+              game_program_wrap(2, KILN_WORLD_CLIENT, fuel, KILN_WRAP_BEFORE, 0, &st_kind, c, &hc) == KILN_OK && hc &&
+              game_program_wrap(1, KILN_WORLD_PREDICTION, fuel, KILN_WRAP_AFTER, 0, &st_kind, pa, &hpa) == KILN_OK && hpa,
+          "prediction wraps: a Before and an After for the prediction storage beside a client-world Before");
+    check(winfo(hp).state == KILN_WRAP_PENDING && winfo(hp).world_kind == KILN_WORLD_PREDICTION, "prediction wraps: pending, kind 1");
+    wpre(KILN_WORLD_CLIENT);
+    check(winfo(hp).state == KILN_WRAP_ACTIVE && winfo(hp).program_index == fuel && winfo(hc).state == KILN_WRAP_ACTIVE &&
+              update_of(wentry(fuel)) != reinterpret_cast<uintptr_t>(kWUpdates[0]),
+          "prediction wraps: applied in the client world's Pre, one trampoline for both kinds");
+    g_tracing = true;
+    g_trace.clear();
+    Job cj(4, KILN_WORLD_CLIENT), pj(1, KILN_WORLD_PREDICTION), sj(2, KILN_WORLD_SERVER);
+    const uint64_t bad_before = g_bad_index.load();
+    run_slice(wentry(fuel), cj);
+    check(g_trace == std::vector<std::string>{"C@c", "orig"}, "prediction wraps: a client slice runs the client stage only");
+    g_trace.clear();
+    run_slice(wentry(fuel), pj);
+    check(g_trace == std::vector<std::string>{"P@p", "orig", "PA@p"},
+          "prediction wraps: a prediction slice runs the prediction stages only, its world kind says so");
+    g_trace.clear();
+    run_slice(wentry(fuel), sj);
+    check(g_trace == std::vector<std::string>{"orig"}, "prediction wraps: a slice of a server storage is forwarded");
+    g_trace.clear();
+    check(winfo(hp).calls == 1 && winfo(hpa).calls == 1 && winfo(hc).calls == 1 && g_bad_index.load() == bad_before && wraps_test_in_flight(1) == 0,
+          "prediction wraps: each stage counted once, the index left whole, nothing in flight");
+    // only prediction stages left: a client slice goes to the update untouched
+    game_program_unwrap(hc);
+    wpre(KILN_WORLD_CLIENT);
+    KilnGameProgramInfo pi{};
+    pi.size = sizeof pi;
+    game_program_info(KILN_WORLD_CLIENT, fuel, &pi);
+    const uint64_t forwarded = pi.forwarded;
+    run_slice(wentry(fuel), cj);
+    game_program_info(KILN_WORLD_CLIENT, fuel, &pi);
+    check(g_trace == std::vector<std::string>{"orig"} && pi.forwarded == forwarded + 1,
+          "prediction wraps: with prediction stages only, a client slice is forwarded");
+    g_trace.clear();
+    run_slice(wentry(fuel), pj);
+    check(g_trace == std::vector<std::string>{"P@p", "orig", "PA@p"}, "prediction wraps: the prediction slice still runs them");
+    g_trace.clear();
+    g_tracing = false;
+    // the client world stops (the prediction storage stops with it): the entry back, the wraps wait for the next one
+    world_event(KILN_WORLD_STOPPING, KILN_WORLD_CLIENT);
+    check(update_of(wentry(fuel)) == reinterpret_cast<uintptr_t>(kWUpdates[0]) && winfo(hp).state == KILN_WRAP_PENDING,
+          "prediction wraps: a client world's stop puts the update back; the prediction wrap waits for the next client world");
+    world_event(KILN_WORLD_STARTED, KILN_WORLD_CLIENT);
+    wpre(KILN_WORLD_CLIENT);
+    check(winfo(hp).state == KILN_WRAP_ACTIVE, "prediction wraps: applied again in the next client world");
+    game_program_unwrap(hp);
+    game_program_unwrap(hpa);
+    wpre(KILN_WORLD_CLIENT);
+    check(update_of(wentry(fuel)) == reinterpret_cast<uintptr_t>(kWUpdates[0]) && winfo(hp).state == KILN_WRAP_REMOVED,
+          "prediction wraps: unwrapped, the game's update is back");
+    world_event(KILN_WORLD_STOPPING, KILN_WORLD_CLIENT);
+    g_live_world[KILN_WORLD_CLIENT] = 0;
+    g_wdesc[5].flags = g_wdesc[6].flags = g_wdesc[7].flags = 0;
+    g_wrap_caps = nullptr;
+}
+
 void archetype_stop_counts_per_world() {
     world_event(KILN_WORLD_STOPPING, KILN_WORLD_SERVER);
     world_event(KILN_WORLD_STOPPING, KILN_WORLD_CLIENT); // discard earlier tests' counts
@@ -2429,6 +2549,7 @@ int main(int argc, char** argv) {
     stress_steps();
     stress_overlap();
     archetype_stop_counts_per_world();
+    prediction_wraps();
     if (argc > 1) abi(argv[1]);
     else check(false, "pass tests/abi.json");
     std::printf("world game programs: %s %d checks, %d failures\n", failures ? "FAIL" : "PASS", checks, failures);
