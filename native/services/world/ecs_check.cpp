@@ -265,9 +265,14 @@ void ecs_check_pre(const KilnTickInfo*) {
     auto round = new Round;
     round->number = ++g_round;
     // The truth, on the tick thread, through the game's own GetComponent.
-    static std::vector<KilnEntity> ids(1 << 16);
+    static std::vector<KilnEntity> ids(1 << 18);
+    const auto listed = [](uint32_t hash, uint32_t& n) {
+        const KilnResult rc = find(hash, ids.data(), static_cast<uint32_t>(ids.size()), &n);
+        if (n > ids.size()) n = static_cast<uint32_t>(ids.size());  // more than fit: the first ones are enough here
+        return rc == KILN_OK || rc == KILN_ERR_BUFFER_TOO_SMALL;
+    };
     uint32_t n = 0;
-    if (find(kCurrentTransformHash, ids.data(), static_cast<uint32_t>(ids.size()), &n) == KILN_OK) {
+    if (listed(kCurrentTransformHash, n)) {
         for (uint32_t i = 0; i < n; ++i) {
             if (ids[i] == 0 || ids[i] > 1023) continue;
             Seen s;
@@ -277,8 +282,7 @@ void ecs_check_pre(const KilnTickInfo*) {
             round->players.push_back(s);
         }
     }
-    if (!round->players.empty() &&
-        find(g_inventory, ids.data(), static_cast<uint32_t>(ids.size()), &n) == KILN_OK) {
+    if (!round->players.empty() && listed(g_inventory, n)) {
         double best = kNear;
         for (uint32_t i = 0; i < n; ++i) {
             if (ids[i] <= 1023) continue;
