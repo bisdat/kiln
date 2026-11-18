@@ -272,10 +272,15 @@ bool seh_write_change(KilnWorldChangeFn fn, uint32_t entity, void* data, uint32_
                       unsigned long* code);
 bool seh_write_cb(KilnWorldWriteFn fn, const KilnWorldWriteResult* result, void* user, unsigned long* code);
 
-// ---- ecs_prod.cpp: verified-copy ECS reads (ecs_reads.cpp) ----
-void ecs_prod_init();       // boot: exact-profile flag and the world.ecs_read capability row
-bool ecs_prod_available();  // entity-table reads validated on this build (none yet)
+// ---- ecs_prod.cpp: verified-copy ECS reads (ecs_reads.cpp over the engine backend, ecs_engine.cpp) ----
+void ecs_prod_init();       // boot: the context answers; entity reads wait for ecs_prod_ready
+void ecs_prod_ready();      // on_ready: kiln.engine's exact profile, the availability decision, the world.ecs_read row
+bool ecs_prod_available();  // entity reads are on for this build (exact profile, agreeing entity-table layout)
 uint32_t ecs_capability();  // KILN_WORLD_CAP_ECS_READ or 0
+const char* ecs_prod_last_refusal();  // the last reason a read was refused (diagnostics)
+// ecs_check.cpp: the opt-in in-game check of the reads from a task (<kiln>/data/kiln.world/ecs-read-check)
+void ecs_check_init();                          // on_ready
+void ecs_check_pre(const KilnTickInfo* tick);   // server Pre
 KilnResult KILN_CALL t_entity_open(KilnOwner owner, uint64_t reload_epoch, uint32_t world_kind,
                                    uint64_t expected_session, KilnEntity entity, KilnObjectRef* out);
 KilnResult KILN_CALL t_entity_validate(KilnOwner owner, const KilnObjectRef* ref, KilnObjectInfo* out);

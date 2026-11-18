@@ -14,21 +14,21 @@ bool bad_ref(const KilnObjectRef* ref) {
     return !ref || ref->size < sizeof(KilnObjectRef) || !ref->entity || ref->world_kind >= KILN_WORLD_KINDS;
 }
 
-uint32_t get_context(const Backend& b, uint32_t kind, ContextFact& c) {
+uint32_t get_context(const Backend& b, KilnOwner owner, uint32_t kind, ContextFact& c) {
     c = ContextFact{};
-    const uint32_t s = b.context(b.user, kind, &c);
+    const uint32_t s = b.context(b.user, owner, kind, &c);
     if (s != KILN_ECS_OK) return s;
     return c.present ? KILN_ECS_OK : KILN_ECS_UNAVAILABLE;
 }
 
 // Validate `ref`. ctx/fact are filled from the reads that succeeded, including when the status is stale, so the
 // caller can report the generation the id names now. KILN_OBJECT_ALIVE is only for a ref that still matches.
-uint32_t validate(const Backend& b, const KilnObjectRef& ref, ContextFact& ctx, EntityFact& fact) {
+uint32_t validate(const Backend& b, KilnOwner owner, const KilnObjectRef& ref, ContextFact& ctx, EntityFact& fact) {
     fact = {};
-    if (uint32_t s = get_context(b, ref.world_kind, ctx); s != KILN_ECS_OK) return s;
+    if (uint32_t s = get_context(b, owner, ref.world_kind, ctx); s != KILN_ECS_OK) return s;
     uint32_t status = KILN_ECS_OK;
     if (ctx.session != ref.session) status = KILN_ECS_STALE;
-    else if (ctx.reload_epoch && ref.reload_epoch != ctx.reload_epoch) status = KILN_ECS_STALE;
+    else if (ctx.epoch_tracked && ref.reload_epoch != ctx.reload_epoch) status = KILN_ECS_STALE;
     EntityFact f{};
     const uint32_t es = b.entity(b.user, ctx, ref.entity, &f);
     if (es == KILN_ECS_OK) fact = f;
@@ -37,8 +37,9 @@ uint32_t validate(const Backend& b, const KilnObjectRef& ref, ContextFact& ctx, 
     if (!f.alive) return KILN_ECS_ABSENT;
     if (f.generation != ref.generation || f.layout_stamp != ref.layout_stamp) return KILN_ECS_STALE;
     ContextFact after{};
-    if (uint32_t s = get_context(b, ref.world_kind, after); s != KILN_ECS_OK) return s;
-    if (after.session != ctx.session || after.layout_stamp != ctx.layout_stamp || after.reload_epoch != ctx.reload_epoch)
+    if (uint32_t s = get_context(b, owner, ref.world_kind, after); s != KILN_ECS_OK) return s;
+    if (after.session != ctx.session || after.layout_stamp != ctx.layout_stamp || after.reload_epoch != ctx.reload_epoch ||
+        after.epoch_tracked != ctx.epoch_tracked)
         return KILN_ECS_STALE;
     ctx = after;
     return KILN_ECS_OK;
@@ -64,16 +65,19 @@ void fill_info(const KilnObjectRef& ref, uint32_t status, const ContextFact& ctx
 
 // Stamp, copy, stamp, and do that twice. The stamp has to match on both sides of each copy and the two copies
 // have to be identical. `out` is filled only then.
-uint32_t copy_stable(const Backend& b, const KilnObjectRef& ref, uint32_t hash, const ComponentFact& cf,
+uint32_t copy_stable(const Backend& b, KilnOwner owner, const KilnObjectRef& ref, uint32_t hash, const ComponentFact& cf,
                      std::vector<uint8_t>& out) {
     // Stamp, then copy, then stamp, twice. The stamp has to be the same value on both sides of a copy, and the
     // two copies have to be identical. A writer that bumps content_stamp around its store cannot hide a tear.
     auto sample = [&](ComponentFact& got) -> uint32_t {
         ContextFact ctx{};
         EntityFact fact{};
-        if (uint32_t s = validate(b, ref, ctx, fact); s != KILN_ECS_OK) return s;
+        if (uint32_t s = validate(b, owner, ref, ctx, fact); s != KILN_ECS_OK) return s;
         if (uint32_t s = b.component(b.user, ctx, fact, ref.entity, hash, &got); s != KILN_ECS_OK) return s;
-        if (!got.present || got.address != cf.address || got.size != cf.size) return KILN_ECS_STALE;
+        // Gone or resized under the same generation and layout: not the component the read started on (stale). Moved
+        // (same entity, its row went elsewhere): the world changed under the read (unreadable; try again).
+        if (!got.present || got.size != cf.size) return KILN_ECS_STALE;
+        if (got.address != cf.address) return KILN_ECS_UNREADABLE;
         if (got.content_stamp != cf.content_stamp) return KILN_ECS_UNREADABLE;
         return KILN_ECS_OK;
     };
@@ -117,14 +121,17 @@ uint32_t result_of(uint32_t status) {
     }
 }
 
-KilnResult entity_open(const Backend& b, uint64_t reload_epoch, uint32_t world_kind, uint64_t expected_session,
+KilnResult entity_open(const Backend& b, KilnOwner owner, uint64_t reload_epoch, uint32_t world_kind, uint64_t expected_session,
                        KilnEntity entity, KilnObjectRef* out) {
     if (bad_backend(b) || !out || !entity || world_kind >= KILN_WORLD_KINDS) return KILN_ERR_INVALID_ARGUMENT;
     *out = KilnObjectRef{};
+    // The owner opens under its epoch: a newer one is its reload (refs of the older epochs go stale), an older one is
+    // a ref from before its reload.
+    if (b.open_epoch && owner && b.open_epoch(b.user, owner, reload_epoch) != reload_epoch) return KILN_ECS_ERR_STALE;
     ContextFact ctx{};
-    if (uint32_t s = get_context(b, world_kind, ctx); s != KILN_ECS_OK) return result_of(s);
+    if (uint32_t s = get_context(b, owner, world_kind, ctx); s != KILN_ECS_OK) return result_of(s);
     if (expected_session && expected_session != ctx.session) return KILN_ECS_ERR_STALE;
-    if (ctx.reload_epoch && reload_epoch != ctx.reload_epoch) return KILN_ECS_ERR_STALE;
+    if (ctx.epoch_tracked && reload_epoch != ctx.reload_epoch) return KILN_ECS_ERR_STALE;
     EntityFact f{};
     if (uint32_t s = b.entity(b.user, ctx, entity, &f); s != KILN_ECS_OK) return result_of(s);
     if (!f.alive) return KILN_ERR_NOT_FOUND;
@@ -132,8 +139,9 @@ KilnResult entity_open(const Backend& b, uint64_t reload_epoch, uint32_t world_k
     // that was already wrong when it was handed out.
     ContextFact ctx2{};
     EntityFact again{};
-    if (uint32_t s = get_context(b, world_kind, ctx2); s != KILN_ECS_OK) return result_of(s);
-    if (ctx2.session != ctx.session || ctx2.layout_stamp != ctx.layout_stamp || ctx2.reload_epoch != ctx.reload_epoch)
+    if (uint32_t s = get_context(b, owner, world_kind, ctx2); s != KILN_ECS_OK) return result_of(s);
+    if (ctx2.session != ctx.session || ctx2.layout_stamp != ctx.layout_stamp || ctx2.reload_epoch != ctx.reload_epoch ||
+        ctx2.epoch_tracked != ctx.epoch_tracked)
         return KILN_ECS_ERR_STALE;
     if (uint32_t s = b.entity(b.user, ctx2, entity, &again); s != KILN_ECS_OK) return result_of(s);
     if (!again.alive) return KILN_ERR_NOT_FOUND;
@@ -146,12 +154,12 @@ KilnResult entity_open(const Backend& b, uint64_t reload_epoch, uint32_t world_k
     return KILN_OK;
 }
 
-KilnResult entity_validate(const Backend& b, const KilnObjectRef* ref, KilnObjectInfo* out) {
+KilnResult entity_validate(const Backend& b, KilnOwner owner, const KilnObjectRef* ref, KilnObjectInfo* out) {
     if (bad_backend(b) || bad_ref(ref) || !out || out->size < sizeof(KilnObjectInfo))
         return KILN_ERR_INVALID_ARGUMENT;
     ContextFact ctx{};
     EntityFact fact{};
-    const uint32_t s = validate(b, *ref, ctx, fact);
+    const uint32_t s = validate(b, owner, *ref, ctx, fact);
     fill_info(*ref, s, ctx, fact, *out);
     return result_of(s);
 }
@@ -164,7 +172,7 @@ KilnResult ecs_context_snapshot(const Backend& b, KilnEcsContextInfo* out) {
     };
     const auto read_kind = [&](uint32_t kind) {
         Sample s;
-        s.status = b.context(b.user, kind, &s.fact);
+        s.status = b.context(b.user, 0, kind, &s.fact);
         return s;
     };
     Sample first[KILN_WORLD_KINDS], second[KILN_WORLD_KINDS];
@@ -199,13 +207,13 @@ KilnResult ecs_context_snapshot(const Backend& b, KilnEcsContextInfo* out) {
     return result;
 }
 
-KilnResult ecs_snapshot(const Backend& b, const KilnObjectRef* ref, uint32_t component, void* out,
+KilnResult ecs_snapshot(const Backend& b, KilnOwner owner, const KilnObjectRef* ref, uint32_t component, void* out,
                         uint32_t capacity, uint32_t* required) {
     if (required) *required = 0;
     if (bad_backend(b) || bad_ref(ref) || !component || (capacity && !out)) return KILN_ERR_INVALID_ARGUMENT;
     ContextFact ctx{};
     EntityFact fact{};
-    if (uint32_t s = validate(b, *ref, ctx, fact); s != KILN_ECS_OK) return result_of(s);
+    if (uint32_t s = validate(b, owner, *ref, ctx, fact); s != KILN_ECS_OK) return result_of(s);
     ComponentFact cf{};
     if (uint32_t s = b.component(b.user, ctx, fact, ref->entity, component, &cf); s != KILN_ECS_OK)
         return result_of(s);
@@ -214,19 +222,19 @@ KilnResult ecs_snapshot(const Backend& b, const KilnObjectRef* ref, uint32_t com
         // between names a new occupant, and its missing component says nothing about the ref's entity.
         ContextFact again{};
         EntityFact still{};
-        if (uint32_t s = validate(b, *ref, again, still); s != KILN_ECS_OK) return result_of(s);
+        if (uint32_t s = validate(b, owner, *ref, again, still); s != KILN_ECS_OK) return result_of(s);
         return KILN_ERR_NOT_FOUND;
     }
     if (required) *required = cf.size;
     if (capacity < cf.size) return KILN_ERR_BUFFER_TOO_SMALL;
     std::vector<uint8_t> staging;
-    if (uint32_t s = copy_stable(b, *ref, component, cf, staging); s != KILN_ECS_OK) return result_of(s);
+    if (uint32_t s = copy_stable(b, owner, *ref, component, cf, staging); s != KILN_ECS_OK) return result_of(s);
     if (!staging.empty()) std::memcpy(out, staging.data(), staging.size());
     return KILN_OK;
 }
 
-KilnResult ecs_snapshot_many(const Backend& b, const KilnObjectRef* ref, const KilnEcsSnapshotSpec* specs,
-                             uint32_t count, void* out, uint32_t capacity, uint32_t* required, uint32_t* presence) {
+KilnResult ecs_snapshot_many(const Backend& b, KilnOwner owner, const KilnObjectRef* ref,
+                             const KilnEcsSnapshotSpec* specs, uint32_t count, void* out, uint32_t capacity, uint32_t* required, uint32_t* presence) {
     if (required) *required = 0;
     // KILN_ECS_OK is 0, so presence must not be cleared before the arguments are accepted: a zeroed slot reads as OK.
     if (bad_backend(b) || bad_ref(ref) || !count || !specs || (capacity && !out)) return KILN_ERR_INVALID_ARGUMENT;
@@ -234,47 +242,62 @@ KilnResult ecs_snapshot_many(const Backend& b, const KilnObjectRef* ref, const K
         if (!specs[i].component || specs[i].reserved) return KILN_ERR_INVALID_ARGUMENT;
     ContextFact ctx{};
     EntityFact fact{};
-    if (uint32_t s = validate(b, *ref, ctx, fact); s != KILN_ECS_OK) {
+    if (uint32_t s = validate(b, owner, *ref, ctx, fact); s != KILN_ECS_OK) {
         if (presence) for (uint32_t i = 0; i < count; ++i) presence[i] = s;
         return result_of(s);
     }
-    std::vector<uint8_t> packed;
+    // Pass 1: look every spec up (presence and size, no copy). Presence depends only on the entity's layout, which
+    // the ref pins, so the total is exact for this ref; a later change of it is stale in the copies' own checks.
+    std::vector<ComponentFact> facts(count);
     std::vector<uint32_t> got(count, KILN_ECS_UNAVAILABLE);
     uint32_t fatal = KILN_ECS_OK;
-    bool any_absent = false;
+    uint64_t total = 0;
     for (uint32_t i = 0; i < count && fatal == KILN_ECS_OK; ++i) {
-        ComponentFact cf{};
-        uint32_t s = b.component(b.user, ctx, fact, ref->entity, specs[i].component, &cf);
-        if (s != KILN_ECS_OK) { fatal = s; got[i] = s; break; }
-        if (!cf.present) { got[i] = KILN_ECS_ABSENT; any_absent = true; continue; }
-        if (cf.size > UINT32_MAX - packed.size()) { fatal = KILN_ECS_UNREADABLE; got[i] = fatal; break; }
-        std::vector<uint8_t> staging;
-        s = copy_stable(b, *ref, specs[i].component, cf, staging);
-        if (s != KILN_ECS_OK) { fatal = s; got[i] = s; break; }
-        packed.insert(packed.end(), staging.begin(), staging.end());
-        got[i] = KILN_ECS_OK;
+        const uint32_t s = b.component(b.user, ctx, fact, ref->entity, specs[i].component, &facts[i]);
+        if (s != KILN_ECS_OK) { fatal = s; break; }
+        got[i] = facts[i].present ? KILN_ECS_OK : KILN_ECS_ABSENT;
+        if (facts[i].present) total += facts[i].size;
+        if (total > UINT32_MAX) fatal = KILN_ECS_UNREADABLE;
     }
-    // An absent spec is confirmed only by a validation after its lookup (the copies validate their own specs).
-    if (fatal == KILN_ECS_OK && any_absent) {
+    // Every lookup above answers for the ref's entity only if the ref still holds after them (an absent spec of a
+    // recycled id would describe the new occupant).
+    if (fatal == KILN_ECS_OK) {
         ContextFact again{};
         EntityFact still{};
-        fatal = validate(b, *ref, again, still);
+        fatal = validate(b, owner, *ref, again, still);
     }
-    if (fatal != KILN_ECS_OK) {
+    const auto fail = [&](uint32_t status) -> KilnResult {
         // No spec keeps an answer from a call that failed: an absent one was not confirmed either.
-        for (uint32_t i = 0; i < count; ++i) got[i] = fatal;
+        for (uint32_t i = 0; i < count; ++i) got[i] = status;
         if (presence) std::memcpy(presence, got.data(), count * sizeof(uint32_t));
         if (required) *required = 0;
-        return result_of(fatal);
+        return result_of(status);
+    };
+    if (fatal != KILN_ECS_OK) return fail(fatal);
+    if (capacity < total) {
+        // Sized before any copy: the caller learns the size and the presence, and nothing was copied.
+        if (presence) std::memcpy(presence, got.data(), count * sizeof(uint32_t));
+        if (required) *required = static_cast<uint32_t>(total);
+        return KILN_ERR_BUFFER_TOO_SMALL;
     }
+    // Pass 2: each present spec is copied with its own validation before and after (copy_stable).
+    std::vector<uint8_t> packed;
+    packed.reserve(static_cast<size_t>(total));
+    for (uint32_t i = 0; i < count; ++i) {
+        if (!facts[i].present) continue;
+        std::vector<uint8_t> staging;
+        if (uint32_t s = copy_stable(b, owner, *ref, specs[i].component, facts[i], staging); s != KILN_ECS_OK)
+            return fail(s);
+        packed.insert(packed.end(), staging.begin(), staging.end());
+    }
+    if (packed.size() != total) return fail(KILN_ECS_STALE);
     if (presence) std::memcpy(presence, got.data(), count * sizeof(uint32_t));
     if (required) *required = static_cast<uint32_t>(packed.size());
-    if (capacity < packed.size()) return KILN_ERR_BUFFER_TOO_SMALL;
     if (!packed.empty()) std::memcpy(out, packed.data(), packed.size());
     return KILN_OK;
 }
 
-KilnResult ecs_query(const Backend& b, const KilnEcsQueryRequest* request, KilnObjectRef* out, uint32_t capacity,
+KilnResult ecs_query(const Backend& b, KilnOwner owner, const KilnEcsQueryRequest* request, KilnObjectRef* out, uint32_t capacity,
                      uint32_t* required, uint32_t* state) {
     if (required) *required = 0;
     const bool bounds = request && (request->flags & KILN_ECS_QUERY_BOUNDS);
@@ -287,7 +310,7 @@ KilnResult ecs_query(const Backend& b, const KilnEcsQueryRequest* request, KilnO
         return KILN_ERR_INVALID_ARGUMENT;
     if (state) *state = KILN_ECS_UNAVAILABLE;
     ContextFact ctx{};
-    if (uint32_t s = get_context(b, request->world_kind, ctx); s != KILN_ECS_OK) {
+    if (uint32_t s = get_context(b, owner, request->world_kind, ctx); s != KILN_ECS_OK) {
         if (state) *state = s;
         return result_of(s);
     }
@@ -303,9 +326,16 @@ KilnResult ecs_query(const Backend& b, const KilnEcsQueryRequest* request, KilnO
         if (es == KILN_ECS_ABSENT || (es == KILN_ECS_OK && !f.alive)) return KILN_ECS_ABSENT;
         if (es != KILN_ECS_OK) return es;
         for (uint32_t i = 0; i < request->component_count; ++i) {
-            ComponentFact cf{};
-            const uint32_t cs = b.component(b.user, world, f, id, request->components[i], &cf);
-            if (cs == KILN_ECS_ABSENT || (cs == KILN_ECS_OK && !cf.present)) return KILN_ECS_ABSENT;
+            bool present = false;
+            uint32_t cs;
+            if (b.has) {
+                cs = b.has(b.user, world, f, id, request->components[i], &present);
+            } else {
+                ComponentFact cf{};
+                cs = b.component(b.user, world, f, id, request->components[i], &cf);
+                present = cf.present;
+            }
+            if (cs == KILN_ECS_ABSENT || (cs == KILN_ECS_OK && !present)) return KILN_ECS_ABSENT;
             if (cs != KILN_ECS_OK) return cs;
         }
         if (request->flags & KILN_ECS_QUERY_BOUNDS) {
@@ -347,7 +377,7 @@ KilnResult ecs_query(const Backend& b, const KilnEcsQueryRequest* request, KilnO
     // The same query, again. A different set (a component gained or lost, an entity moved into the radius, a
     // generation change) is not a complete result: copy nothing.
     ContextFact ctx2{};
-    if (uint32_t s = get_context(b, request->world_kind, ctx2); s != KILN_ECS_OK) {
+    if (uint32_t s = get_context(b, owner, request->world_kind, ctx2); s != KILN_ECS_OK) {
         if (state) *state = s;
         return result_of(s);
     }
@@ -368,7 +398,7 @@ KilnResult ecs_query(const Backend& b, const KilnEcsQueryRequest* request, KilnO
                (i == 0 || matches[i - 1].entity != m.entity);
     }
     if (!same || ctx2.session != ctx.session || ctx2.revision != ctx.revision || ctx2.layout_stamp != ctx.layout_stamp ||
-        ctx2.reload_epoch != ctx.reload_epoch) {
+        ctx2.reload_epoch != ctx.reload_epoch || ctx2.epoch_tracked != ctx.epoch_tracked) {
         if (state) *state = KILN_ECS_UNREADABLE;
         return KILN_WORLD_ERR_CHANGED;
     }
@@ -379,17 +409,17 @@ KilnResult ecs_query(const Backend& b, const KilnEcsQueryRequest* request, KilnO
     return KILN_OK;
 }
 
-KilnResult ecs_template_uuid(const Backend& b, const KilnObjectRef* ref, uint8_t guid[16]) {
+KilnResult ecs_template_uuid(const Backend& b, KilnOwner owner, const KilnObjectRef* ref, uint8_t guid[16]) {
     if (bad_backend(b) || bad_ref(ref) || !guid) return KILN_ERR_INVALID_ARGUMENT;
     ContextFact ctx{};
     EntityFact fact{};
-    if (uint32_t s = validate(b, *ref, ctx, fact); s != KILN_ECS_OK) return result_of(s);
+    if (uint32_t s = validate(b, owner, *ref, ctx, fact); s != KILN_ECS_OK) return result_of(s);
     if (!fact.has_template) return KILN_ERR_NOT_FOUND;
     uint8_t staging[16];
     std::memcpy(staging, fact.template_uuid, sizeof staging);
     ContextFact ctx2{};
     EntityFact fact2{};
-    if (uint32_t s = validate(b, *ref, ctx2, fact2); s != KILN_ECS_OK) return result_of(s);
+    if (uint32_t s = validate(b, owner, *ref, ctx2, fact2); s != KILN_ECS_OK) return result_of(s);
     if (!fact2.has_template || std::memcmp(fact2.template_uuid, staging, sizeof staging) != 0)
         return KILN_ECS_ERR_STALE;
     std::memcpy(guid, staging, sizeof staging);
