@@ -145,7 +145,8 @@ pass, `Committed 3965 changed resources`. With auto-loot-plus (capability `expor
 start finds the pass current. kiln-eml's own copy of EML (`gpl/kiln-eml/eml/mod-loader-lua`) still has the old check.
 
 **One failing startup mod no longer costs the others** (fork branch `kiln-sf-retry`: `42b59dd`, `c20c0c5`, `1ab36f8`,
-`33c0d06`, `4b1ab16`, `1073446`, `dc8b392`, `e625c2f`, `430e287`, `16de6f2` on `ec75fb6`; Kiln 0.2.0-dev.29.18). Upstream puts the game data back after a failed startup pass
+`33c0d06`, `4b1ab16`, `1073446`, `dc8b392`, `e625c2f`, `430e287`, `16de6f2`, `2df1de6` on `ec75fb6`; Kiln
+0.2.0-dev.29.18). Upstream puts the game data back after a failed startup pass
 and starts the game with none of the packages the pass writes (a `patch` part, or `export` without a runtime part, and
 the EML packages it runs). In inbox 79 one package's own check failed ("Missing base localization: keenglish", after a
 third-party EML mod had changed that data) and the player lost every startup mod. Now, when the error came from one
