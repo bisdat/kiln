@@ -216,6 +216,8 @@ any of it DLSS. Code: `native/services/ui/upscale.cpp` (the swap), `upscale_amd.
 - **kiln.log** (`graphics: upscaler: ...`): the choice at start and the hooks, the files' check, what was added to the
   Vulkan device and what the GPU lacks, the versions AMD offers for the GPU, each set-up (`AMD FSR 4.1.2 set up for
   960x540 -> 1920x1080`), and every fallback with its reason.
+- **Limits:** after a fault inside an upscaler's own code Kiln never calls that upscaler again (it may hold a lock), so
+  its GPU memory stays allocated until the game ends; the game's FSR 3 runs meanwhile.
 - **Not proven yet:** a real game with AMD FSR on any GPU; FSR 4 needs an AMD tester (RX 9000, or RX 6000/7000), the
   Steam Deck too. The swap itself was proven on the real client with a plain stretch (spike B0, RTX 3080 Ti, Proton).
 

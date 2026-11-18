@@ -83,7 +83,7 @@ class Fs {
     virtual bool is_link(const std::wstring& path) = 0;  // a reparse point / symbolic link (not followed)
     // Opened for reading, writes and deletes by anybody else denied, links not followed. nullptr: could not.
     virtual Handle open_locked(const std::wstring& path, uint32_t* error) = 0;
-    virtual bool handle_is_link(Handle h) = 0;           // the opened object itself is a link
+    virtual bool handle_is_link(Handle h) = 0;           // the opened object itself is a link (or a folder: not a plain file)
     virtual bool size(Handle h, uint64_t* out) = 0;
     virtual bool read(Handle h, void* buf, uint32_t want, uint32_t* got) = 0;  // sequential, from the start
     virtual void close(Handle h) = 0;
@@ -238,7 +238,7 @@ inline Verified verify_component(Fs& fs, const std::wstring& kiln_dir, std::stri
         }
         v.handles.push_back(h);
         v.paths.push_back(path);
-        if (fs.handle_is_link(h)) return fail(Check::link, label + " is a link: Kiln loads only the file itself (download " + v.component + " again)");
+        if (fs.handle_is_link(h)) return fail(Check::link, label + " is a link or a folder: Kiln loads only the file itself (download " + v.component + " again)");
         uint64_t size = 0;
         if (!fs.size(h, &size)) return fail(Check::unreadable, label + " could not be read for the check");
         if (size != p->size) {

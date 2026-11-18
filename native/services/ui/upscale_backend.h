@@ -26,8 +26,12 @@
 // come from the thread that creates the game's instance and device (the main thread too, seen on the real client).
 // device_lost comes from vk.cpp's vkDestroyDevice hook, after vkDeviceWaitIdle.
 // Faults: the core calls every method under a fault guard; a fault, or `false` from create or record, puts the
-// game's own FSR 3 back for the session (Status reason FAULT / CREATE_FAILED / RUNTIME_FAILED) and the backend is
-// destroyed. The frame in which record fails gets a plain blit of the colour to the output, so it is never empty.
+// game's own FSR 3 back for the session (Status reason FAULT / CREATE_FAILED / RUNTIME_FAILED). The frame in which
+// record fails gets a plain blit of the colour to the output, so it is never empty.
+// Lifetime: the backend object lives for the whole session. After `false` from create or record it gets destroy() and,
+// later, device_lost() as usual. After a FAULT inside the backend the core never calls it again (no destroy, tick or
+// device_lost: it may hold a lock), so its contexts and Vulkan objects outlive the device until the game ends: a known
+// leak, accepted (a fault is rare and the session ends with the game). A backend's destructor must not call its vendor.
 #pragma once
 #ifndef VK_NO_PROTOTYPES
 #define VK_NO_PROTOTYPES
