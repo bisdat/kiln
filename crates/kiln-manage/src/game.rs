@@ -658,12 +658,25 @@ pub fn user_reg_native(user_reg: &str, name: &str) -> bool {
     native
 }
 
+/// GE-Proton 11-11 and later load the game's native dinput8.dll without a Steam override.
+/// Steam's mapping must name a known GE build; an unknown or default Proton stays advisory.
+fn ge_proton_loads_dinput8(tool: &str) -> bool {
+    matches!(crate::wine::ge_version(tool).as_deref(), Some([major, minor, ..]) if (*major, *minor) >= (11, 11))
+}
+
 /// Launch options facts of an install (read-only): Proton clients only; None elsewhere.
 pub fn launch_options_info(install: &GameInstall, roots: &[SteamRoot]) -> Option<LaunchOptionsInfo> {
     if install.platform != Platform::Proton {
         return None;
     }
-    let candidates: Vec<SteamRoot> = match install.library.as_deref().and_then(|l| steam::root_of_library(roots, l)) {
+    let root = install.library.as_deref().and_then(|l| steam::root_of_library(roots, l));
+    // Only trust an app-specific mapping in the Steam root that owns this game library.
+    // In particular, simply having a recent GE-Proton installed does not mean Steam runs it.
+    let ge_native_dinput8 = root.as_ref()
+        .and_then(|r| steam::compat_tool(r, install.app_id).ok().flatten())
+        .as_deref()
+        .is_some_and(ge_proton_loads_dinput8);
+    let candidates: Vec<SteamRoot> = match root {
         Some(r) => vec![r],
         None => roots.to_vec(),
     };
@@ -686,7 +699,10 @@ pub fn launch_options_info(install: &GameInstall, roots: &[SteamRoot]) -> Option
         value,
         has_dll_override: has,
         chained_override_missing,
-        advice: (!has || chained_override_missing).then(|| if chained { CHAINED_DLL_OVERRIDE_ADVICE } else { DLL_OVERRIDE_ADVICE }.to_string()),
+        // Modern GE-Proton loads Kiln's dinput8.dll itself. A separate chained
+        // xinput9_1_0.dll may still need the native-first override.
+        advice: ((!has && !ge_native_dinput8) || chained_override_missing)
+            .then(|| if chained { CHAINED_DLL_OVERRIDE_ADVICE } else { DLL_OVERRIDE_ADVICE }.to_string()),
     })
 }
 
