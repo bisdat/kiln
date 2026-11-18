@@ -16,7 +16,8 @@ where the card runs it) or Intel XeSS ([below](#behind-the-games-fsr-3-phase-b))
   behind the game's FSR 3 and why the chosen one does not run, what they step aside for, and when a restart is needed.
 - In the launcher: Settings, card **Graphics** (the same `kiln.json` entries, the upscaler choice with its files and
   what ran in the last game; it also names the tools Kiln steps aside for, from the game folder). On the Steam Deck:
-  Deck mode's Settings, rows **Upscaler**, **AMD FSR version**, the files' rows and **Upscaler now**.
+  Deck mode's Settings, rows **Upscaler behind the game's FSR 3**, **AMD FSR version**, the files' rows and **Upscaler
+  now** ([launcher/deck.md](launcher/deck.md#upscaler)).
 - By hand: `kiln/kiln.json`, section `graphics` (the game reads the file again every 2 seconds; a file that is not valid
   JSON keeps the settings in use, with a warning in kiln.log):
 

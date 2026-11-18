@@ -350,6 +350,37 @@ public unsafe class GraphicsTests : IDisposable
         Assert.Equal((UpscalerChoice.Xess, AmdUpscalerMode.Fsr3), (saved.Upscaler, saved.AmdUpscaler));
     }
 
+    [Fact]
+    public void Graphics_set_carries_the_upscaler_and_amd_s_version_at_offsets_40_and_44_for_every_choice()
+    {
+        // kiln.ui takes the choice from graphics_set at every call (every 2 seconds and on every change): left at 0, it would
+        // turn the player's choice back to the game's own FSR 3 at the next FSR set-up
+        foreach (var (name, choice, native) in new[] { ("game", UpscalerChoice.Game, 0u), ("amd", UpscalerChoice.Amd, 1u), ("xess", UpscalerChoice.Xess, 2u) })
+            foreach (var (amdName, amd, amdNative) in new[] { ("auto", AmdUpscalerMode.Auto, 0u), ("fsr3", AmdUpscalerMode.Fsr3, 1u) })
+            {
+                var s = GraphicsTools.Parse($"{{ \"graphics\": {{ \"upscaler\": \"{name}\", \"amdUpscaler\": \"{amdName}\", \"fpsCap\": 60 }} }}");
+                Assert.Equal((choice, amd), (s.Upscaler, s.AmdUpscaler));
+                var g = GraphicsTools.ToNative(s);
+                var bytes = new byte[sizeof(UiNative.Graphics)];
+                fixed (byte* b = bytes) *(UiNative.Graphics*)b = g;
+                Assert.Equal(native, BitConverter.ToUInt32(bytes, 40));
+                Assert.Equal(amdNative, BitConverter.ToUInt32(bytes, 44));
+                Assert.Equal(60u, BitConverter.ToUInt32(bytes, 4));  // phase A's fields as before
+                Assert.Equal((uint)sizeof(UiNative.Graphics), BitConverter.ToUInt32(bytes, 0));
+            }
+        // and through the table: at start, on a change, and on every later apply
+        Install();
+        GraphicsTools.PathOverride = Path.Combine(_dir, "kiln.json");
+        GraphicsStateFile.PathOverride = Path.Combine(_dir, "state", "graphics.json");
+        File.WriteAllText(GraphicsTools.PathOverride, "{ \"graphics\": { \"upscaler\": \"xess\", \"amdUpscaler\": \"fsr3\" } }");
+        GraphicsTools.Start();
+        Assert.Equal((2u, 1u), (Set[^1].Upscaler, Set[^1].AmdUpscaler));
+        GraphicsTools.Apply();
+        Assert.Equal((2u, 1u), (Set[^1].Upscaler, Set[^1].AmdUpscaler));
+        GraphicsTools.Change(GraphicsTools.Current with { FpsCap = 90 });  // another setting: the choice stays in the struct
+        Assert.Equal((2u, 1u, 90u), (Set[^1].Upscaler, Set[^1].AmdUpscaler, Set[^1].FpsCap));
+    }
+
     private static IEnumerable<(string Name, uint Value)> HeaderEnum(string header, string prefix)
     {
         foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(header,
