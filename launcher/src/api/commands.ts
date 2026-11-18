@@ -1177,7 +1177,8 @@ export interface ModpackManifest {
   created?: string;
   server: { id: ServerId; name?: string | null };
   kiln?: string;
-  mods: { kind: ModKind; id: string; version: string; name?: string; path: string; hash: string; clients?: Clients; side?: Side }[];
+  // identity (0.2.0-dev.29.18): what the server advertises for an engine mod when that is not hash (kiln-manage modpack.rs)
+  mods: { kind: ModKind; id: string; version: string; name?: string; path: string; hash: string; identity?: string; clients?: Clients; side?: Side }[];
 }
 export interface BuiltModpack {
   file: string;
