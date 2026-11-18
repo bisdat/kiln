@@ -176,21 +176,32 @@ inline std::optional<float> wanted_scale(const Settings& s, int quality) {
     return std::nullopt;
 }
 
-// After DLSS's optimal-settings answer: the render size Kiln sets instead of DLSS's (`dlss`), or nullopt to keep it.
-// `output`: the size asked for; `min`/`max`: DLSS's range for this output (zero: unknown, not clamped). A size within a
-// pixel of DLSS's own is DLSS's (the per-mode defaults are DLSS's scales, rounded).
-inline std::optional<Size> render_size(const Settings& s, int quality, Size output, Size dlss, Size min, Size max) {
+// After DLSS's optimal-settings answer: the render size Kiln sets instead of DLSS's (`dlss`; nullopt: keep it), and
+// whether DLSS's range for this mode limited the player's scale. `output`: the size asked for; `min`/`max`: DLSS's range
+// for this output and mode (zero: unknown, not clamped; DLSS renders nothing outside it). A size within a pixel of DLSS's
+// own is DLSS's (the per-mode defaults are DLSS's scales, rounded).
+struct RenderPick {
+    std::optional<Size> set;
+    bool limited = false;  // the wanted size was outside DLSS's range: the nearest size in it is used
+    Size wanted;           // output x scale, before DLSS's range (zero: Kiln wants none)
+};
+inline RenderPick pick_render_size(const Settings& s, int quality, Size output, Size dlss, Size min, Size max) {
+    RenderPick p;
     const auto scale = wanted_scale(s, quality);
-    if (!scale || !output.w || !output.h) return std::nullopt;
-    auto axis = [](uint32_t out, float k, uint32_t lo, uint32_t hi) {
-        auto v = static_cast<int64_t>(std::llround(static_cast<double>(out) * k));
-        if (lo && hi && lo <= hi) v = std::clamp<int64_t>(v, lo, hi);
-        return static_cast<uint32_t>(std::clamp<int64_t>(v, 1, out));
+    if (!scale || !output.w || !output.h) return p;
+    auto want = [](uint32_t out, float k) {
+        return static_cast<uint32_t>(std::clamp<int64_t>(std::llround(static_cast<double>(out) * k), 1, out));
     };
-    const Size r{axis(output.w, *scale, min.w, max.w), axis(output.h, *scale, min.h, max.h)};
+    auto fit = [](uint32_t v, uint32_t lo, uint32_t hi) { return lo && hi && lo <= hi ? std::clamp(v, lo, hi) : v; };
+    p.wanted = {want(output.w, *scale), want(output.h, *scale)};
+    const Size r{fit(p.wanted.w, min.w, max.w), fit(p.wanted.h, min.h, max.h)};
+    p.limited = !(r == p.wanted);
     const auto within_one = [](uint32_t a, uint32_t b) { return (a > b ? a - b : b - a) <= 1; };
-    if (within_one(r.w, dlss.w) && within_one(r.h, dlss.h)) return std::nullopt;
-    return r;
+    if (!(within_one(r.w, dlss.w) && within_one(r.h, dlss.h))) p.set = r;
+    return p;
+}
+inline std::optional<Size> render_size(const Settings& s, int quality, Size output, Size dlss, Size min, Size max) {
+    return pick_render_size(s, quality, output, dlss, min, max).set;
 }
 
 }  // namespace kui::gfx

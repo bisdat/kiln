@@ -387,7 +387,8 @@ internal static unsafe class GraphicsTools
 internal static unsafe class GraphicsPage
 {
     // KilnUiGraphicsStatus.flags (kiln_ui.h)
-    internal const uint CapActive = 1, DlssHooked = 2, DlssActive = 4, DlssRestart = 8, DlssPreset = 16, DlssScaled = 32, Counting = 64;
+    internal const uint CapActive = 1, DlssHooked = 2, DlssActive = 4, DlssRestart = 8, DlssPreset = 16, DlssScaled = 32, Counting = 64,
+        DlssLimited = 128;
     // KilnUiGraphicsStatus.aside_* bits (kiln_ui.h KILN_UI_GFX_ASIDE_*), in the order they are named
     internal static readonly (uint Bit, string Key)[] AsideKeys =
     [
@@ -430,8 +431,11 @@ internal static unsafe class GraphicsPage
         if (st.AsideDlss != 0)
             lines.Add(KilnText.T("graphics.status.dlss_aside", ("tools", AsideNames(st.AsideDlss))));
         else if ((st.Flags & DlssActive) != 0)
+        {
             lines.Add(KilnText.T("graphics.status.dlss_active", ("mode", ModeName(st.DlssQuality)), ("render", $"{st.RenderWidth}x{st.RenderHeight}"),
                 ("output", $"{st.DlssOutputWidth}x{st.DlssOutputHeight}"), ("preset", PresetName(st.DlssPreset))));
+            if ((st.Flags & DlssLimited) != 0) lines.Add(KilnText.T("graphics.status.dlss_limited", ("mode", ModeName(st.DlssQuality))));
+        }
         else if ((st.Flags & DlssHooked) != 0)
             lines.Add(KilnText.T("graphics.status.dlss_idle"));
         else if ((st.Flags & DlssRestart) == 0 && (s.DlssSet || s.Readout))

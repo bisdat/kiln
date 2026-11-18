@@ -979,6 +979,7 @@
       "fps": "Rendered {rendered} fps, output {output} fps, {ms} ms a frame.",
       "dlss_aside": "DLSS settings: left to {tools}.",
       "dlss_active": "DLSS {mode}: {render} to {output}, preset {preset}.",
+      "dlss_limited": "Your render scale is outside what DLSS allows in {mode}: it renders at the nearest size DLSS allows (above).",
       "dlss_idle": "DLSS is not in use right now (the game uses FSR 3, XeSS or no upscaler, or no world is loaded).",
       "dlss_none": "The game has not set DLSS up in this session (DLSS needs an NVIDIA RTX card and DLSS chosen in the game's settings).",
       "restart": "Restart the game for Kiln's DLSS settings and the readout's DLSS line: Kiln hooks DLSS only when one of them is on when the game starts."

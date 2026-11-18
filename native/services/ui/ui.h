@@ -236,7 +236,8 @@ const void* render_table();            // the KilnRenderApi
 void graphics_start(bool optiscaler, bool streamline);  // plugin main, after overlay_guard_start: kiln.json, what steps aside
 bool graphics_wants_load_hook();  // DLSS is to be hooked when NVIDIA's DLSS core loads (the LoadLibraryExW hook must be in)
 void graphics_after_load();       // after every library load (load_hook.h; may hold the loader lock): NVIDIA's DLSS core
-void graphics_present();          // render thread, right before the game's frame goes to vkQueuePresentKHR: the frame cap
+void graphics_present();          // render thread, right after the game's frame went to vkQueuePresentKHR (no lock held):
+                                  // the frame counts, and the frame cap's wait for the game's next slot
 void graphics_overlay();          // render thread, inside the ImGui frame: the readout
 KilnResult graphics_set(const KilnUiGraphics* settings);  // any thread (Kiln.Ui; ui.cpp refuses native plugins)
 KilnResult graphics_status(KilnUiGraphicsStatus* out);     // any thread

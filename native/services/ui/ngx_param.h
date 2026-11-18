@@ -62,10 +62,12 @@ inline constexpr const char* kMaxWidth = "DLSS.Get.Dynamic.Max.Render.Width";
 inline constexpr const char* kMaxHeight = "DLSS.Get.Dynamic.Max.Render.Height";
 inline constexpr const char* kSubrectWidth = "DLSS.Render.Subrect.Dimensions.Width";
 inline constexpr const char* kSubrectHeight = "DLSS.Render.Subrect.Dimensions.Height";
-// The render preset hints by DLSS mode (DLAA's is left as the game sets it).
+// The render preset hints Kiln sets: the four the game sets itself before every creation besides DLAA's (docs/re/
+// client-upscale.md), so the game's own value comes back at the next creation once the player goes back to "default".
+// DLAA's is left as the game sets it; Ultra Quality's the game neither sets nor offers.
 inline constexpr const char* kPresetHints[] = {
     "DLSS.Hint.Render.Preset.Quality", "DLSS.Hint.Render.Preset.Balanced", "DLSS.Hint.Render.Preset.Performance",
-    "DLSS.Hint.Render.Preset.UltraPerformance", "DLSS.Hint.Render.Preset.UltraQuality",
+    "DLSS.Hint.Render.Preset.UltraPerformance",
 };
 inline constexpr const char* kPresetHintDlaa = "DLSS.Hint.Render.Preset.DLAA";
 // The hint the game's mode reads (PerfQualityValue -> name); null for DLAA and unknown values.

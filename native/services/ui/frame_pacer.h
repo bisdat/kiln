@@ -2,11 +2,11 @@
 // kiln.ui: Kiln's frame cap and the readout's frame counts (graphics.cpp; docs/kiln/graphics.md). Plain logic on a tick
 // clock, no windows.h: host test tests/graphics_test.cpp.
 //
-// The cap paces the frames the game renders: each of the game's presents waits, on the presenting thread, until its turn
-// in a schedule of one frame per interval. Frames the game hands over late do not build up a debt that later frames
-// would pay back in a burst: a frame later than half an interval starts a new schedule from itself. So with the game's
-// own frame limit or V-Sync at a lower rate than the cap, frames are never held (theirs decides); at a higher rate, the
-// cap decides.
+// The cap paces the frames the game renders: after each of the game's presents the presenting thread waits until the
+// next slot in a schedule of one frame per interval, so the game starts its next frame there (a frame is never held
+// once it is done). Frames that come late do not build up a debt that later frames would pay back in a burst: a frame
+// later than half an interval starts a new schedule from itself. So with the game's own frame limit or V-Sync at a
+// lower rate than the cap, the game is never held (theirs decides); at a higher rate, the cap decides.
 //
 // Frame generation (a later phase) adds presents of its own between the game's: those are output frames, not rendered
 // ones. The pacer sees only the game's (`FrameStats::rendered` vs `output`), so a cap of 60 with 2x generation shows
@@ -36,8 +36,9 @@ public:
     int64_t interval() const { return interval_; }
     bool on() const { return interval_ > 0; }
 
-    // The game's frame is ready to be presented at `now`: the tick it may go at (`now` when at once). `resynced` is set
-    // when this frame started a new schedule (the first frame, or one late by over half an interval).
+    // A frame boundary of the game at `now` (its frame was just presented): the tick the game may go on at (`now` when at
+    // once). `resynced` is set when this frame started a new schedule (the first frame, or one late by over half an
+    // interval).
     int64_t plan(int64_t now, bool* resynced = nullptr) {
         if (resynced) *resynced = false;
         if (!interval_) return now;

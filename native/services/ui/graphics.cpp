@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: MIT
 // kiln.ui: Kiln's own graphics tools in the game (docs/kiln/graphics.md; what the game does with DLSS:
 // docs/re/client-upscale.md).
-//  - The frame cap: the game's presents wait for their turn (frame_pacer.h) in Kiln's present hook (vk.cpp), on the
-//    presenting thread: a timer for most of the wait, a short spin on the clock for the rest.
+//  - The frame cap: right after each of the game's presents (Kiln's present hook, vk.cpp), the presenting thread waits
+//    for the game's next slot (frame_pacer.h) before it goes back to the game: a timer for most of the wait, a short
+//    spin on the clock for the rest. The frame is shown as soon as it is done; the game starts its next one later, as a
+//    limiter in the game would. So the cap adds no latency to a finished frame, and display times follow the game's
+//    render times (a frame that takes longer shows later).
 //  - DLSS settings: the game links NVIDIA's NGX SDK statically and reaches NGX's core (_nvngx.dll, NVIDIA's driver
 //    component; Proton ships it too) through GetProcAddress. Kiln hooks five of the core's exports once the game loads it:
 //      GetCapabilityParameters  Kiln puts its own optimal-settings callback in front of DLSS's (the documented
@@ -139,6 +142,7 @@ struct Scaled {
     int quality = -2;
     gfx::Size output, render;
     bool applied = false;  // Kiln's step set `render` (else it is DLSS's own)
+    bool limited = false;  // DLSS's range for the mode limited the player's scale
 } g_scaled;
 
 uint32_t g_fault_code = 0;
@@ -172,10 +176,23 @@ void scale_answer(void* params) {
     ngx::get_ui(params, ngx::kMinHeight, &min.h);
     ngx::get_ui(params, ngx::kMaxWidth, &max.w);
     ngx::get_ui(params, ngx::kMaxHeight, &max.h);
-    const auto size = gfx::render_size(s, quality, out, dlss, min, max);
+    const auto pick = gfx::pick_render_size(s, quality, out, dlss, min, max);
+    const auto& size = pick.set;
     {
         std::lock_guard lk(g_scaled_mu);
-        g_scaled = {quality, out, size ? *size : dlss, size.has_value()};
+        g_scaled = {quality, out, size ? *size : dlss, size.has_value(), pick.limited};
+    }
+    if (pick.limited) {
+        static std::mutex lim_mu;
+        static std::vector<std::tuple<int, uint32_t, uint32_t, uint32_t, uint32_t>> said_lim;
+        std::lock_guard lk(lim_mu);
+        const auto key = std::make_tuple(int(quality), out.w, out.h, pick.wanted.w, pick.wanted.h);
+        if (std::find(said_lim.begin(), said_lim.end(), key) == said_lim.end() && said_lim.size() < 32) {
+            said_lim.push_back(key);
+            logf(KILN_LOG_INFO, "graphics: DLSS %s for %ux%u: Kiln's scale asks for %ux%u, outside DLSS's range %ux%u..%ux%u for this mode: "
+                 "it renders at %ux%u", gfx::mode_name(quality), out.w, out.h, pick.wanted.w, pick.wanted.h, min.w, min.h, max.w, max.h,
+                 size ? size->w : dlss.w, size ? size->h : dlss.h);
+        }
     }
     if (!size) return;
     ngx::set_ui(params, ngx::kOutWidth, size->w);
@@ -259,8 +276,10 @@ void before_create(void* params) {
     ngx::get_ui(params, ngx::kOutHeight, &out.h);
     {
         std::lock_guard lk(g_scaled_mu);
-        if (g_scaled.applied && g_scaled.quality == quality && g_scaled.output == out && g_scaled.render == render)
-            flags |= KILN_UI_GFX_DLSS_SCALED;  // created at the size Kiln's step gave
+        if (g_scaled.quality == quality && g_scaled.output == out && g_scaled.render == render) {
+            if (g_scaled.applied) flags |= KILN_UI_GFX_DLSS_SCALED;    // created at the size Kiln's step gave
+            if (g_scaled.limited) flags |= KILN_UI_GFX_DLSS_LIMITED;   // DLSS's range limited the player's scale
+        }
     }
     g_dlss_quality.store(quality);
     g_dlss_preset.store(preset);
@@ -350,27 +369,38 @@ std::string module_file(HMODULE m) {
     return std::string(u.begin(), u.end());
 }
 
-// The module a patched function jumps into, for the log ("" when it cannot be told).
-std::string jump_owner(const uint8_t* at) {
+// Where a function's first instruction jumps (patched_entry's forms); null when it cannot be read.
+const uint8_t* jump_target(const uint8_t* at) {
     uint8_t b[16] = {};
-    if (!read_bytes(at, b, sizeof b)) return {};
-    const uint8_t* to = nullptr;
+    if (!read_bytes(at, b, sizeof b)) return nullptr;
     int32_t rel = 0;
-    if (b[0] == 0xE9) { std::memcpy(&rel, b + 1, 4); to = at + 5 + rel; }
-    else if (b[0] == 0xEB) to = at + 2 + static_cast<int8_t>(b[1]);
-    else if (b[0] == 0xFF && b[1] == 0x25) {
+    if (b[0] == 0xE9) {
+        std::memcpy(&rel, b + 1, 4);
+        return at + 5 + rel;
+    }
+    if (b[0] == 0xEB) return at + 2 + static_cast<int8_t>(b[1]);
+    if (b[0] == 0xFF && b[1] == 0x25) {
         std::memcpy(&rel, b + 2, 4);
         uint64_t abs = 0;
-        if (read_bytes(at + 6 + rel, reinterpret_cast<uint8_t*>(&abs), 8)) to = reinterpret_cast<const uint8_t*>(abs);
-    } else if (b[0] == 0x48 || b[0] == 0x49) {
+        return read_bytes(at + 6 + rel, reinterpret_cast<uint8_t*>(&abs), 8) ? reinterpret_cast<const uint8_t*>(abs) : nullptr;
+    }
+    if (b[0] == 0x48 || b[0] == 0x49) {
         uint64_t abs = 0;
         std::memcpy(&abs, b + 2, 8);
-        to = reinterpret_cast<const uint8_t*>(abs);
+        return reinterpret_cast<const uint8_t*>(abs);
     }
+    return nullptr;
+}
+
+HMODULE module_at(const void* at) {
     HMODULE m = nullptr;
-    if (!to || !GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                                   reinterpret_cast<LPCWSTR>(to), &m))
-        return {};
+    if (!at || !GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                   reinterpret_cast<LPCWSTR>(at), &m))
+        return nullptr;
+    return m;
+}
+
+std::string file_name(HMODULE m) {
     const auto f = module_file(m);
     const auto slash = f.find_last_of("\\/");
     return slash == std::string::npos ? f : f.substr(slash + 1);
@@ -400,13 +430,19 @@ void hook_ngx(HMODULE core) {
             return;
         }
         uint8_t b[16] = {};
-        if (e.target && (!read_bytes(e.target, b, sizeof b) || gfx::patched_entry(b))) {
-            const std::string who = jump_owner(static_cast<const uint8_t*>(e.target));
-            g_aside_run.fetch_or(gfx::kAsideNgxPatched);
-            logf(KILN_LOG_INFO, "graphics: %s in %s is already patched%s%s: another tool hooks DLSS, so Kiln's DLSS settings step aside "
-                 "(the frame cap and the readout stay)", e.name, file.c_str(), who.empty() ? "" : " (it jumps into ", who.empty() ? "" : (who + ")").c_str());
-            return;
-        }
+        if (!e.target) continue;
+        const bool readable = read_bytes(e.target, b, sizeof b);
+        if (readable && !gfx::patched_entry(b)) continue;
+        // a jump at the entry: a thunk into the core itself (a linker's, an NVIDIA build's) is NVIDIA's own code; one
+        // into another module, or one that cannot be followed, is another tool's hook
+        const HMODULE into = readable ? module_at(jump_target(static_cast<const uint8_t*>(e.target))) : nullptr;
+        if (into == core) continue;
+        const std::string who = into ? file_name(into) : std::string();
+        g_aside_run.fetch_or(gfx::kAsideNgxPatched);
+        logf(KILN_LOG_INFO, "graphics: %s in %s is already patched (%s%s): another tool hooks DLSS, so Kiln's DLSS settings step aside "
+             "(the frame cap and the readout stay)", e.name, file.c_str(), who.empty() ? "it jumps outside any module Kiln can name" : "it jumps into ",
+             who.c_str());
+        return;
     }
     // made disabled, the originals published, then enabled: a call on another thread never meets a half-made hook. The
     // hooks are never removed (a trampoline may be running; kiln.ui is never unloaded).

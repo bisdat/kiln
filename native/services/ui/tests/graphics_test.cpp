@@ -267,6 +267,20 @@ static void render_sizes() {
     s.custom_scale = 1.0f;
     CHECK(render_size(s, kQuality, out, dlss_q, Size{}, Size{}) == out);
     CHECK(!render_size(s, kQuality, Size{}, dlss_q, min, max));
+    // whether DLSS's range limited the scale (the Graphics page says so)
+    s.custom_scale = 0.33f;
+    auto pick = pick_render_size(s, kPerformance, out, Size{1280, 720}, min, max);
+    CHECK(pick.limited && pick.set == Size{853, 480} && pick.wanted == Size{845, 475});
+    pick = pick_render_size(s, kUltraPerformance, out, Size{853, 480}, min, max);
+    CHECK(pick.limited && !pick.set);  // limited to DLSS's own size: nothing set, still said
+    s.custom_scale = 0.75f;
+    pick = pick_render_size(s, kQuality, out, dlss_q, min, max);
+    CHECK(!pick.limited && pick.set == Size{1920, 1080});
+    pick = pick_render_size(s, kDlaa, out, out, min, max);
+    CHECK(!pick.limited && !pick.set && pick.wanted == Size{});
+    // a narrow range for a mode: the scale does little there
+    pick = pick_render_size(s, kQuality, out, dlss_q, Size{1600, 900}, Size{1800, 1013});
+    CHECK(pick.limited && pick.set == Size{1800, 1013});
     CHECK(mode_index(kQuality) == 0 && mode_index(kUltraPerformance) == 3 && mode_index(kDlaa) == -1 && mode_index(kUltraQuality) == -1);
     CHECK(std::string(mode_name(kBalanced)) == "Balanced" && std::string(mode_name(42)) == "?");
 }

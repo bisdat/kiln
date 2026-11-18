@@ -682,6 +682,8 @@ enum {
     KILN_UI_GFX_DLSS_PRESET = 1u << 4,    /* the DLSS in use got Kiln's render preset */
     KILN_UI_GFX_DLSS_SCALED = 1u << 5,    /* the DLSS in use got Kiln's render size */
     KILN_UI_GFX_COUNTING = 1u << 6,       /* the frame counts below are kept (the frame cap or the readout is on) */
+    KILN_UI_GFX_DLSS_LIMITED = 1u << 7,   /* the player's render scale was outside DLSS's range for the mode in use: DLSS
+                                             renders at the nearest size it allows (render_width/height) */
 };
 /* KilnUiGraphicsStatus.aside_cap / aside_dlss: what the frame cap and the DLSS settings step aside for (bits). */
 enum {

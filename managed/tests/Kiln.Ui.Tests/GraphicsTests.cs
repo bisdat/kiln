@@ -205,6 +205,11 @@ public unsafe class GraphicsTests : IDisposable
         Assert.Equal("Rendered 60 fps, output 60 fps, 16.8 ms a frame.", lines[1]);
         Assert.Equal("DLSS Quality: 1707x960 to 2560x1440, preset K.", lines[2]);
         Assert.Equal(3, lines.Count);
+        // DLSS's range for the mode limited the player's scale: said under the size in effect
+        st.Flags |= GraphicsPage.DlssLimited;
+        lines = GraphicsPage.StatusLines(s, st);
+        Assert.Equal(4, lines.Count);
+        Assert.Equal("Your render scale is outside what DLSS allows in Quality: it renders at the nearest size DLSS allows (above).", lines[3]);
         // OptiScaler: both step aside, by name
         st = new UiNative.GraphicsStatus { AsideCap = 1, AsideDlss = 1 | 8 };
         lines = GraphicsPage.StatusLines(s, st);
