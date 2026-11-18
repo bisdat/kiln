@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/chat-tab-completion
+      - dev/chat-tab-completion
     paths:
       - 'native/services/ui/**'
       - 'native/core/abi/services/kiln_ui.h'
