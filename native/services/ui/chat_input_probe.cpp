@@ -278,7 +278,7 @@ bool env_enabled(const char* name) { return env_switch(name) == 1; }
 
 // The player's switch: kiln.json "ui": {"chatHistory": true} (the launcher's Settings, "Kiln"), read once at start.
 // Off when the file, the section or the key is missing or unreadable.
-bool kiln_json_chat_history() {
+bool kiln_json_chat_option(const char* key) {
     char buffer[4096]{};
     size_t length = 0;
     if (g_api->path(KILN_PATH_KILN, buffer, sizeof buffer, &length) != KILN_OK || !length || length >= sizeof buffer)
@@ -291,7 +291,7 @@ bool kiln_json_chat_history() {
         if (!doc.is_object()) return false;
         const auto ui = doc.find("ui");
         if (ui == doc.end() || !ui->is_object()) return false;
-        const auto on = ui->find("chatHistory");
+        const auto on = ui->find(key);
         return on != ui->end() && on->is_boolean() && on->get<bool>();
     } catch (...) {
         return false;
@@ -558,15 +558,18 @@ bool on_text(uint32_t ch) {
 }
 
 bool on_key(uint32_t vk, uint32_t mods, bool down, bool captured) {
-    if (!g_history_on.load(std::memory_order_acquire) && !g_diagnose_on.load(std::memory_order_acquire))
-        return false;
+    if (!g_history_on.load(std::memory_order_acquire) &&
+        !g_completion_on.load(std::memory_order_acquire) &&
+        !g_diagnose_on.load(std::memory_order_acquire)) return false;
     // While an IME composes, Up/Down pick its candidates and Backspace edits the composition: none of it is ours.
     const bool composing = g_ime_composing.load(std::memory_order_acquire);
     // Keys that change the text without a character (chat_keys::edits_text) end a browse as typing does.
     if (down && !captured && !composing && chat_keys::edits_text(vk, mods) &&
         g_history_on.load(std::memory_order_relaxed) && g_keys.focused())
         g_manual_text_edit.store(true, std::memory_order_release);
-    const bool kept = !captured && !composing && g_history_on.load(std::memory_order_acquire) && g_keys.key(vk, mods, down);
+    const bool kept = !captured && !composing &&
+        (g_history_on.load(std::memory_order_acquire) || g_completion_on.load(std::memory_order_acquire)) &&
+        g_keys.key(vk, mods, down);
     if (down && (vk == VK_UP || vk == VK_DOWN) && g_trace_on.load(std::memory_order_relaxed) &&
         g_key_log_count.fetch_add(1) < 24)
         logf(KILN_LOG_INFO, "ui: chat history trace: key %s mods=%u focus=%u captured=%u ime=%u consumed=%u",
@@ -582,6 +585,12 @@ void on_blur() {
     g_manual_text_edit.store(false, std::memory_order_release);
     g_ime_composing.store(false, std::memory_order_release);
     g_window_blurred.store(true, std::memory_order_release);
+    {
+        std::lock_guard lock(g_completion_mu);
+        g_completion_snapshot.focused = false;
+        g_completion_actions.clear();
+        g_pending_valid = false;
+    }
 }
 
 const ChatInputSink kSink{&on_key, &on_text, &on_ime, &on_blur};
@@ -697,11 +706,14 @@ void chat_input_exit() {
 bool chat_input_probe_install() {
     const bool diag = env_enabled("KILN_CHAT_HISTORY_DIAG");
     const int forced = env_switch("KILN_CHAT_HISTORY");
-    const bool switched = forced < 0 && kiln_json_chat_history();
+    const bool switched = forced < 0 && kiln_json_chat_option("chatHistory");
+    const int comp_forced = env_switch("KILN_CHAT_COMPLETION");
+    const bool comp_switched = comp_forced < 0 && kiln_json_chat_option("chatCompletion");
+    bool completion = (comp_forced == 1 || comp_switched) && !diag;
     const char* why = forced >= 0 ? "KILN_CHAT_HISTORY" : "kiln.json ui.chatHistory";
     const bool history = (forced == 1 || switched) && !diag;  // diagnostics take precedence: never swallow keys
     const bool probe = env_enabled("KILN_CHAT_INPUT_PROBE");
-    if (!history && !diag && !probe) {
+    if (!history && !completion && !diag && !probe) {
         logf(KILN_LOG_INFO, "ui: chat history off (%s)", forced == 0 ? "KILN_CHAT_HISTORY=0" : "kiln.json ui.chatHistory");
         return false;
     }
@@ -722,22 +734,40 @@ bool chat_input_probe_install() {
         logf(KILN_LOG_WARN, "ui: chat input probe requested, but scoped call sites were not resolved");
         return false;
     }
-    if ((history || diag) && (!symbol("chatui/TextInputState", &g_state_fn) ||
-                              (history && !symbol("chatui/EditSetText", &g_set_text_fn)))) {
+    if ((history || completion || diag) && (!symbol("chatui/TextInputState", &g_state_fn) ||
+                              ((history || completion) && !symbol("chatui/EditSetText", &g_set_text_fn)))) {
         logf(KILN_LOG_WARN, "ui: chat history unavailable: edit state/replace symbols unresolved");
         return false;
+    }
+    // Exact same verified chat UI hook, plus a safe rectangle translation.
+    // Refuse only completion if the optional geometry signatures are missing.
+    if (completion) {
+        completion = symbol("ui/UiNodeRect", &g_rect_fn) &&
+            cst("ui/sys.frame_arg", &g_frame_arg) &&
+            cst("ui/sys.viewport", &g_viewport) &&
+            cst("ui/sys.px_per_unit", &g_ppu) &&
+            g_frame_arg >= 0 && g_viewport >= 0 && g_ppu >= 0 &&
+            g_frame_arg < 0x10000 && g_viewport < 0x10000 && g_ppu < 0x10000;
+        g_rect_metrics = completion;
+        if (!completion) logf(KILN_LOG_WARN,
+            "ui: chat completion unavailable: native chat rect/viewport was not verified; history unaffected");
     }
     if (!g_input.install(g_api, g_owner, input, reinterpret_cast<void*>(&hk_input), "chatui/TextInputProcess")) {
         logf(KILN_LOG_WARN, "ui: chat input hook unavailable: %s", g_input.error());
         return false;
     }
-    if (history || diag) input_set_chat_sink(&kSink);
+    if (history || completion || diag) input_set_chat_sink(&kSink);
+    g_keys.history(history);
+    g_completion_on.store(completion, std::memory_order_release);
     if (history) {
+        if (completion) logf(KILN_LOG_INFO, "ui: chat completion on with chat history (native scoped hook)");
         load_history();
         g_trace_on.store(env_enabled("KILN_CHAT_HISTORY_TRACE"), std::memory_order_release);
         g_history_on.store(true, std::memory_order_release);
         logf(KILN_LOG_INFO, "ui: chat history on (%s): Up/Down in the HUD and Social chat, %zu command(s) kept from "
              "earlier games", why, g_history.count());
+    } else if (completion) {
+        logf(KILN_LOG_INFO, "ui: chat completion on: native HUD and Social input, no history (unless enabled separately)");
     } else if (diag) {
         g_trace_on.store(true, std::memory_order_release);
         g_diagnose_on.store(true, std::memory_order_release);
