@@ -221,6 +221,21 @@ bool widget_text(void* widget, std::string* out) {
 
 // The native UI thread owns every game pointer. Overlay and network code
 // receive only value snapshots and may queue a full-line replacement.
+// Keep Win32 SEH isolated from the std::string and lock lifetime in
+// completion_capture. ClangCL 19's x86 assembly printer crashed while
+// compiling the combined SEH/C++ function in CI runs 44269918037 and
+// 44270356834. This is the same guarded game call and 4-float copy.
+__declspec(noinline) bool game_node_rect(uintptr_t node, float* rect) {
+    if (!node || !rect || !g_rect_fn) return false;
+    __try {
+        const float* raw = reinterpret_cast<RectFn>(g_rect_fn)(reinterpret_cast<void*>(node));
+        return raw && game_copy(reinterpret_cast<const char*>(raw), reinterpret_cast<char*>(rect),
+                                4 * sizeof(float));
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
 void completion_capture(void* widget, void* state, bool hud) {
     if (!g_completion_on.load(std::memory_order_acquire) || !editing(state)) return;
     std::string line;
@@ -236,13 +251,8 @@ void completion_capture(void* widget, void* state, bool hud) {
     }
     uintptr_t node = 0;
     float rect[4]{};
-    bool valid = false;
-    if (g_rect_fn && game_read(reinterpret_cast<const uint8_t*>(widget) + 8, &node) && node) {
-        __try {
-            const float* raw = reinterpret_cast<RectFn>(g_rect_fn)(reinterpret_cast<void*>(node));
-            valid = raw && game_copy(reinterpret_cast<const char*>(raw), reinterpret_cast<char*>(rect), sizeof rect);
-        } __except (EXCEPTION_EXECUTE_HANDLER) { valid = false; }
-    }
+    const bool valid = g_rect_fn && game_read(reinterpret_cast<const uint8_t*>(widget) + 8, &node) &&
+        node && game_node_rect(node, rect);
     if (!valid || !std::isfinite(rect[0]) || !std::isfinite(rect[1]) ||
         !std::isfinite(rect[2]) || !std::isfinite(rect[3]) ||
         rect[2] <= 0 || rect[3] <= 0 || rect[2] > 4000 || rect[3] > 4000) {
