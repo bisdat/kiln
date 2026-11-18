@@ -484,6 +484,35 @@ static upscale::PhysicalDevice gpu() {
     return g;
 }
 
+static void render_scale_output() {
+    // the game's 3D render scale: the upscale size (B0: 1885x1061) inside a 1920x1080 output texture. XeSS is set up
+    // for the upscale size and writes it at the texture's top left (outputColorBase 0,0); the image info names the
+    // whole texture
+    fx::reset();
+    std::vector<std::string> log;
+    upscale::Why why;
+    std::string detail;
+    XessBackend b(std::make_unique<FakeHost>(&log));
+    CHECK(b.load(files(), &why, &detail));
+    b.device_needs(gpu());
+    CHECK(b.device_ready(device(true), &why, &detail));
+    upscale::CreateInfo ci = game_ci();
+    ci.output_width = 1885, ci.output_height = 1061;
+    ci.max_render_width = 943, ci.max_render_height = 531;
+    ci.ratio = 2.0f;
+    CHECK(b.create(ci, &detail));
+    CHECK(fx::all[0]->init.output.x == 1885 && fx::all[0]->init.output.y == 1061);
+    upscale::Frame f = game_frame();
+    f.output_width = 1885, f.output_height = 1061;
+    f.render_width = 943, f.render_height = 531, f.mv_scale_x = 943, f.mv_scale_y = 531;
+    CHECK(b.record(f, &detail));
+    CHECK(fx::last.output.width == 1920 && fx::last.output.height == 1080 && fx::last.output_base.x == 0 && fx::last.input_width == 943);
+    // a frame of another upscale size than the context's never reaches XeSS (the core sets a new one up first)
+    f.output_width = 1920, f.output_height = 1080;
+    CHECK(!b.record(f, &detail) && has(detail, "set up for"));
+    b.device_lost(h<VkDevice>(0x33));
+}
+
 static void load_failures() {
     std::vector<std::string> log;
     upscale::Why why = upscale::Why::none;
@@ -854,6 +883,7 @@ int main() {
     knobs();
     flags_and_create_checks();
     frame_mapping();
+    render_scale_output();
     needs_lists();
     load_failures();
     needs_and_device();
