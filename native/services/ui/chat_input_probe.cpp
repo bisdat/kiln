@@ -427,9 +427,13 @@ namespace {
 // The window procedure has already folded raw input and key messages into one transition per key.
 
 // Typed text ends a history browse (chat_keys::inserts_text); a transient difference in the widget's buffer never does.
-void on_text(uint32_t ch) {
+bool on_text(uint32_t ch) {
+    // Tab's WM_CHAR is separate from the raw key. Swallow it only if the
+    // shared router took that key for completion. Plain chat is unchanged.
+    if (ch == '\t' && g_keys.take_tab_character()) return true;
     if (chat_keys::inserts_text(ch) && g_history_on.load(std::memory_order_acquire) && g_keys.focused())
         g_manual_text_edit.store(true, std::memory_order_release);
+    return false;
 }
 
 bool on_key(uint32_t vk, uint32_t mods, bool down, bool captured) {
