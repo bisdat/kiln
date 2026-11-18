@@ -383,7 +383,7 @@ public static partial class Stations
     {
         StationsCore.CheckRead("Stations.Collect");
         if (to.IsNone) throw new ArgumentException("no target", nameof(to));
-        return StationsCore.Collect(station, item, what, _ => to, toBase: false, chest: to);
+        return StationsCore.Collect(station, item, what, _ => to);
     }
 
     /// <summary>As <see cref="Collect"/>, into the station's base: for each stack a crafting-stock chest that takes
@@ -393,7 +393,7 @@ public static partial class Stations
     {
         StationsCore.CheckRead("Stations.CollectToBase");
         var b = Bases.Of(station);
-        return StationsCore.Collect(station, item, what, it => b is null ? null : Bases.FindRoomFor(b.Id, it), toBase: true);
+        return StationsCore.Collect(station, item, what, it => b is null ? null : Bases.FindRoomFor(b.Id, it));
     }
 }
 
@@ -424,12 +424,9 @@ internal interface IStationsBackend
     bool HasOutputSources { get; }
     /// <summary>The table has max_chests (ordinary chests on a fill).</summary>
     bool HasChests { get; }
-    /// <summary>The table has collect (the same move Kiln.Blocks' Collect uses).</summary>
-    bool HasCollect { get; }
     /// <summary>The table has base_stock_with_stations (Magic-chest stock plus finished station outputs).</summary>
     bool HasStockWithStations { get; }
     (int Rc, StationsNative.Stack[] Rows) BaseStockWithStations(uint index);
-    int Collect(in StationsNative.Collect request, ulong owner, long key);
     int SetOutputSource(uint entity, bool on);
     (int Rc, uint[] Ids) OutputSources();
 }
@@ -643,8 +640,6 @@ internal static unsafe partial class StationsCore
 
         public bool HasChests => T is var t && t != null && t->Header.Size >= (uint)StationsNative.TableChests;
 
-        public bool HasCollect => T is var t && t != null && t->Header.Size >= (uint)StationsNative.TableCollect && t->Collect != null;
-
         public bool HasStockWithStations => T is var t && t != null && t->Header.Size >= (uint)StationsNative.TableStock &&
                                              t->BaseStockWithStations != null;
 
@@ -661,14 +656,6 @@ internal static unsafe partial class StationsCore
                 return (rc, buf.AsSpan(0, (int)Math.Min(n, (uint)buf.Length)).ToArray());
             }
             return (StationsNative.BufferTooSmall, []);
-        }
-
-        public int Collect(in StationsNative.Collect request, ulong owner, long key)
-        {
-            if (!HasCollect) return StationsNative.Unavailable;
-            ulong tk = 0;
-            var copy = request;
-            return T->Collect(owner, &copy, &OnDone, (void*)key, &tk);
         }
 
         public int SetOutputSource(uint entity, bool on) =>
@@ -1078,7 +1065,7 @@ internal static unsafe partial class StationsCore
             or StationsNative.StTimedOut) || r.StateBefore != 0 || r.StoppedBefore != 0;
         return new StationResult(StatusOf(r.Status), action, new EntityId(r.Station), r.RecipeId, (int)r.CraftsRequested, (int)r.CraftsBefore,
             (int)r.CraftsAfter, (int)r.CraftsAdded, r.GameError, changes, read ? (StationState)r.StateBefore : null,
-            read ? (StationState)r.StateAfter : null, (r.Flags & StationsNative.DryRun) != 0, message)
+            read ? (StationState)r.StateAfter : null, action == StationAction.Fill && (r.Flags & StationsNative.DryRun) != 0, message)
         {
             LimitedBy = LimitOf(r.LimitedBy), ShortItem = r.ShortItem != 0 ? new ItemId(r.ShortItem) : null,
             FromChests = (int)Math.Min(r.FromChests, int.MaxValue), FromOutputs = (int)Math.Min(r.FromOutputs, int.MaxValue),

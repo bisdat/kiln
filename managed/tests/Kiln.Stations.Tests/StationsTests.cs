@@ -122,10 +122,15 @@ public sealed unsafe class StationsTests : IDisposable
 
         public uint[] LastChests = [];
         public bool HasChests { get; set; } = true;
-        public bool HasCollect => false;
-        public bool HasStockWithStations => false;
-        public (int Rc, StationsNative.Stack[] Rows) BaseStockWithStations(uint index) => (StationsNative.Unavailable, []);
-        public int Collect(in StationsNative.Collect request, ulong owner, long key) => StationsNative.Unavailable;
+        // base_stock_with_stations (0.2.0-dev.29.17): off unless a test sets it
+        public bool HasStockWithStations { get; set; }
+        public StationsNative.Stack[] StockWithStations = [];
+        public readonly List<uint> StockWithStationsAsked = [];
+        public (int Rc, StationsNative.Stack[] Rows) BaseStockWithStations(uint index)
+        {
+            StockWithStationsAsked.Add(index);
+            return index < BaseRows.Count ? (0, StockWithStations) : (StationsNative.NotFound, []);
+        }
 
         // station outputs as crafting stock (0.2.0-dev.29.17)
         public bool HasOutputs = true;
@@ -999,6 +1004,41 @@ public sealed unsafe class StationsTests : IDisposable
         Assert.True(StationsCore.ResultOf(NewResult(StationActionStatus.Unchanged, ""), StationAction.Stop) is { Ok: true, Changed: false });
     }
 
+    [Fact]
+    public void StockWithStationsReadsTheNativeSumWhenTheTableHasIt()
+    {
+        using var k = Kiln();
+        _fake.HasStockWithStations = true;
+        _fake.Stock = [new StationsNative.Stack { Item = 0x10, Count = 40 }];
+        _fake.StockWithStations = [new StationsNative.Stack { Item = 0x10, Count = 47 }, new StationsNative.Stack { Item = 0x20, Count = 5 }];
+        var id = new BaseId(AltarGuid);
+        var all = k.Run(() => Bases.StockWithStations(id));
+        Assert.Equal(47, all[new ItemId(0x10)]);  // kiln.stations' sum, not Stock plus a managed read of each station
+        Assert.Equal(5, all[new ItemId(0x20)]);
+        Assert.Equal([0u], _fake.StockWithStationsAsked);
+        Assert.Empty(k.Run(() => Bases.StockWithStations(new BaseId(Guid.NewGuid()))));  // no base with that id now
+        Assert.Single(_fake.StockWithStationsAsked);  // an unknown id never reaches the table
+        _fake.State = (false, false, false, false, "stations.read is off");
+        k.Capabilities.Override(Stations.ReadCapability, false);
+        Assert.Throws<KilnUnavailableException>(() => k.Run(() => Bases.StockWithStations(id)));
+    }
+
+    [Fact]
+    public void ACollectResultIsNeverADryRun()
+    {
+        // native collect's flags (bits 16 and up) share no bit with a request flag
+        const uint request = StationsNative.FillAdd | StationsNative.FillExact | StationsNative.DryRun | StationsNative.NoWater |
+                             StationsNative.AfterCraft | StationsNative.KeepStopped | StationsNative.AllowLocked | StationsNative.FillNoOutputs;
+        Assert.Equal(0u, (StationsNative.CollectOutputs | StationsNative.CollectLeftovers | StationsNative.CollectToBase) & request);
+        var collect = NewResult(StationActionStatus.Done, "", StationsNative.CollectOutputs | StationsNative.CollectToBase);
+        collect.Action = StationsNative.CollectAction;
+        Assert.False(StationsCore.ResultOf(collect, StationAction.Collect).DryRun);
+        // even a result whose flags carry 0x4 is a dry run only for a fill
+        var odd = NewResult(StationActionStatus.Done, "", StationsNative.DryRun);
+        Assert.False(StationsCore.ResultOf(odd, StationAction.Collect).DryRun);
+        Assert.True(StationsCore.ResultOf(odd, StationAction.Fill).DryRun);
+    }
+
     internal static StationsNative.Result NewResult(StationActionStatus status, string message, uint flags = 0, bool read = true)
     {
         var r = new StationsNative.Result
@@ -1013,6 +1053,14 @@ public sealed unsafe class StationsTests : IDisposable
     }
 
     internal Fake Backend => _fake;
+
+    // The station's recipe 0x1234 makes this item (a fixed buffer: only an unsafe class can write it).
+    internal void SetRecipeOutput(uint item)
+    {
+        var r = _fake.Recipes[0x1234];
+        r.Outputs[0] = item;
+        _fake.Recipes[0x1234] = r;
+    }
 }
 
 // Submissions complete their tasks (await needs a safe context: this class is not unsafe).
@@ -1093,5 +1141,36 @@ public sealed class StationsSubmitTests : IDisposable
         Assert.True(r.Ok);
         var none = await kiln.Run(() => Stations.Collect(new EntityId(5), new EntityId(700)));
         Assert.Equal(StationActionStatus.NotAStation, none.Status);
+    }
+
+    // Collect and CollectToBase keep their 29.16 path: Kiln.Items' Items.Move per stack, chosen by FindRoomFor; the native
+    // collect of kiln.stations is for native mods only. A player's bag is a target; with no move function the exception
+    // names items.move.
+    [Fact]
+    public async Task CollectKeepsItsItemsMovePathAndTakesAPlayersBag()
+    {
+        using var kiln = Kiln();
+        var coal = kiln.Items.AddItem("Material_T1_Charcoal", 50);
+        _fixture.SetRecipeOutput(coal.Value);
+        var station = kiln.Entities.Create(new WorldPosition(1, 2, 3));
+        var row = Fake.StationRows[3300];
+        Fake.StationRows.Remove(3300);
+        row.Entity = station.Value;
+        Fake.StationRows[station.Value] = row;
+        kiln.Items.AddContainer(station).Put(coal, 7);
+        var changed = new List<StationChangedEvent>();
+        kiln.Run(() => Events.On<StationChangedEvent>(changed.Add));
+
+        var toPlayer = await Assert.ThrowsAsync<KilnUnavailableException>(() => kiln.Run(() => Stations.Collect(station, new EntityId(5))));
+        Assert.Equal("items.move", toPlayer.Capability);
+        Assert.Empty(Fake.Submitted);
+
+        // no Magic chest has room: NoRoom, as in 29.16; not a dry run, nothing changed, no event
+        var none = await kiln.Run(() => Stations.CollectToBase(station));
+        Assert.Equal(StationActionStatus.NoRoom, none.Status);
+        Assert.False(none.DryRun);
+        Assert.Contains("no container with room", none.Message);
+        kiln.Run(() => { });
+        Assert.Empty(changed);
     }
 }

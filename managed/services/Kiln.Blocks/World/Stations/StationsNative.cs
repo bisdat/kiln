@@ -16,7 +16,7 @@ internal static unsafe class StationsNative
 
     // actions
     public const uint Fill = 1, Stop = 2, Resume = 3, Select = 4, CollectAction = 5;
-    public const uint CollectOutputs = 0x1, CollectLeftovers = 0x2, CollectToBase = 0x4;
+    public const uint CollectOutputs = 0x10000, CollectLeftovers = 0x20000, CollectToBase = 0x40000;  // native collect's own bits
     // request flags
     public const uint FillAdd = 0x1, FillExact = 0x2, DryRun = 0x4, NoWater = 0x8, AfterCraft = 0x10, KeepStopped = 0x20,
         AllowLocked = 0x40, FillNoOutputs = 0x80;
