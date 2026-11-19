@@ -14,9 +14,11 @@ void overlay_guard_drawn() noexcept;
 // The overlay's drawing turned off during this session because its own work failed (ui.cpp overlay_turned_off; once;
 // not for a present it does not draw on): a game that ends before it has presented a while longer counts as an
 // interrupted overlay start, so the next start leaves the drawing off; one that goes on presenting, or exits normally
-// where on_unload runs (Wine; Windows with kiln.json "unloadAtExit": "on"), does not.
+// (overlay_guard_exit), does not.
 void overlay_guard_failed() noexcept;
-// The process exits normally with code 0 (kiln.ui's on_unload): a start still trying did not die at the overlay.
+// The process exits normally with code 0 (kiln.ui's on_unload, one of Kiln's own exit steps: under Wine, and on native
+// Windows since 0.2.0-dev.29.18): a start still trying did not die at the overlay, a guarded start's record turns to
+// retry (overlay_guard::at_exit).
 void overlay_guard_exit() noexcept;
 // What overlay_guard_start found next to the game: OptiScaler (by its DLL's contents) and NVIDIA Streamline
 // (sl.interposer.dll in the game folder, Streamline/ or loaded). Kiln's graphics tools step aside for both (graphics.cpp).

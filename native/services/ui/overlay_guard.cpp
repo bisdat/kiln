@@ -23,10 +23,8 @@ bool found_optiscaler = false, found_streamline = false;  // overlay_guard_tools
 // set (under mu) by the overlay's first draw attempt of this process, before any of its work: from then on only the
 // presented frame (or a normal exit) completes the start, never the idle timer
 std::atomic<bool> draw_seen{false};
-HANDLE ran_timer = nullptr, idle_timer = nullptr;
+HANDLE idle_timer = nullptr;
 uint64_t presents_at_swapchain = 0;
-// How long a guarded start (overlay off) must run before the next start may try the overlay again.
-constexpr DWORD kRanFineMs = 60'000;
 // How long the game must keep presenting through Kiln's hooks after its swapchain, with nothing drawn yet, for the start
 // to count as fine (overlay_guard::idle), and how many frames it must present in that time (not hung).
 constexpr DWORD kIdleProofMs = 30'000;
@@ -34,9 +32,11 @@ constexpr uint64_t kIdleProofPresents = 60;
 // Until 0.2.0-dev.29.18 the start counted as fine at the first present with the overlay drawn. Now it does after
 // kDrawnFrames of them, or once the game has presented kIdleProofPresents frames in one kDrawnProofMs window after the
 // first (the overlay may stop drawing sooner: a toast that went; the window is watched again until it has): a game that
-// dies right after the overlay's first frames is caught as one that dies before them. A normal quit counts as fine where
-// on_unload runs (overlay_guard_exit: Wine, or Windows with kiln.json "unloadAtExit": "on"); on Windows by default a quit
-// in the first second of the overlay's drawing would count as a closed start, which costs one start without the overlay.
+// dies right after the overlay's first frames is caught as one that dies before them. A normal quit (code 0) counts as
+// fine: kiln.ui's on_unload runs overlay_guard_exit as one of Kiln's own exit steps, under Wine and, since
+// 0.2.0-dev.29.18, on native Windows too (only kiln.json "unloadAtExit": "off" turns it off). That the game's own quit on
+// Windows exits with code 0 is not confirmed yet (kiln_api.h, on_unload); where it does not, a quit in the first second
+// of the overlay's drawing counts as a closed start, which costs one start without the overlay.
 constexpr uint64_t kDrawnFrames = 60;
 constexpr DWORD kDrawnProofMs = 20'000;
 // After the overlay's drawing turned off during a session because its own work failed (overlay_guard_failed; not for a
@@ -153,20 +153,6 @@ void save() {
         error_unresolved = false;
         logf(KILN_LOG_INFO, "ui: overlay crash guard: kiln/state/overlay-start.guard written after the earlier failure; the guard is up to date again");
     }
-}
-// A guarded start earns the next attempt by RUNNING, not by exiting cleanly: whether a client's normal quit reaches the
-// process's exit call with code 0 is not confirmed (kiln_api.h, on_unload), so a rule that waits for a clean exit
-// could leave the overlay off for good after one game closed during loading. A game that has run a minute without
-// the overlay did not die of the overlay; the next start tries it again once.
-VOID CALLBACK ran_fine(PVOID, BOOLEAN) {
-    try {
-        std::lock_guard<std::mutex> lock(mu);
-        if (!active || record.phase != overlay_guard::Phase::guarded) return;
-        record = overlay_guard::finish(record);
-        save();
-        active = false;
-        logf(KILN_LOG_INFO, "ui: overlay crash guard: the game ran a minute without the overlay; the next start tries the overlay again");
-    } catch (...) { error(); }
 }
 // Nothing has been drawn yet (the overlay draws once Kiln's menu or a mod's window is open), but the game has kept
 // presenting through Kiln's hooks since its swapchain: the start did not die at the overlay. The first draw arms the
@@ -340,13 +326,18 @@ bool overlay_guard_start() noexcept {
         active = true;
         // An ON attempt is not recorded until vk_install, immediately before detours.
         if (start.off && !overlay_drawing_on()) {
+            // Guarded (or locked) on the disk now, in place of the start that died: this start installs no Vulkan hook,
+            // so it arms nothing, and the next one reads guarded and tries the overlay again however this one ends
+            // (overlay_guard::begin). A normal exit writes retry (overlay_guard_exit).
             save();
-            if (record.phase == overlay_guard::Phase::guarded &&
-                !CreateTimerQueueTimer(&ran_timer, nullptr, &ran_fine, nullptr, kRanFineMs, 0, WT_EXECUTEONLYONCE))
-                logf(KILN_LOG_WARN, "ui: overlay crash guard: no timer; the overlay stays off until kiln/state/overlay-start.guard is deleted");
+            // the next start draws unless something else keeps the drawing off (Streamline, OptiScaler, the switches)
+            const bool next_tries = record.phase == overlay_guard::Phase::guarded &&
+                choose_overlay_mode(false, false, sl || optiscaler_off, environment, setting) == OverlayMode::on;
             std::string why = "the game closed during the last start while Kiln's overlay was starting (stage: ";
             why += overlay_guard::stage_name(record.failed_stage);
-            why += "); the overlay's drawing stays off for this start; key bindings and the Mods menu still work";
+            why += next_tries ? "); the overlay's drawing stays off for this start, and the next start tries it again"
+                              : "); the overlay's drawing stays off for this start";
+            why += "; key bindings and the Mods menu still work";
             if (record.phase == overlay_guard::Phase::locked) why += "; it failed twice at this stage; delete kiln/state/overlay-start.guard to try again";
             if (sl) why += "; NVIDIA Streamline (a frame generation mod) is installed; it wraps the same graphics calls";
             if (optiscaler.found()) why += "; OptiScaler is installed; it patches the same graphics calls";
@@ -445,11 +436,14 @@ void overlay_guard_tools(bool* optiscaler, bool* streamline) noexcept {
 void overlay_guard_exit() noexcept {
     try {
         std::lock_guard<std::mutex> lock(mu);
-        if (!active || record.phase != overlay_guard::Phase::trying) return;
-        record = overlay_guard::idle(record);
+        const auto phase = record.phase;
+        if (!active || (phase != overlay_guard::Phase::trying && phase != overlay_guard::Phase::guarded)) return;
+        record = overlay_guard::at_exit(record);
         active = false;
         save();
-        logf(KILN_LOG_INFO, "ui: overlay crash guard: the game exits normally; the overlay's start counts as fine");
+        logf(KILN_LOG_INFO, phase == overlay_guard::Phase::trying
+            ? "ui: overlay crash guard: the game exits normally; the overlay's start counts as fine"
+            : "ui: overlay crash guard: the game exits normally after a start with the overlay's drawing off; the guard lets the next start try the overlay again");
     } catch (...) { error(); }
 }
 }

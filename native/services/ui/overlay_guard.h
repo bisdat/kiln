@@ -18,9 +18,12 @@ struct Record {
 };
 struct Start { Record record; bool off; };
 // No record/complete -> trying. Unfinished trying -> guarded (one death), or locked
-// on a second death at the SAME stage. Guarded -> retry once the guarded start has run
-// for a minute (finish); a guarded start that ends sooner stays guarded. Retry -> trying,
-// preserving the first death. A successful overlay frame resets trying (finish); locked
+// on a second death at the SAME stage. Guarded or retry -> trying, preserving the first death: the guarded start ran
+// with the overlay's drawing off (no Vulkan hook of Kiln's), so however it ended (a normal quit, a crash, the game
+// killed) it says nothing about the overlay, and the start after it tries again. A guarded start writes no new
+// attempt of its own. Until 0.2.0-dev.29.18 a guarded start earned that only by running a minute; one that ended
+// sooner left the record guarded, and every later start kept the overlay off. Retry is a guarded start that exited
+// normally (at_exit), or ran that minute in an older Kiln. A successful overlay frame resets trying (finish); locked
 // stays locked. A wrapper change permits one recovery until a drawn frame succeeds. Further changes preserve the
 // history, so a wrapper updated on every start cannot keep crashing forever. Deleting the record resets it all.
 // Versioned identities give old presence-only records one fresh attempt after an update too.
@@ -35,7 +38,7 @@ inline Start begin(Record r, const std::string& modules) {
         r.failures = r.failures && r.failed_stage == r.stage ? 2 : 1;
         r.failed_stage = r.stage;
         r.phase = r.failures == 2 ? Phase::locked : Phase::guarded;
-    } else if (r.phase == Phase::complete || r.phase == Phase::retry) {
+    } else if (r.phase == Phase::complete || r.phase == Phase::retry || r.phase == Phase::guarded) {
         r.phase = Phase::trying;
         r.stage = Stage::begun;
     }
@@ -59,6 +62,15 @@ inline Record idle(Record r) {
 // the overlay's start again (stage: swapchain created), so it arms the record once more until the frame is presented.
 inline Record rearm(Record r) {
     if (r.phase == Phase::complete) { r.phase = Phase::trying; r.stage = Stage::swapchain; }
+    return r;
+}
+// The process exits normally (code 0, Kiln's exit steps ran: overlay_guard_exit). A start still trying did not die
+// at the overlay (idle: its failure history stays). A guarded start ended well: retry, so the record no longer reads
+// guarded (begin treats both alike; the record then tells a guarded start that quit from one that crashed). Locked
+// stays locked: a normal exit without the overlay says nothing about it.
+inline Record at_exit(Record r) {
+    if (r.phase == Phase::trying) return idle(r);
+    if (r.phase == Phase::guarded) r.phase = Phase::retry;
     return r;
 }
 inline std::string encode(const Record& r) {
