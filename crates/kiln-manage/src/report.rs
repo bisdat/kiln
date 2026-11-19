@@ -2100,6 +2100,7 @@ pub fn write_zip(report: &Report, out: &Path) -> crate::Result<u64> {
 }
 
 /// Each file's options in a report zip: deflated, the time of writing.
+#[cfg(feature = "zip")]
 fn zip_options() -> zip::write::SimpleFileOptions {
     let (y, mo, d, h, mi, s) = crate::util::utc(SystemTime::now());
     let when = zip::DateTime::from_date_and_time(y.clamp(1980, 2107) as u16, mo as u8, d as u8, h as u8, mi as u8, s as u8)
@@ -2113,6 +2114,7 @@ fn zip_options() -> zip::write::SimpleFileOptions {
 
 /// The report zip [`write_zip`] writes, in memory: for a caller that sends it on (the launcher's "Send to Kiln
 /// support") and must not leave it in a shared temp folder, even for a moment.
+#[cfg(feature = "zip")]
 pub fn zip_bytes(report: &Report) -> crate::Result<Vec<u8>> {
     use std::io::Write;
     let zerr = |e: zip::result::ZipError| crate::Error::new(crate::ErrorCode::Io, format!("the report zip: {e}"));

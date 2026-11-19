@@ -258,6 +258,7 @@ fn the_public_facts_name_versions_and_a_mod_count_not_the_mods() {
 
 /// (0.2.0-dev.29.18) The zip in memory is the zip on disk: the same files with the same bytes (the launcher sends it
 /// without writing it to a shared temp folder).
+#[cfg(feature = "zip")]
 #[test]
 fn the_zip_in_memory_holds_what_the_zip_on_disk_holds() {
     let f = Fx::healthy("zip-bytes");
