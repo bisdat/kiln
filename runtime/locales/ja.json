@@ -1051,6 +1051,9 @@
     "footer": {
       "loaded": {
         "other": "Kiln {version} - {count} 個のモッドを読み込み済み"
+      },
+      "xhl": {
+        "other": "Kiln {version}（XHL-Core 併用） - {count} 個のモッドを読み込み済み"
       }
     },
     "fallback": {

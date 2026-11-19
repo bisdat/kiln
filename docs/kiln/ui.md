@@ -105,15 +105,25 @@ right above the build number: Kiln's mark, then **Kiln &lt;version&gt; - &lt;N&g
   EMF, EML, XHL, ShroudForge, SET, Greeneye, Flame, Shroudtopia, Enshwick, shroudlink and Ember. Kiln's own services
   and plugins are not mods; a mod switched off, waiting, failed or not loaded does not count. Kiln.Ui reads the list
   again every 2 seconds while the title or the main menu shows, so a mod that an engine starts late is counted too.
-- **XHL-Core.** XHL-Core 2.1.0 draws its own line at this place ("All mods loaded", or a red line about a problem).
-  **Kiln's line takes its place**: while Kiln's line shows, XHL-Core's is not drawn. Nothing else of XHL-Core changes
-  (its plugins, its Insert menu, its other hooks); it installs as it always did, whether it starts before Kiln or after.
-  How: Kiln runs its own copy of the game's footer function, made from the exe file at start, so the line XHL-Core
-  patches into the game's footer code is not reached (docs/re/game-ui.md "The main menu's footer"). kiln.log names
-  the module that patched the footer (`ui: the main menu's footer: a module patched the game's footer call at ...`).
+- **XHL-Core.** XHL-Core 2.1.0 draws its own line at this place: a green "All mods loaded", or a red line about a
+  problem ("XHL: Game updated · Click to view", "Mod conflict detected. Click to view") that opens XHL-Core's
+  diagnostics when clicked. With XHL-Core in the game, **Kiln's line names it**: "Kiln 0.2.0-dev.29.19 with XHL-Core -
+  N Mods Loaded" (key `native.footer.xhl`, in every language Kiln has). XHL-Core's green line is left out (Kiln's line
+  says XHL-Core runs); **its red line is drawn under Kiln's** while XHL-Core reports a problem, in XHL-Core's words,
+  colour and language, and it opens XHL-Core's diagnostics on a click, with the keyboard or with a pad, as without Kiln.
+  Nothing else of XHL-Core changes (its plugins, its Insert menu, its other hooks); it installs as it always did,
+  whether it starts before Kiln or after, and Kiln notices its patches when they come late.
+  How: Kiln runs its own copy of the game's footer function, made from the exe file at start, whose window call and
+  build-number call go through Kiln. They call the game's functions, or, while XHL-Core reports a problem, the targets
+  XHL-Core patched into the game's footer, so XHL-Core draws its line and takes its clicks itself. Kiln knows XHL-Core
+  by the export `XhlNativeGameBuild` of the module behind the patched call, and reads only its startup state (one
+  number, found by the shape of XHL-Core's state getter, not by an address); where that state cannot be found, XHL-Core's
+  line is always drawn, green or red, so a warning is never hidden (docs/re/game-ui.md "The main menu's footer").
+  kiln.log: `ui: the main menu's footer: XHL-Core's footer line is at ...`, then `... XHL-Core reports a problem` or
+  `... reports no problem` whenever that changes.
 - **The setting** `mainMenuFooter` (on by default; Kiln's config `kiln/config/menus-client.json`, on the Mods page under
-  **Kiln settings**) hides it: the game's footer is then drawn as it always was, with XHL-Core's line where XHL-Core is
-  installed.
+  **Kiln settings**) hides it: the game's footer is then drawn as it always was, with XHL-Core's line (green or red) where
+  XHL-Core is installed.
 - **Fail safe.** On a game build where the footer's code does not match (feature `ui.menu_footer` off), when the copy
   cannot be made or checked, when another module changed the footer's code in a way other than a patched call, before
   Kiln.Ui has counted the mods, or after a fault in Kiln's line, the game's own footer function runs (with XHL-Core's

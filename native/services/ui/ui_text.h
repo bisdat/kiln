@@ -32,6 +32,8 @@ inline constexpr English kEnglish[] = {
     {"native.menu.mods_off", "Mods: {reason}"},
     {"native.footer.loaded.one", "Kiln {version} - {count} Mod Loaded"},
     {"native.footer.loaded.other", "Kiln {version} - {count} Mods Loaded"},
+    {"native.footer.xhl.one", "Kiln {version} with XHL-Core - {count} Mod Loaded"},
+    {"native.footer.xhl.other", "Kiln {version} with XHL-Core - {count} Mods Loaded"},
     {"native.fallback.title", "Kiln {version}"},
     {"native.fallback.body",
      "Kiln's managed host (Kiln.Ui) is not running in this session, so the mod list and mod screens are unavailable here. "

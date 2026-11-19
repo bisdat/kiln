@@ -128,11 +128,58 @@ static bool game() {
     }
     std::printf("code_clone: the game's footer: %zu relative fields, %zu to the outside, %zu calls\n", rels.size(), outside, calls);
     CHECK(calls >= 20 && outside >= 25);
+    // the window call (menu_footer.h kWindowCallAt, +0x4b) and the build-number call, both sent elsewhere
+    bool window_call = false;
+    for (const auto& r : rels) window_call |= r.at == 0x4b && r.call;
+    CHECK(window_call);
+    const code_clone::Redirect both[] = {{0x4b, thunk + 0x10}, {site, thunk}};
+    CHECK(code_clone::relocate(code.data(), n, src, out.data(), dst, both, 2, &err));
+    CHECK(code_clone::same_meaning(code.data(), src, out.data(), dst, n, both, 2, &err));
     return true;
+}
+
+// Two calls sent elsewhere (the footer's window call and its build-number call), and the calls a function makes from its
+// start (XHL-Core's footer detour: its state getter is the first one).
+static void two_redirects() {
+    // call +0x100 / call +0x200 / ret
+    static const uint8_t code[] = {0xE8, 0x00, 0x01, 0x00, 0x00, 0xE8, 0x00, 0x02, 0x00, 0x00, 0xC3};
+    const size_t n = sizeof code;
+    const uint64_t src = 0x140000000ull, dst = 0x13f000000ull, a = dst + 0x800, b = dst + 0x810;
+    std::vector<uint8_t> out(n);
+    std::string err;
+    const code_clone::Redirect both[] = {{0x00, a}, {0x05, b}};
+    CHECK(code_clone::relocate(code, n, src, out.data(), dst, both, 2, &err));
+    CHECK(dst + 0x05 + rd32(&out[0x01]) == a);
+    CHECK(dst + 0x0a + rd32(&out[0x06]) == b);
+    CHECK(code_clone::same_meaning(code, src, out.data(), dst, n, both, 2, &err));
+    const code_clone::Redirect one[] = {{0x05, b}};
+    CHECK(!code_clone::same_meaning(code, src, out.data(), dst, n, one, 1, &err));  // the first call is not the original's
+    const code_clone::Redirect bad[] = {{0x00, a}, {0x0a, b}};                        // a ret is not a call
+    CHECK(!code_clone::relocate(code, n, src, out.data(), dst, bad, 2, &err));
+    const code_clone::Redirect missing[] = {{0x00, a}, {0x03, b}};                    // no instruction starts there
+    CHECK(!code_clone::relocate(code, n, src, out.data(), dst, missing, 2, &err));
+
+    // XHL-Core 2.1.0's footer detour (dinput8.dll RVA 0x596a0), its first 0x90 bytes: two returns, a jmp rax, then the
+    // call of its state getter (RVA 0x43af0)
+    static const uint8_t detour[] = {
+        0x41, 0x57, 0x41, 0x56, 0x41, 0x55, 0x41, 0x54, 0x56, 0x57, 0x55, 0x53, 0x48, 0x81, 0xEC, 0x38, 0x02, 0x00, 0x00, 0x0F,
+        0x29, 0xB4, 0x24, 0x20, 0x02, 0x00, 0x00, 0x48, 0x89, 0xD7, 0x31, 0xD2, 0x31, 0xC0, 0xF0, 0x48, 0x0F, 0xB1, 0x15, 0xF5,
+        0xFD, 0x0A, 0x00, 0x75, 0x1F, 0x48, 0x89, 0xD0, 0x0F, 0x28, 0xB4, 0x24, 0x20, 0x02, 0x00, 0x00, 0x48, 0x81, 0xC4, 0x38,
+        0x02, 0x00, 0x00, 0x5B, 0x5D, 0x5F, 0x5E, 0x41, 0x5C, 0x41, 0x5D, 0x41, 0x5E, 0x41, 0x5F, 0xC3, 0x0F, 0xB6, 0x15, 0xB5,
+        0xFB, 0x0A, 0x00, 0x80, 0xFA, 0x01, 0x75, 0x21, 0x48, 0x89, 0xFA, 0x0F, 0x28, 0xB4, 0x24, 0x20, 0x02, 0x00, 0x00, 0x48,
+        0x81, 0xC4, 0x38, 0x02, 0x00, 0x00, 0x5B, 0x5D, 0x5F, 0x5E, 0x41, 0x5C, 0x41, 0x5D, 0x41, 0x5E, 0x41, 0x5F, 0x48, 0xFF,
+        0xE0, 0x49, 0x89, 0xC4, 0x49, 0x89, 0xCE, 0x4C, 0x89, 0xC6, 0x44, 0x89, 0xCB, 0xE8, 0xC6, 0xA3, 0xFE, 0xFF, 0x89, 0xC5,
+        0x85, 0xC0, 0x74, 0x09};
+    const auto calls = code_clone::calls_in(detour, sizeof detour, 0x1800596a0ull);
+    CHECK(!calls.empty() && calls[0] == 0x180043af0ull);
+    CHECK(code_clone::calls_in(detour, 0x80, 0x1800596a0ull).empty());  // cut before the call: none
+    const uint8_t junk[] = {0x06, 0xE8, 0, 0, 0, 0};                      // an undecodable start (push es): nothing past it
+    CHECK(code_clone::calls_in(junk, sizeof junk, 0x1000).empty());
 }
 
 int main() {
     synthetic();
+    two_redirects();
     const bool real = game();
     std::printf("code_clone_test: %s (%s)\n", g_fail ? "FAIL" : "ok", real ? "with the game's footer" : "synthetic only");
     return g_fail ? 1 : 0;

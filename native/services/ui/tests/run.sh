@@ -99,7 +99,7 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -pthread -fsanitize=address,undefined \
 "$out/menu_page_host_test"
 # Kiln's line in the main menu's footer: its text, its mark's place, when Kiln's copy runs (menu_footer.h)
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/menu_footer_test.cpp" -o "$out/menu_footer_test"
-"$out/menu_footer_test"
+"$out/menu_footer_test" "$here/../../../../sigdb/symbols/client.d/ui.json"
 # Kiln's own texts kiln.ui draws (ui_text.h): the handoff from Kiln.Ui, English fallback, plurals, placeholders, and the
 # built-in English against runtime/locales/en.json
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -I"$here/../../../third_party" "$here/ui_text_test.cpp" -o "$out/ui_text_test"
