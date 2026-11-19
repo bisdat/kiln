@@ -19,6 +19,9 @@ std::mutex mu;
 overlay_guard::Record record;
 std::wstring path;
 bool active = false, said_error = false, error_unresolved = false, began_written = false, idle_done = false;
+// set by overlay_guard_exit (the process exits with code 0): nothing writes the record after it, so a late failure or
+// first draw on another thread before the process ends cannot arm it again behind the exit's back
+bool exited = false;
 bool found_optiscaler = false, found_streamline = false;  // overlay_guard_tools
 // set (under mu) by the overlay's first draw attempt of this process, before any of its work: from then on only the
 // presented frame (or a normal exit) completes the start, never the idle timer
@@ -409,7 +412,7 @@ void overlay_guard_drawn() noexcept {
 void overlay_guard_failed() noexcept {
     try {
         std::lock_guard<std::mutex> lock(mu);
-        if (failed_timer || path.empty()) return;
+        if (exited || failed_timer || path.empty()) return;
         if (record.phase == overlay_guard::Phase::complete) {
             // the start had already counted as fine (drawn frames, the idle proof): a death now is one at the overlay
             // again, for the window below
@@ -436,10 +439,12 @@ void overlay_guard_tools(bool* optiscaler, bool* streamline) noexcept {
 void overlay_guard_exit() noexcept {
     try {
         std::lock_guard<std::mutex> lock(mu);
-        const auto phase = record.phase;
-        if (!active || (phase != overlay_guard::Phase::trying && phase != overlay_guard::Phase::guarded)) return;
-        record = overlay_guard::at_exit(record);
+        const bool was_active = active;
+        exited = true;  // from here on nothing writes the record (overlay_guard_failed; the others need `active`)
         active = false;
+        const auto phase = record.phase;
+        if (!was_active || (phase != overlay_guard::Phase::trying && phase != overlay_guard::Phase::guarded)) return;
+        record = overlay_guard::at_exit(record);
         save();
         logf(KILN_LOG_INFO, phase == overlay_guard::Phase::trying
             ? "ui: overlay crash guard: the game exits normally; the overlay's start counts as fine"

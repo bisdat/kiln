@@ -18,7 +18,7 @@ void overlay_guard_drawn() noexcept;
 void overlay_guard_failed() noexcept;
 // The process exits normally with code 0 (kiln.ui's on_unload, one of Kiln's own exit steps: under Wine, and on native
 // Windows since 0.2.0-dev.29.18): a start still trying did not die at the overlay, a guarded start's record turns to
-// retry (overlay_guard::at_exit).
+// retry (overlay_guard::at_exit). Nothing writes the record after it.
 void overlay_guard_exit() noexcept;
 // What overlay_guard_start found next to the game: OptiScaler (by its DLL's contents) and NVIDIA Streamline
 // (sl.interposer.dll in the game folder, Streamline/ or loaded). Kiln's graphics tools step aside for both (graphics.cpp).
