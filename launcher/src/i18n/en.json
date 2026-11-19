@@ -4475,6 +4475,7 @@
       "denied": "The sign-in was declined. Nothing changed.",
       "offline": "You're offline. Signing in needs the internet.",
       "relay": "frostdev.io isn't answering. Try again in a few minutes.",
+      "tooMany": "Too many sign-ins came from your network in the last hour. Try again in {wait}.",
       "retry": "Try again",
       "tabDone": "Signed in. You can close this tab and go back to the launcher.",
       "tabFailed": "The sign-in did not finish. You can close this tab and go back to the launcher."

@@ -63,6 +63,13 @@ test.describe("desktop", () => {
     await expect(page.locator(".k-toast").filter({ hasText: "Signed in as emberfox" })).toBeVisible({ timeout: 10_000 });
   });
 
+  test("too many sign-ins from the network: when again, not \"frostdev.io isn't answering\"", async ({ page }) => {
+    await open(page, "/?mock=1&discord=signinlimit#/community");
+    await page.getByTestId("kc-signin").click();
+    await page.getByTestId("kc-signin-open").click();
+    await expect(page.getByTestId("kc-signin-error")).toHaveText("Too many sign-ins came from your network in the last hour. Try again in 42 minutes.");
+  });
+
   test("sign out: no confirmation, the launcher holds nothing of the account", async ({ page }) => {
     await open(page, "/?mock=1&discord=in#/community");
     await page.getByTestId("kc-signout").click();
@@ -147,6 +154,13 @@ test.describe("Steam Deck", () => {
     await page.locator('[data-deck-dialog="community-signin"]').getByRole("button", { name: "New code" }).click();
     await expect(page.getByTestId("deck-qr-code")).toHaveText("HV3R-9TCW");
     await expect(qr).toHaveAttribute("data-state", "waiting");
+  });
+
+  test("too many sign-ins from the network: when again", async ({ page }) => {
+    await page.goto("/?mock=1&deck=steamdeck&discord=signinlimit#/deck/community");
+    await page.locator('[data-deck-id="signin"]').click();
+    await expect(page.getByTestId("deck-qr")).toHaveAttribute("data-state", "busy");
+    await expect(page.getByTestId("deck-qr")).toContainText("Too many sign-ins came from your network in the last hour. Try again in 42 minutes.");
   });
 
   test("declined on the phone", async ({ page }) => {

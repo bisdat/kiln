@@ -9,6 +9,7 @@
 //   ratelimit   the next send is refused (3 reports this hour)   toobig   the report zip is over the limit
 //   ratelimitday   the next send is refused (10 in 24 hours)     ratelimitnet   (too many from this network)
 //   toonew      the Discord account is under 3 days old (a send is refused)
+//   signinlimit the relay takes no more sign-ins from this network for now
 //   known       the report matches a known problem with a fix     nodiscord   the Discord app is not running
 //   presence    Rich Presence on     notify      reply notifications on
 //   cancel      sign-in: cancelled on Discord's page              expire   sign-in: the code runs out
@@ -218,6 +219,7 @@ export function communityMockHandlers({ emit, gameRunning }: CommunityMockDeps):
     community_post_delete: (a) => { needSession(); relay("post-delete"); posts = posts.filter((p) => p.id !== a.id); changed(); return null; },
     community_signin_start: (a): SignInStart => {
       relay("signin");
+      if (has("signinlimit")) err("busy", "Kiln support asks you to wait before sending again.", "rate_limited", { limit: "network", sent: 10, waitMin: 42, last: null });
       const id = `s${++seq}`;
       const code = CODES[(seq - 1) % CODES.length];
       const mode = a.mode === "qr" ? "qr" : "browser";

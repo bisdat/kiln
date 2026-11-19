@@ -10,7 +10,7 @@ import { t as tt, useT } from "../i18n";
 import { Banner, Button, Cones, Modal, toast } from "../ui";
 import { DeckButton, Dialog, Row, Word } from "../deck/ui";
 import { PRIVACY_URL, errKind, refreshCommunity, useCommunity, useCommunityUi, useSendOpen } from "./state";
-import { QrCode } from "./parts";
+import { QrCode, waitWords } from "./parts";
 import { DeckAccountDialog } from "./Privacy";
 
 const open = (url: string) => { api.appOpenUrl(url).catch((e) => toast.error(e)); };
@@ -20,7 +20,9 @@ const POLL_MS = 700;
 
 // ---------------------------------------------------------------- desktop
 
-type Phase = "start" | "waiting" | "canceled" | "expired" | "denied" | "offline" | "relay";
+type Phase = "start" | "waiting" | "canceled" | "expired" | "denied" | "offline" | "relay" | "busy";
+/** The relay's sign-in limit (10 starts an hour from one network): how long until it takes one again. */
+const busyText = (e: unknown) => tt("community.signIn.tooMany", { wait: waitWords(Number((e as { detail?: { waitMin?: number } })?.detail?.waitMin ?? 60)) });
 
 export function SignInDialog({ resumeSend }: { resumeSend: boolean }) {
   const t = useT();
@@ -30,6 +32,7 @@ export function SignInDialog({ resumeSend }: { resumeSend: boolean }) {
   const [phase, setPhase] = useState<Phase>("start");
   const [pend, setPend] = useState<{ id: string; url: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [busyWords, setBusyWords] = useState("");
   // a sign-in started from the send dialog goes back to it, with the draft, however it ends
   const close = () => { if (pend) api.communitySignInCancel(pend.id).catch(() => {}); ui.closeSignIn(); if (resumeSend) useSendOpen.setState({ open: true }); };
   const start = async () => {
@@ -39,7 +42,11 @@ export function SignInDialog({ resumeSend }: { resumeSend: boolean }) {
       setPend({ id: s.id, url: s.url });
       setPhase("waiting");
       open(s.url);
-    } catch (e) { setPhase(errKind(e) === "offline" ? "offline" : "relay"); } finally { setBusy(false); }
+    } catch (e) {
+      const k = errKind(e);
+      if (k === "rate_limited") setBusyWords(busyText(e));
+      setPhase(k === "offline" ? "offline" : k === "rate_limited" ? "busy" : "relay");
+    } finally { setBusy(false); }
   };
   useEffect(() => {
     if (phase !== "waiting" || !pend) return;
@@ -78,7 +85,7 @@ export function SignInDialog({ resumeSend }: { resumeSend: boolean }) {
     );
   }
   const errText = phase === "canceled" ? t("community.signIn.canceled") : phase === "expired" ? t("community.signIn.expired") : phase === "denied" ? t("community.signIn.denied")
-    : phase === "offline" ? t("community.signIn.offline") : phase === "relay" ? t("community.signIn.relay") : null;
+    : phase === "offline" ? t("community.signIn.offline") : phase === "relay" ? t("community.signIn.relay") : phase === "busy" ? busyWords : null;
   return (
     <Modal open onClose={close} title={t("community.signIn.title")} width={540}
       footer={<><Button onClick={close}>{t("common.cancel")}</Button><Button variant="primary" loading={busy} onClick={start} data-testid="kc-signin-open">{errText ? t("community.signIn.retry") : t("community.signIn.open")}</Button></>}>
@@ -122,7 +129,7 @@ export function DeckSignInRow() {
   );
 }
 
-type QrState = "waiting" | "expired" | "denied" | "offline" | "relay";
+type QrState = "waiting" | "expired" | "denied" | "offline" | "relay" | "busy";
 
 export function DeckSignIn({ onClose, onDone }: { onClose: () => void; onDone?: (a: CommunityAccount) => void }) {
   const t = useT();
@@ -130,12 +137,17 @@ export function DeckSignIn({ onClose, onDone }: { onClose: () => void; onDone?: 
   const [pair, setPair] = useState<api.SignInStart | null>(null);
   const [state, setState] = useState<QrState>("waiting");
   const [now, setNow] = useState(Date.now());
+  const [busyWords, setBusyWords] = useState("");
   const fresh = () => {
     setState("waiting");
     setPair(null);
     // join: frostdev.io's phone page then offers "Also join the Kiln Discord" (ticked) to a player who isn't in it; the
     // choice is made there, on the Approve page (PLAN 3.2, docs/relay-api.md)
-    api.communitySignInStart("qr", true).then(setPair).catch((e) => setState(errKind(e) === "offline" ? "offline" : "relay"));
+    api.communitySignInStart("qr", true).then(setPair).catch((e) => {
+      const k = errKind(e);
+      if (k === "rate_limited") setBusyWords(busyText(e));
+      setState(k === "offline" ? "offline" : k === "rate_limited" ? "busy" : "relay");
+    });
   };
   // one pairing per opening (a development double mount must not start a second one)
   const begun = useRef(false);
@@ -185,6 +197,7 @@ export function DeckSignIn({ onClose, onDone }: { onClose: () => void; onDone?: 
             {state === "waiting" ? <><Word tone="ember">{t("community.signIn.waitingWord")}</Word> <span className="deck-dim">{t("community.deck.qr.waiting", { left: clock })}</span></>
               : state === "offline" ? <Word tone="warn">{t("community.signIn.offline")}</Word>
               : state === "relay" ? <Word tone="warn">{t("community.signIn.relay")}</Word>
+              : state === "busy" ? <Word tone="warn">{busyWords}</Word>
               : state === "denied" ? <Word tone="warn">{t("community.deck.qr.denied")}</Word> : <Word tone="warn">{t("community.deck.qr.expired")}</Word>}
           </p>
         </div>
