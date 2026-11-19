@@ -53,10 +53,12 @@ public static partial class Coverage
             "and the catalog read the fake; KilnHarness.Items.Calls records each. Gear: every piece has enhancement slots, a level, " +
             "durability and a stamp (FakeSlot.Ref); GearOf, SetRarity, SetEnhancements and SetLevel run with kiln.items' rules at the " +
             "next step, the shown rarity and level a step later, the gear events are Kiln.Items' (the game's own change: " +
-            "KilnHarness.Items.SetGear; perk slots of a type: SetPerkSlots). Offline: water, moves, container names, transfer " +
-            "hooks, item instances, equip, recipe results, upgrades and gem slots, the game's player inventory layout, max " +
+            "KilnHarness.Items.SetGear; perk slots of a type: SetPerkSlots). Rarity upgrades: Items.UpgradeRarity runs Kiln.Items' own " +
+            "code and the fake takes the cost from the payers' plain stacks and makes the write in the same step, all or nothing " +
+            "(CantPay, payers, refusals as kiln.items); KilnHarness.Items.SetUpgradeRolls names the rolls. Offline: water, moves, container names, transfer " +
+            "hooks, item instances, equip, recipe results, unlocked upgrades and gem slots at creation, the game's player inventory layout, max " +
             "durability computed again after a gear change",
-            [ItemsAbi.Service, .. ItemsFake.Features, "items.gear.read", "items.gear.write", "items.gear.durability", .. ItemsFake.OfflineRows]);
+            [ItemsAbi.Service, .. ItemsFake.Features, "items.gear.read", "items.gear.write", "items.gear.durability", "items.gear.upgrade", .. ItemsFake.OfflineRows]);
         Row("Combat", CoverageKind.RecordingFake,
             "Kiln.Combat's own code on the kit's kiln.combat (the v1 table): health is what the test gives an entity of the fake world " +
             "or a fake player (KilnHarness.Combat.SetHealth); a mod's Damage or Kill and the game's hit (KilnHarness.Combat.Hit) apply " +

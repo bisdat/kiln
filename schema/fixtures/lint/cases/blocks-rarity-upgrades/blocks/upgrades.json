@@ -1,0 +1,19 @@
+{
+  "format": 1,
+  "rarityUpgrades": {
+    "standard": {
+      "items": [ "Weapon_*", "Armor_*" ], "max": "legendary",
+      "steps": {
+        "uncommon": { "cost": { "Material_T1_Metal_Scraps": 10 } },
+        "rare": { "cost": { "my-mod:ember-shard": 3 }, "chance": 0.9 },
+        "epic": { "cost": { "my-mod:ember-shard": 5 }, "chance": 0.75, "onFail": "keepItemLoseCost", "levelScale": 0.1 },
+        "legendary": { "cost": { "my-mod:ember-shard": 8 }, "chance": 0.5, "onFail": "downgrade", "unlock": true }
+      },
+      "durability": "keepRatio", "socket": "gameChance", "allowEmptySlot": false
+    },
+    "free": { "steps": { "rare": {} } },
+    "bad": { "items": [ "" ], "max": "mythic", "steps": { "common": { "cost": { "my-mod:ember-shard": 0 }, "chance": 2, "onFail": "destroy" } }, "socket": "always", "price": 3 },
+    "empty": { "steps": {} },
+    "bad-step": { "steps": { "rare": { "cost": { "my-mod:ember-shard": 0 }, "chance": 2, "onFail": "destroy" } } }
+  }
+}

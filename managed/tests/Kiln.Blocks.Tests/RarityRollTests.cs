@@ -117,7 +117,7 @@ public sealed unsafe class RarityRollTests
         Assert.Equal(24, (int)Marshal.OffsetOf<ItemsNative.RollStatus>("Rolled"));
         Assert.Equal(296, sizeof(ItemsNative.TableV7));
         Assert.Equal(320, (int)Marshal.OffsetOf<ItemsNative.TableV8>("RarityRolls"));
-        Assert.Equal(336, sizeof(ItemsNative.TableV8));
+        Assert.Equal(344, sizeof(ItemsNative.TableV8));  // P3's gear_upgrade follows roll_status (336)
         var e = ItemRarityRolls.Entries([new ItemRarityRolls.Rule(7, ItemsNative.RollCraft, 50, 30, 15, 4, 1)]);
         Assert.Equal(7u, e[0].Item);
         Assert.Equal(ItemsNative.RollCraft, e[0].Sources);

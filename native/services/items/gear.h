@@ -27,5 +27,8 @@ KilnResult gear_write(KilnOwner owner, const KilnItemsGearRequest* request, Kiln
                       uint64_t* out_ticket);
 KilnResult gear_read(KilnEntity entity, uint32_t stamp, KilnItemsGearState* out);
 KilnResult gear_status(KilnItemsGearStatus* out);
+// v8 (package P3): a gear write paid for, in one step of kiln_items_gear (kiln_items.h "upgrades").
+KilnResult gear_upgrade(KilnOwner owner, const KilnItemsUpgradeRequest* request, KilnItemsUpgradeDoneFn done, void* user,
+                        uint64_t* out_ticket);
 
 }  // namespace kitems

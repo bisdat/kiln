@@ -168,8 +168,8 @@ public sealed class ItemsFakeTests
     [Fact]
     public void TheWholeTableAndTheGearStructsMirrorTheHeader()
     {
-        // kiln.items v8: sizeof(KilnItemsApi) == 336 (gear_write at 296, then P5's rarity_rolls/roll_status), native items.cpp
-        Assert.Equal((336, 40, 44, 296, 192), (Unsafe.SizeOf<ItemsAbi.FullTable>(), Unsafe.SizeOf<ItemsAbi.GearRequest>(), Unsafe.SizeOf<ItemsAbi.GearState>(),
+        // kiln.items v8: sizeof(KilnItemsApi) == 344 (gear_write at 296, P5's rarity_rolls/roll_status, P3's gear_upgrade), native items.cpp
+        Assert.Equal((344, 40, 44, 296, 192), (Unsafe.SizeOf<ItemsAbi.FullTable>(), Unsafe.SizeOf<ItemsAbi.GearRequest>(), Unsafe.SizeOf<ItemsAbi.GearState>(),
             Unsafe.SizeOf<ItemsAbi.GearResult>(), Unsafe.SizeOf<ItemsAbi.GearStatus>()));
         var native = typeof(Items).Assembly.GetType("Kiln.ItemsNative", true)!;
         Assert.Equal(Unsafe.SizeOf<ItemsAbi.FullTable>(), Mirror.Size(native, "TableV8"));
@@ -177,6 +177,9 @@ public sealed class ItemsFakeTests
         Assert.Equal(Unsafe.SizeOf<ItemsAbi.GearState>(), Mirror.Size(native, "GearState"));
         Assert.Equal(Unsafe.SizeOf<ItemsAbi.GearResult>(), Mirror.Size(native, "GearResult"));
         Assert.Equal(Unsafe.SizeOf<ItemsAbi.GearStatus>(), Mirror.Size(native, "GearStatus"));
+        Assert.Equal((160, 392), (Unsafe.SizeOf<ItemsAbi.UpgradeRequest>(), Unsafe.SizeOf<ItemsAbi.UpgradeResult>()));  // package P3
+        Assert.Equal(Unsafe.SizeOf<ItemsAbi.UpgradeRequest>(), Mirror.Size(native, "UpgradeRequest"));
+        Assert.Equal(Unsafe.SizeOf<ItemsAbi.UpgradeResult>(), Mirror.Size(native, "UpgradeResult"));
         Assert.Equal(Unsafe.SizeOf<ItemsAbi.InstancesStatus>(), Mirror.Size(native, "InstancesStatus"));
     }
 

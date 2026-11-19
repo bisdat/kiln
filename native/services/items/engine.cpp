@@ -5,6 +5,7 @@
 #include "engine.h"
 #include "instances.h"
 #include "pide.h"
+#include "upgrade_logic.h"
 
 #include <windows.h>
 
@@ -1184,6 +1185,23 @@ bool register_program(uintptr_t world, void* desc, int* outcome, char* why, unsi
     } __except (*code = GetExceptionCode(), EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
+}
+
+// Upgrades (gear.cpp, v8 package P3): a transaction of ours on the accessors of `a`, operator `entity`, no flags.
+void tx_begin(const Access& a, KilnEntity entity, uint8_t* tx) {
+    alignas(16) uint8_t s[kSetupBlock];
+    fill_setup_for(a, entity, 0, s);
+    E.tx_ctor(tx);
+    E.tx_init(tx, s);
+}
+
+bool tx_takes_plain_only(const uint8_t* tx) {
+    const Ops ops = ops_of(tx);
+    for (uint64_t i = 0; i < ops.n && ops.p; ++i) {
+        const uint8_t* op = ops.p + i * kOpStride;
+        if (!upgrade::plain_take(op[0x26], op[0x30], rd<uint32_t>(op, 0x20))) return false;
+    }
+    return true;
 }
 
 bool read_pages(const Access& a, KilnEntity e, PageSet* out, bool* initialized) {

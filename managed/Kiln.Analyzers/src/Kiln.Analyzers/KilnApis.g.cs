@@ -444,6 +444,8 @@ internal static partial class KilnApis
         "M:Kiln.Items.Take(Kiln.EntityId,Kiln.ItemId,System.Int32,System.Nullable{Kiln.SlotId},System.Boolean,System.Nullable{Kiln.EntityId},System.Boolean)", // Items.Take(EntityId, ItemId, int, SlotId?, bool, EntityId?, bool): via Items.Submit(bool, ItemsNative.Request, string)
         "M:Kiln.Items.TakeSlot(Kiln.EntityId,Kiln.InventorySlot,System.Boolean)", // Items.TakeSlot(EntityId, InventorySlot, bool): via Items.Take(EntityId, ItemId, int, SlotId?, bool, EntityId?, bool)
         "M:Kiln.Items.Unequip(Kiln.EntityId,Kiln.EquipmentSlot,Kiln.EquipOptions)", // Items.Unequip(EntityId, EquipmentSlot, EquipOptions): Services.RequireTickThread
+        "M:Kiln.Items.UpgradeRarity(Kiln.EntityId,Kiln.ItemInstanceRef,Kiln.RarityUpgradeRule,Kiln.UpgradeOptions)", // Items.UpgradeRarity(EntityId, ItemInstanceRef, RarityUpgradeRule, UpgradeOptions?): via ItemUpgrades.Run(EntityId, ItemInstanceRef, RarityUpgradeRule, UpgradeOptions?, string)
+        "M:Kiln.Items.UpgradeRarity(Kiln.EntityId,Kiln.ItemInstanceRef,System.String,Kiln.UpgradeOptions)", // Items.UpgradeRarity(EntityId, ItemInstanceRef, string, UpgradeOptions?): via ItemUpgrades.Run(EntityId, ItemInstanceRef, RarityUpgradeRule, UpgradeOptions?, string)
         "M:Kiln.Journal.Find(System.String)", // Journal.Find(string): via Journal.Find(uint)
         "M:Kiln.Journal.Find(System.UInt32)", // Journal.Find(uint): via Journal.Quests()
         "M:Kiln.Journal.Quests", // Journal.Quests(): Services.RequireTickThread
@@ -861,6 +863,7 @@ internal static partial class KilnApis
         "P:Kiln.Items.MovesAvailable=items.move", // Can("items.move")
         "P:Kiln.Items.ResultPeekAvailable=kiln.items", // ResultTable != null: Services.Get("kiln.items")
         "P:Kiln.Items.Transfers.Available=items.transfer", // Can("items.transfer")
+        "P:Kiln.Items.UpgradeAvailable=items.gear.upgrade", // Can("items.gear.upgrade")
         "P:Kiln.Knowledge.Available=kiln.knowledge", // KnowledgeNative.T != null: Services.Get("kiln.knowledge")
         "P:Kiln.NoClip.Available=rules.noclip", // Is("rules.noclip")
         "P:Kiln.PlayerAnimStates.Available=kiln.playeranim", // T != null: Services.Get("kiln.playeranim")
