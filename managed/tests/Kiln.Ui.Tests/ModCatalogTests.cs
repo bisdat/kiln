@@ -287,6 +287,77 @@ public sealed class ModCatalogTests : IDisposable
         Assert.False(m.NeedsAttention);
     }
 
+    /// <summary>kiln-dllmod (packages for Enshrouded ModLoader, docs/kiln/engines/dllmod.md): its mods are listed with the
+    /// state of kiln/state/dllmod.json. Before a world of your own starts they wait for it; started, refused with the
+    /// plugin's reason, switched off; a profile entry it has not reported yet is still a row.</summary>
+    [Fact]
+    public void Enshrouded_modloader_packages_show_their_state_from_dllmod_json()
+    {
+        var carry = Dir("Mods", "EnshroudedModLoader", "carryon");
+        var unseen = Dir("Mods", "EnshroudedModLoader", "unseen");
+        Profile(new() { ["dllmod"] = [new { id = "carryon", version = "0.1.50-dev", path = carry }, new { id = "unseen", version = "1", path = unseen }] });
+        Write("dllmod.json", new
+        {
+            format = 1, pid = Pid, status = "waiting", reason = "the mods start when a world of your own starts", steppedAside = false,
+            mods = new object[]
+            {
+                new { id = "carryon", package = "carryon/carryon.dll", name = "carryon", version = "0.1.50-dev", status = "waiting", reason = "", folder = carry },
+                new { id = "lantern", package = "lantern/lantern.dll", name = "lantern", version = "0.1.29-dev", status = "started", reason = "" },
+                new { id = "broken", package = "broken/broken.dll", name = "broken", version = "1", status = "rejected", reason = "broken.dll.mod: abi must be given once" },
+                new { id = "off", package = "off/off.dll", name = "off", version = "1", status = "disabled", reason = "switched off in the profile" },
+            },
+        });
+        var s = Read();
+        var w = Mod(s, "dllmod", "carryon");
+        Assert.Equal(ModRunState.Waiting, w.State);
+        Assert.Contains("world of your own", w.Reason);
+        Assert.False(w.NeedsAttention);
+        Assert.Equal(ModRunState.Loaded, Mod(s, "dllmod", "lantern").State);
+        var b = Mod(s, "dllmod", "broken");
+        Assert.Equal(ModRunState.Failed, b.State);
+        Assert.Equal("broken.dll.mod: abi must be given once", b.Reason);
+        Assert.NotNull(b.Help);
+        Assert.Equal(ModRunState.Disabled, Mod(s, "dllmod", "off").State);
+        Assert.Equal(ModRunState.NotLoaded, Mod(s, "dllmod", "unseen").State);  // in the profile, not in the report
+        var e = s.Engines.Single(e => e.Kind == "dllmod");
+        Assert.Equal("Enshrouded ModLoader", e.Name);
+        Assert.Contains("Enshrouded ModLoader", ModCatalog.EngineAbout("dllmod"));
+        Assert.Equal(ModCatalog.EngineOrder.Length - 1, Array.IndexOf(ModCatalog.EngineOrder, "dllmod"));  // the launcher's order: last
+    }
+
+    [Fact]
+    public void Enshrouded_modloader_steps_aside_and_refuses_another_build()
+    {
+        Profile([]);
+        Write("dllmod.json", new
+        {
+            format = 1, pid = Pid, status = "stepped aside", steppedAside = true, steppedAsideReason = "Enshrouded ModLoader runs in this game: it is loaded (dinput8.dll)",
+            mods = new object[]
+            {
+                new { id = "carryon", status = "own-loader", reason = "runs under Enshrouded ModLoader's own loader; switch it on in the world's Edit > MODS page" },
+                new { id = "lib-copy", status = "not-loaded", reason = "Enshrouded ModLoader's own loader runs this start" },
+            },
+        });
+        var s = Read();
+        Assert.Equal(ModRunState.Loaded, Mod(s, "dllmod", "carryon").State);
+        var nl = Mod(s, "dllmod", "lib-copy");
+        Assert.Equal(ModRunState.Failed, nl.State);
+        Assert.NotNull(nl.Help);
+        Assert.StartsWith("Stepped aside", s.Engines.Single(e => e.Kind == "dllmod").Note);
+
+        Write("dllmod.json", new
+        {
+            format = 1, pid = Pid, status = "unsupported", steppedAside = false,
+            reason = "mods for Enshrouded ModLoader are made for client build 26430625 (enshrouded.exe 5d9ef2f1), and this game is 0123abcd",
+            mods = new object[] { new { id = "carryon", status = "skipped", reason = "mods for Enshrouded ModLoader are made for client build 26430625" } },
+        });
+        s = Read();
+        Assert.Equal(ModRunState.NotLoaded, Mod(s, "dllmod", "carryon").State);
+        var e = s.Engines.Single(e => e.Kind == "dllmod");
+        Assert.Equal(EngineHealth.Problem, e.Health);
+        Assert.Contains("26430625", e.Note);
+    }
+
     [Fact]
     public void Stepped_aside_engines_say_so_and_their_mods_are_not_loaded()
     {

@@ -117,7 +117,8 @@
       "shroudtopia": "Kiln 运行的 Shroudtopia 模组。",
       "enshwick": "Enshwick 模组，由其自带的加载器运行。",
       "shroudlink": "Kiln 运行的 shroudlink 模组。",
-      "ember": "Ember 服务端模组。"
+      "ember": "Ember 服务端模组。",
+      "dllmod": "Enshrouded ModLoader 模组（CarryOn、Belt Lantern），在你自己的世界开始时由 Kiln 启动。"
     },
     "profile": {
       "no_mods": "本次以无模组模式启动。",
@@ -176,6 +177,9 @@
       "reason": "Ember 尚未开放模组接口，其服务端模组暂时无法运行。",
       "help": "模组会保留在配置方案中，待 Kiln 支持 Ember 模组后即可运行。"
     },
+    "dllmod": {
+      "waiting": "在你自己的世界开始时启动。"
+    },
     "shroudtopia": {
       "off": "已在 Shroudtopia 设置中关闭。",
       "off_help": "在此配置方案的配置文件夹中打开 shroudtopia/shroudtopia.json。在 mods 下找到「{name}」（名称见 kiln.log 中的 Registered mod 记录），将其 active 设为 true 并保存。Shroudtopia 会在游戏运行时重新读取设置。",
@@ -209,6 +213,8 @@
       "eml_aside_why": "EML：本次由 EML 自带的加载器接管（{reason}）。",
       "eml_idle": "本次启动没有 EML 模组。",
       "ember": "Ember：已找到模组，暂不支持运行。",
+      "dllmod_unsupported": "Enshrouded ModLoader：其模组是为游戏版本 26430625 制作的，因此在此版本上一个也不会启动。",
+      "dllmod_server": "Enshrouded ModLoader：其模组用于游戏客户端；专用服务器不会启动任何一个。",
       "shroudlink_elsewhere": "这些模组正由其他 shroudlink 加载器运行。",
       "set_aside": "SET：本次由 SET 自带的加载器接管。",
       "set_aside_why": "SET：本次由 SET 自带的加载器接管（{reason}）。",

@@ -117,7 +117,8 @@
       "shroudtopia": "Kiln が実行する Shroudtopia のモッド。",
       "enshwick": "Enshwick のローダーが実行する Enshwick のモッド。",
       "shroudlink": "Kiln が実行する shroudlink のモッド。",
-      "ember": "Ember のサーバーモッド。"
+      "ember": "Ember のサーバーモッド。",
+      "dllmod": "Enshrouded ModLoader 用のモッド（CarryOn、Belt Lantern）。自分のワールドを開始するときに Kiln が起動します。"
     },
     "profile": {
       "no_mods": "今回だけモッドなしでプレイ: 今回の起動ではどのモッドも読み込まれません。",
@@ -176,6 +177,9 @@
       "reason": "Ember モッドはまだ実行できません: Ember はモッドを実行する方法を公開していません。",
       "help": "今は何もする必要はありません。モッドはプロファイルに残り、Kiln が Ember モッドに対応すると動作します。"
     },
+    "dllmod": {
+      "waiting": "自分のワールドを開始すると起動します。"
+    },
     "shroudtopia": {
       "off": "Shroudtopia の設定でオフになっています。",
       "off_help": "プロファイルの config フォルダーにある shroudtopia/shroudtopia.json で、\"{name}\" という名前の mods の項目（kiln.log の Registered mod の行にある名前）の active を true にしてください。ファイルを保存すると、Shroudtopia はゲームの実行中に読み込み直します。",
@@ -209,6 +213,8 @@
       "eml_aside_why": "EML: EML 独自のローダーに譲りました（{reason}）。",
       "eml_idle": "今回の起動では EML モッドはありません。",
       "ember": "Ember: モッドは見つかりましたが、まだ実行できません。",
+      "dllmod_unsupported": "Enshrouded ModLoader：モッドはゲームのビルド 26430625 用に作られているため、このビルドではどれも起動しません。",
+      "dllmod_server": "Enshrouded ModLoader：モッドはゲームクライアント用です。専用サーバーではどれも起動しません。",
       "shroudlink_elsewhere": "別の shroudlink ローダーがこれらのモッドを実行しています。",
       "set_aside": "SET: SET 独自のローダーに譲りました。",
       "set_aside_why": "SET: SET 独自のローダーに譲りました（{reason}）。",

@@ -117,7 +117,8 @@
       "shroudtopia": "Mods de Shroudtopia, ejecutados por Kiln.",
       "enshwick": "Mods de Enshwick, ejecutados por el cargador de Enshwick.",
       "shroudlink": "Mods de shroudlink, ejecutados por Kiln.",
-      "ember": "Mods de servidor de Ember."
+      "ember": "Mods de servidor de Ember.",
+      "dllmod": "Mods de Enshrouded ModLoader (CarryOn, Belt Lantern), que Kiln inicia cuando empieza un mundo tuyo."
     },
     "profile": {
       "no_mods": "Juega una vez sin mods: ningún mod se carga en este inicio.",
@@ -176,6 +177,9 @@
       "reason": "Los mods de Ember aún no pueden ejecutarse: Ember no ha publicado una forma de ejecutar mods.",
       "help": "No hay nada que hacer por ahora. El mod se queda en tu perfil y se ejecutará cuando Kiln admita mods de Ember."
     },
+    "dllmod": {
+      "waiting": "Se inicia cuando empieza un mundo tuyo."
+    },
     "shroudtopia": {
       "off": "Desactivado en los ajustes de Shroudtopia.",
       "off_help": "En shroudtopia/shroudtopia.json, en la carpeta de configuración del perfil, pon active en true en la entrada de mods llamada \"{name}\" (el nombre de la línea Registered mod de kiln.log). Guarda el archivo; Shroudtopia lo vuelve a leer mientras el juego está en marcha.",
@@ -210,6 +214,8 @@
       "eml_aside_why": "EML: se hizo a un lado para el cargador propio de EML ({reason}).",
       "eml_idle": "No hay mods de EML en este inicio.",
       "ember": "Ember: se encuentran mods, pero aún no pueden ejecutarse.",
+      "dllmod_unsupported": "Enshrouded ModLoader: sus mods están hechos para la versión 26430625 del juego, así que ninguno se inicia en esta versión.",
+      "dllmod_server": "Enshrouded ModLoader: sus mods son para el cliente del juego; un servidor dedicado no inicia ninguno.",
       "shroudlink_elsewhere": "Otro cargador de shroudlink ejecuta estos mods.",
       "set_aside": "SET: se hizo a un lado para el cargador propio de SET.",
       "set_aside_why": "SET: se hizo a un lado para el cargador propio de SET ({reason}).",
