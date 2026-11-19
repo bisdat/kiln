@@ -2742,7 +2742,6 @@
     },
     "graphics": {
       "title": "图形",
-      "sub": "游戏中也可按 Insert，在 Kiln 菜单的「图形」页调整。帧率上限和性能监控立即生效；DLSS 设置在下次载入世界或切换 DLSS 模式、分辨率时生效。",
       "aside": {
         "line": "{tool}。{effect}",
         "optiscaler": "已安装 OptiScaler（{file}）",
@@ -2767,10 +2766,6 @@
       }
     },
     "upscalers": {
-      "title": "超分辨率组件",
-      "preview": "预览版",
-      "sub": "按需下载厂商提供的超分辨率组件，保存到游戏目录下的 kiln/vendor。",
-      "purpose": "将来可通过游戏的 FSR 3 选项使用这些组件。当前版本仅供下载，尚不会在游戏中启用。",
       "unreadable": "读取超分辨率组件失败",
       "starting": "正在准备下载",
       "unavailable": "当前 Kiln 版本不支持此组件。",
