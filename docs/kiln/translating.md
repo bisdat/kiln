@@ -5,6 +5,24 @@ Kiln has two sets of texts a player reads: the **Kiln Launcher** (the desktop ap
 `locales/*.json` ([modding/lifecycle.md](modding/lifecycle.md#mod-texts-locales)). English is the source; a text a
 translation does not have yet shows in English, so a translation can be partial and grow.
 
+## Languages
+
+| Language | Tag | State |
+|---|---|---|
+| Simplified Chinese (简体中文) | `zh-CN` | by XiaoHuLi666 (XHL), since 0.2.0-dev.29.18 |
+| German (Deutsch) | `de` | machine translation, waiting for native speakers (0.2.0-dev.29.19): [notes and glossary](translations/de.md), [review issue](https://github.com/frostdev-ops/kiln/issues/90) |
+| Russian (Русский) | `ru` | machine translation, waiting for native speakers (0.2.0-dev.29.19): [notes and glossary](translations/ru.md), [review issue](https://github.com/frostdev-ops/kiln/issues/91) |
+| French (Français) | `fr` | machine translation, waiting for native speakers (0.2.0-dev.29.19): [notes and glossary](translations/fr.md), [review issue](https://github.com/frostdev-ops/kiln/issues/92) |
+| Spanish (Español) | `es` | machine translation, waiting for native speakers (0.2.0-dev.29.19): [notes and glossary](translations/es.md), [review issue](https://github.com/frostdev-ops/kiln/issues/93) |
+| Brazilian Portuguese (Português (Brasil)) | `pt-BR` | machine translation, waiting for native speakers (0.2.0-dev.29.19): [notes and glossary](translations/pt-BR.md), [review issue](https://github.com/frostdev-ops/kiln/issues/94) |
+| Japanese (日本語) | `ja` | machine translation, waiting for native speakers (0.2.0-dev.29.19): [notes and glossary](translations/ja.md), [review issue](https://github.com/frostdev-ops/kiln/issues/95) |
+| Polish (Polski) | `pl` | machine translation, waiting for native speakers (0.2.0-dev.29.19): [notes and glossary](translations/pl.md), [review issue](https://github.com/frostdev-ops/kiln/issues/96) |
+| Italian (Italiano) | `it` | machine translation, waiting for native speakers (0.2.0-dev.29.19): [notes and glossary](translations/it.md), [review issue](https://github.com/frostdev-ops/kiln/issues/97) |
+| Korean (한국어) | `ko` | machine translation, waiting for native speakers (0.2.0-dev.29.19): [notes and glossary](translations/ko.md), [review issue](https://github.com/frostdev-ops/kiln/issues/98) |
+
+A machine translation is complete but not yet read by a native speaker: if your language is one of them, the review
+issue says what to look at first, and a comment there or a pull request is all it takes.
+
 ## Where the files live
 
 | What | English (the source) | Your language |
@@ -58,6 +76,9 @@ Where English changes with a number it has a pair of keys:
 
 Fill the forms your language uses (the CLDR plural categories: `zero`, `one`, `two`, `few`, `many`, `other`).
 Chinese, Japanese and Korean have one form: write only `other`.
+
+Where a language's `one` covers more than 1 (Russian's is also 21, 31, ...; French and Brazilian Portuguese's also 0),
+its `.one` may carry the `{count}` English's `.one` leaves out ("one mod left out" becomes `"{count} мод пропущен"`).
 
 ```json
 "filesRead": { "other": "已读取 {count} 个翻译文件" }
