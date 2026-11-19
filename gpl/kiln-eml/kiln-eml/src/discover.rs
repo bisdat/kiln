@@ -193,7 +193,9 @@ pub fn aside_entries(profile_json: &str, kiln_dir: &Utf8Path, roots: &[Utf8PathB
         // DLL looks for (`mods/XHL-Auto-Loot` for the Library id `xhl-auto-loot`)
         let own_path = paths.get(i).map(|c| c.path.clone())
             .filter(|p| p.parent().is_some_and(|parent| roots.iter().any(|r| is_root(parent, r))));
-        let copy = roots.iter().map(|r| r.join(&id)).chain(own_path).find(|d| kiln_copy_of(d).is_some_and(|m| m == id));
+        // The entry's own path first: on Windows `<root>\<id>` also opens `<root>\XHL-Auto-Loot` (names are not case
+        // sensitive there), and the report must name the folder as the launcher placed it.
+        let copy = own_path.into_iter().chain(roots.iter().map(|r| r.join(&id))).find(|d| kiln_copy_of(d).is_some_and(|m| m == id));
         let wanted = paths.get(i).and_then(|c| classify(&c.path).ok()).map(|m| m.id).unwrap_or_else(|| id.clone());
         let manual = if copy.is_none() {
             roots.iter().flat_map(|r| folder_candidates(r, "own-loader")).map(|c| c.path)
@@ -849,7 +851,8 @@ mod tests {
         let e = aside_entries(j, &d.join("kiln"), &[d.join("mods")], "EML's own loader", None);
         let states: Vec<_> = e.iter().map(|x| (x.id.as_deref().unwrap(), x.state.as_str())).collect();
         assert_eq!(states, [("a", "own-loader"), ("b", "not-loaded"), ("c", "disabled")]);
-        assert_eq!(e[0].path, copy.as_str());
+        // the folder `copy` names, spelled with the system's separator (`mods\a` on Windows): compared as paths
+        assert_eq!(Utf8Path::new(&e[0].path), copy);
         assert!(e[1].reason.as_deref().unwrap().starts_with("EML's own loader runs this start and reads only"));
         assert_eq!(e[1].path, "/lib/b");
         std::fs::remove_dir_all(d).unwrap();
@@ -992,7 +995,8 @@ mod tests {
         assert_eq!(run, [copy.clone()]);
         assert_eq!(entries.len(), 1);
         let aside = aside_entries(&json, &d.join("kiln"), &[d.join("mods")], "EML's own loader", None);
-        assert_eq!((aside[0].state.as_str(), aside[0].path.as_str()), ("own-loader", copy.as_str()));
+        // as paths (Windows spells it with `\`), and with the case the launcher placed it with (`XHL-Native-Mod`, not the id)
+        assert_eq!((aside[0].state.as_str(), Utf8Path::new(&aside[0].path)), ("own-loader", copy.as_path()));
         // No marker: a real hand installation is still loaded by the foreign loader, not missing in the Library.
         std::fs::remove_file(copy.join(".kiln-library.json")).unwrap();
         let aside = aside_entries(&json, &d.join("kiln"), &[d.join("mods")], "EML's own loader", None);

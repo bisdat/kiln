@@ -983,7 +983,16 @@ mod tests {
         let json = serde_json::to_value(&out).unwrap();
         assert!(json["reason"].as_str().unwrap().contains(error));
         assert!(json["mods"][0]["reason"].as_str().unwrap().contains(error));
+        release_game_lock(&d);
         std::fs::remove_dir_all(d).unwrap();
+    }
+
+    /// run() keeps the install lock until the process exits, as the game's DLL must (GAME_LOCKS). A test that removes
+    /// its game folder afterwards drops that lock first: Windows deletes a file that is still open only when its last
+    /// handle closes (always under Wine), so the folder would still hold .kiln-eml.lock (os error 145).
+    fn release_game_lock(game: &Utf8Path) {
+        let game = game.canonicalize_utf8().unwrap();
+        GAME_LOCKS.lock().unwrap().retain(|(p, _)| p != &game);
     }
 
     #[test]
