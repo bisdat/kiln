@@ -15,6 +15,20 @@ Hosted-game BSMS v0.1.4 / Kiln dev.29.17 observations after opting in the base:
 - The Forge's normal screen displayed **Charcoal Available: 0**. The initial full plan was `NotEnough` for the **other** ingredient (Metal Scraps); that first refusal is not evidence against the source API.
 - Hence source registration and read-only stock discovery are demonstrated, but a native Fill execution and player crafting remain **untested**. The UI discrepancy is established independently.
 
+## Real-client probe result — 2026-11-19, v0.1.1
+
+The user supplied an in-game screenshot showing both the native Forge screen and the read-only probe panel. This **confirms the discrepancy in the Forge**, but does not yet establish the same runtime behaviour at every station type.
+
+- Receiving entity: **1032**, `T1_Forge_Factory`, recipe `0x3acc518b` (Metal Sheets); displayed station state `MissingMaterials`, 0 crafts loaded.
+- Native Forge resources: **Charcoal: 0/2, Available: 0**; **Metal Scraps: 0/2**, while the probe reads **38** scraps in bag + Magic Chest stock. The native charcoal +1 button appears disabled.
+- Server `Stations.Plan`, exact **+1 Add**, no station outputs: **`NotEnough`** (`affordable=0, planned=0`).
+- Same plan with opted-in outputs: **`Done`** (`affordable=10, planned=1`).
+- Ingredient IDs and counts: charcoal `0x162cb6d2` requires 2, output sources **20**, bag/chests 0, receiving station 0; metal scraps `0x07e67b5b` requires 2, bag/chests **38**, output sources 0.
+- The probe's presence confirms successful client load/registration after rebuilding against the **Kiln dev.29.17 API 0.2.9 SDK**. The original 0.1.0 probe did not load because its manifest declared API 0.2.10.
+- **Not yet measured:** whether a disabled native Fill hotkey emits an action; a successful native Fill transaction; and equivalent behaviour in other station types. The probe observes `+1`, not the precise in-game fill slider request.
+
+**Interpretation:** Server stock discovery is correct for this recipe, while the Forge's normal material availability and corresponding controls do not account for shared output stock. The target fix must apply to **all production-station screens**, not just the Forge.
+
 ## Source trace
 
 | Concern | Existing implementation / evidence | Consequence |
