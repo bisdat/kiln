@@ -29,6 +29,7 @@ import { useT } from "../i18n";
 import { CommunityDesktopHost } from "../community/Host";
 import { NavCount } from "../community/parts";
 import { useShown } from "../community/state";
+import { watchCrashes } from "../community/crash";
 
 const MOTION = "(prefers-reduced-motion: reduce)";
 const reduced = () => typeof window !== "undefined" && !!window.matchMedia?.(MOTION).matches;
@@ -176,6 +177,8 @@ function Mouth({ isPlay, ctl }: { isPlay: boolean; ctl: PlayControl }) {
 
 export function AppShell() {
   const t = useT();
+  // the crash notice follows every run from the launcher's start, whichever page is open (community/crash.ts)
+  useEffect(() => watchCrashes(), []);
   const info = useAppInfo();
   const settings = useSettings();
   // the WebGL fire, unless turned off (Settings, Appearance) or KILN_LAUNCHER_NO_WEBGL=1; decided once both are known

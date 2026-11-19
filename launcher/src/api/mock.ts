@@ -1992,6 +1992,10 @@ if (slNotice) {
 // game without Kiln ("Kiln is not loading").
 if (typeof location !== "undefined") {
   const problem = new URLSearchParams(location.search).get("problem");
-  if (problem === "crash") setTimeout(() => { mockExternalStart("client-steam", Date.now() - 4 * 60_000); setTimeout(() => mockCrash(), 900); }, 600);
+  // the game starts once the launcher follows the game's events (a start it did not see gets no notice: on a busy
+  // machine the window can take longer than a fixed delay to listen)
+  const play = () => { mockExternalStart("client-steam", Date.now() - 4 * 60_000); setTimeout(() => mockCrash(), 900); };
+  const whenListening = () => (listeners.get("kiln://game")?.size ? setTimeout(play, 600) : setTimeout(whenListening, 100));
+  if (problem === "crash") setTimeout(whenListening, 100);
   if (problem === "nokiln") noProxy = true;
 }

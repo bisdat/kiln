@@ -35,6 +35,7 @@ import DeckCommunity from "../community/DeckCommunity";
 import { CommunityDeckHost } from "../community/Host";
 import { NavCount } from "../community/parts";
 import { useShown } from "../community/state";
+import { watchCrashes } from "../community/crash";
 import "./deck.css";
 
 // the save editor carries its item data (about 2 MB): loaded on the first visit to its tab, as on the desktop
@@ -163,6 +164,8 @@ function DeckBetaMark() {
 
 export default function DeckApp() {
   const t = useT();
+  // the crash notice follows every run from the launcher's start, whichever tab is open (community/crash.ts)
+  useEffect(() => watchCrashes(), []);
   useTaskFeed();
   useBackendEvents();
   useAutoDetect();
