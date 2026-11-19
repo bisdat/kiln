@@ -29,6 +29,7 @@ Code: `crates/kiln-manage/src/report.rs` (`build`, `redact`, `write_zip`), the T
 | `greeneye-mods/<id>/game/*.log`, `.../game/*.status`, `greeneye-mods/<id>/library/...` | each Greeneye mod's own log and status files, one zip folder per mod folder (`game`: its folder in `greeneye/`, `library`: a Library entry; one id may have both) (top level of its folder, at most 4 per mod and 12 mods, the last 64 KiB of each): a Greeneye mod writes what it found and patched only there (The Worst Map Mod: `unlock_map_markers.log`, `UnlockMapMarkers.status`). The folders are those `kiln/state/greeneye.json` names and those in `greeneye/`, read only inside `<game>/greeneye/` or the launcher's `library/greeneye/` (resolved, no links); any other folder is left out with a note (`greeneye-log-skipped`). Compared resolved, so a different spelling of the same folder is the same. Its settings (`.ini`) and data are not read |
 | `game/OptiScaler.ini`, `game/OptiScaler.log` | (dev.29.18) only with OptiScaler in the game folder (`engines::optiscaler_in`): its settings as they are, redacted, at most 1 MiB, and the last 192 KiB of its own log when it writes one (`[Log] LogToFile=true`), each under its name on disk |
 | `game/kiln/crash-reports/<newest>` | the last 64 KiB of the newest crash report |
+| `game/BuildingTools.log`, `game/BuildingTools.prev.log`, `game/shroudlink.log`, `game/auto-loot-plus.log` | (dev.29.19) other mods' own logs in the game folder, when present: Building Tools' (this start and the one before), ShroudLink's core, Auto Loot Plus' native part. The last 192 KiB of each, redacted as Kiln's logs, added after Kiln's own logs and the crash report; a link in the file's place is not followed. Their settings (`BuildingTools.ini`) are not read |
 | `game/kiln/state/*.json` | every state file (boot, mods, native, last-server, hooks, each engine's), at most 1 MiB each |
 | `game/kiln/profile.json`, `kiln/chain.ini`, `kiln/kiln.json`, `kiln/.install.json`, `dinput8-chain.ini` | as they are, redacted; a link in a file's place, and a state file that is a link, is not followed ("a link, not followed") |
 | `launcher/launcher.log` | the last 192 KiB of `<data>/logs/launcher.log` |
@@ -117,7 +118,8 @@ names to replace). `summary.txt` ends with this list.
 
 What redaction cannot catch: a character or server name the player chose that appears in a log line, and 8.3 short
 names that cut the user name (`FROSTL~1`). `game/shroudlink_client.log` is written by the third-party shroudlink
-client addon, not by Kiln: its text gets only the redaction above, so whatever else the addon logs stays as it is
+client addon, not by Kiln (as `game/BuildingTools*.log`, `game/shroudlink.log` and `game/auto-loot-plus.log` are written by
+those mods): its text gets only the redaction above, so whatever else the addon logs stays as it is
 (IPv6 addresses, server DNS or UNC host names, other players' names, anything like `password=...`).
 
 ## When things are broken

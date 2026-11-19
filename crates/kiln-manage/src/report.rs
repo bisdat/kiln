@@ -10,7 +10,8 @@
 //! - [`write_zip`] (feature `zip`) writes the zip.
 //!
 //! Layout of the zip: `summary.txt` (for a forum post), `report.json` (findings and failed sections), `game/<path>`
-//! (tails of kiln.log, proxy.log, eml.log, tick-stats.jsonl, shroudlink_client.log, XHL-Core's XHL-Native-Plugin-Host.log, the newest crash
+//! (tails of kiln.log, proxy.log, eml.log, tick-stats.jsonl, shroudlink_client.log, XHL-Core's XHL-Native-Plugin-Host.log,
+//! other mods' logs in the game folder (BuildingTools.log, shroudlink.log, auto-loot-plus.log: OTHER_MOD_LOGS), the newest crash
 //! report; `kiln/state/*.json`, `kiln/profile.json`,
 //! `kiln/chain.ini`, `kiln/kiln.json`, `kiln/.install.json`), `greeneye-mods/<id>/<game|library>/*.log|*.status` (tails of each Greeneye
 //! mod's own log and status files, with Greeneye Loader's logs under `game/`), `launcher/launcher.log` (tail), `listings/*.txt` (names,
@@ -1605,6 +1606,10 @@ pub fn build(input: &ReportInput) -> Report {
         }
         Err(e) => cx.err("kiln/crash-reports", e.message),
     }
+    // after Kiln's own logs and the crash report, so they never take TOTAL_MAX's room from those
+    for name in OTHER_MOD_LOGS {
+        cx.add_tail(name, SMALL_LOG_MAX);
+    }
     // the profile's Kiln mods that need a newer Kiln (game::newer_mods, as on Play)
     if let (Some(d), Some(i)) = (dirs.as_ref(), install.as_ref()) {
         if let Ok(st) = crate::install::status(d, i) {
@@ -1731,6 +1736,13 @@ fn xhl_core_logs(cx: &mut Ctx, game: &Path) {
         cx.add_tail(&format!("{}/{id}/{}", crate::paths::game::CHAIN_DIR, engine_mods::XHL_CORE_LOG), SMALL_LOG_MAX);
     }
 }
+
+/// Other mods' and loaders' own logs in the game folder, by the names recent support reports listed (netjunk's report
+/// 2026-11-20 had Building Tools' only in the listing): Building Tools (`BuildingTools.log`, and `.prev.log` from the start
+/// before), ShroudLink's core (`shroudlink.log`; its client addon's is `shroudlink_client.log` above), Auto Loot Plus'
+/// native part (`auto-loot-plus.log`: which of its code patterns it found). Each a bounded tail, redacted as Kiln's logs;
+/// their settings files are never read.
+const OTHER_MOD_LOGS: [&str; 4] = ["BuildingTools.log", "BuildingTools.prev.log", "shroudlink.log", "auto-loot-plus.log"];
 
 /// Kiln's copies of XHL-Core whose logs [`xhl_core_logs`] reads (a profile has one; more are copies of other profiles).
 const XHL_CORE_LOGS: usize = 4;

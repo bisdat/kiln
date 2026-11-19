@@ -385,6 +385,34 @@ fn addon_log_is_optional_bounded_and_redacted() {
         old.repeat(SMALL_LOG_MAX as usize / old.len() + 1) + last, "collection is read-only");
 }
 
+/// netjunk's report (2026-11-20): Building Tools' own logs were in the game folder's listing only. Other mods' and
+/// loaders' logs that sit in the game folder are in the zip now (Building Tools' BuildingTools.log and .prev.log,
+/// ShroudLink's core shroudlink.log, Auto Loot Plus' auto-loot-plus.log): each optional, a bounded tail, redacted; their
+/// settings files are not read.
+#[test]
+fn other_mods_logs_in_the_game_folder_are_optional_bounded_and_redacted() {
+    let f = Fx::healthy("other-mod-logs");
+    let names = ["BuildingTools.log", "BuildingTools.prev.log", "shroudlink.log", "auto-loot-plus.log"];
+    let absent = build(&f.input());
+    for n in names {
+        assert!(file(&absent, &format!("game/{n}")).is_none(), "{n}");
+    }
+    assert!(absent.errors.is_empty(), "{:?}", absent.errors);
+
+    let old = "[1] old line\n";
+    for n in names {
+        f.w(n, old.repeat(SMALL_LOG_MAX as usize / old.len() + 1) + &format!("[2] {n} last line (Z:\\var\\home\\frostling\\x.dll)\n"));
+    }
+    f.w("BuildingTools.ini", "[Keys]\nSecretSetting=1\n");
+    let r = build(&f.input());
+    for n in names {
+        let log = file(&r, &format!("game/{n}")).unwrap_or_else(|| panic!("{n} must be collected"));
+        assert!(log.starts_with("... (older lines left out") && log.len() as u64 <= SMALL_LOG_MAX + 200, "{n}: {} bytes", log.len());
+        assert!(log.contains(&format!("{n} last line")) && log.contains(r"<home>\x.dll") && !log.contains("frostling"), "{n}: {log}");
+    }
+    assert!(!r.files.iter().any(|(n, _)| n.ends_with("BuildingTools.ini")), "a mod's settings stay out");
+}
+
 /// inbox 86: XHL-Core loaded a mod the profile had off, and the report had nothing of XHL-Core's own. Its log,
 /// XHL-Native-Plugin-Host.log, written next to the DLL it runs as (the game's dinput8.dll, or Kiln's copy in
 /// kiln/chain/<id>/), is in the zip now when it is there: bounded and redacted as Kiln's logs, never through a link.
