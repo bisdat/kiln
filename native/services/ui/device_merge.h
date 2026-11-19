@@ -111,6 +111,7 @@ inline const std::vector<StructInfo>& structs() {
         KUI_EXT(VkPhysicalDeviceShaderFloat8FeaturesEXT, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT8_FEATURES_EXT, 0, "VK_EXT_shader_float8"),
         KUI_EXT(VkPhysicalDeviceShaderBfloat16FeaturesKHR, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_BFLOAT16_FEATURES_KHR, 0, "VK_KHR_shader_bfloat16"),
         KUI_EXT(VkPhysicalDeviceAntiLagFeaturesAMD, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ANTI_LAG_FEATURES_AMD, 0, "VK_AMD_anti_lag"),
+        KUI_EXT(VkPhysicalDeviceCoherentMemoryFeaturesAMD, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COHERENT_MEMORY_FEATURES_AMD, 0, "VK_AMD_device_coherent_memory"),
         KUI_EXT(VkPhysicalDevicePresentIdFeaturesKHR, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_ID_FEATURES_KHR, 0, "VK_KHR_present_id"),
         KUI_EXT(VkPhysicalDevicePresentWaitFeaturesKHR, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_WAIT_FEATURES_KHR, 0, "VK_KHR_present_wait"),
         KUI_EXT(VkPhysicalDevicePresentId2FeaturesKHR, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_ID_2_FEATURES_KHR, 0, "VK_KHR_present_id2"),

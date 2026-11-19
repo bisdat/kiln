@@ -24,8 +24,8 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -DVK_NO_PROTOTY
 python3 -I "$here/../../../../tools/release/vendor_pins_header.py" --check
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -I"$here/../../../third_party" "$here/vendor_file_test.cpp" -o "$out/vendor_file_test"
 "$out/vendor_file_test" "$out" ${KILN_VENDOR_FILES:+"$KILN_VENDOR_FILES"}
-g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -I"$here/../../../third_party/imgui/vulkan-headers/include" -I"$here/../../../third_party" \
-    "$here/device_merge_test.cpp" -o "$out/device_merge_test"
+g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -DVK_NO_PROTOTYPES '-D__declspec(x)=' -I"$here/../../../third_party/imgui/vulkan-headers/include" \
+    -I"$here/../../../third_party" -I"$here/../../../third_party/ffx" "$here/device_merge_test.cpp" -o "$out/device_merge_test"
 "$out/device_merge_test"
 if [[ -f $here/xess_test.cpp ]]; then  # the XeSS backend's test (dev29/upscale-b2)
     g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -I"$here/../../../third_party/imgui/vulkan-headers/include" -I"$here/../../../third_party" \

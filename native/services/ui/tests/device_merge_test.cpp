@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "../device_merge.h"
+#include "../upscale_amd_map.h"
 
 using namespace kui;
 using namespace kui::device_merge;
@@ -607,6 +608,52 @@ static void queries() {
     CHECK(query_instance_support(nullptr).extensions.empty());
 }
 
+// AMD FSR's own needs (upscale_amd_map.h) on the game's device, on an AMD card that offers every extension and feature
+// they name. Inbox 99, an RX card on 29.18: VK_AMD_device_coherent_memory went on, but its feature struct was not in
+// Kiln's table, so deviceCoherentMemory stayed off and AMD FSR's own check refused to run ("the GPU offers
+// VK_AMD_device_coherent_memory ... could not be turned on for the game").
+static void amd_on_the_game_device() {
+    const upscale::DeviceNeeds needs = upscale::amd::device_needs();
+    for (const auto& f : needs.features) CHECK(find_struct(type_of(f.bytes.data(), f.bytes.size())));  // Kiln can place each
+    for (const auto& u : upscale::amd::used_if_offered()) CHECK(!u.type || find_struct(u.type));
+    GameDevice g;
+    const auto before = g.snapshot();
+    DeviceSupport s = rtx();
+    for (const auto& e : needs.extensions)
+        if (!s.has_extension(e.name)) s.extensions.push_back(e.name);
+    for (const auto& f : needs.features) {
+        const VkStructureType t = type_of(f.bytes.data(), f.bytes.size());
+        bool have = false;
+        for (const auto& x : s.features) have |= type_of(x.bytes.data(), x.bytes.size()) == t;
+        if (have) continue;
+        upscale::FeatureNeed all;
+        all.bytes.assign(find_struct(t)->size, 0);
+        std::memcpy(all.bytes.data(), &t, sizeof t);
+        for (uint32_t o = kHeader; o + sizeof(VkBool32) <= all.bytes.size(); o += sizeof(VkBool32)) set_at(all.bytes.data(), all.bytes.size(), o);
+        s.features.push_back(all);
+    }
+    DeviceMerge m;
+    Report r;
+    const VkDeviceCreateInfo* out = m.merge(&g.ci, needs, s, &r);
+    CHECK(r.ok() && r.changed && out != &g.ci);
+    CHECK(g.snapshot() == before);
+    valid_chain(out);
+    for (const auto& k : r.skipped_optional) CHECK(k.find("does not know") == std::string::npos);
+    const auto e = exts_of(out);
+    CHECK(std::find(e.begin(), e.end(), std::string(VK_AMD_DEVICE_COHERENT_MEMORY_EXTENSION_NAME)) != e.end());
+    const auto* cm = find(out, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COHERENT_MEMORY_FEATURES_AMD);
+    CHECK(cm && on(cm, offsetof(VkPhysicalDeviceCoherentMemoryFeaturesAMD, deviceCoherentMemory)));
+    // AMD FSR's check on that device (upscale_amd.cpp device_ready, as upscale.cpp fills its VkContext): nothing missing
+    upscale::VkContext vk;
+    vk.instance_api = VK_API_VERSION_1_2;
+    vk.props.apiVersion = VK_API_VERSION_1_3;
+    vk.extensions = r.extensions;
+    vk.features = r.features;
+    vk.needs_merged = true;
+    auto gpu = [&](VkStructureType t, uint32_t o) { return s.has(t, o); };
+    CHECK(upscale::amd::missing_used_if_offered(vk, s.extensions, gpu).empty());
+}
+
 static void tables() {
     // every struct's size and every promoted field's two offsets are within their structs; no type twice
     std::set<uint32_t> types;
@@ -632,6 +679,7 @@ static void tables() {
 int main() {
     tables();
     xess_on_the_game_device();
+    amd_on_the_game_device();
     required_missing_changes_nothing();
     optional_missing_is_skipped();
     nothing_to_do();
