@@ -58,8 +58,11 @@ from one non-default value to another applies at the next DLSS set-up. kiln.log 
 - It counts **rendered** frames. A later frame generation phase will add frames of its own between the game's: those
   are output frames, and the cap stays on the rendered ones (a cap of 60 with 2x generation shows 120), as frame cap
   add-ons for frame generation mods do. The readout already shows both counts (equal today).
-- It lives in Kiln's present hook, so it needs Kiln's overlay hooks: with the overlay's drawing off (`KILN_UI_OVERLAY=0`,
-  the overlay crash guard, Streamline, OptiScaler) the cap is off too, and the page and kiln.log say why.
+- It lives in Kiln's present hook, so it needs Kiln's overlay hooks: with the overlay's drawing off from the start
+  (`KILN_UI_OVERLAY=0`, kiln.json `"ui": {"overlay": "off"}`, the overlay crash guard, Streamline, OptiScaler) the cap
+  is off too, and the page and kiln.log say why. When the overlay's drawing turns off during a session (a Vulkan
+  failure: [ui.md](ui.md#when-the-overlay-fails-during-a-session)) the hooks stay, and so does the cap; the readout goes
+  with the drawing.
 
 ## DLSS settings
 For players whose game upscales with DLSS (an NVIDIA RTX card and DLSS chosen in the game's settings). On another card
@@ -216,7 +219,7 @@ the Graphics page, when another tool does the same (the files are looked up in t
 | `nvngx.dll` or `_nvngx.dll` next to the game (another DLSS loader: NGX loads it before the driver's) | stays | aside | stays |
 | NGX's exports already patched when the core loads (another tool hooks DLSS) | stays | aside | stays |
 | another tool's upscaler DLLs next to the game (`amd_fidelityfx_*.dll`, `libxess*.dll`), or the game's FSR 3 pass already patched | stays | stays | aside |
-| Kiln's overlay hooks off (`KILN_UI_OVERLAY=0`, the crash guard) | aside | aside | aside |
+| Kiln's overlay hooks off (`KILN_UI_OVERLAY=0`, kiln.json `ui.overlay` "off", the crash guard) | aside | aside | aside |
 
 The readout stays where Kiln's overlay draws. Kiln never patches over another tool's hook and never changes another
 loader's files or mods. The launcher's Graphics card names the same tools from the game folder, and which of Kiln's

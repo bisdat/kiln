@@ -9,7 +9,7 @@ import * as api from "../api/commands";
 import type { GameInstall, ImportReport, LibraryRef } from "../api/commands";
 import { qk, useProfiles } from "../api/hooks";
 import { Button, Field, Modal, TextInput, toast } from "../ui";
-import { t, useT } from "../i18n";
+import { formatLocale, t, useT } from "../i18n";
 
 /** A reason or note as a sentence: one final period (the backend writes none). */
 export function sentence(s: string): string {
@@ -119,7 +119,7 @@ export function RecentAddsButton() {
   if (!adds.length) return null;
   const when = (iso: string) => {
     const at = new Date(iso);
-    return Number.isNaN(at.getTime()) ? iso : at.toLocaleString();
+    return Number.isNaN(at.getTime()) ? iso : at.toLocaleString(formatLocale());
   };
   return (
     <>

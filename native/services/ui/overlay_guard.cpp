@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT
 #include <windows.h>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <string>
 #include <atomic>
 #include <mutex>
 #include "services/kiln_caps.h"
@@ -9,6 +12,7 @@
 #include "overlay_guard_file.h"
 #include "overlay_wrappers.h"
 #include "overlay_optiscaler.h"
+#include "overlay_setting.h"
 namespace kui {
 namespace {
 std::mutex mu;
@@ -27,6 +31,21 @@ constexpr DWORD kRanFineMs = 60'000;
 // to count as fine (overlay_guard::idle), and how many frames it must present in that time (not hung).
 constexpr DWORD kIdleProofMs = 30'000;
 constexpr uint64_t kIdleProofPresents = 60;
+// Until 0.2.0-dev.29.18 the start counted as fine at the first present with the overlay drawn. Now it does after
+// kDrawnFrames of them, or once the game has presented kIdleProofPresents frames in one kDrawnProofMs window after the
+// first (the overlay may stop drawing sooner: a toast that went; the window is watched again until it has): a game that
+// dies right after the overlay's first frames is caught as one that dies before them. A normal quit counts as fine where
+// on_unload runs (overlay_guard_exit: Wine, or Windows with kiln.json "unloadAtExit": "on"); on Windows by default a quit
+// in the first second of the overlay's drawing would count as a closed start, which costs one start without the overlay.
+constexpr uint64_t kDrawnFrames = 60;
+constexpr DWORD kDrawnProofMs = 20'000;
+// After the overlay's drawing turned off during a session because its own work failed (overlay_guard_failed; not for a
+// present it would not draw on): the game must go on presenting kIdleProofPresents frames in a kFailedProofMs window
+// (watched again until it has) for the failure not to count as a death at the overlay.
+constexpr DWORD kFailedProofMs = 30'000;
+std::atomic<uint64_t> drawn_presents{0};
+HANDLE drawn_timer = nullptr, failed_timer = nullptr;
+uint64_t presents_at_drawn = 0, presents_at_failed = 0;
 // what: the step that failed ("read", "write", "replace", ...); code: its Win32 error, 0 when there is none.
 void error(const char* what = "update", unsigned long code = 0) {
     error_unresolved = true;
@@ -172,6 +191,76 @@ VOID CALLBACK idle_proof(PVOID, BOOLEAN) {
     } catch (...) { error(); }
 }
 
+// A periodic watch ends (its own callback, mu held): deleted without waiting for the callback that runs this.
+void stop_timer(HANDLE& timer) {
+    if (timer) DeleteTimerQueueTimer(nullptr, timer, nullptr);
+    timer = nullptr;
+}
+bool drawn_slow_said = false, failed_slow_said = false;
+// The overlay's first drawn frames were presented and the game went on presenting: the start is fine (overlay_guard_drawn).
+// Periodic: a window with too few frames (loading) is followed by the next one, until one has them or the game ends.
+VOID CALLBACK drawn_proof(PVOID, BOOLEAN) {
+    try {
+        std::lock_guard<std::mutex> lock(mu);
+        // the overlay's drawing went off since: overlay_guard_failed's watch decides
+        if (!active || record.phase != overlay_guard::Phase::trying || failed_timer) return stop_timer(drawn_timer);
+        const uint64_t now = vk_presents(), presented = now - presents_at_drawn;
+        if (presented < kIdleProofPresents) {
+            if (!drawn_slow_said) {
+                drawn_slow_said = true;
+                logf(KILN_LOG_INFO, "ui: overlay crash guard: only %llu frames presented in %u s since the overlay's first frame; the start is still being watched",
+                     static_cast<unsigned long long>(presented), unsigned(kDrawnProofMs / 1000));
+            }
+            presents_at_drawn = now;  // the next window
+            return;
+        }
+        stop_timer(drawn_timer);
+        record = overlay_guard::finish(record);
+        active = false;
+        save();
+        logf(KILN_LOG_INFO, "ui: overlay crash guard complete: the game presented %llu frames in the %u s after the overlay's first frame",
+             static_cast<unsigned long long>(presented), unsigned(kDrawnProofMs / 1000));
+    } catch (...) { error(); }
+}
+// The overlay's drawing turned off during the session and the game went on presenting: it did not die of it
+// (overlay_guard_failed). The failure history stays (overlay_guard::idle): only drawn frames clear it. Periodic, as above.
+VOID CALLBACK failed_proof(PVOID, BOOLEAN) {
+    try {
+        std::lock_guard<std::mutex> lock(mu);
+        if (!active || record.phase != overlay_guard::Phase::trying) return stop_timer(failed_timer);
+        const uint64_t now = vk_presents(), presented = now - presents_at_failed;
+        if (presented < kIdleProofPresents) {
+            if (!failed_slow_said) {
+                failed_slow_said = true;
+                logf(KILN_LOG_INFO, "ui: overlay crash guard: only %llu frames presented in %u s since the overlay's drawing went off; the start is still being watched",
+                     static_cast<unsigned long long>(presented), unsigned(kFailedProofMs / 1000));
+            }
+            presents_at_failed = now;  // the next window
+            return;
+        }
+        stop_timer(failed_timer);
+        record = overlay_guard::idle(record);
+        active = false;
+        save();
+        logf(KILN_LOG_INFO, "ui: overlay crash guard: the game went on (%llu frames in %u s) after the overlay's drawing went off; the start counts as fine",
+             static_cast<unsigned long long>(presented), unsigned(kFailedProofMs / 1000));
+    } catch (...) { error(); }
+}
+// kiln.json "ui": {"overlay": "off"} (the launcher's Settings, "Kiln"): 0 = drawing off, -1 = Kiln decides
+// (overlay_setting.h). Read once at start; a missing or unreadable file, section or key is -1.
+int kiln_json_overlay() {
+    try {
+        const auto dir = api_path(KILN_PATH_KILN);
+        if (dir.empty()) return -1;
+        std::ifstream in(dir / L"kiln.json", std::ios::binary);
+        if (!in) return -1;
+        const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        return overlay_setting(text);
+    } catch (...) {
+        return -1;
+    }
+}
+
 }
 bool overlay_guard_start() noexcept {
     try {
@@ -186,12 +275,18 @@ bool overlay_guard_start() noexcept {
         char option[8] = {};
         const DWORD option_size = GetEnvironmentVariableA("KILN_UI_OVERLAY", option, sizeof option);
         const int environment = option_size == 1 && option[0] == '0' ? 0 : option_size == 1 && option[0] == '1' ? 1 : -1;
+        // kiln.json ui.overlay "off": the same as KILN_UI_OVERLAY=0, for players who cannot set the environment (Steam's
+        // launch options on Windows); KILN_UI_OVERLAY wins over it
+        const int setting = kiln_json_overlay();
         auto apply_mode = [&](bool guarded) {
-            g_overlay_mode = choose_overlay_mode(false, guarded, sl || optiscaler_off, environment);
+            g_overlay_mode = choose_overlay_mode(false, guarded, sl || optiscaler_off, environment, setting);
             if (!overlay_drawing_on()) {
                 g_overlay_reason = "the overlay's drawing is off: ";
-                g_overlay_reason += environment == 0 ? "KILN_UI_OVERLAY=0" : guarded ? "an earlier overlay start was interrupted"
-                    : sl ? "NVIDIA Streamline is installed" : "OptiScaler is installed";
+                g_overlay_reason += environment == 0 ? "KILN_UI_OVERLAY=0"
+                    : environment == -1 && setting == 0 ? "turned off in Kiln's settings (kiln.json ui.overlay)"
+                    : guarded ? "an earlier overlay start was interrupted"
+                    : sl ? "NVIDIA Streamline is installed"
+                    : optiscaler.ini.overlay_menu != 0 ? "OptiScaler's own overlay menu is on" : "OptiScaler's frame generation is on";
             }
         };
         apply_mode(false);
@@ -203,10 +298,17 @@ bool overlay_guard_start() noexcept {
             else if (optiscaler.coexists())  // the crash guard may still keep drawing off for this start (its own line)
                 logf(KILN_LOG_INFO, "ui: OptiScaler is installed (%s) with %s: it leaves the game's presents alone, so it does not turn Kiln's overlay drawing off",
                      file.c_str(), optiscaler_settings(optiscaler).c_str());
-            else
+            else if (optiscaler.ini.overlay_menu != 0)
                 logf(KILN_LOG_INFO, "ui: OptiScaler is installed (%s) with %s: it draws its own overlay in the game's presents and opens its menu with Insert, "
                      "so Kiln's overlay drawing steps aside (keys and the Mods menu still work). For Kiln's overlay, set OverlayMenu=false under [Menu] "
-                     "in OptiScaler.ini (OptiScaler's menu and frame generation go off with it), or KILN_UI_OVERLAY=1 to try both at your own risk",
+                     "in OptiScaler.ini and leave FGInput and FGOutput under [FrameGen] at auto (OptiScaler's menu and frame generation off, its "
+                     "upscaling on), or KILN_UI_OVERLAY=1 to try both at your own risk",
+                     file.c_str(), optiscaler_settings(optiscaler).c_str());
+            else  // its menu off, its frame generation on: its nightly builds since October 2026 run it without the menu
+                logf(KILN_LOG_INFO, "ui: OptiScaler is installed (%s) with %s: with frame generation the game's frames are presented from OptiScaler's "
+                     "own queue and swapchain, where Kiln cannot draw, so Kiln's overlay drawing steps aside (keys and the Mods menu still work). "
+                     "For Kiln's overlay, set FGInput and FGOutput under [FrameGen] in OptiScaler.ini to auto (frame generation off, its upscaling "
+                     "stays), or KILN_UI_OVERLAY=1 to try at your own risk",
                      file.c_str(), optiscaler_settings(optiscaler).c_str());
         } else if (optiscaler.ini_only) {
             logf(KILN_LOG_INFO, "ui: OptiScaler.ini is in the game folder, but no OptiScaler DLL next to it; Kiln's overlay is not changed by it");
@@ -269,7 +371,8 @@ void overlay_guard_stage(overlay_guard::Stage stage) noexcept {
         if (stage == overlay_guard::Stage::frame) {
             record = overlay_guard::finish(record);
             active = false;
-            logf(KILN_LOG_INFO, "ui: overlay crash guard complete: first frame presented with overlay drawn");
+            logf(KILN_LOG_INFO, "ui: overlay crash guard complete: %llu frames presented with the overlay drawn",
+                 static_cast<unsigned long long>(kDrawnFrames));
         } else if (stage == overlay_guard::Stage::swapchain && !idle_timer) {
             presents_at_swapchain = vk_presents();
             if (!CreateTimerQueueTimer(&idle_timer, nullptr, &idle_proof, nullptr, kIdleProofMs, 0, WT_EXECUTEONLYONCE)) {
@@ -289,6 +392,50 @@ void overlay_guard_first_draw() noexcept {
         record = overlay_guard::rearm(record);
         save();
         logf(KILN_LOG_INFO, "ui: overlay crash guard: the overlay's first draw; watched until its frame is presented");
+    } catch (...) { error(); }
+}
+void overlay_guard_drawn() noexcept {
+    const uint64_t n = drawn_presents.fetch_add(1, std::memory_order_relaxed) + 1;
+    if (n != 1 && n != kDrawnFrames) return;  // every other frame: one atomic add
+    if (n == kDrawnFrames) {
+        overlay_guard_stage(overlay_guard::Stage::frame);
+        return;
+    }
+    try {
+        std::lock_guard<std::mutex> lock(mu);
+        if (!active || record.phase != overlay_guard::Phase::trying || drawn_timer) return;
+        presents_at_drawn = vk_presents();
+        if (!CreateTimerQueueTimer(&drawn_timer, nullptr, &drawn_proof, nullptr, kDrawnProofMs, kDrawnProofMs, WT_EXECUTEDEFAULT)) {
+            drawn_timer = nullptr;
+            logf(KILN_LOG_WARN, "ui: overlay crash guard: no timer; the start counts as fine after %llu drawn frames",
+                 static_cast<unsigned long long>(kDrawnFrames));
+            return;
+        }
+        logf(KILN_LOG_INFO, "ui: overlay crash guard: the overlay's first frame was presented; watched for its first %llu frames or %u s",
+             static_cast<unsigned long long>(kDrawnFrames), unsigned(kDrawnProofMs / 1000));
+    } catch (...) { error(); }
+}
+void overlay_guard_failed() noexcept {
+    try {
+        std::lock_guard<std::mutex> lock(mu);
+        if (failed_timer || path.empty()) return;
+        if (record.phase == overlay_guard::Phase::complete) {
+            // the start had already counted as fine (drawn frames, the idle proof): a death now is one at the overlay
+            // again, for the window below
+            record = overlay_guard::rearm(record);
+            active = true;
+            save();
+        } else if (!active || record.phase != overlay_guard::Phase::trying) {
+            return;  // a guarded or locked record, or no guard for this start
+        }
+        presents_at_failed = vk_presents();
+        if (!CreateTimerQueueTimer(&failed_timer, nullptr, &failed_proof, nullptr, kFailedProofMs, kFailedProofMs, WT_EXECUTEDEFAULT)) {
+            failed_timer = nullptr;
+            logf(KILN_LOG_WARN, "ui: overlay crash guard: no timer; until a normal exit, a closed game counts as an interrupted overlay start");
+            return;
+        }
+        logf(KILN_LOG_INFO, "ui: overlay crash guard: if the game closes in the next %u s, the next start leaves the overlay's drawing off",
+             unsigned(kFailedProofMs / 1000));
     } catch (...) { error(); }
 }
 void overlay_guard_tools(bool* optiscaler, bool* streamline) noexcept {

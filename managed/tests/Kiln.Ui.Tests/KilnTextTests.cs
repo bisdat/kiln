@@ -166,6 +166,29 @@ public sealed class KilnTextTests : IDisposable
     }
 
     [Fact]
+    public void Native_texts_kiln_ui_draws_in_the_overlay_wait_for_the_glyphs_too()
+    {
+        File("zh-CN.json", """
+            { "native": { "menu": { "mods": "模组" }, "footer": { "loaded": { "other": "Kiln {version} - 已加载 {count} 个模组" } },
+                          "graphics": { "cap": "帧率上限 {fps} fps" }, "fallback": { "close": "按 {key} 关闭。" } } }
+            """);
+        KilnText.Glyphs(false);                      // kiln.ui is still reading the game's Chinese font, or could not
+        KilnText.Configure("zh-CN");
+        var gated = KilnText.Native().ToDictionary(p => p.Key, p => p.Value);
+        Assert.Equal("模组", gated["native.menu.mods"]);                                        // the game draws these
+        Assert.Equal("Kiln {version} - 已加载 {count} 个模组", gated["native.footer.loaded.one"]);
+        Assert.Equal(KilnText.English()["native.graphics.cap"], gated["native.graphics.cap"]);    // the overlay: English
+        Assert.Equal(KilnText.English()["native.fallback.close"], gated["native.fallback.close"]);
+        Assert.Equal(KilnText.English().Keys.Where(k => k.StartsWith(KilnText.NativePrefix, StringComparison.Ordinal)).Order(StringComparer.Ordinal),
+                     gated.Keys.Order(StringComparer.Ordinal));
+        KilnText.Glyphs(true);                       // the font joined the atlas
+        var ready = KilnText.Native().ToDictionary(p => p.Key, p => p.Value);
+        Assert.Equal("帧率上限 {fps} fps", ready["native.graphics.cap"]);
+        Assert.Equal("按 {key} 关闭。", ready["native.fallback.close"]);
+        Assert.Equal("模组", ready["native.menu.mods"]);
+    }
+
+    [Fact]
     public void Tags_are_written_the_canonical_way()
     {
         Assert.Equal("zh-CN", KilnText.Canonical("zh_cn"));

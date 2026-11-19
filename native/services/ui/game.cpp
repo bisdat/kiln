@@ -364,14 +364,14 @@ bool __fastcall hk_main_entry(void* state, const MainDesc* d) {
             // Full page contents require ImGui. Keep the same native row/slot and
             // toggle its status caption, never an empty Credits page or extra row.
             // With the drawing on, the row's own text and its hash as they were made (nothing changes for a normal start).
-            if (!overlay_drawing_on() && g_menu_open.load() && e.handle == g_builtin[0])
+            if (!overlay_draws() && g_menu_open.load() && e.handle == g_builtin[0])
                 c.text = status_text();
             else
                 c.text = GameText{e.text->c_str(), e.text->size(), e.fnv};
             g_draws.fetch_add(1, std::memory_order_relaxed);
             if (!g_main_hook.call<bool>(state, &c)) continue;
             // Kiln's own MODS entry: the game's own page switch, here as the game does for its entries (menu_page.cpp)
-            if (e.handle == g_builtin[0] && overlay_drawing_on() && page_open_from_entry(state)) {
+            if (e.handle == g_builtin[0] && overlay_draws() && page_open_from_entry(state)) {
                 g_clicks.fetch_add(1, std::memory_order_relaxed);
                 continue;
             }
@@ -388,7 +388,7 @@ bool __fastcall hk_sys_entry(const GameText* t, uint8_t p2, uint8_t attention) {
         uint32_t rows = 0;
         for (const Entry& e : entries_of(KILN_UI_MENU_PAUSE)) {
             ++rows;
-            const bool status_row = !overlay_drawing_on() && g_menu_open.load() && e.handle == g_builtin[1];
+            const bool status_row = !overlay_draws() && g_menu_open.load() && e.handle == g_builtin[1];
             const GameText c = status_row
                 ? status_text()
                 : GameText{e.text->c_str(), e.text->size(), e.fnv};
@@ -528,7 +528,7 @@ void KILN_CALL on_craftmenu(const KilnCraftMenuInfo* info, void*) {
 // Kiln's own "Mods" entry in both menus: opens the Kiln menu (works without the managed host). In the main menu with
 // feature ui.menu_page and a host, the entry hook opens the game page instead and this is not called.
 void KILN_CALL on_builtin(KilnHandle, void*) {
-    g_menu_open = overlay_drawing_on() ? true : !g_menu_open.load();
+    g_menu_open = overlay_draws() ? true : !g_menu_open.load();
     logf(KILN_LOG_DEBUG, "ui: Kiln menu opened from the game's menu");
 }
 KilnResult game_menu_add_impl(KilnOwner owner, uint32_t menu, int32_t order, KilnStr text, KilnUiMenuFn fn, void* user, KilnHandle* out);
@@ -539,9 +539,12 @@ void add_builtin_entries() {
     if (L.system_menu) game_menu_add_impl(g_owner, KILN_UI_MENU_PAUSE, 1000, t, &on_builtin, nullptr, &g_builtin[1]);
 }
 
+// The Mods entry's caption while the overlay does not draw: off from the start (g_overlay_reason), or turned off during
+// this session (overlay_off_reason: ui.cpp overlay_turned_off).
 void set_mods_status() {
-    if (overlay_drawing_on()) return;
-    const std::string s = text::fill(text::get("native.menu.mods_off"), {{"reason", g_overlay_reason}});
+    if (overlay_draws()) return;
+    const std::string& reason = overlay_failed() ? overlay_off_reason() : g_overlay_reason;
+    const std::string s = text::fill(text::get("native.menu.mods_off"), {{"reason", reason}});
     g_native_mods_status.store(intern(KilnStr{s.data(), s.size()}), std::memory_order_release);
 }
 
@@ -811,6 +814,8 @@ void game_texts_changed() {
     }
     set_mods_status();
 }
+
+void game_overlay_turned_off() { set_mods_status(); }
 
 void game_status_line(char* out, size_t cap) {
     char page[192];

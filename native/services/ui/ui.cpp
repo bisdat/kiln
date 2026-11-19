@@ -162,6 +162,59 @@ void set_error(const char* fmt, ...) {
     logf(KILN_LOG_ERROR, "ui: %s", buf);
 }
 
+// The overlay's drawing turned off during this session (ui.h). The reason is written once, before the flag.
+std::atomic<bool> g_overlay_failed{false};
+namespace {
+std::string g_off_reason;
+std::atomic<bool> g_off_said{false};
+// The drawing capability rows say why the overlay does not draw (kiln.caps; capabilities.json, the support report):
+// at the start for a drawing-off start, on a pool thread when it turned off later (a report may run subscribers on the
+// calling thread, which is a present call then).
+void report_drawing_off(const std::string& reason) {
+    const auto* caps = static_cast<const KilnCapsApi*>(g_api->service(KilnStr{KILN_CAPS_SERVICE, sizeof(KILN_CAPS_SERVICE) - 1}, 1));
+    if (!caps || !caps->report) return;
+    for (const char* name : {"ui.windows", "ui.draw", "ui.menu_page", "render.draw", "kiln.screen"})
+        caps->report(g_owner, KilnStr{name, std::strlen(name)}, KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_POLICY,
+                     KilnStr{reason.data(), reason.size()});
+}
+DWORD WINAPI report_drawing_off_later(void* p) {
+    std::unique_ptr<std::string> reason(static_cast<std::string*>(p));
+    try { report_drawing_off(*reason); } catch (...) {}
+    return 0;
+}
+}  // namespace
+
+const std::string& overlay_off_reason() {
+    static const std::string none;
+    return overlay_failed() ? g_off_reason : none;
+}
+
+void overlay_turned_off(int level, const char* reason, const char* detail) {
+    if (g_off_said.exchange(true)) return;
+    try {
+        g_off_reason = std::string("the overlay's drawing is off: ") + (reason && *reason ? reason : "a Vulkan error");
+        g_overlay_failed.store(true, std::memory_order_release);
+        release_input_after_turn_off();
+        logf(level, "ui: Kiln's overlay drawing is off for the rest of this game session: %s%s%s. The game's frames go on "
+             "as the game made them (Kiln hands each present on untouched); key bindings and the Mods menu still work, Kiln's "
+             "windows and HUDs do not show. The next start tries the overlay again", reason && *reason ? reason : "a Vulkan error",
+             detail && *detail ? "; " : "", detail ? detail : "");
+        {
+            std::lock_guard<std::mutex> lk(g_err_mu);
+            std::snprintf(g_error, sizeof g_error, "%s", g_off_reason.c_str());
+        }
+        game_overlay_turned_off();
+        // the overlay's own work failed (an error, not a present it would not draw on): a death soon after is one at the
+        // overlay, for the crash guard
+        if (level == KILN_LOG_ERROR) overlay_guard_failed();
+        auto* copy = new std::string(g_off_reason);
+        if (!QueueUserWorkItem(&report_drawing_off_later, copy, WT_EXECUTEDEFAULT)) delete copy;
+    } catch (...) {
+        g_overlay_failed.store(true, std::memory_order_release);
+        release_input_after_turn_off();
+    }
+}
+
 bool imgui_ready() { return g_imgui; }
 bool in_frame() { return t_in_frame; }
 
@@ -280,7 +333,7 @@ bool dispatch_key(const KilnUiKey& key, bool mouse) {
     // punctuation key is the key at its place on any layout (key_names.h), as for Kiln.Ui's bindings
     if (key.down && !key.repeat && !key.text_input && keys::matches(g_menu_vk.load(), key.vk, key.scan) &&
         key.mods == g_menu_mods.load()) {
-        if (overlay_drawing_on() && page_menu_key()) return true;
+        if (overlay_draws() && page_menu_key()) return true;
         g_menu_open = !g_menu_open.load();
         logf(KILN_LOG_DEBUG, "ui: Kiln menu %s", g_menu_open ? "open" : "closed");
         return true;
@@ -771,13 +824,6 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     if (game) api->register_service(owner, KilnStr{KILN_UI_TICK_SERVICE, sizeof(KILN_UI_TICK_SERVICE) - 1}, &kTickTable);
     api->register_service(owner, KilnStr{KILN_RENDER_SERVICE, sizeof(KILN_RENDER_SERVICE) - 1}, render_table());
     const auto result = api->register_service(owner, KilnStr{KILN_UI_SERVICE, sizeof(KILN_UI_SERVICE) - 1}, &kTable);
-    if (!overlay_drawing_on()) {
-        const auto* caps = static_cast<const KilnCapsApi*>(api->service(KilnStr{KILN_CAPS_SERVICE, sizeof(KILN_CAPS_SERVICE)-1}, 1));
-        if (caps && caps->report) {
-            for (const char* name : {"ui.windows", "ui.draw", "ui.menu_page", "render.draw", "kiln.screen"})
-                caps->report(owner, KilnStr{name, std::strlen(name)}, KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_POLICY,
-                             KilnStr{g_overlay_reason.data(), g_overlay_reason.size()});
-        }
-    }
+    if (!overlay_drawing_on()) report_drawing_off(g_overlay_reason);
     return result;
 }

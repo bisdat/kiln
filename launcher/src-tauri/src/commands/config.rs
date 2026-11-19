@@ -295,4 +295,32 @@ mod kiln_graphics_tests {
         assert!(doc.values["graphics"].get("fpsCap").is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    /// (dev.29.18) kiln.json "ui": {"overlay": "off"} (Settings, the kiln.json card): Kiln's overlay drawing off, as
+    /// KILN_UI_OVERLAY=0 (native/services/ui/overlay_setting.h reads it); "auto" by default, nothing else is taken.
+    #[test]
+    fn the_overlay_switch_is_set_and_checked() {
+        let schema = kiln_snapshot();
+        let e = schema.entries.iter().find(|e| e.path == "ui.overlay").expect("ui.overlay in the snapshot");
+        assert_eq!(e.default, json!("auto"));
+        assert_eq!(serde_json::to_value(&e.options).unwrap(), json!(["auto", "off"]));
+        assert!(e.requires_restart, "kiln.ui reads it at the game's start");
+        let dir = std::env::temp_dir().join(format!("kiln-launcher-overlay-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("kiln.json");
+        std::fs::write(&path, "{\n  // keep me\n  \"ui\": {\"look\": \"game\"}\n}\n").unwrap();
+        let doc = kiln_set(&path, "ui.overlay", Some(&json!("off"))).unwrap();
+        assert_eq!(doc.values["ui"]["overlay"], "off");
+        assert_eq!(doc.values["ui"]["look"], "game");
+        assert!(doc.errors.is_empty() && doc.text.contains("// keep me"), "{:?}", doc.errors);
+        // (an enum also takes its option's index and any case, as Kiln.Api's ConfigSchema does: written as "off" then)
+        for bad in [json!("on"), json!(false), json!(2)] {
+            assert!(kiln_set(&path, "ui.overlay", Some(&bad)).is_err(), "{bad}");
+        }
+        assert_eq!(kiln_set(&path, "ui.overlay", Some(&json!("OFF"))).unwrap().values["ui"]["overlay"], "off");
+        let doc = kiln_set(&path, "ui.overlay", None).unwrap();
+        assert!(doc.values["ui"].get("overlay").is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

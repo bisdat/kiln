@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { useNavigate } from "react-router-dom";
 import { callAdmin, useAdminCall, useAdminQuery, useAdminState, useHasOp, type AdminPlayer, type AdminPos } from "../../api/admin";
 import { useAssetsStatus } from "../../components/GameArt";
-import { rich, t as tr, useT } from "../../i18n";
+import { formatLocale, rich, t as tr, useT } from "../../i18n";
 import { assetsRoot, prettyTemplate } from "../catalog";
 import { playerName, useServerId } from "../common";
 import { deleteWaypoint, saveWaypoint, useHistory } from "../history";
@@ -71,7 +71,7 @@ function fmatch(q: string, ...texts: (string | undefined | null)[]) {
   }
   return false;
 }
-const fmtN = (n: number) => Number(n).toLocaleString("en-US");
+const fmtN = (n: number) => Number(n).toLocaleString(formatLocale() ?? "en-US");
 const dist = (d: number) => (d >= 1000 ? tr("admin.map.km", { n: (d / 1000).toFixed(2) }) : tr("admin.map.metres", { n: Math.round(d) }));
 /** The compass direction from a to b (N, NE, ... NW). */
 function bearing(a: { x: number; z: number }, b: { x: number; z: number }): string {

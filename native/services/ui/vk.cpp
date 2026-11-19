@@ -14,6 +14,9 @@
 //  - in vkQueuePresentKHR: build the ImGui frame, record it into the presented image, submit on the present queue
 //    waiting on the game's semaphores, present waiting on Kiln's semaphore instead.
 // Before the overlay: subscribers of the pre-overlay callback (kiln_ui.h) chain their own submit in the same way.
+// Only on a queue the game got whose family has graphics (vk_present.h: frame generation presents from queues of its
+// own); the first failure (a submit, a fault, ImGui's backend) turns the drawing off for the session and every
+// present after it goes on as the game made it (ui.cpp overlay_turned_off: one log line, status, Mods caption, guard).
 #ifndef VK_NO_PROTOTYPES
 #define VK_NO_PROTOTYPES
 #endif
@@ -22,6 +25,8 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdarg>
+#include <cstdio>
 #include <cstring>
 #include <map>
 #include <mutex>
@@ -37,19 +42,84 @@
 #include "ui.h"
 #include "upscale.h"
 #include "vk_hooks.h"
+#include "vk_present.h"
 
 namespace kui {
 namespace {
 
+const char* vk_name(VkResult r) {
+    switch (r) {
+        case VK_ERROR_OUT_OF_HOST_MEMORY: return "VK_ERROR_OUT_OF_HOST_MEMORY";
+        case VK_ERROR_OUT_OF_DEVICE_MEMORY: return "VK_ERROR_OUT_OF_DEVICE_MEMORY";
+        case VK_ERROR_INITIALIZATION_FAILED: return "VK_ERROR_INITIALIZATION_FAILED";
+        case VK_ERROR_DEVICE_LOST: return "VK_ERROR_DEVICE_LOST";
+        case VK_ERROR_UNKNOWN: return "VK_ERROR_UNKNOWN";
+        case VK_ERROR_OUT_OF_DATE_KHR: return "VK_ERROR_OUT_OF_DATE_KHR";
+        case VK_ERROR_SURFACE_LOST_KHR: return "VK_ERROR_SURFACE_LOST_KHR";
+        default: return "another Vulkan error";
+    }
+}
+
+// The overlay's drawing is off for the rest of the session (presents keep passing through untouched): fail() sets it
+// with its reason, written once under g_fail_mu; hk_present tells it once, outside g_mu (announce_failure).
+std::atomic<bool> g_failed{false};
+std::atomic<bool> g_fail_said{false};
+std::mutex g_fail_mu;
+bool g_fail_taken = false;
+int g_fail_level = KILN_LOG_ERROR;
+char g_fail_reason[128] = "";
+char g_fail_detail[512] = "";
+
+// Turns the overlay's drawing off; the first reason is the one told. `reason` is short (the Mods caption, the status),
+// the detail is for kiln.log. Returns false, for draw()'s `return fail(...)`.
+bool fail(int level, const char* reason, const char* detail_fmt, ...) {
+    // formatted before the lock: draw() runs under a fault guard, and a fault with the lock held would keep it held
+    char detail[sizeof g_fail_detail];
+    va_list ap;
+    va_start(ap, detail_fmt);
+    std::vsnprintf(detail, sizeof detail, detail_fmt, ap);
+    va_end(ap);
+    {
+        std::lock_guard<std::mutex> lk(g_fail_mu);
+        if (!g_fail_taken) {
+            g_fail_taken = true;
+            g_fail_level = level;
+            std::snprintf(g_fail_reason, sizeof g_fail_reason, "%s", reason);
+            std::memcpy(g_fail_detail, detail, sizeof detail);
+        }
+    }
+    g_failed.store(true, std::memory_order_release);
+    return false;
+}
+
+// Once, on a present call after fail(), outside g_mu.
+void announce_failure() {
+    if (!g_failed.load(std::memory_order_acquire) || g_fail_said.exchange(true)) return;
+    int level = KILN_LOG_ERROR;
+    char reason[sizeof g_fail_reason], detail[sizeof g_fail_detail];
+    {
+        std::lock_guard<std::mutex> lk(g_fail_mu);
+        level = g_fail_level;
+        std::memcpy(reason, g_fail_reason, sizeof reason);
+        std::memcpy(detail, g_fail_detail, sizeof detail);
+    }
+    overlay_turned_off(level, reason, detail);
+}
+
 // ImGui's Vulkan backend reports every call's result here (it ignored them before 0.2.0-dev.29.15): a failed
 // vkAllocateDescriptorSets leaves a texture with no descriptor set, which style.cpp then never draws (image_budget.h). Each
-// error code is logged once a process; VK_SUCCESS and the positive codes are not errors.
+// error code is logged once a process; VK_SUCCESS and the positive codes are not errors. A lost device, or a call Vulkan
+// calls not valid (VK_ERROR_UNKNOWN: ImGui's texture upload on a queue of another family, inbox 80), turns the overlay's
+// drawing off before Kiln submits a frame of its own.
 std::atomic<uint32_t> g_vk_logged{0};
 void check_vk(VkResult err) {
     if (err >= 0) return;
     const uint32_t bit = 1u << (static_cast<uint32_t>(-static_cast<int32_t>(err)) & 31u);
-    if (g_vk_logged.fetch_or(bit) & bit) return;
-    logf(KILN_LOG_WARN, "ui: a Vulkan call of the overlay's ImGui backend failed (VkResult %d); what it made is not drawn", static_cast<int>(err));
+    if (!(g_vk_logged.fetch_or(bit) & bit))
+        logf(KILN_LOG_WARN, "ui: a Vulkan call of the overlay's ImGui backend failed (VkResult %d); what it made is not drawn", static_cast<int>(err));
+    if (err == VK_ERROR_DEVICE_LOST || err == VK_ERROR_UNKNOWN)
+        fail(KILN_LOG_ERROR, "a Vulkan call of its ImGui backend failed",
+             "a Vulkan call of the overlay's ImGui backend (its texture uploads and buffers) returned %d (%s)", static_cast<int>(err), vk_name(err));
 }
 
 std::atomic<bool> g_wine{false};
@@ -105,8 +175,13 @@ struct Device {
     VkDevice device = VK_NULL_HANDLE;
     PFN_vkGetDeviceProcAddr gdpa = nullptr;  // real
     DeviceFns fn;
-    std::map<VkQueue, uint32_t> queue_family;
-    uint32_t graphics_family = 0;
+    std::map<VkQueue, uint32_t> queue_family;  // the queues seen handed out on it, with their families (vk_present.h)
+    std::vector<uint32_t> families;            // each queue family's VkQueueFlags (empty: not read)
+    std::vector<VkQueue> tool_queues;          // handed out while it was being made: a tool's own, never drawn on
+    // the queues the game asked for in its create info (hk_create_device), looked up once a present's queue is not
+    // known (present_queue)
+    std::vector<vk_present::Requested> requested;
+    bool looked_up = false;
     // Kiln did not see this device being created and took it over at its swapchain (adopt_device): only the queues
     // it saw handed out are drawn with, never a guessed family.
     bool adopted = false;
@@ -156,7 +231,6 @@ std::atomic<uint32_t> g_swap_count{0};  // live swapchains (status only)
 std::atomic<uint32_t> g_width{0}, g_height{0}, g_format{0}, g_colorspace{0};
 std::atomic<float> g_dpi{1.0f};
 std::atomic<double> g_frame_ms{0};
-bool g_failed = false;  // overlay disabled after a Vulkan error (presents keep passing through)
 bool g_logged_draw = false;
 
 struct PreOverlaySub {
@@ -205,10 +279,13 @@ PFN_vkVoidFunction imgui_loader(const char* name, void*) {
 
 void destroy_swap_resources(Device& d, Swap& s) {
     if (!s.ready) return;
-    if (!s.fences.empty()) d.fn.vkWaitForFences(d.device, static_cast<uint32_t>(s.fences.size()), s.fences.data(), VK_TRUE, 1000000000ull);
+    std::vector<VkFence> fences;  // a fence that could not be made again after a failed submit is null (draw)
+    for (auto f : s.fences)
+        if (f) fences.push_back(f);
+    if (!fences.empty()) d.fn.vkWaitForFences(d.device, static_cast<uint32_t>(fences.size()), fences.data(), VK_TRUE, 1000000000ull);
     for (auto f : s.framebuffers) d.fn.vkDestroyFramebuffer(d.device, f, nullptr);
     for (auto v : s.views) d.fn.vkDestroyImageView(d.device, v, nullptr);
-    for (auto f : s.fences) d.fn.vkDestroyFence(d.device, f, nullptr);
+    for (auto f : fences) d.fn.vkDestroyFence(d.device, f, nullptr);
     for (auto x : s.done) d.fn.vkDestroySemaphore(d.device, x, nullptr);
     if (!s.commands.empty() && d.pool) d.fn.vkFreeCommandBuffers(d.device, d.pool, static_cast<uint32_t>(s.commands.size()), s.commands.data());
     // the render pass may be ImGui's pipeline pass: keep it while the ImGui backend uses it
@@ -374,8 +451,49 @@ bool ensure_imgui_vulkan(Device& d, Swap& s, VkQueue queue, uint32_t family) {
     return true;
 }
 
+// Kiln's own lookup of the game's queues (present_queue, g_mu held) on this thread: hk_get_queue does not remember them
+// again (it would take g_mu), should the real vkGetDeviceQueue lead back into Kiln's hook through another tool's patch.
+thread_local bool t_looking_up = false;
+
+bool guarded_get_queue(PFN_vkGetDeviceQueue fn, VkDevice dev, uint32_t family, uint32_t index, VkQueue* out) {
+    __try {
+        fn(dev, family, index, out);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        *out = VK_NULL_HANDLE;
+        return false;
+    }
+}
+
+// What the overlay may do with a present's queue (draw, run_pre_overlay; g_mu held): vk_present::classify. A queue Kiln
+// did not see the game get, or saw only while the device was being made, is looked up once per device among the queues
+// the game asked for when it made it (vk_present.h look_up_requested): the game's own are drawn on as before
+// 0.2.0-dev.29.18, with their own family; a tool's are not.
+vk_present::QueueUse present_queue(Device& d, VkQueue queue, uint32_t* family) {
+    using vk_present::QueueUse;
+    QueueUse use = vk_present::classify(d.queue_family, d.families, d.tool_queues, queue, family);
+    if ((use != QueueUse::unknown && use != QueueUse::tool) || d.adopted || d.looked_up || d.requested.empty()) return use;
+    d.looked_up = true;
+    const auto get = R.get_queue.load();
+    if (!get) return use;
+    const QueueUse before = use;
+    t_looking_up = true;
+    vk_present::look_up_requested(d.requested, [&](uint32_t f, uint32_t i, VkQueue* q) { return guarded_get_queue(get, d.device, f, i, q); },
+                                  d.queue_family, d.tool_queues);
+    t_looking_up = false;
+    use = vk_present::classify(d.queue_family, d.families, d.tool_queues, queue, family);
+    const bool own = use != QueueUse::unknown && use != QueueUse::tool;
+    logf(own ? KILN_LOG_INFO : KILN_LOG_WARN, "ui: the game presents with a queue Kiln %s; among the queues it asked for when it made device %p "
+         "(%zu queue families) it is %s", before == QueueUse::unknown ? "did not see it get" : "saw handed out only while the device was being made",
+         reinterpret_cast<void*>(d.device), d.requested.size(), own ? "there: the game's own" : "not there: a tool's own");
+    return use;
+}
+
 // The overlay's work inside one present. False = present as the game asked.
 bool draw(VkQueue queue, const VkPresentInfoKHR* info, VkSemaphore* out_wait, uint64_t t0) {
+    // the drawing went off on another present thread (frame generation's) while this one waited for g_mu: no frame
+    // callbacks, no ImGui frame (it would set the input flags overlay_turned_off clears), no submit
+    if (g_failed.load(std::memory_order_acquire)) return false;
     Swap* s = nullptr;
     uint32_t index = 0;
     for (uint32_t i = 0; i < info->swapchainCount; ++i) {
@@ -390,14 +508,28 @@ bool draw(VkQueue queue, const VkPresentInfoKHR* info, VkSemaphore* out_wait, ui
     auto dit = g_devices.find(s->device);
     if (dit == g_devices.end() || !device_fns_ok(*dit->second)) return false;
     Device& d = *dit->second;
-    if (d.adopted && d.queue_family.find(queue) == d.queue_family.end()) {
-        static bool said = false;
-        if (!said) {
-            said = true;
-            logf(KILN_LOG_WARN, "ui: the game presents with a queue Kiln did not see handed out on the device it took over: "
-                 "its family is not known, so the overlay does not draw (Kiln's menus stay empty)");
-        }
-        return false;
+    // Kiln's frame goes to the queue the frame is presented from: only one the game got, of a family with graphics,
+    // never a tool's own or a guessed family (vk_present.h)
+    uint32_t family = 0;
+    switch (present_queue(d, queue, &family)) {
+        case vk_present::QueueUse::unknown:
+            return fail(KILN_LOG_WARN, "the game presents from a queue Kiln does not know",
+                        d.adopted ? "the game presents with a queue Kiln did not see handed out on the device it took over, so its family is not known"
+                                  : "the game presents with a queue Kiln did not see handed out and that is not one the game asked for when it "
+                                    "made its device (a tool between the game and Vulkan added it), so its family is not known and a frame "
+                                    "drawn for another family would fail on it");
+        case vk_present::QueueUse::tool:
+            return fail(KILN_LOG_WARN, "frame generation presents the game's frames from its own queue",
+                        "the game's frames are presented from a queue a tool under Kiln added to the game's device while it was being "
+                        "made (queue family %u%s): frame generation (OptiScaler's, or another tool's) presents the game's frames and its "
+                        "own from its own thread and queue, where Kiln's overlay does not draw", family,
+                        family < d.families.size() && !(d.families[family] & VK_QUEUE_GRAPHICS_BIT) ? ", which cannot draw" : "");
+        case vk_present::QueueUse::no_graphics:
+            return fail(KILN_LOG_WARN, "the game presents from a queue that cannot draw",
+                        "the game's frames are presented from queue family %u, which has no graphics, so Kiln's overlay cannot draw there",
+                        family);
+        case vk_present::QueueUse::drawable:
+            break;
     }
     if (g_dev && g_dev != &d && g_dev->imgui_vk) {
         // the game draws with another device now: move ImGui's backend over
@@ -410,24 +542,15 @@ bool draw(VkQueue queue, const VkPresentInfoKHR* info, VkSemaphore* out_wait, ui
     const bool steps = !logged_steps;
     logged_steps = true;
     if (steps) logf(KILN_LOG_INFO, "ui: first draw: device %p, swapchain %p image %u", reinterpret_cast<void*>(d.device), reinterpret_cast<void*>(s->swapchain), index);
-    uint32_t family = d.graphics_family;
-    if (auto q = d.queue_family.find(queue); q != d.queue_family.end()) family = q->second;
     if (steps) logf(KILN_LOG_INFO, "ui: first draw: queue family %u", family);
-    if (!ensure_pool(d, family) || !ensure_swap_resources(d, *s) || index >= s->images.size()) {
-        set_error("overlay resources could not be created");
-        g_failed = true;
-        return false;
-    }
+    if (!ensure_pool(d, family) || !ensure_swap_resources(d, *s) || index >= s->images.size())
+        return fail(KILN_LOG_ERROR, "its Vulkan resources could not be made",
+                    "the overlay's command pool, image views, framebuffers, fences or semaphores for the %ux%u swapchain could not be made",
+                    s->extent.width, s->extent.height);
     const float dpi = g_dpi.load();
     if (steps) logf(KILN_LOG_INFO, "ui: first draw: resources ready, creating ImGui");
-    if (!imgui_ready() && !imgui_create(s->hwnd, dpi)) {
-        g_failed = true;
-        return false;
-    }
-    if (!ensure_imgui_vulkan(d, *s, queue, family)) {
-        g_failed = true;
-        return false;
-    }
+    if (!imgui_ready() && !imgui_create(s->hwnd, dpi)) return fail(KILN_LOG_ERROR, "ImGui could not start", "ImGui's Win32 backend could not start");
+    if (!ensure_imgui_vulkan(d, *s, queue, family)) return fail(KILN_LOG_ERROR, "ImGui could not start", "ImGui's Vulkan backend could not start");
     input_attach(s->hwnd);
     if (steps) logf(KILN_LOG_INFO, "ui: first draw: ImGui backends ready, building the frame");
     // ImGui frame (callbacks run here)
@@ -443,19 +566,20 @@ bool draw(VkQueue queue, const VkPresentInfoKHR* info, VkSemaphore* out_wait, ui
                 if (tex->Status != ImTextureStatus_OK) ImGui_ImplVulkan_UpdateTexture(tex);
         return false;
     }
+    if (g_failed.load(std::memory_order_acquire)) return false;  // ImGui's backend failed building it (check_vk)
     if (steps) logf(KILN_LOG_INFO, "ui: first draw: frame built (%d lists), recording", dd->CmdListsCount);
 
     VkFence fence = s->fences[index];
-    if (d.fn.vkWaitForFences(d.device, 1, &fence, VK_TRUE, 1000000000ull) != VK_SUCCESS) {
+    if (!fence || d.fn.vkWaitForFences(d.device, 1, &fence, VK_TRUE, 1000000000ull) != VK_SUCCESS) {
         set_error("overlay fence timeout");
         return false;
     }
-    d.fn.vkResetFences(d.device, 1, &fence);
     VkCommandBuffer cb = s->commands[index];
     d.fn.vkResetCommandBuffer(cb, 0);
     VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    d.fn.vkBeginCommandBuffer(cb, &bi);
+    if (const VkResult r = d.fn.vkBeginCommandBuffer(cb, &bi); r != VK_SUCCESS)
+        return fail(KILN_LOG_ERROR, "its Vulkan commands could not be recorded", "vkBeginCommandBuffer returned %d (%s)", static_cast<int>(r), vk_name(r));
     VkRenderPassBeginInfo rp{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
     rp.renderPass = s->pass;
     rp.framebuffer = s->framebuffers[index];
@@ -463,7 +587,10 @@ bool draw(VkQueue queue, const VkPresentInfoKHR* info, VkSemaphore* out_wait, ui
     d.fn.vkCmdBeginRenderPass(cb, &rp, VK_SUBPASS_CONTENTS_INLINE);
     ImGui_ImplVulkan_RenderDrawData(dd, cb);
     d.fn.vkCmdEndRenderPass(cb);
-    d.fn.vkEndCommandBuffer(cb);
+    if (const VkResult r = d.fn.vkEndCommandBuffer(cb); r != VK_SUCCESS)
+        return fail(KILN_LOG_ERROR, "its Vulkan commands could not be recorded", "vkEndCommandBuffer returned %d (%s)", static_cast<int>(r), vk_name(r));
+    // ImGui's backend failed while recording (a texture upload: check_vk): nothing is submitted, the fence stays signalled
+    if (g_failed.load(std::memory_order_acquire)) return false;
 
     std::vector<VkPipelineStageFlags> stages(info->waitSemaphoreCount, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
     VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
@@ -474,16 +601,20 @@ bool draw(VkQueue queue, const VkPresentInfoKHR* info, VkSemaphore* out_wait, ui
     si.pCommandBuffers = &cb;
     si.signalSemaphoreCount = 1;
     si.pSignalSemaphores = &s->done[index];
+    d.fn.vkResetFences(d.device, 1, &fence);
     const VkResult r = d.fn.vkQueueSubmit(queue, 1, &si, fence);
     if (r != VK_SUCCESS) {
-        set_error("overlay submit failed (%d)", static_cast<int>(r));
-        g_failed = true;
-        // the fence stays unsignaled; recreate it signaled so a later attempt does not wait forever
+        // The present goes on with the game's own semaphores (vk_present.h): a failed submit left them as they were, and
+        // Kiln's semaphore was not signalled, so nothing waits on it. The fence was reset but never submitted: made again
+        // signalled, so that freeing the swapchain's resources does not wait a second on it (null when that fails too:
+        // destroy_swap_resources skips it).
         d.fn.vkDestroyFence(d.device, fence, nullptr);
         VkFenceCreateInfo fc{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
         fc.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-        d.fn.vkCreateFence(d.device, &fc, nullptr, &s->fences[index]);
-        return false;
+        VkFence fresh = VK_NULL_HANDLE;
+        s->fences[index] = d.fn.vkCreateFence(d.device, &fc, nullptr, &fresh) == VK_SUCCESS ? fresh : VK_NULL_HANDLE;
+        return fail(KILN_LOG_ERROR, "its Vulkan submit failed",
+                    "vkQueueSubmit of the overlay's frame returned %d (%s) on queue family %u", static_cast<int>(r), vk_name(r), family);
     }
     *out_wait = s->done[index];
     g_frames.fetch_add(1, std::memory_order_relaxed);
@@ -549,7 +680,7 @@ bool guarded_pre_overlay_fn(KilnUiPreOverlayFn fn, const KilnUiPreOverlay* p, vo
 // True: *wait replaces the game's semaphores in this present.
 bool run_pre_overlay(VkQueue queue, const VkPresentInfoKHR* info, VkSemaphore* wait) {
     std::lock_guard<std::mutex> lk(g_mu);
-    if (g_pre_overlay.empty()) return false;
+    if (g_pre_overlay.empty() || g_failed.load(std::memory_order_acquire)) return false;  // off since (another thread)
     Swap* s = nullptr;
     uint32_t index = 0;
     for (uint32_t i = 0; i < info->swapchainCount; ++i) {
@@ -564,7 +695,9 @@ bool run_pre_overlay(VkQueue queue, const VkPresentInfoKHR* info, VkSemaphore* w
     auto dit = g_devices.find(s->device);
     if (dit == g_devices.end() || !dit->second->fn.vkGetSwapchainImagesKHR) return false;
     Device& d = *dit->second;
-    if (d.adopted && d.queue_family.find(queue) == d.queue_family.end()) return false;
+    // the subscribers' work goes to the present's queue with its family: never a guessed one (vk_present.h)
+    uint32_t family = 0;
+    if (present_queue(d, queue, &family) != vk_present::QueueUse::drawable) return false;
     if (s->listed.empty()) {
         uint32_t n = 0;
         if (d.fn.vkGetSwapchainImagesKHR(d.device, s->swapchain, &n, nullptr) != VK_SUCCESS || n == 0) return false;
@@ -573,8 +706,6 @@ bool run_pre_overlay(VkQueue queue, const VkPresentInfoKHR* info, VkSemaphore* w
         s->listed = std::move(listed);
     }
     if (index >= s->listed.size()) return false;
-    uint32_t family = d.graphics_family;
-    if (auto q = d.queue_family.find(queue); q != d.queue_family.end()) family = q->second;
 
     KilnUiPreOverlay p{};
     p.size = sizeof p;
@@ -655,37 +786,86 @@ void VKAPI_CALL hk_destroy_instance(VkInstance inst, const VkAllocationCallbacks
     R.destroy_instance.load()(inst, a);
 }
 
+// Each queue family's VkQueueFlags of a physical device (empty when they cannot be read). No lock is needed.
+std::vector<uint32_t> queue_family_flags(VkInstance instance, VkPhysicalDevice phys) {
+    std::vector<uint32_t> out;
+    const auto gipa = R.gipa.load();
+    if (!gipa || !instance || !phys) return out;
+    const auto fn = reinterpret_cast<PFN_vkGetPhysicalDeviceQueueFamilyProperties>(gipa(instance, "vkGetPhysicalDeviceQueueFamilyProperties"));
+    if (!fn) return out;
+    uint32_t n = 0;
+    fn(phys, &n, nullptr);
+    if (!n || n > 64) return out;
+    std::vector<VkQueueFamilyProperties> props(n);
+    fn(phys, &n, props.data());
+    for (uint32_t i = 0; i < n && i < props.size(); ++i) out.push_back(static_cast<uint32_t>(props[i].queueFlags));
+    return out;
+}
+
+// Queues handed out on this thread while a device is being made (hk_create_device): a tool under Kiln can add queues to
+// the device and get them inside the creation call, before Kiln has the device on its list (OptiScaler's frame
+// generation: vk_present.h).
+using HandedQueue = vk_present::Handed<VkDevice, VkQueue>;
+thread_local std::vector<HandedQueue>* t_creating = nullptr;
+
 VkResult VKAPI_CALL hk_create_device(VkPhysicalDevice phys, const VkDeviceCreateInfo* ci, const VkAllocationCallbacks* a,
                                      VkDevice* out) {
+    std::vector<HandedQueue> handed;
+    // the queues the game asks for, read before the call from the game's own create info: a tool under Kiln may change
+    // the create info it passes on (the upscaler's copy below carries the game's queues unchanged)
+    std::vector<vk_present::Requested> requested =
+        vk_present::requested_queues(ci ? ci->pQueueCreateInfos : nullptr, ci ? ci->queueCreateInfoCount : 0);
     // Kiln's upscaler swap (upscale.cpp): the chosen backend's device extensions and features, merged into a copy of the
     // game's create info (device_merge.h), only for the game's own device and only when the backend was chosen at the
     // game's start. A copy that fails is tried again as the game made it.
     void* upscale_scope = nullptr;
     const VkDeviceCreateInfo* use = upscale_device_begin(g_instance, phys, ci, R.gipa.load(), &upscale_scope);
+    std::vector<HandedQueue>* const outer = t_creating;
+    t_creating = &handed;
     VkResult r = R.create_device.load()(phys, use, a, out);
     if (use != ci && r != VK_SUCCESS) {
         logf(KILN_LOG_WARN, "ui: vkCreateDevice with the upscaler's extensions and features failed (%d): the game's own create info is used",
              static_cast<int>(r));
+        handed.clear();  // queues a tool handed out inside the failed call belong to no device
         use = ci;
         r = R.create_device.load()(phys, ci, a, out);
     }
+    t_creating = outer;
     upscale_device_end(upscale_scope, use, r, r == VK_SUCCESS && out ? *out : VK_NULL_HANDLE, R.gdpa.load(),
                        ci && ci->queueCreateInfoCount > 0 ? ci->pQueueCreateInfos[0].queueFamilyIndex : 0);
     if (r != VK_SUCCESS || !out) return r;
+    VkInstance instance = VK_NULL_HANDLE;
+    {
+        std::lock_guard<std::mutex> lk(g_mu);
+        instance = g_instance;
+    }
+    std::vector<uint32_t> families = queue_family_flags(instance, phys);  // outside g_mu: it calls into the driver
     std::lock_guard<std::mutex> lk(g_mu);
     auto* d = new Device();
     d->instance = g_instance;
     d->physical = phys;
     d->device = *out;
     d->gdpa = R.gdpa;
-    if (ci && ci->queueCreateInfoCount > 0) d->graphics_family = ci->pQueueCreateInfos[0].queueFamilyIndex;
+    d->families = std::move(families);
+    d->requested = std::move(requested);
     load_device_fns(*d);
     g_unseen_queues.erase(*out);  // of an older device that had this handle
+    vk_present::take_handed(handed, *out, d->queue_family, d->tool_queues);
+    for (const HandedQueue& h : handed) {  // another device's (unusual): to the device being made around this one, or
+        if (h.device == *out) continue;    // kept for adopt_device as before
+        if (outer) outer->push_back(h);
+        else if (g_devices.find(h.device) != g_devices.end()) vk_present::game_got(h.queue, h.family, g_devices[h.device]->queue_family, g_devices[h.device]->tool_queues);
+        else if (g_unseen_queues.size() < 8 || g_unseen_queues.count(h.device)) g_unseen_queues[h.device][h.queue] = h.family;
+    }
     g_devices[*out] = d;
     overlay_guard_stage(overlay_guard::Stage::device);
     g_has_device = true;
     logf(KILN_LOG_INFO, "ui: game Vulkan device %p (%u queue families requested, functions %s; %zu live)", reinterpret_cast<void*>(*out),
          ci ? ci->queueCreateInfoCount : 0, device_fns_ok(*d) ? "ok" : "MISSING", g_devices.size());
+    if (!d->tool_queues.empty())
+        logf(KILN_LOG_INFO, "ui: %zu queue(s) of device %p were handed out while it was being made: a tool under Kiln added queues of its "
+             "own to it, as frame generation does; Kiln's overlay does not draw on one of them unless the game asks for it too",
+             d->tool_queues.size(), reinterpret_cast<void*>(*out));
     return r;
 }
 
@@ -731,18 +911,22 @@ void VKAPI_CALL hk_destroy_device(VkDevice dev, const VkAllocationCallbacks* a) 
 void remember_queue(VkDevice dev, uint32_t family, VkQueue q) {
     if (!q) return;
     std::lock_guard<std::mutex> lk(g_mu);
-    if (auto it = g_devices.find(dev); it != g_devices.end()) it->second->queue_family[q] = family;
+    if (t_creating && g_devices.find(dev) == g_devices.end()) {
+        t_creating->push_back({dev, family, q});  // the device being made on this thread: hk_create_device takes it
+        return;
+    }
+    if (auto it = g_devices.find(dev); it != g_devices.end()) vk_present::game_got(q, family, it->second->queue_family, it->second->tool_queues);
     else if (g_unseen_queues.size() < 8 || g_unseen_queues.count(dev)) g_unseen_queues[dev][q] = family;  // adopt_device
 }
 
 void VKAPI_CALL hk_get_queue(VkDevice dev, uint32_t family, uint32_t index, VkQueue* out) {
     R.get_queue.load()(dev, family, index, out);
-    if (out) remember_queue(dev, family, *out);
+    if (out && !t_looking_up) remember_queue(dev, family, *out);
 }
 
 void VKAPI_CALL hk_get_queue2(VkDevice dev, const VkDeviceQueueInfo2* info, VkQueue* out) {
     R.get_queue2.load()(dev, info, out);
-    if (out && info) remember_queue(dev, info->queueFamilyIndex, *out);
+    if (out && info && !t_looking_up) remember_queue(dev, info->queueFamilyIndex, *out);
 }
 
 VkResult VKAPI_CALL hk_create_surface(VkInstance inst, const VkWin32SurfaceCreateInfoKHR* ci, const VkAllocationCallbacks* a,
@@ -803,7 +987,7 @@ void adopt_device(VkDevice dev) {
         d->gdpa = R.gdpa;
         d->adopted = true;
         d->queue_family = queues->second;
-        d->graphics_family = d->queue_family.begin()->second;
+        d->families = queue_family_flags(g_instance, phys);
         load_device_fns(*d);
         if (device_fns_ok(*d)) {
             g_unseen_queues.erase(queues);
@@ -926,14 +1110,20 @@ VkResult VKAPI_CALL hk_present(VkQueue queue, const VkPresentInfoKHR* info) {
     }
     VkPresentInfoKHR after_pre_overlay;
     VkSemaphore pre_overlay_wait = VK_NULL_HANDLE;
-    if (info && g_pre_demand.load(std::memory_order_relaxed) > 0 && run_pre_overlay(queue, info, &pre_overlay_wait)) {
+    // the subscribers' work is part of the overlay's drawing: none after it turned off for the session
+    if (info && g_pre_demand.load(std::memory_order_relaxed) > 0 && !g_failed.load(std::memory_order_relaxed) &&
+        run_pre_overlay(queue, info, &pre_overlay_wait)) {
         after_pre_overlay = *info;
         after_pre_overlay.waitSemaphoreCount = 1;
         after_pre_overlay.pWaitSemaphores = &pre_overlay_wait;
         info = &after_pre_overlay;
     }
-    if (!info || g_failed || !want_draw()) {
-        if (g_failed && wheel_active()) wheel_cancel_undrawable();  // it can never be drawn or picked: release the input
+    const bool failed = g_failed.load(std::memory_order_acquire);
+    if (!info || failed || !want_draw()) {
+        if (failed) {
+            announce_failure();  // once: the drawing went off outside a draw (ImGui's backend, check_vk)
+            if (wheel_active()) wheel_cancel_undrawable();  // it can never be drawn or picked: release the input
+        }
         // capture just ended with nothing left to draw: still give the game its cursor clip back (render thread)
         if (imgui_ready()) input_capture_changed();
         const VkResult result = R.present.load()(queue, info);
@@ -950,26 +1140,26 @@ VkResult VKAPI_CALL hk_present(VkQueue queue, const VkPresentInfoKHR* info) {
     bool faulted = false;
     const bool drew = guarded_draw(queue, info, &wait, t0, &faulted);
     if (faulted) {
-        g_failed = true;
         HMODULE m = nullptr;
         GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
                            static_cast<LPCWSTR>(g_fault_addr), &m);
         wchar_t path[MAX_PATH] = L"?";
         if (m) GetModuleFileNameW(m, path, MAX_PATH);
-        set_error("overlay faulted (0x%08x at %p = %ls+0x%llx): overlay off", g_fault_code, g_fault_addr,
-                  wcsrchr(path, L'\\') ? wcsrchr(path, L'\\') + 1 : path,
-                  m ? static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(g_fault_addr) - reinterpret_cast<uintptr_t>(m)) : 0ull);
+        fail(KILN_LOG_ERROR, "it faulted", "the overlay faulted (0x%08x at %p = %ls+0x%llx)", g_fault_code, g_fault_addr,
+             wcsrchr(path, L'\\') ? wcsrchr(path, L'\\') + 1 : path,
+             m ? static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(g_fault_addr) - reinterpret_cast<uintptr_t>(m)) : 0ull);
     }
-    if (!drew) {
-        const VkResult result = R.present.load()(queue, info);
-        graphics_after_present();  // Kiln's frame cap after the present (g_mu was released by guarded_draw)
-        return result;
-    }
+    announce_failure();  // once, after the draw that turned the drawing off (g_mu was released by guarded_draw)
+    // Kiln's frame went in: the present waits on Kiln's semaphore. It did not (nothing to draw, or the drawing failed):
+    // the game's present goes on untouched, with the game's own semaphores (vk_present.h). draw() sets `wait` right after
+    // its submit succeeded, so a fault after that still presents on Kiln's semaphore: the game's were waited on by it.
+    const bool submitted = wait != VK_NULL_HANDLE;
+    const auto waits = vk_present::present_waits(submitted, info->pWaitSemaphores, info->waitSemaphoreCount, &wait);
     VkPresentInfoKHR p = *info;
-    p.waitSemaphoreCount = 1;
-    p.pWaitSemaphores = &wait;
-    const VkResult result = R.present.load()(queue, &p);
-    if (result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR) overlay_guard_stage(overlay_guard::Stage::frame);
+    p.waitSemaphoreCount = waits.count;
+    p.pWaitSemaphores = waits.semaphores;
+    const VkResult result = R.present.load()(queue, submitted ? &p : info);
+    if (drew && (result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR)) overlay_guard_drawn();
     graphics_after_present();  // Kiln's frame cap after the present (g_mu was released by guarded_draw)
     return result;
 }
