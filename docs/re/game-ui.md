@@ -593,6 +593,37 @@ used a fixed synthetic Player permission subject and got admin refusal: transpor
 authentication**. Rich blocks reuse existing ImGui widgets/input/textures and add no new engine RVA. Complete
 catalogs, immutable-snapshot, custom-stat and owned-viewer contracts remain in dossier chapters 05a/05b/09.
 
+## Item detail layout and value sources for native tooltip lines (equipment wave P8a; client 26430625)
+
+C `5d9ef2f1…`, static only (Ghidra headless without auto-analysis, capstone); nothing here has been seen running.
+Design and the guided client steps: the equipment wave's TOOLTIPS.md. **[dis]** unless marked.
+
+**Tree.** `ItemDetail 0xc109f0` builds `doItemDetailView()` › `mainColumn` › `contentRow` › (`item Base Info Column` with the
+header/thumbnail `0xc12df0`) and `mainContentArea` (`0xa3c740`, vertical). For mode `*(detail+0x170) == 0` and
+`detail+0xbc == 0` the body is a **scroll area** (`0xa3e020` @`0xc117e7` … `0xa40160` @`0xc11fb0`) holding a **vertical content
+list** (`0xa3c790` @`0xc11841` … `0xa40080` @`0xc11fa4`): header line `0xc43850`, stats block `0xbfccf0` (@`0xc11939`), the
+description, type lines, the "%s %u" line. Modes 1..5 jump to `0xb48a00`, `0xcf30c0`, `0xc771d0`, `0xceac80`, `0xc00760`.
+`DetailLinesAppend 0xc1216e` lies after the scroll area has closed, which is why session 6's rows did not scroll and
+covered the vanilla content. Insertion points inside the list: `0xc11fa0` (end; reached by the fall-through and `je` at
+`0xc11e0c`/`0xc11e15`) and `0xc1193e` (after the stats block). ItemDetail's only caller is `0xc101b0` (16 callers).
+
+**Nodes.** Scope helpers create a child of the layouter's current parent (`0x11c4c60`); the UiNode is at scope `+8`.
+Setters: `+0x6c` alignment (`0x11ced70`), `+0x6e` (`0x11ced60`), `+0x90` size mode f32×2 (`0x11cf360`; fraction of the parent,
+0 = fit), `+0x80/+0x84` preferred size (`0x11cf230`), `+0x98` / `+0xa8` 16-byte edge boxes (`0x11cf100` / `0x11cf210`), `+0xb8`
+layout kind (1 `0x11ceff0`, 2 = vertical `0x11cf380`) with spacing `+0xc0`. The shaper `0xb2d820` limits the width to the
+node's last layout rectangle only when `+0x90`'s width is non-zero: the description sets `{1.0, 0.0}` and wraps; a bare
+constructor + draw shapes one line. TextLine: `+0x38` alignment, `+0x3d` = 1 on every detail text, `+0x90` flags (`0x40`
+colour at `+0xb0`, 8 bytes; `0x08` size at `+0x7c`), `+0xd4` bit 0 with a colour.
+
+**Values.** The view (`player_ui` chunk `0x2aff40`) takes level from `ItemState.itemLevelUi` (u8), rarity from
+`ItemState.itemRarityUi` and `+0x2d/+0x2e` from `PerkContainerNew`. The header model `0xb20100` (rbp+0x250) holds the rarity
+label (`0xd424c0`, loca bundle `+0x1de0` + 0x10 × rarity) at `+0x78` and the rarity colour at `+0xa0` (bundle `+0xd5f4` + 8 ×
+rarity; `+0xd5ec` none, `+0xd61c` unique). The stats model `0xb1e350` (rbp+0x810) uses the **client registry's** ItemInfo:
+enhancement rows (≤ 5 × 0x70 B from `+0x580`), base level `+0x7cc`; numbers from `0xe779a0` (damage = (seed × creep × level
++ seed) × dmgMod × speedMod), `0xe77a00`, `0xe77b20` with the client's BalancingTable, drawn by `StatValue 0xc2ddd0(label,
+float)` (callers in `0xb8bbd0` and `0xbfcd6b`). The server's `baseDamageUi` is not read here, so a per-instance power change
+is not shown by the detail view without a client hook.
+
 ## Current crafting-tree lookup (dev.28; client 26430625 / server 26430253)
 
 C `5d9ef2f1…`, S `f0d824be…`; dossier chapter 16a, blocks-a VERIFY claims 1–2 confirmed. [static] [refl] [data]
