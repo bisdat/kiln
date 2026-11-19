@@ -80,13 +80,14 @@ the game never sets DLSS up and these settings do nothing (the page says "The ga
   back to its default.
 - **Render size.** `game`: DLSS's own size for the game's DLSS mode. `perMode`: a scale for each of Quality, Balanced,
   Performance and Ultra Performance (the defaults are DLSS's own; Ultra Quality keeps DLSS's). `custom`: one scale for
-  every mode. Kiln puts its own step in front of DLSS's optimal-settings callback (the documented
-  `DLSSOptimalSettingsCallback` parameter): DLSS answers, then Kiln sets `OutWidth`/`OutHeight` to the output times the
-  scale, within DLSS's own range for that mode (`DLSS.Get.Dynamic.Min/Max.Render.*`). The game renders at that size; a
-  size within a pixel of DLSS's own is left as DLSS's. **DLAA always renders at the output's size.** A scale outside
-  DLSS's range for the mode is held to the nearest size DLSS allows: the Graphics page shows the size in effect and says
-  so, and kiln.log names the range (`graphics: DLSS Quality for 2560x1440: Kiln's scale asks for 845x475, outside
-  DLSS's range ...`). Where that range is narrow, the setting does little in that mode.
+  every mode DLSS offers (a mode DLSS answers with 0x0, Ultra Quality in the game's DLSS, is left alone: `graphics: DLSS
+  Ultra Quality for 1920x1080: not offered ...`). Kiln puts its own step in front of DLSS's optimal-settings callback
+  (the documented `DLSSOptimalSettingsCallback` parameter): DLSS answers, then Kiln sets `OutWidth`/`OutHeight` to the
+  output times the scale, within DLSS's own range for that mode (`DLSS.Get.Dynamic.Min/Max.Render.*`). The game renders
+  at that size; a size within a pixel of DLSS's own is left as DLSS's. **DLAA always renders at the output's size.** A
+  scale outside DLSS's range for the mode is held to the nearest size DLSS allows: the Graphics page shows the size in
+  effect and says so, and kiln.log names the range (`graphics: DLSS Quality for 2560x1440: Kiln's scale asks for
+  845x475, outside DLSS's range ...`). Where that range is narrow, the setting does little in that mode.
 - How: Kiln hooks five exports of NVIDIA's NGX core (`_nvngx.dll`, the driver's; Proton has it too):
   `GetCapabilityParameters`, `CreateFeature`, `CreateFeature1`, `EvaluateFeature`, `ReleaseFeature`. The game's
   statically linked NGX SDK reaches them through `GetProcAddress`; no game code is patched and only NGX's own parameter

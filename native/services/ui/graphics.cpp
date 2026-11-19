@@ -187,6 +187,20 @@ void scale_answer(void* params) {
         std::lock_guard lk(g_scaled_mu);
         g_scaled = {quality, out, size ? *size : dlss, size.has_value(), pick.limited};
     }
+    if (!pick.offered) {
+        // DLSS's own size 0x0: a mode it does not offer. Kiln's scale would cover it, but sets nothing and claims no size.
+        if (!gfx::wanted_scale(s, quality)) return;
+        static std::mutex off_mu;
+        static std::vector<std::tuple<int, uint32_t, uint32_t>> said_off;
+        std::lock_guard lk(off_mu);
+        const auto key = std::make_tuple(int(quality), out.w, out.h);
+        if (std::find(said_off.begin(), said_off.end(), key) == said_off.end() && said_off.size() < 32) {
+            said_off.push_back(key);
+            logf(KILN_LOG_INFO, "graphics: DLSS %s for %ux%u: not offered (DLSS's own size for it is 0x0), so Kiln's %s scale leaves it alone",
+                 gfx::mode_name(quality), out.w, out.h, gfx::scale_name(s.dlss_scale));
+        }
+        return;
+    }
     if (pick.limited) {
         static std::mutex lim_mu;
         static std::vector<std::tuple<int, uint32_t, uint32_t, uint32_t, uint32_t>> said_lim;

@@ -234,16 +234,19 @@ inline std::optional<float> wanted_scale(const Settings& s, int quality) {
 // After DLSS's optimal-settings answer: the render size Kiln sets instead of DLSS's (`dlss`; nullopt: keep it), and
 // whether DLSS's range for this mode limited the player's scale. `output`: the size asked for; `min`/`max`: DLSS's range
 // for this output and mode (zero: unknown, not clamped; DLSS renders nothing outside it). A size within a pixel of DLSS's
-// own is DLSS's (the per-mode defaults are DLSS's scales, rounded).
+// own is DLSS's (the per-mode defaults are DLSS's scales, rounded). DLSS's own size 0x0: DLSS does not offer the mode
+// (Ultra Quality, which the game asks about but neither offers nor uses): nothing is set for it.
 struct RenderPick {
     std::optional<Size> set;
     bool limited = false;  // the wanted size was outside DLSS's range: the nearest size in it is used
+    bool offered = true;   // DLSS gave a render size for this mode (false: 0x0, the mode is not offered)
     Size wanted;           // output x scale, before DLSS's range (zero: Kiln wants none)
 };
 inline RenderPick pick_render_size(const Settings& s, int quality, Size output, Size dlss, Size min, Size max) {
     RenderPick p;
+    p.offered = dlss.w && dlss.h;
     const auto scale = wanted_scale(s, quality);
-    if (!scale || !output.w || !output.h) return p;
+    if (!scale || !output.w || !output.h || !p.offered) return p;
     auto want = [](uint32_t out, float k) {
         return static_cast<uint32_t>(std::clamp<int64_t>(std::llround(static_cast<double>(out) * k), 1, out));
     };

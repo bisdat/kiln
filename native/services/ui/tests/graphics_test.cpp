@@ -330,6 +330,17 @@ static void render_sizes() {
     // a narrow range for a mode: the scale does little there
     pick = pick_render_size(s, kQuality, out, dlss_q, Size{1600, 900}, Size{1800, 1013});
     CHECK(pick.limited && pick.set == Size{1800, 1013});
+    CHECK(pick.offered && pick_render_size(s, kQuality, out, dlss_q, min, max).offered);
+    // a mode DLSS does not offer: its own size and range 0x0 (Ultra Quality; session 29.18 logged "renders at 1440x810"
+    // for it): nothing set, no size claimed, not "limited"
+    const Size fhd{1920, 1080};
+    pick = pick_render_size(s, kUltraQuality, fhd, Size{}, Size{}, Size{});
+    CHECK(!pick.offered && !pick.set && !pick.limited && pick.wanted == Size{});
+    CHECK(!render_size(s, kUltraQuality, fhd, Size{}, Size{}, Size{}));
+    CHECK(!pick_render_size(s, kQuality, out, Size{1707, 0}, min, max).offered);  // one side 0 is as good as none
+    CHECK(render_size(s, kQuality, fhd, Size{1280, 720}, Size{960, 540}, fhd) == Size{1440, 810});  // the offered ones still scale
+    s.dlss_scale = DlssScale::game;  // the game's size: nothing to set either way, and still told apart
+    CHECK(!pick_render_size(s, kUltraQuality, fhd, Size{}, Size{}, Size{}).offered);
     CHECK(mode_index(kQuality) == 0 && mode_index(kUltraPerformance) == 3 && mode_index(kDlaa) == -1 && mode_index(kUltraQuality) == -1);
     CHECK(std::string(mode_name(kBalanced)) == "Balanced" && std::string(mode_name(42)) == "?");
 }
