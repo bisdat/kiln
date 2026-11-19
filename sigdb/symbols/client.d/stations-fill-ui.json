@@ -1,0 +1,31 @@
+{
+  "format": 1,
+  "side": "client",
+  "comment": "GitHub #68, Kiln clients: the station screen's fill buttons. The game's UI action query UiActionStatus(gameUi, u32 station, u32 recipe, u32 item, u16 amount, u32 type, const RecipeInputCategorySelections*) -> u32 is a cached status (0 not run yet, 1 ok, else the dry run's code: 2 no room, 4 missing materials, 5 no inventory); the client program player_ui runs the dry runs (type 3: AutoTransferRecipe on the bag and the Magic chests). A production station's screen enables its '+1' and '+10' fill when the type-3 query answers 1. kiln-items raises a 4 to 1 only when the server said its fill with opted-in station outputs covers that many crafts. Not authority: the press is the game's own action, which the server's Kiln.Blocks runs as Kiln's fill. Found on client 26430625 (5d9ef2f1...) only. docs/re/stations.md section 10.3.",
+  "symbols": {
+    "stations/client.UiActionStatus": {
+      "comment": "the key: +0 type ([rbp+0x38]), +4 station (edx), +0x1c recipe (r8d), +0x20 item (r9d), +0x24 u16 amount ([rbp+0x30]), +0x2c the 32-byte selections ([rbp+0x40]); the cache at gameUi+0x14f70 (its offset is not used). Client 26430625 0xb2dbe0",
+      "find": [
+        {
+          "pattern": "48 89 5C 24 08 48 89 7C 24 10 55 48 8B EC 48 83 EC 70 33 C0 89 55 B4 48 89 45 E6 48 8D B9 ?? ?? ?? ?? 48 89 45 D6 48 8D 55 B0 48 89 45 B8 48 8B CF 48 89 45 C0 89 45 C8 8B 45 38 89 45 B0 0F B7 45 30 66 89 45 D4 48 8B 45 40 44 89 45 CC 44 89 4D D0 0F 10 00 0F 10 48 10 0F 11 45 DC 0F 11 4D EC E8"
+        }
+      ]
+    },
+    "@stations/client.UiActionStatus.fill": {
+      "comment": "the station screen's '+1' fill: type 3 at [rsp+0x28], amount 1 at [rsp+0x20], then the call; its result compared with 1 is the button's enabled byte (client 26430625 0xc7451a; the '+10' at 0xc746f3 is the same with amount 10)",
+      "find": [
+        {
+          "pattern": "C7 44 24 28 03 00 00 00 0F 29 4D F0 48 8B 49 38 C7 44 24 64 02 02 01 00 40 88 7C 24 68 89 7C 24 6A 40 88 7C 24 78 0F 11 44 24 7C 48 89 7D 90 40 88 7D A8 C7 45 AC 00 00 20 41 C7 45 B0 00 00 A0 40 C7 45 B4 00 00 80 3F 40 88 7D D0 66 C7 44 24 20 01 00 E8 {stations/client.UiActionStatus:rel32} 83 F8 01"
+        }
+      ]
+    }
+  },
+  "features": {
+    "stations.fill_ui": {
+      "symbols": [
+        "stations/client.UiActionStatus",
+        "@stations/client.UiActionStatus.fill"
+      ]
+    }
+  }
+}

@@ -31,7 +31,14 @@ public sealed class CraftStockTests : IDisposable
         };
     }
 
-    public void Dispose() => CraftStock.ResetForTests();
+    public void Dispose()
+    {
+        CraftStock.ResetForTests();
+        StationsCore.UseBackend(null);
+    }
+
+    private static FillKey Key(uint station, uint recipe, uint cat = 0, byte index = 0) =>
+        new(station, recipe, new FillChoice(cat, index), default, default, default);
 
     private static CraftStockRows Rows(params (uint Item, uint Count)[] rows) => new([.. rows.Select(r => new CraftStockRow(r.Item, r.Count))]);
 
@@ -100,6 +107,195 @@ public sealed class CraftStockTests : IDisposable
         CraftStockHello.Encode(new CraftStockHello(true), h);
         var hr = new NetReader(h.ToArray());
         Assert.True(CraftStockHello.Decode(ref hr).Open);
+    }
+
+    [Fact]
+    public void A_fill_ask_and_its_answers_survive_the_wire()
+    {
+        var w = new NetWriter();
+        CraftStockFillAsk.Encode(new CraftStockFillAsk([Key(1032, 0x3acc518b, 77, 2), Key(1040, 9)]), w);
+        var r = new NetReader(w.ToArray());
+        Assert.Equal([Key(1032, 0x3acc518b, 77, 2), Key(1040, 9)], CraftStockFillAsk.Decode(ref r).Keys);
+        var a = new NetWriter();
+        CraftStockFillAnswers.Encode(new CraftStockFillAnswers([new FillAnswer(Key(1032, 0x3acc518b, 77, 2), 10)]), a);
+        var ar = new NetReader(a.ToArray());
+        Assert.Equal([new FillAnswer(Key(1032, 0x3acc518b, 77, 2), 10)], CraftStockFillAnswers.Decode(ref ar).Rows);
+        // never more than 16 on the wire
+        var many = Enumerable.Range(1, 20).Select(i => Key((uint)i, 1)).ToArray();
+        var m = new NetWriter();
+        CraftStockFillAsk.Encode(new CraftStockFillAsk(many), m);
+        var mr = new NetReader(m.ToArray());
+        Assert.Equal(CraftStock.MaxFillKeys, CraftStockFillAsk.Decode(ref mr).Keys.Length);
+    }
+
+    [Fact]
+    public void A_key_maps_to_the_native_row_and_to_a_fills_choices()
+    {
+        var k = new FillKey(1032, 0x3acc518b, new FillChoice(77, 2), default, new FillChoice(88, 1), default);
+        var n = k.Native();
+        Assert.Equal((1032u, 0x3acc518bu, 77u, (byte)2, 88u, (byte)1), (n.Station, n.Recipe, n.C0.Category, n.C0.Index, n.C2.Category, n.C2.Index));
+        Assert.Equal(k, FillKey.Of(n));
+        Assert.Equal([new CategoryChoice(77, 2), new CategoryChoice(88, 1)], k.FillChoices());
+        Assert.Empty(Key(1032, 1).FillChoices());
+    }
+
+    // ---- the station screen's fill: the server ----
+
+    private readonly List<(EntityId Player, CraftStockFillAnswers M)> _fills = [];
+    private readonly Dictionary<FillKey, uint> _covers = new();
+
+    private void FillHooks()
+    {
+        CraftStock.FillBuildHook = (_, keys) => [.. keys.Select(k => new FillAnswer(k, _covers.GetValueOrDefault(k)))];
+        CraftStock.FillSendHook = (p, m) =>
+        {
+            _fills.Add((p, m));
+            return _sendOk;
+        };
+    }
+
+    [Fact]
+    public void Asked_fills_are_answered_at_once_then_only_when_an_answer_changes()
+    {
+        FillHooks();
+        var p = new EntityId(5);
+        _rows[5] = Rows((Coal, 20), (Scrap, 38));
+        CraftStock.Enqueue(p, true);
+        CraftStock.Pump(7);
+        Assert.Empty(_fills);  // nothing asked: nothing answered
+        var forge = Key(1032, 0x3acc518b);
+        _covers[forge] = 10;
+        CraftStock.EnqueueAsk(p, [forge]);
+        CraftStock.Pump(8);
+        Assert.Equal([new FillAnswer(forge, 10)], Assert.Single(_fills).M.Rows);
+        for (ulong s = 9; s <= 90; s++) CraftStock.Pump(s);  // refreshes, nothing changed
+        Assert.Single(_fills);
+        _covers[forge] = 9;  // a craft's charcoal went in meanwhile
+        CraftStock.Pump(120);
+        Assert.Equal(2, _fills.Count);
+        Assert.Equal([new FillAnswer(forge, 9)], _fills[1].M.Rows);
+        // a second fill is added to the first; both are answered
+        var other = Key(1040, 0x55, 77, 1);
+        CraftStock.EnqueueAsk(p, [other]);
+        CraftStock.Pump(121);
+        Assert.Equal([new FillAnswer(forge, 9), new FillAnswer(other, 0)], _fills[^1].M.Rows);
+        Assert.Equal([forge, other], CraftStock.AskedOf(p));
+        // asked again (the client has no answer): the answers go out again even unchanged
+        var n = _fills.Count;
+        CraftStock.EnqueueAsk(p, [forge]);
+        CraftStock.Pump(122);
+        Assert.Equal(n + 1, _fills.Count);
+        Assert.Equal([forge, other], CraftStock.AskedOf(p));
+    }
+
+    [Fact]
+    public void An_ask_without_an_open_menu_is_dropped_and_a_session_keeps_at_most_16()
+    {
+        FillHooks();
+        var p = new EntityId(5);
+        CraftStock.EnqueueAsk(p, [Key(1032, 1)]);
+        CraftStock.Pump(7);
+        Assert.Empty(_fills);
+        Assert.Empty(CraftStock.AskedOf(p));
+        _rows[5] = Rows((Coal, 3));
+        CraftStock.Enqueue(p, true);
+        CraftStock.Pump(8);
+        CraftStock.EnqueueAsk(p, [.. Enumerable.Range(1, 20).Select(i => Key((uint)i, 1)), Key(0, 1), Key(3, 0)]);
+        CraftStock.Pump(9);
+        var held = CraftStock.AskedOf(p);
+        Assert.Equal(CraftStock.MaxFillKeys, held.Count);
+        Assert.Equal(Key(5, 1), held[0]);  // the oldest went; a key without a station or recipe never counts
+        // the menu closes: the session and its asks end
+        CraftStock.Enqueue(p, false);
+        CraftStock.Pump(10);
+        Assert.Empty(CraftStock.AskedOf(p));
+    }
+
+    [Fact]
+    public void With_no_station_outputs_to_count_an_asked_fill_is_answered_with_nothing()
+    {
+        FillHooks();
+        var p = new EntityId(5);
+        _rows[5] = Rows((Coal, 3));
+        CraftStock.Enqueue(p, true);
+        CraftStock.Pump(7);
+        _covers[Key(1032, 1)] = 5;
+        CraftStock.EnqueueAsk(p, [Key(1032, 1)]);
+        CraftStock.Pump(8);
+        Assert.Single(_fills[^1].M.Rows);
+        _rows[5] = null;  // the kiln's outputs were collected: no snapshot, and no answer that could raise a button
+        CraftStock.Pump(30);
+        Assert.Empty(_fills[^1].M.Rows);
+    }
+
+    [Fact]
+    public void An_answer_that_did_not_go_out_is_tried_again()
+    {
+        FillHooks();
+        var p = new EntityId(5);
+        _rows[5] = Rows((Coal, 3));
+        CraftStock.Enqueue(p, true);
+        CraftStock.Pump(7);
+        _sendOk = false;
+        CraftStock.EnqueueAsk(p, [Key(1032, 1)]);
+        CraftStock.Pump(8);
+        var n = _fills.Count;
+        _sendOk = true;
+        CraftStock.Pump(30);
+        Assert.Equal(n + 1, _fills.Count);
+    }
+
+    // ---- the station screen's fill: the client ----
+
+    [Fact]
+    public void The_client_asks_once_per_set_of_refused_fills_again_after_5_s_and_keeps_answers_only_while_open()
+    {
+        using var t = new StationsTests();
+        var fake = t.Backend;
+        StationsCore.UseBackend(fake);
+        var asked = new List<FillKey[]>();
+        CraftStock.AskHook = asked.Add;
+        CraftStock.HelloHook = _ => { };
+        CraftStock.ServerSideHook = () => true;
+        using var k = new KilnHarness();
+        k.Capabilities.Override(CraftStock.FillUiCapability, true);
+        k.Capabilities.Override(Stations.CraftUiCapability, false);  // the station screen's fill alone still opens the session
+        CraftStock.PollAsks(10_000);  // no menu open: nothing
+        CraftStock.ClientChanged(Screen(ScreenKind.InGame), Screen(ScreenKind.Crafting));
+        CraftStock.PollAsks(10_000);  // nothing refused yet
+        Assert.Empty(asked);
+        var forge = Key(1032, 0x3acc518b, 77, 2);
+        fake.Asks = [forge.Native()];
+        CraftStock.PollAsks(10_300);
+        Assert.Equal([forge], Assert.Single(asked));
+        CraftStock.PollAsks(10_400);  // within 250 ms: not even read
+        CraftStock.PollAsks(11_000);  // the same set: not again
+        Assert.Single(asked);
+        CraftStock.PollAsks(15_400);  // 5 s on, still unanswered: once more
+        Assert.Equal(2, asked.Count);
+        var kiln2 = Key(1040, 9);
+        fake.Asks = [forge.Native(), kiln2.Native()];
+        CraftStock.PollAsks(15_700);
+        Assert.Equal([forge, kiln2], asked[^1]);
+        // the answers go to native while the menu is open
+        Assert.True(CraftStock.ApplyFill(new CraftStockFillAnswers([new FillAnswer(forge, 10)])));
+        var row = Assert.Single(fake.FillAnswers);
+        Assert.Equal((1032u, 10u, 77u, (byte)2), (row.Key.Station, row.Crafts, row.Key.C0.Category, row.Key.C0.Index));
+        // the menu closes; a late answer is not kept
+        CraftStock.ApplyHook = _ => true;
+        CraftStock.ClientChanged(Screen(ScreenKind.Crafting), Screen(ScreenKind.InGame));
+        CraftStock.ClientFill(new CraftStockFillAnswers([new FillAnswer(forge, 10)]));
+        Assert.Single(fake.FillAnswers);  // unchanged: the late rows never reached native (the close cleared native itself)
+        fake.Asks = [kiln2.Native()];
+        var n = asked.Count;
+        CraftStock.PollAsks(30_000);
+        Assert.Equal(n, asked.Count);  // closed: no asks
+        // an older kiln-items without the table's members: nothing asked, nothing applied
+        fake.HasFill = false;
+        CraftStock.ClientChanged(Screen(ScreenKind.InGame), Screen(ScreenKind.Crafting));
+        CraftStock.PollAsks(40_000);
+        Assert.Equal(n, asked.Count);
+        Assert.False(CraftStock.ApplyFill(new CraftStockFillAnswers([new FillAnswer(forge, 10)])));
     }
 
     // ---- the session ----

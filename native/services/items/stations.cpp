@@ -39,6 +39,7 @@
 #include "engine.h"
 #include "equip.h"
 #include "equip_logic.h"
+#include "kiln_hook.hpp"
 #include "instances.h"
 #include "sets.h"
 #include "stations_logic.h"
@@ -1083,6 +1084,93 @@ int craft_adjust_impl(uint32_t recipe, uint32_t cap, uint32_t game, const void* 
                      static_cast<unsigned>(crafts), n > 1 ? " (more held back)" : "");
     }
     return 1;
+}
+
+// ---- the station screen's fill buttons on a Kiln client (GitHub #68, docs/re/stations.md §10.3) ----
+// The game's UI action query (stations/client.UiActionStatus, called on the game's UI thread): u32 (gameUi*, u32 station,
+// u32 recipe, u32 item, u16 amount, u32 type, const RecipeInputCategorySelections*). The station screen enables its
+// "+1" and "+10" fill when the type-3 query answers 1. Hooked on demand: the client world's Pre installs it the first
+// time a Kiln server's craft-stock snapshot is on (never with a vanilla server, never while no opted-in station of the
+// player's base holds outputs). Without an answer for the exact station, recipe and choices it returns the game's status.
+kiln::RawHook h_ui_status;
+std::atomic<bool> g_fill_hooked{false};
+bool g_fill_failed = false;  // the client world's thread only
+bool g_fill_feat = false;    // stations.fill_ui with its symbol (stations_resolve)
+uintptr_t g_ui_status = 0;
+std::mutex g_fill_mu;
+std::vector<KilnStationFillAnswer> g_fill_answers;  // g_fill_mu
+std::vector<KilnStationFillKey> g_fill_asks;        // g_fill_mu
+std::atomic<uint32_t> g_fill_raised{0}, g_fill_faults{0};
+LogLimit g_log_fill{12};
+
+void fill_clear() {
+    std::lock_guard lock(g_fill_mu);
+    g_fill_answers.clear();
+    g_fill_asks.clear();
+}
+
+bool copy_choices(const void* sel, KilnStationChoice* out) {
+    __try {
+        std::memcpy(out, sel, sizeof(KilnStationChoice) * 4);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+uint32_t __fastcall hk_ui_status(void* ui, uint32_t station, uint32_t recipe, uint32_t item, uint32_t amount, uint32_t type,
+                                 const void* sel) {
+    const uint32_t game = h_ui_status.call<uint32_t>(ui, station, recipe, item, amount, type, sel);
+    if (type != kUiQueryFill || game != kUiMissing || !g_craft_on.load(std::memory_order_acquire)) return game;
+    KilnStationChoice c[4] = {};
+    if (sel && !copy_choices(sel, c)) {
+        g_fill_faults.fetch_add(1, std::memory_order_relaxed);
+        return game;
+    }
+    const KilnStationFillKey k = fill_key(station, recipe, c);
+    const uint32_t want = amount & 0xffffu;  // the amount is a u16 (a stack argument)
+    bool answered = false;
+    uint32_t out = game;
+    {
+        std::lock_guard lock(g_fill_mu);
+        out = fill_ui_status(game, type, want, k, g_fill_answers, &answered);
+        if (!answered) note_fill_ask(&g_fill_asks, k, KILN_STATIONS_MAX_FILL_KEYS);
+    }
+    if (out != game) {
+        g_fill_raised.fetch_add(1, std::memory_order_relaxed);
+        // once per station, recipe and amount, in a few lines: the real-client check reads them
+        static std::mutex mu;
+        static std::unordered_map<uint64_t, uint32_t> said;
+        const uint64_t key = (static_cast<uint64_t>(station) << 32) | recipe;
+        bool fresh = false;
+        {
+            std::lock_guard lock(mu);
+            if (said.size() > 512) said.clear();
+            auto [it, inserted] = said.emplace(key, want);
+            fresh = inserted || it->second != want;
+            it->second = want;
+        }
+        if (fresh)
+            if (const uint32_t n = g_log_fill.take())
+                LOGI("stations: the station screen's fill of %u craft(s) of recipe 0x%08x at station %u is offered: the server's "
+                     "fill covers it with station outputs%s", want, recipe, station, n > 1 ? " (more held back)" : "");
+    }
+    return out;
+}
+
+// The client world's Pre: the hook, the first time the snapshot is on.
+void fill_hook_on_demand() {
+    if (!g_fill_feat || g_fill_failed || g_fill_hooked.load(std::memory_order_acquire) || !g_craft_on.load(std::memory_order_acquire))
+        return;
+    if (!h_ui_status.install(g_api, g_owner, g_ui_status, reinterpret_cast<void*>(&hk_ui_status), "stations/client.UiActionStatus")) {
+        g_fill_failed = true;
+        LOGE("stations: hooking the station screen's fill query failed: %s", h_ui_status.error() ? h_ui_status.error() : "?");
+        lower("stations.fill_ui", KILN_CAP_REASON_FAULTED, "hooking the station screen's fill query failed (see kiln.log)");
+        return;
+    }
+    g_fill_hooked.store(true, std::memory_order_release);
+    LOGI("stations: the station screen's fill query %p hooked (a fill only station outputs cover is offered when the server says so)",
+         reinterpret_cast<void*>(g_ui_status));
 }
 
 uint32_t craft_stats(uint32_t* out, uint32_t n) {
@@ -2926,12 +3014,37 @@ KilnResult KILN_CALL t_set_craft_stock(const KilnStationStack* rows, uint32_t co
         kept = g_craft_have.size();
         g_craft_on.store(kept != 0, std::memory_order_release);
     }
+    if (!kept) fill_clear();  // the fill buttons' answers belong to the same open menu
     if (kept || was)
         if (const uint32_t n = g_log_stock.take())
             LOGI(kept ? "stations: crafting stock from the server: %u item(s) the crafting menu may count%s"
                       : "stations: crafting stock cleared: the crafting menu shows the game's own counts%s",
                  static_cast<unsigned>(kept), n > 1 ? " (more held back)" : "");
     return KILN_OK;
+}
+
+// The server's answers for the station screen's fills (a Kiln client). Any thread.
+KilnResult KILN_CALL t_set_fill_answers(const KilnStationFillAnswer* rows, uint32_t count) {
+    if (count > KILN_STATIONS_MAX_FILL_KEYS || (count && !rows)) return KILN_ERR_INVALID_ARGUMENT;
+    std::vector<KilnStationFillAnswer> v;
+    for (uint32_t i = 0; i < count; ++i) {
+        if (!fill_answer_ok(rows[i])) return KILN_ERR_INVALID_ARGUMENT;
+        v.push_back(rows[i]);
+    }
+    std::lock_guard lock(g_fill_mu);
+    drop_answered(&g_fill_asks, v);
+    g_fill_answers = std::move(v);
+    return KILN_OK;
+}
+
+// The station screen's refused fills with no answer yet (a Kiln client). Any thread.
+KilnResult KILN_CALL t_fill_asks(KilnStationFillKey* out, uint32_t capacity, uint32_t* out_count) {
+    if (!out_count || (capacity && !out)) return KILN_ERR_INVALID_ARGUMENT;
+    std::lock_guard lock(g_fill_mu);
+    const uint32_t n = static_cast<uint32_t>(g_fill_asks.size());
+    *out_count = n;
+    for (uint32_t i = 0; i < n && i < capacity; ++i) out[i] = g_fill_asks[i];
+    return n > capacity ? KILN_ERR_BUFFER_TOO_SMALL : KILN_OK;
 }
 
 // ---- the items a Kiln client needs counted (GitHub #68): an index of every recipe's inputs ----
@@ -3067,7 +3180,7 @@ const KilnStationsApi kTable = {
     &t_status, &t_base_count, &t_base_at, &t_base_of, &t_base_at_position, &t_base_storage, &t_base_water, &t_base_stock,
     &t_stations, &t_station_read, &t_recipe, &t_recipe_inputs, &t_category, &t_category_at, &t_workshop_recipes, &t_plan,
     &t_submit, &t_cancel, &t_watch, &t_events, &t_last_seq, &t_set_output_source, &t_output_sources, &t_max_chests,
-    &t_collect, &t_base_stock_with_stations, &t_set_craft_stock, &t_craft_items,
+    &t_collect, &t_base_stock_with_stations, &t_set_craft_stock, &t_craft_items, &t_set_fill_answers, &t_fill_asks,
 };
 
 template <typename F>
@@ -3150,13 +3263,17 @@ void KILN_CALL client_pre(const KilnTickInfo*, void*) {
     if (w != seen || !g_client_recipes.load(std::memory_order_relaxed) || (++frames & 255) == 0) {
         if (w != seen) {
             seen = w;
-            std::lock_guard lock(g_craft_mu);  // a new world: the last one's snapshot names nothing
-            g_craft_have.clear();
-            g_craft_on.store(false, std::memory_order_release);
+            {
+                std::lock_guard lock(g_craft_mu);  // a new world: the last one's snapshot names nothing
+                g_craft_have.clear();
+                g_craft_on.store(false, std::memory_order_release);
+            }
+            fill_clear();
         }
         g_client_recipes.store(w ? reinterpret_cast<void*>(g_api->singleton(w, str("g38_items::RecipeRegistry"))) : nullptr,
                                std::memory_order_release);
     }
+    fill_hook_on_demand();
     static bool checked = false;
     if (!checked && w && feat("stations.craft_ui")) {
         checked = true;
@@ -3177,9 +3294,12 @@ void KILN_CALL client_pre(const KilnTickInfo*, void*) {
 void KILN_CALL client_world(const KilnWorldEvent* ev, void*) {
     if (ev->kind != KILN_WORLD_CLIENT || ev->event != KILN_WORLD_STOPPING) return;
     g_client_recipes.store(nullptr, std::memory_order_release);
-    std::lock_guard lock(g_craft_mu);
-    g_craft_have.clear();
-    g_craft_on.store(false, std::memory_order_release);
+    {
+        std::lock_guard lock(g_craft_mu);
+        g_craft_have.clear();
+        g_craft_on.store(false, std::memory_order_release);
+    }
+    fill_clear();
 }
 
 }  // namespace
@@ -3225,6 +3345,12 @@ void stations_resolve() {
     // The count hook needs these two even then (docs/re/stations.md §10.2). Missing symbols leave the game's count.
     if (!G.resolve) sym("stations/ResolveRecipeInputs", &G.resolve);
     if (!G.recipe_find) sym("content/RecipeFind", &G.recipe_find);
+    // The station screen's fill buttons (GitHub #68, a Kiln client; docs/re/stations.md §10.3). Hooked on demand.
+    if (g_api->side() == KILN_SIDE_CLIENT && feat("stations.fill_ui")) {
+        g_fill_feat = sym("stations/client.UiActionStatus", &g_ui_status) && g_ui_status;
+        if (!g_fill_feat)
+            lower("stations.fill_ui", KILN_CAP_REASON_SYMBOL_MISSING, "stations/client.UiActionStatus did not resolve");
+    }
     G.fill_ok = G.read && feat("stations.fill") && E.tx_ok && sym("stations/AutoTransferRecipe", &G.fill) &&
                 sym("stations/FactoryInfoInvalidate", &G.invalidate) && E.setup_operator > 0 &&
                 E.setup_operator + 4 <= static_cast<int64_t>(kSetupBlock);
@@ -3406,6 +3532,7 @@ void stations_world_closed() {
         g_craft_have.clear();
         g_craft_on.store(false, std::memory_order_release);
     }
+    fill_clear();
     g_known.clear();
     g_stations.clear();
     g_altars.clear();

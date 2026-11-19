@@ -434,6 +434,10 @@ internal interface IStationsBackend
     int SetCraftStock(StationsNative.Stack[] rows);
     /// <summary>The items a Kiln client needs counted for these lent items (native <c>craft_items</c>).</summary>
     (int Rc, uint[] Items) CraftItems(uint[] lent);
+    /// <summary>The table has <c>set_fill_answers</c> and <c>fill_asks</c> (the station screen's fill buttons, 0.2.0-dev.29.19).</summary>
+    bool HasFillUi { get; }
+    int SetFillAnswers(StationsNative.FillAnswer[] rows);
+    (int Rc, StationsNative.FillKey[] Keys) FillAsks();
 }
 
 /// <summary>Kiln.Stations' side of kiln.stations: requests, results, reads, the event pump.</summary>
@@ -672,6 +676,25 @@ internal static unsafe partial class StationsCore
             fixed (StationsNative.Stack* p = rows) return T->SetCraftStock(p, (uint)rows.Length);
         }
 
+        public bool HasFillUi => T is var t && t != null && t->Header.Size >= (uint)StationsNative.TableFillUi;
+
+        public int SetFillAnswers(StationsNative.FillAnswer[] rows)
+        {
+            if (!HasFillUi) return StationsNative.Unavailable;
+            if (rows.Length == 0) return T->SetFillAnswers(null, 0);
+            fixed (StationsNative.FillAnswer* p = rows) return T->SetFillAnswers(p, (uint)rows.Length);
+        }
+
+        public (int Rc, StationsNative.FillKey[] Keys) FillAsks()
+        {
+            if (!HasFillUi) return (StationsNative.Unavailable, []);
+            var buf = new StationsNative.FillKey[StationsNative.MaxFillKeys];
+            uint n = 0;
+            int rc;
+            fixed (StationsNative.FillKey* p = buf) rc = T->FillAsks(p, (uint)buf.Length, &n);
+            return (rc, buf.AsSpan(0, (int)Math.Min(n, (uint)buf.Length)).ToArray());
+        }
+
         public (int Rc, uint[] Items) CraftItems(uint[] lent)
         {
             if (!HasCraftStock) return (StationsNative.Unavailable, []);
@@ -749,11 +772,15 @@ internal static unsafe partial class StationsCore
         {
             if (Backend.Status() is null)
                 ServiceCaps.LowerFeatures(StationsNative.Name, Stations.ReadCapability, Stations.FillCapability, Stations.ControlCapability,
-                    Stations.EventsCapability, Stations.OutputSourcesCapability, Stations.CraftSourcesCapability, Stations.CraftUiCapability);
+                    Stations.EventsCapability, Stations.OutputSourcesCapability, Stations.CraftSourcesCapability, Stations.CraftUiCapability,
+                    CraftStock.FillUiCapability);
             else if (!Backend.HasOutputSources)
-                ServiceCaps.LowerFeatures(StationsNative.Name, Stations.OutputSourcesCapability, Stations.CraftSourcesCapability, Stations.CraftUiCapability);
+                ServiceCaps.LowerFeatures(StationsNative.Name, Stations.OutputSourcesCapability, Stations.CraftSourcesCapability, Stations.CraftUiCapability,
+                    CraftStock.FillUiCapability);
             else if (!Backend.HasCraftStock)
-                ServiceCaps.LowerFeatures(StationsNative.Name, Stations.CraftSourcesCapability, Stations.CraftUiCapability);
+                ServiceCaps.LowerFeatures(StationsNative.Name, Stations.CraftSourcesCapability, Stations.CraftUiCapability, CraftStock.FillUiCapability);
+            else if (!Backend.HasFillUi)
+                ServiceCaps.LowerFeatures(StationsNative.Name, CraftStock.FillUiCapability);  // kiln-items before 0.2.0-dev.29.19
         }
         catch (Exception e) when (e is ArgumentException or InvalidOperationException)
         {

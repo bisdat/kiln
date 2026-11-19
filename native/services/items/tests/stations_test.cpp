@@ -62,11 +62,12 @@ int main() {
     static_assert(sizeof(KilnStationEvent) == 112 && offsetof(KilnStationEvent, by) == 64 && offsetof(KilnStationEvent, position) == 72 &&
                   offsetof(KilnStationEvent, base) == 96);
     static_assert(sizeof(KilnStationsStatus) == 188);
-    static_assert(sizeof(KilnStationsApi) == 8 + 28 * 8 && offsetof(KilnStationsApi, set_output_source) == 8 + 21 * 8 &&
+    static_assert(sizeof(KilnStationsApi) == 8 + 30 * 8 && offsetof(KilnStationsApi, set_output_source) == 8 + 21 * 8 &&
                   offsetof(KilnStationsApi, max_chests) == 8 + 23 * 8 && offsetof(KilnStationsApi, collect) == 8 + 24 * 8 &&
                   offsetof(KilnStationsApi, base_stock_with_stations) == 8 + 25 * 8 &&
-                  offsetof(KilnStationsApi, set_craft_stock) == 8 + 26 * 8 && offsetof(KilnStationsApi, craft_items) == 8 + 27 * 8);
-    static_assert(KILN_STATIONS_MAX_CRAFT_STOCK == 1024);
+                  offsetof(KilnStationsApi, set_craft_stock) == 8 + 26 * 8 && offsetof(KilnStationsApi, craft_items) == 8 + 27 * 8 &&
+                  offsetof(KilnStationsApi, set_fill_answers) == 8 + 28 * 8 && offsetof(KilnStationsApi, fill_asks) == 8 + 29 * 8);
+    static_assert(KILN_STATIONS_MAX_CRAFT_STOCK == 1024 && KILN_STATIONS_MAX_FILL_KEYS == 16);
     static_assert(sizeof(KilnStationCollect) == 24 && offsetof(KilnStationCollect, flags) == 16);
     // a collect's flags travel in KilnStationResult.flags: they share no bit with a request flag (DRY_RUN above all)
     static_assert(((KILN_STATION_COLLECT_OUTPUTS | KILN_STATION_COLLECT_LEFTOVERS | KILN_STATION_COLLECT_TO_BASE) &
@@ -884,6 +885,69 @@ int main() {
         CHECK(craft_stock_items(recipes, {COAL}) == want);
         CHECK(craft_stock_items(recipes, {}).empty());
         CHECK(craft_stock_items(recipes, {0x999}) == std::vector<uint32_t>({0x999}));  // lent, used by no recipe
+    }
+
+    // ---- the station screen's fill buttons on a Kiln client (GitHub #68, docs/re/stations.md §10.3) ----
+    {
+        static_assert(sizeof(KilnStationFillKey) == 40 && offsetof(KilnStationFillKey, choices) == 8);
+        static_assert(sizeof(KilnStationFillAnswer) == 48 && offsetof(KilnStationFillAnswer, crafts) == 40);
+        constexpr uint32_t FORGE = 1032, KILN2 = 1040, SHEETS = 0x3acc518b, OTHER = 0x1234;
+        KilnStationChoice sel[4] = {};
+        sel[1].category = 0x77;
+        sel[1].index = 2;
+        sel[1].reserved[0] = 0xcd;  // the game's padding byte is not part of the key
+        const KilnStationFillKey k = fill_key(FORGE, SHEETS, sel);
+        CHECK(k.choices[1].category == 0x77 && k.choices[1].index == 2 && k.choices[1].reserved[0] == 0);
+        CHECK(same_fill(k, fill_key(FORGE, SHEETS, sel)));
+        KilnStationChoice sel2[4] = {};
+        std::memcpy(sel2, sel, sizeof sel);
+        sel2[1].index = 3;
+        CHECK(!same_fill(k, fill_key(FORGE, SHEETS, sel2)));  // another option of the category
+        CHECK(!same_fill(k, fill_key(KILN2, SHEETS, sel)) && !same_fill(k, fill_key(FORGE, OTHER, sel)));
+        CHECK(same_fill(fill_key(FORGE, SHEETS, nullptr), fill_key(FORGE, SHEETS, std::vector<KilnStationChoice>(4).data())));
+
+        std::vector<KilnStationFillAnswer> answers;
+        bool answered = true;
+        // no answer: the game's status, and the screen's query is noted as unanswered
+        CHECK(fill_ui_status(kUiMissing, kUiQueryFill, 1, k, answers, &answered) == kUiMissing && !answered);
+        answers.push_back(KilnStationFillAnswer{k, 10, 0});
+        // the server's fill with station outputs covers 10 more crafts: "+1" and "+10" can fill, "+11" cannot
+        CHECK(fill_ui_status(kUiMissing, kUiQueryFill, 1, k, answers, &answered) == kUiOk && answered);
+        CHECK(fill_ui_status(kUiMissing, kUiQueryFill, 10, k, answers, &answered) == kUiOk);
+        CHECK(fill_ui_status(kUiMissing, kUiQueryFill, 11, k, answers, &answered) == kUiMissing && answered);
+        CHECK(fill_ui_status(kUiMissing, kUiQueryFill, 0, k, answers, &answered) == kUiMissing);
+        // only "missing materials" is raised: not run yet, no room, no inventory and ok stay the game's
+        CHECK(fill_ui_status(0, kUiQueryFill, 1, k, answers, &answered) == 0);
+        CHECK(fill_ui_status(2, kUiQueryFill, 1, k, answers, &answered) == 2);
+        CHECK(fill_ui_status(5, kUiQueryFill, 1, k, answers, &answered) == 5);
+        CHECK(fill_ui_status(kUiOk, kUiQueryFill, 1, k, answers, &answered) == kUiOk);
+        // other queries (the item fill 4, the craft 1, ...) are never touched
+        CHECK(fill_ui_status(kUiMissing, 4, 1, k, answers, &answered) == kUiMissing && !answered);
+        CHECK(fill_ui_status(kUiMissing, 1, 1, k, answers, &answered) == kUiMissing);
+        // an answer for another station, recipe or choice does not count
+        CHECK(fill_ui_status(kUiMissing, kUiQueryFill, 1, fill_key(KILN2, SHEETS, sel), answers, &answered) == kUiMissing && !answered);
+        CHECK(fill_ui_status(kUiMissing, kUiQueryFill, 1, fill_key(FORGE, SHEETS, sel2), answers, &answered) == kUiMissing && !answered);
+        // an answer of 0 crafts: answered, still the game's refusal
+        answers[0].crafts = 0;
+        CHECK(fill_ui_status(kUiMissing, kUiQueryFill, 1, k, answers, &answered) == kUiMissing && answered);
+
+        // the rows set_fill_answers takes
+        CHECK(fill_answer_ok(KilnStationFillAnswer{k, 3, 0}));
+        CHECK(!fill_answer_ok(KilnStationFillAnswer{k, 3, 1}));
+        CHECK(!fill_answer_ok(KilnStationFillAnswer{fill_key(0, SHEETS, nullptr), 3, 0}));
+        CHECK(!fill_answer_ok(KilnStationFillAnswer{fill_key(FORGE, 0, nullptr), 3, 0}));
+        KilnStationFillAnswer dirty{k, 3, 0};
+        dirty.key.choices[2].reserved[1] = 1;
+        CHECK(!fill_answer_ok(dirty));
+
+        // the asks: each refused key once, oldest first, at most the cap; an answer takes its key off
+        std::vector<KilnStationFillKey> asks;
+        CHECK(note_fill_ask(&asks, k, 3) && !note_fill_ask(&asks, k, 3) && asks.size() == 1);
+        CHECK(note_fill_ask(&asks, fill_key(KILN2, SHEETS, nullptr), 3) && note_fill_ask(&asks, fill_key(FORGE, OTHER, nullptr), 3));
+        CHECK(note_fill_ask(&asks, fill_key(FORGE, SHEETS, sel2), 3) && asks.size() == 3 && same_fill(asks[0], fill_key(KILN2, SHEETS, nullptr)));
+        CHECK(!note_fill_ask(&asks, k, 0) || asks.size() <= 3);
+        drop_answered(&asks, {KilnStationFillAnswer{fill_key(FORGE, OTHER, nullptr), 0, 0}});
+        CHECK(asks.size() == 2 && same_fill(asks[0], fill_key(KILN2, SHEETS, nullptr)) && same_fill(asks[1], fill_key(FORGE, SHEETS, sel2)));
     }
 
     std::printf("stations: %d checks, %d failures\n", checks, failed);

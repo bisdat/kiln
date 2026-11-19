@@ -638,6 +638,75 @@ inline std::vector<uint32_t> craft_stock_items(const std::vector<std::vector<uin
     return v;
 }
 
+// ---- the station screen's fill buttons on a Kiln client (GitHub #68, docs/re/stations.md §10.3) ----
+// The game's UI action query (stations/client.UiActionStatus) with type 3 asks whether a recipe fill of `amount` more
+// crafts would go through (the station screen's "+1" and "+10"; the client's own dry run of AutoTransferRecipe on its view
+// of the bag and the Magic chests). It answers 0 (not run yet), 1 (it would: the button is enabled), or the fill's code:
+// 2 no room in the station, 4 missing materials, 5 no inventory.
+constexpr uint32_t kUiQueryFill = 3;
+constexpr uint32_t kUiOk = 1, kUiMissing = 4;
+
+// The key of a query as the screen passes it; a choice's reserved bytes are not part of it.
+inline KilnStationFillKey fill_key(uint32_t station, uint32_t recipe, const KilnStationChoice* sel) {
+    KilnStationFillKey k{};
+    k.station = station;
+    k.recipe = recipe;
+    for (int i = 0; sel && i < 4; ++i) {
+        k.choices[i].category = sel[i].category;
+        k.choices[i].index = sel[i].index;
+    }
+    return k;
+}
+inline bool same_fill(const KilnStationFillKey& a, const KilnStationFillKey& b) {
+    if (a.station != b.station || a.recipe != b.recipe) return false;
+    for (int i = 0; i < 4; ++i)
+        if (a.choices[i].category != b.choices[i].category || a.choices[i].index != b.choices[i].index) return false;
+    return true;
+}
+// A row set_fill_answers takes: a station and a recipe, reserved bytes 0.
+inline bool fill_answer_ok(const KilnStationFillAnswer& a) {
+    if (!a.key.station || !a.key.recipe || a.reserved) return false;
+    for (int i = 0; i < 4; ++i)
+        if (a.key.choices[i].reserved[0] || a.key.choices[i].reserved[1] || a.key.choices[i].reserved[2]) return false;
+    return true;
+}
+
+// What the query answers: the game's own status, except that a fill the game refused for missing materials is "can fill"
+// when the server's answer for exactly this station, recipe and choices covers at least `amount` more crafts. Every other
+// status (not run yet, no room, no inventory, ok) and every other query type stays the game's. *answered: an answer names
+// this key (whatever its count).
+inline uint32_t fill_ui_status(uint32_t game, uint32_t type, uint32_t amount, const KilnStationFillKey& k,
+                               const std::vector<KilnStationFillAnswer>& answers, bool* answered) {
+    if (answered) *answered = false;
+    if (type != kUiQueryFill || game != kUiMissing) return game;
+    for (const KilnStationFillAnswer& a : answers) {
+        if (!same_fill(a.key, k)) continue;
+        if (answered) *answered = true;
+        return amount != 0 && amount <= a.crafts ? kUiOk : game;
+    }
+    return game;
+}
+
+// The fills to ask the server about: refused for missing materials, no answer yet. Oldest first, at most `cap` (the
+// oldest goes when a new one comes). False: nothing changed.
+inline bool note_fill_ask(std::vector<KilnStationFillKey>* asks, const KilnStationFillKey& k, size_t cap) {
+    for (const KilnStationFillKey& a : *asks)
+        if (same_fill(a, k)) return false;
+    if (cap == 0) return false;
+    if (asks->size() >= cap) asks->erase(asks->begin());
+    asks->push_back(k);
+    return true;
+}
+// New answers came: the asks they name are answered.
+inline void drop_answered(std::vector<KilnStationFillKey>* asks, const std::vector<KilnStationFillAnswer>& answers) {
+    asks->erase(std::remove_if(asks->begin(), asks->end(),
+                               [&](const KilnStationFillKey& k) {
+                                   return std::any_of(answers.begin(), answers.end(),
+                                                      [&](const KilnStationFillAnswer& a) { return same_fill(a.key, k); });
+                               }),
+                asks->end());
+}
+
 enum CraftVerdict : int {
     kCraftGame = 0,      // Kiln took nothing: the game's own payment runs (`why` says why)
     kCraftPaid = 1,      // every line paid, station outputs last: InventoryPay's 0

@@ -162,12 +162,7 @@ internal static partial class StationsCore
         if (recipe == 0 || item != 0 || water != 0 || amount == 0) return null;
         if (StationOutputKeeper.Count == 0 || station.IsNone) return null;
         if (amount > 1000) return Pass(out why, $"{amount} crafts is more than Kiln's fill takes (1000)");
-        if (mayAccess is not true) return Pass(out why, mayAccess is null ? "the player's permissions are not known" : "the player may not access inventories");
-        var at = Bases.Of(station);
-        var mine = Bases.Of(player);
-        if (at is null || mine is null || at.Id != mine.Id) return Pass(out why, "the player stands in another base than the station (or in none)");
-        var target = station;
-        if (Stations.OutputSources(at.Id).All(s => s == target)) return Pass(out why, "no other station of the base is opted in");
+        if (!SourceFillAllowed(player, station, mayAccess, out why)) return null;
         var choices = new List<CategoryChoice>();
         for (var i = 0; i < 4; i++)
         {
@@ -184,6 +179,43 @@ internal static partial class StationsCore
         if (lent.Status != StationActionStatus.Done) return Pass(out why, $"not even with station outputs: {lent.Reason}");
         return options;
     }
+
+    /// <summary>The button's own rules before any plan: the player may access the base's inventories (the game's
+    /// CanAccessInventories), stands in the station's base, and another station of that base is opted in. Shared by the
+    /// press (<see cref="SourceFill"/>) and the answers a Kiln client's station screen enables its fill from
+    /// (<see cref="FillCrafts"/>).</summary>
+    internal static bool SourceFillAllowed(EntityId player, EntityId station, bool? mayAccess, out string? why)
+    {
+        why = null;
+        if (mayAccess is not true) return Pass(out why, mayAccess is null ? "the player's permissions are not known" : "the player may not access inventories") is not null;
+        var at = Bases.Of(station);
+        var mine = Bases.Of(player);
+        if (at is null || mine is null || at.Id != mine.Id) return Pass(out why, "the player stands in another base than the station (or in none)") is not null;
+        if (Stations.OutputSources(at.Id).All(s => s == station)) return Pass(out why, "no other station of the base is opted in") is not null;
+        return true;
+    }
+
+    /// <summary>
+    /// GitHub #68, the station screen on a Kiln client: how many more complete crafts the button's fill (this recipe and
+    /// these choices, the player's bag first, then the Magic chests, then opted-in station outputs) covers now, by the
+    /// same rules <see cref="SourceFill"/> runs the press with. 0: none, or those rules refuse it (no inventory right,
+    /// another base, nothing else opted in). The client enables its "+1" and "+10" from it only where the game itself
+    /// refused for missing materials; the press is checked again when it comes.
+    /// </summary>
+    internal static uint FillCrafts(EntityId player, EntityId station, uint recipe, IReadOnlyList<CategoryChoice>? choices, bool? mayAccess)
+    {
+        if (StationOutputKeeper.Count == 0 || station.IsNone || player.IsNone || recipe == 0) return 0;
+        if (!SourceFillAllowed(player, station, mayAccess, out _)) return 0;
+        var plan = Stations.Plan(station, new FillOptions
+        {
+            Crafts = MaxFillCrafts, Mode = FillMode.Add, Exact = false, Recipe = recipe, Choices = choices is { Count: > 0 } ? choices : null,
+            Player = player,
+        });
+        return plan.Status is StationActionStatus.Done or StationActionStatus.Partial && plan.CraftsPlanned > 0 ? (uint)plan.CraftsPlanned : 0;
+    }
+
+    /// <summary>The most crafts one fill asks for (the press above it stays the game's).</summary>
+    internal const int MaxFillCrafts = 1000;
 
     private static FillOptions? Pass(out string? why, string text)
     {
