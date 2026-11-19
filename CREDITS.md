@@ -37,7 +37,10 @@ Enshrouded is a trademark of Keen Games GmbH. Kiln is not affiliated with or end
 
 ## Translations
 
-Translators of the launcher and of Kiln's in-game texts ([how to translate](docs/kiln/translating.md)).
+Translators of the launcher and of Kiln's in-game texts ([how to translate](docs/kiln/translating.md)). Each
+translation adds a line here: the language, the translator's name as they want it shown, and what they translated (the
+launcher, the in-game texts).
 
-None yet. Each translation adds a line here: the language, the translator's name as they want it shown, and what
-they translated (the launcher, the in-game texts).
+| Language | Translator | Translated |
+|---|---|---|
+| Simplified Chinese (简体中文, `zh-CN`) | XiaoHuLi666 (XHL) | The whole launcher (`launcher/src/i18n/zh-CN.json`) and all of Kiln's in-game texts (`runtime/locales/zh-CN.json`), from 0.2.0-dev.29.18. |

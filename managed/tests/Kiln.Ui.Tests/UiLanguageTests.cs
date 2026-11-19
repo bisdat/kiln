@@ -125,6 +125,37 @@ public sealed unsafe class UiLanguageTests : IDisposable
     }
 
     [Fact]
+    public void A_language_is_named_by_its_tag_while_the_overlay_cannot_draw_its_name()
+    {
+        File.WriteAllText(Path.Combine(_dir, "zh-CN.json"), """{ "language": { "name": "简体中文" } }""");
+        try
+        {
+            KilnLook.GlyphsForTests((UiNative.GlyphsLatin, 0));       // an English game: no Chinese font in the overlay
+            var (labels, ids) = LanguagePage.Choices("auto");
+            Assert.Equal(["auto", "en", "zh-CN"], ids);
+            Assert.Equal(["English", "zh-CN"], labels[1..]);
+            KilnLook.GlyphsForTests((UiNative.GlyphsLoading, 20));    // Chinese chosen: its font is being read
+            Assert.Equal("zh-CN", LanguagePage.Choices("zh-CN").Labels[^1]);
+            KilnLook.GlyphsForTests((UiNative.GlyphsFailed, 20));     // the font could not be read: the tag stays
+            Assert.Equal("zh-CN", LanguagePage.Choices("zh-CN").Labels[^1]);
+            KilnLook.GlyphsForTests((UiNative.GlyphsReady, 11));      // Japanese glyphs are not Chinese ones
+            Assert.Equal("zh-CN", LanguagePage.Choices("zh-CN").Labels[^1]);
+            KilnLook.GlyphsForTests((UiNative.GlyphsReady, 20));      // the font joined the atlas
+            Assert.Equal("简体中文", LanguagePage.Choices("zh-CN").Labels[^1]);
+            // a Chinese game on auto: "Automatic" names the game's language by its tag until the font is there
+            KilnText.Refresh("zh-cn");
+            KilnLook.GlyphsForTests((UiNative.GlyphsLoading, 20));
+            Assert.Equal("Automatic (the game's language: zh-CN)", LanguagePage.Choices("auto").Labels[0]);
+            KilnLook.GlyphsForTests(null);                            // a kiln.ui that does not say is taken at its word
+            Assert.Equal("简体中文", LanguagePage.Choices("auto").Labels[^1]);
+        }
+        finally
+        {
+            KilnLook.GlyphsForTests(null);
+        }
+    }
+
+    [Fact]
     public void Kiln_ui_s_layout_of_the_texts_tail()
     {
         Assert.Equal(40, sizeof(UiNative.Texts));

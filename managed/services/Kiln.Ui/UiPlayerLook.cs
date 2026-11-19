@@ -356,6 +356,9 @@ internal static unsafe class KilnLook
     /// keen::LanguageId); null when this kiln.ui does not say.</summary>
     internal static (byte State, byte Language)? Glyphs => _glyphs;
 
+    /// <summary>Tests: kiln.ui's glyph state as if read at a frame's start (null: a kiln.ui that does not say).</summary>
+    internal static void GlyphsForTests((byte State, byte Language)? glyphs) => _glyphs = glyphs;
+
     /// <summary>Tests and the preview: a palette in place of kiln.ui's.</summary>
     internal static UiPalette? Override;
 
@@ -472,8 +475,9 @@ internal static class LookPage
 }
 
 /// <summary>Mods > Kiln settings > Language (beside Look): the language of Kiln's own texts. "Automatic" follows the game's
-/// text language; each language Kiln has texts for is listed in its own name. A change shows at once and is saved with the
-/// look (kiln.json <c>ui.language</c>).</summary>
+/// text language; each language Kiln has texts for is listed in its own name, or by its tag while the overlay cannot draw
+/// that name (简体中文 needs the game's Chinese font in the overlay: an English game has none). A change shows at once and is
+/// saved with the look (kiln.json <c>ui.language</c>).</summary>
 internal static class LanguagePage
 {
     private static string _itemsKey = "\0";
@@ -484,11 +488,11 @@ internal static class LanguagePage
     /// player's setting too while no file has it.</summary>
     internal static (string[] Labels, string[] Ids) Choices(string setting)
     {
-        var labels = new List<string> { KilnText.T("settings.language.auto", ("language", KilnText.NameOf(KilnText.Setting == KilnText.Auto ? KilnText.Language : GameLanguage.Current))) };
+        var labels = new List<string> { KilnText.T("settings.language.auto", ("language", Name(KilnText.Setting == KilnText.Auto ? KilnText.Language : GameLanguage.Current))) };
         var ids = new List<string> { KilnText.Auto };
         foreach (var tag in KilnText.Languages())
         {
-            labels.Add(KilnText.NameOf(tag));
+            labels.Add(Name(tag));
             ids.Add(KilnText.Canonical(tag));
         }
         if (setting != KilnText.Auto && !ids.Contains(setting, StringComparer.OrdinalIgnoreCase))
@@ -498,6 +502,11 @@ internal static class LanguagePage
         }
         return (labels.ToArray(), ids.ToArray());
     }
+
+    /// <summary>A language's name as the overlay can draw it now: its own name ("简体中文") when the overlay has that
+    /// language's glyphs (or the language needs none), else its tag ("zh-CN"), which is never boxes.</summary>
+    internal static string Name(string language) =>
+        UiLanguage.GlyphsReady(language, KilnLook.Glyphs) ? KilnText.NameOf(language) : KilnText.Canonical(language);
 
     public static void Draw(UiDraw ui, float s, Action<UiDraw, string, float> caption)
     {

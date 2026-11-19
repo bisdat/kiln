@@ -103,6 +103,10 @@ reads the game's UI font, and merges it into the overlay's fonts after their Lat
   `kiln.assets`, another build's data), kiln.log says why (`ui: the game's font of language 20 is not available (...)`),
   the overlay keeps its Latin fonts and Kiln's texts stay English. `KilnUiLookInfo.glyphs` says which
   (`KILN_UI_GLYPHS_LATIN / LOADING / READY / FAILED`).
+  The same holds for what kiln-ui.dll draws in the overlay itself (the graphics readout, the fallback window): only the
+  `native.` texts the game draws (`KilnText.GameDrawnPrefixes`: `native.menu.`, `native.footer.`) are in the language
+  meanwhile. In **Language**, a Chinese, Japanese or Korean language's own name (简体中文) shows once the overlay has its
+  glyphs, else its tag: an English game lists Simplified Chinese as `zh-CN` (since 0.2.0-dev.29.18).
 - kiln.log: `ui: the game's font of language 20 joined the overlay's font atlas (group 1, fonts 13, 12 of 28, 17.7 MB; ...)`.
 
 ## Testing a translation
