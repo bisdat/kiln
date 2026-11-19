@@ -34,10 +34,11 @@ extern "C" {
 #endif
 
 #define KILN_ITEMS_SERVICE "kiln.items"
-#define KILN_ITEMS_VERSION 7u  /* v2 appends the fuel functions, v3 the move, name and transfer functions, v4 the item
+#define KILN_ITEMS_VERSION 8u  /* v2 appends the fuel functions, v3 the move, name and transfer functions, v4 the item
                                   instances (stamps, locations, records), v5 (0.2.0-dev.27) equip and unequip, v6
                                   (0.2.0-dev.29) equipment sets, v7 (0.2.0-dev.30, the gem wave) gem sockets on any gear:
-                                  KILN_ITEMS_GEM_SLOT_ANY, REPLACE, DYE, DURABILITY and socket_roll; check header.size */
+                                  KILN_ITEMS_GEM_SLOT_ANY, REPLACE, DYE, DURABILITY and socket_roll, v8 (0.2.0-dev.29.19,
+                                  the equipment wave) gear_write, gear_read and gear_status; check header.size */
 
 typedef uint32_t KilnItemId;  /* 0 = none */
 typedef uint64_t KilnSlotId;  /* 0 = none / let the game choose */
@@ -905,6 +906,141 @@ typedef struct KilnItemsSocketRoll {
     uint32_t reserved; /* 0 */
 } KilnItemsSocketRoll;
 
+/* ---------------------------------------------------------------------------------------------- gear -------- */
+
+/* v8, since 0.2.0-dev.29.19 (the equipment wave; feature items.gear; check header.size before calling a v8 member).
+ *
+ * An item entity's rarity, enhancements and level, written in place. The game keeps an instance's rarity as its
+ * enhancement count: PerkContainerNew {u8 availablePerks, u8 unlockedPerks} on the item entity, and itemRarityOf is
+ * availablePerks - 1 (Common 0 .. Legendary 4) when that is 0..4, else the type's ItemInfo.rarity. The shown rarity,
+ * level and damage (ItemState.itemRarityUi, itemLevelUi, baseDamageUi) are derived from it by the game's own
+ * item_state_init in the next sim step, and replicated from there. An unlocked enhancement is one level: the Level
+ * attribute moves with unlockedPerks, as the game's UnlockPerk and its free +1 / -1 action do. Max durability is
+ * computed once by item_durability_init from rarity and level; clearing ItemState's DurabilityInitialized bit makes it
+ * run again in the next step, keeping the current / max ratio (docs/re/items.md section 19).
+ *
+ * gear_write queues one write; it runs in the next sim step inside the serial program kiln_items_gear (registered
+ * through kiln.world) as tracked writes (WriteOther, the attribute's formulas), so players and the save get it like the
+ * game's own changes. The request names the item entity with its v4 stamp (read_instances, a slot's reserved field):
+ * an item entity that is gone, or another item now, ends STALE and nothing changes. Server world only (a dedicated
+ * server, or the hosting player's game). */
+
+/* KilnItemsGearRequest.flags */
+enum {
+    KILN_ITEMS_GEAR_AVAILABLE = 0x0001u,     /* availablePerks := available (1..5; the rarity is available - 1). Lower
+                                                than unlockedPerks: unlockedPerks (and Level) come down with it */
+    KILN_ITEMS_GEAR_UNLOCKED = 0x0002u,      /* unlockedPerks := unlocked (0..availablePerks after AVAILABLE); Level moves
+                                                by the same number (it needs a Level) */
+    KILN_ITEMS_GEAR_LEVEL = 0x0004u,         /* Level := level (the shown level, enhancements included); the base level
+                                                (level - unlockedPerks) must be in the type's level range */
+    KILN_ITEMS_GEAR_FORCE_SLOT = 0x0008u,    /* AVAILABLE beyond the type's last filled perk slot (an empty slot; the
+                                                game skips it): without it such a request ends NO_SLOT */
+    KILN_ITEMS_GEAR_DURABILITY_REFRESH = 0x0010u, /* clear DurabilityInitialized: the game recomputes max durability at
+                                                     the new rarity and level in the next step, keeping the ratio */
+    KILN_ITEMS_GEAR_DURABILITY_REPAIR = 0x0020u,  /* current := max, then as REFRESH: full at the new max */
+    KILN_ITEMS_GEAR_DRY_RUN = 0x0040u,       /* say what would change (after = the plan), change nothing */
+    KILN_ITEMS_GEAR_NOT_EQUIPPED = 0x0080u,  /* refuse (EQUIPPED) when the item is equipped; default: allowed */
+};
+
+/* KilnItemsGearResult.status */
+enum {
+    KILN_ITEMS_GEAR_DONE = 0,         /* written (or, DRY_RUN, would be); also when nothing needed a change */
+    KILN_ITEMS_GEAR_STALE = 1,        /* the entity is not the stamped item entity any more (gone, or another item) */
+    KILN_ITEMS_GEAR_NOT_GEAR = 2,     /* no PerkContainerNew (the type has no enhancement slots), or no Level for an
+                                         UNLOCKED change or LEVEL */
+    KILN_ITEMS_GEAR_NO_SLOT = 3,      /* AVAILABLE beyond the type's last filled perk slot (without FORCE_SLOT) */
+    KILN_ITEMS_GEAR_OUT_OF_RANGE = 4, /* unlocked above available, a level whose base is outside the type's range */
+    KILN_ITEMS_GEAR_EQUIPPED = 5,     /* NOT_EQUIPPED and the item is equipped */
+    KILN_ITEMS_GEAR_UNAVAILABLE = 6,  /* gear writes were switched off since the request was accepted */
+    KILN_ITEMS_GEAR_DROPPED = 7,      /* not run: the server world went away or did not step for 10 s */
+    KILN_ITEMS_GEAR_REFUSED = 8,      /* a component of the entity is not laid out as expected; nothing changed */
+};
+
+/* KilnItemsGearResult.changed / KilnItemsGearState.flags */
+enum {
+    KILN_ITEMS_GEAR_CHANGED_PERKS = 0x01u,      /* PerkContainerNew */
+    KILN_ITEMS_GEAR_CHANGED_LEVEL = 0x02u,      /* Level (current or max) */
+    KILN_ITEMS_GEAR_CHANGED_DURABILITY = 0x04u, /* Durability current (REPAIR) */
+    KILN_ITEMS_GEAR_CHANGED_STATE = 0x08u,      /* ItemState: DurabilityInitialized cleared */
+};
+enum {
+    KILN_ITEMS_GEAR_HAS_PERKS = 0x01u,      /* the entity has PerkContainerNew */
+    KILN_ITEMS_GEAR_HAS_LEVEL = 0x02u,      /* ... a Level with values */
+    KILN_ITEMS_GEAR_HAS_DURABILITY = 0x04u, /* ... a Durability with values */
+    KILN_ITEMS_GEAR_EQUIPPED_NOW = 0x08u,   /* ItemState IsEquipped */
+    KILN_ITEMS_GEAR_DURABILITY_INIT = 0x10u,/* ItemState DurabilityInitialized */
+};
+
+typedef struct KilnItemsGearRequest {
+    uint32_t size;       /* sizeof(KilnItemsGearRequest) */
+    uint32_t flags;      /* KILN_ITEMS_GEAR_*: at least one of AVAILABLE, UNLOCKED, LEVEL, DURABILITY_REFRESH,
+                            DURABILITY_REPAIR; other bits are refused */
+    KilnEntity entity;   /* the item entity */
+    uint32_t stamp;      /* its v4 stamp (required) */
+    KilnItemId item;     /* the item it must hold (0 = whatever the stamp names) */
+    uint8_t available;   /* AVAILABLE: 1..5 */
+    uint8_t unlocked;    /* UNLOCKED: 0..5 */
+    uint16_t reserved0;  /* 0 */
+    uint32_t level;      /* LEVEL: 1..255 (the save record keeps the low byte) */
+    uint32_t reserved[3];/* 0 */
+} KilnItemsGearRequest;
+
+/* One item entity's gear as the program (or gear_read) sees it. */
+typedef struct KilnItemsGearState {
+    uint32_t flags;           /* KILN_ITEMS_GEAR_HAS_* */
+    KilnItemId item;
+    uint8_t available;        /* HAS_PERKS: availablePerks */
+    uint8_t unlocked;         /* HAS_PERKS: unlockedPerks */
+    uint8_t rarity;           /* itemRarityOf: available - 1 when that is 0..4, else type_rarity */
+    uint8_t type_rarity;      /* ItemInfo.rarity */
+    uint8_t max_available;    /* the type's last filled perk slot + 1 (0: none filled): the highest AVAILABLE without
+                                 FORCE_SLOT */
+    uint8_t rarity_ui;        /* ItemState.itemRarityUi: the rarity the game derived (and players are sent); it follows a
+                                 write in the next sim step */
+    uint8_t level_ui;         /* ItemState.itemLevelUi, likewise */
+    uint8_t reserved0;        /* 0 */
+    uint32_t level;           /* HAS_LEVEL: Level current */
+    uint32_t level_max;       /* HAS_LEVEL: Level max */
+    uint32_t type_level_min;  /* ItemInfo.itemLevelRange */
+    uint32_t type_level_max;
+    int32_t durability;       /* HAS_DURABILITY: current */
+    int32_t durability_max;   /* HAS_DURABILITY: max */
+    uint16_t state;           /* ItemState.itemState bits */
+    uint16_t reserved1;       /* 0 */
+} KilnItemsGearState;
+
+typedef struct KilnItemsGearResult {
+    uint32_t size;            /* sizeof(KilnItemsGearResult) of kiln.items */
+    int32_t status;           /* KILN_ITEMS_GEAR_DONE ... */
+    uint64_t ticket;
+    KilnEntity entity;
+    uint32_t stamp;
+    uint32_t flags;           /* the request's */
+    uint32_t changed;         /* KILN_ITEMS_GEAR_CHANGED_* (DRY_RUN: would change) */
+    uint32_t steps;           /* sim steps between the request and the write */
+    uint32_t reserved;        /* 0 */
+    uint64_t step;            /* the sim step it ran in (0: it never ran) */
+    KilnItemsGearState before;
+    KilnItemsGearState after; /* read back after the writes (DRY_RUN: the plan). rarity is the derived one: the game's
+                                 itemRarityUi follows in the next step */
+    char message[160];        /* "" when DONE; NUL-terminated */
+} KilnItemsGearResult;
+
+typedef void(KILN_CALL* KilnItemsGearDoneFn)(const KilnItemsGearResult* result, void* user);
+
+typedef struct KilnItemsGearStatus {
+    uint32_t size;            /* in: sizeof(KilnItemsGearStatus) */
+    uint8_t available;        /* 1: gear_write can run (feature items.gear, kiln.world, the layouts, the program) */
+    uint8_t program;          /* KILN_ITEMS_PROGRAM_* of kiln_items_gear */
+    uint8_t replicated;       /* 1: the world replicates ItemState, where the game puts the rarity, level and damage it
+                                 derives from the written state (checked when the program first runs) */
+    uint8_t saved;            /* 1: the world saves PerkContainerNew and Level */
+    uint32_t pending;         /* requests waiting for the program */
+    uint64_t writes;          /* item entities changed since the start */
+    uint64_t refused;         /* requests that ended with anything but DONE */
+    char detail[160];         /* why it is off; NUL-terminated */
+} KilnItemsGearStatus;
+
 /* ---------------------------------------------------------------------------------------------- the table ---- */
 
 typedef struct KilnItemsApi {
@@ -1085,6 +1221,23 @@ typedef struct KilnItemsApi {
      * KILN_ERR_INVALID_ARGUMENT: a chance outside 0..1 (or not a number), size too small, reserved not 0.
      * cancel_owner(owner) ends them too. Any thread; the next item the game creates uses them. */
     KilnResult(KILN_CALL* socket_roll)(KilnOwner owner, const KilnItemsSocketRoll* roll);
+
+    /* ---- v8, since 0.2.0-dev.29.19: gear (check header.size; KILN_ERR_UNAVAILABLE without feature items.gear) ---- */
+
+    /* Queues a gear write (see "gear"). *out_ticket (optional) = its ticket. Refused at once with
+     * KILN_ERR_INVALID_ARGUMENT (no request or a short one, entity 0, stamp 0, no operation, bad flags, available
+     * outside 1..5, unlocked above 5, level outside 1..255, non-zero reserved fields) or KILN_ERR_UNAVAILABLE (feature
+     * items.gear off, no kiln.world, a layout check failed, the program refused or switched off, 1024 requests
+     * waiting). Otherwise `done` runs once on the tick thread in Pre with the result (it may be NULL). cancel(ticket)
+     * and cancel_owner(owner) drop the callback. Any thread. */
+    KilnResult(KILN_CALL* gear_write)(KilnOwner owner, const KilnItemsGearRequest* request, KilnItemsGearDoneFn done,
+                                      void* user, uint64_t* out_ticket);
+    /* An item entity's gear now, through GetComponent (no write): *out zeroed, then filled. stamp 0 = any; otherwise
+     * KILN_ERR_NOT_FOUND also when the entity is not that stamped item entity. KILN_ERR_NOT_FOUND: no item entity
+     * (no ItemState). KILN_ERR_UNAVAILABLE: feature items.gear or items.instances off, or before the server world's
+     * first step. Tick thread (Pre / Post). */
+    KilnResult(KILN_CALL* gear_read)(KilnEntity entity, uint32_t stamp, KilnItemsGearState* out);
+    KilnResult(KILN_CALL* gear_status)(KilnItemsGearStatus* out); /* any thread */
 } KilnItemsApi;
 
 #ifdef __cplusplus
