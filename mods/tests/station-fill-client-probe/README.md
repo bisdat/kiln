@@ -34,7 +34,7 @@ The research branch also has a branch-only GitHub Actions build workflow. It pac
 1. Keep BSMS `ShareOutputs=true`, `CollectOutputs=false`; base enabled and relevant station types opted in. Avoid other automatic fill/collect changes during the check.
 2. Put eligible finished outputs into one producing station; have another station's normal recipe require them. Repeat across several station **types**, not just Forge.
 3. Open the *receiving station's* normal interface. Capture the native **Available** label and enabled/disabled Fill control, alongside the Kiln probe panel's `+1 craft` comparison.
-4. Optionally try the native Fill hotkey while the button is greyed out, only after preserving your save and choosing harmless test quantities. Check whether an `ACTION-RECEIVED ... kind=Fill` line appears. A transmitted Fill *may change inventory* through the game's real handler; the probe itself never sends one.
+4. Record the receiving station's type for each observation; cover different input counts and water-dependent stations, not only the charcoal example. Optionally try the native Fill hotkey while the button is greyed out, only after preserving your save and choosing harmless test quantities. Check whether an `ACTION-RECEIVED ... kind=Fill` line appears. A transmitted Fill *may change inventory* through the game's real handler; the probe itself never sends one.
 5. Close that station; repeat for other station types. Compare results and capture `fillprobe:` log lines.
 
 From the Bazzite terminal while the game is running, retrieve the last probe messages:
