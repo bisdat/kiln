@@ -1517,6 +1517,10 @@
       "nothingAdded": "Nothing was added",
       "addedOne": "Added {name}",
       "addedMany": "Added {count} mods",
+      "updatedOne": "Updated {name}: {from} → {to}",
+      "updatedName": "Updated {name}",
+      "updatedMany": "Updated {count} mods",
+      "addedAndUpdated": "{added} added, {updated} updated",
       "needs": "Needs {ids}",
       "alreadyOne": "{name} already on",
       "alreadyMany": "{count} mods already on",
@@ -2630,6 +2634,25 @@
     },
     "partsMissing": "Parts missing",
     "partsMissingText": "Kiln {version} has parts this game does not: {parts}. Mods that need them do not load until they are in.",
+    "repair": "Repair",
+    "filesMissing": "Files missing",
+    "filesMissingText": {
+      "one": "{count} of Kiln's files is missing: {files}",
+      "other": "{count} of Kiln's files are missing: {files}"
+    },
+    "filesMissingAntivirus": {
+      "one": "An antivirus may have removed it.",
+      "other": "An antivirus may have removed them."
+    },
+    "filesMissingRepair": {
+      "one": "Repair puts it back.",
+      "other": "Repair puts them back."
+    },
+    "filesMissingNoBundle": {
+      "one": "Kiln {version} is not among the bundles below: update Kiln, or add its bundle, to put it back.",
+      "other": "Kiln {version} is not among the bundles below: update Kiln, or add its bundle, to put them back."
+    },
+    "antivirusHelp": "Antivirus help",
     "chainTitle": "What the game loads, in order",
     "chainLive": "Live, from this boot.",
     "chainNotLive": "Live statuses show after a start.",
@@ -3458,6 +3481,10 @@
       "kilnWhat": "Kiln {version} · {what}"
     },
     "play": {
+      "applyingProfile": "Applying profile…",
+      "installingKiln": "Installing Kiln…",
+      "removingKiln": "Removing Kiln…",
+      "applyingAria": "{what} ({title})",
       "stoppedStart": "Kiln stopped the start",
       "waitingForKiln": "Waiting for Kiln",
       "noWord": "No word from Kiln",
@@ -3613,6 +3640,8 @@
       "undoKeptDetail.one": "{count} mod was changed since this add.",
       "undoKeptDetail.other": "{count} mods were changed since this add.",
       "undone": "Undone",
+      "updatedFromTo": "Updated {name}: {from} → {to}",
+      "addedAndUpdated": "Added {added}, updated {updated}",
       "noGame": "No game yet",
       "noGameModpack": "Find Enshrouded on Play before installing a modpack.",
       "headingAddedOff": "Added, switched off",

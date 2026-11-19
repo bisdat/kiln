@@ -119,7 +119,9 @@ as it is; otherwise it downloads from `builds.dotnet.microsoft.com` and checks t
     `<data>/installs/<installId>.json` (`game::write_record`).
 
 `status` reports the receipt, the current proxy class, the files changed since (size mismatch, else sha256 cached by
-size+mtime per process) and a newer bundle in `<data>/runtime/` for the side.
+size+mtime per process; a missing file counts), `missingFiles` (since 0.2.0-dev.29.18: the changed files that are not
+in the folder at all, such as a DLL an antivirus removed; Runtime offers Repair, the same bundle again, for them) and
+a newer bundle in `<data>/runtime/` for the side.
 
 ## Uninstall and rollback
 `uninstall` (refused while running/updating): checks first that every original (the oldest `replaced[]` record per

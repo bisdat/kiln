@@ -503,21 +503,33 @@ let taskSeq = 0;
 
 function emitTask(t: Task) { tasks.set(t.id, t); mockEmit("kiln://task", clone(t)); }
 
+/** Tasks of a kind held before their last step until a test opens the gate (`__kilnMock.holdTasks(kind, gate)`): a slow
+ *  activation of that kind. `fail`: the task then fails with this message instead of finishing. */
+const taskHolds = new Map<string, { gate: string; fail?: string }>();
+
 /** A fake long task: `steps` progress messages, then `finish()` gives the result (or throws a KilnError). */
 function startTask(kind: string, title: string, steps: string[], finish: () => unknown, stepMs = 450): string {
   const id = `t${++taskSeq}-${kind}`;
   const t: Task = { id, kind, title, state: "running", progress: 0, message: steps[0] ?? null, started: now(), finished: null };
   emitTask(t);
+  const hold = taskHolds.get(kind);
   let i = 0;
+  const end = () => {
+    let state: TaskState = "done";
+    let result: unknown = null;
+    let error: KilnError | undefined;
+    try {
+      if (hold?.fail) reject("io", hold.fail);
+      result = finish();
+    } catch (e) { state = "failed"; error = e as KilnError; }
+    emitTask({ ...t, state, progress: 1, message: error ? error.message : "Done", finished: now(), result, error });
+  };
   const tick = () => {
     if (cancels.has(id)) { emitTask({ ...t, state: "canceled", message: "Canceled", finished: now(), error: { code: "canceled", message: "Canceled." } }); return; }
     i++;
     if (i < steps.length) { emitTask({ ...t, progress: i / steps.length, message: steps[i] }); setTimeout(tick, stepMs); return; }
-    let state: TaskState = "done";
-    let result: unknown = null;
-    let error: KilnError | undefined;
-    try { result = finish(); } catch (e) { state = "failed"; error = e as KilnError; }
-    emitTask({ ...t, state, progress: 1, message: error ? error.message : "Done", finished: now(), result, error });
+    if (hold && !gateOf(hold.gate).open) { gateOf(hold.gate).waiters.push(() => setTimeout(end, 0)); return; }
+    end();
   };
   setTimeout(tick, stepMs);
   return id;
@@ -1015,7 +1027,9 @@ const handlers: Record<string, Handler> = {
     const fail = failNextInstall;
     failNextInstall = null;
     runtimeInstalls.push(b.version);
-    return startTask("runtime_install", `Install Kiln ${b.kiln}`, ["Staging", "Verifying hashes", "Classifying dinput8.dll", "Backing up", "Placing files", "Writing receipt"], () => {
+    // runtime_rollback's own task, as the backend names it (its kind and "Roll back to <version>")
+    const back = a.rollback === true;
+    return startTask(back ? "runtime_rollback" : "runtime_install", back ? `Roll back to ${b.version}` : `Install Kiln ${b.kiln}`, ["Staging", "Verifying hashes", "Classifying dinput8.dll", "Backing up", "Placing files", "Writing receipt"], () => {
       const st = runtime[gameId];
       if (fail) reject("io", fail);
       if (st?.proxy?.kind === "shroudforge" && !opts.switchFromShroudforge) reject("refused", "ShroudForge is installed. Switch from ShroudForge to replace it.");
@@ -1025,8 +1039,9 @@ const handlers: Record<string, Handler> = {
       const components = opts.components ? selectParts(b, g.kind, opts.components) : resolveParts(b, g.kind, prev);
       const deselected = opts.components ? deselectedFor(b, g.kind, components, prev) : prev?.side === g.kind ? prev.runtime.deselected ?? [] : [];
       const receipt: InstallReceipt = { ...baseReceipt, side: g.kind, installed: st?.receipt?.installed ?? now(), updated: now(), runtime: { version: b.version, sha256: b.sha256, components, deselected } };
-      // like the backend: Kiln files changed by hand are replaced, their copies kept in the install's backup
-      const changed = st?.modified ?? [];
+      // like the backend: Kiln files changed by hand are replaced, their copies kept in the install's backup; missing
+      // ones are put back (there is nothing to keep)
+      const changed = (st?.modified ?? []).filter((f) => !(st?.missingFiles ?? []).includes(f));
       runtime[gameId] = { installed: true, receipt, proxy: kilnProxy, modified: [], upgradeAvailable: null };
       emitGame(g.id, "status");
       const backup = changed.length ? `/home/player/.local/share/kiln/backups/install/${receipt.installId}/install-${now().replace(/[-:]/g, "").slice(0, 15)}Z` : null;
@@ -1047,7 +1062,7 @@ const handlers: Record<string, Handler> = {
       return { removed: 1, restored: [], adopted: [], kept: [], placements: { removed: [], retained: [] }, warnings: [] };
     });
   },
-  runtime_rollback: (a) => handlers.runtime_install({ ...a, options: {} }),
+  runtime_rollback: (a) => handlers.runtime_install({ ...a, options: {}, rollback: true }),
 
   // profiles
   profile_list: () => [...profiles.values()].map(summary).sort((a, b) => a.name.localeCompare(b.name)),
@@ -1883,6 +1898,9 @@ if (typeof window !== "undefined") (window as unknown as { __kilnMock?: unknown 
   planAddNotices: (lines: string[]) => { addNotices.push(...lines); },
   setSfOwnFolder: (id: string, own = true) => { if (own) sfOwn.add(id); else sfOwn.delete(id); },
   setCookPace: (ms: number) => { cookStepMs = ms; },
+  /** Tasks of `kind` started from now on wait before their last step until `openGate(gate)`; with `fail`, they then
+   *  fail with that message. null clears it. */
+  holdTasks: (kind: string, hold: { gate: string; fail?: string } | null) => { if (hold) taskHolds.set(kind, hold); else taskHolds.delete(kind); },
   setOnceBootSnapshot: (profileId: string, s: BootSnapshot | null) => { if (s) onceBootSnapshots.set(profileId, s); else onceBootSnapshots.delete(profileId); },
   setCook: (id: string, cook: { reason?: CookReason | null; fails?: string | null } | null) => {
     if (!cook) { cookMods.delete(id); return; }
@@ -1904,6 +1922,13 @@ if (typeof window !== "undefined") (window as unknown as { __kilnMock?: unknown 
     edited.set(editKey(kind, id, e.versions[0].hash), change);
   },
   setModified: (files: string[], gameId = "client-steam") => { if (runtime[gameId]) runtime[gameId] = { ...runtime[gameId], modified: files }; emitGame(gameId, "status"); },
+  /** Receipt files gone from the game folder (an antivirus took them): missing, and changed as the backend counts them
+   *  (install::status). An install puts them back. */
+  setMissing: (files: string[], gameId = "client-steam") => {
+    const st = runtime[gameId];
+    if (st) runtime[gameId] = { ...st, modified: [...new Set([...st.modified, ...files])], missingFiles: files };
+    emitGame(gameId, "status");
+  },
   startOutside: mockStartOutside, setServer: mockSetServer, opened: () => [...openedUrls],
   setPreStart: (p: PreStart | null) => { preStart = p; },
   /** The next Play plays the owner's start of 13 Nov (mockProgress.ts), compressed and changed by `o`; null: off. */

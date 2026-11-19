@@ -346,7 +346,18 @@ window, Play. The mod is in the list on Play, switched on.
   the drop until the add worked (a profile made by "New profile…" whose add failed is listed, to pick again). One
   activation per game at a time (`api/oneActivation.ts`, inside `profileActivate`, `profileDeactivate`,
   `profileEnsureDefault`, `libraryAddToProfile` and `launchPlay`): another one while it runs is refused with "Kiln is
-  still loading a profile in this game". A drop takes a
+  still loading a profile in this game". Since 0.2.0-dev.29.18 Play does not wait for the click to say so: while an
+  activation runs, whatever started it, the mouth (desktop and Deck) reads Play with "Applying profile…" under it
+  ("Installing Kiln…" for `runtime_install` and `runtime_rollback`, "Removing Kiln…" for `runtime_uninstall`) and is
+  off, and so are Vanilla and Without mods (a Vanilla or Play once dialog opened before says the guard's sentence
+  instead of starting); it comes back when the activation ends or fails. `src/shell/applying.ts` decides it from two
+  places only: the task list (`library_add`, `modpack_install`, `found_add`, `nexus_install`, `runtime_install`,
+  `runtime_rollback`, `runtime_uninstall` queued or running; tasks name no game, so one holds Play in every game; the
+  list is read once the `kiln://task` listener is in, so a task that ends in between is not left running) and the
+  guard above (`useDirectActivations`, Play's own `launchPlay` aside; the guard lives in the page, so a reload while a
+  Load runs forgets it). `tests/applying.spec.ts` holds each kind with `__kilnMock.holdTasks(kind, {gate, fail?})`. A
+  drop's toast says "Updated <name>: <old> → <new>" (desktop and Deck) when the profile had another version of the mod
+  (`AddReport.changes[].before`; `src/shell/addWords.ts`), "Added <name>" for a new one as before. A drop takes a
   zip, 7z or rar (`library::archive_kind`), a folder or a DLL. Modpack zips open the consent dialog (`ModpackDropOffer`: tick the box, then
   `modpack_install` with `{path}`). A drop on a DropZone (Runtime's bundle row) or while a dialog is
   open is not the window's; a covered or busy DropZone takes no drops. Overlapping identical drops run once; other
@@ -727,6 +738,52 @@ words, the report's finding, the restart's arguments), `render::` (the restart a
 Debug and QA (`dev-eval`) builds only: `KILN_LAUNCHER_TEST_SANDBOX_PROBE=works|fails|missing|unknown` replaces the
 probe's result, and `KILN_LAUNCHER_TEST_DIALOG=tools` skips GTK (the tools) or `=<button>@<seconds>` presses a GTK
 message's button by itself, so the messages can be checked on a private Xvfb display.
+
+## Antivirus
+For players on Windows. Kiln works by putting DLL files into the game folder. Some antivirus programs flag files like
+these and remove them or move them to quarantine. Kiln, or a part of it, then does not load. Since 0.2.0-dev.29.18 the
+launcher's Runtime page says when one of Kiln's files is missing, for example "1 of Kiln's files is missing:
+kiln\plugins\kiln-greeneye.dll", and offers **Repair**. The support report says it too (`files-missing`).
+
+**What Kiln puts in the game folder.** The receipt, `kiln\.install.json`, lists every file Kiln installed with its
+SHA-256 checksum. On the game client these are:
+- `dinput8.dll`, next to `enshrouded.exe`. This is Kiln's proxy: the game loads it when it starts, and it loads the
+  rest of Kiln.
+- `kiln\kiln-core.dll` and Kiln's services in `kiln\services\`.
+- `kiln\plugins\*.dll`, the parts that run other loaders' mods (EMF, EML, ShroudForge, Greeneye, SET and others), and
+  the folders `kiln\plugins\shroudforge\` and `kiln\plugins\enshwick\`.
+- `kiln\host\`, Kiln's C# host and services, and `kiln\dotnet\`, the .NET runtime Kiln brings with it.
+- Data files: `kiln\kiln.json` (Kiln's settings), `kiln\compat-rules.json` and `kiln\sigdb\`.
+
+Mods can bring DLLs of their own. Kiln keeps your mods in the launcher's data folder (Settings, Library, Data folder)
+and places some of them in the game folder.
+
+**Why antivirus programs flag it.** Kiln's `dinput8.dll` has the name of a Windows file. Windows looks for that file
+next to the program first, so the game loads Kiln's copy, and Kiln passes the game's calls on to the real one. Kiln then
+loads its other DLLs into the game and changes the game's code while it runs. Some malware works the same way, so
+antivirus programs watch for it. Kiln's files are also new and not many people have them yet, and they are not code
+signed yet, so an antivirus cannot check who made them. That is why one antivirus can flag a file that another lets
+through.
+
+**Add an exclusion for the game folder.** Do this first, or the antivirus removes the file again. To find the game
+folder: in Steam, right click Enshrouded, then Manage, then Browse local files.
+- Windows Security: open Windows Security from the Start menu, then Virus & threat protection. Under Virus & threat
+  protection settings, choose Manage settings. Under Exclusions, choose Add or remove exclusions, then Add an exclusion,
+  then Folder, and pick the game folder.
+- Other antivirus programs: look for a setting named Exclusions, Exceptions or Allowed list, and add the game folder
+  there. The antivirus's help pages say where it is.
+
+If your antivirus also removes files from your mods, add the launcher's data folder as an exclusion too.
+
+**Get the file back.** Restore it from the antivirus's quarantine, or let the launcher put it back.
+- Windows Security: Virus & threat protection, then Protection history. Open the entry for the Kiln file, then choose
+  Actions, then Restore.
+- Other antivirus programs: open the quarantine list (it may be called Quarantine or Virus Chest) and restore the file.
+- In the launcher: open the Runtime page and choose **Repair** on the "Files missing" banner. It installs the same Kiln
+  version again and puts back every missing file. Close the game first.
+
+You can also report the file to your antivirus's maker as a false positive. They usually ask for the file or its
+SHA-256 checksum, which the receipt lists.
 
 ## Taskbar icon and app menu
 Taskbars, docks and app menus show the launcher with Kiln's icon (`launcher/src-tauri/src/desktop.rs`).
