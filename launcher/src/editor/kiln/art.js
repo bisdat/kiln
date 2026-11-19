@@ -32,11 +32,14 @@ export function useEditorArt(root) {
   const artKey = e?.extracted ?? '';
   const modVersion = e?.modded?.version ?? '';
   useEffect(() => { assetsPresent().then(setAssets); }, []);
-  // new art (first extraction, a game update): load the icons again
-  const firstArt = useRef(true);
+  // new art (first extraction, a game update): load the icons again. Keyed by the art it last saw, not by "first run":
+  // React's StrictMode runs an effect twice on mount, and a second run with the same art must not remount the views
+  // (that dropped the open character menu and the Deck's focus a moment after the page showed)
+  const seenArt = useRef(null);
   useEffect(() => {
     if (!known) return;
-    if (firstArt.current) { firstArt.current = false; return; }
+    if (seenArt.current === null || seenArt.current === artKey) { seenArt.current = artKey; return; }
+    seenArt.current = artKey;
     assetsPresent().then((ok) => { setAssets(ok); setGen((g) => g + 1); });
   }, [artKey, known]);
   // mod items: merge before the first mount, again whenever the overlay changes

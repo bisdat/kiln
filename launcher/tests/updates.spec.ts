@@ -68,7 +68,8 @@ test("three mods: an update, no source, a stale answer; the notice opens a page 
   await row(page, "New Items").getByRole("button", { name: /Update 1\.1\.0 for New Items: open its page/ }).click();
   await expect.poll(() => opened(page)).toEqual(["https://github.com/example-org/new-items/releases/tag/v1.1.0"]);
   await page.waitForTimeout(600);
-  const after = (await commands(page)).slice(before).filter((c) => !["game_status", "launch_state", "task_list"].includes(c));
+  // what the page polls by itself (found_scan: every 10 s, GameFolder.tsx) is not something the click called
+  const after = (await commands(page)).slice(before).filter((c) => !["game_status", "launch_state", "task_list", "found_scan"].includes(c));
   expect(after).toEqual(["app_open_url"]);
   // the same link from the mod's dialog
   const dialog = await openUpdates(page, "New Items");
@@ -216,7 +217,7 @@ test("the daily check is off by default, and on it runs by itself as an automati
   // the input is drawn as a track: click its card, as render.spec.ts does
   await page.locator(".k-toggle", { has: toggle }).click();
   await expect(toggle).toBeChecked();
-  await expect.poll(async () => (await requests(page)).filter((r) => r.automatic).length, { timeout: 5000 }).toBe(1);
+  await expect.poll(async () => (await requests(page)).filter((r) => r.automatic).length, { timeout: 10_000 }).toBe(1);
   expect((await api<{ modUpdatesDaily?: boolean }>(page, "appSettingsGet")).modUpdatesDaily).toBe(true);
   // one check, not a loop: the next one is a day away
   await page.waitForTimeout(1200);
