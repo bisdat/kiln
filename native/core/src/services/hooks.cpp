@@ -31,6 +31,7 @@
 #include "../sigdb.h"
 #include "../tick.h"
 #include "hooks_chain.h"
+#include "hooks_code.h"
 #include "hooks_patch_policy.h"
 #include "hooks_fingerprint.h"
 #include "hooks_internal.h"
@@ -48,6 +49,7 @@ struct Patch {
     KilnOwner owner = 0;
     uintptr_t addr = 0;
     std::vector<uint8_t> original;
+    uint64_t code_token = 0;
 };
 
 // Process lifetime, just like the installed detours.
@@ -164,27 +166,58 @@ KilnResult KILN_CALL h_read(uintptr_t addr, void* dst, size_t n) {
 
 KilnResult KILN_CALL h_write(uintptr_t addr, const void* src, size_t n) {
     if (!src || n == 0) return KILN_ERR_INVALID_ARGUMENT;
-    return poke(addr, src, n) ? KILN_OK : KILN_ERR_NOT_FOUND;
+    KILN_GUARD("write", KILN_ERR_INTERNAL, {
+        auto code_guard = code::registry().lock();
+        const bool ok = poke(addr, src, n);
+        code::registry().touch_locked();  // not a patch: its bytes stay unowned (FOREIGN); a failed copy may have changed some
+        return ok ? KILN_OK : KILN_ERR_NOT_FOUND;
+    });
+}
+
+code::Image code_image() {
+    const auto& i = image();
+    return {i.base, i.size, reinterpret_cast<uintptr_t>(i.text), i.text_size, &sigdb::file_bytes,
+        +[](uintptr_t a, uint8_t* out, size_t n) { return seh::copy(out, reinterpret_cast<const void*>(a), n); }};
+}
+KilnResult KILN_CALL h_read_original(uintptr_t address, void* out, size_t size) {
+    KILN_GUARD("read_original", KILN_ERR_INTERNAL, return code::read_original(code_image(), address, out, size););
+}
+KilnResult KILN_CALL h_code_state(uintptr_t address, size_t size, uint32_t* state, uint64_t* generation) {
+    KILN_GUARD("code_state", KILN_ERR_INTERNAL,
+               return code::registry().code_state(code_image(), address, size, state, generation););
 }
 
 KilnResult KILN_CALL h_patch(KilnOwner owner, uintptr_t addr, const void* bytes, size_t n, KilnHandle* out) {
     if (!bytes || n == 0 || n > 4096) return KILN_ERR_INVALID_ARGUMENT;
-    std::vector<uint8_t> original(n);
-    if (!seh::copy(original.data(), reinterpret_cast<const void*>(addr), n)) return KILN_ERR_NOT_FOUND;
-    if (!poke(addr, bytes, n)) return KILN_ERR_INTERNAL;
-    std::lock_guard lock(g_mutex);
-    const KilnHandle handle = g_next_handle.fetch_add(1);
-    patches().push_back(Patch{handle, owner, addr, std::move(original)});
-    if (out) *out = handle;
-    KLOG_I("hooks: patch %zu bytes at rva 0x%llx (handle %llu, owner %llu)", n,
-           static_cast<unsigned long long>(addr - image().base), static_cast<unsigned long long>(handle),
-           static_cast<unsigned long long>(owner));
-    return KILN_OK;
+    KILN_GUARD("patch", KILN_ERR_INTERNAL, {
+        std::vector<uint8_t> original(n), installed(n);
+        std::lock_guard lock(g_mutex);
+        auto code_guard = code::registry().lock();
+        if (!seh::copy(original.data(), reinterpret_cast<const void*>(addr), n)) return KILN_ERR_NOT_FOUND;
+        if (!seh::copy(installed.data(), bytes, n)) return KILN_ERR_INTERNAL;
+        // Everything that can fail to allocate is done before the bytes change.
+        if (patches().size() == patches().capacity())
+            patches().reserve(std::max<size_t>(1, patches().capacity() * 2));
+        const auto token = code::registry().add_locked(addr, original, installed, true);
+        if (!poke(addr, installed.data(), n)) {
+            code::registry().remove_locked(token);
+            return KILN_ERR_INTERNAL;
+        }
+        const KilnHandle handle = g_next_handle.fetch_add(1);
+        patches().push_back(Patch{handle, owner, addr, std::move(original), token});
+        if (out) *out = handle;
+        KLOG_I("hooks: patch %zu bytes at rva 0x%llx (handle %llu, owner %llu)", n,
+               static_cast<unsigned long long>(addr - image().base), static_cast<unsigned long long>(handle),
+               static_cast<unsigned long long>(owner));
+        return KILN_OK;
+    });
 }
 
 // restore + drop a patch; g_mutex held
 void restore_patch_locked(std::vector<Patch>::iterator it) {
+    auto code_guard = code::registry().lock();
     poke(it->addr, it->original.data(), it->original.size());
+    code::registry().remove_locked(it->code_token);
     patches().erase(it);
 }
 
@@ -440,7 +473,9 @@ KilnResult KILN_CALL h_revoke_owner(KilnOwner owner) {
         auto& ps = patches();
         for (auto it = ps.begin(); it != ps.end();) {
             if (it->owner == owner) {
+                auto code_guard = code::registry().lock();
                 poke(it->addr, it->original.data(), it->original.size());
+                code::registry().remove_locked(it->code_token);
                 it = ps.erase(it);
                 ++removed;
             } else {
@@ -606,6 +641,9 @@ const KilnHooksApi kTable = {
     &h_typed_install_ready,
     // checked typed installation (dev.29)
     &h_detour_typed_checked,
+    // original code (0.2.0-dev.29.19)
+    &h_read_original,
+    &h_code_state,
 };
 
 std::mutex g_ready_mutex;

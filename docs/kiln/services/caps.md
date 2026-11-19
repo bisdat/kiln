@@ -97,6 +97,11 @@ Opening the remaining 20 is an owner decision, not a real-game confirmation; the
   server, `policy` in safe idle. They follow a hook that faults later, as the `tick*` rows do. kiln.world names the row
   in its wrap capability texts and at each stop.
 - Every service DLL that did not load, as `kiln.<stem>`, with `service-missing` or `faulted`.
+- `hooks.read_original`, `hooks.code_state` (since 0.2.0-dev.29.19): kiln.hooks' `read_original` and `code_state`
+  ([hooks.md](hooks.md#original-code-read_original-code_state-since-020-dev2919)), on both sides. Available when
+  kiln.hooks runs and the core reads the exe file's code (sigdb's verified file view). Unavailable: `policy` in safe
+  idle, `service-missing` when kiln.hooks did not start, `symbol-missing` when sigdb could not use the exe file and
+  reads the live code instead (the live code is not the original). Static.
 - Kiln's managed layer adds `identity.entities` and `identity.players` ([modding/contract.md](../modding/contract.md)):
   pending until a service registers a source, then available. The sources (Kiln.Players, Kiln.Items, Kiln.Spawn)
   register at the first service tick. A source can still answer "not yet" for one entity: kiln.spawn's says so while

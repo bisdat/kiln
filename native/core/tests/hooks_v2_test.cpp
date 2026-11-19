@@ -35,6 +35,7 @@
 #include "nlohmann/json.hpp"
 #include "registry.h"
 #include "services/hooks_chain.h"
+#include "services/hooks_code.h"
 #include "services/hooks_internal.h"
 #include "services/kiln_hooks.h"
 #include "services/service.h"
@@ -307,6 +308,9 @@ extern char game_asm_flags_hook[];
 int game_asm_regs(int);
 extern char game_asm_regs_hook[];
 int game_asm_fb(int);
+int game_asm_code(int);
+int game_asm_code_hold(int);
+extern char game_code_many[];
 int game_asm_fo(int);
 int game_asm_mid(int);
 int game_asm_mid2(int);
@@ -345,7 +349,13 @@ __asm__(".intel_syntax noprefix\n.section .game,\"xr\"\n" GAME_ASM(game_asm_er1)
         "  mov rsp, rbx\n  mov eax, 0xBADBAD\n"
         "1:\n  add rsp, 0x20\n  pop rbx\n  ret\n.seh_endproc\n");
 __asm__(".intel_syntax noprefix\n.section .game,\"xr\"\n" GAME_ASM(game_asm_fb) GAME_ASM(game_asm_fo)
-            GAME_ASM(game_asm_mid) GAME_ASM(game_asm_mid2) GAME_ASM(game_asm_mid3) GAME_ASM(game_asm_mix) ".text\n");
+            GAME_ASM(game_asm_mid) GAME_ASM(game_asm_mid2) GAME_ASM(game_asm_mid3) GAME_ASM(game_asm_mix) GAME_ASM(game_asm_code) GAME_ASM(game_asm_code_hold) ".text\n");
+
+// 16 more of them for test_code_lock_order: first installs while other threads poll code_state.
+__asm__(".intel_syntax noprefix\n.section .game,\"xr\"\n.balign 32, 0xCC\n"
+        ".globl game_code_many\n.def game_code_many; .scl 2; .type 32; .endef\ngame_code_many:\n"
+        ".rept 16\n  push rbx\n  sub rsp, 0x20\n  mov eax, ecx\n  add eax, 1\n  add rsp, 0x20\n  pop rbx\n  ret\n  .balign 32, 0xCC\n.endr\n"
+        ".text\n");
 
 // 600 small functions, 32 bytes apart, `int f(int x)` = x + 1, for the target-cap test (512 distinct addresses to hook).
 __asm__(".intel_syntax noprefix\n.section .game,\"xr\"\n.balign 32, 0xCC\n"
@@ -584,6 +594,190 @@ int call_av(int x, DWORD* code) {
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
+void test_code_inspection() {
+    std::puts("-- original code: read_original and code_state on the real service (detours, patches, write, an unreadable page)");
+    const uintptr_t at = reinterpret_cast<uintptr_t>(&game_asm_code);
+    snapshot_file(reinterpret_cast<void*>(at));
+    uint8_t original[16] = {};
+    uint32_t state = 99; uint64_t generation = 0;
+    check(A->read_original && A->code_state && A->read_original(at, original, sizeof original) == KILN_OK,
+          "the table has read_original and code_state; read_original copies the file's bytes");
+    check(A->code_state(at, 16, &state, &generation) == KILN_OK && state == KILN_CODE_ORIGINAL,
+          "a function nobody changed is ORIGINAL");
+    const auto before = generation;
+    static int (*continuation)(int) = nullptr;
+    static auto handler = +[](int x) { return continuation(x); };
+    KilnHandle h = 0;
+    check(A->raw_detour(6, at, nullptr, reinterpret_cast<void*>(handler), reinterpret_cast<void**>(&continuation), &h) == KILN_OK,
+          "the registry places a detour on it");
+    check(A->code_state(at, 16, &state, &generation) == KILN_OK && state == KILN_CODE_MANAGED && generation > before,
+          "its detour is MANAGED and the generation moved");
+    uint8_t after[16] = {};
+    check(A->read_original(at, after, sizeof after) == KILN_OK && !std::memcmp(original, after, sizeof after),
+          "read_original still returns the file's bytes under the detour");
+    check(A->code_state(at + 7, 9, &state, &generation) == KILN_OK && state == KILN_CODE_ORIGINAL,
+          "the detour owns the instructions it overwrote, not the rest of the function");
+    uint64_t again = 0;
+    check(A->code_state(at, 16, &state, &generation) == KILN_OK && A->code_state(at, 16, &state, &again) == KILN_OK &&
+              again == generation,
+          "the same range asked twice with nothing changed keeps the generation");
+    const auto installed = generation;
+    A->revoke(h);  // the bytes stay: only the chain changes
+    check(A->code_state(at, 16, &state, &generation) == KILN_OK && state == KILN_CODE_MANAGED && generation > installed,
+          "after the revoke the detour stays MANAGED (an empty chain) and the generation moved");
+    const uint8_t patch = original[10] ^ 0x7f;
+    KilnHandle p = 0;
+    check(A->patch(6, at + 10, &patch, 1, &p) == KILN_OK &&
+          A->code_state(at + 10, 1, &state, &generation) == KILN_OK && state == KILN_CODE_MANAGED,
+          "a patch's byte is MANAGED");
+    const auto patched = generation;
+    A->unpatch(p);
+    check(A->code_state(at + 10, 1, &state, &generation) == KILN_OK && state == KILN_CODE_ORIGINAL && generation > patched,
+          "unpatch makes it ORIGINAL again and moves the generation");
+    A->write(at + 10, &patch, 1);  // write owns nothing: like another module's patch
+    check(A->code_state(at, 16, &state, &generation) == KILN_OK && state == KILN_CODE_FOREIGN,
+          "a byte from write beside Kiln's detour is FOREIGN");
+    A->write(at + 10, original + 10, 1);
+    DWORD old = 0, ignored = 0;
+    check(VirtualProtect(reinterpret_cast<void*>(at), 16, PAGE_NOACCESS, &old) != 0, "the test page is made unreadable");
+    const auto result = A->code_state(at, 16, &state, &generation);
+    VirtualProtect(reinterpret_cast<void*>(at), 16, old, &ignored);
+    check(result == KILN_OK && state == KILN_CODE_UNKNOWN, "an unreadable page is UNKNOWN (guarded read), never the file's bytes");
+    std::atomic<bool> done{false}; std::atomic<unsigned> polls{0}, bad{0};
+    std::thread observer([&] {
+        do { uint32_t s; uint64_t g;
+             if (A->code_state(at + 10, 1, &s, &g) != KILN_OK || s > KILN_CODE_MANAGED) ++bad;
+             ++polls;
+        } while (!done.load());
+    });
+    for (int i = 0; i < 1000; ++i) {
+        KilnHandle handle = 0;
+        if (A->patch(6, at + 10, &patch, 1, &handle) != KILN_OK || A->unpatch(handle) != KILN_OK) ++bad;
+        if (A->raw_detour(6, at, nullptr, reinterpret_cast<void*>(handler), reinterpret_cast<void**>(&continuation), &handle) != KILN_OK ||
+            A->revoke(handle) != KILN_OK) ++bad;
+    }
+    done = true; observer.join();
+    check(polls > 0 && bad == 0, "a poller sees only ORIGINAL or MANAGED while patches and links come and go 1000 times");
+}
+
+// A first install takes code_state's lock before it reads the target and stops the game's threads. A code_state call
+// holds that lock only for its two guarded copies, so a thread the install stops is never one that holds it. An install
+// that wrote without the lock fails the checks below; one that stopped threads first and then waited for the lock would
+// hang here for good, which is this test's failure too. The same lock makes patch, unpatch and write wait for a reader.
+void test_code_lock_order() {
+    std::puts("-- original code: installs, patches and write wait for a thread holding code_state's lock; polls during first installs");
+    const uintptr_t at = reinterpret_cast<uintptr_t>(&game_asm_code_hold);
+    const size_t unstoppable = log_count("could not be opened or stopped");
+    snapshot_file(reinterpret_cast<void*>(at));
+    uint8_t file[16];
+    std::memcpy(file, reinterpret_cast<const void*>(at), sizeof file);
+    auto live_is = [&](const uint8_t* bytes) { return !std::memcmp(reinterpret_cast<const void*>(at), bytes, 16); };
+    // One writer call, made while another thread holds the lock: it must not return and must not change a byte until
+    // the lock is free.
+    auto while_held = [&](const char* what, auto&& call) {
+        uint8_t before[16];
+        std::memcpy(before, reinterpret_cast<const void*>(at), sizeof before);
+        std::atomic<int> phase{0};
+        std::thread holder([&] {
+            auto guard = kiln::hooks::code::registry().lock();
+            phase = 1;
+            while (phase.load() < 2) Sleep(1);
+            guard.unlock();
+            // Stay alive until the writer returned: a thread that is ending while an install stops the others cannot
+            // always be stopped, and that is another test's failure (test_many_threads_stopped counts those lines).
+            while (phase.load() < 3) Sleep(1);
+        });
+        while (phase.load() < 1) Sleep(0);
+        std::atomic<bool> returned{false};
+        KilnResult rc = KILN_ERR_INTERNAL;
+        std::thread writer([&] {
+            rc = call();
+            returned = true;
+        });
+        bool waited = true;
+        for (int i = 0; i < 20 && waited; ++i) {  // about 200 ms
+            Sleep(10);
+            waited = !returned.load() && live_is(before);
+        }
+        phase = 2;
+        writer.join();
+        phase = 3;
+        holder.join();
+        check(waited, (std::string(what) + " waits for a thread that holds code_state's lock: nothing written meanwhile").c_str());
+        return rc;
+    };
+    static int (*continuation)(int) = nullptr;
+    static auto handler = +[](int x) { return continuation(x); };
+    KilnHandle h = 0;
+    const KilnResult installed = while_held("a first install", [&] {
+        return A->raw_detour(6, at, nullptr, reinterpret_cast<void*>(handler), reinterpret_cast<void**>(&continuation), &h);
+    });
+    uint32_t state = 99;
+    uint64_t generation = 0;
+    check(installed == KILN_OK && !live_is(file) && reinterpret_cast<int (*)(int)>(at)(41) == 42 &&
+              A->code_state(at, 16, &state, &generation) == KILN_OK && state == KILN_CODE_MANAGED,
+          "...then it installs, and its detour reads MANAGED");
+    const uint8_t byte = file[10] ^ 0x7f;
+    KilnHandle p = 0;
+    check(while_held("patch", [&] { return A->patch(6, at + 10, &byte, 1, &p); }) == KILN_OK &&
+              *reinterpret_cast<const uint8_t*>(at + 10) == byte,
+          "...then the patch is written");
+    check(while_held("unpatch", [&] { return A->unpatch(p); }) == KILN_OK && *reinterpret_cast<const uint8_t*>(at + 10) == file[10],
+          "...then the byte is put back");
+    check(while_held("write", [&] { return A->write(at + 10, &byte, 1); }) == KILN_OK &&
+              *reinterpret_cast<const uint8_t*>(at + 10) == byte,
+          "...then write copies its byte");
+    A->write(at + 10, file + 10, 1);
+    A->revoke(h);
+
+    // Four threads poll code_state on 16 functions while this thread places their first detours (each one stops every
+    // other thread) and revokes the links: no poll waits forever, and none sees a half-written jump (UNKNOWN or FOREIGN).
+    constexpr int kTargets = 16;
+    uintptr_t targets[kTargets];
+    for (int i = 0; i < kTargets; ++i) {
+        targets[i] = reinterpret_cast<uintptr_t>(game_code_many) + 32 * static_cast<uintptr_t>(i);
+        snapshot_file(reinterpret_cast<void*>(targets[i]));
+    }
+    std::atomic<bool> done{false};
+    std::atomic<unsigned> polls{0}, bad{0};
+    std::vector<std::thread> pollers;
+    for (int k = 0; k < 4; ++k)
+        pollers.emplace_back([&, k] {
+            for (unsigned n = static_cast<unsigned>(k); !done.load(); ++n) {
+                uint32_t s = 99;
+                uint64_t g = 0;
+                if (A->code_state(targets[n % kTargets], 16, &s, &g) != KILN_OK ||
+                    (s != KILN_CODE_ORIGINAL && s != KILN_CODE_MANAGED))
+                    ++bad;
+                ++polls;
+            }
+        });
+    while (polls.load() < 1000) Sleep(0);
+    const unsigned first = polls.load();
+    unsigned refused = 0;
+    static auto many = +[](int x) { return x + 1; };  // the functions' own result; it never calls on
+    for (int i = 0; i < kTargets; ++i) {
+        KilnHandle link = 0;
+        if (A->raw_detour(6, targets[i], nullptr, reinterpret_cast<void*>(many), nullptr, &link) != KILN_OK ||
+            A->revoke(link) != KILN_OK)
+            ++refused;
+    }
+    const unsigned during = polls.load() - first;
+    while (polls.load() < first + during + 1000) Sleep(0);
+    done = true;
+    for (auto& t : pollers) t.join();
+    bool all_managed = true;
+    for (int i = 0; i < kTargets; ++i) {
+        uint32_t s = 99;
+        uint64_t g = 0;
+        all_managed = all_managed && A->code_state(targets[i], 16, &s, &g) == KILN_OK && s == KILN_CODE_MANAGED;
+    }
+    check(refused == 0 && all_managed, "16 first installs while 4 threads poll code_state: each placed, each MANAGED after");
+    check(bad == 0 && during > 0, "the polls during them see only ORIGINAL or MANAGED", std::to_string(bad.load()) + " bad of " +
+          std::to_string(polls.load()) + ", " + std::to_string(during) + " during the installs");
+    check(log_count("could not be opened or stopped") == unstoppable, "these installs stopped every other thread they listed");
+}
+
 void test_raw_chain_9args() {
     std::puts("-- raw links: 9 arguments through a chain of 3, caller() in each link");
     // probe the real return address of each call site before anything is hooked
@@ -2211,6 +2405,8 @@ int main(int argc, char** argv) {
           "size " + std::to_string(A->header.size));
     check(A->raw_detour && A->caller && A->detour2 && A->call_original2 && A->mid2 && A->map_json, "every v2 entry is set");
 
+    test_code_inspection();
+    test_code_lock_order();
     test_raw_chain_9args();
     test_floats();
     test_structured();

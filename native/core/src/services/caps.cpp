@@ -883,6 +883,21 @@ void core_rows(bool hooks, bool verified, const std::string& safe_idle) {
                                 "not started in safe idle: " + safe_idle, "core", 0, ev);
         }
         set_tasks_pool_locked(hooks ? tasks_pool_state() : kTasksIdle, safe_idle, ev);  // kiln.tasks' pool
+        // kiln.hooks' read_original and code_state read the exe file's code (sigdb's verified file view). sigdb's
+        // live-code fallback is not the original code, so they are off there. Static: the view is made once.
+        const bool hooks_service = std::any_of(services.begin(), services.end(), [](const Svc& s) {
+            return s.name == "kiln.hooks" && s.available;
+        });
+        const bool original_code = hooks && hooks_service && sigdb::code_from_disk();
+        for (const char* name : {"hooks.read_original", "hooks.code_state"}) {
+            const uint32_t reason = !hooks ? KILN_CAP_REASON_POLICY : !hooks_service ? KILN_CAP_REASON_SERVICE_MISSING :
+                original_code ? KILN_CAP_REASON_NONE : KILN_CAP_REASON_SYMBOL_MISSING;
+            const std::string text = !hooks ? "not started in safe idle: " + safe_idle : !hooks_service ?
+                "kiln.hooks did not start" : original_code ? "verified relocated executable file code" :
+                "verified executable file code unavailable; live fallback is not original code";
+            set_core_locked(name, kService, original_code ? KILN_CAP_AVAILABLE : KILN_CAP_UNAVAILABLE,
+                            reason, text, "core", 0, ev);
+        }
         for (const auto& file : idle_dlls) {
             const std::string name = dll_row_name(file);
             if (name.empty()) continue;

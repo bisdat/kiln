@@ -22,6 +22,7 @@
 // taking a new slot; see revive() for why a call still in flight through the old incarnation stays correct.
 #include "hooks_chain.h"
 #include "hooks_patch_policy.h"
+#include "hooks_code.h"
 #include "hooks_typed_result.h"
 
 #include <windows.h>
@@ -479,6 +480,9 @@ Plan plan_chain(Target& t) {
 // live ones tail to head and the head last, so a thread walking the chain always lands on a valid entry (or the
 // trampoline). A new or revived link's own cell is filled by install() before this runs.
 void apply_plan(Target& t, Plan& p) {
+    // The links changed: code_state's generation moves. Every caller holds the chain mutex and then code::registry()'s
+    // lock. The detour stays after its last link is revoked, so the bytes it wrote stay owned: nothing is removed here.
+    code::registry().touch_locked();
     for (auto& [d, to] : p.dead)
         if (d->next->load(std::memory_order_relaxed) != to) d->next->store(to, std::memory_order_release);
     for (size_t i = p.live.size(); i-- > 0;)
@@ -985,6 +989,8 @@ Target* target_for(uintptr_t addr, bool* refused_quietly, uint32_t* unchecked = 
         }
         return nullptr;
     };
+    // install() took code::registry()'s lock before this reads the old bytes and before enable_detour stops threads: a
+    // code_state call is never stopped while it holds a lock this install needs (and it never takes the chain mutex).
     // Foreign hook already there? Compare the live bytes with the exe file's (the file is never patched).
     uint8_t live[kFootprint] = {}, file[kFootprint] = {};
     const bool have_live = read_guarded(addr, live, sizeof live);
@@ -1037,6 +1043,21 @@ Target* target_for(uintptr_t addr, bool* refused_quietly, uint32_t* unchecked = 
     t->hook = std::move(*hook);
     t->trampoline = t->hook.target_address() ? t->hook.trampoline().address() : 0;
     t->head->store(t->trampoline, std::memory_order_release);
+    // What the detour writes for code_state: exactly the instructions it overwrites, nop padding included (not the 5 or
+    // 14 bytes the map's foreign check reads).
+    PatchBytes physical;
+    const bool physical_known = make_patch(*t, physical);
+    const auto& saved = t->hook.original_bytes();
+    const std::vector<uint8_t> expected = physical_known
+        ? std::vector<uint8_t>(physical.b, physical.b + physical.len) : std::vector<uint8_t>(saved.size());
+    const auto code_token = code::registry().add_locked(addr, saved, expected, physical_known && t->trampoline);
+    // An install that writes nothing (refused, or a checked install that could not check every thread) owns nothing:
+    // the record goes again unless the detour was written.
+    struct CodeAdmission {
+        uint64_t token;
+        bool committed = false;
+        ~CodeAdmission() { if (!committed) code::registry().remove_locked(token); }
+    } admission{code_token};
     FreezeReport rep;
     if (enable_detour(*t, rep, unchecked)) {
         KLOG_D("hooks: detour on rva %s written with %zu other thread(s) stopped (of %zu listed) for %.2f ms, %.2f ms to "
@@ -1090,6 +1111,7 @@ Target* target_for(uintptr_t addr, bool* refused_quietly, uint32_t* unchecked = 
     Target* raw = t.release();
     s.targets.push_back(raw);
     s.by_addr[addr] = raw;
+    admission.committed = true;
     return raw;
 }
 
@@ -1144,6 +1166,7 @@ KilnResult install(Kind kind, KilnOwner owner, uintptr_t addr, const Order& orde
     if (!fn || !addr) return KILN_ERR_INVALID_ARGUMENT;
     if (!s.ready) return KILN_ERR_UNAVAILABLE;
     std::lock_guard lock(s.mutex);
+    auto code_guard = code::registry().lock();
     const bool had_target = s.by_addr.count(addr) != 0;
     if (!had_target && s.next_link >= kMaxLinks) return KILN_ERR_UNAVAILABLE;  // a new target has nothing to revive
     bool quiet = false;
@@ -1442,6 +1465,7 @@ extern "C" uintptr_t kiln_hk_structured_dispatch(const uintptr_t* regs, const ui
     if (ok) return ret;
     link->live.store(false, std::memory_order_release);
     link->target->dirty.store(true, std::memory_order_release);
+    kiln::hooks::code::registry().note_chain_fault();
     KLOG_E("hooks: %s link \"%s\" (handle %llu, owner %s) faulted (0x%08lx) and was disabled",
            kind_name(link->kind), link->label.c_str(), static_cast<unsigned long long>(link->h()),
            link->owner_name.c_str(), code);
@@ -1509,6 +1533,7 @@ extern "C" void kiln_hk_typed_dispatch(KilnCallFrame* frame, void* lp) {
     if (!ok) {
         link->live.store(false, std::memory_order_release);
         link->target->dirty.store(true, std::memory_order_release);
+        kiln::hooks::code::registry().note_chain_fault();
         KLOG_E("hooks: typed link \"%s\" (handle %llu, owner %s) faulted (0x%08lx) and was disabled",
                link->label.c_str(), static_cast<unsigned long long>(link->h()), link->owner_name.c_str(), code);
         if (S().env.changed) S().env.changed();
@@ -1532,6 +1557,7 @@ extern "C" void kiln_hk_mid_dispatch(void* ctx, void* lp) {
     if (!kiln::hooks::seh::call_mid(reinterpret_cast<KilnMidFn>(link->fn), regs, link->user, &code)) {
         link->live.store(false, std::memory_order_release);
         link->target->dirty.store(true, std::memory_order_release);
+        kiln::hooks::code::registry().note_chain_fault();
         KLOG_E("hooks: mid link \"%s\" (handle %llu, owner %s) faulted (0x%08lx) and was disabled",
                link->label.c_str(), static_cast<unsigned long long>(link->h()), link->owner_name.c_str(), code);
         if (S().env.changed) S().env.changed();
@@ -1570,6 +1596,7 @@ KilnResult revoke(KilnHandle h) {
     Link* l = lookup(h);
     if (!l) return KILN_ERR_NOT_FOUND;
     std::lock_guard lock(s.mutex);
+    auto code_guard = code::registry().lock();
     if (l->h() != h) return KILN_ERR_NOT_FOUND;  // revived meanwhile under a new handle
     if (!l->live.exchange(false, std::memory_order_acq_rel)) return KILN_ERR_NOT_FOUND;
     rebuild(*l->target);
@@ -1582,6 +1609,7 @@ KilnResult revoke(KilnHandle h) {
 size_t revoke_owner(KilnOwner owner) {
     State& s = S();
     std::lock_guard lock(s.mutex);
+    auto code_guard = code::registry().lock();
     size_t removed = 0;
     for (Target* t : s.targets) {
         bool any = false;
@@ -1631,6 +1659,7 @@ void note_world_checked() { S().world_checked.store(true, std::memory_order_rele
 void sweep() {
     State& s = S();
     std::lock_guard lock(s.mutex);
+    auto code_guard = code::registry().lock();
     for (Target* t : s.targets)
         if (t->dirty.exchange(false, std::memory_order_acq_rel)) rebuild(*t);
 }
