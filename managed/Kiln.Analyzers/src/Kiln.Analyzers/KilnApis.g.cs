@@ -423,6 +423,7 @@ internal static partial class KilnApis
         "M:Kiln.Items.Fuel.Refill(Kiln.EntityId,Kiln.FuelRefill,Kiln.ItemId,System.Boolean)", // Items.Fuel.Refill(EntityId, FuelRefill, ItemId, bool): Services.RequireTickThread
         "M:Kiln.Items.Fuel.Set(Kiln.EntityId,System.Int32,System.Boolean)", // Items.Fuel.Set(EntityId, int, bool): via Items.Fuel.Submit(EntityId, uint, int, ItemId, bool, int)
         "M:Kiln.Items.Fuel.SetAll(Kiln.EntityId,System.Int32,Kiln.ItemId,System.Boolean)", // Items.Fuel.SetAll(EntityId, int, ItemId, bool): via Items.Fuel.Submit(EntityId, uint, int, ItemId, bool, int)
+        "M:Kiln.Items.GearOf(Kiln.ItemInstanceRef)", // Items.GearOf(ItemInstanceRef): Services.RequireTickThread
         "M:Kiln.Items.Give(Kiln.EntityId,Kiln.ItemId,System.Int32,System.Nullable{Kiln.Gear},Kiln.GiveOptions,System.Nullable{Kiln.SlotId})", // Items.Give(EntityId, ItemId, int, Gear?, GiveOptions, SlotId?): via Items.Submit(bool, ItemsNative.Request, string)
         "M:Kiln.Items.Give(Kiln.EntityId,System.String,System.Int32,System.Nullable{Kiln.Gear},Kiln.GiveOptions)", // Items.Give(EntityId, string, int, Gear?, GiveOptions): via Items.Give(EntityId, ItemId, int, Gear?, GiveOptions, SlotId?)
         "M:Kiln.Items.GiveRecipeResult(Kiln.EntityId,System.UInt32,System.Int32,Kiln.GiveOptions)", // Items.GiveRecipeResult(EntityId, uint, int, GiveOptions): via Items.Submit(bool, ItemsNative.Request, string)
@@ -434,7 +435,11 @@ internal static partial class KilnApis
         "M:Kiln.Items.MoveAll(Kiln.EntityId,Kiln.EntityId,Kiln.MoveOptions)", // Items.MoveAll(EntityId, EntityId, MoveOptions): via Items.SubmitMove(ItemsNative.MoveRequest, string, bool)
         "M:Kiln.Items.PlanSet(Kiln.EntityId,Kiln.EquipmentSet)", // Items.PlanSet(EntityId, EquipmentSet): Services.RequireTickThread
         "M:Kiln.Items.QuickStack(Kiln.EntityId,Kiln.EntityId,Kiln.MoveOptions)", // Items.QuickStack(EntityId, EntityId, MoveOptions): via Items.SubmitMove(ItemsNative.MoveRequest, string, bool)
+        "M:Kiln.Items.RarityOf(Kiln.ItemInstanceRef)", // Items.RarityOf(ItemInstanceRef): via Items.GearOf(ItemInstanceRef)
         "M:Kiln.Items.Read(Kiln.EntityId)", // Items.Read(EntityId): via Items.Require(string)
+        "M:Kiln.Items.SetEnhancements(Kiln.ItemInstanceRef,System.Int32,Kiln.GearWriteOptions)", // Items.SetEnhancements(ItemInstanceRef, int, GearWriteOptions?): via Items.WriteGear(ItemInstanceRef, Items.GearChange, GearWriteOptions?, GearChangeSource, string)
+        "M:Kiln.Items.SetLevel(Kiln.ItemInstanceRef,System.Int32,Kiln.GearWriteOptions)", // Items.SetLevel(ItemInstanceRef, int, GearWriteOptions?): via Items.WriteGear(ItemInstanceRef, Items.GearChange, GearWriteOptions?, GearChangeSource, string)
+        "M:Kiln.Items.SetRarity(Kiln.ItemInstanceRef,Kiln.ItemRarity,Kiln.GearWriteOptions)", // Items.SetRarity(ItemInstanceRef, ItemRarity, GearWriteOptions?): via Items.WriteGear(ItemInstanceRef, Items.GearChange, GearWriteOptions?, GearChangeSource, string)
         "M:Kiln.Items.SetToolWearPerDebit(Kiln.ItemId,System.Int32)", // Items.SetToolWearPerDebit(ItemId, int): Services.RequireTickThread
         "M:Kiln.Items.Take(Kiln.EntityId,Kiln.ItemId,System.Int32,System.Nullable{Kiln.SlotId},System.Boolean,System.Nullable{Kiln.EntityId},System.Boolean)", // Items.Take(EntityId, ItemId, int, SlotId?, bool, EntityId?, bool): via Items.Submit(bool, ItemsNative.Request, string)
         "M:Kiln.Items.TakeSlot(Kiln.EntityId,Kiln.InventorySlot,System.Boolean)", // Items.TakeSlot(EntityId, InventorySlot, bool): via Items.Take(EntityId, ItemId, int, SlotId?, bool, EntityId?, bool)
@@ -851,6 +856,8 @@ internal static partial class KilnApis
         "P:Kiln.Items.ContainerNamesAvailable=items.names", // Can("items.names")
         "P:Kiln.Items.Fuel.Available=items.fuel", // Can("items.fuel")
         "P:Kiln.Items.GearOptionsAvailable=items.pide_options,kiln.items", // Can("items.pide_options"); via Kiln.Items.Available
+        "P:Kiln.Items.GearReadAvailable=items.gear.read", // Can("items.gear.read")
+        "P:Kiln.Items.GearWriteAvailable=items.gear.write", // Can("items.gear.write")
         "P:Kiln.Items.MovesAvailable=items.move", // Can("items.move")
         "P:Kiln.Items.ResultPeekAvailable=kiln.items", // ResultTable != null: Services.Get("kiln.items")
         "P:Kiln.Items.Transfers.Available=items.transfer", // Can("items.transfer")

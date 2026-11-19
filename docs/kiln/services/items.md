@@ -599,6 +599,76 @@ real runs.
   program boundary (chapter 10 §8: no attribute snapshot was taken), a fault of the game inside the transaction (only the
   host test injects one).
 
+## Gear: rarity, enhancements, level (v8, since 0.2.0-dev.29.19)
+
+The game keeps an item's rarity as its number of **enhancement slots** (its `PerkContainerNew` component: Common one ..
+Legendary five), and every unlocked slot is one level (docs/re/items.md section 19). Kiln.Items reads and writes these in
+place: the same item entity, so its item data (`InstanceData`), affixes and gem stay on it. The writes run in the next
+sim step inside kiln.items' serial program `kiln_items_gear` through the game's tracked writes, so players and the save
+get them like the game's own; the game derives the shown rarity (colour), the "LEVEL x/y" line and the damage itself in
+its next step.
+
+```csharp
+var item = Items.Held(player);                         // or a slot's Ref, a give result's Changes[i].Ref
+GearState? g = Items.GearOf(item);                     // null: gone, or the id names another item now
+// g.Rarity, g.Enhancements (slots), g.Unlocked, g.Level, g.BaseLevel, g.MaxLevel ("LEVEL x/max"), g.MaxRarity (the
+// type's last perk slot), g.Durability / DurabilityMax, g.HasSocket, g.Perks[0..4] (Available, Unlocked, TypeHasSlot),
+// g.ShownRarity / ShownLevel (what the game derived and sends: a step behind a change)
+ItemRarity? r = Items.RarityOf(item);
+
+GearResult up = await Items.SetRarity(item, ItemRarity.Epic);          // one more slot, locked: unlocked at the workbench
+if (!up.Ok) Log.Info($"not changed: {up.Reason}");                     // NoSlot, Stale, OutOfRange, ...
+await Items.SetEnhancements(item, 2);                                   // unlock two; the level moves with them
+await Items.SetLevel(item, 12, new GearWriteOptions { Durability = DurabilityRule.Repair });
+
+Events.On<GearRarityChangedEvent>(e => Log.Info($"{e.Item}: {e.From} -> {e.To} ({e.Source} by {e.Origin})"));
+Events.On<GearEnhancedEvent>(e => Log.Info($"{e.Item}: unlocked {e.From} -> {e.To}"));   // also a player's workbench unlock
+```
+
+- `GearOf(item)` / `RarityOf(item)` (server, tick thread; capability `items.gear.read`). The ref must carry kiln.items'
+  stamp (`Items.Held`, `Items.Equipped`, `InventorySlot.Ref`, `ItemChange.Ref`): another ref is an `ArgumentException`.
+  `MaxRarity` is the highest rarity the type has a perk slot for: 487 of 497 weapons and 653 of 863 equipment items with an
+  item entity fill all five (the equipment dossier); tools stop at Rare or Epic.
+- `SetRarity(item, rarity, options)`, `SetEnhancements(item, unlocked 0..5, options)`, `SetLevel(item, level 1..255,
+  options)` → `Task<GearResult>` (server, tick thread; capability `items.gear.write`). A higher rarity adds slots,
+  locked; a lower one takes slots away, unlocked ones among them, and the level comes down by as many (as the game's own
+  -1 does). `SetLevel` sets the level the game shows, unlocked slots included; the base (level - unlocked) must be in the
+  type's level range, since the game sets anything else back when the world loads (`OutOfRange`; levels outside the range
+  per item are a later package of this wave). The task completes on the tick thread one step after the write.
+- `GearWriteOptions`: `Durability` (`KeepRatio`, the default: the game computes max durability again at the new rarity
+  and level in its next step and the item keeps its share; `Keep`: max stays; `Repair`: as `KeepRatio`, and full; both
+  need `items.gear.durability`), `AllowEmptySlot` (default false: a rarity whose slot the type has no perk for is refused
+  `NoSlot`; with it the slot exists and unlocks a level, but no perk acts), `RefuseEquipped` (default false: an equipped
+  item changes in place too), `DryRun`.
+- `GearResult` (`IKilnResult`): `Status` (`Done`, `Stale`, `NotGear`, `NoSlot`, `OutOfRange`, `Equipped`, `Unavailable`,
+  `Dropped`, `Refused`: kiln.items' own values), `Before` / `After` (`GearState`; null when it never ran), `Changed`
+  (`Enhancements`, `Level`, `Durability`, `DurabilityRefresh`), `Message`, `Steps`, `DryRun`. `Done` also when nothing
+  needed a change. A refusal changes nothing; bad arguments throw; an off capability throws `KilnUnavailableException`.
+  1024 writes waiting is a `Refused` result.
+- Events (server, tick thread; through the change-notice queue of docs/kiln/modding/contract.md "Change events", so a
+  handler that writes again gets its event in a later step, never inside the dispatch): `GearChangedEvent` (every change of
+  slots, unlocked, level or, a repair, durability; `Changed`), then `GearRarityChangedEvent` (`From`, `To`) and
+  `GearEnhancedEvent` (`From`, `To` unlocked) where they apply. All carry `Before`, `After`, `Source` (`Code`,
+  `Upgrade`, `Game`) and `Origin` (the mod's id, "kiln", or "game"). Kiln's own writes post when their result arrives,
+  only when something changed (not a dry run, not a refusal). **The game's own changes** (a player's unlock at the workbench,
+  the game's free +1 / -1) are found by Kiln.Items' gear watch: while one of the three events has subscribers, it reads one
+  player's items per step (kiln.items' inventory read, then its gear read of each item entity) and compares them with the
+  last read, so a change shows within as many steps as players are in game. The first read of an item is its baseline (no
+  event); items outside players' inventories (chests) are not read; wear is not a gear change; Kiln's own writes are never
+  reported again as the game's. Gear writes are not reported to kiln.component_changes, which is why this is a poll.
+- Capabilities: `items.gear` (sigdb, the core; kiln-items.dll lowers it, see [caps.md](caps.md)), and Kiln.Items' own rows
+  `items.gear.read` (kiln.items v8 and `items.gear`), `items.gear.write` (the read row and kiln.items says
+  `kiln_items_gear` can run: `faulted` with its detail when it was refused or switched off), `items.gear.durability` (with
+  the write row). Followed every 25 steps; a call checks `items.gear` live. `Items.GearReadAvailable`,
+  `Items.GearWriteAvailable`.
+- Not confirmed in a real game yet: that a client shows the new rarity, enhancement list and level without re-joining (vanilla
+  and Kiln clients), that the workbench then offers the new unlock at its cost, an equipped item's perks after a change, and
+  the durability bar after a refresh. Lab (package P1's self-test, server 26430253, no player): the writes, the derived
+  rarity within 10 steps, the refreshed max durability with its ratio, and a save and restart keeping them.
+- Test kit: every piece of gear the fake kiln.items makes has enhancement slots, a level, a durability of 100 and a stamp;
+  `HarnessItems.SetPerkSlots(item, n)` sets a type's filled perk slots, `HarnessItems.SetGear(ref, ...)` plays the game's
+  own change ([unit-tests.md](../modding/unit-tests.md)).
+
 ## Tool wear per debit (since 0.2.0-dev.28)
 `Items.SetToolWearPerDebit(tool, n)` (or `ToolBlock.WearPerDebit` in a block) sets what one of the game's wear debits
 costs a tool: `n` instead of the game's 1, 0 to 32767. Native table `kiln.toolwear` (`kiln_toolwear.h`), published by
