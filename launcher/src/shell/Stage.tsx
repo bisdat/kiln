@@ -156,7 +156,8 @@ export function Stage({ root, enabled = true }: { root: RefObject<HTMLDivElement
       h += (heat - h) * (1 - Math.exp(-dt * 2.2));
       m[0] += (i.mx - m[0]) * 0.05; m[1] += (i.my - m[1]) * 0.05;
       const t = ms / 1000;
-      const F = Math.max(0, Math.min(1, 0.5 + 0.22 * Math.sin(t * 11.3) + 0.16 * Math.sin(t * 6.1 + 1.1) + 0.12 * Math.sin(t * 2.7 + 0.3)));
+      // a still frame (prefers-reduced-motion) does not flicker: base.css's --fire stays at its .5
+      const F = still ? 0.5 : Math.max(0, Math.min(1, 0.5 + 0.22 * Math.sin(t * 11.3) + 0.16 * Math.sin(t * 6.1 + 1.1) + 0.12 * Math.sin(t * 2.7 + 0.3)));
       // the Play mouth (40% of the width, 62.5% of the height, at most 800 px: base.css --kiln; 48 px from the right,
       // standing on the 84 px floor) and the pilot light
       const bw = Math.min(800, W * 0.4, H * 0.625), bh = bw * 0.88, bx = W - 48 - bw, by = H - 84 - bh, px = W - 60, py = 7;
@@ -176,7 +177,7 @@ export function Stage({ root, enabled = true }: { root: RefObject<HTMLDivElement
         // every frame of the spring
         lab?.style.setProperty("--k", k.toFixed(3));
       }
-      if (!i.game && ms - lastCss > 90) {
+      if (!still && !i.game && ms - lastCss > 90) {
         lastCss = ms;
         if (!lit.length || lit.some((e) => !e.isConnected) || (i.play && !lit.some((e) => e.classList.contains("k-title")))) {
           lit = [...app.querySelectorAll<HTMLElement>(FIRE_READERS)];

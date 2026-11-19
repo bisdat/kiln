@@ -193,21 +193,22 @@ export function AppShell() {
   );
   const sheet = useLinger<ReactNode>(page, !isPlay, 480);
   const hero = useLinger<ReactNode>(page, isPlay, 360);
-  // the torch: a soft warm light follows the pointer across the sheet (and the fire's camera leans after it).
+  // the torch: a soft warm light follows the pointer across the sheet (and the fire's camera leans after it). Only while
+  // the fire burns (.k-app[data-gl]: not with Animated fire off, without the GPU, without WebGL or with reduced motion).
   // The pointer goes onto the light's own layer (.k-torch, no children) and moves it: on .k-app (inbox 94) every move
   // restyled the whole window and repainted the whole sheet.
   const root = useRef<HTMLDivElement>(null);
   const light = useRef<HTMLDivElement>(null);
   const frame = useRef(0);
   const torch = (e: React.MouseEvent) => {
-    if (frame.current || reduced()) return;
+    if (frame.current || !root.current?.dataset.gl || reduced()) return;
     const x = e.clientX, y = e.clientY;
     frame.current = requestAnimationFrame(() => {
       frame.current = 0;
       const b = root.current?.getBoundingClientRect();
       if (b?.width) { stageInput.mx = ((x - b.left) / b.width) * 2 - 1; stageInput.my = 1 - ((y - b.top) / b.height) * 2; }
       const l = light.current;
-      if (!l) return;
+      if (!l || !root.current?.dataset.gl) return;
       l.style.setProperty("--mx", `${x}px`);
       l.style.setProperty("--my", `${y}px`);
       if (!l.dataset.at) l.dataset.at = "1";
