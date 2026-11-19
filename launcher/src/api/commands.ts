@@ -425,7 +425,11 @@ export interface InstallState {
   installed: boolean;
   receipt: InstallReceipt | null;
   proxy: ProxyClass | null;
+  /** Receipt files changed since the install, missing ones included (game-relative, "/" separators). */
   modified: string[];
+  /** (29.18) The files of `modified` that are not in the game folder at all: deleted, or removed or quarantined by an
+   *  antivirus. A reinstall of the installed bundle (Runtime's Repair) puts them back. Absent from older backends. */
+  missingFiles?: string[];
   upgradeAvailable: string | null;
   /** Parts absent from the receipt that a reinstall adds: defaults not turned off, plus required dependencies.
    *  Absent from older backends. */
@@ -1849,7 +1853,7 @@ export const configKilnReset = (gameId: GameId, path: string) => call<ConfigDocu
 
 // launch.rs
 /** Through the activation guard (./oneActivation.ts): the start applies the active profile again (refresh_active). */
-export const launchPlay = (gameId: GameId, request: LaunchRequest) => oneActivation(gameId, () => call<LaunchResult>("launch_play", { gameId, request }));
+export const launchPlay = (gameId: GameId, request: LaunchRequest) => oneActivation(gameId, () => call<LaunchResult>("launch_play", { gameId, request }), { play: true });
 export const launchState = (gameId: GameId) => call<BootState>("launch_state", { gameId });
 export const launchPrestart = (gameId: GameId) => call<PreStart | null>("launch_prestart", { gameId });
 /** Play was pressed (before the cook): the launcher times the start's own steps from now. */

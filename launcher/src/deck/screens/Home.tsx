@@ -14,6 +14,7 @@ import { useGame, useGameStatus, useLaunchState, usePoll, useRuntimeChanges } fr
 import { engineStatusKey } from "../../components/EngineStatus";
 import { errorText } from "../../ui";
 import { clock, usePlayControl } from "../../shell/play";
+import { applyingWord } from "../../shell/applying";
 import { startWords } from "../../shell/startProgress";
 import { StartBar } from "../../shell/StartPanel";
 import { detectGames, useDetect, useEnsureProfile, useKilnInstall } from "../../shell/firstRun";
@@ -71,6 +72,8 @@ export default function Home() {
   else if (ctl.timeline) { word = t("deck.shared.starting"); heat = "flare"; }
   else if (ctl.starting) { word = t("deck.shared.starting"); sub = t("deck.home.waitingKiln"); heat = "flare"; }
   else if (ctl.running) { word = ctl.elapsed !== null ? clock(ctl.elapsed) : v.label; sub = v.label; heat = "embers"; }
+  // (29.18) a profile is being applied to the game, whatever started it: Play waits for it (shell/applying.ts)
+  else if (ctl.applying) { word = t("deck.home.play"); sub = applyingWord(ctl.applying); heat = "low"; }
   else { word = t("deck.home.play"); if (ctl.canPlay && !kiln.installing) act = () => ctl.play("profile"); }
 
   // a start that says what it does: the step and the time left under the mouth's word, the bar and the step's line in
@@ -132,9 +135,10 @@ export default function Home() {
           {change?.state === "failed" && <DeckButton id="kiln-failed" onClick={() => nav("/deck/kiln")}>{t("deck.app.tabs.kiln")}</DeckButton>}
         </div>
       </div>
-      {/* while the game starts or runs the mouth keeps the focus (aria-disabled, A does nothing): a gamepad is never left with
-          nothing focused for the two minutes of a start, or after it */}
-      <button type="button" className={`deck-mouth heat-${heat}`} disabled={!act && !ctl.starting && !ctl.running} aria-disabled={!act || undefined} onClick={() => act?.()}
+      {/* while the game starts or runs, a profile is being applied or Kiln is installed, the mouth keeps the focus
+          (aria-disabled, A does nothing): a gamepad is never left with nothing focused for the two minutes of a start,
+          or after it, nor when an install's task has ended a moment before its change has */}
+      <button type="button" className={`deck-mouth heat-${heat}`} disabled={!act && !ctl.starting && !ctl.running && !ctl.applying && !kiln.installing} aria-disabled={!act || undefined} onClick={() => act?.()}
         data-deck-autofocus="" data-deck-id="mouth" data-deck-a={act ? word : undefined} aria-label={sub ? t("deck.home.mouthAria", { word, sub }) : word}
         onFocus={() => { deckFire.hot = !!act; }} onBlur={() => { deckFire.hot = false; }}>
         <span className="deck-mouth-fire" aria-hidden />

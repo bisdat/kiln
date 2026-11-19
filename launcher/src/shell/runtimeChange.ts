@@ -41,7 +41,7 @@ export async function runRuntimeChange(qc: QueryClient, game: GameInstall, bundl
     if (r && "runtime" in r) {
       const newer = bundles.find((b) => b.sides.includes(game.kind) && isOlder(r.runtime.version, b.version, bundles))?.version ?? null;
       // an install leaves no default part out unless the player turned it off: nothing is missing after it
-      const fix = (s: InstallState | undefined) => s && { ...s, installed: true, receipt: r, modified: [], upgradeAvailable: newer, missingParts: [] };
+      const fix = (s: InstallState | undefined) => s && { ...s, installed: true, receipt: r, modified: [], missingFiles: [], upgradeAvailable: newer, missingParts: [] };
       qc.setQueryData<InstallState>(qk.runtimeStatus(gid), fix);
       qc.setQueryData<api.GameStatus>(qk.gameStatus(gid), (s) => s && { ...s, runtime: fix(s.runtime)! });
     }

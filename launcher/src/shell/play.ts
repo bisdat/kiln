@@ -19,6 +19,8 @@ import { invalidateGame, useActiveProfile, useGame, useGameStatus, useLaunchStat
 import { runTask, toast } from "../ui";
 import { bootSnapshotBeforeOnce, cookBeforePlay, cookingNotice } from "./cook";
 import { notifyLibraryChanged } from "./libraryChanged";
+import { activationBusy } from "../api/oneActivation";
+import { useApplying, type Applying } from "./applying";
 import { gameState, playState, runStarted, type GameStateView } from "./gameState";
 import { notifyActivation, notifyActivationOf, notifyInstall } from "./notices";
 import { quietIsKiln, quietText, showsProgress, STEAM_WAIT_MS } from "./startProgress";
@@ -47,8 +49,11 @@ export interface PlayControl {
   view: GameStateView;
   installed: boolean;
   running: boolean;
-  /** Play can start now (a game, stopped, not updating). */
+  /** Play can start now (a game, stopped, not updating, no profile being applied). */
   canPlay: boolean;
+  /** (29.18) A profile is being applied to the game now (a Load in Settings, an add, a modpack, Kiln's install with its
+   *  profile, whatever started it; shell/applying.ts): Play says so and waits. Null otherwise. */
+  applying: Applying | null;
   busy: boolean;
   /** Waiting for Kiln to boot: a start this launcher made (or a play-once start) with no fresh boot.json yet. */
   starting: boolean;
@@ -79,6 +84,7 @@ export function usePlayControl(): PlayControl {
   const active = useActiveProfile(game?.id);
   const profiles = useProfiles();
   const changingRuntime = useRuntimeChanges((m) => !!game && m.last[game.id]?.state === "running");
+  const applying = useApplying(game?.id);
   const memo = useLaunchMemo();
   const id = game?.id ?? "";
   const stops = useStops();
@@ -193,7 +199,8 @@ export function usePlayControl(): PlayControl {
     view,
     installed: !!s?.runtime.installed,
     running,
-    canPlay: !!s && !running && !s.steamUpdating && launching === 0 && !starting && !changingRuntime,
+    canPlay: !!s && !running && !s.steamUpdating && launching === 0 && !starting && !changingRuntime && !applying,
+    applying,
     busy: launching > 0 || starting,
     starting,
     elapsed: running && since ? Math.max(0, Math.round((now - since) / 1000)) : null,
@@ -204,7 +211,11 @@ export function usePlayControl(): PlayControl {
     stoppedStart,
     dismissStop: () => clearStop(id),
     profileName: activeProfile?.name ?? null,
-    play: (mode, profileId) => launch.mutate({ gameId: id, req: { mode, profileId: profileId ?? null } }),
+    play: (mode, profileId) => {
+      // a dialog opened before an activation began (Vanilla once, the Deck's Play once) waits for it too (29.18)
+      if (applying) { toast.info(activationBusy()); return; }
+      launch.mutate({ gameId: id, req: { mode, profileId: profileId ?? null } });
+    },
   };
 }
 

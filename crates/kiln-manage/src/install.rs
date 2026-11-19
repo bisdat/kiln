@@ -164,8 +164,13 @@ pub struct InstallState {
     pub receipt: Option<InstallReceipt>,
     /// What `dinput8.dll` is now.
     pub proxy: Option<ProxyClass>,
-    /// Receipt files whose sha256 changed since the install (game-relative paths).
+    /// Receipt files whose sha256 changed since the install (game-relative paths). Missing files count too.
     pub modified: Vec<String>,
+    /// The receipt files of [`modified`](Self::modified) that are not in the game folder at all (game-relative paths,
+    /// config files never): deleted by hand, or removed or quarantined by an antivirus. A reinstall of the installed
+    /// bundle puts them back. Empty from older backends.
+    #[serde(default)]
+    pub missing_files: Vec<String>,
     /// A newer bundle in `<data>/runtime/` (its version).
     pub upgrade_available: Option<String>,
     /// Components of the installed bundle (when it is in `<data>/runtime/`) missing from the receipt that a
@@ -286,10 +291,22 @@ pub fn modified_files(game_dir: &Path, receipt: &InstallReceipt) -> Vec<String> 
         .collect()
 }
 
+/// Of `modified` (from [`modified_files`]), the files that are not in `game_dir` at all, as opposed to there with other
+/// bytes. Only "not found" counts: a file the system refuses to read (a lock, a permission) is there, so it stays a
+/// changed file.
+pub fn missing_files(game_dir: &Path, modified: &[String]) -> Vec<String> {
+    modified
+        .iter()
+        .filter(|p| matches!(std::fs::metadata(game_dir.join(p)), Err(e) if e.kind() == std::io::ErrorKind::NotFound))
+        .cloned()
+        .collect()
+}
+
 pub fn status(dirs: &DataDirs, install: &GameInstall) -> Result<InstallState> {
     let receipt = read_receipt(&install.path)?;
     let proxy = crate::pe::classify_proxy(&install.path.join(PROXY)).ok();
     let modified = receipt.as_ref().map(|r| modified_files(&install.path, r)).unwrap_or_default();
+    let missing_files = missing_files(&install.path, &modified);
     let side = side_of(install);
     let bundles = receipt.as_ref().and_then(|_| crate::bundle::list(dirs).ok());
     let missing_parts = receipt
@@ -321,7 +338,7 @@ pub fn status(dirs: &DataDirs, install: &GameInstall) -> Result<InstallState> {
             .map(|b| b.version)
     });
     crate::filecache::flush();
-    Ok(InstallState { installed: receipt.is_some(), receipt, proxy, modified, upgrade_available, missing_parts, switch_back: None })
+    Ok(InstallState { installed: receipt.is_some(), receipt, proxy, modified, missing_files, upgrade_available, missing_parts, switch_back: None })
 }
 
 /// The components `requested` (None: defaults) for `side`, with everything they require.
