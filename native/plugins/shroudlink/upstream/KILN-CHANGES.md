@@ -42,6 +42,13 @@ The step-aside hint (dev.30, marked `kiln:`):
 |---|---|
 | `server/src/kiln.rs` | `aside_entry` names the core file `real_core_in_process` found in the `not-loaded` reason, and `shroudlink.json` carries that path in `corePath`. Advice names that file, including a core under `kiln/chain/`, and keeps the client addon for its MODS tab. With none known (another core claimed the process), the reason lists possible names. Host test `standing_aside_reports_profile_entries_truthfully`. |
 
+The chest-name scan (0.2.0-dev.29.19, marked `kiln:`; a player's report: with the assistants mod on, a busy area
+stuttered at every scan on a 4-thread CPU with the page file on a hard drive):
+
+| File | Change |
+|---|---|
+| `server/src/names.rs` | A scan reads only the pages in the working set (`K32QueryWorkingSetEx` per 1 MiB chunk): a record on a skipped page stays as the scan before saw it (`keep_skipped`; such a page was not written since it was paged out), and the scan no longer pages the game's memory back in. The background thread runs in `THREAD_MODE_BACKGROUND_BEGIN` and rests 4 ms after each 4 ms of work; a scan the game thread waits for (`lookup_fresh`) does not rest. The log line says what a scan read and skipped and how many records it kept. Host tests `ranges_and_runs`, `records_on_skipped_pages_are_kept`, `a_scan_finds_a_record_in_this_process`. |
+
 The enclosing workspace enables `Win32_Storage_FileSystem` and `Win32_Security` for those checked handles.
 `../build.sh --test` also includes the common crate's tests. `../src/guard.c` and `../tests/nearby/` are Kiln's own
 integration code/tests outside the vendored crates.
