@@ -306,7 +306,14 @@ still takes (0.2.0-dev.27; `kiln_manage::start_progress`, commands `launch_begin
   start and the game's process does not exist a minute later (a first start under Proton makes its prefix first),
   the bar stops counting and says "Steam is still preparing the game: this can take minutes the first time"; after
   5 minutes the window offers Play again (the launcher before 0.2.0-dev.27 did after 2), and the launcher keeps the
-  start's own timings until the game appears (it goes on as one start), Play is pressed again, or 30 minutes pass. The window keeps following a start while it is hidden or in the background (the game has the display then);
+  start's own timings until the game appears (it goes on as one start), Play is pressed again, or 30 minutes pass.
+  **Stop waiting** (0.2.0-dev.29.18): from the moment Steam was asked until the game's process exists, Play (after the
+  time left, or under the boot stages of a start without a bar) and the Deck's Home offer "Stop waiting", for a launch
+  cancelled in Steam (its "Processing Vulkan shaders" dialog, say) that would otherwise hold Play for those 5 minutes.
+  It gives Play back at once and drops the launcher's start too (`launch_end`), so its timings go and no later look
+  brings the wait back; a game Steam still starts afterwards is shown as running, without the launcher's steps. It is
+  never offered before Steam was asked (the cook, the profile) nor once the game runs, and it touches no process: a game
+  that appeared by the click is left as it is and its running views take over. The window keeps following a start while it is hidden or in the background (the game has the display then);
   the launcher's watcher keeps a start that reached the main menu even when no window asks. A game with a Kiln runtime older than
   0.2.0-dev.27 writes no progress.json: after the launcher's own steps the line says "Waiting for Kiln to boot" until
   its boot.json, then "Running" as before, and nothing is kept.
