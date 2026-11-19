@@ -1,0 +1,46 @@
+name: Research 68 - Station Fill client probe
+
+on:
+  push:
+    branches:
+      - research/issue-68-station-fill-client
+    paths:
+      - 'mods/tests/station-fill-client-probe/**'
+      - '.github/workflows/issue-68-station-fill-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package-read-only-probe:
+    name: Build read-only all-station probe
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout research branch
+        uses: actions/checkout@v4
+
+      - name: Install .NET 10 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Pack Kiln test mod
+        run: dotnet build mods/tests/station-fill-client-probe/StationFillClientProbe.csproj -c Release -t:KilnPack
+
+      - name: Verify package and stage artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          mapfile -t packages < <(find mods/tests/station-fill-client-probe/bin -type f -name 'station-fill-client-probe-0.1.0.zip' | sort)
+          test "${#packages[@]}" -eq 1
+          unzip -l "${packages[0]}"
+          cp "${packages[0]}" artifacts/
+
+      - name: Upload probe package (no release)
+        uses: actions/upload-artifact@v4
+        with:
+          name: station-fill-client-probe-0.1.0
+          path: artifacts/station-fill-client-probe-0.1.0.zip
+          if-no-files-found: error
