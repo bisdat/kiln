@@ -80,7 +80,9 @@ name, NVIDIA's version file and `nvidia-smi` on Linux; the display adapter's reg
 privileges). A tick (on) switches the launcher to test builds through the existing channel switch. A tester sees the
 current test build's checklist with only this hardware's steps ("2 steps are for other hardware"), sets Worked,
 Didn't work or Couldn't try with one line per step (on the Deck a pick for what happened), and sends the results
-(with a support report for the team only, ticked by default) once every step has one. The team's check mark shows as
+(with a support report for the team only, ticked by default) once every step has one. The attached report is prepared
+while the tick is on and the checklist shows its size and files before Send results (the Deck: "What is sent"); it
+goes as shown, never built unseen. The team's check mark shows as
 "read". Stop testing is in the checklist's `···` (the Deck: X).
 
 **Rich Presence** (`kiln_manage::community::presence`, `launcher/src-tauri/src/community/presence.rs`): one switch,
@@ -179,7 +181,7 @@ Discord snowflakes); the launcher refuses anything else before sending.
 | `GET /tester` | | `{tester, hardware, results: [{build, sentAt, url, read, replied}]}`; a `plan` beside them is read when the relay serves one |
 | `POST /tester` | `{hardware: {gpu, driver?, vram?, os?, runner?, covers: ["FSR 4", ...]}, beta}` (the lines the volunteer screen showed; a fact it could not read is left out, the card then says "Not known") | answer not used |
 | `DELETE /tester` | | answer not used |
-| `POST /tester/results` | multipart: `results` `{build (the build's version), steps: [{id, title, result, note?}]}` and, when ticked, `zip` | `{result: {build, sentAt, url, read, replied}}` |
+| `POST /tester/results` | multipart: `results` `{build (the build's version), steps: [{id, title, result, note?}]}` and, when ticked, `zip` (the report the checklist showed) | `{result: {build, sentAt, url, read, replied}}` |
 
 `Post` = `{id, title, url: "https://discord.com/channels/<guild>/<thread>", created, status:
 waiting|replied|solved|closed, replies, unread, lastReply: {name, team, at} | null, zip}`; a post that breaks the

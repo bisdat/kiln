@@ -114,6 +114,18 @@ pub async fn prepare(app: tauri::AppHandle, target: Option<crate::commands::logs
     .await
 }
 
+/// A prepared report's zip for another send (a tester's results): the zip the screen showed, sent as shown. It stays
+/// until [`forget_prepared`], so a send that fails can be tried again with it.
+pub fn prepared_zip(prepared: &str) -> Option<(String, Vec<u8>)> {
+    let map = PREPARED.lock().unwrap();
+    let p = map.get(prepared).filter(|p| p.at.elapsed() < KEEP)?;
+    Some((p.name.clone(), p.zip.clone()))
+}
+
+pub fn forget_prepared(prepared: &str) {
+    PREPARED.lock().unwrap().remove(prepared);
+}
+
 /// The known problem the report matches, from the last copy of the public list (kept when the Community page opened:
 /// matching it sends nothing).
 pub fn matching(r: &kiln_manage::report::Report) -> Option<kiln_manage::community::known::KnownIssue> {

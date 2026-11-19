@@ -59,6 +59,12 @@ test.describe("desktop", () => {
     await step("reload").getByRole("radio", { name: "Couldn't try" }).click();
     await expect(step("reload").locator(".kc-step-head")).toContainText("Couldn't try");
     await expect(page.getByTestId("kc-send-results")).toBeEnabled();
+    // the report attached for the team is shown before Send results: its size and files, prepared once and sent as shown
+    const attached = page.getByTestId("kc-attached");
+    await expect(attached).toContainText("10 files: Kiln's logs and state files, the profile, the launcher's log and lists of the game folder.");
+    await attached.getByRole("button", { name: "Show the files" }).click();
+    await expect(page.getByTestId("kc-attached-files")).toContainText("game/kiln/logs/kiln.log");
+    await expect(attached).toContainText("Saves and mod settings are never in it.");
     await page.getByTestId("kc-send-results").click();
     await expect(page.locator(".k-toast").filter({ hasText: "Results sent" })).toContainText("They're in the build's post in #testing. The team marks them when they've read them.");
     await expect(page.getByTestId("kc-results-state")).toContainText("Results sent just now. The Kiln team hasn't read them yet.");
@@ -100,6 +106,10 @@ test.describe("Steam Deck", () => {
     await page.getByTestId("deck-why").locator('[data-deck-id="why-slow"]').click();
     await expect(plan.locator('[data-deck-id="step-deck-battery"]')).toContainText("It was slow or stuttered");
     await expect(plan.locator('[data-deck-id="step-deck-battery"]')).toContainText("Didn't work");
+    // the report attached for the team: its size and files before Send results
+    await expect(plan.locator('[data-deck-id="attached"]')).toContainText("10 files");
+    await plan.locator('[data-deck-id="attached"]').click();
+    await expect(page.getByTestId("deck-attached-files")).toContainText("game/kiln/logs/kiln.log");
   });
 
   test("results read by the team", async ({ page }) => {

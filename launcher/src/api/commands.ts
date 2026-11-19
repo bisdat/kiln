@@ -2468,6 +2468,7 @@ export const testerLeave = () => call<null>("tester_leave");
 /** `result` or `note` left out: that one stays as it is (a note typed after a pick never undoes the pick); "clear":
  *  back to Not tried. */
 export const testerResultSet = (step: string, result?: StepResult | "clear", note?: string) => call<TestPlan | null>("tester_result_set", { step, result, note });
-export const testerResultsSend = (withReport: boolean) => call<TestPlan | null>("tester_results_send", { withReport });
+/** `prepared`: the support report the checklist showed (communityReportPrepare), for the team only when `withReport`. */
+export const testerResultsSend = (withReport: boolean, prepared?: string) => call<TestPlan | null>("tester_results_send", { withReport, prepared });
 /** Deck: asks Steam for its on-screen keyboard (steam://open/keyboard) for a field that takes words; nothing elsewhere. */
 export const communitySteamKeyboard = () => call<null>("community_steam_keyboard");

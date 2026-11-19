@@ -5,13 +5,14 @@
 // results with a support report for the team only, whether the team has read them, and Stop testing.
 import { MoreHorizontal } from "lucide-react";
 import { useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as api from "../api/commands";
 import type { Hardware, StepResult, TestPlan, TestStep } from "../api/commands";
 import { useUpdate } from "../api/update";
 import { runSwitch } from "../shell/ChannelSwitch";
 import { t as tt, useT } from "../i18n";
-import { Button, Card, EmptyState, KeyValue, Menu, Modal, StatusPill, TextInput, toast } from "../ui";
+import { Button, Card, EmptyState, KeyValue, Menu, Modal, StatusPill, TextInput, fmtBytes, toast } from "../ui";
+import { useGame } from "../api/hooks";
 import { DeckButton, Dialog, Row, Word } from "../deck/ui";
 import { ago, cq, refreshCommunity, useCommunity, useCommunityUi, useTester } from "./state";
 import { Pick } from "./DeckCommunity";
@@ -23,6 +24,14 @@ export const resultTone = (r: StepResult | null) => (r === "worked" ? "ok" : r =
 const untilDate = (iso: string) => new Date(iso).toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" });
 /** Shown for a fact the launcher could not read. */
 const fact = (s: string) => s || tt("community.tester.unknown");
+
+/** The support report a tester attaches to the results, prepared while it is ticked so the checklist shows its size
+ *  and files before Send results (the same report as Send to Kiln support's, for the team only), and sent as shown. */
+function useAttached(on: boolean) {
+  const { game } = useGame();
+  return useQuery({ queryKey: ["community", "prepare", "tester"], queryFn: () => api.communityReportPrepare(game ? { game: game.id } : null, "community"),
+    enabled: on, staleTime: 25 * 60_000, gcTime: 25 * 60_000, retry: false });
+}
 
 /** Volunteer, then the switch to test builds when ticked (the existing channel switch, as Settings does it). */
 function useVolunteer() {
@@ -114,6 +123,8 @@ function Checklist({ plan, net }: { plan: TestPlan; net: boolean }) {
   const [openStep, setOpenStep] = useState<string | null>(plan.steps.find((s) => !s.result)?.id ?? null);
   const [attach, setAttach] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [files, setFiles] = useState(false);
+  const report = useAttached(attach && !plan.sent);
   const steps = plan.steps;
   const done = steps.filter((s) => s.result).length;
   const setResult = (s: TestStep, result: StepResult | "clear" | undefined, note?: string) =>
@@ -125,7 +136,8 @@ function Checklist({ plan, net }: { plan: TestPlan; net: boolean }) {
   const send = async () => {
     setBusy(true);
     try {
-      await api.testerResultsSend(attach);
+      await api.testerResultsSend(attach, attach ? report.data?.prepared : undefined);
+      qc.removeQueries({ queryKey: ["community", "prepare", "tester"] });
       await qc.invalidateQueries({ queryKey: cq.tester });
       toast.ok(t("community.tester.plan.sentToast"), t("community.tester.plan.sentToastDetail"));
     } catch (e) { toast.error(e); } finally { setBusy(false); }
@@ -170,10 +182,21 @@ function Checklist({ plan, net }: { plan: TestPlan; net: boolean }) {
       {plan.hidden > 0 && <span className="k-hint">{t("community.tester.plan.hidden", { count: plan.hidden })}</span>}
       {!sent && (
         <div className="k-row" style={{ gap: 14 }}>
-          <Button onClick={send} loading={busy} disabled={!net || done < steps.length} data-testid="kc-send-results">{t("community.tester.plan.sendResults")}</Button>
-          <label className="kc-tick"><input type="checkbox" className="k-check" checked={attach} onChange={(e) => setAttach(e.target.checked)} />
+          <Button onClick={send} loading={busy} disabled={!net || done < steps.length || (attach && !report.data)} data-testid="kc-send-results">{t("community.tester.plan.sendResults")}</Button>
+          <label className="kc-tick"><input type="checkbox" className="k-check" checked={attach} onChange={(e) => setAttach(e.target.checked)} data-testid="kc-attach" />
             <span>{t("community.tester.plan.attach")} <span className="k-hint">{t("community.tester.plan.attachHint")}</span></span></label>
           {done < steps.length && <span className="k-hint">{t("community.tester.plan.untried")}</span>}
+        </div>
+      )}
+      {!sent && attach && (
+        <div className="kc-block" data-testid="kc-attached">
+          <div className="kc-block-head">
+            <span className="k-label">{t("community.send.check.zip")}</span>
+            <span className="k-hint">{report.data ? t("community.send.check.zipHint", { size: fmtBytes(report.data.size), count: report.data.files.length }) : t("community.send.checking")}</span>
+            {report.data && <button type="button" className="k-link kc-files-toggle" onClick={() => setFiles(!files)}>{files ? t("community.send.check.hideFiles") : t("community.send.check.showFiles")}</button>}
+          </div>
+          {files && report.data && <ul className="kc-files" data-testid="kc-attached-files">{report.data.files.map((f) => <li key={f.path}><span className="k-mono">{f.path}</span><span className="k-muted">{fmtBytes(f.size)}</span></li>)}</ul>}
+          <span className="k-hint">{t("community.send.check.redacted")}</span>
         </div>
       )}
     </Card>
@@ -210,7 +233,9 @@ function DeckTester({ onClose, signedIn }: { onClose: () => void; signedIn: bool
   const [signIn, setSignIn] = useState(false);
   const [beta, setBeta] = useState(true);
   const [attach, setAttach] = useState(true);
+  const [files, setFiles] = useState(false);
   const ts = q.data;
+  const report = useAttached(attach && !!ts?.plan && !ts.plan.sent);
   if (signIn) return <DeckSignIn onClose={() => setSignIn(false)} />;
   if (!ts) return null;
   const hw = ts.hardware;
@@ -245,6 +270,18 @@ function DeckTester({ onClose, signedIn }: { onClose: () => void; signedIn: bool
   const plan = ts.plan;
   const set = (s: TestStep, result: StepResult | "clear" | undefined, note?: string) =>
     api.testerResultSet(s.id, result, note).then(() => qc.invalidateQueries({ queryKey: cq.tester })).catch((e) => toast.error(e));
+  if (files && report.data) {
+    return (
+      <Dialog key="files" name="tester-files" title={t("community.deck.whatIsSent")} wide onClose={() => setFiles(false)} backLabel={t("common.back")}
+        buttons={<DeckButton primary onClick={() => setFiles(false)}>{t("common.ok")}</DeckButton>}>
+        <div className="deck-scroll kdc-sent-list" tabIndex={0} data-deck-a="-" data-deck-id="sent-list" data-testid="deck-attached-files">
+          <p className="deck-label">{t("community.send.check.zip")} · {fmtBytes(report.data.size)}</p>
+          <ul>{report.data.files.map((f) => <li key={f.path} className="deck-mono">{f.path}</li>)}</ul>
+          <p className="deck-dim">{t("community.send.check.redacted")}</p>
+        </div>
+      </Dialog>
+    );
+  }
   if (step && typing) return <TypeDialog value={step.note} max={140} onDone={(v) => { void set(step, undefined, v); setTyping(false); setWhy(false); setStep(null); }} />;
   if (step && why) {
     const notes = ["crashed", "wrong", "slow", "missing"] as const;
@@ -279,7 +316,9 @@ function DeckTester({ onClose, signedIn }: { onClose: () => void; signedIn: bool
     <Dialog key="plan" name="tester-plan" title={t("community.tester.plan.title", { build: plan.build })} wide onClose={onClose} backLabel={t("common.close")}
       actions={[{ button: "x", label: t("community.tester.leave"), run: () => void stopTesting(qc).then(onClose) }]}
       buttons={plan.sent ? <DeckButton primary onClick={onClose}>{t("common.ok")}</DeckButton>
-        : <DeckButton primary disabled={done < plan.steps.length} onClick={() => api.testerResultsSend(attach).then(() => qc.invalidateQueries({ queryKey: cq.tester })).then(() => toast.ok(t("community.tester.plan.sentToast"))).catch((e) => toast.error(e))}>{t("community.tester.plan.sendResults")}</DeckButton>}>
+        : <DeckButton primary disabled={done < plan.steps.length || (attach && !report.data)} onClick={() => api.testerResultsSend(attach, attach ? report.data?.prepared : undefined)
+            .then(() => { qc.removeQueries({ queryKey: ["community", "prepare", "tester"] }); return qc.invalidateQueries({ queryKey: cq.tester }); })
+            .then(() => toast.ok(t("community.tester.plan.sentToast"))).catch((e) => toast.error(e))}>{t("community.tester.plan.sendResults")}</DeckButton>}>
       <div className="deck-scroll" data-testid="deck-plan">
         {plan.sent ? <p className="deck-line" data-testid="deck-results-state">{plan.sent.read ? <><Word tone="ok">{t("community.posts.status.repliedSeen")}</Word> <span>{t("community.tester.plan.read", { name: plan.sent.read.by, ago: ago(plan.sent.read.at) })}</span></>
           : <><Word tone="idle">{t("community.posts.status.waiting")}</Word> <span>{t("community.tester.plan.sent", { ago: ago(plan.sent.at) })}</span></>}</p>
@@ -289,6 +328,8 @@ function DeckTester({ onClose, signedIn }: { onClose: () => void; signedIn: bool
             end={<Word tone={resultTone(x.result)}>{t(`community.tester.plan.result.${x.result ?? "none"}`)}</Word>} a={t("common.open")} onClick={() => { if (!plan.sent) setStep(x); }} />)}
           {!plan.sent && <Pick id="attach" title={t("community.tester.plan.attach")} sub={t("community.tester.plan.attachHint")} on={attach}
             end={<Word tone={attach ? "ok" : "idle"}>{attach ? t("community.deck.on") : t("community.deck.off")}</Word>} a={t("community.deck.toggle")} onClick={() => setAttach(!attach)} />}
+          {!plan.sent && attach && <Pick id="attached" title={t("community.deck.whatIsSent")} a={tt("deck.shared.read")} onClick={() => setFiles(true)}
+            sub={report.data ? t("community.send.check.zipHint", { size: fmtBytes(report.data.size), count: report.data.files.length }) : t("community.send.checking")} />}
         </div>
         {plan.hidden > 0 && <p className="deck-dim">{t("community.tester.plan.hidden", { count: plan.hidden })}</p>}
       </div>

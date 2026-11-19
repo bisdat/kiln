@@ -150,28 +150,25 @@ pub fn set_result(step: &str, result: Option<ResultChange>, note: Option<String>
     Ok(Some(view(&plan, None, &hardware())?))
 }
 
-pub async fn send_results(app: tauri::AppHandle, with_report: bool) -> Result<Option<PlanView>, Error> {
+/// Sends the results; `prepared`: the support report the checklist showed (community_report_prepare: its size and
+/// files), for the team only. A report goes only as prepared and shown: nothing is built here.
+pub async fn send_results(_app: tauri::AppHandle, with_report: bool, prepared: Option<String>) -> Result<Option<PlanView>, Error> {
     let Some((plan, _)) = REMOTE.lock().unwrap().clone() else { return Ok(None) };
     let hw = hardware();
     let d = crate::state::dirs()?;
     let wire = Results::load(&d, &plan.build).wire(&plan, &hw.caps)?;
-    // the support report for the team, as "Send to Kiln support" builds it (the first client game)
-    let input = if with_report {
-        let game = kiln_manage::game::known(&d).unwrap_or_default().into_iter().find(|g| g.kind == kiln_manage::game::GameKind::Client);
-        Some(crate::commands::logs::report_input(&app, game.map(|g| crate::commands::logs::LogTarget::Game(g.id)))?)
-    } else {
-        None
+    let zip = match (with_report, prepared.as_deref()) {
+        (false, _) => None,
+        (true, Some(id)) => Some(crate::community::report::prepared_zip(id).ok_or_else(|| {
+            Error::new(kiln_manage::ErrorCode::NotFound, "This report was prepared too long ago. Look at it again, then send.").with_detail(serde_json::json!({ "kind": "not_found" }))
+        })?),
+        (true, None) => return Err(Error::invalid("The report to attach was not shown yet.")),
     };
     blocking(move || {
-        let zip = match input {
-            Some(input) => {
-                // in memory, as Send to Kiln support builds it: never in a temp folder other users could read
-                Some(kiln_manage::report::zip_bytes(&kiln_manage::report::build(&input))?)
-            }
-            None => None,
-        };
-        let name = kiln_manage::report::file_name(std::time::SystemTime::now());
-        let sent = crate::commands::community::relay_call(|r| r.tester_results(wire, zip.as_deref().map(|z| (name.as_str(), z))))?.mark();
+        let sent = crate::commands::community::relay_call(|r| r.tester_results(wire, zip.as_ref().map(|(name, z)| (name.as_str(), z.as_slice()))))?.mark();
+        if let Some(id) = prepared.as_deref().filter(|_| with_report) {
+            crate::community::report::forget_prepared(id);
+        }
         *REMOTE.lock().unwrap() = Some((plan.clone(), Some(sent.clone())));
         crate::commands::app::launcher_log("community", &format!("test results sent for {}", plan.build));
         Ok(Some(view(&plan, Some(sent), &hardware())?))

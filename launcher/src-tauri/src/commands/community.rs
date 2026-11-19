@@ -527,9 +527,11 @@ pub async fn tester_result_set(step: String, result: Option<kiln_manage::communi
     blocking(move || crate::community::testers::set_result(&step, result, note)).await
 }
 
+/// `prepared`: the support report the checklist showed (community_report_prepare), sent with the results when
+/// `with_report`.
 #[tauri::command]
-pub async fn tester_results_send(app: AppHandle, with_report: bool) -> Result<Option<crate::community::testers::PlanView>, Error> {
-    let r = crate::community::testers::send_results(app.clone(), with_report).await?;
+pub async fn tester_results_send(app: AppHandle, with_report: bool, prepared: Option<String>) -> Result<Option<crate::community::testers::PlanView>, Error> {
+    let r = crate::community::testers::send_results(app.clone(), with_report, prepared).await?;
     emit_changed(&app);
     Ok(r)
 }

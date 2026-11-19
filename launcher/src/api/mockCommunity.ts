@@ -318,6 +318,9 @@ export function communityMockHandlers({ emit, gameRunning }: CommunityMockDeps):
     tester_results_send: (a) => {
       needSession();
       if (!testPlan) return null;
+      // the attached report goes only as prepared and shown (the backend refuses one it did not show)
+      if (a.withReport && !prepared.has(String(a.prepared))) err("invalid_argument", "The report to attach was not shown yet.", "not_found");
+      if (a.withReport) prepared.delete(String(a.prepared));
       if (testPlan.steps.some((s) => !s.result)) err("invalid_argument", "Try each step, or mark it Couldn't try.", "untried");
       relay(a.withReport ? "tester-results+zip" : "tester-results");
       testPlan = { ...testPlan, sent: { at: new Date().toISOString(), read: null, replied: false } };
