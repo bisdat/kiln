@@ -11,7 +11,7 @@
 
 use crate::game::{GameInstall, GameKind};
 use crate::library::{self, ImportReport, LibraryRef, Skipped};
-use crate::manifest::ModKind;
+use crate::manifest::{ModKind, RunSide};
 use crate::paths::DataDirs;
 use crate::profile::{self, Activation, Profile, ProfileMod, ProfileMods};
 use crate::task::Progress;
@@ -631,24 +631,11 @@ fn add_impl(dirs: &DataDirs, install: &GameInstall, paths: &[PathBuf], is_runnin
     }
     report.import = if files.is_empty() { ImportReport::default() } else { library::import(dirs, &files, progress)? };
     report.import.skipped.extend(skipped);
-    let mut refs: Vec<LibraryRef> = Vec::new();
-    for r in report.import.imported.iter().chain(&report.import.existing) {
-        if let Some(i) = refs.iter().position(|old| old.kind == r.kind && old.id == r.id) {
-            // One version per mod, chosen consistently even when import divides a repeated drop into its
-            // imported/existing lists in a different order. A repeated multi-version drop is a no-op.
-            if crate::bundle::compare_versions(&r.version, &refs[i].version).then_with(|| r.hash.cmp(&refs[i].hash)).is_gt() {
-                refs[i] = r.clone();
-            }
-        } else {
-            refs.push(r.clone());
-        }
-    }
+    let current = match &dest { Dest::Active(p) | Dest::Resume(p) => Some(&p.mods), _ => None };
+    let refs = pick_one_per_mod(dirs, &report.import, current);
     for r in report.import.imported.iter().chain(&report.import.existing) {
         if let Some(selected) = refs.iter().find(|s| s.kind == r.kind && s.id == r.id && *s != r) {
-            let (chosen, omitted) = (named(dirs, selected)?, named(dirs, r)?);
-            let notice = format!("Kiln selected {} {} ({:.8}) over {} {} ({:.8}) for this drop: both have the id {} {}. Both are in your Library.",
-                chosen.name, chosen.version, chosen.hash.trim_start_matches("kdh1:"),
-                omitted.name, omitted.version, omitted.hash.trim_start_matches("kdh1:"), r.kind.as_str(), r.id);
+            let notice = pick_notice(dirs, &report.import, current, selected, r)?;
             if !report.notices.contains(&notice) { report.notices.push(notice); }
         }
     }
@@ -693,6 +680,85 @@ fn add_impl(dirs: &DataDirs, install: &GameInstall, paths: &[PathBuf], is_runnin
     report.applied = target.created || target.resumed;
     put_in_profile(dirs, install, &target, &refs, running, progress, &mut report)?;
     Ok(report)
+}
+
+/// What decides between two entries of one mod in one drop, best first (`Ord`: the greater wins).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Why {
+    /// No reason left: the copies are the same entry.
+    Same,
+    /// The one that comes first in the drop (folders sorted by name).
+    Order,
+    /// The one the profile has now.
+    InProfile,
+    /// The one made or packed for the game ([`library::side_fit`]).
+    Side,
+    /// The newer version.
+    Version,
+}
+
+/// How `a` compares with `b` (two entries of one mod in one drop) for a game client's profile, and what decided it: the
+/// newer version; then the copy made or packed for the game (a download with a client and a server copy of one version,
+/// inbox 91); then the copy the profile has now; then the one that comes first in the drop. Never the hash: a repeated
+/// drop picks the same entry, however import divides it into its imported/existing lists.
+fn compare_for_client(dirs: &DataDirs, import: &ImportReport, current: Option<&ProfileMods>, a: &LibraryRef, b: &LibraryRef)
+                      -> (std::cmp::Ordering, Why) {
+    use std::cmp::Ordering::Equal;
+    let v = crate::bundle::compare_versions(&a.version, &b.version);
+    if v != Equal { return (v, Why::Version); }
+    let fit = |r: &LibraryRef| library::record(dirs, r).ok().map(|rec| library::side_fit(RunSide::Client, &rec));
+    let s = fit(a).cmp(&fit(b));
+    if s != Equal { return (s, Why::Side); }
+    let has = |r: &LibraryRef| current.is_some_and(|m| m.list(r.kind).iter().any(|e| e.id == r.id && e.hash == r.hash));
+    let p = has(a).cmp(&has(b));
+    if p != Equal { return (p, Why::InProfile); }
+    let pos = |r: &LibraryRef| import.order.iter().position(|o| o == r).unwrap_or(usize::MAX);
+    let o = pos(b).cmp(&pos(a)); // earlier in the drop is better
+    (o, if o == Equal { Why::Same } else { Why::Order })
+}
+
+/// One entry per mod of a drop ([`compare_for_client`]).
+fn pick_one_per_mod(dirs: &DataDirs, import: &ImportReport, current: Option<&ProfileMods>) -> Vec<LibraryRef> {
+    let mut refs: Vec<LibraryRef> = Vec::new();
+    for r in import.imported.iter().chain(&import.existing) {
+        if let Some(i) = refs.iter().position(|old| old.kind == r.kind && old.id == r.id) {
+            if compare_for_client(dirs, import, current, r, &refs[i]).0.is_gt() {
+                refs[i] = r.clone();
+            }
+        } else {
+            refs.push(r.clone());
+        }
+    }
+    refs
+}
+
+/// What the player reads when a drop held another entry of a mod than the one that went in, in words that say why.
+fn pick_notice(dirs: &DataDirs, import: &ImportReport, current: Option<&ProfileMods>, chosen: &LibraryRef, other: &LibraryRef) -> Result<String> {
+    let (c, o) = (named(dirs, chosen)?, named(dirs, other)?);
+    let short = |h: &str| h.trim_start_matches("kdh1:").chars().take(8).collect::<String>();
+    let why = compare_for_client(dirs, import, current, chosen, other).1;
+    Ok(match why {
+        Why::Version => format!("Kiln selected {} {} ({}) over {} {} ({}) for this drop: both have the id {} {}. Both are in your Library.",
+            c.name, c.version, short(&c.hash), o.name, o.version, short(&o.hash), other.kind.as_str(), other.id),
+        // the other copy does not run on the game (its manifest), or the drop packed it for a server
+        Why::Side if library::record(dirs, other).is_ok_and(|rec| library::side_fit(RunSide::Client, &rec) < (true, 1)) =>
+            format!("This drop holds two copies of {} {}: one for the game and one for a dedicated server. Kiln selected the game copy; \
+                the dedicated server copy stays in your Library for a server.", c.name, c.version),
+        Why::Side => format!("This drop holds two copies of {} {}, and its client folder holds the one for the game: Kiln selected that copy. \
+            Both are in your Library.", c.name, c.version),
+        Why::InProfile | Why::Order | Why::Same => {
+            // two packages that only share the id and version (another name each) are named both
+            let which = if c.name == o.name {
+                format!("two different copies of {} {} ({} and {})", c.name, c.version, short(&c.hash), short(&o.hash))
+            } else {
+                format!("two different packages with the id {} {} and the version {}: {} ({}) and {} ({})", other.kind.as_str(), other.id,
+                    c.version, c.name, short(&c.hash), o.name, short(&o.hash))
+            };
+            let how = if why == Why::InProfile { "the one your profile already has" } else { "the first one in this drop" };
+            format!("This drop holds {which}, and nothing in them says which one is for the game. Kiln selected {how} ({}). \
+                Both are in your Library: if the mod misbehaves, pick the other one on its row.", short(&c.hash))
+        }
+    })
 }
 
 /// Merges `refs` into the target profile, saves it and, when the game is not running, writes the game's profile.json

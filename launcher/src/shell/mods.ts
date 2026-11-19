@@ -59,9 +59,15 @@ const lower = (s: string) => s.toLowerCase();
 
 /** The version the launcher picks by itself for a mod (the row's version when the profile lacks it, a switch, All on,
  *  the server's sync dialog): the Library's newest that is not kept for a roll back. A kept version is only ever
- *  picked by hand (Roll back to, Use). None when only kept versions are left. */
-export function defaultVersion(lib: LibraryEntry | null | undefined): LibraryVersion | undefined {
-  return lib?.versions.find((v) => !v.kept);
+ *  picked by hand (Roll back to, Use). None when only kept versions are left. Of several copies of that version (one
+ *  download's game and dedicated-server copies, `source.packagedFor`), the one packed for `side`, else one packed for
+ *  neither side; the Library's order decides among the rest. */
+export function defaultVersion(lib: LibraryEntry | null | undefined, side: "client" | "server" = "client"): LibraryVersion | undefined {
+  const newest = lib?.versions.find((v) => !v.kept);
+  if (!newest) return undefined;
+  const fit = (v: LibraryVersion) => (v.source?.packagedFor === side ? 2 : v.source?.packagedFor ? 0 : 1);
+  const copies = lib!.versions.filter((v) => !v.kept && v.version === newest.version);
+  return copies.reduce((best, v) => (fit(v) > fit(best) ? v : best), newest);
 }
 const byName = (a: ModRow, b: ModRow) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }) || a.key.localeCompare(b.key);
 

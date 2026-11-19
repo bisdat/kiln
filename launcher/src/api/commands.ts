@@ -652,7 +652,9 @@ export interface LibraryVersion {
   side: Side | null;
   clients: Clients | null;
   size: number;
-  source: { type: "file" | "folder" | "modpack" | "replaced-dll"; from: string } | null;
+  /** `packagedFor`: the side the download packed this copy for (a client/ or server/ folder around it, as Town Portals
+   *  2.0.3 ships both copies of one version in one zip). Absent: no such folder. */
+  source: { type: "file" | "folder" | "modpack" | "replaced-dll"; from: string; packagedFor?: "client" | "server" } | null;
   /** The id the mod's own manifest gives, when the Library id is not that (an engine mod such as "Hoarders Helper":
    *  the Library id is its Kiln-id slug). Engine plugins report their state rows under this id. */
   manifestId: string | null;

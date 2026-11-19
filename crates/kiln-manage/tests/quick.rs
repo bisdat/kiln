@@ -603,3 +603,161 @@ fn an_eml_mod_whose_manifest_id_is_no_kiln_id_goes_into_the_profile() {
     let again = quick::add_with(&dirs, &g, &[t.0.join("HoardersHelper EML included")], false, &mut NoProgress).unwrap();
     assert!(again.added.is_empty() && again.already.len() == 1, "{again:?}");
 }
+
+// ---- inbox 91: one download that holds a client copy and a server copy of one mod (Town Portals 2.0.3) ----
+
+/// Town Portals' mod.json as both copies of 2.0.3 carry it: the same id, version and side; only the DLLs differ.
+#[cfg(feature = "zip")]
+const TOWN_PORTALS_JSON: &[u8] = br#"{"id":"town-portal","name":"Town Portals","version":"2.0.3","dll":"town-portal.dll","side":"both","api":2}"#;
+
+/// A zip with one Greeneye mod folder per (folder, DLL marker): `<folder>/town-portal/{mod.json,town-portal.dll}`.
+#[cfg(feature = "zip")]
+fn town_portals_zip(path: &Path, copies: &[(&str, String)]) {
+    use std::io::Write;
+    let mut w = zip::ZipWriter::new(std::fs::File::create(path).unwrap());
+    let o = zip::write::SimpleFileOptions::default();
+    for (folder, marker) in copies {
+        w.start_file(format!("{folder}/town-portal/mod.json"), o).unwrap();
+        w.write_all(TOWN_PORTALS_JSON).unwrap();
+        w.start_file(format!("{folder}/town-portal/town-portal.dll"), o).unwrap();
+        w.write_all(&kiln_manage::pe::build_test_dll(&["GreeneyeModStart"], marker.as_bytes())).unwrap();
+    }
+    w.finish().unwrap();
+}
+
+/// The Library hash of the town-portal copy whose DLL carries `marker`.
+fn town_portal_hash(dirs: &DataDirs, marker: &str) -> String {
+    let e = library::list(dirs, Some(ModKind::Greeneye)).unwrap().into_iter().find(|e| e.id == "town-portal").expect("town-portal in the Library");
+    let want = kiln_manage::pe::build_test_dll(&["GreeneyeModStart"], marker.as_bytes());
+    e.versions.iter().find(|v| std::fs::read(v.folder.join("town-portal.dll")).unwrap() == want).map(|v| v.hash.clone())
+        .unwrap_or_else(|| panic!("no copy with {marker}"))
+}
+
+fn profile_town_portal(dirs: &DataDirs) -> String {
+    let p = profile::get(dirs, "my-mods").unwrap();
+    let m = p.mods.greeneye.iter().find(|m| m.id == "town-portal").expect("town-portal in My mods");
+    assert!(m.enabled);
+    m.hash.clone()
+}
+
+/// Inbox 91: Town Portals 2.0.3's zip holds client/ and server/, two different packages with one id and one version.
+/// A game client's profile gets the client copy whatever their hashes are, and the notice says what happened instead of
+/// "Kiln selected X over X".
+#[cfg(feature = "zip")]
+#[test]
+fn a_drop_with_a_client_and_a_server_copy_puts_the_client_copy_in_the_game() {
+    let mut orders = std::collections::BTreeSet::new();
+    for seed in 0..8 {
+        let t = tmp(&format!("tp-variants-{seed}"));
+        let dirs = DataDirs::at(t.0.join("data"));
+        let g = game(&t.0);
+        let z = t.0.join("Town Portals-255-2-0-3-1763500000.zip");
+        let (client, server) = (format!("client build {seed}"), format!("server build {seed}"));
+        town_portals_zip(&z, &[("client", client.clone()), ("server", server.clone())]);
+        let r = quick::add_with(&dirs, &g, &[z], false, &mut NoProgress).unwrap();
+        let (c, s) = (town_portal_hash(&dirs, &client), town_portal_hash(&dirs, &server));
+        orders.insert(c < s);
+        assert_eq!(profile_town_portal(&dirs), c, "seed {seed}: the client copy goes into a client profile: {r:?}");
+        assert!(r.notices.iter().all(|n| !n.contains(" over ")), "seed {seed}: not \"Kiln selected X over X\": {:?}", r.notices);
+        let n = r.notices.iter().find(|n| n.contains("Town Portals")).unwrap_or_else(|| panic!("seed {seed}: a notice: {:?}", r.notices));
+        assert!(n.contains("dedicated server") && n.contains("Library"), "{n}");
+    }
+    assert_eq!(orders.len(), 2, "the seeds give both hash orders, so the pick cannot be the hash's");
+}
+
+/// The Library keeps which side the download packed each copy for, so a dedicated server can be given its copy:
+/// `library::side_fit` ranks the server copy first for a server and the client copy first for a game.
+#[cfg(feature = "zip")]
+#[test]
+fn the_library_records_which_copy_the_download_packed_for_a_server() {
+    use kiln_manage::manifest::RunSide;
+    let t = tmp("tp-library");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let z = t.0.join("town-portals.zip");
+    town_portals_zip(&z, &[("client", "client build".into()), ("server", "server build".into())]);
+    library::import(&dirs, &[z], &mut NoProgress).unwrap();
+    let (c, s) = (town_portal_hash(&dirs, "client build"), town_portal_hash(&dirs, "server build"));
+    let rec = |hash: &str| library::record(&dirs, &LibraryRef { kind: ModKind::Greeneye, id: "town-portal".into(), version: "2.0.3".into(), hash: hash.into() }).unwrap();
+    let (rc, rs) = (rec(&c), rec(&s));
+    assert_eq!(rc.source.as_ref().unwrap().packaged_for, Some(RunSide::Client));
+    assert_eq!(rs.source.as_ref().unwrap().packaged_for, Some(RunSide::Server));
+    let v = serde_json::to_value(rs.source.as_ref().unwrap()).unwrap();
+    assert_eq!(v["packagedFor"], "server", "the launcher reads it as source.packagedFor: {v}");
+    assert!(library::side_fit(RunSide::Server, &rs) > library::side_fit(RunSide::Server, &rc));
+    assert!(library::side_fit(RunSide::Client, &rc) > library::side_fit(RunSide::Client, &rs));
+}
+
+/// The folders that say which side a drop packed a mod for, and the ones that do not.
+#[test]
+fn a_client_or_server_folder_around_a_mod_names_its_side() {
+    use kiln_manage::manifest::RunSide;
+    for (rel, want) in [
+        ("client/town-portal", Some(RunSide::Client)),
+        ("Server/town-portal", Some(RunSide::Server)),
+        ("Town Portals/Dedicated Server/town-portal", Some(RunSide::Server)),
+        ("server", Some(RunSide::Server)),
+        ("town-portal", None),
+        ("server-tweaks/mod", None),
+        ("client/server/mod", None),
+    ] {
+        assert_eq!(library::packaged_for(Path::new(rel)), want, "{rel}");
+    }
+}
+
+/// The same drop again after an older Kiln imported both copies (no record of which folder each came from) and put the
+/// server copy into the profile (its arbitrary pick, inbox 91): the profile gets the client copy now.
+#[cfg(feature = "zip")]
+#[test]
+fn dropping_it_again_replaces_a_server_copy_an_older_pick_put_in_the_profile() {
+    let t = tmp("tp-again");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let g = game(&t.0);
+    // the copies as an older Kiln took them: each mod folder on its own, nothing around it naming a side
+    let folder = |dir: &str, marker: &str| {
+        let d = t.0.join("unpacked").join(dir).join("town-portal");
+        put(&d, "mod.json", TOWN_PORTALS_JSON);
+        put(&d, "town-portal.dll", &kiln_manage::pe::build_test_dll(&["GreeneyeModStart"], marker.as_bytes()));
+        d
+    };
+    let (old_client, old_server) = (folder("one", "client build"), folder("two", "server build"));
+    quick::add_with(&dirs, &g, &[old_server], false, &mut NoProgress).unwrap();
+    library::import(&dirs, &[old_client], &mut NoProgress).unwrap();
+    let (c, s) = (town_portal_hash(&dirs, "client build"), town_portal_hash(&dirs, "server build"));
+    assert_eq!(profile_town_portal(&dirs), s, "what an older Kiln left: the server copy in My mods");
+    let z = t.0.join("town-portals.zip");
+    town_portals_zip(&z, &[("client", "client build".into()), ("server", "server build".into())]);
+    let r = quick::add_with(&dirs, &g, &[z], false, &mut NoProgress).unwrap();
+    assert!(r.import.imported.is_empty() && r.import.existing.len() == 2, "both copies were in the Library: {r:?}");
+    assert_eq!(profile_town_portal(&dirs), c, "{r:?}");
+}
+
+/// Two different copies of one id and version and nothing saying which is for the game (no client/ or server/ folder,
+/// the same side): the first in the drop goes in, whatever the hashes; a copy the profile already has stays; the notice
+/// says so in words a player follows.
+#[cfg(feature = "zip")]
+#[test]
+fn copies_without_a_side_hint_are_picked_by_their_place_in_the_drop_not_by_hash() {
+    let mut orders = std::collections::BTreeSet::new();
+    for seed in 0..8 {
+        let t = tmp(&format!("tp-nohint-{seed}"));
+        let dirs = DataDirs::at(t.0.join("data"));
+        let g = game(&t.0);
+        let z = t.0.join("town-portals.zip");
+        let (a, b) = (format!("first {seed}"), format!("second {seed}"));
+        town_portals_zip(&z, &[("a", a.clone()), ("b", b.clone())]);
+        let r = quick::add_with(&dirs, &g, &[z.clone()], false, &mut NoProgress).unwrap();
+        let (ha, hb) = (town_portal_hash(&dirs, &a), town_portal_hash(&dirs, &b));
+        orders.insert(ha < hb);
+        assert_eq!(profile_town_portal(&dirs), ha, "seed {seed}: the first copy in the drop: {r:?}");
+        let n = r.notices.iter().find(|n| n.contains("Town Portals")).unwrap_or_else(|| panic!("a notice: {:?}", r.notices));
+        assert!(!n.contains(" over ") && n.contains("two different copies") && n.contains("first one in this drop") && n.contains("Library"), "{n}");
+        // the player chose the other copy: a drop of the same zip keeps it
+        let mut p = profile::get(&dirs, "my-mods").unwrap();
+        p.mods.greeneye.iter_mut().find(|m| m.id == "town-portal").unwrap().hash = hb.clone();
+        profile::save(&dirs, &p).unwrap();
+        let again = quick::add_with(&dirs, &g, &[z], false, &mut NoProgress).unwrap();
+        assert_eq!(profile_town_portal(&dirs), hb, "seed {seed}: the profile's copy stays: {again:?}");
+        assert!(again.changes.is_empty(), "{again:?}");
+    }
+    assert_eq!(orders.len(), 2, "the seeds give both hash orders");
+}
