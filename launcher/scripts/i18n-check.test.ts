@@ -24,6 +24,15 @@ test("a translation with unknown keys, non-text values and changed placeholders 
   expect(untranslated(enT, { n: { other: "x" } })).toEqual(["a", "p"]);
 });
 
+test("a plural form may carry {count} where English's .one has none (Russian's one is also 21; French's also 0)", () => {
+  const enT = flatten({ n: { one: "one mod left out", other: "{count} mods left out" }, m: { one: "{count} mod in {name}", other: "{count} mods in {name}" } });
+  expect(checkLocale(enT, { n: { one: "{count} мод пропущен", few: "{count} мода пропущены", many: "{count} модов пропущено", other: "{count} мода пропущено" } })).toEqual([]);
+  expect(checkLocale(enT, { n: { one: "un mod laissé de côté", other: "{count} mods laissés de côté" } })).toEqual([]);
+  // still flagged: a name no English form has, and a form that drops what English's own text at that key has
+  expect(checkLocale(enT, { n: { one: "{count} {name} мод" } }).map((p) => p.kind)).toEqual(["placeholders"]);
+  expect(checkLocale(enT, { m: { one: "{count} mod" } }).map((p) => p.kind)).toEqual(["placeholders"]);
+});
+
 test("a translation is data: markup, links, control characters, other number formats and bad confirm words are flagged", () => {
   const enT = flatten({
     a: "Read {file}", n: { one: "{count:N0} icon", other: "{count:N0} icons" }, site: "See https://frostdev.io/kiln.",

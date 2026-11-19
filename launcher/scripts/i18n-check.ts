@@ -57,13 +57,16 @@ function dataProblems(key: string, text: string, english: string[]): Problem[] {
   return out;
 }
 
-/** en.json's text(s) for a key a locale has: the key itself, or all plural forms of its base. Null: en.json lacks it. */
+/** en.json's text(s) for a key a locale has: for a plural form, all of English's forms of its base (a language's
+ * `one` may be more than 1: Russian's is also 21, 31, ...; French and Brazilian Portuguese's also 0, so its `.one` may
+ * need the `{count}` English's `.one` leaves out); else the key itself. Null: en.json lacks it. */
 function englishFor(en: Table, key: string): string[] | null {
-  if (en[key] !== undefined) return [en[key]];
   const base = pluralBase(key);
-  if (base === key) return null;
-  const forms = PLURAL_FORMS.map((f) => en[`${base}.${f}`]).filter((x): x is string => x !== undefined);
-  return forms.length ? forms : null;
+  if (base !== key) {
+    const forms = PLURAL_FORMS.map((f) => en[`${base}.${f}`]).filter((x): x is string => x !== undefined);
+    if (forms.length) return forms;
+  }
+  return en[key] !== undefined ? [en[key]] : null;
 }
 
 /** What is wrong in one locale file's object, compared with en.json's. */
@@ -81,10 +84,13 @@ export function checkLocale(enTable: Table, file: unknown): Problem[] {
       out.push({ key, kind: "unknown-key", message: "en.json has no such key" });
       continue;
     }
-    const want = new Set(english.flatMap(placeholders));
+    // allowed: what any English form of the key has; needed: what English's own text at this key has (all forms' for a
+    // plural form English does not have, e.g. Russian's .few)
+    const allowed = new Set(english.flatMap(placeholders));
+    const want = new Set(enTable[key] !== undefined ? placeholders(enTable[key]) : allowed);
     const have = new Set(placeholders(text));
     const plural = pluralBase(key) !== key;
-    const extra = [...have].filter((p) => !want.has(p));
+    const extra = [...have].filter((p) => !allowed.has(p));
     const missing = [...want].filter((p) => !have.has(p) && !(plural && p === "count"));
     if (extra.length || missing.length) {
       const parts = [];
