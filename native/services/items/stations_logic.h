@@ -687,6 +687,16 @@ inline uint32_t fill_ui_status(uint32_t game, uint32_t type, uint32_t amount, co
     return game;
 }
 
+// The ingredient rows' "available" count on a Kiln client (stations/client.UiAvailableCount: the bag plus the base's
+// Magic-chest cache, one widget for the crafting menu and the station screen). Only at the row's two call sites (`ret` is
+// one of them) and only for an item the snapshot names: the greater of the game's count and the snapshot's (the server's
+// bag, Magic chests and opted-in outputs). Everywhere else the game's own count.
+inline uint32_t stock_ui_count(uint32_t game, uintptr_t ret, uintptr_t row1, uintptr_t row2, bool named, uint64_t have) {
+    if (!ret || (ret != row1 && ret != row2) || !named) return game;
+    if (have <= game) return game;
+    return have > 0xffffffffull ? 0xffffffffu : static_cast<uint32_t>(have);
+}
+
 // The fills to ask the server about: refused for missing materials, no answer yet. Oldest first, at most `cap` (the
 // oldest goes when a new one comes). False: nothing changed.
 inline bool note_fill_ask(std::vector<KilnStationFillKey>* asks, const KilnStationFillKey& k, size_t cap) {

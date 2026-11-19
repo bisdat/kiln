@@ -167,6 +167,7 @@ internal static class CraftStock
     internal static readonly CraftStockRows Off = new([]);
     internal const int MaxFillKeys = StationsNative.MaxFillKeys;
     internal const string FillUiCapability = "stations.fill_ui";
+    internal const string StockUiCapability = "stations.stock_ui";
 
     private sealed class Session
     {
@@ -622,7 +623,7 @@ internal static class CraftStock
     internal static void ClientChanged(GameScreen before, GameScreen now)
     {
         var open = now.Kind == ScreenKind.Crafting && ServerSide() &&
-                   (Capabilities.Is(Stations.CraftUiCapability) || Capabilities.Is(FillUiCapability));
+                   (Capabilities.Is(Stations.CraftUiCapability) || Capabilities.Is(FillUiCapability) || Capabilities.Is(StockUiCapability));
         if (open == _open) return;
         _open = open;
         SwitchTick(open);

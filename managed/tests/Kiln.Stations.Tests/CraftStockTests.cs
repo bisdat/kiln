@@ -427,6 +427,21 @@ public sealed class CraftStockTests : IDisposable
     }
 
     [Fact]
+    public void The_ingredient_rows_count_alone_still_opens_the_session()
+    {
+        // stations.stock_ui (the "available" counts) needs the same snapshot even where the other client rows are off
+        var hellos = new List<bool>();
+        CraftStock.HelloHook = hellos.Add;
+        CraftStock.ServerSideHook = () => true;
+        using var k = new KilnHarness();
+        k.Capabilities.Override(Stations.CraftUiCapability, false);
+        k.Capabilities.Override(CraftStock.FillUiCapability, false);
+        k.Capabilities.Override(CraftStock.StockUiCapability, true);
+        CraftStock.ClientChanged(Screen(ScreenKind.InGame), Screen(ScreenKind.Crafting));
+        Assert.Equal([true], hellos);
+    }
+
+    [Fact]
     public void A_client_whose_server_has_no_Kiln_never_says_hello()
     {
         var hellos = new List<bool>();

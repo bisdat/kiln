@@ -650,11 +650,30 @@ the chests, then the opted-in outputs; the station's room and the recipe's water
 checks as the press (`StationsCore.SourceFillAllowed`). The logic is `stations_logic.h` (`fill_ui_status`,
 `note_fill_ask`, `drop_answered`), host-tested.
 
-**The input rows' "available" counts are not this query.** The screen's material rows (an input's count in the station and
-the count the base can give) are drawn from other data. `factory_station_info` is a program on both exes (flags 4;
-sys-read `PlayerBasesSystemServer`, other-read `Inventory`, `InventorySetup`, `FactoryStation`, `Crafting`; sys-write
-`ServerFactoryInfo`) and is the likely source, but the screen's read of those counts was not found in this pass. Kiln
-does not change them yet.
+**The input rows' "available" counts are not this query** (read 2026-11-19, the same build, disassembly only). They
+are built on the client, from a cache of the base's Magic chests:
+- `factory_station_info` (update C `0x336210`) is not the source: it fills a per-station record (state, recipe,
+  selections, position, the crafts its inventory holds at `+0xac`) and reads no base stock.
+- `cache_crafting_stock` (a client program, flags 5; update C `0x2b4150`; sys-read `LocalPlayerData`, sys-write
+  `PlayerBasesSystemClient`) finds the local player's base (C `0x46f460`) and walks its crafting-stock containers 40 a
+  frame, adding each container's stacks into a working hash map at `PlayerBasesSystemClient+0x1668` (item -> 8-byte value,
+  `u16` count first; C `0x40c6d0`, find C `0x2b1bf0`, add C `0x46d7e0`). When a pass ends C `0x46f460` copies it to the
+  published map at `+0x1610`.
+- `player_ui` (C `0x2b8430`, sys-write `G38UiPlayData`) copies that published map (getter C `0x4709a0`) into
+  `G38UiPlayData+0x2000` (C `0x2bd1ca`..`0x2bd2e9`) and sets `G38UiPlayData+0x828` when the player stands in a base
+  (C `0x2bd366`).
+- `UiAvailableCount` (C `0xd397d0`, `u32 (u32 item, inventory view*, stock map*)`) is the UI's count: the item's stacks
+  in the player's inventory view (72-byte entries at `+0x2d8`, item `+8`, count `+0x10`) plus, when `+0x828` is set, the
+  map's `u16`. The ingredient row widget (C `0xbb1850`, used by the crafting menu, C `0xc7883a` through C `0xbf4a90`, and
+  by the production station's screen, C `0xbb6562`) calls it twice: C `0xbb19b3` (return `0xbb19b8`) and C `0xbb2805`
+  (return `0xbb280a`), with `G38UiPlayData+0x2000` as the map. It has 9 other callers (other screens) that Kiln leaves alone.
+
+**What Kiln does (feature `stations.stock_ui`, Kiln clients).** kiln-items hooks `stations/client.UiAvailableCount` on
+demand (the same trigger as the fill query). Only for a call from the ingredient row's two sites
+(`stations/client.AvailableRowRet1` / `Ret2`, the game's return address as kiln.hooks reports it) and only for an item
+the server's snapshot names, it returns the greater of the game's count and the snapshot's (the server's bag, Magic
+chests and opted-in outputs, §10.5). Every other call and item is the game's. The cache maps are never written.
+`stations_logic.h` `stock_ui_count`, host-tested.
 
 ### 10.4 Which transaction, which thread
 

@@ -773,12 +773,13 @@ internal static unsafe partial class StationsCore
             if (Backend.Status() is null)
                 ServiceCaps.LowerFeatures(StationsNative.Name, Stations.ReadCapability, Stations.FillCapability, Stations.ControlCapability,
                     Stations.EventsCapability, Stations.OutputSourcesCapability, Stations.CraftSourcesCapability, Stations.CraftUiCapability,
-                    CraftStock.FillUiCapability);
+                    CraftStock.FillUiCapability, CraftStock.StockUiCapability);
             else if (!Backend.HasOutputSources)
                 ServiceCaps.LowerFeatures(StationsNative.Name, Stations.OutputSourcesCapability, Stations.CraftSourcesCapability, Stations.CraftUiCapability,
-                    CraftStock.FillUiCapability);
+                    CraftStock.FillUiCapability, CraftStock.StockUiCapability);
             else if (!Backend.HasCraftStock)
-                ServiceCaps.LowerFeatures(StationsNative.Name, Stations.CraftSourcesCapability, Stations.CraftUiCapability, CraftStock.FillUiCapability);
+                ServiceCaps.LowerFeatures(StationsNative.Name, Stations.CraftSourcesCapability, Stations.CraftUiCapability, CraftStock.FillUiCapability,
+                    CraftStock.StockUiCapability);
             else if (!Backend.HasFillUi)
                 ServiceCaps.LowerFeatures(StationsNative.Name, CraftStock.FillUiCapability);  // kiln-items before 0.2.0-dev.29.19
         }

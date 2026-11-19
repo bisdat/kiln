@@ -950,6 +950,21 @@ int main() {
         CHECK(asks.size() == 2 && same_fill(asks[0], fill_key(KILN2, SHEETS, nullptr)) && same_fill(asks[1], fill_key(FORGE, SHEETS, sel2)));
     }
 
+    // ---- the ingredient rows' "available" count on a Kiln client (GitHub #68, docs/re/stations.md §10.3) ----
+    {
+        constexpr uintptr_t ROW1 = 0x140bb19b8, ROW2 = 0x140bb280a, OTHER = 0x140c7eeb4;
+        // the row's two calls: the greater of the game's count and the snapshot's
+        CHECK(stock_ui_count(0, ROW1, ROW1, ROW2, true, 20) == 20);
+        CHECK(stock_ui_count(3, ROW2, ROW1, ROW2, true, 20) == 20);
+        CHECK(stock_ui_count(25, ROW1, ROW1, ROW2, true, 20) == 25);  // never below the game's own count
+        // any other caller (the build menu, a hint, ...), an item the snapshot does not name, no row symbols: the game's
+        CHECK(stock_ui_count(0, OTHER, ROW1, ROW2, true, 20) == 0);
+        CHECK(stock_ui_count(4, ROW1, ROW1, ROW2, false, 0) == 4);
+        CHECK(stock_ui_count(4, 0, 0, 0, true, 20) == 4);
+        CHECK(stock_ui_count(4, ROW1, 0, 0, true, 20) == 4);
+        CHECK(stock_ui_count(0, ROW1, ROW1, ROW2, true, 0x1'0000'0005ull) == 0xffffffffu);
+    }
+
     std::printf("stations: %d checks, %d failures\n", checks, failed);
     return failed ? 1 : 0;
 }

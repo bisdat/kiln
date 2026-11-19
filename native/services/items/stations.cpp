@@ -1158,6 +1158,64 @@ uint32_t __fastcall hk_ui_status(void* ui, uint32_t station, uint32_t recipe, ui
     return out;
 }
 
+// The ingredient rows' "available" count (stations/client.UiAvailableCount, the game's UI thread): u32 (u32 item,
+// inventory view*, stock map*). Hooked on demand with the fill query; at the row's two call sites the greater of the
+// game's count and the snapshot's. docs/re/stations.md §10.3.
+kiln::RawHook h_avail;
+std::atomic<bool> g_avail_hooked{false};
+bool g_avail_failed = false;  // the client world's thread only
+bool g_avail_feat = false;    // stations.stock_ui with its symbols (stations_resolve)
+uintptr_t g_avail_fn = 0, g_avail_row1 = 0, g_avail_row2 = 0;
+std::atomic<uint32_t> g_avail_raised{0};
+LogLimit g_log_avail{12};
+
+uint32_t __fastcall hk_avail(uint32_t item, const void* view, const void* stock) {
+    const uintptr_t ret = h_avail.caller();  // the game's call site (read before the original runs)
+    const uint32_t game = h_avail.call<uint32_t>(item, view, stock);
+    if ((ret != g_avail_row1 && ret != g_avail_row2) || !g_craft_on.load(std::memory_order_acquire)) return game;
+    bool named = false;
+    uint64_t have = 0;
+    {
+        std::lock_guard lock(g_craft_mu);
+        if (const auto it = g_craft_have.find(item); it != g_craft_have.end()) named = true, have = it->second;
+    }
+    const uint32_t out = stock_ui_count(game, ret, g_avail_row1, g_avail_row2, named, have);
+    if (out != game) {
+        g_avail_raised.fetch_add(1, std::memory_order_relaxed);
+        static std::mutex mu;
+        static std::unordered_map<uint32_t, uint64_t> said;
+        const uint64_t key = (static_cast<uint64_t>(game) << 32) | out;
+        bool fresh = false;
+        {
+            std::lock_guard lock(mu);
+            if (said.size() > 512) said.clear();
+            auto [it, inserted] = said.emplace(item, key);
+            fresh = inserted || it->second != key;
+            it->second = key;
+        }
+        if (fresh)
+            if (const uint32_t n = g_log_avail.take())
+                LOGI("stations: an ingredient's available count for item 0x%08x shown %u -> %u with station outputs%s", item, game, out,
+                     n > 1 ? " (more held back)" : "");
+    }
+    return out;
+}
+
+// The client world's Pre: the hook, the first time the snapshot is on.
+void avail_hook_on_demand() {
+    if (!g_avail_feat || g_avail_failed || g_avail_hooked.load(std::memory_order_acquire) || !g_craft_on.load(std::memory_order_acquire))
+        return;
+    if (!h_avail.install(g_api, g_owner, g_avail_fn, reinterpret_cast<void*>(&hk_avail), "stations/client.UiAvailableCount")) {
+        g_avail_failed = true;
+        LOGE("stations: hooking the ingredient rows' available count failed: %s", h_avail.error() ? h_avail.error() : "?");
+        lower("stations.stock_ui", KILN_CAP_REASON_FAULTED, "hooking the ingredient rows' available count failed (see kiln.log)");
+        return;
+    }
+    g_avail_hooked.store(true, std::memory_order_release);
+    LOGI("stations: the ingredient rows' available count %p hooked (station outputs counted where the server's snapshot names them)",
+         reinterpret_cast<void*>(g_avail_fn));
+}
+
 // The client world's Pre: the hook, the first time the snapshot is on.
 void fill_hook_on_demand() {
     if (!g_fill_feat || g_fill_failed || g_fill_hooked.load(std::memory_order_acquire) || !g_craft_on.load(std::memory_order_acquire))
@@ -3274,6 +3332,7 @@ void KILN_CALL client_pre(const KilnTickInfo*, void*) {
                                std::memory_order_release);
     }
     fill_hook_on_demand();
+    avail_hook_on_demand();
     static bool checked = false;
     if (!checked && w && feat("stations.craft_ui")) {
         checked = true;
@@ -3350,6 +3409,13 @@ void stations_resolve() {
         g_fill_feat = sym("stations/client.UiActionStatus", &g_ui_status) && g_ui_status;
         if (!g_fill_feat)
             lower("stations.fill_ui", KILN_CAP_REASON_SYMBOL_MISSING, "stations/client.UiActionStatus did not resolve");
+    }
+    // The ingredient rows' "available" count (the same snapshot). Hooked on demand.
+    if (g_api->side() == KILN_SIDE_CLIENT && feat("stations.stock_ui")) {
+        g_avail_feat = sym("stations/client.UiAvailableCount", &g_avail_fn) && sym("stations/client.AvailableRowRet1", &g_avail_row1) &&
+                       sym("stations/client.AvailableRowRet2", &g_avail_row2) && g_avail_fn && g_avail_row1 && g_avail_row2;
+        if (!g_avail_feat)
+            lower("stations.stock_ui", KILN_CAP_REASON_SYMBOL_MISSING, "stations/client.UiAvailableCount or its row call sites did not resolve");
     }
     G.fill_ok = G.read && feat("stations.fill") && E.tx_ok && sym("stations/AutoTransferRecipe", &G.fill) &&
                 sym("stations/FactoryInfoInvalidate", &G.invalidate) && E.setup_operator > 0 &&
