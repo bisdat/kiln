@@ -6,7 +6,7 @@ Upstream issue: https://github.com/frostdev-ops/kiln/issues/68
 
 ## Objective and observed discrepancy
 
-Finished items should stay in an opted-in production station yet be recognised by another station's **ordinary native availability display and Fill controls**, as if they were usable Magic Chest stock. Do not expose queued station inputs, copy stock into a chest, or alter the authoritative payment rules.
+For **every supported production-station type** (not only Forge), finished items should stay in an opted-in production station yet be recognised by another station's **ordinary native availability display and Fill controls**, as if they were usable Magic Chest stock. The Charcoal Kiln → Forge scenario below is simply our first reproducible example. Do not expose queued station inputs, copy stock into a chest, or alter the authoritative payment rules.
 
 Hosted-game BSMS v0.1.4 / Kiln dev.29.17 observations after opting in the base:
 
@@ -28,6 +28,10 @@ Hosted-game BSMS v0.1.4 / Kiln dev.29.17 observations after opting in the base:
 | Server plan and client limitations | `managed/services/Kiln.Blocks/World/Stations/StationsApi.cs`: `Stations.Plan` is `[ServerOnly, TickThreadOnly]`. | The render/UI thread must **not** call `Stations.Plan` directly. Hosting and joined clients both need a safe server-produced answer. |
 | Capability gating | `sigdb/symbols/client.d/stations-craft-ui.json` covers `stations.craft_ui`, not native factory Fill UI. | Any future hook should have its own fail-closed, build-verified client capability; don't repurpose `stations.craft_ui` as evidence of factory support. |
 
+## Read-only probe (in this research branch)
+
+`mods/tests/station-fill-client-probe/` contains a separate, opt-in mod that works generically on factory screens. It observes Kiln's UI target (`CraftingScreen.IsFactory` / `Station`), computes read-only `Stations.Plan` for **+1 additional craft** both with and without station outputs on the hosting server's tick, and shows a non-interactive panel with input quantities. It also logs received `StationPlayerActionEvent` Fill/Select/UseAllOptions actions without cancelling them. This is **not a native-client status-byte probe**: the exact native Fill enabled byte and slider quantity are not exposed; absence of a received action cannot alone establish why no action was sent. The test requires visual observation of the native controls (and client-build signature investigation later). No `Stations.Fill`, `Items.Move`, native patch or UI enablement is performed by this mod.
+
 ## Recommended investigation sequence (not a patch yet)
 
 1. **Confirm C7 in a real Kiln client**, including whether the native Fill hotkey still emits an action while the button is disabled. Instrument read-only UI state and/or observe the existing `StationPlayerActionEvent`; do not alter the status byte while collecting evidence. Check both Fill button state and displayed `Available` material count (these may be **two separate UI paths**).
@@ -38,7 +42,8 @@ Hosted-game BSMS v0.1.4 / Kiln dev.29.17 observations after opting in the base:
 
 ## Acceptance and safeguards before any PR
 
-- Base opted in, Charcoal Kiln has 20 output charcoal (no charcoal in bag/real Magic Chests), Forge has sufficient Metal Scraps: the native display shows shared availability; Fill is enabled; clicking it consumes the required charcoal exactly once; kiln's queued logs remain.
+- General acceptance: **every applicable production-station kind** shares eligible outputs and receives other stations' finished products through its native material display and Fill controls (not solely forge/charcoal kiln).
+- Reproducible first case: base opted in, Charcoal Kiln has 20 output charcoal (no charcoal in bag/real Magic Chests), Forge has sufficient Metal Scraps: the native display shows shared availability; Fill is enabled; clicking it consumes the required charcoal exactly once; kiln's queued logs remain.
 - Native Fill stays disabled on a genuinely insufficient ingredient, no eligible outputs, opted-out station/base, wrong base, no access rights, station/recipe changed, unavailable capability, or stale/late response.
 - Slider amounts, category ingredient options, full station, water, and disabled-for-other-reasons checks are not bypassed.
 - Test normal Fill versus the possible Fill hotkey separately; hosting client and joined Kiln client, plus vanilla client untouched.
