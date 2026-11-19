@@ -1,1 +1,57 @@
 #nullable enable
+const Kiln.Content.GearCapability = "content.gear" -> string!
+Kiln.GearArmorKind
+Kiln.GearArmorKind.Physical = 0 -> Kiln.GearArmorKind
+Kiln.GearArmorKind.Magical = 1 -> Kiln.GearArmorKind
+Kiln.GearArmorKind.Cut = 2 -> Kiln.GearArmorKind
+Kiln.GearArmorKind.Pierce = 3 -> Kiln.GearArmorKind
+Kiln.GearArmorKind.Blunt = 4 -> Kiln.GearArmorKind
+Kiln.GearArmorKind.Fire = 5 -> Kiln.GearArmorKind
+Kiln.GearArmorKind.Ice = 6 -> Kiln.GearArmorKind
+Kiln.GearArmorKind.Shroud = 7 -> Kiln.GearArmorKind
+Kiln.GearArmorKind.Lightning = 8 -> Kiln.GearArmorKind
+Kiln.GearDamageKind
+Kiln.GearDamageKind.Cut = 0 -> Kiln.GearDamageKind
+Kiln.GearDamageKind.Pierce = 1 -> Kiln.GearDamageKind
+Kiln.GearDamageKind.Blunt = 2 -> Kiln.GearDamageKind
+Kiln.GearDamageKind.Fire = 3 -> Kiln.GearDamageKind
+Kiln.GearDamageKind.Ice = 4 -> Kiln.GearDamageKind
+Kiln.GearDamageKind.Shroud = 5 -> Kiln.GearDamageKind
+Kiln.GearDamageKind.Lightning = 6 -> Kiln.GearDamageKind
+Kiln.GearDamageKind.Poison = 7 -> Kiln.GearDamageKind
+Kiln.GearDamageKind.Healing = 8 -> Kiln.GearDamageKind
+Kiln.GearDamageKind.Wood = 9 -> Kiln.GearDamageKind
+Kiln.GearDamageKind.Stone = 10 -> Kiln.GearDamageKind
+Kiln.GearDamageKind.Metal = 11 -> Kiln.GearDamageKind
+Kiln.GearDamageKind.Explosion = 12 -> Kiln.GearDamageKind
+Kiln.GearStats
+Kiln.GearStats.Armor(Kiln.GearArmorKind kind) -> int
+Kiln.GearStats.Block.get -> double
+Kiln.GearStats.Block.set -> void
+Kiln.GearStats.Damage(Kiln.GearDamageKind kind) -> double
+Kiln.GearStats.HasArmor.get -> bool
+Kiln.GearStats.HasDamage.get -> bool
+Kiln.GearStats.Item.get -> string!
+Kiln.GearStats.Level.get -> int
+Kiln.GearStats.MaxLevel.get -> int
+Kiln.GearStats.MaxStack.get -> int
+Kiln.GearStats.MaxStack.set -> void
+Kiln.GearStats.Power.get -> int
+Kiln.GearStats.Power.set -> void
+Kiln.GearStats.PowerAt(int level) -> int
+Kiln.GearStats.Rarity.get -> Kiln.ItemRarity
+Kiln.GearStats.Rarity.set -> void
+Kiln.GearStats.Reset() -> int
+Kiln.GearStats.Rolled.get -> bool
+Kiln.GearStats.Rolled.set -> void
+Kiln.GearStats.SetArmor(Kiln.GearArmorKind kind, int armor) -> void
+Kiln.GearStats.SetDamage(Kiln.GearDamageKind kind, double value) -> void
+Kiln.GearStats.SetLevels(int lowest, int? highest = null) -> void
+Kiln.GearStats.Socket.get -> bool
+Kiln.GearStats.Socket.set -> void
+Kiln.GearStats.Speed.get -> double
+Kiln.GearStats.Speed.set -> void
+override Kiln.GearStats.ToString() -> string!
+static Kiln.Content.Gear(Kiln.ContentEntry! item) -> Kiln.GearStats!
+static Kiln.Content.Gear(Kiln.ItemId item) -> Kiln.GearStats?
+static Kiln.Content.Gear(string! item) -> Kiln.GearStats?

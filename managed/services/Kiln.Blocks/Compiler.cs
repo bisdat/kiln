@@ -113,14 +113,15 @@ internal sealed class BlockContext(ModBlocks mod, string block)
 internal static partial class Compiler
 {
     // The game's damage power: int(int(seed * creep * level + seed) * dmgMod * speedMod), keen::BalancingTable +0 genericWeaponSeed,
-    // +0x28 powerCreepWeapon (0x91e9d0). Checked against the running game when content is ready (BlockRuntime).
-    internal static uint Seed = 10;
-    internal static float Creep = 0.15f;
+    // +0x28 powerCreepWeapon (0x91e9d0). Checked against the running game when content is ready (BlockRuntime). The formulas live
+    // in Kiln.Content's GearMath, shared with the gear values of data packs and Content.Gear.
+    internal static uint Seed => GearMath.Seed;
+    internal static float Creep => GearMath.Creep;
 
-    public static int BasePower(int level) => (int)((long)(Seed * Creep * level + Seed));
+    public static int BasePower(int level) => GearMath.BasePower(level);
 
     /// <summary>The dmgMod that makes a level's power (with speedMod 1) this number, as the tooltip shows it.</summary>
-    public static double DmgModFor(int power, int level) => (power + 0.5) / BasePower(level);
+    public static double DmgModFor(int power, int level) => GearMath.DmgModFor(power, level);
 
     private static string Label<T>(string name) => $"{typeof(T).Name.Replace("Block", "").ToLowerInvariant()} {name}";
 

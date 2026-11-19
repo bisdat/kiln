@@ -34,6 +34,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstring>
+#include <cwctype>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -43,6 +44,7 @@
 #include <vector>
 
 #include "gamedata.h"
+#include "gear.h"
 #include "kiln_blocks_json.hpp"
 #include "kiln_boot_collector.hpp"
 #include "refs.h"
@@ -54,6 +56,7 @@ namespace {
 
 constexpr char kRow[] = "mods.boot.resource_patches";
 constexpr char kKind[] = "resourcePatches";
+constexpr char kGearRules[] = "gearRules";  // a data pack's boot values for gear (gear.h): resource patches of the BalancingTable
 constexpr size_t kMaxSets = 4096;        // changes of one generation: field writes, list appends, components added or removed
 constexpr size_t kMaxResource = 64u << 20;  // bytes of one patched resource
 
@@ -343,17 +346,56 @@ bool overlap(const std::string& a, const std::string& b) { return a == b || a.fi
 // another reader's to report (Kiln.Blocks reads the same files), except for a required participant (kiln_boot_collector.hpp,
 // entry_error): a blocks file of its own that cannot be read, or that names "resourcePatches" and is not JSON, refuses it (Refusal,
 // turned into a refusal by prepare_boot).
+// The "gearRules" of a mod's data packs (content/*.json, files by name, any case of .json as kiln.content finds them): the
+// game's balancing values for gear (gear.h), lowered to one resource patch of the BalancingTable per file, keyed
+// "gearRules@<file>". A file that cannot be read or is not JSON is kiln.content's packs' to report at the world's load; a
+// gearRules that does not lower is an entry error here (a required mod is refused, an optional one logged and left out).
+void gear_rule_docs(const std::filesystem::path& dir, const std::string& id, const kiln::boot::Input* boot, std::vector<kiln::boot::Doc>* out) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    if (!fs::is_directory(dir / L"content", ec)) return;
+    std::vector<fs::path> files;
+    for (auto it = fs::directory_iterator(dir / L"content", ec); !ec && it != fs::directory_iterator(); it.increment(ec)) {
+        std::wstring ext = it->path().extension().wstring();
+        for (wchar_t& c : ext) c = static_cast<wchar_t>(std::towlower(c));
+        if (ext == L".json") files.push_back(it->path());
+    }
+    std::sort(files.begin(), files.end());
+    for (const fs::path& f : files) {
+        std::ifstream in(f, std::ios::binary);
+        if (!in) continue;
+        const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        if (text.find(kGearRules) == std::string::npos) continue;
+        const nlohmann::json j = nlohmann::json::parse(text, nullptr, false, true);  // as kiln.content reads packs: comments
+        if (!j.is_object() || !j.contains(kGearRules)) continue;
+        const std::u8string u = f.filename().u8string();
+        const std::string label = "content/" + std::string(u.begin(), u.end());
+        std::vector<std::string> errors;
+        const gear::json lowered = gear::lower_rules(gear::json::parse(j[kGearRules].dump()), &errors);
+        if (!errors.empty()) {
+            std::string why;
+            for (const std::string& e : errors) why += (why.empty() ? "" : "; ") + e;
+            LOGW("mod %s: %s: its gearRules are not applied: %s", id.c_str(), label.c_str(), why.c_str());
+            kiln::boot::entry_error(boot, id, kKind, label, "kiln.content: " + label + ": " + why);
+            continue;
+        }
+        out->push_back({id, std::string(kGearRules) + "@" + std::string(u.begin(), u.end()), nlohmann::json::parse(lowered.dump())});
+    }
+}
+
 std::vector<kiln::boot::Doc> file_docs(const kiln::boot::Input* boot) {
     namespace fs = std::filesystem;
     std::vector<kiln::boot::Doc> out;
     for (const fs::path& dir : mod_folder_list()) {
         std::error_code ec;
-        if (!fs::is_directory(dir / L"blocks", ec)) continue;
+        const bool blocks = fs::is_directory(dir / L"blocks", ec);
+        if (!blocks && !fs::is_directory(dir / L"content", ec)) continue;  // content/: data packs' gearRules
         const std::string id = kiln::boot::mod_id_of(dir);
         if (id.empty() || (boot && boot->out(id))) continue;
         std::vector<fs::path> files;
-        for (auto it = fs::directory_iterator(dir / L"blocks", ec); !ec && it != fs::directory_iterator(); it.increment(ec))
-            if (it->path().extension() == L".json") files.push_back(it->path());
+        if (blocks)
+            for (auto it = fs::directory_iterator(dir / L"blocks", ec); !ec && it != fs::directory_iterator(); it.increment(ec))
+                if (it->path().extension() == L".json") files.push_back(it->path());
         std::sort(files.begin(), files.end());
         for (const fs::path& f : files) {
             const std::u8string u = f.filename().u8string();
@@ -374,6 +416,7 @@ std::vector<kiln::boot::Doc> file_docs(const kiln::boot::Input* boot) {
             }
             for (const auto& [key, doc] : j[kKind].items()) out.push_back({id, key, doc});
         }
+        gear_rule_docs(dir, id, boot, &out);
     }
     return out;
 }
@@ -425,10 +468,16 @@ KilnResult KILN_CALL prepare_boot(void*, const KilnBootPrepareInputV1* in, KilnB
     for (const auto& d : docs) {
         // a mod that takes no part in the generation (no "boot" in its kiln.mod.json): its patches are not applied
         if (!input.owner.count(d.owner)) {
-            if (not_boot.insert(d.owner).second)
-                LOGW("mod %s has \"resourcePatches\" in a blocks file and takes no part in the boot generation: they are not applied. Add \"boot\": true "
-                     "to its kiln.mod.json",
-                     d.owner.c_str());
+            if (not_boot.insert(d.owner).second) {
+                if (d.key.rfind(kGearRules, 0) == 0)
+                    LOGW("mod %s has \"gearRules\" in a data pack and takes no part in the boot generation: they are not applied. Add \"boot\": true "
+                         "to its kiln.mod.json",
+                         d.owner.c_str());
+                else
+                    LOGW("mod %s has \"resourcePatches\" in a blocks file and takes no part in the boot generation: they are not applied. Add \"boot\": true "
+                         "to its kiln.mod.json",
+                         d.owner.c_str());
+            }
             continue;
         }
         auto refused = [&](const std::string& path, const std::string& why) {
@@ -961,9 +1010,8 @@ void gd_boot_patches_bind() {
         try {
             for (const auto& d : file_docs(nullptr))
                 if (said.insert(d.owner).second)
-                    LOGW("mod %s has \"resourcePatches\" in a blocks file, and this start has no boot phase: they are not applied. Add \"boot\": true to "
-                         "its kiln.mod.json",
-                         d.owner.c_str());
+                    LOGW("mod %s has %s, and this start has no boot phase: they are not applied. Add \"boot\": true to its kiln.mod.json",
+                         d.owner.c_str(), d.key.rfind(kGearRules, 0) == 0 ? "\"gearRules\" in a data pack" : "\"resourcePatches\" in a blocks file");
         } catch (const std::exception&) {
         }
     }

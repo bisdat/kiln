@@ -89,6 +89,37 @@ public sealed class ContentTestMod : Mod
         File.WriteAllText(Marker(), $"{{\"phase\": \"{phase}\", \"pid\": {Environment.ProcessId}, \"start\": \"{ProcessStart()}\"}}");
     }
 
+    // ------------------------------------------------------------------------------------------- gear ----------
+
+    private const string GearSword = "Weapon_T1_1H_Sword_Craft", GearChest = "Armor_T2_Warrior_Tank_Chest";
+
+    // The pack's "gear" rules solved for each item (power at its level, armour at its level), then a code layer of this mod
+    // over them (it wins, the pack's comes back after Reset).
+    private void GearValues(string report)
+    {
+        var sword = Content.Gear(GearSword);
+        var chest = Content.Gear(GearChest);
+        if (sword == null || chest == null)
+        {
+            Check(false, $"gear: {GearSword} and {GearChest} are in this game ({sword}, {chest})");
+            return;
+        }
+        var swordEntry = Content.Items.Get(GearSword)!;
+        Check(sword.Power == 30 && Math.Abs(sword.Damage(GearDamageKind.Cut) - 0.75) < 1e-6 && Math.Abs(sword.Damage(GearDamageKind.Fire) - 0.25) < 1e-6,
+            $"gear pack: {GearSword} power {sword.Power} at level {sword.Level} (dmgMod {swordEntry.Get("damageSetup.dmgMod")}, original " +
+            $"{swordEntry.Original("damageSetup.dmgMod")}), cut {sword.Damage(GearDamageKind.Cut)}, fire {sword.Damage(GearDamageKind.Fire)}");
+        var chestEntry = Content.Items.Get(GearChest)!;
+        var magical0 = (int)Math.Round((15 * chest.Level + 23) * chestEntry.Original("armorSetup.distribution.magical").Number, MidpointRounding.AwayFromZero);
+        Check(chest.Armor(GearArmorKind.Physical) == 45 && chest.Armor(GearArmorKind.Magical) == magical0 * 2,
+            $"gear pack: {GearChest} physical armour {chest.Armor(GearArmorKind.Physical)}, magical {chest.Armor(GearArmorKind.Magical)} " +
+            $"(the game's {magical0}, x2) at level {chest.Level}");
+        Check(report.Contains("gear Weapon_T1_1H_Sword_Nonexistent: matches nothing"), "gear pack: a selector that matches nothing is reported");
+        sword.Power = 41;
+        Check(sword.Power == 41, $"gear code: Content.Gear power 41 wins over the pack's 30 ({sword.Power})");
+        Check(sword.Reset() >= 1 && sword.Power == 30, $"gear code: Reset takes this mod's layer off, the pack's 30 is back ({sword.Power})");
+        Check(Throws(() => chest.Power = 10) && Throws(() => sword.SetLevels(0)), "gear code: power on armour and level 0 are refused");
+    }
+
     // ------------------------------------------------------------------------------------------- fresh ---------
 
     private async Task Fresh(ContentReadyEvent e)
@@ -135,6 +166,9 @@ public sealed class ContentTestMod : Mod
         var report = Content.PackReport();
         Check(report.Contains("content-test/content/test-pack.json") && report.Contains("Material_T1_Nonexistent_Item: matches nothing"),
             "data pack report lists the pack and warns about the selector that matches nothing");
+
+        // ---- the pack's gear section (typed values in the tooltip's numbers) and Content.Gear ----
+        GearValues(report);
 
         // ---- code changes: max stack + a give of more than the old max into one slot ----
         var woodOrig = (int)wood!.Original("maxStackSize").Integer;
