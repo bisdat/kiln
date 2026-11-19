@@ -7,7 +7,7 @@ set -euo pipefail
 TAG="v0.2.0-dev.29.17"
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 WORK="${HOME}/.cache/kiln-issue68-dev29.17"
-OUT="${HERE}/bin/Release"
+OUT="${KILN_PROBE_OUT:-${HOME}/Downloads}"
 TARGET="${WORK}/mods/tests/station-fill-client-probe"
 ZIP="${OUT}/station-fill-client-probe-0.1.1.zip"
 
