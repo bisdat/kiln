@@ -101,6 +101,29 @@ The per-owner limits (2 running, 2 LongRunning, 1024 records) are part of the co
 it queues. `priority` (Normal, Low, High) orders work inside one owner only; it never raises an owner's share or an OS
 priority. Owners are served round-robin.
 
+## Resident tasks
+
+`KILN_TASK_RESIDENT` (since 0.2.0-dev.29.19; the table's version and size are unchanged) marks a body that is meant to
+run until it is cancelled, such as a mod's own service loop. It is accepted only together with
+`KILN_TASK_LONG_RUNNING`; alone it is refused `INVALID_ARGUMENT` + `ARGUMENT`. It combines with `KILN_TASK_AFTER_STEP`
+and `submit_in`, which only decide when it starts and when `cancelled()` turns 1.
+
+- It holds one of its owner's two LongRunning threads, and one of the pool's, for as long as it runs.
+- The watchdog does not report it as running too long while it runs normally. From the moment its cancellation is
+  asked (`cancel`, `drain_owner`, a revoke, a `submit_in` task's session ending, the process exit) the watchdog counts
+  as for any task: still running `watchdog_running_s` (30 s by default) later, it is reported once ("still running ...
+  after its cancellation was asked"). A queued resident task is reported like any queued one.
+- `tick-stats.jsonl` counts it as running, but its body's time adds nothing to `cpu_ms` / `wall_ms` and is never the
+  window's longest segment: one segment that lasts the whole session would say nothing useful there.
+- Priority, caps, `drain_owner`, faults and exit are exactly as for any LongRunning task. At exit the pool waits only
+  500 ms for running bodies, so poll `run->cancelled(run)` at least every 50 ms and return soon after it says 1.
+- A native fault quarantines the owner (see [States and outcomes](#states-and-outcomes)) but does not ask its running
+  bodies to stop. A quarantined owner's resident body keeps running, silently: the watchdog counts for it only from a
+  `cancel`, a `drain_owner` or the owner's unload.
+
+An older Kiln refuses the bit with `INVALID_ARGUMENT` + `ARGUMENT`; retry without it if you can live with one
+watchdog line. `ARGUMENT` alone does not tell an older Kiln from another wrong field: `KilnApi.version()` does.
+
 ## AFTER_STEP and sessions
 
 `KILN_TASK_AFTER_STEP` captures the live server world's session and that session's last Post edge at acceptance. The
@@ -233,10 +256,11 @@ Windows behaviour is still to be confirmed on a real Windows machine.
 
 A watchdog sweeps once a second and writes one `kiln.log` warning for a task running, or queued, for more than 30 s,
 naming the owner, the task, the state and the age. It reports each task once per state (never every sweep), also a
-body that outlives its revoked owner; it only reports and never stops a task. When a worker kind loses its last
-worker (a fault, then its replacement could not start) `kiln.log` says so once, with the number of queued tasks that
-wait, and once again when a retried start brings a worker back. While a task runs its worker's thread description is
-`<mod>/<task>`.
+body that outlives its revoked owner; it only reports and never stops a task. A resident task (`KILN_TASK_RESIDENT`)
+is reported running too long only after its cancellation was asked, counted from that moment. When a worker kind loses
+its last worker (a fault, then its replacement could not start) `kiln.log` says so once, with the number of queued
+tasks that wait, and once again when a retried start brings a worker back. While a task runs its worker's thread
+description is `<mod>/<task>`.
 
 Since issue #49 the pool is also visible where Kiln already reports performance and crashes:
 
@@ -245,9 +269,10 @@ Since issue #49 the pool is also visible where Kiln already reports performance 
   fields — the window's id, span and age; the pool's workers, LongRunning workers and deepest queue; one row per
   owner *instance* (a reload starts a new row, never mixed with the old one; at most 64 rows, then
   `"owners_truncated":true`) with queued/running current and window max, completed/faulted/cancelled in the
-  window, `cpu_ms` and `wall_ms`, the window's longest segment and its name, and the watchdog, queue-full and
-  blocked-unload counts; the tick hops' apply account (applied, deferred, cancelled, its time, the budget stops,
-  the owners served and the backlog) of that line's world; and that world's refused hops. A hosting client's
+  window, `cpu_ms` and `wall_ms`, the window's longest segment and its name (a resident task's body adds no time and
+  is never the longest segment), and the watchdog, queue-full and blocked-unload counts; the tick hops' apply account
+  (applied, deferred, cancelled, its time, the budget stops, the owners served and the backlog) of that line's world;
+  and that world's refused hops. A hosting client's
   client-world line carries `"tasks": {"apply": ..., "hops": ...}` for the client world's hops alone (the pool-wide
   parts are on its server line, so a window is never split). The object is absent when the pool does not exist, so a
   line without a pool keeps its older shape byte for byte.

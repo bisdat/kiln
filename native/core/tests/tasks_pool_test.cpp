@@ -1268,6 +1268,347 @@ KILN_TASKS_TEST(exit_park_under_load) {
     stop = true;
     for (auto& t : submitters) t.join();
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// KILN_TASK_RESIDENT (SubmitArgs.resident): a LongRunning task meant to run until it is cancelled. The watchdog does
+// not report it running until its cancellation is asked, then once the age after that; its segments stay out of the
+// stats' time sums; everything else is a LongRunning task's.
+
+constexpr uint64_t kSecond = 1000ull * 1000 * 1000;
+
+SubmitArgs resident(const char* name) {
+    SubmitArgs a = named(name, Priority::Normal, true);
+    a.resident = true;
+    return a;
+}
+
+// A service loop: runs until cancelled() says so, then returns (it opens its own release on the way out).
+void loop_until_cancelled(Job& job) {
+    job.extra = [&job](const TaskRun* run) {
+        while (!run->cancelled(run)) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        job.release.open();
+    };
+}
+
+std::vector<Watch> sweep(Pool& pool) {
+    std::vector<Watch> reports;
+    pool.run_watchdog(+[](const Watch& w, void* user) { static_cast<std::vector<Watch>*>(user)->push_back(w); }, &reports);
+    return reports;
+}
+
+std::size_t reports_of(const std::vector<Watch>& reports, KilnHandle task, Watch::Kind kind) {
+    std::size_t n = 0;
+    for (const Watch& w : reports) n += w.task == task && w.kind == kind;
+    return n;
+}
+
+// The default ages (30 s) on the fake clock. Running for minutes, sweep after sweep: the resident task is not reported
+// while a plain LongRunning task beside it is (once), and a resident task waiting in the queue is reported as queued.
+// Once its cancellation is asked (a body that ignores it) its running clock restarts: nothing at 29 s, one report
+// "after its cancellation was asked" at 31 s, never again. Its crash-report row is any task's.
+KILN_TASKS_TEST(watchdog_resident_until_cancel) {
+    HostPlatform platform;
+    Job loop, plain, waits;
+    loop.platform = plain.platform = waits.platform = &platform;
+    Pool pool(config(1, 2), &platform);
+    pool.open_owner(1, "mod.service");
+    {
+        SubmitArgs not_long = resident("loop");
+        not_long.long_running = false;
+        KilnHandle h = 7;
+        Refusal why = Refusal::None;
+        check(pool.submit(1, not_long, &job_body, &job_done, &loop, &h, &why) == KILN_ERR_INVALID_ARGUMENT &&
+                  why == Refusal::Argument && h == 0 && platform.acquires() == platform.releases() &&
+                  pool.counts().records == 0,
+              "resident without long_running: INVALID_ARGUMENT + Argument, nothing held");
+    }
+    const KilnHandle lh = submit(pool, 1, resident("loop"), loop);
+    const KilnHandle ph = submit(pool, 1, named("plain", Priority::Normal, true), plain);
+    check(until([&] { return loop.body_runs.load() == 1 && plain.body_runs.load() == 1; }), "both LongRunning bodies run");
+    const KilnHandle wh = submit(pool, 1, resident("waits"), waits);  // the owner's two LongRunning slots are taken
+    std::vector<Watch> reports;
+    for (int i = 0; i < 4; ++i) {  // two minutes, a sweep every 30 s
+        platform.advance(31 * kSecond);
+        for (const Watch& w : sweep(pool)) reports.push_back(w);
+    }
+    check(reports_of(reports, lh, Watch::Kind::RunningTooLong) == 0 && reports_of(reports, lh, Watch::Kind::QueuedTooLong) == 0,
+          "the running resident task is not reported before its cancel");
+    check(reports_of(reports, ph, Watch::Kind::RunningTooLong) == 1, "the plain LongRunning task beside it is, once");
+    check(reports_of(reports, wh, Watch::Kind::QueuedTooLong) == 1, "a resident task queued past its age is reported");
+    bool plain_wording = true;
+    for (const Watch& w : reports) plain_wording &= !w.after_cancel;
+    check(plain_wording, "those reports are the usual ones (not after a cancellation)");
+    const kiln::tasks_stats::CrashSnapshot crash = pool.stats_store().snapshot_crash(platform.now_ns());
+    bool listed = false;
+    for (std::size_t i = 0; i < crash.running_count; ++i)
+        listed |= crash.running[i].handle == lh && crash.running[i].state == kiln::tasks_stats::EntryState::Running &&
+                  std::string(crash.running[i].task_name) == "loop";
+    check(listed, "a crash report lists the running resident task");
+    State st = State::None;
+    check(pool.cancel(1, lh, &st) == KILN_OK && st == State::Running, "cancel: asked, the body ignores it");
+    check(sweep(pool).empty(), "the sweep that first sees the cancel reports nothing");
+    platform.advance(29 * kSecond);
+    check(sweep(pool).empty(), "29 s after the cancel: nothing yet");
+    platform.advance(2 * kSecond);
+    const std::vector<Watch> late = sweep(pool);
+    check(late.size() == 1 && late[0].task == lh && late[0].kind == Watch::Kind::RunningTooLong && late[0].after_cancel &&
+              late[0].age_ns >= 31 * kSecond && late[0].age_ns < 32 * kSecond && late[0].name == "loop" &&
+              late[0].owner_name == "mod.service",
+          "31 s after the cancel: one report, after its cancellation, aged from the cancel");
+    platform.advance(60 * kSecond);
+    check(sweep(pool).empty(), "and never again");
+    plain.release.open();
+    check(until([&] { return waits.body_runs.load() == 1; }), "the queued resident task starts in the freed slot");
+    platform.advance(31 * kSecond);
+    check(reports_of(sweep(pool), wh, Watch::Kind::RunningTooLong) == 0, "and is not reported running before its cancel");
+    loop.release.open();
+    waits.release.open();
+    check(until([&] { return pool.counts().outstanding == 0; }), "quiescent");
+}
+
+// The tick statistics: a resident segment adds nothing to its owner's cpu and wall time and never becomes the window's
+// longest, while its running and completion counts are kept. A plain LongRunning segment beside it is counted.
+KILN_TASKS_TEST(resident_segment_stats) {
+    HostPlatform platform;
+    Job loop, plain;
+    loop.platform = plain.platform = &platform;
+    Pool pool(config(1, 2), &platform);
+    pool.open_owner(1, "mod.resident");
+    pool.open_owner(2, "mod.plain");
+    pool.collect_tasks_window(0);  // a fresh window
+    submit(pool, 1, resident("loop"), loop);
+    submit(pool, 2, named("plain", Priority::Normal, true), plain);
+    check(until([&] { return loop.body_runs.load() == 1 && plain.body_runs.load() == 1; }), "both run");
+    platform.advance(90 * kSecond);
+    platform.advance_cpu(40 * kSecond);
+    const auto row = [](const kiln::tasks_stats::WindowSnapshot& w, KilnOwner owner) {
+        for (std::size_t i = 0; i < w.owner_count; ++i)
+            if (w.owners[i].owner == owner) return w.owners[i];
+        return kiln::tasks_stats::OwnerSnapshot{};
+    };
+    {
+        const kiln::tasks_stats::WindowSnapshot w = pool.collect_tasks_window(0);
+        check(row(w, 1).present && row(w, 1).running_current == 1, "the running resident task counts as running");
+    }
+    loop.release.open();
+    plain.release.open();
+    check(until([&] { return pool.counts().outstanding == 0; }), "both ended");
+    const kiln::tasks_stats::WindowSnapshot w = pool.collect_tasks_window(0);
+    const kiln::tasks_stats::OwnerSnapshot r = row(w, 1), p = row(w, 2);
+    check(r.present && r.cpu_ns == 0 && r.wall_ns == 0 && r.longest_ns == 0 && r.longest_name[0] == 0 &&
+              r.completed == 1 && r.running_current == 0,
+          "the resident segment: no cpu, no wall, never the longest; completed once (cpu " + std::to_string(r.cpu_ns) +
+              ", wall " + std::to_string(r.wall_ns) + ")");
+    check(p.present && p.wall_ns >= 90 * kSecond && p.cpu_ns >= 40 * kSecond && p.longest_ns >= 90 * kSecond &&
+              std::string(p.longest_name) == "plain",
+          "the plain one beside it is counted");
+}
+
+// drain_owner and a revoke (retire_owner) ask a resident body to stop as a cancel does: for one that ignores them the
+// running clock starts at the first sweep after, and it is reported once 30 s later, with its owner's name.
+KILN_TASKS_TEST(resident_clock_from_drain_and_revoke) {
+    HostPlatform platform;
+    Job drained, revoked;
+    drained.platform = revoked.platform = &platform;
+    Pool pool(config(1, 2), &platform);
+    pool.open_owner(1, "mod.drained");
+    pool.open_owner(2, "mod.revoked");
+    const KilnHandle dh = submit(pool, 1, resident("loop"), drained);
+    const KilnHandle rh = submit(pool, 2, resident("loop"), revoked);
+    check(until([&] { return drained.body_runs.load() == 1 && revoked.body_runs.load() == 1; }), "both run");
+    platform.advance(60 * kSecond);
+    check(sweep(pool).empty(), "a minute: neither is reported");
+    uint32_t left = 0;
+    check(pool.drain_owner(1, 0, &left) == KILN_OK && left == 1, "drain(0): sealed, the resident body still running");
+    check(pool.retire_owner(2, &left) == KILN_OK && left == 1, "revoke: retired, the resident body still running");
+    check(sweep(pool).empty(), "the sweep that sees both cancels reports nothing");
+    platform.advance(29 * kSecond);
+    check(sweep(pool).empty(), "29 s later: nothing yet");
+    platform.advance(2 * kSecond);
+    const std::vector<Watch> late = sweep(pool);
+    bool d = false, r = false;
+    for (const Watch& w : late) {
+        d |= w.task == dh && w.after_cancel && w.owner_name == "mod.drained";
+        r |= w.task == rh && w.after_cancel && w.owner_name == "mod.revoked";
+    }
+    check(late.size() == 2 && d && r, "31 s later: each reported once, after its cancellation");
+    drained.release.open();
+    revoked.release.open();
+    check(until([&] { return pool.counts().outstanding == 0; }), "quiescent");
+}
+
+// A fault quarantines its owner, and a quarantine does not ask the owner's running bodies to stop (cancelled() stays
+// 0). Its resident body keeps running, unreported, until a cancel or drain asks it; then its clock starts.
+KILN_TASKS_TEST(resident_quarantined_owner) {
+    HostPlatform platform;
+    Job loop, faulter;  // before the pool: the faulter's done may still run when the test ends
+    loop.platform = faulter.platform = &platform;
+    Pool pool(config(2, 2), &platform);
+    pool.open_owner(1, "mod.faulty");
+    const KilnHandle lh = submit(pool, 1, resident("loop"), loop);
+    check(until([&] { return loop.body_runs.load() == 1; }), "the resident body runs");
+    platform.fault_next_call_of(reinterpret_cast<uintptr_t>(&job_body));  // the next body called: the faulter's
+    faulter.release.open();
+    const KilnHandle fh = submit(pool, 1, named("faulter"), faulter);
+    check(until([&] {
+        State st = State::None;
+        pool.status(1, fh, &st);
+        return st == State::Faulted;
+    }), "the other task faults: the owner is quarantined");
+    KilnHandle h = 0;
+    Refusal why = Refusal::None;
+    check(pool.submit(1, named("after"), &job_body, &job_done, &faulter, &h, &why) == KILN_ERR_UNAVAILABLE &&
+              why == Refusal::OwnerQuarantined,
+          "the quarantined owner takes no new task");
+    check(!pool.cancel_requested(lh), "the quarantine did not ask the resident body to stop");
+    platform.advance(120 * kSecond);
+    check(sweep(pool).empty(), "two minutes after the fault: the resident body is still not reported");
+    uint32_t left = 0;
+    check(pool.drain_owner(1, 0, &left) == KILN_OK && left >= 1 && pool.cancel_requested(lh), "a drain asks it");
+    check(sweep(pool).empty(), "the sweep that sees the drain reports nothing");
+    platform.advance(31 * kSecond);
+    const std::vector<Watch> late = sweep(pool);
+    check(late.size() == 1 && late[0].task == lh && late[0].after_cancel, "31 s after the drain: reported once");
+    loop.release.open();
+    check(until([&] {
+        uint32_t out = 1;
+        pool.drain_owner(1, 0, &out);
+        return out == 0;
+    }), "quiescent");
+}
+
+// A lease (the managed host's tasks: SubmitArgs.lease) admitted resident follows the same rule: not reported before
+// its cancel, once 30 s after it; its segment adds no time to the owner's stats.
+KILN_TASKS_TEST(resident_lease) {
+    HostPlatform platform;
+    Job lease;
+    lease.platform = &platform;
+    Pool pool(config(1, 2), &platform);
+    pool.open_owner(1, "mod.host");
+    pool.collect_tasks_window(0);  // a fresh window
+    SubmitArgs a = resident("lease");
+    a.lease = true;
+    KilnHandle lh = 0;  // written before the release opens; the segment reads it after
+    std::atomic<KilnResult> finished{KILN_ERR_INTERNAL};
+    lease.after_release = [&] { finished = pool.finish(lh, Outcome::OwnTokenCancelled); };  // inside the segment
+    lh = submit(pool, 1, a, lease);
+    check(until([&] { return lease.body_runs.load() == 1; }), "its segment runs");
+    platform.advance(120 * kSecond);
+    check(sweep(pool).empty(), "two minutes: the running resident lease is not reported");
+    State st = State::None;
+    check(pool.cancel(1, lh, &st) == KILN_OK && st == State::Running, "cancel: asked");
+    check(sweep(pool).empty(), "the sweep that sees the cancel reports nothing");
+    platform.advance(31 * kSecond);
+    const std::vector<Watch> late = sweep(pool);
+    check(late.size() == 1 && late[0].task == lh && late[0].kind == Watch::Kind::RunningTooLong && late[0].after_cancel,
+          "31 s after the cancel: reported once, after its cancellation");
+    lease.release.open();
+    check(until([&] {
+        State s = State::None;
+        pool.status(1, lh, &s);
+        return s == State::Cancelled;
+    }) && finished.load() == KILN_OK,
+          "finish(own token) inside the segment: Cancelled");
+    check(until([&] { return pool.counts().outstanding == 0; }), "quiescent");
+    const kiln::tasks_stats::WindowSnapshot w = pool.collect_tasks_window(0);
+    bool zero = false;
+    for (std::size_t i = 0; i < w.owner_count; ++i)
+        if (w.owners[i].owner == 1)
+            zero = w.owners[i].wall_ns == 0 && w.owners[i].cpu_ns == 0 && w.owners[i].longest_ns == 0 &&
+                   w.owners[i].cancelled == 1;
+    check(zero, "its segment added no time to the owner's stats; it counts as cancelled");
+}
+
+// A suspended resident lease (its segment armed a resumption and returned) whose cancel is asked while no segment
+// runs: the sweep sees the cancel, but the running clock starts with the next segment, not at that sweep.
+KILN_TASKS_TEST(resident_lease_cancelled_while_suspended) {
+    HostPlatform platform;
+    Job lease;
+    Gate hold;  // the second segment blocks here
+    lease.platform = &platform;
+    Pool pool(config(1, 2), &platform);
+    pool.open_owner(1, "mod.host");
+    lease.pool = &pool;
+    lease.arm_on_run.store(true);
+    lease.release.open();
+    SubmitArgs a = resident("lease");
+    a.lease = true;
+    const KilnHandle lh = submit(pool, 1, a, lease);
+    check(until([&] { return lease.registration.load() != 0 && pool.items_in_hand() == 0; }),
+          "its first segment armed a resumption and returned: suspended");
+    State st = State::None;
+    check(pool.cancel(1, lh, &st) == KILN_OK && st == State::Running, "cancel while suspended: asked");
+    check(sweep(pool).empty(), "the sweep that sees the cancel reports nothing");
+    platform.advance(40 * kSecond);
+    check(sweep(pool).empty(), "40 s later, still suspended: nothing (no segment runs)");
+    // the next segment: no new arm, it blocks on `hold`, then finishes the lease with its own token
+    std::atomic<KilnResult> finished{KILN_ERR_INTERNAL};
+    lease.arm_on_run.store(false);
+    lease.extra = [&hold](const TaskRun*) { hold.wait(); };
+    lease.after_release = [&] { finished = pool.finish(lh, Outcome::OwnTokenCancelled); };
+    check(pool.resume(lh, lease.registration.load()) == KILN_OK, "the host resumes it");
+    check(until([&] { return lease.body_runs.load() == 2; }), "its next segment runs");
+    check(sweep(pool).empty(), "that segment just started: not reported (the clock did not run while suspended)");
+    platform.advance(29 * kSecond);
+    check(sweep(pool).empty(), "29 s into that segment: nothing yet");
+    platform.advance(2 * kSecond);
+    const std::vector<Watch> late = sweep(pool);
+    check(late.size() == 1 && late[0].task == lh && late[0].kind == Watch::Kind::RunningTooLong && late[0].after_cancel &&
+              late[0].age_ns >= 31 * kSecond && late[0].age_ns < 32 * kSecond,
+          "31 s into that segment: reported once, aged from the segment's start");
+    hold.open();
+    check(until([&] {
+        State s = State::None;
+        pool.status(1, lh, &s);
+        return s == State::Cancelled;
+    }) && finished.load() == KILN_OK,
+          "finish(own token) in that segment: Cancelled");
+    check(until([&] { return pool.counts().outstanding == 0; }), "quiescent");
+}
+
+// A resident service loop is cancelled, drained and parked at exit like any task: drain_owner signals it and waits
+// for its body and done; at the exit close() signals it, park() waits for it, and one that ignores its cancel is named.
+KILN_TASKS_TEST(resident_drain_and_exit_park) {
+    HostPlatform platform;
+    Job drained, parked, stuck;  // before the pool: a released body still reads its job on its way out
+    drained.platform = parked.platform = stuck.platform = &platform;
+    Pool pool(config(1, 2), &platform);
+    pool.open_owner(1, "mod.one");
+    pool.open_owner(2, "mod.two");
+    loop_until_cancelled(drained);
+    submit(pool, 1, resident("service"), drained);
+    check(until([&] { return drained.body_runs.load() == 1; }), "the resident loop runs");
+    uint32_t left = 9;
+    check(pool.drain_owner(1, 5ull * 1000 * 1000 * 1000, &left) == KILN_OK && left == 0,
+          "drain_owner signals the resident loop and waits until its body and done returned");
+    check(drained.done_calls.load() == 1 && drained.done_state.load() == static_cast<uint32_t>(State::Completed),
+          "its done ran once (a native body that returned: Completed)");
+    // at the exit: this loop sees its cancel, then returns only once the park has begun (its release)
+    std::atomic<bool> signalled{false};
+    parked.extra = [&signalled](const TaskRun* run) {
+        while (!run->cancelled(run)) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        signalled = true;
+    };
+    submit(pool, 2, resident("service"), parked);
+    submit(pool, 2, resident("ignores"), stuck);
+    check(until([&] { return parked.body_runs.load() == 1 && stuck.body_runs.load() == 1; }), "both run");
+    pool.close();
+    check(until([&] { return signalled.load(); }), "the exit signals the running resident loop");
+    Parker parker;
+    parker.start(pool, 500ull * 1000 * 1000);
+    check(until([&] { return pool.parked(); }), "the park began while both run");
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    check(!parker.returned.load(), "park waits while the resident bodies run");
+    parked.release.open();
+    check(until([&] { return parker.returned.load(); }), "park returns at its bound");
+    parker.join();
+    check(parker.result.running_at_start == 2 && parker.result.still_running == 1 &&
+              parker.result.names == "mod.two/ignores",
+          "the park waited for both and names the resident body that ignores its cancel: '" + parker.result.names + "'");
+    stuck.release.open();
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    check(parked.done_calls.load() == 0 && stuck.done_calls.load() == 0, "no done runs once the pool parked");
+}
 }  // namespace
 
 int main(int argc, char** argv) { return kiln::tasks::test::run(argc, argv, "tasks pool"); }

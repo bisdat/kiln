@@ -57,6 +57,8 @@ struct PoolConfig {
 
 // Watchdog reports: a task running, or queued, past its age. Report only, never a kill; each task is reported at
 // most once per kind (it never repeats every sweep). services/tasks.cpp logs them (kiln.log, one line each).
+// A resident task (SubmitArgs.resident) is not reported running until its cancellation is asked; its age then counts
+// from the first sweep that saw the cancel, or from the start of a segment that began after it (after_cancel).
 struct Watch {
     enum class Kind : uint32_t { RunningTooLong, QueuedTooLong };
     Kind kind;
@@ -65,6 +67,7 @@ struct Watch {
     std::string name;
     uint64_t age_ns;
     std::string owner_name;  // the owner's bounded name (kept after it was revoked)
+    bool after_cancel;       // RunningTooLong of a resident task: age_ns counts from its cancellation (see above)
 };
 using WatchFn = void (*)(const Watch&, void* user);
 

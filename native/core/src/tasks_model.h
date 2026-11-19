@@ -78,6 +78,9 @@ struct SubmitArgs {
     std::string_view name;
     Priority priority = Priority::Normal;
     bool long_running = false;
+    // kiln_tasks.h KILN_TASK_RESIDENT: runs until cancelled. Only with long_running (the pool refuses it otherwise,
+    // Argument). The pool's watchdog and stats treat it apart (tasks.cpp); the model itself ignores it.
+    bool resident = false;
     bool lease = false;       // a managed logical task (kiln.internal.tasks.host): its outcome comes from finish()
     bool after_step = false;  // runnable only after a Post edge of `session` newer than `edge`
     uint32_t world = KILN_WORLD_SERVER;  // AFTER_STEP: the world of `session` (session_world; else ARGUMENT)

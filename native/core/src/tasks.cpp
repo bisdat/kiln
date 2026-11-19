@@ -42,6 +42,11 @@ struct Meta {
     uint64_t running_since = 0;  // when its current body started (valid while `running`)
     bool running = false;
     bool reported_running = false, reported_queued = false;  // the watchdog says each once
+    // KILN_TASK_RESIDENT: runs until cancelled. The watchdog's running clock starts at the first sweep that sees its
+    // cancellation asked (cancel_seen_ns), never before, and its segments stay out of the stats' time sums.
+    bool resident = false;
+    bool cancel_seen = false;
+    uint64_t cancel_seen_ns = 0;
     bool lease = false;  // a managed lease (snapshot)
     int stats_slot = -1, stats_entry = -1;  // tasks_stats.h rows (issue #49); -1 when its tables were full
 };
@@ -322,8 +327,10 @@ void Pool::Core::deliver_body(Worker& self, Work& work) {
     const bool suspended = t_segment_armed;  // the body armed a resumption (managed lease): it is not terminal
     t_segment_armed = false;
     if (m) {
-        stats.segment_ended(m->stats_slot, m->stats_entry, cpu1 >= cpu0 ? cpu1 - cpu0 : 0,
-                            wall1 >= wall0 ? wall1 - wall0 : 0, suspended);
+        // a resident segment lasts the task's whole life: kept out of the owner's time sums and the window's longest
+        const bool timed = !m->resident;
+        stats.segment_ended(m->stats_slot, m->stats_entry, timed && cpu1 >= cpu0 ? cpu1 - cpu0 : 0,
+                            timed && wall1 >= wall0 ? wall1 - wall0 : 0, suspended);
         if (info.faulted) stats.note_fault_code(m->stats_entry, info.code);
     }
     platform.set_description(self.slot == Slot::Normal ? "kiln-task-N" : "kiln-task-L");
@@ -549,6 +556,11 @@ KilnResult Pool::submit(KilnOwner owner, const SubmitArgs& in, TaskBodyFn body, 
         if (why) *why = Refusal::Argument;
         return KILN_ERR_INVALID_ARGUMENT;
     }
+    if (in.resident && !in.long_running) {  // a resident task runs until cancelled: only on its own thread
+        if (task) *task = 0;
+        if (why) *why = Refusal::Argument;
+        return KILN_ERR_INVALID_ARGUMENT;
+    }
     const Slot slot = in.long_running ? Slot::LongRunning : Slot::Normal;
     if (!can_run(slot)) {  // never accept work no worker can run (checked again at publication)
         if (task) *task = 0;
@@ -575,6 +587,7 @@ KilnResult Pool::submit(KilnOwner owner, const SubmitArgs& in, TaskBodyFn body, 
     m->owner = owner;
     m->name = std::string(in.name);
     m->lease = in.lease;
+    m->resident = in.resident;
     std::unordered_map<KilnHandle, std::shared_ptr<Meta>> spare;  // the metadata map's node, allocated here
     spare.emplace(0, m);
     auto node = spare.extract(spare.begin());
@@ -737,14 +750,23 @@ void Pool::Core::sweep_watchdog(WatchFn fn, void* user) {
         for (const auto& [task, m] : meta) {
             // by handle, not the owner-scoped public status: a body that outlives its retired owner is still named
             const State s = model.diag_state(task);  // pool -> model lock order; the model never calls back
-            if (s == State::Running && m->running && !m->reported_running && now - m->running_since >= config.running_watchdog_ns) {
+            // A resident task runs until it is cancelled: its running clock starts when a sweep first sees the cancel
+            // asked (same lock order), or with a segment that starts later.
+            if (s == State::Running && m->resident && !m->cancel_seen && model.cancel_requested(task)) {
+                m->cancel_seen = true;
+                m->cancel_seen_ns = now;
+            }
+            const bool watched = !m->resident || m->cancel_seen;
+            const uint64_t since = m->resident ? std::max(m->running_since, m->cancel_seen_ns) : m->running_since;
+            if (s == State::Running && m->running && watched && !m->reported_running &&
+                now - since >= config.running_watchdog_ns) {
                 m->reported_running = true;
                 stats.note_too_long(m->stats_slot, true);
-                reports.push_back({Watch::Kind::RunningTooLong, m->owner, task, m->name, now - m->running_since, {}});
+                reports.push_back({Watch::Kind::RunningTooLong, m->owner, task, m->name, now - since, {}, m->resident});
             } else if (s == State::Queued && !m->reported_queued && now - m->queued_since >= config.queued_watchdog_ns) {
                 m->reported_queued = true;
                 stats.note_too_long(m->stats_slot, false);
-                reports.push_back({Watch::Kind::QueuedTooLong, m->owner, task, m->name, now - m->queued_since, {}});
+                reports.push_back({Watch::Kind::QueuedTooLong, m->owner, task, m->name, now - m->queued_since, {}, false});
             }
         }
         for (Watch& r : reports) r.owner_name = model.owner_name(r.owner);
@@ -886,9 +908,11 @@ KilnResult Service::submit_in(KilnOwner owner, const KilnTaskInfo* info, uint32_
 KilnResult Service::submit_as(KilnOwner owner, const KilnTaskInfo* info, KilnTaskBodyFn body, KilnTaskDoneFn done,
                               void* user, bool lease, KilnHandle* task, uint32_t* refusal, uint32_t world,
                               uint32_t session, bool bound) {
-    // every required pointer and field before any side effect
+    // every required pointer and field before any side effect; RESIDENT is known only together with LONG_RUNNING
+    // (alone it is refused as an unknown bit is)
     if (!owner || !info || !body || !done || !task || info->size < sizeof(KilnTaskInfo) ||
-        (info->flags & ~uint32_t{KILN_TASK_LONG_RUNNING | KILN_TASK_AFTER_STEP}) || info->priority > 2 ||
+        (info->flags & ~uint32_t{KILN_TASK_LONG_RUNNING | KILN_TASK_AFTER_STEP | KILN_TASK_RESIDENT}) ||
+        ((info->flags & KILN_TASK_RESIDENT) && !(info->flags & KILN_TASK_LONG_RUNNING)) || info->priority > 2 ||
         info->reserved != 0 || (info->name.len && !info->name.ptr) ||
         !valid_name(std::string_view(info->name.ptr ? info->name.ptr : "", info->name.len)))
         return refuse(task, refusal, KILN_ERR_INVALID_ARGUMENT, Refusal::Argument);
@@ -899,6 +923,7 @@ KilnResult Service::submit_as(KilnOwner owner, const KilnTaskInfo* info, KilnTas
     args.name = std::string_view(info->name.ptr, info->name.len);
     args.priority = static_cast<Priority>(info->priority);
     args.long_running = (info->flags & KILN_TASK_LONG_RUNNING) != 0;
+    args.resident = (info->flags & KILN_TASK_RESIDENT) != 0;
     args.lease = lease;
     if (bound || (info->flags & KILN_TASK_AFTER_STEP)) {
         const Snapshot snap = snapshot(world);  // one consistent (session, edge, live)

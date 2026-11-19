@@ -139,6 +139,12 @@ KilnResult KILN_CALL t_drain_owner(KilnOwner owner, uint32_t timeout_ms, uint32_
 void log_watch(const tasks::Watch& w, void*) {
     const bool running = w.kind == tasks::Watch::Kind::RunningTooLong;
     const std::string owner = w.owner_name.empty() ? "owner " + std::to_string(w.owner) : w.owner_name;
+    if (running && w.after_cancel) {  // a resident task: reported only once its cancellation was asked
+        KLOG_W("kiln.tasks: %s/%s (task 0x%llx) is still running %.1f s after its cancellation was asked (the watchdog "
+               "reports it once; nothing is stopped)",
+               owner.c_str(), w.name.c_str(), static_cast<unsigned long long>(w.task), static_cast<double>(w.age_ns) / 1e9);
+        return;
+    }
     KLOG_W("kiln.tasks: %s/%s (task 0x%llx) has been %s for %.1f s (the watchdog reports it once; nothing is stopped)",
            owner.c_str(), w.name.c_str(), static_cast<unsigned long long>(w.task), running ? "running" : "queued",
            static_cast<double>(w.age_ns) / 1e9);
