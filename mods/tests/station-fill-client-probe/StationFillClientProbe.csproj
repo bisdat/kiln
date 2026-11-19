@@ -1,0 +1,13 @@
+<Project>
+  <!-- Issue #68: source-level/client UI probe for ALL production stations. No native hooks or transactions. -->
+  <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.props" />
+  <PropertyGroup>
+    <KilnModId>station-fill-client-probe</KilnModId>
+    <KilnModName>Station Fill client probe (read only)</KilnModName>
+    <Version>0.1.0</Version>
+    <KilnServices>Ui;Stations;Items;Chat;Players;World;Client</KilnServices>
+    <KilnSide>both</KilnSide>
+    <KilnClients>kiln</KilnClients>
+  </PropertyGroup>
+  <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.targets" />
+</Project>
