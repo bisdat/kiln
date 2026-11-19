@@ -21,7 +21,8 @@ Tags: **static** = read in the code at the address given; **live** = seen in the
 | table capacity | `0x380` (896) | `41 BE 80 03 00 00; cmp ax, r14w` | static |
 | table / stride | `world+0x746350`, stride **0x1F28** (was 0x1F20) | `imul rbx,rax,0x1F28; add rbx,0x746350`; entry `+0x00` desc*, `+0x08` u16 id (index+1), `+0x10` name, `+0x20` flags, `+0x24` interval | static |
 | name map / init list | `world+0xE17660` / count `world+0xE17658`, list `+0xE16F58` | same function | static |
-| "may finalize" | u8 `world+0xE17958` | `FinalizePrograms` `0x6c2500`: `cmp byte [rcx],0; jne; cmp byte [rcx+0xE17958],0` (setter `0x69de40`) | static |
+| "finalized" | u8 `world+0` | `FinalizePrograms` `0x6c2500` returns at once while it is set and sets it at its end (C `0xa25f97`) | static |
+| "may finalize" | u8 `world+0xE17958` | `FinalizePrograms` `0x6c2500`: `cmp byte [rcx],0; jne; cmp byte [rcx+0xE17958],0; je` (it finalizes only while this byte is **set**; setter `0x69de40`). A permission, not a state: a client world is made with it set (section "Client and prediction registration") | static |
 | engine vanilla count | 817 programs | game log `[ecss] Programs: 817` (lab2, vanilla) | live |
 | with kiln.world | 821 (kiln_world + 3 self-test programs) | `[ecss] Programs: 821`; kiln.log `program kiln_world registered as #818` | live |
 
@@ -457,6 +458,18 @@ RegisterAllPrograms `0x4acf80` at `0x3a85a5`. Hosted server setup C `0x49be10` /
 C `0x4a0126` / S `0x2381f6`. RegisterProgram C `0x9e2e40` / S `0x67ede0` is shared by the worlds. No
 RegisterAllPrograms call exists for kind 1: prediction uses the **client world's table**, not the hosted server's.
 This table ownership was observed in both hosted session 2 and joined session 4.
+
+The two state bytes of the table (client exe `5d9ef2f1…`, read for the owner's 29.18 client, where Kiln refused every
+client world): FinalizePrograms C `0xa25c50` returns while `world+0` is set (`0xa25c66`) or while `world+0xE17958` is
+**clear** (`0xa25c7e`), and sets `world+0` at its end (`0xa25f97`); its only callers are the world's step functions
+(C `0x9d545a`, `0x9d5a35`). createWorld C `0x983140` copies `world+0xE17958` from its config `+0x43` (`0x98320d`). The
+client world's config sets it: `mov dword [rbp+0x40],0x1000000` (`0x84d05d`, kind byte 2 at `0x84d06e`, createWorld at
+`0x84d076`). The server world's clears it (`0xe53bc6`), and its GameServer sets it later through the setter C
+`0xa00dd0`, whose only caller is `0xe61339` (on GameServer+0x1d0, the server world). Client setup `0x3a60b0` runs at
+`0x84d681` in the same function as the client world's createWorld, with no step in between. So in every client world's
+RegisterAllPrograms the may-finalize byte is 1 and `world+0` is 0, and only `world+0` says that a client table is closed.
+0.2.0-dev.29 to 29.18 refused a client world when either byte was set, so they never registered a client program
+(`client world 0x… is already finalizing its programs`). The server world keeps both checks. [static] [seen]
 
 Server kind 0 selects programs without flag `0x1`; client kind 2 selects flag `0x1`; prediction excludes `0x1`,
 `0x10` and engine bit `0x40`. A test SYSTEM program with flags `0x5` ran in the client world on its main thread,
