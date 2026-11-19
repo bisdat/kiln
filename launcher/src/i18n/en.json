@@ -3885,6 +3885,12 @@
       "onAgain": "{name} is on {version} again",
       "changedSince": "{name} was changed since the roll back."
     },
+    "runtimeBlocked": {
+      "file": "Windows did not let Kiln write {file}.",
+      "why": "An antivirus or another program may be blocking it.",
+      "fix": "Add an exclusion for the game folder in your antivirus, then try again.",
+      "raw": "Details: {error}"
+    },
     "runtimeChange": {
       "alreadyRunning": "A runtime change is already running",
       "installOf": "Install of {version}",

@@ -7,6 +7,7 @@ import type { GameInstall, InstallState, RuntimeBundle } from "../api/commands";
 import { invalidateGame, qk, useRuntimeChanges, type RuntimeChange } from "../api/hooks";
 import { installNote, runTask, toast } from "../ui";
 import { notifyInstall } from "./notices";
+import { blockedLine } from "./RuntimeFailure";
 import { t } from "../i18n";
 
 /** `a` is older than `b`. runtime_list sorts newest first (the version, its build date, then when the bundle was
@@ -35,7 +36,8 @@ export async function runRuntimeChange(qc: QueryClient, game: GameInstall, bundl
   put(gid, base);
   let ok = false;
   try {
-    const r = await runTask<api.InstallResult | api.UninstallResult | null>(async () => { const id = await start(); put(gid, { ...base, taskId: id }); return id; }, { done: label, detail: installNote });
+    // the error toast is said here: a file Windows refused (an antivirus, inbox 92) has plain words as its title
+    const r = await runTask<api.InstallResult | api.UninstallResult | null>(async () => { const id = await start(); put(gid, { ...base, taskId: id }); return id; }, { done: label, detail: installNote, quiet: true });
     notifyInstall(r);
     put(gid, { ...(useRuntimeChanges.getState().last[gid] ?? base), state: "done" });
     if (r && "runtime" in r) {
@@ -47,7 +49,9 @@ export async function runRuntimeChange(qc: QueryClient, game: GameInstall, bundl
     }
     ok = true;
   } catch (e) {
-    put(gid, { ...(useRuntimeChanges.getState().last[gid] ?? base), state: "failed", error: api.toKilnError(e) });
+    const err = api.toKilnError(e);
+    if (err.code !== "canceled") toast.error(err, blockedLine(err, game.platform) ?? undefined);
+    put(gid, { ...(useRuntimeChanges.getState().last[gid] ?? base), state: "failed", error: err });
   }
   invalidateGame(qc, gid);
   return ok;

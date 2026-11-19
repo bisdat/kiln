@@ -100,8 +100,9 @@ const live = (gameId: string) => { const r = running[gameId]; return r && (!r.fr
 let pidSeq = 4100;
 /** How long profile_activate takes to answer. */
 const ACTIVATE_MS = 1500;
-/** The next runtime install fails with this message (tests: `__kilnMock.failNextInstall`). */
-let failNextInstall: string | null = null;
+/** The next runtime install fails with this message as an `io` error, or with this whole error (a `permission` error with
+ *  `detail.blocked`: a DLL Windows refused, inbox 92) (tests: `__kilnMock.failNextInstall`). */
+let failNextInstall: string | KilnError | null = null;
 /** Steam does not load Kiln's proxy (tests: `__kilnMock.setNoProxy`): starts keep play-once.ini, write no boot.json, the
  *  launch option is not set, and the process "started" 31 s before the launch so the launcher's grace has passed. */
 let noProxy = false;
@@ -1039,7 +1040,8 @@ const handlers: Record<string, Handler> = {
     const back = a.rollback === true;
     return startTask(back ? "runtime_rollback" : "runtime_install", back ? `Roll back to ${b.version}` : `Install Kiln ${b.kiln}`, ["Staging", "Verifying hashes", "Classifying dinput8.dll", "Backing up", "Placing files", "Writing receipt"], () => {
       const st = runtime[gameId];
-      if (fail) reject("io", fail);
+      if (typeof fail === "string") reject("io", fail);
+      if (fail) reject(fail.code, fail.message, fail.detail);
       if (st?.proxy?.kind === "shroudforge" && !opts.switchFromShroudforge) reject("refused", "ShroudForge is installed. Switch from ShroudForge to replace it.");
       // like install::resolve_components: an explicit choice records the defaults it leaves out; none keeps the game's
       // parts and adds every new or newly default one not turned off
@@ -1923,7 +1925,7 @@ if (typeof window !== "undefined") (window as unknown as { __kilnMock?: unknown 
     if (own) { ownFolders.set(id, own); sfOwn.add(id); } else { ownFolders.delete(id); sfOwn.delete(id); }
   },
   setGameFileUsers: (users: Record<string, string[]>) => { gameFileUsers = users; },
-  failNextInstall: (message: string) => { failNextInstall = message; },
+  failNextInstall: (failure: string | KilnError) => { failNextInstall = failure; },
   /** The player changes a mod's files in its Library folder ("Open folder", mod.json edited): its newest version. */
   editInLibrary: (kind: ModKind, id: string, change: { name?: string; version?: string }) => {
     const e = library.find((l) => l.kind === kind && l.id === id);

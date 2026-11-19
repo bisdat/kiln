@@ -10,6 +10,7 @@ import { qk, useGame, useGameStatus, useLaunchState, useRuntimeChanges, type Run
 import { partRows, partsFor, resolveParts, selectParts, type PartState } from "../shell/parts";
 import { installBundle, isOlder, runRuntimeChange } from "../shell/runtimeChange";
 import { ANTIVIRUS_DOCS, fewPaths, fileProblems } from "../shell/runtimeFiles";
+import { RuntimeFailure } from "../shell/RuntimeFailure";
 import { rich, t, useT } from "../i18n";
 import {
   Banner, Button, Card, ConfirmDanger, DropZone, EmptyState, Modal, Page, PageHeader, Skeleton, Table,
@@ -124,7 +125,7 @@ export default function RuntimePage() {
         </Banner>
       )}
       {files.changed.length > 0 && <Banner tone="warn" title={t("runtime.changed")}>{rich("runtime.changedText", { count: files.changed.length, files: <span className="k-mono">{fewPaths(files.changed, game.platform)}</span> })}</Banner>}
-      {change && <ChangeOutcome change={change} installed={current} onDismiss={() => clear(game.id)} />}
+      {change && <ChangeOutcome change={change} installed={current} platform={game.platform} onDismiss={() => clear(game.id)} />}
       {missing.length > 0 && change?.state !== "running" && (
         <Banner tone="warn" title={t("runtime.partsMissing")} actions={installedBundle && (
           <Button size="s" disabled={running || busy || !!status.data?.steamUpdating} onClick={() => setPick(installedBundle)}>{t("runtime.reinstall")}</Button>
@@ -272,15 +273,17 @@ function InstallModal({ bundle, side, receipt, onClose, onInstall }: {
 
 /** The last change on this page and how it ended: the task while it runs and when done (its last line says what is
  *  in the game folder now), a plain failure otherwise. Stays until dismissed. */
-function ChangeOutcome({ change, installed, onDismiss }: { change: RuntimeChange; installed: string | null; onDismiss: () => void }) {
+function ChangeOutcome({ change, installed, platform, onDismiss }: { change: RuntimeChange; installed: string | null; platform: api.Platform | undefined; onDismiss: () => void }) {
   const t = useT();
   const task = useTasks((s) => (change.taskId ? s.tasks[change.taskId] : undefined));
   const dismiss = <button type="button" className="k-link" onClick={onDismiss}>{t("common.dismiss")}</button>;
   if (change.state === "failed") {
     return (
       <Banner tone="err" title={t("runtime.changeFailed", { what: change.what })} actions={dismiss}>
-        <span style={{ overflowWrap: "anywhere" }}>{change.error?.message ?? t("runtime.noReason")}</span>{" "}
-        {installed ? rich("runtime.keeps", { version: <span className="k-mono">{installed}</span> }) : t("runtime.notInGame")}
+        {/* a file Windows refused (an antivirus, inbox 92) is said in plain words, with the raw error under them */}
+        <RuntimeFailure error={change.error} platform={platform} fallback={t("runtime.noReason")}>
+          {installed ? rich("runtime.keeps", { version: <span className="k-mono">{installed}</span> }) : t("runtime.notInGame")}
+        </RuntimeFailure>
       </Banner>
     );
   }

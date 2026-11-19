@@ -746,6 +746,14 @@ these and remove them or move them to quarantine. Kiln, or a part of it, then do
 launcher's Runtime page says when one of Kiln's files is missing, for example "1 of Kiln's files is missing:
 kiln\plugins\kiln-greeneye.dll", and offers **Repair**. The support report says it too (`files-missing`).
 
+An antivirus can also stop Kiln while it installs: it holds a DLL to scan it, or moves it to quarantine, and Windows
+answers Kiln's write with "Access is denied". The install is then undone and Kiln is not in the game. Since
+0.2.0-dev.29.18 the launcher says so instead of only that error, on the Runtime page, on Play and in its message:
+"Windows did not let Kiln write kiln\plugins\kiln-greeneye.dll. An antivirus or another program may be blocking it."
+The error itself stays under it (Details). The support report says it too (`install-blocked`), also after the launcher
+was closed. Add the exclusion below, restore what the antivirus took, then install Kiln again. If the antivirus also
+took the launcher itself, or its uninstaller, restore those from the quarantine too, or install the launcher again.
+
 **What Kiln puts in the game folder.** The receipt, `kiln\.install.json`, lists every file Kiln installed with its
 SHA-256 checksum. On the game client these are:
 - `dinput8.dll`, next to `enshrouded.exe`. This is Kiln's proxy: the game loads it when it starts, and it loads the

@@ -17,6 +17,7 @@ import { otherFolderProfile, otherFolderTitle } from "../shell/dataFolderText";
 import { qk, useGame, useGameSel, useGameStatus, useLaunchState, usePoll, usePreStart, useProfiles, useRuntimeChanges } from "../api/hooks";
 import { detectGames, useDetect, useEnsureProfile, useInstallPrompt, useKilnInstall } from "../shell/firstRun";
 import { clock, usePlayControl, type PlayControl } from "../shell/play";
+import { RuntimeFailure } from "../shell/RuntimeFailure";
 import { isDefaultProfile, useMods } from "../shell/useMods";
 import { MainList } from "./mods/MainList";
 import { StartProgress } from "../shell/StartPanel";
@@ -343,8 +344,9 @@ function Banners({ game, ctl, pending, onOffer, boot }: { game: GameInstall; ctl
         <SendToSupport from="banner" target={{ game: game.id }} kind="noload" />
         <button type="button" className="k-link" onClick={() => useRuntimeChanges.getState().clear(game.id)}>{t("common.dismiss")}</button>
       </>}>
-        <span style={{ overflowWrap: "anywhere" }}>{change.error?.message ?? t("play.banner.noReason")}</span>{" "}
-        {has ? rich("play.banner.stillHas", { version: <span className="k-mono">{has}</span> }) : t("play.banner.notInGame")}
+        <RuntimeFailure error={change.error} platform={game.platform} fallback={t("play.banner.noReason")}>
+          {has ? rich("play.banner.stillHas", { version: <span className="k-mono">{has}</span> }) : t("play.banner.notInGame")}
+        </RuntimeFailure>
       </Banner>,
     );
   }
