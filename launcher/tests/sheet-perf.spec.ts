@@ -1,7 +1,8 @@
 // The sheet stays cheap while the fire burns (inbox 94: every page but Play lagged, a page switch took about a second
 // and typing 250 to 750 ms). The flicker (--fire, shell/Stage.tsx) and the torch (--mx, --my, shell/AppShell.tsx) write
 // only onto leaves: an element with children under it would restyle and repaint the whole page on every write. With
-// the fire off (Settings' Animated fire, drawing without the GPU) or reduced motion there are no writes at all.
+// the fire off (Settings' Animated fire, drawing without the GPU) or reduced motion there are no writes at all, and
+// without the GPU a lit flame stands still.
 // The last test types into a sheet page in WebKit (the engine of the Linux launcher) while the pointer moves; it runs
 // where Playwright's WebKit starts (KILN_WEBKIT names another build; not on distributions it does not support).
 import { expect, test, webkit, type Page } from "@playwright/test";
@@ -143,7 +144,7 @@ test("with Animated fire off nothing is written: no flicker, no torch", async ({
   expect(await writes(page)).toEqual([]);
 });
 
-test("drawing without the GPU: no fire loop, no flicker, no torch", async ({ page }) => {
+test("drawing without the GPU: no fire loop, no flicker, no torch, and lit flames stand still", async ({ page }) => {
   await countWrites(page);
   await page.goto("/?render=software#/settings");
   await page.locator(".k-splash").waitFor({ state: "detached" });
@@ -151,6 +152,18 @@ test("drawing without the GPU: no fire loop, no flicker, no torch", async ({ pag
   await wander(page);
   await page.locator("#st-keep").fill("12");
   expect(await writes(page)).toEqual([]);
+  // a lit flame stands still: its flicker repainted it and its glow every frame on the CPU
+  await page.evaluate(() => { location.hash = "#/mods/order"; });
+  const flame = page.locator(".k-flame.on svg").first();
+  await expect(flame).toBeVisible();
+  await expect(flame).toHaveCSS("animation-name", "none");
+});
+
+test("with the GPU a lit flame still flickers", async ({ page }) => {
+  await open(page, "/mods/order");
+  const flame = page.locator(".k-flame.on svg").first();
+  await expect(flame).toBeVisible();
+  await expect(flame).toHaveCSS("animation-name", "k-lick");
 });
 
 test("WebKit: typing into a sheet page stays quick while the fire burns and the pointer moves", async ({ baseURL }) => {
