@@ -525,7 +525,7 @@ pub struct Finding {
     /// Stable name: `not-installed`, `proxy-not-kiln`, `files-missing`, `files-changed`, `not-loaded`,
     /// `proton-override`, `proton-chained-override`, `unknown-build`, `safe-idle`, `own-loader`, `loader-in-folder`, `unlisted-mods`,
     /// `mod-failed`, `hosted-mods`, `hosted-off`, `crash`, `profile-invalid`, `newer-mods`, `no-game`, `sf-startup-failed`, `sf-startup-skipped`,
-    /// `optiscaler`, `install-blocked`; from the launcher ([`ReportInput::findings`]): `webkit-sandbox`.
+    /// `optiscaler`, `install-blocked`; from the launcher ([`ReportInput::findings`]): `webkit-sandbox`, `launcher-files-missing`.
     pub id: String,
     pub level: Level,
     pub text: String,

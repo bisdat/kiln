@@ -53,6 +53,10 @@ pub struct AppInfo {
     /// commands/vendor.rs `previews`): none is used since 0.2.0-dev.29.18 (`"upscalers"` ended with phase B). Left out while none is on.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub preview: Vec<String>,
+    /// (dev.29.18) A Windows install's own files that are gone from the launcher's folder at this start: its exe, its
+    /// `uninstall.exe` (an antivirus took them; crate::own_files). Left out while none is.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub own_files_missing: Vec<String>,
 }
 
 /// `<data>/settings.json`
@@ -367,6 +371,7 @@ pub async fn app_info(app: AppHandle) -> Result<AppInfo, Error> {
         desktop: crate::desktop::info(),
         sandbox: crate::sandbox::info(),
         preview: super::vendor::previews(),
+        own_files_missing: crate::own_files::missing().to_vec(),
     })
 }
 

@@ -899,6 +899,8 @@ let settings: LauncherSettings = { steamRoots: [], defaultGameId: FRESH ? null :
   addToActiveProfile: true, modFolderNotes: true, keepVersions: 1 };
 // how the (Linux) launcher draws its window
 // `?render=software`: the fallback's restart; `?render=marker`: a later start, from the marker the fallback wrote
+/** `?ownFiles=uninstall.exe`: the launcher's own files an antivirus took (app_info.ownFilesMissing, inbox 92). */
+const OWN_FILES = (typeof location !== "undefined" ? new URLSearchParams(location.search).get("ownFiles") ?? "" : "").split(",").filter(Boolean);
 const RENDER_Q = typeof location !== "undefined" ? new URLSearchParams(location.search).get("render") : null;
 const FELL_BACK = "The launcher turned this on by itself: the page did not start within 15 s of the window with the GPU (2026-11-11T21:04:10Z)";
 let render: RenderInfo = RENDER_Q === "software" ? { mode: "software", why: "restart", marker: true, markerWhy: FELL_BACK }
@@ -950,7 +952,7 @@ const handlers: Record<string, Handler> = {
   // app
   app_info: (): AppInfo => ({ version: "0.2.0-dev", kiln: "0.2.0-dev", platform: "linux", arch: "x86_64", dataDir: mockDataDir(), commit: "0f1ffa6", mock: true,
     noWebgl: render.mode === "software", distribution: MOCK_DISTRIBUTION, nexusEnabled: NEXUS_MOCK_ENABLED, render: { ...render }, desktop: { ...desktop }, sandbox: { ...sandbox },
-    ...(MOCK_PREVIEW.length ? { preview: [...MOCK_PREVIEW] } : {}) }),
+    ...(MOCK_PREVIEW.length ? { preview: [...MOCK_PREVIEW] } : {}), ...(OWN_FILES.length ? { ownFilesMissing: [...OWN_FILES] } : {}) }),
   app_started: () => null,
   app_render_set: (a) => {
     render = { ...render, marker: !!a.software, markerWhy: a.software ? `Turned on in Settings (${new Date().toISOString()})` : undefined };

@@ -99,6 +99,9 @@ export interface AppInfo {
   desktop?: DesktopInfo;
   /** (dev.29.18) Linux only: WebKit's sandbox in this start and whether the next start turns it off (sandbox.rs). */
   sandbox?: SandboxInfo;
+  /** (dev.29.18) A Windows install's own files gone from the launcher's folder at this start (its exe, `uninstall.exe`:
+   *  an antivirus took them; own_files.rs). Absent while none is, and from older backends. */
+  ownFilesMissing?: string[];
   /** (dev.29) The previews on for this start (settings.json `preview`, KILN_LAUNCHER_PREVIEW). None uses it in
    *  0.2.0-dev.29.18 (the upscaler files are out of preview). Absent: none. */
   preview?: string[];

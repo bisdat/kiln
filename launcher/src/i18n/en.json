@@ -3885,6 +3885,16 @@
       "onAgain": "{name} is on {version} again",
       "changedSince": "{name} was changed since the roll back."
     },
+    "ownFiles": {
+      "title": {
+        "one": "A file of the launcher is missing",
+        "other": "Files of the launcher are missing"
+      },
+      "text": {
+        "one": "{files} is gone from the launcher's folder. An antivirus may have quarantined it. Restore it from the quarantine and add an exclusion, or install the launcher again.",
+        "other": "{files} are gone from the launcher's folder. An antivirus may have quarantined them. Restore them from the quarantine and add an exclusion, or install the launcher again."
+      }
+    },
     "runtimeBlocked": {
       "file": "Windows did not let Kiln write {file}.",
       "why": "An antivirus or another program may be blocking it.",

@@ -97,6 +97,8 @@ pub(crate) fn report_input(app: &tauri::AppHandle, target: Option<LogTarget>) ->
         input.facts.push(("WebKit sandbox".into(), s.says()));
         input.findings.extend(crate::sandbox::finding(s));
     }
+    // Windows: the launcher's own exe or uninstaller gone from its folder (an antivirus; crate::own_files)
+    input.findings.extend(crate::own_files::finding());
     match target {
         Some(LogTarget::Game(id)) => input.install = Some(crate::state::game(&id)?),
         Some(t @ LogTarget::Server(_)) => input.game_dir = Some(target_dir(&t)?),

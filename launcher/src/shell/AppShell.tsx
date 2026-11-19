@@ -15,6 +15,7 @@ import { UpdateTray } from "./UpdateNotice";
 import { BetaMark, ChannelSwitchDialog } from "./ChannelSwitch";
 import { RouteErrorBoundary } from "./ErrorBoundary";
 import { DataFolderNotice } from "./DataFolderGate";
+import { OwnFilesNotice } from "./OwnFilesNotice";
 import { NAV_MAIN, NAV_SIDE, navFor } from "./nav";
 import { DropAnywhere, ModpackDropOffer, useAddMods } from "./drop";
 import { ImportDetails, PickProfile } from "./importResult";
@@ -267,6 +268,7 @@ export function AppShell() {
       <ModUpdatesWatcher />
       <DataFolderNotice />
       <CommunityDesktopHost />
+      <OwnFilesNotice />
       <Toaster />
       <Splash done={ready} />
     </div>

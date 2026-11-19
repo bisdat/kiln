@@ -17,6 +17,8 @@ pub mod dialog;
 pub mod desktop;
 pub mod distribution;
 pub mod events;
+/// The launcher's own files next to it (a Windows install's exe and uninstaller), looked at once per start (dev.29.18).
+pub mod own_files;
 /// The process's data folder: found once, its lock, and the hold while a move runs (dev.26).
 pub mod folder;
 /// The backend timing harness (ignored tests; tools/launcher/perf.sh).
@@ -316,6 +318,8 @@ pub(crate) fn after_snapshot(app: &tauri::AppHandle) {
     commands::app::flush_early_log();
     // a message's "off" from the start before, when its marker could not be written then
     sandbox::after_gate();
+    // an antivirus that took the launcher's uninstaller (or its exe while it ran): launcher.log says it (own_files.rs)
+    own_files::start();
     // the installed runtime's and the bundles' sha256s from the last run (a start does not hash 1.5 GB again)
     if let Ok(d) = state::dirs() {
         kiln_manage::filecache::persist_at(&state::file_hashes(&d));
