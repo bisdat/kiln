@@ -294,7 +294,8 @@ mod imp {
             }
             h.update(&buf[..n]);
             if let Some(o) = out.as_mut() {
-                o.write_all(&buf[..n])?;
+                // the staged copy of a DLL that Windows refuses (an antivirus): crate::blocked
+                o.write_all(&buf[..n]).map_err(crate::blocked::io_at(Path::new(&f.path), "writing", &f.path))?;
             }
         }
         let sha = hex(h.finalize().as_slice());

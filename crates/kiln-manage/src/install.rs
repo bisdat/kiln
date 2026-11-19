@@ -612,25 +612,26 @@ fn copy_into_backup(game_dir: &Path, backup_rel: &str, rel: &str, mirror: Option
     if let Some(p) = dst.parent() {
         std::fs::create_dir_all(p).map_err(io_at(p, "creating"))?;
     }
-    copy_new(&src, &dst)?;
+    copy_new(&src, &dst, rel)?;
     if let Some(m) = mirror {
         let mdst = m.join(rel);
         if let Some(p) = mdst.parent() {
             std::fs::create_dir_all(p).map_err(io_at(p, "creating"))?;
         }
-        copy_new(&src, &mdst)?;
+        copy_new(&src, &mdst, rel)?;
     }
     Ok(dst_rel)
 }
 
-fn copy_new(src: &Path, dst: &Path) -> Result<()> {
-    let mut input = std::fs::File::open(src).map_err(io_at(src, "reading"))?;
-    let mut output = std::fs::OpenOptions::new().write(true).create_new(true).open(dst).map_err(io_at(dst, "creating"))?;
+/// Copies `src` to a new file `dst`; `rel` names the file in the game folder (a DLL Windows refuses: crate::blocked).
+fn copy_new(src: &Path, dst: &Path, rel: &str) -> Result<()> {
+    let mut input = std::fs::File::open(src).map_err(crate::blocked::io_at(src, "reading", rel))?;
+    let mut output = std::fs::OpenOptions::new().write(true).create_new(true).open(dst).map_err(crate::blocked::io_at(dst, "creating", rel))?;
     let result = std::io::copy(&mut input, &mut output).and_then(|_| output.sync_all());
     if let Err(e) = result {
         drop(output);
         let _ = std::fs::remove_file(dst);
-        return Err(io_at(dst, "copying to")(e));
+        return Err(crate::blocked::io_at(dst, "copying to", rel)(e));
     }
     Ok(())
 }
@@ -848,7 +849,7 @@ fn install_staged(dirs: &DataDirs, install: &GameInstall, bundle: &Path, bundle_
                     r.backup.as_deref().unwrap_or("(none recorded)")));
                 continue;
             };
-            copy_new(&backup, &target)?;
+            copy_new(&backup, &target, rel)?;
             steps.push(Step::Placed { target: target.clone(), previous: None });
             if file_sha(&target).is_none_or(|(h, _)| h != r.sha256) {
                 return Err(Error::new(ErrorCode::HashMismatch, format!("recovered ShroudForge {rel} does not match its original")));
@@ -938,7 +939,7 @@ fn install_staged(dirs: &DataDirs, install: &GameInstall, bundle: &Path, bundle_
                     std::fs::create_dir_all(p).map_err(io_at(p, "creating"))?;
                 }
                 // create_new prevents a race from replacing a file that appeared after slot selection.
-                copy_new(&proxy_path, &dst)?;
+                copy_new(&proxy_path, &dst, &chain_rel)?;
                 if let Err(e) = std::fs::remove_file(&proxy_path) {
                     let _ = std::fs::remove_file(&dst);
                     return Err(io_at(&proxy_path, "moving the proxy from")(e));
@@ -1096,16 +1097,16 @@ fn install_staged(dirs: &DataDirs, install: &GameInstall, bundle: &Path, bundle_
                         Some((i, ReplacedAction::Replaced)) if replaced[i].backup.is_some() => {
                             let b = game_dir.join(replaced[i].backup.as_deref().expect("checked"));
                             if file_sha(&b).is_some_and(|(bh, _)| bh == replaced[i].sha256) {
-                                steps.push(Step::Edited { target: p.clone(), previous: Some(std::fs::read(&p).map_err(io_at(&p, "reading"))?) });
-                                std::fs::copy(&b, &p).map_err(io_at(&p, "restoring"))?;
+                                steps.push(Step::Edited { target: p.clone(), previous: Some(std::fs::read(&p).map_err(crate::blocked::io_at(&p, "reading", &f.path))?) });
+                                std::fs::copy(&b, &p).map_err(crate::blocked::io_at(&p, "restoring", &f.path))?;
                                 replaced.remove(i);
                             } else {
                                 kept_obsolete.push(f.path.clone());
                             }
                         }
                         _ => {
-                            steps.push(Step::Edited { target: p.clone(), previous: Some(std::fs::read(&p).map_err(io_at(&p, "reading"))?) });
-                            std::fs::remove_file(&p).map_err(io_at(&p, "removing"))?;
+                            steps.push(Step::Edited { target: p.clone(), previous: Some(std::fs::read(&p).map_err(crate::blocked::io_at(&p, "reading", &f.path))?) });
+                            std::fs::remove_file(&p).map_err(crate::blocked::io_at(&p, "removing", &f.path))?;
                         }
                     },
                     Some(_) => kept_obsolete.push(f.path.clone()),
