@@ -313,7 +313,7 @@ test.describe("the save editor in Deck mode", () => {
     await pad(page, "b");
     await expect(page.locator('[data-deck-dialog="quit"]')).toHaveCount(0);
     // another character while changed: asked first; Cancel keeps Aldric
-    await walk(page, "up", /^ed-/, 8);
+    await walk(page, "up", /^ed-(characters|backups|discard|save)$/, 8);
     await walk(page, "left", "ed-characters", 4);
     await pad(page, "a");
     const chars = page.locator('[data-deck-dialog="editor-characters"]');
