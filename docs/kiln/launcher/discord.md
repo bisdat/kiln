@@ -189,11 +189,17 @@ launcher's limits (title 120, a Discord link) is left out of the list.
 
 **The desktop sign-in round trip:** the launcher listens once on `127.0.0.1:<random port>` before `POST /signin` and
 opens `url` in the system browser. After Discord the relay sends the browser to `http://127.0.0.1:<port>/done?c=<one-time
-code>` (an `id` beside it must match when there is one; `?error=canceled|denied|expired` ends the attempt). The
-launcher answers that request with a small page ("Signed in. You can close this tab and go back to the launcher.")
-and calls `/signin/exchange`. Any other request on the port (another path or id, another `Host` than
-`127.0.0.1:<port>`, a repeated parameter) gets a 404 and changes nothing. With a port, the relay gives the session only
-to the exchange; the launcher's poll from 8 seconds on only reads "waiting" then.
+code>` (an `id` beside it must match when there is one; the relay sends none, nor an `?error=`, which the launcher would
+also read). The launcher answers that request with a small page of its own ("Signed in. You can close this tab and go
+back to the launcher."; no redirect) and calls `/signin/exchange` with the code and the secret behind the challenge, so
+a program that takes the port or the code gets nothing. Any other request on the port (another path or id, another
+`Host` than `127.0.0.1:<port>`, a repeated parameter) gets a 404 and changes nothing; a code the relay refuses (403
+`refused`: made up on this PC) is dropped and the attempt waits on; a code the exchange could not take for want of a
+network is tried again every 2 seconds. With a port, the relay gives the session only to the exchange; the launcher's
+poll from 8 seconds on reads "waiting", or "canceled" after Cancel on Discord's page (how a cancel reaches the
+desktop). The listener closes at the attempt's end, at Cancel, offline, a new attempt, and when the page is hidden.
+Without a listener (the port can't be opened) the launcher asks without a port and polls from the start: the relay's
+page then asks for Approve first.
 
 **The public post** is built by the relay from report.json (the zip's, or report.json alone): the player's line and
 words, the kind, the findings (problems, then warnings, then notes), the versions line from report.json's `versions`
