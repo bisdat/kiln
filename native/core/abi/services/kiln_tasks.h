@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: MIT
- * kiln.tasks v1 (since 0.2.0-dev.30): Kiln-owned worker threads for mods' off-tick work (docs/kiln/services/tasks.md).
+ * kiln.tasks v1 (since 0.2.0-dev.29.18): Kiln-owned worker threads for mods' off-tick work (docs/kiln/services/tasks.md).
  * A task runs its body on a pool worker, never on the tick, a world thread, a window/render thread or one of the
  * game's job workers, then its done callback, exactly once, also on a pool worker. A body touches game state only
  * through members documented as callable from any thread; anything phase-bound is posted back with

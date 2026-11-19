@@ -1,6 +1,6 @@
 # Tasks: Kiln-owned worker threads for off-tick work
 
-`kiln.tasks` (since 0.2.0-dev.30) runs a mod's heavy work on Kiln's own worker threads instead of in a tick handler.
+`kiln.tasks` (since 0.2.0-dev.29.18) runs a mod's heavy work on Kiln's own worker threads instead of in a tick handler.
 A task's body runs on a pool worker, never on the tick, a world thread, a window or render thread or one of the
 game's job workers; then its `done` callback runs, exactly once, also on a pool worker. A body touches game state only
 through members documented as callable from any thread; anything phase-bound is posted back with `KilnApi.post` /
