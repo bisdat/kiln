@@ -155,7 +155,8 @@ public:
     // The maintenance thread sweeps every watchdog_interval_ns and hands each new report to `fn` (outside every lock,
     // on the maintenance thread). nullptr stops it.
     void set_watch_sink(WatchFn fn, void* user);
-    // PoolNote lines (slot lost / recovered), on the maintenance thread outside every lock. nullptr stops them.
+    // PoolNote lines: slot lost / recovered on the maintenance thread, a resident task's start on its worker; each
+    // outside every lock. nullptr stops them.
     void set_note_sink(NoteFn fn, void* user);
 
     // Diagnostics (issue #49): this pool's lock-free stats store (tasks_stats.h). The tick-stats

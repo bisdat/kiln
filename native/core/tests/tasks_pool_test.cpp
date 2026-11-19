@@ -1707,6 +1707,7 @@ KILN_TASKS_TEST(resident_start_noted_once) {
     check(until([&] { return pool.counts().outstanding == 0; }), "quiescent");
     pool.set_note_sink(nullptr, nullptr);
 }
+
 // At most one resident task per owner. A second one is refused INVALID_ARGUMENT + Argument, with nothing held, while
 // the first is queued, running, cancelled with its body still running, or a managed lease between segments. A plain
 // LongRunning task of the same owner and another owner's resident task are accepted, and the owner's next resident
@@ -1802,6 +1803,55 @@ KILN_TASKS_TEST(resident_one_per_owner) {
     again.release.open();
     submit(pool, 1, resident("again"), again);
     check(until([&] { return again.done_calls.load() == 1; }), "once they ended, the owner's resident task is accepted");
+    check(stray.body_runs.load() == 0, "no refused submission ran");
+}
+
+// The exit and the owner's state refuse before the one-per-owner cap, as they would any task: while the owner's first
+// resident body still runs, a second resident task of a quarantined, sealed (drained) or revoked owner, or one after
+// the exit began, gets that refusal, not the cap's Argument. A healthy owner gets the cap's.
+KILN_TASKS_TEST(resident_cap_after_owner_state) {
+    HostPlatform platform;
+    Job quarantined, sealed, revoked, exiting, stray;  // before the pool: a released body still reads its job
+    for (Job* j : {&quarantined, &sealed, &revoked, &exiting, &stray}) j->platform = &platform;
+    stray.release.open();
+    Pool pool(config(1, 4), &platform);
+    pool.open_owner(1, "mod.quarantined");
+    pool.open_owner(2, "mod.sealed");
+    pool.open_owner(3, "mod.revoked");
+    pool.open_owner(4, "mod.exiting");
+    submit(pool, 1, resident("first"), quarantined);
+    submit(pool, 2, resident("first"), sealed);
+    submit(pool, 3, resident("first"), revoked);
+    submit(pool, 4, resident("first"), exiting);
+    check(until([&] {
+        return quarantined.body_runs.load() == 1 && sealed.body_runs.load() == 1 && revoked.body_runs.load() == 1 &&
+               exiting.body_runs.load() == 1;
+    }), "each owner's first resident body runs");
+    const auto second = [&](KilnOwner owner, KilnResult want, Refusal want_why, const std::string& what) {
+        KilnHandle h = 7;
+        Refusal why = Refusal::None;
+        const auto records = pool.counts().records;
+        const auto held = platform.acquires() - platform.releases();
+        const KilnResult r = pool.submit(owner, resident("second"), &job_body, &job_done, &stray, &h, &why);
+        check(r == want && why == want_why && h == 0 && pool.counts().records == records &&
+                  platform.acquires() - platform.releases() == held,
+              what + " (got " + std::to_string(r) + ", reason " + std::to_string(static_cast<uint32_t>(why)) + ")");
+    };
+    second(4, KILN_ERR_INVALID_ARGUMENT, Refusal::Argument, "a healthy owner: the cap's INVALID_ARGUMENT + Argument");
+    check(pool.quarantine(1) == KILN_OK, "owner 1 quarantined");
+    second(1, KILN_ERR_UNAVAILABLE, Refusal::OwnerQuarantined, "a quarantined owner: UNAVAILABLE + OwnerQuarantined");
+    uint32_t left = 0;
+    check(pool.drain_owner(2, 0, &left) == KILN_OK && left == 1, "owner 2 drained (sealed), its body still runs");
+    second(2, KILN_ERR_UNAVAILABLE, Refusal::OwnerSealed, "a sealed owner: UNAVAILABLE + OwnerSealed");
+    pool.retire_owner(3, nullptr);
+    second(3, KILN_ERR_REVOKED, Refusal::OwnerSealed, "a revoked owner: REVOKED + OwnerSealed");
+    pool.close();
+    second(4, KILN_ERR_UNAVAILABLE, Refusal::Shutdown, "after the exit began: UNAVAILABLE + Shutdown");
+    quarantined.release.open();
+    sealed.release.open();
+    revoked.release.open();
+    exiting.release.open();
+    check(until([&] { return pool.counts().outstanding == 0; }), "quiescent");
     check(stray.body_runs.load() == 0, "no refused submission ran");
 }
 }  // namespace

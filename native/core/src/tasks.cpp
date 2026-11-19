@@ -670,8 +670,14 @@ KilnResult Pool::submit(KilnOwner owner, const SubmitArgs& in, TaskBodyFn body, 
             if (why) *why = Refusal::Capability;
             r = KILN_ERR_UNAVAILABLE;
         } else if (second_resident) {
-            if (why) *why = Refusal::Argument;
-            r = KILN_ERR_INVALID_ARGUMENT;
+            // the exit and the owner's state refuse first, as for any task; only a healthy owner meets the cap
+            Refusal state_why = Refusal::None;
+            r = c.model.owner_state(owner, &state_why);
+            if (r == KILN_OK) {
+                state_why = Refusal::Argument;
+                r = KILN_ERR_INVALID_ARGUMENT;
+            }
+            if (why) *why = state_why;
         } else {
             r = c.model.submit(owner, args, &handle, &submit_why);
             if (why) *why = submit_why;

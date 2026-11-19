@@ -125,7 +125,8 @@ and `submit_in`, which only decide when it starts and when `cancelled()` turns 1
   `cancel`, a `drain_owner` or the owner's unload.
 - An owner has at most one resident task. A second one, while the first is queued or running (also after its
   `cancel`, until its body returns), is refused `INVALID_ARGUMENT` + `ARGUMENT` and nothing changes. Its next one
-  may be submitted from the first one's `done`.
+  may be submitted from the first one's `done`. The order: a malformed request (`ARGUMENT`), then the checks every
+  task gets (`CAPABILITY`, `SHUTDOWN`, `OWNER_SEALED`, `OWNER_QUARANTINED`), then this cap (`ARGUMENT`).
 
 An older Kiln refuses the bit with `INVALID_ARGUMENT` + `ARGUMENT`; retry without it if you can live with one
 watchdog line. `ARGUMENT` alone does not tell an older Kiln from another wrong field: `KilnApi.version()` does.
