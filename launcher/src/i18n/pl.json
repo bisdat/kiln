@@ -2860,6 +2860,7 @@
       "httpModpacksHint": "Wyłączone: tylko https.",
       "dailyUpdates": "Sprawdzaj aktualizacje modów raz dziennie",
       "dailyUpdatesHint": "Wyłączone: tylko gdy naciśniesz Sprawdź aktualizacje nad listą modów. Sprawdzanie czyta strony podane przez twoje mody (GitHub oraz Nexus Mods, gdy jesteś zalogowany) i pokazuje powiadomienie z linkiem. Nigdy nie pobiera ani nie instaluje moda.",
+      "dailyUpdatesHintNoNexus": "Wyłączone: tylko gdy naciśniesz Sprawdź aktualizacje nad listą modów. Sprawdzanie czyta strony GitHub podane przez twoje mody i pokazuje powiadomienie z linkiem. Nigdy nie pobiera ani nie instaluje moda.",
       "steamRoots": "Dodatkowe foldery Steam",
       "steamRootsHint": "Biblioteki, których Kiln nie znajduje sam."
     },

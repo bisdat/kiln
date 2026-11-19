@@ -2748,6 +2748,7 @@
       "httpModpacksHint": "Off: https only.",
       "dailyUpdates": "Check for mod updates once a day",
       "dailyUpdatesHint": "Off: only when you press Check for updates above your mods. A check reads the pages your mods name (GitHub, and Nexus Mods with your sign-in) and shows a notice with a link. It never downloads or installs a mod.",
+      "dailyUpdatesHintNoNexus": "Off: only when you press Check for updates above your mods. A check reads the GitHub pages your mods name and shows a notice with a link. It never downloads or installs a mod.",
       "steamRoots": "Extra Steam folders",
       "steamRootsHint": "Libraries Kiln does not find on its own."
     },

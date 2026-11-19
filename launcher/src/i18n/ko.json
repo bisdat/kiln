@@ -2692,6 +2692,7 @@
       "httpModpacksHint": "꺼짐: https만.",
       "dailyUpdates": "하루에 한 번 모드 업데이트 확인",
       "dailyUpdatesHint": "꺼짐: 모드 목록 위의 업데이트 확인을 누를 때만 확인합니다. 확인은 모드가 알려 준 페이지(GitHub, 로그인한 Nexus Mods)를 읽고 링크가 있는 알림을 보여 줍니다. 모드를 다운로드하거나 설치하지 않습니다.",
+      "dailyUpdatesHintNoNexus": "꺼짐: 모드 목록 위의 업데이트 확인을 누를 때만 확인합니다. 확인은 모드가 알려 준 GitHub 페이지를 읽고 링크가 있는 알림을 보여 줍니다. 모드를 다운로드하거나 설치하지 않습니다.",
       "steamRoots": "추가 Steam 폴더",
       "steamRootsHint": "Kiln이 스스로 찾지 못하는 라이브러리입니다."
     },

@@ -64,6 +64,7 @@ function LauncherCard() {
   const qc = useQueryClient();
   const s = useSettings();
   const { games } = useGame();
+  const nexusEnabled = useNexusEnabled();
   const [root, setRoot] = useState("");
   if (s.isLoading) return <Card title={t("settings.launcher.title")}><Skeleton /></Card>;
   if (!s.data) return <Card title={t("settings.launcher.title")}><EmptyState title={t("settings.launcher.unavailable")} hint={errorText(s.error)} /></Card>;
@@ -88,7 +89,7 @@ function LauncherCard() {
       <Toggle checked={v.allowHttpModpacks} onChange={(on) => set({ allowHttpModpacks: on })} label={t("settings.launcher.httpModpacks")} hint={t("settings.launcher.httpModpacksHint")} />
       <CommunityToggle />
       <Toggle checked={v.modUpdatesDaily === true} onChange={(on) => set({ modUpdatesDaily: on })} label={t("settings.launcher.dailyUpdates")}
-        hint={t("settings.launcher.dailyUpdatesHint")} />
+        hint={t(nexusEnabled ? "settings.launcher.dailyUpdatesHint" : "settings.launcher.dailyUpdatesHintNoNexus")} />
       <TypeToConfirmToggle />
       <Field label={t("settings.launcher.steamRoots")} hint={t("settings.launcher.steamRootsHint")}>
         <div className="k-stack">

@@ -2748,6 +2748,7 @@
       "httpModpacksHint": "Spento: solo https.",
       "dailyUpdates": "Cerca aggiornamenti delle mod una volta al giorno",
       "dailyUpdatesHint": "Spento: solo quando premi Cerca aggiornamenti sopra le tue mod. Un controllo legge le pagine che le tue mod indicano (GitHub, e Nexus Mods con il tuo accesso) e mostra un avviso con un link. Non scarica né installa mai una mod.",
+      "dailyUpdatesHintNoNexus": "Spento: solo quando premi Cerca aggiornamenti sopra le tue mod. Un controllo legge le pagine GitHub che le tue mod indicano e mostra un avviso con un link. Non scarica né installa mai una mod.",
       "steamRoots": "Cartelle Steam aggiuntive",
       "steamRootsHint": "Librerie che Kiln non trova da solo."
     },

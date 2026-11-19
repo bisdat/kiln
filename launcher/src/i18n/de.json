@@ -2748,6 +2748,7 @@
       "httpModpacksHint": "Aus: nur https.",
       "dailyUpdates": "Einmal am Tag nach Mod-Updates suchen",
       "dailyUpdatesHint": "Aus: nur, wenn du über deinen Mods auf Nach Updates suchen drückst. Eine Suche liest die Seiten, die deine Mods nennen (GitHub, und Nexus Mods mit deiner Anmeldung), und zeigt einen Hinweis mit Link. Sie lädt oder installiert nie eine Mod.",
+      "dailyUpdatesHintNoNexus": "Aus: nur, wenn du über deinen Mods auf Nach Updates suchen drückst. Eine Suche liest die GitHub-Seiten, die deine Mods nennen, und zeigt einen Hinweis mit Link. Sie lädt oder installiert nie eine Mod.",
       "steamRoots": "Weitere Steam-Ordner",
       "steamRootsHint": "Bibliotheken, die Kiln nicht selbst findet."
     },

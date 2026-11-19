@@ -2748,6 +2748,7 @@
       "httpModpacksHint": "Désactivé : https seulement.",
       "dailyUpdates": "Rechercher les mises à jour des mods une fois par jour",
       "dailyUpdatesHint": "Désactivé : seulement quand vous appuyez sur « Rechercher des mises à jour » au-dessus de vos mods. Une recherche lit les pages que vos mods indiquent (GitHub, et Nexus Mods avec votre connexion) et affiche un avis avec un lien. Elle ne télécharge ni n'installe jamais de mod.",
+      "dailyUpdatesHintNoNexus": "Désactivé : seulement quand vous appuyez sur « Rechercher des mises à jour » au-dessus de vos mods. Une recherche lit les pages GitHub que vos mods indiquent et affiche un avis avec un lien. Elle ne télécharge ni n'installe jamais de mod.",
       "steamRoots": "Dossiers Steam supplémentaires",
       "steamRootsHint": "Les bibliothèques que Kiln ne trouve pas tout seul."
     },

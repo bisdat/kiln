@@ -2671,6 +2671,7 @@
       "httpModpacksHint": "关闭时仅允许 HTTPS。",
       "dailyUpdates": "每天检查一次模组更新",
       "dailyUpdatesHint": "关闭后，可在模组列表上方点击「检查更新」手动检查。Kiln 会查看模组指定的 GitHub 发布页，或使用你登录的账号检查 Nexus Mods。发现更新时只显示链接，供你自行下载安装。",
+      "dailyUpdatesHintNoNexus": "关闭后，可在模组列表上方点击「检查更新」手动检查。Kiln 会查看模组指定的 GitHub 发布页。发现更新时只显示链接，供你自行下载安装。",
       "steamRoots": "其他 Steam 库文件夹",
       "steamRootsHint": "添加 Kiln 未自动找到的 Steam 库。"
     },
