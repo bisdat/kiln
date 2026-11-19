@@ -1611,12 +1611,13 @@ line, the last one wins, else `KILN_LAUNCHER_UI=deck|desktop`). The UI: `forced`
 | community | `tester_join` | beta: boolean | null (sends the hardware tester_status showed) |
 | community | `tester_leave` | - | null |
 | community | `tester_result_set` | step, result?: "worked"\|"failed"\|"skipped"\|"clear", note? | plan \| null (kept on this PC) |
-| community | `tester_results_send` | withReport: boolean | plan \| null |
+| community | `tester_results_send` | withReport: boolean, prepared?: string (the report `community_report_prepare` showed) | plan \| null |
 | community | `community_steam_keyboard` | - | null (a Steam Deck only: `steam://open/keyboard`) |
 
 The community commands ([discord.md](discord.md)) refuse every request that would leave the PC while
 `community.json`'s `shown` is false (`refused`, `detail.kind` "hidden"); their errors carry `detail.kind` (`offline`,
-`relay`, `signin`, `not_member`, `rate_limited`, `too_big`, ...), which the UI words.
+`relay`, `signin`, `not_member`, `too_young`, `rate_limited` with `limit` "hour"\|"day"\|"network", `too_big`,
+`not_found`, ...), which the UI words.
 
 Official launcher builds (`KILN_RELEASE_BUILD` set) require valid public Nexus OAuth registration when Nexus is enabled.
 `KILN_NEXUS_ENABLED=0` disables the entire integration; absent/`1` enables it, other values fail the build.
