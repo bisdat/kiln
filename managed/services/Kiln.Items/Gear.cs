@@ -29,7 +29,7 @@ public static unsafe partial class Items
         {
             if (_v8 != null) return _v8;
             var t = T;
-            if (t == null || t->Header.Size < (uint)sizeof(ItemsNative.TableV8)) return null;
+            if (t == null || t->Header.Size < ItemsNative.V8GearEnd) return null;  // the gear functions; the rolls after them (336) are P5's
             return _v8 = (ItemsNative.TableV8*)t;
         }
     }

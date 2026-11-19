@@ -168,8 +168,8 @@ public sealed class ItemsFakeTests
     [Fact]
     public void TheWholeTableAndTheGearStructsMirrorTheHeader()
     {
-        // kiln.items v8: sizeof(KilnItemsApi) == 320, gear_write at 296 (native/services/items/tests/completed_results_test.cpp)
-        Assert.Equal((320, 40, 44, 296, 192), (Unsafe.SizeOf<ItemsAbi.FullTable>(), Unsafe.SizeOf<ItemsAbi.GearRequest>(), Unsafe.SizeOf<ItemsAbi.GearState>(),
+        // kiln.items v8: sizeof(KilnItemsApi) == 336 (gear_write at 296, then P5's rarity_rolls/roll_status), native items.cpp
+        Assert.Equal((336, 40, 44, 296, 192), (Unsafe.SizeOf<ItemsAbi.FullTable>(), Unsafe.SizeOf<ItemsAbi.GearRequest>(), Unsafe.SizeOf<ItemsAbi.GearState>(),
             Unsafe.SizeOf<ItemsAbi.GearResult>(), Unsafe.SizeOf<ItemsAbi.GearStatus>()));
         var native = typeof(Items).Assembly.GetType("Kiln.ItemsNative", true)!;
         Assert.Equal(Unsafe.SizeOf<ItemsAbi.FullTable>(), Mirror.Size(native, "TableV8"));

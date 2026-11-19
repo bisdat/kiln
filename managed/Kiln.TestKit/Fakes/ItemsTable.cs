@@ -228,6 +228,9 @@ internal static unsafe class ItemsAbi
         public delegate* unmanaged[Cdecl]<ulong, GearRequest*, delegate* unmanaged[Cdecl]<GearResult*, void*, void>, void*, ulong*, int> GearWrite;
         public delegate* unmanaged[Cdecl]<uint, uint, GearState*, int> GearRead;
         public delegate* unmanaged[Cdecl]<GearStatus*, int> GetGearStatus;
+        // v8 (package P5): rarity_rolls, roll_status. Not modelled by the kit: null, so the rolls read as unavailable.
+        public void* RarityRolls;
+        public void* RollStatus;
     }
 
     /// <summary>The game's ItemId: FNV-1a-32 over the item GUID's 16 bytes.</summary>

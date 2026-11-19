@@ -23,7 +23,9 @@ internal static unsafe class ItemRarityRolls
         {
             var t = Services.Get<ItemsNative.Table>(ItemsNative.Service, ItemsNative.Version);
             if (t == null || t->Header.Size < (uint)sizeof(ItemsNative.TableV8)) return null;
-            return (ItemsNative.TableV8*)t;
+            var v8 = (ItemsNative.TableV8*)t;
+            // a table that is long enough but leaves the rolls out (the test kit) has none
+            return v8->RarityRolls == null || v8->RollStatusOf == null ? null : v8;
         }
     }
 

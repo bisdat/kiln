@@ -709,6 +709,9 @@ internal static unsafe class ItemsNative
     /// <summary>The v8 table (the equipment wave): v7 followed by gear_write, gear_read, gear_status (package P1, typed by
     /// the managed gear API of package P2; 320 bytes) and rarity_rolls, roll_status (package P5; 336 bytes). Read a member
     /// only when the header's size covers it.</summary>
+    /// <summary>Where the v8 gear functions end (offsetof(KilnItemsApi, rarity_rolls)): a table this long has gear.</summary>
+    public const uint V8GearEnd = 320;
+
     [StructLayout(LayoutKind.Sequential)]
     public struct TableV8
     {
