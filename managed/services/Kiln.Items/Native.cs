@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
-// Mirror of native/core/abi/services/kiln_items.h (kiln.items v6; the v2 functions are in TableV2, the v3 ones in TableV3,
-// the v4 ones in TableV4, the v5 ones in TableV5, the v6 ones in TableV6). Blittable only; field order is the ABI (the native side static_asserts the same sizes and offsets).
+// Mirror of native/core/abi/services/kiln_items.h (kiln.items v8; the v2 functions are in TableV2, the v3 ones in TableV3,
+// the v4 ones in TableV4, the v5 ones in TableV5, the v6 ones in TableV6, v7 in TableV7, the v8 gear functions in TableV8). Blittable only; field order is the ABI (the native side static_asserts the same sizes and offsets).
 using System.Runtime.InteropServices;
 
 namespace Kiln;
@@ -595,6 +595,100 @@ internal static unsafe class ItemsNative
     {
         public TableV6 V6;
         public delegate* unmanaged[Cdecl]<ulong, SocketRoll*, int> SocketRollOf;
+    }
+
+    // ---- v8 (0.2.0-dev.29.19, the equipment wave): gear (KilnItemsGearRequest, KilnItemsGearState, KilnItemsGearResult,
+    // KilnItemsGearStatus; kiln_items.h "gear") ----
+    public const uint GearAvailable = 0x01, GearUnlocked = 0x02, GearLevel = 0x04, GearForceSlot = 0x08, GearDurabilityRefresh = 0x10,
+        GearDurabilityRepair = 0x20, GearDryRun = 0x40, GearNotEquipped = 0x80;
+    public const int GearDone = 0, GearStale = 1, GearNotGear = 2, GearNoSlot = 3, GearOutOfRange = 4, GearEquipped = 5, GearUnavailableStatus = 6,
+        GearDropped = 7, GearRefused = 8;
+    public const uint GearChangedPerks = 0x01, GearChangedLevel = 0x02, GearChangedDurability = 0x04, GearChangedState = 0x08;
+    public const uint GearHasPerks = 0x01, GearHasLevel = 0x02, GearHasDurability = 0x04, GearEquippedNow = 0x08, GearDurabilityInit = 0x10;
+
+    /// <summary><c>KilnItemsGearRequest</c>, 40 bytes.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GearRequest
+    {
+        public uint Size;
+        public uint Flags;
+        public uint Entity;
+        public uint Stamp;
+        public uint Item;
+        public byte Available;
+        public byte Unlocked;
+        public ushort Reserved0;
+        public uint Level;
+        public uint R0, R1, R2;
+    }
+
+    /// <summary><c>KilnItemsGearState</c>, 44 bytes.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GearState
+    {
+        public uint Flags;
+        public uint Item;
+        public byte Available;
+        public byte Unlocked;
+        public byte Rarity;
+        public byte TypeRarity;
+        public byte MaxAvailable;
+        public byte RarityUi;
+        public byte LevelUi;
+        public byte Reserved0;
+        public uint Level;
+        public uint LevelMax;
+        public uint TypeLevelMin;
+        public uint TypeLevelMax;
+        public int Durability;
+        public int DurabilityMax;
+        public ushort State;
+        public ushort Reserved1;
+    }
+
+    /// <summary><c>KilnItemsGearResult</c>, 296 bytes.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GearResult
+    {
+        public uint Size;
+        public int Status;
+        public ulong Ticket;
+        public uint Entity;
+        public uint Stamp;
+        public uint Flags;
+        public uint Changed;
+        public uint Steps;
+        public uint Reserved;
+        public ulong Step;
+        public GearState Before;
+        public GearState After;
+        public fixed byte Message[160];
+    }
+
+    /// <summary><c>KilnItemsGearStatus</c>, 192 bytes.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GearStatus
+    {
+        public uint Size;
+        public byte Available;
+        public byte Program;
+        public byte Replicated;
+        public byte Saved;
+        public uint Pending;
+        public ulong Writes;
+        public ulong Refused;
+        public fixed byte Detail[160];
+    }
+
+    /// <summary>The v8 table (the equipment wave): v7 followed by the gear functions. Read a member only when the header's
+    /// size covers the whole struct (320 bytes).</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct TableV8
+    {
+        public TableV7 V7;
+        public delegate* unmanaged[Cdecl]<ulong, GearRequest*, delegate* unmanaged[Cdecl]<GearResult*, void*, void>, void*, ulong*, int> GearWrite;
+        public delegate* unmanaged[Cdecl]<uint, uint, GearState*, int> GearRead;
+        public delegate* unmanaged[Cdecl]<GearStatus*, int> GetGearStatus;
     }
 
     /// <summary>True when a table of <paramref name="size"/> bytes has the v6 member that ends at <paramref name="end"/>.</summary>

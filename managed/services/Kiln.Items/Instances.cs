@@ -496,6 +496,8 @@ internal static class ItemsStartup
     {
         // tool wear (dev.28): rule changes are raised from the first tick, also those of native plugins where no mod set a rule
         Items.ToolWear.WatchRules();
+        // gear (the equipment wave): the game's own enhancement and level changes, read while a gear event has subscribers
+        GearWatch.Start();
         if (Environment.GetEnvironmentVariable("KILN_LAB_NO_ENTITY_SOURCES") == "1")
         {
             Backend.Current.Log(0, LogLevel.Warn, "kiln.items: KILN_LAB_NO_ENTITY_SOURCES=1: no item entity source (lab switch)");

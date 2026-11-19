@@ -13,14 +13,15 @@ public static unsafe partial class Items
 {
     private static ItemsNative.TableV3* _v3;
 
-    // The v3 table, or null when the native service is older (an older runtime).
+    // The v3 table, or null when the native service is older (an older runtime). A table long enough for v3 whose move
+    // function is null has no v3 parts either (kiln.items always fills it; the test kit's v8 table leaves v3 out this way).
     private static ItemsNative.TableV3* V3
     {
         get
         {
             if (_v3 != null) return _v3;
             var t = T;
-            if (t == null || t->Header.Size < (uint)sizeof(ItemsNative.TableV3)) return null;
+            if (t == null || t->Header.Size < (uint)sizeof(ItemsNative.TableV3) || ((ItemsNative.TableV3*)t)->Move == null) return null;
             return _v3 = (ItemsNative.TableV3*)t;
         }
     }

@@ -1,1 +1,163 @@
 #nullable enable
+Kiln.DurabilityRule
+Kiln.DurabilityRule.Keep = 1 -> Kiln.DurabilityRule
+Kiln.DurabilityRule.KeepRatio = 0 -> Kiln.DurabilityRule
+Kiln.DurabilityRule.Repair = 2 -> Kiln.DurabilityRule
+Kiln.GearChangeSource
+Kiln.GearChangeSource.Code = 0 -> Kiln.GearChangeSource
+Kiln.GearChangeSource.Game = 2 -> Kiln.GearChangeSource
+Kiln.GearChangeSource.Upgrade = 1 -> Kiln.GearChangeSource
+Kiln.GearChangedEvent
+Kiln.GearChangedEvent.Changed.get -> Kiln.GearChanges
+Kiln.GearChanges
+Kiln.GearChanges.Durability = 4 -> Kiln.GearChanges
+Kiln.GearChanges.DurabilityRefresh = 8 -> Kiln.GearChanges
+Kiln.GearChanges.Enhancements = 1 -> Kiln.GearChanges
+Kiln.GearChanges.Level = 2 -> Kiln.GearChanges
+Kiln.GearChanges.None = 0 -> Kiln.GearChanges
+Kiln.GearEnhancedEvent
+Kiln.GearEnhancedEvent.From.get -> int
+Kiln.GearEnhancedEvent.To.get -> int
+Kiln.GearEvent
+Kiln.GearEvent.After.get -> Kiln.GearState!
+Kiln.GearEvent.Before.get -> Kiln.GearState!
+Kiln.GearEvent.Item.get -> Kiln.ItemInstanceRef
+Kiln.GearEvent.Origin.get -> string!
+Kiln.GearEvent.Source.get -> Kiln.GearChangeSource
+Kiln.GearRarityChangedEvent
+Kiln.GearRarityChangedEvent.From.get -> Kiln.ItemRarity
+Kiln.GearRarityChangedEvent.To.get -> Kiln.ItemRarity
+Kiln.GearResult
+Kiln.GearResult.<Clone>$() -> Kiln.GearResult!
+Kiln.GearResult.After.get -> Kiln.GearState?
+Kiln.GearResult.After.init -> void
+Kiln.GearResult.Before.get -> Kiln.GearState?
+Kiln.GearResult.Before.init -> void
+Kiln.GearResult.Changed.get -> Kiln.GearChanges
+Kiln.GearResult.Changed.init -> void
+Kiln.GearResult.Deconstruct(out Kiln.GearStatus Status, out Kiln.ItemInstanceRef Item, out Kiln.GearState? Before, out Kiln.GearState? After, out Kiln.GearChanges Changed, out string! Message, out int Steps, out bool DryRun) -> void
+Kiln.GearResult.DryRun.get -> bool
+Kiln.GearResult.DryRun.init -> void
+Kiln.GearResult.Equals(Kiln.GearResult? other) -> bool
+Kiln.GearResult.GearResult(Kiln.GearStatus Status, Kiln.ItemInstanceRef Item, Kiln.GearState? Before, Kiln.GearState? After, Kiln.GearChanges Changed, string! Message, int Steps, bool DryRun) -> void
+Kiln.GearResult.Item.get -> Kiln.ItemInstanceRef
+Kiln.GearResult.Item.init -> void
+Kiln.GearResult.Message.get -> string!
+Kiln.GearResult.Message.init -> void
+Kiln.GearResult.Ok.get -> bool
+Kiln.GearResult.Reason.get -> string?
+Kiln.GearResult.Status.get -> Kiln.GearStatus
+Kiln.GearResult.Status.init -> void
+Kiln.GearResult.Steps.get -> int
+Kiln.GearResult.Steps.init -> void
+Kiln.GearState
+Kiln.GearState.<Clone>$() -> Kiln.GearState!
+Kiln.GearState.BaseLevel.get -> int
+Kiln.GearState.BaseLevel.init -> void
+Kiln.GearState.Deconstruct(out Kiln.ItemInstanceRef Item, out Kiln.ItemId Type, out Kiln.ItemRarity Rarity, out Kiln.ItemRarity TypeRarity, out Kiln.ItemRarity MaxRarity, out int Level, out int BaseLevel, out int Enhancements, out int Unlocked, out int MaxLevel, out bool HasSocket, out int? Durability, out int? DurabilityMax, out System.Collections.Generic.IReadOnlyList<Kiln.PerkSlot!>! Perks) -> void
+Kiln.GearState.Durability.get -> int?
+Kiln.GearState.Durability.init -> void
+Kiln.GearState.DurabilityMax.get -> int?
+Kiln.GearState.DurabilityMax.init -> void
+Kiln.GearState.Enhancements.get -> int
+Kiln.GearState.Enhancements.init -> void
+Kiln.GearState.Equals(Kiln.GearState? other) -> bool
+Kiln.GearState.GearState(Kiln.ItemInstanceRef Item, Kiln.ItemId Type, Kiln.ItemRarity Rarity, Kiln.ItemRarity TypeRarity, Kiln.ItemRarity MaxRarity, int Level, int BaseLevel, int Enhancements, int Unlocked, int MaxLevel, bool HasSocket, int? Durability, int? DurabilityMax, System.Collections.Generic.IReadOnlyList<Kiln.PerkSlot!>! Perks) -> void
+Kiln.GearState.HasEnhancementSlots.get -> bool
+Kiln.GearState.HasEnhancementSlots.init -> void
+Kiln.GearState.HasSocket.get -> bool
+Kiln.GearState.HasSocket.init -> void
+Kiln.GearState.IsEquipped.get -> bool
+Kiln.GearState.IsEquipped.init -> void
+Kiln.GearState.Item.get -> Kiln.ItemInstanceRef
+Kiln.GearState.Item.init -> void
+Kiln.GearState.Level.get -> int
+Kiln.GearState.Level.init -> void
+Kiln.GearState.MaxLevel.get -> int
+Kiln.GearState.MaxLevel.init -> void
+Kiln.GearState.MaxRarity.get -> Kiln.ItemRarity
+Kiln.GearState.MaxRarity.init -> void
+Kiln.GearState.Perks.get -> System.Collections.Generic.IReadOnlyList<Kiln.PerkSlot!>!
+Kiln.GearState.Perks.init -> void
+Kiln.GearState.Rarity.get -> Kiln.ItemRarity
+Kiln.GearState.Rarity.init -> void
+Kiln.GearState.ShownLevel.get -> int
+Kiln.GearState.ShownLevel.init -> void
+Kiln.GearState.ShownRarity.get -> Kiln.ItemRarity
+Kiln.GearState.ShownRarity.init -> void
+Kiln.GearState.Type.get -> Kiln.ItemId
+Kiln.GearState.Type.init -> void
+Kiln.GearState.TypeLevelMax.get -> int
+Kiln.GearState.TypeLevelMax.init -> void
+Kiln.GearState.TypeLevelMin.get -> int
+Kiln.GearState.TypeLevelMin.init -> void
+Kiln.GearState.TypeRarity.get -> Kiln.ItemRarity
+Kiln.GearState.TypeRarity.init -> void
+Kiln.GearState.Unlocked.get -> int
+Kiln.GearState.Unlocked.init -> void
+Kiln.GearStatus
+Kiln.GearStatus.Done = 0 -> Kiln.GearStatus
+Kiln.GearStatus.Dropped = 7 -> Kiln.GearStatus
+Kiln.GearStatus.Equipped = 5 -> Kiln.GearStatus
+Kiln.GearStatus.NoSlot = 3 -> Kiln.GearStatus
+Kiln.GearStatus.NotGear = 2 -> Kiln.GearStatus
+Kiln.GearStatus.OutOfRange = 4 -> Kiln.GearStatus
+Kiln.GearStatus.Refused = 8 -> Kiln.GearStatus
+Kiln.GearStatus.Stale = 1 -> Kiln.GearStatus
+Kiln.GearStatus.Unavailable = 6 -> Kiln.GearStatus
+Kiln.GearWriteOptions
+Kiln.GearWriteOptions.<Clone>$() -> Kiln.GearWriteOptions!
+Kiln.GearWriteOptions.AllowEmptySlot.get -> bool
+Kiln.GearWriteOptions.AllowEmptySlot.init -> void
+Kiln.GearWriteOptions.DryRun.get -> bool
+Kiln.GearWriteOptions.DryRun.init -> void
+Kiln.GearWriteOptions.Durability.get -> Kiln.DurabilityRule
+Kiln.GearWriteOptions.Durability.init -> void
+Kiln.GearWriteOptions.Equals(Kiln.GearWriteOptions? other) -> bool
+Kiln.GearWriteOptions.GearWriteOptions() -> void
+Kiln.GearWriteOptions.RefuseEquipped.get -> bool
+Kiln.GearWriteOptions.RefuseEquipped.init -> void
+Kiln.PerkSlot
+Kiln.PerkSlot.<Clone>$() -> Kiln.PerkSlot!
+Kiln.PerkSlot.Available.get -> bool
+Kiln.PerkSlot.Available.init -> void
+Kiln.PerkSlot.Deconstruct(out int Index, out bool Available, out bool Unlocked, out bool TypeHasSlot) -> void
+Kiln.PerkSlot.Equals(Kiln.PerkSlot? other) -> bool
+Kiln.PerkSlot.Index.get -> int
+Kiln.PerkSlot.Index.init -> void
+Kiln.PerkSlot.PerkSlot(int Index, bool Available, bool Unlocked, bool TypeHasSlot) -> void
+Kiln.PerkSlot.TypeHasSlot.get -> bool
+Kiln.PerkSlot.TypeHasSlot.init -> void
+Kiln.PerkSlot.Unlocked.get -> bool
+Kiln.PerkSlot.Unlocked.init -> void
+override Kiln.GearChangedEvent.ToString() -> string!
+override Kiln.GearEnhancedEvent.ToString() -> string!
+override Kiln.GearRarityChangedEvent.ToString() -> string!
+override Kiln.GearResult.Equals(object? obj) -> bool
+override Kiln.GearResult.GetHashCode() -> int
+override Kiln.GearResult.ToString() -> string!
+override Kiln.GearState.Equals(object? obj) -> bool
+override Kiln.GearState.GetHashCode() -> int
+override Kiln.GearState.ToString() -> string!
+override Kiln.GearWriteOptions.Equals(object? obj) -> bool
+override Kiln.GearWriteOptions.GetHashCode() -> int
+override Kiln.GearWriteOptions.ToString() -> string!
+override Kiln.PerkSlot.Equals(object? obj) -> bool
+override Kiln.PerkSlot.GetHashCode() -> int
+override Kiln.PerkSlot.ToString() -> string!
+static Kiln.GearResult.operator !=(Kiln.GearResult? left, Kiln.GearResult? right) -> bool
+static Kiln.GearResult.operator ==(Kiln.GearResult? left, Kiln.GearResult? right) -> bool
+static Kiln.GearState.operator !=(Kiln.GearState? left, Kiln.GearState? right) -> bool
+static Kiln.GearState.operator ==(Kiln.GearState? left, Kiln.GearState? right) -> bool
+static Kiln.GearWriteOptions.Default.get -> Kiln.GearWriteOptions!
+static Kiln.GearWriteOptions.operator !=(Kiln.GearWriteOptions? left, Kiln.GearWriteOptions? right) -> bool
+static Kiln.GearWriteOptions.operator ==(Kiln.GearWriteOptions? left, Kiln.GearWriteOptions? right) -> bool
+static Kiln.Items.GearOf(Kiln.ItemInstanceRef item) -> Kiln.GearState?
+static Kiln.Items.GearReadAvailable.get -> bool
+static Kiln.Items.GearWriteAvailable.get -> bool
+static Kiln.Items.RarityOf(Kiln.ItemInstanceRef item) -> Kiln.ItemRarity?
+static Kiln.Items.SetEnhancements(Kiln.ItemInstanceRef item, int unlocked, Kiln.GearWriteOptions? options = null) -> System.Threading.Tasks.Task<Kiln.GearResult!>!
+static Kiln.Items.SetLevel(Kiln.ItemInstanceRef item, int level, Kiln.GearWriteOptions? options = null) -> System.Threading.Tasks.Task<Kiln.GearResult!>!
+static Kiln.Items.SetRarity(Kiln.ItemInstanceRef item, Kiln.ItemRarity rarity, Kiln.GearWriteOptions? options = null) -> System.Threading.Tasks.Task<Kiln.GearResult!>!
+static Kiln.PerkSlot.operator !=(Kiln.PerkSlot? left, Kiln.PerkSlot? right) -> bool
+static Kiln.PerkSlot.operator ==(Kiln.PerkSlot? left, Kiln.PerkSlot? right) -> bool

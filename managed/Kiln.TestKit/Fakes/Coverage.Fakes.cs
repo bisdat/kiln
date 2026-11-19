@@ -45,14 +45,18 @@ public static partial class Coverage
             "enableTextChat, the account hash and connection state of a chat player",
             ChatAbi.Service, ChatFake.SendFeature, ChatFake.ReceiveFeature, ChatFake.PlayersFeature);
         Row("Items", CoverageKind.RecordingFake,
-            "Kiln.Items' own code on the kit's kiln.items (the v1 table): the items are the ones the test adds " +
+            "Kiln.Items' own code on the kit's kiln.items (the v1 table and v8's gear functions): the items are the ones the test adds " +
             "(KilnHarness.Items.AddItem, with their stack size), an inventory per fake player in game (FakePlayer.Inventory, 5 generic " +
             "8-slot inventories unless the test says) and per container entity (AddContainer); Give and Take run as one transaction " +
             "at the start of the next step (stacks topped up first, gear one per slot with an item entity, Partial or NoRoom when it " +
             "does not fit, take all or nothing, dry runs), ItemsGivenEvent and ItemsTakenEvent are Kiln.Items'; Read, FindInventories " +
-            "and the catalog read the fake; KilnHarness.Items.Calls records each. Offline: water, moves, container names, transfer " +
-            "hooks, item instances, equip, recipe results, upgrades and gem slots, the game's player inventory layout",
-            [ItemsAbi.Service, .. ItemsFake.Features, .. ItemsFake.OfflineRows]);
+            "and the catalog read the fake; KilnHarness.Items.Calls records each. Gear: every piece has enhancement slots, a level, " +
+            "durability and a stamp (FakeSlot.Ref); GearOf, SetRarity, SetEnhancements and SetLevel run with kiln.items' rules at the " +
+            "next step, the shown rarity and level a step later, the gear events are Kiln.Items' (the game's own change: " +
+            "KilnHarness.Items.SetGear; perk slots of a type: SetPerkSlots). Offline: water, moves, container names, transfer " +
+            "hooks, item instances, equip, recipe results, upgrades and gem slots, the game's player inventory layout, max " +
+            "durability computed again after a gear change",
+            [ItemsAbi.Service, .. ItemsFake.Features, "items.gear.read", "items.gear.write", "items.gear.durability", .. ItemsFake.OfflineRows]);
         Row("Combat", CoverageKind.RecordingFake,
             "Kiln.Combat's own code on the kit's kiln.combat (the v1 table): health is what the test gives an entity of the fake world " +
             "or a fake player (KilnHarness.Combat.SetHealth); a mod's Damage or Kill and the game's hit (KilnHarness.Combat.Hit) apply " +

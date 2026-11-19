@@ -164,4 +164,43 @@ public sealed class ItemsFakeTests
         Assert.Equal(Unsafe.SizeOf<ItemsAbi.Status>(), Mirror.Size(native, "Status"));
         Assert.Equal(Unsafe.SizeOf<ItemsAbi.Table>(), Mirror.Size(native, "Table"));
     }
+
+    [Fact]
+    public void TheWholeTableAndTheGearStructsMirrorTheHeader()
+    {
+        // kiln.items v8: sizeof(KilnItemsApi) == 320, gear_write at 296 (native/services/items/tests/completed_results_test.cpp)
+        Assert.Equal((320, 40, 44, 296, 192), (Unsafe.SizeOf<ItemsAbi.FullTable>(), Unsafe.SizeOf<ItemsAbi.GearRequest>(), Unsafe.SizeOf<ItemsAbi.GearState>(),
+            Unsafe.SizeOf<ItemsAbi.GearResult>(), Unsafe.SizeOf<ItemsAbi.GearStatus>()));
+        var native = typeof(Items).Assembly.GetType("Kiln.ItemsNative", true)!;
+        Assert.Equal(Unsafe.SizeOf<ItemsAbi.FullTable>(), Mirror.Size(native, "TableV8"));
+        Assert.Equal(Unsafe.SizeOf<ItemsAbi.GearRequest>(), Mirror.Size(native, "GearRequest"));
+        Assert.Equal(Unsafe.SizeOf<ItemsAbi.GearState>(), Mirror.Size(native, "GearState"));
+        Assert.Equal(Unsafe.SizeOf<ItemsAbi.GearResult>(), Mirror.Size(native, "GearResult"));
+        Assert.Equal(Unsafe.SizeOf<ItemsAbi.GearStatus>(), Mirror.Size(native, "GearStatus"));
+        Assert.Equal(Unsafe.SizeOf<ItemsAbi.InstancesStatus>(), Mirror.Size(native, "InstancesStatus"));
+    }
+
+    [Fact]
+    public void TheKitsGearPlanIsKilnItemsRules()
+    {
+        // gear_logic.h plan() as ported: slots up only to the type's filled ones, unlocked and level move together
+        var before = new ItemsAbi.GearState
+        {
+            Flags = ItemsAbi.GearHasPerks | ItemsAbi.GearHasLevel | ItemsAbi.GearHasDurability, Available = 3, Unlocked = 2, Rarity = 2, MaxAvailable = 4,
+            Level = 7, LevelMax = 7, TypeLevelMin = 5, TypeLevelMax = 5, Durability = 10, DurabilityMax = 100, State = ItemsAbi.StateDurabilityInitialized,
+        };
+        ItemsAbi.GearRequest Req(uint flags, byte a = 0, byte u = 0, uint l = 0) => new() { Size = 40, Flags = flags, Entity = 5000, Stamp = 1, Available = a, Unlocked = u, Level = l };
+        Assert.Equal(ItemsAbi.GearNoSlot, ItemsFake.Plan(Req(ItemsAbi.GearAvailable, a: 5), before).Status);
+        var up = ItemsFake.Plan(Req(ItemsAbi.GearAvailable | ItemsAbi.GearDurabilityRefresh, a: 4), before);
+        Assert.Equal((ItemsAbi.GearDone, (byte)4, (byte)3, ItemsAbi.GearChangedPerks | ItemsAbi.GearChangedState), (up.Status, up.After.Available, up.After.Rarity, up.Changed));
+        var down = ItemsFake.Plan(Req(ItemsAbi.GearAvailable, a: 1), before);
+        Assert.Equal(((byte)1, (byte)1, 6u, ItemsAbi.GearChangedPerks | ItemsAbi.GearChangedLevel), (down.After.Available, down.After.Unlocked, down.After.Level, down.Changed));
+        Assert.Equal(ItemsAbi.GearOutOfRange, ItemsFake.Plan(Req(ItemsAbi.GearUnlocked, u: 4), before).Status);
+        Assert.Equal(ItemsAbi.GearOutOfRange, ItemsFake.Plan(Req(ItemsAbi.GearLevel, l: 8), before).Status);  // base 6 is outside 5..5
+        var repair = ItemsFake.Plan(Req(ItemsAbi.GearDurabilityRepair), before);
+        Assert.Equal((100, ItemsAbi.GearChangedDurability | ItemsAbi.GearChangedState), (repair.After.Durability, repair.Changed));
+        Assert.False(ItemsFake.GearRequestValid(Req(ItemsAbi.GearUnlocked, a: 2, u: 1)));  // a field whose operation is not asked for
+        Assert.False(ItemsFake.GearRequestValid(Req(ItemsAbi.GearDryRun)));                // no operation
+        Assert.True(ItemsFake.GearRequestValid(Req(ItemsAbi.GearAvailable | ItemsAbi.GearUnlocked, a: 2, u: 1)));
+    }
 }
