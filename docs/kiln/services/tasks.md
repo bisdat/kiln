@@ -123,6 +123,9 @@ and `submit_in`, which only decide when it starts and when `cancelled()` turns 1
 - A native fault quarantines the owner (see [States and outcomes](#states-and-outcomes)) but does not ask its running
   bodies to stop. A quarantined owner's resident body keeps running, silently: the watchdog counts for it only from a
   `cancel`, a `drain_owner` or the owner's unload.
+- An owner has at most one resident task. A second one, while the first is queued or running (also after its
+  `cancel`, until its body returns), is refused `INVALID_ARGUMENT` + `ARGUMENT` and nothing changes. Its next one
+  may be submitted from the first one's `done`.
 
 An older Kiln refuses the bit with `INVALID_ARGUMENT` + `ARGUMENT`; retry without it if you can live with one
 watchdog line. `ARGUMENT` alone does not tell an older Kiln from another wrong field: `KilnApi.version()` does.

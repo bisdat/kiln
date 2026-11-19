@@ -127,6 +127,9 @@ struct Pool::Core : std::enable_shared_from_this<Pool::Core> {
     bool maintenance_kick = false;  // set_watch_sink changed the schedule: the maintenance thread re-plans its wait
     NoteFn note_fn = nullptr;  // slot lost / recovered, a resident task's start (set_note_sink)
     uint32_t resident_running = 0;  // resident bodies running now: the LongRunning threads they hold
+    // Each owner's latest accepted resident task: a second one is refused while this one is queued or running
+    // (submit); erased with that task's metadata (release_meta) unless a newer one replaced it.
+    std::unordered_map<KilnOwner, KilnHandle> resident_of;
     void* note_user = nullptr;
     bool slot_lost[2] = {false, false};  // a replacement's failed start took the slot's last worker
     bool slot_said[2] = {false, false};  // ...and that was said (once; recovery said once too)
@@ -524,6 +527,10 @@ void Pool::Core::release_meta(KilnHandle task) {
         if (it == meta.end()) return;
         m = it->second;
         meta.erase(it);  // the watchdog clocks go with it: nothing outlives the task
+        if (m->resident) {
+            const auto r = resident_of.find(m->owner);
+            if (r != resident_of.end() && r->second == task) resident_of.erase(r);
+        }
     }
     platform.release_module(m->body);
     platform.release_module(m->done);
@@ -624,6 +631,12 @@ KilnResult Pool::submit(KilnOwner owner, const SubmitArgs& in, TaskBodyFn body, 
     std::unordered_map<KilnHandle, std::shared_ptr<Meta>> spare;  // the metadata map's node, allocated here
     spare.emplace(0, m);
     auto node = spare.extract(spare.begin());
+    std::unordered_map<KilnOwner, KilnHandle> spare_resident;  // resident_of's node for this owner, allocated here
+    decltype(spare_resident)::node_type resident_node;
+    if (in.resident) {
+        spare_resident.emplace(owner, 0);
+        resident_node = spare_resident.extract(spare_resident.begin());
+    }
     SubmitArgs args = in;
     args.payload = {reinterpret_cast<uintptr_t>(body), reinterpret_cast<uintptr_t>(done), reinterpret_cast<uintptr_t>(user)};
     {
@@ -644,9 +657,21 @@ KilnResult Pool::submit(KilnOwner owner, const SubmitArgs& in, TaskBodyFn body, 
         // capability check again here: a worker may have faulted (and its replacement failed) meanwhile.
         std::lock_guard lock(c.mutex);
         c.meta.reserve(c.meta.size() + 1);  // may throw: still before publication
+        if (in.resident) c.resident_of.reserve(c.resident_of.size() + 1);
+        // At most one resident task per owner: refused while its earlier one is queued or running (a suspended lease
+        // and a cancelled body that has not returned yet included). Pool -> model lock order, as the watchdog's.
+        const auto held = in.resident ? c.resident_of.find(owner) : c.resident_of.end();
+        bool second_resident = false;
+        if (held != c.resident_of.end()) {
+            const State s = c.model.diag_state(held->second);
+            second_resident = s == State::Queued || s == State::Running;
+        }
         if (!c.can_run_locked(slot)) {
             if (why) *why = Refusal::Capability;
             r = KILN_ERR_UNAVAILABLE;
+        } else if (second_resident) {
+            if (why) *why = Refusal::Argument;
+            r = KILN_ERR_INVALID_ARGUMENT;
         } else {
             r = c.model.submit(owner, args, &handle, &submit_why);
             if (why) *why = submit_why;
@@ -664,6 +689,14 @@ KilnResult Pool::submit(KilnOwner owner, const SubmitArgs& in, TaskBodyFn body, 
             m->stats_entry = admitted.entry;
             node.key() = handle;
             c.meta.insert(std::move(node));  // reserved: no allocation, no rehash
+            if (in.resident) {
+                if (held != c.resident_of.end()) {
+                    held->second = handle;  // the earlier one ended (its done may still run): this one replaces it
+                } else {
+                    resident_node.mapped() = handle;
+                    c.resident_of.insert(std::move(resident_node));  // reserved: no allocation, no rehash
+                }
+            }
             if (c.hook) c.hook(Point::SubmitPublished);
         }
     }

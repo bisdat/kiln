@@ -132,11 +132,12 @@ enum {
  * asked (cancel, drain, revoke, a submit_in task's session ending, the exit): a resident body still running
  * watchdog_running_s (30 s by default) after that is reported once. A queued resident task is reported like any queued
  * task. Its first start writes one kiln.log info line (the owner, the task, the LongRunning threads resident tasks
- * hold now). A native fault quarantines the owner but does not ask its running bodies to stop: a quarantined owner's
- * resident body keeps running, and the watchdog counts for it only from a cancel, a drain or the owner's unload. Its
- * body's time is not added to tick-stats' cpu_ms / wall_ms and is never the window's longest segment. Poll
- * run->cancelled() at least every 50 ms and return soon after it says 1: at exit the pool waits only 500 ms for
- * running bodies.
+ * hold now). An owner has at most one resident task: a second one, while its first is queued or running (a cancelled
+ * body that has not returned yet included), is refused INVALID_ARGUMENT + ARGUMENT. A native fault quarantines the
+ * owner but does not ask its running bodies to stop: a quarantined owner's resident body keeps running, and the
+ * watchdog counts for it only from a cancel, a drain or the owner's unload. Its body's time is not added to
+ * tick-stats' cpu_ms / wall_ms and is never the window's longest segment. Poll run->cancelled() at least every 50 ms
+ * and return soon after it says 1: at exit the pool waits only 500 ms for running bodies.
  */
 
 typedef struct KilnTaskInfo {

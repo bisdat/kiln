@@ -1313,6 +1313,7 @@ KILN_TASKS_TEST(watchdog_resident_until_cancel) {
     loop.platform = plain.platform = waits.platform = &platform;
     Pool pool(config(1, 2), &platform);
     pool.open_owner(1, "mod.service");
+    pool.open_owner(2, "mod.other");
     {
         SubmitArgs not_long = resident("loop");
         not_long.long_running = false;
@@ -1326,7 +1327,7 @@ KILN_TASKS_TEST(watchdog_resident_until_cancel) {
     const KilnHandle lh = submit(pool, 1, resident("loop"), loop);
     const KilnHandle ph = submit(pool, 1, named("plain", Priority::Normal, true), plain);
     check(until([&] { return loop.body_runs.load() == 1 && plain.body_runs.load() == 1; }), "both LongRunning bodies run");
-    const KilnHandle wh = submit(pool, 1, resident("waits"), waits);  // the owner's two LongRunning slots are taken
+    const KilnHandle wh = submit(pool, 2, resident("waits"), waits);  // the pool's two LongRunning threads are taken
     std::vector<Watch> reports;
     for (int i = 0; i < 4; ++i) {  // two minutes, a sweep every 30 s
         platform.advance(31 * kSecond);
@@ -1576,6 +1577,7 @@ KILN_TASKS_TEST(resident_drain_and_exit_park) {
     Pool pool(config(1, 2), &platform);
     pool.open_owner(1, "mod.one");
     pool.open_owner(2, "mod.two");
+    pool.open_owner(3, "mod.three");
     loop_until_cancelled(drained);
     submit(pool, 1, resident("service"), drained);
     check(until([&] { return drained.body_runs.load() == 1; }), "the resident loop runs");
@@ -1591,7 +1593,7 @@ KILN_TASKS_TEST(resident_drain_and_exit_park) {
         signalled = true;
     };
     submit(pool, 2, resident("service"), parked);
-    submit(pool, 2, resident("ignores"), stuck);
+    submit(pool, 3, resident("ignores"), stuck);
     check(until([&] { return parked.body_runs.load() == 1 && stuck.body_runs.load() == 1; }), "both run");
     pool.close();
     check(until([&] { return signalled.load(); }), "the exit signals the running resident loop");
@@ -1604,7 +1606,7 @@ KILN_TASKS_TEST(resident_drain_and_exit_park) {
     check(until([&] { return parker.returned.load(); }), "park returns at its bound");
     parker.join();
     check(parker.result.running_at_start == 2 && parker.result.still_running == 1 &&
-              parker.result.names == "mod.two/ignores",
+              parker.result.names == "mod.three/ignores",
           "the park waited for both and names the resident body that ignores its cancel: '" + parker.result.names + "'");
     stuck.release.open();
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -1704,6 +1706,103 @@ KILN_TASKS_TEST(resident_start_noted_once) {
     later.release.open();
     check(until([&] { return pool.counts().outstanding == 0; }), "quiescent");
     pool.set_note_sink(nullptr, nullptr);
+}
+// At most one resident task per owner. A second one is refused INVALID_ARGUMENT + Argument, with nothing held, while
+// the first is queued, running, cancelled with its body still running, or a managed lease between segments. A plain
+// LongRunning task of the same owner and another owner's resident task are accepted, and the owner's next resident
+// task is accepted from the first one's done.
+struct Resubmit : Job {
+    std::atomic<bool> tried{false};
+    std::atomic<KilnResult> result{KILN_ERR_INTERNAL};
+    std::atomic<KilnHandle> handle{0};
+    Job* next = nullptr;
+};
+
+void KILN_CALL resubmit_done(KilnHandle, uint32_t, void* user) {
+    auto* r = static_cast<Resubmit*>(static_cast<Job*>(user));
+    KilnHandle h = 0;
+    Refusal why = Refusal::None;
+    r->result = r->pool->submit(1, resident("next"), &job_body, &job_done, r->next, &h, &why);
+    r->handle = h;
+    r->tried = true;
+}
+
+KILN_TASKS_TEST(resident_one_per_owner) {
+    HostPlatform platform;
+    // before the pool: a released body still reads its job on its way out
+    Resubmit first;
+    Job fill1, fill2, plain, other, lease, next, stray, again;
+    for (Job* j : {static_cast<Job*>(&first), &fill1, &fill2, &plain, &other, &lease, &next, &stray, &again})
+        j->platform = &platform;
+    stray.release.open();
+    Pool pool(config(1, 5), &platform);
+    pool.open_owner(1, "mod.one");
+    pool.open_owner(2, "mod.two");
+    pool.open_owner(3, "mod.three");
+    const auto refused = [&](KilnOwner owner, const std::string& what) {
+        KilnHandle h = 7;
+        Refusal why = Refusal::None;
+        const auto records = pool.counts().records;
+        const auto held = platform.acquires() - platform.releases();
+        check(pool.submit(owner, resident("second"), &job_body, &job_done, &stray, &h, &why) ==
+                      KILN_ERR_INVALID_ARGUMENT &&
+                  why == Refusal::Argument && h == 0 && pool.counts().records == records &&
+                  platform.acquires() - platform.releases() == held,
+              what + ": INVALID_ARGUMENT + Argument, nothing held");
+    };
+    // queued: the owner's two LongRunning slots are taken by plain tasks
+    submit(pool, 1, named("fill1", Priority::Normal, true), fill1);
+    submit(pool, 1, named("fill2", Priority::Normal, true), fill2);
+    check(until([&] { return fill1.body_runs.load() == 1 && fill2.body_runs.load() == 1; }), "two plain tasks run");
+    first.pool = &pool;
+    first.next = &next;
+    KilnHandle fh = 0;
+    check(pool.submit(1, resident("first"), &job_body, &resubmit_done, static_cast<Job*>(&first), &fh, nullptr) ==
+                  KILN_OK &&
+              fh != 0,
+          "the owner's resident task is accepted");
+    State st = State::None;
+    check(pool.status(1, fh, &st) == KILN_OK && st == State::Queued, "and queued");
+    refused(1, "a second one while the first is queued");
+    submit(pool, 1, named("plain", Priority::Normal, true), plain);
+    submit(pool, 2, resident("other"), other);
+    check(until([&] { return other.body_runs.load() == 1; }), "a plain LongRunning task and another owner's resident "
+                                                              "task are accepted; that one runs");
+    fill1.release.open();
+    fill2.release.open();
+    check(until([&] { return first.body_runs.load() == 1 && plain.body_runs.load() == 1; }), "the first one runs");
+    refused(1, "a second one while the first runs");
+    check(pool.cancel(1, fh, &st) == KILN_OK && st == State::Running, "cancel: asked, the body has not returned");
+    refused(1, "a second one while the cancelled first one's body still runs");
+    // a resident lease between its segments (it armed a resumption and returned)
+    lease.pool = &pool;
+    lease.arm_on_run.store(true);
+    lease.release.open();
+    SubmitArgs a = resident("lease");
+    a.lease = true;
+    const KilnHandle sh = submit(pool, 3, a, lease);
+    check(until([&] { return lease.registration.load() != 0 && pool.items_in_hand() == 3; }),
+          "the lease's first segment armed a resumption and returned");
+    refused(3, "a second one while the owner's resident lease is suspended");
+    lease.arm_on_run.store(false);
+    lease.after_release = [&] { pool.finish(sh, Outcome::Completed); };
+    check(pool.resume(sh, lease.registration.load()) == KILN_OK, "the host resumes the lease");
+    check(until([&] { return lease.done_calls.load() == 1; }), "the lease finished");
+    // the first one's body returns; its done submits the owner's next resident task
+    first.release.open();
+    check(until([&] { return first.tried.load(); }) && first.result.load() == KILN_OK && first.handle.load() != 0,
+          "the owner's next resident task is accepted from the first one's done");
+    check(until([&] { return next.body_runs.load() == 1 && pool.items_in_hand() == 3; }),
+          "it runs; the first one is gone");
+    refused(1, "a second one beside that next one");
+    next.release.open();
+    plain.release.open();
+    other.release.open();
+    check(until([&] { return pool.counts().outstanding == 0; }), "quiescent");
+    again.release.open();
+    submit(pool, 1, resident("again"), again);
+    check(until([&] { return again.done_calls.load() == 1; }), "once they ended, the owner's resident task is accepted");
+    check(stray.body_runs.load() == 0, "no refused submission ran");
 }
 }  // namespace
 

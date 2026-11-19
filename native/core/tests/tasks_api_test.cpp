@@ -373,6 +373,8 @@ KILN_TASKS_TEST(resident_flag) {
     HostPlatform p;
     FakeEnv env;
     env.add(1);
+    env.add(2);
+    env.add(3);
     PoolConfig c = config();
     c.running_watchdog_ns = 1000;
     c.queued_watchdog_ns = 1000ull * 1000 * 1000 * 1000;
@@ -405,7 +407,8 @@ KILN_TASKS_TEST(resident_flag) {
     }
     check(pool.counts().owners == 0 && pool.counts().records == 0 && p.acquires() == p.releases(),
           "no refusal opened the owner or referenced a module");
-    // accepted: plain, with AFTER_STEP, and bound with submit_in, at High priority
+    // accepted: plain, with AFTER_STEP, and bound with submit_in, at High priority (one owner each: one resident task
+    // per owner)
     s.session_started(KILN_WORLD_SERVER, 1);
     Job plain, after, bound;
     KilnHandle hp = 0, ha = 0, hb = 0;
@@ -414,14 +417,26 @@ KILN_TASKS_TEST(resident_flag) {
     check(s.submit(1, &i, &body, &done, &plain, &hp, &why) == KILN_OK && hp != 0 && why == 1234,
           "RESIDENT | LONG_RUNNING is accepted (High priority)");
     i = info("after", KILN_TASK_RESIDENT | KILN_TASK_LONG_RUNNING | KILN_TASK_AFTER_STEP);
-    check(s.submit(1, &i, &body, &done, &after, &ha, &why) == KILN_OK && state_of(s, 1, ha) == KILN_TASK_QUEUED,
+    check(s.submit(2, &i, &body, &done, &after, &ha, &why) == KILN_OK && state_of(s, 2, ha) == KILN_TASK_QUEUED,
           "with AFTER_STEP: accepted, waiting for the Post edge");
     i = info("bound", KILN_TASK_RESIDENT | KILN_TASK_LONG_RUNNING);
-    check(s.submit_in(1, &i, KILN_WORLD_SERVER, 1, &body, &done, &bound, &hb, &why) == KILN_OK && hb != 0,
+    check(s.submit_in(3, &i, KILN_WORLD_SERVER, 1, &body, &done, &bound, &hb, &why) == KILN_OK && hb != 0,
           "submit_in: accepted");
     check(until([&] { return plain.body_runs.load() == 1; }), "the plain one runs");
+    {
+        // one resident task per owner: a second one of owner 1 is refused through submit and the host's admit alike
+        const KilnTaskInfo second = info("second", KILN_TASK_RESIDENT | KILN_TASK_LONG_RUNNING);
+        refused(s, p, pool, 1, &second, &body, &done, KILN_ERR_INVALID_ARGUMENT, KILN_TASK_REFUSAL_ARGUMENT,
+                "a second resident task of the owner: INVALID_ARGUMENT + ARGUMENT");
+        KilnLease l = 77;
+        uint32_t w = 99;
+        const auto records = pool.counts().records;
+        check(s.host_admit(1, &second, nullptr, &l, &w) == KILN_ERR_INVALID_ARGUMENT &&
+                  w == KILN_TASK_REFUSAL_ARGUMENT && l == 0 && pool.counts().records == records,
+              "host_admit: a second resident task is ARGUMENT too");
+    }
     check(s.post_edge(KILN_WORLD_SERVER, 1, 1), "a Post edge");
-    // the owner's two LongRunning slots: `plain` holds one, the edge made `after` runnable beside `bound`
+    // the pool's two LongRunning threads: `plain` holds one, the edge made `after` runnable beside `bound`
     check(until([&] { return after.body_runs.load() + bound.body_runs.load() == 1; }), "one more runs in the second slot");
     p.advance(5000);
     std::vector<Watch> reports;
