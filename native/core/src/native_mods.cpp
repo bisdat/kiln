@@ -310,7 +310,14 @@ void read_manifest(Mod& m, const fs::path& folder) {
     }
     if (doc.contains("builds") && doc["builds"].is_array() && !doc["builds"].empty()) {
         bool listed = false;
-        for (const auto& b : doc["builds"]) listed |= b.is_string() && b.get<std::string>() == image().sha256;
+        // case ignored: Enshrouded ModLoader 0.6.15's native.json gives the hash in upper case
+        for (const auto& b : doc["builds"]) {
+            if (!b.is_string()) continue;
+            std::string s = b.get<std::string>();
+            for (char& c : s)
+                if (c >= 'A' && c <= 'F') c = static_cast<char>(c - 'A' + 'a');
+            listed |= s == image().sha256;
+        }
         if (!listed) m.notes.push_back("untested build (the exe's sha256 is not in \"builds\")");
     }
     if (doc.contains("enabled") && doc["enabled"].is_boolean() && !doc["enabled"].get<bool>()) m.notes.push_back("#off");
