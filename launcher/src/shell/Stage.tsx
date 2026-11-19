@@ -6,7 +6,8 @@
 // base.css draws the CSS mouth instead.
 // Budget: at most 1000 px wide (0.72 of the window at 1280), ~30 fps on Play, ~9 fps behind a sheet, full rate only while
 // the mouth moves or the heat changes; nothing while the window is hidden, and a still frame while the game runs (the GPU
-// is the game's then; the loop then looks four times a second instead of every frame).
+// is the game's then; the loop then looks four times a second instead of every frame). With reduced motion a still
+// frame, drawn again only when what it shows changes (wakeStage), and no flicker.
 import { useEffect, useRef, type RefObject } from "react";
 
 export type Heat = "unlit" | "idle" | "flare" | "embers" | "low";
@@ -86,25 +87,49 @@ export const UNIFORMS = ["uR", "uT", "uH", "uF", "uD", "uM", "uS", "uL", "uK"] a
  *  (.k-sheet-rim, a strip with no children) and the Play title (.k-title, a word). */
 export const FIRE_READERS = ".k-sheet-rim, .k-title";
 
+/** The running fire's wake-up (a still fire draws only when something changed); null while none runs. */
+let wakeFire: (() => void) | null = null;
+
+/** Tells the fire that stageInput changed: a still fire (reduced motion) draws its next frame then. */
+export function wakeStage() {
+  wakeFire?.();
+}
+
 /** The canvas behind everything. `root` is .k-app: its size, data-gl, the .k-door it moves (and --k on the door's label)
  *  and the flicker on FIRE_READERS. `enabled` false takes the no-WebGL path without asking for a context (give the
- *  canvas a new key to turn it back on). */
-export function Stage({ root, enabled = true }: { root: RefObject<HTMLDivElement>; enabled?: boolean }) {
+ *  canvas a new key to turn it back on). `onLit` hears whether the fire burns (the torch follows it).
+ *  prefers-reduced-motion is followed while the fire runs (KDE's animation speed "Instant" turns it on): the fire stands
+ *  still, writes no flicker and draws only when what it shows changed (wakeStage, a resize), with no timer meanwhile. */
+export function Stage({ root, enabled = true, onLit }: { root: RefObject<HTMLDivElement>; enabled?: boolean; onLit?: (lit: boolean) => void }) {
   const ref = useRef<HTMLCanvasElement>(null);
+  // the latest callback, without restarting the fire when the parent renders a new one
+  const litCb = useRef(onLit);
+  litCb.current = onLit;
   useEffect(() => {
     const app = root.current, canvas = ref.current;
     if (!app || !canvas) return;
-    const still = !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    const motion = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+    let still = !!motion?.matches;
     let gl: WebGLRenderingContext | null = null;
     const U: Partial<Record<(typeof UNIFORMS)[number], WebGLUniformLocation | null>> = {};
-    let raf = 0, nap = 0;
+    let raf = 0, nap = 0, parked = false;
+    // the flicker's two readers (base.css --fire), looked up again when React replaced them
+    let lit: HTMLElement[] = [];
+    // back to base.css's .5 (a still fire, or none)
+    const unflicker = () => {
+      for (const e of app.querySelectorAll<HTMLElement>(FIRE_READERS)) e.style.removeProperty("--fire");
+      lit = [];
+    };
     const off = (why: string) => {
       gl = null;
       cancelAnimationFrame(raf);
       clearTimeout(nap);
+      raf = nap = 0;
       delete app.dataset.gl;
       for (const p of ["transform", "width", "height"]) app.querySelector<HTMLElement>(".k-door")?.style.removeProperty(p);
       app.querySelector<HTMLElement>(".k-door-lab")?.style.removeProperty("--k");
+      unflicker();
+      litCb.current?.(false);
       if (why) console.warn("Hearth fire off:", why);
     };
     if (!enabled) { off(""); return; } // turned off, or not decided yet: the CSS mouth, quietly
@@ -132,15 +157,14 @@ export function Stage({ root, enabled = true }: { root: RefObject<HTMLDivElement
     const lost = (e: Event) => { e.preventDefault(); off("context lost"); };
     canvas.addEventListener("webglcontextlost", lost);
     app.dataset.gl = "1";
+    litCb.current?.(true);
 
     // the mouth's spring (k: 0 Play, 1 pilot light), the eased heat and the eased pointer
     let k = stageInput.play ? 0 : 1, kv = 0;
     let h = stageInput.play && !still ? 0.02 : target(stageInput);
     const m = [0, 0];
-    let last = performance.now(), lastDraw = 0, lastCss = 0, lastDoor = "", lastSize = "";
+    let last = performance.now(), lastDraw = 0, lastCss = 0, lastDoor = "", lastSize = "", lastStill = "";
     let door: HTMLElement | null = null, lab: HTMLElement | null = null;
-    // the flicker's two readers (base.css --fire), looked up again when React replaced them
-    let lit: HTMLElement[] = [];
     const loop = (ms: number) => {
       if (!gl) return;
       raf = requestAnimationFrame(loop);
@@ -150,13 +174,15 @@ export function Stage({ root, enabled = true }: { root: RefObject<HTMLDivElement
       const i = stageInput;
       const tgt = i.play ? 0 : 1;
       const W = app.clientWidth, H = app.clientHeight;
-      if (still) { k = tgt; kv = 0; }
-      else for (let s = 0; s < 2; s += 1) { kv += (-170 * (k - tgt) - 24 * kv) * (dt / 2); k += kv * (dt / 2); }
       const heat = target(i);
-      h += (heat - h) * (1 - Math.exp(-dt * 2.2));
-      m[0] += (i.mx - m[0]) * 0.05; m[1] += (i.my - m[1]) * 0.05;
+      if (still) { k = tgt; kv = 0; h = heat; m[0] = i.mx; m[1] = i.my; }
+      else {
+        for (let s = 0; s < 2; s += 1) { kv += (-170 * (k - tgt) - 24 * kv) * (dt / 2); k += kv * (dt / 2); }
+        h += (heat - h) * (1 - Math.exp(-dt * 2.2));
+        m[0] += (i.mx - m[0]) * 0.05; m[1] += (i.my - m[1]) * 0.05;
+      }
       const t = ms / 1000;
-      // a still frame (prefers-reduced-motion) does not flicker: base.css's --fire stays at its .5
+      // a still frame does not flicker: base.css's --fire stays at its .5
       const F = still ? 0.5 : Math.max(0, Math.min(1, 0.5 + 0.22 * Math.sin(t * 11.3) + 0.16 * Math.sin(t * 6.1 + 1.1) + 0.12 * Math.sin(t * 2.7 + 0.3)));
       // the Play mouth (40% of the width, 62.5% of the height, at most 800 px: base.css --kiln; 48 px from the right,
       // standing on the 84 px floor) and the pilot light
@@ -184,16 +210,24 @@ export function Stage({ root, enabled = true }: { root: RefObject<HTMLDivElement
         }
         for (const e of lit) e.style.setProperty("--fire", F.toFixed(3));
       }
-      const moving = Math.abs(kv) > 0.004 || Math.abs(k - tgt) > 0.002 || Math.abs(h - heat) > 0.02;
       const size = `${W}x${H}`;
-      const gap = moving || size !== lastSize ? 0 : i.game ? Infinity : i.play ? 33 : 110;
-      if (gap === Infinity) {
-        // the game runs and the frame stands: look again in 250 ms, not every frame
-        cancelAnimationFrame(raf);
-        nap = window.setTimeout(() => { nap = 0; raf = requestAnimationFrame(loop); }, 250);
-        return;
+      if (still) {
+        // drawn once for what it shows; then nothing (no frame, no timer) until wakeStage, a resize or motion again
+        const what = `${key} ${heat} ${m[0].toFixed(3)} ${m[1].toFixed(3)} ${size}`;
+        if (what === lastStill) { cancelAnimationFrame(raf); raf = 0; parked = true; return; }
+        lastStill = what;
+      } else {
+        lastStill = "";
+        const moving = Math.abs(kv) > 0.004 || Math.abs(k - tgt) > 0.002 || Math.abs(h - heat) > 0.02;
+        const gap = moving || size !== lastSize ? 0 : i.game ? Infinity : i.play ? 33 : 110;
+        if (gap === Infinity) {
+          // the game runs and the frame stands: look again in 250 ms, not every frame
+          cancelAnimationFrame(raf);
+          nap = window.setTimeout(() => { nap = 0; raf = requestAnimationFrame(loop); }, 250);
+          return;
+        }
+        if (ms - lastDraw < gap) return;
       }
-      if (ms - lastDraw < gap) return;
       lastDraw = ms;
       lastSize = size;
       const S = Math.min(0.72, 1000 / Math.max(W, 1));
@@ -210,12 +244,33 @@ export function Stage({ root, enabled = true }: { root: RefObject<HTMLDivElement
       gl.uniform1f(U.uK!, k);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     };
+    const resume = () => {
+      if (!gl || !parked) return;
+      parked = false;
+      last = performance.now();
+      raf = requestAnimationFrame(loop);
+    };
+    const onMotion = () => {
+      still = !!motion?.matches;
+      if (still) unflicker();
+      resume();
+    };
+    motion?.addEventListener?.("change", onMotion);
+    window.addEventListener("resize", resume);
+    wakeFire = resume;
     raf = requestAnimationFrame(loop);
     return () => {
+      gl = null;
       cancelAnimationFrame(raf);
       clearTimeout(nap);
+      raf = nap = 0;
       canvas.removeEventListener("webglcontextlost", lost);
+      motion?.removeEventListener?.("change", onMotion);
+      window.removeEventListener("resize", resume);
+      if (wakeFire === resume) wakeFire = null;
       delete app.dataset.gl;
+      unflicker();
+      litCb.current?.(false);
     };
   }, [root, enabled]);
   return <canvas ref={ref} className="k-stage-gl" aria-hidden />;

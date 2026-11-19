@@ -3,7 +3,7 @@
 // Play button, which shrinks to a pilot light in the corner while a sheet is up), toasts and the splash.
 // Mounts the backend event feeds once, the first run's game detection, the window-wide mod drop, the rows' right click
 // (ui/Menu.tsx) and the Install Kiln confirm.
-import { Suspense, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { Suspense, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { NavLink, useLocation, useNavigate, useOutlet } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAppInfo, useBackendEvents, useNexusEnabled, useSettings } from "../api/hooks";
@@ -23,11 +23,21 @@ import { ModUpdatesWatcher } from "./modUpdates";
 import { InstallKilnModal, detectGames, useAutoDetect, useDetect, useInstallPrompt, useKilnInstall } from "./firstRun";
 import { clock, usePlayControl, type PlayControl } from "./play";
 import { applyingWord } from "./applying";
-import { Stage, stageInput, type Heat } from "./Stage";
+import { Stage, stageInput, wakeStage, type Heat } from "./Stage";
 import { startWords } from "./startProgress";
 import { useT } from "../i18n";
 
-const reduced = () => typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+const MOTION = "(prefers-reduced-motion: reduce)";
+const reduced = () => typeof window !== "undefined" && !!window.matchMedia?.(MOTION).matches;
+
+/** prefers-reduced-motion, followed while the launcher runs (KDE's animation speed "Instant" turns it on). */
+function useReducedMotion(): boolean {
+  return useSyncExternalStore((changed) => {
+    const q = window.matchMedia?.(MOTION);
+    q?.addEventListener?.("change", changed);
+    return () => q?.removeEventListener?.("change", changed);
+  }, reduced, () => false);
+}
 
 /** Keeps the last value shown for `ms` after `show` turns false (so a sheet can drop with its page still on it). */
 function useLinger<T>(value: T, show: boolean, ms: number): T | null {
@@ -145,6 +155,8 @@ function Mouth({ isPlay, ctl }: { isPlay: boolean; ctl: PlayControl }) {
   stageInput.heat = heat;
   stageInput.hover = hot && !!act;
   stageInput.game = !!ctl.running && !ctl.starting;
+  // a still fire (reduced motion) draws only when told: after each render of the mouth (and so of the shell)
+  useEffect(() => wakeStage());
   const subTone = v.phase === "vanilla" ? " k-tone-info" : v.phase === "updating" || v.word === "safeIdle" ? " k-tone-warn" : "";
   return (
     <button type="button" className={`k-door ${isPlay ? "play" : "pilot"} heat-${heat}${hot && act ? " hot" : ""}`} disabled={!act}
@@ -194,32 +206,40 @@ export function AppShell() {
   const sheet = useLinger<ReactNode>(page, !isPlay, 480);
   const hero = useLinger<ReactNode>(page, isPlay, 360);
   // the torch: a soft warm light follows the pointer across the sheet (and the fire's camera leans after it). Only while
-  // the fire burns (.k-app[data-gl]: not with Animated fire off, without the GPU, without WebGL or with reduced motion).
-  // The pointer goes onto the light's own layer (.k-torch, no children) and moves it: on .k-app (inbox 94) every move
-  // restyled the whole window and repainted the whole sheet.
+  // the fire burns (Stage's onLit: not with Animated fire off, without the GPU or without WebGL) and motion is not
+  // reduced; the pointer listener exists only then, and goes (with its pending frame) as either turns off. The pointer
+  // goes onto the light's own layer (.k-torch, no children) and moves it: on .k-app (inbox 94) every move restyled the
+  // whole window and repainted the whole sheet.
   const root = useRef<HTMLDivElement>(null);
   const light = useRef<HTMLDivElement>(null);
-  const frame = useRef(0);
-  const torch = (e: React.MouseEvent) => {
-    if (frame.current || !root.current?.dataset.gl || reduced()) return;
-    const x = e.clientX, y = e.clientY;
-    frame.current = requestAnimationFrame(() => {
-      frame.current = 0;
-      const b = root.current?.getBoundingClientRect();
-      if (b?.width) { stageInput.mx = ((x - b.left) / b.width) * 2 - 1; stageInput.my = 1 - ((y - b.top) / b.height) * 2; }
-      const l = light.current;
-      if (!l || !root.current?.dataset.gl) return;
+  const [lit, setLit] = useState(false);
+  const still = useReducedMotion();
+  const torchOn = lit && !still;
+  useEffect(() => {
+    const app = root.current, l = light.current;
+    if (!torchOn || !app || !l) return;
+    let frame = 0, x = 0, y = 0;
+    const show = () => {
+      frame = 0;
+      const b = app.getBoundingClientRect();
+      if (b.width) { stageInput.mx = ((x - b.left) / b.width) * 2 - 1; stageInput.my = 1 - ((y - b.top) / b.height) * 2; }
       l.style.setProperty("--mx", `${x}px`);
       l.style.setProperty("--my", `${y}px`);
       if (!l.dataset.at) l.dataset.at = "1";
-    });
-  };
+    };
+    const move = (e: MouseEvent) => {
+      x = e.clientX; y = e.clientY;
+      if (!frame) frame = requestAnimationFrame(show);
+    };
+    app.addEventListener("mousemove", move);
+    return () => { app.removeEventListener("mousemove", move); cancelAnimationFrame(frame); };
+  }, [torchOn]);
   // `t` changes with the language: the title follows it
   useEffect(() => { document.title = isPlay ? "Kiln" : t("shell.appShell.docTitle", { page: navFor(loc.pathname)?.label ?? "Kiln" }); }, [isPlay, loc.pathname, t]);
   return (
-    <div ref={root} className={"k-app" + (isPlay ? " is-play" : " is-sheet")} onMouseMove={torch}
+    <div ref={root} className={"k-app" + (isPlay ? " is-play" : " is-sheet")}
       data-render={info.data?.render?.mode === "software" ? "software" : undefined}>
-      <div className="k-stage" aria-hidden><Stage root={root} key={fire ? "fire" : "plain"} enabled={fire} /><div className="k-fall" /></div>
+      <div className="k-stage" aria-hidden><Stage root={root} key={fire ? "fire" : "plain"} enabled={fire} onLit={setLit} /><div className="k-fall" /></div>
       <Header isPlay={isPlay} ctl={ctl} />
       <div className={"k-hero-layer" + (isPlay ? " on" : "")} aria-hidden={!isPlay}>{hero}</div>
       <main className={"k-sheet" + (isPlay ? " down" : " up")} id="main" aria-hidden={isPlay}>
