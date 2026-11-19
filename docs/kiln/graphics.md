@@ -194,6 +194,10 @@ A few lines in the top right corner of the game, drawn by Kiln's overlay:
 - `DLSS Quality: 1707x960 -> 2560x1440, preset K` while the game upscales with DLSS (the render size is this frame's:
   dynamic resolution may lower it); else "Not DLSS now" (the game's FSR 3, XeSS or no upscaler: Kiln does not read the
   game's own upscalers) or, without Kiln's DLSS hooks, "read from the next game start";
+- (phase B, with an upscaler other than the game's own chosen, or Kiln's swap in) `Behind FSR 3: AMD FSR 4 (4.1.2):
+  960x540 -> 1920x1080`, or the game's own FSR 3 and "AMD FSR is not running: its files are not downloaded (launcher:
+  Settings, Graphics)": the reason in kiln.log's short words, to keep the corner small (the Graphics page says it in
+  full, [What runs now, and why not](#what-runs-now-and-why-not));
 - the frame cap and whether it is on.
 No latency: the game sets no latency markers, so there is nothing for Kiln to read honestly. Turning the readout on makes
 the overlay draw every frame (an ImGui frame and one submit per present); off, it costs nothing.
@@ -318,7 +322,8 @@ any of it DLSS. Code: `native/services/ui/upscale.cpp` (the swap), `upscale_amd.
   the game's FSR 3 pass already patched by another module, and Kiln's overlay hooks being off (the swap needs Kiln's
   Vulkan hooks).
 - **What the player sees.** The readout's line `Behind FSR 3: AMD FSR 4 (4.1.2): 960x540 -> 1920x1080`, or the game's
-  own FSR 3 with the reason the chosen one does not run; the Graphics page and the launcher read the same status.
+  own FSR 3 with the reason the chosen one does not run (kiln.log's short words, `upscale_logic.h` `why_text`); the
+  Graphics page and the launcher read the same status and say the reason in the players' sentences.
 - **kiln.log** (`graphics: upscaler: ...`): the choice at start and the hooks, the files' check, what was added to the
   Vulkan device and what the GPU lacks, the versions AMD offers for the GPU, each set-up (`AMD FSR 4.1.2 set up for
   960x540 -> 1920x1080`), and every fallback with its reason.

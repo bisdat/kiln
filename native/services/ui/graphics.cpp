@@ -686,10 +686,10 @@ static void upscale_readout(const KilnUiGraphicsStatus& st) {
         ImGui::TextUnformatted(text::fill(text::get("native.graphics.upscale"), {{"upscaler", text::get("native.graphics.game_fsr3")},
             {"render", render}, {"output", output}}).c_str());
     if (st.upscale_reason) {
+        // the reason in kiln.log's short English (upscale_logic.h why_text), as the readout names the upscalers: the
+        // players' sentences (graphics.upscaler.reason.*, the docs' table) are the Graphics page's and the launcher's
         const auto chosen = static_cast<gfx::Upscaler>(st.upscaler);
-        const std::string key = "native.graphics.why." + std::to_string(st.upscale_reason);
-        std::string why = text::get(key);
-        if (why.empty() || why == key) why = upscale::why_text(static_cast<upscale::Why>(st.upscale_reason));
+        const std::string why = upscale::why_text(static_cast<upscale::Why>(st.upscale_reason));
         ImGui::TextUnformatted(text::fill(text::get("native.graphics.upscale_why"), {{"upscaler", gfx::upscaler_name(chosen)}, {"why", why}}).c_str());
     }
 }
