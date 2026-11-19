@@ -284,7 +284,7 @@ Contract: [launcher/contracts.md](launcher/contracts.md) section 5.15; code `cra
 - **Later:** NVIDIA's frame generation (`nvidia-dlssg`, from NVIDIA's own GitHub, never inside Kiln) is a new component
   in the same manifest, with NVIDIA's licence.
 
-## How the upscaler swap works (0.2.0-dev.29.18)
+## Upscaler behind the game's FSR 3: how it works (0.2.0-dev.29.18)
 Phase B, for the curious and for testers ([the player's side above](#behind-the-games-fsr-3-phase-b)). In the game's own settings the player chooses FSR 3, as before; `graphics.upscaler` chooses what runs behind
 it: the game's own FSR 3 (`game`, the default: nothing changes), AMD FSR (`amd`) or Intel XeSS (`xess`). Kiln never calls
 any of it DLSS. Code: `native/services/ui/upscale.cpp` (the swap), `upscale_amd.cpp` (AMD FSR), `upscale_xess.cpp`
@@ -314,6 +314,14 @@ any of it DLSS. Code: `native/services/ui/upscale.cpp` (the swap), `upscale_amd.
   Vulkan backend uses when the GPU offers it (subgroup size control, 16-bit floats, synchronization2, AMD's buffer
   markers and coherent memory, descriptor indexing) and FSR 4's set (cooperative matrix, FP8, integer dot product,
   compute-shader derivatives, 8- and 16-bit storage), each only where the GPU has it.
+- **Intel XeSS.** XeSS Super Resolution 3.0.2 from Intel's own `libxess.dll`, from `<game>/kiln/vendor/intel/3.0.2/`
+  (the launcher's Settings, Graphics card), checked and kept open as AMD's files are, mapped only from that folder, and
+  never patched or hooked (Intel's licence: the software unmodified, also while it runs). On a GPU that is not Intel's
+  it runs its cross-vendor (DP4a) path. Kiln adds what XeSS itself lists for the Vulkan instance and device at the
+  game's start (XeSS chosen later: reason `restart`), picks the first XeSS quality preset whose input range holds the
+  game's render size, copies the motion vectors into the format Intel's guide names (values unchanged), and makes a new
+  XeSS context at each FSR set-up (the old one goes four FSR frames later). Code `xess_backend.h` (host test
+  `tests/xess_test.cpp`), `upscale_xess.cpp`; needs the VC++ runtime 14.40 or later, as Proton and current Windows have.
 - **Failures.** A missing or changed file, a GPU without what the upscaler needs, a set-up that fails: the game's own
   FSR 3 runs and the status says why. A failure while upscaling: that frame gets a plain stretch of the image, then
   the game's own FSR 3 for the rest of the session. Every call of Kiln's around the game's runs under a fault guard.
