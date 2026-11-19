@@ -45,11 +45,38 @@ char level_letter(int level) {
     }
 }
 
+// One kiln.log line. The block between the markers is pure: native/core/tests/test-log-line.sh cuts it out of this file
+// and runs it.
+// log-line:begin
+// "[<level> hh:mm:ss.mmm] [<source>] <text>\n", every byte of the counted text kept: printf's %.*s stopped at the first
+// NUL (a C# string can hold one) and dropped the rest. A NUL is written as the two characters \0, so kiln.log stays a
+// text file for grep and support tools; CR and LF pass through as they are.
+inline std::string log_line(char level, unsigned h, unsigned m, unsigned s, unsigned ms, std::string_view source,
+                            std::string_view text) {
+    char head[32];
+    const int n = std::snprintf(head, sizeof head, "[%c %02u:%02u:%02u.%03u] [", level, h % 100, m % 100, s % 100,
+                                ms % 1000);
+    std::string line;
+    line.reserve(static_cast<size_t>(n > 0 ? n : 0) + source.size() + text.size() + 4);
+    line.append(head, static_cast<size_t>(n > 0 ? n : 0));
+    line.append(source);
+    line.append("] ");
+    for (const char c : text) {
+        if (c == '\0')
+            line.append("\\0");
+        else
+            line.push_back(c);
+    }
+    line.push_back('\n');
+    return line;
+}
+// log-line:end
+
 void write_entry(const Entry& e) {
     if (!g_file) return;
-    std::fprintf(g_file, "[%c %02u:%02u:%02u.%03u] [%s] %.*s\n", level_letter(e.level), e.time.wHour, e.time.wMinute,
-                 e.time.wSecond, e.time.wMilliseconds, e.source.c_str(), static_cast<int>(e.text.size()),
-                 e.text.data());
+    const std::string line = log_line(level_letter(e.level), e.time.wHour, e.time.wMinute, e.time.wSecond,
+                                      e.time.wMilliseconds, e.source, e.text);
+    std::fwrite(line.data(), 1, line.size(), g_file);  // one write: the text with its length
 }
 
 thread_local int64_t t_line_ns = 0;  // the line being handed to subscribers on this (the writer) thread
