@@ -66,5 +66,8 @@ and `libraryWebgl` show the fire on (their style numbers are the real signal; th
   torch runs only while the fire burns: not with Animated fire off, without the GPU, without WebGL or with reduced
   motion, and with reduced motion the flicker writes nothing. While the game runs the loop looks four times a second
   instead of every frame. `tests/sheet-perf.spec.ts` counts the writes.
+- **Without the GPU** (`.k-app[data-render="software"]`, Linux): no WebGL fire, no torch, and a lit mod's flame stands
+  still (`ui/ui.css`): on the CPU every frame of its flicker repainted each flame and its glow, most of the launcher's
+  time on a page of lit mods at a HiDPI scale.
 - **The bundle**: the browser mock (`api/mock.ts` and its data) is a chunk of its own, loaded only in a plain browser
   or by the development fallback; admin pages, server pages, the save editor and the Deck UI were lazy already.
