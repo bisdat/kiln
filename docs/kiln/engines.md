@@ -23,6 +23,7 @@ this order; the first match wins. Texts match as ASCII or UTF-16LE, case ignored
 | `flame` | `FlameStartRuntime`, `flame.json` |
 | `shroudlink` | `shroudlink` |
 | `ember` | `ember-loader`, `ember_loader` |
+| `dllmod` | `ENSHROUDED_MODS_V1` (Enshrouded ModLoader's own `dinput8.dll`: still a DLL mod Kiln chain-loads; kiln-dllmod steps aside while it runs) |
 | `modloaderproxy` | `modloader-proxy.dll`, `chainloader.ini` |
 | `ultimateasiloader` | export or text `IsUltimateASILoader` |
 | `aldrich` | `aldrich` |
@@ -193,6 +194,7 @@ the profile's `.asi` packages in `[profile]`) and reports a missing override.
 | `greeneye` | a DLL exporting `GreeneyeModStart` (the folder is the mod) |
 | `shroudtopia` | `shroudtopia.json`, or a DLL exporting `CreateModInstance` |
 | `shroudlink` | a DLL exporting `shroudlink_mod_v2` or `shroudlink_mod_v1` (the folder is the mod). A folder that also holds EML data mods (`<sub>/mod.json` + `src/mod.lua`) is a folder of mods: each DLL and each EML mod on its own. A release's `shroudlink_mods/` folder with one mod is named after its DLL |
+| `dllmod` | a DLL with a `<file>.dll.mod` manifest beside it whose first line is `ENSHROUDED_PACKAGE_V1` (the folder is the package; its manifest and exports are checked: [engines/dllmod.md](engines/dllmod.md)). A mod DLL exporting `EnshroudedModInitialize` without its manifest is left out, never a plain DLL |
 | `ember` | a folder in `ember/mods/` holding a DLL that no other engine claims (Ember's mods have no manifest or known export yet, so the place names them; a lone DLL elsewhere stays Kiln's own bare-DLL rule) |
 | `proxy` | another engine's loader or a tool DLL (classification above). OptiScaler (dev.29.18): its DLL under one of its names (`dxgi`, `winmm`, `version`, `dbghelp`, `d3d12`, `wininet`, `winhttp`, `OptiScaler*.dll`) when its contents say so, `OptiScaler*.asi` and `OptiScaler*.ini` by name, and a package holding `OptiScaler*.asi` (in it or a folder of it), never an `.asi` package |
 | `save` | `*.ksd`, `characters`, a world save (`<8 hex>_info`, `-N` backups) |
@@ -401,7 +403,7 @@ engines' mods") and 5.8.
   Engine settings writes are refused while a game reading these files runs. Active copy-mode Shroudtopia profiles
   edit the game-side config copy, so activation's copy-back preserves the change. Without a matching selected game,
   a unique active copy is used; multiple active copies require selecting which game to edit.
-- **Status.** `engine_mods::status`: `kiln/state/{emf,eml,shroudforge,greeneye,flame,shroudtopia,set,enshwick,shroudlink,ember}.json`; missing files
+- **Status.** `engine_mods::status`: `kiln/state/{emf,eml,shroudforge,greeneye,flame,shroudtopia,set,enshwick,shroudlink,ember,dllmod}.json`; missing files
   mean the plugin has not run yet, while unreadable, invalid or symlinked files report an error.
 - **Shared archive backups.** `engine_mods::eml_backup` reports whether `<exe>.kfc` differs from `<exe>.kfc.bak`,
   not which loader wrote it. Inspection reports read failures and refuses symlinks. The legacy `eml_restore_vanilla`
@@ -423,6 +425,7 @@ engines' mods") and 5.8.
   | `flame`, `shroudtopia`, `enshwick` | `mods` (Enshwick's loader folder `mods/enshwick/` is never a mod) |
   | `shroudlink` | `shroudlink_mods` (one folder per mod, `shroudlink_mods/<id>/`; kiln-shroudlink reads the DLLs in its direct subfolders too) |
   | `ember` | `ember/mods` |
+  | `dllmod` | none: packages for Enshrouded ModLoader are made for the game client and are not synced to servers |
 
   Each copy carries the `.kiln-source.json` marker plus a receipt and payload inventory in
   `kiln/state/server-library.json`. A marker alone never permits replacement or removal; older marker-only copies
