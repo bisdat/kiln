@@ -78,16 +78,35 @@ internal static class KilnText
     internal static int Generation => Current().Generation;
 
     /// <summary>The overlay's texts are English for now although <see cref="Language"/> is not: Kiln.Ui's glyphs of that
-    /// language (the game's own Chinese, Japanese or Korean font) are still loading, or could not be loaded.</summary>
+    /// language (the game's own Chinese, Japanese or Korean font, or the Cyrillic one of its default font group) are still
+    /// loading, or could not be loaded.</summary>
     internal static bool Gated => Current().Gated;
 
     /// <summary>Whether drawing <paramref name="language"/> needs glyphs the overlay's Latin fonts lack (Chinese, Japanese,
-    /// Korean): kiln.ui loads the game's own font of that language group first.</summary>
-    internal static bool NeedsGlyphs(string language)
+    /// Korean, Cyrillic): kiln.ui loads the game's own fonts of that script first.</summary>
+    internal static bool NeedsGlyphs(string language) => GlyphLanguage(language) != 0;
+
+    /// <summary>The keen::LanguageId kiln.ui reports the glyphs of for a tag (font_group.h language_id): zh-TW, zh-HK, zh-MO
+    /// and zh-Hant 21, every other zh 20, ja 11, ko 13; ru 9, uk 34, bg 24, and the other Cyrillic languages (be, mk, sr but
+    /// sr-Latn, kk, ky, mn, tg) 9; else 0 (Latin: the overlay's own fonts).</summary>
+    internal static byte GlyphLanguage(string language)
     {
         var l = ModLocale.Normalize(language);
         var dash = l.IndexOf('-');
-        return (dash > 0 ? l[..dash] : l) is "zh" or "ja" or "ko";
+        var primary = dash > 0 ? l[..dash] : l;
+        if (primary == "ja") return 11;
+        if (primary == "ko") return 13;
+        if (l is "zh-tw" or "zh-hk" or "zh-mo" || l.StartsWith("zh-hant", StringComparison.Ordinal)) return 21;
+        if (primary == "zh") return 20;
+        return primary switch
+        {
+            "ru" => 9,
+            "uk" => 34,
+            "bg" => 24,
+            "sr" => l.StartsWith("sr-latn", StringComparison.Ordinal) ? (byte)0 : (byte)9,
+            "be" or "mk" or "kk" or "ky" or "mn" or "tg" => 9,
+            _ => 0,
+        };
     }
 
     /// <summary>Kiln.Ui, each overlay frame: whether the overlay can draw the language in use (kiln.ui's glyph state). Until it

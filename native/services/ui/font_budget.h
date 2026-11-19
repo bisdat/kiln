@@ -62,6 +62,29 @@ inline size_t admit_group(const size_t* sizes, size_t n) {
     return k;
 }
 
+// The default group's fonts after its Latin source (font_group.h pick_default), read for every language at the first
+// overlay frame and kept for the process: only small files (client 26430625: Noto Serif for Cyrillic 515 KB and Noto Sans
+// Thai 62 KB, 577 KB together). The default group's CJK fallbacks (Noto Serif SC 11.2 MB, KR 7.4 MB) are left out: a
+// Chinese, Japanese or Korean language's own group brings them (above). No mod fonts either.
+constexpr size_t kMaxDefaultFontBytes = 2u << 20;  // one file
+constexpr size_t kMaxDefaultBytes = 4u << 20;      // the files kept together
+constexpr size_t kMaxDefaultFonts = 4;             // files kept
+
+// Which of the default group's files (sizes in the group's order) load: `keep[i]` for each; a file over
+// kMaxDefaultFontBytes, or one that would pass kMaxDefaultBytes or kMaxDefaultFonts, is left out and the next ones are
+// still looked at (the game's order puts the large CJK fallbacks between the small ones). The count kept.
+inline size_t admit_default(const size_t* sizes, size_t n, bool* keep) {
+    size_t total = 0, k = 0;
+    for (size_t i = 0; i < n; ++i) {
+        keep[i] = sizes[i] >= 1024 && sizes[i] <= kMaxDefaultFontBytes && total + sizes[i] <= kMaxDefaultBytes && k < kMaxDefaultFonts;
+        if (keep[i]) {
+            total += sizes[i];
+            ++k;
+        }
+    }
+    return k;
+}
+
 inline const char* refusal_text(Refusal r) {
     switch (r) {
         case kNotAFont: return "not a TrueType or OpenType font";

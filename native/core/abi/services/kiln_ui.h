@@ -621,9 +621,10 @@ typedef struct KilnUiLook {
     uint32_t reserved;
 } KilnUiLook;               /* 32 bytes */
 
-/* KilnUiLookInfo.glyphs (0.2.0-dev.29.16): the game's own font of the language group Kiln's language (else the game's) needs */
+/* KilnUiLookInfo.glyphs (0.2.0-dev.29.16): the game's own fonts Kiln's language (else the game's) needs: a Chinese, Japanese
+   or Korean language's group, or (0.2.0-dev.29.19) for a Cyrillic language the default group's Cyrillic font */
 enum {
-    KILN_UI_GLYPHS_LATIN = 0,    /* no Chinese, Japanese or Korean language: the overlay's fonts as they are */
+    KILN_UI_GLYPHS_LATIN = 0,    /* no CJK or Cyrillic language: the overlay's fonts need nothing more */
     KILN_UI_GLYPHS_LOADING = 1,  /* being read from the game's data (Kiln's texts show in English meanwhile) */
     KILN_UI_GLYPHS_READY = 2,    /* merged into the overlay's font atlas */
     KILN_UI_GLYPHS_FAILED = 3,   /* not available (kiln.log says why): Kiln's texts stay English */
@@ -637,8 +638,9 @@ typedef struct KilnUiLookInfo {
     float background, opacity, scale;  /* as set (clamped) */
     uint8_t game_colors;    /* 1: the game's colours were read from its data; 0: the neutral stand-in (so far) */
     uint8_t game_font;      /* 1: the game's UI font is loaded */
-    uint8_t glyphs;         /* KILN_UI_GLYPHS_*: the overlay's glyphs of a Chinese, Japanese or Korean language (set_texts) */
-    uint8_t glyph_language; /* the keen::LanguageId `glyphs` is about (20 zh-CN, 21 zh-TW, 11 ja-JP, 13 ko-KR), 0 none */
+    uint8_t glyphs;         /* KILN_UI_GLYPHS_*: the overlay's glyphs of a CJK or Cyrillic language (set_texts) */
+    uint8_t glyph_language; /* the keen::LanguageId `glyphs` is about (20 zh-CN, 21 zh-TW, 11 ja-JP, 13 ko-KR; 9 ru-RU,
+                               24 bg-BG, 34 uk-UA, other Cyrillic 9), 0 none */
     uint32_t roles[16];     /* KILN_UI_ROLE_COUNT colours, 0xRRGGBBAA: inside a frame callback the look pushed now (the
                                player's when none is), elsewhere the player's. WINDOW_BG's alpha is the windows' opacity */
     uint32_t role_count;    /* KILN_UI_ROLE_COUNT */
