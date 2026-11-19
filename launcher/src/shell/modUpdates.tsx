@@ -7,7 +7,7 @@ import { ExternalLink } from "lucide-react";
 import { useEffect, useState } from "react";
 import * as api from "../api/commands";
 import type { ModKind } from "../api/commands";
-import { useGame, useGameStatus, useSettings } from "../api/hooks";
+import { useGame, useGameStatus, useNexusEnabled, useSettings } from "../api/hooks";
 import * as up from "../api/updates";
 import type { CheckReport, ModUpdateStatus, UpdatesRequest, UpdatesSpec } from "../api/updates";
 import { Badge, Banner, Button, Field, KeyValue, Modal, Select, TextInput, errorText, fmtAgo, toast, useTasks } from "../ui";
@@ -78,6 +78,10 @@ export function UpdateSourceModal({ target, onClose }: { target: { kind: ModKind
   const qc = useQueryClient();
   const report = useModUpdates();
   const status = target ? statusOf(report.data, target.kind, target.id) : undefined;
+  // Official builds run with Nexus Mods switched off: the form offers GitHub only. A Nexus Mods source saved before is
+  // shown above (state and source rows) and stays saved; the form starts at GitHub for a new choice.
+  const nexusEnabled = useNexusEnabled();
+  const savedNexusOff = !nexusEnabled && status?.source?.provider === "nexus";
   const [provider, setProvider] = useState<"github" | "nexus">("github");
   const [repository, setRepository] = useState("");
   const [tagPattern, setTagPattern] = useState("");
@@ -101,8 +105,10 @@ export function UpdateSourceModal({ target, onClose }: { target: { kind: ModKind
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, status?.source]);
   if (!target) return null;
+  // what the form edits: GitHub whenever Nexus Mods is off here, whatever was picked before
+  const chosen = nexusEnabled ? provider : "github";
 
-  const spec = (): UpdatesSpec => (provider === "github"
+  const spec = (): UpdatesSpec => (chosen === "github"
     ? { provider: "github", repository: repository.trim(), ...(tagPattern.trim() ? { tagPattern: tagPattern.trim() } : {}), ...(asset.trim() ? { asset: asset.trim() } : {}), channel }
     : { provider: "nexus", gameId: 5811, modId: Number(modId.trim()), fileChainId: fileChainId.trim() });
   const send = async (request: UpdatesRequest, done: string) => {
@@ -120,7 +126,8 @@ export function UpdateSourceModal({ target, onClose }: { target: { kind: ModKind
   const save = (confirm: boolean) => send({ source: { action: "map", kind: target.kind, id: target.id, spec: spec(), confirm } }, t("shell.modUpdates.checkedThere", { name: target.name }));
   const words = status ? up.updateWords(status) : null;
   const page = status ? up.pageOf(status) : null;
-  const filled = provider === "github" ? repository.trim().length > 0 : modId.trim().length > 0 && fileChainId.trim().length > 0;
+  const providers = [{ value: "github", label: t("shell.modUpdates.githubReleases") }, ...(nexusEnabled ? [{ value: "nexus", label: t("shell.modUpdates.nexusFile") }] : [])];
+  const filled = chosen === "github" ? repository.trim().length > 0 : modId.trim().length > 0 && fileChainId.trim().length > 0;
 
   return (
     <Modal open onClose={onClose} width={620} locked={busy} title={t("shell.modUpdates.title", { name: target.name })} footer={<>
@@ -155,10 +162,11 @@ export function UpdateSourceModal({ target, onClose }: { target: { kind: ModKind
           </>}>{conflict}</Banner>
         )}
         {error && <Banner tone="err" title={t("shell.modUpdates.notSaved")}>{error}</Banner>}
+        {savedNexusOff && status.source && <Banner tone="info" title={t("shell.modUpdates.nexusOff")}>{t("shell.modUpdates.nexusOffBody", { destination: status.source.destination })}</Banner>}
         <Field label={t("shell.modUpdates.where")} htmlFor="us-provider" hint={t("shell.modUpdates.whereHint")}>
-          <Select id="us-provider" value={provider} onChange={(v) => { setProvider(v as "github" | "nexus"); setConflict(null); }} options={[{ value: "github", label: t("shell.modUpdates.githubReleases") }, { value: "nexus", label: t("shell.modUpdates.nexusFile") }]} />
+          <Select id="us-provider" value={chosen} onChange={(v) => { setProvider(v as "github" | "nexus"); setConflict(null); }} options={providers} />
         </Field>
-        {provider === "github" ? (
+        {chosen === "github" ? (
           <>
             <Field label={t("shell.modUpdates.repository")} htmlFor="us-repo" hint={t("shell.modUpdates.repositoryHint")}><TextInput id="us-repo" mono value={repository} onChange={(e) => { setRepository(e.target.value); setConflict(null); }} placeholder="example-org/my-mod" /></Field>
             <Field label={t("shell.modUpdates.releaseTag")} htmlFor="us-tag" hint={t("shell.modUpdates.releaseTagHint")}><TextInput id="us-tag" mono value={tagPattern} onChange={(e) => setTagPattern(e.target.value)} placeholder="v{version}" /></Field>

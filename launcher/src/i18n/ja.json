@@ -3756,6 +3756,8 @@
       "whereHint": "Kiln はそこを読んでリンク付きのお知らせを表示するだけです。バージョンをダウンロードやインストールすることはありません。",
       "githubReleases": "GitHub リリース",
       "nexusFile": "Nexus Mods のファイル",
+      "nexusOff": "このビルドでは Nexus Mods がオフになっています",
+      "nexusOffBody": "この MOD に保存されている確認先は Nexus Mods のファイル {destination} です。Kiln はこれを残しますが、このビルドでは確認しません。代わりに GitHub で確認するには、ここで GitHub の確認先を保存してください。",
       "repository": "リポジトリ",
       "repositoryHint": "owner/repo（github.com/owner/repo の形式）。",
       "releaseTag": "リリースタグ",

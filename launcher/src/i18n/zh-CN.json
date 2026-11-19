@@ -3644,6 +3644,8 @@
       "whereHint": "Kiln 只检查更新并提供链接，模组需手动下载和安装。",
       "githubReleases": "GitHub Releases",
       "nexusFile": "Nexus Mods 上的文件",
+      "nexusOff": "此构建已停用 Nexus Mods",
+      "nexusOffBody": "此模组保存的来源是 Nexus Mods 文件 {destination}。Kiln 会保留它，但在此构建中不会检查。若要改为在 GitHub 上检查，请在此保存一个 GitHub 来源。",
       "repository": "仓库",
       "repositoryHint": "格式为 owner/repo，例如 github.com/owner/repo。",
       "releaseTag": "发布标签",

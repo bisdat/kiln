@@ -3838,6 +3838,8 @@
       "whereHint": "O Kiln só lê lá e mostra um aviso com um link. Ele nunca baixa nem instala uma versão.",
       "githubReleases": "Releases do GitHub",
       "nexusFile": "Um arquivo no Nexus Mods",
+      "nexusOff": "O Nexus Mods está desativado nesta build",
+      "nexusOffBody": "A fonte salva deste mod é o arquivo do Nexus Mods {destination}. O Kiln a mantém, mas não a verifica nesta build. Salve aqui uma fonte do GitHub para verificar lá.",
       "repository": "Repositório",
       "repositoryHint": "dono/repo, como em github.com/dono/repo.",
       "releaseTag": "Tag da release",

@@ -4002,6 +4002,8 @@
       "whereHint": "Kiln только читает оттуда и показывает уведомление со ссылкой. Он никогда не скачивает и не устанавливает версии.",
       "githubReleases": "Релизы на GitHub",
       "nexusFile": "Файл на Nexus Mods",
+      "nexusOff": "Nexus Mods выключен в этой сборке",
+      "nexusOffBody": "Сохранённый источник этого мода — файл Nexus Mods {destination}. Kiln сохраняет его, но в этой сборке не проверяет. Сохраните здесь источник на GitHub, чтобы проверять там.",
       "repository": "Репозиторий",
       "repositoryHint": "owner/repo, как в github.com/owner/repo.",
       "releaseTag": "Тег релиза",

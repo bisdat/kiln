@@ -4002,6 +4002,8 @@
       "whereHint": "Kiln tylko stamtąd czyta i pokazuje powiadomienie z linkiem. Nigdy nie pobiera ani nie instaluje wersji.",
       "githubReleases": "Wydania na GitHub",
       "nexusFile": "Plik na Nexus Mods",
+      "nexusOff": "Nexus Mods jest wyłączony w tej wersji",
+      "nexusOffBody": "Zapisanym źródłem tego moda jest plik Nexus Mods {destination}. Kiln je zachowuje, ale w tej wersji go nie sprawdza. Zapisz tutaj źródło na GitHubie, aby sprawdzać tam.",
       "repository": "Repozytorium",
       "repositoryHint": "owner/repo, jak w github.com/owner/repo.",
       "releaseTag": "Tag wydania",

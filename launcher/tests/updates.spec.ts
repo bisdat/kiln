@@ -156,6 +156,55 @@ test("a source set by hand, and the yes a changed source needs", async ({ page }
   expect(sent.map((r) => r.source!.confirm)).toEqual([false, true]);
 });
 
+// Official builds run with Nexus Mods switched off (app_info.nexusEnabled false): the form offers GitHub only, and a
+// Nexus Mods source saved before (a build with Nexus Mods on, a mod's manifest) is shown and kept, not dropped.
+const mapNexus = (page: Page, id: string) =>
+  page.evaluate(async (mod) => {
+    const m = (await import("/src/api/updates.ts")) as unknown as { updatesCheck: (r: unknown) => Promise<unknown> };
+    await m.updatesCheck({ offline: true, source: { action: "map", kind: "kiln", id: mod, spec: { provider: "nexus", gameId: 5811, modId: 316, fileChainId: "1001" }, confirm: false } });
+  }, id);
+const whereOptions = (dialog: ReturnType<Page["getByRole"]>) => dialog.getByLabel("Where it is published").locator("option");
+
+test("with Nexus Mods on, a source can be on GitHub or Nexus Mods", async ({ page }) => {
+  await desktop(page);
+  await expect(row(page, "New Items")).toContainText("Update 1.1.0", { timeout: 10_000 });
+  await mapNexus(page, "big-stacks");
+  const dialog = await openUpdates(page, "Big Stacks");
+  await expect(whereOptions(dialog)).toHaveText(["GitHub releases", "A file on Nexus Mods"]);
+  await expect(dialog.getByLabel("Where it is published")).toHaveValue("nexus");
+  await expect(dialog.getByLabel("Mod page number")).toHaveValue("316");
+  await expect(dialog.getByLabel("File id")).toHaveValue("1001");
+  await expect(dialog.getByText("Nexus Mods is switched off in this build")).toHaveCount(0);
+});
+
+test("with Nexus Mods off, only GitHub is offered, and a saved Nexus Mods source stays and is said", async ({ page }) => {
+  await page.goto("/?nexus=disabled#/");
+  await page.locator(".k-splash").waitFor({ state: "detached" });
+  await expect(row(page, "New Items")).toContainText("Update 1.1.0", { timeout: 10_000 });
+  let dialog = await openUpdates(page, "Big Stacks");
+  await expect(whereOptions(dialog)).toHaveText(["GitHub releases"]);
+  await page.keyboard.press("Escape");
+
+  await mapNexus(page, "big-stacks");
+  dialog = await openUpdates(page, "Big Stacks");
+  // the saved source, as it is, and why it is not checked
+  await expect(dialog).toContainText("Nexus Mods: enshrouded/316/1001 (set by you, anonymous)");
+  await expect(dialog).toContainText("Checks off");
+  await expect(dialog).toContainText("Nexus Mods is switched off in this build");
+  // a new choice starts at GitHub; the Nexus Mods fields are not offered
+  await expect(whereOptions(dialog)).toHaveText(["GitHub releases"]);
+  await expect(dialog.getByLabel("Where it is published")).toHaveValue("github");
+  await expect(dialog.getByLabel("Repository")).toHaveValue("");
+  await expect(dialog.getByLabel("Mod page number")).toHaveCount(0);
+  await expect(dialog.getByRole("button", { name: "Save and check" })).toBeDisabled();
+  await expect(dialog.getByRole("button", { name: "Remove my source" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  // opening the dialog sent nothing: the saved source is still there
+  expect((await requests(page)).filter((r) => r.source?.id === "big-stacks").map((r) => r.source!.action)).toEqual(["map"]);
+  dialog = await openUpdates(page, "Big Stacks");
+  await expect(dialog).toContainText("Nexus Mods: enshrouded/316/1001 (set by you, anonymous)");
+});
+
 test("the daily check is off by default, and on it runs by itself as an automatic check", async ({ page }) => {
   // the test's clock: the first automatic check 300 ms after the setting is on (the real one waits 2 to 15 minutes)
   await page.addInitScript(() => { (window as unknown as { __kilnDailyMs: number }).__kilnDailyMs = 300; });

@@ -3838,6 +3838,8 @@
       "whereHint": "Kiln liest dort nur und zeigt einen Hinweis mit einem Link. Es lädt oder installiert nie eine Version.",
       "githubReleases": "GitHub-Releases",
       "nexusFile": "Eine Datei auf Nexus Mods",
+      "nexusOff": "Nexus Mods ist in dieser Version ausgeschaltet",
+      "nexusOffBody": "Die gespeicherte Quelle dieser Mod ist die Nexus-Mods-Datei {destination}. Kiln behält sie, prüft sie in dieser Version aber nicht. Speichere hier eine GitHub-Quelle, um stattdessen dort zu prüfen.",
       "repository": "Repository",
       "repositoryHint": "owner/repo, wie in github.com/owner/repo.",
       "releaseTag": "Release-Tag",
