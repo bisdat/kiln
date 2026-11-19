@@ -195,6 +195,17 @@ void check_entry_patch(BootFacts& f) {
     f.errors.push_back(what);
 }
 
+// state/boot.json's text. The block between the markers is pure (nlohmann only): native/core/tests/test-boot-json.sh cuts
+// it out of this file and runs it.
+// boot-json:begin
+// Strings in boot.json can carry bytes Kiln did not make itself: boot's safe-idle text quotes a JSON parser's error,
+// which copies the offending byte, and a Windows error message comes in the ANSI code page. dump() throws on a byte that
+// is not UTF-8, which ended Kiln's boot after it had loaded everything; the replace handler writes U+FFFD instead.
+inline std::string boot_json_text(const nlohmann::json& doc) {
+    return doc.dump(2, ' ', false, nlohmann::json::error_handler_t::replace) + "\n";
+}
+// boot-json:end
+
 void write_boot_json(const BootFacts& f) {
     using nlohmann::json;
     const auto& prof = profile::state();
@@ -283,7 +294,7 @@ void write_boot_json(const BootFacts& f) {
         if (profile::dropins(k)) doc["profile"]["dropins"].push_back(profile::kind_name(k));
     for (uint32_t i = 0; i < profile::kEngineKindCount; ++i)  // other engines' lists, when the profile has them
         if (!prof.engine_mods[i].empty()) doc["profile"]["counts"][profile::kEngineKinds[i]] = prof.engine_mods[i].size();
-    if (!write_file_atomic(paths().state / L"boot.json", doc.dump(2) + "\n"))
+    if (!write_file_atomic(paths().state / L"boot.json", boot_json_text(doc)))
         KLOG_W("state: cannot write %s", u8(paths().state / L"boot.json").c_str());
 }
 

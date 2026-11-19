@@ -201,6 +201,8 @@ handles, which no runtime unload clears: `Blocks.Find` and a block's reference b
 - Host: `native/core/tests/test-stop-facts.sh` (the facts a stop writes boot.json from, under the thread sanitizer,
   while boot() changes and publishes them; `test-stop-facts.sh old` runs the round-2 pattern, a pointer to the live
   facts, which the sanitizer flags).
+- Host: `native/core/tests/test-boot-json.sh` (state/boot.json's text: bytes that are not UTF-8 become U+FFFD instead
+  of ending the boot).
 - Offline: `managed/tests/Kiln.Blocks.Tests` (staging, lowering, `BootHandleTests`: the handle map), `Kiln.Host.Tests`
   (`BootPhaseTests`, including the pin of `KilnBootApiV1`'s member order; `BootInputsTests`: the frozen inputs).
 - Offline, the test kit: `Kiln.TestKit.Tests` (`BootFakeTests`: `KilnHarness.BootPhase`), `Kiln.Sdk.Tests`
