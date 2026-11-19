@@ -180,6 +180,9 @@ const seedMods: Record<ModKind, MockManifest[]> = {
   enshwick: [{ id: "you.lanterns", name: "Lanterns", version: "1.0.0", side: "both", clients: "mod" }],
   shroudlink: [{ id: "chestsort", name: "chestsort.dll", version: "0.0.0", side: "server", clients: "none" }],
   ember: [{ id: "private-chests", name: "private-chests", version: "0.0.0", side: "server", clients: "none" }],
+  // packages for Enshrouded ModLoader (a DLL with its .dll.mod, run by kiln-dllmod from Mods/EnshroudedModLoader/<id>/):
+  // none seeded, so the other pages' mod counts stay as they are (engine_status has kiln-dllmod's state file)
+  dllmod: [],
 };
 
 const library: LibraryEntry[] = FRESH ? [] : MOD_KINDS.flatMap((kind) => [...seedMods[kind]].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
@@ -272,7 +275,7 @@ const profiles = new Map<string, Profile>(FRESH ? [] : [
       plugin: [],
       emf: [pm("emf", "beastmaster")],
       xhl: [], eml: [pm("eml", "loot-tables-x", false)], shroudforge: [pm("shroudforge", "better-chests")], set: [], greeneye: [pm("greeneye", "zoom-out")],
-      flame: [], shroudtopia: [pm("shroudtopia", "fly-mode")], enshwick: [], shroudlink: [], ember: [],
+      flame: [], shroudtopia: [pm("shroudtopia", "fly-mode")], enshwick: [], shroudlink: [], ember: [], dllmod: [],
     },
     // made by a dev.22 launcher: the list names every kind that is on (none). "Vanilla plus" is from before dev.22.
     dropins: [], dropinsEngines: true, dataDir: "shared", server: null,
@@ -1341,6 +1344,8 @@ const handlers: Record<string, Handler> = {
       st("shroudlink", "shroudlink.json", null),
       st("ember", "ember.json", { abi: null, steppedAside: false, mods: [{ id: "private-chests", status: "waiting-for-abi",
         reason: "not loaded: Ember has not published its mod ABI yet" }] }),
+      st("dllmod", "dllmod.json", { status: "waiting", reason: "the mods start when a world of your own starts", abi: 1, steppedAside: false,
+        mods: [{ id: "carryon", package: "carryon/carryon.dll", version: "0.1.50-dev", status: "waiting", reason: "" }] }),
     ];
   },
   eml_data_latest: () => null,

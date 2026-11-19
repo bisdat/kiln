@@ -117,7 +117,8 @@
       "shroudtopia": "Kiln이 실행하는 Shroudtopia 모드입니다.",
       "enshwick": "Enshwick 로더가 실행하는 Enshwick 모드입니다.",
       "shroudlink": "Kiln이 실행하는 shroudlink 모드입니다.",
-      "ember": "Ember 서버 모드입니다."
+      "ember": "Ember 서버 모드입니다.",
+      "dllmod": "Enshrouded ModLoader용 모드(CarryOn, Belt Lantern). 내 월드를 시작할 때 Kiln이 실행합니다."
     },
     "profile": {
       "no_mods": "모드 없이 한 번 플레이: 이번 실행에서는 모드를 불러오지 않습니다.",
@@ -176,6 +177,9 @@
       "reason": "Ember 모드는 아직 실행할 수 없습니다. Ember가 모드를 실행할 방법을 공개하지 않았습니다.",
       "help": "지금은 할 일이 없습니다. 모드는 프로필에 남아 있으며, Kiln이 Ember 모드를 지원하면 실행됩니다."
     },
+    "dllmod": {
+      "waiting": "내 월드를 시작하면 실행됩니다."
+    },
     "shroudtopia": {
       "off": "Shroudtopia 설정에서 꺼져 있습니다.",
       "off_help": "프로필 구성 폴더의 shroudtopia/shroudtopia.json에서 이름이 \"{name}\"인 mods 항목의 active를 true로 설정하세요 (이름은 kiln.log의 Registered mod 줄에 있음). 파일을 저장하면 Shroudtopia가 게임 실행 중에 다시 읽습니다.",
@@ -209,6 +213,8 @@
       "eml_aside_why": "EML: EML 자체 로더에 비켜섰습니다 ({reason}).",
       "eml_idle": "이번 실행에는 EML 모드가 없습니다.",
       "ember": "Ember: 모드를 찾았지만 아직 실행할 수 없습니다.",
+      "dllmod_unsupported": "Enshrouded ModLoader: 이 모드들은 게임 빌드 26430625용으로 만들어져 이 빌드에서는 하나도 실행되지 않습니다.",
+      "dllmod_server": "Enshrouded ModLoader: 이 모드들은 게임 클라이언트용입니다. 전용 서버에서는 하나도 실행되지 않습니다.",
       "shroudlink_elsewhere": "다른 shroudlink 로더가 이 모드들을 실행합니다.",
       "set_aside": "SET: SET 자체 로더에 비켜섰습니다.",
       "set_aside_why": "SET: SET 자체 로더에 비켜섰습니다 ({reason}).",

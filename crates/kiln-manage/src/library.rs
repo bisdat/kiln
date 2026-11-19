@@ -4,7 +4,7 @@
 //! kiln_plugin_main), a modpack (kiln-modpack.json), a runtime bundle (kiln-runtime.json), a bare DLL (wrapped into a
 //! native mod with a generated native.json), or nothing usable. Zips are unpacked first.
 
-use crate::manifest::{Clients, ModKind, Side};
+use crate::manifest::{Clients, ModKind, RunSide, Side};
 use crate::paths::DataDirs;
 use crate::task::Progress;
 use crate::{Error, ErrorCode, Result};
@@ -28,6 +28,11 @@ pub struct ImportSource {
     #[serde(rename = "type")]
     pub kind: String,
     pub from: String,
+    /// The side the drop packed this copy for, by a `client` or `server` folder around it in the archive or folder
+    /// ([`packaged_for`]): one download can hold a game copy and a dedicated-server copy of one mod with the same id
+    /// and version (Town Portals 2.0.3). None: no such folder (or the same files came in both).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub packaged_for: Option<RunSide>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -103,6 +108,8 @@ pub enum DetectKind {
     Shroudlink,
     /// An Ember server mod.
     Ember,
+    /// A package for Enshrouded ModLoader: a DLL with a `<file>.dll.mod` manifest beside it (`ENSHROUDED_PACKAGE_V1`).
+    Dllmod,
     /// Another engine's loader or a tool under a proxy name (`engine` says which): never a mod to import.
     Proxy,
     /// Patched game data files (`.kfc`).
@@ -195,6 +202,10 @@ pub struct ImportReport {
     /// The display name of every mod in `imported` and `existing`, by `<kind>/<id>`.
     #[serde(default)]
     pub names: std::collections::BTreeMap<String, String>,
+    /// Every entry of `imported` and `existing` in the order the drop holds them (folders sorted by name): a repeated
+    /// drop has the same order, however it divides into the two lists. Not sent to the launcher.
+    #[serde(skip)]
+    pub order: Vec<LibraryRef>,
 }
 
 impl ImportReport {
@@ -294,12 +305,26 @@ fn detect_dll(path: &Path) -> Detected {
     if has(crate::pe::EMF_MOD_EXPORT) {
         return d(DetectKind::Emf, "an EMF mod DLL (exports emf_mod_load); a mod.json is generated");
     }
+    // a package for Enshrouded ModLoader (AndyPimms' loader): never a plain DLL (its EnshroudedModInitialize must run
+    // at a world's start, and that loader refuses a world whose mod's DLL is already loaded). With its .dll.mod beside it,
+    // a Library entry kiln-dllmod runs; without it there is nothing to run it by.
+    if crate::dllmod::has_header(path) {
+        let mut x = d(DetectKind::Dllmod, &crate::engines::mod_reason(crate::engines::Engine::Dllmod, &file_name(path)));
+        x.engine = Some(crate::engines::Engine::Dllmod);
+        match crate::dllmod::read(path) {
+            Ok(m) => x.version = Some(m.version),
+            Err(e) => {
+                x.kind = DetectKind::Unknown;
+                x.reason = format!("{}: a package for Enshrouded ModLoader that Kiln cannot run: {e}", file_name(path));
+            }
+        }
+        return x;
+    }
     if is_modloader_package(path, &exports) {
         return d(DetectKind::Unknown, &format!(
-            "{}: a mod for Enshrouded ModLoader (AndyPimms' loader); only that loader runs it. Keep it with its .dll.mod in \
-             the game's Mods folder and switch it on in the world's Edit > MODS page. Kiln chain-loads that loader (add its \
-             dinput8.dll to the Library)",
-            file_name(path)));
+            "{}: a mod for Enshrouded ModLoader (AndyPimms' loader) without its manifest ({}.mod) beside it. Add the mod's \
+             folder, or the DLL together with its .dll.mod",
+            file_name(path), file_name(path)));
     }
     // another engine's mod DLL or loader: never imported as a plain DLL. A DLL that reads dinput8-chain.ini is not only
     // a chain loader: Auto Loot Plus's dinput8.dll is the mod itself (its looting, its F8 menu), XHL-Core's is the host
@@ -345,27 +370,15 @@ fn file_name(path: &Path) -> String {
     path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
 }
 
-/// A package of Enshrouded ModLoader (github.com/aebischer/Enshrouded-ModLoader, SDK ABI 1): a `kind=mod` DLL exports
-/// `EnshroudedModInitialize` (and `EnshroudedModConfigure` when it has settings); every package, `kind=library` too, has
-/// a `<file>.dll.mod` manifest beside it whose first line is `ENSHROUDED_PACKAGE_V1`. That loader starts them itself,
-/// at a world's start, from `<game>/Mods/`. Loaded by Kiln as a plain DLL, the mod's Initialize would never run, and
-/// the loader refuses to start a world with a mod whose DLL is already in the process (`err.dll_external`).
-const MODLOADER_EXPORTS: [&str; 2] = ["EnshroudedModInitialize", "EnshroudedModConfigure"];
-const MODLOADER_MANIFEST: &[u8] = b"ENSHROUDED_PACKAGE_V1";
+/// A mod DLL of Enshrouded ModLoader (github.com/aebischer/Enshrouded-ModLoader, SDK ABI 1) by its exports alone: a
+/// `kind=mod` DLL exports `EnshroudedModInitialize` (and `EnshroudedModConfigure` when it has settings). With its
+/// `<file>.dll.mod` manifest beside it (`crate::dllmod::has_header`) it is a Library entry kiln-dllmod runs at a world's
+/// start; never a plain DLL, whose Initialize would never run (and that loader refuses to start a world with a mod whose
+/// DLL is already in the process, `err.dll_external`).
+const MODLOADER_EXPORTS: [&str; 2] = [crate::dllmod::INITIALIZE, crate::dllmod::CONFIGURE];
 
 fn is_modloader_package(path: &Path, exports: &[String]) -> bool {
-    use std::io::Read;
-    if MODLOADER_EXPORTS.iter().any(|e| exports.iter().any(|x| x == e)) {
-        return true;
-    }
-    let mut manifest = path.as_os_str().to_owned();
-    manifest.push(".mod");
-    let mut head = Vec::new();
-    let Ok(file) = std::fs::File::open(&manifest) else { return false };
-    if file.take(64).read_to_end(&mut head).is_err() {
-        return false;
-    }
-    head.strip_prefix(b"\xef\xbb\xbf").unwrap_or(&head).starts_with(MODLOADER_MANIFEST)
+    MODLOADER_EXPORTS.iter().any(|e| exports.iter().any(|x| x == e)) || crate::dllmod::has_header(path)
 }
 
 /// A mod id from a file or folder name: lower case, other characters as '-', at most 64.
@@ -1443,15 +1456,24 @@ pub fn commit_folder(dirs: &DataDirs, prepared: &Path, rec: ImportRecord, report
         // Likewise an EML mod imported before Kiln recognised the modified EML loader beside it learns which part runs.
         let game_folder = rec.game_folder.is_some() && old.game_folder.is_none();
         let loader_part = rec.loader_part.is_some() && old.loader_part.is_none();
-        if game_folder || loader_part {
+        // and an entry imported before Kiln looked at the folders around it learns which side its drop packed it for
+        let packaged = learned_packaged_for(old.source.as_ref(), rec.source.as_ref());
+        if game_folder || loader_part || packaged.is_some() {
             crate::durable::flush_contents(&folder)?;
+            let source = match (packaged, &old.source) {
+                (Some(p), Some(s)) => Some(ImportSource { packaged_for: p, ..s.clone() }),
+                (Some(_), None) => rec.source.clone(),
+                (None, s) => s.clone(),
+            };
             let learned = ImportRecord {
                 game_folder: if game_folder { rec.game_folder.clone() } else { old.game_folder.clone() },
                 loader_part: if loader_part { rec.loader_part.clone() } else { old.loader_part.clone() },
+                source,
                 ..old
             };
             crate::durable::json(&record_path(&folder), &learned, &[folder.clone()])?;
         }
+        report.order.push(r.clone());
         report.existing.push(r);
         return Ok(());
     }
@@ -1462,8 +1484,57 @@ pub fn commit_folder(dirs: &DataDirs, prepared: &Path, rec: ImportRecord, report
     crate::durable::flush_contents(prepared)?;
     crate::durable::rename_dir(prepared, &folder)?;
     crate::durable::json(&record_path(&folder), &rec, &[folder.clone()])?;
+    report.order.push(r.clone());
     report.imported.push(r);
     Ok(())
+}
+
+/// What an entry already in the Library learns from a drop of the same files: Some(new value) of its source's
+/// `packaged_for` when it changes. A first side is taken; the other side for the same files means they are both copies
+/// (Some(None)); a drop that names no side changes nothing.
+fn learned_packaged_for(old: Option<&ImportSource>, new: Option<&ImportSource>) -> Option<Option<RunSide>> {
+    let new = new.and_then(|s| s.packaged_for)?;
+    match old.and_then(|s| s.packaged_for) {
+        None => Some(Some(new)),
+        Some(o) if o != new => Some(None),
+        Some(_) => None,
+    }
+}
+
+/// The side a drop packed a mod for, from the folders between the drop's root and the mod (`rel`, the mod's own folder
+/// last): a folder named `client` means the game, `server` (or `dedicated server`) a dedicated server. Mods that ship
+/// both in one download put each copy in such a folder (Town Portals 2.0.3: `client/` and `server/`). None when no
+/// folder says it, or folders say both.
+pub fn packaged_for(rel: &Path) -> Option<RunSide> {
+    let mut found = None;
+    for c in rel.components() {
+        let name = c.as_os_str().to_string_lossy().trim().to_ascii_lowercase();
+        let side = match name.as_str() {
+            "client" => RunSide::Client,
+            "server" | "dedicated" | "dedicated server" | "dedicated-server" | "dedicated_server" | "dedicatedserver" => RunSide::Server,
+            _ => continue,
+        };
+        if found.is_some_and(|f| f != side) {
+            return None;
+        }
+        found = Some(side);
+    }
+    found
+}
+
+/// How well a Library entry fits a game of `side` among entries of one mod with one version (one download's client and
+/// server copies). Higher is better: first whether the mod's own manifest lets it run there (`side` both, that side, or
+/// none given), then whether the drop packed it for that side (that side, no word, the other side). A copy for "both"
+/// and one for exactly that side fit the same.
+pub fn side_fit(side: RunSide, rec: &ImportRecord) -> (bool, u8) {
+    let exact = match side { RunSide::Client => Side::Client, RunSide::Server => Side::Server };
+    let runs = rec.side.is_none_or(|s| s == Side::Both || s == exact);
+    let packaged = match rec.source.as_ref().and_then(|s| s.packaged_for) {
+        Some(p) if p == side => 2,
+        None => 1,
+        Some(_) => 0,
+    };
+    (runs, packaged)
 }
 
 /// A Kiln entry [`migrate_identities`] moved to its identity: the hash it was recorded under, and the one it has now.
@@ -1984,7 +2055,7 @@ pub fn take_over_with(dirs: &DataDirs, r: &LibraryRef, find: &mut dyn FnMut(&Pat
 }
 
 fn source_of(path: &Path, kind: &str) -> ImportSource {
-    ImportSource { kind: kind.into(), from: path.display().to_string() }
+    ImportSource { kind: kind.into(), from: path.display().to_string(), packaged_for: None }
 }
 
 fn semverish(v: &str) -> bool {
@@ -2260,6 +2331,12 @@ fn import_detected(dirs: &DataDirs, d: &Detected, base_label: &Path, base_real: 
         return Ok(());
     }
     progress.report(None, &format!("importing {}", d.path));
+    // a client/ or server/ folder between the drop's root and the mod: which side the drop packed this copy for. A dropped
+    // folder's own name counts too (the player dropped server/); an archive's file name does not.
+    let mut rel = PathBuf::new();
+    if base_label == base_real && let Some(n) = base_real.file_name() { rel.push(n); }
+    if let Ok(rest) = Path::new(&d.path).strip_prefix(base_label) { rel.push(rest); }
+    let from = &ImportSource { packaged_for: packaged_for(&rel), ..from.clone() };
     if let Err(e) = import_item(dirs, d, &real, from, report) {
         report.skipped.push(Skipped { path: d.path.clone(), reason: e.message });
     }
@@ -2478,7 +2555,8 @@ pub fn replace_dll(dirs: &DataDirs, profile_id: &str, from: &LibraryRef, file: &
     let i = p.mods.list(from.kind).iter().position(|m| m.id == from.id && m.version == from.version && m.hash == from.hash)
         .ok_or_else(|| Error::new(ErrorCode::Conflict, "The mod changed in this profile. Reload it first."))?;
     let before = p.mods.list(from.kind)[i].clone();
-    rec.source = Some(ImportSource { kind: "replaced-dll".into(), from: serde_json::to_string(&replacement_base(rec.source.as_ref()).unwrap_or_else(|| from.clone()))? });
+    let packaged_for = rec.source.as_ref().and_then(|s| s.packaged_for);
+    rec.source = Some(ImportSource { kind: "replaced-dll".into(), from: serde_json::to_string(&replacement_base(rec.source.as_ref()).unwrap_or_else(|| from.clone()))?, packaged_for });
     rec.imported = crate::util::now_rfc3339();
     rec.hash = recorded_hash(tmp.path(), &rec)?;
     rec.size = size - old_size + bytes.len() as u64;

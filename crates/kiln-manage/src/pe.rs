@@ -59,6 +59,8 @@ pub enum ProxyKind {
     Shroudlink,
     /// Ember's server loader (powrprof.dll, iphlpapi.dll, dbghelp.dll).
     Ember,
+    /// AndyPimms' Enshrouded ModLoader (dinput8.dll): runs packages with a .dll.mod manifest.
+    Dllmod,
     /// ModLoader Proxy (chainloader.ini).
     ModLoaderProxy,
     /// Ultimate ASI Loader (.asi plugins; runs only under its own proxy names).

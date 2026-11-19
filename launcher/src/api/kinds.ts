@@ -6,11 +6,11 @@ import type { ModKind, ProfileMod } from "./commands";
 type Tone = "ok" | "warn" | "err" | "info" | "idle" | "ember";
 
 /** Every kind, in ModKind::ALL order. */
-export const MOD_KINDS: ModKind[] = ["kiln", "native", "plugin", "emf", "eml", "xhl", "shroudforge", "set", "greeneye", "flame", "shroudtopia", "enshwick", "shroudlink", "ember"];
+export const MOD_KINDS: ModKind[] = ["kiln", "native", "plugin", "emf", "eml", "xhl", "shroudforge", "set", "greeneye", "flame", "shroudtopia", "enshwick", "shroudlink", "ember", "dllmod"];
 /** Kiln's own four. */
 export const CORE_KINDS: ModKind[] = ["kiln", "native", "plugin", "emf"];
 /** Other engines' mods and external-host companions that the Library imports (engine_mods::IMPORTED): every engine kind. */
-export const IMPORTED_KINDS: ModKind[] = ["eml", "xhl", "shroudforge", "set", "greeneye", "flame", "shroudtopia", "enshwick", "shroudlink", "ember"];
+export const IMPORTED_KINDS: ModKind[] = ["eml", "xhl", "shroudforge", "set", "greeneye", "flame", "shroudtopia", "enshwick", "shroudlink", "ember", "dllmod"];
 /** Every kind that is not one of Kiln's own four. */
 export const ENGINE_KINDS: ModKind[] = IMPORTED_KINDS;
 /** Kinds the Library holds and profiles and servers carry, but whose plugin can't start them yet (engine_mods::runs_yet:
@@ -30,21 +30,22 @@ export const KIND_NAME: Record<ModKind, string> = {
   kiln: "Kiln", get native() { return t("api.kinds.name.native"); }, get plugin() { return t("api.kinds.name.plugin"); }, emf: "EMF",
   get eml() { return t("api.kinds.name.eml"); }, get xhl() { return t("api.kinds.name.xhl"); }, shroudforge: "ShroudForge",
   set: "Shrouded Engine Tweaks", greeneye: "Greeneye Loader", flame: "Flame", shroudtopia: "Shroudtopia", enshwick: "Enshwick",
-  shroudlink: "shroudlink", get ember() { return t("api.kinds.name.ember"); },
+  shroudlink: "shroudlink", get ember() { return t("api.kinds.name.ember"); }, dllmod: "Enshrouded ModLoader",
 };
 /** The short word for a badge or a filter (getters as in KIND_NAME). */
 export const KIND_SHORT: Record<ModKind, string> = {
   kiln: "Kiln", get native() { return t("api.kinds.short.native"); }, get plugin() { return t("api.kinds.short.plugin"); }, emf: "EMF", eml: "EML", xhl: "XHL",
   shroudforge: "ShroudForge", set: "SET", greeneye: "Greeneye", flame: "Flame", shroudtopia: "Shroudtopia", enshwick: "Enshwick", shroudlink: "shroudlink", ember: "Ember",
+  dllmod: "ModLoader",
 };
 export const KIND_TONE: Record<ModKind, Tone> = {
   kiln: "ember", native: "info", emf: "ok", plugin: "idle", eml: "warn", xhl: "warn", shroudforge: "info", set: "ok", greeneye: "ok", flame: "ember",
-  shroudtopia: "info", enshwick: "ok", shroudlink: "info", ember: "idle",
+  shroudtopia: "info", enshwick: "ok", shroudlink: "info", ember: "idle", dllmod: "ok",
 };
 /** engine_mods::plugin_of: the Kiln plugin that runs a kind. */
 export const KIND_PLUGIN: Partial<Record<ModKind, string>> = {
   emf: "kiln-emf", eml: "kiln-eml", shroudforge: "kiln-shroudforge", set: "kiln-set", greeneye: "kiln-greeneye", flame: "kiln-flame",
-  shroudtopia: "kiln-shroudtopia", enshwick: "kiln-enshwick", shroudlink: "kiln-shroudlink", ember: "kiln-ember",
+  shroudtopia: "kiln-shroudtopia", enshwick: "kiln-enshwick", shroudlink: "kiln-shroudlink", ember: "kiln-ember", dllmod: "kiln-dllmod",
 };
 /** Kinds whose settings the launcher edits (engine_settings_get/set). EMF's ini is the Configs tab's. */
 export const SETTINGS_KINDS: ModKind[] = ["shroudforge", "shroudtopia"];

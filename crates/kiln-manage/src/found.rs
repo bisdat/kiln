@@ -179,6 +179,9 @@ fn roots(game: &Path) -> Vec<Root> {
         Root { rel: String::new(), abs: game.join(crate::engine_mods::SHROUDLINK_MODS), kinds: vec![K::Shroudlink],
             files: Files { dll: true, zip: false }, folders: true },
         Root { rel: String::new(), abs: game.join(crate::engine_mods::EMBER_MODS), kinds: vec![K::Ember], files: none, folders: true },
+        // packages for Enshrouded ModLoader: package folders, and DLL + .dll.mod pairs directly in it
+        Root { rel: String::new(), abs: game.join(crate::dllmod::RUN_FOLDER), kinds: vec![K::Dllmod], files: Files { dll: true, zip: false },
+            folders: true },
     ];
     // ShroudForge's mods folder is `mods` unless its config names another
     let sf = crate::shroudforge::mods_dir(game);
@@ -208,6 +211,7 @@ fn folders_of(kind: ModKind) -> &'static str {
         ModKind::Flame | ModKind::Shroudtopia | ModKind::Enshwick => "mods",
         ModKind::Shroudlink => "shroudlink_mods",
         ModKind::Ember => "ember/mods",
+        ModKind::Dllmod => crate::dllmod::RUN_FOLDER,
     }
 }
 
@@ -239,6 +243,7 @@ fn loader_kinds(e: Engine) -> Vec<ModKind> {
         Engine::Flame => vec![K::Flame],
         Engine::Shroudlink => vec![K::Shroudlink],
         Engine::Ember => vec![K::Ember],
+        Engine::Dllmod => vec![K::Dllmod],
         _ => vec![],
     }
 }
@@ -641,6 +646,10 @@ pub fn scan(dirs: &DataDirs, install: &GameInstall, profile: &Profile) -> FoundR
                 }
                 // Enshwick's loader keeps its own files in mods/enshwick/: never a mod
                 if root.kinds.contains(&ModKind::Enshwick) && lower == crate::engine_mods::ENSHWICK_LOADER_FOLDER {
+                    continue;
+                }
+                // mods/EnshroudedModLoader is Mods/EnshroudedModLoader on Windows: its packages are that root's entries
+                if root.kinds.contains(&ModKind::Eml) && lower == "enshroudedmodloader" {
                     continue;
                 }
             } else if t.is_file() {

@@ -128,7 +128,7 @@ int main() {
         check(guarded.off && guarded.record.phase == Phase::guarded && guarded.record.failed_stage == Stage::hooks &&
               guarded.record.failures == 1);
         check(parse(encode(guarded.record), disk));
-        check(encode(disk) == "2 2 1 1 1 0 " + m + "\n");  // the owner's file, byte for byte
+        check(encode(disk) == "3 2 1 1 1 0 - " + m + "\n");  // the owner's file in today's format (no Kiln version given)
         // its normal quit (code 0, Kiln's exit steps ran: overlay_guard_exit): the record no longer reads guarded
         const auto quit = at_exit(disk);
         check(quit.phase == Phase::retry && quit.failures == 1 && quit.failed_stage == Stage::hooks);
@@ -192,6 +192,47 @@ int main() {
     for (Phase p : {Phase::complete, Phase::retry, Phase::locked}) {
         Record x{p, Stage::swapchain, Stage::device, 1, "m"};
         check(at_exit(x).phase == p && at_exit(x).stage == Stage::swapchain && at_exit(x).failures == 1);
+    }
+    // Inbox 97: the lock 0.2.0-dev.29.17 wrote ("failed twice at this stage", from bugs a later Kiln fixed) stayed after
+    // the update, and the overlay stayed off. The record carries the Kiln version since 0.2.0-dev.29.19; a record of
+    // another Kiln (an update, a downgrade) or one without the version (every older Kiln's) starts fresh.
+    {
+        const std::string m = "w2-a8c7f832281a39c5", now = "0.2.0-dev.29.19";
+        Record old;
+        check(parse("2 4 1 1 2 0 " + m + "\n", old) && old.phase == Phase::locked && old.kiln.empty());
+        check(begin(old, m).off);  // without the Kiln's version the lock holds, as it did
+        const auto cleared = for_kiln(old, now, m);
+        check(cleared.phase == Phase::complete && cleared.failures == 0 && !cleared.wrapper_retry && cleared.kiln == now &&
+              cleared.modules == m && cleared.stage == Stage::begun);
+        const auto next = begin(cleared, m);
+        check(!next.off && next.record.phase == Phase::trying && next.record.kiln == now);
+        check(encode(next.record) == "3 1 0 0 0 0 " + now + " " + m + "\n");
+        Record disk;
+        check(parse(encode(next.record), disk) && disk.kiln == now && disk.modules == m && disk.phase == Phase::trying);
+        // a wrapper recovery and a guarded record of an old Kiln are cleared too
+        Record wrapped{Phase::guarded, Stage::device, Stage::device, 1, "w2-old", true, "0.2.0-dev.29.17"};
+        const auto fresh = for_kiln(wrapped, now, m);
+        check(fresh.phase == Phase::complete && fresh.failures == 0 && !fresh.wrapper_retry && fresh.modules == m);
+        // the same Kiln: nothing changes, a lock holds until the record is deleted
+        Record locked{Phase::locked, Stage::hooks, Stage::hooks, 2, m, false, now};
+        const auto same = for_kiln(locked, now, m);
+        check(same.phase == Phase::locked && same.failures == 2 && same.kiln == now);
+        check(begin(same, m).off && begin(same, m).record.kiln == now);
+        check(parse(encode(locked), disk) && begin(for_kiln(disk, now, m), m).off);
+        // another Kiln, a downgrade as well: cleared
+        check(!begin(for_kiln(locked, "0.2.0-dev.29.18", m), m).off);
+        // a wrapper change within one Kiln keeps its version in the record
+        check(begin(locked, "w2-other").record.kiln == now && begin(locked, "w2-other").record.wrapper_retry);
+        // malformed records of the new format are rejected (a rejected record starts fresh, never locked)
+        check(!parse("3 4 1 1 2 0 " + m + "\n", disk));  // no version field
+        check(!parse("3 4 1 1 2 0 " + std::string(65, 'v') + " " + m + "\n", disk));
+        check(!parse("3 4 1 1 2 2 " + now + " " + m + "\n", disk));
+        check(!parse("3 4 1 1 2 0 " + now + " " + m + " extra\n", disk));
+        check(!parse("4 4 1 1 2 0 " + now + " " + m + "\n", disk));
+        // the version as one bounded token
+        check(kiln_token("0.2.0-dev.29.19+20261119.c370680") == "0.2.0-dev.29.19+20261119.c370680");
+        check(kiln_token("") == "unknown" && kiln_token("a b\tc\n") == "a_b_c_" && kiln_token(std::string(100, 'x')).size() == 64);
+        check(kiln_token("-") == "unknown");  // "-" stands for no version in the record
     }
     // idle() and rearm() change nothing outside their phases
     for (Phase p : {Phase::complete, Phase::guarded, Phase::retry, Phase::locked}) {

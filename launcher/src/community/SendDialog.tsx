@@ -11,7 +11,7 @@ import type { KnownAction, ReportDraft, ReportPreview } from "../api/commands";
 import { useT } from "../i18n";
 import { Banner, Button, Cones, Field, KeyValue, Modal, Skeleton, StatusPill, TextArea, TextInput, fmtBytes, toast } from "../ui";
 import { INVITE, errKind, refreshCommunity, useCommunity, useCommunityUi, useSendOpen } from "./state";
-import { KINDS, kindKey, rateText, versionsLine } from "./parts";
+import { KINDS, discordWords, kindKey, rateText, versionsLine } from "./parts";
 
 const MAX = 90;
 const WORDS_MAX = 1500;
@@ -120,7 +120,7 @@ export function SendDialog() {
           ? <Button variant="primary" loading={busy} disabled={!st.data?.online || !p} data-testid="kc-send-now" onClick={() => send()}>{t("community.send.check.send")}</Button>
           : <Button variant="primary" data-testid="kc-send-signin" onClick={() => { useSendOpen.setState({ open: false }); ui.openSignIn(true); }}>{t("community.send.check.signInToSend")}</Button>}
       </>}>
-      {prep.error ? <Banner tone="err" title={t("community.send.err.relayTitle")}>{(prep.error as { message?: string }).message ?? ""}</Banner> : !p ? <Skeleton lines={5} /> : (
+      {prep.error ? <Banner tone="err" title={t("community.send.err.prepareTitle")}>{(prep.error as { message?: string }).message ?? ""}</Banner> : !p ? <Skeleton lines={5} /> : (
         <div className="k-stack kc-check" style={{ gap: 16 }} data-testid="kc-check">
           <section className="kc-block">
             <div className="kc-block-head"><span className="k-label">{t("community.send.check.public")}</span></div>
@@ -213,6 +213,14 @@ function SendError({ err, size, retry, sendWithout, save, recheck }: { err: NonN
       return <Banner tone="warn" title={t("community.send.err.tooNewTitle")} actions={<Button size="s" onClick={save}>{t("community.send.err.saveReport")}</Button>}>{t("community.send.err.tooNew")}</Banner>;
     case "not_found":
       return <Banner tone="info" title={t("community.send.err.staleTitle")}>{t("community.send.err.stale")}</Banner>;
+    case "discord": {
+      // Discord refused the post, or its rate limit holds it: frostdev.io answered, so not "can't be reached"
+      const w = discordWords(d, "report");
+      return <Banner tone="warn" title={w.title} actions={<>
+        <Button size="s" onClick={retry}>{t("common.retry")}</Button>
+        <button type="button" className="k-link" onClick={save}>{t("community.send.err.saveReport")}</button>
+      </>}>{w.text}</Banner>;
+    }
     default:
       return <Banner tone="err" title={t("community.send.err.relayTitle")} actions={<Button size="s" onClick={retry}>{t("common.retry")}</Button>}>{t("community.send.err.relay")}</Banner>;
   }

@@ -45,6 +45,9 @@ pub enum Kind {
     Expired,
     NotFound,
     BadRequest,
+    /** Discord refused the relay's request, or its rate limit holds it (`discord-refused`, `discord-rate-limited`):
+     *  frostdev.io answered, so not an outage; the problem is on Kiln's side, not the player's connection. */
+    Discord,
 }
 
 impl Kind {
@@ -60,6 +63,7 @@ impl Kind {
             Kind::Expired => "expired",
             Kind::NotFound => "not_found",
             Kind::BadRequest => "bad_request",
+            Kind::Discord => "discord",
         }
     }
 }
@@ -88,7 +92,15 @@ pub fn refusal(status: u16, body: &[u8]) -> Error {
     let reason = v.get("error").and_then(Value::as_str).unwrap_or("").replace('-', "_");
     let reason = reason.as_str();
     let num = |k: &str| v.get(k).and_then(Value::as_u64);
+    // Discord's reason as the UI may show it: one line of printable text, at most 160 characters, or nothing
+    let line = |k: &str| v.get(k).and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty() && s.chars().count() <= 160 && !s.chars().any(char::is_control));
     match (status, reason) {
+        // docs/relay-api.md: Discord refused the request (502) or rate-limits the relay (503). Told apart by the reason,
+        // so a 502 page of frostdev.io's own (no JSON) stays an outage
+        (_, "discord_refused") => Error::new(ErrorCode::Refused, "Discord didn't accept this from Kiln support.")
+            .with_detail(json!({ "kind": Kind::Discord.as_str(), "limited": false, "status": num("discordStatus"), "code": num("discordCode"), "reason": line("discordMessage") })),
+        (_, "discord_rate_limited") => Error::new(ErrorCode::Busy, "Discord asks Kiln support to wait before posting again.")
+            .with_detail(json!({ "kind": Kind::Discord.as_str(), "limited": true, "waitMin": num("retryAfter").map(|s| s.max(1).div_ceil(60)) })),
         (401, _) => err(ErrorCode::AuthFailed, Kind::Signin, "Sign in with Discord again."),
         (403, "not_member") => err(ErrorCode::Refused, Kind::NotMember, "You're not in the Kiln Discord yet."),
         (403, "too_young" | "too_new") => err(ErrorCode::Refused, Kind::TooYoung, "This Discord account is too new to send reports."),
@@ -618,6 +630,27 @@ mod tests {
         // the session's field may be called token
         let g: Grant = serde_json::from_value(json!({ "token": KEY, "account": account() })).unwrap();
         assert_eq!(g.session, KEY);
+    }
+
+    #[test]
+    fn discords_refusal_and_rate_limit_are_told_apart_from_an_outage() {
+        // Discord refused the relay's request: its status, code and reason, for the UI's "Discord didn't accept it"
+        let e = refusal(502, br#"{"error":"discord-refused","message":"Discord did not accept this.","discordStatus":400,"discordCode":50035,"discordMessage":"Invalid Form Body (name: This field is required)"}"#);
+        let d = e.detail.unwrap();
+        assert_eq!(d["kind"], "discord");
+        assert_eq!(d["limited"], false);
+        assert_eq!((d["status"].as_u64(), d["code"].as_u64(), d["reason"].as_str()), (Some(400), Some(50035), Some("Invalid Form Body (name: This field is required)")));
+        // a reason that is not one short line is left out, not shown
+        let d = refusal(502, format!(r#"{{"error":"discord-refused","discordStatus":403,"discordCode":null,"discordMessage":"{}"}}"#, "x".repeat(400)).as_bytes()).detail.unwrap();
+        assert_eq!((d["kind"].as_str(), d["status"].as_u64(), d["code"].is_null(), d["reason"].is_null()), (Some("discord"), Some(403), true, true));
+        assert!(refusal(502, br#"{"error":"discord-refused","discordStatus":403,"discordMessage":"Missing\u001bAccess"}"#).detail.unwrap()["reason"].is_null());
+        // Discord's rate limit: when to try again, in minutes (at least one)
+        let d = refusal(503, br#"{"error":"discord-rate-limited","message":"Slow down.","retryAfter":38}"#).detail.unwrap();
+        assert_eq!((d["kind"].as_str(), d["limited"].as_bool(), d["waitMin"].as_u64()), (Some("discord"), Some(true), Some(1)));
+        assert_eq!(refusal(503, br#"{"error":"discord-rate-limited","retryAfter":600}"#).detail.unwrap()["waitMin"], 10);
+        // a real outage keeps its words: frostdev.io's own 502 page, the relay's 503 unavailable (also a blocked account)
+        assert_eq!(kind_of(&refusal(502, b"<html>Bad Gateway</html>")), Some("relay"));
+        assert_eq!(kind_of(&refusal(503, br#"{"error":"unavailable","message":"Kiln support can't be reached right now."}"#)), Some("relay"));
     }
 
     #[test]

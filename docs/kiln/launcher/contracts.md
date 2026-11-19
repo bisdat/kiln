@@ -482,6 +482,7 @@ drop-in selections require an updated core. `dropins: true` keeps the older all-
 | `enshwick` | kiln-enshwick | library folder (`pack.toml`, or a folder with the mod DLL) | `plan_engine("enshwick")`; the plugin copies each enabled entry into `<game>/mods/<id>/` (Enshwick's loader reads only that folder), with its own receipts, and starts Enshwick's loader |
 | `shroudlink` | kiln-shroudlink | library folder (mod DLLs directly in it) | its own `plan_from` (the same rule as `compat.h`); roots are the enabled entries, then `shroudlink_mods/` and its direct subfolders |
 | `ember` | kiln-ember | library folder (one library) | `plan_engine("ember")`; finds and reports, starts nothing: Ember has published no mod ABI (the launcher says the mods don't run yet) |
+| `dllmod` | kiln-dllmod | Kiln's placed copy in `<game>/Mods/EnshroudedModLoader/<id>/` (an enabled package: the folder Enshrouded ModLoader reads too; Copy mode `../Mods/EnshroudedModLoader/<id>` from `profileReader` 4), else the library folder (DLLs with their `.dll.mod`) | `plan_engine("dllmod")`; the packages start at a local world's start; `dropins` never names `dllmod` (a core before `profileReader` 4 calls such a profile invalid). `docs/kiln/engines/dllmod.md` |
 
 Placement ownership requires `.kiln-library.json` plus a matching launcher receipt in
 `kiln/state/library-placements.json` (`{path, marker, files, extension?, game_folder?}` entries, recording relative paths,

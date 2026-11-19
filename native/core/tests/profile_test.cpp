@@ -175,7 +175,10 @@ int main(int argc, char** argv) try {
     const json names = json::parse(names_file);
     size_t checked = 0;
     // mods.flame: Kiln's copy of a Flame mod in game/mods/<id>, where the mod reads its own files (KILN_PROFILE_READER 3)
-    for (const auto& [kind, root] : {std::pair{"eml", "mods"}, std::pair{"greeneye", "greeneye"}, std::pair{"flame", "mods"}}) {
+    // mods.dllmod: Kiln's copy of a package for Enshrouded ModLoader in game/Mods/EnshroudedModLoader/<id>, where that
+    // loader and kiln-dllmod read it
+    for (const auto& [kind, root] : {std::pair{"eml", "mods"}, std::pair{"greeneye", "greeneye"}, std::pair{"flame", "mods"},
+                                     std::pair{"dllmod", "Mods/EnshroudedModLoader"}}) {
         for (const char* verdict : {"accept", "reject"}) {
             for (const auto& n : names.at(verdict)) {
                 const std::string path = std::string("../") + root + "/" + n.get<std::string>();
@@ -197,10 +200,16 @@ int main(int argc, char** argv) try {
                                      std::pair{"greeneye", "../greeneye/../outside"}, std::pair{"greeneye", "../greeneye/a/b"},
                                      std::pair{"flame", "../greeneye/safe"}, std::pair{"flame", "../mods/a/b"},
                                      std::pair{"flame", "../mods/../outside"}, std::pair{"shroudtopia", "../mods/safe"},
-                                     std::pair{"enshwick", "../mods/safe"}}) {
+                                     std::pair{"enshwick", "../mods/safe"}, std::pair{"dllmod", "../mods/safe"},
+                                     std::pair{"dllmod", "../Mods/EnshroudedModLoader/a/b"},
+                                     std::pair{"dllmod", "../Mods/EnshroudedModLoader/../outside"}, std::pair{"dllmod", "../greeneye/safe"},
+                                     std::pair{"greeneye", "../Mods/EnshroudedModLoader/safe"}}) {
         p = profile(); p["mods"][kind] = {{{"id", "safe"}, {"path", path}}};
         invalid(p, "path");
     }
+    // a "dropins" list may name dllmod
+    p = profile(); p["dropins"] = {"dllmod", "greeneye"};
+    g_state = State{}; parse(p.dump());
     std::printf("folder name table: %zu names agree\n", checked);
     // The actual profiles kiln-manage renders in Copy mode (crates/kiln-manage/tests/eml_packages.rs passes them), not a
     // hand-retyped approximation.

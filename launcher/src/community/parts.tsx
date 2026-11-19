@@ -145,5 +145,14 @@ export function rateText(d: Record<string, unknown>): string {
   return t("community.send.err.rate", { sent: typeof d.sent === "number" ? d.sent : 3, wait });
 }
 
+/** The words for Discord's refusal or rate limit (`detail` of a `discord` error: docs/kiln/launcher/discord.md), for a
+ *  report or for test results. Discord's reason is shown as Discord gave it (English), without its last full stop. */
+export function discordWords(d: Record<string, unknown>, what: "report" | "results"): { title: string; text: string } {
+  const k = what === "report" ? "community.send.err" : "community.tester.plan";
+  if (d.limited === true) return { title: t("community.send.err.discordLimitTitle"), text: t(`${k}.discordLimit`, { wait: waitWords(typeof d.waitMin === "number" ? d.waitMin : 1) }) };
+  const reason = typeof d.reason === "string" ? d.reason.trim().replace(/\.$/, "") : "";
+  return { title: t(`${k}.discordTitle`), text: reason ? t(`${k}.discord`, { reason }) : t(`${k}.discordNoReason`) };
+}
+
 /** The post's versions line as the relay writes it: "Kiln 0.2.0 · Launcher 0.2.0 · Arch Linux · game build 1 · 12 mods on". */
 export const versionsLine = (v: [string, string][]) => v.map(([k, x]) => (k ? `${k} ${x}` : x)).join(" · ");

@@ -117,7 +117,8 @@
       "shroudtopia": "Mod di Shroudtopia, eseguite da Kiln.",
       "enshwick": "Mod di Enshwick, eseguite dal loader di Enshwick.",
       "shroudlink": "Mod di shroudlink, eseguite da Kiln.",
-      "ember": "Mod per server Ember."
+      "ember": "Mod per server Ember.",
+      "dllmod": "Mod per Enshrouded ModLoader (CarryOn, Belt Lantern), avviate da Kiln quando parte un tuo mondo."
     },
     "profile": {
       "no_mods": "Gioca una volta senza mod: a questo avvio non si carica nessuna mod.",
@@ -176,6 +177,9 @@
       "reason": "Le mod di Ember non possono ancora funzionare: Ember non ha pubblicato un modo per eseguirle.",
       "help": "Per ora non c'è niente da fare. La mod resta nel tuo profilo e funzionerà quando Kiln supporterà le mod di Ember."
     },
+    "dllmod": {
+      "waiting": "Si avvia quando parte un tuo mondo."
+    },
     "shroudtopia": {
       "off": "Disattivata nelle impostazioni di Shroudtopia.",
       "off_help": "In shroudtopia/shroudtopia.json nella cartella config del profilo, imposta active a true nella voce mods chiamata \"{name}\" (il nome nella riga Registered mod di kiln.log). Salva il file; Shroudtopia lo rilegge mentre il gioco è in esecuzione.",
@@ -210,6 +214,8 @@
       "eml_aside_why": "EML: lascia il posto al loader di EML ({reason}).",
       "eml_idle": "Nessuna mod EML a questo avvio.",
       "ember": "Ember: le mod sono state trovate ma non possono ancora funzionare.",
+      "dllmod_unsupported": "Enshrouded ModLoader: le sue mod sono fatte per la build 26430625 del gioco, su questa build non ne parte nessuna.",
+      "dllmod_server": "Enshrouded ModLoader: le sue mod sono per il client del gioco; un server dedicato non ne avvia nessuna.",
       "shroudlink_elsewhere": "Un altro loader shroudlink esegue queste mod.",
       "set_aside": "SET: lascia il posto al loader di SET.",
       "set_aside_why": "SET: lascia il posto al loader di SET ({reason}).",

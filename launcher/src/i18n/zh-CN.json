@@ -1253,6 +1253,7 @@
       "flame": "Flame 模组",
       "shroudlink": "shroudlink 模组",
       "ember": "Ember 模组（尚不支持运行）",
+      "dllmod": "Enshrouded ModLoader 模组",
       "proxy": "加载器",
       "data": "游戏数据",
       "save": "存档文件",
@@ -3644,6 +3645,8 @@
       "whereHint": "Kiln 只检查更新并提供链接，模组需手动下载和安装。",
       "githubReleases": "GitHub Releases",
       "nexusFile": "Nexus Mods 上的文件",
+      "nexusOff": "此构建已停用 Nexus Mods",
+      "nexusOffBody": "此模组保存的来源是 Nexus Mods 文件 {destination}。Kiln 会保留它，但在此构建中不会检查。若要改为在 GitHub 上检查，请在此保存一个 GitHub 来源。",
       "repository": "仓库",
       "repositoryHint": "格式为 owner/repo，例如 github.com/owner/repo。",
       "releaseTag": "发布标签",
@@ -4140,6 +4143,30 @@
     "word": {
       "steam": "通过 Steam 启动",
       "direct": "直接启动"
+    }
+  },
+  "community": {
+    "banner": {
+      "afterMinutes": { "other": "{count} 分钟" },
+      "afterHours": { "other": "{count} 小时" }
+    },
+    "send": {
+      "err": {
+        "prepareTitle": "无法生成报告",
+        "discordTitle": "Discord 没有接受这份报告",
+        "discord": "Discord 给出的原因：{reason}。问题出在 Kiln 这边，不是你的网络连接。你的报告已保留：请稍后再试，或保存报告后自己发帖。",
+        "discordNoReason": "问题出在 Kiln 这边，不是你的网络连接。你的报告已保留：请稍后再试，或保存报告后自己发帖。",
+        "discordLimitTitle": "Discord 要求 Kiln 支持稍等",
+        "discordLimit": "Discord 限制了 Kiln 支持发帖的频率，目前已达到上限。这不是你的网络连接问题。你的报告已保留：请在 {wait}后再试。"
+      }
+    },
+    "tester": {
+      "plan": {
+        "discordTitle": "Discord 没有接受这些结果",
+        "discord": "Discord 给出的原因：{reason}。问题出在 Kiln 这边，不是你的网络连接。你的结果已保留：请稍后再试。",
+        "discordNoReason": "问题出在 Kiln 这边，不是你的网络连接。你的结果已保留：请稍后再试。",
+        "discordLimit": "Discord 限制了 Kiln 支持发帖的频率，目前已达到上限。你的结果已保留：请在 {wait}后再试。"
+      }
     }
   }
 }

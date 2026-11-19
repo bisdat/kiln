@@ -139,7 +139,7 @@ internal static class ModCatalog
 {
     /// <summary>Engines in the order the screen lists them (the launcher's MOD_KINDS, with chain DLLs after plugins).</summary>
     public static readonly string[] EngineOrder =
-        ["kiln", "native", "plugin", "chain", "emf", "eml", "xhl", "shroudforge", "set", "greeneye", "flame", "shroudtopia", "enshwick", "shroudlink", "ember"];
+        ["kiln", "native", "plugin", "chain", "emf", "eml", "xhl", "shroudforge", "set", "greeneye", "flame", "shroudtopia", "enshwick", "shroudlink", "ember", "dllmod"];
 
     /// <summary>The names players see (the launcher's KIND_SHORT, plain words for Kiln's own kinds).</summary>
     public static string EngineName(string kind) => kind switch
@@ -147,7 +147,7 @@ internal static class ModCatalog
         "kiln" => "Kiln", "native" => KilnText.T("catalog.engine.native"), "plugin" => KilnText.T("catalog.engine.plugin"),
         "chain" => KilnText.T("catalog.engine.chain"), "emf" => "EMF",
         "eml" => "EML", "xhl" => "XHL", "shroudforge" => "ShroudForge", "set" => "SET", "greeneye" => "Greeneye", "flame" => "Flame",
-        "shroudtopia" => "Shroudtopia", "enshwick" => "Enshwick", "shroudlink" => "shroudlink", "ember" => "Ember", _ => kind,
+        "shroudtopia" => "Shroudtopia", "enshwick" => "Enshwick", "shroudlink" => "shroudlink", "ember" => "Ember", "dllmod" => "Enshrouded ModLoader", _ => kind,
     };
 
     /// <summary>One line about what the engine is, for the details.</summary>
@@ -165,7 +165,7 @@ internal static class ModCatalog
     {
         ["kiln-emf"] = "emf", ["kiln-eml"] = "eml", ["shroudforge"] = "shroudforge", ["kiln-shroudforge"] = "shroudforge",
         ["kiln-set"] = "set", ["kiln-greeneye"] = "greeneye", ["kiln-flame"] = "flame", ["kiln-shroudtopia"] = "shroudtopia",
-        ["kiln-enshwick"] = "enshwick", ["kiln-shroudlink"] = "shroudlink", ["kiln-ember"] = "ember",
+        ["kiln-enshwick"] = "enshwick", ["kiln-shroudlink"] = "shroudlink", ["kiln-ember"] = "ember", ["kiln-dllmod"] = "dllmod",
     };
 
     // ------------------------------------------------------------------------------------------- normalisation ----
@@ -615,7 +615,7 @@ internal static class ModCatalog
         Guard("native", () => NativeMods(b));
         Guard("plugin", () => PluginMods(b, bootDoc));
         Guard("chain", () => ChainMods(b, bootDoc));
-        foreach (var kind in new[] { "emf", "eml", "set", "greeneye", "flame", "shroudtopia", "shroudlink", "ember" })
+        foreach (var kind in new[] { "emf", "eml", "set", "greeneye", "flame", "shroudtopia", "shroudlink", "ember", "dllmod" })
             Guard(kind, () => EngineMods(b, kind, bootDoc));
         Guard("xhl", () => Xhl(b));
         Guard("shroudforge", () => ShroudForge(b, bootDoc));
@@ -873,6 +873,9 @@ internal static class ModCatalog
                     reason ??= KilnText.T("catalog.ember.reason");
                     help = KilnText.T("catalog.ember.help");
                 }
+                // kiln-dllmod starts its packages when a world of your own starts: until then they wait for it
+                else if (kind == "dllmod" && state == ModRunState.Waiting && string.IsNullOrEmpty(reason))
+                    reason = KilnText.T("catalog.dllmod.waiting");
                 // own-loader: the engine's own loader runs it (Kiln copied it into that loader's folder)
                 else if (aside && state != ModRunState.Failed && line.State != "own-loader")
                 {
@@ -975,6 +978,14 @@ internal static class ModCatalog
                 };
             case "ember":
                 return (EngineHealth.Idle, KilnText.T("catalog.note.ember"));
+            // kiln-dllmod (packages for Enshrouded ModLoader): one client build only, never on a dedicated server
+            case "dllmod":
+                return word switch
+                {
+                    "unsupported" => (EngineHealth.Problem, KilnText.T("catalog.note.dllmod_unsupported")),
+                    "client only" => (EngineHealth.Idle, KilnText.T("catalog.note.dllmod_server")),
+                    _ => (health, null),
+                };
             case "shroudlink":
                 if (Bool(d, "claimedElsewhere") == true) return (EngineHealth.Idle, KilnText.T("catalog.note.shroudlink_elsewhere"));
                 return (health, null);

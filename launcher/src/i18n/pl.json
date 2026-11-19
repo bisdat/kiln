@@ -1283,6 +1283,7 @@
       "flame": "Mod Flame",
       "shroudlink": "Mod shroudlink",
       "ember": "Mod Ember (jeszcze nie działa)",
+      "dllmod": "Mod Enshrouded ModLoader",
       "proxy": "Loader",
       "data": "Dane gry",
       "save": "Plik zapisu",
@@ -4002,6 +4003,8 @@
       "whereHint": "Kiln tylko stamtąd czyta i pokazuje powiadomienie z linkiem. Nigdy nie pobiera ani nie instaluje wersji.",
       "githubReleases": "Wydania na GitHub",
       "nexusFile": "Plik na Nexus Mods",
+      "nexusOff": "Nexus Mods jest wyłączony w tej wersji",
+      "nexusOffBody": "Zapisanym źródłem tego moda jest plik Nexus Mods {destination}. Kiln je zachowuje, ale w tej wersji go nie sprawdza. Zapisz tutaj źródło na GitHubie, aby sprawdzać tam.",
       "repository": "Repozytorium",
       "repositoryHint": "owner/repo, jak w github.com/owner/repo.",
       "releaseTag": "Tag wydania",
@@ -4780,7 +4783,13 @@
         "big": "Ten raport ma {size}, a wysłać można do {limit}. Wyślij post bez pliku zip, potem zapisz raport i przekaż go zespołowi na Discordzie.",
         "sendWithout": "Wyślij bez pliku zip",
         "saveReport": "Zapisz raport",
-        "stillNot": "Nadal nie jesteś na Discordzie Kiln. Dołącz przez zaproszenie, potem naciśnij Dołączyłem."
+        "stillNot": "Nadal nie jesteś na Discordzie Kiln. Dołącz przez zaproszenie, potem naciśnij Dołączyłem.",
+        "prepareTitle": "Nie udało się utworzyć raportu",
+        "discordTitle": "Discord nie przyjął raportu",
+        "discord": "Discord podaje: {reason}. Problem leży po stronie Kiln, nie Twojego połączenia. Twój raport jest zachowany: spróbuj ponownie później albo zapisz raport i opublikuj go sam.",
+        "discordNoReason": "Problem leży po stronie Kiln, nie Twojego połączenia. Twój raport jest zachowany: spróbuj ponownie później albo zapisz raport i opublikuj go sam.",
+        "discordLimitTitle": "Discord prosi wsparcie Kiln o chwilę cierpliwości",
+        "discordLimit": "Discord ogranicza, jak często wsparcie Kiln może publikować, i ten limit jest teraz osiągnięty. To nie Twoje połączenie. Twój raport jest zachowany: spróbuj ponownie za {wait}."
       },
       "sent": {
         "title": "Wysłano",
@@ -4900,7 +4909,11 @@
         "sentToastDetail": "Są w poście wersji na #testing. Zespół oznaczy je, gdy przeczyta.",
         "how": "Jak",
         "untried": "Wypróbuj każdy krok albo oznacz go jako Nie mogłem wypróbować.",
-        "more": "Więcej dla tej wersji testowej"
+        "more": "Więcej dla tej wersji testowej",
+        "discordTitle": "Discord nie przyjął wyników",
+        "discord": "Discord podaje: {reason}. Problem leży po stronie Kiln, nie Twojego połączenia. Twoje wyniki są zachowane: spróbuj ponownie później.",
+        "discordNoReason": "Problem leży po stronie Kiln, nie Twojego połączenia. Twoje wyniki są zachowane: spróbuj ponownie później.",
+        "discordLimit": "Discord ogranicza, jak często wsparcie Kiln może publikować, i ten limit jest teraz osiągnięty. Twoje wyniki są zachowane: spróbuj ponownie za {wait}."
       },
       "unknown": "Nieznane"
     },

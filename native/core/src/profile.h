@@ -20,9 +20,10 @@
 // ("profileReader"), and the launcher writes a form only for a runtime whose bundle declares it (kiln-manage
 // profile::render). 2: a mods.eml path may be Copy mode's ../mods/<folder>, a mods.greeneye path ../greeneye/<id>
 // (every core before calls such a profile invalid). 3: a mods.flame path may be ../mods/<id> (Kiln's copy of a Flame mod
-// in the folder it reads its own files from; a core of revision 2 calls such a profile invalid). Raise it with the next
-// form an older core would refuse.
-#define KILN_PROFILE_READER 3
+// in the folder it reads its own files from; a core of revision 2 calls such a profile invalid). 4: mods.dllmod, whose
+// path may be ../Mods/EnshroudedModLoader/<id> (a core of revision 3 skips that list whole). Raise it with the next form
+// an older core would refuse.
+#define KILN_PROFILE_READER 4
 
 namespace kiln::profile {
 
@@ -43,10 +44,11 @@ struct Missing {
 // each engine's plugin reads its own list from json(). The core validates them like the others (a broken entry makes
 // the profile INVALID), counts them for kiln.log and boot.json, and reports missing folders. Internal kind numbers
 // for Missing: KILN_PROFILE_KINDS + index into kEngineKinds.
-inline constexpr uint32_t kEngineKindCount = 9;
+inline constexpr uint32_t kEngineKindCount = 10;
 inline constexpr const char* kEngineKinds[kEngineKindCount] = {"eml",         "shroudforge", "set",
                                                                "greeneye",    "flame",       "shroudtopia",
-                                                               "enshwick",    "shroudlink",  "ember"};
+                                                               "enshwick",    "shroudlink",  "ember",
+                                                               "dllmod"};
 
 struct State {
     uint32_t mode = KILN_PROFILE_LEGACY;

@@ -48,6 +48,10 @@ KilnResult KILN_CALL fake_path(int32_t kind, char* buffer, size_t capacity, size
     return KILN_OK;
 }
 
+// The running Kiln's version (KilnApi::version): what a release build reports
+const char* g_version = "0.2.0-dev.29.19";
+KilnStr KILN_CALL fake_version() { return {g_version, std::strlen(g_version)}; }
+
 bool expect(bool ok, const std::string& what) {
     ++g_checks;
     if (!ok) {
@@ -113,9 +117,10 @@ int main() {
     KilnApi api{};
     api.size = sizeof api;
     api.path = &fake_path;
+    api.version = &fake_version;
     kui::g_api = &api;
     const std::string id = kui::overlay_guard::detect_wrappers(g_root / "game").identity;
-    auto rec = [&](const char* fields) { return std::string("2 ") + fields + " " + id + "\n"; };
+    auto rec = [&](const char* fields) { return std::string("3 ") + fields + " 0.2.0-dev.29.19 " + id + "\n"; };
     auto reset = [&] { std::filesystem::remove(g_state / "overlay-start.guard"); };
 
     // The owner's sequence, 0.2.0-dev.29.18 candidate on Proton, 2026-11-19: the game died while the overlay was
@@ -228,6 +233,42 @@ int main() {
         expect(record_text() == rec("0 4 4 1 0"), "complete, the history kept, got " + record_text());
     });
     start("on after a quiet quit", [] { expect(!kui::overlay_guard_start(), "on"); });
+
+    // Inbox 97: a lock written by 0.2.0-dev.29.17 (old bugs, "failed twice at this stage") outlived the update to a Kiln
+    // that fixed them. A record of another Kiln, or one without a version (every Kiln before 0.2.0-dev.29.19), is
+    // cleared at the first start of the new one, and kiln.log says why.
+    std::ofstream(g_state / "overlay-start.guard", std::ios::binary) << "2 4 1 1 2 0 " + id + "\n";
+    start("29.17's lock after the update", [&] {
+        expect(!kui::overlay_guard_start(), "a lock from an older Kiln: the overlay's drawing is on");
+        expect(logged("Kiln was updated since the record was written (by a Kiln that did not note its version)"),
+               "kiln.log says the guard was cleared because Kiln was updated");
+        expect(!logged("failed twice") && !logged("graphics wrappers changed"), "and nothing else about the old record");
+        expect(record_text() == rec("0 0 0 0 0"), "the cleared record is written with this Kiln's version, got " + record_text());
+        stages(Stage::hooks);
+        expect(record_text() == rec("1 1 0 0 0"), "an attempt of this Kiln, got " + record_text());
+    });
+    start("guarded after its own death", [&] {
+        expect(kui::overlay_guard_start(), "a death of this Kiln's attempt still guards");
+        expect(!logged("Kiln was updated"), "the record is this Kiln's: no update line");
+    });
+    std::ofstream(g_state / "overlay-start.guard", std::ios::binary) << "3 4 2 2 2 0 0.2.0-dev.29.18 " + id + "\n";
+    start("29.18's lock after the update", [&] {
+        expect(!kui::overlay_guard_start(), "a lock from another version: the overlay's drawing is on");
+        expect(logged("Kiln was updated since the record was written (by Kiln 0.2.0-dev.29.18, this is 0.2.0-dev.29.19)"),
+               "the line names both versions");
+    });
+    std::ofstream(g_state / "overlay-start.guard", std::ios::binary) << rec("4 2 2 2 0");
+    start("this Kiln's lock", [&] {
+        expect(kui::overlay_guard_start(), "a lock from this very Kiln holds");
+        expect(!logged("Kiln was updated") && logged("it failed twice at this stage"), "the lock's own warning");
+    });
+    // a complete record of an older Kiln is rewritten quietly: nothing it said keeps the overlay off
+    std::ofstream(g_state / "overlay-start.guard", std::ios::binary) << "2 0 5 0 0 0 " + id + "\n";
+    start("29.17's complete record", [&] {
+        expect(!kui::overlay_guard_start(), "on");
+        expect(!logged("Kiln was updated"), "no line for a record that kept nothing off");
+        expect(record_text() == rec("0 0 0 0 0"), "written with this Kiln's version, got " + record_text());
+    });
 
     std::filesystem::remove_all(g_root);
     std::printf("overlay_guard_host: %u checks, %u failures\n", g_checks, g_failures);

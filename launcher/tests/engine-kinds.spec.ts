@@ -396,6 +396,20 @@ test("Enshwick, shroudlink and Ember mods: labels in the list, their plugins in 
   expect(words).toEqual(["Ember mod (doesn't run yet)", "Enshwick mod", "shroudlink mod"]);
 });
 
+test("packages for Enshrouded ModLoader: the kind's words, kiln-dllmod, and its state file on Logs > Engines", async ({ page }) => {
+  await desktop(page, "/logs");
+  await page.getByRole("tab", { name: "Engines" }).click();
+  const list = page.getByLabel("Engine plugins");
+  await expect(list.locator('[data-engine="dllmod"]')).toContainText("waiting");
+  await expect(list.locator('[data-engine="dllmod"]')).toContainText("carryon");
+  const words = await page.evaluate(async () => {
+    const { KIND_WORD } = await import("/src/deck/status.ts");
+    const { KIND_NAME, KIND_PLUGIN, IMPORTED_KINDS, runsYet } = await import("/src/api/kinds.ts");
+    return [KIND_WORD.dllmod, KIND_NAME.dllmod, KIND_PLUGIN.dllmod, IMPORTED_KINDS.includes("dllmod"), runsYet("dllmod")];
+  });
+  expect(words).toEqual(["Enshrouded ModLoader mod", "Enshrouded ModLoader", "kiln-dllmod", true, true]);
+});
+
 test("Logs > Engines reads Enshwick's and Ember's state files", async ({ page }) => {
   await desktop(page, "/logs");
   await page.getByRole("tab", { name: "Engines" }).click();

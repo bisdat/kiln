@@ -117,7 +117,8 @@
       "shroudtopia": "Моды Shroudtopia, их запускает Kiln.",
       "enshwick": "Моды Enshwick, их запускает загрузчик Enshwick.",
       "shroudlink": "Моды shroudlink, их запускает Kiln.",
-      "ember": "Серверные моды Ember."
+      "ember": "Серверные моды Ember.",
+      "dllmod": "Моды для Enshrouded ModLoader (CarryOn, Belt Lantern), Kiln запускает их, когда начинается ваш собственный мир."
     },
     "profile": {
       "no_mods": "Разовая игра без модов: в этом запуске моды не загружаются.",
@@ -176,6 +177,9 @@
       "reason": "Моды Ember пока не могут работать: Ember не опубликовал способ запуска модов.",
       "help": "Сейчас делать ничего не нужно. Мод остаётся в вашем профиле и заработает, когда Kiln начнёт поддерживать моды Ember."
     },
+    "dllmod": {
+      "waiting": "Запустится, когда начнётся ваш собственный мир."
+    },
     "shroudtopia": {
       "off": "Выключен в настройках Shroudtopia.",
       "off_help": "В shroudtopia/shroudtopia.json в папке config профиля задайте active = true в записи mods с именем «{name}» (имя из строки Registered mod в kiln.log). Сохраните файл; Shroudtopia перечитывает его во время игры.",
@@ -212,6 +216,8 @@
       "eml_aside_why": "EML: уступил место собственному загрузчику EML ({reason}).",
       "eml_idle": "В этом запуске нет модов EML.",
       "ember": "Ember: моды найдены, но пока не могут работать.",
+      "dllmod_unsupported": "Enshrouded ModLoader: его моды сделаны для сборки игры 26430625, поэтому на этой сборке ни один не запускается.",
+      "dllmod_server": "Enshrouded ModLoader: его моды для клиента игры; выделенный сервер не запускает ни один.",
       "shroudlink_elsewhere": "Эти моды запускает другой загрузчик shroudlink.",
       "set_aside": "SET: уступил место собственному загрузчику SET.",
       "set_aside_why": "SET: уступил место собственному загрузчику SET ({reason}).",

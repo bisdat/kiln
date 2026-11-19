@@ -614,9 +614,66 @@ two other conditions, `r12b` and `[r13+0x218] == 0`), else 0. That byte is the e
 So the button is **disabled**, not only restyled, when the bag and the chests alone cannot cover the fill: a fill only
 station outputs can complete cannot be pressed there, and the server's handling of that press (step 1) is reached only
 if something else sends it. The hotkey poll C `0xd68510` does not receive the status; whether the fill hotkey still
-sends the press was not shown by the static trace. Kiln does not hook this screen: enabling the button for Kiln clients
-would need the fill's own plan (the station's loaded inputs, the amount on the slider) on the client, which the craft
-snapshot does not carry. `Stations.Fill` from a mod and crafts use the outputs; the button does not. C7 checks the hotkey.
+sends the press was not shown by the static trace (C7 checks it).
+
+**The query behind the buttons** (read 2026-11-19, same client build, disassembly only; `objdump`, no decompiler).
+The status the screen reads is a cache of UI action queries at gameUi `+0x14f70` (the same cache
+`rules/client.CraftableAmount` reads, §10.2). C `0xb2dbe0` is its generic query, `u32 UiActionStatus(gameUi*, u32 a,
+u32 recipe, u32 item, u16 amount, u32 type, const RecipeInputCategorySelections*)` (`stations/client.UiActionStatus`):
+it builds a 0x4c-byte key (`+0` type, `+4` `a` = the station, `+0x1c` recipe, `+0x20` item, `+0x24` amount, `+0x2c` the
+32 bytes of selections), inserts it into the cache when it is new (value 0, "not run yet") and returns the value's
+first dword. Thin wrappers exist for type 4 (C `0xb2dd20`) and type 3 (C `0xb2dd70`); the station screen calls the
+generic function directly. The client program behind the dry runs is `FUN_1402b8430`: per cache entry it switches on
+the type (jump table at C `0x2bee34`): 0 an inventory transfer (C `0x4150c0` / `0x4149b0`), 1 a craft
+(`RecipeApply`, C `0x2be03a`, §10.4), 2 C `0x4117d0`, **3 a recipe fill** (`AutoTransferRecipe` at C `0x2be77f` with
+`station = key+4`, `crafts = key+0x24`, the selections `key+0x2c`, the player from `0x9bf9e0`, the stock from the
+client's `BaseStockForPlayer` at C `0x2bda75`), 4 an item fill (`AutoTransferItem`, C `0x2be462`), 5 a count
+(`0x4709b0`, stored at value `+4`). Every dry run is rolled back; the status is then written as described above.
+
+The production station's screen (the function at C `0xc743e0`) asks type 3 twice for the selected recipe: amount 1 at C
+`0xc7451a` and amount 10 at C `0xc746f3`, with the station (`[rbx]`), the recipe (`[rsi+0x10]`) and the selections
+copied from `[r14+8]`. Right after each call `cmp eax,1; sete` stores the enabled byte of the screen's action (ids 5 and
+6). (The read at C `0xbda1fd` described above builds its key inline with type 0, an inventory transfer for the station
+with `key+0x14` from its widget: it is not the fill's query.) So "+1" and "+10" are enabled exactly when their query
+answers 1, and the query's caller cannot tell a Kiln answer
+from the game's.
+
+**What Kiln does (since 0.2.0-dev.29.19, feature `stations.fill_ui`, Kiln clients).** kiln-items hooks
+`stations/client.UiActionStatus` (pattern plus `@stations/client.UiActionStatus.fill`, the "+1" call site, which pins the
+argument order and the type value). The hook goes in at the first client-world Pre with the server's craft-stock
+snapshot on (§10.5), never before. It calls the game's function first. Only a type-3 answer of 4 (missing materials)
+while the snapshot is on is looked at: when the server's answer for the same station, recipe and selections (category
+and option index of each, the padding bytes left out) covers at least `amount` more crafts, the hook returns 1;
+otherwise it returns the game's value and notes the key so the client asks the server. The server's answer is
+`Stations.Plan` for the press's own options (n more crafts, as many as the stock covers, up to 1000, the player's bag,
+the chests, then the opted-in outputs; the station's room and the recipe's water are in the plan), behind the same
+checks as the press (`StationsCore.SourceFillAllowed`). The logic is `stations_logic.h` (`fill_ui_status`,
+`note_fill_ask`, `drop_answered`), host-tested.
+
+**The input rows' "available" counts are not this query** (read 2026-11-19, the same build, disassembly only). They
+are built on the client, from a cache of the base's Magic chests:
+- `factory_station_info` (update C `0x336210`) is not the source: it fills a per-station record (state, recipe,
+  selections, position, the crafts its inventory holds at `+0xac`) and reads no base stock.
+- `cache_crafting_stock` (a client program, flags 5; update C `0x2b4150`; sys-read `LocalPlayerData`, sys-write
+  `PlayerBasesSystemClient`) finds the local player's base (C `0x46f460`) and walks its crafting-stock containers 40 a
+  frame, adding each container's stacks into a working hash map at `PlayerBasesSystemClient+0x1668` (item -> 8-byte value,
+  `u16` count first; C `0x40c6d0`, find C `0x2b1bf0`, add C `0x46d7e0`). When a pass ends C `0x46f460` copies it to the
+  published map at `+0x1610`.
+- `player_ui` (C `0x2b8430`, sys-write `G38UiPlayData`) copies that published map (getter C `0x4709a0`) into
+  `G38UiPlayData+0x2000` (C `0x2bd1ca`..`0x2bd2e9`) and sets `G38UiPlayData+0x828` when the player stands in a base
+  (C `0x2bd366`).
+- `UiAvailableCount` (C `0xd397d0`, `u32 (u32 item, inventory view*, stock map*)`) is the UI's count: the item's stacks
+  in the player's inventory view (72-byte entries at `+0x2d8`, item `+8`, count `+0x10`) plus, when `+0x828` is set, the
+  map's `u16`. The ingredient row widget (C `0xbb1850`, used by the crafting menu, C `0xc7883a` through C `0xbf4a90`, and
+  by the production station's screen, C `0xbb6562`) calls it twice: C `0xbb19b3` (return `0xbb19b8`) and C `0xbb2805`
+  (return `0xbb280a`), with `G38UiPlayData+0x2000` as the map. It has 9 other callers (other screens) that Kiln leaves alone.
+
+**What Kiln does (feature `stations.stock_ui`, Kiln clients).** kiln-items hooks `stations/client.UiAvailableCount` on
+demand (the same trigger as the fill query). Only for a call from the ingredient row's two sites
+(`stations/client.AvailableRowRet1` / `Ret2`, the game's return address as kiln.hooks reports it) and only for an item
+the server's snapshot names, it returns the greater of the game's count and the snapshot's (the server's bag, Magic
+chests and opted-in outputs, §10.5). Every other call and item is the game's. The cache maps are never written.
+`stations_logic.h` `stock_ui_count`, host-tested.
 
 ### 10.4 Which transaction, which thread
 

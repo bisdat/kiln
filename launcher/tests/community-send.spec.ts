@@ -4,7 +4,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 type Hooks = {
-  community: { requests: () => string[]; approve: () => void; setOnline: (on: boolean) => void; setRelay: (up: boolean) => void; join: () => void; forgetPrepared: () => void };
+  community: { requests: () => string[]; approve: () => void; setOnline: (on: boolean) => void; setRelay: (up: boolean) => void; join: () => void; forgetPrepared: () => void; setDiscord: (mode: "refused" | "limited" | null) => void };
   opened: () => string[]; setNoProxy: (on: boolean) => void; crash: () => void; externalStart: (id: string, at?: number) => void;
 };
 const mock = <T,>(page: Page, f: (h: Hooks) => T) => page.evaluate((src) => (new Function("h", `return (${src})(h)`))((window as unknown as { __kilnMock: Hooks }).__kilnMock), f.toString()) as Promise<T>;
@@ -103,6 +103,34 @@ test.describe("desktop", () => {
     await expect(state).toContainText("Your draft is kept. Send it when you're back online, or save the report and post it yourself.");
     await expect(page.getByTestId("kc-send-now")).toBeDisabled();
     await expect(page.getByTestId("kc-postmock")).toContainText("The game crashes when I open the map");
+    await state.getByRole("button", { name: "Save report" }).click();
+    await expect(page).toHaveURL(/#\/logs$/);
+  });
+
+  test("Discord refused the post: its reason, on Kiln's side and not the connection, the draft kept, Retry, Save report", async ({ page }) => {
+    await open(page, "/?mock=1&discord=in,discordrefused#/community");
+    await page.getByTestId("kc-send").click();
+    await writeAndCheck(page);
+    await page.getByTestId("kc-send-now").click();
+    const state = page.getByTestId("kc-send-state");
+    await expect(state).toContainText("Discord didn't accept the report");
+    await expect(state).toContainText("Discord said: Missing Permissions. This is on Kiln's side, not your connection. Your report is kept: try again later, or save the report and post it yourself.");
+    // not an outage: frostdev.io answered
+    await expect(state).not.toContainText("frostdev.io isn't answering");
+    await expect(page.getByTestId("kc-postmock")).toContainText("The game crashes when I open the map");
+    await mock(page, (h) => h.community.setDiscord(null));
+    await state.getByRole("button", { name: "Retry" }).click();
+    await expect(page.getByTestId("kc-sent")).toBeVisible();
+  });
+
+  test("Discord's rate limit: when to try again, Save report", async ({ page }) => {
+    await open(page, "/?mock=1&discord=in,discordlimit#/community");
+    await page.getByTestId("kc-send").click();
+    await writeAndCheck(page);
+    await page.getByTestId("kc-send-now").click();
+    const state = page.getByTestId("kc-send-state");
+    await expect(state).toContainText("Discord asks Kiln support to wait");
+    await expect(state).toContainText("Discord limits how often Kiln support can post, and the limit is reached right now. This is not your connection. Your report is kept: try again in 2 minutes.");
     await state.getByRole("button", { name: "Save report" }).click();
     await expect(page).toHaveURL(/#\/logs$/);
   });
@@ -288,6 +316,18 @@ test.describe("Steam Deck", () => {
     await expect(page.getByTestId("deck-crash")).toContainText("The game closed unexpectedly", { timeout: 10_000 });
     await page.locator('[data-deck-id="send-support"]').click();
     await expect.poll(() => focused(page)).toBe("kind-crash");
+  });
+
+  test("Discord refused the post: its reason, not \"can't be reached\"", async ({ page }) => {
+    await page.goto("/?mock=1&deck=steamdeck&discord=in,discordrefused#/deck/community");
+    await page.locator('[data-deck-id="send"]').click();
+    await page.locator('[data-deck-id="kind-mod"]').click();
+    await page.locator('[data-deck-id="when-play"]').click();
+    await page.locator('[data-deck-dialog="send-check"]').getByRole("button", { name: "Send to Kiln support" }).click();
+    const err = page.getByTestId("deck-send-err");
+    await expect(err).toContainText("Discord didn't accept the report");
+    await expect(err).toContainText("Discord said: Missing Permissions. This is on Kiln's side, not your connection.");
+    await expect(err).not.toContainText("can't be reached");
   });
 
   test("the known problem on the check step, what is sent, and offline", async ({ page }) => {

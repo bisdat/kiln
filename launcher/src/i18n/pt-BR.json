@@ -1263,6 +1263,7 @@
       "flame": "Mod Flame",
       "shroudlink": "Mod shroudlink",
       "ember": "Mod Ember (ainda não roda)",
+      "dllmod": "Mod do Enshrouded ModLoader",
       "proxy": "Loader",
       "data": "Dados do jogo",
       "save": "Arquivo de save",
@@ -3838,6 +3839,8 @@
       "whereHint": "O Kiln só lê lá e mostra um aviso com um link. Ele nunca baixa nem instala uma versão.",
       "githubReleases": "Releases do GitHub",
       "nexusFile": "Um arquivo no Nexus Mods",
+      "nexusOff": "O Nexus Mods está desativado nesta build",
+      "nexusOffBody": "A fonte salva deste mod é o arquivo do Nexus Mods {destination}. O Kiln a mantém, mas não a verifica nesta build. Salve aqui uma fonte do GitHub para verificar lá.",
       "repository": "Repositório",
       "repositoryHint": "dono/repo, como em github.com/dono/repo.",
       "releaseTag": "Tag da release",
@@ -4592,7 +4595,13 @@
         "big": "Este relatório tem {size}, e o máximo que pode ser enviado é {limit}. Envie o post sem o zip, depois salve o relatório e entregue-o à equipe no Discord.",
         "sendWithout": "Enviar sem o zip",
         "saveReport": "Salvar relatório",
-        "stillNot": "Você ainda não está no Discord do Kiln. Entre pelo convite e aperte Já entrei."
+        "stillNot": "Você ainda não está no Discord do Kiln. Entre pelo convite e aperte Já entrei.",
+        "prepareTitle": "Não foi possível criar o relatório",
+        "discordTitle": "O Discord não aceitou o relatório",
+        "discord": "O Discord informou: {reason}. O problema está do lado do Kiln, não na sua conexão. Seu relatório foi guardado: tente de novo mais tarde, ou salve o relatório e poste você mesmo.",
+        "discordNoReason": "O problema está do lado do Kiln, não na sua conexão. Seu relatório foi guardado: tente de novo mais tarde, ou salve o relatório e poste você mesmo.",
+        "discordLimitTitle": "O Discord pede que o suporte do Kiln espere",
+        "discordLimit": "O Discord limita a frequência com que o suporte do Kiln pode postar, e o limite foi atingido agora. Não é a sua conexão. Seu relatório foi guardado: tente de novo em {wait}."
       },
       "sent": {
         "title": "Enviado",
@@ -4704,7 +4713,11 @@
         "sentToastDetail": "Eles estão no post da build em #testing. A equipe os marca quando ler.",
         "how": "Como",
         "untried": "Tente cada passo, ou marque Não deu para tentar.",
-        "more": "Mais sobre esta versão de teste"
+        "more": "Mais sobre esta versão de teste",
+        "discordTitle": "O Discord não aceitou os resultados",
+        "discord": "O Discord informou: {reason}. O problema está do lado do Kiln, não na sua conexão. Seus resultados foram guardados: tente de novo mais tarde.",
+        "discordNoReason": "O problema está do lado do Kiln, não na sua conexão. Seus resultados foram guardados: tente de novo mais tarde.",
+        "discordLimit": "O Discord limita a frequência com que o suporte do Kiln pode postar, e o limite foi atingido agora. Seus resultados foram guardados: tente de novo em {wait}."
       },
       "unknown": "Desconhecido"
     },

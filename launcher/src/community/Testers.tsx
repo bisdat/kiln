@@ -14,12 +14,23 @@ import { t as tt, useT } from "../i18n";
 import { Button, Card, EmptyState, KeyValue, Menu, Modal, StatusPill, TextInput, fmtBytes, toast } from "../ui";
 import { useGame } from "../api/hooks";
 import { DeckButton, Dialog, Row, Word } from "../deck/ui";
-import { ago, cq, refreshCommunity, useCommunity, useCommunityUi, useTester } from "./state";
+import { ago, cq, errKind, refreshCommunity, useCommunity, useCommunityUi, useTester } from "./state";
+import { discordWords } from "./parts";
 import { Pick } from "./DeckCommunity";
 import { DeckSignIn } from "./SignIn";
 import { TypeDialog } from "./DeckSend";
 
 const RESULTS: StepResult[] = ["worked", "failed", "skipped"];
+
+/** Send results failed: Discord's refusal or rate limit, and frostdev.io not answering, in the player's language (the
+ *  backend's own sentence otherwise). The checklist keeps every result for the next try. */
+function resultsFailed(e: unknown) {
+  const d = (e as { detail?: Record<string, unknown> })?.detail ?? {};
+  const k = errKind(e);
+  if (k === "discord") { const w = discordWords(d, "results"); return toast.error({ code: "refused", message: w.text }, w.title); }
+  if (k === "relay") return toast.error({ code: "network", message: tt("community.signIn.relay") }, tt("community.send.err.relayTitle"));
+  return toast.error(e);
+}
 export const resultTone = (r: StepResult | null) => (r === "worked" ? "ok" : r === "failed" ? "err" : r === "skipped" ? "warn" : "idle") as "ok" | "err" | "warn" | "idle";
 const untilDate = (iso: string) => new Date(iso).toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" });
 /** Shown for a fact the launcher could not read. */
@@ -155,7 +166,7 @@ function Checklist({ plan, net }: { plan: TestPlan; net: boolean }) {
       qc.removeQueries({ queryKey: ["community", "prepare", "tester"] });
       await qc.invalidateQueries({ queryKey: cq.tester });
       toast.ok(t("community.tester.plan.sentToast"), t("community.tester.plan.sentToastDetail"));
-    } catch (e) { toast.error(e); } finally { setBusy(false); }
+    } catch (e) { resultsFailed(e); } finally { setBusy(false); }
   };
   const sent = plan.sent;
   return (
@@ -333,7 +344,7 @@ function DeckTester({ onClose, signedIn }: { onClose: () => void; signedIn: bool
       buttons={plan.sent ? <DeckButton primary onClick={onClose}>{t("common.ok")}</DeckButton>
         : <DeckButton primary disabled={done < plan.steps.length || (attach && !report.data)} onClick={() => api.testerResultsSend(attach, attach ? report.data?.prepared : undefined)
             .then(() => { qc.removeQueries({ queryKey: ["community", "prepare", "tester"] }); return qc.invalidateQueries({ queryKey: cq.tester }); })
-            .then(() => toast.ok(t("community.tester.plan.sentToast"))).catch((e) => toast.error(e))}>{t("community.tester.plan.sendResults")}</DeckButton>}>
+            .then(() => toast.ok(t("community.tester.plan.sentToast"))).catch(resultsFailed)}>{t("community.tester.plan.sendResults")}</DeckButton>}>
       <div className="deck-scroll" data-testid="deck-plan">
         {plan.sent ? <p className="deck-line" data-testid="deck-results-state">{plan.sent.read ? <><Word tone="ok">{t("community.posts.status.repliedSeen")}</Word> <span>{t("community.tester.plan.read", { name: plan.sent.read.by, ago: ago(plan.sent.read.at) })}</span></>
           : <><Word tone="idle">{t("community.posts.status.waiting")}</Word> <span>{t("community.tester.plan.sent", { ago: ago(plan.sent.at) })}</span></>}</p>

@@ -96,6 +96,12 @@ std::string modules(bool& streamline, overlay_guard::OptiScaler& optiscaler) {
     streamline = found.streamline;
     return found.identity;
 }
+// This Kiln's version as the record keeps it (overlay_guard::for_kiln): a release build's full version, e.g.
+// "0.2.0-dev.29.19".
+std::string kiln_version() {
+    const KilnStr v = g_api->version ? g_api->version() : KilnStr{};
+    return overlay_guard::kiln_token(v.ptr ? std::string(v.ptr, v.len) : std::string());
+}
 std::string utf8(const std::filesystem::path& p) {
     const auto u = p.u8string();
     return std::string(u.begin(), u.end());
@@ -307,13 +313,31 @@ bool overlay_guard_start() noexcept {
         path = (dir / L"overlay-start.guard").wstring();
         char b[513]; DWORD n = 0;
         HANDLE h = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, 0, nullptr);
+        bool have_record = false;
         if (h != INVALID_HANDLE_VALUE) {
             const bool ok = ReadFile(h, b, sizeof b, &n, nullptr);
             const DWORD read_error = ok ? 0 : GetLastError();
             CloseHandle(h);
             if (!ok) error("read", read_error);
             else if (!overlay_guard::parse(std::string(b, n), record)) error("understand", 0);
+            else have_record = true;
         } else if (const DWORD e = GetLastError(); e != ERROR_FILE_NOT_FOUND && e != ERROR_PATH_NOT_FOUND) error("open", e);
+        // A record another Kiln wrote (or one from before 0.2.0-dev.29.19, without a version) starts fresh: an update
+        // clears an old lock (inbox 97). Written now, as a complete record of this Kiln, so a start that installs no
+        // Vulkan hook (the drawing off for another reason) does not read the old record again next time.
+        const std::string kiln = kiln_version();
+        if (have_record && record.kiln != kiln) {
+            const bool held = record.phase != overlay_guard::Phase::complete || record.failures || record.wrapper_retry;
+            if (held) {
+                const std::string by = record.kiln.empty() ? std::string("by a Kiln that did not note its version")
+                                                           : "by Kiln " + record.kiln + ", this is " + kiln;
+                logf(KILN_LOG_INFO, "ui: overlay crash guard: Kiln was updated since the record was written (%s); its earlier overlay start failures%s are cleared, and the overlay's drawing is tried again",
+                     by.c_str(), record.phase == overlay_guard::Phase::locked ? " and its lock" : "");
+            }
+            record = overlay_guard::for_kiln(record, kiln, wrapper_set);
+            save();
+        }
+        record.kiln = kiln;  // a record that could not be read, or none: this Kiln's from its first save
         if (!record.modules.empty() && record.modules != wrapper_set)
             logf(KILN_LOG_INFO, record.wrapper_retry
                 ? "ui: overlay crash guard: graphics wrappers changed again before an overlay frame succeeded; keeping earlier startup failures"

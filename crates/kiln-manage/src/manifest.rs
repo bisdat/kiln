@@ -77,10 +77,13 @@ pub enum ModKind {
     /// Ember server SDK mods (one library per folder), found and reported by kiln-ember; not run until Ember publishes
     /// its mod ABI.
     Ember,
+    /// Packages for AndyPimms' Enshrouded ModLoader (a DLL with a `<file>.dll.mod` manifest, ABI 1: CarryOn, Belt
+    /// Lantern), run by kiln-dllmod from Kiln's copy in `<game>/Mods/EnshroudedModLoader/<id>/`.
+    Dllmod,
 }
 
 impl ModKind {
-    pub const ALL: [ModKind; 14] = [
+    pub const ALL: [ModKind; 15] = [
         ModKind::Kiln,
         ModKind::Native,
         ModKind::Plugin,
@@ -95,6 +98,7 @@ impl ModKind {
         ModKind::Enshwick,
         ModKind::Shroudlink,
         ModKind::Ember,
+        ModKind::Dllmod,
     ];
     /// Kiln's own kinds (kiln-core's `kiln.profile` service counts these: KILN_PROFILE_KIND_*).
     pub const CORE: [ModKind; 4] = [ModKind::Kiln, ModKind::Native, ModKind::Plugin, ModKind::Emf];
@@ -115,6 +119,7 @@ impl ModKind {
             ModKind::Enshwick => "enshwick",
             ModKind::Shroudlink => "shroudlink",
             ModKind::Ember => "ember",
+            ModKind::Dllmod => "dllmod",
         }
     }
 
@@ -143,6 +148,7 @@ impl ModKind {
             ModKind::Enshwick => Engine::Enshwick,
             ModKind::Shroudlink => Engine::Shroudlink,
             ModKind::Ember => Engine::Ember,
+            ModKind::Dllmod => Engine::Dllmod,
         })
     }
 
@@ -164,6 +170,7 @@ impl ModKind {
             D::Enshwick => ModKind::Enshwick,
             D::Shroudlink => ModKind::Shroudlink,
             D::Ember => ModKind::Ember,
+            D::Dllmod => ModKind::Dllmod,
             _ => return None,
         })
     }
@@ -186,6 +193,7 @@ impl ModKind {
             ModKind::Enshwick => D::Enshwick,
             ModKind::Shroudlink => D::Shroudlink,
             ModKind::Ember => D::Ember,
+            ModKind::Dllmod => D::Dllmod,
         }
     }
 

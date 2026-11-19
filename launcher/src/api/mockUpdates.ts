@@ -78,6 +78,13 @@ export function updatesMockHandlers(handlers: Record<string, Handler>, emit: Emi
         candidateVersion: i.latestVersion, candidateIdentity: i.latestGsid ? { releaseId: null, tag: null, assetId: null, assetName: null, artifactSha256: null, fileVersionId: i.latestGsid } : null,
         state: i.updateAvailable ? "available" : i.latestVersion ? "current" : "unknown", reason: i.latestVersion ? null : "network", coverage: "complete", checkedAt: iso(now - 600_000),
         pageUrl: `https://www.nexusmods.com/enshrouded/mods/${nexus.modId}?tab=files`, name: nexus.name };
+    } else if (src?.spec.provider === "nexus") {
+      // a Nexus Mods file the catalog did not install: not checked (nexus.rs); in a build with Nexus Mods off its
+      // provider is not there, and the mod is disabled with its source kept (coordinator.rs)
+      const source = { provider: "nexus" as const, destination: dest(src.spec), origin: src.origin, authenticated: false, spec: src.spec };
+      s = NEXUS_MOCK_ENABLED
+        ? { ...base, source, state: "unknown", reason: "not_checked", pageUrl: `https://www.nexusmods.com/enshrouded/mods/${src.spec.modId}` }
+        : { ...base, source, state: "disabled" };
     }
     return { ...s, ...(patches.get(e.id) ?? {}) };
   };

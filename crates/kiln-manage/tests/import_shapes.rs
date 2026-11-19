@@ -896,3 +896,83 @@ fn set_release_zip_leaves_its_loader_out_and_imports_its_mods() {
         }
     }
 }
+
+
+/// XHL's Kiln builds (Nexus 377 XHL-Kiln-Core, 364 XHL Blueprint, and the "(Kiln)" files of his mods, laid out as the
+/// Kiln SDK packs them): each is one Kiln mod, or one native Kiln mod, under its own id, with nothing left out and no
+/// note. Their ids start with "xhl-" like the XHL-Core plugins', and the Core carries a native DLL of its own in
+/// runtime/win-x64: neither makes them XHL-Core plugins (no native-plugin.ini), native proxies or engine mods.
+#[test]
+fn xhls_kiln_builds_import_as_kiln_mods() {
+    let t = tmp("xhl-kiln-builds");
+    let core = t.0.join("XHL-Kiln-Core-0.1.0");
+    put(&core, "xhl-kiln-core/kiln.mod.json", br#"{ "id": "xhl-kiln-core", "name": "XHL-Core (Kiln)", "version": "0.1.0",
+        "authors": ["XHL (original mods)", "Kiln port"], "apiVersion": "0.2.9", "side": "both", "entryAssembly": "Xhl.Kiln.Core.dll",
+        "exports": ["Xhl.Kiln.Core.dll"], "advanced": true,
+        "kilnBuild": { "version": "0.2.0-dev.29.17+20261118.c6b3352", "created": "2026-11-18T04:21:15Z" } }"#);
+    put(&core, "xhl-kiln-core/Xhl.Kiln.Core.dll", b"managed");
+    put(&core, "xhl-kiln-core/XHL-panel-font-OFL.txt", b"licence");
+    put(&core, "xhl-kiln-core/locales/en.json", br#"{"panel.title":"Mod Settings"}"#);
+    put(&core, "xhl-kiln-core/locales/zh-CN.json", br#"{"panel.title":"Mod Settings"}"#);
+    put(&core, "xhl-kiln-core/runtime/win-x64/xhl-game-panels.dll", &build_test_dll(&["xhl_hud_panels_v1"], b""));
+    let blueprint = t.0.join("XHL-Blueprint-0.1.0");
+    put(&blueprint, "native.json", br#"{ "format": 1, "id": "xhl-blueprint", "name": "XHL-blueprint", "version": "0.1.0", "side": "client",
+        "clients": "none", "dlls": ["xhl-blueprint.dll"], "phase": "boot", "init": "kiln_native_init", "kiln": ">=0.2.0-dev.28" }"#);
+    put(&blueprint, "xhl-blueprint.dll", &build_test_dll(&["kiln_native_init"], b""));
+    put(&blueprint, "Xhl.Blueprint.Keys.dll", b"managed");
+    put(&blueprint, "OFL.txt", b"licence");
+    let grapple = t.0.join("XHL-Grappling-Hook-Pull-2x-Kiln");
+    put(&grapple, "xhl-grappling-hook-pull-2x/kiln.mod.json", br#"{ "id": "xhl-grappling-hook-pull-2x", "name": "XHL-Grappling-Hook-Pull-2x",
+        "version": "0.1.0", "authors": ["XHL (original mods)", "Kiln port"], "apiVersion": "0.2.7", "side": "both",
+        "entryAssembly": "XhlGrapplingHookPull2x.dll" }"#);
+    put(&grapple, "xhl-grappling-hook-pull-2x/XhlGrapplingHookPull2x.dll", b"managed");
+    put(&grapple, "xhl-grappling-hook-pull-2x/xhl-display-names.json", br#"{"en":"Grappling Hook Pull 2x"}"#);
+    put(&grapple, "xhl-grappling-hook-pull-2x/lang/xhl-locales.json", br#"{"en":{}}"#);
+    let cases = [(&core, "kiln/xhl-kiln-core"), (&blueprint, "native/xhl-blueprint"), (&grapple, "kiln/xhl-grappling-hook-pull-2x")];
+    for (dir, want) in cases {
+        let z = t.0.join(format!("{}.zip", dir.file_name().unwrap().to_string_lossy()));
+        zip_of(dir, &z);
+        for (how, path) in [("zip", z), ("folder", dir.to_path_buf())] {
+            let (_k, dirs, r) = import(&[path]);
+            assert_eq!(found(&r), [want], "{want} {how}:\n{}", summary(&r));
+            assert!(r.skipped.is_empty() && r.notes.is_empty(), "{want} {how}:\n{}", summary(&r));
+            let lr = &r.imported[0];
+            let folder = library::path_of(&dirs, lr).unwrap();
+            match lr.kind {
+                ModKind::Kiln => assert!(folder.join("kiln.mod.json").is_file(), "{want} {how}: {}", folder.display()),
+                _ => assert!(folder.join("native.json").is_file() && folder.join("Xhl.Blueprint.Keys.dll").is_file(), "{want} {how}"),
+            }
+            if lr.id == "xhl-kiln-core" {
+                assert!(folder.join("runtime/win-x64/xhl-game-panels.dll").is_file() && folder.join("locales/zh-CN.json").is_file(),
+                    "the Core keeps its own native DLL and its texts: {}", folder.display());
+            }
+        }
+    }
+    // all of them in one drop, beside XHL's own XHL-Core plugin of the same mod (an EML package with native-plugin.ini):
+    // the Kiln build and the plugin are two Library entries of two kinds, the Kiln one never taken for the plugin
+    let both = t.0.join("both");
+    for (dir, _) in cases { copy_tree(dir, &both.join(dir.file_name().unwrap())); }
+    put(&both, "mods/XHL-Grappling-Hook-Pull-2x/mod.json", br#"{"id":"xhl-grappling-hook-pull-2x","name":"XHL-Grappling-Hook-Pull-2x","version":"2.1.0","capabilities":[]}"#);
+    put(&both, "mods/XHL-Grappling-Hook-Pull-2x/src/mod.lua", b"return {}");
+    put(&both, "mods/XHL-Grappling-Hook-Pull-2x/native-plugin.ini", b"[Plugin]\r\nEnabled=1\r\nDll=XHL-Grappling-Hook-Pull-2x.dll\r\n");
+    put(&both, "mods/XHL-Grappling-Hook-Pull-2x/xhl-plugin.json", br#"{"schema":1,"id":"xhl-grappling-hook-pull-2x","version":"2.1.0"}"#);
+    put(&both, "mods/XHL-Grappling-Hook-Pull-2x/XHL-Grappling-Hook-Pull-2x.dll", &build_test_dll(&["XhlNativePluginQuery", "XhlNativePluginStart", "XhlNativePluginRequestStop"], b""));
+    let (_k, _dirs, r) = import(&[both]);
+    assert_eq!(found(&r), ["eml/xhl-grappling-hook-pull-2x", "kiln/xhl-grappling-hook-pull-2x", "kiln/xhl-kiln-core", "native/xhl-blueprint"],
+        "{}", summary(&r));
+    assert!(r.skipped.is_empty(), "{}", summary(&r));
+}
+
+fn copy_tree(from: &Path, to: &Path) {
+    for e in std::fs::read_dir(from).unwrap() {
+        let e = e.unwrap();
+        let dst = to.join(e.file_name());
+        if e.file_type().unwrap().is_dir() {
+            std::fs::create_dir_all(&dst).unwrap();
+            copy_tree(&e.path(), &dst);
+        } else {
+            std::fs::create_dir_all(to).unwrap();
+            std::fs::copy(e.path(), dst).unwrap();
+        }
+    }
+}

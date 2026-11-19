@@ -9,7 +9,7 @@ ajv.addSchema(read("../common.schema.json"));
 const validate = ajv.compile(read("../profile.schema.json"));
 const profile = (kind, entries) => ({ format: 1, id: "test", generation: 1, mods: { [kind]: entries } });
 const entry = { id: "safe", version: "1.0.0", hash: `kdh1:${"a".repeat(64)}`, path: "profiles/test/eml/safe" };
-const kinds = ["eml", "xhl", "shroudforge", "set", "greeneye", "flame", "shroudtopia", "enshwick", "shroudlink", "ember"];
+const kinds = ["eml", "xhl", "shroudforge", "set", "greeneye", "flame", "shroudtopia", "enshwick", "shroudlink", "ember", "dllmod"];
 for (const kind of kinds) {
   assert(validate(profile(kind, [entry])), JSON.stringify(validate.errors));
   assert(validate(profile(kind, [{ ...entry, version: "V1.2.3" }])), "SemVersion prefix parity");
@@ -34,7 +34,7 @@ for (const kind of ["eml", "xhl", "flame"]) {
 }
 // One table of folder names for the three validators of ../mods/<folder> (kiln-manage, the native core, this schema).
 const names = read("../fixtures/profile/game-folder-names.json");
-for (const [kind, root] of [["eml", "mods"], ["xhl", "mods"], ["greeneye", "greeneye"], ["flame", "mods"]]) {
+for (const [kind, root] of [["eml", "mods"], ["xhl", "mods"], ["greeneye", "greeneye"], ["flame", "mods"], ["dllmod", "Mods/EnshroudedModLoader"]]) {
   for (const name of names.accept) {
     assert(validate(profile(kind, [{ ...entry, path: `../${root}/${name}` }])), `${kind} accept ${JSON.stringify(name)}: ${JSON.stringify(validate.errors)}`);
   }
@@ -53,5 +53,12 @@ for (const kind of ["kiln", "native", "emf", "plugin", ...kinds.filter((k) => ![
   assert.equal(validate(profile(kind, [{ ...entry, path: "../mods/safe" }])), false, kind);
 }
 assert.equal(validate({ ...profile("xhl", [entry]), dropins: ["xhl"] }), false);
+// mods.dllmod: Kiln's copy of a package in game/Mods/EnshroudedModLoader/<id> (profileReader 4); no other kind's folder
+for (const path of ["../Mods/EnshroudedModLoader/../outside", "../Mods/EnshroudedModLoader/a/b", "../mods/EnshroudedModLoader/safe", "../Mods/safe"]) {
+  assert.equal(validate(profile("dllmod", [{ ...entry, path }])), false, path);
+}
+for (const kind of ["eml", "greeneye", "flame", "native"]) {
+  assert.equal(validate(profile(kind, [{ ...entry, path: "../Mods/EnshroudedModLoader/safe" }])), false, kind);
+}
 assert.equal(validate({ ...profile("eml", []), generation: 18446744073709551615 }), false);
 console.log("engine profile schema checks passed");

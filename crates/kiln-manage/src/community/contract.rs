@@ -129,6 +129,14 @@ fn expect(name: &str, got: &Got) {
         "send a report, not in the server" => assert_eq!(kind(got).as_deref(), Some("not_member")),
         "send a report, account under 3 days old" => assert_eq!(kind(got).as_deref(), Some("too_young")),
         "send a report, not one of our zips" | "send a report, Discord not answering" => assert_eq!(kind(got).as_deref(), Some("relay")),
+        "send a report, Discord refused it" => {
+            let d = got.as_ref().unwrap_err();
+            assert_eq!((d["kind"].as_str(), d["status"].as_u64(), d["code"].as_u64(), d["reason"].as_str()), (Some("discord"), Some(403), Some(50013), Some("Missing Permissions")));
+        }
+        "send a report, Discord rate-limits the relay" => {
+            let d = got.as_ref().unwrap_err();
+            assert_eq!((d["kind"].as_str(), d["limited"].as_bool(), d["waitMin"].as_u64()), (Some("discord"), Some(true), Some(1)));
+        }
         "send a report, zip too big" => {
             let d = got.as_ref().unwrap_err();
             assert_eq!((d["kind"].as_str(), d["size"].as_u64(), d["limit"].as_u64()), (Some("too_big"), Some(4_194_304), Some(8_388_608)));
@@ -213,7 +221,7 @@ fn every_example_of_the_relays_contract_holds_for_the_launcher() {
         expect(name, &got);
         checked += 1;
     }
-    assert_eq!(checked, 35, "every example but /health");
+    assert_eq!(checked, 37, "every example but /health");
 }
 
 #[test]

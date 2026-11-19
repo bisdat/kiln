@@ -1263,6 +1263,7 @@
       "flame": "Flame mod",
       "shroudlink": "shroudlink mod",
       "ember": "Ember mod (doesn't run yet)",
+      "dllmod": "Enshrouded ModLoader mod",
       "proxy": "Loader",
       "data": "Game data",
       "save": "Save file",
@@ -3838,6 +3839,8 @@
       "whereHint": "Kiln only reads there and shows a notice with a link. It never downloads or installs a version.",
       "githubReleases": "GitHub releases",
       "nexusFile": "A file on Nexus Mods",
+      "nexusOff": "Nexus Mods is switched off in this build",
+      "nexusOffBody": "This mod's saved source is the Nexus Mods file {destination}. Kiln keeps it, but does not check it in this build. Save a GitHub source here to check there instead.",
       "repository": "Repository",
       "repositoryHint": "owner/repo, as in github.com/owner/repo.",
       "releaseTag": "Release tag",
@@ -4592,7 +4595,13 @@
         "big": "This report is {size}, and up to {limit} can be sent. Send the post without the zip, then save the report and give it to the team on Discord.",
         "sendWithout": "Send without the zip",
         "saveReport": "Save report",
-        "stillNot": "You're still not in the Kiln Discord. Join with the invite, then press I've joined."
+        "stillNot": "You're still not in the Kiln Discord. Join with the invite, then press I've joined.",
+        "prepareTitle": "The report could not be made",
+        "discordTitle": "Discord didn't accept the report",
+        "discord": "Discord said: {reason}. This is on Kiln's side, not your connection. Your report is kept: try again later, or save the report and post it yourself.",
+        "discordNoReason": "This is on Kiln's side, not your connection. Your report is kept: try again later, or save the report and post it yourself.",
+        "discordLimitTitle": "Discord asks Kiln support to wait",
+        "discordLimit": "Discord limits how often Kiln support can post, and the limit is reached right now. This is not your connection. Your report is kept: try again in {wait}."
       },
       "sent": {
         "title": "Sent",
@@ -4704,7 +4713,11 @@
         "sentToastDetail": "They're in the build's post in #testing. The team marks them when they've read them.",
         "how": "How",
         "untried": "Try each step, or mark it Couldn't try.",
-        "more": "More for this test build"
+        "more": "More for this test build",
+        "discordTitle": "Discord didn't accept the results",
+        "discord": "Discord said: {reason}. This is on Kiln's side, not your connection. Your results are kept: try again later.",
+        "discordNoReason": "This is on Kiln's side, not your connection. Your results are kept: try again later.",
+        "discordLimit": "Discord limits how often Kiln support can post, and the limit is reached right now. Your results are kept: try again in {wait}."
       },
       "unknown": "Not known"
     },

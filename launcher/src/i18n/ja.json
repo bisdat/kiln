@@ -1253,6 +1253,7 @@
       "flame": "Flame モッド",
       "shroudlink": "shroudlink モッド",
       "ember": "Ember モッド（まだ動作しません）",
+      "dllmod": "Enshrouded ModLoader モッド",
       "proxy": "ローダー",
       "data": "ゲームデータ",
       "save": "セーブファイル",
@@ -3756,6 +3757,8 @@
       "whereHint": "Kiln はそこを読んでリンク付きのお知らせを表示するだけです。バージョンをダウンロードやインストールすることはありません。",
       "githubReleases": "GitHub リリース",
       "nexusFile": "Nexus Mods のファイル",
+      "nexusOff": "このビルドでは Nexus Mods がオフになっています",
+      "nexusOffBody": "この MOD に保存されている確認先は Nexus Mods のファイル {destination} です。Kiln はこれを残しますが、このビルドでは確認しません。代わりに GitHub で確認するには、ここで GitHub の確認先を保存してください。",
       "repository": "リポジトリ",
       "repositoryHint": "owner/repo（github.com/owner/repo の形式）。",
       "releaseTag": "リリースタグ",
@@ -4498,7 +4501,13 @@
         "big": "このレポートは {size} で、送れるのは {limit} までです。zip なしで投稿を送り、レポートを保存して Discord でチームに渡してください。",
         "sendWithout": "zip なしで送る",
         "saveReport": "レポートを保存",
-        "stillNot": "まだ Kiln Discord に参加していません。招待から参加して、「参加しました」を押してください。"
+        "stillNot": "まだ Kiln Discord に参加していません。招待から参加して、「参加しました」を押してください。",
+        "prepareTitle": "レポートを作成できませんでした",
+        "discordTitle": "Discord がレポートを受け付けませんでした",
+        "discord": "Discord の理由: {reason}。原因は Kiln 側にあり、お使いの接続ではありません。レポートは保存されています。後でもう一度お試しいただくか、レポートを保存して自分で投稿してください。",
+        "discordNoReason": "原因は Kiln 側にあり、お使いの接続ではありません。レポートは保存されています。後でもう一度お試しいただくか、レポートを保存して自分で投稿してください。",
+        "discordLimitTitle": "Discord が Kiln サポートに待つよう求めています",
+        "discordLimit": "Discord は Kiln サポートが投稿できる頻度を制限しており、現在その上限に達しています。お使いの接続の問題ではありません。レポートは保存されています。{wait}後にもう一度お試しください。"
       },
       "sent": {
         "title": "送信しました",
@@ -4606,7 +4615,11 @@
         "sentToastDetail": "#testing のビルドの投稿に載っています。チームが読むと印が付きます。",
         "how": "手順",
         "untried": "各手順を試すか、「試せなかった」にしてください。",
-        "more": "このテストビルドのその他の操作"
+        "more": "このテストビルドのその他の操作",
+        "discordTitle": "Discord が結果を受け付けませんでした",
+        "discord": "Discord の理由: {reason}。原因は Kiln 側にあり、お使いの接続ではありません。結果は保存されています。後でもう一度お試しください。",
+        "discordNoReason": "原因は Kiln 側にあり、お使いの接続ではありません。結果は保存されています。後でもう一度お試しください。",
+        "discordLimit": "Discord は Kiln サポートが投稿できる頻度を制限しており、現在その上限に達しています。結果は保存されています。{wait}後にもう一度お試しください。"
       },
       "unknown": "不明"
     },

@@ -10,6 +10,12 @@
 //  - Only the base the player may craft from by the game's own right (CanAccessInventories, the payment's own test): a
 //    visitor without it is sent nothing.
 //  - Not authority: the craft's payment recounts everything (native kiln.stations, docs/re/stations.md §10).
+//  - The station screen's fill buttons (0.2.0-dev.29.19, client capability stations.fill_ui): the game enables a
+//    production station's "+1" and "+10" only when its own dry run on the bag and the Magic chests goes through. While
+//    the snapshot is on, kiln-items notes each fill the game refused for missing materials; the client asks the server
+//    about those (station, recipe, choices), the server answers how many more crafts its own fill with station outputs
+//    covers (StationsCore.FillCrafts, the rules the press itself runs with), and the client's query says "can fill" for
+//    up to that many. The press is the game's own; StationsCore.OnSourceFill runs it as Kiln's fill. docs/re/stations.md §10.3.
 // docs/kiln/services/stations.md, "What each client shows".
 using System.Collections.Concurrent;
 using System.Text;
@@ -48,6 +54,100 @@ internal sealed record CraftStockHello(bool Open)
     public static CraftStockHello Decode(ref NetReader r) => new(r.Bool());
 }
 
+/// <summary>One category choice of a station screen's fill (the game's selection: category, option index).</summary>
+internal readonly record struct FillChoice(uint Category, byte Index);
+
+/// <summary>A fill the station screen asked the game about: the station, the recipe, its four category choices.</summary>
+internal readonly record struct FillKey(uint Station, uint Recipe, FillChoice C0, FillChoice C1, FillChoice C2, FillChoice C3)
+{
+    public IEnumerable<FillChoice> Choices => [C0, C1, C2, C3];
+
+    public static void Write(NetWriter w, in FillKey k)
+    {
+        w.UInt32(k.Station).UInt32(k.Recipe);
+        foreach (var c in k.Choices) w.UInt32(c.Category).Byte(c.Index);
+    }
+
+    public static FillKey Read(ref NetReader r)
+    {
+        var station = r.UInt32();
+        var recipe = r.UInt32();
+        var c = new FillChoice[4];
+        for (var i = 0; i < 4; i++) c[i] = new FillChoice(r.UInt32(), r.Byte());
+        return new FillKey(station, recipe, c[0], c[1], c[2], c[3]);
+    }
+
+    public static FillKey Of(in StationsNative.FillKey k) =>
+        new(k.Station, k.Recipe, new(k.C0.Category, k.C0.Index), new(k.C1.Category, k.C1.Index), new(k.C2.Category, k.C2.Index),
+            new(k.C3.Category, k.C3.Index));
+
+    public StationsNative.FillKey Native() => new()
+    {
+        Station = Station, Recipe = Recipe,
+        C0 = new StationsNative.Choice { Category = C0.Category, Index = C0.Index },
+        C1 = new StationsNative.Choice { Category = C1.Category, Index = C1.Index },
+        C2 = new StationsNative.Choice { Category = C2.Category, Index = C2.Index },
+        C3 = new StationsNative.Choice { Category = C3.Category, Index = C3.Index },
+    };
+
+    /// <summary>The choices as a fill takes them (none: the station's own).</summary>
+    public IReadOnlyList<CategoryChoice> FillChoices() => [.. Choices.Where(c => c.Category != 0).Select(c => new CategoryChoice(c.Category, c.Index))];
+}
+
+/// <summary>The server's answer for one asked fill: how many more crafts its fill with station outputs covers now.</summary>
+internal readonly record struct FillAnswer(FillKey Key, uint Crafts);
+
+/// <summary>Client to server: fills the station screen asked the game about, that the game refused for missing materials
+/// and that no answer names yet (at most 16).</summary>
+internal sealed record CraftStockFillAsk(FillKey[] Keys)
+{
+    public const ushort Id = 3;
+
+    public static void Encode(CraftStockFillAsk m, NetWriter w)
+    {
+        var n = Math.Min(m.Keys.Length, CraftStock.MaxFillKeys);
+        w.Byte((byte)n);
+        for (var i = 0; i < n; i++) FillKey.Write(w, m.Keys[i]);
+    }
+
+    public static CraftStockFillAsk Decode(ref NetReader r)
+    {
+        var n = Math.Min((int)r.Byte(), CraftStock.MaxFillKeys);
+        var keys = new FillKey[n];
+        for (var i = 0; i < n; i++) keys[i] = FillKey.Read(ref r);
+        return new CraftStockFillAsk(keys);
+    }
+}
+
+/// <summary>Server to client: the answers for every fill the open menu asked about. Empty: none (the game's buttons).</summary>
+internal sealed record CraftStockFillAnswers(FillAnswer[] Rows)
+{
+    public const ushort Id = 4;
+
+    public static void Encode(CraftStockFillAnswers m, NetWriter w)
+    {
+        var n = Math.Min(m.Rows.Length, CraftStock.MaxFillKeys);
+        w.Byte((byte)n);
+        for (var i = 0; i < n; i++)
+        {
+            FillKey.Write(w, m.Rows[i].Key);
+            w.UInt32(m.Rows[i].Crafts);
+        }
+    }
+
+    public static CraftStockFillAnswers Decode(ref NetReader r)
+    {
+        var n = Math.Min((int)r.Byte(), CraftStock.MaxFillKeys);
+        var rows = new FillAnswer[n];
+        for (var i = 0; i < n; i++)
+        {
+            var k = FillKey.Read(ref r);
+            rows[i] = new FillAnswer(k, r.UInt32());
+        }
+        return new CraftStockFillAnswers(rows);
+    }
+}
+
 /// <summary>Started at the first service tick (ServiceTick.AutoStart), so the channel is there before anyone joins. It
 /// registers the channel and, on a client, watches the screen; nothing else runs until a Kiln client opens a crafting
 /// menu (Kiln.Blocks' data tick does not start here).</summary>
@@ -65,12 +165,18 @@ internal static class CraftStock
     internal static readonly TimeSpan KeepAlive = TimeSpan.FromSeconds(5);
     internal static readonly TimeSpan SessionLife = TimeSpan.FromSeconds(15);
     internal static readonly CraftStockRows Off = new([]);
+    internal const int MaxFillKeys = StationsNative.MaxFillKeys;
+    internal const string FillUiCapability = "stations.fill_ui";
+    internal const string StockUiCapability = "stations.stock_ui";
 
     private sealed class Session
     {
         public string? Sent;  // the key of the last snapshot that went out; null: none yet, or the last send failed
         public long Seen;     // ms of the last hello
         public bool Due = true;
+        public readonly List<FillKey> Asked = [];  // the station screen's fills the client asked about, oldest first
+        public string? FillSent;                   // the key of the last answers that went out
+        public bool FillDue;
     }
 
     private static readonly object Gate = new();
@@ -81,12 +187,16 @@ internal static class CraftStock
     private static int _warned;
     private static readonly Dictionary<uint, Session> Sessions = new();
     private static readonly ConcurrentQueue<(EntityId Player, bool Open)> Inbox = new();
+    private static readonly ConcurrentQueue<(EntityId Player, FillKey[] Keys)> AskInbox = new();
     private static readonly Dictionary<BaseId, IReadOnlyDictionary<ItemId, long>> StockCache = new();
 
     /// <summary>Test hooks: the clock (ms), what a player is sent (null: off), the delivery (true: it went out).</summary>
     internal static Func<long> Clock = static () => Environment.TickCount64;
     internal static Func<EntityId, CraftStockRows?>? BuildHook;
     internal static Func<EntityId, CraftStockRows, bool>? SendHook;
+    /// <summary>Test hooks: the answers for a player's asked fills (null: the real plan), their delivery.</summary>
+    internal static Func<EntityId, IReadOnlyList<FillKey>, FillAnswer[]>? FillBuildHook;
+    internal static Func<EntityId, CraftStockFillAnswers, bool>? FillSendHook;
 
     /// <summary>Registers the channel (and on a client the screen watch). Idempotent; a refused channel is not retried.</summary>
     internal static void Start()
@@ -107,7 +217,14 @@ internal static class CraftStock
                     NetDirection.ToClient)
                 .Register<CraftStockHello>(CraftStockHello.Id, static (m, w) => CraftStockHello.Encode(m, w),
                     static (ref NetReader r) => CraftStockHello.Decode(ref r), static (m, ctx) => Enqueue(ctx.Player, m.Open),
-                    NetDirection.ToServer);
+                    NetDirection.ToServer)
+                // 0.2.0-dev.29.19: the station screen's fill buttons. An older peer has no such message ids and drops them.
+                .Register<CraftStockFillAsk>(CraftStockFillAsk.Id, static (m, w) => CraftStockFillAsk.Encode(m, w),
+                    static (ref NetReader r) => CraftStockFillAsk.Decode(ref r), static (m, ctx) => EnqueueAsk(ctx.Player, m.Keys),
+                    NetDirection.ToServer)
+                .Register<CraftStockFillAnswers>(CraftStockFillAnswers.Id, static (m, w) => CraftStockFillAnswers.Encode(m, w),
+                    static (ref NetReader r) => CraftStockFillAnswers.Decode(ref r), static (m, _) => { if (!Client.IsHosting) ClientFill(m); },
+                    NetDirection.ToClient);
         }
         catch (Exception e)
         {
@@ -136,6 +253,38 @@ internal static class CraftStock
         if (player.IsNone || Inbox.Count > 1024) return;
         Inbox.Enqueue((player, open));
         EnsureTick();
+    }
+
+    /// <summary>A client's asked fills (any thread): the server's tick takes them.</summary>
+    internal static void EnqueueAsk(EntityId player, FillKey[] keys)
+    {
+        if (player.IsNone || keys.Length == 0 || AskInbox.Count > 1024) return;
+        AskInbox.Enqueue((player, keys));
+        EnsureTick();
+    }
+
+    /// <summary>Asked fills (tick thread): added to the player's open session (oldest dropped past 16), answered at once.
+    /// Without an open session (no hello) they are dropped.</summary>
+    internal static void Ask(EntityId player, IReadOnlyList<FillKey> keys)
+    {
+        lock (Gate)
+        {
+            if (!Sessions.TryGetValue(player.Value, out var s)) return;
+            foreach (var k in keys)
+            {
+                if (k.Station == 0 || k.Recipe == 0) continue;
+                s.FillDue = true;  // asked again: the client has no answer for it, so the answers go out again
+                if (s.Asked.Contains(k)) continue;
+                if (s.Asked.Count >= MaxFillKeys) s.Asked.RemoveAt(0);
+                s.Asked.Add(k);
+            }
+        }
+    }
+
+    /// <summary>Tests: the fills a player's session holds.</summary>
+    internal static IReadOnlyList<FillKey> AskedOf(EntityId player)
+    {
+        lock (Gate) return Sessions.TryGetValue(player.Value, out var s) ? [.. s.Asked] : [];
     }
 
     private static void EnsureTick()
@@ -197,6 +346,7 @@ internal static class CraftStock
     {
         var n = 0;
         while (n++ < 256 && Inbox.TryDequeue(out var h)) Hello(h.Player, h.Open);
+        while (n++ < 512 && AskInbox.TryDequeue(out var a)) Ask(a.Player, a.Keys);
         List<(EntityId Player, Session S)>? due = null;
         var now = Clock();
         lock (Gate)
@@ -207,7 +357,7 @@ internal static class CraftStock
             foreach (var p in Sessions.Where(kv => now - kv.Value.Seen > (long)SessionLife.TotalMilliseconds).Select(kv => kv.Key).ToList())
                 Sessions.Remove(p);
             foreach (var (p, s) in Sessions)
-                if (s.Due || step % RefreshSteps == 0) (due ??= []).Add((new EntityId(p), s));
+                if (s.Due || s.FillDue || step % RefreshSteps == 0) (due ??= []).Add((new EntityId(p), s));
         }
         if (due is null) return;
         StockCache.Clear();  // each base's chests read once per pass
@@ -226,17 +376,102 @@ internal static class CraftStock
             rows = Off;
         }
         var key = Key(rows);
+        bool send;
         lock (Gate)
         {
             if (!Sessions.TryGetValue(player.Value, out var live) || !ReferenceEquals(live, s)) return;  // it ended meanwhile
-            if (!s.Due && s.Sent == key) return;
+            send = s.Due || s.Sent != key;
         }
-        var ok = Deliver(player, rows);
+        if (send)
+        {
+            var ok = Deliver(player, rows);
+            lock (Gate)
+            {
+                s.Due = false;
+                s.Sent = ok ? key : null;  // not sent: the next pass tries again
+            }
+        }
+        RefreshFill(player, s, rows.Rows.Length > 0);
+    }
+
+    // The answers for the session's asked fills: again when one is asked, and when an answer changed (the refresh
+    // steps). While the snapshot is empty there is nothing to answer (the client's query stays the game's).
+    private static void RefreshFill(EntityId player, Session s, bool stockOn)
+    {
+        FillKey[] asked;
+        bool due;
         lock (Gate)
         {
-            s.Due = false;
-            s.Sent = ok ? key : null;  // not sent: the next pass tries again
+            if (s.Asked.Count == 0) return;
+            asked = [.. s.Asked];
+            due = s.FillDue;
         }
+        FillAnswer[] answers;
+        try
+        {
+            answers = stockOn ? BuildFill(player, asked) : [];
+        }
+        catch (Exception e) when (e is KilnUnavailableException or InvalidOperationException or KeyNotFoundException or ArgumentException)
+        {
+            answers = [];
+        }
+        var key = FillKeyText(answers);
+        lock (Gate)
+        {
+            if (!Sessions.TryGetValue(player.Value, out var live) || !ReferenceEquals(live, s)) return;
+            if (!due && s.FillSent == key) return;
+        }
+        var ok = DeliverFill(player, new CraftStockFillAnswers(answers));
+        lock (Gate)
+        {
+            s.FillDue = false;
+            s.FillSent = ok ? key : null;
+        }
+    }
+
+    /// <summary>The answers for a player's asked fills (tick thread): per key, how many more crafts the button's fill with
+    /// station outputs covers now (0: none, or the button's rules refuse it).</summary>
+    internal static FillAnswer[] BuildFill(EntityId player, IReadOnlyList<FillKey> keys)
+    {
+        if (FillBuildHook is { } hook) return hook(player, keys);
+        if (!Capabilities.Is(Stations.OutputSourcesCapability) || !Capabilities.Is(Stations.FillCapability)) return [.. keys.Select(k => new FillAnswer(k, 0))];
+        if (!Stations.Available || !Players.Available) return [.. keys.Select(k => new FillAnswer(k, 0))];
+        bool? mayAccess = Players.Find(player) is { InGame: true } who ? StationsCore.CanAccessInventories(who) : null;
+        var answers = new FillAnswer[keys.Count];
+        for (var i = 0; i < keys.Count; i++)
+        {
+            uint crafts;
+            try
+            {
+                crafts = StationsCore.FillCrafts(player, new EntityId(keys[i].Station), keys[i].Recipe, keys[i].FillChoices(), mayAccess);
+            }
+            catch (Exception e) when (e is ArgumentException or KeyNotFoundException)
+            {
+                crafts = 0;  // a key that names no station or a choice out of range
+            }
+            answers[i] = new FillAnswer(keys[i], crafts);
+        }
+        return answers;
+    }
+
+    internal static string FillKeyText(FillAnswer[] answers)
+    {
+        var b = new StringBuilder();
+        foreach (var a in answers)
+        {
+            b.Append(a.Key.Station).Append(':').Append(a.Key.Recipe);
+            foreach (var c in a.Key.Choices) b.Append(',').Append(c.Category).Append('/').Append(c.Index);
+            b.Append('=').Append(a.Crafts).Append(';');
+        }
+        return b.ToString();
+    }
+
+    private static bool DeliverFill(EntityId player, CraftStockFillAnswers m)
+    {
+        if (FillSendHook is { } hook) return hook(player, m);
+        if (Client.IsHosting && Client.HasLocalPlayer && Client.LocalPlayer == player) return ApplyFill(m);
+        if (_channel is null || Network.PeerOf(player) is not { } peer || !peer.HasChannel(ChannelName)) return false;
+        return _channel.SendTo(player, m);
     }
 
     /// <summary>What a player is sent now: null when nothing of theirs can be raised (no right to the base's
@@ -335,10 +570,16 @@ internal static class CraftStock
             _open = _ticking = false;
         }
         while (Inbox.TryDequeue(out _)) { }
+        while (AskInbox.TryDequeue(out _)) { }
+        _lastAsked = "";
+        _lastAskPoll = _lastAskSent = 0;
         StockCache.Clear();
         Clock = static () => Environment.TickCount64;
         BuildHook = null;
         SendHook = null;
+        FillBuildHook = null;
+        FillSendHook = null;
+        AskHook = null;
         ServerSideHook = null;
         HelloHook = null;
         ApplyHook = null;
@@ -381,12 +622,14 @@ internal static class CraftStock
     /// or closed (the server is told, the counts go back to the game's).</summary>
     internal static void ClientChanged(GameScreen before, GameScreen now)
     {
-        var open = now.Kind == ScreenKind.Crafting && ServerSide() && Capabilities.Is(Stations.CraftUiCapability);
+        var open = now.Kind == ScreenKind.Crafting && ServerSide() &&
+                   (Capabilities.Is(Stations.CraftUiCapability) || Capabilities.Is(FillUiCapability) || Capabilities.Is(StockUiCapability));
         if (open == _open) return;
         _open = open;
         SwitchTick(open);
         _lastHello = Environment.TickCount64;
         SendHello(open);
+        _lastAsked = "";
         if (!open) Apply(Off);
     }
 
@@ -415,10 +658,65 @@ internal static class CraftStock
     internal static void ClientTick(GameScreen now)
     {
         if (!_open || now.Kind != ScreenKind.Crafting) return;  // Changed ends the watch
+        PollAsks(Environment.TickCount64);
         var tick = Environment.TickCount64;
         if (tick - _lastHello < (long)KeepAlive.TotalMilliseconds) return;
         _lastHello = tick;
         SendHello(true);
+    }
+
+    private static string _lastAsked = "";
+    private static long _lastAskPoll, _lastAskSent;
+    internal static readonly TimeSpan AskPoll = TimeSpan.FromMilliseconds(250);
+    /// <summary>Test hook: an ask sent (instead of the channel or the hosting server's inbox).</summary>
+    internal static Action<FillKey[]>? AskHook;
+
+    /// <summary>Every 250 ms while a crafting menu is open (the game's UI thread): the fills the station screen asked the
+    /// game about that it refused for missing materials, with no answer yet (native), go to the server once each set.</summary>
+    internal static void PollAsks(long nowMs)
+    {
+        if (!_open || nowMs - _lastAskPoll < (long)AskPoll.TotalMilliseconds) return;
+        _lastAskPoll = nowMs;
+        if (!StationsCore.Backend.HasFillUi) return;
+        var (rc, raw) = StationsCore.Backend.FillAsks();
+        if (rc != StationsNative.Ok && rc != StationsNative.BufferTooSmall) return;
+        var keys = raw.Select(k => FillKey.Of(k)).ToArray();
+        var text = string.Join(';', keys.Select(k => k.ToString()));
+        if (keys.Length == 0 || (text == _lastAsked && nowMs - _lastAskSent < (long)KeepAlive.TotalMilliseconds)) return;
+        _lastAsked = text;
+        _lastAskSent = nowMs;  // the same set again only after 5 s: an ask or its answer may have been lost
+        SendAsk(keys);
+    }
+
+    private static void SendAsk(FillKey[] keys)
+    {
+        if (AskHook is { } hook)
+        {
+            hook(keys);
+            return;
+        }
+        if (Client.IsHosting && Client.HasLocalPlayer)
+        {
+            EnqueueAsk(Client.LocalPlayer, keys);  // the server half in this process takes it on its tick
+            return;
+        }
+        _channel?.SendToServer(new CraftStockFillAsk(keys));
+    }
+
+    // The server's answers (the client's main thread). Ones that arrive after the menu closed are not kept.
+    internal static void ClientFill(CraftStockFillAnswers m)
+    {
+        if (!_open && m.Rows.Length > 0) return;
+        ApplyFill(m);
+    }
+
+    /// <summary>Hands the answers to kiln.stations (the station screen's fill query reads them); empty clears them.</summary>
+    internal static bool ApplyFill(CraftStockFillAnswers m)
+    {
+        if (!StationsCore.Backend.HasFillUi) return false;
+        var rows = (m.Rows.Length > 0 && !_open ? [] : m.Rows).Take(MaxFillKeys)
+            .Select(a => new StationsNative.FillAnswer { Key = a.Key.Native(), Crafts = a.Crafts }).ToArray();
+        return StationsCore.Backend.SetFillAnswers(rows) == StationsNative.Ok;
     }
 
     private static void SendHello(bool open)

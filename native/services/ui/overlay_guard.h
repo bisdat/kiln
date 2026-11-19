@@ -15,6 +15,8 @@ struct Record {
     unsigned failures = 0;
     std::string modules;
     bool wrapper_retry = false;
+    // The Kiln that wrote the record (KilnApi::version, as kiln_token), since 0.2.0-dev.29.19; "" in older records.
+    std::string kiln = {};
 };
 struct Start { Record record; bool off; };
 // No record/complete -> trying. Unfinished trying -> guarded (one death), or locked
@@ -30,7 +32,9 @@ struct Start { Record record; bool off; };
 inline Start begin(Record r, const std::string& modules) {
     if (r.modules != modules && !r.wrapper_retry) {
         const bool had_identity = !r.modules.empty();
+        std::string kiln = std::move(r.kiln);
         r = {};
+        r.kiln = std::move(kiln);
         r.wrapper_retry = had_identity;
     }
     r.modules = modules;
@@ -43,6 +47,25 @@ inline Start begin(Record r, const std::string& modules) {
         r.stage = Stage::begun;
     }
     return {r, r.phase == Phase::guarded || r.phase == Phase::locked};
+}
+// The Kiln version as the record keeps it: one token without blanks, at most 64 bytes; "unknown" when there is none
+// ("-" stands for no version in the record, encode).
+inline std::string kiln_token(std::string v) {
+    if (v.size() > 64) v.resize(64);
+    for (char& c : v)
+        if (static_cast<unsigned char>(c) <= ' ' || c == 0x7f) c = '_';
+    return v.empty() || v == "-" ? std::string("unknown") : v;
+}
+// Before begin(): a record another Kiln wrote (an update, a downgrade) or one without a version (every Kiln before
+// 0.2.0-dev.29.19) starts fresh, history, lock and wrapper recovery cleared: the deaths it counts were another Kiln's,
+// and a lock 0.2.0-dev.29.17 wrote for bugs a later Kiln fixed kept the overlay off after the update (inbox 97). A record
+// of this very Kiln is returned as it is.
+inline Record for_kiln(Record r, const std::string& kiln, const std::string& modules) {
+    if (r.kiln == kiln) return r;
+    Record fresh;
+    fresh.modules = modules;
+    fresh.kiln = kiln;
+    return fresh;
 }
 inline Record finish(Record r) {
     if (r.phase == Phase::guarded) r.phase = Phase::retry;
@@ -74,22 +97,26 @@ inline Record at_exit(Record r) {
     return r;
 }
 inline std::string encode(const Record& r) {
-    return "2 " + std::to_string(unsigned(r.phase)) + " " + std::to_string(unsigned(r.stage)) + " " +
+    return "3 " + std::to_string(unsigned(r.phase)) + " " + std::to_string(unsigned(r.stage)) + " " +
         std::to_string(unsigned(r.failed_stage)) + " " + std::to_string(r.failures) + " " +
-        std::to_string(unsigned(r.wrapper_retry)) + " " + r.modules + "\n";
+        std::to_string(unsigned(r.wrapper_retry)) + " " + (r.kiln.empty() ? std::string("-") : r.kiln) + " " + r.modules + "\n";
 }
-// First field is the format version. Reject partial, oversized, future or malformed records.
+// First field is the format version: 3 since 0.2.0-dev.29.19 (the Kiln version before the wrapper identity), 2 and 1
+// before. Reject partial, oversized, future or malformed records. A Kiln before 0.2.0-dev.29.19 rejects a version 3
+// record as one it cannot read and starts without it: it tries the overlay, it does not lock.
 inline bool parse(const std::string& text, Record& out) {
     out = {};
     if (text.size() > 512) return false;
     std::istringstream in(text);
     unsigned version, phase, stage, failed, count, wrapper_retry = 0;
-    std::string modules, extra;
-    if (!(in >> version >> phase >> stage >> failed >> count) || (version != 1 && version != 2)) return false;
-    if (version == 2 && (!(in >> wrapper_retry) || wrapper_retry > 1)) return false;
+    std::string modules, extra, kiln;
+    if (!(in >> version >> phase >> stage >> failed >> count) || version < 1 || version > 3) return false;
+    if (version >= 2 && (!(in >> wrapper_retry) || wrapper_retry > 1)) return false;
+    if (version == 3 && (!(in >> kiln) || kiln.size() > 64)) return false;
+    if (kiln == "-") kiln.clear();
     if (!(in >> modules) || (in >> extra) || phase > 4 || stage > 5 || failed > 5 || count > 2 || modules.size() > 128)
         return false;
-    out = {Phase(phase), Stage(stage), Stage(failed), count, modules, wrapper_retry != 0};
+    out = {Phase(phase), Stage(stage), Stage(failed), count, modules, wrapper_retry != 0, kiln};
     return true;
 }
 } // namespace kui::overlay_guard

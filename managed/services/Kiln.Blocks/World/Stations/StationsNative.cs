@@ -211,7 +211,29 @@ internal static unsafe class StationsNative
         // ---- the crafting menu's snapshot for Kiln clients (GitHub #68 step 2). Header.Size tells whether they are here. ----
         public delegate* unmanaged[Cdecl]<Stack*, uint, int> SetCraftStock;
         public delegate* unmanaged[Cdecl]<uint*, uint, uint*, uint, uint*, int> CraftItems;
+        // ---- the station screen's fill buttons for Kiln clients (GitHub #68, 0.2.0-dev.29.19). Header.Size tells. ----
+        public delegate* unmanaged[Cdecl]<FillAnswer*, uint, int> SetFillAnswers;
+        public delegate* unmanaged[Cdecl]<FillKey*, uint, uint*, int> FillAsks;
     }
+
+    /// <summary>KilnStationFillKey: a fill the station screen asks the game about (40 bytes).</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct FillKey
+    {
+        public uint Station, Recipe;
+        public Choice C0, C1, C2, C3;
+    }
+
+    /// <summary>KilnStationFillAnswer: the server's answer for one key (48 bytes).</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct FillAnswer
+    {
+        public FillKey Key;
+        public uint Crafts, Reserved;
+    }
+
+    /// <summary>KILN_STATIONS_MAX_FILL_KEYS: fills a Kiln client asks about, and answers it keeps.</summary>
+    public const int MaxFillKeys = 16;
 
     [StructLayout(LayoutKind.Sequential)]
     public struct Collect
@@ -234,6 +256,8 @@ internal static unsafe class StationsNative
     public static readonly int TableStock = TableCollect + sizeof(nint);
     /// <summary>The table size through <see cref="Table.CraftItems"/>: the crafting menu's snapshot (GitHub #68 step 2).</summary>
     public static readonly int TableCraftStock = TableStock + 2 * sizeof(nint);
+    /// <summary>The table size through <see cref="Table.FillAsks"/>: the station screen's fill buttons (0.2.0-dev.29.19).</summary>
+    public static readonly int TableFillUi = TableCraftStock + 2 * sizeof(nint);
     /// <summary>The plan's size before 0.2.0-dev.29.17 (no <see cref="Plan.Outputs"/>).</summary>
     public static readonly int PlanV1 = sizeof(Plan) - 2 * MaxInputs * sizeof(uint);
     /// <summary>The plan's size with outputs and without <see cref="Plan.Chests"/>.</summary>

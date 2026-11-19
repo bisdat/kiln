@@ -160,6 +160,10 @@ pub enum Engine {
     Flame,
     Shroudlink,
     Ember,
+    /// AndyPimms' Enshrouded ModLoader (github.com/aebischer/Enshrouded-ModLoader): its dinput8.dll runs packages with a
+    /// .dll.mod manifest (CarryOn, Belt Lantern). Kiln runs those packages itself (kiln-dllmod); its dinput8.dll stays a
+    /// DLL mod Kiln chain-loads when a player adds it (kiln-dllmod then steps aside).
+    Dllmod,
     ModLoaderProxy,
     UltimateAsiLoader,
     Aldrich,
@@ -224,6 +228,9 @@ pub const ENGINES: &[EngineInfo] = &[
     EngineInfo { engine: Engine::Ember, word: "ember", name: "Ember (server SDK)",
         proxies: &["powrprof.dll", "iphlpapi.dll", "dbghelp.dll"], exports: &[], texts: &["ember-loader", "ember_loader"],
         what: "a server mod framework" },
+    // AndyPimms' loader names its world profile files' header (ENSHROUDED_MODS_V1) and logs to ModLoader/mod-loader.log
+    EngineInfo { engine: Engine::Dllmod, word: "enshrouded-modloader", name: "Enshrouded ModLoader", proxies: &["dinput8.dll"],
+        exports: &[], texts: &["enshrouded_mods_v1"], what: "a DLL mod loader (CarryOn, Belt Lantern)" },
     EngineInfo { engine: Engine::ModLoaderProxy, word: "modloader-proxy", name: "ModLoader Proxy",
         proxies: &["dinput8.dll", "powrprof.dll"], exports: &[], texts: &["modloader-proxy.dll", "chainloader.ini"],
         what: "a DLL chain loader" },
@@ -282,6 +289,7 @@ impl Engine {
             Engine::Flame => ProxyKind::Flame,
             Engine::Shroudlink => ProxyKind::Shroudlink,
             Engine::Ember => ProxyKind::Ember,
+            Engine::Dllmod => ProxyKind::Dllmod,
             Engine::ModLoaderProxy => ProxyKind::ModLoaderProxy,
             Engine::UltimateAsiLoader => ProxyKind::UltimateAsiLoader,
             Engine::Aldrich => ProxyKind::Aldrich,
@@ -434,7 +442,7 @@ pub fn short_name(engine: Engine) -> &'static str {
 /// Engines whose mods Kiln runs itself (a plugin per engine): their own loader in a package is not needed.
 pub fn kiln_runs(engine: Engine) -> bool {
     matches!(engine, Engine::Emf | Engine::Eml | Engine::ShroudForge | Engine::Set | Engine::Greeneye | Engine::Flame
-        | Engine::Shroudtopia | Engine::Enshwick | Engine::Shroudlink | Engine::Ember)
+        | Engine::Shroudtopia | Engine::Enshwick | Engine::Shroudlink | Engine::Ember | Engine::Dllmod)
 }
 
 /// The engine whose own loader is a DLL directly in `dir`, when Kiln runs that engine's mods itself ([`kiln_runs`]): a
@@ -710,6 +718,11 @@ pub fn detect_dll(path: &Path, bytes: &[u8], exports: &[String]) -> Option<Detec
     }
     let class = crate::pe::classify_bytes(bytes);
     let engine = Engine::of_proxy(class.kind).filter(|e| *e != Engine::Kiln)?; // Kiln's own proxy: library's rule
+    // Enshrouded ModLoader's own dinput8.dll keeps Kiln's own rules (a DLL mod Kiln chain-loads, as before kiln-dllmod):
+    // a player who wants its MODS page adds it, and kiln-dllmod steps aside while it runs
+    if engine == Engine::Dllmod {
+        return None;
+    }
     // a modified EML loader is left out with what it is and what does not run, never as "not needed" (Unknown: the
     // import skips it with that reason; detect_folder does not take its folder for an EML mod)
     if engine == Engine::Eml && let Some(what) = &class.modified {
@@ -731,6 +744,32 @@ pub fn detect_dll(path: &Path, bytes: &[u8], exports: &[String]) -> Option<Detec
     Some(detected(DetectKind::Proxy, Some(engine), path, loader_reason(engine, &file)))
 }
 
+/// A package folder for Enshrouded ModLoader (one or more DLLs with their `.dll.mod` manifest directly in it,
+/// [`crate::dllmod::packages_in`]): one Library entry named after the folder (the loader's package id is the folder's name
+/// and the DLL's), with the version of its first kind=mod package. A folder whose packages Kiln cannot run (a manifest
+/// the format refuses, a mod without its export) is left out with the reason. None for any other folder.
+pub fn dllmod_folder(dir: &Path) -> Option<Detected> {
+    if crate::dllmod::packages_in(dir).is_empty() {
+        return None;
+    }
+    let shown = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let mut d = detected(DetectKind::Dllmod, Some(Engine::Dllmod), dir, String::new());
+    match crate::dllmod::read_folder(dir) {
+        Ok(f) => {
+            d.version = f.mods.first().or(f.libraries.first()).map(|(_, m)| m.version.clone());
+            d.reason = mod_reason(Engine::Dllmod, &shown);
+            if f.mods.is_empty() {
+                d.reason += " (library packages only: they load when a mod that requires them runs)";
+            }
+        }
+        Err(e) => {
+            d.kind = DetectKind::Unknown;
+            d.reason = format!("{shown}: a package for Enshrouded ModLoader that Kiln cannot run: {e}");
+        }
+    }
+    Some(d)
+}
+
 /// The Library kind of an engine's mods.
 pub fn engine_kind(engine: Engine) -> DetectKind {
     match engine {
@@ -745,6 +784,7 @@ pub fn engine_kind(engine: Engine) -> DetectKind {
         Engine::Flame => DetectKind::Flame,
         Engine::Shroudlink => DetectKind::Shroudlink,
         Engine::Ember => DetectKind::Ember,
+        Engine::Dllmod => DetectKind::Dllmod,
         Engine::UltimateAsiLoader => DetectKind::Asi,
         Engine::ReShade => DetectKind::Reshade,
         Engine::OptiScaler => DetectKind::Proxy,
@@ -983,6 +1023,10 @@ pub fn is_container(dir: &Path) -> bool {
 /// whose own DLL is another engine's mod (Greeneye, Enshwick, Flame, Shroudtopia).
 pub fn detect_folder(dir: &Path) -> Option<Detected> {
     let has = |f: &str| dir.join(f).is_file();
+    // a package for Enshrouded ModLoader: a DLL with its .dll.mod manifest directly in the folder
+    if let Some(d) = dllmod_folder(dir) {
+        return Some(d);
+    }
     if has("flame.json") {
         let m = read_json(&dir.join("mod.json"));
         return Some(folder_detected(DetectKind::Flame, Engine::Flame, dir, m.as_ref(), "this Flame mod"));
