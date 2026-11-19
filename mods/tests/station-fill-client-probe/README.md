@@ -29,10 +29,10 @@ bash mods/tests/station-fill-client-probe/build-for-dev29.17.sh
 
 The script uses a separate cached copy of upstream **tag `v0.2.0-dev.29.17`**, verifies that its SDK is **API 0.2.9**, copies only this probe's source/project into the tagged tree, builds it with the actual matching SDK, and validates the resulting ZIP's manifest. It does not alter the research branch's `main` or any other Git branch.
 
-The verified output is:
+The verified local output is written directly to **`~/Downloads`** (the GitHub Actions build overrides this to its own artifact staging directory):
 
 ```text
-mods/tests/station-fill-client-probe/bin/Release/station-fill-client-probe-0.1.1.zip
+~/Downloads/station-fill-client-probe-0.1.1.zip
 ```
 
 Import **0.1.1** using the normal Kiln Launcher procedure; disable/remove the previously imported **0.1.0** which requires API 0.2.10. Never enable two versions of the same mod.
