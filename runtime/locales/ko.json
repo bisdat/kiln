@@ -1,0 +1,1069 @@
+{
+  "language": {
+    "name": "한국어"
+  },
+  "menu": {
+    "title": "모드 관리자",
+    "game_title": "모드",
+    "subtitle": {
+      "loaded": "모드 {count}개 중 {loaded}개 로드됨"
+    },
+    "sections": {
+      "mods": "모드",
+      "network": "네트워크",
+      "keys": "키",
+      "overlay": "오버레이",
+      "graphics": "그래픽"
+    },
+    "shroudlink": {
+      "open": "shroudlink 메뉴",
+      "back": "모드로 돌아가기"
+    },
+    "hints": {
+      "back": "뒤로",
+      "next_section": "다음 섹션",
+      "arrows": "방향키",
+      "move": "이동",
+      "choose": "선택",
+      "search": "검색",
+      "gamepad": "게임패드: LB / RB 섹션, A 선택, B 뒤로"
+    }
+  },
+  "mods": {
+    "engines": {
+      "all": "모든 모드",
+      "attention": "확인 필요",
+      "menus": "메뉴 항목",
+      "menus_note": "모드가 게임 메뉴에 추가한 항목입니다. 여기서 고르면 메뉴에서와 같은 동작을 합니다.",
+      "settings": "Kiln 설정"
+    },
+    "captions": {
+      "engines": "엔진",
+      "all": "모든 모드",
+      "attention": "확인 필요",
+      "details": "세부 정보",
+      "settings": "KILN 설정",
+      "pause_entries": "일시 정지 메뉴 항목",
+      "main_entries": "메인 메뉴 항목"
+    },
+    "search": {
+      "hint": "모드 검색 (Ctrl+F)"
+    },
+    "empty": {
+      "loading": "모드 목록을 읽는 중...",
+      "none": "설치된 모드가 없습니다.",
+      "none_hint": "Kiln 런처(라이브러리)에서 모드를 추가하고 프로필에 넣은 뒤 게임을 다시 시작하세요.",
+      "no_match": "\"{search}\"에 맞는 모드가 없습니다.",
+      "no_match_hint": "다른 단어로 해 보거나 검색창을 지우세요.",
+      "nothing": "아무것도 없습니다.",
+      "nothing_hint": "왼쪽에서 모든 모드를 고르세요."
+    },
+    "side": {
+      "client": "게임 전용",
+      "both": "게임과 서버",
+      "world": "내 월드 전용",
+      "server": "서버 전용"
+    },
+    "details": {
+      "pick_list": "목록에서 모드를 고르면 무엇인지, 로드되었는지, 설정이 어떤지 볼 수 있습니다.",
+      "pick": "모드를 고르면 세부 정보를 볼 수 있습니다.",
+      "id_version": "{id}   ·   버전 {version}",
+      "wrong": "무엇이 잘못됐나",
+      "state": "상태",
+      "engine": "엔진",
+      "load_order": "로드 순서",
+      "loads_as": "{number}번째로 로드됩니다.",
+      "needs": "필요 항목",
+      "dependency": "{id} {range}",
+      "dependency_optional": "{id} {range} (선택)",
+      "dependency_optional_off": "{id} {range} (선택): 로드 안 됨",
+      "dependency_missing": "{id} {range}: 없음",
+      "folder": "폴더",
+      "status": "상태"
+    },
+    "menus": {
+      "open": "열기",
+      "unavailable": "\"{entry}\"은(는) 지금 여기서 쓸 수 없습니다.",
+      "plugin": "Kiln 플러그인",
+      "hidden": "{mod}   ·   지금 게임 메뉴에 없음"
+    }
+  },
+  "catalog": {
+    "chip": {
+      "loaded": "로드됨",
+      "waiting": "대기 중",
+      "off": "꺼짐",
+      "failed": "실패",
+      "not_loaded": "로드 안 됨",
+      "missing": "없음"
+    },
+    "engine": {
+      "native": "네이티브 DLL 모드",
+      "plugin": "Kiln 플러그인",
+      "chain": "체인 DLL"
+    },
+    "about": {
+      "kiln": "Kiln 자체 모드 (C#).",
+      "native": "Kiln이 시작할 때 불러오는 DLL 모드입니다.",
+      "plugin": "Kiln을 확장하는 네이티브 플러그인입니다.",
+      "chain": "Kiln이 게임 옆에서 시작하는 다른 DLL입니다.",
+      "emf": "Kiln이 실행하는 Enshrouded Mod Framework 모드입니다.",
+      "eml": "Enshrouded Mod Loader 모드: 게임이 시작되기 전에 게임 데이터를 바꿉니다.",
+      "xhl": "게임의 mods 폴더에 넣는 XHL-Core 플러그인입니다. 따로 설치한 XHL-Core만 불러오며, Kiln은 불러오지 않습니다.",
+      "shroudforge": "ShroudForge 런타임이 실행하는 ShroudForge 모드입니다.",
+      "set": "Kiln이 실행하는 Shrouded Engine Tweaks Lua 모드입니다.",
+      "greeneye": "Kiln이 실행하는 Greeneye Loader 모드입니다.",
+      "flame": "Kiln이 실행하는 Flame 모드입니다.",
+      "shroudtopia": "Kiln이 실행하는 Shroudtopia 모드입니다.",
+      "enshwick": "Enshwick 로더가 실행하는 Enshwick 모드입니다.",
+      "shroudlink": "Kiln이 실행하는 shroudlink 모드입니다.",
+      "ember": "Ember 서버 모드입니다."
+    },
+    "profile": {
+      "no_mods": "모드 없이 한 번 플레이: 이번 실행에서는 모드를 불러오지 않습니다.",
+      "invalid": "프로필을 읽을 수 없어 모드를 불러오지 않습니다.",
+      "invalid_why": "프로필을 읽을 수 없어 모드를 불러오지 않습니다 ({error}).",
+      "legacy": "프로필 없음: Kiln이 mods 폴더를 불러옵니다.",
+      "name": "프로필: {name}",
+      "off": "프로필에서 꺼져 있습니다.",
+      "missing": "폴더가 없습니다: {path}",
+      "kept_xhl": "프로필에서 꺼져 있지만 폴더가 아직 게임의 mods 폴더({folder})에 있어 XHL-Core가 불러올 수 있습니다.",
+      "kept_enshwick": "프로필에서 꺼져 있지만 폴더가 아직 게임의 mods 폴더({folder})에 있어, 그곳의 모든 폴더를 실행하는 Enshwick 로더가 실행할 수 있습니다.",
+      "kept": "프로필에서 꺼져 있지만 폴더가 아직 게임의 mods 폴더({folder})에 있어, 그 폴더를 읽는 모드나 로더가 쓸 수 있습니다."
+    },
+    "help": {
+      "turn_on": "Kiln 런처(프로필)에서 켠 뒤 게임을 다시 시작하세요.",
+      "kept": "실행되지 않게 하려면 Kiln 런처에서 제거하거나 그 폴더를 게임의 mods 폴더 밖으로 옮기세요.",
+      "repair": "Kiln 런처(라이브러리)에서 복구하거나 제거한 뒤 게임을 다시 시작하세요."
+    },
+    "file": {
+      "too_large": "파일이 너무 큽니다",
+      "invalid": "잘렸거나 올바른 JSON이 아닙니다",
+      "unreadable": "파일을 읽을 수 없습니다: {error}",
+      "not_object": "파일이 JSON 객체가 아닙니다"
+    },
+    "engine_unreadable": "Kiln이 이 엔진의 보고서를 읽지 못했습니다: {error}",
+    "report_unreadable": "보고서를 읽을 수 없습니다: {error}",
+    "see_log": "kiln.log를 확인하세요",
+    "kiln": {
+      "with_world": "혼자 플레이하거나 친구가 접속할 때 내 월드와 함께 시작합니다. 다른 사람의 월드에서는 실행되지 않습니다.",
+      "hosted_off": "이 게임에서 꺼짐: kiln.json이 내 월드와 함께 시작하는 모드를 끕니다 (mods.hosted가 false).",
+      "hosted_off_help": "시작하게 하려면 게임 폴더의 kiln/kiln.json \"mods\" 부분에서 \"hosted\": false를 지운 뒤 게임을 다시 시작하세요.",
+      "pending": "차례가 오면 로드됩니다 (예: 월드가 시작될 때).",
+      "disabled": "오류가 너무 많아 Kiln이 껐습니다. 다시 시도하려면 게임을 다시 시작하거나 모드를 업데이트하세요.",
+      "failed": "위의 이유를 읽어 보세요. Kiln 런처에서 모드나 모드에 필요한 것을 업데이트한 뒤 게임을 다시 시작하세요. 자세한 내용은 kiln/logs/kiln.log에 있습니다.",
+      "unloaded": "명령으로 언로드되었습니다. 불러오려면 게임을 다시 시작하세요.",
+      "not_reported": "프로필에는 있지만 이번 실행에서 Kiln이 불러오지 않았습니다.",
+      "not_reported_help": "게임을 다시 시작하세요. 계속 이러면 kiln/logs/kiln.log를 확인하세요."
+    },
+    "native": {
+      "policy": "Kiln의 네이티브 정책상 이 게임 빌드에서는 DLL 모드를 불러오지 않습니다.",
+      "failed_help": "위의 이유를 읽어 보세요. Kiln 런처에서 DLL 모드를 업데이트한 뒤 게임을 다시 시작하세요.",
+      "no_report": "이번 실행에서 Kiln의 네이티브 로더가 보고서를 쓰지 않았습니다.",
+      "old_report": "네이티브 로더의 보고서가 이전 실행의 것입니다.",
+      "not_reported": "프로필에는 있지만 네이티브 로더가 보고하지 않았습니다."
+    },
+    "plugin": {
+      "engine_failed": "Kiln의 {engine} 플러그인이 시작되지 않았습니다: {error}. 이 엔진의 모드는 실행할 수 없습니다.",
+      "failed_help": "Kiln 런처에서 플러그인을 업데이트하거나 제거한 뒤 게임을 다시 시작하세요.",
+      "no_report": "Kiln의 시작 보고서가 없어 로드되었는지 알 수 없습니다.",
+      "not_reported": "프로필에는 있지만 Kiln이 불러오지 않았습니다."
+    },
+    "chain": {
+      "failed_help": "chain.ini(또는 Kiln 런처)에서 DLL을 확인한 뒤 게임을 다시 시작하세요."
+    },
+    "ember": {
+      "reason": "Ember 모드는 아직 실행할 수 없습니다. Ember가 모드를 실행할 방법을 공개하지 않았습니다.",
+      "help": "지금은 할 일이 없습니다. 모드는 프로필에 남아 있으며, Kiln이 Ember 모드를 지원하면 실행됩니다."
+    },
+    "shroudtopia": {
+      "off": "Shroudtopia 설정에서 꺼져 있습니다.",
+      "off_help": "프로필 구성 폴더의 shroudtopia/shroudtopia.json에서 이름이 \"{name}\"인 mods 항목의 active를 true로 설정하세요 (이름은 kiln.log의 Registered mod 줄에 있음). 파일을 저장하면 Shroudtopia가 게임 실행 중에 다시 읽습니다.",
+      "not_active": "켜져 있지만 모드가 활성 상태라고 보고하지 않습니다.",
+      "not_active_help": "Kiln은 Shroudtopia 0.1.1의 모드 인터페이스로 Shroudtopia 모드를 실행하며 이 모드의 Activate를 계속 호출합니다. 다른 게임 버전용이거나 다른 Shroudtopia로 빌드한 모드는 아무것도 하지 않은 채 이 상태로 남을 수 있습니다. kiln/logs/kiln.log에 [shroudtopia:{name}] 줄이 있으며, 이 게임 버전을 지원하는지는 모드 제작자가 알려 줄 수 있습니다."
+    },
+    "engine_mods": {
+      "own_loader": "이번 실행에서는 {engine} 자체 로더가 {engine} 모드를 실행하며 자기 폴더만 읽습니다. Kiln 런처에서 프로필을 다시 활성화하고(모드를 그곳에 복사함) 게임을 다시 시작하세요.",
+      "failed_help": "위의 이유를 읽어 보세요. Kiln 런처에서 모드를 업데이트한 뒤 게임을 다시 시작하세요. {engine} 관련 줄은 kiln/logs/kiln.log에 있습니다.",
+      "unreadable": "{engine}의 보고서를 읽을 수 없습니다: {error}. Kiln이 잠시 후 다시 읽습니다.",
+      "not_run": "이번 실행에서 {engine}이(가) 실행되지 않아 이 모드가 로드되지 않았습니다.",
+      "not_run_folder": "이번 실행에서 {engine}이(가) 실행되지 않아 모드가 로드되지 않았습니다.",
+      "old_report": "이번 실행에서 {engine}이(가) 보고하지 않았습니다 (마지막 보고서는 이전 실행의 것).",
+      "not_reported": "프로필에는 있지만 이번 실행에서 {engine}이(가) 보고하지 않았습니다.",
+      "plugin_help": "Kiln의 {engine} 플러그인이 설치되어 있는지(kiln/plugins) 확인한 뒤 게임을 다시 시작하세요.",
+      "note_old": "이번 실행에서 {engine}이(가) 보고하지 않았습니다. 마지막 보고서는 이전 실행의 것입니다.",
+      "note_not_run": "이번 실행에서 {engine}이(가) 실행되지 않았습니다."
+    },
+    "note": {
+      "aside_emf": "EMF: 실제 EMF에 비켜섰습니다.",
+      "aside_emf_why": "EMF: 실제 EMF에 비켜섰습니다 ({reason}).",
+      "aside": "비켜섬: 다른 {engine} 로더가 이 모드들을 실행합니다.",
+      "aside_why": "비켜섬: 다른 {engine} 로더가 이 모드들을 실행합니다 ({reason}).",
+      "emf_idle": "이 게임 빌드에서 EMF가 대기 상태가 되었습니다: {reason}",
+      "eml_patched": {
+        "other": "게임이 시작되기 전에 게임 데이터를 패치했습니다 (변경 {count}개)."
+      },
+      "eml_failed": "EML 실패: {error}. 게임 데이터를 원래대로 되돌렸습니다.",
+      "eml_aside_sf": "EML: ShroudForge에 비켜섰습니다. ShroudForge가 자기 mods 폴더의 EML 모드 중 ShroudForge 스위치가 켜진 것을 실행합니다.",
+      "eml_aside": "EML: EML 자체 로더에 비켜섰습니다.",
+      "eml_aside_why": "EML: EML 자체 로더에 비켜섰습니다 ({reason}).",
+      "eml_idle": "이번 실행에는 EML 모드가 없습니다.",
+      "ember": "Ember: 모드를 찾았지만 아직 실행할 수 없습니다.",
+      "shroudlink_elsewhere": "다른 shroudlink 로더가 이 모드들을 실행합니다.",
+      "set_aside": "SET: SET 자체 로더에 비켜섰습니다.",
+      "set_aside_why": "SET: SET 자체 로더에 비켜섰습니다 ({reason}).",
+      "set_waiting": "모드는 메인 메뉴에서 로드됩니다.",
+      "set_off": "이번 실행에서는 꺼짐."
+    },
+    "sf": {
+      "hosted_menu": "ShroudForge: Kiln이 런타임을 호스팅합니다. 모드를 골라 여기서 켜고 끄거나 설정을 바꾸세요 (ShroudForge 자체 Modloader 창은 실행되지 않음).",
+      "hosted": "ShroudForge: Kiln이 런타임을 호스팅합니다. 모드를 골라 켜고 끄거나 설정을 바꾸세요.",
+      "self_hosted": "ShroudForge: 자체 로더가 모드를 실행하며 Kiln은 비켜섰습니다. 모드를 골라 켜고 끄거나 설정을 바꾸세요.",
+      "not_installed": "ShroudForge가 설치되지 않아 그 모드를 실행할 수 없습니다.",
+      "off": "이번 실행에서 ShroudForge가 꺼져 있습니다.",
+      "off_why": "ShroudForge 꺼짐: {reason}.",
+      "failed": "ShroudForge 실패: {reason}.",
+      "no_report": "이번 실행에서 ShroudForge가 보고하지 않았습니다.",
+      "not_run": "이번 실행에서 ShroudForge가 실행되지 않았습니다.",
+      "runs_it": "ShroudForge가 실행합니다.",
+      "fix_first": "먼저 ShroudForge를 고친 뒤(엔진 줄 참고) 게임을 다시 시작하세요.",
+      "unconfirmed": "ShroudForge는 실행 중이지만 Kiln이 이 모드에 대한 ShroudForge의 보고를 읽지 못했습니다 (엔진 줄 참고). 모드가 활성이라는 증거는 아닙니다.",
+      "off_in_settings": "ShroudForge 설정에서 꺼져 있습니다.",
+      "eml_failed_help": "먼저 ShroudForge를 고친 뒤(kiln.log 참고) 게임을 다시 시작하세요. Kiln EML은 비켜서서 이 모드를 적용하지 않았습니다.",
+      "eml_aside_but": "Kiln EML은 ShroudForge에 비켜섰지만 {note}",
+      "eml_off": {
+        "other": "프로필의 EML 모드 {count}개가 ShroudForge에서 꺼져 있어 이번 실행에서는 아무것도 적용하지 않습니다. ShroudForge는 자기 폴더의 EML 모드 중 ShroudForge 스위치가 켜진 것을 실행합니다."
+      },
+      "hand_off": "이 모드를 직접 ShroudForge 폴더에 넣었고, ShroudForge에서 꺼져 있습니다.",
+      "hand_off_profile_help": "모드 > ShroudForge(그곳의 해당 줄)에서 켜거나, 폴더를 지우고 Kiln 런처에서 플레이를 누르세요. 모드가 프로필에 있으므로 Kiln이 켜진 상태의 자체 사본을 넣습니다.",
+      "off_in_sf_help": "ShroudForge는 스위치가 켜져 있을 때만 실행합니다. 어디서 켜는지는 위의 이유에 있습니다. 그다음 게임을 다시 시작하세요.",
+      "no_switch_file": "ShroudForge가 켜지 않았습니다. ShroudForge 스위치를 담는 파일인 extended.mod.json이 없어서 ShroudForge가 실행하지 않습니다.",
+      "package_unreadable": "ShroudForge는 이 폴더를 읽지만, Kiln이 ShroudForge처럼 패키지를 읽지 못합니다 ({error}). ShroudForge는 읽을 수 없는 패키지를 거부합니다.",
+      "eml_switch_off": "ShroudForge의 mods 폴더에 있지만 extended.mod.json(ShroudForge 스위치를 담는 파일)에 enabled: false로 되어 있어 이번 실행에서는 아무것도 적용하지 않습니다.",
+      "eml_no_switch": "ShroudForge의 mods 폴더에 있지만 ShroudForge 스위치를 담는 파일인 extended.mod.json이 없고, ShroudForge는 스위치가 켜질 때까지 패키지를 꺼 두므로 이번 실행에서는 아무것도 적용하지 않습니다.",
+      "eml_press_play": "Kiln 런처에서 플레이를 누르세요(또는 프로필을 다시 활성화). Kiln이 ShroudForge 설정에서 켭니다. 그다음 게임을 다시 시작하세요.",
+      "eml_other_side": "ShroudForge는 {sides}에서만 실행합니다.",
+      "and": " 및 ",
+      "eml_unconfirmed": "ShroudForge 스위치는 켜져 있지만, 이번 실행의 시작 단계에 대한 ShroudForge 기록에 이 버전이 없어 적용되었는지 Kiln이 확인할 수 없습니다.",
+      "startup_failed": "이번 게임 실행에서 ShroudForge의 시작 게임 데이터 단계가 실패했습니다.",
+      "startup_failed_why": "이번 게임 실행에서 ShroudForge의 시작 게임 데이터 단계가 실패했습니다: {error}",
+      "startup_failed_help": "자세한 내용은 ShroudForge 로그에 있습니다. 원인을 고친 뒤 게임을 다시 시작하세요.",
+      "startup_applied": "ShroudForge가 이번 게임 실행 시작 때 게임 데이터 변경을 적용했습니다 (시작 단계 기록에 이 모드가 있음). 설정 변경은 다음 실행 때 적용됩니다.",
+      "startup_current": "ShroudForge가 이전 실행의 게임 데이터 변경이 이번 실행의 모드에도 여전히 유효하다고 확인했습니다 (시작 단계 기록에 이 모드가 있음). 설정 변경은 다음 실행 때 적용됩니다.",
+      "settings_unreadable": "패키지 설정을 읽을 수 없어 ShroudForge의 모드별 활성화를 확인하지 못했습니다.",
+      "hand_off_help_live": "아래에서 켜거나, 폴더를 지우고 Kiln 런처의 모드 추가로 모드를 추가하세요. ShroudForge가 플레이 중에 시작합니다.",
+      "hand_off_help_next": "아래에서 켜거나, 폴더를 지우고 Kiln 런처의 모드 추가로 모드를 추가하세요. 다음 게임 실행 때 적용됩니다.",
+      "no_switch_help_live": "아래에서 켜세요. Kiln이 ShroudForge 자체 Modloader가 쓰는 extended.mod.json을 씁니다. ShroudForge가 플레이 중에 시작합니다.",
+      "no_switch_help_next": "아래에서 켜세요. Kiln이 ShroudForge 자체 Modloader가 쓰는 extended.mod.json을 씁니다. 다음 게임 실행 때 적용됩니다.",
+      "off_ext": "ShroudForge 설정(모드의 extended.mod.json)에서 꺼져 있습니다.",
+      "off_ext_repair": "ShroudForge 설정(모드의 extended.mod.json)에서 꺼져 있습니다. {repair}",
+      "switch_on_below": "아래에서 켜세요.",
+      "repair_help": "Kiln 메뉴에서 설정 하나를 바꾸거나 한 번 껐다 켜면 고쳐집니다.",
+      "other_side": "{sides}에서만 실행됩니다.",
+      "no_runtime": "스위치는 켜져 있지만 ShroudForge에 현재 모드별 런타임 보고서가 없습니다. 모드가 활성이라는 증거는 아닙니다.",
+      "error": "ShroudForge: {error}",
+      "restart": "게임을 다시 시작하세요.",
+      "error_help": "위의 이유를 읽어 보세요. 모드를 업데이트한 뒤 게임을 다시 시작하세요. 자세한 내용은 ShroudForge 로그에 있습니다.",
+      "startup_unconfirmed": "시작 시 게임 데이터 변경에 켜져 있지만, 이번 실행의 시작 단계에 대한 ShroudForge 기록에 이 버전이 없어 Kiln이 확인할 수 없습니다.",
+      "inactive": "지금은 ShroudForge가 실행하지 않습니다. 스위치 변경은 1~2초 걸리거나, 다음 게임 실행 때 시작됩니다.",
+      "effect": "ShroudForge Lua 활성. 보고된 효과: {effect}. {detail}",
+      "effect_failed_help": "모드가 변경이 적용되지 않았다고 보고합니다. 자세한 내용은 ShroudForge 로그에 있습니다.",
+      "active": "ShroudForge가 Lua를 실행 중이며, 모드가 효과 결과를 보고하지 않습니다."
+    },
+    "enshwick": {
+      "no_report": "이번 실행에서 Enshwick이 보고하지 않았습니다.",
+      "not_run": "이번 실행에서 Enshwick이 실행되지 않았습니다.",
+      "started": "Enshwick 로더가 시작되었습니다.",
+      "starting": "Enshwick 로더가 시작하는 중입니다.",
+      "failed": "Enshwick 로더 실패: {reason}.",
+      "no_loader": "Enshwick 로더가 없습니다: {reason}.",
+      "install": "Enshwick을 설치하세요",
+      "aside": "Enshwick: Enshwick 자체 로더에 비켜섰습니다.",
+      "runs_it": "Enshwick 로더가 실행합니다. Enshwick은 모드별 결과를 보고하지 않습니다.",
+      "fix_first": "먼저 Enshwick을 고친 뒤(엔진 줄 참고) 게임을 다시 시작하세요.",
+      "copy_failed": "Kiln이 게임의 mods 폴더로 복사하지 못했습니다.",
+      "copy_failed_help": "게임의 mods 폴더를 쓰는 다른 도구를 닫은 뒤 게임을 다시 시작하세요.",
+      "removed": "게임의 mods 폴더에서 제거했습니다."
+    },
+    "xhl": {
+      "prerequisite": "XHL-Core 필요: 따로 설치한 그 호스트만 불러옵니다. Kiln 런처에서 XHL-Core를 네이티브 모드로 가져와 켜거나, 제작자가 안내하는 대로 설치한 뒤 게임을 다시 시작하세요.",
+      "core_started": "XHL-Core를 위해 게임의 mods 폴더에 넣었습니다. XHL-Core가 게임과 함께 시작되었고, 이 플러그인은 Kiln이 아니라 XHL-Core가 직접 불러옵니다. 플러그인이 시작되었는지는 XHL-Core 옆의 XHL-Native-Plugin-Host.log에 있습니다.",
+      "placed": "XHL-Core를 위해 게임의 mods 폴더에 넣었습니다. Kiln은 불러오지 않으며, XHL-Core가 실행하는지 알 수 없습니다.",
+      "found_core": "게임의 mods 폴더에 있는 XHL-Core 플러그인입니다. XHL-Core가 게임과 함께 시작되었고, 이 플러그인은 Kiln이 아니라 XHL-Core가 직접 불러옵니다. 플러그인이 시작되었는지는 XHL-Core 옆의 XHL-Native-Plugin-Host.log에 있습니다.",
+      "found": "게임의 mods 폴더에 있는 XHL-Core 플러그인입니다. Kiln은 불러오지 않으며, XHL-Core가 실행하는지 알 수 없습니다.",
+      "note_core": "XHL: 별도 호스트인 XHL-Core를 위해 넣었습니다. XHL-Core가 게임과 함께 시작되어 이 플러그인들을 불러옵니다. Kiln은 직접 불러오지 않습니다.",
+      "note": "XHL: 별도 호스트인 XHL-Core를 위해 넣었습니다. Kiln은 이 플러그인 DLL을 불러오지 않으며, 여기서 XHL-Core가 설치되었는지 확인하지 않습니다."
+    }
+  },
+  "config": {
+    "read_only_synced": "서버 구성: 서버에 연결된 동안 읽기 전용입니다. 동기화된 항목은 서버의 값을 보여 줍니다.",
+    "read_only": "서버 구성: 서버에 연결된 동안 읽기 전용입니다 (직접 호스트할 때 적용됨).",
+    "server_values": {
+      "other": "연결된 동안 항목 {count}개가 서버의 값을 씁니다 (읽기 전용)."
+    },
+    "file_error": "파일: {error}",
+    "not_saved": "저장 안 됨: {error}",
+    "columns": {
+      "entry": "항목",
+      "value": "값"
+    },
+    "marks": {
+      "server": " [서버]",
+      "synced": " (동기화됨)",
+      "restart": " (재시작)"
+    },
+    "server_value": "서버의 값입니다. 내 값: {value} (나가면 돌아옴).",
+    "hint": {
+      "duration": "기간: 30s, 5m, 1h30m",
+      "list": "목록: [1, 2, 3] 또는 1, 2, 3"
+    },
+    "read_only_nul": "여기서는 읽기 전용: NUL 문자가 들어 있습니다. 구성 파일에서 바꾸세요.",
+    "read_only_long": "여기서는 읽기 전용: 512바이트보다 깁니다. 구성 파일에서 바꾸세요.",
+    "default": "기본값",
+    "default_tip": "기본값: {value}",
+    "type_here": "여기에 값을 입력하세요.",
+    "range": "{min}~{max} 사이의 숫자",
+    "describe": {
+      "entry": "{path}: {type}, 기본값 {default}",
+      "entry_range": "{path}: {type}, 기본값 {default}, 범위 {min}..{max}",
+      "options": "선택지: {options}",
+      "synced": "동기화됨: 서버가 자기 값을 클라이언트에 보냅니다.",
+      "restart": "재시작 필요: 모드가 다시 로드될 때 변경이 적용됩니다.",
+      "from_server": "연결된 동안 서버의 값을 씁니다."
+    },
+    "apply": "적용 ({count})",
+    "undo": "실행 취소",
+    "saved_later": "(월드가 실행될 때 저장됨)",
+    "all_defaults": "모두 기본값으로",
+    "applied": {
+      "other": "변경 {count}개 적용함 (월드가 실행될 때 저장됨)"
+    },
+    "saved": "{id}: 저장함"
+  },
+  "configpage": {
+    "caption": "설정"
+  },
+  "settings": {
+    "look": {
+      "caption": "모양",
+      "look": "모양",
+      "game": "게임 스타일",
+      "translucent": "게임 스타일, 반투명",
+      "kiln": "Kiln 클래식 스타일 (불씨)",
+      "theme": "{theme} ({mod})",
+      "theme_missing": "{theme} (해당 모드가 로드되지 않음)",
+      "background": "배경 불투명도 (%)",
+      "opacity": "불투명도 (%)",
+      "size": "크기 (%)",
+      "game_read": "게임 스타일은 게임에서 읽은 게임 자체의 색과 글꼴을 씁니다.",
+      "game_not_read": "게임에서 색을 (아직) 읽지 못해 중립적인 어두운 대체 스타일을 씁니다.",
+      "saved": "kiln/kiln.json(\"ui\")에 저장되며, 런처의 설정에도 같게 표시됩니다. 모드가 스타일을 더 제공할 수 있습니다."
+    },
+    "language": {
+      "caption": "언어",
+      "language": "언어",
+      "auto": "자동 (게임 언어: {language})",
+      "missing": "{language} (Kiln에 이 언어의 텍스트가 없음)",
+      "saved": "Kiln 자체의 메뉴와 메시지에 적용되며, 모드 텍스트는 게임 언어를 따릅니다. 런처의 설정에 표시되는 것처럼 kiln/kiln.json(\"ui\")에 저장됩니다."
+    }
+  },
+  "set": {
+    "about": "SET 모드 설정, 호환성, 엔티티, 후크, 바인딩, 콘솔, 로컬 지원 보고서.",
+    "unavailable": "SET 도구를 쓸 수 없습니다 (kiln-set이 실행 중이 아님).",
+    "open": "SET 설정과 도구",
+    "open_failed": "SET 도구를 쓸 수 없습니다. 엔진 상태를 확인하세요."
+  },
+  "shroudforge": {
+    "labels": {
+      "waits": "기다리는 것",
+      "settings": "스위치와 설정"
+    },
+    "waits": {
+      "restart": "다음 게임 실행: ShroudForge는 게임이 다시 시작될 때만 이 모드의 바뀐 구성을 불러옵니다.",
+      "dependency": "필요한 모드: 그 모드가 실행되면 ShroudForge가 이 모드를 시작합니다 (위의 이유에 이름이 나옴).",
+      "write_access": "게임 월드에 대한 쓰기 권한. 이 게임이 호스팅하는 월드(싱글 플레이 월드나 내가 호스팅하는 협동 월드)가 실행되면 ShroudForge가 줍니다. 다른 사람의 월드나 전용 서버에서는 오지 않을 수 있으며, 그때는 모드가 호스트의 게임이나 서버에서 실행되어야 합니다.",
+      "world": "월드: 메인 메뉴가 아니라 이 게임이 호스팅하는 월드에 들어가면 작동을 시작합니다.",
+      "player": "월드 안의 내 캐릭터.",
+      "glide": "활공. 활공하는 동안에만 글라이더를 바꾸므로, 비행 사이(그리고 이 메뉴가 열려 있을 때)에는 대기 중으로 표시됩니다. 정상입니다. 이륙하면 적용됩니다.",
+      "other": "모드에 필요한 무언가가 아직 없습니다. 모드 자체의 설명은 위의 상태에 있습니다."
+    },
+    "reading": "설정을 읽는 중...",
+    "cannot_show": "설정을 표시할 수 없습니다: {error}",
+    "files_unreadable": "파일을 읽을 수 없습니다: {error}",
+    "value_unreadable": "설정 {setting}의 값을 읽을 수 없습니다 ({error})",
+    "too_many": "이 페이지에 비해 선택지, 그룹, 동작이 너무 많습니다 (합쳐서 최대 1000개). 모드의 extended.mod.json에서 설정을 바꾸세요. 파일은 바뀌지 않았습니다.",
+    "value_error": "값을 읽을 수 없습니다 ({error})",
+    "on": "켜짐",
+    "off": "꺼짐",
+    "switch_live": "ShroudForge가 플레이 중에 켜고 끕니다.",
+    "switch_next": "켜고 끄기는 다음 게임 실행 때 적용됩니다 (게임이 시작될 때 게임 데이터를 바꾸기 때문).",
+    "switch_profile": "Kiln 프로필에 이 모드가 있습니다. Kiln 런처가 게임을 시작할 때 프로필대로 이 스위치를 설정합니다. 변경을 유지하려면 프로필에서도 바꾸세요.",
+    "repair": "ShroudForge는 설정을 한 번 저장할 때까지 이 모드를 거부합니다. 이전 Kiln이 {settings}을(를) 소수부 없이 기록했습니다.",
+    "repair_more": "ShroudForge는 설정을 한 번 저장할 때까지 이 모드를 거부합니다. 이전 Kiln이 {settings} 외 {more}개를 소수부 없이 기록했습니다.",
+    "repair_here": "{repair} 여기서 아무 설정이나 스위치를 바꾸면 고쳐집니다.",
+    "no_settings": "이 모드에는 설정이 없습니다.",
+    "other_settings": "기타 설정",
+    "hidden": {
+      "other": "설정 {count}개가 더 있지만 여기에 표시되지 않습니다 (이 모드에는 {total}개가 있고, 페이지에는 처음 {shown}개를 표시). 모드의 extended.mod.json에서 바꾸세요."
+    },
+    "saved_to": "ShroudForge와 Kiln 런처가 읽는 파일인 모드의 extended.mod.json에 저장했습니다.",
+    "next_start": "다음 게임 실행 때 적용됩니다.",
+    "only_used_while": "{value}  ({setting}이(가) {want}일 때만 사용)",
+    "value_on": "켜짐",
+    "value_off": "꺼짐",
+    "shortcut": "단축키: {key}",
+    "shortcut_help": "아래에서 SDL 바인딩을 편집하세요 (키 입력 감지 아님): Ctrl+SDL:66은 Ctrl+F9, Mouse:4는 마우스 버튼 4입니다. 비우면 꺼집니다. SF가 키보드 사용 가능 여부를 확인합니다.",
+    "field_nul": "이 값에는 텍스트 칸이 표시하거나 유지할 수 없는 NUL 문자가 있습니다. 모드의 extended.mod.json에서 바꾸세요.",
+    "field_long": "여기서 편집하기에는 너무 깁니다 ({length}자). 모드의 extended.mod.json에서 바꾸세요.",
+    "not_a_number": "{setting}: \"{text}\"은(는) 숫자가 아닙니다",
+    "save": {
+      "switch_live_on": "저장함: {mod} 켜기를 요청했습니다. 실행 중인 ShroudForge는 보통 1~2초 안에 반영합니다. 위의 상태를 확인하세요.",
+      "switch_live_off": "저장함: {mod} 끄기를 요청했습니다. 실행 중인 ShroudForge는 보통 1~2초 안에 반영합니다. 위의 상태를 확인하세요.",
+      "switch_next_on": "저장함: 다음 게임 실행 때 {mod}이(가) 켜지도록 설정했습니다.",
+      "switch_next_off": "저장함: 다음 게임 실행 때 {mod}이(가) 꺼지도록 설정했습니다.",
+      "setting_live": "저장함: {setting}은(는) 모드가 활성일 때 적용될 수 있습니다. ShroudForge는 보통 1~2초 안에 반영합니다.",
+      "setting_next": "저장함: {setting}을(를) 다음 게임 실행용으로 설정했습니다.",
+      "unreadable_after": "extended.mod.json을 바꿨지만 다시 읽을 수 없습니다: {error}. 파일을 고칠 때까지 ShroudForge가 모드를 거부할 수 있습니다.",
+      "failed": "저장할 수 없습니다: {error}"
+    },
+    "action": {
+      "confirm": "확인: {action}",
+      "not_running": "{action}을(를) 보내지 않았습니다. ShroudForge는 모드를 실행하는 동안에만 동작을 실행합니다 (위의 상태 참고). 대기열에 넣은 것은 없습니다.",
+      "still_waiting": "{action}: {mod}에 대한 이전 요청(이번 또는 이전 게임 실행의 것)이 아직 ShroudForge를 기다리고 있으며, 모드가 받으면 실행됩니다. 새로 대기열에 넣은 것은 없습니다.",
+      "requested": "요청함: {action}.",
+      "failed": "{action}을(를) 보낼 수 없습니다: {error}"
+    },
+    "binding": "ShroudForge 모드: Kiln의 ShroudForge 페이지 열기",
+    "check": {
+      "whole": "{setting}은(는) 정수를 받습니다",
+      "type": "{setting}은(는) {given}이(가) 아니라 {type}을(를) 받습니다",
+      "keep_one": "ShroudForge가 옵션 유형을 유지하도록 {setting}에는 선택지가 적어도 하나 남아 있어야 합니다",
+      "finite": "{setting}은(는) 유한한 숫자를 받습니다",
+      "null_first": "{setting}: \"{choice}\"은(는) 이 목록의 맨 앞에 올 수 없습니다 (값이 없어 ShroudForge가 모드를 거부함)",
+      "no_value_choice": "값이 없는 선택지",
+      "shortcut": "{setting}: Ctrl+SDL:66이나 Mouse:4 같은 SDL 단축키를 쓰세요 (비우면 꺼짐, 수정 키 순서 Ctrl, Alt, Shift, Meta)",
+      "length": "{setting}은(는) {min}~{max}자여야 합니다",
+      "length_min": "{setting}은(는) {min}자 이상이어야 합니다",
+      "range": "{setting}은(는) {min}~{max} 사이여야 합니다",
+      "not_option": "{setting}: {options} 중 하나가 아닙니다"
+    },
+    "kind": {
+      "boolean": "예/아니요 값",
+      "integer": "정수",
+      "number": "숫자",
+      "array": "목록",
+      "string": "텍스트",
+      "value": "값"
+    }
+  },
+  "shroudlink": {
+    "needs_addon": "브리지 ABI v1을 지원하는 shroudlink 클라이언트 애드온이 필요합니다. 기본 애드온은 바뀌지 않습니다.",
+    "waiting": "실행 중인 shroudlink 호스트, UI 프로토콜 2, 인식된 월드, 표시 권한을 기다리는 중입니다.",
+    "no_entries": "호스트가 메뉴 항목을 보내지 않았습니다.",
+    "apply": "적용",
+    "item": "아이템 {id} × {count}",
+    "close_window": "창 닫기",
+    "declined": "shroudlink가 마지막 요청을 거부했습니다 ({error}). 현재 상태를 새로 고칩니다."
+  },
+  "keys": {
+    "help_mouse": "키를 클릭한 뒤 새 키를 누르세요: 키보드 키, 마우스 가운데 버튼이나 옆 버튼, 휠 돌리기를 쓸 수 있고 Ctrl, Shift, Alt를 함께 눌러도 됩니다 (왼쪽·오른쪽 클릭은 지정 불가). 다시 클릭하면 취소되고, Escape는 취소하고 메뉴를 닫습니다. 지정 해제는 동작에서 키를 뺍니다. kiln/config/keybinds.json에 저장됩니다.",
+    "help": "키를 클릭한 뒤 새 키를 누르세요. 다시 클릭하면 취소되고, Escape는 취소하고 메뉴를 닫습니다. 지정 해제는 동작에서 키를 뺍니다. kiln/config/keybinds.json에 저장됩니다.",
+    "col_action": "동작",
+    "col_key": "키",
+    "col_default": "기본값",
+    "menu": "Kiln: 이 메뉴 열기",
+    "press": "키를 누르세요...",
+    "reset": "초기화",
+    "unbind": "지정 해제",
+    "toast": {
+      "wheel_menu": "Kiln 메뉴 키는 휠({key})에 둘 수 없습니다. 스크롤하면 메뉴가 닫히기 때문입니다"
+    }
+  },
+  "network": {
+    "on": "Kiln 네트워크가 켜져 있습니다. 모드가 이 게임과 Kiln 서버 사이에서 통신할 수 있습니다.",
+    "off": "이번 세션에서는 Kiln 네트워크가 실행되지 않습니다.",
+    "role": {
+      "both": "서버 겸 클라이언트",
+      "server": "서버",
+      "client": "클라이언트",
+      "none": "없음"
+    },
+    "stats": "역할: {role}. 메시지 수신 {in}, 송신 {out}, 버림 {dropped}. 채널: {channels}. 가장 큰 메시지: {largest}바이트.",
+    "server": {
+      "caption": "서버",
+      "ready": "서버에 Kiln {version}",
+      "vanilla": "서버에 Kiln 없음 (바닐라)",
+      "rejected": "서버가 이 클라이언트를 거부했습니다",
+      "handshake": "핸드셰이크 진행 중",
+      "round_trip": "왕복 {ms:F0} ms",
+      "mods": "서버 모드: {mods}",
+      "none": "서버에 연결되지 않았습니다."
+    },
+    "sync": {
+      "applied": "콘텐츠: 서버의 변경 {count}개{reset}{errors} ({kib:F0} KiB)",
+      "reset": ", 내 변경 {count}개 되돌림",
+      "errors": ", 오류 {count}개",
+      "hosting": "콘텐츠: 호스팅 중 (서버의 콘텐츠가 이 게임의 것)",
+      "waiting": "콘텐츠: {detail}",
+      "failed": "콘텐츠: 동기화 안 됨: {detail}",
+      "none": "콘텐츠: 서버가 콘텐츠 상태를 보내지 않았습니다",
+      "configs": "구성: 서버에서 동기화된 구성 {count}개, 여기서 {used}개 사용 중",
+      "configs_none": "구성: 서버가 동기화된 구성을 보내지 않았습니다"
+    },
+    "clients": {
+      "caption": "클라이언트 ({count})",
+      "col_player": "플레이어",
+      "col_state": "상태",
+      "col_mods": "모드",
+      "col_rtt": "RTT",
+      "col_frames": "프레임 수신/송신"
+    },
+    "peer": {
+      "connecting": "연결 중",
+      "ready": "준비됨",
+      "vanilla": "바닐라",
+      "rejected": "거부됨",
+      "closed": "닫힘"
+    },
+    "ms": "{ms:F0} ms",
+    "admission": "접속 허가",
+    "channels": {
+      "caption": "채널 ({count})",
+      "line": "{name} v{version}: 수신 {in}, 송신 {out}",
+      "required": "{name} v{version} (필수): 수신 {in}, 송신 {out}"
+    }
+  },
+  "overlay": {
+    "surface": "{width}x{height}, 형식 {format}, 배율 {scale:F2}",
+    "frames": "표시 {presents}, 그림 {drawn}, 마지막 오버레이 프레임 {ms:F2} ms",
+    "counts": "창 {windows}, HUD 줄 {hud}, 프레임 핸들러 {handlers}",
+    "screen": "게임 화면: {kind} ({state}/{hud}), 언어 {language}, UI 프레임 {frame}",
+    "screen_station": "게임 화면: {kind} ({state}/{hud}), 언어 {language}, UI 프레임 {frame}; 제작대 작업장 0x{workshop:x8} 레시피 0x{recipe:x8}",
+    "screen_own": "게임 화면: {kind} ({state}/{hud}), 언어 {language}, UI 프레임 {frame}; 자체 제작 작업장 0x{workshop:x8} 레시피 0x{recipe:x8}",
+    "panels_on": "열린 화면 {screens}, 제작 패널 {panels}, 메뉴 확장 켜짐",
+    "panels_off": "열린 화면 {screens}, 제작 패널 {panels}, 메뉴 확장 꺼짐",
+    "test_toast": "테스트 알림",
+    "test_toast_text": "Kiln 오버레이가 작동합니다"
+  },
+  "classic": {
+    "tab": {
+      "mods": "모드",
+      "network": "네트워크",
+      "keys": "키",
+      "overlay": "오버레이"
+    },
+    "mods": {
+      "back": "모드로 돌아가기",
+      "shroudlink": "shroudlink 메뉴",
+      "count": "{loaded}개 로드, {found}개 찾음 (쪽: {side})",
+      "kiln_settings": "Kiln 설정",
+      "kiln_settings_close": "Kiln 설정 닫기",
+      "col_mod": "모드",
+      "col_version": "버전",
+      "col_side": "쪽",
+      "col_state": "상태",
+      "state": {
+        "pending": "대기 중",
+        "loaded": "로드됨",
+        "disabled": "꺼짐",
+        "failed": "실패",
+        "skipped": "건너뜀",
+        "unloaded": "언로드됨"
+      },
+      "config": "구성",
+      "config_close": "닫기",
+      "status": "상태 ({count})",
+      "config_of": "구성: {mod}",
+      "no_pages": "모드는 Ui.AddConfigPage로 구성 페이지를 추가합니다 (구성 레지스트리의 편집기가 여기에 붙습니다)."
+    }
+  },
+  "details": {
+    "menu": "아이템 정보",
+    "title": "아이템 정보",
+    "snapshot": "마지막으로 살펴본 아이템 — 스냅숏 (아이템 {item:x8}, 프레임 {frame})",
+    "refresh": "새로고침",
+    "close": "닫기"
+  },
+  "gamemenu": {
+    "scroll_crashed": "Kiln: 지난번 스크롤되는 일시 정지 메뉴 때문에 게임이 종료되어 꺼 둡니다. Kiln의 모드 페이지에 모드의 메뉴 항목이 있습니다.",
+    "summary": {
+      "auto_scrolls": "일시 정지 메뉴에 모두 표시되며, 다 들어가지 않으면 스크롤됩니다 (Kiln 설정, modEntries: Auto).",
+      "auto": "게임 메뉴는 항목이 3개 이하일 때만 표시해 게임 자체 항목(종료)이 화면에 남게 합니다 (Kiln 설정, modEntries: Auto. 이 메뉴는 여기서 스크롤되지 않음).",
+      "always": "게임 메뉴에 모두 표시됩니다 (Kiln 설정, modEntries: Always).",
+      "never": "게임 메뉴에 하나도 표시되지 않습니다 (Kiln 설정, modEntries: Never).",
+      "few": "게임 메뉴는 항목이 3개 이하일 때만 표시해 게임 자체 항목(종료)이 화면에 남게 합니다 (Kiln 설정, modEntries: Few).",
+      "not_drawn": {
+        "other": "{how} 그중 {count}개는 지금 게임 메뉴에 없습니다. 여기서 고르세요."
+      }
+    }
+  },
+  "toast": {
+    "render_off_errors": "{mod}: 렌더링 핸들러를 껐습니다 (오류)",
+    "render_off_slow": "{mod}: 렌더링 핸들러를 껐습니다 (너무 느림)"
+  },
+  "refusal": {
+    "server": "서버가 이 게임을 거부했습니다.",
+    "named": "{server} 서버가 이 게임을 거부했습니다.",
+    "needs_one": "가지고 있지 않은 모드가 필요합니다:",
+    "needs_many": "가지고 있지 않은 모드들이 필요합니다:",
+    "you_have": "{mod} {version} (내 버전 {have})",
+    "more": "외 {count}개",
+    "modpack": "Kiln 런처가 이 서버의 모드팩을 제공합니다.",
+    "add": "Kiln 런처에서 추가한 뒤 다시 접속하세요.",
+    "no_reason": "서버가 거부했습니다."
+  },
+  "creative": {
+    "title": "크리에이티브",
+    "menu": "크리에이티브",
+    "hud": "크리에이티브",
+    "key": {
+      "category": "크리에이티브",
+      "open": "크리에이티브 메뉴 열기",
+      "flight": "캐릭터 비행 켜기/끄기 (크리에이티브 모드)"
+    },
+    "asking": "서버에 묻는 중...",
+    "no_server": "이 서버에는 Kiln 크리에이티브 메뉴가 없습니다 (서버에 Kiln이 필요합니다).",
+    "idle": "이 서버는 Creative Mode(Flame 모드)를 실행하므로 여기서는 Kiln의 크리에이티브 메뉴가 쉬고 있습니다. Creative Mode 자체 메뉴를 쓰세요. 그 모드가 실행되는 동안에는 Kiln의 크리에이티브 모드를 켤 수 없습니다.",
+    "on": "크리에이티브 모드 켜짐",
+    "off": "크리에이티브 모드 꺼짐",
+    "turn_off": "끄기",
+    "turn_on": "켜기",
+    "admin_turns_on": "(관리자가 켭니다: /creative on <you>)",
+    "refused": "거부됨: {reason}",
+    "needs_creative": "크리에이티브 모드가 필요합니다.",
+    "tab": {
+      "items": "아이템",
+      "world": "월드",
+      "rules": "규칙"
+    },
+    "rules": {
+      "yours": "내 규칙: {rules}",
+      "game": "내 규칙: 게임 기본",
+      "key": "키: {key} (바꾸려면 Kiln 메뉴 > 키)."
+    },
+    "items": {
+      "cannot_give": "이 서버의 게임 빌드는 아이템을 줄 수 없습니다.",
+      "needs_creative": "아이템을 가져가려면 크리에이티브 모드가 필요합니다.",
+      "search": "검색",
+      "no_equipment": "장비 제외",
+      "journey": "찾은 것만",
+      "journey_tip": "여정: 주웠거나 제작했거나 사용한 아이템입니다. 첫 번째는 게임 의도대로 찾거나 제작하고, 그 뒤로는 원하는 만큼 가져가세요.",
+      "category": "분류",
+      "found_unknown": "이 서버는 어떤 아이템을 찾았는지 알 수 없습니다.",
+      "loading": "카탈로그를 불러오는 중...",
+      "of": "아이템 {total}개 중 {count}개",
+      "none_found": "아직 찾은 것이 없습니다. 먼저 아이템을 줍거나 제작하세요.",
+      "none_match": "맞는 아이템이 없습니다.",
+      "pick": "아이템을 고르세요.",
+      "previous": "이전",
+      "page": "{page}/{pages} 페이지",
+      "next": "다음"
+    },
+    "category": {
+      "all": "전체",
+      "materials": "재료",
+      "building": "건축",
+      "consumables": "소모품",
+      "ammunition": "탄약",
+      "weapons": "무기",
+      "equipment": "장비",
+      "tools": "도구",
+      "instruments": "악기",
+      "fishing": "낚시",
+      "customization": "꾸미기",
+      "gems": "보석",
+      "palettes": "색상 팔레트",
+      "animal_food": "동물 먹이",
+      "collectibles": "수집품",
+      "blueprints": "설계도",
+      "currency": "화폐"
+    },
+    "backpack": {
+      "caption": "배낭",
+      "holding": "{item} x{count} 들고 있음: 빈 칸(또는 같은 아이템이 있는 칸)을 클릭하세요.",
+      "put_back": "되돌려 놓기",
+      "hint": "\"놓기...\"로 아이템을 집은 뒤 칸을 클릭하세요.",
+      "reading": "배낭을 읽는 중..."
+    },
+    "item": {
+      "stacks": "{category}, 최대 {count}개 겹침",
+      "level": "레벨",
+      "level_fixed": "레벨 {level}",
+      "rarity": "희귀도",
+      "upgrades": "강화",
+      "upgrades_tip": "작업대에서처럼 강화를 해금합니다 (하나마다 레벨 +1). 5: 아이템이 가진 전부 (희귀도에 따라 개수가 정해짐).",
+      "gem_slot": "보석 슬롯",
+      "journey_level": "찾은 것만: 레벨은 캐릭터 레벨까지로 제한됩니다.",
+      "count": "수량",
+      "take": "{count}개 가져가기",
+      "place": "놓기...",
+      "place_tip": "집은 뒤 아래 배낭 칸을 클릭해서 그곳에 넣으세요."
+    },
+    "rarity": {
+      "common": "일반",
+      "uncommon": "고급",
+      "rare": "희귀",
+      "epic": "영웅",
+      "legendary": "전설"
+    },
+    "map": {
+      "caption": "지도 밝히기",
+      "unavailable": "이 게임 빌드에는 지도 밝히기가 없습니다 (Kiln이 여기서 전장의 안개를 찾지 못했습니다).",
+      "radius": "밝힐 반경",
+      "game": "게임 기본",
+      "r200": "200 m",
+      "r400": "400 m",
+      "whole": "지도 전체",
+      "help": "이동하면서 주변 지도를 밝힙니다 (지도 전체: 한 번에 전부). 밝혀진 곳은 크리에이티브 모드가 끝나도 이 캐릭터에게 그대로 남습니다. 월드를 나가면 게임 기본으로 돌아갑니다."
+    },
+    "flight": {
+      "caption": "캐릭터 비행",
+      "unavailable": "캐릭터 비행에는 rules.json의 allowCharacterFlight와 양쪽 게임에 맞는 비행 후크가 필요합니다.",
+      "flight": "비행",
+      "off": "꺼짐",
+      "unlimited": "무제한",
+      "building": "건축 구역에서만",
+      "help": "점프로 이륙, 점프를 누르고 있으면 상승, 웅크리기로 하강, 달리기로 가속. 땅으로 내려앉으면 착지합니다. 키: {key} (Kiln 메뉴 > 키)."
+    },
+    "time": {
+      "caption": "시각",
+      "now": "지금은 {time}입니다.",
+      "unknown": "시각을 알 수 없습니다.",
+      "cannot": "이 빌드는 시각을 설정할 수 없습니다.",
+      "admin_only": "관리자만 시각을 바꿀 수 있습니다.",
+      "help": "고른 시각으로 건너뜁니다.",
+      "hour": "시",
+      "set": "설정"
+    },
+    "cycle": {
+      "caption": "낮과 밤 주기",
+      "now_stopped": "현재: 멈춤 (해가 멈춰 있음)",
+      "now_fast": "현재: 빠름 (약 90초에 낮과 밤 한 번)",
+      "now_normal": "현재: 보통",
+      "cannot": "이 빌드는 주기 속도를 바꿀 수 없습니다.",
+      "admin_only": "관리자만 주기를 바꿀 수 있습니다.",
+      "normal": "보통",
+      "stopped": "멈춤",
+      "fast": "빠름",
+      "help": "월드 전체에 적용되며, 되돌리거나 서버가 다시 시작될 때까지 유지됩니다."
+    }
+  },
+  "checks": {
+    "title": "안내 점검",
+    "header": "안내 점검 · {session}",
+    "session": {
+      "hosted": "호스팅한 월드",
+      "joined": "서버에 접속함 (점검은 서버에서 실행)",
+      "server": "전용 서버",
+      "menu": "메인 메뉴: 점검을 실행하려면 월드를 호스팅하거나 서버에 접속하세요"
+    },
+    "totals": "   {passed}개 통과 · {failed}개 실패 · {skipped}개 건너뜀 · {never}개 실행 안 함",
+    "guard": "업적 보호: {guard}",
+    "guard_warning": "보호 경고: {warning}",
+    "ledger": "기록: {ledger}",
+    "idle": "실행 중인 점검이 없습니다. 아래에서 하나를 고르거나 모두 순서대로 실행하세요.",
+    "run_these": "이 {count}개 실행",
+    "run_all": "모두 실행",
+    "refresh": "새로고침",
+    "queued": "{count}개 더 대기 중",
+    "only_new": "Kiln {version}에서 새로 생긴 점검 {count}개만",
+    "none_server": "서버에 점검이 없습니다.",
+    "none_mods": "로드된 모드 중 점검을 등록한 것이 없습니다.",
+    "area": "{area}  ({count}개 중 {done}개 통과)",
+    "cheats_note": "cheats 태그가 붙은 점검은 캐릭터를 영구히 바꿉니다. 버려도 되는 캐릭터를 쓰고 나중에 지우세요.",
+    "verdict": {
+      "pass": "통과",
+      "fail": "실패",
+      "skip": "건너뜀"
+    },
+    "run": "실행",
+    "item": {
+      "needs": "{ids}  {needs} 필요",
+      "refused": "    거부됨: {reason}",
+      "note": "    메모: {note}"
+    },
+    "now": "현재: {title}",
+    "now_cheats": "{mod}/{id} · {area} · cheats",
+    "confirm": {
+      "before": "이 점검을 시작하기 전에:",
+      "no": "아니요, 실행하지 않음",
+      "yes": "예, 실행",
+      "yes_wait": "예, 실행 (먼저 글을 읽으세요)"
+    },
+    "setting_up": "(준비 중…)",
+    "fail_note": "무엇이 잘못됐나요? Enter는 이 줄과 함께 실패를 기록하고, Escape는 줄 없이 기록합니다.",
+    "pass": "통과",
+    "fail": "실패…",
+    "skip": "건너뛰기",
+    "stop": "중지 (기록 안 함)",
+    "writing": "결과를 기록하는 중…",
+    "assert": {
+      "ok": "ok   {what}",
+      "ok_detail": "ok   {what} — {detail}",
+      "fail": "FAIL {what}",
+      "fail_detail": "FAIL {what} — {detail}"
+    },
+    "hud": {
+      "confirming": "점검 \"{title}\"이(가) 먼저 질문합니다: 목록을 여세요 ({open})",
+      "finishing": "점검 \"{title}\": 결과 기록 중",
+      "running": "점검 \"{title}\": {instruction}   [통과 {pass} · 실패 {fail} · 건너뛰기 {skip}]",
+      "setting_up": "준비 중…"
+    },
+    "key": {
+      "category": "안내 점검",
+      "open": "안내 점검 목록 열기",
+      "pass": "실행 중인 점검 통과",
+      "fail": "실행 중인 점검 실패 (그다음 한 줄 입력)",
+      "skip": "실행 중인 점검 건너뛰기"
+    },
+    "keys": "키: 목록 {open} · 통과 {pass} · 실패 {fail} · 건너뛰기 {skip} (Kiln 메뉴, 키)"
+  },
+  "talents": {
+    "key": {
+      "category": "특성",
+      "open": "특성 트리 {tree} 열기"
+    },
+    "no_server_trees": "서버에 Kiln 특성 트리가 없습니다",
+    "not_connected": "Kiln 서버에 연결되지 않았습니다",
+    "waiting": "서버를 기다리는 중...",
+    "points": "포인트: {0} 사용 가능  ({2} 중 {1} 사용)",
+    "select": "특성을 고르세요.",
+    "level_cost": "레벨 {0} / {1}   비용 {2}",
+    "needs_all": "모두 필요: {0}",
+    "needs_one": "하나 필요: {0}",
+    "needs_points": "이 트리에 포인트 {0} 사용 필요",
+    "needs_level": "캐릭터 레벨 {0} 필요",
+    "unlock": "해금 ({0})",
+    "next_level": "다음 레벨 ({0})",
+    "refund": "환불",
+    "respec": "초기화 (무료)",
+    "close": "닫기",
+    "tooltip": "{0}  ({1}/{2}, 비용 {3})",
+    "paused": "게임이 일시 정지되었습니다. 재개하면 적용됩니다.",
+    "effect": {
+      "attribute": "속성 {0} +{1}/레벨",
+      "buff": "버프 {0}",
+      "game_node": "게임 노드 {0}",
+      "program": "프로그램 {0}",
+      "ability": "능력 {0}",
+      "code": "코드"
+    }
+  },
+  "blocks": {
+    "toast": {
+      "baked_vfx": "{mod}: vfx \"{name}\"이(가) 모드 빌드와 다릅니다. 모드를 다시 빌드하세요",
+      "baked_material": "{mod}: 머티리얼 \"{name}\"이(가) 모드 빌드와 다릅니다. 모드를 다시 빌드하세요",
+      "new_vfx": "{mod}: 새 VFX \"{name}\": 보려면 게임을 다시 시작하세요",
+      "new_material": "{mod}: 새 머티리얼 \"{name}\": 보려면 게임을 다시 시작하세요",
+      "no_window": "{window}은(는) 이 게임에 있는 창이 아닙니다",
+      "too_many": "대기 중인 명령이 너무 많습니다. 천천히 하세요",
+      "command_failed": "{command} 실패",
+      "server_value": "{config}: {path}은(는) 서버의 값입니다. 나간 뒤에 바꿀 수 있습니다"
+    }
+  },
+  "abilities": {
+    "server_lacks": "서버에 이 능력이 없습니다",
+    "not_connected": "Kiln 서버에 연결되지 않았습니다",
+    "cooldown": "{ability} [{key}]: {seconds:F1}초"
+  },
+  "gemforge": {
+    "outcome": "보석 대장간: {message}"
+  },
+  "dev": {
+    "window_key": "{window} 창",
+    "filter": "필터",
+    "clear": "지우기",
+    "systems": {
+      "title": "Kiln: 시스템",
+      "unavailable": "이 빌드에서는 시스템을 쓸 수 없습니다: {status}",
+      "off_only": "꺼진 것만",
+      "profile": "프로파일",
+      "stop_profiling": "프로파일링 중지",
+      "all_on": "모두 켜기",
+      "log_top": "상위 30개 기록",
+      "col_on": "켜짐",
+      "col_system": "시스템",
+      "col_calls": "호출/초",
+      "col_world": "월드"
+    },
+    "types": {
+      "title": "Kiln: 타입",
+      "unavailable": "이 빌드에서는 타입을 쓸 수 없습니다: {status}",
+      "search": "검색",
+      "base": "기반: {type}"
+    },
+    "bindings": {
+      "title": "Kiln: 바인딩",
+      "key_for": "{binding}의 키:",
+      "set": "설정",
+      "unbind": "지정 해제",
+      "default": "기본값",
+      "col_mod": "모드",
+      "col_binding": "바인딩",
+      "col_key": "키",
+      "col_description": "설명",
+      "also_bound": "함께 지정됨: {bindings}"
+    },
+    "resources": {
+      "title": "Kiln: 리소스",
+      "type": "유형",
+      "list": "목록",
+      "more": "... (더 보려면 필터)",
+      "log_guid": "GUID 기록"
+    },
+    "hooks": {
+      "title": "Kiln: 후크"
+    },
+    "log": {
+      "title": "Kiln: 게임 로그",
+      "hide_noise": "잡음 숨기기",
+      "hidden": "(오래된 줄 {count}개는 그리지 않음. 필터로 찾으세요)"
+    },
+    "status": {
+      "title": "Kiln: 상태",
+      "none": "{folder}에 상태 파일이 없습니다"
+    },
+    "console": {
+      "title": "Kiln: 콘솔",
+      "run": "실행",
+      "history": "기록:"
+    }
+  },
+  "graphics": {
+    "cap": {
+      "caption": "프레임 제한",
+      "on": "프레임 속도 제한",
+      "fps": "초당 프레임",
+      "hint": "게임이 초당 최대 이만큼의 프레임을 렌더링합니다. Kiln이 프레임 시작 간격을 고르게 맞춥니다. 바로 적용됩니다. 게임 자체 프레임 제한이나 수직 동기화도 켜져 있으면 가장 낮은 제한이 정합니다."
+    },
+    "dlss": {
+      "caption": "DLSS (NVIDIA RTX 카드)",
+      "preset": "렌더링 프리셋",
+      "preset_hint": "기본값은 게임과 DLSS에 맡깁니다. J와 K는 DLSS 4의 트랜스포머 모델이고, L과 M은 DLSS 4.5의 새 모델입니다. DLAA는 게임의 프리셋을 유지합니다. NVIDIA 앱에서 DLSS 재정의를 설정했다면 그것이 우선합니다.",
+      "scale": "렌더링 크기",
+      "render_scale": "렌더링 배율 (%)",
+      "mode_scale": "{mode} (%)",
+      "scale_hint": "DLSS가 업스케일하기 전에 렌더링하는 게임 해상도의 비율입니다. 낮을수록 빠르고, 높을수록 선명합니다. DLAA는 항상 전체 크기로 렌더링합니다. DLSS 설정은 게임이 다음에 DLSS를 준비할 때 적용됩니다. 월드를 불러올 때, 또는 게임 설정에서 DLSS 모드나 해상도를 바꿀 때입니다."
+    },
+    "scale": {
+      "game": "모드별 DLSS 기본값",
+      "per_mode": "DLSS 모드마다 배율 지정",
+      "custom": "모든 모드에 한 배율"
+    },
+    "mode": {
+      "performance": "성능",
+      "balanced": "균형",
+      "quality": "품질",
+      "ultra_performance": "울트라 성능",
+      "ultra_quality": "울트라 품질"
+    },
+    "preset": {
+      "default": "기본"
+    },
+    "readout": {
+      "caption": "정보 표시",
+      "on": "정보 표시 보이기",
+      "hint": "오른쪽 위에 몇 줄을 표시합니다: 초당 프레임(렌더링과 출력), 프레임 시간, 업스케일러와 모드, 렌더링 및 출력 크기, DLSS 프리셋. 지연 시간은 표시하지 않습니다. 이 게임에서는 Kiln이 정직하게 잴 수 없기 때문입니다."
+    },
+    "status": {
+      "caption": "현재",
+      "unavailable": "Kiln 그래픽 도구에는 Kiln 0.2.0-dev.29.18 이상의 kiln-ui.dll이 필요합니다.",
+      "cap_on": "프레임 제한: {fps} fps.",
+      "cap_aside": "프레임 제한 ({fps} fps): 꺼짐, {tools}에 맡김.",
+      "fps": "렌더링 {rendered} fps, 출력 {output} fps, 프레임당 {ms} ms.",
+      "dlss_aside": "DLSS 설정: {tools}에 맡김.",
+      "dlss_active": "DLSS {mode}: {render} → {output}, 프리셋 {preset}.",
+      "dlss_limited": "렌더링 배율이 {mode}에서 DLSS가 허용하는 범위를 벗어났습니다. DLSS가 허용하는 가장 가까운 크기로 렌더링합니다 (위).",
+      "dlss_idle": "지금은 DLSS를 쓰지 않습니다 (게임이 FSR 3나 XeSS를 쓰거나, 업스케일러가 없거나, 월드를 불러오지 않음).",
+      "dlss_none": "이번 세션에서 게임이 DLSS를 준비하지 않았습니다 (DLSS에는 NVIDIA RTX 카드와 게임 설정의 DLSS 선택이 필요).",
+      "restart": "Kiln의 DLSS 설정과 정보 표시의 DLSS 줄을 쓰려면 게임을 다시 시작하세요. Kiln은 게임 시작 때 둘 중 하나가 켜져 있을 때만 DLSS를 후크합니다."
+    },
+    "aside": {
+      "optiscaler": "OptiScaler",
+      "streamline": "NVIDIA Streamline (프레임 생성 모드)",
+      "vkfg": "DLSS 프레임 생성 모드 (EnshroudedVKFG.ini)",
+      "dlsstweaks": "DLSSTweaks",
+      "nvngx": "다른 DLSS 로더 (게임 옆의 nvngx.dll)",
+      "ngx_patched": "DLSS를 후크하는 다른 도구",
+      "overlay_off": "꺼져 있는 Kiln 오버레이",
+      "upscaler": "다른 업스케일러 도구 (게임 옆의 AMD나 Intel 업스케일러 파일, 또는 바뀐 FSR 3 패스)"
+    },
+    "upscaler": {
+      "caption": "게임 FSR 3 뒤에서",
+      "choice": "업스케일러",
+      "game": "게임 자체 FSR 3",
+      "amd": "AMD FSR",
+      "xess": "Intel XeSS",
+      "amd_mode": "AMD FSR 버전",
+      "amd_auto": "자동 (지원되면 FSR 4)",
+      "amd_fsr3": "FSR 3.1",
+      "amd_hint": "자동은 AMD가 고릅니다: 지원하는 그래픽 카드와 드라이버에서는 FSR 4, 그 밖에서는 FSR 3.1. FSR 3.1을 고르면 FSR 4가 될 곳에서도 FSR 3.1을 씁니다.",
+      "hint": "게임 그래픽 설정에서 업스케일러로 FSR 3를 고르세요. 그 자리에서 Kiln이 선택한 것을 실행합니다. 변경은 게임이 다음에 FSR을 준비할 때 적용됩니다. 월드를 불러올 때, 또는 FSR 품질, 해상도, 3D 렌더링 배율을 바꿀 때입니다. AMD FSR과 Intel XeSS에는 제조사의 파일이 필요하며, Kiln 런처가 다운로드합니다 (설정, 그래픽).",
+      "files": {
+        "present": "{name} {version}: 파일이 {folder}에 있습니다.",
+        "missing": "이 게임에 아직 {name} 파일이 없습니다. 게임을 닫은 상태에서 Kiln 런처(설정, 그래픽)에서 다운로드하세요. 그때까지 게임 자체 FSR 3가 실행됩니다.",
+        "changed": "{folder}에 있는 {name} 파일 일부가 없거나 바뀌었습니다. 게임을 닫은 상태에서 Kiln 런처(설정, 그래픽)에서 다시 다운로드하세요. 그때까지 게임 자체 FSR 3가 실행됩니다."
+      },
+      "running": {
+        "off": "지금은 게임 FSR 3 뒤에서 Kiln의 업스케일러를 쓰고 있지 않습니다.",
+        "not_fsr": "지금 게임이 FSR 3로 업스케일하고 있지 않습니다. 게임 그래픽 설정에서 FSR 3를 고르지 않았거나 월드를 불러오지 않았습니다.",
+        "game_fsr3": "게임 자체 FSR 3가 실행 중입니다.",
+        "amd_fsr4": "게임의 FSR 3 대신 AMD FSR 4가 실행 중입니다.",
+        "amd_fsr31": "게임의 FSR 3 대신 AMD FSR 3.1이 실행 중입니다.",
+        "xess": "게임의 FSR 3 대신 Intel XeSS가 실행 중입니다.",
+        "unknown": "Kiln이 게임 FSR 3 뒤에서 무엇이 업스케일하는지 알 수 없습니다. 구성 요소의 버전이 서로 다릅니다."
+      },
+      "size": "{output}용으로 {render}에서 렌더링합니다.",
+      "size_version": "버전 {version}, {output}용으로 {render}에서 렌더링합니다.",
+      "amd_fsr3_auto": "AMD의 선택으로 FSR 3.1이 정해졌습니다. 이 그래픽 카드나 드라이버에서는 FSR 4가 실행되지 않습니다.",
+      "detail": "자세히: {detail}",
+      "reason": {
+        "restart": "{upscaler}은(는) 다음 게임 실행부터 작동합니다. Kiln은 게임이 시작될 때 준비합니다.",
+        "files_missing": "{upscaler} 파일을 아직 다운로드하지 않아 게임 자체 FSR 3가 실행됩니다.",
+        "files_bad": "{upscaler}의 파일 하나가 Kiln이 예상한 것과 달라서(크기나 SHA-256이 다름) Kiln이 불러오지 않습니다. 다시 다운로드하세요.",
+        "load_failed": "{upscaler}의 파일 하나를 불러오지 못해 게임 자체 FSR 3가 실행됩니다.",
+        "device": "그래픽 카드나 드라이버에 {upscaler}에 필요한 Vulkan 기능이 없어 게임 자체 FSR 3가 실행됩니다.",
+        "create_failed": "이 해상도에서 {upscaler}을(를) 준비하지 못해 게임 자체 FSR 3가 실행됩니다.",
+        "runtime_failed": "업스케일 중 {upscaler}이(가) 실패했습니다. 게임을 다시 시작할 때까지 게임 자체 FSR 3가 실행됩니다.",
+        "fault": "{upscaler} 또는 그 주변의 Kiln 코드에 오류가 났습니다. 게임을 다시 시작할 때까지 게임 자체 FSR 3가 실행됩니다.",
+        "aside": "Kiln이 {tools}에 비켜서므로 게임의 FSR 3를 바꾸지 않습니다.",
+        "no_signatures": "Kiln이 아직 이 게임 빌드의 FSR 3를 몰라서 게임 자체 FSR 3가 실행됩니다. 이 게임 빌드에 맞는 Kiln 업데이트로 해결됩니다.",
+        "inputs": "게임의 이미지가 {upscaler}이(가) 받는 형식이 아니라서 게임 자체 FSR 3가 실행됩니다.",
+        "unavailable": "이 Kiln 빌드나 이 시스템에서 {upscaler}을(를) 쓸 수 없어 게임 자체 FSR 3가 실행됩니다.",
+        "waiting": "{upscaler} 준비 완료. 게임이 다음에 FSR 3를 준비할 때 시작됩니다. 월드를 불러오거나 게임 설정에서 FSR 품질을 바꾸세요.",
+        "no_vulkan": "이번 세션에서 게임이 그래픽 장치를 준비하는 것을 Kiln이 보지 못했습니다. {upscaler}을(를) 쓰려면 게임을 다시 시작하세요.",
+        "unknown": "{upscaler}이(가) 실행되지 않아(더 새로운 Kiln의 이유 {number}) 게임 자체 FSR 3가 실행됩니다."
+      }
+    },
+    "saved": "kiln/kiln.json에 저장됩니다 (런처의 설정 페이지에도 있습니다)."
+  },
+  "native": {
+    "menu": {
+      "mods": "모드",
+      "mods_off": "모드: {reason}"
+    },
+    "footer": {
+      "loaded": {
+        "other": "Kiln {version} - 모드 {count}개 로드됨"
+      }
+    },
+    "fallback": {
+      "title": "Kiln {version}",
+      "body": "이번 세션에서는 Kiln의 관리 호스트(Kiln.Ui)가 실행되지 않아 여기서 모드 목록과 모드 화면을 쓸 수 없습니다. kiln/logs/kiln.log를 확인하세요.",
+      "close": "{key}을(를) 누르면 닫힙니다."
+    },
+    "graphics": {
+      "fps": "렌더링 {rendered} fps | 출력 {output} fps | {ms} ms",
+      "dlss": "DLSS {mode}: {render} -> {output}, 프리셋 {preset}",
+      "preset_default": "기본",
+      "not_dlss": "지금은 DLSS가 아님 (게임의 FSR 3, XeSS 또는 없음): {output}",
+      "unknown": "업스케일러: 다음 게임 실행 때 읽음: {output}",
+      "aside": "업스케일러: {tools}에 맡김: {output}",
+      "cap": "프레임 제한 {fps} fps",
+      "cap_aside": "프레임 제한 {fps} fps: {tools} 때문에 꺼짐",
+      "upscale": "FSR 3 뒤에서: {upscaler}: {render} -> {output}",
+      "game_fsr3": "게임 자체 FSR 3",
+      "upscale_why": "{upscaler}이(가) 실행되지 않음: {why}"
+    }
+  }
+}
