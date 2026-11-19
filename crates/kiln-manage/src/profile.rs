@@ -936,6 +936,23 @@ fn skipped_native_loaders(dirs: &DataDirs, profile: &Profile) -> Vec<String> {
     }).collect()
 }
 
+/// A Kiln mod and an XHL-Core plugin of the same id both on (XHL ships Kiln builds of his mods under his plugins' ids):
+/// where the game has XHL-Core (`game`, after chain.ini is written), Kiln loads the one and XHL-Core the other from the
+/// game's mods folder, so the mod runs twice. One sentence per mod; none without XHL-Core.
+fn xhl_twins(dirs: &DataDirs, profile: &Profile, game: &Path) -> Vec<String> {
+    let twins: Vec<(ModKind, &str)> = profile.mods.kiln.iter().filter(|k| k.enabled).flat_map(|k| {
+        [ModKind::Eml, ModKind::Xhl].into_iter().filter_map(move |kind| {
+            let m = profile.mods.list(kind).iter().find(|m| m.enabled && m.id.eq_ignore_ascii_case(&k.id))?;
+            let folder = crate::library::path_of(dirs, &lref(kind, m)).ok()?;
+            crate::engine_mods::has_xhl_plugin_ini(&folder).then_some((kind, k.id.as_str()))
+        })
+    }).collect();
+    if twins.is_empty() || !crate::engine_mods::xhl_host(game).available { return Vec::new(); }
+    twins.into_iter().map(|(kind, id)| format!("kiln:{id} and {}:{id} are both on in this profile: Kiln runs the Kiln mod, and \
+        XHL-Core runs the XHL-Core plugin of the same mod from the game's mods folder, so the mod runs twice. Switch one of them \
+        off in the profile.", kind.as_str())).collect()
+}
+
 fn skipped_set_loader(id: &str, file: &str) -> String {
     format!("Skipped native mod {id}: {file} is Shrouded Engine Tweaks's own loader, not a mod; Kiln runs SET mods itself. \
         The Library source and saved profile are kept unchanged. Remove this native entry from the profile and import the \
@@ -2097,7 +2114,7 @@ pub fn activate(dirs: &DataDirs, profile_id: &str, install: &GameInstall) -> Res
         own_loaders: placed.own_loaders,
         kept_files: placed.kept_files,
         warnings: skipped_native_loaders(dirs, &profile).into_iter().chain(copy_warnings).chain(placed.warnings).chain(placed.own_notes)
-            .chain(game_files.notes).chain(order_notes).collect(),
+            .chain(game_files.notes).chain(order_notes).chain(xhl_twins(dirs, &profile, &install.path)).collect(),
         retained: placed.retained.into_iter().chain(game_files.retained).collect(),
         safety_notes: placed.safety_notes,
     };
