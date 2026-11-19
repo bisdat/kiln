@@ -1577,8 +1577,7 @@ fn changed_copy(dirs: &DataDirs, k: ModKind, m: &ProfileMod, src: &Path, dst: &P
 fn set_aside_copy(install: &GameInstall, profile: &Profile, k: ModKind, m: &ProfileMod, dst: &Path, c: &ChangedCopy) -> Result<String> {
     let base = install.path.join(crate::paths::game::BACKUPS)
         .join(format!("profile-copy-{}-{}-{}-{}", profile.id, k.as_str(), m.id, ts_compact(crate::util::now_unix())));
-    let aside = (1..).map(|n| if n == 1 { base.clone() } else { crate::util::with_suffix(&base, &format!("-{n}")) })
-        .find(|p| std::fs::symlink_metadata(p).is_err()).expect("a free name");
+    let aside = next_copy_name(&base);
     crate::engine_mods::refuse_symlink_path(&install.path, &aside)?;
     std::fs::create_dir_all(aside.parent().expect("parent")).map_err(io_at(&aside, "creating"))?;
     std::fs::rename(dst, &aside).map_err(io_at(&aside, "moving the changed profile copy to"))?;
@@ -1598,6 +1597,22 @@ fn set_aside_copy(install: &GameInstall, profile: &Profile, k: ModKind, m: &Prof
         _ => format!("{}:{}: its copy in {} was changed in the game folder{what}. Kiln replaced it with the Library's files and kept the changed \
             copy in {}.", k.as_str(), m.id, dst.display(), aside.display()),
     })
+}
+
+/// The name for a copy set aside in the second `base` names: `base`, else `base-<n>` after the highest `n` in use. Never
+/// a lower name that [`prune_profile_copies`] freed: a newer copy under it would sort as the oldest and be deleted at
+/// once, with the notice naming a folder that is gone (more than three set aside within one second).
+fn next_copy_name(base: &Path) -> PathBuf {
+    let name = base.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+    let last = base.parent().and_then(|d| std::fs::read_dir(d).ok()).into_iter().flatten().flatten()
+        .filter_map(|e| {
+            let rest = e.file_name().into_string().ok()?.strip_prefix(name)?.to_string();
+            if rest.is_empty() { Some(1) } else { rest.strip_prefix('-')?.parse::<u32>().ok().filter(|n| *n >= 2) }
+        })
+        .max()
+        .unwrap_or(0);
+    (last + 1..).map(|n| if n == 1 { base.to_path_buf() } else { crate::util::with_suffix(base, &format!("-{n}")) })
+        .find(|p| std::fs::symlink_metadata(p).is_err()).expect("a free name")
 }
 
 /// How many changed copies of one profile's mod [`set_aside_copy`] keeps in `<game>/kiln/backups/`: a mod that changes
@@ -2309,6 +2324,42 @@ fn save_pause(root: &Path) {
 #[cfg(test)]
 mod review_tests {
     use super::*;
+
+    /// More than three changed copies of one mod set aside within one second: the pruning frees the oldest names, and
+    /// the next copy never takes one of them back (it would sort as the oldest and be deleted at once).
+    #[test]
+    fn copies_set_aside_in_one_second_keep_the_newest_three() {
+        let root = std::env::temp_dir().join(format!("km-profile-copy-names-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let prefix = "profile-copy-my-mods-shroudforge-tweaks-";
+        let base = root.join(format!("{prefix}20261118T234617Z"));
+        // another mod whose id starts with this one's is not this mod's copy
+        std::fs::create_dir_all(root.join("profile-copy-my-mods-shroudforge-tweaks-live-20261118T234617Z-9")).unwrap();
+        let mut made = Vec::new();
+        for i in 1..=6 {
+            let p = next_copy_name(&base);
+            std::fs::create_dir_all(&p).unwrap();
+            std::fs::write(p.join("n"), i.to_string()).unwrap();
+            made.push(p.file_name().unwrap().to_string_lossy().into_owned());
+            prune_profile_copies(&root, prefix);
+        }
+        assert_eq!(made, [
+            "profile-copy-my-mods-shroudforge-tweaks-20261118T234617Z",
+            "profile-copy-my-mods-shroudforge-tweaks-20261118T234617Z-2",
+            "profile-copy-my-mods-shroudforge-tweaks-20261118T234617Z-3",
+            "profile-copy-my-mods-shroudforge-tweaks-20261118T234617Z-4",
+            "profile-copy-my-mods-shroudforge-tweaks-20261118T234617Z-5",
+            "profile-copy-my-mods-shroudforge-tweaks-20261118T234617Z-6",
+        ]);
+        let mut kept: Vec<String> = std::fs::read_dir(&root).unwrap().flatten()
+            .filter(|e| e.file_name().to_string_lossy().starts_with(&format!("{prefix}2")))
+            .map(|e| std::fs::read_to_string(e.path().join("n")).unwrap()).collect();
+        kept.sort();
+        assert_eq!(kept, ["4", "5", "6"]);
+        assert!(root.join("profile-copy-my-mods-shroudforge-tweaks-live-20261118T234617Z-9").is_dir());
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     /// A save that read the profile before another worker deleted it and made it again (same id, same generation)
     /// never writes after that: the delete and the create wait for the save, so the save lands on the old profile,
