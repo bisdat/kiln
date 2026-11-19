@@ -396,6 +396,14 @@ public sealed class WorldConcurrentWritesTests : TaskTest
     [Fact]
     public void A_subscription_kiln_world_refused_at_first_is_made_at_the_next_service_tick_and_no_native_event_is_lost()
     {
+        // The event type's first use binds once in its static constructor and again as the subscription is made, and the
+        // fake refuses only the first: the case here is a type already in use, so that first use comes first, with no
+        // table to bind to (otherwise the outcome depends on whether an earlier test of the run used the type).
+        Backend.Tables.Remove("kiln.world");
+        WorldNative.Reset();
+        System.Runtime.CompilerServices.RuntimeHelpers.RunClassConstructor(typeof(ComponentExchangedEvent).TypeHandle);
+        Backend.Tables["kiln.world"] = FakeEcsReads.Table;
+        WorldNative.Reset();
         FakeEcsReads.Add(12, WorldKind.Server, ("Counter", Le(5)));
         var seen = new List<ComponentExchangedEvent>();
         Capabilities.Report(WorldConcurrent.WriteCapability, CapabilityState.Available);
