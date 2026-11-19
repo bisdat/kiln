@@ -114,6 +114,13 @@
           "pattern": "48 8B 4D {items/pide.list:d8} 48 8D 97 4C 05 00 00 48 89 8D 80 00 00 00 45 8B CC 48 8B 4D {items/pide.count:d8} 44 8B C3 48 89 8D 88 00 00 00 0F B6 0D ?? ?? ?? ?? 88 4C 24 38 48 8D 8D 80 00 00 00 C6 44 24 30 04 48 89 4C 24 28 48 8B C8 48 89 54 24 20 48 8D 54 24 48 E8" }
       ]
     },
+    "items/PideRarity": {
+      "comment": "items.gear.rolls: createPide right after it loads the rarity its caller asked for (movzx ebx, word [opts+8]: OptU8 {value, has}; rdi = ItemInfo), before the has test and the type's rule (generateRarity, rarity). kiln.items' mid hook replaces bx with a rolled {rarity, 1} for item types a rule names (kiln_items.h rarity rolls). Server 26430253 0x1b1c27, client 26430625 0x412127 (docs/re/items.md section 10)",
+      "find": [
+        { "scope": { "symbol": "items/CreatePide", "size": 1600 },
+          "pattern": "0F B7 5B 08 0F B7 C3 66 C1 E8 08 84 C0 75 ?? 0F B6 4F 17 44 38 67 16", "offset": 4 }
+      ]
+    },
     "@items/CreatePide.fields": {
       "comment": "the Level override's value indices (u32 globals: the max, then the current level) and ItemInfo's category (Weapons 2 get the gem slot)",
       "find": [
@@ -379,6 +386,9 @@
     },
     "items.equip": {
       "symbols": ["items/EquipItem", "items/UnequipItem", "@items/EquipAction.calls"]
+    },
+    "items.gear.rolls": {
+      "symbols": ["items/CreatePide", "items/PideRarity"]
     },
     "items.gear": {
       "symbols": ["items/WriteOther", "items/JobTracker", "items/JobWriteFlag", "items/JobStorage", "items/ReadOther", "items/AttrFind",

@@ -38,7 +38,8 @@ extern "C" {
                                   instances (stamps, locations, records), v5 (0.2.0-dev.27) equip and unequip, v6
                                   (0.2.0-dev.29) equipment sets, v7 (0.2.0-dev.30, the gem wave) gem sockets on any gear:
                                   KILN_ITEMS_GEM_SLOT_ANY, REPLACE, DYE, DURABILITY and socket_roll, v8 (0.2.0-dev.29.19,
-                                  the equipment wave) gear_write, gear_read and gear_status; check header.size */
+                                  the equipment wave) gear_write, gear_read and gear_status, then rarity_rolls and
+                                  roll_status; check header.size */
 
 typedef uint32_t KilnItemId;  /* 0 = none */
 typedef uint64_t KilnSlotId;  /* 0 = none / let the game choose */
@@ -1041,6 +1042,55 @@ typedef struct KilnItemsGearStatus {
     char detail[160];         /* why it is off; NUL-terminated */
 } KilnItemsGearStatus;
 
+/* ---------------------------------------------------------------------------------------------- rarity rolls -- */
+
+/* v8, since 0.2.0-dev.29.19 (the equipment wave, package P5; feature items.gear.rolls; check header.size).
+ *
+ * A rarity rolled when the game creates an item, per item type. createPide (docs/re/items.md section 10) takes the
+ * rarity its caller asked for, or, with none asked, the type's rule (generateRarity: the lowest allowed, else
+ * ItemInfo.rarity); the item gets PerkContainerNew {rarity + 1, 0} when the type has perk slot [rarity], and its weapon
+ * gem slot by the rarity's chance. kiln.items' mid hook where createPide reads the asked rarity (items/PideRarity)
+ * replaces it, for item types a rule names, with a weighted roll among the rarities the type has a perk slot for, so the
+ * game itself then makes the item at that rarity: enhancements, socket chance, durability. Which creations a rule takes
+ * (KILN_ITEMS_ROLL_*):
+ *  - CRAFT: the game creates the item and asked for no rarity: crafting at a station or the hand menu (the recipe
+ *    function clears level, rarity and fuel), Items.GiveRecipeResult, and any other game creation without a rarity;
+ *  - LOOT: the game creates it with a rarity it rolled or fixed: random loot (containers, world pickups, random
+ *    drop-table stacks roll one from globalRarityDropRates); a loot entry that fixes its rarity (LootableItemInfo
+ *    useUiRarity) is a LOOT creation too: leave LOOT out for such an item to keep it;
+ *  - GIVE: a give of kiln.items for this item type without KILN_ITEMS_RARITY. A give with KILN_ITEMS_RARITY is never
+ *    rolled.
+ * Items no rule names are never touched. Server world (and a hosting client, which is the server of its world). */
+enum {
+    KILN_ITEMS_ROLL_CRAFT = 0x1u,
+    KILN_ITEMS_ROLL_LOOT = 0x2u,
+    KILN_ITEMS_ROLL_GIVE = 0x4u,
+};
+
+/* One item type's rule. */
+typedef struct KilnItemsRarityRoll {
+    KilnItemId item;     /* the item type (not 0; once per set) */
+    uint32_t sources;    /* KILN_ITEMS_ROLL_* (at least one; other bits are refused) */
+    float weights[5];    /* Common .. Legendary: 0 or more, finite, at least one above 0. A rarity whose perk slot the
+                            type lacks never comes up (its weight is left out); with none left the game's rarity stays */
+    uint32_t reserved;   /* 0 */
+} KilnItemsRarityRoll;
+
+typedef struct KilnItemsRollStatus {
+    uint32_t size;        /* in: sizeof(KilnItemsRollStatus) */
+    uint8_t available;    /* 1: rolls act (feature items.gear.rolls hooked, ItemInfo's perk slots found by reflection) */
+    uint8_t reserved0[3];
+    uint32_t items;       /* item types with a rule now (all owners merged) */
+    uint32_t owners;      /* owners with rules */
+    uint32_t conflicts;   /* item types more than one owner names (the last owner to set its rules wins) */
+    uint32_t reserved1;
+    uint64_t rolled[5];   /* creations given each rarity by a roll since the start */
+    uint64_t kept;        /* creations of a named type left as the game made them (the rule does not take that source) */
+    uint64_t no_slot;     /* rolls with no rarity the type has a perk slot for: the game's rarity stayed */
+    uint64_t faults;      /* the hook faulted (the item was created as the game made it) */
+    char detail[160];     /* why rolls are off; NUL-terminated */
+} KilnItemsRollStatus;
+
 /* ---------------------------------------------------------------------------------------------- the table ---- */
 
 typedef struct KilnItemsApi {
@@ -1238,6 +1288,18 @@ typedef struct KilnItemsApi {
      * first step. Tick thread (Pre / Post). */
     KilnResult(KILN_CALL* gear_read)(KilnEntity entity, uint32_t stamp, KilnItemsGearState* out);
     KilnResult(KILN_CALL* gear_status)(KilnItemsGearStatus* out); /* any thread */
+
+    /* ---- v8, since 0.2.0-dev.29.19 (package P5): rarity rolls at creation (check header.size; KILN_ERR_UNAVAILABLE
+     * without feature items.gear.rolls) ---- */
+
+    /* Replaces `owner`'s rules (see "rarity rolls"): `count` entries of `roll_size` bytes (sizeof(KilnItemsRarityRoll)
+     * the caller was built with, at least the v8 size). rolls NULL or count 0 ends them (always KILN_OK; cancel_owner
+     * does it too). KILN_ERR_UNAVAILABLE (checked first for a set): rolls are off (roll_status says why).
+     * KILN_ERR_INVALID_ARGUMENT: roll_size too small, more than 65536 entries, an entry roll_status would not take (item
+     * 0 or named twice, no source or an unknown bit, a weight below 0 or not a number, no weight above 0, reserved not
+     * 0); nothing changes then. Any thread; the next item the game creates uses them. */
+    KilnResult(KILN_CALL* rarity_rolls)(KilnOwner owner, const KilnItemsRarityRoll* rolls, uint32_t count, uint32_t roll_size);
+    KilnResult(KILN_CALL* roll_status)(KilnItemsRollStatus* out); /* any thread */
 } KilnItemsApi;
 
 #ifdef __cplusplus

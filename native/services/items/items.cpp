@@ -81,7 +81,12 @@ static_assert(offsetof(KilnItemsApi, set_capture) == 240 && offsetof(KilnItemsAp
 static_assert(offsetof(KilnItemsApi, socket_roll) == 288);
 // v8 (0.2.0-dev.29.19, the equipment wave) appends gear_write, gear_read and gear_status; a v7 reader's table ends at 296.
 static_assert(offsetof(KilnItemsApi, gear_write) == 296 && offsetof(KilnItemsApi, gear_read) == 304 &&
-              offsetof(KilnItemsApi, gear_status) == 312 && sizeof(KilnItemsApi) == 320);
+              offsetof(KilnItemsApi, gear_status) == 312);
+// v8 (package P5) then appends rarity_rolls and roll_status: a reader built before them sees a table ending at 320.
+static_assert(offsetof(KilnItemsApi, rarity_rolls) == 320 && offsetof(KilnItemsApi, roll_status) == 328 &&
+              sizeof(KilnItemsApi) == 336);
+static_assert(sizeof(KilnItemsRarityRoll) == 32 && offsetof(KilnItemsRarityRoll, weights) == 8 &&
+              sizeof(KilnItemsRollStatus) == 248 && offsetof(KilnItemsRollStatus, rolled) == 24);
 static_assert(sizeof(KilnItemsGearRequest) == 40 && sizeof(KilnItemsGearState) == 44 && sizeof(KilnItemsGearResult) == 296 &&
               offsetof(KilnItemsGearResult, before) == 48 && offsetof(KilnItemsGearResult, after) == 92 &&
               offsetof(KilnItemsGearResult, message) == 136 && sizeof(KilnItemsGearStatus) == 192);
@@ -1431,6 +1436,7 @@ void KILN_CALL t_cancel_owner(KilnOwner owner) {
     sets_cancel_owner(owner);  // v6: the owner's snapshots
     pide_socket_roll(owner, nullptr);  // v7: the owner's socket rolls
     gear_cancel_owner(owner);          // v8: the owner's gear write callbacks
+    pide_rarity_rolls(owner, nullptr, 0, 0);  // v8 (P5): the owner's rarity rolls
     // Draining a running transfer callback must not hold the request mutex: that callback may queue a request.
     xfer_end_owner(owner);
 }
@@ -1662,6 +1668,12 @@ KilnResult KILN_CALL t_gear_write(KilnOwner owner, const KilnItemsGearRequest* r
 KilnResult KILN_CALL t_gear_read(KilnEntity entity, uint32_t stamp, KilnItemsGearState* out) { return gear_read(entity, stamp, out); }
 KilnResult KILN_CALL t_gear_status(KilnItemsGearStatus* out) { return gear_status(out); }
 
+// ---- v8 (P5): rarity rolls at creation (pide.cpp) ----
+KilnResult KILN_CALL t_rarity_rolls(KilnOwner owner, const KilnItemsRarityRoll* rolls, uint32_t count, uint32_t roll_size) {
+    return pide_rarity_rolls(owner, rolls, count, roll_size);
+}
+KilnResult KILN_CALL t_roll_status(KilnItemsRollStatus* out) { return pide_roll_status(out); }
+
 const KilnItemsApi kTable = {
     {sizeof(KilnItemsApi), KILN_ITEMS_VERSION},
     &t_give, &t_take, &t_cancel, &t_cancel_owner, &t_read, &t_find,
@@ -1674,6 +1686,7 @@ const KilnItemsApi kTable = {
     &t_set_capture, &t_set_release, &t_set_status, &t_set_plan, &t_equip_set, &t_set_cancel,
     &t_socket_roll,
     &t_gear_write, &t_gear_read, &t_gear_status,
+    &t_rarity_rolls, &t_roll_status,
 };
 
 // ============================================================================================= self-test =======
@@ -2016,6 +2029,9 @@ void resolve() {
     LOGI("gear options at creation (KILN_ITEMS_UNLOCK, KILN_ITEMS_GEM_SLOT): %s", pide ? "on" : "OFF (items.pide_options)");
     LOGI("gem sockets on any gear (GEM_SLOT_ANY, DYE, DURABILITY, gemSlotOverride, socket_roll): %s",
          pide_sockets_available() ? "on" : "OFF (gems.sockets)");
+    // v8 (P5): rarity rolls at creation, a second mid hook in createPide (feature items.gear.rolls)
+    const bool rolls = pide_install_rolls(g_api, g_owner);
+    LOGI("rarity rolls at creation (rarity_rolls): %s", rolls ? "on" : "OFF (items.gear.rolls)");
     // v3 (docs/re/items.md sections 13 and 14)
     {
         const bool qs = sym("items/QuickStack", &E.quick_stack) && sym("items/MoveAll", &E.move_all);

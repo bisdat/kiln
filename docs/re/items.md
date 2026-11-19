@@ -247,6 +247,25 @@ docs/kiln/services/content.md "Rarity, level and perks of new gear").
 `PerkContainerNew` unchanged, after a restart under a one-level definition. The clamp above fits, but its other write (attribute
 `0x638a979a`) did not show in `Level`'s second slot (still 55), so which function did it was not confirmed.
 
+### Rarity rolls at creation (kiln.items v8, package P5) **[dis]**
+Server 26430253 `f0d824be…`, client 26430625 `5d9ef2f1…` in brackets; listing `dev29/out/eq-p5/scratch/srv_createpide.asm`.
+- createPide's sixth argument (`[rbp+0x108]`, the stack slot at entry `rsp+0x30`) points at the op's optionals: `+0` OptU32 level
+  (`+4` has), `+8` OptU8 rarity (`+9` has), `+0xc` OptF32 fuel (`+0x10` has). At `0x1b1c23` [`0x412123`] it loads the rarity word
+  (`movzx ebx, word [rbx+8]`), tests the high byte (has) and only without it reads the type's rule (`generateRarity` `+0x16`, the
+  `disableRarityGeneration` mask `+0x18`, else `rarity` `+0x17`). From there `bl` is the rarity for everything after it:
+  `PerkContainerNew {min(bl + 1, 5), 0}` when `perkReferences[bl]` (`ItemInfo + 0x608 + 16 * bl`, 16 bytes, tested as two qwords
+  at `0x1b1c7c`) is set, and the weapon gem slot's chance per rarity (`0x939130`, switch on `bl` at `0x1b1d1c`).
+- `items/PideRarity` is the instruction after the load (`0x1b1c27` [`0x412127`], `movzx eax, bx`, 7 relocatable bytes before the
+  branch). A mid hook there that sets `bx` to `{rarity, 1}` makes the game create the item at that rarity by its own code; the
+  op itself is not written. `rdi` is the ItemInfo (`+0` itemId).
+- Who asks for a rarity (the 26 addItems callers, section 10): the recipe function clears it (crafting, Items.GiveRecipeResult);
+  random loot (`0x16ae30`, `0x16b190`) and random drop-table stacks (`0x1a1d70` through `0x16d020`) pass `has = 1` with the
+  rarity of the roll output of `0x16b5f0`: `LootableItemInfo +5` (useUiRarity) set takes `+6` (uiRarity), else the caller's
+  rolled OptU8 (`globalRarityDropRates`), else 0. So a creation with `has = 1` that no kiln.items give made is loot, one
+  without is a craft (or another game creation without a rarity); a kiln.items give is known by its own scope (pide.cpp).
+  Not followed here: the fixed-item drop-table stack's call (`0x1a210a`) passes a rarity word from `bx` whose `has` byte was not
+  traced, so such a stack is a craft or a loot creation by that byte.
+
 ### Lab results (lab `craft-match`, `mods/tests/craftmatch-test`, server 26430253, no player) **[rt]**
 `MADE` = an item entity read back after `Items.GiveRecipeResult`, which runs the game's recipe function `0x19a1d0`; `TOOLTIP` = computed as `0xb1fa70` does.
 ```
