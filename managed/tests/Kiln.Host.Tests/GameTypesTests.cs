@@ -5,6 +5,7 @@
 using System.Reflection;
 using System.Reflection.Metadata;
 using System.Reflection.PortableExecutable;
+using System.Runtime.CompilerServices;
 using System.Runtime.Loader;
 using Kiln.Host;
 using Xunit;
@@ -60,6 +61,15 @@ public sealed class GameTypesTests : ModsFixture
         File.Copy(BuiltGame, Path.Combine(host, "Kiln.Game.dll"));
         var own = Directory.CreateDirectory(Path.Combine(host, "game", "server-f0d824be7fcd")).FullName;
         File.Copy(BuiltGame, Path.Combine(own, "Kiln.Game.dll"));
+        // Each context is unloaded and collected before the next step: a context loaded from a path maps its file, and
+        // Windows refuses to delete a mapped file (the fixture's Directory.Delete) until the context is collected.
+        AssertCollected(LoadOwn(host, own));
+        AssertCollected(LoadFlat(host));
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    static WeakReference LoadOwn(string host, string own)
+    {
         var lines = new List<string>();
         var ctx = new AssemblyLoadContext("game-types-test", isCollectible: true);
         try
@@ -70,8 +80,14 @@ public sealed class GameTypesTests : ModsFixture
             Assert.Equal(["Info: Kiln.Game: game/server-f0d824be7fcd/Kiln.Game.dll, generated for this game build"], lines);
         }
         finally { ctx.Unload(); }
-        ctx = new AssemblyLoadContext("game-types-test-flat", isCollectible: true);
-        lines.Clear();
+        return new WeakReference(ctx);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    static WeakReference LoadFlat(string host)
+    {
+        var lines = new List<string>();
+        var ctx = new AssemblyLoadContext("game-types-test-flat", isCollectible: true);
         try
         {
             var a = GameTypes.Load(ctx, host, "client-0123456789ab", (l, t) => lines.Add($"{l}: {t}"));
@@ -79,6 +95,18 @@ public sealed class GameTypesTests : ModsFixture
             Assert.Equal(["Info: Kiln.Game: Kiln.Game.dll (no game/client-0123456789ab/ for this game build: the newest layouts; mods are checked against them)"], lines);
         }
         finally { ctx.Unload(); }
+        return new WeakReference(ctx);
+    }
+
+    /// <summary>The unloaded context is gone after a few collections: GameTypes.Load keeps nothing of it alive.</summary>
+    static void AssertCollected(WeakReference context)
+    {
+        for (var i = 0; context.IsAlive && i < 10; i++)
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+        }
+        Assert.False(context.IsAlive, "the unloaded AssemblyLoadContext is still alive");
     }
 
     [Fact]
