@@ -17,17 +17,27 @@ Every change of the plan is logged as `fillprobe:` in `kiln/logs/kiln.log`. No `
 
 **Limitations:** The panel does *not* read the native button's enabled byte, the native displayed `Available` quantity, the current slider amount or every dynamically selected ingredient option; compare these visually. The probe shows the *server's* +1 craft case, not the complete live native request. Absence of a Fill event is only evidence that **no Fill action reached the server**, not proof of the client's exact rejection reason. The server-side plan and panel use the same process: joined clients are not yet supported for this first probe.
 
-## Build
+## Build for Kiln dev.29.17 (API 0.2.9)
 
-Requires the Kiln repository and **.NET SDK 10**:
+**Important:** This research branch's own SDK is already API **0.2.10**. A normal `dotnet build -t:KilnPack` there creates an incompatible ZIP for dev.29.17. Do **not** override the generated manifest's `apiVersion` to disguise this mismatch.
+
+Requires Git, .NET SDK 10 and Python 3. From the research checkout **inside the Kiln build Distrobox**, run:
 
 ```bash
-dotnet build mods/tests/station-fill-client-probe/StationFillClientProbe.csproj -c Release -t:KilnPack
+bash mods/tests/station-fill-client-probe/build-for-dev29.17.sh
 ```
 
-The resulting `station-fill-client-probe-0.1.0.zip` contains the `station-fill-client-probe/` mod directory, ready to extract into `<Enshrouded>/kiln/mods`.
+The script uses a separate cached copy of upstream **tag `v0.2.0-dev.29.17`**, verifies that its SDK is **API 0.2.9**, copies only this probe's source/project into the tagged tree, builds it with the actual matching SDK, and validates the resulting ZIP's manifest. It does not alter the research branch's `main` or any other Git branch.
 
-The research branch also has a branch-only GitHub Actions build workflow. It packages a test artifact but does not publish a release.
+The verified output is:
+
+```text
+mods/tests/station-fill-client-probe/bin/Release/station-fill-client-probe-0.1.1.zip
+```
+
+Import **0.1.1** using the normal Kiln Launcher procedure; disable/remove the previously imported **0.1.0** which requires API 0.2.10. Never enable two versions of the same mod.
+
+The branch-only packaging workflow also uses the pinned script and creates no release.
 
 ## Hosted-game check
 
