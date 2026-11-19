@@ -342,9 +342,10 @@ mod imp {
             if let Some(parent) = target.parent() {
                 std::fs::create_dir_all(parent).map_err(crate::util::io_at(parent, "creating"))?;
             }
-            let mut out = std::fs::File::create(&target).map_err(crate::util::io_at(&target, "writing"))?;
+            // a DLL Windows refuses here is in the staging folder (an antivirus scans it as it is written): crate::blocked
+            let mut out = std::fs::File::create(&target).map_err(crate::blocked::io_at(&target, "writing", &f.path))?;
             copy_checked(&mut a, f, zip, Some(&mut out))?;
-            out.sync_all().map_err(crate::util::io_at(&target, "flushing"))?;
+            out.sync_all().map_err(crate::blocked::io_at(&target, "flushing", &f.path))?;
             done += f.size;
             progress.report(Some(done as f32 / total as f32), &format!("staged {}", f.path));
         }

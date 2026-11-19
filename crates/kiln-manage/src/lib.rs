@@ -25,6 +25,7 @@
 //! | [`winpath`] | host <-> game path translation (Z:, copy mode) |
 //! | [`bundle`] | runtime bundles (`kiln-runtime.json`) |
 //! | [`install`] | install / upgrade / uninstall / rollback, receipts (`.install.json`) |
+//! | [`blocked`] | a DLL or exe the install could not write because Windows refused it (an antivirus, another program): `detail.blocked`, the report's finding from launcher.log |
 //! | [`chain`] | `kiln/chain.ini`, `kiln/chain/once.ini` |
 //! | [`compat`] | closed DLL mods: compat rules, the last session's hooks.json overlaps, chain.ini [late] plans |
 //! | [`manifest`] | `kiln.mod.json` (port of Manifest.cs), `native.json` |
@@ -95,6 +96,7 @@ pub mod bundle;
 pub mod chain;
 pub mod compat;
 pub mod install;
+pub mod blocked;
 pub mod archive;
 pub mod library;
 pub mod manifest;

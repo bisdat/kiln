@@ -600,7 +600,8 @@ fn undo(steps: Vec<Step>) -> Result<()> {
 fn rollback_error(steps: Vec<Step>, original: Error, staging: &Path) -> Error {
     match undo(steps) {
         Ok(()) => original,
-        Err(e) => Error::new(original.code, format!("{}; {}. Recovery files remain in {} and kiln/backups", original.message, e.message, staging.display())),
+        // the first failure's detail stays (a file Windows refused: crate::blocked)
+        Err(e) => Error { message: format!("{}; {}. Recovery files remain in {} and kiln/backups", original.message, e.message, staging.display()), ..original },
     }
 }
 
@@ -774,7 +775,18 @@ fn install_report_adding(dirs: &DataDirs, install: &GameInstall, bundle: &Path, 
     let staging = kiln.join(format!(".staging-{}", rand_suffix()?));
     let result = install_staged(dirs, install, bundle, &bundle_sha, &manifest, &choice, &files, old, options, &staging, progress);
     if result.is_ok() || !has_previous(&staging) { let _ = std::fs::remove_dir_all(&staging); }
-    result
+    result.map_err(|e| started_meanwhile(install, e))
+}
+
+/// A file Windows refused ([`crate::blocked`]) while the game runs: the game started during the install and may be
+/// what holds it, so it is no antivirus hint but the game's own case, with the installer's words after it.
+fn started_meanwhile(install: &GameInstall, e: Error) -> Error {
+    let Some(b) = crate::blocked::of(&e) else { return e };
+    match crate::proc::find_game(install) {
+        Ok(Some(p)) => Error::new(ErrorCode::GameRunning, format!("{} started during the install and may hold {}; quit it and install again ({})", install.exe, b.path, e.message))
+            .with_detail(serde_json::json!({ "pid": p.pid })),
+        _ => e,
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1046,7 +1058,7 @@ fn install_staged(dirs: &DataDirs, install: &GameInstall, bundle: &Path, bundle_
                 if let Some(p) = hold.parent() {
                     std::fs::create_dir_all(p).map_err(io_at(p, "creating"))?;
                 }
-                std::fs::rename(&target, &hold).map_err(io_at(&target, "moving aside"))?;
+                std::fs::rename(&target, &hold).map_err(crate::blocked::io_at(&target, "moving aside", &f.path))?;
                 Some(hold)
             } else {
                 None
@@ -1056,7 +1068,7 @@ fn install_staged(dirs: &DataDirs, install: &GameInstall, bundle: &Path, bundle_
                 if let Some(p) = &previous {
                     let _ = std::fs::rename(p, &target);
                 }
-                return Err(io_at(&target, "installing")(e));
+                return Err(crate::blocked::io_at(&target, "installing", &f.path)(e));
             }
             steps.push(Step::Placed { target, previous });
             progress.report(Some(0.5 + 0.4 * (i + 1) as f32 / total as f32), &format!("installed {}", f.path));
