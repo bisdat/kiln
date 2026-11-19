@@ -1,0 +1,12 @@
+{
+  // typed gear values (docs/kiln/services/content.md "Gear values")
+  "format": 1,
+  "gear": {
+    "Weapon_Fixture_Sword": { "power": 30, "damage": { "cut": 0.7, "fire": 0.3 }, "rarity": "rare", "levels": [5, 5],
+                              "recipe": { "inputs": [ { "item": "Material_Fixture_Logs", "count": 3 } ], "duration": 5 } },
+    "Weapon_Fixture_*": { "@where": { "rarity": "Common" }, "power": { "mul": 1.2 }, "maxStackSize": 1, "socket": true },
+    "Weapon_Fixture_Loot": { "powr": 3, "rarity": "Mythic", "levels": [0, 60], "damage": { "frost": 1 }, "armor": { "physical": { "times": 2 } } },
+    "Weapon_Fixture_Nothing": { "power": 10 }
+  },
+  "gearRules": { "rarityDurability": [0.9, 0.95, 1, 1.1, 1.2], "socketChance": { "legendary": 1 }, "lootRarityRates": { "common": 1 }, "speed": 2 }
+}

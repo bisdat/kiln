@@ -1,0 +1,78 @@
+{
+  "catalog": true,
+  "description": "the data packs' typed gear section and gearRules: unknown keys and kinds, rarity names, level ranges, op keys, the unsupported loot rarity rates, selectors that match nothing",
+  "diagnostics": [
+    {
+      "code": "KL402",
+      "col": 30,
+      "file": "content/gear.json",
+      "line": 8,
+      "message": "\"powr\": no such item field in the game's reflection (Kiln reports \"unknown field\")",
+      "severity": "warning"
+    },
+    {
+      "code": "KL106",
+      "col": 51,
+      "file": "content/gear.json",
+      "line": 8,
+      "message": "\"Mythic\" does not have the expected form (^(common|uncommon|rare|epic|legendary|Common|Uncommon|Rare|Epic|Legendary)$)",
+      "severity": "error"
+    },
+    {
+      "code": "KL107",
+      "col": 72,
+      "file": "content/gear.json",
+      "line": 8,
+      "message": "0 is below the minimum 1",
+      "severity": "error"
+    },
+    {
+      "code": "KL107",
+      "col": 75,
+      "file": "content/gear.json",
+      "line": 8,
+      "message": "60 is above the maximum 55",
+      "severity": "error"
+    },
+    {
+      "code": "KL102",
+      "col": 92,
+      "file": "content/gear.json",
+      "line": 8,
+      "message": "\"frost\" is not allowed here",
+      "severity": "error"
+    },
+    {
+      "code": "KL102",
+      "col": 131,
+      "file": "content/gear.json",
+      "line": 8,
+      "message": "\"times\" is not allowed here (allowed: add, lowerOnly, max, min, mul, raiseOnly, set)",
+      "severity": "error"
+    },
+    {
+      "code": "KL401",
+      "col": 5,
+      "file": "content/gear.json",
+      "line": 9,
+      "message": "no item \"Weapon_Fixture_Nothing\" in the game or the mods",
+      "severity": "warning"
+    },
+    {
+      "code": "KL109",
+      "col": 100,
+      "file": "content/gear.json",
+      "line": 11,
+      "message": "not supported yet: Kiln has not mapped the game resource that holds the loot rarity rates",
+      "severity": "error"
+    },
+    {
+      "code": "KL102",
+      "col": 136,
+      "file": "content/gear.json",
+      "line": 11,
+      "message": "\"speed\" is not allowed here (allowed: comment, durability, lootRarityRates, rarityDurability, socketChance, unlockCost)",
+      "severity": "error"
+    }
+  ]
+}

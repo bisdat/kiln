@@ -289,6 +289,26 @@ public sealed class BootFingerprintTests : ModsFixture
     }
 
     [Fact]
+    public void A_data_packs_gearRules_are_boot_content_and_change_the_hash()
+    {
+        // kiln.content's prepare lowers content/*.json's "gearRules" to a BalancingTable patch (gamedata_bootpatch.cpp gear_rule_docs):
+        // files by name, any case of .json, comments allowed, trailing commas not (nlohmann::json)
+        const string rules = """
+            { // boot values for gear
+              "format": 1, "gear": { "Weapon_*": { "power": { "mul": 2 } } }, "gearRules": { "rarityDurability": [1, 1, 1, 1.25, 1.5] } }
+            """;
+        var dir = Mod("gear", ("content/Gear.JSON", rules), ("content/items.json", """{ "items": { "Material_T1_Wood_Logs": { "maxStackSize": 1000 } } }"""),
+            ("content/trailing.json", """{ "gearRules": { "socketChance": [0, 0, 0, 0, 1], }, }"""));
+        var patches = BootFingerprint.FilePatches(dir);
+        Assert.Equal("gearRules@Gear.JSON", Assert.Single(patches).Key);
+        var changed = Mod("gear-changed", ("content/Gear.JSON", rules.Replace("1.5", "2")));
+        Assert.NotEqual(BootFingerprint.Of("m", dir, new JsonObject()), BootFingerprint.Of("m", changed, new JsonObject()));
+        var gearOnly = Mod("gear-only", ("content/Gear.JSON", rules.Replace("\"power\": { \"mul\": 2 }", "\"power\": 40")));
+        Assert.Equal(BootFingerprint.Of("m", dir, new JsonObject()), BootFingerprint.Of("m", gearOnly, new JsonObject()));  // "gear" is world content, not boot
+        Assert.Empty(BootFingerprint.FilePatches(Mod("no-rules", ("content/items.json", """{ "items": {} }"""))));
+    }
+
+    [Fact]
     public void A_lab_switch_writes_the_hashed_text_and_without_it_nothing_is_written()
     {
         var root = KilnPaths.Root;

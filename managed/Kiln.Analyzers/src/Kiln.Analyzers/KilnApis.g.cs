@@ -176,6 +176,8 @@ internal static partial class KilnApis
         "M:Kiln.Content.ApplyFile(System.String)", // Content.ApplyFile(string): via Content.Apply(string, string?)
         "M:Kiln.Content.ConfigVocabulary", // Content.ConfigVocabulary(): via Content.RequireGD(string)
         "M:Kiln.Content.Dump(System.String)", // Content.Dump(string?): via Content.Require(string)
+        "M:Kiln.Content.Gear(Kiln.ItemId)", // Content.Gear(ItemId): via ContentRegistry.Get(ItemId)
+        "M:Kiln.Content.Gear(System.String)", // Content.Gear(string): via ContentRegistry.Get(string)
         "M:Kiln.Content.OnReady(System.Action{Kiln.ContentReadyEvent})", // Content.OnReady(Action<ContentReadyEvent>): via Content.Require(string)
         "M:Kiln.Content.PackReport", // Content.PackReport(): via Content.Require(string)
         "M:Kiln.Content.ReloadPacks", // Content.ReloadPacks(): via Content.Require(string)
