@@ -482,8 +482,8 @@ pub struct TickStat {
     /// Since 0.2.0-dev.29: the window's worst step (Pre + step + Post) broken down.
     #[serde(default, deserialize_with = "lenient", skip_serializing_if = "Option::is_none")]
     pub worst: Option<WorstStep>,
-    /// From the tasks plan (T4, issue #49; not written yet on `main`): the task pool's window. Absent when the pool
-    /// does not exist, and None here when the section does not read; the rest of the line still does.
+    /// Issue #49 (T4): the kiln.tasks window (per-owner task counters, tick-hop apply, refused hops). Absent when the
+    /// pool does not exist, and None here when the section does not read; the rest of the line still does.
     #[serde(default, deserialize_with = "lenient", skip_serializing_if = "Option::is_none")]
     pub tasks: Option<TasksSection>,
 }
@@ -592,8 +592,9 @@ pub struct TasksSection {
     pub pool: Option<TasksPool>,
     #[serde(default)]
     pub owners: Vec<TaskOwner>,
+    /// The native writer emits `"owners_truncated":true` only when owner rows were capped (`tasks_stats.cpp`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub owners_truncated: Option<u64>,
+    pub owners_truncated: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub apply: Option<TaskApply>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -885,6 +886,28 @@ mod tests {
         assert_eq!(odd.steps, 3);
         assert!(odd.post_parts.is_none() && odd.worst.is_none());
         assert_eq!(odd.pre_parts.as_ref().map(|p| p.subs[0].max), Some(2.0));
+
+        // issue #49: the tasks object, when the pool wrote one; the old line above has none
+        assert!(old.tasks.is_none());
+        let with_tasks = &tick_stats(r#"{"time":"t","steps":3,"tasks":{"window":{"id":7,"span_ms":60000.0,"age_ms":3.0},"pool":{"workers":3,"long_running":1,"queue_max":12},"owners":[{"owner":"kiln-auto-loot","queued":{"current":0,"max":4},"running":{"current":1,"max":2},"completed":120,"faulted":0,"cancelled":2,"cpu_ms":830.5,"wall_ms":910.2,"longest_ms":44.1,"longest_name":"loot-scan","queued_too_long":0,"running_too_long":0,"queue_full":0,"unload_blocked":0}],"apply":{"applied":96,"deferred":3,"cancelled":0,"ms":4.2,"owner_budget_stops":1,"step_budget_stops":0,"owners_served":1,"backlog":0},"hops":{"refused":0}}}"#)[0];
+        let tasks = with_tasks.tasks.as_ref().expect("tasks");
+        let (window, pool) = (tasks.window.as_ref().expect("window"), tasks.pool.as_ref().expect("pool"));
+        assert_eq!((window.id, window.span_ms, pool.queue_max), (Some(7), Some(60000.0), Some(12)));
+        assert_eq!((tasks.owners[0].owner.as_str(), tasks.owners[0].completed, tasks.owners[0].cpu_ms, tasks.owners[0].longest_name.as_deref()),
+            ("kiln-auto-loot", 120, 830.5, Some("loot-scan")));
+        let (apply, hops) = (tasks.apply.as_ref().expect("apply"), tasks.hops.as_ref().expect("hops"));
+        assert_eq!((apply.applied, apply.ms, hops.refused), (96, 4.2, 0));
+        assert_eq!(tasks.owners_truncated, None);
+        let again: TickStat = serde_json::from_str(&serde_json::to_string(with_tasks).unwrap()).unwrap();
+        assert_eq!(&again, with_tasks);
+        // a hosting client's client-world line (#82): only that world's hop account, still a tasks section
+        let client = &tick_stats(r#"{"time":"t","world":"client","steps":3,"tasks":{"apply":{"applied":5,"deferred":1,"cancelled":0,"ms":0.4,"owner_budget_stops":0,"step_budget_stops":1,"owners_served":1,"backlog":1},"hops":{"refused":2}}}"#)[0];
+        let ct = client.tasks.as_ref().expect("an apply-only tasks section reads");
+        assert!(ct.window.is_none() && ct.pool.is_none() && ct.owners.is_empty());
+        assert_eq!((ct.apply.as_ref().map(|a| a.applied), ct.hops.as_ref().map(|h| h.refused)), (Some(5), Some(2)));
+        // the native writer marks capped owner rows with a bool; the section must still read
+        let capped = &tick_stats(r#"{"time":"t","steps":1,"tasks":{"owners":[],"owners_truncated":true}}"#)[0];
+        assert_eq!(capped.tasks.as_ref().and_then(|t| t.owners_truncated), Some(true));
     }
 
     #[test]

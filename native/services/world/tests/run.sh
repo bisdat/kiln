@@ -26,6 +26,55 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -D__fastcall= -
     -I"$here/../../../third_party" -I"$here/../../../core/abi" "$here/budget_test.cpp" -o "$out/budget_test"
 "$out/budget_test"
 
+# ecs_reads_test: verified-copy ECS reads over a fake engine memory model (identity, snapshots, queries,
+# concurrency), under ASan/UBSan and ThreadSanitizer.
+g++ -std=c++20 -O1 -g -pthread -Wall -Wextra -fsanitize=address,undefined -I"$here/../../../core/abi" \
+    "$here/ecs_reads_test.cpp" "$here/../ecs_reads.cpp" -o "$out/ecs_reads_test_asan"
+"$out/ecs_reads_test_asan"
+g++ -std=c++20 -O1 -g -pthread -Wall -Wextra -fsanitize=thread -I"$here/../../../core/abi" \
+    "$here/ecs_reads_test.cpp" "$here/../ecs_reads.cpp" -o "$out/ecs_reads_test_tsan"
+TSAN_OPTIONS=halt_on_error=1:exitcode=66 "$out/ecs_reads_test_tsan"
+
+# ecs_engine_test: the engine backend of those reads (ecs_engine.cpp) under the same logic, over the real kiln.engine
+# (booted through kiln_plugin_main with a fake core) and a fake engine laid out from both exact profiles, with an entity
+# world in it; under ASan/UBSan and ThreadSanitizer.
+engine="$here/../../engine"
+for kind in asan tsan; do
+  if [[ $kind == asan ]]; then san=(-fsanitize=address,undefined -fno-sanitize-recover=undefined); else san=(-fsanitize=thread); fi
+  g++ -std=c++20 -O1 -g -pthread -Wall -Wextra -Werror "${san[@]}" -I"$engine" -I"$engine/include" -I"$engine/tests" \
+      -I"$here/../../../core/abi" "$here/ecs_engine_test.cpp" "$here/../ecs_engine.cpp" "$here/../ecs_lookup.cpp" "$here/../ecs_reads.cpp" \
+      "$engine/engine.cpp" "$engine/identity.cpp" "$engine/resolve.cpp" "$engine/gate.cpp" "$engine/tests/host/memory_host.cpp" \
+      -o "$out/ecs_engine_test_$kind"
+  TSAN_OPTIONS=halt_on_error=1:exitcode=66 "$out/ecs_engine_test_$kind"
+done
+
+# ecs_writes_test: the compare-exchange writes (ecs_writes.cpp, ecs_write_hold.cpp, ecs_write_policy.cpp) over the same
+# real kiln.engine (its write gate) and fake engine, every outcome forced, racing writers against a simulated frame,
+# the policy against sigdb's reflection of both exact builds; under ASan/UBSan and ThreadSanitizer. lint_hold.py checks
+# the code that runs inside the hold for waits, locks, allocations, logs, KilnApi calls and unbounded loops.
+python3 -I "$here/lint_hold.py"
+for kind in asan tsan; do
+  if [[ $kind == asan ]]; then san=(-fsanitize=address,undefined -fno-sanitize-recover=undefined); else san=(-fsanitize=thread); fi
+  g++ -std=c++20 -O1 -g -pthread -Wall -Wextra -Werror -Wno-mismatched-new-delete "${san[@]}" -DKILN_ENGINE_GATE_TEST_POINTS \
+      -DKILN_WORLD_HOLD_TEST_POINTS -I"$engine" -I"$engine/include" -I"$engine/tests" -I"$here/../../../core/abi" \
+      -I"$here/../../../third_party" "$here/ecs_writes_test.cpp" "$here/../ecs_writes.cpp" "$here/../ecs_write_hold.cpp" \
+      "$here/../ecs_write_policy.cpp" "$here/../ecs_engine.cpp" "$here/../ecs_lookup.cpp" "$here/../ecs_reads.cpp" \
+      "$engine/engine.cpp" "$engine/identity.cpp" "$engine/resolve.cpp" "$engine/gate.cpp" "$engine/tests/host/memory_host.cpp" \
+      -o "$out/ecs_writes_test_$kind"
+  TSAN_OPTIONS=halt_on_error=1:exitcode=66 "$out/ecs_writes_test_$kind" "$here/../../../../sigdb/types"
+done
+
+# ecs_prod_test: the production wiring of the write events (ecs_prod.cpp) over a fake core with kiln.hooks' owner-retiring
+# observer: a subscription before on_ready carries over, one of an owner revoked before on_ready ends.
+for kind in asan tsan; do
+  if [[ $kind == asan ]]; then san=(-fsanitize=address,undefined -fno-sanitize-recover=undefined); else san=(-fsanitize=thread); fi
+  g++ -std=c++20 -O1 -g -pthread -Wall -Wextra -Werror "${san[@]}" -D__fastcall= -I"$engine" -I"$engine/include" \
+      -I"$here/../../../core/abi" -I"$here/../../../third_party" "$here/ecs_prod_test.cpp" "$here/../ecs_prod.cpp" \
+      "$here/../ecs_writes.cpp" "$here/../ecs_write_hold.cpp" "$here/../ecs_write_policy.cpp" "$here/../ecs_engine.cpp" \
+      "$here/../ecs_lookup.cpp" "$here/../ecs_reads.cpp" -o "$out/ecs_prod_test_$kind"
+  TSAN_OPTIONS=halt_on_error=1:exitcode=66 "$out/ecs_prod_test_$kind"
+done
+
 # wraps_test: kiln.world v4 (the game's programs: directory, lab switch, wraps) over a fake world table.
 g++ -std=c++20 -O1 -g -pthread -Wall -Wextra -fsanitize=address,undefined -D__fastcall= -I"$here/host" \
     -I"$here/../../../third_party" -I"$here/../../../core/abi" "$here/wraps_test.cpp" -o "$out/wraps_test"

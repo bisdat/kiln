@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT
 #include "clr.h"
 
+#include "api.h"
 #include "log.h"
+#include "tasks_host.h"
 
 namespace kiln::clr {
 namespace {
@@ -133,7 +135,9 @@ bool boot(const KilnApi* api) {
     }
     KLOG_I("clr: Kiln.Host loaded (%s)", mode);
     const double t1 = now_ms();
-    rc = host_init(api);
+    // the managed host's KilnApi view: for the core's own public KilnApi (boot.cpp passes api()), the same table plus
+    // the core's kiln.internal.tasks.host lease table; any other table is handed over as it is
+    rc = host_init(api == kiln::api() ? api_for_managed_host() : api);
     if (rc != 0) {
         KLOG_E("clr: Kiln.Host.Init returned %d", rc);
         return false;

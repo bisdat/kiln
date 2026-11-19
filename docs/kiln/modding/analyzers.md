@@ -122,9 +122,22 @@ The analyzers decide which thread runs a piece of code.
 - `Context.Tick.Pre` and `Post` handlers;
 - `Context.GameLog.Line` handlers;
 - `Scheduler.Post` work;
-- `Events.On` and `Context.Messages.On` handlers.
+- `Events.On` and `Context.Messages.On` handlers;
+- command and chat handlers: `[Command]` methods, handlers given to `Commands.Register` and to
+  `LiteralNode.Executes` / `ArgumentNode.Executes`, and `Chat.Received` handlers (Kiln.Chat runs every command,
+  from chat, the console folder or a remote tool, on the tick);
+- the delegate handed to a task's `ctx.OnTick(...)` or `ctx.PostToTick(...)`, and task code after a tick hop (below);
+- the `onTick` delegate of `WorldConcurrent.OrOnTick(ctx, offTick, onTick)`. Its `offTick` delegate runs at once,
+  where `OrOnTick` is called, so it takes the thread of the code around it.
 
 Method groups count too: `Context.Tick.Pre += OnPre` makes `OnPre` tick-thread code.
+
+**The game's main thread** (a client's: it steps the client world and builds the game's UI):
+- `Client.Tick` handlers and `Client.Post` work, and code after `await Client.NextTick()`;
+- callbacks handed to a parameter or an event marked `[ClientMainThread]` (`Ui.Values.SubscribeSlots`, ...);
+- a Kiln task's client-world hops (below).
+
+**The render thread:** callbacks marked `[RenderThread]`, and a draw callback that takes a `UiDraw`.
 
 **A game thread:**
 - any other callback handed to a Kiln API or a Kiln event: on a server, the tick thread;
@@ -141,10 +154,33 @@ known.
 | own thread | `new Thread(…)` |
 | timer thread | `System.Threading.Timer`, `System.Timers.Timer.Elapsed` |
 | BCL events | `FileSystemWatcher`; `Process` output and exit; `AppDomain.ProcessExit` and `UnhandledException`; `TaskScheduler.UnobservedTaskException`; `Console.CancelKeyPress`; `SocketAsyncEventArgs.Completed`; `BackgroundWorker.DoWork` |
-| after `ConfigureAwait(false)` | everything after `await x.ConfigureAwait(false)`, up to the next `await Context.Scheduler.NextTick()`. A plain `await` off the tick thread does not come back: there is no Kiln synchronization context there. |
+| after `ConfigureAwait(false)` | everything after `await x.ConfigureAwait(false)`, up to the next `await Context.Scheduler.NextTick()`. The same for the body of `await foreach (… in xs.ConfigureAwait(false))` and the code after it, and for the code after `await using (x.ConfigureAwait(false))` (or `await using var`). A plain `await` off the tick thread does not come back: there is no Kiln synchronization context there. |
+| Kiln task worker | the delegate handed to `Context.Tasks.Run(...)` (a lambda, a method group, or a local function handed out that way), until a tick hop takes it to the tick |
+
+**Inside a Kiln task** the thread is followed through the function's own control flow (branches and joins, loops,
+early returns, `try`/`catch`/`finally`, `using`):
+- `await ctx.ToTick()` lands where the task belongs: where its `Context.Tasks.Run` was called. Called from tick code, on
+  the tick; from main-thread code (`Client.Tick`, `Client.Post`, a `[ClientMainThread]` callback), on the game's main
+  thread; inside a task, in its parent's world (inside a hop, that hop's world); from anywhere else, on the tick, as Kiln
+  does. `ctx.ToTick(WorldKind.Client)` and `ctx.ToTick(WorldKind.Server)` land where their constant says; a world that
+  is not a constant is some game thread. The delegates of `ctx.OnTick(...)` and `ctx.PostToTick(...)` follow the same
+  rule.
+- `await ctx.ToTick()` and `await Context.Scheduler.NextTick()` land on every path that reaches the call after them. From there the code stays on the tick: its later plain `await`s come back to the tick too. It
+  leaves the tick at `await ctx.NextGateWindow()` (back to a worker) or at an `await …ConfigureAwait(false)`
+  (the thread pool), until it hops again. A call after an `if` where only one branch hopped is still off the tick.
+- The delegate of `ctx.OnTick(...)` / `ctx.PostToTick(...)` runs on the tick. Awaiting the `OnTick` result does not
+  hop the caller: the code after it resumes in the task, where it was.
+- Hops are recognised by the type of what is awaited, the real `Kiln.KilnTaskContext` / `Kiln.Scheduler` awaitables:
+  a user method that happens to be named `ToTick` or `NextGateWindow` hops nothing, `Scheduler.NextTick` still
+  counts, and a hop kept in a variable (`var hop = ctx.ToTick(); await hop;`) counts too.
+- Awaiting your own async helper does not move the caller, even when the helper hops inside: the caller's `await`
+  resumes in the task where it was.
+- A local function called from a task body runs where its call has got to, so it is judged by its calls. An
+  ordinary helper method called from the body is not followed: when the rule cannot tell, it stays quiet.
 
 **Not reported (unknown):**
 - lambdas the mod stores or hands to its own helpers;
+- calls through ordinary helper methods (above), and code whose thread no path settles;
 - code under `if (Game.IsTickThread)` or `Client.IsClientThread`.
 
 Lambdas passed to library calls that run them at once (LINQ, `List.ForEach`) take the thread of the code around
@@ -183,6 +219,22 @@ await Context.Scheduler.NextTick();
 ```
 The fix uses `Context.Scheduler` in a `Mod`; otherwise it uses a `ModContext` or `Scheduler` field or property of
 the type. No fix without one.
+
+Inside a Kiln task the same rule reads the task's hops ([Where code runs](#where-code-runs-kiln101-kiln105)):
+```csharp
+Context.Tasks.Run("loot-scan", async ctx =>
+{
+    var found = ScanNearbyContainers(area);            // a worker: compute and IO are fine here
+    Chat.Broadcast("scan done");                       // KILN101: runs on a Kiln task worker (Context.Tasks.Run)
+    await ctx.ToTick();
+    foreach (var c in found) Inventory.Transfer(c, player);   // on the tick after the hop
+    await ctx.NextGateWindow();
+    Chat.Broadcast("applied");                         // KILN101: NextGateWindow took the work back to a worker
+});
+```
+**Fix in a task.** Hop first (`await ctx.ToTick()`), or hand the call to the tick (`ctx.PostToTick(() => ...)`,
+`await ctx.OnTick(() => ...)`). Those keep the work tracked by the task; the `Scheduler.Post` code fix above
+also works, as ordinary tick work that the task does not wait for.
 
 <a id="kiln102"></a>
 ## KILN102: async void
@@ -314,6 +366,128 @@ Not reported:
 
 In a synchronous handler, start the work and react when it completes:
 `Context.Scheduler.Post` or `ContinueWith(…, TaskScheduler.FromCurrentSynchronizationContext())`.
+
+### Around Kiln tasks
+The same id covers the ways of waiting on, or escaping, a Kiln task (`Context.Tasks`). The thread
+classifier ([Where code runs](#where-code-runs-kiln101-kiln105)) also follows a task's scope: a task segment
+and its tick hops run with the task's execution scope installed; code after
+`await …ConfigureAwait(false)` still belongs to the task body, but its scope is gone until a hop
+(`await ctx.ToTick()`, `await ctx.NextGateWindow()`) brings the work back into the task.
+
+**Blocking on a task.** `KilnTask.Wait()` on the tick, on a game thread or inside a task body (a lambda,
+method group or local function handed to `Context.Tasks.Run`, on a worker or on one of its tick hops,
+also after `await …ConfigureAwait(true)`), and blocking on the plain `Task` that `AsTask()` hands out — `job.AsTask().Result`,
+`job.AsTask().Wait()`, `job.AsTask().GetAwaiter().GetResult()`, also through a local whose only value is
+that call (`var t = job.AsTask(); … t.Result`, until the local is written again). At run time
+`KilnTask.Wait()` refuses on the tick and on a task worker; `AsTask()` escapes that refusal, so blocking on
+its `Task` can deadlock the tick or starve the pool and only this rule sees it. **Fix:** `await` the
+`KilnTask` (in an async function the code fix rewrites the `Wait` and `Result` forms as above).
+
+Not reported:
+- `KilnTask<T>.Result` and `job.GetAwaiter().GetResult()` themselves: they never block, they throw until
+  the task has ended;
+- a plain `Task` that is not from `AsTask()` inside a task (`Task.FromResult(…)` above, `Task.Run` work a
+  task waits on), a look-alike `Wait()` or `AsTask()` on one of the mod's own types, and `KilnTask.Wait()`
+  on a thread of the mod's own (`Task.Run`, a thread it started), where `Wait` is allowed;
+- the same calls in a task after `await …ConfigureAwait(false)` on every path or only some, until a hop:
+  the code usually runs on a .NET pool thread there, where `Wait` is allowed too, and the analyzer cannot
+  tell when the await finished at once and stayed on the worker.
+
+**A hop that never happens.** `ctx.ToTick()` whose result runs nothing: the call as a statement, under
+`_ =`, as the body of a void task lambda, or in a local nobody reads again. A `TickHop` does nothing until
+it is awaited — its awaiter is what hands the continuation to the tick — so the code after such a call
+still runs where it ran before. This is reported anywhere, in a task or in a helper that takes a
+`KilnTaskContext`. Not reported: a hop that is awaited, kept in a local and awaited later
+(`var hop = ctx.ToTick(); await hop;`), returned, passed on, or driven by hand through `GetAwaiter()`; and
+a look-alike `ToTick()` on one of the mod's own types.
+
+```csharp
+Context.Tasks.Run("loot-scan", async ctx =>
+{
+    var found = ScanNearbyContainers(area);
+    ctx.ToTick();                                   // KILN105: never awaited, the hop never happens
+    job.Wait();                                     // KILN105: refused in a task
+    var path = other.AsTask().Result;               // KILN105: AsTask() escapes the refusal
+    await ctx.ToTick();
+    ApplyResults(found);                            // tick-only work, on the tick after the hop
+});
+```
+
+**`await Client.NextTick()` in a task.** Kiln.Client's way to the main thread is a plain `Client.Post` of the
+continuation: inside a Kiln task the rest of the method leaves the task (not tracked by it, not cancelled with it, and
+left waiting for good if the mod unloads before that step). Reported at the await, where the task's scope is proven;
+outside a task it is Kiln.Client's own way and fine. **Fix:** `await ctx.ToTick(WorldKind.Client)`, the task's own hop
+to the client world's step.
+
+```csharp
+Client.Tick += (in TickInfo t) => Context.Tasks.Run("overlay", async ctx =>
+{
+    var marks = ComputeMarks();
+    await Client.NextTick();                        // KILN105: leaves the task
+    await ctx.ToTick();                             // the task's own hop: back to the client world it was started in
+    Thread.Sleep(5);                                // KILN105: blocks the game's main thread
+});
+```
+
+**A task-thread world call outside a task.** A `WorldConcurrent` read (`Open`, `Validate`, `Read`,
+`ReadBytes`, `ReadMany`, `Query`, `Template`) or compare-exchange write (`TryCompareExchange`,
+`TryCompareExchangeBytes`) where no task's scope is installed:
+- in a task body after `await …ConfigureAwait(false)` (also `await foreach` and `await using` over
+  `ConfigureAwait(false)`), on every path or only some, round a loop, or in a `catch` or `finally` whose `try`
+  had one, until a hop (`await ctx.NextGateWindow()`, `await ctx.ToTick()`) brings the work back into the task;
+- in work the mod starts itself: `Task.Run`, a `new Thread`, a timer or a thread-pool callback, also inside a
+  task body;
+- in the `offTick` delegate of `WorldConcurrent.OrOnTick` in such places: it runs at once, where `OrOnTick` is
+  called;
+- in an async helper of the mod's own after its own `await …ConfigureAwait(false)`.
+
+Kiln checks the scope on every call and refuses one without it with `InvalidOperationException`, so the call
+never works there. **Fix:** keep the awaits in the task or the helper (drop `ConfigureAwait(false)`), or call
+`await ctx.NextGateWindow()` first; for work started with `Task.Run` or a thread, run it in a Kiln task
+(`Context.Tasks.Run`) instead.
+
+Not reported: the reads inside a task body (also after `ConfigureAwait(true)`, a hop, or in `ctx.OnTick` and
+`OrOnTick`'s `onTick`), on the tick and on game threads; `WorldConcurrent.IsAvailable`, `IsPresent`, `CanWrite`,
+`WritePolicy` and `OrOnTick` itself, which work on any thread; the values the reads return (`ConcurrentSnapshot.TryGet`,
+`ConcurrentRead<T>.Value`); a look-alike `WorldConcurrent` of the mod's own; code whose thread the analyzer cannot
+tell (a stored delegate, a method nothing in the mod calls); and an awaitable configured in one place and awaited
+in another (`var a = x.ConfigureAwait(false); … await a;`), whose `false` the analyzer does not follow.
+
+```csharp
+Context.Tasks.Run("chest-scan", async ctx =>
+{
+    var data = await File.ReadAllBytesAsync(path).ConfigureAwait(false);
+    var chest = WorldConcurrent.Open(id);          // KILN105: the task's scope is gone after ConfigureAwait(false)
+    await ctx.NextGateWindow();
+    var again = WorldConcurrent.Open(id);          // back in the task: fine
+});
+```
+
+**A compare-exchange write in tick code.** `WorldConcurrent.TryCompareExchange` or `TryCompareExchangeBytes` in
+code the analyzer places on the tick (the list in [Where code runs](#where-code-runs-kiln101-kiln105): `OnLoad`, tick,
+event, command and chat handlers, `Scheduler.Post` work, a task after `await ctx.ToTick()`, `ctx.OnTick` and
+`ctx.PostToTick` delegates). The write takes the engine's write gate, which the server frame holds for its whole
+update, so from tick code it answers `Busy` (`WriteReason.InFrame`) every time and never writes (a client mod's tick
+gets `Unavailable`: the writes are for the server world only). **Fix:** call it from a Kiln task's worker (retry a
+busy one after `await ctx.NextGateWindow()`), or write on the tick with `World.Write`. Not reported: the writes on a task's worker, and a look-alike `TryCompareExchange` of the mod's own.
+
+```csharp
+[Command("charge")]
+private string Charge(CommandContext c)
+{
+    WorldConcurrent.TryCompareExchange(e, "Charge", now, next);   // KILN105: always Busy from a command handler
+    Context.Tasks.Run("charge", async ctx =>
+    {
+        var r = WorldConcurrent.TryCompareExchange(e, "Charge", now, next);   // on a worker: fine
+        while (r.Status == ExchangeStatus.Busy)
+        {
+            await ctx.NextGateWindow();
+            r = WorldConcurrent.TryCompareExchange(e, "Charge", now, next);
+        }
+    });
+    return "charging";
+}
+```
 
 <a id="kiln106"></a>
 ## KILN106: thread, timer or subscription never released
@@ -541,12 +715,39 @@ you compile.
 
 In a mod players install, use the documented API instead; `limits.md` lists what has none yet.
 
+The task-thread world reads and writes (`WorldConcurrent`) are not lab members: they have their own id,
+[KILNX003](#kilnx003), and `KILNX001` does not opt in to them.
+
 <a id="kilnx002"></a>
 ## KILNX002: not yet proven in the game client
 **What.** The member works in Kiln's labs, but no player has confirmed it in the real game client yet (the guided client
 pass settles it). `[Experimental("KILNX002")]`; today the achievement guard (`SteamGuard`, `SteamGuardRelay`).
 
 **Fix.** Opt in the same way with `KILNX002` when you accept that; the mark goes once the client pass confirms it.
+
+<a id="kilnx003"></a>
+## KILNX003: task-thread world reads and writes
+**What.** The code uses `WorldConcurrent` or one of its types (Kiln.World): the reads from a Kiln task (`Open`, `Read`,
+`ReadMany`, `Query`, `ConcurrentEntity`, `ReadStatus` and the rest) or the compare-exchange writes
+(`TryCompareExchange`, `WritePolicy`, `ExchangeResult<T>`, `ComponentExchangedEvent` and the rest). They are
+`[Experimental("KILNX003")]`: documented API for mods that shows in completion, but new. The compiler reports the use as
+an error. In unit tests, `FakeWorld.BusyReads` and `BusyWrites` (Kiln.TestKit) carry the same id.
+
+**Since when.** 0.2.0-dev.29.18, the first release with `WorldConcurrent`. Pre-release builds of the task branch marked it
+`KILNX001`, the lab members' id: a project that opted in with `KILNX001` for it now opts in with `KILNX003` (and keeps
+`KILNX001` only if it also calls lab members).
+
+**Fix.** Opt in once in the mod's project file, and in its test project when the tests use them:
+
+```xml
+<PropertyGroup>
+  <NoWarn>$(NoWarn);KILNX003</NoWarn>
+</PropertyGroup>
+```
+
+They leave experimental once their in-game checks (services/world.md, "World reads from task threads" and "World writes
+from task threads") pass on both exact game builds; until then their shape can still change. The guide:
+[tasks.md](tasks.md#project-setup).
 
 ---
 
@@ -604,8 +805,9 @@ runs.
   - `CodeFixes/` (+ Workspaces);
   - `tools/ApiScan` and `managed/Kiln.Analyzers/tools/gen-apis.sh`.
 - Limits:
-  - The thread analysis follows syntax and one level of method groups inside a type. A method that becomes
-    off-thread code through another type or a stored delegate is not seen.
+  - The thread analysis follows a function's control-flow graph and one level of method groups inside a type,
+    plus local functions at their call sites inside a function. A method that becomes off-thread code through
+    another type, an ordinary helper call or a stored delegate is not seen.
   - KILN106 checks that a release exists somewhere in the type, not that it runs in `OnUnload`.
   - KILN120 and KILN121: their own sections above.
 

@@ -17,4 +17,8 @@ done
 for d in "" -DKILN_TEST_ABILITIES_FIRST -DKILN_TEST_ABILITIES_ONLY -DKILN_TEST_WORLD_ONLY; do
     "$cxx" -std=c++20 -Wall -Wextra -Werror -fsyntax-only $d "${inc[@]}" "$here/abi_headers/both.cpp"; n=$((n + 1))
 done
-echo "abi headers: PASS $n compile-only checks (kiln_world.h and kiln_abilities.h together in both orders, C and C++; each alone)"
+# kiln.tasks v1: every size/offset/tag as C11 and C++20, and the Kiln-internal host table (src/tasks_host.h, C++ only)
+"$cc" -std=c11 -Wall -Wextra -Werror -fsyntax-only "${inc[@]}" "$here/tasks_abi_test.c"; n=$((n + 1))
+"$cxx" -std=c++20 -x c++ -Wall -Wextra -Werror -fsyntax-only "${inc[@]}" "$here/tasks_abi_test.c"; n=$((n + 1))
+"$cxx" -std=c++20 -x c++ -Wall -Wextra -Werror -fsyntax-only "${inc[@]}" -I"$here/../src" -include tasks_host.h /dev/null; n=$((n + 1))
+echo "abi headers: PASS $n compile-only checks (kiln_world.h and kiln_abilities.h together in both orders, C and C++; each alone; kiln_tasks.h, tasks_host.h)"
