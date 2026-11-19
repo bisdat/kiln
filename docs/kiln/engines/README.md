@@ -22,6 +22,17 @@ Stand-alone `dinput8.dll` mods (and other loaders' `dinput8.dll`) are chained fr
 also reads `dinput8-chain.ini` `[Chain]` and `[EMF]` ([../engines.md](../engines.md)). Kiln's own DLL mods
 (`native.json`) are not another engine.
 
+**Enshrouded ModLoader** (AndyPimms' loader, [aebischer/Enshrouded-ModLoader](https://github.com/aebischer/Enshrouded-ModLoader),
+SDK ABI 1; CarryOn and Belt Lantern use it) is one of those loaders. Kiln's installer moves its `dinput8.dll` into
+`kiln/chain/` and chains it; with Kiln already installed, add that DLL (`dist/dinput8.dll` in its release) to the
+Library instead, because its own installer will not replace a `dinput8.dll` it did not install. Chained, it still
+reads its files from the game's folder (`Mods/`, `ModLoader/`), so its MODS page in a world's Edit menu works as
+before. To update it, replace the chained copy. Kiln does not run its packages (a DLL with a `<file>.dll.mod` manifest
+beside it) itself: the Library leaves them out with that reason, because the loader refuses to start a mod whose DLL
+is already loaded. The loader also refuses to start when another tool has already patched one of the eight game
+functions it hooks. None of Kiln's own client hooks are among them on game build 26430625 (client exe `5d9ef2f1`);
+its log (`ModLoader/mod-loader.log`) names that refusal, Kiln's does not.
+
 The launcher's Library imports every kind above, Enshwick, shroudlink and Ember included; Ember mods are listed but not
 run until Ember publishes its loader ABI.
 

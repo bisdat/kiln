@@ -423,3 +423,41 @@ fn optiscaler_ini_decides_kilns_overlay() {
     put(&big.0, "OptiScaler.ini", &text);
     assert!(OptiScalerIni::read(&big.0).kiln_overlay_draws(), "up to the limit it is read");
 }
+
+/// Enshrouded ModLoader's packages (AndyPimms' loader, SDK ABI 1; github.com/aebischer/Enshrouded-ModLoader) run only
+/// from that loader, at a world's start. Imported as plain DLLs, Kiln would load them early and that loader would then
+/// refuse every world with the mod switched on (it never starts a DLL already in the process). Its own dinput8.dll
+/// stays a DLL mod Kiln chain-loads.
+#[test]
+fn enshrouded_modloader_packages_are_never_plain_dlls() {
+    let t = tmp("modloader");
+    let r = &t.0;
+    // a kind=mod package as its zip lays it out, a loose mod DLL (its export alone says it), and a kind=library
+    // package (no SDK export: only its manifest says it)
+    let carry = put(r, "CarryOn/CarryOn.dll", &build_test_dll(&["EnshroudedModInitialize", "EnshroudedModConfigure"], b""));
+    put(r, "CarryOn/CarryOn.dll.mod", b"\xef\xbb\xbfENSHROUDED_PACKAGE_V1\r\nkind=mod\r\nversion=1.0.0\r\nabi=1\r\n");
+    let lantern = put(r, "loose/BeltLantern.dll", &build_test_dll(&["EnshroudedModInitialize"], b""));
+    let lib = put(r, "libs/shared.dll", &build_test_dll(&["SharedThing"], b""));
+    put(r, "libs/shared.dll.mod", b"ENSHROUDED_PACKAGE_V1\nkind=library\nversion=1.0.0\nabi=1\n");
+    for p in [&carry, &lantern, &lib] {
+        let d = detect(p);
+        assert_eq!((d.kind, d.engine), (DetectKind::Unknown, None), "{}: {}", p.display(), d.reason);
+        assert!(d.reason.contains("a mod for Enshrouded ModLoader") && d.reason.contains("Edit > MODS"), "{}", d.reason);
+        assert!(!d.reason.ends_with('.'), "the launcher adds the period: {:?}", d.reason);
+        assert!(!d.kind.importable());
+    }
+    // another .mod file beside a plain DLL changes nothing
+    let fps = put(r, "other/fps.dll", &build_test_dll(&["x"], b""));
+    put(r, "other/fps.dll.mod", b"[settings]\n");
+    assert_eq!(detect(&fps).kind, DetectKind::BareDll);
+    // its loader as its release ships it (dist/dinput8.dll): a DLL mod chain-loaded at dllmain, as before
+    let loader = put(r, "Enshrouded-ModLoader/dist/dinput8.dll", &build_test_dll(&["DirectInput8Create", "GetdfDIJoystick"], &utf16("mod-loader.log")));
+    assert_eq!(detect(&loader).kind, DetectKind::BareDll);
+    // importing the mod's folder imports nothing and says why
+    let dirs = DataDirs::at(r.join("data"));
+    let rep = library::import(&dirs, &[r.join("CarryOn"), lantern.clone()], &mut NoProgress).unwrap();
+    assert!(rep.imported.is_empty() && rep.existing.is_empty(), "{rep:?}");
+    assert!(!rep.skipped.is_empty(), "{rep:?}");
+    assert!(format!("{rep:?}").contains("a mod for Enshrouded ModLoader"), "{rep:?}");
+    assert!(library::list(&dirs, None).unwrap().is_empty());
+}
