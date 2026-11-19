@@ -1,2 +1,1 @@
 #nullable enable
-const Kiln.Systems.PredictionCapability = "systems.wraps.prediction" -> string!
