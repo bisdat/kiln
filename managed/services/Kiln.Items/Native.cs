@@ -597,6 +597,46 @@ internal static unsafe class ItemsNative
         public delegate* unmanaged[Cdecl]<ulong, SocketRoll*, int> SocketRollOf;
     }
 
+    // KilnItemsRarityRoll.sources (v8, package P5)
+    public const uint RollCraft = 0x1, RollLoot = 0x2, RollGive = 0x4;
+
+    /// <summary>KilnItemsRarityRoll (v8, package P5): one item type's rarity rule at creation.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RarityRoll
+    {
+        public uint Item;
+        public uint Sources;
+        public fixed float Weights[5];
+        public uint Reserved;
+    }
+
+    /// <summary>KilnItemsRollStatus (v8, package P5).</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RollStatus
+    {
+        public uint Size;
+        public byte Available;
+        public byte R0, R1, R2;
+        public uint Items, Owners, Conflicts, R3;
+        public fixed ulong Rolled[5];
+        public ulong Kept, NoSlot, Faults;
+        public fixed byte Detail[160];
+    }
+
+    /// <summary>The v8 table (the equipment wave): v7 followed by gear_write, gear_read, gear_status (package P1; typed by
+    /// the managed gear API of package P2) and rarity_rolls, roll_status (package P5). Read a member only when the header's
+    /// size covers it.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct TableV8
+    {
+        public TableV7 V7;
+        public void* GearWrite;
+        public void* GearRead;
+        public void* GearStatus;
+        public delegate* unmanaged[Cdecl]<ulong, RarityRoll*, uint, uint, int> RarityRolls;
+        public delegate* unmanaged[Cdecl]<RollStatus*, int> RollStatusOf;
+    }
+
     /// <summary>True when a table of <paramref name="size"/> bytes has the v6 member that ends at <paramref name="end"/>.</summary>
     public static bool HasV6(uint size, int end) => size >= (uint)end;
 

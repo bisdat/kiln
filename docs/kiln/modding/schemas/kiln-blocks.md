@@ -55,6 +55,7 @@ A mod's blocks: spells, weapons, wands, armor, items, stations, statuses, effect
 | `processing` | object |  | Parts: how a station works on its own. |
 | `props` | object |  | Things placed that stand there: furniture, banners, lamps. |
 | `quests` | object |  | Quest chains in the game's own journal: steps, objectives, conditions, rewards. Needs "clients": "mod". |
+| `rarityRolls` | object |  | Rarity at creation: which item types roll which rarity (Common to Legendary, by weight) when the game crafts them, loot makes them or a Kiln give asks for none. The game then makes the item at that rarity. Server; asks nothing of players' games. A later definition wins an item type an earlier one also names. |
 | `recipes` | object |  | Recipes of their own: one more way to make any item at a station, such as a game item at the game's workbench. |
 | `resourcePatches` | object |  | Changes to the game's own resources, made before the game reads them: fields, a template's components, a list's length (a mod with "boot": true; docs/kiln/modding/resource-patches.md). Not blocks: kiln.content applies them. |
 | `rules` | object |  | Rules, for behaviours to name. |
@@ -1318,6 +1319,16 @@ One step of a quest. It is done when all its objectives are.
 What a made item is: its colour, and how many enhancements it can have (one more than the rank).
 
 Type: `"common"` \| `"uncommon"` \| `"rare"` \| `"epic"` \| `"legendary"`
+
+## rarityRoll
+
+Which item types roll which rarity when they are made (RarityRollBlock). A rarity whose enhancement slot the item type lacks never comes up; with none left the game's rarity stays. A recipe's tooltip still shows the type's rarity.
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `items` | array of string | yes | The item types: game items, items of this mod by block name, "other-mod:name", or a pattern with * over the game's item names ("Weapon_*"; "my-mod:*" is every item of that mod). min items 1 max items 1024 |
+| `sources` | string |  | Which creations roll (default "craft, loot"): craft, the game makes it without a rarity (crafting); loot, the game makes it with a rarity it rolled or fixed (random loot, random drop-table stacks); give, a Kiln give without a rarity. Pattern `^(craft\|loot\|give)(, ?(craft\|loot\|give))*$`. |
+| `weights` | object | yes | How likely each rarity is, among the five; one left out is 0. At least one above 0. |
 
 ## recipe
 

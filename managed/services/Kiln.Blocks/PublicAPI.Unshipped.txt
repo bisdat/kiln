@@ -1,1 +1,22 @@
 #nullable enable
+Kiln.ItemSource
+Kiln.ItemSource.Craft = 1 -> Kiln.ItemSource
+Kiln.ItemSource.Give = 4 -> Kiln.ItemSource
+Kiln.ItemSource.Loot = 2 -> Kiln.ItemSource
+Kiln.ItemSource.None = 0 -> Kiln.ItemSource
+Kiln.RarityRollBlock
+Kiln.RarityRollBlock.<Clone>$() -> Kiln.RarityRollBlock!
+Kiln.RarityRollBlock.Equals(Kiln.RarityRollBlock? other) -> bool
+Kiln.RarityRollBlock.Items.get -> System.Collections.Generic.IReadOnlyList<Kiln.ItemRef>!
+Kiln.RarityRollBlock.Items.init -> void
+Kiln.RarityRollBlock.RarityRollBlock() -> void
+Kiln.RarityRollBlock.Sources.get -> Kiln.ItemSource
+Kiln.RarityRollBlock.Sources.init -> void
+Kiln.RarityRollBlock.Weights.get -> System.Collections.Generic.IReadOnlyDictionary<Kiln.Rarity, double>!
+Kiln.RarityRollBlock.Weights.init -> void
+override Kiln.RarityRollBlock.Equals(object? obj) -> bool
+override Kiln.RarityRollBlock.GetHashCode() -> int
+override Kiln.RarityRollBlock.ToString() -> string!
+static Kiln.Blocks.Define(string! name, Kiln.RarityRollBlock! block) -> Kiln.BlockHandle<Kiln.RarityRollBlock!>!
+static Kiln.RarityRollBlock.operator !=(Kiln.RarityRollBlock? left, Kiln.RarityRollBlock? right) -> bool
+static Kiln.RarityRollBlock.operator ==(Kiln.RarityRollBlock? left, Kiln.RarityRollBlock? right) -> bool
