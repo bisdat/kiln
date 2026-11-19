@@ -16,6 +16,7 @@
 //   deny        QR sign-in: declined on the phone                 tester   already a tester (with a test plan)
 //   sent        tester: results sent, not read yet                read     tester: results read by the team
 //   hidden      Settings' "Show the Community page" is off        noplan   tester, no test build open
+//   nobuild     no test build open (a volunteer gets no checklist)
 // Tests and the console: __kilnMock.community.reply(), .approve(), .setOnline(bool), .setRelay(bool), .readResults(),
 // .requests() (every call that would reach the relay, in order: what the "nothing is sent" tests check), .signins().
 import type {
@@ -43,6 +44,8 @@ const min = (n: number) => new Date(Date.now() - n * 60_000).toISOString();
 const later = (n: number) => new Date(Date.now() + n * 60_000).toISOString();
 
 const TESTER = has("tester") || has("sent") || has("read") || has("noplan");
+/** The relay serves no test plan: no test build is open. */
+const NO_BUILD = has("noplan") || has("nobuild");
 const SIGNED_IN = has("in") || has("empty") || has("notmember") || TESTER;
 const me = (): CommunityAccount => ({ id: "731204485922648124", name: "emberfox", member: !has("notmember"), tester });
 
@@ -168,7 +171,7 @@ const plan = (): TestPlan => ({
   hidden: 2,
   sent: has("read") ? { at: min(60 * 5), read: { by: "Rowan", at: min(60 * 2) }, replied: true } : has("sent") ? { at: min(20), read: null, replied: false } : null,
 });
-let testPlan: TestPlan | null = tester && !has("noplan") ? plan() : null;
+let testPlan: TestPlan | null = tester && !NO_BUILD ? plan() : null;
 
 export function communityMockHandlers({ emit, gameRunning }: CommunityMockDeps): Record<string, Handler> {
   const changed = () => emit("kiln://community", { kind: "changed" });
@@ -300,9 +303,8 @@ export function communityMockHandlers({ emit, gameRunning }: CommunityMockDeps):
       tester = true;
       if (a.beta) beta = true;
       account = { ...account!, tester: true };
-      testPlan = plan();
-      testPlan.sent = null;
-      testPlan.steps = testPlan.steps.map((s) => ({ ...s, result: null, note: "" }));
+      testPlan = NO_BUILD ? null : { ...plan(), sent: null };
+      if (testPlan) testPlan.steps = testPlan.steps.map((s) => ({ ...s, result: null, note: "" }));
       changed();
       return null;
     },

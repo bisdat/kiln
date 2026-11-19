@@ -3,7 +3,7 @@
 // mark, Stop testing; desktop and Deck.
 import { expect, test, type Page } from "@playwright/test";
 
-type Hooks = { community: { requests: () => string[]; readResults: () => void } };
+type Hooks = { community: { requests: () => string[]; readResults: () => void; setOnline: (on: boolean) => void } };
 const mock = <T,>(page: Page, f: (h: Hooks) => T) => page.evaluate((src) => (new Function("h", `return (${src})(h)`))((window as unknown as { __kilnMock: Hooks }).__kilnMock), f.toString()) as Promise<T>;
 const requests = (page: Page) => mock(page, (h) => h.community.requests());
 
@@ -81,6 +81,29 @@ test.describe("desktop", () => {
     await expect(page.locator(".k-toast").filter({ hasText: "You're not a tester any more" })).toBeVisible();
     await expect(page.getByTestId("kc-tester")).toContainText("Volunteer as a tester");
     expect(await requests(page)).toContain("tester-leave");
+  });
+
+  test("a tester with no test build open can Stop testing too: the role and the tester state go", async ({ page }) => {
+    await open(page, "/?mock=1&discord=in,nobuild#/community");
+    await page.getByTestId("kc-volunteer-open").click();
+    await page.getByTestId("kc-volunteer").click();
+    await expect(page.locator(".k-toast").filter({ hasText: "You're a tester" })).toBeVisible();
+    const card = page.getByTestId("kc-tester");
+    await expect(card).toContainText("You're a tester.");
+    await expect(card).toContainText("No test build right now. The next one shows here.");
+    await expect(page.getByTestId("kc-checklist")).toHaveCount(0);
+    await expect(page.getByTestId("kc-account")).toContainText("Tester");
+    // it must reach frostdev.io: not while offline
+    const leave = card.getByRole("button", { name: "Stop testing" });
+    await mock(page, (h) => h.community.setOnline(false));
+    await expect(leave).toBeDisabled();
+    await mock(page, (h) => h.community.setOnline(true));
+    await leave.click();
+    await expect(page.locator(".k-toast").filter({ hasText: "You're not a tester any more" })).toBeVisible();
+    await expect(card).toContainText("Volunteer as a tester");
+    await expect(card).not.toContainText("You're a tester.");
+    await expect(page.getByTestId("kc-account")).not.toContainText("Tester");
+    expect((await requests(page)).filter((r) => r.startsWith("tester-"))).toEqual(["tester-join", "tester-leave"]);
   });
 });
 

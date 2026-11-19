@@ -71,8 +71,23 @@ export function TesterSection({ signedIn, net }: { signedIn: boolean; net: boole
       </Card>
     );
   }
-  if (!ts.plan) return <Card title={t("community.tester.title")} data-testid="kc-tester"><p className="kc-p">{t("community.tester.you")}</p><EmptyState title={t("community.tester.plan.noPlan")} /></Card>;
+  if (!ts.plan) return <NoPlan net={net} />;
   return <Checklist plan={ts.plan} net={net} />;
+}
+
+/** A tester while the relay serves no test plan: Stop testing is here then (with a plan, in the checklist's ···). */
+function NoPlan({ net }: { net: boolean }) {
+  const t = useT();
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  const leave = () => { setBusy(true); void stopTesting(qc).finally(() => setBusy(false)); };
+  return (
+    <Card title={t("community.tester.title")} data-testid="kc-tester"
+      actions={<button type="button" className="k-link k-tone-err" disabled={!net || busy} onClick={leave} data-testid="kc-tester-leave">{t("community.tester.leave")}</button>}>
+      <p className="kc-p">{t("community.tester.you")}</p>
+      <EmptyState title={t("community.tester.plan.noPlan")} />
+    </Card>
+  );
 }
 
 function HardwareFacts({ hw }: { hw: Hardware }) {

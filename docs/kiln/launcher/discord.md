@@ -83,7 +83,8 @@ Didn't work or Couldn't try with one line per step (on the Deck a pick for what 
 (with a support report for the team only, ticked by default) once every step has one. The attached report is prepared
 while the tick is on and the checklist shows its size and files before Send results (the Deck: "What is sent"); it
 goes as shown, never built unseen. The team's check mark shows as
-"read". Stop testing is in the checklist's `···` (the Deck: X).
+"read". Stop testing is in the checklist's `···`, and on the card while no test build is open (the Deck: X, or the
+dialog's button with no test build).
 
 **Rich Presence** (`kiln_manage::community::presence`, `launcher/src-tauri/src/community/presence.rs`): one switch,
 off by default, with the preview card. While a client game runs with Kiln (its boot.json from this run), the switch is
@@ -97,9 +98,9 @@ PC" (or Deck) when the switch is on and no socket is there.
 
 **Mock mode** (`?mock=1&discord=<flags>`, `src/api/mockCommunity.ts`): `in`, `empty`, `notmember`, `offline`,
 `relaydown`, `ratelimit`, `toobig`, `known`, `nodiscord`, `presence`, `notify`, `cancel`, `expire`, `deny`, `tester`,
-`sent`, `read`, `noplan`, `hidden`; `&problem=crash` (the game runs four minutes and closes with a crash report) or
-`&problem=nokiln` (the next Play starts without Kiln); `__kilnMock.community.{reply, approve, setOnline, setRelay,
-join, readResults, requests}` and `__kilnMock.crash()`.
+`sent`, `read`, `noplan`, `nobuild` (a volunteer gets no checklist), `hidden`; `&problem=crash` (the game runs four
+minutes and closes with a crash report) or `&problem=nokiln` (the next Play starts without Kiln);
+`__kilnMock.community.{reply, approve, setOnline, setRelay, join, readResults, requests}` and `__kilnMock.crash()`.
 
 ## Privacy
 
