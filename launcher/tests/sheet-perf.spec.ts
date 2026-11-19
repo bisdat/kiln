@@ -1,19 +1,39 @@
 // The sheet stays cheap while the fire burns (inbox 94: every page but Play lagged, a page switch took about a second
 // and typing 250 to 750 ms). The flicker (--fire, shell/Stage.tsx) and the torch (--mx, --my, shell/AppShell.tsx) write
 // only onto leaves: an element with children under it would restyle and repaint the whole page on every write. With
-// the fire off (Settings' Animated fire, drawing without the GPU) or reduced motion there are no writes at all, and
-// without the GPU a lit flame stands still.
+// the fire off (Settings' Animated fire, the launcher's own animation switch; drawing without the GPU) or reduced motion
+// there are no writes at all, and turned off while the launcher runs, the fire's frames and the torch's pointer listener
+// go too. Without the GPU a lit flame stands still.
 // The last test types into a sheet page in WebKit (the engine of the Linux launcher) while the pointer moves; it runs
 // where Playwright's WebKit starts (KILN_WEBKIT names another build; not on distributions it does not support).
 import { expect, test, webkit, type Page } from "@playwright/test";
 
 type Write = { name: string; cls: string; kids: number };
 
-/** Records every write of the moving properties with the element it went onto (and how many element children it has). */
+/** Records every write of the moving properties with the element it went onto (and how many element children it has),
+ *  the pointer listeners on .k-app (the torch's), the reduced-motion listeners and the animation frames asked for. */
 async function countWrites(page: Page) {
   await page.addInitScript(() => {
-    const w = window as unknown as { __writes: Write[] };
+    const w = window as unknown as { __writes: Write[]; __moves: number; __motion: number; __frames: number };
     w.__writes = [];
+    w.__moves = 0;
+    w.__motion = 0;
+    w.__frames = 0;
+    const count = (t: EventTarget, type: string, d: number) => {
+      if (type === "mousemove" && t instanceof HTMLElement && t.classList.contains("k-app")) w.__moves += d;
+      if (type === "change" && t instanceof MediaQueryList && t.media.includes("reduced-motion")) w.__motion += d;
+    };
+    const add = EventTarget.prototype.addEventListener, remove = EventTarget.prototype.removeEventListener;
+    EventTarget.prototype.addEventListener = function (type: string, fn: EventListenerOrEventListenerObject | null, o?: boolean | AddEventListenerOptions) {
+      if (fn) count(this, type, 1);
+      return add.call(this, type, fn, o);
+    };
+    EventTarget.prototype.removeEventListener = function (type: string, fn: EventListenerOrEventListenerObject | null, o?: boolean | EventListenerOptions) {
+      if (fn) count(this, type, -1);
+      return remove.call(this, type, fn, o);
+    };
+    const frame = window.requestAnimationFrame.bind(window);
+    window.requestAnimationFrame = (cb: FrameRequestCallback) => { w.__frames += 1; return frame(cb); };
     const desc = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "style")!;
     const owner = new WeakMap<CSSStyleDeclaration, HTMLElement>();
     Object.defineProperty(HTMLElement.prototype, "style", {
@@ -33,6 +53,10 @@ async function countWrites(page: Page) {
 }
 
 const writes = (page: Page) => page.evaluate(() => (window as unknown as { __writes: Write[] }).__writes.splice(0));
+type Counts = { __moves: number; __motion: number; __frames: number };
+/** The torch's pointer listeners on .k-app, the reduced-motion listeners, the animation frames asked for so far. */
+const counts = (page: Page) => page.evaluate(() => { const w = window as unknown as Counts; return { moves: w.__moves, motion: w.__motion, frames: w.__frames }; });
+const rimFire = (page: Page) => page.locator(".k-sheet-rim").evaluate((el) => (el as HTMLElement).style.getPropertyValue("--fire"));
 
 async function open(page: Page, route: string) {
   await page.goto(`/#${route}`);
@@ -127,21 +151,96 @@ test("with reduced motion nothing is written while the pointer moves and the pag
   expect((await writes(page)).filter((w) => w.name !== "--k")).toEqual([]);
 });
 
-test("with Animated fire off nothing is written: no flicker, no torch", async ({ page }) => {
+test("Animated fire turned off while the launcher runs: no flicker, no torch, no frames, no pointer listener; on again, both come back", async ({ page }) => {
   await countWrites(page);
   await open(page, "/settings");
+  const gl = await hasGl(page);
+  if (gl) {
+    await expect(page.locator(".k-app")).toHaveAttribute("data-gl", "1");
+    await expect.poll(async () => (await counts(page)).moves).toBe(1);
+    expect((await counts(page)).motion).toBe(2);
+  }
   const fire = page.getByRole("switch", { name: /^Animated fire/ });
   await expect(fire).toBeChecked();
   await page.getByText("Animated fire", { exact: true }).click();
   await expect(fire).not.toBeChecked();
   await expect(page.locator(".k-app")).not.toHaveAttribute("data-gl");
+  // the torch's listener and the fire's reduced-motion listener are gone (the shell's own stays)
+  await expect.poll(async () => (await counts(page)).moves).toBe(0);
+  expect((await counts(page)).motion).toBe(1);
+  expect(await rimFire(page)).toBe("");
   await page.waitForTimeout(300);
   await writes(page);
+  const before = (await counts(page)).frames;
   await wander(page);
   await page.locator("#st-keep").fill("12");
   await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Play" }).click();
   await wander(page);
   expect(await writes(page)).toEqual([]);
+  // the loop's frames stopped (a handful for the page's own work at most)
+  expect((await counts(page)).frames - before).toBeLessThan(10);
+  // on again: the flicker, the torch and its listener come back where there is WebGL
+  await page.locator(".k-head-link", { hasText: "Settings" }).click();
+  await page.getByText("Animated fire", { exact: true }).click();
+  await expect(fire).toBeChecked();
+  if (!gl) return;
+  await expect(page.locator(".k-app")).toHaveAttribute("data-gl", "1");
+  await expect.poll(async () => (await counts(page)).moves).toBe(1);
+  await wander(page);
+  const back = await writes(page);
+  expect(back.filter((w) => w.name === "--fire").length).toBeGreaterThan(3);
+  expect(back.filter((w) => w.name === "--mx").length).toBeGreaterThan(3);
+});
+
+test("with Animated fire off nothing is written whatever the system says about motion", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await countWrites(page);
+  await open(page, "/settings");
+  await page.getByText("Animated fire", { exact: true }).click();
+  await expect(page.getByRole("switch", { name: /^Animated fire/ })).not.toBeChecked();
+  // another page, the pointer over it: still nothing
+  await page.evaluate(() => { location.hash = "#/mods/order"; });
+  await page.waitForTimeout(300);
+  await writes(page);
+  await wander(page);
+  expect(await writes(page)).toEqual([]);
+  expect((await counts(page)).moves).toBe(0);
+});
+
+test("reduced motion turned on while the launcher runs: the flicker and the torch stop at once, the still fire asks for no frames", async ({ page }) => {
+  await countWrites(page);
+  await open(page, "/settings");
+  test.skip(!(await hasGl(page)), "no WebGL in this browser: the fire, the flicker and the torch never start");
+  await expect(page.locator(".k-app")).toHaveAttribute("data-gl", "1");
+  await wander(page);
+  let all = await writes(page);
+  expect(all.filter((w) => w.name === "--fire").length).toBeGreaterThan(3);
+  expect(all.filter((w) => w.name === "--mx").length).toBeGreaterThan(3);
+  expect((await counts(page)).moves).toBe(1);
+  expect(await rimFire(page)).not.toBe("");
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect.poll(async () => (await counts(page)).moves).toBe(0);
+  await expect.poll(() => rimFire(page)).toBe("");
+  await page.waitForTimeout(300);
+  await writes(page);
+  const before = (await counts(page)).frames;
+  await wander(page);
+  await page.locator("#st-keep").fill("12");
+  await page.waitForTimeout(500);
+  expect((await writes(page)).filter((w) => w.name !== "--k")).toEqual([]);
+  // the still fire drew its frame and stopped: no frame asked for while nothing changes
+  expect((await counts(page)).frames - before).toBeLessThan(10);
+  // a page switch still moves the mouth to the pilot light and back (drawn once each)
+  await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Play" }).click();
+  await expect.poll(() => page.locator(".k-door").evaluate((el) => parseFloat((el as HTMLElement).style.width))).toBeGreaterThan(100);
+  // motion again: both come back
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await expect.poll(async () => (await counts(page)).moves).toBe(1);
+  await page.locator(".k-head-link", { hasText: "Settings" }).click();
+  await wander(page);
+  all = await writes(page);
+  expect(all.filter((w) => w.name === "--fire").length).toBeGreaterThan(3);
+  expect(all.filter((w) => w.name === "--mx").length).toBeGreaterThan(3);
 });
 
 test("drawing without the GPU: no fire loop, no flicker, no torch, and lit flames stand still", async ({ page }) => {
