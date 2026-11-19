@@ -29,7 +29,7 @@ export function QrCode({ text, size = 220, title }: { text: string; size?: numbe
 export function PresenceCard({ name, mods, time, dim }: { name: string; mods: number; time: string; dim?: boolean }) {
   const t = useT();
   return (
-    <div className={"kc-presence" + (dim ? " dim" : "")} aria-label={t("community.presence.preview")} data-testid="kc-presence-card">
+    <div className={"kc-presence" + (dim ? " dim" : "")} role="group" aria-label={t("community.presence.preview")} data-testid="kc-presence-card">
       <div className="kc-presence-user">
         <span className="kc-avatar" aria-hidden>{name.slice(0, 1).toUpperCase()}</span>
         <span className="kc-presence-name">{name}</span>

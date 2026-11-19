@@ -5,7 +5,7 @@ import { expect, test } from "bun:test";
 import * as api from "../src/api/commands";
 import type { CommunityStatus } from "../src/api/commands";
 import { ago, errKind, sayLine } from "../src/community/state";
-import { statusWord } from "../src/community/parts";
+import { rateText, statusWord, waitWords } from "../src/community/parts";
 
 const st = (p: Partial<CommunityStatus>): CommunityStatus => ({
   shown: true, account: null, online: true, relay: "ok", presence: { on: false, discordRunning: false, showing: false }, notify: false, unread: 0, postsAsOf: null, ...p,
@@ -96,4 +96,15 @@ test("What is sent and kept makes the privacy page's promises, with its times", 
   }
   // nothing promised that the page does not say: no email, password or messages are received
   expect(t("community.privacy.signIn")).toContain("It never gets your email, your password, your messages");
+});
+
+test("the relay's sending limits are worded for the limit: the hour, the 24 hours, the network", () => {
+  expect(rateText({ limit: "hour", sent: 3, waitMin: 38 })).toBe("You sent 3 reports in the last hour. Wait for a reply, or add to your last post on Discord. You can send again in 38 minutes.");
+  expect(rateText({ limit: "day", sent: 10, waitMin: 300 })).toBe("You sent 10 reports in the last 24 hours. Wait for a reply, or add to your last post on Discord. You can send again in 5 hours.");
+  expect(rateText({ limit: "network", sent: 20, waitMin: 61 })).toBe("Many reports came from your network in the last 24 hours, so sending is paused for now. You can send again in 61 minutes.");
+  // an older relay that names no limit: the hour's words, as before
+  expect(rateText({ waitMin: 1 })).toBe("You sent 3 reports in the last hour. Wait for a reply, or add to your last post on Discord. You can send again in 1 minute.");
+  expect(waitWords(89)).toBe("89 minutes");
+  expect(waitWords(90)).toBe("2 hours");
+  expect(waitWords(23 * 60 + 50)).toBe("24 hours");
 });
