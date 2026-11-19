@@ -566,6 +566,52 @@ the inventory before the commit, but `SlotSelection.equipment` of a slot that wa
 (between the call and the commit it still reads 0), so kiln.items reads the target slot from the inventory and the chosen
 equipment slot from the committed selection. A dry run therefore cannot say which slot an item would pick for itself.
 
+
+## 19. Writing an instance's rarity, enhancements and level (server 26430253 `f0d824be…`; client 26430625 `5d9ef2f1…`) **[dis] [refl] [rt]**
+What kiln.items' v8 gear writes (`gear_write`, feature `items.gear`, `native/services/items/gear.cpp`) rest on. Server RVAs,
+client in brackets. Scratch listings: `/mnt/Dongus/kiln-wave/dev29/out/equip-research/scratch/` (`srv_unlockperk.asm`,
+`srv_item_state_init.asm`, `srv_item_durability_init.asm`).
+
+- **An instance's rarity is `PerkContainerNew.availablePerks - 1`** (section 10). UnlockPerk (`0x1a0b80` [`0x3ff8a0`]) and the
+  free +1 / -1 action (`0x19fe00`) take both components through typed tracked-write wrappers (`0x19c3d0` PerkContainerNew,
+  `0xac0f0` Level): each is `WriteOther(storage, tracker, accessor, entity, flag)` (section 12) with the job's tracker and write
+  flag, so the components are marked for replication and the save before they change.
+- **UnlockPerk's writes:** `inc byte [perks+1]` (unlockedPerks + 1); then it reads Level's current (`0x724bf568`) and max
+  (`0x638a979a`) through `AttrFind`, raises max by 1 first when current == max, then current by 1, each with `0x19b7b0`
+  [`0x3fa500`] `(block, AttributeRegistry, delta, attribute)`: `values[index] += delta`, then `0xab970` [`0x2c0660`]
+  `(block, AttributeRegistry)`, the UInt32 attribute's formulas (the twin of `items/AttrChanged` `0x52700`, which serves the
+  SInt32 blocks Fuel and Durability). The free action sets the value with `0x19d7b0` (`values[index] = v`, then `0xab970`)
+  and leaves max alone. sigdb: `@items/LevelAdd.site` captures `items/AttrChangedU32` from `0x19b7b0`'s body,
+  `@items/UnlockPerk.level` the two attribute ids (both unique on both exes).
+- **Nothing else needs a write:** `item_state_init` (`0x1a8da0`) derives `ItemState.itemRarityUi`, `itemLevelUi`, `baseDamageUi`
+  and the HasLevel bit from `PerkContainerNew` and `Level` every step, writing only what differs (section 2.3 of the
+  equipment dossier).
+- **Max durability:** `item_durability_init` (`0x57930`) computes it only while `ItemState.itemState` lacks
+  `DurabilityInitialized` (`test byte [state+0xe], 2`; the bit is the reflected `ItemStateFlag` value 1): ratio =
+  `DurabilityPercentageInit` when the item still has that component, else current / max (1.0 when max is 0); max from
+  balancing, level (`0x1bb190`), rarity (`0x1bb220`) and the item's factor; current = ratio x max; then the bit is set.
+  Clearing the bit through a tracked ItemState write makes it run again in the next step (`DurabilityPercentageInit` is
+  removed by the program once the bit is set, so an older item keeps its own ratio).
+- **The marking's gates** (`0x66f170`): replication needs the component's bit in the ECS registry's array at
+  `registry + 0x190` (`world/registry.replicated`), the save the bit at `registry + 0x230` (`world/registry.saved`), both
+  indexed by the component's type index. Measured in the lab world: ItemState replicated, not saved; Durability and Level
+  saved, not replicated (players get NetworkDurability and ItemState's derived bytes); PerkContainerNew both. kiln_items_gear
+  checks before its first write that ItemState is replicated and PerkContainerNew and Level are saved, and stays off
+  otherwise; every write also marks ItemState (bytes unchanged), so the entity is re-sent in the same step.
+- **Layouts by reflection:** `PerkContainerNew {u8 availablePerks, u8 unlockedPerks}` (2 bytes), `Level` and `Durability`
+  (attribute blocks with `dataStorage[2]`), `ItemState` (20 bytes: `itemId` +8, `itemState` +0xe, `itemRarityUi` +0x10,
+  `itemLevelUi` +0x11), `ItemStateFlag` (`DurabilityInitialized` 1, `IsEquipped` 3), `ItemInfo.perkIds[5]` (the type's perk
+  slots; the last non-zero one bounds the rarity a write accepts without `FORCE_SLOT`), `ItemInfo.itemLevelRange` +0x674.
+- **Lab** (2026-11-19, server 26430253, lab `dev29-eq-p1` on a copy of a real world, no player; the native self-test
+  `<data>/kiln.items/gear-selftest`, 14 PASS, 0 FAIL over two boots): a Rare item (perks 0/3, level 3, durability
+  273/273) to Epic with a refresh: `PerkContainerNew 0/3 -> 0/4`, DurabilityInitialized cleared, `itemRarityUi 3` within 10
+  steps, the bit set again and max durability `273 -> 287` (ratio kept); two unlocks: Level `3 -> 5`, `itemLevelUi 5`; to
+  Common: perks `1/1`, Level 4, `itemRarityUi 0`, durability max `249`; a wrong stamp STALE; a type without the next slot
+  NO_SLOT; the item entity id and stamp the same throughout; the final state (perks 1/4, level 4) read back after the
+  save and a restart, with `itemRarityUi 3` derived by the game after the load. Logs: dev29/out/eq-p1/lab-boot*-kiln.log.
+- **Not verified here:** that a client shows the change without re-joining (vanilla and Kiln clients), the workbench's
+  unlock offer and cost after an upgrade, an equipped item's perk programs after a change.
+
 ## 9. Open questions
 - Players (no client in the lab): popup and PickupEvent with `0x01`, knowledge unlocks through the queue, the
   backpack-priority setting (the game's own handlers add `0x20` when `PlayerInput+0x5b0` bit 11 is set; kiln.items does

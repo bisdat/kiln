@@ -409,8 +409,10 @@ void reuse_tests() {
 
 int main() {
     static_assert(sizeof(KilnItemsInstance) == 88 && offsetof(KilnItemsApi, read_instances) == 200 &&
-                      offsetof(KilnItemsApi, equip) == 224 && offsetof(KilnItemsApi, set_capture) == 240 && sizeof(KilnItemsApi) == 296,
-                  "v4 appends after peek_result, v5 (equip) after v4, v6 (sets) after v5, v7 after v6; the instance record is 88 bytes");
+                      offsetof(KilnItemsApi, equip) == 224 && offsetof(KilnItemsApi, set_capture) == 240 &&
+                      offsetof(KilnItemsApi, socket_roll) == 288 && sizeof(KilnItemsApi) == 320,
+                  "v4 appends after peek_result, v5 (equip) after v4, v6 (sets) after v5, v7 after v6, v8 (gear) after v7; the "
+                  "instance record is 88 bytes");
     setup_engine();
     table_tests();
     read_tests();

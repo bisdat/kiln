@@ -16,12 +16,12 @@ KilnItemsResult result(uint64_t ticket, uint32_t count = 2) {
 }
 }
 int main() {
-    static_assert(KILN_ITEMS_VERSION == 7 && offsetof(KilnItemsApi, peek_result) == 192 &&
+    static_assert(KILN_ITEMS_VERSION == 8 && offsetof(KilnItemsApi, peek_result) == 192 &&
                       offsetof(KilnItemsApi, read_instances) == 200 && offsetof(KilnItemsApi, equip) == 224 &&
                       offsetof(KilnItemsApi, set_capture) == 240 && offsetof(KilnItemsApi, socket_roll) == 288 &&
-                      sizeof(KilnItemsApi) == 296,
+                      offsetof(KilnItemsApi, gear_write) == 296 && sizeof(KilnItemsApi) == 320,
                   "peek appended one row without moving the v3 ABI; v4 appends after it, v5 (equip) after v4, v6 (sets) after v5, "
-                  "v7 (socket_roll) after v6");
+                  "v7 (socket_roll) after v6, v8 (gear) after v7");
     static_assert(sizeof(KilnItemsRequest) == 40 && sizeof(KilnItemsRequestEx) == 56 && offsetof(KilnItemsRequestEx, dye) == 40 &&
                       sizeof(KilnItemsSocketRoll) == 24,
                   "v7: the Ex request appends to the unchanged v1 request; the socket roll is 24 bytes");

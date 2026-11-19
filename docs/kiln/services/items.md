@@ -7,7 +7,7 @@ entity, and the change is replicated and saved like a vanilla one. Evidence and 
 
 | Layer | Where |
 |---|---|
-| Symbols | `sigdb/symbols/server.d/items.json` (features `items.transaction`, `items.program`, `items.read`, `items.catalog`, `items.scan`, `items.recipe`, `items.fuel`, `items.pide_options`, `items.move`, `items.transfer`, `items.names`, `items.instances`, `items.equip`); `sigdb/symbols/server.d/dev29-10-equipment-sets.json` (`items.equip_sets`, used by the client unchanged) |
+| Symbols | `sigdb/symbols/server.d/items.json` (features `items.transaction`, `items.program`, `items.read`, `items.catalog`, `items.scan`, `items.recipe`, `items.fuel`, `items.pide_options`, `items.move`, `items.transfer`, `items.names`, `items.instances`, `items.equip`, `items.gear`); `sigdb/symbols/server.d/dev29-10-equipment-sets.json` (`items.equip_sets`, used by the client unchanged) |
 | C table | `native/core/abi/services/kiln_items.h` (`kiln.items` v6: v1 + water + moves, container names, transfer rules and events + item instances + equip and unequip + equipment sets) |
 | Native | `native/services/items/` → `kiln/services/kiln-items.dll` |
 | Managed | `managed/services/Kiln.Items/` → `kiln/host/Kiln.Items.dll` (namespace `Kiln`, class `Items`) |
@@ -677,7 +677,13 @@ per Pre) / `fuel_keep_end`. v4 (header size >= `sizeof(KilnItemsApi)` of v4; fea
 `read_instances(items, count, item_size, flags)` and `read_holder(holder, out, capacity, item_size, &count, &initialized)`
 fill `KilnItemsInstance` records (stamp, item, holder, slot, link, flat slot, count, the save record's fields; tick thread),
 `instances_status` (any thread); the stamps are in the `reserved` fields of `KilnItemsSlot`, `KilnItemsChange` and
-`KilnItemsMoveChange` (0 from an older service). Details and every field: the header.
+`KilnItemsMoveChange` (0 from an older service). v8 (since 0.2.0-dev.29.19; feature `items.gear`): `gear_write` queues a
+`KilnItemsGearRequest` for one item entity named with its stamp (`AVAILABLE` sets the enhancement slots, so the rarity;
+`UNLOCKED` the unlocked enhancements, Level moving with them; `LEVEL`; `DURABILITY_REFRESH` / `DURABILITY_REPAIR`;
+`DRY_RUN`; `FORCE_SLOT`; `NOT_EQUIPPED`), run in the next step inside the serial program `kiln_items_gear` through the
+game's tracked writes; the callback gets a `KilnItemsGearResult` (status, what changed, before and after). `gear_read`
+(tick thread) and `gear_status` (any thread). The game derives the shown rarity and level in the next step; evidence in
+docs/re/items.md section 19. Details and every field: the header.
 
 ## How it runs
 - A system ECS program `kiln_items` (other-write Inventory, InventorySetup, InventoryEmptyState, ItemState,

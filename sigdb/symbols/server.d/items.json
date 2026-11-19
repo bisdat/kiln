@@ -144,6 +144,19 @@
         { "pattern": "29 3C 8A 48 8B D6 48 8B CB E8 {items/AttrChanged:rel32}" }
       ]
     },
+    "@items/LevelAdd.site": {
+      "comment": "items.gear: the game's add-to-a-UInt32-attribute (server 0x19b7b0, client 0x3fa500; UnlockPerk raises Level with it): the value += delta, then the UInt32 attribute's formulas (server 0xab970, client 0x2c0660; the Level twin of items/AttrChanged). docs/re/items.md section 19",
+      "find": [
+        { "pattern": "F6 43 06 01 74 15 0F B7 4B 04 48 03 CB 01 34 91 48 8B D7 48 8B CB E8 {items/AttrChangedU32:rel32}" }
+      ]
+    },
+    "@items/UnlockPerk.level": {
+      "comment": "items.gear: UnlockPerk (ItemAction 3, server 0x1a0b80, client 0x3ff8a0) reads Level's current and max values after unlockedPerks + 1, to raise max first when the level would pass it",
+      "find": [
+        { "pattern": "BA {items/attr.level:d32} E8 {items/AttrFind:rel32} 44 38 74 24 30 74 05 41 8B DE" },
+        { "pattern": "4C 8B 87 E8 00 00 00 48 8D 4C 24 30 BA {items/attr.level_max:d32} E8 {items/AttrFind:rel32} 44 38 74 24 30 75 1A" }
+      ]
+    },
     "@items/GetComponent.fields": {
       "find": [
         { "scope": { "symbol": "GetComponent", "size": 96 }, "pattern": "48 8B 0F 41 8B D9 48 81 C1 {items/registry.components:d32} E8 {items/ComponentMapFind:rel32} 4C 8B C0 44 8B CB 48 8B D7 48 8B CE E8 {items/ReadOtherImpl:rel32}" }
@@ -307,7 +320,8 @@
     "items/attr.durability_max": { "min_votes": 1 },
     "items/attr.fuel": { "min_votes": 1 },
     "items/attr.fuel_max": { "min_votes": 1 },
-    "items/attr.level": { "min_votes": 1 }
+    "items/attr.level": { "min_votes": 1 },
+    "items/attr.level_max": { "min_votes": 1 }
   },
   "features": {
     "items.transaction": {
@@ -365,6 +379,13 @@
     },
     "items.equip": {
       "symbols": ["items/EquipItem", "items/UnequipItem", "@items/EquipAction.calls"]
+    },
+    "items.gear": {
+      "symbols": ["items/WriteOther", "items/JobTracker", "items/JobWriteFlag", "items/JobStorage", "items/ReadOther", "items/AttrFind",
+                  "items/AttrChanged", "items/AttrChangedU32", "@items/FuelWrite.site", "@items/AttrFind.site", "@items/AttrChanged.site",
+                  "@items/LevelAdd.site", "@items/UnlockPerk.level", "@world/WriteMark.bits"],
+      "constants": ["items/attr.level", "items/attr.level_max", "items/attr.durability", "items/attr.durability_max",
+                    "world/registry.replicated", "world/registry.saved", "items/registry.components"]
     }
   }
 }
