@@ -16,6 +16,8 @@ namespace kui {
 std::atomic<uint32_t> g_interactive{0};
 std::atomic<bool> g_menu_open{false};
 std::atomic<bool> g_page_capture{false};
+std::atomic<bool> g_overlay_failed{false};  // ui.cpp: the overlay turned off during the session
+std::atomic<bool> g_text_input{false};      // ui.cpp: ImGui's text field flag of the last frame
 static uint64_t g_now = 1000;
 static bool g_attached = true, g_swapchain = true;
 static bool g_held[256];
@@ -377,6 +379,21 @@ int main() {
     CHECK(g_results.size() == 1 && g_results[0] == -1 && !kui::wheel_active() && !kui::capturing());
     kui::wheel_cancel_undrawable();  // nothing open: nothing happens
     CHECK(g_results.size() == 1 && kui::wheel_close(h) == KILN_ERR_NOT_FOUND);
+    // after the overlay turned off during the session (0.2.0-dev.29.18): no wheel opens, nothing captures the input, even
+    // with Kiln's menu or a window open
+    kui::g_overlay_failed = true;
+    kui::g_menu_open = true;
+    kui::g_interactive = 1;
+    CHECK(!kui::capturing());
+    CHECK(kui::wheel_open(7, &d, on_result, nullptr, &h) == KILN_ERR_UNAVAILABLE && !kui::wheel_active());
+    // what the last drawn frame left set lets go too (overlay_turned_off): a Kiln text field that had the keyboard
+    // (key bindings would take every press for typing) and Kiln's menu (Escape would close it unseen)
+    kui::g_text_input = true;
+    kui::release_input_after_turn_off();
+    CHECK(!kui::g_text_input.load() && !kui::g_menu_open.load() && !kui::capturing());
+    kui::g_overlay_failed = false;
+    kui::g_menu_open = false;
+    kui::g_interactive = 0;
 
     CHECK(kui::g_errors.empty());
     ImGui::DestroyContext();

@@ -246,6 +246,21 @@ fn optiscaler_is_named_with_what_kilns_overlay_does() {
     f.w("OptiScaler.ini", "[Menu]\nOverlayMenu=false\n");
     let r = build(&f.input());
     assert!(finding(&r, "optiscaler").text.contains("draws next to it"));
+    assert!(r.summary.contains("Graphics tool: OptiScaler (winmm.dll): Kiln's overlay draws next to it (its own menu and frame generation are off"), "{}", r.summary);
+    // Inbox 80: its menu off, frame generation set: Kiln steps aside, and the finding says why
+    f.w("OptiScaler.ini", "[FrameGen]\r\nFGInput=upscaler\r\nFGOutput=fsrfg\r\n[Menu]\r\nOverlayMenu=false\r\n");
+    let r = build(&f.input());
+    let x = finding(&r, "optiscaler");
+    assert!(x.text.contains("frame generation is set") && x.text.contains("steps aside"), "{}", x.text);
+    assert!(r.summary.contains("Graphics tool: OptiScaler (winmm.dll): Kiln's overlay drawing steps aside"), "{}", r.summary);
+    // the DLL as it really is: ReShade's texts first, its own later (29.17 named it "ReShade (text reshade)")
+    let mut text = b"ReShade 6.4 reshade64.dll ".to_vec();
+    text.extend(std::iter::repeat_n(0u8, 2048));
+    text.extend("OptiScaler.ini".encode_utf16().flat_map(|c| c.to_le_bytes()));
+    f.w("winmm.dll", crate::pe::build_test_dll(&["timeGetTime"], &text));
+    let r = build(&f.input());
+    assert!(r.summary.contains("winmm.dll        OptiScaler") && !r.summary.contains("winmm.dll        ReShade"), "{}", r.summary);
+    f.w("OptiScaler.ini", "[Menu]\nOverlayMenu=false\n");
     // its log can grow large (debug level): only its tail, within a log's budget, as for the other tools' logs
     let old = "[info] an earlier line of OptiScaler's log\n";
     f.w("OptiScaler.log", old.repeat(SMALL_LOG_MAX as usize / old.len() + 1) + "[info] HookDevice: the newest line\n");

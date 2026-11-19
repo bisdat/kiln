@@ -354,6 +354,22 @@ fn optiscaler_in_the_game_folder_is_found_by_its_contents() {
     let notes = kiln_manage::game::graphics_tools(g);
     assert!(notes[0].kiln_overlay && notes[0].text.contains("draws next to it"), "{}", notes[0].text);
     assert_eq!(serde_json::to_value(&notes[0]).unwrap()["kilnOverlay"], true);
+    // Inbox 80: OptiScaler's real DLL carries ReShade's texts (it can load ReShade) long before its own (0.9.5's
+    // OptiScaler.dll: "reshade" at 24.59 MB, "optiscaler.ini" at 24.88 MB in UTF-16 and 24.95 MB in ASCII). Under winmm.dll
+    // it is OptiScaler, whatever comes first in the file; 29.17's report named it "ReShade (text reshade)".
+    for own in [utf16("OptiScaler.ini"), utf16("OptiScaler.log"), b"OptiScaler.ini".to_vec()] {
+        let mut text = b"ReShade 6.4 reshade64.dll ReShade.ini ".to_vec();
+        text.extend(utf16("ReShade"));
+        text.extend(std::iter::repeat_n(0u8, 4096));
+        text.extend(&own);
+        put(g, "winmm.dll", &build_test_dll(&["timeGetTime", "PlaySoundW"], &text));
+        assert_eq!(kinds(g)[0], ("winmm.dll".to_string(), ProxyKind::OptiScaler));
+        assert_eq!(optiscaler_in(g).as_deref(), Some("winmm.dll"));
+    }
+    // ReShade's texts alone under winmm.dll stay ReShade's
+    put(g, "winmm.dll", &build_test_dll(&["timeGetTime"], b"ReShade 6.4 reshade64.dll"));
+    assert_eq!(kinds(g)[0], ("winmm.dll".to_string(), ProxyKind::ReShade));
+    assert_eq!(optiscaler_in(g), None);
     // its .asi build, loaded by Ultimate ASI Loader
     std::fs::remove_file(g.join("winmm.dll")).unwrap();
     put(g, "OptiScaler.asi", &build_test_dll(&["x"], b"OptiScaler.log"));
@@ -373,6 +389,24 @@ fn optiscaler_ini_decides_kilns_overlay() {
     let fg = OptiScalerIni::parse("[Menu]\nOverlayMenu=false\n[FrameGen]\nFGInput=upscaler\nFGOutput=fsrfg\n");
     assert!(fg.frame_gen && !fg.kiln_overlay_draws(), "frame generation: Kiln steps aside");
     assert!(!OptiScalerIni::parse("[FrameGen]\nFGInput=upscaler\nFGOutput=nofg\n").frame_gen);
+    // Inbox 80: its menu off, frame generation set as a nightly's ini has it (CRLF, [FrameGen] before [Menu], Enabled
+    // off: the stand-in swapchain and the own present queue are made with Enabled=false too). Every Vulkan output its
+    // master knows, with either input, makes frame generation; an output alone or an input alone does not.
+    for (input, output) in [("upscaler", "fsrfg"), ("dlssg", "fsrfg"), ("upscaler", "dlssg"), ("Upscaler", "Reprojection")] {
+        let ini = format!("[FrameGen]\r\nEnabled=false\r\nFGInput={input}\r\nFGOutput={output}\r\n[Menu]\r\nOverlayMenu=false\r\n");
+        let parsed = OptiScalerIni::parse(&ini);
+        assert!(parsed.overlay_menu == Some(false) && parsed.frame_gen && !parsed.kiln_overlay_draws(), "{input} -> {output}");
+        let note = kiln_manage::engines::optiscaler_overlay_note(&parsed);
+        assert!(note.contains("frame generation is set") && note.contains("own queue") && note.contains("FGInput and FGOutput to auto"), "{note}");
+    }
+    for ini in ["[FrameGen]\nFGInput=auto\nFGOutput=fsrfg\n[Menu]\nOverlayMenu=false\n", "[FrameGen]\nFGInput=upscaler\n[Menu]\nOverlayMenu=false\n",
+                "[FrameGen]\nEnabled=true\n[Menu]\nOverlayMenu=false\n"] {
+        assert!(OptiScalerIni::parse(ini).kiln_overlay_draws(), "{ini}");
+    }
+    // the menu-on note says to leave frame generation off too; the drawing note says both are off
+    let menu_on = kiln_manage::engines::optiscaler_overlay_note(&stock);
+    assert!(menu_on.contains("OverlayMenu=false") && menu_on.contains("FGInput and FGOutput") && !menu_on.contains("go off with it"), "{menu_on}");
+    assert!(kiln_manage::engines::optiscaler_overlay_note(&off).contains("no frame generation is set"));
     assert_eq!(OptiScalerIni::parse("[Menu]\nOverlayMenu=false\nOverlayMenu=true\n").overlay_menu, Some(true));
     // no ini: the defaults
     let t = tmp("optiscaler-ini");

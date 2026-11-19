@@ -2,20 +2,28 @@
 // kiln.ui: OptiScaler next to the game, and whether Kiln's overlay draws next to it (overlay_guard.cpp; host test:
 // tests/overlay_guard_test.cpp). No windows.h.
 //
-// OptiScaler (github.com/optiscaler/OptiScaler, GPL-3.0; read at 2df7ad9f, release v0.9.5; no code of it here) is an
-// upscaler and frame generation tool installed as a proxy DLL in the game folder. Its profile for enshrouded.exe
-// (misc/GameConfigs.cpp) loads vulkan-1.dll in OptiScaler's DllMain and patches its exports before the game runs. With
-// its overlay menu on (the default) it also patches the game device's present and swapchain functions when the device
-// is made (hooks/Vulkan_Hooks.cpp HookDevice), draws its own ImGui menu in every present and rewrites the present's wait
+// OptiScaler (github.com/optiscaler/OptiScaler, GPL-3.0; read at release v0.9.5 90d9568d and master 2df7ad9f of
+// 2026-11-17, which its nightly builds come from; no code of it here) is an upscaler and frame generation tool installed
+// as a proxy DLL in the game folder. Its profile for enshrouded.exe (misc/GameConfigs.cpp; misc/Quirks.h in 0.9.5) loads
+// vulkan-1.dll in OptiScaler's DllMain and patches its exports before the game runs. With its overlay menu on (the
+// default) it also patches the game device's present and swapchain functions when the device is made
+// (hooks/Vulkan_Hooks.cpp HookDevice), draws its own ImGui menu in every present and rewrites the present's wait
 // semaphores (menu/menu_overlay_vk.cpp QueuePresent), subclasses the game window and hooks raw input, and opens its menu
-// with Insert, Kiln's menu key too. With frame generation on, the game draws into FFX's stand-in swapchain and the real
-// presents come from FFX's own thread, past other overlays' hooks on purpose (framegen/ffx/FSRFG_Vk.cpp
-// BypassOverlayHooks). With `OverlayMenu=false` under [Menu] in OptiScaler.ini none of the device, present or window
-// patches is made, and frame generation is off with it (OptiScaler.ini: "without this option OptiScaler will disable
-// all FG features"): Kiln's overlay then draws as without OptiScaler.
+// with Insert, Kiln's menu key too.
+// Frame generation: 0.9.5 has none for Vulkan. master has it (framegen/IFGFeature_Vk.cpp, ffx/FSRFG_Vk.cpp), made when
+// the device is made whenever [FrameGen] names an input (upscaler, dlssg) and an output (fsrfg, dlssg, reprojection),
+// with its menu on or OFF (hkvkCreateDevice: CreateFGFeature, then HookDevice; the ini's "without this option OptiScaler
+// will disable all FG features" under [Menu] no longer holds there). It adds queues of its own to the device, gives the
+// game FFX's stand-in swapchain, and its thread presents the game's frames and the generated ones from its own present
+// queue, through the present function Kiln handed out (vk_present.h: Kiln does not draw there). An input without an
+// output, or an output without an input, makes none (dllmain.cpp "FG Input ... without an FG Output, using none").
+// With `OverlayMenu=false` under [Menu] and no frame generation none of the device, present or window patches is made:
+// Kiln's overlay then draws as without OptiScaler.
 //
-// So: OptiScaler with its menu on (or frame generation set) -> Kiln's drawing steps aside on its own, as for Streamline;
-// OptiScaler with `OverlayMenu=false` and no frame generation -> Kiln draws. KILN_UI_OVERLAY=0/1 wins over both.
+// So: OptiScaler with its menu on, or frame generation set -> Kiln's drawing steps aside on its own, as for Streamline;
+// OptiScaler with `OverlayMenu=false` and no frame generation -> Kiln draws. KILN_UI_OVERLAY=0/1 wins over both. Should
+// frame generation be on in a way this misses, Kiln sees its present queue at the first draw and turns its drawing off
+// for the session before anything is submitted (vk.cpp draw).
 //
 // Found by contents, never by a name alone: dxgi.dll, winmm.dll, version.dll and dbghelp.dll are other tools' and
 // loaders' names too (ReShade, ShroudForge, EML, Shroudtopia). A candidate under one of OptiScaler's names is read only
@@ -74,7 +82,9 @@ struct OptiScalerIni {
     bool read = false;          // the file was there and read
     int overlay_menu = -1;      // [Menu] OverlayMenu: -1 auto (OptiScaler's default: on), 0 false, 1 true
     std::string fg_input, fg_output;  // [FrameGen] FGInput / FGOutput, lower case; "" or "auto" = OptiScaler's nofg
-    // Frame generation is set up: an input and an output other than nofg (Vulkan_Hooks.cpp CreateFGFeature needs both).
+    // Frame generation is set up: an input and an output other than nofg (Vulkan_Hooks.cpp CreateFGFeature needs both;
+    // OptiScaler drops an input without an output). [FrameGen] Enabled only turns frame generation on and off while it
+    // runs: the stand-in swapchain and the own present queue are there with Enabled=false too.
     bool frame_gen() const {
         auto none = [](const std::string& v) { return v.empty() || v == "auto" || v == "nofg"; };
         return !none(fg_input) && !none(fg_output);
@@ -124,7 +134,8 @@ struct OptiScaler {
     OptiScalerIni ini;           // OptiScaler.ini next to it
     bool ini_only = false;       // OptiScaler.ini in the game folder, but no OptiScaler DLL next to it (an uninstall's leftover)
     bool found() const { return !file.empty(); }
-    // Kiln's overlay draws next to it: OptiScaler's own menu is off and so no present or swapchain of the game is patched.
+    // Kiln's overlay draws next to it: OptiScaler's own menu is off and no frame generation is set, so no present or
+    // swapchain of the game is patched.
     bool coexists() const { return found() && ini.overlay_menu == 0 && !ini.frame_gen(); }
 };
 

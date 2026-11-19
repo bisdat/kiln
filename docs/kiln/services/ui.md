@@ -7,7 +7,7 @@ at the end of the native table, after `subscribe_key_ex`; the service version st
 It forwards to Dear ImGui `SetNextWindowSizeConstraints` for the next `begin`, in
 screen pixels. Call it inside a frame callback before `begin`, every frame that
 needs constraints. Like the neighbouring window setters it does nothing outside
-a drawing frame, including `KILN_UI_OVERLAY=0`.
+a drawing frame, including `KILN_UI_OVERLAY=0` and kiln.json `"ui": {"overlay": "off"}`.
 
 Readers must check `header.size >= offsetof(KilnUiApi, set_next_window_size_constraints) +
 sizeof(ui->set_next_window_size_constraints)` and that the pointer is non-null.
@@ -192,3 +192,23 @@ check `header.size` through the member and that its pointer is non-null). Player
 - `graphics_set(&KilnUiGraphics)` (48 bytes): the player's settings. Kiln.Ui's call only, from kiln.json "graphics" and
   the Kiln menu's Graphics tab; a native plugin's is refused (`KILN_ERR_UNAVAILABLE`): mods never choose them.
 
+## The overlay's drawing off: kiln.json and a session that turned it off (0.2.0-dev.29.18)
+
+No table change. Player side: [ui.md](../ui.md#frame-generation-mods-and-drawing-off).
+- **kiln.json `"ui": {"overlay": "off"}`** turns the overlay's drawing off from the game's start, the same as
+  `KILN_UI_OVERLAY=0` (which wins where it is set, as `KILN_UI_OVERLAY=1` does). `"auto"` is the default. Read once by
+  kiln.ui at start (`native/services/ui/overlay_setting.h`), top level only; the launcher's Settings writes it. For a
+  native plugin it is the drawing-off mode as with `KILN_UI_OVERLAY=0`: `KilnUiStatus.error` says "the overlay's
+  drawing is off: turned off in Kiln's settings (kiln.json ui.overlay)", and the drawing capability rows are unavailable
+  with that text.
+- **Drawing that turns off during a session.** The overlay's first failure (its submit, its resources, ImGui, a fault,
+  or a present from a queue Kiln cannot draw on: [ui.md](../ui.md#when-the-overlay-fails-during-a-session)) turns its
+  drawing off until the game closes. From then on frame callbacks and pre-overlay callbacks are no longer called,
+  `KilnUiStatus.drawing` turns 0, `KilnUiStatus.error` reads "the overlay's drawing is off: <reason>", `wheel_open`
+  returns `KILN_ERR_UNAVAILABLE`, and the rows `ui.windows`, `ui.draw`, `ui.menu_page`, `render.draw` and
+  `kiln.screen` turn unavailable (`KILN_CAP_REASON_POLICY`, the same text) a moment later. Keys, native menu rows,
+  `kiln.ui.tick` and the window's input subscriptions go on.
+- **Pre-overlay callbacks** (`subscribe_pre_overlay`) are called only for a present on a queue the game got (not one a
+  tool added to the device while it was made, such as frame generation's present queue) whose family has graphics;
+  `queue_family` is that queue's own family, never a guess. A queue Kiln did not see the game get is looked up among the
+  queues the game asked for when it made its device, so the game's own counts wherever it got it.
