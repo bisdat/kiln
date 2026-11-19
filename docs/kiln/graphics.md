@@ -107,7 +107,8 @@ limits: AMD's and Intel's own libraries decide what runs on a card.
 - **AMD FSR** (`amd`): AMD's FidelityFX SDK 2.4.0. With `amdUpscaler` `auto`, AMD's own selection runs FSR 4 (4.1.2)
   where the card and driver run it, else FSR 3.1 (3.1.6). `fsr3` keeps FSR 3.1 even where FSR 4 would run (some players
   prefer its look, or its cost on an older card).
-- **Intel XeSS** (`xess`): Intel's XeSS 3.0.2 (super resolution only), on Intel, AMD and NVIDIA cards.
+- **Intel XeSS** (`xess`): Intel's XeSS SDK 3.0.2, its Super Resolution only (which reports itself as version 2.0.2),
+  on Intel, AMD and NVIDIA cards.
 
 **When it applies:** at the game's next FSR set-up: a world load, or a change of FSR's quality, the resolution or the 3D
 render scale in the game's settings. Kiln hooks the game's FSR 3 pass and adds what the chosen upscaler needs to the
@@ -145,8 +146,9 @@ Details: [Upscaler files](#upscaler-files) below.
 The Graphics page's "Now" block, the launcher's Graphics card and the Deck's "Upscaler now" row say what upscales behind
 the game's FSR 3 option: the game's own FSR 3, AMD FSR 4, AMD FSR 3.1, Intel XeSS, or nothing because FSR 3 is not the
 game's chosen upscaler right now (DLSS or none chosen, or no world loaded). With the version and the render and output
-size while it runs. When the chosen one does not run, one of these reasons follows (the same English in the game and
-the launcher; shown here for AMD FSR):
+size while it runs: the upscaler's own version, not its SDK's (FSR 4.1.2 or 3.1.6 from AMD's SDK 2.4.0; 2.0.2 for XeSS,
+the Super Resolution version Intel's SDK 3.0.2 reports). When the chosen one does not run, one of these reasons follows
+(the same English in the game and the launcher; shown here for AMD FSR):
 
 | code | number | text |
 |---|---|---|
@@ -321,9 +323,12 @@ any of it DLSS. Code: `native/services/ui/upscale.cpp` (the swap), `upscale_amd.
   Vulkan backend uses when the GPU offers it (subgroup size control, 16-bit floats, synchronization2, AMD's buffer
   markers and coherent memory, descriptor indexing) and FSR 4's set (cooperative matrix, FP8, integer dot product,
   compute-shader derivatives, 8- and 16-bit storage), each only where the GPU has it.
-- **Intel XeSS.** XeSS Super Resolution 3.0.2 from Intel's own `libxess.dll`, from `<game>/kiln/vendor/intel/3.0.2/`
-  (the launcher's Settings, Graphics card), checked and kept open as AMD's files are, mapped only from that folder, and
-  never patched or hooked (Intel's licence: the software unmodified, also while it runs). On a GPU that is not Intel's
+- **Intel XeSS.** XeSS Super Resolution from the XeSS SDK 3.0.2: Intel's own `libxess.dll`, from
+  `<game>/kiln/vendor/intel/3.0.2/` (the launcher's Settings, Graphics card), checked and kept open as AMD's files are,
+  mapped only from that folder, and never patched or hooked (Intel's licence: the software unmodified, also while it
+  runs). The library reports its Super Resolution version, 2.0.2 for the SDK 3.0.2 (Intel's 3.0 SDK added multi-frame
+  generation in other libraries): Kiln loads a Super Resolution 2.x that has every export it calls, and refuses 1.x and
+  later majors (kiln.log: "libxess.dll loaded: XeSS SDK 3.0.2 (Super Resolution 2.0.2)"). On a GPU that is not Intel's
   it runs its cross-vendor (DP4a) path. Kiln adds what XeSS itself lists for the Vulkan instance and device at the
   game's start (XeSS chosen later: reason `restart`), picks the first XeSS quality preset whose input range holds the
   game's render size, copies the motion vectors into the format Intel's guide names (values unchanged), and makes a new

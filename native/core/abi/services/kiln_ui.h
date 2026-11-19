@@ -740,7 +740,8 @@ typedef struct KilnUiGraphicsStatus {
     uint32_t upscale_reason;    /* KILN_UI_UPSCALE_WHY_*: why the chosen upscaler does not run now (0: it runs, or GAME) */
     uint32_t upscale_flags;     /* KILN_UI_UPSCALE_* */
     uint32_t aside_upscale;     /* KILN_UI_GFX_ASIDE_* that keep Kiln's swap off (0: none) */
-    uint32_t upscale_version;   /* what runs: (major << 22) | (minor << 12) | patch (FSR 4.1.2, FSR 3.1.6, XeSS 3.0.2);
+    uint32_t upscale_version;   /* what runs: (major << 22) | (minor << 12) | patch (FSR 4.1.2, FSR 3.1.6, XeSS 2.0.2:
+                                   the upscaler's own version, so Super Resolution's from the XeSS SDK 3.0.2);
                                    0: the game's FSR 3 or nothing */
     uint32_t upscale_render_width, upscale_render_height;  /* the FSR 3 pass's input this frame (while FSR_SEEN) */
     uint32_t upscale_output_width, upscale_output_height;

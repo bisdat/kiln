@@ -26,7 +26,7 @@
           "description": "Why the chosen upscaler does not run, null when it runs or the game's own is chosen (kiln_ui.h KILN_UI_UPSCALE_WHY_* in camelCase; texts: docs/kiln/graphics.md). Known codes: restart, filesMissing, filesBad, loadFailed, device, createFailed, runtimeFailed, fault, aside, noSignatures, inputs, unavailable, waiting, noVulkan; unknown (with reasonNumber) for a number this Kiln.Ui has no name for. Later versions add codes: show a code you do not know as unknown."
         },
         "reasonNumber": { "type": "integer", "minimum": 0, "description": "With reason unknown: kiln.ui's number." },
-        "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$", "description": "The version that runs (FSR 4.1.2, FSR 3.1.6, XeSS 3.0.2); absent for the game's FSR 3 or nothing." },
+        "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$", "description": "The version that runs, the upscaler's own (FSR 4.1.2, FSR 3.1.6, XeSS 2.0.2: Super Resolution's, from the XeSS SDK 3.0.2); absent for the game's FSR 3 or nothing." },
         "hooked": { "type": "boolean", "description": "Kiln's hooks on the game's FSR 3 pass are in (KILN_UI_UPSCALE_HOOKED)." },
         "fsrSeen": { "type": "boolean", "description": "The game upscaled with FSR 3 in the last two seconds." },
         "filesOk": { "type": "boolean", "description": "The chosen upscaler's files are there and match their pinned SHA-256." },
