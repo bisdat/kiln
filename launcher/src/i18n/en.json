@@ -3487,6 +3487,8 @@
       "applyingAria": "{what} ({title})",
       "stoppedStart": "Kiln stopped the start",
       "waitingForKiln": "Waiting for Kiln",
+      "stopWaiting": "Stop waiting",
+      "stopWaitingTip": "Steam has not started the game. Stop waiting and show Play again, for example after you cancelled the launch in Steam. Nothing is closed.",
       "noWord": "No word from Kiln",
       "hookedNothing": "Kiln hooked nothing",
       "kilnStopped": "Kiln stopped",

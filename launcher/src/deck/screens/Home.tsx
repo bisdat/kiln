@@ -132,6 +132,8 @@ export default function Home() {
           {game && rt && v.phase !== "none" && ((crash && !ctl.running) || (ctl.stuck && rt.installed) || ctl.kilnMissing || change?.state === "failed" || !!sfNote) && (
             <DeckSendToSupport target={{ game: game.id }} kind={crash && !ctl.running ? "crash" : sfNote ? "mod" : "noload"} />
           )}
+          {/* (29.18) Play waits for a game Steam has not started (a launch cancelled in Steam): Play again at once */}
+          {game && ctl.waitingForGame && <DeckButton id="stop-waiting" onClick={ctl.stopWaiting}>{t("shell.play.stopWaiting")}</DeckButton>}
           {/* once the game's state is known, as the other actions: the arch takes the first focus (it is disabled before) */}
           {game && rt && v.phase !== "none" && sfNote && <DeckButton id="sf-startup" a={t("deck.shared.read")} onClick={() => setSfOpen(sfNote)}>{t("deck.home.sfWhy")}</DeckButton>}
           {!game && !looking && tried && <DeckButton id="pick-folder" a={t("common.open")} onClick={() => setOpen("find")}>{t("deck.home.pickFolder")}</DeckButton>}

@@ -216,7 +216,7 @@ function PlayFor({ game, ctl, onAdded }: { game: GameInstall; ctl: PlayControl; 
         <h1 className="k-hero-name"><span className="k-title static">Enshrouded</span></h1>
         {ctl.timeline ? (
           <div className="k-hero-state k-hero-start" key="progress">
-            <StartProgress t={ctl.timeline} prep={prep} />
+            <StartProgress t={ctl.timeline} prep={prep} action={ctl.waitingForGame && <StopWaiting ctl={ctl} />} />
           </div>
         ) : starting ? (
           <div className="k-hero-state" key="start">
@@ -229,6 +229,7 @@ function PlayFor({ game, ctl, onAdded }: { game: GameInstall; ctl: PlayControl; 
                 </li>
               ))}
             </ol>
+            {ctl.waitingForGame && <div className="k-hero-stop"><StopWaiting ctl={ctl} /></div>}
           </div>
         ) : ctl.running ? (
           <div className="k-hero-state" key="run">
@@ -294,6 +295,13 @@ function PlayFor({ game, ctl, onAdded }: { game: GameInstall; ctl: PlayControl; 
       ))}
     </>
   );
+}
+
+/** (29.18) While Play waits for a game Steam has not started (a launch cancelled in Steam): Play again at once, and the
+ *  launcher forgets the start (PlayControl.stopWaiting). Never shown once the game runs. */
+function StopWaiting({ ctl }: { ctl: PlayControl }) {
+  const t = useT();
+  return <button type="button" className="k-link" title={t("shell.play.stopWaitingTip")} onClick={ctl.stopWaiting}>{t("shell.play.stopWaiting")}</button>;
 }
 
 /** Refusal, Kiln did not start, the Steam launch option, Steam updating, safe idle: flat strips above the name. */
