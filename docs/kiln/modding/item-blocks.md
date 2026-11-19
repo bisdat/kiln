@@ -173,6 +173,49 @@ Blocks.Define("ember-scavenger", new CreatureBlock { Body = Bodies.Vukah, Drops 
 - **Mistakes.** An empty table, `Pick = One` with every weight 0 (or weights too large to add up), a chance outside 0 to 1, a `countMax` under `countMin`, a block that is no item or no table: refused at load, by block and field. An item name that is nobody's is said once content is ready: `block loottable x, entries[1].item: the game has no item "No_Such_Item"` (`drops.entries[1].item` in a table written in a creature). The rest of the table still rolls.
 - **`clients`.** A table asks nothing of players' games. The items in it ask what they ask.
 
+## Rarity at creation (RarityRollBlock)
+Since 0.2.0-dev.29.19 (the equipment wave). Name item types and five weights, and the server rolls the item's rarity, Common to
+Legendary, whenever the game makes one: a craft at a station or by hand, random loot in a container or on the ground, a
+random drop-table stack. The game then makes the item at that rarity itself: its enhancement slots (one more than the
+rank), the weapon socket chance of that rarity, its durability. So one item type with five perk slots covers common to
+legendary drops and crafts, instead of one item per tier.
+```csharp
+Blocks.Define("ember-rolls", new RarityRollBlock
+{
+    Items = ["my-mod:*"],                                   // every item of this mod; or names, GameItems constants, "Weapon_*"
+    Sources = ItemSource.Craft | ItemSource.Loot,           // the default
+    Weights = new Dictionary<Rarity, double> { [Rarity.Common] = 50, [Rarity.Uncommon] = 30, [Rarity.Rare] = 15, [Rarity.Epic] = 4, [Rarity.Legendary] = 1 },
+});
+```
+```jsonc
+{ "format": 1,
+  "rarityRolls": {
+    "ember-rolls": { "items": [ "my-mod:*" ], "sources": "craft, loot",
+                     "weights": { "common": 50, "uncommon": 30, "rare": 15, "epic": 4, "legendary": 1 } } } }
+```
+- **`items`**: game item names (`Weapon_T1_1H_Sword_Craft`), items of this mod by block name, `"other-mod:name"`, or a pattern
+  with `*` over the game's item names (`"Weapon_*"`; `"my-mod:*"` is every item of that mod). Names are resolved on the server
+  once the world's item registry has them, and again when it grows; a name that matches nothing is said once in kiln.log.
+- **`sources`**: `craft` (the game makes the item and asks for no rarity: crafting, `Items.GiveRecipeResult`), `loot` (the
+  game makes it with a rarity it rolled: random loot, random drop-table stacks; an item whose loot entry fixes its rarity is
+  loot too, so leave `loot` out to keep that), `give` (a Kiln `Items.Give` without `Gear.Rarity`). A give with a rarity is
+  never rolled, nor is anything Kiln re-creates (`Gems.AddSocket`).
+- **`weights`**: per rarity, 0 or more, at least one above 0; a rarity left out is 0. A rarity whose perk slot the item type
+  lacks never comes up (most tools stop at Rare or Epic; a data pack can fill `perkReferences`); with none left the game's own
+  rarity stays.
+- One rule per item type: a later definition (of any mod) wins an item type an earlier one also names, and kiln.log says so.
+  A mod's rules end with the mod.
+- **What players see.** The item is made by the game's own item creation at the rolled rarity, the same way as an item whose
+  rarity the game rolled itself, so its colour, enhancement list and "LEVEL x/y" are the game's (players without Kiln get them
+  like any loot; not yet confirmed in a real game). A recipe's tooltip still shows the item type's rarity (the
+  game builds it from the type, not from a roll): `kiln lint` warns (KL406) when a rule rolls crafts of an item with a recipe.
+- **Where it runs.** On the server: a dedicated server, or the game of the player who hosts the world. A game client joined to
+  another server rolls nothing. Capability `items.gear.rolls` (the hook in the game's item creation); without it items are
+  made at the game's rarity and kiln.log says why.
+- The per-item rarity at creation is the game's; changing an item's rarity afterwards is `Items.SetRarity` / upgrades (the
+  gear API). Balancing-table values (the game's loot rarity rates, rarity durability factors, socket chances) are the
+  content pack's `gearRules`, not this block.
+
 ## Recipes of their own
 A `RecipeBlock` on an item says how that item is made. A `RecipeBlock` of its own, in `recipes`, is one more recipe for any item: a game item at the game's workbench, or an item of yours there. It needs `Output`.
 

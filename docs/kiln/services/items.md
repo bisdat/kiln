@@ -7,7 +7,7 @@ entity, and the change is replicated and saved like a vanilla one. Evidence and 
 
 | Layer | Where |
 |---|---|
-| Symbols | `sigdb/symbols/server.d/items.json` (features `items.transaction`, `items.program`, `items.read`, `items.catalog`, `items.scan`, `items.recipe`, `items.fuel`, `items.pide_options`, `items.move`, `items.transfer`, `items.names`, `items.instances`, `items.equip`, `items.gear`); `sigdb/symbols/server.d/dev29-10-equipment-sets.json` (`items.equip_sets`, used by the client unchanged) |
+| Symbols | `sigdb/symbols/server.d/items.json` (features `items.transaction`, `items.program`, `items.read`, `items.catalog`, `items.scan`, `items.recipe`, `items.fuel`, `items.pide_options`, `items.move`, `items.transfer`, `items.names`, `items.instances`, `items.equip`, `items.gear`, `items.gear.rolls`); `sigdb/symbols/server.d/dev29-10-equipment-sets.json` (`items.equip_sets`, used by the client unchanged) |
 | C table | `native/core/abi/services/kiln_items.h` (`kiln.items` v6: v1 + water + moves, container names, transfer rules and events + item instances + equip and unequip + equipment sets) |
 | Native | `native/services/items/` → `kiln/services/kiln-items.dll` |
 | Managed | `managed/services/Kiln.Items/` → `kiln/host/Kiln.Items.dll` (namespace `Kiln`, class `Items`) |
@@ -683,7 +683,12 @@ fill `KilnItemsInstance` records (stamp, item, holder, slot, link, flat slot, co
 `DRY_RUN`; `FORCE_SLOT`; `NOT_EQUIPPED`), run in the next step inside the serial program `kiln_items_gear` through the
 game's tracked writes; the callback gets a `KilnItemsGearResult` (status, what changed, before and after). `gear_read`
 (tick thread) and `gear_status` (any thread). The game derives the shown rarity and level in the next step; evidence in
-docs/re/items.md section 19. Details and every field: the header.
+docs/re/items.md section 19. v8, package P5 (feature `items.gear.rolls`): `rarity_rolls(owner, rolls, count, size)` sets an
+owner's `KilnItemsRarityRoll` rules (item type, `KILN_ITEMS_ROLL_CRAFT` / `LOOT` / `GIVE`, five weights) and
+`roll_status` counts what they did; a mid hook where createPide loads the rarity its caller asked for replaces it with a
+weighted roll among the rarities the type has a perk slot for, so the game makes the item at that rarity (docs/re/items.md
+section 10, "Rarity rolls at creation"). Managed: `RarityRollBlock` ([item-blocks.md](../modding/item-blocks.md#rarity-at-creation-rarityrollblock)).
+Details and every field: the header.
 
 ## How it runs
 - A system ECS program `kiln_items` (other-write Inventory, InventorySetup, InventoryEmptyState, ItemState,

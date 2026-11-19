@@ -19,19 +19,36 @@
 //    DurabilityPercentageInit {fraction} entry (the game's item_durability_init reads the latter), replaced when the
 //    list has one, else appended.
 // Weapons keep the game's own roll; an item whose list already has a WeaponGemSlot never gets a second one.
+// v8, the equipment wave (package P5, feature items.gear.rolls): rarity rolls at creation. A second mid hook, where
+// createPide loads the rarity its caller asked for (`movzx ebx, word [opts+8]`: OptU8 {value, has}; items/PideRarity is
+// the instruction after it), replaces that word for an item type a rule names with {rolled rarity, has 1}, chosen by
+// weight among the rarities the type has a perk slot for (ItemInfo.perkReferences[r], the slot createPide itself tests).
+// The game then makes the item at that rarity: PerkContainerNew, the weapon gem slot's chance, durability. Which
+// creations a rule takes (rolls_logic.h source_of): a give of this service for this item type (t_item, the give scope
+// below) with or without a rarity, or another creation with (loot) or without (crafting) one. A give that asked for a
+// rarity is never rolled. Nothing is written to the game's memory: only the register.
 // Component hashes are FNV-1a-32 of the reflected type names, so they hold across builds. Faults count; the item is
 // then created as the game made it.
 #include <windows.h>
 
 #include <atomic>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
+#include <memory>
 #include <mutex>
 #include <unordered_map>
+#include <string_view>
+#include <unordered_set>
+#include <vector>
 
 #include "kiln_hook.hpp"
 #include "pide.h"
+#include "rolls_logic.h"
 #include "safetyhook.hpp"  // Context only: the mid handler keeps its safetyhook::Context& signature
+#ifndef KILN_ITEMS_HOST_TEST
+#include "services/kiln_types.h"
+#endif
 
 namespace kitems {
 namespace {
@@ -94,6 +111,91 @@ struct Counters {
     std::atomic<uint64_t> unlocked{0}, gems{0}, faults{0};
     std::atomic<uint64_t> any{0}, overrides{0}, rolled{0}, extras{0};  // v7
 } C;
+
+// v8 (P5): rarity rolls. The merged rules are published as an immutable sorted vector the hook reads without a lock;
+// replaced vectors stay alive for the process (rules change at mod loads, not per item).
+kiln::MidHook2 h_rarity;
+bool g_rolls_hooked = false;  // items/PideRarity hooked (feature items.gear.rolls)
+uint32_t g_perk_refs = 0;     // ItemInfo.perkReferences (5 x 16 bytes), by reflection; 0 = not resolved yet
+std::mutex g_rules_mu;
+rolls::Table g_rules;  // every owner's set (g_rules_mu)
+std::vector<std::unique_ptr<const std::vector<rolls::Rule>>> g_retired;  // g_rules_mu
+std::atomic<const std::vector<rolls::Rule>*> g_published{nullptr};
+char g_rolls_why[160] = "feature items.gear.rolls is off (items/PideRarity not hooked)";
+struct RollCounters {
+    std::atomic<uint64_t> rolled[rolls::kRarities] = {};
+    std::atomic<uint64_t> kept{0}, no_slot{0}, faults{0};
+} R;
+
+// ItemInfo.perkReferences' offset by this build's reflection (pide_install_rolls sets the real one; tests set
+// g_perk_refs themselves). false + why: not found.
+bool (*g_resolve_perk_refs)(uint32_t* offset, char* why, size_t cap) = nullptr;
+
+void apply_roll(safetyhook::Context& c) {
+    const auto* rules = g_published.load(std::memory_order_acquire);
+    const auto* info = reinterpret_cast<const uint8_t*>(c.rdi);
+    if (!rules || !info || !g_perk_refs) return;
+    uint32_t item;
+    std::memcpy(&item, info, 4);  // ItemInfo.itemId (+0; the UsedItem override createPide builds reads the same)
+    const rolls::Rule* r = rolls::Table::find(*rules, item);
+    if (!r) return;
+    const uint32_t word = static_cast<uint32_t>(c.rbx) & 0xFFFFu;  // the asked rarity: {u8 value, u8 has}
+    const uint32_t source = rolls::source_of(t_item != 0 && t_item == item, (word >> 8) != 0);
+    if (!(r->sources & source)) {
+        R.kept.fetch_add(1, std::memory_order_relaxed);
+        return;
+    }
+    uint32_t allowed = 0;
+    for (int k = 0; k < rolls::kRarities; ++k) {
+        uint64_t a, b;
+        std::memcpy(&a, info + g_perk_refs + 16 * k, 8);
+        std::memcpy(&b, info + g_perk_refs + 16 * k + 8, 8);
+        if (a | b) allowed |= 1u << k;
+    }
+    const int rarity = rolls::pick(r->weights, allowed, g_rand());
+    if (rarity < 0) {
+        R.no_slot.fetch_add(1, std::memory_order_relaxed);
+        return;
+    }
+    c.rbx = (c.rbx & ~uintptr_t{0xFFFF}) | 0x100u | static_cast<uint32_t>(rarity);
+    R.rolled[rarity].fetch_add(1, std::memory_order_relaxed);
+}
+
+void hk_rarity(safetyhook::Context& c) {
+    if (!g_published.load(std::memory_order_relaxed)) return;  // no rules: one load per created item
+    __try {
+        apply_roll(c);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        R.faults.fetch_add(1, std::memory_order_relaxed);
+    }
+}
+
+// g_rules_mu held.
+void publish_rules() {
+    const auto& merged = g_rules.merged();
+    if (merged.empty()) {
+        g_published.store(nullptr, std::memory_order_release);
+        return;
+    }
+    auto copy = std::make_unique<const std::vector<rolls::Rule>>(merged);
+    g_published.store(copy.get(), std::memory_order_release);
+    g_retired.push_back(std::move(copy));
+}
+
+// g_rules_mu held. Rolls act: the hook is in and the perk slots' offset is known (resolved at the first set).
+bool rolls_ready() {
+    if (!g_rolls_hooked) return false;
+    if (g_perk_refs) return true;
+    uint32_t offset = 0;
+    if (!g_resolve_perk_refs) {
+        std::snprintf(g_rolls_why, sizeof g_rolls_why, "ItemInfo.perkReferences cannot be looked up here");
+        return false;
+    }
+    if (!g_resolve_perk_refs(&offset, g_rolls_why, sizeof g_rolls_why)) return false;
+    g_perk_refs = offset;
+    g_rolls_why[0] = 0;
+    return true;
+}
 
 float roll_chance(SocketKind k) {
     if (k < kKindRings || k > kKindOther) return 0;
@@ -345,6 +447,107 @@ KilnResult pide_socket_roll(KilnOwner owner, const KilnItemsSocketRoll* roll) {
         any |= best[k] > 0;
     }
     g_roll_any.store(any, std::memory_order_relaxed);
+    return KILN_OK;
+}
+
+// ---- v8 (P5): rarity rolls at creation ----
+
+#ifndef KILN_ITEMS_HOST_TEST
+namespace {
+const KilnApi* g_types_api = nullptr;
+
+// ItemInfo.perkReferences by kiln.types: 5 entries of 16 bytes, the slots createPide tests; and ItemInfo.itemId at +0.
+bool resolve_perk_refs(uint32_t* offset, char* why, size_t cap) {
+    const auto* t = g_types_api ? static_cast<const KilnTypesApi*>(g_types_api->service(KilnStr{KILN_TYPES_SERVICE, std::strlen(KILN_TYPES_SERVICE)}, 1))
+                                : nullptr;
+    if (!t || t->header.size < sizeof(KilnTypesApi)) return std::snprintf(why, cap, "kiln.types is not loaded"), false;
+    const KilnType* info = t->type_by_name(KilnStr{"keen::ItemInfo", 14});
+    KilnTypeInfo ti{};
+    ti.size = sizeof ti;
+    if (!info || t->type_info(info, &ti) != KILN_OK) return std::snprintf(why, cap, "this build has no keen::ItemInfo"), false;
+    bool id_ok = false;
+    uint32_t refs = 0, refs_size = 0;
+    for (uint32_t i = 0; i < ti.field_count; ++i) {
+        KilnTypeField f{};
+        if (t->type_field(info, i, &f) != KILN_OK) continue;
+        KilnTypeInfo fi{};
+        fi.size = sizeof fi;
+        if (t->type_info(f.type, &fi) != KILN_OK) continue;
+        const std::string_view name(f.name.ptr, f.name.len);
+        if (name == "itemId") id_ok = f.offset == 0 && fi.type_size == 4;
+        else if (name == "perkReferences") refs = static_cast<uint32_t>(f.offset), refs_size = fi.type_size;
+    }
+    if (!id_ok) return std::snprintf(why, cap, "this build's ItemInfo.itemId is not 4 bytes at +0"), false;
+    if (refs == 0 || refs_size != 5 * 16 || refs + refs_size > 0x2000)
+        return std::snprintf(why, cap, "this build's ItemInfo.perkReferences is not 5 x 16 bytes"), false;
+    *offset = refs;
+    return true;
+}
+}  // namespace
+#endif
+
+bool pide_install_rolls(const KilnApi* api, KilnOwner owner) {
+    uintptr_t site = 0;
+    if (!api->feature(KilnStr{"items.gear.rolls", 16}) ||
+        api->symbol(KilnStr{"items/PideRarity", 16}, &site) != KILN_OK || !site)
+        return false;
+#ifndef KILN_ITEMS_HOST_TEST
+    g_types_api = api;
+    g_resolve_perk_refs = &resolve_perk_refs;
+#endif
+    std::lock_guard lock(g_rules_mu);
+    g_rolls_hooked = h_rarity.install(api, owner, site, &hk_rarity, "items/PideRarity");
+    if (g_rolls_hooked) std::snprintf(g_rolls_why, sizeof g_rolls_why, "rule sets resolve ItemInfo.perkReferences first");
+    else std::snprintf(g_rolls_why, sizeof g_rolls_why, "items/PideRarity could not be hooked: %s", h_rarity.error() ? h_rarity.error() : "?");
+    return g_rolls_hooked;
+}
+
+KilnResult pide_rarity_rolls(KilnOwner owner, const KilnItemsRarityRoll* rolls_in, uint32_t count, uint32_t roll_size) {
+    if (!rolls_in || count == 0) {  // ending a set always works, also when rolls are off
+        std::lock_guard lock(g_rules_mu);
+        g_rules.set(owner, {});
+        publish_rules();
+        return KILN_OK;
+    }
+    {
+        std::lock_guard lock(g_rules_mu);
+        if (!rolls_ready()) return KILN_ERR_UNAVAILABLE;
+    }
+    if (roll_size < sizeof(KilnItemsRarityRoll) || count > rolls::kMaxRules) return KILN_ERR_INVALID_ARGUMENT;
+    std::vector<rolls::Rule> set;
+    set.reserve(count);
+    std::unordered_set<uint32_t> seen;
+    for (uint32_t i = 0; i < count; ++i) {
+        KilnItemsRarityRoll e;
+        std::memcpy(&e, reinterpret_cast<const uint8_t*>(rolls_in) + static_cast<size_t>(i) * roll_size, sizeof e);
+        if (!rolls::valid(e) || !seen.insert(e.item).second) return KILN_ERR_INVALID_ARGUMENT;
+        rolls::Rule r;
+        r.item = e.item;
+        r.sources = e.sources;
+        std::memcpy(r.weights, e.weights, sizeof r.weights);
+        set.push_back(r);
+    }
+    std::lock_guard lock(g_rules_mu);
+    g_rules.set(owner, std::move(set));
+    publish_rules();
+    return KILN_OK;
+}
+
+KilnResult pide_roll_status(KilnItemsRollStatus* out) {
+    if (!out || out->size < sizeof(KilnItemsRollStatus)) return KILN_ERR_INVALID_ARGUMENT;
+    const uint32_t size = out->size;
+    std::memset(out, 0, sizeof *out);
+    out->size = size;
+    std::lock_guard lock(g_rules_mu);
+    out->available = g_rolls_hooked && (g_perk_refs || g_resolve_perk_refs) ? 1 : 0;
+    out->items = static_cast<uint32_t>(g_rules.merged().size());
+    out->owners = g_rules.owners();
+    out->conflicts = g_rules.conflicts();
+    for (int r = 0; r < rolls::kRarities; ++r) out->rolled[r] = R.rolled[r].load();
+    out->kept = R.kept.load();
+    out->no_slot = R.no_slot.load();
+    out->faults = R.faults.load();
+    if (!g_perk_refs || !g_rolls_hooked) std::snprintf(out->detail, sizeof out->detail, "%s", g_rolls_why);
     return KILN_OK;
 }
 

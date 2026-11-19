@@ -738,6 +738,11 @@ Fix: remove the opt-in, or take the recipe away from a loot item. For a game ite
 
 A block in `blocks/*.json` gets the same warning for `"loot": { "rolled": true }` with a `recipe`; Kiln.Blocks refuses that block at load.
 
+A `rarityRolls` rule that rolls crafts (its `sources` left out, or with `craft`) of an item of this mod that has a recipe (by its
+block name, `"<this mod>:name"` or a pattern over this mod's items) gets it too: the recipe tooltip shows the item's own rarity
+while a craft comes out at a rolled one ([item-blocks.md](item-blocks.md#rarity-at-creation-rarityrollblock)). Leave `craft` out of
+`sources` to keep crafts as the tooltip says, or accept the difference (the tooltip cannot show a roll).
+
 ## KL5xx: files, assets and cook recipes
 
 ### KL501 file-missing
