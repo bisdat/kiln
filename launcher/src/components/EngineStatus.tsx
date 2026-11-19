@@ -8,6 +8,7 @@ import { t, useT } from "../i18n";
 import { KIND_NAME, KIND_SHORT, KIND_TONE, MOD_KINDS } from "../api/kinds";
 import { Badge, Banner, EmptyState, Skeleton, errorText, type Tone } from "../ui";
 import { RestoreDataOffer } from "./RestoreDataOffer";
+import { SendToSupport } from "../community/parts";
 
 type Obj = Record<string, Json>;
 const isObj = (v: unknown): v is Obj => !!v && typeof v === "object" && !Array.isArray(v);
@@ -86,12 +87,12 @@ export function EngineStatusList({ gameId }: { gameId: GameId }) {
   if (!rows.length) return <EmptyState title={t("engineStatus.none")} hint={t("engineStatus.noneHint")} />;
   return (
     <div className="k-list" aria-label={t("engineStatus.plugins")}>
-      {rows.map((s) => <EngineRow key={s.kind} s={s} />)}
+      {rows.map((s) => <EngineRow key={s.kind} s={s} gameId={gameId} />)}
     </div>
   );
 }
 
-export function EngineRow({ s }: { s: EngineStatus }) {
+export function EngineRow({ s, gameId }: { s: EngineStatus; gameId?: GameId }) {
   const t = useT();
   const selfFile = s.kind === "shroudforge" ? s.ownLoader?.file : null;
   const selfHosted = !selfFile && s.kind === "shroudforge" && isObj(s.state) && s.state.mode === "self-hosted";
@@ -152,7 +153,7 @@ export function EngineRow({ s }: { s: EngineStatus }) {
       {/* ShroudForge's startup pass failed at the last start (sf_startup.rs): whoever ran it, with or without an own loader's note. */}
       {s.startupFailed && (
         <span className="k-hint k-tone-warn" data-startup-failed="" style={{ flexBasis: "100%" }}>
-          {s.startupFailed.text}.
+          {s.startupFailed.text}. {gameId && <SendToSupport from="banner" target={{ game: gameId }} kind="mod" />}
         </span>
       )}
       {/* ShroudForge's pass failed in one mod and ran again without it (sf_startup.rs `skipped`): the others loaded. */}

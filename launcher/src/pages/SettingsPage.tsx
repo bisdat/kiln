@@ -1,7 +1,7 @@
 // /settings: profiles (a background feature: components/ProfilesSettings.tsx), the library's storage, launcher settings,
-// games, and Kiln's kiln.json for the selected game (its "graphics" section on the Graphics card; under it, behind the
-// preview "upscalers", the vendor upscaler files: components/UpscalerSettings.tsx). `#profiles` (Play's profile line,
-// the old /profiles) scrolls there.
+// games, and Kiln's kiln.json for the selected game (its "graphics" section on the Graphics card, with the upscaler
+// behind the game's FSR 3 and the vendor upscaler files: components/GraphicsSettings.tsx, UpscalerSettings.tsx).
+// `#profiles` (Play's profile line, the old /profiles) scrolls there; `#graphics` and `#upscalers` too.
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FolderPlus, Plus, RefreshCw, Trash2, X } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
@@ -18,9 +18,9 @@ import { ProfilesCard } from "../components/ProfilesSettings";
 import { LibraryCard } from "../components/LibrarySettings";
 import { LanguageCard } from "../components/LanguageSettings";
 import { GraphicsCard, isGraphicsPath } from "../components/GraphicsSettings";
-import { UpscalersCard } from "../components/UpscalerSettings";
 import { StartModal, UnknownBuild, useStartWord } from "../components/GameStart";
 import { rich, t, useT } from "../i18n";
+import { CommunityToggle } from "../community/parts";
 import {
   Badge, Button, Card, ConfirmDanger, EmptyState, Field, IconButton, NumberInput, Page, PageHeader, PathPicker, SchemaForm, Select, Skeleton,
   Toggle, errorText, fmtAgo, fmtBytes, setTypeToConfirm, toast, typeToConfirm,
@@ -54,7 +54,6 @@ export default function SettingsPage() {
       </div>
       <KilnJsonCard />
       <GraphicsCard />
-      <UpscalersCard />
       <AssetsCard />
     </Page>
   );
@@ -87,6 +86,7 @@ function LauncherCard() {
       <Toggle checked={v.modFolderNotes !== false} onChange={(on) => set({ modFolderNotes: on })} label={t("settings.launcher.folderNotes")}
         hint={t("settings.launcher.folderNotesHint")} />
       <Toggle checked={v.allowHttpModpacks} onChange={(on) => set({ allowHttpModpacks: on })} label={t("settings.launcher.httpModpacks")} hint={t("settings.launcher.httpModpacksHint")} />
+      <CommunityToggle />
       <Toggle checked={v.modUpdatesDaily === true} onChange={(on) => set({ modUpdatesDaily: on })} label={t("settings.launcher.dailyUpdates")}
         hint={t("settings.launcher.dailyUpdatesHint")} />
       <TypeToConfirmToggle />

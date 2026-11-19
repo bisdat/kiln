@@ -282,6 +282,18 @@ mod tests {
     }
 
     #[test]
+    fn delete_is_refused_before_sending_unless_the_client_allows_it() {
+        let t = FakeTransport::new();
+        let e = client(&t).send(Request::new(Method::Delete, "https://api.provider.example/releases/7")).unwrap_err();
+        assert_eq!(e.code, ErrorCode::Refused);
+        assert!(t.requests().is_empty(), "a DELETE reached the wire");
+        t.reply(Method::Delete, "https://api.provider.example/releases/7", Reply::status(204));
+        let r = client(&t).allow_delete().send(Request::new(Method::Delete, "https://api.provider.example/releases/7")).unwrap();
+        assert_eq!(r.status, 204);
+        assert_eq!(t.requests().len(), 1);
+    }
+
+    #[test]
     fn a_request_is_recorded_with_its_headers_and_body() {
         let t = FakeTransport::new();
         t.reply(Method::Post, "https://api.provider.example/releases", Reply::json(201, r#"{"id":7}"#));

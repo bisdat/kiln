@@ -12,6 +12,26 @@ bash "$here/run-window-constraints.sh"
 # parameter slots (frame_pacer.h, graphics_settings.h, graphics_aside.h, ngx_param.h): plain logic
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -I"$here/../../../third_party" "$here/graphics_test.cpp" -o "$out/graphics_test"
 "$out/graphics_test" "$out"
+# the upscaler swap (phase B): kiln.json "upscaler", the game's FSR description and Kiln's render command, history,
+# contexts, the status, AMD FSR's device needs and dispatch mapping (upscale_logic.h, upscale_amd_map.h): plain logic
+g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -DVK_NO_PROTOTYPES '-D__declspec(x)=' -I"$here/../../../third_party" \
+    -I"$here/../../../third_party/imgui/vulkan-headers/include" -I"$here/../../../third_party/ffx" -I"$here/../../../core/abi" \
+    "$here/upscale_test.cpp" -o "$out/upscale_test"
+"$out/upscale_test" "$out"
+# phase B's upscaler swap (0.2.0-dev.29.18): the game's vendor pins against the launcher's manifest; the vendor files'
+# check and its SHA-256 (also over the real files when KILN_VENDOR_FILES names their folder, dev29/vendor-files); the
+# merge of a backend's Vulkan needs into the game's create infos; the XeSS backend against a fake libxess
+python3 -I "$here/../../../../tools/release/vendor_pins_header.py" --check
+g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -I"$here/../../../third_party" "$here/vendor_file_test.cpp" -o "$out/vendor_file_test"
+"$out/vendor_file_test" "$out" ${KILN_VENDOR_FILES:+"$KILN_VENDOR_FILES"}
+g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -I"$here/../../../third_party/imgui/vulkan-headers/include" -I"$here/../../../third_party" \
+    "$here/device_merge_test.cpp" -o "$out/device_merge_test"
+"$out/device_merge_test"
+if [[ -f $here/xess_test.cpp ]]; then  # the XeSS backend's test (dev29/upscale-b2)
+    g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -I"$here/../../../third_party/imgui/vulkan-headers/include" -I"$here/../../../third_party" \
+        "$here/xess_test.cpp" -o "$out/xess_test"
+    "$out/xess_test"
+fi
 # the overlay's image budget: the descriptor pool holds every image Kiln lets exist, uploads spread over frames (image_budget.h)
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/image_budget_test.cpp" -o "$out/image_budget_test"
 "$out/image_budget_test" "$here/../vk.cpp"

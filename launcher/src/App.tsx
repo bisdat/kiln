@@ -23,6 +23,7 @@ import LogsPage from "./pages/LogsPage";
 import SavesPage from "./pages/SavesPage";
 import SettingsPage from "./pages/SettingsPage";
 import AboutPage from "./pages/AboutPage";
+import { CommunityRoute } from "./community/CommunityPage";
 
 // Server and admin pages load lazily: a page that is mid-edit (or broken) fails alone, inside the shell's error
 // boundary, instead of blanking the launcher.
@@ -80,6 +81,7 @@ export default function App() {
         <Route path="editor" element={<EditorPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="about" element={<AboutPage />} />
+        <Route path="community" element={<CommunityRoute />} />
         <Route path="servers" element={<ServersPage />} />
         {/* outside the server's layout and the lazy admin pages: the redirect is the router's alone */}
         {ADMIN_MERGED.map(([from, to]) => <Route key={from} path={`servers/:id/admin/${from}`} element={<ServerRedirect to={to} />} />)}

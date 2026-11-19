@@ -125,19 +125,65 @@ pub struct GameStatus {
     /// cap, DLSS settings): Kiln's step aside next to them (`graphics_step_aside`). Left out when there is none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub graphics_step_aside: Vec<GraphicsStepAside>,
+    /// (dev.29.18) `kiln/state/graphics.json` (Kiln.Ui): what Kiln's graphics tools did in this game's last run, the
+    /// upscaler behind the game's FSR 3 option above all, and whether that run is the one running now (`graphics_now`).
+    /// Left out for a server and while there is none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub graphics_state: Option<GraphicsNow>,
+}
+
+/// `GameStatus.graphics_state`: `kiln/state/graphics.json` and whether the game that wrote it runs now.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphicsNow {
+    /// This install's game runs and wrote the file after it started (`launch::state_file_is_current`): "Now". False:
+    /// "Last game".
+    pub current: bool,
+    pub state: crate::state::GraphicsState,
+}
+
+/// `GameStatus.graphics_state` of a client: the file, judged against the running game's process as the status found it
+/// (`running`: its pid; None when the game does not run) by `launch::state_file_is_current`'s rule: written after that
+/// process started, and on Windows by that pid.
+pub fn graphics_now(install: &GameInstall, running: Option<u32>) -> Option<GraphicsNow> {
+    if install.kind != GameKind::Client {
+        return None;
+    }
+    let state = crate::state::read_graphics(&install.path)?;
+    let current = running.is_some_and(|pid| {
+        if cfg!(windows) && pid != state.pid {
+            return false;
+        }
+        let written = std::fs::metadata(install.path.join(crate::paths::game::GRAPHICS_JSON)).and_then(|m| m.modified()).ok();
+        crate::launch::written_after_start(written, crate::proc::start_time(pid))
+    });
+    Some(GraphicsNow { current, state })
 }
 
 /// `GameStatus.graphics_step_aside`: a tool in the game folder that makes Kiln's graphics tools step aside.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GraphicsStepAside {
-    /// "optiscaler", "streamline", "vkfg", "dlsstweaks" or "nvngx".
+    /// "optiscaler", "streamline", "vkfg", "dlsstweaks", "nvngx" or (dev.29.18) "upscaler" (AMD's or Intel's upscaler
+    /// DLLs next to the game: another tool's).
     pub kind: String,
     /// The tool's file relative to the game folder, forward slashes, as it is named on disk.
     pub file: String,
     /// Kiln's frame cap steps aside too (else only Kiln's DLSS settings do; the readout always works).
     pub frame_cap: bool,
+    /// (dev.29.18) Kiln's upscaler behind the game's FSR 3 option (kiln.json `graphics.upscaler`) steps aside too.
+    #[serde(default)]
+    pub upscaler: bool,
 }
+
+/// (dev.29.18) Upscaler DLLs another tool puts next to the game (AMD's loader looks in the exe's folder before Kiln's):
+/// any of them there keeps Kiln's upscaler swap off. The same list as kiln.ui's (`native/services/ui/graphics_aside.h`
+/// `kUpscalerFiles`).
+pub const UPSCALER_FILES: [&str; 10] = [
+    "amd_fidelityfx_loader_vk.dll", "amd_fidelityfx_upscaler_vk.dll", "amd_fidelityfx_framegeneration_vk.dll", "amd_fidelityfx_vk.dll",
+    "amd_fidelityfx_dx12.dll", "amd_fidelityfx_loader_dx12.dll", "amd_fidelityfx_upscaler_dx12.dll", "libxess.dll", "libxess_dx11.dll",
+    "libxess_fg.dll",
+];
 
 /// The entry in `dir` whose name is `name` in any case (Windows and Wine match names so; the game folder may sit on a
 /// case-sensitive file system) and that is a file (`want_dir` false) or a folder, a symbolic link followed as the game
@@ -167,11 +213,12 @@ fn dir_named(dir: &Path, name: &str) -> Option<String> {
 
 /// The tools in a game folder next to which Kiln's graphics tools (kiln.json "graphics") step aside, in this order:
 /// OptiScaler (`engines::optiscaler_in`), NVIDIA Streamline (`sl.interposer.dll` in the folder or `Streamline/`), a DLSS
-/// frame generation mod (`EnshroudedVKFG.ini`), DLSSTweaks (`dlsstweaks.ini`) and another DLSS loader (`nvngx.dll` or
-/// `_nvngx.dll`; the game's own `nvngx_dlss.dll` is not one). The first three take the frame cap too. Names match in
-/// any case.
+/// frame generation mod (`EnshroudedVKFG.ini`), DLSSTweaks (`dlsstweaks.ini`), another DLSS loader (`nvngx.dll` or
+/// `_nvngx.dll`; the game's own `nvngx_dlss.dll` is not one) and (dev.29.18) another tool's upscaler DLLs
+/// ([`UPSCALER_FILES`], the first found). The first three take the frame cap too; the first three and the last take
+/// Kiln's upscaler swap (kiln.ui's `kAsideUpscale`). Names match in any case.
 pub fn graphics_step_aside(game_dir: &Path) -> Vec<GraphicsStepAside> {
-    let entry = |kind: &str, file: String, frame_cap: bool| GraphicsStepAside { kind: kind.to_string(), file, frame_cap };
+    let entry = |kind: &str, file: String, frame_cap: bool| GraphicsStepAside { kind: kind.to_string(), file, frame_cap, upscaler: frame_cap };
     let mut out = Vec::new();
     if let Some(file) = crate::engines::optiscaler_in(game_dir) {
         out.push(entry("optiscaler", file, true));
@@ -191,6 +238,9 @@ pub fn graphics_step_aside(game_dir: &Path) -> Vec<GraphicsStepAside> {
     }
     if let Some(file) = file_named(game_dir, "nvngx.dll").or_else(|| file_named(game_dir, "_nvngx.dll")) {
         out.push(entry("nvngx", file, false));
+    }
+    if let Some(file) = UPSCALER_FILES.iter().find_map(|f| file_named(game_dir, f)) {
+        out.push(GraphicsStepAside { kind: "upscaler".into(), file, frame_cap: false, upscaler: true });
     }
     out
 }
@@ -849,6 +899,7 @@ pub fn status_with(dirs: &DataDirs, install: &GameInstall, roots: &[SteamRoot]) 
         build,
         graphics_tools: if install.kind == GameKind::Client { graphics_tools(&install.path) } else { Vec::new() },
         graphics_step_aside: if install.kind == GameKind::Client { graphics_step_aside(&install.path) } else { Vec::new() },
+        graphics_state: graphics_now(install, proc.as_ref().map(|p| p.pid)),
     })
 }
 

@@ -270,6 +270,8 @@ void graphics_overlay();          // render thread, inside the ImGui frame: the 
 KilnResult graphics_set(const KilnUiGraphics* settings);  // any thread (Kiln.Ui; ui.cpp refuses native plugins)
 KilnResult graphics_status(KilnUiGraphicsStatus* out);     // any thread
 
+// ---- upscale.cpp (phase B): declared in upscale.h, which needs the Vulkan headers ----
+
 // ---- vk.cpp ----
 bool vk_install();  // called once vulkan-1.dll is loaded (from the LoadLibraryExW hook)
 void vk_extent(uint32_t* width, uint32_t* height);  // the game window's swapchain (any thread; 0 before one exists)

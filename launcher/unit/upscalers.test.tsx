@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { Task } from "../src/api/commands";
-import { upscalersPreview, type VendorComponent } from "../src/api/vendor";
+import type { VendorComponent } from "../src/api/vendor";
 import { upscalerRow } from "../src/components/UpscalerSettings";
 import manifest from "../src/data/vendor-components.json";
 
@@ -72,11 +72,12 @@ test("missing or changed files read as failed with Download again", () => {
   expect(r.actions).toEqual(["downloadAgain", "remove"]);
 });
 
-test("the section is a preview: only app_info's 'upscalers' shows it", () => {
-  expect(upscalersPreview(null)).toBe(false);
-  expect(upscalersPreview({ preview: [] } as never)).toBe(false);
-  expect(upscalersPreview({ preview: ["other"] } as never)).toBe(false);
-  expect(upscalersPreview({ preview: ["upscalers"] } as never)).toBe(true);
+test("(dev.29.18) the upscaler files are out of preview: no gate in the API, the mock or the texts", async () => {
+  const vendor = await import("../src/api/vendor");
+  expect("upscalersPreview" in vendor).toBe(false);
+  const en = (await import("../src/i18n/en.json")).default as { settings: { upscalers: Record<string, unknown> } };
+  expect(en.settings.upscalers.preview).toBeUndefined();
+  expect(String(en.settings.upscalers.purpose)).not.toContain("later update");
 });
 
 test("the shipped manifest's components never say DLSS and pin every file", () => {

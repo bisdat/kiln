@@ -8,6 +8,7 @@ import type { LogTarget } from "../api/commands";
 import { isTauri } from "../api/commands";
 import { t, useT } from "../i18n";
 import { Button, fmtBytes, toast } from "../ui";
+import { SendToSupport } from "../community/parts";
 
 /** `kiln-report-2026-11-10.zip` (the crate's report::file_name, in local time). */
 export function reportFileName(d = new Date()): string {
@@ -64,6 +65,7 @@ export function SupportReport({ target, compact }: { target: LogTarget | null; c
       <span className="k-hint" style={{ flex: "1 1 260px" }}>
         {t("supportReport.hint")}
       </span>
+      <SendToSupport from="logs" target={target} variant="primary" />
       <Button size="s" loading={busy === "save"} disabled={!!busy} onClick={save}>{t("supportReport.save")}</Button>
       <Button size="s" variant="ghost" loading={busy === "copy"} disabled={!!busy} onClick={copy}>{t("supportReport.copy")}</Button>
     </div>

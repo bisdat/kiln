@@ -6,7 +6,7 @@ import { mockStoppedFile, readMockStop, type StopScript } from "./mockStoppedSta
 // Commands without a mock reject with not_implemented, like the wave-0 Rust stubs.
 import type {
   Activation, AddReport, BootSnapshot, BundlePart, RunSide, AddedMod, AdminEndpoint, AppInfo, BootJson, BootState, ConfigDocument, CookJob, CookReason, CookedMod, ConfigFileInfo, ConfigTarget, CrashReport, ReportFinding, ReportSaved, Detected, Distribution,
-  FoundMod, FoundReport, GameInstall, GameStatus, ImportReport, InstallReceipt, InstallResult, InstallState, Json, KilnError, LastServer, LaunchRequest, NewerKilnMod, GraphicsToolNote, GraphicsStepAside,
+  FoundMod, FoundReport, GameInstall, GameStatus, ImportReport, InstallReceipt, InstallResult, InstallState, Json, KilnError, LastServer, LaunchRequest, NewerKilnMod, GraphicsToolNote, GraphicsStepAside, GraphicsStateFile,
   LaunchResult, LauncherSettings, RenderInfo, SandboxInfo, DesktopInfo, LibraryEntry, LibraryRef, LibraryVersion, RollbackReport, VersionRef, TakenOver, LogFile, LogTarget, ModKind, ModpackInstallRequest, ModpackInstallResult, ModsJson,
   NativeJson, NativePlanEntry, NativeUserState, PreStart, Profile, ProfileChange, ProfileMod, ProfileSummary, ProxyClass, Rejection, RemoveReport, ResolvePreview, RuntimeBundle, SaveBackup, SaveSlot,
   SchemaSnapshot, ServerInstance, ServerStatus, Task, TaskState, StartMode, StartSettings, StartSetup, RunnerInfo, BuildCheck,
@@ -16,6 +16,7 @@ import { serverMockHandlers } from "../pages/servers/mockServers";
 import { updateMockHandlers } from "./mockUpdate";
 import { deckMockHandlers } from "../deck/mockDeck";
 import { nexusMockHandlers, NEXUS_MOCK_ENABLED } from "./mockNexus";
+import { communityMockHandlers, communityMockHooks } from "./mockCommunity";
 import { updatesMockHandlers } from "./mockUpdates";
 import { MOCK_PREVIEW, vendorMockHandlers } from "./mockVendor";
 import { chainMockHandlers } from "./mockChain";
@@ -116,8 +117,11 @@ const graphicsTools: Record<string, GraphicsToolNote[]> = {};
 /** GameStatus.graphicsStepAside per game (tests: `__kilnMock.setGraphicsStepAside`). The preview's Steam client has
  *  DLSSTweaks next to it, so the Graphics card shows a line; tests start from it or set their own. */
 const graphicsStepAside: Record<string, GraphicsStepAside[]> = {
-  "client-steam": [{ kind: "dlsstweaks", file: "dlsstweaks.ini", frameCap: false }],
+  "client-steam": [{ kind: "dlsstweaks", file: "dlsstweaks.ini", frameCap: false, upscaler: false }],
 };
+/** (dev.29.18) GameStatus.graphicsState per game: the game's kiln/state/graphics.json (tests: `__kilnMock.setGraphicsState`;
+ *  `current` is decided as the backend does: the file's game runs). */
+const graphicsState: Record<string, GraphicsStateFile> = {};
 
 function mockPart(name: string, sides: RunSide[] = ["server", "client"], isDefault = true): BundlePart {
   return { name, sides, default: isDefault, requires: name === "core" ? [] : ["core"] };
@@ -625,6 +629,7 @@ function status(gameId: string): GameStatus {
     newerMods: newerMods[gameId] ?? [],
     ...(graphicsTools[gameId]?.length ? { graphicsTools: graphicsTools[gameId] } : {}),
     ...(g.kind === "client" && graphicsStepAside[gameId]?.length ? { graphicsStepAside: graphicsStepAside[gameId] } : {}),
+    ...(g.kind === "client" && graphicsState[gameId] ? { graphicsState: { current: !!r, state: graphicsState[gameId] } } : {}),
     ...(g.kind === "client" ? { start: startOf(g), build: buildOf(g) } : {}),
     ...(startOf(g) === "direct" ? { launchOptions: null } : {}),
   };
@@ -706,6 +711,13 @@ export function mockStartOutside(secondsAgo: number, gameId = "client-steam") {
 }
 
 /** Dev/test helper: the fake game exits. */
+/** A crash: Kiln writes a crash report now, and the game closes (tests: `__kilnMock.crash()`). */
+function mockCrash(gameId = "client-steam") {
+  const now = new Date();
+  crashes.unshift({ name: `${now.toISOString().slice(0, 19).replace(/:/g, "-")}Z-crash.txt`, created: now.toISOString(), size: 4_211 });
+  mockStopGame(gameId);
+}
+
 export function mockStopGame(gameId = "client-steam") {
   if (!running[gameId]) return;
   running[gameId] = null;
@@ -1534,6 +1546,8 @@ const handlers: Record<string, Handler> = {
 Object.assign(handlers, adminMockHandlers(mockEmit));
 Object.assign(handlers, updateMockHandlers(mockEmit, MOCK_DISTRIBUTION, () => settings.updateChannel));
 Object.assign(handlers, deckMockHandlers(handlers));
+// the Discord features: the relay, Discord and the Discord app, faked (./mockCommunity.ts, `?discord=` flags)
+Object.assign(handlers, communityMockHandlers({ emit: mockEmit, gameRunning: () => Object.keys(running).some((g) => !!live(g)) }));
 Object.assign(handlers, nexusMockHandlers(handlers, mockEmit, startTask, quickAdd));
 Object.assign(handlers, updatesMockHandlers(handlers, mockEmit));
 Object.assign(handlers, vendorMockHandlers(startTask, (id) => gameOf(id).kind));
@@ -1886,7 +1900,7 @@ export function mockEmit(name: string, payload: unknown): void {
 }
 
 // Playwright and the dev console reach the fake game through this (mock mode only).
-if (typeof window !== "undefined") (window as unknown as { __kilnMock?: unknown }).__kilnMock = { scriptStoppedStart, externalStart: mockExternalStart, stopGame: mockStopGame, emit: mockEmit, setLastServer: mockSetLastServer,
+if (typeof window !== "undefined") (window as unknown as { __kilnMock?: unknown }).__kilnMock = { community: communityMockHooks(mockEmit), crash: mockCrash, scriptStoppedStart, externalStart: mockExternalStart, stopGame: mockStopGame, emit: mockEmit, setLastServer: mockSetLastServer,
   calls: () => [...commandCalls],
   planCommand: (cmd: string, plan: CommandPlan) => { (commandPlans[cmd] ??= []).push(plan); },
   openGate: (name: string) => { const g = gateOf(name); g.open = true; g.waiters.splice(0).forEach((w) => w()); },
@@ -1938,6 +1952,12 @@ if (typeof window !== "undefined") (window as unknown as { __kilnMock?: unknown 
   setNewerMods: (mods: NewerKilnMod[], gameId = "client-steam") => { newerMods[gameId] = mods; emitGame(gameId, "status"); },
   setGraphicsTools: (tools: GraphicsToolNote[], gameId = "client-steam") => { graphicsTools[gameId] = tools; emitGame(gameId, "status"); },
   setGraphicsStepAside: (tools: GraphicsStepAside[], gameId = "client-steam") => { graphicsStepAside[gameId] = tools; emitGame(gameId, "status"); },
+  /** (dev.29.18) What the game's Kiln wrote to kiln/state/graphics.json (null: none); "Now" while the game runs. */
+  setGraphicsState: (state: GraphicsStateFile | null, gameId = "client-steam") => {
+    if (state) graphicsState[gameId] = state;
+    else delete graphicsState[gameId];
+    emitGame(gameId, "status");
+  },
   /** The game's kiln.json values as the launcher last wrote them (tests read what Settings saved). */
   kilnJsonValues: (gameId = "client-steam") => clone(kilnFile(gameId).values),
   /** A hand edit of the game's kiln.json (a key the launcher's Settings do not list, such as `mods.hosted`). */
@@ -1965,4 +1985,17 @@ if (slNotice) {
   }
   if (slNotice !== "missing") library.push({ kind: "native", id: "shroudlink-addon", name: "Shroudlink client addon", versions: [{ version: "1", hash: "sl-addon", folder: "/mock/addon", imported: "2026-11-15", side: "client", clients: "none", size: 1, source: null, manifestId: null, manifest: null }] });
   if (slNotice === "server") for (const g of games) g.kind = "server";
+}
+
+// `?problem=crash` (the Discord work's demo): the game runs for four minutes, then closes with a crash report, so Play
+// and Deck Home show the crash notice with its "Send to Kiln support". `?problem=nokiln`: the next Play starts the
+// game without Kiln ("Kiln is not loading").
+if (typeof location !== "undefined") {
+  const problem = new URLSearchParams(location.search).get("problem");
+  // the game starts once the launcher follows the game's events (a start it did not see gets no notice: on a busy
+  // machine the window can take longer than a fixed delay to listen)
+  const play = () => { mockExternalStart("client-steam", Date.now() - 4 * 60_000); setTimeout(() => mockCrash(), 900); };
+  const whenListening = () => (listeners.get("kiln://game")?.size ? setTimeout(play, 600) : setTimeout(whenListening, 100));
+  if (problem === "crash") setTimeout(whenListening, 100);
+  if (problem === "nokiln") noProxy = true;
 }

@@ -45,6 +45,9 @@ inline constexpr English kEnglish[] = {
     {"native.graphics.aside", "Upscaler: left to {tools}: {output}"},
     {"native.graphics.cap", "Frame cap {fps} fps"},
     {"native.graphics.cap_aside", "Frame cap {fps} fps: off for {tools}"},
+    {"native.graphics.upscale", "Behind FSR 3: {upscaler}: {render} -> {output}"},
+    {"native.graphics.game_fsr3", "the game's own FSR 3"},
+    {"native.graphics.upscale_why", "{upscaler} is not running: {why}"},
 };
 
 inline std::string english(std::string_view key) {

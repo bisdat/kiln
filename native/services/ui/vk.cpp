@@ -40,6 +40,7 @@
 #include "safetyhook.hpp"
 #include "image_budget.h"
 #include "ui.h"
+#include "upscale.h"
 #include "vk_hooks.h"
 #include "vk_present.h"
 
@@ -219,6 +220,7 @@ uint32_t g_instance_api = VK_API_VERSION_1_0;
 std::map<VkDevice, std::map<VkQueue, uint32_t>> g_unseen_queues;
 std::map<VkDevice, Device*> g_devices;  // every live device the game created
 Device* g_dev = nullptr;  // the device ImGui's backend is set up for (the drawable swapchain's)
+std::atomic<VkDevice> g_swap_device{VK_NULL_HANDLE};  // the device of the game's last swapchain (the upscaler swap's check)
 std::map<VkSwapchainKHR, Swap> g_swaps;
 std::map<VkSurfaceKHR, HWND> g_surfaces;
 std::atomic<HMODULE> g_vulkan{nullptr};
@@ -751,7 +753,17 @@ bool run_pre_overlay(VkQueue queue, const VkPresentInfoKHR* info, VkSemaphore* w
 // Detours
 
 VkResult VKAPI_CALL hk_create_instance(const VkInstanceCreateInfo* ci, const VkAllocationCallbacks* a, VkInstance* out) {
-    const VkResult r = R.create_instance.load()(ci, a, out);
+    // Kiln's upscaler swap (upscale.cpp): the chosen backend's instance needs, only when it was chosen at the game's
+    // start; otherwise ci goes through unchanged. A create info of Kiln's that fails is tried again as the game made it.
+    void* upscale_scope = nullptr;
+    const VkInstanceCreateInfo* use = upscale_instance_begin(ci, R.gipa.load(), &upscale_scope);
+    VkResult r = R.create_instance.load()(use, a, out);
+    if (use != ci && r != VK_SUCCESS) {
+        logf(KILN_LOG_WARN, "ui: vkCreateInstance with the upscaler's extensions failed (%d): the game's own create info is used", static_cast<int>(r));
+        use = ci;
+        r = R.create_instance.load()(ci, a, out);
+    }
+    upscale_instance_end(upscale_scope, use, r, r == VK_SUCCESS && out ? *out : VK_NULL_HANDLE);
     if (r == VK_SUCCESS && out) {
         std::lock_guard<std::mutex> lk(g_mu);
         overlay_guard_stage(overlay_guard::Stage::instance);
@@ -764,6 +776,7 @@ VkResult VKAPI_CALL hk_create_instance(const VkInstanceCreateInfo* ci, const VkA
 }
 
 void VKAPI_CALL hk_destroy_instance(VkInstance inst, const VkAllocationCallbacks* a) {
+    upscale_instance_destroyed(inst);
     {
         std::lock_guard<std::mutex> lk(g_mu);
         if (g_instance == inst) g_instance = VK_NULL_HANDLE;
@@ -798,13 +811,28 @@ thread_local std::vector<HandedQueue>* t_creating = nullptr;
 VkResult VKAPI_CALL hk_create_device(VkPhysicalDevice phys, const VkDeviceCreateInfo* ci, const VkAllocationCallbacks* a,
                                      VkDevice* out) {
     std::vector<HandedQueue> handed;
-    // the queues the game asks for, read before the call: a tool under Kiln may change the create info it passes on
+    // the queues the game asks for, read before the call from the game's own create info: a tool under Kiln may change
+    // the create info it passes on (the upscaler's copy below carries the game's queues unchanged)
     std::vector<vk_present::Requested> requested =
         vk_present::requested_queues(ci ? ci->pQueueCreateInfos : nullptr, ci ? ci->queueCreateInfoCount : 0);
+    // Kiln's upscaler swap (upscale.cpp): the chosen backend's device extensions and features, merged into a copy of the
+    // game's create info (device_merge.h), only for the game's own device and only when the backend was chosen at the
+    // game's start. A copy that fails is tried again as the game made it.
+    void* upscale_scope = nullptr;
+    const VkDeviceCreateInfo* use = upscale_device_begin(g_instance, phys, ci, R.gipa.load(), &upscale_scope);
     std::vector<HandedQueue>* const outer = t_creating;
     t_creating = &handed;
-    const VkResult r = R.create_device.load()(phys, ci, a, out);
+    VkResult r = R.create_device.load()(phys, use, a, out);
+    if (use != ci && r != VK_SUCCESS) {
+        logf(KILN_LOG_WARN, "ui: vkCreateDevice with the upscaler's extensions and features failed (%d): the game's own create info is used",
+             static_cast<int>(r));
+        handed.clear();  // queues a tool handed out inside the failed call belong to no device
+        use = ci;
+        r = R.create_device.load()(phys, ci, a, out);
+    }
     t_creating = outer;
+    upscale_device_end(upscale_scope, use, r, r == VK_SUCCESS && out ? *out : VK_NULL_HANDLE, R.gdpa.load(),
+                       ci && ci->queueCreateInfoCount > 0 ? ci->pQueueCreateInfos[0].queueFamilyIndex : 0);
     if (r != VK_SUCCESS || !out) return r;
     VkInstance instance = VK_NULL_HANDLE;
     {
@@ -842,6 +870,9 @@ VkResult VKAPI_CALL hk_create_device(VkPhysicalDevice phys, const VkDeviceCreate
 }
 
 void VKAPI_CALL hk_destroy_device(VkDevice dev, const VkAllocationCallbacks* a) {
+    upscale_device_destroy(dev);  // the upscaler backend's Vulkan objects on this device go first (it waits for the GPU)
+    VkDevice was = dev;
+    g_swap_device.compare_exchange_strong(was, VK_NULL_HANDLE);
     {
         std::lock_guard<std::mutex> lk(g_mu);
         g_unseen_queues.erase(dev);
@@ -993,6 +1024,7 @@ VkResult VKAPI_CALL hk_create_swapchain(VkDevice dev, const VkSwapchainCreateInf
     if (r != VK_SUCCESS) return r;
     overlay_guard_stage(overlay_guard::Stage::swapchain);
     g_swapchain_count.fetch_add(1);
+    g_swap_device.store(dev);
     std::lock_guard<std::mutex> lk(g_mu);
     if (g_devices.find(dev) == g_devices.end()) adopt_device(dev);
     if (ci->oldSwapchain) {
@@ -1509,6 +1541,9 @@ void vk_set_pre_overlay_demand(uint32_t count) { if (!overlay_drawing_on()) retu
 void vk_add_swapchain_usage(uint32_t usage) { if (!overlay_drawing_on()) return; g_extra_usage.fetch_or(usage); }
 
 uint64_t vk_presents() { return g_presents.load(std::memory_order_relaxed); }
+VkDevice vk_swapchain_device() { return g_swap_device.load(); }
+int vk_install_count() { return g_installs; }
+
 void vk_extent(uint32_t* width, uint32_t* height) {
     if (width) *width = g_width.load();
     if (height) *height = g_height.load();

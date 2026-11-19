@@ -29,10 +29,23 @@ enum Aside : uint32_t {
     kAsideNvngx = 1u << 4,
     kAsideNgxPatched = 1u << 5,   // NGX's functions patched by another module (run time)
     kAsideOverlayOff = 1u << 6,   // Kiln's overlay hooks are off (KILN_UI_OVERLAY=0, the crash guard, ...)
+    kAsideUpscaler = 1u << 7,     // another upscaler tool: AMD FidelityFX or Intel XeSS DLLs next to the game, or the
+                                  // game's FSR 3 pass already patched by another module (run time)
 };
 // The reasons that stop the frame cap too; every reason stops the DLSS settings.
 inline constexpr uint32_t kAsideCap = kAsideOptiScaler | kAsideStreamline | kAsideVkfg | kAsideOverlayOff;
 inline constexpr uint32_t kAsideDlss = 0x7f;
+// What keeps Kiln's upscaler swap (phase B) off: the tools that replace or hook the game's upscaler or its frames, and
+// Kiln's Vulkan hooks being off (the swap needs vk.cpp's instance and device hooks). DLSSTweaks and another DLSS loader
+// only touch DLSS, which the swap leaves alone.
+inline constexpr uint32_t kAsideUpscale = kAsideOptiScaler | kAsideStreamline | kAsideVkfg | kAsideOverlayOff | kAsideUpscaler;
+// Upscaler DLLs another tool puts next to the game (AMD's loader looks in the exe's folder before Kiln's): any of them
+// there keeps the swap off, so Kiln never runs next to, or loads, another tool's copy.
+inline constexpr const char* kUpscalerFiles[] = {
+    "amd_fidelityfx_loader_vk.dll", "amd_fidelityfx_upscaler_vk.dll", "amd_fidelityfx_framegeneration_vk.dll", "amd_fidelityfx_vk.dll",
+    "amd_fidelityfx_dx12.dll", "amd_fidelityfx_loader_dx12.dll", "amd_fidelityfx_upscaler_dx12.dll", "libxess.dll", "libxess_dx11.dll",
+    "libxess_fg.dll",
+};
 
 // The tool's name for the log and the settings page.
 inline const char* aside_name(uint32_t bit) {
@@ -44,6 +57,7 @@ inline const char* aside_name(uint32_t bit) {
         case kAsideNvngx: return "another DLSS loader (nvngx.dll next to the game)";
         case kAsideNgxPatched: return "another module that patched NVIDIA's DLSS functions";
         case kAsideOverlayOff: return "Kiln's overlay hooks being off";
+        case kAsideUpscaler: return "another upscaler tool (FidelityFX or XeSS files next to the game)";
         default: return "?";
     }
 }
@@ -51,7 +65,7 @@ inline const char* aside_name(uint32_t bit) {
 // "OptiScaler, DLSSTweaks" for the bits set (lowest first).
 inline std::string aside_names(uint32_t bits) {
     std::string out;
-    for (uint32_t b = 1; b && b <= kAsideOverlayOff; b <<= 1) {
+    for (uint32_t b = 1; b && b <= kAsideUpscaler; b <<= 1) {
         if (!(bits & b)) continue;
         if (!out.empty()) out += ", ";
         out += aside_name(b);
@@ -82,6 +96,9 @@ inline AsideFiles detect_aside_files(const std::filesystem::path& game, bool opt
     if (has("EnshroudedVKFG.ini")) out.bits |= kAsideVkfg;
     if (has("dlsstweaks.ini")) out.bits |= kAsideDlssTweaks;
     if (has("nvngx.dll") | has("_nvngx.dll")) out.bits |= kAsideNvngx;
+    bool upscaler = false;
+    for (const char* f : kUpscalerFiles) upscaler |= has(f);
+    if (upscaler) out.bits |= kAsideUpscaler;
     return out;
 }
 

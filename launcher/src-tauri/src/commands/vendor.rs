@@ -1,9 +1,9 @@
-//! Tauri commands: vendor upscaler files (Settings, Upscalers: components/UpscalerSettings.tsx). Names and arguments:
-//! docs/kiln/launcher/contracts.md section 9; the logic is kiln_manage::vendor.
+//! Tauri commands: vendor upscaler files (Settings, Graphics: the upscaler behind the game's FSR 3 option and its files,
+//! components/UpscalerSettings.tsx; the Deck's Settings). Names and arguments: docs/kiln/launcher/contracts.md section
+//! 9; the logic is kiln_manage::vendor.
 //!
-//! Behind the preview "upscalers" ([`PREVIEW`]) until phase B uses the files: `vendor_download` is refused while it
-//! is off (and the page shows nothing); `vendor_status`, `vendor_license` and `vendor_remove` answer either way (they
-//! fetch nothing, and removing is always allowed). A dedicated server is refused: it draws no frames.
+//! (0.2.0-dev.29.18) Out of the preview "upscalers": phase B runs the files behind the game's FSR 3 option. A dedicated
+//! server is refused: it draws no frames.
 
 use super::app::{spawn_task, to_value};
 use super::TaskId;
@@ -13,11 +13,9 @@ use kiln_manage::{net, Error, ErrorCode};
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 
-/// The preview name of the Upscalers section (settings.json `preview`, `KILN_LAUNCHER_PREVIEW`).
-pub const PREVIEW: &str = "upscalers";
-
 /// The previews on for this start: settings.json's `preview` list, and `KILN_LAUNCHER_PREVIEW` (names separated by
-/// commas or spaces) for one start. Sorted, each once.
+/// commas or spaces) for one start. Sorted, each once. (dev.29.18) No feature is behind one now: the upscaler files'
+/// preview ended with phase B; the list stays for the next preview (`app_info.preview`).
 pub fn previews() -> Vec<String> {
     let mut out: Vec<String> = crate::state::read_settings().map(|s| s.preview).unwrap_or_default();
     out.extend(previews_in(std::env::var("KILN_LAUNCHER_PREVIEW").ok().as_deref()));
@@ -31,16 +29,10 @@ fn previews_in(env: Option<&str>) -> Vec<String> {
     env.unwrap_or("").split([',', ' ']).map(|s| s.trim().to_ascii_lowercase()).filter(|s| !s.is_empty()).collect()
 }
 
-pub fn preview_on(name: &str) -> bool {
-    previews().iter().any(|p| p == name)
-}
-
-/// `vendor_status`: what the Upscalers section shows for a game.
+/// `vendor_status`: what Settings, Graphics shows of the upscaler files for a game (the Deck's rows too).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VendorStatus {
-    /// The preview "upscalers" is on (downloads are allowed).
-    pub preview: bool,
     /// `kiln/vendor`, relative to the game folder.
     pub folder: String,
     pub components: Vec<ComponentStatus>,
@@ -71,7 +63,7 @@ pub async fn vendor_status(game_id: String) -> Result<VendorStatus, Error> {
         let store = Store::for_game(&g)?;
         let m = vendor::builtin()?;
         let agreed = Agreements::load(&dirs()?);
-        Ok(VendorStatus { preview: preview_on(PREVIEW), folder: vendor::store::DIR.into(), components: store.status(&m, &agreed) })
+        Ok(VendorStatus { folder: vendor::store::DIR.into(), components: store.status(&m, &agreed) })
     })
     .await
 }
@@ -89,10 +81,7 @@ pub async fn vendor_license(component_id: String) -> Result<LicenseText, Error> 
 }
 
 /// The checks before a download starts, in the order the player meets them.
-fn admit(g: &kiln_manage::game::GameInstall, c: &vendor::Component, license_sha256: Option<&str>, preview: bool) -> Result<(), Error> {
-    if !preview {
-        return Err(Error::new(ErrorCode::Refused, "Upscaler downloads are a preview that is off in this launcher. Nothing was downloaded."));
-    }
+fn admit(g: &kiln_manage::game::GameInstall, c: &vendor::Component, license_sha256: Option<&str>) -> Result<(), Error> {
     Store::for_game(g)?;
     if !c.pinned() {
         return Err(Error::new(ErrorCode::Refused, format!("{} is not available in this build of Kiln. Nothing was downloaded.", c.name)));
@@ -117,7 +106,7 @@ pub async fn vendor_download(app: AppHandle, game_id: String, component_id: Stri
     let (g, c) = blocking(move || {
         let g = crate::state::game(&game_id)?;
         let c = component(&component_id)?;
-        admit(&g, &c, license_sha256.as_deref(), preview_on(PREVIEW))?;
+        admit(&g, &c, license_sha256.as_deref())?;
         Ok((g, c))
     })
     .await?;
@@ -172,18 +161,15 @@ mod tests {
     }
 
     #[test]
-    fn a_download_is_refused_with_the_preview_off_on_a_server_and_when_not_pinned() {
+    fn a_download_is_refused_on_a_server_and_when_not_pinned_and_needs_no_preview() {
         let m = vendor::builtin().unwrap();
         let shipped = m.component("amd-fsr").unwrap();
         assert!(shipped.pinned());
-        let e = admit(&install(GameKind::Client), shipped, None, false).unwrap_err();
-        assert_eq!(e.code, ErrorCode::Refused);
-        assert!(e.message.contains("preview"));
-        assert_eq!(admit(&install(GameKind::Server), shipped, None, true).unwrap_err().code, ErrorCode::Unsupported);
+        assert_eq!(admit(&install(GameKind::Server), shipped, None).unwrap_err().code, ErrorCode::Unsupported);
         // a component with a file not pinned (a fake): refused before any licence or data folder is looked at
         let mut c = shipped.clone();
         c.files[2].sha256 = vendor::manifest::NOT_PINNED.into();
-        let e = admit(&install(GameKind::Client), &c, Some(&c.license.sha256), true).unwrap_err();
+        let e = admit(&install(GameKind::Client), &c, Some(&c.license.sha256)).unwrap_err();
         assert_eq!(e.code, ErrorCode::Refused);
         assert!(e.message.contains("not available in this build"), "{}", e.message);
     }

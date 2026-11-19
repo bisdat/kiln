@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
 // Kiln's own graphics tools (0.2.0-dev.29.18, docs/kiln/graphics.md): kiln.json's "graphics" section (the frame cap, the
-// DLSS render preset and render scale, the readout), read at start and again when the file changes (checked every 2
-// seconds), changed on the Kiln menu's Graphics page (applied at once, written back to kiln.json half a second after the
-// last change with a value edit that keeps the file's comments), and handed to kiln.ui (graphics_set). kiln.ui reads the
+// DLSS render preset and render scale, the readout, and the upscaler behind the game's FSR 3 option: UiUpscaler.cs), read
+// at start and again when the file changes (checked every 2 seconds, when kiln/state/graphics.json is written again if
+// the status changed), changed on the Kiln menu's Graphics page (applied at once, written back to kiln.json half a second
+// after the last change with a value edit that keeps the file's comments), and handed to kiln.ui (graphics_set). kiln.ui reads the
 // file itself at its own start too: the frame cap works from the first frame, and whether DLSS gets hooked is decided
 // before the game sets DLSS up (native/services/ui/graphics.cpp).
 using System.Globalization;
@@ -55,8 +56,16 @@ internal sealed record GraphicsSettings(int FpsCap, string DlssPreset, DlssScale
         return Presets.Contains(u) ? u : null;
     }
 
+    /// <summary>What runs behind the game's FSR 3 option (<c>graphics.upscaler</c>; phase B).</summary>
+    public UpscalerChoice Upscaler { get; init; }
+
+    /// <summary>AMD FSR's auto selection, or FSR 3.1 pinned (<c>graphics.amdUpscaler</c>).</summary>
+    public AmdUpscalerMode AmdUpscaler { get; init; }
+
     public GraphicsSettings Clamped() => this with
     {
+        Upscaler = Enum.IsDefined(Upscaler) ? Upscaler : UpscalerChoice.Game,
+        AmdUpscaler = Enum.IsDefined(AmdUpscaler) ? AmdUpscaler : AmdUpscalerMode.Auto,
         FpsCap = ClampFps(FpsCap),
         DlssPreset = PresetOf(DlssPreset) ?? "default",
         DlssScale = Enum.IsDefined(DlssScale) ? DlssScale : DlssScaleMode.Game,
@@ -111,6 +120,7 @@ internal static unsafe class GraphicsTools
         if (!Available) return;
         if (Interlocked.Exchange(ref _started, 1) != 0) return;
         Reload(quiet: true);  // kiln.ui read the same file at its start (and logged it)
+        WriteState();
         _watch = new Timer(_ => Poll(), null, 2000, 2000);
     }
 
@@ -118,13 +128,30 @@ internal static unsafe class GraphicsTools
     {
         try
         {
-            if (_savePending) return;
-            if (Stamp() == _stamp) return;
-            Reload(quiet: false);
+            if (!_savePending && Stamp() != _stamp) Reload(quiet: false);
         }
         catch (Exception e)
         {
             UiEngine.Log(LogLevel.Debug, "graphics: " + e.Message);
+        }
+        WriteState();
+    }
+
+    private static string? _stateError;
+
+    /// <summary>kiln/state/graphics.json for the launcher, when what it says changed (every 2 seconds and at start).</summary>
+    internal static void WriteState()
+    {
+        try
+        {
+            var st = Status();
+            GraphicsStateFile.Update(_current, st, st is { } x ? UpscalerStatus.FromNative(x) : null);
+            _stateError = null;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            if (_stateError != e.Message) UiEngine.Log(LogLevel.Warn, $"graphics: state/graphics.json not written: {e.Message}");
+            _stateError = e.Message;
         }
     }
 
@@ -164,6 +191,9 @@ internal static unsafe class GraphicsTools
             parts.Add(string.Create(CultureInfo.InvariantCulture,
                 $"DLSS render scale per mode {s.QualityScale:0.###}/{s.BalancedScale:0.###}/{s.PerformanceScale:0.###}/{s.UltraPerformanceScale:0.###}"));
         if (s.Readout) parts.Add("readout on");
+        if (s.Upscaler == UpscalerChoice.Amd)
+            parts.Add(s.AmdUpscaler == AmdUpscalerMode.Fsr3 ? "AMD FSR 3.1 behind the game's FSR 3" : "AMD FSR (auto) behind the game's FSR 3");
+        else if (s.Upscaler == UpscalerChoice.Xess) parts.Add("Intel XeSS behind the game's FSR 3");
         return parts.Count == 0 ? "all off" : string.Join(", ", parts);
     }
 
@@ -215,9 +245,23 @@ internal static unsafe class GraphicsTools
                 if (name is not ("game" or "perMode" or "custom")) warn?.Invoke("graphics.dlssScale is not game, perMode or custom: game");
             }
             var readout = g.TryGetProperty("readout", out var r) && r.ValueKind == JsonValueKind.True;
+            var upscaler = UpscalerChoice.Game;
+            if (g.TryGetProperty("upscaler", out var u) && u.ValueKind != JsonValueKind.Null)
+            {
+                upscaler = UpscalerCodes.ChoiceOf(u.ValueKind == JsonValueKind.String ? u.GetString() : null) ?? UpscalerChoice.Game;
+                if (UpscalerCodes.ChoiceOf(u.ValueKind == JsonValueKind.String ? u.GetString() : null) is null)
+                    warn?.Invoke("graphics.upscaler is not game, amd or xess: game");
+            }
+            var amd = AmdUpscalerMode.Auto;
+            if (g.TryGetProperty("amdUpscaler", out var a) && a.ValueKind != JsonValueKind.Null)
+            {
+                amd = UpscalerCodes.AmdOf(a.ValueKind == JsonValueKind.String ? a.GetString() : null) ?? AmdUpscalerMode.Auto;
+                if (UpscalerCodes.AmdOf(a.ValueKind == JsonValueKind.String ? a.GetString() : null) is null)
+                    warn?.Invoke("graphics.amdUpscaler is not auto or fsr3: auto");
+            }
             return new GraphicsSettings(fps, preset, mode, Num("dlssRenderScale", d.RenderScale), Num("dlssQualityScale", d.QualityScale),
                 Num("dlssBalancedScale", d.BalancedScale), Num("dlssPerformanceScale", d.PerformanceScale),
-                Num("dlssUltraPerformanceScale", d.UltraPerformanceScale), readout).Clamped();
+                Num("dlssUltraPerformanceScale", d.UltraPerformanceScale), readout) { Upscaler = upscaler, AmdUpscaler = amd }.Clamped();
         }
         catch (JsonException e)
         {
@@ -240,6 +284,8 @@ internal static unsafe class GraphicsTools
         g.ModeScale[2] = s.PerformanceScale;
         g.ModeScale[3] = s.UltraPerformanceScale;
         g.Readout = s.Readout ? 1u : 0u;
+        g.Upscaler = (uint)s.Upscaler;
+        g.AmdUpscaler = (uint)s.AmdUpscaler;
         return g;
     }
 
@@ -359,6 +405,7 @@ internal static unsafe class GraphicsTools
             ("dlssQualityScale", Num(s.QualityScale)), ("dlssBalancedScale", Num(s.BalancedScale)),
             ("dlssPerformanceScale", Num(s.PerformanceScale)), ("dlssUltraPerformanceScale", Num(s.UltraPerformanceScale)),
             ("readout", s.Readout ? "true" : "false"),
+            ("upscaler", ShroudForgePackages.Quote(UpscalerCodes.Choice(s.Upscaler))), ("amdUpscaler", ShroudForgePackages.Quote(UpscalerCodes.Amd(s.AmdUpscaler))),
         };
         if (text.Trim().Length == 0)
         {
@@ -403,6 +450,7 @@ internal static unsafe class GraphicsTools
         _save?.Dispose();
         _save = null;
         _savePending = false;
+        _stateError = null;
         PathOverride = null;
     }
 }
@@ -417,11 +465,12 @@ internal static unsafe class GraphicsPage
     internal static readonly (uint Bit, string Key)[] AsideKeys =
     [
         (1, "optiscaler"), (2, "streamline"), (4, "vkfg"), (8, "dlsstweaks"), (16, "nvngx"), (32, "ngx_patched"), (64, "overlay_off"),
+        (128, "upscaler"),
     ];
 
     private static int _capDrag = -1;  // the frame cap slider's value while it is held (applied when let go)
     private static int _textsGeneration = -1;
-    private static byte[] _presetItems = [], _scaleItems = [];
+    private static byte[] _presetItems = [], _scaleItems = [], _upscalerItems = [], _amdItems = [];
 
     /// <summary>The tools a status steps aside for, by name ("OptiScaler, DLSSTweaks").</summary>
     internal static string AsideNames(uint bits) =>
@@ -465,7 +514,61 @@ internal static unsafe class GraphicsPage
         else if ((st.Flags & DlssRestart) == 0 && (s.DlssSet || s.Readout))
             lines.Add(KilnText.T("graphics.status.dlss_none"));
         if ((st.Flags & DlssRestart) != 0) lines.Add(KilnText.T("graphics.status.restart"));
+        lines.AddRange(UpscalerLines(s, UpscalerStatus.FromNative(st), available: true));
         return lines;
+    }
+
+    /// <summary>The upscaler's lines under "Now": what runs behind the game's FSR 3, its version and sizes, and why the
+    /// choice does not run (the shared reason texts, graphics.upscaler.reason.*). Nothing while the choice is the game's own
+    /// and Kiln's swap is off (nothing changes then).</summary>
+    internal static IReadOnlyList<string> UpscalerLines(GraphicsSettings s, UpscalerNow? now, bool available)
+    {
+        var lines = new List<string>();
+        if (s.Upscaler == UpscalerChoice.Game && (now is null || now.Running is UpscalerRunning.Off or UpscalerRunning.Unknown)) return lines;
+        if (now is null)
+        {
+            lines.Add(available ? KilnText.T("graphics.upscaler.running.unknown") : KilnText.T("graphics.status.unavailable"));
+            return lines;
+        }
+        lines.Add(KilnText.T("graphics.upscaler.running." + UpscalerCodes.Key(UpscalerCodes.Running(now.Running))));
+        if (now.Running is UpscalerRunning.GameFsr3 or UpscalerRunning.AmdFsr4 or UpscalerRunning.AmdFsr31 or UpscalerRunning.Xess &&
+            (now.Flags & UpscalerNow.FsrSeen) != 0 && now.RenderWidth > 0 && now.OutputWidth > 0)
+        {
+            var size = (render: $"{now.RenderWidth}x{now.RenderHeight}", output: $"{now.OutputWidth}x{now.OutputHeight}");
+            lines.Add(now.VersionText is { } v
+                ? KilnText.T("graphics.upscaler.size_version", ("version", v), ("render", size.render), ("output", size.output))
+                : KilnText.T("graphics.upscaler.size", ("render", size.render), ("output", size.output)));
+        }
+        if (now.Running == UpscalerRunning.AmdFsr31 && s.Upscaler == UpscalerChoice.Amd && (now.Flags & UpscalerNow.AmdPinned) == 0 &&
+            s.AmdUpscaler == AmdUpscalerMode.Auto)
+            lines.Add(KilnText.T("graphics.upscaler.amd_fsr3_auto"));
+        if (UpscalerCodes.Reason(now.Reason) is { } code)
+            lines.Add(KilnText.T("graphics.upscaler.reason." + UpscalerCodes.Key(code), ("upscaler", ChoiceName(s)), ("tools", AsideNames(now.Aside)),
+                ("number", now.Code)));
+        return lines;
+    }
+
+    /// <summary>kiln.ui's English detail of the reason (a file's or an extension's name, a fault), for a muted line.</summary>
+    internal static string? UpscalerDetail(UpscalerNow? now) =>
+        now is { Detail.Length: > 0 } && now.Reason != UpscalerReason.None ? KilnText.T("graphics.upscaler.detail", ("detail", now.Detail)) : null;
+
+    /// <summary>The chosen upscaler's name as the page shows it ("AMD FSR", "Intel XeSS").</summary>
+    internal static string ChoiceName(GraphicsSettings s) => s.Upscaler switch
+    {
+        UpscalerChoice.Amd => KilnText.T("graphics.upscaler.amd"), UpscalerChoice.Xess => KilnText.T("graphics.upscaler.xess"),
+        _ => KilnText.T("graphics.upscaler.game"),
+    };
+
+    /// <summary>The line about the chosen vendor's files in kiln/vendor/ (none for the game's own FSR 3).</summary>
+    internal static string? FilesLine(GraphicsSettings s)
+    {
+        if (VendorFiles.Of(UpscalerCodes.Vendor(s.Upscaler)) is not { } c) return null;
+        var key = VendorFiles.State(c) switch
+        {
+            VendorFilesState.Present => "graphics.upscaler.files.present", VendorFilesState.Changed => "graphics.upscaler.files.changed",
+            _ => "graphics.upscaler.files.missing",
+        };
+        return KilnText.T(key, ("name", c.Name), ("version", c.Version), ("folder", VendorFiles.Folder(c)));
     }
 
     private static void Texts()
@@ -474,6 +577,8 @@ internal static unsafe class GraphicsPage
         if (g == _textsGeneration) return;
         _presetItems = UiDraw.ComboItems([KilnText.T("graphics.preset.default"), "J", "K", "L", "M"]);
         _scaleItems = UiDraw.ComboItems([KilnText.T("graphics.scale.game"), KilnText.T("graphics.scale.per_mode"), KilnText.T("graphics.scale.custom")]);
+        _upscalerItems = UiDraw.ComboItems([KilnText.T("graphics.upscaler.game"), KilnText.T("graphics.upscaler.amd"), KilnText.T("graphics.upscaler.xess")]);
+        _amdItems = UiDraw.ComboItems([KilnText.T("graphics.upscaler.amd_auto"), KilnText.T("graphics.upscaler.amd_fsr3")]);
         _textsGeneration = g;
     }
 
@@ -549,6 +654,26 @@ internal static unsafe class GraphicsPage
         Hint(KilnText.T("graphics.dlss.scale_hint"));
         ui.Space(1, 12 * s);
 
+        // ---- behind the game's FSR 3 (phase B) ----
+        cur = GraphicsTools.Current;
+        Caption(KilnText.T("graphics.upscaler.caption"));
+        var choice = (int)cur.Upscaler;
+        ui.NextItemWidth(w);
+        if (ui.Combo(KilnText.T("graphics.upscaler.choice") + "##kiln.gfx.upscaler", ref choice, _upscalerItems, 3))
+            GraphicsTools.Change(cur with { Upscaler = (UpscalerChoice)choice });
+        cur = GraphicsTools.Current;
+        if (cur.Upscaler == UpscalerChoice.Amd)
+        {
+            var amd = (int)cur.AmdUpscaler;
+            ui.NextItemWidth(w);
+            if (ui.Combo(KilnText.T("graphics.upscaler.amd_mode") + "##kiln.gfx.amd", ref amd, _amdItems, 2))
+                GraphicsTools.Change(cur with { AmdUpscaler = (AmdUpscalerMode)amd });
+            Hint(KilnText.T("graphics.upscaler.amd_hint"));
+        }
+        if (FilesLine(GraphicsTools.Current) is { } files) ui.TextWrapped(files);
+        Hint(KilnText.T("graphics.upscaler.hint"));
+        ui.Space(1, 12 * s);
+
         // ---- the readout ----
         Caption(KilnText.T("graphics.readout.caption"));
         var readout = GraphicsTools.Current.Readout;
@@ -560,6 +685,7 @@ internal static unsafe class GraphicsPage
         // ---- what the tools do now ----
         Caption(KilnText.T("graphics.status.caption"));
         foreach (var line in StatusLines(GraphicsTools.Current, st)) ui.TextWrapped(line);
+        if (st is { } now && UpscalerDetail(UpscalerStatus.FromNative(now)) is { } detail) ui.TextDisabled(detail);
         ui.TextDisabled(KilnText.T("graphics.saved"));
     }
 
@@ -578,5 +704,7 @@ internal static unsafe class GraphicsPage
         _textsGeneration = -1;
         _presetItems = [];
         _scaleItems = [];
+        _upscalerItems = [];
+        _amdItems = [];
     }
 }

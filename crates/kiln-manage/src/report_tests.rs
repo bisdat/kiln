@@ -226,6 +226,53 @@ fn healthy_install_finds_nothing() {
     }
 }
 
+/// (0.2.0-dev.29.18) The facts a public post may name: Kiln's version, the system, the game's build and how many mods
+/// are on (never which), also in report.json.
+#[test]
+fn the_public_facts_name_versions_and_a_mod_count_not_the_mods() {
+    let f = Fx::healthy("public-facts");
+    let r = build(&f.input());
+    assert_eq!(r.facts.kiln.as_deref(), Some("0.2.0-dev.22"));
+    assert_eq!(r.facts.mods_on, Some(1));
+    assert!(!r.facts.os.is_empty());
+    let json: serde_json::Value = serde_json::from_str(file(&r, "report.json").unwrap()).unwrap();
+    // the relay's shape (docs/relay-api.md): {kiln, launcher, os, runner, gameBuild, modsOn, deck}
+    let v = &json["versions"];
+    assert_eq!((v["kiln"].as_str(), v["modsOn"].as_u64(), v["deck"].as_bool()), (Some("0.2.0-dev.22"), Some(1), Some(false)));
+    assert_eq!(v["runner"], "Windows");
+    assert!(v.get("launcher").is_none(), "the tool here is not a launcher's");
+    assert!(!v.to_string().contains("chat-plus"), "{v}");
+    // with the launcher as the tool, its version
+    let mut input = f.input();
+    input.tool = "kiln-launcher 0.2.0-dev.29.18 beta 3".into();
+    let r = build(&input);
+    assert_eq!(r.facts.versions()["launcher"], "0.2.0-dev.29.18");
+    // report.json alone for a post without the zip: the launcher's version, the findings, the versions, nothing else
+    // (not when it was written, not the test build's number: the post shows neither)
+    let alone: serde_json::Value = serde_json::from_slice(&public_json(&r)).unwrap();
+    let mut keys: Vec<&str> = alone.as_object().unwrap().keys().map(String::as_str).collect();
+    keys.sort();
+    assert_eq!(keys, ["findings", "format", "tool", "versions"]);
+    assert_eq!((alone["format"].as_u64(), alone["tool"].as_str()), (Some(1), Some("kiln-launcher 0.2.0-dev.29.18")));
+}
+
+/// (0.2.0-dev.29.18) The zip in memory is the zip on disk: the same files with the same bytes (the launcher sends it
+/// without writing it to a shared temp folder).
+#[cfg(feature = "zip")]
+#[test]
+fn the_zip_in_memory_holds_what_the_zip_on_disk_holds() {
+    let f = Fx::healthy("zip-bytes");
+    let r = build(&f.input());
+    let bytes = zip_bytes(&r).unwrap();
+    let mut z = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+    assert_eq!(z.len(), r.files.len());
+    for (name, data) in &r.files {
+        let mut got = Vec::new();
+        std::io::Read::read_to_end(&mut z.by_name(name).unwrap(), &mut got).unwrap();
+        assert_eq!(&got, data, "{name}");
+    }
+}
+
 /// OptiScaler next to the game (an upscaler with its own overlay, inbox 80): one Info finding with what Kiln's overlay
 /// does next to it, its ini in the zip, nothing found when it is not there.
 #[test]

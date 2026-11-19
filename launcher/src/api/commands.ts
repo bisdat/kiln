@@ -99,8 +99,8 @@ export interface AppInfo {
   desktop?: DesktopInfo;
   /** (dev.29.18) Linux only: WebKit's sandbox in this start and whether the next start turns it off (sandbox.rs). */
   sandbox?: SandboxInfo;
-  /** (dev.29) The previews on for this start (settings.json `preview`, KILN_LAUNCHER_PREVIEW): "upscalers" shows
-   *  Settings, Upscalers (api/vendor.ts). Absent: none. */
+  /** (dev.29) The previews on for this start (settings.json `preview`, KILN_LAUNCHER_PREVIEW). None uses it in
+   *  0.2.0-dev.29.18 (the upscaler files are out of preview). Absent: none. */
   preview?: string[];
 }
 /** WebKit's process sandbox on Linux (src-tauri/src/sandbox.rs). */
@@ -179,7 +179,7 @@ export interface LauncherSettings {
   keepVersions?: number;
   /** The launcher's language (Settings, Language; src/i18n): "system" or absent = the system's, else a tag ("zh-CN"). */
   language?: string | null;
-  /** (dev.29) Previews of unfinished features ("upscalers"), set by hand in settings.json; kept as it is by every save. */
+  /** (dev.29) Previews of unfinished features, set by hand in settings.json; kept as it is by every save. */
   preview?: string[];
 }
 /** The most `keepVersions` may be (kiln_manage::kept::KEEP_MAX). */
@@ -240,13 +240,63 @@ export interface GraphicsToolNote {
 /** (dev.29.18) A tool in the game folder next to which Kiln's graphics tools (kiln.json "graphics") step aside
  *  (kiln_manage::game::GraphicsStepAside). */
 export interface GraphicsStepAside {
-  /** "optiscaler", "streamline" (sl.interposer.dll), "vkfg" (EnshroudedVKFG.ini), "dlsstweaks" (dlsstweaks.ini) or
-   *  "nvngx" (nvngx.dll or _nvngx.dll: another DLSS loader); a kind this launcher does not know reads as another tool. */
-  kind: "optiscaler" | "streamline" | "vkfg" | "dlsstweaks" | "nvngx" | (string & {});
+  /** "optiscaler", "streamline" (sl.interposer.dll), "vkfg" (EnshroudedVKFG.ini), "dlsstweaks" (dlsstweaks.ini),
+   *  "nvngx" (nvngx.dll or _nvngx.dll: another DLSS loader) or (dev.29.18) "upscaler" (AMD's or Intel's upscaler DLLs
+   *  next to the game: another tool's); a kind this launcher does not know reads as another tool. */
+  kind: "optiscaler" | "streamline" | "vkfg" | "dlsstweaks" | "nvngx" | "upscaler" | (string & {});
   /** The tool's file relative to the game folder, forward slashes ("dxgi.dll", "Streamline/sl.interposer.dll"). */
   file: string;
   /** Kiln's frame cap steps aside too; false: only Kiln's DLSS settings do. The readout always works. */
   frameCap: boolean;
+  /** (dev.29.18) Kiln's upscaler behind the game's FSR 3 option steps aside too. Absent from an older backend: false. */
+  upscaler?: boolean;
+}
+
+/** (dev.29.18) kiln.json `graphics.upscaler`: what runs behind the game's FSR 3 option. */
+export type UpscalerChoice = "game" | "amd" | "xess";
+/** kiln.json `graphics.amdUpscaler`. */
+export type AmdUpscalerMode = "auto" | "fsr3";
+/** What upscales behind the game's FSR 3 option (kiln_ui.h KILN_UI_UPSCALE_RUN_*; "unknown": a runtime that does not say). */
+export type UpscalerRunning = "off" | "notFsr" | "gameFsr3" | "amdFsr4" | "amdFsr31" | "xess" | "unknown";
+/** Why the chosen upscaler does not run (kiln_ui.h KILN_UI_UPSCALE_WHY_* in camelCase; docs/kiln/graphics.md); a code
+ *  this launcher does not know reads as "unknown". */
+export const UPSCALER_REASONS = ["restart", "filesMissing", "filesBad", "loadFailed", "device", "createFailed", "runtimeFailed", "fault", "aside",
+  "noSignatures", "inputs", "unavailable", "waiting", "noVulkan"] as const;
+export type UpscalerReason = (typeof UPSCALER_REASONS)[number] | "unknown";
+
+/** (dev.29.18) `<game>/kiln/state/graphics.json` (Kiln.Ui; schema/state-graphics.schema.json, kiln_manage::state::GraphicsState). */
+export interface GraphicsStateFile {
+  format: 1;
+  pid: number;
+  written: string;
+  kiln?: string | null;
+  upscaler: {
+    chosen: UpscalerChoice | (string & {});
+    amdUpscaler: AmdUpscalerMode | (string & {});
+    running: UpscalerRunning | (string & {});
+    reason?: string | null;
+    reasonNumber?: number;
+    version?: string;
+    hooked?: boolean;
+    fsrSeen?: boolean;
+    filesOk?: boolean;
+    deviceOk?: boolean;
+    fellBack?: boolean;
+    amdPinned?: boolean;
+    /** The tools it steps aside for (KILN_UI_GFX_ASIDE_* by name: "optiscaler", "upscaler", ...). */
+    aside?: string[];
+    /** kiln.ui's English detail of the reason (a file's or a Vulkan extension's name). */
+    detail?: string;
+  };
+  /** Per vendor folder (amd, intel): this runtime's version and what of it is in kiln/vendor/. */
+  files?: Record<string, { version: string; state: "present" | "missing" | "changed" | (string & {}) }>;
+  frameCap?: unknown;
+  dlss?: unknown;
+}
+/** GameStatus.graphicsState: the file, and whether the game that wrote it runs now ("Now"; false: "Last game"). */
+export interface GraphicsNow {
+  current: boolean;
+  state: GraphicsStateFile;
 }
 export interface GameStatus {
   id: GameId;
@@ -276,6 +326,9 @@ export interface GameStatus {
    *  Streamline, a DLSS frame generation mod, DLSSTweaks, another DLSS loader), in that order; absent or empty: none
    *  (kiln_manage::game::graphics_step_aside). */
   graphicsStepAside?: GraphicsStepAside[];
+  /** (dev.29.18) kiln/state/graphics.json: what Kiln's graphics tools did in the game's last run (`current`: it runs
+   *  now). Absent for a server and while there is none. */
+  graphicsState?: GraphicsNow;
 }
 /** How an install starts (kiln_manage::direct). */
 export type StartMode = "steam" | "direct";
@@ -2182,6 +2235,9 @@ export const COMMANDS = [
   "app_locales",
   "app_sandbox_set",
   "vendor_status", "vendor_license", "vendor_download", "vendor_remove",
+  "community_settings_get", "community_settings_set", "community_status", "community_feed", "community_check_member", "community_signout", "community_signin_start", "community_signin_poll", "community_signin_cancel",
+  "community_posts", "community_post_seen", "community_post_solved", "community_post_delete", "community_presence_facts", "community_report_prepare", "community_report_send",
+  "tester_status", "tester_join", "tester_leave", "tester_result_set", "tester_results_send", "community_steam_keyboard",
 ] as const;
 export type CommandName = (typeof COMMANDS)[number];
 
@@ -2205,6 +2261,9 @@ export interface KilnEvents {
   "kiln://mod-updates": import("./updates").CheckReport;
   /** A profile was written again without profile_activate and its notices wait: take them with activation_notices. */
   "kiln://activation": { gameId: GameId };
+  /** The Discord features (community_*): something the Community page shows changed (`changed`: a sign-in, a post's
+   *  state, the settings), or Kiln support replied (`reply`: the post, its title and link, who replied). */
+  "kiln://community": { kind: "changed" | "reply"; post?: string; title?: string; url?: string; by?: string };
 }
 export type KilnEventName = keyof KilnEvents;
 
@@ -2220,3 +2279,196 @@ export const snapshotContinue = () => call<null>("snapshot_continue");
 
 export interface ShroudlinkNotice { mods: string[]; addons: LibraryRef[] }
 export const shroudlinkNotice = (profile: Profile, gameId: GameId) => call<ShroudlinkNotice | null>("shroudlink_notice", { profile, gameId });
+
+// ---------------------------------------------------------------- community: the optional Discord features
+// docs/kiln/launcher/discord.md. The Rust side (src-tauri/src/commands/community.rs, kiln_manage::community) talks to
+// the relay on frostdev.io and, for Rich Presence, to the Discord app on this PC; the browser mock answers in
+// ./mockCommunity.ts (`?discord=` flags). The UI (src/community/) talks to Discord only through these.
+
+/** `community.json`: the Community page shown (Settings), Rich Presence, reply notifications. */
+export interface CommunitySettings { format: number; shown: boolean; presence: boolean; notify: boolean; relay?: string | null }
+export type CommunitySettingsPatch = Partial<Pick<CommunitySettings, "shown" | "presence" | "notify">>;
+export interface CommunityAccount {
+  /** Discord user id (a snowflake). */
+  id: string;
+  name: string;
+  /** In the Kiln Discord. */
+  member: boolean;
+  tester: boolean;
+}
+export type PostStatus = "waiting" | "replied" | "solved" | "closed";
+/** Who sees a report's zip: the Kiln team only (default), everyone in #support, nobody (not sent). */
+export type ZipAudience = "team" | "public" | "none";
+export interface SupportPost {
+  id: string;
+  title: string;
+  /** https://discord.com/channels/<guild>/<thread> */
+  url: string;
+  created: string;
+  status: PostStatus;
+  replies: number;
+  /** Replies the player has not seen in the launcher. */
+  unread: number;
+  lastReply: { name: string; team: boolean; at: string } | null;
+  tags: string[];
+  zip: ZipAudience;
+}
+export interface PresenceStatus {
+  on: boolean;
+  /** The Discord app's socket is there (looked for only while the switch is on). */
+  discordRunning: boolean;
+  /** Shown on Discord now: the game runs with Kiln. */
+  showing: boolean;
+}
+/** What the page and the header show, from what the launcher already has (no request). */
+export interface CommunityStatus {
+  shown: boolean;
+  account: CommunityAccount | null;
+  online: boolean;
+  relay: "ok" | "down";
+  presence: PresenceStatus;
+  notify: boolean;
+  unread: number;
+  /** When the posts were last read (offline: the time they show as of). */
+  postsAsOf: string | null;
+}
+export interface FeedRelease { title: string; date: string; line: string; url: string }
+export interface FeedEvent { title: string; start: string; end?: string | null; where?: string | null; url: string }
+export interface CommunityFeed { releases: FeedRelease[]; events: FeedEvent[] }
+export type SignInMode = "browser" | "qr";
+export interface SignInStart {
+  id: string;
+  /** The short code the phone page shows too (QR pairing); empty in browser mode. */
+  code: string;
+  /** What the browser or the phone opens. */
+  url: string;
+  expiresAt: string;
+}
+export type SignInState =
+  | { state: "waiting" }
+  | { state: "approved"; account: CommunityAccount }
+  | { state: "denied" | "expired" | "canceled" };
+/** What the browser tab says after the desktop round trip. */
+export interface SignInTexts { done: string; failed: string }
+export type ProblemKind = "noload" | "mod" | "crash" | "launcher" | "server" | "other";
+/** Where a report was started. */
+export type SendFrom = "logs" | "banner" | "crash" | "community" | "deck";
+export interface ReportDraft {
+  title: string;
+  kind: ProblemKind;
+  /** Deck: when it happens (picked from a list). */
+  when?: string | null;
+  text: string;
+  zip: ZipAudience;
+}
+export type FindingLevel = "problem" | "warning" | "info";
+export interface PostFinding { id: string; level: FindingLevel; text: string }
+export type KnownAction = "mods" | "runtime" | "logs" | "settings";
+export interface KnownProblem {
+  id: string;
+  title: string;
+  fix: string;
+  /** A line to copy (a launch option). */
+  copy?: string | null;
+  /** The fix's own button. */
+  action?: KnownAction | null;
+  /** The button's words from the list; absent: the launcher's own for the action. */
+  label?: string | null;
+}
+/** A support report prepared for sending: exactly what the check step shows and what Send sends. */
+export interface ReportPreview {
+  /** Send names this: the zip and the post go as prepared. */
+  prepared: string;
+  findings: PostFinding[];
+  versions: [string, string][];
+  /** The system's #support tag ("Linux", "Windows", "Steam Deck"). */
+  tags: string[];
+  /** Each kind's tag ("Mods", "Crash", ...; null: none): the post's first tag follows the kind the player picks. */
+  kindTags: Record<ProblemKind, string | null>;
+  /** The zip's size; `limit` what the relay takes. */
+  size: number;
+  limit: number;
+  files: { path: string; size: number }[];
+  known: KnownProblem | null;
+}
+/** Rich Presence's words in the launcher's language (en.json community.presence.*). */
+export interface PresenceTexts { details: string; stateOne: string; stateOther: string; getKiln: string; joinDiscord: string }
+export type Capability = "fsr4" | "xess" | "framegen" | "deck";
+export interface Hardware {
+  gpu: string;
+  driver: string;
+  vram: string;
+  os: string;
+  runner: string;
+  caps: Capability[];
+  /** What this hardware can test that the team cannot (FSR 4, XeSS, frame generation, Steam Deck). */
+  covers: string[];
+}
+export type StepResult = "worked" | "failed" | "skipped";
+export interface TestStep {
+  id: string;
+  title: string;
+  /** Plain steps, one per line. */
+  how: string[];
+  /** Who it is for; null: everyone. */
+  for: { label: string; needs: Capability[] } | null;
+  result: StepResult | null;
+  note: string;
+}
+export interface TestPlan {
+  build: string;
+  /** The #testing post of this build. */
+  url: string;
+  until: string;
+  /** Only the steps for this hardware. */
+  steps: TestStep[];
+  /** Steps for other hardware (not shown). */
+  hidden: number;
+  /** Results sent for this build, and whether the team read them. */
+  sent: { at: string; read: { by: string; at: string } | null; replied: boolean } | null;
+}
+export interface TesterStatus {
+  tester: boolean;
+  /** The launcher follows test builds. */
+  beta: boolean;
+  /** What Volunteer would share (read on this PC; shown before anything is sent). */
+  hardware: Hardware;
+  plan: TestPlan | null;
+}
+
+export const communitySettingsGet = () => call<CommunitySettings>("community_settings_get");
+export const communitySettingsSet = (patch: CommunitySettingsPatch) => call<CommunitySettings>("community_settings_set", { patch });
+export const communityStatus = () => call<CommunityStatus>("community_status");
+/** News and events (public; also refreshes the known-problems copy). Only when the Community page opens. */
+export const communityFeed = () => call<CommunityFeed>("community_feed");
+/** The player's posts, fresh from the relay. */
+export const communityPosts = () => call<SupportPost[]>("community_posts");
+export const communityPostSeen = (id: string) => call<null>("community_post_seen", { id });
+export const communityPostSolved = (id: string) => call<null>("community_post_solved", { id });
+export const communityPostDelete = (id: string) => call<null>("community_post_delete", { id });
+/** `mode` browser: the desktop opens `url` in the browser; qr: the Deck shows it as a QR code with `code`. */
+export const communitySignInStart = (mode: SignInMode, join: boolean, texts?: SignInTexts) => call<SignInStart>("community_signin_start", { mode, join, texts });
+export const communitySignInPoll = (id: string) => call<SignInState>("community_signin_poll", { id });
+export const communitySignInCancel = (id: string) => call<null>("community_signin_cancel", { id });
+/** `forget`: frostdev.io deletes what it keeps about the player too; `posts`: and their support posts on Discord. */
+export const communitySignOut = (forget: boolean, posts = false) => call<null>("community_signout", { forget, posts });
+/** The account and membership again (the page opens, "I've joined"). */
+export const communityCheckMember = () => call<CommunityAccount | null>("community_check_member");
+/** The reply notification's words in the launcher's language. */
+export interface NotifyTexts { title: string; detail: string; open: string }
+/** What only the window knows: the mods on (the Play page's count; null when Rich Presence is off) and the words of
+ *  Rich Presence and of the reply notification. */
+export const communityPresenceFacts = (mods: number | null, texts: PresenceTexts, notify?: NotifyTexts) => call<null>("community_presence_facts", { mods, texts, notify });
+export const communityReportPrepare = (target: LogTarget | null, from: SendFrom) => call<ReportPreview>("community_report_prepare", { target, from });
+export const communityReportSend = (prepared: string, draft: ReportDraft) => call<SupportPost>("community_report_send", { prepared, draft });
+export const testerStatus = () => call<TesterStatus>("tester_status");
+/** Sends the hardware tester_status showed and asks for the Tester role. */
+export const testerJoin = (beta: boolean) => call<null>("tester_join", { beta });
+export const testerLeave = () => call<null>("tester_leave");
+/** `result` or `note` left out: that one stays as it is (a note typed after a pick never undoes the pick); "clear":
+ *  back to Not tried. */
+export const testerResultSet = (step: string, result?: StepResult | "clear", note?: string) => call<TestPlan | null>("tester_result_set", { step, result, note });
+/** `prepared`: the support report the checklist showed (communityReportPrepare), for the team only when `withReport`. */
+export const testerResultsSend = (withReport: boolean, prepared?: string) => call<TestPlan | null>("tester_results_send", { withReport, prepared });
+/** Deck: asks Steam for its on-screen keyboard (steam://open/keyboard) for a field that takes words; nothing elsewhere. */
+export const communitySteamKeyboard = () => call<null>("community_steam_keyboard");

@@ -59,6 +59,15 @@ inline float clamp_scale(double v, float fallback) {
     return static_cast<float>(std::fmin(std::fmax(v, kMinScale), kMaxScale));
 }
 
+// What runs behind the game's FSR 3 option (kiln.json graphics.upscaler, KILN_UI_UPSCALER_*; upscale_backend.h Choice).
+enum class Upscaler : uint32_t { game = 0, amd = 1, xess = 2 };
+inline const char* upscaler_key(Upscaler u) { return u == Upscaler::amd ? "amd" : u == Upscaler::xess ? "xess" : "game"; }
+inline const char* upscaler_name(Upscaler u) {
+    return u == Upscaler::amd ? "AMD FSR" : u == Upscaler::xess ? "Intel XeSS" : "the game's own FSR 3";
+}
+// kiln.json graphics.amdUpscaler (KILN_UI_AMD_UPSCALER_*): AMD's own choice, or FSR 3.1 even where FSR 4 runs.
+enum class AmdPin : uint32_t { automatic = 0, fsr3 = 1 };
+
 struct Settings {
     uint32_t fps_cap = 0;  // clamp_fps: 0 off, 20..500
     uint32_t dlss_preset = kPresetDefault;
@@ -66,7 +75,11 @@ struct Settings {
     float custom_scale = 0.67f;
     std::array<float, 4> mode_scale = kDlssScales;  // Quality, Balanced, Performance, Ultra Performance
     bool readout = false;
+    Upscaler upscaler = Upscaler::game;
+    AmdPin amd_pin = AmdPin::automatic;
 
+    // Kiln's upscaler swap is asked for (its hooks go in only when this is so at the game's start).
+    bool wants_swap() const { return upscaler != Upscaler::game; }
     // Something asks for Kiln's hooks on DLSS: a DLSS setting off its default, or the readout (which reads what DLSS runs at).
     bool dlss_set() const { return dlss_preset != kPresetDefault || dlss_scale != DlssScale::game; }
     bool wants_ngx() const { return dlss_set() || readout; }
@@ -82,6 +95,8 @@ inline Settings clamped(Settings s) {
     if (static_cast<uint32_t>(s.dlss_scale) > 2) s.dlss_scale = DlssScale::game;
     s.custom_scale = clamp_scale(s.custom_scale, 0.67f);
     for (size_t i = 0; i < 4; ++i) s.mode_scale[i] = clamp_scale(s.mode_scale[i], kDlssScales[i]);
+    if (static_cast<uint32_t>(s.upscaler) > 2) s.upscaler = Upscaler::game;
+    if (static_cast<uint32_t>(s.amd_pin) > 1) s.amd_pin = AmdPin::automatic;
     return s;
 }
 
@@ -132,6 +147,19 @@ inline Settings parse_settings(const nlohmann::json& root, std::vector<std::stri
     if (const auto v = g.find("readout"); v != g.end() && !v->is_null()) {
         if (v->is_boolean()) s.readout = v->get<bool>();
         else warn("graphics.readout is not true or false: off");
+    }
+    if (const auto v = g.find("upscaler"); v != g.end() && !v->is_null()) {
+        const std::string m = v->is_string() ? v->get<std::string>() : std::string();
+        if (m == "game") s.upscaler = Upscaler::game;
+        else if (m == "amd") s.upscaler = Upscaler::amd;
+        else if (m == "xess") s.upscaler = Upscaler::xess;
+        else warn("graphics.upscaler is not game, amd or xess: game is used");
+    }
+    if (const auto v = g.find("amdUpscaler"); v != g.end() && !v->is_null()) {
+        const std::string m = v->is_string() ? v->get<std::string>() : std::string();
+        if (m == "auto") s.amd_pin = AmdPin::automatic;
+        else if (m == "fsr3") s.amd_pin = AmdPin::fsr3;
+        else warn("graphics.amdUpscaler is not auto or fsr3: auto is used");
     }
     return s;
 }

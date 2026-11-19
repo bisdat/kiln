@@ -531,6 +531,73 @@ pub struct Finding {
     pub text: String,
 }
 
+/// What a public post about the report may say of the setup (the launcher's "Send to Kiln support",
+/// docs/kiln/launcher/discord.md): versions, the system and how the game runs, how many mods are on. Never which mods.
+/// In report.json as `versions` ([`PublicFacts::versions`]).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublicFacts {
+    /// Kiln's version in the game (None: not installed).
+    pub kiln: Option<String>,
+    /// Who wrote the report (`kiln-launcher 0.2.0-dev.29.18`).
+    pub tool: String,
+    /// The operating system's name (`Arch Linux`, `SteamOS 3.7`, `Windows 11`).
+    pub os: String,
+    pub deck: bool,
+    /// How the game runs: the Proton or Wine build, or `Windows`.
+    pub runner: Option<String>,
+    /// The game's Steam build.
+    pub game_build: Option<String>,
+    /// Mods on in the active profile, every kind (None: no profile).
+    pub mods_on: Option<usize>,
+}
+
+impl PublicFacts {
+    /// The launcher's version from `tool` (`kiln-launcher 0.2.0-dev.29.18 beta 3` -> `0.2.0-dev.29.18`).
+    pub fn launcher(&self) -> Option<&str> {
+        self.tool.strip_prefix("kiln-launcher ")?.split_whitespace().next().filter(|v| v.starts_with(|c: char| c.is_ascii_digit()))
+    }
+
+    /// report.json's `versions` (the relay's contract, docs/relay-api.md in the kilnbot repo: `{kiln, launcher, os,
+    /// runner, gameBuild, modsOn, deck}`, strings of at most 60 characters, `modsOn` a number, `deck` a boolean). A
+    /// fact that is not known is left out.
+    pub fn versions(&self) -> serde_json::Value {
+        let cut = |s: &str, n: usize| -> Option<String> {
+            let s: String = s.chars().filter(|c| !c.is_control()).collect::<String>().trim().chars().take(n).collect();
+            (!s.is_empty()).then_some(s)
+        };
+        let mut v = serde_json::Map::new();
+        let mut put = |k: &str, x: Option<String>| {
+            if let Some(x) = x {
+                v.insert(k.to_string(), serde_json::Value::String(x));
+            }
+        };
+        put("kiln", self.kiln.as_deref().and_then(|x| cut(x, 40)));
+        put("launcher", self.launcher().and_then(|x| cut(x, 40)));
+        put("os", cut(&self.os, 60));
+        put("runner", self.runner.as_deref().and_then(|x| cut(x, 60)));
+        put("gameBuild", self.game_build.as_deref().and_then(|x| cut(x, 20)));
+        if let Some(n) = self.mods_on {
+            v.insert("modsOn".into(), serde_json::json!(n));
+        }
+        v.insert("deck".into(), serde_json::json!(self.deck));
+        serde_json::Value::Object(v)
+    }
+}
+
+/// report.json alone with only what a public post shows (the launcher's version, the findings, the versions): what
+/// "Send to Kiln support" sends in place of the zip when the player chooses that nobody gets the zip (the relay builds
+/// the post from it; the privacy page: "only the facts shown in the post go to frostdev.io"). Not when the report was
+/// written, not a test build's number, not the sections that could not be read, not the channel.
+pub fn public_json(r: &Report) -> Vec<u8> {
+    // the relay takes `kiln-launcher <version>`: the version the post shows, without a test build's " beta N"
+    let tool = r.facts.launcher().map(|v| format!("kiln-launcher {v}")).unwrap_or_else(|| r.facts.tool.clone());
+    serde_json::to_vec_pretty(&serde_json::json!({
+        "format": 1, "tool": tool, "findings": r.findings, "versions": r.facts.versions(),
+    }))
+    .unwrap_or_default()
+}
+
 /// A built report. Everything in it is redacted.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -543,6 +610,9 @@ pub struct Report {
     pub findings: Vec<Finding>,
     /// Sections that could not be read, with why.
     pub errors: Vec<String>,
+    /// (0.2.0-dev.29.18+) The setup a public post may name.
+    #[serde(default)]
+    pub facts: PublicFacts,
     /// (path in the zip, bytes), summary.txt and report.json included.
     #[serde(skip)]
     pub files: Vec<(String, Vec<u8>)>,
@@ -1226,6 +1296,7 @@ pub fn build(input: &ReportInput) -> Report {
                 let _ = writeln!(pr, "  (no mods)");
             }
             facts.profile = Some(format!("{} ({}{})", p.name.as_deref().unwrap_or(&p.id), plural(n, "mod", "mods"), if off > 0 { format!(", {off} off") } else { String::new() }));
+            facts.mods_on = Some(n.saturating_sub(off));
         }
         None if !facts.profile_broken => {
             let _ = writeln!(pr, "Active:        none (legacy layout: the drop-in folders load)");
@@ -1607,6 +1678,8 @@ struct Facts {
     profile: Option<String>,
     profile_broken: bool,
     last_start: Option<String>,
+    /// Mods on in the active profile (every kind).
+    mods_on: Option<usize>,
 }
 
 fn plural(n: usize, one: &str, many: &str) -> String {
@@ -1962,9 +2035,24 @@ fn finish(mut cx: Ctx, mut s: String, sys: String, body: String, input: &ReportI
         short = short.chars().take(SHORT_MAX).collect::<String>() + "\n... (more in the report's summary.txt)\n";
     }
 
-    let mut report = Report { written: rfc(now), summary, short, findings: cx.findings, errors: cx.errors, files: Vec::new() };
+    let deck = input.deck.unwrap_or(os.deck);
+    let runner = match facts.platform {
+        Some(Platform::Windows) => Some("Windows".to_string()),
+        _ => facts.proton.clone(),
+    };
+    let public = PublicFacts {
+        kiln: facts.kiln.as_deref().map(|k| redact(k, cx.red)),
+        tool: redact(tool, cx.red),
+        os: redact(&os.name, cx.red),
+        deck,
+        runner: runner.map(|r| redact(&r, cx.red)),
+        game_build: facts.build.clone(),
+        mods_on: facts.mods_on,
+    };
+    let mut report = Report { written: rfc(now), summary, short, findings: cx.findings, errors: cx.errors, facts: public, files: Vec::new() };
     let json = serde_json::to_vec_pretty(&serde_json::json!({
         "format": 1, "written": report.written, "tool": redact(tool, cx.red), "channel": input.channel, "findings": report.findings, "errors": report.errors,
+        "versions": report.facts.versions(),
     }))
     .unwrap_or_default();
     let mut files = vec![("summary.txt".to_string(), report.summary.clone().into_bytes()), ("report.json".to_string(), json)];
@@ -1992,14 +2080,7 @@ pub fn write_zip(report: &Report, out: &Path) -> crate::Result<u64> {
     let f = std::fs::File::create(&tmp).map_err(crate::util::io_at(&tmp, "writing"))?;
     let zerr = |e: zip::result::ZipError| crate::Error::new(crate::ErrorCode::Io, format!("{}: {e}", out.display()));
     let mut w = zip::ZipWriter::new(std::io::BufWriter::new(f));
-    let (y, mo, d, h, mi, s) = crate::util::utc(SystemTime::now());
-    let when = zip::DateTime::from_date_and_time(y.clamp(1980, 2107) as u16, mo as u8, d as u8, h as u8, mi as u8, s as u8)
-        .unwrap_or_else(|_| zip::DateTime::default_for_write());
-    let opts = zip::write::SimpleFileOptions::default()
-        .compression_method(zip::CompressionMethod::Deflated)
-        .compression_level(Some(6))
-        .last_modified_time(when)
-        .unix_permissions(0o644);
+    let opts = zip_options();
     let result = (|| -> crate::Result<()> {
         for (name, data) in &report.files {
             w.start_file(name.as_str(), opts).map_err(zerr)?;
@@ -2016,6 +2097,34 @@ pub fn write_zip(report: &Report, out: &Path) -> crate::Result<u64> {
     }
     crate::util::rename_replace(&tmp, out)?;
     Ok(std::fs::metadata(out)?.len())
+}
+
+/// Each file's options in a report zip: deflated, the time of writing.
+#[cfg(feature = "zip")]
+fn zip_options() -> zip::write::SimpleFileOptions {
+    let (y, mo, d, h, mi, s) = crate::util::utc(SystemTime::now());
+    let when = zip::DateTime::from_date_and_time(y.clamp(1980, 2107) as u16, mo as u8, d as u8, h as u8, mi as u8, s as u8)
+        .unwrap_or_else(|_| zip::DateTime::default_for_write());
+    zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated)
+        .compression_level(Some(6))
+        .last_modified_time(when)
+        .unix_permissions(0o644)
+}
+
+/// The report zip [`write_zip`] writes, in memory: for a caller that sends it on (the launcher's "Send to Kiln
+/// support") and must not leave it in a shared temp folder, even for a moment.
+#[cfg(feature = "zip")]
+pub fn zip_bytes(report: &Report) -> crate::Result<Vec<u8>> {
+    use std::io::Write;
+    let zerr = |e: zip::result::ZipError| crate::Error::new(crate::ErrorCode::Io, format!("the report zip: {e}"));
+    let mut w = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    let opts = zip_options();
+    for (name, data) in &report.files {
+        w.start_file(name.as_str(), opts).map_err(zerr)?;
+        w.write_all(data)?;
+    }
+    Ok(w.finish().map_err(zerr)?.into_inner())
 }
 
 #[cfg(test)]

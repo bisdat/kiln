@@ -669,8 +669,23 @@ typedef struct KilnUiGraphics {
     float custom_scale;     /* SCALE_CUSTOM: the render width and height as a share of the output's, 0.33..1 */
     float mode_scale[4];    /* SCALE_PER_MODE: Quality, Balanced, Performance, Ultra Performance; 0.33..1 each */
     uint32_t readout;       /* 1: the readout in the top right corner of the game */
-    uint32_t reserved[2];
+    /* 0.2.0-dev.29.18 phase B (were reserved, 0 in older callers: the game's own FSR 3, AMD's own choice) */
+    uint32_t upscaler;      /* KILN_UI_UPSCALER_*: what runs behind the game's FSR 3 option (kiln.json graphics.upscaler) */
+    uint32_t amd_upscaler;  /* KILN_UI_AMD_UPSCALER_* (kiln.json graphics.amdUpscaler) */
 } KilnUiGraphics;           /* 48 bytes */
+
+/* KilnUiGraphics.upscaler / KilnUiGraphicsStatus.upscaler: what the player chose to run behind the game's FSR 3 option.
+ * Applies at the game's next FSR 3 set-up (a world load, the FSR quality, the resolution or the 3D render scale). */
+enum {
+    KILN_UI_UPSCALER_GAME = 0,  /* "game": the game's own FSR 3, nothing changes (default) */
+    KILN_UI_UPSCALER_AMD = 1,   /* "amd": AMD FSR, FSR 4 where the GPU and driver run it (AMD's own selection), else FSR 3.1 */
+    KILN_UI_UPSCALER_XESS = 2,  /* "xess": Intel XeSS */
+};
+/* KilnUiGraphics.amd_upscaler */
+enum {
+    KILN_UI_AMD_UPSCALER_AUTO = 0,  /* "auto": AMD's selection (FSR 4 where it runs) */
+    KILN_UI_AMD_UPSCALER_FSR3 = 1,  /* "fsr3": FSR 3.1 even where FSR 4 runs */
+};
 
 /* KilnUiGraphicsStatus.flags */
 enum {
@@ -694,6 +709,9 @@ enum {
     KILN_UI_GFX_ASIDE_NVNGX = 1u << 4,        /* nvngx.dll or _nvngx.dll next to the game: another DLSS loader */
     KILN_UI_GFX_ASIDE_NGX_PATCHED = 1u << 5,  /* NVIDIA's DLSS functions were already patched by another module */
     KILN_UI_GFX_ASIDE_OVERLAY_OFF = 1u << 6,  /* Kiln's overlay hooks are off (KilnUiStatus.error says why) */
+    KILN_UI_GFX_ASIDE_UPSCALER = 1u << 7,     /* (0.2.0-dev.29.18) another upscaler tool's files in the game folder: AMD
+                                                 FidelityFX or XeSS DLLs next to the game (another mod's), or the FSR 3
+                                                 pass already patched by another module */
 };
 /* graphics_status: what Kiln's graphics tools do now. */
 typedef struct KilnUiGraphicsStatus {
@@ -712,7 +730,68 @@ typedef struct KilnUiGraphicsStatus {
     uint32_t render_width, render_height;    /* DLSS's input this frame (dynamic resolution may lower it) */
     uint32_t dlss_output_width, dlss_output_height;
     uint32_t reserved[2];
-} KilnUiGraphicsStatus;     /* 72 bytes */
+    /* ---- 0.2.0-dev.29.18 phase B, an upscaler behind the game's FSR 3 option: filled when size >=
+     * KILN_UI_GRAPHICS_STATUS_SIZE_V2 (248); a 72-byte caller gets the fields above only. ---- */
+    uint32_t upscaler;          /* KILN_UI_UPSCALER_* the player chose (the setting now) */
+    uint32_t amd_upscaler;      /* KILN_UI_AMD_UPSCALER_* */
+    uint32_t upscale_running;   /* KILN_UI_UPSCALE_RUN_*: what upscales behind the game's FSR 3 option now */
+    uint32_t upscale_reason;    /* KILN_UI_UPSCALE_WHY_*: why the chosen upscaler does not run now (0: it runs, or GAME) */
+    uint32_t upscale_flags;     /* KILN_UI_UPSCALE_* */
+    uint32_t aside_upscale;     /* KILN_UI_GFX_ASIDE_* that keep Kiln's swap off (0: none) */
+    uint32_t upscale_version;   /* what runs: (major << 22) | (minor << 12) | patch (FSR 4.1.2, FSR 3.1.6, XeSS 3.0.2);
+                                   0: the game's FSR 3 or nothing */
+    uint32_t upscale_render_width, upscale_render_height;  /* the FSR 3 pass's input this frame (while FSR_SEEN) */
+    uint32_t upscale_output_width, upscale_output_height;
+    uint32_t reserved2;
+    char upscale_detail[128];   /* the reason in English words, UTF-8, NUL-terminated (a missing extension's or file's
+                                   name, a fault); "" when there is nothing to add. For logs and tooltips: the UI says
+                                   the reason in the player's language from upscale_reason */
+} KilnUiGraphicsStatus;     /* 248 bytes (72 before 0.2.0-dev.29.18's phase B fields) */
+#define KILN_UI_GRAPHICS_STATUS_SIZE_V1 72u
+#define KILN_UI_GRAPHICS_STATUS_SIZE_V2 248u
+
+/* KilnUiGraphicsStatus.upscale_running */
+enum {
+    KILN_UI_UPSCALE_RUN_OFF = 0,        /* Kiln's swap is not in: "game" chosen, or the swap's hooks are not in (see
+                                           upscale_reason); whatever the game chose runs and Kiln does not see it */
+    KILN_UI_UPSCALE_RUN_NOT_FSR = 1,    /* the swap is in, but the game did not upscale with FSR 3 in the last two
+                                           seconds: FSR 3 is not the game's chosen upscaler (DLSS, none), or no world */
+    KILN_UI_UPSCALE_RUN_GAME_FSR3 = 2,  /* the game's own FSR 3 runs (the chosen one does not: upscale_reason) */
+    KILN_UI_UPSCALE_RUN_AMD_FSR4 = 3,   /* AMD FSR 4 runs in place of the game's FSR 3 */
+    KILN_UI_UPSCALE_RUN_AMD_FSR3 = 4,   /* AMD FSR 3.1 */
+    KILN_UI_UPSCALE_RUN_XESS = 5,       /* Intel XeSS */
+};
+/* KilnUiGraphicsStatus.upscale_reason: why the chosen upscaler does not run. Stable numbers (never renumbered). */
+enum {
+    KILN_UI_UPSCALE_WHY_NONE = 0,            /* it runs, or GAME is chosen */
+    KILN_UI_UPSCALE_WHY_RESTART = 1,         /* chosen while the game runs: it needs Kiln's hooks or device features from
+                                                the game's start, so it runs from the next start of the game */
+    KILN_UI_UPSCALE_WHY_FILES_MISSING = 2,   /* its files are not downloaded (launcher: Settings, Graphics) */
+    KILN_UI_UPSCALE_WHY_FILES_BAD = 3,       /* a file is not the pinned one (size or SHA-256), or is a link: download again */
+    KILN_UI_UPSCALE_WHY_LOAD_FAILED = 4,     /* a vendor DLL did not load */
+    KILN_UI_UPSCALE_WHY_DEVICE = 5,          /* the GPU or driver lacks a Vulkan extension or feature it needs */
+    KILN_UI_UPSCALE_WHY_CREATE_FAILED = 6,   /* it could not be set up for these sizes: the game's FSR 3 runs */
+    KILN_UI_UPSCALE_WHY_RUNTIME_FAILED = 7,  /* it failed while upscaling: the game's FSR 3 for the rest of the session */
+    KILN_UI_UPSCALE_WHY_FAULT = 8,           /* a fault in it or in Kiln's code around it: the game's FSR 3 for the session */
+    KILN_UI_UPSCALE_WHY_ASIDE = 9,           /* Kiln steps aside for another tool (aside_upscale) */
+    KILN_UI_UPSCALE_WHY_NO_SIGNATURES = 10,  /* this game build's FSR 3 pass was not found (or could not be hooked): the
+                                                swap is off */
+    KILN_UI_UPSCALE_WHY_INPUTS = 11,         /* the game's textures are not what it takes (format, size, a missing one) */
+    KILN_UI_UPSCALE_WHY_UNAVAILABLE = 12,    /* not in this build of Kiln, or not on this system */
+    KILN_UI_UPSCALE_WHY_WAITING = 13,        /* ready: it starts at the game's next FSR 3 set-up (load a world, or change
+                                                FSR's quality in the game's settings) */
+    KILN_UI_UPSCALE_WHY_NO_VULKAN = 14,      /* Kiln did not see the game's Vulkan device created: restart the game */
+};
+/* KilnUiGraphicsStatus.upscale_flags */
+enum {
+    KILN_UI_UPSCALE_HOOKED = 1u << 0,      /* Kiln's hooks on the game's FSR 3 pass are in (an upscaler other than GAME was
+                                              chosen at the game's start) */
+    KILN_UI_UPSCALE_FSR_SEEN = 1u << 1,    /* the game upscaled with FSR 3 in the last two seconds (the sizes are its) */
+    KILN_UI_UPSCALE_FILES_OK = 1u << 2,    /* the chosen backend's files are there and match their pins */
+    KILN_UI_UPSCALE_DEVICE_OK = 1u << 3,   /* the game's device has what the chosen backend needs */
+    KILN_UI_UPSCALE_FELL_BACK = 1u << 4,   /* the chosen backend failed in this session: the game's FSR 3 until restart */
+    KILN_UI_UPSCALE_AMD_PINNED = 1u << 5,  /* AMD FSR 3.1 runs because amd_upscaler is FSR3 (FSR 4 would run) */
+};
 
 typedef struct KilnUiApi {
     KilnServiceHeader header; /* { sizeof(KilnUiApi), KILN_UI_VERSION } */

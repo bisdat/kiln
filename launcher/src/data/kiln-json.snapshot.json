@@ -14,7 +14,7 @@
     { "path": "mods", "comment": "Managed mods", "synced": false },
     { "path": "shroudforge", "comment": "ShroudForge mods", "synced": false },
     { "path": "ui", "comment": "In the game: Kiln's look and language (also in game: Mods, Kiln settings, Look), chat history, and Kiln's overlay on or off", "synced": false },
-    { "path": "graphics", "comment": "In the game: Kiln's frame cap, DLSS settings and readout (also in game: Kiln menu, Graphics)", "synced": false }
+    { "path": "graphics", "comment": "In the game: Kiln's frame cap, DLSS settings, readout and the upscaler behind the game's FSR 3 option (also in game: Kiln menu, Graphics)", "synced": false }
   ],
   "entries": [
     { "path": "policy", "type": "enum", "comment": "Hook only verified game builds, or any build", "default": "verified-only", "options": ["verified-only", "any"], "requiresRestart": false, "synced": false },
@@ -44,6 +44,8 @@
     { "path": "graphics.dlssBalancedScale", "type": "float", "comment": "With the DLSS render size perMode: the render scale of DLSS Balanced (the default is DLSS's own)", "default": 0.58, "min": 0.33, "max": 1, "requiresRestart": false, "synced": false },
     { "path": "graphics.dlssPerformanceScale", "type": "float", "comment": "With the DLSS render size perMode: the render scale of DLSS Performance (the default is DLSS's own)", "default": 0.5, "min": 0.33, "max": 1, "requiresRestart": false, "synced": false },
     { "path": "graphics.dlssUltraPerformanceScale", "type": "float", "comment": "With the DLSS render size perMode: the render scale of DLSS Ultra Performance (the default is DLSS's own)", "default": 0.333, "min": 0.33, "max": 1, "requiresRestart": false, "synced": false },
-    { "path": "graphics.readout", "type": "bool", "comment": "A small readout in a corner of the game: rendered and output frames a second, frame time, the upscaler, its mode, render and output size, and the DLSS preset", "default": false, "requiresRestart": false, "synced": false }
+    { "path": "graphics.readout", "type": "bool", "comment": "A small readout in a corner of the game: rendered and output frames a second, frame time, the upscaler, its mode, render and output size, and the DLSS preset", "default": false, "requiresRestart": false, "synced": false },
+    { "path": "graphics.upscaler", "type": "enum", "comment": "The upscaler Kiln runs in place of the game's own FSR 3 while FSR 3 is the game's chosen upscaler: game (the game's own FSR 3, nothing changes), amd (AMD FSR: FSR 4 where the graphics card and driver run it, else FSR 3.1) or xess (Intel XeSS). AMD FSR and Intel XeSS need the vendor's files in kiln/vendor (the launcher downloads them); without them the game's own FSR 3 runs. Applies when the game next sets FSR up (loading a world, or changing FSR's quality, the resolution or the 3D render scale in the game's settings); one chosen for the first time while the game runs applies from the next game start", "default": "game", "options": ["game", "amd", "xess"], "requiresRestart": false, "synced": false },
+    { "path": "graphics.amdUpscaler", "type": "enum", "comment": "With the upscaler amd: auto (AMD's own selection: FSR 4 where it runs, else FSR 3.1) or fsr3 (FSR 3.1 even where FSR 4 would run)", "default": "auto", "options": ["auto", "fsr3"], "requiresRestart": false, "synced": false }
   ]
 }

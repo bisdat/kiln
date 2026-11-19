@@ -23,7 +23,8 @@ fn put(root: &Path, rel: &str, data: &[u8]) {
     std::fs::write(&p, data).unwrap();
 }
 fn aside(kind: &str, file: &str, frame_cap: bool) -> GraphicsStepAside {
-    GraphicsStepAside { kind: kind.into(), file: file.into(), frame_cap }
+    // the tools that take the frame cap take Kiln's upscaler swap too (kiln.ui's kAsideUpscale)
+    GraphicsStepAside { kind: kind.into(), file: file.into(), frame_cap, upscaler: frame_cap }
 }
 
 #[test]
@@ -93,7 +94,40 @@ fn every_kind_in_order_and_as_json() {
         ]
     );
     let json = serde_json::to_value(&all[0]).unwrap();
-    assert_eq!(json, serde_json::json!({ "kind": "optiscaler", "file": "OptiScaler.asi", "frameCap": true }));
+    assert_eq!(json, serde_json::json!({ "kind": "optiscaler", "file": "OptiScaler.asi", "frameCap": true, "upscaler": true }));
+    // a status from before dev.29.18 (no "upscaler") still reads
+    let old: GraphicsStepAside = serde_json::from_value(serde_json::json!({ "kind": "nvngx", "file": "nvngx.dll", "frameCap": false })).unwrap();
+    assert!(!old.upscaler);
+}
+
+#[test]
+fn another_tools_upscaler_dlls_next_to_the_game_take_kilns_upscaler_swap() {
+    let t = tmp("upscaler");
+    // Kiln's own copies live in kiln/vendor/: not another tool's
+    put(&t.0, "kiln/vendor/amd/2.4.0/amd_fidelityfx_loader_vk.dll", b"x");
+    put(&t.0, "kiln/vendor/intel/3.0.2/libxess.dll", b"x");
+    assert!(graphics_step_aside(&t.0).is_empty());
+    put(&t.0, "LIBXESS.dll", b"x");
+    let up = GraphicsStepAside { kind: "upscaler".into(), file: "LIBXESS.dll".into(), frame_cap: false, upscaler: true };
+    assert_eq!(graphics_step_aside(&t.0), [up.clone()]);
+    // one entry, the list's first found; after the others
+    put(&t.0, "amd_fidelityfx_vk.dll", b"x");
+    put(&t.0, "dlsstweaks.ini", b"");
+    let all = graphics_step_aside(&t.0);
+    assert_eq!(all, [aside("dlsstweaks", "dlsstweaks.ini", false),
+        GraphicsStepAside { file: "amd_fidelityfx_vk.dll".into(), ..up }]);
+}
+
+/// The launcher's list of another tool's upscaler DLLs is kiln.ui's (`native/services/ui/graphics_aside.h`
+/// `kUpscalerFiles`), name for name and in order: the Graphics card names what the game steps aside for.
+#[test]
+fn the_upscaler_files_are_kiln_ui_s_k_upscaler_files() {
+    let h = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../native/services/ui/graphics_aside.h")).unwrap();
+    let start = h.find("kUpscalerFiles[] = {").expect("graphics_aside.h has kUpscalerFiles");
+    let end = start + h[start..].find("};").expect("kUpscalerFiles ends");
+    let list: Vec<&str> = h[start..end].split('"').skip(1).step_by(2).collect();
+    assert!(!list.is_empty());
+    assert_eq!(list, kiln_manage::game::UPSCALER_FILES);
 }
 
 #[cfg(unix)]
@@ -115,4 +149,42 @@ fn a_linked_file_or_folder_counts_as_the_game_sees_it() {
     std::fs::remove_file(t.0.join("dlsstweaks.ini")).unwrap();
     std::os::unix::fs::symlink(store.0.join("gone.ini"), t.0.join("dlsstweaks.ini")).unwrap();
     assert_eq!(graphics_step_aside(&t.0), [aside("streamline", "Streamline/sl.interposer.dll", true)]);
+}
+
+/// (dev.29.18) kiln/state/graphics.json (Kiln.Ui): read as the schema's example has it; "Now" only while the game that
+/// wrote it runs; not read for a server, nor in another format.
+#[test]
+fn the_graphics_state_file_is_read_and_judged_against_the_running_game() {
+    use kiln_manage::game::{graphics_now, GameInstall, GameKind, PathMode, Platform};
+    let t = tmp("state");
+    let install = |kind: GameKind| GameInstall {
+        id: "g".into(), kind, path: t.0.clone(), exe: "enshrouded.exe".into(), app_id: kiln_manage::CLIENT_APP_ID, library: None,
+        platform: Platform::Proton, prefix: None, build_id: None, exe_sha256: None, steam_flavor: None, path_mode: PathMode::Copy,
+        source: "manual".into(),
+    };
+    assert!(graphics_now(&install(GameKind::Client), None).is_none(), "no file");
+    let example = std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../schema/examples/state-graphics.json")).unwrap();
+    put(&t.0, "kiln/state/graphics.json", &example);
+    let g = graphics_now(&install(GameKind::Client), None).unwrap();
+    assert!(!g.current, "the game does not run: the last game's");
+    assert_eq!((g.state.upscaler.chosen.as_str(), g.state.upscaler.running.as_str()), ("amd", "amdFsr4"));
+    assert_eq!(g.state.upscaler.reason, None);
+    assert_eq!(g.state.upscaler.version.as_deref(), Some("4.1.2"));
+    assert_eq!(g.state.files["amd"].state, "present");
+    assert!(g.state.frame_cap.is_some());
+    // the running game's pid: written after it started (this test's own process started before the file was written)
+    let me = std::process::id();
+    if !cfg!(windows) {
+        assert!(graphics_now(&install(GameKind::Client), Some(me)).unwrap().current);
+    }
+    assert!(graphics_now(&install(GameKind::Server), Some(me)).is_none(), "a server draws no frames");
+    // as JSON for the launcher: camelCase, the file as it is
+    let json = serde_json::to_value(&g).unwrap();
+    assert_eq!(json["state"]["upscaler"]["amdUpscaler"], "auto");
+    assert_eq!(json["state"]["frameCap"]["fps"], 141);
+    // another format, or not JSON: none
+    put(&t.0, "kiln/state/graphics.json", br#"{"format": 2, "pid": 1, "written": "x", "upscaler": {"chosen": "game", "running": "off"}}"#);
+    assert!(graphics_now(&install(GameKind::Client), None).is_none());
+    put(&t.0, "kiln/state/graphics.json", b"{ half");
+    assert!(graphics_now(&install(GameKind::Client), None).is_none());
 }
