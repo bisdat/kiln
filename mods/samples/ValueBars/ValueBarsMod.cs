@@ -11,7 +11,9 @@ namespace ValueBars;
 ///  - its slot bar is drawn from its own fuel (0/0 stays the game's full bar: the provider passes);
 ///  - the health pair reads as a percentage (the bar looks the same, the numbers say 0 to 100);
 ///  - Kiln's "Item details" window lists the water of the last inspected container; F8 (or the pause menu's "Item
-///    details") opens it.
+///    details") opens it;
+///  - the game's own detail view of a water container gets a coloured line under its last line (Ui.Tooltip: drawn there
+///    where the game build is measured and ui.tooltip.lines is on, else it joins the Item details window).
 /// Each part is a capability of its own and may be off (a server, an unsupported build, or held until its game test):
 /// the sample registers what it can and logs the rest. The labels are fixed texts: a label is kept for the whole
 /// process, so a provider never makes a new one per frame; numbers go into Current/Max.
@@ -28,6 +30,7 @@ public sealed class ValueBarsMod : Mod
         Try(Ui.Values.HudCapability, () => Ui.Values.Hud(HudValue.Health, HealthPercent));
         if (Try(Ui.Values.TooltipCapability, () => Ui.Values.TooltipLines(default, WaterLines)))
             KeyBindings.Register("valuebars.details", "F8", OpenDetails, "Open Kiln's Item details window");
+        Try(Ui.Values.TooltipCapability, () => Ui.Tooltip.AddLines(InGameLine));
     }
 
     public override void OnUnload()
@@ -89,6 +92,12 @@ public sealed class ValueBarsMod : Mod
                       ("de", $"Wasser: {item.Fuel / per} von {item.FuelMax / per} Ladungen")),
             $"Raw fuel: {item.Fuel} / {item.FuelMax} ({per} a charge)");
     }
+
+    // A line inside the game's own detail view (Ui.Tooltip): wrapped and placed by the game, in its Rare colour.
+    private static readonly TooltipLine Refillable = new(UiText.Of(("en", "Refill at any water source"), ("de", "An jeder Wasserquelle nachfüllbar")),
+        TooltipColor.Rare);
+    private static UiTooltipLines InGameLine(in UiValueContext context, in UiItemView item) =>
+        item.FuelMax == 0 ? UiTooltipLines.None : UiTooltipLines.With(Refillable);
 
     private void OpenDetails()
     {

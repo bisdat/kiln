@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // kiln.ui.values: native lines inside the game's own item detail view (capability ui.tooltip.lines), the detail's stat
 // numbers scaled (ui.tooltip.values), and the tooltip probe of the guided client session (equipment wave P8b; the
-// wave's TOOLTIPS.md and docs/re/game-ui.md "Native tooltip lines"; client checks equip-c5..equip-c9 unplayed).
+// wave's TOOLTIPS.md and docs/re/game-ui.md "Native tooltip lines"; client checks equip.c5..equip.c9 unplayed).
 //
 //   mid ui/DetailAfterStats (H2)      between the stats block and the description: the lines placed AfterStats
 //   mid ui/DetailContentEnd (H1)      the scrolled content list's end, before the game closes it: every line not yet
@@ -129,6 +129,7 @@ bool load_lines_layout(std::string* why) {
 }
 
 void load_probe_layout() {
+    if (!g_l.view.item) load_view_layout(&g_l.view);  // the DETAIL line's item fields, also with both features off
     if (!sig_symbol("ui/DetailStatsModel", &g_l.h3)) g_l.h3 = 0;
     if (!sig_symbol("ui/DetailHeaderModel", &g_l.h5)) g_l.h5 = 0;
     auto opt = [](const char* n, int64_t* out) {
@@ -250,10 +251,74 @@ thread_local DetailCopy* t_gate = nullptr;  // the occurrence whose stats block 
 using StatFn = void (*)(const void*, float);
 StatFn g_stat_next = nullptr;
 
+// The value providers over one occurrence, once: the product of their scales (each sees the product before it).
+float run_values(const DetailCopy& c, float s) {
+    if (!any(kListValues) || !env().call_scale) return s;
+    KilnUiItemView v{};
+    v.size = sizeof v;
+    fill_view(c.raw, g_l.view, KUI_DETAIL_COPY, &v);
+    if (v.item == 0) return s;
+    ChainStamp st;
+    ClientNow now{};
+    if (env().client && env().client(&now)) {
+        v.local_player = now.local_player;
+        st.session = now.session;
+        st.step = now.step;
+    }
+    KilnUiScreen screen{};
+    if (env().screen && env().screen(&screen)) {
+        v.screen = screen;
+        st.frame = screen.frame + 1;  // the frame being built
+    }
+    v.session = st.session;
+    v.frame = st.frame;
+    const auto list = providers(kListValues);
+    for (const auto& sp : *list) {
+        Provider& p = *sp;
+        if (!provider_live(p) || (p.item != 0 && p.item != v.item)) continue;
+        CallState cs;
+        cs.magic = kCallMagic;
+        cs.provider = &p;
+        KilnUiProviderContext ctx{};
+        ctx.size = sizeof ctx;
+        ctx.kind = kListValues;
+        ctx.session = st.session;
+        ctx.frame = st.frame;
+        ctx.client_step = st.step;
+        ctx.owner = p.owner;
+        ctx.text = text_ops();
+        ctx.reserved = &cs;
+        KilnUiItemView view = v;
+        float out = s;
+        KilnResult rc = KILN_ERR_INTERNAL;
+        bool called;
+        {
+            CallScope scope(&cs);
+            called = env().call_scale(reinterpret_cast<KilnUiScaleFn>(p.fn), &ctx, &view, &out, p.user, &rc);
+        }
+        if (!env().owner_alive(p.owner)) continue;
+        if (!called || rc == KILN_ERR_INTERNAL) {
+            fault(p, called ? "returned an internal error" : "faulted");
+            continue;
+        }
+        if (rc != KILN_OK) {
+            refused(p, KUI_REJECTED);  // the scale before it stays
+            continue;
+        }
+        if (!std::isfinite(out) || out < 0 || out > kScaleMax) {
+            fault(p, "returned a scale outside 0..1000");
+            continue;
+        }
+        s = out;
+        succeeded(p);
+    }
+    return s;
+}
+
 float occurrence_scale(DetailCopy& c) {
     if (c.scaled) return c.scale;
     c.scaled = true;
-    float s = 1.0f;
+    float s = run_values(c, 1.0f);
     if (g_probe_on.load(std::memory_order_relaxed)) s *= probe_scale();
     c.scale = std::isfinite(s) && s >= 0 && s <= kScaleMax ? s : 1.0f;
     return c.scale;
@@ -315,6 +380,7 @@ bool install_values_natives(Allowed allowed) {
     uintptr_t gate = 0, h2 = 0, h4 = 0;
     if (!env().layout_supported || !env().layout_supported()) why = "private UI layout is not measured for this client image";
     else if (!allowed(kValuesRow)) why = "the capability is off or held";
+    else if (!load_view_layout(&g_l.view)) why = "the item view constants did not resolve";
     else if (!sig_symbol("ui/DetailStatsBlockCall", &gate) || !sig_symbol("ui/DetailAfterStats", &h2) ||
              !sig_symbol("ui/StatValueDraw", &h4))
         why = "a symbol of the detail view's stats block did not resolve";
@@ -342,6 +408,13 @@ bool install_values_natives(Allowed allowed) {
 }
 
 bool feature_allowed(const char* name) { return env().feature_open && env().feature_open(name); }
+bool row_allowed(const char* name) { return env().row_available && env().row_available(name); }
+
+// kiln.ui.values' installer of the values list: the first tooltip_values provider installs the value sites.
+bool install_values_list(uint32_t list) { return list == kListValues && install_values_natives(&row_allowed); }
+struct ValuesInstaller {
+    ValuesInstaller() { set_installer(kListValues, &install_values_list); }
+} g_values_installer;
 
 // ============================================================================================ the tooltip probe
 // The guided client session's build (TOOLTIPS.md §9): a fixed test block drawn through the native path above, in
@@ -574,6 +647,24 @@ using tt::g_values_on;
 bool tooltip_lines_on() { return g_lines_on.load(std::memory_order_acquire); }
 bool tooltip_values_on() { return g_values_on.load(std::memory_order_acquire); }
 bool tooltip_probe_on() { return g_probe_on.load(std::memory_order_acquire); }
+
+bool tooltip_lines_request() { return tt::install_lines_natives(&tt::row_allowed); }
+
+KilnResult tooltip_native_state(KilnUiTooltipNativeState* out) {
+    const uint32_t size = out->size;
+    *out = KilnUiTooltipNativeState{};
+    out->size = size;
+    out->lines_on = g_lines_on.load() ? 1 : 0;
+    out->values_on = g_values_on.load() ? 1 : 0;
+    out->probe = g_probe_on.load() ? 1 : 0;
+    out->drawn_lines = tt::g_drawn.load();
+    out->scaled_values = tt::g_scaled.load();
+    std::lock_guard lk(tt::g_mu);
+    out->after_stats = out->lines_on && tt::g_l.h2 ? 1 : 0;
+    const std::string& why = !out->lines_on && !tt::g_lines_why.empty() ? tt::g_lines_why : tt::g_values_why;
+    if (!out->lines_on || !out->values_on) std::snprintf(out->why, sizeof out->why, "%s", why.c_str());
+    return KILN_OK;
+}
 
 void tooltip_detail_enter(DetailCopy& c) {
     if (g_probe_on.load(std::memory_order_relaxed)) tt::probe_detail(c);

@@ -85,6 +85,15 @@ void prime_tooltip(bool with_h2 = true) {
     e.key_down = [](uint32_t vk) { return g_key && vk == 0x72; };
     e.thread_id = []() -> uint32_t { return 4242; };
     e.feature_open = [](const char* n) { return g_open_features.count(n) != 0; };
+    e.call_scale = [](KilnUiScaleFn fn, const KilnUiProviderContext* c, const KilnUiItemView* v, float* s, void* user,
+                      KilnResult* rc) {
+        try {
+            *rc = fn(c, v, s, user);
+            return true;
+        } catch (...) {
+            return false;
+        }
+    };
 }
 
 // ItemDetail as the client runs it: H2 (if hooked), then H1; values: the stats block opens before H2.
@@ -278,7 +287,158 @@ void tooltip_values_scale() {
     g_stats_draw = false;
 }
 
+// ---- the API: providers registered for the game's tooltip, and value providers ----
+struct StyledScript {
+    std::vector<std::pair<std::string, uint32_t>> lines;
+    std::vector<KilnResult> appends;
+};
+KilnResult KILN_CALL styled_provider(const KilnUiProviderContext* c, const KilnUiItemView*, KilnUiLineWriter* w, void* user) {
+    auto* s = static_cast<StyledScript*>(user);
+    s->appends.clear();
+    for (const auto& [text, flags] : s->lines) {
+        KilnUiTextId id = 0;
+        c->text->intern(c, KilnStr{text.data(), text.size()}, &id);
+        s->appends.push_back(w->append_line(w, id, flags));
+    }
+    return KILN_OK;
+}
+KilnHandle add_styled(KilnOwner o, StyledScript* s, uint32_t flags = KUI_LINES_IN_GAME_TOOLTIP) {
+    auto r = reg_record();
+    return T()->tooltip_lines_native(o, 0, flags, &styled_provider, s, &r) == KILN_OK && r.ok ? r.handle : 0;
+}
+void prime_api(bool lines_row = true, bool values_row = true) {
+    prime_tooltip();
+    if (lines_row) fake::rows.insert("ui.tooltip.lines");
+    if (values_row) fake::rows.insert("ui.tooltip.values");
+    set_installer(kListValues, &kiln::uivalues::tt::install_values_list);
+}
+
+void tooltip_api_lines() {
+    static_assert(offsetof(KilnUiValuesApi, tooltip_values) == 136 && offsetof(KilnUiValuesApi, tooltip_native_state) == 144 &&
+                  sizeof(KilnUiValuesApi) == 152);
+    static_assert(offsetof(KilnUiLineWriter, append) == 280 && offsetof(KilnUiLineWriter, append_line) == 288 &&
+                  sizeof(KilnUiLineWriter) == 296 && sizeof(KilnUiTooltipNativeState) == 152);
+    prime_api();
+    CHECK(T()->header.size == sizeof(KilnUiValuesApi) && T()->tooltip_lines_native && T()->tooltip_values &&
+              T()->tooltip_native_state,
+          "table: the three tooltip slots are appended and covered by header.size");
+    const KilnOwner o = fake::owner("mod:tooltip-api");
+    StyledScript s;
+    s.lines = {{"+12 % fire", KUI_COLOR_POSITIVE}, {"Set: 2 of 4", uint32_t{KUI_COLOR_EPIC} | uint32_t{KUI_LINE_SMALL}},
+               {"Affix: sharp", KUI_LINE_AFTER_STATS}};
+    LinesScript plain;
+    plain.lines = {"only in the window"};
+    CHECK(add_styled(o, &s) != 0 && add_lines(o, 0, &plain) != 0 && tooltip_lines_on() && arm_tooltip(),
+          "api: a provider for the game's tooltip installs the native sites (row available)");
+    show();
+    CHECK(g_order == (std::vector<std::string>{"H2:Affix: sharp", "H1:+12 % fire", "H1:Set: 2 of 4"}),
+          "api: the provider's lines go into the game's view at their places; a tooltip_lines provider's never");
+    CHECK(g_drawn.size() == 3 && g_drawn[1].d.colored && g_drawn[1].d.color_value == kPal[2] && g_drawn[2].d.small &&
+              g_drawn[2].d.color_value == kPal[4],
+          "api: the colours and the small size the flags name");
+    const auto d = read_details(o, 1);
+    CHECK(lines_of(d) == (std::vector<std::string>{"+12 % fire", "Set: 2 of 4", "Affix: sharp", "only in the window"}),
+          "api: every line is in the details window's snapshot too");
+    KilnUiTooltipNativeState ns{};
+    ns.size = sizeof ns;
+    CHECK(T()->tooltip_native_state(&ns) == KILN_OK && ns.lines_on == 1 && ns.after_stats == 1 && ns.drawn_lines == 3 &&
+              ns.probe == 0,
+          "state: lines on, AfterStats place, lines drawn counted");
+    // invalid flags: a fault of that provider, nothing of its lines anywhere
+    StyledScript bad;
+    bad.lines = {{"x", 0x200}};
+    StyledScript bad_color;
+    bad_color.lines = {{"y", 10}};
+    add_styled(o, &bad);
+    add_styled(o, &bad_color);
+    g_drawn.clear();
+    show(0xAB);
+    CHECK(bad.appends == (std::vector<KilnResult>{KILN_ERR_INVALID_ARGUMENT}) &&
+              bad_color.appends == (std::vector<KilnResult>{KILN_ERR_INVALID_ARGUMENT}) && g_drawn.size() == 3 &&
+              fake::logged("wrote an invalid line") == 2,
+          "api: an unknown flag or colour is an invalid line (a fault), the other providers' lines stay");
+    auto r = reg_record();
+    CHECK(T()->tooltip_lines_native(o, 0, 2, &lines_provider, &plain, &r) == KILN_ERR_INVALID_ARGUMENT,
+          "api: an unknown registration flag is an argument error");
+}
+
+KilnResult KILN_CALL unit_scale(const KilnUiProviderContext*, const KilnUiItemView*, float*, void*) { return KILN_OK; }
+
+void tooltip_api_fallback() {
+    prime_api(false, false);
+    const KilnOwner o = fake::owner("mod:tooltip-fallback");
+    StyledScript s;
+    s.lines = {{"in the window", KUI_COLOR_RARE}};
+    CHECK(add_styled(o, &s) != 0 && !tooltip_lines_on() && arm_lines() && !mid_at("ui.tooltip/DetailContentEnd") &&
+              fake::logged("no native tooltip lines: the capability is off or held") == 1,
+          "fallback: without ui.tooltip.lines the registration still works and no native site is hooked");
+    fill_view_bytes(g_mem.record, 0x5000, 2, 0xAA, 1, 900, 0, 0);
+    g_detail_hook(g_mem.record, 0);
+    CHECK(lines_of(read_details(o, 1)) == (std::vector<std::string>{"in the window"}) && g_drawn.empty(),
+          "fallback: the lines are in Kiln's details window, nothing is drawn natively");
+    KilnUiTooltipNativeState ns{};
+    ns.size = sizeof ns;
+    T()->tooltip_native_state(&ns);
+    CHECK(ns.lines_on == 0 && std::string(ns.why) == "the capability is off or held", "state: off, with the reason");
+    auto r = reg_record();
+    CHECK(T()->tooltip_values(o, 0, &unit_scale, nullptr, &r) == KILN_ERR_UNAVAILABLE,
+          "values: without ui.tooltip.values a value provider is refused (UNAVAILABLE)");
+}
+
+struct ScaleScript {
+    float set = 1;
+    KilnResult rc = KILN_OK;
+    float seen = 0;
+    int calls = 0;
+    uint32_t item = 0;
+};
+KilnResult KILN_CALL scale_provider(const KilnUiProviderContext*, const KilnUiItemView* v, float* scale, void* user) {
+    auto* s = static_cast<ScaleScript*>(user);
+    ++s->calls;
+    s->seen = *scale;
+    s->item = v->item;
+    *scale = s->set;
+    return s->rc;
+}
+KilnHandle add_scale(KilnOwner o, uint32_t item, ScaleScript* s) {
+    auto r = reg_record();
+    return T()->tooltip_values(o, item, &scale_provider, s, &r) == KILN_OK && r.ok ? r.handle : 0;
+}
+
+void tooltip_api_values() {
+    prime_api();
+    const KilnOwner o = fake::owner("mod:tooltip-values");
+    ScaleScript a, b, refuse, wild, other;
+    a.set = 1.5f;
+    b.set = 3.0f;  // sees 1.5, sets 3: the product so far is the input
+    refuse.set = 99;
+    refuse.rc = KILN_ERR_UNAVAILABLE;
+    wild.set = 5000;
+    other.set = 10;
+    add_scale(o, 0, &a);
+    add_scale(o, 0, &refuse);
+    add_scale(o, 0, &wild);
+    add_scale(o, 0, &b);
+    add_scale(o, 0xBB, &other);
+    CHECK(tooltip_values_on() && arm_tooltip() && mids_labelled("ui.tooltip/DetailStatsBlockCall") == 1,
+          "values: the first provider installs the value sites");
+    g_stats_draw = true;
+    g_stat_in = 10.0f;
+    g_stat_values.clear();
+    show();
+    CHECK(g_stat_values == (std::vector<float>{30.0f, 10.0f}) && b.seen == 1.5f && a.item == 0xAA && other.calls == 0,
+          "values: providers chain in order (each sees the scale so far), a refusal keeps it, another item's is skipped");
+    CHECK(fake::logged("returned a scale outside 0..1000") == 1 && refuse.calls == 1,
+          "values: a scale out of range is a fault; the refusal is not");
+    show();
+    CHECK(a.calls == 2, "values: once per detail occurrence");
+    g_stats_draw = false;
+}
+
 void tooltip_tests() {
+    tooltip_api_lines();
+    tooltip_api_fallback();
+    tooltip_api_values();
     tooltip_probe_installs();
     tooltip_probe_lines();
     tooltip_no_after_stats_site();

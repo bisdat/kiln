@@ -152,7 +152,12 @@ internal static unsafe class UiValuesNative
         public fixed byte Lines[16 * 16];
         public void* Reserved;
         public delegate* unmanaged[Cdecl]<LineWriter*, ulong, int> Append;
+        // ---- appended in 0.2.0-dev.29.19: read Size (an older native writer is 8 bytes shorter) ----
+        public delegate* unmanaged[Cdecl]<LineWriter*, ulong, uint, int> AppendLine;
     }
+
+    // KilnUiLineFlags (bits 0..3: KilnUiLineColor = TooltipColor) and KilnUiNativeLinesFlags
+    public const uint LineSmall = 0x10, LineAfterStats = 0x100, LinesInGameTooltip = 1;
 
     [StructLayout(LayoutKind.Sequential)]
     public struct TooltipOpen
@@ -275,6 +280,40 @@ internal static unsafe class UiValuesNative
             if (t == null || t->Header.Size < sizeof(SourcesTable)) return null;
             var s = (SourcesTable*)t;
             return s->GemForgeSources != null && s->GemForgeSourcesState != null ? s : null;
+        }
+    }
+
+    // ---- appended in 0.2.0-dev.29.19: ui.tooltip.lines / ui.tooltip.values ----
+    [StructLayout(LayoutKind.Sequential)]
+    public struct TooltipTable
+    {
+        public SourcesTable Base;
+        public delegate* unmanaged[Cdecl]<ulong, uint, uint,
+            delegate* unmanaged[Cdecl]<ProviderContext*, ItemView*, LineWriter*, void*, int>, void*, Registration*, int> TooltipLinesNative;
+        public delegate* unmanaged[Cdecl]<ulong, uint,
+            delegate* unmanaged[Cdecl]<ProviderContext*, ItemView*, float*, void*, int>, void*, Registration*, int> TooltipValues;
+        public delegate* unmanaged[Cdecl]<TooltipNativeState*, int> TooltipNativeState;
+    }
+
+    /// <summary>KilnUiTooltipNativeState (152 bytes).</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct TooltipNativeState
+    {
+        public uint Size;
+        public byte LinesOn, ValuesOn, AfterStats, Probe;
+        public ulong DrawnLines, ScaledValues;
+        public fixed byte Why[128];
+    }
+
+    /// <summary>The table with the native tooltip slots, or null (a server, an older native service).</summary>
+    public static TooltipTable* TooltipT
+    {
+        get
+        {
+            var t = T;
+            if (t == null || t->Header.Size < sizeof(TooltipTable)) return null;
+            var s = (TooltipTable*)t;
+            return s->TooltipLinesNative != null && s->TooltipValues != null && s->TooltipNativeState != null ? s : null;
         }
     }
 

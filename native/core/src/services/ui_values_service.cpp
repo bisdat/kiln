@@ -136,6 +136,19 @@ bool call_lines(KilnUiLinesFn fn, const KilnUiProviderContext* c, const KilnUiIt
     }
 }
 
+bool call_scale(KilnUiScaleFn fn, const KilnUiProviderContext* c, const KilnUiItemView* v, float* scale, void* user,
+                KilnResult* rc) {
+    crash::Capture cap{};
+    unsigned long code = 0;
+    __try {
+        *rc = fn(c, v, scale, user);
+        return true;
+    } __except (crash::filter(GetExceptionInformation(), &cap, &code)) {
+        crash::report(cap, "kiln.ui.values tooltip value provider", reinterpret_cast<const void*>(fn));
+        return false;
+    }
+}
+
 bool call_slots(KilnUiSlotsFn fn, const KilnUiSlotsFrame* f, const KilnUiVisibleSlot* s, uint32_t n, void* user) {
     crash::Capture cap{};
     unsigned long code = 0;
@@ -349,6 +362,7 @@ void wire() {
     };
     e.subscribe_frames = &subscribe_frames;
     e.draw_text = &draw_text;
+    e.call_scale = &call_scale;
     e.node_rect = &node_rect;
     e.key_down = [](uint32_t vk) { return (GetAsyncKeyState(static_cast<int>(vk)) & 0x8000) != 0; };
     e.thread_id = []() -> uint32_t { return GetCurrentThreadId(); };

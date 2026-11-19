@@ -47,7 +47,7 @@ inline constexpr double kNewStringsPerSecond = 64;  // per mod
 inline constexpr double kNewStringsBurst = 128;
 
 // Registration lists: the value kinds (KilnUiValueKind), then these.
-enum : uint32_t { kListLines = kValueKinds, kListSlots, kListChanges, kListGemForge, kLists };
+enum : uint32_t { kListLines = kValueKinds, kListSlots, kListChanges, kListGemForge, kListValues, kLists };
 
 // The capability row of a list ("ui.values.hud" for the three HUD kinds).
 const char* row_of(uint32_t list);
@@ -104,6 +104,8 @@ struct Env {
     uint32_t (*thread_id)() = nullptr;
     // A sigdb feature resolved on this build and not held by the client gate (usable before kiln.caps has rows).
     bool (*feature_open)(const char* name) = nullptr;
+    bool (*call_scale)(KilnUiScaleFn fn, const KilnUiProviderContext* c, const KilnUiItemView* v, float* scale,
+                       void* user, KilnResult* rc) = nullptr;
 };
 Env& env();
 void logf(int level, const char* fmt, ...);
@@ -115,6 +117,7 @@ struct Provider {
     std::string mod;  // stable mod id at registration (quotas and text are charged to it)
     uint32_t list = 0;
     uint32_t item = 0;  // 0 = any nonempty item
+    uint32_t flags = 0;  // lines: KilnUiNativeLinesFlags (tooltip_lines_native)
     void* fn = nullptr;
     void* user = nullptr;
     uint64_t seq = 0;  // accepted registration order
@@ -126,7 +129,8 @@ using ProviderList = std::vector<std::shared_ptr<Provider>>;
 
 // Adds a registration after the caller checked the arguments. KILN_OK with out->ok = 0 and KUI_REGISTRATION_BUDGET
 // when the mod holds 128; KILN_ERR_REVOKED for a retired owner.
-KilnResult add(KilnOwner owner, uint32_t list, uint32_t item, void* fn, void* user, KilnUiRegistration* out);
+KilnResult add(KilnOwner owner, uint32_t list, uint32_t item, void* fn, void* user, KilnUiRegistration* out,
+               uint32_t flags = 0);
 KilnResult remove(KilnHandle h);
 // The live providers of a list in registration order, as one immutable snapshot (changes made while a dispatch holds
 // it apply to the next one). Never null.
@@ -351,6 +355,10 @@ struct TextDraw {
     float small_size = 0;
 };
 inline constexpr int32_t kTextObjectBytes = 0x150;
+// A provider registered with KUI_LINES_IN_GAME_TOOLTIP: installs the native sites once when ui.tooltip.lines is
+// available (false = the lines stay in the details window).
+bool tooltip_lines_request();
+KilnResult tooltip_native_state(KilnUiTooltipNativeState* out);
 bool tooltip_lines_on();     // native lines are drawn now
 bool tooltip_values_on();    // stat numbers are scaled now
 bool tooltip_probe_on();
