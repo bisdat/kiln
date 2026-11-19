@@ -899,28 +899,42 @@ overlay drawn completed it, so a game that died a few frames later was not caugh
 off during a session because its own work failed ([below](#when-the-overlay-fails-during-a-session); not for a present
 from a queue Kiln does not draw on, which comes before any work of its own), the record is armed again: a game that
 closes before it has presented 60 more frames in a 30 second window counts as an interrupted attempt. A game that goes
-on presenting does not, and neither does a normal exit where Kiln sees it (`on_unload`: under Wine, and on Windows with
-kiln.json `"unloadAtExit": "on"`). On Windows by default a quit during the overlay's first drawn frames (about a second at 60 frames a second), or in
-the 30 seconds after it failed, counts as an interrupted attempt: one start without the overlay, then it tries again.
+on presenting does not, and neither does a normal exit (exit code 0). kiln.ui sees that in its `on_unload`, one of
+Kiln's own exit steps: under Wine, and since 0.2.0-dev.29.18 on native Windows too (only kiln.json
+`"unloadAtExit": "off"` turns it off). That the game's own quit on Windows ends with exit code 0 is not confirmed yet;
+where it does not, a quit during the overlay's first drawn frames (about a second at 60 frames a second), or in the 30
+seconds after it failed, counts as an interrupted attempt: one start without the overlay, then it tries again. After
+the normal exit nothing writes the record any more, so a failure or a first draw on another thread in the moment
+before the process ends cannot arm it again.
 Each record is written (a temporary file, then a rename) before the stage goes on, and forced to the disk
 on a thread of its own, never on the game's present call: a game that dies loses nothing it already
 wrote.
-A game that ends before that frame, however it ends, counts as an interrupted attempt (closing
-the game while it is still loading does too: the cost is one start without the overlay).
+A game that ends before then in any other way (a crash, a hang that was killed) counts as an interrupted attempt: the
+cost is one start without the overlay.
 
 On the next start only overlay drawing steps aside. Keys, native game-menu rows and
 `kiln.ui.tick` remain available. The drawing capability rows in
 `kiln/state/capabilities.json` carry the reason. The log says:
 
-> ui: the game closed during the last start while Kiln's overlay was starting (stage: instance seen); the overlay's drawing stays off for this start; key bindings and the Mods menu still work
+> ui: the game closed during the last start while Kiln's overlay was starting (stage: instance seen); the overlay's drawing stays off for this start, and the next start tries it again; key bindings and the Mods menu still work
 
 The stage varies. When detected it adds:
 “NVIDIA Streamline (a frame generation mod) is installed; it wraps the same graphics calls”.
 This is a likely conflict, not proof of the crash's cause.
 
-Once a guarded start has run for a minute, the next start tries the overlay again once
-(the log says so; automatic Streamline protection still takes precedence). A second interrupted attempt at the same stage keeps it off. To re-enable it, close the
-game and delete `kiln/state/overlay-start.guard`. Removing a detected graphics wrapper
+The start after a guarded start tries the overlay again, however long the guarded start ran and however it ended. With
+the drawing off Kiln installs none of its Vulkan hooks, so the guarded start arms no attempt of its own, and its end
+(a quick quit from the main menu, or a crash) says nothing about the overlay. The warning above says "the next start
+tries it again" unless something else keeps the drawing off then too (automatic Streamline or OptiScaler protection,
+`KILN_UI_OVERLAY=0`, kiln.json `ui.overlay`); those still take precedence. Until 0.2.0-dev.29.18 a guarded start had to
+run a minute for that: one that ended sooner left the next start guarded too, and so on at every start, until the
+record was deleted. Such a record gets its new attempt at the first start of 0.2.0-dev.29.18. The record keeps the
+first interrupted attempt: a second one at the same stage keeps the drawing off at every start (a normal exit does not
+change that). To re-enable it, close the
+game and delete `kiln/state/overlay-start.guard`. The record is one line, `2 <phase> <stage> <failed stage> <failures>
+<wrapper retry> <wrappers>`; phase 0 is complete, 1 an attempt (the overlay starting, or a start that died during it),
+2 a guarded start, 3 a guarded start that exited normally, 4 locked; stage 0 is before hooks, 1 hooks installed,
+2 instance seen, 3 device seen, 4 swapchain created, 5 the overlay's frames presented. Removing a detected graphics wrapper
 also permits a new attempt, as does adding or replacing one. The guard compares the paths,
 sizes and the first and last 64 KiB of `sl.interposer.dll`, `dxgi.dll`, `ReShade64.dll`,
 `opengl32.dll`, and `powrprof.dll` directly in the game folder or its `Streamline/` folder, and OptiScaler's DLL when
