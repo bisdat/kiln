@@ -483,8 +483,26 @@ internal static unsafe class GraphicsPage
         3 => KilnText.T("graphics.mode.ultra_performance"), 4 => KilnText.T("graphics.mode.ultra_quality"), 5 => "DLAA", _ => "?",
     };
 
-    internal static string PresetName(uint preset) => preset == 0 ? KilnText.T("graphics.preset.default") :
-        preset is >= 1 and <= 26 ? ((char)('A' + preset - 1)).ToString() : preset.ToString(CultureInfo.InvariantCulture);
+    /// <summary>The preset of a DLSS render preset hint: bit 31 (set by the NGX SDK code in the game on the default it fills
+    /// in for a hint the game left at 0; graphics_settings.h kPresetSdkDefault) is not part of it.</summary>
+    internal static uint PresetValue(uint preset) => preset & 0x7FFF_FFFFu;
+
+    /// <summary>A DLSS render preset's name: "default" (in the player's language) for 0, A..O for 1..15, "?" for a value
+    /// with no letter (never the number).</summary>
+    internal static string PresetName(uint preset) => PresetValue(preset) switch
+    {
+        0 => KilnText.T("graphics.preset.default"),
+        var v and <= 15 => ((char)('A' + v - 1)).ToString(),
+        _ => "?",
+    };
+
+    /// <summary>graphics.json's dlss.preset: "default", a letter, or "unknown".</summary>
+    internal static string PresetKey(uint preset) => PresetValue(preset) switch
+    {
+        0 => "default",
+        var v and <= 15 => ((char)('A' + v - 1)).ToString(),
+        _ => "unknown",
+    };
 
     /// <summary>The status lines the page shows (plain: tests).</summary>
     internal static IReadOnlyList<string> StatusLines(GraphicsSettings s, UiNative.GraphicsStatus? status)

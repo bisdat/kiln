@@ -300,6 +300,57 @@ public unsafe class GraphicsTests : IDisposable
         Assert.Equal("M", GraphicsPage.PresetName(13));
     }
 
+    [Fact]
+    public void A_preset_reads_as_its_letter_whatever_bits_it_has()
+    {
+        // the game's own hint as the NGX SDK code in the game fills it in: 0x8000000B is K (session 29.18 showed "preset 2147483659")
+        Assert.Equal("K", GraphicsPage.PresetName(0x8000000Bu));
+        Assert.Equal("K", GraphicsPage.PresetKey(0x8000000Bu));
+        Assert.Equal("default", GraphicsPage.PresetName(0x80000000u));
+        Assert.Equal("default", GraphicsPage.PresetKey(0x80000000u));
+        // a plain value
+        Assert.Equal("K", GraphicsPage.PresetName(11));
+        Assert.Equal("L", GraphicsPage.PresetKey(12));
+        Assert.Equal("default", GraphicsPage.PresetKey(0));
+        Assert.Equal("O", GraphicsPage.PresetName(15));
+        // a value with no letter: readable, never the number
+        Assert.Equal("?", GraphicsPage.PresetName(16));
+        Assert.Equal("?", GraphicsPage.PresetName(99));
+        Assert.Equal("?", GraphicsPage.PresetName(0xFFFFFFFFu));
+        Assert.Equal("unknown", GraphicsPage.PresetKey(99));
+        Assert.Equal("unknown", GraphicsPage.PresetKey(0x8000001Fu));
+        // the Graphics page's line
+        var st = new UiNative.GraphicsStatus
+        {
+            Flags = GraphicsPage.DlssHooked | GraphicsPage.DlssActive, DlssQuality = 2, DlssPreset = 0x8000000Bu,
+            RenderWidth = 1280, RenderHeight = 720, DlssOutputWidth = 1920, DlssOutputHeight = 1080,
+        };
+        Assert.Equal(["DLSS Quality: 1280x720 to 1920x1080, preset K."], GraphicsPage.StatusLines(GraphicsSettings.Default with { Readout = true }, st));
+        st.DlssPreset = 99;
+        Assert.Equal(["DLSS Quality: 1280x720 to 1920x1080, preset ?."], GraphicsPage.StatusLines(GraphicsSettings.Default with { Readout = true }, st));
+    }
+
+    [Fact]
+    public void The_state_file_names_the_preset_by_its_letter()
+    {
+        var path = GraphicsStateFile.PathOverride = Path.Combine(_dir, "state", "graphics.json");
+        VendorFiles.RootOverride = _dir;
+        var s = GraphicsSettings.Default with { Readout = true };
+        string Preset(uint raw)
+        {
+            var st = Phase(1, 0, UpscalerNow.Hooked);
+            st.Flags = GraphicsPage.DlssHooked | GraphicsPage.DlssActive;
+            st.DlssQuality = 2;
+            st.DlssPreset = raw;
+            GraphicsStateFile.Update(s, st, UpscalerStatus.FromNative(st));
+            return (string)JsonNode.Parse(File.ReadAllText(path))!["dlss"]!["preset"]!;
+        }
+        Assert.Equal("K", Preset(0x8000000Bu));
+        Assert.Equal("M", Preset(13));
+        Assert.Equal("default", Preset(0));
+        Assert.Equal("unknown", Preset(99));
+    }
+
     // ---- phase B: the upscaler behind the game's FSR 3 option ----
 
     [Fact]

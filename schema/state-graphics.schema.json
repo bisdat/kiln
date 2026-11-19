@@ -69,7 +69,7 @@
         "active": { "type": "boolean", "description": "The game upscaled with DLSS in the last two seconds." },
         "restart": { "type": "boolean", "description": "A DLSS setting is on now but was not at start: it applies from the next start." },
         "mode": { "enum": ["performance", "balanced", "quality", "ultraPerformance", "ultraQuality", "dlaa", null] },
-        "preset": { "type": "string", "description": "The render preset asked for: default, or a letter." },
+        "preset": { "type": "string", "description": "The render preset asked for: default, or a letter (A..O); unknown for a value without a letter." },
         "aside": { "$ref": "#/$defs/aside" }
       },
       "additionalProperties": false

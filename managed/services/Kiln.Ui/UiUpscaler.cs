@@ -345,7 +345,7 @@ internal static class GraphicsStateFile
                 {
                     0 => "performance", 1 => "balanced", 2 => "quality", 3 => "ultraPerformance", 4 => "ultraQuality", 5 => "dlaa", _ => null,
                 };
-                dlss["preset"] = st.DlssPreset == 0 ? "default" : GraphicsPage.PresetName(st.DlssPreset);
+                dlss["preset"] = GraphicsPage.PresetKey(st.DlssPreset);
             }
             body["dlss"] = dlss;
         }
