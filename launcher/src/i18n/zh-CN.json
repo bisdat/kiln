@@ -1253,6 +1253,7 @@
       "flame": "Flame 模组",
       "shroudlink": "shroudlink 模组",
       "ember": "Ember 模组（尚不支持运行）",
+      "dllmod": "Enshrouded ModLoader 模组",
       "proxy": "加载器",
       "data": "游戏数据",
       "save": "存档文件",

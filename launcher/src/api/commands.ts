@@ -67,7 +67,7 @@ export type TaskId = string;
  *  ./kinds.ts. */
 export type ModKind = "kiln" | "native" | "plugin" | "emf"
   | "eml" | "xhl" | "shroudforge" | "set" | "greeneye" | "flame" | "shroudtopia"
-  | "enshwick" | "shroudlink" | "ember";
+  | "enshwick" | "shroudlink" | "ember" | "dllmod";
 export type Side = "server" | "client" | "both";
 export type RunSide = "server" | "client";
 export type Clients = "none" | "kiln" | "mod";
@@ -415,7 +415,7 @@ export interface BundlePart {
 }
 export type ProxyKind = "none" | "kiln" | "shroudforge" | "emf" | "unknown" | "notdll"
   // other engines' loaders and tools under a proxy name (kiln_manage::engines)
-  | "eml" | "set" | "enshwick" | "greeneye" | "shroudtopia" | "flame" | "shroudlink" | "ember" | "modloaderproxy"
+  | "eml" | "set" | "enshwick" | "greeneye" | "shroudtopia" | "flame" | "shroudlink" | "ember" | "dllmod" | "modloaderproxy"
   | "ultimateasiloader" | "aldrich" | "livemap" | "sharedxp" | "reshade" | "chainloader" | "nativefolders" | "optiscaler";
 export interface ProxyClass {
   kind: ProxyKind;
@@ -713,11 +713,11 @@ export interface LibraryEntry {
 }
 export type DetectKind = "kiln" | "native" | "plugin" | "emf" | "modpack" | "runtime" | "bare-dll" | "unknown"
   // made for other engines, or not mods: imported only once Kiln supports them; `reason` says why not yet
-  | "eml" | "xhl" | "shroudforge" | "set" | "enshwick" | "greeneye" | "shroudtopia" | "flame" | "shroudlink" | "ember"
+  | "eml" | "xhl" | "shroudforge" | "set" | "enshwick" | "greeneye" | "shroudtopia" | "flame" | "shroudlink" | "ember" | "dllmod"
   | "proxy" | "data" | "save" | "reshade" | "cheat-table" | "asi";
 /** kiln_manage::engines::Engine */
 export type EngineId = "kiln" | "emf" | "shroudforge" | "eml" | "set" | "enshwick" | "greeneye" | "shroudtopia" | "flame"
-  | "shroudlink" | "ember" | "mod-loader-proxy" | "ultimate-asi-loader" | "aldrich" | "live-map" | "shared-xp" | "reshade"
+  | "shroudlink" | "ember" | "dllmod" | "mod-loader-proxy" | "ultimate-asi-loader" | "aldrich" | "live-map" | "shared-xp" | "reshade"
   | "chain-loader" | "native-folders" | "optiscaler";
 export interface Detected {
   kind: DetectKind;

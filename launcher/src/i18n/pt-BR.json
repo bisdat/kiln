@@ -1263,6 +1263,7 @@
       "flame": "Mod Flame",
       "shroudlink": "Mod shroudlink",
       "ember": "Mod Ember (ainda não roda)",
+      "dllmod": "Mod do Enshrouded ModLoader",
       "proxy": "Loader",
       "data": "Dados do jogo",
       "save": "Arquivo de save",

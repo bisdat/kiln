@@ -1253,6 +1253,7 @@
       "flame": "Flame 모드",
       "shroudlink": "shroudlink 모드",
       "ember": "Ember 모드 (아직 실행 안 됨)",
+      "dllmod": "Enshrouded ModLoader 모드",
       "proxy": "로더",
       "data": "게임 데이터",
       "save": "세이브 파일",

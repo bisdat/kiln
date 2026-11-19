@@ -1263,6 +1263,7 @@
       "flame": "Flame-Mod",
       "shroudlink": "shroudlink-Mod",
       "ember": "Ember-Mod (läuft noch nicht)",
+      "dllmod": "Enshrouded-ModLoader-Mod",
       "proxy": "Loader",
       "data": "Spieldaten",
       "save": "Spielstanddatei",
