@@ -23,6 +23,7 @@ import { activationBusy } from "../api/oneActivation";
 import { useApplying, type Applying } from "./applying";
 import { gameState, playState, runStarted, type GameStateView } from "./gameState";
 import { notifyActivation, notifyActivationOf, notifyInstall } from "./notices";
+import { blockedLine } from "./RuntimeFailure";
 import { quietIsKiln, quietText, showsProgress, STEAM_WAIT_MS } from "./startProgress";
 import { t } from "../i18n";
 
@@ -234,7 +235,9 @@ export async function switchBackFirst(gameId: string, req: api.LaunchRequest): P
     notifyInstall(r);
     return true;
   } catch (e) {
-    toast.error(e, t("shell.play.switchBackFailed", { to: back.to, from: back.from }));
+    // a DLL Windows refused (an antivirus, inbox 92): its plain words before the raw error
+    const err = api.toKilnError(e), blocked = blockedLine(err, undefined);
+    toast.error(blocked ? { ...err, message: `${blocked} ${err.message}` } : e, t("shell.play.switchBackFailed", { to: back.to, from: back.from }));
     return false;
   }
 }

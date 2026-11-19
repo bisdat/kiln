@@ -4,8 +4,9 @@
 //! player had downloaded. A running launcher can see only what is gone next to it: a Windows install (Tauri's NSIS
 //! installer) puts `uninstall.exe` next to the launcher's exe, and the exe itself can be gone when it was taken while it
 //! ran. When one of them is gone, launcher.log says it, the window says it once (`AppInfo.own_files_missing`,
-//! launcher/src/shell/OwnFilesNotice.tsx) and the support report has a finding (`launcher-files-missing`). The setup is in the player's downloads, which the launcher does not know: not looked at.
-//! Other installs (the AppImage, a .deb, a development build, an MSI) are not looked at either.
+//! launcher/src/shell/OwnFilesNotice.tsx) and the support report has a finding (`launcher-files-missing`). The setup is
+//! in the player's downloads, which the launcher does not know: not looked at. Other installs (the AppImage, a .deb, a
+//! development build, an MSI, a build's own exe without the runtime the setup puts beside it) are not looked at either.
 
 use kiln_manage::report::{Finding, Level};
 use std::path::Path;
@@ -15,9 +16,11 @@ use std::sync::OnceLock;
 pub const UNINSTALLER: &str = "uninstall.exe";
 
 /// The file names of a Windows install's own files that are not in the folder of `exe` (the launcher's exe): the exe
-/// itself, then the uninstaller. Nothing when `nsis` is false (not that installer's install).
+/// itself, then the uninstaller. Nothing when `nsis` is false (not that installer's install), and nothing in a folder
+/// without the Kiln runtime the setup puts next to the exe (`runtime/kiln-runtime.zip`): the exe a Windows build leaves
+/// beside its setup reports the NSIS bundle too, and a tester runs it on its own.
 pub fn missing_next_to(exe: &Path, nsis: bool) -> Vec<String> {
-    let Some(dir) = exe.parent().filter(|_| nsis) else { return Vec::new() };
+    let Some(dir) = exe.parent().filter(|d| nsis && d.join(crate::commands::runtime::SHIPPED_RUNTIME).is_file()) else { return Vec::new() };
     let mut out = Vec::new();
     if !exe.exists() {
         out.extend(exe.file_name().map(|n| n.to_string_lossy().into_owned()));
@@ -78,6 +81,10 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let exe = dir.join("Kiln Launcher.exe");
         std::fs::write(&exe, b"MZ").unwrap();
+        // the exe of a build folder (no runtime beside it, as the setup puts there): not an install, nothing is looked at
+        assert!(missing_next_to(&exe, true).is_empty());
+        std::fs::create_dir_all(dir.join("runtime")).unwrap();
+        std::fs::write(dir.join(crate::commands::runtime::SHIPPED_RUNTIME), b"PK").unwrap();
         std::fs::write(dir.join(UNINSTALLER), b"MZ").unwrap();
         assert!(missing_next_to(&exe, true).is_empty());
         std::fs::remove_file(dir.join(UNINSTALLER)).unwrap();
