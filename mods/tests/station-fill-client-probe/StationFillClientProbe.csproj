@@ -4,10 +4,16 @@
   <PropertyGroup>
     <KilnModId>station-fill-client-probe</KilnModId>
     <KilnModName>Station Fill client probe (read only)</KilnModName>
-    <Version>0.1.0</Version>
+    <Version>0.1.1</Version>
     <KilnServices>Ui;Stations;Items;Chat;Players;World;Client</KilnServices>
     <KilnSide>both</KilnSide>
     <KilnClients>kiln</KilnClients>
   </PropertyGroup>
+  <!-- The research checkout's SDK has moved on to API 0.2.10. Build the probe from
+       the pinned v0.2.0-dev.29.17 API 0.2.9 source; do not falsify apiVersion. -->
+  <Target Name="GuardProbeSdk029" BeforeTargets="CoreCompile">
+    <Error Condition="'$(KilnModApiVersion)' != '0.2.9'"
+           Text="Station Fill probe requires Kiln SDK API 0.2.9. Run mods/tests/station-fill-client-probe/build-for-dev29.17.sh (do not use a newer fork main SDK)." />
+  </Target>
   <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.targets" />
 </Project>
