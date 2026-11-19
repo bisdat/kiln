@@ -353,6 +353,12 @@ engines' mods") and 5.8.
   be done, the folder is in the result as one that may still run (where Kiln finds no XHL-Core, a note says that it
   could not, since an XHL-Core Kiln does not recognize may still load it). A copy that stays when Kiln stops managing the game
   (Deactivate, uninstall) keeps the renamed file, and the result says how to name it back.
+- **A Kiln mod and an XHL-Core plugin of the same id** (0.2.0-dev.29.19). XHL ships Kiln builds of his mods (the
+  "(Kiln)" files on Nexus, with XHL-Core (Kiln) as their shared mod) under the ids of his XHL-Core plugins, for example
+  `kiln:xhl-grappling-hook-pull-2x` beside `eml:xhl-grappling-hook-pull-2x`. They are two Library entries of two kinds,
+  and a profile may hold both. With both on and XHL-Core in the game, Kiln loads the Kiln mod and XHL-Core loads the
+  plugin from the game's mods folder, so the mod runs twice: the activation says so for each such pair and asks to switch
+  one of them off. It changes nothing by itself.
 - **A player's own ShroudForge folder.** A folder in ShroudForge's mods folder that Kiln did not place and that serves a
   profile entry (it is called `<library id>`, or its mod.json holds the entry's package id under any folder name) is
   the player's: activation says so ("the game uses your own folder …"), places no second copy, and neither switches,
