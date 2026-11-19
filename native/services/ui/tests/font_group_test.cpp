@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
-// font_group.h: which of the game's fonts gives the overlay a Chinese, Japanese or Korean language's glyphs, read from made-up
-// keen::UiFontResource bytes (no game data): the language's own group, its regular sets in order, each font once, the
-// ranges as ImGui's exclusions, a layout other than 26430625's (as the reflection would give it), bad data; and the
-// budget of font_budget.h for a group's files.
+// font_group.h: which of the game's fonts give the overlay the glyphs its Latin font lacks, read from made-up
+// keen::UiFontResource bytes (no game data): a CJK language's own group, its regular sets in order, each font once, the
+// ranges as ImGui's exclusions; the default group's sets after its Latin source (Cyrillic, Thai) and whether they cover
+// Cyrillic; the languages (CJK, Cyrillic); a layout other than 26430625's (as the reflection would give it), bad data; and
+// the budgets of font_budget.h for a group's files and the default group's.
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -84,11 +85,14 @@ static std::vector<FakeGroup> game_like() {
     const uint64_t bit = 1;
     return {
         {(bit << 1) | (bit << 3) | (bit << 20) | (bit << 11), true,
-         {{4, 2, {{0, 0x3ff}}}, {0, 0, {{0, 0x3ff}, {0x500, 0xdff}}}, {24, 1, {{0, 0x3ff}}}, {13, 0, {{0x2e80, 0xabff}}}}},
+         {{4, 2, {{0, 0x3ff}}}, {0, 0, {{0, 0x3ff}, {0x500, 0xdff}}}, {24, 1, {{0, 0x3ff}}}, {13, 0, {{0x2e80, 0xabff}}},
+          {26, 1, {{0x400, 0x4ff}}}, {10, 0, {{0x400, 0x4ff}, {0x20a9, 0x20a9}, {0x2116, 0x2116}}}, {12, 0, {{0xac00, 0xffff}}},
+          {6, 0, {{0xe00, 0xe7f}}}, {0, 0, {{0x2000, 0x206f}}}}},
         {bit << 20, false, {{18, 2, {{0, 0xabff}}}, {13, 0, {{0, 0xabff}}}, {5, 1, {{0, 0xabff}}}, {12, 0, {{0xac00, 0xffff}}}}},
         {bit << 11, false, {{3, 0, {{0, 0xabff}}}, {12, 0, {{0xac00, 0xffff}}}}},
         {bit << 13, false, {{20, 2, {{0, 0xffff}}}, {12, 0, {{0, 0xffff}}}}},
         {bit << 21, false, {{21, 0, {{0, 0xabff}}}, {12, 0, {{0xac00, 0xffff}}}, {12, 0, {{0xac00, 0xffff}}}}},
+        {(bit << 9) | (bit << 24) | (bit << 34), false, {{10, 0, {{0, 0xabff}}}, {12, 0, {{0xac00, 0xffff}}}, {13, 0, {{0x500, 0xabff}}}}},
     };
 }
 
@@ -99,11 +103,22 @@ int main() {
     CHECK(fg::language_id("zh-tw") == fg::kZhTw && fg::language_id("zh-HK") == fg::kZhTw && fg::language_id("zh-hant-tw") == fg::kZhTw);
     CHECK(fg::language_id("ja") == fg::kJaJp && fg::language_id("ja-jp") == fg::kJaJp && fg::language_id("ko-KR") == fg::kKoKr);
     CHECK(fg::language_id("en-us") == fg::kNone && fg::language_id("") == fg::kNone && fg::language_id("jav") == fg::kNone);
-    // whose glyphs: Kiln's language when CJK, else the game's when CJK
+    // Cyrillic: ru, uk, bg have the game's ids; the others count as ru-RU; Serbian in Latin script needs nothing
+    CHECK(fg::language_id("ru") == fg::kRuRu && fg::language_id("ru-RU") == fg::kRuRu && fg::language_id("uk_ua") == fg::kUkUa);
+    CHECK(fg::language_id("bg-bg") == fg::kBgBg && fg::language_id("be") == fg::kRuRu && fg::language_id("sr-cyrl") == fg::kRuRu);
+    CHECK(fg::language_id("sr-latn-rs") == fg::kNone && fg::language_id("run") == fg::kNone && fg::language_id("pl-pl") == fg::kNone);
+    CHECK(fg::cyrillic(fg::kRuRu) && fg::cyrillic(fg::kUkUa) && fg::cyrillic(fg::kBgBg) && !fg::cyrillic(fg::kZhCn) && !fg::cjk(fg::kRuRu));
+    // whose group: Kiln's language when CJK, else the game's when CJK
     CHECK(fg::wanted("zh-cn", 3) == fg::kZhCn);          // Kiln forced Chinese in a German game
     CHECK(fg::wanted("en-us", fg::kJaJp) == fg::kJaJp);  // Kiln forced English in a Japanese game: mods' texts are Japanese
     CHECK(fg::wanted("de-de", 3) == fg::kNone);
     CHECK(fg::wanted("", fg::kKoKr) == fg::kKoKr);       // before Kiln.Ui said anything
+    CHECK(fg::wanted("ru", fg::kZhCn) == fg::kZhCn);     // Kiln in Russian in a Chinese game: mods' Chinese still drawn
+    CHECK(fg::wanted("ru", 3) == fg::kNone);             // Cyrillic needs no group of its own (the default group's fonts)
+    // whose glyphs look_info reports: Kiln's language when not Latin, else the game's when not Latin
+    CHECK(fg::needed("ru-ru", 1) == fg::kRuRu && fg::needed("ru", fg::kZhCn) == fg::kRuRu && fg::needed("zh", fg::kRuRu) == fg::kZhCn);
+    CHECK(fg::needed("en-us", fg::kUkUa) == fg::kUkUa && fg::needed("en-us", fg::kJaJp) == fg::kJaJp);
+    CHECK(fg::needed("de", 3) == fg::kNone && fg::needed("en", 17) == fg::kNone);  // Thai: the game draws it with the default group too
 
     // ---- the group of a language, with 26430625's layout ----
     const fg::Layout l;
@@ -123,6 +138,31 @@ int main() {
     CHECK(p.group == 4 && p.sets.size() == 2 && p.sets[1].font == 12);  // font 12 once
     p = fg::pick(res.data(), res.size(), 3, l);                          // German: no group of its own needed
     CHECK(p.group == -1 && p.sets.empty() && !p.why.empty());
+    p = fg::pick(res.data(), res.size(), fg::kRuRu, l);                  // Russian: its own group is never taken (default's fonts)
+    CHECK(p.group == -1 && p.sets.empty());
+
+    // ---- the default group's fonts after its Latin source ----
+    p = fg::pick_default(res.data(), res.size(), l);
+    CHECK(p.group == 0 && p.font_count == 28);
+    // regular only, in the group's order, the Latin source (font 0, also its second set) left out, each font once
+    CHECK(p.sets.size() == 4 && p.sets[0].font == 13 && p.sets[1].font == 10 && p.sets[2].font == 12 && p.sets[3].font == 6);
+    CHECK(p.sets[1].ranges.size() == 3 && p.sets[1].ranges[0].first == 0x400 && p.sets[1].ranges[2].last == 0x2116);
+    CHECK(fg::covers(p.sets, 0x410, 0x44f) && !fg::covers(p.sets, 0x370, 0x3ff));
+    CHECK(!fg::covers({p.sets[0], p.sets[2], p.sets[3]}, 0x410, 0x44f));  // without Noto Serif: no Cyrillic
+    CHECK((fg::exclude_ranges(p.sets[1].ranges) == std::vector<uint16_t>{1, 0x3ff, 0x500, 0x20a8, 0x20aa, 0x2115, 0x2117, 0xffff, 0}));
+    {  // no default group: why
+        auto groups = game_like();
+        groups.erase(groups.begin());
+        const auto nodef = resource(l, sizes, groups);
+        p = fg::pick_default(nodef.data(), nodef.size(), l);
+        CHECK(p.group == -1 && p.sets.empty() && p.why.find("no default") != std::string::npos);
+        groups = game_like();
+        groups[0].sets = {{0, 0, {{0, 0xffff}}}, {24, 1, {{0, 0xffff}}}};  // only its Latin source
+        const auto latin = resource(l, sizes, groups);
+        p = fg::pick_default(latin.data(), latin.size(), l);
+        CHECK(p.group == 0 && p.sets.empty() && !p.why.empty());
+    }
+    CHECK(fg::pick_default(res.data(), 4, l).sets.empty());  // too short: nothing, never out of bounds
     // the default group is never taken, even when its mask has the language
     auto only_default = game_like();
     only_default.resize(1);
@@ -138,6 +178,8 @@ int main() {
     const auto other = resource(o, sizes, game_like());
     p = fg::pick(other.data(), other.size(), fg::kZhCn, o);
     CHECK(p.group == 1 && p.sets.size() == 2 && p.sets[0].font == 13 && p.sets[0].ranges[0].first == 0 && p.sets[0].ranges[0].last == 0xabff);
+    p = fg::pick_default(other.data(), other.size(), o);
+    CHECK(p.group == 0 && p.sets.size() == 4 && p.sets[1].font == 10 && fg::covers(p.sets, 0x410, 0x44f));
     // read with the wrong layout: nothing found or nothing sensible, never out of bounds (ASan)
     p = fg::pick(other.data(), other.size(), fg::kZhCn, l);
     CHECK(p.sets.empty() || p.sets[0].font < 28);
@@ -180,6 +222,19 @@ int main() {
     CHECK(fonts::admit_group(tiny, 1) == 0);
     const size_t five[5] = {2000000, 2000000, 2000000, 2000000, 2000000};
     CHECK(fonts::admit_group(five, 5) == fonts::kMaxGroupFonts);
+
+    // ---- the budget of the default group's files: small ones only, the large CJK fallbacks between them skipped ----
+    {
+        const size_t game[4] = {11214632, 515892, 7384364, 61636};  // 26430625: SC, Noto Serif, KR, Thai
+        bool keep[4] = {};
+        CHECK(fonts::admit_default(game, 4, keep) == 2 && !keep[0] && keep[1] && !keep[2] && keep[3]);
+        const size_t many[6] = {1500000, 1500000, 1500000, 600000, 2000, 2000};  // 4 MiB together, 4 files at most
+        bool k6[6] = {};
+        CHECK(fonts::admit_default(many, 6, k6) == 4 && k6[0] && k6[1] && !k6[2] && k6[3] && k6[4] && !k6[5]);
+        const size_t odd[2] = {12, fonts::kMaxDefaultFontBytes};
+        bool k2[2] = {};
+        CHECK(fonts::admit_default(odd, 2, k2) == 1 && !k2[0] && k2[1]);
+    }
 
     std::printf("font_group_test: %d checks, %d failed\n", g_checks, g_fail);
     return g_fail ? 1 : 0;
