@@ -1,1 +1,3 @@
 #nullable enable
+Kiln.TestKit.KilnHarness.LogFile.get -> string!
+Kiln.TestKit.KilnHarness.ReadLogFile() -> string!
