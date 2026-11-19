@@ -88,7 +88,7 @@ test.describe("Steam Deck", () => {
     await page.waitForTimeout(60);
   }
 
-  test("the Language row steps through System, English and 简体中文; the Deck follows at once", async ({ page }) => {
+  test("the Language row steps through System, English, each translation and 简体中文 last; the Deck follows at once", async ({ page }) => {
     await page.goto("/?deck=steamdeck#/deck/settings");
     const row = page.locator('[data-deck-id="set-language"]');
     await expect(row).toBeEnabled();
@@ -97,6 +97,11 @@ test.describe("Steam Deck", () => {
     await row.focus();
     await pad(page, "a");
     await expect(row).toContainText("English");
+    // then the translations by tag (i18n languages(): English first, then by tag), each named in its own language
+    for (const name of ["Deutsch", "Español", "Français", "Italiano", "日本語", "한국어", "Polski", "Português (Brasil)", "Русский"]) {
+      await pad(page, "a");
+      await expect(row).toContainText(name);
+    }
     await pad(page, "a");
     await expect(row).toContainText("简体中文");
     await expect(row).toContainText("语言");
