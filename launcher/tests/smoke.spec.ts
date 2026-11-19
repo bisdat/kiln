@@ -673,6 +673,8 @@ test("every page reaches all of its content at 1024×640 (nothing cut off withou
 
 test("screenshots of the main pages", async ({ page }) => {
   test.skip(process.env.SHOTS === "0", "SHOTS=0");
+  // 34 pages at two sizes with a settle wait each: ~56 s alone on an idle PC, so the default 60 s is not enough
+  test.setTimeout(180_000);
   mkdirSync(SHOTS, { recursive: true });
   const shots: [string, string][] = [
     ["play", "/"], ["load-order", "/mods/order"], ["mods-native", "/mods/native"], ["mods-engines", "/mods/engines"],

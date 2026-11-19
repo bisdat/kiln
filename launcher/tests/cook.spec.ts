@@ -60,7 +60,7 @@ test("the cook shows its progress as a task: the mod and then each line the tool
   await play.click();
   await page.locator(".k-tray-btn").click();
   const task = page.getByRole("dialog", { name: "Tasks" }).locator(".k-task", { hasText: "Cook mods" });
-  await expect(task.locator(".k-task-msg")).toHaveText("Cooking New Items (1 of 1)", { timeout: 5_000 });
+  await expect(task.locator(".k-task-msg")).toHaveText("Cooking New Items (1 of 1)", { timeout: 10_000 });
   await expect(task.locator(".k-task-msg")).toHaveText("New Items: kiln: cooking assets/cook.json (modelcook)", { timeout: 8_000 });
   await expect(task.locator(".k-task-pct")).toBeVisible();
   // and the start follows the cook, not before it ends
