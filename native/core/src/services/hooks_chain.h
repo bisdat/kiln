@@ -135,7 +135,10 @@ struct TargetInfo {
         Kind kind = Kind::Raw;
         int32_t priority = 0;
     };
-    uintptr_t address = 0, rva = 0;
+    uintptr_t address = 0, rva = 0;   // rva: 0 for a target in another module
+    std::string module;               // a target inside another module (open_module): its file name; "" in the exe
+    uintptr_t offset = 0;             // ... and the target's offset from that module's base
+    std::string path;                 // ... and its file (module_place.h), as foreign-hook records give it
     std::string symbol;               // sigdb name of the address ("" = none)
     std::string label;                // symbol, else the first link's label, else "rva 0x..."
     std::vector<LinkRow> links;       // live links in chain order (the first one runs first)

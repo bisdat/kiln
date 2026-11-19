@@ -1,1 +1,17 @@
 #nullable enable
+Kiln.HookModule
+Kiln.HookModule.At(nuint offset) -> nuint
+Kiln.HookModule.Base.get -> nuint
+Kiln.HookModule.CodeEnd.get -> nuint
+Kiln.HookModule.CodeStart.get -> nuint
+Kiln.HookModule.Contains(nuint address) -> bool
+Kiln.HookModule.Describe(nuint address) -> string!
+Kiln.HookModule.Find(string! pattern) -> nuint
+Kiln.HookModule.FindAll(string! pattern, int max = 64) -> nuint[]!
+Kiln.HookModule.IsGame.get -> bool
+Kiln.HookModule.Name.get -> string!
+Kiln.HookModule.Size.get -> nuint
+override Kiln.HookModule.ToString() -> string!
+static Kiln.Hooks.FindInModule(string! moduleName, string! pattern) -> nuint
+static Kiln.Hooks.Module(string! name) -> Kiln.HookModule!
+static Kiln.Hooks.TryModule(string! name, out Kiln.HookModule? module) -> bool

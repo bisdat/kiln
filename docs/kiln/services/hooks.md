@@ -304,6 +304,22 @@ state and never call into it again; do not wait and do not call game code. A cal
 already running on another thread is the service's own to guard. `unsubscribe_owner_retiring(handle)` may be called
 from inside the callback.
 
+## Hooks inside another module: `open_module`, `module_scan` (since 0.2.0-dev.29.19)
+Every hook kind takes addresses in the game exe's image only (anything else: `KILN_ERR_INVALID_ARGUMENT`). To hook
+inside another loaded module (another mod's DLL, a loader's DLL), open it: `hooks->open_module(owner, name, &m)` (offset 312; `module_scan` at 320, table 328 bytes; check
+`header.size` covers it; the capability row is `hooks.foreign_modules`). It finds the module by file name, never loads
+it (`KILN_ERR_NOT_FOUND` while it is not there), refuses Kiln's own modules (`KILN_ERR_UNAVAILABLE`), reads its
+executable sections from its mapped PE headers and **pins** it (`GetModuleHandleEx` with `PIN`): the registry never
+removes a physical detour, so the code a detour is written into must stay mapped for the life of the process. From then
+on addresses inside those sections are targets for `detour`, `mid`, `raw_detour`, `detour2`, `mid2` and `mid2_checked`,
+for every owner; headers, data and the space between sections stay refused. Typed links stay the game's
+(`KILN_HOOKS_ERR_SIG_UNKNOWN` with a `typed_refusal` text: no exe code to check the descriptor against), and
+`fingerprint`, `read_original` and `code_state` read the exe only (an address in an opened module is `KILN_ERR_INVALID_ARGUMENT` there). `m` gives the base, image size, code span and `KILN_HOOKS_MODULE_PINNED` (or
+`KILN_HOOKS_MODULE_GAME` for the exe, which is not pinned). `module_scan(m.base, pattern, out, cap, &count)` searches the
+live bytes of the opened module's code with `scan`'s results. kiln.log has one line per module opened, and names every
+link and thread-stop line of such a target `<module>+0x<offset> [<file>]` (module_place.h, as the overlap lines) instead of `rva 0x...`; the hook map gives the target
+`"module"`, `"offset"` and `"path"` with `"rva": null`. Managed: `Hooks.Module` ([../hooks.md](../hooks.md#hooks-inside-another-mods-dll-since-020-dev2919)).
+
 ## Typed hooks and calls: `detour_typed`, Kiln.Sigs (since 0.2.0-dev.29)
 A typed link hooks or calls a game function as a function: integer, pointer, float and double arguments in their
 Win64 positions (`rcx`/`xmm0` ... `r9`/`xmm3`, then the caller's stack), and the return in `rax`, `xmm0` or a hidden
@@ -521,6 +537,12 @@ are not counted per call. Structured and mid dispatches are counted by each thre
   pause inside the install makes it deterministic): it finishes after the install and reads MANAGED, and a
   `read_original` call made meanwhile returns at once. Each run has a time limit (300 s), so a lock-order deadlock
   fails the run instead of hanging it.
+  Its   foreign-module test (also alone: `hooks_v2_test.exe module`, run natively on Windows too) opens `hooks-v2-module.dll`
+  (built from `native/core/tests/hooks_module_dll.cpp`): refused before it is opened, not found when not loaded, Kiln's
+  own names refused, pinned (FreeLibrary no longer unloads it), headers and data refused, mid, v1 mid, raw and
+  structured links inside it, module+offset in kiln.log and the map, `module_scan`, typed links, `read_original` and `code_state` refused there.
+- `native/core/tests/test-hooks-modules.sh` (host): the executable sections `open_module` reads from a module's PE
+  headers, and which names are Kiln's own modules.
 - `native/core/tests/test-hooks-typed.sh` (Wine, no game): the typed link kind (the T3 set of sret, f64, eight stack
   arguments, narrow integers, mixed positions; the call state machine, faults before and after `CallOriginal`, a
   24- and a 128-byte struct return restored whole after a faulting handler, eight callers while a ninth installs and

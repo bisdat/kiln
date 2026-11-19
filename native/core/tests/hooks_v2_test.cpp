@@ -202,6 +202,12 @@ bool log_has(const std::string& needle) {
         if (l.find(needle) != std::string::npos) return true;
     return false;
 }
+std::string log_line(const std::string& needle) {
+    std::lock_guard lock(g_log_mutex);
+    for (const auto& l : g_lines)
+        if (l.find(needle) != std::string::npos) return l;
+    return "(no line)";
+}
 size_t log_count(const std::string& needle) {
     std::lock_guard lock(g_log_mutex);
     size_t n = 0;
@@ -2406,6 +2412,169 @@ void test_symbol_cache_and_counts() {
     A->revoke_owner(6);
 }
 
+// ---- hooks inside another module (open_module, 0.2.0-dev.29.19): XHL-Creative-Mode-Fix's mid hook in creative.dll
+struct HooksModuleInfo {
+    void* add;
+    void* add_mid;
+    void* twice;
+    void* marked;
+    const void* data;
+};
+
+std::wstring exe_dir() {
+    wchar_t path[MAX_PATH];
+    const DWORD n = GetModuleFileNameW(nullptr, path, MAX_PATH);
+    std::wstring w(path, n);
+    return w.substr(0, w.find_last_of(L"\\/") + 1);
+}
+
+KilnStr kstr(const char* s) { return KilnStr{s, std::strlen(s)}; }
+
+void test_foreign_module() {
+    std::puts("-- hooks inside another module: refused until the module is opened; then pinned, hooked, named, scanned");
+    const HMODULE dll = LoadLibraryW((exe_dir() + L"hooks-v2-module.dll").c_str());
+    check(dll != nullptr, "hooks-v2-module.dll loads (another mod's DLL)");
+    if (!dll) return;
+    HooksModuleInfo mi{};
+    const auto info = reinterpret_cast<void (*)(HooksModuleInfo*)>(reinterpret_cast<void*>(GetProcAddress(dll, "hooks_module_info")));
+    if (info) info(&mi);
+    check(info && mi.add && mi.add_mid && mi.marked && mi.data, "it hands out its functions");
+    if (!info) return;
+    const auto mod_add = reinterpret_cast<int (*)(int)>(mi.add);
+    const auto mod_twice = reinterpret_cast<int (*)(int)>(mi.twice);
+    const uintptr_t mid_at = reinterpret_cast<uintptr_t>(mi.add_mid);
+    static auto plus100 = +[](KilnRegisters* r, void*) { r->rcx += 100; ran('X'); };
+    const auto om = ord(0, "t/module-mid");
+    // what netjunk's kiln.log showed: "Hooks.Mid(0x7FFB83A7F5F7): invalid argument" for an address in creative.dll
+    check(A->mid2(6, mid_at, &om, plus100, nullptr, nullptr) == KILN_ERR_INVALID_ARGUMENT &&
+              A->mid(6, mid_at, 0, plus100, nullptr, nullptr) == KILN_ERR_INVALID_ARGUMENT,
+          "an address in a module nobody opened is still refused (the game's image only)");
+    const bool has = A->header.size >= offsetof(KilnHooksApi, module_scan) + sizeof(void*) && A->open_module && A->module_scan;
+    check(has && offsetof(KilnHooksApi, open_module) == 312 && offsetof(KilnHooksApi, module_scan) == 320 && A->header.size == 328,
+          "the table carries open_module at 312 and module_scan at 320 (328 bytes)", "size " + std::to_string(A->header.size));
+    if (!has) return;
+    KilnHooksModule m{};
+    m.size = sizeof m;
+    check(A->open_module(6, kstr("hooks-v2-never-loaded.dll"), &m) == KILN_ERR_NOT_FOUND &&
+              GetModuleHandleW(L"hooks-v2-never-loaded.dll") == nullptr,
+          "a module that is not loaded: not found, and open_module does not load it");
+    check(A->open_module(6, kstr(""), &m) == KILN_ERR_INVALID_ARGUMENT, "an empty name is refused");
+    KilnHooksModule small{};
+    small.size = 8;
+    check(A->open_module(6, kstr("hooks-v2-module.dll"), &small) == KILN_ERR_INVALID_ARGUMENT, "a short out struct is refused");
+    // one of Kiln's own modules (a copy of the test DLL under a kiln-*.dll name)
+    const std::wstring own = exe_dir() + L"kiln-hooks-v2-own.dll";
+    CopyFileW((exe_dir() + L"hooks-v2-module.dll").c_str(), own.c_str(), FALSE);
+    const HMODULE own_h = LoadLibraryW(own.c_str());
+    check(own_h && A->open_module(6, kstr("kiln-hooks-v2-own.dll"), &m) == KILN_ERR_UNAVAILABLE,
+          "Kiln's own modules (kiln-*.dll) are not opened for hooks");
+    if (own_h) FreeLibrary(own_h);
+    check(GetModuleHandleW(L"kiln-hooks-v2-own.dll") == nullptr, "...and not pinned: it unloads");
+
+    m = {};
+    m.size = sizeof m;
+    const KilnResult rc = A->open_module(6, kstr("HOOKS-V2-MODULE.DLL"), &m);
+    const uintptr_t base = reinterpret_cast<uintptr_t>(dll);
+    check(rc == KILN_OK && m.base == base && m.image_size > 0 && (m.flags & KILN_HOOKS_MODULE_PINNED) &&
+              !(m.flags & KILN_HOOKS_MODULE_GAME) && m.code_sections >= 1 && m.code_lo <= mid_at && mid_at < m.code_hi,
+          "open_module finds it by file name (any case), pins it and reports its code", std::to_string(rc));
+    check(log_has("hooks: hooks-v2-module.dll [") && log_has("] opened for hooks by test"),
+          "kiln.log names the module, its file in brackets as the overlap lines do, and who opened it", log_line("opened for hooks"));
+    KilnHooksModule again{};
+    again.size = sizeof again;
+    const size_t opened_lines = log_count("opened for hooks");
+    check(A->open_module(5, kstr("hooks-v2-module.dll"), &again) == KILN_OK && again.base == base &&
+              log_count("opened for hooks") == opened_lines,
+          "opening it again is the same module and logs nothing new");
+    // pinned: every reference the test holds is given back (and more), the module stays
+    for (int i = 0; i < 4; ++i) FreeLibrary(dll);
+    check(GetModuleHandleW(L"hooks-v2-module.dll") == dll, "pinned: FreeLibrary no longer unloads it");
+
+    check(A->mid2(6, base, &om, plus100, nullptr, nullptr) == KILN_ERR_INVALID_ARGUMENT,
+          "its headers are no hook target");
+    check(A->mid2(6, reinterpret_cast<uintptr_t>(mi.data), &om, plus100, nullptr, nullptr) == KILN_ERR_INVALID_ARGUMENT,
+          "its read-only data is no hook target");
+    check(A->mid2(6, base + m.image_size + 0x1000, &om, plus100, nullptr, nullptr) == KILN_ERR_INVALID_ARGUMENT,
+          "an address past its image is no hook target");
+    KilnHandle hm = 0;
+    check(A->mid2(6, mid_at, &om, plus100, nullptr, &hm) == KILN_OK && hm, "a mid hook inside its code is installed");
+    take_order();
+    check(mod_add(1) == 102 && take_order() == "X", "the mid hook runs inside the other module and changes a register");
+    check(log_line("on hooks-v2-module.dll+0x").find(" [") != std::string::npos, "kiln.log names the link's place as module+offset [file]", log_line("on hooks-v2-module.dll+0x"));
+    check(!log_has("on rva 0xffff"), "...not as an rva of the game");
+    // v1 mid, raw and structured links work there too
+    static int (*orig_twice)(int) = nullptr;
+    static auto raw_twice = +[](int x) -> int { ran('R'); return orig_twice(x) * 2; };
+    static auto s2 = +[](KilnHookCall2* c, void*) -> uintptr_t { ran('S'); c->args[0] += 10; return A->call_original2(c); };
+    const auto orw = ord(2, "t/module-raw"), os2 = ord(1, "t/module-s2");
+    const uintptr_t twice = reinterpret_cast<uintptr_t>(mi.twice);
+    check(A->raw_detour(6, twice, &orw, reinterpret_cast<void*>(raw_twice), reinterpret_cast<void**>(&orig_twice), nullptr) == KILN_OK &&
+              A->detour2(6, twice, &os2, 1, s2, nullptr, nullptr) == KILN_OK,
+          "raw and structured detours on a function of the module");
+    check(mod_twice(1) == 24 && take_order() == "RS", "both run in order, then the module's function once", "");
+    static auto v1 = +[](KilnRegisters* r, void*) { r->rcx += 1000; ran('V'); };
+    check(A->mid(6, mid_at, 5, v1, nullptr, nullptr) == KILN_OK && mod_add(1) == 1102 && take_order() == "VX",
+          "a v1 mid link joins the mid hook's chain (priority 5 first)");
+    // the map lists the targets with module and offset
+    size_t len = 0;
+    A->map_json(nullptr, 0, &len);
+    std::string buf(len + 1, '\0');
+    A->map_json(buf.data(), buf.size(), &len);
+    const json j = json::parse(buf.data(), buf.data() + len, nullptr, false);
+    bool row = false;
+    char want[32];
+    std::snprintf(want, sizeof want, "0x%llx", static_cast<unsigned long long>(mid_at - base));
+    if (j.is_object())
+        for (auto& t : j["targets"])
+            if (lower(t.value("module", "")) == "hooks-v2-module.dll" && t.value("offset", "") == want && t["rva"].is_null())
+                row = true;
+    check(row, "the hook map lists the target with module, offset and rva null", want);
+    // module_scan: the live bytes of its code
+    uintptr_t hits[4] = {};
+    uint32_t count = 0;
+    const KilnResult sr = A->module_scan(base, kstr("41 BA 4D 3C 2B 1A 89 C8 83 C0 07 C3"), hits, 4, &count);
+    check(sr == KILN_OK && count == 1 && hits[0] == reinterpret_cast<uintptr_t>(mi.marked),
+          "module_scan finds the one match in its code", std::to_string(sr) + " / " + std::to_string(count));
+    check(A->module_scan(base, kstr("41 BA 4D 3C 2B 1A 89 C8 83 C0 08 C3"), hits, 4, &count) == KILN_ERR_NOT_FOUND && count == 0,
+          "a pattern that is not there: not found");
+    check(A->module_scan(base + 0x10, kstr("41 BA"), hits, 4, &count) == KILN_ERR_INVALID_ARGUMENT &&
+              A->module_scan(base, kstr("zz"), hits, 4, &count) == KILN_ERR_INVALID_ARGUMENT,
+          "module_scan wants an opened module's base and a valid pattern");
+    // the game's exe: reported, not pinned; an address of the exe outside the game's image stays refused
+    KilnHooksModule game{};
+    game.size = sizeof game;
+    check(A->open_module(6, kstr(exe_name_lower().c_str()), &game) == KILN_OK && (game.flags & KILN_HOOKS_MODULE_GAME) &&
+              !(game.flags & KILN_HOOKS_MODULE_PINNED),
+          "the game's exe answers as the game, nothing pinned");
+    check(A->mid2(6, reinterpret_cast<uintptr_t>(&kiln_check_call), &om, plus100, nullptr, nullptr) == KILN_ERR_INVALID_ARGUMENT,
+          "the exe's code outside the game's image is still refused");
+    // typed links stay the game's: there is no exe code to check a descriptor against in another module
+    KilnSigArg targ{};
+    targ.name = kstr("x");
+    targ.kind = KILN_SIG_S32;
+    KilnSig tsig{};
+    tsig.size = sizeof tsig;
+    tsig.argc = 1;
+    tsig.args = &targ;
+    tsig.ret_kind = KILN_SIG_S32;
+    static auto typed_fn = +[](KilnCallFrame*, void*) -> uintptr_t { return KILN_TYPED_CONTINUE; };
+    const auto oty = ord(0, "t/module-typed");
+    check(A->detour_typed_checked(6, twice, &oty, &tsig, typed_fn, nullptr, nullptr) == KILN_HOOKS_ERR_SIG_UNKNOWN &&
+              log_has("typed hook on t/module-typed refused: typed hooks check their descriptor against the game exe's code"),
+          "a typed hook inside the module is refused with a reason (its descriptor needs the game's code)");
+    check(A->fingerprint(twice, nullptr, 0, &len) == KILN_ERR_INVALID_ARGUMENT, "fingerprint stays the game's code");
+    // read_original and code_state compare with the exe file's code: they do not apply inside another module
+    uint8_t orig[8];
+    std::memset(orig, 0x55, sizeof orig);
+    uint32_t cstate = 0x77;
+    uint64_t cgen = 0x77;
+    check(A->read_original(twice, orig, sizeof orig) == KILN_ERR_INVALID_ARGUMENT && orig[0] == 0x55 && orig[7] == 0x55 &&
+              A->code_state(twice, 8, &cstate, &cgen) == KILN_ERR_INVALID_ARGUMENT && cstate == 0x77 && cgen == 0x77,
+          "read_original and code_state refuse an address in the opened module and write nothing");
+    A->revoke_owner(6);
+    check(mod_add(1) == 2 && mod_twice(1) == 2 && take_order().empty(), "revoked: the module's functions run as before");
+}
+
 // ---- ur8 finding 6: the target cap (its own process: it uses up every target slot)
 void test_target_cap() {
     std::puts("-- every target slot used: a new address is refused and the plugins can tell; hooked addresses still take links");
@@ -2522,6 +2691,14 @@ int main(int argc, char** argv) {
         std::puts(g_fail ? "FAILED" : "all passed");
         return g_fail ? 1 : 0;
     }
+    if (argc > 1 && !std::strcmp(argv[1], "module")) {  // the foreign-module test alone (a quick run on real Windows)
+        g_service->init();
+        A = static_cast<const KilnHooksApi*>(g_service->table);
+        test_foreign_module();
+        std::printf("%d passed, %d failed\n", g_pass, g_fail);
+        std::puts(g_fail ? "FAILED" : "all passed");
+        return g_fail ? 1 : 0;
+    }
     if (argc > 1 && !std::strcmp(argv[1], "tls64"))  // push the caller-table slot into TlsExpansionSlots
         for (int i = 0; i < 70; ++i) TlsAlloc();
     std::printf("hooks_v2_test: game section %p +0x%zx, tls %s\n", reinterpret_cast<void*>(kiln::g_image.base),
@@ -2574,6 +2751,7 @@ int main(int argc, char** argv) {
     test_map_robust();
     test_refused_target();
     test_symbol_cache_and_counts();
+    test_foreign_module();
 
     {
         std::lock_guard lock(g_log_mutex);

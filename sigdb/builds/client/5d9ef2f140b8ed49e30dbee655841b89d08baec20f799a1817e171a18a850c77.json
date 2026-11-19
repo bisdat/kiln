@@ -11,7 +11,7 @@
   "declared": {
     "symbols": 807,
     "constants": 892,
-    "features": 231
+    "features": 232
   },
   "features": {
     "abilities.attributes": true,
@@ -93,6 +93,7 @@
     "gems.craft": true,
     "gems.payers": true,
     "gems.sockets": true,
+    "hooks.foreign_modules": true,
     "hooks.owner_cleanup": true,
     "hooks.typed": true,
     "items.catalog": true,
@@ -2663,6 +2664,16 @@
       },
       "features": {
         "quests.npc_pages": "static"
+      }
+    },
+    "dev29-xhl-foreign-modules": {
+      "level": "static",
+      "date": "2026-11-19",
+      "evidence": "resolved offline (tools/sigport/build_record.py)",
+      "symbols": {},
+      "constants": {},
+      "features": {
+        "hooks.foreign_modules": "static"
       }
     },
     "emf": {

@@ -103,8 +103,20 @@ struct Link {
     KilnHandle h() const { return handle.load(std::memory_order_relaxed); }
 };
 
+// How kiln.log and the hook map name a target: "rva 0x..." in the game exe; "<module>+0x..." in another module (a hook
+// inside a module opened with open_module, kiln_hooks.h). Worked out before the registry mutex is taken: finding the
+// module takes the loader lock, which a plugin installing a hook from its DllMain already holds.
+struct Place {
+    std::string text;        // "rva 0x1234" | "creative.dll+0x15f5f7" | "0x7ff6..." (in no module)
+    std::string short_text;  // "0x1234" | "creative.dll+0x15f5f7": the part after "<owner>@" in a default label
+    std::string module;      // the module's file name; "" in the game exe
+    uintptr_t offset = 0;    // from the module's base
+    std::string path;        // the module's file (module_place.h: relative to the game folder, else the full path)
+};
+
 struct Target {
     uintptr_t addr = 0;
+    Place where;
     uint32_t slot = 0;
     safetyhook::InlineHook hook;             // process lifetime: never reset
     uint8_t* entry_stub = nullptr;
@@ -558,6 +570,27 @@ bool module_of(uintptr_t a, Dest& d) {
 
 bool outside_exe(uintptr_t a) { return a < S().env.image_lo || a >= S().env.image_hi; }
 
+// Call without the registry mutex (module_of takes the loader lock).
+Place place_of(uintptr_t a) {
+    Place p;
+    if (!outside_exe(a)) {
+        p.short_text = hex(rva_of(a));
+        p.text = "rva " + p.short_text;
+        return p;
+    }
+    Dest d;
+    if (module_of(a, d)) {
+        p.module = d.module;
+        p.offset = d.offset;
+        p.path = d.path;
+        p.short_text = d.module + "+" + hex(d.offset);
+        p.text = p.short_text + module_place_suffix(d.path);  // the bracket the overlap lines use (module_place.h)
+    } else {
+        p.text = p.short_text = hex(a);
+    }
+    return p;
+}
+
 }  // namespace
 
 Dest analyze(uintptr_t at, const uint8_t* bytes) {
@@ -659,7 +692,7 @@ std::string target_label(Target& t) {
                 name = l->label;
                 break;
             }
-    if (name.empty()) name = "rva " + hex(rva_of(t.addr));
+    if (name.empty()) name = t.where.text;
     t.label_cache = name;
     return name;
 }
@@ -948,7 +981,7 @@ bool enable_detour(Target& t, FreezeReport& rep, uint32_t* unchecked = nullptr) 
 
 // g_mutex held. Finds or creates the target: entry stub, head cell, the one safetyhook inline detour. *refused_quietly
 // is set when the address was refused before with the same bytes (nothing allocated, nothing logged).
-Target* target_for(uintptr_t addr, bool* refused_quietly, uint32_t* unchecked = nullptr) {
+Target* target_for(uintptr_t addr, const Place& where, bool* refused_quietly, uint32_t* unchecked = nullptr) {
     State& s = S();
     if (auto it = s.by_addr.find(addr); it != s.by_addr.end()) return it->second;
     if (auto it = s.refused.find(addr); it != s.refused.end()) {
@@ -966,6 +999,7 @@ Target* target_for(uintptr_t addr, bool* refused_quietly, uint32_t* unchecked = 
     }
     auto t = std::make_unique<Target>();
     t->addr = addr;
+    t->where = where;
     t->slot = static_cast<uint32_t>(s.targets.size());
     if (s.spare_head) {
         t->head = s.spare_head;
@@ -1038,8 +1072,8 @@ Target* target_for(uintptr_t addr, bool* refused_quietly, uint32_t* unchecked = 
     auto hook = safetyhook::InlineHook::create(reinterpret_cast<void*>(addr), t->entry_stub,
                                                safetyhook::InlineHook::StartDisabled);
     if (!hook) {
-        KLOG_E("hooks: safetyhook could not detour rva %s (error %d); later requests for it are refused while its bytes "
-               "stay the same", hex(rva_of(addr)).c_str(), static_cast<int>(hook.error().type));
+        KLOG_E("hooks: safetyhook could not detour %s (error %d); later requests for it are refused while its bytes "
+               "stay the same", where.text.c_str(), static_cast<int>(hook.error().type));
         // An allocation failure (no memory near the target) is not the bytes' fault: not remembered.
         return fail(hook.error().type != safetyhook::InlineHook::Error::BAD_ALLOCATION);
     }
@@ -1063,47 +1097,47 @@ Target* target_for(uintptr_t addr, bool* refused_quietly, uint32_t* unchecked = 
     } admission{code_token};
     FreezeReport rep;
     if (enable_detour(*t, rep, unchecked)) {
-        KLOG_D("hooks: detour on rva %s written with %zu other thread(s) stopped (of %zu listed) for %.2f ms, %.2f ms to "
+        KLOG_D("hooks: detour on %s written with %zu other thread(s) stopped (of %zu listed) for %.2f ms, %.2f ms to "
                "list and open them (%zu not openable, %zu moved out of the replaced bytes, %zu without a context, %zu "
                "ended)",
-               hex(rva_of(addr)).c_str(), rep.stopped, rep.threads, rep.stopped_ms, rep.list_ms, rep.unopened, rep.moved,
+               where.text.c_str(), rep.stopped, rep.threads, rep.stopped_ms, rep.list_ms, rep.unopened, rep.moved,
                rep.no_context, rep.exited);
         if (rep.stopped_ms > 50)
-            KLOG_W("hooks: the other threads stood still for %.1f ms while the detour on rva %s was written",
-                   rep.stopped_ms, hex(rva_of(addr)).c_str());
+            KLOG_W("hooks: the other threads stood still for %.1f ms while the detour on %s was written",
+                   rep.stopped_ms, where.text.c_str());
         if (rep.moved)
-            KLOG_I("hooks: %zu thread(s) were paused inside the first bytes of rva %s and were moved to the trampoline",
-                   rep.moved, hex(rva_of(addr)).c_str());
+            KLOG_I("hooks: %zu thread(s) were paused inside the first bytes of %s and were moved to the trampoline",
+                   rep.moved, where.text.c_str());
         if (rep.unopened || rep.unstopped || rep.no_context)
-            KLOG_W("hooks: rva %s: %zu thread(s) could not be opened or stopped and %zu stopped one(s) gave no context "
+            KLOG_W("hooks: %s: %zu thread(s) could not be opened or stopped and %zu stopped one(s) gave no context "
                    "while the detour was written; they were not checked for the replaced bytes",
-                   hex(rva_of(addr)).c_str(), rep.unopened + rep.unstopped, rep.no_context);
+                   where.text.c_str(), rep.unopened + rep.unstopped, rep.no_context);
         if (rep.moved != rep.in_range)
-            KLOG_E("hooks: %zu thread(s) paused inside the first bytes of rva %s could not be moved; they may crash when they "
-                   "run on", rep.in_range - rep.moved, hex(rva_of(addr)).c_str());
+            KLOG_E("hooks: %zu thread(s) paused inside the first bytes of %s could not be moved; they may crash when they "
+                   "run on", rep.in_range - rep.moved, where.text.c_str());
     } else {
         if (unchecked) {  // a checked installation never falls back to an unchecked patch
             if (rep.why_n)
-                KLOG_W("hooks: rva %s: checked installation refused, nothing written: %zu thread(s) could not be checked "
+                KLOG_W("hooks: %s: checked installation refused, nothing written: %zu thread(s) could not be checked "
                        "(%zu not opened, %zu not stopped, %zu without an id or a context; %zu ended ones not counted); the "
                        "first: thread %lu, stop error %lu, exit code %lu%s",
-                       hex(rva_of(addr)).c_str(), rep.unopened + rep.unstopped + rep.no_context, rep.unopened, rep.unstopped,
+                       where.text.c_str(), rep.unopened + rep.unstopped + rep.no_context, rep.unopened, rep.unstopped,
                        rep.no_context, rep.exited, static_cast<unsigned long>(rep.why[0].tid),
                        static_cast<unsigned long>(rep.why[0].error), static_cast<unsigned long>(rep.why[0].exit_code),
                        rep.why[0].no_id ? " (its id could not be read)" : "");
             else if (rep.in_range || rep.no_context || rep.unopened)
-                KLOG_W("hooks: rva %s: checked installation refused, nothing written: %zu thread(s) paused inside the bytes "
+                KLOG_W("hooks: %s: checked installation refused, nothing written: %zu thread(s) paused inside the bytes "
                        "to replace, %zu stopped one(s) without a context, %zu not opened",
-                       hex(rva_of(addr)).c_str(), rep.in_range, rep.no_context, rep.unopened);
+                       where.text.c_str(), rep.in_range, rep.no_context, rep.unopened);
             else
-                KLOG_W("hooks: rva %s: checked installation refused, nothing written: %s", hex(rva_of(addr)).c_str(),
+                KLOG_W("hooks: %s: checked installation refused, nothing written: %s", where.text.c_str(),
                        *unchecked ? "the process's threads could not be listed" : "the detour's bytes could not be prepared");
             return fail(false);
         }
         // No thread list, or a trampoline of a shape we don't know: safetyhook's own way (page trap, no thread stops).
-        KLOG_W("hooks: rva %s: could not stop the other threads; using safetyhook's enable", hex(rva_of(addr)).c_str());
+        KLOG_W("hooks: %s: could not stop the other threads; using safetyhook's enable", where.text.c_str());
         if (!t->hook.enable()) {
-            KLOG_E("hooks: safetyhook could not enable the detour on rva %s", hex(rva_of(addr)).c_str());
+            KLOG_E("hooks: safetyhook could not enable the detour on %s", where.text.c_str());
             t->hook = {};  // frees the trampoline; nothing was written
             return fail(true);
         }
@@ -1168,12 +1202,13 @@ KilnResult install(Kind kind, KilnOwner owner, uintptr_t addr, const Order& orde
     State& s = S();
     if (!fn || !addr) return KILN_ERR_INVALID_ARGUMENT;
     if (!s.ready) return KILN_ERR_UNAVAILABLE;
+    const Place where = place_of(addr);  // before the mutex (see Place)
     std::lock_guard lock(s.mutex);
     auto code_guard = code::registry().lock();
     const bool had_target = s.by_addr.count(addr) != 0;
     if (!had_target && s.next_link >= kMaxLinks) return KILN_ERR_UNAVAILABLE;  // a new target has nothing to revive
     bool quiet = false;
-    Target* t = target_for(addr, &quiet, unchecked);
+    Target* t = target_for(addr, where, &quiet, unchecked);
     if (!t) return KILN_ERR_UNAVAILABLE;
     normalize(*t);
     const std::string owner_name =
@@ -1181,7 +1216,7 @@ KilnResult install(Kind kind, KilnOwner owner, uintptr_t addr, const Order& orde
     std::string label = order.label;
     if (label.empty()) {
         const std::string& sym = target_symbol(*t);
-        label = sym.empty() ? owner_name + "@" + hex(rva_of(addr)) : sym;
+        label = sym.empty() ? owner_name + "@" + t->where.short_text : sym;
     }
     auto same = [&](const Link* x) {
         return x->kind == kind && x->fn == fn && x->user == user && x->arg_count == arg_count && x->sret_size == sret_size && x->owner == owner &&
@@ -1312,20 +1347,20 @@ KilnResult install(Kind kind, KilnOwner owner, uintptr_t addr, const Order& orde
     if (out) *out = link->h();
     const char* how = fresh ? "" : kept ? ", kept in place" : ", revived";
     if (old_handle)
-        KLOG_I("hooks: %s link \"%s\" on rva %s prio %d (handle %llu, owner %s, %zu on target%s, replaces handle %llu)",
-               kind_name(kind), link->label.c_str(), hex(rva_of(addr)).c_str(), link->priority,
+        KLOG_I("hooks: %s link \"%s\" on %s prio %d (handle %llu, owner %s, %zu on target%s, replaces handle %llu)",
+               kind_name(kind), link->label.c_str(), t->where.text.c_str(), link->priority,
                static_cast<unsigned long long>(link->h()), link->owner_name.c_str(), t->order.size(), how,
                static_cast<unsigned long long>(old_handle));
     else
-        KLOG_I("hooks: %s link \"%s\" on rva %s prio %d (handle %llu, owner %s, %zu on target%s%s)", kind_name(kind),
-               link->label.c_str(), hex(rva_of(addr)).c_str(), link->priority, static_cast<unsigned long long>(link->h()),
+        KLOG_I("hooks: %s link \"%s\" on %s prio %d (handle %llu, owner %s, %zu on target%s%s)", kind_name(kind),
+               link->label.c_str(), t->where.text.c_str(), link->priority, static_cast<unsigned long long>(link->h()),
                link->owner_name.c_str(), t->order.size(), had_target ? "" : ", new detour", how);
     if (!had_target && t->before_present) {
         if (!t->before.module.empty() || t->before.address)
             KLOG_I("hooks: %s chained over %s", links_text(*t).c_str(), dest_text(t->before).c_str());
         else
-            KLOG_I("hooks: %s: the bytes at rva %s differ from the exe file's (patched in place by someone else)",
-                   links_text(*t).c_str(), hex(rva_of(addr)).c_str());
+            KLOG_I("hooks: %s: the bytes at %s differ from the exe file's (patched in place by someone else)",
+                   links_text(*t).c_str(), t->where.text.c_str());
     }
     notify_changed();
     return KILN_OK;
@@ -1603,8 +1638,8 @@ KilnResult revoke(KilnHandle h) {
     if (l->h() != h) return KILN_ERR_NOT_FOUND;  // revived meanwhile under a new handle
     if (!l->live.exchange(false, std::memory_order_acq_rel)) return KILN_ERR_NOT_FOUND;
     rebuild(*l->target);
-    KLOG_D("hooks: revoked %s link \"%s\" on rva %s (handle %llu)", kind_name(l->kind), l->label.c_str(),
-           hex(rva_of(l->target->addr)).c_str(), static_cast<unsigned long long>(h));
+    KLOG_D("hooks: revoked %s link \"%s\" on %s (handle %llu)", kind_name(l->kind), l->label.c_str(),
+           l->target->where.text.c_str(), static_cast<unsigned long long>(h));
     notify_changed();
     return KILN_OK;
 }
@@ -1687,8 +1722,8 @@ size_t check_foreign() {
                 KLOG_W("hooks: %s hooked over Kiln's %s (Kiln's detour stays armed; it is reached through their jump)",
                        dest_text(t->over).c_str(), links_text(*t).c_str());
             else
-                KLOG_W("hooks: something patched over Kiln's %s at rva %s (%s)", links_text(*t).c_str(),
-                       hex(rva_of(t->addr)).c_str(), dest_text(t->over).c_str());
+                KLOG_W("hooks: something patched over Kiln's %s at %s (%s)", links_text(*t).c_str(),
+                       t->where.text.c_str(), dest_text(t->over).c_str());
         } else if (!differs && t->over_present) {
             t->over_present = false;
             t->over = {};
@@ -1717,7 +1752,10 @@ std::vector<TargetInfo> targets() {
     for (Target* t : s.targets) {
         TargetInfo ti;
         ti.address = t->addr;
-        ti.rva = rva_of(t->addr);
+        ti.rva = t->where.module.empty() ? rva_of(t->addr) : 0;
+        ti.module = t->where.module;
+        ti.offset = t->where.offset;
+        ti.path = t->where.path;
         ti.symbol = target_symbol(*t);
         ti.label = target_label(*t);
         for (Link* l : t->order)
@@ -1750,7 +1788,14 @@ std::string map_text(const std::vector<ForeignSym>& foreign, const char* phase) 
     json jts = json::array();
     for (const TargetInfo& t : targets()) {
         json jt;
-        jt["rva"] = hex(t.rva);
+        if (t.module.empty()) {
+            jt["rva"] = hex(t.rva);
+        } else {  // a target inside another module (open_module): where it is in that module
+            jt["rva"] = nullptr;
+            jt["module"] = t.module;
+            jt["offset"] = hex(t.offset);
+            jt["path"] = t.path;
+        }
         jt["symbol"] = t.symbol.empty() ? json(nullptr) : json(t.symbol);
         jt["label"] = t.label;
         json links = json::array();

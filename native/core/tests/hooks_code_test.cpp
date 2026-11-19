@@ -74,7 +74,7 @@ int main() {
     std::setvbuf(stdout, nullptr, _IOLBF, 0);  // a hang (test-hooks-code.sh's time limit) still shows how far it got
     static_assert(offsetof(KilnHooksApi, read_original) == 296);
     static_assert(offsetof(KilnHooksApi, code_state) == 304);
-    static_assert(sizeof(KilnHooksApi) == 312);
+    static_assert(sizeof(KilnHooksApi) >= 312);  // 328 since open_module / module_scan were appended after code_state
     // A real 296-byte allocation, not a newer object with a short size; ASan catches premature slot loads.
     alignas(KilnHooksApi) std::array<uint8_t, 296> old{};
     reinterpret_cast<KilnServiceHeader*>(old.data())->size = old.size();

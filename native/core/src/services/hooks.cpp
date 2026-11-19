@@ -27,6 +27,7 @@
 #include "../common.h"
 #include "../image.h"
 #include "../log.h"
+#include "../module_place.h"
 #include "../registry.h"
 #include "../sigdb.h"
 #include "../tick.h"
@@ -35,6 +36,7 @@
 #include "hooks_patch_policy.h"
 #include "hooks_fingerprint.h"
 #include "hooks_internal.h"
+#include "hooks_modules.h"
 #include "service.h"
 #include "services/kiln_hooks.h"
 
@@ -229,8 +231,159 @@ KilnResult KILN_CALL h_unpatch(KilnHandle h) {
     return KILN_OK;
 }
 
+// ---- modules opened for hooks (open_module, since 0.2.0-dev.29.19) ----
+// A hook may go into the game's image, or into the executable sections of a module a caller opened: another mod's DLL
+// or a loader's DLL (Creative Mode's creative.dll under kiln-flame). An opened module is pinned (GetModuleHandleEx PIN):
+// the registry never removes a physical detour, so the code a detour was written into must outlive the process's
+// hooks. Process lifetime, like the detours.
+struct OpenModule {
+    std::string name;  // file name as loaded
+    uintptr_t base = 0;
+    modules::ModuleCode code;
+};
+std::mutex g_modules_mutex;  // opened(); never held across a loader call
+std::vector<OpenModule>& opened() {
+    static auto& v = *new std::vector<OpenModule>;
+    return v;
+}
+
+bool in_image(uintptr_t a) { return a >= image().base && a < image().base + image().size; }
+
+bool in_opened_code(uintptr_t a) {
+    std::lock_guard lock(g_modules_mutex);
+    for (const OpenModule& m : opened())
+        if (a >= m.base && modules::in_code(m.code, a - m.base)) return true;
+    return false;
+}
+
+// The module's file name, and in *path_text its file as the overlap lines name it (module_place.h).
+std::string module_file_name(HMODULE h, std::string* path_text = nullptr) {
+    wchar_t path[MAX_PATH];
+    const DWORD n = GetModuleFileNameW(h, path, MAX_PATH);
+    if (!n || n >= MAX_PATH) return {};
+    std::wstring w(path, n);
+    if (path_text) *path_text = module_path_text(to_utf8(w), u8(paths().game));
+    const size_t slash = w.find_last_of(L"\\/");
+    if (slash != std::wstring::npos) w.erase(0, slash + 1);
+    return to_utf8(w);
+}
+
+void fill_module(KilnHooksModule* out, uintptr_t base, const modules::ModuleCode& code, uint32_t flags) {
+    out->flags = flags;
+    out->base = base;
+    out->image_size = code.size_of_image;
+    out->code_lo = base + code.code.front().rva;
+    out->code_hi = out->code_lo;
+    for (const modules::CodeRange& r : code.code) {
+        out->code_lo = std::min<uintptr_t>(out->code_lo, base + r.rva);
+        out->code_hi = std::max<uintptr_t>(out->code_hi, base + r.rva + r.size);
+    }
+    out->code_sections = static_cast<uint32_t>(code.code.size());
+    out->reserved = 0;
+}
+
+KilnResult open_module(KilnOwner owner, const std::string& name, KilnHooksModule* out) {
+    // Our own reference while we look (given back below), so the module cannot unload under the checks. Never loads it.
+    HMODULE h = nullptr;
+    if (!GetModuleHandleExW(0, to_wide(name).c_str(), &h) || !h) return KILN_ERR_NOT_FOUND;
+    struct Ref {
+        HMODULE h;
+        ~Ref() { FreeLibrary(h); }
+    } ref{h};
+    const uintptr_t base = reinterpret_cast<uintptr_t>(h);
+    {
+        std::lock_guard lock(g_modules_mutex);
+        for (const OpenModule& m : opened())
+            if (m.base == base) return fill_module(out, base, m.code, KILN_HOOKS_MODULE_PINNED), KILN_OK;
+    }
+    uint8_t headers[4096];
+    modules::ModuleCode code;
+    std::string err;
+    if (!seh::copy(headers, reinterpret_cast<const void*>(base), sizeof headers) ||
+        !modules::parse_code(headers, sizeof headers, code, err)) {
+        KLOG_W("hooks: %s cannot be opened for hooks: %s", name.c_str(), err.empty() ? "its headers cannot be read" : err.c_str());
+        return KILN_ERR_INVALID_ARGUMENT;
+    }
+    if (h == GetModuleHandleW(nullptr)) return fill_module(out, base, code, KILN_HOOKS_MODULE_GAME), KILN_OK;
+    std::string path_text;
+    const std::string file = module_file_name(h, &path_text);
+    HMODULE self = nullptr;
+    GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                       reinterpret_cast<LPCWSTR>(&in_opened_code), &self);
+    if (h == self || modules::kiln_own_name(file)) {
+        KLOG_W("hooks: %s asked to open %s for hooks: Kiln's own modules are no hook targets (use their APIs)",
+               reg::owner_name(owner).c_str(), file.c_str());
+        return KILN_ERR_UNAVAILABLE;
+    }
+    HMODULE pinned = nullptr;
+    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_PIN | GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+                            reinterpret_cast<LPCWSTR>(base), &pinned) ||
+        pinned != h) {
+        KLOG_W("hooks: %s cannot be opened for hooks: pinning it failed (error %lu)", file.c_str(),
+               static_cast<unsigned long>(GetLastError()));
+        return KILN_ERR_UNAVAILABLE;
+    }
+    bool first = true;
+    {
+        std::lock_guard lock(g_modules_mutex);
+        for (const OpenModule& m : opened()) first = first && m.base != base;  // another thread opened it meanwhile
+        if (first) opened().push_back(OpenModule{file, base, code});
+    }
+    fill_module(out, base, code, KILN_HOOKS_MODULE_PINNED);
+    if (first)
+        KLOG_I("hooks: %s%s opened for hooks by %s: base 0x%llx, %u bytes, %u code section(s) at 0x%llx..0x%llx; pinned, it "
+               "stays loaded until the game exits",
+               file.c_str(), module_place_suffix(path_text).c_str(), reg::owner_name(owner).c_str(),
+               static_cast<unsigned long long>(base), code.size_of_image,
+               out->code_sections, static_cast<unsigned long long>(out->code_lo - base),
+               static_cast<unsigned long long>(out->code_hi - base));
+    return KILN_OK;
+}
+
+KilnResult KILN_CALL h_open_module(KilnOwner owner, KilnStr name, KilnHooksModule* out) {
+    if (!out || out->size < sizeof(KilnHooksModule) || !name.ptr || name.len == 0 || name.len > 1024)
+        return KILN_ERR_INVALID_ARGUMENT;
+    KILN_GUARD("open_module", KILN_ERR_INTERNAL, return open_module(owner, std::string(sv(name)), out););
+}
+
+KilnResult KILN_CALL h_module_scan(uintptr_t module_base, KilnStr pattern, uintptr_t* out, uint32_t cap, uint32_t* count) {
+    if (count) *count = 0;
+    sigdb::Pattern p;
+    std::string err;
+    if (!sigdb::parse_pattern(sv(pattern), p, err)) return KILN_ERR_INVALID_ARGUMENT;
+    modules::ModuleCode code;
+    {
+        std::lock_guard lock(g_modules_mutex);
+        bool found = false;
+        for (const OpenModule& m : opened())
+            if (m.base == module_base) code = m.code, found = true;
+        if (!found) return KILN_ERR_INVALID_ARGUMENT;
+    }
+    KILN_GUARD("module_scan", KILN_ERR_INTERNAL, {
+        const size_t limit = cap ? size_t{cap} + 1 : 64u;
+        std::vector<uintptr_t> hits;
+        std::vector<uint8_t> bytes;
+        for (const modules::CodeRange& r : code.code) {
+            // The live bytes, a page at a time: a page that cannot be read stays zero (it matches no literal byte run).
+            bytes.assign(r.size, 0);
+            const uintptr_t at = module_base + r.rva;
+            for (size_t off = 0; off < r.size; off += 4096)
+                seh::copy(bytes.data() + off, reinterpret_cast<const void*>(at + off), std::min<size_t>(4096, r.size - off));
+            for (const uint8_t* m : sigdb::scan(p, bytes.data(), bytes.data() + bytes.size(), limit - hits.size()))
+                hits.push_back(at + static_cast<uintptr_t>(m - bytes.data()));
+            if (hits.size() >= limit) break;
+        }
+        if (hits.empty()) return KILN_ERR_NOT_FOUND;
+        const uint32_t writable = out ? std::min<uint32_t>(cap, static_cast<uint32_t>(hits.size())) : 0;
+        for (uint32_t i = 0; i < writable; ++i) out[i] = hits[i];
+        if (count) *count = writable;
+        return hits.size() > cap ? KILN_ERR_BUFFER_TOO_SMALL : KILN_OK;
+    });
+}
+
 // ---- hooks (the registry engine does the work) ----
-bool valid_target(uintptr_t target) { return target >= image().base && target < image().base + image().size; }
+// The game's image, or the code of a module opened with open_module; everything else stays refused.
+bool valid_target(uintptr_t target) { return in_image(target) || in_opened_code(target); }
 
 chain::Order order_of(const KilnHookOrder* o) {
     chain::Order r;
@@ -330,6 +483,15 @@ KilnResult copy_text(const std::string& text, char* buf, size_t cap, size_t* len
 KilnResult typed_check(uintptr_t target, const KilnSig* sig, const KilnHookOrder* order) {
     std::string& why = typed_refusal_text();
     why.clear();
+    if (!in_image(target)) {  // a module opened with open_module: no exe code to check the descriptor against
+        why = "typed hooks check their descriptor against the game exe's code, and this target is in another module (use a "
+              "mid hook or a detour there)";
+        char b[40];
+        std::snprintf(b, sizeof b, "0x%llx", static_cast<unsigned long long>(target));
+        const std::string label = order_of(order).label;
+        KLOG_W("hooks: typed hook on %s refused: %s", label.empty() ? b : label.c_str(), why.c_str());
+        return KILN_HOOKS_ERR_SIG_UNKNOWN;
+    }
     sigdb::SigInfo info;
     const bool described = sigdb::sig_at(target, &info);
     std::string name = described ? info.symbol : order_of(order).label;
@@ -444,7 +606,7 @@ KilnResult KILN_CALL h_call_with_frame(uintptr_t fn, KilnCallFrame* frame, uint3
 }
 
 KilnResult KILN_CALL h_fingerprint(uintptr_t target, char* json, size_t cap, size_t* len) {
-    if (!valid_target(target)) return KILN_ERR_INVALID_ARGUMENT;
+    if (!in_image(target)) return KILN_ERR_INVALID_ARGUMENT;  // the exe file's code only
     KILN_GUARD("fingerprint", KILN_ERR_INTERNAL, {
         fp::Fingerprint f;
         if (!sigdb::fingerprint(target, &f)) return KILN_ERR_INVALID_ARGUMENT;
@@ -644,6 +806,9 @@ const KilnHooksApi kTable = {
     // original code (0.2.0-dev.29.19)
     &h_read_original,
     &h_code_state,
+    // hooks inside other modules (dev.29.19)
+    &h_open_module,
+    &h_module_scan,
 };
 
 std::mutex g_ready_mutex;

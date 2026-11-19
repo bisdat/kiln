@@ -117,6 +117,23 @@ typedef struct KilnHookOrder {
 
 #define KILN_HOOK_NEWEST_FIRST 1u  /* among links of the same priority: newest first, before those without the flag */
 
+/* A loaded module opened for hooks (open_module, since 0.2.0-dev.29.19): another mod's DLL or a loader's DLL whose
+ * executable code may then be the target of every hook kind but typed links, like the game's own code. */
+typedef struct KilnHooksModule {
+    uint32_t size;          /* sizeof(KilnHooksModule): set by the caller */
+    uint32_t flags;         /* KILN_HOOKS_MODULE_* below */
+    uintptr_t base;         /* where the module is loaded (its HMODULE) */
+    uint64_t image_size;    /* SizeOfImage */
+    uintptr_t code_lo;      /* start of its first executable section */
+    uintptr_t code_hi;      /* end of its last executable section (exclusive); a hook target must lie in an executable
+                               section, which kiln.hooks checks against each section, not only this span */
+    uint32_t code_sections; /* how many executable sections it has */
+    uint32_t reserved;
+} KilnHooksModule;
+
+#define KILN_HOOKS_MODULE_GAME 1u    /* the game's exe: its code was a hook target already */
+#define KILN_HOOKS_MODULE_PINNED 2u  /* pinned by kiln.hooks: it stays loaded until the process ends */
+
 typedef struct KilnHooksStats {
     uint32_t size;
     uint32_t detour_targets;   /* distinct addresses with a detour (raw, structured or v1) link */
@@ -442,6 +459,35 @@ typedef struct KilnHooksApi {
      * for good. */
     KilnResult(KILN_CALL* read_original)(uintptr_t address, void* out, size_t size);
     KilnResult(KILN_CALL* code_state)(uintptr_t address, size_t size, uint32_t* state, uint64_t* generation);
+
+    /* ======== hooks inside other modules (since 0.2.0-dev.29.19): check header.size covers each member ========
+     *
+     * Every hook kind takes addresses in the game exe's image only; anything else is KILN_ERR_INVALID_ARGUMENT. To hook
+     * inside another loaded module (another mod's DLL, a loader's DLL: Creative Mode's creative.dll under kiln-flame),
+     * open it first:
+     *
+     * open_module: finds the loaded module `name` (its file name, "creative.dll"; matched like GetModuleHandle, never
+     * loaded by this call), pins it (it stays loaded until the process ends: a hook's bytes and trampoline must never
+     * outlive the code they replace, and kiln.hooks never removes a physical detour) and from then on accepts addresses
+     * inside its executable sections as targets of detour, mid, raw_detour, detour2, mid2 and mid2_checked, for every
+     * owner. Typed links stay the game's: their descriptor is checked against the exe's code (KILN_HOOKS_ERR_SIG_UNKNOWN
+     * elsewhere). Fills `out` (out->size set by the caller). kiln.log names the module once, and every link on it as
+     * "<module>+0x<offset>"; the hook map lists such targets with "module" and "offset" (and "rva": null). The game's
+     * exe answers KILN_OK with KILN_HOOKS_MODULE_GAME (nothing pinned). Calling it again is cheap.
+     * KILN_ERR_NOT_FOUND: no such module is loaded (it may load later: open it then). KILN_ERR_UNAVAILABLE: one of
+     * Kiln's own modules (kiln-core.dll, kiln-*.dll), which mods use through their APIs, or pinning failed.
+     * KILN_ERR_INVALID_ARGUMENT: an empty name, a short `out`, or a module without an executable section.
+     *
+     * module_scan: matches of `pattern` (sigdb syntax, as `scan`) in the executable sections of the module opened at
+     * `module_base`, read from the live bytes (another engine's hook there can hide a match), in address order, with
+     * `scan`'s results. KILN_ERR_INVALID_ARGUMENT: a bad pattern, or `module_base` is not an opened module (open it
+     * first). The capability row is `hooks.foreign_modules`.
+     *
+     * read_original and code_state stay the game exe's: an address in an opened module is KILN_ERR_INVALID_ARGUMENT
+     * there (they compare with the exe file's code, and another module has none Kiln reads). */
+    KilnResult(KILN_CALL* open_module)(KilnOwner owner, KilnStr name, KilnHooksModule* out);
+    KilnResult(KILN_CALL* module_scan)(uintptr_t module_base, KilnStr pattern, uintptr_t* out, uint32_t cap,
+                                       uint32_t* count);
 } KilnHooksApi;
 
 #ifdef __cplusplus
@@ -453,11 +499,17 @@ static_assert(offsetof(KilnHooksApi, typed_install_ready) == 280, "typed_install
 static_assert(offsetof(KilnHooksApi, detour_typed_checked) == 288, "detour_typed_checked is appended at 288");
 static_assert(offsetof(KilnHooksApi, read_original) == 296, "read_original is appended at 296");
 static_assert(offsetof(KilnHooksApi, code_state) == 304, "code_state is appended at 304");
-static_assert(sizeof(KilnHooksApi) == 312, "KilnHooksApi is 312 bytes");
+static_assert(offsetof(KilnHooksApi, open_module) == 312, "open_module is appended at 312");
+static_assert(offsetof(KilnHooksApi, module_scan) == 320, "module_scan is appended at 320");
+static_assert(sizeof(KilnHooksApi) == 328, "KilnHooksApi is 328 bytes");
+static_assert(sizeof(KilnHooksModule) == 48, "KilnHooksModule is 48 bytes");
 #else
 _Static_assert(offsetof(KilnHooksApi, read_original) == 296, "read_original is appended at 296");
 _Static_assert(offsetof(KilnHooksApi, code_state) == 304, "code_state is appended at 304");
-_Static_assert(sizeof(KilnHooksApi) == 312, "KilnHooksApi is 312 bytes");
+_Static_assert(offsetof(KilnHooksApi, open_module) == 312, "open_module is appended at 312");
+_Static_assert(offsetof(KilnHooksApi, module_scan) == 320, "module_scan is appended at 320");
+_Static_assert(sizeof(KilnHooksApi) == 328, "KilnHooksApi is 328 bytes");
+_Static_assert(sizeof(KilnHooksModule) == 48, "KilnHooksModule is 48 bytes");
 #endif
 
 #endif /* KILN_HOOKS_H */

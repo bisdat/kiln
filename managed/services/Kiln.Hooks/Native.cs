@@ -153,6 +153,50 @@ internal static unsafe class HooksNative
     /// <summary>header.size that covers detour_typed_checked (offset 288).</summary>
     public const uint CheckedInstallSize = 296;
 
+    /// <summary>KilnHooksModule (0.2.0-dev.29.19): a loaded module opened for hooks.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct ModuleRaw
+    {
+        public uint Size;
+        public uint Flags;          // ModuleGame / ModulePinned
+        public nuint Base;
+        public ulong ImageSize;
+        public nuint CodeLo, CodeHi;
+        public uint CodeSections;
+        public uint Reserved;
+    }
+
+    public const uint ModuleGame = 1, ModulePinned = 2;  // KILN_HOOKS_MODULE_GAME / _PINNED
+
+    /// <summary>The table with open_module and module_scan (0.2.0-dev.29.19): hooks inside other modules.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct ModulesTable
+    {
+        public CheckedTable Checked;
+        public void* ReadOriginal, CodeState;  // the original-code members (0.2.0-dev.29.19), not used here
+        public delegate* unmanaged[Cdecl]<ulong, NativeStr, ModuleRaw*, int> OpenModule;
+        public delegate* unmanaged[Cdecl]<nuint, NativeStr, nuint*, uint, uint*, int> ModuleScan;
+    }
+
+    /// <summary>header.size that covers module_scan (offset 320).</summary>
+    public const uint ModulesSize = 328;
+
+    /// <summary>The table with open_module and module_scan, or null on a core without them (older than
+    /// 0.2.0-dev.29.19). Never cached: it follows <see cref="T"/>.</summary>
+    public static ModulesTable* Modules => T != null && T->Header.Size >= ModulesSize &&
+        ((ModulesTable*)T)->OpenModule != null && ((ModulesTable*)T)->ModuleScan != null ? (ModulesTable*)T : null;
+
+    /// <summary>The modules table, or <see cref="KilnUnavailableException"/> naming <c>hooks.foreign_modules</c>.</summary>
+    public static ModulesTable* RequireModules(string api)
+    {
+        var m = Modules;
+        if (m != null) return m;
+        HooksCaps.Rows.Ensure();
+        throw ServiceCaps.Unavailable(HooksCaps.ForeignModules, T == null
+            ? $"{api}: kiln.hooks is unavailable on this build"
+            : $"{api}: this Kiln runtime's kiln.hooks cannot hook inside other modules (older than 0.2.0-dev.29.19)");
+    }
+
     /// <summary>The table with detour_typed_checked, or null on a core without it (older than 0.2.0-dev.29): managed code
     /// then refuses a typed hook rather than patch through the unchecked detour_typed. Never cached.</summary>
     public static CheckedTable* CheckedInstall => T != null && T->Header.Size >= CheckedInstallSize &&

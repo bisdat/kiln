@@ -12,6 +12,10 @@ internal static unsafe class HooksCaps
     /// whose kiln.hooks table lacks the typed members.</summary>
     public const string Typed = "hooks.typed";
 
+    /// <summary>Hooks inside other loaded modules (0.2.0-dev.29.19, <see cref="Hooks.Module"/>): the core's sigdb feature
+    /// without symbols; it is off on a core whose kiln.hooks table lacks open_module.</summary>
+    public const string ForeignModules = "hooks.foreign_modules";
+
     /// <summary>The row of a described symbol: on when it resolved and its descriptor fits the function's code.</summary>
     public static string Sig(string symbol) => "sig/" + symbol;
 
@@ -30,6 +34,14 @@ internal static unsafe class HooksCaps
                 ? ServiceCaps.Cause(CapabilityReason.ServiceMissing, "kiln.hooks is unavailable on this build", Service)
                 : (CapabilityReason.ServiceOlder, "this core's kiln.hooks has no typed links (older than 0.2.0-dev.28)");
             ServiceCaps.Lower(Typed, reason, text);
+        }
+        // hooks.foreign_modules the same way: a table without open_module (no core, or one older than 0.2.0-dev.29.19)
+        if (HooksNative.Modules == null)
+        {
+            var (reason, text) = HooksNative.T == null
+                ? ServiceCaps.Cause(CapabilityReason.ServiceMissing, "kiln.hooks is unavailable on this build", Service)
+                : (CapabilityReason.ServiceOlder, "this Kiln runtime's kiln.hooks cannot hook inside other modules (older than 0.2.0-dev.29.19)");
+            ServiceCaps.Lower(ForeignModules, reason, text);
         }
     }
 }
