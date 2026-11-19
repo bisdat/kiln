@@ -78,6 +78,9 @@ struct SubmitArgs {
     std::string_view name;
     Priority priority = Priority::Normal;
     bool long_running = false;
+    // kiln_tasks.h KILN_TASK_RESIDENT: runs until cancelled. Only with long_running (the pool refuses it otherwise,
+    // Argument). The pool's watchdog and stats treat it apart (tasks.cpp); the model itself ignores it.
+    bool resident = false;
     bool lease = false;       // a managed logical task (kiln.internal.tasks.host): its outcome comes from finish()
     bool after_step = false;  // runnable only after a Post edge of `session` newer than `edge`
     uint32_t world = KILN_WORLD_SERVER;  // AFTER_STEP: the world of `session` (session_world; else ARGUMENT)
@@ -147,6 +150,10 @@ public:
     // ---- the public operations (services/tasks.cpp binds them) ----
     // *task = 0 and *why set on every non-OK return; *why untouched on OK.
     KilnResult submit(KilnOwner owner, const SubmitArgs& args, KilnHandle* task, Refusal* why);
+    // What submit would answer now for the exit and the owner's state alone (Shutdown, OwnerSealed for an unknown or
+    // retired owner, OwnerQuarantined, OwnerSealed), with *why set; KILN_OK when those let a new task in. The pool
+    // asks it before refusing a second resident task, so these refusals come first, as they do for any task.
+    KilnResult owner_state(KilnOwner owner, Refusal* why) const;
     KilnResult cancel(KilnOwner owner, KilnHandle task, State* state);
     KilnResult status(KilnOwner owner, KilnHandle task, State* state) const;
     // Terminal only: OK and the capacity slot returns; OK again for a handle this owner instance already released;
@@ -222,6 +229,7 @@ private:
     class Lock;
 
     std::shared_ptr<Owner> find_open(KilnOwner owner) const;
+    KilnResult owner_state_locked(KilnOwner owner, Refusal* why) const;  // mutex held: owner_state
     std::shared_ptr<Record> find_record(const Owner& o, KilnHandle task, bool* foreign, bool* released) const;
     void enqueue(Owner& o, const std::shared_ptr<Record>& r, Work::Kind kind);
     void cancel_queued(Owner& o, const std::shared_ptr<Record>& r);

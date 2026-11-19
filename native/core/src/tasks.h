@@ -57,6 +57,8 @@ struct PoolConfig {
 
 // Watchdog reports: a task running, or queued, past its age. Report only, never a kill; each task is reported at
 // most once per kind (it never repeats every sweep). services/tasks.cpp logs them (kiln.log, one line each).
+// A resident task (SubmitArgs.resident) is not reported running until its cancellation is asked; its age then counts
+// from the first sweep that saw the cancel, or from the start of a segment that began after it (after_cancel).
 struct Watch {
     enum class Kind : uint32_t { RunningTooLong, QueuedTooLong };
     Kind kind;
@@ -65,18 +67,31 @@ struct Watch {
     std::string name;
     uint64_t age_ns;
     std::string owner_name;  // the owner's bounded name (kept after it was revoked)
+    bool after_cancel;       // RunningTooLong of a resident task: age_ns counts from its cancellation (see above)
 };
 using WatchFn = void (*)(const Watch&, void* user);
 
 // A worker kind lost its last worker (a replacement's start failed: queued work waits for a retried start), or got
 // one back. Said once each way, from the maintenance thread outside every lock; admission is the capability's.
+// ResidentStarted: a resident task's body (SubmitArgs.resident) starts for the first time. Said once per task, on the
+// worker that runs it, just before the body, outside every lock: it holds a LongRunning thread on purpose, and the
+// watchdog will not name it while it runs, so kiln.log says so once (resident_started_line).
 struct PoolNote {
-    enum class Kind : uint32_t { SlotLost, SlotRecovered };
-    Kind kind;
-    Slot slot;
-    std::size_t queued;  // work ready to run, all owners, when it was noted
+    enum class Kind : uint32_t { SlotLost, SlotRecovered, ResidentStarted };
+    Kind kind = Kind::SlotLost;
+    Slot slot = Slot::Normal;
+    std::size_t queued = 0;  // SlotLost / SlotRecovered: work ready to run, all owners, when it was noted
+    // ResidentStarted only:
+    KilnOwner owner = 0;
+    KilnHandle task = 0;
+    std::string owner_name;     // the owner's bounded name
+    std::string name;           // the task's name
+    uint32_t held = 0;          // LongRunning threads that resident bodies hold now, this one included
+    uint32_t long_running = 0;  // the pool's LongRunning threads
 };
 using NoteFn = void (*)(const PoolNote&, void* user);
+// The kiln.log line for a ResidentStarted note (services/tasks.cpp writes it as an info line).
+std::string resident_started_line(const PoolNote& note);
 
 class Pool {
 public:
@@ -140,7 +155,8 @@ public:
     // The maintenance thread sweeps every watchdog_interval_ns and hands each new report to `fn` (outside every lock,
     // on the maintenance thread). nullptr stops it.
     void set_watch_sink(WatchFn fn, void* user);
-    // PoolNote lines (slot lost / recovered), on the maintenance thread outside every lock. nullptr stops them.
+    // PoolNote lines: slot lost / recovered on the maintenance thread, a resident task's start on its worker; each
+    // outside every lock. nullptr stops them.
     void set_note_sink(NoteFn fn, void* user);
 
     // Diagnostics (issue #49): this pool's lock-free stats store (tasks_stats.h). The tick-stats

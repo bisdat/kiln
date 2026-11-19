@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <chrono>
 #include <condition_variable>
+#include <cstdio>
 #include <cstring>
 #include <deque>
 #include <mutex>
@@ -42,6 +43,12 @@ struct Meta {
     uint64_t running_since = 0;  // when its current body started (valid while `running`)
     bool running = false;
     bool reported_running = false, reported_queued = false;  // the watchdog says each once
+    // KILN_TASK_RESIDENT: runs until cancelled. The watchdog's running clock starts at the first sweep that sees its
+    // cancellation asked (cancel_seen_ns), never before, and its segments stay out of the stats' time sums.
+    bool resident = false;
+    bool cancel_seen = false;
+    uint64_t cancel_seen_ns = 0;
+    bool start_said = false;  // resident: its first body start was noted (PoolNote::ResidentStarted, once)
     bool lease = false;  // a managed lease (snapshot)
     int stats_slot = -1, stats_entry = -1;  // tasks_stats.h rows (issue #49); -1 when its tables were full
 };
@@ -118,7 +125,11 @@ struct Pool::Core : std::enable_shared_from_this<Pool::Core> {
     std::chrono::steady_clock::time_point next_sweep{};  // the next watchdog sweep
     WatchFn watch_fn = nullptr;  // the periodic watchdog sweep's sink (set_watch_sink)
     bool maintenance_kick = false;  // set_watch_sink changed the schedule: the maintenance thread re-plans its wait
-    NoteFn note_fn = nullptr;  // slot lost / recovered (set_note_sink)
+    NoteFn note_fn = nullptr;  // slot lost / recovered, a resident task's start (set_note_sink)
+    uint32_t resident_running = 0;  // resident bodies running now: the LongRunning threads they hold
+    // Each owner's latest accepted resident task: a second one is refused while this one is queued or running
+    // (submit); erased with that task's metadata (release_meta) unless a newer one replaced it.
+    std::unordered_map<KilnOwner, KilnHandle> resident_of;
     void* note_user = nullptr;
     bool slot_lost[2] = {false, false};  // a replacement's failed start took the slot's last worker
     bool slot_said[2] = {false, false};  // ...and that was said (once; recovery said once too)
@@ -267,15 +278,38 @@ bool Pool::Core::run_one(Worker& self) {
         leave_busy(false);
         return false;
     }
+    NoteFn note = nullptr;
+    void* note_to = nullptr;
+    PoolNote started;
     {
         // submit registers the metadata in the same critical section that publishes the task, so it is here
         std::lock_guard lock(mutex);
         ++in_item;
         const auto it = meta.find(work.task);
         if (it != meta.end() && work.kind != Work::Kind::Done) {
-            it->second->running_since = platform.now_ns();
-            it->second->running = true;
+            Meta& m = *it->second;
+            m.running_since = platform.now_ns();
+            m.running = true;
+            if (m.resident) {
+                ++resident_running;
+                if (!m.start_said) {  // its first segment: said once, below, outside the lock
+                    m.start_said = true;
+                    note = note_fn;
+                    note_to = note_user;
+                    started.kind = PoolNote::Kind::ResidentStarted;
+                    started.slot = self.slot;
+                    started.owner = work.owner;
+                    started.task = work.task;
+                    if (note) started.name = m.name;
+                    started.held = resident_running;
+                    started.long_running = long_running_workers;
+                }
+            }
         }
+    }
+    if (note) {
+        started.owner_name = model.owner_name(work.owner);
+        note(started, note_to);  // before the body, outside every lock: the sink logs
     }
     if (work.kind == Work::Kind::Done) deliver_done(self, work);
     else deliver_body(self, work);
@@ -322,14 +356,17 @@ void Pool::Core::deliver_body(Worker& self, Work& work) {
     const bool suspended = t_segment_armed;  // the body armed a resumption (managed lease): it is not terminal
     t_segment_armed = false;
     if (m) {
-        stats.segment_ended(m->stats_slot, m->stats_entry, cpu1 >= cpu0 ? cpu1 - cpu0 : 0,
-                            wall1 >= wall0 ? wall1 - wall0 : 0, suspended);
+        // a resident segment lasts the task's whole life: kept out of the owner's time sums and the window's longest
+        const bool timed = !m->resident;
+        stats.segment_ended(m->stats_slot, m->stats_entry, timed && cpu1 >= cpu0 ? cpu1 - cpu0 : 0,
+                            timed && wall1 >= wall0 ? wall1 - wall0 : 0, suspended);
         if (info.faulted) stats.note_fault_code(m->stats_entry, info.code);
     }
     platform.set_description(self.slot == Slot::Normal ? "kiln-task-N" : "kiln-task-L");
     if (m) {
         std::lock_guard lock(mutex);
         m->running = false;
+        if (m->resident) --resident_running;
     }
     if (info.faulted) {
         model.segment_ended(work, false, Outcome::Faulted);  // publish Faulted, queue its done for a healthy worker
@@ -445,14 +482,20 @@ void Pool::Core::maintenance_loop() {
                 work_cv.notify_all();
             }
             // a slot that lost its last worker, or got one back: said once each way (no admission change here)
+            const auto slot_note = [&notes](PoolNote::Kind kind, Slot slot) {
+                PoolNote n;
+                n.kind = kind;
+                n.slot = slot;
+                notes.push_back(std::move(n));
+            };
             for (const Slot slot : {Slot::Normal, Slot::LongRunning}) {
                 const std::size_t i = slot_index_of(slot);
                 if (slot_lost[i] && !slot_said[i]) {
                     slot_said[i] = true;
-                    notes.push_back({PoolNote::Kind::SlotLost, slot, 0});
+                    slot_note(PoolNote::Kind::SlotLost, slot);
                 } else if (slot_said[i] && healthy[i] > 0) {
                     slot_said[i] = slot_lost[i] = false;
-                    notes.push_back({PoolNote::Kind::SlotRecovered, slot, 0});
+                    slot_note(PoolNote::Kind::SlotRecovered, slot);
                 }
             }
             if (!notes.empty()) {
@@ -484,6 +527,10 @@ void Pool::Core::release_meta(KilnHandle task) {
         if (it == meta.end()) return;
         m = it->second;
         meta.erase(it);  // the watchdog clocks go with it: nothing outlives the task
+        if (m->resident) {
+            const auto r = resident_of.find(m->owner);
+            if (r != resident_of.end() && r->second == task) resident_of.erase(r);
+        }
     }
     platform.release_module(m->body);
     platform.release_module(m->done);
@@ -549,6 +596,11 @@ KilnResult Pool::submit(KilnOwner owner, const SubmitArgs& in, TaskBodyFn body, 
         if (why) *why = Refusal::Argument;
         return KILN_ERR_INVALID_ARGUMENT;
     }
+    if (in.resident && !in.long_running) {  // a resident task runs until cancelled: only on its own thread
+        if (task) *task = 0;
+        if (why) *why = Refusal::Argument;
+        return KILN_ERR_INVALID_ARGUMENT;
+    }
     const Slot slot = in.long_running ? Slot::LongRunning : Slot::Normal;
     if (!can_run(slot)) {  // never accept work no worker can run (checked again at publication)
         if (task) *task = 0;
@@ -575,9 +627,16 @@ KilnResult Pool::submit(KilnOwner owner, const SubmitArgs& in, TaskBodyFn body, 
     m->owner = owner;
     m->name = std::string(in.name);
     m->lease = in.lease;
+    m->resident = in.resident;
     std::unordered_map<KilnHandle, std::shared_ptr<Meta>> spare;  // the metadata map's node, allocated here
     spare.emplace(0, m);
     auto node = spare.extract(spare.begin());
+    std::unordered_map<KilnOwner, KilnHandle> spare_resident;  // resident_of's node for this owner, allocated here
+    decltype(spare_resident)::node_type resident_node;
+    if (in.resident) {
+        spare_resident.emplace(owner, 0);
+        resident_node = spare_resident.extract(spare_resident.begin());
+    }
     SubmitArgs args = in;
     args.payload = {reinterpret_cast<uintptr_t>(body), reinterpret_cast<uintptr_t>(done), reinterpret_cast<uintptr_t>(user)};
     {
@@ -598,9 +657,27 @@ KilnResult Pool::submit(KilnOwner owner, const SubmitArgs& in, TaskBodyFn body, 
         // capability check again here: a worker may have faulted (and its replacement failed) meanwhile.
         std::lock_guard lock(c.mutex);
         c.meta.reserve(c.meta.size() + 1);  // may throw: still before publication
+        if (in.resident) c.resident_of.reserve(c.resident_of.size() + 1);
+        // At most one resident task per owner: refused while its earlier one is queued or running (a suspended lease
+        // and a cancelled body that has not returned yet included). Pool -> model lock order, as the watchdog's.
+        const auto held = in.resident ? c.resident_of.find(owner) : c.resident_of.end();
+        bool second_resident = false;
+        if (held != c.resident_of.end()) {
+            const State s = c.model.diag_state(held->second);
+            second_resident = s == State::Queued || s == State::Running;
+        }
         if (!c.can_run_locked(slot)) {
             if (why) *why = Refusal::Capability;
             r = KILN_ERR_UNAVAILABLE;
+        } else if (second_resident) {
+            // the exit and the owner's state refuse first, as for any task; only a healthy owner meets the cap
+            Refusal state_why = Refusal::None;
+            r = c.model.owner_state(owner, &state_why);
+            if (r == KILN_OK) {
+                state_why = Refusal::Argument;
+                r = KILN_ERR_INVALID_ARGUMENT;
+            }
+            if (why) *why = state_why;
         } else {
             r = c.model.submit(owner, args, &handle, &submit_why);
             if (why) *why = submit_why;
@@ -618,6 +695,14 @@ KilnResult Pool::submit(KilnOwner owner, const SubmitArgs& in, TaskBodyFn body, 
             m->stats_entry = admitted.entry;
             node.key() = handle;
             c.meta.insert(std::move(node));  // reserved: no allocation, no rehash
+            if (in.resident) {
+                if (held != c.resident_of.end()) {
+                    held->second = handle;  // the earlier one ended (its done may still run): this one replaces it
+                } else {
+                    resident_node.mapped() = handle;
+                    c.resident_of.insert(std::move(resident_node));  // reserved: no allocation, no rehash
+                }
+            }
             if (c.hook) c.hook(Point::SubmitPublished);
         }
     }
@@ -737,14 +822,23 @@ void Pool::Core::sweep_watchdog(WatchFn fn, void* user) {
         for (const auto& [task, m] : meta) {
             // by handle, not the owner-scoped public status: a body that outlives its retired owner is still named
             const State s = model.diag_state(task);  // pool -> model lock order; the model never calls back
-            if (s == State::Running && m->running && !m->reported_running && now - m->running_since >= config.running_watchdog_ns) {
+            // A resident task runs until it is cancelled: its running clock starts when a sweep first sees the cancel
+            // asked (same lock order), or with a segment that starts later.
+            if (s == State::Running && m->resident && !m->cancel_seen && model.cancel_requested(task)) {
+                m->cancel_seen = true;
+                m->cancel_seen_ns = now;
+            }
+            const bool watched = !m->resident || m->cancel_seen;
+            const uint64_t since = m->resident ? std::max(m->running_since, m->cancel_seen_ns) : m->running_since;
+            if (s == State::Running && m->running && watched && !m->reported_running &&
+                now - since >= config.running_watchdog_ns) {
                 m->reported_running = true;
                 stats.note_too_long(m->stats_slot, true);
-                reports.push_back({Watch::Kind::RunningTooLong, m->owner, task, m->name, now - m->running_since, {}});
+                reports.push_back({Watch::Kind::RunningTooLong, m->owner, task, m->name, now - since, {}, m->resident});
             } else if (s == State::Queued && !m->reported_queued && now - m->queued_since >= config.queued_watchdog_ns) {
                 m->reported_queued = true;
                 stats.note_too_long(m->stats_slot, false);
-                reports.push_back({Watch::Kind::QueuedTooLong, m->owner, task, m->name, now - m->queued_since, {}});
+                reports.push_back({Watch::Kind::QueuedTooLong, m->owner, task, m->name, now - m->queued_since, {}, false});
             }
         }
         for (Watch& r : reports) r.owner_name = model.owner_name(r.owner);
@@ -803,6 +897,16 @@ void Pool::set_watch_sink(WatchFn fn, void* user) {
     core_->maintenance_cv.notify_all();  // start (or stop) the periodic sweep now
 }
 void Pool::set_model_test_hook(std::function<void(Model::Point)> hook) { core_->model.set_test_hook(std::move(hook)); }
+
+std::string resident_started_line(const PoolNote& n) {
+    const std::string owner = n.owner_name.empty() ? "owner " + std::to_string(n.owner) : n.owner_name;
+    char tail[192];
+    std::snprintf(tail, sizeof tail,
+                  " (task 0x%llx) started as a resident task (the watchdog names it only after its cancellation is "
+                  "asked); resident tasks now hold %u of %u LongRunning threads",
+                  static_cast<unsigned long long>(n.task), n.held, n.long_running);
+    return "kiln.tasks: " + owner + "/" + n.name + tail;
+}
 
 }  // namespace kiln::tasks
 
@@ -886,9 +990,11 @@ KilnResult Service::submit_in(KilnOwner owner, const KilnTaskInfo* info, uint32_
 KilnResult Service::submit_as(KilnOwner owner, const KilnTaskInfo* info, KilnTaskBodyFn body, KilnTaskDoneFn done,
                               void* user, bool lease, KilnHandle* task, uint32_t* refusal, uint32_t world,
                               uint32_t session, bool bound) {
-    // every required pointer and field before any side effect
+    // every required pointer and field before any side effect; RESIDENT is known only together with LONG_RUNNING
+    // (alone it is refused as an unknown bit is)
     if (!owner || !info || !body || !done || !task || info->size < sizeof(KilnTaskInfo) ||
-        (info->flags & ~uint32_t{KILN_TASK_LONG_RUNNING | KILN_TASK_AFTER_STEP}) || info->priority > 2 ||
+        (info->flags & ~uint32_t{KILN_TASK_LONG_RUNNING | KILN_TASK_AFTER_STEP | KILN_TASK_RESIDENT}) ||
+        ((info->flags & KILN_TASK_RESIDENT) && !(info->flags & KILN_TASK_LONG_RUNNING)) || info->priority > 2 ||
         info->reserved != 0 || (info->name.len && !info->name.ptr) ||
         !valid_name(std::string_view(info->name.ptr ? info->name.ptr : "", info->name.len)))
         return refuse(task, refusal, KILN_ERR_INVALID_ARGUMENT, Refusal::Argument);
@@ -899,6 +1005,7 @@ KilnResult Service::submit_as(KilnOwner owner, const KilnTaskInfo* info, KilnTas
     args.name = std::string_view(info->name.ptr, info->name.len);
     args.priority = static_cast<Priority>(info->priority);
     args.long_running = (info->flags & KILN_TASK_LONG_RUNNING) != 0;
+    args.resident = (info->flags & KILN_TASK_RESIDENT) != 0;
     args.lease = lease;
     if (bound || (info->flags & KILN_TASK_AFTER_STEP)) {
         const Snapshot snap = snapshot(world);  // one consistent (session, edge, live)
