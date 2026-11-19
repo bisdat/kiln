@@ -121,6 +121,37 @@ public sealed class KilnTextTests : IDisposable
         Assert.Equal("other", KilnText.PluralForm("pt-pt", 0));
     }
 
+    [Theory]
+    // Russian (and Ukrainian, Belarusian): one 1, 21, 101 but not 11; few 2-4, 22-24 but not 12-14; many the rest
+    [InlineData("ru-ru", 1L, "one")] [InlineData("ru", 21L, "one")] [InlineData("ru", 101L, "one")] [InlineData("ru", 11L, "many")]
+    [InlineData("ru", 2L, "few")] [InlineData("ru", 4L, "few")] [InlineData("ru", 22L, "few")] [InlineData("ru", 12L, "many")]
+    [InlineData("ru", 14L, "many")] [InlineData("ru", 0L, "many")] [InlineData("ru", 5L, "many")] [InlineData("ru", 20L, "many")]
+    [InlineData("ru", 111L, "many")] [InlineData("ru", 112L, "many")] [InlineData("ru", -1L, "one")] [InlineData("uk-ua", 3L, "few")]
+    [InlineData("be", 25L, "many")]
+    // Polish: one only 1; few as Russian; many the rest (0, 5-21, 25-31, 12-14)
+    [InlineData("pl-pl", 1L, "one")] [InlineData("pl", 21L, "many")] [InlineData("pl", 2L, "few")] [InlineData("pl", 22L, "few")]
+    [InlineData("pl", 12L, "many")] [InlineData("pl", 0L, "many")] [InlineData("pl", 5L, "many")] [InlineData("pl", 102L, "few")]
+    [InlineData("pl", long.MinValue, "many")]
+    public void Slavic_plurals_have_few_and_many(string language, long n, string form) =>
+        Assert.Equal(form, KilnText.PluralForm(language, n));
+
+    [Fact]
+    public void A_russian_plural_uses_its_few_and_many_and_falls_back_to_other()
+    {
+        File("ru.json", """{ "native": { "footer": { "loaded": { "one": "{count} мод", "few": "{count} мода", "many": "{count} модов", "other": "{count} мода" } } } }""");
+        KilnText.Configure("ru-RU");
+        Assert.Equal("1 мод", KilnText.Plural("native.footer.loaded", 1, ("version", "1.0")));
+        Assert.Equal("3 мода", KilnText.Plural("native.footer.loaded", 3, ("version", "1.0")));
+        Assert.Equal("5 модов", KilnText.Plural("native.footer.loaded", 5, ("version", "1.0")));
+        Assert.Equal("21 мод", KilnText.Plural("native.footer.loaded", 21, ("version", "1.0")));
+        // a file with only one and other: few and many fall back to its .other
+        File("pl.json", """{ "native": { "footer": { "loaded": { "one": "{count} mod", "other": "{count} modów" } } } }""");
+        KilnText.Reload();
+        KilnText.Configure("pl-PL");
+        Assert.Equal("1 mod", KilnText.Plural("native.footer.loaded", 1, ("version", "1.0")));
+        Assert.Equal("2 modów", KilnText.Plural("native.footer.loaded", 2, ("version", "1.0")));
+    }
+
     [Fact]
     public void A_broken_file_is_skipped_and_english_stays()
     {

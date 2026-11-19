@@ -253,10 +253,12 @@ internal static class KilnText
         return string.Join('-', parts);
     }
 
-    /// <summary>The CLDR plural category of <paramref name="n"/> among one / other: languages without a singular form (Chinese,
-    /// Japanese, Korean, Vietnamese, Thai, Indonesian, Malay) always "other"; French and Brazilian Portuguese "one" for 0
-    /// and 1; every other language "one" for 1. A translation that needs more forms (few, many) writes them; Kiln's
-    /// English has one and other, so a missing form falls back to .other.</summary>
+    /// <summary>The CLDR plural category of <paramref name="n"/> (a whole number): languages without a singular form
+    /// (Chinese, Japanese, Korean, Vietnamese, Thai, Indonesian, Malay) always "other"; French and Brazilian Portuguese
+    /// "one" for 0 and 1; Russian, Ukrainian and Belarusian "one" (1, 21, 31, ... but not 11), "few" (2-4, 22-24, ... but
+    /// not 12-14) and "many" (0, 5-20, 25-30, ...); Polish "one" (1 only), "few" (as Russian) and "many" (0, 5-21, ...);
+    /// every other language "one" for 1. A translation that lacks a form falls back to .other; Kiln's English has one and
+    /// other.</summary>
     internal static string PluralForm(string language, long n)
     {
         var l = ModLocale.Normalize(language);
@@ -264,6 +266,14 @@ internal static class KilnText
         var primary = dash > 0 ? l[..dash] : l;
         if (primary is "zh" or "ja" or "ko" or "vi" or "th" or "id" or "ms" or "lo" or "my" or "km") return "other";
         if (primary is "fr" || l is "pt-br" || (primary is "pt" && l is not "pt-pt")) return n is 0 or 1 ? "one" : "other";
+        if (primary is "ru" or "uk" or "be" or "pl")
+        {
+            var a = n == long.MinValue ? long.MaxValue : Math.Abs(n);
+            long m10 = a % 10, m100 = a % 100;
+            if (primary is "pl" ? a == 1 : m10 == 1 && m100 != 11) return "one";
+            if (m10 is >= 2 and <= 4 && m100 is < 12 or > 14) return "few";
+            return "many";
+        }
         return n == 1 ? "one" : "other";
     }
 

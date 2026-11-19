@@ -52,7 +52,8 @@ The format, in short (the launcher's translating guide says the same at length):
 - Placeholders `{0}`, `{name}`, `{count:N0}` stay exactly as written; move them where your grammar needs them; never add
   or drop one. `{{` and `}}` are literal braces.
 - Plurals are `.one` / `.other` pairs (`"loaded": { "one": "...", "other": "..." }`). Chinese, Japanese and Korean have one
-  form: write only `.other`. A language with more forms adds them (`zero`, `two`, `few`, `many`).
+  form: write only `.other`. Russian, Ukrainian and Belarusian (`one`, `few`, `many`, `other`) and Polish (the same
+  four) get their `few` and `many` in game since 0.2.0-dev.29.19; a form a file lacks falls back to its `.other`.
 - Groups follow Kiln's pages: `menu` (the Kiln menu's frame), `mods`, `catalog` (the Mods page's sentences about mods),
   `config`, `settings`, `set`, `shroudforge`, `shroudlink`, `keys`, `network`, `overlay`, `classic` (the old small window),
   `details` (Item details), `gamemenu`, `toast`, `refusal`, `creative`, `checks`, `talents`, `blocks`, `abilities`,
