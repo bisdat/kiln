@@ -194,7 +194,8 @@ test("WebKit: typing into a sheet page stays quick while the fire burns and the 
     const lat = (await page.evaluate(() => (window as unknown as { __lat: number[] }).__lat)).sort((a, b) => a - b);
     expect(lat.length).toBe(24);
     const median = lat[Math.floor(lat.length / 2)];
-    console.log(`WebKit typing: median ${median.toFixed(1)} ms, slowest ${lat.at(-1)!.toFixed(1)} ms`);
+    const gl = await page.locator(".k-app").getAttribute("data-gl");
+    console.log(`WebKit typing: median ${median.toFixed(1)} ms, slowest ${lat.at(-1)!.toFixed(1)} ms (the fire ${gl ? "burned" : "was off: no WebGL"})`);
     expect(median).toBeLessThan(100);
   } finally {
     await browser.close();
