@@ -43,21 +43,27 @@ test.describe("desktop", () => {
     await expect(list).toContainText("Try each step, or mark it Couldn't try.");
     // the first step is open; Worked
     const step = (id: string) => list.locator(`[data-step="${id}"]`);
+    // each result is waited for in the step's head before the next press: a press reads the step as it is drawn, so a
+    // second press on the same result before the first one's answer would set it again instead of taking it back
+    const head = (id: string) => step(id).locator(".kc-step-head");
     await step("start").getByRole("radio", { name: "Worked" }).click();
-    await expect(step("start")).toContainText("Worked");
-    await step("fsr4").locator(".kc-step-head").click();
+    await expect(head("start")).toContainText("Worked");
+    await head("fsr4").click();
     await step("fsr4").getByRole("radio", { name: "Didn't work" }).click();
+    await expect(head("fsr4")).toContainText("Didn't work");
     await step("fsr4").getByRole("textbox").fill("Water smears when I turn the camera");
     await step("fsr4").getByRole("textbox").blur();
     for (const id of ["overlay", "reload"]) {
-      await step(id).locator(".kc-step-head").click();
-      await step(id).getByRole("radio", { name: id === "reload" ? "Couldn't try" : "Worked" }).click();
+      const result = id === "reload" ? "Couldn't try" : "Worked";
+      await head(id).click();
+      await step(id).getByRole("radio", { name: result }).click();
+      await expect(head(id)).toContainText(result);
     }
     // pressed again: back to Not tried, and on again
     await step("reload").getByRole("radio", { name: "Couldn't try" }).click();
-    await expect(step("reload")).toContainText("Not tried");
+    await expect(head("reload")).toContainText("Not tried");
     await step("reload").getByRole("radio", { name: "Couldn't try" }).click();
-    await expect(step("reload").locator(".kc-step-head")).toContainText("Couldn't try");
+    await expect(head("reload")).toContainText("Couldn't try");
     await expect(page.getByTestId("kc-send-results")).toBeEnabled();
     // the report attached for the team is shown before Send results: its size and files, prepared once and sent as shown
     const attached = page.getByTestId("kc-attached");
