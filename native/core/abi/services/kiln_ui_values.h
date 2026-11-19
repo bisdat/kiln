@@ -12,7 +12,8 @@
  * (tooltip_lines, open/close_tooltip_details), ui.slots.inspect (copy_slots, subscribe_slots), ui.gemforge.inspect
  * (copy_gemforge_candidates, subscribe_gemforge_candidates), gems.sockets (gemforge_sockets; the row also carries
  * kiln.items' socket options, and on a server it is kiln.items' alone), ui.gemforge.sources (gemforge_sources,
- * 0.2.0-dev.29.15). A kind's game hooks are
+ * 0.2.0-dev.29.15), ui.tooltip.lines (tooltip_lines_native drawing in the game's tooltip, 0.2.0-dev.29.19),
+ * ui.tooltip.values (tooltip_values, 0.2.0-dev.29.19). A kind's game hooks are
  * installed when the first provider of that kind registers and its row is available; one kind failing leaves the
  * others working, and the game's own value is drawn whenever no provider changes it. These seven rows never exist on a
  * dedicated server. They require the measured client build; after a game update they are off until Kiln is updated.
@@ -138,9 +139,10 @@ typedef struct KilnUiProviderContext {
     void* reserved; /* the service's; do not touch */
 } KilnUiProviderContext;
 
-/* Tooltip lines: only writer.append may add one (it checks the token and the room left and fills a sized line with
- * flags 0); status is a KilnUiValueReason that a failed append latches. At most 16 entries per detail occurrence, all
- * providers together. They feed Kiln's details window, never the game's tooltip. */
+/* Tooltip lines: only writer.append (flags 0) or writer.append_line (KilnUiLineFlags, since 0.2.0-dev.29.19) may add
+ * one (it checks the token, the flags and the room left and fills a sized line); status is a KilnUiValueReason that a
+ * failed append latches. At most 16 entries per detail occurrence, all providers together. They feed Kiln's details
+ * window; only a provider registered with tooltip_lines_native also gets them drawn into the game's tooltip. */
 typedef struct KilnUiLine {
     uint32_t size, flags;
     KilnUiTextId text;
@@ -150,7 +152,56 @@ typedef struct KilnUiLineWriter {
     KilnUiLine lines[16];
     void* reserved;
     KilnResult(KILN_CALL* append)(struct KilnUiLineWriter*, KilnUiTextId);
+    /* ---- appended in 0.2.0-dev.29.19 (equipment wave): read size before using it ----
+     * append with KilnUiLineFlags: the colour, small text and the place in the game's tooltip. Only a provider
+     * registered with tooltip_lines_native gets lines drawn into the game's tooltip; for every other provider the flags
+     * are kept but only Kiln's details window shows its lines. An unknown flag bit or colour is an invalid line (a
+     * fault, as a foreign token is). append(w, id) is append_line(w, id, 0). */
+    KilnResult(KILN_CALL* append_line)(struct KilnUiLineWriter*, KilnUiTextId, uint32_t flags);
 } KilnUiLineWriter;
+
+/* KilnUiLine.flags (0.2.0-dev.29.19): bits 0..3 a KilnUiLineColor, KUI_LINE_SMALL, KUI_LINE_AFTER_STATS. */
+enum KilnUiLineFlags {
+    KUI_LINE_COLOR_MASK = 0x0f,
+    KUI_LINE_SMALL = 0x10,        /* the game's smaller detail text size */
+    KUI_LINE_AFTER_STATS = 0x100, /* between the stats block and the description (else after the last vanilla line) */
+};
+/* The palette of a line: the game's own rarity colours (the header's), a positive and a negative colour, and a muted
+ * one. KUI_COLOR_DEFAULT is the detail text's own colour. */
+enum KilnUiLineColor {
+    KUI_COLOR_DEFAULT = 0,
+    KUI_COLOR_POSITIVE = 1,
+    KUI_COLOR_NEGATIVE = 2,
+    KUI_COLOR_COMMON = 3,
+    KUI_COLOR_UNCOMMON = 4,
+    KUI_COLOR_RARE = 5,
+    KUI_COLOR_EPIC = 6,
+    KUI_COLOR_LEGENDARY = 7,
+    KUI_COLOR_UNIQUE = 8,
+    KUI_COLOR_MUTED = 9,
+};
+/* tooltip_lines_native flags */
+enum KilnUiNativeLinesFlags { KUI_LINES_IN_GAME_TOOLTIP = 1 };
+
+/* A tooltip value provider (ui.tooltip.values, 0.2.0-dev.29.19): *scale comes in as the product of the earlier
+ * providers' scales (1 for the first) and may be set to any finite value in [0, 1000]. The game's item detail view
+ * then draws its stat numbers (the main damage, armour or block number and the other values its stats block draws)
+ * multiplied by the final scale, on this client only. KILN_OK commits *scale; any other result keeps the scale before
+ * this provider (a refusal, not a fault); a value out of range is an invalid edit (a fault). */
+typedef KilnResult(KILN_CALL* KilnUiScaleFn)(const KilnUiProviderContext*, const KilnUiItemView*, float* scale,
+                                             void* user);
+
+/* What the native tooltip paths are doing now (tooltip_native_state). */
+typedef struct KilnUiTooltipNativeState {
+    uint32_t size;          /* set to sizeof(KilnUiTooltipNativeState) before calling */
+    uint8_t lines_on;       /* lines are drawn into the game's item detail view */
+    uint8_t values_on;      /* stat numbers are scaled in it */
+    uint8_t after_stats;    /* the place between the stats and the description exists (else such lines go last) */
+    uint8_t probe;          /* the tooltip probe (KILN_TOOLTIP_PROBE / kiln.json "tooltipProbe") is running */
+    uint64_t drawn_lines;   /* lines drawn into the game's tooltip in this process */
+    uint64_t scaled_values; /* numbers scaled */
+    char why[128];          /* when lines_on or values_on is 0: why (empty: no provider asked yet) */
+} KilnUiTooltipNativeState;
 
 typedef KilnResult(KILN_CALL* KilnUiValueFn)(const KilnUiProviderContext*, const KilnUiItemView*,
                                              const KilnUiBarValue*, KilnUiBarEdit*, void* user);
@@ -367,6 +418,22 @@ typedef struct KilnUiValuesApi {
                                             const KilnUiGemForgePayer* payers, uint32_t payer_count);
     /* The feature's state for logs and the owner's managed side (which materials to ask the server about). */
     KilnResult(KILN_CALL* gemforge_sources_state)(KilnUiGemForgeSourcesState* out);
+    /* ---- appended in 0.2.0-dev.29.19 (equipment wave): native tooltip lines and values. Check header.size. ----
+     * tooltip_lines_native: a tooltip-lines provider as tooltip_lines registers one (same budgets, order, faults and
+     * the same details window), whose lines are also drawn inside the game's own item detail view when flags has
+     * KUI_LINES_IN_GAME_TOOLTIP and the row ui.tooltip.lines is available: as the last children of the detail's
+     * scrolled content (or between the stats and the description, KUI_LINE_AFTER_STATS), wrapped to the panel as the
+     * game wraps its description, in the colour each line names. Where the game's view does not reach those places
+     * (other detail screens), on an unmeasured build, or after a fault in the drawing, the lines show only in Kiln's
+     * details window: a tooltip is never left half drawn. Needs ui.values.tooltip_lines (else KILN_ERR_UNAVAILABLE).
+     * tooltip_values: a KilnUiScaleFn for one item id or 0 (ui.tooltip.values; KILN_ERR_UNAVAILABLE when off).
+     * Both are client only, any thread; callbacks run on the client's main thread inside the game's UI frame, as the
+     * lines providers do. tooltip_native_state: what the native paths are doing (any thread). */
+    KilnResult(KILN_CALL* tooltip_lines_native)(KilnOwner, uint32_t item_filter, uint32_t flags, KilnUiLinesFn,
+                                                void* user, KilnUiRegistration*);
+    KilnResult(KILN_CALL* tooltip_values)(KilnOwner, uint32_t item_filter, KilnUiScaleFn, void* user,
+                                          KilnUiRegistration*);
+    KilnResult(KILN_CALL* tooltip_native_state)(KilnUiTooltipNativeState* out);
 } KilnUiValuesApi;
 
 #ifdef __cplusplus
