@@ -193,7 +193,27 @@ public sealed class KilnTextTests : IDisposable
         KilnText.Glyphs(false);                      // a Latin language never waits
         KilnText.Configure("de");
         Assert.False(KilnText.Gated);
-        Assert.True(KilnText.NeedsGlyphs("ja-jp") && KilnText.NeedsGlyphs("ko") && !KilnText.NeedsGlyphs("ru-ru"));
+        Assert.True(KilnText.NeedsGlyphs("ja-jp") && KilnText.NeedsGlyphs("ko") && !KilnText.NeedsGlyphs("pl-pl"));
+    }
+
+    [Fact]
+    public void A_cyrillic_language_waits_for_the_glyphs_of_the_games_default_font_group()
+    {
+        File("ru.json", """{ "native": { "menu": { "mods": "Моды" } }, "settings": { "look": { "look": "Вид" } } }""");
+        KilnText.Glyphs(false);                      // kiln.ui is still reading the game's Cyrillic font (Noto Serif)
+        KilnText.Configure("ru");
+        Assert.True(KilnText.Gated);
+        Assert.Equal("Look", KilnText.T("settings.look.look"));                          // the overlay: English, no "????"
+        Assert.Contains(KilnText.Native(), p => p.Key == "native.menu.mods" && p.Value == "Моды");  // the game draws these
+        KilnText.Glyphs(true);
+        Assert.False(KilnText.Gated);
+        Assert.Equal("Вид", KilnText.T("settings.look.look"));
+        Assert.True(KilnText.NeedsGlyphs("uk-UA") && KilnText.NeedsGlyphs("bg") && KilnText.NeedsGlyphs("sr-Cyrl") && KilnText.NeedsGlyphs("be"));
+        Assert.False(KilnText.NeedsGlyphs("sr-Latn") || KilnText.NeedsGlyphs("en-us") || KilnText.NeedsGlyphs("run"));
+        Assert.Equal(9, KilnText.GlyphLanguage("ru-RU"));
+        Assert.Equal(34, KilnText.GlyphLanguage("uk"));
+        Assert.Equal(24, KilnText.GlyphLanguage("bg-BG"));
+        Assert.Equal(9, KilnText.GlyphLanguage("kk"));
     }
 
     [Fact]

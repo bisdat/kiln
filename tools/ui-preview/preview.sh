@@ -3,8 +3,8 @@
 # Renders the Kiln mod manager to PNGs without the game (tools/ui-preview/README.md).
 #   tools/ui-preview/preview.sh [--font TTF] [--no-game-font] [--scene NAME] [--size WxH --scale S]
 #                               [--language TAG --locales DIR]  (Kiln's texts in that language, e.g. zh-CN with a stub
-#                               translation in DIR; a Chinese, Japanese or Korean one reads the game's own font of that
-#                               language group with game_fonts.py, outside the tree)
+#                               translation in DIR; the game's own fonts are read with game_fonts.py, outside the
+#                               tree: the default group's (Cyrillic, Thai) and a Chinese, Japanese or Korean group's)
 # (--no-game-font also leaves the game's colours out: the game look is then its neutral stand-in)
 # Output: $KILN_OUT/preview/*.png (KILN_OUT default: <repo>/.out). Builds the shim and the preview app first.
 set -euo pipefail
@@ -28,6 +28,7 @@ while (($#)); do
     *) echo "unknown argument $1" >&2; exit 2 ;;
   esac
 done
+userfont=$font
 if [[ -n $size ]]; then sizes=("$size $scale"); else sizes=("1920x1080 1" "2560x1440 1" "1920x1080 1.5" "3440x1440 1" "1920x1200 1"); fi
 
 # the shim: Dear ImGui + kiln.ui's drawing slots and looks (the game's code) + the rasteriser
@@ -54,7 +55,8 @@ if [[ $gamefont == 1 ]]; then
   ((${#colors[@]} == 2)) || { colors=(); echo "game colours not found: the game look is its neutral stand-in" >&2; }
 fi
 
-# a Chinese, Japanese or Korean language: the game's font resource and the files of its group (and the default group's)
+# the game's font resource and the files kiln.ui reads from it, as in game: the default group's (its Latin source and bold,
+# Cyrillic, Thai) for every language, and a Chinese, Japanese or Korean language's own group
 fontres=()
 case ${language,,} in
   zh-tw|zh-hk|zh-mo|zh-hant*) lid=21 ;;
@@ -63,10 +65,10 @@ case ${language,,} in
   ko*) lid=13 ;;
   *) lid=0 ;;
 esac
-if [[ $lid != 0 && $gamefont == 1 ]]; then
+if [[ $gamefont == 1 && ( -z $userfont || $lid != 0 ) ]]; then
   res=$(python3 -I "$here/game_fonts.py" "$KILN_OUT/ui-preview/game-fonts" --language "$lid" 2>/dev/null || true)
   if [[ -n $res ]]; then fontres=(--font-resource "$res" --font-blobs "$KILN_OUT/ui-preview/game-fonts"); font=""
-  else echo "the game's fonts were not found: Kiln's texts stay English in the preview" >&2; fi
+  else echo "the game's fonts were not found: a CJK or Cyrillic language's texts stay English in the preview" >&2; fi
 fi
 
 dotnet build "$here/Kiln.Ui.Preview/Kiln.Ui.Preview.csproj" --artifacts-path "$KILN_OUT/dotnet" -v q -nologo | grep -E "error|Error" || true

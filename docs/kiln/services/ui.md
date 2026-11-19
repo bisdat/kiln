@@ -163,14 +163,23 @@ through it and its pointer). The guide: [translating-game.md](../translating-gam
   font, the game's UI font and its bold face (`MergeMode`, the target's size, `GlyphExcludeRanges` = every rune outside the
   set's ranges), now or as those fonts arrive; another group's files replace them, a Latin language removes them (their
   sources leave the fonts; glyphs are made again as drawn). Mods' fonts get none.
+- **The default group's other fonts** (0.2.0-dev.29.19). For every language, at the first overlay frame (any look), kiln.ui
+  reads the default group's regular glyph sets after its first (the Latin source), each font once, only files up to 2 MiB,
+  at most 4 and 4 MiB together (`font_budget.h` `admit_default`; 26430625: Noto Serif for Cyrillic, Noto Sans Thai, 577 KB;
+  the CJK fallbacks are left to the CJK groups), and merges them into the same three fonts the same way, before a CJK
+  group's (which waits for them, unless they failed). Kept for the process; asked again while the resource is not listed,
+  as above.
 - `KilnUiLookInfo.glyphs` (byte 30; it was reserved) is `KILN_UI_GLYPHS_LATIN` (0, no such language), `LOADING` (1),
   `READY` (2) or `FAILED` (3, kiln.log says why), and `glyph_language` (byte 31) the `keen::LanguageId` it is about (20 zh-CN,
-  21 zh-TW, 11 ja-JP, 13 ko-KR). Kiln.Ui shows its overlay texts in English until `READY` for its language.
+  21 zh-TW, 11 ja-JP, 13 ko-KR; since 29.19 9 ru-RU, 24 bg-BG, 34 uk-UA, other Cyrillic tags 9). The language is Kiln's
+  (set_texts) when its script is not Latin, else the game's when its is not (`font_group.h` `needed`). For a CJK one the
+  state is its group's; for a Cyrillic one the default group's fonts' (`READY` only when they cover U+0410..U+044F).
+  Kiln.Ui shows its overlay texts in English until `READY` for its language.
 - Host tests (`tests/run.sh`): `ui_text_test.cpp` (the handoff, plurals, placeholders, the built-in English against
   en.json), `font_group_test.cpp` (the group, sets and exclusions from made-up resource bytes, another layout, bad data, the
   budget), `group_host_test.cpp` (style.cpp's loading on a headless ImGui context with a made-up resource and a system TTF:
-  the language's choice, the state, merging into fonts that arrive later, replacing, removing, a failed read, the layout
-  from reflection; `KILN_TEST_CJK_FONT=<an extracted CJK font>` also checks a real CJK glyph).
+  the default group's fonts and the Cyrillic state, the language's choice, the state, merging into fonts that arrive later
+  in order, replacing, removing, a failed read, the layout from reflection; `KILN_TEST_CJK_FONT=<an extracted CJK font>` also checks a real CJK glyph).
 
 ## Kiln's graphics tools (0.2.0-dev.29.18)
 

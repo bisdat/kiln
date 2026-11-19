@@ -568,7 +568,7 @@ internal static unsafe class UiNative
     /// <summary>Tests: a table of the graphics tail in place of kiln.ui's.</summary>
     internal static TableGraphics* GraphicsOverride;
 
-    /// <summary>KILN_UI_GLYPHS_* (kiln_ui.h look_info): the overlay's glyphs of a Chinese, Japanese or Korean language.</summary>
+    /// <summary>KILN_UI_GLYPHS_* (kiln_ui.h look_info): the overlay's glyphs of a Chinese, Japanese, Korean or Cyrillic language.</summary>
     public const byte GlyphsLatin = 0, GlyphsLoading = 1, GlyphsReady = 2, GlyphsFailed = 3;
 
     /// <summary>KILN_UI_IMAGE_WAITING / READY / FAILED (kiln_ui.h image_state).</summary>

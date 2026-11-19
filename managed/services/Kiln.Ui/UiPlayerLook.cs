@@ -352,7 +352,7 @@ internal static unsafe class KilnLook
     internal static bool GameColorsRead => _gameColors;
     internal static bool GameFontRead => _gameFont;
 
-    /// <summary>kiln.ui's glyphs of a Chinese, Japanese or Korean language as of this frame's start (UiNative.Glyphs*, the
+    /// <summary>kiln.ui's glyphs of a Chinese, Japanese, Korean or Cyrillic language as of this frame's start (UiNative.Glyphs*, the
     /// keen::LanguageId); null when this kiln.ui does not say.</summary>
     internal static (byte State, byte Language)? Glyphs => _glyphs;
 

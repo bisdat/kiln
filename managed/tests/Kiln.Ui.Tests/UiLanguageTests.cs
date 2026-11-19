@@ -117,6 +117,18 @@ public sealed unsafe class UiLanguageTests : IDisposable
         Assert.Equal(20, UiLanguage.LanguageId("zh"));
         Assert.Equal(13, UiLanguage.LanguageId("ko"));
         Assert.Equal(0, UiLanguage.LanguageId("en-us"));
+        // Cyrillic: the default font group's glyphs, reported for the language's id
+        Assert.False(UiLanguage.GlyphsReady("ru", (UiNative.GlyphsLatin, 0)));                 // not read yet
+        Assert.False(UiLanguage.GlyphsReady("ru", (UiNative.GlyphsLoading, 9)));
+        Assert.True(UiLanguage.GlyphsReady("ru-RU", (UiNative.GlyphsReady, 9)));
+        Assert.True(UiLanguage.GlyphsReady("uk", (UiNative.GlyphsReady, 9)));                  // one font for all Cyrillic
+        Assert.False(UiLanguage.GlyphsReady("uk", (UiNative.GlyphsReady, 20)));                // Chinese glyphs only
+        Assert.False(UiLanguage.GlyphsReady("ru", (UiNative.GlyphsFailed, 9)));                // kiln.log says why: English
+        Assert.Equal(9, UiLanguage.LanguageId("ru"));
+        Assert.Equal(24, UiLanguage.LanguageId("bg"));
+        Assert.Equal("ru-ru", GameLanguage.KeyOf(9));
+        Assert.Equal("bg-bg", GameLanguage.KeyOf(24));
+        Assert.Equal("uk-ua", GameLanguage.KeyOf(34));
         // the same numbers as kiln.ui's (font_group.h) and the game's keen::LanguageId (GameLanguage)
         Assert.Equal("zh-cn", GameLanguage.KeyOf(20));
         Assert.Equal("zh-tw", GameLanguage.KeyOf(21));

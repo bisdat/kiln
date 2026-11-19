@@ -17,7 +17,7 @@ internal static unsafe class UiLanguage
     internal static void Start()
     {
         if (Interlocked.Exchange(ref _started, 1) != 0) return;
-        // with the overlay drawing, a Chinese, Japanese or Korean language waits for its glyphs (the first frames say)
+        // with the overlay drawing, a Chinese, Japanese, Korean or Cyrillic language waits for its glyphs (the first frames say)
         if (UiNative.DrawingOffReason == null && UiNative.Looks != null) KilnText.Glyphs(false);
         KilnText.Configure(PlayerLook.Current.Language);
         KilnText.Refresh(GameLanguage.Current);
@@ -34,26 +34,23 @@ internal static unsafe class UiLanguage
         KilnText.Glyphs(GlyphsReady(KilnText.Language, KilnLook.Glyphs));
     }
 
-    /// <summary>Whether the overlay can draw <paramref name="language"/>: Latin needs nothing; Chinese, Japanese and Korean need
-    /// kiln.ui's glyphs of that language ready. A kiln.ui that does not say (null) is taken at its word.</summary>
+    /// <summary>Whether the overlay can draw <paramref name="language"/>: Latin needs nothing; Chinese, Japanese, Korean and
+    /// Cyrillic need kiln.ui's glyphs of that language ready (a CJK group's fonts; for Cyrillic the game's default font
+    /// group's, the same for every Cyrillic language). A kiln.ui that does not say (null) is taken at its word.</summary>
     internal static bool GlyphsReady(string language, (byte State, byte Language)? glyphs)
     {
         if (!KilnText.NeedsGlyphs(language) || glyphs is not { } g) return true;
         if (g.State != UiNative.GlyphsReady) return false;
-        return g.Language == LanguageId(language);
+        var id = LanguageId(language);
+        return g.Language == id || (Cyrillic(g.Language) && Cyrillic(id));  // one font for every Cyrillic language
     }
 
-    /// <summary>The keen::LanguageId kiln.ui loads the glyphs of for a CJK tag (font_group.h language_id): zh-TW, zh-HK,
-    /// zh-MO and zh-Hant 21, every other zh 20, ja 11, ko 13; else 0.</summary>
-    internal static byte LanguageId(string language)
-    {
-        var l = ModLocale.Normalize(language);
-        if (l == "ja" || l.StartsWith("ja-", StringComparison.Ordinal)) return 11;
-        if (l == "ko" || l.StartsWith("ko-", StringComparison.Ordinal)) return 13;
-        if (l is "zh-tw" or "zh-hk" or "zh-mo" || l.StartsWith("zh-hant", StringComparison.Ordinal)) return 21;
-        if (l == "zh" || l.StartsWith("zh-", StringComparison.Ordinal)) return 20;
-        return 0;
-    }
+    private static bool Cyrillic(byte id) => id is 9 or 24 or 34;
+
+    /// <summary>The keen::LanguageId kiln.ui loads the glyphs of for a tag (KilnText.GlyphLanguage, font_group.h
+    /// language_id): zh-TW, zh-HK, zh-MO and zh-Hant 21, every other zh 20, ja 11, ko 13, ru 9, uk 34, bg 24 (other Cyrillic
+    /// languages 9); else 0.</summary>
+    internal static byte LanguageId(string language) => KilnText.GlyphLanguage(language);
 
     /// <summary>The setting changed (kiln.json, or Kiln's menu): applied at once.</summary>
     internal static void Apply(string setting)

@@ -136,8 +136,10 @@ What happens to a file that arrives (the first one, Simplified Chinese by XiaoHu
    `tools/ui-preview/preview.sh --language <tag> --locales runtime/locales`.
 5. **Fonts.** The launcher's own fonts are Latin: Chinese, Japanese and Korean come from the system's fonts (the
    page's `lang` is the file's tag, so the system picks that language's glyph shapes). In game, a CJK language uses the
-   game's own font of that language group ([translating-game.md](translating-game.md#chinese-japanese-and-korean));
-   until it is in the overlay, Kiln's texts there are English and a language's name in the Language entry is its tag.
+   game's own font of that language group ([translating-game.md](translating-game.md#chinese-japanese-and-korean)), a
+   Cyrillic one the game's Cyrillic font of its default group
+   ([translating-game.md](translating-game.md#cyrillic-and-the-other-scripts-of-the-games-default-font-group)); until it
+   is in the overlay, Kiln's texts there are English and a language's name in the Language entry is its tag.
 
 ## Credit
 
