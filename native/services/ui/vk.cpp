@@ -41,6 +41,7 @@
 #include "image_budget.h"
 #include "ui.h"
 #include "upscale.h"
+#include "upscale_reentry.h"
 #include "vk_hooks.h"
 #include "vk_present.h"
 
@@ -753,6 +754,9 @@ bool run_pre_overlay(VkQueue queue, const VkPresentInfoKHR* info, VkSemaphore* w
 // Detours
 
 VkResult VKAPI_CALL hk_create_instance(const VkInstanceCreateInfo* ci, const VkAllocationCallbacks* a, VkInstance* out) {
+    // the upscaler backend's library making an instance of its own while Kiln asks it for its needs (inside the game's
+    // vkCreateInstance, upscale_reentry.h): straight to the real function, not the game's instance
+    if (upscale::reentry::inside()) return R.create_instance.load()(ci, a, out);
     // Kiln's upscaler swap (upscale.cpp): the chosen backend's instance needs, only when it was chosen at the game's
     // start; otherwise ci goes through unchanged. A create info of Kiln's that fails is tried again as the game made it.
     void* upscale_scope = nullptr;
@@ -776,6 +780,7 @@ VkResult VKAPI_CALL hk_create_instance(const VkInstanceCreateInfo* ci, const VkA
 }
 
 void VKAPI_CALL hk_destroy_instance(VkInstance inst, const VkAllocationCallbacks* a) {
+    if (upscale::reentry::inside()) return R.destroy_instance.load()(inst, a);  // the backend's own (upscale_reentry.h)
     upscale_instance_destroyed(inst);
     {
         std::lock_guard<std::mutex> lk(g_mu);
@@ -810,6 +815,8 @@ thread_local std::vector<HandedQueue>* t_creating = nullptr;
 
 VkResult VKAPI_CALL hk_create_device(VkPhysicalDevice phys, const VkDeviceCreateInfo* ci, const VkAllocationCallbacks* a,
                                      VkDevice* out) {
+    // the upscaler backend's library making a device of its own while Kiln asks it (upscale_reentry.h): not the game's
+    if (upscale::reentry::inside()) return R.create_device.load()(phys, ci, a, out);
     std::vector<HandedQueue> handed;
     // the queues the game asks for, read before the call from the game's own create info: a tool under Kiln may change
     // the create info it passes on (the upscaler's copy below carries the game's queues unchanged)
@@ -870,6 +877,7 @@ VkResult VKAPI_CALL hk_create_device(VkPhysicalDevice phys, const VkDeviceCreate
 }
 
 void VKAPI_CALL hk_destroy_device(VkDevice dev, const VkAllocationCallbacks* a) {
+    if (upscale::reentry::inside()) return R.destroy_device.load()(dev, a);  // the backend's own (upscale_reentry.h)
     upscale_device_destroy(dev);  // the upscaler backend's Vulkan objects on this device go first (it waits for the GPU)
     VkDevice was = dev;
     g_swap_device.compare_exchange_strong(was, VK_NULL_HANDLE);

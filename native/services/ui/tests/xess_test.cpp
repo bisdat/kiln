@@ -4,15 +4,18 @@
 // exposure, reset), the device needs (XeSS's own answers and the guide's), device_ready's verdicts (device, restart),
 // and the life of contexts: created per Fsr3Create, retired, destroyed after four more records or at device_lost, never
 // while the GPU may still use them. No GPU, no Windows, no Intel file.
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <vector>
 
+#include "../upscale_reentry.h"
 #include "../xess_backend.h"
 
 using namespace kui;
@@ -297,6 +300,8 @@ int destroyed = 0, set_vel = 0, log_calls = 0;
 ExecuteParams last{};
 VkCommandBuffer last_cb = VK_NULL_HANDLE;
 LogFn logger = nullptr;
+// A Vulkan call of libxess's own while it answers (it reaches Kiln's hooks: upscale_reentry.h); nullptr: none.
+void (*reenter)() = nullptr;
 VkPhysicalDeviceMutableDescriptorTypeFeaturesEXT mut{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MUTABLE_DESCRIPTOR_TYPE_FEATURES_EXT, nullptr, VK_TRUE};
 VkPhysicalDeviceFeatures2 f2 = [] {
     VkPhysicalDeviceFeatures2 f{};
@@ -315,19 +320,25 @@ void reset() {
     destroyed = set_vel = log_calls = 0;
     last = {};
     logger = nullptr;
+    reenter = nullptr;
 }
 int32_t get_version(Version* v) { return *v = version, kOk; }
 int32_t inst(uint32_t* n, const char* const** names, uint32_t* api) {
+    if (reenter) reenter();
     if (instance_result < 0) return instance_result;
     *n = 1, *names = inst_exts, *api = VK_API_VERSION_1_1;
     return kOk;
 }
 int32_t dev(VkInstance, VkPhysicalDevice, uint32_t* n, const char* const** names) {
+    if (reenter) reenter();
     if (device_ext_result < 0) return device_ext_result;
     *n = 1, *names = dev_exts;
     return kOk;
 }
-int32_t feats(VkInstance, VkPhysicalDevice, void** chain) { return *chain = &f2, kOk; }
+int32_t feats(VkInstance, VkPhysicalDevice, void** chain) {
+    if (reenter) reenter();
+    return *chain = &f2, kOk;
+}
 int32_t create(VkInstance, VkPhysicalDevice, VkDevice, Context* out) {
     if (create_result < 0) return create_result;
     auto* c = new Ctx{static_cast<int>(all.size())};
@@ -984,6 +995,84 @@ static void ratios_of_the_game() {
     CHECK(b.contexts_made() == 11);
 }
 
+// The owner's game (0.2.0-dev.29.18 trial, XeSS chosen): libxess.dll's answer to Kiln's instance-needs question made a
+// Vulkan call that came back into Kiln's vkCreateInstance hook, which asked XeSS again, until the stack ran out. The
+// fake libxess calls back into a hook shaped like vk.cpp's hk_create_instance + upscale.cpp's upscale_instance_begin
+// (and the device's): with Kiln's mark (upscale_reentry.h) the inner call goes to the "real" function, once.
+namespace hook {
+XessBackend* backend = nullptr;
+bool guard = true;  // false: as before the fix (the hook stops itself at kMaxDepth instead of overflowing)
+int calls = 0, passed = 0, depth = 0, max_depth = 0;
+constexpr int kMaxDepth = 8;
+upscale::PhysicalDevice gpu;
+enum class What { instance, device } what = What::instance;
+void reset(XessBackend* b, bool with_guard, What w) { backend = b, guard = with_guard, what = w, calls = passed = depth = max_depth = 0; }
+void create() {  // Kiln's vkCreateInstance / vkCreateDevice hook
+    ++calls;
+    if (guard && upscale::reentry::inside()) {  // the real vkCreate*: nothing of Kiln's
+        ++passed;
+        return;
+    }
+    if (depth >= kMaxDepth) return;
+    max_depth = std::max(max_depth, ++depth);
+    {
+        std::optional<upscale::reentry::Scope> in;
+        if (guard) in.emplace();
+        if (what == What::instance) backend->instance_needs();
+        else backend->device_needs(gpu);
+    }
+    --depth;
+}
+}  // namespace hook
+
+static void reentrant_vulkan_calls() {
+    std::vector<std::string> log;
+    upscale::Why why = upscale::Why::none;
+    std::string detail;
+    {
+        // the instance: one hook call from the game, one from libxess, passed on; XeSS's answer as without the call
+        fx::reset();
+        XessBackend b(std::make_unique<FakeHost>(&log));
+        CHECK(b.load(files(), &why, &detail));
+        fx::reenter = &hook::create;
+        hook::reset(&b, true, hook::What::instance);
+        CHECK(!upscale::reentry::inside());
+        hook::create();
+        CHECK(hook::calls == 2 && hook::passed == 1 && hook::max_depth == 1 && hook::depth == 0 && !upscale::reentry::inside());
+        fx::reenter = nullptr;
+        const upscale::InstanceNeeds in = b.instance_needs();
+        CHECK(in.min_api_version == VK_API_VERSION_1_1 && in.extensions.size() == 1);
+        // without the mark: the same fake recurses (the crash), stopped here at the hook's depth limit
+        fx::reenter = &hook::create;
+        hook::reset(&b, false, hook::What::instance);
+        hook::create();
+        CHECK(hook::max_depth == hook::kMaxDepth && hook::passed == 0);
+        fx::reenter = nullptr;
+    }
+    {
+        // the device: xessVKGetRequiredDeviceExtensions and xessVKGetRequiredDeviceFeatures each call back once
+        fx::reset();
+        XessBackend b(std::make_unique<FakeHost>(&log));
+        CHECK(b.load(files(), &why, &detail));
+        fx::reenter = &hook::create;
+        hook::reset(&b, true, hook::What::device);
+        hook::gpu = gpu();
+        hook::create();
+        CHECK(hook::calls == 3 && hook::passed == 2 && hook::max_depth == 1 && hook::depth == 0 && !upscale::reentry::inside());
+        fx::reenter = nullptr;
+        // the mark nests and ends with its scopes
+        {
+            const upscale::reentry::Scope a;
+            {
+                const upscale::reentry::Scope c;
+                CHECK(upscale::reentry::t_depth == 2);
+            }
+            CHECK(upscale::reentry::inside());
+        }
+        CHECK(!upscale::reentry::inside());
+    }
+}
+
 int main() {
     presets();
     knobs();
@@ -999,6 +1088,7 @@ int main() {
     lifetime();
     ticks();
     ratios_of_the_game();
+    reentrant_vulkan_calls();
     fx::reset();
     std::printf("xess_test: %d checks passed\n", g_checks);
     return 0;

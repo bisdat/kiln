@@ -42,6 +42,7 @@
 #include "upscale.h"
 #include "upscale_backend.h"
 #include "upscale_logic.h"
+#include "upscale_reentry.h"
 #include "vendor_file.h"
 
 namespace kui {
@@ -317,7 +318,10 @@ void log_report(const char* what, const device_merge::Report& r) {
 
 const VkInstanceCreateInfo* upscale_instance_begin(const VkInstanceCreateInfo* ci, PFN_vkGetInstanceProcAddr gipa, void** scope) {
     *scope = nullptr;
+    // an instance the backend's own library makes while Kiln asks it (upscale_reentry.h): passed on untouched
+    if (reentry::inside()) return ci;
     if (!g_hooked.load() || !g_backend || !ci) return ci;
+    const reentry::Scope in_backend;  // the load and the instance needs below call into the backend's library
     load_backend();
     auto* s = new InstanceScope();
     s->api = ci->pApplicationInfo && ci->pApplicationInfo->apiVersion ? ci->pApplicationInfo->apiVersion : VK_API_VERSION_1_0;
@@ -362,10 +366,12 @@ void upscale_instance_destroyed(VkInstance instance) {
 const VkDeviceCreateInfo* upscale_device_begin(VkInstance instance, VkPhysicalDevice phys, const VkDeviceCreateInfo* ci,
                                                PFN_vkGetInstanceProcAddr gipa, void** scope) {
     *scope = nullptr;
+    if (reentry::inside()) return ci;  // a device the backend's own library makes while Kiln asks it (upscale_reentry.h)
     if (!g_hooked.load() || !g_backend || !ci || !gipa) return ci;
     // the game's own device: the first one with a swapchain while Kiln has none (the client also makes a second device
     // with 79 extensions next to its own, B0; it is left alone)
     if (g_device.load() || !has_swapchain_ext(ci)) return ci;
+    const reentry::Scope in_backend;  // the load and the device needs below call into the backend's library
     load_backend();
     auto* s = new DeviceScope();
     *scope = s;
@@ -456,6 +462,7 @@ void upscale_device_end(void* scope, const VkDeviceCreateInfo* used, VkResult r,
     Why why = Why::device;
     std::string detail;
     bool ok = false;
+    const reentry::Scope in_backend;  // the backend's library may make Vulkan calls of its own (upscale_reentry.h)
     if (!KUI_GUARD("the backend's device set-up", ok = g_backend->device_ready(g_vk, &why, &detail))) return;
     if (!ok) {
         if (why == Why::aside) g_aside_run.fetch_or(gfx::kAsideUpscaler);
