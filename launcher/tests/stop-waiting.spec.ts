@@ -25,8 +25,6 @@ const mouth = (page: Page) => page.locator(".k-door");
 const stopWaiting = (page: Page) => page.getByRole("button", { name: "Stop waiting" });
 const fits = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1 && document.documentElement.scrollHeight <= innerHeight + 1);
 
-test.describe.configure({ mode: "serial" });
-
 test("Stop waiting: a Steam start that never comes gives Play back at once, and nothing brings the wait back", async ({ page }) => {
   test.setTimeout(60_000);
   await open(page);
