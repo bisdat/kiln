@@ -91,6 +91,13 @@ using LogFn = void (*)(const char* message, int32_t level);  // UTF-8; any threa
 struct Version {  // xess_version_t
     uint16_t major, minor, patch, reserved;
 };
+// The Super Resolution major version this interface is, as xessGetVersion reports it. That is not the SDK's number: the
+// XeSS SDK 3.0.2's libxess.dll (the file Kiln pins, its size and SHA-256 checked before it loads: vendor_file.h) reports
+// 2.0.2, because Intel's 3.0 SDK added multi-frame generation in other libraries and kept Super Resolution at 2. The
+// version check only guards against a wrong or old library: a major version is the interface's, so 1.x (older, not
+// what Kiln declares here) and a later major (may change these structs) are refused; any 2.x with every required export
+// (Api::missing) loads.
+inline constexpr uint16_t kSuperResolutionMajor = 2;
 struct Dim {  // xess_2d_t, also xess_coord_t
     uint32_t x, y;
 };

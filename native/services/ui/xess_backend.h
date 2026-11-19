@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: MIT
 // kiln.ui: the Intel XeSS backend of Kiln's upscaler swap (upscale_backend.h; docs/kiln/graphics.md "Upscaler behind the
-// game's FSR 3"). XeSS Super Resolution 3.0.2 from Intel's unmodified libxess.dll, loaded from
-// <game>/kiln/vendor/intel/3.0.2/ after vendor_file.h checked it. On a GPU that is not Intel's it runs its cross-vendor
-// (DP4a) path.
+// game's FSR 3"). XeSS Super Resolution from the XeSS SDK 3.0.2: Intel's unmodified libxess.dll (it reports Super
+// Resolution 2.0.2, xess_abi.h kSuperResolutionMajor), loaded from <game>/kiln/vendor/intel/3.0.2/ after vendor_file.h
+// checked it. On a GPU that is not Intel's it runs its cross-vendor (DP4a) path.
 //
 // Life of it (the core calls in this order, all on the game's main thread):
-//  load          libxess.dll's exports (Host::load_library), XeSS's version, the test knobs (kiln/control/xess; read
+//  load          libxess.dll's exports (Host::load_library), XeSS's version (Super Resolution 2.x), the test knobs (kiln/control/xess; read
 //                again at each create, so a knob changed during a test applies at the game's next FSR set-up).
 //  instance_needs / device_needs
 //                XeSS's own answers (xessVKGetRequiredInstanceExtensions / DeviceExtensions / DeviceFeatures) once the
@@ -163,9 +163,11 @@ class XessBackend final : public upscale::Backend {
         Version v{};
         const int32_t r = api.get_version(&v);
         if (r < 0) return fail(upscale::Why::load_failed, std::string("xessGetVersion failed: ") + result_name(r));
-        if (v.major != 3) {
-            return fail(upscale::Why::load_failed, "libxess.dll is XeSS " + std::to_string(v.major) + "." + std::to_string(v.minor) + "." +
-                                                       std::to_string(v.patch) + "; this Kiln is made for XeSS 3");
+        // Super Resolution's own version, not the SDK's (the pinned SDK 3.0.2 reports 2.0.2): xess_abi.h kSuperResolutionMajor
+        if (v.major != kSuperResolutionMajor) {
+            return fail(upscale::Why::load_failed, "libxess.dll reports XeSS Super Resolution " + version_string(v) + "; this Kiln calls Super Resolution " +
+                                                       std::to_string(kSuperResolutionMajor) +
+                                                       (files.version.empty() ? std::string() : " (the XeSS SDK " + files.version + "'s)"));
         }
         api_ = api;
         version_ = v;
@@ -174,7 +176,7 @@ class XessBackend final : public upscale::Backend {
         read_tuning();
         if (tuning_.motion_copy) mv_ = host_->motion_copy();
         log_host().store(host_.get());
-        host_->log(3, "libxess.dll loaded: XeSS " + name_version());
+        host_->log(3, "libxess.dll loaded: XeSS " + full_name());
         return true;
     }
 
@@ -300,7 +302,7 @@ class XessBackend final : public upscale::Backend {
         vel_x_ = vel_y_ = NAN;
         pending_reset_ = true;
         ++contexts_;
-        host_->log(3, "XeSS " + name_version() + " set up: " + size_text(ci.max_render_width, ci.max_render_height) + " -> " +
+        host_->log(3, "XeSS Super Resolution " + name_version() + " set up: " + size_text(ci.max_render_width, ci.max_render_height) + " -> " +
                           size_text(ci.output_width, ci.output_height) + " (ratio " + ratio_text(ratio) + ", " + preset_of(q).name + "), flags " +
                           flags_text(flags) + range);
         return true;
@@ -393,7 +395,9 @@ class XessBackend final : public upscale::Backend {
 
     upscale::Running running() const override { return upscale::Running::xess; }
     uint32_t version() const override { return loaded_ ? upscale::make_version(version_.major, version_.minor, version_.patch) : 0; }
-    std::string name() const override { return "Intel XeSS " + (loaded_ ? name_version() : std::string("3")); }
+    // version() is Super Resolution's own (2.0.2 from the SDK 3.0.2), as the readout, graphics.json and the launcher show it
+    // ("Version 2.0.2"); the name for kiln.log says both
+    std::string name() const override { return loaded_ ? "Intel XeSS " + full_name() : std::string("Intel XeSS"); }
 
     // For the tests and the log.
     bool loaded() const { return loaded_; }
@@ -500,8 +504,14 @@ class XessBackend final : public upscale::Backend {
     }
 
     static bool vendor_is_intel(const upscale::VkContext& vk) { return vk.props.vendorID == 0x8086; }
-    std::string name_version() const {
-        return std::to_string(version_.major) + "." + std::to_string(version_.minor) + "." + std::to_string(version_.patch);
+    static std::string version_string(const Version& v) {
+        return std::to_string(v.major) + "." + std::to_string(v.minor) + "." + std::to_string(v.patch);
+    }
+    std::string name_version() const { return version_string(version_); }
+    // "SDK 3.0.2 (Super Resolution 2.0.2)": the download's version (the pin's folder) and what libxess.dll reports
+    std::string full_name() const {
+        const std::string sr = "Super Resolution " + name_version();
+        return files_.version.empty() ? sr : "SDK " + files_.version + " (" + sr + ")";
     }
     static std::string version_text(uint32_t v) {
         return std::to_string(VK_API_VERSION_MAJOR(v)) + "." + std::to_string(VK_API_VERSION_MINOR(v));

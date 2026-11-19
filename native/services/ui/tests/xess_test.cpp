@@ -292,7 +292,7 @@ struct Ctx {
 };
 std::vector<Ctx*> all;
 int32_t create_result = kOk, init_result = kOk, execute_result = kOk, device_ext_result = kOk, instance_result = kOk;
-Version version{3, 0, 2, 0};
+Version version{2, 0, 2, 0};  // what the XeSS SDK 3.0.2's libxess.dll reports (Super Resolution 2.0.2)
 int destroyed = 0, set_vel = 0, log_calls = 0;
 ExecuteParams last{};
 VkCommandBuffer last_cb = VK_NULL_HANDLE;
@@ -311,7 +311,7 @@ void reset() {
     for (auto* c : all) delete c;
     all.clear();
     create_result = init_result = execute_result = device_ext_result = instance_result = kOk;
-    version = {3, 0, 2, 0};
+    version = {2, 0, 2, 0};
     destroyed = set_vel = log_calls = 0;
     last = {};
     logger = nullptr;
@@ -532,7 +532,7 @@ static void load_failures() {
         host->fail_load = true;
         XessBackend b(std::move(host));
         CHECK(!b.load(files(), &why, &detail) && why == upscale::Why::load_failed && has(detail, "error 126") && !b.loaded());
-        CHECK(b.version() == 0 && b.name() == "Intel XeSS 3");
+        CHECK(b.version() == 0 && b.name() == "Intel XeSS");
     }
     {
         auto host = std::make_unique<FakeHost>(&log);
@@ -540,12 +540,51 @@ static void load_failures() {
         XessBackend b(std::move(host));
         CHECK(!b.load(files(), &why, &detail) && why == upscale::Why::load_failed && detail == "libxess.dll has no export xessVKExecute");
     }
-    {
+    // xessGetVersion is Super Resolution's own version, not the SDK's: the SDK 3.0.2's library reports 2.0.2 (the owner's
+    // game, 0.2.0-dev.29.18's trial build refused it as "XeSS 2.0.2"). Major 2 loads; 1.x (older) and a later major (may
+    // change the structs Kiln declares) are refused with what the library reported
+    for (const Version v : {Version{1, 3, 1, 0}, Version{1, 0, 0, 0}, Version{3, 0, 2, 0}, Version{0, 0, 0, 0}}) {
         fx::reset();
-        fx::version = {2, 1, 0, 0};
+        fx::version = v;
+        log.clear();
         XessBackend b(std::make_unique<FakeHost>(&log));
-        CHECK(!b.load(files(), &why, &detail) && why == upscale::Why::load_failed && has(detail, "XeSS 2.1.0"));
-        fx::version = {3, 0, 2, 0};
+        const std::string reported = "libxess.dll reports XeSS Super Resolution " + std::to_string(v.major) + "." + std::to_string(v.minor) + "." +
+                                     std::to_string(v.patch) + "; this Kiln calls Super Resolution 2 (the XeSS SDK 3.0.2's)";
+        CHECK(!b.load(files(), &why, &detail) && why == upscale::Why::load_failed && detail == reported && !b.loaded());
+        CHECK(b.version() == 0 && b.name() == "Intel XeSS" && !log.empty() && log.back() == reported);
+    }
+    for (const Version v : {Version{2, 0, 2, 0}, Version{2, 0, 0, 0}, Version{2, 1, 0, 0}}) {
+        fx::reset();
+        fx::version = v;
+        XessBackend b(std::make_unique<FakeHost>(&log));
+        CHECK(b.load(files(), &why, &detail) && b.loaded() && b.version() == upscale::make_version(v.major, v.minor, v.patch));
+    }
+    {
+        // the pinned SDK's library: kiln.log and the name say the SDK and Super Resolution's own version; version() is the
+        // reported one (the readout, graphics.json and the launcher: "Version 2.0.2")
+        fx::reset();
+        log.clear();
+        XessBackend b(std::make_unique<FakeHost>(&log));
+        CHECK(b.load(files(), &why, &detail) && b.version() == upscale::make_version(2, 0, 2));
+        CHECK(b.name() == "Intel XeSS SDK 3.0.2 (Super Resolution 2.0.2)");
+        CHECK(!log.empty() && log.back() == "libxess.dll loaded: XeSS SDK 3.0.2 (Super Resolution 2.0.2)");
+        // without the component's version (not how the core calls it): Super Resolution's alone
+        upscale::Files f = files();
+        f.version.clear();
+        XessBackend b2(std::make_unique<FakeHost>(&log));
+        CHECK(b2.load(f, &why, &detail) && b2.name() == "Intel XeSS Super Resolution 2.0.2");
+        fx::version = {1, 3, 1, 0};
+        XessBackend b3(std::make_unique<FakeHost>(&log));
+        CHECK(!b3.load(f, &why, &detail) && detail == "libxess.dll reports XeSS Super Resolution 1.3.1; this Kiln calls Super Resolution 2");
+        fx::reset();
+    }
+    {
+        // a library without an export Kiln calls is refused before its version is asked (whatever it reports)
+        fx::reset();
+        auto host = std::make_unique<FakeHost>(&log);
+        host->api.set_velocity_scale = nullptr;
+        XessBackend b(std::move(host));
+        CHECK(!b.load(files(), &why, &detail) && why == upscale::Why::load_failed && detail == "libxess.dll has no export xessSetVelocityScale");
     }
     {
         XessBackend b(std::make_unique<FakeHost>(&log));
@@ -574,7 +613,8 @@ static void needs_and_device() {
     // loaded first (the order the core uses): XeSS's own answers
     {
         XessBackend b(std::make_unique<FakeHost>(&log));
-        CHECK(b.load(files(), &why, &detail) && b.loaded() && b.version() == upscale::make_version(3, 0, 2) && b.name() == "Intel XeSS 3.0.2");
+        CHECK(b.load(files(), &why, &detail) && b.loaded() && b.version() == upscale::make_version(2, 0, 2) &&
+              b.name() == "Intel XeSS SDK 3.0.2 (Super Resolution 2.0.2)");
         CHECK(b.load(files(), &why, &detail));  // twice: still loaded, nothing again
         const upscale::InstanceNeeds in = b.instance_needs();
         CHECK(in.min_api_version == VK_API_VERSION_1_1 && in.extensions.size() == 1 && in.extensions[0].name == "VK_KHR_get_physical_device_properties2" &&
