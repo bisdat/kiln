@@ -232,6 +232,24 @@ int main(int argc, char** argv) {
                  "quotes, backslashes and control characters escaped; well-formed UTF-8 kept, other bytes '?'");
     }
 
+    // ---- paused gaps (0.2.0-dev.29.19): the world's clock stood still, so it is a pause, not a stall ----
+    {
+        // a player's report: 17.4 s, 9.9 s and 16.6 s in the game's menu, the clock going on by a tick or so after each
+        check(paused_gap(17440.0, 1) && paused_gap(9902.0, 13) && paused_gap(16662.0, 2), "menu pauses: the clock did not cover them");
+        // a 10 s save stall, then the clock catching up in one step (clock_rate 60.02 while rate fell to 43.68)
+        check(!paused_gap(10271.25, 616), "a stall the clock caught up is not a pause");
+        // a dedicated server's step is 2-3 ticks: its slow steps are not pauses
+        check(!paused_gap(50.0, 3) && !paused_gap(683.0, 1) && !paused_gap(1200.0, 70), "short gaps and caught-up gaps are not pauses");
+        Line l = base(nullptr);
+        const std::string plain = format(l);
+        check(plain.find("paused_ms") == std::string::npos, "no pause: no paused_ms, the old line unchanged");
+        l.paused.add(17440.0f);
+        l.paused.add(9902.0f);
+        const std::string got = format(l);
+        check(got.size() > 2 && got.compare(0, plain.size() - 2, plain, 0, plain.size() - 2) == 0, "paused_ms comes after every older field");
+        check(got.find(",\"paused_ms\":{\"count\":2,\"total\":27342.0,\"max\":17440.0}}\n") != std::string::npos, "paused_ms: count, total, max");
+    }
+
     // ---- the tasks section (issue #49): appended last, absent without a pool ----
     {
         Line l = base(nullptr);
@@ -341,6 +359,8 @@ int main(int argc, char** argv) {
     check(line.find("reg::owner_name(owner)") != std::string::npos && line.find("stats::format(l)") != std::string::npos,
           "owner names are looked up and the line formatted when it is written");
     check(src.find("interval_ms") == std::string::npos, "tick.cpp has no line format of its own any more");
+    check(server.find("stats::paused_gap(gap, info.clock_delta)") != std::string::npos && server.find("g_win.paused.add(gap)") != std::string::npos,
+          "the server world keeps its paused gaps out of interval_ms");
 
     std::printf("%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;

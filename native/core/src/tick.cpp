@@ -114,6 +114,7 @@ struct Window {
     uint64_t steps = 0;
     uint64_t clock = 0;
     std::vector<float> step, pre, post, interval;
+    stats::Paused paused;  // the server world's paused gaps (tick_stats.h paused_gap), kept out of `interval`
     // since 0.2.0-dev.29, the parts of Pre and Post (tick_stats.h): the server world's job wait per step that waited, the
     // window services' end, and the worst step
     std::vector<float> wait;
@@ -126,6 +127,7 @@ void reset(Window& w) {
     w.steps = 0;
     w.clock = 0;
     for (auto* v : {&w.step, &w.pre, &w.post, &w.interval, &w.wait}) v->clear();
+    w.paused = stats::Paused{};
     w.wait_part = stats::Part{};
     w.windows = stats::Part{};
     stats::reset(w.worst);
@@ -220,6 +222,7 @@ void write_line(Window& w, const stats::Subs& slots, const char* world, double s
     l.pre = {pct(w.pre, 0.5), pct(w.pre, 0.99), maxof(w.pre)};
     l.post = {pct(w.post, 0.5), pct(w.post, 0.99), maxof(w.post)};
     l.interval = {pct(w.interval, 0.5), pct(w.interval, 0.99), maxof(w.interval)};
+    l.paused = w.paused;
     l.pre_count = pre_subs;
     l.post_count = post_subs;
     l.waits = waits;
@@ -454,7 +457,11 @@ uintptr_t server_step(uintptr_t storage, uintptr_t ticked, uintptr_t r8, uintptr
         // the pool, never runs one here
         tasks_svc::post_edge(KILN_WORLD_SERVER, g_sessions[KILN_WORLD_SERVER].load(), info.step);
         const double t3 = now_ms();
-        if (g_step > 1 && info.wall_delta_ms > 0) g_win.interval.push_back(static_cast<float>(t0 - g_prev_start));
+        if (g_step > 1 && info.wall_delta_ms > 0) {
+            const float gap = static_cast<float>(t0 - g_prev_start);
+            if (stats::paused_gap(gap, info.clock_delta)) g_win.paused.add(gap);
+            else g_win.interval.push_back(gap);
+        }
         g_win.step.push_back(static_cast<float>(t2 - t1));
         g_win.pre.push_back(static_cast<float>(t1 - t0));
         g_win.post.push_back(static_cast<float>(t3 - t2));

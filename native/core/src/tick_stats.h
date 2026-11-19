@@ -26,6 +26,29 @@ namespace kiln::tick::stats {
 inline constexpr float kSlowMs = 50.0f;  // "over50"
 inline constexpr size_t kPreTop = 8;     // Pre subscribers listed per line and in the worst step
 
+// The game's world clock runs at 60 ticks a second (clock_rate 60.0 in every running minute, on a hosting client and on
+// a dedicated server, whose steps advance it 2-3 ticks each).
+inline constexpr double kClockTickMs = 1000.0 / 60.0;
+inline constexpr double kPauseMinMs = 1000.0;
+// A gap between two server-world steps that the world's clock did not cover: the world was paused (a single-player
+// world stops while the game's menu is open, and its clock goes on from where it stopped), not stalled (after a stall
+// the clock catches up in the next step: clock_rate stays 60 while rate drops). Such gaps go into "paused_ms", not
+// "interval_ms" (since 0.2.0-dev.29.19; a player report read three menu pauses as 10-17 s stalls).
+inline bool paused_gap(double gap_ms, uint32_t clock_delta) {
+    return gap_ms >= kPauseMinMs && clock_delta * kClockTickMs < gap_ms * 0.5;
+}
+// The paused gaps of a window.
+struct Paused {
+    uint32_t count = 0;
+    double total = 0;
+    float max = 0;
+    void add(float ms) {
+        ++count;
+        total += ms;
+        if (ms > max) max = ms;
+    }
+};
+
 // One timed part over a window.
 struct Part {
     float max = 0;
@@ -166,6 +189,9 @@ struct Line {
     // when the task pool does not exist, so a line without a pool keeps its old shape byte for byte.
     bool has_tasks = false;
     kiln::tasks_stats::WindowSnapshot tasks;
+    // since 0.2.0-dev.29.19, the server world's paused gaps (paused_gap), after every older field; absent when there
+    // were none, so a line without a pause keeps its old shape
+    Paused paused;
 };
 
 // Slots by owner name, in run order (an owner's first slot gives its place); one owner's subscribers add up.
@@ -350,6 +376,9 @@ inline std::string format(const Line& l) {
         out += ',';
         out += kiln::tasks_stats::format_window_json(l.tasks);
     }
+    if (l.paused.count)
+        appendf(out, ",\"paused_ms\":{\"count\":%u,\"total\":%.1f,\"max\":%.1f}", l.paused.count, fin(l.paused.total),
+                fin(l.paused.max));
     out += "}\n";
     return out;
 }
