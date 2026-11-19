@@ -108,6 +108,8 @@ pub enum DetectKind {
     Shroudlink,
     /// An Ember server mod.
     Ember,
+    /// A package for Enshrouded ModLoader: a DLL with a `<file>.dll.mod` manifest beside it (`ENSHROUDED_PACKAGE_V1`).
+    Dllmod,
     /// Another engine's loader or a tool under a proxy name (`engine` says which): never a mod to import.
     Proxy,
     /// Patched game data files (`.kfc`).
@@ -303,12 +305,26 @@ fn detect_dll(path: &Path) -> Detected {
     if has(crate::pe::EMF_MOD_EXPORT) {
         return d(DetectKind::Emf, "an EMF mod DLL (exports emf_mod_load); a mod.json is generated");
     }
+    // a package for Enshrouded ModLoader (AndyPimms' loader): never a plain DLL (its EnshroudedModInitialize must run
+    // at a world's start, and that loader refuses a world whose mod's DLL is already loaded). With its .dll.mod beside it,
+    // a Library entry kiln-dllmod runs; without it there is nothing to run it by.
+    if crate::dllmod::has_header(path) {
+        let mut x = d(DetectKind::Dllmod, &crate::engines::mod_reason(crate::engines::Engine::Dllmod, &file_name(path)));
+        x.engine = Some(crate::engines::Engine::Dllmod);
+        match crate::dllmod::read(path) {
+            Ok(m) => x.version = Some(m.version),
+            Err(e) => {
+                x.kind = DetectKind::Unknown;
+                x.reason = format!("{}: a package for Enshrouded ModLoader that Kiln cannot run: {e}", file_name(path));
+            }
+        }
+        return x;
+    }
     if is_modloader_package(path, &exports) {
         return d(DetectKind::Unknown, &format!(
-            "{}: a mod for Enshrouded ModLoader (AndyPimms' loader); only that loader runs it. Keep it with its .dll.mod in \
-             the game's Mods folder and switch it on in the world's Edit > MODS page. Kiln chain-loads that loader (add its \
-             dinput8.dll to the Library)",
-            file_name(path)));
+            "{}: a mod for Enshrouded ModLoader (AndyPimms' loader) without its manifest ({}.mod) beside it. Add the mod's \
+             folder, or the DLL together with its .dll.mod",
+            file_name(path), file_name(path)));
     }
     // another engine's mod DLL or loader: never imported as a plain DLL. A DLL that reads dinput8-chain.ini is not only
     // a chain loader: Auto Loot Plus's dinput8.dll is the mod itself (its looting, its F8 menu), XHL-Core's is the host
@@ -354,27 +370,15 @@ fn file_name(path: &Path) -> String {
     path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
 }
 
-/// A package of Enshrouded ModLoader (github.com/aebischer/Enshrouded-ModLoader, SDK ABI 1): a `kind=mod` DLL exports
-/// `EnshroudedModInitialize` (and `EnshroudedModConfigure` when it has settings); every package, `kind=library` too, has
-/// a `<file>.dll.mod` manifest beside it whose first line is `ENSHROUDED_PACKAGE_V1`. That loader starts them itself,
-/// at a world's start, from `<game>/Mods/`. Loaded by Kiln as a plain DLL, the mod's Initialize would never run, and
-/// the loader refuses to start a world with a mod whose DLL is already in the process (`err.dll_external`).
-const MODLOADER_EXPORTS: [&str; 2] = ["EnshroudedModInitialize", "EnshroudedModConfigure"];
-const MODLOADER_MANIFEST: &[u8] = b"ENSHROUDED_PACKAGE_V1";
+/// A mod DLL of Enshrouded ModLoader (github.com/aebischer/Enshrouded-ModLoader, SDK ABI 1) by its exports alone: a
+/// `kind=mod` DLL exports `EnshroudedModInitialize` (and `EnshroudedModConfigure` when it has settings). With its
+/// `<file>.dll.mod` manifest beside it (`crate::dllmod::has_header`) it is a Library entry kiln-dllmod runs at a world's
+/// start; never a plain DLL, whose Initialize would never run (and that loader refuses to start a world with a mod whose
+/// DLL is already in the process, `err.dll_external`).
+const MODLOADER_EXPORTS: [&str; 2] = [crate::dllmod::INITIALIZE, crate::dllmod::CONFIGURE];
 
 fn is_modloader_package(path: &Path, exports: &[String]) -> bool {
-    use std::io::Read;
-    if MODLOADER_EXPORTS.iter().any(|e| exports.iter().any(|x| x == e)) {
-        return true;
-    }
-    let mut manifest = path.as_os_str().to_owned();
-    manifest.push(".mod");
-    let mut head = Vec::new();
-    let Ok(file) = std::fs::File::open(&manifest) else { return false };
-    if file.take(64).read_to_end(&mut head).is_err() {
-        return false;
-    }
-    head.strip_prefix(b"\xef\xbb\xbf").unwrap_or(&head).starts_with(MODLOADER_MANIFEST)
+    MODLOADER_EXPORTS.iter().any(|e| exports.iter().any(|x| x == e)) || crate::dllmod::has_header(path)
 }
 
 /// A mod id from a file or folder name: lower case, other characters as '-', at most 64.

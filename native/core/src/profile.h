@@ -20,9 +20,10 @@
 // ("profileReader"), and the launcher writes a form only for a runtime whose bundle declares it (kiln-manage
 // profile::render). 2: a mods.eml path may be Copy mode's ../mods/<folder>, a mods.greeneye path ../greeneye/<id>
 // (every core before calls such a profile invalid). 3: a mods.flame path may be ../mods/<id> (Kiln's copy of a Flame mod
-// in the folder it reads its own files from; a core of revision 2 calls such a profile invalid). Raise it with the next
-// form an older core would refuse.
-#define KILN_PROFILE_READER 3
+// in the folder it reads its own files from; a core of revision 2 calls such a profile invalid). 4: mods.dllmod, whose
+// path may be ../Mods/EnshroudedModLoader/<id> (a core of revision 3 skips that list whole). Raise it with the next form
+// an older core would refuse.
+#define KILN_PROFILE_READER 4
 
 namespace kiln::profile {
 

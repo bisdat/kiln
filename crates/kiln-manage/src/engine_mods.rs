@@ -74,6 +74,8 @@ pub fn run_folder(kind: ModKind) -> Option<&'static str> {
     match kind {
         ModKind::Greeneye => Some(GREENEYE_MODS),
         ModKind::Flame => Some(FLAME_MODS),
+        // packages for Enshrouded ModLoader: kiln-dllmod and that loader both read <game>/Mods/EnshroudedModLoader
+        ModKind::Dllmod => Some(crate::dllmod::RUN_FOLDER),
         _ => None,
     }
 }
@@ -83,8 +85,8 @@ pub const EMBER_MODS: &str = "ember/mods";
 pub const ENSHWICK_LOADER_FOLDER: &str = "enshwick";
 
 /// The kinds with a Library importer: every engine kind (EMF's mods are Kiln's own `emf` kind).
-pub const IMPORTED: [ModKind; 10] = [ModKind::Eml, ModKind::Xhl, ModKind::ShroudForge, ModKind::Set, ModKind::Greeneye, ModKind::Flame,
-    ModKind::Shroudtopia, ModKind::Enshwick, ModKind::Shroudlink, ModKind::Ember];
+pub const IMPORTED: [ModKind; 11] = [ModKind::Eml, ModKind::Xhl, ModKind::ShroudForge, ModKind::Set, ModKind::Greeneye, ModKind::Flame,
+    ModKind::Shroudtopia, ModKind::Enshwick, ModKind::Shroudlink, ModKind::Ember, ModKind::Dllmod];
 
 /// Kinds whose mods Kiln holds but cannot run yet (Ember: no published mod ABI). The launcher says so.
 pub fn runs_yet(kind: ModKind) -> bool {
@@ -104,6 +106,7 @@ pub fn plugin_of(kind: ModKind) -> Option<&'static str> {
         ModKind::Enshwick => "kiln-enshwick",
         ModKind::Shroudlink => "kiln-shroudlink",
         ModKind::Ember => "kiln-ember",
+        ModKind::Dllmod => "kiln-dllmod",
         _ => return None,
     })
 }
@@ -123,7 +126,8 @@ pub fn default_side(kind: ModKind) -> (Side, Clients) {
         // data patches and new content: both sides must have the same data. Enshwick: a mod's side is "both" unless it
         // says "server" (pack.toml; a DLL's is compiled in), and its join check refuses players without a "both" mod.
         ModKind::Eml | ModKind::Xhl | ModKind::ShroudForge | ModKind::Flame | ModKind::Enshwick => (Side::Both, Clients::Mod),
-        ModKind::Greeneye => (Side::Client, Clients::None),
+        // Greeneye; Enshrouded ModLoader's packages are made for the game client (solo; its format has no server side)
+        ModKind::Greeneye | ModKind::Dllmod => (Side::Client, Clients::None),
         // server frameworks: shroudlink's mods run in its server core (players use its client addon), Ember is for
         // dedicated servers only
         ModKind::Shroudlink | ModKind::Ember => (Side::Server, Clients::None),
@@ -150,8 +154,8 @@ pub fn manifest_json(folder: &Path) -> Option<serde_json::Value> {
 
 fn side_of(kind: ModKind, folder: &Path) -> (Side, Clients) {
     let (mut side, mut clients) = default_side(kind);
-    if matches!(kind, ModKind::Shroudlink | ModKind::Ember) {
-        return (side, clients); // server-only engines: joining players never need their mods
+    if matches!(kind, ModKind::Shroudlink | ModKind::Ember | ModKind::Dllmod) {
+        return (side, clients); // server-only engines, and dllmod's client-only packages: their files say nothing else
     }
     if kind == ModKind::Enshwick {
         // Only Enshwick's own pack controls its join requirements. An unrelated mod.json
@@ -356,6 +360,11 @@ pub fn import_engine_mod(ctx: &mut ImportCtx) -> Result<()> {
                 } else { dll_of(&work, kind)?.is_some() }
             },
             ModKind::Shroudlink => dll_of(&work, kind)?.is_some(),
+            // what kiln-dllmod reads: every package's manifest and exports, checked on the copy that is committed
+            ModKind::Dllmod => match crate::dllmod::read_folder(&work) {
+                Ok(_) => true,
+                Err(e) => return skip(ctx.report, format!("a package for Enshrouded ModLoader that Kiln cannot run: {e}")),
+            },
             ModKind::Ember => crate::engines::ember_library(&work).is_some(),
             // XHL's own mod.json (since 2026-11) only names the mod; an EML part (src/mod.lua) makes it an EML mod
             ModKind::Xhl => has_xhl_plugin_ini(&work) && !work.join("src").join("mod.lua").exists(),
@@ -388,7 +397,16 @@ pub fn import_engine_mod(ctx: &mut ImportCtx) -> Result<()> {
         }
         std::fs::create_dir_all(&work).map_err(io_at(&work, "creating"))?;
         let file = src.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "mod.dll".into());
-        let size = std::fs::copy(src, work.join(&file)).map_err(io_at(src, "copying"))?;
+        let mut size = std::fs::copy(src, work.join(&file)).map_err(io_at(src, "copying"))?;
+        if kind == ModKind::Dllmod {
+            // a package is the DLL and its manifest: both go into the folder
+            let manifest = crate::dllmod::manifest_path(src);
+            let to = crate::dllmod::manifest_path(&work.join(&file));
+            size += std::fs::copy(&manifest, &to).map_err(io_at(&manifest, "copying"))?;
+            if let Err(e) = crate::dllmod::read_folder(&work) {
+                return skip(ctx.report, format!("a package for Enshrouded ModLoader that Kiln cannot run: {e}"));
+            }
+        }
         size + write_dll_manifest(kind, &work, &id, &version, &file)?
     };
     let hash = crate::hash::dirhash(&work)?;
@@ -1744,6 +1762,7 @@ fn check_placement_path(game_dir: &Path, receipt: &Placement) -> Result<()> {
         ModKind::Set => game_dir.join(SET_MODS),
         ModKind::Emf => game_dir.join("emf/mods"),
         ModKind::Greeneye => game_dir.join(GREENEYE_MODS),
+        ModKind::Dllmod => game_dir.join(crate::dllmod::RUN_FOLDER),
         ModKind::Eml if dst.parent() == Some(crate::shroudforge::mods_dir(game_dir).as_path()) => crate::shroudforge::mods_dir(game_dir),
         ModKind::Eml | ModKind::Flame | ModKind::Shroudtopia => game_dir.join("mods"),
         ModKind::Native | ModKind::Xhl if receipt.game_folder => game_dir.join(EML_GAME_MODS),
@@ -4154,6 +4173,7 @@ pub fn state_file(kind: ModKind) -> Option<&'static str> {
         ModKind::Enshwick => "enshwick.json",
         ModKind::Shroudlink => "shroudlink.json",
         ModKind::Ember => "ember.json",
+        ModKind::Dllmod => "dllmod.json",
         _ => return None,
     })
 }

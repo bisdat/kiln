@@ -96,6 +96,8 @@ fn kinds_of(kind: ProxyKind, game_dir: &Path) -> Vec<(ModKind, String, Delivery)
         ProxyKind::Enshwick => vec![(ModKind::Enshwick, "mods".into(), Delivery::Plugin)],
         ProxyKind::Shroudlink => vec![(ModKind::Shroudlink, crate::engine_mods::SHROUDLINK_MODS.into(), Delivery::None)],
         ProxyKind::Ember => vec![(ModKind::Ember, crate::engine_mods::EMBER_MODS.into(), Delivery::None)],
+        // Enshrouded ModLoader reads Mods/EnshroudedModLoader, where Kiln's copies of the profile's packages always are
+        ProxyKind::Dllmod => vec![(ModKind::Dllmod, crate::dllmod::RUN_FOLDER.into(), Delivery::Placed)],
         _ => Vec::new(),
     }
 }
@@ -254,9 +256,9 @@ pub(crate) fn check_runtime_eml_loader(loaders: &[OwnLoader], ids: &[String]) ->
 
 /// The kinds whose own loader reads a fixed folder of the game. EML, EMF and Shroudtopia mods are copied there only
 /// while that loader is installed (EMF's Lua mods always: EMF's lua mod reads them only there, engine_mods::EMF_MODS);
-/// Greeneye and Flame mods always run from Kiln's copy there (engine_mods::run_folder), and SF and SET are always placed
-/// as well (their Kiln plugins read only their own folder).
-pub const PLACED_FOR_LOADER: [ModKind; 5] = [ModKind::Eml, ModKind::Emf, ModKind::Greeneye, ModKind::Flame, ModKind::Shroudtopia];
+/// Greeneye, Flame and Enshrouded ModLoader's packages always run from Kiln's copy there (engine_mods::run_folder), and SF
+/// and SET are always placed as well (their Kiln plugins read only their own folder).
+pub const PLACED_FOR_LOADER: [ModKind; 6] = [ModKind::Eml, ModKind::Emf, ModKind::Greeneye, ModKind::Flame, ModKind::Shroudtopia, ModKind::Dllmod];
 
 /// The (id, enabled) lists of a profile, from a launcher profile or from the game's `kiln/profile.json`.
 #[derive(Debug, Clone, Default)]
@@ -674,6 +676,7 @@ pub fn short(kind: ModKind) -> &'static str {
         ModKind::Enshwick => "Enshwick",
         ModKind::Shroudlink => "shroudlink",
         ModKind::Ember => "Ember",
+        ModKind::Dllmod => "Enshrouded ModLoader",
         k => k.label(),
     }
 }

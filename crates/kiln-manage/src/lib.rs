@@ -85,6 +85,7 @@ pub mod paths;
 pub mod data_folder;
 pub mod data_folder_move;
 pub mod engines;
+pub mod dllmod;
 pub mod pe;
 pub mod proc;
 pub mod steam;

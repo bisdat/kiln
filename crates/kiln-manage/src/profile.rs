@@ -55,7 +55,9 @@ impl Dropins {
 
 /// The kinds whose plugin reads the profile's `dropins` for its own folder, in [`ModKind::ALL`] order: the switches the
 /// launcher offers. `dropins: true` is written when a profile has every one of them on. SET does not read `dropins`
-/// (see [`Dropins`]); Ember's mods do not run, so it has no switch.
+/// (see [`Dropins`]); Ember's mods do not run, so it has no switch. Enshrouded ModLoader's packages (dllmod) have none
+/// either: a core before 0.2.0-dev.29.19 calls a profile whose `dropins` names a kind it does not know invalid, so the
+/// list never names dllmod; its folder is read with `dropins: true` (every switch on) or without a profile.
 pub const DROPIN_KINDS: [ModKind; 11] = [
     ModKind::Kiln,
     ModKind::Native,
@@ -171,6 +173,8 @@ pub struct ProfileFileMods {
     pub shroudlink: Vec<FolderMod>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ember: Vec<FolderMod>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dllmod: Vec<FolderMod>,
 }
 
 impl ProfileFileMods {
@@ -191,6 +195,7 @@ impl ProfileFileMods {
             ModKind::Enshwick => &self.enshwick,
             ModKind::Shroudlink => &self.shroudlink,
             ModKind::Ember => &self.ember,
+            ModKind::Dllmod => &self.dllmod,
         })
     }
 
@@ -210,6 +215,7 @@ impl ProfileFileMods {
             ModKind::Enshwick => &mut self.enshwick,
             ModKind::Shroudlink => &mut self.shroudlink,
             ModKind::Ember => &mut self.ember,
+            ModKind::Dllmod => &mut self.dllmod,
         })
     }
 }
@@ -299,6 +305,8 @@ pub struct ProfileMods {
     pub shroudlink: Vec<ProfileMod>,
     #[serde(default)]
     pub ember: Vec<ProfileMod>,
+    #[serde(default)]
+    pub dllmod: Vec<ProfileMod>,
 }
 
 impl ProfileMods {
@@ -319,6 +327,7 @@ impl ProfileMods {
             ModKind::Enshwick => &self.enshwick,
             ModKind::Shroudlink => &self.shroudlink,
             ModKind::Ember => &self.ember,
+            ModKind::Dllmod => &self.dllmod,
         }
     }
 
@@ -338,6 +347,7 @@ impl ProfileMods {
             ModKind::Enshwick => &mut self.enshwick,
             ModKind::Shroudlink => &mut self.shroudlink,
             ModKind::Ember => &mut self.ember,
+            ModKind::Dllmod => &mut self.dllmod,
         }
     }
 }
@@ -448,6 +458,8 @@ pub struct ProfileCounts {
     pub shroudlink: u32,
     #[serde(default)]
     pub ember: u32,
+    #[serde(default)]
+    pub dllmod: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -729,6 +741,7 @@ fn counts(p: &Profile) -> ProfileCounts {
         enshwick: n(ModKind::Enshwick),
         shroudlink: n(ModKind::Shroudlink),
         ember: n(ModKind::Ember),
+        dllmod: n(ModKind::Dllmod),
     }
 }
 
@@ -1141,10 +1154,15 @@ pub const PROFILE_READER_GAME_MODS: u32 = 2;
 /// reads its own files from, engine_mods::FLAME_MODS). A core of revision 2 calls such a profile invalid.
 pub const PROFILE_READER_FLAME_MODS: u32 = 3;
 
+/// The reader revision from which a core knows mods.dllmod and its Copy-mode path `../Mods/EnshroudedModLoader/<id>`
+/// (Kiln's copy of a package for Enshrouded ModLoader, engine_mods::run_folder). An older core skips mods.dllmod whole.
+pub const PROFILE_READER_DLLMOD: u32 = 4;
+
 /// The reader revision a Copy-mode path into the game folder outside kiln/ needs for mods of `kind`.
 fn reader_for_game_path(kind: ModKind) -> u32 {
     match kind {
         ModKind::Flame => PROFILE_READER_FLAME_MODS,
+        ModKind::Dllmod => PROFILE_READER_DLLMOD,
         // no core reads `../emf/mods/<id>` (native/core/src/profile.cpp): Copy mode names an EMF Lua mod's copy under
         // kiln/profiles/, and EMF's lua mod reads the Lua files from Kiln's copy in emf/mods, the folder of that name
         ModKind::Emf => u32::MAX,
@@ -2171,9 +2189,9 @@ pub fn write_once(dirs: &DataDirs, profile_id: &str, install: &GameInstall) -> R
     crate::own_loaders::check_runtime_eml_loader(&loaders, &view.eml_runtime)?;
     let fixed = crate::own_loaders::PLACED_FOR_LOADER.into_iter().filter(|k| crate::own_loaders::of_kind(&loaders, *k)
         .is_some_and(|l| l.delivery == crate::own_loaders::Delivery::Placed));
-    // Greeneye and Flame mods run from Kiln's copies in <game>/greeneye/ and <game>/mods/ (engine_mods::run_folder): a
-    // fixed folder as well
-    for kind in [ModKind::ShroudForge, ModKind::Set, ModKind::Greeneye, ModKind::Flame].into_iter()
+    // Greeneye, Flame and dllmod packages run from Kiln's copies in <game>/greeneye/, <game>/mods/ and
+    // <game>/Mods/EnshroudedModLoader/ (engine_mods::run_folder): a fixed folder as well
+    for kind in [ModKind::ShroudForge, ModKind::Set, ModKind::Greeneye, ModKind::Flame, ModKind::Dllmod].into_iter()
         .chain(fixed.filter(|k| crate::engine_mods::run_folder(*k).is_none())) {
         let mut wanted: Vec<_> = profile.mods.list(kind).iter()
             .map(|m| (m.id.as_str(), Some(m.version.as_str()), Some(m.hash.as_str()), m.enabled)).collect();
