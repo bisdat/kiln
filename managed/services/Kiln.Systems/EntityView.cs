@@ -387,7 +387,7 @@ internal sealed unsafe class ViewContext
     private byte[] _before = new byte[256];
     private int _used;
     private uint _entity;
-    private bool _track, _events, _watching;
+    private bool _track, _events, _watching, _local;
     private ulong _step;
     private ManagedStage? _stage;
 
@@ -408,6 +408,7 @@ internal sealed unsafe class ViewContext
         ctx._events = stage.Wrap.World == WorldKind.Server && Events.HasSubscribers<ComponentWrittenEvent>();
         ctx._watching = stage.Wrap.World == WorldKind.Server && ComponentChanges.Watching;
         ctx._track = ctx._events || ctx._watching;
+        ctx._local = stage.Wrap.World != WorldKind.Server;
         ctx._count = 0;
         ctx._used = 0;
         ctx._entity = 0;
@@ -435,7 +436,12 @@ internal sealed unsafe class ViewContext
         var rc = t->GameSliceMark(s, iter, list, index);
         if (rc == SystemsNative.InvalidArgument)
             throw new InvalidOperationException($"{Program}: {component} is not one of its write slots");
-        if (rc != SystemsNative.Ok)
+        // The prediction storage and a client world (since 0.2.0-dev.29.18): kiln.world answers Unavailable for a write
+        // record without a tracker. The engine builds the prediction storage's records without one, and the game's own
+        // update there writes without MarkWritten when the record has none; nothing there is saved or sent. So the write
+        // goes ahead unmarked, as the game's own (docs/re/world.md, "The prediction storage recomputes the stance").
+        // The server world is unchanged: a write it cannot mark is refused.
+        if (rc != SystemsNative.Ok && !(_local && rc == SystemsNative.Unavailable))
             throw new InvalidOperationException($"{Program}: {component} could not be marked for save and replication (result {rc})");
         if (_count == _recs.Length) Array.Resize(ref _recs, _count * 2);
         var at = _used;

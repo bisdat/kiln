@@ -257,6 +257,54 @@ public sealed unsafe class SystemsTests
         Assert.Equal(1, wrap.Stats.Faults);
     }
 
+    // The owner's hosted game, 2026-11-19 (0.2.0-dev.29.18 trial): a prediction wrap of equipment_visuals threw at its first
+    // write of EquipmentAnimationSets, "could not be marked for save and replication (result 3)". The engine builds the
+    // prediction storage's write records without a tracker, kiln.world's game_slice_mark answers Unavailable for such a
+    // record, and the game's own update there writes without MarkWritten (docs/re/world.md).
+    [Theory]
+    [InlineData(WorldKind.Prediction)]
+    [InlineData(WorldKind.Client)]
+    public void A_write_record_without_a_tracker_is_written_unmarked_outside_the_server_world(WorldKind world)
+    {
+        using var w = new FakeWorld(n => n is "systems.wraps" or "systems.wraps.client" or "systems.wraps.prediction");
+        w.MarkResult = SystemsNative.Unavailable;
+        var wrap = Systems.Wrap("fuel_setup", new WrapOptions { World = world }).Wrap!;
+        var written = 0;
+        wrap.AfterEach((ref EntityView e) =>
+        {
+            e.Write<FuelBlock>("Fuel").Current = 7;
+            e.Write<FuelBlock>("keen::ecs::Fuel").Current += 1;  // the same slot: asked once per entity
+            written++;
+        });
+        ProgramWrap.Poll();
+        w.Call(w.Wraps[0]);
+        Assert.Equal(3, written);
+        for (var r = 0; r < 3; r++) Assert.Equal(8, *(int*)(w.Fuel + 16 * r + 8));
+        Assert.False(w.Wraps[0].Gone);
+        Assert.Equal(0, wrap.Stats.Faults);
+        Assert.Equal(3, w.MarkCalls);  // asked once per entity and component, as with a tracker
+        Assert.Empty(w.Marks);
+        wrap.Dispose();
+    }
+
+    [Fact]
+    public void A_prediction_write_with_a_tracker_is_marked_and_other_mark_failures_still_refuse_it()
+    {
+        using var w = new FakeWorld(n => n is "systems.wraps" or "systems.wraps.client" or "systems.wraps.prediction");
+        var wrap = Systems.Wrap("fuel_setup", new WrapOptions { World = WorldKind.Prediction }).Wrap!;
+        wrap.AfterEach((ref EntityView e) => e.Write<FuelBlock>("Fuel").Current = 7);
+        ProgramWrap.Poll();
+        w.Call(w.Wraps[0]);
+        Assert.Equal(new (ulong, int, int)[] { (0, 4, 0), (1, 4, 0), (2, 4, 0) }, w.Marks);  // a record with a tracker: marked
+        w.MarkResult = SystemsNative.Internal;
+        *(int*)(w.Fuel + 8) = 100;
+        w.Call(w.Wraps[0]);
+        Assert.Equal(100, *(int*)(w.Fuel + 8));
+        Assert.True(w.Wraps[0].Gone);
+        Assert.Equal(1, wrap.Stats.Faults);
+        wrap.Dispose();
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

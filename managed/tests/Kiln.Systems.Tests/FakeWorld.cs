@@ -43,6 +43,7 @@ internal sealed unsafe class FakeWorld : IDisposable
     internal bool FuelIsAttribute = true;
     internal bool RefuseUnwrapInSlice;
     internal int MarkResult = SystemsNative.Ok;
+    internal int MarkCalls;  // every game_slice_mark call, whatever it answered
     internal uint FuelSize = 16;
     internal bool NoRegistry;  // fuel_setup does not declare impact::AttributeRegistry
     internal ulong StepNow = 77;  // the step a fake slice says
@@ -394,6 +395,7 @@ internal sealed unsafe class FakeWorld : IDisposable
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int Mark(SystemsNative.Slice* s, ulong* iter, int list, int i)
     {
+        F.MarkCalls++;
         if (list is not (SystemsNative.ListWrite or SystemsNative.ListWriteOpt)) return SystemsNative.InvalidArgument;
         if (F.MarkResult != SystemsNative.Ok) return F.MarkResult;
         F.Marks.Add((*iter, list, i));
