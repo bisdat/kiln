@@ -930,9 +930,15 @@ tries it again" unless something else keeps the drawing off then too (automatic 
 run a minute for that: one that ended sooner left the next start guarded too, and so on at every start, until the
 record was deleted. Such a record gets its new attempt at the first start of 0.2.0-dev.29.18. The record keeps the
 first interrupted attempt: a second one at the same stage keeps the drawing off at every start (a normal exit does not
-change that). To re-enable it, close the
-game and delete `kiln/state/overlay-start.guard`. The record is one line, `2 <phase> <stage> <failed stage> <failures>
-<wrapper retry> <wrappers>`; phase 0 is complete, 1 an attempt (the overlay starting, or a start that died during it),
+change that) until the record is deleted or Kiln is updated. Since 0.2.0-dev.29.19 the record notes the Kiln
+version that wrote it, and a record of another version (an update, also going back to an older one) or one without
+a version (every Kiln before 0.2.0-dev.29.19) starts fresh at the next start: its attempts, its lock and its
+wrapper-change recovery are cleared, and `kiln.log` says "Kiln was updated since the record was written". A Kiln
+before 0.2.0-dev.29.19 cannot read the new record; it starts without it (it tries the overlay) and logs that it could
+not understand the file. To re-enable it, close the
+game and delete `kiln/state/overlay-start.guard`. The record is one line, `3 <phase> <stage> <failed stage> <failures>
+<wrapper retry> <Kiln version> <wrappers>` (`-` for no version; format 2, before 0.2.0-dev.29.19, has no version);
+phase 0 is complete, 1 an attempt (the overlay starting, or a start that died during it),
 2 a guarded start, 3 a guarded start that exited normally, 4 locked; stage 0 is before hooks, 1 hooks installed,
 2 instance seen, 3 device seen, 4 swapchain created, 5 the overlay's frames presented. Removing a detected graphics wrapper
 also permits a new attempt, as does adding or replacing one. The guard compares the paths,
