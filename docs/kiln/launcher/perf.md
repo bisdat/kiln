@@ -64,8 +64,11 @@ and `libraryWebgl` show the fire on (their style numbers are the real signal; th
   pointer onto `.k-app`: each write repainted the whole page under the sheet (and restyled the whole window, for the
   pointer), which made every page but Play lag in WebKitGTK, most of all when it draws without the GPU (inbox 94). The
   torch runs only while the fire burns: not with Animated fire off, without the GPU, without WebGL or with reduced
-  motion, and with reduced motion the flicker writes nothing. While the game runs the loop looks four times a second
-  instead of every frame. `tests/sheet-perf.spec.ts` counts the writes.
+  motion; its mousemove listener on `.k-app` exists only then. Reduced motion is followed while the launcher runs (KDE's
+  animation speed "Instant" turns it on): the fire stands still, writes no flicker and draws a frame only when what it
+  shows changed (`wakeStage`, a resize), asking for no frame or timer meanwhile. While the game runs the loop looks four
+  times a second instead of every frame. `tests/sheet-perf.spec.ts` counts the writes, the torch's listener and the
+  frames asked for.
 - **Without the GPU** (`.k-app[data-render="software"]`, Linux): no WebGL fire, no torch, and a lit mod's flame stands
   still (`ui/ui.css`): on the CPU every frame of its flicker repainted each flame and its glow, most of the launcher's
   time on a page of lit mods at a HiDPI scale.
