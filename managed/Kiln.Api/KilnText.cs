@@ -337,6 +337,7 @@ internal static class KilnText
         {
             Log(LogLevel.Warn, "texts: a listener of the language change failed: " + e.Message);
         }
+        KilnLanguage.Raise();  // mods' handlers (each guarded on its own)
         return made;
     }
 

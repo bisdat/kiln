@@ -8,8 +8,10 @@ namespace Kiln.XhlKilnCoreReflectionTests;
 // reflection, by name: the language of Kiln's texts and its change event (its labels follow Kiln's language), kiln.ui's
 // native table with its key subscription that also takes mouse and controller keys (its key capture), the mod's native
 // owner id, and the press code the Keys page stores. A rename here silently breaks his mod's settings panel and key
-// capture for every player who has it, so each name, binding and shape it asks for is pinned until Kiln gives him a public
-// way (the report of dev29/xhl-compat). Only the lookups as his code makes them; what the members do is tested elsewhere.
+// capture for every player who has it, so each name, binding and shape it asks for is pinned (the report of dev29/xhl-compat).
+// The public way since 0.2.0-dev.29.19 is KilnLanguage and KeyInput (docs/kiln/ui.md, "XHL-Core (Kiln): from reflection to
+// public members"); these pins stay while builds that read the internals are in players' games. Only the lookups as his code
+// makes them; what the members do is tested elsewhere.
 public class XhlKilnCoreReflectionTests
 {
     private const BindingFlags StaticNonPublic = BindingFlags.Static | BindingFlags.NonPublic;     // his 40

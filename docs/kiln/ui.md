@@ -401,6 +401,23 @@ of that language group (never shipped); Kiln's texts are English until it is loa
 Mods' own texts are theirs (`Mod.Text`, `UiText`) and follow the game's language. For translators and Kiln's developers:
 [translating-game.md](translating-game.md).
 
+**Following Kiln's language** (`KilnLanguage`, Kiln.Api, since 0.2.0-dev.29.19). A mod whose pages sit beside Kiln's and
+should read in the same language (a settings panel in the Kiln menu's style, a shared core for several mods) asks Kiln
+instead of the game:
+```csharp
+var lang = KilnLanguage.Current;           // "zh-cn", "en-us": ui.language's tag, or the game's while it is "auto"
+var text = Context.Locale.GetIn(KilnLanguage.OverlayInEnglish ? "en" : lang, "panel.title");
+KilnLanguage.Changed += () => Relabel();   // another language, the English fallback switched, or a reload
+```
+- `Current` is a lower-case tag; `Setting` is `ui.language` as set (`"auto"` or the tag). On a dedicated server both
+  follow its game language (`"en-us"`).
+- `OverlayInEnglish` is true while Kiln's overlay shows its texts in English because it cannot draw `Current`'s script
+  yet (the game's Chinese, Japanese, Korean or Cyrillic font is loading, or could not be loaded). Text a mod draws in the
+  overlay in that language shows as boxes meanwhile; follow Kiln and show English too.
+- `Changed` runs on the thread that made the change (often the overlay's render thread, or the window thread for the
+  in-game setting), after the new values are in place. Keep it short. A handler that throws is logged under its mod and
+  does not stop the others; a mod's handlers are dropped when it unloads.
+
 ### Mod themes
 ```csharp
 var frost = Ui.Themes.Define("frost", new UiThemeSpec
@@ -645,6 +662,66 @@ b.OnRelease = …;  b.IsDown;  b.TakePresses();  b.Consume = false;  b.WhileCapt
   Creative Mode (Nexus 146) runs in the game: its own menu applies.
 - `kiln.menu` (default **Insert**) opens the Kiln menu. Its toggle is native, so it works without the managed host.
   Escape closes the menu.
+
+### Key and mouse presses as they come (`KeyInput`, since 0.2.0-dev.29.19)
+For a mod that reads presses itself rather than giving an action a key: its own "press a key" field, a key it handles by
+state, a shortcut layer of its own. An action the player should be able to remap on the Keys page stays a
+`KeyBindings.Register` binding.
+```csharp
+var listener = KeyInput.Listen(p =>
+{
+    if (!p.Down || p.Repeat || p.Captured || p.TextInput) return false;  // play only, presses only
+    if (!_capturing) return false;
+    _capturing = false;
+    Save(p.Chord.ToString());                 // "Ctrl+K", "Backquote", "Mouse4", "WheelUp": the names keybinds.json uses
+    return true;                              // keep this press from the game
+});
+if (!listener.Ok) Context.Log.Info(listener.Reason!);  // no Kiln overlay here (a dedicated server)
+listener.Dispose();                           // or let the mod's unload end it
+```
+- `Listen` is kiln.ui's key subscription (`subscribe_key_ex` in `kiln_ui.h`). With `KeyListenFlags.Mouse` (the default)
+  it gets the middle and side mouse buttons and the wheel's notches too, as key bindings do; `KeyListenFlags.None` gets
+  keyboard keys only. Next to an older kiln-ui.dll (a hand-mixed install) it gets keys only and `listener.Mouse` is false.
+- It runs on the game's window thread while the message is handled, before the game gets the press: keep it short.
+  Returning true keeps the press from the game. Every listener and Kiln's own key bindings get every press whatever
+  another returned; kiln.ui keeps a press from the game when any of them asked.
+- Every press comes, also while the Kiln menu, a Kiln screen or a Kiln text field has the input: `KeyPress.Captured` and
+  `KeyPress.TextInput` say so. `Down` is false for a release; a wheel notch is a press with no release. `Mods` holds
+  Ctrl, Shift and Alt.
+- `KeyPress.Code` (and `KeyInput.PressCode(vk, scan)`) is the code the Keys page stores: a punctuation key by its place
+  on a US keyboard, found by its scan code on any layout, every other key by its virtual key. `KeyPress.Chord` is the
+  press as the Keys page saves it, and its `ToString()` parses back with `KeyChord.TryParse` and `KeyBindings.Rebind`.
+- The listener belongs to the calling mod (kiln.ui is told whose it is) and ends when the mod unloads. A handler that
+  throws is logged under its mod and keeps nothing. `Listen` returns a listener that is not `Ok`, with a `Reason`, where
+  there is no Kiln overlay; it never throws for that.
+
+### XHL-Core (Kiln): from reflection to public members (0.2.0-dev.29.19)
+XHL-Core (Kiln) 0.1.0 reads a few Kiln internals by name. They stay as they are (Kiln.Ui.Tests' XhlKilnCoreReflectionTests
+pins each name and shape), so the published 0.1.0 keeps working; on 0.2.0-dev.29.19 and later the public members below do
+the same jobs and are covered by the API promise (`PublicAPI.Shipped.txt`, never removed before API 1.0.0):
+
+| Read today by reflection | Public member |
+|---|---|
+| `Kiln.KilnText.Language` (static, non-public) | `KilnLanguage.Current` |
+| `Kiln.KilnText.Gated` | `KilnLanguage.OverlayInEnglish` |
+| `Kiln.KilnText.Changed` (event `Action`) | `KilnLanguage.Changed` (event `Action`; guarded per handler, dropped at the mod's unload) |
+| `Kiln.UiNative.T` with `Table7.SubscribeKeyEx` (flag `KILN_UI_KEYS_MOUSE`), the owner from `ModContext.Owner` | `KeyInput.Listen(onKey, KeyListenFlags.Mouse)`; the owner is the calling mod, filled in by Kiln |
+| `Kiln.UiNative.Table.Unsubscribe` | `KeyListener.Dispose()` (also done at the mod's unload) |
+| `Kiln.KeyNames.PressCode(vk, scan)` | `KeyInput.PressCode(virtualKey, scanCode)`, or `KeyPress.Code` / `KeyPress.Chord` inside a listener |
+| `KeyBinding.Category`, `KeyBinding.Description` | already public (read them directly) |
+
+`ModContext.Owner` stays internal: it is the mod's native owner handle, and a mod holding it could register, and revoke,
+native subscriptions in any service as that mod. Its one use here, the key subscription, is now `KeyInput.Listen`, which
+passes the owner itself. A mod that needs a native service Kiln has no managed member for should ask for the member (below)
+rather than for the handle.
+
+**Where new APIs come from.** Hooks and call sites a mod author has found in the game (as XHL has for his native mods) are
+welcome as proposals for Kiln's general API, so that every mod can use them: a GitHub issue on
+[frostdev-ops/kiln](https://github.com/frostdev-ops/kiln/issues) naming the game function or data, how to find it (a
+pattern or the code around it), and what a mod would do with it. Kiln adds such a site as a sigdb feature with its own
+capability row ([services/caps.md](services/caps.md)), then a typed event or service member in the Kiln.* assembly it
+belongs to (a UI site in Kiln.Ui, a gameplay site in Kiln.Gameplay, and so on). Until then an advanced mod reaches a site
+itself through `Kiln.Hooks` ([hooks.md](hooks.md)).
 
 ## The Kiln menu (the mod manager)
 A page in the player's look (the game's colours and its UI font unless the player chose another look under **Kiln
