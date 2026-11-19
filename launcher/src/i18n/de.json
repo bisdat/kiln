@@ -4594,7 +4594,13 @@
         "big": "Dieser Bericht ist {size} groß, gesendet werden können bis zu {limit}. Sende den Beitrag ohne das Zip, speichere dann den Bericht und gib ihn dem Team auf Discord.",
         "sendWithout": "Ohne Zip senden",
         "saveReport": "Bericht speichern",
-        "stillNot": "Du bist immer noch nicht im Kiln-Discord. Tritt mit der Einladung bei und drück dann Bin beigetreten."
+        "stillNot": "Du bist immer noch nicht im Kiln-Discord. Tritt mit der Einladung bei und drück dann Bin beigetreten.",
+        "prepareTitle": "Der Bericht konnte nicht erstellt werden",
+        "discordTitle": "Discord hat den Bericht nicht angenommen",
+        "discord": "Discord meldet: {reason}. Das liegt an Kiln, nicht an deiner Verbindung. Dein Bericht bleibt erhalten: versuch es später noch einmal, oder speichere den Bericht und poste ihn selbst.",
+        "discordNoReason": "Das liegt an Kiln, nicht an deiner Verbindung. Dein Bericht bleibt erhalten: versuch es später noch einmal, oder speichere den Bericht und poste ihn selbst.",
+        "discordLimitTitle": "Discord bittet den Kiln-Support zu warten",
+        "discordLimit": "Discord begrenzt, wie oft der Kiln-Support posten kann, und die Grenze ist gerade erreicht. Das liegt nicht an deiner Verbindung. Dein Bericht bleibt erhalten: versuch es in {wait} noch einmal."
       },
       "sent": {
         "title": "Gesendet",
@@ -4706,7 +4712,11 @@
         "sentToastDetail": "Sie stehen im Beitrag der Version in #testing. Das Team markiert sie, wenn es sie gelesen hat.",
         "how": "So geht's",
         "untried": "Probiere jeden Schritt aus oder markiere ihn als Nicht möglich.",
-        "more": "Mehr zu dieser Testversion"
+        "more": "Mehr zu dieser Testversion",
+        "discordTitle": "Discord hat die Ergebnisse nicht angenommen",
+        "discord": "Discord meldet: {reason}. Das liegt an Kiln, nicht an deiner Verbindung. Deine Ergebnisse bleiben erhalten: versuch es später noch einmal.",
+        "discordNoReason": "Das liegt an Kiln, nicht an deiner Verbindung. Deine Ergebnisse bleiben erhalten: versuch es später noch einmal.",
+        "discordLimit": "Discord begrenzt, wie oft der Kiln-Support posten kann, und die Grenze ist gerade erreicht. Deine Ergebnisse bleiben erhalten: versuch es in {wait} noch einmal."
       },
       "unknown": "Unbekannt"
     },

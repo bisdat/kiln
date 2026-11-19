@@ -4594,7 +4594,13 @@
         "big": "Este informe ocupa {size} y se puede enviar hasta {limit}. Envía la publicación sin el zip, luego guarda el informe y dáselo al equipo en Discord.",
         "sendWithout": "Enviar sin el zip",
         "saveReport": "Guardar informe",
-        "stillNot": "Aún no estás en el Discord de Kiln. Únete con la invitación y pulsa Ya me uní."
+        "stillNot": "Aún no estás en el Discord de Kiln. Únete con la invitación y pulsa Ya me uní.",
+        "prepareTitle": "No se pudo crear el informe",
+        "discordTitle": "Discord no aceptó el informe",
+        "discord": "Discord dice: {reason}. El problema está del lado de Kiln, no en tu conexión. Tu informe se guarda: vuelve a intentarlo más tarde, o guarda el informe y publícalo tú.",
+        "discordNoReason": "El problema está del lado de Kiln, no en tu conexión. Tu informe se guarda: vuelve a intentarlo más tarde, o guarda el informe y publícalo tú.",
+        "discordLimitTitle": "Discord pide al soporte de Kiln que espere",
+        "discordLimit": "Discord limita la frecuencia con la que el soporte de Kiln puede publicar, y ahora mismo se alcanzó el límite. No es tu conexión. Tu informe se guarda: vuelve a intentarlo en {wait}."
       },
       "sent": {
         "title": "Enviado",
@@ -4706,7 +4712,11 @@
         "sentToastDetail": "Están en la publicación de la build en #testing. El equipo los marca cuando los ha leído.",
         "how": "Cómo",
         "untried": "Prueba cada paso, o márcalo como No pude probar.",
-        "more": "Más de esta versión de prueba"
+        "more": "Más de esta versión de prueba",
+        "discordTitle": "Discord no aceptó los resultados",
+        "discord": "Discord dice: {reason}. El problema está del lado de Kiln, no en tu conexión. Tus resultados se guardan: vuelve a intentarlo más tarde.",
+        "discordNoReason": "El problema está del lado de Kiln, no en tu conexión. Tus resultados se guardan: vuelve a intentarlo más tarde.",
+        "discordLimit": "Discord limita la frecuencia con la que el soporte de Kiln puede publicar, y ahora mismo se alcanzó el límite. Tus resultados se guardan: vuelve a intentarlo en {wait}."
       },
       "unknown": "Desconocido"
     },

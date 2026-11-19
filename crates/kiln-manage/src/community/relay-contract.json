@@ -39,7 +39,9 @@
     "rate-limited": [429, "has retryAt and limit (hour, day or network); reports also lastPost"],
     "slow-down": [429, "has retryAfter (seconds); also the Retry-After header"],
     "internal": [500, "a bug on the relay"],
+    "discord-refused": [502, "Discord refused the relay's request (a 4xx but 429); has discordStatus, discordCode (or null) and discordMessage (Discord's reason in one line, or null). On our side, not the player's connection"],
     "unavailable": [503, "Discord is not answering (or the account is blocked: deliberately the same answer)"],
+    "discord-rate-limited": [503, "Discord's rate limit is longer than the relay waits; has retryAfter (seconds); also the Retry-After header"],
     "busy": [503, "too many uploads at once; nothing was used up"]
   },
   "endpoints": [
@@ -167,6 +169,18 @@
       "method": "POST", "path": "/reports", "auth": true,
       "request": "multipart/form-data: draft, zip",
       "answer": { "status": 503, "body": { "error": "unavailable", "message": "<text>" } }
+    },
+    {
+      "name": "send a report, Discord refused it",
+      "method": "POST", "path": "/reports", "auth": true,
+      "request": "multipart/form-data: draft, zip",
+      "answer": { "status": 502, "body": { "error": "discord-refused", "message": "<text>", "discordStatus": 403, "discordCode": 50013, "discordMessage": "Missing Permissions" } }
+    },
+    {
+      "name": "send a report, Discord rate-limits the relay",
+      "method": "POST", "path": "/reports", "auth": true,
+      "request": "multipart/form-data: draft, zip",
+      "answer": { "status": 503, "body": { "error": "discord-rate-limited", "message": "<text>", "retryAfter": 38 } }
     },
     {
       "name": "your posts",

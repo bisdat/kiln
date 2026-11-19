@@ -4594,7 +4594,13 @@
         "big": "Questo report è di {size}, e si può inviare al massimo {limit}. Invia il post senza lo zip, poi salva il report e dallo al team su Discord.",
         "sendWithout": "Invia senza lo zip",
         "saveReport": "Salva report",
-        "stillNot": "Non sei ancora nel Discord di Kiln. Entra con l'invito, poi premi Sono entrato."
+        "stillNot": "Non sei ancora nel Discord di Kiln. Entra con l'invito, poi premi Sono entrato.",
+        "prepareTitle": "Non è stato possibile creare il report",
+        "discordTitle": "Discord non ha accettato il report",
+        "discord": "Discord dice: {reason}. Il problema è dalla parte di Kiln, non nella tua connessione. Il tuo report è conservato: riprova più tardi, o salva il report e pubblicalo tu.",
+        "discordNoReason": "Il problema è dalla parte di Kiln, non nella tua connessione. Il tuo report è conservato: riprova più tardi, o salva il report e pubblicalo tu.",
+        "discordLimitTitle": "Discord chiede al supporto Kiln di aspettare",
+        "discordLimit": "Discord limita quanto spesso il supporto Kiln può pubblicare, e il limite è raggiunto proprio ora. Non dipende dalla tua connessione. Il tuo report è conservato: riprova tra {wait}."
       },
       "sent": {
         "title": "Inviato",
@@ -4706,7 +4712,11 @@
         "sentToastDetail": "Sono nel post della build in #testing. Il team li segna quando li ha letti.",
         "how": "Come",
         "untried": "Prova ogni passaggio, o segnalo come Non ho potuto.",
-        "more": "Altro per questa build di prova"
+        "more": "Altro per questa build di prova",
+        "discordTitle": "Discord non ha accettato i risultati",
+        "discord": "Discord dice: {reason}. Il problema è dalla parte di Kiln, non nella tua connessione. I tuoi risultati sono conservati: riprova più tardi.",
+        "discordNoReason": "Il problema è dalla parte di Kiln, non nella tua connessione. I tuoi risultati sono conservati: riprova più tardi.",
+        "discordLimit": "Discord limita quanto spesso il supporto Kiln può pubblicare, e il limite è raggiunto proprio ora. I tuoi risultati sono conservati: riprova tra {wait}."
       },
       "unknown": "Non noto"
     },

@@ -4500,7 +4500,13 @@
         "big": "이 보고서는 {size}이고, 최대 {limit}까지 보낼 수 있습니다. zip 없이 게시글을 보낸 뒤, 보고서를 저장해서 Discord에서 팀에 전달하세요.",
         "sendWithout": "zip 없이 보내기",
         "saveReport": "보고서 저장",
-        "stillNot": "아직 Kiln Discord에 없습니다. 초대 링크로 참가한 뒤 참가했습니다를 누르세요."
+        "stillNot": "아직 Kiln Discord에 없습니다. 초대 링크로 참가한 뒤 참가했습니다를 누르세요.",
+        "prepareTitle": "보고서를 만들 수 없었습니다",
+        "discordTitle": "Discord가 보고서를 받지 않았습니다",
+        "discord": "Discord가 알려 준 이유: {reason}. 문제는 Kiln 쪽에 있으며, 연결 문제가 아닙니다. 보고서는 보관됩니다. 나중에 다시 시도하거나, 보고서를 저장해서 직접 올리세요.",
+        "discordNoReason": "문제는 Kiln 쪽에 있으며, 연결 문제가 아닙니다. 보고서는 보관됩니다. 나중에 다시 시도하거나, 보고서를 저장해서 직접 올리세요.",
+        "discordLimitTitle": "Discord가 Kiln 지원에 기다려 달라고 합니다",
+        "discordLimit": "Discord는 Kiln 지원이 게시할 수 있는 횟수를 제한하며, 지금은 그 한도에 도달했습니다. 연결 문제가 아닙니다. 보고서는 보관됩니다. {wait} 뒤에 다시 시도하세요."
       },
       "sent": {
         "title": "보냄",
@@ -4608,7 +4614,11 @@
         "sentToastDetail": "#testing의 빌드 게시글에 있습니다. 팀이 읽으면 표시합니다.",
         "how": "방법",
         "untried": "각 단계를 해 보거나 못 해 봄으로 표시하세요.",
-        "more": "이 테스트 빌드 더 보기"
+        "more": "이 테스트 빌드 더 보기",
+        "discordTitle": "Discord가 결과를 받지 않았습니다",
+        "discord": "Discord가 알려 준 이유: {reason}. 문제는 Kiln 쪽에 있으며, 연결 문제가 아닙니다. 결과는 보관됩니다. 나중에 다시 시도하세요.",
+        "discordNoReason": "문제는 Kiln 쪽에 있으며, 연결 문제가 아닙니다. 결과는 보관됩니다. 나중에 다시 시도하세요.",
+        "discordLimit": "Discord는 Kiln 지원이 게시할 수 있는 횟수를 제한하며, 지금은 그 한도에 도달했습니다. 결과는 보관됩니다. {wait} 뒤에 다시 시도하세요."
       },
       "unknown": "알 수 없음"
     },

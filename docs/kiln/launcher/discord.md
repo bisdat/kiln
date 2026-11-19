@@ -125,8 +125,9 @@ and kept" says it in short; `unit/community.test.ts` checks that its words keep 
 
 ## The contract with the relay
 
-The relay runs on frostdev.io (the kilnbot repo). Its contract is the relay's own: `docs/relay-api.md` and the 36
-examples of `docs/relay-contract.json` there (master 3eb30a7, live since 18 November 2026). This is how the launcher
+The relay runs on frostdev.io (the kilnbot repo). Its contract is the relay's own: `docs/relay-api.md` and the 38
+examples of `docs/relay-contract.json` there (master 3eb30a7, live since 18 November 2026; the two Discord refusal
+examples since the relay's `refusal` branch). This is how the launcher
 uses it. The launcher's tests talk to a fake relay on 127.0.0.1, never to frostdev.io. A copy of the examples is
 `crates/kiln-manage/src/community/relay-contract.json`; `community::contract` makes the launcher's call for each one
 (all but `/health`, which the launcher never calls) against a strict fake relay that holds every request to the real
@@ -149,7 +150,9 @@ Bearer <session key>`. JSON bodies are `Content-Type: application/json`.
 | Answer | Kind | What the launcher does |
 |---|---|---|
 | no answer (DNS, refused, reset, timeout before connecting) | `offline` | "You're offline"; the draft is kept |
-| 503 `unavailable`, 5xx, 422 `bad-zip`, 409, 403 `refused`, a body that is not JSON, a redirect, an answer over its bound | `relay` | "Kiln support can't be reached"; Retry |
+| 503 `unavailable`, 5xx, 422 `bad-zip`, 409, 403 `refused`, a body that is not JSON, a redirect, an answer over its bound | `relay` | "Kiln support can't be reached"; Retry. A blocked account gets this answer too, on purpose (PLAN 7.3) |
+| 502 `discord-refused` (`discordStatus`, `discordCode`, `discordMessage`) | `discord` (`limited: false`, `status`, `code`, `reason`: Discord's reason when it is one printable line of at most 160 characters) | "Discord didn't accept the report" with Discord's reason: on Kiln's side, not the player's connection; the draft is kept; Retry, Save report. Not an outage: the page's "isn't answering" line is not shown |
+| 503 `discord-rate-limited` (`retryAfter`) | `discord` (`limited: true`, `waitMin`) | "Discord asks Kiln support to wait" and when to try again; the draft is kept; Retry, Save report |
 | 401 `signed-out` | `signin` | forgets the session key (signed out) |
 | 403 `not-member` | `not_member` | "You're not in the Kiln Discord yet", Join and "I've joined" |
 | 403 `too-new` | `too_young` | "This Discord account is too new" (reports from accounts 3 days old and more), Save report; the draft is kept |
@@ -160,7 +163,8 @@ Bearer <session key>`. JSON bodies are `Content-Type: application/json`.
 | 429 `slow-down` | (sign-in poll: still waiting) | |
 | 400 `bad-request` | `bad_request` | a launcher bug; shown as the relay's refusal |
 
-Reasons are read with dashes or underscores. Ids that go into a path are `[A-Za-z0-9_-]{1,64}` (the relay's are
+Reasons are read with dashes or underscores. The relay chose 502 and 503 for the two Discord answers so a launcher
+older than them (0.2.0-dev.29.18 and before) reads them as `relay` and keeps its old words. Ids that go into a path are `[A-Za-z0-9_-]{1,64}` (the relay's are
 Discord snowflakes); the launcher refuses anything else before sending.
 
 **Endpoints, as the launcher calls them:**

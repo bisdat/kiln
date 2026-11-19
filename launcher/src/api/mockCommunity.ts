@@ -17,7 +17,9 @@
 //   sent        tester: results sent, not read yet                read     tester: results read by the team
 //   hidden      Settings' "Show the Community page" is off        noplan   tester, no test build open
 //   nobuild     no test build open (a volunteer gets no checklist)
+//   discordrefused  Discord refuses reports and results (502)     discordlimit  Discord's rate limit holds them (503)
 // Tests and the console: __kilnMock.community.reply(), .approve(), .setOnline(bool), .setRelay(bool), .readResults(),
+// .setDiscord("refused" | "limited" | null),
 // .requests() (every call that would reach the relay, in order: what the "nothing is sent" tests check), .signins().
 import type {
   CommunityAccount, CommunityFeed, CommunitySettings, CommunityStatus, Hardware, KnownProblem, ReportDraft, ReportPreview, SendFrom, SignInStart,
@@ -54,6 +56,13 @@ let tester = TESTER;
 let account: CommunityAccount | null = SIGNED_IN ? me() : null;
 let online = !has("offline");
 let relayUp = !has("relaydown");
+/** Discord refuses the next report or results (the relay's 502 discord-refused), or its rate limit holds them (503
+ *  discord-rate-limited), as kiln_manage::community::relay::refusal words them. */
+let discord: "refused" | "limited" | null = has("discordrefused") ? "refused" : has("discordlimit") ? "limited" : null;
+function discordAnswer() {
+  if (discord === "refused") err("refused", "Discord didn't accept this from Kiln support.", "discord", { limited: false, status: 403, code: 50013, reason: "Missing Permissions" });
+  if (discord === "limited") err("busy", "Discord asks Kiln support to wait before posting again.", "discord", { limited: true, waitMin: 2 });
+}
 /** The relay's sending limit the next report meets (docs/relay-api.md: hour, day, network), or none. */
 let rateLimited: "hour" | "day" | "network" | null = has("ratelimit") ? "hour" : has("ratelimitday") ? "day" : has("ratelimitnet") ? "network" : null;
 let postsAsOf: string | null = SIGNED_IN ? min(has("offline") ? 38 : 0) : null;
@@ -285,6 +294,7 @@ export function communityMockHandlers({ emit, gameRunning }: CommunityMockDeps):
       if (rateLimited) err("busy", "Kiln support asks you to wait before sending again.", "rate_limited", { limit: rateLimited, sent: { hour: 3, day: 10, network: 20 }[rateLimited],
         waitMin: rateLimited === "hour" ? 38 : 300, last: posts[0]?.url ?? null });
       if (has("toobig") && d.zip !== "none") err("refused", "The report is too big to send.", "too_big", { size: 21_400_000, limit: 8 * 1024 * 1024 });
+      discordAnswer();
       const post: SupportPost = { id: `p${Date.now()}`, title: d.title, url: thread(9), created: new Date().toISOString(), status: "waiting", replies: 0, unread: 0,
         lastReply: null, tags: [...new Set([({ noload: "Mods", mod: "Mods", crash: "Crash", launcher: "Launcher", server: "Server", other: null } as Record<string, string | null>)[d.kind], ...p!.tags].filter((x): x is string => !!x))], zip: d.zip };
       posts = [post, ...posts];
@@ -324,9 +334,11 @@ export function communityMockHandlers({ emit, gameRunning }: CommunityMockDeps):
       if (!testPlan) return null;
       // the attached report goes only as prepared and shown (the backend refuses one it did not show)
       if (a.withReport && !prepared.has(String(a.prepared))) err("invalid_argument", "The report to attach was not shown yet.", "not_found");
-      if (a.withReport) prepared.delete(String(a.prepared));
       if (testPlan.steps.some((s) => !s.result)) err("invalid_argument", "Try each step, or mark it Couldn't try.", "untried");
       relay(a.withReport ? "tester-results+zip" : "tester-results");
+      discordAnswer();
+      // used up only once sent (as community/testers.rs send_results does): a failed send can be tried again
+      if (a.withReport) prepared.delete(String(a.prepared));
       testPlan = { ...testPlan, sent: { at: new Date().toISOString(), read: null, replied: false } };
       changed();
       return testPlan;
@@ -349,6 +361,7 @@ export function communityMockHooks(emit: Emit) {
     approve: () => { for (const p of pending.values()) p.done = "approved"; },
     setOnline: (on: boolean) => { online = on; emit("kiln://community", { kind: "changed" }); },
     setRelay: (up: boolean) => { relayUp = up; emit("kiln://community", { kind: "changed" }); },
+    setDiscord: (mode: "refused" | "limited" | null) => { discord = mode; },
     setRateLimited: (on: boolean | "hour" | "day" | "network") => { rateLimited = on === true ? "hour" : on || null; },
     /** "I've joined": the next membership check finds the player in the server. */
     join: () => { joined = true; },

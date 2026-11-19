@@ -3,7 +3,7 @@
 // mark, Stop testing; desktop and Deck.
 import { expect, test, type Page } from "@playwright/test";
 
-type Hooks = { community: { requests: () => string[]; readResults: () => void; setOnline: (on: boolean) => void } };
+type Hooks = { community: { requests: () => string[]; readResults: () => void; setOnline: (on: boolean) => void; setDiscord: (mode: "refused" | "limited" | null) => void } };
 const mock = <T,>(page: Page, f: (h: Hooks) => T) => page.evaluate((src) => (new Function("h", `return (${src})(h)`))((window as unknown as { __kilnMock: Hooks }).__kilnMock), f.toString()) as Promise<T>;
 const requests = (page: Page) => mock(page, (h) => h.community.requests());
 
@@ -71,6 +71,24 @@ test.describe("desktop", () => {
     expect(await requests(page)).toContain("tester-results+zip");
     await mock(page, (h) => h.community.readResults());
     await expect(page.getByTestId("kc-results-state")).toContainText("Rowan of the Kiln team read your results just now.");
+  });
+
+  test("Discord refused the results: the toast says so in words, the results stay for the next try", async ({ page }) => {
+    await open(page, "/?mock=1&discord=tester,discordrefused#/community");
+    const list = page.getByTestId("kc-checklist");
+    const step = (id: string) => list.locator(`[data-step="${id}"]`);
+    for (const id of ["start", "fsr4", "overlay", "reload"]) {
+      if (id !== "start") await step(id).locator(".kc-step-head").click();
+      await step(id).getByRole("radio", { name: "Worked" }).click();
+    }
+    await expect(page.getByTestId("kc-attached")).toContainText("10 files");
+    await page.getByTestId("kc-send-results").click();
+    const toast = page.locator(".k-toast").filter({ hasText: "Discord didn't accept the results" });
+    await expect(toast).toContainText("Discord said: Missing Permissions. This is on Kiln's side, not your connection. Your results are kept: try again later.");
+    await expect(page.getByTestId("kc-send-results")).toBeEnabled();
+    await mock(page, (h) => h.community.setDiscord(null));
+    await page.getByTestId("kc-send-results").click();
+    await expect(page.getByTestId("kc-results-state")).toContainText("Results sent just now.");
   });
 
   test("read by the team and replied; Stop testing", async ({ page }) => {

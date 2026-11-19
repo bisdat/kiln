@@ -4594,7 +4594,13 @@
         "big": "This report is {size}, and up to {limit} can be sent. Send the post without the zip, then save the report and give it to the team on Discord.",
         "sendWithout": "Send without the zip",
         "saveReport": "Save report",
-        "stillNot": "You're still not in the Kiln Discord. Join with the invite, then press I've joined."
+        "stillNot": "You're still not in the Kiln Discord. Join with the invite, then press I've joined.",
+        "prepareTitle": "The report could not be made",
+        "discordTitle": "Discord didn't accept the report",
+        "discord": "Discord said: {reason}. This is on Kiln's side, not your connection. Your report is kept: try again later, or save the report and post it yourself.",
+        "discordNoReason": "This is on Kiln's side, not your connection. Your report is kept: try again later, or save the report and post it yourself.",
+        "discordLimitTitle": "Discord asks Kiln support to wait",
+        "discordLimit": "Discord limits how often Kiln support can post, and the limit is reached right now. This is not your connection. Your report is kept: try again in {wait}."
       },
       "sent": {
         "title": "Sent",
@@ -4706,7 +4712,11 @@
         "sentToastDetail": "They're in the build's post in #testing. The team marks them when they've read them.",
         "how": "How",
         "untried": "Try each step, or mark it Couldn't try.",
-        "more": "More for this test build"
+        "more": "More for this test build",
+        "discordTitle": "Discord didn't accept the results",
+        "discord": "Discord said: {reason}. This is on Kiln's side, not your connection. Your results are kept: try again later.",
+        "discordNoReason": "This is on Kiln's side, not your connection. Your results are kept: try again later.",
+        "discordLimit": "Discord limits how often Kiln support can post, and the limit is reached right now. Your results are kept: try again in {wait}."
       },
       "unknown": "Not known"
     },

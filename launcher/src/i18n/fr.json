@@ -4594,7 +4594,13 @@
         "big": "Ce rapport fait {size}, et l'envoi est limité à {limit}. Envoyez le message sans le zip, puis enregistrez le rapport et donnez-le à l'équipe sur Discord.",
         "sendWithout": "Envoyer sans le zip",
         "saveReport": "Enregistrer le rapport",
-        "stillNot": "Vous n'êtes toujours pas sur le Discord de Kiln. Rejoignez-le avec l'invitation, puis appuyez sur « J'ai rejoint »."
+        "stillNot": "Vous n'êtes toujours pas sur le Discord de Kiln. Rejoignez-le avec l'invitation, puis appuyez sur « J'ai rejoint ».",
+        "prepareTitle": "Le rapport n'a pas pu être créé",
+        "discordTitle": "Discord n'a pas accepté le rapport",
+        "discord": "Discord indique : {reason}. Le problème vient de Kiln, pas de votre connexion. Votre rapport est gardé : réessayez plus tard, ou enregistrez le rapport et publiez-le vous-même.",
+        "discordNoReason": "Le problème vient de Kiln, pas de votre connexion. Votre rapport est gardé : réessayez plus tard, ou enregistrez le rapport et publiez-le vous-même.",
+        "discordLimitTitle": "Discord demande à l'assistance Kiln d'attendre",
+        "discordLimit": "Discord limite la fréquence des messages de l'assistance Kiln, et cette limite est atteinte pour le moment. Ce n'est pas votre connexion. Votre rapport est gardé : réessayez dans {wait}."
       },
       "sent": {
         "title": "Envoyé",
@@ -4706,7 +4712,11 @@
         "sentToastDetail": "Ils sont dans le message de la version dans #testing. L'équipe les marque quand elle les a lus.",
         "how": "Comment",
         "untried": "Essayez chaque étape, ou marquez-la « Pas pu essayer ».",
-        "more": "Plus d'options pour cette version de test"
+        "more": "Plus d'options pour cette version de test",
+        "discordTitle": "Discord n'a pas accepté les résultats",
+        "discord": "Discord indique : {reason}. Le problème vient de Kiln, pas de votre connexion. Vos résultats sont gardés : réessayez plus tard.",
+        "discordNoReason": "Le problème vient de Kiln, pas de votre connexion. Vos résultats sont gardés : réessayez plus tard.",
+        "discordLimit": "Discord limite la fréquence des messages de l'assistance Kiln, et cette limite est atteinte pour le moment. Vos résultats sont gardés : réessayez dans {wait}."
       },
       "unknown": "Inconnu"
     },

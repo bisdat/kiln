@@ -10,7 +10,7 @@ import { t as tt, useT } from "../i18n";
 import { fmtBytes } from "../ui";
 import { DeckButton, Dialog, Word } from "../deck/ui";
 import { errKind, refreshCommunity, useCommunity, useCommunityUi, useSendOpen } from "./state";
-import { KINDS, QrCode, kindKey, rateText, versionsLine, whenKey } from "./parts";
+import { KINDS, QrCode, discordWords, kindKey, rateText, versionsLine, whenKey } from "./parts";
 import { Pick } from "./DeckCommunity";
 import { DeckSignIn } from "./SignIn";
 
@@ -125,10 +125,10 @@ function DeckSend() {
   const nextZip = d.zip === "team" ? "public" : d.zip === "public" ? "none" : "team";
   const errWord = (k: string) => k === "offline" ? t("community.send.err.offlineTitle") : k === "not_member" ? t("community.send.err.notMemberTitle") : k === "rate_limited" ? t("community.send.err.rateTitle")
     : k === "too_big" ? t("community.send.err.bigTitle") : k === "signin" ? t("community.account.out") : k === "too_young" ? t("community.send.err.tooNewTitle")
-    : k === "not_found" ? t("community.send.err.staleTitle") : t("community.send.err.relayTitle");
+    : k === "not_found" ? t("community.send.err.staleTitle") : k === "discord" ? discordWords(err?.detail ?? {}, "report").title : t("community.send.err.relayTitle");
   const errText = (k: string, x: Record<string, unknown>) => k === "offline" ? t("community.send.err.offline") : k === "not_member" ? t("community.send.err.notMember")
     : k === "rate_limited" ? rateText(x) : k === "too_big" ? t("community.send.err.big", { size: fmtBytes(Number(x.size ?? p?.size)), limit: fmtBytes(Number(x.limit ?? 8 * 1024 * 1024)) })
-    : k === "signin" ? t("community.send.check.signInHint") : k === "too_young" ? t("community.send.err.tooNew") : k === "not_found" ? t("community.send.err.stale") : t("community.send.err.relay");
+    : k === "signin" ? t("community.send.check.signInHint") : k === "too_young" ? t("community.send.err.tooNew") : k === "not_found" ? t("community.send.err.stale") : k === "discord" ? discordWords(x, "report").text : t("community.send.err.relay");
   return (
     <Dialog key="check" name="send-check" title={t("community.deck.check")} wide onClose={() => setStep("when")} backLabel={t("common.back")}
       buttons={acct
