@@ -193,8 +193,11 @@ export function AppShell() {
   );
   const sheet = useLinger<ReactNode>(page, !isPlay, 480);
   const hero = useLinger<ReactNode>(page, isPlay, 360);
-  // the torch: a soft warm light follows the pointer across the sheet
+  // the torch: a soft warm light follows the pointer across the sheet (and the fire's camera leans after it).
+  // The pointer goes onto the light's own layer (.k-torch, no children) and moves it: on .k-app (inbox 94) every move
+  // restyled the whole window and repainted the whole sheet.
   const root = useRef<HTMLDivElement>(null);
+  const light = useRef<HTMLDivElement>(null);
   const frame = useRef(0);
   const torch = (e: React.MouseEvent) => {
     if (frame.current || reduced()) return;
@@ -203,8 +206,11 @@ export function AppShell() {
       frame.current = 0;
       const b = root.current?.getBoundingClientRect();
       if (b?.width) { stageInput.mx = ((x - b.left) / b.width) * 2 - 1; stageInput.my = 1 - ((y - b.top) / b.height) * 2; }
-      root.current?.style.setProperty("--mx", `${x}px`);
-      root.current?.style.setProperty("--my", `${y}px`);
+      const l = light.current;
+      if (!l) return;
+      l.style.setProperty("--mx", `${x}px`);
+      l.style.setProperty("--my", `${y}px`);
+      if (!l.dataset.at) l.dataset.at = "1";
     });
   };
   // `t` changes with the language: the title follows it
@@ -215,6 +221,9 @@ export function AppShell() {
       <Header isPlay={isPlay} ctl={ctl} />
       <div className={"k-hero-layer" + (isPlay ? " on" : "")} aria-hidden={!isPlay}>{hero}</div>
       <main className={"k-sheet" + (isPlay ? " down" : " up")} id="main" aria-hidden={isPlay}>
+        {/* leaves: the lit top edge (the flicker's --fire) and the torch (--mx, --my); nothing goes inside them */}
+        <div className="k-sheet-rim" aria-hidden />
+        <div ref={light} className="k-torch" aria-hidden />
         <div className="k-sheet-in">{sheet}</div>
       </main>
       <Mouth isPlay={isPlay} ctl={ctl} />

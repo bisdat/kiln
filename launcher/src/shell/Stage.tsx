@@ -81,8 +81,14 @@ export const FRAG = [
 
 export const UNIFORMS = ["uR", "uT", "uH", "uF", "uD", "uM", "uS", "uL", "uK"] as const;
 
-/** The canvas behind everything. `root` is .k-app: its size, its --k and --fire, data-gl, and the .k-door it moves.
- *  `enabled` false takes the no-WebGL path without asking for a context (give the canvas a new key to turn it back on). */
+/** What the loop writes the flicker (--fire) onto: leaves only, never an element with the page under it (inbox 94: on
+ *  .k-sheet every write restyled and repainted the whole page, about 11 times a second). The sheet's lit top edge
+ *  (.k-sheet-rim, a strip with no children) and the Play title (.k-title, a word). */
+export const FIRE_READERS = ".k-sheet-rim, .k-title";
+
+/** The canvas behind everything. `root` is .k-app: its size, data-gl, the .k-door it moves (and --k on the door's label)
+ *  and the flicker on FIRE_READERS. `enabled` false takes the no-WebGL path without asking for a context (give the
+ *  canvas a new key to turn it back on). */
 export function Stage({ root, enabled = true }: { root: RefObject<HTMLDivElement>; enabled?: boolean }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
@@ -98,6 +104,7 @@ export function Stage({ root, enabled = true }: { root: RefObject<HTMLDivElement
       clearTimeout(nap);
       delete app.dataset.gl;
       for (const p of ["transform", "width", "height"]) app.querySelector<HTMLElement>(".k-door")?.style.removeProperty(p);
+      app.querySelector<HTMLElement>(".k-door-lab")?.style.removeProperty("--k");
       if (why) console.warn("Hearth fire off:", why);
     };
     if (!enabled) { off(""); return; } // turned off, or not decided yet: the CSS mouth, quietly
@@ -131,7 +138,7 @@ export function Stage({ root, enabled = true }: { root: RefObject<HTMLDivElement
     let h = stageInput.play && !still ? 0.02 : target(stageInput);
     const m = [0, 0];
     let last = performance.now(), lastDraw = 0, lastCss = 0, lastDoor = "", lastSize = "";
-    let door: HTMLElement | null = null;
+    let door: HTMLElement | null = null, lab: HTMLElement | null = null;
     // the flicker's two readers (base.css --fire), looked up again when React replaced them
     let lit: HTMLElement[] = [];
     const loop = (ms: number) => {
@@ -155,18 +162,24 @@ export function Stage({ root, enabled = true }: { root: RefObject<HTMLDivElement
       const bw = Math.min(800, W * 0.4, H * 0.625), bh = bw * 0.88, bx = W - 48 - bw, by = H - 84 - bh, px = W - 60, py = 7;
       const dw = Math.max(14, bw + (36 - bw) * k), dh = dw * 0.88, dx = bx + (px - bx) * k, dy = by + (py - by) * k;
       const key = `${dx.toFixed(1)} ${dy.toFixed(1)} ${dw.toFixed(1)}`;
-      if (!door?.isConnected) { door = app.querySelector<HTMLElement>(".k-door"); lastDoor = ""; }
+      if (!door?.isConnected || !lab?.isConnected) {
+        door = app.querySelector<HTMLElement>(".k-door");
+        lab = door?.querySelector<HTMLElement>(".k-door-lab") ?? null;
+        lastDoor = "";
+      }
       if (key !== lastDoor && door) {
         lastDoor = key;
         door.style.transform = `translate(${dx.toFixed(1)}px,${dy.toFixed(1)}px)`;
         door.style.width = `${dw.toFixed(1)}px`;
         door.style.height = `${dh.toFixed(1)}px`;
-        app.style.setProperty("--k", k.toFixed(3));
+        // on its only reader (the label fades as the mouth shrinks), not on .k-app: there it restyled the whole window
+        // every frame of the spring
+        lab?.style.setProperty("--k", k.toFixed(3));
       }
       if (!i.game && ms - lastCss > 90) {
         lastCss = ms;
         if (!lit.length || lit.some((e) => !e.isConnected) || (i.play && !lit.some((e) => e.classList.contains("k-title")))) {
-          lit = [...app.querySelectorAll<HTMLElement>(".k-sheet, .k-title")];
+          lit = [...app.querySelectorAll<HTMLElement>(FIRE_READERS)];
         }
         for (const e of lit) e.style.setProperty("--fire", F.toFixed(3));
       }
