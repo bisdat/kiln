@@ -1,165 +1,165 @@
 #nullable enable
-[KILNX001]Kiln.ComponentSet
-[KILNX001]Kiln.ComponentSet.ComponentSet(params string![]! components) -> void
-[KILNX001]Kiln.ComponentSet.Count.get -> int
-[KILNX001]Kiln.ComponentSet.this[int index].get -> string!
-[KILNX001]Kiln.ConcurrentCopy
-[KILNX001]Kiln.ConcurrentCopy.ConcurrentCopy() -> void
-[KILNX001]Kiln.ConcurrentCopy.Required.get -> int
-[KILNX001]Kiln.ConcurrentCopy.Status.get -> Kiln.ReadStatus
-[KILNX001]Kiln.ConcurrentCopy.Written.get -> int
-[KILNX001]Kiln.ConcurrentEntity
-[KILNX001]Kiln.ConcurrentEntity.ConcurrentEntity() -> void
-[KILNX001]Kiln.ConcurrentEntity.Equals(Kiln.ConcurrentEntity other) -> bool
-[KILNX001]Kiln.ConcurrentEntity.Generation.get -> uint
-[KILNX001]Kiln.ConcurrentEntity.Id.get -> Kiln.EntityId
-[KILNX001]Kiln.ConcurrentEntity.IsNone.get -> bool
-[KILNX001]Kiln.ConcurrentEntity.Session.get -> ulong
-[KILNX001]Kiln.ConcurrentEntity.World.get -> Kiln.WorldKind
-[KILNX001]Kiln.ConcurrentQueryResult
-[KILNX001]Kiln.ConcurrentQueryResult.ConcurrentQueryResult() -> void
-[KILNX001]Kiln.ConcurrentQueryResult.Count.get -> int
-[KILNX001]Kiln.ConcurrentQueryResult.Required.get -> int
-[KILNX001]Kiln.ConcurrentQueryResult.Status.get -> Kiln.ReadStatus
-[KILNX001]Kiln.ConcurrentRead<T>
-[KILNX001]Kiln.ConcurrentRead<T>.ConcurrentRead() -> void
-[KILNX001]Kiln.ConcurrentRead<T>.IsOk.get -> bool
-[KILNX001]Kiln.ConcurrentRead<T>.Status.get -> Kiln.ReadStatus
-[KILNX001]Kiln.ConcurrentRead<T>.Value.get -> T
-[KILNX001]Kiln.ConcurrentSnapshot
-[KILNX001]Kiln.ConcurrentSnapshot.Bytes(int index) -> System.ReadOnlySpan<byte>
-[KILNX001]Kiln.ConcurrentSnapshot.Count.get -> int
-[KILNX001]Kiln.ConcurrentSnapshot.Status.get -> Kiln.ReadStatus
-[KILNX001]Kiln.ConcurrentSnapshot.StatusOf(int index) -> Kiln.ReadStatus
-[KILNX001]Kiln.ConcurrentSnapshot.TryGet<T>(int index, out T value) -> bool
-[KILNX001]Kiln.EntityQuery
-[KILNX001]Kiln.EntityQuery.Center.get -> Kiln.WorldPosition?
-[KILNX001]Kiln.EntityQuery.Center.init -> void
-[KILNX001]Kiln.EntityQuery.Components.get -> System.Collections.Generic.IReadOnlyList<string!>!
-[KILNX001]Kiln.EntityQuery.EntityQuery() -> void
-[KILNX001]Kiln.EntityQuery.EntityQuery(Kiln.WorldKind world, params string![]! components) -> void
-[KILNX001]Kiln.EntityQuery.Mode.get -> Kiln.ReadMode
-[KILNX001]Kiln.EntityQuery.Mode.init -> void
-[KILNX001]Kiln.EntityQuery.Radius.get -> double
-[KILNX001]Kiln.EntityQuery.Radius.init -> void
-[KILNX001]Kiln.EntityQuery.World.get -> Kiln.WorldKind
-[KILNX001]Kiln.ReadMode
-[KILNX001]Kiln.ReadMode.FrameQuiet = 1 -> Kiln.ReadMode
-[KILNX001]Kiln.ReadMode.Stable = 0 -> Kiln.ReadMode
-[KILNX001]Kiln.ReadStatus
-[KILNX001]Kiln.ReadStatus.Absent = 1 -> Kiln.ReadStatus
-[KILNX001]Kiln.ReadStatus.Busy = 5 -> Kiln.ReadStatus
-[KILNX001]Kiln.ReadStatus.Changed = 7 -> Kiln.ReadStatus
-[KILNX001]Kiln.ReadStatus.Ok = 0 -> Kiln.ReadStatus
-[KILNX001]Kiln.ReadStatus.SizeMismatch = 9 -> Kiln.ReadStatus
-[KILNX001]Kiln.ReadStatus.Stale = 2 -> Kiln.ReadStatus
-[KILNX001]Kiln.ReadStatus.TooSmall = 8 -> Kiln.ReadStatus
-[KILNX001]Kiln.ReadStatus.Unavailable = 4 -> Kiln.ReadStatus
-[KILNX001]Kiln.ReadStatus.Unreadable = 3 -> Kiln.ReadStatus
-[KILNX001]Kiln.ReadStatus.Unsupported = 6 -> Kiln.ReadStatus
-[KILNX001]Kiln.WorldConcurrent
-[KILNX001]const Kiln.WorldConcurrent.Capability = "world.ecs_read" -> string!
-[KILNX001]override Kiln.ConcurrentEntity.Equals(object? obj) -> bool
-[KILNX001]override Kiln.ConcurrentEntity.GetHashCode() -> int
-[KILNX001]override Kiln.ConcurrentEntity.ToString() -> string!
-[KILNX001]override Kiln.ConcurrentRead<T>.ToString() -> string!
-[KILNX001]static Kiln.ConcurrentEntity.operator !=(Kiln.ConcurrentEntity left, Kiln.ConcurrentEntity right) -> bool
-[KILNX001]static Kiln.ConcurrentEntity.operator ==(Kiln.ConcurrentEntity left, Kiln.ConcurrentEntity right) -> bool
-[KILNX001]static Kiln.WorldConcurrent.IsAvailable.get -> bool
-[KILNX001]static Kiln.WorldConcurrent.IsPresent(Kiln.WorldKind world) -> bool
-[KILNX001]static Kiln.WorldConcurrent.Open(Kiln.EntityId id, Kiln.WorldKind world = Kiln.WorldKind.Server) -> Kiln.ConcurrentRead<Kiln.ConcurrentEntity>
-[KILNX001]static Kiln.WorldConcurrent.OrOnTick<T>(Kiln.KilnTaskContext! ctx, System.Func<T>! offTick, System.Func<T>! onTick) -> System.Threading.Tasks.Task<T>!
-[KILNX001]static Kiln.WorldConcurrent.Query(in Kiln.EntityQuery query, System.Span<Kiln.ConcurrentEntity> into) -> Kiln.ConcurrentQueryResult
-[KILNX001]static Kiln.WorldConcurrent.Read<T>(Kiln.ConcurrentEntity entity, string! component, Kiln.ReadMode mode = Kiln.ReadMode.Stable) -> Kiln.ConcurrentRead<T>
-[KILNX001]static Kiln.WorldConcurrent.ReadBytes(Kiln.ConcurrentEntity entity, string! component, System.Span<byte> into, Kiln.ReadMode mode = Kiln.ReadMode.Stable) -> Kiln.ConcurrentCopy
-[KILNX001]static Kiln.WorldConcurrent.ReadMany(Kiln.ConcurrentEntity entity, Kiln.ComponentSet! components, Kiln.ReadMode mode = Kiln.ReadMode.Stable) -> Kiln.ConcurrentSnapshot!
-[KILNX001]static Kiln.WorldConcurrent.Template(Kiln.ConcurrentEntity entity) -> Kiln.ConcurrentRead<System.Guid>
-[KILNX001]static Kiln.WorldConcurrent.Validate(Kiln.ConcurrentEntity entity) -> Kiln.ReadStatus
-[KILNX001]const Kiln.WorldConcurrent.WriteCapability = "world.ecs_write" -> string!
-[KILNX001]Kiln.ComponentExchangedEvent
-[KILNX001]Kiln.ComponentExchangedEvent.ComponentExchangedEvent(Kiln.EntityId entity, uint generation, uint componentHash, ulong session, ulong step, string? mod) -> void
-[KILNX001]Kiln.ComponentExchangedEvent.ComponentHash.get -> uint
-[KILNX001]Kiln.ComponentExchangedEvent.Entity.get -> Kiln.EntityId
-[KILNX001]Kiln.ComponentExchangedEvent.Generation.get -> uint
-[KILNX001]Kiln.ComponentExchangedEvent.Involves(Kiln.EntityId entity) -> bool
-[KILNX001]Kiln.ComponentExchangedEvent.Is(string! component) -> bool
-[KILNX001]Kiln.ComponentExchangedEvent.Mod.get -> string?
-[KILNX001]Kiln.ComponentExchangedEvent.Session.get -> ulong
-[KILNX001]Kiln.ComponentExchangedEvent.Step.get -> ulong
-[KILNX001]Kiln.ComponentExchangedEvent.World.get -> Kiln.WorldKind
-[KILNX001]Kiln.ComponentWritePolicy
-[KILNX001]Kiln.ComponentWritePolicy.Budget.get -> int
-[KILNX001]Kiln.ComponentWritePolicy.Component.get -> string!
-[KILNX001]Kiln.ComponentWritePolicy.ComponentWritePolicy() -> void
-[KILNX001]Kiln.ComponentWritePolicy.IsPlain.get -> bool
-[KILNX001]Kiln.ComponentWritePolicy.IsTracked.get -> bool
-[KILNX001]Kiln.ComponentWritePolicy.IsWritable.get -> bool
-[KILNX001]Kiln.ComponentWritePolicy.Reason.get -> Kiln.WriteReason
-[KILNX001]Kiln.ComponentWritePolicy.Size.get -> int
-[KILNX001]Kiln.ComponentWritePolicy.Status.get -> Kiln.ExchangeStatus
-[KILNX001]Kiln.ComponentWritePolicy.Text.get -> string!
-[KILNX001]Kiln.ComponentWritePolicy.TrackingKnown.get -> bool
-[KILNX001]Kiln.ExchangeBytesResult
-[KILNX001]Kiln.ExchangeBytesResult.ExchangeBytesResult() -> void
-[KILNX001]Kiln.ExchangeBytesResult.Flags.get -> Kiln.ExchangeFlags
-[KILNX001]Kiln.ExchangeBytesResult.HoldTime.get -> System.TimeSpan
-[KILNX001]Kiln.ExchangeBytesResult.IsOk.get -> bool
-[KILNX001]Kiln.ExchangeBytesResult.Reason.get -> Kiln.WriteReason
-[KILNX001]Kiln.ExchangeBytesResult.Status.get -> Kiln.ExchangeStatus
-[KILNX001]Kiln.ExchangeBytesResult.Written.get -> bool
-[KILNX001]Kiln.ExchangeFlags
-[KILNX001]Kiln.ExchangeFlags.Confirmed = 4 -> Kiln.ExchangeFlags
-[KILNX001]Kiln.ExchangeFlags.EventQueued = 32 -> Kiln.ExchangeFlags
-[KILNX001]Kiln.ExchangeFlags.None = 0 -> Kiln.ExchangeFlags
-[KILNX001]Kiln.ExchangeFlags.NoOp = 2 -> Kiln.ExchangeFlags
-[KILNX001]Kiln.ExchangeFlags.RolledBack = 8 -> Kiln.ExchangeFlags
-[KILNX001]Kiln.ExchangeFlags.TargetLatched = 16 -> Kiln.ExchangeFlags
-[KILNX001]Kiln.ExchangeFlags.Written = 1 -> Kiln.ExchangeFlags
-[KILNX001]Kiln.ExchangeResult<T>
-[KILNX001]Kiln.ExchangeResult<T>.Current.get -> T
-[KILNX001]Kiln.ExchangeResult<T>.ExchangeResult() -> void
-[KILNX001]Kiln.ExchangeResult<T>.Flags.get -> Kiln.ExchangeFlags
-[KILNX001]Kiln.ExchangeResult<T>.HoldTime.get -> System.TimeSpan
-[KILNX001]Kiln.ExchangeResult<T>.IsOk.get -> bool
-[KILNX001]Kiln.ExchangeResult<T>.Reason.get -> Kiln.WriteReason
-[KILNX001]Kiln.ExchangeResult<T>.Status.get -> Kiln.ExchangeStatus
-[KILNX001]Kiln.ExchangeResult<T>.Written.get -> bool
-[KILNX001]Kiln.ExchangeStatus
-[KILNX001]Kiln.ExchangeStatus.Absent = 1 -> Kiln.ExchangeStatus
-[KILNX001]Kiln.ExchangeStatus.Busy = 5 -> Kiln.ExchangeStatus
-[KILNX001]Kiln.ExchangeStatus.Conflict = 7 -> Kiln.ExchangeStatus
-[KILNX001]Kiln.ExchangeStatus.NotWritable = 8 -> Kiln.ExchangeStatus
-[KILNX001]Kiln.ExchangeStatus.Ok = 0 -> Kiln.ExchangeStatus
-[KILNX001]Kiln.ExchangeStatus.Stale = 2 -> Kiln.ExchangeStatus
-[KILNX001]Kiln.ExchangeStatus.Unavailable = 4 -> Kiln.ExchangeStatus
-[KILNX001]Kiln.ExchangeStatus.Uncertain = 9 -> Kiln.ExchangeStatus
-[KILNX001]Kiln.ExchangeStatus.Unreadable = 3 -> Kiln.ExchangeStatus
-[KILNX001]Kiln.WriteReason
-[KILNX001]Kiln.WriteReason.Compare = 16 -> Kiln.WriteReason
-[KILNX001]Kiln.WriteReason.EventsFull = 12 -> Kiln.WriteReason
-[KILNX001]Kiln.WriteReason.Fault = 17 -> Kiln.WriteReason
-[KILNX001]Kiln.WriteReason.Gate = 11 -> Kiln.WriteReason
-[KILNX001]Kiln.WriteReason.InFrame = 10 -> Kiln.WriteReason
-[KILNX001]Kiln.WriteReason.None = 0 -> Kiln.WriteReason
-[KILNX001]Kiln.WriteReason.NoProfile = 2 -> Kiln.WriteReason
-[KILNX001]Kiln.WriteReason.NotOwnersRef = 19 -> Kiln.WriteReason
-[KILNX001]Kiln.WriteReason.NotPlain = 7 -> Kiln.WriteReason
-[KILNX001]Kiln.WriteReason.NotServerWorld = 1 -> Kiln.WriteReason
-[KILNX001]Kiln.WriteReason.NoWorld = 3 -> Kiln.WriteReason
-[KILNX001]Kiln.WriteReason.OverBudget = 9 -> Kiln.WriteReason
-[KILNX001]Kiln.WriteReason.OwnerRetired = 14 -> Kiln.WriteReason
-[KILNX001]Kiln.WriteReason.Readback = 18 -> Kiln.WriteReason
-[KILNX001]Kiln.WriteReason.Ref = 15 -> Kiln.WriteReason
-[KILNX001]Kiln.WriteReason.RetireRace = 20 -> Kiln.WriteReason
-[KILNX001]Kiln.WriteReason.Size = 8 -> Kiln.WriteReason
-[KILNX001]Kiln.WriteReason.TargetLatched = 13 -> Kiln.WriteReason
-[KILNX001]Kiln.WriteReason.Tracked = 5 -> Kiln.WriteReason
-[KILNX001]Kiln.WriteReason.TrackingUnknown = 6 -> Kiln.WriteReason
-[KILNX001]Kiln.WriteReason.Unregistered = 4 -> Kiln.WriteReason
-[KILNX001]override Kiln.ComponentWritePolicy.ToString() -> string!
-[KILNX001]override Kiln.ExchangeBytesResult.ToString() -> string!
-[KILNX001]override Kiln.ExchangeResult<T>.ToString() -> string!
-[KILNX001]static Kiln.WorldConcurrent.CanWrite.get -> bool
-[KILNX001]static Kiln.WorldConcurrent.TryCompareExchangeBytes(Kiln.ConcurrentEntity entity, string! component, System.ReadOnlySpan<byte> expected, System.ReadOnlySpan<byte> desired, System.ReadOnlySpan<byte> mask = default(System.ReadOnlySpan<byte>), System.Span<byte> current = default(System.Span<byte>)) -> Kiln.ExchangeBytesResult
-[KILNX001]static Kiln.WorldConcurrent.TryCompareExchange<T>(Kiln.ConcurrentEntity entity, string! component, in T expected, in T desired) -> Kiln.ExchangeResult<T>
-[KILNX001]static Kiln.WorldConcurrent.WritePolicy(string! component, Kiln.WorldKind world = Kiln.WorldKind.Server) -> Kiln.ComponentWritePolicy
+[KILNX003]Kiln.ComponentSet
+[KILNX003]Kiln.ComponentSet.ComponentSet(params string![]! components) -> void
+[KILNX003]Kiln.ComponentSet.Count.get -> int
+[KILNX003]Kiln.ComponentSet.this[int index].get -> string!
+[KILNX003]Kiln.ConcurrentCopy
+[KILNX003]Kiln.ConcurrentCopy.ConcurrentCopy() -> void
+[KILNX003]Kiln.ConcurrentCopy.Required.get -> int
+[KILNX003]Kiln.ConcurrentCopy.Status.get -> Kiln.ReadStatus
+[KILNX003]Kiln.ConcurrentCopy.Written.get -> int
+[KILNX003]Kiln.ConcurrentEntity
+[KILNX003]Kiln.ConcurrentEntity.ConcurrentEntity() -> void
+[KILNX003]Kiln.ConcurrentEntity.Equals(Kiln.ConcurrentEntity other) -> bool
+[KILNX003]Kiln.ConcurrentEntity.Generation.get -> uint
+[KILNX003]Kiln.ConcurrentEntity.Id.get -> Kiln.EntityId
+[KILNX003]Kiln.ConcurrentEntity.IsNone.get -> bool
+[KILNX003]Kiln.ConcurrentEntity.Session.get -> ulong
+[KILNX003]Kiln.ConcurrentEntity.World.get -> Kiln.WorldKind
+[KILNX003]Kiln.ConcurrentQueryResult
+[KILNX003]Kiln.ConcurrentQueryResult.ConcurrentQueryResult() -> void
+[KILNX003]Kiln.ConcurrentQueryResult.Count.get -> int
+[KILNX003]Kiln.ConcurrentQueryResult.Required.get -> int
+[KILNX003]Kiln.ConcurrentQueryResult.Status.get -> Kiln.ReadStatus
+[KILNX003]Kiln.ConcurrentRead<T>
+[KILNX003]Kiln.ConcurrentRead<T>.ConcurrentRead() -> void
+[KILNX003]Kiln.ConcurrentRead<T>.IsOk.get -> bool
+[KILNX003]Kiln.ConcurrentRead<T>.Status.get -> Kiln.ReadStatus
+[KILNX003]Kiln.ConcurrentRead<T>.Value.get -> T
+[KILNX003]Kiln.ConcurrentSnapshot
+[KILNX003]Kiln.ConcurrentSnapshot.Bytes(int index) -> System.ReadOnlySpan<byte>
+[KILNX003]Kiln.ConcurrentSnapshot.Count.get -> int
+[KILNX003]Kiln.ConcurrentSnapshot.Status.get -> Kiln.ReadStatus
+[KILNX003]Kiln.ConcurrentSnapshot.StatusOf(int index) -> Kiln.ReadStatus
+[KILNX003]Kiln.ConcurrentSnapshot.TryGet<T>(int index, out T value) -> bool
+[KILNX003]Kiln.EntityQuery
+[KILNX003]Kiln.EntityQuery.Center.get -> Kiln.WorldPosition?
+[KILNX003]Kiln.EntityQuery.Center.init -> void
+[KILNX003]Kiln.EntityQuery.Components.get -> System.Collections.Generic.IReadOnlyList<string!>!
+[KILNX003]Kiln.EntityQuery.EntityQuery() -> void
+[KILNX003]Kiln.EntityQuery.EntityQuery(Kiln.WorldKind world, params string![]! components) -> void
+[KILNX003]Kiln.EntityQuery.Mode.get -> Kiln.ReadMode
+[KILNX003]Kiln.EntityQuery.Mode.init -> void
+[KILNX003]Kiln.EntityQuery.Radius.get -> double
+[KILNX003]Kiln.EntityQuery.Radius.init -> void
+[KILNX003]Kiln.EntityQuery.World.get -> Kiln.WorldKind
+[KILNX003]Kiln.ReadMode
+[KILNX003]Kiln.ReadMode.FrameQuiet = 1 -> Kiln.ReadMode
+[KILNX003]Kiln.ReadMode.Stable = 0 -> Kiln.ReadMode
+[KILNX003]Kiln.ReadStatus
+[KILNX003]Kiln.ReadStatus.Absent = 1 -> Kiln.ReadStatus
+[KILNX003]Kiln.ReadStatus.Busy = 5 -> Kiln.ReadStatus
+[KILNX003]Kiln.ReadStatus.Changed = 7 -> Kiln.ReadStatus
+[KILNX003]Kiln.ReadStatus.Ok = 0 -> Kiln.ReadStatus
+[KILNX003]Kiln.ReadStatus.SizeMismatch = 9 -> Kiln.ReadStatus
+[KILNX003]Kiln.ReadStatus.Stale = 2 -> Kiln.ReadStatus
+[KILNX003]Kiln.ReadStatus.TooSmall = 8 -> Kiln.ReadStatus
+[KILNX003]Kiln.ReadStatus.Unavailable = 4 -> Kiln.ReadStatus
+[KILNX003]Kiln.ReadStatus.Unreadable = 3 -> Kiln.ReadStatus
+[KILNX003]Kiln.ReadStatus.Unsupported = 6 -> Kiln.ReadStatus
+[KILNX003]Kiln.WorldConcurrent
+[KILNX003]const Kiln.WorldConcurrent.Capability = "world.ecs_read" -> string!
+[KILNX003]override Kiln.ConcurrentEntity.Equals(object? obj) -> bool
+[KILNX003]override Kiln.ConcurrentEntity.GetHashCode() -> int
+[KILNX003]override Kiln.ConcurrentEntity.ToString() -> string!
+[KILNX003]override Kiln.ConcurrentRead<T>.ToString() -> string!
+[KILNX003]static Kiln.ConcurrentEntity.operator !=(Kiln.ConcurrentEntity left, Kiln.ConcurrentEntity right) -> bool
+[KILNX003]static Kiln.ConcurrentEntity.operator ==(Kiln.ConcurrentEntity left, Kiln.ConcurrentEntity right) -> bool
+[KILNX003]static Kiln.WorldConcurrent.IsAvailable.get -> bool
+[KILNX003]static Kiln.WorldConcurrent.IsPresent(Kiln.WorldKind world) -> bool
+[KILNX003]static Kiln.WorldConcurrent.Open(Kiln.EntityId id, Kiln.WorldKind world = Kiln.WorldKind.Server) -> Kiln.ConcurrentRead<Kiln.ConcurrentEntity>
+[KILNX003]static Kiln.WorldConcurrent.OrOnTick<T>(Kiln.KilnTaskContext! ctx, System.Func<T>! offTick, System.Func<T>! onTick) -> System.Threading.Tasks.Task<T>!
+[KILNX003]static Kiln.WorldConcurrent.Query(in Kiln.EntityQuery query, System.Span<Kiln.ConcurrentEntity> into) -> Kiln.ConcurrentQueryResult
+[KILNX003]static Kiln.WorldConcurrent.Read<T>(Kiln.ConcurrentEntity entity, string! component, Kiln.ReadMode mode = Kiln.ReadMode.Stable) -> Kiln.ConcurrentRead<T>
+[KILNX003]static Kiln.WorldConcurrent.ReadBytes(Kiln.ConcurrentEntity entity, string! component, System.Span<byte> into, Kiln.ReadMode mode = Kiln.ReadMode.Stable) -> Kiln.ConcurrentCopy
+[KILNX003]static Kiln.WorldConcurrent.ReadMany(Kiln.ConcurrentEntity entity, Kiln.ComponentSet! components, Kiln.ReadMode mode = Kiln.ReadMode.Stable) -> Kiln.ConcurrentSnapshot!
+[KILNX003]static Kiln.WorldConcurrent.Template(Kiln.ConcurrentEntity entity) -> Kiln.ConcurrentRead<System.Guid>
+[KILNX003]static Kiln.WorldConcurrent.Validate(Kiln.ConcurrentEntity entity) -> Kiln.ReadStatus
+[KILNX003]const Kiln.WorldConcurrent.WriteCapability = "world.ecs_write" -> string!
+[KILNX003]Kiln.ComponentExchangedEvent
+[KILNX003]Kiln.ComponentExchangedEvent.ComponentExchangedEvent(Kiln.EntityId entity, uint generation, uint componentHash, ulong session, ulong step, string? mod) -> void
+[KILNX003]Kiln.ComponentExchangedEvent.ComponentHash.get -> uint
+[KILNX003]Kiln.ComponentExchangedEvent.Entity.get -> Kiln.EntityId
+[KILNX003]Kiln.ComponentExchangedEvent.Generation.get -> uint
+[KILNX003]Kiln.ComponentExchangedEvent.Involves(Kiln.EntityId entity) -> bool
+[KILNX003]Kiln.ComponentExchangedEvent.Is(string! component) -> bool
+[KILNX003]Kiln.ComponentExchangedEvent.Mod.get -> string?
+[KILNX003]Kiln.ComponentExchangedEvent.Session.get -> ulong
+[KILNX003]Kiln.ComponentExchangedEvent.Step.get -> ulong
+[KILNX003]Kiln.ComponentExchangedEvent.World.get -> Kiln.WorldKind
+[KILNX003]Kiln.ComponentWritePolicy
+[KILNX003]Kiln.ComponentWritePolicy.Budget.get -> int
+[KILNX003]Kiln.ComponentWritePolicy.Component.get -> string!
+[KILNX003]Kiln.ComponentWritePolicy.ComponentWritePolicy() -> void
+[KILNX003]Kiln.ComponentWritePolicy.IsPlain.get -> bool
+[KILNX003]Kiln.ComponentWritePolicy.IsTracked.get -> bool
+[KILNX003]Kiln.ComponentWritePolicy.IsWritable.get -> bool
+[KILNX003]Kiln.ComponentWritePolicy.Reason.get -> Kiln.WriteReason
+[KILNX003]Kiln.ComponentWritePolicy.Size.get -> int
+[KILNX003]Kiln.ComponentWritePolicy.Status.get -> Kiln.ExchangeStatus
+[KILNX003]Kiln.ComponentWritePolicy.Text.get -> string!
+[KILNX003]Kiln.ComponentWritePolicy.TrackingKnown.get -> bool
+[KILNX003]Kiln.ExchangeBytesResult
+[KILNX003]Kiln.ExchangeBytesResult.ExchangeBytesResult() -> void
+[KILNX003]Kiln.ExchangeBytesResult.Flags.get -> Kiln.ExchangeFlags
+[KILNX003]Kiln.ExchangeBytesResult.HoldTime.get -> System.TimeSpan
+[KILNX003]Kiln.ExchangeBytesResult.IsOk.get -> bool
+[KILNX003]Kiln.ExchangeBytesResult.Reason.get -> Kiln.WriteReason
+[KILNX003]Kiln.ExchangeBytesResult.Status.get -> Kiln.ExchangeStatus
+[KILNX003]Kiln.ExchangeBytesResult.Written.get -> bool
+[KILNX003]Kiln.ExchangeFlags
+[KILNX003]Kiln.ExchangeFlags.Confirmed = 4 -> Kiln.ExchangeFlags
+[KILNX003]Kiln.ExchangeFlags.EventQueued = 32 -> Kiln.ExchangeFlags
+[KILNX003]Kiln.ExchangeFlags.None = 0 -> Kiln.ExchangeFlags
+[KILNX003]Kiln.ExchangeFlags.NoOp = 2 -> Kiln.ExchangeFlags
+[KILNX003]Kiln.ExchangeFlags.RolledBack = 8 -> Kiln.ExchangeFlags
+[KILNX003]Kiln.ExchangeFlags.TargetLatched = 16 -> Kiln.ExchangeFlags
+[KILNX003]Kiln.ExchangeFlags.Written = 1 -> Kiln.ExchangeFlags
+[KILNX003]Kiln.ExchangeResult<T>
+[KILNX003]Kiln.ExchangeResult<T>.Current.get -> T
+[KILNX003]Kiln.ExchangeResult<T>.ExchangeResult() -> void
+[KILNX003]Kiln.ExchangeResult<T>.Flags.get -> Kiln.ExchangeFlags
+[KILNX003]Kiln.ExchangeResult<T>.HoldTime.get -> System.TimeSpan
+[KILNX003]Kiln.ExchangeResult<T>.IsOk.get -> bool
+[KILNX003]Kiln.ExchangeResult<T>.Reason.get -> Kiln.WriteReason
+[KILNX003]Kiln.ExchangeResult<T>.Status.get -> Kiln.ExchangeStatus
+[KILNX003]Kiln.ExchangeResult<T>.Written.get -> bool
+[KILNX003]Kiln.ExchangeStatus
+[KILNX003]Kiln.ExchangeStatus.Absent = 1 -> Kiln.ExchangeStatus
+[KILNX003]Kiln.ExchangeStatus.Busy = 5 -> Kiln.ExchangeStatus
+[KILNX003]Kiln.ExchangeStatus.Conflict = 7 -> Kiln.ExchangeStatus
+[KILNX003]Kiln.ExchangeStatus.NotWritable = 8 -> Kiln.ExchangeStatus
+[KILNX003]Kiln.ExchangeStatus.Ok = 0 -> Kiln.ExchangeStatus
+[KILNX003]Kiln.ExchangeStatus.Stale = 2 -> Kiln.ExchangeStatus
+[KILNX003]Kiln.ExchangeStatus.Unavailable = 4 -> Kiln.ExchangeStatus
+[KILNX003]Kiln.ExchangeStatus.Uncertain = 9 -> Kiln.ExchangeStatus
+[KILNX003]Kiln.ExchangeStatus.Unreadable = 3 -> Kiln.ExchangeStatus
+[KILNX003]Kiln.WriteReason
+[KILNX003]Kiln.WriteReason.Compare = 16 -> Kiln.WriteReason
+[KILNX003]Kiln.WriteReason.EventsFull = 12 -> Kiln.WriteReason
+[KILNX003]Kiln.WriteReason.Fault = 17 -> Kiln.WriteReason
+[KILNX003]Kiln.WriteReason.Gate = 11 -> Kiln.WriteReason
+[KILNX003]Kiln.WriteReason.InFrame = 10 -> Kiln.WriteReason
+[KILNX003]Kiln.WriteReason.None = 0 -> Kiln.WriteReason
+[KILNX003]Kiln.WriteReason.NoProfile = 2 -> Kiln.WriteReason
+[KILNX003]Kiln.WriteReason.NotOwnersRef = 19 -> Kiln.WriteReason
+[KILNX003]Kiln.WriteReason.NotPlain = 7 -> Kiln.WriteReason
+[KILNX003]Kiln.WriteReason.NotServerWorld = 1 -> Kiln.WriteReason
+[KILNX003]Kiln.WriteReason.NoWorld = 3 -> Kiln.WriteReason
+[KILNX003]Kiln.WriteReason.OverBudget = 9 -> Kiln.WriteReason
+[KILNX003]Kiln.WriteReason.OwnerRetired = 14 -> Kiln.WriteReason
+[KILNX003]Kiln.WriteReason.Readback = 18 -> Kiln.WriteReason
+[KILNX003]Kiln.WriteReason.Ref = 15 -> Kiln.WriteReason
+[KILNX003]Kiln.WriteReason.RetireRace = 20 -> Kiln.WriteReason
+[KILNX003]Kiln.WriteReason.Size = 8 -> Kiln.WriteReason
+[KILNX003]Kiln.WriteReason.TargetLatched = 13 -> Kiln.WriteReason
+[KILNX003]Kiln.WriteReason.Tracked = 5 -> Kiln.WriteReason
+[KILNX003]Kiln.WriteReason.TrackingUnknown = 6 -> Kiln.WriteReason
+[KILNX003]Kiln.WriteReason.Unregistered = 4 -> Kiln.WriteReason
+[KILNX003]override Kiln.ComponentWritePolicy.ToString() -> string!
+[KILNX003]override Kiln.ExchangeBytesResult.ToString() -> string!
+[KILNX003]override Kiln.ExchangeResult<T>.ToString() -> string!
+[KILNX003]static Kiln.WorldConcurrent.CanWrite.get -> bool
+[KILNX003]static Kiln.WorldConcurrent.TryCompareExchangeBytes(Kiln.ConcurrentEntity entity, string! component, System.ReadOnlySpan<byte> expected, System.ReadOnlySpan<byte> desired, System.ReadOnlySpan<byte> mask = default(System.ReadOnlySpan<byte>), System.Span<byte> current = default(System.Span<byte>)) -> Kiln.ExchangeBytesResult
+[KILNX003]static Kiln.WorldConcurrent.TryCompareExchange<T>(Kiln.ConcurrentEntity entity, string! component, in T expected, in T desired) -> Kiln.ExchangeResult<T>
+[KILNX003]static Kiln.WorldConcurrent.WritePolicy(string! component, Kiln.WorldKind world = Kiln.WorldKind.Server) -> Kiln.ComponentWritePolicy

@@ -174,7 +174,7 @@ public sealed unsafe class FakeWorld
     /// <summary>The next <paramref name="value"/> frame-quiet reads from tasks (<see cref="ReadMode.FrameQuiet"/>) answer
     /// <see cref="ReadStatus.Busy"/>, as when a server frame runs during the read; then they read again. The kit's reads
     /// never meet a frame otherwise: a read from a worker runs between the harness's steps. Default 0.</summary>
-    [System.Diagnostics.CodeAnalysis.Experimental("KILNX001", UrlFormat = "https://github.com/frostdev-ops/kiln/blob/main/docs/kiln/services/world.md#world-reads-from-task-threads")]
+    [System.Diagnostics.CodeAnalysis.Experimental("KILNX003", UrlFormat = "https://github.com/frostdev-ops/kiln/blob/main/docs/kiln/services/world.md#world-reads-from-task-threads")]
     public int BusyReads
     {
         get
@@ -193,7 +193,7 @@ public sealed unsafe class FakeWorld
     /// <summary>The next <paramref name="value"/> compare-exchanges from tasks (<c>WorldConcurrent.TryCompareExchange</c>)
     /// meet the engine's gate taken and answer <see cref="ExchangeStatus.Busy"/>, as when a server frame runs; each such
     /// refusal latches the mod for the rest of the step, as the gate does. Default 0.</summary>
-    [System.Diagnostics.CodeAnalysis.Experimental("KILNX001", UrlFormat = "https://github.com/frostdev-ops/kiln/blob/main/docs/kiln/services/world.md#world-writes-from-task-threads")]
+    [System.Diagnostics.CodeAnalysis.Experimental("KILNX003", UrlFormat = "https://github.com/frostdev-ops/kiln/blob/main/docs/kiln/services/world.md#world-writes-from-task-threads")]
     public int BusyWrites
     {
         get

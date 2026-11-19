@@ -561,8 +561,9 @@ compares: `world ecs-read check: ...` lines in `kiln.log`, one `PASS` or `FAIL` 
 
 `WorldConcurrent` (Kiln.World) is the C# face of these members, for code in a Kiln task (the guide:
 [../modding/tasks.md](../modding/tasks.md#reading-the-world-from-a-task)). It is
-`[Experimental("KILNX001")]`: opt in with `<NoWarn>$(NoWarn);KILNX001</NoWarn>` in the mod's project. It can change
-until it leaves experimental, and that waits for the in-game check above to pass on both exact builds.
+`[Experimental("KILNX003")]`: opt in with `<NoWarn>$(NoWarn);KILNX003</NoWarn>` in the mod's project
+([KILNX003](../modding/analyzers.md#kilnx003); `KILNX001`, the lab members' id, does not opt in). It can change until it
+leaves experimental, and that waits for the in-game check above to pass on both exact builds.
 
 ```csharp
 // CurrentTransform starts with x, y, z as 32.32 fixed-point metres (layouts depend on the game build)
@@ -755,7 +756,7 @@ The write protocol is adapted from ShroudForge's `write_entity_components.cpp` (
 
 #### From C#: compare-exchange (experimental)
 
-`WorldConcurrent` (Kiln.World) has the C# face of these members, `[Experimental("KILNX001")]` like the reads. A task
+`WorldConcurrent` (Kiln.World) has the C# face of these members, `[Experimental("KILNX003")]` like the reads. A task
 reads a component, works out the new value off the tick, and writes it only if nothing changed it meanwhile:
 
 ```csharp

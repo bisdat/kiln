@@ -10,8 +10,8 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <IsPackable>false</IsPackable>
     <!-- its capacity fake uses 17b's groundwork types ([Experimental("KILNX028")]); its kiln.world fakes the task-thread
-         world reads and names their types (KILNX001) -->
-    <NoWarn>$(NoWarn);KILNX028;KILNX001</NoWarn>
+         world reads and writes and names their types (KILNX003) -->
+    <NoWarn>$(NoWarn);KILNX028;KILNX003</NoWarn>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Kiln.Api/Kiln.Api.csproj" />

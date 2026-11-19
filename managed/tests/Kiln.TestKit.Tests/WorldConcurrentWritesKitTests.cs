@@ -7,7 +7,7 @@
 using TkEvents;
 using Xunit;
 
-#pragma warning disable KILNX001
+#pragma warning disable KILNX003
 
 namespace Kiln.TestKit.Tests;
 

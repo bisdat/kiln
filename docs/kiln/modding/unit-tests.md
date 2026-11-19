@@ -83,7 +83,9 @@ hops back to the tick (`ToTick`, `OnTick`, `PostToTick`) run in the next `Step`,
 all of them have ended, and returns the steps it took. A task that never ends fails the test with a `TimeoutException`
 naming it and what it waits for (after 10 s or 1000 steps by default; `Settle(maxSteps, timeout)` sets both).
 `kiln.Tasks.Live` counts the tasks that have not ended. The pool's per-mod caps and per-step budgets are not modelled.
-A task's world reads (`WorldConcurrent`) read the fake world's entities, between the harness's steps. A container made
+A task's world reads (`WorldConcurrent`) read the fake world's entities, between the harness's steps. They are
+experimental: a test project that calls them opts in with `<NoWarn>$(NoWarn);KILNX003</NoWarn>`, as the mod does
+([tasks.md](tasks.md#project-setup); the template has the line as a comment). A container made
 with `kiln.Items.AddContainer` carries the game's `Inventory` component, so a query for it finds the container.
 `kiln.Capabilities.Override("world.ecs_read", false)` is a game build with no exact engine profile: every read is
 `Unavailable` and `OrOnTick` takes the tick path. `kiln.Entities.BusyReads = n` makes the next `n` frame-quiet reads

@@ -16,7 +16,7 @@ public sealed class TaskGatedTests
     public async Task Every_read_after_ConfigureAwait_false_is_reported()
     {
         var d = await Run(A, """
-            #pragma warning disable KILNX001
+            #pragma warning disable KILNX003
             public sealed class M : Mod
             {
                 public override void OnLoad()
@@ -48,7 +48,7 @@ public sealed class TaskGatedTests
     public async Task ConfigureAwait_false_on_some_paths_is_reported()
     {
         var d = await Run(A, """
-            #pragma warning disable KILNX001
+            #pragma warning disable KILNX003
             public sealed class M : Mod
             {
                 public override void OnLoad()
@@ -70,7 +70,7 @@ public sealed class TaskGatedTests
     public async Task Task_Run_and_threads_of_the_mods_own_are_reported()
     {
         var d = await Run(A, """
-            #pragma warning disable KILNX001
+            #pragma warning disable KILNX003
             public sealed class M : Mod
             {
                 public override void OnLoad()
@@ -96,7 +96,7 @@ public sealed class TaskGatedTests
     public async Task Inside_the_task_on_the_tick_and_after_a_hop_back_are_not_reported()
     {
         var d = await Run(A, """
-            #pragma warning disable KILNX001
+            #pragma warning disable KILNX003
             public sealed class M : Mod
             {
                 public override void OnLoad()
@@ -142,7 +142,7 @@ public sealed class TaskGatedTests
     public async Task ConfigureAwait_false_coming_round_a_loop_is_reported()
     {
         var d = await Run(A, """
-            #pragma warning disable KILNX001
+            #pragma warning disable KILNX003
             public sealed class M : Mod
             {
                 public override void OnLoad()
@@ -197,7 +197,7 @@ public sealed class TaskGatedTests
     public async Task Catch_and_finally_after_ConfigureAwait_false_in_the_try_are_reported()
     {
         var d = await Run(A, """
-            #pragma warning disable KILNX001
+            #pragma warning disable KILNX003
             public sealed class M : Mod
             {
                 public override void OnLoad()
@@ -228,7 +228,7 @@ public sealed class TaskGatedTests
     public async Task OrOnTick_off_tick_delegate_runs_where_it_is_called()
     {
         var d = await Run(A, """
-            #pragma warning disable KILNX001
+            #pragma warning disable KILNX003
             public sealed class M : Mod
             {
                 public override void OnLoad()
@@ -260,7 +260,7 @@ public sealed class TaskGatedTests
     public async Task Await_foreach_and_await_using_with_ConfigureAwait_false_are_reported()
     {
         var d = await Run(A, """
-            #pragma warning disable KILNX001
+            #pragma warning disable KILNX003
             public sealed class M : Mod
             {
                 private static async IAsyncEnumerable<int> Seq() { await Task.Yield(); yield return 1; }
@@ -301,7 +301,7 @@ public sealed class TaskGatedTests
     public async Task A_helper_after_ConfigureAwait_false_is_told_to_drop_it()
     {
         var d = await Run(A, """
-            #pragma warning disable KILNX001
+            #pragma warning disable KILNX003
             public sealed class M : Mod
             {
                 public override void OnLoad() { }
@@ -321,7 +321,7 @@ public sealed class TaskGatedTests
     public async Task Any_thread_members_lookalikes_and_unknown_code_are_not_reported()
     {
         var d = await Run(A, """
-            #pragma warning disable KILNX001
+            #pragma warning disable KILNX003
             namespace Mine { public static class WorldConcurrent { public static int Open(int id) => id; } }
             public sealed class M : Mod
             {

@@ -434,6 +434,7 @@ The core's row for Kiln's task pool ([tasks.md](tasks.md)), and kiln.engine's ro
 | `engine.ecs_write` | native, static | kiln.engine, with `engine.profile` | as `engine.ecs_read`, and the profile's original native-thread Scene write gate is enabled (`symbol-missing` "the profile has no enabled native-thread Scene write gate", or `engine.profile`'s reason) |
 
 A mod asks `world.ecs_read` (`WorldConcurrent.IsAvailable`) for the task-thread world reads and `world.ecs_write`
-(`WorldConcurrent.CanWrite`) for the compare-exchange writes, not the `engine.*` rows: those say what the profile
+(`WorldConcurrent.CanWrite`; both experimental, opt in with [KILNX003](../modding/analyzers.md#kilnx003)) for the
+compare-exchange writes, not the `engine.*` rows: those say what the profile
 carries, the `world.*` rows say whether kiln.world reads or writes with it in this process (both are among the
 kiln.world rows above).

@@ -19,9 +19,9 @@ A mod that runs tasks says so in its project file (`dotnet new kiln-mod` has the
 <PropertyGroup>
   <!-- Kiln's task pool: Kiln does not load the mod where it is off -->
   <KilnFeatures>tasks.pool</KilnFeatures>
-  <!-- the task-thread world reads (WorldConcurrent) are in Kiln.World, and experimental -->
+  <!-- the task-thread world reads and writes (WorldConcurrent) are in Kiln.World, and experimental -->
   <KilnServices>World;Items;Chat</KilnServices>
-  <NoWarn>$(NoWarn);KILNX001</NoWarn>
+  <NoWarn>$(NoWarn);KILNX003</NoWarn>
 </PropertyGroup>
 ```
 
@@ -31,14 +31,16 @@ A mod that runs tasks says so in its project file (`dotnet new kiln-mod` has the
   tasks too asks `Capabilities.Is("tasks.pool")` before it starts one instead.
 - **`<KilnServices>`** lists `World` among the mod's services when its tasks read the world (FetchNearby's list is
   `World;Items;Chat`).
-- **`KILNX001`** is the opt-in for `WorldConcurrent`, which is experimental. A mod without world reads leaves it out.
+- **`KILNX003`** is the opt-in for `WorldConcurrent`, which is experimental ([KILNX003](analyzers.md#kilnx003)). A
+  mod without world reads or writes leaves it out. `KILNX001` is a different id (lab and test members) and does not opt
+  in to `WorldConcurrent`.
 
 **The test project** (`dotnet new kiln-unit-test`, [unit-tests.md](unit-tests.md)) needs the same opt-in when its
 tests call `WorldConcurrent`, as the example's do (`WorldConcurrent.IsAvailable`). Without it they don't compile
-(`error KILNX001`). The template has the line as a comment:
+(`error KILNX003`). The template has the line as a comment:
 
 ```xml
-<NoWarn>$(NoWarn);KILNX001</NoWarn>
+<NoWarn>$(NoWarn);KILNX003</NoWarn>
 ```
 
 ## When to use a task
@@ -326,8 +328,8 @@ checks the entity again around the copy, so it returns a whole value or says why
 - `TooSmall` and `Changed`: see the buffer rules below.
 - `Busy` and `Unsupported`: see the read modes below.
 
-An ordinary miss never throws. The reads are experimental (`KILNX001`): opt in with
-`<NoWarn>$(NoWarn);KILNX001</NoWarn>` in the mod's project, and in its test project when the tests call them
+An ordinary miss never throws. The reads are experimental (`KILNX003`): opt in with
+`<NoWarn>$(NoWarn);KILNX003</NoWarn>` in the mod's project, and in its test project when the tests call them
 ([Project setup](#project-setup)). The full reference is
 [world.md](../services/world.md#from-c-worldconcurrent-experimental).
 
@@ -486,7 +488,7 @@ The [TestKit](unit-tests.md) runs a mod's tasks under `dotnet test`:
 
 The example's tests are in `managed/tests/Kiln.TestKit.Tests/FetchNearbyTests.cs`, with their helpers (`Start`,
 `Finish`, `Said`, `Wood`, `ChatOf`). The first one, without its last check (its `WorldConcurrent` line is why the
-test project opts in to `KILNX001`):
+test project opts in to `KILNX003`):
 
 ```csharp
 [Theory]

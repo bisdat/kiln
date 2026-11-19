@@ -7,7 +7,7 @@
 using Xunit;
 
 #pragma warning disable xUnit1031, xUnit1051  // the test thread is the mod's own thread; task bodies stand in for mod code
-#pragma warning disable KILNX001
+#pragma warning disable KILNX003
 
 namespace Kiln.Api.Tests;
 

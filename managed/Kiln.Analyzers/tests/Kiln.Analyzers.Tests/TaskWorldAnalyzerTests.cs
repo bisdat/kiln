@@ -205,7 +205,7 @@ public sealed class TaskWorldAnalyzerTests
     public async Task A_task_from_a_command_handler_hops_to_the_server_tick_where_a_compare_exchange_is_reported()
     {
         var d = await Run(Blocking, """
-            #pragma warning disable KILNX001
+            #pragma warning disable KILNX003
             public sealed class M : Mod
             {
                 private ConcurrentEntity _e;
@@ -241,7 +241,7 @@ public sealed class TaskWorldAnalyzerTests
     public async Task A_compare_exchange_after_a_client_hop_is_task_scope_and_not_the_server_tick()
     {
         var d = await Run(Blocking, """
-            #pragma warning disable KILNX001
+            #pragma warning disable KILNX003
             public sealed class M : Mod
             {
                 private ConcurrentEntity _e;

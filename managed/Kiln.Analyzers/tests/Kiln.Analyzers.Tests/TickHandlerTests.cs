@@ -108,7 +108,7 @@ public sealed class TickHandlerTests
     public async Task A_compare_exchange_in_tick_code_is_reported()
     {
         var d = await Run(B, """
-            #pragma warning disable KILNX001
+            #pragma warning disable KILNX003
             public sealed class M : Mod
             {
                 private ConcurrentEntity _e;
@@ -140,7 +140,7 @@ public sealed class TickHandlerTests
     public async Task A_compare_exchange_on_a_worker_is_not_reported()
     {
         var d = await Run(B, """
-            #pragma warning disable KILNX001
+            #pragma warning disable KILNX003
             public sealed class M : Mod
             {
                 private ConcurrentEntity _e;
@@ -184,7 +184,7 @@ public sealed class TickHandlerTests
     public async Task A_compare_exchange_after_ConfigureAwait_false_is_the_out_of_scope_row()
     {
         var d = await Run(B, """
-            #pragma warning disable KILNX001
+            #pragma warning disable KILNX003
             public sealed class M : Mod
             {
                 private ConcurrentEntity _e;
@@ -215,7 +215,7 @@ public sealed class TickHandlerTests
     public async Task A_compare_exchange_is_reported_in_every_kind_of_tick_code()
     {
         var d = await Run(B, """
-            #pragma warning disable KILNX001
+            #pragma warning disable KILNX003
             public sealed class M : Mod
             {
                 private ConcurrentEntity _e;
@@ -256,7 +256,7 @@ public sealed class TickHandlerTests
     public async Task A_compare_exchange_back_on_a_worker_or_in_a_stored_handler_is_not_reported()
     {
         var d = await Run(B, """
-            #pragma warning disable KILNX001
+            #pragma warning disable KILNX003
             public sealed class M : Mod
             {
                 private ConcurrentEntity _e;
@@ -286,7 +286,7 @@ public sealed class TickHandlerTests
     public async Task A_compare_exchange_in_an_async_command_after_ConfigureAwait_false_is_the_out_of_scope_row()
     {
         var d = await Run(B, """
-            #pragma warning disable KILNX001
+            #pragma warning disable KILNX003
             public sealed class M : Mod
             {
                 private ConcurrentEntity _e;

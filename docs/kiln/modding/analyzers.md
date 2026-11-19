@@ -715,10 +715,8 @@ you compile.
 
 In a mod players install, use the documented API instead; `limits.md` lists what has none yet.
 
-**The task-thread world reads.** `WorldConcurrent` and its types (Kiln.World, docs/kiln/services/world.md "From C#:
-`WorldConcurrent`") carry the same id while they are new, but they are documented API for mods and show in completion.
-Opt in the same way. They leave experimental once the in-game check of the reads (world.md) has passed on both exact game
-builds; until then their shape can still change.
+The task-thread world reads and writes (`WorldConcurrent`) are not lab members: they have their own id,
+[KILNX003](#kilnx003), and `KILNX001` does not opt in to them.
 
 <a id="kilnx002"></a>
 ## KILNX002: not yet proven in the game client
@@ -726,6 +724,30 @@ builds; until then their shape can still change.
 pass settles it). `[Experimental("KILNX002")]`; today the achievement guard (`SteamGuard`, `SteamGuardRelay`).
 
 **Fix.** Opt in the same way with `KILNX002` when you accept that; the mark goes once the client pass confirms it.
+
+<a id="kilnx003"></a>
+## KILNX003: task-thread world reads and writes
+**What.** The code uses `WorldConcurrent` or one of its types (Kiln.World): the reads from a Kiln task (`Open`, `Read`,
+`ReadMany`, `Query`, `ConcurrentEntity`, `ReadStatus` and the rest) or the compare-exchange writes
+(`TryCompareExchange`, `WritePolicy`, `ExchangeResult<T>`, `ComponentExchangedEvent` and the rest). They are
+`[Experimental("KILNX003")]`: documented API for mods that shows in completion, but new. The compiler reports the use as
+an error. In unit tests, `FakeWorld.BusyReads` and `BusyWrites` (Kiln.TestKit) carry the same id.
+
+**Since when.** 0.2.0-dev.29.18, the first release with `WorldConcurrent`. Pre-release builds of the task branch marked it
+`KILNX001`, the lab members' id: a project that opted in with `KILNX001` for it now opts in with `KILNX003` (and keeps
+`KILNX001` only if it also calls lab members).
+
+**Fix.** Opt in once in the mod's project file, and in its test project when the tests use them:
+
+```xml
+<PropertyGroup>
+  <NoWarn>$(NoWarn);KILNX003</NoWarn>
+</PropertyGroup>
+```
+
+They leave experimental once their in-game checks (services/world.md, "World reads from task threads" and "World writes
+from task threads") pass on both exact game builds; until then their shape can still change. The guide:
+[tasks.md](tasks.md#project-setup).
 
 ---
 
