@@ -859,7 +859,8 @@ fn detect_folder_at(dir: &Path, depth: usize, top_name: Option<&str>) -> Detecte
     // An XHL mod without an EML part: a plugin XHL-Core loads from the game's mods folder, never a DLL to load on its own.
     // XHL's mods since 2026-11 also carry a mod.json that only names the mod (id, name, version, no src/mod.lua): it is
     // no EML package, and the folder is still XHL-Core's plugin.
-    if crate::engine_mods::has_xhl_plugin_ini(dir) && !has_lua {
+    // (a native-plugin.ini of ShroudForge's own form is no XHL-Core plugin: engine_mods::is_xhl_plugin)
+    if crate::engine_mods::is_xhl_plugin(dir) && !has_lua {
         // XHL-Core loads every folder that holds the ini: a copy suffix, or a version in an archive's name, would make
         // a second companion beside the first
         let name = match top_name.filter(|_| depth == 0) {

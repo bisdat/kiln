@@ -454,12 +454,74 @@ public sealed class ModCatalogTests : IDisposable
         Assert.Equal("shroudforge", Assert.Single(s.Mods, m => m.Folder is { } f && ModCatalog.SamePath(f, sf)).Engine);
         Assert.Contains(s.Mods, m => m.Engine == "xhl" && m.Folder is { } f && ModCatalog.SamePath(f, xhl));
         Assert.Contains(s.Mods, m => m.Engine == "xhl" && m.Folder is { } f && ModCatalog.SamePath(f, switched));
-        // ShroudForge configured to another mods folder: the game's mods folder is XHL-Core's alone again
+        // ShroudForge configured to another mods folder: the game's mods folder is XHL-Core's alone again, and its plugins
+        // still show; this package is no XHL-Core plugin all the same (XHL-Core refuses Dll=bin/ut_native.dll, a path)
         Write("shroudforge.json", new { pid = Pid, mode = "hosted", menu = "kiln", runtime = "running", modsDir = Dir("elsewhere") });
         Directory.CreateDirectory(Path.Combine(_root, "shroudforge", "config"));
         File.WriteAllText(Path.Combine(_root, "shroudforge", "config", "modloader-config.json"), JsonSerializer.Serialize(new { paths = new { mods = Dir("elsewhere") } }));
-        Assert.Contains(Read().Mods, m => m.Engine == "xhl" && m.Folder is { } f && ModCatalog.SamePath(f, sf));
+        s = Read();
+        Assert.Contains(s.Mods, m => m.Engine == "xhl" && m.Folder is { } f && ModCatalog.SamePath(f, xhl));
+        Assert.DoesNotContain(s.Mods, m => m.Engine == "xhl" && m.Folder is { } f && ModCatalog.SamePath(f, sf));
     }
+
+    /// <summary>A minimal PE32+ DLL file with these exports (the shape of kiln-manage's <c>pe::build_test_dll</c>).</summary>
+    private static byte[] TestDll(params string[] exports)
+    {
+        var b = new byte[0x200];
+        void U16(byte[] a, int at, ushort v) => System.Buffers.Binary.BinaryPrimitives.WriteUInt16LittleEndian(a.AsSpan(at), v);
+        void U32(byte[] a, int at, uint v) => System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(a.AsSpan(at), v);
+        b[0] = (byte)'M'; b[1] = (byte)'Z'; U32(b, 0x3c, 0x80); U32(b, 0x80, 0x4550);
+        const int coff = 0x84, opt = coff + 20;
+        U16(b, coff, 0x8664); U16(b, coff + 2, 1); U16(b, coff + 16, 240); U16(b, coff + 18, 0x2022);
+        U16(b, opt, 0x20b); U32(b, opt + 108, 16);
+        const uint va = 0x1000;
+        var n = (uint)exports.Length;
+        uint funcs = va + 40, names = funcs + 4 * n, ords = names + 4 * n, strings = ords + 2 * n;
+        var str = new List<byte>(System.Text.Encoding.ASCII.GetBytes("plugin.dll\0"));
+        var dllName = strings; strings += (uint)str.Count;
+        var nameRvas = new List<uint>();
+        foreach (var e in exports) { nameRvas.Add(strings); str.AddRange(System.Text.Encoding.ASCII.GetBytes(e + "\0")); strings += (uint)e.Length + 1; }
+        var head = new byte[40]; U32(head, 12, dllName); U32(head, 16, 1); U32(head, 20, n); U32(head, 24, n); U32(head, 28, funcs); U32(head, 32, names); U32(head, 36, ords);
+        var data = new List<byte>(head);
+        for (var i = 0; i < n; i++) data.AddRange(BitConverter.GetBytes(0x2000u));
+        foreach (var r in nameRvas) data.AddRange(BitConverter.GetBytes(r));
+        for (var i = 0; i < n; i++) data.AddRange(BitConverter.GetBytes((ushort)i));
+        data.AddRange(str);
+        var size = (uint)data.Count; var raw = (size + 0x1ff) / 0x200 * 0x200;
+        while (data.Count < raw) data.Add(0);
+        var sec = opt + 240;
+        System.Text.Encoding.ASCII.GetBytes(".edata").CopyTo(b, sec); U32(b, sec + 8, size); U32(b, sec + 12, va); U32(b, sec + 16, raw); U32(b, sec + 20, 0x200); U32(b, sec + 36, 0x40000040);
+        U32(b, opt + 112, va); U32(b, opt + 116, size);
+        return [.. b, .. data];
+    }
+
+    /// <summary>inbox 92 and Smart Quick Stack: <c>native-plugin.ini</c> is ShroudForge's file too. A folder XHL-Core would not
+    /// run (a Dll value with a path, a DLL without XHL-Core's exports) is no XHL row; XHL's own plugins still are.</summary>
+    [Fact]
+    public void Only_a_folder_xhl_core_would_run_is_listed_as_an_xhl_plugin()
+    {
+        Profile([]);
+        var path = Dir("mods", "smart-quick-stack");
+        File.WriteAllText(Path.Combine(path, "mod.json"), """{"id":"smart-quick-stack","name":"Smart Quick Stack","version":"0.16.1-beta"}""");
+        File.WriteAllText(Path.Combine(path, "native-plugin.ini"), "[Plugin]\r\nEnabled=1\r\nDll=bin\\sqs.dll\r\n");
+        Directory.CreateDirectory(Path.Combine(path, "bin"));
+        File.WriteAllBytes(Path.Combine(path, "bin", "sqs.dll"), TestDll("DllMain"));
+        var plain = Dir("mods", "plain-dll-mod");
+        File.WriteAllText(Path.Combine(plain, "native-plugin.ini"), "[Plugin]\nEnabled=1\nDll=PlainMod.dll\n");
+        File.WriteAllBytes(Path.Combine(plain, "PlainMod.dll"), TestDll("DllMain", "Init"));
+        var json = Dir("mods", "XHL-Remote-Chest");
+        File.WriteAllText(Path.Combine(json, "native-plugin.ini"), "[Plugin]\nDll=XHL-Remote-Chest.dll\n");
+        File.WriteAllText(Path.Combine(json, "xhl-plugin.json"), "{}");
+        File.WriteAllBytes(Path.Combine(json, "XHL-Remote-Chest.dll"), TestDll("DllMain"));
+        var abi = Dir("mods", "XHL-Free-Climb");
+        File.WriteAllText(Path.Combine(abi, "native-plugin.ini"), "[Plugin]\nEnabled=1\nDll=XHL-Free-Climb.dll\n[Climbing]\nspeed=2\n");
+        File.WriteAllBytes(Path.Combine(abi, "XHL-Free-Climb.dll"), TestDll("XhlNativePluginQuery", "XhlNativePluginStart", "XhlNativePluginRequestStop"));
+        Assert.Equal(["XhlNativePluginQuery", "XhlNativePluginStart", "XhlNativePluginRequestStop"], ModCatalog.PeExports(Path.Combine(abi, "XHL-Free-Climb.dll")));
+        var xhlRows = Read().Mods.Where(m => m.Engine == "xhl").Select(m => LeafName(m.Folder!)).Order().ToArray();
+        Assert.Equal(["XHL-Free-Climb", "XHL-Remote-Chest"], xhlRows);
+    }
+
+    private static string LeafName(string p) => Path.GetFileName(p.TrimEnd('/', '\\'));
 
     [Fact]
     public void Shroudforge_reports_real_activation_errors_side_and_switches_not_just_the_host()

@@ -1575,7 +1575,7 @@ internal static class ModCatalog
         foreach (var sub in SubDirs(mods))
         {
             bool plugin;
-            try { plugin = File.Exists(Path.Combine(sub, XhlPluginIni)); }
+            try { plugin = IsXhlPlugin(sub); }
             catch (Exception) { plugin = false; }
             if (!plugin || listed.Contains(NormPath(sub)) || taken.Contains(NormPath(sub))) continue;
             if (sfReads && IsSfPackage(sub)) continue;
@@ -1589,6 +1589,89 @@ internal static class ModCatalog
         }
         if (b.Mods.ContainsKey("xhl") || b.Profile.Of("xhl").Count > 0)
             b.Engine("xhl", null, EngineHealth.Idle, core ? KilnText.T("catalog.xhl.note_core") : KilnText.T("catalog.xhl.note"), true);
+    }
+
+    /// <summary>Is <paramref name="dir"/> an XHL-Core plugin, and not only a folder with a <c>native-plugin.ini</c>? That file is
+    /// ShroudForge's too: its DLL Manager loads the DLL <c>[Plugin] Dll=</c> names inside the package (<c>Dll=bin/x.dll</c>,
+    /// Unified Tweaks). XHL-Core 2.1.0 takes <c>Dll</c> as a file name in the plugin's folder and refuses one with a path in
+    /// it, and refuses a DLL without its plugin exports (<c>XhlNativePluginQuery</c>, <c>XhlNativePluginStart</c>,
+    /// <c>XhlNativePluginRequestStop</c>). A folder is XHL-Core's when it has XHL's <c>xhl-plugin.json</c>, or when nothing
+    /// says otherwise: a plain <c>Dll</c> file name, and the DLL, when it can be read, exports something of XHL's
+    /// (<c>Xhl…</c>). The rule of kiln-manage <c>engine_mods::is_xhl_plugin</c>.</summary>
+    internal static bool IsXhlPlugin(string dir)
+    {
+        try
+        {
+            var ini = Path.Combine(dir, XhlPluginIni);
+            if (!File.Exists(ini)) return false;
+            if (File.Exists(Path.Combine(dir, XhlPluginJson))) return true;
+            if (new FileInfo(ini).Length > 64 << 10 || IniDll(File.ReadAllText(ini)) is not { } dll) return true;
+            if (dll.Contains('/')) return false;
+            var path = Path.Combine(dir, dll);
+            if (!File.Exists(path) || PeExports(path) is not { } exports) return true;
+            return exports.Any(e => e.StartsWith("Xhl", StringComparison.OrdinalIgnoreCase));
+        }
+        catch (Exception) { return File.Exists(Path.Combine(dir, XhlPluginIni)); }
+    }
+
+    private const string XhlPluginJson = "xhl-plugin.json";
+
+    /// <summary>The DLL the <c>[Plugin]</c> section of a <c>native-plugin.ini</c> names (<c>Dll=</c>, section and key in any
+    /// case), '/'-separated; null when there is none or it leaves the folder (kiln-manage <c>engine_mods::xhl_ini_dll</c>).</summary>
+    internal static string? IniDll(string text)
+    {
+        var plugin = false;
+        foreach (var raw in text.Split('\n'))
+        {
+            var line = raw.Trim().TrimStart('\uFEFF');
+            if (line.StartsWith('[') && line.EndsWith(']')) { plugin = line[1..^1].Trim().Equals("Plugin", StringComparison.OrdinalIgnoreCase); continue; }
+            var eq = line.IndexOf('=');
+            if (!plugin || line.StartsWith(';') || line.StartsWith('#') || eq <= 0) continue;
+            if (!line[..eq].Trim().Equals("Dll", StringComparison.OrdinalIgnoreCase)) continue;
+            var value = line[(eq + 1)..].Trim().Trim('"').Replace('\\', '/');
+            while (value.StartsWith("./", StringComparison.Ordinal)) value = value[2..];
+            var leaves = value.Length == 0 || value.StartsWith('/') || value.Contains(':') || value.Split('/').Any(p => p == "..");
+            return leaves ? null : value;
+        }
+        return null;
+    }
+
+    /// <summary>The export names of the PE file at <paramref name="path"/>; null when it is not one Kiln can read.</summary>
+    internal static List<string>? PeExports(string path)
+    {
+        try
+        {
+            if (new FileInfo(path).Length > 512L << 20) return null;
+            var file = File.ReadAllBytes(path);
+            using var pe = new System.Reflection.PortableExecutable.PEReader(new MemoryStream(file));
+            var h = pe.PEHeaders;
+            if (h.PEHeader is not { } opt) return null;
+            var dir = opt.ExportTableDirectory;
+            if (dir.Size == 0 || dir.RelativeVirtualAddress == 0) return [];
+            int Off(int rva)
+            {
+                foreach (var s in h.SectionHeaders)
+                    if (rva >= s.VirtualAddress && rva < s.VirtualAddress + Math.Max(s.VirtualSize, s.SizeOfRawData))
+                        return rva - s.VirtualAddress + s.PointerToRawData;
+                return -1;
+            }
+            uint U32(int at) => at >= 0 && at + 4 <= file.Length ? System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(file.AsSpan(at)) : throw new InvalidDataException();
+            var ed = Off(dir.RelativeVirtualAddress);
+            var count = U32(ed + 24);
+            var names = Off((int)U32(ed + 32));
+            if (count > 65536 || names < 0) return null;
+            var list = new List<string>((int)count);
+            for (var i = 0; i < count; i++)
+            {
+                var at = Off((int)U32(names + 4 * i));
+                if (at < 0) return null;
+                var end = Array.IndexOf(file, (byte)0, at, Math.Min(512, file.Length - at));
+                if (end < 0) return null;
+                list.Add(Encoding.ASCII.GetString(file, at, end - at));
+            }
+            return list;
+        }
+        catch (Exception) { return null; }
     }
 
     /// <summary>A ShroudForge package with a <c>native-plugin.ini</c> is not an XHL-Core plugin of its own: ShroudForge's own

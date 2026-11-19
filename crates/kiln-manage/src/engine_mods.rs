@@ -493,6 +493,41 @@ pub fn has_xhl_plugin_ini(dir: &Path) -> bool {
         .any(|e| e.file_name().to_str().is_some_and(|n| n.eq_ignore_ascii_case(XHL_PLUGIN_INI)) && e.path().is_file())
 }
 
+/// XHL's own plugin description beside its `native-plugin.ini` (every XHL mod since 2.x; XHL-Core reads it for the
+/// plugins it loaded).
+pub const XHL_PLUGIN_JSON: &str = "xhl-plugin.json";
+
+/// The exports XHL-Core 2.1.0 looks up in a plugin DLL ("Plugin exports or ABI are invalid" without them).
+pub const XHL_PLUGIN_EXPORTS: [&str; 3] = ["XhlNativePluginQuery", "XhlNativePluginStart", "XhlNativePluginRequestStop"];
+
+/// Is `dir` an XHL-Core plugin, one XHL-Core runs, and not only a folder with a `native-plugin.ini`? That file is also
+/// ShroudForge's: its DLL Manager loads the DLL `[Plugin] Dll=` names inside the package (`Dll=bin/x.dll`, Unified
+/// Tweaks) with the Windows loader, no exports needed. XHL-Core 2.1.0 takes `Dll` as a file name in the plugin's folder
+/// and refuses one with a path in it ("Plugin DLL or native-plugin.ini entry is missing/invalid"), and it refuses a DLL
+/// without its plugin exports ([`XHL_PLUGIN_EXPORTS`]). So a folder is XHL-Core's when it has XHL's
+/// [`XHL_PLUGIN_JSON`], or when nothing says otherwise: its `Dll` is a plain file name, and the DLL, when Kiln can read
+/// it, exports something of XHL's (`Xhl…`; an older XHL ABI is still XHL's). Only the classification asks this: what
+/// XHL-Core may load from the game's mods folder (it loads a named DLL before it looks at the exports) is
+/// [`has_xhl_plugin_ini`]'s.
+pub fn is_xhl_plugin(dir: &Path) -> bool {
+    let Some(ini) = file_ignoring_case(dir, XHL_PLUGIN_INI) else { return false };
+    if file_ignoring_case(dir, XHL_PLUGIN_JSON).is_some() { return true; }
+    let Some(dll) = std::fs::metadata(&ini).ok().filter(|m| m.len() <= 64 * 1024)
+        .and_then(|_| std::fs::read(&ini).ok()).and_then(|b| xhl_ini_dll(&b)) else { return true };
+    if dll.contains('/') { return false; }
+    let Some(path) = file_ignoring_case(dir, &dll) else { return true };
+    let exports = std::fs::metadata(&path).ok().filter(|m| m.len() <= 512 << 20)
+        .and_then(|_| std::fs::read(&path).ok()).and_then(|b| crate::pe::parse(&b).ok()).map(|pe| pe.exports);
+    exports.is_none_or(|e| e.iter().any(|x| x.len() >= 3 && x[..3].eq_ignore_ascii_case("xhl")))
+}
+
+/// The file `name` directly in `dir`, its name in any case (Windows finds it so).
+fn file_ignoring_case(dir: &Path, name: &str) -> Option<PathBuf> {
+    std::fs::read_dir(dir).ok()?.flatten()
+        .find(|e| e.file_name().to_str().is_some_and(|n| n.eq_ignore_ascii_case(name)) && e.path().is_file())
+        .map(|e| e.path())
+}
+
 /// What the XHL-Core ini of Kiln's copy of a ShroudForge mod is renamed to while the profile has the mod off
 /// ([`park_plugin_ini`]): `<its name>.kiln-off` (`native-plugin.ini.kiln-off`). XHL-Core 2.1.0 opens
 /// `<mods>\<folder>\native-plugin.ini` by that name only (Windows and Wine match it in any case) and skips a folder
