@@ -25,6 +25,7 @@
 #include "../src/services/ui_values_sockets.cpp"
 #include "../src/services/ui_values_sources.cpp"
 #include "../src/services/ui_values_lines.cpp"
+#include "../src/services/ui_values_tooltip.cpp"
 
 using namespace kiln::uivalues;
 
@@ -2442,6 +2443,7 @@ void write_layout_validation() {
 #include "ui_values_gemforge_test.inc"
 #include "ui_values_sockets_test.inc"
 #include "ui_values_sources_test.inc"
+#include "ui_values_tooltip_test.inc"
 }  // namespace
 
 int main() {
@@ -2487,6 +2489,7 @@ int main() {
     lines_need_overlay();
     slot_layout_is_independent();
     lines_writer_tampering();
+    tooltip_tests();
     std::printf(g_fail ? "%d FAILED\n" : "all passed\n", g_fail);
     return g_fail ? 1 : 0;
 }

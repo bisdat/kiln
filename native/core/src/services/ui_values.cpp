@@ -614,6 +614,7 @@ void reset_for_tests() {  // host tests only: nothing dispatches while it runs
     sockets_reset_for_tests();
     sources_reset_for_tests();
     lines_reset_for_tests();
+    tooltip_reset_for_tests();
 }
 
 }  // namespace kiln::uivalues

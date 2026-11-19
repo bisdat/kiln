@@ -31,11 +31,9 @@ struct LinesLayout {
 using DetailFn = void (*)(void*, uint8_t);
 DetailFn g_detail_next = nullptr;
 
-struct DetailCopy {
-    uint8_t raw[kViewBytes] = {};
-    bool ok = false, collected = false;
-};
 thread_local DetailCopy* t_detail = nullptr;
+std::mutex g_detail_mu;
+int g_detail_state = 0;  // the ItemDetail link: 0 not tried, 1 in, -1 failed
 
 struct WriterState {
     uint32_t magic = kWriterMagic;
@@ -199,17 +197,16 @@ void collect(const DetailCopy& c) {
 void hk_item_detail(void* detail, uint8_t flag) {
     DetailCopy c;
     DetailCopy* outer = t_detail;
-    c.ok = any(kListLines) && env().read(c.raw, reinterpret_cast<uintptr_t>(detail), sizeof c.raw);
+    c.ok = detail_wanted() && env().read(c.raw, reinterpret_cast<uintptr_t>(detail), sizeof c.raw);
+    c.record = reinterpret_cast<uintptr_t>(detail);
     t_detail = &c;
+    if (c.ok) tooltip_detail_enter(c);
     g_detail_next(detail, flag);
     t_detail = outer;
 }
 
 void KILN_CALL on_lines_point(KilnRegisters*, void*) {
-    DetailCopy* c = t_detail;
-    if (!c || !c->ok || c->collected) return;
-    c->collected = true;  // once per detail occurrence
-    collect(*c);
+    if (DetailCopy* c = t_detail) collect_once(*c);
 }
 
 bool install_lines(uint32_t list) {
@@ -220,11 +217,8 @@ bool install_lines(uint32_t list) {
         logf(KILN_LOG_ERROR, "ui.values: ui/ItemDetail, ui/DetailLinesAppend or the view constants did not resolve");
         return false;
     }
-    KilnResult rc = env().hook_mid(point, "ui.values/DetailLinesAppend", &on_lines_point);
-    if (rc == KILN_OK)
-        rc = env().hook_raw(detail, "ui.values/ItemDetail", 0, reinterpret_cast<void*>(&hk_item_detail),
-                            reinterpret_cast<void**>(&g_detail_next));
-    if (rc != KILN_OK || !g_detail_next) {
+    const KilnResult rc = env().hook_mid(point, "ui.values/DetailLinesAppend", &on_lines_point);
+    if (rc != KILN_OK || !detail_hook_install()) {
         logf(KILN_LOG_ERROR, "ui.values: hooking the item detail view failed (%d)", rc);
         return false;
     }
@@ -262,6 +256,36 @@ void invalidate(Details& d, uint64_t session) {  // d.mu held
 }
 
 }  // namespace
+
+DetailCopy* current_detail() { return t_detail; }
+
+void collect_once(DetailCopy& c) {
+    if (!c.ok || c.collected || !any(kListLines)) return;
+    c.collected = true;  // once per detail occurrence
+    collect(c);
+}
+
+bool detail_hook_install() {
+    std::lock_guard lk(g_detail_mu);
+    if (g_detail_state) return g_detail_state > 0;
+    uintptr_t detail = 0;
+    if (!load_view_layout(&g_ll.view) || !sig_symbol("ui/ItemDetail", &detail)) {
+        logf(KILN_LOG_ERROR, "ui.values: ui/ItemDetail, ui/DetailLinesAppend or the view constants did not resolve");
+        g_detail_state = -1;
+        return false;
+    }
+    const KilnResult rc = env().hook_raw(detail, "ui.values/ItemDetail", 0, reinterpret_cast<void*>(&hk_item_detail),
+                                         reinterpret_cast<void**>(&g_detail_next));
+    if (rc != KILN_OK || !g_detail_next) {
+        logf(KILN_LOG_ERROR, "ui.values: hooking the item detail view failed (%d)", rc);
+        g_detail_state = -1;
+        return false;
+    }
+    g_detail_state = 1;
+    return true;
+}
+
+bool detail_wanted() { return any(kListLines) || tooltip_probe_on() || tooltip_values_on(); }
 
 KilnResult tooltip_open(KilnOwner owner, KilnUiTooltipOpen* out) {
     if (const KilnResult rc = check_caller(owner)) return rc;
@@ -361,6 +385,8 @@ void lines_reset_for_tests() {
     d.open.reset();
     g_ll = {};
     g_detail_next = nullptr;
+    std::lock_guard dl(g_detail_mu);
+    g_detail_state = 0;
 }
 
 }  // namespace kiln::uivalues

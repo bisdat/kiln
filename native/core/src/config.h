@@ -14,6 +14,9 @@
 // a list of their names. A side section's "preview" replaces the top-level one.
 // "tasks": { "workers": 1..8, "long_running_global": 1..16, "watchdog_running_s": 5..600, "watchdog_queued_s": 5..600 }:
 // kiln.tasks' pool (TasksConfig below); also in a side section.
+// "tooltipProbe": true | "<key>": the tooltip probe of the guided client session (kiln.ui.values, a client test build's
+// switch; also in the "client" section; the environment variable KILN_TOOLTIP_PROBE does the same): a fixed test block
+// in the game's item detail view, stepped through with the key (default F3), and "tooltip-probe:" lines in kiln.log.
 // "boot": { "testRefuse": { "<mod id>": "<collector>" } }: labs only (policy any, ignored otherwise): kiln.boot hands that
 // collector an unreadable document of that mod, so the collector refuses it and the mod is dropped from the boot generation
 // (the forced-drop proof of chapter 08; a release never sets it).
@@ -52,6 +55,7 @@ struct Config {
     std::map<std::string, std::string> boot_test_refuse;  // "boot": {"testRefuse": {mod: collector}} (labs, policy any)
     std::map<std::string, std::string> boot_test_fault;   // "boot": {"testFault": {mod: collector}} (labs, policy any)
     TasksConfig tasks;                                    // "tasks": {...} (a side section overrides key by key)
+    std::string tooltip_probe;                            // "tooltipProbe": "" off, "default" (true) or a key name
 };
 
 const char* native_policy_name(NativePolicy p);  // "always" | "verified-only" | "never"

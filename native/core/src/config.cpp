@@ -63,6 +63,14 @@ void read_boot(const nlohmann::json& doc) {
             else KLOG_W("config: kiln.json boot.%s.%s is not a collector name; ignored", key, mod.c_str());
     }
 }
+// "tooltipProbe": true | false | "<key>" (the client session's tooltip probe; a side section replaces it).
+void read_tooltip_probe(const nlohmann::json& sec, const char* where) {
+    if (!sec.contains("tooltipProbe")) return;
+    const auto& p = sec["tooltipProbe"];
+    if (p.is_boolean()) g_config.tooltip_probe = p.get<bool>() ? "default" : "";
+    else if (p.is_string()) g_config.tooltip_probe = p.get<std::string>();
+    else KLOG_W("config: %s \"tooltipProbe\" is not true, false or a key name; ignored", where);
+}
 // "tasks": {...}: the pool's global knobs (config.h TasksConfig). Present in a section, each valid key replaces the
 // value before it; a wrong type or a value out of its bound gives the default and one warning naming the key and bound.
 void read_tasks(const nlohmann::json& sec, const char* where) {
@@ -121,6 +129,7 @@ void load_config() {
         read_preview(doc, "kiln.json");
         read_boot(doc);
         read_tasks(doc, "kiln.json");
+        read_tooltip_probe(doc, "kiln.json");
         KLOG_I("config: policy=%s clr=%d plugins=%d native.policy=%s", g_config.policy_any ? "any" : "verified-only",
                g_config.clr, g_config.plugins, native_policy_name(g_config.native_policy));
     } catch (const std::exception& e) {
@@ -136,6 +145,7 @@ void apply_side(uint32_t side) {
         // Apply the gate override even if another side option has the wrong type. In particular, preview:false
         // must not inherit a top-level preview:true because e.g. clr could not be read.
         read_preview(sec, name);
+        read_tooltip_probe(sec, name);
         if (sec.contains("policy")) g_config.policy_any = sec.value("policy", "verified-only") == "any";
         g_config.clr = sec.value("clr", g_config.clr);
         g_config.plugins = sec.value("plugins", g_config.plugins);
