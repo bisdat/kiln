@@ -643,6 +643,19 @@ writing its `SlotAttachment`, and a server wrap of `equipment_visuals`). **[seen
   `equipment_visuals`' slot runs before `locomotion_animation` reads it, in the server world and in prediction alike.
   Since 0.2.0-dev.29.18 a wrap can be the prediction storage's: `WrapOptions.World = WorldKind.Prediction`
   (docs/kiln/services/systems.md). **[static] [seen]**
+- The prediction storage's write records carry no tracker, so a write there is not marked. `IterNext` 0x9c2780 (one
+  for every world of the client) fills a write record's `[5]`, the tracker `MarkWritten` takes, with
+  `storage + 0x7bc030` only when the job's write entry has byte `+0xc` or `+0xd` set and `J+0x1c0` is not null, and
+  with 0 otherwise (`[1]` to `[3]` the same way; 0x9c28ab..0x9c2963). `MarkWritten` 0x9d3150 reads through `[5]` at
+  once (0x9d316e), and the game's own write helpers test it first: 0x216bd0 calls `MarkWritten` only when the record's
+  tracker is not null, then returns the data pointer (the server's helpers in docs/re/rules.md do the same). Its
+  replication arm skips every storage whose kind byte is not 0 as well (0x9d3192). Which of the two inputs is zero
+  in the prediction storage was not followed. **[static]**
+- In the owner's hosted game (0.2.0-dev.29.18 trial, client 26430625, 2026-11-19) Holster Hotkey's prediction wrap of
+  `equipment_visuals` threw at its first write of `EquipmentAnimationSets`: kiln.world's `game_slice_mark` answered
+  `KILN_ERR_UNAVAILABLE` (3), its answer for a record without a tracker, while the server world's wrap of the same
+  program in the same process reported no fault. Since then Kiln.Systems writes such a slot unmarked outside the
+  server world, as the game's own update does there. **[seen]**
 
 ### Only a real client proves
 - That a mod's managed client program registers into a client world, runs, and its `SlotAttachment` write moves a

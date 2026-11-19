@@ -133,8 +133,11 @@ if (made is { Ok: true, Wrap: { } predicted })
   `Client.Post` run on the main thread there and these calls throw from them. The prediction storage steps serially on
   the main thread. `Slice.Step` is the client world's step at its last Pre (several prediction steps can share it) and
   `IsWorldThread` compares with the client world's thread. No tick-thread API inside a stage, as anywhere.
-- **Writes** go to the prediction storage only and are marked with the job's tracker, as the game's own update there
-  marks them. No `ComponentWrittenEvent` (server world only). The next server state the client receives for the
+- **Writes** go to the prediction storage only and are marked as the game's own update there marks them: with the job's
+  tracker where the write record has one, and not at all where it has none. The engine builds the prediction storage's
+  records without one (`equipment_visuals`' `EquipmentAnimationSets` in a real game:
+  [docs/re/world.md](../../re/world.md#the-prediction-storage-recomputes-the-stance)), so such a write goes ahead
+  unmarked; nothing there is saved or sent. No `ComponentWrittenEvent` (server world only). The next server state the client receives for the
   predicted entity can put the game's value back until your stage runs again; write in every step you mean it.
 - **WhenArchetype** reads the slice's archetype from the engine's slice record and the prediction storage's own
   component indices (no entity-map read, as for the client world).
@@ -181,7 +184,7 @@ read too):
 |---|---|
 | `Has(name)` | the program lists it and the entity has it now (optional slots may be absent); never throws |
 | `Read<T>(name)` | a `ref readonly` into the game's storage; `T` at most the component's reflected size (Kiln.Game's structs fit) |
-| `Write<T>(name)` | a `ref` into the game's storage, write lists only. The first use per entity and component in the stage marks it for the save and replication (the game's own MarkWritten) |
+| `Write<T>(name)` | a `ref` into the game's storage, write lists only. The first use per entity and component in the stage marks it for the save and replication (the game's own MarkWritten). In the prediction storage and a client world a write record without a tracker is written unmarked, as the game's own update does there; in the server world a write that cannot be marked throws |
 | `Attribute(name)` | an `Attribute32` over a written attribute component (Health, Stamina, Mana, Fuel, Level ...): `Values`, an indexer, `RootId`, `HasValues`, and `Changed()`, which runs the game's attribute formulas with the program's own `impact::AttributeRegistry` (the program must declare it, else it throws) |
 
 A name the program does not list, an optional component the entity lacks, or a `T` larger than the component throws
