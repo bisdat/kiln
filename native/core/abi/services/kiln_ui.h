@@ -726,7 +726,9 @@ typedef struct KilnUiGraphicsStatus {
     uint32_t output_width, output_height;    /* the game window's swapchain */
     int32_t dlss_quality;     /* the DLSS in use (GFX_DLSS_HOOKED): NVSDK_NGX_PerfQuality_Value, 0 Performance, 1 Balanced,
                                  2 Quality, 3 Ultra Performance, 4 Ultra Quality, 5 DLAA; -1 none */
-    uint32_t dlss_preset;     /* its render preset as asked (Kiln's, else the game's hint); 0: DLSS's default */
+    uint32_t dlss_preset;     /* its render preset as asked (Kiln's, else the game's hint): 0 DLSS's default, 1..15 A..O
+                                 (above: no letter). Without bit 31, which the game's NGX SDK code sets on the default
+                                 it fills in for a hint the game left at 0 (0x8000000B: K) */
     uint32_t render_width, render_height;    /* DLSS's input this frame (dynamic resolution may lower it) */
     uint32_t dlss_output_width, dlss_output_height;
     uint32_t reserved[2];

@@ -258,7 +258,22 @@ static void settings_parse() {
 
 static void presets() {
     CHECK(preset_name(0) == "default" && preset_name(kPresetJ) == "J" && preset_name(kPresetM) == "M" && preset_name(5) == "E");
-    CHECK(preset_name(99) == "99");
+    CHECK(preset_name(14) == "N" && preset_name(15) == "O");
+    // the game's own hint, as the NGX SDK code linked into the game fills it in (bit 31 set): the letter on screen, the
+    // raw value in kiln.log only (session 29.18: "render preset 2147483659 (the game's)")
+    CHECK(preset_value(0x8000000Bu) == kPresetK && preset_name(0x8000000Bu) == "K");
+    CHECK(preset_name(0x8000000Du) == "M" && preset_name(0x8000000Cu) == "L" && preset_name(0x80000000u) == "default");
+    CHECK(preset_log(0x8000000Bu, false) == "K (the game's default; raw 0x8000000B)");
+    CHECK(preset_log(0x8000000Bu, false, "DLAA keeps it") == "K (the game's default: DLAA keeps it; raw 0x8000000B)");
+    // a plain value: the game's, or Kiln's (no raw value)
+    CHECK(preset_value(kPresetK) == kPresetK && preset_name(kPresetK) == "K");
+    CHECK(preset_log(kPresetK, false) == "K (the game's)" && preset_log(kPresetM, true) == "M (Kiln's)");
+    CHECK(preset_log(kPresetDefault, false) == "default (the game's)");
+    CHECK(preset_log(5, false, "DLAA keeps it") == "E (the game's: DLAA keeps it)");
+    // a value with no letter: "?" on screen, never the number; "unknown" and the raw value in kiln.log
+    CHECK(preset_name(16) == "?" && preset_name(99) == "?" && preset_name(0xFFFFFFFFu) == "?" && preset_name(0x40000001u) == "?");
+    CHECK(preset_log(99, false) == "unknown (the game's; raw 0x00000063)");
+    CHECK(preset_log(0x8000001Fu, false) == "unknown (the game's default; raw 0x8000001F)");
     CHECK(preset_from_name("J") == kPresetJ && preset_from_name("l") == kPresetL && preset_from_name("Default") == kPresetDefault);
     CHECK(!preset_from_name("E") && !preset_from_name("F") && !preset_from_name("") && !preset_from_name("KK"));
     Settings s;

@@ -287,15 +287,15 @@ void before_create(void* params) {
         }
     }
     g_dlss_quality.store(quality);
-    g_dlss_preset.store(preset);
+    g_dlss_preset.store(gfx::preset_value(preset));  // the status's: without the bit the game's NGX SDK code adds
     g_dlss_flags.store(flags);
     g_render_w.store(render.w);
     g_render_h.store(render.h);
     g_dlss_out_w.store(out.w);
     g_dlss_out_h.store(out.h);
-    logf(KILN_LOG_INFO, "graphics: DLSS %s created: %ux%u -> %ux%u, render preset %s%s", gfx::mode_name(quality), render.w, render.h,
-         out.w, out.h, gfx::preset_name(preset).c_str(),
-         (flags & KILN_UI_GFX_DLSS_PRESET) ? " (Kiln's)" : quality == gfx::kDlaa && s.dlss_preset ? " (the game's: DLAA keeps it)" : " (the game's)");
+    const bool kilns = flags & KILN_UI_GFX_DLSS_PRESET;
+    logf(KILN_LOG_INFO, "graphics: DLSS %s created: %ux%u -> %ux%u, render preset %s", gfx::mode_name(quality), render.w, render.h,
+         out.w, out.h, gfx::preset_log(preset, kilns, !kilns && quality == gfx::kDlaa && s.dlss_preset ? "DLAA keeps it" : "").c_str());
 }
 bool guarded_before_create(void* params) {
     __try {

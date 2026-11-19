@@ -69,7 +69,10 @@ For players whose game upscales with DLSS (an NVIDIA RTX card and DLSS chosen in
 the game never sets DLSS up and these settings do nothing (the page says "The game has not set DLSS up in this session").
 - **Render preset.** The game's DLSS (`nvngx_dlss.dll` 310.9.1) has models for presets E, F, J, K, L and M; Kiln offers
   J and K (DLSS 4's transformer models) and L and M (DLSS 4.5's newer ones). `default` leaves the game's hint and DLSS's
-  own choice. Kiln sets the documented hints `DLSS.Hint.Render.Preset.{Quality, Balanced, Performance,
+  own choice. Where the game sets no preset of its own, the NGX SDK code in the game asks for NVIDIA's defaults: K for
+  DLAA, Quality and Balanced, M for Performance, L for Ultra Performance. The readout and the Graphics page show that
+  letter; kiln.log adds the raw value (`render preset K (the game's default; raw 0x8000000B)`, bit 31 marking the
+  SDK's default). Kiln sets the documented hints `DLSS.Hint.Render.Preset.{Quality, Balanced, Performance,
   UltraPerformance}` right before DLSS is created, after the game's own (the game sets the same four, and DLAA's, before
   every creation, so "default" brings its own back at the next one); **DLAA keeps the game's preset**.
   The NVIDIA app's DLSS override, when the player set one there, wins over any app's hint, Kiln's included; Kiln cannot

@@ -84,6 +84,16 @@ below) and of the `nvngx_dlss.dll` it ships (310.9.1.0, sha256 `3975567b…`, im
   the title default ("App hint Preset %s is not available, using title default Preset %s").
 - The NVIDIA driver's override (DRS `NGX_OVERRIDE_RENDER_PRESET_SELECTION`, "Using DRS Overridden Preset") wins over
   an app hint. There is no parameter to read back which preset runs. Kiln offers default, J, K, L, M.
+- **The SDK fills in NVIDIA's defaults with bit 31 set.** The NGX SDK code linked into the game, `0x12f0100`, runs in
+  both `CreateFeature` wrappers (`0x12f0c70`, `0x12f0cf0`) right before NGX's core is called. It reads each preset
+  hint and, where it is missing or 0, sets NVIDIA's default for that mode with bit 31 set:
+  `DLSS.Hint.Render.Preset.{DLAA, Quality, Balanced, UltraQuality}` 0x8000000B (K), `.Performance` 0x8000000D (M),
+  `.UltraPerformance` 0x8000000C (L); the six `RayReconstruction.Hint.Render.Preset.*` 0x80000006 (F) and
+  `DLSSNR.Hint.Render.Preset` 0x80000001. With the game's own value (`[obj+0xd4]`) at 0, Kiln's `CreateFeature` hook
+  (on the core) reads 0x8000000B for Quality: the preset is the bits below bit 31. The bit most likely tells DLSS the
+  value is the SDK's default, not the app's choice (not checked in `nvngx_dlss.dll`). Kiln shows the letter and puts
+  the raw value only in kiln.log (`render preset K (the game's default; raw 0x8000000B)`); its own preset goes in
+  without the bit.
 
 ## FSR 3
 The FSR 3 upscaler is compiled into the game: no DLL, no export to hook. It is the studio's own port of FSR 3's

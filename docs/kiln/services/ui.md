@@ -187,7 +187,8 @@ check `header.size` through the member and that its pointer is non-null). Player
   off). Then the cap, `rendered_fps`, `output_fps` (equal until a frame generation phase), `frame_ms`, the swapchain's
   size, and the DLSS in use: `dlss_quality` (`NVSDK_NGX_PerfQuality_Value`: 0 Performance, 1 Balanced, 2 Quality, 3
   Ultra Performance, 4 Ultra Quality, 5 DLAA; -1 none), `dlss_preset` (as asked: Kiln's, else the game's hint; 0 DLSS's
-  default), `render_width/height` (this frame's while the readout is on, else at creation) and
+  default, 1..15 A..O; without bit 31, which the game's NGX SDK code sets on the default it fills in, so 0x8000000B
+  reads 11, K), `render_width/height` (this frame's while the readout is on, else at creation) and
   `dlss_output_width/height`. Any thread.
 - `graphics_set(&KilnUiGraphics)` (48 bytes): the player's settings. Kiln.Ui's call only, from kiln.json "graphics" and
   the Kiln menu's Graphics tab; a native plugin's is refused (`KILN_ERR_UNAVAILABLE`): mods never choose them.

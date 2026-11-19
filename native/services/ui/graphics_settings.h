@@ -5,6 +5,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <optional>
 #include <string>
@@ -22,11 +23,37 @@ namespace kui::gfx {
 inline constexpr uint32_t kPresetDefault = 0, kPresetJ = 10, kPresetK = 11, kPresetL = 12, kPresetM = 13;
 inline constexpr std::array<uint32_t, 4> kPresets = {kPresetJ, kPresetK, kPresetL, kPresetM};
 
-// The name of a preset value as DLSS logs it ("K" for 11), "default" for 0, else the number.
-inline std::string preset_name(uint32_t v) {
+// Bit 31 of a preset hint the game passes: the NGX SDK code linked into the game (enshrouded.exe 0x12f0100, run by its
+// CreateFeature wrappers right before NGX's core) fills each hint the game left at 0 with NVIDIA's default for the mode
+// and sets this bit: 0x8000000B (K) for DLAA, Quality, Balanced and Ultra Quality, 0x8000000D (M) for Performance,
+// 0x8000000C (L) for Ultra Performance (docs/re/client-upscale.md). The preset is the bits below it.
+inline constexpr uint32_t kPresetSdkDefault = 0x80000000u;
+// The last preset value with a letter (O, 15): NGX's enum leaves room for these; the game's DLSS has models up to M.
+inline constexpr uint32_t kPresetLast = 15;
+// A hint's preset without the SDK's default bit (0: DLSS's default; above kPresetLast: not one with a letter).
+inline constexpr uint32_t preset_value(uint32_t raw) { return raw & ~kPresetSdkDefault; }
+// The name of a preset as DLSS logs it ("K" for 11, and for the SDK's 0x8000000B), "default" for 0, "?" for a value
+// without a letter (shown on screen: never a ten-digit number).
+inline std::string preset_name(uint32_t raw) {
+    const uint32_t v = preset_value(raw);
     if (v == kPresetDefault) return "default";
-    if (v >= 1 && v <= 13) return std::string(1, static_cast<char>('A' + v - 1));
-    return std::to_string(v);
+    if (v <= kPresetLast) return std::string(1, static_cast<char>('A' + v - 1));
+    return "?";
+}
+// kiln.log's words for the preset DLSS is created with: its name, whose it is (Kiln's, the game's, or the default the
+// game's NGX SDK code filled in), `note` after a colon, and the raw value only when it is not a plain preset:
+// "K (Kiln's)", "K (the game's)", "K (the game's default; raw 0x8000000B)", "unknown (the game's; raw 0x00000063)".
+inline std::string preset_log(uint32_t raw, bool kilns, std::string_view note = {}) {
+    const uint32_t v = preset_value(raw);
+    std::string out = v <= kPresetLast ? preset_name(raw) : "unknown";
+    out += kilns ? " (Kiln's" : (raw & kPresetSdkDefault) ? " (the game's default" : " (the game's";
+    if (!note.empty()) out.append(": ").append(note);
+    if (raw != v || v > kPresetLast) {
+        char b[24];
+        std::snprintf(b, sizeof b, "; raw 0x%08X", raw);
+        out += b;
+    }
+    return out + ")";
 }
 // A preset Kiln offers by its name ("J".."M", any case), "default" -> 0; nullopt for anything else.
 inline std::optional<uint32_t> preset_from_name(std::string_view s) {
