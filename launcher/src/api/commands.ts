@@ -578,7 +578,7 @@ export interface OwnLoaderNote {
   file: string;
   /** proxy: under a proxy name next to the game (on Linux it runs only with a DLL override); chain: kiln/chain.ini;
    * emf-chain: dinput8-chain.ini; hosted-shroud-forge: Kiln hosts ShroudForge for this profile. */
-  via: "proxy" | "chain" | "emf-chain" | "hosted-shroud-forge";
+  via: "proxy" | "chain" | "emf-chain" | "hosted-shroud-forge" | "native-module";
   /** Game-relative folder the loader reads ("mods", "emf/mods"). */
   folder: string;
   /** placed: the launcher copies the profile's mods there; plugin: Kiln's plugin does; none: nothing can. */

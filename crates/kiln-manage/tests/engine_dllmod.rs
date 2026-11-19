@@ -277,3 +277,76 @@ fn copy_mode_names_the_copy_only_for_a_core_that_reads_mods_dllmod() {
     let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
     assert!(out.status.success() && text.contains("launcher profile ok"), "the native parser refused a profile the launcher wrote:\n{text}");
 }
+
+// ---- Enshrouded ModLoader 0.6.15 next to Kiln, as a Kiln native module ----
+
+/// What its Install.cmd leaves with Kiln installed: kiln/native/enshrouded-modloader/modloader.dll (the same DLL as its
+/// standalone dinput8.dll: the DirectInput8 export, kiln_native_init) with a native.json, and its per-world profiles and
+/// settings in Mods/EnshroudedModLoader/worlds/.
+fn his_native_module(game: &Path) -> Vec<(String, Vec<u8>)> {
+    let files: Vec<(String, Vec<u8>)> = vec![
+        ("kiln/native/enshrouded-modloader/modloader.dll".into(), build_test_dll(&["DirectInput8Create", "GetdfDIJoystick", "kiln_native_init"], b"ENSHROUDED_MODS_V1\0KilnProxyInfo\0")),
+        ("kiln/native/enshrouded-modloader/native.json".into(), br#"{"format":1,"id":"enshrouded-modloader","version":"0.6.15","name":"Enshrouded ModLoader","side":"client","dlls":["modloader.dll"],"phase":"boot","init":"kiln_native_init","enabled":true,"kiln":">=0.2.0-dev","builds":["5D9EF2F140B8ED49E30DBEE655841B89D08BAEC20F799A1817E171A18A850C77"]}"#.to_vec()),
+        ("Mods/EnshroudedModLoader/worlds/0123456789abcdef0123456789abcdef.mods".into(), b"ENSHROUDED_MODS_V1\nlantern/lantern.dll\n".to_vec()),
+        ("Mods/EnshroudedModLoader/worlds/0123456789abcdef0123456789abcdef.settings-v2/0f.ini".into(), b"ENSHROUDED_SETTINGS_V1\n".to_vec()),
+        ("Mods/EnshroudedModLoader/lantern/lantern.dll".into(), build_test_dll(&["EnshroudedModInitialize"], b"his lantern")),
+        ("Mods/EnshroudedModLoader/lantern/lantern.dll.mod".into(), LANTERN_MOD.as_bytes().to_vec()),
+    ];
+    for (rel, data) in &files { put(game, rel, data); }
+    files
+}
+
+#[test]
+fn his_native_module_is_the_kinds_own_loader_and_kiln_never_touches_his_files() {
+    use kiln_manage::own_loaders::{self, ProfileView, Via};
+    let t = tmp("native-module");
+    let t = &t.0;
+    std::fs::create_dir_all(t.join("0.1.50-dev")).unwrap();
+    let dirs = DataDirs::at(t.join("data"));
+    let g = game(t, PathMode::Z);
+    let his = his_native_module(&g.path);
+    // the Library reads his native.json (the hash in upper case): a native mod, not "cannot be used"
+    let d = library::detect(&g.path.join("kiln/native/enshrouded-modloader")).unwrap();
+    assert_eq!(d.kind, DetectKind::Native, "{}", d.reason);
+    let pid = profile::create(&dirs, "Both", None).unwrap().id;
+    let mut p = profile::get(&dirs, &pid).unwrap();
+    // no profile view (legacy layout) and a profile that reads the native drop-ins: his loader runs, kind dllmod
+    for view in [None, Some({ p.dropins = vec![ModKind::Native, ModKind::Kiln]; p.dropins_engines = true; ProfileView::of_profile(&p) })] {
+        let l = own_loaders::find(&g.path, view.as_ref());
+        let own = own_loaders::of_kind(&l, ModKind::Dllmod).unwrap_or_else(|| panic!("{l:?}"));
+        assert_eq!((own.via, own.file.as_str(), own.folder.as_str()), (Via::NativeModule, "kiln/native/enshrouded-modloader/modloader.dll", "Mods/EnshroudedModLoader"));
+    }
+    // a profile that reads no native drop-ins does not load it: Kiln's engine runs the packages
+    p.dropins = vec![ModKind::Kiln];
+    assert!(own_loaders::of_kind(&own_loaders::find(&g.path, Some(&ProfileView::of_profile(&p))), ModKind::Dllmod).is_none());
+    p.dropins = vec![ModKind::Native];
+    profile::save(&dirs, &p).unwrap();
+
+    // a Library package activated while his loader runs: Kiln's copy goes beside his packages (his MODS page lists it),
+    // the launcher says his loader runs it, and nothing of his changes
+    let v50 = import_carryon(&dirs, t, "0.1.50-dev");
+    let file = activate_with(&dirs, &g, &pid, vec![pm(&v50, true)]);
+    let copy = g.path.join("Mods/EnshroudedModLoader/carryon");
+    assert_eq!(file.mods.dllmod[0].path, z(&copy));
+    let view = ProfileView::of_file(&file);
+    let l = own_loaders::find(&g.path, Some(&view));
+    let notes = own_loaders::notes(&g.path, &l, Some(&view));
+    assert!(format!("{notes:?}").contains("Enshrouded ModLoader's own loader"), "{notes:?}");
+    activate_with(&dirs, &g, &pid, vec![pm(&v50, false)]);
+    assert!(!copy.exists(), "Kiln's own copy goes when switched off");
+    for (rel, data) in &his {
+        assert_eq!(std::fs::read(g.path.join(rel)).ok().as_deref(), Some(data.as_slice()), "{rel}");
+    }
+}
+
+#[test]
+fn a_package_named_worlds_is_never_placed_into_his_profiles_folder() {
+    let t = tmp("worlds");
+    let r = &t.0;
+    put(r, "worlds/worlds.dll", &build_test_dll(&["EnshroudedModInitialize"], b""));
+    put(r, "worlds/worlds.dll.mod", LANTERN_MOD.as_bytes());
+    let dirs = DataDirs::at(r.join("data"));
+    let rep = import(&dirs, &[r.join("worlds")]);
+    assert!(rep.imported.is_empty(), "{}", summary(&rep));
+    assert!(summary(&rep).contains("Mods/EnshroudedModLoader/worlds"), "{}", summary(&rep));
+}

@@ -65,14 +65,24 @@ A mod with settings (CarryOn's Chests, Decor, Usable objects, Debug) gets, in th
 
 1. Kiln's settings file for it, `<config>/dllmod/<id>.ini` (`<config>` is the profile's config folder, normally
    `<game>/kiln/config`), in the loader's format: a first line `ENSHROUDED_SETTINGS_V1`, then `key=value` lines;
-2. the loader's own settings for the world being opened (`<game>/ModLoader/worlds/<world id>.settings-v2/<SHA-256 of the
-   package id>.ini`), what its MODS page saved, so settings you made with the loader keep working;
+2. the loader's own settings for the world being opened (`<game>/Mods/EnshroudedModLoader/worlds/<world id>.settings-v2/<SHA-256
+   of the package id>.ini` since 0.6.15, else `<game>/ModLoader/worlds/...`), what its MODS page saved, so settings you made
+   with the loader keep working;
 3. the manifest's defaults.
 
 A file that is there but invalid (an unknown key, a value the setting does not take) keeps the world from starting with
 the file's name, as the loader does. The launcher has no settings page for these mods yet.
 
 ## When Enshrouded ModLoader is installed too
+
+Since 0.6.15 its `Install.cmd` installs it next to Kiln as a Kiln native mod, `kiln/native/enshrouded-modloader/modloader.dll`
+with a `native.json` (phase boot), and keeps its per-world profiles and settings in `Mods/EnshroudedModLoader/worlds/`.
+kiln-core loads that native mod after every plugin started, so kiln-dllmod looks for it on disk as kiln-core does (a
+switched-on native entry of the profile, or the `kiln/native` drop-in folder when the profile reads it) and steps aside
+before it hooks anything. The launcher counts it as this kind's own loader the same way. Kiln never places a package
+named `worlds`, and never removes or changes the loader's files, its `worlds/` folder or its installer's backups: Kiln
+removes only copies its own receipts name.
+
 
 Kiln never runs a package twice and never breaks the loader. The loader refuses to start when one of the game functions
 it hooks was patched first, so when its `dinput8.dll` is in the game (chained by Kiln from `kiln/chain/`, listed in
