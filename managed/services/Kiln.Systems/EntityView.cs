@@ -67,10 +67,13 @@ public unsafe ref struct EntityView
 
     /// <summary>The entity's <paramref name="component"/> to write (a write list of the program): a reference into the
     /// game's storage. The first use per entity and component in the stage marks it for the save and replication (the
-    /// game's own MarkWritten); the stage's change raises <see cref="ComponentWrittenEvent"/> in the next step.</summary>
+    /// game's own MarkWritten); the stage's change raises <see cref="ComponentWrittenEvent"/> in the next step. In the
+    /// prediction storage and a client world a write record without a tracker is written unmarked, as the game's own
+    /// update does there (the prediction storage's records have none).</summary>
     /// <typeparam name="T">The component's layout; at most the component's reflected size.</typeparam>
     /// <exception cref="InvalidOperationException">The program does not write it; an optional one the entity lacks;
-    /// <typeparamref name="T"/> is larger than the component on this build.</exception>
+    /// <typeparamref name="T"/> is larger than the component on this build; in the server world, the write cannot be
+    /// marked.</exception>
     public readonly ref T Write<T>(string component) where T : unmanaged =>
         ref Unsafe.AsRef<T>(Need(component, true, sizeof(T), out _, out _, out _));
 
