@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <chrono>
 #include <condition_variable>
+#include <cstdio>
 #include <cstring>
 #include <deque>
 #include <mutex>
@@ -47,6 +48,7 @@ struct Meta {
     bool resident = false;
     bool cancel_seen = false;
     uint64_t cancel_seen_ns = 0;
+    bool start_said = false;  // resident: its first body start was noted (PoolNote::ResidentStarted, once)
     bool lease = false;  // a managed lease (snapshot)
     int stats_slot = -1, stats_entry = -1;  // tasks_stats.h rows (issue #49); -1 when its tables were full
 };
@@ -123,7 +125,8 @@ struct Pool::Core : std::enable_shared_from_this<Pool::Core> {
     std::chrono::steady_clock::time_point next_sweep{};  // the next watchdog sweep
     WatchFn watch_fn = nullptr;  // the periodic watchdog sweep's sink (set_watch_sink)
     bool maintenance_kick = false;  // set_watch_sink changed the schedule: the maintenance thread re-plans its wait
-    NoteFn note_fn = nullptr;  // slot lost / recovered (set_note_sink)
+    NoteFn note_fn = nullptr;  // slot lost / recovered, a resident task's start (set_note_sink)
+    uint32_t resident_running = 0;  // resident bodies running now: the LongRunning threads they hold
     void* note_user = nullptr;
     bool slot_lost[2] = {false, false};  // a replacement's failed start took the slot's last worker
     bool slot_said[2] = {false, false};  // ...and that was said (once; recovery said once too)
@@ -272,15 +275,38 @@ bool Pool::Core::run_one(Worker& self) {
         leave_busy(false);
         return false;
     }
+    NoteFn note = nullptr;
+    void* note_to = nullptr;
+    PoolNote started;
     {
         // submit registers the metadata in the same critical section that publishes the task, so it is here
         std::lock_guard lock(mutex);
         ++in_item;
         const auto it = meta.find(work.task);
         if (it != meta.end() && work.kind != Work::Kind::Done) {
-            it->second->running_since = platform.now_ns();
-            it->second->running = true;
+            Meta& m = *it->second;
+            m.running_since = platform.now_ns();
+            m.running = true;
+            if (m.resident) {
+                ++resident_running;
+                if (!m.start_said) {  // its first segment: said once, below, outside the lock
+                    m.start_said = true;
+                    note = note_fn;
+                    note_to = note_user;
+                    started.kind = PoolNote::Kind::ResidentStarted;
+                    started.slot = self.slot;
+                    started.owner = work.owner;
+                    started.task = work.task;
+                    if (note) started.name = m.name;
+                    started.held = resident_running;
+                    started.long_running = long_running_workers;
+                }
+            }
         }
+    }
+    if (note) {
+        started.owner_name = model.owner_name(work.owner);
+        note(started, note_to);  // before the body, outside every lock: the sink logs
     }
     if (work.kind == Work::Kind::Done) deliver_done(self, work);
     else deliver_body(self, work);
@@ -337,6 +363,7 @@ void Pool::Core::deliver_body(Worker& self, Work& work) {
     if (m) {
         std::lock_guard lock(mutex);
         m->running = false;
+        if (m->resident) --resident_running;
     }
     if (info.faulted) {
         model.segment_ended(work, false, Outcome::Faulted);  // publish Faulted, queue its done for a healthy worker
@@ -452,14 +479,20 @@ void Pool::Core::maintenance_loop() {
                 work_cv.notify_all();
             }
             // a slot that lost its last worker, or got one back: said once each way (no admission change here)
+            const auto slot_note = [&notes](PoolNote::Kind kind, Slot slot) {
+                PoolNote n;
+                n.kind = kind;
+                n.slot = slot;
+                notes.push_back(std::move(n));
+            };
             for (const Slot slot : {Slot::Normal, Slot::LongRunning}) {
                 const std::size_t i = slot_index_of(slot);
                 if (slot_lost[i] && !slot_said[i]) {
                     slot_said[i] = true;
-                    notes.push_back({PoolNote::Kind::SlotLost, slot, 0});
+                    slot_note(PoolNote::Kind::SlotLost, slot);
                 } else if (slot_said[i] && healthy[i] > 0) {
                     slot_said[i] = slot_lost[i] = false;
-                    notes.push_back({PoolNote::Kind::SlotRecovered, slot, 0});
+                    slot_note(PoolNote::Kind::SlotRecovered, slot);
                 }
             }
             if (!notes.empty()) {
@@ -825,6 +858,16 @@ void Pool::set_watch_sink(WatchFn fn, void* user) {
     core_->maintenance_cv.notify_all();  // start (or stop) the periodic sweep now
 }
 void Pool::set_model_test_hook(std::function<void(Model::Point)> hook) { core_->model.set_test_hook(std::move(hook)); }
+
+std::string resident_started_line(const PoolNote& n) {
+    const std::string owner = n.owner_name.empty() ? "owner " + std::to_string(n.owner) : n.owner_name;
+    char tail[192];
+    std::snprintf(tail, sizeof tail,
+                  " (task 0x%llx) started as a resident task (the watchdog names it only after its cancellation is "
+                  "asked); resident tasks now hold %u of %u LongRunning threads",
+                  static_cast<unsigned long long>(n.task), n.held, n.long_running);
+    return "kiln.tasks: " + owner + "/" + n.name + tail;
+}
 
 }  // namespace kiln::tasks
 

@@ -73,13 +73,25 @@ using WatchFn = void (*)(const Watch&, void* user);
 
 // A worker kind lost its last worker (a replacement's start failed: queued work waits for a retried start), or got
 // one back. Said once each way, from the maintenance thread outside every lock; admission is the capability's.
+// ResidentStarted: a resident task's body (SubmitArgs.resident) starts for the first time. Said once per task, on the
+// worker that runs it, just before the body, outside every lock: it holds a LongRunning thread on purpose, and the
+// watchdog will not name it while it runs, so kiln.log says so once (resident_started_line).
 struct PoolNote {
-    enum class Kind : uint32_t { SlotLost, SlotRecovered };
-    Kind kind;
-    Slot slot;
-    std::size_t queued;  // work ready to run, all owners, when it was noted
+    enum class Kind : uint32_t { SlotLost, SlotRecovered, ResidentStarted };
+    Kind kind = Kind::SlotLost;
+    Slot slot = Slot::Normal;
+    std::size_t queued = 0;  // SlotLost / SlotRecovered: work ready to run, all owners, when it was noted
+    // ResidentStarted only:
+    KilnOwner owner = 0;
+    KilnHandle task = 0;
+    std::string owner_name;     // the owner's bounded name
+    std::string name;           // the task's name
+    uint32_t held = 0;          // LongRunning threads that resident bodies hold now, this one included
+    uint32_t long_running = 0;  // the pool's LongRunning threads
 };
 using NoteFn = void (*)(const PoolNote&, void* user);
+// The kiln.log line for a ResidentStarted note (services/tasks.cpp writes it as an info line).
+std::string resident_started_line(const PoolNote& note);
 
 class Pool {
 public:

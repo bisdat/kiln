@@ -113,6 +113,9 @@ and `submit_in`, which only decide when it starts and when `cancelled()` turns 1
   asked (`cancel`, `drain_owner`, a revoke, a `submit_in` task's session ending, the process exit) the watchdog counts
   as for any task: still running `watchdog_running_s` (30 s by default) later, it is reported once ("still running ...
   after its cancellation was asked"). A queued resident task is reported like any queued one.
+- Its first start writes one info line to `kiln.log`, with the owner, the task and how many of the pool's
+  LongRunning threads resident tasks hold now, since the watchdog stays quiet about it while it runs:
+  `kiln.tasks: <mod>/<task> (task 0x…) started as a resident task (...); resident tasks now hold 1 of 8 LongRunning threads`.
 - `tick-stats.jsonl` counts it as running, but its body's time adds nothing to `cpu_ms` / `wall_ms` and is never the
   window's longest segment: one segment that lasts the whole session would say nothing useful there.
 - Priority, caps, `drain_owner`, faults and exit are exactly as for any LongRunning task. At exit the pool waits only

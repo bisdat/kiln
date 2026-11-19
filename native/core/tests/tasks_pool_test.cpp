@@ -6,6 +6,7 @@
 // clock. Built twice by test-tasks.sh (ASan/UBSan and TSan); `tasks_pool_test <name>` runs one test.
 #include <atomic>
 #include <condition_variable>
+#include <cstdio>
 #include <deque>
 #include <functional>
 #include <mutex>
@@ -1608,6 +1609,101 @@ KILN_TASKS_TEST(resident_drain_and_exit_park) {
     stuck.release.open();
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     check(parked.done_calls.load() == 0 && stuck.done_calls.load() == 0, "no done runs once the pool parked");
+}
+
+// A resident task's first body start is noted once (PoolNote::ResidentStarted, kiln.log's info line), on its worker
+// before its body, with its owner, its name and the LongRunning threads resident bodies hold now, of the pool's. A
+// plain LongRunning task is not noted, a resident lease's later segment is not noted again, and a resident body that
+// returned gives its thread back to the count.
+KILN_TASKS_TEST(resident_start_noted_once) {
+    HostPlatform platform;
+    Job loop, plain, worker, lease, later;  // before the pool: a released body still reads its job on its way out
+    loop.platform = plain.platform = worker.platform = lease.platform = later.platform = &platform;
+    struct Notes {
+        std::mutex mutex;
+        std::vector<PoolNote> seen;
+        std::vector<PoolNote> resident() {
+            std::lock_guard lock(mutex);
+            std::vector<PoolNote> r;
+            for (const PoolNote& n : seen)
+                if (n.kind == PoolNote::Kind::ResidentStarted) r.push_back(n);
+            return r;
+        }
+    } notes;
+    Pool pool(config(1, 4), &platform);
+    pool.set_note_sink(+[](const PoolNote& n, void* user) {
+        auto* s = static_cast<Notes*>(user);
+        std::lock_guard lock(s->mutex);
+        s->seen.push_back(n);
+    }, &notes);
+    pool.open_owner(1, "mod.service");
+    pool.open_owner(2, "mod.other");
+    pool.open_owner(3, "mod.host");
+    pool.open_owner(4, "mod.late");
+    std::atomic<std::size_t> noted_before_body{99};
+    loop.extra = [&](const TaskRun*) { noted_before_body = notes.resident().size(); };
+    const KilnHandle lh = submit(pool, 1, resident("loop"), loop);
+    check(until([&] { return loop.body_runs.load() == 1; }), "the resident body runs");
+    check(noted_before_body.load() == 1, "its start was noted before its body ran");
+    std::vector<PoolNote> r = notes.resident();
+    check(r.size() == 1 && r[0].owner == 1 && r[0].task == lh && r[0].name == "loop" && r[0].owner_name == "mod.service" &&
+              r[0].slot == Slot::LongRunning && r[0].held == 1 && r[0].long_running == 4,
+          "one note: its owner, its task, 1 of the pool's 4 LongRunning threads held");
+    if (!r.empty()) {
+        char expect[256];
+        std::snprintf(expect, sizeof expect,
+                      "kiln.tasks: mod.service/loop (task 0x%llx) started as a resident task (the watchdog names it only "
+                      "after its cancellation is asked); resident tasks now hold 1 of 4 LongRunning threads",
+                      static_cast<unsigned long long>(lh));
+        const std::string line = resident_started_line(r[0]);
+        check(line == expect, "the kiln.log line: '" + line + "'");
+    }
+    submit(pool, 1, named("plain", Priority::Normal, true), plain);
+    check(until([&] { return plain.body_runs.load() == 1; }), "a plain LongRunning task runs beside it");
+    const KilnHandle wh = submit(pool, 2, resident("worker"), worker);
+    check(until([&] { return worker.body_runs.load() == 1; }), "another owner's resident body runs");
+    r = notes.resident();
+    check(r.size() == 2 && r[1].task == wh && r[1].owner_name == "mod.other" && r[1].held == 2,
+          "the plain one is not noted; the second resident start: 2 held");
+    // a resident lease: its first segment arms a resumption and returns, the host resumes it, the next segment finishes
+    lease.pool = &pool;
+    lease.arm_on_run.store(true);
+    lease.release.open();
+    SubmitArgs a = resident("lease");
+    a.lease = true;
+    const KilnHandle sh = submit(pool, 3, a, lease);
+    check(until([&] { return lease.registration.load() != 0 && pool.items_in_hand() == 3; }),
+          "the lease's first segment armed a resumption and returned: suspended (3 bodies still in hand)");
+    r = notes.resident();
+    check(r.size() == 3 && r[2].task == sh && r[2].held == 3, "the lease's first segment: noted, 3 held");
+    lease.arm_on_run.store(false);
+    std::atomic<KilnResult> finished{KILN_ERR_INTERNAL};
+    lease.after_release = [&] { finished = pool.finish(sh, Outcome::Completed); };
+    check(pool.resume(sh, lease.registration.load()) == KILN_OK, "the host resumes it");
+    check(until([&] { return lease.done_calls.load() == 1; }) && lease.body_runs.load() == 2 && finished.load() == KILN_OK,
+          "its second segment ran and finished it");
+    check(notes.resident().size() == 3, "the lease's second segment is not noted again");
+    loop.release.open();
+    check(until([&] { return loop.done_calls.load() == 1; }), "the first resident body returned");
+    const KilnHandle th = submit(pool, 4, resident("later"), later);
+    check(until([&] { return later.body_runs.load() == 1; }), "a later resident body runs");
+    r = notes.resident();
+    check(r.size() == 4 && r[3].task == th && r[3].held == 2,
+          "its note counts only the resident bodies still running (the worker and itself: 2)");
+    PoolNote unnamed;
+    unnamed.kind = PoolNote::Kind::ResidentStarted;
+    unnamed.owner = 7;
+    unnamed.task = 0x2a;
+    unnamed.name = "x";
+    unnamed.held = 1;
+    unnamed.long_running = 8;
+    check(resident_started_line(unnamed).rfind("kiln.tasks: owner 7/x (task 0x2a) started as a resident task", 0) == 0,
+          "an owner without a name is named by its id");
+    plain.release.open();
+    worker.release.open();
+    later.release.open();
+    check(until([&] { return pool.counts().outstanding == 0; }), "quiescent");
+    pool.set_note_sink(nullptr, nullptr);
 }
 }  // namespace
 

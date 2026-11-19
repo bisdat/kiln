@@ -40,6 +40,9 @@ for kind in asan tsan; do
     if [[ $rc != 0 && $rc != 2 ]]; then exit "$rc"; fi
   done
 done
+# the binding writes a resident task's start as the pool formats it (resident_start_noted_once reads that text)
+grep -qF 'KLOG_I("%s", tasks::resident_started_line(n).c_str());' "$here/../src/services/tasks.cpp" ||
+  { echo "FAIL services/tasks.cpp does not write tasks::resident_started_line as an info line"; exit 1; }
 # the core's calls into kiln.tasks at the server world's start, Post and STOPPING (tick.cpp, checked as source)
 "$cxx" -std=c++20 -O1 -Wall -Wextra -Werror "$here/tasks_wiring_test.cpp" -o "$out/tasks_wiring_test"
 "$out/tasks_wiring_test" "$here/../src/tick.cpp" | grep -v '^ok'

@@ -150,8 +150,13 @@ void log_watch(const tasks::Watch& w, void*) {
            static_cast<double>(w.age_ns) / 1e9);
 }
 
-// A worker kind that lost its last worker (or got one back): one kiln.log line each way.
+// A worker kind that lost its last worker (or got one back): one kiln.log line each way. A resident task's first
+// start: one info line (on its worker, before its body), with the LongRunning threads resident tasks hold.
 void log_note(const tasks::PoolNote& n, void*) {
+    if (n.kind == tasks::PoolNote::Kind::ResidentStarted) {
+        KLOG_I("%s", tasks::resident_started_line(n).c_str());
+        return;
+    }
     const char* kind = n.slot == tasks::Slot::Normal ? "normal" : "LongRunning";
     if (n.kind == tasks::PoolNote::Kind::SlotLost)
         KLOG_E("kiln.tasks: the %s task workers lost their last worker (its replacement could not start); %zu queued "
