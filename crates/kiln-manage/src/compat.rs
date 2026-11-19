@@ -321,6 +321,30 @@ pub fn file_name(p: &str) -> &str {
     p.rsplit(['\\', '/']).next().unwrap_or(p)
 }
 
+/// True when chain entry path `entry` (as chain.ini names it: absolute, or relative to the kiln folder like
+/// `chain\x\x.dll` and `..\x.dll`) is the module hooks.json's `path` names (relative to the game folder, else the full
+/// path). Case and separators are ignored; one must end with the other at a folder boundary, and a bare file name (a
+/// module in the game folder itself) only matches a bare file name: it would match every entry of that name otherwise.
+pub fn path_names_entry(entry: &str, path: &str) -> bool {
+    fn norm(p: &str) -> String {
+        let p = p.strip_prefix("\\\\?\\").unwrap_or(p);
+        let mut s = p.replace('\\', "/").to_ascii_lowercase();
+        while let Some(rest) = s.strip_prefix("../").or_else(|| s.strip_prefix("./")) {
+            s = rest.to_string();
+        }
+        s
+    }
+    let (e, p) = (norm(entry), norm(path));
+    if e.is_empty() || p.is_empty() {
+        return false;
+    }
+    if !e.contains('/') || !p.contains('/') {
+        return e == p;
+    }
+    let (long, short) = if e.len() >= p.len() { (&e, &p) } else { (&p, &e) };
+    long.ends_with(short.as_str()) && (long.len() == short.len() || short.starts_with('/') || long.as_bytes()[long.len() - short.len() - 1] == b'/')
+}
+
 /// `*` (any run) and `?` (one character) glob, ASCII case ignored.
 pub fn glob(pattern: &str, name: &str) -> bool {
     // no file name is longer (Windows: 255), and rules are checked to be short: bounds the work of a match
@@ -693,6 +717,10 @@ pub struct ForeignDest {
     pub own: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub in_place: bool,
+    /// dev.29.19: the module's file, relative to the game folder ("kiln/chain/xhl-core/xhl-core.dll"), else its full path;
+    /// empty from an older core. Tells two chain entries with one file name apart ([`path_names_entry`]).
+    #[serde(default, deserialize_with = "null_string", skip_serializing_if = "String::is_empty")]
+    pub path: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1252,6 +1280,14 @@ fn overlap_view(o: Overlap, entries: &[ChainViewEntry], lib: &[crate::library::L
     } else {
         entries.iter().filter(|e| e.entry.file.eq_ignore_ascii_case(file_name(&module))).collect()
     };
+    // dev.29.19: hooks.json's `path` picks the one at that path, when exactly one is
+    let named = match o.foreign.as_ref().map(|f| f.path.as_str()).filter(|p| !p.is_empty()) {
+        Some(path) if named.len() > 1 => {
+            let at: Vec<&ChainViewEntry> = named.iter().copied().filter(|e| path_names_entry(&e.entry.path, path)).collect();
+            if at.len() == 1 { at } else { named }
+        }
+        _ => named,
+    };
     let ambiguous = named.len() > 1;
     let hit = if ambiguous { None } else { named.first().copied() };
     let library = match hit.and_then(|e| e.entry.mod_id.as_ref()) {
@@ -1709,6 +1745,36 @@ mod tests {
         let two = overlap_view(overlap, &[v("chain\\hook.dll", Section::Chain, None), v("Z:\\a\\hook.dll", Section::Profile, Some("a"))], &[], &|_| false);
         assert_eq!((two.fix.as_str(), two.entry.as_deref()), ("none", None));
         assert!(two.hint.contains("2 chain entries"), "{}", two.hint);
+    }
+
+    /// netjunk's report (2026-11-20): ShroudLink's player addon and Building Tools, both a Library dinput8.dll. hooks.json's
+    /// `path` (the core's module_place.h: relative to the game folder, else the full path) tells them apart.
+    #[test]
+    fn the_hooks_json_path_picks_one_of_two_entries_with_one_file_name() {
+        let v = |path: &str, section, mod_id: Option<&str>| ChainViewEntry {
+            entry: entry(path, section, None, mod_id), late: false, late_by: None, off_by: None, early_by: None, loader: false, gated: false,
+        };
+        let overlap = |module: &str, path: &str| Overlap {
+            symbol: "S".into(), rva: "0x1".into(), kind: OverlapKind::ForeignBefore, owners: vec!["kiln.chat".into()], hook: None,
+            foreign: Some(ForeignDest { module: module.into(), offset: "0x1".into(), path: path.into(), ..Default::default() }),
+        };
+        let addon = "C:\\Users\\p\\AppData\\Local\\Kiln\\library\\native\\player-addon\\0.0.0+9b0759ea\\dinput8.dll";
+        let tools = "C:\\Users\\p\\AppData\\Local\\Kiln\\library\\native\\building-tools\\0.0.0+26bc47c7\\dinput8.dll";
+        let both = [v(addon, Section::Profile, Some("player-addon")), v(tools, Section::Profile, Some("building-tools"))];
+        let view = overlap_view(overlap("dinput8.dll", tools), &both, &[], &|_| false);
+        assert_eq!((view.fix.as_str(), view.entry.as_deref()), ("late", Some(tools)), "{}", view.hint);
+        // the case and separators of the path text do not matter
+        let view = overlap_view(overlap("DINPUT8.dll", &addon.to_lowercase().replace('\\', "/")), &both, &[], &|_| false);
+        assert_eq!(view.entry.as_deref(), Some(addon), "{}", view.hint);
+        // a game-relative path and a [chain] entry relative to kiln/
+        let chain = [v("chain\\xhl-core\\hook.dll", Section::Chain, None), v("Z:\\a\\hook.dll", Section::Profile, Some("a"))];
+        let view = overlap_view(overlap("hook.dll", "kiln/chain/xhl-core/hook.dll"), &chain, &[], &|_| false);
+        assert_eq!(view.entry.as_deref(), Some("chain\\xhl-core\\hook.dll"), "{}", view.hint);
+        // a module in the game folder itself, or a path neither entry has: still the two-entries hint
+        for path in ["hook.dll", "D:\\elsewhere\\hook.dll", "kiln/chain/other/hook.dll"] {
+            let view = overlap_view(overlap("hook.dll", path), &chain, &[], &|_| false);
+            assert!(view.entry.is_none() && view.hint.contains("2 chain entries"), "{path}: {}", view.hint);
+        }
     }
 
     fn view_entry(path: &str, section: Section, off_by: Option<&str>, late: bool) -> ChainViewEntry {

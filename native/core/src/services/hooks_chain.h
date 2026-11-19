@@ -49,6 +49,7 @@ struct Dest {
     bool in_place = false;      // bytes changed but no jump decoded
     uintptr_t address = 0;      // final destination reached (0 when none)
     std::string module;         // file name of the module containing it ("" = none/unknown)
+    std::string path;           // its file (module_place.h): relative to the game folder, else the full path ("" = unknown)
     uintptr_t offset = 0;       // address - module base
     bool own = false;           // the module is one of Kiln's ("kiln-*.dll")
 };
@@ -62,6 +63,7 @@ struct Env {
     std::string (*symbol_at)(uintptr_t a) = nullptr;     // sigdb symbol name of an address ("" = none)
     std::string (*owner_name)(KilnOwner o) = nullptr;     // registry name of an owner
     uintptr_t image_lo = 0, image_hi = 0;                 // the exe's range: jumps ending outside it are "foreign"
+    std::string game_dir;                                 // the game folder (UTF-8): Dest::path is relative to it
     void (*changed)() = nullptr;                          // links changed (mutex held: only arm a timer)
 };
 

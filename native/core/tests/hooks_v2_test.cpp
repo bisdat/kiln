@@ -85,6 +85,11 @@ const ImageInfo& image() { return g_image; }
 const Paths& paths() {
     static Paths p;
     p.state = g_state_dir;
+    if (p.game.empty()) {  // as init_paths: the test exe's folder plays the game folder
+        wchar_t exe[MAX_PATH];
+        const DWORD n = GetModuleFileNameW(nullptr, exe, MAX_PATH);
+        p.game = std::filesystem::path(std::wstring(exe, n)).parent_path();
+    }
     return p;
 }
 std::string to_utf8(std::wstring_view w) {
@@ -1421,6 +1426,8 @@ void test_foreign() {
         const size_t over = chain::check_foreign();
         check(over == 1, "check_foreign: one target hooked over", std::to_string(over));
         check(log_has("hooked over Kiln's t/fo (test)"), "kiln.log: \"<module> hooked over Kiln's <label> (<owner>)\"");
+        check(log_has(" [game folder] hooked over Kiln's t/fo (test)"),
+              "kiln.log: the module's file follows its name (\"<module>+0x.. [game folder] hooked over\"; two DLLs can share a name)");
         KilnHooksStats st{};
         st.size = sizeof st;
         A->stats(&st);
@@ -1443,6 +1450,8 @@ void test_foreign() {
                 saw_over = true;
                 check(lower(t["foreignOver"].value("module", "")) == exe_name_lower(), "map: foreignOver names the module",
                       t["foreignOver"].dump());
+                check(lower(t["foreignOver"].value("path", "")) == exe_name_lower(),
+                      "map: foreignOver's path is relative to the game folder", t["foreignOver"].dump());
             }
             check(t.contains("rva") && t.contains("symbol") && t.contains("label") && t["links"].is_array(), "map: target has rva/symbol/label/links");
             for (auto& l : t["links"])

@@ -164,8 +164,13 @@ After boot and at the first world, never per frame, Kiln checks that each target
 If another module hooked over it:
 
 ```
-[kiln] hooks: xhl.dll+0x4410 hooked over Kiln's chat/ChatLogAdd (kiln-chat) (Kiln's detour stays armed; it is reached through their jump)
+[kiln] hooks: xhl.dll+0x4410 [mods/xhl/xhl.dll] hooked over Kiln's chat/ChatLogAdd (kiln-chat) (Kiln's detour stays armed; it is reached through their jump)
 ```
+
+The bracket after `<module>+0x...` names the module's file (since 0.2.0-dev.29.19): its path relative to the game folder,
+`[game folder]` for one in the game folder itself, or its full path outside it (a Library DLL, whose folder names the
+mod). Two DLLs can share a file name (two Library `dinput8.dll`); the map's `foreignBefore`/`foreignOver` carry the same
+text as `path`.
 
 The map records `foreignOver`. Kiln never writes over that target again, and never removes the other module's jump.
 Kiln does not unhook its own detours (an empty chain just calls the real function).

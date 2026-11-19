@@ -673,6 +673,7 @@ bool ensure_ready() {
     env.owner_name = &env_owner_name;
     env.image_lo = image().base;
     env.image_hi = image().base + image().size;
+    env.game_dir = u8(paths().game);
     env.changed = &map_changed;
     return chain::init(env);
 }

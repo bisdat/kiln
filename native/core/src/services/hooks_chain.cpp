@@ -21,6 +21,7 @@
 // count, owner and label equal a revoked link's revives that link (same slot, same stubs, a new handle) instead of
 // taking a new slot; see revive() for why a call still in flight through the old incarnation stays correct.
 #include "hooks_chain.h"
+#include "module_place.h"
 #include "hooks_patch_policy.h"
 #include "hooks_code.h"
 #include "hooks_typed_result.h"
@@ -543,6 +544,7 @@ bool module_of(uintptr_t a, Dest& d) {
     const DWORD n = GetModuleFileNameW(mod, path, MAX_PATH);
     if (!n) return false;
     std::wstring w(path, n);
+    d.path = module_path_text(to_utf8(w), S().env.game_dir);
     const size_t slash = w.find_last_of(L"\\/");
     if (slash != std::wstring::npos) w.erase(0, slash + 1);
     d.module = to_utf8(w);
@@ -619,7 +621,7 @@ Dest analyze(uintptr_t at, const uint8_t* bytes) {
 namespace {
 
 std::string dest_text(const Dest& d) {
-    if (!d.module.empty()) return d.module + "+" + hex(d.offset);
+    if (!d.module.empty()) return d.module + "+" + hex(d.offset) + module_place_suffix(d.path);
     if (d.address) return "an unnamed jump target " + hex(d.address);
     return "patched bytes";
 }
@@ -628,6 +630,7 @@ json dest_json(const Dest& d) {
     json j;
     j["module"] = d.module;
     j["offset"] = hex(d.offset);
+    if (!d.path.empty()) j["path"] = d.path;
     if (d.address) j["address"] = hex(d.address);
     if (d.in_place) j["inPlace"] = true;
     j["own"] = d.own;
