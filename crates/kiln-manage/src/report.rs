@@ -525,7 +525,7 @@ pub struct Finding {
     /// Stable name: `not-installed`, `proxy-not-kiln`, `files-missing`, `files-changed`, `not-loaded`,
     /// `proton-override`, `proton-chained-override`, `unknown-build`, `safe-idle`, `own-loader`, `loader-in-folder`, `unlisted-mods`,
     /// `mod-failed`, `hosted-mods`, `hosted-off`, `crash`, `profile-invalid`, `newer-mods`, `no-game`, `sf-startup-failed`, `sf-startup-skipped`,
-    /// `optiscaler`; from the launcher ([`ReportInput::findings`]): `webkit-sandbox`.
+    /// `optiscaler`, `install-blocked`; from the launcher ([`ReportInput::findings`]): `webkit-sandbox`.
     pub id: String,
     pub level: Level,
     pub text: String,
@@ -1211,6 +1211,8 @@ pub fn build(input: &ReportInput) -> Report {
         }
     }
     check_install(&mut cx, &game, receipt.as_ref(), dinput8.as_ref());
+    facts.game = Some(game.to_path_buf());
+    facts.receipt_at = receipt.as_ref().and_then(|r| crate::util::parse_rfc3339(r.updated.as_deref().unwrap_or(&r.installed)));
     let _ = writeln!(k, "Proxies next to the game:");
     if proxies.is_empty() {
         let _ = writeln!(k, "  (none)");
@@ -1680,6 +1682,10 @@ struct Facts {
     last_start: Option<String>,
     /// Mods on in the active profile (every kind).
     mods_on: Option<usize>,
+    /// The game folder, for the launcher.log check of a blocked install (`install-blocked`).
+    game: Option<PathBuf>,
+    /// When the receipt was written last (an install, update or Repair that worked), Unix seconds.
+    receipt_at: Option<i64>,
 }
 
 fn plural(n: usize, one: &str, many: &str) -> String {
@@ -1854,6 +1860,19 @@ fn check_install(cx: &mut Ctx, game: &Path, receipt: Option<&InstallReceipt>, di
     }
 }
 
+/// (dev.29.18, inbox 92) The last install, update, Repair or rollback of Kiln in this game folder failed because Windows
+/// refused one of Kiln's DLLs or exes (an antivirus, or another program: crate::blocked), as launcher.log says, and no
+/// install worked since (the receipt is older, or there is none).
+fn check_blocked_install(cx: &mut Ctx, launcher_log: &str, facts: &Facts) {
+    let Some(game) = facts.game.as_deref() else { return };
+    let Some(l) = crate::blocked::last_in_log(launcher_log, game) else { return };
+    let at = crate::util::parse_rfc3339(&l.at);
+    if facts.receipt_at.is_some_and(|r| at.is_none_or(|a| r >= a)) {
+        return;
+    }
+    cx.find("install-blocked", Level::Problem, crate::blocked::finding_text(&l));
+}
+
 /// Other engines' own loaders under the proxy names the game loads (EML's dbghelp.dll, SET's powrprof.dll ...).
 /// `ran`: the kinds whose plugin wrote at the last start that it did not stand aside (kiln-greeneye: the loader's
 /// claim was not there): the loader file is in the folder but did not start, and Kiln ran its mods itself.
@@ -1973,7 +1992,10 @@ fn finish(mut cx: Ctx, mut s: String, sys: String, body: String, input: &ReportI
     let llog = input.launcher_log.clone().or_else(|| dirs.map(|d| d.logs().join("launcher.log")));
     if let Some(p) = llog {
         match tail(&p, SMALL_LOG_MAX) {
-            Ok(Some((t, cut))) => cx.add_text("launcher/launcher.log", &t, cut.then_some("... (older lines left out)")),
+            Ok(Some((t, cut))) => {
+                check_blocked_install(&mut cx, &t, facts);
+                cx.add_text("launcher/launcher.log", &t, cut.then_some("... (older lines left out)"))
+            }
             Ok(None) => {}
             Err(e) => cx.err("launcher.log", format!("could not read: {e}")),
         }

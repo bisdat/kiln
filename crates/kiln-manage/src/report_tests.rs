@@ -519,6 +519,45 @@ fn files_missing_or_changed_against_the_receipt() {
     assert!(finding(&r, "files-changed").text.contains("kiln/Kiln.Host.dll"));
 }
 
+/// Inbox 92 (a player on Windows 11): an antivirus held kiln-greeneye.dll while Kiln installed it, the install failed with
+/// "Access is denied. (os error 5)" and was undone, and the report said only "Kiln is not installed". launcher.log had the
+/// cause: the report now says it (`install-blocked`), until an install works (a newer receipt).
+#[test]
+fn an_install_windows_refused_a_dll_of_is_a_finding_until_an_install_works() {
+    let f = Fx::new("blocked");
+    f.w("enshrouded.exe", b"MZ");
+    let log = f.root.join("data/logs/launcher.log");
+    std::fs::create_dir_all(log.parent().unwrap()).unwrap();
+    // a 0.2.0-dev.29.18 launcher's lines: the error's detail after its words (this test's folder is a Linux path, so
+    // the words alone would not count: 5 is no refusal there; blocked.rs has the Windows lines of older launchers)
+    let failed = |at: &str, game: &Path| format!(
+        "{at} task: runtime_install-3-6afe2bc4 started: Install Kiln 0.2.0-dev.29.18\n\
+         {at} task: runtime_install-3-6afe2bc4 failed: [permission] installing {}/kiln/plugins/kiln-greeneye.dll: Access is denied. (os error 5) \
+         {{\"blocked\":{{\"osError\":5,\"path\":\"kiln/plugins/kiln-greeneye.dll\"}}}} (last step: installed kiln/plugins/kiln-flame.dll)\n\
+         {at} update: automatic check (dev): up to date (frostdev.io)\n", game.display());
+    std::fs::write(&log, failed("2026-11-18T23:58:08Z", &f.game)).unwrap();
+    let r = build(&f.input());
+    let b = finding(&r, "install-blocked");
+    assert_eq!(b.level, Level::Problem);
+    assert!(b.text.starts_with("The last Kiln install in this game folder (Install Kiln 0.2.0-dev.29.18, 2026-11-18T23:58:08Z) failed because Windows denied access to kiln/plugins/kiln-greeneye.dll (os error 5)."), "{}", b.text);
+    assert!(b.text.contains("An antivirus or another program may be blocking the file"), "{}", b.text);
+    assert!(ids(&r).contains(&"not-installed"), "the receipt's own finding stays: {:?}", ids(&r));
+    assert!(r.summary.contains("kiln-greeneye.dll (os error 5)") && r.short.contains("kiln-greeneye.dll (os error 5)"), "{}", r.short);
+    assert!(file(&r, "launcher/launcher.log").is_some_and(|t| t.contains("os error 5")), "the raw line stays in the log");
+    // another game folder's failure is not this one's
+    std::fs::write(&log, failed("2026-11-18T23:58:08Z", &f.root.join("EnshroudedServer"))).unwrap();
+    assert!(!ids(&build(&f.input())).contains(&"install-blocked"));
+
+    // Kiln installed: a failed update after the receipt is found, one before it is over (an install worked since)
+    let h = Fx::healthy("blocked-update");
+    let log = h.root.join("data/logs/launcher.log");
+    std::fs::create_dir_all(log.parent().unwrap()).unwrap();
+    std::fs::write(&log, failed("2026-11-18T23:58:08Z", &h.game)).unwrap();
+    assert_eq!(ids(&build(&h.input())), ["install-blocked"]);
+    std::fs::write(&log, failed("2026-11-09T23:58:08Z", &h.game)).unwrap();
+    assert_eq!(ids(&build(&h.input())), Vec::<&str>::new());
+}
+
 #[test]
 fn kiln_did_not_load() {
     // the game ran (its log is there) and Kiln's proxy never wrote anything
