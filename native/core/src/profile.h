@@ -43,10 +43,11 @@ struct Missing {
 // each engine's plugin reads its own list from json(). The core validates them like the others (a broken entry makes
 // the profile INVALID), counts them for kiln.log and boot.json, and reports missing folders. Internal kind numbers
 // for Missing: KILN_PROFILE_KINDS + index into kEngineKinds.
-inline constexpr uint32_t kEngineKindCount = 9;
+inline constexpr uint32_t kEngineKindCount = 10;
 inline constexpr const char* kEngineKinds[kEngineKindCount] = {"eml",         "shroudforge", "set",
                                                                "greeneye",    "flame",       "shroudtopia",
-                                                               "enshwick",    "shroudlink",  "ember"};
+                                                               "enshwick",    "shroudlink",  "ember",
+                                                               "dllmod"};
 
 struct State {
     uint32_t mode = KILN_PROFILE_LEGACY;
