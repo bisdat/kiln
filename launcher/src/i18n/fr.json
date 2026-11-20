@@ -2850,7 +2850,7 @@
       "upscaler": {
         "title": "Derrière le FSR 3 du jeu",
         "label": "Mise à l'échelle",
-        "hint": "Choisissez FSR 3 comme mise à l'échelle dans les paramètres graphiques du jeu : Kiln exécute votre choix à sa place. Un changement s'applique la prochaine fois que le jeu prépare le FSR : au chargement d'un monde, ou quand vous changez la qualité du FSR, la résolution ou l'échelle de rendu 3D. Choisi pour la première fois pendant que le jeu tourne, il s'applique à partir du prochain lancement du jeu.",
+        "hint": "Choisissez FSR 3 comme mise à l'échelle dans les paramètres graphiques du jeu : Kiln exécute votre choix à sa place. Un changement s'applique tout de suite pendant que le FSR 3 tourne dans un monde, sinon au chargement d'un monde. Choisi pour la première fois pendant que le jeu tourne, il s'applique à partir du prochain lancement du jeu.",
         "choice": {
           "game": "Le FSR 3 du jeu",
           "amd": "AMD FSR",
@@ -2906,7 +2906,7 @@
           "noSignatures": "Kiln ne connaît pas encore le FSR 3 de cette version du jeu, c'est donc le FSR 3 du jeu qui tourne. Une mise à jour de Kiln pour cette version du jeu corrigera cela.",
           "inputs": "Les images du jeu ne sont pas celles qu'attend {upscaler}, c'est donc le FSR 3 du jeu qui tourne.",
           "unavailable": "{upscaler} n'est pas disponible dans cette version de Kiln ou sur ce système, c'est donc le FSR 3 du jeu qui tourne.",
-          "waiting": "{upscaler} est prêt. Il démarre la prochaine fois que le jeu prépare le FSR 3 : chargez un monde, ou changez la qualité du FSR dans les paramètres du jeu.",
+          "waiting": "{upscaler} est prêt. Il démarre dès que le jeu exécute le FSR 3 : chargez un monde avec le FSR 3 choisi dans les paramètres graphiques du jeu.",
           "noVulkan": "Kiln n'a pas vu le jeu préparer son périphérique graphique dans cette session. Redémarrez le jeu pour {upscaler}.",
           "unknown": "{upscaler} ne tourne pas (raison {number} venant d'une version plus récente de Kiln), c'est donc le FSR 3 du jeu qui tourne."
         },

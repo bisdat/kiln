@@ -1010,7 +1010,7 @@
       "amd_auto": "Auto (FSR 4 onde roda)",
       "amd_fsr3": "FSR 3.1",
       "amd_hint": "Auto deixa a AMD escolher: FSR 4 em placas de vídeo e drivers que o rodam, FSR 3.1 nas outras. FSR 3.1 mantém o FSR 3.1 mesmo onde o FSR 4 rodaria.",
-      "hint": "Escolha FSR 3 como upscaler nas configurações gráficas do jogo: o Kiln roda a sua escolha no lugar dele. Uma mudança vale quando o jogo preparar o FSR de novo: quando um mundo carrega, ou quando você muda a qualidade do FSR, a resolução ou a escala de renderização 3D. O Kiln precisa dos arquivos do fabricante para o AMD FSR e o Intel XeSS; o Kiln Launcher os baixa (Configurações, Gráficos).",
+      "hint": "Escolha FSR 3 como upscaler nas configurações gráficas do jogo: o Kiln roda a sua escolha no lugar dele. Uma mudança vale na hora enquanto o FSR 3 roda em um mundo; se não, quando um mundo carrega. O Kiln precisa dos arquivos do fabricante para o AMD FSR e o Intel XeSS; o Kiln Launcher os baixa (Configurações, Gráficos).",
       "files": {
         "present": "{name} {version}: os arquivos estão em {folder}.",
         "missing": "Os arquivos do {name} ainda não estão neste jogo. Baixe-os no Kiln Launcher (Configurações, Gráficos) com o jogo fechado. Até lá, roda o FSR 3 do próprio jogo.",
@@ -1042,7 +1042,7 @@
         "no_signatures": "O Kiln ainda não conhece o FSR 3 desta build do jogo, então roda o FSR 3 do próprio jogo. Uma atualização do Kiln para esta build resolve isso.",
         "inputs": "As imagens do jogo não são o que o {upscaler} aceita, então roda o FSR 3 do próprio jogo.",
         "unavailable": "O {upscaler} não está disponível nesta build do Kiln ou neste sistema, então roda o FSR 3 do próprio jogo.",
-        "waiting": "O {upscaler} está pronto. Ele começa quando o jogo preparar o FSR 3 de novo: carregue um mundo ou mude a qualidade do FSR nas configurações do jogo.",
+        "waiting": "O {upscaler} está pronto. Ele começa assim que o jogo rodar o FSR 3: carregue um mundo com o FSR 3 escolhido nas configurações gráficas do jogo.",
         "no_vulkan": "O Kiln não viu o jogo preparar o dispositivo gráfico nesta sessão. Reinicie o jogo para o {upscaler}.",
         "unknown": "O {upscaler} não roda (motivo {number}, de um Kiln mais novo), então roda o FSR 3 do próprio jogo."
       }

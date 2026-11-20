@@ -290,6 +290,18 @@ static void calls() {
 }
 
 static StatusOut st(StatusIn in) { return decide_status(in); }
+// A choice changed in the game applies at the next FSR frame, not only at the game's next FSR 3 set-up: the game does
+// not set FSR 3 up again for every quality change (SleepyPuppy at native AA, 29.19 beta 1: AMD FSR stayed "ready").
+static void latch() {
+    const uint32_t game = static_cast<uint32_t>(Choice::game), amd = static_cast<uint32_t>(Choice::amd);
+    const uint32_t autop = static_cast<uint32_t>(AmdPin::automatic), fsr3 = static_cast<uint32_t>(AmdPin::fsr3);
+    CHECK(!latch_at_frame(false, game, autop, amd, autop));  // no set-up seen yet: the game's first Fsr3Create latches
+    CHECK(!latch_at_frame(true, amd, autop, amd, autop));    // nothing changed
+    CHECK(latch_at_frame(true, game, autop, amd, autop));    // back to AMD FSR after "the game's own"
+    CHECK(latch_at_frame(true, amd, autop, game, autop));    // to the game's own: its FSR 3 at once
+    CHECK(latch_at_frame(true, amd, autop, amd, fsr3));      // the FSR 3.1 pin
+}
+
 static void status() {
     StatusIn in;
     // "game" chosen, nothing hooked: off, no reason
@@ -541,6 +553,7 @@ int main(int argc, char** argv) {
     frames();
     calls();
     status();
+    latch();
     amd_map();
     std::printf("upscale_test: %d checks passed\n", g_checks);
     return 0;

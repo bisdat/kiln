@@ -1022,7 +1022,7 @@
       "amd_auto": "Auto (FSR 4 tam, gdzie działa)",
       "amd_fsr3": "FSR 3.1",
       "amd_hint": "Auto pozwala wybrać AMD: FSR 4 na kartach graficznych i sterownikach, które go obsługują, FSR 3.1 na pozostałych. FSR 3.1 zostaje przy FSR 3.1 nawet tam, gdzie działałby FSR 4.",
-      "hint": "Wybierz FSR 3 jako metodę skalowania w ustawieniach grafiki gry: Kiln uruchomi w jego miejsce twój wybór. Zmiana działa, gdy gra następnym razem przygotuje FSR: gdy wczytuje się świat albo gdy zmienisz jakość FSR, rozdzielczość lub skalę renderowania 3D. Kiln potrzebuje plików producenta dla AMD FSR i Intel XeSS; launcher Kiln je pobiera (Ustawienia, Grafika).",
+      "hint": "Wybierz FSR 3 jako metodę skalowania w ustawieniach grafiki gry: Kiln uruchomi w jego miejsce twój wybór. Zmiana działa od razu, gdy FSR 3 pracuje w świecie, a w przeciwnym razie po wczytaniu świata. Kiln potrzebuje plików producenta dla AMD FSR i Intel XeSS; launcher Kiln je pobiera (Ustawienia, Grafika).",
       "files": {
         "present": "{name} {version}: pliki są w {folder}.",
         "missing": "Plików {name} nie ma jeszcze w tej grze. Pobierz je w launcherze Kiln (Ustawienia, Grafika), gdy gra jest zamknięta. Do tego czasu działa własny FSR 3 gry.",
@@ -1054,7 +1054,7 @@
         "no_signatures": "Kiln nie zna jeszcze FSR 3 tej wersji gry, więc działa własny FSR 3 gry. Naprawi to aktualizacja Kiln dla tej wersji gry.",
         "inputs": "Obrazy gry nie są tym, co przyjmuje {upscaler}, więc działa własny FSR 3 gry.",
         "unavailable": "{upscaler} nie jest dostępny w tej wersji Kiln lub w tym systemie, więc działa własny FSR 3 gry.",
-        "waiting": "{upscaler} jest gotowy. Ruszy, gdy gra następnym razem przygotuje FSR 3: wczytaj świat albo zmień jakość FSR w ustawieniach gry.",
+        "waiting": "{upscaler} jest gotowy. Ruszy, gdy tylko gra uruchomi FSR 3: wczytaj świat z FSR 3 wybranym w ustawieniach grafiki gry.",
         "no_vulkan": "Kiln nie widział, by gra przygotowała swoje urządzenie graficzne w tej sesji. Uruchom grę ponownie dla {upscaler}.",
         "unknown": "{upscaler} nie działa (powód {number} z nowszego Kiln), więc działa własny FSR 3 gry."
       }

@@ -73,7 +73,7 @@ enum class Why : uint32_t {
     no_signatures = 10,   // this game build's FSR 3 pass was not found (sigdb feature upscale.swap off)
     inputs = 11,          // the game's textures are not what the backend takes (format, size, a texture missing)
     unavailable = 12,     // this backend is not in this build of Kiln, or not on this system (XeSS: no Vulkan 1.1)
-    waiting = 13,         // ready: it starts at the game's next FSR 3 set-up (load a world, or change FSR's quality)
+    waiting = 13,         // ready: it starts at the game's next FSR 3 frame (load a world with FSR 3 chosen in the game)
     no_vulkan = 14,       // Kiln did not see the game's Vulkan device being created (Kiln's Vulkan hooks came late)
 };
 

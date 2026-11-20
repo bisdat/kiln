@@ -725,6 +725,23 @@ void hk_fsr(void* ctx, uint8_t* fsr, uint8_t* desc) {
             g_oh.store(sz[3], std::memory_order_relaxed);
         }
     }
+    // a choice changed in the game applies now: the game does not set FSR 3 up again for every quality change (seen at
+    // native AA, 29.19 beta 1), so waiting for its next Fsr3Create could leave the choice unapplied until a world load
+    {
+        const uint32_t ch = g_choice.load(), pin = g_pin.load();
+        if (latch_at_frame(g_latched_any.load(), g_latched.load(), g_latched_pin.load(), ch, pin)) {
+            g_latched = ch;
+            g_latched_pin = pin;
+            g_setup_pending = true;  // history goes (ensure_context); the game's FSR 3 drops its own (game_fsr)
+            static uint32_t said = 0;
+            if (said++ < 8)
+                logf(KILN_LOG_INFO, "graphics: upscaler: the choice changed in the game; behind the game's FSR 3 from this frame: %s",
+                     static_cast<Choice>(ch) == Choice::game ? "the game's own FSR 3"
+                     : static_cast<Choice>(ch) != g_start  ? "the game's own FSR 3 (the choice differs from the game's start: it applies from the next start)"
+                     : g_failed.load()                      ? "the game's own FSR 3 (the upscaler failed in this session)"
+                                                            : g_backend ? g_backend->name().c_str() : "?");
+        }
+    }
     // what the backend kept for the GPU goes once the GPU is done with it, whether or not it records this frame
     if (g_backend && g_loaded.load(std::memory_order_relaxed) && may(Call::tick)) KUI_GUARD("the backend's tick", g_backend->tick(n));
     if (!swap_on()) {

@@ -1010,7 +1010,7 @@
       "amd_auto": "Auto (FSR 4 where it runs)",
       "amd_fsr3": "FSR 3.1",
       "amd_hint": "Auto lets AMD choose: FSR 4 on graphics cards and drivers that run it, FSR 3.1 on the others. FSR 3.1 keeps FSR 3.1 even where FSR 4 would run.",
-      "hint": "Choose FSR 3 as the upscaler in the game's graphics settings: Kiln runs your choice in its place. A change applies when the game next sets FSR up: when a world loads, or when you change FSR's quality, the resolution or the 3D render scale. Kiln needs the vendor's files for AMD FSR and Intel XeSS; the Kiln launcher downloads them (Settings, Graphics).",
+      "hint": "Choose FSR 3 as the upscaler in the game's graphics settings: Kiln runs your choice in its place. A change applies at once while FSR 3 runs in a world, else when a world loads. Kiln needs the vendor's files for AMD FSR and Intel XeSS; the Kiln launcher downloads them (Settings, Graphics).",
       "files": {
         "present": "{name} {version}: the files are in {folder}.",
         "missing": "{name}'s files are not in this game yet. Download them in the Kiln launcher (Settings, Graphics) while the game is closed. Until then the game's own FSR 3 runs.",
@@ -1042,7 +1042,7 @@
         "no_signatures": "Kiln does not know this game build's FSR 3 yet, so the game's own FSR 3 runs. A Kiln update for this game build fixes that.",
         "inputs": "The game's images are not what {upscaler} takes, so the game's own FSR 3 runs.",
         "unavailable": "{upscaler} is not available in this build of Kiln or on this system, so the game's own FSR 3 runs.",
-        "waiting": "{upscaler} is ready. It starts when the game next sets FSR 3 up: load a world, or change FSR's quality in the game's settings.",
+        "waiting": "{upscaler} is ready. It starts as soon as the game runs FSR 3: load a world with FSR 3 chosen in the game's graphics settings.",
         "no_vulkan": "Kiln did not see the game set up its graphics device in this session. Restart the game for {upscaler}.",
         "unknown": "{upscaler} does not run (reason {number} from a newer Kiln), so the game's own FSR 3 runs."
       }

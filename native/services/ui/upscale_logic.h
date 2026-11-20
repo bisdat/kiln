@@ -149,6 +149,13 @@ inline void planes(float a, float b, float* near_plane, float* far_plane) {
     *near_plane = n;
     *far_plane = f;
 }
+// The player's choice (and AMD pin) as set now against the one latched at the game's last FSR 3 set-up: true when it
+// is to be latched at this FSR frame. The game does not set FSR 3 up again for every change of its FSR quality (seen at
+// native AA), so a choice made in the game applies at the next FSR frame; before the game's first set-up (`any` false)
+// its Fsr3Create latches it.
+inline bool latch_at_frame(bool any, uint32_t latched, uint32_t latched_pin, uint32_t choice, uint32_t pin) {
+    return any && (latched != choice || latched_pin != pin);
+}
 inline float sane_exposure(float e) { return std::isfinite(e) && e > 0 ? e : 1.0f; }
 inline float sane_fov(float f) { return std::isfinite(f) && f > 0.01f && f < 3.1f ? f : 1.1345f; }
 
@@ -339,7 +346,7 @@ inline const char* why_text(Why w) {
         case Why::no_signatures: return "this game build's FSR 3 pass was not found";
         case Why::inputs: return "the game's textures are not what it takes";
         case Why::unavailable: return "it is not in this build of Kiln, or not on this system";
-        case Why::waiting: return "it starts at the game's next FSR 3 set-up (load a world, or change FSR's quality)";
+        case Why::waiting: return "it starts as soon as the game runs FSR 3 (load a world with FSR 3 chosen in the game's settings)";
         case Why::no_vulkan: return "Kiln did not see the game's Vulkan device created: restart the game";
     }
     return "";

@@ -29,8 +29,8 @@ where the card runs it) or Intel XeSS ([below](#behind-the-games-fsr-3-phase-b))
 | `dlssRenderScale` | 0.33..1: with `custom`, the render width and height as a share of the output | 0.67 | " |
 | `dlssQualityScale`, `dlssBalancedScale`, `dlssPerformanceScale`, `dlssUltraPerformanceScale` | 0.33..1 each: with `perMode` | DLSS's own: 0.667, 0.58, 0.5, 0.333 | " |
 | `readout` | `true` / `false` | `false` | at once |
-| `upscaler` | `game` (the game's own FSR 3), `amd` (AMD FSR: FSR 4 where the GPU runs it, else FSR 3.1), `xess` (Intel XeSS): what runs in place of the game's FSR 3 | `game` | at the game's next FSR 3 set-up; Kiln's hooks go in only when it is not `game` at the game's start ([below](#behind-the-games-fsr-3-phase-b)) |
-| `amdUpscaler` | `auto` (AMD's selection: FSR 4 where it runs, else FSR 3.1), `fsr3` (FSR 3.1 even where FSR 4 runs): with `amd` | `auto` | at the game's next FSR 3 set-up |
+| `upscaler` | `game` (the game's own FSR 3), `amd` (AMD FSR: FSR 4 where the GPU runs it, else FSR 3.1), `xess` (Intel XeSS): what runs in place of the game's FSR 3 | `game` | at the next FSR 3 frame (in a world with FSR 3 chosen in the game), else when a world loads; Kiln's hooks go in only when it is not `game` at the game's start ([below](#behind-the-games-fsr-3-phase-b)) |
+| `amdUpscaler` | `auto` (AMD's selection: FSR 4 where it runs, else FSR 3.1), `fsr3` (FSR 3.1 even where FSR 4 runs): with `amd` | `auto` | at the next FSR 3 frame |
 
 "When the game next sets DLSS up": loading a world, or changing the DLSS mode or the resolution in the game's own
 settings. One more rule: Kiln hooks DLSS only when a DLSS setting or the readout is on **when the game starts**. A DLSS
@@ -164,7 +164,7 @@ the Super Resolution version Intel's SDK 3.0.2 reports). When the chosen one doe
 | `noSignatures` | 10 | Kiln does not know this game build's FSR 3 yet, so the game's own FSR 3 runs. A Kiln update for this game build fixes that. |
 | `inputs` | 11 | The game's images are not what AMD FSR takes, so the game's own FSR 3 runs. |
 | `unavailable` | 12 | AMD FSR is not available in this build of Kiln or on this system, so the game's own FSR 3 runs. |
-| `waiting` | 13 | AMD FSR is ready. It starts when the game next sets FSR 3 up: load a world, or change FSR's quality in the game's settings. |
+| `waiting` | 13 | AMD FSR is ready. It starts as soon as the game runs FSR 3: load a world with FSR 3 chosen in the game's graphics settings. |
 | `noVulkan` | 14 | Kiln did not see the game set up its graphics device in this session. Restart the game for AMD FSR. |
 | `unknown` | any other | AMD FSR does not run (reason 15 from a newer Kiln), so the game's own FSR 3 runs. |
 
@@ -302,9 +302,10 @@ any of it DLSS. Code: `native/services/ui/upscale.cpp` (the swap), `upscale_amd.
 `client.d/upscale.json` (feature `upscale.swap`).
 - **When it applies.** Kiln hooks the game's FSR 3 pass only when an upscaler other than `game` is chosen **when the
   game starts**, and only then adds what that upscaler needs to the game's Vulkan device (extensions and features, as
-  the game's device is made). A choice made while the game runs applies at the game's next FSR 3 set-up (loading a
-  world, changing FSR's quality, the resolution or the 3D render scale) when it is the start's choice or `game`, else
-  from the next start (status reason `RESTART`). `amdUpscaler` applies at the next set-up.
+  the game's device is made). A choice made while the game runs applies at the game's next FSR 3 frame when it is the
+  start's choice or `game`, else from the next start (status reason `RESTART`); `amdUpscaler` the same. (Up to
+  0.2.0-dev.29.19 beta 1 a choice waited for the game's next FSR 3 set-up, which the game does not do for every FSR
+  quality change: seen at native AA.)
 - **What happens.** The game builds its frame as a list of its own render commands, then runs them. Where the game would
   write its FSR 3 passes, Kiln makes the game flush its pending barriers (as the game does for DLSS) and writes one
   command of its own instead; when the game runs that command, Kiln has the chosen upscaler record its work into the

@@ -1010,7 +1010,7 @@
       "amd_auto": "Auto (FSR 4, wo es läuft)",
       "amd_fsr3": "FSR 3.1",
       "amd_hint": "Auto lässt AMD wählen: FSR 4 auf Grafikkarten und Treibern, die es ausführen, FSR 3.1 auf den anderen. FSR 3.1 behält FSR 3.1, auch wo FSR 4 laufen würde.",
-      "hint": "Wähle in den Grafikeinstellungen des Spiels FSR 3 als Upscaler: Kiln führt deine Wahl an seiner Stelle aus. Eine Änderung gilt, wenn das Spiel FSR das nächste Mal einrichtet: wenn eine Welt lädt oder wenn du die FSR-Qualität, die Auflösung oder die 3D-Renderskala änderst. Kiln braucht die Dateien des Herstellers für AMD FSR und Intel XeSS; der Kiln Launcher lädt sie herunter (Einstellungen, Grafik).",
+      "hint": "Wähle in den Grafikeinstellungen des Spiels FSR 3 als Upscaler: Kiln führt deine Wahl an seiner Stelle aus. Eine Änderung gilt sofort, solange FSR 3 in einer Welt läuft, sonst sobald eine Welt lädt. Kiln braucht die Dateien des Herstellers für AMD FSR und Intel XeSS; der Kiln Launcher lädt sie herunter (Einstellungen, Grafik).",
       "files": {
         "present": "{name} {version}: Die Dateien liegen in {folder}.",
         "missing": "Die Dateien von {name} sind noch nicht in diesem Spiel. Lade sie im Kiln Launcher herunter (Einstellungen, Grafik), während das Spiel geschlossen ist. Bis dahin läuft das eigene FSR 3 des Spiels.",
@@ -1042,7 +1042,7 @@
         "no_signatures": "Kiln kennt das FSR 3 dieser Spielversion noch nicht, daher läuft das eigene FSR 3 des Spiels. Ein Kiln-Update für diese Spielversion behebt das.",
         "inputs": "Die Bilder des Spiels sind nicht das, was {upscaler} annimmt, daher läuft das eigene FSR 3 des Spiels.",
         "unavailable": "{upscaler} ist in dieser Kiln-Version oder auf diesem System nicht verfügbar, daher läuft das eigene FSR 3 des Spiels.",
-        "waiting": "{upscaler} ist bereit. Es startet, wenn das Spiel FSR 3 das nächste Mal einrichtet: Lade eine Welt oder ändere die FSR-Qualität in den Einstellungen des Spiels.",
+        "waiting": "{upscaler} ist bereit. Es startet, sobald das Spiel FSR 3 ausführt: Lade eine Welt, während in den Grafikeinstellungen des Spiels FSR 3 gewählt ist.",
         "no_vulkan": "Kiln hat nicht gesehen, dass das Spiel in dieser Sitzung sein Grafikgerät eingerichtet hat. Starte das Spiel für {upscaler} neu.",
         "unknown": "{upscaler} läuft nicht (Grund {number} aus einem neueren Kiln), daher läuft das eigene FSR 3 des Spiels."
       }

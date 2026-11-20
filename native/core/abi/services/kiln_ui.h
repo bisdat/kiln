@@ -783,8 +783,8 @@ enum {
                                                 swap is off */
     KILN_UI_UPSCALE_WHY_INPUTS = 11,         /* the game's textures are not what it takes (format, size, a missing one) */
     KILN_UI_UPSCALE_WHY_UNAVAILABLE = 12,    /* not in this build of Kiln, or not on this system */
-    KILN_UI_UPSCALE_WHY_WAITING = 13,        /* ready: it starts at the game's next FSR 3 set-up (load a world, or change
-                                                FSR's quality in the game's settings) */
+    KILN_UI_UPSCALE_WHY_WAITING = 13,        /* ready: it starts at the game's next FSR 3 frame (load a world with FSR 3
+                                                chosen in the game's settings) */
     KILN_UI_UPSCALE_WHY_NO_VULKAN = 14,      /* Kiln did not see the game's Vulkan device created: restart the game */
 };
 /* KilnUiGraphicsStatus.upscale_flags */

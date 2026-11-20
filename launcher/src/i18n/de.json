@@ -2850,7 +2850,7 @@
       "upscaler": {
         "title": "Hinter dem FSR 3 des Spiels",
         "label": "Upscaler",
-        "hint": "Wähle in den Grafikeinstellungen des Spiels FSR 3 als Upscaler: Kiln lässt an seiner Stelle deine Wahl laufen. Eine Änderung gilt, sobald das Spiel FSR das nächste Mal einrichtet: wenn eine Welt lädt oder wenn du die FSR-Qualität, die Auflösung oder die 3D-Renderskala änderst. Wählst du zum ersten Mal, während das Spiel läuft, gilt es ab dem nächsten Spielstart.",
+        "hint": "Wähle in den Grafikeinstellungen des Spiels FSR 3 als Upscaler: Kiln lässt an seiner Stelle deine Wahl laufen. Eine Änderung gilt sofort, solange FSR 3 in einer Welt läuft, sonst sobald eine Welt lädt. Wählst du zum ersten Mal, während das Spiel läuft, gilt es ab dem nächsten Spielstart.",
         "choice": {
           "game": "Das FSR 3 des Spiels",
           "amd": "AMD FSR",
@@ -2906,7 +2906,7 @@
           "noSignatures": "Kiln kennt das FSR 3 dieser Spielversion noch nicht, deshalb läuft das FSR 3 des Spiels. Ein Kiln-Update für diese Spielversion behebt das.",
           "inputs": "Die Bilder des Spiels passen nicht zu dem, was {upscaler} erwartet, deshalb läuft das FSR 3 des Spiels.",
           "unavailable": "{upscaler} ist in dieser Kiln-Version oder auf diesem System nicht verfügbar, deshalb läuft das FSR 3 des Spiels.",
-          "waiting": "{upscaler} ist bereit. Es startet, sobald das Spiel FSR 3 das nächste Mal einrichtet: Lade eine Welt oder ändere die FSR-Qualität in den Einstellungen des Spiels.",
+          "waiting": "{upscaler} ist bereit. Es startet, sobald das Spiel FSR 3 ausführt: Lade eine Welt, während in den Grafikeinstellungen des Spiels FSR 3 gewählt ist.",
           "noVulkan": "Kiln hat in dieser Sitzung nicht gesehen, wie das Spiel sein Grafikgerät einrichtet. Starte das Spiel neu für {upscaler}.",
           "unknown": "{upscaler} läuft nicht (Grund {number} von einer neueren Kiln-Version), deshalb läuft das FSR 3 des Spiels."
         },

@@ -2962,7 +2962,7 @@
       "upscaler": {
         "title": "Za FSR 3 gry",
         "label": "Skalowanie",
-        "hint": "Wybierz FSR 3 jako metodę skalowania w ustawieniach grafiki gry: Kiln uruchomi w jego miejsce twój wybór. Zmiana działa, gdy gra następnym razem przygotuje FSR: gdy wczytuje się świat albo gdy zmienisz jakość FSR, rozdzielczość lub skalę renderowania 3D. Wybrane po raz pierwszy w trakcie gry działa od następnego uruchomienia gry.",
+        "hint": "Wybierz FSR 3 jako metodę skalowania w ustawieniach grafiki gry: Kiln uruchomi w jego miejsce twój wybór. Zmiana działa od razu, gdy FSR 3 pracuje w świecie, a w przeciwnym razie po wczytaniu świata. Wybrane po raz pierwszy w trakcie gry działa od następnego uruchomienia gry.",
         "choice": {
           "game": "Własny FSR 3 gry",
           "amd": "AMD FSR",
@@ -3018,7 +3018,7 @@
           "noSignatures": "Kiln nie zna jeszcze FSR 3 tej wersji gry, więc działa własny FSR 3 gry. Naprawi to aktualizacja Kiln dla tej wersji gry.",
           "inputs": "Obrazy gry nie są tym, co przyjmuje {upscaler}, więc działa własny FSR 3 gry.",
           "unavailable": "{upscaler} nie jest dostępny w tej wersji Kiln lub w tym systemie, więc działa własny FSR 3 gry.",
-          "waiting": "{upscaler} jest gotowy. Ruszy, gdy gra następnym razem przygotuje FSR 3: wczytaj świat albo zmień jakość FSR w ustawieniach gry.",
+          "waiting": "{upscaler} jest gotowy. Ruszy, gdy tylko gra uruchomi FSR 3: wczytaj świat z FSR 3 wybranym w ustawieniach grafiki gry.",
           "noVulkan": "Kiln nie widział, by gra przygotowała swoje urządzenie graficzne w tej sesji. Uruchom grę ponownie dla {upscaler}.",
           "unknown": "{upscaler} nie działa (powód {number} z nowszego Kiln), więc działa własny FSR 3 gry."
         },

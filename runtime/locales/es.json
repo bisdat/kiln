@@ -1010,7 +1010,7 @@
       "amd_auto": "Auto (FSR 4 donde funcione)",
       "amd_fsr3": "FSR 3.1",
       "amd_hint": "Auto deja que AMD elija: FSR 4 en las tarjetas gráficas y controladores que lo admiten, FSR 3.1 en los demás. FSR 3.1 mantiene FSR 3.1 incluso donde funcionaría FSR 4.",
-      "hint": "Elige FSR 3 como escalador en los ajustes gráficos del juego: Kiln ejecuta tu elección en su lugar. Un cambio se aplica la próxima vez que el juego prepara FSR: al cargar un mundo, o al cambiar la calidad de FSR, la resolución o la escala de renderizado 3D. Kiln necesita los archivos del fabricante para AMD FSR e Intel XeSS; el launcher de Kiln los descarga (Ajustes, Gráficos).",
+      "hint": "Elige FSR 3 como escalador en los ajustes gráficos del juego: Kiln ejecuta tu elección en su lugar. Un cambio se aplica al momento mientras FSR 3 funciona en un mundo; si no, al cargar un mundo. Kiln necesita los archivos del fabricante para AMD FSR e Intel XeSS; el launcher de Kiln los descarga (Ajustes, Gráficos).",
       "files": {
         "present": "{name} {version}: los archivos están en {folder}.",
         "missing": "Los archivos de {name} aún no están en este juego. Descárgalos en el launcher de Kiln (Ajustes, Gráficos) con el juego cerrado. Hasta entonces funciona el FSR 3 propio del juego.",
@@ -1042,7 +1042,7 @@
         "no_signatures": "Kiln aún no conoce el FSR 3 de esta build del juego, así que funciona el FSR 3 propio del juego. Una actualización de Kiln para esta build del juego lo soluciona.",
         "inputs": "Las imágenes del juego no son las que {upscaler} admite, así que funciona el FSR 3 propio del juego.",
         "unavailable": "{upscaler} no está disponible en esta build de Kiln o en este sistema, así que funciona el FSR 3 propio del juego.",
-        "waiting": "{upscaler} está listo. Empieza la próxima vez que el juego prepare FSR 3: carga un mundo o cambia la calidad de FSR en los ajustes del juego.",
+        "waiting": "{upscaler} está listo. Empieza en cuanto el juego ejecute FSR 3: carga un mundo con FSR 3 elegido en los ajustes gráficos del juego.",
         "no_vulkan": "Kiln no vio que el juego preparara su dispositivo gráfico en esta sesión. Reinicia el juego para {upscaler}.",
         "unknown": "{upscaler} no funciona (motivo {number}, de un Kiln más reciente), así que funciona el FSR 3 propio del juego."
       }
