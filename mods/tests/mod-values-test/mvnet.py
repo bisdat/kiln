@@ -162,8 +162,14 @@ def main():
         r = A.ctl(2, "award")
         t.check("command tick=True source=Player", r and r["Ok"] and r["Tick"] and r["Source"] == "Player", r)
         t.check("award xp=7 coins=11 rev=1", r and r["Xp"] == 7 and r["Coins"] == 11 and r["Rev"] == 1, r)
-        m, p = sa.transfer()
-        t.check("owner stream delta seq=2 coins=11", m is not None and not m["full"] and m["seq"] == "2" and sa.raw("mod-values-test:coins") == 11, (m and m["seq"], sa.values.get("mod-values-test:coins")))
+        # the characters' initialization may come first as its own delta: read transfers until the award's arrives
+        seen = []
+        for _ in range(6):
+            m, p = sa.transfer()
+            seen.append(m and (m["seq"], m["full"]))
+            if m is None or sa.raw("mod-values-test:coins") == 11:
+                break
+        t.check("owner stream delta coins=11", m is not None and not m["full"] and int(m["seq"]) >= 2 and sa.raw("mod-values-test:coins") == 11, (seen, sa.values.get("mod-values-test:coins")))
         same = A.ctl(2, "award")
         t.check("duplicate request not executed twice", same == r, same)
         bad = A.ctl(3, "spend", amount=20)
