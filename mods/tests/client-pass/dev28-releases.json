@@ -46,7 +46,8 @@
   "19d-creature-control": "0.2.0-dev.28",
   "19d-pets": "0.2.0-dev.32",
   "19e-taming": "0.2.0-dev.32",
-  "19f-terrain": "0.2.0-dev.28"
+  "19f-terrain": "0.2.0-dev.28",
+  "dev30-ui-hooks": "0.2.0-dev.30"
  },
  "owners": {
   "12-debug.client-windows": "12a-debugger",

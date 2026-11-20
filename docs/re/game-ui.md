@@ -628,3 +628,39 @@ Current bundle has 48 workshops/48 trees, declared and observed maximum 15 group
 bounds **512 recipe outputs per group**, u16 count `+0x9820`, 0x4c-byte records. These are independent capacities;
 increasing UI maxima alone does not expand output storage. First set receives the tab's special header handling.
 No new joined-client station-menu presentation check was run; schema/sync/ownership designs stay in chapter 16a.
+
+## Inventory slots: clicks and marks (dev.30; client 26430625, static, nothing of it run)
+
+What Kiln's `ui.slots.click` (kiln.ui.inventory, `Ui.Inventory`) rests on. No new game address: it reuses the slot sites
+above (ItemSlot `0xc046c0` raw link, SlotGeometry mid `0xc05433`, GameUiFrame) and the HUD screen byte. Feature:
+`sigdb/symbols/client.d/ui-hooks.json`.
+- **The press is not the game's.** Kiln does not hook the game's own slot input (the ItemSlot result's action bytes
+  `+0x10..+0x1f` are not decoded). kiln.ui's window procedure sees every left/right press first (raw record and window
+  message, paired as mouse_press.h pairs the middle and side buttons), hands it to `subscribe_pointer_press`
+  subscribers, and keeps a taken press from the game the way a key binding's press is kept (the raw record's button flag
+  taken out through the game's own GetRawInputData import, the message not passed on); releases always pass. **[src]**
+- **Hit test:** the core hit-tests the press against the last completed slot frame's outer rectangles (the last drawn
+  wins: a slot drawn over another, a dragged item's preview). The frame must be this client session's and at most
+  250 ms old. **[src]**
+- **Pixels:** `pixel = viewport + unit * px_per_unit` on the game's canvas (`ui/sys.canvas_w/h`, `ui/sys.viewport`,
+  `ui/sys.px_per_unit`, chapter 05a), then scaled by client (or overlay display) size / canvas size when they differ.
+  Static only; check `ui-hooks.c1` (marks on the slots at two resolutions/UI scales) confirms it, which is also 05a-c5.
+  Expected to hold: the game renders its UI at the swapchain size and kiln.ui's overlay draws at that size. **[hyp]**
+- **Screens with a pointer** (HUD screen byte, play `+0x1cd8`): 4 InGameMenu, 8 PlayerCrafting, 9 Backpack,
+  22 StorageChest, 25 StationBasedCrafting, 27 NpcCrafting, 28 FactoryCrafting, 41 the chest-style transfer screen's mode 1
+  (`0xb9d0f0(1)`; which game screen that is was not traced). 1 InGame is refused: the HUD's hotbar is drawn through
+  ItemSlot there too, but a click is an attack. **[refl] [dis] [rt for 4, 9, 22, 25]**
+- **Identity:** the slot's ItemView `+0x14` (pide) is the server's entity id for a replicated item (05a section 6,
+  network.md). Kiln reports it as the client entity and leaves `server_entity` 0; `ui-hooks.c2` compares it with the
+  server world's own inventory in a hosted world. **[dis]**
+- **Hover byte:** ItemSlot's result `+0x10` (`ui/slot.hoverCandidate`) is still only a candidate (mouse hover or gamepad
+  focus). `ui-hooks.c4` logs it next to the cursor's slot. A gamepad slot action waits for it. **[hyp]**
+
+### For the next slices (not built)
+- **A button in the chest screen (where Enlarge / Enchant sits):** the chest-style transfer screen is `0xb9d0f0(mode)`
+  (PlayStateUi's switch `0xc61135`: 22 → mode 0, 41 → 1, 28 → 2), the other inventory found through play `+0x2c50`. Its
+  button row, the button renderer it uses, and the upgrade-storage action (`consumedUpgradeStorageAction`,
+  `ecs.InventoryTransferAction` are strings in the exe) are not traced. The menu entries' recipe (a frame through the
+  game's own entry renderer inside the game's layout scope, identified by return address) is the model.
+- **The game's own slot tint:** ItemSlot's descriptor `+0x7d` and context `+0x51` gate the fuel bar; the slot's background
+  colour parameter is not mapped.

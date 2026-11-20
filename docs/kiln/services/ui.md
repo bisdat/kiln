@@ -202,6 +202,13 @@ check `header.size` through the member and that its pointer is non-null). Player
 - `graphics_set(&KilnUiGraphics)` (48 bytes): the player's settings. Kiln.Ui's call only, from kiln.json "graphics" and
   the Kiln menu's Graphics tab; a native plugin's is refused (`KILN_ERR_UNAVAILABLE`): mods never choose them.
 
+After them: byte 1032 is `chat_completion` (Kiln.Ui's own chat Tab completion, refused from native plugins), and
+`subscribe_pointer_press` at 1040 (0.2.0-dev.30; the table is 1048 bytes; check `header.size` and the pointer):
+`fn(const KilnUiPointerPress*)` once per left or right press over the game window (its raw record and its window message
+are paired), on the window thread, only while Kiln does not capture input and the cursor is not over a Kiln panel; an
+answer of `KILN_UI_POINTER_TAKE` keeps the press from the game, its release always reaches it. A fault in `fn` removes the
+subscription. The core's `kiln.ui.inventory` (slot clicks, `kiln_ui_inventory.h`) is its first user.
+
 ## The overlay's drawing off: kiln.json and a session that turned it off (0.2.0-dev.29.18)
 
 No table change. Player side: [ui.md](../ui.md#frame-generation-mods-and-drawing-off).
