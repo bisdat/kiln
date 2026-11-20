@@ -400,6 +400,9 @@ pub fn check_index(ix: &PackIndex) -> Result<()> {
         if let Some(f) = &m.file && !sha256_ok(&f.sha256) {
             problems.push(format!("mod {}: file.sha256", m.id));
         }
+        if let Some(f) = &m.file && f.size > MAX_FILE {
+            problems.push(format!("mod {}: file.size is over {MAX_FILE} bytes", m.id));
+        }
         if let Some(c) = &m.credit && (c.author.trim().is_empty() || !c.source.to_ascii_lowercase().starts_with("https://")) {
             problems.push(format!("mod {}: a credit needs an author and an https source", m.id));
         }
@@ -407,6 +410,10 @@ pub fn check_index(ix: &PackIndex) -> Result<()> {
     if let Some(l) = &ix.layer {
         if l.id != ix.layer_id() || l.path != LAYER_PATH || l.version != ix.version || !l.hash.starts_with("kdh1:") || crate::hash::hash8(&l.hash).is_none() {
             problems.push(format!("layer: id {}, path layer, the pack's version and a kdh1", ix.layer_id()));
+        }
+        // the layer's file.sha256 names its cache file (crucible::fetch): a sha256 and nothing else
+        if let Some(f) = &l.file && (!sha256_ok(&f.sha256) || f.size > MAX_FILE) {
+            problems.push(format!("layer: file.sha256 and a size of at most {MAX_FILE} bytes"));
         }
     }
     for id in &ix.order.kiln {
