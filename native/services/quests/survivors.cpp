@@ -106,6 +106,35 @@ void load_layout() {
     g_layout_ok = true;
 }
 
+// ---- the NPC's template data (bed radius): the game's GetTemplateComponent (core sigdb), on the world's thread
+using GetTemplateFn = void* (*)(uintptr_t world, uint32_t hash, uint32_t entity);
+GetTemplateFn g_get_tpl = nullptr;
+uint32_t h_tpl_npc = 0;
+void* tpl_guarded(GetTemplateFn f, uintptr_t w, uint32_t h, uint32_t e) {
+    __try {
+        return f(w, h, e);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return nullptr;
+    }
+}
+bool float_guarded(const void* p, float* out) {
+    __try {
+        std::memcpy(out, p, 4);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+// The NPC's bed radius (ActiveNpcState.searchTargetSetup.bedRadius, template data); -1 when it cannot be read.
+float bed_radius_of(KilnEntity npc) {
+    const uintptr_t w = A->server_world();
+    if (!g_get_tpl || !w || !h_tpl_npc || !g_layout_ok) return -1;
+    const auto* t = static_cast<const uint8_t*>(tpl_guarded(g_get_tpl, w, h_tpl_npc, npc));
+    float r = -1;
+    if (!t || !float_guarded(t + L.tpl_bed_radius, &r) || !std::isfinite(r) || r <= 0 || r > 10000) return -1;
+    return r;
+}
+
 // ---- reads (tick)
 template <class T>
 bool comp_read(KilnEntity e, uint32_t hash, int64_t want_size, int64_t off, T* out) {
@@ -334,6 +363,7 @@ struct Req {
     bool reset_sent = false;
     // beds
     KilnEntity npc = 0, old_bed = 0, displaced = 0;
+    KilnSurvivorState displaced_before{};
     uint32_t displaced_npc = 0, actor_handle = 0;
     uint64_t write_step = 0;
 };
@@ -537,8 +567,7 @@ void step_recruit(Req& r, uint64_t now, uint64_t step) {
             KilnSurvivorState s;
             fill_state(r.roster, &s);
             post_event(KILN_SURV_EV_TOOL_GIVEN, &r, r.before, s);
-            if (past(r, now)) return fail(r, KILN_SURV_TIMED_OUT, "Deadline: the tool arrived after the budget");
-            return finish(r, KILN_SURV_DONE, "");
+            return finish(r, KILN_SURV_DONE, "");  // every requested effect happened (also when it settled while draining)
         }
         return fail(r, KILN_SURV_REFUSED, "ToolNotGiven: " + r.item_message);
     }
@@ -661,7 +690,7 @@ struct BedOp {
 std::mutex g_op_mu;
 std::unique_ptr<BedOp> g_op;  // under g_op_mu
 KilnHandle g_prog = 0;
-int g_slot_common = -1, g_slot_bed = -1, g_slot_tpl = -1;
+int g_slot_common = -1, g_slot_bed = -1;
 std::atomic<bool> g_tpl_warned{false};
 
 void KILN_CALL bed_program(KilnProgramCtx* ctx, uint64_t* it, KilnEntity, void*) {
@@ -673,27 +702,10 @@ void KILN_CALL bed_program(KilnProgramCtx* ctx, uint64_t* it, KilnEntity, void*)
     if (g_slot_common < 0) {
         g_slot_common = W->program_slot(g_prog, KILN_SLOT_OTHER_WRITE, ks("NpcCommon"));
         g_slot_bed = W->program_slot(g_prog, KILN_SLOT_OTHER_WRITE, ks("NpcBed"));
-        g_slot_tpl = W->program_slot(g_prog, KILN_SLOT_OTHER_TPL, ks("ActiveNpcState"));
     }
     if (g_slot_common < 0 || g_slot_bed < 0) {
         op.why = "Unavailable: the bed program has no write slots";
         return;
-    }
-    if (op.op == KILN_SURV_OP_ASSIGN_BED && op.distance >= 0 && g_slot_tpl >= 0) {
-        uint32_t size = 0;
-        const auto* t = static_cast<const uint8_t*>(W->read_other(ctx, it[g_slot_tpl], op.npc, &size));
-        if (t && L.tpl_bed_radius + 4 <= int64_t(size)) {
-            std::memcpy(&op.radius, t + L.tpl_bed_radius, 4);
-            if (std::isfinite(op.radius) && op.radius > 0 && op.distance > op.radius) {
-                char b[160];
-                std::snprintf(b, sizeof b, "BedOutOfHomeRange: the bed is %.1f m from its home, its bed radius is %.1f m", op.distance,
-                              op.radius);
-                op.why = b;
-                return;
-            }
-        } else if (!g_tpl_warned.exchange(true)) {
-            logf(KILN_LOG_WARN, "survivors: the NPC's bed radius (ActiveNpcState template) could not be read; the home-range check is skipped");
-        }
     }
     // every pointer first: nothing is written unless all ends can be
     uint32_t size = 0;
@@ -742,24 +754,16 @@ void KILN_CALL bed_program(KilnProgramCtx* ctx, uint64_t* it, KilnEntity, void*)
 void register_program() {
     if (!W || !g_layout_ok) return;
     static const KilnStr writes[] = {ks("NpcBed"), ks("NpcCommon")};
-    static const KilnStr tpl[] = {ks("ActiveNpcState")};
     KilnProgramDesc d{};
     d.size = sizeof d;
     d.flags = KILN_PROGRAM_SYSTEM | KILN_PROGRAM_HOST_ONLY | KILN_PROGRAM_BARRIER;
     d.name = ks("kiln_survivors_beds");
     d.each = &bed_program;
     d.other_write = KilnNames{writes, 2, 0};
-    d.other_tpl = KilnNames{tpl, 1, 0};
     const KilnResult rc = W->register_program(O, &d, &g_prog);
     if (rc != KILN_OK) {
-        // without the template read the program still works (no home-range check)
-        d.other_tpl = KilnNames{};
-        if (W->register_program(O, &d, &g_prog) != KILN_OK) {
-            SW("the bed program was refused (%d): survivors.assign is off", rc);
-            g_prog = 0;
-            return;
-        }
-        SW("the bed program runs without the ActiveNpcState template read: no home-range check");
+        SW("the bed program was refused (%d): survivors.assign is off", rc);
+        g_prog = 0;
     }
 }
 
@@ -791,10 +795,19 @@ void take_bed(Req& r) {
         touched.push_back(r.in.bed);
         KilnVec3 home{}, bpos{};
         if (home_of(r.npc, &home) && W->position(r.in.bed, &bpos) == KILN_OK) op->distance = distance(home, bpos);
+        op->radius = bed_radius_of(r.npc);
+        if (op->radius < 0 && !g_tpl_warned.exchange(true))
+            SW("the NPC's bed radius (its template's ActiveNpcState) could not be read; the home-range check is skipped");
+        if (op->radius > 0 && op->distance > op->radius) {
+            char b[160];
+            std::snprintf(b, sizeof b, "BedOutOfHomeRange: the bed is %.1f m from its home, its bed radius is %.1f m", op->distance, op->radius);
+            return finish(r, KILN_SURV_REFUSED, b);
+        }
         if (occupant && occupant != r.in.npc_id) {
             r.displaced_npc = occupant;
             const auto d = entities_of(occupant);
             if (!d.empty()) r.displaced = d.front();
+            state_of(occupant, &r.displaced_before);
         }
     }
     for (KilnEntity b : find_all(h_bed)) {
@@ -817,6 +830,7 @@ void take_bed(Req& r) {
                     r.displaced = c;
                     auto it = g_npc_of.find(c);
                     r.displaced_npc = it == g_npc_of.end() ? 0 : it->second;
+                    if (r.displaced_npc) state_of(r.displaced_npc, &r.displaced_before);
                 }
             }
         }
@@ -912,7 +926,10 @@ void step_bed_post(Req& r, uint64_t now, uint64_t step) {
         g_seen[r.in.npc_id] = after;
         if (r.displaced_npc) {
             KilnSurvivorState ds;
-            if (state_of(r.displaced_npc, &ds)) g_seen[r.displaced_npc] = ds;
+            if (state_of(r.displaced_npc, &ds)) {
+                if (ds.bed != r.displaced_before.bed) post_event(KILN_SURV_EV_ASSIGNMENT_CHANGED, &r, r.displaced_before, ds);
+                g_seen[r.displaced_npc] = ds;
+            }
         }
         if (ok) return finish(r, KILN_SURV_DONE, "");
         return fail(r, KILN_SURV_REFUSED, "ChangedByGame: the readback after the write does not show the assignment");
@@ -981,10 +998,14 @@ void KILN_CALL on_pre(const KilnTickInfo* t, void*) {
     g_active.erase(std::remove_if(g_active.begin(), g_active.end(), [](const auto& p) { return p->stage < 0; }), g_active.end());
 }
 
-uint64_t g_next_observe = 0;
+uint64_t g_next_observe = 0, g_observe_from = 0;
 bool g_observed_once = false;
+// The baseline is taken 10 s after a world started: the game fills the NPCs' side of their beds from the saved bed side
+// over its first updates after a load, and that is no change a mod should hear of.
 void observe(uint64_t now) {
     if (!g_layout_ok || now < g_next_observe) return;
+    if (!g_observe_from) g_observe_from = now + 10000;
+    if (now < g_observe_from) return;
     g_next_observe = now + 1000;
     {
         std::lock_guard lock(g_op_mu);
@@ -1041,6 +1062,7 @@ void KILN_CALL on_world(const KilnWorldEvent* e, void*) {
     g_active.clear();
     g_seen.clear();
     g_observed_once = false;
+    g_observe_from = 0;
     g_ent_step = ~0ull;
 }
 
@@ -1210,7 +1232,10 @@ void survivors_ready() {
         h_bed = W->component_hash(ks("NpcBed"));
         h_saved = W->component_hash(ks("ActiveNpcStateSaved"));
         h_base = W->component_hash(ks("BaseIdComponent"));
+        h_tpl_npc = W->component_hash(ks("ActiveNpcState"));
     }
+    uintptr_t gt = 0;
+    if (A->symbol(ks("GetTemplateComponent"), &gt) == KILN_OK && gt) g_get_tpl = reinterpret_cast<GetTemplateFn>(gt);
     register_program();  // the server world: a dedicated server, or a game while it hosts
     if (g_prog) {
         KilnWorldProgramInfo info{};
