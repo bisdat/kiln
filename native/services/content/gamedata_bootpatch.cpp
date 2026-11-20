@@ -22,7 +22,13 @@
 //     and removed, one component copied from two templates, one list appended to twice, a component removed that another
 //     mod's path starts at, a list appended to and set with [*] by another mod, a list cleared or replaced and changed
 //     any other way by another mod (the same clear, or the same values, from both is fine), a "components[i]" path on a
-//     template whose components change. The plan is frozen.
+//     template whose components change. Then, when the start has a base view of its game data newer than the boot
+//     snapshot (gamedata_bootview.h; none by default), what only the data can say is checked against that view's decoded
+//     values too (check_base below): the resource there, an index inside its list, a variant's or an optional's member
+//     there, a template's component there, the place a scalar or a list, copyComponents' source there with the component.
+//     Such a refusal holds only for a resource whose view the source says is final for this start (nothing in the start
+//     creates or overrides it), and is then the mod's as any other; anything else, and what the view cannot say, is left
+//     to the bytes. The plan is frozen, with the view's digest.
 //   apply (kiln.assets when_resources_ready: the game's resource service is up and nothing has read through it): each
 //     resource is copied, every document's structural edits are made in the copy (kPhases: removes, adds, copies, clears,
 //     replaces, appends), then every set, with the game's values as the originals, and the copy is served as an override. A document is all or
@@ -44,6 +50,7 @@
 #include <vector>
 
 #include "gamedata.h"
+#include "gamedata_bootview.h"
 #include "gear.h"
 #include "kiln_blocks_json.hpp"
 #include "kiln_boot_collector.hpp"
@@ -78,6 +85,7 @@ struct DocPatch {
     std::string mod, key;
     std::vector<StructOp> ops;  // its order; applied by kPhases (every document's), before the sets
     std::vector<Set> sets;      // its order
+    size_t seq = 0;             // its place among the generation's documents (the check against the base view names the first)
 };
 struct ResPatch {
     KilnAssetKey res{};
@@ -88,6 +96,8 @@ struct ResPatch {
 struct BootPlan {
     std::vector<ResPatch> resources;
     size_t sets = 0;  // changes, against kMaxSets
+    // the base view the plan was checked against before the start (gamedata_bootview.h); empty: none, the bytes decide
+    std::string base_source, base_digest;
 };
 
 // Process-lifetime latch: readiness is one-shot; a later write would miss the game's first read.
@@ -421,6 +431,334 @@ std::vector<kiln::boot::Doc> file_docs(const kiln::boot::Input* boot) {
     return out;
 }
 
+// ---- the check against the base view (gamedata_bootview.h) ----
+// Before the start, what only the game's data can say: an index is inside its list, a variant holds the member, an
+// optional has its value, a template has the component a path starts at, a path ends in a scalar (a number for an
+// operation) and a list edit in a list, copyComponents' source has the component. The data is the base view's decoded
+// value of each resource, walked as gd::resolve walks the bytes when the patch is written. What the value cannot say is
+// left to the bytes, as before: a place another edit of the generation changes (an append, replace or clear of a list on
+// the way, a component added, removed or copied), a member outside a variant (the types say which members a struct has,
+// and a config named by its alias is no member of the value), a config shown by its alias, a value cut at the view's
+// depth or shown as text, a struct of one scalar shown as that scalar (also inside a variant, which the bytes follow to
+// the scalar), a resource the view cannot decode. And whatever the view says about a resource refuses only when the source
+// says its view of that resource is final for this start (Source::final_for): Kiln, a boot mod, a data pack or another
+// mod's assets.json may create or override a resource in this start, served before the patch is written, and then the
+// bytes say.
+constexpr size_t kBaseReadMax = 16u << 20;    // bytes of one resource's decoded value a check reads
+constexpr size_t kBaseReadsMax = 128u << 20;  // bytes of decoded values one prepare reads in all
+
+struct BaseRefusal {
+    std::string mod, key, path, why;
+};
+enum class Seen { Ok, Unknown, Refused };
+
+// One path walked over a decoded value.
+struct Walk {
+    bool tmpl = false;
+    std::vector<std::pair<std::string, const nlohmann::json*>> leaves;  // the places the path names, and their values
+    bool unknown = false;                                              // a branch the value cannot say
+    std::string error;                                                 // the first branch that is not there
+};
+
+const nlohmann::json* member_of(const nlohmann::json& o, const std::string& name) {  // as TType::field: exact, then any case
+    const auto it = o.find(name);
+    if (it != o.end()) return &*it;
+    const std::string f = folded(name);
+    for (auto i = o.begin(); i != o.end(); ++i)
+        if (folded(i.key()) == f) return &i.value();
+    return nullptr;
+}
+std::string type_in(const nlohmann::json& o) {  // a variant's selected type ("$type"); empty for a plain struct
+    const auto t = o.is_object() ? o.find("$type") : o.end();
+    return t != o.end() && t->is_string() ? t->get<std::string>() : std::string();
+}
+std::string place_text(const std::string& at) { return at.empty() ? "the resource" : at; }
+constexpr char kInBase[] = " in the game data this start reads";
+
+void walk(const nlohmann::json& node, const std::vector<Seg>& segs, size_t i, const std::string& at, Walk* w) {
+    // a config shown by its alias ({"$config", "value"}): gd::resolve reads the config's value or a member of it
+    if (node.is_object() && node.contains("$config")) return void(w->unknown = true);
+    if (i == segs.size()) return w->leaves.emplace_back(at, &node), void();
+    auto fail = [&](const std::string& why) {
+        if (w->error.empty()) w->error = why;
+    };
+    const Seg& s = segs[i];
+    if (node.is_string()) return void(w->unknown = true);  // a value cut at the view's depth, a summary: the bytes say
+    if (node.is_null()) return fail(place_text(at) + " is empty (an optional without a value)" + kInBase);
+    if (!s.index) {
+        if (i == 0 && w->tmpl && node.is_object() && !member_of(node, s.s)) {  // a template's component by its type ("Gravity#1")
+            const size_t h = s.s.find('#');
+            const std::string want = folded(s.s.substr(0, h)), k = h == std::string::npos ? "0" : s.s.substr(h + 1);
+            const nlohmann::json* comps = member_of(node, "components");
+            if (!comps || !comps->is_array() || k.empty() || k.size() > 9 || !std::all_of(k.begin(), k.end(), [](char c) { return c >= '0' && c <= '9'; }))
+                return void(w->unknown = true);
+            const unsigned long nth = std::stoul(k);
+            unsigned long seen = 0;
+            for (const auto& c : *comps) {
+                const std::string t = type_in(c);
+                if (t.empty()) {
+                    w->unknown = true;
+                    continue;
+                }
+                if (folded(t) == want && seen++ == nth) return walk(c, segs, 1, s.s, w);
+            }
+            if (!w->unknown) fail("the template has no component " + s.s + kInBase);
+            return;
+        }
+        if (node.is_array()) return fail(place_text(at) + " is a list, which has no member " + s.s + kInBase);
+        if (!node.is_object()) return void(w->unknown = true);  // a struct of one scalar (keen::Time, an id) shows as the scalar
+        const nlohmann::json* m = member_of(node, s.s);
+        if (!m) {
+            const std::string t = type_in(node);
+            // outside a variant the types say which members there are; a keen::impact::Configurations names its configs by
+            // alias or id, which are no members of the value
+            if (t.empty() || t == "Configurations") return void(w->unknown = true);
+            return fail(place_text(at) + " is a " + t + kInBase + ", which has no member " + s.s);
+        }
+        return walk(*m, segs, i + 1, at.empty() ? s.s : at + "." + s.s, w);
+    }
+    if (!node.is_array()) {
+        // a struct (the types say), or a keen::impact::Configurations, whose "[...]" names a config by its id
+        if (node.is_object() && (type_in(node).empty() || type_in(node) == "Configurations")) return void(w->unknown = true);
+        return fail(place_text(at) + " is not a list" + kInBase);
+    }
+    if (s.s == "*") {
+        for (size_t k = 0; k < node.size(); ++k) walk(node[k], segs, i + 1, at + "[" + std::to_string(k) + "]", w);
+        return;
+    }
+    const unsigned long k = std::stoul(s.s);  // segments(): nine digits at most
+    if (k >= node.size())
+        return fail("IndexPastEnd: " + at + "[" + s.s + "]: the list has " + std::to_string(node.size()) + " entries" + kInBase);
+    walk(node[k], segs, i + 1, at + "[" + s.s + "]", w);
+}
+
+// A variant whose selected struct holds one member that is no struct or list (keen::HashKey32, keen::Time): the view
+// shows the struct, the bytes follow the variant to it and take it as that one scalar (gd::leaf_of).
+bool one_scalar_variant(const nlohmann::json& n) {
+    if (!n.is_object() || type_in(n).empty() || n.size() != 2) return false;
+    for (auto it = n.begin(); it != n.end(); ++it)
+        if (it.key() != "$type") return !it->is_object() && !it->is_array();
+    return false;
+}
+
+// A set: refused when a place it names is no scalar (no number, for an operation), or when it names no place at all
+// ([*] over an empty list names none and changes nothing: resource-patches.md). [*] keeps the elements that have the
+// path, as gd::resolve does.
+Seen set_verdict(const Walk& w, const nlohmann::json& value, std::string* why) {
+    bool unknown = w.unknown;
+    for (const auto& [at, n] : w.leaves) {
+        if (one_scalar_variant(*n)) {
+            unknown = true;
+            continue;
+        }
+        if (n->is_object() || n->is_array())
+            return *why = "NotScalar: " + place_text(at) + " is " + (n->is_array() ? "a list" : "a struct") + kInBase + ", not a number, a bool or an enum",
+                   Seen::Refused;
+        if (is_op(value) && n->is_boolean())
+            return *why = "OperationOnNonNumber: " + place_text(at) + " is a bool" + kInBase + " (it takes a plain value)", Seen::Refused;
+    }
+    if (unknown) return Seen::Unknown;
+    if (w.leaves.empty() && !w.error.empty()) return *why = w.error, Seen::Refused;
+    return Seen::Ok;
+}
+
+// A clear, replace or append: the path names one list (of scalars for replace and append).
+Seen list_verdict(const Walk& w, char op, std::string* why) {
+    if (w.leaves.size() == 1) {
+        const auto& [at, n] = w.leaves[0];
+        if (n->is_string()) return Seen::Unknown;
+        if (n->is_null()) return *why = place_text(at) + " is empty (an optional without a value)" + kInBase, Seen::Refused;
+        if (!n->is_array()) return *why = "NotAList: " + place_text(at) + " is not a list" + kInBase, Seen::Refused;
+        if (op != 'x' && !n->empty() && ((*n)[0].is_object() || (*n)[0].is_array()))
+            return *why = "NotScalar: " + place_text(at) + " is a list of structs or lists" + kInBase, Seen::Refused;
+        return Seen::Ok;
+    }
+    if (w.unknown || !w.leaves.empty()) return Seen::Unknown;
+    if (!w.error.empty()) return *why = w.error, Seen::Refused;
+    return Seen::Unknown;
+}
+
+// What the generation's structural edits change on one resource: the lists they clear, replace or append to, and the
+// components added, removed or copied. A path through such a list, or into such a component, is the bytes' to say.
+struct Shape {
+    std::vector<std::vector<Seg>> lists;  // normalised
+    std::set<std::string> components;     // folded
+    bool components_change = false;
+};
+Shape shape_of(const ResPatch& rp) {
+    Shape sh;
+    for (const DocPatch& d : rp.docs)
+        for (const StructOp& o : d.ops) {
+            if (o.op == 'x' || o.op == 'r' || o.op == 'a') {
+                std::vector<Seg> segs;
+                std::string e;
+                if (segments(o.path, &segs, &e)) sh.lists.push_back(normalised(segs, rp.tmpl));
+                continue;
+            }
+            sh.components_change = true;
+            for (const std::string& n : o.names) sh.components.insert(folded(n));
+        }
+    return sh;
+}
+bool touched(const Shape& sh, const std::vector<Seg>& place, bool tmpl) {
+    for (const auto& list : sh.lists)
+        if (through(list, place)) return true;
+    if (tmpl && !place.empty() && !place[0].index) {
+        const std::string head = place[0].s.substr(0, place[0].s.find('#'));
+        if (head == "components") return sh.components_change;  // a component by its place in the list
+        if (sh.components.count(head)) return true;
+    }
+    return false;
+}
+
+// One document against the base view. false + *f: refused. What the view says about a resource refuses only when
+// final_of(key) says the source's view of that resource is final for this start; otherwise it is logged and the bytes say.
+template <class ReadFn, class FinalFn>
+bool check_doc(const ResPatch& rp, const DocPatch& d, ReadFn&& read, FinalFn&& final_of, const Shape& sh, BaseRefusal* f) {
+    auto refuse = [&](const std::string& path, const std::string& why) {
+        *f = {d.mod, d.key, path, why};
+        return false;
+    };
+    // a refusal of what the view says about `key` (`of`: that resource in words): false, refused, when the view of that
+    // resource is final for this start; true, not refused, when the start may create or override it before the patch is
+    // written (the bytes say then)
+    auto refuse_if_final = [&](const KilnAssetKey& key, const std::string& of, const std::string& path, const std::string& why) {
+        if (final_of(key)) return refuse(path, why + " (nothing in this start creates or overrides " + of + ")");
+        LOGI("boot: resource patch %s/%s: %s%s; this start may create or override %s before the patch is written, so the patch is checked when it "
+             "is written",
+             d.mod.c_str(), d.key.c_str(), path.empty() ? "" : ("\"" + path + "\": ").c_str(), why.c_str(), of.c_str());
+        return true;
+    };
+    const std::string what = rp.type + " " + guid_text(rp.res.guid);
+    const bootview::Read& res = read(bootview::query_of(guid_text(rp.res.guid), rp.res.type, rp.res.part));
+    if (res.found == bootview::Found::Missing && !refuse_if_final(rp.res, what, "", "MissingResource: the game data this start reads has no " + what))
+        return false;
+    // copyComponents' sources, as the game has them before any patch of this start
+    for (const StructOp& o : d.ops)
+        for (size_t k = 0; o.op == 'c' && k < o.sources.size(); ++k) {
+            const std::string g = guid_text(o.sources[k].guid);
+            const bootview::Read& src = read(bootview::query_of(g, o.sources[k].type, o.sources[k].part));
+            if (src.found == bootview::Found::Missing &&
+                !refuse_if_final(o.sources[k], "the template " + g, "",
+                                 "\"copyComponents\": MissingResource: the template " + g + " that " + o.names[k] + " is copied from is not" + kInBase))
+                return false;
+            if (src.found != bootview::Found::Yes) continue;
+            const nlohmann::json* comps = src.value.is_object() ? member_of(src.value, "components") : nullptr;
+            if (!comps || !comps->is_array()) continue;
+            bool found = false, unknown = false;
+            for (const auto& c : *comps) {
+                const std::string t = type_in(c);
+                unknown = unknown || t.empty();
+                found = found || folded(t) == folded(o.names[k]);
+            }
+            if (!found && !unknown &&
+                !refuse_if_final(o.sources[k], "the template " + g, "", "\"copyComponents\": the template " + g + " has no " + o.names[k] + kInBase))
+                return false;
+        }
+    if (res.found != bootview::Found::Yes) return true;
+    // the paths on the resource itself: the first one the view refuses decides (not final: none of them can refuse)
+    for (const StructOp& o : d.ops) {
+        if (o.op != 'x' && o.op != 'r' && o.op != 'a') continue;
+        std::vector<Seg> segs;
+        std::string why;
+        if (!segments(o.path, &segs, &why) || touched(sh, normalised(segs, rp.tmpl), rp.tmpl)) continue;
+        Walk w;
+        w.tmpl = rp.tmpl;
+        walk(res.value, segs, 0, "", &w);
+        if (list_verdict(w, o.op, &why) == Seen::Refused)
+            return refuse_if_final(rp.res, what, o.path, std::string(o.op == 'x' ? "\"clear\": " : o.op == 'r' ? "\"replace\": " : "\"append\": ") + why);
+    }
+    for (const Set& s : d.sets) {
+        std::vector<Seg> segs;
+        std::string why;
+        if (!segments(s.path, &segs, &why) || touched(sh, normalised(segs, rp.tmpl), rp.tmpl)) continue;
+        Walk w;
+        w.tmpl = rp.tmpl;
+        walk(res.value, segs, 0, "", &w);
+        if (set_verdict(w, s.value, &why) == Seen::Refused) return refuse_if_final(rp.res, what, s.path, why);
+    }
+    return true;
+}
+
+// The plan against the base view of this start's game data, every document in load order; the plan keeps the view's
+// digest. false + *r: the first document the data refuses. true: none refused, or no view (nothing is checked).
+bool check_base(BootPlan* plan, BaseRefusal* r) {
+    if (plan->resources.empty() || !bootview::has_source()) return true;
+    std::string why;
+    bootview::BaseView* view = bootview::current(&why);
+    if (!view) {
+        LOGI("boot: resource patches are not checked against a base view of this start's game data before the start (%s); the bytes decide "
+             "when they are written",
+             why.c_str());
+        return true;
+    }
+    const std::string digest = view->digest();
+    if (digest.empty()) {
+        LOGI("boot: the %s base view names no data; resource patches are checked when they are written", view->source());
+        return true;
+    }
+    struct Item {
+        size_t seq;
+        const ResPatch* rp;
+        const DocPatch* d;
+    };
+    std::vector<Item> order;
+    for (const ResPatch& rp : plan->resources)
+        for (const DocPatch& d : rp.docs) order.push_back({d.seq, &rp, &d});
+    std::sort(order.begin(), order.end(), [](const Item& a, const Item& b) { return a.seq < b.seq; });
+    std::map<std::string, bootview::Read> reads;  // by query: each resource read once
+    size_t left = kBaseReadsMax;
+    auto read = [&](const std::string& q) -> const bootview::Read& {
+        if (const auto it = reads.find(q); it != reads.end()) return it->second;
+        bootview::Read rd;
+        if (!left) {
+            rd.why = "the check read as much of the game data as one prepare may";
+        } else {
+            rd = bootview::read(*view, q, std::min(kBaseReadMax, left));
+            if (rd.found == bootview::Found::Yes) left -= std::min(left, rd.bytes);
+        }
+        return reads.emplace(q, std::move(rd)).first->second;
+    };
+    std::map<std::string, bool> finals;  // by resource: the source's answer, asked once, only for a refusal
+    auto final_of = [&](const KilnAssetKey& key) {
+        const std::string q = bootview::query_of(guid_text(key.guid), key.type, key.part);
+        if (const auto it = finals.find(q); it != finals.end()) return it->second;
+        return finals.emplace(q, bootview::final_for(key)).first->second;
+    };
+    std::map<const ResPatch*, Shape> shapes;
+    BaseRefusal first;
+    bool refused = false;
+    for (const Item& it : order) {
+        auto sh = shapes.find(it.rp);
+        if (sh == shapes.end()) sh = shapes.emplace(it.rp, shape_of(*it.rp)).first;
+        if (!check_doc(*it.rp, *it.d, read, final_of, sh->second, &first)) {
+            refused = true;
+            break;
+        }
+    }
+    // one generation from the first read to the last; otherwise nothing is refused and the bytes decide
+    const std::string after = view->digest();
+    if (after != digest) {
+        LOGW("boot: the %s base view of this start's game data changed while the patches were checked (%.16s, then %.16s); the bytes decide "
+             "when they are written",
+             view->source(), digest.c_str(), after.empty() ? "none" : after.c_str());
+        return true;
+    }
+    plan->base_source = view->source();
+    plan->base_digest = digest;
+    if (refused) {
+        LOGW("boot: resource patch %s/%s: %s%s (checked before the start against the %s base view %.16s of this start's game data)",
+             first.mod.c_str(), first.key.c_str(), first.path.empty() ? "" : ("\"" + first.path + "\": ").c_str(), first.why.c_str(),
+             view->source(), digest.c_str());
+        *r = std::move(first);
+        return false;
+    }
+    LOGI("boot: resource patches checked before the start against the %s base view %.16s of this start's game data (%zu resource value(s) "
+         "read)",
+         view->source(), digest.c_str(), reads.size());
+    return true;
+}
+
 void KILN_CALL destroy_plan(const void* p) { delete static_cast<const BootPlan*>(p); }
 
 KilnResult KILN_CALL prepare_boot(void*, const KilnBootPrepareInputV1* in, KilnBootPreparedV1* out, KilnBootIssueV1* issue) {
@@ -465,6 +803,7 @@ KilnResult KILN_CALL prepare_boot(void*, const KilnBootPrepareInputV1* in, KilnB
         }
     }
     std::set<std::string> not_boot;
+    size_t seq = 0;
     for (const auto& d : docs) {
         // a mod that takes no part in the generation (no "boot" in its kiln.mod.json): its patches are not applied
         if (!input.owner.count(d.owner)) {
@@ -517,6 +856,7 @@ KilnResult KILN_CALL prepare_boot(void*, const KilnBootPrepareInputV1* in, KilnB
         const std::string res_key = guid_text(rp.res.guid) + "/" + rp.type + "/" + std::to_string(rp.res.part);
         rp.tmpl = rp.type == "keen::ecs::TemplateResource";
         DocPatch dp{d.owner, d.key, {}, {}};
+        dp.seq = seq++;
         // every change counts against the limit: a field write, a list's append, a component added or removed
         const std::string too_many =
             "more than " + std::to_string(kMaxSets) + " changes (field writes, lists cleared, replaced or appended to, components) in one boot generation";
@@ -777,6 +1117,11 @@ KilnResult KILN_CALL prepare_boot(void*, const KilnBootPrepareInputV1* in, KilnB
             same->docs.push_back(std::move(dp));
         }
     }
+    // what only the game's data can say, against the base view of this start's data when it has one (none: the bytes say it)
+    {
+        BaseRefusal r;
+        if (!check_base(plan.get(), &r)) return kiln::boot::refuse(out, issue, r.mod, kKind, r.key, (r.path.empty() ? std::string() : "\"" + r.path + "\": ") + r.why);
+    }
     LOGI("boot generation %llu prepared: %zu resource patch change(s) on %zu resource(s)%s", static_cast<unsigned long long>(input.generation),
          plan->sets, plan->resources.size(), types || !plan->sets ? "" : " (types are checked when they are applied)");
     return kiln::boot::prepared(out, plan.release(), &destroy_plan);
@@ -916,17 +1261,27 @@ void KILN_CALL apply(void*) {
     const auto* plan = static_cast<const BootPlan*>(kiln::boot::published(g_api, "patches"));
     if (!plan) {
         g_ready_before_publication.store(true);
+        bootview::finished();  // no prepare after this one may write anything: no check needs the base view any more
         return;
     }
+    bootview::finished();  // the generation is published and the resources are up: no check reads the base view any more
     if (plan->resources.empty()) return;
     LOGI("boot: the game's resource service is up: resource patches of %zu resource(s) are written into copies of the bytes kiln.assets serves now", plan->resources.size());
+    // a plan checked before the start against a base view: a fault now comes from the bytes served now (another provider's
+    // override, a change after the check, or what only the bytes say); the game's data is not changed back
+    const std::string checked = plan->base_digest.empty()
+                                    ? std::string()
+                                    : "; before the start it passed the check against the " + plan->base_source + " base view " +
+                                          plan->base_digest.substr(0, 16) + " of this start's game data, and the bytes served now decide";
+    if (!checked.empty())
+        LOGI("boot: the plan was checked before the start against the %s base view %s", plan->base_source.c_str(), plan->base_digest.c_str());
     const KilnAssetsApi* A = assets();
     size_t written = 0, failed = 0;
     // one fault per document, naming its mod and key: for a required mod kiln.boot ends the process inside the call
     auto fault = [&](const DocPatch& d, const std::string& why) {
         ++failed;
-        LOGE("boot: resource patch %s/%s: %s; nothing of this patch was applied", d.mod.c_str(), d.key.c_str(), why.c_str());
-        kiln::boot::activation_fault(g_api, g_owner, d.mod, kKind, d.key, why + "; nothing of this patch was applied");
+        LOGE("boot: resource patch %s/%s: %s; nothing of this patch was applied%s", d.mod.c_str(), d.key.c_str(), why.c_str(), checked.c_str());
+        kiln::boot::activation_fault(g_api, g_owner, d.mod, kKind, d.key, why + "; nothing of this patch was applied" + checked);
     };
     // the templates copyComponents copies from, read before any patched copy is served
     Sources sources;
