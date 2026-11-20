@@ -870,7 +870,14 @@ pub fn save(dirs: &DataDirs, profile: &Profile) -> Result<Profile> {
 pub fn delete(dirs: &DataDirs, id: &str) -> Result<()> {
     let _one = one_at_a_time();
     get(dirs, id)?;
-    let to = dirs.backups().join("profiles").join(format!("{id}-{}", ts_compact(crate::util::now_unix())));
+    let base = format!("{id}-{}", ts_compact(crate::util::now_unix()));
+    let mut to = dirs.backups().join("profiles").join(&base);
+    // the same profile id deleted twice in one second (Pack Studio's test instance): a free name
+    let mut n = 2;
+    while to.exists() {
+        to = dirs.backups().join("profiles").join(format!("{base}-{n}"));
+        n += 1;
+    }
     std::fs::create_dir_all(to.parent().expect("parent")).map_err(io_at(&to, "creating"))?;
     std::fs::rename(dirs.profile(id), &to).map_err(io_at(&to, "moving the profile to"))?;
     Ok(())

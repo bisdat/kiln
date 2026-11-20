@@ -1,0 +1,78 @@
+// The pack layer's data editors (DESIGN 3.3): Items, Recipes, Loot, Drops, New items, Raw JSON, with the game's art
+// icons in the pickers and the live lint (kiln lint over the layer, answered by every write). Each editor writes an
+// ordinary content/*.json section of the pack layer and keeps the rest of the file as the creator wrote it.
+import { useMemo, useState } from "react";
+import type { GameId, Studio } from "../../api/commands";
+import { useT } from "../../i18n";
+import { Button, Spinner, Tabs } from "../../ui";
+import { isObj, readDoc } from "./model";
+import { DataCtx, type DataCtxValue } from "./Picker";
+import RulesEditor from "./RulesEditor";
+import RecipesEditor from "./RecipesEditor";
+import DropsEditor from "./DropsEditor";
+import NewItemsEditor from "./NewItemsEditor";
+import RawEditor, { DiagList } from "./RawEditor";
+import { useDrafts, useLayerTexts, useLint } from "./store";
+import "./data.css";
+
+const SUBS = ["items", "recipes", "loot", "drops", "added", "raw"] as const;
+type Sub = (typeof SUBS)[number];
+/** The sub-tab each pack was left on. */
+const lastSub = new Map<string, Sub>();
+
+export default function DataTab({ studio }: { studio: Studio; gameId: GameId | null }) {
+  const t = useT();
+  const packId = studio.source.id;
+  const [sub, setSubState] = useState<Sub>(lastSub.get(packId) ?? "items");
+  const setSub = (s: Sub) => { lastSub.set(packId, s); setSubState(s); };
+  const texts = useLayerTexts(packId);
+  const lint = useLint(packId);
+  const [showLint, setShowLint] = useState(false);
+  const drafts = useDrafts((s) => s.by);
+  const dirty = (k: string) => Object.entries(drafts).some(([key, d]) => d.dirty && (key === packId + ":" + k || (k === "raw" && key.startsWith(packId + ":raw:"))));
+  const label: Record<Sub, string> = {
+    items: t("studio.data.tab.items"), recipes: t("studio.data.tab.recipes"), loot: t("studio.data.tab.loot"), drops: t("studio.data.tab.drops"),
+    added: t("studio.data.tab.added"), raw: t("studio.data.tab.raw"),
+  };
+  const ctx = useMemo<DataCtxValue>(() => {
+    const bases: Record<string, string> = {};
+    for (const text of Object.values(texts.data ?? {})) {
+      const items = readDoc(text).value.items;
+      const add = isObj(items) && Array.isArray(items.add) ? items.add : [];
+      for (const a of add) if (isObj(a) && typeof a.name === "string" && typeof a.base === "string") bases[a.name] = a.base;
+    }
+    return {
+      packId,
+      bases,
+      fromName: (from) => (!from ? null : from === "pack." + packId ? t("studio.data.thisPack") : studio.mods.find((m) => m.id === from)?.name ?? from),
+    };
+  }, [packId, texts.data, studio.mods, t]);
+  const sum = lint.data?.summary;
+  const lintLine = sum ? t("studio.data.lint.line", { errors: t("studio.data.lint.errors", { count: sum.errors }), warnings: t("studio.data.lint.warnings", { count: sum.warnings }) }) : t("studio.data.lint.checking");
+  const diags = lint.data?.diagnostics ?? [];
+  return (
+    <DataCtx.Provider value={ctx}>
+      <div className="kd" data-testid="studio-data">
+        <div className="kd-head">
+          <Tabs aria-label={t("studio.data.tabsAria")} value={sub} onChange={setSub}
+            items={SUBS.map((id) => ({ id, label: <span data-testid={"data-sub-" + id}>{label[id]}{dirty(id) ? " •" : ""}</span> }))} />
+          <span className="kd-grow" />
+          <span className={"kd-lint" + (sum?.errors ? " kd-lint-err" : sum?.warnings ? " kd-lint-warn" : "")} data-testid="data-lint">{lintLine}</span>
+          {diags.length > 0 && <Button size="s" variant="ghost" onClick={() => setShowLint(!showLint)} aria-expanded={showLint} data-testid="data-lint-toggle">{showLint ? t("studio.data.lint.hide") : t("studio.data.lint.show")}</Button>}
+        </div>
+        {lint.data && !lint.data.catalog && <p className="kst-dim kd-note" data-testid="data-nocatalog">{t("studio.data.noCatalog")}</p>}
+        {showLint && <DiagList diags={diags} testId="data-lint-list" />}
+        {texts.isLoading ? <Spinner /> : (
+          <div className="kd-body">
+            {sub === "items" && <RulesEditor key="items" section="items" texts={texts.data} />}
+            {sub === "recipes" && <RecipesEditor texts={texts.data} />}
+            {sub === "loot" && <RulesEditor key="loot" section="loot" texts={texts.data} />}
+            {sub === "drops" && <DropsEditor texts={texts.data} />}
+            {sub === "added" && <NewItemsEditor texts={texts.data} />}
+            {sub === "raw" && <RawEditor texts={texts.data} />}
+          </div>
+        )}
+      </div>
+    </DataCtx.Provider>
+  );
+}

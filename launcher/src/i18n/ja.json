@@ -5006,5 +5006,406 @@
       "turnOn": "オンにする",
       "turnOff": "オフにする"
     }
+  },
+  "studio": {
+    "nav": "スタジオ",
+    "title": "Pack Studio",
+    "sub": "プロファイルから Crucible パックを作成：MOD、設定、独自データ、クレジット、そして公開。",
+    "new": "新しいパック",
+    "newFrom": "元にする",
+    "newEmpty": "空（新しいプロファイル）",
+    "newProfile": "{name}（MOD {count} 個）",
+    "newName": "名前",
+    "newNamePh": "マイパック",
+    "create": "作成",
+    "newFailed": "パックを作成できませんでした",
+    "empty": {
+      "title": "まだパックがありません",
+      "hint": "遊んでいるプロファイルから始めましょう。MOD と設定も一緒に入ります。"
+    },
+    "packLine": {
+      "other": "v{version} · MOD {count} 個 · {ago}に変更"
+    },
+    "packSub": {
+      "other": "バージョン {version}、プロファイル {profile} から作成（MOD {count} 個）。"
+    },
+    "profileGone": "このパックの元になったプロファイルはもうありません。",
+    "missing": "このパックはここにありません",
+    "back": "すべてのパック",
+    "allPacks": "すべてのパック",
+    "tabsAria": "Pack Studio",
+    "deleteTitle": "{name} を削除しますか？",
+    "deleteText": "パックの下書きは Kiln のバックアップに移ります。プロファイルは残り、公開したものは Crucible に残ります。",
+    "recheck": "再チェック",
+    "state": {
+      "draft": "下書き",
+      "link": "リンクのみ",
+      "public": "公開"
+    },
+    "tab": {
+      "mods": "MOD",
+      "settings": "設定",
+      "data": "データ",
+      "order": "読み込み順",
+      "test": "テスト",
+      "credits": "クレジット",
+      "publish": "公開"
+    },
+    "mods": {
+      "lead": "プロファイル {profile} の MOD。それぞれライブラリにあるバージョンです。プレイヤーはインストール前に任意の MOD をオン・オフできます。",
+      "addLibrary": "ライブラリから追加",
+      "addFile": "ファイルを追加",
+      "pickFile": "MOD ファイルをパックに追加",
+      "addFailed": "MOD を追加できませんでした",
+      "removeFailed": "{name} を外せませんでした",
+      "empty": "まだ MOD がありません。ライブラリから追加してください。",
+      "mod": "MOD",
+      "version": "バージョン",
+      "need": "パック内",
+      "sides": "動作先",
+      "source": "出典",
+      "needAria": "{name} のパックでの扱い",
+      "sidesAria": "{name} の動作先",
+      "required": "必須",
+      "optionalOn": "任意・オン",
+      "optionalOff": "任意・オフ",
+      "both": "プレイヤーとサーバー",
+      "client": "プレイヤーのみ",
+      "server": "サーバーのみ",
+      "checking": "確認中…",
+      "unknown": "不明",
+      "filter": "絞り込み",
+      "libraryEmpty": "ライブラリの MOD はすべてパックに入っています。",
+      "addN": {
+        "other": "MOD を {count} 個追加"
+      }
+    },
+    "settings": {
+      "lead": "設定は、遊んでいるプロファイルから選んだキーとして渡されます。MOD の既定値と同じキーは含まれず、ホットキーもチェックしない限り含まれません。個人情報らしきものは決して渡されません。",
+      "capture": "現在の設定から取り込む",
+      "captureFailed": "Kiln はプロファイルの設定を読めませんでした",
+      "save": {
+        "other": "{count} 個のキーを使う"
+      },
+      "saved": {
+        "other": "設定ファイル {count} 個がパックに入りました"
+      },
+      "saveFailed": "設定を取り込めませんでした",
+      "none": "このプロファイルにはまだ設定ファイルがありません。一度遊んで好きに変えてから取り込んでください。",
+      "refused": "渡せません：{why}",
+      "wholeOnly": "ファイル全体として渡されます",
+      "differs": {
+        "other": "MOD の既定値と {count} 個のキーが違います"
+      },
+      "noDefaults": {
+        "other": "キー {count} 個（既定値は不明）"
+      },
+      "sideAria": "{file} を受け取る側",
+      "whole": "ファイル全体",
+      "default": "（既定 {value}）",
+      "personal": "個人用",
+      "secret": "非公開"
+    },
+    "server": {
+      "title": "サーバーのゲーム設定",
+      "lead": "このパックのサーバーが使うゲーム設定（体力、敵、建築）。あなたのサーバーから取り込みます。サーバー名、パスワード、ポートは渡されません。",
+      "none": "ゲーム設定を取り込むには「サーバー」でサーバーを追加してください。",
+      "pick": "サーバー",
+      "take": "このサーバーから取り込む",
+      "takeFailed": "Kiln はサーバーの設定を読めませんでした",
+      "use": "チェックした設定を使う",
+      "saved": "サーバーのゲーム設定がパックに入りました",
+      "clear": "外す"
+    },
+    "data": {
+      "tabsAria": "データエディター",
+      "tab": {
+        "items": "アイテム",
+        "recipes": "レシピ",
+        "loot": "ルート",
+        "drops": "ドロップ",
+        "added": "新規アイテム",
+        "raw": "Raw JSON"
+      },
+      "lint": {
+        "line": "Lint: {errors}、{warnings}",
+        "errors": {
+          "other": "{count} 件のエラー"
+        },
+        "warnings": {
+          "other": "{count} 件の警告"
+        },
+        "checking": "Lint: チェック中…",
+        "show": "問題を表示",
+        "hide": "問題を隠す",
+        "error": "エラー",
+        "warning": "警告",
+        "info": "メモ"
+      },
+      "noCatalog": "このPCにゲームデータのカタログがありません。選択リストにはパックのMODが追加するものだけが表示され、フィールドは手入力になります。",
+      "thisPack": "このパック",
+      "save": "保存",
+      "saved": "保存しました",
+      "unsaved": "未保存の変更",
+      "discard": "破棄",
+      "remove": "削除",
+      "saveFailed": "{file} を保存できませんでした",
+      "broken": "このファイルは有効なJSONではありません。先にRaw JSONで修正してください。",
+      "alsoIn": "{files} でも設定されています（Raw JSON）。",
+      "name": "名前",
+      "guid": "固定GUID（一度だけ作成し、変更しないこと）",
+      "badName": "名前は1〜200文字の英数字、_ - または . です",
+      "dupName": "{name} が重複しています",
+      "pick": {
+        "ph": "アイテムを検索",
+        "selectorPh": "名前、または Material_T1_* のようなパターン",
+        "glob": "すべての一致",
+        "unknown": "ゲームにもパックのMODにも見つかりません",
+        "none": "見つかりません",
+        "searching": "検索中…"
+      },
+      "value": {
+        "set": "次に設定",
+        "mul": "倍",
+        "add": "加算",
+        "min": "最小",
+        "max": "最大",
+        "modeAria": "{field} の変更方法",
+        "minAria": "{field} の最小値",
+        "maxAria": "{field} の最大値",
+        "raiseOnly": "増加のみ",
+        "lowerOnly": "減少のみ",
+        "on": "オン",
+        "off": "オフ"
+      },
+      "field": {
+        "add": "+ フィールド",
+        "remove": "{field} を削除",
+        "nameAria": "フィールド"
+      },
+      "where": {
+        "add": "+ 条件",
+        "where": "条件:",
+        "and": "かつ",
+        "fieldAria": "条件のフィールド",
+        "fieldPh": "フィールド",
+        "valueAria": "{field} の条件",
+        "remove": "条件を削除"
+      },
+      "rules": {
+        "add": "+ ルール",
+        "addAll": "+ すべてのアイテムのルール",
+        "remove": "ルールを削除",
+        "selectorAria": "対象のエントリ",
+        "noSelector": "ルールには名前またはパターンが必要です",
+        "duplicate": "{selector} に2つのルールがあります。1つにまとめてください"
+      },
+      "items": {
+        "lead": "ゲームのアイテムとパックのMODのアイテムを変更します。アイテムまたはパターンごとに1つのルールを作り、ゲームの値に条件を付けられます。パックレイヤーはすべてのMODの後に読み込まれるため、その値が優先されます。",
+        "empty": "アイテムのルールはまだありません。",
+        "selector": "アイテム"
+      },
+      "loot": {
+        "lead": "チェストやワールド上の拾得物のランダムなルートを、アイテムごとに設定します。1スタックに入る数です。",
+        "empty": "ルートのルールはまだありません。",
+        "selector": "アイテム"
+      },
+      "recipes": {
+        "lead": "レシピの必要素材、完成品、所要時間を変更するか、独自のレシピを追加します。",
+        "changes": "変更したレシピ",
+        "noChanges": "レシピの変更はまだありません。",
+        "add": "+ レシピを変更",
+        "recipe": "レシピ",
+        "noRecipe": "変更にはレシピが必要です",
+        "changeInputs": "材料を変更",
+        "changeOutputs": "完成品を変更",
+        "inputs": "材料",
+        "outputs": "完成品",
+        "addInput": "+ 材料",
+        "addOutput": "+ 完成品",
+        "duration": "所要時間",
+        "durationPh": "ゲーム標準",
+        "seconds": "秒",
+        "itemAria": "アイテム",
+        "countAria": "個数",
+        "category": "カテゴリ {id} の任意のアイテム",
+        "modNote": "MODのレシピを変更します。パックレイヤーが優先されます（{mod} の後に読み込まれます）。",
+        "stationNote": "ゲームのレシピは作業台がそのままです。新規レシピは作業台を自分で選びます。",
+        "new": "新規レシピ",
+        "noNew": "新規レシピはまだありません。",
+        "addNew": "+ 新規レシピ",
+        "removeNew": "新規レシピを削除",
+        "station": "作業台",
+        "stationPh": "作業台を検索",
+        "hand": "手作業で作成",
+        "noStation": "新規レシピには作業台が必要です",
+        "needStacks": "新規レシピには材料と完成品が必要です"
+      },
+      "drops": {
+        "lead": "デフォルトのインベントリ：敵のルートと固定チェストを、テーブルごと、またはすべてのテーブル（*）に設定します。",
+        "empty": "ドロップのルールはまだありません。",
+        "table": "テーブル",
+        "add": "+ テーブル",
+        "addAll": "+ すべてのテーブルのルール",
+        "count": "数量",
+        "chance": "確率",
+        "items": "単体アイテム",
+        "addItem": "+ アイテム",
+        "noTable": "ドロップのルールにはテーブルが必要です"
+      },
+      "added": {
+        "lead": "独自のアイテム：それぞれベースアイテム（モデル、アイコン、挙動）のコピーで、独自の名前と値を持ちます。",
+        "empty": "新規アイテムはまだありません。",
+        "add": "+ 新規アイテム",
+        "remove": "新規アイテムを削除",
+        "displayName": "表示名",
+        "base": "ベースアイテム",
+        "description": "説明",
+        "rolledLoot": "ルートのように抽選（レアリティとレベルが変動）",
+        "fields": "値",
+        "noBase": "新規アイテムにはベースアイテムが必要です"
+      },
+      "raw": {
+        "none": "ファイルはまだありません。",
+        "newPh": "name.json",
+        "newAria": "新しいファイル名",
+        "new": "新規ファイル",
+        "rename": "名前を変更",
+        "renameAria": "新しい名前",
+        "renameOk": "変更",
+        "exists": "{file} は既に存在します",
+        "delete": "削除",
+        "deleteTitle": "{file} を削除しますか？",
+        "deleteText": "このファイルはパックレイヤーから外れます。",
+        "textAria": "{file} のテキスト",
+        "clean": "このファイルに問題はありません。",
+        "pick": "ファイルを選ぶか、新しく作成してください。"
+      }
+    },
+    "order": {
+      "title": "読み込み順",
+      "always": "（パックレイヤー、常に最後）",
+      "late": "後から読み込むネイティブ DLL：{list}",
+      "conflicts": "競合",
+      "none": "同じ項目を別の値にしている MOD の組はありません。",
+      "noCatalog": "ゲームデータのカタログがないため、ワイルドカードの競合は推測にすぎません。",
+      "maybe": "かもしれない",
+      "wins": "現在の勝者",
+      "setIn": "パックで指定：",
+      "set": "指定",
+      "setAria": "パック内の {field} の値",
+      "setDone": "{field} をパックレイヤーで指定しました"
+    },
+    "test": {
+      "lead": "プレイヤーが受け取るのと同じ形でパックを試せます。Kiln がパックを組み立て、専用のプロファイルとしてインストールします。",
+      "backup": "先にセーブをバックアップします。",
+      "world": "自分のワールドをそのまま残すため、テストには新しいワールドを使ってください。",
+      "server": "サーバー用パックは、公開したバージョンをあなたのサーバーに入れて試します（公開）。",
+      "make": "このパックをテスト",
+      "again": "もう一度テスト",
+      "play": "テストをプレイ",
+      "end": "テストを終了",
+      "failed": "テスト用インスタンスを作れませんでした",
+      "ready": "{name} の準備ができました",
+      "readyDetail": "プレイを押して開始します。",
+      "noGame": "先にゲームを追加してください。",
+      "reported": "ゲームからの報告",
+      "notYet": "テストをプレイしてから戻ってください。",
+      "clean": "前回の実行では競合もエラーもありません。",
+      "conflicts": {
+        "other": "データ競合 {count} 件"
+      },
+      "problems": {
+        "other": "エラーまたは警告 {count} 件"
+      }
+    },
+    "credits": {
+      "lead": "公開パックではすべての MOD のクレジットが必要です：作者と出典への https リンク。Kiln が分かるものを埋めるので、各行を確認してください。",
+      "author": "作者",
+      "source": "出典",
+      "matched": "判定元",
+      "authorAria": "{name} の作者",
+      "sourceAria": "{name} の出典",
+      "notIdentified": "不明：入力するか MOD を外してください",
+      "missing": {
+        "other": "公開パックにはまだ {count} 個の MOD にクレジットが必要です"
+      },
+      "complete": "すべての MOD にクレジットがあります",
+      "save": "クレジットを保存",
+      "saved": "クレジットを保存しました",
+      "saveFailed": "クレジットを保存できませんでした"
+    },
+    "match": {
+      "kiln": "Kiln 公式",
+      "crucible": "Crucible",
+      "github": "GitHub リリース",
+      "nexus": "Nexus",
+      "manifest": "MOD のマニフェスト",
+      "manual": "あなた"
+    },
+    "confidence": {
+      "certain": "確実",
+      "likely": "おそらく",
+      "conflict": "以前のクレジットと異なる",
+      "unverified": "未検証",
+      "creator": "あなたのもの",
+      "unconfirmed": "未確認",
+      "none": "なし"
+    },
+    "publish": {
+      "signInTitle": "公開するにはサインイン",
+      "signIn": "公開には Discord のサインインを使います。プレイヤーはインストールにサインイン不要です。",
+      "version": "バージョン",
+      "changes": "変更点",
+      "changesPh": "戦利品を調整、Busy Hands を追加",
+      "tested": "ゲームビルド {build} でテスト済み",
+      "visibility": "公開範囲",
+      "public": "公開",
+      "link": "リンクのみ",
+      "summary": "概要",
+      "summaryHint": "Crucible の一覧に出る 1 行（10 文字以上）。",
+      "attest": "すべての MOD とその作者をクレジットし、これらのファイルを共有する権利があります。",
+      "checks": "チェック",
+      "check": {
+        "format": "形式",
+        "sizes": "サイズ",
+        "blocked": "既知の有害ファイル",
+        "code": {
+          "other": "コード検査（注記 {count} 件）"
+        },
+        "lint": {
+          "other": "lint（警告 {count} 件）"
+        }
+      },
+      "tone": {
+        "ok": "OK",
+        "warn": "要確認",
+        "err": "エラー",
+        "note": "注記"
+      },
+      "go": "公開",
+      "saveFile": "ファイルとして保存",
+      "failed": "パックを公開できませんでした",
+      "donePublic": "バージョン {version} を公開しました",
+      "doneLink": "バージョン {version} を公開しました（リンクのみ）",
+      "copied": "リンクをコピーしました。",
+      "isPublic": "Crucible で公開中",
+      "isLink": "公開済み（リンクのみ）",
+      "history": "公開したバージョン",
+      "toServer": "サーバーに入れる",
+      "makePublic": "公開する",
+      "makeLink": "リンクのみにする",
+      "goFresh": "新しいパックとして公開",
+      "goneTitle": "このパックはもう Crucible にありません",
+      "gone": "Crucible で削除または取り下げられました。公開すると新しいリンクとコードの新しいパックになります。",
+      "notYetPublic": "まだ公開されていません"
+    },
+    "serverPack": {
+      "title": "{name} {version} をサーバーへ",
+      "lead": "このバージョンのサーバー用 MOD、サーバー設定、ゲーム設定をサーバーに入れ、そこからプレイヤーがダウンロードする MOD パックを作ります。先にサーバーを停止してください。",
+      "go": "サーバーに入れる",
+      "done": "{version} をサーバーに入れました",
+      "failed": "サーバー用パックを作れませんでした"
+    }
   }
 }

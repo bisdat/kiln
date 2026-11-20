@@ -5122,5 +5122,420 @@
       "turnOn": "Turn on",
       "turnOff": "Turn off"
     }
+  },
+  "studio": {
+    "nav": "Studio",
+    "title": "Pack Studio",
+    "sub": "Make Crucible packs from your profiles: mods, settings, your own data, credits, then publish.",
+    "new": "New pack",
+    "newFrom": "Start from",
+    "newEmpty": "Empty (a new profile)",
+    "newProfile": "{name} ({count} mods)",
+    "newName": "Name",
+    "newNamePh": "My pack",
+    "create": "Create",
+    "newFailed": "The pack was not made",
+    "empty": {
+      "title": "No packs yet",
+      "hint": "Start one from a profile you play: its mods and settings come along."
+    },
+    "packLine": {
+      "one": "v{version} · {count} mod · changed {ago}",
+      "other": "v{version} · {count} mods · changed {ago}"
+    },
+    "packSub": {
+      "one": "Version {version}, made from the profile {profile} ({count} mod).",
+      "other": "Version {version}, made from the profile {profile} ({count} mods)."
+    },
+    "profileGone": "The profile this pack was made from is gone.",
+    "missing": "This pack is not here",
+    "back": "All packs",
+    "allPacks": "All packs",
+    "tabsAria": "Pack Studio",
+    "deleteTitle": "Delete {name}?",
+    "deleteText": "The pack's draft goes to Kiln's backups. Its profile stays, and what you published stays on Crucible.",
+    "recheck": "Check again",
+    "state": {
+      "draft": "Draft",
+      "link": "Link only",
+      "public": "Public"
+    },
+    "tab": {
+      "mods": "Mods",
+      "settings": "Settings",
+      "data": "Data",
+      "order": "Load order",
+      "test": "Test",
+      "credits": "Credits",
+      "publish": "Publish"
+    },
+    "mods": {
+      "lead": "The mods of the profile {profile}, each as your Library holds it. Players switch optional mods on or off before they install.",
+      "addLibrary": "Add from my Library",
+      "addFile": "Add file",
+      "pickFile": "Add a mod file to the pack",
+      "addFailed": "The mod was not added",
+      "removeFailed": "{name} was not removed",
+      "empty": "No mods yet. Add some from your Library.",
+      "mod": "Mod",
+      "version": "Version",
+      "need": "In the pack",
+      "sides": "Runs on",
+      "source": "Source",
+      "needAria": "How {name} is in the pack",
+      "sidesAria": "Where {name} runs",
+      "required": "Required",
+      "optionalOn": "Optional, on",
+      "optionalOff": "Optional, off",
+      "both": "Players and servers",
+      "client": "Players only",
+      "server": "Servers only",
+      "checking": "Checking…",
+      "unknown": "Not identified",
+      "filter": "Filter",
+      "libraryEmpty": "Every mod of your Library is in the pack already.",
+      "addN": {
+        "one": "Add {count} mod",
+        "other": "Add {count} mods"
+      }
+    },
+    "settings": {
+      "lead": "Settings travel as the keys you choose, taken from the profile as you play it. Keys that match a mod's default are left out, and so are hotkeys unless you tick them. Anything that looks private never travels.",
+      "capture": "Capture from my current settings",
+      "captureFailed": "Kiln couldn't read the profile's settings",
+      "save": {
+        "one": "Use {count} key",
+        "other": "Use {count} keys"
+      },
+      "saved": {
+        "one": "{count} settings file is in the pack",
+        "other": "{count} settings files are in the pack"
+      },
+      "saveFailed": "The settings were not taken",
+      "none": "This profile has no settings files yet. Play it once, change what you like, then capture.",
+      "refused": "can't travel: {why}",
+      "wholeOnly": "travels as a whole file",
+      "differs": {
+        "one": "differs from the mod's defaults in {count} key",
+        "other": "differs from the mod's defaults in {count} keys"
+      },
+      "noDefaults": {
+        "one": "{count} key (no defaults known)",
+        "other": "{count} keys (no defaults known)"
+      },
+      "sideAria": "Who gets {file}",
+      "whole": "Whole file",
+      "default": "(default {value})",
+      "personal": "personal",
+      "secret": "private"
+    },
+    "server": {
+      "title": "Server game settings",
+      "lead": "Game settings a server of this pack uses (health, enemies, building). Taken from one of your servers; its name, password and ports never travel.",
+      "none": "Add a server in Servers to take its game settings.",
+      "pick": "Server",
+      "take": "Take from this server",
+      "takeFailed": "Kiln couldn't read the server's settings",
+      "use": "Use the ticked settings",
+      "saved": "The server game settings are in the pack",
+      "clear": "Remove them"
+    },
+    "data": {
+      "tabsAria": "Data editors",
+      "tab": {
+        "items": "Items",
+        "recipes": "Recipes",
+        "loot": "Loot",
+        "drops": "Drops",
+        "added": "New items",
+        "raw": "Raw JSON"
+      },
+      "lint": {
+        "line": "Lint: {errors}, {warnings}",
+        "errors": {
+          "one": "{count} error",
+          "other": "{count} errors"
+        },
+        "warnings": {
+          "one": "{count} warning",
+          "other": "{count} warnings"
+        },
+        "checking": "Lint: checking…",
+        "show": "Show problems",
+        "hide": "Hide problems",
+        "error": "Error",
+        "warning": "Warning",
+        "info": "Note"
+      },
+      "noCatalog": "No game-data catalog on this PC: the pickers list only what the pack's mods add, and fields are typed by hand.",
+      "thisPack": "this pack",
+      "save": "Save",
+      "saved": "Saved",
+      "unsaved": "Unsaved changes",
+      "discard": "Discard",
+      "remove": "Remove",
+      "saveFailed": "{file} was not saved",
+      "broken": "This file is not valid JSON. Fix it in Raw JSON first.",
+      "alsoIn": "Also set in {files} (Raw JSON).",
+      "name": "Name",
+      "guid": "Fixed GUID (made once, never change it)",
+      "badName": "A name is 1 to 200 letters, digits, _ - or .",
+      "dupName": "{name} is used twice",
+      "pick": {
+        "ph": "Search items",
+        "selectorPh": "Name or pattern like Material_T1_*",
+        "glob": "every match",
+        "unknown": "not found in the game or the pack's mods",
+        "none": "Nothing found",
+        "searching": "Searching…"
+      },
+      "value": {
+        "set": "set to",
+        "mul": "times",
+        "add": "plus",
+        "min": "min",
+        "max": "max",
+        "modeAria": "How {field} changes",
+        "minAria": "Lowest {field}",
+        "maxAria": "Highest {field}",
+        "raiseOnly": "raise only",
+        "lowerOnly": "lower only",
+        "on": "on",
+        "off": "off"
+      },
+      "field": {
+        "add": "+ Field",
+        "remove": "Remove {field}",
+        "nameAria": "Field"
+      },
+      "where": {
+        "add": "+ Condition",
+        "where": "where",
+        "and": "and",
+        "fieldAria": "Condition field",
+        "fieldPh": "field",
+        "valueAria": "Condition on {field}",
+        "remove": "Remove condition"
+      },
+      "rules": {
+        "add": "+ Rule",
+        "addAll": "+ Rule for every item",
+        "remove": "Remove rule",
+        "selectorAria": "Which entries",
+        "noSelector": "Every rule needs a name or a pattern",
+        "duplicate": "{selector} has two rules: merge them into one"
+      },
+      "items": {
+        "lead": "Change the game's items and the pack's mods' items: a rule per item or pattern, with conditions on the game's values. The pack layer loads after every mod, so its values win.",
+        "empty": "No item rules yet.",
+        "selector": "Items"
+      },
+      "loot": {
+        "lead": "Random loot of chests and world pickups, per item: how many come in a stack.",
+        "empty": "No loot rules yet.",
+        "selector": "Item"
+      },
+      "recipes": {
+        "lead": "Change what recipes take and make, and how long they take, or add recipes of your own.",
+        "changes": "Changed recipes",
+        "noChanges": "No recipe changes yet.",
+        "add": "+ Change a recipe",
+        "recipe": "Recipe",
+        "noRecipe": "Every change needs a recipe",
+        "changeInputs": "Change the inputs",
+        "changeOutputs": "Change the outputs",
+        "inputs": "Inputs",
+        "outputs": "Outputs",
+        "addInput": "+ Input",
+        "addOutput": "+ Output",
+        "duration": "Duration",
+        "durationPh": "game's",
+        "seconds": "seconds",
+        "itemAria": "Item",
+        "countAria": "Count",
+        "category": "any item of category {id}",
+        "modNote": "Changes the mod's recipe; the pack layer wins (it loads after {mod}).",
+        "stationNote": "A recipe of the game keeps its station; new recipes choose their own.",
+        "new": "New recipes",
+        "noNew": "No new recipes yet.",
+        "addNew": "+ New recipe",
+        "removeNew": "Remove new recipe",
+        "station": "Station",
+        "stationPh": "Search stations",
+        "hand": "Crafted by hand",
+        "noStation": "Every new recipe needs a station",
+        "needStacks": "Every new recipe needs an input and an output"
+      },
+      "drops": {
+        "lead": "Default inventories: enemy loot and fixed chests, by table or for every table (*).",
+        "empty": "No drop rules yet.",
+        "table": "Table",
+        "add": "+ Table",
+        "addAll": "+ Rule for every table",
+        "count": "Amounts",
+        "chance": "Chance",
+        "items": "Single items",
+        "addItem": "+ Item",
+        "noTable": "Every drop rule needs a table"
+      },
+      "added": {
+        "lead": "Items of your own: each is a copy of a base item (its model, icon and behaviour) with its own name and values.",
+        "empty": "No new items yet.",
+        "add": "+ New item",
+        "remove": "Remove new item",
+        "displayName": "Shown as",
+        "base": "Base item",
+        "description": "Description",
+        "rolledLoot": "Rolled like loot (rarity and level vary)",
+        "fields": "Values",
+        "noBase": "Every new item needs a base item"
+      },
+      "raw": {
+        "none": "No files yet.",
+        "newPh": "name.json",
+        "newAria": "New file name",
+        "new": "New file",
+        "rename": "Rename",
+        "renameAria": "New name",
+        "renameOk": "Rename",
+        "exists": "{file} exists already",
+        "delete": "Delete",
+        "deleteTitle": "Delete {file}?",
+        "deleteText": "The file leaves the pack layer.",
+        "textAria": "Text of {file}",
+        "clean": "No problems in this file.",
+        "pick": "Pick a file or make a new one."
+      }
+    },
+    "order": {
+      "title": "Load order",
+      "always": "(the pack layer, always last)",
+      "late": "Late native DLLs: {list}",
+      "conflicts": "Conflicts",
+      "none": "No two mods set the same field differently.",
+      "noCatalog": "Without the game-data catalog, conflicts of wildcards are only guesses.",
+      "maybe": "maybe",
+      "wins": "wins today",
+      "setIn": "Set in the pack:",
+      "set": "Set",
+      "setAria": "Value of {field} in the pack",
+      "setDone": "{field} is set in the pack layer"
+    },
+    "test": {
+      "lead": "Try the pack exactly as players get it: Kiln builds it and installs it as a profile of its own.",
+      "backup": "Your saves are backed up first.",
+      "world": "Start a new world for the test to keep your own worlds as they are.",
+      "server": "For a server pack, put a published version on one of your servers (Publish).",
+      "make": "Test this pack",
+      "again": "Test again",
+      "play": "Play the test",
+      "end": "End the test",
+      "failed": "The test instance was not made",
+      "ready": "{name} is ready",
+      "readyDetail": "Press Play to start it.",
+      "noGame": "Add the game first.",
+      "reported": "What the game reported",
+      "notYet": "Play the test, then come back here.",
+      "clean": "No conflicts or errors in the last run.",
+      "conflicts": {
+        "one": "{count} data conflict",
+        "other": "{count} data conflicts"
+      },
+      "problems": {
+        "one": "{count} error or warning",
+        "other": "{count} errors or warnings"
+      }
+    },
+    "credits": {
+      "lead": "Public packs credit every mod: its author and an https link to where it comes from. Kiln fills in what it recognises; check each row.",
+      "author": "Author",
+      "source": "Source",
+      "matched": "Found by",
+      "authorAria": "Author of {name}",
+      "sourceAria": "Where {name} comes from",
+      "notIdentified": "Not identified: fill in or remove the mod",
+      "missing": {
+        "one": "{count} mod still needs a credit for a public pack",
+        "other": "{count} mods still need a credit for a public pack"
+      },
+      "complete": "Every mod is credited",
+      "save": "Save credits",
+      "saved": "The credits are saved",
+      "saveFailed": "The credits were not saved"
+    },
+    "match": {
+      "kiln": "Kiln's own",
+      "crucible": "Crucible",
+      "github": "GitHub release",
+      "nexus": "Nexus",
+      "manifest": "the mod's manifest",
+      "manual": "you"
+    },
+    "confidence": {
+      "certain": "certain",
+      "likely": "likely",
+      "conflict": "differs from an earlier credit",
+      "unverified": "unverified",
+      "creator": "yours",
+      "unconfirmed": "unconfirmed",
+      "none": "none"
+    },
+    "publish": {
+      "signInTitle": "Sign in to publish",
+      "signIn": "Publishing uses your Discord sign-in. Players don't need one to install.",
+      "version": "Version",
+      "changes": "What changed",
+      "changesPh": "Rebalanced loot; added Busy Hands",
+      "tested": "Tested with game build {build}",
+      "visibility": "Visibility",
+      "public": "Public",
+      "link": "Link only",
+      "summary": "Summary",
+      "summaryHint": "One line for Crucible's lists (at least 10 characters).",
+      "attest": "I have credited every mod and its author, and I may share these files.",
+      "checks": "Checks",
+      "check": {
+        "format": "format",
+        "sizes": "sizes",
+        "blocked": "known bad files",
+        "code": {
+          "one": "code scan ({count} note)",
+          "other": "code scan ({count} notes)"
+        },
+        "lint": {
+          "one": "lint ({count} warning)",
+          "other": "lint ({count} warnings)"
+        }
+      },
+      "tone": {
+        "ok": "ok",
+        "warn": "look",
+        "err": "error",
+        "note": "note"
+      },
+      "go": "Publish",
+      "saveFile": "Save as file",
+      "failed": "The pack was not published",
+      "donePublic": "Version {version} is public",
+      "doneLink": "Version {version} is published",
+      "copied": "Link copied.",
+      "isPublic": "Public on Crucible",
+      "isLink": "Published, link only",
+      "history": "Published versions",
+      "toServer": "Put on a server",
+      "makePublic": "Make public",
+      "makeLink": "Make it link only",
+      "goFresh": "Publish as a new pack",
+      "goneTitle": "This pack is no longer on Crucible",
+      "gone": "It was deleted or taken down there. Publishing makes a new pack with a new link and code.",
+      "notYetPublic": "Not public yet"
+    },
+    "serverPack": {
+      "title": "{name} {version} on a server",
+      "lead": "The version's server mods, its server settings and its game settings go onto the server, and the modpack players download is built from it. Stop the server first.",
+      "go": "Put on the server",
+      "done": "{version} is on the server",
+      "failed": "The server pack was not made"
+    }
   }
 }

@@ -341,7 +341,8 @@ Code: `crates/kiln-manage/src/crucible/` (`mod.rs` client and flows, `sign.rs` t
   download and works offline);
 - the preview's local check of a dropped file reads it whole: a client-only pack (Crucible's
   `<vid>.client.kilnpack` cache, never offered to players) fails it;
-- Pack Studio, the Crucible browse page, comments and upvotes in the launcher, "Make it public".
+- the Crucible browse page, comments and upvotes in the launcher. Pack Studio (making packs, credits, publishing link-only
+  or public, Make public, server packs, kilnctl pack init/add/capture-settings/lint/credits/publish): [pack-studio.md](pack-studio.md).
 
 ## Checks done
 Player layer and update merge (dev.30 pack-layers): `tests/pack_layers.rs` (the player layer last across an update,

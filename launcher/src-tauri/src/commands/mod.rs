@@ -28,6 +28,7 @@ pub mod vendor;
 pub mod community;
 pub mod pack;
 pub mod crucible;
+pub mod studio;
 
 /// A background task id; the task reports through `kiln://task`.
 pub type TaskId = String;
@@ -275,6 +276,32 @@ pub const NAMES: &[&str] = &[
     "crucible_trust_set",
     "crucible_links",
     "crucible_resume",
+    "studio_list",
+    "studio_create",
+    "studio_get",
+    "studio_save",
+    "studio_delete",
+    "studio_credits_set",
+    "studio_capture",
+    "studio_capture_set",
+    "studio_order",
+    "studio_layer_files",
+    "studio_layer_read",
+    "studio_layer_write",
+    "studio_layer_delete",
+    "studio_layer_set",
+    "studio_layer_lint",
+    "studio_pick",
+    "studio_fields",
+    "studio_analyze",
+    "studio_test",
+    "studio_test_report",
+    "studio_test_end",
+    "studio_build",
+    "studio_publish_check",
+    "studio_publish",
+    "studio_set_visibility",
+    "studio_server_pack",
 ];
 
 #[cfg(test)]

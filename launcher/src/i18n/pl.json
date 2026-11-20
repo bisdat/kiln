@@ -5354,5 +5354,448 @@
       "turnOn": "Włącz",
       "turnOff": "Wyłącz"
     }
+  },
+  "studio": {
+    "nav": "Studio",
+    "title": "Pack Studio",
+    "sub": "Twórz paczki Crucible ze swoich profili: mody, ustawienia, własne dane, autorzy, a potem publikacja.",
+    "new": "Nowa paczka",
+    "newFrom": "Na podstawie",
+    "newEmpty": "Pusta (nowy profil)",
+    "newProfile": "{name} (modów: {count})",
+    "newName": "Nazwa",
+    "newNamePh": "Moja paczka",
+    "create": "Utwórz",
+    "newFailed": "Paczka nie powstała",
+    "empty": {
+      "title": "Nie ma jeszcze paczek",
+      "hint": "Zacznij od profilu, w który grasz: jego mody i ustawienia przejdą razem z nim."
+    },
+    "packLine": {
+      "one": "v{version} · {count} mod · zmieniono {ago}",
+      "few": "v{version} · {count} mody · zmieniono {ago}",
+      "many": "v{version} · {count} modów · zmieniono {ago}",
+      "other": "v{version} · {count} modów · zmieniono {ago}"
+    },
+    "packSub": {
+      "one": "Wersja {version} z profilu {profile} ({count} mod).",
+      "few": "Wersja {version} z profilu {profile} ({count} mody).",
+      "many": "Wersja {version} z profilu {profile} ({count} modów).",
+      "other": "Wersja {version} z profilu {profile} ({count} modów)."
+    },
+    "profileGone": "Profilu, z którego powstała ta paczka, już nie ma.",
+    "missing": "Tej paczki tu nie ma",
+    "back": "Wszystkie paczki",
+    "allPacks": "Wszystkie paczki",
+    "tabsAria": "Pack Studio",
+    "deleteTitle": "Usunąć {name}?",
+    "deleteText": "Szkic paczki trafi do kopii zapasowych Kilna. Jej profil zostaje, a to, co opublikowano, zostaje na Crucible.",
+    "recheck": "Sprawdź ponownie",
+    "state": {
+      "draft": "Szkic",
+      "link": "Tylko przez link",
+      "public": "Publiczna"
+    },
+    "tab": {
+      "mods": "Mody",
+      "settings": "Ustawienia",
+      "data": "Dane",
+      "order": "Kolejność ładowania",
+      "test": "Test",
+      "credits": "Autorzy",
+      "publish": "Publikacja"
+    },
+    "mods": {
+      "lead": "Mody profilu {profile}, każdy w wersji z twojej Biblioteki. Gracze włączają lub wyłączają mody opcjonalne przed instalacją.",
+      "addLibrary": "Dodaj z mojej Biblioteki",
+      "addFile": "Dodaj plik",
+      "pickFile": "Dodaj plik moda do paczki",
+      "addFailed": "Mod nie został dodany",
+      "removeFailed": "Nie usunięto {name}",
+      "empty": "Nie ma jeszcze modów. Dodaj je z Biblioteki.",
+      "mod": "Mod",
+      "version": "Wersja",
+      "need": "W paczce",
+      "sides": "Działa u",
+      "source": "Źródło",
+      "needAria": "Jak {name} jest w paczce",
+      "sidesAria": "Gdzie działa {name}",
+      "required": "Wymagany",
+      "optionalOn": "Opcjonalny, włączony",
+      "optionalOff": "Opcjonalny, wyłączony",
+      "both": "Gracze i serwery",
+      "client": "Tylko gracze",
+      "server": "Tylko serwery",
+      "checking": "Sprawdzanie…",
+      "unknown": "Nierozpoznany",
+      "filter": "Filtr",
+      "libraryEmpty": "Wszystkie mody z twojej Biblioteki są już w paczce.",
+      "addN": {
+        "one": "Dodaj {count} mod",
+        "few": "Dodaj {count} mody",
+        "many": "Dodaj {count} modów",
+        "other": "Dodaj {count} modów"
+      }
+    },
+    "settings": {
+      "lead": "Ustawienia przechodzą jako wybrane klucze, wzięte z profilu, w który grasz. Klucze równe domyślnym modu zostają pominięte, podobnie skróty klawiszowe, chyba że je zaznaczysz. Nic, co wygląda na prywatne, nie przechodzi.",
+      "capture": "Weź z moich obecnych ustawień",
+      "captureFailed": "Kiln nie mógł odczytać ustawień profilu",
+      "save": {
+        "one": "Użyj {count} klucza",
+        "few": "Użyj {count} kluczy",
+        "many": "Użyj {count} kluczy",
+        "other": "Użyj {count} kluczy"
+      },
+      "saved": {
+        "one": "{count} plik ustawień jest w paczce",
+        "few": "{count} pliki ustawień są w paczce",
+        "many": "{count} plików ustawień jest w paczce",
+        "other": "{count} plików ustawień jest w paczce"
+      },
+      "saveFailed": "Ustawienia nie zostały wzięte",
+      "none": "Ten profil nie ma jeszcze plików ustawień. Zagraj raz, zmień, co chcesz, potem je weź.",
+      "refused": "nie może przejść: {why}",
+      "wholeOnly": "przechodzi jako cały plik",
+      "differs": {
+        "one": "różni się od domyślnych modu w {count} kluczu",
+        "few": "różni się od domyślnych modu w {count} kluczach",
+        "many": "różni się od domyślnych modu w {count} kluczach",
+        "other": "różni się od domyślnych modu w {count} kluczach"
+      },
+      "noDefaults": {
+        "one": "{count} klucz (nieznane wartości domyślne)",
+        "few": "{count} klucze (nieznane wartości domyślne)",
+        "many": "{count} kluczy (nieznane wartości domyślne)",
+        "other": "{count} kluczy (nieznane wartości domyślne)"
+      },
+      "sideAria": "Kto dostaje {file}",
+      "whole": "Cały plik",
+      "default": "(domyślnie {value})",
+      "personal": "osobiste",
+      "secret": "prywatne"
+    },
+    "server": {
+      "title": "Ustawienia gry serwera",
+      "lead": "Ustawienia gry, których używa serwer tej paczki (zdrowie, wrogowie, budowanie). Wzięte z jednego z twoich serwerów; jego nazwa, hasło i porty nigdy nie przechodzą.",
+      "none": "Dodaj serwer w zakładce Serwery, aby wziąć jego ustawienia gry.",
+      "pick": "Serwer",
+      "take": "Weź z tego serwera",
+      "takeFailed": "Kiln nie mógł odczytać ustawień serwera",
+      "use": "Użyj zaznaczonych ustawień",
+      "saved": "Ustawienia gry serwera są w paczce",
+      "clear": "Usuń je"
+    },
+    "data": {
+      "tabsAria": "Edytory danych",
+      "tab": {
+        "items": "Przedmioty",
+        "recipes": "Receptury",
+        "loot": "Łup",
+        "drops": "Dropy",
+        "added": "Nowe przedmioty",
+        "raw": "Raw JSON"
+      },
+      "lint": {
+        "line": "Lint: {errors}, {warnings}",
+        "errors": {
+          "one": "{count} błąd",
+          "few": "{count} błędy",
+          "many": "{count} błędów",
+          "other": "{count} błędu"
+        },
+        "warnings": {
+          "one": "{count} ostrzeżenie",
+          "few": "{count} ostrzeżenia",
+          "many": "{count} ostrzeżeń",
+          "other": "{count} ostrzeżenia"
+        },
+        "checking": "Lint: sprawdzanie…",
+        "show": "Pokaż problemy",
+        "hide": "Ukryj problemy",
+        "error": "Błąd",
+        "warning": "Ostrzeżenie",
+        "info": "Uwaga"
+      },
+      "noCatalog": "Brak katalogu danych gry na tym komputerze: listy wyboru pokazują tylko to, co dodają mody paczki, a pola wpisuje się ręcznie.",
+      "thisPack": "ta paczka",
+      "save": "Zapisz",
+      "saved": "Zapisano",
+      "unsaved": "Niezapisane zmiany",
+      "discard": "Odrzuć",
+      "remove": "Usuń",
+      "saveFailed": "Nie zapisano {file}",
+      "broken": "Ten plik nie jest poprawnym JSON-em. Najpierw popraw go w Raw JSON.",
+      "alsoIn": "Ustawione także w {files} (Raw JSON).",
+      "name": "Nazwa",
+      "guid": "Stały GUID (tworzony raz, nigdy go nie zmieniaj)",
+      "badName": "Nazwa ma od 1 do 200 liter, cyfr, _ - lub .",
+      "dupName": "{name} występuje dwa razy",
+      "pick": {
+        "ph": "Szukaj przedmiotów",
+        "selectorPh": "Nazwa lub wzorzec, np. Material_T1_*",
+        "glob": "każde dopasowanie",
+        "unknown": "nie znaleziono w grze ani w modach paczki",
+        "none": "Nic nie znaleziono",
+        "searching": "Szukanie…"
+      },
+      "value": {
+        "set": "ustaw na",
+        "mul": "razy",
+        "add": "plus",
+        "min": "min.",
+        "max": "maks.",
+        "modeAria": "Jak zmienia się {field}",
+        "minAria": "Najniższa wartość: {field}",
+        "maxAria": "Najwyższa wartość: {field}",
+        "raiseOnly": "tylko zwiększ",
+        "lowerOnly": "tylko zmniejsz",
+        "on": "wł.",
+        "off": "wył."
+      },
+      "field": {
+        "add": "+ Pole",
+        "remove": "Usuń {field}",
+        "nameAria": "Pole"
+      },
+      "where": {
+        "add": "+ Warunek",
+        "where": "gdzie",
+        "and": "i",
+        "fieldAria": "Pole warunku",
+        "fieldPh": "pole",
+        "valueAria": "Warunek dla {field}",
+        "remove": "Usuń warunek"
+      },
+      "rules": {
+        "add": "+ Reguła",
+        "addAll": "+ Reguła dla każdego przedmiotu",
+        "remove": "Usuń regułę",
+        "selectorAria": "Które wpisy",
+        "noSelector": "Każda reguła potrzebuje nazwy lub wzorca",
+        "duplicate": "{selector} ma dwie reguły: połącz je w jedną"
+      },
+      "items": {
+        "lead": "Zmieniaj przedmioty gry i przedmioty modów paczki: jedna reguła na przedmiot lub wzorzec, z warunkami na wartości gry. Warstwa paczki ładuje się po wszystkich modach, więc jej wartości wygrywają.",
+        "empty": "Brak reguł przedmiotów.",
+        "selector": "Przedmioty"
+      },
+      "loot": {
+        "lead": "Losowy łup ze skrzyń i przedmiotów w świecie, według przedmiotu: ile trafia do jednego stosu.",
+        "empty": "Brak reguł łupu.",
+        "selector": "Przedmiot"
+      },
+      "recipes": {
+        "lead": "Zmieniaj, co receptury zużywają i wytwarzają oraz ile trwają, albo dodaj własne receptury.",
+        "changes": "Zmienione receptury",
+        "noChanges": "Brak zmian receptur.",
+        "add": "+ Zmień recepturę",
+        "recipe": "Receptura",
+        "noRecipe": "Każda zmiana potrzebuje receptury",
+        "changeInputs": "Zmień składniki",
+        "changeOutputs": "Zmień wyniki",
+        "inputs": "Składniki",
+        "outputs": "Wyniki",
+        "addInput": "+ Składnik",
+        "addOutput": "+ Wynik",
+        "duration": "Czas trwania",
+        "durationPh": "jak w grze",
+        "seconds": "sekund",
+        "itemAria": "Przedmiot",
+        "countAria": "Liczba",
+        "category": "dowolny przedmiot z kategorii {id}",
+        "modNote": "Zmienia recepturę moda; warstwa paczki wygrywa (ładuje się po {mod}).",
+        "stationNote": "Receptura z gry zachowuje swoją stację; nowe receptury wybierają własną.",
+        "new": "Nowe receptury",
+        "noNew": "Brak nowych receptur.",
+        "addNew": "+ Nowa receptura",
+        "removeNew": "Usuń nową recepturę",
+        "station": "Stacja",
+        "stationPh": "Szukaj stacji",
+        "hand": "Wytwarzane ręcznie",
+        "noStation": "Każda nowa receptura potrzebuje stacji",
+        "needStacks": "Każda nowa receptura potrzebuje składnika i wyniku"
+      },
+      "drops": {
+        "lead": "Domyślne ekwipunki: łup z wrogów i stałe skrzynie, według tabeli lub dla każdej tabeli (*).",
+        "empty": "Brak reguł dropu.",
+        "table": "Tabela",
+        "add": "+ Tabela",
+        "addAll": "+ Reguła dla każdej tabeli",
+        "count": "Ilości",
+        "chance": "Szansa",
+        "items": "Pojedyncze przedmioty",
+        "addItem": "+ Przedmiot",
+        "noTable": "Każda reguła dropu potrzebuje tabeli"
+      },
+      "added": {
+        "lead": "Własne przedmioty: każdy jest kopią przedmiotu bazowego (jego modelu, ikony i zachowania) z własną nazwą i wartościami.",
+        "empty": "Brak nowych przedmiotów.",
+        "add": "+ Nowy przedmiot",
+        "remove": "Usuń nowy przedmiot",
+        "displayName": "Wyświetlany jako",
+        "base": "Przedmiot bazowy",
+        "description": "Opis",
+        "rolledLoot": "Losowany jak łup (rzadkość i poziom się różnią)",
+        "fields": "Wartości",
+        "noBase": "Każdy nowy przedmiot potrzebuje przedmiotu bazowego"
+      },
+      "raw": {
+        "none": "Brak plików.",
+        "newPh": "name.json",
+        "newAria": "Nazwa nowego pliku",
+        "new": "Nowy plik",
+        "rename": "Zmień nazwę",
+        "renameAria": "Nowa nazwa",
+        "renameOk": "Zmień nazwę",
+        "exists": "{file} już istnieje",
+        "delete": "Usuń",
+        "deleteTitle": "Usunąć {file}?",
+        "deleteText": "Plik opuszcza warstwę paczki.",
+        "textAria": "Tekst pliku {file}",
+        "clean": "Brak problemów w tym pliku.",
+        "pick": "Wybierz plik albo utwórz nowy."
+      }
+    },
+    "order": {
+      "title": "Kolejność ładowania",
+      "always": "(warstwa paczki, zawsze ostatnia)",
+      "late": "Późne natywne DLL: {list}",
+      "conflicts": "Konflikty",
+      "none": "Żadne dwa mody nie ustawiają tego samego pola inaczej.",
+      "noCatalog": "Bez katalogu danych gry konflikty z symbolami wieloznacznymi to tylko przypuszczenia.",
+      "maybe": "może",
+      "wins": "teraz wygrywa",
+      "setIn": "Ustaw w paczce:",
+      "set": "Ustaw",
+      "setAria": "Wartość {field} w paczce",
+      "setDone": "{field} jest ustawione w warstwie paczki"
+    },
+    "test": {
+      "lead": "Wypróbuj paczkę dokładnie tak, jak dostaną ją gracze: Kiln buduje ją i instaluje jako osobny profil.",
+      "backup": "Twoje zapisy są najpierw kopiowane.",
+      "world": "Do testu zacznij nowy świat, aby twoje światy zostały bez zmian.",
+      "server": "Dla paczki serwerowej umieść opublikowaną wersję na jednym ze swoich serwerów (Publikacja).",
+      "make": "Testuj tę paczkę",
+      "again": "Testuj ponownie",
+      "play": "Graj w test",
+      "end": "Zakończ test",
+      "failed": "Instancja testowa nie powstała",
+      "ready": "{name} jest gotowa",
+      "readyDetail": "Naciśnij Graj, aby ją uruchomić.",
+      "noGame": "Najpierw dodaj grę.",
+      "reported": "Co zgłosiła gra",
+      "notYet": "Zagraj w test i wróć tutaj.",
+      "clean": "Brak konfliktów i błędów w ostatniej rozgrywce.",
+      "conflicts": {
+        "one": "{count} konflikt danych",
+        "few": "{count} konflikty danych",
+        "many": "{count} konfliktów danych",
+        "other": "{count} konfliktów danych"
+      },
+      "problems": {
+        "one": "{count} błąd lub ostrzeżenie",
+        "few": "{count} błędy lub ostrzeżenia",
+        "many": "{count} błędów lub ostrzeżeń",
+        "other": "{count} błędów lub ostrzeżeń"
+      }
+    },
+    "credits": {
+      "lead": "Paczki publiczne podają każdy mod: autora i link https do źródła. Kiln wypełnia to, co rozpoznaje; sprawdź każdy wiersz.",
+      "author": "Autor",
+      "source": "Źródło",
+      "matched": "Znaleziono przez",
+      "authorAria": "Autor {name}",
+      "sourceAria": "Skąd pochodzi {name}",
+      "notIdentified": "Nierozpoznany: uzupełnij lub usuń moda",
+      "missing": {
+        "one": "{count} mod wciąż potrzebuje autora dla paczki publicznej",
+        "few": "{count} mody wciąż potrzebują autora dla paczki publicznej",
+        "many": "{count} modów wciąż potrzebuje autora dla paczki publicznej",
+        "other": "{count} modów wciąż potrzebuje autora dla paczki publicznej"
+      },
+      "complete": "Każdy mod ma autora",
+      "save": "Zapisz autorów",
+      "saved": "Autorzy zapisani",
+      "saveFailed": "Autorzy nie zostali zapisani"
+    },
+    "match": {
+      "kiln": "własne Kilna",
+      "crucible": "Crucible",
+      "github": "wydanie GitHub",
+      "nexus": "Nexus",
+      "manifest": "manifest moda",
+      "manual": "ty"
+    },
+    "confidence": {
+      "certain": "pewne",
+      "likely": "prawdopodobne",
+      "conflict": "różni się od wcześniejszego wpisu",
+      "unverified": "niezweryfikowane",
+      "creator": "twoje",
+      "unconfirmed": "niepotwierdzone",
+      "none": "brak"
+    },
+    "publish": {
+      "signInTitle": "Zaloguj się, aby publikować",
+      "signIn": "Publikacja używa logowania przez Discord. Gracze nie potrzebują go do instalacji.",
+      "version": "Wersja",
+      "changes": "Co się zmieniło",
+      "changesPh": "Zbalansowane łupy; dodano Busy Hands",
+      "tested": "Przetestowano na buildzie gry {build}",
+      "visibility": "Widoczność",
+      "public": "Publiczna",
+      "link": "Tylko przez link",
+      "summary": "Podsumowanie",
+      "summaryHint": "Jedna linia do list Crucible (co najmniej 10 znaków).",
+      "attest": "Podałem każdy mod i jego autora i mogę udostępniać te pliki.",
+      "checks": "Sprawdzenia",
+      "check": {
+        "format": "format",
+        "sizes": "rozmiary",
+        "blocked": "znane szkodliwe pliki",
+        "code": {
+          "one": "skan kodu ({count} uwaga)",
+          "few": "skan kodu ({count} uwagi)",
+          "many": "skan kodu ({count} uwag)",
+          "other": "skan kodu ({count} uwag)"
+        },
+        "lint": {
+          "one": "lint ({count} ostrzeżenie)",
+          "few": "lint ({count} ostrzeżenia)",
+          "many": "lint ({count} ostrzeżeń)",
+          "other": "lint ({count} ostrzeżeń)"
+        }
+      },
+      "tone": {
+        "ok": "ok",
+        "warn": "sprawdź",
+        "err": "błąd",
+        "note": "uwaga"
+      },
+      "go": "Opublikuj",
+      "saveFile": "Zapisz jako plik",
+      "failed": "Paczka nie została opublikowana",
+      "donePublic": "Wersja {version} jest publiczna",
+      "doneLink": "Wersja {version} jest opublikowana",
+      "copied": "Skopiowano link.",
+      "isPublic": "Publiczna na Crucible",
+      "isLink": "Opublikowana, tylko przez link",
+      "history": "Opublikowane wersje",
+      "toServer": "Na serwer",
+      "makePublic": "Upublicznij",
+      "makeLink": "Ustaw tylko przez link",
+      "goFresh": "Opublikuj jako nową paczkę",
+      "goneTitle": "Tej paczki nie ma już na Crucible",
+      "gone": "Została tam usunięta lub zdjęta. Publikacja utworzy nową paczkę z nowym linkiem i kodem.",
+      "notYetPublic": "Jeszcze nie publiczna"
+    },
+    "serverPack": {
+      "title": "{name} {version} na serwerze",
+      "lead": "Mody serwerowe tej wersji, jej ustawienia serwera i gry trafiają na serwer, a z niego powstaje modpack pobierany przez graczy. Najpierw zatrzymaj serwer.",
+      "go": "Umieść na serwerze",
+      "done": "{version} jest na serwerze",
+      "failed": "Paczka serwerowa nie powstała"
+    }
   }
 }

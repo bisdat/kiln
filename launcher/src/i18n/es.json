@@ -5122,5 +5122,420 @@
       "turnOn": "Activar",
       "turnOff": "Desactivar"
     }
+  },
+  "studio": {
+    "nav": "Studio",
+    "title": "Pack Studio",
+    "sub": "Crea packs de Crucible a partir de tus perfiles: mods, ajustes, tus propios datos, créditos y después publica.",
+    "new": "Nuevo pack",
+    "newFrom": "Partir de",
+    "newEmpty": "Vacío (un perfil nuevo)",
+    "newProfile": "{name} ({count} mods)",
+    "newName": "Nombre",
+    "newNamePh": "Mi pack",
+    "create": "Crear",
+    "newFailed": "No se creó el pack",
+    "empty": {
+      "title": "Aún no hay packs",
+      "hint": "Empieza uno desde un perfil con el que juegues: sus mods y ajustes vienen con él."
+    },
+    "packLine": {
+      "one": "v{version} · {count} mod · cambiado {ago}",
+      "other": "v{version} · {count} mods · cambiado {ago}"
+    },
+    "packSub": {
+      "one": "Versión {version}, hecho a partir del perfil {profile} ({count} mod).",
+      "other": "Versión {version}, hecho a partir del perfil {profile} ({count} mods)."
+    },
+    "profileGone": "El perfil del que se hizo este pack ya no existe.",
+    "missing": "Este pack no está aquí",
+    "back": "Todos los packs",
+    "allPacks": "Todos los packs",
+    "tabsAria": "Pack Studio",
+    "deleteTitle": "¿Borrar {name}?",
+    "deleteText": "El borrador del pack va a las copias de seguridad de Kiln. Su perfil se queda, y lo que publicaste sigue en Crucible.",
+    "recheck": "Comprobar de nuevo",
+    "state": {
+      "draft": "Borrador",
+      "link": "Solo con enlace",
+      "public": "Público"
+    },
+    "tab": {
+      "mods": "Mods",
+      "settings": "Ajustes",
+      "data": "Datos",
+      "order": "Orden de carga",
+      "test": "Probar",
+      "credits": "Créditos",
+      "publish": "Publicar"
+    },
+    "mods": {
+      "lead": "Los mods del perfil {profile}, cada uno tal como lo tiene tu Biblioteca. Los jugadores activan o desactivan los mods opcionales antes de instalar.",
+      "addLibrary": "Añadir desde mi Biblioteca",
+      "addFile": "Añadir archivo",
+      "pickFile": "Añadir un archivo de mod al pack",
+      "addFailed": "No se añadió el mod",
+      "removeFailed": "No se quitó {name}",
+      "empty": "Aún no hay mods. Añade algunos desde tu Biblioteca.",
+      "mod": "Mod",
+      "version": "Versión",
+      "need": "En el pack",
+      "sides": "Funciona en",
+      "source": "Origen",
+      "needAria": "Cómo está {name} en el pack",
+      "sidesAria": "Dónde funciona {name}",
+      "required": "Obligatorio",
+      "optionalOn": "Opcional, activado",
+      "optionalOff": "Opcional, desactivado",
+      "both": "Jugadores y servidores",
+      "client": "Solo jugadores",
+      "server": "Solo servidores",
+      "checking": "Comprobando…",
+      "unknown": "Sin identificar",
+      "filter": "Filtrar",
+      "libraryEmpty": "Todos los mods de tu Biblioteca ya están en el pack.",
+      "addN": {
+        "one": "Añadir {count} mod",
+        "other": "Añadir {count} mods"
+      }
+    },
+    "settings": {
+      "lead": "Los ajustes viajan como las claves que elijas, tomadas del perfil tal como lo juegas. Las claves con el valor por defecto del mod se quedan fuera, y también los atajos de teclado salvo que los marques. Nada que parezca privado viaja nunca.",
+      "capture": "Tomar de mis ajustes actuales",
+      "captureFailed": "Kiln no pudo leer los ajustes del perfil",
+      "save": {
+        "one": "Usar {count} clave",
+        "other": "Usar {count} claves"
+      },
+      "saved": {
+        "one": "{count} archivo de ajustes está en el pack",
+        "other": "{count} archivos de ajustes están en el pack"
+      },
+      "saveFailed": "No se tomaron los ajustes",
+      "none": "Este perfil aún no tiene archivos de ajustes. Juégalo una vez, cambia lo que quieras y después tómalos.",
+      "refused": "no puede viajar: {why}",
+      "wholeOnly": "viaja como archivo completo",
+      "differs": {
+        "one": "difiere de los valores por defecto del mod en {count} clave",
+        "other": "difiere de los valores por defecto del mod en {count} claves"
+      },
+      "noDefaults": {
+        "one": "{count} clave (sin valores por defecto conocidos)",
+        "other": "{count} claves (sin valores por defecto conocidos)"
+      },
+      "sideAria": "Quién recibe {file}",
+      "whole": "Archivo completo",
+      "default": "(por defecto {value})",
+      "personal": "personal",
+      "secret": "privado"
+    },
+    "server": {
+      "title": "Ajustes de partida del servidor",
+      "lead": "Ajustes de partida que usa un servidor de este pack (salud, enemigos, construcción). Tomados de uno de tus servidores; su nombre, contraseña y puertos nunca viajan.",
+      "none": "Añade un servidor en Servidores para tomar sus ajustes de partida.",
+      "pick": "Servidor",
+      "take": "Tomar de este servidor",
+      "takeFailed": "Kiln no pudo leer los ajustes del servidor",
+      "use": "Usar los ajustes marcados",
+      "saved": "Los ajustes de partida del servidor están en el pack",
+      "clear": "Quitarlos"
+    },
+    "data": {
+      "tabsAria": "Editores de datos",
+      "tab": {
+        "items": "Objetos",
+        "recipes": "Recetas",
+        "loot": "Botín",
+        "drops": "Drops",
+        "added": "Objetos nuevos",
+        "raw": "JSON sin procesar"
+      },
+      "lint": {
+        "line": "Lint: {errors}, {warnings}",
+        "errors": {
+          "one": "{count} error",
+          "other": "{count} errores"
+        },
+        "warnings": {
+          "one": "{count} advertencia",
+          "other": "{count} advertencias"
+        },
+        "checking": "Lint: comprobando…",
+        "show": "Mostrar problemas",
+        "hide": "Ocultar problemas",
+        "error": "Error",
+        "warning": "Advertencia",
+        "info": "Nota"
+      },
+      "noCatalog": "No hay catálogo de datos del juego en este PC: los selectores solo listan lo que añaden los mods del pack y los campos se escriben a mano.",
+      "thisPack": "este pack",
+      "save": "Guardar",
+      "saved": "Guardado",
+      "unsaved": "Cambios sin guardar",
+      "discard": "Descartar",
+      "remove": "Quitar",
+      "saveFailed": "{file} no se guardó",
+      "broken": "Este archivo no es JSON válido. Arréglalo primero en JSON sin procesar.",
+      "alsoIn": "También definido en {files} (JSON sin procesar).",
+      "name": "Nombre",
+      "guid": "GUID fijo (se crea una vez, no lo cambies nunca)",
+      "badName": "Un nombre tiene de 1 a 200 letras, dígitos, _ - o .",
+      "dupName": "{name} se usa dos veces",
+      "pick": {
+        "ph": "Buscar objetos",
+        "selectorPh": "Nombre o patrón como Material_T1_*",
+        "glob": "todas las coincidencias",
+        "unknown": "no se encuentra en el juego ni en los mods del pack",
+        "none": "No se encontró nada",
+        "searching": "Buscando…"
+      },
+      "value": {
+        "set": "fijar en",
+        "mul": "multiplicar por",
+        "add": "sumar",
+        "min": "mín.",
+        "max": "máx.",
+        "modeAria": "Cómo cambia {field}",
+        "minAria": "Mínimo de {field}",
+        "maxAria": "Máximo de {field}",
+        "raiseOnly": "solo subir",
+        "lowerOnly": "solo bajar",
+        "on": "sí",
+        "off": "no"
+      },
+      "field": {
+        "add": "+ Campo",
+        "remove": "Quitar {field}",
+        "nameAria": "Campo"
+      },
+      "where": {
+        "add": "+ Condición",
+        "where": "donde",
+        "and": "y",
+        "fieldAria": "Campo de la condición",
+        "fieldPh": "campo",
+        "valueAria": "Condición sobre {field}",
+        "remove": "Quitar condición"
+      },
+      "rules": {
+        "add": "+ Regla",
+        "addAll": "+ Regla para todos los objetos",
+        "remove": "Quitar regla",
+        "selectorAria": "Qué entradas",
+        "noSelector": "Cada regla necesita un nombre o un patrón",
+        "duplicate": "{selector} tiene dos reglas: únelas en una"
+      },
+      "items": {
+        "lead": "Cambia los objetos del juego y los de los mods del pack: una regla por objeto o patrón, con condiciones sobre los valores del juego. La capa del pack se carga después de todos los mods, así que sus valores ganan.",
+        "empty": "Aún no hay reglas de objetos.",
+        "selector": "Objetos"
+      },
+      "loot": {
+        "lead": "Botín aleatorio de cofres y objetos del mundo, por objeto: cuántos vienen en una pila.",
+        "empty": "Aún no hay reglas de botín.",
+        "selector": "Objeto"
+      },
+      "recipes": {
+        "lead": "Cambia lo que piden y producen las recetas y cuánto tardan, o añade recetas propias.",
+        "changes": "Recetas modificadas",
+        "noChanges": "Aún no hay cambios de recetas.",
+        "add": "+ Cambiar una receta",
+        "recipe": "Receta",
+        "noRecipe": "Cada cambio necesita una receta",
+        "changeInputs": "Cambiar los ingredientes",
+        "changeOutputs": "Cambiar los resultados",
+        "inputs": "Ingredientes",
+        "outputs": "Resultados",
+        "addInput": "+ Ingrediente",
+        "addOutput": "+ Resultado",
+        "duration": "Duración",
+        "durationPh": "del juego",
+        "seconds": "segundos",
+        "itemAria": "Objeto",
+        "countAria": "Cantidad",
+        "category": "cualquier objeto de la categoría {id}",
+        "modNote": "Cambia la receta del mod; la capa del pack gana (se carga después de {mod}).",
+        "stationNote": "Una receta del juego conserva su estación; las recetas nuevas eligen la suya.",
+        "new": "Recetas nuevas",
+        "noNew": "Aún no hay recetas nuevas.",
+        "addNew": "+ Receta nueva",
+        "removeNew": "Quitar receta nueva",
+        "station": "Estación",
+        "stationPh": "Buscar estaciones",
+        "hand": "Fabricada a mano",
+        "noStation": "Cada receta nueva necesita una estación",
+        "needStacks": "Cada receta nueva necesita un ingrediente y un resultado"
+      },
+      "drops": {
+        "lead": "Inventarios por defecto: botín de enemigos y cofres fijos, por tabla o para todas las tablas (*).",
+        "empty": "Aún no hay reglas de drops.",
+        "table": "Tabla",
+        "add": "+ Tabla",
+        "addAll": "+ Regla para todas las tablas",
+        "count": "Cantidades",
+        "chance": "Probabilidad",
+        "items": "Objetos sueltos",
+        "addItem": "+ Objeto",
+        "noTable": "Cada regla de drops necesita una tabla"
+      },
+      "added": {
+        "lead": "Objetos propios: cada uno es una copia de un objeto base (su modelo, icono y comportamiento) con nombre y valores propios.",
+        "empty": "Aún no hay objetos nuevos.",
+        "add": "+ Objeto nuevo",
+        "remove": "Quitar objeto nuevo",
+        "displayName": "Se muestra como",
+        "base": "Objeto base",
+        "description": "Descripción",
+        "rolledLoot": "Se genera como botín (la rareza y el nivel varían)",
+        "fields": "Valores",
+        "noBase": "Cada objeto nuevo necesita un objeto base"
+      },
+      "raw": {
+        "none": "Aún no hay archivos.",
+        "newPh": "name.json",
+        "newAria": "Nombre del archivo nuevo",
+        "new": "Archivo nuevo",
+        "rename": "Renombrar",
+        "renameAria": "Nombre nuevo",
+        "renameOk": "Renombrar",
+        "exists": "{file} ya existe",
+        "delete": "Eliminar",
+        "deleteTitle": "¿Eliminar {file}?",
+        "deleteText": "El archivo sale de la capa del pack.",
+        "textAria": "Texto de {file}",
+        "clean": "No hay problemas en este archivo.",
+        "pick": "Elige un archivo o crea uno nuevo."
+      }
+    },
+    "order": {
+      "title": "Orden de carga",
+      "always": "(la capa del pack, siempre la última)",
+      "late": "DLL nativas tardías: {list}",
+      "conflicts": "Conflictos",
+      "none": "Ningún par de mods pone el mismo campo distinto.",
+      "noCatalog": "Sin el catálogo de datos del juego, los conflictos con comodines son solo suposiciones.",
+      "maybe": "quizá",
+      "wins": "gana ahora",
+      "setIn": "Fijar en el pack:",
+      "set": "Fijar",
+      "setAria": "Valor de {field} en el pack",
+      "setDone": "{field} está fijado en la capa del pack"
+    },
+    "test": {
+      "lead": "Prueba el pack tal como lo reciben los jugadores: Kiln lo construye y lo instala como un perfil propio.",
+      "backup": "Primero se hace una copia de tus partidas.",
+      "world": "Empieza un mundo nuevo para la prueba y así tus mundos quedan como están.",
+      "server": "Para un pack de servidor, pon una versión publicada en uno de tus servidores (Publicar).",
+      "make": "Probar este pack",
+      "again": "Probar de nuevo",
+      "play": "Jugar la prueba",
+      "end": "Terminar la prueba",
+      "failed": "No se creó la instancia de prueba",
+      "ready": "{name} está listo",
+      "readyDetail": "Pulsa Jugar para iniciarlo.",
+      "noGame": "Añade primero el juego.",
+      "reported": "Lo que informó el juego",
+      "notYet": "Juega la prueba y vuelve aquí.",
+      "clean": "Sin conflictos ni errores en la última partida.",
+      "conflicts": {
+        "one": "{count} conflicto de datos",
+        "other": "{count} conflictos de datos"
+      },
+      "problems": {
+        "one": "{count} error o aviso",
+        "other": "{count} errores o avisos"
+      }
+    },
+    "credits": {
+      "lead": "Los packs públicos dan crédito a cada mod: su autor y un enlace https de su origen. Kiln rellena lo que reconoce; revisa cada fila.",
+      "author": "Autor",
+      "source": "Origen",
+      "matched": "Encontrado por",
+      "authorAria": "Autor de {name}",
+      "sourceAria": "De dónde viene {name}",
+      "notIdentified": "Sin identificar: rellénalo o quita el mod",
+      "missing": {
+        "one": "{count} mod aún necesita crédito para un pack público",
+        "other": "{count} mods aún necesitan crédito para un pack público"
+      },
+      "complete": "Todos los mods tienen crédito",
+      "save": "Guardar créditos",
+      "saved": "Los créditos están guardados",
+      "saveFailed": "No se guardaron los créditos"
+    },
+    "match": {
+      "kiln": "propio de Kiln",
+      "crucible": "Crucible",
+      "github": "versión de GitHub",
+      "nexus": "Nexus",
+      "manifest": "el manifiesto del mod",
+      "manual": "tú"
+    },
+    "confidence": {
+      "certain": "seguro",
+      "likely": "probable",
+      "conflict": "distinto de un crédito anterior",
+      "unverified": "sin verificar",
+      "creator": "tuyo",
+      "unconfirmed": "sin confirmar",
+      "none": "ninguno"
+    },
+    "publish": {
+      "signInTitle": "Inicia sesión para publicar",
+      "signIn": "Publicar usa tu inicio de sesión de Discord. Los jugadores no lo necesitan para instalar.",
+      "version": "Versión",
+      "changes": "Qué cambió",
+      "changesPh": "Botín reequilibrado; añadido Busy Hands",
+      "tested": "Probado con la build del juego {build}",
+      "visibility": "Visibilidad",
+      "public": "Público",
+      "link": "Solo con enlace",
+      "summary": "Resumen",
+      "summaryHint": "Una línea para las listas de Crucible (al menos 10 caracteres).",
+      "attest": "He dado crédito a cada mod y a su autor, y puedo compartir estos archivos.",
+      "checks": "Comprobaciones",
+      "check": {
+        "format": "formato",
+        "sizes": "tamaños",
+        "blocked": "archivos dañinos conocidos",
+        "code": {
+          "one": "análisis de código ({count} nota)",
+          "other": "análisis de código ({count} notas)"
+        },
+        "lint": {
+          "one": "lint ({count} aviso)",
+          "other": "lint ({count} avisos)"
+        }
+      },
+      "tone": {
+        "ok": "ok",
+        "warn": "revisar",
+        "err": "error",
+        "note": "nota"
+      },
+      "go": "Publicar",
+      "saveFile": "Guardar como archivo",
+      "failed": "No se publicó el pack",
+      "donePublic": "La versión {version} es pública",
+      "doneLink": "La versión {version} está publicada",
+      "copied": "Enlace copiado.",
+      "isPublic": "Público en Crucible",
+      "isLink": "Publicado, solo con enlace",
+      "history": "Versiones publicadas",
+      "toServer": "Poner en un servidor",
+      "makePublic": "Hacer público",
+      "makeLink": "Dejar solo con enlace",
+      "goFresh": "Publicar como pack nuevo",
+      "goneTitle": "Este pack ya no está en Crucible",
+      "gone": "Se borró o se retiró allí. Publicar crea un pack nuevo con un enlace y un código nuevos.",
+      "notYetPublic": "Aún no es público"
+    },
+    "serverPack": {
+      "title": "{name} {version} en un servidor",
+      "lead": "Los mods de servidor de la versión, sus ajustes de servidor y de partida van al servidor, y desde ahí se construye el modpack que descargan los jugadores. Detén antes el servidor.",
+      "go": "Poner en el servidor",
+      "done": "{version} está en el servidor",
+      "failed": "No se creó el pack de servidor"
+    }
   }
 }

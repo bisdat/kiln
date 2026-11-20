@@ -9,18 +9,92 @@ use kiln_manage::modpack::ModpackSource;
 use kiln_manage::modpack::merge::Pick;
 use kiln_manage::modpack::layers;
 use kiln_manage::modpack::pack::{self, BuildRequest, Env, InstallRequest, Need, OverrideSpec, PartSide, ServerInstallRequest, UpdateRequest};
+use kiln_manage::modpack::studio;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 #[derive(Subcommand)]
 pub enum PackCmd {
-    /// Build a .kilnpack from a launcher profile (its mods as the Library holds them, a layer, config overrides)
-    Build {
-        /// The profile id
-        profile: String,
-        /// The pack's version (SemVer)
+    /// Start a pack source folder (Pack Studio's form: kiln-pack.json, layer/, credits.json) from a profile, or with a new
+    /// empty profile; build, lint, credits and publish then work on the folder (keep it in git)
+    Init {
+        /// The folder (must not hold a pack yet)
+        dir: PathBuf,
+        /// The pack's name
         #[arg(long)]
-        version: String,
+        name: String,
+        /// The profile it is made from [default: a new empty profile named after the pack]
+        #[arg(long)]
+        profile: Option<String>,
+        /// The pack's id [default: from the name]
+        #[arg(long)]
+        id: Option<String>,
+    },
+    /// Add mods to a pack source's profile: Library entries (KIND:ID@VERSION or ID@VERSION) or files/folders to import
+    Add {
+        dir: PathBuf,
+        #[arg(required = true)]
+        what: Vec<String>,
+    },
+    /// The pack's profile settings that differ from the mods' defaults; with --take, the keys the pack carries
+    #[command(name = "capture-settings")]
+    CaptureSettings {
+        dir: PathBuf,
+        /// A settings file and its keys: PATH[:KEY,KEY...][@both|client|server] (no keys: the whole file). Replaces the
+        /// pack's choice; --take none clears it
+        #[arg(long = "take", value_name = "SPEC")]
+        take: Vec<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// kiln lint over the pack layer, the pack's profile as the other mods. Exit 1: errors
+    Lint {
+        dir: PathBuf,
+        /// The game-data catalog [default: the launcher's]
+        #[arg(long)]
+        catalog: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// The credits of a pack source: what is saved, and what the pack analysis identifies; --set fills a row
+    Credits {
+        dir: PathBuf,
+        /// ID=AUTHOR,https://... (the mod's credit; AUTHOR may not hold a comma)
+        #[arg(long = "set", value_name = "ID=AUTHOR,URL")]
+        set: Vec<String>,
+        /// Take every identified row the analysis found for mods without a saved credit
+        #[arg(long)]
+        accept: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Publish the pack source's next version to Crucible (link only, or --public with a credit for every mod). Needs
+    /// a Crucible session: KILN_CRUCIBLE_SESSION or --session-file (the launcher's Discord sign-in)
+    Publish {
+        dir: PathBuf,
+        /// The version [default: the source's next]
+        #[arg(long)]
+        version: Option<String>,
+        #[arg(long)]
+        changes: Option<String>,
+        /// A public pack (credits for every mod, a summary; --yes confirms you credited every mod and may share the files)
+        #[arg(long)]
+        public: bool,
+        #[arg(long)]
+        yes: bool,
+        #[arg(long)]
+        session_file: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Build a .kilnpack from a launcher profile (its mods as the Library holds them, a layer, config overrides), or from
+    /// a pack source folder (kilnctl pack init; its own choices, the other options then do not apply)
+    Build {
+        /// The profile id, or a pack source folder given as a path (./my-pack, /home/me/my-pack)
+        profile: String,
+        /// The pack's version (SemVer; a pack source's own when not given)
+        #[arg(long)]
+        version: Option<String>,
         /// The pack's id [default: from the name]
         #[arg(long)]
         id: Option<String>,
@@ -275,6 +349,23 @@ pub fn run(cmd: PackCmd) -> Result<i32> {
     match cmd {
         PackCmd::Build { profile, version, id, name, layer, overrides, optional, client_only, server_only, server_settings, changes, out, json } => {
             let dirs = data_dirs()?;
+            // a folder is named as a path (it has a separator, or is "."): a profile id never shadows a folder or the other way round
+            let folder = std::path::Path::new(&profile);
+            let looks_like_path = profile.contains('/') || profile.contains(std::path::MAIN_SEPARATOR) || profile == "." || profile == "..";
+            if looks_like_path && folder.join(studio::SOURCE_FILE).is_file() {
+                if id.is_some() || name.is_some() || layer.is_some() || !overrides.is_empty() || !optional.is_empty() || !client_only.is_empty()
+                    || !server_only.is_empty() || server_settings.is_some() || changes.is_some() {
+                    bail!("{profile} is a pack source: its kiln-pack.json holds those choices (only --version and --out apply)");
+                }
+                let v = version.as_deref();
+                let built = if json { studio::build_as(&dirs, folder, v, Some(&out), &mut kiln_manage::task::NoProgress) } else { studio::build_as(&dirs, folder, v, Some(&out), &mut Printer::new()) }.km()?;
+                if json { return print_json(&built); }
+                show_index(&built.index);
+                for n in &built.notes { println!("  note: {n}"); }
+                println!("{} ({} bytes, sha256 {})", built.file.display(), built.size, built.sha256);
+                return Ok(0);
+            }
+            let Some(version) = version else { bail!("--version is needed to build a pack from a profile") };
             let mut env = BTreeMap::new();
             for id in client_only { env.insert(id, Env { client: Need::Required, server: Need::Unsupported }); }
             for id in server_only { env.insert(id, Env { client: Need::Unsupported, server: Need::Required }); }
@@ -295,6 +386,120 @@ pub fn run(cmd: PackCmd) -> Result<i32> {
             println!("{} ({} bytes, sha256 {})", built.file.display(), built.size, built.sha256);
             Ok(0)
         }
+        PackCmd::Init { dir, name, profile, id } => {
+            let dirs = data_dirs()?;
+            let st = studio::init(&dirs, &dir, &studio::NewPack { name, from: profile, id }).km()?;
+            println!("pack source {} ({}) in {}, made from the profile {} ({} mods)", st.source.name, st.source.id, dir.display(),
+                st.profile_name.as_deref().unwrap_or(&st.source.profile), st.mods.len());
+            println!("next: kilnctl pack add | capture-settings | lint | credits | build | publish {}", dir.display());
+            Ok(0)
+        }
+        PackCmd::Add { dir, what } => {
+            let dirs = data_dirs()?;
+            let s = studio::read_source(&dir).km()?;
+            let mut refs = Vec::new();
+            let mut paths = Vec::new();
+            let lib = kiln_manage::library::list(&dirs, None).km()?;
+            for w in &what {
+                if std::path::Path::new(w).exists() {
+                    paths.push(PathBuf::from(w));
+                    continue;
+                }
+                let (kind, rest) = match w.split_once(':') {
+                    Some((k, r)) => (Some(kiln_manage::manifest::ModKind::parse(k).ok_or_else(|| anyhow::anyhow!("{w}: {k} is not a mod kind"))?), r),
+                    None => (None, w.as_str()),
+                };
+                let (id, version) = rest.split_once('@').map(|(a, b)| (a, Some(b))).unwrap_or((rest, None));
+                let e = lib.iter().find(|e| e.id == id && kind.is_none_or(|k| e.kind == k)).ok_or_else(|| anyhow::anyhow!("{w}: not in the Library (give a file to import)"))?;
+                let v = match version { Some(v) => e.versions.iter().find(|x| x.version == v), None => e.versions.first() }
+                    .ok_or_else(|| anyhow::anyhow!("{w}: the Library has no such version"))?;
+                refs.push(kiln_manage::library::LibraryRef { kind: e.kind, id: e.id.clone(), version: v.version.clone(), hash: v.hash.clone() });
+            }
+            if !paths.is_empty() {
+                let r = kiln_manage::library::import(&dirs, &paths, &mut Printer::new()).km()?;
+                for s in &r.skipped { println!("  skipped {}: {}", s.path, s.reason); }
+                refs.extend(r.imported.into_iter().chain(r.existing));
+            }
+            let mut p = kiln_manage::profile::get(&dirs, &s.profile).km()?;
+            for r in &refs {
+                let list = p.mods.list_mut(r.kind);
+                list.retain(|m| m.id != r.id);
+                list.push(kiln_manage::profile::ProfileMod { id: r.id.clone(), version: r.version.clone(), hash: r.hash.clone(), enabled: true });
+                println!("  + {} {} {}", r.kind.as_str(), r.id, r.version);
+            }
+            kiln_manage::profile::save(&dirs, &p).km()?;
+            Ok(0)
+        }
+        PackCmd::CaptureSettings { dir, take, json } => {
+            let dirs = data_dirs()?;
+            if !take.is_empty() {
+                let choices: Vec<studio::CaptureChoice> = if take == ["none"] { Vec::new() } else {
+                    take.iter().map(|s| parse_override(s).map(|o| studio::CaptureChoice { whole: o.keys.is_empty(), path: o.path, side: o.side, keys: o.keys })).collect::<Result<_>>()?
+                };
+                let st = studio::set_capture(&dirs, &dir, &choices).km()?;
+                for o in &st.source.overrides { println!("  {} {:?} {}", o.path, o.side, if o.keys.is_empty() { "(whole file)".to_string() } else { o.keys.join(", ") }); }
+                return Ok(0);
+            }
+            let files = studio::capture(&dirs, &dir).km()?;
+            if json { return print_json(&files); }
+            for f in &files {
+                match &f.refused {
+                    Some(why) => println!("{}: can't travel ({why})", f.path),
+                    None => println!("{}{}", f.path, if f.whole { " (in the pack, whole file)" } else if f.defaults { "" } else { " (no defaults known)" }),
+                }
+                for k in &f.keys {
+                    let mark = if k.secret.is_some() { "secret" } else if k.chosen { "[x]" } else { "[ ]" };
+                    let def = k.default.as_ref().map(|d| format!(" (default {d})")).unwrap_or_default();
+                    println!("  {mark} {} = {}{def}{}", k.key, k.value, if k.personal { " (personal)" } else { "" });
+                }
+            }
+            Ok(0)
+        }
+        PackCmd::Lint { dir, catalog, json } => {
+            let dirs = data_dirs()?;
+            let r = studio::layer_lint(&dirs, &dir, catalog).km()?;
+            if json { print_json(&r)?; } else {
+                for d in &r.diagnostics { println!("{}:{}:{} {:?} {} {}", d.file, d.line, d.col, d.severity, d.code, d.message); }
+                println!("lint: {} error(s), {} warning(s)", r.summary.errors, r.summary.warnings);
+            }
+            Ok(if r.summary.errors > 0 { 1 } else { 0 })
+        }
+        PackCmd::Credits { dir, set, accept, json } => {
+            let dirs = data_dirs()?;
+            let mut st = studio::open(&dirs, &dir).km()?;
+            let report = studio::analyze(&dirs, &dir, &mut kiln_manage::task::NoProgress).km()?;
+            let mut credits = st.credits.clone();
+            if accept {
+                for c in &report.credits {
+                    if let (Some(a), Some(s)) = (&c.author, &c.source) && !credits.contains_key(&c.id) {
+                        credits.insert(c.id.clone(), pack::Credit { author: a.clone(), source: s.clone(), match_kind: Some(c.match_kind.clone()) });
+                    }
+                }
+            }
+            for s in &set {
+                let (id, rest) = s.split_once('=').ok_or_else(|| anyhow::anyhow!("{s:?}: ID=AUTHOR,URL"))?;
+                let (author, url) = rest.rsplit_once(',').ok_or_else(|| anyhow::anyhow!("{s:?}: ID=AUTHOR,URL"))?;
+                credits.insert(id.to_string(), pack::Credit { author: author.trim().into(), source: url.trim().into(), match_kind: Some("manual".into()) });
+            }
+            if accept || !set.is_empty() {
+                st = studio::set_credits(&dirs, &dir, &credits).km()?;
+            }
+            if json { return print_json(&serde_json::json!({ "credits": st.credits, "identified": report.credits, "needs": studio::public_needs(&st) })); }
+            for m in &st.mods {
+                let found = report.credits.iter().find(|c| c.id == m.id);
+                match &m.credit {
+                    Some(c) => println!("  {:<24} {} {} ({})", m.id, c.author, c.source, c.match_kind.as_deref().unwrap_or("manual")),
+                    None => match found.and_then(|c| c.author.as_ref().map(|a| (a, c))) {
+                        Some((a, c)) => println!("  {:<24} ? suggested: {a} {} ({}, {}) - kilnctl pack credits --accept", m.id, c.source.as_deref().unwrap_or("-"), c.match_kind, c.confidence),
+                        None => println!("  {:<24} ? not identified: --set {}=AUTHOR,https://...", m.id, m.id),
+                    },
+                }
+            }
+            let needs = studio::public_needs(&st);
+            println!("{}", if needs.is_empty() { "public: ready".to_string() } else { format!("public needs: {}", needs.join("; ")) });
+            Ok(0)
+        }
+        PackCmd::Publish { dir, version, changes, public, yes, session_file, json } => publish(dir, version, changes, public, yes, session_file, json),
         PackCmd::Verify { file, sha256, json } => {
             let ix = pack::verify(&file, sha256.as_deref()).km()?;
             if json { return print_json(&ix); }
@@ -460,4 +665,46 @@ mod tests {
         assert_eq!(switches(&["a".into(), "b=off".into()], true).unwrap(), BTreeMap::from([("a".to_string(), true), ("b".to_string(), false)]));
         assert!(switches(&["a".into()], false).is_err());
     }
+}
+
+#[cfg(feature = "crucible")]
+fn publish(dir: PathBuf, version: Option<String>, changes: Option<String>, public: bool, yes: bool, session_file: Option<PathBuf>, json: bool) -> Result<i32> {
+    use kiln_manage::crucible::{Crucible, Endpoints, publish::{self, PublishRequest}};
+    let dirs = data_dirs()?;
+    let session = match session_file {
+        Some(p) => std::fs::read_to_string(&p).map_err(|e| anyhow::anyhow!("{}: {e}", p.display()))?.trim().to_string(),
+        None => std::env::var("KILN_CRUCIBLE_SESSION").map_err(|_| anyhow::anyhow!("publishing needs a Crucible session: KILN_CRUCIBLE_SESSION or --session-file"))?,
+    };
+    let (ep, transport): (Endpoints, Box<dyn kiln_manage::net::Transport>) = match std::env::var("KILN_CRUCIBLE_DEV") {
+        // a local service (debug builds only, as the launcher)
+        Ok(spec) if cfg!(debug_assertions) && !spec.trim().is_empty() => {
+            let (ep, t) = kiln_manage::crucible::dev::from_spec(&spec).km()?;
+            (ep, Box::new(t))
+        }
+        _ => (Endpoints::production(), Box::new(kiln_manage::net::UreqTransport::new())),
+    };
+    if !ep.enabled() {
+        bail!("Crucible is not available in this version of Kiln yet");
+    }
+    let s = studio::read_source(&dir).km()?;
+    let req = PublishRequest {
+        version: version.unwrap_or(s.version),
+        changes,
+        visibility: if public { studio::Visibility::Public } else { studio::Visibility::Link },
+        attest: yes,
+        game_builds: Vec::new(),
+        fresh: false,
+    };
+    let c = Crucible::new(&ep, transport.as_ref(), env!("CARGO_PKG_VERSION")).with_session(Some(session));
+    let r = if json { publish::publish(&dirs, &c, &dir, &req, None, &mut kiln_manage::task::NoProgress) } else { publish::publish(&dirs, &c, &dir, &req, None, &mut Printer::new()) }.km()?;
+    if json { return print_json(&r); }
+    println!("published {} {} ({}): {} code {}", r.pack.title, r.version.version, if r.public { "public" } else { "link only" }, r.pack.url, r.pack.code);
+    println!("  {} file(s), {} bytes sent, {} bytes Crucible had", r.files, r.uploaded, r.skipped);
+    for n in &r.needs { println!("  before it can be public: {n}"); }
+    Ok(0)
+}
+
+#[cfg(not(feature = "crucible"))]
+fn publish(_dir: PathBuf, _version: Option<String>, _changes: Option<String>, _public: bool, _yes: bool, _session_file: Option<PathBuf>, _json: bool) -> Result<i32> {
+    bail!("this kilnctl was built without Crucible (feature crucible)")
 }
