@@ -1,4 +1,10 @@
 {
+  "chat": {
+    "completion": {
+      "title": "Comandi suggeriti",
+      "hint": "Tab: completa · Esc: chiudi"
+    }
+  },
   "language": {
     "name": "Italiano"
   },

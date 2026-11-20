@@ -1,4 +1,10 @@
 {
+  "chat": {
+    "completion": {
+      "title": "Command suggestions",
+      "hint": "Tab: complete · Esc: close"
+    }
+  },
   "language": {
     "name": "English"
   },

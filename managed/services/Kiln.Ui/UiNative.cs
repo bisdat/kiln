@@ -568,6 +568,98 @@ internal static unsafe class UiNative
     /// <summary>Tests: a table of the graphics tail in place of kiln.ui's.</summary>
     internal static TableGraphics* GraphicsOverride;
 
+    /// <summary>Issue #44: internal completion handoff at kiln.ui offset 1032, after the graphics tail.</summary>
+    /// <remarks>Native writes text and the native-chat rectangle on its UI
+    /// thread. Only managed Kiln.Ui may use this slot. No game pointers cross
+    /// threads. Layout: 44-byte header, 16-byte rect, two 257-byte buffers;
+    /// total 576 bytes after 2-byte padding.</remarks>
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct ChatCompletion
+    {
+        public uint Size, Operation;
+        public uint Focused, Action, Cursor, TextLen, ReplacementLen;
+        public uint Suggestions, ListOpen, Field, Revision;
+        public float X, Y, Width, Height;
+        public fixed byte Text[257];
+        public fixed byte Replacement[257];
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct TableChat
+    {
+        public TableGraphics Base;
+        public delegate* unmanaged[Cdecl]<ChatCompletion*, int> ChatCompletion;
+    }
+
+    private static delegate* unmanaged[Cdecl]<ChatCompletion*, int> ChatCompletionSlot
+    {
+        get
+        {
+            var t = T;
+            if (t == null || t->Header.Size < (uint)sizeof(TableChat)) return null;
+            return ((TableChat*)t)->ChatCompletion;
+        }
+    }
+
+    /// <summary>Native read: 1 (snapshot). Null when chat is not focused,
+    /// disabled, unsupported or the input rectangle could not be validated.</summary>
+    internal static ChatCompletion? ChatInput()
+    {
+        var slot = ChatCompletionSlot;
+        if (slot == null) return null;
+        var result = new ChatCompletion { Size = (uint)sizeof(ChatCompletion), Operation = 1 };
+        return slot(&result) == Ok && result.Focused != 0 ? result : null;
+    }
+
+    // One stable native call site: kiln.ui's hover capture is per caller.
+    // Always clear it when suggestions disappear or focus changes.
+    internal static void ChatHover(bool hovering)
+    {
+        var t = T;
+        if (t != null) t->SetHoverCapture(hovering ? 1u : 0u);
+    }
+
+    // Turning suggestions on names the snapshot (field, revision) they belong to: native refuses a stale one, so a
+    // focus loss on the game's UI thread is never undone by this render frame. Turning them off needs no snapshot.
+    internal static bool ChatCandidates(bool hasSuggestions, bool active, uint field = 0, uint revision = 0)
+    {
+        var slot = ChatCompletionSlot;
+        if (slot == null) return false;
+        var request = new ChatCompletion {
+            Size = (uint)sizeof(ChatCompletion), Operation = 2,
+            Suggestions = hasSuggestions ? 1u : 0u, ListOpen = active ? 1u : 0u,
+            Field = field, Revision = revision,
+        };
+        return slot(&request) == Ok;
+    }
+
+    internal static bool ChatReplace(in ChatCompletion snapshot, string expected, string replacement)
+    {
+        var slot = ChatCompletionSlot;
+        if (slot == null || System.Text.Encoding.UTF8.GetByteCount(expected) > 256 ||
+            System.Text.Encoding.UTF8.GetByteCount(replacement) > 256) return false;
+        var request = new ChatCompletion {
+            Size = (uint)sizeof(ChatCompletion), Operation = 3,
+            Field = snapshot.Field, Revision = snapshot.Revision,
+        };
+        var left = System.Text.Encoding.UTF8.GetBytes(expected);
+        var right = System.Text.Encoding.UTF8.GetBytes(replacement);
+        request.TextLen = (uint)left.Length;
+        request.ReplacementLen = (uint)right.Length;
+        for (var i = 0; i < left.Length; ++i) request.Text[i] = left[i];
+        for (var i = 0; i < right.Length; ++i) request.Replacement[i] = right[i];
+        return slot(&request) == Ok;
+    }
+
+    internal static string ChatText(in ChatCompletion snapshot)
+    {
+        if (snapshot.TextLen > 256) return "";
+        // A fixed buffer cannot be used from an unfixed in parameter: copy
+        // the blittable value to a local before pinning.
+        var copy = snapshot;
+        return System.Text.Encoding.UTF8.GetString(copy.Text, (int)copy.TextLen);
+    }
+
     /// <summary>KILN_UI_GLYPHS_* (kiln_ui.h look_info): the overlay's glyphs of a Chinese, Japanese, Korean or Cyrillic language.</summary>
     public const byte GlyphsLatin = 0, GlyphsLoading = 1, GlyphsReady = 2, GlyphsFailed = 3;
 

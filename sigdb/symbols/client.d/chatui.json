@@ -133,6 +133,35 @@
           "pattern": "48 8B D8 48 8D 50 {chatui/state.edit:d8} 66 0F 7F 44 24 ?? E8 {chatui/EditSetText:rel32}"
         }
       ]
+    },
+    "@chatui/TextInputState.node": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "chatui/TextInputState",
+            "size": 64
+          },
+          "pattern": "40 53 48 83 EC 30 48 8B 49 {chatui/widget.node:d8} 4C 8D 0D"
+        }
+      ]
+    },
+    "@chatui/EditSetText.cursor": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "chatui/EditSetText",
+            "size": 4096
+          },
+          "pattern": "8B 4F 08 8B 87 {chatui/edit.cursor:d32} 3B C8 74 0F C6 87 62 19 00 00"
+        },
+        {
+          "scope": {
+            "symbol": "chatui/EditSetText",
+            "size": 4096
+          },
+          "pattern": "8B C1 89 8F {chatui/edit.cursor:d32} 89 87 44 19 00 00 41 89 06"
+        }
+      ]
     }
   },
   "constants": {
@@ -150,6 +179,12 @@
     },
     "chatui/widget.buffer": {
       "min_votes": 1
+    },
+    "chatui/widget.node": {
+      "min_votes": 1
+    },
+    "chatui/edit.cursor": {
+      "min_votes": 2
     }
   },
   "features": {
@@ -169,6 +204,18 @@
         "chatui/state.edit",
         "chatui/state.editing",
         "chatui/widget.buffer"
+      ]
+    },
+    "chat.ui.completion": {
+      "symbols": [
+        "chatui/TextInputState",
+        "chatui/EditSetText",
+        "@chatui/TextInputState.node",
+        "@chatui/EditSetText.cursor"
+      ],
+      "constants": [
+        "chatui/widget.node",
+        "chatui/edit.cursor"
       ]
     }
   }

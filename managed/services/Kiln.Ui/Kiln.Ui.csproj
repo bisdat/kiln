@@ -30,6 +30,7 @@
   <ItemGroup>
     <ProjectReference Include="../../Kiln.Api/Kiln.Api.csproj" Private="false" />
     <ProjectReference Include="../Kiln.Network/Kiln.Network.csproj" Private="false" />
+    <ProjectReference Include="../Kiln.Chat/Kiln.Chat.csproj" Private="false" />
     <!-- the Network tab's sync status (ContentSync) -->
     <ProjectReference Include="../Kiln.Content/Kiln.Content.csproj" Private="false" />
     <!-- Ui.Values' item views (ItemRarity) -->

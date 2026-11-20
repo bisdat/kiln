@@ -604,6 +604,12 @@ KilnResult KILN_CALL t_set_texts(const KilnUiTexts* t) {
     footer_texts_changed();
     return KILN_OK;
 }
+// Managed-only chat completion; native plugins cannot read typed chat or
+// submit a replacement through the appended internal UI table slot.
+KilnResult KILN_CALL t_chat_completion(KilnUiChatCompletion* io) {
+    if (caller_is_plugin(_ReturnAddress())) return KILN_ERR_UNAVAILABLE;
+    return chat_completion_io(io);
+}
 KilnHandle KILN_CALL t_font_load(KilnOwner o, const void* data, size_t len) {
     if (!overlay_drawing_on()) return 0;
     return font_load(o, data, len);
@@ -651,7 +657,7 @@ static_assert(sizeof(KilnUiImageDraw) == 32 && offsetof(KilnUiImageDraw, width) 
               "KilnUiImageDraw layout (UiNative.ImageDraw)");
 static_assert(offsetof(KilnUiApi, set_texts) == 1008,
               "kiln.ui appends set_texts after image_opaque_rect (0.2.0-dev.29.16; UiNative.TableTexts)");
-static_assert(offsetof(KilnUiApi, graphics_set) == 1016 && offsetof(KilnUiApi, graphics_status) == 1024 && sizeof(KilnUiApi) == 1032,
+static_assert(offsetof(KilnUiApi, graphics_set) == 1016 && offsetof(KilnUiApi, graphics_status) == 1024,
               "kiln.ui appends graphics_set and graphics_status after set_texts (0.2.0-dev.29.18; UiNative.TableGraphics)");
 static_assert(sizeof(KilnUiGraphics) == 48 && offsetof(KilnUiGraphics, custom_scale) == 16 && offsetof(KilnUiGraphics, mode_scale) == 20 &&
                   offsetof(KilnUiGraphics, readout) == 36 && offsetof(KilnUiGraphics, upscaler) == 40 &&
@@ -666,6 +672,12 @@ static_assert(sizeof(KilnUiGraphicsStatus) == KILN_UI_GRAPHICS_STATUS_SIZE_V2 &&
                   offsetof(KilnUiGraphicsStatus, upscale_version) == 96 && offsetof(KilnUiGraphicsStatus, upscale_render_width) == 100 &&
                   offsetof(KilnUiGraphicsStatus, upscale_output_width) == 108 && offsetof(KilnUiGraphicsStatus, upscale_detail) == 120,
               "KilnUiGraphicsStatus layout (UiNative.GraphicsStatus; phase B fields from 72)");
+static_assert(offsetof(KilnUiApi, chat_completion) == 1032 && sizeof(KilnUiApi) == 1040,
+              "chat completion appends after graphics_status (internal, Kiln.Ui only; UiNative.TableChat)");
+static_assert(offsetof(KilnUiChatCompletion, text) == 60 &&
+              offsetof(KilnUiChatCompletion, replacement) == 317 &&
+              sizeof(KilnUiChatCompletion) == 576,
+              "chat completion ABI payload matches managed UiNative.ChatCompletion");
 static_assert(sizeof(KilnUiTexts) == 40 && offsetof(KilnUiTexts, language) == 8 && offsetof(KilnUiTexts, keys) == 24 &&
                   offsetof(KilnUiTexts, texts) == 32,
               "KilnUiTexts layout (UiNative.Texts)");
@@ -735,6 +747,7 @@ const KilnUiApi kTable = {
     &t_image_ex, &t_image_opaque_rect,
     &t_set_texts,  // Kiln's own texts (0.2.0-dev.29.16)
     &t_graphics_set, &t_graphics_status,  // Kiln's own graphics tools (0.2.0-dev.29.18)
+    &t_chat_completion,  // issue #44 internal managed completion
 };
 
 std::string api_path(int kind) {
