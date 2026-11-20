@@ -63,6 +63,12 @@ public sealed class KilnTaskContext
     [AnyThread]
     public CancellationToken Cancellation => _run.Token;
 
+    /// <summary>Kiln-internal: whether the task's cancellation was asked, also when only the pool asked it while this
+    /// segment runs (the process exit seals every owner; the token learns that only at the next dispatch otherwise). A long
+    /// synchronous body of a Kiln component (Kiln.Saves' writer) polls it. Signals <see cref="Cancellation"/> when it is
+    /// true. Any thread.</summary>
+    internal bool CancellationAsked => _run.PollCancelled();
+
     /// <summary>The world the parameterless <see cref="ToTick()"/>, <see cref="OnTick{T}(Func{T})"/>,
     /// <see cref="PostToTick(Action)"/> and <see cref="NextGateWindow()"/> go to: the one the task was started in
     /// (<see cref="WorldKind.Server"/> or <see cref="WorldKind.Client"/>; <see cref="WorldKind.Menu"/> for a task started
