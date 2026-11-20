@@ -1,0 +1,85 @@
+// Pack Studio's shared state: the queries of a pack source and the save that follows the creator's edits.
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { create } from "zustand";
+import * as api from "../api/commands";
+import type { PackCheckReport, PackSourceDoc, Studio } from "../api/commands";
+import { runTask } from "../ui";
+
+export const sk = {
+  list: ["studio_list"] as const,
+  get: (id: string) => ["studio_get", id] as const,
+  capture: (id: string) => ["studio_capture", id] as const,
+  order: (id: string) => ["studio_order", id] as const,
+  layer: (id: string) => ["studio_layer_files", id] as const,
+  lint: (id: string) => ["studio_layer_lint", id] as const,
+};
+
+export const useStudioList = () => useQuery({ queryKey: sk.list, queryFn: api.studioList, retry: false });
+export const useStudio = (id: string | undefined) => useQuery({ queryKey: sk.get(id ?? ""), queryFn: () => api.studioGet(id!), enabled: !!id, retry: false });
+
+/** Everything that reads a pack source (after a change to it or its profile). */
+export function refreshStudio(qc: QueryClient, id: string) {
+  for (const k of [sk.list, sk.get(id), sk.capture(id), sk.order(id), sk.layer(id), sk.lint(id), ["profile_list"], ["profile_get"], ["profile_resolve"], ["library_list"]]) void qc.invalidateQueries({ queryKey: k });
+}
+
+/** Saves a changed source; the answer replaces the cached pack at once. */
+export function useSaveSource(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (source: PackSourceDoc) => api.studioSave(id, source),
+    onSuccess: (st: Studio) => { qc.setQueryData(sk.get(id), st); void qc.invalidateQueries({ queryKey: sk.list }); },
+  });
+}
+
+export const TABS = ["mods", "settings", "data", "order", "test", "credits", "publish"] as const;
+export type StudioTab = (typeof TABS)[number];
+
+// ---------------------------------------------------------------- the analysis (checks, conflicts, prefilled credits)
+
+interface Analysis { report: PackCheckReport | null; stamp: string | null; running: boolean; error: string | null }
+const EMPTY: Analysis = { report: null, stamp: null, running: false, error: null };
+/** The last analysis per pack and the source's updated time it was made for. */
+export const useAnalysis = create<{ by: Record<string, Analysis>; set: (id: string, a: Partial<Analysis>) => void }>((set) => ({
+  by: {},
+  set: (id, a) => set((s) => ({ by: { ...s.by, [id]: { ...EMPTY, ...s.by[id], ...a } } })),
+}));
+
+/** Runs the analysis (a task) unless one runs; keeps it for the tabs. */
+export async function analyze(id: string, stamp: string): Promise<PackCheckReport | null> {
+  const cur = useAnalysis.getState().by[id];
+  if (cur?.running) return null;
+  useAnalysis.getState().set(id, { running: true, error: null });
+  try {
+    const report = await runTask<PackCheckReport>(() => api.studioAnalyze(id), { quiet: true });
+    useAnalysis.getState().set(id, { report, stamp, running: false });
+    return report;
+  } catch (e) {
+    useAnalysis.getState().set(id, { running: false, error: api.toKilnError(e).message });
+    return null;
+  }
+}
+
+/** The analysis of the pack as it is (made again when the source changed since). */
+export function useAnalysisOf(st: Studio | undefined, auto = true): Analysis & { stale: boolean } {
+  const a = useAnalysis((s) => (st ? s.by[st.source.id] : undefined)) ?? EMPTY;
+  const stale = !!st && a.stamp !== st.source.updated;
+  if (auto && st && stale && !a.running && !a.error) queueMicrotask(() => void analyze(st.source.id, st.source.updated));
+  return { ...a, stale };
+}
+
+// ---------------------------------------------------------------- words of the analysis
+
+/** How a credit was found (CreditRow.match) as words. */
+export const MATCH_WORD: Record<string, string> = {
+  kiln: "studio.match.kiln", crucible: "studio.match.crucible", github: "studio.match.github", nexus: "studio.match.nexus", manifest: "studio.match.manifest", manual: "studio.match.manual",
+};
+export const matchWord = (m: string) => MATCH_WORD[m] ?? MATCH_WORD.manual;
+/** How sure the identification is (CreditRow.confidence). */
+const CONFIDENCE_WORD: Record<string, string> = {
+  certain: "studio.confidence.certain", likely: "studio.confidence.likely", conflict: "studio.confidence.conflict", unverified: "studio.confidence.unverified",
+  creator: "studio.confidence.creator", unconfirmed: "studio.confidence.unconfirmed", none: "studio.confidence.none",
+};
+export const confidenceWord = (c: string) => CONFIDENCE_WORD[c] ?? CONFIDENCE_WORD.unconfirmed;
+/** A check's state word. */
+const TONE_WORD: Record<string, string> = { ok: "studio.publish.tone.ok", warn: "studio.publish.tone.warn", err: "studio.publish.tone.err", note: "studio.publish.tone.note" };
+export const toneWord = (x: string) => TONE_WORD[x] ?? TONE_WORD.note;

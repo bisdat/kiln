@@ -1,0 +1,69 @@
+/* Pack Studio (src/studio/): the creator's tool. Hearth tokens; Crucible's frost cyan for its own accents. */
+.kst-mark { vertical-align: middle; }
+.kst-meta { font-family: var(--k-font-label); font-size: 15px; color: #6fdcff; }
+.kst-p { margin: 0; font-size: 15.5px; line-height: 1.45; }
+.kst-dim { color: var(--k-text-2); }
+.kst-mono { font-family: var(--k-font-mono); font-size: 14px; }
+.kst-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.kst-between { justify-content: space-between; }
+.kst-label { font-family: var(--k-font-label); font-size: 15px; color: var(--k-ash-1h, #b9a99a); }
+.kst-h3 { font-family: var(--k-font-label); font-size: 18px; margin: 4px 0 8px; color: var(--k-text-0); }
+.kst-warn-text { color: #ffb066; }
+.kst-ok-text { color: var(--k-ok, #7cc47f); }
+.kst-off { opacity: .55; }
+.kst-tick { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-size: 15px; }
+.kst-tick .k-check { margin: 0; }
+.kst-section { display: flex; flex-direction: column; gap: 14px; }
+.kst-body { padding-top: 14px; }
+.kst-tabs { margin-top: 4px; }
+
+.kst-empty { display: flex; align-items: center; gap: 24px; }
+.kst-empty img { width: 220px; height: 165px; flex: none; }
+.kst-packs { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
+.kst-pack { display: flex; gap: 12px; align-items: center; padding: 10px; border-radius: 10px; text-decoration: none; color: inherit;
+  background: rgba(8, 19, 32, .45); box-shadow: inset 0 0 0 1px rgba(23, 200, 244, .22); }
+.kst-pack:hover, .kst-pack:focus-visible { box-shadow: inset 0 0 0 1px #6fdcff, 0 0 18px rgba(23, 200, 244, .18); outline: none; }
+.kst-pack-cover { width: 96px; height: 54px; border-radius: 6px; background-size: cover; background-position: center; flex: none; }
+.kst-pack-text { display: flex; flex-direction: column; min-width: 0; }
+.kst-pack-name { font-family: var(--k-font-label); font-size: 18px; }
+.kst-pack-sub { font-size: 14px; color: var(--k-text-2); }
+.kst-pack-pub { font-size: 13.5px; color: #6fdcff; }
+.kst-new { display: grid; grid-template-columns: minmax(240px, 1fr) minmax(240px, 1fr); gap: 12px 18px; align-items: end; padding: 14px; margin-bottom: 18px;
+  border-radius: 10px; box-shadow: inset 0 0 0 1px rgba(23, 200, 244, .3); max-width: 760px; }
+.kst-new .kst-row { grid-column: 1 / -1; }
+
+.kst-table { width: 100%; border-collapse: collapse; font-size: 15px; }
+.kst-table th { text-align: left; font-family: var(--k-font-label); font-weight: normal; color: var(--k-ash-1h, #b9a99a); padding: 4px 8px 6px; }
+.kst-table td { padding: 6px 8px; border-top: 1px solid rgba(255, 255, 255, .06); vertical-align: middle; }
+.kst-table .k-select, .kst-table .k-input { min-width: 0; width: 100%; }
+.kst-mod-name { font-size: 15.5px; }
+.kst-source { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kst-pick { list-style: none; margin: 10px 0 0; padding: 0; max-height: 360px; overflow: auto; display: flex; flex-direction: column; gap: 6px; }
+
+.kst-files { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.kst-file { padding: 10px 12px; border-radius: 8px; background: rgba(255, 255, 255, .03); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .06); display: flex; flex-direction: column; gap: 8px; }
+.kst-keys { list-style: none; margin: 0; padding: 0 0 0 4px; display: flex; flex-direction: column; gap: 4px; }
+.kst-server { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+
+.kst-split { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(320px, 1.3fr); gap: 28px; }
+.kst-order { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.kst-order li { display: flex; gap: 10px; align-items: baseline; padding: 4px 0; flex-wrap: wrap; }
+.kst-num { width: 22px; text-align: right; color: var(--k-text-2); font-family: var(--k-font-mono); }
+.kst-layer { color: #6fdcff; }
+.kst-conflicts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.kst-conflict { padding: 10px 12px; border-radius: 8px; background: rgba(154, 107, 255, .08); box-shadow: inset 0 0 0 1px rgba(154, 107, 255, .3); display: flex; flex-direction: column; gap: 4px; }
+.kst-conflict .k-input { width: 140px; }
+.kst-win { font-size: 13px; padding: 1px 8px; border-radius: 999px; background: #6fdcff; color: #081320; margin-left: 6px; }
+
+.kst-bullets { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; font-size: 15px; }
+.kst-report { display: flex; flex-direction: column; gap: 8px; }
+.kst-log { margin: 0; padding: 10px; border-radius: 8px; background: rgba(0, 0, 0, .35); font-family: var(--k-font-mono); font-size: 13px; white-space: pre-wrap; max-height: 220px; overflow: auto; }
+
+.kst-credits .k-input { font-size: 14px; }
+.kst-form { display: flex; flex-direction: column; gap: 12px; max-width: 720px; }
+.kst-checks { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; font-size: 14.5px; }
+.kst-check-ok { color: var(--k-ok, #7cc47f); }
+.kst-check-warn, .kst-check-note { color: #ffb066; }
+.kst-check-err { color: #ff7a6b; }
+.kst-needs { margin: 0; padding-left: 20px; color: #ffb066; font-size: 15px; }
+.kst-history ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; max-width: 720px; }
