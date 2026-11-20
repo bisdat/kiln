@@ -438,6 +438,11 @@ Each UDP source address is one fake client (peer `0x8000000n`, "lab-n"). The sui
   kiln.assets reports, a real entity of each Kiln-only template, their children, a template resource added and removed at run time;
 - the client guard and the held-back resend (part of `withheld`), on the game's own create reader and relevance step, which the server exe
   has too; a free player slot is used;
+- kiln.content's added-buff check at the join (`content_join`, needs `--lab` and a buff room that holds records: a server
+  with mods/tests/statusblock-join-test, or its placeholders after it was removed): a client whose HELLO has
+  `kiln.content.held-answer` is held by kiln.content, gets the content state while held and is let in by its deferral
+  (ack 4); an older client is not held, and its `program_refresh` WRONG_THREAD error is taken as applied; a refusal while
+  held refuses it with its reason; silence refuses it at the 25 s deadline with the timeout text (docs/kiln/sync.md);
 - the wait for definitions (`definitions`, needs Kiln-only templates): released by an ack of the state it was sent, not by an ack of
   another state, by its deadline, no wait without the channel;
 - a template added during play (`hotload`, needs `kiln/staged/creaturetweaks`): CreatureTweaks loaded while three fake clients are

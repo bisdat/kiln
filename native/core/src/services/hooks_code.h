@@ -18,6 +18,12 @@
 #include "services/kiln_hooks.h"
 
 namespace kiln::hooks::code {
+
+#ifdef KILN_HOOKS_TEST_LOCK_PROBE
+// Host tests only (hooks_v2_test.cpp; never defined for kiln-core): called by lock() before it takes the mutex, so a
+// test that holds the lock knows the thread it watches has reached it and waits, instead of sleeping and hoping it has.
+void test_lock_probe();
+#endif
 struct Image {
     uintptr_t base;
     size_t size;
@@ -84,7 +90,12 @@ class Registry {
         return foreign ? KILN_CODE_FOREIGN : managed ? KILN_CODE_MANAGED : KILN_CODE_ORIGINAL;
     }
 public:
-    auto lock() { return std::unique_lock(mutex_); }
+    auto lock() {
+#ifdef KILN_HOOKS_TEST_LOCK_PROBE
+        test_lock_probe();
+#endif
+        return std::unique_lock(mutex_);
+    }
     // Writers call these ONLY while holding lock(), including the physical write. Prepare all allocations before
     // changing code. Tokens are never reused; a detour's fact is process-lifetime, as is its trampoline.
     uint64_t add_locked(uintptr_t address, const std::vector<uint8_t>& original,

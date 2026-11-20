@@ -659,6 +659,13 @@ export interface LibraryRef {
   version: string;
   hash: string;
 }
+/** What "Remove its settings too" did (kiln_manage::mod_settings::SettingsRemoval): the paths removed (a shared file's
+ *  entry as "<file> (mods.<key>)"), the copy in the backups folder (null: nothing to remove), and what stayed, why. */
+export interface SettingsRemoval {
+  removed: string[];
+  backup: string | null;
+  notes: string[];
+}
 /** library_remove_many: the versions removed, and each one that was not (conflict without force, not_found, io). */
 export interface RemoveReport {
   removed: LibraryRef[];
@@ -1891,7 +1898,11 @@ export const libraryAddToProfile = (gameId: GameId, profileId: ProfileId, entrie
   oneActivation(gameId, () => call<AddReport>("library_add_to_profile", { gameId, profileId, entries }));
 /** Rejects with game_running while a game runs, or a server whose profile file points into the library, even with force (it may be reading the mod).
  *  `shown`: the libraryUsers answer a confirmation named. Removal goes past exactly those; any other user is a conflict, whatever `force` says. */
-export const libraryRemove = (entry: LibraryRef, force = false, shown?: string[]) => call<null>("library_remove", { entry, force, shown: shown ?? null });
+export const libraryRemove = (entry: LibraryRef, force = false, shown?: string[], settings = false) =>
+  call<SettingsRemoval | null>("library_remove", { entry, force, shown: shown ?? null, settings });
+/** "Remove its settings too" for a mod no longer in the Library (kiln_manage::mod_settings::remove): conflict while the
+ *  Library still holds a version of it, game_running while a game runs. */
+export const libraryRemoveSettings = (kind: ModKind, id: string) => call<SettingsRemoval>("library_remove_settings", { kind, id });
 /** Clean up: one look at the running processes and the profiles for the whole batch. Rejects with game_running (nothing
  *  removed) while a game runs, or a server may read one of the versions; otherwise reports the versions not removed. */
 export const libraryRemoveMany = (entries: LibraryRef[], force = false) => call<RemoveReport>("library_remove_many", { entries, force });
@@ -2261,7 +2272,7 @@ export const COMMANDS = [
   "runtime_list", "runtime_import", "runtime_status", "runtime_install", "runtime_uninstall", "runtime_rollback", "runtime_classify",
   "profile_list", "profile_get", "profile_create", "profile_save", "profile_delete", "profile_resolve", "profile_activate",
   "profile_deactivate", "profile_active", "activation_notices", "notices_unseen", "notices_shown",
-  "library_list", "library_detect", "library_import", "library_remove", "library_remove_many", "library_unused", "library_users", "library_lint", "library_take_over", "library_rollback", "library_replace_dll",
+  "library_list", "library_detect", "library_import", "library_remove", "library_remove_many", "library_remove_settings", "library_unused", "library_users", "library_lint", "library_take_over", "library_rollback", "library_replace_dll",
   "config_list", "config_read", "config_set", "config_write", "config_reset", "config_native_state", "config_native_set",
   "launch_play", "launch_state", "launch_prestart", "launch_begin", "launch_progress", "launch_end",
   "logs_list", "logs_read", "logs_follow", "logs_unfollow", "logs_crash_reports",

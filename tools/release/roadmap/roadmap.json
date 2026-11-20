@@ -1,6 +1,98 @@
 {
   "released": [
     {
+      "version": "0.2.0-dev.29.23",
+      "date": "2026-11-20",
+      "title": "A safer save editor",
+      "summary": "The launcher's save editor in your language, read-only when it can't read a save for sure, other mods' hidden items shown as locked tiles, and the game's own skill-point count.",
+      "patch": true,
+      "features": [
+        {
+          "title": "The save editor in your language",
+          "text": "The editor's texts follow the launcher's 11 languages; item and skill names stay the game's.",
+          "area": "launcher",
+          "kind": "improved"
+        },
+        {
+          "title": "No guessing at a backpack",
+          "text": "A save the editor can't read for sure, or one holding another mod's data, opens read-only with the reason, so nothing is written at a guessed place.",
+          "area": "launcher",
+          "kind": "fix"
+        },
+        {
+          "title": "Other mods' hidden items as locked tiles",
+          "text": "An item Kiln doesn't know shows as a locked tile with a note naming its slot, and is kept untouched.",
+          "area": "launcher",
+          "kind": "improved"
+        },
+        {
+          "title": "The game's own skill-point count",
+          "text": "Available skill points are worked out the way the game does at each load, and a skill tree that spends more than that is not saved.",
+          "area": "launcher",
+          "kind": "fix"
+        }
+      ]
+    },
+    {
+      "version": "0.2.0-dev.29.22",
+      "date": "2026-11-20",
+      "title": "Chat completion and clearer reports",
+      "summary": "Tab completion for Kiln's commands in the game's chat by bisdat, a view of what a support report holds before it leaves your PC, and fixes for ShroudLink, Enshrouded ModLoader's mods and the Linux launcher.",
+      "patch": true,
+      "features": [
+        {
+          "title": "Tab completion in the game's chat, by bisdat",
+          "text": "Start a chat line with / and Tab completes the Kiln commands you may use, on a server with Kiln or in your own hosted world. On by default.",
+          "area": "content"
+        },
+        {
+          "title": "See what is in a support report",
+          "text": "Before a report is saved or sent, the launcher shows what it holds and what was replaced, and other mods' logs can be left out.",
+          "area": "launcher",
+          "kind": "improved",
+          "gamePending": true
+        },
+        {
+          "title": "Support reports take out more personal details",
+          "text": "Other players' names, IPv6, MAC and mail addresses, secrets in logs and more of your Steam names are replaced.",
+          "area": "launcher",
+          "kind": "improved"
+        },
+        {
+          "title": "Removing a mod keeps its settings",
+          "text": "Adding a removed mod again brings its settings back, and the remove dialog can take them out too, with a copy in Kiln's backups.",
+          "area": "launcher",
+          "kind": "improved"
+        },
+        {
+          "title": "ShroudLink's chest names without endless scans",
+          "text": "With Kiln, chest names come from the game's own name table, and a short search runs only for a name a mod asks for.",
+          "area": "compat",
+          "kind": "fix",
+          "gamePending": true
+        },
+        {
+          "title": "Enshrouded ModLoader's mods in the loader's order",
+          "text": "Mods for Enshrouded ModLoader start in that loader's order, so CarryOn and Belt Lantern can run together.",
+          "area": "compat",
+          "kind": "fix",
+          "gamePending": true
+        },
+        {
+          "title": "A lighter Linux launcher without compositing",
+          "text": "Where WebKit cannot composite, the launcher draws without blurred shadows, and launcher.log says why it does not composite.",
+          "area": "launcher",
+          "kind": "improved"
+        },
+        {
+          "title": "A game build Kiln does not know",
+          "text": "The guide says where the build Kiln checks comes from and what a player can do (GitHub #99).",
+          "area": "core",
+          "kind": "improved"
+        }
+      ]
+    },
+    {
       "version": "0.2.0-dev.29.21",
       "date": "2026-11-20",
       "title": "FSR 4 without the extra extensions",
@@ -2732,9 +2824,19 @@
     {
       "version": "0.2.0-dev.31",
       "status": "planned",
-      "title": "Values, UI, network and NPCs",
-      "summary": "Mods' own character values and richer UI, map markers, station tabs, cloth on models and a debugger for the game client; control over what the server sends each player, survivors and bases, and friendly NPCs with bodies and routines of their own.",
+      "title": "Registries, values, UI, network and NPCs",
+      "summary": "Kiln's own registries, so mods outlast game updates, and one data stage for all mods; mods' own character values and richer UI, map markers, station tabs, cloth on models and a debugger for the game client; control over what the server sends each player, survivors and bases, and friendly NPCs with bodies and routines of their own.",
       "features": [
+        {
+          "title": "Kiln registries: mods that outlast game updates",
+          "area": "api",
+          "text": "Mods and data packs add to, change and remove entries in Kiln's own registries (items, recipes, loot, creatures, abilities and more) instead of touching the game's internals. Kiln translates them to the game, so after an Enshrouded update only Kiln needs an update, not every mod."
+        },
+        {
+          "title": "One data stage for all mods",
+          "area": "api",
+          "text": "Kiln reads the game's data once at start, every mod's changes apply on top in one ordered pass with conflicts shown in one place, and the result is ready before the game reads it: no per-start limits, and registries are complete from a mod's first line."
+        },
         {
           "title": "Mods' own character values",
           "text": "Mods can give characters their own counters, currencies and experience with levels, saved with the character.",

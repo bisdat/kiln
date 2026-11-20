@@ -46,7 +46,7 @@ pub const UPLOAD_SUFFIX: &str = ".r2.cloudflarestorage.com";
 /// Public keys of Crucible's index signer (raw Ed25519, base64). The pair is made on the server at the first deploy
 /// and its public key goes here once the owner approves it (DESIGN.md section 13.6). Until then this is empty and the
 /// launcher shows no Crucible surface ([`Endpoints::enabled`]).
-pub const KEYS: &[&str] = &[];
+pub const KEYS: &[&str] = &["3wedy1u9hKuyGh6UcRGBe1X8YvAiPyeALoIpVaBXK/s="];
 /// The largest pack Crucible takes (2 GiB) and the largest file (512 MiB).
 pub const MAX_PACK: u64 = 2 * 1024 * 1024 * 1024;
 
@@ -430,9 +430,7 @@ impl<'a> Crucible<'a> {
             r.body
         };
         let (ix, raw) = sign::open(&body, &self.ep.keys)?;
-        if let Some(c) = &ix.crucible
-            && c.version.as_deref().is_some_and(|v| v != version_id)
-        {
+        if ix.crucible.as_ref().and_then(|c| c.version.as_deref()) != Some(version_id) {
             return Err(err(ErrorCode::HashMismatch, "This pack's index names another version. Nothing was installed."));
         }
         Ok((ix, raw))
@@ -460,6 +458,9 @@ impl<'a> Crucible<'a> {
     pub fn download(&self, given_url: Option<&str>, role: &str, f: &StoredFile, dest: &Path, progress: &mut dyn FnMut(u64)) -> Result<()> {
         use sha2::Digest;
         use std::io::Write;
+        if f.sha256.len() != 64 || !f.sha256.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+            return Err(err(ErrorCode::HashMismatch, "A pack file is named by something that is no sha256. Nothing was downloaded."));
+        }
         let url = self.file_url(given_url, role, &f.sha256)?;
         if let Some(d) = dest.parent() {
             std::fs::create_dir_all(d).map_err(crate::util::io_at(d, "creating"))?;
@@ -786,10 +787,10 @@ pub fn preview_of(dirs: &DataDirs, pack: CruciblePack, version: CrucibleVersion,
     let mut code = Vec::new();
     // what this game client takes: a server-only mod is neither downloaded nor installed here
     for m in index.mods.iter().filter(|m| !pack::client_skips(m)) {
-        size += part_size(m.file.as_ref());
+        size = size.saturating_add(part_size(m.file.as_ref()));
         let lr = LibraryRef { kind: m.kind, id: m.id.clone(), version: m.version.clone(), hash: m.hash.clone() };
         if let Some(f) = lacking.get(&m.id) {
-            download += f.size;
+            download = download.saturating_add(f.size);
             missing.push(lr.clone());
         } else {
             present.push(lr.clone());
@@ -804,10 +805,10 @@ pub fn preview_of(dirs: &DataDirs, pack: CruciblePack, version: CrucibleVersion,
         }
     }
     if let Some(l) = &index.layer {
-        size += part_size(l.file.as_ref());
+        size = size.saturating_add(part_size(l.file.as_ref()));
         let lr = LibraryRef { kind: ModKind::Kiln, id: l.id.clone(), version: l.version.clone(), hash: l.hash.clone() };
         if let Some(f) = lacking.get(&l.id) {
-            download += f.size;
+            download = download.saturating_add(f.size);
             missing.push(lr);
         } else {
             present.push(lr);
@@ -815,11 +816,19 @@ pub fn preview_of(dirs: &DataDirs, pack: CruciblePack, version: CrucibleVersion,
     }
     for o in &index.overrides {
         let n = o.size.unwrap_or(0);
-        size += n;
-        download += n;
+        size = size.saturating_add(n);
+        download = download.saturating_add(n);
     }
     let optional = index.mods.iter().filter(|m| m.dep == pack::Dep::Optional).map(|m| (m.id.clone(), m.default.unwrap_or(true))).collect();
-    let instance = pack::instances(dirs)?.into_iter().find(|(_, i)| i.pack == index.id || (i.crucible.as_ref().and_then(|x| x.pack.as_deref()).is_some_and(|p| p == pack.id))).map(|(p, _)| p);
+    // a Crucible instance is this pack's when it came from this Crucible pack (another creator may use the same index id);
+    // a pack installed from a file is matched by its index id
+    let instance = pack::instances(dirs)?
+        .into_iter()
+        .find(|(_, i)| match i.crucible.as_ref().and_then(|x| x.pack.as_deref()) {
+            Some(p) => p == pack.id,
+            None => i.pack == index.id,
+        })
+        .map(|(p, _)| p);
     let trusted = pack.owner.as_ref().is_some_and(|o| trusted(dirs).iter().any(|t| t.id == o.id));
     Ok(Preview { game: game_fit(&index, game), kiln: kiln_fit(&index), pack, version, index, size, download, missing, present, code, optional, instance, trusted })
 }
@@ -838,7 +847,8 @@ pub fn fetch(dirs: &DataDirs, c: &Crucible, version_id: &str, progress: &mut dyn
         return Ok((ix, pack::Assembled { file: out, sha256: r.sha256, size: r.size, ..Default::default() }, 0));
     }
     let lacking = pack::lacking_for(dirs, &ix, &pack::client_skips)?;
-    let total: u64 = lacking.iter().map(|(_, f)| f.size).sum::<u64>() + ix.overrides.iter().map(|o| o.size.unwrap_or(0)).sum::<u64>();
+    // saturating: sizes come from the index, and a wrapped sum would pass the limit
+    let total: u64 = lacking.iter().map(|(_, f)| f.size).chain(ix.overrides.iter().map(|o| o.size.unwrap_or(0))).fold(0u64, u64::saturating_add);
     if total > MAX_PACK {
         return Err(err(ErrorCode::Refused, "This pack is larger than Crucible allows (2 GB)."));
     }
@@ -1061,7 +1071,8 @@ pub fn update_plan(dirs: &DataDirs, c: &Crucible, pid: &str, progress: &mut dyn 
     let pack_id = inst.crucible.as_ref().and_then(|x| x.pack.clone()).ok_or_else(|| Error::not_found("this pack was not installed from Crucible"))?;
     let head = c.head(&pack_id)?;
     let v = head.version.ok_or_else(|| err(ErrorCode::NotFound, "This pack is no longer on Crucible."))?;
-    let (_, done, download) = fetch(dirs, c, &v.id, progress)?;
+    let (ix, done, download) = fetch(dirs, c, &v.id, progress)?;
+    same_crucible_pack(&inst, &ix)?;
     let plan = pack::plan_update(dirs, pid, &done.file, Some(&done.sha256), &BTreeMap::new())?;
     Ok(CrucibleUpdatePlan { version_id: v.id, download, plan })
 }
@@ -1083,15 +1094,24 @@ pub struct UpdateRequest {
     pub drop: Vec<String>,
 }
 
+/// A version may update an instance only when it is of the same pack: the same index id and, for an instance installed
+/// from Crucible, the same Crucible pack (the index id is the creator's choice; two creators can pick the same one).
+fn same_crucible_pack(inst: &pack::Instance, ix: &PackIndex) -> Result<()> {
+    let want = inst.crucible.as_ref().and_then(|x| x.pack.as_deref());
+    let got = ix.crucible.as_ref().and_then(|x| x.pack.as_deref());
+    if ix.id != inst.pack || (want.is_some() && got != want) {
+        return Err(err(ErrorCode::Refused, "That version belongs to another pack."));
+    }
+    Ok(())
+}
+
 pub fn update(dirs: &DataDirs, c: &Crucible, req: &UpdateRequest, progress: &mut dyn Progress) -> Result<pack::UpdateResult> {
     if !req.consent {
         return Err(err(ErrorCode::ConsentRequired, "This pack contains mods, including code, from other people: confirm first."));
     }
     let inst = pack::instance(dirs, &req.profile)?.ok_or_else(|| Error::not_found(format!("profile {} is no Crucible pack", req.profile)))?;
     let (ix, done, _) = fetch(dirs, c, &req.version_id, &mut Scaled { inner: progress, from: 0.0, to: 0.6 })?;
-    if ix.id != inst.pack {
-        return Err(err(ErrorCode::Refused, "That version belongs to another pack."));
-    }
+    same_crucible_pack(&inst, &ix)?;
     pack::update(
         dirs,
         &pack::UpdateRequest {

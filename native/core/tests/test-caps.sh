@@ -21,5 +21,6 @@ fp=("$here/../src/services/hooks_fingerprint.cpp" "$out/zydis-host.o")
 # the client gate's list, as the core's build generates it (a bad native/core/gates/*.json fails here too)
 python3 -I "$here/../gates/gen.py" "$here/../gates" "$out/kiln_gates.g.h"
 "$cxx" "${flags[@]}" -I"$out" -o "$out/caps_test" "$here/caps_test.cpp" "${fp[@]}"
-# a subscriber that deadlocks the registry hangs the test: the time limit turns that into a failure
-timeout 120 "$out/caps_test" "$out"
+# a subscriber that deadlocks the registry hangs the test: the time limit turns that into a failure (it is above the
+# test's own 300 s bound on a wait that must end, so a slow wait still names its check)
+timeout 600 "$out/caps_test" "$out"

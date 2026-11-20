@@ -4148,7 +4148,12 @@
       "leavesListed.other": "Jego pliki znikną z biblioteki. {others} też go wymieniają i pokażą go jako brakujący.",
       "leaves": "Jego pliki znikną z biblioteki.",
       "notSaved": "Nie udało się zapisać twojej listy modów; nic nie usunięto.",
-      "notRemovable": "jest w folderze gry, nie umieścił go tam Kiln: usuń go stamtąd"
+      "notRemovable": "jest w folderze gry, nie umieścił go tam Kiln: usuń go stamtąd",
+      "settingsToo": "Usuń też jego ustawienia",
+      "settingsTooHint": "Jego ustawienia w tej grze i w twoich profilach też znikną. Kiln zachowa kopię w kopiach zapasowych.",
+      "settingsTooMany": "Usuń też ich ustawienia",
+      "settingsTooManyHint": "Ich ustawienia w tej grze i w twoich profilach też znikną. Kiln zachowa kopię w kopiach zapasowych.",
+      "settingsLeft": "Część ustawień została"
     },
     "rollback": {
       "settingsBack.one": "Jego ustawienia sprzed aktualizacji wracają razem z nim ({count} plik).",
@@ -5796,6 +5801,372 @@
       "go": "Umieść na serwerze",
       "done": "{version} jest na serwerze",
       "failed": "Paczka serwerowa nie powstała"
+    }
+  },
+  "editor": {
+    "page": {
+      "title": "Edytor",
+      "lookingForSaves": "Szukanie zapisów…",
+      "pickCharacter": "Wybierz postać.",
+      "noSaves": "Nie znaleziono zapisów postaci.",
+      "cannotParse": "Nie udało się odczytać tego zapisu do edycji.",
+      "readOnlyNoSave": "Ten zapis można tylko odczytać: zapisywanie jest wyłączone.",
+      "gameOpen": "Gra jest otwarta: zamknij ją, aby zapisać.",
+      "unsaved": "Zmiany nie są jeszcze zapisane. Kiln robi kopię zapasową zapisu, zanim go nadpisze.",
+      "levelBackup": "Poziom {n}. Kiln robi kopię zapasową zapisu, zanim go nadpisze.",
+      "notSaved": "Nie zapisano",
+      "discard": "Odrzuć",
+      "backups": "Kopie zapasowe",
+      "save": "Zapisz",
+      "saving": "Zapisywanie…",
+      "saved": "Zapisano",
+      "savedHint": "Poprzedni zapis jest w kopiach zapasowych.",
+      "gameOpenShort": "Gra działa: zamknij ją, aby zapisać",
+      "error": "Błąd",
+      "note": "Uwaga",
+      "readAgain": "Wczytaj ponownie",
+      "close": "Zamknij",
+      "parts": "Części zapisu",
+      "characters": "Postacie",
+      "openFile": "Otwórz plik…",
+      "pickCharacterButton": "Wybierz postać",
+      "open": "Otwórz",
+      "opened": "Otwarta",
+      "discardTitle": "Odrzucić zmiany?",
+      "discardAndOpen": "Odrzuć i otwórz",
+      "discardBody": "Zmiany w {nome} nie są jeszcze zapisane.",
+      "cancel": "Anuluj",
+      "back": "Wstecz",
+      "readOnlyError": "Tylko do odczytu: {erro}",
+      "pointsRaised": "Zwiększono liczbę używanych punktów ({antes} → {depois}). Wpisz sumę swoich punktów na karcie Umiejętności, aby edytor mógł ją sprawdzić; powyżej sumy gra resetuje całe drzewko.",
+      "notWritten": "Nie zapisano. {problemas}",
+      "gameWroteSince": "Gra zapisała ten plik po tym, jak edytor go odczytał. Wczytaj go ponownie, aby edytować obecny stan zapisu (zmiany wprowadzone tutaj przepadną)."
+    },
+    "tabs": {
+      "equipment": "Ekwipunek",
+      "inventory": "Plecak",
+      "skills": "Umiejętności",
+      "knowledge": "Wiedza"
+    },
+    "backups": {
+      "title": "Kopie zapasowe: {nome}",
+      "openFolder": "Otwórz folder",
+      "hint": "Gra sama trzyma 10 ostatnich zapisów; edytor dodatkowo kopiuje zapis przed każdym nadpisaniem.",
+      "dropsChanges": "Przywrócenie odrzuca niezapisane zmiany.",
+      "looking": "Szukanie kopii zapasowych…",
+      "none": "Nie znaleziono kopii zapasowej tego zapisu.",
+      "restore": "Przywróć",
+      "restored": "Przywrócono",
+      "restoredBody": "{arquivo} ({quando}). Poprzedni zapis zachowano jako kopię zapasową.",
+      "restoreTitle": "Przywrócić tę kopię zapasową?",
+      "restoreBody": "Obecny stan zapisu zostanie zachowany jako kopia zapasowa.",
+      "kindGame": "Kopia gry",
+      "kindKiln": "Kopia Kiln",
+      "beforeSave": "przed zapisem"
+    },
+    "common": {
+      "level": "Poziom",
+      "empty": "Puste",
+      "change": "Zmień",
+      "add": "Dodaj",
+      "tierN": "Tier {n}",
+      "rarity": "Rzadkość",
+      "amount": "Ilość",
+      "aboveStack": "więcej niż stos gry ({n}): dla światów z modem zwiększającym rozmiar stosów",
+      "gameStack": "Stos gry ({n})",
+      "maxAmount": "Najwięcej na miejsce ({n})",
+      "upgrades": "Ulepszenia",
+      "remove": "Usuń",
+      "levelN": "poziom {n}",
+      "pick": "Wybierz",
+      "noMatch": "Nic nie pasuje do tych filtrów.",
+      "all": "Wszystkie"
+    },
+    "equipment": {
+      "xp": "PD na poziomie",
+      "attrsHint": "Atrybuty pochodzą z węzłów drzewka umiejętności (edytuj je na karcie Umiejętności).",
+      "attrsFlameHint": "Gra dodaje też węzły rosnące z poziomem Płomienia i premie z ekwipunku; żadne z nich nie są przechowywane w zapisie postaci.",
+      "emptyHint": "Puste miejsce. Załóż przedmiot w grze; tutaj możesz edytować lub zdjąć to, co już jest założone.",
+      "backpackFull": {
+        "one": "Nie zdejmę przedmiotu {item}: usunęłoby to jego pojemnik i {count} zapisane w nim miejsce. Najpierw opróżnij go w grze.",
+        "few": "Nie zdejmę przedmiotu {item}: usunęłoby to jego pojemnik i {count} zapisane w nim miejsca. Najpierw opróżnij go w grze.",
+        "many": "Nie zdejmę przedmiotu {item}: usunęłoby to jego pojemnik i {count} zapisanych w nim miejsc. Najpierw opróżnij go w grze.",
+        "other": "Nie zdejmę przedmiotu {item}: usunęłoby to jego pojemnik i {count} zapisanych w nim miejsc. Najpierw opróżnij go w grze."
+      },
+      "groups": {
+        "armour": "Pancerz",
+        "appearance": "Wygląd",
+        "accessories": "Akcesoria"
+      },
+      "slots": {
+        "headVanity": "Głowa (wygląd)",
+        "chestVanity": "Tułów (wygląd)",
+        "armsVanity": "Ręce (wygląd)",
+        "legsVanity": "Nogi (wygląd)",
+        "feetVanity": "Stopy (wygląd)",
+        "head": "Głowa",
+        "chest": "Tułów",
+        "arms": "Ręce",
+        "legs": "Nogi",
+        "feet": "Stopy",
+        "ring": "Pierścień",
+        "shield": "Tarcza",
+        "hook": "Kotwiczka",
+        "glider": "Lotnia",
+        "backpack": "Plecak",
+        "slot": "Miejsce {n}"
+      }
+    },
+    "inventory": {
+      "move": "Przenieś",
+      "slotEmpty": "Miejsce {n} puste",
+      "putHere": "Umieść tutaj",
+      "slotsUsed": {
+        "one": "{n} z {total} miejsca",
+        "few": "{n} z {total} miejsc",
+        "many": "{n} z {total} miejsc",
+        "other": "{n} z {total} miejsc"
+      },
+      "addItem": "Dodaj przedmiot",
+      "swapBar": "Zamień pasek",
+      "swapBarHint": "Alt zamienia go z paskiem akcji",
+      "actionBar": "Pasek akcji",
+      "deckHint": "A zmienia przedmiot · Y go przenosi · A na pustym miejscu dodaje nowy",
+      "hint": "Przeciągnij, aby przenieść · kliknij dwukrotnie puste miejsce, aby dodać · Delete usuwa · Ctrl+D duplikuje",
+      "noneSelected": "Nie wybrano przedmiotu.",
+      "noneSelectedHint": "Wybierz miejsce, aby zobaczyć i zmienić jego przedmiot.",
+      "emptyHint": "Wybierz przedmiot z katalogu, aby go tu umieścić.",
+      "pickItem": "Wybierz przedmiot",
+      "notFound": "W tym ekwipunku nie znaleziono przedmiotów, a edytor nie wie na pewno, gdzie leży on w tym zapisie. Jeśli gra pokazuje tu przedmioty, nie udało się ich odczytać: nie można niczego dodać. Kopia tego zapisu przesłana do nas pomoże to naprawić.",
+      "modItem": "Przedmiot moda, pozostawiony bez zmian",
+      "hiddenModItem": "{place} zawiera ukryty przedmiot innego moda (id {id}); Kiln zostawia go bez zmian.",
+      "place": {
+        "backpack": "Miejsce {n} w plecaku",
+        "swap": "Miejsce {n} na pasku zamiany",
+        "action": "Miejsce {n} na pasku akcji"
+      }
+    },
+    "inspector": {
+      "item": "Przedmiot",
+      "stacksTo": "stos do {n}",
+      "max": "Maks.",
+      "levelSplit": {
+        "one": "= podstawa {base} + {count} ulepszenie",
+        "few": "= podstawa {base} + {count} ulepszenia",
+        "many": "= podstawa {base} + {count} ulepszeń",
+        "other": "= podstawa {base} + {count} ulepszeń"
+      },
+      "aboveItemMax": "powyżej maksimum tego przedmiotu ({max}): serwer obetnie to przy wczytaniu, chyba że mod poszerzył jego zakres",
+      "upgradesHint": "Rzadkość określa, ile ulepszeń przyjmuje przedmiot: maks. poziom = poziom bazowy + rzadkość.",
+      "gem": "Osadzony klejnot",
+      "gemUnknown": "id {id} nie ma w katalogu",
+      "noGem": "— brak klejnotu —",
+      "gemLevel": "Poziom klejnotu",
+      "aboveGemMax": "powyżej maksimum tego klejnotu ({max}): serwer obetnie to przy wczytaniu, chyba że mod poszerzył jego zakres",
+      "durability": "Wytrzymałość",
+      "repair": "Napraw",
+      "water": "Woda",
+      "fill": "Napełnij",
+      "duplicateHint": "Kopiuje przedmiot do pierwszego wolnego miejsca",
+      "duplicate": "Duplikuj",
+      "attributes": "Atrybuty",
+      "physicalArmour": "Pancerz fizyczny",
+      "magicalArmour": "Pancerz magiczny",
+      "raisesSkill": "podnosi poziom umiejętności {no}",
+      "unknownLines": "Wiersze bez liczby rosną z poziomem przedmiotu według wzoru, którego jeszcze nie zmierzono; edytor nie pokazuje wartości, której nie jest pewien."
+    },
+    "parts": {
+      "full": "Pełne",
+      "clickToSet": "Kliknij, aby ustawić"
+    },
+    "catalog": {
+      "items": "Przedmioty",
+      "countLimited": {
+        "one": "{count} przedmiot (pokazano {limite}; zawęź wyszukiwanie)",
+        "few": "{count} przedmioty (pokazano {limite}; zawęź wyszukiwanie)",
+        "many": "{count} przedmiotów (pokazano {limite}; zawęź wyszukiwanie)",
+        "other": "{count} przedmiotów (pokazano {limite}; zawęź wyszukiwanie)"
+      },
+      "count": {
+        "one": "{count} przedmiot",
+        "few": "{count} przedmioty",
+        "many": "{count} przedmiotów",
+        "other": "{count} przedmiotów"
+      },
+      "categories": "Kategorie",
+      "searchDeck": "Szukaj po nazwie (Steam + X: klawiatura)",
+      "search": "Szukaj po nazwie…",
+      "searchLabel": "Szukaj",
+      "type": "Pisz",
+      "allRarities": "Wszystkie",
+      "tier": "Tier",
+      "targetFull": "Cel: ekwipunek pełny",
+      "target": "Cel: miejsce {n}",
+      "pickHint": "Wybierz przedmiot.",
+      "deckHint": "A wybiera, ponowne A dodaje.",
+      "hint": "Dwukrotne kliknięcie od razu dodaje.",
+      "cat": {
+        "weapons": "Broń",
+        "armour": "Pancerz",
+        "ammo": "Amunicja",
+        "magic": "Zaklęcia i klejnoty",
+        "consumables": "Zużywalne",
+        "materials": "Materiały",
+        "tools": "Narzędzia",
+        "building": "Budowanie",
+        "cosmetics": "Kosmetyczne i kolekcjonerskie"
+      }
+    },
+    "knowledge": {
+      "noBlock": "Ten zapis nie ma bloku wiedzy.",
+      "search": "Szukaj po nazwie lub id",
+      "above": "Powyżej poziomu",
+      "allLevels": "wszystkie",
+      "show": "Pokaż",
+      "filter": {
+        "itemsRecipes": "Przedmioty i przepisy",
+        "items": "Tylko przedmioty",
+        "recipes": "Tylko przepisy",
+        "everything": "Wszystko"
+      },
+      "removeN": "Usuń ({n})",
+      "kind": "Rodzaj",
+      "name": "Nazwa",
+      "state": "Stan",
+      "id": "id {id}",
+      "kinds": {
+        "item": "przedmiot",
+        "recipe": "przepis",
+        "misc": "inne"
+      },
+      "count": {
+        "one": "{n} z {total} wpisu",
+        "few": "{n} z {total} wpisów",
+        "many": "{n} z {total} wpisów",
+        "other": "{n} z {total} wpisów"
+      },
+      "unnamed": {
+        "one": "{count} bez znanej nazwy",
+        "few": "{count} bez znanej nazwy",
+        "many": "{count} bez znanej nazwy",
+        "other": "{count} bez znanej nazwy"
+      },
+      "shownLimit": "Pokazano pierwsze 400; użyj wyszukiwania lub progu poziomu, aby zobaczyć resztę.",
+      "hint": "Usunięcie materiału wysokiego poziomu zamyka zależne od niego przepisy. Przepisy nie są przechowywane w zapisie: gra wylicza je od nowa z wiedzy, zarówno tutaj, jak i w świecie na serwerze."
+    },
+    "skills": {
+      "total": "Suma punktów",
+      "minusLevel": "−1 poziom",
+      "plusLevel": "+1 poziom",
+      "tree": "Drzewko umiejętności",
+      "used": "Użyte",
+      "available": "Dostępne",
+      "enterTotal": "wpisz sumę…",
+      "changeTotal": "Kliknij, aby zmienić sumę",
+      "totalFromGame": "Łącznie {total}, liczone tak jak w grze: 2 punkty za każdy poziom powyżej 1 oraz korzenie Całunu i studnie eliksiru zniszczone przez tę postać. Gra tego nie zapisuje, więc nie edytuje się tego tutaj.",
+      "totalHint": "Suma punktów (użyte + dostępne, tak jak pokazuje gra):",
+      "zoomIn": "Przybliż",
+      "zoomOut": "Oddal",
+      "centre": "Wyśrodkuj",
+      "cost": "koszt {n}",
+      "maxN": "maks. {n}",
+      "deckHint": "A: +1 poziom · Y: −1",
+      "hint": "Kliknięcie: +1 poziom · prawy przycisk: −1",
+      "class": {
+        "warrior": "Wojownik",
+        "ranger": "Tropiciel",
+        "mage": "Mag",
+        "neutral": "Neutralne"
+      }
+    },
+    "deck": {
+      "delete": "Usuń",
+      "range": "Od {min} do {max}",
+      "min": "Min.",
+      "use": "Użyj",
+      "current": "Obecne"
+    },
+    "art": {
+      "preparing": "Przygotowywanie grafik gry…",
+      "needsClient": "Grafiki gry wymagają klienta Enshrouded (Ustawienia → Gry).",
+      "notFound": "Nie znaleziono grafik gry. Uruchom {script}."
+    },
+    "game": {
+      "tree": {
+        "aboveMax": "{no}: poziom {nivel} powyżej maksimum {max}",
+        "orphans": "Węzły bez połączenia z resztą drzewka: {nos}",
+        "overTotal": "Użyte punkty ({usados}) przekraczają sumę postaci ({total})"
+      },
+      "unknownItem": "Nieznany przedmiot (0x{h})",
+      "errors": {
+        "unknownItems": "Nieznane przedmioty w tym zapisie (usunięty mod?): tylko do odczytu",
+        "levelXp": "Nieprawidłowy poziom lub PD",
+        "skill": "Nieprawidłowa umiejętność",
+        "item": "Nieznany przedmiot: {id}",
+        "slotAmount": "Nieprawidłowe miejsce lub ilość",
+        "sameSlot": "Dwa przedmioty w tym samym miejscu ekwipunku",
+        "knowledge": "Nieprawidłowy wpis wiedzy",
+        "knowledgeRepeated": "Wiedza z powtórzonym id",
+        "closeGame": "Zamknij Enshrouded przed zapisaniem: gra nadpisałaby zmiany.",
+        "notOpen": "Zapis nie jest otwarty do edycji",
+        "noEquipment": "Edytor nie może znaleźć ekwipunku i plecaka w tym zapisie",
+        "skillList": "Edytor nie zna listy umiejętności tego zapisu",
+        "notSave": "To nie jest zapis Enshrouded",
+        "inventoryUnsure": "Edytor nie znalazł na pewno ekwipunku w tym zapisie: nie można w nim zapisać przedmiotów.",
+        "modData": "Ten zapis zawiera dane moda, których edytor nie umie zapisać ({mods}): tylko do odczytu, aby dane moda zostały bez zmian.",
+        "inventoryUnread": "Edytor nie odczytał na pewno ekwipunku tej postaci (plecak, pasek zamiany i pasek akcji): tylko do odczytu, aby nic go nie nadpisało."
+      },
+      "saveFileFilter": "Zapis Enshrouded",
+      "rarity": {
+        "none": "Bez rzadkości",
+        "common": "Pospolity",
+        "uncommon": "Niepospolity",
+        "rare": "Rzadki",
+        "epic": "Epicki",
+        "legendary": "Legendarny"
+      },
+      "category": {
+        "weapon": "Broń",
+        "equipment": "Ekwipunek",
+        "material": "Materiał",
+        "consumable": "Zużywalny",
+        "ammunition": "Amunicja",
+        "tool": "Narzędzie",
+        "building": "Budowanie",
+        "blueprint": "Schemat",
+        "collectible": "Kolekcjonerski",
+        "cosmetic": "Kosmetyczny",
+        "gem": "Klejnot"
+      },
+      "attribute": {
+        "constitution": "Kondycja",
+        "spirit": "Duch",
+        "endurance": "Wytrzymałość",
+        "strength": "Siła",
+        "dexterity": "Zręczność",
+        "intelligence": "Inteligencja"
+      },
+      "classes": {
+        "survivor": "Ocalały",
+        "beastmaster": "Władca bestii",
+        "ranger": "Tropiciel",
+        "assassin": "Zabójca",
+        "trickster": "Szelma",
+        "wizard": "Czarodziej",
+        "healer": "Uzdrowiciel",
+        "battlemage": "Mag bojowy",
+        "tank": "Obrońca",
+        "warrior": "Wojownik",
+        "barbarian": "Barbarzyńca",
+        "athlete": "Atleta"
+      },
+      "knowledge": {
+        "pickedUp": "podniesiony",
+        "used": "użyty",
+        "inspected": "zbadany",
+        "seen": "widziany",
+        "crafted": "wytworzony"
+      }
     }
   }
 }

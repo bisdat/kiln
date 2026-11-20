@@ -3976,7 +3976,12 @@
       "leavesListed.other": "Sus archivos salen de la Biblioteca. {others} también lo incluyen y lo mostrarán como faltante.",
       "leaves": "Sus archivos salen de la Biblioteca.",
       "notSaved": "No se pudo guardar tu lista de mods; no se quitó nada.",
-      "notRemovable": "está en la carpeta del juego y Kiln no lo puso ahí: quítalo desde ahí"
+      "notRemovable": "está en la carpeta del juego y Kiln no lo puso ahí: quítalo desde ahí",
+      "settingsToo": "Quitar también sus ajustes",
+      "settingsTooHint": "Sus ajustes en este juego y en tus perfiles también se van. Kiln guarda una copia en las copias de seguridad.",
+      "settingsTooMany": "Quitar también sus ajustes",
+      "settingsTooManyHint": "Sus ajustes en este juego y en tus perfiles también se van. Kiln guarda una copia en las copias de seguridad.",
+      "settingsLeft": "Algunos ajustes se quedaron"
     },
     "rollback": {
       "settingsBack.one": "Sus ajustes de antes de la actualización vuelven con él ({count} archivo).",
@@ -5536,6 +5541,358 @@
       "go": "Poner en el servidor",
       "done": "{version} está en el servidor",
       "failed": "No se creó el pack de servidor"
+    }
+  },
+  "editor": {
+    "page": {
+      "title": "Editor",
+      "lookingForSaves": "Buscando partidas…",
+      "pickCharacter": "Elige un personaje.",
+      "noSaves": "No se encontraron partidas de personaje.",
+      "cannotParse": "No se pudo leer esta partida para editarla.",
+      "readOnlyNoSave": "Esta partida solo se puede leer: Guardar está desactivado.",
+      "gameOpen": "El juego está abierto: ciérralo para guardar.",
+      "unsaved": "Cambios aún sin guardar. Kiln hace una copia de seguridad de la partida antes de escribir.",
+      "levelBackup": "Nivel {n}. Kiln hace una copia de seguridad de la partida antes de escribir.",
+      "notSaved": "Sin guardar",
+      "discard": "Descartar",
+      "backups": "Copias",
+      "save": "Guardar",
+      "saving": "Guardando…",
+      "saved": "Guardado",
+      "savedHint": "La partida anterior está en Copias.",
+      "gameOpenShort": "Juego en ejecución: ciérralo para guardar",
+      "error": "Error",
+      "note": "Atención",
+      "readAgain": "Volver a leer",
+      "close": "Cerrar",
+      "parts": "Partes de la partida",
+      "characters": "Personajes",
+      "openFile": "Abrir archivo…",
+      "pickCharacterButton": "Elegir un personaje",
+      "open": "Abrir",
+      "opened": "Abierto",
+      "discardTitle": "¿Descartar los cambios?",
+      "discardAndOpen": "Descartar y abrir",
+      "discardBody": "Los cambios en {nome} aún no se han guardado.",
+      "cancel": "Cancelar",
+      "back": "Atrás",
+      "readOnlyError": "Solo lectura: {erro}",
+      "pointsRaised": "Has subido los puntos en uso ({antes} → {depois}). Introduce tu total de puntos en la pestaña Habilidades para que el editor pueda comprobarlo; por encima del total, el juego reinicia todo el árbol.",
+      "notWritten": "No se guardó. {problemas}",
+      "gameWroteSince": "El juego escribió esta partida después de que el editor la leyera. Vuelve a leerla para editar la partida tal como está ahora (los cambios hechos aquí se pierden)."
+    },
+    "tabs": {
+      "equipment": "Equipo",
+      "inventory": "Mochila",
+      "skills": "Habilidades",
+      "knowledge": "Conocimiento"
+    },
+    "backups": {
+      "title": "Copias de seguridad de {nome}",
+      "openFolder": "Abrir carpeta",
+      "hint": "El juego guarda automáticamente las últimas 10 partidas; el editor también copia la partida antes de cada escritura.",
+      "dropsChanges": "Restaurar descarta los cambios que no están guardados.",
+      "looking": "Buscando copias de seguridad…",
+      "none": "No se encontró ninguna copia de seguridad de esta partida.",
+      "restore": "Restaurar",
+      "restored": "Restaurada",
+      "restoredBody": "{arquivo} ({quando}). La partida anterior se conservó como copia de seguridad.",
+      "restoreTitle": "¿Restaurar esta copia de seguridad?",
+      "restoreBody": "La partida tal como está ahora se conserva como copia de seguridad.",
+      "kindGame": "Copia del juego",
+      "kindKiln": "Copia de Kiln",
+      "beforeSave": "antes de guardar"
+    },
+    "common": {
+      "level": "Nivel",
+      "empty": "Vacío",
+      "change": "Cambiar",
+      "add": "Añadir",
+      "tierN": "Tier {n}",
+      "rarity": "Rareza",
+      "amount": "Cantidad",
+      "aboveStack": "más que la pila del juego de {n}: para mundos con un mod que aumenta el tamaño de las pilas",
+      "gameStack": "Pila del juego ({n})",
+      "maxAmount": "Lo máximo que cabe en un espacio ({n})",
+      "upgrades": "Mejoras",
+      "remove": "Quitar",
+      "levelN": "nivel {n}",
+      "pick": "Elegir",
+      "noMatch": "Nada coincide con estos filtros.",
+      "all": "Todo"
+    },
+    "equipment": {
+      "xp": "XP en el nivel",
+      "attrsHint": "Los atributos vienen de los nodos del árbol de habilidades (edítalos en la pestaña Habilidades).",
+      "attrsFlameHint": "El juego también suma los nodos que escalan con tu nivel de la Llama y las bonificaciones de tu equipo; ninguno de los dos se guarda en la partida del personaje.",
+      "emptyHint": "Espacio vacío. Equipa la pieza en el juego; aquí puedes editar o quitar lo que ya llevas puesto.",
+      "backpackFull": {
+        "one": "No quitaré {item}: eso borraría su contenedor y el {count} espacio guardado en él. Vacíalo primero en el juego.",
+        "other": "No quitaré {item}: eso borraría su contenedor y los {count} espacios guardados en él. Vacíalo primero en el juego."
+      },
+      "groups": {
+        "armour": "Armadura",
+        "appearance": "Apariencia",
+        "accessories": "Accesorios"
+      },
+      "slots": {
+        "headVanity": "Cabeza (apariencia)",
+        "chestVanity": "Torso (apariencia)",
+        "armsVanity": "Brazos (apariencia)",
+        "legsVanity": "Piernas (apariencia)",
+        "feetVanity": "Pies (apariencia)",
+        "head": "Cabeza",
+        "chest": "Torso",
+        "arms": "Brazos",
+        "legs": "Piernas",
+        "feet": "Pies",
+        "ring": "Anillo",
+        "shield": "Escudo",
+        "hook": "Gancho de agarre",
+        "glider": "Planeador",
+        "backpack": "Mochila",
+        "slot": "Espacio {n}"
+      }
+    },
+    "inventory": {
+      "move": "Mover",
+      "slotEmpty": "Espacio {n} vacío",
+      "putHere": "Poner aquí",
+      "slotsUsed": {
+        "one": "{n} de {total} espacio",
+        "other": "{n} de {total} espacios"
+      },
+      "addItem": "Añadir objeto",
+      "swapBar": "Cambiar barra",
+      "swapBarHint": "Alt la intercambia con la barra de acción",
+      "actionBar": "Barra de acción",
+      "deckHint": "A cambia el objeto · Y lo mueve · A en un espacio vacío añade uno",
+      "hint": "Arrastra para mover · doble clic en un espacio vacío para añadir · Delete quita · Ctrl+D duplica",
+      "noneSelected": "Ningún objeto seleccionado.",
+      "noneSelectedHint": "Elige un espacio para ver y cambiar su objeto.",
+      "emptyHint": "Elige un objeto del catálogo para ponerlo aquí.",
+      "pickItem": "Elegir objeto",
+      "notFound": "No se encontraron objetos en este inventario y el editor no puede saber con certeza dónde está en esta partida. Si el juego muestra objetos aquí, no se pudieron leer: no se puede añadir nada. Enviarnos una copia de esta partida nos ayuda a arreglarlo.",
+      "modItem": "Objeto de mod, se deja intacto",
+      "hiddenModItem": "{place} guarda un objeto oculto de otro mod (id {id}); Kiln lo deja intacto.",
+      "place": {
+        "backpack": "Casilla {n} de la mochila",
+        "swap": "Casilla {n} de la barra de cambio",
+        "action": "Casilla {n} de la barra de acción"
+      }
+    },
+    "inspector": {
+      "item": "Objeto",
+      "stacksTo": "se apila hasta {n}",
+      "max": "Máx.",
+      "levelSplit": {
+        "one": "= base {base} + {count} mejora",
+        "other": "= base {base} + {count} mejoras"
+      },
+      "aboveItemMax": "por encima del máximo de este objeto ({max}): el servidor lo limita al cargar, salvo que un mod haya ampliado su rango",
+      "upgradesHint": "La rareza fija cuántas mejoras admite el objeto: nivel máximo = nivel base + rareza.",
+      "gem": "Gema engastada",
+      "gemUnknown": "el id {id} no está en el catálogo",
+      "noGem": "— sin gema —",
+      "gemLevel": "Nivel de la gema",
+      "aboveGemMax": "por encima del máximo de esta gema ({max}): el servidor lo limita al cargar, salvo que un mod haya ampliado su rango",
+      "durability": "Durabilidad",
+      "repair": "Reparar",
+      "water": "Agua",
+      "fill": "Llenar",
+      "duplicateHint": "Copia el objeto en el primer espacio libre",
+      "duplicate": "Duplicar",
+      "attributes": "Atributos",
+      "physicalArmour": "Armadura física",
+      "magicalArmour": "Armadura mágica",
+      "raisesSkill": "sube el nivel de la habilidad {no}",
+      "unknownLines": "Las líneas sin número escalan con el nivel del objeto según una fórmula que aún no se ha medido; el editor no muestra un valor del que no esté seguro."
+    },
+    "parts": {
+      "full": "Lleno",
+      "clickToSet": "Haz clic para fijar"
+    },
+    "catalog": {
+      "items": "Objetos",
+      "countLimited": {
+        "one": "{count} objeto (se muestran {limite}; afina la búsqueda)",
+        "other": "{count} objetos (se muestran {limite}; afina la búsqueda)"
+      },
+      "count": {
+        "one": "{count} objeto",
+        "other": "{count} objetos"
+      },
+      "categories": "Categorías",
+      "searchDeck": "Buscar por nombre (Steam + X: teclado)",
+      "search": "Buscar por nombre…",
+      "searchLabel": "Buscar",
+      "type": "Escribir",
+      "allRarities": "Todas",
+      "tier": "Tier",
+      "targetFull": "Destino: inventario lleno",
+      "target": "Destino: espacio {n}",
+      "pickHint": "Elige un objeto.",
+      "deckHint": "A lo elige, A otra vez lo añade.",
+      "hint": "Doble clic lo añade al instante.",
+      "cat": {
+        "weapons": "Armas",
+        "armour": "Armaduras",
+        "ammo": "Munición",
+        "magic": "Hechizos y gemas",
+        "consumables": "Consumibles",
+        "materials": "Materiales",
+        "tools": "Herramientas",
+        "building": "Construcción",
+        "cosmetics": "Cosméticos y coleccionables"
+      }
+    },
+    "knowledge": {
+      "noBlock": "Esta partida no tiene bloque de conocimiento.",
+      "search": "Buscar por nombre o id",
+      "above": "Por encima del nivel",
+      "allLevels": "todos",
+      "show": "Mostrar",
+      "filter": {
+        "itemsRecipes": "Objetos y recetas",
+        "items": "Solo objetos",
+        "recipes": "Solo recetas",
+        "everything": "Todo"
+      },
+      "removeN": "Quitar {n}",
+      "kind": "Tipo",
+      "name": "Nombre",
+      "state": "Estado",
+      "id": "id {id}",
+      "kinds": {
+        "item": "objeto",
+        "recipe": "receta",
+        "misc": "otro"
+      },
+      "count": {
+        "one": "{n} de {total} entrada",
+        "other": "{n} de {total} entradas"
+      },
+      "unnamed": {
+        "one": "{count} sin nombre conocido",
+        "other": "{count} sin nombre conocido"
+      },
+      "shownLimit": "Se muestran las primeras 400; usa la búsqueda o el corte por nivel para ver el resto.",
+      "hint": "Quitar un material de nivel alto cierra las recetas que dependen de él. Las recetas no se guardan en la partida: el juego las vuelve a calcular a partir del conocimiento, tanto aquí como en el mundo del servidor."
+    },
+    "skills": {
+      "total": "Puntos totales",
+      "minusLevel": "−1 nivel",
+      "plusLevel": "+1 nivel",
+      "tree": "Árbol de habilidades",
+      "used": "En uso",
+      "available": "Disponibles",
+      "enterTotal": "introduce el total…",
+      "changeTotal": "Haz clic para cambiar el total",
+      "totalFromGame": "Total {total}, calculado como lo hace el juego: 2 puntos por nivel por encima de 1, más las raíces del velo y los pozos de elixir que este personaje ha destruido. El juego no lo guarda, así que aquí no se edita.",
+      "totalHint": "Total de puntos (en uso + disponibles, como lo muestra el juego):",
+      "zoomIn": "Acercar",
+      "zoomOut": "Alejar",
+      "centre": "Centrar",
+      "cost": "coste {n}",
+      "maxN": "máx. {n}",
+      "deckHint": "A: +1 nivel · Y: −1",
+      "hint": "Clic: +1 nivel · Clic derecho: −1",
+      "class": {
+        "warrior": "Guerrero",
+        "ranger": "Explorador",
+        "mage": "Mago",
+        "neutral": "Neutral"
+      }
+    },
+    "deck": {
+      "delete": "Borrar",
+      "range": "De {min} a {max}",
+      "min": "Mín.",
+      "use": "Usar",
+      "current": "Actual"
+    },
+    "art": {
+      "preparing": "Preparando el arte del juego…",
+      "needsClient": "El arte del juego necesita el cliente de Enshrouded (Ajustes → Juegos).",
+      "notFound": "No se encontró el arte del juego. Ejecuta {script}."
+    },
+    "game": {
+      "tree": {
+        "aboveMax": "{no}: nivel {nivel} por encima del máximo de {max}",
+        "orphans": "Nodos sin conexión con el resto del árbol: {nos}",
+        "overTotal": "Los puntos en uso ({usados}) superan el total del personaje ({total})"
+      },
+      "unknownItem": "Objeto desconocido (0x{h})",
+      "errors": {
+        "unknownItems": "Objetos desconocidos en esta partida (¿un mod que ya no está?): solo lectura",
+        "levelXp": "Nivel o XP no válidos",
+        "skill": "Habilidad no válida",
+        "item": "Objeto desconocido: {id}",
+        "slotAmount": "Espacio o cantidad no válidos",
+        "sameSlot": "Dos objetos en el mismo espacio del inventario",
+        "knowledge": "Entrada de conocimiento no válida",
+        "knowledgeRepeated": "Conocimiento con un id repetido",
+        "closeGame": "Cierra Enshrouded antes de guardar: el juego sobrescribiría la edición.",
+        "notOpen": "Partida no abierta para editar",
+        "noEquipment": "El editor no encuentra el equipo ni el inventario en esta partida",
+        "skillList": "El editor no conoce la lista de habilidades de esta partida",
+        "notSave": "No es una partida de Enshrouded",
+        "inventoryUnsure": "El editor no pudo encontrar con certeza el inventario de esta partida: no se pueden escribir objetos en él.",
+        "modData": "Esta partida guarda datos de un mod que el editor no sabe escribir ({mods}): solo lectura, para que los datos del mod queden como están.",
+        "inventoryUnread": "El editor no pudo leer con certeza el inventario de este personaje (mochila, barra de cambio y barra de acción): solo lectura, para no escribir nada encima."
+      },
+      "saveFileFilter": "Partida de Enshrouded",
+      "rarity": {
+        "none": "Sin rareza",
+        "common": "Común",
+        "uncommon": "Poco común",
+        "rare": "Raro",
+        "epic": "Épico",
+        "legendary": "Legendario"
+      },
+      "category": {
+        "weapon": "Arma",
+        "equipment": "Equipo",
+        "material": "Material",
+        "consumable": "Consumible",
+        "ammunition": "Munición",
+        "tool": "Herramienta",
+        "building": "Construcción",
+        "blueprint": "Plano",
+        "collectible": "Coleccionable",
+        "cosmetic": "Cosmético",
+        "gem": "Gema"
+      },
+      "attribute": {
+        "constitution": "Constitución",
+        "spirit": "Espíritu",
+        "endurance": "Resistencia",
+        "strength": "Fuerza",
+        "dexterity": "Destreza",
+        "intelligence": "Inteligencia"
+      },
+      "classes": {
+        "survivor": "Superviviente",
+        "beastmaster": "Señor de las bestias",
+        "ranger": "Explorador",
+        "assassin": "Asesino",
+        "trickster": "Embaucador",
+        "wizard": "Hechicero",
+        "healer": "Sanador",
+        "battlemage": "Mago de batalla",
+        "tank": "Tanque",
+        "warrior": "Guerrero",
+        "barbarian": "Bárbaro",
+        "athlete": "Atleta"
+      },
+      "knowledge": {
+        "pickedUp": "recogido",
+        "used": "usado",
+        "inspected": "inspeccionado",
+        "seen": "visto",
+        "crafted": "fabricado"
+      }
     }
   }
 }

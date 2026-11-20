@@ -110,6 +110,13 @@ test("a save with an item no table knows is read-only: Save stays off and the pa
   await expect(first).toContainText("120");
   await expect(page.locator(".ke")).not.toContainText("Not saved");
   await expect(page.getByRole("button", { name: "Save" })).toBeDisabled();
+  // the item no table has is a locked mod tile in its slot, and the tab names the slot
+  await expect(page.locator(".ke-grid .ke-slot.mod")).toHaveCount(1);
+  await expect(page.locator(".ke-grid .ke-slot.mod")).toHaveAttribute("aria-label", "Backpack slot 10: Mod item, kept untouched");
+  await expect(page.locator(".ke-mod-note")).toHaveText("Backpack slot 10 holds a hidden item from another mod (id 0x7f00abcd); Kiln keeps it untouched.");
+  // the skill tree takes no click either, and says why (the banner above can be closed)
+  await page.getByRole("tab", { name: "Skills" }).click();
+  await expect(page.locator(".ke-tree-warn")).toContainText("Read-only: Unknown items in this save");
   // Cedric cannot be read at all: the reason is in English
   await page.locator(".ke-who-btn").click();
   await expect(page.getByRole("option", { name: /Cedric/ })).toContainText("The editor cannot find the equipment and inventory in this save");

@@ -1358,7 +1358,13 @@ mod tests {
         let req = ModpackInstallRequest { source: ModpackSource::Url { url: "http://127.0.0.1:1/x.zip".into(), sha256: "a".repeat(64) }, consent: false, allow_http: false, activate: None };
         assert_eq!(install(&dirs, &g, &req, &mut crate::task::NoProgress).unwrap_err().code, ErrorCode::ConsentRequired);
         let req = ModpackInstallRequest { consent: true, ..req };
-        assert_eq!(install(&dirs, &g, &req, &mut crate::task::NoProgress).unwrap_err().code, ErrorCode::Refused, "http refused by default");
+        // The https rule is download's, and only a build with `http` downloads: without it (`--features zip`, say) the
+        // stub answers Unsupported before any URL is read.
+        #[cfg(feature = "http")]
+        let want = ErrorCode::Refused;
+        #[cfg(not(feature = "http"))]
+        let want = ErrorCode::Unsupported;
+        assert_eq!(install(&dirs, &g, &req, &mut crate::task::NoProgress).unwrap_err().code, want, "http refused by default; no download at all without the http feature");
         let _ = std::fs::remove_dir_all(&dirs.root);
         let _ = std::fs::remove_dir_all(game);
     }

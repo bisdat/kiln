@@ -97,7 +97,25 @@ text is about Kiln's own kind it says "Kiln mods".
   (`library_remove` past exactly the users `library_users` named; another profile that lists it is named in the
   confirmation and shows it as missing). One click with a plain confirmation; Settings "Type a mod's name to remove it"
   (off unless turned on) adds the typed name. Uninstalling Kiln, deleting a profile, a server or saves keep their own
-  typed confirmations. Refused while the game runs.
+  typed confirmations. Refused while the game runs. **"Remove its settings too"** (0.2.0-dev.30, owner 2026-11-20): a
+  checkbox in the dialog, unchecked each time it opens, with one line under it ("Its settings in this game and your
+  profiles go too. Kiln keeps a copy in backups."). Unchecked, the settings stay where Kiln keeps them, and adding the
+  mod again brings them back. Checked, `library_remove` gets `settings: true`, and with the mod's last Library version
+  its settings go too (`kiln_manage::mod_settings`): in every known client game the settings stash
+  `kiln/state/placed-settings/<kind>/<id>/` and the settings files in `kiln/kept-mod-files/<kind>/<id>/`; in every
+  config folder (each profile's `<data>/profiles/<pid>/config/`, a copied profile's `<game>/kiln/profiles/<pid>/config/`,
+  the game's `kiln/config/`) Kiln's config files of the mod (`<id>.json`, `<id>-server.json`, `<id>-client.json` and
+  every file a `.schema/` snapshot names as the mod's, with those snapshots; Kiln, native, plugin and Shroudtopia mods,
+  and not while a mod of another kind has the same id), an engine's values file and schema (`<kind>/<id>.<ext>`,
+  `.schema/<kind>/<id>.json`: EMF's `emf/<id>.ini`) and a Shroudtopia mod's entry in the shared
+  `shroudtopia/shroudtopia.json` (that entry only). Never another mod's file, Kiln's own files (`native.json`,
+  `keybinds.json`, ...), a folder of the player's own, servers or world data. Everything is first copied into
+  `<data>/backups/mod-settings/<kind>-<id>-<time>/` (`games/<install id>/...` and `profiles/<pid>/config/...`, as it
+  was laid out, and `removed.json` naming where each file came from), so a player can put it back by hand. The box
+  shows only when the whole mod goes (not for Remove <version> of one of several); a row whose files were gone from
+  the Library already uses `library_remove_settings`. What could not go is a notice ("Some settings stayed", with why).
+  Remove… of several selected mods has the same box ("Remove their settings too"), and the Deck's remove dialogs a row
+  above the buttons that A switches (Off by default).
 - **Above the list**: Filter (words in the name or id) and Kind (when more than one kind is present), shown with more
   than six rows; Notes (N) when the last activation said something about mod folders (below); Load order, Engines,
   Catalog (Nexus builds), Add mods (the file dialog: zip, 7z, rar and DLL files, `shell/modFiles.ts`; folders are
