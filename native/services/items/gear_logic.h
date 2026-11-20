@@ -13,8 +13,10 @@ constexpr uint32_t kPerkSlots = 5;    // ItemInfo.perkIds[5] / perkReferences[5]
 constexpr uint32_t kMaxLevel = 255;   // the save record keeps the Level's low byte (docs/re/items.md section 10)
 
 constexpr uint32_t kOps = KILN_ITEMS_GEAR_AVAILABLE | KILN_ITEMS_GEAR_UNLOCKED | KILN_ITEMS_GEAR_LEVEL |
-                          KILN_ITEMS_GEAR_DURABILITY_REFRESH | KILN_ITEMS_GEAR_DURABILITY_REPAIR;
-constexpr uint32_t kFlags = kOps | KILN_ITEMS_GEAR_FORCE_SLOT | KILN_ITEMS_GEAR_DRY_RUN | KILN_ITEMS_GEAR_NOT_EQUIPPED;
+                          KILN_ITEMS_GEAR_DURABILITY_REFRESH | KILN_ITEMS_GEAR_DURABILITY_REPAIR |
+                          KILN_ITEMS_GEAR_DURABILITY_MAX;
+constexpr uint32_t kFlags = kOps | KILN_ITEMS_GEAR_FORCE_SLOT | KILN_ITEMS_GEAR_DRY_RUN | KILN_ITEMS_GEAR_NOT_EQUIPPED |
+                            KILN_ITEMS_GEAR_ANY_LEVEL;
 
 // The type's last filled perk slot + 1 (perkIds[i] != 0), 0 when none is filled. A gap below it does not stop it: the
 // game's perk programs skip an empty slot (equipment_impacts, apply_armor test the registry lookup).
@@ -34,7 +36,7 @@ inline uint8_t rarity_of(bool has_perks, uint8_t available, uint8_t type_rarity)
 inline bool request_valid(const KilnItemsGearRequest& r) {
     if (r.size < sizeof(KilnItemsGearRequest) || r.entity == 0 || r.stamp == 0) return false;
     if ((r.flags & ~kFlags) != 0 || (r.flags & kOps) == 0) return false;
-    if (r.reserved0 != 0 || r.reserved[0] != 0 || r.reserved[1] != 0 || r.reserved[2] != 0) return false;
+    if (r.reserved0 != 0 || r.reserved[0] != 0 || r.reserved[1] != 0) return false;
     // a field whose operation is not asked for must be 0: no value is ever ignored silently
     if (r.flags & KILN_ITEMS_GEAR_AVAILABLE) {
         if (r.available < 1 || r.available > kPerkSlots) return false;
@@ -48,7 +50,13 @@ inline bool request_valid(const KilnItemsGearRequest& r) {
     }
     if (r.flags & KILN_ITEMS_GEAR_LEVEL) {
         if (r.level < 1 || r.level > kMaxLevel) return false;
-    } else if (r.level != 0) {
+    } else if (r.level != 0 || (r.flags & KILN_ITEMS_GEAR_ANY_LEVEL)) {
+        return false;  // ANY_LEVEL only modifies LEVEL
+    }
+    if (r.flags & KILN_ITEMS_GEAR_DURABILITY_MAX) {
+        if (r.durability_max < 1 || r.durability_max > KILN_ITEMS_GEAR_MAX_DURABILITY) return false;
+        if (r.flags & KILN_ITEMS_GEAR_DURABILITY_REFRESH) return false;  // the game's recompute would replace the max
+    } else if (r.durability_max != 0) {
         return false;
     }
     return true;
@@ -62,6 +70,7 @@ struct Plan {
     bool write_perks = false;      // PerkContainerNew := after.available / after.unlocked
     bool write_level = false;      // Level := after.level, max := after.level_max
     bool write_durability = false; // Durability current := after.durability
+    bool write_durability_max = false; // Durability max := after.durability_max (DURABILITY_MAX, package P7)
     bool clear_init = false;       // ItemState.itemState &= ~init_bit
 };
 
@@ -70,7 +79,7 @@ inline Plan refuse(Plan p, const KilnItemsGearState& before, int32_t status, con
     p.why = why;
     p.after = before;
     p.changed = 0;
-    p.write_perks = p.write_level = p.write_durability = p.clear_init = false;
+    p.write_perks = p.write_level = p.write_durability = p.write_durability_max = p.clear_init = false;
     return p;
 }
 
@@ -80,7 +89,10 @@ inline Plan refuse(Plan p, const KilnItemsGearState& before, int32_t status, con
 //    count brings the unlocked count down with it, as the game's free -1 action does one at a time.
 //  - Every change of the unlocked count moves Level by the same number (UnlockPerk: unlocked + 1, Level + 1; Level's
 //    max is raised first when the new level would pass it). LEVEL sets Level outright; its base (level - unlocked) must
-//    be in the type's level range: a level outside it is not kept by a save load (the game re-clamps it).
+//    be in the type's level range: a level outside it is not kept by a save load (the game re-clamps it). ANY_LEVEL
+//    lifts that rule (the base must still be 1 or more): the caller writes the level again after each load.
+//  - DURABILITY_MAX sets max durability and keeps current at the same share of it (REPAIR: full at the new max), only
+//    once the game has computed the item's durability (DurabilityInitialized set; else REFUSED, try again later).
 //  - REPAIR puts current durability at max; REPAIR and REFRESH clear DurabilityInitialized, so the game recomputes max
 //    at the new rarity and level in the next step, keeping the ratio. An item without Durability has nothing to do.
 inline Plan plan(const KilnItemsGearRequest& r, const KilnItemsGearState& before, uint16_t init_bit, uint16_t equipped_bit) {
@@ -113,7 +125,9 @@ inline Plan plan(const KilnItemsGearRequest& r, const KilnItemsGearState& before
     if (r.flags & KILN_ITEMS_GEAR_LEVEL) {
         if (!level) return refuse(p, before, KILN_ITEMS_GEAR_NOT_GEAR, "the item has no Level");
         const int64_t base = static_cast<int64_t>(r.level) - unl;
-        if (base < 1 || base < before.type_level_min || base > before.type_level_max)
+        if (base < 1)
+            return refuse(p, before, KILN_ITEMS_GEAR_OUT_OF_RANGE, "the level is below the unlocked enhancements + 1");
+        if (!(r.flags & KILN_ITEMS_GEAR_ANY_LEVEL) && (base < before.type_level_min || base > before.type_level_max))
             return refuse(p, before, KILN_ITEMS_GEAR_OUT_OF_RANGE, "the level's base is outside the type's level range");
         new_level = r.level;
     } else if (delta != 0) {
@@ -138,7 +152,30 @@ inline Plan plan(const KilnItemsGearRequest& r, const KilnItemsGearState& before
             p.changed |= KILN_ITEMS_GEAR_CHANGED_LEVEL;
         }
     }
-    if (durability && (r.flags & (KILN_ITEMS_GEAR_DURABILITY_REFRESH | KILN_ITEMS_GEAR_DURABILITY_REPAIR))) {
+    if (r.flags & KILN_ITEMS_GEAR_DURABILITY_MAX) {
+        if (!durability) return refuse(p, before, KILN_ITEMS_GEAR_NOT_GEAR, "the item has no durability");
+        if (init_bit && !(before.state & init_bit))
+            return refuse(p, before, KILN_ITEMS_GEAR_REFUSED, "the game has not computed the item's durability yet");
+        const int32_t max = r.durability_max;
+        int64_t cur = max;
+        if (!(r.flags & KILN_ITEMS_GEAR_DURABILITY_REPAIR) && before.durability_max > 0) {
+            // the same share of the new max, rounded to the nearest unit (as the game keeps a ratio)
+            cur = (static_cast<int64_t>(before.durability) * max * 2 + before.durability_max) / (2 * int64_t{before.durability_max});
+            if (before.durability > 0 && cur < 1) cur = 1;  // a worn item stays usable, a broken one stays broken
+        }
+        if (cur < 0) cur = 0;
+        if (cur > max) cur = max;
+        p.after.durability_max = max;
+        p.after.durability = static_cast<int32_t>(cur);
+        if (max != before.durability_max) {
+            p.write_durability_max = true;
+            p.changed |= KILN_ITEMS_GEAR_CHANGED_DURABILITY_MAX;
+        }
+        if (p.after.durability != before.durability) {
+            p.write_durability = true;
+            p.changed |= KILN_ITEMS_GEAR_CHANGED_DURABILITY;
+        }
+    } else if (durability && (r.flags & (KILN_ITEMS_GEAR_DURABILITY_REFRESH | KILN_ITEMS_GEAR_DURABILITY_REPAIR))) {
         if ((r.flags & KILN_ITEMS_GEAR_DURABILITY_REPAIR) && before.durability != before.durability_max) {
             p.after.durability = before.durability_max;
             p.write_durability = true;

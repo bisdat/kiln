@@ -334,10 +334,11 @@ bool marked(const Access& a, uint64_t acc, KilnEntity e, const uint8_t* read) {
 // ItemState is marked whenever anything is written (bytes unchanged unless clear_init): it carries the replication bit,
 // so players get the entity again this step, and once more when item_state_init derives the new UI values.
 bool mark_plan(const Access& a, const Reader& rd_, KilnEntity e, const Blocks& b, const gear::Plan& plan) {
-    const bool any = plan.write_perks || plan.write_level || plan.write_durability || plan.clear_init;
+    const bool dur = plan.write_durability || plan.write_durability_max;
+    const bool any = plan.write_perks || plan.write_level || dur || plan.clear_init;
     return !((plan.write_perks && !marked(a, rd_.acc_perks, e, b.perks)) ||
              (plan.write_level && !marked(a, rd_.acc_level, e, b.level)) ||
-             (plan.write_durability && !marked(a, rd_.acc_dur, e, b.dur)) ||
+             (dur && !marked(a, rd_.acc_dur, e, b.dur)) ||
              (any && !marked(a, a.acc[A_ITEMSTATE], e, b.state)));
 }
 
@@ -354,8 +355,10 @@ void write_plan(const Reader& rd_, const Blocks& b, const gear::Plan& plan) {
         v[b.lv] = plan.after.level;
         F.attr_changed_u32(const_cast<uint8_t*>(b.level), rd_.attributes);
     }
-    if (plan.write_durability) {
-        attr_values(b.dur)[b.du] = static_cast<uint32_t>(plan.after.durability);
+    if (plan.write_durability || plan.write_durability_max) {
+        // max first (package P7: DURABILITY_MAX), then current at its share; the attribute's formulas once after both
+        if (plan.write_durability_max) attr_values(b.dur)[b.du_max] = static_cast<uint32_t>(plan.after.durability_max);
+        if (plan.write_durability) attr_values(b.dur)[b.du] = static_cast<uint32_t>(plan.after.durability);
         E.attr_changed(const_cast<uint8_t*>(b.dur), rd_.attributes);
     }
     if (plan.clear_init) {

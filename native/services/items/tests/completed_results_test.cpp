@@ -20,9 +20,10 @@ int main() {
                       offsetof(KilnItemsApi, read_instances) == 200 && offsetof(KilnItemsApi, equip) == 224 &&
                       offsetof(KilnItemsApi, set_capture) == 240 && offsetof(KilnItemsApi, socket_roll) == 288 &&
                       offsetof(KilnItemsApi, gear_write) == 296 && offsetof(KilnItemsApi, rarity_rolls) == 320 &&
-                      offsetof(KilnItemsApi, gear_upgrade) == 336 && sizeof(KilnItemsApi) == 344,
+                      offsetof(KilnItemsApi, gear_upgrade) == 336 && offsetof(KilnItemsApi, gear_scale) == 344 &&
+                      sizeof(KilnItemsApi) == 368,
                   "peek appended one row without moving the v3 ABI; v4 appends after it, v5 (equip) after v4, v6 (sets) after v5, "
-                  "v7 (socket_roll) after v6, v8 (gear) after v7, then the rarity rolls (P5) and gear_upgrade (P3)");
+                  "v7 (socket_roll) after v6, v8 (gear) after v7, then the rarity rolls (P5), gear_upgrade (P3) and the scales (P7)");
     static_assert(sizeof(KilnItemsRequest) == 40 && sizeof(KilnItemsRequestEx) == 56 && offsetof(KilnItemsRequestEx, dye) == 40 &&
                       sizeof(KilnItemsSocketRoll) == 24,
                   "v7: the Ex request appends to the unchanged v1 request; the socket roll is 24 bytes");

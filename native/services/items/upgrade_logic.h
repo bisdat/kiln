@@ -23,8 +23,8 @@ inline bool request_valid(const KilnItemsUpgradeRequest& r) {
     if (r.flags & KILN_ITEMS_UPGRADE_WRITE) {
         // the write as gear_write takes it; a dry run is the upgrade's own flag, never the write's
         if (!gear::request_valid(g) || (g.flags & KILN_ITEMS_GEAR_DRY_RUN)) return false;
-    } else if (g.flags != 0 || g.available != 0 || g.unlocked != 0 || g.level != 0 || g.reserved0 != 0 || g.reserved[0] != 0 ||
-               g.reserved[1] != 0 || g.reserved[2] != 0) {
+    } else if (g.flags != 0 || g.available != 0 || g.unlocked != 0 || g.level != 0 || g.reserved0 != 0 || g.durability_max != 0 ||
+               g.reserved[0] != 0 || g.reserved[1] != 0) {
         return false;  // no value is ever ignored silently
     }
     for (uint32_t i = 0; i < kMaxCosts; ++i) {

@@ -941,16 +941,29 @@ enum {
     KILN_ITEMS_GEAR_DURABILITY_REPAIR = 0x0020u,  /* current := max, then as REFRESH: full at the new max */
     KILN_ITEMS_GEAR_DRY_RUN = 0x0040u,       /* say what would change (after = the plan), change nothing */
     KILN_ITEMS_GEAR_NOT_EQUIPPED = 0x0080u,  /* refuse (EQUIPPED) when the item is equipped; default: allowed */
+    /* package P7 (per-instance values; the same v8 table, 0x0100 stays unused): */
+    KILN_ITEMS_GEAR_ANY_LEVEL = 0x0200u,     /* LEVEL's base may lie outside the type's level range (1..255 still). A save
+                                                load sets such a level back into the range (docs/re/items.md section 20):
+                                                the caller keeps the level it wants and writes it again after a load */
+    KILN_ITEMS_GEAR_DURABILITY_MAX = 0x0400u,/* Durability max := durability_max, current kept at the same share of it
+                                                (REPAIR: current := the new max). Refused with REFRESH, whose recompute
+                                                would replace it; REFUSED while the game has not computed the item's
+                                                durability yet (DurabilityInitialized clear). The game computes max again
+                                                after a save load (ItemState, where the bit lives, is not saved): the
+                                                caller writes it again after a load */
 };
+
+#define KILN_ITEMS_GEAR_MAX_DURABILITY 1000000 /* the highest durability_max (package P7) */
 
 /* KilnItemsGearResult.status */
 enum {
     KILN_ITEMS_GEAR_DONE = 0,         /* written (or, DRY_RUN, would be); also when nothing needed a change */
     KILN_ITEMS_GEAR_STALE = 1,        /* the entity is not the stamped item entity any more (gone, or another item) */
     KILN_ITEMS_GEAR_NOT_GEAR = 2,     /* no PerkContainerNew (the type has no enhancement slots), or no Level for an
-                                         UNLOCKED change or LEVEL */
+                                         UNLOCKED change or LEVEL, or no Durability for DURABILITY_MAX */
     KILN_ITEMS_GEAR_NO_SLOT = 3,      /* AVAILABLE beyond the type's last filled perk slot (without FORCE_SLOT) */
-    KILN_ITEMS_GEAR_OUT_OF_RANGE = 4, /* unlocked above available, a level whose base is outside the type's range */
+    KILN_ITEMS_GEAR_OUT_OF_RANGE = 4, /* unlocked above available, a level whose base is outside the type's range
+                                         (without ANY_LEVEL) */
     KILN_ITEMS_GEAR_EQUIPPED = 5,     /* NOT_EQUIPPED and the item is equipped */
     KILN_ITEMS_GEAR_UNAVAILABLE = 6,  /* gear writes were switched off since the request was accepted */
     KILN_ITEMS_GEAR_DROPPED = 7,      /* not run: the server world went away or did not step for 10 s */
@@ -963,6 +976,7 @@ enum {
     KILN_ITEMS_GEAR_CHANGED_LEVEL = 0x02u,      /* Level (current or max) */
     KILN_ITEMS_GEAR_CHANGED_DURABILITY = 0x04u, /* Durability current (REPAIR) */
     KILN_ITEMS_GEAR_CHANGED_STATE = 0x08u,      /* ItemState: DurabilityInitialized cleared */
+    KILN_ITEMS_GEAR_CHANGED_DURABILITY_MAX = 0x10u, /* Durability max (DURABILITY_MAX, package P7) */
 };
 enum {
     KILN_ITEMS_GEAR_HAS_PERKS = 0x01u,      /* the entity has PerkContainerNew */
@@ -983,7 +997,8 @@ typedef struct KilnItemsGearRequest {
     uint8_t unlocked;    /* UNLOCKED: 0..5 */
     uint16_t reserved0;  /* 0 */
     uint32_t level;      /* LEVEL: 1..255 (the save record keeps the low byte) */
-    uint32_t reserved[3];/* 0 */
+    int32_t durability_max; /* DURABILITY_MAX: 1..KILN_ITEMS_GEAR_MAX_DURABILITY; else 0 (package P7: was reserved) */
+    uint32_t reserved[2];/* 0 */
 } KilnItemsGearRequest;
 
 /* One item entity's gear as the program (or gear_read) sees it. */
@@ -1161,6 +1176,62 @@ typedef struct KilnItemsRollStatus {
     uint64_t faults;      /* the hook faulted (the item was created as the game made it) */
     char detail[160];     /* why rolls are off; NUL-terminated */
 } KilnItemsRollStatus;
+
+/* ---------------------------------------------------------------------------- power and armour scales ---- */
+
+/* v8, since 0.2.0-dev.29.19 (the equipment wave, package P7; features items.gear.power and items.gear.armor; check
+ * header.size).
+ *
+ * A multiplier of one item entity's power (the damage it deals) and of its armour, kept by kiln.items for this server
+ * world and applied where the game computes them, so nothing of the item's saved state changes:
+ *  - power: the game computes a used item's power when an impact of it starts (a swing, a shot, a spell: impact_initialize,
+ *    items/ItemPower: int(int(seed x creep x level + seed) x dmgMod x speedMod)) and multiplies the impact's damage
+ *    distribution by the weapon's power plus its ammunition's (docs/re/abilities.md). kiln.items' detour multiplies the
+ *    power of an item entity with a scale right after the game computed it, so the damage of that item's impacts
+ *    follows (armour, block, crit and attributes still act after, as for the game's own numbers);
+ *  - armour: apply_armor sums every worn piece's armour (its type's armorSetup at its base level plus each unlocked
+ *    perk's) into the wearer's nine armour values, slot by slot. Two mid hooks around one piece's part
+ *    (items/ArmorSlotBase, items/ArmorSlotEnd) multiply what that piece added when it has a scale.
+ * Server world only: the hooks act on the server world's storage, never on a game client's own world. What players see
+ * in the game's tooltip is the type's number (a game client computes it from its own data, docs/re/game-ui.md): Kiln
+ * clients can be shown the scaled number through kiln.ui.values' tooltip_values. The table is forgotten when a server
+ * world closes or starts (entity ids start again); a caller that keeps scales across a restart sets them again. The
+ * hooks install at the first scale other than 1 (nothing is hooked on a server that never uses them). */
+
+#define KILN_ITEMS_SCALE_CAPACITY 8192u /* items with a scale at once */
+#define KILN_ITEMS_SCALE_MIN 0.01f
+#define KILN_ITEMS_SCALE_MAX 100.0f
+
+/* KilnItemsGearScale.flags */
+enum {
+    KILN_ITEMS_SCALE_POWER = 0x01u, /* power: the damage the item's impacts deal */
+    KILN_ITEMS_SCALE_ARMOR = 0x02u, /* armor: the armour values the item adds to its wearer */
+};
+
+typedef struct KilnItemsGearScale {
+    uint32_t size;        /* sizeof(KilnItemsGearScale) */
+    uint32_t flags;       /* gear_scale: which scales to set (KILN_ITEMS_SCALE_*); read: which are not 1 */
+    KilnEntity entity;    /* the item entity */
+    uint32_t stamp;       /* its v4 stamp (gear_scale: required) */
+    float power;          /* SCALE_POWER: KILN_ITEMS_SCALE_MIN..MAX; 1 = the item's own power */
+    float armor;          /* SCALE_ARMOR: likewise */
+    uint32_t reserved[2]; /* 0 */
+} KilnItemsGearScale;
+
+typedef struct KilnItemsScaleStatus {
+    uint32_t size;        /* in: sizeof(KilnItemsScaleStatus) */
+    uint8_t power;        /* 1: power scales act (feature items.gear.power, the detour installed or installable) */
+    uint8_t armor;        /* 1: armour scales act (feature items.gear.armor) */
+    uint8_t power_hooked; /* 1: the power detour is installed */
+    uint8_t armor_hooked; /* 1: the armour mid hooks are installed */
+    uint32_t entries;     /* items with a scale now */
+    uint32_t capacity;    /* KILN_ITEMS_SCALE_CAPACITY */
+    uint32_t reserved;    /* 0 */
+    uint64_t powered;     /* item powers the detour scaled since the start */
+    uint64_t armored;     /* armour pieces the mid hooks scaled */
+    uint64_t faults;      /* faults inside a hook (each ended the hook's work for that call; the game's own value stood) */
+    char detail[160];     /* why a scale is off; NUL-terminated */
+} KilnItemsScaleStatus;
 
 /* ---------------------------------------------------------------------------------------------- the table ---- */
 
@@ -1384,6 +1455,22 @@ typedef struct KilnItemsApi {
      * thread. */
     KilnResult(KILN_CALL* gear_upgrade)(KilnOwner owner, const KilnItemsUpgradeRequest* request, KilnItemsUpgradeDoneFn done,
                                         void* user, uint64_t* out_ticket);
+
+    /* ---- v8, since 0.2.0-dev.29.19 (package P7): per-instance power and armour (see "power and armour scales"; check
+     * header.size: a table without them ends at 344) ---- */
+
+    /* Sets an item entity's power and/or armour scale (s->flags names which; 1 = the item's own value, which removes
+     * it). KILN_ERR_INVALID_ARGUMENT: no request or a short one, entity or stamp 0, no flag or an unknown one, a scale
+     * outside KILN_ITEMS_SCALE_MIN..KILN_ITEMS_SCALE_MAX or not a number, reserved not 0. KILN_ERR_NOT_FOUND: the entity
+     * is not that stamped item entity (gone, or never stamped). KILN_ERR_UNAVAILABLE: the scale's feature is off
+     * (items.gear.power, items.gear.armor; scale_status says why), or its hook could not be installed (the first scale
+     * other than 1 installs it). KILN_ERR_BUFFER_TOO_SMALL: KILN_ITEMS_SCALE_CAPACITY items have a scale. Tick thread
+     * (Pre / Post); the next game computation uses it. */
+    KilnResult(KILN_CALL* gear_scale)(const KilnItemsGearScale* scale);
+    /* An item entity's scales: *out zeroed, then filled (size, entity, stamp, flags = the scales other than 1, power,
+     * armor; 1 for a scale it has none of). stamp 0 = any. KILN_ERR_NOT_FOUND: not that stamped item entity. Any thread. */
+    KilnResult(KILN_CALL* gear_scale_read)(KilnEntity entity, uint32_t stamp, KilnItemsGearScale* out);
+    KilnResult(KILN_CALL* scale_status)(KilnItemsScaleStatus* out); /* any thread */
 } KilnItemsApi;
 
 #ifdef __cplusplus
