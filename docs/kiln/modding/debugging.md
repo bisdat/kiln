@@ -36,11 +36,17 @@ user can talk to them.
    `netcoredbg-win64.zip` of release 3.2.0-1092, sha256
    `3c410a45fa502415203a94fcb88654af65bf8e3dac158a5527a722e7a6b9274a`. The VS Code extension bundles it. For the CLI on its
    own, unpack it so that `netcoredbg.exe` is at `<data>/tools/netcoredbg/netcoredbg.exe`, or set `KILN_NETCOREDBG`.
-   `<data>` is `~/.local/share/kiln` on Linux and `%LOCALAPPDATA%\Kiln` on Windows. Another release is not supported
-   until it passes the same checks.
-2. On Linux, the Kiln SDK ships the Windows helper `tools/debug-inspect/win-x64/kiln.exe` with
-   `tools/debug-inspect/manifest.json` (its SHA-256). `kiln debug` runs it under the target's own Wine or Proton to ask
-   Windows about the process, and only when its hash matches the manifest. Missing or changed: `tool_missing`.
+   `<data>` is `~/.local/share/kiln` on Linux and `%LOCALAPPDATA%\Kiln` on Windows. `kiln debug` checks every file of
+   that folder against the pinned release: at the default place (and for the extension's bundled copy) another build is
+   refused (`tool_missing`, reason `netcoredbg_unpinned`); a copy you name with `KILN_NETCOREDBG` or the extension's
+   `kiln.debug.netcoredbg` setting starts with a warning. Another release is not supported until it passes the same
+   checks.
+2. On Linux, `kiln debug` needs the Windows helper `tools/debug-inspect/win-x64/kiln.exe` with
+   `tools/debug-inspect/manifest.json` (its SHA-256). The SDK folder of a release has it next to `kiln`; for a `kiln`
+   downloaded on its own, unpack the release's `kiln-debug-inspect-<version>.zip` into `<data>` (it holds
+   `tools/debug-inspect/`). `kiln debug` looks next to itself first, then in `<data>`, runs the helper under the
+   target's own Wine or Proton to ask Windows about the process, and only when its hash matches the manifest. Missing or
+   changed: `tool_missing`. `kiln debug-inspect --verify-bundle` says which helper it would use.
 3. Build and deploy your mod in the Debug configuration, so its `.pdb` goes along and breakpoints bind.
 
 ## Attach
@@ -82,7 +88,7 @@ removed by the next `kiln debug`.
 Under Proton, Kiln reads `/proc` only to find the runner of the game: the processes whose `WINEPREFIX` is that
 install's prefix and whose image is that install's game. All of them must agree on the runner and on the allowed
 environment (`WINEPREFIX`, `STEAM_COMPAT_DATA_PATH`, `STEAM_COMPAT_CLIENT_INSTALL_PATH`, `LD_LIBRARY_PATH`, `WINEDLLPATH`,
-`WINEDLLOVERRIDES`, `WINEESYNC`, `WINEFSYNC`, `WINENTSYNC`); `LD_PRELOAD` is never copied. Disagreement is
+`WINEDLLOVERRIDES`, `WINEESYNC`, `WINEFSYNC`, `WINENTSYNC`); `LD_PRELOAD` is never copied, and none of these variables is taken from `kiln`'s own environment: netcoredbg and the helper get the game's values or none. Disagreement is
 `ambiguous_runner`. A game inside the Steam Linux Runtime container cannot be reached from outside it:
 `unsupported_identity` (reason `runner_unreachable`).
 
@@ -106,7 +112,7 @@ environment (`WINEPREFIX`, `STEAM_COMPAT_DATA_PATH`, `STEAM_COMPAT_CLIENT_INSTAL
 | A vanishing editor detaches cleanly | stdin closing, SIGINT, SIGTERM or SIGHUP (on Windows: Ctrl-C, Ctrl-Break, closing the console, logoff, shutdown) make the proxy send its own `disconnect` and wait for the answer |
 | The debugger is never killed | netcoredbg runs in its own process group (Windows: detached from the console and out of a kill-on-close job when the job allows it). If it does not answer, the proxy closes its stdin and leaves it running |
 | Breakpoints go to the live mod | Before attaching, the proxy asks the game to collect unloaded mod contexts (control command `gc`) |
-| No reload under a debugger | `kiln reload`, `kiln deploy --reload` and the SDK's `KilnReload` (KILN012) refuse while a session is attached (reason `debugger_attached`) |
+| No reload under a debugger | `kiln reload`, `kiln deploy --reload`, the SDK's `KilnReload` (KILN012) and VS Code's Reload Mod and Control command refuse while a live `kiln debug` session is attached; Kiln.Host itself refuses `reload`, `unload` and `reload-test` while a .NET debugger is attached to the process (reason `debugger_attached`) |
 | The game going away ends the session | When the debuggee exits or stops matching its identity, the session ends with a detach, never a kill |
 
 ## What it cannot protect
