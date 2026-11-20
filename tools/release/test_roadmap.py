@@ -20,13 +20,23 @@ spec = importlib.util.spec_from_file_location("roadmap", HERE / "roadmap.py")
 roadmap = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(roadmap)
 
-SOURCE = HERE / "roadmap" / "roadmap.json"
+# A frozen copy of the source as it was seeded (0.2.0-dev.29.19 next): the tests below ship, deploy and round-trip it, so
+# they must not follow the live source, which moves with every release. The live one is checked on its own (LiveSource).
+SOURCE = HERE / "testdata" / "roadmap-0.2.0-dev.29.19.json"
+LIVE_SOURCE = HERE / "roadmap" / "roadmap.json"
 LIVE = "a" * 40
 OTHER = "b" * 40
 
 
 def seeded():
     return json.loads(SOURCE.read_text(encoding="utf-8"))
+
+
+class LiveSource(unittest.TestCase):
+    def test_the_live_source_round_trips_and_validates(self):
+        text = LIVE_SOURCE.read_text(encoding="utf-8")
+        self.assertEqual(roadmap.dump(json.loads(text)), text)
+        roadmap.validate(json.loads(text))
 
 
 class Format(unittest.TestCase):
