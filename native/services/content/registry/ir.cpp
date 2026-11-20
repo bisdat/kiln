@@ -633,13 +633,13 @@ bool parse_batch(const json& doc, const Schema& schema, Batch* out, std::vector<
             if (e.is_object() && e.contains("n")) {
                 const json& n = e["n"];
                 if (!n.is_number_unsigned() || n.get<uint64_t>() > UINT32_MAX) {
-                    refused->push_back({out->mod, out->source, out->stage, at, "\"n\" is a whole number 0..4294967295, not " + brief(n)});
+                    refused->push_back({out->mod, out->source, out->stage, at, "\"n\" is a whole number 0..4294967295, not " + brief(n), ""});
                     continue;
                 }
                 x.n = static_cast<uint32_t>(n.get<uint64_t>());
             }
             if (!used.insert(x.n).second) {
-                refused->push_back({out->mod, out->source, out->stage, x.n, "the edit number " + std::to_string(x.n) + " is used twice in this batch"});
+                refused->push_back({out->mod, out->source, out->stage, x.n, "the edit number " + std::to_string(x.n) + " is used twice in this batch", ""});
                 continue;
             }
             ok = edit_of(e, *out, schema, &x, &why);
@@ -647,8 +647,14 @@ bool parse_batch(const json& doc, const Schema& schema, Batch* out, std::vector<
             ok = false;
             why = std::string("this edit could not be read: ") + ex.what();
         }
-        if (ok) out->edits.push_back(std::move(x));
-        else refused->push_back({out->mod, out->source, out->stage, x.n, why});
+        if (ok) {
+            out->edits.push_back(std::move(x));
+            continue;
+        }
+        Refusal r{out->mod, out->source, out->stage, x.n, why, ""};
+        if (e.is_object() && e.value("entry", json()) == "add" && e.contains("id") && e["id"].is_string() && e.contains("registry") && e["registry"].is_string())
+            r.entry = e["registry"].get<std::string>() + "|" + e["id"].get<std::string>();  // a reference to it names this as its cause
+        refused->push_back(std::move(r));
     }
     return true;
 }

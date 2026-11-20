@@ -49,6 +49,7 @@ struct FieldSpec {
     std::vector<std::string> enum_values;
     bool read_only = false;
     Applies applies = Applies::Restart;
+    std::string ref;  // an id (or a list of ids): the registry its ids name (the schema's "ref"); a reference the stage checks
     std::vector<FieldSpec> element_fields;  // element Struct: its leaves by their own name ("item", "count"); link_elements()
     const FieldSpec* element_field(const std::string& leaf) const {
         for (const FieldSpec& f : element_fields)
@@ -185,6 +186,7 @@ struct Refusal {
     Stage stage = Stage::Alter;
     uint32_t n = 0;
     std::string reason;
+    std::string entry;  // a refused add: the "<registry>|<id>" it would have made (a reference to it names this refusal as its cause)
 };
 
 // One IR document. false: the document itself is unusable (*err: why; nothing of it is taken): not JSON, nested deeper than

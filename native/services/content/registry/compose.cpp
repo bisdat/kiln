@@ -305,6 +305,13 @@ struct Ctx {
     const BaseModel& base;
     // (registry, Kiln field) -> the raw keys behind it that Kiln converts (BaseModel::raw_cover): one place on two scales
     std::map<std::pair<std::string, std::string>, std::vector<std::string>> converted;
+    // references: why an entry's add was refused (the cause a reference to it names), and who added each entry
+    std::map<EntryRef, std::string> refused_add;
+    struct Adder {
+        std::string mod, source;
+        uint32_t n = 0;
+    };
+    std::map<EntryRef, Adder> adders;
 };
 
 // A "where" condition on one value: ">=1", "<=2", "!=x", "==x", ">1", "<1", or a plain value (equal; names ignore case).
@@ -598,7 +605,7 @@ bool raw_target(Ctx& c, State& s, const std::string& reg, const std::string& id,
     return true;
 }
 
-void refuse(Ctx& c, const Who& w, const Edit& e, const std::string& why) { c.out.refused.push_back({w.mod, w.source, w.stage, e.n, why}); }
+void refuse(Ctx& c, const Who& w, const Edit& e, const std::string& why) { c.out.refused.push_back({w.mod, w.source, w.stage, e.n, why, ""}); }
 
 // A value a field can take (code batches bypass the IR reader's checks): its type, its range, a list's size.
 bool value_fits(const Value& v, const FieldSpec& f, std::string* why, bool element = false) {
@@ -657,13 +664,17 @@ void run_edit(Ctx& c, State& s, const Who& w, const Edit& e, bool report, const 
         if (e.add_id.rfind(w.mod + ":", 0) != 0) return refuse(c, w, e, "an added entry's id is \"" + w.mod + ":<name>\"");
         if (lower(e.add_id) != e.add_id) return refuse(c, w, e, "an added entry's id is lower case (Kiln ids are), not \"" + e.add_id + "\"");
         if (s.entry(e.registry, e.add_id)) return refuse(c, w, e, "the id " + e.add_id + " is taken (ids are never reused)");
+        auto refuse_add = [&](const std::string& why) {  // a reference to this id names why it is not there
+            c.refused_add.try_emplace({e.registry, e.add_id}, why);
+            refuse(c, w, e, why);
+        };
         std::vector<std::pair<const FieldSpec*, Value>> given;
         for (const auto& [k, v] : e.add_fields) {
             const FieldSpec* f = reg->field(k);
             std::string why;
-            if (!f) return refuse(c, w, e, e.registry + " has no field \"" + k + "\"; the entry is not added");
-            if (f->read_only) return refuse(c, w, e, e.registry + "." + k + " is read-only; the entry is not added");
-            if (!value_fits(v, *f, &why)) return refuse(c, w, e, why + "; the entry is not added");
+            if (!f) return refuse_add(e.registry + " has no field \"" + k + "\"; the entry is not added");
+            if (f->read_only) return refuse_add(e.registry + "." + k + " is read-only; the entry is not added");
+            if (!value_fits(v, *f, &why)) return refuse_add(why + "; the entry is not added");
             given.emplace_back(f, v);
         }
         EntryState n;
@@ -672,7 +683,7 @@ void run_edit(Ctx& c, State& s, const Who& w, const Edit& e, bool report, const 
         n.like = lower(e.like);
         if (!n.like.empty()) {
             const EntryState* l = s.entry(e.registry, n.like);
-            if (!l || l->removed) return refuse(c, w, e, "like: no entry " + e.like + " in " + e.registry);
+            if (!l || l->removed) return refuse_add("like: no entry " + e.like + " in " + e.registry);
             n.traits = l->traits;
             n.base = l->base;
             for (auto it = s.fields.lower_bound({e.registry, n.like, ""}); it != s.fields.end() && it->first.registry == e.registry && it->first.id == n.like; ++it)
@@ -680,6 +691,7 @@ void run_edit(Ctx& c, State& s, const Who& w, const Edit& e, bool report, const 
         }
         s.add_entry(e.registry, std::move(n));
         if (report) c.out.added.push_back({e.registry, e.add_id});
+        c.adders[{e.registry, e.add_id}] = {w.mod, w.source, e.n};
         for (const auto& [f, v] : given) {  // a fresh entry: no other writer, nothing to refuse
             Edit set;
             set.n = e.n;
@@ -779,12 +791,173 @@ void run_mod(Ctx& c, State& s, const ModInput& m, Stage stage) {
 
 }  // namespace
 
+namespace {
+
+// ---- references (mod-dev feedback adopted for P1) ----
+// An entry whose reference (an id field, a list of ids, an id leaf of a list's elements, into a registry of this schema)
+// names a refused, removed, retired or missing entry is refused too, per entry, with the cause chain. Runs after the stage;
+// a refusal can make another entry's reference bad, so it runs until nothing changes.
+
+using Ref = std::pair<std::string, std::string>;  // the place in the value ("inputs[0].item"), the id as written
+
+void refs_of(const Schema& schema, const FieldSpec& f, const Value& v, const std::string& path, std::vector<Ref>* out) {
+    auto known = [&](const std::string& reg) { return !reg.empty() && schema.registry(reg); };
+    if (f.type == FieldType::Id) {
+        if (v.kind == Value::Text && known(f.ref)) out->emplace_back(path, v.t);
+        return;
+    }
+    if (f.type != FieldType::List || v.kind != Value::List) return;
+    for (size_t i = 0; i < v.list.size(); ++i) {
+        const Value& x = v.list[i];
+        const std::string at = path + "[" + std::to_string(i) + "]";
+        if (f.element == FieldType::Id && x.kind == Value::Text && known(f.ref)) out->emplace_back(at, x.t);
+        if (f.element == FieldType::Struct && x.kind == Value::Struct)
+            for (size_t k = 0; k < x.keys.size(); ++k)
+                if (const FieldSpec* leaf = f.element_field(x.keys[k]); leaf && leaf->type == FieldType::Id && x.list[k].kind == Value::Text && known(leaf->ref))
+                    out->emplace_back(at + "." + x.keys[k], x.list[k].t);
+    }
+}
+
+bool has_refs(const Schema& schema, const FieldSpec& f) {
+    auto known = [&](const std::string& reg) { return !reg.empty() && schema.registry(reg); };
+    if (f.type == FieldType::Id || (f.type == FieldType::List && f.element == FieldType::Id)) return known(f.ref);
+    if (f.type == FieldType::List && f.element == FieldType::Struct)
+        for (const FieldSpec& leaf : f.element_fields)
+            if (leaf.type == FieldType::Id && known(leaf.ref)) return true;
+    return false;
+}
+
+// The registry a reference at path points into (the field's, or its element leaf's).
+std::string ref_registry(const FieldSpec& f, const std::string& path) {
+    if (f.type != FieldType::List || f.element != FieldType::Struct) return f.ref;
+    const size_t dot = path.rfind('.');
+    const FieldSpec* leaf = dot == std::string::npos ? nullptr : f.element_field(path.substr(dot + 1));
+    return leaf ? leaf->ref : std::string();
+}
+
+// "" when the entry is there; else why not, as a reference to it says it.
+std::string why_gone(const Ctx& c, const State& s, const std::string& reg, const std::string& id, const std::map<EntryRef, std::string>& cascaded) {
+    const std::string key = lower(id);
+    const EntryState* e = s.entry(reg, key);
+    const auto refused = c.refused_add.find({reg, key});
+    if (!e) return refused != c.refused_add.end() ? "refused: " + refused->second : "does not exist";
+    if (!e->removed) return "";
+    if (e->retired) return "is retired";
+    if (!e->removed_in.empty()) return "was removed by game build " + e->removed_in;
+    if (refused != c.refused_add.end()) return "refused: " + refused->second;
+    if (const auto it = cascaded.find({reg, key}); it != cascaded.end()) return "was removed: " + it->second;
+    return "was removed by " + e->removed_by;
+}
+
+// One chain row over value v (its field's spec f). false + *why: it no longer applies there.
+bool apply_row(const ChainRow& r, const Value& v, const FieldSpec& f, Value* out, std::string* why) {
+    if (r.element.on) return r.element_spec && element_step(r.element, r.op, *r.element_spec, v, out, why);
+    if (r.list != ListOp::None) return *out = list_step(r.list, r.list_values, v, &f), true;
+    if (!op_result(r.op, v, f, out, why)) return false;
+    return true;
+}
+
+void check_references(Ctx& c, State& s) {
+    std::map<EntryRef, std::string> cascaded;  // game entries removed with what they name: why
+    std::vector<std::pair<std::string, const FieldSpec*>> fields;  // (registry, field) with references
+    for (const auto& [name, reg] : c.schema.registries)
+        for (const auto& [fname, f] : reg.fields)
+            if (fname.find("[]") == std::string::npos && has_refs(c.schema, f)) fields.emplace_back(name, &f);  // a leaf row is checked through its list
+    if (fields.empty()) return;
+    auto first_bad = [&](const FieldSpec& f, const Value& v, std::string* text) {
+        std::vector<Ref> refs;
+        refs_of(c.schema, f, v, f.name, &refs);
+        for (const auto& [path, id] : refs) {
+            const std::string why = why_gone(c, s, ref_registry(f, path), id, cascaded);
+            if (!why.empty()) return *text = path + " " + id + " " + why, true;
+        }
+        return false;
+    };
+    for (int round = 0; round < 64; ++round) {
+        bool changed = false;
+        for (const auto& [reg, f] : fields) {
+            std::vector<std::string> ids;
+            s.each_entry(reg, [&](const EntryState& e) {
+                if (!e.removed) ids.push_back(e.id);
+            });
+            for (const std::string& id : ids) {
+                EntryState* e = s.entry(reg, id);
+                if (!e || e->removed) continue;
+                const FieldRef fr{reg, id, f->name};
+                std::string bad;
+                if (!first_bad(*f, s.current(fr), &bad)) continue;
+                const auto adder = c.adders.find({reg, id});
+                // 1: the registry edits that brought a bad reference in are taken out, here only (the entry's own add stands)
+                if (auto it = s.fields.find(fr); it != s.fields.end()) {
+                    FieldOutcome& fo = it->second;
+                    std::vector<ChainRow> kept;
+                    Value v = fo.base;
+                    std::string had;
+                    bool dropped = false;
+                    for (ChainRow& r : fo.chain) {
+                        const bool own_add = adder != c.adders.end() && r.kind == WriterKind::Registry && r.stage == Stage::Add && r.mod == adder->second.mod;
+                        Value next;
+                        std::string why;
+                        if (r.kind != WriterKind::Registry || own_add) {
+                            if (apply_row(r, v, *f, &next, &why)) v = next;
+                            r.after = v;
+                            kept.push_back(std::move(r));
+                            continue;
+                        }
+                        const bool before = first_bad(*f, v, &had);
+                        std::string now;
+                        if (!apply_row(r, v, *f, &next, &why) || (!before && first_bad(*f, next, &now))) {
+                            dropped = true;
+                            c.out.refused.push_back({r.mod, r.source, r.stage, r.n,
+                                                     reg + " " + id + ": " + (why.empty() ? now : why) + "; this edit was not applied there", ""});
+                            continue;
+                        }
+                        v = next;
+                        r.after = v;
+                        kept.push_back(std::move(r));
+                    }
+                    if (dropped) {
+                        changed = true;
+                        fo.chain = std::move(kept);
+                        fo.result = v;
+                        fo.winner = fo.chain.empty() ? std::string() : fo.chain.back().who;
+                        if (fo.chain.empty()) s.fields.erase(it);
+                        if (!first_bad(*f, s.current(fr), &bad)) continue;
+                    }
+                }
+                // 2: still naming what is not there: the entry goes, reported with the cause chain
+                changed = true;
+                e->removed = true;
+                if (adder != c.adders.end()) {
+                    c.refused_add[{reg, id}] = bad;
+                    e->removed_by = "refused";
+                    c.out.refused.push_back({adder->second.mod, adder->second.source, Stage::Add, adder->second.n, reg + " " + id + " refused: " + bad, reg + "|" + id});
+                    std::erase_if(c.out.added, [&](const EntryRef& a) { return a.registry == reg && a.id == id; });
+                    for (auto x = s.fields.lower_bound({reg, id, ""}); x != s.fields.end() && x->first.registry == reg && x->first.id == id;) x = s.fields.erase(x);
+                } else {
+                    cascaded[{reg, id}] = bad;
+                    e->removed_by = "the reference check";
+                    c.out.removed.push_back({reg, id});
+                    c.out.lines.push_back({LineKind::Dropped, fr, "", "", reg + " " + id + " removed: " + bad});
+                }
+            }
+        }
+        if (!changed) break;
+    }
+}
+
+}  // namespace
+
 Result compose(const Schema& schema, const BaseModel& base, const std::vector<OldWrite>& old, const std::vector<ModInput>& mods) {
     Result out;
-    Ctx c{schema, out, base, {}};
+    Ctx c{schema, out, base, {}, {}, {}};
     for (const auto& [reg, covers] : base.raw_cover)
         for (const auto& [key, cover] : covers)
             if (cover.converted) c.converted[{reg, cover.field}].push_back(key);
+    for (const ModInput& m : mods)  // refused before the stage: a reference to such an add names this as its cause
+        for (const Refusal& x : m.refused)
+            if (const size_t bar = x.entry.find('|'); bar != std::string::npos)
+                c.refused_add.try_emplace({x.entry.substr(0, bar), lower(x.entry.substr(bar + 1))}, x.reason);
     State s;
     for (const auto& [reg, entries] : base.registries)
         for (const BaseModel::Entry& e : entries) {
@@ -869,7 +1042,7 @@ Result compose(const Schema& schema, const BaseModel& base, const std::vector<Ol
         State scratch;
         scratch.parent = &s;
         Result ignored;
-        Ctx sc{schema, ignored, base, c.converted};
+        Ctx sc{schema, ignored, base, c.converted, {}, {}};
         auto take = [&](const Who& w, const Edit& e, const std::string& batch_mod) {
             if (batch_mod != m.id) return refuse(c, w, e, "a batch of mod " + batch_mod + " in " + m.id + "'s place");
             if (e.entry == EntryOp::Add) return refuse(c, w, e, "an entry is added in stage add");
@@ -902,6 +1075,7 @@ Result compose(const Schema& schema, const BaseModel& base, const std::vector<Ol
         }
         run_edit(c, s, h.who, h.edit, true, &h.ids);
     }
+    check_references(c, s);
     out.fields = std::move(s.fields);
     return out;
 }

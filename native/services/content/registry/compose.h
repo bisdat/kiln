@@ -138,6 +138,9 @@ public:
 struct ModInput {
     std::string id;
     std::vector<Batch> batches;
+    // This mod's edits refused before the stage (the IR reader, the build's mapping check): not repeated in the result, but a
+    // reference to an entry whose add is among them names that refusal as its cause.
+    std::vector<Refusal> refused;
     std::function<void(Stage, const View&, Batch*)> code;
 };
 
