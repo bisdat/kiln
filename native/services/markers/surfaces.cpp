@@ -9,15 +9,22 @@
 #include <windows.h>
 
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <array>
+#include <map>
+#include <memory>
+#include <mutex>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "services/kiln_render.h"
 #include "services/kiln_ui.h"
 
+#include "compass.h"
 #include "glue.h"
 #include "map_list.h"
 #include "select.h"
@@ -220,6 +227,182 @@ void post_map(uint64_t epoch, const std::vector<uint32_t>& order) {
     if (c.state != ListState::Ok) return latch_map("the native map list's header failed its guards (data pointer, capacity or count)");
 }
 
+// ---- the drawn surfaces: world labels and the compass strip (S6) -------------------------------------------------------
+// One process-lifetime frame callback reads an immutable snapshot the client Post publishes; it makes no game read and
+// calls no author code. Frames are leased from kiln.render only while the snapshot has something to draw.
+
+struct Drawable {
+    double from[3] = {0, 0, 0}, to[3] = {0, 0, 0};  // smoothed over 100 ms from the drawn position to the newest
+    float height = 0;
+    uint32_t rgba = 0xffffffffu;
+    std::string text;
+};
+struct FrameSnap {
+    std::chrono::steady_clock::time_point at;
+    std::vector<Drawable> world, compass;  // best first
+};
+
+std::mutex g_frame_mu;  // guards the pointer only; the snapshot itself is immutable
+std::shared_ptr<const FrameSnap> g_frame;
+bool g_drawn_ok = false;     // kiln.render's camera, kiln.ui's frame callback and screen state
+std::string g_drawn_off = "not set up";
+uint32_t g_drawn_reason = KILN_CAP_REASON_SERVICE_MISSING;
+bool g_screen_ok = false;
+KilnHandle g_lease = 0;      // kiln.render acquire_frames while there is something to draw
+int g_nameplates_reported = -1;
+using RowKey = std::tuple<uint32_t, uint64_t, std::string, std::string>;
+struct Segment {
+    double from[3], to[3];
+};
+std::map<RowKey, Segment> g_drawn_at;  // each drawn row's segment in the last snapshot
+
+void publish_frame(std::shared_ptr<const FrameSnap> s) {
+    std::lock_guard l(g_frame_mu);
+    g_frame = std::move(s);
+}
+
+std::shared_ptr<const FrameSnap> frame_snapshot() {
+    std::lock_guard l(g_frame_mu);
+    return g_frame;
+}
+
+void set_lease(bool want) {
+    if (!g_render) return;
+    if (want && !g_lease) {
+        KilnHandle h = 0;
+        if (g_render->acquire_frames(g.owner, &h) == KILN_OK) g_lease = h;
+    } else if (!want && g_lease) {
+        g_render->release(g_lease);
+        g_lease = 0;
+    }
+}
+
+void diamond(float x, float y, float r, uint32_t rgba) {
+    const float xy[8] = {x, y - r, x + r, y, x, y + r, x - r, y};
+    g_render->polyline(xy, 4, rgba, 1.0f, 1, 1);
+    g_render->polyline(xy, 4, 0x000000c0u, 1.0f, 1, 0);
+}
+
+// Inside kiln.ui's frame: only on the play screen (in game or typing in chat), the Kiln menu closed, a fresh camera.
+void KILN_CALL on_frame(const KilnUiFrame* f, void*) {
+    if (!f || f->menu_open || !g_render || !g_screen_ok) return;
+    const auto s = frame_snapshot();
+    if (!s || (s->world.empty() && s->compass.empty())) return;
+    KilnUiScreen sc{};
+    sc.size = sizeof sc;
+    if (g_uiapi->screen(&sc) != KILN_OK || !sc.available || sc.ui_state != KILN_UI_STATE_PLAY ||
+        (sc.hud_screen != KILN_UI_HUD_INGAME && sc.hud_screen != KILN_UI_HUD_TEXT_CHAT))
+        return;
+    KilnRenderCamera c{};
+    c.size = sizeof c;
+    double fwd[3];
+    if (g_render->camera(&c) != KILN_OK || !c.valid || !forward_of(c.rotation, fwd) || !(f->width > 0) || !(f->height > 0)) return;
+    static double s_heading = 0;  // the frame callback's own: the last valid heading (initially north)
+    s_heading = heading_of(fwd, s_heading);
+    const float scale = f->dpi_scale > 0 && std::isfinite(f->dpi_scale) ? f->dpi_scale : 1.0f;
+    const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - s->at).count();
+    char line[192];
+    for (const Drawable& d : s->world) {
+        double p[3];
+        interpolate(d.from, d.to, ms, p);
+        p[1] += d.height;
+        float out[3];
+        if (!g_render->world_to_screen(p, f->width, f->height, out)) continue;  // behind the near plane
+        diamond(out[0], out[1], 5 * scale, d.rgba);
+        if (!d.text.empty())
+            g_render->text(out[0], out[1] - 24 * scale, d.rgba, 14 * scale, KILN_RENDER_TEXT_CENTER_X | KILN_RENDER_TEXT_OUTLINE,
+                           KilnStr{d.text.data(), d.text.size()});
+    }
+    if (!s->compass.empty()) {
+        const Strip st = strip_of(f->width, scale);
+        g_render->line(st.cx - st.width / 2, st.y, st.cx + st.width / 2, st.y, 0xffffff60u, 1.0f * scale);
+        for (const Drawable& d : s->compass) {
+            double p[3];
+            interpolate(d.from, d.to, ms, p);
+            const float x = strip_x(st, s_heading, bearing_to(c.position, p[0], p[2]));
+            diamond(x, st.y, 8 * scale, d.rgba);
+            const double dx = p[0] - c.position[0], dy = p[1] - c.position[1], dz = p[2] - c.position[2];
+            const int n = std::snprintf(line, sizeof line, "%.*s %.0fm", static_cast<int>(d.text.size() > 128 ? 128 : d.text.size()),
+                                        d.text.data(), std::sqrt(dx * dx + dy * dy + dz * dz));
+            if (n > 0)
+                g_render->text(x, st.y + 12 * scale, d.rgba, 12 * scale, KILN_RENDER_TEXT_CENTER_X | KILN_RENDER_TEXT_OUTLINE,
+                               KilnStr{line, static_cast<size_t>(n < static_cast<int>(sizeof line) ? n : sizeof line - 1)});
+        }
+    }
+}
+
+void drawn_setup() {
+    if (!g_render) {
+        g_drawn_off = "needs kiln.render";
+        return;
+    }
+    if (!g.api->feature(str("render.camera"))) {
+        g_drawn_off = "needs kiln.render's camera (render.camera) on this build";
+        g_drawn_reason = KILN_CAP_REASON_SYMBOL_MISSING;
+        return;
+    }
+    const bool frames = g_uiapi && g_uiapi->header.size >= offsetof(KilnUiApi, subscribe_frame) + sizeof(g_uiapi->subscribe_frame) && g_uiapi->subscribe_frame;
+    g_screen_ok = g_uiapi && g_uiapi->header.size >= offsetof(KilnUiApi, screen) + sizeof(g_uiapi->screen) && g_uiapi->screen &&
+                  g.api->feature(str("ui.screens"));
+    if (!frames || !g_screen_ok) {
+        g_drawn_off = !frames ? "needs kiln.ui's frame callback" : "needs kiln.ui's screen state (ui.screens): labels are drawn only on the play screen";
+        g_drawn_reason = !frames ? KILN_CAP_REASON_SERVICE_MISSING : KILN_CAP_REASON_SYMBOL_MISSING;
+        return;
+    }
+    KilnHandle h = 0;
+    if (g_uiapi->subscribe_frame(g.owner, &on_frame, nullptr, &h) != KILN_OK) {
+        g_drawn_off = "kiln.ui refused the frame callback";
+        g_drawn_reason = KILN_CAP_REASON_FAULTED;
+        return;
+    }
+    g_drawn_ok = true;
+}
+
+void update_nameplates_row() {
+    const bool on = g_drawn_ok && g.sw->anchors_client.load();
+    if (static_cast<int>(on) == g_nameplates_reported) return;
+    g_nameplates_reported = on;
+    if (on)
+        report(kNameplates, KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE, "");
+    else
+        report(kNameplates, KILN_CAP_UNAVAILABLE, g_drawn_ok ? KILN_CAP_REASON_SERVICE_MISSING : g_drawn_reason,
+               g_drawn_ok ? "needs markers.world and markers.anchors.client (following an entity of the client world)" : g_drawn_off.c_str());
+}
+
+void post_frame(const std::vector<uint32_t>& world, const std::vector<uint32_t>& compass) {
+    if (!g_drawn_ok) return;
+    const auto prev = frame_snapshot();
+    const auto now = std::chrono::steady_clock::now();
+    const double ms = prev ? std::chrono::duration<double, std::milli>(now - prev->at).count() : 0;
+    std::map<RowKey, Segment> drawn;
+    auto make = [&](uint32_t i) {
+        const ClientRow& r = g_rows[i];
+        Drawable d;
+        d.to[0] = g_cand[i].x, d.to[1] = g_cand[i].y, d.to[2] = g_cand[i].z;
+        RowKey key{r.source, r.publisher_generation, r.ns, r.key};
+        // a row drawn before starts where it is drawn right now, so a moving one goes on smoothly; a new one at its point
+        if (auto it = g_drawn_at.find(key); it != g_drawn_at.end())
+            interpolate(it->second.from, it->second.to, ms, d.from);
+        else
+            for (int k = 0; k < 3; ++k) d.from[k] = d.to[k];
+        d.height = r.rec.height;
+        d.rgba = r.rec.rgba;
+        d.text.assign(r.rec.text.data(), r.rec.text.size());
+        Segment seg;
+        for (int k = 0; k < 3; ++k) seg.from[k] = d.from[k], seg.to[k] = d.to[k];
+        drawn[key] = seg;
+        return d;
+    };
+    auto s = std::make_shared<FrameSnap>();
+    s->at = now;
+    for (uint32_t i : world) s->world.push_back(make(i));
+    for (uint32_t i : compass) s->compass.push_back(make(i));
+    g_drawn_at.swap(drawn);
+    const bool any = !s->world.empty() || !s->compass.empty();
+    publish_frame(std::move(s));
+    set_lease(any);
+}
+
 }  // namespace
 
 void surfaces_ready() {
@@ -234,8 +417,16 @@ void surfaces_ready() {
     g_ui_status = g_uiapi && g_uiapi->header.size >= offsetof(KilnUiApi, status) + sizeof(g_uiapi->status) && g_uiapi->status;
     map_setup();
     update_map_row();
-    static const char kNotBuilt[] = "not built yet in this kiln.markers";
-    for (const char* name : {kCompass, kWorld, kNameplates}) report(name, KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_POLICY, kNotBuilt);
+    drawn_setup();
+    for (const char* name : {kCompass, kWorld}) {
+        if (g_drawn_ok)
+            report(name, KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE, "");
+        else
+            report(name, KILN_CAP_UNAVAILABLE, g_drawn_reason, g_drawn_off.c_str());
+    }
+    g.sw->compass.store(g_drawn_ok);
+    g.sw->world.store(g_drawn_ok);
+    update_nameplates_row();
 }
 
 void surfaces_world(const KilnWorldEvent& e, std::vector<Note>* notes) {
@@ -247,6 +438,10 @@ void surfaces_world(const KilnWorldEvent& e, std::vector<Note>* notes) {
         g_appended = Appended{};
         g_ui = 0;
         g_ui_epoch = 0;
+        // the frame callback draws nothing from here; the lease goes
+        publish_frame(nullptr);
+        g_drawn_at.clear();
+        set_lease(false);
     }
 }
 
@@ -255,8 +450,16 @@ void surfaces_client_post(std::vector<Note>* notes) {
     uint64_t epoch = 0;
     g.store->world_epoch(KILN_WORLD_CLIENT, &epoch);
     update_map_row();
+    update_nameplates_row();
     g.store->snapshot_client(&g_rows);
-    if (g_rows.empty() && !g_vis.size() && !g_appended.n) return;
+    if (g_rows.empty() && !g_vis.size() && !g_appended.n) {
+        if (g_lease) {
+            publish_frame(nullptr);
+            g_drawn_at.clear();
+            set_lease(false);
+        }
+        return;
+    }
     View v;
     v.world_active = epoch != 0;
     v.cap[kSurfMap] = g.sw->map.load();
@@ -284,6 +487,7 @@ void surfaces_client_post(std::vector<Note>* notes) {
     admit(v, g_cand, &g_adm, order);
     g_vis.step(epoch, g_rows, g_adm, notes);
     post_map(epoch, order[kSurfMap]);
+    post_frame(order[kSurfWorld], order[kSurfCompass]);
 }
 
 }  // namespace kmk

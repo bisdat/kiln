@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "check.h"
+#include "compass.h"
 #include "map_list.h"
 #include "select.h"
 #include "visibility.h"
@@ -406,6 +407,40 @@ void heading() {
     kmk_test::end("camera heading: north 0, east pi/2, west -pi/2, the last heading kept looking straight down");
 }
 
+void compass_strip() {
+    kmk_test::begin();
+    // a point 50 m east of the camera (chapter 04 §6 M07): facing north it is right of centre, facing east centred,
+    // facing west on the far side (the strip's edge, wrapped), facing south left
+    const double cam[3] = {3670, 820, 1500};
+    const double east = bearing_to(cam, 3720, 1500);
+    CHECK(std::fabs(east - kPi / 2) < 1e-12);
+    const Strip s = strip_of(1920, 1.0f);
+    CHECK(s.cx == 960 && s.y == 54 && s.width == 640);
+    const float north = strip_x(s, 0, east), facing = strip_x(s, kPi / 2, east), west = strip_x(s, -kPi / 2, east), south = strip_x(s, kPi, east);
+    CHECK(std::fabs(north - (960 + 160)) < 1e-3);
+    CHECK(std::fabs(facing - 960) < 1e-3);
+    CHECK(std::fabs(west - (960 - 320)) < 1e-3);  // exactly opposite: -pi, the left edge of [-pi, pi)
+    CHECK(std::fabs(south - (960 - 160)) < 1e-3);
+    // a narrow window: 0.9 of its width; the scale moves the strip down and widens it up to that
+    const Strip narrow = strip_of(500, 2.0f);
+    CHECK(narrow.width == 450 && narrow.y == 108 && narrow.cx == 250);
+    const Strip bad = strip_of(1920, 0.0f);
+    CHECK(bad.scale == 1.0f);
+    // wrap stays in [-pi, pi)
+    CHECK(std::fabs(wrap_pi(3 * kPi) + kPi) < 1e-9 && std::fabs(wrap_pi(-3 * kPi) + kPi) < 1e-9 && wrap_pi(0.5) == 0.5);
+    CHECK(wrap_pi(std::numeric_limits<double>::quiet_NaN()) == 0);
+    // smoothing: linear over 100 ms, clamped, no extrapolation
+    const double a[3] = {0, 0, 0}, b[3] = {10, 0, -10};
+    double p[3];
+    interpolate(a, b, 50, p);
+    CHECK(p[0] == 5 && p[2] == -5);
+    interpolate(a, b, 250, p);
+    CHECK(p[0] == 10 && p[2] == -10);
+    interpolate(a, b, -5, p);
+    CHECK(p[0] == 0);
+    kmk_test::end("M07 compass maths: east of a north-facing camera right of centre, centred facing east, opposite facing west; strip size; 100 ms smoothing");
+}
+
 }  // namespace
 
 int main() {
@@ -416,5 +451,6 @@ int main() {
     reason_precedence();
     encoder_and_reuse();
     heading();
+    compass_strip();
     return kmk_test::finish("surfaces_test");
 }
