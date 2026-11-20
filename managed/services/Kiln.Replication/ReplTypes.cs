@@ -82,8 +82,9 @@ public sealed record ReplComponentInfo(string Name, int Index, int Size, uint Ha
 /// update against the entity's template.</param>
 /// <param name="PayloadBytes">The message's payload bytes as sent (the delta, after its header).</param>
 /// <param name="Gap">Kiln dropped records before this one (its buffer was full): an earlier message is missing.</param>
-/// <param name="Components">The full values of every component the message carried, by component name: the state the
-/// game coded the delta from, so a watch started mid-session shows full values at once.</param>
+/// <param name="Components">The full values of every component the message carried, by the game's component name (its
+/// qualified name when two component types share the short name): the state the game coded the delta from, so a watch
+/// started mid-session shows full values at once.</param>
 /// <param name="PackedByGame">The components among them that the game packs with a codec of its own: a client sees them
 /// rounded, so a difference from these bytes on the client is expected.</param>
 public sealed record ReplSent(NetPeer? Peer, ReplChannel Channel, ReplKind Kind, EntityId Entity, uint Tick, uint Seq,

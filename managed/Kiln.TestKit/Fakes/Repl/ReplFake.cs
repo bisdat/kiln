@@ -324,7 +324,12 @@ internal sealed unsafe class ReplFake : IKitFake
         }
         // the callbacks run outside the lock (a handler may dispose its watch: remove takes the lock); a watch removed
         // meanwhile gets nothing more, as the native deliver() checks 'removed' before each call
-        foreach (var (w, r, reason) in calls) Deliver(st, w, r, reason);
+        foreach (var (w, r, reason) in calls)
+        {
+            Deliver(st, w, r, reason);
+            if (reason != 0)
+                lock (st.Lock) w.Removed = true;  // ENDED is the last event: kiln.repl gives the slot back by itself (dev.31)
+        }
         lock (st.Lock) st.Watches.RemoveAll(w => w.Removed);  // watch_apply: removed watches free their slots
     }
 
@@ -526,7 +531,7 @@ internal sealed unsafe class ReplFake : IKitFake
                     if (m < 0) return FakeTables.InvalidArgument;  // not connected
                     machines = 1u << m;
                 }
-                if (st.Watches.Count >= MaxWatches) return FakeTables.InvalidArgument;  // 64 watches (an ended one keeps its slot until removed)
+                if (st.Watches.Count >= MaxWatches) return FakeTables.InvalidArgument;  // 64 watches (an ended one gives its slot back at once)
                 var handle = (0x5245ul << 48) | ++st.Serial;
                 st.Watches.Add(new ReplFakeState.Watch
                 {

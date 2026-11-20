@@ -12,6 +12,8 @@ namespace Kiln;
 /// traffic.
 /// <para>The counters and watches cost a little on the server's network jobs while they are on: Kiln hooks the game's
 /// send path only while some mod holds the stats or a watch, and a watch copies only its own entity.</para>
+/// <para>A diagnostic tool of the Advanced tier: it names the game's own components (their names and registry indices,
+/// verified per game build) and may change with game updates. Mods that need stable names use Kiln's typed APIs.</para>
 /// </summary>
 public static class Replication
 {
@@ -192,22 +194,51 @@ public static class Replication
 
     // ---- component names (hash -> the game's short name), for watch events ----
     private static readonly ConcurrentDictionary<uint, string> Names = new();
+    private static HashSet<string>? _ambiguous;
 
+    private static string Short(string name)
+    {
+        var colon = name.LastIndexOf("::", StringComparison.Ordinal);
+        return colon >= 0 ? name[(colon + 2)..] : name;
+    }
+
+    // Short names two of the game's component types share: those components are named by their qualified name instead.
+    private static HashSet<string> Ambiguous()
+    {
+        if (_ambiguous is { } known) return known;
+        var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+        try
+        {
+            foreach (var t in GameTypes.Components)
+            {
+                var s = Short(t.Name);
+                counts[s] = counts.GetValueOrDefault(s) + 1;
+            }
+        }
+        catch (Exception)
+        {
+            // kiln.types is not there: nothing is known to collide
+        }
+        return _ambiguous = counts.Where(kv => kv.Value > 1).Select(kv => kv.Key).ToHashSet(StringComparer.Ordinal);
+    }
+
+    /// <summary>The key a component has in an event's Components: the game's short name, its qualified name when another
+    /// component type shares the short name, "#&lt;index&gt;" without kiln.types.</summary>
     internal static string NameOf(uint hash, ushort index)
     {
         if (Names.TryGetValue(hash, out var n)) return n;
-        string? name = null;
+        GameType? type = null;
         try
         {
-            name = GameTypes.ByHash(hash)?.Name;
+            type = GameTypes.ByHash(hash);
         }
         catch (Exception)
         {
             // kiln.types is not there: the registry index names it
         }
-        if (string.IsNullOrEmpty(name)) return "#" + index.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        var colon = name.LastIndexOf("::", StringComparison.Ordinal);
-        if (colon >= 0) name = name[(colon + 2)..];
+        if (type is null || string.IsNullOrEmpty(type.Name)) return "#" + index.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var name = Short(type.Name);
+        if (Ambiguous().Contains(name) && !string.IsNullOrEmpty(type.QualifiedName)) name = type.QualifiedName;
         return Names[hash] = name;
     }
 }

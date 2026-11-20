@@ -148,6 +148,7 @@ public sealed unsafe class ReplWatch : IDisposable
             {
                 var c = e->Components[i];
                 var name = Replication.NameOf(c.Hash, c.Index);
+                if (components.ContainsKey(name)) name += "#" + c.Index.ToString(System.Globalization.CultureInfo.InvariantCulture);
                 components[name] = c.Data == null ? ReadOnlyMemory<byte>.Empty : new ReadOnlySpan<byte>(c.Data, c.Size).ToArray();
                 if (c.CustomCodec != 0) (packed ??= new HashSet<string>(StringComparer.Ordinal)).Add(name);
             }

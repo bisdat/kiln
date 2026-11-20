@@ -12,7 +12,7 @@ internal static class ReplCommands
 {
     private const int DefaultWatchSeconds = 30;
     private static readonly object Gate = new();
-    private static readonly List<(ReplWatch Watch, Timer Timer)> CommandWatches = [];
+    private static readonly List<(ReplWatch Watch, Timer Timer, Action Close)> CommandWatches = [];
 
     /// <summary>Registers the commands once (Kiln.Chat may be missing: then there are none).</summary>
     internal static void RegisterSafe()
@@ -124,20 +124,56 @@ internal static class ReplCommands
         {
             throw new CommandException(e.Message);
         }
-        w.Sent += e => Log(SentLine(e));
-        w.Ended += e => Log($"repl watch: entity {e.Entity.Value} ended ({e.Reason})");
+        // The lines (component bytes, players' names) go into a file of their own in kiln/logs, not into kiln.log, whose
+        // tail travels in support reports; kiln.log gets one line at the start and one at the end.
+        var file = string.Create(CultureInfo.InvariantCulture, $"repl-watch-{entity}-{DateTime.UtcNow:yyyyMMddTHHmmssZ}.txt");
+        StreamWriter? writer;
+        try
+        {
+            writer = new StreamWriter(Path.Combine(KilnPaths.Root, "logs", file), append: true, new UTF8Encoding(false));
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            w.Dispose();
+            throw new CommandException($"cannot write kiln/logs/{file}: {e.Message}");
+        }
+        var gate = new object();
+        var lines = 0;
+        void Close(string why)
+        {
+            lock (gate)
+            {
+                if (writer is null) return;
+                writer.Dispose();
+                writer = null;
+            }
+            Log($"repl watch: entity {entity} {why}: {lines} message line(s) in kiln/logs/{file}");
+        }
+        w.Sent += e =>
+        {
+            lock (gate)
+            {
+                if (writer is null) return;
+                writer.WriteLine(SentLine(e));
+                writer.Flush();
+                lines++;
+            }
+        };
+        w.Ended += e => Close($"ended ({e.Reason})");
+        Log($"repl watch: entity {entity} for {DefaultWatchSeconds} s into kiln/logs/{file}");
         Timer? timer = null;
         timer = new Timer(_ =>
         {
             w.Dispose();
+            Close("stopped (time)");
             timer?.Dispose();
         }, null, TimeSpan.FromSeconds(DefaultWatchSeconds), Timeout.InfiniteTimeSpan);
         lock (Gate)
         {
             CommandWatches.RemoveAll(x => !x.Watch.IsActive);
-            CommandWatches.Add((w, timer));
+            CommandWatches.Add((w, timer, () => Close("stopped")));
         }
-        return $"repl: watching entity {entity} on {(peerText is null ? "every peer" : peerText)} for {DefaultWatchSeconds} s: one line per message in kiln.log ('repl watch stop' ends it)";
+        return $"repl: watching entity {entity} on {(peerText is null ? "every peer" : peerText)} for {DefaultWatchSeconds} s: one line per message in kiln/logs/{file} ('repl watch stop' ends it)";
     }
 
     internal static string SentLine(ReplSent e)
@@ -155,16 +191,17 @@ internal static class ReplCommands
 
     private static string StopWatches()
     {
-        List<(ReplWatch Watch, Timer Timer)> all;
+        List<(ReplWatch Watch, Timer Timer, Action Close)> all;
         lock (Gate)
         {
             all = [.. CommandWatches];
             CommandWatches.Clear();
         }
-        foreach (var (w, t) in all)
+        foreach (var (w, t, close) in all)
         {
             w.Dispose();
             t.Dispose();
+            close();
         }
         return $"repl: {all.Count} watch(es) stopped";
     }
