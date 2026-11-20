@@ -1,4 +1,6 @@
 #nullable enable
+Kiln.ItemBlock.VanillaLook.get -> string?
+Kiln.ItemBlock.VanillaLook.init -> void
 Kiln.ItemSource
 Kiln.ItemSource.Craft = 1 -> Kiln.ItemSource
 Kiln.ItemSource.Give = 4 -> Kiln.ItemSource

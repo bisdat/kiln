@@ -1,7 +1,32 @@
 #nullable enable
+Kiln.ComponentFilter<T>
+Kiln.FilterContext
+Kiln.FilterContext.Channel.get -> Kiln.ReplChannel
+Kiln.FilterContext.Entity.get -> Kiln.EntityId
+Kiln.FilterContext.FilterContext() -> void
+Kiln.FilterContext.Peer.get -> Kiln.NetPeer?
+Kiln.FilterContext.PeerId.get -> uint
+Kiln.FilterContext.Tick.get -> uint
+Kiln.FilterContext.TryRead<TC>(Kiln.EntityId entity, out TC value) -> bool
+Kiln.FilterOptions
+Kiln.FilterOptions.<Clone>$() -> Kiln.FilterOptions!
+Kiln.FilterOptions.AllowPrediction.get -> bool
+Kiln.FilterOptions.AllowPrediction.init -> void
+Kiln.FilterOptions.Channels.get -> Kiln.ReplChannels
+Kiln.FilterOptions.Channels.init -> void
+Kiln.FilterOptions.Equals(Kiln.FilterOptions? other) -> bool
+Kiln.FilterOptions.FilterOptions() -> void
+Kiln.FilterOptions.Priority.get -> int
+Kiln.FilterOptions.Priority.init -> void
+Kiln.FilterOptions.Sources.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Kiln.FilterOptions.Sources.init -> void
+Kiln.ReceiveFilter<T>
 Kiln.ReplChannel
 Kiln.ReplChannel.Client = 4 -> Kiln.ReplChannel
 Kiln.ReplChannel.Prediction = 5 -> Kiln.ReplChannel
+Kiln.ReplChannels
+Kiln.ReplChannels.Client = 1 -> Kiln.ReplChannels
+Kiln.ReplChannels.Prediction = 2 -> Kiln.ReplChannels
 Kiln.ReplComponentInfo
 Kiln.ReplComponentInfo.<Clone>$() -> Kiln.ReplComponentInfo!
 Kiln.ReplComponentInfo.CustomCodec.get -> bool
@@ -86,6 +111,27 @@ Kiln.ReplReceived.Kind.init -> void
 Kiln.ReplReceived.ReplReceived(Kiln.ReplKind Kind, Kiln.EntityId Entity, uint Tick, bool Gap, System.Collections.Generic.IReadOnlyDictionary<string!, System.ReadOnlyMemory<byte>>! Components) -> void
 Kiln.ReplReceived.Tick.get -> uint
 Kiln.ReplReceived.Tick.init -> void
+Kiln.ReplRemapStats
+Kiln.ReplRemapStats.<Clone>$() -> Kiln.ReplRemapStats!
+Kiln.ReplRemapStats.Active.get -> bool
+Kiln.ReplRemapStats.Active.init -> void
+Kiln.ReplRemapStats.Deconstruct(out bool Active, out int Sites, out int KilnOnlyItems, out int WithoutLookAlike, out long Snapshots, out long Remapped, out long Zeroed, out long Faults) -> void
+Kiln.ReplRemapStats.Equals(Kiln.ReplRemapStats? other) -> bool
+Kiln.ReplRemapStats.Faults.get -> long
+Kiln.ReplRemapStats.Faults.init -> void
+Kiln.ReplRemapStats.KilnOnlyItems.get -> int
+Kiln.ReplRemapStats.KilnOnlyItems.init -> void
+Kiln.ReplRemapStats.Remapped.get -> long
+Kiln.ReplRemapStats.Remapped.init -> void
+Kiln.ReplRemapStats.ReplRemapStats(bool Active, int Sites, int KilnOnlyItems, int WithoutLookAlike, long Snapshots, long Remapped, long Zeroed, long Faults) -> void
+Kiln.ReplRemapStats.Sites.get -> int
+Kiln.ReplRemapStats.Sites.init -> void
+Kiln.ReplRemapStats.Snapshots.get -> long
+Kiln.ReplRemapStats.Snapshots.init -> void
+Kiln.ReplRemapStats.WithoutLookAlike.get -> int
+Kiln.ReplRemapStats.WithoutLookAlike.init -> void
+Kiln.ReplRemapStats.Zeroed.get -> long
+Kiln.ReplRemapStats.Zeroed.init -> void
 Kiln.ReplSent
 Kiln.ReplSent.<Clone>$() -> Kiln.ReplSent!
 Kiln.ReplSent.BaselineTick.get -> uint
@@ -137,6 +183,20 @@ Kiln.ReplWatchEnded.Equals(Kiln.ReplWatchEnded? other) -> bool
 Kiln.ReplWatchEnded.Reason.get -> string!
 Kiln.ReplWatchEnded.Reason.init -> void
 Kiln.ReplWatchEnded.ReplWatchEnded(Kiln.EntityId Entity, string! Reason) -> void
+Kiln.TouchResult
+Kiln.TouchResult.<Clone>$() -> Kiln.TouchResult!
+Kiln.TouchResult.Deconstruct(out bool Ok, out string? Reason) -> void
+Kiln.TouchResult.Entity.get -> Kiln.EntityId
+Kiln.TouchResult.Entity.init -> void
+Kiln.TouchResult.Equals(Kiln.TouchResult? other) -> bool
+Kiln.TouchResult.Ok.get -> bool
+Kiln.TouchResult.Ok.init -> void
+Kiln.TouchResult.Reason.get -> string?
+Kiln.TouchResult.Reason.init -> void
+Kiln.TouchResult.TouchResult(bool Ok, string? Reason) -> void
+override Kiln.FilterOptions.Equals(object? obj) -> bool
+override Kiln.FilterOptions.GetHashCode() -> int
+override Kiln.FilterOptions.ToString() -> string!
 override Kiln.ReplComponentInfo.Equals(object? obj) -> bool
 override Kiln.ReplComponentInfo.GetHashCode() -> int
 override Kiln.ReplComponentInfo.ToString() -> string!
@@ -146,22 +206,37 @@ override Kiln.ReplPeerStats.ToString() -> string!
 override Kiln.ReplReceived.Equals(object? obj) -> bool
 override Kiln.ReplReceived.GetHashCode() -> int
 override Kiln.ReplReceived.ToString() -> string!
+override Kiln.ReplRemapStats.Equals(object? obj) -> bool
+override Kiln.ReplRemapStats.GetHashCode() -> int
+override Kiln.ReplRemapStats.ToString() -> string!
 override Kiln.ReplSent.Equals(object? obj) -> bool
 override Kiln.ReplSent.GetHashCode() -> int
 override Kiln.ReplSent.ToString() -> string!
 override Kiln.ReplWatchEnded.Equals(object? obj) -> bool
 override Kiln.ReplWatchEnded.GetHashCode() -> int
 override Kiln.ReplWatchEnded.ToString() -> string!
+override Kiln.TouchResult.Equals(object? obj) -> bool
+override Kiln.TouchResult.GetHashCode() -> int
+override Kiln.TouchResult.ToString() -> string!
+static Kiln.FilterOptions.operator !=(Kiln.FilterOptions? left, Kiln.FilterOptions? right) -> bool
+static Kiln.FilterOptions.operator ==(Kiln.FilterOptions? left, Kiln.FilterOptions? right) -> bool
 static Kiln.ReplComponentInfo.operator !=(Kiln.ReplComponentInfo? left, Kiln.ReplComponentInfo? right) -> bool
 static Kiln.ReplComponentInfo.operator ==(Kiln.ReplComponentInfo? left, Kiln.ReplComponentInfo? right) -> bool
 static Kiln.Replication.Component(string! name) -> Kiln.ReplComponentInfo?
+static Kiln.Replication.Filter<TComponent>(Kiln.PeerSelector! peers, Kiln.ComponentFilter<TComponent>! filter, Kiln.FilterOptions? options = null) -> System.IDisposable!
+static Kiln.Replication.RemapItems(Kiln.PeerSelector! peers) -> System.IDisposable!
+static Kiln.Replication.RemapStats() -> Kiln.ReplRemapStats!
 static Kiln.Replication.Stats() -> System.Collections.Generic.IReadOnlyList<Kiln.ReplPeerStats!>!
+static Kiln.Replication.Touch(Kiln.EntityId entity) -> Kiln.TouchResult!
+static Kiln.Replication.Touched -> System.Action<Kiln.TouchResult!>?
 static Kiln.Replication.Watch(Kiln.EntityId entity, Kiln.NetPeer? peer = null) -> Kiln.ReplWatch!
 static Kiln.Replication.WatchReceived(Kiln.EntityId entity) -> Kiln.ReplWatch!
 static Kiln.ReplPeerStats.operator !=(Kiln.ReplPeerStats? left, Kiln.ReplPeerStats? right) -> bool
 static Kiln.ReplPeerStats.operator ==(Kiln.ReplPeerStats? left, Kiln.ReplPeerStats? right) -> bool
 static Kiln.ReplReceived.operator !=(Kiln.ReplReceived? left, Kiln.ReplReceived? right) -> bool
 static Kiln.ReplReceived.operator ==(Kiln.ReplReceived? left, Kiln.ReplReceived? right) -> bool
+static Kiln.ReplRemapStats.operator !=(Kiln.ReplRemapStats? left, Kiln.ReplRemapStats? right) -> bool
+static Kiln.ReplRemapStats.operator ==(Kiln.ReplRemapStats? left, Kiln.ReplRemapStats? right) -> bool
 static Kiln.ReplSent.operator !=(Kiln.ReplSent? left, Kiln.ReplSent? right) -> bool
 static Kiln.ReplSent.operator ==(Kiln.ReplSent? left, Kiln.ReplSent? right) -> bool
 static Kiln.ReplWatchEnded.operator !=(Kiln.ReplWatchEnded? left, Kiln.ReplWatchEnded? right) -> bool
@@ -184,3 +259,7 @@ Kiln.ReplicatedExtension.Name.get -> string!
 Kiln.ReplicatedExtension.Size.get -> int
 Kiln.ReplicatedExtension.Version.get -> int
 override Kiln.ReplicatedExtension.ToString() -> string!
+static Kiln.TouchResult.operator !=(Kiln.TouchResult? left, Kiln.TouchResult? right) -> bool
+static Kiln.TouchResult.operator ==(Kiln.TouchResult? left, Kiln.TouchResult? right) -> bool
+virtual Kiln.ComponentFilter<T>.Invoke(ref T value, in Kiln.FilterContext context) -> void
+virtual Kiln.ReceiveFilter<T>.Invoke(ref T value, Kiln.EntityId entity) -> void

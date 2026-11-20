@@ -85,6 +85,8 @@ internal static partial class Compiler
         public IReadOnlyDictionary<string, ItemTexts>? Texts;
         /// <summary>What it is held in: none (a material, armor), one hand, or both (daggers). A look's animated model is for what is held.</summary>
         public HeldIn Held;
+        /// <summary>The game item players without this mod see in its place (ItemBlock.VanillaLook).</summary>
+        public string? VanillaLook;
 
         public void Commit(string displayName, string? description, string? source = null)
         {
@@ -92,6 +94,7 @@ internal static partial class Compiler
             {
                 Guid = Guid, Name = Game, BaseOn = Starter, DisplayName = displayName, Description = description ?? "", Source = source, Fields = Fields, Refs = Refs,
                 Model = Model, Icon = Icon, Perks = Perks, Loot = Loot, Drops = Drops, RolledLoot = Rolled, Texts = Texts, VisualModels = VisualModels,
+                VanillaLook = VanillaLook,
             });
             var parts = new JsonObject();
             if (Model != null) parts["model"] = Model;
@@ -722,7 +725,7 @@ internal static partial class Compiler
         var mod = ctx.Mod.Id;
         var healPotion = kind == ItemKind.Consumable && b.Heals != null;
         var starter = kind == ItemKind.Tool ? b.Tool!.Harvests.Starter : healPotion ? "Consumable_Potion_Health_T1" : kind.Starter;
-        var d = new Draft(ctx, low, key, name, starter) { Texts = b.Texts, Held = kind == ItemKind.Tool ? HeldIn.OneHand : HeldIn.None };
+        var d = new Draft(ctx, low, key, name, starter) { Texts = b.Texts, Held = kind == ItemKind.Tool ? HeldIn.OneHand : HeldIn.None, VanillaLook = b.VanillaLook };
         if (b.Stack is { } stack) d.Fields["maxStackSize"] = stack;
         ApplyVisual(d, b.Visual, "visual");
         ApplyLoot(d, b.Loot);

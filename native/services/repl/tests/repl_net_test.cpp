@@ -38,7 +38,7 @@ void abi() {
                   offsetof(KilnReplNetApi, track) == 24 && offsetof(KilnReplNetApi, filter_add) == 40 &&
                   offsetof(KilnReplNetApi, touch) == 56 && offsetof(KilnReplNetApi, remap_set) == 64 &&
                   offsetof(KilnReplNetApi, message_hook) == 88 && offsetof(KilnReplNetApi, schema_find) == 104 &&
-                  offsetof(KilnReplNetApi, schema_encode) == 128);
+                  offsetof(KilnReplNetApi, schema_encode) == 128 && offsetof(KilnReplNetApi, peers) == 136);
     static_assert(offsetof(KilnReplFilterCtx, entity) == 12 && offsetof(KilnReplFilterCtx, component_hash) == 20 &&
                   offsetof(KilnReplFilterCtx, failed) == 32);
     static_assert(offsetof(KilnReplItemSite, offset) == 4 && offsetof(KilnReplItemSite, stride) == 8);

@@ -55,6 +55,11 @@ public sealed record ItemDefinition
     /// one level, like the game's crafted gear.</summary>
     public bool RolledLoot { get; init; }
 
+    /// <summary>The game item players without this item see in its place (a vanilla client, a Kiln client that lacks
+    /// this mod's content): debug name, <c>"0x…"</c> id or GUID of a game item of the same kind. Null: such players see
+    /// an empty slot where this item is.</summary>
+    public string? VanillaLook { get; init; }
+
     // ---- texts per language ----
 
     /// <summary>Texts per language (<c>"en"</c>, <c>"de"</c>, <c>"pt-BR"</c>, <c>"*"</c> = every language). A game
@@ -273,7 +278,16 @@ public static unsafe class NewContent
     public static ContentDefinition Register(ItemDefinition def) => Register(def, Content.Owner());
 
     /// <summary>Registers a new item as a given owner (Kiln.Blocks: a data-only mod's blocks).</summary>
-    internal static ContentDefinition Register(ItemDefinition def, ulong owner) => Define(ContentKind.Items, ToJson(def), owner);
+    internal static ContentDefinition Register(ItemDefinition def, ulong owner)
+    {
+        if (def.VanillaLook is { } look && !string.IsNullOrWhiteSpace(look)) VanillaLooks[def.Guid] = look.Trim();
+        else VanillaLooks.TryRemove(def.Guid, out _);
+        return Define(ContentKind.Items, ToJson(def), owner);
+    }
+
+    /// <summary>The declared look-alikes of new items (ItemDefinition.VanillaLook), by GUID: what Kiln.Replication's item
+    /// remap shows players who lack the item.</summary>
+    internal static readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, string> VanillaLooks = new();
 
     /// <summary>The JSON kiln.content's define() takes for a new item (also what a boot generation's IR carries, chapter 08).</summary>
     internal static JsonObject ToJson(ItemDefinition def)

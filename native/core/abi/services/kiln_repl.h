@@ -442,6 +442,10 @@ typedef struct KilnReplNetApi {
     KilnResult(KILN_CALL* schema_decode)(uint64_t schema, const void* bytes, uint32_t length, void* out, uint32_t out_size);
     KilnResult(KILN_CALL* schema_encode)(uint64_t schema, const void* msg, uint32_t msg_size, void* out, uint32_t cap,
                                          uint32_t* out_length);
+    /* Each machine's peer as the last Pre saw it (kiln_repl.h "Machines and peers"): out_peers[m] the peer handle (0: none),
+     * out_flags[m] its KILN_REPL_PEER_* flags, for m < min(cap, KILN_REPL_MACHINES). Tick thread (server) / main thread
+     * (client: all 0). *count = KILN_REPL_MACHINES. */
+    KilnResult(KILN_CALL* peers)(uint32_t* out_peers, uint8_t* out_flags, uint32_t cap, uint32_t* count);
 } KilnReplNetApi;
 
 #ifdef __cplusplus
@@ -453,7 +457,7 @@ static_assert(sizeof(KilnReplRemapStats) == 40, "KilnReplRemapStats is 40 bytes"
 static_assert(sizeof(KilnReplMessage) == 48 && offsetof(KilnReplMessage, data) == 16 && offsetof(KilnReplMessage, rewrite_length) == 40,
               "KilnReplMessage is 48 bytes");
 static_assert(sizeof(KilnReplSchemaField) == 48, "KilnReplSchemaField is 48 bytes");
-static_assert(sizeof(KilnReplNetApi) == 8 + 16 * sizeof(void*), "KilnReplNetApi v1: 16 members");
+static_assert(sizeof(KilnReplNetApi) == 8 + 17 * sizeof(void*), "KilnReplNetApi v1: 17 members");
 #endif
 
 #ifdef __cplusplus

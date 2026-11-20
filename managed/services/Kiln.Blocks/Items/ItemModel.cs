@@ -384,6 +384,10 @@ public sealed record ItemBlock : IBlock, ITweakable
     public string? Description { get; init; }
     /// <summary>Where to get it, in the tooltip. Null: nothing.</summary>
     public string? Source { get; init; }
+    /// <summary>The game item players without this mod see in its place (a vanilla client, a Kiln client without this
+    /// mod's content): a game item of the same kind, by debug name. Null: they see an empty slot where it is. JSON
+    /// <c>"vanillaLook"</c>.</summary>
+    public string? VanillaLook { get; init; }
     /// <summary>Null: a <see cref="Tool"/> makes a tool, <see cref="Ammo"/> an arrow, <see cref="Feeds"/> food, <see cref="Heals"/> or <see cref="OnUse"/> a potion, the rest a material.</summary>
     public ItemKind? Kind { get; init; }
     public PartRef<VisualBlock>? Visual { get; init; }

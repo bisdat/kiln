@@ -110,6 +110,7 @@ internal static unsafe class ReplNetNative
         public delegate* unmanaged[Cdecl]<ulong, SchemaField*, uint, uint*, int> SchemaFields;
         public delegate* unmanaged[Cdecl]<ulong, void*, uint, void*, uint, int> SchemaDecode;
         public delegate* unmanaged[Cdecl]<ulong, void*, uint, void*, uint, uint*, int> SchemaEncode;
+        public delegate* unmanaged[Cdecl]<uint*, byte*, uint, uint*, int> Peers;
     }
 
     private static Table* _table;
@@ -142,4 +143,15 @@ internal static unsafe class ReplNetNative
     public static uint Capabilities() => T != null ? T->Capabilities() : 0;
 
     public static int Remove(ulong handle) => T == null ? ReplNative.Unavailable : T->Remove(handle);
+
+    /// <summary>Each machine's peer and KILN_REPL_PEER_* flags as kiln.repl's last Pre saw them (17 machines).</summary>
+    public static int MachinePeers(Span<uint> peers, Span<byte> flags)
+    {
+        if (T == null) return ReplNative.Unavailable;
+        uint count = 0;
+        var cap = (uint)Math.Min(peers.Length, flags.Length);
+        fixed (uint* p = peers)
+        fixed (byte* f = flags)
+            return T->Peers(p, f, cap, &count);
+    }
 }

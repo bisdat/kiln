@@ -18,6 +18,17 @@ KilnResult KILN_CALL t_net_remove(KilnHandle h) {
     }
 }
 
+KilnResult KILN_CALL t_net_peers(uint32_t* out_peers, uint8_t* out_flags, uint32_t cap, uint32_t* count) {
+    if (count) *count = KILN_REPL_MACHINES;
+    if (cap && (!out_peers || !out_flags)) return KILN_ERR_INVALID_ARGUMENT;
+    for (uint32_t m = 0; m < cap && m < KILN_REPL_MACHINES; ++m) {
+        uint8_t flags = 0;
+        out_peers[m] = peer_of(m, &flags);
+        out_flags[m] = flags;
+    }
+    return KILN_OK;
+}
+
 }  // namespace
 
 const KilnReplNetApi kNetTable = {{sizeof(KilnReplNetApi), KILN_REPL_NET_VERSION},
@@ -36,7 +47,8 @@ const KilnReplNetApi kNetTable = {{sizeof(KilnReplNetApi), KILN_REPL_NET_VERSION
                                   &t_schema_find,
                                   &t_schema_fields,
                                   &t_schema_decode,
-                                  &t_schema_encode};
+                                  &t_schema_encode,
+                                  &t_net_peers};
 
 uint32_t net_capabilities() { return track_caps() | filter_caps() | messages_caps() | schema_caps(); }
 

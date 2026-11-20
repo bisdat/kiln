@@ -112,5 +112,6 @@ internal static class ReplicationStartup
         ReplicationCaps.Rows.Ensure();
         ReplCommands.RegisterSafe();  // repl stats | watch | capture | component
         ReplicationView.Start();      // the Kiln menu's Replication section
+        ItemRemap.Start();            // Kiln-only items hidden from peers that lack them (kiln.repl.net)
     }
 }

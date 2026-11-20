@@ -51,6 +51,8 @@ Kiln.GearStats.Socket.get -> bool
 Kiln.GearStats.Socket.set -> void
 Kiln.GearStats.Speed.get -> double
 Kiln.GearStats.Speed.set -> void
+Kiln.ItemDefinition.VanillaLook.get -> string?
+Kiln.ItemDefinition.VanillaLook.init -> void
 override Kiln.GearStats.ToString() -> string!
 static Kiln.Content.Gear(Kiln.ContentEntry! item) -> Kiln.GearStats!
 static Kiln.Content.Gear(Kiln.ItemId item) -> Kiln.GearStats?
