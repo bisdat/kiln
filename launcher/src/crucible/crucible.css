@@ -59,7 +59,7 @@
 .kcr-tag { font-size: 12.5px; padding: 1px 8px; border-radius: 999px; color: #081320; background: #6fdcff; margin-left: 8px; vertical-align: 2px; }
 
 /* Deck */
-.kcr-deck-big { font-family: var(--k-font-display); font-size: 3.4rem; letter-spacing: .08em; color: #6fdcff; text-align: center; }
+.kcr-deck-big { font-family: var(--k-font-mono); font-weight: 700; font-size: 3.4rem; letter-spacing: .08em; color: #6fdcff; text-align: center; }
 .kcr-deck-share { display: flex; gap: 2rem; align-items: center; }
 .kcr-deck-share-text { display: flex; flex-direction: column; gap: .6rem; flex: 1; min-width: 0; }
 .kcr-deck-input { font-size: 2.4rem; letter-spacing: .12em; text-transform: uppercase; text-align: center; width: 100%; box-sizing: border-box; padding: .5rem; }
