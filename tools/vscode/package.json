@@ -224,6 +224,12 @@
       },
       {
         "fileMatch": [
+          "**/kiln/state/debug/[0-9]*.json"
+        ],
+        "url": "./data/schemas/state-debug.schema.json"
+      },
+      {
+        "fileMatch": [
           "**/kiln/state/last-server.json"
         ],
         "url": "./data/schemas/state-last-server.schema.json"
@@ -741,7 +747,8 @@
         "kiln.debug.wine": {
           "type": "string",
           "default": "",
-          "description": "wine binary for the debugger. Empty: the one the running server uses, so the debugger joins its wineserver."
+          "description": "Not used: `kiln debug` finds the runner of the target itself.",
+          "deprecationMessage": "Not used since 0.2.0-dev.31: `kiln debug` finds the runner of the server or game it attaches to."
         }
       }
     },
@@ -900,7 +907,7 @@
     "debuggers": [
       {
         "type": "kiln",
-        "label": "Kiln: attach to a test server",
+        "label": "Kiln: attach to a test server or a game client",
         "languages": [
           "csharp"
         ],
@@ -909,7 +916,29 @@
             "properties": {
               "server": {
                 "type": "string",
-                "description": "Test server: a name from the Test Servers view, a lab name or a server folder (default: the selected one)."
+                "description": "Test server: a name from the Test Servers view, a lab name or a server folder (default: the selected one). `kiln debug --server` proves the process by its Windows identity. Not with `client`."
+              },
+              "client": {
+                "type": "string",
+                "description": "Game client: a Kiln install id (the launcher's) or the game folder. Needs \"allowClientPause\": true; the game needs kiln.json \"developer_debugging\": true (launcher: Settings, kiln.json). Not with `server`."
+              },
+              "allowClientPause": {
+                "type": "boolean",
+                "default": false,
+                "description": "Required for `client`: every breakpoint stops the whole game, and a stopped game can freeze or lose its connection. Without it nothing attaches; `kiln debug --client <install> --observe` shows Kiln's log instead."
+              },
+              "maxPauseMs": {
+                "type": "integer",
+                "minimum": 100,
+                "maximum": 60000,
+                "description": "A breakpoint holds the game at most this long, then the debugger continues it (best effort: an evaluation or a game lock can delay it). Default for a client: 5000; a server: no limit."
+              },
+              "sourceFileMap": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "netcoredbg: map the source paths in a mod's PDB to this machine's folders (\"<path in the PDB>\": \"<local folder>\")."
               },
               "justMyCode": {
                 "type": "boolean",
@@ -928,12 +957,47 @@
         ],
         "configurationSnippets": [
           {
-            "label": "Kiln: attach to server",
-            "description": "Attach a .NET debugger to a running Kiln test server (netcoredbg in the server's Wine prefix). Disconnecting leaves the server running.",
+            "label": "Kiln: attach to a Wine test server",
+            "description": "A lab or a server instance on Linux (netcoredbg in the server's Wine prefix). Disconnecting leaves the server running.",
             "body": {
               "type": "kiln",
               "request": "attach",
-              "name": "Kiln: attach to server"
+              "name": "Kiln: attach to Wine server",
+              "server": "${1:lab or server folder}"
+            }
+          },
+          {
+            "label": "Kiln: attach to a Windows dedicated server",
+            "description": "A dedicated server on Windows, by its folder. Disconnecting leaves the server running.",
+            "body": {
+              "type": "kiln",
+              "request": "attach",
+              "name": "Kiln: attach to Windows server",
+              "server": "${1:C:\\\\EnshroudedServer}"
+            }
+          },
+          {
+            "label": "Kiln: attach to a Windows game client",
+            "description": "The game on Windows with kiln.json \"developer_debugging\": true. Breakpoints stop the whole game: a disposable world only.",
+            "body": {
+              "type": "kiln",
+              "request": "attach",
+              "name": "Kiln: attach to Windows client",
+              "client": "${1:install id or game folder}",
+              "allowClientPause": true,
+              "maxPauseMs": 5000
+            }
+          },
+          {
+            "label": "Kiln: attach to a Proton game client",
+            "description": "The game under Proton on Linux with kiln.json \"developer_debugging\": true; the debugger runs under the game's own Proton. Breakpoints stop the whole game: a disposable world only.",
+            "body": {
+              "type": "kiln",
+              "request": "attach",
+              "name": "Kiln: attach to Proton client",
+              "client": "${1:install id or game folder}",
+              "allowClientPause": true,
+              "maxPauseMs": 5000
             }
           }
         ]
