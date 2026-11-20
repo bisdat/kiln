@@ -44,6 +44,7 @@ internal static class ModValuesService
             Events.On<CharacterImportedEvent>(_ => Safe("after a carried import", () => _ledger.ProjectAll()));
             ModValuesStream.Start(_ledger);
             ModValuesNative.Bind();
+            ModValuesAuthoring.Poll();
         }
         catch (Exception e) when (e is InvalidOperationException or ArgumentException or NotSupportedException)
         {
@@ -85,21 +86,24 @@ internal static class ModValuesService
 
     private static void Tick(in TickInfo tick)
     {
+        _ticks++;
+        if (_ticks % 25 == 0) Safe("reading mod-values/*.json", ModValuesAuthoring.Poll);
         if (!ModValuesCaps.ServerRole)
         {
             ModValuesClient.ClientTick();
             return;
         }
-        ModValuesStream.ServerTick();
-        if (++_ticks % 5 != 0 || _ledger is null) return;
-        Safe("at the character tick", () =>
-        {
-            if (_ledger.Store.World == Guid.Empty) return;
-            var now = LiveKeys().Where(k => !k.IsAccountOnly).ToHashSet();
-            foreach (var c in now)
-                if (Touched.Add(c)) _ledger.Touch(c);  // the character's first ready server step: its values exist from here
-            Touched.IntersectWith(now);
-        });
+        if (_ledger is null) return;
+        if (_ticks % 5 == 0)
+            Safe("at the character tick", () =>
+            {
+                if (_ledger.Store.World == Guid.Empty) return;
+                var now = LiveKeys().Where(k => !k.IsAccountOnly).ToHashSet();
+                foreach (var c in now)
+                    if (Touched.Add(c)) _ledger.Touch(c);  // the character's first ready server step: its values exist from here
+                Touched.IntersectWith(now);
+            });
+        Safe("streaming", ModValuesStream.ServerTick);
     }
 
     // ---------------------------------------------------------------------------------------------- owners ----
@@ -151,6 +155,7 @@ internal static class ModValuesService
 
     internal static Ledger NeedLedger(string api)
     {
+        EnsureStarted();  // a mod's OnLoad runs before the first service tick
         ModValuesCaps.Require(ModValuesCaps.Own);
         Services.RequireTickThread(api);
         return _ledger ?? throw ServiceCaps.Unavailable(ModValuesCaps.Own, "Kiln.ModValues did not start");
