@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: MIT
-// The fake kiln.ui.inventory (native/core/abi/services/kiln_ui_inventory.h, v1) under the real Ui.Inventory of Kiln.Ui:
+// The fake kiln.ui.inventory (native/core/abi/services/kiln_ui_inventory.h, v2) under the real Ui.Inventory of Kiln.Ui:
 // click handlers subscribe as with the game, a test draws a screen's slots (KilnHarness.UiInventory.Draw), points at one
 // (Hover) and clicks it (Click); the press rules of the native service run here (a drawn frame, a screen with a pointer,
 // the button and the exact modifiers, take or watch). Marks stay Kiln.Ui's own: MarkOf asks it what a drawn slot would
-// show. The game's drawing, its hooks and the pixel mapping are not modelled.
+// show. v2: the screen a Draw draws on is the open screen (Ui.Inventory.Screen, ScreenChanged; a chest's entity from
+// OpenChest), screen_view answers its kind and entity, and the panels a mod added show by their screens and When
+// (PanelsShown). The game's drawing, its hooks and the pixel mapping are not modelled (no panel is drawn).
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
@@ -20,6 +22,7 @@ internal sealed class UiInventoryFakeState
     public ulong Frame;
     public int? Hovered;
     public ulong NextHandle = 1;
+    public uint Container;  // the chest's entity on a chest screen (OpenChest)
 }
 
 internal sealed unsafe class UiInventoryFake : IKitFake
@@ -27,9 +30,10 @@ internal sealed unsafe class UiInventoryFake : IKitFake
     public const string Service = UiInventoryNative.Service;
     public const string ClickRow = Ui.Inventory.ClickCapability;
     public const string SlotsRow = Ui.Inventory.MarkCapability;
-    public static readonly string[] Features = [ClickRow, SlotsRow];
+    public const string PanelRow = Ui.Inventory.PanelCapability;
+    public static readonly string[] Features = [ClickRow, SlotsRow, PanelRow];
     private const uint ModsAll = 1 | 2 | 4;  // KILN_UI_MOD_CTRL | SHIFT | ALT
-    private const uint ReasonBudget = 8, NoSlot = 32, NoViewport = 34;
+    private const uint ReasonBudget = 8, NoSlot = 32, NoViewport = 34, NoPanelScreen = 35;
     private const uint ReasonNoFrame = UiValuesNative.ReasonNoFrame;
 
     private static UiInventoryNative.Table* _table;
@@ -40,29 +44,34 @@ internal sealed unsafe class UiInventoryFake : IKitFake
     {
         if (_table == null)
         {
-            var t = (UiInventoryNative.Table*)NativeMemory.AllocZeroed((nuint)sizeof(UiInventoryNative.Table));
-            t->Header = new ServiceHeader { Size = (uint)sizeof(UiInventoryNative.Table), Version = 1 };
+            var v2 = (UiInventoryNative.TableV2*)NativeMemory.AllocZeroed((nuint)sizeof(UiInventoryNative.TableV2));
+            var t = &v2->Base;
+            t->Header = new ServiceHeader { Size = (uint)sizeof(UiInventoryNative.TableV2), Version = 2 };
             t->SubscribeClicks = &SubscribeClicks;
             t->SlotAt = &SlotAt;
             t->GetMapping = &GetMapping;
             t->Unsubscribe = &Unsubscribe;
+            v2->GetScreenView = &ScreenView;
             _table = t;  // process lifetime
         }
         KitBackend.Instance.RegisterTable(Service, (nint)_table);
         FakeTables.Features(Features);
     }
 
-    public void Start(KilnHarness harness) { }
+    public void Start(KilnHarness harness) => UiInventoryScreens.ForgetScreen();
     public void BeforeStep(KilnHarness harness, ulong step) { }
     public void End(KilnHarness harness) { }
 
     public void AddCoverage(List<CoverageRow> rows) =>
-        rows.Add(new CoverageRow("The game's inventory slots", CoverageKind.RecordingFake, [Service, ClickRow, SlotsRow],
+        rows.Add(new CoverageRow("The game's inventory slots", CoverageKind.RecordingFake, [Service, ClickRow, SlotsRow, PanelRow],
             "Ui.Inventory's own code on the kit's kiln.ui.inventory: OnClick handlers subscribe with their button, exact " +
             "modifiers and Take; a test draws a screen's slots (KilnHarness.UiInventory.Draw), hovers one (Hovered) and clicks " +
             "it (Click): only on a screen with a pointer, the matching handlers get the click with the slot's item and entity, " +
             "Taken when one asked for it. Marks and MarkWhen rules are Kiln.Ui's (MarkOf: what a drawn slot would show); " +
-            "Ui.Values.Slots reads the drawn frame. Offline: the game's drawing and hooks, the pixel mapping, the 250 ms frame age."));
+            "Ui.Values.Slots reads the drawn frame. The screen a Draw draws on is the open one: Ui.Inventory.Screen and " +
+            "ScreenChanged follow it (OpenBackpack, OpenChest with the chest's entity, CloseScreen), and PanelsShown names the " +
+            "AddPanel panels that would show there (their screens and When). Offline: the game's drawing and hooks, the pixel " +
+            "mapping (no panel is drawn or placed), the 250 ms frame age."));
 
     internal static UiInventoryFakeState? State =>
         FakeTables.Active(Service) is { } h ? KitFakes.State<UiInventoryFakeState>(h) : null;
@@ -151,6 +160,46 @@ internal sealed unsafe class UiInventoryFake : IKitFake
         o->Reason = NoViewport;  // the game's canvas is not modelled: Kiln.Ui draws no marks offline (MarkOf says what they are)
         return FakeTables.Ok;
     }
+
+    // v2: the kind and entity of the drawn screen; the pixels are not modelled (KUI_NO_VIEWPORT, as the mapping)
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int ScreenView(ulong owner, float w, float h, UiInventoryNative.ScreenView* o)
+    {
+        if (owner == 0 || o == null || o->Size < (uint)sizeof(UiInventoryNative.ScreenView)) return FakeTables.InvalidArgument;
+        var size = o->Size;
+        *o = default;
+        o->Size = size;
+        if (FakeTables.Off(PanelRow) || FakeTables.Off(SlotsRow) || State is not { } st) return FakeTables.Unavailable;
+        lock (st.Lock)
+        {
+            if (st.Slots is null)
+            {
+                o->Reason = ReasonNoFrame;
+                return FakeTables.Ok;
+            }
+            var kind = (byte)st.Screen switch { 9 or 4 => UiInventoryNative.ViewBackpack, 22 or 41 => UiInventoryNative.ViewChest, _ => 0u };
+            if (kind == 0)
+            {
+                o->Reason = NoPanelScreen;
+                return FakeTables.Ok;
+            }
+            o->Kind = kind;
+            o->HudScreen = (byte)st.Screen;
+            o->Container = kind == UiInventoryNative.ViewChest ? st.Container : 0;
+            o->Session = 1;
+            o->Frame = st.Frame;
+            o->SlotCount = (uint)st.Slots.Length;
+            o->Reason = NoViewport;
+        }
+        return FakeTables.Ok;
+    }
+
+    /// <summary>The game screen of a fake frame (its Target: the chest's entity on a chest-style screen).</summary>
+    internal static GameScreen GameScreenOf(HudScreen s, ulong frame, uint container) =>
+        new(GameUiState.Play, s, GameScreen.KindOf(GameUiState.Play, s, 0), 0, null, 0, frame)
+        {
+            Target = GameScreen.TargetScreen(s) && container != 0 ? new EntityId(container) : EntityId.None,
+        };
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int Unsubscribe(ulong handle)

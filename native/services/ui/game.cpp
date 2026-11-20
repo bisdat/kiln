@@ -180,14 +180,18 @@ bool rd(uintptr_t a, T& out) {
 struct Raw {
     uint8_t ui_state, hud;
     uint32_t interaction, language;
-    uint32_t target;  // play.target, read only while a factory screen shows
+    uint32_t target;  // play.target, read only while a chest-style transfer screen shows (target_screen)
 };
 
 // keen::HudScreenType FactoryCrafting: a production station's screen (kiln, smelter, loom). The game draws it with its
 // chest-style transfer screen (PlayStateUi -> 0xb9d0f0 mode 2 on 26430625), not with CraftingMenu (docs/re/game-ui.md
 // section 5): no builder frame names it, so Kiln.Ui reports it from the HUD screen, play.interaction and play.target.
 constexpr uint8_t kHudFactory = 28;
-std::atomic<uint32_t> g_target{0};  // play.target of the last UI frame while a factory screen showed, else 0
+// The screens PlayStateUi's switch (0xc61135) sends to the chest-style transfer screen 0xb9d0f0, which finds the other
+// inventory by play.target: 22 StorageChest (mode 0), 41 CommerceProductChest (mode 1), 28 FactoryCrafting (mode 2).
+// Since 0.2.0-dev.30 (kiln.ui.inventory's screen view: a chest's entity) for all three; before, the factory only.
+constexpr bool target_screen(uint8_t hud) { return hud == 22 || hud == 41 || hud == kHudFactory; }
+std::atomic<uint32_t> g_target{0};  // play.target of the last UI frame while a target_screen showed, else 0
 
 bool read_state(uintptr_t sys10, Raw* r) {
     r->ui_state = r->hud = 0;
@@ -199,7 +203,7 @@ bool read_state(uintptr_t sys10, Raw* r) {
     if (rd(state + L.state_play, play) && play && r->ui_state == KILN_UI_STATE_PLAY) {
         rd(play + L.play_hud, r->hud);
         rd(play + L.play_interaction, r->interaction);
-        if (r->hud == kHudFactory && L.play_target) rd(play + L.play_target, r->target);
+        if (target_screen(r->hud) && L.play_target) rd(play + L.play_target, r->target);
     }
     if (L.language) {
         uintptr_t pool = 0;
@@ -439,9 +443,9 @@ void after_frame(uintptr_t sys10) {
     s.language = raw.language;
     s.ui_thread = g_ui_thread;
     s.frame = g_frame_no;
-    // a factory screen's station: the game may write play.target a frame after the screen opens; a change of it is a change
-    // of the screen (subscribers read it again through screen_target)
-    const uint32_t target = s.hud_screen == kHudFactory ? raw.target : 0;
+    // a factory's station, a chest: the game may write play.target a frame after the screen opens; a change of it is a
+    // change of the screen (subscribers read it again through screen_target)
+    const uint32_t target = target_screen(s.hud_screen) ? raw.target : 0;
     const bool target_changed = g_target.exchange(target, std::memory_order_relaxed) != target;
     // the builder runs every frame while a crafting menu shows; a frame or two without it (a tab transition) is not a close
     if (g_craft.frame && g_craft.frame + 3 > g_frame_no) {

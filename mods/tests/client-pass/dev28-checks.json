@@ -1848,6 +1848,36 @@
    ],
    "state": "open",
    "added": "dev30-ui-hooks"
+  },
+  {
+   "id": "ui-hooks.c5",
+   "title": "A panel sits beside the backpack and the chest (two resolutions or UI scales)",
+   "chapter": "dev30-ui-hooks",
+   "packages": [
+    "dev30-ui-hooks"
+   ],
+   "state": "open",
+   "added": "dev30-ui-hooks slice 2"
+  },
+  {
+   "id": "ui-hooks.c6",
+   "title": "The chest screen names the chest's entity",
+   "chapter": "dev30-ui-hooks",
+   "packages": [
+    "dev30-ui-hooks"
+   ],
+   "state": "open",
+   "added": "dev30-ui-hooks slice 2"
+  },
+  {
+   "id": "ui-hooks.c7",
+   "title": "Closing the chest or backpack hides the panel; opening, switching and closing are events",
+   "chapter": "dev30-ui-hooks",
+   "packages": [
+    "dev30-ui-hooks"
+   ],
+   "state": "open",
+   "added": "dev30-ui-hooks slice 2"
   }
  ]
 }

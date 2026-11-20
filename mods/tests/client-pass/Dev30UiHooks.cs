@@ -7,8 +7,9 @@ namespace ClientPass;
 
 // dev30 ui-hooks (/mnt/Dongus/kiln-wave/dev30/out/ui-hooks/DESIGN.md): Ui.Inventory, marks and clicks on the game's own
 // slots. Rows: ui.slots.click (ui-hooks.c2, c3, c4) and the marks on ui.slots.inspect (ui-hooks.c1, which is also 05a-c5's
-// pixel mapping). Each check registers its own marks and handlers and removes them at its end; a check whose handler never
-// ran cannot pass. Orders 2410-2419.
+// pixel mapping). Slice 2 (ui.inventory.panels): a Kiln panel docked beside the backpack and chest screens and the chest's
+// entity (ui-hooks.c5, c6, c7). Each check registers its own marks, handlers and panels and removes them at its end; a
+// check whose handler never ran cannot pass. Orders 2410-2419.
 public sealed partial class ClientPassMod
 {
     private const string SlotsArea = "The game's inventory slots";
@@ -133,6 +134,110 @@ public sealed partial class ClientPassMod
             c.Log.Info($"ui-hooks.c4: hovered {h.Item} page {h.InventoryPage} slot {h.SlotIndex}, native state byte 0 = " +
                        $"{h.NativeState[0]} (the candidate hover byte of 05a-c5)");
         c.Instruct("Write in the notes which item is under the cursor; the log line ui-hooks.c4 names what Kiln saw.");
+        await c.Verdict();
+    }
+
+    private const string PanelsArea = "Panels beside the game's inventory screens";
+
+    [ClientCheck("ui-hooks.c5", "A panel sits beside the backpack and the chest (two resolutions or UI scales)", Area = PanelsArea,
+        Since = Dev30, Tags = [Visual], Needs = ClientCheckNeeds.Hosted, Order = 2414)]
+    public async Task InventoryPanelBeside(CheckContext c)
+    {
+        if (!await NeedOpen(c, Ui.Inventory.PanelCapability)) return;
+        int drawn = 0;
+        var gate = new object();
+        InventoryScreen? last = null;
+        InventoryScreen? Last() { lock (gate) return last; }
+        var panel = Ui.Inventory.AddPanel("Kiln check panel", (ui, s) =>
+        {
+            Interlocked.Increment(ref drawn);
+            lock (gate) last = s;
+            ui.Text($"{s.Kind} ({s.Hud})");
+            ui.TextDisabled("ui-hooks.c5: this panel should sit beside the slots");
+        });
+        c.OnEnd(panel.Dispose);
+        c.Instruct("Host a world. Open the inventory (I). Press continue.");
+        await c.Verdict();
+        c.Expect(await c.Until(() => Volatile.Read(ref drawn) > 0, TimeSpan.FromSeconds(30), "the panel was drawn"),
+            "the panel is drawn on the backpack screen", $"last screen {Last()}");
+        c.Instruct("A small window \"Kiln check panel\" saying Backpack should sit right next to your backpack's slots (to " +
+                   "their right, or to their left when there is no room), not on top of any slot and not off the screen. Is it there?");
+        await c.Verdict();
+        c.Instruct("Open a storage chest. The panel should now say Chest and sit beside the slots (the chest's and the backpack's " +
+                   "together), level with the chest's slots. Is it there, without covering a slot?");
+        await c.Verdict();
+        c.Expect(Last() is { Kind: InventoryScreenKind.Chest }, "the panel saw the chest screen", $"{Last()}");
+        c.Instruct("Change the game's resolution or window size (Settings > Graphics), or the UI scale, open the chest again. " +
+                   "Does the panel still sit beside the slots? (Write the resolutions or scales you tried in the notes.)");
+        await c.Verdict();
+        c.Instruct("Hover the panel and click on it (not on a slot). Did the game ignore that click (nothing picked up or moved)?");
+        await c.Verdict();
+    }
+
+    [ClientCheck("ui-hooks.c6", "The chest screen names the chest's entity", Area = PanelsArea,
+        Since = Dev30, Needs = ClientCheckNeeds.Hosted, Order = 2415)]
+    public async Task InventoryChestEntity(CheckContext c)
+    {
+        if (!await NeedOpen(c, Ui.Inventory.PanelCapability) || !await NeedPlayer(c)) return;
+        var gate = new object();
+        InventoryScreen? chest = null;
+        InventoryScreen? Chest() { lock (gate) return chest; }
+        Action<InventoryScreen?, InventoryScreen?> h = (_, now) =>
+        {
+            if (now is { Kind: InventoryScreenKind.Chest, Container.Value: not 0 } s) lock (gate) chest = s;
+        };
+        Ui.Inventory.ScreenChanged += h;
+        c.OnEnd(() => Ui.Inventory.ScreenChanged -= h);
+        c.Instruct("Put a few items in a storage chest, close it, then open it again.");
+        c.Expect(await c.Until(() => Chest() is not null, TimeSpan.FromMinutes(2), "a chest screen with its entity"),
+            "ScreenChanged named the chest's entity");
+        if (Chest() is not { } s) return;
+        c.Log.Info($"ui-hooks.c6: {s}, GameScreen.Target {Ui.Screens.Current.Target}");
+        c.Expect(Ui.Screens.Current.Target == s.Container, "GameScreen.Target is the same entity", $"{Ui.Screens.Current.Target}");
+        // the entity is the chest: the chest's own slots name it as their holder, and the server world has its inventory
+        var slots = Ui.Values.Slots();
+        c.Expect(slots.Ok && slots.Snapshot!.Slots.Any(v => v.Holder == s.Container),
+            "the chest's slots on screen are held by that entity", $"holders {string.Join(", ", slots.Snapshot?.Slots.Select(v => v.Holder).Distinct() ?? [])}");
+        var inv = Items.Read(s.Container);
+        c.Expect(inv is not null && inv.Slots.Any(v => !v.IsEmpty), "the server world reads that entity's inventory (the chest's items)",
+            inv is null ? "no inventory" : $"{inv.Slots.Count(v => !v.IsEmpty)} stacks");
+        var at = World.Position(c.Player);
+        var where = World.Position(s.Container);
+        c.Expect(at is not null && where is not null && where.Value.DistanceTo(at.Value) < 15, "the entity stands next to you",
+            at is null || where is null ? "no position" : $"{where.Value.DistanceTo(at.Value):F1} m");
+        c.Instruct("Does the log line ui-hooks.c6 name a chest entity (a number), and did the items you put in match the stacks it counted?");
+        await c.Verdict();
+    }
+
+    [ClientCheck("ui-hooks.c7", "Closing the chest or backpack hides the panel; opening, switching and closing are events",
+        Area = PanelsArea, Since = Dev30, Tags = [Visual], Needs = ClientCheckNeeds.Hosted, Order = 2416)]
+    public async Task InventoryPanelCloses(CheckContext c)
+    {
+        if (!await NeedOpen(c, Ui.Inventory.PanelCapability)) return;
+        var events = new List<string>();
+        Action<InventoryScreen?, InventoryScreen?> h = (before, now) =>
+        {
+            lock (events) events.Add($"{before?.Kind.ToString() ?? "none"} -> {now?.Kind.ToString() ?? "none"} {now?.Container}");
+        };
+        Ui.Inventory.ScreenChanged += h;
+        var panel = Ui.Inventory.AddPanel("Kiln check panel", (ui, s) => ui.Text($"{s.Kind} {s.Container}"),
+            new InventoryPanelOptions { Screens = InventoryScreens.Chest });
+        c.OnEnd(() =>
+        {
+            Ui.Inventory.ScreenChanged -= h;
+            panel.Dispose();
+        });
+        c.Instruct("Open a storage chest (the panel shows beside it), close it, open the inventory (I), close it, then open a " +
+                   "second, different chest and close it. Press continue.");
+        await c.Verdict();
+        string[] seen;
+        lock (events) seen = [.. events];
+        c.Log.Info("ui-hooks.c7: " + string.Join(" | ", seen));
+        c.Expect(seen.Count(e => e.StartsWith("none -> Chest")) >= 2 && seen.Count(e => e.StartsWith("Chest -> none")) >= 2,
+            "two chest openings and closings were reported", string.Join(" | ", seen));
+        c.Expect(seen.Any(e => e.StartsWith("none -> Backpack")), "the backpack's opening was reported");
+        c.Instruct("Did the panel disappear each time the chest closed, and did it NOT show on the inventory screen (this " +
+                   "panel asked for chests only)?");
         await c.Verdict();
     }
 }
