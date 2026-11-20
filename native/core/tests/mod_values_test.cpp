@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: MIT
-// Host test of kiln.mod-values v1 and kiln.mod-values.backend v1 (src/services/mod_values.cpp,
-// abi/services/kiln_mod_values.h) against the REAL owner registry (src/registry.cpp) and a stub backend in place of
-// Kiln.ModValues: owner namespaces, the error order, the one error rule (a refusal is KILN_OK with ok 0), Before/After
-// flags, compare-and-set arguments, subscriptions (scope, filter, read policy at dispatch, faults, unsubscribe waits),
-// and owner revoke (subscriptions gone, definitions retired once the namespace's last owner is gone).
+// Host test of kiln.mod-values v1 (src/services/mod_values.cpp, abi/services/kiln_mod_values.h) and the Kiln-internal
+// kiln.internal.mod-values.backend v1 (src/mod_values_host.h) against the REAL owner registry (src/registry.cpp) and a
+// stub backend in place of Kiln.ModValues: owner namespaces (a managed mod's manifest id only for an owner Kiln.Host
+// made), the error order, the one error rule (a refusal is KILN_OK with ok 0), Before/After flags, compare-and-set
+// arguments, subscriptions (scope, filter, read policy at dispatch, faults, unsubscribe waits), and owner revoke
+// (subscriptions gone, the definitions that owner made retired with its handle as the backend's token).
 // Run by test-mod-values.sh (ASan/UBSan). The fault guard, the log and the service registrar are stubs.
 #include <windows.h>  // tests/stubs/windows.h
 
@@ -91,13 +92,14 @@ bool logged(const char* part) {
 struct Stub {
     int calls = 0;
     std::string ns, key;
+    KilnOwner owner = 0;  // describe/define: the owner handle the core passed (the backend's token)
     uint32_t op = 99;
     int64_t amount = 0;
     const KilnModValueVersion* expected = nullptr;
     KilnModValueVersion expected_copy{};
     uint64_t request_id = 0;
     uint32_t def_kind = 99;
-    std::vector<std::string> retired;
+    std::vector<std::pair<std::string, KilnOwner>> retired;  // (namespace, owner) per retire call
     // what the next call answers
     KilnResult rc = KILN_OK;
     uint32_t ok = 1, reason = 0, flags = KMV_AFTER;
@@ -120,9 +122,10 @@ void answer(KilnModValueResult* out) {
 
 std::string str(KilnStr s) { return std::string(s.ptr ? s.ptr : "", s.len); }
 
-KilnResult KILN_CALL st_describe(KilnStr ns, const KilnModValueDef* def, KilnModDefinitionResult* out) {
+KilnResult KILN_CALL st_describe(KilnStr ns, KilnOwner owner, const KilnModValueDef* def, KilnModDefinitionResult* out) {
     ++g_stub.calls;
     g_stub.ns = str(ns);
+    g_stub.owner = owner;
     g_stub.key = str(def->local_id);
     g_stub.def_kind = def->kind;
     if (g_stub.rc != KILN_OK) return g_stub.rc;
@@ -162,7 +165,7 @@ KilnResult KILN_CALL st_read_synced(KilnStr ns, KilnStr key, KilnModValueResult*
     out->character.account = 0x77;  // read_synced: the backend names the local character
     return KILN_OK;
 }
-void KILN_CALL st_retire(KilnStr ns) { g_stub.retired.push_back(str(ns)); }
+void KILN_CALL st_retire(KilnStr ns, KilnOwner owner) { g_stub.retired.emplace_back(str(ns), owner); }
 
 void reset_stub() {
     const auto retired = g_stub.retired;
@@ -261,20 +264,30 @@ KilnModValueExport exported(uint32_t read, uint32_t sync, const KilnStr* mods = 
 int main() {
     std::setvbuf(stdout, nullptr, _IONBF, 0);  // every line out before a sanitizer report
     const auto* svc = service(KILN_MOD_VALUES_SERVICE);
-    const auto* bsvc = service(KILN_MOD_VALUES_BACKEND_SERVICE);
-    check(svc && bsvc, "both tables are registered as in-core services");
-    if (!svc || !bsvc) return 1;
-    check(svc->version == 1 && bsvc->version == 1, "kiln.mod-values v1 and kiln.mod-values.backend v1");
+    check(svc != nullptr, "kiln.mod-values is registered as an in-core service");
+    if (!svc) return 1;
+    check(std::string_view(KILN_MOD_VALUES_BACKEND_SERVICE) == "kiln.internal.mod-values.backend" &&
+              !service(KILN_MOD_VALUES_BACKEND_SERVICE) && !service("kiln.mod-values.backend") && services().size() == 1,
+          "the backend table is Kiln-internal (kiln.internal.mod-values.backend) and no in-core service: no svc::find, "
+          "so neither the plugins' nor the services' view resolves it (api.cpp gives it to the managed host's view only)");
+    check(kiln::mod_values::backend_table() == nullptr, "before the facade's init: no backend table for the host either");
+    check(svc->version == 1, "kiln.mod-values v1");
     check(svc->init && svc->init(), "the facade's init subscribes to owner revokes");
     const auto* api = static_cast<const KilnModValuesApi*>(svc->table);
-    const auto* be = static_cast<const KilnModValuesBackendApi*>(bsvc->table);
+    const auto* be = static_cast<const KilnModValuesBackendApi*>(kiln::mod_values::backend_table());
+    check(be != nullptr, "after it: the managed host's view gets the backend table");
+    if (!be) return 1;
     check(api->header.size == sizeof(KilnModValuesApi) && api->header.version == KILN_MOD_VALUES_VERSION &&
-              be->header.size == sizeof(KilnModValuesBackendApi) && be->header.version == 1,
+              be->header.size == sizeof(KilnModValuesBackendApi) && be->header.version == KILN_MOD_VALUES_BACKEND_VERSION &&
+              sizeof(KilnModValuesApi) == 72 && sizeof(KilnModValuesBackendApi) == 32 && KILN_MOD_VALUES_BACKEND_VERSION == 1,
           "the tables' headers carry their sizes (72, 32) and version 1");
 
     const KilnOwner plugin = reg::owner_create("plugin:my-mod.dll");
-    const KilnOwner fishing = reg::owner_create("mod:fishing");
-    const KilnOwner upper = reg::owner_create("mod:Fishing");
+    const KilnOwner fishing = reg::owner_create_managed_host("mod:fishing");  // what Kiln.Host makes for a managed mod
+    const KilnOwner upper = reg::owner_create_managed_host("mod:Fishing");
+    const KilnOwner spoof = reg::owner_create("mod:fishing");  // a native owner that merely names itself like one
+    const KilnOwner reserved = reg::owner_create_managed_host("mod:native.0123");
+    const KilnOwner host_self = reg::owner_create_managed_host("host");
 
     // ---- owner_namespace ----
     {
@@ -295,6 +308,18 @@ int main() {
         check(api->owner_namespace(upper, buf, sizeof buf, &need) == KILN_OK &&
                   std::strcmp(buf, "native.8ad4adb6acbefada3d9d62add2f398d7") == 0,
               "mod:<not a manifest id> (uppercase) is a native owner, hashed");
+        check(reg::owner_managed_host(fishing) && !reg::owner_managed_host(spoof) && !reg::owner_managed_host(plugin) &&
+                  !reg::owner_managed_host(0),
+              "the registry knows which owners Kiln.Host made");
+        check(api->owner_namespace(spoof, buf, sizeof buf, &need) == KILN_OK &&
+                  std::strcmp(buf, "native.4606c0f0d6e4229f95fd79b25868b866") == 0,
+              "a native owner named \"mod:fishing\" is not the managed mod: native. + the hash of its name, never \"fishing\"");
+        check(api->owner_namespace(reserved, buf, sizeof buf, &need) == KILN_OK &&
+                  std::strcmp(buf, "native.8a1c0801dff9c26d2a0e406f1740d36d") == 0,
+              "\"native.\" is reserved for hashed namespaces: even a host owner mod:native.<x> is hashed (Kiln.Host refuses such ids)");
+        check(api->owner_namespace(host_self, buf, sizeof buf, &need) == KILN_OK &&
+                  std::strcmp(buf, "native.4740ae6347b0172c01254ff55bae5aff") == 0,
+              "a host owner that is not mod:<id> (the host's own) is hashed");
         check(api->owner_namespace(0, buf, sizeof buf, &need) == KILN_OK &&
                   std::strcmp(buf, "native.cdfe9ad58b46226d63eb322dacd35f4f") == 0,
               "owner 0 (the core, \"kiln\") is a native owner");
@@ -346,7 +371,10 @@ int main() {
               "bind refuses no table and a table with a function missing");
         KilnModValuesBackend small = stub;
         small.size = 48;
-        check(be->bind(&small) == KILN_ERR_INVALID_ARGUMENT, "bind refuses a table smaller than v1");
+        KilnModValuesBackend big = stub;
+        big.size = sizeof big + 8;
+        check(be->bind(&small) == KILN_ERR_INVALID_ARGUMENT && be->bind(&big) == KILN_ERR_INVALID_ARGUMENT,
+              "bind takes exactly its own build's table: smaller or larger than v1 is refused (Kiln-internal, not append-only)");
         check(be->bind(&stub) == KILN_OK, "the backend binds");
         check(be->bind(&stub) == KILN_ERR_INVALID_ARGUMENT && logged("bound already"), "a second bind is refused (logged)");
     }
@@ -356,14 +384,14 @@ int main() {
         reset_stub();
         KilnModDefinitionResult d{sizeof d, 9, 9, 9};
         check(api->describe(plugin, &coins, &d) == KILN_OK && d.ok == 1 && d.reason == 0 &&
-                  g_stub.ns == "native.979f28a72f2a8c18d48f73f0fe910c21" && g_stub.key == "coins",
-              "describe reaches the backend with the owner's namespace and the local id");
+                  g_stub.ns == "native.979f28a72f2a8c18d48f73f0fe910c21" && g_stub.key == "coins" && g_stub.owner == plugin,
+              "describe reaches the backend with the owner's namespace, its owner handle (the token) and the local id");
         reset_stub();
         g_stub.ok = 0;
         g_stub.reason = KMV_DEFINITION_CONFLICT;
         d = {sizeof d, 9, 9, 9};
         check(api->define(fishing, &coins, &d) == KILN_OK && d.ok == 0 && d.reason == KMV_DEFINITION_CONFLICT &&
-                  g_stub.ns == "fishing",
+                  g_stub.ns == "fishing" && g_stub.owner == fishing,
               "a refused define is KILN_OK with ok 0 and the reason (DEFINITION_CONFLICT is 15)");
         reset_stub();
         g_stub.rc = KILN_ERR_WRONG_THREAD;
@@ -423,9 +451,15 @@ int main() {
         d = coins; d.label_json = KilnStr{"\xff\xfe", 2}; try_def(d);  // not UTF-8
         d = coins; d.label_json = KilnStr{nullptr, 4}; try_def(d);
         d = coins; d.number_format_json = KilnStr{"\xc3", 1}; try_def(d);  // a cut UTF-8 sequence
+        d = coins; d.reserved0 = 1; try_def(d);  // the named padding after sync_policy
+        d = coins; d.reserved1 = 1; try_def(d);
+        d = coins; d.reserved2 = 0x80000000u; try_def(d);
         check(bad == n && g_stub.calls == 0,
               "record size, enum values, flag bits, Currency+Carried, Carried without TRUST_IMPORTS, ids, read_mods "
-              "outside READ_LIST, XP thresholds, labels and UTF-8: INVALID_ARGUMENT, the backend never asked");
+              "outside READ_LIST, XP thresholds, labels, UTF-8 and a reserved field not 0: INVALID_ARGUMENT, the backend never asked");
+        check(offsetof(KilnModValueDef, reserved0) == 36 && offsetof(KilnModValueDef, reserved1) == 124 &&
+                  offsetof(KilnModValueDef, reserved2) == 140 && sizeof(KilnModValueDef) == 144,
+              "KilnModValueDef's padding is named: reserved0 at 36, reserved1 at 124, reserved2 at 140 (144 bytes as before)");
         KilnModDefinitionResult r{sizeof r, 0, 0, 0};
         check(api->describe(fishing, nullptr, &r) == KILN_ERR_INVALID_ARGUMENT &&
                   api->describe(fishing, &coins, nullptr) == KILN_ERR_INVALID_ARGUMENT,
@@ -708,6 +742,7 @@ int main() {
         api->subscribe(native, KMV_CANONICAL_EVENTS, S(""), &on_change, &heard, &h_native);
         api->subscribe(lurker, KMV_CANONICAL_EVENTS, S(""), &on_change, &lurk, &h_lurk);
         const std::string ns = "native.79231b3a6fa23ad352e1bb4e43bcf7cf";
+        check(g_stub.owner == twin, "define passes the defining owner's handle");
         reg::owner_revoke(native);
         const std::string coins_key = ns + ":coins";  // the event borrows the key's bytes
         auto c = event(coins_key.c_str(), KMV_CANONICAL_EVENTS);
@@ -715,16 +750,22 @@ int main() {
         be->dispatch(&c, &pub);
         check(heard.calls == 0 && api->unsubscribe(h_native) == KILN_ERR_NOT_FOUND,
               "revoking an owner removes its subscriptions");
-        check(g_stub.retired.empty(), "another live owner still defines in the namespace: nothing retired yet");
+        check(g_stub.retired.size() == 1 && g_stub.retired[0].first == ns && g_stub.retired[0].second == native,
+              "revoking an owner that described retires exactly what it made: the backend gets its namespace and its owner "
+              "handle as the token (the twin's definitions in the same namespace stay)");
         auto r = result_buf();
         check(api->read(native, &who, S("fishing:coins"), &r) == KILN_ERR_REVOKED && payload_zero(r) &&
                   api->subscribe(native, KMV_CANONICAL_EVENTS, S(""), &on_change, &heard, &h_native) == KILN_ERR_REVOKED,
               "a revoked owner's calls are REVOKED");
         reg::owner_revoke(twin);
-        check(g_stub.retired.size() == 1 && g_stub.retired[0] == ns,
-              "the namespace's last defining owner revoked: the backend retires the namespace (data parked there)");
+        check(g_stub.retired.size() == 2 && g_stub.retired[1].first == ns && g_stub.retired[1].second == twin,
+              "then the twin's revoke retires the twin's (data parked there)");
         reg::owner_revoke(lurker);
-        check(g_stub.retired.size() == 1, "an owner that never described or defined retires nothing");
+        check(g_stub.retired.size() == 2, "an owner that never described or defined retires nothing");
+        reg::owner_revoke(spoof);
+        reg::owner_revoke(fishing);
+        check(g_stub.retired.size() == 3 && g_stub.retired[2].first == "fishing" && g_stub.retired[2].second == fishing,
+              "a managed mod's owner retires in its manifest id's namespace with its own handle");
         check(be->wanted() == 0, "revoked subscribers leave wanted()");
     }
 

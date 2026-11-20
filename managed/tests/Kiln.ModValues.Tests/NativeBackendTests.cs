@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
-// The managed side of the native facade kiln.mod-values (NativeBackend.cs): the records against the header's static
-// asserts (native/core/abi/services/kiln_mod_values.h, read from the source tree), the RFC 4122 GUID byte order, the
+// The managed side of the native facade kiln.mod-values (NativeBackend.cs): the records against the headers' static
+// asserts (the public native/core/abi/services/kiln_mod_values.h and the Kiln-internal native/core/src/mod_values_host.h,
+// read from the source tree), the backend table taken only at exactly v1, the owner token, the RFC 4122 GUID byte order, the
 // reason and event-kind numbers, and the backend's calls on a real ledger (in-memory store): the one error rule
 // across the boundary, Before/After, compare-and-set with the world GUID, definitions from their native record.
 using System.Runtime.CompilerServices;
@@ -50,6 +51,10 @@ public sealed unsafe class NativeBackendTests
     private static string HeaderPath([CallerFilePath] string here = "") =>
         Path.GetFullPath(Path.Combine(Path.GetDirectoryName(here)!, "../../../native/core/abi/services/kiln_mod_values.h"));
 
+    /// <summary>The Kiln-internal backend table (never in core/abi: only Kiln.ModValues and the core use it).</summary>
+    private static string HostHeaderPath([CallerFilePath] string here = "") =>
+        Path.GetFullPath(Path.Combine(Path.GetDirectoryName(here)!, "../../../native/core/src/mod_values_host.h"));
+
     private static long Off(void* field, void* rec) => (byte*)field - (byte*)rec;
 
     // ------------------------------------------------------------------------------------------- the records ----
@@ -73,6 +78,7 @@ public sealed unsafe class NativeBackendTests
         m["KilnModValueDef.carry_epoch"] = Off(&d.CarryEpoch, &d);
         m["KilnModValueDef.read_policy"] = Off(&d.ReadPolicy, &d);
         m["KilnModValueDef.sync_policy"] = Off(&d.SyncPolicy, &d);
+        m["KilnModValueDef.reserved0"] = Off(&d.Reserved0, &d);
         m["KilnModValueDef.local_id"] = Off(&d.LocalId, &d);
         m["KilnModValueDef.label_json"] = Off(&d.LabelJson, &d);
         m["KilnModValueDef.number_format_json"] = Off(&d.NumberFormatJson, &d);
@@ -81,8 +87,10 @@ public sealed unsafe class NativeBackendTests
         m["KilnModValueDef.initial"] = Off(&d.Initial, &d);
         m["KilnModValueDef.xp_thresholds"] = Off(&d.Thresholds, &d);
         m["KilnModValueDef.threshold_count"] = Off(&d.ThresholdCount, &d);
+        m["KilnModValueDef.reserved1"] = Off(&d.Reserved1, &d);
         m["KilnModValueDef.read_mods"] = Off(&d.ReadMods, &d);
         m["KilnModValueDef.read_mod_count"] = Off(&d.ReadModCount, &d);
+        m["KilnModValueDef.reserved2"] = Off(&d.Reserved2, &d);
         var val = default(ModValuesAbi.ValueRec);
         m["sizeof KilnModValue"] = sizeof(ModValuesAbi.ValueRec);
         m["KilnModValue.level"] = Off(&val.Level, &val);
@@ -127,7 +135,15 @@ public sealed unsafe class NativeBackendTests
     [Fact]
     public void RecordsMatchTheHeadersStaticAsserts()
     {
-        var text = File.ReadAllText(HeaderPath());
+        var pub = File.ReadAllText(HeaderPath());
+        var host = File.ReadAllText(HostHeaderPath());
+        // nothing host-only in the public header: the backend's types live in the Kiln-internal one
+        foreach (var name in new[] { "KilnModValuesBackend", "KilnModValueExport", "KMV_WANT_", "kiln.mod-values.backend" })
+            Assert.False(pub.Contains(name, StringComparison.Ordinal), $"kiln_mod_values.h names {name}");
+        Assert.Contains("#define KILN_MOD_VALUES_BACKEND_SERVICE \"" + ModValuesAbi.BackendService + "\"", host);
+        Assert.Contains("#define KILN_MOD_VALUES_BACKEND_VERSION " + ModValuesAbi.BackendVersion + "u", host);
+        Assert.Equal("kiln.internal.mod-values.backend", ModValuesAbi.BackendService);
+        var text = pub + "\n" + host;
         var managed = ManagedLayout();
         var checkedCount = 0;
         foreach (Match a in Regex.Matches(text, @"sizeof\((\w+)\) == (\d+)"))
@@ -421,6 +437,75 @@ public sealed unsafe class NativeBackendTests
         Assert.Equal(ModValuesAbi.InvalidArgument, ModValuesNative.Describe(_ => throw new Exception("not reached"), pins.Str("fish"), &bad, &o));
         Assert.Equal(ModValuesAbi.InvalidArgument, ModValuesNative.Describe(_ => throw new Exception("not reached"), pins.Str("fish"), null, &o));
         Assert.Equal(ModValuesAbi.Unavailable, ModValuesNative.Describe(_ => throw new KilnUnavailableException("stats.definitions", "off"), pins.Str("fish"), &rec, &o));
+        foreach (var field in new[] { 0, 1, 2 })
+        {
+            bad = Coins(pins);
+            if (field == 0) bad.Reserved0 = 1;
+            else if (field == 1) bad.Reserved1 = 1;
+            else bad.Reserved2 = 1;
+            Assert.Equal(ModValuesAbi.InvalidArgument, ModValuesNative.Describe(_ => throw new Exception("not reached"), pins.Str("fish"), &bad, &o));
+        }
+    }
+
+    // ------------------------------------------------------------------------------ owners and their tokens ----
+
+    [Fact]
+    public void DescribeAndDefineCarryTheNativeOwnersToken()
+    {
+        using var pins = new Pins();
+        var rec = Coins(pins);
+        var o = default(ModValuesAbi.DefinitionResultRec);
+        object? seen = null;
+        Assert.Equal(ModValuesAbi.Ok, ModValuesNative.Describe((d, token) => { seen = token; return new ModValueDefinitionResult(true, null, d.Key); },
+            pins.Str("native.0123456789abcdef0123456789abcdef"), 7, &rec, &o));
+        Assert.Equal(ModValuesNative.TokenOf(7), seen);
+        Assert.Equal((object)7UL, seen);  // a boxed owner handle: Equals, not reference identity, is what the registry compares
+        Assert.NotEqual(ModValuesNative.TokenOf(8), seen);
+    }
+
+    [Fact]
+    public void ARetireTakesOnlyThatOwnersDefinitions()
+    {
+        // the registry's contract the native facade relies on: a native owner's token is its boxed handle
+        var registry = new Registry();
+        var ns = "native.0123456789abcdef0123456789abcdef";
+        Def D(string id) => Def.FromOptions(ns, id, new ModValueOptions(ModValueKind.Counter, id));
+        Assert.Null(registry.Activate(D("a"), ModValuesNative.TokenOf(1), out _));
+        Assert.Null(registry.Activate(D("b"), ModValuesNative.TokenOf(2), out _));
+        Assert.Null(registry.Describe(D("c"), ModValuesNative.TokenOf(1), out _));
+        var gone = registry.Retire(ns, ModValuesNative.TokenOf(1));  // a fresh box of the same handle, as the revoke passes it
+        Assert.Equal(new[] { "a" }, gone.Select(d => d.Id));
+        Assert.Null(registry.Active(new ModValueKey(ns, "a")));
+        Assert.NotNull(registry.Active(new ModValueKey(ns, "b")));
+        Assert.Null(registry.Described(new ModValueKey(ns, "c")));
+        Assert.NotNull(registry.Described(new ModValueKey(ns, "b")));
+
+        // the bound retire passes the owner's namespace and its token; a bad namespace is refused inside, nothing thrown
+        using var pins = new Pins();
+        var calls = new List<(string, object?)>();
+        ModValuesNative.Retire((owner, token) => calls.Add((owner, token)), pins.Str(ns), 2);
+        ModValuesNative.Retire((owner, token) => calls.Add((owner, token)), pins.Str("Not A Namespace"), 3);
+        Assert.Equal(new[] { (ns, (object?)2UL) }, calls);
+    }
+
+    // ------------------------------------------------------------------------------- the backend table ----
+
+    [Fact]
+    public void TheBackendTableIsTakenOnlyAtExactlyV1()
+    {
+        var t = default(ModValuesAbi.BackendTable);
+        t.Header.Size = (uint)sizeof(ModValuesAbi.BackendTable);
+        t.Header.Version = ModValuesAbi.BackendVersion;
+        Assert.Null(ModValuesNative.Refusal(&t));
+        t.Header.Version = 2;  // a later version of a Kiln-internal table is another build's, not a superset
+        Assert.Contains("version 2", ModValuesNative.Refusal(&t));
+        t.Header.Version = 0;
+        Assert.NotNull(ModValuesNative.Refusal(&t));
+        t.Header.Version = ModValuesAbi.BackendVersion;
+        t.Header.Size += 8;  // larger: not append-only either
+        Assert.Contains("40-byte", ModValuesNative.Refusal(&t));
+        t.Header.Size = 24;
+        Assert.Contains("24-byte", ModValuesNative.Refusal(&t));
     }
 
     // ---------------------------------------------------------------------------------------------- events ----
@@ -457,12 +542,12 @@ public sealed unsafe class NativeBackendTests
         Assert.Equal((uint)sizeof(ModValuesAbi.BackendFns), f.Size);
         Assert.True(f.Describe != null && f.Define != null && f.Read != null && f.Change != null && f.ReadSynced != null && f.Retire != null);
         var o = default(ModValuesAbi.DefinitionResultRec);
-        Assert.Equal(ModValuesAbi.InvalidArgument, f.Describe(pins.Str("fish"), null, &o));
-        Assert.Equal(ModValuesAbi.InvalidArgument, f.Define(pins.Str("fish"), null, &o));
+        Assert.Equal(ModValuesAbi.InvalidArgument, f.Describe(pins.Str("fish"), 7, null, &o));
+        Assert.Equal(ModValuesAbi.InvalidArgument, f.Define(pins.Str("fish"), 7, null, &o));
         var r = default(ModValuesAbi.ResultRec);
         Assert.Equal(ModValuesAbi.InvalidArgument, f.Read(pins.Str("fish"), null, pins.Str("fish:coins"), &r));
         Assert.Equal(ModValuesAbi.InvalidArgument, f.Change(pins.Str("fish"), null, pins.Str("fish:coins"), 0, 1, null, 0, &r));
         Assert.Equal(ModValuesAbi.InvalidArgument, f.ReadSynced(pins.Str("fish"), pins.Str("not a key"), &r));
-        f.Retire(pins.Str("Not A Namespace"));  // refused inside, nothing thrown
+        f.Retire(pins.Str("Not A Namespace"), 7);  // refused inside, nothing thrown
     }
 }

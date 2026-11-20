@@ -127,6 +127,26 @@ fn mod_values_kind_rules() {
     }
 }
 
+/// A carried value takes the higher of the world's value and the copy a player's client brings: with no explicit "max", a
+/// client can raise it to the top of the 64-bit range. A warning (KL356), on counters and experience values (the kinds that
+/// can be carried) that trust client imports.
+#[test]
+fn mod_values_carried_without_max_is_a_warning() {
+    let f = mod_values_findings("carried-max", &[("mod-values/c.json", values(concat!(
+        r#""open":{"kind":"experience","label":"A","persistence":"carried","trustClientImports":true,"thresholds":["0","10"]},"#,
+        r#""open-counter":{"kind":"counter","label":"B","persistence":"carried","trustClientImports":true},"#,
+        r#""capped":{"kind":"experience","label":"C","persistence":"carried","trustClientImports":true,"thresholds":["0","10"],"max":"1000000"},"#,
+        r#""capped-at-top":{"kind":"counter","label":"D","persistence":"carried","trustClientImports":true,"max":"9223372036854775807"},"#,
+        r#""world":{"kind":"counter","label":"E"},"#,
+        r#""world-trusting":{"kind":"counter","label":"F","trustClientImports":true},"#,
+        r#""untrusted":{"kind":"counter","label":"G","persistence":"carried"}"#)))]);
+    let warned = |p: &str| f.iter().any(|x| x.1 == "KL356" && x.2 == p && x.3 == Severity::Warning);
+    assert!(warned("/values/open"), "{f:?}");
+    assert!(warned("/values/open-counter"), "{f:?}");
+    assert_eq!(f.iter().filter(|x| x.1 == "KL356").count(), 2, "an explicit max (any), a World value or an untrusted one: no KL356: {f:?}");
+    assert!(!f.iter().any(|x| x.2.starts_with("/values/capped") || x.2.starts_with("/values/world")), "{f:?}");
+}
+
 #[test]
 fn mod_values_thresholds_increase_as_whole_numbers() {
     let f = mod_values_findings("steps", &[("mod-values/t.json", values(concat!(
