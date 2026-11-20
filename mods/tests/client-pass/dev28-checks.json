@@ -704,6 +704,16 @@
    "state": "open"
   },
   {
+   "id": "11-repl.stats-real-peer",
+   "title": "The server's counters for a real player",
+   "chapter": "11",
+   "packages": [
+    "11-replication-observe"
+   ],
+   "state": "open",
+   "added": "11-replication-observe (dev.31: the network inspector's counters with a real player; the content of the settled 11-M1)"
+  },
+  {
    "id": "11-transform-interpolation",
    "title": "Optional stored versus drawn transform",
    "chapter": "11",

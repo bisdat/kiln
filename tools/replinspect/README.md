@@ -54,7 +54,7 @@ channel.
 | `msg` | entry type: 0 frame, 2 handshake, 4 entity, 5 destroy list |
 | `kind` | `frame` (msg 0), `handshake` (msg 2), `create` or `update` (msg 4), `destroy` (msg 5) |
 | `tick`, `seq` | the message header's server tick and message counter |
-| `base` | the baseline tick of an update, else 0 (replinspect accepts it with or without bit 31, the "acked state A" bit) |
+| `base` | the baseline tick of an update without bit 31 (kiln.repl writes the tick only; the "acked state A" bit stays in `raw`), else 0; replinspect also accepts it with bit 31 |
 | `bytes` | the size of the whole message (`raw`) |
 | `gap` | records were dropped before this one |
 | `components` | optional, entity messages only: the full component values of the snapshot the server coded (the bytes before delta coding) |
