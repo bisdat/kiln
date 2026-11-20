@@ -299,7 +299,7 @@ void completion_before(void* widget, bool hud) {
             !g_window_blurred.load(std::memory_order_acquire);
         uint32_t cursor = 0;
         const bool cursor_matches = game_read(
-            reinterpret_cast<const uint8_t*>(state) + L.edit + kEditorCursor, &cursor) &&
+            reinterpret_cast<const uint8_t*>(state) + L.edit + L.cursor, &cursor) &&
             cursor == codepoints(pending.expected);
         const bool valid_replacement = safe_line(pending.replacement) &&
             !pending.replacement.empty() && pending.replacement.front() == '/';
