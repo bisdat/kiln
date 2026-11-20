@@ -1560,3 +1560,117 @@ fn a_custom_folder_started_directly() {
     assert!(r.summary.contains("Start:         through Steam"), "{}", r.summary);
     assert!(finding(&r, "proton-override").text.contains(crate::game::DLL_OVERRIDE_ADVICE));
 }
+
+
+// ---------------------------------------------------------------- what is in a report (dev.29.22)
+
+/// A player declined to send a report: "a little too much personal information". The launcher's "What's in this report"
+/// groups the files; only other mods' and tools' files can be left out (support needs Kiln's own logs, the settings and
+/// the listings).
+#[test]
+fn file_kinds_group_the_zip_and_only_other_mods_files_can_be_left_out() {
+    for (p, g, about) in [
+        ("summary.txt", FileGroup::Kiln, "summary"),
+        ("report.json", FileGroup::Kiln, "findings"),
+        ("game/kiln/logs/kiln.log", FileGroup::Kiln, "kiln-log"),
+        ("game/kiln/logs/proxy.log", FileGroup::Kiln, "proxy-log"),
+        ("game/kiln/logs/eml.log", FileGroup::Kiln, "eml-log"),
+        ("game/kiln/logs/tick-stats.jsonl", FileGroup::Kiln, "tick-stats"),
+        ("game/kiln/logs/greeneye-loader.log", FileGroup::Kiln, "greeneye-bridge"),
+        ("game/kiln/crash-reports/crash-2026-11-10.txt", FileGroup::Kiln, "crash"),
+        ("launcher/launcher.log", FileGroup::Kiln, "launcher-log"),
+        ("launcher/game-start.log", FileGroup::Kiln, "game-start"),
+        ("game/kiln/state/boot.json", FileGroup::Settings, "state"),
+        ("game/kiln/profile.json", FileGroup::Settings, "profile"),
+        ("game/kiln/chain.ini", FileGroup::Settings, "chain"),
+        ("game/dinput8-chain.ini", FileGroup::Settings, "chain"),
+        ("game/kiln/kiln.json", FileGroup::Settings, "kiln-json"),
+        ("game/kiln/.install.json", FileGroup::Settings, "receipt"),
+        ("listings/game-folder.txt", FileGroup::Listings, "game-folder"),
+        ("listings/mod-folders.txt", FileGroup::Listings, "mod-folders"),
+        ("game/BuildingTools.log", FileGroup::Mods, "building-tools"),
+        ("game/BuildingTools.prev.log", FileGroup::Mods, "building-tools"),
+        ("game/shroudlink.log", FileGroup::Mods, "shroudlink"),
+        ("game/shroudlink_client.log", FileGroup::Mods, "shroudlink"),
+        ("game/auto-loot-plus.log", FileGroup::Mods, "auto-loot"),
+        ("game/XHL-Native-Plugin-Host.log", FileGroup::Mods, "xhl-core"),
+        ("game/kiln/chain/xhl-core/XHL-Native-Plugin-Host.log", FileGroup::Mods, "xhl-core"),
+        ("game/greeneye/loader.log", FileGroup::Mods, "greeneye"),
+        ("greeneye-mods/unlock-map/game/unlock_map_markers.log", FileGroup::Mods, "greeneye"),
+        ("game/OptiScaler.ini", FileGroup::Mods, "optiscaler-settings"),
+        ("game/optiscaler.log", FileGroup::Mods, "optiscaler-log"),
+        ("game/SomeNewMod.log", FileGroup::Mods, "mod-log"),
+    ] {
+        assert_eq!(file_kind(p), (g, about), "{p}");
+        assert_eq!(excludable(p), g == FileGroup::Mods, "{p}");
+    }
+}
+
+#[cfg(feature = "zip")]
+#[test]
+fn a_left_out_file_is_described_but_not_in_the_zip_and_kilns_own_cannot_be_left_out() {
+    let f = Fx::healthy("left-out");
+    f.w("BuildingTools.log", "[BT] loaded from Z:\\var\\home\\frostling\\Enshrouded\n");
+    f.w("auto-loot-plus.log", "[ALP] patterns found\n");
+    let mut input = f.input();
+    input.exclude = vec!["game/BuildingTools.log".into(), "game/kiln/logs/kiln.log".into(), "listings/game-folder.txt".into()];
+    let r = build(&input);
+    assert!(file(&r, "game/BuildingTools.log").is_none(), "left out");
+    assert!(file(&r, "game/auto-loot-plus.log").is_some(), "not asked for");
+    assert!(file(&r, "game/kiln/logs/kiln.log").is_some() && file(&r, "listings/game-folder.txt").is_some(), "Kiln's own files and the listings stay");
+    assert_eq!(r.left_out.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(), ["game/BuildingTools.log"]);
+    let summary = file(&r, "summary.txt").unwrap();
+    assert!(summary.contains("Left out by the player (other mods' own files):\n  game/BuildingTools.log"), "{summary}");
+    let json: serde_json::Value = serde_json::from_str(file(&r, "report.json").unwrap()).unwrap();
+    assert_eq!(json["leftOut"], serde_json::json!(["game/BuildingTools.log"]));
+    // the zip has no trace of it
+    let zip = zip_bytes(&r).unwrap();
+    let mut z = zip::ZipArchive::new(std::io::Cursor::new(zip)).unwrap();
+    let names: Vec<String> = (0..z.len()).map(|i| z.by_index(i).unwrap().name().unwrap().into_owned()).collect();
+    assert!(!names.iter().any(|n| n.contains("BuildingTools")), "{names:?}");
+
+    // every other mod's file at once
+    input.exclude = vec![EXCLUDE_OTHER_MODS.into()];
+    let all = build(&input);
+    assert!(all.files.iter().all(|(n, _)| !excludable(n)), "{:?}", all.files.iter().map(|(n, _)| n).collect::<Vec<_>>());
+    assert_eq!(all.left_out.len(), 2);
+
+    // nothing asked: as before, nothing left out and no line about it
+    let none = build(&f.input());
+    assert!(none.left_out.is_empty() && !file(&none, "summary.txt").unwrap().contains("Left out by the player"));
+}
+
+#[test]
+fn contents_counts_each_replacement_per_file() {
+    let f = Fx::healthy("contents");
+    f.w("kiln/logs/kiln.log", "[I] [kiln] Kiln 0.2.0-dev.22 starting (pid 412)\n[I] [kiln] path /var/home/frostling/a and /var/home/frostling/b\n\
+        [I] [net] net: Wintermoth (0x81) joined with Kiln\n[I] [kiln] boot complete; handing control to the game\n");
+    f.w("BuildingTools.log", "[BT] Wintermoth placed a wall at 192.168.1.20\n");
+    let mut input = f.input();
+    input.exclude = vec!["game/BuildingTools.log".into()];
+    let r = build(&input);
+    let c = contents(&r);
+    let get = |p: &str| c.files.iter().find(|x| x.path == p).unwrap_or_else(|| panic!("no {p}: {:?}", c.files.iter().map(|x| &x.path).collect::<Vec<_>>()));
+    let log = get("game/kiln/logs/kiln.log");
+    assert_eq!((log.group, log.about.as_str(), log.excludable, log.excluded), (FileGroup::Kiln, "kiln-log", false, false));
+    assert_eq!(log.replaced.get("home"), Some(&2), "{:?}", log.replaced);
+    assert_eq!(log.replaced.get("player"), Some(&1), "{:?}", log.replaced);
+    assert_eq!(log.size, file(&r, "game/kiln/logs/kiln.log").unwrap().len() as u64);
+    let bt = get("game/BuildingTools.log");
+    assert!(bt.excluded && bt.excludable && bt.group == FileGroup::Mods);
+    assert_eq!((bt.replaced.get("player"), bt.replaced.get("ip")), (Some(&1), Some(&1)), "{:?}", bt.replaced);
+    // summary.txt's "Left out" names every token once: that is not a replacement
+    let s = get("summary.txt");
+    assert!(!s.replaced.contains_key("mac") && !s.replaced.contains_key("email"), "{:?}", s.replaced);
+    assert_eq!(c.size, r.files.iter().map(|(_, b)| b.len() as u64).sum::<u64>());
+    assert_eq!(c.summary, r.summary);
+    // the never-collected list is the summary's, item by item
+    assert_eq!(c.never.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["saves", "settings", "admin", "mods", "steam"]);
+    for n in &c.never {
+        assert!(LEFT_OUT.contains(&format!("- {}", n.text)), "{}", n.text);
+    }
+    // a report's JSON for the launcher
+    let j = serde_json::to_value(&c).unwrap();
+    assert_eq!(j["files"][0]["path"], "summary.txt");
+    assert!(j["files"].as_array().unwrap().iter().any(|x| x["path"] == "game/kiln/logs/kiln.log" && x["replaced"]["home"] == 2 && x["group"] == "kiln"));
+}

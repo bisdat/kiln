@@ -808,6 +808,12 @@ pub struct ReportInput {
     pub channel: Option<ReportChannel>,
     /// Default [`Redactor::current`].
     pub redactor: Option<Redactor>,
+    /// (dev.29.22) Files the player leaves out of the zip (the launcher's "What's in this report", `kilnctl report
+    /// --exclude`): zip paths, or [`EXCLUDE_OTHER_MODS`] for all of them. Only [`excludable`] files (other mods' and
+    /// tools' own files) can be left out; any other name here is ignored, since support needs Kiln's own logs, the
+    /// settings and the listings to diagnose anything. A file left out is still read and redacted ([`Report::left_out`],
+    /// for [`contents`]) but is not in the zip; summary.txt names it.
+    pub exclude: Vec<String>,
 }
 
 /// The launcher's channel for a report: the channel its build belongs to, its beta number (a test build), and the
@@ -943,6 +949,166 @@ pub struct Report {
     /// (path in the zip, bytes), summary.txt and report.json included.
     #[serde(skip)]
     pub files: Vec<(String, Vec<u8>)>,
+    /// (dev.29.22) The files [`ReportInput::exclude`] left out, as they would have been in the zip (redacted): not
+    /// written, only described by [`contents`].
+    #[serde(skip)]
+    pub left_out: Vec<(String, Vec<u8>)>,
+}
+
+// ---------------------------------------------------------------- what is in a report (the launcher's preview)
+
+/// [`ReportInput::exclude`]: every other mod's and tool's file ([`excludable`]).
+pub const EXCLUDE_OTHER_MODS: &str = "other-mods";
+
+/// The groups "What's in this report" shows a report's files in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FileGroup {
+    /// Kiln's and the launcher's own logs, summary.txt, report.json, the crash report.
+    Kiln,
+    /// Other mods' and tools' own files (their logs; OptiScaler's settings): the player may leave these out.
+    Mods,
+    /// Kiln's state files, the profile, the chain, the install receipt.
+    Settings,
+    /// The listings of folders (names, sizes, times; no contents).
+    Listings,
+}
+
+/// What one file in a report is: its group and a stable name for what it holds (the launcher's words for it are
+/// `report.about.<name>`). A file this does not know is another mod's (it can be left out).
+pub fn file_kind(path: &str) -> (FileGroup, &'static str) {
+    use FileGroup::*;
+    let low = path.to_ascii_lowercase();
+    let name = low.rsplit('/').next().unwrap_or("");
+    match path {
+        "summary.txt" => return (Kiln, "summary"),
+        "report.json" => return (Kiln, "findings"),
+        "launcher/launcher.log" => return (Kiln, "launcher-log"),
+        "launcher/game-start.log" => return (Kiln, "game-start"),
+        "game/kiln/logs/kiln.log" => return (Kiln, "kiln-log"),
+        "game/kiln/logs/proxy.log" => return (Kiln, "proxy-log"),
+        "game/kiln/logs/eml.log" => return (Kiln, "eml-log"),
+        "game/kiln/logs/tick-stats.jsonl" => return (Kiln, "tick-stats"),
+        "game/kiln/logs/greeneye-loader.log" => return (Kiln, "greeneye-bridge"),
+        "game/kiln/profile.json" => return (Settings, "profile"),
+        "game/kiln/chain.ini" | "game/dinput8-chain.ini" => return (Settings, "chain"),
+        "game/kiln/kiln.json" => return (Settings, "kiln-json"),
+        "game/kiln/.install.json" => return (Settings, "receipt"),
+        "listings/game-folder.txt" => return (Listings, "game-folder"),
+        "listings/kiln-folder.txt" => return (Listings, "kiln-folder"),
+        "listings/mod-folders.txt" => return (Listings, "mod-folders"),
+        _ => {}
+    }
+    if path.starts_with("game/kiln/crash-reports/") {
+        (Kiln, "crash")
+    } else if path.starts_with("game/kiln/state/") {
+        (Settings, "state")
+    } else if path.starts_with("listings/") {
+        (Listings, "listing")
+    } else if name == engine_mods::XHL_CORE_LOG.to_ascii_lowercase() {
+        (Mods, "xhl-core")
+    } else if path.starts_with("game/kiln/logs/") {
+        (Kiln, "kiln-other")
+    } else if path.starts_with("greeneye-mods/") || low.starts_with("game/greeneye/") {
+        (Mods, "greeneye")
+    } else if name.starts_with("buildingtools") {
+        (Mods, "building-tools")
+    } else if name.starts_with("shroudlink") {
+        (Mods, "shroudlink")
+    } else if name == "auto-loot-plus.log" {
+        (Mods, "auto-loot")
+    } else if name == "optiscaler.ini" {
+        (Mods, "optiscaler-settings")
+    } else if name == "optiscaler.log" {
+        (Mods, "optiscaler-log")
+    } else {
+        (Mods, "mod-log")
+    }
+}
+
+/// Whether the player may leave a file out ([`ReportInput::exclude`]): other mods' and tools' files only.
+pub fn excludable(path: &str) -> bool {
+    file_kind(path).0 == FileGroup::Mods
+}
+
+/// What [`redact`] and [`redact_json`] put in place of what they take out, by the name [`contents`] counts them
+/// under (`home` for `<home>`).
+pub const TOKENS: [&str; 10] = ["<home>", "<user>", "<host>", "<steam-name>", "<steamid>", "<player>", "<ip>", "<mac>", "<email>", "<redacted>"];
+
+/// How often each replacement token stands in a text (only those that do), by name without the brackets.
+pub fn replacements(text: &str) -> std::collections::BTreeMap<String, usize> {
+    TOKENS.iter()
+        .map(|t| (t.trim_matches(|c| c == '<' || c == '>').to_string(), text.matches(t).count()))
+        .filter(|(_, n)| *n > 0)
+        .collect()
+}
+
+/// One file of [`Contents`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContentsFile {
+    /// The path in the zip.
+    pub path: String,
+    pub group: FileGroup,
+    /// What it holds ([`file_kind`]).
+    pub about: String,
+    /// Bytes before compression.
+    pub size: u64,
+    /// The player may leave it out ([`excludable`]).
+    pub excludable: bool,
+    /// Left out by [`ReportInput::exclude`]: not in the zip.
+    pub excluded: bool,
+    /// How often each replacement stands in it (`{"home": 169, "player": 3}`); summary.txt's own "Left out"
+    /// section, which names every token once, is not counted.
+    pub replaced: std::collections::BTreeMap<String, usize>,
+}
+
+/// One thing a report never holds ([`NEVER_COLLECTED`]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NeverItem {
+    pub id: String,
+    pub text: String,
+}
+
+/// "What's in this report" (the launcher's `report_preview`, `kilnctl report --contents`): each file with its size and
+/// replacements, those left out, and what a report never holds. Built from a [`Report`], so it describes exactly the
+/// zip that report writes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Contents {
+    pub files: Vec<ContentsFile>,
+    /// All files in the zip together (before compression).
+    pub size: u64,
+    /// summary.txt (the launcher's "View").
+    pub summary: String,
+    pub never: Vec<NeverItem>,
+}
+
+/// What a report holds ([`Contents`]).
+pub fn contents(r: &Report) -> Contents {
+    let own = replacements(LEFT_OUT);
+    let line = |path: &str, bytes: &[u8], excluded: bool| {
+        let (group, about) = file_kind(path);
+        let text = String::from_utf8_lossy(bytes);
+        let mut replaced = replacements(&text);
+        if path == "summary.txt" && text.contains(LEFT_OUT) {
+            for (k, n) in &own {
+                if let Some(v) = replaced.get_mut(k) {
+                    *v = v.saturating_sub(*n);
+                }
+            }
+            replaced.retain(|_, n| *n > 0);
+        }
+        ContentsFile { path: path.to_string(), group, about: about.to_string(), size: bytes.len() as u64, excludable: group == FileGroup::Mods, excluded, replaced }
+    };
+    let mut files: Vec<ContentsFile> = r.files.iter().map(|(n, b)| line(n, b, false)).collect();
+    files.extend(r.left_out.iter().map(|(n, b)| line(n, b, true)));
+    Contents {
+        size: r.files.iter().map(|(_, b)| b.len() as u64).sum(),
+        summary: r.summary.clone(),
+        never: NEVER_COLLECTED.iter().map(|(id, text)| NeverItem { id: id.to_string(), text: text.to_string() }).collect(),
+        files,
+    }
 }
 
 /// `kiln-report-2026-11-10.zip`
@@ -1265,7 +1431,9 @@ pub fn profile_view(file: &ProfileFile) -> crate::profile::Profile {
 struct Ctx<'a> {
     game: Option<&'a Path>,
     red: &'a Redactor,
+    exclude: &'a [String],
     files: Vec<(String, Vec<u8>)>,
+    left_out: Vec<(String, Vec<u8>)>,
     total: usize,
     errors: Vec<String>,
     findings: Vec<Finding>,
@@ -1285,6 +1453,11 @@ impl Ctx<'_> {
         let mut t = redact(text, self.red);
         if let Some(n) = note {
             t = format!("{n}\n{t}");
+        }
+        // left out by the player: described, never in the zip, and takes nothing of TOTAL_MAX
+        if excludable(name) && self.exclude.iter().any(|e| e == name || e == EXCLUDE_OTHER_MODS) {
+            self.left_out.push((name.to_string(), t.into_bytes()));
+            return;
         }
         let left = TOTAL_MAX.saturating_sub(self.total);
         if t.len() > left {
@@ -1379,7 +1552,8 @@ pub fn build(input: &ReportInput) -> Report {
             }
         }
     }
-    let mut cx = Ctx { game: game_dir.as_deref(), red: &red, files: Vec::new(), total: 0, errors: Vec::new(), findings: Vec::new() };
+    let mut cx = Ctx { game: game_dir.as_deref(), red: &red, exclude: &input.exclude, files: Vec::new(), left_out: Vec::new(), total: 0, errors: Vec::new(),
+        findings: Vec::new() };
     let mut s = String::new();
     let tool = if input.tool.is_empty() { format!("kiln-manage {}", crate::VERSION) } else { input.tool.clone() };
 
@@ -2367,6 +2541,12 @@ fn finish(mut cx: Ctx, mut s: String, sys: String, body: String, input: &ReportI
     for (n, b) in &cx.files {
         let _ = writeln!(s, "  {n} ({})", crate::util::human_size(b.len() as u64));
     }
+    if !cx.left_out.is_empty() {
+        let _ = writeln!(s, "Left out by the player (other mods' own files):");
+        for (n, _) in &cx.left_out {
+            let _ = writeln!(s, "  {n}");
+        }
+    }
     let _ = writeln!(s, "\n== Left out ==\n{LEFT_OUT}");
     let s: String = s.lines().map(str::trim_end).collect::<Vec<_>>().join("\n") + "\n";
     let summary = redact(&s, cx.red);
@@ -2417,17 +2597,28 @@ fn finish(mut cx: Ctx, mut s: String, sys: String, body: String, input: &ReportI
         game_build: facts.build.clone(),
         mods_on: facts.mods_on,
     };
-    let mut report = Report { written: rfc(now), summary, short, findings: cx.findings, errors: cx.errors, facts: public, files: Vec::new() };
+    let mut report = Report { written: rfc(now), summary, short, findings: cx.findings, errors: cx.errors, facts: public, files: Vec::new(),
+        left_out: Vec::new() };
     let json = serde_json::to_vec_pretty(&serde_json::json!({
         "format": 1, "written": report.written, "tool": redact(tool, cx.red), "channel": input.channel, "findings": report.findings, "errors": report.errors,
-        "versions": report.facts.versions(),
+        "versions": report.facts.versions(), "leftOut": cx.left_out.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(),
     }))
     .unwrap_or_default();
     let mut files = vec![("summary.txt".to_string(), report.summary.clone().into_bytes()), ("report.json".to_string(), json)];
     files.append(&mut cx.files);
     report.files = files;
+    report.left_out = cx.left_out;
     report
 }
+
+/// What a report never holds, one by one (id, the words in [`LEFT_OUT`]): "What's in this report" lists them.
+pub const NEVER_COLLECTED: [(&str, &str); 5] = [
+    ("saves", "your saves and world data (the game's savegame folder, kiln/data/)"),
+    ("settings", "mod settings and Kiln's config folder (kiln/config/, the profile's config folder): they may hold server passwords and tokens"),
+    ("admin", "Kiln.Admin's files (kiln/data/kiln-admin/: the admin token and endpoint)"),
+    ("mods", "the contents of your mods (only folder and file names, sizes and times are listed)"),
+    ("steam", "Steam's own files, besides the compat tool and launch options shown above"),
+];
 
 /// What a report never holds (summary.txt's last section).
 pub const LEFT_OUT: &str = "Never collected:
