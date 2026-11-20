@@ -1381,6 +1381,11 @@ fn refuse_all(e: &anyhow::Error) -> Result<i32> {
     Ok(1)
 }
 
+/// The fake DAP adapter suite (`PASS debug.detach-policy`, `PASS debug.pause-watchdog`): Linux test builds only.
+#[cfg(all(test, target_os = "linux"))]
+#[path = "../tests/debug_dap/suite.rs"]
+mod dap_suite;
+
 #[cfg(test)]
 mod tests {
     use super::*;
