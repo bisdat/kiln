@@ -174,9 +174,28 @@ impl Target {
     }
 }
 
-/// Inherited variables that would point a Wine call at another runner, prefix or display.
+/// Inherited variables that would point a Wine call at another runner, prefix, wineserver, sync mode, loader or display.
+/// netcoredbg and the helper get these only from the target's own runner environment ([`Target::env`],
+/// [`RunnerLaunch`]), never from the environment kiln was started in.
 fn scrub(c: &mut Command) {
-    for k in ["WINEPREFIX", "WINESERVER", "WINELOADER", "WINEDLLPATH", "WINEARCH", "WINEDLLOVERRIDES", "WINEDEBUG", "STEAM_COMPAT_DATA_PATH", "STEAM_COMPAT_CLIENT_INSTALL_PATH"] {
+    for k in [
+        "WINEPREFIX",
+        "WINESERVER",
+        "WINESERVERSOCKET",
+        "WINELOADER",
+        "WINELOADERNOEXEC",
+        "WINEDLLPATH",
+        "WINEARCH",
+        "WINEDLLOVERRIDES",
+        "WINEDEBUG",
+        "WINEESYNC",
+        "WINEFSYNC",
+        "WINENTSYNC",
+        "LD_LIBRARY_PATH",
+        "LD_PRELOAD",
+        "STEAM_COMPAT_DATA_PATH",
+        "STEAM_COMPAT_CLIENT_INSTALL_PATH",
+    ] {
         c.env_remove(k);
     }
     kiln_manage::server::run::headless(c);
