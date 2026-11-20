@@ -201,6 +201,53 @@ float maxof(const std::vector<float>& v) { return v.empty() ? 0 : *std::max_elem
 // hosting client's client world: the pool-wide parts are on its server line).
 enum class TasksPart { None, Whole, ApplyOnly };
 
+// since 0.2.0-dev.29.19 (inbox 116): the world's impact memory pool for the line (tick_stats.h ImpactPool): five guarded
+// reads through sigdb's impact.pool offsets (the ones kiln.abilities' impact pool watch uses), once a minute on the world's
+// thread, no allocation. False (the line keeps its older shape) on a build without them, for the prediction world (no
+// singletons), with kiln/control/impacts saying "off", or on a fault.
+bool read_impact_pool(uint32_t kind, stats::ImpactPool* out) {
+    struct Offsets {
+        int64_t used = -1, cap = -1, pool = -1, live = -1, peak = -1;
+    };
+    static const Offsets o = [] {  // once, thread-safe (the server and the client worlds write lines on two threads)
+        Offsets x;
+        if (!sigdb::feature("impact.pool") || !sigdb::constant("impact/alloc.used", &x.used) ||
+            !sigdb::constant("impact/alloc.capacity", &x.cap) || !sigdb::constant("impact/sys.pool", &x.pool) ||
+            !sigdb::constant("impact/pool.live", &x.live) || !sigdb::constant("impact/pool.peak", &x.peak))
+            x.used = -1;
+        return x;
+    }();
+    const int64_t used = o.used, cap = o.cap, pool = o.pool, live = o.live, peak = o.peak;
+    if (used < 0 || kind == KILN_WORLD_PREDICTION) return false;
+    {
+        std::error_code ec;
+        const auto ctl = paths().kiln / L"control" / L"impacts";
+        if (std::filesystem::exists(ctl, ec)) {
+            char b[16] = {};
+            if (std::FILE* f = _wfopen(ctl.c_str(), L"rb")) {
+                const size_t n = std::fread(b, 1, sizeof b - 1, f);
+                std::fclose(f);
+                size_t a = 0, e = n;
+                while (a < e && (b[a] == ' ' || b[a] == '\t' || b[a] == '\r' || b[a] == '\n')) ++a;
+                while (e > a && (b[e - 1] == ' ' || b[e - 1] == '\t' || b[e - 1] == '\r' || b[e - 1] == '\n')) --e;
+                if (e - a == 3 && (b[a] | 0x20) == 'o' && (b[a + 1] | 0x20) == 'f' && (b[a + 2] | 0x20) == 'f') return false;
+            }
+        }
+    }
+    const uintptr_t world = worldinfo::world(kind);
+    const uintptr_t sys = world ? worldinfo::singleton(world, "impact::ImpactSystem") : 0;
+    uintptr_t alloc = 0;
+    uint64_t up[2] = {};
+    if (!sys || !guard::copy(&alloc, sys, 8) || !alloc || !guard::copy(up, alloc + static_cast<uintptr_t>(used), 16) ||
+        !guard::copy(&out->capacity, alloc + static_cast<uintptr_t>(cap), 8) ||
+        !guard::copy(&out->live, sys + static_cast<uintptr_t>(pool + live), 8) ||
+        !guard::copy(&out->live_peak, sys + static_cast<uintptr_t>(pool + peak), 8))
+        return false;
+    out->used = up[0];
+    out->peak = up[1];
+    return stats::impact_pool_sane(*out);
+}
+
 // One tick-stats.jsonl line of the window (write_window), the kiln.tasks part collected here, once a minute, never on
 // a step.
 void write_line(Window& w, const stats::Subs& slots, const char* world, double span, size_t pre_subs, size_t post_subs,
@@ -249,6 +296,7 @@ void write_line(Window& w, const stats::Subs& slots, const char* world, double s
         stats::top(l.worst_pre_subs, stats::kPreTop);
     }
     if (tasks != TasksPart::None) l.has_tasks = tasks_svc::tasks_window(kind, tasks == TasksPart::ApplyOnly, &l.tasks);
+    l.has_impact = read_impact_pool(kind, &l.impact);
     const std::string line = stats::format(l);
     {
         std::lock_guard lock(g_stats_mutex);

@@ -250,6 +250,38 @@ int main(int argc, char** argv) {
         check(got.find(",\"paused_ms\":{\"count\":2,\"total\":27342.0,\"max\":17440.0}}\n") != std::string::npos, "paused_ms: count, total, max");
     }
 
+    // ---- the impact memory pool (0.2.0-dev.29.19, inbox 116): last, only when read and sane ----
+    {
+        Line l = base(nullptr);
+        l.paused.add(17440.0f);
+        const std::string plain = format(l);
+        check(plain.find("\"impact\"") == std::string::npos, "no reading: no impact object, the old line unchanged");
+        l.impact = ImpactPool{4ull << 20, 8ull << 20, 16ull << 20, 120, 300};
+        check(format(l) == plain, "a reading not flagged: no impact object");
+        l.has_impact = true;
+        const std::string got = format(l);
+        check(got.size() > 2 && got.compare(0, plain.size() - 2, plain, 0, plain.size() - 2) == 0, "impact comes after every older field");
+        check(got.find(",\"impact\":{\"used_pct\":25.00,\"peak_pct\":50.00,\"capacity_mib\":16,\"live\":120,\"live_peak\":300}}\n") !=
+                  std::string::npos,
+              "impact: used and peak percent of capacity, capacity, live and peak instances");
+        check(impact_pool_sane(l.impact), "a 16 MiB pool is sane");
+        ImpactPool bad = l.impact;
+        bad.capacity = (16ull << 20) + 8;
+        check(!impact_pool_sane(bad), "a capacity that is no power of two is not sane");
+        bad = l.impact;
+        bad.used = bad.peak + 1;
+        check(!impact_pool_sane(bad), "used above its peak is not sane");
+        bad = l.impact;
+        bad.live = bad.live_peak + 1;
+        check(!impact_pool_sane(bad), "live above its peak is not sane");
+        bad = l.impact;
+        bad.capacity = 512 * 1024;
+        bad.used = bad.peak = 0;
+        check(!impact_pool_sane(bad), "under 1 MiB is not sane");
+        l.impact = bad;
+        check(format(l) == plain, "a reading that is not sane is left out");
+    }
+
     // ---- the tasks section (issue #49): appended last, absent without a pool ----
     {
         Line l = base(nullptr);
@@ -361,6 +393,13 @@ int main(int argc, char** argv) {
     check(src.find("interval_ms") == std::string::npos, "tick.cpp has no line format of its own any more");
     check(server.find("stats::paused_gap(gap, info.clock_delta)") != std::string::npos && server.find("g_win.paused.add(gap)") != std::string::npos,
           "the server world keeps its paused gaps out of interval_ms");
+    check(line.find("l.has_impact = read_impact_pool(kind, &l.impact);") != std::string::npos,
+          "each world's line reads its impact pool when it is written (once a minute, not on a step)");
+    const std::string pool = body("bool read_impact_pool(");
+    check(pool.find("KILN_WORLD_PREDICTION") != std::string::npos && pool.find("guard::copy") != std::string::npos &&
+              pool.find("L\"impacts\"") != std::string::npos &&
+              pool.find("stats::impact_pool_sane") != std::string::npos && pool.find("new ") == std::string::npos,
+          "the pool read: no prediction world, guarded reads, kiln/control/impacts off, sane only, no allocation");
 
     std::printf("%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;

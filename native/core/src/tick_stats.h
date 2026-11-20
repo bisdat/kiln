@@ -49,6 +49,18 @@ struct Paused {
     }
 };
 
+// since 0.2.0-dev.29.19 (inbox 116): the world's impact memory pool (kiln.abilities' impact pool watch reads the same
+// counters; docs/re/impact.md "The impact memory pool"), read once when the line is written: the allocator's bytes in
+// use, their peak and its capacity, and the live impact instances with their peak. Shown only when sane (the watch's
+// layout check: a capacity that is a power of two between 1 MiB and 1 GiB, used <= peak <= capacity, live <= peak).
+struct ImpactPool {
+    uint64_t used = 0, peak = 0, capacity = 0, live = 0, live_peak = 0;
+};
+inline bool impact_pool_sane(const ImpactPool& p) {
+    return p.capacity >= (1ull << 20) && p.capacity <= (1ull << 30) && (p.capacity & (p.capacity - 1)) == 0 &&
+           p.used <= p.peak && p.peak <= p.capacity && p.live <= p.live_peak && p.live_peak < (1ull << 24);
+}
+
 // One timed part over a window.
 struct Part {
     float max = 0;
@@ -192,6 +204,9 @@ struct Line {
     // since 0.2.0-dev.29.19, the server world's paused gaps (paused_gap), after every older field; absent when there
     // were none, so a line without a pause keeps its old shape
     Paused paused;
+    // since 0.2.0-dev.29.19, the world's impact memory pool (ImpactPool), last; absent when unread or not sane
+    bool has_impact = false;
+    ImpactPool impact;
 };
 
 // Slots by owner name, in run order (an owner's first slot gives its place); one owner's subscribers add up.
@@ -379,6 +394,13 @@ inline std::string format(const Line& l) {
     if (l.paused.count)
         appendf(out, ",\"paused_ms\":{\"count\":%u,\"total\":%.1f,\"max\":%.1f}", l.paused.count, fin(l.paused.total),
                 fin(l.paused.max));
+    if (l.has_impact && impact_pool_sane(l.impact)) {
+        const double cap = static_cast<double>(l.impact.capacity);
+        appendf(out, ",\"impact\":{\"used_pct\":%.2f,\"peak_pct\":%.2f,\"capacity_mib\":%.0f,\"live\":%llu,\"live_peak\":%llu}",
+                fin(static_cast<double>(l.impact.used) * 100.0 / cap), fin(static_cast<double>(l.impact.peak) * 100.0 / cap),
+                fin(cap / (1024.0 * 1024.0)), static_cast<unsigned long long>(l.impact.live),
+                static_cast<unsigned long long>(l.impact.live_peak));
+    }
     out += "}\n";
     return out;
 }
