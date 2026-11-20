@@ -154,6 +154,49 @@ class Checks(unittest.TestCase):
         rows["three"]["backend"] = "live"
         self.assertTrue(any("things.three" in e and "boot" in e for e in self.run_check(rows).errors))
 
+    def test_untraced_read_time_ships_the_cautious_applies(self):
+        rows = copy.deepcopy(ROWS)
+        rows["color"].update({"read": "unknown", "state": "unproven", "reason": "when the game reads the color is not traced"})
+        self.assertTrue(any("things.color" in e and "cautious" in e for e in self.run_check(rows).errors))
+
+    def test_reasons_in_kiln_words(self):
+        rows = copy.deepcopy(ROWS)
+        rows["on"].update({"read": "now", "state": "unproven", "reason": "the reader of mask is not traced"})
+        self.assertEqual(self.run_check(rows).errors, [])
+        schema = copy.deepcopy(SCHEMA)
+        rows["three"]["paths"] = ["threeValues"]
+        rows["on"]["reason"] = "the reader of threeValues is not traced"
+        TYPES2 = copy.deepcopy(TYPES)
+        TYPES2["types"][-1]["fields"].append({"name": "threeValues", "type": "keen::StaticArray<keen::uint32,3>", "offset": 36})
+        errs = self.run_check(rows, schema, TYPES2).errors
+        self.assertTrue(any("things.on" in e and "threeValues" in e for e in errs), errs)
+
+    def test_record_carries_and_computes_aliases(self):
+        t = Tree()
+        try:
+            db = rc.TypeDb.from_refl(dict(TYPES, exe_sha256="ab" * 32))
+            G1, G2 = "10000000-0000-0000-0000-000000000001", "20000000-0000-0000-0000-000000000002"
+            maps = t.root / "regmap" / "common"
+            d = json.loads((maps / "things.json").read_text())
+            d["entries"]["unnamed"] = "thing_%08x"
+            (maps / "things.json").write_text(json.dumps(d))
+            # the tool takes its registries in load order; a test registry rides as "items"
+            (maps / "things.json").rename(maps / "items.json")
+            d["registry"] = "items"
+            (maps / "items.json").write_text(json.dumps(d))
+            e1 = {"registries": {"items": [{"guid": G1, "name": "Sword", "id": 1}, {"guid": G2, "name": "Sword", "id": 2}]}}
+            rec1, table1 = rc.record(t.root, db, "server", "1", "", e1, None, None)
+            self.assertEqual(rec1["aliases"]["renames"], [{"registry": "items", "guid": G1, "id": "game:sword"}])
+            self.assertEqual(rec1["aliases"]["suffixes"], [{"registry": "items", "guid": G2, "id": "game:sword~20000000"}])
+            e2 = {"registries": {"items": [{"guid": G2, "name": "Sword", "id": 2}]}}
+            rec2, table2 = rc.record(t.root, db, "server", "2", "", e2, rec1, table1)
+            self.assertEqual(rec2["aliases"]["removals"], [{"registry": "items", "id": "game:sword", "removedIn": "2"}])
+            self.assertEqual(table2, {"items": {G2: "game:sword~20000000"}})
+            rec3, _ = rc.record(t.root, db, "server", "3", "", None, rec2, None)      # no entries: carried as they are
+            self.assertEqual(rec3["aliases"], rec2["aliases"])
+        finally:
+            t.close()
+
     def test_missing_rows_are_unmapped_not_errors(self):
         rows = copy.deepcopy(ROWS)
         del rows["on"]
@@ -171,7 +214,7 @@ class Checks(unittest.TestCase):
         t = Tree()
         try:
             db = rc.TypeDb.from_refl(dict(TYPES, exe_sha256="ab" * 32))
-            rec = rc.record(t.root, db, "server", "1", "2")
+            rec, _ = rc.record(t.root, db, "server", "1", "2")
             self.assertTrue(rec["verified"])
             self.assertEqual(rec["layouts"], {"keen::Thing": "0xabcdef01"})
             self.assertEqual(rec["rows"]["things.size"], "ok")
@@ -180,7 +223,7 @@ class Checks(unittest.TestCase):
             rows["size"]["paths"] = ["gone"]
             (t.root / "regmap" / "common" / "things.json").write_text(json.dumps({
                 "regmap": 1, "registry": "things", "entries": {"kind": "resource", "resourceType": "keen::Thing"}, "rows": rows}))
-            rec = rc.record(t.root, db, "server", "1", "2")
+            rec, _ = rc.record(t.root, db, "server", "1", "2")
             self.assertEqual(rec["rows"]["things.size"], "unmapped")
         finally:
             t.close()

@@ -87,7 +87,7 @@
       ],
       "conv": "int",
       "read": "restart",
-      "backend": "boot",
+      "backend": "none",
       "clientNeeds": true
     },
     "altarsPerFlameLevel": {

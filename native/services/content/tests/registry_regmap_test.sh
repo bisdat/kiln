@@ -9,4 +9,4 @@ mkdir -p "$out"
 echo "== registry-regmap-test (host)"
 g++ -std=c++20 -O1 -g -Wall -Wextra -Wno-unused-function -fsanitize=address,undefined -I"$here/../../../third_party" \
     "$here/registry_regmap_test.cpp" "$here/../registry/regmap.cpp" -o "$out/registry-regmap-test"
-"$out/registry-regmap-test" "$here/../../../../regmap"
+"$out/registry-regmap-test" "$here/../../../../regmap" "$here/registry_ids_cases.json" "$out"

@@ -84,7 +84,10 @@ struct RegMap {
     std::map<std::string, RegistryMap> registries;
     BuildRecord build;
     bool has_build = false;
-    // The state of a field on this build and, unless Mapped, the reason an edit of it is refused.
+    std::string side, exe_sha256;  // the running game's (load_dir), named when there is no record for it
+    // The state of a field on this build and, unless Mapped, the reason an edit of it is refused (BRIEF 6.2: it names the field
+// and the game build and ends "; this edit was not applied"). Without a verified record for the running exe every field is
+// Unproven: Kiln never writes a field it has not proven on that exact build.
     Mapping mapping(const std::string& registry, const std::string& field, std::string* reason) const;
 };
 
@@ -92,7 +95,8 @@ struct RegMap {
 bool load_common(const json& doc, RegistryMap* out, std::vector<std::string>* errs);
 // One regmap/<side>/<exe sha256>.json.
 bool load_record(const json& doc, BuildRecord* out, std::vector<std::string>* errs);
-// <dir>/common/*.json and <dir>/<side>/<exe sha256>.json (has_build false when there is no record for that exe).
+// <dir>/common/*.json and <dir>/<side>/<exe sha256>.json (has_build false when there is no record for that exe). A row that
+// breaks the routing rule (check_routing) is loaded as unproven, its reason the rule it breaks, and named in *errs.
 bool load_dir(const std::string& dir, const std::string& side, const std::string& exe_sha256, RegMap* out, std::vector<std::string>* errs);
 
 // The routing rule against the generated schema (schema.g.h): one line per row that breaks it, or names a field the schema
@@ -111,7 +115,14 @@ struct GameEntry {
 // the first of its templates' names in ordinal order). The entry that holds a name first keeps it; a later one with the
 // same name (also in another case) gets "~<first 8 hex digits of its GUID>", more digits while that is taken.
 // by_item_id: the items registry's ids by 32-bit item id (loot).
+// A name outside the id grammar (spaces, apostrophes, non-ASCII bytes) has each such character as '_' and is named in
+// *notes (the record pins it); so is a second loot entry for one item. Removed ids (aliases.removed) are never given again.
 std::vector<std::string> assign_ids(const std::string& registry, const EntrySource& src, const Aliases& aliases,
-                                    const std::vector<GameEntry>& entries, const std::map<uint32_t, std::string>* by_item_id);
+                                    const std::vector<GameEntry>& entries, const std::map<uint32_t, std::string>* by_item_id,
+                                    std::vector<std::string>* notes = nullptr);
+
+// The one id grammar (tools/registrygen KILN_ID, C# RegistryId, the data section's schema): <namespace>:<name>, namespace
+// [a-z0-9][a-z0-9_.-]*, name [a-z0-9_.-]+, then optionally a clash suffix "~" and 8 to 32 lower-case hex digits.
+bool is_kiln_id(const std::string& id);
 
 }  // namespace kc::reg::map

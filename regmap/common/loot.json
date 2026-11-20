@@ -36,7 +36,7 @@
       "read": "now",
       "backend": "live",
       "state": "unproven",
-      "reason": "read by the roll per the decompile; not yet seen in a lab",
+      "reason": "the roll reads it in the decompiled code; not yet seen in a lab roll",
       "evidence": "docs/re/content.md 0x16db30"
     },
     "stack.maxScaled": {
@@ -47,7 +47,7 @@
       "read": "now",
       "backend": "live",
       "state": "unproven",
-      "reason": "read by the roll per the decompile; not yet seen in a lab"
+      "reason": "the roll reads it in the decompiled code; not yet seen in a lab roll"
     },
     "rarities": {
       "paths": [
@@ -64,7 +64,7 @@
         "legendary": "Legendary"
       },
       "state": "unproven",
-      "reason": "two reverse-engineering notes disagree whether rolls read it live (docs/re/content.md 8.4 vs open question 6): a lab roll settles it"
+      "reason": "whether a roll reads the rarities live is not settled (two notes disagree): a lab roll settles it"
     },
     "fixedRarity": {
       "paths": [

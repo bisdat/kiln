@@ -133,7 +133,7 @@
       "read": "unknown",
       "backend": "live",
       "state": "unproven",
-      "reason": "the reader of blockSetup.quality is not traced (the per-impact block writer is; which member it reads is not)"
+      "reason": "when the game reads the block value is not traced yet"
     },
     "staminaCost": {
       "paths": [
@@ -164,7 +164,7 @@
       "read": "unknown",
       "backend": "live",
       "state": "unproven",
-      "reason": "when the game reads fuelSetup.burnTime is not traced"
+      "reason": "when the game reads the fuel burn time is not traced yet"
     },
     "comfort": {
       "paths": [
@@ -174,7 +174,7 @@
       "read": "unknown",
       "backend": "live",
       "state": "unproven",
-      "reason": "when the game reads comfortSetup.comfortAmount is not traced"
+      "reason": "when the game reads the comfort value is not traced yet"
     },
     "damage.cut": {
       "paths": [

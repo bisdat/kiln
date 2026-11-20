@@ -1,0 +1,264 @@
+{
+  "doc": "Kiln id cases both id makers must agree on: native regmap.cpp assign_ids (registry_regmap_test.cpp) and tools/registrygen/regmap_ids.py derive (test_regmap_ids.py). Made-up entries, no game data.",
+  "cases": [
+    {
+      "name": "names, clashes, unnamed",
+      "registry": "items",
+      "src": {
+        "unnamed": "item_%08x"
+      },
+      "aliases": {},
+      "entries": [
+        {
+          "guid": "11111111-0000-0000-0000-000000000001",
+          "name": "Material_T1_Wood_Logs",
+          "id": 1
+        },
+        {
+          "guid": "22222222-0000-0000-0000-000000000002",
+          "name": "Twin",
+          "id": 2
+        },
+        {
+          "guid": "33333333-0000-0000-0000-000000000003",
+          "name": "Twin",
+          "id": 3
+        },
+        {
+          "guid": "44444444-0000-0000-0000-000000000004",
+          "name": "TWIN",
+          "id": 4
+        },
+        {
+          "guid": "55555555-0000-0000-0000-000000000005",
+          "name": "",
+          "id": 2882400018
+        }
+      ],
+      "expect": [
+        "game:material_t1_wood_logs",
+        "game:twin",
+        "game:twin~33333333",
+        "game:twin~44444444",
+        "game:item_abcdef12"
+      ]
+    },
+    {
+      "name": "a taken suffix grows",
+      "registry": "items",
+      "src": {
+        "unnamed": "item_%08x"
+      },
+      "aliases": {},
+      "entries": [
+        {
+          "guid": "aaaaaaaa-1111-0000-0000-000000000001",
+          "name": "X",
+          "id": 1
+        },
+        {
+          "guid": "aaaaaaaa-2222-0000-0000-000000000002",
+          "name": "X",
+          "id": 2
+        },
+        {
+          "guid": "aaaaaaaa-3333-0000-0000-000000000003",
+          "name": "x",
+          "id": 3
+        }
+      ],
+      "expect": [
+        "game:x",
+        "game:x~aaaaaaaa",
+        "game:x~aaaaaaaa3333"
+      ]
+    },
+    {
+      "name": "pins hold whatever the order",
+      "registry": "items",
+      "src": {
+        "unnamed": "item_%08x"
+      },
+      "aliases": {
+        "pinned": {
+          "22222222-0000-0000-0000-000000000002": "game:old_twin",
+          "44444444-0000-0000-0000-000000000004": "game:twin"
+        }
+      },
+      "entries": [
+        {
+          "guid": "22222222-0000-0000-0000-000000000002",
+          "name": "Twin",
+          "id": 2
+        },
+        {
+          "guid": "33333333-0000-0000-0000-000000000003",
+          "name": "Twin",
+          "id": 3
+        },
+        {
+          "guid": "44444444-0000-0000-0000-000000000004",
+          "name": "TWIN",
+          "id": 4
+        }
+      ],
+      "expect": [
+        "game:old_twin",
+        "game:twin~33333333",
+        "game:twin"
+      ]
+    },
+    {
+      "name": "a removed id is never reused",
+      "registry": "items",
+      "src": {
+        "unnamed": "item_%08x"
+      },
+      "aliases": {
+        "removed": {
+          "game:gone": "1287369"
+        }
+      },
+      "entries": [
+        {
+          "guid": "66666666-0000-0000-0000-000000000006",
+          "name": "Gone",
+          "id": 6
+        }
+      ],
+      "expect": [
+        "game:gone~66666666"
+      ]
+    },
+    {
+      "name": "names outside the grammar",
+      "registry": "items",
+      "src": {
+        "unnamed": "item_%08x"
+      },
+      "aliases": {},
+      "entries": [
+        {
+          "guid": "77777777-0000-0000-0000-000000000007",
+          "name": "Bob's Sword",
+          "id": 7
+        },
+        {
+          "guid": "88888888-0000-0000-0000-000000000008",
+          "name": "Épée",
+          "id": 8
+        },
+        {
+          "guid": "99999999-0000-0000-0000-000000000009",
+          "name": "bob_s_sword",
+          "id": 9
+        }
+      ],
+      "expect": [
+        "game:bob_s_sword",
+        "game:__p__e",
+        "game:bob_s_sword~99999999"
+      ],
+      "notes": 2
+    },
+    {
+      "name": "drop tables from their templates",
+      "registry": "drops",
+      "src": {
+        "nameFrom": "keen::ecs::DefaultInventory.defaultInventory",
+        "unnamed": "drops_%.8s"
+      },
+      "aliases": {},
+      "entries": [
+        {
+          "guid": "a20e8eae-7833-462e-9ea9-59d1e17a1b98",
+          "name": "",
+          "id": 0,
+          "namedBy": [
+            "LootContainer_Enemy_Scavenger_Ranged01",
+            "LootContainer_Enemy_Scavenger_Melee01"
+          ]
+        },
+        {
+          "guid": "b30e8eae-0000-0000-0000-000000000000",
+          "name": "",
+          "id": 0,
+          "namedBy": [
+            "Scatter_X"
+          ]
+        },
+        {
+          "guid": "c40e8eae-0000-0000-0000-000000000000",
+          "name": "",
+          "id": 0,
+          "namedBy": []
+        }
+      ],
+      "expect": [
+        "game:lootcontainer_enemy_scavenger_melee01",
+        "game:scatter_x",
+        "game:drops_c40e8eae"
+      ]
+    },
+    {
+      "name": "loot takes its item's id, and it is taken",
+      "registry": "loot",
+      "src": {
+        "key": "items",
+        "unnamed": "item_%08x"
+      },
+      "aliases": {},
+      "byItemId": {
+        "7": "game:material_t1_wood_logs",
+        "9": "game:item_00000010"
+      },
+      "entries": [
+        {
+          "guid": "",
+          "name": "",
+          "id": 7
+        },
+        {
+          "guid": "",
+          "name": "",
+          "id": 9
+        },
+        {
+          "guid": "",
+          "name": "",
+          "id": 16
+        },
+        {
+          "guid": "",
+          "name": "",
+          "id": 7
+        }
+      ],
+      "expect": [
+        "game:material_t1_wood_logs",
+        "game:item_00000010",
+        "game:item_00000010~00000010",
+        "game:material_t1_wood_logs~00000007"
+      ],
+      "notes": 1
+    },
+    {
+      "name": "the one entry",
+      "registry": "balance",
+      "src": {
+        "unnamed": "balance"
+      },
+      "aliases": {},
+      "entries": [
+        {
+          "guid": "82706b40-61b1-4b8f-8b23-dcec6971bda1",
+          "name": "",
+          "id": 0
+        }
+      ],
+      "expect": [
+        "game:balance"
+      ]
+    }
+  ]
+}

@@ -54,8 +54,12 @@ shows or predicts from its own copy), `state` (mapped, unproven, unmapped; the l
 
 **The routing rule.** The schema's `applies` is the contract. A row's `read` may not be later than its field's
 `applies` (now < worldLoad < restart); a `boot` back-end serves only restart fields and `live` only now and worldLoad
-ones; a read time that is not traced makes the row unproven. Both the native reader and regmap_check.py refuse a row that
-breaks it.
+ones; a read-only field has back-end `none`; a read time that is not traced makes the row unproven, and its field ships the
+cautious `applies` (worldLoad or restart, never now). regmap_check.py fails on a row that breaks it; the native reader
+(`load_dir`) loads such a row as unproven (refused per entry, its reason the rule it breaks) and names it in its errors.
+
+**Reasons are shown to players and mod authors.** A row's `reason` is in Kiln words (the field, what is not known); the
+game's member and type names go in `evidence` only. regmap_check.py refuses a reason that names one.
 
 ## <side>/<exe sha256>.json: one game build
 
@@ -68,12 +72,30 @@ breaks it.
 ```
 
 A field is applied only on a build whose record is `verified` and lists its row `ok`; everything else is refused per
-entry with the reason (BRIEF 6.2: "Unmapped: items.power is not mapped for game build <b> yet (a Kiln update is
-needed)"). A record is written by `regmap_check.py --exe <a copy of the exe> --record` (later `kilnctl update`) after
-the proof; never by hand.
+entry with the reason, which names the field and the game build and ends "; this edit was not applied" (BRIEF 6.2:
+"Unmapped: items.power is not mapped for game build 1287369 yet (a Kiln update is needed); this edit was not applied").
+**No record for the running exe** (a game update Kiln has not mapped yet): every field is Unproven ("... is not proven
+for this game build (server exe f0d824be) (no verified regmap record for it yet; a Kiln update is needed)"), so Kiln
+never writes a field it has not proven on that exact build; reads of the game's own values are not affected.
+
+A record is written by `regmap_check.py --exe <a copy of the exe> --record --side <side> --game-build <b>` (later
+`kilnctl update`) after the proof; never by hand. With `--entries` (this build's entries, made by
+`regmap_entries.py --exe <copy> --out <file>`), `--ids-in` (the previous build's id table) and `--ids-out` it also computes
+the alias deltas below; the entries file and the id tables hold the game's names and stay outside the repository (a
+build folder; at run time kiln.content keeps the id table of the running build in its own data folder). Without
+`--entries` the previous record's aliases are carried as they are.
 
 **Alias deltas (D3).** The full name-to-GUID table is made at every start from the game's own data; a record keeps only
-what must not move: `renames` ({registry, guid, id}: the entry keeps this id although its debug name changed),
-`suffixes` ({registry, guid, id}: a clash suffix given once and kept), `removals` ({registry, id, removedIn}: every
-edit naming it is refused "removed by game build ..."). Identifiers only (GUIDs and Kiln ids), never names or values of
-the game's data (coordinator ruling, 2026-11-20). How ids are made: docs/kiln/modding/registries/README.md "Ids".
+what must not move, carried forward from the previous build's record:
+- `renames` ({registry, guid, id}): this entry keeps this id: its debug name changed, the order of the archive changed,
+  its drop table's templates changed, it holds a name another entry also has, or its name had characters outside the id
+  grammar;
+- `suffixes` ({registry, guid, id}): a clash suffix given once and kept;
+- `removals` ({registry, id, removedIn}): an entry the build no longer has; its id is retired (never given again) and
+  every edit naming it is refused "removed by game build ...".
+
+Identifiers only (GUIDs and Kiln ids), never names or values of the game's data (coordinator ruling, 2026-11-20). Drop
+tables are pinned when their name would move (or clash), not all at once: pinning every template-derived table name would
+put a list of the game's template names in the repository; the previous build's id table plus these deltas keep every
+id. How ids are made: docs/kiln/modding/registries/README.md "Ids"; the same rules in regmap_ids.py and regmap.cpp, tested
+on native/services/content/tests/registry_ids_cases.json.

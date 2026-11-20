@@ -52,17 +52,33 @@ bool is_hex_guid(const std::string& g) {
     return true;
 }
 
-bool is_kiln_id(const std::string& id) {
-    const auto colon = id.find(':');
-    if (colon == std::string::npos || colon == 0 || colon + 1 == id.size()) return false;
-    return std::all_of(id.begin(), id.end(), [](char c) {
-        return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.' || c == ':' || c == '~';
-    });
-}
+bool id_char(char c) { return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.'; }
 
 std::string str(const json& j, const char* k) { return j.contains(k) && j[k].is_string() ? j[k].get<std::string>() : std::string(); }
 
 }  // namespace
+
+bool is_kiln_id(const std::string& id) {
+    if (id.empty() || id.size() > 256) return false;
+    const auto colon = id.find(':');
+    if (colon == std::string::npos || colon == 0 || !(std::islower(static_cast<unsigned char>(id[0])) || std::isdigit(static_cast<unsigned char>(id[0]))))
+        return false;
+    for (size_t i = 0; i < colon; ++i)
+        if (!id_char(id[i])) return false;
+    size_t end = id.size();
+    const auto tilde = id.find('~', colon + 1);
+    if (tilde != std::string::npos) {
+        const size_t n = id.size() - tilde - 1;
+        if (n < 8 || n > 32) return false;
+        for (size_t i = tilde + 1; i < id.size(); ++i)
+            if (!std::isxdigit(static_cast<unsigned char>(id[i])) || std::isupper(static_cast<unsigned char>(id[i]))) return false;
+        end = tilde;
+    }
+    if (end == colon + 1) return false;
+    for (size_t i = colon + 1; i < end; ++i)
+        if (!id_char(id[i])) return false;
+    return true;
+}
 
 bool Aliases::is_removed(const std::string& registry, const std::string& id, std::string* build) const {
     const auto it = removed.find(registry + "|" + id);
@@ -202,6 +218,7 @@ bool read_json(const std::filesystem::path& p, json* out, std::vector<std::strin
 
 bool load_dir(const std::string& dir, const std::string& side, const std::string& exe_sha256, RegMap* out, std::vector<std::string>* errs) {
     *out = RegMap{};
+    out->side = side, out->exe_sha256 = exe_sha256;
     namespace fs = std::filesystem;
     std::error_code ec;
     std::vector<fs::path> files;
@@ -214,6 +231,16 @@ bool load_dir(const std::string& dir, const std::string& side, const std::string
         if (!read_json(p, &doc, errs)) continue;
         RegistryMap m;
         if (!load_common(doc, &m, errs)) continue;
+        for (const std::string& broken : check_routing(m)) {
+            errs->push_back(broken);
+            const auto colon = broken.find(": ");
+            const std::string field = broken.substr(m.registry.size() + 1, colon - m.registry.size() - 1);
+            const auto it = m.rows.find(field);
+            if (it != m.rows.end() && it->second.state == RowState::Mapped) {
+                it->second.state = RowState::Unproven;
+                it->second.reason = "Kiln's mapping breaks its own routing rule (" + broken.substr(colon + 2) + ")";
+            }
+        }
         if (p.stem().string() != m.registry) errs->push_back(p.filename().string() + ": the file of registry \"" + m.registry + "\" is " + m.registry + ".json");
         out->registries[m.registry] = std::move(m);
     }
@@ -232,7 +259,10 @@ bool load_dir(const std::string& dir, const std::string& side, const std::string
 }
 
 Mapping RegMap::mapping(const std::string& registry, const std::string& field, std::string* reason) const {
+    static const char* const kNotApplied = "; this edit was not applied";
     const std::string q = registry + "." + field;
+    const std::string build_name = has_build && !build.game_build.empty() ? "game build " + build.game_build
+                                                                          : "this game build (" + side + " exe " + exe_sha256.substr(0, 8) + ")";
     const auto reg = registries.find(registry);
     const Row* row = nullptr;
     if (reg != registries.end()) {
@@ -240,21 +270,21 @@ Mapping RegMap::mapping(const std::string& registry, const std::string& field, s
         if (it != reg->second.rows.end()) row = &it->second;
     }
     if (!row || row->state == RowState::Unmapped) {
-        *reason = "Unmapped: " + q + " is not mapped yet" + (row && !row->reason.empty() ? " (" + row->reason + ")" : std::string());
+        *reason = "Unmapped: " + q + " is not mapped for " + build_name + " yet (a Kiln update is needed" +
+                  (row && !row->reason.empty() ? ": " + row->reason : std::string()) + ")" + kNotApplied;
         return Mapping::Unmapped;
     }
     if (!has_build || !build.verified) {
-        *reason = "Unproven: no verified regmap record for this game build" + (has_build ? " (" + build.game_build + ")" : std::string()) +
-                  ": " + q + " is not applied";
+        *reason = "Unproven: " + q + " is not proven for " + build_name + " (no verified regmap record for it yet; a Kiln update is needed)" + kNotApplied;
         return Mapping::Unproven;
     }
     const auto b = build.rows.find(q);
     if (b == build.rows.end() || b->second != BuildRow::Ok) {
-        *reason = "Unmapped: " + q + " is not mapped for game build " + build.game_build + " yet (a Kiln update is needed)";
+        *reason = "Unmapped: " + q + " is not mapped for " + build_name + " yet (a Kiln update is needed)" + kNotApplied;
         return Mapping::Unmapped;
     }
     if (row->state == RowState::Unproven) {
-        *reason = "Unproven: " + q + ": " + row->reason;
+        *reason = "Unproven: " + q + " is not proven for " + build_name + " (" + row->reason + ")" + kNotApplied;
         return Mapping::Unproven;
     }
     reason->clear();
@@ -271,6 +301,7 @@ std::vector<std::string> check_routing(const RegistryMap& m) {
         const int applies = f->applies == gen::Applies::Now ? 0 : f->applies == gen::Applies::WorldLoad ? 1 : 2;
         if (row.read == Read::Unknown) {
             if (row.state != RowState::Unproven) out.push_back(q + ": the game's read time is not traced: the row is unproven until it is");
+            if (applies == 0) out.push_back(q + ": the game's read time is not traced: the schema ships the cautious applies (worldLoad or restart), not now");
         } else {
             const int read = row.read == Read::Now ? 0 : row.read == Read::WorldLoad ? 1 : 2;
             if (read > applies)
@@ -289,47 +320,73 @@ std::vector<std::string> check_routing(const RegistryMap& m) {
 }
 
 std::vector<std::string> assign_ids(const std::string& registry, const EntrySource& src, const Aliases& aliases,
-                                    const std::vector<GameEntry>& entries, const std::map<uint32_t, std::string>* by_item_id) {
+                                    const std::vector<GameEntry>& entries, const std::map<uint32_t, std::string>* by_item_id,
+                                    std::vector<std::string>* notes) {
     std::vector<std::string> ids(entries.size());
     std::set<std::string> taken;
+    const std::string prefix = registry + "|";
+    for (const auto& [key, build] : aliases.removed)  // a removed entry's id is never given again
+        if (key.compare(0, prefix.size(), prefix) == 0) taken.insert(key.substr(prefix.size()));
     // pinned ids hold first, whatever the order
     for (size_t i = 0; i < entries.size(); ++i) {
-        const auto it = aliases.pinned.find(registry + "|" + lower(entries[i].guid));
+        const auto it = aliases.pinned.find(prefix + lower(entries[i].guid));
         if (it != aliases.pinned.end()) ids[i] = it->second, taken.insert(it->second);
     }
+    const auto suffixed = [&](const std::string& base, std::string hex) {
+        std::string id = base;
+        if (hex.empty()) hex = "00000000";
+        for (size_t n = 8; taken.count(id) && n <= std::max<size_t>(hex.size(), 8) + 4; n += 4)
+            id = base + "~" + hex.substr(0, std::min(n, hex.size()));
+        return id;
+    };
     for (size_t i = 0; i < entries.size(); ++i) {
         if (!ids[i].empty()) continue;
         const GameEntry& e = entries[i];
+        std::string hex;
+        for (char c : lower(e.guid))
+            if (c != '-') hex += c;
+        if (hex.empty()) {
+            char buf[16];
+            std::snprintf(buf, sizeof buf, "%08x", static_cast<unsigned>(e.id));
+            hex = buf;
+        }
         if (src.key == "items" && by_item_id) {
             const auto it = by_item_id->find(e.id);
-            if (it != by_item_id->end()) { ids[i] = it->second; continue; }
+            if (it != by_item_id->end()) {
+                std::string id = it->second;
+                if (taken.count(id)) {
+                    if (notes) notes->push_back(registry + ": a second entry for " + id + " (" + hex + ") gets a suffix");
+                    id = suffixed(it->second, hex);
+                }
+                taken.insert(id);
+                ids[i] = id;
+                continue;
+            }
         }
-        std::string name;
+        std::string raw;
         if (!src.name_from.empty()) {
             std::vector<std::string> by;
             for (const std::string& t : e.named_by) by.push_back(lower(t));
             std::sort(by.begin(), by.end());
-            if (!by.empty()) name = by.front();
+            if (!by.empty()) raw = by.front();
         } else {
-            name = lower(e.name);
+            raw = lower(e.name);
         }
+        std::string name;
+        for (char c : raw) name += id_char(c) ? c : '_';
+        if (name != raw && notes) notes->push_back(registry + ": \"" + raw + "\" is outside the id grammar: " + name + " (" + hex + ", pinned by the record)");
         if (name.empty()) {
             char buf[64] = {};
-            const std::string g = lower(e.guid);
             if (src.unnamed.find("%08x") != std::string::npos) std::snprintf(buf, sizeof buf, src.unnamed.c_str(), static_cast<unsigned>(e.id));
-            else if (src.unnamed.find("%.8s") != std::string::npos) std::snprintf(buf, sizeof buf, src.unnamed.c_str(), g.c_str());
+            else if (src.unnamed.find("%.8s") != std::string::npos) std::snprintf(buf, sizeof buf, src.unnamed.c_str(), hex.c_str());
             else if (!src.unnamed.empty() && src.unnamed.find('%') == std::string::npos) std::snprintf(buf, sizeof buf, "%s", src.unnamed.c_str());
             else std::snprintf(buf, sizeof buf, "entry_%08x", static_cast<unsigned>(e.id));
             name = buf;
         }
-        std::string id = "game:" + name;
-        if (taken.count(id)) {
-            std::string hex;
-            for (char c : lower(e.guid))
-                if (c != '-') hex += c;
-            size_t n = 8;
-            do id = "game:" + name + "~" + hex.substr(0, std::min(n, hex.size())), n += 4;
-            while (taken.count(id) && n <= hex.size() + 4);
+        std::string id = suffixed("game:" + name, hex);
+        if (!is_kiln_id(id)) {
+            if (notes) notes->push_back(registry + ": \"" + id + "\" is not a Kiln id: game:entry_" + hex.substr(0, 8) + " instead");
+            id = suffixed("game:entry_" + hex.substr(0, 8), hex);
         }
         taken.insert(id);
         ids[i] = id;

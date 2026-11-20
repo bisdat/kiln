@@ -17,6 +17,7 @@ absent; --exe checks everything. Exit 0: no error.
 """
 import argparse
 import json
+import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -24,6 +25,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import registrygen as rg  # noqa: E402
+import regmap_ids  # noqa: E402
 
 # reflection kinds (tools/kfc/kfc/refl.py, the same numbers in sigdb/types)
 K_BOOL, K_U8, K_S8, K_U16, K_S16, K_U32, K_S32, K_U64, K_S64, K_F32, K_F64 = range(1, 12)
@@ -277,6 +279,14 @@ def check(root, db):
         for f in rows:
             if f not in specs:
                 res.errors.append(f"{name}.{f}: the schema has no such field")
+        # a refusal reason is shown to players and mod authors: Kiln words only (the game's names belong in "evidence")
+        game = rg.game_names(root, model.registries)
+        for f, row in rows.items():
+            reason = str(row.get("reason") or "")
+            bad = rg.GAME_WORDS.search(reason) or next((w for w in sorted(game) if re.search(r"\b" + re.escape(w) + r"\b", reason)), None)
+            if bad:
+                res.errors.append(f"{name}.{f}: the reason names the game's {bad.group(0) if hasattr(bad, 'group') else bad!r} "
+                                  "(Kiln words only; game members go in evidence)")
         e = m.get("entries", {})
         rtype = e.get("resourceType", "")
         root_t = db.get(rtype)
@@ -312,6 +322,8 @@ def check(root, db):
             if read == "unknown":
                 if row.get("state") != "unproven":
                     errs.append(f"{q}: the game's read time is not traced: the row is unproven until it is")
+                if spec_row.applies == "now":
+                    errs.append(f"{q}: the game's read time is not traced: the schema ships the cautious applies (worldLoad or restart), not now")
             elif read not in READ_RANK:
                 errs.append(f"{q}: read is now, worldLoad, restart or unknown")
             elif READ_RANK[read] > READ_RANK[spec_row.applies]:
@@ -346,17 +358,55 @@ def check(root, db):
     return res
 
 
-def record(root, db, side, game_build, steam_build):
+def previous_record(root, side, game_build):
+    """The newest record of this side from an earlier game build (by number), or None."""
+    best = None
+    for p in sorted((Path(root) / "regmap" / side).glob("*.json")):
+        d = json.loads(p.read_text(encoding="utf-8"))
+        b = str(d.get("gameBuild", ""))
+        if b.isdigit() and str(game_build).isdigit() and int(b) < int(game_build) and (best is None or int(b) > int(best["gameBuild"])):
+            best = d
+    return best
+
+
+def compute_aliases(root, entries, previous, previous_table, game_build):
+    """The record's aliases and this build's id table from its entries (regmap_entries.py), the previous record and the
+    previous build's id table. Registries in load order: loot takes the items' ids."""
+    maps = load_regmap(root)
+    prev = regmap_ids.aliases_from_json((previous or {}).get("aliases", {}))
+    per, table = {}, {}
+    item_ids = {}
+    for name in ("items", "recipes", "loot", "drops", "balance"):
+        if name not in maps or name not in entries.get("registries", {}):
+            continue
+        src = maps[name].get("entries", {})
+        es = entries["registries"][name]
+        al, ids, t = regmap_ids.record_aliases(name, src, prev.get(name, {}), (previous_table or {}).get(name, {}), es,
+                                               game_build, item_ids if src.get("key") == "items" else None)
+        if name == "items":
+            item_ids = {e["id"]: i for e, i in zip(es, ids)}
+        per[name] = al
+        table[name] = t
+    return regmap_ids.aliases_json(per), table
+
+
+def record(root, db, side, game_build, steam_build, entries=None, previous=None, previous_table=None):
+    """(record, id table): the record of this build from the proof; its aliases from the entries when given, else the
+    previous record's carried as they are."""
     res = check(root, db)
     proof = ("regmap_check.py --exe: every mapped row resolved and type-checked against this exe's own reflection"
              if not res.errors and not res.absent else "regmap_check.py --exe: not every row resolved (see rows)")
+    if entries is not None:
+        aliases, table = compute_aliases(root, entries, previous, previous_table, game_build)
+    else:
+        aliases, table = (previous or {}).get("aliases") or {"renames": [], "removals": [], "suffixes": []}, None
     return {"regmap": 1, "side": side, "exeSha256": db.exe_sha256, "gameBuild": game_build, "steamBuild": steam_build,
             # verified: the proof covered every root type; a row that failed it is listed "unmapped" and refused alone
             "verified": not res.absent,
             "proof": proof,
             "layouts": {k: f"0x{v:08x}" for k, v in sorted(res.layouts.items()) if v is not None},
             "rows": dict(sorted(res.rows.items())),
-            "aliases": {"renames": [], "removals": [], "suffixes": []}}
+            "aliases": aliases}, table
 
 
 def main(argv=None):
@@ -367,6 +417,10 @@ def main(argv=None):
     ap.add_argument("--side", choices=("server", "client"))
     ap.add_argument("--game-build", default="")
     ap.add_argument("--steam-build", default="")
+    ap.add_argument("--entries", help="this build's entries (regmap_entries.py; kept outside the repository)")
+    ap.add_argument("--previous", help="the previous build's record (default: the newest earlier record of this side)")
+    ap.add_argument("--ids-in", help="the previous build's id table (written by --ids-out for that build)")
+    ap.add_argument("--ids-out", help="write this build's id table here (GUID -> id: names, keep it outside the repository)")
     a = ap.parse_args(argv)
     root = Path(a.root)
     sources = []
@@ -391,7 +445,14 @@ def main(argv=None):
             if not a.exe or not a.side:
                 print("regmap_check: --record needs --exe and --side", file=sys.stderr)
                 return 2
-            rec = record(root, db, a.side, a.game_build, a.steam_build)
+            prev = json.loads(Path(a.previous).read_text()) if a.previous else previous_record(root, a.side, a.game_build)
+            entries = json.loads(Path(a.entries).read_text()) if a.entries else None
+            if entries is None:
+                print("regmap_check: no --entries: the previous record's aliases are carried as they are", file=sys.stderr)
+            prev_table = json.loads(Path(a.ids_in).read_text()) if a.ids_in else None
+            rec, table = record(root, db, a.side, a.game_build, a.steam_build, entries, prev, prev_table)
+            if a.ids_out and table is not None:
+                Path(a.ids_out).write_text(json.dumps(table), encoding="utf-8")
             out = root / "regmap" / a.side / f"{db.exe_sha256}.json"
             out.parent.mkdir(parents=True, exist_ok=True)
             out.write_text(json.dumps(rec, indent=2) + "\n", encoding="utf-8")
