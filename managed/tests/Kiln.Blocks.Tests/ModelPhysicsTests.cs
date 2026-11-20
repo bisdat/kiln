@@ -131,6 +131,28 @@ public sealed class ModelPhysicsTests : IDisposable
     }
 
     [Fact]
+    public void A_scaled_body_on_a_model_with_physics_from_physics_json_is_refused()
+    {
+        var ctx = new BlockContext(Mod("phys-scaled"), "creature golem");
+        var side = new JsonObject { ["physics"] = new JsonObject { ["spec"] = FullHash, ["cloth"] = 1, ["chains"] = 0 } };
+        // the body names no cloth itself: its model's cloth comes from assets/physics.json, and the game would scale it by the body's scale
+        var e = Assert.Throws<BlockError>(() => NpcPhysics.CheckCooked(ctx, new BodyBlock { Model = "models/cape.gltf", Scale = 2 }, side, "models/cape", "body"));
+        Assert.Equal("body.scale", e.Field);
+        Assert.Contains("keeps scale 1", e.Problem, StringComparison.Ordinal);
+        // scale 1, or a model without physics, is fine
+        NpcPhysics.CheckCooked(ctx, new BodyBlock { Model = "models/cape.gltf", Scale = 1 }, side, "models/cape", "body");
+        NpcPhysics.CheckCooked(ctx, new BodyBlock { Model = "models/cape.gltf", Scale = 2 }, new JsonObject { ["guid"] = Guid.Empty.ToString() }, "models/cape", "body");
+    }
+
+    [Fact]
+    public void Null_colliders_are_no_colliders()
+    {
+        var none = new BodyBlock { Model = "m.gltf", Cloth = [new ModelClothBlock { Pin = [1], Colliders = null! }] };
+        Assert.Equal(NpcPhysics.SpecBytes(new BodyBlock { Model = "m.gltf", Cloth = [new ModelClothBlock { Pin = [1] }] }), NpcPhysics.SpecBytes(none));
+        Compiler.Define(Mod("phys-null-colliders"), "cape", none);
+    }
+
+    [Fact]
     public void A_body_asks_for_what_its_build_cooked()
     {
         var ctx = new BlockContext(Mod("phys-cooked"), "creature golem");
