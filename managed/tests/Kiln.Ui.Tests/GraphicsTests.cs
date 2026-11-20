@@ -530,6 +530,28 @@ public unsafe class GraphicsTests : IDisposable
     }
 
     [Fact]
+    public void A_choice_that_needs_a_restart_gets_one_toast()
+    {
+        var amd = GraphicsSettings.Default with { Upscaler = UpscalerChoice.Amd };
+        var restart = UpscalerStatus.FromNative(Phase(2, 1));
+        var t0 = new DateTime(2026, 11, 20, 0, 0, 0, DateTimeKind.Utc);
+        var n = new GraphicsPage.RestartNotice();
+        Assert.Null(n.Due(amd, restart, t0));  // not armed: the player did not change it here
+        n.Arm(UpscalerChoice.Amd, t0);
+        Assert.Null(n.Due(amd, UpscalerStatus.FromNative(Phase(2, 0)), t0.AddMilliseconds(16)));  // the status has not caught up yet
+        Assert.Equal("Restart the game to use AMD FSR. Until then the game's own FSR 3 runs.", n.Due(amd, restart, t0.AddMilliseconds(33)));
+        Assert.Null(n.Due(amd, restart, t0.AddMilliseconds(50)));  // once
+        n.Arm(UpscalerChoice.Amd, t0.AddSeconds(10));
+        Assert.Null(n.Due(amd, restart, t0.AddSeconds(10.1)));  // once per choice and session
+        var xess = amd with { Upscaler = UpscalerChoice.Xess };
+        n.Arm(UpscalerChoice.Xess, t0.AddSeconds(20));
+        Assert.Null(n.Due(xess, UpscalerStatus.FromNative(Phase(3, 0)), t0.AddSeconds(24)));  // applied at once: no restart, dropped
+        Assert.Null(n.Due(xess, restart, t0.AddSeconds(24.1)));
+        n.Arm(UpscalerChoice.Xess, t0.AddSeconds(30));
+        Assert.Equal("Restart the game to use Intel XeSS. Until then the game's own FSR 3 runs.", n.Due(xess, restart, t0.AddSeconds(30.5)));
+    }
+
+    [Fact]
     public void The_page_says_what_runs_behind_fsr_3_and_why_the_choice_does_not()
     {
         var amd = GraphicsSettings.Default with { Upscaler = UpscalerChoice.Amd };
@@ -552,8 +574,16 @@ public unsafe class GraphicsTests : IDisposable
             GraphicsPage.StatusLines(amd with { Upscaler = UpscalerChoice.Xess }, Phase(0, 9, aside: 1)));
         // not FSR 3 in the game's settings; chosen while the game runs
         Assert.Equal(KilnText.T("graphics.upscaler.running.not_fsr"), GraphicsPage.StatusLines(amd, Phase(1, 0))[0]);
-        Assert.Equal("Intel XeSS runs from the next start of the game: Kiln sets it up when the game starts.",
-            GraphicsPage.StatusLines(GraphicsSettings.Default with { Upscaler = UpscalerChoice.Xess }, Phase(0, 1))[1]);
+        var restartLines = GraphicsPage.StatusLines(GraphicsSettings.Default with { Upscaler = UpscalerChoice.Xess }, Phase(0, 1));
+        Assert.Equal("Intel XeSS runs from the next start of the game: Kiln sets it up when the game starts.", restartLines[^1]);
+        // ... and the restart leads, plainly (29.19 beta 2: a player missed the reason line and took the game's FSR 3 for AMD FSR)
+        Assert.Equal("Restart the game to use Intel XeSS. Until then the game's own FSR 3 runs.", restartLines[0]);
+        Assert.Equal("Restart the game to use AMD FSR. Until then the game's own FSR 3 runs.",
+            GraphicsPage.RestartLine(amd with { AmdUpscaler = AmdUpscalerMode.Fsr3 }, UpscalerStatus.FromNative(Phase(2, 1))));
+        Assert.Null(GraphicsPage.RestartLine(GraphicsSettings.Default, UpscalerStatus.FromNative(Phase(2, 1))));
+        Assert.Null(GraphicsPage.RestartLine(amd, UpscalerStatus.FromNative(Phase(2, 2))));
+        Assert.Null(GraphicsPage.RestartLine(amd, null));
+        Assert.DoesNotContain(GraphicsPage.StatusLines(amd, Phase(2, 2, UpscalerNow.FsrSeen)), l => l.StartsWith("Restart the game", StringComparison.Ordinal));
         // a newer reason; a kiln-ui.dll without phase B
         Assert.Equal("AMD FSR does not run (reason 40 from a newer Kiln), so the game's own FSR 3 runs.", GraphicsPage.StatusLines(amd, Phase(2, 40))[^1]);
         Assert.Equal([KilnText.T("graphics.upscaler.running.unknown")],

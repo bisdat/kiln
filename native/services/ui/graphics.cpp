@@ -699,7 +699,7 @@ static void upscale_readout(const KilnUiGraphicsStatus& st) {
     if (running == upscale::Running::game_fsr3)
         ImGui::TextUnformatted(text::fill(text::get("native.graphics.upscale"), {{"upscaler", text::get("native.graphics.game_fsr3")},
             {"render", render}, {"output", output}}).c_str());
-    if (st.upscale_reason) {
+    if (st.upscale_reason && !upscale::restart_to_use(st.upscaler, st.upscale_reason)) {  // a restart leads the readout instead
         // the reason in kiln.log's short English (upscale_logic.h why_text), as the readout names the upscalers: the
         // players' sentences (graphics.upscaler.reason.*, the docs' table) are the Graphics page's and the launcher's
         const auto chosen = static_cast<gfx::Upscaler>(st.upscaler);
@@ -721,6 +721,11 @@ void graphics_overlay() {
                                        ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings |
                                        ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoMove;
     if (ImGui::Begin("##kiln.graphics.readout", nullptr, flags)) {
+        // a chosen upscaler that runs only from the next game start leads, in a warm colour (a player read the game's FSR 3
+        // as AMD FSR for a session, 29.19 beta 2)
+        if (upscale::restart_to_use(st.upscaler, st.upscale_reason))
+            ImGui::TextColored(ImVec4(1.0f, 0.78f, 0.35f, 1.0f), "%s",
+                text::fill(text::get("native.graphics.upscale_restart"), {{"upscaler", gfx::upscaler_name(static_cast<gfx::Upscaler>(st.upscaler))}}).c_str());
         ImGui::TextUnformatted(text::fill(text::get("native.graphics.fps"), {{"rendered", fmt_fps(st.rendered_fps)},
             {"output", fmt_fps(st.output_fps)}, {"ms", fmt_ms(st.frame_ms)}}).c_str());
         const std::string output = fmt_size(st.output_width, st.output_height);

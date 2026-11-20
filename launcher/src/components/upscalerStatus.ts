@@ -57,6 +57,20 @@ export interface UpscalerView {
   detail?: string;
   /** The choice needs files that are not in the game (or not as Kiln pinned them): offer this component's download. */
   offer: VendorComponent | null;
+  /** The running game must restart for the choice to run ("Restart the game to use AMD FSR..."): shown first, as a
+   *  warning, so it is not missed (a player took the game's FSR 3 for AMD FSR 3.1, 29.19 beta 2). */
+  restart?: string;
+}
+
+/** The running game needs a restart for `choice`: Kiln's swap goes in only for the choice the game started with. From
+ *  the game's file: its reason (restart, for the choice it has), else what it started with as far as the file shows (a
+ *  vendor's upscaler running, or Kiln's hooks not in at all). */
+export function restartNeeded(choice: UpscalerChoice, state: GraphicsNow | undefined | null): boolean {
+  const s = state?.state.upscaler;
+  if (!state?.current || !s || choice === "game") return false;
+  if (s.chosen === choice) return reasonOf(s.reason) === "restart";
+  const started = s.running === "amdFsr4" || s.running === "amdFsr31" ? "amd" : s.running === "xess" ? "xess" : s.hooked === false ? "game" : null;
+  return started !== null && started !== choice;
 }
 
 /** What the Graphics card and the Deck say about the upscaler. `aside`: GameStatus.graphicsStepAside. */
@@ -80,7 +94,8 @@ export function upscalerView(choice: UpscalerChoice, amd: AmdUpscalerMode, state
     if (why) lines.push(reasonText(why, s.chosen, s.aside ?? [], s.reasonNumber));
     // the choice changed while that game runs: when it applies
     if (state.current && (s.chosen !== choice || (choice === "amd" && s.amdUpscaler !== amd))) lines.push(t("settings.graphics.upscaler.changedNow", { upscaler: choiceName(choice) }));
-    return { heading: state.current ? "now" : "last", lines, detail: why && s.detail ? s.detail : undefined, offer };
+    const restart = restartNeeded(choice, state) ? t("settings.graphics.upscaler.restartNow", { upscaler: choiceName(choice) }) : undefined;
+    return { heading: state.current ? "now" : "last", lines, detail: why && s.detail ? s.detail : undefined, offer, ...(restart ? { restart } : {}) };
   }
   if (choice === "game") return { heading: null, lines: [], offer: null };
   const lines: string[] = [];

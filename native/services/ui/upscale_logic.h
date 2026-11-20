@@ -156,6 +156,11 @@ inline void planes(float a, float b, float* near_plane, float* far_plane) {
 inline bool latch_at_frame(bool any, uint32_t latched, uint32_t latched_pin, uint32_t choice, uint32_t pin) {
     return any && (latched != choice || latched_pin != pin);
 }
+// The readout and the Graphics page lead with "Restart the game to use ..." when the chosen upscaler (KilnUiGraphicsStatus
+// upscaler, a Choice) runs only from the next game start (reason, a Why): a player missed the reason line (29.19 beta 2).
+inline bool restart_to_use(uint32_t chosen, uint32_t reason) {
+    return static_cast<Choice>(chosen) != Choice::game && static_cast<Why>(reason) == Why::restart;
+}
 inline float sane_exposure(float e) { return std::isfinite(e) && e > 0 ? e : 1.0f; }
 inline float sane_fov(float f) { return std::isfinite(f) && f > 0.01f && f < 3.1f ? f : 1.1345f; }
 

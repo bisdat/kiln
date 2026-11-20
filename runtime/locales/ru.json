@@ -1041,6 +1041,7 @@
       "size_version": "Версия {version}, рисует в {render} для {output}.",
       "amd_fsr3_auto": "Выбор AMD пал на FSR 3.1: FSR 4 не работает на этой видеокарте или драйвере.",
       "detail": "Подробности: {detail}",
+      "restart_now": "Перезапустите игру, чтобы использовать {upscaler}. До тех пор работает собственный FSR 3 игры.",
       "reason": {
         "restart": "{upscaler} заработает со следующего запуска игры: Kiln настраивает его при старте игры.",
         "files_missing": "Файлы {upscaler} ещё не скачаны, поэтому работает собственный FSR 3 игры.",
@@ -1090,13 +1091,14 @@
       "dlss": "DLSS {mode}: {render} -> {output}, пресет {preset}",
       "preset_default": "по умолчанию",
       "not_dlss": "Сейчас не DLSS (FSR 3 игры, XeSS или ничего): {output}",
-      "unknown": "Апскейлер: станет известен со следующего запуска игры: {output}",
+      "unknown": "DLSS: станет известен со следующего запуска игры: {output}",
       "aside": "Апскейлер: оставлен {tools}: {output}",
       "cap": "Ограничение кадров {fps} fps",
       "cap_aside": "Ограничение кадров {fps} fps: выкл. из-за {tools}",
       "upscale": "Вместо FSR 3: {upscaler}: {render} -> {output}",
       "game_fsr3": "собственный FSR 3 игры",
-      "upscale_why": "{upscaler} не работает: {why}"
+      "upscale_why": "{upscaler} не работает: {why}",
+      "upscale_restart": "Перезапустите игру, чтобы использовать {upscaler}"
     }
   }
 }

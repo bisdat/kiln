@@ -2831,6 +2831,7 @@
         "version": "버전 {version}.",
         "amdFsr3Auto": "AMD의 선택으로 FSR 3.1이 정해졌습니다. 이 그래픽 카드나 드라이버에서는 FSR 4가 실행되지 않습니다.",
         "changedNow": "그 게임이 시작된 뒤 {upscaler}을(를) 골랐습니다. 게임이 다음에 FSR을 준비할 때, 또는 다음 실행부터 적용됩니다.",
+        "restartNow": "{upscaler}를 쓰려면 게임을 다시 시작하세요. 그때까지는 게임 자체의 FSR 3가 실행됩니다.",
         "detail": "자세히: {detail}",
         "plan": {
           "amd": "게임 그래픽 설정에서 FSR 3를 고르면 Kiln이 그 자리에서 AMD FSR을 실행합니다. 그래픽 카드와 드라이버가 지원하면 FSR 4, 아니면 FSR 3.1입니다.",

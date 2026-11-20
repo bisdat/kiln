@@ -128,6 +128,11 @@ export function UpscalerChoiceBlock({ values, disabled, onSet, state, aside, fil
         <Select style={{ maxWidth: 420 }} id="gfx-upscaler" value={choice} disabled={disabled} onChange={(v) => onSet("graphics.upscaler", v)}
           options={UPSCALER_CHOICES.map((v) => ({ value: v, label: t(`settings.graphics.upscaler.choice.${v}`) }))} />
       </Field>
+      {view.restart && (
+        <Banner tone="warn">
+          <span data-testid="upscaler-restart">{view.restart}</span>
+        </Banner>
+      )}
       {choice === "amd" && (
         <Field label={t("settings.graphics.upscaler.amdLabel")} hint={t("settings.graphics.upscaler.amdHint")} htmlFor="gfx-amd-upscaler">
           <Select style={{ maxWidth: 420 }} id="gfx-amd-upscaler" value={amd} disabled={disabled} onChange={(v) => onSet("graphics.amdUpscaler", v)}

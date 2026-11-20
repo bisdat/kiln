@@ -43,13 +43,14 @@ inline constexpr English kEnglish[] = {
     {"native.graphics.dlss", "DLSS {mode}: {render} -> {output}, preset {preset}"},
     {"native.graphics.preset_default", "default"},
     {"native.graphics.not_dlss", "Not DLSS now (the game's FSR 3, XeSS or none): {output}"},
-    {"native.graphics.unknown", "Upscaler: read from the next game start: {output}"},
+    {"native.graphics.unknown", "DLSS: read from the next game start: {output}"},
     {"native.graphics.aside", "Upscaler: left to {tools}: {output}"},
     {"native.graphics.cap", "Frame cap {fps} fps"},
     {"native.graphics.cap_aside", "Frame cap {fps} fps: off for {tools}"},
     {"native.graphics.upscale", "Behind FSR 3: {upscaler}: {render} -> {output}"},
     {"native.graphics.game_fsr3", "the game's own FSR 3"},
     {"native.graphics.upscale_why", "{upscaler} is not running: {why}"},
+    {"native.graphics.upscale_restart", "Restart the game to use {upscaler}"},
 };
 
 inline std::string english(std::string_view key) {

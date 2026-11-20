@@ -66,8 +66,8 @@ function Rows({ game }: { game: GameInstall }) {
       )}
       {view.heading && (
         <Row id="set-upscaler-now" title={t("deck.settings.upscalerNow")} aria-label={t("deck.settings.upscalerNow")}
-          sub={<span className="deck-wrap" data-testid="deck-upscaler-now">{[...view.lines, ...(view.detail ? [t("settings.graphics.upscaler.detail", { detail: view.detail })] : [])].join(" ")}</span>}
-          end={<Word tone={view.heading === "now" ? "ok" : "info"}>{t(`settings.graphics.upscaler.heading.${view.heading}`)}</Word>} />
+          sub={<span className="deck-wrap" data-testid="deck-upscaler-now">{[...(view.restart ? [view.restart] : []), ...view.lines, ...(view.detail ? [t("settings.graphics.upscaler.detail", { detail: view.detail })] : [])].join(" ")}</span>}
+          end={<Word tone={view.restart ? "warn" : view.heading === "now" ? "ok" : "info"}>{t(`settings.graphics.upscaler.heading.${view.heading}`)}</Word>} />
       )}
       {(files.status.data?.components ?? []).map((c) => {
         const row = files.row(c);

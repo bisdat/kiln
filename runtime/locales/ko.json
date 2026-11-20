@@ -1023,6 +1023,7 @@
       "size_version": "버전 {version}, {output}용으로 {render}에서 렌더링합니다.",
       "amd_fsr3_auto": "AMD의 선택으로 FSR 3.1이 정해졌습니다. 이 그래픽 카드나 드라이버에서는 FSR 4가 실행되지 않습니다.",
       "detail": "자세히: {detail}",
+      "restart_now": "{upscaler}를 쓰려면 게임을 다시 시작하세요. 그때까지는 게임 자체의 FSR 3가 실행됩니다.",
       "reason": {
         "restart": "{upscaler}은(는) 다음 게임 실행부터 작동합니다. Kiln은 게임이 시작될 때 준비합니다.",
         "files_missing": "{upscaler} 파일을 아직 다운로드하지 않아 게임 자체 FSR 3가 실행됩니다.",
@@ -1066,13 +1067,14 @@
       "dlss": "DLSS {mode}: {render} -> {output}, 프리셋 {preset}",
       "preset_default": "기본",
       "not_dlss": "지금은 DLSS가 아님 (게임의 FSR 3, XeSS 또는 없음): {output}",
-      "unknown": "업스케일러: 다음 게임 실행 때 읽음: {output}",
+      "unknown": "DLSS: 다음 게임 실행 때 읽음: {output}",
       "aside": "업스케일러: {tools}에 맡김: {output}",
       "cap": "프레임 제한 {fps} fps",
       "cap_aside": "프레임 제한 {fps} fps: {tools} 때문에 꺼짐",
       "upscale": "FSR 3 뒤에서: {upscaler}: {render} -> {output}",
       "game_fsr3": "게임 자체 FSR 3",
-      "upscale_why": "{upscaler}이(가) 실행되지 않음: {why}"
+      "upscale_why": "{upscaler}이(가) 실행되지 않음: {why}",
+      "upscale_restart": "{upscaler}를 쓰려면 게임 재시작"
     }
   }
 }

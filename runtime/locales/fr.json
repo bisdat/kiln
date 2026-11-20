@@ -1029,6 +1029,7 @@
       "size_version": "Version {version}, rendu en {render} pour {output}.",
       "amd_fsr3_auto": "La sélection d'AMD a choisi FSR 3.1 : FSR 4 ne tourne pas sur cette carte graphique ou ce pilote.",
       "detail": "Détails : {detail}",
+      "restart_now": "Redémarrez le jeu pour utiliser {upscaler}. D'ici là, c'est le FSR 3 du jeu qui tourne.",
       "reason": {
         "restart": "{upscaler} tourne à partir du prochain lancement du jeu : Kiln le prépare au démarrage du jeu.",
         "files_missing": "Les fichiers de {upscaler} ne sont pas encore téléchargés, c'est donc le FSR 3 du jeu qui tourne.",
@@ -1074,13 +1075,14 @@
       "dlss": "DLSS {mode} : {render} -> {output}, préréglage {preset}",
       "preset_default": "par défaut",
       "not_dlss": "Pas de DLSS actuellement (FSR 3 du jeu, XeSS ou aucun) : {output}",
-      "unknown": "Mise à l'échelle : lue au prochain lancement du jeu : {output}",
+      "unknown": "DLSS : lu au prochain lancement du jeu : {output}",
       "aside": "Mise à l'échelle : laissée à {tools} : {output}",
       "cap": "Limite d'images {fps} fps",
       "cap_aside": "Limite d'images {fps} fps : désactivée pour {tools}",
       "upscale": "Derrière FSR 3 : {upscaler} : {render} -> {output}",
       "game_fsr3": "le FSR 3 du jeu",
-      "upscale_why": "{upscaler} ne tourne pas : {why}"
+      "upscale_why": "{upscaler} ne tourne pas : {why}",
+      "upscale_restart": "Redémarrez le jeu pour utiliser {upscaler}"
     }
   }
 }

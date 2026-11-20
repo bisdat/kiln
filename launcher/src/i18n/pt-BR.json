@@ -2887,6 +2887,7 @@
         "version": "Versão {version}.",
         "amdFsr3Auto": "A seleção da AMD escolheu o FSR 3.1: o FSR 4 não roda nesta placa de vídeo ou driver.",
         "changedNow": "Você escolheu {upscaler} depois que aquele jogo iniciou: vale quando o jogo preparar o FSR de novo, ou a partir do próximo início.",
+        "restartNow": "Reinicie o jogo para usar o {upscaler}. Até lá, roda o FSR 3 do próprio jogo.",
         "detail": "Detalhes: {detail}",
         "plan": {
           "amd": "Com o FSR 3 escolhido nas configurações gráficas do jogo, o Kiln roda o AMD FSR no lugar dele: FSR 4 onde sua placa de vídeo e driver o rodam, senão FSR 3.1.",

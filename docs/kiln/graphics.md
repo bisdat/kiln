@@ -199,10 +199,13 @@ pass already patched by another module, and Kiln's overlay hooks off. DLSSTweaks
 
 ## Readout
 A few lines in the top right corner of the game, drawn by Kiln's overlay:
+- first, in a warm colour, "Restart the game to use AMD FSR" (or Intel XeSS) while the chosen upscaler runs only from the
+  next game start (it was chosen after the game started with another; the Graphics page, right under the choice, and the
+  launcher's Graphics card lead with the same, and the Graphics page shows it once as a notice when the choice is made);
 - rendered and output frames a second and the mean frame time over the last half second;
 - `DLSS Quality: 1707x960 -> 2560x1440, preset K` while the game upscales with DLSS (the render size is this frame's:
   dynamic resolution may lower it); else "Not DLSS now" (the game's FSR 3, XeSS or no upscaler: Kiln does not read the
-  game's own upscalers) or, without Kiln's DLSS hooks, "read from the next game start";
+  game's own upscalers) or, without Kiln's DLSS hooks, "DLSS: read from the next game start";
 - (phase B, with an upscaler other than the game's own chosen, or Kiln's swap in) `Behind FSR 3: AMD FSR 4 (4.1.2):
   960x540 -> 1920x1080`, or the game's own FSR 3 and "AMD FSR is not running: its files are not downloaded (launcher:
   Settings, Graphics)": the reason in kiln.log's short words, to keep the corner small (the Graphics page says it in

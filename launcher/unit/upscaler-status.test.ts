@@ -7,7 +7,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { UPSCALER_REASONS, type GraphicsNow, type GraphicsStateFile } from "../src/api/commands";
 import type { VendorComponent } from "../src/api/vendor";
-import { amdModeOf, choiceOf, componentFor, reasonOf, upscalerView } from "../src/components/upscalerStatus";
+import { amdModeOf, choiceOf, componentFor, reasonOf, restartNeeded, upscalerView } from "../src/components/upscalerStatus";
 import en from "../src/i18n/en.json";
 
 const repo = join(import.meta.dir, "..", "..");
@@ -99,6 +99,25 @@ test("now: what the running game wrote, with the version and the reason", () => 
   const changed = upscalerView("xess", "auto", now({ running: "amdFsr4" }), both("downloaded", "downloaded"));
   expect(changed.heading).toBe("now");
   expect(changed.lines.at(-1)).toBe("You have chosen Intel XeSS since that game started: it applies when the game next sets FSR up, or from its next start.");
+});
+
+test("a choice that needs a game restart leads with it (29.19 beta 2: the game's FSR 3 taken for AMD FSR 3.1)", () => {
+  const lead = (u: string) => `Restart the game to use ${u}. Until then the game's own FSR 3 runs.`;
+  // chosen in the game after a start with the game's own: its file says restart
+  const r = upscalerView("amd", "fsr3", now({ chosen: "amd", amdUpscaler: "fsr3", running: "gameFsr3", reason: "restart", hooked: false }), both("downloaded"));
+  expect(r.restart).toBe(lead("AMD FSR"));
+  expect(r.lines.at(-1)).toBe("AMD FSR runs from the next start of the game: Kiln sets it up when the game starts.");
+  // chosen in the launcher while the game runs: from what the game started with
+  expect(upscalerView("xess", "auto", now({ running: "amdFsr4" }), both("downloaded", "downloaded")).restart).toBe(lead("Intel XeSS"));
+  expect(upscalerView("amd", "auto", now({ chosen: "game", running: "gameFsr3", hooked: false }), both("downloaded")).restart).toBe(lead("AMD FSR"));
+  expect(restartNeeded("amd", now({ chosen: "xess", running: "xess" }))).toBe(true);
+  // no restart: it runs, the game's own chosen, the start's choice back, unknown start, not the running game's file
+  expect(upscalerView("amd", "auto", now({ running: "amdFsr4", version: "4.1.2" }), both("downloaded")).restart).toBeUndefined();
+  expect(restartNeeded("game", now({ chosen: "amd", running: "gameFsr3", reason: "restart" }))).toBe(false);
+  expect(restartNeeded("amd", now({ chosen: "game", running: "amdFsr31" }))).toBe(false);
+  expect(restartNeeded("amd", now({ chosen: "game", running: "gameFsr3", hooked: true }))).toBe(false);
+  expect(restartNeeded("amd", now({ chosen: "amd", running: "gameFsr3", reason: "restart" }, false))).toBe(false);
+  expect(restartNeeded("amd", null)).toBe(false);
 });
 
 test("the last game: shown while its choice is the one set and what it said still holds", () => {

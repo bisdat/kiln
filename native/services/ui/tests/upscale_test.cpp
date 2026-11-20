@@ -302,6 +302,15 @@ static void latch() {
     CHECK(latch_at_frame(true, amd, autop, amd, fsr3));      // the FSR 3.1 pin
 }
 
+// The readout leads with "Restart the game to use ..." only for a chosen upscaler that runs from the next start.
+static void restart_lead() {
+    const uint32_t game = static_cast<uint32_t>(Choice::game), amd = static_cast<uint32_t>(Choice::amd), xess = static_cast<uint32_t>(Choice::xess);
+    CHECK(restart_to_use(amd, static_cast<uint32_t>(Why::restart)) && restart_to_use(xess, static_cast<uint32_t>(Why::restart)));
+    CHECK(!restart_to_use(game, static_cast<uint32_t>(Why::restart)));  // "the game's own": nothing to restart for
+    CHECK(!restart_to_use(amd, static_cast<uint32_t>(Why::none)) && !restart_to_use(amd, static_cast<uint32_t>(Why::waiting)) &&
+          !restart_to_use(amd, static_cast<uint32_t>(Why::files_missing)));
+}
+
 static void status() {
     StatusIn in;
     // "game" chosen, nothing hooked: off, no reason
@@ -553,6 +562,7 @@ int main(int argc, char** argv) {
     frames();
     calls();
     status();
+    restart_lead();
     latch();
     amd_map();
     std::printf("upscale_test: %d checks passed\n", g_checks);

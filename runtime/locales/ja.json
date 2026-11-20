@@ -1023,6 +1023,7 @@
       "size_version": "バージョン {version}、{output} 用に {render} で描画しています。",
       "amd_fsr3_auto": "AMD の選択で FSR 3.1 になりました。このグラフィックカードまたはドライバーでは FSR 4 は動作しません。",
       "detail": "詳細: {detail}",
+      "restart_now": "{upscaler} を使うにはゲームを再起動してください。それまではゲーム自身の FSR 3 が動作します。",
       "reason": {
         "restart": "{upscaler} は次回のゲーム起動から動作します。Kiln はゲームの起動時にそれを準備します。",
         "files_missing": "{upscaler} のファイルがまだダウンロードされていないため、ゲーム本来の FSR 3 が動作します。",
@@ -1066,13 +1067,14 @@
       "dlss": "DLSS {mode}: {render} -> {output}、プリセット {preset}",
       "preset_default": "既定",
       "not_dlss": "現在は DLSS ではありません（ゲームの FSR 3、XeSS、またはなし）: {output}",
-      "unknown": "アップスケーラー: 次のゲーム起動時に読み取ります: {output}",
+      "unknown": "DLSS: 次のゲーム起動時に読み取ります: {output}",
       "aside": "アップスケーラー: {tools} に任せています: {output}",
       "cap": "フレーム上限 {fps} fps",
       "cap_aside": "フレーム上限 {fps} fps: {tools} のためオフ",
       "upscale": "FSR 3 の代わり: {upscaler}: {render} -> {output}",
       "game_fsr3": "ゲーム本来の FSR 3",
-      "upscale_why": "{upscaler} は動作していません: {why}"
+      "upscale_why": "{upscaler} は動作していません: {why}",
+      "upscale_restart": "{upscaler} を使うにはゲームを再起動"
     }
   }
 }

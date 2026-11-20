@@ -1018,7 +1018,7 @@
       "dlss": "DLSS {mode}：{render} → {output}，预设 {preset}",
       "preset_default": "默认",
       "not_dlss": "未用 DLSS（FSR 3、XeSS 或关闭超分辨率），输出 {output}",
-      "unknown": "重启游戏后可识别超分辨率技术，当前输出 {output}",
+      "unknown": "DLSS：下次启动游戏后读取，当前输出 {output}",
       "aside": "Kiln 未接管超分辨率（{tools}），输出 {output}",
       "cap": "帧率上限 {fps} fps",
       "cap_aside": "限帧 {fps} fps 未生效（{tools}）"

@@ -532,9 +532,50 @@ internal static unsafe class GraphicsPage
         else if ((st.Flags & DlssRestart) == 0 && (s.DlssSet || s.Readout))
             lines.Add(KilnText.T("graphics.status.dlss_none"));
         if ((st.Flags & DlssRestart) != 0) lines.Add(KilnText.T("graphics.status.restart"));
-        lines.AddRange(UpscalerLines(s, UpscalerStatus.FromNative(st), available: true));
+        var upscaler = UpscalerStatus.FromNative(st);
+        // a choice that needs a game restart leads, plainly (a player missed the reason line under the rest, 29.19 beta 2)
+        if (RestartLine(s, upscaler) is { } restart) lines.Insert(0, restart);
+        lines.AddRange(UpscalerLines(s, upscaler, available: true));
         return lines;
     }
+
+    /// <summary>"Restart the game to use AMD FSR. Until then the game's own FSR 3 runs." when the chosen upscaler runs only
+    /// from the next game start (Kiln's swap goes in for the choice the game started with); else null.</summary>
+    internal static string? RestartLine(GraphicsSettings s, UpscalerNow? now) =>
+        s.Upscaler != UpscalerChoice.Game && now?.Reason == UpscalerReason.Restart
+            ? KilnText.T("graphics.upscaler.restart_now", ("upscaler", ChoiceName(s))) : null;
+
+    /// <summary>The one-time toast when a choice made on this page needs a game restart: armed by the player's change, shown
+    /// once the status says restart (the next frames), once per choice and session; dropped when the status does not
+    /// say it within a few seconds (the choice applies at once).</summary>
+    internal sealed class RestartNotice
+    {
+        private UpscalerChoice? _armed;
+        private DateTime _armedAt;
+        private readonly HashSet<UpscalerChoice> _said = new();
+
+        public void Arm(UpscalerChoice choice, DateTime now)
+        {
+            _armed = choice;
+            _armedAt = now;
+        }
+
+        /// <summary>The toast's text when it is due now, else null.</summary>
+        public string? Due(GraphicsSettings s, UpscalerNow? status, DateTime now)
+        {
+            if (_armed is not { } armed) return null;
+            if (s.Upscaler != armed || now - _armedAt > TimeSpan.FromSeconds(3))
+            {
+                _armed = null;
+                return null;
+            }
+            if (RestartLine(s, status) is not { } text) return null;
+            _armed = null;
+            return _said.Add(armed) ? text : null;
+        }
+    }
+
+    private static readonly RestartNotice _restartNotice = new();
 
     /// <summary>The upscaler's lines under "Now": what runs behind the game's FSR 3, its version and sizes, and why the
     /// choice does not run (the shared reason texts, graphics.upscaler.reason.*). Nothing while the choice is the game's own
@@ -678,8 +719,21 @@ internal static unsafe class GraphicsPage
         var choice = (int)cur.Upscaler;
         ui.NextItemWidth(w);
         if (ui.Combo(KilnText.T("graphics.upscaler.choice") + "##kiln.gfx.upscaler", ref choice, _upscalerItems, 3))
+        {
             GraphicsTools.Change(cur with { Upscaler = (UpscalerChoice)choice });
+            _restartNotice.Arm((UpscalerChoice)choice, DateTime.UtcNow);
+        }
         cur = GraphicsTools.Current;
+        {
+            var upscalerNow = st is { } stNow ? UpscalerStatus.FromNative(stNow) : null;
+            if (RestartLine(cur, upscalerNow) is { } restart)
+            {
+                // right under the choice, in the accent colour: the page's "Now" is further down
+                using (ui.PushColor(UiColorSlot.Text, GameColors.GoldBright)) ui.TextWrapped(restart);
+                if (_restartNotice.Due(cur, upscalerNow, DateTime.UtcNow) is { } toast) Hud.Toast(toast, ToastKind.Warning, 8);
+            }
+            else _restartNotice.Due(cur, upscalerNow, DateTime.UtcNow);
+        }
         if (cur.Upscaler == UpscalerChoice.Amd)
         {
             var amd = (int)cur.AmdUpscaler;

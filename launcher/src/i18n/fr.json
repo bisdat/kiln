@@ -2887,6 +2887,7 @@
         "version": "Version {version}.",
         "amdFsr3Auto": "La sélection d'AMD a choisi FSR 3.1 : FSR 4 ne tourne pas sur cette carte graphique ou ce pilote.",
         "changedNow": "Vous avez choisi {upscaler} depuis le lancement de cette partie : il s'applique la prochaine fois que le jeu prépare le FSR, ou à partir de son prochain lancement.",
+        "restartNow": "Redémarrez le jeu pour utiliser {upscaler}. D'ici là, c'est le FSR 3 du jeu qui tourne.",
         "detail": "Détails : {detail}",
         "plan": {
           "amd": "Avec FSR 3 choisi dans les paramètres graphiques du jeu, Kiln exécute AMD FSR à sa place : FSR 4 si votre carte graphique et votre pilote le font tourner, sinon FSR 3.1.",

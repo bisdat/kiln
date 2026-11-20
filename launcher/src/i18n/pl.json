@@ -2999,6 +2999,7 @@
         "version": "Wersja {version}.",
         "amdFsr3Auto": "Wybór AMD padł na FSR 3.1: FSR 4 nie działa na tej karcie graficznej lub sterowniku.",
         "changedNow": "Od startu tamtej gry wybrałeś {upscaler}: zadziała, gdy gra następnym razem przygotuje FSR, albo od jej następnego uruchomienia.",
+        "restartNow": "Uruchom grę ponownie, aby używać {upscaler}. Do tego czasu działa własne FSR 3 gry.",
         "detail": "Szczegóły: {detail}",
         "plan": {
           "amd": "Gdy w ustawieniach grafiki gry wybrany jest FSR 3, Kiln uruchamia w jego miejsce AMD FSR: FSR 4 tam, gdzie obsługuje go twoja karta graficzna i sterownik, inaczej FSR 3.1.",
