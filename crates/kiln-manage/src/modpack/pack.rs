@@ -1251,6 +1251,76 @@ pub fn build(dirs: &DataDirs, req: &BuildRequest, out_dir: &Path, progress: &mut
     Err(err(ErrorCode::Unsupported, "kiln-manage was built without the zip feature"))
 }
 
+/// The archive of one Library entry as Crucible stores it (f/<sha256>.zip, shared by every pack that uses it): the
+/// entry folder's files at the zip's root (a plugin: its one .dll), the files a pack carries of it (no dot entries, no
+/// cook outputs of a Kiln mod), sorted bytewise, every entry dated 1980-01-01 00:00:00, mode 0644, deflate level 6, no
+/// extra fields. No file time or folder path reaches the bytes, so the same entry zips to the same bytes on every PC
+/// (with the same deflate code: a Kiln that changes its zip library may compress differently, which only costs one
+/// more upload). kdh1 recomputed from the entries is the entry's hash (for a plugin, sha256 of its one file).
+#[cfg(feature = "zip")]
+pub fn mod_archive(dirs: &DataDirs, r: &LibraryRef, out: &Path) -> Result<StoredFile> {
+    use std::io::Write;
+    let at = crate::library::path_of(dirs, r)?;
+    let (files, hash) = if r.kind == ModKind::Plugin {
+        let name = at.file_name().and_then(|n| n.to_str()).ok_or_else(|| Error::invalid(format!("plugin {}: no file name", r.id)))?.to_string();
+        let hash = crate::hash::sha256_file(&at)?.0;
+        (vec![(name, at.clone())], hash)
+    } else {
+        let files = super::mod_files(r.kind, &at)?;
+        let hash = crate::hash::of_mod_records(r.kind, records(&files)?)?;
+        (files, hash)
+    };
+    if hash != r.hash {
+        return Err(err(ErrorCode::Refused, format!("{} {} changed in its Library folder since it was imported ({hash}, expected {})", r.kind.as_str(), r.id, r.hash)));
+    }
+    let mut seen = BTreeSet::new();
+    for (rel, _) in &files {
+        if !valid_rel(rel) || rel.split('/').any(windows_device) || !seen.insert(fold_name(rel)) {
+            return Err(err(ErrorCode::Refused, format!("{} {}: {rel:?} cannot be a file on every system", r.kind.as_str(), r.id)));
+        }
+    }
+    let time = zip::DateTime::from_date_and_time(1980, 1, 1, 0, 0, 0).map_err(|e| err(ErrorCode::Internal, format!("zip time: {e}")))?;
+    let opts = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated)
+        .compression_level(Some(6))
+        .last_modified_time(time)
+        .unix_permissions(0o644)
+        .system(zip::System::Unix)
+        .large_file(false);
+    if let Some(d) = out.parent() {
+        std::fs::create_dir_all(d).map_err(crate::util::io_at(d, "creating"))?;
+    }
+    let tmp = crate::util::with_suffix(out, ".tmp");
+    let written = (|| -> Result<()> {
+        let f = std::fs::File::create(&tmp).map_err(crate::util::io_at(&tmp, "writing"))?;
+        let mut w = zip::ZipWriter::new(std::io::BufWriter::new(f));
+        let zerr = |e: zip::result::ZipError| err(ErrorCode::Io, format!("writing {}: {e}", tmp.display()));
+        for (rel, p) in &files {
+            let data = std::fs::read(p).map_err(crate::util::io_at(p, "reading"))?;
+            let o = if data.len() as u64 >= 0xFFFF_0000 { opts.large_file(true) } else { opts };
+            w.start_file(rel.as_str(), o).map_err(zerr)?;
+            w.write_all(&data)?;
+        }
+        let mut inner = w.finish().map_err(zerr)?;
+        inner.flush()?;
+        inner.into_inner().map_err(|e| Error::from(e.into_error()))?.sync_all()?;
+        Ok(())
+    })();
+    if let Err(e) = written {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
+    crate::util::rename_replace(&tmp, out)?;
+    let (sha256, size) = crate::hash::sha256_file(out)?;
+    Ok(StoredFile { sha256, size, url: None })
+}
+
+#[cfg(not(feature = "zip"))]
+pub fn mod_archive(dirs: &DataDirs, r: &LibraryRef, out: &Path) -> Result<StoredFile> {
+    let _ = (dirs, r, out);
+    Err(err(ErrorCode::Unsupported, "kiln-manage was built without the zip feature"))
+}
+
 // ================================================================================================= preview
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

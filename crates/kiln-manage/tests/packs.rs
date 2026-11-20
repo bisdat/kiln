@@ -449,3 +449,34 @@ fn an_update_that_fails_while_writing_is_rolled_back() {
     assert_eq!(pack::instance(&dirs, &ip).unwrap().unwrap().version, "1.1.0");
     assert!(pack::undo(&dirs, &ip).is_ok());
 }
+
+#[test]
+fn per_mod_archives_are_the_same_bytes_on_every_pc() {
+    use std::io::Read;
+    let t = tmp("modzip");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let refs = import(&dirs, &[kiln_mod(&t.0, "alpha", "1.0.0")]);
+    let r = find(&refs, "alpha");
+    let a = pack::mod_archive(&dirs, &r, &t.0.join("a.zip")).unwrap();
+    // another PC: the same entry with other file times
+    let at = library::path_of(&dirs, &r).unwrap();
+    let old = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_500_000_000);
+    for f in ["kiln.mod.json", "M.dll"] {
+        std::fs::File::options().write(true).open(at.join(f)).unwrap().set_modified(old).unwrap();
+    }
+    let b = pack::mod_archive(&dirs, &r, &t.0.join("b.zip")).unwrap();
+    assert_eq!((a.sha256.clone(), a.size), (b.sha256.clone(), b.size));
+    assert_eq!(std::fs::read(t.0.join("a.zip")).unwrap(), std::fs::read(t.0.join("b.zip")).unwrap());
+    // the folder's files at the zip's root, sorted; kdh1 recomputed from the entries is the entry's hash
+    let mut z = zip::ZipArchive::new(std::fs::File::open(t.0.join("a.zip")).unwrap()).unwrap();
+    let names: Vec<String> = (0..z.len()).map(|i| z.by_index(i).unwrap().name().unwrap().to_string()).collect();
+    assert_eq!(names, ["M.dll", "kiln.mod.json"]);
+    let mut recs = Vec::new();
+    for i in 0..z.len() {
+        let mut e = z.by_index(i).unwrap();
+        let mut b = Vec::new();
+        e.read_to_end(&mut b).unwrap();
+        recs.push(kiln_manage::hash::Record { path: e.name().unwrap().to_string(), size: b.len() as u64, sha256: kiln_manage::hash::sha256_hex(&b) });
+    }
+    assert_eq!(kiln_manage::hash::of_mod_records(kiln_manage::manifest::ModKind::Kiln, recs).unwrap(), r.hash);
+}
