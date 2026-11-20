@@ -552,6 +552,17 @@ internal static unsafe class UiNative
         public delegate* unmanaged[Cdecl]<GraphicsStatus*, int> GraphicsStatusFn;
     }
 
+    /// <summary>The tail after the graphics tail: chat_completion's slot (bisdat's PR #73, Kiln.Ui's own) and
+    /// subscribe_pointer_press (0.2.0-dev.30: presses on the game's own UI, used by the core's kiln.ui.inventory). Pinned
+    /// here so the offsets cannot drift; Kiln.Ui does not call them.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct TablePointer
+    {
+        public TableGraphics Base;
+        public void* ChatCompletion;
+        public delegate* unmanaged[Cdecl]<ulong, void*, void*, ulong*, int> SubscribePointerPress;
+    }
+
     /// <summary>kiln.ui's graphics tail, or null on a table without it (a kiln-ui.dll older than 0.2.0-dev.29.18). Tests:
     /// <see cref="GraphicsOverride"/>.</summary>
     public static TableGraphics* GraphicsTable

@@ -72,10 +72,7 @@ struct FrameCollector {
 };
 thread_local FrameCollector* t_frame = nullptr;
 
-struct Frame {
-    KilnUiSlotsFrame meta{};
-    std::vector<KilnUiVisibleSlot> slots;
-};
+using Frame = SlotsSnapshot;
 struct Ring {
     std::mutex mu;
     std::shared_ptr<const Frame> latest, previous;
@@ -253,7 +250,9 @@ void publish(FrameCollector& f, uintptr_t sys10) {
         r.previous = std::move(r.latest);
         r.latest = frame;
     }
-    // subscribers, on this (the UI) thread after the frame
+    // slot clicks pressed since the last frame (ui_values_inventory.cpp), then the subscribers, on this (the UI)
+    // thread after the frame
+    clicks_frame_published();
     const auto subs = providers(kListSlots);
     for (const auto& sp : *subs) {
         Provider& p = *sp;
@@ -385,6 +384,12 @@ KilnResult slots_copy(KilnOwner owner, uint64_t expected_session, uint64_t expec
         std::memcpy(out + static_cast<size_t>(i) * stride, &s, n);
     }
     return KILN_OK;
+}
+
+std::shared_ptr<const SlotsSnapshot> slots_latest() {
+    Ring& r = ring();
+    std::lock_guard lk(r.mu);
+    return r.latest;
 }
 
 void slots_reset_for_tests() {

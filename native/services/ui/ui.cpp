@@ -421,6 +421,7 @@ KilnResult KILN_CALL t_unsubscribe(KilnHandle h) {
     }
     if (const KilnResult r = keys_unsubscribe(h); r != KILN_ERR_NOT_FOUND) return r;  // key callbacks (keys.cpp)
     if (const KilnResult r = input_feed_unsubscribe(h); r != KILN_ERR_NOT_FOUND) return r;  // window input (v5)
+    if (const KilnResult r = input_pointer_unsubscribe(h); r != KILN_ERR_NOT_FOUND) return r;  // pointer presses (dev.30)
     if (game_unsubscribe(h)) return KILN_OK;  // menu entries, screen and UI-tick subscriptions
     // Frame callbacks run under Vulkan's mutex. Look up local handles first to avoid recursively locking it.
     if (t_in_frame) return KILN_ERR_WRONG_THREAD;
@@ -533,6 +534,11 @@ void KILN_CALL t_menu_page_host(uint32_t on) {
 // v5: the window's input records (input.cpp)
 KilnResult KILN_CALL t_subscribe_window_input(KilnOwner o, KilnUiWindowInputFn fn, void* u, KilnHandle* out) {
     return input_feed_subscribe(o, fn, u, out);
+}
+
+// presses on the game's own UI (input.cpp, 0.2.0-dev.30)
+KilnResult KILN_CALL t_subscribe_pointer_press(KilnOwner o, KilnUiPointerFn fn, void* u, KilnHandle* out) {
+    return input_pointer_subscribe(o, fn, u, out);
 }
 
 // v6: mods' entries in the game's menus (game.cpp, menu_rows.h)
@@ -651,8 +657,12 @@ static_assert(sizeof(KilnUiImageDraw) == 32 && offsetof(KilnUiImageDraw, width) 
               "KilnUiImageDraw layout (UiNative.ImageDraw)");
 static_assert(offsetof(KilnUiApi, set_texts) == 1008,
               "kiln.ui appends set_texts after image_opaque_rect (0.2.0-dev.29.16; UiNative.TableTexts)");
-static_assert(offsetof(KilnUiApi, graphics_set) == 1016 && offsetof(KilnUiApi, graphics_status) == 1024 && sizeof(KilnUiApi) == 1032,
+static_assert(offsetof(KilnUiApi, graphics_set) == 1016 && offsetof(KilnUiApi, graphics_status) == 1024,
               "kiln.ui appends graphics_set and graphics_status after set_texts (0.2.0-dev.29.18; UiNative.TableGraphics)");
+static_assert(offsetof(KilnUiApi, reserved_chat_completion) == 1032 && offsetof(KilnUiApi, subscribe_pointer_press) == 1040 &&
+                  sizeof(KilnUiApi) == 1048 && sizeof(KilnUiPointerPress) == 32,
+              "kiln.ui keeps 1032 for chat_completion (PR #73) and appends subscribe_pointer_press at 1040 (0.2.0-dev.30; "
+              "UiNative.TablePointer)");
 static_assert(sizeof(KilnUiGraphics) == 48 && offsetof(KilnUiGraphics, custom_scale) == 16 && offsetof(KilnUiGraphics, mode_scale) == 20 &&
                   offsetof(KilnUiGraphics, readout) == 36 && offsetof(KilnUiGraphics, upscaler) == 40 &&
                   offsetof(KilnUiGraphics, amd_upscaler) == 44,
@@ -735,6 +745,8 @@ const KilnUiApi kTable = {
     &t_image_ex, &t_image_opaque_rect,
     &t_set_texts,  // Kiln's own texts (0.2.0-dev.29.16)
     &t_graphics_set, &t_graphics_status,  // Kiln's own graphics tools (0.2.0-dev.29.18)
+    nullptr,                     // 1032: chat_completion (PR #73) takes this slot
+    &t_subscribe_pointer_press,  // presses on the game's own UI (0.2.0-dev.30)
 };
 
 std::string api_path(int kind) {

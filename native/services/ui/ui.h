@@ -136,6 +136,9 @@ bool input_key_held(uint32_t vk);         // the key is down now, as far as the 
 // subscribe_window_input (kiln_ui.h v5): the window's input records for native subscribers. Any thread.
 KilnResult input_feed_subscribe(KilnOwner owner, KilnUiWindowInputFn fn, void* user, KilnHandle* out);
 KilnResult input_feed_unsubscribe(KilnHandle h);  // KILN_ERR_NOT_FOUND: not a window-input subscription
+// subscribe_pointer_press (0.2.0-dev.30): left/right presses over the game's UI for native subscribers. Any thread.
+KilnResult input_pointer_subscribe(KilnOwner owner, KilnUiPointerFn fn, void* user, KilnHandle* out);
+KilnResult input_pointer_unsubscribe(KilnHandle h);  // KILN_ERR_NOT_FOUND: not a pointer subscription
 
 // ---- keys.cpp (the key subscribers: subscribe_key, v7 subscribe_key_ex) ----
 KilnResult keys_subscribe(KilnOwner owner, KilnUiKeyFn fn, void* user, uint32_t flags, KilnHandle* out);  // KILN_UI_KEYS_*

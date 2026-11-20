@@ -1,0 +1,33 @@
+{
+  "format": 1,
+  "side": "client",
+  "comment": "dev.30 ui-hooks (client 26430625, enshrouded.exe 5d9ef2f1; static, no new address): ui.slots.click is kiln.ui.inventory's slot clicks (kiln_ui_inventory.h). It reuses ui.slots.inspect's slot sites (ItemSlot raw link, SlotGeometry mid at 0xc05433, GameUiFrame) and needs the HUD screen (play+play.hud_screen while state+state.ui_state is Play, read by kiln.ui) to tell screens with a pointer (backpack, chest, stations) from the play view, where the hotbar is drawn but a click attacks. The press itself comes from kiln.ui's window procedure (subscribe_pointer_press), not from the game. Evidence: docs/re/game-ui.md 'Native value, slot and text sites' and 'Inventory slots: clicks and marks (dev.30)'. The units-to-pixels mapping (05a-c5) is unverified: client check ui-hooks.c1.",
+  "symbols": {},
+  "constants": {},
+  "features": {
+    "ui.slots.click": {
+      "symbols": [
+        "ui/ItemSlot",
+        "ui/SlotGeometry",
+        "ui/GameUiFrame"
+      ],
+      "constants": [
+        "ui/slot.resultBytes",
+        "ui/slot.hoverCandidate",
+        "ui/view.stride",
+        "ui/view.inventoryPage",
+        "ui/view.slotIndex",
+        "ui/view.item",
+        "ui/view.count",
+        "ui/view.pide",
+        "ui/sys.frame_arg",
+        "ui/sys.canvas_w",
+        "ui/sys.canvas_h",
+        "ui/sys.viewport",
+        "ui/sys.px_per_unit",
+        "ui/state.ui_state",
+        "ui/play.hud_screen"
+      ]
+    }
+  }
+}

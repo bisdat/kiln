@@ -33,9 +33,10 @@ constexpr KilnHandle kHandleMask = (1ull << 48) - 1;
 // The capability row of each list (change subscriptions follow the value rows: none of their own).
 const char* const kRows[kLists] = {"ui.values.detail",        "ui.values.slot",   "ui.values.held",
                                    "ui.values.hud",           "ui.values.hud",    "ui.values.hud",
-                                   "ui.values.tooltip_lines", "ui.slots.inspect", nullptr, "ui.gemforge.inspect"};
+                                   "ui.values.tooltip_lines", "ui.slots.inspect", nullptr, "ui.gemforge.inspect",
+                                   "ui.slots.click"};
 const char* const kListNames[kLists] = {"detail", "slot",  "held",  "health", "stamina",
-                                        "mana",   "lines", "slots", "changes", "gemforge"};
+                                        "mana",   "lines", "slots", "changes", "gemforge", "clicks"};
 
 // Edit masks per value kind (chapter 05a §5.1).
 constexpr uint32_t kMask[kValueKinds] = {
@@ -321,6 +322,10 @@ void logf(int level, const char* fmt, ...) {
     std::vsnprintf(text, sizeof text, fmt, a);
     va_end(a);
     env().log(level, text);
+}
+
+KilnResult register_list(KilnOwner owner, uint32_t list, uint32_t item, void* fn, void* user, KilnUiRegistration* out) {
+    return register_in(owner, list, item, fn, user, out);
 }
 
 const char* row_of(uint32_t list) { return list < kLists ? kRows[list] : nullptr; }

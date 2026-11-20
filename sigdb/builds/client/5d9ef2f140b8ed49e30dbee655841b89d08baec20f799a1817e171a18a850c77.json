@@ -11,7 +11,7 @@
   "declared": {
     "symbols": 814,
     "constants": 904,
-    "features": 233
+    "features": 234
   },
   "features": {
     "abilities.attributes": true,
@@ -221,6 +221,7 @@
     "ui.menu_page_sound": true,
     "ui.menu_scroll": true,
     "ui.screens": true,
+    "ui.slots.click": true,
     "ui.slots.inspect": true,
     "ui.system_menu": true,
     "ui.values.detail": true,
@@ -4034,6 +4035,16 @@
         "ui.menu_scroll": "static",
         "ui.screens": "lab",
         "ui.system_menu": "lab"
+      }
+    },
+    "ui-hooks": {
+      "level": "static",
+      "date": "2026-11-20",
+      "evidence": "resolved offline (tools/sigport/build_record.py)",
+      "symbols": {},
+      "constants": {},
+      "features": {
+        "ui.slots.click": "static"
       }
     },
     "upscale": {
