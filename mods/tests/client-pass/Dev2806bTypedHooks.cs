@@ -4,7 +4,8 @@ using Kiln.Testing;
 
 namespace ClientPass;
 
-// Typed hooks (chapter 06b, since 0.2.0-dev.29): what a real game client still has to show. The native typed link ran
+// Typed hooks (chapter 06b, since 0.2.0-dev.29): what a real game client still has to show. Played in the dev.30 pass
+// (dev28-releases.json ids: the dev.29 pass never ran it; dev.30's client hooks for mods rest on it, docs/kiln/modding/client-hooks.md). The native typed link ran
 // on the client exe in a research session (06b-typed-client, settled); a managed mod's typed hook in a game client has
 // not. Order block 2700-2799 (lab port 28070).
 //
@@ -22,7 +23,7 @@ namespace ClientPass;
 public sealed partial class ClientPassMod
 {
     [ClientCheck("06b-typed-hooks.client", "Typed hooks: a mod's typed hook runs in the game", Area = "Typed hooks",
-        Since = Dev29, Needs = ClientCheckNeeds.Hosted, Order = 2700)]
+        Since = Dev30, Needs = ClientCheckNeeds.Hosted, Order = 2700)]
     public async Task TypedHooksClient(CheckContext c)
     {
         if (!await Need(c, "typed-hook-volume") || !await NeedPlayer(c)) return;

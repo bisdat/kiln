@@ -208,8 +208,10 @@ def _skins(doc, buffers):
 
 def read(path):
     """-> {"primitives": [{"material": index|None, "material_name", "positions", "normals"|None, "tangents"|None,
-    "uvs"|None, "colors"|None, "indices", "ancestors", "morphs"}], "materials": [names], "skins", "node_names", "node_extras", "world"}
-    in glTF space (right-handed, y up, metres). `ancestors` lists the nodes above the primitive's node, nearest first.
+    "uvs"|None, "colors"|None, "indices", "ancestors", "morphs", "mesh", "primitive", "node"}], "materials": [names], "skins", "node_names", "node_extras", "world"}
+    in glTF space (right-handed, y up, metres). `ancestors` lists the nodes above the primitive's node, nearest first. "mesh" and "primitive" are the
+    file's own indices (a mesh used by two nodes gives two primitives with the same pair, "node" tells them apart). The vertices stay as the file
+    has them, one per POSITION element in its order, which is what physics.json's particleIds count.
     A primitive of a skinned node has "skin" (index into "skins") and "influences", and its attributes (morphs too) stay in mesh space."""
     doc, buffers = _load(path)
     scene = doc.get("scenes", [{}])[doc.get("scene", 0)] if doc.get("scenes") else {"nodes": list(range(len(doc.get("nodes", []))))}
@@ -221,7 +223,7 @@ def read(path):
         if "mesh" in node and not str(node.get("name", "")).startswith(REFERENCE):
             skin = node.get("skin")
             mesh = doc["meshes"][node["mesh"]]
-            for p in mesh["primitives"]:
+            for pi, p in enumerate(mesh["primitives"]):
                 if p.get("mode", 4) != 4:
                     raise GltfError("only triangle lists are supported")
                 at = p["attributes"]
@@ -249,7 +251,8 @@ def read(path):
                 if skin is None:
                     morphs = {k: [_xf_dir(m, v) for v in deltas] for k, deltas in morphs.items()}
                 prim = {"material": mi, "material_name": mname, "positions": pos, "normals": nrm,
-                        "tangents": tan, "uvs": uv, "colors": col, "indices": idx, "ancestors": above, "morphs": morphs}
+                        "tangents": tan, "uvs": uv, "colors": col, "indices": idx, "ancestors": above, "morphs": morphs,
+                        "mesh": node["mesh"], "primitive": pi, "node": ni}
                 if skin is not None:
                     prim["skin"] = skin
                     prim["influences"] = _influences(doc, buffers, at, len(pos))

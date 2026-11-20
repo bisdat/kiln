@@ -154,3 +154,64 @@ static Kiln.Ui.Inventory.OnClick(Kiln.SlotClickOptions! options, System.Action<K
 static Kiln.Ui.Inventory.Unmark(Kiln.EntityId item) -> void
 ~override Kiln.SlotMark.Equals(object obj) -> bool
 ~override Kiln.SlotMark.ToString() -> string
+Kiln.GameScreen.Target.get -> Kiln.EntityId
+Kiln.GameScreen.Target.init -> void
+Kiln.InventoryPanelOptions
+Kiln.InventoryPanelOptions.<Clone>$() -> Kiln.InventoryPanelOptions!
+Kiln.InventoryPanelOptions.Equals(Kiln.InventoryPanelOptions? other) -> bool
+Kiln.InventoryPanelOptions.Interactive.get -> bool
+Kiln.InventoryPanelOptions.Interactive.init -> void
+Kiln.InventoryPanelOptions.InventoryPanelOptions() -> void
+Kiln.InventoryPanelOptions.Screens.get -> Kiln.InventoryScreens
+Kiln.InventoryPanelOptions.Screens.init -> void
+Kiln.InventoryPanelOptions.Side.get -> Kiln.InventoryPanelSide
+Kiln.InventoryPanelOptions.Side.init -> void
+Kiln.InventoryPanelOptions.Style.get -> Kiln.UiStyle
+Kiln.InventoryPanelOptions.Style.init -> void
+Kiln.InventoryPanelOptions.Theme.get -> Kiln.UiTheme?
+Kiln.InventoryPanelOptions.Theme.init -> void
+Kiln.InventoryPanelOptions.When.get -> System.Func<Kiln.InventoryScreen, bool>?
+Kiln.InventoryPanelOptions.When.init -> void
+Kiln.InventoryPanelOptions.Width.get -> float
+Kiln.InventoryPanelOptions.Width.init -> void
+Kiln.InventoryPanelSide
+Kiln.InventoryPanelSide.Below = 2 -> Kiln.InventoryPanelSide
+Kiln.InventoryPanelSide.Left = 1 -> Kiln.InventoryPanelSide
+Kiln.InventoryPanelSide.Right = 0 -> Kiln.InventoryPanelSide
+Kiln.InventoryScreen
+Kiln.InventoryScreen.Container.get -> Kiln.EntityId
+Kiln.InventoryScreen.Container.init -> void
+Kiln.InventoryScreen.Deconstruct(out Kiln.InventoryScreenKind Kind, out Kiln.HudScreen Hud, out Kiln.EntityId Container) -> void
+Kiln.InventoryScreen.Equals(Kiln.InventoryScreen other) -> bool
+Kiln.InventoryScreen.Hud.get -> Kiln.HudScreen
+Kiln.InventoryScreen.Hud.init -> void
+Kiln.InventoryScreen.InventoryScreen() -> void
+Kiln.InventoryScreen.InventoryScreen(Kiln.InventoryScreenKind Kind, Kiln.HudScreen Hud, Kiln.EntityId Container) -> void
+Kiln.InventoryScreen.Kind.get -> Kiln.InventoryScreenKind
+Kiln.InventoryScreen.Kind.init -> void
+Kiln.InventoryScreenChangedEvent
+Kiln.InventoryScreenChangedEvent.Current.get -> Kiln.InventoryScreen?
+Kiln.InventoryScreenChangedEvent.InventoryScreenChangedEvent(Kiln.InventoryScreen? previous, Kiln.InventoryScreen? current) -> void
+Kiln.InventoryScreenChangedEvent.Previous.get -> Kiln.InventoryScreen?
+Kiln.InventoryScreenKind
+Kiln.InventoryScreenKind.Backpack = 1 -> Kiln.InventoryScreenKind
+Kiln.InventoryScreenKind.Chest = 2 -> Kiln.InventoryScreenKind
+Kiln.InventoryScreens
+Kiln.InventoryScreens.All = Kiln.InventoryScreens.Backpack | Kiln.InventoryScreens.Chest -> Kiln.InventoryScreens
+Kiln.InventoryScreens.Backpack = 1 -> Kiln.InventoryScreens
+Kiln.InventoryScreens.Chest = 2 -> Kiln.InventoryScreens
+const Kiln.Ui.Inventory.PanelCapability = "ui.inventory.panels" -> string!
+override Kiln.InventoryPanelOptions.Equals(object? obj) -> bool
+override Kiln.InventoryPanelOptions.GetHashCode() -> int
+override Kiln.InventoryPanelOptions.ToString() -> string!
+override Kiln.InventoryScreen.GetHashCode() -> int
+static Kiln.InventoryPanelOptions.operator !=(Kiln.InventoryPanelOptions? left, Kiln.InventoryPanelOptions? right) -> bool
+static Kiln.InventoryPanelOptions.operator ==(Kiln.InventoryPanelOptions? left, Kiln.InventoryPanelOptions? right) -> bool
+static Kiln.InventoryScreen.Of(Kiln.GameScreen screen) -> Kiln.InventoryScreen?
+static Kiln.InventoryScreen.operator !=(Kiln.InventoryScreen left, Kiln.InventoryScreen right) -> bool
+static Kiln.InventoryScreen.operator ==(Kiln.InventoryScreen left, Kiln.InventoryScreen right) -> bool
+static Kiln.Ui.Inventory.AddPanel(Kiln.UiText! title, System.Action<Kiln.UiDraw!, Kiln.InventoryScreen>! draw, Kiln.InventoryPanelOptions? options = null) -> System.IDisposable!
+static Kiln.Ui.Inventory.Screen.get -> Kiln.InventoryScreen?
+static Kiln.Ui.Inventory.ScreenChanged -> System.Action<Kiln.InventoryScreen?, Kiln.InventoryScreen?>?
+~override Kiln.InventoryScreen.Equals(object obj) -> bool
+~override Kiln.InventoryScreen.ToString() -> string

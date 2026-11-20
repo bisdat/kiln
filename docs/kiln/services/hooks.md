@@ -409,6 +409,8 @@ if (Capabilities.Is("hooks.typed") && Capabilities.Is(GetItemVolume.Capability))
 - **Threads**: the handler runs on the thread that calls the function, game worker threads too; it runs as its mod
   (gated calls work), and the mod's unload waits for handlers in flight (one second, then the unload goes on and the
   mod's fragment stays until the last one returns).
+- **Client hooks for mods**: what a hook of the game client may do and the advanced tier's update rule:
+  [../modding/client-hooks.md](../modding/client-hooks.md) (sample `mods/samples/ClientHookSample`, check `ui-hooks.c8`).
 - **A mod's own descriptors**: a `sig` in an entry of the mod's fragment (`sigdb/server.json`, `sigdb/client.json`;
   names `<modid>/...`) becomes a class `Kiln.Sigs.<ModId>.<Name>`, internal to the mod (Kiln.Sdk's generator; the root
   namespace is `KilnSigsNamespace`). It may name a struct of its own fragment or one of Kiln.Sigs (`OptS32`,
