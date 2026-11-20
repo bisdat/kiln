@@ -6,9 +6,10 @@
 //   /drive where                    the player's place, the held item (gear state) and the offered things near
 //   /drive use [radius|e<entity>]   accept the nearest thing's current offer, as pressing E sends it: the game's own
 //                                   AcceptOfferedInteractionEvent (Gameplay.Inject.Interact), validated by the game
-//                                   (range, the offer being active for you). Anvil (equip.c1), forge (equip.c2), well.
+//                                   (range, the offer being active for you). It takes the NEAREST offered thing: run
+//                                   "where" first (a chest would open). Prefer anvil / forge / fill-can, which filter.
 //   /drive anvil [n] / forge        the same, with the nearest Kiln-offered or offered station; anvil repeats n times
-//   /drive fill-can [radius]        the same at the nearest well (06b): the game's fill runs, so its GetItemVolume calls
+//   /drive fill-can [radius]        the same at the nearest well (a template named "...Well...") (06b): the game's fill runs, so its GetItemVolume calls
 //   /drive craft [item] [n]         n crafts of the item's recipe at the nearest station, each the game's own
 //                                   CraftRecipeEvent (Gameplay.Inject.Craft): payment and output by the game, rarity
 //                                   rolls on its result (equip.c10; default rarity-anvil.anvil-blade x 10)
@@ -48,11 +49,11 @@ public sealed class DriverMod : Mod
 
     [Command("drive", Description = "client-pass driver (test only): where | use | anvil | forge | fill-can | craft | provoke | step-away | held",
         Permission = CommandPermission.Admin)]
-    private async Task Drive(CommandContext c)
+    private async Task Drive(CommandContext c, [Greedy] string? line = null)
     {
         if (!c.Source.IsPlayer) throw new CommandException("run it as a player (the console runs as the host's player)");
         EntityId p = c.Source.Player;
-        var a = c.Args;
+        IReadOnlyList<string> a = (line ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         var verb = a.Count > 0 ? a[0].ToLowerInvariant() : "help";
         double Num(int i, double fallback) => a.Count > i && double.TryParse(a[i], System.Globalization.NumberStyles.Float,
             System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : fallback;
@@ -72,13 +73,13 @@ public sealed class DriverMod : Mod
                     var n = (int)Math.Clamp(Num(1, 1), 1, 10);
                     for (var i = 1; i <= n; i++)
                     {
-                        await Use(c, p, 5, null, $"anvil {i}/{n}", KilnOffered);
+                        await Use(c, p, 5, null, $"anvil {i}/{n}", e => Named(e, "anvil") || (KilnOffered(e) && !Named(e, "forge")));
                         if (i < n) await Steps(45);
                     }
                     break;
                 }
-                case "forge": await Use(c, p, 5, null, "forge", KilnOffered); break;
-                case "fill-can": await Use(c, p, Num(1, 5), null, "fill-can", e => !KilnOffered(e)); break;
+                case "forge": await Use(c, p, 5, null, "forge", e => Named(e, "forge") || (KilnOffered(e) && !Named(e, "anvil"))); break;
+                case "fill-can": await Use(c, p, Num(1, 5), null, "fill-can", e => Named(e, "well")); break;
                 case "craft": await Craft(c, p, a.Count > 1 && !double.TryParse(a[1], out _) ? a[1] : DefaultCraft,
                     (int)Math.Clamp(Num(a.Count > 1 && !double.TryParse(a[1], out _) ? 2 : 1, 10), 1, 50)); break;
                 case "provoke": await Provoke(c, p, Num(1, 25)); break;
@@ -96,6 +97,9 @@ public sealed class DriverMod : Mod
     }
 
     private static bool KilnOffered(EntityId e) => Offers.Available && Offers.List().Any(o => o.Entity == e);
+
+    // Only things of that name: a bare "use" next to a chest would open the chest.
+    private static bool Named(EntityId e, string part) => NameOf(e).Contains(part, StringComparison.OrdinalIgnoreCase);
 
     private static string NameOf(EntityId e) => Spawn.Inspect(e)?.TemplateName ?? "?";
 
