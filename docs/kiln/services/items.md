@@ -789,6 +789,9 @@ await Items.SetDurabilityMax(sword, null);                    // the game's own 
 - Test kit: the fake kiln.items keeps the multipliers (no damage or armour is computed) and writes levels and max
   durability with kiln.items' rules; the keeping is Kiln.Blocks' (a mod's test registers no keeper unless Kiln.Blocks
   started).
+- Lab (server 26430253, a copy of a real world, no player; docs/re/items.md section 20): the writes, the hooks installing at
+  the first scale with the server running on, and after a save and restart every value back within about three seconds;
+  with the keeper's pass off the same load showed the game's level clamp and its own max durability.
 - Not confirmed in a real game (guided checks `equip-p7.power`, `equip-p7.armor`, `equip-p7.tooltip`, `equip-p7.reload`): the damage a player deals with a multiplied
   weapon, the damage a player takes in multiplied armour, a Kiln client's scaled tooltip number and a vanilla client's
   unchanged one, the level and durability bar after a load on both.

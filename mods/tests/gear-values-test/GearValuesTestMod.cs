@@ -105,17 +105,21 @@ public sealed class GearValuesTestMod : Mod
         await Steps(2);
         Check(Items.GearOf(armour) is { } a1 && a1.Level == want && a1.ShownLevel == want, $"the game derives the shown level {want}: {Items.GearOf(armour)}");
 
-        var dur = a0.Durability ?? 0;
-        var dm = await Items.SetDurabilityMax(armour, 900);
-        Check(dm.Ok && dm.Kept && dm.After?.DurabilityMax == 900, $"max durability 900: {dm}");
+        // armour pieces have no durability in this game: the sword's (the armour's write is a NotGear refusal)
+        var none = await Items.SetDurabilityMax(armour, 900);
+        Check(none.Status == GearStatus.NotGear, $"an armour piece has no durability: {none}");
+        var dur = s0.Durability ?? 0;
+        var dm = await Items.SetDurabilityMax(sword, 900);
+        Check(dm.Ok && dm.Kept && dm.After?.DurabilityMax == 900 && dm.After.Durability == 900 * dur / Math.Max(1, s0.DurabilityMax ?? 1),
+            $"the sword's max durability 900, the share kept: {dm}");
         await Steps(5);
-        Check(Items.GearOf(armour)?.DurabilityMax == 900, $"the game keeps max durability 900 in the session (it computes it once): {Items.GearOf(armour)} (was {dur}/{a0.DurabilityMax})");
+        Check(Items.GearOf(sword)?.DurabilityMax == 900, $"the game keeps max durability 900 in the session (it computes it once): {Items.GearOf(sword)} (was {dur}/{s0.DurabilityMax})");
 
         var p = Items.SetPower(sword, 2.0);
         Check(p.Ok && p.Power == 2.0 && p.Kept, $"the sword's power x2 (the detour installs now): {p}");
         var ar = Items.SetArmor(armour, 1.5);
         Check(ar.Ok && ar.Armor == 1.5 && ar.Kept, $"the armour's armour x1.5 (the mid hooks install now): {ar}");
-        Check(Items.ValuesOf(sword) is { Power: 2.0, Armor: 1.0 } && Items.ValuesOf(armour) is { Armor: 1.5, KeptBaseLevel: not null, KeptDurabilityMax: 900 },
+        Check(Items.ValuesOf(sword) is { Power: 2.0, Armor: 1.0, KeptDurabilityMax: 900 } && Items.ValuesOf(armour) is { Armor: 1.5, KeptBaseLevel: not null },
             $"read back: {Items.ValuesOf(sword)}; {Items.ValuesOf(armour)}");
         Log.Info($"gear-values-test: rows power {Capabilities.Is("items.gear.power")}, armor {Capabilities.Is("items.gear.armor")} ({Capabilities.Why("items.gear.armor")})");
 
@@ -158,15 +162,17 @@ public sealed class GearValuesTestMod : Mod
         Check(!armour.IsNone && !sword.IsNone, $"after the restart the armour and the sword are in the chest near ({at[0]}, {at[1]}, {at[2]})");
         if (armour.IsNone || sword.IsNone) return;
         Log.Info($"gear-values-test: the armour as first read after the load: {first}");
-        GearState? g = null;
+        Log.Info($"gear-values-test: the sword as first read after the load: {Items.GearOf(sword)}");
+        GearState? g = null, sw = null;
         for (var i = 0; i < 12; i++)  // the keeper's pass runs about once a second
         {
             await Steps(25);
             g = Items.GearOf(armour);
-            if (g is { } x && x.Level == want && x.DurabilityMax == 900 && Items.ValuesOf(armour)?.Armor == 1.5 && Items.ValuesOf(sword)?.Power == 2.0) break;
+            sw = Items.GearOf(sword);
+            if (g?.Level == want && sw?.DurabilityMax == 900 && Items.ValuesOf(armour)?.Armor == 1.5 && Items.ValuesOf(sword)?.Power == 2.0) break;
         }
         Check(g?.Level == want, $"the level outside the range is back: {g}");
-        Check(g?.DurabilityMax == 900, $"max durability 900 is back: {g}");
+        Check(sw?.DurabilityMax == 900, $"the sword's max durability 900 is back: {sw}");
         Check(Items.ValuesOf(armour) is { Armor: 1.5, Kept: true }, $"the armour multiplier is back: {Items.ValuesOf(armour)}");
         Check(Items.ValuesOf(sword) is { Power: 2.0, Kept: true }, $"the power multiplier is back: {Items.ValuesOf(sword)}");
     }

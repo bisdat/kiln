@@ -666,6 +666,18 @@ function's twin in the other exe and checks a pattern's uniqueness).
   session nothing sets it back (`rebalance_perks_and_level` runs once per item entity). So such a level must be written again
   after every load; item data's fingerprint uses the level as a load gives it back (Kiln.Saves, `StableFingerprint`), so the
   record still finds its item.
+- **Lab** (2026-11-19, server 26430253, lab `dev29-eq-p7` on a read-only copy of a real world, no player;
+  `mods/tests/gear-values-test`, logs `dev29/out/eq-p7/lab-boot*-kiln.log`): boot 1, 11 PASS 0 FAIL: an armour piece
+  (`Armor_T2_Warrior_Tank_Chest`, levels 10..10) to level 40 with `ANY_LEVEL` (`itemLevelUi` 40 a step later; refused
+  `OUT_OF_RANGE` without it); armour pieces have no `Durability` (`NOT_GEAR`); a sword's max durability 252 → 900 with
+  current 252 → 900 (the share), still 900 five steps later; the first power scale installed `items/ItemPower`'s detour, the
+  first armour scale both mid hooks, and the server ran on; then a save. Boot 2 (the keeper on), 5 PASS 0 FAIL: the level
+  40, the max durability 900 and both multipliers were back within about three seconds of the load. Boot 3, the control
+  (the keeper's marker removed, so its pass did not run): the first read after the load showed **level 10 and durability
+  252/252**, the game's load clamp and its new max computation, and the multipliers at 1; the item data was still on both
+  items (`base level 40`, `max durability 900` read back), so the fingerprint by the level as loaded found them. Not
+  exercised: a hit or an armour pass with a scale (no player: no impact with a used item starts, `apply_armor` runs for
+  players).
 - **Not verified in a real game:** the damage of a player's swing, shot or cast with a scaled item, the armour of a scaled
   piece in the wearer's damage taken, and what any client shows (the tooltip shows the type's numbers; the level and
   durability bar come from replicated components).

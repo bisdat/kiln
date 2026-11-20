@@ -55,7 +55,8 @@ std::mutex g_mu;  // the writer's side of the table, installs and the details
 scale::Table g_table;
 
 struct Kind {
-    bool resolved = false;             // the feature's symbols and checks passed
+    bool resolved = false;             // the feature's symbols and constants resolved
+    bool layout = false;               // this build's reflection checked (at the first scale: kiln.types loads after us)
     std::atomic<bool> hooked{false};   // its hooks are in
     std::atomic<bool> off{false};      // a fault or a failed install: off for the process
     char why[160] = "";
@@ -258,6 +259,19 @@ bool ensure_hooked(Kind& k, bool power) {
         set_why(k, "%s is held until its guided client check passes (kiln.json preview lifts it)", feature);
         return false;
     }
+    if (!k.layout) {
+        // this build's reflection (kiln.types, loaded after kiln.items: checked here, at the first scale)
+        const auto* t = static_cast<const KilnTypesApi*>(g_api->service(str(KILN_TYPES_SERVICE), 1));
+        char why[160] = "kiln.types is not loaded";
+        if (!t || t->header.size < sizeof(KilnTypesApi) || !(power ? power_layout(t, why, sizeof why) : armor_layout(t, why, sizeof why))) {
+            set_why(k, "%s", why);
+            k.off.store(true);
+            LOGE("%s: %s", feature, k.why);
+            lower(feature, KILN_CAP_REASON_SYMBOL_MISSING, k.why);
+            return false;
+        }
+        k.layout = true;
+    }
     bool ok;
     if (power) {
         ok = h_power.install(g_api, g_owner, g_power_fn, reinterpret_cast<void*>(&hk_power), "items/ItemPower");
@@ -290,9 +304,6 @@ void scale_resolve(const KilnApi* api, KilnOwner owner) {
     g_owner = owner;
     auto sym = [api](const char* n, uintptr_t* out) { return api->symbol(str(n), out) == KILN_OK && *out; };
     auto cst = [api](const char* n, int64_t* out) { return api->constant(str(n), out) == KILN_OK; };
-    const auto* t = static_cast<const KilnTypesApi*>(api->service(str(KILN_TYPES_SERVICE), 1));
-    const bool types = t && t->header.size >= sizeof(KilnTypesApi);
-    char why[160];
     std::lock_guard lock(g_mu);
     const bool world = E.job_storage && E.world_storage > 0 && E.instances_ok;
     if (!api->feature(str(kPowerFeature))) {
@@ -300,9 +311,6 @@ void scale_resolve(const KilnApi* api, KilnOwner owner) {
     } else if (!world || !sym("items/ItemPower", &g_power_fn) || !cst("items/ItemPower.power", &g_power_off) ||
                g_power_off <= kEntryPide || g_power_off > 0x7C) {
         set_why(g_power, "items.gear.power needs item instances, the job's storage and the entry's power offset");
-        lower(kPowerFeature, KILN_CAP_REASON_SYMBOL_MISSING, g_power.why);
-    } else if (!types || !power_layout(t, why, sizeof why)) {
-        set_why(g_power, "%s", types ? why : "kiln.types is not loaded");
         lower(kPowerFeature, KILN_CAP_REASON_SYMBOL_MISSING, g_power.why);
     } else {
         g_power.resolved = true;
@@ -313,14 +321,11 @@ void scale_resolve(const KilnApi* api, KilnOwner owner) {
                !cst("items/ArmorSlot.pide", &g_armor_pide) || g_armor_pide <= 0 || g_armor_pide > 0x88) {
         set_why(g_armor, "items.gear.armor needs item instances, the job's storage and the piece's pide offset");
         lower(kArmorFeature, KILN_CAP_REASON_SYMBOL_MISSING, g_armor.why);
-    } else if (!types || !armor_layout(t, why, sizeof why)) {
-        set_why(g_armor, "%s", types ? why : "kiln.types is not loaded");
-        lower(kArmorFeature, KILN_CAP_REASON_SYMBOL_MISSING, g_armor.why);
     } else {
         g_armor.resolved = true;
     }
-    LOGI("per-instance power (gear_scale): %s; armour: %s", g_power.resolved ? "on (hooked at the first scale)" : g_power.why,
-         g_armor.resolved ? "on (hooked at the first scale)" : g_armor.why);
+    LOGI("per-instance power (gear_scale): %s; armour: %s", g_power.resolved ? "resolved (checked and hooked at the first scale)" : g_power.why,
+         g_armor.resolved ? "resolved (checked and hooked at the first scale)" : g_armor.why);
 }
 
 void scale_world_reset() {
