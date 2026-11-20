@@ -78,6 +78,96 @@ fn redacts_secret_json_fields() {
 }
 
 #[test]
+fn redacts_other_players_names_in_kiln_and_shroudlink_lines() {
+    let r = Redactor::new(Some(HOME), Some("frostling"), Some("frost-desk"));
+    let cases = [
+        ("[I 22:31:42.935] [service:kiln-players.dll] players: joined slot 1 entity 7 'Brim Wyn' (steam 76561198000000002, admin 0, perms 0x1) [event 2]",
+         "[I 22:31:42.935] [service:kiln-players.dll] players: joined slot 1 entity 7 '<player>' (steam <steamid>, admin 0, perms 0x1) [event 2]"),
+        ("[I 22:31:36.187] [kiln] net: Brim (0x81) joined with Kiln 0.2.0-dev.29.19: 6 mod(s), 13 shared channel(s)",
+         "[I 22:31:36.187] [kiln] net: <player> (0x81) joined with Kiln 0.2.0-dev.29.19: 6 mod(s), 13 shared channel(s)"),
+        ("[I 1] [kiln] net: peer Al (0x82) left (in game)", "[I 1] [kiln] net: peer <player> (0x82) left (in game)"),
+        ("[W 1] [kiln] net: kicking Mia (0x83) by admin: spam", "[W 1] [kiln] net: kicking <player> (0x83) by admin: spam"),
+        ("[W 1] [kiln] net: refusing Mia (Kiln 0.2.0-dev.20): too old", "[W 1] [kiln] net: refusing <player> (Kiln 0.2.0-dev.20): too old"),
+        ("[I 1] [kiln] net: peer Mia said bye", "[I 1] [kiln] net: peer <player> said bye"),
+        ("[W 1] [kiln] net: peer Mia: dropped frame (late); 1 dropped so far", "[W 1] [kiln] net: peer <player>: dropped frame (late); 1 dropped so far"),
+        ("[I 1] [kiln] net: config state 0a0b0c0d (3 config(s)) sent to Mia", "[I 1] [kiln] net: config state 0a0b0c0d (3 config(s)) sent to <player>"),
+        ("[W 1] [kiln] Kiln.Saves: Mia has no character id on this build: x", "[W 1] [kiln] Kiln.Saves: <player> has no character id on this build: x"),
+        ("[1794424596] shroudlink: client 2eaa65d2d4c437f9 is Ember Fox", "[1794424596] shroudlink: client 2eaa65d2d4c437f9 is <player>"),
+        ("[1] world: client 2eaa65d2d4c437f9 is player 1 (the only unmatched one) (Ember Fox)",
+         "[1] world: client 2eaa65d2d4c437f9 is player 1 (the only unmatched one) (<player>)"),
+        ("[1] world: client 2eaa65d2d4c437f9 is player 2 (Mia)", "[1] world: client 2eaa65d2d4c437f9 is player 2 (<player>)"),
+    ];
+    for (raw, want) in cases {
+        assert_eq!(redact(raw, &r), want);
+    }
+    // lines that name no player stay as they are
+    for keep in [
+        "[1] shroudlink: client 2eaa65d2d4c437f9 is addon 0.8.0, UI protocol 3",
+        "[1] shroudlink: client 2eaa65d2d4c437f9 is an addon older than 0.6 (no hello)",
+        "[1] world: client 2eaa65d2d4c437f9 is player 1 (the only unmatched one)",
+        "[I 1] [kiln] net: last-server.json: welcome from srv-76bd0efb99c3",
+        "[I 1] [kiln] net: lab peer 0x80 kicked (reason 2)",
+        "[I 1] [service:kiln-players.dll] players: server world session ended (quit): 2 player(s) left with it",
+    ] {
+        assert_eq!(redact(keep, &r), keep);
+    }
+    // the names a log shows also go where a line does not say it is a player
+    let log = "players: joined slot 1 entity 7 'Brimwyn' (steam 0, admin 0, perms 0x1)\nnet: Al (0x9) joined with Kiln x\n";
+    assert_eq!(player_names(log), vec!["Brimwyn".to_string(), "Al".to_string()]);
+    let mut r2 = r.clone();
+    r2.add_players_from(log);
+    assert_eq!(redact("chat-plus: welcome back, Brimwyn! Also Al.", &r2), "chat-plus: welcome back, <player>! Also Al.",
+        "a name of 2 characters only where a line says it is a player");
+    assert_eq!(redact("Brimwynne", &r2), "Brimwynne", "whole words only");
+    // the local player keeps the Steam name token
+    let mut me = r.clone();
+    me.add_whole_word("Frosty", "<steam-name>");
+    assert_eq!(redact("players: joined slot 0 entity 1 'Frosty' (steam 0, admin 1, perms 0x3f)", &me),
+        "players: joined slot 0 entity 1 '<steam-name>' (steam 0, admin 1, perms 0x3f)");
+}
+
+#[test]
+fn redacts_ipv6_macs_mails_and_plain_text_secrets() {
+    let r = Redactor::new(Some(HOME), Some("frostling"), Some("frost-desk"));
+    assert_eq!(redact("join [2001:db8:85a3::8a2e:370:7334]:15636 or fe80::1c2d:3e4f%eth0", &r), "join [<ip>]:15636 or <ip>%eth0");
+    assert_eq!(redact("2001:0db8:0000:0000:0000:ff00:0042:8329 then", &r), "<ip> then");
+    assert_eq!(redact("pad 00:1a:2b:3c:4d:5e connected", &r), "pad <mac> connected");
+    assert_eq!(redact("mail frost.ling+kiln@example.co.uk.", &r), "mail <email>.");
+    for keep in [
+        "[I 22:30:56.603] at 12:30:45", "loopback ::1 and ::", "keen::ItemCategory abc::def", "kdh1:8f21dcb1097232d5",
+        "kiln.world@4 period@resolved", "Kiln.Host 0.2.0.0 (mod API 0.2.10)", "@types/node", "deadbeef:cafe",
+    ] {
+        assert_eq!(redact(keep, &r), keep);
+    }
+    assert_eq!(redact("join 0.2.0.0 and 10.0.0.2", &r), "join 0.2.0.0 and <ip>", "0.x.x.x is a version, never a host");
+    // plain text and INI: the value after a secret's name
+    assert_eq!(redact("[Server]\nPassword=hunter2\nApiKey = abc123\nShortcutKey=0x2D\n", &r),
+        "[Server]\nPassword=<redacted>\nApiKey = <redacted>\nShortcutKey=0x2D\n");
+    assert_eq!(redact("GET /x?token=abc&page=2 token: abc, server_password: 'p w'", &r),
+        "GET /x?token=<redacted>&page=2 token: <redacted>, server_password: '<redacted>'");
+    assert_eq!(redact("%command% -password hunter2 --apikey x -log", &r), "%command% -password <redacted> --apikey <redacted> -log");
+    for keep in [
+        "the admin token and endpoint", "\"token\": \"<redacted>\",", "\"tokens\": [", "password=", "credential::Store",
+        "client-checks pass: pre", "fields named like passwords, tokens, keys",
+    ] {
+        assert_eq!(redact(keep, &r), keep);
+    }
+    // a report redacted twice does not change
+    let once = redact("token=abc fe80::1 a@b.org players: joined slot 1 entity 7 'Mia' (steam 0)", &r);
+    assert_eq!(redact(&once, &r), once);
+}
+
+#[test]
+fn json_fields_that_name_people_are_redacted() {
+    for k in ["userName", "user_name", "accountName", "personaName", "playerName", "character_name", "email", "contactEmail", "api-key"] {
+        assert!(is_secret_key(k), "{k}");
+    }
+    for k in ["name", "displayName", "modName", "keybind", "players", "emailVerifiedAt"] {
+        assert!(!is_secret_key(k), "{k}");
+    }
+}
+
+#[test]
 fn os_release_names() {
     assert_eq!(os_release("NAME=\"Arch Linux\"\nPRETTY_NAME=\"Arch Linux\"\nID=arch\n"), (Some("Arch Linux".into()), Some("arch".into())));
     assert_eq!(os_release("NAME=SteamOS\nID=steamos\n"), (Some("SteamOS".into()), Some("steamos".into())));
@@ -416,6 +506,36 @@ fn other_mods_logs_in_the_game_folder_are_optional_bounded_and_redacted() {
 /// inbox 86: XHL-Core loaded a mod the profile had off, and the report had nothing of XHL-Core's own. Its log,
 /// XHL-Native-Plugin-Host.log, written next to the DLL it runs as (the game's dinput8.dll, or Kiln's copy in
 /// kiln/chain/<id>/), is in the zip now when it is there: bounded and redacted as Kiln's logs, never through a link.
+#[test]
+fn other_players_names_never_reach_any_file_of_the_report() {
+    let f = Fx::healthy("players");
+    f.w("kiln/logs/kiln.log", concat!(
+        "[I 11:00:00.000] [kiln] Kiln 0.2.0-dev.22 starting (pid 412)\n",
+        "[I 11:00:00.100] [kiln] boot complete; handing control to the game\n",
+        "[I 11:01:00.000] [kiln] net: Brimwyn (0x81) joined with Kiln 0.2.0-dev.22: 1 mod(s), 2 shared channel(s)\n",
+        "[I 11:01:00.500] [service:kiln-players.dll] players: joined slot 1 entity 7 'Brimwyn' (steam 76561198000000002, admin 0, perms 0x1) [event 2]\n",
+        "[I 11:02:00.000] [mod:chat-plus] welcome back, Brimwyn! mail brim@example.org, rcon password=hunter2, peer fe80::1c2d:3e4f\n",
+        "[E 11:03:00.000] [kiln] net: peer Brimwyn: 12 drops in 10 s: kicking\n",
+    ));
+    f.w("shroudlink.log", "[1] shroudlink: client 2eaa65d2d4c437f9 is Ember Fox\n[2] world: client 2eaa65d2d4c437f9 is player 2 (Ember Fox)\n");
+    f.w("kiln/state/last-server.json", br#"{"format":1,"server":{"id":"srv-1","name":"Ember Isles","address":"203.0.113.7:15636"},"players":[{"playerName":"Brimwyn","email":"brim@example.org"}]}"#);
+    let r = build(&f.input());
+    let mut all = r.summary.clone() + &r.short;
+    for (n, b) in &r.files {
+        let t = String::from_utf8_lossy(b);
+        for secret in ["Brimwyn", "Ember Fox", "brim@example.org", "hunter2", "fe80::1c2d", "76561198000000002", "203.0.113.7"] {
+            assert!(!t.contains(secret), "{n} holds {secret}: {t}");
+        }
+        all.push_str(&t);
+    }
+    let log = file(&r, "game/kiln/logs/kiln.log").unwrap();
+    assert!(log.contains("net: <player> (0x81) joined") && log.contains("welcome back, <player>!") && log.contains("password=<redacted>")
+        && log.contains("<email>") && log.contains("peer <ip>"), "{log}");
+    assert!(file(&r, "game/shroudlink.log").unwrap().contains("is player 2 (<player>)"));
+    assert!(file(&r, "game/kiln/state/last-server.json").unwrap().contains("Ember Isles"), "the server keeps its name");
+    assert!(r.summary.contains("(<player>)") && r.summary.contains("<email>"), "summary.txt says what was replaced");
+}
+
 #[test]
 fn xhl_cores_own_log_is_collected_where_it_runs_from() {
     let f = Fx::healthy("xhl-core-log");

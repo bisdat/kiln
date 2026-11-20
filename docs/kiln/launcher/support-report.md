@@ -103,12 +103,25 @@ Every text goes through one function, `report::redact`:
   also inside other words (`me-pc`, Wine's `C:\users\me`); a name of 3 characters or fewer only as a whole word, a
   common word (`user`, `steam`, `kiln` ...) only inside the home folder; Steam display names become `<steam-name>`
   (whole words);
-- SteamID64s, `userdata/<n>` and `[U:1:<n>]` become `<steamid>`; IPv4 addresses other than `127.x` and `0.0.0.0`
-  become `<ip>`.
+- other players: the names Kiln's and ShroudLink's own log lines give the players of a session (Kiln's players
+  service `players: joined slot 1 entity 7 'Name' (steam ...)`, Kiln.Network `net: Name (0x81) joined with Kiln`, `peer
+  Name ...`, `kick`/`kicking`/`banned`/`refusing Name`, `... sent to Name`, Kiln.Saves `Name has no character id`,
+  ShroudLink's `client <id> is Name` and `is player 2 (Name)`) become `<player>` in those lines (`report::player_names`),
+  and a name of 3 characters or more, read from kiln.log and shroudlink.log before anything is written, also as a whole
+  word in every other line and file (`Redactor::add_players_from`: a mod's own `welcome back, Name`). The player whose
+  Steam name is in `loginusers.vdf` stays `<steam-name>`;
+- SteamID64s, `userdata/<n>` and `[U:1:<n>]` become `<steamid>`; IPv4 addresses other than `127.x` and `0.x`
+  (a version such as `Kiln.Host 0.2.0.0`) become `<ip>`; IPv6 addresses other than `::1` and `::` become
+  `<ip>`, MAC addresses `<mac>`, mail addresses `<email>`;
+- in every text (logs, INI files such as `OptiScaler.ini`, `chain.ini`), the value after a word that names a
+  secret (`token`, `password`, `passwd`, `passphrase`, `secret`, `apikey`/`api_key`/`api-key`, `cookie`, `credential`)
+  and `=` or `:` becomes `<redacted>` (`password=hunter2`, `ApiKey = abc`, `?token=abc&`, `token: abc`), and so does the
+  argument of such a command-line flag (`-password hunter2`, `--apikey x`).
 
 JSON files also go through `report::redact_json`: string and number values of fields named like a secret or an address
 (`token`, `password`, `secret`, `apiKey`, `cookie`, `credential`, `private`, `auth`, `key`, `ip`, `host`, `endpoint`,
-`nonce`, `*address`, `*url`, `*steamId`) become `<redacted>`. A JSON file that does not parse or was cut loses the
+`nonce`, `*address`, `*url`, `*steamId`; also `api-key` and the names of people, `*userName`, `*accountName`,
+`*personaName`, `*playerName`, `*characterName`, `*email`, `_` and `-` ignored) become `<redacted>`. A JSON file that does not parse or was cut loses the
 values of such fields line by line.
 
 Never read into the report: saves and world data (`kiln/data/`), `kiln/config/` and the profile's config folder (mod
@@ -116,11 +129,13 @@ settings, `network.json`), `kiln/data/kiln-admin/`, the contents of any mod (onl
 listings), Steam's files other than `config.vdf`'s compat tool, the launch options and `loginusers.vdf` (for the
 names to replace). `summary.txt` ends with this list.
 
-What redaction cannot catch: a character or server name the player chose that appears in a log line, and 8.3 short
-names that cut the user name (`FROSTL~1`). `game/shroudlink_client.log` is written by the third-party shroudlink
+What redaction cannot catch: a character or server name the player chose that appears in a log line other than the
+ones above (`kiln/state/last-server.json` keeps the server's name on purpose), a player's name of 1 or 2 characters
+outside the lines that name players, and 8.3 short names that cut the user name (`FROSTL~1`). `game/shroudlink_client.log` is written by the third-party shroudlink
 client addon, not by Kiln (as `game/BuildingTools*.log`, `game/shroudlink.log` and `game/auto-loot-plus.log` are written by
 those mods): its text gets only the redaction above, so whatever else the addon logs stays as it is
-(IPv6 addresses, server DNS or UNC host names, other players' names, anything like `password=...`).
+(server DNS or UNC host names, other players' names in lines other than ShroudLink's `client <id> is Name` ones,
+secrets under names other than those above).
 
 ## When things are broken
 
