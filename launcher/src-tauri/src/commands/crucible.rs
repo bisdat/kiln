@@ -29,6 +29,11 @@ static SEEN: LazyLock<Mutex<BTreeMap<String, CruciblePack>>> = LazyLock::new(|| 
 /// The last update check (game id -> when, what).
 static UPDATES: LazyLock<Mutex<BTreeMap<String, (std::time::Instant, Vec<crucible::UpdateAvailable>)>>> = LazyLock::new(|| Mutex::new(BTreeMap::new()));
 
+/// The launcher's version as Crucible's User-Agent names it (Pack Studio's publish too).
+pub(crate) fn launcher_version() -> String {
+    version()
+}
+
 fn version() -> String {
     VERSION.get().cloned().unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string())
 }
