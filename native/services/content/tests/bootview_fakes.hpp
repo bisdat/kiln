@@ -204,6 +204,8 @@ struct FakeView final : kiln::boot_view::BaseView {
 FakeView* g_view = nullptr;  // what the source answers (null: none, with g_view_why)
 std::string g_view_why = "the test start has no newer view";
 std::atomic<int> finished_calls{0};
+bool g_nothing_creates = false;  // the source's answer: nothing in this start creates a resource the view has not got
+std::atomic<int> nothing_asked{0};
 const bootview::Source kSource{
     [](std::string* why) -> kiln::boot_view::BaseView* {
         if (!g_view) *why = g_view_why;
@@ -212,7 +214,16 @@ const bootview::Source kSource{
     [] {
         ++finished_calls;
         if (g_view) g_view->release();
+    },
+    [](const KilnAssetKey&) {
+        ++nothing_asked;
+        return g_nothing_creates;
     }};
+std::string gid(const std::string& name) {  // the GUID text the fakes give a resource name
+    uint8_t g[16];
+    guid_parse(name, g);
+    return guid_text(g);
+}
 const std::string kFixture = "resource:fixture/0000002a/0", kTemplate = "resource:g6/0000002a/0", kChest = "resource:g13/0000002a/0";
 
 // documents of mods a, b and r (r's boot content is required), each {owner, key, document}

@@ -24,10 +24,10 @@
 //     any other way by another mod (the same clear, or the same values, from both is fine), a "components[i]" path on a
 //     template whose components change. Then, when the start has a base view of its game data newer than the boot
 //     snapshot (gamedata_bootview.h; none by default), what only the data can say is checked against that view's decoded
-//     values too (check_base below): the resource is there, an index inside its list, a variant's or an optional's member
-//     there, a template's component there, the place a scalar or a list, copyComponents' source has the component. Such a
-//     refusal is the mod's as any other; what the view cannot say is left to the bytes. The plan is frozen, with the
-//     view's digest.
+//     values too (check_base below): an index inside its list, a variant's or an optional's member there, a template's
+//     component there, the place a scalar or a list, copyComponents' source has the component, and the resource (or the
+//     source) there when nothing in this start can create it. Such a refusal is the mod's as any other; what the view
+//     cannot say is left to the bytes. The plan is frozen, with the view's digest.
 //   apply (kiln.assets when_resources_ready: the game's resource service is up and nothing has read through it): each
 //     resource is copied, every document's structural edits are made in the copy (kPhases: removes, adds, copies, clears,
 //     replaces, appends), then every set, with the game's values as the originals, and the copy is served as an override. A document is all or
@@ -431,14 +431,17 @@ std::vector<kiln::boot::Doc> file_docs(const kiln::boot::Input* boot) {
 }
 
 // ---- the check against the base view (gamedata_bootview.h) ----
-// Before the start, what only the game's data can say: the resource is there, an index is inside its list, a variant
-// holds the member, an optional has its value, a template has the component a path starts at, a path ends in a scalar (a
-// number for an operation) and a list edit in a list, copyComponents' source has the component. The data is the base
-// view's decoded value of each resource, walked as gd::resolve walks the bytes when the patch is written. What the value
-// cannot say is left to the bytes, as before: a place another edit of the generation changes (an append, replace or clear
-// of a list on the way, a component added, removed or copied), a member outside a variant (the types say which members a
-// struct has, and a config named by its alias is no member of the value), a value cut at the view's depth or shown as
-// text, a struct of one scalar shown as that scalar, a resource the view cannot decode.
+// Before the start, what only the game's data can say: an index is inside its list, a variant holds the member, an
+// optional has its value, a template has the component a path starts at, a path ends in a scalar (a number for an
+// operation) and a list edit in a list, copyComponents' source has the component. The data is the base view's decoded
+// value of each resource, walked as gd::resolve walks the bytes when the patch is written. What the value cannot say is
+// left to the bytes, as before: a place another edit of the generation changes (an append, replace or clear of a list on
+// the way, a component added, removed or copied), a member outside a variant (the types say which members a struct has,
+// and a config named by its alias is no member of the value), a config shown by its alias, a value cut at the view's
+// depth or shown as text, a struct of one scalar shown as that scalar (also inside a variant, which the bytes follow to
+// the scalar), a resource the view cannot decode. A resource (or a copyComponents source) the view has not got is the
+// bytes' as well unless nothing in this start can create it (Source::nothing_creates): Kiln, a boot mod or a data pack
+// may register it with a new GUID, served once the game's resources are up.
 constexpr size_t kBaseReadMax = 16u << 20;    // bytes of one resource's decoded value a check reads
 constexpr size_t kBaseReadsMax = 128u << 20;  // bytes of decoded values one prepare reads in all
 
@@ -471,6 +474,8 @@ std::string place_text(const std::string& at) { return at.empty() ? "the resourc
 constexpr char kInBase[] = " in the game data this start reads";
 
 void walk(const nlohmann::json& node, const std::vector<Seg>& segs, size_t i, const std::string& at, Walk* w) {
+    // a config shown by its alias ({"$config", "value"}): gd::resolve reads the config's value or a member of it
+    if (node.is_object() && node.contains("$config")) return void(w->unknown = true);
     if (i == segs.size()) return w->leaves.emplace_back(at, &node), void();
     auto fail = [&](const std::string& why) {
         if (w->error.empty()) w->error = why;
@@ -511,7 +516,8 @@ void walk(const nlohmann::json& node, const std::vector<Seg>& segs, size_t i, co
         return walk(*m, segs, i + 1, at.empty() ? s.s : at + "." + s.s, w);
     }
     if (!node.is_array()) {
-        if (node.is_object() && type_in(node).empty()) return void(w->unknown = true);
+        // a struct (the types say), or a keen::impact::Configurations, whose "[...]" names a config by its id
+        if (node.is_object() && (type_in(node).empty() || type_in(node) == "Configurations")) return void(w->unknown = true);
         return fail(place_text(at) + " is not a list" + kInBase);
     }
     if (s.s == "*") {
@@ -524,18 +530,32 @@ void walk(const nlohmann::json& node, const std::vector<Seg>& segs, size_t i, co
     walk(node[k], segs, i + 1, at + "[" + s.s + "]", w);
 }
 
+// A variant whose selected struct holds one member that is no struct or list (keen::HashKey32, keen::Time): the view
+// shows the struct, the bytes follow the variant to it and take it as that one scalar (gd::leaf_of).
+bool one_scalar_variant(const nlohmann::json& n) {
+    if (!n.is_object() || type_in(n).empty() || n.size() != 2) return false;
+    for (auto it = n.begin(); it != n.end(); ++it)
+        if (it.key() != "$type") return !it->is_object() && !it->is_array();
+    return false;
+}
+
 // A set: refused when a place it names is no scalar (no number, for an operation), or when it names no place at all
 // ([*] over an empty list names none and changes nothing: resource-patches.md). [*] keeps the elements that have the
 // path, as gd::resolve does.
 Seen set_verdict(const Walk& w, const nlohmann::json& value, std::string* why) {
+    bool unknown = w.unknown;
     for (const auto& [at, n] : w.leaves) {
+        if (one_scalar_variant(*n)) {
+            unknown = true;
+            continue;
+        }
         if (n->is_object() || n->is_array())
             return *why = "NotScalar: " + place_text(at) + " is " + (n->is_array() ? "a list" : "a struct") + kInBase + ", not a number, a bool or an enum",
                    Seen::Refused;
         if (is_op(value) && n->is_boolean())
             return *why = "OperationOnNonNumber: " + place_text(at) + " is a bool" + kInBase + " (it takes a plain value)", Seen::Refused;
     }
-    if (w.unknown) return Seen::Unknown;
+    if (unknown) return Seen::Unknown;
     if (w.leaves.empty() && !w.error.empty()) return *why = w.error, Seen::Refused;
     return Seen::Ok;
 }
@@ -598,15 +618,24 @@ bool check_doc(const ResPatch& rp, const DocPatch& d, ReadFn&& read, const Shape
     };
     const std::string what = rp.type + " " + guid_text(rp.res.guid);
     const bootview::Read& res = read(bootview::query_of(guid_text(rp.res.guid), rp.res.type, rp.res.part));
-    if (res.found == bootview::Found::Missing) return refuse("", "MissingResource: the game data this start reads has no " + what);
+    // a resource the data has not got: refused only when nothing in this start can create it; Kiln, a boot mod or a data
+    // pack may register a new GUID, served once the game's resources are up, and then the bytes say
+    if (res.found == bootview::Found::Missing) {
+        if (bootview::nothing_creates(rp.res))
+            return refuse("", "MissingResource: the game data this start reads has no " + what + ", and nothing in this start creates it");
+        LOGI("boot: resource patch %s/%s: the game data this start reads has no %s; this start may create it, so the patch is checked when it "
+             "is written",
+             d.mod.c_str(), d.key.c_str(), what.c_str());
+    }
     // copyComponents' sources, as the game has them before any patch of this start
     for (const StructOp& o : d.ops)
         for (size_t k = 0; o.op == 'c' && k < o.sources.size(); ++k) {
             const std::string g = guid_text(o.sources[k].guid);
             const bootview::Read& src = read(bootview::query_of(g, o.sources[k].type, o.sources[k].part));
-            if (src.found == bootview::Found::Missing)
-                return refuse("", "\"copyComponents\": MissingResource: the template " + g + " that " + o.names[k] + " is copied from is not" + kInBase);
-            if (src.found != bootview::Found::Yes) continue;
+            if (src.found == bootview::Found::Missing && bootview::nothing_creates(o.sources[k]))
+                return refuse("", "\"copyComponents\": MissingResource: the template " + g + " that " + o.names[k] + " is copied from is not" + kInBase +
+                                      ", and nothing in this start creates it");
+            if (src.found != bootview::Found::Yes) continue;  // missing: this start may create it, and the bytes say
             const nlohmann::json* comps = src.value.is_object() ? member_of(src.value, "components") : nullptr;
             if (!comps || !comps->is_array()) continue;
             bool found = false, unknown = false;

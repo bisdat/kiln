@@ -73,8 +73,60 @@ void shorter_list() {
     p.destroy(p.plan);
     check(faults.empty() && put_count == 1 && patched.value == 5, "the other mod's patch is written");
     check(refused(docs_of({{"r", "k", set1("list[2]", 9)}}), "r", "the list has 2 entries"), "a required mod is refused before the start");
-    v.values.erase(kFixture);
-    check(refused(docs_of({{"b", "k", set1("value", 1)}}), "b", "MissingResource"), "a resource the data has not got refuses its mod");
+    g_view = nullptr;
+}
+
+// A resource the data has not got: Kiln, a boot mod or a data pack may register it with a new GUID in this start (served
+// once the game's resources are up), so the bytes say; only when the start says nothing in it creates one is the patch
+// refused before the start.
+void missing_resource() {
+    FakeView v;
+    v.values[kFixture] = json({{"value", 75}, {"flag", true}, {"list", {1, 2}}});
+    v.values[kTemplate] = {{"name", "T"}, {"components", {{{"$type", "Alpha"}, {"x", 1}}}}};
+    g_view = &v;
+    serve(75, {1, 2});
+    const json made = {{"resource", "made-by-a-mod"}, {"type", "fixture"}, {"set", {{"value", 5}}}};
+    const json copy = templ({{"copyComponents", {{"Stock", "new-template"}}}});
+    nothing_asked = 0;
+    run(docs_of({{"r", "k", made}}));
+    check(faults.empty() && put_count == 1 && patched.value == 5, "a resource this start creates is not refused (a required mod's either) and is written");
+    check(logged("this start may create it") && nothing_asked > 0, "the source was asked, and the log says the bytes decide");
+    missing_assets.insert(gid("made-by-a-mod"));
+    run(docs_of({{"a", "k", made}}));
+    check(faults.size() == 1 && has(faults[0].reason, "MissingResource") && put_count == 0, "not served when it is written: an activation fault, as before");
+    missing_assets.clear();
+    check(accepted(docs_of({{"a", "k", copy}})), "a copyComponents source this start may create: the bytes say");
+    g_nothing_creates = true;
+    check(refused(docs_of({{"b", "k", made}}), "b", "MissingResource") && has(issue.reason, "nothing in this start creates it"),
+          "nothing in this start creates it: refused before the start");
+    check(refused(docs_of({{"r", "k", made}}), "r", "MissingResource"), "a required mod's as well (kiln.boot stops the start)");
+    check(refused(docs_of({{"a", "k", copy}}), "a", "copyComponents") && has(issue.reason, "MissingResource"), "and a copyComponents source");
+    nothing_asked = 0;
+    check(accepted(docs_of({{"a", "k", set1("list[1]", 3)}})) && nothing_asked == 0, "a resource the data has: the source is not asked");
+    g_nothing_creates = false;
+    g_view = nullptr;
+}
+
+// Forms of the view that the bytes read otherwise: a variant of one scalar (the bytes follow it to the scalar), a config
+// shown by its alias, a config named by its id below a Configurations variant. None of them refuses.
+void view_forms() {
+    FakeView v;
+    v.values[kFixture] = json({{"value", 1},
+                               {"flag", true},
+                               {"list", {1}},
+                               {"key", {{"$type", "HashKey32"}, {"value", 7}}},
+                               {"when", {{"$type", "Time"}, {"nanoseconds", 5}}},
+                               {"pair", {{"$type", "Pair"}, {"a", 1}, {"b", 2}}},
+                               {"impactValues", {{"ManaCost", {{"$config", "ScaledConfig"}, {"value", {{"value", 3}, {"scaleFactor", 1}}}}}}},
+                               {"cfgs", {{"$type", "Configurations"}, {"simple", json::array()}}}});
+    g_view = &v;
+    check(accepted(docs_of({{"a", "k", set1("key", 9)}})), "a variant of one scalar: the bytes take it as the scalar");
+    check(accepted(docs_of({{"a", "k", set1("when", {{"add", 1}})}})), "a keen::Time in a variant, with an operation");
+    check(refused(docs_of({{"a", "k", set1("pair", 9)}}), "a", "NotScalar"), "a variant of two members is a struct");
+    check(accepted(docs_of({{"a", "k", set1("impactValues.ManaCost", {{"mul", 2}})}})), "a config shown by its alias: its value is set");
+    check(accepted(docs_of({{"a", "k", set1("impactValues.ManaCost.scaleFactor", 2)}})), "and a member of it");
+    check(accepted(docs_of({{"a", "k", set1("cfgs[3]", 2)}})), "a config by its id below a Configurations variant");
+    check(refused(docs_of({{"a", "k", set1("pair[3]", 2)}}), "a", "is not a list"), "another variant has no index");
     g_view = nullptr;
 }
 
@@ -184,7 +236,7 @@ void variants_optionals_components() {
     check(refused(docs_of({{"a", "k", templ({{"set", {{"Alpha.steps[2]", 1}}}})}}), "a", "IndexPastEnd"), "an index past a component's list");
     check(accepted(docs_of({{"a", "k", templ({{"copyComponents", {{"Stock", "magic-chest"}}}})}})), "the source has the component");
     check(refused(docs_of({{"a", "k", templ({{"copyComponents", {{"Beta", "magic-chest"}}}})}}), "a", "no Beta"), "the source has not got it");
-    check(refused(docs_of({{"a", "k", templ({{"copyComponents", {{"Stock", "gone-template"}}}})}}), "a", "MissingResource"), "the source is not there");
+    check(accepted(docs_of({{"a", "k", templ({{"copyComponents", {{"Stock", "gone-template"}}}})}})), "a source the data has not got: this start may create it");
     g_view = nullptr;
 }
 
@@ -315,6 +367,8 @@ int main() {
     const std::pair<const char*, void (*)()> groups[] = {{"no_view", no_view},
                                                          {"longer_list", longer_list},
                                                          {"shorter_list", shorter_list},
+                                                         {"missing_resource", missing_resource},
+                                                         {"view_forms", view_forms},
                                                          {"wildcard", wildcard},
                                                          {"arithmetic", arithmetic},
                                                          {"current_policy", current_policy},
@@ -328,6 +382,7 @@ int main() {
     for (const auto& [name, fn] : groups) {
         bootview::set_source(&kSource);
         g_view = nullptr;
+        g_nothing_creates = false;
         gd::g_types = false;
         g_mod_dirs.clear();
         try {
