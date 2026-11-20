@@ -9,6 +9,8 @@
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Kiln.Blocks" />
+    <!-- Gems.Register serves the gem trigger programs under the registering mod's owner (RegisterAs) -->
+    <InternalsVisibleTo Include="Kiln.Abilities" />
     <InternalsVisibleTo Include="Kiln.Api.Tests" />
     <InternalsVisibleTo Include="Kiln.Contract.Tests" />
   </ItemGroup>

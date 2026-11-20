@@ -261,6 +261,66 @@ fn the_lock_is_shared_by_launchers_and_exclusive_for_a_move() {
     assert!(!root.join(df::JOURNAL).exists());
 }
 
+/// A program another thread starts holds a copy of every open file of this process from its fork until its exec, and on
+/// Unix a lock belongs to the open file: closing alone would leave the move's locks held for that moment, and the next
+/// move would be refused as if another launcher ran (the `locked` refusal the parallel tests hit now and then). Here a
+/// child is forked while the move holds its locks and kept before its exec until the move is over: every lock the move
+/// took is free again at once.
+#[test]
+#[cfg(unix)] // fork and exec
+fn a_finished_moves_locks_are_free_while_a_program_is_starting() {
+    use std::io::Read;
+    use std::os::fd::AsRawFd;
+    use std::os::unix::process::CommandExt;
+    /// At "switching to the new place" (every lock held): a child forked on another thread, held before its exec until
+    /// `release` closes.
+    struct ForkAtSwitch {
+        release: Option<std::io::PipeWriter>,
+        child: Option<std::thread::JoinHandle<std::io::Result<std::process::ExitStatus>>>,
+    }
+    impl Progress for ForkAtSwitch {
+        fn report(&mut self, _: Option<f32>, m: &str) {
+            if m != "switching to the new place" || self.child.is_some() {
+                return;
+            }
+            let (hold_r, hold_w) = std::io::pipe().unwrap();
+            let (mut ready_r, ready_w) = std::io::pipe().unwrap();
+            let (hr, hw, rw) = (hold_r.as_raw_fd(), hold_w.as_raw_fd(), ready_w.as_raw_fd());
+            let mut cmd = std::process::Command::new("true");
+            // SAFETY: only async-signal-safe calls (close, write, read) between fork and exec
+            unsafe {
+                cmd.pre_exec(move || {
+                    libc::close(hw);
+                    libc::write(rw, b"f".as_ptr().cast(), 1);
+                    let mut b = 0u8;
+                    libc::read(hr, (&raw mut b).cast(), 1);
+                    Ok(())
+                });
+            }
+            self.child = Some(std::thread::spawn(move || {
+                let _keep = (hold_r, ready_w);
+                cmd.status()
+            }));
+            let mut b = [0u8; 1];
+            ready_r.read_exact(&mut b).unwrap();
+            self.release = Some(hold_w);
+        }
+    }
+    let fx = Fixture::build("lock-fork");
+    let to = fx.base.join("moved");
+    let mut p = ForkAtSwitch { release: None, child: None };
+    let r = dfm::move_to(&located(&fx.env), &fx.env, &to, &linking(), None, &MoveOptions::default(), &mut p);
+    let free = (
+        DataLock::exclusive(&fx.dirs.root).unwrap().is_some(),
+        DataLock::exclusive(&to).unwrap().is_some(),
+        [&fx.dirs.root, &to].iter().filter_map(|d| std::fs::OpenOptions::new().read(true).write(true).open(d.join("quick.lock")).ok()).all(|q| q.try_lock().is_ok()),
+    );
+    drop(p.release.take().expect("the child was forked during the move"));
+    assert!(p.child.take().unwrap().join().unwrap().unwrap().success());
+    r.unwrap();
+    assert_eq!(free, (true, true, true), "the old folder's lock, the new folder's lock, the quick flow's: free while the child had not run yet");
+}
+
 // ------------------------------------------------------------------------------------------------ moves
 
 /// A Progress that cancels once the switch is under way (the move's own removal of the old copy is then interrupted),
@@ -1047,7 +1107,7 @@ fn another_data_folders_profile_is_left_alone() {
             assert_eq!(profile::game_profile_owner(&old, g).unwrap(), GameProfileOwner::Here { id: theirs.clone() }, "and the other folder still sees its own");
         }
         // copy mode: the game's config copy is the other folder's, never copied into this one
-        assert_eq!(profile::copy_back(&new, &theirs, &fx.game_copy).unwrap(), 0);
+        assert_eq!(profile::copy_back(&new, &theirs, &fx.game_copy).unwrap(), profile::ConfigSync::default());
         if same_id {
             assert!(!new.profile(&fx.active).join("config/new-items.json").exists(), "nothing mixed into the moved profile");
             // the player activates the moved folder's profile in that game: the other folder's config copy is kept aside
@@ -1156,7 +1216,8 @@ fn a_move_never_replaces_or_removes_what_it_did_not_make() {
 }
 
 /// `rewrittenAfter` holds only what the move writes (install and activation records, the activated profiles'
-/// configs): a file another writer changed after the switch is not in it, and its old copy stays.
+/// configs, copy mode's record of the game's config copy): a file another writer changed after the switch is not in it,
+/// and its old copy stays.
 #[test]
 fn only_what_the_move_writes_after_the_switch_is_rewritten_after() {
     struct Other {
@@ -1175,8 +1236,12 @@ fn only_what_the_move_writes_after_the_switch_is_rewritten_after() {
     let j = dfm::read_journal(&fx.env).unwrap().unwrap();
     let paths: BTreeSet<&str> = j.rewritten_after.iter().map(|r| r.path.as_str()).collect();
     assert!(!paths.contains("settings.json"), "{paths:?}");
-    assert!(paths.iter().all(|p| p.starts_with("installs/") || p.contains("/config/")), "{paths:?}");
+    let ours = |p: &str| p.starts_with("installs/") || p.contains("/config/") || p.contains("/config-sync/");
+    assert!(paths.iter().all(|p| ours(p)), "{paths:?}");
     assert!(paths.contains(format!("installs/{}.active.json", fx.game_z.id).as_str()), "{paths:?}");
+    // the copy-mode game's activation in the new place writes the record of its config copy again
+    let record = profile::config_sync_record(&DataDirs::at(""), &fx.active, &fx.game_copy.id);
+    assert!(paths.contains(record.to_string_lossy().as_ref()), "{paths:?}");
     let c = r.cleanup.unwrap();
     assert!(c.kept.iter().any(|k| k.path == fx.dirs.root.join("settings.json")), "{c:?}");
     assert!(fx.dirs.root.join("settings.json").is_file());
@@ -1656,7 +1721,7 @@ fn crashed_after_copy(tag: &str, facts: &Facts) -> (Fixture, BTreeMap<String, St
     let before = tree(&fx.dirs.root);
     let to = fx.base.join("target");
     let e = mv(&fx, &to, facts, &inject(Inject::StopAfter(Step::Copy))).unwrap_err();
-    assert_eq!(e.code, ErrorCode::Internal);
+    assert_eq!(e.code, ErrorCode::Internal, "{e:?}");
     let Pending::Uncommitted { journal } = dfm::pending(&fx.env).unwrap() else { panic!("{:?}", dfm::pending(&fx.env)) };
     assert!(journal.entries.iter().any(|e| e.name == "backups"), "{:?}", journal.entries);
     assert!(to.join(df::MOVE_MARKER).is_file());

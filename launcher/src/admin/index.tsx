@@ -5,7 +5,9 @@
 // redirect there. Pages and hooks: docs/kiln/launcher/admin-pages.md.
 import { Navigate, Outlet, Route, Routes, useParams } from "react-router-dom";
 import { AdminProvider } from "../api/admin";
+import { t } from "../i18n";
 import { startHistory } from "./history";
+import { ADMIN_MERGED } from "../shell/serverNav";
 import AdminPlayersPage from "./pages/AdminPlayersPage";
 import AdminMapPage from "./pages/AdminMapPage";
 import AdminZonesPage from "./pages/AdminZonesPage";
@@ -24,21 +26,21 @@ import "./admin.css";
 export { AdminProvider } from "../api/admin";
 export { ConfirmHost } from "./ui";
 
-/** The admin pages (route segment, label, page). */
+/** The admin pages (route segment, label (call it: the current language), page). */
 export const ADMIN_PAGES = [
-  ["players", "Players", AdminPlayersPage],
-  ["map", "Map", AdminMapPage],
-  ["zones", "Zones", AdminZonesPage],
-  ["items", "Items", AdminItemsPage],
-  ["spawn", "Spawn", AdminSpawnPage],
-  ["world", "World", AdminWorldPage],
-  ["combat", "Combat", AdminCombatPage],
-  ["creatures", "Creatures", AdminCreaturesPage],
-  ["gamedata", "Game data", AdminGameDataPage],
-  ["permissions", "Permissions", AdminPermissionsPage],
-  ["content", "Content", AdminContentPage],
-  ["saves", "Saves", AdminSavesPage],
-  ["crashes", "Crashes", AdminCrashesPage],
+  ["players", () => t("admin.pages.players"), AdminPlayersPage],
+  ["map", () => t("admin.pages.map"), AdminMapPage],
+  ["zones", () => t("admin.pages.zones"), AdminZonesPage],
+  ["items", () => t("admin.pages.items"), AdminItemsPage],
+  ["spawn", () => t("admin.pages.spawn"), AdminSpawnPage],
+  ["world", () => t("admin.pages.world"), AdminWorldPage],
+  ["combat", () => t("admin.pages.combat"), AdminCombatPage],
+  ["creatures", () => t("admin.pages.creatures"), AdminCreaturesPage],
+  ["gamedata", () => t("admin.pages.gamedata"), AdminGameDataPage],
+  ["permissions", () => t("admin.pages.permissions"), AdminPermissionsPage],
+  ["content", () => t("admin.pages.content"), AdminContentPage],
+  ["saves", () => t("admin.pages.saves"), AdminSavesPage],
+  ["crashes", () => t("admin.pages.crashes"), AdminCrashesPage],
 ] as const;
 
 startHistory();
@@ -53,8 +55,9 @@ function AdminLayout() {
   return <Outlet />;
 }
 
-/** Old admin routes that are merged into the server's own pages. */
-const MERGED: [string, string][] = [["configs", "configs"], ["mods", "mods"], ["console", "overview"]];
+/** Old admin routes that are merged into the server's own pages (App.tsx redirects them before this bundle loads;
+ *  these routes serve an AdminRoutes mounted elsewhere). */
+const MERGED = ADMIN_MERGED;
 
 /** Every admin page of the server in the URL (`/servers/:id/admin/*`). */
 export function AdminRoutes({ serverId }: { serverId?: string }) {

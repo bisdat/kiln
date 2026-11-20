@@ -6,8 +6,8 @@
 
 Prints passed, failed, skipped and never run per area, then the failed checks with their notes, and with --rows each
 status row with the state of its checks. The newest entry of a check counts (entries are appended oldest first); "never
-run" comes from the ledger's catalogue of checks. A pass whose automatic assertions failed is printed as passed with a
-mark and counted on a line of its own. --json prints the same as one JSON document.
+run" comes from the ledger's catalogue of checks. A pass whose automatic assertions failed is counted as failed and identified as an older
+pass with failed assertions, never as confirmation. --json prints the same as one JSON document.
 
 Exit code 0 when the ledger (and the rows file, when given) could be read, 2 when not.
 Python 3, standard library only. The ledger's shape: schema/state-client-checks.schema.json.
@@ -84,12 +84,16 @@ def summarize(ledger: dict, rows: list[dict] | None = None, rows_mod: str = "cli
         e = newest.get(key)
         state = VERDICT_STATE.get(e.get("verdict"), "never run") if e else "never run"
         bad = _failed_assertions(e) if e else []
+        marked = state == "passed" and (bool(bad) or e.get("assertionFailureCount", 0) > 0)
+        if marked:
+            state = "failed"
         results[key] = {
             "mod": key[0], "id": key[1], "title": c.get("title") or (e or {}).get("title", ""),
             "area": c.get("area") or (e or {}).get("area") or key[0],
             "state": state, "note": (e or {}).get("note", ""), "time": (e or {}).get("time"),
             "failedAssertions": [{"what": a.get("what", ""), "detail": a.get("detail")} for a in bad],
-            "marked": state == "passed" and bool(bad),
+            "marked": marked,
+            "playerAnswer": (e or {}).get("playerAnswer"),
         }
 
     areas: dict[str, dict] = {}
@@ -147,11 +151,13 @@ def render(report: dict) -> str:
     if report["marked"]:
         for r in report["marked"]:
             what = "; ".join(a["what"] + (f" ({a['detail']})" if a["detail"] else "") for a in r["failedAssertions"])
-            lines.append(f"  passed{MARK} {r['mod']}/{r['id']}: {what}")
+            lines.append(f"  passed with failed assertions: not a pass: {r['mod']}/{r['id']}: {what}")
     lines.append("")
     lines.append(f"failed: {len(report['failed'])}")
     for r in report["failed"]:
         lines.append(f"  {r['mod']}/{r['id']} ({r['area']}): {r['title']}")
+        if r.get("playerAnswer"):
+            lines.append(f"    player answered: {r['playerAnswer']}")
         if r["note"]:
             lines.append(f"    note: {r['note']}")
         for a in r["failedAssertions"]:

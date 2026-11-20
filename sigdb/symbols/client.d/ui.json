@@ -1,7 +1,7 @@
 {
   "format": 1,
   "side": "client",
-  "comment": "kiln.ui's game-UI integration on the client (enshrouded.exe 26404966). Evidence: docs/re/game-ui.md. The game's UI is immediate mode: GameUiSystem calls its update fn (GameUiFrame, registered at app start) once per UI frame on the UI thread; the frame context sits in the global UiApp only while that call runs. GameUiFrame's first argument is the GameUiSystem+0x10; its +sys.data is the persistent GameUiData (first field: the GameUi state, whose byte +state.ui_state is keen::UiState and +state.play the play data, whose byte +play.hud_screen is keen::HudScreenType and +play.interaction the entity the player interacts with). Menu entries are drawn by two entry renderers: MainMenuEntry(state, {text, len, fnv64, 8 option bytes}) in the main menu builder and SystemMenuEntry({text, len, fnv64}, 1, attention) in the system (pause) menu and a few other lists; both return true on activation and take part in the frame's focus/gamepad navigation. kiln.ui draws its entries through them right before the Settings entry (main menu: both layout branches, ShroudForge 1.7.6's insertion point; system menu: the Settings entry), identified by the call's return address. CraftingMenu is the crafting menu builder (every frame while one is open); its last selected recipe id is stored at data+data.craft_recipe (the player's own menu) or *(data+data.station_recipe) (a station). Main-menu page (feature ui.menu_page, docs/re/game-ui.md \"Main-menu pages\", client 26430625, static analysis): the PreGame state block (never cached: the UI's state store frees blocks not touched in a frame) keeps the current page at +pregame.page; PreGameGoTo(pregame, page) only compares and writes it. MainMenuEntry's first argument is pregame+pregame.main_menu at the Settings and Credits call sites. Kiln's MODS entry calls PreGameGoTo(pregame, pregame.page_credits); its hook on PreGameCredits (bool(void)) answers only the call from the PreGame page switch (return address PreGameCreditsRet): true stays, false makes the game go back to page_main_menu itself. The UI system's update writes the canvas (sys.canvas_w/h, UI units), the viewport (sys.viewport: x, y, w, h floats, pixels) and pixels per unit (sys.px_per_unit) at system offsets; GameUiFrame's first argument is system+sys.frame_arg. The error popup shows while the byte at frame_arg-relative sys.popups + popups.error is set. ui.menu_page_sound: UiPlaySound(*UiApp, &copy of cfg+cfg.sound_entry_cancel) as PlaySelection's back does.",
+  "comment": "kiln.ui's game-UI integration on the client (enshrouded.exe 26404966). Evidence: docs/re/game-ui.md. The game's UI is immediate mode: GameUiSystem calls its update fn (GameUiFrame, registered at app start) once per UI frame on the UI thread; the frame context sits in the global UiApp only while that call runs. GameUiFrame's first argument is the GameUiSystem+0x10; its +sys.data is the persistent GameUiData (first field: the GameUi state, whose byte +state.ui_state is keen::UiState and +state.play the play data, whose byte +play.hud_screen is keen::HudScreenType and +play.interaction the entity the player interacts with). Menu entries are drawn by two entry renderers: MainMenuEntry(state, {text, len, fnv64, 8 option bytes}) in the main menu builder and SystemMenuEntry({text, len, fnv64}, 1, attention) in the system (pause) menu and a few other lists; both return true on activation and take part in the frame's focus/gamepad navigation. kiln.ui draws its entries through them right before the Settings entry (main menu: both layout branches, ShroudForge 1.7.6's insertion point; system menu: the Settings entry), identified by the call's return address. CraftingMenu is the crafting menu builder (every frame while one is open); its last selected recipe id is stored at data+data.craft_recipe (the player's own menu) or *(data+data.station_recipe) (a station). Main-menu page (feature ui.menu_page, docs/re/game-ui.md \"Main-menu pages\", client 26430625, static analysis): the PreGame state block (never cached: the UI's state store frees blocks not touched in a frame) keeps the current page at +pregame.page; PreGameGoTo(pregame, page) only compares and writes it. MainMenuEntry's first argument is pregame+pregame.main_menu at the Settings and Credits call sites. Kiln's MODS entry calls PreGameGoTo(pregame, pregame.page_credits); its hook on PreGameCredits (bool(void)) answers only the call from the PreGame page switch (return address PreGameCreditsRet): true stays, false makes the game go back to page_main_menu itself. The UI system's update writes the canvas (sys.canvas_w/h, UI units), the viewport (sys.viewport: x, y, w, h floats, pixels) and pixels per unit (sys.px_per_unit) at system offsets; GameUiFrame's first argument is system+sys.frame_arg. The error popup shows while the byte at frame_arg-relative sys.popups + popups.error is set. ui.menu_page_sound: UiPlaySound(*UiApp, &copy of cfg+cfg.sound_entry_cancel) as PlaySelection's back does. Main-menu footer (feature ui.menu_footer, docs/re/game-ui.md \"The main menu's footer\", client 26430625, static analysis): MainMenuFooter is the game's footer function (void(void), window \"LegalLine\": a bottom-aligned stack with the build number and the legal line), called only at the end of the main menu page. MainMenuFooterBuildLine is its call of NativeTextLine(out, GameText*, style, mode) for the build number; the text object built there sits at rbp+footer.text and the game sets its fields at rbp+footer.text_* (node pointer, a shown byte, two colours to alpha 0x7f, flags |= 0x48, flags2 = 0, a bits byte |= 1, the size from cfg+cfg.footer_font) before NativeTextDraw(object). kiln.ui runs a copy of MainMenuFooter whose build-number call goes through Kiln first: Kiln's line is drawn there the same way (XHL-Core 2.1.0 patches this very call for its \"All mods loaded\" line, which the copy leaves out). Factory screens (0.2.0-dev.29.15, docs/re/game-ui.md section 5): @ui/HudCrafting.fields is the HUD screen dispatcher's crafting cases (client 26430625: 0xbe87d0; StationBasedCrafting 25 and NpcCrafting 27). Both need play+play.target, the entity the screen is about (0: they close it), and read the station's workshop from play+0x2e48 (play.interaction) before they call CraftingMenu. FactoryCrafting 28 has no case there (PlayStateUi runs the chest-style transfer screen 0xb9d0f0 with mode 2 for it, which finds the station's inventory view by play+play.target), so kiln.ui reads play.target itself while a factory screen shows (screen_target).",
   "symbols": {
     "ui/PlayStateUi": {
       "find": [
@@ -110,6 +110,16 @@
             "size": 2048
           },
           "pattern": "39 9D ?? ?? 00 00 75 1B 48 05 {ui/data.craft_recipe:d32} BF ?? ?? ?? ?? 48 39 5C 24 ?? 48 0F 45 F8 48 89 7C 24 ?? EB 1C 48 05 {ui/data.station_recipe:d32} B9"
+        }
+      ]
+    },
+    "@ui/HudCrafting.fields": {
+      "find": [
+        {
+          "pattern": "39 B8 {ui/play.target:d32} 74 ?? 8B 90 ?? ?? 00 00 85 D2 74 ?? 66 89 BD ?? ?? ?? ?? B8 ?? ?? ?? 00"
+        },
+        {
+          "pattern": "39 B8 {ui/play.target:d32} 0F 84 ?? ?? ?? ?? 44 8B 88 ?? ?? 00 00 45 85 C9 74 ?? 66 89 BD ?? ?? ?? ?? B8 ?? ?? ?? 00"
         }
       ]
     },
@@ -259,6 +269,25 @@
           "pattern": "E8 {ui/ScrollbarParamsInit:rel32} 48 8B 0D ?? ?? ?? ?? 45 33 C9 C6 85 ?? ?? 00 00 01 4D 8B C6 B2 01 48 8B 81 ?? ?? ?? ?? 0F 10 80 {ui/cfg.scrollbar_a:d32} 0F 11 85 ?? ?? 00 00 0F 10 88 ?? ?? ?? ?? 0F 11 8D ?? ?? 00 00 48 8B 81 ?? ?? ?? ?? 0F 10 80 {ui/cfg.scrollbar_b:d32} 0F 11 85 ?? ?? 00 00 0F 10 88 ?? ?? ?? ?? C7 85 ?? ?? 00 00 00 00 C0 41 C7 85 ?? ?? 00 00 00 00 C0 41 0F 11 8D ?? ?? 00 00 C7 85 ?? ?? 00 00 00 00 C0 41 C7 85 ?? ?? 00 00 00 00 A0 41 48 8B 81 ?? ?? ?? ?? 48 8B 88 {ui/cfg.scrollbar_c:d32}"
         }
       ]
+    },
+    "ui/MainMenuFooter": {
+      "find": [
+        {
+          "pattern": "48 89 5C 24 18 48 89 7C 24 20 55 48 8D AC 24 ?? ?? FF FF 48 81 EC ?? ?? 00 00 33 FF 48 C7 44 24 38 09 00 00 00 48 8D 05 ?? ?? ?? ?? 89 7C 24 28 41 B9 22 00 00 00 89 7C 24 20 41 B0 01 48 89 44 24 30 48 8D 54 24 30 48 8D 4D ?? E8"
+        }
+      ]
+    },
+    "ui/MainMenuFooterBuildLine": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "ui/MainMenuFooter",
+            "size": 1024
+          },
+          "pattern": "4C 8D 05 ?? ?? ?? ?? E8 ?? ?? ?? ?? 0F 10 44 24 70 4C 8D 83 ?? ?? ?? ?? 45 33 C9 F2 0F 10 4D ?? 48 8D 54 24 ?? 48 8D 4D {ui/footer.text:d8} 0F 29 44 24 ?? F2 0F 11 4C 24 ?? E8 {ui/NativeTextLine:rel32} 48 8B 4D {ui/footer.text_node:d8} 48 8D 95 ?? ?? ?? ?? C6 45 {ui/footer.text_shown:d8} 01 66 C7 85 ?? ?? ?? ?? 01 03 E8 {ui/UiNodeAlign:rel32} 8B 85 {ui/footer.text_color:d32} 0F B7 95 {ui/footer.text_flags:d32} 25 FF FF FF 00 80 8D {ui/footer.text_bits:d32} 01 0D 00 00 00 7F 89 85 ?? ?? ?? ?? 66 83 CA 40 8B 85 {ui/footer.text_color2:d32} 66 89 95 ?? ?? ?? ?? 25 FF FF FF 00 0D 00 00 00 7F 66 89 BD {ui/footer.text_flags2:d32} 89 85 ?? ?? ?? ?? 66 83 CA 08 48 8B 05 {ui/UiApp:rel32} 48 8B 88 {ui/ui.config:d32} F3 0F 10 81 {ui/cfg.footer_font:d32} 48 8D 4D ?? F3 0F 11 85 {ui/footer.text_size:d32} 66 89 95 ?? ?? ?? ?? E8 {ui/NativeTextDraw:rel32}",
+          "offset": 52
+        }
+      ]
     }
   },
   "constants": {
@@ -276,6 +305,9 @@
     },
     "ui/play.interaction": {
       "min_votes": 1
+    },
+    "ui/play.target": {
+      "min_votes": 2
     },
     "ui/state.ui_state": {
       "min_votes": 1
@@ -345,6 +377,36 @@
     },
     "ui/cfg.scrollbar_c": {
       "min_votes": 2
+    },
+    "ui/footer.text": {
+      "min_votes": 1
+    },
+    "ui/footer.text_node": {
+      "min_votes": 1
+    },
+    "ui/footer.text_shown": {
+      "min_votes": 1
+    },
+    "ui/footer.text_color": {
+      "min_votes": 1
+    },
+    "ui/footer.text_flags": {
+      "min_votes": 1
+    },
+    "ui/footer.text_bits": {
+      "min_votes": 1
+    },
+    "ui/footer.text_color2": {
+      "min_votes": 1
+    },
+    "ui/footer.text_flags2": {
+      "min_votes": 1
+    },
+    "ui/footer.text_size": {
+      "min_votes": 1
+    },
+    "ui/cfg.footer_font": {
+      "min_votes": 1
     }
   },
   "features": {
@@ -468,6 +530,30 @@
         "ui/cfg.scrollbar_a",
         "ui/cfg.scrollbar_b",
         "ui/cfg.scrollbar_c"
+      ]
+    },
+    "ui.menu_footer": {
+      "symbols": [
+        "ui/GameUiFrame",
+        "ui/MainMenuFooter",
+        "ui/MainMenuFooterBuildLine",
+        "ui/NativeTextLine",
+        "ui/NativeTextDraw",
+        "ui/UiNodeAlign",
+        "ui/UiApp"
+      ],
+      "constants": [
+        "ui/ui.config",
+        "ui/cfg.footer_font",
+        "ui/footer.text",
+        "ui/footer.text_node",
+        "ui/footer.text_shown",
+        "ui/footer.text_color",
+        "ui/footer.text_flags",
+        "ui/footer.text_bits",
+        "ui/footer.text_color2",
+        "ui/footer.text_flags2",
+        "ui/footer.text_size"
       ]
     }
   }

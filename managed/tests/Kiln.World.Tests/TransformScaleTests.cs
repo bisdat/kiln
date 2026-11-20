@@ -98,6 +98,19 @@ public sealed class TransformScaleTests
         Assert.Equal("keen::ecs::CurrentTransform.transform.scale at +40 (keen::float3: a struct of three float32)", why);
     }
 
+    // 0.2.0-dev.28 held the row on both sides until its guided check (13-world.transform-scale). The owner opened every
+    // held capability for 0.2.0-dev.29 (native/core/gates/README.md): no gate file may hold it again by accident.
+    [Fact]
+    public void Transform_scale_is_not_held_by_the_client_gate()
+    {
+        foreach (var file in Directory.GetFiles(Path.Combine(Repo(), "native", "core", "gates"), "*.json"))
+        {
+            using var gates = JsonDocument.Parse(File.ReadAllText(file));
+            Assert.DoesNotContain(gates.RootElement.GetProperty("gates").EnumerateArray(),
+                g => g.GetProperty("name").GetString() == World.TransformScaleCapability);
+        }
+    }
+
     [Fact]
     public void Scale3_is_three_sequential_floats_and_its_JSON_is_lower_case()
     {

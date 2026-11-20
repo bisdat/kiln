@@ -125,12 +125,17 @@ bool resolve() {
     L.reg_templates = cst("world/registry.templates");
     L.storage_entities = cst("world/storage.entities");
     L.entity_layout = cst("world/entity.layout");
+    L.entity_id = cst("spawn/record.id");  // spawn's declaration (CreateEntity writes it at +0x10 on both builds)
     L.tp_applied = cst("world/teleport.applied");
     L.tp_find_ground = cst("world/teleport.find_ground");
     L.tp_target_entity = cst("world/teleport.target_entity");
     L.tp_add_size = cst("world/record.teleport_size");
     L.tp_remove_size = cst("world/record.remove_size");
     L.actor_state = cst("world/actor.state");
+    L.slice_entry = cst("world/slice.entry");
+    L.slice_layout = cst("world/slice.layout");
+    L.slice_first = cst("world/slice.first");
+    L.slice_end = cst("world/slice.end");
 
     // The descriptor layout kiln.world builds must be the one RegisterProgram reads.
     if (F.programs && (cst("world/desc.flags") != offsetof(EngineDesc, flags) ||
@@ -205,6 +210,9 @@ void KILN_CALL on_pre(const KilnTickInfo* tick, void*) {
     teleport_pre(tick);
     writes_pre(tick);
     selftest_pre(tick);
+    ecs_check_pre(tick);
+    ecs_write_check_pre(tick);
+    ecs_writes_drain();  // committed-write events of the steps since the last Pre, after their gates were released
 }
 
 // ---- the table ----
@@ -342,10 +350,59 @@ const KilnWorldApi kTable = {
     &game_wraps_release,
     &game_slice_run_original,
     &wrap_original,
+    &in_program,
+    &game_program_list,
+    &game_slice_iterate,
+    &game_slice_slot,
+    &game_slice_mark,
+    &game_slice_archetype,
+    &game_archetype_has,
+    &game_slice_attr_changed,
+    &game_slice_attr_validate,
+    &game_world_session,
+    &game_program_contract,
+    &foreign_layout,
+    &foreign_slot,
+    &foreign_check,
+    &foreign_read,
+    &foreign_write,
+    &foreign_attr_changed,
+    // since 0.2.0-dev.29: Kiln programs in a client's client world and prediction storage (chapter 14), at 496..520
+    // (after 06c's foreign views)
+    &register_program_world,
+    &program_world_state,
+    &bind_program_world,
+    &unbind_program_world,
+    // appended in v4: verified-copy ECS reads from task threads, at 528..576
+    &t_entity_open,
+    &t_entity_validate,
+    &t_ecs_context_snapshot,
+    &t_ecs_query,
+    &t_ecs_snapshot,
+    &t_ecs_snapshot_many,
+    &t_ecs_template_uuid,
+    // appended in v4: compare-exchange writes from task threads, at 584..608
+    &t_ecs_write_policy,
+    &t_ecs_compare_exchange,
+    &t_ecs_write_subscribe,
+    &t_ecs_write_unsubscribe,
 };
+static_assert(sizeof(KilnWorldApi) == 616 && offsetof(KilnWorldApi, foreign_attr_changed) == 488 &&
+                  offsetof(KilnWorldApi, register_program_world) == 496 && offsetof(KilnWorldApi, unbind_program_world) == 520 &&
+                  offsetof(KilnWorldApi, entity_open) == 528 && offsetof(KilnWorldApi, ecs_template_uuid) == 576 &&
+                  offsetof(KilnWorldApi, ecs_write_policy) == 584 && offsetof(KilnWorldApi, ecs_write_unsubscribe) == 608,
+              "kiln.world's table: the client-world members append at 496, the ECS reads at 528, the writes at 584");
 
-void KILN_CALL on_client_pre(const KilnTickInfo* tick, void*) { game_programs_pre(KILN_WORLD_CLIENT, tick); }
-void KILN_CALL on_world_event(const KilnWorldEvent* event, void*) { game_programs_world_event(event); }
+void KILN_CALL on_client_pre(const KilnTickInfo* tick, void*) {
+    game_programs_pre(KILN_WORLD_CLIENT, tick);
+    programs_client_pre(tick);
+}
+void KILN_CALL on_world_event(const KilnWorldEvent* event, void*) {
+    game_programs_world_event(event);
+    programs_world_event(event);
+    // What is left of the stopping server world's committed-write events is delivered now, on the stopping thread.
+    if (event && event->kind == KILN_WORLD_SERVER && event->event == KILN_WORLD_STOPPING) ecs_writes_drain();
+}
 
 }  // namespace
 }  // namespace kw
@@ -356,14 +413,22 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     g_api = api;
     g_owner = owner;
     if (info->size >= offsetof(KilnPluginInfo, on_ready) + sizeof(info->on_ready))
-        info->on_ready = [](void*) { boot_programs_init(); };
+        info->on_ready = [](void*) {
+            ecs_prod_ready();
+            ecs_check_init();
+            ecs_write_check_init();
+            boot_programs_init();
+            in_program_resolve(program_types());
+        };
     info->id = KilnStr{KILN_WORLD_SERVICE, sizeof(KILN_WORLD_SERVICE) - 1};
     info->version = KilnStr{"4", 1};
     resolve();
+    ecs_prod_init();
     game_programs_resolve();
     wraps_init();
     const bool hooked = programs_init();
     if (!hooked) F.programs = F.teleport = false;
+    wraps_define_row(F.programs);
     if (hooked) {
         // kiln.world's own program: no entity query, no access; pushes teleport records and proves the world runs.
         KilnProgramDesc d{};
@@ -380,9 +445,14 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     // The game's own programs: the client world's directory (a game client) and every world's start and stop.
     if (api->size >= offsetof(KilnApi, session) + sizeof(void*)) {
         KilnHandle h = 0;
+        bool client_tick = false;
         if (api->side() == KILN_SIDE_CLIENT)
-            api->subscribe_world_tick(owner, KILN_WORLD_CLIENT, KILN_TICK_PRE, &on_client_pre, nullptr, &h);
-        api->subscribe_world(owner, &on_world_event, nullptr, &h);
+            client_tick = api->subscribe_world_tick(owner, KILN_WORLD_CLIENT, KILN_TICK_PRE, &on_client_pre, nullptr, &h) == KILN_OK;
+        const bool events = api->subscribe_world(owner, &on_world_event, nullptr, &h) == KILN_OK;
+        wraps_client_ready(client_tick, events);
+        programs_client_init(client_tick, events);  // world.programs.client: before on_ready's reservations
+    } else {
+        programs_client_init(false, false);
     }
     game_programs_init();
     KW_I("kiln.world: programs %s, entities %s, find %s, names %s (singletons %s, events %s), queue %s, "
@@ -391,5 +461,7 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
          F.singletons ? "on" : "off", F.events ? "on" : "off", F.queue ? "on" : "off", F.write ? "on" : "off",
          F.read_other ? "on" : "off", F.teleport ? "on" : "off", F.dead ? "on" : "off", writes_available() ? "on" : "off");
     if (!F.entities && !F.programs) return KILN_ERR_UNAVAILABLE;  // nothing works on this build
-    return api->register_service(owner, KilnStr{KILN_WORLD_SERVICE, sizeof(KILN_WORLD_SERVICE) - 1}, &kTable);
+    const KilnResult rc = api->register_service(owner, KilnStr{KILN_WORLD_SERVICE, sizeof(KILN_WORLD_SERVICE) - 1}, &kTable);
+    if (rc == KILN_OK) program_budget_register();  // kiln.world.budget: a table of its own (since 0.2.0-dev.29)
+    return rc;
 }

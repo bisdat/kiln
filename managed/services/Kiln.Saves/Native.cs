@@ -14,6 +14,7 @@ internal static unsafe class SavesNative
     public const uint CanRequest = 1, CanWrite = 2, CanLoad = 4, CanReason = 8;
     public const uint ClientHosted = 16;  // KILN_SAVES_CLIENT_HOSTED: a game client's own world (Steam cloud / local slot)
     public const uint CanSnapshotStage = 32;
+    public const uint CanStageBarrier = 64;  // KILN_SAVES_CAN_STAGE_BARRIER (0.2.0-dev.29.3): stage_progress holds the world write
     public const int PathSaveDir = 0, PathWorldFile = 1, PathData = 2, PathBackups = 3;
 
     [StructLayout(LayoutKind.Sequential)]
@@ -56,6 +57,30 @@ internal static unsafe class SavesNative
         public delegate* unmanaged[Cdecl]<ulong, delegate* unmanaged[Cdecl]<uint, void*, void>, void*, ulong*, int> SetPump;
         public delegate* unmanaged[Cdecl]<int, byte*, nuint, nuint*, int> Path;
         public delegate* unmanaged[Cdecl]<uint, int> SetPumpInterval;
+    }
+
+    /// <summary>The table with what 0.2.0-dev.29.3 appended (kiln_saves.h stage_progress); read only when
+    /// <c>Header.Size</c> covers it.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct TableV2
+    {
+        public Table V1;
+        public delegate* unmanaged[Cdecl]<ulong, ulong, int> StageProgress;
+    }
+
+    /// <summary>kiln.saves' stage barrier (stage_progress): the game's world write waits until Kiln.Saves' writer has the
+    /// stagings it was handed on disk. Null without it: an older kiln.saves, or a build whose world write is not hooked
+    /// (KILN_SAVES_CAN_STAGE_BARRIER off), where nothing would hold the world write; Kiln.Saves then waits for its own
+    /// staging on the tick thread, as before 0.2.0-dev.29.3.</summary>
+    public static delegate* unmanaged[Cdecl]<ulong, ulong, int> StageBarrier
+    {
+        get
+        {
+            var t = T;
+            if (t == null || t->Header.Size < (uint)sizeof(TableV2)) return null;
+            if (ReadStatus() is not { } s || (s.Features & CanStageBarrier) == 0) return null;
+            return ((TableV2*)t)->StageProgress;
+        }
     }
 
     private static Table* _table;

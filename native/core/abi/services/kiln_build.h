@@ -56,7 +56,11 @@ enum {
     KILN_BUILD_F_ALLOW_ALTARS = 1u << 2,  /* props: allow templates with BaseIdComponent (they found a base) */
     KILN_BUILD_F_UNLOADED = 1u << 3,      /* write even where the voxel tiles are not streamed in (not recommended) */
     KILN_BUILD_F_DRY_RUN = 1u << 4,       /* compute and report, write nothing */
-    KILN_BUILD_F_TRANSIENT = 1u << 5,     /* do not keep the edit across restarts (the game's own rule outside bases) */
+    KILN_BUILD_F_TRANSIENT = 1u << 5,     /* gone after the next restart: no Kiln save region, and where the game's save
+                                             writes the cells anyway (a base, a chunk another edit keeps) Kiln puts the
+                                             earlier cells back at the next start (journal: kiln/data/kiln.build/transient).
+                                             Not with KILN_BUILD_F_UNLOADED (INVALID_ARGUMENT); UNAVAILABLE when the
+                                             journal is full or cannot be written, or the world's id is unknown */
 };
 
 /* KilnBuildResult.flags */
@@ -255,6 +259,12 @@ typedef struct KilnBuildApi {
      * too); release() forgets the chunks inside a box (they revert at the next restart unless a base covers them). */
     KilnResult(KILN_CALL* keep)(const int32_t origin[3], const uint32_t dims[3]);
     KilnResult(KILN_CALL* release)(const int32_t origin[3], const uint32_t dims[3], uint64_t* released);
+    /* Appended dev.29, v1: shared Terrain/recovery allowance on the tick thread. Inspect header.size before use.
+     * reserve: OK admits conservative read/write cell costs in this server step (32768/4096); otherwise try next step.
+     * charge: elapsed synchronous work in milliseconds; stop admission after 2 ms. Calls are not preemptible.
+     * These are used by Kiln.Terrain and native transient recovery; keep/release metadata has no voxel cell cost. */
+    KilnResult(KILN_CALL* terrain_budget_reserve)(uint32_t read_cells, uint32_t write_cells);
+    void(KILN_CALL* terrain_budget_charge)(double milliseconds);
 } KilnBuildApi;
 
 #ifdef __cplusplus

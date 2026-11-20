@@ -179,6 +179,9 @@ fn roots(game: &Path) -> Vec<Root> {
         Root { rel: String::new(), abs: game.join(crate::engine_mods::SHROUDLINK_MODS), kinds: vec![K::Shroudlink],
             files: Files { dll: true, zip: false }, folders: true },
         Root { rel: String::new(), abs: game.join(crate::engine_mods::EMBER_MODS), kinds: vec![K::Ember], files: none, folders: true },
+        // packages for Enshrouded ModLoader: package folders, and DLL + .dll.mod pairs directly in it
+        Root { rel: String::new(), abs: game.join(crate::dllmod::RUN_FOLDER), kinds: vec![K::Dllmod], files: Files { dll: true, zip: false },
+            folders: true },
     ];
     // ShroudForge's mods folder is `mods` unless its config names another
     let sf = crate::shroudforge::mods_dir(game);
@@ -208,6 +211,7 @@ fn folders_of(kind: ModKind) -> &'static str {
         ModKind::Flame | ModKind::Shroudtopia | ModKind::Enshwick => "mods",
         ModKind::Shroudlink => "shroudlink_mods",
         ModKind::Ember => "ember/mods",
+        ModKind::Dllmod => crate::dllmod::RUN_FOLDER,
     }
 }
 
@@ -239,6 +243,7 @@ fn loader_kinds(e: Engine) -> Vec<ModKind> {
         Engine::Flame => vec![K::Flame],
         Engine::Shroudlink => vec![K::Shroudlink],
         Engine::Ember => vec![K::Ember],
+        Engine::Dllmod => vec![K::Dllmod],
         _ => vec![],
     }
 }
@@ -364,6 +369,11 @@ struct Ctx<'a> {
     kiln: bool,
     /// Wine or Proton: a loader under a proxy name next to the game runs only with a DLL override for that name.
     wine: bool,
+    /// ShroudForge runs the EML mods of its mods folder this start ([`crate::own_loaders::sf_eml_folder`]): Some(its own
+    /// loader does; false: Kiln hosts it for the profile).
+    sf_eml: Option<bool>,
+    /// A dedicated server's folder.
+    server: bool,
 }
 
 fn found(name: String, path: String, state: FoundState, reason: String) -> FoundMod {
@@ -377,7 +387,7 @@ fn entry(cx: &Ctx, root: &Root, abs: &Path, file_name: &str, is_zip: bool) -> Fo
         // the zip is not opened here: EML's runner takes a zip in its folders as one mod
         let stem = Path::new(file_name).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| shown.clone());
         Detected { kind: DetectKind::Eml, path: path.clone(), id: None, version: None, name: Some(stem),
-            reason: "a .zip in EML's folder".into(), items: vec![], engine: Some(Engine::Eml) }
+            reason: "a .zip in EML's folder".into(), items: vec![], asi_omit: vec![], engine: Some(Engine::Eml) }
     } else if too_large(abs) {
         return found(shown, path, FoundState::CannotRun, format!("A DLL here is larger than {} MiB, too large to inspect.", MAX_DLL >> 20));
     } else {
@@ -406,6 +416,13 @@ fn entry(cx: &Ctx, root: &Root, abs: &Path, file_name: &str, is_zip: bool) -> Fo
         m.reason = "Kiln finds Ember mods but cannot run them yet: Ember has not published its mod ABI.".into();
         return m;
     }
+    // ShroudForge runs the EML mods of its own folder this start (its own loader, or Kiln hosting it for the profile's
+    // ShroudForge mods), each only while its switch is on: neither EML's drop-ins nor kiln-eml decide it
+    if kind == ModKind::Eml && cx.kiln && cx.sf_eml.is_some() && root.kinds.contains(&ModKind::ShroudForge) && abs.is_dir()
+        && profile_entry(cx.dirs, cx.profile, kind, d.id.as_deref(), abs).is_none()
+    {
+        return sf_eml_entry(cx, m, abs);
+    }
     if !root.kinds.contains(&kind) {
         m.reason = format!("Nothing loads {} mods from {}: Kiln looks for them in {}.", short(kind), root.rel, folders_of(kind));
         m.fix = Some(FoundFix::Add);
@@ -430,6 +447,29 @@ fn entry(cx: &Ctx, root: &Root, abs: &Path, file_name: &str, is_zip: bool) -> Fo
         m.profile_mod = Some(pm.id.clone());
         return m;
     }
+    // An EMF Lua mod runs under EMF's lua mod, whoever loads the EMF mods: without it nothing runs the mod
+    let lua = kind == ModKind::Emf && abs.is_dir() && crate::library::is_emf_lua(abs);
+    match lua.then(|| emf_lua_host(cx)) {
+        Some(Some(false)) => {
+            m.reason = "An EMF Lua mod. EMF's lua mod runs Lua mods, and this profile has it switched off.".into();
+            return m;
+        }
+        Some(None) => {
+            m.reason = format!("An EMF Lua mod. EMF's lua mod runs Lua mods, and it is not in {} or in this profile. Add EMF's lua mod \
+                (game/emf/mods/lua in EMF's download) to run it.", folders_of(kind));
+            return m;
+        }
+        _ => {}
+    }
+    let mut m = found_loads(cx, kind, m);
+    if lua && m.state == FoundState::Loads {
+        m.reason.push_str(" EMF's lua mod runs its Lua.");
+    }
+    m
+}
+
+/// [`entry`] from the own loader on: who loads the mod of `kind` with this profile, and why.
+fn found_loads(cx: &Ctx, kind: ModKind, mut m: FoundMod) -> FoundMod {
     let loader = cx.loaders.iter().find(|l| l.kinds.contains(&kind));
     // A chained loader always runs. One under a proxy name always runs on Windows (the game imports those names);
     // under Wine and Proton only with a DLL override, which the launcher cannot see.
@@ -467,6 +507,47 @@ fn entry(cx: &Ctx, root: &Root, abs: &Path, file_name: &str, is_zip: bool) -> Fo
     m
 }
 
+/// Is EMF's `lua` mod, the host of EMF's Lua mods, there for this profile: Some(on) when the profile lists it (kiln-emf
+/// takes the profile's entry first, and a copy in emf/mods is then ignored); else Some(true) for a folder in emf/mods
+/// whose mod.json gives the id `lua` beside its DLL, or a loose emf/mods/lua.dll; None when there is none. While EMF's
+/// own loader runs (as [`found_loads`] tells it), that folder counts first: EMF reads emf/mods itself, whatever the
+/// profile says, and Kiln copies the profile's entry there when it is on.
+fn emf_lua_host(cx: &Ctx) -> Option<bool> {
+    let own = cx.loaders.iter().any(|l| l.kinds.contains(&ModKind::Emf) && !(cx.wine && !l.file.contains('/')));
+    let listed = cx.profile.mods.emf.iter().find(|m| m.id == EMF_LUA_HOST).map(|m| m.enabled);
+    if !own && listed.is_some() {
+        return listed;
+    }
+    let dir = cx.game.join(crate::paths::game::DROPIN_EMF);
+    let folder = || std::fs::read_dir(&dir).into_iter().flatten().flatten().take(MAX_ENTRIES)
+        .any(|e| e.path().is_dir() && crate::library::emf_dll_mod_id(&e.path()).as_deref() == Some(EMF_LUA_HOST));
+    if dir.join(format!("{EMF_LUA_HOST}.dll")).is_file() || folder() { Some(true) } else { listed }
+}
+
+/// The id of EMF's `lua` mod (EMF's mods/lua/mod.json).
+const EMF_LUA_HOST: &str = "lua";
+
+/// [`entry`] for an EML folder in ShroudForge's mods folder while ShroudForge runs the EML mods ([`Ctx::sf_eml`]): its
+/// switch decides. One the player copied there by hand that ShroudForge keeps off gets the words promised on Nexus
+/// ([`crate::shroudforge::hand_eml_off`]); "Add it" is no fix for it (activation never places a copy beside the
+/// player's folder), so the words name the ways out.
+fn sf_eml_entry(cx: &Ctx, mut m: FoundMod, abs: &Path) -> FoundMod {
+    use crate::shroudforge::SfOff;
+    let own = cx.sf_eml == Some(true);
+    match crate::shroudforge::switched_off(abs, cx.server) {
+        None => {
+            m.state = FoundState::Loads;
+            m.via = Some(if own { FoundVia::OwnLoader } else { FoundVia::Kiln });
+            m.reason = "ShroudForge runs it: its ShroudForge switch is on.".into();
+        }
+        Some(SfOff::Switch(_)) => m.reason = crate::shroudforge::hand_eml_off(cx.server, false),
+        Some(SfOff::Side(_)) => m.reason = format!("ShroudForge runs it on the {} only, not {}.",
+            if cx.server { "client" } else { "server" }, if cx.server { "on this server" } else { "in this game" }),
+        Some(SfOff::Unreadable(why)) => m.reason = format!("ShroudForge cannot read it ({why}), so it does not run, and no switch changes that."),
+    }
+    m
+}
+
 fn short_engine(l: &OwnLoader) -> &'static str {
     match l.engine {
         Engine::Eml => "EML",
@@ -498,7 +579,15 @@ pub fn scan(dirs: &DataDirs, install: &GameInstall, profile: &Profile) -> FoundR
     let kiln_installed = kiln_proxy || receipt.is_some();
     // Kiln's own files in kiln/plugins (kiln-*.dll, and anything its receipt lists)
     let shipped: Vec<String> = receipt.iter().flat_map(|r| r.files.iter().map(|f| f.path.replace('\\', "/").to_ascii_lowercase())).collect();
-    let cx = Ctx { dirs, game, profile, loaders: &loaders, kiln: kiln_installed, wine: install.platform != crate::game::Platform::Windows };
+    // who runs the EML mods of ShroudForge's folder, as activation decides it (own_loaders), only when that folder is there
+    let sf_eml = crate::shroudforge::mods_dir(game).is_dir().then(|| {
+        let view = crate::own_loaders::ProfileView::of_profile(profile);
+        let mine = crate::own_loaders::find(game, Some(&view));
+        crate::own_loaders::sf_eml_folder(game, &mine).map(|_| crate::own_loaders::of_kind(&mine, ModKind::Eml)
+            .is_some_and(|l| l.engine == Engine::ShroudForge && l.via != crate::own_loaders::Via::HostedShroudForge))
+    }).flatten();
+    let cx = Ctx { dirs, game, profile, loaders: &loaders, kiln: kiln_installed, wine: install.platform != crate::game::Platform::Windows,
+        sf_eml, server: install.kind == crate::game::GameKind::Server };
     let mut rep = FoundReport {
         game_id: install.id.clone(),
         profile_id: profile.id.clone(),
@@ -557,6 +646,10 @@ pub fn scan(dirs: &DataDirs, install: &GameInstall, profile: &Profile) -> FoundR
                 }
                 // Enshwick's loader keeps its own files in mods/enshwick/: never a mod
                 if root.kinds.contains(&ModKind::Enshwick) && lower == crate::engine_mods::ENSHWICK_LOADER_FOLDER {
+                    continue;
+                }
+                // mods/EnshroudedModLoader is Mods/EnshroudedModLoader on Windows: its packages are that root's entries
+                if root.kinds.contains(&ModKind::Eml) && lower == "enshroudedmodloader" {
                     continue;
                 }
             } else if t.is_file() {

@@ -2,6 +2,7 @@
 // kiln.content: reference fields ("kitbash", refs.cpp). An item's GUID references (model, visual template, icon setup,
 // perks, weapon category, impact entity, program, ...) pointed at resources the game already loaded, validated by type.
 #pragma once
+#include <filesystem>
 #include <functional>
 #include <string>
 #include <vector>
@@ -31,9 +32,16 @@ struct KitbashOut {
     std::vector<RefWrite> writes;
     std::vector<BlobWrite> blobs;
     std::vector<std::string> problems;  // ops that were skipped (unknown item, wrong type, GUID not loaded, ...)
+    std::vector<const Field*> unresolved;  // reference fields whose last value did not resolve (the base's value stays)
     bool icon = false;                  // "icon": the UI icon texture is looked up under icon_guid
     uint8_t icon_guid[16] = {};
 };
+
+// A placeholder ("[Missing: mod:item]", newcontent.cpp) is inert: an Impact program reference it cannot resolve (a
+// program its mod served, such as a Kiln gem trigger program, and nothing serves now) names no program instead of
+// keeping the base's, so a missing mod's gem does nothing rather than act as its base gem (gem wave). Other unresolved
+// references keep the base's value. Adds a "none" write for each such field of `out`; returns how many.
+size_t placeholder_clear_programs(KitbashOut* out);
 
 // The keys an item definition / rule may use for references: model visual icon perks weaponType impact program
 // animation collectionModel refs, or the path of any reference field ("equipment.visualEntity").
@@ -59,5 +67,6 @@ KilnResult apply_kitbash(KilnOwner owner, uint64_t seq, const Entry& e, const st
                          bool allow_game, const std::string& source, std::vector<std::string>* problems);
 std::vector<uintptr_t> registry_items();
 std::string refs_info_json(const Schema& s, const std::vector<uintptr_t>& items);
+std::vector<std::filesystem::path> mod_folder_list();  // every enabled mod folder, in load order
 
 }  // namespace kc

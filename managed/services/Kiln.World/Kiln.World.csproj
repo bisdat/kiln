@@ -14,8 +14,17 @@
     <InternalsVisibleTo Include="Kiln.Game" />
     <InternalsVisibleTo Include="Kiln.TestKit" />
     <InternalsVisibleTo Include="Kiln.World.Tests" />
+    <!-- WorldConcurrent's tests run real Kiln tasks on the task API's fake pool (Kiln.Api.Tests/FakeTaskBackend.cs) -->
+    <InternalsVisibleTo Include="Kiln.Api.Tests" />
     <InternalsVisibleTo Include="Kiln.TestKit.Tests" />
     <!-- the contract tests: the rows' names -->
     <InternalsVisibleTo Include="Kiln.Contract.Tests" />
+    <!-- dev.28 06a: a program wrap's writes raise ComponentWrittenEvent (ComponentWrittenEvent.FromWrap) -->
+    <InternalsVisibleTo Include="Kiln.Systems" />
+    <!-- NativeContext's writes of other entities raise the same ComponentWrittenEvent (06c S5) -->
+    <InternalsVisibleTo Include="Kiln.Abilities" />
+    <InternalsVisibleTo Include="Kiln.Systems.Tests" />
+    <!-- dev.29 07 S7: the component watches' native mirrors and consumer, tested with the decisions -->
+    <InternalsVisibleTo Include="Kiln.Decisions.Tests" />
   </ItemGroup>
 </Project>

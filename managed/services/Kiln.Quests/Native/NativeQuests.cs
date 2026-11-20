@@ -31,7 +31,7 @@ public sealed record NativeModInfo(string Id, bool Ok, IReadOnlyDictionary<strin
 public readonly record struct NativeWanted(string Name, uint Id, uint Value);
 
 /// <summary>What was built at boot from the mods' quests/*.json, and the run-time glue.</summary>
-public static class NativeQuests
+public static partial class NativeQuests
 {
     private static IReadOnlyList<NativeModInfo>? _mods;
     private static string _raw = "";

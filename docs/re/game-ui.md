@@ -173,6 +173,16 @@ of 5d9ef2f1. Helper: `kx.py` (copied from the NoClip research) over the exe as a
   entries' focus for the keys and the pad (the end code says so; nothing has run). Settled by the first try: `dl` 1
   scrolls vertically, the wheel scrolls, the inner stack sizes to its entries. Kiln's experiment (`native/services/ui/menu_scroll.cpp`) does exactly what the credits do,
   in the column, and logs the sizes it saw.
+- **The height (dev.29; from a screenshot and the first try, nothing new run).** The owner's 1280x720 screenshot
+  (2026-11-15, 16 rows: the game's 13, Kiln's Mods, Creative, SET tools) puts an entry frame every 40 px from 20 px,
+  with 53 px and 27 px between the three groups, and Quit's at 700..740 px (cut). With the first try's column of 1020
+  units at 3440x1440 both fit a UI 1080 units high at any resolution: column at y 30, 1020 tall, a row 60, the gaps
+  80 + 40; the 13 game rows alone are 900. **[rt]** (pixels) **[hyp]** (the 1080-unit UI; the parts of the 87 units
+  below Quit). Kiln does not rely on these numbers: it reads the column's rectangle and the top of an empty,
+  zero-sized stack it opens after the last entry (the same `UiVStack` / `UiNodeSize` / `UiFrameEnd` as its own stack
+  in the view; the probe's top is the rows' bottom), and wraps when the rows are taller than the column
+  (`menu_scroll.h`). That the probe is laid out like any child (a rectangle at the rows' bottom, no height) is a
+  reading of the layout rules above, for the client pass to confirm (kiln.log's `ui: the pause menu's entries: ...`).
 - **Cost and risk:** the game's layout asserts are fatal (`0xcb4c38`: "SmallDynamicArray is out of elements", then
   `0x8a0d90`): a wrong nesting ends the game on the first scrolled frame, which no run-time check can rule out before
   it. Kiln's crash guard limits that to one start per Kiln version and game build. A game update moves every one of
@@ -234,11 +244,49 @@ of 5d9ef2f1. Helper: `kx.py` (copied from the NoClip research) over the exe as a
   in the data (workshop 0: 6 tabs). **[refl] [data]** Corrected 2026-11 (dev.28 RE) **[static]**: current builder
   reads max groups at bundle+0xf0a8 and group walker reserves sets from +0xf0ac; a separate 512-output bound also
   applies (current lookup section below). Kiln's additions must respect each bound.
+- **Factory screens (client 26430625, static analysis, 2026-11-17; nothing of it run)** **[dis]**. The HUD screen dispatcher is
+  `0xbe87d0(type, mode)` on this build (PlayStateUi calls it with mode 3 at `0xc611bf`). Its switch on `type - 2`
+  (`0xbe947b`, tables `0xbea0d8` / `0xbea0b4`) sends **25** (StationBasedCrafting, `0xbe956f`) and **27** (NpcCrafting,
+  `0xbe94a4`) to CraftingMenu (`0xb80130` here); both first need play `+0x2c50` non-zero (else `0xbe9556`, which closes the
+  screen) and read the station's workshop from play `+0x2e48`. **28 (FactoryCrafting) falls to the default case**: no
+  crafting builder runs at a kiln, smelter or loom, so Kiln's `g_craft` never names it. PlayStateUi's own switch on the HUD
+  screen (`0xc61135`, the one `ui/GemForgeSwitch` patterns; cases 22..45) sends 22 StorageChest to `0xb9d0f0(0)`, 41 to
+  `0xb9d0f0(1)` and **28 to `0xb9d0f0(2)`**: the chest-style transfer screen with a mode. `0xb9d0f0` reads play `+0x2c50`
+  and looks it up in the UI's inventory views (play `+0x3060`, `+0x3068` count, stride 0x8f70, keyed by the first dword):
+  the other inventory's entity; play `+0x18` is the player's own. So play `+0x2c50` is **the entity the screen is about**
+  (a chest, a factory station, an NPC: the NPC crafting code at `0x2b88e2` writes it and clears `+0x2e48`); Kiln names it
+  `ui/play.target` (captured by `@ui/HudCrafting.fields` from both dispatcher cases, 2 captures agree on 0x2c50). Play
+  `+0x2e48` (Kiln's `ui/play.interaction`, the same field: **not an entity**, the workshop **[rt]** for a bench) is written at
+  `0x2b990a` from `+0xc` of a component the player-UI update looks up on the interaction target: not `Crafting` (`+0x10`) nor
+  `CraftingInteraction` (`+0x1c`), so whether it holds a factory's workshop is open (client step 4 of docs/kiln/ui.md "Item
+  icons and names"). Kiln 0.2.0-dev.29.15 reports a factory screen as a crafting screen (`IsFactory`, `Station` from
+  `+0x2c50` through kiln.ui's `screen_target`, `Workshop` from `+0x2e48`, `Recipe` 0); the factory's selected recipe is not
+  read (its transfer screen's state was not traced).
 - Extension point (shipped): `kiln.craftmenu` v1, implemented inside content-data's existing `0xd5ade0` hook (no
   second detour): Kiln tabs and subcategories are copies of a workshop's tab array in near memory with Kiln's entries
   appended; the tree header is pointed at the copy; labels are new LocaTagReference GUIDs whose tag ids content's loca
   hooks answer. Info panels next to the menu are Kiln overlay windows (they know station, workshop and selected
   recipe). **[dis] [rt]**
+
+## 5a. Names and icons for mod UIs (client 26430625 / server 26430253; 0.2.0-dev.29.15) **[refl] [data]**
+What Kiln reads to name and draw items, workshops and recipes in mod windows (Kiln.Items' `GameNames`, Kiln.Ui's
+`ItemIcons`), from the game's resident data, so without a world (main menu) and on a joined client:
+- **Item icons**: the `keen::UiTextureResource` under the item's own GUID (docs/re/resources.md section 4, "Item icons as
+  pictures"). `ItemInfo.iconImage` has no reader (docs/re/content.md 8.3).
+- **Texts**: `keen::LocaTagCollectionResource` (one resource, 40 B: `englishData` ResourceContentReference @0, `languages`
+  BlobArray @0x20 of `LocaTagCollectionResourceLanguage` 40 B {`language` keen::LanguageId (sint32) @0, `data`
+  ResourceContentReference @8}). A language's content blob is a `LocaTagCollectionResourceData` {`tags`: BlobArray of
+  `LocaTagResource` 24 B {`id` LocaTagId @0, `text` BlobString @4, `arguments` @0xc, `genericArguments` @0x14}}. keen::LanguageId:
+  1 En_Us, 3 De_De, ... 34 Uk_Ua (the same order as Kiln.Ui's `GameLanguage` keys). A dedicated server's data has none of it.
+- **An item's name**: `ItemInfo.name` @0x48, a NameLocaTag (16-byte GUID); its tag id is FNV-1a-32 of the 16 bytes.
+- **Workshops**: `keen::WorkshopRegistryResource` {`npcs` @0, `workshops` @8: BlobArray of `WorkshopResource` 56 B
+  {`workshopGuid` @4, `workshopId` @0x14, `name` LocaTagId @0x18, `item` ItemId @0x1c (the item that places it), `itemRef`
+  @0x20}}.
+- **Recipes**: `keen::RecipeRegistryResource` `recipes` @0: BlobArray of `RecipeInfo` 168 B {`recipeId` @0x10, `output` @0x30
+  (BlobArray of `RecipeItemStackResource` 24 B {`item` @0x10, `count` @0x14}), `recipeName` NameLocaTag @0x68}; most recipes'
+  `recipeName` is empty (their result names them).
+- **The game's items by id**: every `keen::ItemInfo` resource of the game's data (4,268 on 26430625); id = FNV-1a-32 of its
+  GUID (kiln.items' registry check and kiln.content agree). Kiln reads every offset from the game's reflection (kiln.types).
 
 ## 5b. Main-menu pages (client 26430625, static analysis only)
 Nothing in this section has been seen running. Source: `kiln-wave/dev22/re/REPORT-main-menu.md` (Ghidra headless,
@@ -315,6 +363,98 @@ entries. A hook on Credits answers only calls returning to `ui/PreGameCreditsRet
 13. The page stays readable over the real close-up shot (it has no background of its own).
 14. Kill Kiln.Ui's drawing (a build without the managed host): the page leaves by itself after about a second and MODS
     then opens the stand-alone menu (`no host drew it for a while`).
+
+## 5c. The main menu's footer (client 26430625, static analysis only)
+Asked for 2026-11-16: Kiln's own line on the main menu ("Kiln &lt;version&gt; - &lt;N&gt; Mods Loaded" with Kiln's mark),
+taking the place of XHL-Core's. Nothing here has been seen running. RVAs of 5d9ef2f1. Symbols: `ui.json` feature
+`ui.menu_footer`. Kiln's use: `native/services/ui/menu_footer.cpp`, `code_clone.h`. Work files (helpers, the XHL-Core
+signature map): `/mnt/Dongus/kiln-wave/dev29/out/menufooter/`.
+
+**The game's footer.** `MainMenuFooter 0xc189e0` (`void(void)`, 0x3f5 bytes, unwind info version 1, no handler) has one
+caller: the main menu page's draw (`call` at `0xc2cb5e`, in a chunk of `0xc2a400`, right before the page's frame closes).
+It opens a window named "LegalLine" (`0xa3f530(&win, {"LegalLine", 9}, 1, layer 0x22, 0, 0)` at `0xc18a2b`), a stack
+(`0xa3cbd0`, `0xa49b10`) with padding = max(safe-area insets, 10 units) and spacing {0, 5}, a flexible spacer {0, 1} (the
+lines sit at the bottom), then two lines:
+- the build number (only when `*(*(UiApp)+0xd0)` holds a state): loca tag `cfg+0x6be0` formatted with "%s %u" and the
+  build number, `NativeTextLine 0xb1da10(rbp+0x10, &text, cfg+0x10f2c, 0)` at **`0xc18c14`** (`ui/MainMenuFooterBuildLine`),
+  then the object's node aligned 0x301 (`UiNodeAlign 0x11ced70`), byte `+0x3d` = 1, the colours at `+0xb0` and `+0xb8`
+  to alpha 0x7f, flags u16 `+0x90` |= 0x48, `+0x92` = 0, byte `+0xd4` |= 1, the size float `+0x7c` = `cfg+0x10b98`, and
+  `NativeTextDraw 0xb25160(object)` at `0xc18caf`;
+- the legal line (loca tag `cfg+0x6b80`), the same way (`0xc18d05` … `0xc18da9`);
+- the stack's end `0xa40080`, the window's end `0xa3fa90`. **[dis]**
+
+No base relocation touches the function; its 32 relative fields are 31 to the outside (20 calls) and one jump inside
+(`je 0xc18cbb`, no state: no build number). **[dis]** (`tests/code_clone_test.cpp` reads it from the installed exe.)
+
+**XHL-Core 2.1.0** (`dinput8.dll`, sha256 `9eba3c3d…`, MIT; Ghidra decompile in `kiln-wave/xhl/re/core/all.c`) draws its
+main-menu entry here. A background thread (`FUN_180045510`) scans the game's exe **file** (mapped from disk; the live
+image only when the file cannot be mapped) until it finds its sites, then rewrites four `E8 rel32` calls in the live code
+to near stubs (`FUN_180030160`, mutex `Local\XHL.CodePatch.<pid>`, every thread suspended, each site's live byte must be
+`E8`, its old target becomes the hook's "original"). It never scans again once they are in. Its LegalLine scanner
+(`FUN_18005b370`) finds the "LegalLine" `lea`, the window call (`0xc18a2b`), the "%s %u" `lea` and the
+`NativeTextLine` / `NativeTextDraw` calls after it and the `movss xmm0, [rcx+0x10b98]` size read:
+- `0xc18c14` (the build number's `NativeTextLine`) → `FUN_1800596a0`: when its status text is not empty, it opens a
+  frame "XhlStartupStatus" (FNV-1a id), builds its own text with the game's `NativeTextLine` (the build line's style
+  and mode), aligns it 0x101, sets `+0x3d`, flags `|= 0x4a`, the size `cfg+0x10b98 × 1.1`, colour `0xff80ff60` (green)
+  when all is well or `0xff3030ff` (red) for a problem, draws it with `NativeTextDraw`, makes it clickable while its
+  input mode is on (a click opens its diagnostics), then calls the game's `NativeTextLine`. So its line sits right above
+  the build number. The text: "All mods loaded" (35 languages, `PTR_s_All_mods_loaded_1800be0f8[lang × 27]`) once its
+  startup check finished with no issue, else the issue ("XHL: Game updated … Click to view", "Mod conflict detected.
+  Click to view", …), else nothing.
+- `0xc18a2b` (the LegalLine window) → `FUN_180059bf0`: the window's input argument forced on while its status line is
+  interactive.
+- two calls in the main menu's entry code (found through "pregameMainMenuWindow", "mainMenuEntries",
+  "PreGameStateStorageWindow", "doButton()", "Settings", "MainMenu") → `FUN_180059560`, `FUN_180059640`: keyboard and
+  gamepad reach of the status line (its activation opens XHL's menu).
+**[xhl]** (decompile; not run)
+
+**What Kiln does** (feature `ui.menu_footer`): at start kiln.ui copies `MainMenuFooter` from the exe file into memory
+near the image (`code_clone.h`: same layout, outside references rewritten, the copy checked against the original before
+use, the original's unwind information registered for it) with its call at `0xc18c14` sent through Kiln's thunk, and
+hooks the function's entry to run the copy (XHL-Core scans the exe file, not the live code, and at install checks only
+that its own call sites are still calls). The thunk builds and draws Kiln's line
+exactly as the game builds its build-number line (the same style, mode, fields; text with 7 no-break spaces in front of
+it for the mark), reads its rectangle (`UiNodeRect`, the last layout's) and then calls the game's `NativeTextLine` for
+the build number. Kiln never writes to the function's body, so XHL-Core's scan and its call patches go in as before in
+either order. The copy's window call (`0xc18a2b`, `+0x4b`: the last byte of `ui/MainMenuFooter`'s pattern) goes through
+a second thunk. Both thunks call the game's functions, unless XHL-Core is in the footer and reports a problem: then they
+call XHL-Core's patched targets (its stubs: `jmp [rip+0]` with no register move for these two sites: their entries in the
+site list handed to `FUN_180030160` carry register 0xffffffff; only `FUN_180059560`'s gets a `mov r9, reg`), so XHL-Core draws its red line under Kiln's and its window
+patch lets the line take clicks; its two main-menu patches work as they do without Kiln. Kiln knows XHL-Core by the
+export `XhlNativeGameBuild` of the module the build-number call's stub leads to, and reads its state through the first
+call of the detour `FUN_1800596a0` whose target has the getter's shape `xor ecx,ecx; xor eax,eax; lock cmpxchg
+[rip+rel32],ecx; ret` (`FUN_180043af0`, the int `DAT_180109160`: 0 = no problem, its green line or nothing; else the
+problem its red line names, via `FUN_180043bd0`). Kiln looks at the two live calls each frame its copy runs (XHL-Core
+patches from its own thread, maybe late). Its green "All mods loaded" is left out (Kiln's line reads "Kiln ... with
+XHL-Core - N Mods Loaded"); where the getter is not found, XHL-Core's line is always drawn. At the first use kiln.ui compares the live
+function with the file's: a patched call is logged (module and offset); any other change (or base-relocated bytes) leaves
+the footer to the game's function. The game font's metrics for the mark's gap: Harmonique Display Regular, 1000 units per
+em, ascent 980, descent 220, space and no-break space 191 (fontTools over font 0 of the UiFontResource) **[data]**.
+
+### Client checklist (needs the real game)
+Without XHL-Core:
+1. Main menu: Kiln's mark and "Kiln 0.2.0-dev.29.11 - N Mods Loaded" right above the build number, in the footer's
+   font, size and colour, aligned like the two game lines; N is what the Mods page counts as Loaded. kiln.log:
+   `ui: the main menu's footer: Kiln's line goes above the build number`, `... says "Kiln ..."`, `... Kiln's line at ...,
+   its mark at ...`.
+2. The mark sits in the gap before "Kiln" (not over the text, not far from it), its height about the text's; check at
+   1920x1080, 2560x1440, 3440x1440 and a UI scale change.
+3. Settings, Credits, PLAY and back, the Kiln page (MODS) and back, a world and Return to Main Menu: the line and its
+   mark are there only on the main menu page, and come back with it.
+4. Kiln settings → `mainMenuFooter` off: the line and the mark go at once, the game's footer is as before; on again:
+   they come back.
+With XHL-Core 2.1.0 (as a chain DLL):
+5. Kiln's line reads "Kiln <version> with XHL-Core - N Mods Loaded" (in Kiln's language) in the same place; with no
+   XHL-Core problem its green "All mods loaded" is not shown at any moment. kiln.log names XHL-Core: `a module patched
+   the game's footer call at +0x234 to <XHL-Core's file>+0x596a0` (and at `+0x4b` to `+0x59bf0`), `XHL-Core's footer
+   line is at <file>+0x596a0; ... shows while XHL-Core reports a problem (it takes clicks)`, `XHL-Core reports no
+   problem: Kiln's line only`.
+6. With an XHL-Core problem (see the report's check list for how to provoke one): XHL-Core's red line ("XHL: Game
+   updated · Click to view" or "Mod conflict detected. Click to view") right under Kiln's line, above the build number;
+   a click on it opens XHL-Core's startup diagnostics window; kiln.log `XHL-Core reports a problem: its red line shows
+   under Kiln's`.
+7. XHL-Core's Insert menu, its plugins and its other features work as before, in the main menu and in a world.
+8. `mainMenuFooter` off: XHL-Core's own line (green or red) is back above the build number, as XHL-Core draws it.
 
 ## 6. Other strings worth knowing
 "[GameUi] … opened" log lines exist for every menu (Backpack, Map, Journal, Skill Tree, Settings, Social, NPC dialog,
@@ -468,6 +608,37 @@ used a fixed synthetic Player permission subject and got admin refusal: transpor
 authentication**. Rich blocks reuse existing ImGui widgets/input/textures and add no new engine RVA. Complete
 catalogs, immutable-snapshot, custom-stat and owned-viewer contracts remain in dossier chapters 05a/05b/09.
 
+## Item detail layout and value sources for native tooltip lines (equipment wave P8a; client 26430625)
+
+C `5d9ef2f1…`, static only (Ghidra headless without auto-analysis, capstone); nothing here has been seen running.
+Design and the guided client steps: the equipment wave's TOOLTIPS.md. **[dis]** unless marked.
+
+**Tree.** `ItemDetail 0xc109f0` builds `doItemDetailView()` › `mainColumn` › `contentRow` › (`item Base Info Column` with the
+header/thumbnail `0xc12df0`) and `mainContentArea` (`0xa3c740`, vertical). For mode `*(detail+0x170) == 0` and
+`detail+0xbc == 0` the body is a **scroll area** (`0xa3e020` @`0xc117e7` … `0xa40160` @`0xc11fb0`) holding a **vertical content
+list** (`0xa3c790` @`0xc11841` … `0xa40080` @`0xc11fa4`): header line `0xc43850`, stats block `0xbfccf0` (@`0xc11939`), the
+description, type lines, the "%s %u" line. Modes 1..5 jump to `0xb48a00`, `0xcf30c0`, `0xc771d0`, `0xceac80`, `0xc00760`.
+`DetailLinesAppend 0xc1216e` lies after the scroll area has closed, which is why session 6's rows did not scroll and
+covered the vanilla content. Insertion points inside the list: `0xc11fa0` (end; reached by the fall-through and `je` at
+`0xc11e0c`/`0xc11e15`) and `0xc1193e` (after the stats block). ItemDetail's only caller is `0xc101b0` (16 callers).
+
+**Nodes.** Scope helpers create a child of the layouter's current parent (`0x11c4c60`); the UiNode is at scope `+8`.
+Setters: `+0x6c` alignment (`0x11ced70`), `+0x6e` (`0x11ced60`), `+0x90` size mode f32×2 (`0x11cf360`; fraction of the parent,
+0 = fit), `+0x80/+0x84` preferred size (`0x11cf230`), `+0x98` / `+0xa8` 16-byte edge boxes (`0x11cf100` / `0x11cf210`), `+0xb8`
+layout kind (1 `0x11ceff0`, 2 = vertical `0x11cf380`) with spacing `+0xc0`. The shaper `0xb2d820` limits the width to the
+node's last layout rectangle only when `+0x90`'s width is non-zero: the description sets `{1.0, 0.0}` and wraps; a bare
+constructor + draw shapes one line. TextLine: `+0x38` alignment, `+0x3d` = 1 on every detail text, `+0x90` flags (`0x40`
+colour at `+0xb0`, 8 bytes; `0x08` size at `+0x7c`), `+0xd4` bit 0 with a colour.
+
+**Values.** The view (`player_ui` chunk `0x2aff40`) takes level from `ItemState.itemLevelUi` (u8), rarity from
+`ItemState.itemRarityUi` and `+0x2d/+0x2e` from `PerkContainerNew`. The header model `0xb20100` (rbp+0x250) holds the rarity
+label (`0xd424c0`, loca bundle `+0x1de0` + 0x10 × rarity) at `+0x78` and the rarity colour at `+0xa0` (bundle `+0xd5f4` + 8 ×
+rarity; `+0xd5ec` none, `+0xd61c` unique). The stats model `0xb1e350` (rbp+0x810) uses the **client registry's** ItemInfo:
+enhancement rows (≤ 5 × 0x70 B from `+0x580`), base level `+0x7cc`; numbers from `0xe779a0` (damage = (seed × creep × level
++ seed) × dmgMod × speedMod), `0xe77a00`, `0xe77b20` with the client's BalancingTable, drawn by `StatValue 0xc2ddd0(label,
+float)` (callers in `0xb8bbd0` and `0xbfcd6b`). The server's `baseDamageUi` is not read here, so a per-instance power change
+is not shown by the detail view without a client hook.
+
 ## Current crafting-tree lookup (dev.28; client 26430625 / server 26430253)
 
 C `5d9ef2f1…`, S `f0d824be…`; dossier chapter 16a, blocks-a VERIFY claims 1–2 confirmed. [static] [refl] [data]
@@ -488,3 +659,39 @@ Current bundle has 48 workshops/48 trees, declared and observed maximum 15 group
 bounds **512 recipe outputs per group**, u16 count `+0x9820`, 0x4c-byte records. These are independent capacities;
 increasing UI maxima alone does not expand output storage. First set receives the tab's special header handling.
 No new joined-client station-menu presentation check was run; schema/sync/ownership designs stay in chapter 16a.
+
+## Inventory slots: clicks and marks (dev.30; client 26430625, static, nothing of it run)
+
+What Kiln's `ui.slots.click` (kiln.ui.inventory, `Ui.Inventory`) rests on. No new game address: it reuses the slot sites
+above (ItemSlot `0xc046c0` raw link, SlotGeometry mid `0xc05433`, GameUiFrame) and the HUD screen byte. Feature:
+`sigdb/symbols/client.d/ui-hooks.json`.
+- **The press is not the game's.** Kiln does not hook the game's own slot input (the ItemSlot result's action bytes
+  `+0x10..+0x1f` are not decoded). kiln.ui's window procedure sees every left/right press first (raw record and window
+  message, paired as mouse_press.h pairs the middle and side buttons), hands it to `subscribe_pointer_press`
+  subscribers, and keeps a taken press from the game the way a key binding's press is kept (the raw record's button flag
+  taken out through the game's own GetRawInputData import, the message not passed on); releases always pass. **[src]**
+- **Hit test:** the core hit-tests the press against the last completed slot frame's outer rectangles (the last drawn
+  wins: a slot drawn over another, a dragged item's preview). The frame must be this client session's and at most
+  250 ms old. **[src]**
+- **Pixels:** `pixel = viewport + unit * px_per_unit` on the game's canvas (`ui/sys.canvas_w/h`, `ui/sys.viewport`,
+  `ui/sys.px_per_unit`, chapter 05a), then scaled by client (or overlay display) size / canvas size when they differ.
+  Static only; check `ui-hooks.c1` (marks on the slots at two resolutions/UI scales) confirms it, which is also 05a-c5.
+  Expected to hold: the game renders its UI at the swapchain size and kiln.ui's overlay draws at that size. **[hyp]**
+- **Screens with a pointer** (HUD screen byte, play `+0x1cd8`): 4 InGameMenu, 8 PlayerCrafting, 9 Backpack,
+  22 StorageChest, 25 StationBasedCrafting, 27 NpcCrafting, 28 FactoryCrafting, 41 the chest-style transfer screen's mode 1
+  (`0xb9d0f0(1)`; which game screen that is was not traced). 1 InGame is refused: the HUD's hotbar is drawn through
+  ItemSlot there too, but a click is an attack. **[refl] [dis] [rt for 4, 9, 22, 25]**
+- **Identity:** the slot's ItemView `+0x14` (pide) is the server's entity id for a replicated item (05a section 6,
+  network.md). Kiln reports it as the client entity and leaves `server_entity` 0; `ui-hooks.c2` compares it with the
+  server world's own inventory in a hosted world. **[dis]**
+- **Hover byte:** ItemSlot's result `+0x10` (`ui/slot.hoverCandidate`) is still only a candidate (mouse hover or gamepad
+  focus). `ui-hooks.c4` logs it next to the cursor's slot. A gamepad slot action waits for it. **[hyp]**
+
+### For the next slices (not built)
+- **A button in the chest screen (where Enlarge / Enchant sits):** the chest-style transfer screen is `0xb9d0f0(mode)`
+  (PlayStateUi's switch `0xc61135`: 22 → mode 0, 41 → 1, 28 → 2), the other inventory found through play `+0x2c50`. Its
+  button row, the button renderer it uses, and the upgrade-storage action (`consumedUpgradeStorageAction`,
+  `ecs.InventoryTransferAction` are strings in the exe) are not traced. The menu entries' recipe (a frame through the
+  game's own entry renderer inside the game's layout scope, identified by return address) is the model.
+- **The game's own slot tint:** ItemSlot's descriptor `+0x7d` and context `+0x51` gate the fuel bar; the slot's background
+  colour parameter is not mapped.

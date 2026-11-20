@@ -779,6 +779,28 @@ Verdict check(const Shape& sh, const Fingerprint& f, std::string* text) {
     return Verdict::Match;
 }
 
+// The size a KilnSig field stands for: a scalar's 0 is its kind's own size (kiln_hooks.h, KilnSigArg), a struct's
+// size is never implied.
+namespace {
+uint32_t sized(uint32_t kind, uint32_t size) {
+    if (size || kind == KILN_SIG_BYVAL || kind == KILN_SIG_STRUCT) return size;
+    for (const Scalar& s : kScalars)
+        if (s.kind == kind) return s.size;
+    return size;
+}
+}  // namespace
+
+bool compiled_matches(const KilnSig& c, const Sig& s, std::string* reason) {
+    auto fail = [&](const std::string& why) { if (reason) *reason = "compiled descriptor differs from loaded descriptor: " + why; return false; };
+    if (c.sret != s.sret || c.ret_kind != s.ret_kind || sized(c.ret_kind, c.ret_size) != sized(s.ret_kind, s.ret_size))
+        return fail("return class, size or hidden buffer");
+    if (c.argc != s.args.size()) return fail("argument / stack count");
+    for (uint32_t i = 0; i < c.argc; ++i)
+        if (c.args[i].kind != s.args[i].kind || sized(c.args[i].kind, c.args[i].size) != sized(s.args[i].kind, s.args[i].size))
+            return fail("argument " + std::to_string(i + 1) + " class or size");
+    return true;
+}
+
 Verdict check_sig(const Sig& sig, const Fingerprint& f, std::string* text) {
     auto say = [&](const std::string& s) {
         if (text) *text = s;

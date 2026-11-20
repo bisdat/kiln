@@ -20,20 +20,36 @@ use std::process::Command;
 const OWN: [&str; 4] = ["APPDIR", "APPIMAGE", "ARGV0", "OWD"];
 
 /// The Linux launcher's software mode (launcher/src-tauri/src/render.rs) sets these for its own webview, and names the
-/// ones it set (not the user's own) in [`RENDER_SET`], comma-separated. They are the launcher's, not the host's: a
-/// Steam it starts would draw its own window in software, so a program of the host never gets them.
-pub const RENDER_VARS: [&str; 3] = ["WEBKIT_DISABLE_COMPOSITING_MODE", "WEBKIT_SKIA_ENABLE_CPU_RENDERING", "LIBGL_ALWAYS_SOFTWARE"];
+/// ones it set (not the user's own) in [`RENDER_SET`], comma-separated; so does its choice against WebKit's DMA-BUF
+/// renderer (`WEBKIT_DISABLE_DMABUF_RENDERER`, 0.2.0-dev.29.19: set only where that renderer failed). They are the
+/// launcher's, not the host's: a Steam it starts would draw its own window in software (or without DMA-BUF), so a
+/// program of the host never gets them.
+pub const RENDER_VARS: [&str; 4] =
+    ["WEBKIT_DISABLE_COMPOSITING_MODE", "WEBKIT_SKIA_ENABLE_CPU_RENDERING", "LIBGL_ALWAYS_SOFTWARE", "WEBKIT_DISABLE_DMABUF_RENDERER"];
 pub const RENDER_SET: &str = "KILN_LAUNCHER_RENDER_SET";
+/// (dev.29.18) The Linux launcher turns WebKit's process sandbox off for its own webview when the player chose so
+/// (launcher/src-tauri/src/sandbox.rs) and names the variable in [`SANDBOX_SET`] when it set it (not the player's own).
+/// A browser or another WebKit program the launcher starts keeps its sandbox: a program of the host never gets it.
+pub const SANDBOX_VARS: [&str; 1] = ["WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS"];
+pub const SANDBOX_SET: &str = "KILN_LAUNCHER_SANDBOX_SET";
 
-/// [`RENDER_SET`] and the [`RENDER_VARS`] it names, as removals. Any other name in it is left alone.
+/// Each list variable and the launcher's own variables it may name: what the launcher set for its webview only.
 #[cfg(unix)]
-fn render_removals(vars: &[(OsString, OsString)]) -> Vec<(OsString, Option<OsString>)> {
-    let Some((_, list)) = vars.iter().find(|(k, _)| k == RENDER_SET) else { return Vec::new() };
-    let list = list.to_string_lossy();
-    let mut out: Vec<(OsString, Option<OsString>)> = RENDER_VARS.iter()
-        .filter(|v| list.split(',').any(|x| x.trim() == **v) && vars.iter().any(|(k, _)| k == **v))
-        .map(|v| (OsString::from(v), None)).collect();
-    out.push((OsString::from(RENDER_SET), None));
+const LAUNCHER_ONLY: [(&str, &[&str]); 2] = [(RENDER_SET, &RENDER_VARS), (SANDBOX_SET, &SANDBOX_VARS)];
+
+/// [`RENDER_SET`], [`SANDBOX_SET`] and the variables they name ([`RENDER_VARS`], [`SANDBOX_VARS`]), as removals. Any
+/// other name in a list is left alone.
+#[cfg(unix)]
+fn launcher_only_removals(vars: &[(OsString, OsString)]) -> Vec<(OsString, Option<OsString>)> {
+    let mut out: Vec<(OsString, Option<OsString>)> = Vec::new();
+    for (set, names) in LAUNCHER_ONLY {
+        let Some((_, list)) = vars.iter().find(|(k, _)| k == set) else { continue };
+        let list = list.to_string_lossy();
+        out.extend(names.iter()
+            .filter(|v| list.split(',').any(|x| x.trim() == **v) && vars.iter().any(|(k, _)| k == **v))
+            .map(|v| (OsString::from(v), None)));
+        out.push((OsString::from(set), None));
+    }
     out
 }
 
@@ -51,7 +67,7 @@ where
 {
     use std::os::unix::ffi::{OsStrExt, OsStringExt};
     let vars: Vec<(OsString, OsString)> = vars.into_iter().collect();
-    let mut out = render_removals(&vars);
+    let mut out = launcher_only_removals(&vars);
     let Some(appdir) = vars.iter().find(|(k, _)| k == "APPDIR").map(|(_, v)| v.as_bytes().to_vec()) else { return out };
     let appdir: &[u8] = match appdir.strip_suffix(b"/") { Some(s) => s, None => &appdir };
     if appdir.is_empty() { return out; }
@@ -213,6 +229,40 @@ mod tests {
         }
         // no list: nothing of the kind changes
         assert!(changes(vars(&[("LIBGL_ALWAYS_SOFTWARE", "1")])).is_empty());
+    }
+
+    /// (dev.29.19) The launcher's own WEBKIT_DISABLE_DMABUF_RENDERER (set where the DMA-BUF renderer failed) stays with
+    /// it; the user's own (not in the list) goes along to Steam as before.
+    #[test]
+    fn the_launchers_dmabuf_variable_stays_with_the_launcher() {
+        let ours = vars(&[(RENDER_SET, "WEBKIT_DISABLE_DMABUF_RENDERER"), ("WEBKIT_DISABLE_DMABUF_RENDERER", "1")]);
+        for env in [ours.clone(), ours.iter().cloned().chain(seen()).collect()] {
+            let c = changes(env);
+            assert_eq!(of(&c, "WEBKIT_DISABLE_DMABUF_RENDERER"), Some(&None), "{c:?}");
+            assert_eq!(of(&c, RENDER_SET), Some(&None));
+        }
+        assert!(changes(vars(&[("WEBKIT_DISABLE_DMABUF_RENDERER", "1")])).is_empty(), "the user's own value goes along");
+    }
+
+    /// (dev.29.18) WebKit's sandbox turned off for the launcher's own page: a browser or Steam the launcher starts gets
+    /// its sandbox back; a value the player set themselves (not in the list) goes along as before.
+    #[test]
+    fn the_launchers_sandbox_variable_stays_with_the_launcher() {
+        let ours = vars(&[
+            (SANDBOX_SET, "WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS"),
+            ("WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS", "1"),
+            (RENDER_SET, "LIBGL_ALWAYS_SOFTWARE"),
+            ("LIBGL_ALWAYS_SOFTWARE", "1"),
+        ]);
+        for env in [ours.clone(), ours.iter().cloned().chain(seen()).collect()] {
+            let c = changes(env);
+            assert_eq!(of(&c, "WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS"), Some(&None), "{c:?}");
+            assert_eq!(of(&c, SANDBOX_SET), Some(&None));
+            assert_eq!(of(&c, "LIBGL_ALWAYS_SOFTWARE"), Some(&None), "both lists are read");
+            assert_eq!(c.iter().filter(|(k, _)| k == "WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS").count(), 1, "once");
+        }
+        // the player's own value: no list, nothing changes
+        assert!(changes(vars(&[("WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS", "1")])).is_empty());
     }
 
     /// A command built for the host carries the removals, and the caller's own `env` after it wins.

@@ -1,5 +1,8 @@
 # Writing a Kiln service
 
+No capability ships held by the client gate in 0.2.0-dev.29. Open rows still depend on their services, signatures and side; the [guided checks](../client-pass.md) remain the record of real-game behavior not yet confirmed.
+
+
 A service is one capability (teleport, items, chat, ...) with three layers. Which services and features a build has
 available is generated from a boot's `capabilities.json`: [../status.generated.md](../status.generated.md). The template is `example`:
 
@@ -24,7 +27,9 @@ available is generated from a boot's `capabilities.json`: [../status.generated.m
 | [combat.md](combat.md) | kiln.combat: health, damage, healing, kills, god mode and combat events |
 | [content.md](content.md) | kiln.content: registries and data packs |
 | [creatures.md](creatures.md) | kiln.creatures: one creature's values, variants, AI events, commands and arsenal rules |
+| [engine.md](engine.md) | kiln.engine: which exact game build runs (`identity`, `gate_stats`) against per-build engine profiles (`sigdb/engine/`); the Kiln-internal kiln.internal.engine table (engine reads and the engine's own write gate) for Kiln's own services |
 | [gamedata.md](gamedata.md) | kiln.gamedata: spells, abilities, creatures and their attacks as data |
+| [gems.md](gems.md) | Gems: how a gem works, changing one with a data pack, the `Gems` read API and gem events; with [gems-new.md](gems-new.md) (new gems, `Gems.Register`), [gems-forge.md](gems-forge.md) (forge actions from code) and [gems-sockets.md](gems-sockets.md) (sockets on rings, armour, shields) |
 | [gameplay.md](gameplay.md) | kiln.gameplay: player/world interaction events and protection zones |
 | [hooks.md](hooks.md) | kiln.hooks v2: one registry for every hook |
 | [items.md](items.md) | kiln.items: items in inventories |
@@ -44,6 +49,7 @@ available is generated from a boot's `capabilities.json`: [../status.generated.m
 | [spawn.md](spawn.md) | kiln.spawn: create and destroy entities from templates (creatures, item drops, props) |
 | [steamguard.md](steamguard.md) | kiln.steamguard / SteamGuard: the achievement guard (game client only, experimental) |
 | [surfaces.md](surfaces.md) | kiln.surfaces: building surfaces |
+| [tasks.md](tasks.md) | kiln.tasks: Kiln-owned worker threads for off-tick work (`submit`/`cancel`/`status`/`release`/`drain_owner`), states, quiescence, AFTER_STEP sessions, exit and the `tasks.pool` capability |
 | [time.md](time.md) | kiln.time: time of day and weather |
 | [types.md](types.md) | kiln.types: the game's types, systems, events and components by name |
 | [vfx-cook.md](vfx-cook.md) | VFX blocks: the builder |
@@ -58,8 +64,19 @@ row above and grows its own page.
 
 | Page | What |
 |---|---|
+| [../ui.md](../ui.md#values-in-the-games-own-ui-dev28) | kiln.ui.values / `Ui.Values` (in-core, client): values in the game's own UI, tooltip lines in Kiln's Item details window, the slots of each UI frame; the player-UI stage for 09 |
 | [queries.md](queries.md) | `Kiln.Queries`: voxel rays, ground below a point, voxel line of sight, entity origins in a sphere or box; the shared ray budget |
+| [terrain.md](terrain.md) | `Kiln.Terrain`: bounded terrain overlays (a vein, a mound, a tunnel) applied once per world with a ledger of owned blocks; managed only, over kiln.build |
+| [boot.md](boot.md) | kiln.boot (in-core): `Mod.OnBoot`'s one generation per process; the table, the collector contract (bind, prepare, destroy), `activation_fault`, exit code 0x4B01, `state/boot.json` |
 | [creature-control.md](creature-control.md) | kiln.creature_control / CreatureControl: the one broker that owns a controlled creature body's AI-off layer and SteeringAgent; leases for pets, mounts, vehicles and NPC brains |
+| [systems.md](systems.md) | `Kiln.Systems` / kiln.world v4: Before, After and Replace on the game's own ECS programs, per slice or per entity; entity views, write events, attribute formulas |
+
+### Service pages added in dev.29
+
+| Page | What |
+|---|---|
+| [decisions.md](decisions.md) | kiln.decisions / kiln.window_clock: refusing a death (`EntityDyingEvent`), a walk-over pickup (`ItemPickingUpEvent`) and an equipment input (`PlayerEquippingEvent`), each ending in one `DecisionCompletedEvent`; the native death guard and the native adapters' verdict route |
+| [stations.md](stations.md) | kiln.stations / `Stations`, `Bases` (Kiln.Blocks): the production stations of a base, its Magic chests, and the game's own fill from chests, stop, resume and select for code; station events |
 
 ## Native rules
 - `kiln_plugin_main(api, owner, info)`: check `api->abi_version == KILN_ABI_VERSION`, resolve symbols with
@@ -76,6 +93,7 @@ row above and grows its own page.
   game's call site with `caller()` (use it instead of `_ReturnAddress()`), and lists every hook in
   `state/hooks.json`. See [hooks.md](hooks.md).
 - Other services: look them up in `info->on_ready` (`api->service("kiln.world", 1)`), not in `kiln_plugin_main`.
+  `kiln.internal.*` tables resolve only for Kiln's own services ([Kiln-internal tables](#kiln-internal-tables)).
 - Capabilities: the core gives your service a row (`kiln.<svc>`) and one per sigdb feature. Report what else it can or
   cannot do through `kiln.caps` (`<svc>.<thing>`; [caps.md](caps.md)), and a session-dependent row as pending before
   the mods load.
@@ -86,6 +104,42 @@ row above and grows its own page.
 - Names you define in sigdb are prefixed with your service: symbols `items/InventoryCommit`, constants
   `items/tx.size`. Unprefixed names belong to the core file (`SimStep`, `world.storage`, `GetEntityTransform`, ...)
   and may be used, never redefined.
+
+## Kiln-internal tables
+
+A service name that starts with `kiln.internal.` is Kiln-internal:
+
+- only an owner the core created for a DLL loaded from `kiln/services` **of this very build** may publish one: every DLL
+  built with `kiln_service`/`kiln_plugin` exports `kiln_build_stamp()` (`native/cmake/kiln_build_stamp.cpp`, the
+  version plus the build metadata), and the core gives internal access only when it equals its own build identity. The
+  build metadata comes from `native/cmake/kiln_build_stamp.sh`, which CMake runs at configure time and before every
+  build of a stamped target (`native/build.sh` builds through it): `+<yyyymmdd>.<commit>` in a git work tree, or
+  `+nogit.<nonce>` in a source export without git (one random nonce per build directory, shared by that build's core
+  and DLLs). A core without build metadata grants no DLL internal access (a matching version alone is not a build). A
+  stale or foreign DLL in `kiln/services`, or any DLL under such a core, loads as before, without internal access, with
+  a warning in kiln.log and the row `kiln.<svc>.internal` unavailable (`service-older`) saying why;
+- `KilnApi.register_service` publishes it and `KilnApi.service` resolves it only through the `KilnApi` the core hands to
+  those DLLs (whose `register_service` also checks the owner). Plugins, managed mods, early plugins and foreign DLLs get
+  the other `KilnApi`: its `register_service` refuses every `kiln.internal.*` name with `KILN_ERR_INVALID_ARGUMENT` and
+  a warning, whatever owner it is given (owner IDs are guessable), and its `service` answers NULL for one;
+- its header lives with its owner (a service's `native/services/<svc>/include/`, or the core's `native/core/src/`),
+  never in `native/core/abi`, `kiln-abi` or the SDK, and it may change between Kiln builds: consumers check
+  `header.version` for an exact match and `header.size` for each member they call, and on a mismatch log it and report
+  their own row unavailable with that reason;
+- Kiln-internal tables get no public capability row and do not appear in `capabilities.json`.
+
+One table is the core's own and is named for one consumer: `kiln.internal.tasks.host`, the managed host's task lease
+table ([tasks.md](tasks.md)). Nobody may publish that name, and only the `KilnApi` the core hands to the managed host
+resolves it.
+
+This is a reach rule, not a sandbox: it keeps tables that hand out game addresses or Kiln's own lock primitives away from
+plugins and from stale or foreign service DLLs. It is no defence against arbitrary native code already in the process,
+which can read memory anyway.
+
+```sh
+KILN_OUT=/path/to/build native/core/tests/test-service-access.sh   # the kiln.internal.* rule (real api.cpp block, stamped and without build metadata)
+KILN_OUT=/path/to/build native/core/tests/test-build-stamp.sh      # the build metadata script (git, overrides, no git, nested export)
+```
 
 ## Managed rules
 - Public API as static classes in namespace `Kiln` (e.g. `Kiln.Teleport`), no pointers in public signatures.

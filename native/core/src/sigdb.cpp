@@ -11,8 +11,10 @@
 #include <set>
 #include <thread>
 
+#include "config.h"
 #include "image.h"
 #include "log.h"
+#include "module_place.h"
 #include "nlohmann/json.hpp"
 #include "pe_text.h"
 #include "services/hooks_fingerprint.h"
@@ -86,10 +88,16 @@ std::string hex(int64_t v) {
 // The exe file's .text (image().file, relocated like the live image) when it is the loaded code, else the live .text.
 struct Code {
     pe::CodeView view;
+    // The exe file's .text (relocated like the live image), retained on both scan paths so a rel32 capture can be
+    // checked against the file even when the live code is scanned. Null when no trustworthy file view exists.
+    const uint8_t* file_text = nullptr;
+    size_t file_size = 0;
     std::string note;             // why this view (kiln.log, report)
     size_t fixups = 0;            // base relocations applied to the file's copy
     size_t live_diff_bytes = 0;   // live .text bytes that differ from the file's, at the time of the check
     std::vector<pe::DiffRun> runs;
+    pe::OtherDiffs in_place;      // those of them that are no hook: another mod's in-place patches (offsets in .text)
+    uint32_t text_rva = 0;
     std::vector<uint8_t> private_text;  // relocation/zero-fill buffer; the hashed file view stays pristine
     double ms = 0;
 };
@@ -116,7 +124,7 @@ std::string module_at(uintptr_t a) {
     std::filesystem::path pth(std::wstring(path, n));
     char off[32];
     std::snprintf(off, sizeof off, "+0x%llx", static_cast<unsigned long long>(a - reinterpret_cast<uintptr_t>(mod)));
-    return to_utf8(pth.filename().wstring()) + off;
+    return to_utf8(pth.filename().wstring()) + off + module_place_suffix(module_path_text(to_utf8(pth.wstring()), u8(paths().game)));
 }
 
 // The target of a jmp or call at `a` (E9/E8 rel32, EB rel8, FF 25/FF 15 [rip+disp32], mov rax,imm64 + jmp rax),
@@ -178,9 +186,57 @@ std::string patched_by(uintptr_t a) {
     return b;
 }
 
-// Where a redirected call may go (pe::redirected_call_at): into a loaded module, or to a relay as hookers write them.
+// Where a redirected call may go (pe::redirected_call_at): into a loaded module, or to a relay as hookers write
+// them. Relays take more than one layout — an indirect jump through a pointer slot at any displacement (greeneye's
+// sits 10 bytes past the instruction, XHL's is a per-page pointer table), a trampoline, a generated stub — so follow
+// the target's jumps to the landing module instead of matching one byte shape. The shape check stays as a fallback,
+// so no previously accepted form is lost. The pristine-build checks around this (file identity, the 1% budget, the
+// conservative live fallback) are untouched: a changed exe still fails them, because its differences are not jumps
+// into loaded modules.
 bool call_lands(uintptr_t to) {
-    return readable(to, 14) && (!module_at(to).empty() || pe::relay_shape(reinterpret_cast<const uint8_t*>(to)));
+    if (!readable(to, 14)) return false;
+    if (!module_at(to).empty()) return true;
+    uintptr_t t = jump_target(to);
+    for (int hop = 0; hop < 4 && t; ++hop) {
+        if (!module_at(t).empty()) return true;
+        const uintptr_t next = jump_target(t);
+        if (!next) break;
+        t = next;
+    }
+    return pe::relay_shape(reinterpret_cast<const uint8_t*>(to));
+}
+
+// One line naming the first difference the hook check rejected: RVA, file/live bytes, and who patched it. Without
+// this the fallback clears the diff runs and the log can only say the check failed, never which patch tripped it.
+std::string first_difference_note(const uint8_t* file, const uint8_t* live, size_t size, uintptr_t live_text,
+                                  uintptr_t image_base, size_t image_size, uint32_t text_rva, size_t off) {
+    if (off >= size) return "";
+    const size_t n = std::min<size_t>(8, size - off);
+    std::string fb, lb;
+    for (size_t i = 0; i < n; ++i) {
+        char h[4];
+        std::snprintf(h, sizeof h, "%02x ", file[off + i]);
+        fb += h;
+        std::snprintf(h, sizeof h, "%02x ", live[off + i]);
+        lb += h;
+    }
+    // Attribute from the patch site. A redirected call's first differing byte is in the operand, so the bytes there
+    // decode as nothing: back up to the E8 and attribute from the call. The shape check runs without call_lands —
+    // the call was rejected, so the landing test is what failed; the targets are what identify it.
+    std::string by = patched_by(live_text + off);
+    if (by == "bytes changed in place") {
+        for (uintptr_t back = 1; back <= 4 && off >= back; ++back) {
+            const size_t start = off - back;
+            if (!pe::redirected_call_at(file, live, size, start, live_text, image_base, image_size)) continue;
+            const std::string call_by = patched_by(live_text + start);
+            if (call_by.rfind("jmp to ", 0) == 0) by = "call redirected to " + call_by.substr(7);
+            break;
+        }
+    }
+    char b[320];
+    std::snprintf(b, sizeof b, " (first unrecognised difference at RVA 0x%x: file [%s] live [%s], %s)",
+                  text_rva + static_cast<uint32_t>(off), fb.c_str(), lb.c_str(), by.c_str());
+    return b;
 }
 
 // Applies the file's fixups to its mapped copy; false if the view can't be written (no C++ objects here: SEH).
@@ -223,6 +279,8 @@ void init_code() {
         if (!relocate_guarded(text, size, &ft, img.base, &g_code.fixups))
             return fallback("cannot apply base relocations to the mapped file");
     }
+    g_code.file_text = text;
+    g_code.file_size = size;
     g_code.runs = pe::diff_runs(text, img.text, size, ft.text_rva, &g_code.live_diff_bytes);
     if (g_code.live_diff_bytes > size / 100) {
         char b[96];
@@ -230,9 +288,29 @@ void init_code() {
         g_code.runs.clear();
         return fallback(b);
     }
-    if (!pe::only_hook_differences(text, img.text, size, live, img.base, img.size, call_lands)) {
+    // What differs is what other mods wrote before this check: hooks, and bytes changed in place (a check skipped, a
+    // number raised). Up to 0.2.0-dev.27 one in-place patch sent the whole scan to the live code, where the same
+    // start's hooks hid functions: a client with The Worst Map Mod (four map marker patches) and other loaders' hooks
+    // lost 20 symbols and 22 features, items.move and items.transaction among them, so two Kiln mods loaded and did
+    // nothing (a player's report of 14 Nov 2026).
+    // Whose bytes an in-place difference shows is decided by the file's hash. image().sha256 is taken over this very
+    // mapping; when it is a verified build record, the file is the game as shipped, the header matched above and at
+    // most 1% of the code differs, so the patch is in the live code and the file is what to read. Without a record
+    // the file itself may carry the patch (an exe changed on disk after the game started), and a capture read from
+    // it could name a place the loaded code does not use: the live scan, as before.
+    // The in-place patches are counted and named in kiln.log; a symbol whose own bytes are patched is named by
+    // check_live as before.
+    g_code.in_place = pe::other_differences(text, img.text, size, live, img.base, img.size, call_lands);
+    g_code.text_rva = ft.text_rva;
+    if (g_code.in_place.sites && !build_verified(img.side, img.sha256, nullptr)) {
+        // Name the first in-place difference (RVA, file/live bytes, who patched it) before the evidence is cleared,
+        // so a report says which patch tripped the check.
+        const std::string first = first_difference_note(text, img.text, size, live, img.base, img.size, ft.text_rva,
+                                                        g_code.in_place.first.front());
         g_code.runs.clear();
-        return fallback("file/live differences are not recognised inline hooks; the exe may have changed on disk");
+        g_code.in_place = {};
+        return fallback("file/live differences are not recognised inline hooks and the exe file is no verified "
+                        "build; the exe may have changed on disk" + first);
     }
     g_code.view = {text, size, live, true};
     g_code.note = "the exe file's code";
@@ -247,6 +325,14 @@ const pe::CodeView& code() {
             KLOG_I("sigdb: scanning %s (.text 0x%zx bytes, %zu base relocations applied); live code differs in %zu "
                    "bytes, %zu runs (hooks or patches made before this check) (%.1f ms)",
                    c.note.c_str(), c.view.size, c.fixups, c.live_diff_bytes, c.runs.size(), c.ms);
+            if (c.in_place.sites) {
+                std::string at;
+                for (uint32_t off : c.in_place.first) at += (at.empty() ? "" : ", ") + hex(int64_t{c.text_rva} + off);
+                KLOG_I("sigdb: %zu places (%zu bytes) of the live code are patched in place by another mod, not hooked: "
+                       "rva %s%s. The scan reads the file's code, so they hide nothing from Kiln",
+                       c.in_place.sites, c.in_place.bytes, at.c_str(),
+                       c.in_place.sites > c.in_place.first.size() ? ", ..." : "");
+            }
         } else {
             KLOG_W("sigdb: scanning the %s; another engine's hooks can hide functions from Kiln", c.note.c_str());
         }
@@ -566,6 +652,7 @@ public:
         auto it = sigs_.find(std::string(name));
         if (it == sigs_.end()) return false;
         if (out) {
+            out->descriptor = it->second.sig;
             out->symbol = it->first;
             out->status = it->second.status;
             out->text = it->second.note;
@@ -575,6 +662,16 @@ public:
             auto s = symbols_.find(it->first);
             if (s != symbols_.end() && s->second.ok) out->address = static_cast<uintptr_t>(s->second.value);
         }
+        return true;
+    }
+    bool sig_status(std::string_view name, uintptr_t* address, SigStatus* status, std::string* text) const {
+        auto it = sigs_.find(std::string(name));
+        if (it == sigs_.end()) return false;
+        *status = it->second.status;
+        *text = *status == SigStatus::Match ? std::string{} : it->second.note;
+        *address = 0;
+        auto s = symbols_.find(it->first);
+        if (s != symbols_.end() && s->second.ok) *address = static_cast<uintptr_t>(s->second.value);
         return true;
     }
     bool sig_at(uintptr_t a, SigInfo* out) const {
@@ -761,6 +858,10 @@ public:
                 c["base_relocations_applied"] = g_code.fixups;
                 c["live_differs_bytes"] = g_code.live_diff_bytes;
                 c["live_differs_runs"] = g_code.runs.size();
+                c["live_patched_in_place"] = g_code.in_place.sites;
+                json at = json::array();
+                for (uint32_t off : g_code.in_place.first) at.push_back(hex(int64_t{g_code.text_rva} + off));
+                c["live_patched_in_place_at"] = at;
             }
             json hooked = json::array();
             for (auto& [n, r] : symbols_)
@@ -968,6 +1069,19 @@ private:
         std::vector<Capture>& caps = captures_[tag];
         caps.clear();
         for (const Hole& h : p.holes) {
+            // A rel32 capture read through a redirected call measures the hook, not the function: the call site's
+            // live operand names a stub or relay outside the image, so the vote disagrees with the pattern (or
+            // with a clean capture) and fails a symbol another engine merely hooked. Skip it; the pattern value
+            // or an unredirected capture stands. No file view, no redirect, or no E8 before the hole: record
+            // exactly as before, so clean stacks resolve byte-identically. Only on the live scan: the file scan
+            // reads the file's operand, the function itself, and a symbol named only by captures needs that vote.
+            if (h.kind == Hole::Rel32 && !cv.disk && g_code.file_text && h.offset > 0) {
+                const size_t start = static_cast<size_t>(match - cv.scan) + h.offset - 1;
+                const auto* live = reinterpret_cast<const uint8_t*>(cv.live);
+                if (pe::redirected_call_at(g_code.file_text, live, cv.size, start, cv.live, image().base,
+                                           image().size, call_lands))
+                    continue;
+            }
             int64_t v = 0;
             hole_value(p, match, h.name, &v, cv.delta());
             caps.push_back({h.name, h.kind == Hole::Rel32, v});
@@ -1050,6 +1164,7 @@ private:
 };
 
 // ---- global state ----
+std::atomic<uint64_t> g_sig_revision{1};
 Resolver g_core;
 bool g_core_loaded = false;
 double g_ms = 0;
@@ -1082,6 +1197,7 @@ bool load_and_resolve(const std::filesystem::path& definitions) {
             KLOG_E("sigdb: %s: %s", to_utf8(f.filename().wstring()).c_str(), g_core.load_error.c_str());
 
     g_core.resolve();
+    ++g_sig_revision;
     g_core_loaded = true;
     g_ms = g_core.ms();
     g_core.log_unresolved();
@@ -1117,12 +1233,15 @@ bool load_fragment(std::string_view id, const std::filesystem::path& file, const
     if (summary) res->summarize(*summary);
     std::lock_guard lock(g_frag_mutex);
     g_fragments[std::string(id)] = std::move(res);
+    ++g_sig_revision;
     return true;
 }
 
 bool unload_fragment(std::string_view id) {
     std::lock_guard lock(g_frag_mutex);
-    return g_fragments.erase(std::string(id)) != 0;
+    const bool removed = g_fragments.erase(std::string(id)) != 0;
+    if (removed) ++g_sig_revision;
+    return removed;
 }
 
 bool any_symbol(std::string_view name, uintptr_t* out) {
@@ -1165,6 +1284,47 @@ bool hole_value_at(const Pattern& p, uintptr_t live_match, std::string_view name
 
 bool code_from_disk() { return code().disk; }
 
+void code_patch_map(void* json, const char*) {
+    if (!json) return;
+    auto& doc = *static_cast<nlohmann::ordered_json*>(json);
+    constexpr size_t kRows = 1024;  // Kiln's own hooks, other loaders' (Greeneye: 100+) and patches fit; the total says more
+    code();  // the file view is made once
+    const Code& c = g_code;
+    const ImageInfo& img = image();
+    nlohmann::ordered_json out = nlohmann::ordered_json::object();
+    if (!c.file_text || !img.text || c.file_size != img.text_size) {
+        out["available"] = false;
+        out["reason"] = c.note.empty() ? "no file view of the exe's code" : c.note;
+        doc["codePatches"] = std::move(out);
+        return;
+    }
+    const uintptr_t live = reinterpret_cast<uintptr_t>(img.text);
+    size_t total = 0;
+    const auto rows = pe::patch_rows(c.file_text, img.text, c.file_size, c.text_rva, live, img.base, img.size, kRows,
+                                     &total, call_lands);
+    nlohmann::ordered_json list = nlohmann::ordered_json::array();
+    for (const pe::PatchRow& r : rows) {
+        nlohmann::ordered_json row;
+        const uintptr_t at = img.base + r.rva;
+        row["rva"] = hex(int64_t{r.rva});
+        row["size"] = r.len;
+        if (r.call) {
+            const std::string by = patched_by(at);  // follows the call's new target to a module
+            row["by"] = by.rfind("jmp to ", 0) == 0 ? "call redirected to " + by.substr(7) : "call redirected (" + by + ")";
+            row["called"] = hex(int64_t{r.called_rva});
+            if (const std::string s = symbol_name_at(img.base + r.called_rva); !s.empty()) row["calledSymbol"] = s;
+        } else {
+            row["by"] = patched_by(at);
+        }
+        if (const std::string s = symbol_name_at(at); !s.empty()) row["symbol"] = s;
+        list.push_back(std::move(row));
+    }
+    out["available"] = true;
+    out["total"] = total;
+    out["rows"] = std::move(list);
+    doc["codePatches"] = std::move(out);
+}
+
 // ---- kiln.hooks v2 accessors ----
 bool file_bytes(uintptr_t live_addr, uint8_t* out, size_t n) {
     const pe::CodeView& cv = code();
@@ -1187,6 +1347,8 @@ std::string symbol_name_at(uintptr_t live_addr) {
 }
 
 // ---- kiln.hooks typed links ----
+uint64_t sig_revision() { return g_sig_revision.load(); }
+
 bool sig(std::string_view symbol, SigInfo* out) {
     if (g_core.sig(symbol, out)) return true;
     const std::string pfx = prefix_of(symbol);
@@ -1194,6 +1356,15 @@ bool sig(std::string_view symbol, SigInfo* out) {
     std::lock_guard lock(g_frag_mutex);
     auto it = g_fragments.find(pfx);
     return it != g_fragments.end() && it->second->sig(symbol, out);
+}
+
+bool sig_status(std::string_view symbol, uintptr_t* address, SigStatus* status, std::string* text) {
+    if (g_core.sig_status(symbol, address, status, text)) return true;
+    const std::string pfx = prefix_of(symbol);
+    if (pfx.empty()) return false;
+    std::lock_guard lock(g_frag_mutex);
+    auto it = g_fragments.find(pfx);
+    return it != g_fragments.end() && it->second->sig_status(symbol, address, status, text);
 }
 
 bool sig_at(uintptr_t live_addr, SigInfo* out) {

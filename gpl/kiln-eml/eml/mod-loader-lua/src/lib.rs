@@ -24,7 +24,7 @@ mod ownership;
 mod cleanup;
 mod displacement;
 // kiln-eml: restoration needs exact writer ownership, not an input/performance cache.
-pub use ownership::{owns_output, adopt, prune, retained_containers, recovery_guidance, Adoption};
+pub use ownership::{recovery_inventory, owns_output, adopt, prune, retained_containers, recovery_guidance, Adoption};
 mod lua;
 
 #[derive(Debug, Clone, Default)]
@@ -183,7 +183,8 @@ fn run_steps(
         &cache_diff,
     ) {
         Ok(context) => context,
-        Err(_) => anyhow::bail!("Failed to create AppState"),
+        // kiln-eml: include the complete preparation cause in Display (also used by status).
+        Err(error) => anyhow::bail!("could not prepare the game data: {error:#}"),
     };
     let vanilla_containers = app_state.kfc_file().containers().len();
     progress.stage(Stage::Checking);

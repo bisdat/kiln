@@ -92,11 +92,11 @@ public sealed class PlayerAnimLookupTests : IDisposable
     }
 
     [Fact]
-    public void A_guid_or_an_id_needs_no_lookup()
+    public void A_guid_or_an_id_is_refused_without_the_receiving_graph()
     {
         var g = Guid.NewGuid();
-        Assert.Equal(g, MoveStates.Resolve(Mod, new AnimationRef(g.ToString(), g, null), Lookup(available: false), out var problem)!.Value.Guid);
-        Assert.Null(problem);
+        Assert.Null(MoveStates.Resolve(Mod, new AnimationRef(g.ToString(), g, null), Lookup(available: false), out var problem));
+        Assert.Contains("not loaded", problem);
     }
 
     // ---- a name through the adapter ----
@@ -152,8 +152,8 @@ public sealed class PlayerAnimLookupTests : IDisposable
             BlockCapabilities.Rearm();
             BlockCapabilities.Ensure();
             BlockCapabilities.Ensure();
-            // the two of item blocks, and the two names villager routines reserve (routines.decisions is the core's row: only lowered)
-            Assert.Equal(["blocks.animated_held", "blocks.weapon_moves", "routines.anchors", "routines.jobs"], got.Order());
+            // the item blocks' rows, and the two names villager routines reserve (routines.decisions is the core's row: only lowered)
+            Assert.Equal(["blocks.animated_held", "blocks.move_followups", "blocks.weapon_moves", "routines.anchors", "routines.jobs"], got.Order());
         }
         finally
         {

@@ -61,6 +61,7 @@ internal sealed class BlockContext(ModBlocks mod, string block)
     public (Guid Guid, byte[] Blob) Build(ProgramBuilder b)
     {
         var built = b.Build(Mod.Id);
+        KindBudget.Current?.Built(built.Blob.Length);
         if (b.IsLate) Mod.LateBuilders[built.Guid] = b;
         return built;
     }
@@ -77,9 +78,21 @@ internal sealed class BlockContext(ModBlocks mod, string block)
 
     private BlockHandle Lookup(string name, string path)
     {
+        if (Lowered._bootLowering) return BootLowering.Reference(Mod, Block, name, path);  // only what this OnBoot staged before it
         var colon = name.IndexOf(':');
         // a product of a kind's plan names another by "consumer-mod:kind-...": staged with it, not published yet
-        if (colon > 0 && Mod.StagesFor != null && name.AsSpan(0, colon).SequenceEqual(Mod.Id) && Mod.Handles.TryGetValue(name[(colon + 1)..], out var staged)) return staged;
+        if (colon > 0 && Mod.StagesFor != null && name.AsSpan(0, colon).SequenceEqual(Mod.Id))
+        {
+            var local = name[(colon + 1)..];
+            if (Mod.Handles.TryGetValue(local, out var staged)) return staged;
+            // a product of the plan that is not staged yet: staged now, whatever order the plan lists them in
+            if (Mod.Pending.TryGetValue(local, out var product))
+            {
+                if (!Mod.Compiling.Add(local)) throw new BlockError(Block, path, $"\"{name}\" refers back to itself");
+                try { return product(); }
+                finally { Mod.Compiling.Remove(local); }
+            }
+        }
         if (colon > 0)
             return Blocks.Find(name[(colon + 1)..], name[..colon])
                    ?? throw new BlockError(Block, path, $"no block \"{name[(colon + 1)..]}\" in mod {name[..colon]} (is it loaded before this one?)");
@@ -91,6 +104,8 @@ internal sealed class BlockContext(ModBlocks mod, string block)
             try { return pending(); }
             finally { authored.Compiling.Remove(name); }
         }
+        // a committed boot definition of the mod: in the game since the boot generation, before (and after) its runtime activation
+        if (BootHandles.Find(authored.Id, name) is { } boot) return boot;
         throw new BlockError(Block, path, $"no block \"{name}\" in this mod; define it first, or say \"other-mod:{name}\"; there are: {string.Join(", ", Mod.Handles.Keys.Order())}");
     }
 }
@@ -98,14 +113,15 @@ internal sealed class BlockContext(ModBlocks mod, string block)
 internal static partial class Compiler
 {
     // The game's damage power: int(int(seed * creep * level + seed) * dmgMod * speedMod), keen::BalancingTable +0 genericWeaponSeed,
-    // +0x28 powerCreepWeapon (0x91e9d0). Checked against the running game when content is ready (BlockRuntime).
-    internal static uint Seed = 10;
-    internal static float Creep = 0.15f;
+    // +0x28 powerCreepWeapon (0x91e9d0). Checked against the running game when content is ready (BlockRuntime). The formulas live
+    // in Kiln.Content's GearMath, shared with the gear values of data packs and Content.Gear.
+    internal static uint Seed => GearMath.Seed;
+    internal static float Creep => GearMath.Creep;
 
-    public static int BasePower(int level) => (int)((long)(Seed * Creep * level + Seed));
+    public static int BasePower(int level) => GearMath.BasePower(level);
 
     /// <summary>The dmgMod that makes a level's power (with speedMod 1) this number, as the tooltip shows it.</summary>
-    public static double DmgModFor(int power, int level) => (power + 0.5) / BasePower(level);
+    public static double DmgModFor(int power, int level) => GearMath.DmgModFor(power, level);
 
     private static string Label<T>(string name) => $"{typeof(T).Name.Replace("Block", "").ToLowerInvariant()} {name}";
 
@@ -114,6 +130,7 @@ internal static partial class Compiler
         // A kind's plan is being staged on this thread: whoever asked (an inline status, a data file's block named for the
         // first time, a closure over the mod's own ledger), the block joins the plan and nothing is committed.
         if (KindTransaction.Current is { } staging) return staging.Define(mod, name, block);
+        if (KindApply.NameReserved(mod, name)) throw new BlockError(name, null, "the name belongs to a block kind's pending or applied plan");
         var (handle, low, label) = Lower(mod, name, block);
         low.Commit();
         mod.Handles[name] = handle;
@@ -138,7 +155,7 @@ internal static partial class Compiler
         AffixNameFree(mod, name, block, label);
         var ctx = new BlockContext(mod, label);
         // a new item or template is drawn by the player's game; an effect alone is nothing a client sees; a VFX or material asks for more, and says so itself
-        if (block is not EffectBlock and not VfxBlock and not MaterialBlock and not AbilityBlock and not TriggerBlock and not MaterialTweakBlock and not StrengthBlock and not SurfaceBlock and not BuildingMaterialBlock and not TerrainMaterialBlock and not ScreenEffectBlock and not LootTableBlock and not INpcBlock and not IQuestBlock and not IUiBlock and not AffixBlock and not AffixPoolBlock) ctx.Need(ClientsLevel.Kiln, null, "vanilla clients cannot show new items, spells or statuses: Kiln clients then get the definitions from the server");
+        if (block is not EffectBlock and not VfxBlock and not MaterialBlock and not AbilityBlock and not TriggerBlock and not MaterialTweakBlock and not StrengthBlock and not SurfaceBlock and not BuildingMaterialBlock and not BuildingMaterialPoolBlock and not TerrainMaterialBlock and not ScreenEffectBlock and not LootTableBlock and not INpcBlock and not IQuestBlock and not IUiBlock and not AffixBlock and not AffixPoolBlock and not RarityRollBlock and not RarityUpgradeBlock) ctx.Need(ClientsLevel.Kiln, null, "vanilla clients cannot show new items, spells or statuses: Kiln clients then get the definitions from the server");
         var low = new Lowered(mod);
         ctx.Low = low;
         BlockHandle handle = block switch
@@ -150,12 +167,15 @@ internal static partial class Compiler
             MaterialBlock m => DefineMaterial(ctx, low, name, m),
             MaterialTweakBlock t => DefineMaterialTweak(ctx, low, name, t),
             BuildingMaterialBlock m => DefineBuildingMaterial(ctx, low, name, m),
+            BuildingMaterialPoolBlock p => DefineMaterialPool(ctx, low, name, p),
             StrengthBlock s => DefineStrength(ctx, low, name, s),
             SurfaceBlock s => DefineSurface(ctx, low, name, s),
             SoundBlock s => DefineSound(ctx, low, name, s),
             AffixBlock a => DefineAffix(ctx, low, name, a),
             AffixPoolBlock p => DefineAffixPool(ctx, low, name, p),
             RoutineBlock r => DefineRoutine(ctx, low, name, r),
+            RarityRollBlock r => DefineRarityRoll(ctx, low, name, r),
+            RarityUpgradeBlock u => DefineRarityUpgrade(ctx, low, name, u),
             _ => DefineItemBlock(ctx, low, name, block) ?? DefineAbilityBlock(ctx, low, name, block) ?? DefineScreenBlock(ctx, low, name, block) ?? DefineNpcBlock(ctx, low, name, block) ?? DefineQuestBlock(ctx, low, name, block) ?? DefineUiBlock(ctx, low, name, block) ?? throw new BlockError(label, null, $"{typeof(T).Name} is not a block Kiln can compile yet"),
         };
         if (block is ITweakable { Tweak.Count: > 0 } tweak) low.Tweak(label, block is StatusBlock ? "buffs" : block is PerkBlock ? "perks" : "items", handle.GameName, tweak.Tweak);
@@ -379,8 +399,6 @@ internal sealed class Lowered(ModBlocks mod)
     private readonly List<(string Section, string Entry, string Path, Guid Program)> _lateRules = new();
     private readonly List<(string Section, string Entry, JsonObject Rules, VfxLate Late)> _vfxLates = new();
     private readonly HashSet<Guid> _carriers = new();
-    // the kind transaction this was lowered under: it commits when the transaction does, never before
-    private readonly KindTransaction? _staging = KindTransaction.Current;
 
     public JsonObject Json { get; } = new();
 
@@ -513,9 +531,30 @@ internal sealed class Lowered(ModBlocks mod)
         public void Recipe(ulong owner, RecipeDefinition d) => BlocksBridge.Register(d, owner);
     }
 
+    /// <summary>Set while a boot generation is lowered (BootLowering.cs, chapter 08): a commit hands its registrations to the sink (the IR
+    /// envelope) and leaves the runtime parts (rules, late programs, after-commit actions) to the mod's runtime activation.</summary>
+    [ThreadStatic] internal static bool _bootLowering;
+
     public void Commit()
     {
-        if (_staging is { Committing: false }) throw new InvalidOperationException("a block staged for a kind's plan was committed before the plan: nothing of a plan registers until all of it is checked");
+        CommitRegistrations();
+        CommitAfter();
+    }
+
+    /// <summary>The first half of a commit: what the services register, and the ledger rows of the block's own mod. A kind's
+    /// plan runs this half for every block of the plan before the second half of any: a refusal here leaves nothing running.</summary>
+    internal void CommitRegistrations()
+    {
+        if (mod.StagesFor != null && !mod.CommitOpen) throw new InvalidOperationException("a block staged for a kind's plan was committed before the plan: nothing of a plan registers until all of it is checked");
+        if (_bootLowering)
+        {
+            foreach (var (guid, blob) in _programs)
+                if (!mod.LateBuilders.ContainsKey(guid)) Sink.Program(mod.Owner, guid, blob);
+            foreach (var (section, def) in _clones) Sink.Clone(mod.Owner, section, def);
+            foreach (var d in _items) Sink.Item(mod.Owner, d);
+            foreach (var d in _recipes) Sink.Recipe(mod.Owner, d);
+            return;
+        }
         foreach (var (guid, blob) in _programs)
         {
             if (mod.LateBuilders.ContainsKey(guid)) continue;     // BlockRuntime finishes it when content is ready
@@ -529,6 +568,13 @@ internal sealed class Lowered(ModBlocks mod)
         foreach (var d in _items) Sink.Item(mod.Owner, d);
         foreach (var d in _recipes) Sink.Recipe(mod.Owner, d);
         foreach (var (section, entry, rules) in _rules) BlockRuntime.AddRules(mod, section, entry, rules);
+    }
+
+    /// <summary>The second half: what runs in Kiln because the block exists (triggers, icons, checks at content ready).</summary>
+    internal void CommitAfter()
+    {
+        if (mod.StagesFor != null && !mod.CommitOpen) throw new InvalidOperationException("a block staged for a kind's plan was committed before the plan");
+        if (_bootLowering) return;  // a boot generation lowers registrations only; the runtime parts wait for the mod's runtime activation
         foreach (var a in _after) a();
         foreach (var (section, entry, rules, late) in _vfxLates)
         {
@@ -536,6 +582,35 @@ internal sealed class Lowered(ModBlocks mod)
             BlockRuntime.AddVfxLate(mod, late);
         }
     }
+
+    /// <summary>What this block registers and runs, into a hash: two lowerings that add the same register the same (a kind's plan in a
+    /// later content generation, Kinds/KindApply.cs). Items and recipes are in <see cref="Json"/>, which the caller adds.</summary>
+    internal void Digest(System.Security.Cryptography.IncrementalHash h)
+    {
+        void Text(string s)
+        {
+            h.AppendData(System.Text.Encoding.UTF8.GetBytes(s));
+            h.AppendData([0]);
+        }
+        foreach (var (guid, blob) in _programs)
+        {
+            Text(guid.ToString());
+            h.AppendData(blob);
+            h.AppendData([0]);
+        }
+        foreach (var (section, def) in _clones) Text($"{section}|{KindJson.Canonical(def)}");
+        foreach (var (section, entry, rules) in _rules) Text($"{section}|{entry}|{KindJson.Canonical(rules)}");
+        foreach (var (section, entry, path, program) in _lateRules) Text($"{section}|{entry}|{path}|{program}");
+        foreach (var (section, entry, _, late) in _vfxLates) Text($"{section}|{entry}|{late.Vfx.GameName}");
+        Text(_after.Count.ToString(System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    /// <summary>The names of the game-data clones and new items this block registers (a kind's plan checks them at content ready).</summary>
+    internal IEnumerable<string> DefinitionNames =>
+        _clones.Select(c => c.Def["name"]?.GetValue<string>() ?? "").Concat(_items.Select(d => d.Name)).Where(n => n.Length > 0);
+
+    /// <summary>How many bytes of programs this block made (a plan's bound).</summary>
+    internal long GeneratedBytes => _programs.Sum(p => (long)p.Blob.Length) + Json.ToJsonString().Length;
 
     public string Summary()
     {

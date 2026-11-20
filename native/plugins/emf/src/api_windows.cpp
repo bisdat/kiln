@@ -9,9 +9,15 @@
 //    (kiln.ui v2's is_item_clicked); a kiln.ui without it reports none.
 //  - Differences: EMF's console look and its debug-bridge commands are not reproduced (the widgets are plain ImGui
 //    widgets).
+//  - Windows keep Kiln's movable, appearing-only placement. With UI size constraints they follow content height
+//    up to 85% of the frame; older UI tables keep appearing-only sizing.
 //  - window_open is refused while a wheel is open (api_wheel.cpp), as EMF documents.
 //  - Pictures: PNG files (or a folder of PNG frames) decoded by kiln.ui's image_load; EMF's limits (512 x 512, 64
 //    frames, 128 pictures, 64 MB) and path rules (the mod's folder, absolute, "portrait:<key>").
+//  - kiln.log (support reports): under the mod, each window open, each real change of what it shows (title, widget
+//    count, clickable widgets' keys and texts, other texts; v26::window_log_summary), each click delivered to the mod and
+//    the close. Bounded: an update with the same content logs nothing, 20 change lines per open window, 300 window
+//    lines per mod and world session.
 #include <intrin.h>
 
 #include <algorithm>
@@ -39,6 +45,7 @@ struct Pending {
     uint32_t kind, reason;
     uint8_t world_kind;
     std::shared_ptr<WindowLifetime> lifetime;
+    std::string label;  // a click's widget text, for the log line
 };
 
 std::mutex g_win_mutex;
@@ -64,11 +71,50 @@ std::map<std::string, uint32_t> g_image_keys;
 std::set<std::string> g_image_refused;  // logged once per path
 uint64_t g_image_bytes = 0;
 
+// window log lines (see the top of the file)
+constexpr int kChangeLines = 20;            // per open window
+constexpr uint32_t kModWindowLines = 300;   // per mod and world session
+std::string g_logged;                       // the open window's last logged summary (g_win_mutex)
+int g_change_lines = 0;                     // its change lines so far (g_win_mutex)
+std::mutex g_log_mutex;
+std::map<const Mod*, uint32_t> g_log_lines;  // lines per mod since the last world start (g_log_mutex)
+
+void win_log(const Mod* m, const std::string& line) {
+    bool last = false;
+    {
+        std::lock_guard lock(g_log_mutex);
+        uint32_t& n = g_log_lines[m];
+        if (n > kModWindowLines) return;
+        last = ++n > kModWindowLines;
+    }
+    if (last)
+        mod_logf(m, KILN_LOG_INFO, "further window lines of this mod are not logged (more than %u)", kModWindowLines);
+    else
+        mod_logf(m, KILN_LOG_INFO, "%s", line.c_str());
+}
+
+const char* close_reason(uint32_t reason) {
+    return reason == EMF_UI_BY_PLAYER ? "by the player"
+           : reason == EMF_UI_BY_MOD  ? "by the mod"
+                                      : "by Kiln (the world ended, the overlay went off or the mod stopped)";
+}
+
 void deliver(Pending& p, EmfWorld* w, bool no_world) {
     if (!p.cb || !p.lifetime) return;
+    const auto what = [&p] {
+        const std::string label = v26::log_text(p.label, v26::kLogTextLen);
+        return "window " + p.window + ": " + (p.kind == EMF_UI_RIGHT_CLICK ? "right click" : "click") + " on " +
+               v26::log_text(p.key, v26::kMaxWidgetKeyLen) + (label.empty() ? "" : " \"" + label + "\"");
+    };
     if (p.kind == EMF_UI_CLOSED) {
         if (p.lifetime->ended.exchange(true)) return;
-    } else if (p.lifetime->ended.load()) return;
+        win_log(p.mod, "window " + p.window + " closed " + close_reason(p.reason) + (no_world ? " (no world running)" : ""));
+    } else if (p.lifetime->ended.load()) {
+        win_log(p.mod, what() + " not delivered: the window closed first");
+        return;
+    } else {
+        win_log(p.mod, what() + " delivered");
+    }
     EmfUiEvent e{};
     e.size = sizeof e;
     e.kind = p.kind;
@@ -94,8 +140,8 @@ void deliver(Pending& p, EmfWorld* w, bool no_world) {
 
 // Queues an event of the open (or just closed) window `r`. A CLOSED without a world of its kind is delivered now.
 void post_event_locked(const v26::WindowRequest& r, Mod* m, uint32_t kind, const std::string& key, uint32_t reason,
-                       std::vector<Pending>* now) {
-    Pending p{r.cb, r.user, m, r.id, key, kind, reason, r.world_kind, g_win_lifetime};
+                       std::vector<Pending>* now, const std::string& label = {}) {
+    Pending p{r.cb, r.user, m, r.id, key, kind, reason, r.world_kind, g_win_lifetime, label};
     if (kind != EMF_UI_CLOSED && g_events.size() >= 256) return;
     if (kind == EMF_UI_CLOSED && !g_api->world(r.world_kind)) now->push_back(std::move(p));
     else g_events.push_back(std::move(p));
@@ -148,11 +194,17 @@ void KILN_CALL on_frame(const KilnUiFrame* fr, void*) {
     if (win.place == EMF_UI_PLACE_LEFT) x = fr->width * 0.08f;
     if (win.place == EMF_UI_PLACE_RIGHT) x = fr->width * 0.58f;
     S.ui->set_next_window_pos(x, fr->height * 0.15f, KILN_UI_COND_APPEARING, 0, 0);
-    S.ui->set_next_window_size(width, 0, KILN_UI_COND_APPEARING);
+    // Keep Kiln's movable, appearing-only placement; newer overlays follow late-arriving content.
+    const bool constraints = S.ui->header.size >= offsetof(KilnUiApi, set_next_window_size_constraints) +
+                                                    sizeof(S.ui->set_next_window_size_constraints) &&
+                             S.ui->set_next_window_size_constraints;
+    if (constraints) S.ui->set_next_window_size_constraints(width, 0, width, fr->height * 0.85f);
+    else S.ui->set_next_window_size(width, 0, KILN_UI_COND_APPEARING);
     bool open = true;
     const bool right_clicks = ui_has_item_clicked();  // kiln.ui v2
     const std::string title = (win.title.empty() ? win.id : win.title) + "###emf." + win.id;
-    if (S.ui->begin(kstr(title), &open, KILN_UI_WINDOW_NO_COLLAPSE)) {
+    if (S.ui->begin(kstr(title), &open, KILN_UI_WINDOW_NO_COLLAPSE |
+                                              (constraints ? KILN_UI_WINDOW_ALWAYS_AUTO_RESIZE : 0))) {
         for (size_t i = 0; i < win.widgets.size(); ++i) {
             const v26::WindowWidget& wd = win.widgets[i];
             if (i && (wd.flags & EMF_UI_SAME_LINE)) S.ui->same_line(0, -1);
@@ -225,8 +277,8 @@ void KILN_CALL on_frame(const KilnUiFrame* fr, void*) {
                                S.ui->is_item_clicked(KILN_UI_MOUSE_RIGHT);
             if (!wd.tooltip.empty() && S.ui->is_item_hovered()) S.ui->set_tooltip(kstr(wd.tooltip));
             if (clicked && !off && !wd.key.empty() && v26::widget_takes_clicks(wd.type))
-                post_event_locked(win, g_win_mod, EMF_UI_CLICK, wd.key, 0, &now);
-            if (right) post_event_locked(win, g_win_mod, EMF_UI_RIGHT_CLICK, wd.key, 0, &now);
+                post_event_locked(win, g_win_mod, EMF_UI_CLICK, wd.key, 0, &now, wd.text);
+            if (right) post_event_locked(win, g_win_mod, EMF_UI_RIGHT_CLICK, wd.key, 0, &now, wd.text);
             S.ui->pop_id();
         }
     }
@@ -281,6 +333,7 @@ bool api_window_open(const EmfWindowDef* def) {
                           : "no client world runs: its events would never come"),
                false;
     std::vector<Pending> now;
+    std::string line;
     {
         std::lock_guard lock(g_win_mutex);
         std::erase_if(g_targets, [](const Pending& p) { return p.lifetime->ended.load(); });
@@ -292,10 +345,14 @@ bool api_window_open(const EmfWindowDef* def) {
         g_win = std::move(r);
         g_win_mod = m;
         g_win_lifetime = std::make_shared<WindowLifetime>();
-        g_targets.push_back({g_win->cb, g_win->user, m, g_win->id, "", EMF_UI_CLOSED, EMF_UI_BY_CORE, g_win->world_kind, g_win_lifetime});
+        g_targets.push_back({g_win->cb, g_win->user, m, g_win->id, "", EMF_UI_CLOSED, EMF_UI_BY_CORE, g_win->world_kind, g_win_lifetime, ""});
         set_open(true);
+        g_logged = v26::window_log_summary(*g_win);
+        g_change_lines = 0;
+        line = "window " + g_win->id + " opened: " + g_logged;
     }
-    run_now(now);
+    run_now(now);  // the replaced window's CLOSED (and its line) first
+    win_log(m, line);
     return true;
 }
 
@@ -304,14 +361,28 @@ bool api_window_update(const EmfWindowDef* def) {
     v26::WindowRequest r;
     std::string why;
     if (!v26::copy_window_def(def, true, &r, &why)) return refuse(m, "window_update", why.c_str()), false;
-    std::lock_guard lock(g_win_mutex);
-    if (!g_win || g_win->id != r.id || g_win_mod != m) return false;  // not open (the player closed it): no log, never reopened
-    r.cb = g_win->cb;
-    r.user = g_win->user;
-    r.mod = g_win->mod;
-    for (auto& target : g_targets)
-        if (target.lifetime == g_win_lifetime) target.world_kind = r.world_kind;
-    g_win = std::move(r);
+    std::string line;
+    {
+        std::lock_guard lock(g_win_mutex);
+        if (!g_win || g_win->id != r.id || g_win_mod != m) return false;  // not open (the player closed it): no log, never reopened
+        r.cb = g_win->cb;
+        r.user = g_win->user;
+        r.mod = g_win->mod;
+        for (auto& target : g_targets)
+            if (target.lifetime == g_win_lifetime) target.world_kind = r.world_kind;
+        if (g_change_lines <= kChangeLines) {
+            std::string summary = v26::window_log_summary(r);
+            if (summary != g_logged) {
+                line = ++g_change_lines > kChangeLines
+                           ? "window " + r.id + ": further changes of this window are not logged (more than " +
+                                 std::to_string(kChangeLines) + ")"
+                           : "window " + r.id + " changed: " + summary;
+                g_logged = std::move(summary);
+            }
+        }
+        g_win = std::move(r);
+    }
+    if (!line.empty()) win_log(m, line);
     return true;
 }
 
@@ -542,6 +613,10 @@ void windows_world_stopping(uint8_t kind) {
 
 void windows_world_started(uint8_t kind) {
     windows_world_stopping(kind); // also discard pending events when an older core missed a stop (and a wheel's)
+    {
+        std::lock_guard lock(g_log_mutex);
+        g_log_lines.clear();  // a new session: its windows are logged again
+    }
     {
         std::lock_guard lock(g_win_mutex);
         g_stopping[kind] = false;

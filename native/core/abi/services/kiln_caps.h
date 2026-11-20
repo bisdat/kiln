@@ -36,8 +36,8 @@
  * the session gets a row of its own ("items.fuel" stays what this build can do; "items.fuel_program" could say
  * whether it runs right now), so a manifest can go on requiring the static one.
  *
- * The client gate (since 0.2.0-dev.28). Some capabilities ship switched off because only a real game client can
- * confirm them (native/core/gates/README.md). While such a name is held, the core's own report for it is
+ * The client gate (since 0.2.0-dev.28). Capabilities can be held for real-game confirmation
+ * (native/core/gates/README.md); the list is empty in 0.2.0-dev.29. While such a name is held, the core's own report for it is
  * KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_POLICY, text KILN_CAP_GATE_TEXT followed by the ids of the guided client
  * checks that open it; that is what every reader sees, whatever a service reports for the name, and KilnApi.feature()
  * answers false for it. kiln.json's "preview" (true, or a list of names) lifts it. A service whose slice is held

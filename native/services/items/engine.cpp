@@ -5,10 +5,12 @@
 #include "engine.h"
 #include "instances.h"
 #include "pide.h"
+#include "upgrade_logic.h"
 
 #include <windows.h>
 
 #include <atomic>
+#include <new>
 #include <cstdio>
 #include <cstring>
 #include <vector>
@@ -238,7 +240,58 @@ const uint8_t* stack_at(const Access& a, uint64_t slot) {
     return inv ? inv + 12 * KILN_SLOT_INDEX(slot) : nullptr;
 }
 
-void run_give(const Access& a, const KilnItemsRequest& r, uint8_t* tx, KilnItemsResult* res) {
+// KILN_ITEMS_REPLACE (v7): the slot must hold exactly this one item entity of this item; read before the transaction.
+// The re-creation destroys the old item entity, so worn or held gear (a player's equipment slots and the item in hand,
+// as moves protect them, or ItemState IsEquipped) and gear with a gem slot (ItemState HasWeaponGemSlot: a gem in it would
+// be destroyed with its carrier) are refused; the caller's earlier read may be a step old.
+bool replace_source_ok(const Access& a, const KilnItemsRequest& r, KilnItemsResult* res) {
+    const uint8_t* st = stack_at(a, r.slot);
+    if (!st) return fail(res, KILN_ITEMS_SLOT_CHANGED, "inventory %u could not be read", KILN_SLOT_INVENTORY(r.slot)), false;
+    const uint32_t id = rd<uint32_t>(st, 0), cnt = rd<uint32_t>(st, 4), pide = rd<uint32_t>(st, 8);
+    if (id != r.item || cnt != 1)
+        return fail(res, KILN_ITEMS_SLOT_CHANGED, "the slot holds item 0x%08x, not 0x%08x", id, r.item), false;
+    if (pide != r.pide)
+        return fail(res, KILN_ITEMS_SLOT_CHANGED, "the slot holds item entity %u, not %u", pide, r.pide), false;
+    PlayerGuard g;
+    player_guard(a, r.entity, &g);
+    if (g.is_player && g.protects(r.slot))
+        return fail(res, KILN_ITEMS_REFUSED, "item entity %u is worn or held by player %u: unequip it first", pide, r.entity), false;
+    PtrSize ps{};
+    E.read_other(&ps, a.storage, a.acc[A_ITEMSTATE], pide);
+    if (!ps.ptr || ps.size < kItemStateSize)
+        return fail(res, KILN_ITEMS_REFUSED, "item entity %u has no ItemState to check", pide), false;
+    const uint16_t state = rd<uint16_t>(static_cast<const uint8_t*>(ps.ptr), 0x0E);
+    if (state & (1u << 3))  // IsEquipped
+        return fail(res, KILN_ITEMS_REFUSED, "item entity %u is worn or held (IsEquipped): unequip it first", pide), false;
+    if (state & (1u << 8))  // HasWeaponGemSlot
+        return fail(res, KILN_ITEMS_REFUSED, "item entity %u has a gem slot: re-creating it would destroy its gem", pide), false;
+    return true;
+}
+
+// The take half of a REPLACE on the give's transaction: exactly one op 1 (take) of `r.pide` out of `r.slot`.
+bool replace_take(const Access& a, const KilnItemsRequest& r, uint8_t* tx, KilnItemsResult* res) {
+    (void)a;
+    Result12 out{};
+    E.remove_items(&out, tx, r.entity, r.item, r.slot, 1);
+    const Ops ops = ops_of(tx);
+    uint32_t takes = 0;
+    bool exact = true;
+    for (uint64_t i = 0; i < ops.n && ops.p; ++i) {
+        const uint8_t* op = ops.p + i * kOpStride;
+        if (op[0x26] != 1) continue;
+        ++takes;
+        if (rd<uint64_t>(op, 0) != r.slot || !op[0x30] || rd<uint32_t>(op, 0x20) != r.pide) exact = false;
+    }
+    res->game_error = out.error;
+    if (out.error) return fail(res, KILN_ITEMS_REFUSED, "the game refused taking the old item (error 0x%02x)", out.error), false;
+    if (out.value != 0 || takes != 1 || !exact)
+        return fail(res, KILN_ITEMS_SLOT_CHANGED, "the old item could not be taken from its slot alone (%u take(s))", takes), false;
+    return true;
+}
+
+void run_give(const Access& a, const Job& job, uint8_t* tx, KilnItemsResult* res) {
+    const KilnItemsRequest& r = job.r;
+    const bool replace = (r.flags & KILN_ITEMS_REPLACE) != 0;
     const auto* setup = static_cast<const uint8_t*>(other(a, A_SETUP, r.entity));
     if (!setup) return fail(res, KILN_ITEMS_NO_INVENTORY, "entity %u has no inventory (no InventorySetup)", r.entity);
     if (!setup[E.setup_initialized])
@@ -249,14 +302,22 @@ void run_give(const Access& a, const KilnItemsRequest& r, uint8_t* tx, KilnItems
         return fail(res, KILN_ITEMS_SLOT_CHANGED, "the slot (inventory %u) is not one of entity %u's slots",
                     KILN_SLOT_INVENTORY(r.slot), r.entity);
     const bool gear = (rd<uint32_t>(info, E.item_flags) & 2u) != 0;
+    if (replace && !gear) return fail(res, KILN_ITEMS_REFUSED, "item 0x%08x is no gear (no item entity to re-create)", r.item);
+    if (replace && !replace_source_ok(a, r, res)) return;
     const bool player = r.entity >= 1 && r.entity <= kMaxPlayer;
     uint8_t flags = 0;
     if ((r.flags & KILN_ITEMS_NOTIFY) && player) flags |= 0x01;  // PickupEvent + "+N" popup
-    if (r.flags & KILN_ITEMS_NO_MERGE) flags |= 0x80;
+    if ((r.flags & KILN_ITEMS_NO_MERGE) || replace) flags |= 0x80;
     alignas(16) uint8_t s[kSetupBlock];
     fill_setup(a, r, flags, s);
     E.tx_ctor(tx);
     E.tx_init(tx, s);
+    if (replace && !replace_take(a, r, tx, res)) {  // nothing of the give runs: roll the take back
+        E.rollback(tx);
+        E.free_arrays(tx);
+        res->change_count = 0;
+        return;
+    }
     OptU32 level{r.level, static_cast<uint8_t>((r.flags & KILN_ITEMS_LEVEL) ? 1 : 0), {}};
     OptU8 rarity{r.rarity, static_cast<uint8_t>((r.flags & KILN_ITEMS_RARITY) ? 1 : 0)};
     OptF32 fuel{0.0f, 0, {}};
@@ -275,10 +336,16 @@ void run_give(const Access& a, const KilnItemsRequest& r, uint8_t* tx, KilnItems
     res->done = r.count - remaining;
     res->game_error = out.error;
     const bool dry = (r.flags & KILN_ITEMS_DRY_RUN) != 0;
-    const bool all = (r.flags & KILN_ITEMS_ALL_OR_NOTHING) != 0;
+    const bool all = (r.flags & KILN_ITEMS_ALL_OR_NOTHING) != 0 || replace;  // a replace is both halves or neither
     const bool commit = out.error == 0 && res->done > 0 && !(all && remaining > 0) && !dry;
     if (commit) {
-        pide_commit(tx, E.commit, r.flags, r.unlock, r.item); // createPide runs inside the commit
+        PideOptions o;
+        o.flags = r.flags;
+        o.unlock = r.unlock;
+        o.item = r.item;
+        o.dye = job.dye;
+        o.durability = job.durability;
+        pide_commit(tx, E.commit, o);  // createPide runs inside the commit
     } else {
         E.rollback(tx);
     }
@@ -291,6 +358,7 @@ void run_give(const Access& a, const KilnItemsRequest& r, uint8_t* tx, KilnItems
     if (queued != res->done) {  // the op list and the result disagree: report it, trust the game's count
         std::snprintf(res->message, sizeof res->message, "note: %u queued vs %u reported", queued, res->done);
     }
+    if (commit && replace) stamp_destroyed(r.pide, r.item);  // v7: the old item entity is gone (a tombstone from now on)
     if (commit && gear) {  // the game created each item entity at commit
         for (uint32_t i = 0; i < res->change_count; ++i) {
             if (const uint8_t* st = stack_at(a, res->changes[i].slot)) res->changes[i].pide = rd<uint32_t>(st, 8);
@@ -436,7 +504,7 @@ void read_impl(uintptr_t world, void* registry, KilnEntity e, ReadOut* out) {
     KilnItemsInventory& inf = out->info;
     inf.entity = e;
     inf.initialized = setup[E.setup_initialized];
-    inf.setup_flags = setup[0x50];
+    inf.setup_flags = setup[kSetupFlags];
     inf.generic_slots = setup[0x51];
     inf.available_slots = setup[0x52];
     Tree t{};
@@ -489,7 +557,7 @@ void read_impl(uintptr_t world, void* registry, KilnEntity e, ReadOut* out) {
 bool matches(uintptr_t world, KilnEntity e, uint32_t flags) {
     const auto* setup = static_cast<const uint8_t*>(component(world, kHashInventorySetup, e, kSetupSize));
     if (!setup || !setup[E.setup_initialized]) return false;
-    const uint8_t f = setup[0x50];
+    const uint8_t f = setup[kSetupFlags];
     const uint32_t kinds = flags & 7u;
     if (kinds) {
         const bool player = (f & 1u) != 0, npc = (f & 2u) != 0;
@@ -1019,7 +1087,7 @@ bool run_job(const Access& a, const Job& job, uint8_t* tx, KilnItemsResult* res,
     __try {
         if (job.take) run_take(a, job.r, tx, res);
         else if (job.r.flags & KILN_ITEMS_RECIPE) run_recipe(a, job.r, tx, res);
-        else run_give(a, job.r, tx, res);
+        else run_give(a, job, tx, res);
         return true;
     } __except (*code = GetExceptionCode(), EXCEPTION_EXECUTE_HANDLER) {
         return false;
@@ -1119,11 +1187,43 @@ bool register_program(uintptr_t world, void* desc, int* outcome, char* why, unsi
     }
 }
 
+// Upgrades (gear.cpp, v8 package P3): a transaction of ours on the accessors of `a`, operator `entity`, no flags.
+void tx_begin(const Access& a, KilnEntity entity, uint8_t* tx) {
+    alignas(16) uint8_t s[kSetupBlock];
+    fill_setup_for(a, entity, 0, s);
+    E.tx_ctor(tx);
+    E.tx_init(tx, s);
+}
+
+bool tx_takes_plain_only(const uint8_t* tx) {
+    const Ops ops = ops_of(tx);
+    for (uint64_t i = 0; i < ops.n && ops.p; ++i) {
+        const uint8_t* op = ops.p + i * kOpStride;
+        if (!upgrade::plain_take(op[0x26], op[0x30], rd<uint32_t>(op, 0x20))) return false;
+    }
+    return true;
+}
+
 bool read_pages(const Access& a, KilnEntity e, PageSet* out, bool* initialized) {
     __try {
         return read_pages_impl(a, e, out, initialized);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         out->n = 0;
+        return false;
+    }
+}
+
+static bool setup_flags_impl(const Access& a, KilnEntity e, uint8_t* flags) {
+    const auto* setup = static_cast<const uint8_t*>(other_sized(a, A_SETUP, e, kSetupSize));
+    if (!setup) return false;
+    *flags = setup[kSetupFlags];
+    return true;
+}
+
+bool setup_flags(const Access& a, KilnEntity e, uint8_t* flags) {
+    __try {
+        return setup_flags_impl(a, e, flags);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
 }
@@ -1170,6 +1270,145 @@ bool run_move(const Access& a, const MoveJob& job, uint8_t* tx, KilnItemsMoveRes
         xfer_mod_end();
         return false;
     }
+}
+
+// ---- kiln.component_changes (07 S7): engine.h WatchNote, NoteLease ----
+namespace {
+std::atomic<const KilnComponentChangesApiV1*> g_note_table{nullptr};
+std::atomic<KilnOwner> g_note_owner{0};
+const Acc kNoteAcc[7] = {A_COUNT, A_COUNT, A_COUNT, A_COUNT, A_FUEL, A_INVENTORY, A_SLOTSEL};  // by component index
+constexpr int kNotePool = 2;  // the program's thread and one nested job at most; more get a note of their own
+std::atomic<WatchNote*> g_note_pool[kNotePool] = {};
+std::atomic<bool> g_note_busy[kNotePool] = {};
+std::atomic<uint64_t> g_note_extra{0};
+
+WatchNote* note_lend(int* slot) {
+    for (int i = 0; i < kNotePool; ++i) {
+        bool free = false;
+        if (!g_note_busy[i].compare_exchange_strong(free, true, std::memory_order_acquire)) continue;
+        WatchNote* n = g_note_pool[i].load(std::memory_order_relaxed);
+        if (!n) {
+            n = new (std::nothrow) WatchNote;
+            if (!n) {
+                g_note_busy[i].store(false, std::memory_order_release);
+                return nullptr;
+            }
+            g_note_pool[i].store(n, std::memory_order_relaxed);
+        }
+        *slot = i;
+        n->count = 0;
+        return n;
+    }
+    *slot = -1;
+    g_note_extra.fetch_add(1, std::memory_order_relaxed);
+    WatchNote* n = new (std::nothrow) WatchNote;
+    if (n) n->count = 0;
+    return n;
+}
+
+bool note_read(const Access& a, uint32_t index, KilnEntity e, uint8_t* out, uint32_t* size) {
+    const Acc which = kNoteAcc[index];
+    if (which == A_COUNT || !a.acc[which] || !e) return false;
+    PtrSize ps{};
+    E.read_other(&ps, a.storage, a.acc[which], e);
+    if (!ps.ptr || ps.size == 0 || ps.size > 256) return false;
+    std::memcpy(out, ps.ptr, ps.size);
+    *size = static_cast<uint32_t>(ps.size);
+    return true;
+}
+}  // namespace
+
+// One entity's component: copied only when the service may watch it (its filter), into a note lent at the first one.
+void note_add(const Access& a, uint32_t index, KilnEntity e, NoteLease* lease) {
+    if (!e || !kiln_component_watched(g_note_table.load(std::memory_order_acquire), e, index)) return;
+    if (!lease->note_ && !(lease->note_ = note_lend(&lease->slot_))) return;
+    WatchNote* note = lease->note_;
+    if (note->count >= WatchNote::kMax) return;
+    for (uint32_t i = 0; i < note->count; ++i)
+        if (note->items[i].entity == e && note->items[i].index == index) return;
+    WatchNote::Item& it = note->items[note->count];
+    it.entity = e;
+    it.index = index;
+    if (note_read(a, index, e, it.bytes, &it.size)) ++note->count;
+}
+
+namespace {
+void note_begin_impl(const Access& a, const KilnEntity* holders, uint32_t n, NoteLease* lease) {
+    for (uint32_t h = 0; h < n; ++h) {
+        const KilnEntity holder = holders[h];
+        if (!holder) continue;
+        note_add(a, KILN_WATCH_SLOT_SELECTION, holder, lease);
+        note_add(a, KILN_WATCH_FUEL, holder, lease);
+        const uint8_t* setup = a.acc[A_SETUP] ? setup_via_access(&a, holder) : nullptr;
+        if (!setup) continue;
+        Tree t{};
+        walk(setup, &setup_via_access, &a, &t, 0, -1);
+        for (uint32_t i = 0; i < t.n; ++i) {
+            note_add(a, KILN_WATCH_INVENTORY, t.ids[i], lease);
+            const auto* inv = a.acc[A_INVENTORY] ? static_cast<const uint8_t*>(other(a, A_INVENTORY, t.ids[i])) : nullptr;
+            if (!inv) continue;
+            for (uint32_t k = 0; k < 8; ++k) {
+                const KilnEntity pide = rd<uint32_t>(inv + 12 * k, 8);
+                if (pide && pide != 0xFFFFFFFFu) note_add(a, KILN_WATCH_FUEL, pide, lease);
+            }
+        }
+    }
+}
+
+bool note_begin_guarded(const Access& a, const KilnEntity* holders, uint32_t n, NoteLease* lease, WatchNote** note) {
+    __try {
+        note_begin_impl(a, holders, n, lease);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        if (*note) (*note)->count = 0;
+        return false;
+    }
+}
+
+bool note_end_guarded(const Access& a, const WatchNote& note, const KilnComponentChangesApiV1* t, KilnOwner owner) {
+    __try {
+        uint8_t now[256];
+        for (uint32_t i = 0; i < note.count; ++i) {
+            const WatchNote::Item& it = note.items[i];
+            uint32_t size = 0;
+            if (note_read(a, it.index, it.entity, now, &size) && size == it.size && std::memcmp(now, it.bytes, size) != 0)
+                kiln_component_write(t, owner, it.index, it.entity, it.bytes, now, size, 0, "kiln.items");
+        }
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+}  // namespace
+
+void note_setup(const KilnComponentChangesApiV1* table, KilnOwner owner) {
+    g_note_owner.store(owner, std::memory_order_relaxed);
+    g_note_table.store(table, std::memory_order_release);
+}
+
+bool note_wanted() { return kiln_component_watching(g_note_table.load(std::memory_order_acquire)); }
+
+void note_pool_stats(uint32_t* pooled, uint64_t* extra) {
+    uint32_t n = 0;
+    for (const auto& p : g_note_pool) n += p.load(std::memory_order_relaxed) ? 1u : 0u;
+    *pooled = n;
+    *extra = g_note_extra.load(std::memory_order_relaxed);
+}
+
+void NoteLease::begin(const Access& a, const KilnEntity* holders, uint32_t n) {
+    if (note_) note_->count = 0;
+    note_begin_guarded(a, holders, n, this, &note_);
+}
+
+void NoteLease::end(const Access& a) {
+    const auto* t = g_note_table.load(std::memory_order_acquire);
+    if (note_ && note_->count && t) note_end_guarded(a, *note_, t, g_note_owner.load(std::memory_order_relaxed));
+}
+
+NoteLease::~NoteLease() {
+    if (!note_) return;
+    if (slot_ >= 0) g_note_busy[slot_].store(false, std::memory_order_release);
+    else delete note_;
 }
 
 }  // namespace kitems

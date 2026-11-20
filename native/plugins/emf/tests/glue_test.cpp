@@ -2,6 +2,7 @@
 // Exercise the production adapters against fake Kiln services, including
 // callback reentrancy.
 #include "emf_internal.h"
+#include "services/kiln_caps.h"
 #include "services/kiln_render.h"
 #include "v26_model.h"
 #include <algorithm>
@@ -11,6 +12,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <map>
+#include <set>
 #include <stdexcept>
 #include <thread>
 
@@ -35,7 +37,17 @@ static Mod *active_mod = &mod;
 Mod *caller_mod(const void *) { return active_mod; }
 Mod *mod_of_address(const void *) { return active_mod; }
 void logf(int, const char *, ...) {}
-void mod_logf(const Mod *, int, const char *, ...) {}
+std::vector<std::string> mod_lines;  // every mod_logf line, for the window log checks
+void mod_logf(const Mod *, int, const char *fmt, ...) {
+    char buf[4096];
+    va_list ap;
+    va_start(ap, fmt);
+    std::vsnprintf(buf, sizeof buf, fmt, ap);
+    va_end(ap);
+    mod_lines.emplace_back(buf);
+    if (std::getenv("KEMF_TEST_VERBOSE"))
+        std::printf("  log %s\n", buf);
+}
 // A fake portrait worker: `drawing_key` is being drawn until the test finishes it and runs the registered callback.
 std::string drawing_key;
 void (*when_drawn)() = nullptr;
@@ -43,12 +55,14 @@ bool portraits_wait(const std::string &k) { return k != drawing_key; }
 bool portraits_drawing(const std::string &k) { return k == drawing_key; }
 void portraits_when_drawn(void (*fn)()) { when_drawn = fn; }
 int unsupported_calls = 0, refusals = 0;
+std::set<std::string> unsupported_fns;  // every function that reported itself not supported
 static void say(const char *what, const char *fn, const char *why) {
     if (std::getenv("KEMF_TEST_VERBOSE"))
         std::printf("  %s %s: %s\n", what, fn ? fn : "", why ? why : "");
 }
 void unsupported(const Mod *, const char *fn, const char *why) {
     ++unsupported_calls;
+    if (fn) unsupported_fns.insert(fn);
     say("unsupported", fn, why);
 }
 void refuse(const Mod *, const char *fn, const char *why, bool) {
@@ -157,6 +171,10 @@ static KilnHandle wheel_closed = 0;
 static std::vector<std::string> wheel_items;
 static std::string wheel_title;
 static uint32_t wheel_hold = 0, wheel_count = 0;
+static int size_calls = 0, constraint_calls = 0;
+static float min_w, min_h, max_w, max_h, size_w, size_h;
+static uint32_t window_flags, size_cond, pos_cond;
+static std::vector<std::string> window_calls;
 static void init_ui(KilnUiApi &ui) {
     ui.header.size = sizeof ui;
     ui.header.version = KILN_UI_VERSION;
@@ -170,9 +188,13 @@ static void init_ui(KilnUiApi &ui) {
         *h = 2;
         return KILN_OK;
     };
-    ui.set_next_window_pos = [](float, float, uint32_t, float, float) {};
-    ui.set_next_window_size = [](float, float, uint32_t) {};
-    ui.begin = [](KilnStr, bool *open, uint32_t) {
+    ui.set_next_window_pos = [](float, float, uint32_t c, float, float) { pos_cond = c; window_calls.push_back("pos"); };
+    ui.set_next_window_size = [](float w, float h, uint32_t c) { ++size_calls; size_w = w; size_h = h; size_cond = c; window_calls.push_back("size"); };
+    ui.set_next_window_size_constraints = [](float a, float b, float c, float d) {
+        ++constraint_calls; min_w = a; min_h = b; max_w = c; max_h = d; window_calls.push_back("constraints");
+    };
+    ui.begin = [](KilnStr, bool *open, uint32_t flags) {
+        window_flags = flags; window_calls.push_back("begin");
         *open = !close_frame;
         return !close_frame;
     };
@@ -210,6 +232,165 @@ static void init_ui(KilnUiApi &ui) {
     ui.end = []() {};
     ui.unsubscribe = [](KilnHandle) -> KilnResult { return KILN_OK; };
     ui.set_capture = [](uint32_t c) { captured = c; };
+}
+static void test_window_sizing(KilnUiApi &ui) {
+    auto d = window_def();
+    d.width = 20;
+    CHECK(table.window_open(&d));
+    KilnUiFrame fr{};
+    fr.width = 1920; fr.height = 1080; fr.dpi_scale = 1.5f;
+    const bool saved_close = close_frame;
+    const int saved_closed = closed;
+    close_frame = false;
+    for (int i = 0; i < 2; ++i) {
+        // The second frame represents content arriving after opening.
+        if (i) {
+            EmfUiWidget row{}; row.type = EMF_UI_TEXT; row.text = "creature";
+            d.widgets = &row; d.count = 1;
+            CHECK(table.window_update(&d));
+        }
+        window_calls.clear(); size_calls = constraint_calls = 0;
+        frame_fn(&fr, nullptr);
+        CHECK(constraint_calls == 1 && size_calls == 0);
+        CHECK(min_w == 540 && max_w == 540 && min_h == 0 && max_h == 918);
+        CHECK(window_flags == (KILN_UI_WINDOW_NO_COLLAPSE | KILN_UI_WINDOW_ALWAYS_AUTO_RESIZE));
+        CHECK(pos_cond == KILN_UI_COND_APPEARING);
+        CHECK((window_calls == std::vector<std::string>{"pos", "constraints", "begin"}));
+    }
+    d.widgets = nullptr; d.count = 0;
+    CHECK(table.window_update(&d));
+    const auto full = ui.header.size;
+    // a table that ends before the constraints slot, and one that ends a byte short of covering it (kiln.ui has grown
+    // past that slot since, so sizeof(KilnUiApi) - 1 no longer is that case)
+    for (auto short_size : {offsetof(KilnUiApi, set_next_window_size_constraints),
+                            offsetof(KilnUiApi, set_next_window_size_constraints) + sizeof(ui.set_next_window_size_constraints) - 1}) {
+        ui.header.size = short_size;
+        window_calls.clear(); size_calls = constraint_calls = 0;
+        frame_fn(&fr, nullptr);
+        CHECK(constraint_calls == 0 && size_calls == 1);
+        CHECK(size_w == 540 && size_h == 0 && size_cond == KILN_UI_COND_APPEARING);
+        CHECK(window_flags == KILN_UI_WINDOW_NO_COLLAPSE);
+        CHECK((window_calls == std::vector<std::string>{"pos", "size", "begin"}));
+    }
+    ui.header.size = full;
+    auto constraints = ui.set_next_window_size_constraints;
+    ui.set_next_window_size_constraints = nullptr;
+    size_calls = constraint_calls = 0;
+    frame_fn(&fr, nullptr);
+    CHECK(size_calls == 1 && constraint_calls == 0 && window_flags == KILN_UI_WINDOW_NO_COLLAPSE);
+    ui.set_next_window_size_constraints = constraints;
+    CHECK(table.window_close(d.id));
+    windows_after_step(reinterpret_cast<EmfWorld *>(worlds[0]), EMF_WORLD_SERVER);
+    closed = saved_closed; close_frame = saved_close;
+}
+// kiln.log lines about mod windows (support reports): the open, real changes only (bounded), each click delivered and
+// the close.
+static std::string row_hit;  // the row label the fake selectable reports clicked
+static size_t lines_with(const std::string &needle, size_t from = 0) {
+    size_t n = 0;
+    for (size_t i = from; i < mod_lines.size(); ++i)
+        n += mod_lines[i].find(needle) != std::string::npos;
+    return n;
+}
+static void test_window_log(KilnUiApi &ui) {
+    ui.selectable = [](KilnStr s, bool) { return !row_hit.empty() && std::string(s.ptr, s.len) == row_hit; };
+    ui.separator_text = [](KilnStr) {};
+    auto *server = reinterpret_cast<EmfWorld *>(worlds[0]);
+    const bool saved_close = close_frame, saved_button = button_clicked;
+    close_frame = false;
+    button_clicked = false;
+    const int saved_clicks = clicks, saved_closed = closed;
+    const size_t start = mod_lines.size();
+    EmfUiWidget w[3]{};
+    w[0].type = EMF_UI_HEADING;
+    w[0].text = "Survivors";
+    w[1].type = EMF_UI_ROW;
+    w[1].key = "pick.7";
+    w[1].text = "Hunter (4 m)";
+    w[2].type = EMF_UI_BUTTON;
+    w[2].key = "send";
+    w[2].text = "Send";
+    auto d = window_def();
+    d.title = "Expeditions";
+    d.widgets = w;
+    d.count = 3;
+    CHECK(table.window_open(&d));
+    CHECK(mod_lines.size() == start + 1);
+    CHECK(lines_with("window test.win opened: \"Expeditions\", 3 widgets, events on the server world; clickable: "
+                     "pick.7 \"Hunter (4 m)\", send \"Send\"; text: \"Survivors\"", start) == 1);
+    // the same content again (a mod refreshing every tick): no line
+    for (int i = 0; i < 50; ++i)
+        CHECK(table.window_update(&d));
+    KilnUiFrame fr{};
+    fr.dpi_scale = 1;
+    for (int i = 0; i < 5; ++i)
+        frame_fn(&fr, nullptr);
+    CHECK(mod_lines.size() == start + 1);
+    // a real change: one line
+    w[1].text = "Hunter (2 m)";
+    CHECK(table.window_update(&d));
+    CHECK(table.window_update(&d));
+    CHECK(mod_lines.size() == start + 2 && lines_with("window test.win changed: ", start) == 1 &&
+          lines_with("pick.7 \"Hunter (2 m)\"", start) == 1);
+    // a click on the row and on the button: one line each when the mod gets it (after the world's step)
+    row_hit = "Hunter (2 m)";
+    frame_fn(&fr, nullptr);
+    row_hit.clear();
+    button_clicked = true;
+    frame_fn(&fr, nullptr);
+    button_clicked = false;
+    CHECK(lines_with(": click on", start) == 0);  // not delivered yet
+    windows_after_step(server, EMF_WORLD_SERVER);
+    CHECK(clicks == saved_clicks + 2);
+    CHECK(lines_with("window test.win: click on pick.7 \"Hunter (2 m)\" delivered", start) == 1);
+    CHECK(lines_with("window test.win: click on send \"Send\" delivered", start) == 1);
+    // a mod changing its window every tick: bounded, then one line saying so
+    const size_t before = mod_lines.size();
+    for (int i = 0; i < 200; ++i) {
+        const std::string t = "Hunter (" + std::to_string(i) + " m)";
+        w[1].text = t.c_str();
+        CHECK(table.window_update(&d));
+    }
+    const size_t spent = mod_lines.size() - before;
+    CHECK(spent >= 10 && spent <= 40);
+    CHECK(lines_with("further changes of this window are not logged", before) == 1);
+    // closed by the player (its X): one line
+    close_frame = true;
+    frame_fn(&fr, nullptr);
+    windows_after_step(server, EMF_WORLD_SERVER);
+    CHECK(closed == saved_closed + 1);
+    CHECK(lines_with("window test.win closed by the player", start) == 1);
+    // reopened: the change budget starts again
+    close_frame = false;
+    w[1].text = "Hunter (1 m)";
+    CHECK(table.window_open(&d));
+    CHECK(lines_with("window test.win opened: ", start) == 2);
+    w[1].text = "Hunter (0 m)";
+    CHECK(table.window_update(&d));
+    CHECK(mod_lines.back().find("window test.win changed: ") == 0);
+    CHECK(table.window_close(d.id));
+    windows_after_step(server, EMF_WORLD_SERVER);
+    CHECK(lines_with("window test.win closed by the mod", start) == 1);
+    // a mod opening and closing every tick: bounded per mod, then one line saying so
+    const size_t cycle = mod_lines.size();
+    for (int i = 0; i < 2000; ++i) {
+        CHECK(table.window_open(&d));
+        CHECK(table.window_close(d.id));
+        windows_after_step(server, EMF_WORLD_SERVER);
+    }
+    CHECK(mod_lines.size() - cycle <= 400);
+    CHECK(lines_with("further window lines of this mod are not logged", cycle) == 1);
+    windows_world_started(EMF_WORLD_SERVER);  // the next session logs again
+    CHECK(table.window_open(&d));
+    CHECK(mod_lines.back().find("window test.win opened: ") == 0);
+    CHECK(table.window_close(d.id));
+    windows_after_step(server, EMF_WORLD_SERVER);
+    clicks = saved_clicks;
+    closed = saved_closed;
+    close_frame = saved_close;
+    button_clicked = saved_button;
+    ui.selectable = nullptr;
+    ui.separator_text = nullptr;
 }
 static std::vector<KilnProgressionRequest> submitted;
 static bool curve_available = true;
@@ -349,6 +530,28 @@ static void test_program(void* ctx,void*) {
     CHECK(table.program_write_other(ctx,"undeclared",5000,24)==nullptr);
     CHECK(table.program_write_other(ctx,"Health",5000,25)==nullptr);
 }
+// ---- the client world (0.2.0-dev.29): register_program(EMF_WORLD_CLIENT), _def and on_event through kiln.world's
+// register_program_world, one relay per event type per world kind, delivery after that world's step ----
+static std::map<std::string, uint32_t> program_worlds;  // the kind each program was registered for
+static std::vector<KilnHandle> unbound, unregistered;
+static bool client_row_available = true;
+static int client_events = 0, client_program_runs = 0;
+static std::thread::id client_event_thread;
+static void client_program(void*, void*) { ++client_program_runs; }
+static void client_event_cb(EmfWorld *, const void *, uint32_t, void *) {
+    ++client_events;
+    client_event_thread = std::this_thread::get_id();
+}
+static const KilnCapsApi *caps_table() {
+    static KilnCapsApi caps{};
+    caps.header.size = sizeof caps;
+    caps.find = [](KilnStr name, KilnCapRow *row) -> KilnResult {
+        if (std::string_view(name.ptr, name.len) != "world.programs.client") return KILN_ERR_NOT_FOUND;
+        row->state = client_row_available ? KILN_CAP_AVAILABLE : KILN_CAP_UNAVAILABLE;
+        return KILN_OK;
+    };
+    return &caps;
+}
 static void accepted_cb(EmfWorld *, uint32_t player, uint32_t entity, void *) {
     CHECK(player == 2 && entity == 5000);
     ++accepts;
@@ -370,9 +573,19 @@ static void test_components(KilnWorldApi &world) {
         if (std::string(d->name.ptr,d->name.len)=="two_events")
             passed_other_write=d->other_write.count==1 && std::string(d->other_write.items[0].ptr,d->other_write.items[0].len)=="Health";
         programs[std::string(d->name.ptr, d->name.len)] = *d;
+        program_worlds[std::string(d->name.ptr, d->name.len)] = KILN_WORLD_SERVER;
         *h = programs.size();
         return KILN_OK;
     };
+    world.register_program_world = [](KilnOwner, uint32_t kind, const KilnProgramDesc *d, KilnHandle *h) -> KilnResult {
+        if (kind != KILN_WORLD_CLIENT || (d->flags & KILN_PROGRAM_HOST_ONLY)) return KILN_ERR_INVALID_ARGUMENT;  // as kiln.world
+        programs[std::string(d->name.ptr, d->name.len)] = *d;
+        program_worlds[std::string(d->name.ptr, d->name.len)] = kind;
+        *h = 1000 + programs.size();
+        return KILN_OK;
+    };
+    world.unbind_program_world = [](KilnHandle h) -> KilnResult { unbound.push_back(h); return KILN_OK; };
+    world.unregister_program = [](KilnHandle h) -> KilnResult { unregistered.push_back(h); return KILN_OK; };
     world.program_slot = [](KilnHandle,int32_t kind,KilnStr name)->int32_t {
         const std::string key(name.ptr,name.len);
         if (kind==KILN_SLOT_OTHER_WRITE) return key=="Health"?2:-1;
@@ -392,9 +605,41 @@ static void test_components(KilnWorldApi &world) {
     EmfProgramDef definition{}; definition.size=sizeof definition; definition.name="two_events";
     definition.world_kind=EMF_WORLD_SERVER; definition.fn=&test_program; definition.events_in=inputs; definition.other_write=writes;
     CHECK(table.register_program_def(&definition));
+    // the client world: a dedicated server refuses at the call as before (false, an "unsupported" note); so does a
+    // client whose world.programs.client is off; a client with it registers through register_program_world
+    const auto api_service = const_cast<KilnApi *>(g_api)->service;
+    const_cast<KilnApi *>(g_api)->service = [](KilnStr n, uint32_t) -> const void * {
+        return std::string_view(n.ptr, n.len) == KILN_CAPS_SERVICE ? caps_table() : nullptr;
+    };
+    const int unsupported_before = unsupported_calls;
+    g_side = KILN_SIDE_SERVER;
+    CHECK(!table.register_program("cprog", EMF_WORLD_CLIENT, &client_program, nullptr));
+    CHECK(!table.on_event(EMF_WORLD_CLIENT, "ClientEvent", 24, &client_event_cb, nullptr));
+    g_side = KILN_SIDE_CLIENT;
+    client_row_available = false;
+    CHECK(!table.register_program("cprog", EMF_WORLD_CLIENT, &client_program, nullptr));
+    client_row_available = true;
+    CHECK(!table.register_program("pprog", 1 /* the prediction world */, &client_program, nullptr));
+    CHECK(unsupported_calls == unsupported_before + 4);
+    CHECK(table.register_program("cprog", EMF_WORLD_CLIENT, &client_program, nullptr));
+    EmfProgramDef cdef{}; cdef.size=sizeof cdef; cdef.name="cprog_def"; cdef.world_kind=EMF_WORLD_CLIENT; cdef.fn=&client_program;
+    const char* cin[]={"ClientEvent",nullptr}; cdef.events_in=cin;
+    CHECK(table.register_program_def(&cdef));
+    CHECK(table.on_event(EMF_WORLD_CLIENT, "ClientEvent", 24, &client_event_cb, nullptr));
+    CHECK(table.on_event(EMF_WORLD_SERVER, "ClientEvent", 24, &client_event_cb, nullptr));  // the same name in the server world
     components_on_ready();
     events_on_ready();
     CHECK(passed_other_write);
+    CHECK(program_worlds.at("two_events") == KILN_WORLD_SERVER && program_worlds.at("cprog") == KILN_WORLD_CLIENT &&
+          program_worlds.at("cprog_def") == KILN_WORLD_CLIENT);
+    CHECK(programs.at("cprog").flags == KILN_PROGRAM_SYSTEM && programs.at("two_events").flags == (KILN_PROGRAM_SYSTEM | KILN_PROGRAM_HOST_ONLY));
+    CHECK(programs.at("cprog_def").events_in.count == 1);
+    // one relay per event type per world kind
+    CHECK(program_worlds.at("emf_evc_ClientEvent") == KILN_WORLD_CLIENT && program_worlds.at("emf_ev_ClientEvent") == KILN_WORLD_SERVER);
+    CHECK(programs.at("emf_evc_ClientEvent").flags == KILN_PROGRAM_SYSTEM);
+    programs.at("cprog").each(nullptr, nullptr, 0, programs.at("cprog").user);
+    CHECK(client_program_runs == 1);
+    const_cast<KilnApi *>(g_api)->service = api_service;
     struct ProgramQueue { uint16_t first=1; uint8_t pad[6]{}; uintptr_t blocks=0; uint32_t count=1; } qa,qb;
     alignas(8) uint8_t page_a[256]{},page_b[256]{};
     uint32_t one=11,two=22; std::memcpy(page_a+8,&one,4); std::memcpy(page_b+8,&two,4);
@@ -443,6 +688,31 @@ static void test_components(KilnWorldApi &world) {
     events_world_stopping();
     events_after_step(w, EMF_WORLD_SERVER);
     CHECK(accepts == 1); // copied old-world accepts are discarded
+    {
+        // The client world's relay: copies made in its step go to its registrations after its step, on that thread, and
+        // never to the server world's; the server world's never to the client's.
+        alignas(8) uint8_t cblock[256]{};
+        Queue cq;
+        cq.blocks = reinterpret_cast<uintptr_t>(cblock);
+        uint64_t citer = reinterpret_cast<uintptr_t>(&cq);
+        auto &relay = programs.at("emf_evc_ClientEvent");
+        relay.each(nullptr, &citer, 0, relay.user);
+        events_after_step(w, EMF_WORLD_SERVER);
+        CHECK(client_events == 0);
+        auto cw = reinterpret_cast<EmfWorld *>(worlds[2]);
+        std::thread([&] { events_after_step(cw, EMF_WORLD_CLIENT); }).join();
+        CHECK(client_events == 1 && client_event_thread != std::this_thread::get_id());  // on the thread that ran the step
+        relay.each(nullptr, &citer, 0, relay.user);
+        events_world_stopping(EMF_WORLD_CLIENT);  // the client world stops: its copies are never delivered to the next
+        events_after_step(cw, EMF_WORLD_CLIENT);
+        CHECK(client_events == 1);
+        auto &srelay = programs.at("emf_ev_ClientEvent");
+        srelay.each(nullptr, &citer, 0, srelay.user);
+        events_after_step(cw, EMF_WORLD_CLIENT);
+        CHECK(client_events == 1);
+        events_after_step(w, EMF_WORLD_SERVER);
+        CHECK(client_events == 2);
+    }
     CHECK(table.offer_remove(w, 5000));
     step();
     step();
@@ -453,6 +723,11 @@ static void test_components(KilnWorldApi &world) {
     CHECK(!table.offer_active(w, 5000));
     CHECK(!table.player_level_set(w,2,5,0));
     components_world_started();
+    // shutdown: a client-world program's handle goes to unbind_program_world, a server one's to unregister_program
+    events_shutdown();
+    CHECK(unbound.size() == 3 && unregistered.size() >= 3);
+    for (KilnHandle h : unbound) CHECK(h > 1000);
+    for (KilnHandle h : unregistered) CHECK(h < 1000);
 }
 
 // ---- v18 attributes on kiln.combat v2 ----
@@ -647,7 +922,7 @@ static void test_v40(KilnApi &api) {
         if (!slots[i] && i != offsetof(EmfApi, chat_tell_ex) / sizeof(void *) &&
             i != offsetof(EmfApi, chat_broadcast_ex) / sizeof(void *))
             ++empty;
-    CHECK(n - first == 45 && empty == 0);
+    CHECK(n - first == 52 && empty == 0);  // v28-v40: 45; v43: 1, v44: 3, v46: 3
     CHECK(!t.chat_tell_ex && !t.chat_broadcast_ex && !t.net_peer);
 
     auto *w = reinterpret_cast<EmfWorld *>(worlds[0]);
@@ -719,6 +994,18 @@ static void test_v40(KilnApi &api) {
     mo.size = sizeof mo;
     CHECK(t.enemy_move(w, &mo, [](EmfWorld *, uint32_t, uint32_t, void *) { ++v40_callbacks; }, nullptr) == 0 &&
           std::string(mo.why) == "not available on Kiln yet");
+    // v41 (EMF 0.6.10): a mod built with 0.6.11's header sends 136 bytes with stuck_seconds and EMF_MOVE_PEACEFUL_ALL;
+    // one built with 0.6.8's sends 128. Both get the same refusal with its reason, and no callback.
+    CHECK(sizeof mo == 136);
+    mo = {};
+    mo.size = sizeof mo;
+    mo.flags = EMF_MOVE_PEACEFUL | EMF_MOVE_PEACEFUL_ALL;
+    mo.stuck_seconds = 30;
+    CHECK(t.enemy_move(w, &mo, [](EmfWorld *, uint32_t, uint32_t, void *) { ++v40_callbacks; }, nullptr) == 0 &&
+          std::string(mo.why) == "not available on Kiln yet");
+    mo = {};
+    mo.size = 128;
+    CHECK(t.enemy_move(w, &mo, nullptr, nullptr) == 0 && std::string(mo.why) == "not available on Kiln yet");
     const int counted = unsupported_calls - before;
     CHECK(counted >= 42);  // every function that is not carried reported itself at least once
     rb = {};
@@ -743,6 +1030,96 @@ static void test_v40(KilnApi &api) {
     CHECK(!t.world_to_screen(10, 20, 30, &px, &py) && px == -1 && py == -1);
     render_ok = true;
     CHECK(unsupported_calls - before == counted);
+}
+
+// v43-v46 (EMF 0.6.13 and 0.6.14): seven functions Kiln does not carry yet, by the rules of v28-v40's. v45 added no
+// function (EmfBlockInfo.world, EMF_BREAK_WORLD); v46 also gave EmfMoveOrder hold_seconds (pad2's place) and the flag
+// EMF_MOVE_HOLD, which change nothing in the answer.
+static int v46_callbacks = 0;
+static void test_v46() {
+    EmfApi t{};
+    fill_v40(&t);
+    CHECK(t.player_permissions && t.break_blocks && t.block_at && t.find_wall && t.villager_move && t.villager_move_cancel &&
+          t.villager_moving);
+    auto *w = reinterpret_cast<EmfWorld *>(worlds[0]);
+    const int before = unsupported_calls, refused_before = refusals;
+    auto break_cb = [](EmfWorld *, uint32_t, const EmfBreakResult *, void *) { ++v46_callbacks; };
+    auto move_cb = [](EmfWorld *, uint32_t, uint32_t, void *) { ++v46_callbacks; };
+    const std::string not_yet = "not available on Kiln yet";
+
+    // v43: false and *perms = 0, as for an entity that is no player
+    uint32_t perms = 0x3F;
+    CHECK(!t.player_permissions(w, 7, &perms) && perms == 0);
+    CHECK(!t.player_permissions(w, 7, nullptr));
+
+    // v44: a break is refused with its reason and no callback; block_at and find_wall answer false and leave *out as
+    // it was (EMF writes it only on success): a mod built with 0.6.14's SDK keeps world = -1, "not known"
+    EmfBreakBlocks bb{};
+    bb.size = sizeof bb;
+    bb.flags = EMF_BREAK_INSTANT | EMF_BREAK_DROPS;
+    bb.x = 1, bb.y = 2, bb.z = 3, bb.radius = 2, bb.height = 1;
+    // EMF's own text, which mods compare (Night Raids 1.2.1: no wall search, raiders go for doors; GitHub #43)
+    CHECK(t.break_blocks(w, &bb, break_cb, nullptr) == 0 && bb.why == std::string("not available on this game version"));
+    // v45: the flag for the world's own blocks gets the same answer
+    bb = {};
+    bb.size = sizeof bb;
+    bb.flags = EMF_BREAK_WORLD;
+    CHECK(t.break_blocks(w, &bb, nullptr, nullptr) == 0 && bb.why == std::string("not available on this game version"));
+    EmfBlockInfo info{};
+    info.size = sizeof info;
+    info.kind = 77;
+    info.world = -1;
+    const float from[3] = {0, 0, 0}, to[3] = {10, 0, 0};
+    CHECK(!t.block_at(w, 1, 2, 3, &info) && info.size == sizeof info && info.kind == 77 && info.world == -1);
+    CHECK(!t.find_wall(w, from, to, &info) && info.size == sizeof info && info.kind == 77 && info.world == -1);
+    info.size = 40;  // a v44 mod's EmfBlockInfo, before `world`
+    CHECK(!t.block_at(w, 1, 2, 3, &info) && !t.find_wall(w, from, to, &info) && info.size == 40 && info.kind == 77);
+    CHECK(!t.block_at(w, 1, 2, 3, nullptr) && !t.find_wall(w, nullptr, nullptr, nullptr));
+
+    // v46: a villager move gets enemy_move's refusal, with hold_seconds or EMF_MOVE_HOLD too, and no callback
+    EmfPathPoint point{1, 2, 3, 0};
+    EmfMoveOrder mo{};
+    mo.size = sizeof mo;
+    mo.enemy = 9;
+    mo.count = 1;
+    mo.points = &point;
+    CHECK(t.villager_move(w, &mo, move_cb, nullptr) == 0 && mo.why == not_yet);
+    mo.why[0] = 0;
+    mo.flags = EMF_MOVE_HOLD;
+    CHECK(t.villager_move(w, &mo, move_cb, nullptr) == 0 && mo.why == not_yet);
+    mo.why[0] = 0;
+    mo.flags = 0;
+    mo.hold_seconds = 60;
+    mo.stuck_seconds = 20;
+    CHECK(t.villager_move(w, &mo, move_cb, nullptr) == 0 && mo.why == not_yet);
+    mo = {};
+    mo.size = 128;  // a mod built with EMF 0.6.8's header
+    CHECK(t.villager_move(w, &mo, nullptr, nullptr) == 0 && mo.why == not_yet);
+    CHECK(!t.villager_move_cancel(1) && t.villager_moving(w, 9) == 0);
+    // enemy_move with EMF_MOVE_HOLD (EMF: "EMF_MOVE_HOLD is for villager_move"): refused as every order on Kiln
+    mo = {};
+    mo.size = sizeof mo;
+    mo.flags = EMF_MOVE_HOLD;
+    CHECK(t.enemy_move(w, &mo, move_cb, nullptr) == 0 && mo.why == not_yet);
+    CHECK(v46_callbacks == 0 && refusals == refused_before);
+    // each of the seven reported itself (one kiln.log line per mod and function, state/emf.json "unsupported")
+    for (const char *fn : {"player_permissions", "break_blocks", "block_at", "find_wall", "villager_move",
+                           "villager_move_cancel", "villager_moving"})
+        CHECK(unsupported_fns.count(fn) == 1);
+    const int counted = unsupported_calls - before;
+    CHECK(counted >= 7);
+
+    // a request whose size is below EMF's minimum is refused untouched (no `why`), as EMF refuses it
+    bb = {};
+    bb.size = sizeof bb - 1;
+    CHECK(t.break_blocks(w, &bb, break_cb, nullptr) == 0 && bb.why[0] == 0);
+    CHECK(t.break_blocks(w, nullptr, break_cb, nullptr) == 0);
+    mo = {};
+    mo.size = 127;
+    mo.flags = EMF_MOVE_HOLD;
+    CHECK(t.villager_move(w, &mo, move_cb, nullptr) == 0 && mo.why[0] == 0);
+    CHECK(t.villager_move(w, nullptr, move_cb, nullptr) == 0);
+    CHECK(refusals == refused_before + 4 && unsupported_calls - before == counted && v46_callbacks == 0);
 }
 
 static void test_wheel_and_right_clicks(KilnUiApi &ui) {
@@ -963,6 +1340,8 @@ int main(int argc, char **argv) {
     S.world = &world;
     test_components(world);
     test_level(prog);
+    test_window_sizing(ui);
+    test_window_log(ui);
     auto d = window_def();
     CHECK(table.window_open(&d));
     active_mod = &other_mod;
@@ -1010,6 +1389,7 @@ int main(int argc, char **argv) {
     test_attributes();
     test_wheel_and_right_clicks(ui);
     test_v40(api);
+    test_v46();
     windows_shutdown();
     CHECK(live_images == 0);
     std::printf("glue_test: %d checks, %d failures\n", checks, failures);

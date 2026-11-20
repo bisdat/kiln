@@ -469,6 +469,12 @@ void lookups(const TypeDb& db, const Bytes& raw, const json& names, const std::s
                 same = got[i]->machine == w["machine"].get<std::string>() && got[i]->name == w["name"].get<std::string>() && got[i]->kind == w["kind"].get<std::string>() &&
                        got[i]->ids == ids;
             }
+            for (const auto* state : got)
+                for (uint32_t id : state->ids) {
+                    char raw[11]; std::snprintf(raw, sizeof raw, "0x%08x", id);
+                    const auto by_id = gs.find(raw);
+                    if (std::find(by_id.begin(), by_id.end(), state) == by_id.end()) same = false;
+                }
             if (!same && ++bad <= 5) std::printf("  lookup %s: %zu found, want %zu\n", k["name"].get<std::string>().c_str(), got.size(), k["states"].size());
         }
         check("lookup on " + label + ": " + std::to_string(names.size()) + " names give the machine, kind and ids the merge's rules give", bad == 0);

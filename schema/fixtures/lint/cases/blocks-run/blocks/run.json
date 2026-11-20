@@ -1,0 +1,12 @@
+{
+  "format": 1,
+  "effects": {
+    "good": { "run": "fixture-blocks-run.OnHit", "damage": { "fire": 5 } },
+    "noDamage": { "run": "fixture-blocks-run.OnHit", "heal": 2 },
+    "badName": { "run": "fixture-blocks-run.Odd", "damage": { "ice": 1 } },
+    "optional": { "run": "fixture-blocks-run.Soft", "heal": 1 },
+    "otherMod": { "run": "other-mod.Anything", "heal": 1 },
+    "later": { "run": "fixture-blocks-run.Later", "heal": 1 },
+    "miscount": { "run": "fixture-blocks-run.Miscount", "heal": 1 }
+  }
+}

@@ -100,6 +100,10 @@ public sealed class CheckMod : Mod
         DuringBody = null;
     }
 
+    [ClientCheck("t.transition-fail", "A required failed assertion")]
+    public async Task TransitionFail(CheckContext c) { c.Expect(false,"required proof"); await c.Verdict(); }
+    [ClientCheck("t.transition-pass", "Required assertions hold")]
+    public async Task TransitionPass(CheckContext c) { c.Expect(true,"required proof"); await c.Verdict(); }
     [ClientCheck("t.pass", "Passes on its assertions", Area = "Basics", Since = "0.2.0-test", Order = 1)]
     public async Task Pass(CheckContext c)
     {
@@ -118,6 +122,16 @@ public sealed class CheckMod : Mod
         c.Instruct("second");
         await c.Verdict();
     }
+
+    [ClientCheck("t.selfskip", "Skips itself", Area = "Skips")]
+    public async Task SelfSkip(CheckContext c)
+    {
+        c.Instruct("Nothing to judge here.");
+        var v = await c.Skip("the capability under test is still held");
+        c.Expect(v == ClientCheckVerdict.Skip, "the verdict is skip");
+        SelfSkipLater = await c.Verdict();
+    }
+    public static ClientCheckVerdict? SelfSkipLater;
 
     [ClientCheck("t.noask", "Returns without asking", Area = "Basics", Order = 3)]
     public Task NoAsk(CheckContext c)

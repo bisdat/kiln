@@ -72,7 +72,8 @@ public sealed class ChatMessage
     public string Text { get; }
 
     /// <summary>The text starts with <see cref="Commands.Prefix"/>: after the handlers it goes to the command
-    /// registry (and is not broadcast) unless a handler cancels it.</summary>
+    /// registry (and is not broadcast) unless a handler cancels it. A line naming no Kiln command goes on to the game
+    /// untouched (<see cref="Commands.UnknownCommands"/>).</summary>
     public bool IsCommand { get; }
 
     /// <summary>Set to true to drop the line: nobody sees it, not even the sender, and no command runs.</summary>
@@ -468,7 +469,8 @@ public static unsafe partial class Chat
         if (ev.Canceled) return true;
         if (!ev.TextChanged) return message.IsCommand && Commands.RunFromChat(message);
         var text = ev.Text ?? "";
-        if (message.IsCommand && Commands.IsCommandLine(text)) return Commands.RunFromChat(message, text);
+        // rewritten to an unknown command that passes through: the rewritten line is said below, like any rewrite
+        if (message.IsCommand && Commands.IsCommandLine(text) && !Commands.PassesThrough(text)) return Commands.RunFromChat(message, text);
         if (text.Trim().Length == 0) return true;  // rewritten to nothing: drop it
         if (!message.Sender.IsNone && Available)
         {

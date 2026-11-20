@@ -14,12 +14,13 @@ One per native mod folder (library/native/<id>/<version>+<hash8>/, kiln/native/<
 |---|---|---|---|
 | `$schema` | string |  |  |
 | `after` | `common.schema.json ids` |  | Native mods to load before this one, when present (ordering only). |
+| `asi` | array |  | (since 0.2.0-dev.29.4, written by the Library for an Ultimate ASI Loader package) .asi plugins in the folder. Such a mod is placed in the game folder at profile activation and never loaded by kiln-core, so dlls may be empty (it names Ultimate ASI Loader when the package brings it). docs/kiln/engines.md, "Files in the game folder". min items 1 |
 | `authors` | string or array of string |  |  |
 | `before` | `common.schema.json ids` |  | Native mods to load after this one, when present. |
 | `builds` | array of `common.schema.json sha256` |  | Game exe sha256s the mod was made for. When given and the running exe is not listed, the mod still loads with a warning (status note 'untested build'). |
 | `clients` | `common.schema.json clients` |  | Default from side: server -> none, client/both -> mod. |
 | `description` | string |  |  |
-| `dlls` | array | yes | DLLs in the folder (subfolders allowed), loaded in this order. min items 1 |
+| `dlls` | array | yes | DLLs in the folder (subfolders allowed), loaded in this order. At least one, except with asi. |
 | `enabled` | boolean |  | Default state; <configDir>/native.json and the profile entry override it. Default `true`. |
 | `format` | `1` |  | Default `1`. |
 | `id` | `common.schema.json modId` | yes |  |
@@ -31,6 +32,7 @@ One per native mod folder (library/native/<id>/<version>+<hash8>/, kiln/native/<
 | `phase` | `"early"` \| `"boot"` \| `"world"` \| `"dllmain"` |  | kiln_native.h: early (start of kiln_boot, also in safe idle), boot (after Kiln plugins, no hooks needed), world (first world step, needs hooks), dllmain (loaded by the proxy in DllMain; chain.ini [profile]). Default `"early"`. |
 | `requires` | `common.schema.json ids` |  | Native mods that must be present and load first; else this one fails. |
 | `side` | `common.schema.json side` |  | Where it loads. Default client (most DLL mods are client mods; a hosting client runs the world). Default `"client"`. |
+| `updates` | object \| null |  | Where new versions of the mod are published, for the launcher's and `kiln updates check`'s update notice (a notice and a link: Kiln never downloads or installs a version by itself). A tagged union by provider; each provider takes only its own properties. Never a reason to refuse a mod: a value Kiln can't read is ignored with a warning (KL103), and a provider this Kiln does not know means "update checks unsupported". Docs: docs/kiln/modding/manifest.md, "updates". Kiln warns (not refused). |
 | `url` | string |  |  |
 | `version` | `common.schema.json semver` | yes |  |
 

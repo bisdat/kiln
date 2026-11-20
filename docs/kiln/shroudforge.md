@@ -16,12 +16,19 @@ are, and with one switch Kiln can run your own ShroudForge copy instead of the b
    existing in-process menu, not a second window; no separate ShroudForge installation is needed. The Kiln Launcher
    and `mods/<mod>/extended.mod.json` edit the same settings. The panel says which changes need a game restart.
    Runtime-only mods normally accept changes within a second or two; startup patches and their switches need a restart.
-   If the mod is in a Kiln profile, also change its enabled switch in the launcher profile to keep it across launches.
+   If the mod is in a Kiln profile, also change its enabled switch in the launcher profile to keep it across launches:
+   the launcher sets that switch from the profile at every activation. Settings you change on the panel stay: they are
+   in the copy ShroudForge runs (the panel's FOLDER line names it, `<mods>/<mod>/`), and profile updates keep them, a
+   new version of the mod too. Before 0.2.0-dev.29.18, in Copy path mode (a Steam Deck with the game on an SD card, say)
+   the panel changed a second copy under `kiln/profiles/<profile>/shroudforge/` that ShroudForge never read; the next
+   activation keeps such a changed copy in `kiln/backups/` and says so in its notes.
 4. To run your installed ShroudForge instead of Kiln's copy, switch on **Settings → Kiln (kiln.json) → ShroudForge mods
    → "Use my installed ShroudForge"** in the launcher (in the file: `"shroudforge": {"useInstalled": true}`), then
    restart the game. If your copy is missing or broken, Kiln uses its own and says so in `kiln.log`.
 5. Start the game or the server through Kiln. `kiln/logs/kiln.log` names the runtime that runs
-   (`ShroudForge runtime: bundled 1.7.9 ...` or `installed ...`) and shows ShroudForge's log as `[sf] ...` lines.
+   (`ShroudForge runtime: bundled 1.7.9 ...` or `installed ...`) and shows ShroudForge's log as `[sf] ...` lines, with
+   ShroudForge's own errors and warnings as kiln.log errors and warnings (0.2.0-dev.29.18; before, every `[sf]` line was
+   logged as info, and the support report's count of errors left them out).
    `kiln/state/shroudforge.json` says how ShroudForge ran:
    - `hosted` (with `source` bundled or installed);
    - `self-hosted`: ShroudForge started itself through its own `dbghelp.dll`, next to Kiln;
@@ -59,6 +66,16 @@ Notes:
     this fault. Take `dbghelp=n,b` and `winmm=n,b` out of the launch options and keep `dinput8=n,b`: Kiln then runs the
     ShroudForge mods of your profile itself. From 0.2.0-dev.27 the launcher says this when it happens: on the Deck's Home, in the
     engine list (Mods > Engines) and in the support report ([shroudforge-compat.md](shroudforge-compat.md#57-shroudforges-own-loader-under-wine-and-proton)).
+- **One startup mod that fails no longer costs the others** (0.2.0-dev.29.18). ShroudForge writes its startup mods
+  into the game data in one pass before the game starts. When that pass fails in one mod's own code (its own check,
+  say, because another mod changed the same game data), the ShroudForge that comes with Kiln puts the game data back and
+  runs the pass once more without that mod (and without the mods that need it): the other mods load. kiln.log has the
+  `[sf]` line `ShroudForge: <mod> failed in the pregame pass (<error>); started the game without it, the other N mods
+  loaded`, and the launcher's engine list (Mods > Engines), the Deck's Home and the support report warn with the mod's
+  name, its error, and to turn it off or look for a clash with another mod. The pass runs again only once; failures that
+  are not one mod's (access denied, `os error`, the game's files, the baseline backups) are not retried, and when the
+  second pass fails too the game starts without the startup mods, as before. Details:
+  [shroudforge-compat.md](shroudforge-compat.md#50-the-fork-frostdev-opsshroudforge-branch-kiln-kiln-submodule-third_partyshroudforge).
 - **Updates:** the bundled runtime updates with Kiln. While Kiln hosts your installed copy, ShroudForge does not update
   itself at game start, so its updater cannot replace Kiln's `dinput8.dll`. To update your own ShroudForge, run its
   updater (`shroudforge/shroudforge.exe`) with the game closed. If it puts its own `dinput8.dll` back, reinstall Kiln
@@ -67,6 +84,10 @@ Notes:
   original SF proxy comes back byte-for-byte; installing twice or updating Kiln keeps the first backup. Reinstalling Kiln also recovers missing
   `dbghelp.dll` / `winmm.dll` from older switch-from-ShroudForge receipts, after checking their hashes. A newer helper
   or proxy you installed yourself is kept instead, with the original backup's recovery path in the result.
+- **A ShroudForge mod with a `native-plugin.ini`** (Unified Tweaks): ShroudForge's own DLL loader loads the DLL it
+  names, so the Mods page lists the mod once, under ShroudForge (0.2.0-dev.29.18; before, also under XHL as "Not
+  loaded"). An XHL-Core plugin (an EML mod with that file and no ShroudForge `extended.mod.json` of its own, or only
+  the EML switch `"launcher": "EML"`) stays under XHL.
 - **Profile copies:** activation never changes switches or settings in a mod folder you installed yourself. It only
   changes Kiln's own copies. Deactivating a profile or uninstalling removes unchanged copies from SF's mods folder.
   Edited settings, extra files, changed code and old receipts without exact settings proof are kept in place; the

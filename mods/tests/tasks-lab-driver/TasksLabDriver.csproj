@@ -1,0 +1,22 @@
+<Project>
+  <!-- Reloads tasks-lab-test while its resident tasks run (one ignoring its cancel for 3 s) and checks the reload: the
+       tick never waits for the tasks, the waiting task unwinds, the ignoring one is reported once, and the mod loads
+       again. PASS / FAIL lines in kiln.log. Run: mods/tests/tasks-lab-test/run.sh <lab>. -->
+  <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.props" />
+  <PropertyGroup>
+    <AssemblyName>TasksLabDriver</AssemblyName>
+    <KilnModId>tasks-lab-driver</KilnModId>
+    <KilnModName>Kiln tasks lab driver</KilnModName>
+    <Version>0.1.0</Version>
+    <Description>Reloads tasks-lab-test with tasks in flight: PASS/FAIL lines.</Description>
+    <KilnSide>server</KilnSide>
+    <KilnServices>Client</KilnServices>
+    <KilnGameIds>None</KilnGameIds>
+  </PropertyGroup>
+  <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.targets" />
+  <Target Name="_TasksLabDriverSharedOut" AfterTargets="_KilnModFiles">
+    <ItemGroup>
+      <_KilnModFile Remove="$(OutDir)Kiln.*" />
+    </ItemGroup>
+  </Target>
+</Project>

@@ -13,6 +13,9 @@ namespace kitems {
 
 // A ticket from the service's one counter (items.cpp), so cancel() can tell every kind of request apart.
 uint64_t items_next_ticket();
+// A move that another program of the service ran (kiln.stations' collect): kiln.items' move and commit counters, as
+// its own moves count. moved: committed with items moved; otherwise a rollback.
+void items_count_move(bool moved);
 
 // on_ready: registers kiln_items_equip through kiln.world. Without kiln.world (w null) or without feature items.equip
 // equip stays off and equip_status says why.
@@ -27,5 +30,14 @@ KilnResult equip_submit(KilnOwner owner, const KilnItemsEquipRequest* r, KilnIte
 KilnResult equip_status(KilnItemsEquipStatus* out);
 bool equip_cancel(uint64_t ticket);    // drops the callback; false: not an equip ticket
 void equip_cancel_owner(KilnOwner owner);
+
+// v6: equipment sets (the queue lives with the program's, under the same lock)
+KilnResult equip_set_submit(KilnOwner owner, const KilnSetRequestV1* r, KilnSetDoneV1 done, void* user, uint64_t* ticket);
+KilnResult equip_set_cancel(uint64_t ticket);
+
+struct Access;
+// The setup block of an equip transaction as the game's equipment_actions builds it (s: kSetupBlock bytes). A set's
+// transaction uses the same (setexec.cpp).
+void equip_setup_block(const Access& a, KilnEntity player, bool dry, uint8_t* s);
 
 }  // namespace kitems

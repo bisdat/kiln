@@ -94,6 +94,12 @@ public sealed class FakeSlot
     /// <summary>Gear: its rarity; null for a stack and an empty slot.</summary>
     public ItemRarity? Rarity { get; }
 
+    /// <summary>Gear: the item as one particular item, with the stamp the kit's kiln.items gave its item entity (what
+    /// <see cref="global::Kiln.InventorySlot.Ref"/> and a give result's <c>Ref</c> carry): pass it to
+    /// <see cref="global::Kiln.Items.GearOf"/>, <see cref="global::Kiln.Items.SetRarity"/> and
+    /// <see cref="HarnessItems.SetGear"/>. <see cref="ItemInstanceRef.None"/> for a stack and an empty slot.</summary>
+    public ItemInstanceRef Ref { get; internal init; }
+
     /// <summary>The slot is empty.</summary>
     public bool IsEmpty => Count == 0;
 
@@ -125,7 +131,10 @@ public sealed class FakeInventory
     {
         lock (Fake.Lock)
             return (IReadOnlyList<FakeSlot>)[.. _inv.Slots.Select((s, i) => new FakeSlot(new SlotId(_inv.SlotId(i)), s.Count > 0 ? new ItemId(s.Item) : ItemId.None,
-                s.Count, new EntityId(s.Pide), s.Level, s.Count > 0 && s.Pide != 0 ? (ItemRarity)s.Rarity : null))];
+                s.Count, new EntityId(s.Pide), s.Level, s.Count > 0 && s.Pide != 0 ? (ItemRarity)s.Rarity : null)
+            {
+                Ref = s.Count > 0 && s.Pide != 0 ? HarnessItems.RefOf(s.Pide, s.Item, Fake.StampOf(s.Pide)) : ItemInstanceRef.None,
+            })];
     });
 
     /// <summary>How many of <paramref name="item"/> the inventory holds.</summary>
@@ -172,10 +181,23 @@ public sealed class FakeInventory
 /// and destroys gear's item entity; a dry run changes nothing. A mod that unloads before its request ran leaves it to run
 /// (Kiln.Items cancels only the answer, as kiln.items does). Give and take need the service's program, which runs from the
 /// first step (<c>items.program</c>; switched off, they are refused).</para>
+/// <para><b>Gear</b> (kiln.items v8, <c>items.gear</c>; Kiln.Items' rows <c>items.gear.read</c>, <c>items.gear.write</c>,
+/// <c>items.gear.durability</c>): every piece of gear the fake creates has the components a gear write reads and writes:
+/// enhancement slots (rarity + 1, when the type has a perk in that slot: <see cref="SetPerkSlots"/>, all five unless the
+/// test says), none unlocked, its level, a durability of 100, and a stamp, so <see cref="FakeSlot.Ref"/>, a slot's
+/// <c>Ref</c> in <see cref="global::Kiln.Items.Read"/> and a give result's <c>Ref</c> name it. <see cref="global::Kiln.Items.GearOf"/>,
+/// <c>SetRarity</c>, <c>SetEnhancements</c> and <c>SetLevel</c> run Kiln.Items' own code on it with kiln.items' rules (a write at
+/// the start of the next step, its task then; the shown rarity and level one step later), and the gear events are
+/// Kiln.Items' (the game's own change: <see cref="SetGear"/>, seen by Kiln.Items' read of the players' items). Max durability
+/// is not computed again after a change (the kit has no balancing table) and nothing is equipped. Upgrades
+/// (&lt;c&gt;items.gear.upgrade&lt;/c&gt;): &lt;see cref="global::Kiln.Items.UpgradeRarity(EntityId, ItemInstanceRef, RarityUpgradeRule, UpgradeOptions?)"/&gt;
+/// runs Kiln.Items' own code; the fake takes the cost from the payers' plain stacks and makes the write in the same step, all
+/// or nothing, with kiln.items' rules (&lt;see cref="SetUpgradeRolls"/&gt; names the rolls).</para>
 /// <para><b>Not modelled</b> (they report offline): water (<c>items.fuel</c>), moves between inventories
-/// (<c>items.move</c>: the v3 table is not there), container names, transfer hooks, item instances, equip and unequip,
-/// recipe results, upgrades and gem slots at creation; the game's player inventory layout (action bars, equipment, the
-/// backpack's size), the "+N" popup, and saving inventories with the world.</para>
+/// (<c>items.move</c>: the v3 functions are not there), container names, transfer hooks, item instances (locations,
+/// save-record fields, <c>Items.Held</c>), equip and unequip, recipe results, upgrades and gem slots at creation; the
+/// game's player inventory layout (action bars, equipment, the backpack's size), the "+N" popup, and saving inventories
+/// with the world.</para>
 /// </remarks>
 public sealed class HarnessItems
 {
@@ -240,4 +262,64 @@ public sealed class HarnessItems
 
     /// <summary>Every give and take a mod asked for, in the order they ran, with what became of each.</summary>
     public IReadOnlyList<FakeItemsCall> Calls => _harness.Run(() => Fake.Calls);
+
+    /// <summary>Says how many of a gear item's five perk slots its type fills (its last filled one + 1; default 5): gear made
+    /// afterwards gets its first enhancement slots only up to that, and a rarity past it is refused
+    /// (<see cref="GearStatus.NoSlot"/>) unless the write allows an empty slot. 0: no enhancement slots at all (a tool).</summary>
+    /// <exception cref="ArgumentException">The game has no such item, or it is no gear.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="slots"/> is outside 0..5.</exception>
+    public void SetPerkSlots(ItemId item, int slots)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(slots);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(slots, 5);
+        _harness.Run(() =>
+        {
+            var info = Fake.Item(item.Value) ?? throw new ArgumentException($"the game has no item {item}", nameof(item));
+            if (!info.Gear) throw new ArgumentException($"{info.Name} is no gear", nameof(item));
+            info.PerkSlots = slots;
+        });
+    }
+
+    /// <summary>Changes a piece of gear as if the game had: a player's unlock at the workbench (<paramref name="unlocked"/>,
+    /// with <paramref name="level"/> one higher), the game's free +1 / -1, wear (<paramref name="durability"/>). No write of
+    /// Kiln's and no event of its own: Kiln.Items' read of the players' items sees it (<see cref="GearChangeSource.Game"/>).
+    /// Null leaves a value as it is.</summary>
+    /// <param name="item">The item (<see cref="FakeSlot.Ref"/>).</param>
+    /// <param name="enhancements">Its enhancement slots, 0 to 5 (the rarity + 1).</param>
+    /// <param name="unlocked">Unlocked ones, up to its slots.</param>
+    /// <param name="level">Its level, 1 to 255 (the game moves it with the unlocked count: say both).</param>
+    /// <param name="durability">Its current durability (clamped to its max).</param>
+    /// <exception cref="ArgumentException">The ref names no gear of the fake (gone, or another item now).</exception>
+    /// <exception cref="ArgumentOutOfRangeException">A value outside its range.</exception>
+    public void SetGear(ItemInstanceRef item, int? enhancements = null, int? unlocked = null, int? level = null, int? durability = null)
+    {
+        if (item.IsNone) throw new ArgumentException("no item", nameof(item));
+        _harness.Run(() => Fake.SetGear(item.Entity.Id.Value, (uint)(item.Entity.Serial & IdentitySources.MaxStampValue), enhancements, unlocked, level, durability));
+    }
+
+    /// <summary>Names the rolls of the upgrades that follow (<see cref="global::Kiln.Items.UpgradeRarity(EntityId, ItemInstanceRef, RarityUpgradeRule, UpgradeOptions?)"/>),
+    /// in order, each 0 (inclusive) to 1 (exclusive): a roll below the step's chance succeeds. Only a chance between 0 and 1
+    /// takes a roll (and <see cref="SocketRule.GameChance"/>'s socket roll after a success). No rolls: the server's random
+    /// numbers again. An upgrade that needs a roll after the named ones are used throws.</summary>
+    /// <exception cref="ArgumentOutOfRangeException">A roll outside 0 (inclusive) to 1 (exclusive).</exception>
+    public void SetUpgradeRolls(params double[] rolls)
+    {
+        ArgumentNullException.ThrowIfNull(rolls);
+        foreach (var r in rolls)
+            if (!(r >= 0 && r < 1)) throw new ArgumentOutOfRangeException(nameof(rolls), r, "a roll is 0 (inclusive) to 1 (exclusive)");
+        if (rolls.Length == 0)
+        {
+            ItemUpgrades.Roller = null;
+            return;
+        }
+        var queue = new Queue<double>(rolls);
+        ItemUpgrades.Roller = () => queue.Count > 0 ? queue.Dequeue()
+            : throw new InvalidOperationException($"the test named {rolls.Length} upgrade roll(s) and an upgrade needed another (HarnessItems.SetUpgradeRolls)");
+    }
+
+    /// <summary>The ref of a gear item entity with its stamp (none without one), as Kiln.Items builds it.</summary>
+    internal static ItemInstanceRef RefOf(uint pide, uint item, uint stamp) =>
+        pide == 0 || stamp == 0
+            ? ItemInstanceRef.None
+            : new ItemInstanceRef(new EntityRef(new EntityId(pide), IdentitySources.Stamp(EntitySourceOrder.Items, stamp)), new ItemId(item));
 }

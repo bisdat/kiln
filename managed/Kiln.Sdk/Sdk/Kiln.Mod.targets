@@ -11,15 +11,24 @@
       KilnSide           server (default) | client | both
       KilnClients        what joining players need: none | kiln | mod (default from the side: server none, else mod)
       KilnEntryType      full name of the Mod subclass (default: the only public one)
+      KilnBoot           true | required: the mod has boot content (Mod.OnBoot; "boot" in kiln.mod.json); required: a failure of
+                         it stops the start (default: none)
       KilnAdvanced       true: opt into the advanced tier (hooks, symbols)
       KilnFeatures       ;-list of required Kiln features (Game.HasFeature), e.g. tick;log.mirror
       KilnExports        ;-list of assembly file names other mods compile against (e.g. MyMod.Api.dll)
       KilnServices       ;-list of Kiln service assemblies to reference: Players;Chat;World;Items;Spawn;Time;Settings;...
-                         plus Testing (Kiln.Testing, for [KilnTest] methods) and Game (Kiln.Game, the game's ECS types
+                         (';', ',', spaces or one name per line; Stations, Testing, Game and Blocks' defaults in any case)
+                         plus Stations (the production stations and bases, Stations and Bases: Kiln.Blocks' assembly without
+                         Blocks' defaults, since 0.2.0-dev.29.15), Testing (Kiln.Testing, for [KilnTest] methods) and Game (Kiln.Game, the game's ECS types
                          generated from its reflection: Kiln.Ecs.*; the build then writes kiln.gametypes.json,
                          Kiln.GameTypes.targets)
       KilnTestsAutoRun   true: run the mod's [KilnTest] methods when the server has started
       KilnTestTimeoutSeconds
+      KilnUpdatesRepository  owner/repo on GitHub where releases of the mod are published: writes "updates" (manifest.md).
+                         With it: KilnUpdatesTagPattern (default v{version}), KilnUpdatesAsset (e.g. my-mod-{version}.zip),
+                         KilnUpdatesChannel (stable | prerelease)
+      KilnUpdatesNexusModId, KilnUpdatesNexusFileChainId  the same for one file of a Nexus Mods page
+      KilnUpdatesProvider    github | nexus (default: from which of the two is set)
       KilnServer         a server folder (with enshrouded_server.exe) for KilnDeploy, or KilnModsDir (its kiln/mods)
       KilnReload         true: KilnDeploy also asks the running server to hot-reload the mod (kiln/control)
       KilnPackageOutputPath  where KilnPack writes <id>-<version>.zip (default: next to the output folder)
@@ -44,17 +53,22 @@
     <!-- Blocks make new items, spells and statuses, which a player's game must know: run on both sides. What clients need follows from
          the blocks (the manifest task reads it from the built assembly); a mod with blocks only in data files gets "kiln". Set either
          property to say otherwise. -->
-    <KilnSide Condition="'$(KilnSide)' == '' and $(KilnServices.Contains('Blocks'))">both</KilnSide>
-    <_KilnClientsFallback Condition="$(KilnServices.Contains('Blocks'))">kiln</_KilnClientsFallback>
+    <!-- KilnServices as one ';' list (separated by ';', ',', spaces or line breaks) and its lower-case keys: the name checks below
+         read the keys, so "stations", "Stations" and one name per line mean the same -->
+    <_KilnServiceList>;$([System.Text.RegularExpressions.Regex]::Replace('$(KilnServices)', '[\s,;]+', ';'));</_KilnServiceList>
+    <_KilnServiceKeys>$(_KilnServiceList.ToLowerInvariant())</_KilnServiceKeys>
+    <!-- the assemblies to reference: the list without Testing and Stations (no assembly of their own; see the items below) -->
+    <_KilnServiceRefs>$([System.Text.RegularExpressions.Regex]::Replace('$(_KilnServiceList)', '(?i);(stations|testing)(?=;)', ''))</_KilnServiceRefs>
+    <KilnSide Condition="'$(KilnSide)' == '' and $(_KilnServiceKeys.Contains(';blocks;'))">both</KilnSide>
+    <_KilnClientsFallback Condition="$(_KilnServiceKeys.Contains(';blocks;'))">kiln</_KilnClientsFallback>
     <KilnSide Condition="'$(KilnSide)' == ''">server</KilnSide>
     <KilnAdvanced Condition="'$(KilnAdvanced)' == ''">false</KilnAdvanced>
     <KilnManifestSource Condition="'$(KilnManifestSource)' == ''">$(MSBuildProjectDirectory)/kiln.mod.json</KilnManifestSource>
     <KilnPackageOutputPath Condition="'$(KilnPackageOutputPath)' == ''">$([MSBuild]::NormalizeDirectory('$(OutDir)', '..'))</KilnPackageOutputPath>
     <!-- Microsoft.NET.Sdk defaults Authors to the assembly name: not an author. -->
     <_KilnAuthors Condition="'$(Authors)' != '$(AssemblyName)'">$(Authors)</_KilnAuthors>
-    <_KilnServiceList>;$(KilnServices.Replace(' ', '').Replace(',', ';'));</_KilnServiceList>
-    <_KilnWantsTesting>$(_KilnServiceList.Contains(';Testing;'))</_KilnWantsTesting>
-    <_KilnWantsGame>$(_KilnServiceList.Contains(';Game;'))</_KilnWantsGame>
+    <_KilnWantsTesting>$(_KilnServiceKeys.Contains(';testing;'))</_KilnWantsTesting>
+    <_KilnWantsGame>$(_KilnServiceKeys.Contains(';game;'))</_KilnWantsGame>
     <!-- The build task: from the package, or (repository mode) built by the Kiln.Sdk project reference into a fixed
          folder and run out of process, so a rebuilt task is never stale in a reused MSBuild node. -->
     <_KilnTasksDir Condition="'$(KilnRepoMode)' != 'true'">$(MSBuildThisFileDirectory)../tasks/net10.0/</_KilnTasksDir>
@@ -83,11 +97,18 @@
 
   <ItemGroup>
     <!-- Unescape: a property function's result is escaped, so its ';' would not split the list. -->
-    <_KilnService Include="$([MSBuild]::Unescape($(KilnServices.Replace(',', ';'))))" Exclude="Testing" />
+    <_KilnService Include="$([MSBuild]::Unescape($(_KilnServiceRefs)))" />
+    <!-- Stations: Stations and Bases live in Kiln.Blocks' assembly but make nothing a player's game must know, so this name
+         references Kiln.Blocks without the defaults that listing Blocks sets above (side both, clients kiln): a server does not
+         refuse players without Kiln for a mod that only automates stations. Blocks content (Blocks.Define, blocks/*.json)
+         still asks for what it needs through the build's own check. -->
+    <_KilnService Include="Blocks" Condition="$(_KilnServiceKeys.Contains(';stations;')) and !$(_KilnServiceKeys.Contains(';blocks;'))" />
     <!-- Game is not under managed/services in the repository (managed/Kiln.Game); in the package it is kiln/lib like the rest -->
     <_KilnRepoService Include="@(_KilnService)" Exclude="Game" />
-    <!-- Kiln.Game compiles against Kiln.World: a direct, compile-only reference, so the transitive one is not copied -->
-    <_KilnRepoService Include="World" Condition="'$(_KilnWantsGame)' == 'true' and !$(_KilnServiceList.Contains(';World;'))" />
+    <!-- Kiln.Game compiles against Kiln.World and Kiln.Systems (its typed program views): direct, compile-only
+         references, so the transitive ones are not copied -->
+    <_KilnRepoService Include="World" Condition="'$(_KilnWantsGame)' == 'true' and !$(_KilnServiceKeys.Contains(';world;'))" />
+    <_KilnRepoService Include="Systems" Condition="'$(_KilnWantsGame)' == 'true' and !$(_KilnServiceKeys.Contains(';systems;'))" />
   </ItemGroup>
 
   <!-- Kiln.Api and the services come from kiln/host at run time: compile against them, never ship them. -->
@@ -145,10 +166,12 @@
     <KilnManifest Source="$(KilnManifestSource)" Output="$(IntermediateOutputPath)kiln.mod.json"
                   Id="$(KilnModId)" Name="$(KilnModName)" Version="$(Version)" ApiVersion="$(KilnApiVersion)" Side="$(KilnSide)" Clients="$(KilnClients)" ClientsFallback="$(_KilnClientsFallback)" AssemblyPath="$(TargetPath)" BlocksDirectory="$(MSBuildProjectDirectory)/blocks"
                   Authors="$(_KilnAuthors)" Description="$(Description)" License="$(PackageLicenseExpression)" Url="$(PackageProjectUrl)"
-                  EntryAssembly="$(TargetFileName)" EntryType="$(KilnEntryType)" Advanced="$(KilnAdvanced)"
+                  EntryAssembly="$(TargetFileName)" EntryType="$(KilnEntryType)" Boot="$(KilnBoot)" Advanced="$(KilnAdvanced)"
                   Features="$(KilnFeatures)" Exports="$(KilnExports)" Dependencies="@(KilnDependency)"
                   LoadBefore="@(KilnLoadBefore)" LoadAfter="@(KilnLoadAfter)" Incompatible="@(KilnIncompatible)"
                   TestsAutoRun="$(KilnTestsAutoRun)" TestTimeoutSeconds="$(KilnTestTimeoutSeconds)"
+                  UpdatesProvider="$(KilnUpdatesProvider)" UpdatesRepository="$(KilnUpdatesRepository)" UpdatesTagPattern="$(KilnUpdatesTagPattern)" UpdatesAsset="$(KilnUpdatesAsset)" UpdatesChannel="$(KilnUpdatesChannel)"
+                  UpdatesNexusModId="$(KilnUpdatesNexusModId)" UpdatesNexusFileChainId="$(KilnUpdatesNexusFileChainId)"
                   KilnApiPath="@(ReferencePath->WithMetadataValue('Filename','Kiln.Api'))">
       <Output TaskParameter="ModId" PropertyName="KilnResolvedModId" />
       <Output TaskParameter="ModVersion" PropertyName="KilnResolvedModVersion" />
@@ -170,6 +193,16 @@
       <_KilnWritesGame Include="@(ReferencePath->WithMetadataValue('Filename','Kiln.Game'))" />
     </ItemGroup>
     <KilnWrites AssemblyPath="$(TargetPath)" GameReference="@(_KilnWritesGame->'%(FullPath)')" ManifestPath="$(OutDir)kiln.mod.json" />
+  </Target>
+
+  <!-- kiln.programs.json in the output: one entry per [Query] struct of the mod's code (Kiln.Systems' Systems.Define), so
+       kiln.world reserves the mod's own programs before the world starts (docs/kiln/services/systems.md, "Programs of your
+       own"). The entries of the project's own kiln.programs.json stay. KilnPrograms=false turns it off. Error KILN036: a
+       [Query] kiln.world cannot reserve; error KILN031: an unreadable input. -->
+  <UsingTask TaskName="Kiln.Sdk.KilnPrograms" AssemblyFile="$(_KilnTasksDir)Kiln.Sdk.Tasks.dll" Condition="'$(KilnRepoMode)' != 'true'" />
+  <UsingTask TaskName="Kiln.Sdk.KilnPrograms" AssemblyFile="$(_KilnTasksDir)Kiln.Sdk.Tasks.dll" TaskFactory="TaskHostFactory" Condition="'$(KilnRepoMode)' == 'true'" />
+  <Target Name="KilnPrograms" AfterTargets="KilnManifest" Condition="'$(KilnManifest)' != 'false' and '$(KilnPrograms)' != 'false'">
+    <KilnPrograms AssemblyPath="$(TargetPath)" ProgramsPath="$(OutDir)kiln.programs.json" SourcePath="$(MSBuildProjectDirectory)/kiln.programs.json" />
   </Target>
 
   <!-- The files of the mod folder: the output folder without what kiln/host provides or the loader ignores. -->

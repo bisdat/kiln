@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "state-content-refused.schema.json",
+  "title": "A start stopped because the mods' native quests and NPCs could not be built (<game>/kiln/state/content-refused.json), format 1",
+  "description": "Written by kiln.knowledge (0.2.0-dev.29) when the WHOLE build of the mods' native quests, knowledge and NPCs failed, so that nothing of it is served, while at least one enabled mod ships such content: reading the mods' files failed in a way that is no one mod's, the build threw, the shared resources did not build, kiln.assets refused the built pack or is not there, or the hook on the game's resource start is not there. One mod's own errors never write it, a file of its own that throws when read included (that mod is loaded without its content). Written before the log line, before kiln.boot's stop writes boot.json and progress.json, and before any message box, so a reader has the reason even when the player ends the game while the message is open. The process then ends with exitCode. The next start of Kiln moves the file to content-refused.last.json (a reader of the last stop reads that one). A stale file is told by pid and utc. docs/kiln/launcher/contracts.md, docs/kiln/services/npcs.md.",
+  "type": "object",
+  "required": ["format", "refused", "why", "mods", "side", "exitCode", "unixExitStatus", "restart", "advice", "bootStop", "pid", "utc"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "format": { "const": 1 },
+    "refused": { "const": true },
+    "why": { "type": "string", "minLength": 1, "description": "What failed, word for word, for example \"the build of the mods' native quests failed: <the error>\", \"the mods' native quests are not served: <why the shared resources did not build>\", \"kiln.assets refused the built GameKnowledgeResource\" or \"the hook on the game's resource start (assets/ResourceInit) could not be installed (<why>)\". Show it to the player." },
+    "mods": { "type": "array", "items": { "type": "string" }, "description": "The mods whose native quests, knowledge or NPCs were not served (ids): the ones to remove or update." },
+    "side": { "enum": ["client", "server"] },
+    "exitCode": { "const": 19203, "description": "0x4B03 (KILN_KNOW_CONTENT_EXIT_CODE), the code the process ends with." },
+    "unixExitStatus": { "const": 3, "description": "What a Linux parent sees when the server runs under Wine (the low byte)." },
+    "restart": { "const": false, "description": "A restart stops the same way: nothing should restart the game or the server on this exit." },
+    "advice": { "type": "string", "description": "What to do, one paragraph, the same as in kiln.log." },
+    "bootStop": { "type": "boolean", "description": "kiln.boot's stop_start ended the start: boot.json \"boot\".\"stop\" and progress.json (state failed) say the same. false: an older core without that call; then only this file and kiln.log." },
+    "pid": { "type": "integer", "minimum": 0, "description": "The game process, as boot.json's pid." },
+    "utc": { "type": "string", "description": "When it was written, UTC, \"YYYY-MM-DDThh:mm:ssZ\"." }
+  },
+  "additionalProperties": false
+}

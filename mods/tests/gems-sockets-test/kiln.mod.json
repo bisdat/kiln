@@ -1,0 +1,11 @@
+{
+  "id": "gems-sockets-test",
+  "name": "Gem sockets on other gear lab test",
+  "version": "0.1.0",
+  "apiVersion": "0.2",
+  "entryAssembly": "GemsSocketsTest.dll",
+  "side": "server",
+  "advanced": true,
+  "writes": ["WeaponGemSlot", "Durability"],
+  "description": "Lab test of the gem wave's sockets on rings, armour and shields (G4, docs/kiln/services/gems-sockets.md) on a spawned 1_Player stand-in: Gems.AllowSockets, Gear.GemSlot on a ring, Gems.AddSocket (the re-created item keeps level, rarity, upgrades and durability), the refusals, the socket rolls, gemSlotOverride on a shield, a gem written into a ring's socket runs its impact from impact slot 7/8 when the ring is worn, and a socketed ring with a gem in a container survives a save and a restart (run twice: the second start checks kiln/data/gems-sockets-test/persist.txt). PASS and FAIL lines in kiln.log, then 'gems-sockets-test done: N PASS, M FAIL'."
+}

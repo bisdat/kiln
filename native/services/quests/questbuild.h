@@ -100,7 +100,12 @@ struct JournalQuestDef {
 bool rebuild_journal(const uint8_t* res, size_t len, const std::vector<JournalQuestDef>& quests, Bytes* out, std::string* err);
 
 // ---- NpcCollection -------------------------------------------------------------------------------------------------
-constexpr uint32_t kMaxNpcs = 64;  // npc_unlock_state (0xa2ef90) keeps the unlock states in one u64: a bit per entry
+// The game keeps the roster's unlock states in one u64, a bit per entry, and both its evaluator and its query take an
+// entry's index modulo 64 (docs/re/npc-roster.md): 64 entries, the game's included. kiln.knowledge keeps a second
+// page beside each NpcRegistry where its three hooks are installed (roster_core.h): then 128. The caller passes the
+// runtime maximum; nothing here decides it.
+constexpr uint32_t kMaxNpcs = 64;
+constexpr uint32_t kMaxNpcsPaged = 128;
 struct NpcDef {
     uint32_t id = 0, name = 0;
     uint32_t copy_from = 0;       // the NpcId of the game's entry to start from (preset, portrait, roaming, ...)
@@ -114,7 +119,14 @@ struct NpcDef {
     Guid item_ref;
     std::string debug_name;
 };
-bool rebuild_npcs(const uint8_t* res, size_t len, const std::vector<NpcDef>& npcs, Bytes* out, std::string* err);
+// `max_npcs`: the roster's maximum on this side (kMaxNpcs, or kMaxNpcsPaged once the second page is installed); more
+// entries than that, the game's included, is an error and nothing is built.
+bool rebuild_npcs(const uint8_t* res, size_t len, const std::vector<NpcDef>& npcs, Bytes* out, std::string* err,
+                  uint32_t max_npcs = kMaxNpcs);
+// The entries of a collection (0 when it cannot be read).
+uint32_t npc_count(const uint8_t* res, size_t len);
+// The NpcIds of a collection, in its order (empty when it cannot be read).
+std::vector<uint32_t> npc_ids(const uint8_t* res, size_t len);
 // The game's roster entry by NpcId: nullptr if none.
 const uint8_t* npc_find(const uint8_t* res, size_t len, uint32_t id);
 

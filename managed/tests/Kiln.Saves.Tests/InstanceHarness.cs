@@ -97,6 +97,7 @@ internal sealed class InstanceHarness : IDisposable
     {
         StageOnly(revision);
         Store.Commit(revision, 1000 + revision, SaveReason.Request);
+        Written();
     }
 
     /// <summary>Both stagings of a save, nothing after (the process dies before the world file is written, or before Kiln
@@ -114,6 +115,7 @@ internal sealed class InstanceHarness : IDisposable
         Store.Stage(revision, reason, late: false);
         between?.Invoke();
         Store.Commit(revision, 1000 + revision, reason);
+        Written();
     }
 
     /// <summary>A new process loads the world file of <paramref name="fileRevision"/> (and file time): the store reads the
@@ -137,8 +139,12 @@ internal sealed class InstanceHarness : IDisposable
         Store.Instances.Tick();
     }
 
+    /// <summary>Kiln.Saves' writer has every file of the saves so far on disk (it writes them off the tick thread).</summary>
+    public static void Written() => Assert.True(Store.Writer.Drain("test"), "the writer did not finish");
+
     public JsonObject? Bundle(uint revision, string scope)
     {
+        Written();
         var manifest = Directory.EnumerateFiles(Path.Combine(Root, "manifests"), $"{revision:D10}*.json").Single();
         var entry = JsonNode.Parse(File.ReadAllText(manifest))!["bundles"]![scope];
         if (entry is null) return null;
@@ -148,6 +154,7 @@ internal sealed class InstanceHarness : IDisposable
 
     public IReadOnlyList<string> Scopes(uint revision)
     {
+        Written();
         var manifest = Directory.EnumerateFiles(Path.Combine(Root, "manifests"), $"{revision:D10}*.json").Single();
         return ((JsonObject)JsonNode.Parse(File.ReadAllText(manifest))!["bundles"]!).Select(kv => kv.Key).ToList();
     }

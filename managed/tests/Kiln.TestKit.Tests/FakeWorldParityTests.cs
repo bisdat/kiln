@@ -54,14 +54,26 @@ public sealed unsafe class FakeWorldParityTests
     public void The_kit_s_table_matches_the_header_field_for_field()
     {
         var abi = Fixture("abi.json");
-        foreach (var (native, mirror) in (ValueTuple<string, Type>[])[("KilnWorldApi", typeof(WorldAbi.Table)),
+        foreach (var (native, mirror) in (ValueTuple<string, Type>[])[("KilnWorldApiV4", typeof(WorldAbi.Table)),
                      ("KilnWorldWriteRequest", typeof(WorldAbi.WriteRequest)), ("KilnWorldWriteResult", typeof(WorldAbi.WriteResult)),
                      ("KilnWorldWriteInfo", typeof(WorldAbi.WriteInfo)), ("KilnWorldWriteStatus", typeof(WorldAbi.WriteStatus))])
         {
             var fields = abi[native]!["fields"]!.AsArray().Select(f => ((string)f![0]!, (int)f[1]!)).ToList();
+            var size = (int)abi[native]!["size"]!;
+            if (native == "KilnWorldApiV4")
+            {
+                // the whole table: v4 up to game_program_contract, then the client-world members of 0.2.0-dev.29, then
+                // the ECS reads and the compare-exchange writes from task threads
+                foreach (var part in new[] { "KilnWorldApiClientPrograms", "KilnWorldApiEcsReads", "KilnWorldApiEcsWrites" })
+                {
+                    var tail = abi[part]!;
+                    fields.AddRange(tail["fields"]!.AsArray().Select(f => ((string)f![0]!, (int)f[1]!)));
+                    size = (int)tail["size"]!;
+                }
+            }
             var mine = mirror.GetFields(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic)
                 .OrderBy(f => f.MetadataToken).Select(f => (f.Name, Offset: (int)Marshal.OffsetOf(mirror, f.Name))).ToList();
-            Assert.Equal((int)abi[native]!["size"]!, Marshal.SizeOf(mirror));
+            Assert.Equal(size, Marshal.SizeOf(mirror));
             Assert.Equal(fields.Count, mine.Count);
             for (var i = 0; i < fields.Count; i++)
                 Assert.True(fields[i].Item2 == mine[i].Offset, $"{mirror.Name}.{mine[i].Name} is at {mine[i].Offset}, {native}.{fields[i].Item1} at {fields[i].Item2}");

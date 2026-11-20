@@ -10,6 +10,8 @@
 #                                   plus every folder with a kiln.mod.json under $KILN_OUT/mods)
 #   <server>/kiln/plugins/          native plugins (--samples: kiln-native-hello)
 #   <server>/kiln/kiln.json         created if missing (--policy sets it; --cooked sets "cooked", below)
+#   <server>/kiln/compat-rules.json Kiln's shipped compat rules (native/core/compat-rules.json), replaced every deploy
+#   <server>/kiln/locales/          Kiln's own in-game texts (runtime/locales/*.json), replaced every deploy
 # The server must be stopped first; this script does not restart it.
 #   tools/deploy-server.sh <server dir> [--policy any|verified-only] [--cooked local|warn|any] [--samples] [--loader-samples] [--no-build]
 # --cooked local|warn|any: what kiln.assets does with a mod's cooked file (assets/cooked) no cook of this server made (a
@@ -115,6 +117,8 @@ if [[ -s $ewb/enshwick.dll && -s $ewb/LICENSE ]]; then
   install -m 644 "$ewb/LICENSE" "$k/plugins/enshwick/LICENSE.txt"
 fi
 
+install -m 644 "$repo/native/core/compat-rules.json" "$k/compat-rules.json"  # Kiln's shipped compat rules, as the bundle's core
+rm -rf "$k/locales" && mkdir -p "$k/locales" && install -m 644 "$repo"/runtime/locales/*.json "$k/locales/"  # Kiln's texts, as the bundle's core
 install -m 644 "$repo/sigdb/symbols/server.json" "$k/sigdb/server.json"
 rm -rf "$k/sigdb/server.d" && mkdir -p "$k/sigdb/server.d"
 cp "$repo"/sigdb/symbols/server.d/*.json "$k/sigdb/server.d/" 2>/dev/null || true
@@ -169,6 +173,15 @@ cfg = json.load(open(path))
 cfg["cooked"] = cooked
 json.dump(cfg, open(path, "w"), indent=2)
 PY
+fi
+# The game data Mod.OnBoot reads (tools/bootsnap, docs/kiln/modding/boot-snapshot.md): made once per game build into
+# kiln/data/boot-gamedata (about a minute and about 300 MB the first time, under a second after), before the server's
+# first start lets EML patch the archive (it reads EML's backup pair after that), and only when an enabled profile mod
+# or an allowed, unlisted drop-in in kiln/mods asks
+# for the boot phase (--if-needed: "no mod needs the boot snapshot" otherwise, and nothing is touched). A failure is a
+# warning: the server starts without it and kiln.boot says why. KILN_NO_BOOT_SNAPSHOT=1 skips the step altogether.
+if [[ ${KILN_NO_BOOT_SNAPSHOT:-} != 1 ]] && ! python3 -I "$repo/tools/bootsnap/bootsnap.py" make --game "$server" --if-needed; then
+  warn "the game data for OnBoot mods was not made (see above): the server starts without it"
 fi
 shown=$(grep -o '"cooked": "[^"]*"' "$k/kiln.json" | cut -d'"' -f4 || true)
 echo "Kiln deployed to $server (policy: $(grep -o '"policy": "[^"]*"' "$k/kiln.json" | cut -d'"' -f4), cooked: ${shown:-warn, the default})"

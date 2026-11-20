@@ -39,6 +39,26 @@ public sealed class InstanceGameTests : IDisposable
         Assert.Equal(plain.Stable, InstanceGame.FieldsOf(Record()).Stable);
     }
 
+    // package P7: a level outside the type's range (Items.SetLevel with AnyLevel) is set back into it by a save load; the
+    // fingerprint takes the level as the load gives it back, so the record made at the save finds the item after the load
+    [Fact]
+    public void ALevelOutsideTheTypesRangeIsFingerprintedAsTheLoadGivesItBack()
+    {
+        (int, int)? Range(ItemId _) => (5, 55);
+        static ItemRecord AtLevel(int level, int unlocked) =>
+            new(new ItemId(0x5a0d0001), 1, level, 80, 100, 0, 0, new ItemId(0), 3, unlocked, new ItemId(0), 0);
+        var saved = InstanceGame.FieldsOf(AtLevel(60, 1), Range);    // what the save wrote: base 59, outside 5..55
+        var loaded = InstanceGame.FieldsOf(AtLevel(56, 1), Range);   // what the load gives back: base clamped to 55
+        Assert.Equal(56, saved.Level);
+        Assert.Equal(loaded.Stable, saved.Stable);
+        Assert.True(InstanceMatcher.SameFull(saved, loaded));
+        Assert.Equal(23, InstanceGame.FieldsOf(Record(), Range).Level);  // inside the range: unchanged
+        Assert.Equal(6, InstanceGame.LevelAsLoaded(2, 1, (5, 55)));      // below it: the base comes up to 5
+        Assert.Equal(60, InstanceGame.LevelAsLoaded(60, 1, null));       // no range known: unchanged
+        Assert.Equal(60, InstanceGame.LevelAsLoaded(60, 1, (0, 0)));     // a type without a level range: unchanged
+        Assert.Equal(0, InstanceGame.LevelAsLoaded(0, 0, (5, 55)));      // no level: unchanged
+    }
+
     [Fact]
     public void APlacedItemKeepsItsHolderAndFlatSlotAsKilnItemsNumbersThem()
     {

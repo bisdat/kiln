@@ -48,3 +48,19 @@ test("after the fallback, Settings says why and the fire is the CSS one", async 
   await page.locator(".k-splash").waitFor({ state: "detached" });
   await expect(page.locator(".k-app")).not.toHaveAttribute("data-gl", /.*/);
 });
+
+test("a start drawing without the GPU because of the marker says it stays so until the switch is off", async ({ page }) => {
+  await page.goto("/?render=marker#/settings");
+  const sw = page.getByRole("switch", { name: "Draw the launcher without the GPU" });
+  await expect(sw).toBeChecked();
+  const card = page.locator(".k-toggle", { has: sw });
+  await expect(card).toContainText("This start draws without the GPU because this switch is on, and every start does until you turn it off. The launcher turned this on by itself");
+  await card.click();
+  await expect(sw).not.toBeChecked();
+  await expect(page.locator(".k-toast", { hasText: "The next start draws with the GPU" })).toBeVisible();
+  await expect(card).not.toContainText("The launcher turned this on by itself");
+  // this start still draws without the GPU; the next one does not
+  await expect(card).toContainText("Applies at the next start. This start draws without the GPU.");
+  await expect(card).not.toContainText("because this switch is on");
+  expect(await calls(page, "app_render_set")).toBe(1);
+});

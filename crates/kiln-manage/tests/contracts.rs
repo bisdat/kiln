@@ -221,6 +221,13 @@ fn every_example_deserializes_into_its_type() {
     let _: admin::protocol::Endpoint = example("admin-endpoint.json");
     let (_, j): (kiln_manage::data_folder::Pointer, kiln_manage::data_folder_move::Journal) = (example("data-folder.json"), example("data-folder-move.json"));
     assert_eq!((j.entries.len(), j.rewritten_after.len()), (5, 1));
+    // vendor files (an example manifest is checked by the manifest's own rules too)
+    let vm = kiln_manage::vendor::manifest::parse(&read("schema/examples/vendor-components.json")).unwrap();
+    assert!(vm.components[0].pinned());
+    let vr: kiln_manage::vendor::store::Receipt = example("vendor-receipt.json");
+    assert_eq!((vr.component.as_str(), vr.files.len()), ("intel-xess", 1));
+    let va: kiln_manage::vendor::Agreements = example("vendor-licenses.json");
+    assert!(va.agreed(&vm.components[0]));
 }
 
 #[test]

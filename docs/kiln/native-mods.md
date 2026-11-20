@@ -3,7 +3,8 @@
 A native mod is one or more DLLs that Kiln loads with `LoadLibrary`. It may know nothing about Kiln (a plain DLL mod
 whose `DllMain` does the work) or be Kiln-aware (an `init` export that gets the Kiln API). Each mod folder has a
 `native.json`. Contract: [launcher/contracts.md](launcher/contracts.md) 5.4 and 5.9, `schema/native.schema.json`,
-`native/core/abi/kiln_native.h`. Profiles and chain.ini: [profiles.md](profiles.md).
+`native/core/abi/kiln_native.h`. Profiles and chain.ini: [profiles.md](profiles.md). One DLL that also runs under
+Ultimate ASI Loader when Kiln is not installed: [modding/native-asi.md](modding/native-asi.md).
 
 ## Where they come from
 - The profile's `mods.native` entries (folders, usually in the launcher library), in profile mode.
@@ -85,17 +86,29 @@ __declspec(dllexport) int KILN_CALL kiln_native_init(const KilnNativeContext* ct
 - `api->service(KilnStr{"kiln.profile", 12}, 1)` answers in every phase, safe idle included.
 Sample: `native/samples/native-mod/` (phase boot). Template for tests: `native/samples/native-test/`.
 
+**Service headers, one name per struct.** `services/kiln_world.h` and `services/kiln_abilities.h` each had a struct named
+`KilnProgramInfo` (a Kiln ECS program's state; an Impact program in the ImpactRegistry), so no translation unit could
+include both. Since 0.2.0-dev.29 they are `KilnWorldProgramInfo` (kiln.world's `program_info`) and
+`KilnImpactProgramInfo` (kiln.abilities' `program_info`), with the same layouts. Write those names. `KilnProgramInfo`
+still compiles as an alias of the struct of whichever of the two headers comes first in the file
+(`KILN_PROGRAM_INFO_ALIAS` is 1 for kiln_world.h's, 2 for kiln_abilities.h's), so code that includes one header keeps
+building; in a file with both, the old name means the first header's struct. `native/core/tests/test-abi-headers.sh`
+compiles both orders (C and C++).
+
 ## At exit: `on_unload` (plugins only, not native mods)
 A native mod gets no call at exit. A plugin (`kiln_plugin_main`, `kiln_api.h`) may set `KilnPluginInfo.on_unload`:
 Kiln calls it once when the game process exits normally with code 0, at the process's exit call: after the game saved,
 closed its worlds and returned from main, before Windows ends the other threads and before any `DLL_PROCESS_DETACH`.
-- **Where it is on:** under Wine (Linux servers, Proton, the Steam Deck). On native Windows it is off by default in this
-  release, because it has not been proven there. `"unloadAtExit"` in `kiln/kiln.json` decides: `"auto"` (default, the
-  rule above), `"on"`, `"off"` (everywhere). kiln.log's `unload:` line at boot says which and why.
+- **Where it is on:** under Wine (Linux servers, Proton, the Steam Deck). On native Windows a plugin's is off by default
+  in this release, because it has not been proven there; the exit link still runs Kiln's own exit steps there (the task
+  pool parks, the engine's gate closes). `"unloadAtExit"` in `kiln/kiln.json` decides: `"auto"` (default, the rule
+  above), `"on"`, `"off"` (no exit link anywhere, Kiln's own steps included). kiln.log's `unload:` line at boot says
+  which and why.
 - **Proven:** a dedicated server stopped with Ctrl-C, SIGINT or by the launcher (lab). The client's normal quit is
   expected to call it too, but its exit code is not yet confirmed to be 0: not run in a client.
-- **Order and thread:** every service and plugin that loaded, in reverse load order (plugins before the services they
-  use), each on a thread Kiln starts for it while the exiting thread waits.
+- **Order and thread:** Kiln's own exit steps first: Kiln's own services, then the task pool parks (no task body or
+  `done` runs any more, so don't wait for your own tasks), then every plugin that loaded, last loaded first
+  ([services/tasks.md](services/tasks.md#exit)); each on a thread Kiln starts for it while the exiting thread waits.
 - **Limits:** 3 s per handler, 10 s for all. A handler that has not returned is given up and named in kiln.log; after
   10 s the rest are not called. A fault is caught (kiln.log and a crash report) and the next handler runs.
 - **Do:** write your own files atomically; stop your own threads and wait for them briefly.

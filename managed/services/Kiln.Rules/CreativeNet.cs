@@ -93,6 +93,7 @@ internal static class CreativeNet
     private static readonly object Lock = new();
     private static NetChannel? _channel;
     private static bool _ticking;
+    private static EntityId _menuHost;
     private static int _session;
     internal static int Session => Volatile.Read(ref _session);
     private static readonly Queue<(int Session, Action Action)> Completions = new();
@@ -274,6 +275,17 @@ internal static class CreativeNet
 
     private static void Drain()
     {
+        // The handshake can finish before the local character is known. Offline worlds also
+        // need this refresh without a network handshake or an already open menu.
+        if (Hosting(out var host))
+        {
+            if (_menuHost != host)
+            {
+                SendState(host, CreativeServer.StateOf(host), local: true);
+                _menuHost = host;
+            }
+        }
+        else _menuHost = default;
         if (CreativeFlame.Running) Creative.StepAside();  // also runs when only /creative cycle was used, with no rule sets
         for (var i = 0; i < 32; i++)
         {
@@ -314,6 +326,7 @@ internal static class CreativeNet
     {
         lock (Lock)
         {
+            _menuHost = default;
             Interlocked.Increment(ref _session);
             Completions.Clear();
             Inbox.Clear();

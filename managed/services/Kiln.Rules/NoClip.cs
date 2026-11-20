@@ -16,7 +16,8 @@ namespace Kiln;
 /// travel, a bed, a command, a mod); the player leaving; the world closing. After a death or a teleport it has to be
 /// asked for again. When it ends while the character is inside something, Kiln first moves the character back to the
 /// last place where it was in open space, and only then lets collision return: the game does not push a character out
-/// of solid ground.</para>
+/// of solid ground. A player who left (or whose world closed) with NoClip on is moved there when they come back inside
+/// something: the place is kept in the world's data (<see cref="NoClipEnd.Left"/>).</para>
 /// </remarks>
 public static class NoClip
 {
@@ -84,6 +85,11 @@ public static class NoClip
                     : $"NoClip off for {name}.");
         }
         if (!Available) throw new KilnUnavailableException(Capability, Capabilities.Why(Capability));
+        // A world can have /noclip without any mod calling Rules.Apply.
+        // Load the server's rules.json *before* consulting the policy: until
+        // it is loaded, Limits contains only the deny-by-default values. Only the
+        // policy: the rest of the rules runtime starts with the rule set below.
+        RulesRuntime.StartPolicy();
         if (!RulesRuntime.Limits.AllowNoClip)
             return new(false, false, "policy", $"NoClip stays off for {name}: this server's rules.json does not allow it (allowNoClip).");
         var client = Rules.ClientOf(player);
@@ -171,6 +177,8 @@ public static class NoClip
         RulesRuntime.Log(LogLevel.Info, $"player {player}: NoClip ended ({reason})" + (restoredTo is { } p ? $", back at {p}" : ""));
         if (reason == NoClipEnd.Death) Tell(player, "NoClip ended because you died. Turn it on again to go on.");
         else if (reason == NoClipEnd.Teleport) Tell(player, "NoClip ended because you were teleported. Turn it on again to go on.");
+        else if (reason == NoClipEnd.Left && restoredTo is not null)
+            Tell(player, "NoClip ended when you left. You came back inside something, so you are back at the last place where you were free.");
         else if (restoredTo is not null) Tell(player, "NoClip is off. You were inside something, so you are back at the last place where you were free.");
         if (Events.HasSubscribers<PlayerNoClipEndedEvent>()) Events.Post(new PlayerNoClipEndedEvent(player, reason, restoredTo));
     }
@@ -246,6 +254,12 @@ public static class NoClip
     /// <summary>One line: whether it works here, whether the server allows it, and who has it.</summary>
     internal static string Status()
     {
+        // The local console also runs on joined clients. Their file is not the server's policy.
+        if (Client.IsRemote)
+            return "NoClip status belongs to the server you joined. Use /noclip status in server chat to check its rules.json and players.";
+        // /noclip status is a first-class command even if no rule set was
+        // ever applied; report the loaded policy, not uninitialized defaults.
+        RulesRuntime.StartPolicy();
         var who = new List<string>();
         try
         {
@@ -294,6 +308,12 @@ public enum NoClipEnd
 
     /// <summary>The player was teleported (fast travel, a bed, a command, a mod).</summary>
     Teleport = 2,
+
+    /// <summary>The player left the world, or the world closed (a server restart, a hosted game quit), while NoClip was
+    /// on. Posted when the player is next in the world, once: with <see cref="PlayerNoClipEndedEvent.RestoredTo"/> when
+    /// the character came back inside something and Kiln moved it to its last free position first, null when it came
+    /// back in open space. (Since 0.2.0-dev.28.)</summary>
+    Left = 3,
 }
 
 /// <summary>NoClip ended for a player and collision is back. Posted on the tick thread; not cancelable. (That NoClip

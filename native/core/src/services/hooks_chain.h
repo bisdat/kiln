@@ -49,6 +49,7 @@ struct Dest {
     bool in_place = false;      // bytes changed but no jump decoded
     uintptr_t address = 0;      // final destination reached (0 when none)
     std::string module;         // file name of the module containing it ("" = none/unknown)
+    std::string path;           // its file (module_place.h): relative to the game folder, else the full path ("" = unknown)
     uintptr_t offset = 0;       // address - module base
     bool own = false;           // the module is one of Kiln's ("kiln-*.dll")
 };
@@ -62,6 +63,7 @@ struct Env {
     std::string (*symbol_at)(uintptr_t a) = nullptr;     // sigdb symbol name of an address ("" = none)
     std::string (*owner_name)(KilnOwner o) = nullptr;     // registry name of an owner
     uintptr_t image_lo = 0, image_hi = 0;                 // the exe's range: jumps ending outside it are "foreign"
+    std::string game_dir;                                 // the game folder (UTF-8): Dest::path is relative to it
     void (*changed)() = nullptr;                          // links changed (mutex held: only arm a timer)
 };
 
@@ -75,12 +77,15 @@ KilnResult install_structured(KilnOwner owner, uintptr_t target, const Order& or
 KilnResult install_v1(KilnOwner owner, uintptr_t target, int32_t priority, KilnDetourFn fn, void* user,
                       KilnHandle* out);
 KilnResult install_mid(KilnOwner owner, uintptr_t target, const Order& order, KilnMidFn fn, void* user,
-                       KilnHandle* out);
+                       KilnHandle* out, uint32_t* unchecked = nullptr);
 
 // A typed link (dev.28): `fn` gets the call as a KilnCallFrame; `nstack` stack arguments are forwarded to the rest of
 // the chain (the caller derived it from the KilnSig and checked the fingerprint).
+// `unchecked` (detour_typed_checked): the first detour on the target is written only when every thread could be checked
+// and none stands in the bytes, as for install_mid's; *unchecked counts those that could not (0: refused for another
+// reason, or installed).
 KilnResult install_typed(KilnOwner owner, uintptr_t target, const Order& order, uint32_t nstack, KilnTypedFn fn,
-                         void* user, KilnHandle* out);
+                         void* user, KilnHandle* out, uint32_t sret_size = 0, uint32_t* unchecked = nullptr);
 // Inside a typed handler: runs the rest of the chain once. KILN_ERR_INVALID_ARGUMENT when `frame` is not a handler's.
 KilnResult call_original_frame(KilnCallFrame* frame);
 
@@ -130,7 +135,10 @@ struct TargetInfo {
         Kind kind = Kind::Raw;
         int32_t priority = 0;
     };
-    uintptr_t address = 0, rva = 0;
+    uintptr_t address = 0, rva = 0;   // rva: 0 for a target in another module
+    std::string module;               // a target inside another module (open_module): its file name; "" in the exe
+    uintptr_t offset = 0;             // ... and the target's offset from that module's base
+    std::string path;                 // ... and its file (module_place.h), as foreign-hook records give it
     std::string symbol;               // sigdb name of the address ("" = none)
     std::string label;                // symbol, else the first link's label, else "rva 0x..."
     std::vector<LinkRow> links;       // live links in chain order (the first one runs first)

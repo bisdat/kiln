@@ -1,0 +1,15 @@
+{
+  "id": "material-pools-test",
+  "name": "Material pool lab checks",
+  "version": "1.0.0",
+  "apiVersion": "0.2.0-dev.29",
+  "entryAssembly": "MaterialPoolsTest.dll",
+  "side": "both",
+  "clients": "mod",
+  "dependencies": {
+    "mp-fixture": {
+      "version": "1.0.0",
+      "optional": true
+    }
+  }
+}

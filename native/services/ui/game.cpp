@@ -26,12 +26,15 @@
 
 #include "kiln_hook.hpp"
 #include "menu_rows.h"
-#include "menu_scroll.h"
 #include "menu_site.h"
 #include "ui.h"
+#include "ui_text.h"
 
 namespace kui {
 namespace {
+// The Mods entry's caption with the overlay drawing off ("Mods: <why>", in the language of Kiln's texts): interned, so the
+// menu hooks on the UI thread read a stable string while set_texts swaps it
+std::atomic<const std::string*> g_native_mods_status{nullptr};
 
 // ---- layout (sigdb) ----
 struct Layout {
@@ -41,7 +44,8 @@ struct Layout {
     int64_t state_ui = 0;           // *(GameUiData) = state; + state.ui_state: u8 keen::UiState
     int64_t state_play = 0;         // state + state.play -> play data
     int64_t play_hud = 0;           // play + play.hud_screen: u8 keen::HudScreenType
-    int64_t play_interaction = 0;   // play + play.interaction: u32 entity
+    int64_t play_interaction = 0;   // play + play.interaction: u32 (the station's keen::WorkshopId at a crafting station [rt])
+    int64_t play_target = 0;        // play + play.target: u32 entity the screen is about (0: the constant did not resolve)
     int64_t data_loca = 0;          // GameUiData + data.loca_pool -> LocaPool*
     int64_t loca_language = 0;      // LocaPool + content/loca.language: u32 keen::LanguageId
     int64_t craft_recipe = 0;       // GameUiData + data.craft_recipe: u32 (the player's own crafting menu)
@@ -86,6 +90,13 @@ const std::string* intern(KilnStr s) {
     const std::string* p = &g_text_arena.back();
     g_text_index.emplace(v, p);
     return p;
+}
+
+GameText status_text() {
+    const std::string* s = g_native_mods_status.load(std::memory_order_acquire);
+    static const std::string empty;
+    if (!s) s = &empty;
+    return GameText{s->c_str(), s->size(), fnv64(s->data(), s->size())};
 }
 
 struct Entry {
@@ -169,11 +180,18 @@ bool rd(uintptr_t a, T& out) {
 struct Raw {
     uint8_t ui_state, hud;
     uint32_t interaction, language;
+    uint32_t target;  // play.target, read only while a factory screen shows
 };
+
+// keen::HudScreenType FactoryCrafting: a production station's screen (kiln, smelter, loom). The game draws it with its
+// chest-style transfer screen (PlayStateUi -> 0xb9d0f0 mode 2 on 26430625), not with CraftingMenu (docs/re/game-ui.md
+// section 5): no builder frame names it, so Kiln.Ui reports it from the HUD screen, play.interaction and play.target.
+constexpr uint8_t kHudFactory = 28;
+std::atomic<uint32_t> g_target{0};  // play.target of the last UI frame while a factory screen showed, else 0
 
 bool read_state(uintptr_t sys10, Raw* r) {
     r->ui_state = r->hud = 0;
-    r->interaction = r->language = 0;
+    r->interaction = r->language = r->target = 0;
     uintptr_t data = 0, state = 0, play = 0;
     if (!rd(sys10 + L.sys_data, data) || !data) return false;
     if (!rd(data, state) || !state) return true;  // no state yet
@@ -181,6 +199,7 @@ bool read_state(uintptr_t sys10, Raw* r) {
     if (rd(state + L.state_play, play) && play && r->ui_state == KILN_UI_STATE_PLAY) {
         rd(play + L.play_hud, r->hud);
         rd(play + L.play_interaction, r->interaction);
+        if (r->hud == kHudFactory && L.play_target) rd(play + L.play_target, r->target);
     }
     if (L.language) {
         uintptr_t pool = 0;
@@ -265,18 +284,16 @@ std::vector<Entry> visible_of(uint32_t menu) {
     return out;
 }
 
-// The entries one menu draws in this builder call: Kiln's own Mods entry always, the mods' as the mode says
-// (menu_rows.h). AUTO draws every one exactly when this call of the pause menu's builder is wrapped in the scroll view
-// (menu_scroll.cpp decided it at the column's open site, before the Settings entry): one decision per builder call,
-// whatever changed in between.
-std::vector<Entry> entries_of(uint32_t menu) {
-    const bool wrapped = menu == KILN_UI_MENU_PAUSE && scroll_wrapped_now();
-    return menu_rows::pick(visible_of(menu), g_shown.load(std::memory_order_relaxed), is_builtin, wrapped);
-}
+// Can this menu scroll in this process (menu_rows.h's `scrolls`)? Only the pause menu, while menu_scroll.cpp is on.
+// Since dev.29 the pause menu is wrapped by the rows' height (menu_scroll.h), so AUTO draws every mod's row whether
+// this call is wrapped or not: the rows must not change with the wrap, or the height read in one state would not hold
+// in the other (wrapped: every row, too tall; unwrapped: the rule few, fits; and back).
+bool scrolls(uint32_t menu) { return menu == KILN_UI_MENU_PAUSE && scroll_on(); }
 
-// For the Mods page's list (any thread): whether the pause menu would be wrapped with these rows.
-bool scrolls(uint32_t menu, uint32_t mode, size_t rows) {
-    return menu == KILN_UI_MENU_PAUSE && scroll_on() && menu_scroll::wants(mode, rows);
+// The entries one menu draws in this builder call: Kiln's own Mods entry always, the mods' as the mode says
+// (menu_rows.h).
+std::vector<Entry> entries_of(uint32_t menu) {
+    return menu_rows::pick(visible_of(menu), g_shown.load(std::memory_order_relaxed), is_builtin, scrolls(menu));
 }
 
 void activated(KilnHandle h) {
@@ -344,16 +361,23 @@ bool __fastcall hk_main_entry(void* state, const MainDesc* d) {
         page_main_menu_drawn(state);  // a menu-key request for the main-menu page is served here (menu_page.cpp)
         for (const Entry& e : entries_of(KILN_UI_MENU_MAIN)) {
             MainDesc c = *d;  // the Settings entry's option bytes: same style, same behaviour
-            c.text = GameText{e.text->c_str(), e.text->size(), e.fnv};
+            // Full page contents require ImGui. Keep the same native row/slot and
+            // toggle its status caption, never an empty Credits page or extra row.
+            // With the drawing on, the row's own text and its hash as they were made (nothing changes for a normal start).
+            if (!overlay_draws() && g_menu_open.load() && e.handle == g_builtin[0])
+                c.text = status_text();
+            else
+                c.text = GameText{e.text->c_str(), e.text->size(), e.fnv};
             g_draws.fetch_add(1, std::memory_order_relaxed);
             if (!g_main_hook.call<bool>(state, &c)) continue;
             // Kiln's own MODS entry: the game's own page switch, here as the game does for its entries (menu_page.cpp)
-            if (e.handle == g_builtin[0] && page_open_from_entry(state)) {
+            if (e.handle == g_builtin[0] && overlay_draws() && page_open_from_entry(state)) {
                 g_clicks.fetch_add(1, std::memory_order_relaxed);
                 continue;
             }
             activated(e.handle);
         }
+
     }
     return g_main_hook.call<bool>(state, d);
 }
@@ -361,14 +385,24 @@ bool __fastcall hk_main_entry(void* state, const MainDesc* d) {
 bool __fastcall hk_sys_entry(const GameText* t, uint8_t p2, uint8_t attention) {
     const uintptr_t ret = g_sys_hook.caller();  // the game's call site, read before the original
     if (t && ret == L.sys_ret) {
+        uint32_t rows = 0;
         for (const Entry& e : entries_of(KILN_UI_MENU_PAUSE)) {
-            const GameText c{e.text->c_str(), e.text->size(), e.fnv};
+            ++rows;
+            const bool status_row = !overlay_draws() && g_menu_open.load() && e.handle == g_builtin[1];
+            const GameText c = status_row
+                ? status_text()
+                : GameText{e.text->c_str(), e.text->size(), e.fnv};
             g_draws.fetch_add(1, std::memory_order_relaxed);
             if (g_sys_hook.call<bool>(&c, p2, static_cast<uint8_t>((e.flags & KILN_UI_ENTRY_ATTENTION) ? 1 : 0)))
                 activated(e.handle);
         }
+        scroll_rows_drawn(rows);  // Kiln's rows count among the pause menu's entries (menu_scroll.cpp)
     }
-    return g_sys_hook.call<bool>(t, p2, attention);
+    // the scrolling pause menu's height probes: before the menu's first entry and after its last (menu_scroll.cpp)
+    scroll_entry_next();
+    const bool chosen = g_sys_hook.call<bool>(t, p2, attention);
+    scroll_entry_drawn(chosen);
+    return chosen;
 }
 
 void* __fastcall hk_craft(uint64_t packed, int32_t select) {
@@ -385,9 +419,13 @@ void* __fastcall hk_craft(uint64_t packed, int32_t select) {
 }
 
 void after_frame(uintptr_t sys10) {
+    // Issue #44: end of the game's UI frame decides whether chat really has edit focus.
+    chat_input_frame_end(sys10);
+    if (!overlay_drawing_on()) input_poll_window();
     ++g_frame_no;
     g_frames.store(g_frame_no, std::memory_order_relaxed);
     page_after_frame(sys10, g_frame_no);
+    footer_after_frame(sys10);  // the canvas for the mark next to Kiln's line in the main menu's footer (menu_footer.cpp)
     scroll_after_frame(g_frame_no);  // the scrolling pause menu's crash guard (menu_scroll.cpp)
     g_ui_thread = GetCurrentThreadId();
     Raw raw{};
@@ -401,6 +439,10 @@ void after_frame(uintptr_t sys10) {
     s.language = raw.language;
     s.ui_thread = g_ui_thread;
     s.frame = g_frame_no;
+    // a factory screen's station: the game may write play.target a frame after the screen opens; a change of it is a change
+    // of the screen (subscribers read it again through screen_target)
+    const uint32_t target = s.hud_screen == kHudFactory ? raw.target : 0;
+    const bool target_changed = g_target.exchange(target, std::memory_order_relaxed) != target;
     // the builder runs every frame while a crafting menu shows; a frame or two without it (a tab transition) is not a close
     if (g_craft.frame && g_craft.frame + 3 > g_frame_no) {
         s.crafting = g_craft.kind;
@@ -414,7 +456,7 @@ void after_frame(uintptr_t sys10) {
     {
         std::lock_guard lk(g_screen_mu);
         before = g_screen;
-        changed = !g_have_prev || !same_screen(before, s);
+        changed = !g_have_prev || !same_screen(before, s) || target_changed;
         g_prev = before;
         g_screen = s;
         g_have_prev = true;
@@ -486,14 +528,24 @@ void KILN_CALL on_craftmenu(const KilnCraftMenuInfo* info, void*) {
 // Kiln's own "Mods" entry in both menus: opens the Kiln menu (works without the managed host). In the main menu with
 // feature ui.menu_page and a host, the entry hook opens the game page instead and this is not called.
 void KILN_CALL on_builtin(KilnHandle, void*) {
-    g_menu_open = true;
+    g_menu_open = overlay_draws() ? true : !g_menu_open.load();
     logf(KILN_LOG_DEBUG, "ui: Kiln menu opened from the game's menu");
 }
 KilnResult game_menu_add_impl(KilnOwner owner, uint32_t menu, int32_t order, KilnStr text, KilnUiMenuFn fn, void* user, KilnHandle* out);
 void add_builtin_entries() {
-    static const char kMods[] = "Mods";
-    if (L.main_menu) game_menu_add_impl(g_owner, KILN_UI_MENU_MAIN, 1000, KilnStr{kMods, 4}, &on_builtin, nullptr, &g_builtin[0]);
-    if (L.system_menu) game_menu_add_impl(g_owner, KILN_UI_MENU_PAUSE, 1000, KilnStr{kMods, 4}, &on_builtin, nullptr, &g_builtin[1]);
+    const std::string mods = text::get("native.menu.mods");  // English until Kiln.Ui hands the player's language over
+    const KilnStr t{mods.data(), mods.size()};
+    if (L.main_menu) game_menu_add_impl(g_owner, KILN_UI_MENU_MAIN, 1000, t, &on_builtin, nullptr, &g_builtin[0]);
+    if (L.system_menu) game_menu_add_impl(g_owner, KILN_UI_MENU_PAUSE, 1000, t, &on_builtin, nullptr, &g_builtin[1]);
+}
+
+// The Mods entry's caption while the overlay does not draw: off from the start (g_overlay_reason), or turned off during
+// this session (overlay_off_reason: ui.cpp overlay_turned_off).
+void set_mods_status() {
+    if (overlay_draws()) return;
+    const std::string& reason = overlay_failed() ? overlay_off_reason() : g_overlay_reason;
+    const std::string s = text::fill(text::get("native.menu.mods_off"), {{"reason", reason}});
+    g_native_mods_status.store(intern(KilnStr{s.data(), s.size()}), std::memory_order_release);
 }
 
 bool sym(const char* n, uintptr_t* out) {
@@ -505,6 +557,7 @@ bool feat(const char* n) { return g_api->feature(KilnStr{n, std::strlen(n)}); }
 }  // namespace
 
 bool game_install() {
+    set_mods_status();
     uintptr_t frame_fn = 0, main_fn = 0, sys_fn = 0, craft_fn = 0;
     L.screens = feat("ui.screens") && sym("ui/GameUiFrame", &frame_fn) && cst("ui/sys.data", &L.sys_data) &&
                 cst("ui/state.ui_state", &L.state_ui) && cst("ui/state.play", &L.state_play) &&
@@ -512,6 +565,12 @@ bool game_install() {
     if (!L.screens) {
         logf(KILN_LOG_WARN, "ui: game screens unavailable on this build (feature ui.screens off): no menu entries, no screen events");
         return false;
+    }
+    // the entity of a factory screen (0.2.0-dev.29.15): optional; without it Kiln.Ui reports a factory screen with no station
+    if (!cst("ui/play.target", &L.play_target) || L.play_target <= 0 || L.play_target > 0x100000) {
+        L.play_target = 0;
+        logf(KILN_LOG_INFO, "ui: a factory screen's station is not read on this build (constant ui/play.target did not resolve): "
+                            "Kiln.Ui reports factory screens without their station");
     }
     L.language = feat("ui.language") && cst("ui/data.loca_pool", &L.data_loca) && cst("content/loca.language", &L.loca_language);
     L.main_menu = feat("ui.main_menu") && sym("ui/MainMenuEntry", &main_fn) && sym("ui/MainMenuSettingsA", &L.main_ret_a) &&
@@ -553,6 +612,8 @@ bool game_install() {
         L.crafting = static_cast<bool>(g_craft_hook);
     }
     add_builtin_entries();
+    chat_input_probe_install();  // opt-in read-only probe or KILN_CHAT_HISTORY preview; default no hook
+    footer_install();  // Kiln's line in the main menu's footer (menu_footer.cpp): its own log line
     logf(KILN_LOG_INFO, "ui: game UI hooked: screens on, main menu %s, pause menu %s, crafting %s, language %s, main-menu page %s",
          L.main_menu ? "on" : "off", L.system_menu ? "on" : "off", L.crafting ? "on" : "off", L.language ? "on" : "off",
          page ? "on" : "off");
@@ -568,12 +629,15 @@ void game_ready() {
 }
 
 bool game_screens_on() { return L.screens; }
+uint64_t game_frames() { return g_frames.load(std::memory_order_relaxed); }
 bool game_menu_on(uint32_t menu) { return menu == KILN_UI_MENU_MAIN ? L.main_menu : menu == KILN_UI_MENU_PAUSE ? L.system_menu : false; }
 
 bool game_in_menu() {
     if (!L.screens) return false;
     return g_api->world(KILN_WORLD_SERVER) == 0 && g_api->world(KILN_WORLD_CLIENT) == 0;
 }
+
+uint32_t game_screen_target() { return L.screens ? g_target.load(std::memory_order_relaxed) : 0; }
 
 KilnResult game_screen(KilnUiScreen* out) {
     if (!out || out->size < sizeof(KilnUiScreen)) return KILN_ERR_INVALID_ARGUMENT;
@@ -694,7 +758,7 @@ uint32_t game_menu_entries(KilnUiMenuEntry* out, uint32_t capacity) {
         o.text_len = e.text ? static_cast<uint32_t>(e.text->size()) : 0;
         o.flags = e.flags;
         o.order = e.order;
-        o.drawn = visible(e) && e.menu < 3 && menu_rows::draws_mods(mode, shown[e.menu], scrolls(e.menu, mode, shown[e.menu])) ? 1u : 0u;
+        o.drawn = visible(e) && e.menu < 3 && menu_rows::draws_mods(mode, shown[e.menu], scrolls(e.menu)) ? 1u : 0u;
     }
     return static_cast<uint32_t>(mods.size());
 }
@@ -735,6 +799,23 @@ bool game_unsubscribe(KilnHandle h) {
     std::erase_if(g_ftick_subs, [&](const FrameTickSub& e) { return e.handle == h; });
     return g_entries.size() + g_screen_subs.size() + g_tick_subs.size() + g_ftick_subs.size() < n;
 }
+
+void game_texts_changed() {
+    const std::string mods = text::get("native.menu.mods");
+    const std::string* t = intern(KilnStr{mods.data(), mods.size()});
+    {
+        std::lock_guard lk(g_mu);
+        for (Entry& e : g_entries)
+            if (is_builtin(e) && e.text != t) {
+                e.text = t;
+                e.fnv = fnv64(t->data(), t->size());
+                g_entries_version.fetch_add(1);
+            }
+    }
+    set_mods_status();
+}
+
+void game_overlay_turned_off() { set_mods_status(); }
 
 void game_status_line(char* out, size_t cap) {
     char page[192];

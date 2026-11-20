@@ -35,8 +35,8 @@ pub fn list(kind: Option<String>) -> Result<i32> {
     let k = kind.as_deref().map(parse_kind).transpose()?;
     for e in kiln_manage::library::list(&dirs, k).km()? {
         for v in &e.versions {
-            println!("{:<7} {:<24} {:<14} {}  {}{}", e.kind.as_str(), e.id, v.version, v.hash, v.folder.display(),
-                if v.changed { "  (changed on disk)" } else { "" });
+            println!("{:<7} {:<24} {:<14} {}  {}{}{}", e.kind.as_str(), e.id, v.version, v.hash, v.folder.display(),
+                if v.changed { "  (changed on disk)" } else { "" }, if v.kept.is_some() { "  (kept for a roll back)" } else { "" });
         }
     }
     Ok(0)
@@ -51,13 +51,41 @@ pub fn take_over(spec: &str) -> Result<i32> {
     let (id, version) = rest.split_once('@').map(|(i, v)| (i, Some(v))).unwrap_or((rest, None));
     let entries = kiln_manage::library::list(&dirs, Some(kind)).km()?;
     let Some(e) = entries.iter().find(|e| e.id == id) else { bail!("{} {id} is not in the library", kind.as_str()) };
-    let Some(v) = e.versions.iter().find(|v| version.is_none_or(|w| v.version == w)) else { bail!("{id}: no version {}", version.unwrap_or("?")) };
+    let Some(v) = e.versions.iter().find(|v| version.map_or(v.kept.is_none(), |w| v.version == w)) else { bail!("{id}: no version {}", version.unwrap_or("?")) };
     let r = kiln_manage::library::LibraryRef { kind, id: id.into(), version: v.version.clone(), hash: v.hash.clone() };
     let done = kiln_manage::library::take_over(&dirs, &r).km()?;
     if done.to == done.from {
         println!("{} {} {}: its files are the ones imported, nothing to take over", kind.as_str(), id, v.version);
     } else {
         println!("{} {}: now {} {} ({}), was {} ({})", kind.as_str(), id, done.name, done.to.version, done.to.hash, done.from.version, done.from.hash);
+    }
+    Ok(0)
+}
+
+/// `kind:id[@version]` in `profile`: back to an earlier version an update kept (kiln_manage::kept::rollback; the newest
+/// kept one unless a version is named). Like `profile add` it saves the profile only: the game's profile.json and the
+/// mod's settings in the game folder follow at the next activation (the launcher, or Play).
+pub fn rollback(profile: &str, spec: &str) -> Result<i32> {
+    let dirs = data_dirs()?;
+    let Some((kind, rest)) = spec.split_once(':') else { bail!("{spec:?}: use kind:id[@version]") };
+    let kind = parse_kind(kind)?;
+    let (id, version) = rest.split_once('@').map(|(i, v)| (i, Some(v))).unwrap_or((rest, None));
+    let to = match version {
+        None => None,
+        Some(w) => {
+            let kept = kiln_manage::kept::kept_versions(&dirs, kind, id);
+            let Some(v) = kept.iter().find(|v| v.version == w) else { bail!("{} {id} {w} is not kept for a roll back (kilnctl library list shows the kept ones)", kind.as_str()) };
+            Some(kiln_manage::kept::VersionRef { version: v.version.clone(), hash: v.hash.clone() })
+        }
+    };
+    let r = kiln_manage::kept::rollback(&dirs, None, profile, kind, id, to.as_ref()).km()?;
+    println!("profile {}: {} {} -> {}{}", r.profile_id, r.name, r.from.version, r.to.version,
+        if r.kept { format!(" ({} is kept)", r.from.version) } else { String::new() });
+    for f in &r.settings {
+        println!("  back at the next activation: {f}");
+    }
+    for n in &r.notices {
+        println!("  {n}");
     }
     Ok(0)
 }
@@ -73,20 +101,33 @@ pub fn create(name: &str, copy_from: Option<String>) -> Result<i32> {
 pub fn add(profile: &str, mods: &[String], disabled: bool) -> Result<i32> {
     let dirs = data_dirs()?;
     let mut p = kiln_manage::profile::get(&dirs, profile).km()?;
+    let before = p.clone();
     for spec in mods {
         let Some((kind, rest)) = spec.split_once(':') else { bail!("{spec:?}: use kind:id[@version]") };
         let kind = parse_kind(kind)?;
         let (id, version) = rest.split_once('@').map(|(i, v)| (i, Some(v))).unwrap_or((rest, None));
         let entries = kiln_manage::library::list(&dirs, Some(kind)).km()?;
         let Some(e) = entries.iter().find(|e| e.id == id) else { bail!("{} {id} is not in the library (kilnctl library import)", kind.as_str()) };
-        let Some(v) = e.versions.iter().find(|v| version.is_none_or(|w| v.version == w)) else { bail!("{id}: no version {}", version.unwrap_or("?")) };
+        let Some(v) = e.versions.iter().find(|v| version.map_or(v.kept.is_none(), |w| v.version == w)) else { bail!("{id}: no version {}", version.unwrap_or("?")) };
         let m = ProfileMod { id: id.into(), version: v.version.clone(), hash: v.hash.clone(), enabled: !disabled };
         let list = p.mods.list_mut(kind);
         list.retain(|x| x.id != m.id);
         list.push(m);
     }
-    let p = kiln_manage::profile::save(&dirs, &p).km()?;
+    // another version of a mod already in the profile: the one it replaced is kept for a roll back (kiln_manage::kept),
+    // one transaction with the save
+    let kept = kiln_manage::kept::prepare_saved(&dirs, &before, &p);
+    let p = match kiln_manage::profile::save(&dirs, &p).km() {
+        Ok(p) => p,
+        Err(e) => {
+            kept.abort();
+            return Err(e);
+        }
+    };
     println!("profile {} saved (generation {}, fingerprint {})", p.id, p.generation, kiln_manage::profile::fingerprint(&p));
+    for line in kept.commit() {
+        println!("  {line}");
+    }
     Ok(0)
 }
 
@@ -112,5 +153,18 @@ pub fn show(profile: &str, side: &str) -> Result<i32> {
     for w in &r.warnings {
         println!("  warning: {w}");
     }
+    Ok(0)
+}
+
+pub fn replace_dll(profile: &str, spec: &str, file: &std::path::Path, confirmed: bool) -> Result<i32> {
+    let dirs = data_dirs()?;
+    let Some((kind, id)) = spec.split_once(':') else { bail!("{spec:?}: use native:id") };
+    let kind = parse_kind(kind)?;
+    let p = kiln_manage::profile::get(&dirs, profile).km()?;
+    let Some(m) = p.mods.list(kind).iter().find(|m| m.id == id) else { bail!("{spec}: not in profile {profile}") };
+    let from = kiln_manage::library::LibraryRef { kind, id: id.into(), version: m.version.clone(), hash: m.hash.clone() };
+    let r = kiln_manage::library::replace_dll(&dirs, profile, &from, file, confirmed).km()?;
+    println!("{} {}: {} ({}) — game follows at next activation", kind.as_str(), id, r.entry.version, r.entry.hash);
+    for notice in r.notices { println!("  {notice}"); }
     Ok(0)
 }

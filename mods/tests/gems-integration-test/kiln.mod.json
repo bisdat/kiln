@@ -1,0 +1,9 @@
+{
+  "id": "gems-integration-test",
+  "name": "gem system integration lab test",
+  "version": "0.1.0",
+  "apiVersion": "0.2",
+  "entryAssembly": "GemsIntegrationTest.dll",
+  "side": "server",
+  "description": "PASS/FAIL lines (gem wave, the four packages together; docs/kiln/services/gems.md), player-free, two starts. First: sockets on rings (Gems.AllowSockets), Gems.AddSocket read back, a Gems.Register kill gem socketed into a ring with Gems.Socket at a spawned Shroud Forge and upgraded there, the ring worn (Gems.Equipped: a ring slot), a kill runs the gem's C# handler with the ring as its carrier, Gems.ReturnSocketedGems takes the gem back; GemCraftedEvent and GemSocketChangedEvent for each step. A second gem (backstab trigger) is registered and recorded, the world saved. Second start (kiln/data/gems-integration-test/phase2.txt): that gem is not registered: its placeholder has no program, socketed in a worn ring it spawns no gem impact. Do not deploy with gems-custom-test (the same hit program GUID)."
+}

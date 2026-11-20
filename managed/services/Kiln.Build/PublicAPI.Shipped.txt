@@ -56,6 +56,7 @@ Kiln.BuildOptions.LoadTimeout.init -> void
 Kiln.BuildRefusal
 Kiln.BuildRefusal.Base = 2 -> Kiln.BuildRefusal
 Kiln.BuildRefusal.Canceled = 5 -> Kiln.BuildRefusal
+Kiln.BuildRefusal.Changed = 6 -> Kiln.BuildRefusal
 Kiln.BuildRefusal.DryRun = 4 -> Kiln.BuildRefusal
 Kiln.BuildRefusal.None = 0 -> Kiln.BuildRefusal
 Kiln.BuildRefusal.NotLoaded = 3 -> Kiln.BuildRefusal
@@ -521,6 +522,7 @@ static Kiln.Build.UndoEntry(long id, System.TimeSpan? timeout = null) -> System.
 static Kiln.Build.WasPlaced(string! key) -> bool
 static Kiln.Build.Write(Kiln.CellBox box, System.ReadOnlySpan<Kiln.Voxel> cells, Kiln.BuildOptions? options = null, System.ReadOnlySpan<bool> mask = default(System.ReadOnlySpan<bool>)) -> Kiln.BuildResult!
 static Kiln.Build.WriteAsync(Kiln.CellBox box, Kiln.Voxel[]! cells, Kiln.BuildOptions? options = null, bool[]? mask = null) -> System.Threading.Tasks.Task<Kiln.BuildResult!>!
+static Kiln.Build.WriteIfUnchanged(Kiln.CellBox box, System.ReadOnlySpan<Kiln.Voxel> cells, System.ReadOnlySpan<Kiln.Voxel> expected, Kiln.BuildOptions? options = null, System.ReadOnlySpan<bool> mask = default(System.ReadOnlySpan<bool>)) -> Kiln.BuildResult!
 static Kiln.BuildCommands.Register() -> Kiln.CommandRegistration!
 static Kiln.BuildCommands.SchematicDirectory.get -> string!
 static Kiln.BuildCommands.SchematicPath(string! name) -> string!

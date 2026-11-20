@@ -21,6 +21,10 @@ namespace kiln::native_mods {
 // verified (native.policy verified-only); before sigdb, after init_image/apply_side.
 void discover(bool verified);
 void run_early();
+// Start first-pass waits on a separate worker.
+void start_deferred();
+// After every plugin on_ready returns, release absent/failed/idle hosts.
+void plugins_ready();
 void run_boot();
 // Hooks on: subscribes to the first world start (phase world). Hooks off: world mods become "skipped".
 void arm_world(bool hooks);
@@ -46,6 +50,11 @@ struct LateRow {
     int order = 0;                // 1-based load order
 };
 std::vector<LateRow> late_rows();
+
+// The id of the dllmain native mod one of whose DLLs is chain entry `index` (kiln::boot_info().chain, a chain.ini
+// [profile] entry), matched as when the proxy's results are read; empty for none. For the compat report (dev.29 `before`
+// rules); reads no more than the mods' paths. Valid after discover().
+std::string dllmain_mod_of(size_t index);
 
 // A dllmain native mod whose DLL the proxy loaded before kiln-core started (chain.ini [profile], not deferred). Switching
 // such a mod off in the profile (a compat rule, native.json, a profile entry) cannot stop it any more. Valid after discover().

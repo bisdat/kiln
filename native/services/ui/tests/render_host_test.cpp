@@ -28,6 +28,9 @@ int main() {
     assert(t_camera(&camera) == KILN_ERR_UNAVAILABLE && !camera.available && !camera.valid);
     assert(t_acquire(1, nullptr) == KILN_ERR_INVALID_ARGUMENT);
     KilnHandle handle = 0;
+    kui::g_overlay_mode = kui::OverlayMode::drawing_off;
+    assert(t_acquire(1, &handle) == KILN_ERR_UNAVAILABLE && handle == 0 && kui::g_render_demand == 0);
+    kui::g_overlay_mode = kui::OverlayMode::on;
     assert(t_acquire(1, &handle) == KILN_OK && kui::g_render_demand == 1);
     assert(t_release(handle) == KILN_OK && kui::g_render_demand == 0);
     assert(t_release(handle) == KILN_ERR_NOT_FOUND);

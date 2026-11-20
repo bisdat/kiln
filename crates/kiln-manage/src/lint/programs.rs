@@ -13,6 +13,12 @@ pub(super) fn check(file: &str, root: &Node) -> Vec<Diagnostic> {
             if count(names)>max { out.push(Diagnostic::new(file,codes::SIZE,value.span,&format!("program '{}' exceeds engine limit {max} for {}",program.key,names.join(" + ")))); }
         }
         let system=value.get("flags").and_then(Node::as_array).is_none_or(|flags| flags.iter().any(|n|n.as_str()==Some("system")));
+        // "world" (0.2.0-dev.29): hostOnly means "not in a client's prediction storage", a server program's flag only
+        let world=value.get("world").and_then(Node::as_str).unwrap_or("server");
+        if matches!(world,"client"|"prediction") && let Some(flag)=value.get("flags").and_then(Node::as_array)
+            .and_then(|flags| flags.iter().find(|n|n.as_str()==Some("hostOnly"))) {
+            out.push(Diagnostic::new(file,codes::SCHEMA_RULE,flag.span,&format!("program '{}': hostOnly is for server programs; a \"{world}\" program never runs in the server world (native/services/world/boot_programs.h refuses the file)",program.key)));
+        }
         let query=count(&["tpl","tplOptional","read","readOptional","write","writeOptional","with","without","anyOf"]);
         if if system {query>0} else {count(&["tpl","tplOptional","read","readOptional","write","writeOptional","with","anyOf"])==0} {
             out.push(Diagnostic::new(file,codes::SCHEMA_RULE,value.span,"system/query flag and entity access lists disagree"));
@@ -41,5 +47,10 @@ pub(super) fn check(file: &str, root: &Node) -> Vec<Diagnostic> {
         let events=(0..13).map(|n|format!("Event{n}")).collect::<Vec<_>>();
         let json=serde_json::json!({"format":1,"programs":{"a":{"eventsIn":events,"eventsOut":events}}});
         assert!(check("p",&parsed(&json.to_string())).iter().any(|d|d.code==codes::SIZE));
+        // "world": hostOnly only with a server side (the native parser refuses the file otherwise)
+        assert!(check("p",&parsed(r#"{"format":1,"programs":{"a":{"world":"client"}}}"#)).is_empty());
+        assert!(check("p",&parsed(r#"{"format":1,"programs":{"a":{"world":"both","flags":["system","hostOnly"]}}}"#)).is_empty());
+        assert!(check("p",&parsed(r#"{"format":1,"programs":{"a":{"world":"client","flags":["system","hostOnly"]}}}"#)).iter().any(|d|d.code==codes::SCHEMA_RULE));
+        assert!(check("p",&parsed(r#"{"format":1,"programs":{"a":{"world":"prediction","flags":["system","hostOnly"]}}}"#)).iter().any(|d|d.code==codes::SCHEMA_RULE));
     }
 }

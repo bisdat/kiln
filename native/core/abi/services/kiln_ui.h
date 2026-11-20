@@ -5,7 +5,15 @@
  * regions with flags, cursor and item queries, sized selectables, focus, layered drawing, colour/spacing pushes and
  * key queries; v4 appends the main-menu page (the Kiln menu inside the game's own menu) and a font choice; v5 appends
  * the game window's own input records for native plugins (subscribe_window_input); v6 appends the mods' entries in the
- * game's menus; v7 appends subscribe_key_ex, key callbacks that also get mouse presses (the last slot of the table).
+ * game's menus; v7 appends subscribe_key_ex, key callbacks that also get mouse presses.
+ *
+ * The size-guarded tail after v7 appends set_next_window_size_constraints, menu_footer (0.2.0-dev.29.11),
+ * image_load_rgba, screen_target and image_state (0.2.0-dev.29.15), and looks, themes and fonts (0.2.0-dev.29.16:
+ * theme_create, theme_free, push_theme, set_look, look_info, font_load, font_free, push_font_handle; then image_ex and
+ * image_opaque_rect: part of an image, trimmed item icons; then set_texts: Kiln's own texts in the player's language), and
+ * graphics_set and graphics_status (0.2.0-dev.29.18): Kiln's own graphics tools, the frame cap, DLSS settings and readout,
+ * then chat_completion (internal to Kiln.Ui, refused from native plugins): Tab completion in the game's chat (issue #44),
+ * then subscribe_pointer_press (0.2.0-dev.30): left and right presses over the game's own UI, take or pass.
  *
  * How (docs/re/client-render.md):
  *  - The game loads vulkan-1.dll at run time and presents with vkQueuePresentKHR on queue family 0 (no static Vulkan
@@ -24,7 +32,7 @@
  *    The drawing functions below work only there (elsewhere they do nothing and return false).
  *  - Key callbacks run on the window thread (the game's main thread) while the message is being handled.
  *  - Window-input callbacks (v5) run on the window thread too, inside the window procedure.
- *  - status, set_*, key_name: any thread.
+ *  - status, demand/capture/menu setters, key_name: any thread. Window drawing setters: frame callbacks only.
  * Native subscribers must unsubscribe before they unload. */
 #ifndef KILN_UI_H
 #define KILN_UI_H
@@ -196,6 +204,32 @@ enum {
     KILN_UI_ENTRY_ATTENTION = 2u,  /* the game's attention marker (pause menu only) */
 };
 
+/* image_state (size-guarded tail, 0.2.0-dev.29.15) */
+enum {
+    KILN_UI_IMAGE_UNKNOWN = 0,
+    KILN_UI_IMAGE_WAITING = 1,
+    KILN_UI_IMAGE_READY = 2,
+    KILN_UI_IMAGE_FAILED = 3,
+};
+
+/* image_ex (size-guarded tail, 0.2.0-dev.29.16): how an image is drawn */
+enum {
+    /* only the image's opaque bounds (image_opaque_rect: the pixels with alpha >= 16, found when it was loaded), not its
+     * transparent margin; the UVs are ignored. A fully transparent image is drawn whole. */
+    KILN_UI_IMAGE_DRAW_TRIM = 1u,
+    /* keep the source's aspect ratio inside width x height, as large as fits and centred; the whole box is still taken */
+    KILN_UI_IMAGE_DRAW_FIT = 2u,
+};
+typedef struct KilnUiImageDraw {
+    uint32_t size;         /* sizeof(KilnUiImageDraw) */
+    uint32_t flags;        /* KILN_UI_IMAGE_DRAW_* */
+    float width, height;   /* the box; 0 = the source's pixel size */
+    float u0, v0, u1, v1;  /* the source rectangle in texture coordinates (0..1; u1 < u0 flips); all 0 = the whole image */
+} KilnUiImageDraw;
+
+/* menu_footer flags (size-guarded tail after set_next_window_size_constraints) */
+#define KILN_UI_FOOTER_SHOWN 1u /* draw Kiln's line in the main menu's footer (else the game's footer as it was) */
+
 /* menu_shown (v6): which mods' entries the game's menus draw; Kiln's own Mods entry is always drawn */
 enum {
     KILN_UI_MENU_SHOW_FEW = 0,     /* a menu draws its mods' entries while it has only a few, else none (the default) */
@@ -229,6 +263,7 @@ typedef struct KilnUiMenuEntry {
 enum {
     KILN_UI_STYLE_KILN = 0,
     KILN_UI_STYLE_GAME = 1,
+    KILN_UI_STYLE_PLAYER = 2, /* 0.2.0-dev.29.16: the look the player chose (KilnUiLook); an older kiln.ui draws it as KILN */
 };
 
 typedef struct KilnUiScreen {
@@ -238,7 +273,8 @@ typedef struct KilnUiScreen {
     uint8_t crafting;     /* KILN_UI_CRAFTING_* */
     uint8_t available;    /* the game-UI hooks run (feature ui.screens) */
     uint32_t interaction; /* play data +0x2e48: for a crafting station its keen::WorkshopId (seen at run time: the
-                             Workbench gives 0x4da88f73); other uses not known; 0 = none */
+                             Workbench gives 0x4da88f73; the game's crafting cases read it as the station's workshop, also
+                             for a factory screen's station, not seen at run time); other uses not known; 0 = none */
     uint32_t station;     /* the crafting menu's station: its keen::WorkshopId (0 = the player's own crafting) */
     uint32_t workshop;    /* keen::WorkshopId of the crafting menu (0 = the player's own crafting) */
     uint32_t recipe;      /* recipe id selected in the crafting menu, 0 = none */
@@ -367,7 +403,16 @@ enum {
     KILN_UI_COLOR_NAV_CURSOR = 17,      /* the gamepad/keyboard focus outline */
     KILN_UI_COLOR_CHECK_MARK = 18,
     KILN_UI_COLOR_SLIDER_GRAB = 19,
-    KILN_UI_COLOR_COUNT = 20,
+    /* 0.2.0-dev.29.16 (an older kiln.ui ignores them: do not pop them there) */
+    KILN_UI_COLOR_TITLE_BG = 20,
+    KILN_UI_COLOR_TITLE_BG_ACTIVE = 21,
+    KILN_UI_COLOR_POPUP_BG = 22,        /* drop-downs, tooltips */
+    KILN_UI_COLOR_TAB = 23,
+    KILN_UI_COLOR_TAB_HOVERED = 24,
+    KILN_UI_COLOR_TAB_SELECTED = 25,
+    KILN_UI_COLOR_TABLE_HEADER_BG = 26,
+    KILN_UI_COLOR_TEXT_SELECTED_BG = 27,
+    KILN_UI_COLOR_COUNT = 28,           /* 20 before 0.2.0-dev.29.16 */
 };
 
 /* push_var slots: pixels (multiply by the UI scale yourself); _ALIGN ones are 0..1 */
@@ -521,6 +566,279 @@ typedef struct KilnUiWindowInput {
 /* Window thread, inside the window procedure. Keep it short: the game's message loop waits. */
 typedef void(KILN_CALL* KilnUiWindowInputFn)(const KilnUiWindowInput* input, void* user);
 
+/* ---- looks, themes and fonts (size-guarded tail, 0.2.0-dev.29.16; docs/kiln/ui.md "Looks and themes") ----
+ * A look is a palette of roles from which kiln.ui makes ImGui's colours, on one of two bases: the game's (square tiles,
+ * its menu colours read from keen::FbUiBundle at run time, its UI font; a neutral dark stand-in until or unless they can
+ * be read) or Kiln's ember. The player picks the look of Kiln's own UI (KILN_UI_STYLE_PLAYER); a mod's theme applies
+ * where the mod pushes it (push_theme) unless the player picks it for everything. */
+
+/* KilnUiLook.look */
+enum {
+    KILN_UI_LOOK_GAME = 0,         /* the game's look (the default) */
+    KILN_UI_LOOK_TRANSLUCENT = 1,  /* the game's look, the windows' backgrounds at KilnUiLook.background */
+    KILN_UI_LOOK_KILN = 2,         /* Kiln's ember look */
+    KILN_UI_LOOK_THEME = 3,        /* KilnUiLook.theme (a theme a mod offers); the game's look while it does not exist */
+};
+
+/* Palette roles (KilnUiThemeDef.roles, KilnUiLookInfo.roles) */
+enum {
+    KILN_UI_ROLE_TEXT = 0,
+    KILN_UI_ROLE_TEXT_MUTED = 1,        /* disabled and secondary text */
+    KILN_UI_ROLE_WINDOW_BG = 2,         /* windows, title bars, pop-ups */
+    KILN_UI_ROLE_PANEL_BG = 3,          /* child regions and tiles, the chosen tab, table headers */
+    KILN_UI_ROLE_FRAME_BG = 4,          /* text fields, check boxes, slider tracks, idle tabs, scrollbar tracks */
+    KILN_UI_ROLE_BORDER = 5,            /* outlines, separators, table lines */
+    KILN_UI_ROLE_ACCENT = 6,            /* check marks, slider grabs, the chosen tab's line, the focus outline, held items */
+    KILN_UI_ROLE_BUTTON = 7,            /* buttons (hovered: HEADER, held: ACCENT) */
+    KILN_UI_ROLE_HEADER = 8,            /* chosen and hovered rows, collapsing headers, an edited field */
+    KILN_UI_ROLE_ATTENTION = 9,         /* status colours for drawing (look_info): needs a look */
+    KILN_UI_ROLE_WARNING = 10,          /* ... a problem */
+    KILN_UI_ROLE_OK = 11,               /* ... fine */
+    KILN_UI_ROLE_COUNT = 12,
+};
+
+/* theme_create: a theme. Every array is indexed by Kiln's own numbers; a mask bit says the entry is set. */
+typedef struct KilnUiThemeDef {
+    uint32_t size;          /* sizeof(KilnUiThemeDef) */
+    uint32_t base;          /* KILN_UI_STYLE_GAME or KILN_UI_STYLE_KILN: what the theme starts from */
+    uint32_t role_mask;     /* bit r: roles[r] replaces the base's KILN_UI_ROLE_r */
+    uint32_t var_mask;      /* bit v: vars[v] replaces KILN_UI_VAR_v */
+    uint64_t color_mask;    /* bit s: colors[s] sets KILN_UI_COLOR_s, after the roles */
+    uint32_t roles[16];     /* 0xRRGGBBAA; the alpha is ignored (see background) */
+    uint32_t colors[32];    /* 0xRRGGBBAA */
+    float vars[16][2];      /* pixels at UI scale 1 (kiln.ui applies the scale); _ALIGN vars 0..1; y unused for one-value vars */
+    float background;       /* the windows' background opacity 0..1; < 0: the base's */
+    float rounding;         /* every corner (windows, children, frames, pop-ups, grabs, tabs), pixels at scale 1; < 0: the base's */
+    KilnHandle font;        /* 0: the base's font (the game's for GAME); else a font_load handle */
+} KilnUiThemeDef;           /* 360 bytes */
+
+/* set_look: the player's look of Kiln's UI (Kiln.Ui sets it from kiln.json "ui"). */
+typedef struct KilnUiLook {
+    uint32_t size;          /* sizeof(KilnUiLook) */
+    uint32_t look;          /* KILN_UI_LOOK_* (unknown values: GAME) */
+    KilnHandle theme;       /* LOOK_THEME: a theme_create handle */
+    float background;       /* LOOK_TRANSLUCENT: the windows' background opacity, clamped to 0.1..1 */
+    float opacity;          /* the whole overlay, text included (ImGui's global alpha), clamped to 0.3..1 */
+    float scale;            /* the overlay's size on top of the display's scale, clamped to 0.5..2 */
+    uint32_t reserved;
+} KilnUiLook;               /* 32 bytes */
+
+/* KilnUiLookInfo.glyphs (0.2.0-dev.29.16): the game's own fonts Kiln's language (else the game's) needs: a Chinese, Japanese
+   or Korean language's group, or (0.2.0-dev.29.19) for a Cyrillic language the default group's Cyrillic font */
+enum {
+    KILN_UI_GLYPHS_LATIN = 0,    /* no CJK or Cyrillic language: the overlay's fonts need nothing more */
+    KILN_UI_GLYPHS_LOADING = 1,  /* being read from the game's data (Kiln's texts show in English meanwhile) */
+    KILN_UI_GLYPHS_READY = 2,    /* merged into the overlay's font atlas */
+    KILN_UI_GLYPHS_FAILED = 3,   /* not available (kiln.log says why): Kiln's texts stay English */
+};
+
+/* look_info: the player's look and a palette. */
+typedef struct KilnUiLookInfo {
+    uint32_t size;          /* sizeof(KilnUiLookInfo) */
+    uint32_t look;          /* KILN_UI_LOOK_* of the player's look (THEME only while that theme exists) */
+    KilnHandle theme;       /* the player's theme, 0 for none */
+    float background, opacity, scale;  /* as set (clamped) */
+    uint8_t game_colors;    /* 1: the game's colours were read from its data; 0: the neutral stand-in (so far) */
+    uint8_t game_font;      /* 1: the game's UI font is loaded */
+    uint8_t glyphs;         /* KILN_UI_GLYPHS_*: the overlay's glyphs of a CJK or Cyrillic language (set_texts) */
+    uint8_t glyph_language; /* the keen::LanguageId `glyphs` is about (20 zh-CN, 21 zh-TW, 11 ja-JP, 13 ko-KR; 9 ru-RU,
+                               24 bg-BG, 34 uk-UA, other Cyrillic 9), 0 none */
+    uint32_t roles[16];     /* KILN_UI_ROLE_COUNT colours, 0xRRGGBBAA: inside a frame callback the look pushed now (the
+                               player's when none is), elsewhere the player's. WINDOW_BG's alpha is the windows' opacity */
+    uint32_t role_count;    /* KILN_UI_ROLE_COUNT */
+    uint32_t reserved2;
+} KilnUiLookInfo;           /* 104 bytes */
+
+/* set_texts: Kiln's own texts that kiln.ui draws, in the language Kiln's UI shows (docs/kiln/translating-game.md). */
+typedef struct KilnUiTexts {
+    uint32_t size;          /* sizeof(KilnUiTexts) */
+    uint32_t count;         /* entries in keys[] and texts[] */
+    KilnStr language;       /* the language Kiln's UI shows, a lower-case tag ("zh-cn", "en-us"): also picks the overlay's
+                               glyphs (the game's own font of a Chinese, Japanese or Korean language group) */
+    const KilnStr* keys;    /* "native.menu.mods", ... (keys outside "native." are ignored) */
+    const KilnStr* texts;   /* their texts, UTF-8 */
+} KilnUiTexts;              /* 40 bytes */
+
+/* graphics_set (0.2.0-dev.29.18): the player's graphics settings (Kiln.Ui sets them from kiln.json "graphics"; docs/kiln/graphics.md). */
+enum {
+    KILN_UI_DLSS_SCALE_GAME = 0,      /* DLSS's own render size for the game's DLSS mode */
+    KILN_UI_DLSS_SCALE_PER_MODE = 1,  /* mode_scale[] by DLSS mode */
+    KILN_UI_DLSS_SCALE_CUSTOM = 2,    /* custom_scale for every DLSS mode */
+};
+typedef struct KilnUiGraphics {
+    uint32_t size;          /* sizeof(KilnUiGraphics) */
+    uint32_t fps_cap;       /* the most frames a second the game renders: 0 off, else 20..500 (1..19 count as 20) */
+    uint32_t dlss_preset;   /* 0: the game's and DLSS's own; else a DLSS render preset: 10 J, 11 K, 12 L, 13 M (others: 0) */
+    uint32_t dlss_scale;    /* KILN_UI_DLSS_SCALE_* */
+    float custom_scale;     /* SCALE_CUSTOM: the render width and height as a share of the output's, 0.33..1 */
+    float mode_scale[4];    /* SCALE_PER_MODE: Quality, Balanced, Performance, Ultra Performance; 0.33..1 each */
+    uint32_t readout;       /* 1: the readout in the top right corner of the game */
+    /* 0.2.0-dev.29.18 phase B (were reserved, 0 in older callers: the game's own FSR 3, AMD's own choice) */
+    uint32_t upscaler;      /* KILN_UI_UPSCALER_*: what runs behind the game's FSR 3 option (kiln.json graphics.upscaler) */
+    uint32_t amd_upscaler;  /* KILN_UI_AMD_UPSCALER_* (kiln.json graphics.amdUpscaler) */
+} KilnUiGraphics;           /* 48 bytes */
+
+/* KilnUiGraphics.upscaler / KilnUiGraphicsStatus.upscaler: what the player chose to run behind the game's FSR 3 option.
+ * Applies at the game's next FSR 3 set-up (a world load, the FSR quality, the resolution or the 3D render scale). */
+enum {
+    KILN_UI_UPSCALER_GAME = 0,  /* "game": the game's own FSR 3, nothing changes (default) */
+    KILN_UI_UPSCALER_AMD = 1,   /* "amd": AMD FSR, FSR 4 where the GPU and driver run it (AMD's own selection), else FSR 3.1 */
+    KILN_UI_UPSCALER_XESS = 2,  /* "xess": Intel XeSS */
+};
+/* KilnUiGraphics.amd_upscaler */
+enum {
+    KILN_UI_AMD_UPSCALER_AUTO = 0,  /* "auto": FSR 3.1 until FSR 4 is confirmed in this game (was AMD's selection up to
+                                       0.2.0-dev.29.19 beta 3) */
+    KILN_UI_AMD_UPSCALER_FSR3 = 1,  /* "fsr3": FSR 3.1 even where FSR 4 runs */
+    KILN_UI_AMD_UPSCALER_FSR4 = 2,  /* "fsr4": AMD's selection, FSR 4 where it runs (experimental); since 0.2.0-dev.29.19 */
+};
+
+/* KilnUiGraphicsStatus.flags */
+enum {
+    KILN_UI_GFX_CAP_ACTIVE = 1u << 0,     /* the frame cap paces the game's frames now */
+    KILN_UI_GFX_DLSS_HOOKED = 1u << 1,    /* Kiln's hooks on NVIDIA's DLSS are in (a DLSS setting or the readout was on at start) */
+    KILN_UI_GFX_DLSS_ACTIVE = 1u << 2,    /* the game upscaled with DLSS in the last two seconds */
+    KILN_UI_GFX_DLSS_RESTART = 1u << 3,   /* a DLSS setting or the readout is on now, but was not at start: DLSS is hooked
+                                             from the next start of the game */
+    KILN_UI_GFX_DLSS_PRESET = 1u << 4,    /* the DLSS in use got Kiln's render preset */
+    KILN_UI_GFX_DLSS_SCALED = 1u << 5,    /* the DLSS in use got Kiln's render size */
+    KILN_UI_GFX_COUNTING = 1u << 6,       /* the frame counts below are kept (the frame cap or the readout is on) */
+    KILN_UI_GFX_DLSS_LIMITED = 1u << 7,   /* the player's render scale was outside DLSS's range for the mode in use: DLSS
+                                             renders at the nearest size it allows (render_width/height) */
+};
+/* KilnUiGraphicsStatus.aside_cap / aside_dlss: what the frame cap and the DLSS settings step aside for (bits). */
+enum {
+    KILN_UI_GFX_ASIDE_OPTISCALER = 1u << 0,   /* OptiScaler in the game folder */
+    KILN_UI_GFX_ASIDE_STREAMLINE = 1u << 1,   /* NVIDIA Streamline (sl.interposer.dll; frame generation mods) */
+    KILN_UI_GFX_ASIDE_VKFG = 1u << 2,         /* EnshroudedVKFG.ini: a DLSS frame generation mod */
+    KILN_UI_GFX_ASIDE_DLSSTWEAKS = 1u << 3,   /* dlsstweaks.ini: DLSSTweaks */
+    KILN_UI_GFX_ASIDE_NVNGX = 1u << 4,        /* nvngx.dll or _nvngx.dll next to the game: another DLSS loader */
+    KILN_UI_GFX_ASIDE_NGX_PATCHED = 1u << 5,  /* NVIDIA's DLSS functions were already patched by another module */
+    KILN_UI_GFX_ASIDE_OVERLAY_OFF = 1u << 6,  /* Kiln's overlay hooks are off (KilnUiStatus.error says why) */
+    KILN_UI_GFX_ASIDE_UPSCALER = 1u << 7,     /* (0.2.0-dev.29.18) another upscaler tool's files in the game folder: AMD
+                                                 FidelityFX or XeSS DLLs next to the game (another mod's), or the FSR 3
+                                                 pass already patched by another module */
+};
+/* graphics_status: what Kiln's graphics tools do now. */
+typedef struct KilnUiGraphicsStatus {
+    uint32_t size;            /* sizeof(KilnUiGraphicsStatus) */
+    uint32_t flags;           /* KILN_UI_GFX_* */
+    uint32_t aside_cap;       /* KILN_UI_GFX_ASIDE_* that keep the frame cap off (0: none) */
+    uint32_t aside_dlss;      /* KILN_UI_GFX_ASIDE_* that keep the DLSS settings off (0: none) */
+    uint32_t fps_cap;         /* the frame cap set (0 off) */
+    float rendered_fps;       /* the game's frames a second over the last half second (GFX_COUNTING) */
+    float output_fps;         /* frames presented a second: rendered_fps until a frame generation phase exists */
+    float frame_ms;           /* the mean time between the game's frames */
+    uint32_t output_width, output_height;    /* the game window's swapchain */
+    int32_t dlss_quality;     /* the DLSS in use (GFX_DLSS_HOOKED): NVSDK_NGX_PerfQuality_Value, 0 Performance, 1 Balanced,
+                                 2 Quality, 3 Ultra Performance, 4 Ultra Quality, 5 DLAA; -1 none */
+    uint32_t dlss_preset;     /* its render preset as asked (Kiln's, else the game's hint): 0 DLSS's default, 1..15 A..O
+                                 (above: no letter). Without bit 31, which the game's NGX SDK code sets on the default
+                                 it fills in for a hint the game left at 0 (0x8000000B: K) */
+    uint32_t render_width, render_height;    /* DLSS's input this frame (dynamic resolution may lower it) */
+    uint32_t dlss_output_width, dlss_output_height;
+    uint32_t reserved[2];
+    /* ---- 0.2.0-dev.29.18 phase B, an upscaler behind the game's FSR 3 option: filled when size >=
+     * KILN_UI_GRAPHICS_STATUS_SIZE_V2 (248); a 72-byte caller gets the fields above only. ---- */
+    uint32_t upscaler;          /* KILN_UI_UPSCALER_* the player chose (the setting now) */
+    uint32_t amd_upscaler;      /* KILN_UI_AMD_UPSCALER_* */
+    uint32_t upscale_running;   /* KILN_UI_UPSCALE_RUN_*: what upscales behind the game's FSR 3 option now */
+    uint32_t upscale_reason;    /* KILN_UI_UPSCALE_WHY_*: why the chosen upscaler does not run now (0: it runs, or GAME) */
+    uint32_t upscale_flags;     /* KILN_UI_UPSCALE_* */
+    uint32_t aside_upscale;     /* KILN_UI_GFX_ASIDE_* that keep Kiln's swap off (0: none) */
+    uint32_t upscale_version;   /* what runs: (major << 22) | (minor << 12) | patch (FSR 4.1.2, FSR 3.1.6, XeSS 2.0.2:
+                                   the upscaler's own version, so Super Resolution's from the XeSS SDK 3.0.2);
+                                   0: the game's FSR 3 or nothing */
+    uint32_t upscale_render_width, upscale_render_height;  /* the FSR 3 pass's input this frame (while FSR_SEEN) */
+    uint32_t upscale_output_width, upscale_output_height;
+    uint32_t reserved2;
+    char upscale_detail[128];   /* the reason in English words, UTF-8, NUL-terminated (a missing extension's or file's
+                                   name, a fault); "" when there is nothing to add. For logs and tooltips: the UI says
+                                   the reason in the player's language from upscale_reason */
+} KilnUiGraphicsStatus;     /* 248 bytes (72 before 0.2.0-dev.29.18's phase B fields) */
+#define KILN_UI_GRAPHICS_STATUS_SIZE_V1 72u
+#define KILN_UI_GRAPHICS_STATUS_SIZE_V2 248u
+
+/* KilnUiGraphicsStatus.upscale_running */
+enum {
+    KILN_UI_UPSCALE_RUN_OFF = 0,        /* Kiln's swap is not in: "game" chosen, or the swap's hooks are not in (see
+                                           upscale_reason); whatever the game chose runs and Kiln does not see it */
+    KILN_UI_UPSCALE_RUN_NOT_FSR = 1,    /* the swap is in, but the game did not upscale with FSR 3 in the last two
+                                           seconds: FSR 3 is not the game's chosen upscaler (DLSS, none), or no world */
+    KILN_UI_UPSCALE_RUN_GAME_FSR3 = 2,  /* the game's own FSR 3 runs (the chosen one does not: upscale_reason) */
+    KILN_UI_UPSCALE_RUN_AMD_FSR4 = 3,   /* AMD FSR 4 runs in place of the game's FSR 3 */
+    KILN_UI_UPSCALE_RUN_AMD_FSR3 = 4,   /* AMD FSR 3.1 */
+    KILN_UI_UPSCALE_RUN_XESS = 5,       /* Intel XeSS */
+};
+/* KilnUiGraphicsStatus.upscale_reason: why the chosen upscaler does not run. Stable numbers (never renumbered). */
+enum {
+    KILN_UI_UPSCALE_WHY_NONE = 0,            /* it runs, or GAME is chosen */
+    KILN_UI_UPSCALE_WHY_RESTART = 1,         /* chosen while the game runs: it needs Kiln's hooks or device features from
+                                                the game's start, so it runs from the next start of the game */
+    KILN_UI_UPSCALE_WHY_FILES_MISSING = 2,   /* its files are not downloaded (launcher: Settings, Graphics) */
+    KILN_UI_UPSCALE_WHY_FILES_BAD = 3,       /* a file is not the pinned one (size or SHA-256), or is a link: download again */
+    KILN_UI_UPSCALE_WHY_LOAD_FAILED = 4,     /* a vendor DLL did not load */
+    KILN_UI_UPSCALE_WHY_DEVICE = 5,          /* the GPU or driver lacks a Vulkan extension or feature it needs */
+    KILN_UI_UPSCALE_WHY_CREATE_FAILED = 6,   /* it could not be set up for these sizes: the game's FSR 3 runs */
+    KILN_UI_UPSCALE_WHY_RUNTIME_FAILED = 7,  /* it failed while upscaling: the game's FSR 3 for the rest of the session */
+    KILN_UI_UPSCALE_WHY_FAULT = 8,           /* a fault in it or in Kiln's code around it: the game's FSR 3 for the session */
+    KILN_UI_UPSCALE_WHY_ASIDE = 9,           /* Kiln steps aside for another tool (aside_upscale) */
+    KILN_UI_UPSCALE_WHY_NO_SIGNATURES = 10,  /* this game build's FSR 3 pass was not found (or could not be hooked): the
+                                                swap is off */
+    KILN_UI_UPSCALE_WHY_INPUTS = 11,         /* the game's textures are not what it takes (format, size, a missing one) */
+    KILN_UI_UPSCALE_WHY_UNAVAILABLE = 12,    /* not in this build of Kiln, or not on this system */
+    KILN_UI_UPSCALE_WHY_WAITING = 13,        /* ready: it starts at the game's next FSR 3 frame (load a world with FSR 3
+                                                chosen in the game's settings) */
+    KILN_UI_UPSCALE_WHY_NO_VULKAN = 14,      /* Kiln did not see the game's Vulkan device created: restart the game */
+};
+/* KilnUiGraphicsStatus.upscale_flags */
+enum {
+    KILN_UI_UPSCALE_HOOKED = 1u << 0,      /* Kiln's hooks on the game's FSR 3 pass are in (an upscaler other than GAME was
+                                              chosen at the game's start) */
+    KILN_UI_UPSCALE_FSR_SEEN = 1u << 1,    /* the game upscaled with FSR 3 in the last two seconds (the sizes are its) */
+    KILN_UI_UPSCALE_FILES_OK = 1u << 2,    /* the chosen backend's files are there and match their pins */
+    KILN_UI_UPSCALE_DEVICE_OK = 1u << 3,   /* the game's device has what the chosen backend needs */
+    KILN_UI_UPSCALE_FELL_BACK = 1u << 4,   /* the chosen backend failed in this session: the game's FSR 3 until restart */
+    KILN_UI_UPSCALE_AMD_PINNED = 1u << 5,  /* AMD FSR 3.1 runs because Kiln pins it (amd_upscaler AUTO or FSR3) */
+};
+
+/* Issue #44: internal Kiln.Ui chat-completion transport, NOT for native plugins.
+ * Appended after graphics_status at byte 1032; kiln.ui v1's earlier slots never move.
+ * The caller sets size and operation:
+ *  1: snapshot the focused native HUD/Social chat input, plus one queued key action.
+ *  2: set whether suggestions exist and whether the list is active.
+ *  3: queue one safe full-line replacement: text is the expected current input;
+ *     replacement is the new input. Applied ONLY by the game UI thread if
+ *     the expected text and input field still match.
+ * Completion key actions: 3 Tab, 4 Shift+Tab, 5 Up, 6 Down, 7 Escape.
+ * Text strings are UTF-8 byte sequences with explicit lengths, bounded to
+ * 256 bytes; never NUL-terminated by assumption. No player identity on wire.
+ */
+typedef struct KilnUiChatCompletion {
+    uint32_t size, operation;
+    uint32_t focused, action, cursor, text_len, replacement_len;
+    uint32_t suggestions, list_open, field, revision;
+    float x, y, width, height; /* screen pixels; field's native UiNodeRect */
+    char text[257];
+    char replacement[257];
+} KilnUiChatCompletion;
+/* ---- presses on the game's own UI (subscribe_pointer_press, size-guarded tail, 0.2.0-dev.30) ----
+ * One left or right mouse button press over the game window while Kiln does not capture input and the cursor is not
+ * over a Kiln panel. Kiln.Ui and the core's kiln.ui.inventory (slot clicks) use it; any native plugin may. */
+enum { KILN_UI_POINTER_PASS = 0u, KILN_UI_POINTER_TAKE = 1u };
+typedef struct KilnUiPointerPress {
+    uint32_t size;          /* sizeof(KilnUiPointerPress) */
+    uint32_t button;        /* 1 left, 3 right (the numbering of KILN_UI_INPUT_MOUSE_BUTTON) */
+    uint32_t mods;          /* KILN_UI_MOD_* held at the press */
+    uint32_t time;          /* the message time (GetMessageTime, milliseconds, wraps) */
+    float x, y;             /* the cursor in the window's client pixels */
+    float client_width;     /* the client area's size in pixels */
+    float client_height;
+} KilnUiPointerPress;       /* 32 bytes */
+/* Window thread, inside Kiln's window procedure: decide at once (no waiting, no game calls). KILN_UI_POINTER_TAKE keeps
+ * this press from the game; anything else passes it. */
+typedef uint32_t(KILN_CALL* KilnUiPointerFn)(const KilnUiPointerPress* press, void* user);
+
 typedef struct KilnUiApi {
     KilnServiceHeader header; /* { sizeof(KilnUiApi), KILN_UI_VERSION } */
     KilnResult(KILN_CALL* status)(KilnUiStatus* out);
@@ -620,8 +938,9 @@ typedef struct KilnUiApi {
 
     /* ---- looks for Kiln's own windows (inside a frame callback) ----
      * push_style: KILN_UI_STYLE_GAME (the game's colours and, once loaded, the game's own UI font read from its
-     *   resources at run time) or KILN_UI_STYLE_KILN (Kiln's ember theme, branding/palette.json); applies to the
-     *   windows begun until the matching pop_style. */
+     *   resources at run time), KILN_UI_STYLE_KILN (Kiln's ember theme, branding/palette.json) or, since
+     *   0.2.0-dev.29.16, KILN_UI_STYLE_PLAYER (the player's look, set_look; windows that push nothing get it too);
+     *   applies to the windows begun until the matching pop_style. */
     void(KILN_CALL* push_style)(uint32_t style);
     void(KILN_CALL* pop_style)(void);
 
@@ -840,6 +1159,109 @@ typedef struct KilnUiApi {
      * mouse presses described at KILN_UI_VK_WHEEL_UP. Other bits: KILN_ERR_INVALID_ARGUMENT. Remove it with
      * unsubscribe. */
     KilnResult(KILN_CALL* subscribe_key_ex)(KilnOwner owner, KilnUiKeyFn fn, void* user, uint32_t flags, KilnHandle* out);
+    /* Additive size-guarded tail: inside a frame callback, constrain the next window in screen pixels.
+     * With ALWAYS_AUTO_RESIZE, equal min/max width fixes width while height follows content up to max_h.
+     * No-op outside drawing frames (including KILN_UI_OVERLAY=0). Check header.size through this member
+     * and its non-null pointer before calling; older tables do not contain it. */
+    void(KILN_CALL* set_next_window_size_constraints)(float min_w, float min_h, float max_w, float max_h);
+    /* Additive size-guarded tail (0.2.0-dev.29.11; check header.size through this member and its non-null pointer):
+     * Kiln's line in the main menu's footer, "Kiln <version> - <mods> Mods Loaded" with Kiln's mark, above the game's
+     * build number (feature ui.menu_footer; it takes the place of XHL-Core's "All mods loaded" line). Kiln.Ui calls it
+     * with the count of mods loaded this start (every engine's, as Kiln's Mods page counts them; < 0 not known yet: no
+     * line) and KILN_UI_FOOTER_SHOWN unless the player hid the line (Kiln setting mainMenuFooter). Until a call with
+     * a count and SHOWN, and whenever the line is hidden or faulted, the game draws its footer as it always did (with
+     * another mod's line there). Any thread; the next frame follows it. */
+    void(KILN_CALL* menu_footer)(int32_t mods, uint32_t flags);
+    /* Additive size-guarded tail (0.2.0-dev.29.15; check header.size >= offsetof(KilnUiApi, image_load_rgba) +
+     * sizeof(void*) and the pointer): image_load with pixels instead of a PNG. `rgba` is width * height * 4 bytes (R, G, B,
+     * A, rows top down, straight alpha; copied), 1..4096 a side. The same kind of image as image_load's: drawn with image /
+     * image_button, freed with image_free, uploaded at the next frame. Any thread. 0 = refused (no overlay drawing, a size
+     * out of range, NULL). Kiln.Ui loads the game's own item icons with it (kiln.assets texture_rgba decodes them). */
+    KilnHandle(KILN_CALL* image_load_rgba)(KilnOwner owner, const uint8_t* rgba, uint32_t width, uint32_t height);
+    /* Additive size-guarded tail (0.2.0-dev.29.15; check header.size >= offsetof(KilnUiApi, screen_target) + sizeof(void*)
+     * and the pointer): the entity the open screen is about, as of the last completed UI frame, while it is a factory screen
+     * (hud_screen 28, FactoryCrafting: a kiln's, a smelter's...): the station's entity id (play.target; replicated ids are the
+     * server's), else 0. 0 too on a build where the constant ui/play.target did not resolve. A factory screen runs no crafting
+     * builder (docs/re/game-ui.md section 5), so KilnUiScreen.crafting stays 0 there; its workshop is KilnUiScreen.interaction.
+     * Any thread. */
+    uint32_t(KILN_CALL* screen_target)(void);
+    /* Additive size-guarded tail (0.2.0-dev.29.15; check header.size >= offsetof(KilnUiApi, image_state) + sizeof(void*) and
+     * the pointer): KILN_UI_IMAGE_* of an image from image_load / image_load_rgba. WAITING: its texture is not uploaded yet
+     * (a new image waits a frame or more: at most 8 are uploaded a frame); READY: uploaded with its descriptor set, drawn;
+     * FAILED: the backend uploaded it without a descriptor set (the overlay's pool was full), it is never drawn: free it;
+     * UNKNOWN: no such image. image / image_button draw nothing (keeping the place) until READY. Any thread.
+     * Kiln lets at most 960 images exist at once (the pool holds 1024 sets: ImGui keeps the rest for its fonts); past that
+     * image_load and image_load_rgba answer 0. */
+    int32_t(KILN_CALL* image_state)(KilnHandle image);
+    /* Additive size-guarded tail (0.2.0-dev.29.16; check header.size >= offsetof(KilnUiApi, x) + sizeof(void*) and the
+     * pointer for each): looks, themes and fonts (docs/kiln/ui.md "Looks and themes", docs/kiln/services/ui.md).
+     * theme_create: a theme from `def` (copied). Any thread. INVALID_ARGUMENT: def NULL or too small, base not GAME/KILN,
+     *   a value not finite. Remove it with theme_free (owners free theirs before unloading; a theme in use falls back to
+     *   the player's look; the player's theme falls back to the game's look).
+     * push_theme: like push_style with a theme (inside a frame callback; pop_style pops it). False, nothing pushed: no
+     *   such theme.
+     * set_look: the player's look of Kiln's UI. Kiln.Ui calls it from the player's setting; a call from a native plugin
+     *   is refused (KILN_ERR_UNAVAILABLE): mods never set the player's look. Any thread; the next frame follows it.
+     * look_info: the player's look and a palette (KilnUiLookInfo; set out->size first). Any thread.
+     * font_load: a TrueType / OpenType font (TTF or OTF; bytes copied) for Kiln windows, added to the overlay's font
+     *   atlas at the next frame. 0: refused (not a font, no drawing, past the font budget: 8 fonts, 8 MiB each, 24 MiB in
+     *   all; kiln.log says why). Any thread. font_free drops it (an owner's fonts go when it unloads... free yours).
+     * push_font_handle: text drawn until pop_font uses that font at the current size (inside a frame). False (nothing
+     *   to pop): unknown, or not in the atlas yet. */
+    KilnResult(KILN_CALL* theme_create)(KilnOwner owner, const KilnUiThemeDef* def, KilnHandle* out);
+    KilnResult(KILN_CALL* theme_free)(KilnHandle theme);
+    bool(KILN_CALL* push_theme)(KilnHandle theme);
+    KilnResult(KILN_CALL* set_look)(const KilnUiLook* look);
+    KilnResult(KILN_CALL* look_info)(KilnUiLookInfo* out);
+    KilnHandle(KILN_CALL* font_load)(KilnOwner owner, const void* data, size_t len);
+    void(KILN_CALL* font_free)(KilnHandle font);
+    bool(KILN_CALL* push_font_handle)(KilnHandle font);
+    /* Additive size-guarded tail (0.2.0-dev.29.16; check header.size >= offsetof(KilnUiApi, x) + sizeof(void*) and the
+     * pointer for each): part of an image, trimmed images.
+     * image_ex: image / image_button with a source rectangle and KILN_UI_IMAGE_DRAW_* (draw: set draw->size first; NULL or
+     *   too small: nothing drawn). An empty id draws an image (returns false), else a button of that id (true when
+     *   clicked; the box is the image's, as image_button's, plus the frame padding). Inside a frame callback. Not uploaded
+     *   yet (WAITING) or FAILED: the box is kept, nothing drawn (a button stays clickable). TRIM | FIT draws the game's
+     *   item icons (Kiln.Ui's ItemIcon(item, size, trim: true)) without their wide transparent margins.
+     * image_opaque_rect: the image's opaque bounds in pixels (alpha >= 16; the whole image when nothing is that opaque),
+     *   found once when it was loaded. False: no such image. Any thread. */
+    bool(KILN_CALL* image_ex)(KilnStr id, KilnHandle image, const KilnUiImageDraw* draw);
+    bool(KILN_CALL* image_opaque_rect)(KilnHandle image, uint32_t* x, uint32_t* y, uint32_t* width, uint32_t* height);
+    /* Additive size-guarded tail (0.2.0-dev.29.16; check header.size >= offsetof(KilnUiApi, set_texts) + sizeof(void*) and
+     * the pointer): Kiln's own texts that kiln.ui draws (the Mods entry, Kiln's line in the main menu's footer, the fallback
+     * window), from runtime/locales/<language>.json's "native." section, and the language Kiln's UI shows. Kiln.Ui calls it
+     * at start and whenever that language changes (kiln.json ui.language, or the game's language with "auto"); the next
+     * frame and the game's next menu frame follow it. Until then, and for a key it lacks, kiln.ui draws English. With a
+     * Chinese, Japanese or Korean language (or the game's), kiln.ui adds the game's own font of that language group to the
+     * overlay's font atlas. Copied; any thread. A call from a native plugin is refused (KILN_ERR_UNAVAILABLE): the player
+     * chooses the language. INVALID_ARGUMENT: NULL, size too small, count over 4096 or NULL arrays with a count. */
+    KilnResult(KILN_CALL* set_texts)(const KilnUiTexts* texts);
+    /* Additive size-guarded tail (0.2.0-dev.29.18; check header.size >= offsetof(KilnUiApi, x) + sizeof(void*) and the
+     * pointer for each): Kiln's own graphics tools (docs/kiln/graphics.md).
+     * graphics_set: the player's settings (KilnUiGraphics, set size first; values are clamped). Kiln.Ui calls it from
+     *   kiln.json "graphics" and its Graphics page; a call from a native plugin is refused (KILN_ERR_UNAVAILABLE): the
+     *   player chooses them. The frame cap and the readout follow at once; DLSS settings when the game next sets up
+     *   DLSS, and only when Kiln hooked DLSS at start (KILN_UI_GFX_DLSS_RESTART). Any thread. INVALID_ARGUMENT: NULL or
+     *   size too small.
+     * graphics_status: what the tools do now (set out->size first): the frame cap, the frame rates (while the cap or the
+     *   readout is on), the DLSS in use (its mode, preset, render and output size) and what they step aside for. Mods may
+     *   read it. Any thread. INVALID_ARGUMENT: NULL or size too small. */
+    KilnResult(KILN_CALL* graphics_set)(const KilnUiGraphics* settings);
+    KilnResult(KILN_CALL* graphics_status)(KilnUiGraphicsStatus* out);
+    /* Appended internal-only slot (issue #44). Native plugins are refused;
+     * Kiln.Ui uses this on its render thread, never calls game input itself.
+     * The game UI thread owns all reads and actual EditSetText replacements. */
+    KilnResult(KILN_CALL* chat_completion)(KilnUiChatCompletion* io);
+    /* Additive size-guarded tail (0.2.0-dev.30; check header.size >= offsetof(KilnUiApi, subscribe_pointer_press) +
+     * sizeof(void*) and the pointer): presses on the game's own UI (docs/kiln/ui.md "The game's inventory slots").
+     * subscribe_pointer_press: fn(press) once per physical left or right button press (its raw input record and its
+     *   window message are paired, mouse_press.h's rule), on the window thread, only while Kiln does not capture input
+     *   and the cursor is not over a Kiln panel. When any subscriber answers KILN_UI_POINTER_TAKE the press is kept from
+     *   the game (the raw record's button flag is taken out, or the record kept whole when it carries nothing else; the
+     *   button message is not passed on); its release always reaches the game, so nothing stays held. fn must decide at
+     *   once: it runs inside the window procedure. A structured exception in fn removes the subscription (logged).
+     *   Remove it with unsubscribe (KILN_OK: a call in flight has ended). INVALID_ARGUMENT: no fn. */
+    KilnResult(KILN_CALL* subscribe_pointer_press)(KilnOwner owner, KilnUiPointerFn fn, void* user, KilnHandle* out);
 } KilnUiApi;
 
 /* ====================================================================================================================

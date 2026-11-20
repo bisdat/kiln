@@ -1,7 +1,8 @@
 /* SPDX-License-Identifier: MIT
  * kiln.items v4 (v1 + water in containers: fuel, fuel_read, fuel_keep, fuel_keep_end; v3 + item moves that keep item state,
  * container names, inventory-transfer events and rules; v4 + item instances: a stamp per item entity, its location and
- * its save record's fields in one read; v5 + equip and unequip through the game's own functions): put items into and take them out of inventories (players'
+ * its save record's fields in one read; v5 + equip and unequip through the game's own functions; v6 + equipment sets: a
+ * player's equipment slots changed in one transaction): put items into and take them out of inventories (players'
  * backpacks, chests, villagers), gear with a level and rarity included; read an entity's inventory; the game's item
  * catalog.
  *
@@ -27,14 +28,18 @@
 #ifndef KILN_ITEMS_H
 #define KILN_ITEMS_H
 #include "../kiln_api.h"
+#include "kiln_decisions.h" /* v6: KilnEventEntityKey and KilnSetOpV1, shared with kiln.decisions' kind 18 */
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 #define KILN_ITEMS_SERVICE "kiln.items"
-#define KILN_ITEMS_VERSION 5u  /* v2 appends the fuel functions, v3 the move, name and transfer functions, v4 the item
-                                  instances (stamps, locations, records), v5 (0.2.0-dev.27) equip and unequip; check
-                                  header.size */
+#define KILN_ITEMS_VERSION 8u  /* v2 appends the fuel functions, v3 the move, name and transfer functions, v4 the item
+                                  instances (stamps, locations, records), v5 (0.2.0-dev.27) equip and unequip, v6
+                                  (0.2.0-dev.29) equipment sets, v7 (0.2.0-dev.30, the gem wave) gem sockets on any gear:
+                                  KILN_ITEMS_GEM_SLOT_ANY, REPLACE, DYE, DURABILITY and socket_roll, v8 (0.2.0-dev.29.19,
+                                  the equipment wave) gear_write, gear_read and gear_status, then rarity_rolls and
+                                  roll_status; check header.size */
 
 typedef uint32_t KilnItemId;  /* 0 = none */
 typedef uint64_t KilnSlotId;  /* 0 = none / let the game choose */
@@ -67,6 +72,19 @@ enum {
     KILN_ITEMS_UNLOCK = 0x0100u,         /* give gear with `unlock` of its upgrades (perks) unlocked, as the workbench's
                                             upgrade does it (each one raises the level by 1); 255 = all of them */
     KILN_ITEMS_GEM_SLOT = 0x0200u,       /* give weapons with an empty gem slot when the game's own roll gave none */
+    /* since 0.2.0-dev.30 (v7, the gem wave; feature items.pide_options, like the two above) */
+    KILN_ITEMS_GEM_SLOT_ANY = 0x0400u,   /* with GEM_SLOT: any gear gets the empty gem slot (rings, armour, shields,
+                                            tools...), not only weapons. Gems, dyes and customization items never do */
+    KILN_ITEMS_REPLACE = 0x0800u,        /* give: in the same transaction first take the item entity `pide` out of
+                                            `slot` (it must hold `item` and that entity), then create the new item,
+                                            preferably in that slot: both or neither (Gems.AddSocket re-creates gear this
+                                            way). `count` 1, a gear item, `slot` and `pide` required; not with RECIPE.
+                                            KILN_ITEMS_REFUSED, nothing changed: the item is worn or held (a player's
+                                            equipment slot or item in hand, or ItemState IsEquipped), has a gem slot
+                                            (its gem would be destroyed with it), or has no readable ItemState */
+    KILN_ITEMS_DYE = 0x1000u,            /* give gear dyed with KilnItemsRequestEx.dye (needs the Ex request) */
+    KILN_ITEMS_DURABILITY = 0x2000u,     /* give gear at KilnItemsRequestEx.durability (0..1 of its max; needs the Ex
+                                            request), as the game's DurabilityPercentageInit sets it */
 };
 
 typedef struct KilnItemsRequest {
@@ -83,6 +101,14 @@ typedef struct KilnItemsRequest {
     KilnSlotId slot;     /* give: the slot to fill first (0 = the game's choice); take: the slot to take from first
                             (0 = the game's order: a player's held action-bar slot, then everything) */
 } KilnItemsRequest;
+
+/* v7: a give with KILN_ITEMS_DYE or KILN_ITEMS_DURABILITY passes this, base.size = sizeof(KilnItemsRequestEx). */
+typedef struct KilnItemsRequestEx {
+    KilnItemsRequest base;
+    KilnItemId dye;      /* KILN_ITEMS_DYE: the dye item (ColorPaletteItem.paletteItemId); 0 = undyed */
+    float durability;    /* KILN_ITEMS_DURABILITY: 0..1 of the item's max durability (0 = broken) */
+    uint32_t reserved[2];/* 0 */
+} KilnItemsRequestEx;
 
 /* KilnItemsResult.status */
 enum {
@@ -675,6 +701,538 @@ typedef struct KilnItemsEquipStatus {
     char detail[160];         /* why it is off; NUL-terminated */
 } KilnItemsEquipStatus;
 
+/* ---------------------------------------------------------------------------------------------- equipment sets */
+
+/* since 0.2.0-dev.29 (v6; feature items.equip_sets; check header.size before calling a v6 member).
+ *
+ * A player's 20 physical equipment slots (the ones SlotSelection.equipment holds: keen::EquipmentSlot 0-16, 21-23)
+ * changed in ONE inventory transaction inside kiln_items_equip: every slot changes or none does. Chapter 10 of the
+ * dev.28 dossier is the contract; docs/kiln/services/items.md "Equipment sets" the guide.
+ *
+ * Snapshots. set_capture copies a canonical snapshot of the player's inventory tree, equipment selection and item
+ * entities (normalised bytes, compared byte for byte; never a revision counter or a hash) and stores it under a token:
+ * nonzero, only growing within the process, never handed out twice. At most 256 snapshots live in all and 16 per owner;
+ * a full store refuses (KILN_ERR_BUFFER_TOO_SMALL, refusal BUDGET), it never evicts another. A snapshot can be used
+ * through captured_step + 250; the server world's stop, a new world and a reset of the item stamps (the engine's id
+ * counter went down) forget every one. A snapshot belongs to the owner that captured it. */
+
+/* KilnSetSnapshotV1.refusal (and later results' refusal codes) */
+#define KILN_SET_REFUSAL_NONE 0u
+#define KILN_SET_REFUSAL_NO_PLAYER 1u   /* no player character with an initialised inventory and equipment */
+#define KILN_SET_REFUSAL_NO_IDENTITY 2u /* kiln.decisions has no identity for the player (KilnEventEntityKey) */
+#define KILN_SET_REFUSAL_SHAPE 3u       /* the inventory tree is beyond the bounds (64 setups, depth 3, 32 inventories), links
+                                           back into itself or names an entity that cannot be read */
+#define KILN_SET_REFUSAL_BUDGET 4u      /* 256 snapshots live, or 16 of this owner */
+#define KILN_SET_REFUSAL_STALE 5u       /* the snapshot is unknown, used, expired, another owner's or another world's, or from
+                                           before a reset of the item stamps */
+#define KILN_SET_REFUSAL_NOT_HERE 6u    /* a selected item or stack is not where the set says, or not the player's */
+#define KILN_SET_REFUSAL_SLOT_TYPE 7u   /* an item does not fit its equipment slot */
+#define KILN_SET_REFUSAL_NO_ROOM 8u     /* an unequip needs a free Generic slot and there is none */
+#define KILN_SET_REFUSAL_CYCLE 9u       /* items move between equipment slots in a cycle: refused until the rollback matrix
+                                           passes (UnsupportedCycle) */
+#define KILN_SET_REFUSAL_BACKPACK 10u   /* the backpack would change (its contents move with it): refused until the rollback
+                                           matrix passes */
+#define KILN_SET_REFUSAL_LOCKED 11u     /* an item is worn in a slot the set leaves as it is */
+#define KILN_SET_REFUSAL_MERGE 12u      /* a stack of the item type its slot already holds (the game could merge them) */
+#define KILN_SET_REFUSAL_TOO_MANY_STEPS 13u /* more than 128 steps */
+#define KILN_SET_REFUSAL_SWAPS 14u      /* more than one slot that holds an item gets another one, or a slot is emptied after
+                                           such a swap: the game's commit would point a slot at the item that came off
+                                           (UnsupportedSwaps; the rollback matrix, docs/kiln/services/items.md) */
+
+typedef struct KilnSetSnapshotV1 {
+    uint32_t size;               /* in: sizeof the caller's struct (at least the chapter's 88 bytes, up to `reason`) */
+    uint32_t player;
+    uint64_t token;              /* 0 when refused */
+    uint64_t world_epoch;        /* kiln.window_clock's epoch of the server world */
+    uint64_t captured_step;      /* the step it was taken in; usable through captured_step + 250 */
+    uint8_t process_session[16]; /* kiln.window_clock's process nonce */
+    KilnEventEntityKey identity; /* the player's identity (kiln.decisions resolve_entity) */
+    /* appended (written only when `size` covers them): why a capture was refused */
+    uint32_t refusal;            /* KILN_SET_REFUSAL_* */
+    uint32_t reserved;
+    char reason[160];            /* NUL-terminated; "" when captured */
+} KilnSetSnapshotV1;
+
+/* Planning (set_plan). The planner works on a snapshot (it does not take it): the game's equip and unequip calls in the
+ * order one transaction would run them, or a refusal before anything is touched. Advisory for a caller: equip_set plans
+ * again from its own snapshot and trusts no step a caller sends. Order: targets whose item is in a non-equipment slot,
+ * in numeric slot order (equip: a swap, the slot's old stack goes to the source slot); then targets to be emptied
+ * (unequip: into the first free slot of a top-level Generic link); a cycle (an item worn in one named slot and asked
+ * for in another) is refused (CYCLE). Each source is found again by its item entity after the steps before it. */
+
+/* KilnSetPlanV1.status */
+#define KILN_SET_PLAN_PLANNED 0u
+#define KILN_SET_PLAN_NO_CHANGE 1u /* every entry holds already (or no entries): no step */
+#define KILN_SET_PLAN_STALE 4u     /* the snapshot cannot be used (refusal STALE) */
+#define KILN_SET_PLAN_REFUSED 5u   /* refusal and failed_entry say why */
+
+#define KILN_SET_STEP_EQUIP 1u
+#define KILN_SET_STEP_UNEQUIP 2u
+
+typedef struct KilnSetStepV1 {
+    uint32_t index;
+    uint8_t op;             /* KILN_SET_STEP_* */
+    uint8_t equipment_slot; /* keen::EquipmentSlot */
+    uint8_t entry;          /* the request entry it serves; 0xFF: a temporary unequip that frees a slot for a cycle */
+    uint8_t kind;           /* what goes in: 0 nothing (an unequip), 1 an item entity, 2 a plain stack */
+    uint32_t item_id, item_entity;
+    uint64_t instance_stamp;
+    uint64_t source_slot;   /* an equip: where the stack is when the step runs (as planned) */
+    uint32_t count, reserved;
+} KilnSetStepV1;
+
+#define KILN_SET_MAX_STEPS 128u
+
+typedef struct KilnSetPlanV1 {
+    uint32_t size;                 /* in: sizeof(KilnSetPlanV1) */
+    uint32_t status;               /* KILN_SET_PLAN_* */
+    uint32_t refusal;              /* KILN_SET_REFUSAL_* */
+    uint32_t failed_entry;         /* the entry the refusal is about; UINT32_MAX for none */
+    uint32_t step_count;
+    uint32_t required_free_slots;  /* the most free Generic slots the steps use at one time */
+    uint64_t valid_through_step;   /* the snapshot's captured_step + 250 */
+    char reason[256];              /* NUL-terminated; "" when planned */
+    KilnSetStepV1 steps[KILN_SET_MAX_STEPS];
+} KilnSetPlanV1;
+
+/* Applying (equip_set). One request is one inventory transaction inside kiln_items_equip, with one decision: the
+ * service files a kiln.decisions kind-18 request (KilnSetDecisionRequestV1) in the Pre after the call, so mods see one
+ * PlayerEquippingEvent for the whole set (cancel: Canceled, nothing runs); without a decision consumer, a full queue, a
+ * timeout or a released capability the set goes on (kiln.decisions fails open). In the Pre of the step it runs in, the
+ * player's session and identity are checked again; inside the program the snapshot's bytes are compared before the
+ * transaction (a handler or the game that changed the inventory: StaleSnapshot), the plan is made again from it, every
+ * step is staged on one transaction, and the terminal state is checked against the request and the snapshot
+ * (chapter 10 §4.4). FIFO with the player's single equip requests; at most one set per player and step.
+ *
+ * Completion: `done` is called exactly once, on the tick thread in Pre (or when the server world stops), with a result
+ * and its changes that are valid only during the call. Never for a call that did not return KILN_OK. Owners: the
+ * snapshot must be the effective origin's: a call by owner 0 (Kiln's managed bridge) names the asking mod in
+ * origin_owner; any other caller may name 0 (itself) or itself, never another owner. cancel(ticket) drops the callback
+ * (v1 semantics), cancel_owner(owner) drops an owner's queued sets and their callbacks, set_cancel(ticket) ends a queued
+ * set Dropped and keeps its callback. A set that did not run within 250 steps ends Dropped. */
+
+#define KILN_SET_REQUEST_DRY_RUN 1u /* KilnSetRequestV1.flags: run and roll back, never commit */
+/* Lab only: accepted when <kiln data>/kiln.items/sets-lab existed when the server started, refused as bad flags
+ * otherwise (never on a player's server). Faults injected into a real run, for the rollback matrix of the lab test. */
+#define KILN_SET_REQUEST_LAB_FAIL_STEP 0x100u      /* the step in bits 16-23: its equip is called with an empty source */
+#define KILN_SET_REQUEST_LAB_GUARD_BIT 0x200u      /* the commit's own rollback bit is set: refused before the commit */
+#define KILN_SET_REQUEST_LAB_COMMIT_ANYWAY 0x400u  /* the bit set and committed anyway: the commit rolls back by itself */
+#define KILN_SET_REQUEST_LAB_FAKE_MISMATCH 0x800u  /* the result read as unmet after the commit: InvariantFailure */
+
+typedef struct KilnSetRequestV1 {
+    uint32_t size;                /* sizeof(KilnSetRequestV1) */
+    uint32_t player;
+    uint32_t flags;               /* KILN_SET_REQUEST_*; other bits are refused */
+    uint32_t count;               /* 0..20 entries; slots not named stay as they are */
+    const KilnSetOpV1* entries;   /* copied by equip_set */
+    uint64_t snapshot_token;      /* set_capture's token; taken (used up) by an accepted call */
+    KilnOwner origin_owner;       /* the snapshot's owner: see "Applying" */
+    uint8_t process_session[16];  /* must be this process's nonce (checked before the token is looked up) */
+} KilnSetRequestV1;
+
+typedef struct KilnSetSlotValueV1 {
+    uint32_t item_id, item_entity, count, reserved;
+    uint64_t instance_stamp;      /* the item entity's stamp, zero-extended; 0 for a plain stack or an empty slot */
+    uint64_t inventory_slot;      /* the slot that holds it (an equipment page's); 0 when empty */
+} KilnSetSlotValueV1;
+
+typedef struct KilnSetChangeV1 {
+    uint32_t size, equipment_slot; /* keen::EquipmentSlot */
+    KilnSetSlotValueV1 before, after;
+} KilnSetChangeV1;
+
+/* KilnSetResultV1.status */
+#define KILN_SET_DONE 0u
+#define KILN_SET_NO_CHANGE 1u
+#define KILN_SET_SIMULATED 2u
+#define KILN_SET_CANCELED 3u
+#define KILN_SET_STALE_SNAPSHOT 4u
+#define KILN_SET_REFUSED 5u
+#define KILN_SET_COMMIT_ROLLED_BACK 6u
+#define KILN_SET_DROPPED 7u
+#define KILN_SET_INVARIANT_FAILURE 8u
+#define KILN_SET_UNAVAILABLE 9u
+/* KilnSetResultV1.flags */
+#define KILN_SET_RESULT_DRY_RUN 1u
+#define KILN_SET_RESULT_COMMITTED 2u
+#define KILN_SET_RESULT_MAY_HAVE_MUTATED 4u
+
+typedef struct KilnSetResultV1 {
+    uint32_t size, status, game_error;
+    uint32_t failed_operation;    /* the step the game refused; UINT32_MAX if none */
+    uint64_t ticket, decision_id, world_epoch, applied_step; /* decision_id 0: no decision was filed */
+    uint32_t player, flags, change_count;
+    uint32_t refusal;             /* KILN_SET_REFUSAL_* of a refusal or a stale snapshot; 0 otherwise */
+    char reason[256];             /* NUL-terminated; "" for Done, NoChange, Simulated */
+    KilnSetChangeV1 changes[20];  /* the slots a commit changed (also after an invariant failure, when they could be read) */
+} KilnSetResultV1;
+
+typedef void(KILN_CALL* KilnSetDoneV1)(const KilnSetResultV1* result, void* user);
+
+typedef struct KilnSetStatusV1 {
+    uint32_t size;          /* in: sizeof(KilnSetStatusV1) */
+    uint8_t available;      /* 1: sets can run now (feature items.equip_sets, equip, item instances, kiln.decisions'
+                               kind 18, kiln.window_clock, this build's component layouts; not switched off) */
+    uint8_t broken;         /* 1: switched off until the server, or the hosting player's game, restarts (an invariant failure or a fault) */
+    uint16_t reserved;
+    uint32_t snapshots;     /* live snapshots */
+    uint32_t pending;       /* set requests queued or deciding */
+    uint64_t captured;      /* snapshots taken since the start */
+    uint64_t done;          /* sets committed */
+    uint64_t refused;       /* sets that ended with anything but Done, NoChange, Simulated */
+    uint64_t invariant_failures;
+    char detail[160];       /* why it is off; NUL-terminated */
+} KilnSetStatusV1;
+
+/* ---------------------------------------------------------------------------------------------- gem sockets -- */
+
+/* v7 (the gem wave; feature items.pide_options). The game gives a new weapon an empty gem slot (WeaponGemSlot) by a
+ * chance per rarity or when its ItemInfo sets gemSlotOverride; every other kind of gear never gets one, although the
+ * rest of the gem system does not care: equipment_impacts runs the gem of the item in any of its 11 impact slots, and
+ * the save keeps a socket on any item (docs/kiln/services/gems-sockets.md). kiln.items' createPide hook widens this:
+ *  - KILN_ITEMS_GEM_SLOT_ANY on a give (above);
+ *  - gemSlotOverride is honoured on every gear item, not only weapons (no game item outside the weapons sets it: a
+ *    data pack sets the item field "gemSlotOverride": true on its own ring);
+ *  - socket_roll: new gear of a kind rolls an empty gem slot with a chance whenever the game creates it (loot, crafting,
+ *    a give). The chance of a kind is the highest any owner asked for. Weapons keep the game's own roll.
+ * Nothing changes for an item that already has a gem slot. */
+
+/* kinds (KilnItemsSocketRoll's fields): by ItemInfo category and equipment slot type */
+typedef struct KilnItemsSocketRoll {
+    uint32_t size;  /* sizeof(KilnItemsSocketRoll) */
+    float rings;    /* 0..1: category Equipment, slot type Armour_Ring (37) */
+    float armour;   /* Equipment, Armour_Head .. Armour_Feet (13-17) */
+    float shields;  /* Equipment, Shield (18) */
+    float other;    /* any other gear (tools, backpacks, gliders...) except weapons, gems, dyes and customization */
+    uint32_t reserved; /* 0 */
+} KilnItemsSocketRoll;
+
+/* ---------------------------------------------------------------------------------------------- gear -------- */
+
+/* v8, since 0.2.0-dev.29.19 (the equipment wave; feature items.gear; check header.size before calling a v8 member).
+ *
+ * An item entity's rarity, enhancements and level, written in place. The game keeps an instance's rarity as its
+ * enhancement count: PerkContainerNew {u8 availablePerks, u8 unlockedPerks} on the item entity, and itemRarityOf is
+ * availablePerks - 1 (Common 0 .. Legendary 4) when that is 0..4, else the type's ItemInfo.rarity. The shown rarity,
+ * level and damage (ItemState.itemRarityUi, itemLevelUi, baseDamageUi) are derived from it by the game's own
+ * item_state_init in the next sim step, and replicated from there. An unlocked enhancement is one level: the Level
+ * attribute moves with unlockedPerks, as the game's UnlockPerk and its free +1 / -1 action do. Max durability is
+ * computed once by item_durability_init from rarity and level; clearing ItemState's DurabilityInitialized bit makes it
+ * run again in the next step, keeping the current / max ratio (docs/re/items.md section 19).
+ *
+ * gear_write queues one write; it runs in the next sim step inside the serial program kiln_items_gear (registered
+ * through kiln.world) as tracked writes (WriteOther, the attribute's formulas), so players and the save get it like the
+ * game's own changes. The request names the item entity with its v4 stamp (read_instances, a slot's reserved field):
+ * an item entity that is gone, or another item now, ends STALE and nothing changes. Server world only (a dedicated
+ * server, or the hosting player's game). */
+
+/* KilnItemsGearRequest.flags */
+enum {
+    KILN_ITEMS_GEAR_AVAILABLE = 0x0001u,     /* availablePerks := available (1..5; the rarity is available - 1). Lower
+                                                than unlockedPerks: unlockedPerks (and Level) come down with it */
+    KILN_ITEMS_GEAR_UNLOCKED = 0x0002u,      /* unlockedPerks := unlocked (0..availablePerks after AVAILABLE); Level moves
+                                                by the same number (it needs a Level) */
+    KILN_ITEMS_GEAR_LEVEL = 0x0004u,         /* Level := level (the shown level, enhancements included); the base level
+                                                (level - unlockedPerks) must be in the type's level range */
+    KILN_ITEMS_GEAR_FORCE_SLOT = 0x0008u,    /* AVAILABLE beyond the type's last filled perk slot (an empty slot; the
+                                                game skips it): without it such a request ends NO_SLOT */
+    KILN_ITEMS_GEAR_DURABILITY_REFRESH = 0x0010u, /* clear DurabilityInitialized: the game recomputes max durability at
+                                                     the new rarity and level in the next step, keeping the ratio */
+    KILN_ITEMS_GEAR_DURABILITY_REPAIR = 0x0020u,  /* current := max, then as REFRESH: full at the new max */
+    KILN_ITEMS_GEAR_DRY_RUN = 0x0040u,       /* say what would change (after = the plan), change nothing */
+    KILN_ITEMS_GEAR_NOT_EQUIPPED = 0x0080u,  /* refuse (EQUIPPED) when the item is equipped; default: allowed */
+    /* package P7 (per-instance values; the same v8 table, 0x0100 stays unused): */
+    KILN_ITEMS_GEAR_ANY_LEVEL = 0x0200u,     /* LEVEL's base may lie outside the type's level range (1..255 still). A save
+                                                load sets such a level back into the range (docs/re/items.md section 20):
+                                                the caller keeps the level it wants and writes it again after a load */
+    KILN_ITEMS_GEAR_DURABILITY_MAX = 0x0400u,/* Durability max := durability_max, current kept at the same share of it
+                                                (REPAIR: current := the new max). Refused with REFRESH, whose recompute
+                                                would replace it; REFUSED while the game has not computed the item's
+                                                durability yet (DurabilityInitialized clear). The game computes max again
+                                                after a save load (ItemState, where the bit lives, is not saved): the
+                                                caller writes it again after a load */
+};
+
+#define KILN_ITEMS_GEAR_MAX_DURABILITY 1000000 /* the highest durability_max (package P7) */
+
+/* KilnItemsGearResult.status */
+enum {
+    KILN_ITEMS_GEAR_DONE = 0,         /* written (or, DRY_RUN, would be); also when nothing needed a change */
+    KILN_ITEMS_GEAR_STALE = 1,        /* the entity is not the stamped item entity any more (gone, or another item) */
+    KILN_ITEMS_GEAR_NOT_GEAR = 2,     /* no PerkContainerNew (the type has no enhancement slots), or no Level for an
+                                         UNLOCKED change or LEVEL, or no Durability for DURABILITY_MAX */
+    KILN_ITEMS_GEAR_NO_SLOT = 3,      /* AVAILABLE beyond the type's last filled perk slot (without FORCE_SLOT) */
+    KILN_ITEMS_GEAR_OUT_OF_RANGE = 4, /* unlocked above available, a level whose base is outside the type's range
+                                         (without ANY_LEVEL) */
+    KILN_ITEMS_GEAR_EQUIPPED = 5,     /* NOT_EQUIPPED and the item is equipped */
+    KILN_ITEMS_GEAR_UNAVAILABLE = 6,  /* gear writes were switched off since the request was accepted */
+    KILN_ITEMS_GEAR_DROPPED = 7,      /* not run: the server world went away or did not step for 10 s */
+    KILN_ITEMS_GEAR_REFUSED = 8,      /* a component of the entity is not laid out as expected; nothing changed */
+};
+
+/* KilnItemsGearResult.changed / KilnItemsGearState.flags */
+enum {
+    KILN_ITEMS_GEAR_CHANGED_PERKS = 0x01u,      /* PerkContainerNew */
+    KILN_ITEMS_GEAR_CHANGED_LEVEL = 0x02u,      /* Level (current or max) */
+    KILN_ITEMS_GEAR_CHANGED_DURABILITY = 0x04u, /* Durability current (REPAIR) */
+    KILN_ITEMS_GEAR_CHANGED_STATE = 0x08u,      /* ItemState: DurabilityInitialized cleared */
+    KILN_ITEMS_GEAR_CHANGED_DURABILITY_MAX = 0x10u, /* Durability max (DURABILITY_MAX, package P7) */
+};
+enum {
+    KILN_ITEMS_GEAR_HAS_PERKS = 0x01u,      /* the entity has PerkContainerNew */
+    KILN_ITEMS_GEAR_HAS_LEVEL = 0x02u,      /* ... a Level with values */
+    KILN_ITEMS_GEAR_HAS_DURABILITY = 0x04u, /* ... a Durability with values */
+    KILN_ITEMS_GEAR_EQUIPPED_NOW = 0x08u,   /* ItemState IsEquipped */
+    KILN_ITEMS_GEAR_DURABILITY_INIT = 0x10u,/* ItemState DurabilityInitialized */
+};
+
+typedef struct KilnItemsGearRequest {
+    uint32_t size;       /* sizeof(KilnItemsGearRequest) */
+    uint32_t flags;      /* KILN_ITEMS_GEAR_*: at least one of AVAILABLE, UNLOCKED, LEVEL, DURABILITY_REFRESH,
+                            DURABILITY_REPAIR; other bits are refused */
+    KilnEntity entity;   /* the item entity */
+    uint32_t stamp;      /* its v4 stamp (required) */
+    KilnItemId item;     /* the item it must hold (0 = whatever the stamp names) */
+    uint8_t available;   /* AVAILABLE: 1..5 */
+    uint8_t unlocked;    /* UNLOCKED: 0..5 */
+    uint16_t reserved0;  /* 0 */
+    uint32_t level;      /* LEVEL: 1..255 (the save record keeps the low byte) */
+    int32_t durability_max; /* DURABILITY_MAX: 1..KILN_ITEMS_GEAR_MAX_DURABILITY; else 0 (package P7: was reserved) */
+    uint32_t reserved[2];/* 0 */
+} KilnItemsGearRequest;
+
+/* One item entity's gear as the program (or gear_read) sees it. */
+typedef struct KilnItemsGearState {
+    uint32_t flags;           /* KILN_ITEMS_GEAR_HAS_* */
+    KilnItemId item;
+    uint8_t available;        /* HAS_PERKS: availablePerks */
+    uint8_t unlocked;         /* HAS_PERKS: unlockedPerks */
+    uint8_t rarity;           /* itemRarityOf: available - 1 when that is 0..4, else type_rarity */
+    uint8_t type_rarity;      /* ItemInfo.rarity */
+    uint8_t max_available;    /* the type's last filled perk slot + 1 (0: none filled): the highest AVAILABLE without
+                                 FORCE_SLOT */
+    uint8_t rarity_ui;        /* ItemState.itemRarityUi: the rarity the game derived (and players are sent); it follows a
+                                 write in the next sim step */
+    uint8_t level_ui;         /* ItemState.itemLevelUi, likewise */
+    uint8_t reserved0;        /* 0 */
+    uint32_t level;           /* HAS_LEVEL: Level current */
+    uint32_t level_max;       /* HAS_LEVEL: Level max */
+    uint32_t type_level_min;  /* ItemInfo.itemLevelRange */
+    uint32_t type_level_max;
+    int32_t durability;       /* HAS_DURABILITY: current */
+    int32_t durability_max;   /* HAS_DURABILITY: max */
+    uint16_t state;           /* ItemState.itemState bits */
+    uint16_t reserved1;       /* 0 */
+} KilnItemsGearState;
+
+typedef struct KilnItemsGearResult {
+    uint32_t size;            /* sizeof(KilnItemsGearResult) of kiln.items */
+    int32_t status;           /* KILN_ITEMS_GEAR_DONE ... */
+    uint64_t ticket;
+    KilnEntity entity;
+    uint32_t stamp;
+    uint32_t flags;           /* the request's */
+    uint32_t changed;         /* KILN_ITEMS_GEAR_CHANGED_* (DRY_RUN: would change) */
+    uint32_t steps;           /* sim steps between the request and the write */
+    uint32_t reserved;        /* 0 */
+    uint64_t step;            /* the sim step it ran in (0: it never ran) */
+    KilnItemsGearState before;
+    KilnItemsGearState after; /* read back after the writes (DRY_RUN: the plan). rarity is the derived one: the game's
+                                 itemRarityUi follows in the next step */
+    char message[160];        /* "" when DONE; NUL-terminated */
+} KilnItemsGearResult;
+
+typedef void(KILN_CALL* KilnItemsGearDoneFn)(const KilnItemsGearResult* result, void* user);
+
+typedef struct KilnItemsGearStatus {
+    uint32_t size;            /* in: sizeof(KilnItemsGearStatus) */
+    uint8_t available;        /* 1: gear_write can run (feature items.gear, kiln.world, the layouts, the program) */
+    uint8_t program;          /* KILN_ITEMS_PROGRAM_* of kiln_items_gear */
+    uint8_t replicated;       /* 1: the world replicates ItemState, where the game puts the rarity, level and damage it
+                                 derives from the written state (checked when the program first runs) */
+    uint8_t saved;            /* 1: the world saves PerkContainerNew and Level */
+    uint32_t pending;         /* requests waiting for the program */
+    uint64_t writes;          /* item entities changed since the start */
+    uint64_t refused;         /* requests that ended with anything but DONE */
+    char detail[160];         /* why it is off; NUL-terminated */
+} KilnItemsGearStatus;
+
+/* ---------------------------------------------------------------------------------------------- upgrades ---- */
+
+/* v8, since 0.2.0-dev.29.19 (the equipment wave, package P3; feature items.gear and the inventory transaction; check
+ * header.size).
+ *
+ * A gear write paid for: gear_upgrade takes the costs from the payers and makes the gear write of `gear` in one step
+ * of kiln_items_gear, all or nothing. The program checks the item (the v4 stamp, as gear_write), plans the write
+ * (gear_logic.h: a refusal such as NO_SLOT takes nothing), counts each cost item in the payers' inventories, takes
+ * them on one inventory transaction of its own (removeItems per payer, in the payers' order: each pays what it has
+ * until the cost is met), commits it, counts again to see the commit stood, and only then writes the gear components.
+ * A commit that rolled back by itself ends REFUSED with nothing written. Without KILN_ITEMS_UPGRADE_WRITE it only
+ * pays (a failed roll that keeps the item and spends the cost). The roll itself is the caller's: kiln.items never
+ * rolls.
+ *
+ * Payers: the player, or initialized inventories that are no player's and no NPC's (a container the caller vouches
+ * for). A cost item must be a plain stack (no item entity of its own: never gear, never a gem), so the item being
+ * upgraded can never be spent. */
+
+#define KILN_ITEMS_UPGRADE_MAX_COSTS 8u
+#define KILN_ITEMS_UPGRADE_MAX_PAYERS 8u
+#define KILN_ITEMS_UPGRADE_MAX_COUNT 100000u
+
+/* KilnItemsUpgradeRequest.flags */
+enum {
+    KILN_ITEMS_UPGRADE_WRITE = 0x0001u,   /* make `gear`'s write (its flags as gear_write takes them, without DRY_RUN);
+                                             without it `gear` only names the item (flags 0) and the costs are taken */
+    KILN_ITEMS_UPGRADE_DRY_RUN = 0x0002u, /* check, count and plan; take and write nothing */
+};
+
+/* KilnItemsUpgradeResult.status: KILN_ITEMS_GEAR_DONE .. KILN_ITEMS_GEAR_REFUSED (the write's own outcome, nothing
+ * taken unless DONE), and: */
+enum {
+    KILN_ITEMS_UPGRADE_CANT_PAY = 9,  /* the payers hold too little of a cost item (have[] says how much); nothing changed */
+    KILN_ITEMS_UPGRADE_BAD_PAYER = 10,/* a payer has no initialized inventory, or is another player or an NPC */
+    KILN_ITEMS_UPGRADE_CHANGED = 11,  /* expect_available: the item's enhancement slots are not that many now */
+};
+
+typedef struct KilnItemsUpgradeCost {
+    KilnItemId item;  /* a plain stack's item (no item entity) */
+    uint32_t count;   /* 1..KILN_ITEMS_UPGRADE_MAX_COUNT */
+} KilnItemsUpgradeCost;
+
+typedef struct KilnItemsUpgradeRequest {
+    uint32_t size;               /* sizeof(KilnItemsUpgradeRequest) */
+    uint32_t flags;              /* KILN_ITEMS_UPGRADE_* */
+    KilnEntity player;           /* who upgrades (required); the only player that may pay */
+    uint32_t cost_count;         /* 0..8 */
+    uint32_t payer_count;        /* 0..8; at least 1 when cost_count is not 0 */
+    uint32_t expect_available;   /* 0, or 1..5: the item must still have this many enhancement slots (the rarity the
+                                    caller priced), else CHANGED and nothing happens (two upgrades of one item in a step) */
+    KilnItemsGearRequest gear;   /* the item (entity, stamp, item) and, with WRITE, the write */
+    KilnItemsUpgradeCost costs[KILN_ITEMS_UPGRADE_MAX_COSTS];  /* an item at most once; unused entries 0 */
+    KilnEntity payers[KILN_ITEMS_UPGRADE_MAX_PAYERS];          /* in order; each at most once; unused entries 0 */
+} KilnItemsUpgradeRequest;
+
+typedef struct KilnItemsUpgradeResult {
+    uint32_t size;               /* sizeof(KilnItemsUpgradeResult) of kiln.items */
+    int32_t status;              /* KILN_ITEMS_GEAR_DONE ... KILN_ITEMS_UPGRADE_BAD_PAYER */
+    uint64_t ticket;
+    uint32_t flags;              /* the request's */
+    uint32_t cost_count;         /* the request's */
+    uint32_t paid_from_player;   /* items the player paid, all costs together (the rest came from other payers) */
+    uint32_t reserved;           /* 0 */
+    uint32_t paid[KILN_ITEMS_UPGRADE_MAX_COSTS]; /* per cost: items taken (DONE: the count; DRY_RUN: would take) */
+    uint32_t have[KILN_ITEMS_UPGRADE_MAX_COSTS]; /* per cost: what the payers held before (capped at 2^32-1) */
+    KilnItemsGearResult gear;    /* the write's result (before, after, changed, steps, message); without WRITE before ==
+                                    after and changed 0. The upgrade's message is gear.message */
+} KilnItemsUpgradeResult;
+
+typedef void(KILN_CALL* KilnItemsUpgradeDoneFn)(const KilnItemsUpgradeResult* result, void* user);
+
+/* ---------------------------------------------------------------------------------------------- rarity rolls -- */
+
+/* v8, since 0.2.0-dev.29.19 (the equipment wave, package P5; feature items.gear.rolls; check header.size).
+ *
+ * A rarity rolled when the game creates an item, per item type. createPide (docs/re/items.md section 10) takes the
+ * rarity its caller asked for, or, with none asked, the type's rule (generateRarity: the lowest allowed, else
+ * ItemInfo.rarity); the item gets PerkContainerNew {rarity + 1, 0} when the type has perk slot [rarity], and its weapon
+ * gem slot by the rarity's chance. kiln.items' mid hook where createPide reads the asked rarity (items/PideRarity)
+ * replaces it, for item types a rule names, with a weighted roll among the rarities the type has a perk slot for, so the
+ * game itself then makes the item at that rarity: enhancements, socket chance, durability. Which creations a rule takes
+ * (KILN_ITEMS_ROLL_*):
+ *  - CRAFT: the game creates the item and asked for no rarity: crafting at a station or the hand menu (the recipe
+ *    function clears level, rarity and fuel), Items.GiveRecipeResult, and any other game creation without a rarity;
+ *  - LOOT: the game creates it with a rarity it rolled or fixed: random loot (containers, world pickups, random
+ *    drop-table stacks roll one from globalRarityDropRates); a loot entry that fixes its rarity (LootableItemInfo
+ *    useUiRarity) is a LOOT creation too: leave LOOT out for such an item to keep it;
+ *  - GIVE: a give of kiln.items for this item type without KILN_ITEMS_RARITY. A give with KILN_ITEMS_RARITY is never
+ *    rolled.
+ * Items no rule names are never touched. Server world (and a hosting client, which is the server of its world). */
+enum {
+    KILN_ITEMS_ROLL_CRAFT = 0x1u,
+    KILN_ITEMS_ROLL_LOOT = 0x2u,
+    KILN_ITEMS_ROLL_GIVE = 0x4u,
+};
+
+/* One item type's rule. */
+typedef struct KilnItemsRarityRoll {
+    KilnItemId item;     /* the item type (not 0; once per set) */
+    uint32_t sources;    /* KILN_ITEMS_ROLL_* (at least one; other bits are refused) */
+    float weights[5];    /* Common .. Legendary: 0 or more, finite, at least one above 0. A rarity whose perk slot the
+                            type lacks never comes up (its weight is left out); with none left the game's rarity stays */
+    uint32_t reserved;   /* 0 */
+} KilnItemsRarityRoll;
+
+typedef struct KilnItemsRollStatus {
+    uint32_t size;        /* in: sizeof(KilnItemsRollStatus) */
+    uint8_t available;    /* 1: rolls act (feature items.gear.rolls hooked, ItemInfo's perk slots found by reflection) */
+    uint8_t reserved0[3];
+    uint32_t items;       /* item types with a rule now (all owners merged) */
+    uint32_t owners;      /* owners with rules */
+    uint32_t conflicts;   /* item types more than one owner names (the last owner to set its rules wins) */
+    uint32_t reserved1;
+    uint64_t rolled[5];   /* creations given each rarity by a roll since the start */
+    uint64_t kept;        /* creations of a named type left as the game made them (the rule does not take that source) */
+    uint64_t no_slot;     /* rolls with no rarity the type has a perk slot for: the game's rarity stayed */
+    uint64_t faults;      /* the hook faulted (the item was created as the game made it) */
+    char detail[160];     /* why rolls are off; NUL-terminated */
+} KilnItemsRollStatus;
+
+/* ---------------------------------------------------------------------------- power and armour scales ---- */
+
+/* v8, since 0.2.0-dev.29.19 (the equipment wave, package P7; features items.gear.power and items.gear.armor; check
+ * header.size).
+ *
+ * A multiplier of one item entity's power (the damage it deals) and of its armour, kept by kiln.items for this server
+ * world and applied where the game computes them, so nothing of the item's saved state changes:
+ *  - power: the game computes a used item's power when an impact of it starts (a swing, a shot, a spell: impact_initialize,
+ *    items/ItemPower: int(int(seed x creep x level + seed) x dmgMod x speedMod)) and multiplies the impact's damage
+ *    distribution by the weapon's power plus its ammunition's (docs/re/abilities.md). kiln.items' detour multiplies the
+ *    power of an item entity with a scale right after the game computed it, so the damage of that item's impacts
+ *    follows (armour, block, crit and attributes still act after, as for the game's own numbers);
+ *  - armour: apply_armor sums every worn piece's armour (its type's armorSetup at its base level plus each unlocked
+ *    perk's) into the wearer's nine armour values, slot by slot. Two mid hooks around one piece's part
+ *    (items/ArmorSlotBase, items/ArmorSlotEnd) multiply what that piece added when it has a scale.
+ * Server world only: the hooks act on the server world's storage, never on a game client's own world. What players see
+ * in the game's tooltip is the type's number (a game client computes it from its own data, docs/re/game-ui.md): Kiln
+ * clients can be shown the scaled number through kiln.ui.values' tooltip_values. The table is forgotten when a server
+ * world closes or starts (entity ids start again); a caller that keeps scales across a restart sets them again. The
+ * hooks install at the first scale other than 1 (nothing is hooked on a server that never uses them). */
+
+#define KILN_ITEMS_SCALE_CAPACITY 8192u /* items with a scale at once */
+#define KILN_ITEMS_SCALE_MIN 0.01f
+#define KILN_ITEMS_SCALE_MAX 100.0f
+
+/* KilnItemsGearScale.flags */
+enum {
+    KILN_ITEMS_SCALE_POWER = 0x01u, /* power: the damage the item's impacts deal */
+    KILN_ITEMS_SCALE_ARMOR = 0x02u, /* armor: the armour values the item adds to its wearer */
+};
+
+typedef struct KilnItemsGearScale {
+    uint32_t size;        /* sizeof(KilnItemsGearScale) */
+    uint32_t flags;       /* gear_scale: which scales to set (KILN_ITEMS_SCALE_*); read: which are not 1 */
+    KilnEntity entity;    /* the item entity */
+    uint32_t stamp;       /* its v4 stamp (gear_scale: required) */
+    float power;          /* SCALE_POWER: KILN_ITEMS_SCALE_MIN..MAX; 1 = the item's own power */
+    float armor;          /* SCALE_ARMOR: likewise */
+    uint32_t reserved[2]; /* 0 */
+} KilnItemsGearScale;
+
+typedef struct KilnItemsScaleStatus {
+    uint32_t size;        /* in: sizeof(KilnItemsScaleStatus) */
+    uint8_t power;        /* 1: power scales act (feature items.gear.power, the detour installed or installable) */
+    uint8_t armor;        /* 1: armour scales act (feature items.gear.armor) */
+    uint8_t power_hooked; /* 1: the power detour is installed */
+    uint8_t armor_hooked; /* 1: the armour mid hooks are installed */
+    uint32_t entries;     /* items with a scale now */
+    uint32_t capacity;    /* KILN_ITEMS_SCALE_CAPACITY */
+    uint32_t reserved;    /* 0 */
+    uint64_t powered;     /* item powers the detour scaled since the start */
+    uint64_t armored;     /* armour pieces the mid hooks scaled */
+    uint64_t faults;      /* faults inside a hook (each ended the hook's work for that call; the game's own value stood) */
+    char detail[160];     /* why a scale is off; NUL-terminated */
+} KilnItemsScaleStatus;
+
 /* ---------------------------------------------------------------------------------------------- the table ---- */
 
 typedef struct KilnItemsApi {
@@ -814,6 +1372,105 @@ typedef struct KilnItemsApi {
     KilnResult(KILN_CALL* equip)(KilnOwner owner, const KilnItemsEquipRequest* request, KilnItemsEquipDoneFn done,
                                  void* user, uint64_t* out_ticket);
     KilnResult(KILN_CALL* equip_status)(KilnItemsEquipStatus* out); /* any thread */
+
+    /* ---- v6, since 0.2.0-dev.29: equipment sets (check header.size; KILN_ERR_UNAVAILABLE without feature
+     * items.equip_sets) ---- */
+
+    /* Captures a snapshot of `player`'s inventory for `owner` (see "equipment sets"); out->size in. KILN_OK: out holds
+     * the token, epoch, step, nonce and identity. KILN_ERR_INVALID_ARGUMENT: player 0, out NULL or too small.
+     * KILN_ERR_UNAVAILABLE: sets are off (set_status says why). KILN_ERR_WRONG_THREAD: not the world thread in a
+     * world-safe phase (kiln.window_clock: Pre or Post). KILN_ERR_NOT_FOUND: refused for this player (out->refusal and
+     * out->reason when out->size covers them). KILN_ERR_BUFFER_TOO_SMALL: the snapshot budget is used up (refusal
+     * BUDGET; nothing was evicted). */
+    KilnResult(KILN_CALL* set_capture)(KilnOwner owner, uint32_t player, KilnSetSnapshotV1* out);
+    /* Releases a snapshot `owner` captured. KILN_ERR_NOT_FOUND: unknown, used up, expired or another owner's. Any
+     * thread. */
+    KilnResult(KILN_CALL* set_release_snapshot)(KilnOwner owner, uint64_t token);
+    /* The state of equipment sets. Any thread. */
+    KilnResult(KILN_CALL* set_status)(KilnSetStatusV1* out);
+    /* Plans `count` entries (KilnSetOpV1, kiln_decisions.h; omitted slots stay as they are) against the snapshot `token`
+     * of `owner` (see "Planning"; the snapshot is not taken). KILN_OK: *out has the plan or the refusal.
+     * KILN_ERR_INVALID_ARGUMENT: out NULL or too small, or malformed entries (more than 20, a slot that is no equipment
+     * slot or named twice, an item selected twice, an item without its entity, id or stamp, a stack without its item,
+     * slot or count, non-zero reserved fields). KILN_ERR_UNAVAILABLE: sets are off. Any thread. */
+    KilnResult(KILN_CALL* set_plan)(KilnOwner owner, uint64_t token, const KilnSetOpV1* entries, uint32_t count, KilnSetPlanV1* out);
+    /* Queues a set (see "Applying"). *ticket (optional) = its ticket, from the service's one ticket counter.
+     * KILN_ERR_INVALID_ARGUMENT: request NULL or too small, player 0, bad flags, malformed entries (as set_plan), an
+     * origin_owner the caller may not name, or a snapshot of another player. KILN_ERR_UNAVAILABLE: sets are off.
+     * KILN_ERR_NOT_FOUND: stale: another process's nonce, or a snapshot that is unknown, used, expired, another owner's,
+     * another world's or from before a stamp reset (no callback). KILN_ERR_BUFFER_TOO_SMALL: 256 sets are waiting (a
+     * refusal for now; the snapshot is not used). KILN_OK: `done` (it may be NULL) runs once later. Any thread. */
+    KilnResult(KILN_CALL* equip_set)(KilnOwner owner, const KilnSetRequestV1* request, KilnSetDoneV1 done, void* user, uint64_t* ticket);
+    /* Ends a queued set (not started) Dropped at the next Pre; its callback is kept and runs once. KILN_ERR_NOT_FOUND:
+     * no such set, or it already ran or is running. Never undoes a commit. Any thread. */
+    KilnResult(KILN_CALL* set_cancel)(uint64_t ticket);
+
+    /* ---- v7, since 0.2.0-dev.30: gem sockets (check header.size; KILN_ERR_UNAVAILABLE without feature
+     * items.pide_options) ---- */
+
+    /* Sets `owner`'s socket rolls (see "gem sockets"); NULL or every chance 0 ends them. KILN_ERR_UNAVAILABLE (checked
+     * first, for any non-NULL roll, even an invalid one: a probe that changes nothing): feature gems.sockets is off.
+     * KILN_ERR_INVALID_ARGUMENT: a chance outside 0..1 (or not a number), size too small, reserved not 0.
+     * cancel_owner(owner) ends them too. Any thread; the next item the game creates uses them. */
+    KilnResult(KILN_CALL* socket_roll)(KilnOwner owner, const KilnItemsSocketRoll* roll);
+
+    /* ---- v8, since 0.2.0-dev.29.19: gear (check header.size; KILN_ERR_UNAVAILABLE without feature items.gear) ---- */
+
+    /* Queues a gear write (see "gear"). *out_ticket (optional) = its ticket. Refused at once with
+     * KILN_ERR_INVALID_ARGUMENT (no request or a short one, entity 0, stamp 0, no operation, bad flags, available
+     * outside 1..5, unlocked above 5, level outside 1..255, non-zero reserved fields) or KILN_ERR_UNAVAILABLE (feature
+     * items.gear off, no kiln.world, a layout check failed, the program refused or switched off, 1024 requests
+     * waiting). Otherwise `done` runs once on the tick thread in Pre with the result (it may be NULL). cancel(ticket)
+     * and cancel_owner(owner) drop the callback. Any thread. */
+    KilnResult(KILN_CALL* gear_write)(KilnOwner owner, const KilnItemsGearRequest* request, KilnItemsGearDoneFn done,
+                                      void* user, uint64_t* out_ticket);
+    /* An item entity's gear now, through GetComponent (no write): *out zeroed, then filled. stamp 0 = any; otherwise
+     * KILN_ERR_NOT_FOUND also when the entity is not that stamped item entity. KILN_ERR_NOT_FOUND: no item entity
+     * (no ItemState). KILN_ERR_UNAVAILABLE: feature items.gear or items.instances off, or before the server world's
+     * first step. Tick thread (Pre / Post). */
+    KilnResult(KILN_CALL* gear_read)(KilnEntity entity, uint32_t stamp, KilnItemsGearState* out);
+    KilnResult(KILN_CALL* gear_status)(KilnItemsGearStatus* out); /* any thread */
+
+    /* ---- v8, since 0.2.0-dev.29.19 (package P5): rarity rolls at creation (check header.size; KILN_ERR_UNAVAILABLE
+     * without feature items.gear.rolls) ---- */
+
+    /* Replaces `owner`'s rules (see "rarity rolls"): `count` entries of `roll_size` bytes (sizeof(KilnItemsRarityRoll)
+     * the caller was built with, at least the v8 size). rolls NULL or count 0 ends them (always KILN_OK; cancel_owner
+     * does it too). KILN_ERR_UNAVAILABLE (checked first for a set): rolls are off (roll_status says why).
+     * KILN_ERR_INVALID_ARGUMENT: roll_size too small, more than 65536 entries, an entry roll_status would not take (item
+     * 0 or named twice, no source or an unknown bit, a weight below 0 or not a number, no weight above 0, reserved not
+     * 0); nothing changes then. Any thread; the next item the game creates uses them. */
+    KilnResult(KILN_CALL* rarity_rolls)(KilnOwner owner, const KilnItemsRarityRoll* rolls, uint32_t count, uint32_t roll_size);
+    KilnResult(KILN_CALL* roll_status)(KilnItemsRollStatus* out); /* any thread */
+
+    /* ---- v8, since 0.2.0-dev.29.19 (package P3): rarity upgrades, a gear write paid for (see "upgrades"; check
+     * header.size; KILN_ERR_UNAVAILABLE without feature items.gear or the inventory transaction) ---- */
+
+    /* Queues an upgrade. *out_ticket (optional) = its ticket. Refused at once with KILN_ERR_INVALID_ARGUMENT (no request
+     * or a short one, player 0, entity or stamp 0, bad flags, a WRITE whose gear request gear_write would refuse or that
+     * has DRY_RUN, gear fields set without WRITE, more than 8 costs or payers, costs without a payer, a cost item 0 or
+     * named twice, a count outside 1..100000, a payer 0 or named twice, expect_available above 5, non-zero unused entries) or
+     * KILN_ERR_UNAVAILABLE (as gear_write, or the inventory transaction is off). Otherwise `done` runs once on the tick
+     * thread in Pre with the result (it may be NULL). cancel(ticket) and cancel_owner(owner) drop the callback. Any
+     * thread. */
+    KilnResult(KILN_CALL* gear_upgrade)(KilnOwner owner, const KilnItemsUpgradeRequest* request, KilnItemsUpgradeDoneFn done,
+                                        void* user, uint64_t* out_ticket);
+
+    /* ---- v8, since 0.2.0-dev.29.19 (package P7): per-instance power and armour (see "power and armour scales"; check
+     * header.size: a table without them ends at 344) ---- */
+
+    /* Sets an item entity's power and/or armour scale (s->flags names which; 1 = the item's own value, which removes
+     * it). KILN_ERR_INVALID_ARGUMENT: no request or a short one, entity or stamp 0, no flag or an unknown one, a scale
+     * outside KILN_ITEMS_SCALE_MIN..KILN_ITEMS_SCALE_MAX or not a number, reserved not 0. KILN_ERR_NOT_FOUND: the entity
+     * is not that stamped item entity (gone, or never stamped). KILN_ERR_UNAVAILABLE: the scale's feature is off
+     * (items.gear.power, items.gear.armor; scale_status says why), or its hook could not be installed (the first scale
+     * other than 1 installs it). KILN_ERR_BUFFER_TOO_SMALL: KILN_ITEMS_SCALE_CAPACITY items have a scale. Tick thread
+     * (Pre / Post); the next game computation uses it. */
+    KilnResult(KILN_CALL* gear_scale)(const KilnItemsGearScale* scale);
+    /* An item entity's scales: *out zeroed, then filled (size, entity, stamp, flags = the scales other than 1, power,
+     * armor; 1 for a scale it has none of). stamp 0 = any. KILN_ERR_NOT_FOUND: not that stamped item entity. Any thread. */
+    KilnResult(KILN_CALL* gear_scale_read)(KilnEntity entity, uint32_t stamp, KilnItemsGearScale* out);
+    KilnResult(KILN_CALL* scale_status)(KilnItemsScaleStatus* out); /* any thread */
 } KilnItemsApi;
 
 #ifdef __cplusplus

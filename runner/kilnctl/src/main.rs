@@ -17,6 +17,7 @@ mod run;
 mod server;
 mod sigport;
 mod steam;
+mod tick_compare;
 mod util;
 mod wine;
 
@@ -266,6 +267,13 @@ enum Cmd {
         /// Print summary.txt instead of writing the zip
         #[arg(long, conflicts_with = "out")]
         print: bool,
+        /// Leave out another mod's own file (its path in the zip, e.g. game/BuildingTools.log; repeatable), or
+        /// `other-mods` for all of them. Kiln's own logs, its settings and the listings always stay in
+        #[arg(long, value_name = "PATH")]
+        exclude: Vec<String>,
+        /// Print what the report holds (each file, its size and what was replaced in it) instead of writing the zip
+        #[arg(long, conflicts_with_all = ["out", "print"])]
+        contents: bool,
     },
     /// Runtime bundles: create, verify, install into a game folder, uninstall (docs/kiln/launcher/bundle.md)
     Bundle {
@@ -287,6 +295,17 @@ enum Cmd {
         #[command(subcommand)]
         cmd: ProfileCmd,
     },
+    /// Compare two tick-stats.jsonl files (before/after moving a mod's work into tasks): per-world step time and
+    /// steps over budget, per-mod Pre/Post time and share of the step, and the tasks section when present (T12)
+    TickCompare {
+        /// The "before" tick-stats.jsonl (kiln/logs/tick-stats.jsonl of the first run)
+        before: PathBuf,
+        /// The "after" tick-stats.jsonl, same save and route as the first
+        after: PathBuf,
+        /// Print the report as one JSON document instead of the text tables
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -301,6 +320,22 @@ enum LibraryCmd {
     List { kind: Option<String> },
     /// Use the changed files of an entry edited in its Library folder: kind:id[@version] (the newest by default)
     TakeOver { entry: String },
+    /// Replace one native mod DLL in a profile; game follows at the next activation.
+    ReplaceDll {
+        entry: String,
+        file: PathBuf,
+        #[arg(long)]
+        profile: String,
+        /// Accept filename and detected-kind warnings.
+        #[arg(long)]
+        confirm: bool,
+    },
+    /// Roll a mod in a profile back to an earlier version an update kept: kind:id[@version] (the newest kept by
+    /// default); the version rolled away from is kept. The game folder follows at the profile's next activation
+    Rollback {
+        profile: String,
+        entry: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -464,7 +499,7 @@ fn dispatch(cmd: Cmd) -> anyhow::Result<i32> {
             ops::backup(&load(&name)?)?;
         }
         Cmd::List => ops::list()?,
-        Cmd::Report { name, dir, out, print } => return report::run(report::ReportArgs { name, dir, out, print }),
+        Cmd::Report { name, dir, out, print, exclude, contents } => return report::run(report::ReportArgs { name, dir, out, print, exclude, contents }),
         Cmd::Bundle { cmd } => {
             return match cmd {
                 BundleCmd::Create { stage, out, git, epoch } => bundle::create(&stage, &out, git, epoch),
@@ -480,6 +515,8 @@ fn dispatch(cmd: Cmd) -> anyhow::Result<i32> {
                 LibraryCmd::Import { paths } => profiles::import(paths),
                 LibraryCmd::List { kind } => profiles::list(kind),
                 LibraryCmd::TakeOver { entry } => profiles::take_over(&entry),
+                LibraryCmd::ReplaceDll { entry, file, profile, confirm } => profiles::replace_dll(&profile, &entry, &file, confirm),
+                LibraryCmd::Rollback { profile, entry } => profiles::rollback(&profile, &entry),
             };
         }
         Cmd::Profile { cmd } => {
@@ -499,6 +536,9 @@ fn dispatch(cmd: Cmd) -> anyhow::Result<i32> {
                 ClientCmd::Activate { profile, deactivate, dir, real } => client::activate(profile, deactivate, dir, real),
                 ClientCmd::PlayOnce { mode, profile, dir, real } => client::play_once(&mode, profile, dir, real),
             };
+        }
+        Cmd::TickCompare { before, after, json } => {
+            return tick_compare::run(tick_compare::TickCompareArgs { before, after, json });
         }
         Cmd::Cmd { name, line, source, complete, json, timeout } => {
             return console::run(console::CmdArgs {
@@ -526,7 +566,7 @@ fn data_use(cmd: &Cmd) -> lock::Use {
     match cmd {
         Cmd::Init { .. } | Cmd::Install { .. } | Cmd::Prefix { .. } | Cmd::Preflight { .. } | Cmd::Run { .. } => Use::None,
         Cmd::Start { .. } | Cmd::Stop { .. } | Cmd::Status { .. } | Cmd::Logs { .. } | Cmd::Port { .. } | Cmd::Gate { .. } => Use::None,
-        Cmd::List | Cmd::Cmd { .. } => Use::None,
+        Cmd::List | Cmd::Cmd { .. } | Cmd::TickCompare { .. } => Use::None,
         Cmd::Deploy { bundle, .. } => if bundle.is_some() { Use::Whole } else { Use::None },
         Cmd::Update { .. } => Use::Part,
         Cmd::Backup { .. } | Cmd::Report { .. } | Cmd::Library { .. } | Cmd::Profile { .. } | Cmd::Client { .. } => Use::Whole,
@@ -582,7 +622,7 @@ mod data_use_tests {
         for args in [
             &["run", "s"][..], &["start", "s"], &["stop", "s"], &["logs", "s", "--follow"], &["port", "s"], &["gate", "s"],
             &["install", "s"], &["prefix", "s"], &["status", "s"], &["list"], &["deploy", "s"], &["bundle", "verify", "k.zip"],
-            &["cmd", "s", "help"],
+            &["cmd", "s", "help"], &["tick-compare", "a.jsonl", "b.jsonl"],
         ] {
             assert_eq!(use_of(args), Use::None, "{args:?}");
         }

@@ -160,6 +160,11 @@ report what happens to stored data: `InstanceDataRestoredEvent` (back on its ite
 and `/instances discard <record>`.
 
 ### Showing a value in the player's game (dev.27)
+(dev.28: to draw such a value in the game's own item detail view, slot bar or held indicator, or to list it in Kiln's
+Item details window, see `Ui.Values` in [../ui.md](../ui.md#values-in-the-games-own-ui-dev28). A synced value is keyed by
+the server's entity; `UiItemView.ServerEntity` is not proven in dev.28, so a provider that needs one item's instance
+passes, and a provider by item type works.)
+
 A value stays on the server unless its key says who may see it. `Sync = InstanceSync.Holder` sends it to the player who
 holds the item, `InstanceSync.Nearby` also to every player within `NearbyRadius` metres of the item's holder (another
 player, a chest). The mod then runs on both sides (`"side": "both"`): the same `InstanceData.Key` line declares the key
@@ -186,9 +191,11 @@ update with the rest following a quarter of a second later, 4,096 items per game
 [services/saves.md](../services/saves.md#on-players-games-dev27). The sample `mods/samples/ItemData` shows its notch
 count this way.
 
-**What a mod cannot do with it yet:** draw into the game's own item tooltip. The detail view of an item is not
-reachable from a mod (the hook points are mapped in `docs/re/game-ui.md` and in the design, but not built), so a mod
-shows a synced value in a screen of its own, a HUD line or a notice.
+**Showing it on the item's slot (0.2.0-dev.30):** `Ui.Inventory.Mark(item, mark)` draws a mark over the slot the
+game draws for that item (backpack, chest, hotbar), and `Ui.Inventory.OnClick` gives your mod a click on a slot with the
+item's entity id (the server's id of it), for example to mark it on the server: see [../ui.md](../ui.md#the-games-inventory-slots-0200-dev30).
+Lines in the game's own item tooltip come with `Ui.Tooltip` (the equipment work); until then a mod shows a synced value in
+Kiln's Item details window, a screen of its own, a HUD line or a notice.
 
 ### Which API
 | The thing | API |
@@ -317,6 +324,23 @@ Lab `dev20-wp13` (a copy of the user's world, no player, game build 26430253, Wi
 | Logic without the game | `native/services/items/tests/run.sh` (Wine): destination search, ledger, rules, name records, the hook against a fake inventory world, the hook chain in both orders, a faulting handler |
 
 Unit tests are not game evidence. Only a joined player can show the rest:
+
+## Equipment sets: for this session only
+`Items.CaptureSet`, `PlanSet` and `EquipSet` change a player's 20 equipment slots in one transaction (every slot or none;
+[services/items.md](../services/items.md#equipment-sets-v6-since-020-dev29)). A set is scoped to this process, this
+server world and this session of the player: keep it in memory, forget a player's sets when they leave, and do not save
+it. After a restart, in another world or after a rejoin it comes back `StaleSnapshot` and nothing changes; Kiln never
+re-resolves an old set onto items that look the same. The sample `mods/samples/equipment-sets` keeps a dictionary per
+player:
+
+```csharp
+private readonly Dictionary<EntityId, Dictionary<string, EquipmentSet>> _sets = [];
+public override void OnLoad() => Events.On<PlayerLeftEvent>(e => _sets.Remove(e.Player.Entity));
+public override void OnUnload() => _sets.Clear();   // nothing for the next world or start
+```
+
+For a loadout that survives a restart, keep item types (as the Loadouts sample does with `Items.Equip`) or data on the
+items themselves (`InstanceData`), and build a fresh set from what the player has when they ask.
 
 ## Client checklist (needs a player)
 

@@ -6,7 +6,7 @@
 static_assert(offsetof(KilnWorldApi,status)==184 && offsetof(KilnWorldApi,write_other)==192);
 // v3 appended the tracked-write entries (tests/writes_test.cpp pins each): the v2 table is its first 240 bytes.
 static_assert(offsetof(KilnWorldApi,write_submit)==240 && offsetof(KilnWorldApi,game_program_find)==280);  // v4 (0.2.0-dev.28) appends from 280
-static_assert(offsetof(KilnTypesApi,system_hook)==168 && offsetof(KilnTypesApi,external_runner)==184 && offsetof(KilnTypesApi,type_impact_name)==192 && sizeof(KilnTypesApi)==200);  // 0.2.0-dev.28 appends from 184
+static_assert(offsetof(KilnTypesApi,system_hook)==168 && offsetof(KilnTypesApi,external_runner)==184 && offsetof(KilnTypesApi,type_impact_name)==192 && offsetof(KilnTypesApi,in_system_callback)==200 && offsetof(KilnTypesApi,ecs_registry)==208 && sizeof(KilnTypesApi)==216);  // 0.2.0-dev.28 appends from 184, ecs_registry at 208
 using namespace kw;
 int main() {
     int checks = 0;
@@ -27,7 +27,16 @@ int main() {
     check(bad(R"({"format":1,"programs":{"a":{"read":["Health"]}}})"));
     check(bad(R"({"format":1,"programs":{"a":{"flags":[]}}})"));
     check(bad(R"({"format":1,"programs":{"a":{"flags":["hostOnly"],"read":["Health"],"write":["Health"]}}})"));
-    check(bad(R"({"format":1,"programs":{"a":{},"b":{},"c":{},"d":{},"e":{},"f":{},"g":{},"h":{},"i":{}}})"));
+    // 32 declarations per file (0.2.0-dev.29; 8 before), all inside the 64 KiB bound; the 33rd refuses the whole file
+    auto many = [](int n) {
+        std::string t = R"({"format":1,"programs":{)";
+        for (int i = 0; i < n; ++i) t += (i ? "," : "") + std::string("\"p") + std::to_string(i) + "\":{}";
+        return t + "}}";
+    };
+    check(parse_boot_programs(many(9)).size() == 9);
+    check(parse_boot_programs(many(32)).size() == 32);
+    check(bad(many(33)));
+    check(kBootProgramsPerFile == 32);
     check(bad(R"({"format":1,"programs":{"a":{},}})"));
     check(bad(R"({"format":1,"programs":{"a":{"singletonsRead":["bad-name"]}}})"));
     check(parse_boot_programs(R"({"format":1,"programs":{"a":{"singletonsRead":["g38_items::ItemRegistry"]}}})")[0].lists[6].size()==1);
@@ -44,5 +53,25 @@ int main() {
     check(!boot_mod_id("../escape") && !boot_mod_id("a/b") && !boot_mod_id("UPPER"));
     check(boot_mod_id("my-mod.1") && boot_name("Health"));
     check(select_boot_candidates({{"writer",true,false,true,1},{"writer",false,false,true,2}},true)==std::vector<size_t>({1}));
-    std::printf("world boot declarations: PASS %d checks (bounds, duplicate keys, profile precedence, sides)\n",checks);
+    // "world" (0.2.0-dev.29, chapter 14): an older file without it means the server world, as it always did
+    check(value[0].worlds==kBootWorldServer);
+    auto world = [&](const char* w, const char* extra = "") {
+        return parse_boot_programs(std::string(R"({"format":1,"programs":{"a":{"world":")") + w + "\"" + extra + "}}}")[0];
+    };
+    check(world("server").worlds==kBootWorldServer && world("server").flags==0x14);
+    check(world("client").worlds==kBootWorldClient && world("client").flags==0x4);   // no "flags": SYSTEM (no hostOnly)
+    check(world("both").worlds==(kBootWorldServer|kBootWorldClient) && world("both").flags==0x14);
+    check(world("prediction").worlds==kBootWorldPrediction && world("prediction").flags==0x4);
+    check(world("both",R"(,"flags":["system","hostOnly"])").flags==0x14);             // both: hostOnly is its server side's
+    check(world("client",R"(,"flags":["system","chunked"])").flags==0x204);
+    check(bad(R"({"format":1,"programs":{"a":{"world":"client","flags":["system","hostOnly"]}}})"));
+    check(bad(R"({"format":1,"programs":{"a":{"world":"prediction","flags":["hostOnly"],"read":["Health"]}}})"));
+    check(bad(R"({"format":1,"programs":{"a":{"world":"mars"}}})"));
+    check(bad(R"({"format":1,"programs":{"a":{"world":2}}})"));
+    check(bad(R"({"format":1,"programs":{"a":{"world":"client","world":"both"}}})"));
+    check(world("client",R"(,"flags":[],"read":["RenderTransform"])").lists[2][0]=="RenderTransform");
+    // client and both mods are candidates (their client declarations count on a game client)
+    check(select_boot_candidates({{"cl",true,false,false,1,true},{"srv",true,false,true,2,false},{"none",true,false,false,3,false}},true)==
+          std::vector<size_t>({1,2}));
+    std::printf("world boot declarations: PASS %d checks (bounds, duplicate keys, profile precedence, sides, worlds)\n",checks);
 }

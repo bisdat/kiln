@@ -1,0 +1,39 @@
+{
+  "format": 1,
+  "side": "client",
+  "extends": "server.d/gems-sockets.json",
+  "comment": "Client: the Gem Forge lists for sockets on other gear (gem wave G4). Measured client 26430625 SHA-256 5d9ef2f140b8ed49e30dbee655841b89d08baec20f799a1817e171a18a850c77 only. ui/GemForgeWeaponsMask is the instruction right after the WEAPONS list's category-mask store `mov dword [rsp+0x6c], 4` (0xcafc81, scoped in ui/GemForgeLists); ui/GemForgeCarrierMask the one after the GEMS carrier pass's `mov dword [rsp+0x4c], 4` (0xd27d78, scoped in ui/GemForgeCandidates; the loose-gem pass's 0x8000 at 0xd27e31 is left alone). Both hooked instructions are the 5-byte `mov byte [rsp+disp], 1` that enables the category filter. kiln.ui.values ORs the mods' category mask into the captured stack slot there. The feature is the server definition's (the client hosts the same createPide) plus these.",
+  "symbols": {
+    "ui/GemForgeWeaponsMask": {
+      "find": [
+        {
+          "scope": { "symbol": "ui/GemForgeLists", "size": 1536 },
+          "pattern": "66 C7 44 24 59 02 00 44 88 44 24 60 44 88 44 24 68 44 88 44 24 76 66 44 89 44 24 79 C7 44 24 {ui/gemforge.weaponsMask:d8} 04 00 00 00 C6 44 24 70 01 44 88 44 24 4A",
+          "offset": 36
+        }
+      ]
+    },
+    "ui/GemForgeCarrierMask": {
+      "find": [
+        {
+          "scope": { "symbol": "ui/GemForgeCandidates", "size": 768 },
+          "pattern": "66 C7 44 24 39 04 00 40 88 74 24 40 40 88 74 24 48 40 88 74 24 56 66 89 74 24 59 C7 44 24 {ui/gemforge.carrierMask:d8} 04 00 00 00 C6 44 24 50 01 40 88 74 24 2A",
+          "offset": 35
+        }
+      ]
+    }
+  },
+  "constants": {
+    "ui/gemforge.weaponsMask": { "min_votes": 1 },
+    "ui/gemforge.carrierMask": { "min_votes": 1 }
+  },
+  "features": {
+    "gems.sockets": {
+      "symbols": ["items/CreatePide", "items/PideSpawn", "@items/CreatePide.fields", "items/PideLevelMaxIndex", "items/PideLevelIndex",
+                  "@items/CreatePide.gemOverride",
+                  "ui/GemForgeLists", "ui/GemForgeCandidates", "ui/GemForgeWeaponsMask", "ui/GemForgeCarrierMask"],
+      "constants": ["items/pide.list", "items/pide.count", "items/item.category", "items/item.gem_override",
+                    "ui/gemforge.weaponsMask", "ui/gemforge.carrierMask"]
+    }
+  }
+}

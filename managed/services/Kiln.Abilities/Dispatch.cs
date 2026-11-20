@@ -36,18 +36,106 @@ internal static unsafe class AbilitiesDispatch
     {
         lock (Gate)
             if (!WatchedMods.Add(mod)) return;
-        mod.Retiring += () => Retire(mod);
+        mod.UnloadStarting += () => CloseAdmission(mod);  // before its OnUnload
+        mod.Retiring += () => Retire(mod);                // after it
+    }
+
+    // The start of the mod's unload, before its OnUnload: no new call enters its sync natives or attachments; the first
+    // time the unload waits the bounded RetireWaitMs for the calls inside, later asks only look. Null when none is
+    // inside, else what the host's deferred OnUnload waits for.
+    internal static string? CloseAdmission(ModContext mod)
+    {
+        var gate = GateOf(mod);
+        var first = Interlocked.Exchange(ref gate.Closed, 1) == 0;
+        if (first ? WaitQuiet(gate) : Volatile.Read(ref gate.Inflight) == 0) return null;
+        return $"{Volatile.Read(ref gate.Inflight)} call(s) still inside its native handlers (kiln.abilities)";
     }
 
     private static void Retire(ModContext mod)
     {
+        // review P1: admission first: from here no call enters this mod's sync natives or attachments
+        var gate = GateOf(mod);
+        Interlocked.Exchange(ref gate.Closed, 1);
         Abilities.Natives.Unregister(mod);
         RemoveWraps(mod);
         RemoveHoldFilters(mod);
         AbilityRegistry.Retire(mod);
         lock (Gate) WatchedMods.Remove(mod);
-        if (AbilitiesNative.T is var t && t != null && mod.Owner != 0 && Game.IsTickThread) t->ReleaseOwner(mod.Owner);
+        if (AbilitiesNative.T is var t && t != null && mod.Owner != 0)
+        {
+            // the core takes an owner off on the tick thread outside a native call: else in the next tick (review P1)
+            if (!Game.IsTickThread || t->ReleaseOwner(mod.Owner) == AbilitiesNative.WrongThread) PendingRelease.Enqueue(mod.Owner);
+        }
+        RetireGate(mod, gate);
     }
+
+    // ----------------------------------------------------------------------------------------------- mod gates ----
+    // review P1: every call into a mod's sync native or attachment enters the mod's gate (ModGate.Inflight) before its
+    // handler runs; the mod's retirement closes the gate first, then waits a bounded 2 ms for the calls inside. One still
+    // inside after that (a handler that blocks, or a retirement from inside a handler on this thread) is reported and
+    // kept: its entry objects stay reachable from the running call, and the retirement finishes in a later tick, when
+    // the gate is quiet. The gate closes at the start of the mod's unload (ModContext.UnloadStarting), before its
+    // OnUnload, with the same bounded wait: OnUnload runs with no call inside unless one outlasts the bound.
+
+    internal sealed class ModGate
+    {
+        public int Inflight;
+        public int Closed;
+        public string Id = "";
+    }
+
+    private static readonly ConditionalWeakTable<ModContext, ModGate> Gates = new();
+    private static readonly ModGate NoMod = new() { Id = "(no mod)" };
+    private static readonly List<(ModGate Gate, ulong Since)> Deferred = new();
+    [ThreadStatic] private static int _inside;  // dispatch depth on this thread
+
+    internal static int RetireWaitMs = 2;  // the bound; tests raise it so a busy machine cannot decide their outcome
+
+    internal static ModGate GateOf(ModContext? mod) => mod is null ? NoMod : Gates.GetValue(mod, m => new ModGate { Id = m.Info.Id });
+
+    // A call enters (true) or the mod is retiring (false). The increment comes before the check (both full fences).
+    private static bool Enter(ModGate g)
+    {
+        Interlocked.Increment(ref g.Inflight);
+        if (Volatile.Read(ref g.Closed) == 0) return true;
+        Interlocked.Decrement(ref g.Inflight);
+        return false;
+    }
+
+    // True when no call is inside, waiting at most RetireWaitMs; never waits on this thread's own call.
+    internal static bool WaitQuiet(ModGate g)
+    {
+        if (Volatile.Read(ref g.Inflight) == 0) return true;
+        if (_inside > 0) return false;  // a retirement from inside a handler: its own call is inside
+        var sw = Stopwatch.StartNew();
+        while (Volatile.Read(ref g.Inflight) != 0 && sw.ElapsedMilliseconds < RetireWaitMs) Thread.Yield();
+        return Volatile.Read(ref g.Inflight) == 0;
+    }
+
+    internal static void RetireGate(ModContext mod, ModGate gate)
+    {
+        if (WaitQuiet(gate)) return;
+        lock (Gate) Deferred.Add((gate, Step));
+        mod.Log.Warn($"abilities: {gate.Id} unloads with {Volatile.Read(ref gate.Inflight)} call(s) still inside its native handlers: they take no new call; " +
+                     "what they use stays until they leave (checked each tick)");
+    }
+
+    // The listener's tick: deferred retirements whose calls left.
+    internal static void FinishDeferred()
+    {
+        lock (Gate)
+        {
+            for (var i = Deferred.Count - 1; i >= 0; i--)
+            {
+                var (g, since) = Deferred[i];
+                if (Volatile.Read(ref g.Inflight) != 0) continue;
+                Deferred.RemoveAt(i);
+                ModLog.Info($"abilities: the last native handler call of {g.Id} left {Step - since} tick(s) after its unload: retired");
+            }
+        }
+    }
+
+    internal static int DeferredCount { get { lock (Gate) return Deferred.Count; } }
 
     // ----------------------------------------------------------------------------------------------- interest -----
 
@@ -57,7 +145,7 @@ internal static unsafe class AbilitiesDispatch
         if (Events.HasSubscribers<ImpactStartedEvent>()) m |= AbilitiesNative.Bit(AbilitiesNative.EvImpactStarted);
         if (Events.HasSubscribers<ImpactStartingEvent>()) m |= AbilitiesNative.InterestHold;
         if (Events.HasSubscribers<ImpactEndedEvent>()) m |= AbilitiesNative.Bit(AbilitiesNative.EvImpactEnded);
-        if (Events.HasSubscribers<ImpactNativeEvent>()) m |= AbilitiesNative.Bit(AbilitiesNative.EvNative);
+        if (Events.HasSubscribers<ImpactNativeEvent>() || Events.HasSubscribers<GemTriggeredEvent>()) m |= AbilitiesNative.Bit(AbilitiesNative.EvNative);
         if (Events.HasSubscribers<ImpactSignalEvent>()) m |= AbilitiesNative.Bit(AbilitiesNative.EvSignal);
         if (!Abilities.Natives.ManagedNatives.IsEmpty) m |= AbilitiesNative.Bit(AbilitiesNative.EvManagedCall);
         return m;
@@ -75,6 +163,17 @@ internal static unsafe class AbilitiesDispatch
         catch (Exception e)
         {
             ModLog.Error($"abilities: listener threw: {e}");
+        }
+        try
+        {
+            DrainDetaches();
+            FinishDeferred();
+            CheckSetupRefusals();
+            NativeWrites.Flush();
+        }
+        catch (Exception e)
+        {
+            ModLog.Error($"abilities: detaching threw: {e}");
         }
         try
         {
@@ -115,15 +214,19 @@ internal static unsafe class AbilitiesDispatch
                     if (Events.HasSubscribers<ImpactEndedEvent>()) Events.Post(new ImpactEndedEvent(impact, ev.Step));
                     break;
                 case AbilitiesNative.EvNative:
-                    if (!Events.HasSubscribers<ImpactNativeEvent>()) break;
+                    var wantNative = Events.HasSubscribers<ImpactNativeEvent>();
+                    var wantGem = Events.HasSubscribers<GemTriggeredEvent>();  // gem wave G1: the same call, as the gem's
+                    if (!wantNative && !wantGem) break;
                     var snap = Snapshot(ref ev, impact);
-                    Events.Post<ImpactNativeEvent>(ev.NativeHash switch
+                    ImpactNativeEvent native = ev.NativeHash switch
                     {
                         0xb04d0e7a => new ImpactDamageEvent(snap),
                         0x91f30b26 => new ImpactBuffEvent(snap),
                         0x61b11b03 => new ImpactSpawnEvent(snap),
                         _ => new ImpactNativeEvent(snap),
-                    });
+                    };
+                    if (wantNative) Events.Post(native);
+                    if (wantGem) GemTriggers.Deliver(native, ev.Step);
                     break;
                 case AbilitiesNative.EvSignal:
                     if (!Events.HasSubscribers<ImpactSignalEvent>()) break;
@@ -226,6 +329,16 @@ internal static unsafe class AbilitiesDispatch
         Ensure();
         var t = AbilitiesNative.Require("Abilities.Natives.Wrap");
         var mod = ModContext.CurrentMod;
+        // since 0.2.0-dev.29: a wrap is a Before attachment that takes every call, at its priority (the same order as
+        // the global dispatcher's); an older kiln.abilities keeps the global dispatcher
+        if (AbilitiesNative.V2(nameof(AbilitiesNative.TableV2.NativeDetach)) != null)
+        {
+            var r = Attach(hash, 0, 0, NativeStage.Before, priority, handler, mod, wrap: true);
+            if (!r.Ok) throw new InvalidOperationException($"Natives.Wrap(0x{hash:x8}): {r.Reason} (not a vanilla native?)");
+            if (mod is not null) Watch(mod);
+            mod?.Log.Info($"abilities: wraps native {Abilities.Natives.NameOf(hash)} (job thread)");
+            return r.Handle!;
+        }
         var e = Insert(hash, handler, priority, mod);
         var rc = t->NativeWrap(hash, 1);
         if (rc != AbilitiesNative.Ok)
@@ -276,6 +389,140 @@ internal static unsafe class AbilitiesDispatch
         foreach (var kv in Wraps)
             foreach (var e in kv.Value)
                 if (ReferenceEquals(e.Mod, mod)) RemoveWrap(e);
+        foreach (var kv in Attaches)
+            if (ReferenceEquals(kv.Value.Mod, mod)) Detach(kv.Value);
+    }
+
+    // ----------------------------------------------------------------------------------------------- attachments --
+    // since 0.2.0-dev.29: one native attachment per handler (Natives.Attach, and Natives.Wrap / OnDamage as Before
+    // attachments on every call). The core gets a static dispatcher and an id (no GCHandle): a detached id answers
+    // nothing (the call goes on as if the handler were not there), and nothing has to be freed after the core let go.
+
+    internal sealed class AttachEntry
+    {
+        public required long Id;
+        public required uint Hash;
+        public required NativeStage Stage;
+        public required NativeWrapHandler Handler;
+        public required ModContext? Mod;
+        public required bool RawAllowed;
+        public required bool Wrap;  // Natives.Wrap / OnDamage: its log line names a wrap
+        public required ModGate ModGate;
+        public ulong Native;        // the core's handle
+        public int Faults;
+        public volatile bool Active = true;
+    }
+
+
+    private static readonly ConcurrentDictionary<long, AttachEntry> Attaches = new();
+    private static readonly ConcurrentQueue<ulong> PendingDetach = new();
+    private static readonly ConcurrentQueue<ulong> PendingRelease = new();
+    private static long _attachIds;
+
+    internal static delegate* unmanaged[Cdecl]<AbilitiesNative.NativeCall*, void*, void> AttachDispatcher => &AttachDispatch;
+
+    // tick thread
+    internal static AttachResult Attach(uint hash, uint program, uint site, NativeStage stage, int priority,
+        NativeWrapHandler handler, ModContext? mod, bool wrap = false)
+    {
+        var t = AbilitiesNative.V2(nameof(AbilitiesNative.TableV2.NativeDetach));
+        if (t == null) throw new KilnUnavailableException(AbilitiesCaps.NativesAttach, "kiln.abilities is older than 0.2.0-dev.29");
+        Ensure();
+        var e = InsertAttach(hash, stage, handler, mod, wrap);
+        var filter = new AbilitiesNative.NativeFilter { Size = (uint)sizeof(AbilitiesNative.NativeFilter), ProgramId = program, Site = site };
+        ulong handle = 0;
+        uint refusal = 0;
+        var rc = t->NativeAttach(mod?.Owner ?? 0, hash, &filter, (int)stage, priority, AttachDispatcher, (void*)e.Id, &handle, &refusal);
+        if (rc != AbilitiesNative.Ok)
+        {
+            e.Active = false;
+            Attaches.TryRemove(e.Id, out _);
+            if (rc == AbilitiesNative.InvalidArgument && refusal != AbilitiesNative.RefusedNone)
+                return new AttachResult(false, AbilitiesNative.Refusal(refusal), null);
+            if (rc == AbilitiesNative.Unavailable) throw new KilnUnavailableException(AbilitiesCaps.NativesAttach, "kiln.abilities has no natives on this build");
+            if (rc == AbilitiesNative.WrongThread) throw new InvalidOperationException("Natives.Attach: not on the tick thread (or inside a native call)");
+            throw new ArgumentException($"Natives.Attach(0x{hash:x8}): {AbilitiesNative.Describe(rc)}");
+        }
+        e.Native = handle;
+        if (mod is not null) Watch(mod);
+        if (!wrap)
+            mod?.Log.Info($"abilities: {stage} attached to native {Abilities.Natives.NameOf(hash)} (program 0x{program:x8}, site 0x{site:x8}, priority {priority})");
+        return new AttachResult(true, null, new NativeAttachment(e));
+    }
+
+    // Puts the handler in the table the dispatcher reads (the core is asked by Attach; tests call this directly). The
+    // registering mod is known here, so NativeCall.Bytes' answer for it is decided here.
+    internal static AttachEntry InsertAttach(uint hash, NativeStage stage, NativeWrapHandler handler, ModContext? mod, bool wrap = false)
+    {
+        var e = new AttachEntry
+        {
+            Id = Interlocked.Increment(ref _attachIds), Hash = hash, Stage = stage, Handler = handler, Mod = mod,
+            RawAllowed = mod is { Info.Advanced: true }, Wrap = wrap, ModGate = GateOf(mod),
+        };
+        Attaches[e.Id] = e;
+        return e;
+    }
+
+    // Off at once (a call that comes now runs no handler); the core lets go on the tick thread outside a native call,
+    // else in the next Pre.
+    internal static void Detach(AttachEntry e)
+    {
+        e.Active = false;
+        if (!Attaches.TryRemove(e.Id, out _) || e.Native == 0) return;
+        var t = AbilitiesNative.V2(nameof(AbilitiesNative.TableV2.NativeDetach));
+        if (t == null) return;
+        if (!Game.IsTickThread || t->NativeDetach(e.Native) == AbilitiesNative.WrongThread) PendingDetach.Enqueue(e.Native);
+    }
+
+    private static void DrainDetaches()
+    {
+        if (!PendingRelease.IsEmpty && AbilitiesNative.T is var rt && rt != null)
+            while (PendingRelease.TryDequeue(out var owner))
+                if (rt->ReleaseOwner(owner) == AbilitiesNative.WrongThread) { PendingRelease.Enqueue(owner); break; }
+        if (PendingDetach.IsEmpty) return;
+        var t = AbilitiesNative.V2(nameof(AbilitiesNative.TableV2.NativeDetach));
+        while (PendingDetach.TryDequeue(out var h))
+            if (t != null) t->NativeDetach(h);
+    }
+
+    internal static int AttachCount(ModContext? mod) => Attaches.Values.Count(e => ReferenceEquals(e.Mod, mod));
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static void AttachDispatch(AbilitiesNative.NativeCall* c, void* user)
+    {
+        Interlocked.Increment(ref InFlight.Value);
+        var outer = ModContext.CurrentMod;
+        try
+        {
+            if (!Attaches.TryGetValue((long)user, out var e) || !e.Active || e.Mod is { Alive: false }) return;  // as if absent
+            if (!Enter(e.ModGate)) return;  // its mod is retiring
+            _inside++;
+            ModContext.CurrentMod = e.Mod;
+            try
+            {
+                var call = new NativeCall(c, e.Mod, e.RawAllowed);
+                e.Handler(ref call);
+            }
+            catch (Exception ex)
+            {
+                if (Interlocked.Increment(ref e.Faults) <= 3)
+                    e.Mod?.Log.Error($"abilities: {(e.Wrap ? "wrap" : e.Stage + " attachment")} of {Abilities.Natives.CachedName(e.Hash)} threw: {ex.GetType().Name}: {ex.Message}");
+            }
+            finally
+            {
+                _inside--;
+                Interlocked.Decrement(ref e.ModGate.Inflight);
+            }
+        }
+        catch
+        {
+            // never throw into native code
+        }
+        finally
+        {
+            ModContext.CurrentMod = outer;
+            Interlocked.Decrement(ref InFlight.Value);
+        }
     }
 
     // Waits for job threads still inside a handler (they cannot enter removed ones any more).
@@ -312,6 +559,134 @@ internal static unsafe class AbilitiesDispatch
         catch
         {
             // never throw into native code
+        }
+        finally
+        {
+            ModContext.CurrentMod = outer;
+            Interlocked.Decrement(ref InFlight.Value);
+        }
+    }
+
+    // ----------------------------------------------------------------------------------------------- sync natives -
+    // A synchronous native (RegisterSync) hands the core one static dispatcher and an id, never a GCHandle: the entry
+    // lives in this table, a removed id answers 0x1F, and nothing has to be freed after the core let go of it.
+
+    internal sealed class SyncEntry
+    {
+        public required long Id;
+        public required string Name;
+        public required NativeSyncHandler Handler;
+        public required ModContext? Mod;
+        public required bool RawAllowed;
+        public required ModGate ModGate;
+        public uint Hash;
+        public int Faults;
+        public bool Watched;  // registered before a world had its registry: its state is checked each tick until it is in
+        public volatile bool Active = true;
+    }
+
+    private static readonly ConcurrentDictionary<long, SyncEntry> Syncs = new();
+    private static long _syncIds;
+
+    internal static delegate* unmanaged[Cdecl]<AbilitiesNative.NativeCall*, void*, void> SyncDispatcher => &SyncDispatch;
+
+    internal static SyncEntry AddSync(string name, NativeSyncHandler handler, ModContext? mod)
+    {
+        var e = new SyncEntry
+        {
+            Id = Interlocked.Increment(ref _syncIds), Name = name, Handler = handler, Mod = mod,
+            RawAllowed = mod is { Info.Advanced: true }, ModGate = GateOf(mod),
+        };
+        Syncs[e.Id] = e;
+        return e;
+    }
+
+    internal static void RemoveSync(SyncEntry e)
+    {
+        e.Active = false;
+        Syncs.TryRemove(e.Id, out _);
+    }
+
+    // The mod's sync natives (mod unload): off here first (a call that comes now answers 0x1F), then in the core, which
+    // marks the slot dead on the tick thread outside the step (no call can be inside the handler then).
+    internal static void RemoveSyncs(ModContext mod)
+    {
+        foreach (var kv in Syncs)
+        {
+            if (!ReferenceEquals(kv.Value.Mod, mod)) continue;
+            RemoveSync(kv.Value);
+            if (kv.Value.Hash != 0 && AbilitiesNative.T is var t && t != null && Game.IsTickThread) t->NativeUnregister(kv.Value.Hash);
+        }
+    }
+
+    internal static int SyncCount(ModContext? mod) => Syncs.Values.Count(e => ReferenceEquals(e.Mod, mod));
+
+    // review P1 item 4: a sync native registered before a world existed is checked each tick until the world's registry
+    // took it; one the world's setup refused for room is reported to its mod (NativeRegistrationRefusedEvent, its log).
+    private static void CheckSetupRefusals()
+    {
+        foreach (var e in Syncs.Values)
+        {
+            if (!e.Watched || !e.Active || e.Hash == 0) continue;
+            switch (Abilities.Natives.StateOf(e.Hash))
+            {
+                case NativeState.Live:
+                case NativeState.None:
+                case NativeState.Dead:
+                    e.Watched = false;
+                    break;
+                case NativeState.Refused:
+                    e.Watched = false;
+                    e.Mod?.Log.Warn($"abilities: sync native {e.Name} was accepted before the world and the world's native registry had no room for it: programs that call it stop with Error");
+                    if (Events.HasSubscribers<NativeRegistrationRefusedEvent>())
+                        Events.Post(new NativeRegistrationRefusedEvent(e.Name, e.Hash, AbilitiesNative.Refusal(AbilitiesNative.RefusedRegistryFull)));
+                    break;
+            }
+        }
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static void SyncDispatch(AbilitiesNative.NativeCall* c, void* user)
+    {
+        Interlocked.Increment(ref InFlight.Value);
+        var outer = ModContext.CurrentMod;
+        try
+        {
+            if (!Syncs.TryGetValue((long)user, out var e) || !e.Active || e.Mod is { Alive: false })
+            {
+                c->OutError = 0x1F;  // taken off: the instance stops with Error, as for an unknown native
+                return;
+            }
+            if (!Enter(e.ModGate))
+            {
+                c->OutError = 0x1F;  // its mod is retiring: as a removed native
+                return;
+            }
+            _inside++;
+            ModContext.CurrentMod = e.Mod;
+            try
+            {
+                var call = new NativeCall(c, e.Mod, e.RawAllowed, sync: true);
+                var value = e.Handler(ref call);
+                c->OutError = 0;
+                c->OutValue = value;
+            }
+            catch (Exception ex)
+            {
+                c->OutError = 0x11;  // keen::ErrorId Internal: the instance stops with Error, the game goes on
+                c->OutValue = 0;
+                if (Interlocked.Increment(ref e.Faults) <= 3)
+                    e.Mod?.Log.Error($"abilities: sync native {e.Name} threw: {ex.GetType().Name}: {ex.Message}");
+            }
+            finally
+            {
+                _inside--;
+                Interlocked.Decrement(ref e.ModGate.Inflight);
+            }
+        }
+        catch
+        {
+            c->OutError = 0x11;  // never throw into native code
         }
         finally
         {

@@ -14,11 +14,28 @@
     <InternalsVisibleTo Include="Kiln.Admin" />
     <!-- the features a failed hook takes down, on a fake kiln.ui table -->
     <InternalsVisibleTo Include="Kiln.Contract.Tests" />
+    <!-- Gems.AllowSockets widens the client's Gem Forge lists through GemForgeSockets.Widen -->
+    <InternalsVisibleTo Include="Kiln.Abilities" />
+    <!-- Kiln's own key bindings follow the language of Kiln's texts (KeyBinding.Description and Category, internal set) -->
+    <InternalsVisibleTo Include="Kiln.Rules" />
+    <InternalsVisibleTo Include="Kiln.Skills" />
+    <InternalsVisibleTo Include="Kiln.Testing" />
+    <!-- the test kit's fake of kiln.ui.inventory: its click records, and what mark a drawn slot shows (UiInventoryBridge.MarkOf) -->
+    <InternalsVisibleTo Include="Kiln.TestKit" />
+    <InternalsVisibleTo Include="Kiln.DevTools" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- the vendor upscaler files the Graphics page looks for in kiln/vendor/ (names, sizes, versions): the launcher's
+         manifest itself, so there is one list (UiUpscaler.cs VendorFiles) -->
+    <EmbeddedResource Include="../../../launcher/src/data/vendor-components.json" LogicalName="Kiln.vendor-components.json" Link="vendor-components.json" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../Kiln.Api/Kiln.Api.csproj" Private="false" />
     <ProjectReference Include="../Kiln.Network/Kiln.Network.csproj" Private="false" />
+    <ProjectReference Include="../Kiln.Chat/Kiln.Chat.csproj" Private="false" />
     <!-- the Network tab's sync status (ContentSync) -->
     <ProjectReference Include="../Kiln.Content/Kiln.Content.csproj" Private="false" />
+    <!-- Ui.Values' item views (ItemRarity) -->
+    <ProjectReference Include="../Kiln.Items/Kiln.Items.csproj" Private="false" />
   </ItemGroup>
 </Project>

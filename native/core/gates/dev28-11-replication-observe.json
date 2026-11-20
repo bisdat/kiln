@@ -1,3 +1,0 @@
-{ "gates": [
-    { "name": "repl.client", "checks": ["11-repl.receive-watch"], "side": "client" }
-] }

@@ -41,6 +41,9 @@ public static class DirHash
     /// a server advertises for a Kiln mod and what a modpack and the launcher's library record for it.</summary>
     public static string ModIdentity(string root) => Hash(Files(root, mod: true));
 
+    /// <summary>kdh1 of a list of <see cref="Files(string)"/> (a folder without some of its files).</summary>
+    internal static string HashOf(List<(byte[] Key, string Path)> files) => Hash(files);
+
     private static string Hash(List<(byte[] Key, string Path)> files)
     {
         using var h = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);

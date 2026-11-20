@@ -81,7 +81,7 @@ The launcher update sits in the header beside the tasks (`shell/UpdateNotice.tsx
 ember "Updating", celadon "Restart" and "Updated") and its notice, a popover like the task list that drops open by
 itself when an update is found or was just installed, with no backdrop: one line and its buttons, never an
 explanation (details go to launcher.log).
-A soft warm light follows the pointer across the sheet (`--mx`, `--my`).
+A soft warm light follows the pointer across the sheet while the fire burns (`.k-torch`, its own layer; `--mx`, `--my`).
 
 ## Components
 | Component | Props (short) | Notes |

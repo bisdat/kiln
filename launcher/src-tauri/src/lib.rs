@@ -7,9 +7,18 @@
 
 pub mod assets;
 pub mod commands;
+/// The optional Discord features beside their commands: Rich Presence, the posts' refresh, reports, testers.
+pub mod community;
 pub mod deck;
+/// The launcher's own messages when its page cannot start (Linux: GTK, else the desktop's tools).
+#[cfg(target_os = "linux")]
+pub mod dialog;
+/// The window's app id and icon on Linux, the AppImage's app menu entry.
+pub mod desktop;
 pub mod distribution;
 pub mod events;
+/// The launcher's own files next to it (a Windows install's exe and uninstaller), looked at once per start (dev.29.18).
+pub mod own_files;
 /// The process's data folder: found once, its lock, and the hold while a move runs (dev.26).
 pub mod folder;
 /// The backend timing harness (ignored tests; tools/launcher/perf.sh).
@@ -17,10 +26,15 @@ pub mod folder;
 mod perf;
 /// How the window is drawn on Linux (the GPU, or software mode and the fallback to it).
 pub mod render;
+/// "Open folder": a path made safe for Explorer / the file manager, a file shown selected (app_open_path).
+pub mod reveal;
+/// WebKit's process sandbox on Linux: the player's choice, the probe of bwrap (dev.29.18).
+pub mod sandbox;
 pub mod selftest;
 /// The self-update: only in direct builds (feature `self-update`); the Nexus Mods build compiles none of it.
 #[cfg(feature = "self-update")]
 pub mod selfupdate;
+pub mod snapshot;
 pub mod state;
 pub mod watch;
 
@@ -43,6 +57,8 @@ pub fn run() {
     builder
         .register_uri_scheme_protocol("kiln-asset", |_ctx, req| assets::serve(req.uri().path()))
         .setup(|app| {
+            // the release version the relay hears, as About shows it (commands/community.rs)
+            commands::community::set_version(app.handle());
             // the window exists: the render watchdog's clock starts, software mode reaches the webview (render.rs)
             render::window_created(app.handle());
             // the data folder first (commands/data_folder.rs): found once, its lock, an unfinished move. The start-up
@@ -57,11 +73,14 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(gated(tauri::generate_handler![
+            commands::snapshot::snapshot_status,
+            commands::snapshot::snapshot_continue,
             commands::app::app_info,
             commands::app::app_settings_get,
             commands::app::app_settings_set,
             commands::app::app_open_path,
             commands::app::app_open_url,
+            commands::app::app_open_discord,
             commands::app::task_list,
             commands::app::task_get,
             commands::app::task_cancel,
@@ -70,6 +89,8 @@ pub fn run() {
             commands::game::game_add,
             commands::game::game_remove,
             commands::game::game_status,
+            commands::game::game_start_get,
+            commands::game::game_start_set,
             commands::runtime::runtime_list,
             commands::runtime::runtime_import,
             commands::runtime::runtime_status,
@@ -98,6 +119,8 @@ pub fn run() {
             commands::library::library_users,
             commands::library::library_lint,
             commands::library::library_take_over,
+            commands::library::library_rollback,
+            commands::library::library_replace_dll,
             commands::config::config_list,
             commands::config::config_read,
             commands::config::config_set,
@@ -175,6 +198,7 @@ pub fn run() {
             commands::update::update_status,
             commands::update::update_check,
             commands::update::update_install,
+            commands::update::update_switch,
             commands::update::update_restart,
             commands::update::update_skip,
             commands::update::update_ack,
@@ -205,14 +229,21 @@ pub fn run() {
             commands::engines::engine_adopt_folder,
             commands::engines::eml_backup,
             commands::engines::eml_restore,
+            commands::engines::eml_data_plan,
+            commands::engines::eml_data_apply,
+            commands::engines::eml_data_undo,
+            commands::engines::eml_data_latest,
             commands::compat::chain_view,
             commands::compat::chain_set_late,
+            commands::compat::shroudlink_notice,
             commands::found::found_scan,
             commands::found::found_add,
             commands::cook::cook_plan,
             commands::cook::cook_run,
+            commands::cook::boot_snapshot_run,
             commands::logs::report_save,
             commands::logs::report_summary,
+            commands::logs::report_preview,
             commands::data_folder::data_folder_get,
             commands::data_folder::data_folder_size,
             commands::data_folder::data_folder_check,
@@ -222,12 +253,45 @@ pub fn run() {
             commands::data_folder::data_folder_notice_ack,
             commands::data_folder::data_folder_restart,
             commands::app::app_started,
-            commands::app::app_render_set
+            commands::app::app_render_set,
+            commands::app::app_render_report,
+            commands::updates::updates_check,
+            commands::app::app_desktop_set,
+            commands::app::app_locales,
+            commands::app::app_sandbox_set,
+            commands::vendor::vendor_status,
+            commands::vendor::vendor_license,
+            commands::vendor::vendor_download,
+            commands::vendor::vendor_remove,
+            commands::community::community_settings_get,
+            commands::community::community_settings_set,
+            commands::community::community_status,
+            commands::community::community_feed,
+            commands::community::community_check_member,
+            commands::community::community_signout,
+            commands::community::community_signin_start,
+            commands::community::community_signin_poll,
+            commands::community::community_signin_cancel,
+            commands::community::community_posts,
+            commands::community::community_post_seen,
+            commands::community::community_post_solved,
+            commands::community::community_post_delete,
+            commands::community::community_presence_facts,
+            commands::community::community_report_prepare,
+            commands::community::community_report_send,
+            commands::community::tester_status,
+            commands::community::tester_join,
+            commands::community::tester_leave,
+            commands::community::tester_result_set,
+            commands::community::tester_results_send,
+            commands::community::community_steam_keyboard
         ]))
         .build(tauri::generate_context!())
         .expect("error while building the Kiln Launcher")
         .run(|_, event| {
             if matches!(event, tauri::RunEvent::Exit) {
+                // a clean exit after the page started is no DMA-BUF crash: its start guard goes (render.rs)
+                render::leaving();
                 watch::leaving();
                 leave_for_sure();
                 deck::gamepad::stop();
@@ -239,9 +303,37 @@ pub fn run() {
 /// the modpack watcher, Nexus (its instance lock, inbox and leftovers), the self-update's first check. Run once, when the
 /// folder is free (commands/data_folder.rs `start`).
 fn after_folder(app: &tauri::AppHandle) {
+    let f = folder::current();
+    let Ok(found) = f.located() else { return };
+    let version = app.package_info().version.to_string();
+    if let Err(e) = snapshot::startup::start(&found.dirs.root, &version, snapshot_channel(&version), distribution::beta()) {
+        eprintln!("beta copy: {}", e.message);
+        return;
+    }
+    after_snapshot(app);
+}
+
+pub(crate) fn snapshot_channel(version: &str) -> &str {
+    let baked = env!("KILN_LAUNCHER_BUILD_CHANNEL");
+    if !baked.is_empty() { baked } else if version.contains('-') { "dev" } else { "stable" }
+}
+
+pub(crate) fn after_snapshot(app: &tauri::AppHandle) {
+    // the start's own lines (how the window is drawn, WebKit's sandbox) came before the gate opened
+    commands::app::flush_early_log();
+    // a message's "off" from the start before, when its marker could not be written then
+    sandbox::after_gate();
+    // WebKit's DMA-BUF renderer: the sticky marker for a start that died with it, or for the watchdog's restart (render.rs)
+    render::after_gate();
+    // an antivirus that took the launcher's uninstaller (or its exe while it ran): launcher.log says it (own_files.rs)
+    own_files::start();
     // the installed runtime's and the bundles' sha256s from the last run (a start does not hash 1.5 GB again)
     if let Ok(d) = state::dirs() {
         kiln_manage::filecache::persist_at(&state::file_hashes(&d));
+        // kept versions (kiln_manage::kept): a change a stop left half done is finished or undone before anything uses them
+        for line in kiln_manage::kept::recover(&d) {
+            commands::app::launcher_log("library", &line);
+        }
     }
     watch::start(app.clone());
     let shipped = app.clone();
@@ -250,6 +342,8 @@ fn after_folder(app: &tauri::AppHandle) {
     commands::modpack::watch_last_server(app);
     // nxm:// links (Nexus Mods' Mod Manager Download): the instance lock and the link inbox (commands/nexus.rs)
     commands::nexus::start(app);
+    // the AppImage's app menu entry and icons, so taskbars and docks show Kiln's icon (desktop.rs)
+    std::thread::spawn(desktop::start);
     // self-update: the state for this start, then a check after 8 s and every 6 hours (crate::selfupdate)
     #[cfg(feature = "self-update")]
     selfupdate::start(app.clone());

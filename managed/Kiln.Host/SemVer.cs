@@ -112,12 +112,28 @@ internal readonly struct SemVersion : IComparable<SemVersion>, IEquatable<SemVer
         if (a.Length == 0 || b.Length == 0) return b.Length.CompareTo(a.Length);  // release > pre-release
         for (var i = 0; i < Math.Min(a.Length, b.Length); i++)
         {
-            var an = int.TryParse(a[i], NumberStyles.None, CultureInfo.InvariantCulture, out var ai);
-            var bn = int.TryParse(b[i], NumberStyles.None, CultureInfo.InvariantCulture, out var bi);
-            c = an && bn ? ai.CompareTo(bi) : an ? -1 : bn ? 1 : string.CompareOrdinal(a[i], b[i]);
+            // semver.org 11.4: numeric identifiers by value (any length, no int to overflow), below every alphanumeric
+            // one; alphanumeric ones in ASCII order
+            var an = IsNumeric(a[i]);
+            var bn = IsNumeric(b[i]);
+            c = an && bn ? CompareNumeric(a[i], b[i]) : an ? -1 : bn ? 1 : string.CompareOrdinal(a[i], b[i]);
             if (c != 0) return c;
         }
         return a.Length.CompareTo(b.Length);
+    }
+
+    /// <summary>A numeric pre-release identifier: ASCII digits only, of any length.</summary>
+    private static bool IsNumeric(string s) => s.Length > 0 && s.All(char.IsAsciiDigit);
+
+    /// <summary>Two numeric identifiers by value, whatever their length: without leading zeros the shorter is the lower,
+    /// and two of one length compare digit by digit. The parser refuses leading zeros; a value built in code with them
+    /// still compares by its value.</summary>
+    private static int CompareNumeric(string a, string b)
+    {
+        a = a.TrimStart('0');
+        b = b.TrimStart('0');
+        var c = a.Length.CompareTo(b.Length);
+        return c != 0 ? c : string.CompareOrdinal(a, b);
     }
 
     public bool Equals(SemVersion other) => CompareTo(other) == 0;

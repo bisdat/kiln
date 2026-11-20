@@ -1,0 +1,11 @@
+{
+  "format": 1,
+  "programs": {
+    "cpf_system": { "world": "client" },
+    "cpf_entities": { "world": "client", "read": ["RenderTransform"], "flags": [] },
+    "cpf_both": { "world": "both" },
+    "cpf_prediction": { "world": "prediction" },
+    "cpf_refused": { "world": "client", "read": ["KilnClientProgramsFixtureNoSuchComponent"], "flags": [] },
+    "cpf_visual": { "world": "client", "write": ["RenderTransform"], "flags": [] }
+  }
+}

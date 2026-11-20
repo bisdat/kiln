@@ -278,6 +278,11 @@ pub fn is_sf_mod(folder: &Path) -> bool {
     if m.get("$schema").and_then(|s| s.as_str()).is_some_and(|s| s.to_ascii_lowercase().contains("shroudforge")) {
         return true;
     }
+    // a package whose native-plugin.ini is ShroudForge's (its DLL Manager loads the DLL it names; no Lua needed), not an
+    // XHL-Core plugin's (engine_mods::is_xhl_plugin)
+    if crate::engine_mods::has_xhl_plugin_ini(folder) && !crate::engine_mods::is_xhl_plugin(folder) {
+        return true;
+    }
     folder.join("mod.lua").is_file()
         || std::fs::read_dir(folder.join("src"))
             .into_iter()
@@ -567,6 +572,28 @@ pub fn switched_off(folder: &Path, server: bool) -> Option<SfOff> {
     (!runs).then(|| SfOff::Side(format!("its extended.mod.json targets the {} only", if server { "client" } else { "server" })))
 }
 
+/// What Kiln says about an EML mod the player put into ShroudForge's mods folder by hand while ShroudForge runs the
+/// EML mods there and has it switched off ([`SfOff::Switch`]; a legacy EML package has no `extended.mod.json`, so
+/// ShroudForge keeps it off). Promised to a player on Nexus (2026-11-14): what happened and the two ways out, nothing
+/// about ShroudForge's files (that read as "Kiln wants a ShroudForge file from an EML mod"). The launcher's notes and
+/// found-mods list use it; kiln-eml's log line and the in-game Mods page say the same in their own copy of the words.
+pub const HAND_EML_OFF: &str = "You put this mod into ShroudForge's folder yourself, and ShroudForge has it switched off.";
+
+/// [`HAND_EML_OFF`] and what helps. `server`: a dedicated server, which has no in-game menu. `in_profile`: the profile
+/// lists the mod, so once the folder is gone activation places Kiln's copy (switched on); else the player adds it.
+pub fn hand_eml_off(server: bool, in_profile: bool) -> String {
+    let help = match (server, in_profile) {
+        (false, false) => "Switch it on in Kiln's in-game menu (Mods > ShroudForge), or remove the folder and add the mod with Add mods.",
+        (false, true) => "Switch it on in Kiln's in-game menu (Mods > ShroudForge), or remove the folder and press Play: the mod is in your \
+            profile, so Kiln then places its own copy, switched on.",
+        (true, false) => "A server has no in-game menu: remove the folder and add the mod with Add mods, and Kiln places its own copy, \
+            switched on.",
+        (true, true) => "A server has no in-game menu: remove the folder and activate the profile again, and Kiln places its own copy, \
+            switched on.",
+    };
+    format!("{HAND_EML_OFF} {help}")
+}
+
 /// A folder in the mods dir that is not a readable ShroudForge package, and why.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -656,7 +683,7 @@ fn write_extension(m: &SfMod, text: &str) -> Result<()> {
         return Err(Error::invalid("the settings file would be larger than 2 MiB"));
     }
     // a mod folder in the game: never through a fixed temp name a file of the player's may have
-    crate::util::write_atomic_exclusive(&m.folder.join("extended.mod.json"), text.as_bytes())
+    crate::durable::replace(&m.folder.join("extended.mod.json"), text.as_bytes())
 }
 
 /// A whole number written without its fraction by an earlier Kiln (`[2, 1.5]` for a fractional list, `2` for a

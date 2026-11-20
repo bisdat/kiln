@@ -1,0 +1,1903 @@
+{
+ "format": 1,
+ "about": "engine_identity.py writes this file: see its head for the rule",
+ "root": "{root}",
+ "cases": [
+  {
+   "name": "sf-placed",
+   "kind": "shroudforge",
+   "folder": "mods/unifiedemltweaks",
+   "files": {
+    "mod.json": {
+     "text": "{\n  \"id\": \"unifiedemltweaks\",\n  \"name\": \"Unified EML Tweaks\",\n  \"version\": \"2.1.1\"\n}\n"
+    },
+    "extended.mod.json": {
+     "text": "{\n  \"schemaVersion\": 1,\n  \"enabled\": true,\n  \"targets\": [\n    \"client\",\n    \"server\"\n  ],\n  \"settings\": {\n    \"speed\": {\n      \"label\": \"Speed\",\n      \"control\": \"slider\",\n      \"min\": 1,\n      \"max\": 10,\n      \"value\": 3\n    }\n  }\n}\n"
+    },
+    "native-plugin.ini": {
+     "text": "[Plugin]\r\nEnabled=1\r\nDll=bin/ut_native.dll\r\n"
+    },
+    "bin/ut_native.dll": {
+     "hex": "4d5a900003000000206e6f742072756e20000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff"
+    },
+    "src/mod.lua": {
+     "text": "-- settings come from ShroudForge\r\nreturn {}\r\n"
+    },
+    "locales/pl.json": {
+     "text": "{\"speed\": \"Szybko\u015b\u0107\"}\n"
+    },
+    "reference/ut-reference.txt": {
+     "text": "Unified Tweaks reference\n"
+    },
+    "icon.svg": {
+     "text": "<svg xmlns='http://www.w3.org/2000/svg'/>\n"
+    },
+    ".kiln-library.json": {
+     "text": "{\"format\": 1, \"kind\": \"shroudforge\", \"id\": \"unifiedemltweaks\", \"version\": \"2.1.1\", \"hash\": \"kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28\"}"
+    }
+   },
+   "state": {
+    "library-placements.json": [
+     {
+      "path": "/run/media/deck/GF8S5/steamapps/common/Enshrouded/mods/unifiedemltweaks",
+      "marker": {
+       "format": 1,
+       "kind": "shroudforge",
+       "id": "unifiedemltweaks",
+       "version": "2.1.1",
+       "hash": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28"
+      },
+      "files": {
+       "bin/": "",
+       "bin/ut_native.dll": "0bcc5ab87cc4e0cbeb68df9a62cf57d3fe6d0f0ab660b8f3e8ddbf6d760be15b",
+       "extended.mod.json": "f0be036b95a4ae0678d8e1264c952a95dba60ea8fad2c4362d39c06e99741f7c",
+       "icon.svg": "f502af1820bfc04f67ff9daac2ae7a392e23c7cb6c3dfa5422db05fd9538be19",
+       "locales/": "",
+       "locales/pl.json": "0463131720200fa0ec8bc694c023ff09fec0dadc471c4093f2a110eda5776726",
+       "mod.json": "b65ffb5b396f0372bab04ba44174ade10b6f093dceb248079fc2b81020a10ce0",
+       "native-plugin.ini": "6eff6f900216c5e726ba0f3a56ac64db8c5b1b4d521e2476b6442ce02d85d713",
+       "reference/": "",
+       "reference/ut-reference.txt": "f2aa280ae8f02d5b71386a6613634965dac67ff41c0e69c1f6f1155bd63326a1",
+       "src/": "",
+       "src/mod.lua": "954bb756b06e275c59b9baf2915f1cac8ac5fd861267cc5e153ddc410b2fbfd4"
+      }
+     }
+    ]
+   },
+   "library": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28",
+   "expect": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28"
+  },
+  {
+   "name": "sf-placed-run",
+   "kind": "shroudforge",
+   "folder": "mods/unifiedemltweaks",
+   "files": {
+    "mod.json": {
+     "text": "{\n  \"id\": \"unifiedemltweaks\",\n  \"name\": \"Unified EML Tweaks\",\n  \"version\": \"2.1.1\"\n}\n"
+    },
+    "extended.mod.json": {
+     "text": "{\n  \"schemaVersion\": 1,\n  \"enabled\": true,\n  \"targets\": [\n    \"client\",\n    \"server\"\n  ],\n  \"settings\": {\n    \"speed\": {\n      \"label\": \"Speed\",\n      \"control\": \"slider\",\n      \"min\": 1,\n      \"max\": 10,\n      \"value\": 8\n    }\n  }\n}\n"
+    },
+    "native-plugin.ini": {
+     "text": "[Plugin]\r\nEnabled=1\r\nDll=bin/ut_native.dll\r\n"
+    },
+    "bin/ut_native.dll": {
+     "hex": "4d5a900003000000206e6f742072756e20000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff"
+    },
+    "src/mod.lua": {
+     "text": "-- settings come from ShroudForge\r\nreturn {}\r\n"
+    },
+    "locales/pl.json": {
+     "text": "{\"speed\": \"Szybko\u015b\u0107\"}\n"
+    },
+    "reference/ut-reference.txt": {
+     "text": "Unified Tweaks reference\n"
+    },
+    "icon.svg": {
+     "text": "<svg xmlns='http://www.w3.org/2000/svg'/>\n"
+    },
+    ".kiln-library.json": {
+     "text": "{\"format\": 1, \"kind\": \"shroudforge\", \"id\": \"unifiedemltweaks\", \"version\": \"2.1.1\", \"hash\": \"kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28\"}"
+    },
+    "bin/ut_native.log": {
+     "text": "started\nmore\n"
+    },
+    "logs/Run.LOG": {
+     "text": "run\n"
+    },
+    "bin/native-status.txt": {
+     "text": "tick 2\n"
+    }
+   },
+   "state": {
+    "library-placements.json": [
+     {
+      "path": "/run/media/deck/GF8S5/steamapps/common/Enshrouded/mods/unifiedemltweaks",
+      "marker": {
+       "format": 1,
+       "kind": "shroudforge",
+       "id": "unifiedemltweaks",
+       "version": "2.1.1",
+       "hash": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28"
+      },
+      "files": {
+       "bin/": "",
+       "bin/ut_native.dll": "0bcc5ab87cc4e0cbeb68df9a62cf57d3fe6d0f0ab660b8f3e8ddbf6d760be15b",
+       "extended.mod.json": "f0be036b95a4ae0678d8e1264c952a95dba60ea8fad2c4362d39c06e99741f7c",
+       "icon.svg": "f502af1820bfc04f67ff9daac2ae7a392e23c7cb6c3dfa5422db05fd9538be19",
+       "locales/": "",
+       "locales/pl.json": "0463131720200fa0ec8bc694c023ff09fec0dadc471c4093f2a110eda5776726",
+       "mod.json": "b65ffb5b396f0372bab04ba44174ade10b6f093dceb248079fc2b81020a10ce0",
+       "native-plugin.ini": "6eff6f900216c5e726ba0f3a56ac64db8c5b1b4d521e2476b6442ce02d85d713",
+       "reference/": "",
+       "reference/ut-reference.txt": "f2aa280ae8f02d5b71386a6613634965dac67ff41c0e69c1f6f1155bd63326a1",
+       "src/": "",
+       "src/mod.lua": "954bb756b06e275c59b9baf2915f1cac8ac5fd861267cc5e153ddc410b2fbfd4"
+      }
+     }
+    ]
+   },
+   "library": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28",
+   "expect": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28"
+  },
+  {
+   "name": "sf-placed-switched-off",
+   "kind": "shroudforge",
+   "folder": "mods/unifiedemltweaks",
+   "files": {
+    "mod.json": {
+     "text": "{\n  \"id\": \"unifiedemltweaks\",\n  \"name\": \"Unified EML Tweaks\",\n  \"version\": \"2.1.1\"\n}\n"
+    },
+    "extended.mod.json": {
+     "text": "{\n  \"schemaVersion\": 1,\n  \"enabled\": false,\n  \"targets\": [\n    \"client\",\n    \"server\"\n  ],\n  \"settings\": {\n    \"speed\": {\n      \"label\": \"Speed\",\n      \"control\": \"slider\",\n      \"min\": 1,\n      \"max\": 10,\n      \"value\": 3\n    }\n  }\n}\n"
+    },
+    "native-plugin.ini": {
+     "text": "[Plugin]\r\nEnabled=1\r\nDll=bin/ut_native.dll\r\n"
+    },
+    "bin/ut_native.dll": {
+     "hex": "4d5a900003000000206e6f742072756e20000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff"
+    },
+    "src/mod.lua": {
+     "text": "-- settings come from ShroudForge\r\nreturn {}\r\n"
+    },
+    "locales/pl.json": {
+     "text": "{\"speed\": \"Szybko\u015b\u0107\"}\n"
+    },
+    "reference/ut-reference.txt": {
+     "text": "Unified Tweaks reference\n"
+    },
+    "icon.svg": {
+     "text": "<svg xmlns='http://www.w3.org/2000/svg'/>\n"
+    },
+    ".kiln-library.json": {
+     "text": "{\"format\": 1, \"kind\": \"shroudforge\", \"id\": \"unifiedemltweaks\", \"version\": \"2.1.1\", \"hash\": \"kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28\"}"
+    }
+   },
+   "state": {
+    "library-placements.json": [
+     {
+      "path": "/run/media/deck/GF8S5/steamapps/common/Enshrouded/mods/unifiedemltweaks",
+      "marker": {
+       "format": 1,
+       "kind": "shroudforge",
+       "id": "unifiedemltweaks",
+       "version": "2.1.1",
+       "hash": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28"
+      },
+      "files": {
+       "bin/": "",
+       "bin/ut_native.dll": "0bcc5ab87cc4e0cbeb68df9a62cf57d3fe6d0f0ab660b8f3e8ddbf6d760be15b",
+       "extended.mod.json": "f0be036b95a4ae0678d8e1264c952a95dba60ea8fad2c4362d39c06e99741f7c",
+       "icon.svg": "f502af1820bfc04f67ff9daac2ae7a392e23c7cb6c3dfa5422db05fd9538be19",
+       "locales/": "",
+       "locales/pl.json": "0463131720200fa0ec8bc694c023ff09fec0dadc471c4093f2a110eda5776726",
+       "mod.json": "b65ffb5b396f0372bab04ba44174ade10b6f093dceb248079fc2b81020a10ce0",
+       "native-plugin.ini": "6eff6f900216c5e726ba0f3a56ac64db8c5b1b4d521e2476b6442ce02d85d713",
+       "reference/": "",
+       "reference/ut-reference.txt": "f2aa280ae8f02d5b71386a6613634965dac67ff41c0e69c1f6f1155bd63326a1",
+       "src/": "",
+       "src/mod.lua": "954bb756b06e275c59b9baf2915f1cac8ac5fd861267cc5e153ddc410b2fbfd4"
+      }
+     }
+    ]
+   },
+   "library": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28",
+   "listed": false,
+   "expect": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28"
+  },
+  {
+   "name": "sf-placed-exact-path",
+   "kind": "shroudforge",
+   "folder": "mods/unifiedemltweaks",
+   "files": {
+    "mod.json": {
+     "text": "{\n  \"id\": \"unifiedemltweaks\",\n  \"name\": \"Unified EML Tweaks\",\n  \"version\": \"2.1.1\"\n}\n"
+    },
+    "extended.mod.json": {
+     "text": "{\n  \"schemaVersion\": 1,\n  \"enabled\": true,\n  \"targets\": [\n    \"client\",\n    \"server\"\n  ],\n  \"settings\": {\n    \"speed\": {\n      \"label\": \"Speed\",\n      \"control\": \"slider\",\n      \"min\": 1,\n      \"max\": 10,\n      \"value\": 3\n    }\n  }\n}\n"
+    },
+    "native-plugin.ini": {
+     "text": "[Plugin]\r\nEnabled=1\r\nDll=bin/ut_native.dll\r\n"
+    },
+    "bin/ut_native.dll": {
+     "hex": "4d5a900003000000206e6f742072756e20000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff"
+    },
+    "src/mod.lua": {
+     "text": "-- settings come from ShroudForge\r\nreturn {}\r\n"
+    },
+    "locales/pl.json": {
+     "text": "{\"speed\": \"Szybko\u015b\u0107\"}\n"
+    },
+    "reference/ut-reference.txt": {
+     "text": "Unified Tweaks reference\n"
+    },
+    "icon.svg": {
+     "text": "<svg xmlns='http://www.w3.org/2000/svg'/>\n"
+    },
+    ".kiln-library.json": {
+     "text": "{\"format\": 1, \"kind\": \"shroudforge\", \"id\": \"unifiedemltweaks\", \"version\": \"2.1.1\", \"hash\": \"kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28\"}"
+    }
+   },
+   "state": {
+    "library-placements.json": [
+     {
+      "path": "{root}/mods/unifiedemltweaks",
+      "marker": {
+       "format": 1,
+       "kind": "shroudforge",
+       "id": "unifiedemltweaks",
+       "version": "2.1.1",
+       "hash": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28"
+      },
+      "files": {
+       "bin/": "",
+       "bin/ut_native.dll": "0bcc5ab87cc4e0cbeb68df9a62cf57d3fe6d0f0ab660b8f3e8ddbf6d760be15b",
+       "extended.mod.json": "f0be036b95a4ae0678d8e1264c952a95dba60ea8fad2c4362d39c06e99741f7c",
+       "icon.svg": "f502af1820bfc04f67ff9daac2ae7a392e23c7cb6c3dfa5422db05fd9538be19",
+       "locales/": "",
+       "locales/pl.json": "0463131720200fa0ec8bc694c023ff09fec0dadc471c4093f2a110eda5776726",
+       "mod.json": "b65ffb5b396f0372bab04ba44174ade10b6f093dceb248079fc2b81020a10ce0",
+       "native-plugin.ini": "6eff6f900216c5e726ba0f3a56ac64db8c5b1b4d521e2476b6442ce02d85d713",
+       "reference/": "",
+       "reference/ut-reference.txt": "f2aa280ae8f02d5b71386a6613634965dac67ff41c0e69c1f6f1155bd63326a1",
+       "src/": "",
+       "src/mod.lua": "954bb756b06e275c59b9baf2915f1cac8ac5fd861267cc5e153ddc410b2fbfd4"
+      }
+     }
+    ]
+   },
+   "library": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28",
+   "expect": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28"
+  },
+  {
+   "name": "sf-placed-lua-changed",
+   "kind": "shroudforge",
+   "folder": "mods/unifiedemltweaks",
+   "files": {
+    "mod.json": {
+     "text": "{\n  \"id\": \"unifiedemltweaks\",\n  \"name\": \"Unified EML Tweaks\",\n  \"version\": \"2.1.1\"\n}\n"
+    },
+    "extended.mod.json": {
+     "text": "{\n  \"schemaVersion\": 1,\n  \"enabled\": true,\n  \"targets\": [\n    \"client\",\n    \"server\"\n  ],\n  \"settings\": {\n    \"speed\": {\n      \"label\": \"Speed\",\n      \"control\": \"slider\",\n      \"min\": 1,\n      \"max\": 10,\n      \"value\": 3\n    }\n  }\n}\n"
+    },
+    "native-plugin.ini": {
+     "text": "[Plugin]\r\nEnabled=1\r\nDll=bin/ut_native.dll\r\n"
+    },
+    "bin/ut_native.dll": {
+     "hex": "4d5a900003000000206e6f742072756e20000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff"
+    },
+    "src/mod.lua": {
+     "text": "return { edited = true }\n"
+    },
+    "locales/pl.json": {
+     "text": "{\"speed\": \"Szybko\u015b\u0107\"}\n"
+    },
+    "reference/ut-reference.txt": {
+     "text": "Unified Tweaks reference\n"
+    },
+    "icon.svg": {
+     "text": "<svg xmlns='http://www.w3.org/2000/svg'/>\n"
+    },
+    ".kiln-library.json": {
+     "text": "{\"format\": 1, \"kind\": \"shroudforge\", \"id\": \"unifiedemltweaks\", \"version\": \"2.1.1\", \"hash\": \"kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28\"}"
+    }
+   },
+   "state": {
+    "library-placements.json": [
+     {
+      "path": "/run/media/deck/GF8S5/steamapps/common/Enshrouded/mods/unifiedemltweaks",
+      "marker": {
+       "format": 1,
+       "kind": "shroudforge",
+       "id": "unifiedemltweaks",
+       "version": "2.1.1",
+       "hash": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28"
+      },
+      "files": {
+       "bin/": "",
+       "bin/ut_native.dll": "0bcc5ab87cc4e0cbeb68df9a62cf57d3fe6d0f0ab660b8f3e8ddbf6d760be15b",
+       "extended.mod.json": "f0be036b95a4ae0678d8e1264c952a95dba60ea8fad2c4362d39c06e99741f7c",
+       "icon.svg": "f502af1820bfc04f67ff9daac2ae7a392e23c7cb6c3dfa5422db05fd9538be19",
+       "locales/": "",
+       "locales/pl.json": "0463131720200fa0ec8bc694c023ff09fec0dadc471c4093f2a110eda5776726",
+       "mod.json": "b65ffb5b396f0372bab04ba44174ade10b6f093dceb248079fc2b81020a10ce0",
+       "native-plugin.ini": "6eff6f900216c5e726ba0f3a56ac64db8c5b1b4d521e2476b6442ce02d85d713",
+       "reference/": "",
+       "reference/ut-reference.txt": "f2aa280ae8f02d5b71386a6613634965dac67ff41c0e69c1f6f1155bd63326a1",
+       "src/": "",
+       "src/mod.lua": "954bb756b06e275c59b9baf2915f1cac8ac5fd861267cc5e153ddc410b2fbfd4"
+      }
+     }
+    ]
+   },
+   "library": null,
+   "expect": "kdh1:d8a2a50211ffe81ed9826d75d78ffc2f4fcd39d66c3ee33276459530a2b10aa1"
+  },
+  {
+   "name": "sf-placed-dll-updated",
+   "kind": "shroudforge",
+   "folder": "mods/unifiedemltweaks",
+   "files": {
+    "mod.json": {
+     "text": "{\n  \"id\": \"unifiedemltweaks\",\n  \"name\": \"Unified EML Tweaks\",\n  \"version\": \"2.1.1\"\n}\n"
+    },
+    "extended.mod.json": {
+     "text": "{\n  \"schemaVersion\": 1,\n  \"enabled\": true,\n  \"targets\": [\n    \"client\",\n    \"server\"\n  ],\n  \"settings\": {\n    \"speed\": {\n      \"label\": \"Speed\",\n      \"control\": \"slider\",\n      \"min\": 1,\n      \"max\": 10,\n      \"value\": 8\n    }\n  }\n}\n"
+    },
+    "native-plugin.ini": {
+     "text": "[Plugin]\r\nEnabled=1\r\nDll=bin/ut_native.dll\r\n"
+    },
+    "bin/ut_native.dll": {
+     "hex": "4d5a2061206e65776572206275696c64"
+    },
+    "src/mod.lua": {
+     "text": "-- settings come from ShroudForge\r\nreturn {}\r\n"
+    },
+    "locales/pl.json": {
+     "text": "{\"speed\": \"Szybko\u015b\u0107\"}\n"
+    },
+    "reference/ut-reference.txt": {
+     "text": "Unified Tweaks reference\n"
+    },
+    "icon.svg": {
+     "text": "<svg xmlns='http://www.w3.org/2000/svg'/>\n"
+    },
+    ".kiln-library.json": {
+     "text": "{\"format\": 1, \"kind\": \"shroudforge\", \"id\": \"unifiedemltweaks\", \"version\": \"2.1.1\", \"hash\": \"kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28\"}"
+    },
+    "bin/ut_native.log": {
+     "text": "started\nmore\n"
+    },
+    "logs/Run.LOG": {
+     "text": "run\n"
+    },
+    "bin/native-status.txt": {
+     "text": "tick 2\n"
+    }
+   },
+   "state": {
+    "library-placements.json": [
+     {
+      "path": "/run/media/deck/GF8S5/steamapps/common/Enshrouded/mods/unifiedemltweaks",
+      "marker": {
+       "format": 1,
+       "kind": "shroudforge",
+       "id": "unifiedemltweaks",
+       "version": "2.1.1",
+       "hash": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28"
+      },
+      "files": {
+       "bin/": "",
+       "bin/ut_native.dll": "0bcc5ab87cc4e0cbeb68df9a62cf57d3fe6d0f0ab660b8f3e8ddbf6d760be15b",
+       "extended.mod.json": "f0be036b95a4ae0678d8e1264c952a95dba60ea8fad2c4362d39c06e99741f7c",
+       "icon.svg": "f502af1820bfc04f67ff9daac2ae7a392e23c7cb6c3dfa5422db05fd9538be19",
+       "locales/": "",
+       "locales/pl.json": "0463131720200fa0ec8bc694c023ff09fec0dadc471c4093f2a110eda5776726",
+       "mod.json": "b65ffb5b396f0372bab04ba44174ade10b6f093dceb248079fc2b81020a10ce0",
+       "native-plugin.ini": "6eff6f900216c5e726ba0f3a56ac64db8c5b1b4d521e2476b6442ce02d85d713",
+       "reference/": "",
+       "reference/ut-reference.txt": "f2aa280ae8f02d5b71386a6613634965dac67ff41c0e69c1f6f1155bd63326a1",
+       "src/": "",
+       "src/mod.lua": "954bb756b06e275c59b9baf2915f1cac8ac5fd861267cc5e153ddc410b2fbfd4"
+      }
+     }
+    ]
+   },
+   "library": null,
+   "expect": "kdh1:ee3a31f01577bc292b3fb928b9506ebebcc19ed333b3d26d710986703fd19522"
+  },
+  {
+   "name": "sf-placed-ini-changed",
+   "kind": "shroudforge",
+   "folder": "mods/unifiedemltweaks",
+   "files": {
+    "mod.json": {
+     "text": "{\n  \"id\": \"unifiedemltweaks\",\n  \"name\": \"Unified EML Tweaks\",\n  \"version\": \"2.1.1\"\n}\n"
+    },
+    "extended.mod.json": {
+     "text": "{\n  \"schemaVersion\": 1,\n  \"enabled\": true,\n  \"targets\": [\n    \"client\",\n    \"server\"\n  ],\n  \"settings\": {\n    \"speed\": {\n      \"label\": \"Speed\",\n      \"control\": \"slider\",\n      \"min\": 1,\n      \"max\": 10,\n      \"value\": 3\n    }\n  }\n}\n"
+    },
+    "native-plugin.ini": {
+     "text": "[Plugin]\r\nEnabled=1\r\nDll=bin/ut_native_v2.dll\r\n"
+    },
+    "bin/ut_native.dll": {
+     "hex": "4d5a900003000000206e6f742072756e20000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff"
+    },
+    "src/mod.lua": {
+     "text": "-- settings come from ShroudForge\r\nreturn {}\r\n"
+    },
+    "locales/pl.json": {
+     "text": "{\"speed\": \"Szybko\u015b\u0107\"}\n"
+    },
+    "reference/ut-reference.txt": {
+     "text": "Unified Tweaks reference\n"
+    },
+    "icon.svg": {
+     "text": "<svg xmlns='http://www.w3.org/2000/svg'/>\n"
+    },
+    ".kiln-library.json": {
+     "text": "{\"format\": 1, \"kind\": \"shroudforge\", \"id\": \"unifiedemltweaks\", \"version\": \"2.1.1\", \"hash\": \"kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28\"}"
+    }
+   },
+   "state": {
+    "library-placements.json": [
+     {
+      "path": "/run/media/deck/GF8S5/steamapps/common/Enshrouded/mods/unifiedemltweaks",
+      "marker": {
+       "format": 1,
+       "kind": "shroudforge",
+       "id": "unifiedemltweaks",
+       "version": "2.1.1",
+       "hash": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28"
+      },
+      "files": {
+       "bin/": "",
+       "bin/ut_native.dll": "0bcc5ab87cc4e0cbeb68df9a62cf57d3fe6d0f0ab660b8f3e8ddbf6d760be15b",
+       "extended.mod.json": "f0be036b95a4ae0678d8e1264c952a95dba60ea8fad2c4362d39c06e99741f7c",
+       "icon.svg": "f502af1820bfc04f67ff9daac2ae7a392e23c7cb6c3dfa5422db05fd9538be19",
+       "locales/": "",
+       "locales/pl.json": "0463131720200fa0ec8bc694c023ff09fec0dadc471c4093f2a110eda5776726",
+       "mod.json": "b65ffb5b396f0372bab04ba44174ade10b6f093dceb248079fc2b81020a10ce0",
+       "native-plugin.ini": "6eff6f900216c5e726ba0f3a56ac64db8c5b1b4d521e2476b6442ce02d85d713",
+       "reference/": "",
+       "reference/ut-reference.txt": "f2aa280ae8f02d5b71386a6613634965dac67ff41c0e69c1f6f1155bd63326a1",
+       "src/": "",
+       "src/mod.lua": "954bb756b06e275c59b9baf2915f1cac8ac5fd861267cc5e153ddc410b2fbfd4"
+      }
+     }
+    ]
+   },
+   "library": null,
+   "expect": "kdh1:9516e7010608e7066656f8cd199d6e11f4f51eafff1316dd2a1aaea181b87d2e"
+  },
+  {
+   "name": "sf-placed-file-gone",
+   "kind": "shroudforge",
+   "folder": "mods/unifiedemltweaks",
+   "files": {
+    "mod.json": {
+     "text": "{\n  \"id\": \"unifiedemltweaks\",\n  \"name\": \"Unified EML Tweaks\",\n  \"version\": \"2.1.1\"\n}\n"
+    },
+    "extended.mod.json": {
+     "text": "{\n  \"schemaVersion\": 1,\n  \"enabled\": true,\n  \"targets\": [\n    \"client\",\n    \"server\"\n  ],\n  \"settings\": {\n    \"speed\": {\n      \"label\": \"Speed\",\n      \"control\": \"slider\",\n      \"min\": 1,\n      \"max\": 10,\n      \"value\": 3\n    }\n  }\n}\n"
+    },
+    "native-plugin.ini": {
+     "text": "[Plugin]\r\nEnabled=1\r\nDll=bin/ut_native.dll\r\n"
+    },
+    "bin/ut_native.dll": {
+     "hex": "4d5a900003000000206e6f742072756e20000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff"
+    },
+    "src/mod.lua": {
+     "text": "-- settings come from ShroudForge\r\nreturn {}\r\n"
+    },
+    "reference/ut-reference.txt": {
+     "text": "Unified Tweaks reference\n"
+    },
+    "icon.svg": {
+     "text": "<svg xmlns='http://www.w3.org/2000/svg'/>\n"
+    },
+    ".kiln-library.json": {
+     "text": "{\"format\": 1, \"kind\": \"shroudforge\", \"id\": \"unifiedemltweaks\", \"version\": \"2.1.1\", \"hash\": \"kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28\"}"
+    }
+   },
+   "state": {
+    "library-placements.json": [
+     {
+      "path": "/run/media/deck/GF8S5/steamapps/common/Enshrouded/mods/unifiedemltweaks",
+      "marker": {
+       "format": 1,
+       "kind": "shroudforge",
+       "id": "unifiedemltweaks",
+       "version": "2.1.1",
+       "hash": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28"
+      },
+      "files": {
+       "bin/": "",
+       "bin/ut_native.dll": "0bcc5ab87cc4e0cbeb68df9a62cf57d3fe6d0f0ab660b8f3e8ddbf6d760be15b",
+       "extended.mod.json": "f0be036b95a4ae0678d8e1264c952a95dba60ea8fad2c4362d39c06e99741f7c",
+       "icon.svg": "f502af1820bfc04f67ff9daac2ae7a392e23c7cb6c3dfa5422db05fd9538be19",
+       "locales/": "",
+       "locales/pl.json": "0463131720200fa0ec8bc694c023ff09fec0dadc471c4093f2a110eda5776726",
+       "mod.json": "b65ffb5b396f0372bab04ba44174ade10b6f093dceb248079fc2b81020a10ce0",
+       "native-plugin.ini": "6eff6f900216c5e726ba0f3a56ac64db8c5b1b4d521e2476b6442ce02d85d713",
+       "reference/": "",
+       "reference/ut-reference.txt": "f2aa280ae8f02d5b71386a6613634965dac67ff41c0e69c1f6f1155bd63326a1",
+       "src/": "",
+       "src/mod.lua": "954bb756b06e275c59b9baf2915f1cac8ac5fd861267cc5e153ddc410b2fbfd4"
+      }
+     }
+    ]
+   },
+   "library": null,
+   "expect": "kdh1:2432e83eb5c3d943aa3abf64dd4c0e3c2449027ca7efafc2ffd1fcc9facd7e2a"
+  },
+  {
+   "name": "sf-placed-dll-added",
+   "kind": "shroudforge",
+   "folder": "mods/unifiedemltweaks",
+   "files": {
+    "mod.json": {
+     "text": "{\n  \"id\": \"unifiedemltweaks\",\n  \"name\": \"Unified EML Tweaks\",\n  \"version\": \"2.1.1\"\n}\n"
+    },
+    "extended.mod.json": {
+     "text": "{\n  \"schemaVersion\": 1,\n  \"enabled\": true,\n  \"targets\": [\n    \"client\",\n    \"server\"\n  ],\n  \"settings\": {\n    \"speed\": {\n      \"label\": \"Speed\",\n      \"control\": \"slider\",\n      \"min\": 1,\n      \"max\": 10,\n      \"value\": 3\n    }\n  }\n}\n"
+    },
+    "native-plugin.ini": {
+     "text": "[Plugin]\r\nEnabled=1\r\nDll=bin/ut_native.dll\r\n"
+    },
+    "bin/ut_native.dll": {
+     "hex": "4d5a900003000000206e6f742072756e20000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff"
+    },
+    "src/mod.lua": {
+     "text": "-- settings come from ShroudForge\r\nreturn {}\r\n"
+    },
+    "locales/pl.json": {
+     "text": "{\"speed\": \"Szybko\u015b\u0107\"}\n"
+    },
+    "reference/ut-reference.txt": {
+     "text": "Unified Tweaks reference\n"
+    },
+    "icon.svg": {
+     "text": "<svg xmlns='http://www.w3.org/2000/svg'/>\n"
+    },
+    ".kiln-library.json": {
+     "text": "{\"format\": 1, \"kind\": \"shroudforge\", \"id\": \"unifiedemltweaks\", \"version\": \"2.1.1\", \"hash\": \"kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28\"}"
+    },
+    "bin/ut_extra.dll": {
+     "hex": "4d5a20616464656420627920746865206d6f64"
+    }
+   },
+   "state": {
+    "library-placements.json": [
+     {
+      "path": "/run/media/deck/GF8S5/steamapps/common/Enshrouded/mods/unifiedemltweaks",
+      "marker": {
+       "format": 1,
+       "kind": "shroudforge",
+       "id": "unifiedemltweaks",
+       "version": "2.1.1",
+       "hash": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28"
+      },
+      "files": {
+       "bin/": "",
+       "bin/ut_native.dll": "0bcc5ab87cc4e0cbeb68df9a62cf57d3fe6d0f0ab660b8f3e8ddbf6d760be15b",
+       "extended.mod.json": "f0be036b95a4ae0678d8e1264c952a95dba60ea8fad2c4362d39c06e99741f7c",
+       "icon.svg": "f502af1820bfc04f67ff9daac2ae7a392e23c7cb6c3dfa5422db05fd9538be19",
+       "locales/": "",
+       "locales/pl.json": "0463131720200fa0ec8bc694c023ff09fec0dadc471c4093f2a110eda5776726",
+       "mod.json": "b65ffb5b396f0372bab04ba44174ade10b6f093dceb248079fc2b81020a10ce0",
+       "native-plugin.ini": "6eff6f900216c5e726ba0f3a56ac64db8c5b1b4d521e2476b6442ce02d85d713",
+       "reference/": "",
+       "reference/ut-reference.txt": "f2aa280ae8f02d5b71386a6613634965dac67ff41c0e69c1f6f1155bd63326a1",
+       "src/": "",
+       "src/mod.lua": "954bb756b06e275c59b9baf2915f1cac8ac5fd861267cc5e153ddc410b2fbfd4"
+      }
+     }
+    ]
+   },
+   "library": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28",
+   "expect": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28"
+  },
+  {
+   "name": "sf-placed-ships-a-log",
+   "kind": "shroudforge",
+   "folder": "mods/unifiedemltweaks",
+   "files": {
+    "mod.json": {
+     "text": "{\n  \"id\": \"unifiedemltweaks\",\n  \"name\": \"Unified EML Tweaks\",\n  \"version\": \"2.1.1\"\n}\n"
+    },
+    "extended.mod.json": {
+     "text": "{\n  \"schemaVersion\": 1,\n  \"enabled\": true,\n  \"targets\": [\n    \"client\",\n    \"server\"\n  ],\n  \"settings\": {\n    \"speed\": {\n      \"label\": \"Speed\",\n      \"control\": \"slider\",\n      \"min\": 1,\n      \"max\": 10,\n      \"value\": 3\n    }\n  }\n}\n"
+    },
+    "native-plugin.ini": {
+     "text": "[Plugin]\r\nEnabled=1\r\nDll=bin/ut_native.dll\r\n"
+    },
+    "bin/ut_native.dll": {
+     "hex": "4d5a900003000000206e6f742072756e20000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff"
+    },
+    "src/mod.lua": {
+     "text": "-- settings come from ShroudForge\r\nreturn {}\r\n"
+    },
+    "locales/pl.json": {
+     "text": "{\"speed\": \"Szybko\u015b\u0107\"}\n"
+    },
+    "reference/ut-reference.txt": {
+     "text": "Unified Tweaks reference\n"
+    },
+    "icon.svg": {
+     "text": "<svg xmlns='http://www.w3.org/2000/svg'/>\n"
+    },
+    "bin/readme.log": {
+     "text": "shipped\nappended\n"
+    },
+    ".kiln-library.json": {
+     "text": "{\"format\": 1, \"kind\": \"shroudforge\", \"id\": \"unifiedemltweaks\", \"version\": \"2.1.1\", \"hash\": \"kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28\"}"
+    }
+   },
+   "state": {
+    "library-placements.json": [
+     {
+      "path": "/run/media/deck/GF8S5/steamapps/common/Enshrouded/mods/unifiedemltweaks",
+      "marker": {
+       "format": 1,
+       "kind": "shroudforge",
+       "id": "unifiedemltweaks",
+       "version": "2.1.1",
+       "hash": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28"
+      },
+      "files": {
+       "bin/": "",
+       "bin/readme.log": "cfa43394289d895d668f05b6cc2566b2b404bf643d6c7632dbc88383aaab16b3",
+       "bin/ut_native.dll": "0bcc5ab87cc4e0cbeb68df9a62cf57d3fe6d0f0ab660b8f3e8ddbf6d760be15b",
+       "extended.mod.json": "f0be036b95a4ae0678d8e1264c952a95dba60ea8fad2c4362d39c06e99741f7c",
+       "icon.svg": "f502af1820bfc04f67ff9daac2ae7a392e23c7cb6c3dfa5422db05fd9538be19",
+       "locales/": "",
+       "locales/pl.json": "0463131720200fa0ec8bc694c023ff09fec0dadc471c4093f2a110eda5776726",
+       "mod.json": "b65ffb5b396f0372bab04ba44174ade10b6f093dceb248079fc2b81020a10ce0",
+       "native-plugin.ini": "6eff6f900216c5e726ba0f3a56ac64db8c5b1b4d521e2476b6442ce02d85d713",
+       "reference/": "",
+       "reference/ut-reference.txt": "f2aa280ae8f02d5b71386a6613634965dac67ff41c0e69c1f6f1155bd63326a1",
+       "src/": "",
+       "src/mod.lua": "954bb756b06e275c59b9baf2915f1cac8ac5fd861267cc5e153ddc410b2fbfd4"
+      }
+     }
+    ]
+   },
+   "library": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28",
+   "expect": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28"
+  },
+  {
+   "name": "sf-placed-odd-names",
+   "kind": "shroudforge",
+   "folder": "mods/unifiedemltweaks",
+   "files": {
+    "mod.json": {
+     "text": "{\n  \"id\": \"unifiedemltweaks\",\n  \"name\": \"Unified EML Tweaks\",\n  \"version\": \"2.1.1\"\n}\n"
+    },
+    "extended.mod.json": {
+     "text": "{\n  \"schemaVersion\": 1,\n  \"enabled\": true,\n  \"targets\": [\n    \"client\",\n    \"server\"\n  ],\n  \"settings\": {\n    \"speed\": {\n      \"label\": \"Speed\",\n      \"control\": \"slider\",\n      \"min\": 1,\n      \"max\": 10,\n      \"value\": 8\n    }\n  }\n}\n"
+    },
+    "native-plugin.ini": {
+     "text": "[Plugin]\r\nEnabled=1\r\nDll=bin/ut_native.dll\r\n"
+    },
+    "bin/ut_native.dll": {
+     "hex": "4d5a900003000000206e6f742072756e20000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff"
+    },
+    "src/mod.lua": {
+     "text": "-- settings come from ShroudForge\r\nreturn {}\r\n"
+    },
+    "locales/pl.json": {
+     "text": "{\"speed\": \"Szybko\u015b\u0107\"}\n"
+    },
+    "reference/ut-reference.txt": {
+     "text": "Unified Tweaks reference\n"
+    },
+    "icon.svg": {
+     "text": "<svg xmlns='http://www.w3.org/2000/svg'/>\n"
+    },
+    "data/a/b/c/table.bin": {
+     "hex": "fffefdfcfbfaf9f8f7f6f5f4f3f2f1f0efeeedecebeae9e8e7e6e5e4e3e2e1e0dfdedddcdbdad9d8d7d6d5d4d3d2d1d0cfcecdcccbcac9c8c7c6c5c4c3c2c1c0bfbebdbcbbbab9b8b7b6b5b4b3b2b1b0afaeadacabaaa9a8a7a6a5a4a3a2a1a09f9e9d9c9b9a999897969594939291908f8e8d8c8b8a898887868584838281807f7e7d7c7b7a797877767574737271706f6e6d6c6b6a696867666564636261605f5e5d5c5b5a595857565554535251504f4e4d4c4b4a494847464544434241403f3e3d3c3b3a393837363534333231302f2e2d2c2b2a292827262524232221201f1e1d1c1b1a191817161514131211100f0e0d0c0b0a09080706050403020100"
+    },
+    "data/Read Me.txt": {
+     "text": "line one\r\nline two\n"
+    },
+    "data/U\u0308bersicht.lua": {
+     "text": "return 1\n"
+    },
+    "data/caf\u00e9 (copy).json": {
+     "text": "{}\r\n"
+    },
+    "src/crlf.lua": {
+     "text": "local a = 1\r\nreturn a\r\n"
+    },
+    ".hidden/skip.txt": {
+     "text": "never counted\n"
+    },
+    ".kiln-library.json": {
+     "text": "{\"format\": 1, \"kind\": \"shroudforge\", \"id\": \"unifiedemltweaks\", \"version\": \"2.1.1\", \"hash\": \"kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28\"}"
+    },
+    "bin/ut_native.log": {
+     "text": "started\nmore\n"
+    },
+    "logs/Run.LOG": {
+     "text": "run\n"
+    },
+    "bin/native-status.txt": {
+     "text": "tick 2\n"
+    },
+    "data/CRASH.LOG": {
+     "text": "x\n"
+    }
+   },
+   "state": {
+    "library-placements.json": [
+     {
+      "path": "/run/media/deck/GF8S5/steamapps/common/Enshrouded/mods/unifiedemltweaks",
+      "marker": {
+       "format": 1,
+       "kind": "shroudforge",
+       "id": "unifiedemltweaks",
+       "version": "2.1.1",
+       "hash": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28"
+      },
+      "files": {
+       ".hidden/": "",
+       ".hidden/skip.txt": "cb71b2efd6bf1334873d248121f36147c899272d23f70f1df60ff1f3584af2d3",
+       "bin/": "",
+       "bin/ut_native.dll": "0bcc5ab87cc4e0cbeb68df9a62cf57d3fe6d0f0ab660b8f3e8ddbf6d760be15b",
+       "data/": "",
+       "data/Read Me.txt": "af28611c8dd7cdaa70b328947a47e7236543cff6aee512d92f80132b7f8db82f",
+       "data/U\u0308bersicht.lua": "0805bfdc02e872ed322a4a4e440ae985f3a4335f4dd59f3d373dfaf2a68a4a3c",
+       "data/a/": "",
+       "data/a/b/": "",
+       "data/a/b/c/": "",
+       "data/a/b/c/table.bin": "cd6816b77f68d70001fc3eaa4d42bdd67cb5973b3151cc5292ecc02a3daac6ab",
+       "data/caf\u00e9 (copy).json": "e3566b3a06430868d71e9287dfd6c6c520a3da027aabea01951d407ee131dc2f",
+       "extended.mod.json": "f0be036b95a4ae0678d8e1264c952a95dba60ea8fad2c4362d39c06e99741f7c",
+       "icon.svg": "f502af1820bfc04f67ff9daac2ae7a392e23c7cb6c3dfa5422db05fd9538be19",
+       "locales/": "",
+       "locales/pl.json": "0463131720200fa0ec8bc694c023ff09fec0dadc471c4093f2a110eda5776726",
+       "mod.json": "b65ffb5b396f0372bab04ba44174ade10b6f093dceb248079fc2b81020a10ce0",
+       "native-plugin.ini": "6eff6f900216c5e726ba0f3a56ac64db8c5b1b4d521e2476b6442ce02d85d713",
+       "reference/": "",
+       "reference/ut-reference.txt": "f2aa280ae8f02d5b71386a6613634965dac67ff41c0e69c1f6f1155bd63326a1",
+       "src/": "",
+       "src/crlf.lua": "d26cb3988c4694de0740c1bedf0c1cbf0501f4ef2d7b4ea35c87672099823dd5",
+       "src/mod.lua": "954bb756b06e275c59b9baf2915f1cac8ac5fd861267cc5e153ddc410b2fbfd4"
+      }
+     }
+    ]
+   },
+   "library": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28",
+   "expect": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28"
+  },
+  {
+   "name": "sf-placed-receipt-upper-case",
+   "kind": "shroudforge",
+   "folder": "mods/unifiedemltweaks",
+   "files": {
+    "mod.json": {
+     "text": "{\n  \"id\": \"unifiedemltweaks\",\n  \"name\": \"Unified EML Tweaks\",\n  \"version\": \"2.1.1\"\n}\n"
+    },
+    "extended.mod.json": {
+     "text": "{\n  \"schemaVersion\": 1,\n  \"enabled\": true,\n  \"targets\": [\n    \"client\",\n    \"server\"\n  ],\n  \"settings\": {\n    \"speed\": {\n      \"label\": \"Speed\",\n      \"control\": \"slider\",\n      \"min\": 1,\n      \"max\": 10,\n      \"value\": 3\n    }\n  }\n}\n"
+    },
+    "native-plugin.ini": {
+     "text": "[Plugin]\r\nEnabled=1\r\nDll=bin/ut_native.dll\r\n"
+    },
+    "bin/ut_native.dll": {
+     "hex": "4d5a900003000000206e6f742072756e20000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff"
+    },
+    "src/mod.lua": {
+     "text": "-- settings come from ShroudForge\r\nreturn {}\r\n"
+    },
+    "locales/pl.json": {
+     "text": "{\"speed\": \"Szybko\u015b\u0107\"}\n"
+    },
+    "reference/ut-reference.txt": {
+     "text": "Unified Tweaks reference\n"
+    },
+    "icon.svg": {
+     "text": "<svg xmlns='http://www.w3.org/2000/svg'/>\n"
+    },
+    ".kiln-library.json": {
+     "text": "{\"format\": 1, \"kind\": \"shroudforge\", \"id\": \"unifiedemltweaks\", \"version\": \"2.1.1\", \"hash\": \"kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28\"}"
+    }
+   },
+   "state": {
+    "library-placements.json": [
+     {
+      "path": "D:\\steamapps\\common\\Enshrouded\\MODS\\unifiedemltweaks",
+      "marker": {
+       "format": 1,
+       "kind": "shroudforge",
+       "id": "unifiedemltweaks",
+       "version": "2.1.1",
+       "hash": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28"
+      },
+      "files": {
+       "bin/": "",
+       "bin/ut_native.dll": "0BCC5AB87CC4E0CBEB68DF9A62CF57D3FE6D0F0AB660B8F3E8DDBF6D760BE15B",
+       "extended.mod.json": "F0BE036B95A4AE0678D8E1264C952A95DBA60EA8FAD2C4362D39C06E99741F7C",
+       "icon.svg": "F502AF1820BFC04F67FF9DAAC2AE7A392E23C7CB6C3DFA5422DB05FD9538BE19",
+       "locales/": "",
+       "locales/pl.json": "0463131720200FA0EC8BC694C023FF09FEC0DADC471C4093F2A110EDA5776726",
+       "mod.json": "B65FFB5B396F0372BAB04BA44174ADE10B6F093DCEB248079FC2B81020A10CE0",
+       "native-plugin.ini": "6EFF6F900216C5E726BA0F3A56AC64DB8C5B1B4D521E2476B6442CE02D85D713",
+       "reference/": "",
+       "reference/ut-reference.txt": "F2AA280AE8F02D5B71386A6613634965DAC67FF41C0E69C1F6F1155BD63326A1",
+       "src/": "",
+       "src/mod.lua": "954BB756B06E275C59B9BAF2915F1CAC8AC5FD861267CC5E153DDC410B2FBFD4"
+      }
+     }
+    ]
+   },
+   "library": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28",
+   "expect": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28"
+  },
+  {
+   "name": "sf-placed-stale-and-current",
+   "kind": "shroudforge",
+   "folder": "mods/unifiedemltweaks",
+   "files": {
+    "mod.json": {
+     "text": "{\n  \"id\": \"unifiedemltweaks\",\n  \"name\": \"Unified EML Tweaks\",\n  \"version\": \"2.1.1\"\n}\n"
+    },
+    "extended.mod.json": {
+     "text": "{\n  \"schemaVersion\": 1,\n  \"enabled\": true,\n  \"targets\": [\n    \"client\",\n    \"server\"\n  ],\n  \"settings\": {\n    \"speed\": {\n      \"label\": \"Speed\",\n      \"control\": \"slider\",\n      \"min\": 1,\n      \"max\": 10,\n      \"value\": 3\n    }\n  }\n}\n"
+    },
+    "native-plugin.ini": {
+     "text": "[Plugin]\r\nEnabled=1\r\nDll=bin/ut_native.dll\r\n"
+    },
+    "bin/ut_native.dll": {
+     "hex": "4d5a900003000000206e6f742072756e20000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff"
+    },
+    "src/mod.lua": {
+     "text": "-- settings come from ShroudForge\r\nreturn {}\r\n"
+    },
+    "locales/pl.json": {
+     "text": "{\"speed\": \"Szybko\u015b\u0107\"}\n"
+    },
+    "reference/ut-reference.txt": {
+     "text": "Unified Tweaks reference\n"
+    },
+    "icon.svg": {
+     "text": "<svg xmlns='http://www.w3.org/2000/svg'/>\n"
+    },
+    ".kiln-library.json": {
+     "text": "{\"format\": 1, \"kind\": \"shroudforge\", \"id\": \"unifiedemltweaks\", \"version\": \"2.1.1\", \"hash\": \"kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28\"}"
+    }
+   },
+   "state": {
+    "library-placements.json": [
+     {
+      "path": "/old/Enshrouded/mods/unifiedemltweaks",
+      "marker": {
+       "format": 1,
+       "kind": "shroudforge",
+       "id": "unifiedemltweaks",
+       "version": "2.1.1",
+       "hash": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28"
+      },
+      "files": {
+       "bin/": "",
+       "bin/ut_native.dll": "0bcc5ab87cc4e0cbeb68df9a62cf57d3fe6d0f0ab660b8f3e8ddbf6d760be15b",
+       "extended.mod.json": "f0be036b95a4ae0678d8e1264c952a95dba60ea8fad2c4362d39c06e99741f7c",
+       "icon.svg": "f502af1820bfc04f67ff9daac2ae7a392e23c7cb6c3dfa5422db05fd9538be19",
+       "locales/": "",
+       "locales/pl.json": "0463131720200fa0ec8bc694c023ff09fec0dadc471c4093f2a110eda5776726",
+       "mod.json": "b65ffb5b396f0372bab04ba44174ade10b6f093dceb248079fc2b81020a10ce0",
+       "native-plugin.ini": "6eff6f900216c5e726ba0f3a56ac64db8c5b1b4d521e2476b6442ce02d85d713",
+       "reference/": "",
+       "reference/ut-reference.txt": "f2aa280ae8f02d5b71386a6613634965dac67ff41c0e69c1f6f1155bd63326a1",
+       "src/": "",
+       "src/mod.lua": "0000000000000000000000000000000000000000000000000000000000000000"
+      }
+     },
+     {
+      "path": "/run/media/deck/GF8S5/steamapps/common/Enshrouded/mods/unifiedemltweaks",
+      "marker": {
+       "format": 1,
+       "kind": "shroudforge",
+       "id": "unifiedemltweaks",
+       "version": "2.1.1",
+       "hash": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28"
+      },
+      "files": {
+       "bin/": "",
+       "bin/ut_native.dll": "0bcc5ab87cc4e0cbeb68df9a62cf57d3fe6d0f0ab660b8f3e8ddbf6d760be15b",
+       "extended.mod.json": "f0be036b95a4ae0678d8e1264c952a95dba60ea8fad2c4362d39c06e99741f7c",
+       "icon.svg": "f502af1820bfc04f67ff9daac2ae7a392e23c7cb6c3dfa5422db05fd9538be19",
+       "locales/": "",
+       "locales/pl.json": "0463131720200fa0ec8bc694c023ff09fec0dadc471c4093f2a110eda5776726",
+       "mod.json": "b65ffb5b396f0372bab04ba44174ade10b6f093dceb248079fc2b81020a10ce0",
+       "native-plugin.ini": "6eff6f900216c5e726ba0f3a56ac64db8c5b1b4d521e2476b6442ce02d85d713",
+       "reference/": "",
+       "reference/ut-reference.txt": "f2aa280ae8f02d5b71386a6613634965dac67ff41c0e69c1f6f1155bd63326a1",
+       "src/": "",
+       "src/mod.lua": "954bb756b06e275c59b9baf2915f1cac8ac5fd861267cc5e153ddc410b2fbfd4"
+      }
+     }
+    ]
+   },
+   "library": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28",
+   "expect": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28"
+  },
+  {
+   "name": "sf-placed-old-receipt",
+   "kind": "shroudforge",
+   "folder": "mods/unifiedemltweaks",
+   "files": {
+    "mod.json": {
+     "text": "{\n  \"id\": \"unifiedemltweaks\",\n  \"name\": \"Unified EML Tweaks\",\n  \"version\": \"2.1.1\"\n}\n"
+    },
+    "extended.mod.json": {
+     "text": "{\n  \"schemaVersion\": 1,\n  \"enabled\": true,\n  \"targets\": [\n    \"client\",\n    \"server\"\n  ],\n  \"settings\": {\n    \"speed\": {\n      \"label\": \"Speed\",\n      \"control\": \"slider\",\n      \"min\": 1,\n      \"max\": 10,\n      \"value\": 3\n    }\n  }\n}\n"
+    },
+    "native-plugin.ini": {
+     "text": "[Plugin]\r\nEnabled=1\r\nDll=bin/ut_native.dll\r\n"
+    },
+    "bin/ut_native.dll": {
+     "hex": "4d5a900003000000206e6f742072756e20000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff"
+    },
+    "src/mod.lua": {
+     "text": "-- settings come from ShroudForge\r\nreturn {}\r\n"
+    },
+    "locales/pl.json": {
+     "text": "{\"speed\": \"Szybko\u015b\u0107\"}\n"
+    },
+    "reference/ut-reference.txt": {
+     "text": "Unified Tweaks reference\n"
+    },
+    "icon.svg": {
+     "text": "<svg xmlns='http://www.w3.org/2000/svg'/>\n"
+    },
+    ".kiln-library.json": {
+     "text": "{\"format\": 1, \"kind\": \"shroudforge\", \"id\": \"unifiedemltweaks\", \"version\": \"2.1.1\", \"hash\": \"kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28\"}"
+    }
+   },
+   "state": {
+    "library-placements.json": [
+     {
+      "path": "/run/media/deck/GF8S5/steamapps/common/Enshrouded/mods/unifiedemltweaks",
+      "marker": {
+       "format": 1,
+       "kind": "shroudforge",
+       "id": "unifiedemltweaks",
+       "version": "2.1.1",
+       "hash": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28"
+      }
+     }
+    ]
+   },
+   "library": null,
+   "expect": "kdh1:ff3a7641fbcf0e1ccee2bd420faaa9c369f96432ebde0f6739b1d207c17b6c9b"
+  },
+  {
+   "name": "sf-forged-marker",
+   "kind": "shroudforge",
+   "folder": "mods/unifiedemltweaks",
+   "files": {
+    "mod.json": {
+     "text": "{\n  \"id\": \"unifiedemltweaks\",\n  \"name\": \"Unified EML Tweaks\",\n  \"version\": \"2.1.1\"\n}\n"
+    },
+    "extended.mod.json": {
+     "text": "{\n  \"schemaVersion\": 1,\n  \"enabled\": true,\n  \"targets\": [\n    \"client\",\n    \"server\"\n  ],\n  \"settings\": {\n    \"speed\": {\n      \"label\": \"Speed\",\n      \"control\": \"slider\",\n      \"min\": 1,\n      \"max\": 10,\n      \"value\": 3\n    }\n  }\n}\n"
+    },
+    "native-plugin.ini": {
+     "text": "[Plugin]\r\nEnabled=1\r\nDll=bin/ut_native.dll\r\n"
+    },
+    "bin/ut_native.dll": {
+     "hex": "4d5a900003000000206e6f742072756e20000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff"
+    },
+    "src/mod.lua": {
+     "text": "-- settings come from ShroudForge\r\nreturn {}\r\n"
+    },
+    "locales/pl.json": {
+     "text": "{\"speed\": \"Szybko\u015b\u0107\"}\n"
+    },
+    "reference/ut-reference.txt": {
+     "text": "Unified Tweaks reference\n"
+    },
+    "icon.svg": {
+     "text": "<svg xmlns='http://www.w3.org/2000/svg'/>\n"
+    },
+    ".kiln-library.json": {
+     "text": "{\"format\": 1, \"kind\": \"shroudforge\", \"id\": \"unifiedemltweaks\", \"version\": \"2.1.1\", \"hash\": \"kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28\"}"
+    }
+   },
+   "state": {
+    "library-placements.json": []
+   },
+   "library": null,
+   "expect": "kdh1:ff3a7641fbcf0e1ccee2bd420faaa9c369f96432ebde0f6739b1d207c17b6c9b"
+  },
+  {
+   "name": "sf-receipt-elsewhere",
+   "kind": "shroudforge",
+   "folder": "mods/unifiedemltweaks",
+   "files": {
+    "mod.json": {
+     "text": "{\n  \"id\": \"unifiedemltweaks\",\n  \"name\": \"Unified EML Tweaks\",\n  \"version\": \"2.1.1\"\n}\n"
+    },
+    "extended.mod.json": {
+     "text": "{\n  \"schemaVersion\": 1,\n  \"enabled\": true,\n  \"targets\": [\n    \"client\",\n    \"server\"\n  ],\n  \"settings\": {\n    \"speed\": {\n      \"label\": \"Speed\",\n      \"control\": \"slider\",\n      \"min\": 1,\n      \"max\": 10,\n      \"value\": 3\n    }\n  }\n}\n"
+    },
+    "native-plugin.ini": {
+     "text": "[Plugin]\r\nEnabled=1\r\nDll=bin/ut_native.dll\r\n"
+    },
+    "bin/ut_native.dll": {
+     "hex": "4d5a900003000000206e6f742072756e20000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff"
+    },
+    "src/mod.lua": {
+     "text": "-- settings come from ShroudForge\r\nreturn {}\r\n"
+    },
+    "locales/pl.json": {
+     "text": "{\"speed\": \"Szybko\u015b\u0107\"}\n"
+    },
+    "reference/ut-reference.txt": {
+     "text": "Unified Tweaks reference\n"
+    },
+    "icon.svg": {
+     "text": "<svg xmlns='http://www.w3.org/2000/svg'/>\n"
+    },
+    ".kiln-library.json": {
+     "text": "{\"format\": 1, \"kind\": \"shroudforge\", \"id\": \"unifiedemltweaks\", \"version\": \"2.1.1\", \"hash\": \"kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28\"}"
+    }
+   },
+   "state": {
+    "library-placements.json": [
+     {
+      "path": "/elsewhere/shroudforge-mods/unifiedemltweaks",
+      "marker": {
+       "format": 1,
+       "kind": "shroudforge",
+       "id": "unifiedemltweaks",
+       "version": "2.1.1",
+       "hash": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28"
+      },
+      "files": {
+       "bin/": "",
+       "bin/ut_native.dll": "0bcc5ab87cc4e0cbeb68df9a62cf57d3fe6d0f0ab660b8f3e8ddbf6d760be15b",
+       "extended.mod.json": "f0be036b95a4ae0678d8e1264c952a95dba60ea8fad2c4362d39c06e99741f7c",
+       "icon.svg": "f502af1820bfc04f67ff9daac2ae7a392e23c7cb6c3dfa5422db05fd9538be19",
+       "locales/": "",
+       "locales/pl.json": "0463131720200fa0ec8bc694c023ff09fec0dadc471c4093f2a110eda5776726",
+       "mod.json": "b65ffb5b396f0372bab04ba44174ade10b6f093dceb248079fc2b81020a10ce0",
+       "native-plugin.ini": "6eff6f900216c5e726ba0f3a56ac64db8c5b1b4d521e2476b6442ce02d85d713",
+       "reference/": "",
+       "reference/ut-reference.txt": "f2aa280ae8f02d5b71386a6613634965dac67ff41c0e69c1f6f1155bd63326a1",
+       "src/": "",
+       "src/mod.lua": "954bb756b06e275c59b9baf2915f1cac8ac5fd861267cc5e153ddc410b2fbfd4"
+      }
+     }
+    ]
+   },
+   "library": null,
+   "expect": "kdh1:ff3a7641fbcf0e1ccee2bd420faaa9c369f96432ebde0f6739b1d207c17b6c9b"
+  },
+  {
+   "name": "sf-receipt-other-version",
+   "kind": "shroudforge",
+   "folder": "mods/unifiedemltweaks",
+   "files": {
+    "mod.json": {
+     "text": "{\n  \"id\": \"unifiedemltweaks\",\n  \"name\": \"Unified EML Tweaks\",\n  \"version\": \"2.1.1\"\n}\n"
+    },
+    "extended.mod.json": {
+     "text": "{\n  \"schemaVersion\": 1,\n  \"enabled\": true,\n  \"targets\": [\n    \"client\",\n    \"server\"\n  ],\n  \"settings\": {\n    \"speed\": {\n      \"label\": \"Speed\",\n      \"control\": \"slider\",\n      \"min\": 1,\n      \"max\": 10,\n      \"value\": 3\n    }\n  }\n}\n"
+    },
+    "native-plugin.ini": {
+     "text": "[Plugin]\r\nEnabled=1\r\nDll=bin/ut_native.dll\r\n"
+    },
+    "bin/ut_native.dll": {
+     "hex": "4d5a900003000000206e6f742072756e20000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff"
+    },
+    "src/mod.lua": {
+     "text": "-- settings come from ShroudForge\r\nreturn {}\r\n"
+    },
+    "locales/pl.json": {
+     "text": "{\"speed\": \"Szybko\u015b\u0107\"}\n"
+    },
+    "reference/ut-reference.txt": {
+     "text": "Unified Tweaks reference\n"
+    },
+    "icon.svg": {
+     "text": "<svg xmlns='http://www.w3.org/2000/svg'/>\n"
+    },
+    ".kiln-library.json": {
+     "text": "{\"format\": 1, \"kind\": \"shroudforge\", \"id\": \"unifiedemltweaks\", \"version\": \"2.1.1\", \"hash\": \"kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28\"}"
+    }
+   },
+   "state": {
+    "library-placements.json": [
+     {
+      "path": "/run/media/deck/GF8S5/steamapps/common/Enshrouded/mods/unifiedemltweaks",
+      "marker": {
+       "format": 1,
+       "kind": "shroudforge",
+       "id": "unifiedemltweaks",
+       "version": "2.1.0",
+       "hash": "kdh1:813354de86619bf17b7050ad002d92d3eaee5ff8eb943cb46170f97e2ec1a300"
+      },
+      "files": {
+       "bin/": "",
+       "bin/ut_native.dll": "0bcc5ab87cc4e0cbeb68df9a62cf57d3fe6d0f0ab660b8f3e8ddbf6d760be15b",
+       "extended.mod.json": "f0be036b95a4ae0678d8e1264c952a95dba60ea8fad2c4362d39c06e99741f7c",
+       "icon.svg": "f502af1820bfc04f67ff9daac2ae7a392e23c7cb6c3dfa5422db05fd9538be19",
+       "locales/": "",
+       "locales/pl.json": "0463131720200fa0ec8bc694c023ff09fec0dadc471c4093f2a110eda5776726",
+       "mod.json": "b65ffb5b396f0372bab04ba44174ade10b6f093dceb248079fc2b81020a10ce0",
+       "native-plugin.ini": "6eff6f900216c5e726ba0f3a56ac64db8c5b1b4d521e2476b6442ce02d85d713",
+       "reference/": "",
+       "reference/ut-reference.txt": "f2aa280ae8f02d5b71386a6613634965dac67ff41c0e69c1f6f1155bd63326a1",
+       "src/": "",
+       "src/mod.lua": "954bb756b06e275c59b9baf2915f1cac8ac5fd861267cc5e153ddc410b2fbfd4"
+      }
+     }
+    ]
+   },
+   "library": null,
+   "expect": "kdh1:ff3a7641fbcf0e1ccee2bd420faaa9c369f96432ebde0f6739b1d207c17b6c9b"
+  },
+  {
+   "name": "sf-synced",
+   "kind": "shroudforge",
+   "folder": "mods/unifiedemltweaks",
+   "files": {
+    "mod.json": {
+     "text": "{\n  \"id\": \"unifiedemltweaks\",\n  \"name\": \"Unified EML Tweaks\",\n  \"version\": \"2.1.1\"\n}\n"
+    },
+    "extended.mod.json": {
+     "text": "{\n  \"schemaVersion\": 1,\n  \"enabled\": true,\n  \"targets\": [\n    \"client\",\n    \"server\"\n  ],\n  \"settings\": {\n    \"speed\": {\n      \"label\": \"Speed\",\n      \"control\": \"slider\",\n      \"min\": 1,\n      \"max\": 10,\n      \"value\": 3\n    }\n  }\n}\n"
+    },
+    "native-plugin.ini": {
+     "text": "[Plugin]\r\nEnabled=1\r\nDll=bin/ut_native.dll\r\n"
+    },
+    "bin/ut_native.dll": {
+     "hex": "4d5a900003000000206e6f742072756e20000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff"
+    },
+    "src/mod.lua": {
+     "text": "-- settings come from ShroudForge\r\nreturn {}\r\n"
+    },
+    "locales/pl.json": {
+     "text": "{\"speed\": \"Szybko\u015b\u0107\"}\n"
+    },
+    "reference/ut-reference.txt": {
+     "text": "Unified Tweaks reference\n"
+    },
+    "icon.svg": {
+     "text": "<svg xmlns='http://www.w3.org/2000/svg'/>\n"
+    },
+    ".kiln-source.json": {
+     "text": "{\"format\": 1, \"library\": {\"kind\": \"shroudforge\", \"id\": \"unifiedemltweaks\", \"version\": \"2.1.1\", \"hash\": \"kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28\"}, \"synced\": \"2026-11-18T12:00:00Z\", \"by\": \"kiln-launcher\"}"
+    }
+   },
+   "state": {
+    "server-library.json": {
+     "/home/me/servers/isles/mods/unifiedemltweaks": {
+      "library": {
+       "kind": "shroudforge",
+       "id": "unifiedemltweaks",
+       "version": "2.1.1",
+       "hash": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28"
+      },
+      "payload": "0000000000000000000000000000000000000000000000000000000000000000",
+      "files": {
+       "bin/": "",
+       "bin/ut_native.dll": "0bcc5ab87cc4e0cbeb68df9a62cf57d3fe6d0f0ab660b8f3e8ddbf6d760be15b",
+       "extended.mod.json": "f0be036b95a4ae0678d8e1264c952a95dba60ea8fad2c4362d39c06e99741f7c",
+       "icon.svg": "f502af1820bfc04f67ff9daac2ae7a392e23c7cb6c3dfa5422db05fd9538be19",
+       "locales/": "",
+       "locales/pl.json": "0463131720200fa0ec8bc694c023ff09fec0dadc471c4093f2a110eda5776726",
+       "mod.json": "b65ffb5b396f0372bab04ba44174ade10b6f093dceb248079fc2b81020a10ce0",
+       "native-plugin.ini": "6eff6f900216c5e726ba0f3a56ac64db8c5b1b4d521e2476b6442ce02d85d713",
+       "reference/": "",
+       "reference/ut-reference.txt": "f2aa280ae8f02d5b71386a6613634965dac67ff41c0e69c1f6f1155bd63326a1",
+       "src/": "",
+       "src/mod.lua": "954bb756b06e275c59b9baf2915f1cac8ac5fd861267cc5e153ddc410b2fbfd4"
+      }
+     }
+    }
+   },
+   "library": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28",
+   "expect": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28"
+  },
+  {
+   "name": "sf-synced-run",
+   "kind": "shroudforge",
+   "folder": "mods/unifiedemltweaks",
+   "files": {
+    "mod.json": {
+     "text": "{\n  \"id\": \"unifiedemltweaks\",\n  \"name\": \"Unified EML Tweaks\",\n  \"version\": \"2.1.1\"\n}\n"
+    },
+    "extended.mod.json": {
+     "text": "{\n  \"schemaVersion\": 1,\n  \"enabled\": true,\n  \"targets\": [\n    \"client\",\n    \"server\"\n  ],\n  \"settings\": {\n    \"speed\": {\n      \"label\": \"Speed\",\n      \"control\": \"slider\",\n      \"min\": 1,\n      \"max\": 10,\n      \"value\": 8\n    }\n  }\n}\n"
+    },
+    "native-plugin.ini": {
+     "text": "[Plugin]\r\nEnabled=1\r\nDll=bin/ut_native.dll\r\n"
+    },
+    "bin/ut_native.dll": {
+     "hex": "4d5a900003000000206e6f742072756e20000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff"
+    },
+    "src/mod.lua": {
+     "text": "-- settings come from ShroudForge\r\nreturn {}\r\n"
+    },
+    "locales/pl.json": {
+     "text": "{\"speed\": \"Szybko\u015b\u0107\"}\n"
+    },
+    "reference/ut-reference.txt": {
+     "text": "Unified Tweaks reference\n"
+    },
+    "icon.svg": {
+     "text": "<svg xmlns='http://www.w3.org/2000/svg'/>\n"
+    },
+    ".kiln-source.json": {
+     "text": "{\"format\": 1, \"library\": {\"kind\": \"shroudforge\", \"id\": \"unifiedemltweaks\", \"version\": \"2.1.1\", \"hash\": \"kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28\"}, \"synced\": \"2026-11-18T12:00:00Z\", \"by\": \"kiln-launcher\"}"
+    },
+    "bin/ut_native.log": {
+     "text": "started\nmore\n"
+    },
+    "logs/Run.LOG": {
+     "text": "run\n"
+    },
+    "bin/native-status.txt": {
+     "text": "tick 2\n"
+    }
+   },
+   "state": {
+    "server-library.json": {
+     "/home/me/servers/isles/mods/unifiedemltweaks": {
+      "library": {
+       "kind": "shroudforge",
+       "id": "unifiedemltweaks",
+       "version": "2.1.1",
+       "hash": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28"
+      },
+      "payload": "0000000000000000000000000000000000000000000000000000000000000000",
+      "files": {
+       "bin/": "",
+       "bin/ut_native.dll": "0bcc5ab87cc4e0cbeb68df9a62cf57d3fe6d0f0ab660b8f3e8ddbf6d760be15b",
+       "extended.mod.json": "f0be036b95a4ae0678d8e1264c952a95dba60ea8fad2c4362d39c06e99741f7c",
+       "icon.svg": "f502af1820bfc04f67ff9daac2ae7a392e23c7cb6c3dfa5422db05fd9538be19",
+       "locales/": "",
+       "locales/pl.json": "0463131720200fa0ec8bc694c023ff09fec0dadc471c4093f2a110eda5776726",
+       "mod.json": "b65ffb5b396f0372bab04ba44174ade10b6f093dceb248079fc2b81020a10ce0",
+       "native-plugin.ini": "6eff6f900216c5e726ba0f3a56ac64db8c5b1b4d521e2476b6442ce02d85d713",
+       "reference/": "",
+       "reference/ut-reference.txt": "f2aa280ae8f02d5b71386a6613634965dac67ff41c0e69c1f6f1155bd63326a1",
+       "src/": "",
+       "src/mod.lua": "954bb756b06e275c59b9baf2915f1cac8ac5fd861267cc5e153ddc410b2fbfd4"
+      }
+     }
+    }
+   },
+   "library": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28",
+   "expect": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28"
+  },
+  {
+   "name": "sf-synced-old-receipt",
+   "kind": "shroudforge",
+   "folder": "mods/unifiedemltweaks",
+   "files": {
+    "mod.json": {
+     "text": "{\n  \"id\": \"unifiedemltweaks\",\n  \"name\": \"Unified EML Tweaks\",\n  \"version\": \"2.1.1\"\n}\n"
+    },
+    "extended.mod.json": {
+     "text": "{\n  \"schemaVersion\": 1,\n  \"enabled\": true,\n  \"targets\": [\n    \"client\",\n    \"server\"\n  ],\n  \"settings\": {\n    \"speed\": {\n      \"label\": \"Speed\",\n      \"control\": \"slider\",\n      \"min\": 1,\n      \"max\": 10,\n      \"value\": 3\n    }\n  }\n}\n"
+    },
+    "native-plugin.ini": {
+     "text": "[Plugin]\r\nEnabled=1\r\nDll=bin/ut_native.dll\r\n"
+    },
+    "bin/ut_native.dll": {
+     "hex": "4d5a900003000000206e6f742072756e20000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff"
+    },
+    "src/mod.lua": {
+     "text": "-- settings come from ShroudForge\r\nreturn {}\r\n"
+    },
+    "locales/pl.json": {
+     "text": "{\"speed\": \"Szybko\u015b\u0107\"}\n"
+    },
+    "reference/ut-reference.txt": {
+     "text": "Unified Tweaks reference\n"
+    },
+    "icon.svg": {
+     "text": "<svg xmlns='http://www.w3.org/2000/svg'/>\n"
+    },
+    ".kiln-source.json": {
+     "text": "{\"format\": 1, \"library\": {\"kind\": \"shroudforge\", \"id\": \"unifiedemltweaks\", \"version\": \"2.1.1\", \"hash\": \"kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28\"}, \"synced\": \"2026-11-18T12:00:00Z\", \"by\": \"kiln-launcher\"}"
+    }
+   },
+   "state": {
+    "server-library.json": {
+     "/home/me/servers/isles/mods/unifiedemltweaks": {
+      "library": {
+       "kind": "shroudforge",
+       "id": "unifiedemltweaks",
+       "version": "2.1.1",
+       "hash": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28"
+      },
+      "payload": "0000000000000000000000000000000000000000000000000000000000000000"
+     }
+    }
+   },
+   "library": null,
+   "expect": "kdh1:ff3a7641fbcf0e1ccee2bd420faaa9c369f96432ebde0f6739b1d207c17b6c9b"
+  },
+  {
+   "name": "sf-both-markers",
+   "kind": "shroudforge",
+   "folder": "mods/unifiedemltweaks",
+   "files": {
+    "mod.json": {
+     "text": "{\n  \"id\": \"unifiedemltweaks\",\n  \"name\": \"Unified EML Tweaks\",\n  \"version\": \"2.1.1\"\n}\n"
+    },
+    "extended.mod.json": {
+     "text": "{\n  \"schemaVersion\": 1,\n  \"enabled\": true,\n  \"targets\": [\n    \"client\",\n    \"server\"\n  ],\n  \"settings\": {\n    \"speed\": {\n      \"label\": \"Speed\",\n      \"control\": \"slider\",\n      \"min\": 1,\n      \"max\": 10,\n      \"value\": 3\n    }\n  }\n}\n"
+    },
+    "native-plugin.ini": {
+     "text": "[Plugin]\r\nEnabled=1\r\nDll=bin/ut_native.dll\r\n"
+    },
+    "bin/ut_native.dll": {
+     "hex": "4d5a900003000000206e6f742072756e20000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff"
+    },
+    "src/mod.lua": {
+     "text": "-- settings come from ShroudForge\r\nreturn {}\r\n"
+    },
+    "locales/pl.json": {
+     "text": "{\"speed\": \"Szybko\u015b\u0107\"}\n"
+    },
+    "reference/ut-reference.txt": {
+     "text": "Unified Tweaks reference\n"
+    },
+    "icon.svg": {
+     "text": "<svg xmlns='http://www.w3.org/2000/svg'/>\n"
+    },
+    ".kiln-library.json": {
+     "text": "{\"format\": 1, \"kind\": \"shroudforge\", \"id\": \"unifiedemltweaks\", \"version\": \"2.1.1\", \"hash\": \"kdh1:813354de86619bf17b7050ad002d92d3eaee5ff8eb943cb46170f97e2ec1a300\"}"
+    },
+    ".kiln-source.json": {
+     "text": "{\"format\": 1, \"library\": {\"kind\": \"shroudforge\", \"id\": \"unifiedemltweaks\", \"version\": \"2.1.1\", \"hash\": \"kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28\"}, \"synced\": \"2026-11-18T12:00:00Z\", \"by\": \"kiln-launcher\"}"
+    }
+   },
+   "state": {
+    "library-placements.json": [
+     {
+      "path": "/run/media/deck/GF8S5/steamapps/common/Enshrouded/mods/unifiedemltweaks",
+      "marker": {
+       "format": 1,
+       "kind": "shroudforge",
+       "id": "unifiedemltweaks",
+       "version": "2.1.1",
+       "hash": "kdh1:813354de86619bf17b7050ad002d92d3eaee5ff8eb943cb46170f97e2ec1a300"
+      },
+      "files": {
+       "bin/": "",
+       "bin/ut_native.dll": "0bcc5ab87cc4e0cbeb68df9a62cf57d3fe6d0f0ab660b8f3e8ddbf6d760be15b",
+       "extended.mod.json": "f0be036b95a4ae0678d8e1264c952a95dba60ea8fad2c4362d39c06e99741f7c",
+       "icon.svg": "f502af1820bfc04f67ff9daac2ae7a392e23c7cb6c3dfa5422db05fd9538be19",
+       "locales/": "",
+       "locales/pl.json": "0463131720200fa0ec8bc694c023ff09fec0dadc471c4093f2a110eda5776726",
+       "mod.json": "b65ffb5b396f0372bab04ba44174ade10b6f093dceb248079fc2b81020a10ce0",
+       "native-plugin.ini": "6eff6f900216c5e726ba0f3a56ac64db8c5b1b4d521e2476b6442ce02d85d713",
+       "reference/": "",
+       "reference/ut-reference.txt": "f2aa280ae8f02d5b71386a6613634965dac67ff41c0e69c1f6f1155bd63326a1",
+       "src/": "",
+       "src/mod.lua": "954bb756b06e275c59b9baf2915f1cac8ac5fd861267cc5e153ddc410b2fbfd4"
+      }
+     }
+    ],
+    "server-library.json": {
+     "/home/me/servers/isles/mods/unifiedemltweaks": {
+      "library": {
+       "kind": "shroudforge",
+       "id": "unifiedemltweaks",
+       "version": "2.1.1",
+       "hash": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28"
+      },
+      "payload": "0000000000000000000000000000000000000000000000000000000000000000",
+      "files": {
+       "bin/": "",
+       "bin/ut_native.dll": "0bcc5ab87cc4e0cbeb68df9a62cf57d3fe6d0f0ab660b8f3e8ddbf6d760be15b",
+       "extended.mod.json": "f0be036b95a4ae0678d8e1264c952a95dba60ea8fad2c4362d39c06e99741f7c",
+       "icon.svg": "f502af1820bfc04f67ff9daac2ae7a392e23c7cb6c3dfa5422db05fd9538be19",
+       "locales/": "",
+       "locales/pl.json": "0463131720200fa0ec8bc694c023ff09fec0dadc471c4093f2a110eda5776726",
+       "mod.json": "b65ffb5b396f0372bab04ba44174ade10b6f093dceb248079fc2b81020a10ce0",
+       "native-plugin.ini": "6eff6f900216c5e726ba0f3a56ac64db8c5b1b4d521e2476b6442ce02d85d713",
+       "reference/": "",
+       "reference/ut-reference.txt": "f2aa280ae8f02d5b71386a6613634965dac67ff41c0e69c1f6f1155bd63326a1",
+       "src/": "",
+       "src/mod.lua": "954bb756b06e275c59b9baf2915f1cac8ac5fd861267cc5e153ddc410b2fbfd4"
+      }
+     }
+    }
+   },
+   "library": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28",
+   "expect": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28"
+  },
+  {
+   "name": "sf-own",
+   "kind": "shroudforge",
+   "folder": "mods/unifiedemltweaks",
+   "files": {
+    "mod.json": {
+     "text": "{\n  \"id\": \"unifiedemltweaks\",\n  \"name\": \"Unified EML Tweaks\",\n  \"version\": \"2.1.1\"\n}\n"
+    },
+    "extended.mod.json": {
+     "text": "{\n  \"schemaVersion\": 1,\n  \"enabled\": true,\n  \"targets\": [\n    \"client\",\n    \"server\"\n  ],\n  \"settings\": {\n    \"speed\": {\n      \"label\": \"Speed\",\n      \"control\": \"slider\",\n      \"min\": 1,\n      \"max\": 10,\n      \"value\": 3\n    }\n  }\n}\n"
+    },
+    "native-plugin.ini": {
+     "text": "[Plugin]\r\nEnabled=1\r\nDll=bin/ut_native.dll\r\n"
+    },
+    "bin/ut_native.dll": {
+     "hex": "4d5a900003000000206e6f742072756e20000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff"
+    },
+    "src/mod.lua": {
+     "text": "-- settings come from ShroudForge\r\nreturn {}\r\n"
+    },
+    "locales/pl.json": {
+     "text": "{\"speed\": \"Szybko\u015b\u0107\"}\n"
+    },
+    "reference/ut-reference.txt": {
+     "text": "Unified Tweaks reference\n"
+    },
+    "icon.svg": {
+     "text": "<svg xmlns='http://www.w3.org/2000/svg'/>\n"
+    }
+   },
+   "state": {},
+   "library": null,
+   "same": "sf-own-run",
+   "expect": "kdh1:ff3a7641fbcf0e1ccee2bd420faaa9c369f96432ebde0f6739b1d207c17b6c9b"
+  },
+  {
+   "name": "sf-own-run",
+   "kind": "shroudforge",
+   "folder": "mods/unifiedemltweaks",
+   "files": {
+    "mod.json": {
+     "text": "{\n  \"id\": \"unifiedemltweaks\",\n  \"name\": \"Unified EML Tweaks\",\n  \"version\": \"2.1.1\"\n}\n"
+    },
+    "extended.mod.json": {
+     "text": "{\n  \"schemaVersion\": 1,\n  \"enabled\": true,\n  \"targets\": [\n    \"client\",\n    \"server\"\n  ],\n  \"settings\": {\n    \"speed\": {\n      \"label\": \"Speed\",\n      \"control\": \"slider\",\n      \"min\": 1,\n      \"max\": 10,\n      \"value\": 8\n    }\n  }\n}\n"
+    },
+    "native-plugin.ini": {
+     "text": "[Plugin]\r\nEnabled=1\r\nDll=bin/ut_native.dll\r\n"
+    },
+    "bin/ut_native.dll": {
+     "hex": "4d5a900003000000206e6f742072756e20000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff"
+    },
+    "src/mod.lua": {
+     "text": "-- settings come from ShroudForge\r\nreturn {}\r\n"
+    },
+    "locales/pl.json": {
+     "text": "{\"speed\": \"Szybko\u015b\u0107\"}\n"
+    },
+    "reference/ut-reference.txt": {
+     "text": "Unified Tweaks reference\n"
+    },
+    "icon.svg": {
+     "text": "<svg xmlns='http://www.w3.org/2000/svg'/>\n"
+    },
+    "bin/ut_native.log": {
+     "text": "started\n"
+    }
+   },
+   "state": {},
+   "library": null,
+   "expect": "kdh1:ff3a7641fbcf0e1ccee2bd420faaa9c369f96432ebde0f6739b1d207c17b6c9b"
+  },
+  {
+   "name": "sf-own-status-file",
+   "kind": "shroudforge",
+   "folder": "mods/unifiedemltweaks",
+   "files": {
+    "mod.json": {
+     "text": "{\n  \"id\": \"unifiedemltweaks\",\n  \"name\": \"Unified EML Tweaks\",\n  \"version\": \"2.1.1\"\n}\n"
+    },
+    "extended.mod.json": {
+     "text": "{\n  \"schemaVersion\": 1,\n  \"enabled\": true,\n  \"targets\": [\n    \"client\",\n    \"server\"\n  ],\n  \"settings\": {\n    \"speed\": {\n      \"label\": \"Speed\",\n      \"control\": \"slider\",\n      \"min\": 1,\n      \"max\": 10,\n      \"value\": 3\n    }\n  }\n}\n"
+    },
+    "native-plugin.ini": {
+     "text": "[Plugin]\r\nEnabled=1\r\nDll=bin/ut_native.dll\r\n"
+    },
+    "bin/ut_native.dll": {
+     "hex": "4d5a900003000000206e6f742072756e20000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff"
+    },
+    "src/mod.lua": {
+     "text": "-- settings come from ShroudForge\r\nreturn {}\r\n"
+    },
+    "locales/pl.json": {
+     "text": "{\"speed\": \"Szybko\u015b\u0107\"}\n"
+    },
+    "reference/ut-reference.txt": {
+     "text": "Unified Tweaks reference\n"
+    },
+    "icon.svg": {
+     "text": "<svg xmlns='http://www.w3.org/2000/svg'/>\n"
+    },
+    "bin/native-status.txt": {
+     "text": "tick 1\n"
+    }
+   },
+   "state": {},
+   "library": null,
+   "differs": "sf-own",
+   "expect": "kdh1:23647c590b9b7a1b7d7f1498db594227e81dfa430406d0498347c22c55241cb1"
+  },
+  {
+   "name": "sf-own-odd-names",
+   "kind": "shroudforge",
+   "folder": "mods/unifiedemltweaks",
+   "files": {
+    "mod.json": {
+     "text": "{\n  \"id\": \"unifiedemltweaks\",\n  \"name\": \"Unified EML Tweaks\",\n  \"version\": \"2.1.1\"\n}\n"
+    },
+    "extended.mod.json": {
+     "text": "{\n  \"schemaVersion\": 1,\n  \"enabled\": true,\n  \"targets\": [\n    \"client\",\n    \"server\"\n  ],\n  \"settings\": {\n    \"speed\": {\n      \"label\": \"Speed\",\n      \"control\": \"slider\",\n      \"min\": 1,\n      \"max\": 10,\n      \"value\": 3\n    }\n  }\n}\n"
+    },
+    "native-plugin.ini": {
+     "text": "[Plugin]\r\nEnabled=1\r\nDll=bin/ut_native.dll\r\n"
+    },
+    "bin/ut_native.dll": {
+     "hex": "4d5a900003000000206e6f742072756e20000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff"
+    },
+    "src/mod.lua": {
+     "text": "-- settings come from ShroudForge\r\nreturn {}\r\n"
+    },
+    "locales/pl.json": {
+     "text": "{\"speed\": \"Szybko\u015b\u0107\"}\n"
+    },
+    "reference/ut-reference.txt": {
+     "text": "Unified Tweaks reference\n"
+    },
+    "icon.svg": {
+     "text": "<svg xmlns='http://www.w3.org/2000/svg'/>\n"
+    },
+    "data/a/b/c/table.bin": {
+     "hex": "fffefdfcfbfaf9f8f7f6f5f4f3f2f1f0efeeedecebeae9e8e7e6e5e4e3e2e1e0dfdedddcdbdad9d8d7d6d5d4d3d2d1d0cfcecdcccbcac9c8c7c6c5c4c3c2c1c0bfbebdbcbbbab9b8b7b6b5b4b3b2b1b0afaeadacabaaa9a8a7a6a5a4a3a2a1a09f9e9d9c9b9a999897969594939291908f8e8d8c8b8a898887868584838281807f7e7d7c7b7a797877767574737271706f6e6d6c6b6a696867666564636261605f5e5d5c5b5a595857565554535251504f4e4d4c4b4a494847464544434241403f3e3d3c3b3a393837363534333231302f2e2d2c2b2a292827262524232221201f1e1d1c1b1a191817161514131211100f0e0d0c0b0a09080706050403020100"
+    },
+    "data/Read Me.txt": {
+     "text": "line one\r\nline two\n"
+    },
+    "data/U\u0308bersicht.lua": {
+     "text": "return 1\n"
+    },
+    "data/caf\u00e9 (copy).json": {
+     "text": "{}\r\n"
+    },
+    "src/crlf.lua": {
+     "text": "local a = 1\r\nreturn a\r\n"
+    },
+    ".hidden/skip.txt": {
+     "text": "never counted\n"
+    }
+   },
+   "state": {},
+   "library": null,
+   "same": "sf-own-odd-names-run",
+   "expect": "kdh1:1435d4dbb265eaba5a60df3b1c07886b8a0ccd54c5ddfbdc0153ed4bad653922"
+  },
+  {
+   "name": "sf-own-odd-names-run",
+   "kind": "shroudforge",
+   "folder": "mods/unifiedemltweaks",
+   "files": {
+    "mod.json": {
+     "text": "{\n  \"id\": \"unifiedemltweaks\",\n  \"name\": \"Unified EML Tweaks\",\n  \"version\": \"2.1.1\"\n}\n"
+    },
+    "extended.mod.json": {
+     "text": "{\n  \"schemaVersion\": 1,\n  \"enabled\": true,\n  \"targets\": [\n    \"client\",\n    \"server\"\n  ],\n  \"settings\": {\n    \"speed\": {\n      \"label\": \"Speed\",\n      \"control\": \"slider\",\n      \"min\": 1,\n      \"max\": 10,\n      \"value\": 1\n    }\n  }\n}\n"
+    },
+    "native-plugin.ini": {
+     "text": "[Plugin]\r\nEnabled=1\r\nDll=bin/ut_native.dll\r\n"
+    },
+    "bin/ut_native.dll": {
+     "hex": "4d5a900003000000206e6f742072756e20000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff"
+    },
+    "src/mod.lua": {
+     "text": "-- settings come from ShroudForge\r\nreturn {}\r\n"
+    },
+    "locales/pl.json": {
+     "text": "{\"speed\": \"Szybko\u015b\u0107\"}\n"
+    },
+    "reference/ut-reference.txt": {
+     "text": "Unified Tweaks reference\n"
+    },
+    "icon.svg": {
+     "text": "<svg xmlns='http://www.w3.org/2000/svg'/>\n"
+    },
+    "data/a/b/c/table.bin": {
+     "hex": "fffefdfcfbfaf9f8f7f6f5f4f3f2f1f0efeeedecebeae9e8e7e6e5e4e3e2e1e0dfdedddcdbdad9d8d7d6d5d4d3d2d1d0cfcecdcccbcac9c8c7c6c5c4c3c2c1c0bfbebdbcbbbab9b8b7b6b5b4b3b2b1b0afaeadacabaaa9a8a7a6a5a4a3a2a1a09f9e9d9c9b9a999897969594939291908f8e8d8c8b8a898887868584838281807f7e7d7c7b7a797877767574737271706f6e6d6c6b6a696867666564636261605f5e5d5c5b5a595857565554535251504f4e4d4c4b4a494847464544434241403f3e3d3c3b3a393837363534333231302f2e2d2c2b2a292827262524232221201f1e1d1c1b1a191817161514131211100f0e0d0c0b0a09080706050403020100"
+    },
+    "data/Read Me.txt": {
+     "text": "line one\r\nline two\n"
+    },
+    "data/U\u0308bersicht.lua": {
+     "text": "return 1\n"
+    },
+    "data/caf\u00e9 (copy).json": {
+     "text": "{}\r\n"
+    },
+    "src/crlf.lua": {
+     "text": "local a = 1\r\nreturn a\r\n"
+    },
+    ".hidden/skip.txt": {
+     "text": "never counted\n"
+    },
+    "data/CRASH.LOG": {
+     "text": "x\n"
+    }
+   },
+   "state": {},
+   "library": null,
+   "expect": "kdh1:1435d4dbb265eaba5a60df3b1c07886b8a0ccd54c5ddfbdc0153ed4bad653922"
+  },
+  {
+   "name": "set-placed-settings",
+   "kind": "set",
+   "folder": "shrouded_engine_tweaks/mods/faster-boats",
+   "files": {
+    "mod.json": {
+     "text": "{\"id\": \"faster-boats\", \"name\": \"Faster Boats\", \"version\": \"2.1.1\", \"clients\": \"mod\"}\n"
+    },
+    "init.lua": {
+     "text": "return {}\n"
+    },
+    "settings.json": {
+     "text": "{\"speed\": 5}\n"
+    },
+    ".kiln-library.json": {
+     "text": "{\"format\": 1, \"kind\": \"set\", \"id\": \"faster-boats\", \"version\": \"2.1.1\", \"hash\": \"kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28\"}"
+    }
+   },
+   "state": {
+    "library-placements.json": [
+     {
+      "path": "/run/media/deck/GF8S5/steamapps/common/Enshrouded/shrouded_engine_tweaks/mods/faster-boats",
+      "marker": {
+       "format": 1,
+       "kind": "set",
+       "id": "faster-boats",
+       "version": "2.1.1",
+       "hash": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28"
+      },
+      "files": {
+       "init.lua": "1232d8379de77e154ca533689af2e42629dd7574bda5a0a390799849f07607c3",
+       "mod.json": "7cb450dae52270179d59d344f9cfa9a71f518bce7a638db4da4a521573936e8c",
+       "settings.json": "36e8f8c88a5ff290bfd1a22cca707f5d8e823a6f33eed264be4a0c8d671701bc"
+      }
+     }
+    ]
+   },
+   "library": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28",
+   "expect": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28"
+  },
+  {
+   "name": "set-own",
+   "kind": "set",
+   "folder": "shrouded_engine_tweaks/mods/faster-boats",
+   "files": {
+    "mod.json": {
+     "text": "{\"id\": \"faster-boats\", \"name\": \"Faster Boats\", \"version\": \"2.1.1\", \"clients\": \"mod\"}\n"
+    },
+    "init.lua": {
+     "text": "return {}\n"
+    },
+    "settings.json": {
+     "text": "{\"speed\": 2}\n"
+    }
+   },
+   "state": {},
+   "library": null,
+   "same": "set-own-settings",
+   "expect": "kdh1:3c9e11bba09768d8c5cb12ad0e3cfc008f12ec073c5727689e8f7213c3cc2a80"
+  },
+  {
+   "name": "set-own-settings",
+   "kind": "set",
+   "folder": "shrouded_engine_tweaks/mods/faster-boats",
+   "files": {
+    "mod.json": {
+     "text": "{\"id\": \"faster-boats\", \"name\": \"Faster Boats\", \"version\": \"2.1.1\", \"clients\": \"mod\"}\n"
+    },
+    "init.lua": {
+     "text": "return {}\n"
+    },
+    "settings.json": {
+     "text": "{\"speed\": 5}\n"
+    }
+   },
+   "state": {},
+   "library": null,
+   "expect": "kdh1:3c9e11bba09768d8c5cb12ad0e3cfc008f12ec073c5727689e8f7213c3cc2a80"
+  },
+  {
+   "name": "eml-synced-config",
+   "kind": "eml",
+   "folder": "kiln/eml/mods/bigger-stacks",
+   "files": {
+    "mod.json": {
+     "text": "{\"id\": \"bigger-stacks\", \"name\": \"Bigger Stacks\", \"version\": \"2.1.1\"}\n"
+    },
+    "src/mod.lua": {
+     "text": "return {}\n"
+    },
+    "config.txt": {
+     "text": "stack=999\n"
+    },
+    "data/table.ini": {
+     "text": "[a]\nb=1\n"
+    },
+    ".kiln-source.json": {
+     "text": "{\"format\": 1, \"library\": {\"kind\": \"eml\", \"id\": \"bigger-stacks\", \"version\": \"2.1.1\", \"hash\": \"kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28\"}, \"synced\": \"2026-11-18T12:00:00Z\", \"by\": \"kiln-launcher\"}"
+    },
+    "CONFIG.INI": {
+     "text": "[x]\n"
+    }
+   },
+   "state": {
+    "server-library.json": {
+     "/home/me/servers/isles/kiln/eml/mods/bigger-stacks": {
+      "library": {
+       "kind": "eml",
+       "id": "bigger-stacks",
+       "version": "2.1.1",
+       "hash": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28"
+      },
+      "payload": "0000000000000000000000000000000000000000000000000000000000000000",
+      "files": {
+       "config.txt": "020a47e8f9c69ccd9953424d22d3534a3138171ab8d42ff6f6544f86615dd0a8",
+       "data/": "",
+       "data/table.ini": "2f6d42b87511a7bc7de19f46e5ad6e9a6b853079b5b8920493c5cd6d2080f046",
+       "mod.json": "1290b6bc9db9b95885b0cbc58534787766bef5b4f69384828b56007e8567e38b",
+       "src/": "",
+       "src/mod.lua": "1232d8379de77e154ca533689af2e42629dd7574bda5a0a390799849f07607c3"
+      }
+     }
+    }
+   },
+   "library": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28",
+   "expect": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28"
+  },
+  {
+   "name": "eml-game-folder-copy",
+   "kind": "eml",
+   "folder": "kiln/eml/mods/bigger-stacks",
+   "files": {
+    "mod.json": {
+     "text": "{\"id\": \"bigger-stacks\", \"name\": \"Bigger Stacks\", \"version\": \"2.1.1\"}\n"
+    },
+    "src/mod.lua": {
+     "text": "return {}\n"
+    },
+    "config.txt": {
+     "text": "stack=100\n"
+    },
+    "data/table.ini": {
+     "text": "[a]\nb=2\n"
+    },
+    ".kiln-library.json": {
+     "text": "{\"format\": 1, \"kind\": \"eml\", \"id\": \"bigger-stacks\", \"version\": \"2.1.1\", \"hash\": \"kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28\"}"
+    }
+   },
+   "state": {
+    "library-placements.json": [
+     {
+      "path": "/run/media/deck/GF8S5/steamapps/common/Enshrouded/kiln/eml/mods/bigger-stacks",
+      "marker": {
+       "format": 1,
+       "kind": "eml",
+       "id": "bigger-stacks",
+       "version": "2.1.1",
+       "hash": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28"
+      },
+      "files": {
+       "config.txt": "020a47e8f9c69ccd9953424d22d3534a3138171ab8d42ff6f6544f86615dd0a8",
+       "data/": "",
+       "data/table.ini": "2f6d42b87511a7bc7de19f46e5ad6e9a6b853079b5b8920493c5cd6d2080f046",
+       "mod.json": "1290b6bc9db9b95885b0cbc58534787766bef5b4f69384828b56007e8567e38b",
+       "src/": "",
+       "src/mod.lua": "1232d8379de77e154ca533689af2e42629dd7574bda5a0a390799849f07607c3"
+      },
+      "game_folder": true
+     }
+    ]
+   },
+   "library": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28",
+   "expect": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28"
+  },
+  {
+   "name": "eml-copy-table-changed",
+   "kind": "eml",
+   "folder": "kiln/eml/mods/bigger-stacks",
+   "files": {
+    "mod.json": {
+     "text": "{\"id\": \"bigger-stacks\", \"name\": \"Bigger Stacks\", \"version\": \"2.1.1\"}\n"
+    },
+    "src/mod.lua": {
+     "text": "return {}\n"
+    },
+    "config.txt": {
+     "text": "stack=100\n"
+    },
+    "data/table.ini": {
+     "text": "[a]\nb=2\n"
+    },
+    ".kiln-library.json": {
+     "text": "{\"format\": 1, \"kind\": \"eml\", \"id\": \"bigger-stacks\", \"version\": \"2.1.1\", \"hash\": \"kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28\"}"
+    }
+   },
+   "state": {
+    "library-placements.json": [
+     {
+      "path": "/run/media/deck/GF8S5/steamapps/common/Enshrouded/kiln/eml/mods/bigger-stacks",
+      "marker": {
+       "format": 1,
+       "kind": "eml",
+       "id": "bigger-stacks",
+       "version": "2.1.1",
+       "hash": "kdh1:e5d8a82eb0f39d5907716045955a929286c4f19d438926d659fc6ea48d99fa28"
+      },
+      "files": {
+       "config.txt": "020a47e8f9c69ccd9953424d22d3534a3138171ab8d42ff6f6544f86615dd0a8",
+       "data/": "",
+       "data/table.ini": "2f6d42b87511a7bc7de19f46e5ad6e9a6b853079b5b8920493c5cd6d2080f046",
+       "mod.json": "1290b6bc9db9b95885b0cbc58534787766bef5b4f69384828b56007e8567e38b",
+       "src/": "",
+       "src/mod.lua": "1232d8379de77e154ca533689af2e42629dd7574bda5a0a390799849f07607c3"
+      }
+     }
+    ]
+   },
+   "library": null,
+   "expect": "kdh1:a76c36bc621bfb33358a3b6a866bea7579addd430872ec7f8f8f7cd012c37a5c"
+  },
+  {
+   "name": "eml-own",
+   "kind": "eml",
+   "folder": "kiln/eml/mods/bigger-stacks",
+   "files": {
+    "mod.json": {
+     "text": "{\"id\": \"bigger-stacks\", \"name\": \"Bigger Stacks\", \"version\": \"2.1.1\"}\n"
+    },
+    "src/mod.lua": {
+     "text": "return {}\n"
+    },
+    "config.txt": {
+     "text": "stack=100\n"
+    },
+    "data/table.ini": {
+     "text": "[a]\nb=1\n"
+    }
+   },
+   "state": {},
+   "library": null,
+   "same": "eml-own-config",
+   "expect": "kdh1:bc6cf44db76040ce695939badbb391bbdca8bdbfca8e814efc55c8995f1139a0"
+  },
+  {
+   "name": "eml-own-config",
+   "kind": "eml",
+   "folder": "kiln/eml/mods/bigger-stacks",
+   "files": {
+    "mod.json": {
+     "text": "{\"id\": \"bigger-stacks\", \"name\": \"Bigger Stacks\", \"version\": \"2.1.1\"}\n"
+    },
+    "src/mod.lua": {
+     "text": "return {}\n"
+    },
+    "config.txt": {
+     "text": "stack=5\n"
+    },
+    "data/table.ini": {
+     "text": "[a]\nb=1\n"
+    }
+   },
+   "state": {},
+   "library": null,
+   "expect": "kdh1:bc6cf44db76040ce695939badbb391bbdca8bdbfca8e814efc55c8995f1139a0"
+  }
+ ]
+}

@@ -196,7 +196,7 @@ public sealed class SavesTestMod : Mod
             var i1 = _order.IndexOf($"saving:{auto!.Revision}:Autosave");
             var i2 = _order.IndexOf($"saved:{auto.Revision}:Autosave:True");
             Check(i1 >= 0 && i2 > i1, $"order: saving at {i1}, saved at {i2} ({string.Join(" ", _order.TakeLast(4))})");
-            CheckFileAndManifest(auto.Revision, "autosave");
+            await CheckFileAndManifest(auto.Revision, "autosave");
         }
 
         // A requested save.
@@ -205,7 +205,7 @@ public sealed class SavesTestMod : Mod
         Check(r.Success && r.Reason == SaveReason.Request && r.Revision == before + 1,
             $"Saves.Request(): {r} (file was at {before})");
         Check(_savings.Any(e => e.Reason == SaveReason.Request && e.Revision == r.Revision), "WorldSavingEvent(Request) fired for it");
-        CheckFileAndManifest(r.Revision, "request");
+        await CheckFileAndManifest(r.Revision, "request");
 
         // A backup: world file + matching sidecar generation.
         var b = await Saves.Backup("t1");
@@ -383,12 +383,16 @@ public sealed class SavesTestMod : Mod
             $"{p.PayloadSha == L?["sha"]?.GetValue<string>()}");
     }
 
-    private void CheckFileAndManifest(uint rev, string what)
+    private async Task CheckFileAndManifest(uint rev, string what)
     {
         var h = Header();
         Check(h?.rev == rev, $"{what}: world file header revision {h?.rev} = event revision {rev}");
         var man = Path.Combine(Saves.DataDirectory!, "manifests", $"{rev:D10}-{h?.unix}.json");
-        Check(File.Exists(man), $"{what}: Kiln's confirmed manifest {Path.GetFileName(man)} exists");
+        // Kiln.Saves writes the confirmation on its own writer thread (issue #39): at WorldSavedEvent it can still be on its
+        // way (docs/kiln/services/saves.md). It must land within the writer's bounded wait (10 s), and the line says when.
+        var sw = Stopwatch.StartNew();
+        while (!File.Exists(man) && sw.Elapsed.TotalSeconds < 10) await Context.Scheduler.NextTick();
+        Check(File.Exists(man), $"{what}: Kiln's confirmed manifest {Path.GetFileName(man)} exists ({sw.Elapsed.TotalMilliseconds:F0} ms after the event)");
     }
 
     /// <summary>Every manifest parses and every blob it names is there with the right sha256.</summary>

@@ -155,13 +155,30 @@ int main(int argc, char** argv) try {
     p = profile(); p["mods"]["future-engine"] = json::array();
     g_state = State{}; parse(p.dump());
     if (!warned_about("mods.future-engine")) throw std::runtime_error("a really unknown kind is no longer warned about");
+    // inbox 24: the launcher removes the game-folder copy of a mod the profile switched off, so the entry names a folder
+    // that is not there. That is no problem: no "is missing; skipped" warning and no missing folder in boot.json. One
+    // that is on still warns.
+    for (const auto& [kind, path] : {std::pair{"eml", "../mods/Switched-Off-Mod"}, std::pair{"kiln", "profiles/test/Switched-Off-Mod"}}) {
+        kiln::g_logged.clear();
+        p = profile(); p["mods"][kind] = {{{"id", "safe"}, {"path", path}, {"enabled", false}}};
+        g_state = State{}; parse(p.dump());
+        if (warned_about("Switched-Off-Mod") || !g_state.missing.empty())
+            throw std::runtime_error(std::string(kind) + ": a switched-off mod's removed folder is warned about as missing");
+        p["mods"][kind][0]["enabled"] = true;
+        g_state = State{}; parse(p.dump());
+        if (!warned_about("Switched-Off-Mod") || g_state.missing.size() != 1)
+            throw std::runtime_error(std::string(kind) + ": an enabled mod's missing folder is no longer warned about");
+    }
     // One table of folder names for the three validators of ../mods/<folder> (kiln-manage, this parser, the schema).
     std::ifstream names_file(argv[2]);
     if (!names_file) throw std::runtime_error(std::string("cannot read ") + argv[2]);
     const json names = json::parse(names_file);
     size_t checked = 0;
     // mods.flame: Kiln's copy of a Flame mod in game/mods/<id>, where the mod reads its own files (KILN_PROFILE_READER 3)
-    for (const auto& [kind, root] : {std::pair{"eml", "mods"}, std::pair{"greeneye", "greeneye"}, std::pair{"flame", "mods"}}) {
+    // mods.dllmod: Kiln's copy of a package for Enshrouded ModLoader in game/Mods/EnshroudedModLoader/<id>, where that
+    // loader and kiln-dllmod read it
+    for (const auto& [kind, root] : {std::pair{"eml", "mods"}, std::pair{"greeneye", "greeneye"}, std::pair{"flame", "mods"},
+                                     std::pair{"dllmod", "Mods/EnshroudedModLoader"}}) {
         for (const char* verdict : {"accept", "reject"}) {
             for (const auto& n : names.at(verdict)) {
                 const std::string path = std::string("../") + root + "/" + n.get<std::string>();
@@ -183,10 +200,16 @@ int main(int argc, char** argv) try {
                                      std::pair{"greeneye", "../greeneye/../outside"}, std::pair{"greeneye", "../greeneye/a/b"},
                                      std::pair{"flame", "../greeneye/safe"}, std::pair{"flame", "../mods/a/b"},
                                      std::pair{"flame", "../mods/../outside"}, std::pair{"shroudtopia", "../mods/safe"},
-                                     std::pair{"enshwick", "../mods/safe"}}) {
+                                     std::pair{"enshwick", "../mods/safe"}, std::pair{"dllmod", "../mods/safe"},
+                                     std::pair{"dllmod", "../Mods/EnshroudedModLoader/a/b"},
+                                     std::pair{"dllmod", "../Mods/EnshroudedModLoader/../outside"}, std::pair{"dllmod", "../greeneye/safe"},
+                                     std::pair{"greeneye", "../Mods/EnshroudedModLoader/safe"}}) {
         p = profile(); p["mods"][kind] = {{{"id", "safe"}, {"path", path}}};
         invalid(p, "path");
     }
+    // a "dropins" list may name dllmod
+    p = profile(); p["dropins"] = {"dllmod", "greeneye"};
+    g_state = State{}; parse(p.dump());
     std::printf("folder name table: %zu names agree\n", checked);
     // The actual profiles kiln-manage renders in Copy mode (crates/kiln-manage/tests/eml_packages.rs passes them), not a
     // hand-retyped approximation.

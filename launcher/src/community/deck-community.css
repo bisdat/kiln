@@ -1,0 +1,32 @@
+/* The Deck's Community tab (1 rem = 16 px at 1280×800). */
+.kdc .kdc-cols { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 1rem 2.5rem; align-content: start; }
+.kdc-col { display: flex; flex-direction: column; gap: .5rem; min-width: 0; }
+.kdc-head { margin-top: .5rem; font-size: 1.25rem; }
+.kdc .deck-row.kdc-on, .deck-dialog .deck-row.kdc-on { box-shadow: inset 0 0 0 .125rem rgba(255, 143, 69, .55); }
+.deck-tab .kc-nav-count { font-size: 1rem; margin-left: .25rem; }
+
+/* QR dialogs: the code on the left, the words on the right */
+.kdc-qr { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2rem; align-items: center; }
+.kdc-qr-code { display: flex; flex-direction: column; align-items: center; gap: .875rem; }
+.kdc-qr-gone { width: 14.5rem; height: 14.5rem; border-radius: .5rem; background: repeating-linear-gradient(45deg, rgba(255, 190, 140, .05) 0 .5rem, transparent .5rem 1rem); box-shadow: inset 0 0 0 1px var(--k-line-strong); }
+.kdc-code { font-family: var(--k-font-mono); font-stretch: 90%; font-size: 2.25rem; font-weight: 700; letter-spacing: .08em; color: var(--k-gold-300); }
+.kdc-qr-text { display: flex; flex-direction: column; gap: .75rem; min-width: 0; }
+.kdc-qr-text p { margin: 0; }
+.kdc-steps { margin: 0; padding-left: 1.75rem; display: flex; flex-direction: column; gap: .5rem; font-size: 1.375rem; }
+.kdc-url { font-size: 1.375rem; color: var(--k-gold-300); }
+.kdc-sent-list p { margin: 0 0 .625rem; }
+.kdc-sent-list ul { margin: 0 0 .75rem; padding-left: 1.5rem; font-size: 1.125rem; }
+.kdc-input { width: 100%; height: 3.75rem; padding: 0 1.25rem; border: 0; border-radius: .75rem; background: var(--k-well); color: var(--k-text-0);
+  font: inherit; font-size: 1.5rem; box-shadow: inset 0 0 0 1px var(--k-line-strong); }
+.kdc-presence { display: grid; grid-template-columns: 22rem minmax(0, 1fr); gap: 2rem; align-items: start; }
+.kdc-presence p { margin: 0 0 .75rem; }
+.kdc-hw { margin: 0 0 .75rem; padding: 1rem 1.5rem; border-radius: .875rem; background: rgba(255, 190, 140, .035); display: grid; grid-template-columns: auto minmax(0, 1fr); gap: .375rem 2rem; }
+.kdc-hw > div { display: contents; }
+.kdc-hw dt { font-family: var(--k-font-label); font-weight: 500; color: var(--k-text-2); }
+.kdc-hw dd { margin: 0; }
+.kdc-hw:focus { background: rgba(255, 170, 100, .08); }
+.kdc-results { margin: 1rem 0 .5rem; }
+.deck-btn.on.kdc-r-ok { box-shadow: inset 0 -.1875rem 0 var(--k-ok), inset 0 0 0 1px var(--k-line-strong); color: var(--k-ok) !important; }
+.deck-btn.on.kdc-r-err { box-shadow: inset 0 -.1875rem 0 var(--k-err), inset 0 0 0 1px var(--k-line-strong); color: var(--k-err) !important; }
+.deck-btn.on.kdc-r-warn { box-shadow: inset 0 -.1875rem 0 var(--k-warn), inset 0 0 0 1px var(--k-line-strong); color: var(--k-warn) !important; }
+.deck-home-actions .kdc-send-home { order: -1; }

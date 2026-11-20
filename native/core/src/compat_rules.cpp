@@ -106,7 +106,7 @@ bool parse_rule(const json& j, const char* source, Rule* r, std::string* why) {
     }
     for (const auto& [key, v] : j.items()) {
         (void)v;
-        if (key != "id" && key != "when" && key != "action" && key != "subject" && key != "message") {
+        if (key != "id" && key != "when" && key != "action" && key != "subject" && key != "target" && key != "max_wait_ms" && key != "message") {
             *why = "unknown key \"" + key + "\"";
             return false;
         }
@@ -133,12 +133,12 @@ bool parse_rule(const json& j, const char* source, Rule* r, std::string* why) {
         }
     }
     if (!j.contains("action") || !j["action"].is_string()) {
-        *why = "\"action\" must be warn, late or disable";
+        *why = "\"action\" must be warn, late, disable, before, defer or original-code";
         return false;
     }
     r->action = j["action"].get<std::string>();
-    if (r->action != "warn" && r->action != "late" && r->action != "disable") {
-        *why = "\"action\" must be warn, late or disable";
+    if (r->action != "warn" && r->action != "late" && r->action != "disable" && r->action != "before" && r->action != "defer" && r->action != "original-code") {
+        *why = "\"action\" must be warn, late, disable, before, defer or original-code";
         return false;
     }
     if (j.contains("message")) {
@@ -158,6 +158,40 @@ bool parse_rule(const json& j, const char* source, Rule* r, std::string* why) {
     }
     if (r->action != "warn" && !r->has_subject) {
         *why = "action " + r->action + " needs a \"subject\"";
+        return false;
+    }
+    if (j.contains("target")) {
+        if (r->action != "before" && r->action != "defer") {
+            *why = "a \"target\" belongs to action before or defer only";
+            return false;
+        }
+        if (!parse_matcher(j["target"], &r->target, why)) return false;
+        r->has_target = true;
+    }
+    if ((r->action == "before" || r->action == "defer") && !r->has_target) {
+        *why = "action " + r->action + " needs a \"target\"";
+        return false;
+    }
+    if (r->action == "original-code" &&
+        (r->subject.kind != Matcher::Kind::Mod || r->subject.value.rfind("shroudtopia:", 0) != 0 ||
+         r->subject.value.size() == 12)) {
+        *why = "original-code needs a shroudtopia:<id> subject";
+        return false;
+    }
+    if (r->action == "defer") {
+        if (r->target.kind != Matcher::Kind::Mod || r->target.value.rfind("shroudtopia:", 0) != 0 ||
+            r->target.value.size() == 12 || (r->subject.kind != Matcher::Kind::Mod && r->subject.kind != Matcher::Kind::Module)) {
+            *why = "defer needs a native mod or module subject and a shroudtopia:<id> target";
+            return false;
+        }
+        if (!j.contains("max_wait_ms") || !j["max_wait_ms"].is_number_integer() ||
+            j["max_wait_ms"] < 1 || j["max_wait_ms"] > 30000) {
+            *why = "defer needs max_wait_ms from 1 to 30000";
+            return false;
+        }
+        r->max_wait_ms = j["max_wait_ms"].get<uint32_t>();
+    } else if (j.contains("max_wait_ms")) {
+        *why = "max_wait_ms belongs to action defer only";
         return false;
     }
     return true;
@@ -315,4 +349,21 @@ std::vector<const Rule*> evaluate(const std::vector<Rule>& rules, const Facts& f
     return out;
 }
 
+const Rule* native_defer_rule(const std::vector<Rule>& rules, const Facts& start, const Facts& native, bool host_available) {
+    if (!host_available) return nullptr;
+    for (const Rule* r : evaluate(rules, start))
+        if (r->action == "defer" && present(r->target, start) && present(r->subject, native)) return r;
+    return nullptr;
+}
+
 }  // namespace kiln::compat
+
+namespace kiln::compat {
+const Rule* original_code_rule(const std::vector<Rule>& rules, const Facts& start, std::string_view mod) {
+    Facts own;
+    own.mods.emplace_back(mod);
+    for (const Rule* r : evaluate(rules, start))
+        if (r->action == "original-code" && present(r->subject, own)) return r;
+    return nullptr;
+}
+} // namespace kiln::compat
