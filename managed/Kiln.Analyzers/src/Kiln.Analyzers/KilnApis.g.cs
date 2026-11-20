@@ -481,6 +481,12 @@ internal static partial class KilnApis
         "M:Kiln.KnowledgeScope.Revoke(System.String,System.Int32)", // KnowledgeScope.Revoke(string, int): via Knowledge.KnowledgeId(string, string)
         "M:Kiln.KnowledgeScope.Set(System.String,System.UInt32)", // KnowledgeScope.Set(string, uint): via Knowledge.KnowledgeId(string, string)
         "M:Kiln.Mod.WorldConfig``1(System.String)", // Mod.WorldConfig<T>(string?): Game.AssertTickThread
+        "M:Kiln.ModValues.Add(Kiln.CharacterKey,Kiln.ModValueKey,System.Int64,System.Nullable{Kiln.ModValueVersion})", // ModValues.Add(CharacterKey, ModValueKey, long, ModValueVersion?): via ModValues.Change(string, CharacterKey, ModValueKey, ChangeOp, long, ModValueVersion?)
+        "M:Kiln.ModValues.Define(System.String,Kiln.ModValueOptions)", // ModValues.Define(string, ModValueOptions): via ModValuesService.NeedLedger(string)
+        "M:Kiln.ModValues.Read(Kiln.CharacterKey,Kiln.ModValueKey)", // ModValues.Read(CharacterKey, ModValueKey): via ModValuesService.NeedLedger(string)
+        "M:Kiln.ModValues.Reset(Kiln.CharacterKey,Kiln.ModValueKey,System.Nullable{Kiln.ModValueVersion})", // ModValues.Reset(CharacterKey, ModValueKey, ModValueVersion?): via ModValues.Change(string, CharacterKey, ModValueKey, ChangeOp, long, ModValueVersion?)
+        "M:Kiln.ModValues.Set(Kiln.CharacterKey,Kiln.ModValueKey,System.Int64,System.Nullable{Kiln.ModValueVersion})", // ModValues.Set(CharacterKey, ModValueKey, long, ModValueVersion?): via ModValues.Change(string, CharacterKey, ModValueKey, ChangeOp, long, ModValueVersion?)
+        "M:Kiln.ModValues.Spend(Kiln.CharacterKey,Kiln.ModValueKey,System.Int64,System.Nullable{Kiln.ModValueVersion})", // ModValues.Spend(CharacterKey, ModValueKey, long, ModValueVersion?): via ModValues.Change(string, CharacterKey, ModValueKey, ChangeOp, long, ModValueVersion?)
         "M:Kiln.NativeQuests.Holds(Kiln.NativeComputed,Kiln.QuestHolder)", // NativeQuests.Holds(NativeComputed, QuestHolder): Game.AssertTickThread
         "M:Kiln.NativeQuests.Resync(Kiln.QuestHolder,System.Boolean)", // NativeQuests.Resync(QuestHolder, bool): Game.AssertTickThread
         "M:Kiln.NativeQuests.Wanted(System.String,Kiln.QuestHolder)", // NativeQuests.Wanted(string, QuestHolder): Game.AssertTickThread
@@ -789,10 +795,15 @@ internal static partial class KilnApis
         "M:Kiln.Arsenals.JobHandler(System.UInt32,System.IntPtr,System.IntPtr)", // Arsenals.JobHandler(uint, nint, nint): CreaturesGate.RequireAdvanced
         "M:Kiln.Constants.Get(System.String)", // Constants.Get(string): via Constants.TryGet(string, out long)
         "M:Kiln.Constants.TryGet(System.String,System.Int64@)", // Constants.TryGet(string, out long): HooksGate.RequireAdvanced
+        "M:Kiln.HookModule.Find(System.String)", // HookModule.Find(string): via HookModule.FindAll(string, int)
+        "M:Kiln.HookModule.FindAll(System.String,System.Int32)", // HookModule.FindAll(string, int): HooksGate.RequireAdvanced
         "M:Kiln.Hooks.Detour(System.String,Kiln.DetourHandler,System.Int32)", // Hooks.Detour(string, DetourHandler, int): via Hooks.Detour(nuint, DetourHandler, int, string?)
         "M:Kiln.Hooks.Detour(System.UIntPtr,Kiln.DetourHandler,System.Int32)", // Hooks.Detour(nuint, DetourHandler, int): via Hooks.Detour(nuint, DetourHandler, int, string?)
+        "M:Kiln.Hooks.FindInModule(System.String,System.String)", // Hooks.FindInModule(string, string): via HookModule.Find(string)
         "M:Kiln.Hooks.Mid(System.String,Kiln.MidHandler,System.Int32)", // Hooks.Mid(string, MidHandler, int): via Hooks.Mid(nuint, MidHandler, int, string?)
         "M:Kiln.Hooks.Mid(System.UIntPtr,Kiln.MidHandler,System.Int32)", // Hooks.Mid(nuint, MidHandler, int): via Hooks.Mid(nuint, MidHandler, int, string?)
+        "M:Kiln.Hooks.Module(System.String)", // Hooks.Module(string): via Hooks.Open(string, string)
+        "M:Kiln.Hooks.TryModule(System.String,Kiln.HookModule@)", // Hooks.TryModule(string, out HookModule?): via Hooks.Open(string, string)
         "M:Kiln.Is.Job(System.UInt32,System.UInt32)", // Is.Job(uint, uint): CreaturesGate.RequireAdvanced
         "M:Kiln.Keep.Block(System.String,System.Int32)", // Keep.Block(string, int): HooksGate.RequireAdvanced
         "M:Kiln.Keep.Span``1(System.String,System.Int32)", // Keep.Span<T>(string, int): HooksGate.RequireAdvanced
@@ -925,6 +936,7 @@ internal static partial class KilnApis
         "Gameplay",
         "Hooks",
         "Items",
+        "ModValues",
         "Network",
         "Permissions",
         "PlayerAnim",
