@@ -4,16 +4,50 @@ When mods don't load, one file answers the questions a maintainer would otherwis
 which OS and Proton, which game build, what is in the game folder, what the profile loads and what the last start did.
 
 - **Kiln Launcher:** Logs, "Support report" (above the tabs; also with no game found yet, and on a server's Logs page).
-  "Save report..." asks where to save `kiln-report-<date>.zip`; "Copy summary" copies a few lines for a forum post.
-- **kilnctl** (servers, manual installs): `kilnctl report [NAME] [--dir D] [--out FILE] [--print]`. `NAME` is an
-  instance; `--dir` a server or client folder; neither: the client Steam knows. `--print` writes `summary.txt` to the
-  terminal instead of the zip.
+  "Save report..." first shows "What's in this report" (below), then asks where to save `kiln-report-<date>.zip`;
+  "Copy summary" copies a few lines for a forum post.
+- **kilnctl** (servers, manual installs): `kilnctl report [NAME] [--dir D] [--out FILE] [--print] [--contents]
+  [--exclude PATH|other-mods ...]`. `NAME` is an instance; `--dir` a server or client folder; neither: the client
+  Steam knows. `--print` writes `summary.txt` to the terminal instead of the zip; `--contents` prints what the report
+  holds (each file by group, its size and what was replaced in it, as "What's in this report"); `--exclude` leaves
+  out another mod's file by its path in the zip (`game/BuildingTools.log`, repeatable) or `other-mods` for all of them,
+  and refuses Kiln's own files with why.
 
 Both only read. Nothing is written to the game folder, Steam's files are only read, the game may be running.
 
-Code: `crates/kiln-manage/src/report.rs` (`build`, `redact`, `write_zip`), the Tauri commands `report_save` and
-`report_summary` (`launcher/src-tauri/src/commands/logs.rs`), `launcher/src/components/SupportReport.tsx`,
-`runner/kilnctl/src/report.rs`.
+Code: `crates/kiln-manage/src/report.rs` (`build`, `redact`, `write_zip`, `contents`), the Tauri commands `report_save`,
+`report_preview` and `report_summary` (`launcher/src-tauri/src/commands/logs.rs`),
+`launcher/src/components/SupportReport.tsx` and `ReportContents.tsx`, `runner/kilnctl/src/report.rs`.
+
+## What's in this report
+
+(dev.29.22) A player declined to send a report because it held "a little too much personal information". Before a
+report is saved or sent the launcher now shows what it holds, built exactly as it will be written (`report_preview`,
+`report::contents`; nothing is written):
+
+- the files, grouped as **Kiln's logs** (summary.txt, report.json, Kiln's logs, the crash report, the launcher's logs),
+  **other mods' logs** (every file `report::excludable` says is another mod's or tool's: Building Tools, ShroudLink,
+  Auto Loot Plus, XHL-Core, Greeneye, OptiScaler's log and settings, and any file `report::file_kind` does not know),
+  **settings** (Kiln's state files, the profile, chain.ini, kiln.json, the receipt) and **folder listings**;
+- each with one plain line on what it holds (`file_kind`'s name, the launcher's `reportContents.about.<name>`), its
+  size, and how often each replacement stands in it ("Replaced: your home folder (169 times), player names (3
+  times)"; summary.txt's own "Left out" section, which names every token once, is not counted);
+- **View summary.txt**, and the "Never in a report" list (`report::NEVER_COLLECTED`, the items of summary.txt's "Left out");
+- a **Leave out** box on each other mod's log, and one for all of them. Kiln's own files, the settings and the listings
+  have none: support needs them to see what went wrong (the group says so). Redaction cleans every file the same
+  way, but it cannot know everything another mod writes, which is why those are the ones a player may leave out.
+
+`ReportInput::exclude` takes zip paths or `other-mods`; names of files that cannot be left out are ignored. A file
+left out is still read and redacted (for the preview, `Report::left_out`) but is never in the zip and takes none of the
+6 MiB budget; summary.txt lists it under "Left out by the player (other mods' own files)" and report.json as
+`leftOut`.
+
+- **Save report...** opens "What's in this report" as a dialog: Save (then the file dialog), Cancel (nothing written).
+- **Send to Kiln support**: the check step says what the zip holds ("1 file left out. Replaced: ...") and "What's in
+  this report" opens the same view inline; a change prepares the report again (`community_report_prepare` with
+  `exclude`), and Send waits for it, so it always sends the report as the boxes are.
+- **Steam Deck**: the check step's "What's in this report" row opens the list with the pad: each file a row, A leaves
+  another mod's log out or puts it back, "View summary.txt" opens it in a scrollable dialog.
 
 ## What is in the zip
 

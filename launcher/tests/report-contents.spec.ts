@@ -72,13 +72,13 @@ test("Send to Kiln support: the check step says what is in the zip; a log left o
   await page.getByTestId("support-report").getByRole("button", { name: "Send to Kiln support" }).click();
   await page.locator("#kc-line").fill("Mods don't load since the game update");
   await page.getByTestId("kc-next").click();
-  await expect(page.getByTestId("kc-replaced")).toContainText("13 files");
-  await expect(page.getByTestId("kc-replaced")).toContainText("your home folder (249 times)");
+    await expect(page.getByTestId("kc-replaced")).toContainText("your home folder (249 times)");
   await page.getByTestId("kc-files-toggle").click();
   const files = page.getByTestId("kc-files");
   await expect(files.locator('[data-path="game/shroudlink.log"]')).toContainText("ShroudLink's own log");
   await files.locator('[data-path="game/shroudlink.log"]').getByRole("checkbox").check();
   await expect(page.getByTestId("kc-replaced")).toContainText("1 file left out");
+  await expect(page.getByTestId("kc-check")).toContainText("12 files");
   await expect(page.getByTestId("kc-send-now")).toBeEnabled();
   await page.getByTestId("krc-view").click();
   await expect(page.getByTestId("krc-summary")).toContainText("Kiln support report");

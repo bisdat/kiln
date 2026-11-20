@@ -12,7 +12,7 @@ import { useT } from "../i18n";
 import { Banner, Button, Cones, Field, KeyValue, Modal, Skeleton, StatusPill, TextArea, TextInput, fmtBytes, toast } from "../ui";
 import { INVITE, errKind, openInDiscord, refreshCommunity, useCommunity, useCommunityUi, useSendOpen } from "./state";
 import { KINDS, discordWords, kindKey, rateText, versionsLine } from "./parts";
-import { ReportContentsView, SummaryText, replacedInAll, replacedText, totalText } from "../components/ReportContents";
+import { ReportContentsView, SummaryText, leftOutText, replacedInAll, replacedText } from "../components/ReportContents";
 
 const MAX = 90;
 const WORDS_MAX = 1500;
@@ -149,7 +149,7 @@ export function SendDialog() {
               <span className="k-hint">{zipLabel}</span>
               <button type="button" className="k-link kc-files-toggle" data-testid="kc-files-toggle" onClick={() => setFiles(!files)}>{files ? t("community.send.check.hideFiles") : t("reportContents.title")}</button>
             </div>
-            {p.contents && <span className="k-hint" data-testid="kc-replaced">{[totalText(p.contents), replacedText(replacedInAll(p.contents))].filter(Boolean).join(". ")}</span>}
+            {p.contents && <span className="k-hint" data-testid="kc-replaced">{[leftOutText(p.contents), replacedText(replacedInAll(p.contents))].filter(Boolean).join(". ")}</span>}
             {files && p.contents && (
               <div className="k-stack kc-files-contents" style={{ gap: 10 }} data-testid="kc-files">
                 <div className="krc-total">

@@ -13,5 +13,6 @@
 .krc-leave input { accent-color: var(--k-ember-500); width: 16px; height: 16px; }
 .krc-never { margin: 2px 0 0; padding-left: 20px; color: var(--k-text-1); font-size: 14.5px; line-height: 1.5; }
 .krc-total { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; color: var(--k-text-1); }
+.krc-deck-head { margin-top: .75rem; }
 .krc-summary { margin: 0; padding: 10px 12px; max-height: 60vh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.45;
   border-radius: var(--k-radius-s); background: var(--k-well); color: var(--k-text-1); }

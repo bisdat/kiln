@@ -127,7 +127,8 @@ function DeckSend() {
               const files = c.files.filter((f) => f.group === g);
               if (!files.length) return null;
               return [
-                <p key={`h-${g}`} className="deck-label" data-testid={`deck-group-${g}`}>{t(`reportContents.group.${g}`)} <span className="deck-dim">{t(`reportContents.groupHint.${g}`)}</span></p>,
+                <p key={`h-${g}`} className="deck-label krc-deck-head" data-testid={`deck-group-${g}`}>{t(`reportContents.group.${g}`)}</p>,
+                <p key={`n-${g}`} className="deck-note">{t(`reportContents.groupHint.${g}`)}</p>,
                 ...files.map((f) => {
                   const out = exclude.includes(f.path);
                   const sub = [`${f.path} · ${fmtBytes(f.size)}`, out ? t("reportContents.leftOutHint") : replacedText(f.replaced) ?? t("reportContents.nothing")].join(" · ");

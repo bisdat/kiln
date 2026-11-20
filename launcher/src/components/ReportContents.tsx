@@ -42,6 +42,12 @@ export function totalText(c: ReportContents): string {
   return [tt("reportContents.total", { count: n, size: fmtBytes(c.size) }), out ? tt("reportContents.leftOutCount", { count: out }) : null].filter(Boolean).join(" · ");
 }
 
+/** "1 file left out", or null. */
+export function leftOutText(c: ReportContents): string | null {
+  const out = c.files.filter((f) => f.excluded).length;
+  return out ? tt("reportContents.leftOutCount", { count: out }) : null;
+}
+
 /** The never-collected item in the launcher's language (English from the report when the launcher has no words). */
 export const neverText = (n: { id: string; text: string }) => (NEVER.has(n.id) ? tt(`reportContents.never.${n.id}`) : n.text);
 

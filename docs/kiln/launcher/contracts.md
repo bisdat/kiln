@@ -1406,7 +1406,8 @@ Shared types (TypeScript names, defined in `commands.ts`; Rust in kiln-manage un
 | logs | `logs_follow` | target, file: string | string (subscription; lines in `kiln://log`) |
 | logs | `logs_unfollow` | subscription: string | null |
 | logs | `logs_crash_reports` | target | `CrashReport[]` |
-| logs | `report_save` | target: LogTarget \| null, path: string | `ReportSaved` {path, size, findings: `ReportFinding[]` {id, level: 'problem'\|'warning'\|'info', text}, errors: string[]} (launcher type; writes the support report zip, `.zip` added when missing; null target: the system and the launcher only; [support-report.md](support-report.md)) |
+| logs | `report_preview` | target: LogTarget \| null, exclude?: string[] | `ReportContents` {files: [{path, group: 'kiln'\|'mods'\|'settings'\|'listings', about, size, excludable, excluded, replaced: {home?: n, player?: n, ...}}], size, summary, never: [{id, text}]} (dev.29.22: "What's in this report"; the report built as `report_save` would write it, nothing written; [support-report.md](support-report.md)) |
+| logs | `report_save` | target: LogTarget \| null, path: string, exclude?: string[] (other mods' files left out; dev.29.22) | `ReportSaved` {path, size, findings: `ReportFinding[]` {id, level: 'problem'\|'warning'\|'info', text}, errors: string[]} (launcher type; writes the support report zip, `.zip` added when missing; null target: the system and the launcher only; [support-report.md](support-report.md)) |
 | logs | `report_summary` | target: LogTarget \| null | string (the short summary for a post, redacted like the zip) |
 | saves | `saves_list` | gameId | `SaveSlot[]` |
 | saves | `saves_backups` | gameId | `SaveBackup[]` |
@@ -1606,7 +1607,7 @@ line, the last one wins, else `KILN_LAUNCHER_UI=deck|desktop`). The UI: `forced`
 | community | `community_posts` | - | `SupportPost[]` ([discord.md](discord.md)) |
 | community | `community_post_seen` / `community_post_solved` / `community_post_delete` | id | null |
 | community | `community_presence_facts` | mods: number \| null, texts: PresenceTexts, notify?: {title, detail, open} | null (what only the window knows: the mod count, the words in the launcher's language) |
-| community | `community_report_prepare` | target: LogTarget \| null, from: "logs"\|"banner"\|"crash"\|"community"\|"deck" | `ReportPreview` {prepared, findings, versions, tags, kindTags, size, limit, files, known} (builds the support report once; nothing is sent) |
+| community | `community_report_prepare` | target: LogTarget \| null, from: "logs"\|"banner"\|"crash"\|"community"\|"deck", exclude?: string[] (dev.29.22) | `ReportPreview` {prepared, findings, versions, tags, kindTags, size, limit, files, known, contents: `ReportContents`} (builds the support report once; nothing is sent) |
 | community | `community_report_send` | prepared, draft: {title, kind, when?, text, zip: "team"\|"public"\|"none"} | `SupportPost` (sends the prepared report as shown) |
 | community | `tester_status` | - | `TesterStatus` {tester, beta, hardware: {gpu, driver, vram, os, runner, caps, covers}, plan: {build, url, until, steps, hidden, sent} \| null} |
 | community | `tester_join` | beta: boolean | null (sends the hardware tester_status showed) |
