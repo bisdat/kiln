@@ -256,8 +256,9 @@ internal static class NpcPhysics
             foreach (var p in c.Pin) w.Double(p);
             w.End();
             w.Double(c.MassKg); w.Double(c.Gravity); w.Double(c.Damping); w.Double(c.Stiffness);
-            w.List(c.Colliders.Count);
-            foreach (var x in c.Colliders)
+            var colliders = c.Colliders ?? [];
+            w.List(colliders.Count);
+            foreach (var x in colliders)
             {
                 if (x is ClothSphereBlock s)
                 {
@@ -295,6 +296,9 @@ internal static class NpcPhysics
     /// block is refused with the build step that is missing. Nothing is cooked while the game runs.</summary>
     internal static void CheckCooked(BlockContext ctx, BodyBlock b, JsonNode side, string model, string path)
     {
+        // a model whose cloth or chains come from assets/physics.json: the body names none, but the game would still scale them by its scale
+        if (!Has(b) && side["physics"] is not null && b.Scale is { } scale && scale != 1)
+            throw new BlockError(ctx.Block, Join(path, "scale"), $"its model {model} has cloth or chains (from assets/physics.json), so the body keeps scale 1 in this version ({N(scale)} given): the game scales the cloth's colliders by the model's own size, not by this");
         var want = SpecHash(b);
         if (want == null) return;
         var field = Join(path, b.Cloth is { Count: > 0 } ? "cloth" : "chains");
