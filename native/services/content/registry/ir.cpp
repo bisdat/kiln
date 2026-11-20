@@ -76,6 +76,11 @@ json Value::to_json() const {
             for (const Value& v : list) a.push_back(v.to_json());
             return a;
         }
+        case Struct: {
+            json o = json::object();
+            for (size_t n = 0; n < keys.size() && n < list.size(); ++n) o[keys[n]] = list[n].to_json();
+            return o;
+        }
         default: return nullptr;
     }
 }
@@ -87,8 +92,36 @@ bool operator==(const Value& a, const Value& b) {
         case Value::Bool: return a.b == b.b;
         case Value::Text: return a.t == b.t;
         case Value::List: return a.list == b.list;
+        case Value::Struct: return a.keys == b.keys && a.list == b.list;
         default: return true;
     }
+}
+
+std::string generic_path(const std::string& path) {
+    std::string g;
+    for (size_t i = 0; i < path.size(); ++i) {
+        g += path[i];
+        if (path[i] != '[') continue;
+        const size_t e = path.find(']', i);
+        if (e == std::string::npos) return path;
+        i = e - 1;  // the loop's ++i lands on ']', which is copied
+    }
+    return g;
+}
+
+void link_elements(Schema* schema) {
+    for (auto& [name, reg] : schema->registries)
+        for (const auto& [path, leaf] : reg.fields) {
+            const size_t at = path.find("[].");
+            if (at == std::string::npos) continue;
+            const auto list = reg.fields.find(path.substr(0, at));
+            if (list == reg.fields.end() || list->second.type != FieldType::List) continue;
+            FieldSpec& l = list->second;
+            l.element = FieldType::Struct;
+            FieldSpec x = leaf;
+            x.name = path.substr(at + 3);
+            if (!l.element_field(x.name)) l.element_fields.push_back(std::move(x));
+        }
 }
 
 const char* stage_name(Stage s) { return s == Stage::Add ? "add" : s == Stage::Alter ? "alter" : "final"; }
@@ -193,6 +226,71 @@ bool scalar_of(const json& j, FieldType type, const FieldSpec& f, Value* out, st
         default:
             return *err = f.name + ": a list holds plain values", false;
     }
+}
+
+// A flags value: names of the schema (any case), each once, held in the schema's order.
+bool flags_of(const json& j, const FieldSpec& f, Value* out, std::string* err) {
+    if (!j.is_array()) return *err = f.name + ": a list of names is expected, not " + brief(j), false;
+    std::vector<bool> on(f.enum_values.size(), false);
+    for (const json& x : j) {
+        Value v;
+        if (!scalar_of(x, FieldType::Enum, f, &v, err)) return false;
+        const size_t k = static_cast<size_t>(std::find(f.enum_values.begin(), f.enum_values.end(), v.t) - f.enum_values.begin());
+        if (on[k]) return *err = f.name + ": \"" + v.t + "\" is named twice", false;
+        on[k] = true;
+    }
+    std::vector<Value> names;
+    for (size_t k = 0; k < on.size(); ++k)
+        if (on[k]) names.push_back(Value::text(f.enum_values[k]));
+    *out = Value::of_list(std::move(names));
+    return true;
+}
+
+// One element of a list with fields of its own ({"item": "game:x", "count": 2}): its leaves, each typed by its spec.
+bool struct_of(const json& j, const FieldSpec& list, Value* out, std::string* err) {
+    if (!j.is_object()) return *err = list.name + ": an element is {\"<field>\": <value>, ...}, not " + brief(j), false;
+    Value v;
+    v.kind = Value::Struct;
+    for (const auto& [k, x] : j.items()) {  // nlohmann's object is ordered: keys come sorted
+        const FieldSpec* leaf = list.element_field(k);
+        if (!leaf) return *err = list.name + ": an element has no field \"" + k + "\"", false;
+        if (leaf->read_only) return *err = list.name + "[]." + k + " is read-only", false;
+        Value y;
+        if (!(leaf->type == FieldType::Flags ? flags_of(x, *leaf, &y, err) : scalar_of(x, leaf->type, *leaf, &y, err))) return false;
+        v.keys.push_back(k);
+        v.list.push_back(std::move(y));
+    }
+    *out = std::move(v);
+    return true;
+}
+
+bool element_value(const json& j, const FieldSpec& f, Value* out, std::string* err) {
+    return f.element == FieldType::Struct ? struct_of(j, f, out, err) : scalar_of(j, f.element, f, out, err);
+}
+
+// "inputs[2].count", "inputs[*].count", "inputs[3]": the list, the element, the leaf. One level of list.
+bool element_of(const std::string& path, ElementRef* r, std::string* err) {
+    *r = ElementRef{};
+    const size_t open = path.find('['), close = path.find(']');
+    if (open == 0 || open == std::string::npos || close == std::string::npos || close < open)
+        return *err = "\"" + path + "\": an element is <list>[n] or <list>[*]", false;
+    const std::string idx = path.substr(open + 1, close - open - 1);
+    r->list = path.substr(0, open);
+    if (idx == "*") {
+        r->all = true;
+    } else {
+        if (idx.empty() || idx.size() > 9 || !std::all_of(idx.begin(), idx.end(), [](char c) { return c >= '0' && c <= '9'; }))
+            return *err = "\"" + path + "\": an index is a whole number or *", false;
+        r->index = static_cast<uint32_t>(std::stoul(idx));
+    }
+    const std::string rest = path.substr(close + 1);
+    if (!rest.empty()) {
+        if (rest[0] != '.' || rest.size() == 1) return *err = "\"" + path + "\": after an element comes .<field>", false;
+        r->leaf = rest.substr(1);
+        if (r->leaf.find_first_of("[]") != std::string::npos) return *err = "\"" + path + "\": one level of list (no list in an element)", false;
+    }
+    r->on = true;
+    return true;
 }
 
 constexpr size_t kMaxRawPaths = 32;
@@ -318,16 +416,45 @@ bool edit_of(const json& e, const Batch& b, const Schema& schema, Edit* out, std
     if (!e.contains("select") || !selector_of(e["select"], &out->select, err)) return err->empty() ? (*err = "\"select\" names the entries", false) : false;
     if (!e.contains("field") || !e["field"].is_string()) return *err = "\"field\" names the field", false;
     out->field = e["field"].get<std::string>();
+    if (e.contains("op") == e.contains("list")) return *err = "an edit has \"op\" or \"list\"", false;
+    if (out->field.find('[') != std::string::npos) {  // an element of a list: "inputs[2].count", "inputs[*].count", "perks[1]"
+        ElementRef& r = out->element;
+        if (!element_of(out->field, &r, err)) return false;
+        const FieldSpec* lf = reg->field(r.list);
+        if (!lf || lf->type != FieldType::List) return *err = out->registry + " has no list \"" + r.list + "\"", false;
+        if (lf->read_only) return *err = out->registry + "." + r.list + " is read-only", false;
+        out->field = r.list + "[" + (r.all ? std::string("*") : std::to_string(r.index)) + "]" + (r.leaf.empty() ? "" : "." + r.leaf);
+        if (e.contains("list")) return *err = "a list op names the list itself (\"" + r.list + "\"), not an element", false;
+        if (!r.leaf.empty()) {
+            if (lf->element != FieldType::Struct) return *err = out->registry + "." + r.list + "'s elements have no fields", false;
+            const FieldSpec* leaf = lf->element_field(r.leaf);
+            if (!leaf) return *err = out->registry + "." + r.list + "'s elements have no field \"" + r.leaf + "\"", false;
+            if (leaf->read_only) return *err = out->registry + "." + r.list + "[]." + r.leaf + " is read-only", false;
+            return op_of(e["op"], *leaf, &out->op, err);
+        }
+        if (lf->element == FieldType::Struct) {  // a whole element with fields: {"set": {...}} (a plain object would read as an op)
+            const json& o = e["op"];
+            if (!o.is_object() || o.size() != 1 || !o.contains("set")) return *err = out->field + ": a whole element is set with {\"set\": {<its fields>}}", false;
+            out->op.set = true;
+            return struct_of(o["set"], *lf, &out->op.value, err);
+        }
+        FieldSpec el = *lf;  // a plain element: a value or a relative change, with the list's range for its elements
+        el.type = lf->element;
+        el.name = out->field;
+        return op_of(e["op"], el, &out->op, err);
+    }
     const FieldSpec* f = reg->field(out->field);
     if (!f) return *err = out->registry + " has no field \"" + out->field + "\"", false;
     if (f->read_only) return *err = out->registry + "." + out->field + " is read-only", false;
-    if (e.contains("op") == e.contains("list")) return *err = "an edit has \"op\" or \"list\"", false;
+    const bool listish = f->type == FieldType::List || f->type == FieldType::Flags;
     if (e.contains("op")) {
-        if (f->type == FieldType::List) return *err = out->registry + "." + out->field + " is a list: use \"list\" (clear, append, remove, replace)", false;
+        if (listish && !e["op"].is_array() && !(e["op"].is_object() && e["op"].contains("set")))
+            return *err = out->registry + "." + out->field + " is a list: \"op\" sets the whole list ([...]); \"list\" changes it (clear, append, remove, replace)", false;
         return op_of(e["op"], *f, &out->op, err);
     }
-    if (f->type != FieldType::List) return *err = out->registry + "." + out->field + " is not a list", false;
+    if (!listish) return *err = out->registry + "." + out->field + " is not a list", false;
     const json& l = e["list"];
+    if (l == "clear") return out->list = ListOp::Clear, true;  // the section's short form
     if (!l.is_object() || l.size() != 1) return *err = "\"list\" is one of {\"clear\": true}, {\"append\": [...]}, {\"remove\": [...]}, {\"replace\": [...]}", false;
     const std::string k = l.begin().key();
     const json& v = l.begin().value();
@@ -342,7 +469,7 @@ bool edit_of(const json& e, const Batch& b, const Schema& schema, Edit* out, std
     if (v.size() > kMaxListValues) return *err = "\"" + k + "\" takes at most " + std::to_string(kMaxListValues) + " values", false;
     for (const json& x : v) {
         Value y;
-        if (!value_of(x, *f, true, &y, err)) return false;
+        if (!(f->type == FieldType::Flags ? scalar_of(x, FieldType::Enum, *f, &y, err) : value_of(x, *f, true, &y, err))) return false;
         out->list_values.push_back(y);
     }
     if (out->list == ListOp::Replace && f->max_items && out->list_values.size() > f->max_items)
@@ -353,6 +480,8 @@ bool edit_of(const json& e, const Batch& b, const Schema& schema, Edit* out, std
 }  // namespace
 
 bool value_of(const json& j, const FieldSpec& f, bool element, Value* out, std::string* err) {
+    if (f.type == FieldType::Flags && !element) return flags_of(j, f, out, err);
+    if (element && f.type == FieldType::List) return element_value(j, f, out, err);
     if (f.type == FieldType::List && !element) {
         if (!j.is_array()) return *err = f.name + ": a list is expected, not " + brief(j), false;
         if (f.max_items && j.size() > f.max_items) return *err = f.name + ": at most " + std::to_string(f.max_items) + " values", false;
@@ -360,7 +489,7 @@ bool value_of(const json& j, const FieldSpec& f, bool element, Value* out, std::
         std::vector<Value> v;
         for (const json& x : j) {
             Value y;
-            if (!scalar_of(x, f.element, f, &y, err)) return false;
+            if (!element_value(x, f, &y, err)) return false;
             v.push_back(std::move(y));
         }
         *out = Value::of_list(std::move(v));
@@ -520,6 +649,31 @@ bool parse_batch(const json& doc, const Schema& schema, Batch* out, std::vector<
         }
         if (ok) out->edits.push_back(std::move(x));
         else refused->push_back({out->mod, out->source, out->stage, x.n, why});
+    }
+    return true;
+}
+
+bool lower_section(const json& section, const std::string& mod, const std::string& mod_version, const std::string& source, const Schema& schema,
+                   std::vector<Batch>* out, std::vector<Refusal>* refused, std::string* err) {
+    out->clear();
+    try {
+        if (too_deep(section)) return *err = "the \"registry\" section nests deeper than " + std::to_string(kMaxDepth) + " levels", false;
+        if (!section.is_object()) return *err = "the \"registry\" section is {\"add\": [...], \"alter\": [...], \"final\": [...]}", false;
+        for (const auto& [k, v] : section.items()) {
+            Stage st;
+            if (!stage_of(k, &st)) return *err = "the \"registry\" section: unknown member \"" + k + "\" (add, alter, final)", false;
+            if (!v.is_array()) return *err = "the \"registry\" section: \"" + k + "\" is a list of edits", false;
+        }
+    } catch (const std::exception& e) {
+        return *err = std::string("the \"registry\" section could not be read: ") + e.what(), false;
+    }
+    for (const char* stage : {"add", "alter", "final"}) {  // in stage order, whatever the file's order
+        if (!section.contains(stage)) continue;
+        json doc = {{"ir", 1}, {"mod", mod}, {"stage", stage}, {"source", source}, {"edits", section[stage]}};
+        if (!mod_version.empty()) doc["modVersion"] = mod_version;
+        Batch b;
+        if (!parse_batch(doc, schema, &b, refused, err)) return out->clear(), false;
+        out->push_back(std::move(b));
     }
     return true;
 }

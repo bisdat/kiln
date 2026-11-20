@@ -86,6 +86,8 @@ struct OldWrite {
 struct ChainRow {
     WriterKind kind = WriterKind::Registry;
     std::string raw;  // the raw member path as written, when this row came from an Advanced-tier edit
+    ElementRef element;                     // an element edit of this list ("inputs[2].count"): op applies to that element
+    std::optional<FieldSpec> element_spec;  // ...typed by its leaf's (or the element's) spec
     std::string mod;  // the Kiln mod (empty: an archive-writer package)
     std::string who;  // what the report names: the mod, or the old writer
     Stage stage = Stage::Alter;

@@ -35,10 +35,13 @@ using json = nlohmann::json;
 
 // ---- the schema descriptor (generated from schema/registry/*.json by S1) ----
 enum class Applies : uint8_t { Now = 1, WorldLoad = 2, Restart = 3 };  // KILN_REGISTRY_APPLIES_*
-enum class FieldType : uint8_t { Int, Float, Bool, Enum, Id, List };
+// Flags: a set of the schema's names (enum_values), held as a list in the schema's order, each name at most once.
+// Struct: only as a list's element (FieldSpec::element): an element with fields of its own (recipes.inputs {item, count},
+// drops.entries), its leaves in element_fields; the schema names each leaf "<list>[].<leaf>" ("inputs[].count").
+enum class FieldType : uint8_t { Int, Float, Bool, Enum, Id, List, Flags, Struct };
 
 struct FieldSpec {
-    std::string name;  // the Kiln field path, as edits name it ("maxStack", "damage.fire", "inputs")
+    std::string name;  // the Kiln field path, as edits name it ("maxStack", "damage.fire", "inputs", "inputs[].count")
     FieldType type = FieldType::Int;
     FieldType element = FieldType::Int;  // a list's elements
     std::optional<double> min, max;      // the range of a number (of a list's numbers)
@@ -46,7 +49,16 @@ struct FieldSpec {
     std::vector<std::string> enum_values;
     bool read_only = false;
     Applies applies = Applies::Restart;
+    std::vector<FieldSpec> element_fields;  // element Struct: its leaves by their own name ("item", "count"); link_elements()
+    const FieldSpec* element_field(const std::string& leaf) const {
+        for (const FieldSpec& f : element_fields)
+            if (f.name == leaf) return &f;
+        return nullptr;
+    }
 };
+
+// "inputs[3].count" and "inputs[*].count" as the schema names them: "inputs[].count".
+std::string generic_path(const std::string& path);
 
 struct RegistrySpec {
     std::string name;
@@ -54,8 +66,10 @@ struct RegistrySpec {
     std::map<std::string, FieldSpec> fields;
     bool add = true, remove = true;
     bool raw = false;  // "raw": "allowed": edits may name the game's member paths (the Advanced tier, D5)
+    // A field by its path; an element's index ("[3]", "[*]") reads as "[]": "inputs[2].count" is "inputs[].count".
     const FieldSpec* field(const std::string& path) const {
-        const auto it = fields.find(path);
+        auto it = fields.find(path);
+        if (it == fields.end() && path.find('[') != std::string::npos) it = fields.find(generic_path(path));
         return it == fields.end() ? nullptr : &it->second;
     }
 };
@@ -69,14 +83,24 @@ struct Schema {
     }
 };
 
+// After a descriptor is filled: every leaf row "<list>[].<leaf>" joins its list's element_fields (the list's element becomes
+// Struct). schema_ir.h (generated_schema) calls it; so do hand-filled descriptors with element leaves.
+void link_elements(Schema* schema);
+
 // ---- values ----
 struct Value {
-    enum Kind : uint8_t { None, Int, Num, Bool, Text, List } kind = None;
+    enum Kind : uint8_t { None, Int, Num, Bool, Text, List, Struct } kind = None;
     int64_t i = 0;
     double d = 0;
     bool b = false;
     std::string t;  // an enum member's name, an id
-    std::vector<Value> list;
+    std::vector<Value> list;        // a List's values; a Struct's values, in keys' order
+    std::vector<std::string> keys;  // a Struct's leaf names, sorted
+    const Value* leaf(const std::string& k) const {
+        for (size_t n = 0; n < keys.size(); ++n)
+            if (keys[n] == k) return &list[n];
+        return nullptr;
+    }
 
     static Value integer(int64_t v) { Value x; x.kind = Int, x.i = v, x.d = static_cast<double>(v); return x; }
     static Value number(double v) { Value x; x.kind = Num, x.d = v; return x; }
@@ -124,11 +148,22 @@ struct RawWrite {
     json op;           // a plain value or {set | mul | add | min | max | raiseOnly | lowerOnly}: typed per entry against the member
 };
 
+// A field path into one element of a list: "inputs[2].count" (a leaf of element 2), "inputs[*].count" (that leaf of every
+// element), "inputs[3]" / "perks[1]" (the whole element). The edit changes it inside the list's own chain.
+struct ElementRef {
+    bool on = false;
+    std::string list;  // "inputs"
+    bool all = false;  // [*]
+    uint32_t index = 0;
+    std::string leaf;  // "count"; empty: the whole element
+};
+
 struct Edit {
     uint32_t n = 0;  // ordinal in its batch
     std::string registry;
     Selector select;
-    std::string field;
+    std::string field;  // as the schema names a place: "maxStack", "inputs", "inputs[2].count" (indices as plain numbers)
+    ElementRef element;  // field names an element of a list
     Op op;
     ListOp list = ListOp::None;
     std::vector<Value> list_values;
@@ -158,6 +193,13 @@ struct Refusal {
 // 0..4294967295 or is used twice refuses that edit). No exception leaves either form.
 bool parse_batch(const std::string& text, const Schema& schema, Batch* out, std::vector<Refusal>* refused, std::string* err);
 bool parse_batch(const json& doc, const Schema& schema, Batch* out, std::vector<Refusal>* refused, std::string* err);
+
+// A data pack's "registry" section (schema/registry-section.schema.json): {"add": [edits], "alter": [edits], "final":
+// [edits]}, each list an IR batch of that stage for mod, named source ("content/<file>.json"). false: the section itself is
+// unusable (*err; nothing of it is taken). true: *out holds one batch per stage present (add, alter, final), each edit
+// checked as parse_batch checks it (refusals in *refused).
+bool lower_section(const json& section, const std::string& mod, const std::string& mod_version, const std::string& source, const Schema& schema,
+                   std::vector<Batch>* out, std::vector<Refusal>* refused, std::string* err);
 
 // Today's numeric operation on a value (packs.cpp parse_value's order): the base for a relative op. Integer fields round.
 // false + *why: the result is not finite, or past what a whole-number field holds (checked before any rounding).

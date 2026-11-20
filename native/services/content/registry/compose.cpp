@@ -53,12 +53,27 @@ std::string value_key(const Value& v) {
         case Value::Bool: return v.b ? "b1" : "b0";
         case Value::Text: return "t" + v.t;
         case Value::List: return "l" + v.to_json().dump();
+        case Value::Struct: return "s" + v.to_json().dump();
         default: return "z";
     }
 }
 
-Value list_step(const ListOp op, const std::vector<Value>& values, const Value& v) {
+// A list op on a list value. Flags (f->type Flags) stay a set in the schema's order: append adds names not there yet.
+Value list_step(const ListOp op, const std::vector<Value>& values, const Value& v, const FieldSpec* f = nullptr) {
     std::vector<Value> l = v.kind == Value::List ? v.list : std::vector<Value>{};
+    if (f && f->type == FieldType::Flags) {
+        std::set<std::string> on;
+        if (op != ListOp::Clear && op != ListOp::Replace)
+            for (const Value& x : l) on.insert(x.t);
+        if (op == ListOp::Replace || op == ListOp::Append)
+            for (const Value& x : values) on.insert(x.t);
+        if (op == ListOp::Remove)
+            for (const Value& x : values) on.erase(x.t);
+        std::vector<Value> names;
+        for (const std::string& n : f->enum_values)
+            if (on.count(n)) names.push_back(Value::text(n));
+        return Value::of_list(std::move(names));
+    }
     if (op == ListOp::Clear) l.clear();
     else if (op == ListOp::Replace) l = values;
     else if (op == ListOp::Append) l.insert(l.end(), values.begin(), values.end());
@@ -70,11 +85,58 @@ Value list_step(const ListOp op, const std::vector<Value>& values, const Value& 
     return Value::of_list(std::move(l));
 }
 
+// An element edit on a list value ("inputs[2].count", "inputs[*].count", "perks[1]"): op on that leaf (or that whole element) of
+// the element(s), typed by el (the leaf's spec, or the element's). false + *why: refused (no such element, no number there,
+// a result out of range).
+bool element_step(const ElementRef& r, const Op& op, const FieldSpec& el, const Value& v, Value* next, std::string* why) {
+    if (v.kind != Value::List) return *why = r.list + " has no list here", false;
+    std::vector<Value> l = v.list;
+    auto one = [&](Value& x) {
+        Value* at = &x;
+        Value fresh;
+        size_t k = 0;
+        if (!r.leaf.empty()) {
+            if (x.kind != Value::Struct) return *why = r.list + ": its elements have no fields here", false;
+            while (k < x.keys.size() && x.keys[k] < r.leaf) ++k;
+            at = k < x.keys.size() && x.keys[k] == r.leaf ? &x.list[k] : &fresh;
+        }
+        if (op.relative() && !at->numeric()) return *why = el.name + " has no number to change here", false;
+        Value nv;
+        if (!op_result(op, *at, el, &nv, why)) return false;
+        if (nv.numeric() && ((el.min && nv.as_double() < *el.min) || (el.max && nv.as_double() > *el.max)))
+            return *why = el.name + ": the result " + nv.text_of() + " is outside the field's range", false;
+        if (at != &fresh) {
+            *at = std::move(nv);
+        } else {  // a leaf the element did not have: in its sorted place
+            x.keys.insert(x.keys.begin() + static_cast<std::ptrdiff_t>(k), r.leaf);
+            x.list.insert(x.list.begin() + static_cast<std::ptrdiff_t>(k), std::move(nv));
+        }
+        return true;
+    };
+    if (r.all) {
+        for (Value& x : l)
+            if (!one(x)) return false;
+    } else {
+        if (r.index >= l.size()) return *why = r.list + " has no element " + std::to_string(r.index) + " here (it has " + std::to_string(l.size()) + ")", false;
+        if (!one(l[r.index])) return false;
+    }
+    *next = Value::of_list(std::move(l));
+    return true;
+}
+
 }  // namespace
 
 Value evaluate(const std::vector<ChainRow>& rows, const Value& below, const FieldSpec& f) {
     Value v = below;
-    for (const ChainRow& r : rows) v = r.list == ListOp::None ? apply_op(r.op, v, f) : list_step(r.list, r.list_values, v);
+    for (const ChainRow& r : rows) {
+        if (r.element.on) {
+            Value nv;
+            std::string why;
+            if (r.element_spec && element_step(r.element, r.op, *r.element_spec, v, &nv, &why)) v = std::move(nv);
+            continue;
+        }
+        v = r.list == ListOp::None ? apply_op(r.op, v, f) : list_step(r.list, r.list_values, v, &f);
+    }
     return v;
 }
 
@@ -316,20 +378,25 @@ struct Target {
     std::vector<Value> list_values;
     std::string raw;         // the raw path as written (an Advanced-tier write), else empty
     std::string conv_field;  // a raw member behind a Kiln field Kiln converts: that field (one place, two scales)
+    const ElementRef* element = nullptr;  // an element edit of the list at ref ("inputs[2].count")
+    std::string path;                     // ...as the edit names it
+    std::optional<FieldSpec> element_spec;  // ...its leaf's spec (or the plain element's)
 };
 
-bool absolute(const Target& t) { return t.list == ListOp::None ? t.op.set : (t.list == ListOp::Clear || t.list == ListOp::Replace); }
-bool absolute(const ChainRow& r) { return r.list == ListOp::None ? r.op.set : (r.list == ListOp::Clear || r.list == ListOp::Replace); }
+bool absolute(const Target& t) { return t.element ? false : t.list == ListOp::None ? t.op.set : (t.list == ListOp::Clear || t.list == ListOp::Replace); }
+bool absolute(const ChainRow& r) { return r.element.on ? false : r.list == ListOp::None ? r.op.set : (r.list == ListOp::Clear || r.list == ListOp::Replace); }
 Certainty certainty_of(WriterKind k) { return k == WriterKind::ArchiveWriter ? Certainty::Named : Certainty::Certain; }
 
 // The place a target names, for messages: "items[game:x].maxStack", "items[game:x].damageSetup.dmgMod (raw)".
 std::string place_text(const Target& t) {
+    if (t.element) return t.ref.registry + "[" + t.ref.id + "]." + t.path;
     return t.raw.empty() || !is_raw_field(t.ref.field) ? t.ref.text() : t.ref.registry + "[" + t.ref.id + "]." + t.raw + " (raw)";
 }
 
 // The value an edit makes of cur. false: refused (*why).
 bool next_value(const Target& t, const Value& cur, Value* next, std::string* why) {
     const FieldSpec& f = *t.spec;
+    if (t.element) return element_step(*t.element, t.op, *t.element_spec, cur, next, why);
     if (t.list == ListOp::None) {
         if (t.op.relative() && !cur.numeric()) return *why = f.name + " has no number to change here", false;
         if (!op_result(t.op, cur, f, next, why)) return false;
@@ -337,7 +404,7 @@ bool next_value(const Target& t, const Value& cur, Value* next, std::string* why
             return *why = f.name + ": the result " + next->text_of() + " is outside the field's range", false;
         return true;
     }
-    *next = list_step(t.list, t.list_values, cur);
+    *next = list_step(t.list, t.list_values, cur, &f);
     if (f.max_items && next->list.size() > f.max_items)
         return *why = f.name + " would hold " + std::to_string(next->list.size()) + " values; it holds at most " + std::to_string(f.max_items), false;
     return true;
@@ -456,6 +523,7 @@ bool apply_targets(Ctx& c, State& s, const Who& w, const Edit& e, const std::vec
         r.op = t.op;
         r.list = t.list;
         r.list_values = t.list_values;
+        if (t.element) r.element = *t.element, r.element_spec = t.element_spec;
         r.exclusive = e.exclusive;
         r.after = st.next;
         fo.chain.push_back(std::move(r));
@@ -477,10 +545,21 @@ bool apply_targets(Ctx& c, State& s, const Who& w, const Edit& e, const std::vec
 // A Kiln field edit's writes over its entries.
 std::vector<Target> field_targets(const FieldSpec& f, const Edit& e, const std::vector<std::string>& ids) {
     std::vector<Target> ts;
+    std::optional<FieldSpec> el;  // an element edit: f is the list; the leaf's spec, or the plain element's
+    if (e.element.on) {
+        if (!e.element.leaf.empty()) {
+            if (const FieldSpec* leaf = f.element_field(e.element.leaf)) el = *leaf;
+        } else {
+            el = f;
+            el->type = f.element;
+        }
+        if (el) el->name = e.field;
+    }
     for (const std::string& id : ids) {
         Target t;
-        t.ref = {e.registry, id, e.field};
+        t.ref = {e.registry, id, e.element.on ? e.element.list : e.field};
         t.spec = &f;
+        if (e.element.on) t.element = &e.element, t.path = e.field, t.element_spec = el;
         t.op = e.op;
         t.list = e.list;
         t.list_values = e.list_values;
@@ -543,6 +622,20 @@ bool value_fits(const Value& v, const FieldSpec& f, std::string* why, bool eleme
             return *why = f.name + ": one of the schema's names is expected", false;
         case FieldType::Id:
             return (v.kind == Value::Text && v.t.find(':') != std::string::npos) || (*why = f.name + ": an id is expected", false);
+        case FieldType::Flags:
+            if (v.kind != Value::List) return *why = f.name + ": a list of names is expected", false;
+            for (const Value& x : v.list)
+                if (x.kind != Value::Text || std::find(f.enum_values.begin(), f.enum_values.end(), x.t) == f.enum_values.end())
+                    return *why = f.name + ": one of the schema's names is expected", false;
+            return true;
+        case FieldType::Struct:
+            if (v.kind != Value::Struct) return *why = f.name + ": an element with fields is expected", false;
+            for (size_t k = 0; k < v.keys.size(); ++k) {
+                const FieldSpec* leaf = f.element_field(v.keys[k]);
+                if (!leaf) return *why = f.name + ": an element has no field \"" + v.keys[k] + "\"", false;
+                if (!value_fits(v.list[k], *leaf, why)) return false;
+            }
+            return true;
         default:
             if (element || v.kind != Value::List) return *why = f.name + ": a list is expected", false;
             if (f.max_items && v.list.size() > f.max_items) return *why = f.name + ": at most " + std::to_string(f.max_items) + " values", false;
@@ -600,7 +693,9 @@ void run_edit(Ctx& c, State& s, const Who& w, const Edit& e, bool report, const 
         return;
     }
     if (w.stage == Stage::Add) return refuse(c, w, e, "stage add adds entries; field edits belong in alter or final");
-    if (e.entry != EntryOp::Remove && e.raw.empty() && !reg->field(e.field)) return refuse(c, w, e, e.registry + " has no field \"" + e.field + "\"");
+    if (e.entry != EntryOp::Remove && e.raw.empty() && !reg->field(e.element.on ? e.element.list : e.field)) return refuse(c, w, e, e.registry + " has no field \"" + e.field + "\"");
+    if (e.element.on && !reg->field(e.element.list)->element_field(e.element.leaf) && !e.element.leaf.empty())
+        return refuse(c, w, e, e.registry + "." + e.element.list + "'s elements have no field \"" + e.element.leaf + "\"");
     std::vector<std::string> ids;
     if (resolved) {  // a final edit: entries another mod's final removed since are dropped
         for (const std::string& id : *resolved) {
@@ -640,7 +735,7 @@ void run_edit(Ctx& c, State& s, const Who& w, const Edit& e, bool report, const 
                 ts.push_back(std::move(t));
             }
     } else {
-        ts = field_targets(*reg->field(e.field), e, ids);
+        ts = field_targets(*reg->field(e.element.on ? e.element.list : e.field), e, ids);
     }
     std::string why;
     if (!apply_targets(c, s, w, e, ts, report, &why)) refuse(c, w, e, why);
@@ -744,7 +839,7 @@ Result compose(const Schema& schema, const BaseModel& base, const std::vector<Ol
         r.op = w.op;
         r.list = w.list;
         r.list_values = w.list_values;
-        r.after = w.list == ListOp::None ? apply_op(w.op, from, *f) : list_step(w.list, w.list_values, from);
+        r.after = w.list == ListOp::None ? apply_op(w.op, from, *f) : list_step(w.list, w.list_values, from, f);
         fo.result = r.after;
         fo.winner = w.who;
         fo.chain.push_back(std::move(r));
@@ -780,7 +875,7 @@ Result compose(const Schema& schema, const BaseModel& base, const std::vector<Ol
             if (e.entry == EntryOp::Add) return refuse(c, w, e, "an entry is added in stage add");
             const RegistrySpec* reg = schema.registry(e.registry);
             if (!reg) return refuse(c, w, e, "no registry \"" + e.registry + "\"");
-            if (e.entry != EntryOp::Remove && e.raw.empty() && !reg->field(e.field)) return refuse(c, w, e, e.registry + " has no field \"" + e.field + "\"");
+            if (e.entry != EntryOp::Remove && e.raw.empty() && !reg->field(e.element.on ? e.element.list : e.field)) return refuse(c, w, e, e.registry + " has no field \"" + e.field + "\"");
             std::vector<std::string> ids;
             std::string why, dropped_by;
             if (!select(StateView(scratch), schema, scratch, e.registry, e.select, &ids, &why, &dropped_by)) return refuse(c, w, e, why);
