@@ -2737,7 +2737,16 @@
       "noGpuEnv": "이번 실행은 GPU 없이 그립니다: KILN_LAUNCHER_RENDER가 설정되어 이 스위치보다 우선합니다.",
       "gpuEnv": "이번 실행은 GPU로 그립니다: KILN_LAUNCHER_RENDER가 설정되어 이 스위치보다 우선합니다.",
       "noGpuArg": "이번 실행은 GPU 없이 그립니다: {flag}이(가) 지정되어 이 스위치보다 우선합니다.",
-      "gpuArg": "이번 실행은 GPU로 그립니다: {flag}이(가) 지정되어 이 스위치보다 우선합니다."
+      "gpuArg": "이번 실행은 GPU로 그립니다: {flag}이(가) 지정되어 이 스위치보다 우선합니다.",
+      "x11": "Wayland에서 그리기가 느릴 때 X11로 전환",
+      "x11Intro": "Wayland에서 WebKit이 GPU를 사용할 수 없으면 런처가 X11(XWayland)을 통해 한 번 더 시작합니다. 이렇게 하면 끊김이 사라지는 경우가 많습니다. 다음 시작부터 적용됩니다.",
+      "x11Wayland": "이번 시작은 Wayland에서 그립니다.",
+      "x11On": "이번 시작은 X11을 통해 그립니다.",
+      "x11Tried": "X11을 시도했지만 도움이 되지 않아 런처는 Wayland를 유지합니다. 다시 시도하려면 이 설정을 껐다가 다시 켜세요.",
+      "x11Software": "런처가 GPU 없이 그리는 동안에는 사용되지 않습니다.",
+      "x11Yours": "사용자의 GDK_BACKEND={value} 설정이 우선합니다.",
+      "x11NextOn": "런처가 스스로 X11로 전환할 수 있습니다",
+      "x11NextOff": "다음 시작은 Wayland를 유지합니다"
     },
     "dev": {
       "mock": "개발자: 모의 데이터 대체",

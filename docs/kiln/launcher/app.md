@@ -624,6 +624,22 @@ is a webview that never painted the page (a player on NVIDIA / X11 with 0.2.0-de
   "The messages"). So the steps are: DMA-BUF on, then the GPU without DMA-BUF, then software; one restart per step at
   most, never a loop (each restart's variable says its step, so a marker that could not be written does not repeat it;
   the restart's own marker is then written once the gate opens).
+- **X11 on Wayland** (0.2.0-dev.30; a player on KDE Wayland + NVIDIA: WebKit turned hardware acceleration off by itself,
+  "PROBLEM: WebKit turned hardware acceleration off by itself", and with `GDK_BACKEND=x11` the lag was gone): on a
+  Wayland session with XWayland (`WAYLAND_DISPLAY` and `DISPLAY` set), when the webview's policy reads Never in a start
+  that draws with the GPU and no variable explains it (`WEBKIT_DISABLE_COMPOSITING_MODE` / `WEBKIT_DISABLE_DMABUF_RENDERER`),
+  the launcher starts again once with `KILN_LAUNCHER_X11_RESTARTED=1`; that start sets `GDK_BACKEND=x11` itself (named in
+  `KILN_LAUNCHER_RENDER_SET`: programs of the host, the game and the tools never get it).
+  - WebKit composites through X11: `<data>/state/x11.json`, later starts go straight to X11;
+  - still Never through X11: `<data>/state/x11-no-help.json`, that start goes on (no worse than Wayland), later starts
+    stay on Wayland and never switch again;
+  - the page late through X11: `x11-no-help.json` and a restart on Wayland (`KILN_LAUNCHER_X11_RESTARTED=0`: X11 is not
+    tried again in that chain), whose own late page then takes the steps above (DMA-BUF, then software);
+  - precedence: the user's own `GDK_BACKEND` (any value, never changed), no Wayland session with XWayland, software mode,
+    the way back's `=0`, Settings off, the switch's `=1`, the no-help marker, the X11 marker, then GTK's default.
+    Settings > Appearance, "Switch to X11 when drawing is slow on Wayland" (`app_render_x11_set`, on by default): off
+    writes `state/x11-auto-off.json` and removes `x11.json`; on removes it and `x11-no-help.json` (try again). Markers
+    are written once the beta copy's gate opens. `launcher.log` has one `render: X11 ...` line per decision.
 - **Choosing the mode** (the DMA-BUF renderer has its own order, above): `--software-render` / `--gpu-render` (the last one given wins), then
   `KILN_LAUNCHER_RENDER=software|gpu`, then the marker, then the GPU. Settings > Appearance, "Draw the launcher without
   the GPU", sets or clears the marker (`app_render_set`) for the next start. A start with an nxm link takes no other

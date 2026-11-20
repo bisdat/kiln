@@ -926,6 +926,10 @@ const FELL_BACK = "The launcher turned this on by itself: the page did not start
 let render: RenderInfo = RENDER_Q === "software" ? { mode: "software", why: "restart", marker: true, markerWhy: FELL_BACK }
   : RENDER_Q === "marker" ? { mode: "software", why: "marker", marker: true, markerWhy: FELL_BACK }
   : { mode: "gpu", why: "default", marker: false };
+// `?x11=default|restart|marker|tried|yours|off`: a Wayland session with XWayland (render.rs' X11 switch); absent: none
+const X11_Q = typeof location !== "undefined" ? new URLSearchParams(location.search).get("x11") : null;
+if (X11_Q) render = { ...render, x11: { on: X11_Q === "restart" || X11_Q === "marker", why: X11_Q as NonNullable<RenderInfo["x11"]>["why"], auto: X11_Q !== "off",
+  ...(X11_Q === "yours" ? { yours: "wayland" } : {}) } };
 // WebKit's sandbox (sandbox.rs): a default start does not use it; `?sandbox=off` as after a message's "off" on a
 // system where bwrap cannot start
 const SANDBOX_UNUSED = "WebKitGTK's GTK 3 API, which the launcher uses, runs it only when WEBKIT_FORCE_SANDBOX=1 is set";
@@ -977,6 +981,10 @@ const handlers: Record<string, Handler> = {
   app_render_report: () => null,
   app_render_set: (a) => {
     render = { ...render, marker: !!a.software, markerWhy: a.software ? `Turned on in Settings (${new Date().toISOString()})` : undefined };
+    return { ...render };
+  },
+  app_render_x11_set: (a) => {
+    if (render.x11) render = { ...render, x11: { ...render.x11, auto: !!a.on } };
     return { ...render };
   },
   app_sandbox_set: (a) => {

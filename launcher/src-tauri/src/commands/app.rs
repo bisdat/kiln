@@ -403,6 +403,13 @@ pub async fn app_render_set(software: bool) -> Result<crate::render::RenderInfo,
     crate::state::blocking(move || crate::render::set_next(software)).await
 }
 
+/// Settings, "Switch to X11 when drawing is slow on Wayland": on lets the launcher switch by itself (and try X11 again),
+/// off keeps the next start on Wayland. Linux only (else `unsupported`).
+#[tauri::command]
+pub async fn app_render_x11_set(on: bool) -> Result<crate::render::RenderInfo, Error> {
+    crate::state::blocking(move || crate::render::set_x11_auto(on)).await
+}
+
 /// Settings, "WebKit's sandbox": on removes the marker, off writes it; applies at the next start. Linux only (else
 /// `unsupported`).
 #[tauri::command]

@@ -2905,7 +2905,16 @@
       "noGpuEnv": "To uruchomienie rysuje bez GPU: ustawiono KILN_LAUNCHER_RENDER, co ma pierwszeństwo przed tym przełącznikiem.",
       "gpuEnv": "To uruchomienie rysuje z GPU: ustawiono KILN_LAUNCHER_RENDER, co ma pierwszeństwo przed tym przełącznikiem.",
       "noGpuArg": "To uruchomienie rysuje bez GPU: podano {flag}, co ma pierwszeństwo przed tym przełącznikiem.",
-      "gpuArg": "To uruchomienie rysuje z GPU: podano {flag}, co ma pierwszeństwo przed tym przełącznikiem."
+      "gpuArg": "To uruchomienie rysuje z GPU: podano {flag}, co ma pierwszeństwo przed tym przełącznikiem.",
+      "x11": "Przełącz na X11, gdy rysowanie w Wayland jest wolne",
+      "x11Intro": "Gdy w Wayland WebKit nie może użyć GPU, launcher uruchamia się jeszcze raz przez X11 (XWayland), co często usuwa przycięcia. Działa od następnego uruchomienia.",
+      "x11Wayland": "To uruchomienie rysuje w Wayland.",
+      "x11On": "To uruchomienie rysuje przez X11.",
+      "x11Tried": "X11 został wypróbowany i nie pomógł, więc launcher zostaje przy Wayland. Wyłącz i włącz tę opcję, aby spróbować ponownie.",
+      "x11Software": "Nieużywane, gdy launcher rysuje bez GPU.",
+      "x11Yours": "Decyduje twoja zmienna GDK_BACKEND={value}.",
+      "x11NextOn": "Launcher może sam przełączyć się na X11",
+      "x11NextOff": "Następne uruchomienie zostaje przy Wayland"
     },
     "dev": {
       "mock": "Deweloper: zastępcze dane testowe",
