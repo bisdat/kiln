@@ -59,9 +59,10 @@ Environment variables, for testers; they win over the setting:
 
 ## Tab completion
 Tab in the same two chat fields completes Kiln commands: `/he` and Tab gives `/help`. First built by bisdat (GitHub
-issue 44, pull request 73). Off by default, and separate from the history: launcher **Settings**, Kiln's settings, **In
-the game**, "Chat completion", or `{ "ui": { "chatCompletion": true } }` in `kiln/kiln.json`; restart the game after a
-change (`KILN_CHAT_COMPLETION=1` / `=0` wins over the setting, for testers).
+issue 44, pull request 73). On by default since 0.2.0-dev.29.22, and separate from the history. To switch it off:
+launcher **Settings**, Kiln's settings, **In the game**, "Chat completion", or `{ "ui": { "chatCompletion": false } }` in
+`kiln/kiln.json`; restart the game after a change (`KILN_CHAT_COMPLETION=1` / `=0` wins over the setting, for
+testers). Off, Tab and the chat field are the game's own again.
 - Start a line with `/`: a list of matches shows above the chat field (command names, subcommands, choices, player
   names, the same as the server's own `/help` knows).
 - **Tab** puts the first match in. With one match that's it; with several, the list stays and Tab again puts the next

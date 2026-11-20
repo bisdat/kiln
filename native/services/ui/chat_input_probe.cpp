@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Chat history (GitHub issue 44, first built by bisdat): Up/Down in the game's HUD and Social chat field recall lines
 // the player sent; commands are kept in kiln/data/kiln.ui/chat-history.json. Off unless kiln.json "ui":
-// {"chatHistory": true}; diagnostics through the environment (chat_input_probe_install). Game side:
+// {"chatHistory": true}; Tab completion (pull request 73) is on unless {"chatCompletion": false}; diagnostics through the environment (chat_input_probe_install). Game side:
 // docs/re/chat-input.md; player side: docs/kiln/chat-history.md. Every game call and read is scoped to the two chat
 // call sites of TextInputProcess, on the game's UI thread; the window thread only queues keys (ChatInputSink).
 #include <windows.h>
@@ -14,6 +14,7 @@
 #include <mutex>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -22,6 +23,7 @@
 #include "chat_completion_text.h"
 #include "chat_focus.h"
 #include "chat_keys.h"
+#include "chat_setting.h"
 #include "chat_store.h"
 #include "kiln_hook.hpp"
 #include "ui.h"
@@ -346,25 +348,22 @@ int env_switch(const char* name) {
 }
 bool env_enabled(const char* name) { return env_switch(name) == 1; }
 
-// The player's switch: kiln.json "ui": {"chatHistory": true} (the launcher's Settings, "Kiln"), read once at start.
-// Off when the file, the section or the key is missing or unreadable.
-bool kiln_json_chat_option(const char* key) {
+// The player's switches: kiln.json "ui": {"chatHistory": true} or {"chatCompletion": false} (the launcher's Settings,
+// "Kiln"), read once at start. The setting's default (`fallback`) when the file, the section or the key is missing or
+// unreadable (chat_setting.h).
+bool kiln_json_chat_option(const char* key, bool fallback) {
     char buffer[4096]{};
     size_t length = 0;
     if (g_api->path(KILN_PATH_KILN, buffer, sizeof buffer, &length) != KILN_OK || !length || length >= sizeof buffer)
-        return false;
+        return fallback;
     try {
         const std::u8string utf8(reinterpret_cast<const char8_t*>(buffer), length);
         std::ifstream in(std::filesystem::path(utf8) / "kiln.json", std::ios::binary);
-        if (!in) return false;
-        const auto doc = nlohmann::json::parse(in, nullptr, false, true);  // JSONC, as the core reads it
-        if (!doc.is_object()) return false;
-        const auto ui = doc.find("ui");
-        if (ui == doc.end() || !ui->is_object()) return false;
-        const auto on = ui->find(key);
-        return on != ui->end() && on->is_boolean() && on->get<bool>();
+        if (!in) return fallback;
+        const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        return chat_setting(text, key, fallback);
     } catch (...) {
-        return false;
+        return fallback;
     }
 }
 // <game>/kiln/data/kiln.ui/chat-history.json, beside imgui.ini (ui.cpp): kiln.ui's own data, per game folder.
@@ -835,22 +834,25 @@ void chat_input_exit() {
     if (chat_store::Saver* saver = g_saver.load(std::memory_order_acquire)) saver->stop();
 }
 
-// Chat history is off unless the player switches it on (kiln.json ui.chatHistory). The environment is for
+// Chat history is off unless the player switches it on (kiln.json ui.chatHistory); Tab completion is on unless the
+// player switches it off (ui.chatCompletion: false, since 0.2.0-dev.29.22). The environment is for
 // diagnostics: KILN_CHAT_HISTORY=1/0 overrides the switch, KILN_CHAT_HISTORY_TRACE=1 adds counts to kiln.log (never
 // text), KILN_CHAT_HISTORY_DIAG=1 watches keys and submits without taking a key, KILN_CHAT_INPUT_PROBE=1 only confirms
 // the two call sites. Nothing is hooked while all of them are off.
 bool chat_input_probe_install() {
     const bool diag = env_enabled("KILN_CHAT_HISTORY_DIAG");
     const int forced = env_switch("KILN_CHAT_HISTORY");
-    const bool switched = forced < 0 && kiln_json_chat_option("chatHistory");
+    const bool switched = forced < 0 && kiln_json_chat_option("chatHistory", false);
     const int comp_forced = env_switch("KILN_CHAT_COMPLETION");
-    const bool comp_switched = comp_forced < 0 && kiln_json_chat_option("chatCompletion");
+    const bool comp_switched = comp_forced < 0 && kiln_json_chat_option("chatCompletion", true);
     bool completion = (comp_forced == 1 || comp_switched) && !diag;
     const char* why = forced >= 0 ? "KILN_CHAT_HISTORY" : "kiln.json ui.chatHistory";
     const bool history = (forced == 1 || switched) && !diag;  // diagnostics take precedence: never swallow keys
     const bool probe = env_enabled("KILN_CHAT_INPUT_PROBE");
     if (!history && !completion && !diag && !probe) {
-        logf(KILN_LOG_INFO, "ui: chat history off (%s)", forced == 0 ? "KILN_CHAT_HISTORY=0" : "kiln.json ui.chatHistory");
+        logf(KILN_LOG_INFO, "ui: chat history and completion off (%s, %s)",
+             forced == 0 ? "KILN_CHAT_HISTORY=0" : "kiln.json ui.chatHistory",
+             comp_forced == 0 ? "KILN_CHAT_COMPLETION=0" : "kiln.json ui.chatCompletion");
         return false;
     }
     if (!g_api->feature(KilnStr{"chat.ui.input", sizeof("chat.ui.input") - 1})) {

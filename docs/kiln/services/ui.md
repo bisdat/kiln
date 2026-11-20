@@ -207,8 +207,9 @@ check `header.size` through the member and that its pointer is non-null). Player
 One slot after `graphics_status`: `chat_completion` at byte offset 1032 (the table is 1040 bytes). It is Kiln.Ui's
 transport for Tab completion in the game's chat ([chat-history.md](../chat-history.md#tab-completion)), **not** an API:
 a call from a native plugin is refused (`KILN_ERR_UNAVAILABLE`), and `KilnUiChatCompletion`'s layout (576 bytes) may
-change with Kiln.Ui. It answers only while `ui.chatCompletion` is on and the sigdb feature `chat.ui.completion`
-resolved. The game's UI thread owns every game read and the replace; the render thread only gets copies:
+change with Kiln.Ui. It answers only while `ui.chatCompletion` is on (the default; `false` turns it off) and the sigdb
+feature `chat.ui.completion` resolved. The game's UI thread owns every game read and the replace; the render thread
+only gets copies:
 - operation 1: a snapshot of the focused HUD or Social chat field (the line, the cursor, the field and a revision that
   changes with every edit, its rectangle in screen pixels) and one queued key action (3 Tab, 4 Shift+Tab, 5 Up, 6 Down,
   7 Escape);

@@ -1,6 +1,7 @@
 #include <initializer_list>
 #include "../overlay_mode.h"
 #include "../overlay_setting.h"
+#include "../chat_setting.h"
 #include <cassert>
 #include <cstdio>
 using namespace kui;
@@ -33,5 +34,23 @@ int main() {
     assert(choose_overlay_mode(false, false, false, -1, overlay_setting(R"({"ui": {"overlay": "off"}})")) == OverlayMode::drawing_off);
     assert(choose_overlay_mode(false, false, false, 1, 0) == OverlayMode::on);
     assert(choose_overlay_mode(false, false, false, -1, overlay_setting(R"({"ui": {"overlay": "auto"}})")) == OverlayMode::on);
-    std::printf("overlay_mode: %u combinations passed, %u kiln.json settings\n", count, settings);
+    // kiln.json "ui": {"chatHistory": ..., "chatCompletion": ...} (chat_setting.h): history off and completion on by
+    // default (0.2.0-dev.29.22), each only switched by its own boolean
+    unsigned chats = 0;
+    auto chat = [&](const char* text, bool history, bool completion) {
+        ++chats;
+        assert(chat_setting(text, "chatHistory", false) == history);
+        assert(chat_setting(text, "chatCompletion", true) == completion);
+    };
+    chat("", false, true);  // no kiln.json
+    chat("{}", false, true);
+    chat(R"({"ui": {"look": "game"}})", false, true);
+    chat(R"({"ui": {"chatHistory": true}})", true, true);
+    chat(R"({"ui": {"chatCompletion": false}})", false, false);
+    chat("// the player's kiln.json\n{\"ui\": {/* off */ \"chatCompletion\": false, \"chatHistory\": true}}", true, false);
+    chat(R"({"ui": {"chatCompletion": true, "chatHistory": false}})", false, true);
+    chat(R"({"ui": {"chatCompletion": "off", "chatHistory": 1}})", false, true);  // not booleans: the defaults
+    chat(R"({"chatCompletion": false})", false, true);  // top level: not the ui section
+    chat(R"({"ui": {"chatCompletion": false})", false, true);  // broken file: the defaults
+    std::printf("overlay_mode: %u combinations passed, %u kiln.json settings, %u chat settings\n", count, settings, chats);
 }
