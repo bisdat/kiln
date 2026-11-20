@@ -198,8 +198,11 @@ typedef struct KilnReplApi {
      * KILN_REPL_KIND_DESTROYED for a destroy list that names it, and KILN_REPL_KIND_ENDED as its last event. Events
      * come on the tick thread in the next Pre. While a watch exists the watch hooks are installed (EntityWriter,
      * DeltaWriter, SendCallback); a watch copies only its own entity's components. At most 64 watches. Tick thread.
-     * KILN_ERR_INVALID_ARGUMENT: entity 0, no fn, a bad direction, a peer that is not connected, or 64 watches;
-     * KILN_ERR_UNAVAILABLE: repl.observe is off, or KILN_REPL_RECEIVE (the client side is not built). */
+     * KILN_REPL_RECEIVE (a game client, since 0.2.0-dev.31; KILN_REPL_CAP_CLIENT): what this client receives of `e`, from
+     * the game's own decode of the client channel; `peer_or_all` is ignored; events on the game's main thread at the
+     * client world's next Pre; at most 16; call it on the main thread (KILN_ERR_WRONG_THREAD otherwise).
+     * KILN_ERR_INVALID_ARGUMENT: entity 0, no fn, a bad direction, a peer that is not connected, or no free watch;
+     * KILN_ERR_UNAVAILABLE: repl.observe (send) or repl.client (receive) is off, or its hooks could not be installed. */
     KilnResult(KILN_CALL* watch)(KilnOwner owner, KilnEntity e, uint32_t peer_or_all, uint32_t direction,
                                  KilnReplWatchFn fn, void* user, KilnHandle* out);
     /* Any handle this service returned; any thread. A removed watch's events stop at the next Pre (none after it).
@@ -208,6 +211,11 @@ typedef struct KilnReplApi {
     /* The registry's facts about a component, from the live world (cached at its first Pre). Any thread.
      * KILN_ERR_NOT_FOUND: no component of that hash; KILN_ERR_UNAVAILABLE: no world seen yet. */
     KilnResult(KILN_CALL* component_info)(uint32_t hash, KilnReplComponentInfo* out);
+    /* Since 0.2.0-dev.31: writes everything `peer` is sent for `seconds` (1..600) as JSON lines (tools/replinspect/README.md)
+     * into `path` (UTF-8; relative or empty: kiln/logs, empty names it repl-<peer>-<utc>.jsonl); ends early when `owner`
+     * goes, the peer leaves or the world stops. One capture at a time. Tick thread.
+     * KILN_ERR_INVALID_ARGUMENT: owner 0, a bad peer or length, a peer that is not connected, a file that cannot be made,
+     * or a capture runs already; KILN_ERR_UNAVAILABLE: repl.observe is off, no world yet, or the hooks could not go in. */
     KilnResult(KILN_CALL* capture)(KilnOwner owner, uint32_t peer, uint32_t seconds, KilnStr path);
 
     /* ---- lab: the loopback harness; since 0.2.0-dev.28; check header.size ---- */

@@ -36,7 +36,6 @@ namespace {
 
 constexpr uint32_t kMaxWatches = 64;
 constexpr uintptr_t kRecordTemplate = 0x28;  // entity record: TemplateInfo* (its +0 is the template GUID, docs/re/spawn.md)
-constexpr uintptr_t kCtxMsgs = 0x10, kCtxMsgCount = 0x18;  // a context's message list {MsgEntry* ptr; u64 count}
 
 // ---- the watches (tick thread; remove() and an owner's revoke only set `removed`) ----
 struct Watch {
@@ -86,9 +85,8 @@ using DeltaFn = uint64_t (*)(void* bits, uintptr_t registry, const uint8_t* snap
 struct Tls {
     int32_t machine = -1;
     uint8_t pred = 0;
-    uint32_t entity = 0;
-    uintptr_t ctx = 0;
-    uint64_t msgs_before = 0;
+    uint8_t entry_kind = 0;  // the queue reader's ask: 0 create, 1 and 2 update
+    uint32_t entity = 0, tick = 0, seq = 0;
     WSlot* open = nullptr;   // the slot whose ring this writer call may hold a reservation in
     uint8_t* rec = nullptr;  // that reservation
     uint32_t rec_len = 0;
@@ -96,7 +94,7 @@ struct Tls {
 thread_local Tls t_w;
 
 // Ring records.
-enum : uint16_t { kRecWatch = 1, kRecDestroy = 2, kRecRaw = 3 };
+enum : uint16_t { kRecWatch = 1, kRecDestroy = 2, kRecRaw = 3, kRecMeta = 4 };
 struct WatchRec {
     uint32_t entity, tick, seq, baseline_tick, payload_bytes;
     uint8_t kind, pad[3];
@@ -116,7 +114,13 @@ struct RawRec {  // then `size` bytes: a whole message as the session took it (c
     uint32_t seq, size;
     uint8_t type, pad[3];
 };
-static_assert(sizeof(WatchRec) == 48 && sizeof(RecComp) == 16 && sizeof(RawRec) == 12);
+// The send callback's word on an entity message of a watched entity: the session took it, with this header. A snapshot
+// record (kRecWatch, written in the writer call, where the message's bytes are not final yet) is delivered only with
+// its meta: a message the session refused was not sent.
+struct MetaRec {
+    uint32_t seq, entity, kind, tick, base, payload_bytes;
+};
+static_assert(sizeof(WatchRec) == 48 && sizeof(RecComp) == 16 && sizeof(RawRec) == 12 && sizeof(MetaRec) == 24);
 
 bool watched_list(uint32_t entity, uint32_t machine) {
     const uint32_t n = g_hot.n.load(std::memory_order_acquire);
@@ -228,15 +232,35 @@ struct CaptureState {
     std::string path;
 };
 CaptureState g_cap;
-// The snapshot records of the (machine, channel) being drained, by seq, for its messages' lines.
-struct Stash {
-    uint32_t seq;
-    const uint8_t* rec;
+// The records of the (machine, channel) being drained: delivered once its whole frame is read, so a snapshot record meets
+// the callback's meta (and a capture line its snapshot) by seq. They stay valid until the next send step.
+struct Item {
+    uint16_t type;
+    uint8_t gap;
+    const uint8_t* p;
     uint32_t len;
 };
-constexpr uint32_t kStash = 4096;
-Stash g_stash[kStash];
-uint32_t g_stash_n = 0;
+constexpr uint32_t kItems = 4096;  // a ring holds at most 2048 records
+Item g_items[kItems];
+uint32_t g_item_n = 0;
+
+bool find_meta(uint32_t seq, MetaRec* out) {
+    for (uint32_t i = 0; i < g_item_n; ++i) {
+        if (g_items[i].type != kRecMeta || g_items[i].len < sizeof(MetaRec)) continue;
+        std::memcpy(out, g_items[i].p, sizeof *out);
+        if (out->seq == seq) return true;
+    }
+    return false;
+}
+const Item* find_snapshot(uint32_t seq) {
+    for (uint32_t i = 0; i < g_item_n; ++i) {
+        if (g_items[i].type != kRecWatch || g_items[i].len < sizeof(WatchRec)) continue;
+        uint32_t s;
+        std::memcpy(&s, g_items[i].p + offsetof(WatchRec, seq), 4);
+        if (s == seq) return &g_items[i];
+    }
+    return nullptr;
+}
 
 uint64_t utc_ms() {
     FILETIME ft;
@@ -320,12 +344,10 @@ void capture_line(uint32_t m, uint32_t ch, const RecordHeader& rh, const uint8_t
             entity = h.entity;
             tick = h.tick;
             base = h.kind == kKindUpdate ? h.base : 0;
-            for (uint32_t i = 0; i < g_stash_n; ++i)
-                if (g_stash[i].seq == r.seq) {
-                    snap = g_stash[i].rec;
-                    snap_len = g_stash[i].len;
-                    break;
-                }
+            if (const Item* it = find_snapshot(r.seq)) {
+                snap = it->p;
+                snap_len = it->len;
+            }
         } else {
             line += "\"entity\"";
         }
@@ -382,6 +404,7 @@ void deliver_record(uint32_t m, uint32_t ch, const RecordHeader& rh, const uint8
         capture_line(m, ch, rh, p);
         return;
     }
+    if (rh.type == kRecMeta) return;  // read with its snapshot record
     if (rh.type == kRecDestroy && rh.len >= sizeof(DestroyRec)) {
         DestroyRec d;
         std::memcpy(&d, p, sizeof d);
@@ -407,7 +430,12 @@ void deliver_record(uint32_t m, uint32_t ch, const RecordHeader& rh, const uint8
     WatchRec h;
     std::memcpy(&h, p, sizeof h);
     if (sizeof(WatchRec) + uint64_t{h.count} * sizeof(RecComp) + h.data_bytes > rh.len || h.count > kMaxComponents) return;
-    if (g_cap.f && ((g_cap.machines >> m) & 1) && g_stash_n < kStash) g_stash[g_stash_n++] = Stash{h.seq, p, rh.len};
+    MetaRec meta{};
+    if (!find_meta(h.seq, &meta) || meta.entity != h.entity) return;  // the session refused it, or it is not this message
+    h.kind = static_cast<uint8_t>(meta.kind);
+    h.tick = meta.tick;
+    h.baseline_tick = meta.base;
+    h.payload_bytes = meta.payload_bytes;
     bool any = false;
     for (Watch& w : g_w)
         any = any || (w.handle.load(std::memory_order_relaxed) && !w.ended && w.entity == h.entity && ((w.machines >> m) & 1));
@@ -482,10 +510,12 @@ void watch_writer_before(const uint8_t* args, uintptr_t ctx, int32_t machine, ui
     const uintptr_t entry = *reinterpret_cast<const uintptr_t*>(args + kWriterEntry);
     const uint32_t entity = *reinterpret_cast<const uint32_t*>(entry);
     if (!watched(entity, static_cast<uint32_t>(machine))) return;
+    (void)ctx;
     t_w.entity = entity;
+    t_w.entry_kind = *reinterpret_cast<const uint8_t*>(entry + 4);
+    t_w.tick = *reinterpret_cast<const uint32_t*>(args + kWriterTick);
+    t_w.seq = *reinterpret_cast<const uint32_t*>(args + kWriterSeq);
     t_w.pred = pred;
-    t_w.ctx = ctx;
-    t_w.msgs_before = *reinterpret_cast<const uint64_t*>(ctx + kCtxMsgCount);
     t_w.machine = machine;
 }
 
@@ -497,24 +527,18 @@ void watch_writer_after(const WriterOut* out, uint64_t result) {
     t_w.rec = nullptr;
     t_w.open = nullptr;
     if (!rec) return;
-    const uint64_t count = *reinterpret_cast<const uint64_t*>(t_w.ctx + kCtxMsgCount);
-    const auto* msgs = *reinterpret_cast<const MsgEntry* const*>(t_w.ctx + kCtxMsgs);
-    Header hd{};
-    if (!result || !out || out->skipped || count != t_w.msgs_before + 1 || !msgs || msgs[count - 1].type != kMsgEntity ||
-        !parse_header(msgs[count - 1].data, msgs[count - 1].size, &hd) || hd.entity != t_w.entity) {
+    // §2.6: true and not skipped = a message was appended for this entity (its bytes are final only at the callback)
+    if (!(result & 0xff) || !out || out->skipped) {
         ws.ring.abort();  // no message went out (unchanged, too big, gone): nothing to show
         return;
     }
     WatchRec h;
     std::memcpy(&h, rec, sizeof h);
-    h.kind = static_cast<uint8_t>(hd.kind);
-    h.tick = hd.tick;
-    h.seq = hd.seq;
-    h.baseline_tick = hd.kind == kKindUpdate ? hd.base : 0;
-    h.payload_bytes = hd.payload_len;
+    h.kind = static_cast<uint8_t>(t_w.entry_kind == 0 ? kKindCreate : kKindUpdate);  // the callback's meta has the header's
+    h.tick = t_w.tick;
+    h.seq = t_w.seq;
     const uintptr_t ti = out->record ? *reinterpret_cast<const uintptr_t*>(out->record + kRecordTemplate) : 0;
     if (ti) std::memcpy(h.guid, reinterpret_cast<const void*>(ti), 16);
-    else if (hd.has_guid) std::memcpy(h.guid, hd.guid, 16);
     std::memcpy(rec, &h, sizeof h);
     ws.ring.commit(t_w.rec_len);
     ws.records.fetch_add(1, std::memory_order_relaxed);
@@ -547,6 +571,13 @@ void watch_callback(const Batch* b) {
                 ws.records.fetch_add(1, std::memory_order_relaxed);
             }
         }
+        if (m.type == kMsgEntity) {  // the header of a watched entity's message, for its snapshot record
+            Header hd{};
+            if (!parse_header(m.data, m.size, &hd) || !watched(hd.entity, b->machine)) continue;
+            const MetaRec meta{hd.seq, hd.entity, hd.kind, hd.tick, hd.kind == kKindUpdate ? hd.base : 0, hd.payload_len};
+            ws.ring.push(kRecMeta, &meta, sizeof meta);
+            continue;
+        }
         DestroyList l;
         if (m.type != kMsgList || !parse_destroy(m.data, m.size, &l)) continue;
         for (uint32_t k = 0; k < l.na; ++k) {  // list A: destroyed (list B: left this peer's relevance)
@@ -566,10 +597,16 @@ void watch_deliver() {
     if (g_rings)
         for (uint32_t m = 0; m < KILN_REPL_MACHINES; ++m)
             for (uint32_t ch = 0; ch < 2; ++ch) {
-                g_stash_n = 0;
-                g_ws[m][ch].ring.drain([&](const RecordHeader& rh, const uint8_t* p) { deliver_record(m, ch, rh, p); });
+                g_item_n = 0;
+                g_ws[m][ch].ring.drain([&](const RecordHeader& rh, const uint8_t* p) {
+                    if (g_item_n < kItems) g_items[g_item_n++] = Item{rh.type, rh.gap, p, rh.len};
+                });
+                for (uint32_t i = 0; i < g_item_n; ++i) {
+                    const RecordHeader rh{g_items[i].len, g_items[i].type, g_items[i].gap, 0};
+                    deliver_record(m, ch, rh, g_items[i].p);
+                }
             }
-    g_stash_n = 0;
+    g_item_n = 0;
     for (Watch& w : g_w)
         if (w.destroyed) {
             w.destroyed = false;

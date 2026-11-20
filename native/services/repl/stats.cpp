@@ -149,7 +149,7 @@ void wr_after(void* p) {
     auto* c = static_cast<WrCall*>(p);
     if (c->machine < 0) return;
     Slot& s = g_slot[c->machine][c->pred & 1];
-    if (g_counting.load(std::memory_order_relaxed) && c->result && c->out && c->out->skipped) {
+    if (g_counting.load(std::memory_order_relaxed) && (c->result & 0xff) && c->out && c->out->skipped) {  // bool in AL
         // §2.6: nothing changed moves the context's unchanged counter; a message over the channel's maximum does not
         if (*reinterpret_cast<const uint64_t*>(c->ctx + kCtxUnchanged) != c->unchanged_before) add(s.unchanged);
         else add(s.too_big);

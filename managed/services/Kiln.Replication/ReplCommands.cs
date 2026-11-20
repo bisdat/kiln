@@ -120,9 +120,18 @@ internal static class ReplCommands
         {
             throw new CommandException($"peer {peerText} is not connected");
         }
+        catch (Exception e) when (e is InvalidOperationException or KilnUnavailableException)
+        {
+            throw new CommandException(e.Message);
+        }
         w.Sent += e => Log(SentLine(e));
         w.Ended += e => Log($"repl watch: entity {e.Entity.Value} ended ({e.Reason})");
-        var timer = new Timer(_ => w.Dispose(), null, TimeSpan.FromSeconds(DefaultWatchSeconds), Timeout.InfiniteTimeSpan);
+        Timer? timer = null;
+        timer = new Timer(_ =>
+        {
+            w.Dispose();
+            timer?.Dispose();
+        }, null, TimeSpan.FromSeconds(DefaultWatchSeconds), Timeout.InfiniteTimeSpan);
         lock (Gate)
         {
             CommandWatches.RemoveAll(x => !x.Watch.IsActive);

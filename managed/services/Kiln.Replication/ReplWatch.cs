@@ -16,9 +16,10 @@ public sealed unsafe class ReplWatch : IDisposable
 {
     private static readonly ConcurrentDictionary<long, ReplWatch> Live = new();
     private static long _next;
-    private const int MaxWatches = 64;
+    private const int MaxWatches = 64, MaxReceiveWatches = 16;  // kiln.repl's own limits (send, receive)
 
     private readonly long _id;
+    private bool _receive;
     private readonly ModContext? _mod;
     private ulong _handle;
     private int _disposed;
@@ -40,8 +41,14 @@ public sealed unsafe class ReplWatch : IDisposable
     /// <summary>The watch still delivers events: not disposed, not ended.</summary>
     public bool IsActive => Volatile.Read(ref _disposed) == 0 && !HasEnded;
 
+    private volatile bool _ended;
+
     /// <summary>The watch has ended (its <see cref="Ended"/> event came).</summary>
-    public bool HasEnded { get; private set; }
+    public bool HasEnded
+    {
+        get => _ended;
+        private set => _ended = value;
+    }
 
     /// <summary>A message a peer was sent about the entity (a server's watch).</summary>
     public event Action<ReplSent>? Sent;
@@ -70,9 +77,12 @@ public sealed unsafe class ReplWatch : IDisposable
 
     internal static ReplWatch Start(ulong owner, ModContext? mod, EntityId entity, uint peerOrAll, NetPeer? peer, uint direction)
     {
-        if (Live.Count >= MaxWatches) throw new InvalidOperationException($"{MaxWatches} replication watches are on already");
+        var receive = direction == ReplNative.Receive;
+        var limit = receive ? MaxReceiveWatches : MaxWatches;
+        if (Live.Values.Count(x => x._receive == receive) >= limit)
+            throw new InvalidOperationException($"{limit} replication {(receive ? "receive " : "")}watches are on already");
         var id = Interlocked.Increment(ref _next);
-        var w = new ReplWatch(id, mod, entity, peer);
+        var w = new ReplWatch(id, mod, entity, peer) { _receive = receive };
         Live[id] = w;
         var rc = ReplNative.Watch(owner, entity.Value, peerOrAll, direction, &OnEvent, (nint)id, out var handle);
         if (rc != ReplNative.Ok)
@@ -81,7 +91,7 @@ public sealed unsafe class ReplWatch : IDisposable
             throw rc switch
             {
                 ReplNative.InvalidArgument when peer is not null => new ArgumentException($"peer {peer.Name} is not connected", nameof(peer)),
-                ReplNative.InvalidArgument => new InvalidOperationException($"kiln.repl has no room for another watch ({MaxWatches})"),
+                ReplNative.InvalidArgument => new InvalidOperationException($"kiln.repl has no room for another watch ({limit})"),
                 ReplNative.WrongThread => new InvalidOperationException(direction == ReplNative.Receive
                     ? "Replication.WatchReceived must be called on the game's main thread (a client mod's tick)"
                     : "Replication.Watch must be called on the tick thread"),

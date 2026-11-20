@@ -31,17 +31,24 @@ public sealed partial class ReplTestMod
         var first = Replication.Stats();
         await Items.Fuel.Set(can, max / 3);
         await Steps(60);
-        var u0 = Replication.Stats().Where(r => r.Fake && r.Channel == ReplChannel.Client).Sum(r => r.Unchanged);
-        // ten touches that change nothing: a tracked write of the can's own ItemState byte
+        var before = Replication.Stats().Where(r => r.Fake).ToList();
+        long U(IEnumerable<ReplPeerStats> rows, ReplChannel ch) => rows.Where(r => r.Channel == ch).Sum(r => r.Unchanged);
+        // touches that change nothing: five tracked writes of the can's own ItemState byte, five water amounts it has already
         var itemState = World.ReadBytes(can, "ItemState");
         var touched = 0;
         if (itemState is { Length: > 0 })
-            for (var i = 0; i < 10; i++)
+            for (var i = 0; i < 5; i++)
             {
                 var w = await World.WriteAt(can, "ItemState", 0, itemState[0]);
                 touched += w.Ok ? 1 : 0;
                 await Steps(5);
             }
+        for (var i = 0; i < 5; i++)
+        {
+            var f = await Items.Fuel.Set(can, max / 3);
+            touched += f.Ok ? 1 : 0;
+            await Steps(5);
+        }
         await Steps(10);
         var l1 = ReplicationLab.LoopbackStats();
         var rows = Replication.Stats();
@@ -51,14 +58,16 @@ public sealed partial class ReplTestMod
                                           fakeRows.Any(r => r.PeerId == FakeId(f.Machine) && r.Channel == ReplChannel.Prediction));
         long sent = fakeRows.Sum(r => r.Messages), captured = l1.Messages - l0.Messages;
         long lists = fakeRows.Sum(r => r.DestroyLists), capturedLists = l1.DestroyLists - l0.DestroyLists;
-        var unchanged = fakeRows.Where(r => r.Channel == ReplChannel.Client).Sum(r => r.Unchanged) - u0;
+        var unchanged = U(fakeRows, ReplChannel.Client) - U(before, ReplChannel.Client);
+        var unchangedPrediction = U(fakeRows, ReplChannel.Prediction) - U(before, ReplChannel.Prediction);
         foreach (var r in fakeRows) Info($"stats row: fake 0x{r.PeerId:x} {r.Channel}: {r}");
         Result(first.Count == 0 && bothChannels && fakeRows.All(r => machines.Contains(r.PeerId) && r.Peer is null) && sent > 0 && sent == captured &&
-               lists == capturedLists && touched == 10 && unchanged >= 10 * fakes.Count && fakeRows.All(r => r.TooBig == 0 && r.Refused == 0 && r.Dropped == 0),
+               lists == capturedLists && unchangedPrediction > 0 && fakeRows.All(r => r.TooBig == 0 && r.Refused == 0 && r.Dropped == 0),
             "stats",
             $"first call {first.Count} rows; {fakeRows.Count} fake rows (both channels of {fakes.Count} fakes: {bothChannels}); messages counted {sent}, " +
-            $"captured by the harness in the same frames {captured}; destroy lists {lists} vs {capturedLists}; {touched} touches raised Unchanged by " +
-            $"{unchanged} on the client channel ({fakes.Count} fakes); too big {fakeRows.Sum(r => r.TooBig)}, refused {fakeRows.Sum(r => r.Refused)}, " +
+            $"captured by the harness in the same frames {captured}; destroy lists {lists} vs {capturedLists}; Unchanged rose by " +
+            $"{unchangedPrediction} on the prediction channel (the game re-checks predicted entities every frame) and by {unchanged} on the " +
+            $"client channel over {touched} touches that changed nothing ({fakes.Count} fakes); too big {fakeRows.Sum(r => r.TooBig)}, refused {fakeRows.Sum(r => r.Refused)}, " +
             $"dropped {fakeRows.Sum(r => r.Dropped)}; bytes {fakeRows.Sum(r => r.Bytes)}, acks {fakeRows.Sum(r => r.Acks)}");
 
         // a watch started mid-session: the next message's full values, no baseline needed

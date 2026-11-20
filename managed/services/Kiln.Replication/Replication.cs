@@ -22,8 +22,9 @@ public static class Replication
     /// <summary>
     /// Counters per peer and channel: messages, bytes, creates, updates, destroys, unchanged and oversized entities,
     /// acknowledgements, resends asked for, and what the session refused. The first call by a mod turns the counters on
-    /// for that mod until it unloads (the first call of all returns no rows yet); they count from the first time any mod
-    /// turned them on, and a peer's rows start over when another player takes its connection slot.
+    /// for that mod until it unloads; they count from the moment the first holder turned them on (so a call that turns
+    /// them on returns no rows yet, unless another mod or Kiln's own surfaces already hold them), and a peer's rows start
+    /// over when another player takes its connection slot.
     /// </summary>
     /// <returns>One row per peer and channel that has been sent anything. A lab's fake player without a bound lab peer
     /// and a hosted world's own client have a null <see cref="ReplPeerStats.Peer"/>.</returns>
