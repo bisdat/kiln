@@ -13,12 +13,63 @@ public sealed unsafe class UiInventoryFakeTests
     private static readonly FakeInventorySlot Wood = new(0xBB, 60, ItemEntity: 0, Holder: 77, InventoryPage: 0x5000, SlotIndex: 3);
 
     [Fact]
-    public void TheTableIsTheHeadersV1()
+    public void TheTableIsTheHeadersV2()
     {
-        // kiln_ui_inventory.h v1: the header and four functions
+        // kiln_ui_inventory.h v2: the header, v1's four functions and screen_view
         var t = (uint*)KitBackend.Instance.Service("kiln.ui.inventory", 1);  // KilnServiceHeader { size, version }
         Assert.True(t != null);
-        Assert.Equal((40u, 1u), (t[0], t[1]));
+        Assert.Equal((48u, 2u), (t[0], t[1]));
+    }
+
+    [Fact]
+    public void TheOpenScreenAndTheChestsEntityFollowWhatTheGameDraws()
+    {
+        using var kiln = new KilnHarness();
+        kiln.Step();
+        var seen = new List<(InventoryScreen? Prev, InventoryScreen? Cur)>();
+        kiln.Run(() => Ui.Inventory.ScreenChanged += (p, c) => seen.Add((p, c)));
+        Assert.Null(kiln.UiInventory.Screen);
+        var chest = new EntityId(4100);
+        var gem = new FakeInventorySlot(0xCC, 1, ItemEntity: 901, Holder: 4100, InventoryPage: 0x6000);
+        kiln.UiInventory.OpenChest(chest, Sword, gem);
+        Assert.Equal(new InventoryScreen(InventoryScreenKind.Chest, HudScreen.StorageChest, chest), kiln.UiInventory.Screen);
+        kiln.UiInventory.Hover(1);
+        Assert.Equal(chest, kiln.Run<VisibleSlot?>(() => Ui.Inventory.Hovered)!.Holder);  // the chest's slot names it too
+        kiln.UiInventory.OpenChest(new EntityId(4200), Sword);                           // another chest
+        kiln.UiInventory.OpenBackpack(Sword);
+        kiln.UiInventory.CloseScreen();
+        Assert.Equal(4, seen.Count);
+        Assert.Equal((null, chest), (seen[0].Prev?.Container, seen[0].Cur?.Container));
+        Assert.Equal(new EntityId(4200), seen[1].Cur?.Container);
+        Assert.Equal(InventoryScreenKind.Backpack, seen[2].Cur?.Kind);
+        Assert.Equal(EntityId.None, seen[2].Cur?.Container);
+        Assert.Null(seen[3].Cur);
+        Assert.Null(kiln.UiInventory.Screen);
+    }
+
+    [Fact]
+    public void PanelsShowOnTheirScreens()
+    {
+        using var kiln = new KilnHarness();
+        kiln.Step();
+        using var salvage = kiln.Run(() => Ui.Inventory.AddPanel("Salvage", (_, _) => { },
+            new InventoryPanelOptions { Screens = InventoryScreens.Chest, When = s => s.Container.Value != 0 }));
+        using var both = kiln.Run(() => Ui.Inventory.AddPanel("Notes", (_, _) => { }));
+        Assert.Empty(kiln.UiInventory.PanelsShown);
+        kiln.UiInventory.OpenBackpack(Sword);
+        Assert.Equal(["Notes"], kiln.UiInventory.PanelsShown);
+        kiln.UiInventory.OpenChest(new EntityId(4100), Sword);
+        Assert.Equal(["Salvage", "Notes"], kiln.UiInventory.PanelsShown);
+        kiln.UiInventory.OpenChest(EntityId.None, Sword);                   // the entity not named (yet)
+        Assert.Equal(["Notes"], kiln.UiInventory.PanelsShown);
+        kiln.UiInventory.Draw(HudScreen.StationBasedCrafting, Sword);       // a bench: Ui.Crafting's panels, not these
+        Assert.Empty(kiln.UiInventory.PanelsShown);
+        both.Dispose();
+        kiln.UiInventory.OpenBackpack(Sword);
+        Assert.Empty(kiln.UiInventory.PanelsShown);
+        kiln.Capabilities.Override(Ui.Inventory.PanelCapability, false);
+        Assert.Throws<KilnUnavailableException>(() => kiln.Run(() => Ui.Inventory.AddPanel("x", (_, _) => { })));
+        kiln.Capabilities.ClearOverride(Ui.Inventory.PanelCapability);
     }
 
     [Fact]

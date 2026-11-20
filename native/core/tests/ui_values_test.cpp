@@ -64,6 +64,7 @@ KilnUiPointerFn pointer_fn = nullptr;   // what the service subscribed
 void* pointer_user = nullptr;
 bool cursor_ok = true;
 float cursor[4] = {50, 50, 1920, 1080};  // x, y, client width, height
+uint32_t target = 0;                     // kiln.ui's screen_target (a chest's entity)
 struct Raw {
     uintptr_t target;
     std::string label;
@@ -176,6 +177,7 @@ void install() {
             return false;
         }
     };
+    e.screen_target = [] { return target; };
     e.cursor_client = [](float* x, float* y, float* w, float* h) {
         if (!cursor_ok) return false;
         *x = cursor[0];
@@ -251,6 +253,7 @@ void reset() {
     screen = KilnUiScreen{};
     screen.size = sizeof screen;
     have_screen = true;
+    target = 0;
     symbols.clear();
     constants.clear();
     raws.clear();
@@ -2286,6 +2289,121 @@ void clicks_without_kiln_ui() {
           "clicks: kiln.ui without presses -> UNAVAILABLE, ui.slots.click reported off");
 }
 
+// ============================================================ S5c: the backpack/chest screen view (kiln.ui.inventory v2)
+KilnUiScreenView view_record() {
+    KilnUiScreenView v{};
+    v.size = sizeof v;
+    return v;
+}
+bool near(float a, float b) { return std::fabs(a - b) < 0.05f; }
+
+void screen_view_chest_and_backpack() {
+    prime_slots();
+    fake::screen.ui_state = KILN_UI_STATE_PLAY;
+    fake::screen.hud_screen = 22;  // a storage chest
+    fake::target = 99;             // kiln.ui's play.target: the chest (holder 99 of page 0x6000)
+    const KilnOwner o = fake::owner("mod:panels");
+    CHECK(I()->header.size == sizeof(KilnUiInventoryApi) && I()->header.version == 2 &&
+              offsetof(KilnUiInventoryApi, screen_view) == 40 && sizeof(KilnUiInventoryApi) == 48,
+          "v2: screen_view appended at 40 after unsubscribe, the table is 48 bytes, version 2");
+    auto v = view_record();
+    CHECK(I()->screen_view(o, 1920, 1080, &v) == KILN_ERR_UNAVAILABLE, "view: ui.inventory.panels off -> UNAVAILABLE");
+    fake::rows.insert("ui.inventory.panels");
+    auto small = view_record();
+    small.size = 8;
+    CHECK(I()->screen_view(0, 1920, 1080, &v) == KILN_ERR_INVALID_ARGUMENT &&
+              I()->screen_view(o, 1920, 1080, nullptr) == KILN_ERR_INVALID_ARGUMENT &&
+              I()->screen_view(o, 1920, 1080, &small) == KILN_ERR_INVALID_ARGUMENT,
+          "view: owner 0, no record, a short record -> INVALID_ARGUMENT");
+    CHECK(I()->screen_view(o, 1920, 1080, &v) == KILN_OK && v.ok == 0 && v.reason == KUI_NO_FRAME && v.kind == 0,
+          "view: no frame yet -> KUI_NO_FRAME (the slot sites went in)");
+    arm_slots();
+    FakeSlot mine, chest;           // outer {10, 20, 80, 80} units; ppu 1.3333 on a 1920x1080 canvas
+    chest.outer[0] = 200;           // the chest's slot further right: pixels 266.7..373.3
+    g_frame_script = {desc(&mine, 0x5000, 0, 0xAA, 900), desc(&chest, 0x6000, 0, 0xBB, 0)};
+    ui_frame(4000);
+    v = view_record();
+    CHECK(I()->screen_view(o, 1920, 1080, &v) == KILN_OK && v.ok == 1 && v.kind == KUI_VIEW_CHEST && v.hud_screen == 22 &&
+              v.container == 99 && v.local_player == 77 && v.frame == 4000 && v.session == 5 && v.slot_count == 2 &&
+              v.player_slots == 1 && v.container_slots == 1 && (v.flags & KUI_VIEW_HOLDER_MATCH) &&
+              !(v.flags & KUI_VIEW_SCALED) && v.size == sizeof v,
+          "chest: kind, the chest's entity (play.target), seen again as the holder of its slots");
+    CHECK(near(v.all_px.x, 13.33f) && near(v.all_px.y, 26.67f) && near(v.all_px.width, 360.0f) &&
+              near(v.all_px.height, 106.66f) && near(v.player_px.x, 13.33f) && near(v.player_px.width, 106.66f) &&
+              near(v.container_px.x, 266.66f) && near(v.container_px.width, 106.66f),
+          "chest: the rectangles of all slots, the player's and the chest's, in pixels");
+    v = view_record();
+    CHECK(I()->screen_view(o, 3840, 2160, &v) == KILN_OK && v.ok == 1 && (v.flags & KUI_VIEW_SCALED) &&
+              near(v.all_px.x, 26.66f) && near(v.container_px.width, 213.33f),
+          "chest: a target twice the canvas -> rectangles twice as large, SCALED");
+    fake::target = 123;  // play.target names another entity than the drawn slots' holder (a frame late)
+    v = view_record();
+    CHECK(I()->screen_view(o, 1920, 1080, &v) == KILN_OK && v.ok == 1 && v.container == 123 && v.container_slots == 0 &&
+              !(v.flags & KUI_VIEW_HOLDER_MATCH) && v.container_px.width == 0,
+          "chest: a target no drawn slot belongs to -> no HOLDER_MATCH, an empty container rectangle");
+    fake::target = 99;
+    fake::screen.hud_screen = 9;  // kiln.ui moved on (the backpack) while the latest slot frame is still the chest's
+    v = view_record();
+    CHECK(I()->screen_view(o, 1920, 1080, &v) == KILN_OK && v.ok == 1 && v.kind == KUI_VIEW_CHEST && v.container == 0,
+          "chest: kiln.ui shows another screen than the frame -> its target is not taken (0)");
+
+    ui_frame(4001);  // the backpack (HUD 9) drawn
+    v = view_record();
+    CHECK(I()->screen_view(o, 1920, 1080, &v) == KILN_OK && v.ok == 1 && v.kind == KUI_VIEW_BACKPACK && v.hud_screen == 9 &&
+              v.container == 0 && v.player_slots == 1,
+          "backpack: HUD 9, no container");
+    fake::screen.hud_screen = 4;  // the in-game menu
+    fake::screen.crafting = 1;    // its crafting tab: Ui.Crafting's panels
+    ui_frame(4002);
+    v = view_record();
+    CHECK(I()->screen_view(o, 1920, 1080, &v) == KILN_OK && v.ok == 0 && v.reason == KUI_NO_PANEL_SCREEN,
+          "in-game menu, crafting tab -> KUI_NO_PANEL_SCREEN");
+    fake::screen.crafting = 0;
+    ui_frame(4003);
+    v = view_record();
+    CHECK(I()->screen_view(o, 1920, 1080, &v) == KILN_OK && v.ok == 1 && v.kind == KUI_VIEW_BACKPACK && v.hud_screen == 4,
+          "in-game menu with the player's slots drawn -> the backpack");
+    g_frame_script = {desc(&chest, 0x6000, 0, 0xBB, 0)};  // another tab draws slots, none of them the player's
+    ui_frame(4004);
+    v = view_record();
+    CHECK(I()->screen_view(o, 1920, 1080, &v) == KILN_OK && v.ok == 0 && v.reason == KUI_NO_SLOT && v.kind == KUI_VIEW_BACKPACK,
+          "in-game menu without the player's slots (map, character) -> KUI_NO_SLOT");
+    g_frame_script = {};
+    fake::screen.hud_screen = 9;
+    ui_frame(4005);
+    v = view_record();
+    CHECK(I()->screen_view(o, 1920, 1080, &v) == KILN_OK && v.ok == 0 && v.reason == KUI_NO_SLOT,
+          "backpack with no slot drawn yet -> KUI_NO_SLOT");
+
+    // fail closed
+    g_frame_script = {desc(&mine, 0x5000, 0, 0xAA, 900)};
+    for (uint8_t hud : {1, 25, 27, 28, 21, 45}) {
+        fake::screen.hud_screen = hud;
+        ui_frame(4100 + hud);
+        v = view_record();
+        CHECK(I()->screen_view(o, 1920, 1080, &v) == KILN_OK && v.ok == 0 && v.reason == KUI_NO_PANEL_SCREEN && v.kind == 0,
+              "closed: the play view, stations, factories, loot chests, the Gem Forge -> KUI_NO_PANEL_SCREEN");
+    }
+    fake::screen.hud_screen = 22;
+    ui_frame(4200);
+    fake::ticks += 251;
+    v = view_record();
+    CHECK(I()->screen_view(o, 1920, 1080, &v) == KILN_OK && v.ok == 0 && v.reason == KUI_STALE_FRAME,
+          "closed: a frame older than 250 ms -> KUI_STALE_FRAME");
+    put(g_system, 0x48, 0.0f);
+    ui_frame(4201);
+    v = view_record();
+    CHECK(I()->screen_view(o, 1920, 1080, &v) == KILN_OK && v.ok == 0 && v.reason == KUI_NO_VIEWPORT &&
+              v.kind == KUI_VIEW_CHEST && v.container == 99 && v.all_px.width == 0,
+          "closed: no usable viewport -> KUI_NO_VIEWPORT, the kind and the container still said");
+    put(g_system, 0x48, 1.3333f);
+    fake::revoke(o);
+    CHECK(I()->screen_view(o, 1920, 1080, &v) == KILN_ERR_REVOKED, "view: a retired owner -> REVOKED");
+    fake::client_side = false;
+    const KilnOwner o2 = fake::owner("mod:server");
+    CHECK(I()->screen_view(o2, 1920, 1080, &v) == KILN_ERR_UNAVAILABLE, "view: a server -> UNAVAILABLE");
+}
+
 // ========================================================================== S6: tooltip lines and the details window
 using DetailHookFn = void (*)(void*, uint8_t);
 DetailHookFn g_detail_hook = nullptr;
@@ -2721,6 +2839,7 @@ int main() {
     clicks_mapping_and_slot_at();
     clicks_across_a_session_change();
     clicks_without_kiln_ui();
+    screen_view_chest_and_backpack();
     lines_collect();
     lines_window();
     retire_during_dispatch();

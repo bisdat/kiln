@@ -143,6 +143,22 @@ def cook_clip(doc, anim_name, skel, loop=None, tolerance=None, root_motion=None)
     return finish_clip(frames, n, skel, anim_name, loop, tolerance, root_motion)
 
 
+def animated_joints(path, animations=None, retarget_map=None):
+    """The joints a glTF file's animations move, by node name ({name: [animation, ...]}): every animation, or the named ones. With a retarget's
+    "map" (its source joint -> target joint; equal names pair by themselves) the names are the target skeleton's. tools/modelcook refuses a model
+    whose bone chain swings a joint that a clip of its skeleton animates (cook/chains.py: a swinging joint carries no animation)."""
+    from .gltfdoc import Doc
+    doc = Doc(path)
+    out = {}
+    for name, chans in doc.animations().items():
+        if animations is not None and name not in animations:
+            continue
+        for node in chans:
+            joint = doc.names[node]
+            out.setdefault((retarget_map or {}).get(joint, joint), []).append(name)
+    return out
+
+
 def sample_animation(doc, anim_name, skel):
     """An animation of the file sampled at FPS on the skeleton's joints -> (frames, n): n + 1 frames of (rots, positions, scales), game space,
     parent-relative. Joints are found by name (on a game skeleton also by the `keen_joint` extra tools/kfc writes)."""

@@ -29,6 +29,7 @@ const exampleSchema = (name: string): string => {
   if (name.startsWith("native")) return "native.schema.json";
   if (name === "install-receipt.json") return "install-receipt.schema.json";
   if (name === "kiln.publish.json") return "kiln-publish.schema.json"; // the project file kiln.publish.json, schema $id kiln-publish
+  if (name === "kiln-pack.json") return "kiln-modpack.schema.json"; // a Crucible pack's index: kiln-modpack.json format 2
   return name.replace(/\.json$/, ".schema.json");
 };
 

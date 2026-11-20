@@ -27,6 +27,7 @@ internal static unsafe class UiCaps
     [
         "ui.values.detail", "ui.values.slot", "ui.values.held", "ui.values.hud", "ui.values.tooltip_lines",
         "ui.slots.inspect", "ui.gemforge.inspect", "ui.gemforge.sources", "ui.tooltip.lines", "ui.tooltip.values", "ui.slots.click",
+        "ui.inventory.panels",
     ];
 
     internal static readonly ServiceCapRows Rows = new(Service, Report);
@@ -50,6 +51,9 @@ internal static unsafe class UiCaps
                 ServiceCaps.LowerOff(name, CapabilityReason.ServiceOlder, "kiln.ui.values has no native tooltip slots");
         if (UiValuesNative.T != null && UiInventoryNative.T == null)
             ServiceCaps.LowerOff(Ui.Inventory.ClickCapability, CapabilityReason.ServiceOlder, "kiln.ui.inventory is not there (an older kiln-core)");
+        if (UiValuesNative.T != null && UiInventoryNative.T2 == null)
+            ServiceCaps.LowerOff(Ui.Inventory.PanelCapability, CapabilityReason.ServiceOlder,
+                "kiln.ui.inventory has no screen_view (v2: an older kiln-core)");
         // Collected lines have one production consumer: the overlay's Item details window.
         ServiceCaps.LowerFeatures(Service, "ui.values.tooltip_lines");
         if (!RenderNative.Available) ServiceCaps.LowerFeatures(Render, "render.camera");

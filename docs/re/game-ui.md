@@ -687,6 +687,16 @@ above (ItemSlot `0xc046c0` raw link, SlotGeometry mid `0xc05433`, GameUiFrame) a
 - **Hover byte:** ItemSlot's result `+0x10` (`ui/slot.hoverCandidate`) is still only a candidate (mouse hover or gamepad
   focus). `ui-hooks.c4` logs it next to the cursor's slot. A gamepad slot action waits for it. **[hyp]**
 
+### Slice 2 (dev.30): the chest's entity and panels beside the screens
+- **The chest's entity:** PlayStateUi's switch sends 22, 41 and 28 to `0xb9d0f0(mode)`, which finds the other inventory by
+  play `+0x2c50` (`ui/play.target`). kiln.ui reads it on all three since dev.30 (`screen_target`; a change is a screen
+  change). For a chest the game replicated it is the server's id (the same rule as an item's pide). The host test checks
+  it against the holder of the chest's drawn slots (`KUI_VIEW_HOLDER_MATCH`); `ui-hooks.c6` checks it in a game against
+  the server world's inventory and position. **[dis] [src]**
+- **Panel placement:** no new site. kiln.ui.inventory v2's `screen_view` takes the latest slot frame's outer rectangles
+  (all, the local player's, the container's by holder) through the same mapping as marks; Kiln.Ui docks a panel to their
+  right (else left). Game test pending: `ui-hooks.c5`. **[src] [hyp]**
+
 ### For the next slices (not built)
 - **A button in the chest screen (where Enlarge / Enchant sits):** the chest-style transfer screen is `0xb9d0f0(mode)`
   (PlayStateUi's switch `0xc61135`: 22 → mode 0, 41 → 1, 28 → 2), the other inventory found through play `+0x2c50`. Its

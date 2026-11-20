@@ -1,0 +1,129 @@
+{
+  "format": 1,
+  "side": "client",
+  "comment": "Client exe (5d9ef2f1, Steam 26430625): the game's cloth and chains2 code (docs/re/models.md section 9), read-only diagnostic anchors for guided check 16e-cc16e (mods/tests/model-physics-client counts how often each runs). Not call contracts: nothing calls these. Kiln's cook writes cloth and chains without them. Each pattern matches once on this build; an update may change register allocation, so regenerate on one.",
+  "symbols": {
+    "models/ClothFactory": {
+      "comment": "RVA 0x11ddfa0; masked control-flow and RIP relative displacements; update may change register allocation.",
+      "find": [
+        {
+          "pattern": "48 89 5C 24 18 48 89 74 24 20 41 57 48 83 EC 60 48 8B 01 4C 8B FA 41 B1 08"
+        }
+      ]
+    },
+    "models/ClothStep": {
+      "comment": "RVA 0x11e0e50; masked control-flow and RIP relative displacements; update may change register allocation.",
+      "find": [
+        {
+          "pattern": "48 89 5C 24 10 57 48 81 EC 90 00 00 00 48 8B 19 0F 57 C0 B8 00 E1 F5 05"
+        }
+      ]
+    },
+    "models/ClothInstance": {
+      "comment": "RVA 0xe7360; masked control-flow and RIP relative displacements; update may change register allocation.",
+      "find": [
+        {
+          "pattern": "4C 89 44 24 18 48 89 54 24 10 48 89 4C 24 08 55 53 56 57 41 54 41 55 41 56 48 8D AC 24 70 F8 FF FF"
+        }
+      ]
+    },
+    "models/ClothColliders": {
+      "comment": "RVA 0xe8770; masked control-flow and RIP relative displacements; update may change register allocation.",
+      "find": [
+        {
+          "pattern": "48 89 5C 24 10 48 89 4C 24 08 55 56 57 41 54 41 55 41 56 41 57 48 83 EC 50 45 33 E4 0F 29 74 24 40"
+        }
+      ]
+    },
+    "models/Chain2Init": {
+      "comment": "RVA 0xe7e30; masked control-flow and RIP relative displacements; update may change register allocation.",
+      "find": [
+        {
+          "pattern": "40 55 53 56 57 41 55 41 56 48 8D 6C 24 D1 48 81 EC D8 00 00 00 48 8B 82 08 01 00 00"
+        }
+      ]
+    },
+    "models/Chain2CpuAdd": {
+      "comment": "RVA 0x11e2480; masked control-flow and RIP relative displacements; update may change register allocation.",
+      "find": [
+        {
+          "pattern": "4C 89 44 24 18 48 89 4C 24 08 55 57 41 56 48 8D AC 24 50 FF FF FF 48 81 EC B0 01 00 00"
+        }
+      ]
+    },
+    "models/Chain2Step": {
+      "comment": "RVA 0x11e44a0: optional +0x9e8 queued/job front end, not the direct +0x9e0 pool step; unpacks queued config here",
+      "find": [
+        {
+          "pattern": "48 8B C4 48 89 58 10 48 89 70 18 55 57 41 54 41 55 41 56 48 8D 68 C8 48 81 EC 10 01 00 00"
+        }
+      ]
+    },
+    "models/Chain2DirectStep": {
+      "comment": "RVA 0x11e6c30; masked control-flow and RIP relative displacements; update may change register allocation.",
+      "find": [
+        {
+          "pattern": "45 85 C0 75 ?? 44 8B 41 10 0F 57 C0 B8 40 8A F7 01 4C 3B C8 4C 0F 4D C8"
+        }
+      ]
+    },
+    "models/Chain2DeferredAdd": {
+      "comment": "RVA 0x11e1ca0; masked control-flow and RIP relative displacements; update may change register allocation.",
+      "find": [
+        {
+          "pattern": "48 81 EC 98 00 00 00 4C 8B 4A 28 4C 8B D1 4D 85 C9 75 ?? 45 33 C0 48 8B C1"
+        }
+      ]
+    },
+    "models/RenderSimulation": {
+      "comment": "RVA 0xee380; masked control-flow and RIP relative displacements; update may change register allocation.",
+      "find": [
+        {
+          "pattern": "4C 89 44 24 18 55 53 56 57 41 55 41 56 41 57 48 8D AC 24 20 B5 FF FF B8 E0 4B 00 00"
+        }
+      ]
+    }
+  },
+  "constants": {
+    "models/chain2.maxParticles": {
+      "value": 8
+    },
+    "models/cloth.maxColliderParticles": {
+      "value": 32
+    },
+    "models/cloth.maxStepNs": {
+      "value": 100000000
+    },
+    "models/chain2.directMaxStepNs": {
+      "value": 33000000
+    }
+  },
+  "features": {
+    "models.cloth.readers": {
+      "symbols": [
+        "models/ClothFactory",
+        "models/ClothStep",
+        "models/ClothInstance",
+        "models/ClothColliders"
+      ],
+      "constants": [
+        "models/cloth.maxColliderParticles",
+        "models/cloth.maxStepNs"
+      ]
+    },
+    "models.chain2.readers": {
+      "symbols": [
+        "models/Chain2Init",
+        "models/Chain2CpuAdd",
+        "models/Chain2Step",
+        "models/RenderSimulation",
+        "models/Chain2DirectStep",
+        "models/Chain2DeferredAdd"
+      ],
+      "constants": [
+        "models/chain2.maxParticles",
+        "models/chain2.directMaxStepNs"
+      ]
+    }
+  }
+}
