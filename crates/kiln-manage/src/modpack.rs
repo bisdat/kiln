@@ -21,6 +21,8 @@ pub const MANIFEST: &str = "kiln-modpack.json";
 pub mod pack;
 /// The three-way merge of a pack's config overrides.
 pub mod merge;
+/// Pack Studio: the creator's pack source (a profile, chosen settings keys, the pack layer, credits) and its builds.
+pub mod studio;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
