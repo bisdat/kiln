@@ -338,8 +338,7 @@ class Deploy(unittest.TestCase):
                                          "npm run build")]
         self.assertEqual(order, sorted(order))
         commit = next(c for c in fake.calls if "commit" in c)
-        self.assertIn("user.name=Frostdev", commit)
-        self.assertIn("user.email=admin@frostdev.io", commit)
+        self.assertNotIn("-c", commit)  # the site checkout's own identity, no override
         message = commit[commit.index("-m") + 1]
         self.assertEqual(message, "Kiln roadmap: 0.2.0-dev.29.19 released")
         self.assertNotRegex(message, "(?i)co-authored|claude|generated")

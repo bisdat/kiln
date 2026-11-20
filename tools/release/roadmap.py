@@ -52,7 +52,6 @@ LIVE_HOST = "loothing-vps"
 LIVE_LINK = "/opt/frostdev-public/current"
 PAGE_URL = "https://frostdev.io/kiln/roadmap"
 NEW_YORK = ZoneInfo("America/New_York")
-IDENTITY = ("Frostdev", "admin@frostdev.io")
 
 # What src/lib/kilnRoadmap.ts accepts.
 AREAS = ("launcher", "api", "content", "servers", "compat", "tools", "core")
@@ -476,8 +475,8 @@ def deploy(data, checkout, version, runner, yes=False, dry_run=False, ask=tty_as
         if others:
             raise RoadmapError("the build changed other files than the roadmap: " + ", ".join(o[3:] for o in others))
         message = f"Kiln roadmap: {version} released"
-        commit = ["git", "-c", f"user.name={IDENTITY[0]}", "-c", f"user.email={IDENTITY[1]}", "commit", "-q", "-m",
-                  message, "--", SITE_FILE]
+        # the site checkout's own git identity (its history is the owner's), no override
+        commit = ["git", "commit", "-q", "-m", message, "--", SITE_FILE]
         if dry_run:
             step("dry run: stops before the commit")
             if changed:
