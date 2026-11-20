@@ -2,7 +2,9 @@
 //! boot.json, crate::watch) and the mod count the window sends, and keeps the Discord app's activity in step: shown
 //! while the switch is on, the Community page is shown and a client game runs with Kiln; cleared the moment any of
 //! that ends. It runs apart from everything else, so a slow or missing Discord never holds up a game start, and it
-//! tries the socket again every 30 seconds while the game runs (kiln_manage::community::presence).
+//! tries the socket again every 30 seconds while the game runs (kiln_manage::community::presence). With "Show my
+//! Crucible pack" on too, it reads which profile is active on that game each round and, for an instance of a Crucible
+//! pack, shows the pack and the "Get this modpack" button (presence::pack_for_game: local files only).
 
 use kiln_manage::community::presence::{self, Facts, Ipc, PresenceStatus, PresenceTexts};
 use kiln_manage::community::settings::CommunitySettings;
@@ -23,6 +25,8 @@ struct Running {
 #[derive(Default)]
 struct State {
     on: bool,
+    /// "Show my Crucible pack on my Discord profile" (community.json presencePack).
+    pack_on: bool,
     shown: bool,
     games: HashMap<String, Running>,
     mods: Option<u32>,
@@ -43,6 +47,7 @@ fn poke(f: impl FnOnce(&mut State)) {
             let s = CommunitySettings::load(&d);
             let mut st = STATE.0.lock().unwrap();
             st.on = s.presence;
+            st.pack_on = s.presence_pack;
             st.shown = s.shown;
         }
         let _ = std::thread::Builder::new().name("kiln-presence".into()).spawn(run);
@@ -76,9 +81,10 @@ pub fn seen(game_id: &str, pid: Option<u32>, boot: Option<SystemTime>) {
 }
 
 pub fn settings_changed(s: &CommunitySettings) {
-    let (on, shown) = (s.presence, s.shown);
+    let (on, pack_on, shown) = (s.presence, s.presence_pack, s.shown);
     poke(|st| {
         st.on = on;
+        st.pack_on = pack_on;
         st.shown = shown;
     });
 }
@@ -99,14 +105,14 @@ pub fn status(s: &CommunitySettings) -> PresenceStatus {
     PresenceStatus { on: s.presence, discord_running: on && (st.connected || presence::discord_running()), showing: on && st.showing }
 }
 
-/// What should show now: the game's start and the count, or nothing.
-fn wanted(st: &State) -> Option<Facts> {
+/// What should show now: the game's start and the count, or nothing; and the game's id when its pack may be named.
+fn wanted(st: &State) -> Option<(Facts, Option<String>)> {
     if !(st.on && st.shown) {
         return None;
     }
-    let game = st.games.values().filter(|g| g.kiln).min_by_key(|g| g.since)?;
+    let (id, game) = st.games.iter().filter(|(_, g)| g.kiln).min_by_key(|(_, g)| g.since)?;
     let started = game.since.duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
-    Some(Facts { mods: st.mods, started })
+    Some((Facts { mods: st.mods, started, pack: None }, st.pack_on.then(|| id.clone())))
 }
 
 fn run() {
@@ -122,13 +128,17 @@ fn run() {
             (wanted(&st), st.texts.clone().unwrap_or_default())
         };
         match want {
-            Some(f) => {
+            Some((mut f, pack_game)) => {
+                // the active profile's pack, read again each round (a profile switch shows on the next one)
+                if let Some(g) = pack_game {
+                    f.pack = crate::state::dirs().ok().and_then(|d| presence::pack_for_game(&d, &g));
+                }
                 if ipc.is_none() {
                     ipc = presence::connect().and_then(|s| Ipc::handshake(s, std::process::id()).ok());
                     sent = None;
                 }
                 let ok = match ipc.as_mut() {
-                    Some(c) if sent != Some(f) => c.set(&texts, Some(&f)).is_ok(),
+                    Some(c) if sent.as_ref() != Some(&f) => c.set(&texts, Some(&f)).is_ok(),
                     Some(_) => true,
                     None => false,
                 };
@@ -168,7 +178,10 @@ mod tests {
         let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_763_480_000);
         let with = Running { pid: 7, since: t0, kiln: true };
         let without = Running { pid: 8, since: t0, kiln: false };
-        assert_eq!(wanted(&st(true, &[("g", with)])), Some(Facts { mods: Some(12), started: 1_763_480_000 }));
+        assert_eq!(wanted(&st(true, &[("g", with)])), Some((Facts { mods: Some(12), started: 1_763_480_000, pack: None }, None)));
+        let mut pack = st(true, &[("g", with)]);
+        pack.pack_on = true;
+        assert_eq!(wanted(&pack).unwrap().1.as_deref(), Some("g"), "with Show my Crucible pack on, the game's pack is looked up");
         assert_eq!(wanted(&st(false, &[("g", with)])), None, "the switch is off");
         assert_eq!(wanted(&st(true, &[("g", without)])), None, "the game runs without Kiln (Just once, or Kiln did not load)");
         assert_eq!(wanted(&st(true, &[])), None, "the game is not running");

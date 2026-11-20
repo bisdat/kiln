@@ -161,6 +161,8 @@ pub mod publish;
 pub mod updates;
 pub mod vendor;
 pub mod community;
+#[cfg(all(feature = "zip", feature = "http"))]
+pub mod crucible;
 
 pub use error::{Error, ErrorCode, Result};
 

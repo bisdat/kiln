@@ -125,8 +125,28 @@ public sealed partial class KilnHarness
     }
 
     /// <summary>The player hosts or joins again, for the tasks (#82): new sessions of the side's worlds (the server world
-    /// first on a hosting client). A task bound to the last ones never comes into these.</summary>
+    /// first on a hosting client). A task bound to the last ones never comes into these. The world's start ends the main
+    /// menu's session (#83): menu hops still waiting end their tasks <see cref="KilnTaskState.Cancelled"/>.</summary>
     public void EnterWorld() => Run(TasksSessionStarted);
+
+    /// <summary>
+    /// One UI frame of the game's main menu, for the tasks (#83): on the game's main thread, while no world runs (after
+    /// <see cref="LeaveWorld"/>), it opens a menu session when none is live and runs the menu hops queued before it
+    /// (<c>ToTick(WorldKind.Menu)</c>, <c>OnTick(WorldKind.Menu, ...)</c>, <c>PostToTick(WorldKind.Menu, ...)</c>), as
+    /// Kiln.Host does about 30 times a second. While a world runs it does nothing. In a menu hop
+    /// <see cref="Game.IsTickThread"/> is false and the tick-thread APIs refuse, as in the game. Returns the hops it ran.
+    /// The menu's budget (64 hops and 1 ms per mod, 2 ms per frame) is not modelled.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">A <see cref="HarnessSide.DedicatedServer"/> has no main menu.</exception>
+    public int MenuFrame()
+    {
+        if (_options.Side == HarnessSide.DedicatedServer)
+            throw new InvalidOperationException("a dedicated server has no main menu: use KilnHarnessOptions.Side");
+        var pool = TaskPool;
+        var ran = 0;
+        OnMainThread(() => ran = pool.MenuFrame());
+        return ran;
+    }
 }
 
 /// <summary>
@@ -148,8 +168,9 @@ public sealed class HarnessTasks
 
     /// <summary>
     /// Runs the mods' tasks to their end: waits while their work runs on the workers, and steps the server whenever all of
-    /// them wait for the tick (a hop, <c>NextGateWindow</c>, a service task that completes in a step). Returns the steps it
-    /// took (0 when no task was alive).
+    /// them wait for the tick (a hop, <c>NextGateWindow</c>, a service task that completes in a step); in the main menu
+    /// (after <see cref="KilnHarness.LeaveWorld"/> and a <see cref="KilnHarness.MenuFrame"/>) it runs menu frames instead.
+    /// Returns the steps (or frames) it took (0 when no task was alive).
     /// </summary>
     /// <param name="maxSteps">Then it throws <see cref="TimeoutException"/>, naming the tasks still alive.</param>
     /// <param name="timeout">Real time for the whole call (default 10 s); then it throws <see cref="TimeoutException"/>
@@ -173,8 +194,11 @@ public sealed class HarnessTasks
             if (pool.Live == 0) return steps;
             if (steps >= maxSteps) throw new TimeoutException($"the mods' tasks had not ended after {maxSteps} steps: {Alive(pool)}");
             if (Left() == TimeSpan.Zero) throw new TimeoutException($"the mods' tasks had not ended after {limit.TotalSeconds:0.#} s: {Alive(pool)}");
-            var hopsOrEdges = pool.PendingHopsOf(WorldKind.Server) > 0 || pool.PendingHopsOf(WorldKind.Client) > 0 || pool.WaitingForEdge > 0;
-            _harness.Step();
+            var hopsOrEdges = pool.PendingHopsOf(WorldKind.Server) > 0 || pool.PendingHopsOf(WorldKind.Client) > 0 ||
+                              pool.PendingHopsOf(WorldKind.Menu) > 0 || pool.WaitingForEdge > 0;
+            // in the main menu (#83) the UI frame runs the menu's hops; in a world, the step
+            if (pool.Session(WorldKind.Menu) != 0) _harness.MenuFrame();
+            else _harness.Step();
             // a task that awaits something of its own (a delay, a file, a thread) moves in real time: give it a moment
             if (!hopsOrEdges) pool.WaitForWork(TimeSpan.FromMilliseconds(Math.Min(10, Left().TotalMilliseconds)));
         }

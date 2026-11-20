@@ -40,6 +40,15 @@ internal sealed class FakeTaskBackend : Kiln.TestKit.KitTaskPool
         PostEdge(WorldKind.Client);
     });
 
+    /// <summary>One UI frame in the main menu (#83) on the game's main thread: opens a menu session while no world runs,
+    /// then runs the menu hops queued before it.</summary>
+    public new int MenuFrame()
+    {
+        var ran = 0;
+        OnMain(() => ran = base.MenuFrame());
+        return ran;
+    }
+
     /// <summary>Runs <paramref name="job"/> on the game's main thread and waits for it.</summary>
     public void OnMain(Action job) => Run(_mainJobs, job, "main thread");
 
