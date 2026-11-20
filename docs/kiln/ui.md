@@ -292,7 +292,8 @@ player only opened (`InstanceData` Holder sync covers the holder only).
 
 `Ui.Inventory` (client only) treats the slots the game draws (backpack, the inventory menu, a chest, a crafting station or
 factory, an NPC's crafting) as something your mod acts on: marks over a slot, and clicks on a slot with the item's
-identity. Sample: `mods/samples/SlotMarks`. Native: `kiln.ui.inventory` (`native/core/abi/services/kiln_ui_inventory.h`)
+identity. Sample: `mods/samples/SlotMarks` (both sides: the client asks, its server half checks the item is the sender's,
+then the client draws the mark). Native: `kiln.ui.inventory` (`native/core/abi/services/kiln_ui_inventory.h`)
 on `kiln.ui.values`' slot frames and kiln.ui's `subscribe_pointer_press`.
 
 ```csharp
@@ -328,7 +329,7 @@ never authority. Kiln Auto Loot's salvage marks work this way.
 player's crafting, a storage chest, a station, an NPC's crafting, a factory. Never in the play view: the hotbar is drawn
 there but a click attacks. Only while Kiln does not have the input (no Kiln menu or screen open) and the cursor is not over
 a Kiln panel. The game's latest slot frame must be this session's and at most 250 ms old. Anything missing: no event, and
-the game gets the click as without Kiln.
+the game gets the click as without Kiln. A click still waiting for its UI frame when the world is left is dropped.
 
 **Marks** are drawn by Kiln's overlay over the game's slots, on the same screens and on the play view's hotbar, in this
 player's game only. Two mods marking one item: one of the marks shows (no layering in this version).

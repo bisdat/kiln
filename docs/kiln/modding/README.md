@@ -143,7 +143,7 @@ first). `mods/samples/build.sh` builds the loader samples (`SampleLib`, `SampleC
 | `SoundSample` | tools/soundcook + Kiln.Audio: test tones as UI, positional, looped and streamed sounds, music, a replaced game cue, a voiced line and a narration |
 | `UiSample` | Kiln.Ui from code: an FPS line on the HUD, a window (F8) with widgets, toasts |
 | `MenuButtons` | Kiln.Ui game UI: entries in the main and pause menus opening a screen, a crafting info panel, a subcategory and tab in the crafting menu |
-| `SlotMarks` | `Ui.Inventory` (0.2.0-dev.30): Ctrl+click marks an item's slot (the game does not pick it up), Alt+right-click lists it, a tint on big stacks |
+| `SlotMarks` | `Ui.Inventory` (0.2.0-dev.30), client + server: Ctrl+click asks the server to mark an item (the game does not pick it up; the server half checks the item is in the sender's inventory with `Items.Read` first), Alt+right-click lists it, a tint on big stacks |
 | `ValueBars` | `Ui.Values` (dev.28): a water container's detail number in charges with a label, its slot bar, the health pair as a percentage, tooltip lines in Kiln's Item details window (F8) |
 | `RenderSample` | render events: an FPS counter, a compass and waypoint markers in the world |
 | `BlobCatalog` | `Assets.OpenBlobCatalog`: `/blobs` counts the content blobs the game serves by where they come from, lists the ones mods registered, and writes the first entries as JSON |
