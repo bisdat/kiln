@@ -52,7 +52,7 @@ export default function SettingsTab({ studio: st, gameId }: { studio: Studio; ga
         <Button disabled={!dirty || busy} onClick={() => void apply()} data-testid="studio-capture-save">{t("studio.settings.save", { count: chosen })}</Button>
       </div>
       {!files ? <Spinner /> : files.length === 0 ? <p className="kst-p kst-dim">{t("studio.settings.none")}</p> : (
-        <ul className="kst-files">
+        <ul className="kst-files" aria-busy={busy || undefined}>
           {files.map((f) => (
             <li key={f.path} className="kst-file" data-testid={"studio-file-" + f.path}>
               <div className="kst-row kst-between">
@@ -67,7 +67,7 @@ export default function SettingsTab({ studio: st, gameId }: { studio: Studio; ga
                       options={[{ value: "both", label: t("studio.mods.both") }, { value: "client", label: t("studio.mods.client") }, { value: "server", label: t("studio.mods.server") }]} />
                     {(f.mode === "replace" || !f.defaults) && (
                       <label className="kst-tick"><input type="checkbox" className="k-check" checked={f.whole} data-testid={"studio-whole-" + f.path}
-                        disabled={f.keys.some((k) => k.secret)}
+                        disabled={busy || f.keys.some((k) => k.secret)}
                         onChange={(e) => edit(f.path, (x) => ({ ...x, whole: e.target.checked }))} />{t("studio.settings.whole")}</label>
                     )}
                   </span>
@@ -78,7 +78,7 @@ export default function SettingsTab({ studio: st, gameId }: { studio: Studio; ga
                   {f.keys.map((k) => (
                     <li key={k.key}>
                       <label className={"kst-tick" + (k.secret ? " kst-off" : "")} title={k.secret}>
-                        <input type="checkbox" className="k-check" checked={k.chosen || f.whole} disabled={!!k.secret || f.whole} data-testid={"studio-key-" + f.path + "#" + k.key}
+                        <input type="checkbox" className="k-check" checked={k.chosen || f.whole} disabled={busy || !!k.secret || f.whole} data-testid={"studio-key-" + f.path + "#" + k.key}
                           onChange={(e) => edit(f.path, (x) => ({ ...x, keys: x.keys.map((y) => (y.key === k.key ? { ...y, chosen: e.target.checked } : y)) }))} />
                         <span className="kst-mono">{k.key}</span> <span>{show(k.value)}</span>
                         {k.default !== undefined && <span className="kst-dim">{t("studio.settings.default", { value: show(k.default) })}</span>}

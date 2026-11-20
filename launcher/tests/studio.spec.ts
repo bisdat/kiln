@@ -58,6 +58,8 @@ test("settings are captured: chosen keys only, personal keys left out, secrets n
   await open(page, "/?mock=1#/studio/ember-run/settings");
   await expect(page.getByTestId("studio-key-big-stacks.json#multiplier")).toBeChecked();
   await page.getByTestId("studio-capture").click();
+  // the capture reads the files again: the boxes take changes once it answered
+  await expect(page.getByTestId("studio-capture")).toBeEnabled();
   await expect(page.getByTestId("studio-key-big-stacks.json#hotkey")).not.toBeChecked();
   await expect(page.getByTestId("studio-key-discord-bridge.json#token")).toBeDisabled();
   await expect(page.getByTestId("studio-whole-discord-bridge.json")).toBeDisabled();
