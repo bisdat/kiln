@@ -2014,6 +2014,10 @@ export const reportPreview = (target: LogTarget | null, exclude: string[] = []) 
 export const reportSave = (target: LogTarget | null, path: string, exclude: string[] = []) => call<ReportSaved>("report_save", { target, path, exclude });
 /** A few lines for a forum post, redacted like the zip. */
 export const reportSummary = (target: LogTarget | null) => call<string>("report_summary", { target });
+/** What the window did with a support report that report_save never hears of (the Save dialog cancelled, an error
+ *  shown), into launcher.log. Never throws: a note that cannot be written is dropped. */
+export type ReportNote = "opened" | "dialogCancelled" | "dialogChosen" | "failed";
+export const reportNote = (note: ReportNote, detail?: string) => call<null>("report_note", { note, detail: detail ?? null }).catch(() => null);
 
 // saves.rs
 export const savesList = (gameId: GameId) => call<SaveSlot[]>("saves_list", { gameId });
@@ -2297,7 +2301,7 @@ export const COMMANDS = [
   "chain_view", "chain_set_late", "shroudlink_notice",
   "found_scan", "found_add",
   "cook_plan", "cook_run", "boot_snapshot_run",
-  "report_save", "report_summary", "report_preview",
+  "report_save", "report_summary", "report_preview", "report_note",
   "data_folder_get", "data_folder_size", "data_folder_check", "data_folder_move", "data_folder_use", "data_folder_reset",
   "data_folder_notice_ack", "data_folder_restart",
   "app_started", "app_render_set", "app_render_report",

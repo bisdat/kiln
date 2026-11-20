@@ -135,6 +135,69 @@ pub(crate) fn lock(dirs: &DataDirs) -> Result<crate::util::LockedFile> {
     Ok(crate::util::LockedFile(f))
 }
 
+/// The quick flow's lock ([`hold`], [`try_hold`]), released when dropped.
+#[derive(Debug)]
+pub struct QuickLock(#[allow(dead_code)] crate::util::LockedFile);
+
+/// Holds the data folder the way an add, a roll back or a DLL replacement does (`quick.lock`), waiting for one that
+/// runs. The launcher's own writes of the game's profile.json (a profile page's save, an activation) take it, so they
+/// never write native.json and profile.json beside an add that does the same.
+pub fn hold(dirs: &DataDirs) -> Result<QuickLock> {
+    lock(dirs).map(QuickLock)
+}
+
+/// [`hold`] without waiting: None while an add or another quick operation (this process or another one) runs. The
+/// launcher's profile watcher looks again at its next round instead of writing the game's profile.json beside it.
+pub fn try_hold(dirs: &DataDirs) -> Result<Option<QuickLock>> {
+    std::fs::create_dir_all(&dirs.root)?;
+    let f = std::fs::OpenOptions::new().create(true).truncate(false).read(true).write(true).open(dirs.root.join("quick.lock"))?;
+    match f.try_lock() {
+        Ok(()) => Ok(Some(QuickLock(crate::util::LockedFile(f)))),
+        Err(std::fs::TryLockError::WouldBlock) => Ok(None),
+        Err(std::fs::TryLockError::Error(e)) => Err(e.into()),
+    }
+}
+
+/// How long an add waits before it writes the game's profile.json a second time (put_in_profile).
+const REFRESH_RETRY: std::time::Duration = std::time::Duration::from_millis(400);
+
+/// The add's write of the game's profile.json ([`profile::refresh_active`]), tried once more after [`REFRESH_RETRY`]
+/// before the add is undone: a file another program holds for a moment (an antivirus scan, another Kiln writer) is
+/// usually free by then.
+fn refresh_for_add(dirs: &DataDirs, install: &GameInstall, progress: &mut dyn Progress) -> Result<Option<profile::Activation>> {
+    let once = || {
+        #[cfg(test)]
+        if refresh_fault(&dirs.root) {
+            return Err(Error::new(ErrorCode::NotFound, "The system cannot find the file specified. (os error 2)"));
+        }
+        profile::refresh_active(dirs, install)
+    };
+    match once() {
+        Ok(a) => Ok(a),
+        Err(e) => {
+            progress.report(None, &format!("writing the game's profile.json again ({})", e.message));
+            std::thread::sleep(REFRESH_RETRY);
+            once()
+        }
+    }
+}
+
+/// Tests: how many of the next profile.json writes of an add fail, for one data folder.
+#[cfg(test)]
+static REFRESH_FAULTS: std::sync::Mutex<Vec<(std::path::PathBuf, usize)>> = std::sync::Mutex::new(Vec::new());
+
+#[cfg(test)]
+fn refresh_fault(root: &Path) -> bool {
+    let mut f = REFRESH_FAULTS.lock().unwrap_or_else(|e| e.into_inner());
+    match f.iter_mut().find(|(r, n)| r == root && *n > 0) {
+        Some((_, n)) => {
+            *n -= 1;
+            true
+        }
+        None => false,
+    }
+}
+
 fn has_profiles(dirs: &DataDirs) -> Result<bool> {
     match std::fs::read_dir(dirs.profiles()) {
         Ok(mut rd) => rd.next().transpose().map(|e| e.is_some()).map_err(Error::from),
@@ -799,7 +862,7 @@ fn put_in_profile(dirs: &DataDirs, install: &GameInstall, target: &Target, refs:
     report.notices.extend(kept.commit());
     if !running {
         progress.report(None, "writing the game's profile.json");
-        match profile::refresh_active(dirs, install) {
+        match refresh_for_add(dirs, install, progress) {
             Ok(Some(mut a)) => {
                 // another active profile that had changed is written again too; only the target's write counts here
                 report.applied = a.profile_id == saved.id;
@@ -900,5 +963,91 @@ fn revert_unlocked(dirs: &DataDirs, profile_id: &str, changes: &[ProfileChange])
             kept.abort();
             Err(e)
         }
+    }
+}
+
+#[cfg(test)]
+mod refresh_retry_tests {
+    use super::*;
+    use crate::game::{PathMode, Platform};
+    use crate::task::NoProgress;
+
+    fn put(root: &Path, rel: &str, data: &[u8]) {
+        let p = root.join(rel);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, data).unwrap();
+    }
+
+    fn kiln_mod(root: &Path, id: &str) -> PathBuf {
+        let d = root.join(format!("src/{id}"));
+        put(&d, "kiln.mod.json", format!(r#"{{ "id": "{id}", "name": "{id} mod", "version": "1.0.0", "apiVersion": "0.2", "entryAssembly": "M.dll", "side": "both" }}"#).as_bytes());
+        put(&d, "M.dll", id.as_bytes());
+        d
+    }
+
+    fn setup(tag: &str) -> (PathBuf, DataDirs, GameInstall) {
+        let root = std::env::temp_dir().join(format!("km-quick-retry-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let root = root.canonicalize().unwrap();
+        let g = root.join("game");
+        put(&g, "enshrouded.exe", b"MZ");
+        std::fs::create_dir_all(g.join("kiln")).unwrap();
+        let install = GameInstall {
+            id: "g-retry".into(), kind: GameKind::Client, path: g, exe: "enshrouded.exe".into(), app_id: crate::CLIENT_APP_ID,
+            library: None, platform: Platform::Proton, prefix: None, build_id: None, exe_sha256: None, steam_flavor: None,
+            path_mode: PathMode::Copy, source: "manual".into(),
+        };
+        (root.clone(), DataDirs::at(root.join("data")), install)
+    }
+
+    fn enabled_in_game(g: &GameInstall) -> Vec<String> {
+        let f = profile::read_game_profile(&g.path).unwrap().expect("profile.json");
+        f.mods.kiln.iter().filter(|m| m.enabled).map(|m| m.id.clone()).collect()
+    }
+
+    /// The game's profile.json could not be written once (another writer's moment, a scan): the add writes it again
+    /// after a short pause instead of undoing itself ("Not added: The system cannot find the file specified").
+    #[test]
+    fn an_add_writes_the_games_profile_again_once_before_it_is_undone() {
+        let (root, dirs, g) = setup("once");
+        add_with(&dirs, &g, &[kiln_mod(&root, "a")], false, &mut NoProgress).unwrap();
+        REFRESH_FAULTS.lock().unwrap().push((dirs.root.clone(), 1));
+        let r = add_with(&dirs, &g, &[kiln_mod(&root, "b")], false, &mut NoProgress);
+        REFRESH_FAULTS.lock().unwrap().retain(|(r, _)| r != &dirs.root);
+        let r = r.expect("added after the second write");
+        assert!(r.applied && r.added.len() == 1, "{r:?}");
+        let mut ids = enabled_in_game(&g);
+        ids.sort();
+        assert_eq!(ids, ["a", "b"]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Failing twice: undone as before, the profile without the mod.
+    #[test]
+    fn an_add_whose_profile_write_fails_twice_is_undone() {
+        let (root, dirs, g) = setup("twice");
+        let first = add_with(&dirs, &g, &[kiln_mod(&root, "a")], false, &mut NoProgress).unwrap();
+        REFRESH_FAULTS.lock().unwrap().push((dirs.root.clone(), 2));
+        let r = add_with(&dirs, &g, &[kiln_mod(&root, "b")], false, &mut NoProgress);
+        REFRESH_FAULTS.lock().unwrap().retain(|(r, _)| r != &dirs.root);
+        let e = r.unwrap_err();
+        assert!(e.message.starts_with("could not apply the added mods"), "{}", e.message);
+        assert_eq!(enabled_in_game(&g), ["a"]);
+        let p = profile::get(&dirs, first.profile_id.as_deref().unwrap()).unwrap();
+        assert_eq!(p.mods.kiln.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["a"]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// While an add holds the data folder, [`try_hold`] says so (the launcher's watcher waits for its next round);
+    /// once the add is done it holds it.
+    #[test]
+    fn try_hold_is_refused_while_the_folder_is_held() {
+        let (root, dirs, _g) = setup("hold");
+        let held = hold(&dirs).unwrap();
+        assert!(try_hold(&dirs).unwrap().is_none(), "held by another holder in this process");
+        drop(held);
+        assert!(try_hold(&dirs).unwrap().is_some());
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

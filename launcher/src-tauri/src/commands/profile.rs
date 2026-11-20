@@ -160,13 +160,36 @@ pub(crate) fn reapply(d: &kiln_manage::paths::DataDirs, g: &kiln_manage::game::G
 /// generation (seen in a player's launcher.log as every "written again" line twice). The second one now waits, finds
 /// the file current and writes nothing.
 pub(crate) fn reapply_checked(d: &kiln_manage::paths::DataDirs, g: &kiln_manage::game::GameInstall) -> Option<(Activation, bool)> {
+    reapply_with(d, g, true).flatten()
+}
+
+/// [`reapply_checked`] for the profile watcher: None (nothing done, nothing waited for) while an add, a roll back or a
+/// DLL replacement holds the data folder (`quick.lock`); the watcher looks again at its next round. Side by side, the
+/// add and the watcher both wrote native.json and profile.json, and the add was undone ("Not added: The system cannot
+/// find the file specified", a player's report 2026-11-20).
+pub(crate) fn reapply_if_free(d: &kiln_manage::paths::DataDirs, g: &kiln_manage::game::GameInstall) -> Option<Option<(Activation, bool)>> {
+    reapply_with(d, g, false)
+}
+
+/// The data folder's quick lock first (waited for, or only when free), then one at a time in this process.
+fn reapply_with(d: &kiln_manage::paths::DataDirs, g: &kiln_manage::game::GameInstall, wait: bool) -> Option<Option<(Activation, bool)>> {
+    let held = if wait { kiln_manage::quick::hold(d).map(Some) } else { kiln_manage::quick::try_hold(d) };
+    let _quick = match held {
+        Ok(Some(l)) => Some(l),
+        Ok(None) => return None,
+        Err(e) => {
+            // no lock file to hold (a read-only folder?): as before the lock, one at a time in this process only
+            crate::commands::app::launcher_log("profile", &format!("the data folder's quick.lock could not be held: {}", e.message));
+            None
+        }
+    };
     static ONE_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _one = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
     if kiln_manage::proc::find_game(g).ok().flatten().is_some() {
-        return None;
+        return Some(None);
     }
     let before = profile::read_game_profile(&g.path).ok().flatten().map(|f| f.generation);
-    match profile::refresh_active(d, g) {
+    Some(match profile::refresh_active(d, g) {
         Ok(Some(a)) => {
             let log = |line: String| crate::commands::app::launcher_log("profile", &line);
             if before == Some(a.generation) {
@@ -183,7 +206,7 @@ pub(crate) fn reapply_checked(d: &kiln_manage::paths::DataDirs, g: &kiln_manage:
             crate::commands::app::launcher_log("profile", &format!("the active profile of {} changed but does not apply: {}", g.path.display(), e.message));
             None
         }
-    }
+    })
 }
 
 #[tauri::command]
@@ -231,7 +254,10 @@ pub async fn profile_activate(app: AppHandle, profile_id: String, game_id: Strin
     let r = blocking(move || {
         let g = crate::state::game(&id)?;
         crate::state::refuse_running(&g)?;
-        let a = profile::activate(&dirs()?, &profile_id, &g)?;
+        let d = dirs()?;
+        // not beside an add that writes the game's profile.json too (the watcher waits for this one: reapply_if_free)
+        let _quick = kiln_manage::quick::hold(&d)?;
+        let a = profile::activate(&d, &profile_id, &g)?;
         crate::commands::app::launcher_log("profile", &format!("{} activated in {} (generation {})", a.profile_id, g.path.display(), a.generation));
         log_notes(&a);
         Ok(a)
