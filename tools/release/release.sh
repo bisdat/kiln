@@ -349,6 +349,25 @@ nc=$(sed -n 's/^const VERSION = "\(.*\)";/\1/p' "$src/tools/vscode/scripts/fetch
 seed "netcoredbg-$nc-win64.zip" "$KILN_OUT/vscode/netcoredbg/$nc/netcoredbg-win64.zip" "$repo"/.out/*/netcoredbg/"$nc"/netcoredbg-win64.zip
 signing=0
 if "$here/authenticode.sh" available; then signing=1; note "Authenticode: signing Windows files"; else note "Windows files unsigned (no authenticode.env)"; fi
+# The Windows launcher builds (Tauri's NSIS bundler, on this machine) need makensis, and a signed setup also NSIS's own
+# plugins: Tauri copies them from $NSIS_PATH, else /usr/share/nsis (tools/launcher/build-windows.sh looks beside makensis
+# too). Checked here, before an hour of building, not at the bundle step.
+if ((!skip_windows)); then
+  makensis=$(command -v makensis) || die "the Windows setup needs makensis (NSIS) on PATH"
+  if ((signing)) && [[ -z ${NSIS_PATH:-} && ! -d /usr/share/nsis/Plugins/x86-unicode ]]; then
+    nsis_root=$(dirname "$(dirname "$(readlink -f "$makensis")")")
+    for d in "$nsis_root/share/nsis" "$nsis_root"; do
+      if [[ -d $d/Plugins/x86-unicode ]]; then export NSIS_PATH=$d; break; fi
+    done
+    [[ -n ${NSIS_PATH:-} ]] || die "a signed Windows setup needs NSIS's plugins (Plugins/x86-unicode): none in /usr/share/nsis or beside $makensis; set NSIS_PATH to the NSIS folder that has them"
+  fi
+  ((signing)) && note "NSIS plugins for the signed setup: ${NSIS_PATH:-/usr/share/nsis}"
+fi
+# Tauri keeps its NSIS toolset in $XDG_CACHE_HOME/tauri/NSIS (else ~/.cache) and, on Linux, removes and rebuilds it on
+# every Windows build (it checks for an NSIS.exe it never puts there), so two builds sharing it race. Each run's Windows
+# builds get their own cache folder in its work folder; cargo-xwin's MSVC CRT/SDK cache (large, downloaded once) stays
+# the shared one.
+win_env=(env XDG_CACHE_HOME="$work/xdg-cache" XWIN_CACHE_DIR="${XWIN_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/cargo-xwin}")
 sign_pe() { if ((signing)); then "$here/authenticode.sh" sign "$@" | tee -a "$log"; fi; }
 # linux COMMAND...: runs a Linux build command (cargo, build-linux.sh, notices.py for the AppImage) where the Linux files
 # are built: the Ubuntu 22.04 container (tools/release/linux-build/run.sh; $src, $work and tools/release mounted at
@@ -509,7 +528,7 @@ if ((!skip_windows)); then
   wargs=(--runtime "$runtime_zip" --version "$version" --config "$(resources "$notices")")
   ((signing)) && wargs+=(--config "{\"bundle\":{\"windows\":{\"signCommand\":{\"cmd\":\"$here/authenticode.sh\",\"args\":[\"sign\",\"%1\"]}}}}")
   rm -rf "$CARGO_TARGET_DIR/$win/release/bundle"
-  (cd "$src" && quiet low tools/launcher/build-windows.sh "${wargs[@]}")
+  (cd "$src" && quiet low "${win_env[@]}" tools/launcher/build-windows.sh "${wargs[@]}")
   setup=$KILN_OUT/bundles/windows/kiln-launcher-setup.exe
   sign_pe "$CARGO_TARGET_DIR/$win/release/kilnctl.exe" "$CARGO_TARGET_DIR/$win/release/kiln.exe"
 fi
@@ -531,7 +550,7 @@ fi
 if ((nexus_build && !skip_windows)); then
   step "launcher: Nexus Mods build, Windows (no self-update)"
   rm -rf "$CARGO_TARGET_DIR/$win/release/bundle"
-  (cd "$src" && quiet low tools/launcher/build-windows.sh --nexus "${wargs[@]}")
+  (cd "$src" && quiet low "${win_env[@]}" tools/launcher/build-windows.sh --nexus "${wargs[@]}")
   nexus_setup=$KILN_OUT/bundles/windows-nexus/kiln-launcher-setup.exe
 fi
 
