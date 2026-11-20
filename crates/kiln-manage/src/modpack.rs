@@ -21,6 +21,8 @@ pub const MANIFEST: &str = "kiln-modpack.json";
 pub mod pack;
 /// The three-way merge of a pack's config overrides.
 pub mod merge;
+/// The player layer (`local.<pid>`) and data fields of pack layers.
+pub mod layers;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

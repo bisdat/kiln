@@ -210,6 +210,16 @@ pub struct Merged {
 /// The three-way merge of one file: `base` = the installed version's leaves (None: it had no override for the file),
 /// `theirs` = the new version's (None: it has none), `mine` = the live value at a key.
 pub fn three_way(base: Option<&Leaves>, theirs: Option<&Leaves>, mine: &dyn Fn(&[String]) -> Option<Value>) -> Merged {
+    three_way_since(base, theirs, mine, None)
+}
+
+/// [`three_way`] that also knows the file as the last install or update left it (`installed`: the value at a key then).
+/// A key the pack sets for the first time is then a conflict when the player changed it since (it held another value
+/// then), instead of being overwritten; a key the file did not hold then is taken (a mod writing its defaults is no
+/// player change).
+pub fn three_way_since(
+    base: Option<&Leaves>, theirs: Option<&Leaves>, mine: &dyn Fn(&[String]) -> Option<Value>, installed: Option<&dyn Fn(&[String]) -> Option<Value>>,
+) -> Merged {
     let empty = Leaves::new();
     let (b, t) = (base.unwrap_or(&empty), theirs.unwrap_or(&empty));
     let keys: BTreeSet<&Key> = b.keys().chain(t.keys()).collect();
@@ -221,7 +231,11 @@ pub fn three_way(base: Option<&Leaves>, theirs: Option<&Leaves>, mine: &dyn Fn(&
             (Some(_), None) => {}
             // a key the pack sets for the first time
             (None, Some(tv)) => {
-                if m != *tv {
+                let changed_since = installed.and_then(|f| f(k)).is_some_and(|then| m.as_ref() != Some(&then));
+                if m == *tv {
+                } else if changed_since {
+                    out.conflicts.push((k.clone(), KeyConflict { key: key_text(k), base: None, pack: tv.clone(), mine: m }));
+                } else {
                     out.take.push((k.clone(), tv.clone()));
                     out.taken.push(key_text(k));
                 }
@@ -302,6 +316,72 @@ mod tests {
         let (_, c) = &m.conflicts[0];
         assert_eq!((c.key.as_str(), c.base.clone(), c.pack.clone(), c.mine.clone()), ("c", Some(json!(1)), Some(json!(2)), Some(json!(7))));
         assert_eq!(m.take, vec![(vec!["a".to_string()], Some(json!(2))), (vec!["f".to_string()], Some(json!(5)))]);
+    }
+
+    /// The merge matrix: removal vs edit, both removing, the pack no longer managing a key, the player deleting a key or
+    /// the whole file, the same change on both sides, INI settings in conflict, a key new to the pack.
+    #[test]
+    fn merge_matrix_removal_edit_and_settings() {
+        let k = |s: &str| -> Key { s.split('.').map(str::to_string).collect() };
+        let base = l(OverrideMode::MergePatch, r#"{ "rm": 1, "rm_edit": 1, "unmanaged": 1, "both_rm": 1, "del_mine": 1, "del_unchanged": 1, "same": 1 }"#);
+        let theirs = l(OverrideMode::MergePatch, r#"{ "rm": null, "rm_edit": null, "both_rm": null, "del_mine": 2, "del_unchanged": 1, "same": 3 }"#);
+        let live = json!({ "rm": 1, "rm_edit": 5, "unmanaged": 7, "del_unchanged": null, "same": 3 });
+        let mine = |key: &[String]| live.get(&key[0]).cloned().filter(|v| !v.is_null());
+        let m = three_way(Some(&base), Some(&theirs), &mine);
+        // the pack removes a key the player left alone: removed
+        assert!(m.take.contains(&(k("rm"), None)), "{:?}", m.take);
+        // the pack removes a key the player edited: the player decides
+        let c: BTreeMap<String, &KeyConflict> = m.conflicts.iter().map(|(_, c)| (c.key.clone(), c)).collect();
+        assert_eq!((c["rm_edit"].pack.clone(), c["rm_edit"].mine.clone()), (None, Some(json!(5))));
+        // the pack no longer manages a key: the player's value stays, nothing written
+        assert!(!m.take.iter().any(|(x, _)| x == &k("unmanaged")) && !c.contains_key("unmanaged"));
+        // both removed it: nothing to do
+        assert!(!c.contains_key("both_rm") && !m.take.iter().any(|(x, _)| x == &k("both_rm")));
+        // the player deleted a key the pack changes: a conflict with "mine" absent
+        assert_eq!((c["del_mine"].pack.clone(), c["del_mine"].mine.clone()), (Some(json!(2)), None));
+        // the player deleted a key the pack leaves as it was: their deletion is kept
+        assert!(m.kept.contains(&"del_unchanged".to_string()));
+        // both made the same change: nothing to ask
+        assert!(!c.contains_key("same"));
+        assert_eq!(m.conflicts.len(), 2);
+
+        // the player deleted the whole file: every key the pack changes asks, the rest stays deleted
+        let gone = |_: &[String]| None;
+        let m = three_way(Some(&base), Some(&theirs), &gone);
+        assert_eq!(m.conflicts.iter().map(|(_, c)| c.key.as_str()).collect::<Vec<_>>(), ["del_mine", "same"]);
+
+        // INI settings changed on both sides differently, and the same way
+        let base = l(OverrideMode::Ini, "[Loot]\nrange = 10\nchance = 5\n");
+        let theirs = l(OverrideMode::Ini, "[Loot]\nrange = 12\nchance = 6\n");
+        let live = "[Loot]\nrange = 20\nchance = 6\n";
+        let m = three_way(Some(&base), Some(&theirs), &|key| value_at(OverrideMode::Ini, Some(live), key));
+        assert_eq!(m.conflicts.len(), 1);
+        let (_, c) = &m.conflicts[0];
+        assert_eq!((c.key.as_str(), c.base.clone(), c.pack.clone(), c.mine.clone()), ("Loot.range", Some(json!("10")), Some(json!("12")), Some(json!("20"))));
+        assert!(m.take.is_empty(), "chance: both 6");
+    }
+
+    #[test]
+    fn a_key_new_to_the_pack_asks_when_the_player_changed_it_since_the_install() {
+        let theirs = l(OverrideMode::MergePatch, r#"{ "hotkey": "F10", "fresh": 1 }"#);
+        let live = json!({ "hotkey": "F5", "fresh": 0 });
+        let mine = |k: &[String]| live.get(&k[0]).cloned();
+        // without the installed state: the pack's value is written (old instances)
+        let m = three_way(None, Some(&theirs), &mine);
+        assert_eq!(m.taken, ["fresh", "hotkey"]);
+        // the file held F9 at the install and the player made it F5: ask; "fresh" was not in the file then: take it
+        let then = json!({ "hotkey": "F9" });
+        let installed = |k: &[String]| then.get(&k[0]).cloned();
+        let m = three_way_since(None, Some(&theirs), &mine, Some(&installed));
+        assert_eq!(m.taken, ["fresh"]);
+        assert_eq!(m.conflicts.len(), 1);
+        assert_eq!(m.conflicts[0].1.base, None);
+        // unchanged since the install (still F9 now): taken
+        let live = json!({ "hotkey": "F9" });
+        let mine = |k: &[String]| live.get(&k[0]).cloned();
+        let m = three_way_since(None, Some(&theirs), &mine, Some(&installed));
+        assert_eq!(m.taken, ["fresh", "hotkey"]);
+        assert!(m.conflicts.is_empty());
     }
 
     #[test]
