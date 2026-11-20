@@ -464,6 +464,48 @@ internal static class CharacterStore
         }
     }
 
+    // ---- explicit-owner records (Kiln.ModValues, chapter 05b section 2) ----
+    // Kiln.ModValues keeps its ledger in the owning mod's namespace although Kiln's own code writes it (a central
+    // receiver must never put every ledger under one mod, nor take a mod id from a client). These take the validated
+    // owner namespace instead of the calling ModContext, and keep values as JSON (no live object a Replace detaches).
+
+    /// <summary>The open world's id for owned records; empty while no world's mod data is read.</summary>
+    internal static Guid OwnedWorld =>
+        SavesRuntime.Ensure() && !SavesRuntime.Store.LoadDeferred && Guid.TryParse(SavesRuntime.Store.WorldId, out var g) ? g : Guid.Empty;
+
+    internal static string? ReadOwned(string prefix, CharacterKey c, string owner, string key)
+    {
+        CheckCharacter(c);
+        var store = Store("ModValues");
+        store.EnsureOpen();
+        var b = store.FindBundle(Scope(prefix, c, owner));
+        return b is not null && b.Keys.TryGetValue(key, out var s) ? store.JsonOf(b, s, key) : null;
+    }
+
+    internal static void WriteOwned(string prefix, CharacterKey c, string owner, string key, string json)
+    {
+        CheckCharacter(c);
+        ArgumentNullException.ThrowIfNull(json);
+        var store = Store("ModValues");
+        if (prefix == CharacterData.CarriedPrefix) CharacterSync.EnsureStarted();
+        store.GetBundleRaw(Scope(prefix, c, owner), owner).Keys[WorldStore.CheckKey(key)] = new WorldStore.Slot { Json = json };
+    }
+
+    /// <summary>Every (character, owner) whose bundle under <paramref name="prefix"/> holds <paramref name="key"/>.</summary>
+    internal static IReadOnlyList<(CharacterKey Character, string Owner)> FindOwned(string prefix, string key)
+    {
+        var store = Store("ModValues");
+        store.EnsureOpen();
+        var list = new List<(CharacterKey, string)>();
+        foreach (var b in store.BundlesWithPrefix(prefix))
+        {
+            if (!b.Keys.ContainsKey(key)) continue;
+            var parts = b.Scope.Split('/');
+            if (parts.Length == 3 && CharacterKey.TryParse(parts[1], out var k)) list.Add((k, parts[2]));
+        }
+        return list;
+    }
+
     internal static CharacterKey LastOf(ulong playerId)
     {
         if (playerId == 0 || !SavesRuntime.Ensure()) return default;
