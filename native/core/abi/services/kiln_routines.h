@@ -30,7 +30,10 @@
  * the same owner may replace its plan; another owner's assign, remove or resume completes with ok = 0 and the reason
  * "OwnedBy:<mod>". The mod of an owner is the part of the plan's key before ':': an owner's first assign binds it to
  * that mod, a later plan of another mod from the same owner is KILN_ERR_INVALID_ARGUMENT, and so is a mod another live
- * owner is bound to. The binding ends with revoke_owner.
+ * owner is bound to. The binding ends with revoke_owner. Kiln.Blocks names each mod's owner with claim_mod: a claimed
+ * owner's plans must be its own mod's, no other owner may take that mod's plans, and the mod's assignments move to its
+ * claimed owner (a reload's new owner). An owner nobody claimed (a native plugin) is bound by its first plan's key
+ * until the mod it named is claimed.
  *
  * One completion per change. assign, remove and resume check their arguments, queue the change and give a ticket; a
  * refusal at once (a result other than KILN_OK) makes no ticket and never calls `done`. Queued changes are committed
@@ -39,8 +42,9 @@
  * follows), also when the villager is paused, not in the world, or its first task cannot start: what tasks do later
  * (no seat, no bed, NativeSleepNotCurrentlyAllowed) comes as task events only, never as a second completion.
  * At most KILN_ROUTINES_MAX_QUEUED changes wait at a time; one more is refused with KILN_ERR_BUFFER_TOO_SMALL before
- * anything changed. A world that stops completes what is queued with ok = 0, "WorldStopped"; an owner that is revoked
- * before the commit gets ok = 0, "Revoked". The reason string is valid for the callback only.
+ * anything changed. A world that stops completes what is queued with ok = 0, "WorldStopped". A revoked owner is never
+ * called again: its queued changes are dropped and a completion due after its revoke is not delivered ("Revoked",
+ * KILN_ROUTINE_REVOKED, stays reserved). The reason string is valid for the callback only.
  *
  * Revisions count the changes of all assignments of the running world, from 1; an assignment's revision is that of its
  * last change.
@@ -94,7 +98,7 @@ enum {
     KILN_ROUTINE_NOT_ASSIGNED = 4,  /* "NotAssigned": resume of a villager without a routine */
 };
 
-/* restore's flags (since 0.2.0-dev.31) */
+/* restore's flags */
 #define KILN_ROUTINE_RESTORE_SUSPENDED 1u /* the saved assignment was suspended by a manual command */
 
 typedef struct KilnRoutineResult {
@@ -127,7 +131,7 @@ typedef struct KilnRoutinesApi {
     /* The villager's snapshot as JSON (not NUL-terminated). KILN_ERR_NOT_FOUND: no routine. *out_len = the length;
      * KILN_ERR_BUFFER_TOO_SMALL when it is more than cap (nothing is written). */
     KilnResult(KILN_CALL* inspect)(uint32_t npc_id, char* json, size_t cap, size_t* out_len);
-    /* The owner is going (its mod unloads): at the next Pre its queued changes complete with "Revoked" and its
+    /* The owner is going (its mod unloads): at the next Pre its queued changes are dropped without a call and its
      * assignments are removed (reason "OwnerUnloaded"), each with its event. Any thread. */
     void(KILN_CALL* revoke_owner)(KilnOwner owner);
 
@@ -136,7 +140,8 @@ typedef struct KilnRoutinesApi {
     KilnResult(KILN_CALL* subscribe_events)(KilnOwner owner, KilnRoutineEventFn fn, void* user, KilnHandle* out);
     KilnResult(KILN_CALL* unsubscribe_events)(KilnHandle handle);
 
-    /* ---- since 0.2.0-dev.31 (check header.size) ---- */
+    /* ---- framework members (Kiln.Blocks). The service is new in 0.2.0-dev.31 and ships with every member of this
+     * table; a reader still checks header.size before using one of these (the test kit's fake serves the seven above). */
 
     /* Framework only (Kiln.Blocks, when a world is ready after a restart): queues "bind this saved assignment again"
      * at the saved revision, not a new one, with the saved manual suspension (flags). An empty reason: a plain rebind,
@@ -148,14 +153,18 @@ typedef struct KilnRoutinesApi {
     /* Framework only: the next revision the world gives is above floor (the highest revision a saved world ever
      * gave, also of assignments since removed). Tick thread; KILN_ERR_UNAVAILABLE when no world runs. */
     KilnResult(KILN_CALL* set_revision_floor)(uint64_t floor);
+    /* Framework only: `owner` is the owner mod `mod_id`'s calls come with (see Owners above). Tick thread;
+     * KILN_ERR_INVALID_ARGUMENT for owner 0 or an empty or over-long mod id. */
+    KilnResult(KILN_CALL* claim_mod)(KilnOwner owner, KilnStr mod_id);
 } KilnRoutinesApi;
 
 #if defined(__cplusplus) && (defined(_WIN64) || defined(__x86_64__) || defined(__aarch64__))
 static_assert(sizeof(KilnRoutineResult) == 48, "KilnRoutineResult");
 static_assert(offsetof(KilnRoutinesApi, assign) == sizeof(KilnServiceHeader), "kiln.routines v1 starts after the header");
-static_assert(offsetof(KilnRoutinesApi, unsubscribe_events) == sizeof(KilnServiceHeader) + 6 * sizeof(void*), "kiln.routines v1");
-static_assert(offsetof(KilnRoutinesApi, restore) == sizeof(KilnServiceHeader) + 7 * sizeof(void*), "kiln.routines dev.31 tail");
-static_assert(sizeof(KilnRoutinesApi) == sizeof(KilnServiceHeader) + 9 * sizeof(void*), "kiln.routines dev.31 tail");
+static_assert(offsetof(KilnRoutinesApi, unsubscribe_events) == sizeof(KilnServiceHeader) + 6 * sizeof(void*), "kiln.routines");
+static_assert(offsetof(KilnRoutinesApi, restore) == sizeof(KilnServiceHeader) + 7 * sizeof(void*), "kiln.routines framework members");
+static_assert(offsetof(KilnRoutinesApi, claim_mod) == sizeof(KilnServiceHeader) + 9 * sizeof(void*), "kiln.routines framework members");
+static_assert(sizeof(KilnRoutinesApi) == sizeof(KilnServiceHeader) + 10 * sizeof(void*), "kiln.routines");
 #endif
 
 #ifdef __cplusplus

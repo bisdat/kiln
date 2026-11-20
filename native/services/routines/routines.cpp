@@ -211,6 +211,14 @@ bool check_layout(std::string* why) {
         return *why = "keen::ecs::ActiveNpcState is not 456 bytes with npcId first", false;
     if (!type_field(types, "keen::ecs::NpcCommon", "taskFailures", &size, &offset) || size != kCommonSize || offset != kFailures)
         return *why = "keen::ecs::NpcCommon is not 1688 bytes with taskFailures at 0x68e", false;
+    // what the keep-awake prefix reads and writes, by the game's own field names
+    const struct {
+        const char* field;
+        uint32_t at;
+    } common_fields[] = {{"interactionStates", l.common_flags}, {"sleepTime", l.common_sleep}, {"wakeUpTime", l.common_wake}};
+    for (const auto& f : common_fields)
+        if (!type_field(types, "keen::ecs::NpcCommon", f.field, &size, &offset) || offset != f.at)
+            return *why = std::string("keen::ecs::NpcCommon.") + f.field + " is not where SleepCheck reads it", false;
     // DynamicActiveNpcState's size is checked on the records themselves, in Pre (kiln.world gives a component's size).
     // The state enum: checked when the game's reflection names it.
     if (const KilnType* state = types->type_by_name(ks("keen::active_npc::State")); state && types->type_enum) {
@@ -340,7 +348,31 @@ void KILN_CALL on_pre(const KilnTickInfo* tick, void*) {
     if (!g_off.empty()) g_engine.clear();  // the layout failed while this step's list was made
 }
 
-void KILN_CALL on_post(const KilnTickInfo*, void*) {
+// The hooks' counters in kiln.log: at a world's stop, and about every 10 s while they change (the keep-awake prefix's
+// marks, the pause and resume phases a player near an owned villager brings, the manual commands).
+uint64_t g_logged_sum = 0, g_logged_step = 0;
+void log_counters(const char* when) {
+    const Stats& s = g_engine.stats;
+    RT_I("counters (%s): workers %llu, owned %llu, stale %llu, decisions %llu, paused %llu, resumed %llu, nested %llu, "
+         "sleep checks %llu, kept awake %llu, repeated sleep checks %llu, marks %llu, commands %llu, manual %llu, dropped intents %llu",
+         when, (unsigned long long)s.workers.load(), (unsigned long long)s.owned.load(), (unsigned long long)s.stale.load(),
+         (unsigned long long)s.decisions.load(), (unsigned long long)s.paused.load(), (unsigned long long)s.resumes.load(),
+         (unsigned long long)s.nested.load(), (unsigned long long)s.sleep_checks.load(), (unsigned long long)s.kept_awake.load(),
+         (unsigned long long)s.sleep_repeats.load(), (unsigned long long)s.marks.load(), (unsigned long long)s.commands.load(),
+         (unsigned long long)s.manual.load(), (unsigned long long)s.dropped_intents.load());
+}
+uint64_t counters_sum() {
+    const Stats& s = g_engine.stats;
+    return s.owned.load() + s.decisions.load() + s.paused.load() + s.resumes.load() + s.kept_awake.load() + s.marks.load() + s.manual.load();
+}
+
+void KILN_CALL on_post(const KilnTickInfo* tick, void*) {
+    if (tick && tick->step - g_logged_step >= 250) {
+        const uint64_t sum = counters_sum();
+        if (sum != g_logged_sum) log_counters("running");
+        g_logged_sum = sum;
+        g_logged_step = tick->step;
+    }
     g_book.post();
     deliver();
     if (const uint64_t lost = g_book.dropped_task_events()) {
@@ -352,6 +384,7 @@ void KILN_CALL on_post(const KilnTickInfo*, void*) {
 
 void KILN_CALL on_world(const KilnWorldEvent* ev, void*) {
     if (ev->kind != KILN_WORLD_SERVER || ev->event != KILN_WORLD_STOPPING) return;
+    if (counters_sum()) log_counters("world stops");
     g_book.stop();
     deliver();
     g_entity.clear();
@@ -422,6 +455,13 @@ KilnResult KILN_CALL restore(KilnOwner owner, uint32_t npc_id, KilnStr plan_json
     return rc;
 }
 
+KilnResult KILN_CALL claim_mod(KilnOwner owner, KilnStr mod_id) {
+    if (!owner || !mod_id.ptr || !mod_id.len || mod_id.len > 128) return KILN_ERR_INVALID_ARGUMENT;
+    if (!on_tick()) return KILN_ERR_WRONG_THREAD;
+    g_book.claim(owner, std::string_view(mod_id.ptr, mod_id.len));
+    return KILN_OK;
+}
+
 KilnResult KILN_CALL set_revision_floor(uint64_t floor) {
     if (!on_tick()) return KILN_ERR_WRONG_THREAD;
     if (!g_off.empty() || !world_runs()) return KILN_ERR_UNAVAILABLE;
@@ -446,7 +486,7 @@ KilnResult KILN_CALL unsubscribe_events(KilnHandle handle) {
 }
 
 const KilnRoutinesApi kTable = {{sizeof(KilnRoutinesApi), KILN_ROUTINES_VERSION}, &assign, &remove, &resume, &inspect, &revoke_owner,
-                                &subscribe_events, &unsubscribe_events, &restore, &set_revision_floor};
+                                &subscribe_events, &unsubscribe_events, &restore, &set_revision_floor, &claim_mod};
 
 // --------------------------------------------------------------------------------------------------- start ----
 

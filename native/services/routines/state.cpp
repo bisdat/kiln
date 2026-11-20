@@ -83,6 +83,27 @@ KilnResult Book::restore(KilnOwner owner, uint32_t npc_id, std::string_view plan
     return KILN_OK;
 }
 
+void Book::claim(KilnOwner owner, std::string_view mod) {
+    if (!owner || mod.empty()) return;
+    release_revoked();
+    const std::string m(mod);
+    claimed_.insert(owner);
+    // a plan of another mod bound this owner before Kiln named it: that binding was only the plan's word
+    if (auto b = owner_mod_.find(owner); b != owner_mod_.end() && b->second != m) {
+        if (auto h = mod_owner_.find(b->second); h != mod_owner_.end() && h->second == owner) mod_owner_.erase(h);
+    }
+    // the mod's routines follow its claimed owner (a reload's new owner, or the code owner of a mod whose routines a
+    // restart bound under its blocks owner)
+    if (auto held = mod_owner_.find(m); held != mod_owner_.end() && held->second != owner) {
+        const KilnOwner old = held->second;
+        owner_mod_.erase(old);
+        for (auto& [npc, a] : assignments_)
+            if (a.owner == old) a.owner = owner;
+    }
+    owner_mod_[owner] = m;
+    mod_owner_[m] = owner;
+}
+
 KilnResult Book::remove(KilnOwner owner, uint32_t npc_id, KilnRoutineDone done, void* user, uint64_t* ticket) {
     return enqueue(Op::Remove, owner, npc_id, nullptr, done, user, ticket);
 }
@@ -98,7 +119,7 @@ void Book::revoke_owner(KilnOwner owner) {
 }
 
 void Book::complete(const Change& c, bool ok, uint32_t code, std::string reason, uint64_t revision) {
-    completions_.push_back(Completion{c.done, c.user, c.ticket, ok, code, std::move(reason), c.npc_id, revision});
+    completions_.push_back(Completion{c.owner, c.done, c.user, c.ticket, ok, code, std::move(reason), c.npc_id, revision});
 }
 
 std::string Book::snapshot(uint32_t npc_id, const Assignment& a, const char* state_override) const {
@@ -190,15 +211,10 @@ void Book::pre(uint64_t step, const Resolver& where) {
         gone.swap(revoked_);
     }
     for (KilnOwner owner : gone) {
-        for (auto it = queue_.begin(); it != queue_.end();) {
-            if (it->owner != owner) {
-                ++it;
-                continue;
-            }
-            auto have = assignments_.find(it->npc_id);
-            complete(*it, false, KILN_ROUTINE_REVOKED, "Revoked", have == assignments_.end() ? 0 : have->second.revision);
-            it = queue_.erase(it);
-        }
+        gone_.insert(owner);
+        claimed_.erase(owner);
+        // its queued changes go without a call: the owner is gone, and nothing of it is called any more
+        std::erase_if(queue_, [&](const Change& c) { return c.owner == owner; });
         std::vector<uint32_t> theirs;
         for (auto& [npc, a] : assignments_)
             if (a.owner == owner) theirs.push_back(npc);
@@ -274,6 +290,14 @@ void Book::pre(uint64_t step, const Resolver& where) {
                     const std::string before = snapshot(c.npc_id, a);
                     a.suspended = false;
                     a.suspend_reason.clear();
+                    a.resumed = true;
+                    // the plan decides afresh at the next decision: no task of the plan is running until then
+                    Runtime& rt = *a.runtime;
+                    rt.task = Kind::None;
+                    rt.state = TaskState::None;
+                    rt.window = -1;
+                    rt.skip_window = Runtime::kNoSkip;
+                    rt.manual = false;
                     a.revision = ++revision_;
                     assignment_event(before, snapshot(c.npc_id, a), "Resumed", false);
                     complete(c, true, KILN_ROUTINE_OK, "", a.revision);
@@ -293,7 +317,8 @@ void Book::pre(uint64_t step, const Resolver& where) {
     for (auto& [npc, a] : assignments_) {
         const uintptr_t dynamic = where ? where(npc) : 0;
         a.present = dynamic != 0;
-        binds.push_back(Bind{npc, dynamic, a.plan, !a.suspended, a.runtime.get()});
+        binds.push_back(Bind{npc, dynamic, a.plan, !a.suspended, a.runtime.get(), a.resumed});
+        a.resumed = false;
     }
     engine_.publish(std::move(binds), step);
 }
@@ -359,6 +384,11 @@ bool Book::inspect(uint32_t npc_id, std::string& json) const {
 std::vector<Completion> Book::take_completions() {
     std::vector<Completion> out;
     out.swap(completions_);
+    // an owner revoked since its change completed (between Pre and Post) is not called either
+    std::lock_guard lock(revoke_mu_);
+    std::erase_if(out, [&](const Completion& c) {
+        return gone_.count(c.owner) || std::find(revoked_.begin(), revoked_.end(), c.owner) != revoked_.end();
+    });
     return out;
 }
 

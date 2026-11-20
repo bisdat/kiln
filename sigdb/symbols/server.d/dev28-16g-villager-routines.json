@@ -127,6 +127,70 @@
           "pattern": "E8 {routines/MarkWritten:rel32} 48 8B 83 {routines/ctx.common:d32} C6 80 {routines/common.failures:d32} 00"
         }
       ]
+    },
+    "@routines/SleepFields": {
+      "comment": "The keep-awake prefix reads what the game's own SleepCheck reads: the context's clock (lea r14,[rsi+ctx.time]), NpcCommon's forced-sleep flag bit, sleepTime and wakeUpTime, and the clock's now-getter (its body is captured below).",
+      "find": [
+        {
+          "scope": {
+            "symbol": "routines/SleepCheck",
+            "size": 560
+          },
+          "pattern": "48 8B 13 4C 8D B6 {routines/ctx.time:d32} 49 8B 0E 45 33 C0 E8"
+        },
+        {
+          "scope": {
+            "symbol": "routines/SleepCheck",
+            "size": 560
+          },
+          "pattern": "48 8B 03 F6 00 {routines/common.sleepOverrideBit:d8} 0F 84"
+        },
+        {
+          "scope": {
+            "symbol": "routines/SleepCheck",
+            "size": 560
+          },
+          "pattern": "48 8B 03 48 8B 4F 28 F3 0F 10 40 {routines/common.sleep:d8} 0F 5A C0"
+        },
+        {
+          "scope": {
+            "symbol": "routines/SleepCheck",
+            "size": 560
+          },
+          "pattern": "48 8B 07 49 8B 0E F3 0F 10 40 {routines/common.wake:d8} 0F 5A C0"
+        },
+        {
+          "scope": {
+            "symbol": "routines/SleepCheck",
+            "size": 560
+          },
+          "pattern": "E8 {routines/TimeNow:rel32} 48 3B C3 40 0F 9D C5"
+        }
+      ]
+    },
+    "@routines/TimeNowBody": {
+      "comment": "The clock's now-getter: mov rax,[rcx+time.now]; ret.",
+      "find": [
+        {
+          "scope": {
+            "symbol": "routines/TimeNow",
+            "size": 5
+          },
+          "pattern": "48 8B 41 {routines/time.now:d8} C3"
+        }
+      ]
+    },
+    "@routines/TemplateLoad": {
+      "comment": "DecideTask reads the context's ActiveNpcState template pointer (whose first u32 is the NpcId the hooks match).",
+      "find": [
+        {
+          "scope": {
+            "symbol": "routines/DecideTask",
+            "size": 512
+          },
+          "pattern": "E8 ?? ?? ?? ?? 4C 8B 83 {routines/ctx.template:d32} 33 D2"
+        }
+      ]
     }
   },
   "constants": {
@@ -143,7 +207,7 @@
       "min_votes": 1
     },
     "routines/ctx.template": {
-      "value": 1104
+      "min_votes": 1
     },
     "routines/dynamic.state": {
       "value": 0
@@ -167,22 +231,22 @@
       "min_votes": 1
     },
     "routines/ctx.time": {
-      "value": 328
+      "min_votes": 1
     },
     "routines/time.now": {
-      "value": 72
+      "min_votes": 1
     },
     "routines/common.flags": {
       "value": 0
     },
     "routines/common.sleep": {
-      "value": 80
+      "min_votes": 1
     },
     "routines/common.wake": {
-      "value": 84
+      "min_votes": 1
     },
     "routines/common.sleepOverrideBit": {
-      "value": 16
+      "min_votes": 1
     }
   },
   "features": {
@@ -197,7 +261,10 @@
         "@routines/DirtyRecord",
         "routines/MarkWritten",
         "routines/ProcessCommands",
-        "routines/VillagerWorker"
+        "routines/VillagerWorker",
+        "@routines/SleepFields",
+        "@routines/TimeNowBody",
+        "@routines/TemplateLoad"
       ],
       "constants": [
         "routines/ctx.common",

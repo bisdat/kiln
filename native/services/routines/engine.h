@@ -87,6 +87,9 @@ struct Bind {
     std::shared_ptr<const Plan> plan;
     bool active = false;    // false: suspended by a manual command (the game decides; the hooks only watch)
     Runtime* runtime = nullptr;
+    // the owner's Resume was made at this step's Pre: a command still in flight from before it (a Follow's GoTo sent
+    // before the Resume) does not suspend the routine again (chapter 16g §4.3: Resume drops unconsumed manual intents)
+    bool resumed = false;
 };
 
 // Offsets into the worker's context and its records (sigdb constants routines/*).
@@ -125,6 +128,7 @@ struct Stats {
     // the first, MarkWritten calls the prefix made
     std::atomic<uint64_t> sleep_checks{0}, kept_awake{0}, sleep_repeats{0}, marks{0};
     std::atomic<uint64_t> commands{0}, manual{0};  // ProcessCommands calls; manual commands that suspended a routine
+    std::atomic<uint64_t> resumes{0}, dropped_intents{0};  // phase-4 resumes of owned villagers; commands a Resume dropped
 };
 
 class Engine {

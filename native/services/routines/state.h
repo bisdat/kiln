@@ -8,6 +8,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -18,6 +19,7 @@
 namespace kroutines {
 
 struct Completion {
+    KilnOwner owner = 0;  // whose call it was: a revoked owner is never called back
     KilnRoutineDone done = nullptr;
     void* user = nullptr;
     uint64_t ticket = 0;
@@ -46,6 +48,10 @@ public:
     KilnResult restore(KilnOwner owner, uint32_t npc_id, std::string_view plan_json, uint64_t revision, bool suspended,
                        std::string_view reason, KilnRoutineDone done, void* user, uint64_t* ticket, std::string* problem = nullptr);
     void set_revision_floor(uint64_t floor) { if (floor > revision_) revision_ = floor; }
+    // since dev.31: Kiln.Blocks names the owner a mod's calls come with. A mod's routines follow its claimed owner (they
+    // move to it from an earlier owner of the mod); a claimed owner's plans must be its mod's, and another owner cannot
+    // take the mod's plans. Tick thread.
+    void claim(KilnOwner owner, std::string_view mod);
     bool inspect(uint32_t npc_id, std::string& json) const;
     void revoke_owner(KilnOwner owner);  // any thread
 
@@ -88,6 +94,7 @@ private:
         uint64_t revision = 0;
         bool suspended = false;
         bool present = false;
+        bool resumed = false;  // the owner's Resume was made at this Pre (cleared once this step's list is out)
         std::string suspend_reason;
         std::unique_ptr<Runtime> runtime = std::make_unique<Runtime>();
     };
@@ -114,6 +121,8 @@ private:
 
     std::mutex revoke_mu_;
     std::vector<KilnOwner> revoked_;
+    std::set<KilnOwner> gone_;     // owners revoked and processed: never called back
+    std::set<KilnOwner> claimed_;  // owners Kiln.Blocks named for their mod
 };
 
 }  // namespace kroutines

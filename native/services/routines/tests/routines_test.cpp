@@ -7,6 +7,7 @@
 //    leaves previousState alone when it leaves FinishTask, and SetDecision clears the failure count;
 //  - state: the change queue, one completion per change, the events.
 //   native/services/routines/tests/run.sh
+#include <algorithm>
 #include <atomic>
 #include <cstdio>
 #include <cstring>
@@ -236,7 +237,8 @@ struct Villager {
     bool vanilla_checks_sleep = false;  // the game's chooser asks its sleep check first (as the real one does)
     uint8_t common_moved[1688] = {};    // where a write tracker moves NpcCommon to (copy on write), when the test asks
     bool move_common_on_mark = false;
-    uint8_t command_state = 0;  // the game's ProcessCommands takes a command: 1 Start (a Reset), 7 Roam (a GoTo); 0 none
+    uint8_t command_state = 0;
+    bool finish_to_decide = false;  // the game's FinishState goes straight to DecideTask (its chooser runs inside it)  // the game's ProcessCommands takes a command: 1 Start (a Reset), 7 Roam (a GoTo); 0 none
     uint8_t vanilla_previous_seen = 0xff, previous_at_first_decision = 0xff;
     // what the game's own code does inside the worker this step
     void (*script)(Villager&) = nullptr;
@@ -351,7 +353,9 @@ bool game_finish_state(void* ctx, uint8_t condition) {
     v.calls.push_back({'F', condition});
     if (condition == 1) ++v.failures();
     if (v.state() == native::DecideTask && !v.finish_from_decide) return false;
-    g_engine->game.set_state(ctx, target_of(v.state(), condition, v.decision()));
+    const uint8_t to = v.finish_to_decide && condition == 0 && v.state() != native::DecideTask ? native::DecideTask
+                                                                                             : target_of(v.state(), condition, v.decision());
+    g_engine->game.set_state(ctx, to);
     return true;
 }
 bool game_sleep_check(void* ctx) {
@@ -1108,6 +1112,46 @@ void test_sleep_check_after_a_command_is_the_games() {
     CHECK(t_marks.empty());
 }
 
+void test_finish_that_enters_the_chooser_is_the_old_tasks() {
+    // FinishState(Sitting) whose SetState enters DecideTask at once: the plan chooses the next sit inside that call; the
+    // finish must not be credited to the new invocation (the reviewer's harness case)
+    World w;
+    Villager v(7);
+    Runtime& rt = w.bind(v, wire("m:day", Kind::Idle, {all_day(Kind::Sit)}));
+    w.pre();
+    w.update(v);
+    w.run(v, [](Villager& x) { g_engine->game.finish_state(x.ctx, 0); });  // FindTarget -> GoToTarget
+    w.run(v, [](Villager& x) { g_engine->game.finish_state(x.ctx, 0); });  // GoToTarget -> Sitting
+    CHECK(v.state() == native::Sitting);
+    events(rt);
+    const uint64_t first = rt.invocation;
+    v.finish_to_decide = true;
+    w.run(v, [](Villager& x) { g_engine->game.finish_state(x.ctx, 0); });
+    CHECK_EQ(rt.invocation, first + 1);
+    const auto seen = events(rt);
+    bool credited = false;
+    for (uint32_t i = 0; i < seen.size(); ++i) credited = credited || seen[i].to == TaskState::Completed;
+    CHECK(!credited);
+    CHECK(rt.state == TaskState::Started && rt.task == Kind::Sit);
+}
+
+void test_resume_drops_a_command_in_flight() {
+    World w;
+    Villager v(7);
+    Runtime& rt = w.bind(v, wire("m:day", Kind::Idle, {all_day(Kind::Roam)}));
+    w.binds[0].resumed = true;  // the Resume was made at this step's Pre
+    w.pre();
+    w.update(v);
+    v.command_state = native::Roam;  // a Follow's GoTo sent before the Resume
+    w.run(v, [](Villager& x) { entry_commands(x.ctx); });
+    CHECK(!rt.manual);
+    CHECK_EQ(w.engine.stats.dropped_intents.load(), 1u);
+    w.binds[0].resumed = false;  // the next step: a new command suspends again
+    w.pre();
+    w.run(v, [](Villager& x) { entry_commands(x.ctx); });
+    CHECK(rt.manual);
+}
+
 }  // namespace
 
 void test_state();  // state_test part, below
@@ -1140,6 +1184,8 @@ int main(int argc, char** argv) {
     test_keep_awake_until_the_next_decision();
     test_manual_command_suspends();
     test_sleep_check_after_a_command_is_the_games();
+    test_finish_that_enters_the_chooser_is_the_old_tasks();
+    test_resume_drops_a_command_in_flight();
     test_threads();
     test_state();
     std::printf("kiln.routines: %d passed, %d failed\n", g_pass, g_fail);
@@ -1364,9 +1410,11 @@ void test_revoke() {
     // the mod's next owner (a reload) can queue at once, also for the villager the old owner still holds
     const uint64_t again = s.assign(3, 7, wire("a:day", Kind::Roam));
     s.tick();
-    CHECK(is(s.completions[2], queued, false, KILN_ROUTINE_REVOKED, "Revoked", 9, 0));
-    CHECK(is(s.completions[3], others, true, KILN_ROUTINE_OK, "", 10, 4));
-    CHECK(is(s.completions[4], again, true, KILN_ROUTINE_OK, "", 7, 5));
+    // the revoked owner's queued change is dropped: nothing calls a revoked owner
+    CHECK_EQ(s.completions.size(), 4u);
+    CHECK(std::none_of(s.completions.begin(), s.completions.end(), [&](const Completion& c) { return c.ticket == queued; }));
+    CHECK(is(s.completions[2], others, true, KILN_ROUTINE_OK, "", 10, 4));
+    CHECK(is(s.completions[3], again, true, KILN_ROUTINE_OK, "", 7, 5));
     CHECK(s.inspect(9).empty());
     CHECK(has(s.events[events], "\"type\":\"task\"") && has(s.events[events], "\"to\":\"Suspended\",\"reason\":\"Removed\""));
     CHECK(has(s.events[events + 1], "\"assignment\":\"Removed\"") && has(s.events[events + 1], "\"reason\":\"OwnerUnloaded\"") &&
@@ -1483,6 +1531,60 @@ void test_manual_suspension_in_the_book() {
     CHECK(v.state() == native::Roam && v.vanilla == 1);
 }
 
+
+void test_claims() {
+    Service s;
+    s.assign(1, 7, wire("a:day", Kind::Idle));
+    s.tick();
+    // Kiln.Blocks names owner 2 for mod a (the code owner of a mod whose routine a restart bound under owner 1)
+    s.book.claim(2, "a");
+    uint64_t t = 0;
+    CHECK_EQ(s.book.remove(2, 7, &done, nullptr, &t), KILN_OK);
+    s.tick();
+    CHECK(is(s.completions.back(), t, true, KILN_ROUTINE_OK, "", 7, 2));  // the routine moved to the claimed owner
+    // the old owner and an owner nobody claimed cannot take a's plans; a claimed owner cannot assign another mod's
+    s.assign(1, 8, wire("a:day", Kind::Idle), KILN_ERR_INVALID_ARGUMENT, "another owner");
+    s.assign(3, 8, wire("a:day", Kind::Idle), KILN_ERR_INVALID_ARGUMENT, "another owner");
+    s.assign(2, 8, wire("b:day", Kind::Idle), KILN_ERR_INVALID_ARGUMENT, "not a plan of a");
+    // an owner a plan bound before Kiln named it (a plugin claiming b's key) loses that binding to the claim
+    s.assign(4, 9, wire("b:day", Kind::Idle));
+    s.tick();
+    s.book.claim(5, "b");
+    s.assign(4, 10, wire("b:night", Kind::Idle), KILN_ERR_INVALID_ARGUMENT, "another owner");
+    CHECK_EQ(s.book.remove(5, 9, &done, nullptr, &t), KILN_OK);
+    s.tick();
+    CHECK(s.completions.back().ok && s.inspect(9).empty());
+}
+
+void test_no_call_after_a_revoke() {
+    Service s;
+    s.assign(1, 7, wire("a:day", Kind::Idle));
+    s.pre();
+    s.book.revoke_owner(1);  // between the commit and the Post
+    s.post();
+    CHECK(s.completions.empty());
+    s.tick();
+    CHECK(s.completions.empty());
+}
+
+void test_resume_starts_afresh() {
+    Service s;
+    s.assign(1, 7, wire("a:day", Kind::Idle, {all_day(Kind::Roam)}));
+    Villager v(7);
+    s.where[7] = v.dynamic();
+    s.pre();
+    s.world.update(v);
+    s.post();
+    v.command_state = 1;
+    s.pre();
+    s.world.run(v, [](Villager& x) { entry_commands(x.ctx); });
+    s.post();
+    uint64_t t = 0;
+    CHECK_EQ(s.book.resume(1, 7, &done, nullptr, &t), KILN_OK);
+    s.tick();
+    CHECK(has(s.inspect(7), "\"assignment\":\"Assigned\"") && has(s.inspect(7), "\"task\":null") && has(s.inspect(7), "\"windowIndex\":-1"));
+}
+
 void test_restore() {
     Service s;
     const std::string day = wire("a:day", Kind::Idle, {all_day(Kind::Roam)});
@@ -1536,4 +1638,7 @@ void test_state() {
     test_replace_closes_the_running_task();
     test_manual_suspension_in_the_book();
     test_restore();
+    test_claims();
+    test_no_call_after_a_revoke();
+    test_resume_starts_afresh();
 }

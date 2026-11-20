@@ -189,6 +189,7 @@ void Engine::on_decide(void* ctx, uint8_t phase) {
         stats.paused.fetch_add(1, std::memory_order_relaxed);
         return;
     }
+    if (phase == native::PhaseResume) stats.resumes.fetch_add(1, std::memory_order_relaxed);
     rt.paused = false;
     choose(ctx, phase, *a.slot);
 }
@@ -264,7 +265,8 @@ void Engine::enter(void* ctx, uint8_t phase, const Bind& slot, int32_t window, K
 
 void Engine::on_set_state(void* ctx, uint8_t state) {
     const Auth a = t_auth;
-    if (t_in_command && deciding(a, ctx)) {
+    if (t_in_command && deciding(a, ctx) && a.slot->resumed) stats.dropped_intents.fetch_add(1, std::memory_order_relaxed);
+    if (t_in_command && deciding(a, ctx) && !a.slot->resumed) {
         // The worker takes a Reset or GoTo for this villager (the game sets the state of a command it takes, also the
         // state it is in already): the routine is suspended until its owner resumes it, before the game's SetState runs
         // the new state's enter. From here on in this step the game decides; Post makes the suspension the assignment's.
@@ -286,9 +288,16 @@ bool Engine::on_finish_state(void* ctx, uint8_t condition) {
     const Auth a = t_auth;
     const bool watch = deciding(a, ctx) && !a.choosing;
     const uint8_t before = watch ? state_of(ctx) : 0;
+    const uint64_t invocation = watch ? a.slot->runtime->invocation : 0;
     const bool moved = game.finish_state_next(ctx, condition);
     if (!watch) return moved;
     Runtime& rt = *a.slot->runtime;
+    // The game's FinishState can enter DecideTask at once (its SetState runs the new state's enter): the plan then chose
+    // the next task inside this call, and this finish belongs to the task before it, which that decision closed.
+    if (rt.invocation != invocation) {
+        rt.native_state = state_of(ctx);
+        return moved;
+    }
     rt.native_state = state_of(ctx);
     if (rt.state != TaskState::Started || rt.task == Kind::Vanilla || rt.task == Kind::None) return moved;
     const bool terminal = before == terminal_of(rt.task);
