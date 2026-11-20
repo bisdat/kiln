@@ -49,9 +49,14 @@ test.describe("desktop", () => {
 
   test("a mod with several versions: its whole Remove has the box and takes the settings after the last version", async ({ page }) => {
     await desktop(page);
+    // a second version (the dropped one is switched on)
+    const dt = await page.evaluateHandle(() => { const d = new DataTransfer(); d.items.add(new File(["x"], "more-hotbars-2.2.0.zip")); return d; });
+    await page.locator(".k-hero").dispatchEvent("dragover", { dataTransfer: dt });
+    await page.locator(".k-hero").dispatchEvent("drop", { dataTransfer: dt });
+    await expect(row(page, "More Hotbars")).toContainText("2.2.0", { timeout: 10_000 });
     // one version of several: the mod stays, so do its settings, and there is no box
-    await openRemove(page, "More Hotbars", "Remove 2.2.0");
-    let dialog = page.getByRole("dialog", { name: "Remove More Hotbars 2.2.0?" });
+    await openRemove(page, "More Hotbars", "Remove 2.1.0");
+    let dialog = page.getByRole("dialog", { name: "Remove More Hotbars 2.1.0?" });
     await expect(dialog).toBeVisible();
     await expect(dialog.getByRole("checkbox")).toHaveCount(0);
     await dialog.getByRole("button", { name: "Cancel" }).click();
