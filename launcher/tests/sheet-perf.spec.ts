@@ -265,6 +265,99 @@ test("with the GPU a lit flame still flickers", async ({ page }) => {
   await expect(flame).toHaveCSS("animation-name", "k-lick");
 });
 
+test("behind a sheet the fire draws only the header band (the page under the sheet is never repainted for it); on Play the whole window again", async ({ page }) => {
+  await open(page, "/settings");
+  test.skip(!(await hasGl(page)), "no WebGL in this browser: the fire never starts");
+  await expect(page.locator(".k-app")).toHaveAttribute("data-gl", "1");
+  const canvas = page.locator(".k-stage-gl");
+  const box = () => canvas.evaluate((el) => {
+    const c = el as HTMLCanvasElement;
+    return { top: c.getBoundingClientRect().top, css: Math.round(c.getBoundingClientRect().height), buffer: c.height, window: innerHeight };
+  });
+  // once the mouth has sprung to the pilot light: the header (76 px) and the sheet's lit top edge (24 px), no more
+  await expect.poll(async () => (await box()).css).toBeLessThanOrEqual(101);
+  const band = await box();
+  expect(band.top).toBe(0);
+  expect(band.css).toBeGreaterThanOrEqual(100);
+  expect(band.buffer).toBeLessThan(100);
+  // the flicker still burns on the sheet's edge, written on the frames the fire draws
+  await expect.poll(() => rimFire(page)).not.toBe("");
+  // Play: the whole window at once (the mouth springs back over the whole wall)
+  await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Play" }).click();
+  await expect.poll(async () => { const b = await box(); return b.css === b.window; }).toBe(true);
+  // and on a sheet again, the band
+  await page.locator(".k-head-link", { hasText: "Settings" }).click();
+  await expect.poll(async () => (await box()).css).toBeLessThanOrEqual(101);
+});
+
+test("with reduced motion the still fire behind a sheet is the header band too", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await open(page, "/settings");
+  test.skip(!(await hasGl(page)), "no WebGL in this browser: the fire never starts");
+  await expect(page.locator(".k-app")).toHaveAttribute("data-gl", "1");
+  await expect.poll(() => page.locator(".k-stage-gl").evaluate((el) => Math.round(el.getBoundingClientRect().height))).toBeLessThanOrEqual(101);
+});
+
+/** WebKit without compositing (WebKitGTK with hardware acceleration off: WEBKIT_DISABLE_DMABUF_RENDERER=1, which the
+ *  launcher sets, or WEBKIT_DISABLE_COMPOSITING_MODE=1) answers (-webkit-transform-3d) with false; Chromium says true. */
+async function flatWebKit(page: Page) {
+  await page.addInitScript(() => {
+    const mm = window.matchMedia.bind(window);
+    window.matchMedia = (q: string) => (q.includes("-webkit-transform-3d") ? { ...mm("(min-width: 1000000px)"), media: q, matches: false } as MediaQueryList : mm(q));
+  });
+}
+
+/** Counts the fire's frames (its draw calls). */
+async function countDraws(page: Page) {
+  await page.addInitScript(() => {
+    const w = window as unknown as { __draws: number };
+    w.__draws = 0;
+    const draw = WebGLRenderingContext.prototype.drawArrays;
+    WebGLRenderingContext.prototype.drawArrays = function (...a: Parameters<typeof draw>) { w.__draws += 1; return draw.apply(this, a); };
+  });
+}
+const draws = (page: Page) => page.evaluate(() => (window as unknown as { __draws: number }).__draws);
+
+test("WebKit drawing without compositing: lit flames and the torch stand still, the fire on Play draws fewer frames, the effect stays", async ({ page }) => {
+  await flatWebKit(page);
+  await countWrites(page);
+  await countDraws(page);
+  await open(page, "/mods/order");
+  await expect(page.locator(".k-app")).toHaveAttribute("data-render", "flat");
+  const flame = page.locator(".k-flame.on svg").first();
+  await expect(flame).toBeVisible();
+  await expect(flame).toHaveCSS("animation-name", "none");
+  test.skip(!(await hasGl(page)), "no WebGL in this browser: the fire never starts");
+  // the fire burns (and flickers on the sheet's edge), the torch stands still: no pointer listener, no --mx writes
+  await expect(page.locator(".k-app")).toHaveAttribute("data-gl", "1");
+  await page.locator(".k-head-link", { hasText: "Settings" }).click();
+  await expect.poll(() => page.locator(".k-stage-gl").evaluate((el) => Math.round(el.getBoundingClientRect().height))).toBeLessThanOrEqual(101);
+  await wander(page);
+  expect((await counts(page)).moves).toBe(0);
+  const all = await writes(page);
+  expect(all.filter((w) => w.name === "--mx")).toEqual([]);
+  expect(all.filter((w) => w.name === "--fire").length).toBeGreaterThan(3);
+  // Play: the fire still moves, at a lower rate than with compositing (each frame repaints the whole window there)
+  await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Play" }).click();
+  await page.waitForTimeout(1500);
+  const d0 = await draws(page);
+  await page.waitForTimeout(2000);
+  const n = (await draws(page)) - d0;
+  expect(n).toBeGreaterThan(4);
+  // about 15 a second (FLAT_PLAY_MS), not 30
+  expect(n).toBeLessThanOrEqual(Math.ceil(2000 / 66) + 3);
+});
+
+test("with compositing (Chromium, so WebView2; WebKit with the GPU) nothing is taken for drawing without it: the torch follows the pointer", async ({ page }) => {
+  await countWrites(page);
+  await open(page, "/settings");
+  await expect(page.locator(".k-app")).not.toHaveAttribute("data-render", /./);
+  expect(await page.evaluate(() => matchMedia("(-webkit-transform-3d)").matches)).toBe(true);
+  test.skip(!(await hasGl(page)), "no WebGL in this browser: the fire and the torch never start");
+  await expect(page.locator(".k-app")).toHaveAttribute("data-gl", "1");
+  await expect.poll(async () => (await counts(page)).moves).toBe(1);
+});
+
 test("WebKit: typing into a sheet page stays quick while the fire burns and the pointer moves", async ({ baseURL }) => {
   let browser;
   try {

@@ -4,9 +4,11 @@
 // button with it, so the hit area always sits on the drawn arch. When WebGL is missing, fails to compile or loses its
 // context, or the fire is turned off (Settings, Appearance; KILN_LAUNCHER_NO_WEBGL=1), .k-app keeps no data-gl and
 // base.css draws the CSS mouth instead.
-// Budget: at most 1000 px wide (0.72 of the window at 1280), ~30 fps on Play, ~9 fps behind a sheet, full rate only while
-// the mouth moves or the heat changes; nothing while the window is hidden, and a still frame while the game runs (the GPU
-// is the game's then; the loop then looks four times a second instead of every frame). With reduced motion a still
+// Budget: at most 1000 px wide (0.72 of the window at 1280), ~30 fps on Play (15 where WebKit composites nothing:
+// flatDrawing), ~9 fps behind a sheet, full rate only while the mouth moves or the heat changes; behind a sheet, once
+// the mouth is the pilot light, only the header band (stageCanvas: the rest is under the sheet, and where WebKitGTK
+// composites nothing each frame repainted the whole window and the page with it, inbox 94); nothing while the window is
+// hidden, and a still frame while the game runs (the GPU is the game's then; the loop then looks four times a second instead of every frame). With reduced motion a still
 // frame, drawn again only when what it shows changes (wakeStage), and no flicker.
 import { useEffect, useRef, type RefObject } from "react";
 
@@ -29,14 +31,15 @@ function target(i: typeof stageInput): number {
 export const VERT = "attribute vec2 p;void main(){gl_Position=vec4(p,0.,1.);}";
 
 // uR canvas size; uT time; uH heat; uF flicker; uD mouth (centre x, bottom y, half width, height) in canvas px;
-// uM pointer (-1..1); uS canvas px per CSS px; uL floor height (CSS px); uK 0 on Play, 1 as the pilot light.
+// uM pointer (-1..1); uS canvas px per CSS px; uL floor height (CSS px); uK 0 on Play, 1 as the pilot light; uO the
+// canvas rows below this canvas (the header band behind a sheet: stageCanvas), so it draws the whole picture's top rows.
 export const FRAG = [
   "#ifdef GL_FRAGMENT_PRECISION_HIGH",
   "precision highp float;",
   "#else",
   "precision mediump float;",
   "#endif",
-  "uniform vec2 uR;uniform float uT;uniform float uH;uniform float uF;uniform vec4 uD;uniform vec2 uM;uniform float uS;uniform float uL;uniform float uK;",
+  "uniform vec2 uR;uniform float uT;uniform float uH;uniform float uF;uniform vec4 uD;uniform vec2 uM;uniform float uS;uniform float uL;uniform float uK;uniform float uO;",
   "const float AA=.32;const float APEX=1.2806;",
   "float hash(vec2 p){p=fract(p*vec2(123.34,456.21));p+=dot(p,p+45.32);return fract(p.x*p.y);}",
   "float vn(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(hash(i),hash(i+vec2(1.,0.)),f.x),mix(hash(i+vec2(0.,1.)),hash(i+vec2(1.,1.)),f.x),f.y);}",
@@ -62,7 +65,7 @@ export const FRAG = [
   "vec2 s=vec2(q.x*9.,q.y*9.-uT*2.6);vec2 sid=floor(s);float sp=step(.972,hash(sid))*(1.-smoothstep(0.,.34,length(fract(s)-.5)))*(1.-smoothstep(.4,H,q.y));col+=vec3(1.,.46,.13)*sp*min(uH*1.2,1.2)*smoothstep(.12,.34,uH);",
   "return col;}",
   "float embers(vec2 w,float sc,float sp,float seed){vec2 p=w/sc;p.y-=uT*sp;p.x+=sin(p.y*.7+seed)*.35;vec2 id=floor(p);float h=hash(id+seed);if(h<.965)return 0.;vec2 f=fract(p)-.5;f+=vec2(hash(id+1.3),hash(id+2.7))*.6-.3;float tw=.6+.4*sin(uT*3.+h*60.);return tw*(1.-smoothstep(0.,.05,length(f)));}",
-  "void main(){vec2 px=gl_FragCoord.xy;vec2 w=px/uS;float hw=uD.z;float Hd=uD.w/hw;vec2 q=(px-uD.xy)/hw;float d=sdArch(q,Hd);float F=uH*(.72+.28*uF);",
+  "void main(){vec2 px=gl_FragCoord.xy+vec2(0.,uO);vec2 w=px/uS;float hw=uD.z;float Hd=uD.w/hw;vec2 q=(px-uD.xy)/hw;float d=sdArch(q,Hd);float F=uH*(.72+.28*uF);",
   "vec2 lc=uD.xy+vec2(0.,uD.w*.35);float dist=length((px-lc)/hw);vec3 col;",
   "if(d<0.){col=chamber(q,Hd);col*=1.-.6*smoothstep(-.2,0.,d);}",
   // the floor in front of the mouth (the strip under the facts), lit in a pool; gone as the mouth becomes the pilot light
@@ -80,12 +83,42 @@ export const FRAG = [
   "col+=(hash(px+fract(uT))-.5)*.012;gl_FragColor=vec4(col,1.);}",
 ].join("\n");
 
-export const UNIFORMS = ["uR", "uT", "uH", "uF", "uD", "uM", "uS", "uL", "uK"] as const;
+export const UNIFORMS = ["uR", "uT", "uH", "uF", "uD", "uM", "uS", "uL", "uK", "uO"] as const;
+
+/** Behind a sheet the fire draws only the window's top this tall (CSS px): the header (76) and the sheet's lit top edge
+ *  (24, its rounded corners). Below it the sheet covers the wall, and the pilot light's glow is gone long before the
+ *  sheet's side margins (the wall there is the shader's dark ambient, .k-stage's background). */
+export const STAGE_BAND = 100;
+
+/** The canvas for a window W x H (CSS px): its drawing buffer (cw x ch, at most 1000 px wide), its CSS height and the
+ *  rows of the whole-window canvas below it (offset, uO). `band`: only the top STAGE_BAND px, the same pixels the whole
+ *  canvas has there (same scale), so a sheet page repaints only the header band for each frame of the fire. */
+export function stageCanvas(W: number, H: number, band: boolean) {
+  const S = Math.min(0.72, 1000 / Math.max(W, 1));
+  const cw = Math.max(2, Math.round(W * S)), fullCh = Math.max(2, Math.round(H * S));
+  if (!band || H <= STAGE_BAND) return { cw, ch: fullCh, fullCh, cssH: H, offset: 0, S };
+  const sy = fullCh / H;
+  const ch = Math.min(fullCh, Math.ceil(STAGE_BAND * sy));
+  return { cw, ch, fullCh, cssH: ch / sy, offset: fullCh - ch, S };
+}
 
 /** What the loop writes the flicker (--fire) onto: leaves only, never an element with the page under it (inbox 94: on
  *  .k-sheet every write restyled and repainted the whole page, about 11 times a second). The sheet's lit top edge
  *  (.k-sheet-rim, a strip with no children) and the Play title (.k-title, a word). */
 export const FIRE_READERS = ".k-sheet-rim, .k-title";
+
+/** On Play where WebKit composites nothing (flatDrawing): a frame at most this often (ms), about 15 a second instead of
+ *  30. Each frame of the fire repaints the whole window there, the Play page and its list of mods with it, on the CPU
+ *  (inbox 94 follow-up: in a 2560 x 1440 window the page had no time left between frames at 30 a second). */
+export const FLAT_PLAY_MS = 66;
+
+/** WebKit drawing without compositing: WebKitGTK with hardware acceleration off (webkit://gpu "Policy never":
+ *  WEBKIT_DISABLE_DMABUF_RENDERER=1, which the Linux launcher sets, or WEBKIT_DISABLE_COMPOSITING_MODE=1). There every
+ *  change is painted again on the CPU with everything over and under it, in one picture of the window (no layers).
+ *  WebKit answers (-webkit-transform-3d) with false then; Chromium (WebView2) and WebKit with compositing say true. */
+export function flatDrawing(): boolean {
+  return typeof window !== "undefined" && typeof window.matchMedia === "function" && !window.matchMedia("(-webkit-transform-3d)").matches;
+}
 
 /** The running fire's wake-up (a still fire draws only when something changed); null while none runs. */
 let wakeFire: (() => void) | null = null;
@@ -109,6 +142,7 @@ export function Stage({ root, enabled = true, onLit }: { root: RefObject<HTMLDiv
     const app = root.current, canvas = ref.current;
     if (!app || !canvas) return;
     const motion = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+    const playMs = flatDrawing() ? FLAT_PLAY_MS : 33;
     let still = !!motion?.matches;
     let gl: WebGLRenderingContext | null = null;
     const U: Partial<Record<(typeof UNIFORMS)[number], WebGLUniformLocation | null>> = {};
@@ -126,6 +160,7 @@ export function Stage({ root, enabled = true, onLit }: { root: RefObject<HTMLDiv
       clearTimeout(nap);
       raf = nap = 0;
       delete app.dataset.gl;
+      canvas.style.removeProperty("height");
       for (const p of ["transform", "width", "height"]) app.querySelector<HTMLElement>(".k-door")?.style.removeProperty(p);
       app.querySelector<HTMLElement>(".k-door-lab")?.style.removeProperty("--k");
       unflicker();
@@ -163,7 +198,7 @@ export function Stage({ root, enabled = true, onLit }: { root: RefObject<HTMLDiv
     let k = stageInput.play ? 0 : 1, kv = 0;
     let h = stageInput.play && !still ? 0.02 : target(stageInput);
     const m = [0, 0];
-    let last = performance.now(), lastDraw = 0, lastCss = 0, lastDoor = "", lastSize = "", lastStill = "";
+    let last = performance.now(), lastDraw = 0, lastCss = 0, lastDoor = "", lastSize = "", lastStill = "", lastHeight = "";
     let door: HTMLElement | null = null, lab: HTMLElement | null = null;
     const loop = (ms: number) => {
       if (!gl) return;
@@ -203,14 +238,10 @@ export function Stage({ root, enabled = true, onLit }: { root: RefObject<HTMLDiv
         // every frame of the spring
         lab?.style.setProperty("--k", k.toFixed(3));
       }
-      if (!still && !i.game && ms - lastCss > 90) {
-        lastCss = ms;
-        if (!lit.length || lit.some((e) => !e.isConnected) || (i.play && !lit.some((e) => e.classList.contains("k-title")))) {
-          lit = [...app.querySelectorAll<HTMLElement>(FIRE_READERS)];
-        }
-        for (const e of lit) e.style.setProperty("--fire", F.toFixed(3));
-      }
-      const size = `${W}x${H}`;
+      // behind a sheet with the mouth settled as the pilot light: only the header band (the canvas grows back to the whole
+      // window on the frame Play is asked for, before the spring moves the mouth)
+      const geo = stageCanvas(W, H, !i.play && Math.abs(k - 1) < 0.002 && Math.abs(kv) < 0.004);
+      const size = `${W}x${H}x${geo.ch}`;
       if (still) {
         // drawn once for what it shows; then nothing (no frame, no timer) until wakeStage, a resize or motion again
         const what = `${key} ${heat} ${m[0].toFixed(3)} ${m[1].toFixed(3)} ${size}`;
@@ -219,7 +250,7 @@ export function Stage({ root, enabled = true, onLit }: { root: RefObject<HTMLDiv
       } else {
         lastStill = "";
         const moving = Math.abs(kv) > 0.004 || Math.abs(k - tgt) > 0.002 || Math.abs(h - heat) > 0.02;
-        const gap = moving || size !== lastSize ? 0 : i.game ? Infinity : i.play ? 33 : 110;
+        const gap = moving || size !== lastSize ? 0 : i.game ? Infinity : i.play ? playMs : 110;
         if (gap === Infinity) {
           // the game runs and the frame stands: look again in 250 ms, not every frame
           cancelAnimationFrame(raf);
@@ -228,12 +259,22 @@ export function Stage({ root, enabled = true, onLit }: { root: RefObject<HTMLDiv
         }
         if (ms - lastDraw < gap) return;
       }
+      // the flicker, only on frames the fire draws: one repaint for both where WebKitGTK composites nothing
+      if (!still && !i.game && ms - lastCss > 90) {
+        lastCss = ms;
+        if (!lit.length || lit.some((e) => !e.isConnected) || (i.play && !lit.some((e) => e.classList.contains("k-title")))) {
+          lit = [...app.querySelectorAll<HTMLElement>(FIRE_READERS)];
+        }
+        for (const e of lit) e.style.setProperty("--fire", F.toFixed(3));
+      }
       lastDraw = ms;
       lastSize = size;
-      const S = Math.min(0.72, 1000 / Math.max(W, 1));
-      const cw = Math.max(2, Math.round(W * S)), ch = Math.max(2, Math.round(H * S));
+      const { S, cw, ch } = geo;
+      const cssH = geo.offset ? `${geo.cssH.toFixed(3)}px` : "";
+      if (cssH !== lastHeight) { lastHeight = cssH; if (cssH) canvas.style.height = cssH; else canvas.style.removeProperty("height"); }
       if (canvas.width !== cw || canvas.height !== ch) { canvas.width = cw; canvas.height = ch; gl.viewport(0, 0, cw, ch); }
-      gl.uniform2f(U.uR!, cw, ch);
+      gl.uniform2f(U.uR!, cw, geo.fullCh);
+      gl.uniform1f(U.uO!, geo.offset);
       gl.uniform1f(U.uT!, still ? 12 : t % 1000);
       gl.uniform1f(U.uH!, h);
       gl.uniform1f(U.uF!, F);
@@ -269,6 +310,7 @@ export function Stage({ root, enabled = true, onLit }: { root: RefObject<HTMLDiv
       window.removeEventListener("resize", resume);
       if (wakeFire === resume) wakeFire = null;
       delete app.dataset.gl;
+      canvas.style.removeProperty("height");
       unflicker();
       litCb.current?.(false);
     };

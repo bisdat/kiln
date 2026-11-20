@@ -57,6 +57,9 @@ html[data-covered] .k-app ::-webkit-scrollbar, html[data-covered] [data-deck-scr
 /* the fire (shell/Stage.tsx): a WebGL canvas under everything; .k-app gets data-gl once it draws */
 .k-stage-gl { position: absolute; inset: 0; width: 100%; height: 100%; display: none; }
 .k-app[data-gl] .k-stage-gl { display: block; }
+/* behind a sheet the canvas is only the header band (shell/Stage.tsx stageCanvas): below it, in the sheet's side margins,
+   the wall the shader draws there, its dark ambient */
+.k-app[data-gl] .k-stage { background: #020201; }
 .k-app[data-gl] .k-fall, .k-app[data-gl] .k-stage::after { display: none; }
 
 /* ---------------------------------------------------------------- header */

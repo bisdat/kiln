@@ -24,7 +24,7 @@ import { ModUpdatesWatcher } from "./modUpdates";
 import { InstallKilnModal, detectGames, useAutoDetect, useDetect, useInstallPrompt, useKilnInstall } from "./firstRun";
 import { clock, usePlayControl, type PlayControl } from "./play";
 import { applyingWord } from "./applying";
-import { Stage, stageInput, wakeStage, type Heat } from "./Stage";
+import { Stage, flatDrawing, stageInput, wakeStage, type Heat } from "./Stage";
 import { startWords } from "./startProgress";
 import { useT } from "../i18n";
 import { CommunityDesktopHost } from "../community/Host";
@@ -222,7 +222,10 @@ export function AppShell() {
   const light = useRef<HTMLDivElement>(null);
   const [lit, setLit] = useState(false);
   const still = useReducedMotion();
-  const torchOn = lit && !still;
+  // WebKit without compositing (Stage.tsx flatDrawing): each move of the light repainted its 634 x 490 px of the page on
+  // the CPU, about 24 ms a move in a 2560 x 1440 window; it stands still there, as without the GPU
+  const [flat] = useState(flatDrawing);
+  const torchOn = lit && !still && !flat;
   useEffect(() => {
     const app = root.current, l = light.current;
     if (!torchOn || !app || !l) return;
@@ -246,7 +249,7 @@ export function AppShell() {
   useEffect(() => { document.title = isPlay ? "Kiln" : t("shell.appShell.docTitle", { page: navFor(loc.pathname)?.label ?? "Kiln" }); }, [isPlay, loc.pathname, t]);
   return (
     <div ref={root} className={"k-app" + (isPlay ? " is-play" : " is-sheet")}
-      data-render={info.data?.render?.mode === "software" ? "software" : undefined}>
+      data-render={info.data?.render?.mode === "software" ? "software" : flat ? "flat" : undefined}>
       <div className="k-stage" aria-hidden><Stage root={root} key={fire ? "fire" : "plain"} enabled={fire} onLit={setLit} /><div className="k-fall" /></div>
       <Header isPlay={isPlay} ctl={ctl} />
       <div className={"k-hero-layer" + (isPlay ? " on" : "")} aria-hidden={!isPlay}>{hero}</div>

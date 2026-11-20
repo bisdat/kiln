@@ -67,8 +67,17 @@ and `libraryWebgl` show the fire on (their style numbers are the real signal; th
   motion; its mousemove listener on `.k-app` exists only then. Reduced motion is followed while the launcher runs (KDE's
   animation speed "Instant" turns it on): the fire stands still, writes no flicker and draws a frame only when what it
   shows changed (`wakeStage`, a resize), asking for no frame or timer meanwhile. While the game runs the loop looks four
-  times a second instead of every frame. `tests/sheet-perf.spec.ts` counts the writes, the torch's listener and the
-  frames asked for.
+  times a second instead of every frame. Behind a sheet, once the mouth is the pilot light, the canvas is only the
+  header band (`stageCanvas`, `STAGE_BAND`: 100 px, the header and the sheet's lit edge, the same pixels the whole canvas
+  has there), so a frame of the fire repaints that strip and not the page under the sheet; the flicker is written on
+  the frames the fire draws. `tests/sheet-perf.spec.ts` counts the writes, the torch's listener and the frames asked
+  for.
+- **WebKit without compositing** (`.k-app[data-render="flat"]`, `Stage.tsx flatDrawing`): WebKitGTK with hardware
+  acceleration off (webkit://gpu says "Policy never"; `WEBKIT_DISABLE_DMABUF_RENDERER=1`, which the launcher sets, or
+  `WEBKIT_DISABLE_COMPOSITING_MODE=1`) paints every change again on the CPU with everything over and under it, in one
+  picture of the window: scrolling repaints the whole list, so its cost grows with the window. WebKit answers
+  `(-webkit-transform-3d)` with false there (Chromium and WebKit with compositing: true). Then lit flames and the torch
+  stand still and the fire on Play draws about 15 frames a second instead of 30 (`FLAT_PLAY_MS`).
 - **Without the GPU** (`.k-app[data-render="software"]`, Linux): no WebGL fire, no torch, and a lit mod's flame stands
   still (`ui/ui.css`): on the CPU every frame of its flicker repainted each flame and its glow, most of the launcher's
   time on a page of lit mods at a HiDPI scale.
