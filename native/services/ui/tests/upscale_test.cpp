@@ -466,11 +466,32 @@ static void amd_map() {
 
     // creation
     CreateInfo ci;  // the defaults are the game's: linear HDR colour, reverse-Z with a far plane, dynamic resolution
-    CHECK(amd::create_flags(ci) == (FFX_UPSCALE_ENABLE_HIGH_DYNAMIC_RANGE | FFX_UPSCALE_ENABLE_DEPTH_INVERTED | FFX_UPSCALE_ENABLE_DYNAMIC_RESOLUTION));
+    // The game gives its FSR 3 no exposure texture and a pre-exposure of 0 (its port reads 1): its colour is the scene
+    // before the game's own exposure, which its tone mapping applies after the upscaler. AMD FSR (FSR 4 above all: its
+    // network works on the exposed signal) needs an exposure to match: AMD's own auto-exposure, as AMD recommends.
+    // Without it FSR 4 took exposure 1.0 and drew a dark scene almost black (SleepyPuppy, RX 9070 XT, 29.19 beta 1).
+    CHECK(amd::create_flags(ci) == (FFX_UPSCALE_ENABLE_HIGH_DYNAMIC_RANGE | FFX_UPSCALE_ENABLE_DEPTH_INVERTED | FFX_UPSCALE_ENABLE_DYNAMIC_RESOLUTION |
+                                    FFX_UPSCALE_ENABLE_AUTO_EXPOSURE));
     ci.depth_infinite = true;
     CHECK(amd::create_flags(ci) & FFX_UPSCALE_ENABLE_DEPTH_INFINITE);
     ci.depth_infinite = false;
-    CHECK(!(amd::create_flags(ci) & FFX_UPSCALE_ENABLE_DEPTH_INFINITE) && !(amd::create_flags(ci) & FFX_UPSCALE_ENABLE_AUTO_EXPOSURE));
+    CHECK(!(amd::create_flags(ci) & FFX_UPSCALE_ENABLE_DEPTH_INFINITE) && (amd::create_flags(ci) & FFX_UPSCALE_ENABLE_AUTO_EXPOSURE));
+    CHECK(!(amd::create_flags(ci) & FFX_UPSCALE_ENABLE_NON_LINEAR_COLORSPACE));  // the colour is linear
+    {
+        // the test knob kiln/control/amd ("exposure one": the game's pre-exposure only, as up to 29.19 beta 1)
+        amd::Tuning one = amd::parse_tuning("# A/B\nexposure one\n");
+        CHECK(one.exposure == amd::Exposure::one && one.changed());
+        CHECK(!(amd::create_flags(ci, one) & FFX_UPSCALE_ENABLE_AUTO_EXPOSURE));
+        CHECK(amd::create_flags(ci, one) == (FFX_UPSCALE_ENABLE_HIGH_DYNAMIC_RANGE | FFX_UPSCALE_ENABLE_DEPTH_INVERTED | FFX_UPSCALE_ENABLE_DYNAMIC_RESOLUTION));
+        CHECK(amd::parse_tuning("EXPOSURE = Auto\r\n").exposure == amd::Exposure::automatic && !amd::parse_tuning("").changed());
+        CHECK(amd::parse_tuning("exposure maybe\nnoise").notes.size() == 2);
+        // what kiln.log says at each set-up
+        CHECK(amd::flags_text(amd::create_flags(ci)) == "HDR, inverted depth, dynamic resolution, auto exposure");
+        CHECK(amd::flags_text(amd::create_flags(ci, one)) == "HDR, inverted depth, dynamic resolution, exposure 1 (no auto exposure)");
+        CreateInfo ldr = ci;
+        ldr.hdr = false;
+        CHECK(amd::flags_text(amd::create_flags(ldr)) == "inverted depth, dynamic resolution, auto exposure");
+    }
     CHECK(!(amd::create_flags(ci) & FFX_UPSCALE_ENABLE_MOTION_VECTORS_JITTER_CANCELLATION) &&
           !(amd::create_flags(ci) & FFX_UPSCALE_ENABLE_DISPLAY_RESOLUTION_MOTION_VECTORS));
     CHECK(amd::version_major("4.1.2") == 4 && amd::version_major("3.1.6") == 3 && amd::version_major("") == 0 && amd::version_major(nullptr) == 0);

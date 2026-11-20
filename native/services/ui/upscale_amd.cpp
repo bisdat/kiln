@@ -198,6 +198,7 @@ class AmdBackend final : public Backend {
 
     bool create(const CreateInfo& ci, std::string* detail) override {
         destroy();  // the core calls it first; once more is harmless
+        tuning_ = amd::parse_tuning(read_control());  // a knob changed in a test applies at the next set-up
         const int fsr3 = amd::pick_fsr3(version_names_);
         bool pin = ci.amd == AmdPin::fsr3 && fsr3 >= 0;
         uint32_t r = make(ci, pin ? version_ids_[static_cast<size_t>(fsr3)] : 0);
@@ -225,7 +226,11 @@ class AmdBackend final : public Backend {
         }
         ci_ = ci;
         reset_ = true;
-        *detail = "FSR " + version_name_ + (note.empty() ? "" : "; " + note);
+        // what AMD FSR was told about the game's picture (kiln.log, for reports: the dark-picture fix of 29.19)
+        *detail = "FSR " + version_name_ + " (" + amd::flags_text(amd::create_flags(ci, tuning_)) +
+                  (tuning_.changed() ? ", from kiln/control/amd" : "") + "; pre-exposure from the game, no exposure texture)" +
+                  (note.empty() ? "" : "; " + note);
+        for (const auto& n : tuning_.notes) *detail += "; kiln/control/amd: not understood: " + n;
         return true;
     }
 
@@ -285,10 +290,28 @@ class AmdBackend final : public Backend {
     }
 
   private:
+    // <kiln>\control\amd (files_.dir is <kiln>\vendor\amd\<version>); empty when there is none
+    std::string read_control() const {
+        std::wstring kiln = files_.dir;
+        for (int i = 0; i < 3; ++i) {
+            const size_t s = kiln.find_last_of(L"\\/");
+            if (s == std::wstring::npos) return {};
+            kiln.resize(s);
+        }
+        const std::wstring path = kiln + L"\\control\\amd";
+        HANDLE h = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (h == INVALID_HANDLE_VALUE) return {};
+        char buf[4096];
+        DWORD got = 0;
+        const BOOL ok = ReadFile(h, buf, sizeof buf, &got, nullptr);
+        CloseHandle(h);
+        return ok ? std::string(buf, got) : std::string();
+    }
+
     uint32_t make(const CreateInfo& ci, uint64_t version_id) {
         ffxCreateContextDescUpscale c{};
         c.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_UPSCALE;
-        c.flags = amd::create_flags(ci);
+        c.flags = amd::create_flags(ci, tuning_);
         c.maxRenderSize = {ci.max_render_width, ci.max_render_height};
         c.maxUpscaleSize = {ci.output_width, ci.output_height};
         c.fpMessage = &ffx_message;
@@ -343,6 +366,7 @@ class AmdBackend final : public Backend {
     ffxContext ctx_ = nullptr;
     std::vector<Retired> retired_;
     CreateInfo ci_;
+    amd::Tuning tuning_;
     bool reset_ = true;
     uint64_t frame_ = 0;
     Running running_ = Running::off;

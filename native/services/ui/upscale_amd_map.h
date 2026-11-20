@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cstring>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "api/include/ffx_api.h"
@@ -129,13 +130,75 @@ inline DeviceNeeds device_needs() {
 }
 
 // ---- creation -----------------------------------------------------------------------------------------------------
-inline uint32_t create_flags(const CreateInfo& ci) {
+// The exposure. The game gives its FSR 3 no exposure texture and a pre-exposure of 0 (its own port reads 1): its colour
+// is the lit scene before the game's own exposure, which the game's tone mapping applies after the upscaler, so its
+// level follows the scene (a cave at night is far darker than a field at noon). AMD FSR needs the exposure the picture
+// will be seen with ("poorly selected exposure values can have a drastic impact", AMD's FSR docs), FSR 4 above all: its
+// network works on the exposed signal. With no exposure (1.0) FSR 4 drew a dark scene almost black (SleepyPuppy,
+// RX 9070 XT, 29.19 beta 1). Kiln asks for AMD's own auto-exposure, AMD's recommendation; the output stays in the
+// input's domain (AMD reverses its internal tone mapping), so the game's tone mapping after it is unchanged.
+enum class Exposure : uint32_t { automatic = 0, one = 1 };
+// Test knobs: <game>/kiln/control/amd, one per line ('#' starts a comment), read at each of the game's FSR set-ups;
+// nothing reads them in normal play. "exposure auto" (the default) | "exposure one" (no auto exposure: the game's
+// pre-exposure only, as up to 0.2.0-dev.29.19 beta 1, for an A/B on a real card).
+struct Tuning {
+    Exposure exposure = Exposure::automatic;
+    std::vector<std::string> notes;  // lines Kiln did not understand
+    bool changed() const { return exposure != Exposure::automatic; }
+};
+inline Tuning parse_tuning(std::string_view text) {
+    Tuning t;
+    size_t at = 0;
+    while (at <= text.size()) {
+        size_t end = text.find('\n', at);
+        if (end == std::string_view::npos) end = text.size();
+        std::string line(text.substr(at, end - at));
+        at = end + 1;
+        if (const size_t h = line.find('#'); h != std::string::npos) line.resize(h);
+        std::vector<std::string> w;
+        std::string cur;
+        for (char c : line) {
+            if (c == ' ' || c == '\t' || c == '\r' || c == '=') {
+                if (!cur.empty()) w.push_back(cur), cur.clear();
+            } else {
+                cur.push_back(static_cast<char>(c >= 'A' && c <= 'Z' ? c - 'A' + 'a' : c));
+            }
+        }
+        if (!cur.empty()) w.push_back(cur);
+        if (w.empty()) continue;
+        const std::string v = w.size() > 1 ? w[1] : "";
+        if (w[0] == "exposure" && v == "auto") t.exposure = Exposure::automatic;
+        else if (w[0] == "exposure" && v == "one") t.exposure = Exposure::one;
+        else t.notes.push_back(line);
+    }
+    return t;
+}
+
+inline uint32_t create_flags(const CreateInfo& ci, const Tuning& t = {}) {
     uint32_t f = 0;
     if (ci.hdr) f |= FFX_UPSCALE_ENABLE_HIGH_DYNAMIC_RANGE;
     if (ci.depth_inverted) f |= FFX_UPSCALE_ENABLE_DEPTH_INVERTED;
     if (ci.depth_infinite) f |= FFX_UPSCALE_ENABLE_DEPTH_INFINITE;
     if (ci.dynamic_resolution) f |= FFX_UPSCALE_ENABLE_DYNAMIC_RESOLUTION;
-    return f;  // render-size MVs (no DISPLAY_RESOLUTION_MOTION_VECTORS), no jitter in them (no JITTER_CANCELLATION)
+    if (t.exposure == Exposure::automatic) f |= FFX_UPSCALE_ENABLE_AUTO_EXPOSURE;  // the game has no exposure texture
+    return f;  // render-size MVs (no DISPLAY_RESOLUTION_MOTION_VECTORS), no jitter in them (no JITTER_CANCELLATION), linear
+               // colour (no NON_LINEAR_COLORSPACE)
+}
+// The flags in words, for kiln.log at each set-up ("HDR, inverted depth, dynamic resolution, auto exposure").
+inline std::string flags_text(uint32_t f) {
+    std::string s;
+    auto add = [&](bool on, const char* n) {
+        if (on) s += (s.empty() ? "" : ", ") + std::string(n);
+    };
+    add(f & FFX_UPSCALE_ENABLE_HIGH_DYNAMIC_RANGE, "HDR");
+    add(f & FFX_UPSCALE_ENABLE_NON_LINEAR_COLORSPACE, "non-linear colour");
+    add(f & FFX_UPSCALE_ENABLE_DEPTH_INVERTED, "inverted depth");
+    add(f & FFX_UPSCALE_ENABLE_DEPTH_INFINITE, "infinite depth");
+    add(f & FFX_UPSCALE_ENABLE_DYNAMIC_RESOLUTION, "dynamic resolution");
+    add(f & FFX_UPSCALE_ENABLE_DISPLAY_RESOLUTION_MOTION_VECTORS, "display-size motion vectors");
+    add(f & FFX_UPSCALE_ENABLE_MOTION_VECTORS_JITTER_CANCELLATION, "jittered motion vectors");
+    s += (s.empty() ? "" : ", ") + std::string(f & FFX_UPSCALE_ENABLE_AUTO_EXPOSURE ? "auto exposure" : "exposure 1 (no auto exposure)");
+    return s;
 }
 
 // A version's major number from AMD's name for it ("4.1.2", "3.1.6", "2.3.4"); 0 when not a version.

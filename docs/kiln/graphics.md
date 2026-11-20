@@ -312,7 +312,11 @@ any of it DLSS. Code: `native/services/ui/upscale.cpp` (the swap), `upscale_amd.
   colour (linear HDR), depth (reverse-Z), motion vectors (Kiln copies them into a format AMD's API takes; the values
   are unchanged), the reactive and transparency masks the game makes for its FSR, the jitter, sizes, camera planes,
   field of view, pre-exposure and frame time (Kiln's own measured time while the game's is 0, about 500 frames after
-  a world load). History is dropped when the game sets FSR 3 up, after a load and when a size changes.
+  a world load). The game gives its FSR 3 no exposure texture and a pre-exposure of 0 (read as 1): its colour is the
+  lit scene before the game's own exposure, which its tone mapping applies after the upscaler. So Kiln asks AMD FSR for
+  its own auto-exposure (AMD's recommendation; the output stays in the input's range). Without it FSR 4 drew dark
+  scenes almost black (29.19 beta 1, RX 9070 XT). Test knob for an A/B: `<game>/kiln/control/amd` with the line
+  `exposure one` (no auto-exposure), read at each FSR set-up; kiln.log's `set up for` line names the flags in use. History is dropped when the game sets FSR 3 up, after a load and when a size changes.
 - **AMD FSR.** AMD's signed Vulkan DLLs from the FidelityFX SDK 2.4.0, from `<game>/kiln/vendor/amd/2.4.0/` (the
   launcher's Settings, Graphics card). Kiln checks each file's size and SHA-256 against the pins built into Kiln (the same
   values as the launcher's manifest; `tools/release/vendor_pins_header.py --check`) before it maps them, keeps them

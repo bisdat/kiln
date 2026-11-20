@@ -196,7 +196,8 @@ struct Frame {
     float frame_ms = 0;          // > 0: the game's frame time, else Kiln's own measured delta (0 for ~500 frames after a load)
     float camera_near = 0, camera_far = 0;  // 0.01 and 10000 on the real client
     float fov_y = 0;             // radians (the game's FOV setting; vertical, likely)
-    float pre_exposure = 1;      // > 0
+    float pre_exposure = 1;      // > 0 (the game's value, 1 where the game gives 0 or a value that is not usable)
+    float game_exposure = 0;     // the game's description's value as it is (0 seen: no pre-exposure), for kiln.log
     float sharpness = 0;         // 0..1, 0 = no extra sharpening (the game sets 0)
     bool reset = false;          // drop history: set by the core on the first frame after create, a world load, a size change
     VkCommandBuffer cb = VK_NULL_HANDLE;  // the game's, recording; Kiln's place in it is where the FSR passes were

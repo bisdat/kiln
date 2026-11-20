@@ -569,6 +569,7 @@ bool build_frame(const uint8_t* desc_p, const uint8_t* in_p, Frame* f, Why* why,
     planes(v.plane_a, v.plane_b, &f->camera_near, &f->camera_far);
     f->fov_y = sane_fov(v.fov);
     f->pre_exposure = sane_exposure(v.exposure);
+    f->game_exposure = v.exposure;
     f->sharpness = std::isfinite(v.sharpness) ? std::clamp(v.sharpness, 0.0f, 1.0f) : 0.0f;
     f->reset = v.reset;
     // the frame time: the game's, else Kiln's own time since the last FSR frame
@@ -774,11 +775,11 @@ void hk_fsr(void* ctx, uint8_t* fsr, uint8_t* desc) {
         static uint32_t said = 0;
         if (said++ < 12)
             logf(KILN_LOG_INFO, "graphics: upscaler: frame %llu (history reset): colour %ux%u fmt %d, depth fmt %d, motion fmt %d, masks fmt %d/%d, "
-                 "output %ux%u fmt %d; render %ux%u -> %ux%u, jitter %.4f %.4f, MV scale %.0f %.0f, planes %.3g..%.6g, FOV %.4f, exposure %.4f, "
-                 "frame %.2f ms", static_cast<unsigned long long>(n), f.color.width, f.color.height, f.color.format, f.depth.format, f.motion.format,
+                 "output %ux%u fmt %d; render %ux%u -> %ux%u, jitter %.4f %.4f, MV scale %.0f %.0f, planes %.3g..%.6g, FOV %.4f, "
+                 "pre-exposure %.4f (the game's %g), frame %.2f ms", static_cast<unsigned long long>(n), f.color.width, f.color.height, f.color.format, f.depth.format, f.motion.format,
                  f.reactive.format, f.transparency.format, f.output.width, f.output.height, f.output.format, f.render_width, f.render_height,
                  f.output_width, f.output_height, f.jitter_x, f.jitter_y, f.mv_scale_x, f.mv_scale_y, f.camera_near, f.camera_far, f.fov_y,
-                 f.pre_exposure, f.frame_ms);
+                 f.pre_exposure, static_cast<double>(f.game_exposure), f.frame_ms);
     }
     const uint32_t seq = g_seq.fetch_add(1, std::memory_order_relaxed) + 1;
     Slot& s = g_slots[seq % kSlots];
