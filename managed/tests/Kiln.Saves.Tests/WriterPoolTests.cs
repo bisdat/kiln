@@ -29,6 +29,7 @@ public sealed class WriterPoolTests : IDisposable
     public WriterPoolTests()
     {
         Assert.True(Store.Writer.Stop("test start"), "the writer did not stop");  // no runner of an earlier test
+        Store.Writer.ForgetLoggedFallbacks();                                     // "logged once" counts from here
         Backend.Current = _log;
     }
 
@@ -352,13 +353,14 @@ public sealed class WriterPoolTests : IDisposable
         return copy;
     }
 
-    /// <summary>A file's bytes; a manifest's with its creation time taken out (the only field that names the clock).</summary>
+    /// <summary>A file's bytes; a manifest's with its clock times taken out (createdUnixMs, committedUnixMs: the only
+    /// fields that name the clock).</summary>
     private static byte[] Normalize(string file)
     {
         var bytes = File.ReadAllBytes(file);
         if (!file.Contains($"{Path.DirectorySeparatorChar}manifests{Path.DirectorySeparatorChar}")) return bytes;
         var doc = JsonNode.Parse(bytes)!.AsObject();
-        doc.Remove("createdUnixMs");
+        foreach (var key in doc.Select(kv => kv.Key).Where(k => k.EndsWith("UnixMs", StringComparison.Ordinal)).ToList()) doc.Remove(key);
         return System.Text.Encoding.UTF8.GetBytes(doc.ToJsonString());
     }
 

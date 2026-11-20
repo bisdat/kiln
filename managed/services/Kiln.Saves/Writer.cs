@@ -534,6 +534,12 @@ internal sealed unsafe class SaveWriter
         }
     }
 
+    /// <summary>Tests: the fallback lines are logged once per process; a test that checks one starts from none.</summary>
+    internal void ForgetLoggedFallbacks()
+    {
+        lock (_lock) _fallbacks.Clear();
+    }
+
     /// <summary>A runner is admitted on the pool now (tests).</summary>
     internal bool Started
     {
