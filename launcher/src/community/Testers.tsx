@@ -14,7 +14,7 @@ import { t as tt, useT } from "../i18n";
 import { Button, Card, EmptyState, KeyValue, Menu, Modal, StatusPill, TextInput, fmtBytes, toast } from "../ui";
 import { useGame } from "../api/hooks";
 import { DeckButton, Dialog, Row, Word } from "../deck/ui";
-import { ago, cq, errKind, refreshCommunity, useCommunity, useCommunityUi, useTester } from "./state";
+import { ago, cq, errKind, openInDiscord, refreshCommunity, useCommunity, useCommunityUi, useTester } from "./state";
 import { discordWords } from "./parts";
 import { Pick } from "./DeckCommunity";
 import { DeckSignIn } from "./SignIn";
@@ -172,7 +172,7 @@ function Checklist({ plan, net }: { plan: TestPlan; net: boolean }) {
   return (
     <Card title={t("community.tester.plan.title", { build: plan.build })} sub={t("community.tester.plan.say", { done, count: steps.length, until: untilDate(plan.until) })} data-testid="kc-checklist"
       actions={<div className="k-row" style={{ gap: 10 }}>
-        <button type="button" className="k-link" onClick={() => api.appOpenUrl(plan.url).catch((e) => toast.error(e))}>{t("community.tester.plan.openPost")}</button>
+        <button type="button" className="k-link" onClick={() => openInDiscord(plan.url)}>{t("community.tester.plan.openPost")}</button>
         <Menu label={t("community.tester.plan.more")} icon={<MoreHorizontal />} size="s" items={[{ label: t("community.tester.leave"), danger: true, disabled: !net, onSelect: () => void stopTesting(qc) }]} />
       </div>}>
       {sent && (

@@ -80,6 +80,7 @@ pub fn run() {
             commands::app::app_settings_set,
             commands::app::app_open_path,
             commands::app::app_open_url,
+            commands::app::app_open_discord,
             commands::app::task_list,
             commands::app::task_get,
             commands::app::task_cancel,

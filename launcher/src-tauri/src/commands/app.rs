@@ -527,6 +527,100 @@ pub async fn app_open_url(url: String) -> Result<(), Error> {
     crate::state::open_external(std::ffi::OsStr::new(&url))
 }
 
+/// "Open in Discord" (a support post, the build's post in #testing, the server): in the Discord app when this PC has it,
+/// else in the browser (kiln_manage::community::open). `url` is the discord.com link; `fallback` the web link to open
+/// instead of it, when another one fits better (the invite, for the server). The web link alone in Game Mode, where an
+/// app opening over the game is no help. Answers "app" or "web".
+#[tauri::command]
+pub async fn app_open_discord(url: String, fallback: Option<String>) -> Result<String, Error> {
+    if !url.starts_with("https://") || fallback.as_deref().is_some_and(|f| !f.starts_with("https://")) {
+        return Err(Error::new(ErrorCode::Refused, "Only https links open.").with_detail(url));
+    }
+    crate::state::blocking(move || open_discord_link(&url, fallback.as_deref()).map(|r| r.as_str().to_string())).await
+}
+
+/// May this Discord link open in the Discord app: it has an app link, this is no Game Mode session, and the
+/// `discord:` scheme is registered (asked each time: the app may have been installed or removed since).
+pub fn discord_app_usable(url: &str) -> bool {
+    kiln_manage::community::open::app_link(url).is_some() && !crate::deck::detect::current().gamescope && discord_scheme_registered()
+}
+
+/// [`app_open_discord`] without the command (also a reply notification's Open, community/posts.rs). Blocks a few
+/// seconds at most.
+pub fn open_discord_link(url: &str, fallback: Option<&str>) -> Result<kiln_manage::community::open::Opened, Error> {
+    use kiln_manage::community::open;
+    let usable = discord_app_usable(url);
+    let r = open::open_with(url, fallback, usable, |t| open_checked(std::ffi::OsStr::new(t)))?;
+    launcher_log("community", match r {
+        open::Opened::App => "opened a Discord link in the Discord app",
+        open::Opened::Web if usable => "opened a Discord link in the browser (the Discord app did not take it)",
+        open::Opened::Web => "opened a Discord link in the browser (no Discord app for discord: links here, or Game Mode)",
+    });
+    Ok(r)
+}
+
+/// Is the `discord:` scheme registered to a program that is there? Windows: `HKCR\discord` with `URL Protocol` and
+/// an open command whose program exists (reg.exe prints in the OEM code page, so a path with other letters can't be
+/// checked and is trusted). Linux: `xdg-mime` names a handler. Elsewhere: no.
+fn discord_scheme_registered() -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let query = |args: &[&str]| {
+            std::process::Command::new("reg").args(args).creation_flags(CREATE_NO_WINDOW).stdin(std::process::Stdio::null())
+                .output().ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        };
+        if query(&["query", r"HKCR\discord", "/v", "URL Protocol"]).is_none() {
+            return false;
+        }
+        let Some(cmd) = query(&["query", r"HKCR\discord\shell\open\command", "/ve"]) else { return false };
+        match kiln_manage::community::open::reg_command_exe(&cmd, &|k| std::env::var(k).ok()) {
+            Some(exe) if exe.is_ascii() => std::path::Path::new(&exe).is_file(),
+            Some(_) => true,
+            None => false,
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        kiln_manage::hostenv::command("xdg-mime").args(["query", "default", "x-scheme-handler/discord"])
+            .stdin(std::process::Stdio::null()).stderr(std::process::Stdio::null()).output().ok()
+            .filter(|o| o.status.success())
+            .is_some_and(|o| kiln_manage::community::open::xdg_handler(&String::from_utf8_lossy(&o.stdout)).is_some())
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
+    {
+        false
+    }
+}
+
+/// Opens a link and, where the opener says so, whether it worked: on Linux xdg-open's exit within 3 seconds (a handler
+/// that fails or is missing exits non-zero; one that keeps running is taken as opened and reaped in the background).
+/// Windows' explorer exits the same way for every link, so there only its start counts (the scheme was checked before).
+fn open_checked(target: &std::ffi::OsStr) -> Result<(), Error> {
+    #[cfg(not(windows))]
+    {
+        let mut child = kiln_manage::hostenv::command("xdg-open").arg(target)
+            .stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null())
+            .spawn().map_err(|e| Error::new(ErrorCode::Unsupported, format!("could not open it: {e}")))?;
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        while std::time::Instant::now() < until {
+            match child.try_wait() {
+                Ok(Some(s)) if s.success() => return Ok(()),
+                Ok(Some(s)) => return Err(Error::new(ErrorCode::Unsupported, format!("could not open it: xdg-open {s}"))),
+                Ok(None) => std::thread::sleep(std::time::Duration::from_millis(50)),
+                Err(e) => return Err(Error::new(ErrorCode::Unsupported, format!("could not open it: {e}"))),
+            }
+        }
+        std::thread::spawn(move || { let _ = child.wait(); });
+        Ok(())
+    }
+    #[cfg(windows)]
+    {
+        crate::state::open_external(target)
+    }
+}
+
 #[tauri::command]
 pub async fn task_list() -> Result<Vec<Task>, Error> {
     let map = TASKS.lock().unwrap();

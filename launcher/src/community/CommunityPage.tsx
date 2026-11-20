@@ -12,7 +12,7 @@ import type { SupportPost } from "../api/commands";
 import { useGame } from "../api/hooks";
 import { useT } from "../i18n";
 import { Button, Card, ConfirmDanger, EmptyState, Menu, Page, PageHeader, Skeleton, SplitPage, StatusPill, Toggle, errorText, toast } from "../ui";
-import { INVITE, LINKS, ago, clockTime, cq, eventTime, openSendReport, refreshCommunity, sayLine, setCommunity, useCommunity, useCommunitySettings, useCommunityUi, useFeed, usePosts } from "./state";
+import { GUILD, INVITE, LINKS, ago, clockTime, cq, eventTime, openSendReport, refreshCommunity, openInDiscord, sayLine, setCommunity, useCommunity, useCommunitySettings, useCommunityUi, useFeed, usePosts } from "./state";
 import { statusWord } from "./parts";
 import { PresenceSection } from "./Presence";
 import { TesterSection } from "./Testers";
@@ -40,7 +40,7 @@ export default function CommunityPage() {
     <Page className="kc-page">
       <PageHeader title={t("community.title")} sub={sayLine(s)}
         meta={acct ? <StatusPill tone={acct.member ? "ok" : "warn"}>{acct.member ? t("community.account.member") : t("community.account.notMember")}</StatusPill> : undefined}
-        actions={<Button onClick={() => openUrl(INVITE)} disabled={s ? !s.online : false} data-testid="kc-join">{acct?.member ? t("community.openDiscord") : t("community.join")}</Button>} />
+        actions={<Button onClick={() => (acct?.member ? openInDiscord(`https://discord.com/channels/${GUILD}`, INVITE) : openUrl(INVITE))} disabled={s ? !s.online : false} data-testid="kc-join">{acct?.member ? t("community.openDiscord") : t("community.join")}</Button>} />
       <SplitPage form aside={
         <>
           <Card title={t("community.account.title")} data-testid="kc-account">
@@ -146,7 +146,7 @@ function PostRow({ p, net }: { p: SupportPost; net: boolean }) {
   const line = p.lastReply ? (p.lastReply.team ? t("community.posts.lastReplyTeam", { name: p.lastReply.name, ago: ago(p.lastReply.at) }) : t("community.posts.lastReply", { name: p.lastReply.name, ago: ago(p.lastReply.at) }))
     : t("community.posts.noReply", { ago: ago(p.created) });
   // opening a post marks its replies seen
-  const go = () => { openUrl(p.url); if (p.unread) api.communityPostSeen(p.id).then(() => refreshCommunity(qc)).catch(() => {}); };
+  const go = () => { openInDiscord(p.url); if (p.unread) api.communityPostSeen(p.id).then(() => refreshCommunity(qc)).catch(() => {}); };
   const refresh = () => qc.invalidateQueries({ queryKey: cq.posts }).then(() => qc.invalidateQueries({ queryKey: cq.status }));
   return (
     <div className={"kc-post" + (p.unread ? " hot" : "")} data-testid="kc-post" data-post={p.id}>

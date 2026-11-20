@@ -23,9 +23,11 @@
 //! | [`hardware`] | what a tester shares: graphics card, driver, video memory, system, how the game runs; what it can test |
 //! | [`testers`] | test plans, the steps for this hardware, results kept until sent |
 //! | [`presence`] | Rich Presence over the Discord app's local IPC socket: where it is, the frames, the lines |
+//! | [`open`] | "Open in Discord": the Discord app's `discord:` link when the app is there, else the web link |
 
 pub mod hardware;
 pub mod known;
+pub mod open;
 pub mod post;
 pub mod presence;
 pub mod relay;

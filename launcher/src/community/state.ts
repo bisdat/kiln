@@ -14,6 +14,10 @@ import { t } from "../i18n";
 import { toast } from "../ui";
 
 export const INVITE = "https://discord.gg/7pjr8SMTfU";
+/** The Kiln Discord (its channels link opens the server in the Discord app; the web fallback is the invite). */
+export const GUILD = "1568454645683195976";
+/** "Open in Discord" for a discord.com link: the Discord app when this PC has it, else the browser. */
+export const openInDiscord = (url: string, fallback?: string) => { api.appOpenDiscord(url, fallback).catch((e) => toast.error(e)); };
 export const PRIVACY_URL = "https://frostdev.io/kiln/privacy";
 export const TERMS_URL = "https://frostdev.io/kiln/terms";
 export const LINKS = {
@@ -128,7 +132,7 @@ export function useCommunityFeed() {
       if (e.kind !== "reply" || api.isTauri()) return;
       const st = qc.getQueryData<{ notify: boolean }>(cq.status);
       if (st?.notify) toast.info(t("community.notify.title"), t("community.notify.detail", { by: e.by ?? "", title: e.title ?? "" }),
-        { actions: e.url ? [{ label: t("community.posts.open"), onClick: () => { api.appOpenUrl(e.url!).catch((x) => toast.error(x)); } }] : [] });
+        { actions: e.url ? [{ label: t("community.posts.open"), onClick: () => openInDiscord(e.url!) }] : [] });
     }).then((f) => (live ? (off = f) : f()));
     return () => { live = false; off?.(); };
   }, [qc]);

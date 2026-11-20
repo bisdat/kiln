@@ -971,6 +971,15 @@ const handlers: Record<string, Handler> = {
   app_settings_set: (a) => (settings = { ...(a.settings as LauncherSettings) }),
   app_open_path: () => null,
   app_open_url: (a) => { if (!S(a.url).startsWith("https://")) reject("refused", "Only https links open."); openedUrls.push(S(a.url)); return null; },
+  // the Discord app is "installed" with ?discordapp=1 (kiln_manage::community::open: the app link, else the web link)
+  app_open_discord: (a) => {
+    const url = S(a.url), fallback = a.fallback ? S(a.fallback) : url;
+    if (!url.startsWith("https://") || !fallback.startsWith("https://")) reject("refused", "Only https links open.");
+    const m = /^https:\/\/discord\.com\/channels\/(\d{1,24}(?:\/\d{1,24}){0,2})$/.exec(url);
+    if (m && typeof location !== "undefined" && new URLSearchParams(location.search).has("discordapp")) { openedUrls.push(`discord://-/channels/${m[1]}`); return "app"; }
+    openedUrls.push(fallback);
+    return "web";
+  },
   task_list: () => [...tasks.values()],
   task_get: (a) => tasks.get(S(a.taskId)) ?? reject("not_found", "No such task."),
   task_cancel: (a) => { cancels.add(S(a.taskId)); return null; },

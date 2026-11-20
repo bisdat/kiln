@@ -13,6 +13,22 @@ async function open(page: Page, url: string) {
 const post = (page: Page, id: string) => page.locator(`[data-testid="kc-post"][data-post="${id}"]`);
 
 test.describe("desktop", () => {
+  test("with the Discord app on this PC, Open in Discord and Open Discord open the app's discord: links", async ({ page }) => {
+    await open(page, "/?mock=1&discord=in&discordapp=1#/community");
+    await post(page, "p3").getByRole("button", { name: "Open in Discord" }).click();
+    await expect.poll(() => mock(page, (h) => h.opened())).toContain("discord://-/channels/1568454645683195976/15731308842100003");
+    await page.getByTestId("kc-join").click();
+    await expect.poll(() => mock(page, (h) => h.opened())).toContain("discord://-/channels/1568454645683195976");
+    expect((await mock(page, (h) => h.opened())).filter((u) => u.startsWith("https://discord"))).toEqual([]);
+  });
+
+  test("without the Discord app, the same buttons open the web links (the server's invite for Open Discord)", async ({ page }) => {
+    await open(page, "/?mock=1&discord=in#/community");
+    await post(page, "p3").getByRole("button", { name: "Open in Discord" }).click();
+    await page.getByTestId("kc-join").click();
+    await expect.poll(() => mock(page, (h) => h.opened())).toEqual(["https://discord.com/channels/1568454645683195976/15731308842100003", "https://discord.gg/7pjr8SMTfU"]);
+  });
+
   test("a reply arrives: the count, the row's word and line; no notification while the switch is off", async ({ page }) => {
     await open(page, "/?mock=1&discord=in#/community");
     await expect(page.getByTestId("kc-account").getByRole("switch")).not.toBeChecked();

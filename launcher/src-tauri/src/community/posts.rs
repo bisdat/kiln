@@ -108,7 +108,7 @@ fn show(title: &str, body: &str, open: &str, url: &str) {
         match out {
             Ok(o) if o.status.success() => {
                 if String::from_utf8_lossy(&o.stdout).trim() == "open" {
-                    let _ = crate::state::open_external(std::ffi::OsStr::new(url));
+                    let _ = crate::commands::app::open_discord_link(url, None);
                 }
                 return;
             }
@@ -132,6 +132,9 @@ fn show(title: &str, body: &str, open: &str, url: &str) {
 #[cfg(windows)]
 fn show(title: &str, body: &str, open: &str, url: &str) {
     use std::os::windows::process::CommandExt;
+    // the Discord app's link when it is there (the toast opens it through Windows' protocol activation), else the web link
+    let app = crate::commands::app::discord_app_usable(url).then(|| kiln_manage::community::open::app_link(url)).flatten();
+    let url = app.as_deref().unwrap_or(url);
     let x = |s: &str| s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&apos;");
     let xml = format!(
         "<toast activationType=\"protocol\" launch=\"{u}\"><visual><binding template=\"ToastGeneric\"><text>{t}</text><text>{b}</text></binding></visual><actions><action content=\"{o}\" activationType=\"protocol\" arguments=\"{u}\"/></actions></toast>",

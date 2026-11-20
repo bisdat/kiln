@@ -10,7 +10,7 @@ import * as api from "../api/commands";
 import type { KnownAction, ReportDraft, ReportPreview } from "../api/commands";
 import { useT } from "../i18n";
 import { Banner, Button, Cones, Field, KeyValue, Modal, Skeleton, StatusPill, TextArea, TextInput, fmtBytes, toast } from "../ui";
-import { INVITE, errKind, refreshCommunity, useCommunity, useCommunityUi, useSendOpen } from "./state";
+import { INVITE, errKind, openInDiscord, refreshCommunity, useCommunity, useCommunityUi, useSendOpen } from "./state";
 import { KINDS, discordWords, kindKey, rateText, versionsLine } from "./parts";
 
 const MAX = 90;
@@ -68,7 +68,7 @@ export function SendDialog() {
   if (s.step === "sent") {
     return (
       <Modal open onClose={close} title={t("community.send.sent.title")} width={560}
-        footer={<><Button onClick={close}>{t("common.close")}</Button><Button variant="primary" onClick={() => { if (s.sentUrl) open(s.sentUrl); close(); }}>{t("community.send.sent.open")}</Button></>}>
+        footer={<><Button onClick={close}>{t("common.close")}</Button><Button variant="primary" onClick={() => { if (s.sentUrl) openInDiscord(s.sentUrl); close(); }}>{t("community.send.sent.open")}</Button></>}>
         <div className="k-stack" style={{ gap: 10 }} data-testid="kc-sent">
           <p className="kc-p">{t("community.send.sent.text", { title: d.title })}</p>
           <p className="kc-p">{t(`community.send.sent.${d.zip === "team" ? "team" : d.zip === "public" ? "public" : "none"}`)}</p>
@@ -202,7 +202,7 @@ function SendError({ err, size, retry, sendWithout, save, recheck }: { err: NonN
         <button type="button" className="k-link" onClick={recheck}>{t("community.send.err.joined")}</button>
       </>}>{t("community.send.err.notMember")}</Banner>;
     case "rate_limited":
-      return <Banner tone="warn" title={t("community.send.err.rateTitle")} actions={d.last ? <Button size="s" onClick={() => open(String(d.last))}>{t("community.send.err.openLast")}</Button> : undefined}>
+      return <Banner tone="warn" title={t("community.send.err.rateTitle")} actions={d.last ? <Button size="s" onClick={() => openInDiscord(String(d.last))}>{t("community.send.err.openLast")}</Button> : undefined}>
         {rateText(d)}</Banner>;
     case "too_big":
       return <Banner tone="warn" title={t("community.send.err.bigTitle")} actions={<>

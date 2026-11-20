@@ -1306,6 +1306,9 @@ export const appSettingsSet = (settings: LauncherSettings) => call<LauncherSetti
  *  folder: the backend joins and normalises it for Explorer (never `${base}/${path}` here). */
 export const appOpenPath = (path: string, base?: string) => call<null>("app_open_path", { path, base });
 export const appOpenUrl = (url: string) => call<null>("app_open_url", { url });
+/** "Open in Discord": a discord.com link in the Discord app when this PC has it, else (or in Game Mode) in the browser;
+ *  `fallback` is the web link to open instead of `url` then (default: `url`). Answers where it opened. */
+export const appOpenDiscord = (url: string, fallback?: string) => call<"app" | "web">("app_open_discord", { url, fallback: fallback ?? null });
 export const taskList = () => call<Task[]>("task_list");
 export const taskGet = (taskId: TaskId) => call<Task>("task_get", { taskId });
 export const taskCancel = (taskId: TaskId) => call<null>("task_cancel", { taskId });
