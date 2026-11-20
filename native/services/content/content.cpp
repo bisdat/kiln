@@ -21,6 +21,7 @@
 #include <unordered_set>
 
 #include "content.h"
+#include "menulayout.h"  // kiln.stationmenus (registered next to kiln.content)
 #include "refs.h"
 #if KC_GAMEDATA
 #include "gamedata.h"
@@ -37,6 +38,19 @@ static_assert(sizeof(KilnContentStack) == 32);
 static_assert(sizeof(KilnContentStatus) == 208 && offsetof(KilnContentStatus, detail) == 48);
 static_assert(sizeof(KilnContentTextInfo) == 192 && offsetof(KilnContentTextInfo, language_key) == 16 && offsetof(KilnContentTextInfo, detail) == 32);
 static_assert(offsetof(KilnContentApi, text) == offsetof(KilnContentApi, txn_end) + sizeof(void*) && offsetof(KilnContentApi, text_info) == offsetof(KilnContentApi, text) + sizeof(void*));
+// kiln.stationmenus v1 (kiln_station_menus.h; managed mirror: Kiln.Content/StationMenuNative.cs)
+static_assert(sizeof(KilnStationMenusInfo) == 216 && offsetof(KilnStationMenusInfo, generation) == 16 &&
+              offsetof(KilnStationMenusInfo, remote_generation) == 24 && offsetof(KilnStationMenusInfo, layers) == 32 &&
+              offsetof(KilnStationMenusInfo, effective) == 36 && offsetof(KilnStationMenusInfo, remote) == 40 &&
+              offsetof(KilnStationMenusInfo, pending) == 44 && offsetof(KilnStationMenusInfo, materialized) == 48 &&
+              offsetof(KilnStationMenusInfo, detail) == 56);
+static_assert(sizeof(KilnServiceHeader) == 8 && offsetof(KilnStationMenusApi, info) == 8 &&
+              offsetof(KilnStationMenusApi, define) == 8 + 1 * sizeof(void*) && offsetof(KilnStationMenusApi, remove) == 8 + 2 * sizeof(void*) &&
+              offsetof(KilnStationMenusApi, export_layouts) == 8 + 3 * sizeof(void*) &&
+              offsetof(KilnStationMenusApi, remote_replace) == 8 + 4 * sizeof(void*) &&
+              offsetof(KilnStationMenusApi, remote_clear) == 8 + 5 * sizeof(void*) &&
+              offsetof(KilnStationMenusApi, set_pending) == 8 + 6 * sizeof(void*) &&
+              offsetof(KilnStationMenusApi, drain_applied) == 8 + 7 * sizeof(void*) && sizeof(KilnStationMenusApi) == 8 + 8 * sizeof(void*));
 
 namespace kc {
 const KilnApi* g_api = nullptr;
@@ -319,6 +333,7 @@ void try_ready(uint64_t step, uint32_t kind, uintptr_t world) {
 void KILN_CALL noop(void*) {}
 std::unordered_set<KilnOwner> g_pack_owner_set;
 void probe_owners() {
+    ml::probe_owners();  // kiln.stationmenus: the layers of revoked owners go
     std::vector<KilnOwner> owners = store_owners();
     {
         std::lock_guard lock(g_sub_mu);
@@ -1242,6 +1257,12 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     gd_boot();  // registers kiln.gamedata (available or not)
 #endif
     // bind of a boot generation's content part (no definitions are read here either way); kiln.content without its registries takes none
+    // kiln.stationmenus (menulayout.cpp): station menu layouts, stored on every side (a dedicated server too), drawn by a client's menu hook
+    ml::set_owner_probe([](KilnOwner o) { return g_api->post(o, &noop, nullptr) == KILN_ERR_REVOKED; });
+    ml::set_render_probe(&nc_menu_render);
+    if (KilnResult rc = api->register_service(owner, KilnStr{KILN_STATION_MENUS_SERVICE, std::strlen(KILN_STATION_MENUS_SERVICE)}, ml::table());
+        rc != KILN_OK)
+        LOGW("kiln.stationmenus could not be registered (rc %d)", rc);
     if (E.items && E.reflection && kiln::boot::collect(api, owner, "content", &prepare_boot, nullptr))
         LOGI("boot profile: the boot generation's content definitions are prepared before the game's entry point");
 #if KC_GAMEDATA
