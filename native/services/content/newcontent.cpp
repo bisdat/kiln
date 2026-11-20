@@ -18,7 +18,8 @@
 // Client worlds get the definitions when their item registry finishes loading (hook on ItemRegistryUpdate, loading
 // screen), before any step: the prediction world steps first and reads the client world's registry (docs/re/content.md
 // section 9). Ids this game has no definition for are answered in the client world by a placeholder ("[Unknown item]",
-// hook on ItemRegistryFind): dozens of the game's call sites use the lookup's result unchecked.
+// hook on ItemRegistryFind): dozens of the game's call sites use the lookup's result unchecked. That hook goes in only
+// when it is needed: a client world's registry loads while this game joined a server, or while mods define items.
 // Lifecycle: definitions are queued until the registries load (world load, before the save is read: saved stacks of
 // the item survive restarts) and inserted again into every new world. A definition whose owner goes away (mod
 // unload) stays in the registries until the process ends (Forge's missing mappings: stacks are never deleted);
@@ -45,15 +46,18 @@
 #include "nlohmann/json.hpp"
 #include "refs.h"
 #include "services/kiln_assets.h"
+#include "services/kiln_caps.h"  // the row content.text
 #include "services/kiln_ui.h"  // kiln.craftmenu (the crafting menu extension point, implemented here)
 #include "kiln_hook.hpp"
 
 namespace kc {
 void set_kitbash_mod(const std::string* mod);  // refs.cpp
+void set_kitbash_item(const uint8_t* guid);    // refs.cpp
 
+// The definition being kitbashed: its mod (a model it declares) and its item's GUID (a material pool bound to it).
 struct KitbashModScope {
-    explicit KitbashModScope(const std::string* mod) { set_kitbash_mod(mod); }
-    ~KitbashModScope() { set_kitbash_mod(nullptr); }
+    KitbashModScope(const std::string* mod, const uint8_t* item) { set_kitbash_mod(mod); set_kitbash_item(item); }
+    ~KitbashModScope() { set_kitbash_mod(nullptr); set_kitbash_item(nullptr); }
     KitbashModScope(const KitbashModScope&) = delete;
     KitbashModScope& operator=(const KitbashModScope&) = delete;
 };
@@ -656,6 +660,7 @@ struct Def {
     bool pack = false, seen = true, orphan = false;
     bool placeholder = false;  // "[Missing: mod:item]": keeps saved stacks of an item whose mod is gone (A4)
     bool internal = false;     // Kiln's own "[Unknown item]" template: client world only, in no list a mod or the sync sees
+    std::string lab_refuse;    // labs only (kiln.json boot.testFault): every world refuses it at registration, with this reason
     uint64_t version = 0;
     uint8_t tag_guid[kTextSlots][16] = {};
     uint32_t tags[kTextSlots] = {};
@@ -757,6 +762,9 @@ struct WorldState {
     bool early = false;          // bound while the game set the world up; session = the one its first step will start
     uint64_t bound_ms = 0;       // when (GetTickCount64)
     uint64_t registered_ms = 0;  // when every definition was first in (0: not yet)
+    bool find_decided = false;   // the client world's line on the item lookup hook is out (itemfind_hooked)
+    bool find_late_said = false; // ... and the one for an item defined while this world runs
+    size_t find_items = 0;       // items mods defined when that line went out
 };
 WorldState g_ws[KILN_WORLD_KINDS];
 std::mutex g_ui_mu;  // the recipe-UI hook reads the client / server state from the UI thread
@@ -1135,9 +1143,14 @@ uintptr_t build_clone(Def& d, uintptr_t base, WorldState& ws, std::string* why) 
         };
         KitbashOut ko;
         {
-            const KitbashModScope mod(d.placeholder || d.orphan ? nullptr : &d.mod);  // a model this mod declares (a server that did not cook)
+            const KitbashModScope mod(d.placeholder || d.orphan ? nullptr : &d.mod, d.guid);  // a model this mod declares (a server that did not cook)
             for (auto& [key, val] : d.kitbash.items()) kitbash(L.item, key, val, find, all, &ko, reinterpret_cast<uintptr_t>(p));
         }
+        // inert: a program only its gone mod served (a gem's trigger program) is none, not the base's (gem wave)
+        if (d.placeholder)
+            if (const size_t n = placeholder_clear_programs(&ko))
+                LOGI("new content: placeholder %s: %zu program reference(s) nothing serves now: it runs no program (not its base's)",
+                     d.name.c_str(), n);
         for (const RefWrite& w : ko.writes) std::memcpy(p + w.f->offset, w.bytes, w.f->bytes);
         for (const BlobWrite& b : ko.blobs)
             if (!b.data) set_blob(p, b.offset, nullptr, 0);
@@ -1152,11 +1165,12 @@ uintptr_t build_clone(Def& d, uintptr_t base, WorldState& ws, std::string* why) 
                                       [](const std::string& w) { return w.find("the game has loaded") != std::string::npos; });
         if (d.placeholder && !ko.problems.empty()) {
             // A placeholder keeps a missing mod's saved stacks: its references name that mod's own resources, which nothing
-            // serves while it isn't loaded. Expected, so one line at Info (the missing-content summary says which mods).
+            // serves while it isn't loaded. Expected, so one line at Info (the missing-content summary says which mods). The
+            // base's values stay, but for a program reference: none (placeholder_clear_programs above).
             std::string fields;
             for (const std::string& w : ko.problems) fields += (fields.empty() ? "" : ", ") + w.substr(0, w.find(": "));
             LOGI("new content: placeholder %s: %zu reference(s) to its mod's resources stay unresolved while the mod is not loaded "
-                 "(the base's values stay): %s", d.name.c_str(), ko.problems.size(), fields.c_str());
+                 "(the base's values stay; a program: none): %s", d.name.c_str(), ko.problems.size(), fields.c_str());
         } else {
             for (const std::string& w : ko.problems)
                 LOGW("new content: item %s: %s (skipped; the base's value stays)", d.name.c_str(), w.c_str());
@@ -1517,8 +1531,16 @@ void wr_add(WorldState& ws, uint32_t kind, uintptr_t world, uint32_t wid, const 
          d.station.c_str() + 9, wname(kind), m.count + 1, static_cast<unsigned long long>(m.cap), named.c_str());
 }
 
-// Inserts every definition into `world`'s registries (its thread). Returns true when everything is settled.
+bool sync_world_pass(uint32_t kind, uintptr_t world);
+// Inserts every definition into `world`'s registries (its thread). Returns true when everything is settled. A required boot mod's
+// definition that did not register stops the start afterwards (boot_late_check).
 bool sync_world(uint32_t kind, uintptr_t world) {
+    const bool settled = sync_world_pass(kind, world);
+    boot_late_check();
+    return settled;
+}
+
+bool sync_world_pass(uint32_t kind, uintptr_t world) {
     if (!N.on || !world || kind >= KILN_WORLD_KINDS || kind == KILN_WORLD_PREDICTION) return false;
     PhaseTimer pt(PH_SYNC);
     KilnSessionInfo si{};
@@ -1558,6 +1580,10 @@ bool sync_world(uint32_t kind, uintptr_t world) {
     for (const DefPtr& dp : defs) {
         Def& d = *dp;
         if (d.kind != KILN_CONTENT_ITEMS || (d.internal && kind != g_early_kind)) continue;
+        if (!d.lab_refuse.empty()) {
+            fail_once(ws, kind, d, d.lab_refuse);
+            continue;
+        }
         uintptr_t clone = 0;
         {
             std::lock_guard lock(store_mutex());
@@ -1633,6 +1659,10 @@ bool sync_world(uint32_t kind, uintptr_t world) {
         for (const DefPtr& dp : defs) {
             Def& d = *dp;
             if (d.kind != KILN_CONTENT_RECIPES) continue;
+            if (!d.lab_refuse.empty()) {
+                fail_once(ws, kind, d, d.lab_refuse);
+                continue;
+            }
             uintptr_t info = 0;
             {
                 std::lock_guard lock(store_mutex());
@@ -2245,10 +2275,11 @@ void retry_kitbash(WorldState& ws) {
             };
             KitbashOut ko;
             {
-                const KitbashModScope mod(d.placeholder || d.orphan ? nullptr : &d.mod);
+                const KitbashModScope mod(d.placeholder || d.orphan ? nullptr : &d.mod, d.guid);
                 for (auto& [key, val] : d.kitbash.items()) kitbash(L.item, key, val, find, all, &ko, clone);
             }
             if (ko.problems.size() >= d.warnings.size()) continue;
+            if (d.placeholder) placeholder_clear_programs(&ko);  // still unresolved: still none (build_item)
             for (const RefWrite& w : ko.writes) std::memcpy(p + w.f->offset, w.bytes, w.f->bytes);
             for (const BlobWrite& b : ko.blobs)
                 if (const int64_t rel = static_cast<int64_t>(b.data) - static_cast<int64_t>(clone + b.offset);
@@ -3300,10 +3331,11 @@ void KILN_CALL on_client_pre(const KilnTickInfo* t, void*) {
 // loading, on the loading screen, whatever world came before it in this process. Each world has its own registry; the
 // binding comes from the game's own RegisterSingleton call, so a world at a reused address starts clean.
 kiln::RawHook g_regsingleton_hook, g_itemupdate_hook, g_itemfind_hook;
-// The continuations, called directly (a plain function pointer): ItemRegistryFind is hot and runs on job threads.
-using ItemFindFn = uintptr_t(__fastcall*)(uint32_t, uintptr_t);
+// The continuations, called directly (a plain function pointer). ItemRegistryFind's handler calls through its hook
+// object instead (g_itemfind_hook.call): that hook goes in while the game runs, and install() publishes the continuation
+// before the detour is reachable, while a global assigned after install() returns would still be null for a job thread
+// that enters at once.
 using FourArgFn = uintptr_t(__fastcall*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t);
-ItemFindFn g_itemfind_orig = nullptr;
 FourArgFn g_itemupdate_orig = nullptr, g_regsingleton_orig = nullptr;
 int64_t g_kind_off = -1;                  // world + world.storage + storage.kind
 std::atomic<uintptr_t> g_early_world{0};  // the world being set up or running, of kind g_early_kind
@@ -3324,6 +3356,7 @@ std::atomic<uintptr_t> g_unknown_reg{0};   // the registry whose misses are answ
 std::atomic<uintptr_t> g_unknown_tmpl{0};  // the clone copied per id
 uint32_t g_unknown_id = 0;                 // Kiln_Unknown_Item's own id
 uintptr_t g_itemfind_fn = 0;
+bool g_itemfind_tried = false;             // installed (it stays until the process ends), or failed for good; a checked refusal is tried again
 constexpr uint32_t kUnknownProbe = 0x4B494C4E;  // the self-check's id ("KILN"), asked once per world
 
 // The game's data holds more keen::ItemInfo resources than its registry lists (test and deprecated items: Armor_Tint_TEST
@@ -3395,7 +3428,8 @@ uintptr_t unknown_make(uint32_t id) {
 }
 
 uintptr_t __fastcall hk_itemfind(uint32_t id, uintptr_t reg) {
-    const uintptr_t r = g_itemfind_orig(id, reg);
+    // the hook object's continuation, published before the detour is reachable (a job thread may enter while install() runs)
+    const uintptr_t r = g_itemfind_hook.call<uintptr_t>(id, reg);
     if (r || !id || reg != g_unknown_reg.load(std::memory_order_relaxed)) return r;
     if (const UnknownMap* m = g_unknown.load(std::memory_order_acquire))
         if (auto it = m->find(id); it != m->end()) return it->second;
@@ -3403,11 +3437,116 @@ uintptr_t __fastcall hk_itemfind(uint32_t id, uintptr_t reg) {
     return unknown_make(id);
 }
 
+// ---- the item lookup hook, on first need (GitHub issue 39) ----
+// ItemRegistryFind is among the game's hottest functions (478 call sites, job threads), and other loaders' mods hook it
+// too (Quick Deposit). Only an id that the client world's registry lacks needs Kiln there, and only two things bring one:
+// this game joined someone else's server (no server world here: the server may send items of mods this game does not
+// have, and its definitions arrive after the first steps), or mods here define items (one defined while the world runs
+// can reach the client world before its registry has it). So the hook goes in when a client world's item registry
+// finishes loading, on the loading screen where the install's short stop of the other threads is not seen, and only
+// when one of the two holds; a host without item mods never hooks it. Once in, it stays until the process ends.
+// How it is installed follows the gameplay hooks' rule (kiln.hooks' typed_install_ready: no live world of any kind):
+//  - no world runs in the process (a join: no server world, and its client world is still loading; the prediction
+//    world only steps inside the client world's frame): the plain installer, as dev.28 installed this hook at boot.
+//    The checked one refuses on PCs where Kiln cannot open every thread, and a refusal would cost the placeholder on
+//    the join that needs it.
+//  - a world runs (a host: the server world's job threads call the lookup; or the client world already steps when the
+//    early registration is off): the checked installer, as quests/roster.cpp uses it: kiln.hooks' mid2_checked places
+//    the physical detour, refusing before any byte is written while a thread cannot be shown to be outside the bytes
+//    it replaces, and the raw link joins that target without writing. Refused: no hook and no placeholder in this
+//    world; the next world's registry load tries again.
+size_t mod_items() {
+    std::lock_guard lock(store_mutex());
+    size_t n = 0;
+    for (const DefPtr& d : g_defs) n += d->kind == KILN_CONTENT_ITEMS && !d->internal;
+    return n;
+}
+
+void itemfind_place(KilnRegisters&) {}  // the checked placer's mid link: it only places the detour, then goes
+
+enum class FindInstall { ok, unchecked, failed };  // unchecked: the checked install was refused, nothing was written
+
+FindInstall itemfind_install(bool world_runs, std::string* why) {
+    static const char kLabel[] = "content/ItemRegistryFind";
+    const auto raw = [&] {
+        if (g_itemfind_hook.install(g_api, g_owner, g_itemfind_fn, reinterpret_cast<void*>(&hk_itemfind), kLabel)) return true;
+        *why = g_itemfind_hook.error() ? g_itemfind_hook.error() : "kiln.hooks refused the hook";
+        return false;
+    };
+    if (!world_runs) return raw() ? FindInstall::ok : FindInstall::failed;
+    kiln::MidHook2 placer;
+    if (!placer.install_checked(g_api, g_owner, g_itemfind_fn, &itemfind_place, kLabel)) {
+        *why = placer.error() ? placer.error() : "the checked installation was refused";
+        return FindInstall::unchecked;
+    }
+    const bool ok = raw();  // the target has its detour now: the link joins its chain without writing a game byte
+    placer.revoke();
+    return ok ? FindInstall::ok : FindInstall::failed;
+}
+
+// The client world's registry is complete (unknown_enable): whether the lookup is hooked for it, installing it on first
+// need. One kiln.log line per world says which and why.
+bool itemfind_hooked(WorldState& ws) {
+    const char* w = wname(g_early_kind);
+    if (ws.find_decided) {
+        if (!g_itemfind_hook && !ws.find_late_said && mod_items() > ws.find_items) {
+            ws.find_late_said = true;
+            LOGI("new content: %s world: an item was defined while this world runs and the game's item lookup is not hooked: "
+                 "its [Unknown item] placeholder starts with the next world", w);
+        }
+        return static_cast<bool>(g_itemfind_hook);
+    }
+    ws.find_decided = true;
+    const size_t items = ws.find_items = mod_items();
+    if (g_itemfind_hook) {
+        LOGI("new content: %s world: the game's item lookup is hooked (%s)", w,
+             g_early_test ? "at boot: <kiln>/data/content/early-test" : "since an earlier world of this game");
+        return true;
+    }
+    if (g_itemfind_tried) {
+        LOGI("new content: %s world: the game's item lookup is not hooked (it could not be hooked earlier); an unknown item id stays NULL", w);
+        return false;
+    }
+    KilnSessionInfo si{};
+    si.size = sizeof si;
+    const bool known = g_api->session(&si) == KILN_OK;
+    const bool hosts = si.worlds[KILN_WORLD_SERVER] != 0;
+    bool world_runs = !known;  // without the session's answer, as if a world ran: the checked installer
+    for (uintptr_t x : si.worlds) world_runs |= x != 0;
+    if (hosts && !items) {
+        LOGI("new content: %s world: the game's item lookup is not hooked (this game hosts its world and no mod defines items, so "
+             "no unknown item id can reach it)", w);
+        return false;
+    }
+    std::string why;
+    const FindInstall rc = itemfind_install(world_runs, &why);
+    if (rc == FindInstall::unchecked) {  // nothing written: the next world's registry load tries again
+        LOGW("new content: %s world: the [Unknown item] placeholder is off for this world: the game's item lookup could not be "
+             "hooked because the install could not be checked while a world runs (%s); the next world's registry load tries again",
+             w, why.c_str());
+        return false;
+    }
+    g_itemfind_tried = true;
+    if (rc == FindInstall::failed) {
+        LOGW("new content: %s world: the game's item lookup could not be hooked (%s); an unknown item id stays NULL", w, why.c_str());
+        return false;
+    }
+    const char* how = world_runs ? "checked install: a world runs" : "no world runs yet";
+    if (!hosts)
+        LOGI("new content: %s world: the game's item lookup is hooked now (this game joined a server, which may send items of "
+             "mods this game does not have: they show as [Unknown item]; %s)", w, how);
+    else
+        LOGI("new content: %s world: the game's item lookup is hooked now (mods here define %zu item(s): one this world's "
+             "registry does not have yet shows as [Unknown item]; %s)", w, items, how);
+    return true;
+}
+
 // The registry is complete here: every item of the game's registry is in it, so a miss is an item outside it.
 void unknown_enable(WorldState& ws) {
-    if (!g_itemfind_hook || !g_unknown_id || g_unknown_reg.load() == ws.ireg) return;
+    if (!g_unknown_id || !g_itemfind_fn) return;  // no placeholder: no-unknown-items, no symbol, or the template was refused
     const auto it = ws.items.find(g_unknown_id);
     if (it == ws.items.end()) return;
+    if (!itemfind_hooked(ws) || g_unknown_reg.load() == ws.ireg) return;
     std::string why;
     const bool listed = build_game_items(&why);  // before the first answer in this registry
     if (g_unknown_tmpl.exchange(it->second) != it->second) {  // the base item moved: copies of the old clone go out of use
@@ -3433,7 +3572,7 @@ void unknown_enable(WorldState& ws) {
     size_t outside = 0;
     uint32_t sample = 0;
     for (uint32_t id : game)
-        if (!g_itemfind_orig(id, ws.ireg) && (++outside, !sample || id < sample)) sample = id;
+        if (!g_itemfind_hook.call<uintptr_t>(id, ws.ireg) && (++outside, !sample || id < sample)) sample = id;
     if (!outside)
         LOGI("new content: all %zu keen::ItemInfo resources of the game are in this registry", game.size());
     else if (const uintptr_t r = find(sample, ws.ireg); !r)
@@ -3583,7 +3722,10 @@ struct LocaRecResult {  // the game's Result<const LocaTagResource*>
     const uint8_t* rec;
 };
 
+void note_pool(void* pool);  // game texts (below): the LocaPool the game looks its texts up in
+
 LocaRecResult* __fastcall hk_locarec(LocaRecResult* out, void* pool, uint32_t id) {
+    note_pool(pool);
     if (id)
         if (const TextView* t = text_for(id, pool); t && t->rec) {
             g_loca_hits.fetch_add(1, std::memory_order_relaxed);
@@ -3605,6 +3747,7 @@ struct LocaResult {  // the game's Result<StringView>
 
 LocaResult* __fastcall hk_loca(LocaResult* out, void* pool, uint32_t id) {
     g_loca_calls.fetch_add(1, std::memory_order_relaxed);
+    note_pool(pool);
     if (g_loca_trace.load(std::memory_order_relaxed)) {
         std::lock_guard lock(g_trace_mu);
         if (g_trace_ids.size() < 4096 && std::find(g_trace_ids.begin(), g_trace_ids.end(), id) == g_trace_ids.end())
@@ -3621,6 +3764,178 @@ LocaResult* __fastcall hk_loca(LocaResult* out, void* pool, uint32_t id) {
         }
     return g_loca_hook.call<LocaResult*>(out, pool, id);
 }
+
+// ============================================================================================= game texts ======
+// text() / text_info(): the game's own text of a loca tag id, in the language the game shows now (the row content.text).
+// The game has one LocaPool (made once at app start, docs/re/content.md section 8.1); the loca hooks above see it on
+// every lookup and keep it here. text() calls the lookup the way the UI does: the hook's answer for Kiln's own tags
+// first, then the game's function (the continuation of the hook). Thread: the game client's main thread only. The game
+// switches the pool's language there (0x1216b60 from the settings, which reloads the language table), and its own UI
+// looks texts up there every frame; another thread could read a table while it is replaced. Nothing is cached: each
+// call reads the pool's language and asks the game, so a language change applies at the next call.
+std::atomic<void*> g_loca_pool{nullptr};
+std::atomic<uint32_t> g_main_tid{0};      // the game client's main thread, once seen
+std::atomic<bool> g_text_announced{false};  // the row says available
+uint32_t g_text_reason = KILN_CAP_REASON_SERVICE_MISSING;  // why text() is off (set at boot; kiln_plugin_main's thread)
+std::string g_text_off = "kiln.content's registries are not available on this build";
+bool g_text_on = false;                    // the loca hooks are in: text() can work once the pool is seen
+constexpr size_t kMaxText = 1u << 20;      // a longer "text" is not one (a broken result)
+
+const char* const kTextRow = "content.text";
+const char* const kTextWaiting = "waits for the game's first text lookup (its UI starts right after boot)";
+const char* const kTextOn = "the game's texts in the player's language (game client, main thread)";
+
+void text_row(uint32_t state, uint32_t reason, const std::string& text) {
+    const auto* caps = static_cast<const KilnCapsApi*>(g_api->service(KilnStr{KILN_CAPS_SERVICE, sizeof(KILN_CAPS_SERVICE) - 1}, 1));
+    if (caps && caps->report)
+        caps->report(g_owner, KilnStr{kTextRow, std::strlen(kTextRow)}, state, reason, KilnStr{text.data(), text.size()});
+}
+
+void note_pool(void* pool) {
+    if (!pool || g_loca_pool.load(std::memory_order_relaxed) == pool) return;
+    g_loca_pool.store(pool, std::memory_order_release);
+    // once per process: the row goes from pending to available (kiln.caps takes a report from any thread)
+    if (g_text_on && !g_text_announced.exchange(true)) text_row(KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE, kTextOn);
+}
+
+// kiln.ui (client), only for its UI thread id (screen(), any thread): the main thread in the main menu, where no
+// client world steps yet. Looked up again every 2 s while it is missing.
+const KilnUiApi* ui_api() {
+    static std::atomic<const KilnUiApi*> t{nullptr};
+    static std::atomic<uint64_t> next_try{0};
+    if (const KilnUiApi* a = t.load(std::memory_order_acquire)) return a;
+    if (GetTickCount64() < next_try.load(std::memory_order_relaxed)) return nullptr;
+    next_try.store(GetTickCount64() + 2000, std::memory_order_relaxed);
+    const auto* a = static_cast<const KilnUiApi*>(g_api->service(KilnStr{KILN_UI_SERVICE, std::strlen(KILN_UI_SERVICE)}, 1));
+    if (a && (a->header.size < offsetof(KilnUiApi, screen) + sizeof(void*) || !a->screen)) a = nullptr;
+    t.store(a, std::memory_order_release);
+    return a;
+}
+
+// The calling thread is the game client's main thread: the client world's thread, or kiln.ui's UI thread.
+bool on_main_thread() {
+    const uint32_t tid = static_cast<uint32_t>(GetCurrentThreadId());
+    if (const uint32_t known = g_main_tid.load(std::memory_order_relaxed)) return known == tid;
+    bool yes = g_api->on_world_thread(KILN_WORLD_CLIENT);
+    if (!yes)
+        if (const KilnUiApi* ui = ui_api()) {
+            KilnUiScreen sc{};
+            sc.size = sizeof sc;
+            yes = ui->screen(&sc) == KILN_OK && sc.ui_thread != 0 && sc.ui_thread == tid;
+        }
+    if (yes) g_main_tid.store(tid, std::memory_order_relaxed);
+    return yes;
+}
+
+uint32_t pool_language(const void* pool) {
+    uint32_t lang = 0;
+    if (pool && g_loca_lang_off) rd(reinterpret_cast<uintptr_t>(pool) + static_cast<uintptr_t>(g_loca_lang_off), &lang, 4);
+    return lang;
+}
+
+// The game's lookup, guarded (no C++ objects in this frame: SEH).
+bool call_lookup(void* pool, uint32_t id, LocaResult* r) {
+    __try {
+        g_loca_hook.call<LocaResult*>(r, pool, id);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+// Boot (kiln_plugin_main, after nc_boot): the row, before any mod loads.
+void text_boot() {
+    if (g_api->side() != KILN_SIDE_CLIENT) {
+        g_text_on = false;
+        g_text_reason = KILN_CAP_REASON_WRONG_SIDE;
+        g_text_off = "game client only: a dedicated server has no texts and no text lookup";
+    }
+    if (!g_text_on) {
+        text_row(KILN_CAP_UNAVAILABLE, g_text_reason, g_text_off);
+        return;
+    }
+    if (g_loca_pool.load(std::memory_order_acquire) && !g_text_announced.exchange(true)) {
+        text_row(KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE, kTextOn);
+        return;
+    }
+    if (!g_text_announced.load()) text_row(KILN_CAP_PENDING, KILN_CAP_REASON_SESSION, kTextWaiting);
+}
+
+}  // namespace
+
+KilnResult nc_text(uint32_t id, std::string* out) {
+    out->clear();
+    if (!g_text_on) return KILN_ERR_UNAVAILABLE;
+    void* pool = g_loca_pool.load(std::memory_order_acquire);
+    if (!pool) return KILN_ERR_UNAVAILABLE;
+    if (!on_main_thread()) return KILN_ERR_WRONG_THREAD;
+    if (!id) return KILN_ERR_NOT_FOUND;
+    if (const TextView* t = text_for(id, pool)) {  // Kiln's own tags, in the pool's language (as hk_loca answers them)
+        out->assign(t->p, static_cast<size_t>(t->n));
+        return KILN_OK;
+    }
+    LocaResult r{};
+    if (!call_lookup(pool, id, &r)) return KILN_ERR_INTERNAL;
+    if (r.error == 3) return KILN_ERR_UNAVAILABLE;  // "Loading": the English table is not loaded yet
+    if (r.error) return KILN_ERR_NOT_FOUND;         // 0x1f "Unknown Tag Id", 0x12 id 0
+    if (!r.len) return KILN_OK;
+    if (!r.text || r.len > kMaxText) return KILN_ERR_INTERNAL;
+    std::string s(static_cast<size_t>(r.len), '\0');
+    if (!rd(reinterpret_cast<uintptr_t>(r.text), s.data(), s.size())) return KILN_ERR_INTERNAL;
+    *out = std::move(s);
+    return KILN_OK;
+}
+
+void nc_text_info(KilnContentTextInfo* out) {
+    void* pool = g_loca_pool.load(std::memory_order_acquire);
+    const uint32_t size = out->size;
+    std::memset(out, 0, sizeof *out);
+    out->size = size;
+    std::string detail;
+    if (!g_text_on) {
+        out->state = KILN_CAP_UNAVAILABLE;
+        out->reason = g_text_reason;
+        detail = g_text_off;
+    } else if (!pool) {
+        out->state = KILN_CAP_PENDING;
+        out->reason = KILN_CAP_REASON_SESSION;
+        detail = kTextWaiting;
+    } else {
+        out->state = KILN_CAP_AVAILABLE;
+        detail = kTextOn;
+        out->language = pool_language(pool);
+        std::lock_guard lock(g_text_mu);
+        load_languages();
+        if (out->language < g_lang_keys.size()) {
+            const std::string& k = g_lang_keys[out->language];
+            std::memcpy(out->language_key, k.data(), std::min(k.size(), sizeof out->language_key - 1));
+        }
+    }
+    std::memcpy(out->detail, detail.data(), std::min(detail.size(), sizeof out->detail - 1));
+}
+
+void nc_text_boot() { text_boot(); }
+
+KilnResult KILN_CALL nc_text_api(uint32_t id, char* buf, size_t cap, size_t* len) {
+    if (len) *len = 0;
+    std::string text;
+    if (KilnResult rc = nc_text(id, &text)) return rc;
+    if (len) *len = text.size();
+    if (buf && cap) {
+        const size_t n = std::min(text.size(), cap - 1);
+        std::memcpy(buf, text.data(), n);
+        buf[n] = 0;
+    }
+    return buf && cap > text.size() ? KILN_OK : KILN_ERR_BUFFER_TOO_SMALL;
+}
+
+KilnResult KILN_CALL nc_text_info_api(KilnContentTextInfo* out) {
+    if (!out || out->size < sizeof(KilnContentTextInfo)) return KILN_ERR_INVALID_ARGUMENT;
+    nc_text_info(out);
+    return KILN_OK;
+}
+
+namespace {
 
 void* __fastcall hk_uitex(void* cache, const uint8_t* key, uint8_t flag) {
     if (key && g_any_alias.load(std::memory_order_acquire)) {
@@ -3735,7 +4050,7 @@ std::string str_of(const json& j, const char* k) { return j.contains(k) && j[k].
 
 // "mod newitems" / "pack newitems" -> "newitems"
 std::string mod_of_label(const std::string& label) {
-    for (const char* p : {"mod ", "pack "})
+    for (const char* p : {"mod ", "pack ", "boot:"})  // "boot:<mod>": the process owner of a boot generation's definitions
         if (label.rfind(p, 0) == 0) return label.substr(std::strlen(p));
     return {};
 }
@@ -4092,6 +4407,7 @@ std::string nc_definitions_json() {
         Fingerprint f;
         f.add(in_world), f.add(listed), f.add(icon), f.add(d->version), f.add(d->orphan), f.add(d->placeholder);
         f.add(d->error), f.add(d->warnings), f.add(d->gear_notes), f.add(d->icon_problem), f.add(d->owner_label), f.add(d->source), f.add(d->mod);
+        f.add(d->icon_guid), f.add(d->base_guid);
         if (f.h != d->listed_as || d->listed.empty()) {
             char idb[16];
             std::snprintf(idb, sizeof idb, "0x%08x", d->id);
@@ -4117,6 +4433,10 @@ std::string nc_definitions_json() {
                     for (auto& [k, v] : t) ls.insert(k);
                 for (const std::string& k : ls) langs.push_back(k);
                 if (!langs.empty()) e["languages"] = langs;
+                // the UI texture the game draws for this item while kiln.assets serves no icon under its own GUID (the base
+                // item's, or "icon"'s): Kiln.Ui's Ui.ItemImage draws the same (0.2.0-dev.29.15)
+                e["iconGuid"] = guid_text(d->icon_guid);
+                e["baseGuid"] = guid_text(d->base_guid);  // the item it was cloned from (its name when the definition gives none)
                 if (!d->icon_file.empty()) {
                     e["iconFile"] = d->icon_file;
                     if (icon != -2) {
@@ -4205,6 +4525,23 @@ bool nc_icon_alias(const uint8_t from[16], const uint8_t to[16]) {
 
 // A boot generation's prepared definitions that are not published (chapter 08): taken out whole while no world has bound (before the
 // game's entry point nothing has); once one has, they are only set aside as nc_undefine_owner does.
+bool nc_lab_refuse(const std::string& guid, const std::string& why) {
+    std::lock_guard lock(store_mutex());
+    for (const DefPtr& dp : g_defs)
+        if (dp && lower(dp->guid_s) == lower(guid)) {
+            dp->lab_refuse = why;
+            return true;
+        }
+    return false;
+}
+
+void nc_boot_failed(std::vector<BootFailed>* out) {
+    for (const DefPtr& dp : g_defs)
+        if (dp && !dp->error.empty() && dp->owner_label.rfind("boot:", 0) == 0)
+            out->push_back({dp->mod, dp->name, std::string(dp->kind == KILN_CONTENT_ITEMS ? "item " : "recipe ") + dp->name + " (" + dp->guid_s +
+                                                   ") was not registered when a world loaded its registries: " + dp->error});
+}
+
 uint32_t nc_forget_unbound(KilnOwner owner) {
     uint32_t n = 0;
     {
@@ -4280,11 +4617,12 @@ void early_boot() {
         if (g_regsingleton_hook) g_regsingleton_orig = g_regsingleton_hook.original<FourArgFn>();
         if (g_itemupdate_hook) g_itemupdate_orig = g_itemupdate_hook.original<FourArgFn>();
     }
+    // The item lookup is hooked on first need (itemfind_hooked), not here; the lab's early-test file hooks it at boot.
     bool unknown = !file("no-unknown-items") && sym("content/ItemRegistryFind", &g_itemfind_fn);
-    if (unknown) {
+    if (unknown && g_early_test) {
+        g_itemfind_tried = true;
         unknown = g_itemfind_hook.install(g_api, g_owner, g_itemfind_fn, reinterpret_cast<void*>(&hk_itemfind),
                                           "content/ItemRegistryFind");
-        if (unknown) g_itemfind_orig = g_itemfind_hook.original<ItemFindFn>();
     }
     if (unknown) {
         // what a lookup of an unknown id answers. A sword: its record is complete for every reader (hand, armour slot, UI);
@@ -4309,7 +4647,10 @@ void early_boot() {
         }
     }
     LOGI("new content: client worlds: registration at registry load %s, unknown item ids %s", early ? "on" : "OFF (at the first Pre)",
-         unknown ? "answered by a placeholder" : "NOT answered (a miss stays NULL)");
+         !unknown         ? "NOT answered (a miss stays NULL)"
+         : g_itemfind_hook ? "answered by a placeholder (the game's item lookup is hooked at boot: early-test)"
+                           : "answered by a placeholder when needed (the game's item lookup is hooked when a client world's item "
+                             "registry loads, and only if this game joined a server or mods define items)");
 }
 
 void nc_boot() {
@@ -4325,6 +4666,8 @@ void nc_boot() {
            N.ws_stride >= N.ws_count + 2 && N.ws_count >= N.ws_max * 8 && N.ws_max > 0 && N.ws_max <= 4096;
     if (!N.on) {
         LOGW("new content off on this build (content.new %s)", feat("content.new") ? "inconsistent" : "missing");
+        g_text_reason = KILN_CAP_REASON_SYMBOL_MISSING;
+        g_text_off = "needs content.new: kiln.content's client hooks (the text lookup among them) are off on this build";
         return;
     }
     // client only: names, icons, the crafting UI
@@ -4348,11 +4691,17 @@ void nc_boot() {
     N.recipe_ui = feat("content.recipe_ui") && sym("content/RecipeAll", &N.recipe_all_fn) &&
                   cst("content/recipes.all_array", &N.all_array) && cst("content/recipes.resource", &all_res) &&
                   all_res == E.recipes_resource;
+    const bool loca_wanted = N.loca;
     if (N.loca) {
         g_loca_hook.install(g_api, g_owner, N.loca_fn, reinterpret_cast<void*>(&hk_loca), "content/LocaLookup");
         g_locarec_hook.install(g_api, g_owner, locarec, reinterpret_cast<void*>(&hk_locarec), "content/LocaRecord");
         N.loca = static_cast<bool>(g_loca_hook) && static_cast<bool>(g_locarec_hook);
     }
+    // text(): the game's texts (the row content.text, reported by nc_text_boot)
+    g_text_on = N.loca;
+    g_text_reason = loca_wanted ? KILN_CAP_REASON_FAULTED : KILN_CAP_REASON_SYMBOL_MISSING;
+    g_text_off = loca_wanted ? "the hook on the game's text lookup (content/LocaLookup) could not be installed"
+                             : "needs content.loca: the game's text lookup did not resolve on this build";
     if (N.uitex) {
         N.uitex = g_uitex_hook.install(g_api, g_owner, N.uitex_fn, reinterpret_cast<void*>(&hk_uitex), "content/UiTextureGet");
     }

@@ -16,7 +16,7 @@ internal static class BlockJson
         ReadCommentHandling = JsonCommentHandling.Skip,
         AllowTrailingCommas = true,
         AllowOutOfOrderMetadataProperties = true,
-        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase), new Vec3Converter() },
+        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase), new Vec3Converter(), new NativeRefJsonConverter() },
     };
 
     /// <summary>The strict options every block is read with (Kinds/KindJson.cs clones them per registered kind).</summary>
@@ -29,6 +29,15 @@ internal static class BlockJson
             yield return make.Method.IsGenericMethod ? make.Method.GetGenericArguments()[0] : make.Method.Name == nameof(MakeVfx) ? typeof(VfxBlock) : typeof(MaterialBlock);
     }
 
+    /// <summary>The blocks/*.json section of a record type (BootDefinitions names a kind it refuses); null for none.</summary>
+    internal static string? SectionOf(Type type)
+    {
+        foreach (var (section, make) in Kinds)
+            if ((make.Method.IsGenericMethod ? make.Method.GetGenericArguments()[0] : make.Method.Name == nameof(MakeVfx) ? typeof(VfxBlock) : typeof(MaterialBlock)) == type)
+                return section;
+        return null;
+    }
+
     private static readonly JsonDocumentOptions Doc = new() { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true };
 
     // The limits of a mod's own blocks/ folder, as in native/services/vfx/generated.h.
@@ -38,7 +47,7 @@ internal static class BlockJson
     private static readonly (string Section, Func<ModBlocks, string, JsonElement, BlockHandle> Make)[] Kinds =
     [
         ("statuses", Make<StatusBlock>), ("effects", Make<EffectBlock>), ("spells", Make<SpellBlock>), ("weapons", Make<WeaponBlock>), ("vfx", MakeVfx), ("materials", MakeMaterial), ("screenEffects", Make<ScreenEffectBlock>), ("sounds", Make<SoundBlock>), .. WorldJson.Kinds, .. ItemJson.Kinds, .. AbilityJson.Kinds, .. FurnitureJson.Kinds, .. NpcJson.Kinds, .. QuestBlockJson.Kinds, .. UiJson.Kinds,
-        ("affixes", Make<AffixBlock>), ("affixPools", Make<AffixPoolBlock>),
+        ("affixes", Make<AffixBlock>), ("affixPools", Make<AffixPoolBlock>), ("rarityRolls", Make<RarityRollBlock>), ("rarityUpgrades", Make<RarityUpgradeBlock>),
     ];
 
     /// <summary>One block as blocks/*.json writes it (tests).</summary>
@@ -123,6 +132,8 @@ internal static class BlockJson
                 foreach (var p in doc.RootElement.EnumerateObject())
                 {
                     if (p.Name is "format" or "comment" or "$schema") continue;
+                    // resource patches are not blocks: kiln.content reads this section itself, in a boot generation (docs/kiln/modding/resource-patches.md)
+                    if (p.Name == "resourcePatches") continue;
                     var kind = Kinds.FirstOrDefault(k => k.Section == p.Name);
                     // "provider-mod:plural": a kind another mod registered (Blocks.RegisterKind). Its provider is a dependency, so it loaded first.
                     if (kind.Make == null && KindRegistry.IsExternalSection(p.Name))
@@ -150,7 +161,10 @@ internal static class BlockJson
                     {
                         var (name, value, make, section) = (b.Name, b.Value, kind.Make, p.Name);
                         BlockHandle? done = null;
-                        Func<BlockHandle> compile = () => done ??= CompileOne(mod, section, name, value, make);
+                        // A staging attempt may be rolled back. Its handle must never satisfy a later ordinary data pass.
+                        Func<BlockHandle> compile = () => done ?? (KindTransaction.Current != null
+                            ? CompileOne(mod, section, name, value, make)
+                            : done = CompileOne(mod, section, name, value, make));
                         mod.Pending[name] = compile;
                         entries.Add((rel, p.Name, name, compile));
                     }
@@ -260,13 +274,28 @@ internal static class BlockJson
     }
 
     /// <summary>Drop cached data of the old lifetime. A revoked mod owner must never be reused by the next data pass.
-    /// A data-only mod keeps its service owner, so repeated reloads don't allocate owners.</summary>
+    /// A data-only mod's blocks are under an owner of Kiln's own (the host revokes only a code mod's): it is revoked here,
+    /// so the mod's layers, definitions and rules go with it as a code mod's do, and the next load makes a new one. Where
+    /// the backend cannot revoke (no core), the owner is kept as before.</summary>
     internal static void Unloaded(ModBlocks mod)
     {
         mod.Reset();
+        if (!mod.OwnedByMod && mod.Owner != 0 && RevokeServiceOwner(mod.Owner)) mod.Owner = 0;
         if (mod.OwnedByMod) mod.Owner = 0;
         mod.OwnedByMod = false;
     }
+
+    /// <summary>Revokes a data-only mod's service owner. False: this backend cannot. Tests replace it.</summary>
+    internal static Func<ulong, bool> RevokeServiceOwner = owner =>
+    {
+        try
+        {
+            if (!Backend.Current.CanRevokeOwners) return false;
+            Backend.Current.OwnerRevoke(owner);
+            return true;
+        }
+        catch (Exception e) when (e is InvalidOperationException or NotSupportedException) { return false; }
+    };
 
     /// <summary>A mod's data files, read: what their blocks are, until each is compiled.</summary>
     internal sealed class DataFiles : IDisposable

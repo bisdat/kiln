@@ -1,0 +1,442 @@
+/* SPDX-License-Identifier: MIT
+ * kiln.ui.values v1 (in-core service, client only): values in the game's own UI. A client mod replaces what the game
+ * draws for an item (the number and bar of the item detail view, the bar on an inventory slot, the held item) and the
+ * local player's HUD pairs (health, stamina, mana); it adds text for an item to a Kiln-owned details window; it reads
+ * the inventory slots the game drew. Picture only: the server keeps the real values, nothing here writes gameplay
+ * state. A player without the mod, and every vanilla client, sees the game unchanged. Chapter 05a of the dev.28
+ * dossier is the design; docs/kiln/ui.md the author's page.
+ *
+ * Capabilities (kiln.caps rows; sigdb features in sigdb/symbols/client.d, each on or
+ * off by itself; the gate list is empty in 0.2.0-dev.29, real-game checks remain unconfirmed): ui.values.detail (KUI_DETAIL), ui.values.slot
+ * (KUI_SLOT), ui.values.held (KUI_HELD), ui.values.hud (KUI_HEALTH, KUI_STAMINA, KUI_MANA), ui.values.tooltip_lines
+ * (tooltip_lines, open/close_tooltip_details), ui.slots.inspect (copy_slots, subscribe_slots), ui.gemforge.inspect
+ * (copy_gemforge_candidates, subscribe_gemforge_candidates), gems.sockets (gemforge_sockets; the row also carries
+ * kiln.items' socket options, and on a server it is kiln.items' alone), ui.gemforge.sources (gemforge_sources,
+ * 0.2.0-dev.29.15), ui.tooltip.lines (tooltip_lines_native drawing in the game's tooltip, 0.2.0-dev.29.19),
+ * ui.tooltip.values (tooltip_values, 0.2.0-dev.29.19). A kind's game hooks are
+ * installed when the first provider of that kind registers and its row is available; one kind failing leaves the
+ * others working, and the game's own value is drawn whenever no provider changes it. These seven rows never exist on a
+ * dedicated server. They require the measured client build; after a game update they are off until Kiln is updated.
+ * A slot snapshot read also installs inspection hooks; those hooks and collection remain after consumers leave.
+ *
+ * Results. A call that cannot be processed returns a KilnResult: KILN_ERR_INVALID_ARGUMENT (bad argument or record
+ * size), KILN_ERR_UNAVAILABLE (the capability is off, or not the client), KILN_ERR_REVOKED (the owner is retired),
+ * KILN_ERR_WRONG_THREAD. A processed registration returns KILN_OK with its result record: ok = 0 and a
+ * KilnUiValueReason when it was refused (KUI_REGISTRATION_BUDGET: 128 active registrations per stable mod id, value,
+ * line, slot and change subscriptions together). Handles are owner-scoped; unsubscribe takes any of them.
+ *
+ * Providers (KilnUiValueFn). Called in accepted registration order with a read-only accumulated input (the game's
+ * value after every earlier provider's accepted edit) and a zeroed, sized edit. KILN_OK with flags 0 passes through;
+ * KILN_OK with a valid mask commits exactly those fields, the others keep the accumulated value. Any other result
+ * refuses the whole edit: the earlier providers' output stays and edit.reason says why (a reason outside the enum
+ * becomes KUI_REJECTED). A refusal is not a fault. A fault is a structured exception in the callback, an invalid edit,
+ * or KILN_ERR_INTERNAL returned (what a managed bridge returns for an exception it caught); five consecutive faults
+ * remove the registration. An accepted edit or a pass-through resets the count.
+ *   Masks: KUI_DETAIL FRACTION|CURRENT|MAXIMUM|LABEL|GAME_LABEL; KUI_SLOT FRACTION|CURRENT|MAXIMUM; KUI_HELD and the
+ *   HUD kinds CURRENT|MAXIMUM. LABEL and GAME_LABEL exclude each other. Invalid (KUI_INVALID_EDIT, nothing written):
+ *   an unknown or not allowed flag, a fraction that is not finite or outside [0, 1], a text id this owner did not
+ *   intern (other than the input's own label_id), a detail CURRENT or MAXIMUM above 2147483647, a held/HUD MAXIMUM of
+ *   0. LABEL with id 0 clears the label, with an interned id replaces it; GAME_LABEL restores the game's own label.
+ *   Input label_is_override = 0 means the game's own label.
+ *   Units: detail water = charges; slot water and held water = raw fuel units; durability = raw durability; HUD = the
+ *   vital's game units. KilnUiItemView.fuel / fuel_max are always raw fuel units (units_per_charge is the divisor the
+ *   detail view uses, at least 1). The fraction is dimensionless and writable for detail and slot only; for held and
+ *   HUD it is current / maximum, read-only. A slot whose fuel is 0/0 draws full and stays full on a pass-through.
+ *   Item filter: 0 = any nonempty item (detail, slot, held); otherwise one item id. HUD kinds take 0 only.
+ *   No callback runs for an absent local player, nor for a held or HUD value whose game maximum is 0.
+ *
+ * Threads and lifetimes. Detail, slot and line callbacks run on the client's main thread inside the game's UI frame
+ * (context.frame is that frame); held and HUD callbacks right after the game's player-UI update on the same thread,
+ * before the next UI frame (context.frame is the last completed frame, client_step the client world's step). No
+ * context, view, writer or presentation pointer may be kept after the callback returns. Never call server-world APIs,
+ * block or wait in a callback: read a value cached on the client tick.
+ *
+ * Text. context.text->intern copies UTF-8 (no NUL, at most 4096 bytes) into a process-lifetime store and returns an
+ * opaque id (0 = the empty text; never a pointer). Bytes are never freed while the process runs: not at frame end,
+ * provider removal, reload or owner revoke. Limits: 64 KiB interned per callback, 8 MiB per stable mod id, 64 MiB and
+ * 65,536 strings in all; a string's charge is its bytes + 1 + 64, plus 16 per mod holding it (every mod holding a
+ * string pays its full charge); 64 new strings a second per mod, burst 128. Over a limit intern returns
+ * KILN_ERR_BUFFER_TOO_SMALL and the callback is refused with KUI_TEXT_BUDGET whatever it returns; invalid UTF-8 or a
+ * NUL is KILN_ERR_INVALID_ARGUMENT. The store deduplicates exact bytes. Use the numeric fields for numbers that change,
+ * not a new label every frame. resolve returns this owner's text or the input's label; both only inside the callback
+ * the context was given to.
+ *
+ * Every reader checks header.size (table) and the size field of each record. The table is append-only. */
+#ifndef KILN_UI_VALUES_H
+#define KILN_UI_VALUES_H
+#include "../kiln_api.h"
+#include "kiln_ui.h"
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#define KILN_UI_VALUES_SERVICE "kiln.ui.values"
+#define KILN_UI_VALUES_VERSION 1u
+
+enum KilnUiValueKind { KUI_DETAIL = 0, KUI_SLOT = 1, KUI_HELD = 2, KUI_HEALTH = 3, KUI_STAMINA = 4, KUI_MANA = 5 };
+/* KilnUiItemView.flags: which identity fields are valid. Missing identity fields are 0 with their flag clear. */
+enum KilnUiViewFlags {
+    KUI_CLIENT_ENTITY = 1,  /* client_entity is the stack's client-world entity (its pide) */
+    KUI_SERVER_ENTITY = 2,  /* server_entity is proven (never a numeric guess) */
+    KUI_INVENTORY_SLOT = 4, /* inventory_page / slot_index name a real slot (a stack without a pide can have it) */
+    KUI_DETAIL_COPY = 8,    /* the item detail view's own copied record, read-only, identity optional */
+    KUI_SYNTHETIC = 16,     /* a detail record the game built for an item id alone: no slot, count or entity */
+};
+enum KilnUiEditFlags { KUI_FRACTION = 1, KUI_CURRENT = 2, KUI_MAXIMUM = 4, KUI_LABEL = 8, KUI_GAME_LABEL = 16 };
+enum KilnUiValueReason {
+    KUI_REASON_NONE = 0,
+    KUI_REJECTED = 1,
+    KUI_TEXT_BUDGET = 2,
+    KUI_INVALID_EDIT = 3,
+    KUI_CALLBACK_FAULT = 4,
+    KUI_NO_FRAME = 5,
+    KUI_STALE_FRAME = 6,
+    KUI_BUFFER_SMALL = 7,
+    KUI_REGISTRATION_BUDGET = 8,
+    KUI_FRAME_BUDGET = 9,
+    KUI_NO_TOOLTIP = 10,
+};
+typedef uint64_t KilnUiTextId; /* 0 = canonical empty text; never a pointer */
+
+/* What the game drew the value for; a copy, valid for the callback. */
+typedef struct KilnUiItemView {
+    uint32_t size, flags, local_player, client_entity, server_entity, item;
+    uint32_t inventory_page, slot_index, count, durability, durability_max;
+    uint32_t fuel, fuel_max, units_per_charge, level, rarity;
+    KilnUiScreen screen; /* kiln.ui's last completed screen (size 0 when kiln.ui is not there) */
+    uint64_t session, frame;
+} KilnUiItemView;
+
+/* The accumulated input of a provider. */
+typedef struct KilnUiBarValue {
+    uint32_t size, kind;
+    float fraction;
+    uint32_t current, maximum;
+    uint32_t label_is_override; /* 0 = the game's own label; 1 = label_id (0 = cleared) */
+    KilnUiTextId label_id;
+} KilnUiBarValue;
+
+/* A provider's edit: flags (KilnUiEditFlags) say which fields to commit; reason (KilnUiValueReason) with a refusal. */
+typedef struct KilnUiBarEdit {
+    uint32_t size, flags;
+    float fraction;
+    uint32_t current, maximum;
+    uint32_t reason;
+    KilnUiTextId label_id;
+} KilnUiBarEdit;
+
+struct KilnUiProviderContext;
+typedef struct KilnUiTextOps {
+    uint32_t size, version;
+    KilnResult(KILN_CALL* intern)(const struct KilnUiProviderContext*, KilnStr, KilnUiTextId*);
+    KilnResult(KILN_CALL* resolve)(const struct KilnUiProviderContext*, KilnUiTextId, KilnStr*);
+} KilnUiTextOps;
+typedef struct KilnUiProviderContext {
+    uint32_t size, kind;
+    uint64_t session, frame, client_step;
+    KilnOwner owner;
+    const KilnUiTextOps* text;
+    void* reserved; /* the service's; do not touch */
+} KilnUiProviderContext;
+
+/* Tooltip lines: only writer.append (flags 0) or writer.append_line (KilnUiLineFlags, since 0.2.0-dev.29.19) may add
+ * one (it checks the token, the flags and the room left and fills a sized line); status is a KilnUiValueReason that a
+ * failed append latches. At most 16 entries per detail occurrence, all providers together. They feed Kiln's details
+ * window; only a provider registered with tooltip_lines_native also gets them drawn into the game's tooltip. */
+typedef struct KilnUiLine {
+    uint32_t size, flags;
+    KilnUiTextId text;
+} KilnUiLine;
+typedef struct KilnUiLineWriter {
+    uint32_t size, capacity, count, status;
+    KilnUiLine lines[16];
+    void* reserved;
+    KilnResult(KILN_CALL* append)(struct KilnUiLineWriter*, KilnUiTextId);
+    /* ---- appended in 0.2.0-dev.29.19 (equipment wave): read size before using it ----
+     * append with KilnUiLineFlags: the colour, small text and the place in the game's tooltip. Only a provider
+     * registered with tooltip_lines_native gets lines drawn into the game's tooltip; for every other provider the flags
+     * are kept but only Kiln's details window shows its lines. An unknown flag bit or colour is an invalid line (a
+     * fault, as a foreign token is). append(w, id) is append_line(w, id, 0). */
+    KilnResult(KILN_CALL* append_line)(struct KilnUiLineWriter*, KilnUiTextId, uint32_t flags);
+} KilnUiLineWriter;
+
+/* KilnUiLine.flags (0.2.0-dev.29.19): bits 0..3 a KilnUiLineColor, KUI_LINE_SMALL, KUI_LINE_AFTER_STATS. */
+enum KilnUiLineFlags {
+    KUI_LINE_COLOR_MASK = 0x0f,
+    KUI_LINE_SMALL = 0x10,        /* the game's smaller detail text size */
+    KUI_LINE_AFTER_STATS = 0x100, /* between the stats block and the description (else after the last vanilla line) */
+};
+/* The palette of a line: the game's own rarity colours (the header's), a positive and a negative colour, and a muted
+ * one. KUI_COLOR_DEFAULT is the detail text's own colour. */
+enum KilnUiLineColor {
+    KUI_COLOR_DEFAULT = 0,
+    KUI_COLOR_POSITIVE = 1,
+    KUI_COLOR_NEGATIVE = 2,
+    KUI_COLOR_COMMON = 3,
+    KUI_COLOR_UNCOMMON = 4,
+    KUI_COLOR_RARE = 5,
+    KUI_COLOR_EPIC = 6,
+    KUI_COLOR_LEGENDARY = 7,
+    KUI_COLOR_UNIQUE = 8,
+    KUI_COLOR_MUTED = 9,
+};
+/* tooltip_lines_native flags */
+enum KilnUiNativeLinesFlags { KUI_LINES_IN_GAME_TOOLTIP = 1 };
+
+/* A tooltip value provider (ui.tooltip.values, 0.2.0-dev.29.19): *scale comes in as the product of the earlier
+ * providers' scales (1 for the first) and may be set to any finite value in [0, 1000]. The game's item detail view
+ * then draws its stat numbers (the main damage, armour or block number and the other values its stats block draws)
+ * multiplied by the final scale, on this client only. KILN_OK commits *scale; any other result keeps the scale before
+ * this provider (a refusal, not a fault); a value out of range is an invalid edit (a fault). */
+typedef KilnResult(KILN_CALL* KilnUiScaleFn)(const KilnUiProviderContext*, const KilnUiItemView*, float* scale,
+                                             void* user);
+
+/* What the native tooltip paths are doing now (tooltip_native_state). */
+typedef struct KilnUiTooltipNativeState {
+    uint32_t size;          /* set to sizeof(KilnUiTooltipNativeState) before calling */
+    uint8_t lines_on;       /* lines are drawn into the game's item detail view */
+    uint8_t values_on;      /* stat numbers are scaled in it */
+    uint8_t after_stats;    /* the place between the stats and the description exists (else such lines go last) */
+    uint8_t probe;          /* the tooltip probe (KILN_TOOLTIP_PROBE / kiln.json "tooltipProbe") is running */
+    uint64_t drawn_lines;   /* lines drawn into the game's tooltip in this process */
+    uint64_t scaled_values; /* numbers scaled */
+    char why[128];          /* when lines_on or values_on is 0: why (empty: no provider asked yet) */
+} KilnUiTooltipNativeState;
+
+typedef KilnResult(KILN_CALL* KilnUiValueFn)(const KilnUiProviderContext*, const KilnUiItemView*,
+                                             const KilnUiBarValue*, KilnUiBarEdit*, void* user);
+typedef KilnResult(KILN_CALL* KilnUiLinesFn)(const KilnUiProviderContext*, const KilnUiItemView*, KilnUiLineWriter*,
+                                             void* user);
+typedef struct KilnUiRegistration {
+    uint32_t size, ok, reason, reserved;
+    KilnHandle handle;
+} KilnUiRegistration;
+
+typedef struct KilnUiTooltipOpen {
+    uint32_t size, ok, reason, reserved;
+    uint64_t session, source_frame;
+} KilnUiTooltipOpen;
+/* A detail snapshot of the tooltip lines (tooltip_details): the item, where it was collected, and up to 16 lines. The
+ * line views point at the text store's bytes, valid for the process (never freed). */
+typedef struct KilnUiTooltipDetails {
+    uint32_t size, ok, reason, count;
+    uint64_t session, source_frame, capture_ms;
+    uint32_t item, open; /* open: the details window is open (the snapshot of `which` 0 is its frozen one) */
+    uint32_t inventory_page, slot_index, client_entity, view_flags;
+    KilnStr lines[16];
+} KilnUiTooltipDetails;
+typedef struct KilnUiRect {
+    float x, y, width, height;
+} KilnUiRect;
+enum KilnUiSlotAvailability {
+    KUI_OUTER_RECT = 1,
+    KUI_INNER_RECT = 2,
+    KUI_NATIVE_STATE = 4,
+    KUI_VIEWPORT = 8,
+    KUI_PIXEL_MAPPING_VERIFIED = 16,
+};
+/* KilnUiVisibleSlot.holder_flags */
+enum KilnUiHolderFlags {
+    KUI_HOLDER_KNOWN = 1,          /* holder / holder_serial name the inventory's holder (from the game's UI models) */
+    KUI_HOLDER_LOCAL_PLAYER = 2,   /* the holder is kiln.client's local player */
+    KUI_HOLDER_ORDINAL = 4,        /* page_ordinal is set */
+    KUI_HOLDER_SERVER_PROVEN = 8,  /* the holder is proven to be the server's entity of that id: never set in v1 */
+};
+/* One slot the game drew in a completed UI frame (a copy). occurrence is the draw order, not an identity; a page/index
+ * can appear twice in one frame (two screen regions). outer_ui / inner_ui are UI units, valid only with their
+ * KUI_OUTER_RECT / KUI_INNER_RECT bit (zero, negative or non-finite geometry clears it). native_state is the slot
+ * record's 16 state bytes; state[0] is only the candidate hover byte until check 05a-c5 passed. A missing identity
+ * leaves usable geometry valid. */
+typedef struct KilnUiVisibleSlot {
+    uint32_t size, available, occurrence, inventory_page, slot_index;
+    uint32_t item, count, client_entity, server_entity, view_flags;
+    KilnUiRect outer_ui, inner_ui;
+    uint8_t native_state[16];
+    /* the holder (since the first release; for slot marks, 13d-shroudlink): the client-world entity whose inventory
+     * model holds the page (the model's owner), Kiln's lifetime serial of that holder in this process (a new one when
+     * the holder first shows in a client session or shows again after a frame without it: a destroyed and recreated
+     * holder never keeps its serial; never reused), and the page's position among the holder's pages in the game's
+     * model order (not proven to be the saved inventory's page ordinal). Server identity is not proven in v1. */
+    uint32_t holder, holder_flags;
+    uint64_t holder_serial;
+    uint32_t page_ordinal, reserved2;
+} KilnUiVisibleSlot;
+typedef struct KilnUiSlotsFrame {
+    uint32_t size, ok, reason, count, local_player, reserved;
+    KilnUiScreen screen;
+    uint64_t session, frame, capture_ms;
+    float canvas_width, canvas_height;
+    KilnUiRect viewport_px;
+    float pixels_per_unit;
+    uint32_t transform_flags;
+} KilnUiSlotsFrame;
+typedef void(KILN_CALL* KilnUiSlotsFn)(const KilnUiSlotsFrame*, const KilnUiVisibleSlot*, uint32_t count, void* user);
+
+enum KilnUiChangeKind { KUI_ADDED = 0, KUI_UPDATED = 1, KUI_REMOVED = 2, KUI_EVICTED = 3, KUI_RESET = 4 };
+enum KilnUiResetReason { KUI_RESET_WORLD = 0, KUI_RESET_CAPABILITY = 1, KUI_RESET_REGISTRY = 2 };
+typedef struct KilnUiValueIdentity {
+    uint32_t size, kind, local_player, ui_state, hud_screen, crafting, station;
+    uint32_t inventory_page, slot_index, client_entity, item, synthetic_group;
+    uint64_t session;
+} KilnUiValueIdentity;
+typedef struct KilnUiValueChange {
+    uint32_t size, change_kind, has_before, has_after, reason, reserved;
+    uint64_t frame, old_session, new_session;
+    KilnUiValueIdentity identity;
+    KilnUiBarValue before, after;
+    KilnStr before_label, after_label;
+} KilnUiValueChange;
+typedef void(KILN_CALL* KilnUiValueChangedFn)(const KilnUiValueChange*, void* user);
+
+/* The GEMS list returned by the local player's forge selector. Values only; never server authority.
+ * source_row is the selection key's view. A socketed row carries a weapon but displays its socket's gem. */
+typedef struct KilnUiGemForgeCandidate {
+    uint32_t size, index, has_weapon_carrier, reserved;
+    KilnUiItemView source_row, displayed_gem, weapon_carrier;
+} KilnUiGemForgeCandidate;
+typedef struct KilnUiGemForgeFrame {
+    uint32_t size, ok, reason, count, local_player, mode;
+    uint32_t role; /* 0 = GEMS; the WEAPONS grid is never captured */
+    uint32_t has_selected_row, has_selected_weapon, selected_page, selected_index, reserved;
+    KilnUiItemView selected_weapon;
+    uint64_t session, frame, capture_ms, generation;
+} KilnUiGemForgeFrame;
+typedef void(KILN_CALL* KilnUiGemForgeFn)(const KilnUiGemForgeFrame*, const KilnUiGemForgeCandidate*, uint32_t,
+                                         void* user);
+
+/* ui.gemforge.sources (0.2.0-dev.29.15, GitHub issue 61): one chest gem a server offered to this player, as the GEMS
+ * grid lists it. The page and slot are the gem's real inventory slot on the server (an entity id the client shares);
+ * the grid's row key and the request the player's action sends name it, never a player slot. */
+typedef struct KilnUiGemForgeSource {
+    uint32_t size;        /* sizeof(KilnUiGemForgeSource) */
+    uint32_t page;        /* the inventory page entity that holds the gem (a container's) */
+    uint8_t slot;         /* 0..7 */
+    uint8_t rarity;       /* drawn as the game draws an item's rarity */
+    uint8_t group;        /* the payer group of an action on it (1..), 0: the player pays, as the game does */
+    uint8_t reserved0;    /* 0 */
+    uint32_t item;        /* its item id */
+    uint32_t pide;        /* its item entity */
+    uint32_t level;       /* its level (drawn in the cell, and what the Upgrade price uses) */
+    uint32_t reserved1;   /* 0 */
+    uint32_t reserved2;   /* 0 */
+    uint64_t token;       /* the server's token of the offer (kept for logs; the request names the slot) */
+    uint64_t expires_ms;  /* GetTickCount64 milliseconds after which the row is gone */
+} KilnUiGemForgeSource;
+
+/* What one payer group holds of one material (the button's picture of the price test for a row of that group). */
+typedef struct KilnUiGemForgePayer {
+    uint32_t size;          /* sizeof(KilnUiGemForgePayer) */
+    uint8_t group;          /* 1.. */
+    uint8_t player_first;   /* the player's own count is added (the player pays first, then the group) */
+    uint8_t reserved[2];    /* 0 */
+    uint32_t item;          /* the material */
+    uint32_t count;         /* how many the group's containers hold */
+} KilnUiGemForgePayer;
+
+typedef struct KilnUiGemForgeSourcesState {
+    uint32_t size;          /* set to sizeof(KilnUiGemForgeSourcesState) before calling */
+    uint8_t installed;      /* the hooks are in (they went in with the first rows a server sent) */
+    uint8_t off;            /* the feature is off for this process (why says why) */
+    uint8_t reserved[2];
+    uint32_t rows;          /* live rows now */
+    uint32_t wanted_count;  /* materials the price test asked about that no payer row covers */
+    uint32_t wanted[8];
+    uint64_t injected, resolved, priced; /* grid draws with chest rows, selections resolved, price tests answered */
+    char why[128];
+} KilnUiGemForgeSourcesState;
+
+typedef struct KilnUiValuesApi {
+    KilnServiceHeader header; /* { sizeof(KilnUiValuesApi), KILN_UI_VALUES_VERSION }; append-only */
+    /* A value provider of `kind` (KilnUiValueKind) for one item id or 0. Any thread. */
+    KilnResult(KILN_CALL* subscribe)(KilnOwner, uint32_t kind, uint32_t item_filter, KilnUiValueFn, void* user,
+                                     KilnUiRegistration*);
+    /* A tooltip-lines provider (Kiln's details window). Any thread. */
+    KilnResult(KILN_CALL* tooltip_lines)(KilnOwner, uint32_t item_filter, KilnUiLinesFn, void* user,
+                                         KilnUiRegistration*);
+    /* Removes any registration of this service (KILN_ERR_NOT_FOUND when unknown or already gone). Any thread; a
+     * provider removed from inside a callback is not called again. */
+    KilnResult(KILN_CALL* unsubscribe)(KilnHandle);
+    /* One completed frame of drawn slots (ui.slots.inspect): (0, 0) = the latest, else exactly one of the last two
+     * retained frames. Any thread. slots[0].size (when capacity > 0) is the caller's record size (at least the 88
+     * bytes up to native_state). KILN_OK with frame->ok = 0: KUI_NO_FRAME (none yet), KUI_STALE_FRAME (the ids are not
+     * retained: start again from the latest), KUI_FRAME_BUDGET (more than 4096 slot draws in that frame: no partial
+     * list). capacity below the count: KILN_ERR_BUFFER_TOO_SMALL with the whole frame metadata and *required, no
+     * record written; retry with the same ids. A copy freezes one retained frame: metadata and records belong together.
+     * capture_ms is GetTickCount64 at publication. Pixel rectangles need KUI_VIEWPORT and KUI_PIXEL_MAPPING_VERIFIED
+     * in transform_flags; the latter waits for check 05a-c5 (never set in v1). */
+    KilnResult(KILN_CALL* copy_slots)(KilnOwner, uint64_t expected_session, uint64_t expected_frame,
+                                      KilnUiSlotsFrame*, KilnUiVisibleSlot*, uint32_t capacity, uint32_t* required);
+    /* fn(frame, slots, count) once per completed UI frame, on the UI thread after the frame; borrowed for the call. */
+    KilnResult(KILN_CALL* subscribe_slots)(KilnOwner, KilnUiSlotsFn, void* user, KilnUiRegistration*);
+    KilnResult(KILN_CALL* subscribe_changes)(KilnOwner, KilnUiValueChangedFn, void* user, KilnUiRegistration*);
+    /* Opens the shared details window on the last completed detail snapshot (frozen until refresh or close): KILN_OK
+     * with ok = 0 and KUI_NO_TOOLTIP when there is none in this client session. Idempotent. close: idempotent too.
+     * A world/session change, a provider registry change or an unload closes it. Any thread. */
+    KilnResult(KILN_CALL* open_tooltip_details)(KilnOwner, KilnUiTooltipOpen*);
+    KilnResult(KILN_CALL* close_tooltip_details)(KilnOwner);
+    /* ---- appended in the first release, read header.size: what Kiln's details window shows ----
+     * tooltip_details: which 0 = the window's frozen snapshot (ok 0, KUI_NO_TOOLTIP while it is closed), 1 = the last
+     * completed one. refresh_tooltip_details: the window's snapshot becomes the last completed one when that is of the
+     * same presentation identity (else ok 0, KUI_STALE_FRAME). Any thread. */
+    KilnResult(KILN_CALL* tooltip_details)(KilnOwner, uint32_t which, KilnUiTooltipDetails*);
+    KilnResult(KILN_CALL* refresh_tooltip_details)(KilnOwner, KilnUiTooltipOpen*);
+    /* ---- appended: ui.gemforge.inspect. Check header.size before accessing these slots. ----
+     * Same two-frame retry convention as copy_slots. Records must be sized; at most 4096, never a partial list.
+     * A screen, selection, mode, session or generation change invalidates old retries. No GEMS draw means no list.
+     * KUI_NO_FRAME: closed/not drawn; KUI_STALE_FRAME: changed or expired. Reads older than 1000 ms are refused.
+     * An unreadable/incoherent game list disables only this feature for the process, with a kiln.caps reason.
+     * Selection is the context at grid entry, not an action or an eligibility/permission claim. Any thread. */
+    KilnResult(KILN_CALL* copy_gemforge_candidates)(KilnOwner, uint64_t expected_session, uint64_t expected_frame,
+        KilnUiGemForgeFrame*, KilnUiGemForgeCandidate*, uint32_t capacity, uint32_t* required);
+    /* UI thread, after each completed frame, including unavailable frames; borrowed only for the callback. */
+    KilnResult(KILN_CALL* subscribe_gemforge_candidates)(KilnOwner, KilnUiGemForgeFn, void* user, KilnUiRegistration*);
+    /* ---- appended (gem wave): gems.sockets, client only. Check header.size before accessing this slot. ----
+     * Sockets on other gear in the Gem Forge: widens the WEAPONS list and the GEMS list's carrier rows (gear holding
+     * a gem) from Weapons to every category whose bit (1 << ItemCategory) is set in any owner's mask. Both lists still
+     * require the item's own socket flag (a carrier also a gem in it), so only gear that has a socket shows up, and
+     * only from the backpack and action bars (worn gear is not listed: unequip it first). Bits 0..13 only (never
+     * WeaponGem 15); Weapons is always included. The effective mask is the OR over owners; 0 removes this owner's mask,
+     * and so does unloading. The two hooks are installed at the first nonzero extra bit and do nothing while no owner
+     * sets one: without a mod the game's code runs as vanilla. Picture only: the server decides every socket action.
+     * The GEMS snapshot (copy_gemforge_candidates) then also lists carriers of the widened categories; their
+     * weapon_carrier field holds that gear. KILN_ERR_INVALID_ARGUMENT: owner 0 or a bit outside 0..13;
+     * KILN_ERR_UNAVAILABLE: a server, gems.sockets off, or its hooks could not be installed (a removal with 0 always
+     * succeeds on the client); KILN_ERR_REVOKED. Any thread. */
+    KilnResult(KILN_CALL* gemforge_sockets)(KilnOwner owner, uint32_t category_mask);
+    /* ---- appended in 0.2.0-dev.29.15: ui.gemforge.sources, client only. Check header.size before accessing. ----
+     * Chest gems a server offered, in the game's own GEMS grid. `rows` replaces this owner's rows (count 0 removes
+     * them); `payers` what each payer group holds of the materials the price test asked about. Rows belong to the
+     * client world they were set in (another session or local player drops them) and lapse at expires_ms. The hooks
+     * (a link on the GEMS grid that appends the rows, a mid hook on the selected-row resolve, two on the action panel's
+     * price tests) go in with the first nonempty rows, each site checked against the measured instruction bytes first;
+     * until then, and whenever no row is live, the forge runs as the game's. A row the player's own views hold already
+     * (same page and slot) is not added. Picture only: the player's action sends the game's own request with the row's
+     * real slot, and the server decides. KILN_ERR_INVALID_ARGUMENT: owner 0, a bad record (size, page 0, slot over 7,
+     * item 0, pide 0, reserved), more than 256 rows or 64 payer rows. KILN_ERR_UNAVAILABLE: a server, the row
+     * ui.gemforge.sources off, or the hooks could not go in (the row then says why). Any thread. */
+    KilnResult(KILN_CALL* gemforge_sources)(KilnOwner owner, const KilnUiGemForgeSource* rows, uint32_t count,
+                                            const KilnUiGemForgePayer* payers, uint32_t payer_count);
+    /* The feature's state for logs and the owner's managed side (which materials to ask the server about). */
+    KilnResult(KILN_CALL* gemforge_sources_state)(KilnUiGemForgeSourcesState* out);
+    /* ---- appended in 0.2.0-dev.29.19 (equipment wave): native tooltip lines and values. Check header.size. ----
+     * tooltip_lines_native: a tooltip-lines provider as tooltip_lines registers one (same budgets, order, faults and
+     * the same details window), whose lines are also drawn inside the game's own item detail view when flags has
+     * KUI_LINES_IN_GAME_TOOLTIP and the row ui.tooltip.lines is available: as the last children of the detail's
+     * scrolled content (or between the stats and the description, KUI_LINE_AFTER_STATS), wrapped to the panel as the
+     * game wraps its description, in the colour each line names. Where the game's view does not reach those places
+     * (other detail screens), on an unmeasured build, or after a fault in the drawing, the lines show only in Kiln's
+     * details window: a tooltip is never left half drawn. Needs ui.values.tooltip_lines (else KILN_ERR_UNAVAILABLE).
+     * tooltip_values: a KilnUiScaleFn for one item id or 0 (ui.tooltip.values; KILN_ERR_UNAVAILABLE when off).
+     * Both are client only, any thread; callbacks run on the client's main thread inside the game's UI frame, as the
+     * lines providers do. tooltip_native_state: what the native paths are doing (any thread). */
+    KilnResult(KILN_CALL* tooltip_lines_native)(KilnOwner, uint32_t item_filter, uint32_t flags, KilnUiLinesFn,
+                                                void* user, KilnUiRegistration*);
+    KilnResult(KILN_CALL* tooltip_values)(KilnOwner, uint32_t item_filter, KilnUiScaleFn, void* user,
+                                          KilnUiRegistration*);
+    KilnResult(KILN_CALL* tooltip_native_state)(KilnUiTooltipNativeState* out);
+} KilnUiValuesApi;
+
+#ifdef __cplusplus
+}
+#endif
+#endif /* KILN_UI_VALUES_H */

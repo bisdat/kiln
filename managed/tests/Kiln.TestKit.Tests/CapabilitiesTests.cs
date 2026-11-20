@@ -67,10 +67,10 @@ public sealed class CapabilitiesTests
     public void SwitchingOnAnUnfakedServiceThrows()
     {
         using var kiln = new KilnHarness();
-        var e = Assert.Throws<InvalidOperationException>(() => kiln.Capabilities.Override("kiln.abilities", true));
+        var e = Assert.Throws<InvalidOperationException>(() => kiln.Capabilities.Override("kiln.audio", true));
         Assert.Contains("the test kit has no fake of this service", e.Message);
-        Assert.False(kiln.Capabilities.Is("kiln.abilities"));
-        kiln.Capabilities.Override("kiln.abilities", false);  // off is always allowed
+        Assert.False(kiln.Capabilities.Is("kiln.audio"));
+        kiln.Capabilities.Override("kiln.audio", false);  // off is always allowed
         Assert.Throws<ArgumentException>(() => kiln.Capabilities.Override("no spaces", true));
     }
 

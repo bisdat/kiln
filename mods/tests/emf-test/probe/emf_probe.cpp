@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// emf_probe: an EMF mod (EMF C API v40, emf_api.h only) that checks kiln-emf's EmfApi table in a lab and logs
+// emf_probe: an EMF mod (EMF C API v46, emf_api.h only) that checks kiln-emf's EmfApi table in a lab and logs
 // one "PASS <what>" / "FAIL <what>" line per check, then "emf-probe done: N PASS, M FAIL". Player-free: it uses a
 // villager of the copied world (teleport, put/take items), spawns one Vukah next to it and kills it (damage ->
 // EntityDiedEvent), changes and resets a world setting, asks for a save, runs its own command through
@@ -8,7 +8,7 @@
 // position for a moment, spawns a creature and saves the world.
 // v22-v26: the level curve and its refusals, change_component (ScaleComponent on a second Vukah), E-prompt offers
 // (offer / offer_active / offer_remove on it, spawn_offer), and the window / picture refusals of a dedicated server.
-// v28-v40: the two chat functions with flags, and the documented failure of every function Kiln does not carry yet.
+// v28-v46: the two chat functions with flags, and the documented failure of every function Kiln does not carry yet.
 #include <windows.h>
 
 #include <atomic>
@@ -225,7 +225,7 @@ void ws_cb(const char* key, double, void*) {
     if (key && std::strcmp(key, "experienceCombatFactor") == 0) ++g_ws_changes;
 }
 
-// ---- v28-v40 (EMF 0.6.3 to 0.6.8) on a dedicated server, inside a server world callback ----
+// ---- v28-v46 (EMF 0.6.3 to 0.6.14) on a dedicated server, inside a server world callback ----
 int g_v40_callbacks = 0;
 void v40_checks(EmfWorld* w) {
     // carried: chat lines with flags (kiln.chat's server lines have no speaker), world_to_screen (a server has no screen)
@@ -311,6 +311,31 @@ void v40_checks(EmfWorld* w) {
               A->enemy_move(w, &mo, [](EmfWorld*, uint32_t, uint32_t, void*) { ++g_v40_callbacks; }, nullptr) == 0 && mo.why[0] != 0 &&
               !A->enemy_move_cancel(1) && A->enemy_moving(w, F.villager) == 0,
           "enemy orders and moves answer 0 / false, with a reason in the order", std::string(eo.why));
+    // v43 (EMF 0.6.13) to v46 (0.6.14)
+    uint32_t perms = 0x3F;
+    check(!A->player_permissions(w, F.villager, &perms) && perms == 0, "player_permissions answers false with *perms 0");
+    EmfBreakBlocks bb{};
+    bb.size = sizeof bb;
+    bb.flags = EMF_BREAK_WORLD;  // v45
+    bb.radius = 1;
+    EmfBlockInfo bi{};
+    bi.size = sizeof bi;
+    bi.world = -1;
+    const float from[3] = {0, 0, 0}, to[3] = {0, 10, 0};
+    check(A->break_blocks(w, &bb, [](EmfWorld*, uint32_t, const EmfBreakResult*, void*) { ++g_v40_callbacks; }, nullptr) == 0 &&
+              bb.why[0] != 0 && !A->block_at(w, 0, 0, 0, &bi) && !A->find_wall(w, from, to, &bi) && bi.world == -1,
+          "blocks: break_blocks answers 0 with a reason, block_at and find_wall false (out untouched)", std::string(bb.why));
+    EmfPathPoint vp{0, 0, 0, 0};
+    EmfMoveOrder vm{};
+    vm.size = sizeof vm;
+    vm.enemy = F.villager;
+    vm.count = 1;
+    vm.points = &vp;
+    vm.flags = EMF_MOVE_HOLD;
+    vm.hold_seconds = 30;
+    check(A->villager_move(w, &vm, [](EmfWorld*, uint32_t, uint32_t, void*) { ++g_v40_callbacks; }, nullptr) == 0 && vm.why[0] != 0 &&
+              !A->villager_move_cancel(1) && A->villager_moving(w, F.villager) == 0,
+          "villager moves answer 0 / false, with a reason in the order (also with EMF_MOVE_HOLD)", std::string(vm.why));
     check(g_v40_callbacks == 0, "no callback of a function that is not carried was called");
 }
 
@@ -764,7 +789,7 @@ void on_tick(EmfWorld* w, void*) {
 extern "C" __declspec(dllexport) bool emf_mod_load(const EmfApi* api) {
     if (!api || api->version < 40 || api->size < sizeof(EmfApi)) return false;
     A = api;
-    check(api->version == 40 && api->size == sizeof(EmfApi) && sizeof(EmfApi) == 1088, "the table is EmfApi v40 of the SDK's size",
+    check(api->version == 46 && api->size == sizeof(EmfApi) && sizeof(EmfApi) == 1144, "the table is EmfApi v46 of the SDK's size",
           std::to_string(api->version) + ", " + std::to_string(api->size) + " bytes");
     bool all = true;
     for (size_t i = 0; i < (sizeof(EmfApi) - 8) / sizeof(void*); ++i)

@@ -43,9 +43,20 @@ internal static class TestMods
 
     public static void As(ModContext? mod, Action f) => As<object?>(mod, () => { f(); return null; });
 
+    public static void DrainPending(ModContext mod)
+    {
+        var field = typeof(ModContext).GetField("Pending", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var queue = (Queue<Action>)field.GetValue(mod)!;
+        var pending = queue.ToArray(); queue.Clear();
+        As(mod, () => { foreach (var action in pending) action(); });
+    }
+
     static readonly PropertyInfo AliveProperty = typeof(ModContext).GetProperty("Alive", BindingFlags.NonPublic | BindingFlags.Instance)!;
 
     public static bool IsAlive(ModContext mod) => (bool)AliveProperty.GetValue(mod)!;
+
+    public static bool IsUnloading(ModContext mod) => (bool)typeof(ModContext)
+        .GetProperty("Unloading", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(mod)!;
 
     static readonly EventInfo RetiringEvent = typeof(ModContext).GetEvent("Retiring", BindingFlags.NonPublic | BindingFlags.Instance)!;
 
@@ -55,6 +66,12 @@ internal static class TestMods
 
     /// <summary>The unload path: services drop the mod's state (its Retiring event).</summary>
     public static void Retire(ModContext mod) => RetireMethod.Invoke(mod, null);
+
+    public static string? BeginUnload(ModContext mod) => (string?)typeof(ModContext)
+        .GetMethod("BeginUnload", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(mod, null);
+
+    public static string? UnloadWaitsFor(ModContext mod) => (string?)typeof(ModContext)
+        .GetMethod("UnloadWaitsFor", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(mod, null);
 
     /// <summary>Asserts the gate's refusal for an ordinary mod: InvalidOperationException naming the entry point and
     /// telling the author to set "advanced": true.</summary>

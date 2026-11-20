@@ -1,0 +1,1033 @@
+{
+  "chat": {
+    "completion": {
+      "title": "命令提示",
+      "hint": "Tab：补全 · Esc：关闭"
+    }
+  },
+  "language": {
+    "name": "简体中文"
+  },
+  "menu": {
+    "title": "模组管理器",
+    "game_title": "模组",
+    "subtitle": {
+      "loaded": "已加载 {loaded}/{count} 个模组"
+    },
+    "sections": {
+      "mods": "模组",
+      "network": "网络",
+      "keys": "按键",
+      "overlay": "叠加层",
+      "graphics": "图形"
+    },
+    "shroudlink": {
+      "open": "shroudlink 菜单",
+      "back": "返回模组列表"
+    },
+    "hints": {
+      "back": "返回",
+      "next_section": "下一栏",
+      "arrows": "方向键",
+      "move": "移动",
+      "choose": "选择",
+      "search": "搜索",
+      "gamepad": "手柄：LB/RB 切换栏目，A 选择，B 返回"
+    }
+  },
+  "mods": {
+    "engines": {
+      "all": "全部模组",
+      "attention": "需要处理",
+      "menus": "菜单入口",
+      "menus_note": "这里列出模组添加到游戏菜单的操作，选中即可执行。",
+      "settings": "Kiln 设置"
+    },
+    "captions": {
+      "engines": "引擎",
+      "all": "全部模组",
+      "attention": "需要处理",
+      "details": "详情",
+      "settings": "Kiln 设置",
+      "pause_entries": "暂停菜单入口",
+      "main_entries": "主菜单入口"
+    },
+    "search": {
+      "hint": "搜索模组（Ctrl+F）"
+    },
+    "empty": {
+      "loading": "正在读取模组列表……",
+      "none": "尚未安装模组。",
+      "none_hint": "在 Kiln 启动器的「模组库」里添加模组，将它加入配置方案后重启游戏。",
+      "no_match": "未找到匹配“{search}”的模组。",
+      "no_match_hint": "请换个关键词，或清空搜索框。",
+      "nothing": "暂无内容。",
+      "nothing_hint": "请在左侧选择「全部模组」。"
+    },
+    "side": {
+      "client": "仅客户端",
+      "both": "客户端与服务端",
+      "world": "仅限房主世界",
+      "server": "仅服务端"
+    },
+    "details": {
+      "pick_list": "在列表中选择模组，可查看介绍、加载状态和设置。",
+      "pick": "选择模组可查看详情。",
+      "id_version": "{id}   ·   版本 {version}",
+      "wrong": "问题原因",
+      "state": "状态",
+      "engine": "引擎",
+      "load_order": "加载顺序",
+      "loads_as": "加载顺序：第 {number} 个。",
+      "needs": "依赖",
+      "dependency": "{id} {range}",
+      "dependency_optional": "{id} {range}（可选）",
+      "dependency_optional_off": "{id} {range}（可选，未加载）",
+      "dependency_missing": "{id} {range}（缺失）",
+      "folder": "文件夹",
+      "status": "状态"
+    },
+    "menus": {
+      "open": "打开",
+      "unavailable": "暂时无法打开「{entry}」。",
+      "plugin": "Kiln 插件",
+      "hidden": "{mod}   ·   当前未显示在游戏菜单中"
+    }
+  },
+  "catalog": {
+    "chip": {
+      "loaded": "已加载",
+      "waiting": "等待中",
+      "off": "已停用",
+      "failed": "失败",
+      "not_loaded": "未加载",
+      "missing": "缺失"
+    },
+    "engine": {
+      "native": "原生 DLL 模组",
+      "plugin": "Kiln 插件",
+      "chain": "链式 DLL"
+    },
+    "about": {
+      "kiln": "Kiln 的 C# 模组。",
+      "native": "由 Kiln 随游戏启动的 DLL 模组。",
+      "plugin": "扩展 Kiln 功能的原生插件。",
+      "chain": "Kiln 随游戏一起加载的其他 DLL。",
+      "emf": "Kiln 运行的 Enshrouded Mod Framework 模组。",
+      "eml": "Enshrouded Mod Loader 模组，在游戏启动前修改游戏数据。",
+      "xhl": "游戏 mods 目录中的插件，只由单独安装的 XHL-Core 加载。",
+      "shroudforge": "由 ShroudForge 运行时加载的模组。",
+      "set": "Kiln 运行的 Shrouded Engine Tweaks Lua 模组。",
+      "greeneye": "Kiln 运行的 Greeneye Loader 模组。",
+      "flame": "Kiln 运行的 Flame 模组。",
+      "shroudtopia": "Kiln 运行的 Shroudtopia 模组。",
+      "enshwick": "Enshwick 模组，由其自带的加载器运行。",
+      "shroudlink": "Kiln 运行的 shroudlink 模组。",
+      "ember": "Ember 服务端模组。",
+      "dllmod": "Enshrouded ModLoader 模组（CarryOn、Belt Lantern），在你自己的世界开始时由 Kiln 启动。"
+    },
+    "profile": {
+      "no_mods": "本次以无模组模式启动。",
+      "invalid": "配置方案读取失败，本次未加载任何模组。",
+      "invalid_why": "配置方案读取失败，本次未加载任何模组（{error}）。",
+      "legacy": "未用配置方案，Kiln 从模组目录加载。",
+      "name": "配置方案：{name}",
+      "off": "已在配置方案中关闭。",
+      "missing": "找不到模组文件夹：{path}",
+      "kept_xhl": "已在配置方案中停用，但模组仍在游戏的 mods 目录（{folder}）。XHL-Core 仍可能加载它。",
+      "kept_enshwick": "已在配置方案中停用，但模组仍在游戏的 mods 目录（{folder}）。Enshwick 会逐个加载其中的模组，仍可能运行它。",
+      "kept": "已在配置方案中停用，但模组仍在游戏的 mods 目录（{folder}）。读取此目录的其他模组或加载器仍可能使用它。"
+    },
+    "help": {
+      "turn_on": "在 Kiln 启动器的「配置方案」中启用此模组，然后重启游戏。",
+      "kept": "要彻底停用，请在 Kiln 启动器中移除此模组，或将对应文件夹移出游戏的 mods 目录。",
+      "repair": "在 Kiln 启动器的「模组库」中修复或移除此模组，再重启游戏。"
+    },
+    "file": {
+      "too_large": "文件过大",
+      "invalid": "文件不完整或 JSON 格式无效",
+      "unreadable": "无法读取文件：{error}",
+      "not_object": "文件内容不是 JSON 对象"
+    },
+    "engine_unreadable": "Kiln 无法读取此引擎的报告：{error}",
+    "report_unreadable": "无法读取报告：{error}",
+    "see_log": "详见 kiln.log",
+    "kiln": {
+      "with_world": "进入单人世界或担任联机房主时才会加载。加入别人的世界时不生效。",
+      "hosted_off": "kiln.json 中的 mods.hosted 为 false，已禁用本机房主专用的模组。",
+      "hosted_off_help": "从游戏目录的 kiln/kiln.json 中删除 \"mods\" 下的 \"hosted\": false，再重启游戏。",
+      "pending": "此模组会在指定时机加载，例如进入世界时。",
+      "disabled": "模组反复出错，Kiln 已将其停用。重启游戏可重试，也可更新模组。",
+      "failed": "按上方提示，在 Kiln 启动器中更新模组或所需依赖，再重启游戏。详情见 kiln/logs/kiln.log。",
+      "unloaded": "已通过命令卸载。重启游戏即可重新加载。",
+      "not_reported": "配置方案中有此模组，但 Kiln 本次未加载。",
+      "not_reported_help": "重启游戏后若仍未加载，请查看 kiln/logs/kiln.log。"
+    },
+    "native": {
+      "policy": "Kiln 的加载策略禁止在此游戏版本运行原生 DLL 模组。",
+      "failed_help": "按上方提示，在 Kiln 启动器中更新此 DLL 模组，再重启游戏。",
+      "no_report": "Kiln 的原生加载器在本次启动时未生成报告。",
+      "old_report": "这是原生加载器上次启动时的报告。",
+      "not_reported": "配置方案中有此模组，但原生加载器未报告其状态。"
+    },
+    "plugin": {
+      "engine_failed": "Kiln 的 {engine} 插件启动失败：{error}。依赖它的模组无法运行。",
+      "failed_help": "在 Kiln 启动器中更新或移除此插件，再重启游戏。",
+      "no_report": "缺少 Kiln 启动报告，加载情况未知。",
+      "not_reported": "已列入配置方案，但 Kiln 未加载此模组。"
+    },
+    "chain": {
+      "failed_help": "检查 chain.ini 或 Kiln 启动器中配置的 DLL，然后重启游戏。"
+    },
+    "ember": {
+      "reason": "Ember 尚未开放模组接口，其服务端模组暂时无法运行。",
+      "help": "模组会保留在配置方案中，待 Kiln 支持 Ember 模组后即可运行。"
+    },
+    "dllmod": {
+      "waiting": "在你自己的世界开始时启动。"
+    },
+    "shroudtopia": {
+      "off": "已在 Shroudtopia 设置中关闭。",
+      "off_help": "在此配置方案的配置文件夹中打开 shroudtopia/shroudtopia.json。在 mods 下找到「{name}」（名称见 kiln.log 中的 Registered mod 记录），将其 active 设为 true 并保存。Shroudtopia 会在游戏运行时重新读取设置。",
+      "not_active": "已启用，但模组尚未报告正在运行。",
+      "not_active_help": "Kiln 正通过 Shroudtopia 0.1.1 接口反复尝试激活此模组。若游戏或 Shroudtopia 版本不匹配，模组可能一直没有反应。可在 kiln/logs/kiln.log 中查找 [shroudtopia:{name}]，并向作者确认兼容版本。"
+    },
+    "engine_mods": {
+      "own_loader": "本次由 {engine} 自带的加载器运行 {engine} 模组，它只读取自己的目录。在 Kiln 启动器中重新激活方案，将模组复制到该目录，再重启游戏。",
+      "failed_help": "按上方提示，在 Kiln 启动器中更新模组，再重启游戏。详情见 kiln/logs/kiln.log 中的 {engine} 记录。",
+      "unreadable": "无法读取 {engine} 的报告：{error}。Kiln 稍后会重新读取。",
+      "not_run": "本次启动时 {engine} 未运行，因此该模组未加载。",
+      "not_run_folder": "本次启动时 {engine} 未运行，因此该模组未加载。",
+      "old_report": "{engine} 本次未生成报告，当前显示上次的记录。",
+      "not_reported": "已列入配置方案，但 {engine} 本次的报告中没有此模组。",
+      "plugin_help": "确认 kiln/plugins 中已安装 Kiln 的 {engine} 插件，再重启游戏。",
+      "note_old": "{engine} 本次未生成报告，当前显示上次的记录。",
+      "note_not_run": "本次启动时 {engine} 未运行。"
+    },
+    "note": {
+      "aside_emf": "EMF：已交由原版 EMF 加载。",
+      "aside_emf_why": "EMF：已交由原版 EMF 加载（{reason}）。",
+      "aside": "已交由另一个 {engine} 加载器运行这些模组。",
+      "aside_why": "已交由另一个 {engine} 加载器运行这些模组（{reason}）。",
+      "emf_idle": "EMF 在此游戏版本中未运行：{reason}",
+      "eml_patched": {
+        "other": "启动前已应用 {count} 项游戏数据修改。"
+      },
+      "eml_failed": "EML 出错：{error}。游戏数据已还原。",
+      "eml_aside_sf": "EML：ShroudForge 已接管，只运行其 mods 目录中已在 ShroudForge 启用的 EML 模组。",
+      "eml_aside": "EML：本次由 EML 自带的加载器接管。",
+      "eml_aside_why": "EML：本次由 EML 自带的加载器接管（{reason}）。",
+      "eml_idle": "本次启动没有 EML 模组。",
+      "ember": "Ember：已找到模组，暂不支持运行。",
+      "dllmod_unsupported": "Enshrouded ModLoader：其模组是为游戏版本 26430625 制作的，因此在此版本上一个也不会启动。",
+      "dllmod_server": "Enshrouded ModLoader：其模组用于游戏客户端；专用服务器不会启动任何一个。",
+      "shroudlink_elsewhere": "这些模组正由其他 shroudlink 加载器运行。",
+      "set_aside": "SET：本次由 SET 自带的加载器接管。",
+      "set_aside_why": "SET：本次由 SET 自带的加载器接管（{reason}）。",
+      "set_waiting": "模组会在进入主菜单时加载。",
+      "set_off": "本次未启用。"
+    },
+    "sf": {
+      "hosted_menu": "Kiln 正托管 ShroudForge，其自带的 Modloader 窗口未运行。在此选择模组即可启停或调整设置。",
+      "hosted": "Kiln 正托管 ShroudForge。选择模组即可启停或调整设置。",
+      "self_hosted": "本次由 ShroudForge 自带的加载器运行模组。选择模组即可启停或调整设置。",
+      "not_installed": "尚未安装 ShroudForge，其模组无法运行。",
+      "off": "本次启动未启用 ShroudForge。",
+      "off_why": "ShroudForge 已停用：{reason}。",
+      "failed": "ShroudForge 出错：{reason}。",
+      "no_report": "ShroudForge 本次未生成报告。",
+      "not_run": "本次启动时 ShroudForge 未运行。",
+      "runs_it": "由 ShroudForge 运行",
+      "fix_first": "请先按引擎状态提示修复 ShroudForge，再重启游戏。",
+      "unconfirmed": "ShroudForge 正在运行，但 Kiln 读不到此模组的状态，暂时无法确认它是否生效。详见引擎状态。",
+      "off_in_settings": "已在 ShroudForge 设置中关闭。",
+      "eml_failed_help": "请查看 kiln.log，先修复 ShroudForge，再重启游戏。本次 Kiln 已交由 ShroudForge 加载 EML 模组，此模组未生效。",
+      "eml_aside_but": "EML 已交由 ShroudForge 加载。{note}",
+      "eml_off": {
+        "other": "配置方案中有 {count} 个 EML 模组已在 ShroudForge 中停用，本次不会生效。ShroudForge 只运行自己模组文件夹中已启用的 EML 模组。"
+      },
+      "hand_off": "此模组已手动放入 ShroudForge 的目录，但在 ShroudForge 中处于停用状态。",
+      "hand_off_profile_help": "在「模组 > ShroudForge」中启用它。也可移除手动放入的目录，再点 Kiln 启动器的「开始游戏」：Kiln 会按当前方案复制并启用此模组。",
+      "off_in_sf_help": "按上方提示在 ShroudForge 中启用模组，再重启游戏。",
+      "no_switch_file": "此模组缺少记录启用状态的 extended.mod.json，ShroudForge 因此未运行它。",
+      "package_unreadable": "此目录在 ShroudForge 的读取范围内，但按其规则读取模组包失败（{error}）。ShroudForge 会跳过读不出的包。",
+      "eml_switch_off": "模组已放入 ShroudForge 的 mods 目录，但 extended.mod.json 中的 enabled 为 false，本次未生效。",
+      "eml_no_switch": "模组已放入 ShroudForge 的 mods 目录，但缺少记录启用状态的 extended.mod.json。ShroudForge 默认停用这种包，本次未应用其更改。",
+      "eml_press_play": "在 Kiln 启动器点「开始游戏」或重新激活配置方案，Kiln 会在 ShroudForge 中启用此模组。重启游戏后生效。",
+      "eml_other_side": "ShroudForge 仅在「{sides}」运行此模组。",
+      "and": " 和 ",
+      "eml_unconfirmed": "此模组已在 ShroudForge 中启用，但本次启动记录中没有此版本。Kiln 尚无法确认更改已生效。",
+      "startup_failed": "ShroudForge 在本次启动时修改游戏数据失败。",
+      "startup_failed_why": "ShroudForge 在本次启动时修改游戏数据失败：{error}",
+      "startup_failed_help": "详情见 ShroudForge 日志。解决问题后请重新启动游戏。",
+      "startup_applied": "本次启动记录显示，ShroudForge 已应用此模组的数据修改。调整设置后需重启游戏。",
+      "startup_current": "启动记录显示，先前的数据修改仍适用于本次启用的模组，ShroudForge 已沿用。调整设置后需重启游戏。",
+      "settings_unreadable": "读不到模组包设置，暂时无法确认此模组是否已在 ShroudForge 中启用。",
+      "hand_off_help_live": "在下方启用即可当场运行。也可移除该目录，再点 Kiln 启动器的「添加模组」重新添加。",
+      "hand_off_help_next": "在下方启用，或移除该目录后在 Kiln 启动器中点「添加模组」重新添加。下次启动游戏时生效。",
+      "no_switch_help_live": "在下方启用即可。Kiln 会按 ShroudForge 自带加载器的格式写入 extended.mod.json，ShroudForge 随即启动模组。",
+      "no_switch_help_next": "在下方启用即可。Kiln 会按 ShroudForge 自带加载器的格式写入 extended.mod.json，模组在下次启动游戏时生效。",
+      "off_ext": "已在此模组的 ShroudForge 设置（extended.mod.json）中关闭。",
+      "off_ext_repair": "已在此模组的 ShroudForge 设置（extended.mod.json）中关闭。{repair}",
+      "switch_on_below": "请在下方启用。",
+      "repair_help": "在 Kiln 菜单中修改任一设置，或先停用再启用此模组，即可修复。",
+      "other_side": "仅在「{sides}」运行。",
+      "no_runtime": "模组开关已打开，但 ShroudForge 尚未报告本次运行状态，暂时无法确认模组已生效。",
+      "error": "ShroudForge：{error}",
+      "restart": "请重启游戏。",
+      "error_help": "按上方提示更新模组，再重启游戏。详情见 ShroudForge 日志。",
+      "startup_unconfirmed": "已允许此模组在启动时修改游戏数据，但 ShroudForge 本次启动记录中没有此版本，尚无法确认更改已生效。",
+      "inactive": "ShroudForge 当前未运行此模组。切换开关通常需等一两秒，部分模组需重启游戏。",
+      "effect": "ShroudForge 正在运行 Lua 脚本。模组报告：{effect}。{detail}",
+      "effect_failed_help": "模组报告更改未生效。详情见 ShroudForge 日志。",
+      "active": "ShroudForge 正在运行 Lua 脚本，模组尚未报告更改是否生效。"
+    },
+    "enshwick": {
+      "no_report": "Enshwick 本次未生成报告。",
+      "not_run": "本次启动时 Enshwick 未运行。",
+      "started": "Enshwick 加载器已启动。",
+      "starting": "Enshwick 加载器正在启动。",
+      "failed": "Enshwick 加载器出错：{reason}。",
+      "no_loader": "找不到 Enshwick 加载器：{reason}。",
+      "install": "安装 Enshwick",
+      "aside": "Enshwick：本次由 Enshwick 自带的加载器接管。",
+      "runs_it": "Enshwick 正在运行。其加载器不报告单个模组的运行结果。",
+      "fix_first": "请先修复 Enshwick（见引擎状态），然后重新启动游戏。",
+      "copy_failed": "Kiln 未能将此模组复制到游戏的 mods 文件夹。",
+      "copy_failed_help": "请关闭其他正在使用游戏 mods 文件夹的工具，然后重新启动游戏。",
+      "removed": "已从游戏的 mods 文件夹移除。"
+    },
+    "xhl": {
+      "prerequisite": "此插件须由 XHL-Core 加载。请在 Kiln 启动器中将 XHL-Core 作为原生模组导入并启用，或按作者说明安装，然后重启游戏。",
+      "core_started": "插件已放入游戏的 mods 目录。XHL-Core 已随游戏启动并负责加载插件；是否加载成功，请查看 XHL-Core 同目录的 XHL-Native-Plugin-Host.log。",
+      "placed": "插件已放入游戏的 mods 目录，由 XHL-Core 加载。Kiln 无法确认它是否已运行。",
+      "found_core": "在游戏的 mods 目录中找到了此插件。XHL-Core 已随游戏启动并负责加载插件；是否加载成功，请查看 XHL-Core 同目录的 XHL-Native-Plugin-Host.log。",
+      "found": "在游戏的 mods 目录中找到了此插件，由 XHL-Core 加载。Kiln 无法确认它是否已运行。",
+      "note_core": "XHL：插件已就位，由随游戏启动的 XHL-Core 加载。",
+      "note": "XHL：插件 DLL 已就位，需单独安装 XHL-Core 才会加载。Kiln 在这里不检查 XHL-Core 是否已安装。"
+    }
+  },
+  "config": {
+    "read_only_synced": "连接服务器时，服务端设置只读。同步项显示服务器的值。",
+    "read_only": "连接服务器时，这些服务端设置为只读。自己当房主时才会使用这里的设置。",
+    "server_values": {
+      "other": "已连接服务器，{count} 项设置使用服务器的值（只读）。"
+    },
+    "file_error": "文件错误：{error}",
+    "not_saved": "未能保存：{error}",
+    "columns": {
+      "entry": "设置",
+      "value": "值"
+    },
+    "marks": {
+      "server": " [服务端]",
+      "synced": " (已同步)",
+      "restart": " (需重启)"
+    },
+    "server_value": "当前使用服务器的值。离开后恢复为你的设置：{value}。",
+    "hint": {
+      "duration": "时长示例：30s、5m、1h30m",
+      "list": "列表示例：[1, 2, 3] 或 1, 2, 3"
+    },
+    "read_only_nul": "此值含空字符（NUL），请在配置文件中修改。",
+    "read_only_long": "此值超过 512 字节，请在配置文件中修改。",
+    "default": "还原",
+    "default_tip": "默认值：{value}",
+    "type_here": "在此输入值。",
+    "range": "取值范围：{min} 至 {max}",
+    "describe": {
+      "entry": "{path}：{type}，默认值 {default}",
+      "entry_range": "{path}：{type}，默认值 {default}，范围 {min} 至 {max}",
+      "options": "可选值：{options}",
+      "synced": "服务器会将此设置同步给客户端。",
+      "restart": "模组重新加载后，更改才会生效。",
+      "from_server": "连接服务器期间使用服务器的值。"
+    },
+    "apply": "应用（{count}）",
+    "undo": "撤销",
+    "saved_later": "（进入世界后保存）",
+    "all_defaults": "全部还原为默认值",
+    "applied": {
+      "other": "已应用 {count} 项更改（进入世界后保存）"
+    },
+    "saved": "{id} 已保存"
+  },
+  "configpage": {
+    "caption": "设置"
+  },
+  "settings": {
+    "look": {
+      "caption": "外观",
+      "look": "样式",
+      "game": "游戏原版样式",
+      "translucent": "游戏原版样式（半透明）",
+      "kiln": "Kiln 经典样式（余烬）",
+      "theme": "{theme} ({mod})",
+      "theme_missing": "{theme}（对应模组未加载）",
+      "background": "背景不透明度（%）",
+      "opacity": "不透明度（%）",
+      "size": "缩放（%）",
+      "game_read": "原版样式直接使用游戏中的配色和字体。",
+      "game_not_read": "暂未读到游戏配色，先使用默认深色样式。",
+      "saved": "外观设置保存在 kiln/kiln.json 的 \"ui\" 节，与启动器设置一致。模组还可以提供更多样式。"
+    },
+    "language": {
+      "caption": "语言",
+      "language": "语言",
+      "auto": "自动（游戏语言：{language}）",
+      "missing": "{language}（Kiln 暂无此语言的译文）",
+      "saved": "此语言用于 Kiln 菜单和消息。模组使用游戏语言。设置保存在 kiln/kiln.json 的 \"ui\" 节，与启动器同步。"
+    }
+  },
+  "set": {
+    "about": "查看 SET 模组设置、兼容性、实体、钩子、按键绑定、控制台及本地诊断报告。",
+    "unavailable": "SET 工具不可用（kiln-set 未运行）。",
+    "open": "打开 SET 设置和工具",
+    "open_failed": "SET 工具不可用，请检查引擎状态。"
+  },
+  "shroudforge": {
+    "labels": {
+      "waits": "等待条件",
+      "settings": "开关与设置"
+    },
+    "waits": {
+      "restart": "下次启动游戏时，ShroudForge 才会读取此模组的新设置。",
+      "dependency": "等待上方列出的依赖模组。依赖就绪后，ShroudForge 会启动此模组。",
+      "write_access": "进入单人世界或担任联机房主后，模组才能写入世界。加入别人的世界或专服时，通常需要在房主或服务端运行此模组。",
+      "world": "请先进入自己的单人世界或联机房主世界。停留在主菜单时，模组会继续等待。",
+      "player": "等待你的角色进入世界。",
+      "glide": "开始滑翔后，模组才会调整滑翔翼。两次滑翔之间或打开此菜单时显示「等待中」都属正常。",
+      "other": "运行条件尚未满足。具体原因见上方「状态」。"
+    },
+    "reading": "正在读取模组设置……",
+    "cannot_show": "无法显示模组设置：{error}",
+    "files_unreadable": "无法读取模组文件：{error}",
+    "value_unreadable": "无法读取设置 {setting} 的值（{error}）",
+    "too_many": "本页最多显示 1000 个选项、分组和操作。其余项目请在模组的 extended.mod.json 中修改，原文件完好。",
+    "value_error": "无法读取设置值（{error}）",
+    "on": "开",
+    "off": "关",
+    "switch_live": "此开关立即生效，可在游戏中启停模组。",
+    "switch_next": "此模组在启动时修改游戏数据，启停后需重启游戏。",
+    "switch_profile": "启动器每次启动游戏都会按当前配置方案设置此开关。要保留改动，请同步修改方案。",
+    "repair": "旧版 Kiln 把 {settings} 的小数写成了整数。请重新保存设置，否则 ShroudForge 会拒绝加载模组。",
+    "repair_more": "旧版 Kiln 把 {settings} 和另外 {more} 项的小数写成了整数。请重新保存设置，否则 ShroudForge 会拒绝加载模组。",
+    "repair_here": "{repair} 在此更改任一设置或切换开关即可修复。",
+    "no_settings": "此模组没有设置项。",
+    "other_settings": "其他设置",
+    "hidden": {
+      "other": "共 {total} 项设置，本页显示前 {shown} 项。其余 {count} 项请在模组的 extended.mod.json 中修改。"
+    },
+    "saved_to": "已保存到模组的 extended.mod.json。ShroudForge 和 Kiln 启动器均会读取此文件。",
+    "next_start": "下次启动游戏时生效。",
+    "only_used_while": "{value}  （仅当 {setting} 为 {want} 时使用）",
+    "value_on": "开",
+    "value_off": "关",
+    "shortcut": "快捷键：{key}",
+    "shortcut_help": "在下方输入 SDL 快捷键，如 Ctrl+SDL:66（Ctrl+F9）或 Mouse:4（鼠标第 4 键）。留空可禁用。ShroudForge 会检查键盘是否可用。",
+    "field_nul": "此值含有空字符（NUL），文本框无法显示或保留它。请在模组的 extended.mod.json 中修改。",
+    "field_long": "文本过长（{length} 个字符），请在模组的 extended.mod.json 中修改。",
+    "not_a_number": "{setting}：请输入数字，“{text}”无效",
+    "save": {
+      "switch_live_on": "已保存启用 {mod} 的设置。ShroudForge 通常在一两秒内响应，状态见上方。",
+      "switch_live_off": "已保存停用 {mod} 的设置。ShroudForge 通常在一两秒内响应，状态见上方。",
+      "switch_next_on": "已保存：{mod} 将在下次启动游戏时启用。",
+      "switch_next_off": "已保存：{mod} 将在下次启动游戏时停用。",
+      "setting_live": "已保存 {setting}。若模组正在运行，ShroudForge 通常会在一两秒内应用新设置。",
+      "setting_next": "已保存：{setting} 将在下次启动游戏时生效。",
+      "unreadable_after": "extended.mod.json 已修改，但无法重新读取：{error}。修复文件前，ShroudForge 可能会拒绝加载此模组。",
+      "failed": "保存失败：{error}"
+    },
+    "action": {
+      "confirm": "确认执行{action}？",
+      "not_running": "未发送 {action}，也未加入队列。请先确认模组正在 ShroudForge 中运行，状态见上方。",
+      "still_waiting": "{action}：{mod} 先前的请求仍在等模组接收，随后由 ShroudForge 执行。本次未加入新请求。",
+      "requested": "已请求：{action}。",
+      "failed": "无法发送 {action}：{error}"
+    },
+    "binding": "打开 Kiln 的 ShroudForge 模组页",
+    "check": {
+      "whole": "{setting} 必须为整数",
+      "type": "{setting} 需要 {type}，当前为 {given}",
+      "keep_one": "{setting} 至少要保留一个选项，ShroudForge 才能识别其类型",
+      "finite": "{setting} 必须为有限数值",
+      "null_first": "{setting}：“{choice}”没有值，放在列表首位会导致 ShroudForge 拒绝加载模组",
+      "no_value_choice": "无值的选项",
+      "shortcut": "{setting}：请输入 SDL 快捷键，例如 Ctrl+SDL:66 或 Mouse:4。留空即可禁用，修饰键顺序为 Ctrl、Alt、Shift、Meta",
+      "length": "{setting} 的长度应为 {min} 至 {max} 个字符",
+      "length_min": "{setting} 至少需要 {min} 个字符，不限上限",
+      "range": "{setting} 必须介于 {min} 和 {max} 之间",
+      "not_option": "{setting}：请选择 {options} 中的一项"
+    },
+    "kind": {
+      "boolean": "是或否",
+      "integer": "整数",
+      "number": "数值",
+      "array": "列表",
+      "string": "文本",
+      "value": "值"
+    }
+  },
+  "shroudlink": {
+    "needs_addon": "需使用支持桥接 ABI v1 的 shroudlink 客户端扩展。原版扩展保持原样。",
+    "waiting": "正在等待 shroudlink 主机连接、协商 UI 协议 2、识别世界并获得界面显示权限。",
+    "no_entries": "主机尚未发送任何菜单项。",
+    "apply": "应用",
+    "item": "物品 {id} × {count}",
+    "close_window": "关闭窗口",
+    "declined": "shroudlink 拒绝了上次请求（{error}），正在刷新当前状态。"
+  },
+  "keys": {
+    "help_mouse": "点击键位，再按新键。可用鼠标中键、侧键或滚轮，也可搭配 Ctrl、Shift、Alt；鼠标左右键不可绑定。再点一次可取消，Esc 取消并关闭菜单。点「解绑」清除快捷键。设置保存在 kiln/config/keybinds.json。",
+    "help": "点击键位，再按新键。再点一次可取消，Esc 取消并关闭菜单。点「解绑」清除快捷键。设置保存在 kiln/config/keybinds.json。",
+    "col_action": "操作",
+    "col_key": "键位",
+    "col_default": "默认",
+    "menu": "Kiln：打开此菜单",
+    "press": "请按新键……",
+    "reset": "重置",
+    "unbind": "解绑",
+    "toast": {
+      "wheel_menu": "滚轮用于滚动菜单。将 {key} 绑定为菜单开关会意外关闭菜单，请换一个键。"
+    }
+  },
+  "network": {
+    "on": "Kiln 网络已开启，模组可在本机与 Kiln 服务器之间收发消息。",
+    "off": "当前会话未运行 Kiln 网络。",
+    "role": {
+      "both": "服务端和客户端",
+      "server": "服务端",
+      "client": "客户端",
+      "none": "无"
+    },
+    "stats": "本机：{role}。消息：收 {in}，发 {out}，丢弃 {dropped}。通道 {channels} 个，最大消息 {largest} 字节。",
+    "server": {
+      "caption": "服务器",
+      "ready": "服务器运行 Kiln {version}",
+      "vanilla": "服务器未安装 Kiln（原版）",
+      "rejected": "服务器已拒绝连接",
+      "handshake": "正在握手",
+      "round_trip": "往返延迟 {ms:F0} 毫秒",
+      "mods": "服务端模组：{mods}",
+      "none": "未连接到服务器。"
+    },
+    "sync": {
+      "applied": "内容：已应用服务端的 {count} 项更改{reset}{errors}（{kib:F0} KiB）",
+      "reset": "，已还原 {count} 项本地更改",
+      "errors": "，{count} 项错误",
+      "hosting": "内容同步：当前为房主，服务端使用本机游戏内容",
+      "waiting": "内容：{detail}",
+      "failed": "内容未同步：{detail}",
+      "none": "内容同步：服务器尚未发送内容状态",
+      "configs": "配置：服务器已同步 {count} 项，本机在用 {used} 项",
+      "configs_none": "配置同步：服务器尚未发送同步配置"
+    },
+    "clients": {
+      "caption": "客户端（{count}）",
+      "col_player": "玩家",
+      "col_state": "状态",
+      "col_mods": "模组",
+      "col_rtt": "延迟",
+      "col_frames": "帧数（收/发）"
+    },
+    "peer": {
+      "connecting": "正在连接",
+      "ready": "就绪",
+      "vanilla": "原版",
+      "rejected": "已拒绝",
+      "closed": "已关闭"
+    },
+    "ms": "{ms:F0} ms",
+    "admission": "加入条件",
+    "channels": {
+      "caption": "通道（{count}）",
+      "line": "{name} v{version}：收 {in}，发 {out}",
+      "required": "{name} v{version}（必需）：收 {in}，发 {out}"
+    }
+  },
+  "overlay": {
+    "surface": "{width}×{height}，格式 {format}，缩放 {scale:F2}",
+    "frames": "呈现 {presents} 帧，绘制 {drawn} 帧；上一帧叠加层耗时 {ms:F2} ms",
+    "counts": "窗口 {windows} 个，HUD {hud} 行，帧回调 {handlers} 个",
+    "screen": "游戏界面：{kind}（{state}/{hud}），语言 {language}，UI 帧 {frame}",
+    "screen_station": "游戏界面：{kind}（{state}/{hud}），语言 {language}，UI 帧 {frame}；工作站制作，工坊 0x{workshop:x8}，配方 0x{recipe:x8}",
+    "screen_own": "游戏界面：{kind}（{state}/{hud}），语言 {language}，UI 帧 {frame}；随身制作，工坊 0x{workshop:x8}，配方 0x{recipe:x8}",
+    "panels_on": "已打开界面 {screens} 个，制作面板 {panels} 个，菜单扩展已开启",
+    "panels_off": "已打开界面 {screens} 个，制作面板 {panels} 个，菜单扩展已关闭",
+    "test_toast": "测试通知",
+    "test_toast_text": "Kiln 叠加层正常"
+  },
+  "classic": {
+    "tab": {
+      "mods": "模组",
+      "network": "网络",
+      "keys": "按键",
+      "overlay": "叠加层"
+    },
+    "mods": {
+      "back": "返回模组列表",
+      "shroudlink": "shroudlink 菜单",
+      "count": "已加载 {loaded}/{found} 个模组（{side}）",
+      "kiln_settings": "Kiln 设置",
+      "kiln_settings_close": "关闭 Kiln 设置",
+      "col_mod": "模组",
+      "col_version": "版本",
+      "col_side": "运行端",
+      "col_state": "状态",
+      "state": {
+        "pending": "等待中",
+        "loaded": "已加载",
+        "disabled": "已禁用",
+        "failed": "失败",
+        "skipped": "已跳过",
+        "unloaded": "已卸载"
+      },
+      "config": "配置",
+      "config_close": "关闭",
+      "status": "状态（{count}）",
+      "config_of": "配置：{mod}",
+      "no_pages": "模组可通过 Ui.AddConfigPage 添加设置页，已注册的配置也可在此编辑。"
+    }
+  },
+  "details": {
+    "menu": "物品详情",
+    "title": "物品详情",
+    "snapshot": "上次查看的物品快照（物品 {item:x8}，帧 {frame}）",
+    "refresh": "刷新",
+    "close": "关闭"
+  },
+  "gamemenu": {
+    "scroll_crashed": "可滚动的暂停菜单曾导致游戏异常退出，现已停用。仍可在 Kiln 的「模组」页打开模组菜单。",
+    "summary": {
+      "auto_scrolls": "暂停菜单显示所有入口，放不下时可滚动（Kiln 设置，modEntries: Auto）。",
+      "auto": "最多显示 3 个模组入口。超过时全部隐藏，以便保留「退出」等原有选项（Kiln 设置，modEntries: Auto；此菜单不支持滚动）。",
+      "always": "游戏菜单始终显示全部模组入口（Kiln 设置，modEntries: Always）。",
+      "never": "游戏菜单隐藏全部模组入口（Kiln 设置，modEntries: Never）。",
+      "few": "最多显示 3 个模组入口。超过时全部隐藏，以便保留「退出」等原有选项（Kiln 设置，modEntries: Few）。",
+      "not_drawn": {
+        "other": "{how} 当前有 {count} 个入口未在游戏菜单中显示，可在此打开。"
+      }
+    }
+  },
+  "toast": {
+    "render_off_errors": "{mod}：一个渲染处理程序因出错而停用",
+    "render_off_slow": "{mod}：一个渲染处理程序因耗时过长而停用"
+  },
+  "refusal": {
+    "server": "服务器拒绝了此客户端的连接。",
+    "named": "{server} 已拒绝连接。",
+    "needs_one": "缺少服务器所需的模组：",
+    "needs_many": "缺少服务器所需的以下模组：",
+    "you_have": "{mod} {version}（已装 {have}）",
+    "more": "另有 {count} 个",
+    "modpack": "可在 Kiln 启动器中获取此服务器的整合包。",
+    "add": "在 Kiln 启动器中添加所需模组，再重新加入。",
+    "no_reason": "连接被服务器拒绝。"
+  },
+  "creative": {
+    "title": "创造模式",
+    "menu": "创造模式",
+    "hud": "创造模式",
+    "key": {
+      "category": "创造模式",
+      "open": "打开创造模式菜单",
+      "flight": "切换角色飞行（创造模式）"
+    },
+    "asking": "正在向服务器查询……",
+    "no_server": "此服务器没有 Kiln 创造菜单。服务端需安装 Kiln。",
+    "idle": "服务器已启用 Flame 模组 Creative Mode。请使用它的菜单；它运行期间，Kiln 自带的创造模式会停用。",
+    "on": "创造模式已开启",
+    "off": "创造模式已关闭",
+    "turn_off": "关闭",
+    "turn_on": "开启",
+    "admin_turns_on": "（管理员可用 /creative on <you> 为你开启）",
+    "refused": "已拒绝：{reason}",
+    "needs_creative": "需要开启创造模式。",
+    "tab": {
+      "items": "物品",
+      "world": "世界",
+      "rules": "规则"
+    },
+    "rules": {
+      "yours": "你的规则：{rules}",
+      "game": "当前使用游戏默认规则",
+      "key": "快捷键：{key}（可在 Kiln 菜单 > 按键中修改）。"
+    },
+    "items": {
+      "cannot_give": "此服务器的游戏版本不支持发放物品。",
+      "needs_creative": "领取物品需要开启创造模式。",
+      "search": "搜索",
+      "no_equipment": "隐藏装备",
+      "journey": "仅显示已发现的物品",
+      "journey_tip": "先按正常玩法拾取、制作或使用一次物品，再从此处不限量领取。",
+      "category": "类别",
+      "found_unknown": "服务器无法判断你发现过哪些物品。",
+      "loading": "正在加载物品目录……",
+      "of": "物品：{count} / {total}",
+      "none_found": "尚未发现此类物品，请先拾取或制作。",
+      "none_match": "无匹配物品。",
+      "pick": "请选择物品。",
+      "previous": "上一页",
+      "page": "第 {page}/{pages} 页",
+      "next": "下一页"
+    },
+    "category": {
+      "all": "全部",
+      "materials": "材料",
+      "building": "建造",
+      "consumables": "消耗品",
+      "ammunition": "弹药",
+      "weapons": "武器",
+      "equipment": "装备",
+      "tools": "工具",
+      "instruments": "乐器",
+      "fishing": "钓鱼",
+      "customization": "自定义",
+      "gems": "宝石",
+      "palettes": "调色板",
+      "animal_food": "动物饲料",
+      "collectibles": "收集品",
+      "blueprints": "蓝图",
+      "currency": "货币"
+    },
+    "backpack": {
+      "caption": "背包",
+      "holding": "已拿起 {item} × {count}，点击空格或已有同种物品的背包格即可放入。",
+      "put_back": "放回",
+      "hint": "先点物品的「放置……」，再点背包格。",
+      "reading": "正在读取背包……"
+    },
+    "item": {
+      "stacks": "{category}，每组上限 {count}",
+      "level": "等级",
+      "level_fixed": "等级 {level}",
+      "rarity": "稀有度",
+      "upgrades": "升级次数",
+      "upgrades_tip": "每次升级提高 1 级，与工作台相同。设为 5 即可升满，实际上限取决于物品稀有度。",
+      "gem_slot": "宝石插槽",
+      "journey_level": "勾选「仅显示已发现的物品」后，物品最高与你的角色同级。",
+      "count": "数量",
+      "take": "领取 {count}",
+      "place": "放置……",
+      "place_tip": "拿起物品后，点击下方背包格即可放入。"
+    },
+    "rarity": {
+      "common": "常见",
+      "uncommon": "罕见",
+      "rare": "稀有",
+      "epic": "史诗",
+      "legendary": "传奇"
+    },
+    "map": {
+      "caption": "揭开地图迷雾",
+      "unavailable": "当前游戏版本无法揭开地图迷雾（Kiln 未找到迷雾数据）。",
+      "radius": "探索半径",
+      "game": "游戏默认",
+      "r200": "200 米",
+      "r400": "400 米",
+      "whole": "整张地图",
+      "help": "移动时揭开周围的地图迷雾。选「整张地图」可一次揭开全部迷雾。关闭创造模式后，角色仍保留已探索区域；离开世界后，探索半径恢复默认。"
+    },
+    "flight": {
+      "caption": "角色飞行",
+      "unavailable": "飞行需在 rules.json 中启用 allowCharacterFlight，且客户端与服务端都支持当前版本的飞行功能。",
+      "flight": "飞行",
+      "off": "关",
+      "unlimited": "无限制",
+      "building": "仅限建造区域",
+      "help": "跳跃起飞，按住跳跃上升，潜行下降至着陆，冲刺加速。飞行开关：{key}（Kiln 菜单 > 按键）。"
+    },
+    "time": {
+      "caption": "世界时间",
+      "now": "现在是 {time}。",
+      "unknown": "当前世界时间未知。",
+      "cannot": "当前游戏版本不支持设置世界时间。",
+      "admin_only": "仅管理员可更改世界时间。",
+      "help": "将时间快进至所选时刻。",
+      "hour": "时刻",
+      "set": "设置"
+    },
+    "cycle": {
+      "caption": "昼夜循环",
+      "now_stopped": "当前：暂停（太阳停止移动）",
+      "now_fast": "当前：加速（约 90 秒一个昼夜）",
+      "now_normal": "当前：正常",
+      "cannot": "当前游戏版本不支持更改昼夜循环速度。",
+      "admin_only": "仅管理员可更改昼夜循环。",
+      "normal": "正常",
+      "stopped": "暂停",
+      "fast": "加速",
+      "help": "对整个世界生效，直到手动改回或服务器重新启动。"
+    }
+  },
+  "checks": {
+    "title": "引导式检查",
+    "header": "引导式检查 · {session}",
+    "session": {
+      "hosted": "本机房主",
+      "joined": "已连接服务器（检查在服务器上运行）",
+      "server": "专用服务器",
+      "menu": "请进入自己的世界或加入服务器后再运行检查。"
+    },
+    "totals": "   {passed} 项通过 · {failed} 项失败 · {skipped} 项跳过 · {never} 项未运行",
+    "guard": "成就保护：{guard}",
+    "guard_warning": "成就保护警告：{warning}",
+    "ledger": "记录：{ledger}",
+    "idle": "选择下方一项检查，或按顺序运行全部检查。",
+    "run_these": "运行这 {count} 项",
+    "run_all": "全部运行",
+    "refresh": "刷新",
+    "queued": "另有 {count} 项待运行",
+    "only_new": "只显示 Kiln {version} 新增的 {count} 项检查",
+    "none_server": "服务器未列出任何检查。",
+    "none_mods": "已加载的模组均未注册检查。",
+    "area": "{area}（已通过 {done}/{count}）",
+    "cheats_note": "标有 cheats 的检查会永久改变角色。请使用临时角色，完成后删除。",
+    "verdict": {
+      "pass": "通过",
+      "fail": "失败",
+      "skip": "跳过"
+    },
+    "run": "运行",
+    "item": {
+      "needs": "{ids}  需要 {needs}",
+      "refused": "    已拒绝：{reason}",
+      "note": "    说明：{note}"
+    },
+    "now": "正在检查：{title}",
+    "now_cheats": "{mod}/{id} · {area} · 作弊",
+    "confirm": {
+      "before": "运行前请确认：",
+      "no": "取消",
+      "yes": "确认运行",
+      "yes_wait": "确认运行（请先阅读说明）"
+    },
+    "setting_up": "（准备中……）",
+    "fail_note": "请简述失败原因，按 Enter 保存。按 Esc 可直接记为失败，跳过说明。",
+    "pass": "通过",
+    "fail": "失败…",
+    "skip": "跳过",
+    "stop": "停止并跳过记录",
+    "writing": "正在写入检查结果……",
+    "assert": {
+      "ok": "通过 {what}",
+      "ok_detail": "通过 {what} — {detail}",
+      "fail": "失败 {what}",
+      "fail_detail": "失败 {what} — {detail}"
+    },
+    "hud": {
+      "confirming": "检查“{title}”需要你确认，请按 {open} 打开列表",
+      "finishing": "检查“{title}”正在保存结果",
+      "running": "检查“{title}”：{instruction}   [通过 {pass} · 失败 {fail} · 跳过 {skip}]",
+      "setting_up": "正在准备……"
+    },
+    "key": {
+      "category": "引导式检查",
+      "open": "打开引导式检查列表",
+      "pass": "将当前检查标记为通过",
+      "fail": "将当前检查标记为失败并填写说明",
+      "skip": "跳过当前检查"
+    },
+    "keys": "快捷键：列表 {open} · 通过 {pass} · 失败 {fail} · 跳过 {skip}（Kiln 菜单 > 按键）"
+  },
+  "talents": {
+    "key": {
+      "category": "天赋",
+      "open": "打开天赋树 {tree}"
+    },
+    "no_server_trees": "服务器未提供 Kiln 天赋树",
+    "not_connected": "尚未连接到 Kiln 服务器",
+    "waiting": "正在等待服务器……",
+    "points": "可用点数：{0}（共 {2} 点，已用 {1} 点）",
+    "select": "请选择天赋。",
+    "level_cost": "等级 {0}/{1}   消耗 {2}",
+    "needs_all": "须全部满足：{0}",
+    "needs_one": "须满足一项：{0}",
+    "needs_points": "需要先在此天赋树中投入 {0} 点",
+    "needs_level": "需要角色等级 {0}",
+    "unlock": "解锁（{0}）",
+    "next_level": "升一级（{0}）",
+    "refund": "退点",
+    "respec": "免费重置天赋",
+    "close": "关闭",
+    "tooltip": "{0}（{1}/{2}，消耗 {3}）",
+    "paused": "游戏已暂停，恢复游戏后生效。",
+    "effect": {
+      "attribute": "属性 {0} 每级 +{1}",
+      "buff": "增益 {0}",
+      "game_node": "技能节点 {0}",
+      "program": "程序 {0}",
+      "ability": "能力 {0}",
+      "code": "代码"
+    }
+  },
+  "blocks": {
+    "toast": {
+      "baked_vfx": "{mod}：特效“{name}”与构建时不符，请重新构建模组",
+      "baked_material": "{mod}：材质“{name}”与构建时不符，请重新构建模组",
+      "new_vfx": "{mod}：重启游戏后可见新特效“{name}”",
+      "new_material": "{mod}：重启游戏后可见新材质“{name}”",
+      "no_window": "当前游戏中没有名为“{window}”的窗口",
+      "too_many": "待处理命令过多，请稍后再试",
+      "command_failed": "{command} 失败",
+      "server_value": "{config}：{path} 的值由服务器控制，离开服务器后可修改"
+    }
+  },
+  "abilities": {
+    "server_lacks": "服务器未提供此能力",
+    "not_connected": "尚未连接到 Kiln 服务器",
+    "cooldown": "{ability} [{key}]：{seconds:F1} s"
+  },
+  "gemforge": {
+    "outcome": "宝石锻炉：{message}"
+  },
+  "dev": {
+    "window_key": "切换{window}窗口",
+    "filter": "筛选",
+    "clear": "清空",
+    "systems": {
+      "title": "Kiln：系统",
+      "unavailable": "当前游戏版本不支持查看系统：{status}",
+      "off_only": "仅看停用项",
+      "profile": "性能分析",
+      "stop_profiling": "停止性能分析",
+      "all_on": "全部开启",
+      "log_top": "记录耗时前30项",
+      "col_on": "开",
+      "col_system": "系统",
+      "col_calls": "次数/秒",
+      "col_world": "世界"
+    },
+    "types": {
+      "title": "Kiln：类型",
+      "unavailable": "当前游戏版本不支持查看类型：{status}",
+      "search": "搜索",
+      "base": "基类：{type}"
+    },
+    "bindings": {
+      "title": "Kiln：按键绑定",
+      "key_for": "{binding} 的按键：",
+      "set": "设置",
+      "unbind": "解绑",
+      "default": "还原",
+      "col_mod": "模组",
+      "col_binding": "绑定项",
+      "col_key": "键位",
+      "col_description": "说明",
+      "also_bound": "同时绑定到：{bindings}"
+    },
+    "resources": {
+      "title": "Kiln：资源",
+      "type": "类型",
+      "list": "列出",
+      "more": "……（可通过筛选查看更多）",
+      "log_guid": "记录 GUID"
+    },
+    "hooks": {
+      "title": "Kiln：钩子"
+    },
+    "log": {
+      "title": "Kiln：游戏日志",
+      "hide_noise": "隐藏状态切换记录",
+      "hidden": "（另有 {count} 行早期日志，请筛选查看）"
+    },
+    "status": {
+      "title": "Kiln：状态",
+      "none": "{folder} 中没有状态文件"
+    },
+    "console": {
+      "title": "Kiln：控制台",
+      "run": "运行",
+      "history": "历史："
+    }
+  },
+  "graphics": {
+    "cap": {
+      "caption": "帧率上限",
+      "on": "限制帧率",
+      "fps": "每秒最高帧数",
+      "hint": "让游戏均匀出帧，每秒帧数不超过设定值，调整后立即生效。若同时启用游戏限帧或垂直同步，以最低上限为准。"
+    },
+    "dlss": {
+      "caption": "DLSS（NVIDIA RTX 显卡）",
+      "preset": "渲染预设",
+      "preset_hint": "默认由游戏和 DLSS 选择。J、K 使用 DLSS 4 的 Transformer 模型，L、M 使用 DLSS 4.5 的新模型。DLAA 沿用游戏预设。在 NVIDIA App 中手动指定的 DLSS 预设优先。",
+      "scale": "渲染分辨率",
+      "render_scale": "渲染比例（%）",
+      "mode_scale": "{mode}（%）",
+      "scale_hint": "设置 DLSS 放大前的渲染分辨率与游戏分辨率的比例。比例越低越流畅，越高越清晰。DLAA 始终以原分辨率渲染。下次载入世界，或在游戏设置中切换 DLSS 模式或分辨率时生效。"
+    },
+    "scale": {
+      "game": "各模式使用 DLSS 默认比例",
+      "per_mode": "各模式分别设置",
+      "custom": "所有模式共用一个比例"
+    },
+    "mode": {
+      "performance": "性能",
+      "balanced": "平衡",
+      "quality": "质量",
+      "ultra_performance": "超级性能",
+      "ultra_quality": "超级质量"
+    },
+    "preset": {
+      "default": "默认"
+    },
+    "readout": {
+      "caption": "性能监控",
+      "on": "显示性能数据",
+      "hint": "在右上角显示渲染和输出帧率、每帧耗时、超分辨率技术和模式、渲染和输出分辨率，以及 DLSS 预设。游戏延迟无法准确测量，因此不显示。"
+    },
+    "status": {
+      "caption": "当前",
+      "unavailable": "图形工具需要 Kiln 0.2.0-dev.29.18 或更新版本的 kiln-ui.dll。",
+      "cap_on": "帧率上限：{fps} fps。",
+      "cap_aside": "Kiln 限帧（{fps} fps）未生效：{tools}。",
+      "fps": "渲染 {rendered} fps，输出 {output} fps，每帧 {ms} ms。",
+      "dlss_aside": "Kiln 未接管 DLSS：{tools}。",
+      "dlss_active": "DLSS {mode}：{render} → {output}，预设 {preset}。",
+      "dlss_limited": "所选比例超出「{mode}」模式的范围，已使用最接近的可用分辨率，见上方。",
+      "dlss_idle": "当前未使用 DLSS。游戏可能使用了 FSR 3、XeSS 或关闭了超分辨率，也可能尚未载入世界。",
+      "dlss_none": "本次游戏尚未启用 DLSS。需使用 NVIDIA RTX 显卡，并在游戏设置中选择 DLSS。",
+      "restart": "本次启动时，DLSS 设置和性能监控都未开启。请重启游戏，让 DLSS 设置生效，并在性能监控中显示 DLSS 信息。"
+    },
+    "aside": {
+      "optiscaler": "OptiScaler",
+      "streamline": "NVIDIA Streamline（帧生成模组）",
+      "vkfg": "DLSS 帧生成模组（EnshroudedVKFG.ini）",
+      "dlsstweaks": "DLSSTweaks",
+      "nvngx": "其他 DLSS 加载器（游戏目录中有 nvngx.dll）",
+      "ngx_patched": "其他工具已接管 DLSS",
+      "overlay_off": "Kiln 叠加层已关闭"
+    },
+    "saved": "设置保存在 kiln/kiln.json，也可在启动器的设置页调整。"
+  },
+  "native": {
+    "menu": {
+      "mods": "模组",
+      "mods_off": "模组：{reason}"
+    },
+    "footer": {
+      "loaded": {
+        "other": "Kiln {version} - 已加载 {count} 个模组"
+      },
+      "xhl": {
+        "other": "Kiln {version}（搭配 XHL-Core） - 已加载 {count} 个模组"
+      }
+    },
+    "fallback": {
+      "title": "Kiln {version}",
+      "body": "本次未运行 Kiln 托管宿主（Kiln.Ui），模组列表和界面暂不可用。详见 kiln/logs/kiln.log。",
+      "close": "按 {key} 关闭。"
+    },
+    "graphics": {
+      "fps": "渲染 {rendered} fps | 输出 {output} fps | {ms} ms",
+      "dlss": "DLSS {mode}：{render} → {output}，预设 {preset}",
+      "preset_default": "默认",
+      "not_dlss": "未用 DLSS（FSR 3、XeSS 或关闭超分辨率），输出 {output}",
+      "unknown": "DLSS：下次启动游戏后读取，当前输出 {output}",
+      "aside": "Kiln 未接管超分辨率（{tools}），输出 {output}",
+      "cap": "帧率上限 {fps} fps",
+      "cap_aside": "限帧 {fps} fps 未生效（{tools}）"
+    }
+  }
+}

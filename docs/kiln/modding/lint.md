@@ -639,12 +639,25 @@ blocks/walls.json:3:5: warning KL331: this mod has 6 building materials: all mod
 Fix: keep a mod's materials few, or say on its page how many it takes.
 
 ### KL332 material-reference
-Warning (needs the catalog). A `materialTweaks` block's `material` that is not a game material: the block is refused at boot. Names come from the item that places the material
-(`StoneRough`, `WoodFancy`, `TerrainStone`); `Cell<id>` and the material's GUID work too.
+Warning (needs the catalog). A `materialTweaks` block's `material`, or a `buildingMaterialPools` entry's `gameMaterial`, that is not a game material: the block is refused at boot. Names come from the item that places the material
+(`StoneRough`, `WoodFancy`, `TerrainStone`). A tweak also accepts `Cell<id>` or the material's GUID; a pool's `gameMaterial`
+requires the building-material catalog name and cannot name terrain.
 ```text
 blocks/tweaks.json:2:27: warning KL332: "StoneRuogh" is not a game material the catalog knows; a block that names one is refused at boot; did you mean "StoneRough"?
 ```
 Fix: correct the name (quick fix when a close match exists), or use a `GameMaterials` constant.
+
+### KL334 material-pool
+Error. A `buildingMaterialPools` entry or a blueprint's `materialPool` that kiln.worldtables refuses at boot: an entry naming a building material this mod does not have,
+another mod's material without that mod in `dependencies`, a terrain material, the same material twice, a roof material in a wall pool or the other way round (a game
+material's roof is read from its name: the game's roof blocks are `Roof...`), and a blueprint whose `materialPool` names no pool of the mod, another mod's pool without the
+dependency, or a pool of the other roof kind. A pool also needs `"clients": "mod"` ([KL201](#kl201-clients-definitions)); its 1 to 64 entries are the schema's, and a
+`gameMaterial` the catalog does not know is [KL332](#kl332-material-reference).
+```text
+blocks/pools.json:5:24: error KL334: pool "walls", materials[1] (material ice): the material is mod frost's, which this mod does not declare in "dependencies"
+blocks/pools.json:9:21: error KL334: blueprint "wall" is a wall shape and materialPool "roofs" a roof pool; roof must agree
+```
+Fix: add the dependency, name the material or pool as its mod defines it, or make the roof flags agree.
 
 ### KL333 surface-texture
 A building surface's PNG (`surfaces`, or `surface` in `buildingMaterials` and `materialTweaks`), as each client's kiln.surfaces will cook it. Error: a size it refuses, not a power of
@@ -656,6 +669,22 @@ blocks/s.json:3:37: error KL333: tex/odd.png: 6x8 is not a power of two on both 
 blocks/s.json:6:84: warning KL333: tex/normal_grey.png is greyscale: a normal map's red and green are its direction, so this one is flat
 ```
 Fix: resize or re-save the image: colour maps (albedo, emissive) in sRGB, data maps (roughness, metallic, reflectance, height, AO) as greyscale, normal maps as RGB.
+
+### KL340 run-binding
+An effect's `"run": "<modid>.<Name>"` (since 0.2.0-dev.29) whose native, as this mod's `impact/natives.json` declares it, has a
+parameter Kiln.Blocks cannot bind: its parameters are bound by name (`self`, `target`, `attacker`, `caster`, `position`, `attackMod`,
+`damage`), a required `damage` needs an effect with `damage` and a required `attackMod` one with `damage` or a `knockback` other
+than `none`, a parameter's type and byte size must be its binding's (`ecs.EntityId` 4, `float3` 12, `float32` 4,
+`impact.DamageSetup` 52), and the declaration must be `"sync": true` with an `argc` equal to its named parameters. Kiln.Blocks
+refuses the same when it loads the block. Another mod's native, and a native this mod's files do not declare yet (the build writes the
+`[ImpactNative]` entries into the output's `impact/natives.json`: lint the built mod), are not checked.
+```text
+blocks/run.json:5:26: error KL340: run fixture-blocks-run.OnHit: parameter 'attackMod' has nothing to bind to: this effect deals no damage (give it damage, or make the parameter Optional)
+blocks/run.json:6:25: error KL340: run fixture-blocks-run.Odd: parameter 'victim' names nothing a run native gets; its parameters are named self, target, attacker, caster, position, attackMod, damage
+blocks/run.json:9:23: error KL340: run fixture-blocks-run.Later: its declaration is not "sync": true; a native that answers a step later cannot run inside the effect
+```
+Fix: rename the method's parameter to a binding, give it the binding's type, make it `Optional<T>`, or give the effect what it
+binds; declare the native through `[ImpactNative]` (the build writes `"sync": true` and the argc).
 
 ### KL401 unknown-reference
 Warning by default; an error where the reader refuses the file or the node (game-tree links, a talent node's `requires`).
@@ -708,6 +737,11 @@ Fix: remove the opt-in, or take the recipe away from a loot item. For a game ite
 `"generateRarity": false` and one level.
 
 A block in `blocks/*.json` gets the same warning for `"loot": { "rolled": true }` with a `recipe`; Kiln.Blocks refuses that block at load.
+
+A `rarityRolls` rule that rolls crafts (its `sources` left out, or with `craft`) of an item of this mod that has a recipe (by its
+block name, `"<this mod>:name"` or a pattern over this mod's items) gets it too: the recipe tooltip shows the item's own rarity
+while a craft comes out at a rolled one ([item-blocks.md](item-blocks.md#rarity-at-creation-rarityrollblock)). Leave `craft` out of
+`sources` to keep crafts as the tooltip says, or accept the difference (the tooltip cannot show a roll).
 
 ## KL5xx: files, assets and cook recipes
 

@@ -1,0 +1,1617 @@
+{
+ "format": 1,
+ "comment": "roster-cap-fixture, fixture: 93 new roster entries (written by mods/tests/roster-cap-test/gen_roster.py)",
+ "knowledge": {
+  "rc_0": {
+   "scope": "world"
+  },
+  "rc_1": {
+   "scope": "world"
+  },
+  "rc_2": {
+   "scope": "world"
+  },
+  "rc_3": {
+   "scope": "world"
+  },
+  "rc_4": {
+   "scope": "world"
+  },
+  "rc_5": {
+   "scope": "world"
+  },
+  "rc_6": {
+   "scope": "world"
+  },
+  "rc_7": {
+   "scope": "world"
+  },
+  "rc_8": {
+   "scope": "world"
+  },
+  "rc_9": {
+   "scope": "world"
+  },
+  "rc_10": {
+   "scope": "world"
+  },
+  "rc_11": {
+   "scope": "world"
+  },
+  "rc_12": {
+   "scope": "world"
+  },
+  "rc_13": {
+   "scope": "world"
+  },
+  "rc_14": {
+   "scope": "world"
+  },
+  "rc_15": {
+   "scope": "world"
+  },
+  "rc_16": {
+   "scope": "world"
+  },
+  "rc_17": {
+   "scope": "world"
+  },
+  "rc_18": {
+   "scope": "world"
+  },
+  "rc_19": {
+   "scope": "world"
+  },
+  "rc_20": {
+   "scope": "world"
+  },
+  "rc_21": {
+   "scope": "world"
+  },
+  "rc_22": {
+   "scope": "world"
+  },
+  "rc_23": {
+   "scope": "world"
+  },
+  "rc_24": {
+   "scope": "world"
+  },
+  "rc_25": {
+   "scope": "world"
+  },
+  "rc_26": {
+   "scope": "world"
+  },
+  "rc_27": {
+   "scope": "world"
+  },
+  "rc_28": {
+   "scope": "world"
+  },
+  "rc_29": {
+   "scope": "world"
+  },
+  "rc_30": {
+   "scope": "world"
+  },
+  "rc_31": {
+   "scope": "world"
+  },
+  "rc_32": {
+   "scope": "world"
+  },
+  "rc_33": {
+   "scope": "world"
+  },
+  "rc_34": {
+   "scope": "world"
+  },
+  "rc_35": {
+   "scope": "world"
+  },
+  "rc_36": {
+   "scope": "world"
+  },
+  "rc_37": {
+   "scope": "world"
+  },
+  "rc_38": {
+   "scope": "world"
+  },
+  "rc_39": {
+   "scope": "world"
+  },
+  "rc_40": {
+   "scope": "world"
+  },
+  "rc_41": {
+   "scope": "world"
+  },
+  "rc_42": {
+   "scope": "world"
+  },
+  "rc_43": {
+   "scope": "world"
+  },
+  "rc_44": {
+   "scope": "world"
+  },
+  "rc_45": {
+   "scope": "world"
+  },
+  "rc_46": {
+   "scope": "world"
+  },
+  "rc_47": {
+   "scope": "world"
+  },
+  "rc_48": {
+   "scope": "world"
+  },
+  "rc_49": {
+   "scope": "world"
+  },
+  "rc_50": {
+   "scope": "world"
+  },
+  "rc_51": {
+   "scope": "world"
+  },
+  "rc_52": {
+   "scope": "world"
+  },
+  "rc_53": {
+   "scope": "world"
+  },
+  "rc_54": {
+   "scope": "world"
+  },
+  "rc_55": {
+   "scope": "world"
+  },
+  "rc_56": {
+   "scope": "world"
+  },
+  "rc_57": {
+   "scope": "world"
+  },
+  "rc_58": {
+   "scope": "world"
+  },
+  "rc_59": {
+   "scope": "world"
+  },
+  "rc_60": {
+   "scope": "world"
+  },
+  "rc_61": {
+   "scope": "world"
+  },
+  "rc_62": {
+   "scope": "world"
+  },
+  "rc_63": {
+   "scope": "world"
+  },
+  "rc_64": {
+   "scope": "world"
+  },
+  "rc_65": {
+   "scope": "world"
+  },
+  "rc_66": {
+   "scope": "world"
+  },
+  "rc_67": {
+   "scope": "world"
+  },
+  "rc_68": {
+   "scope": "world"
+  },
+  "rc_69": {
+   "scope": "world"
+  },
+  "rc_70": {
+   "scope": "world"
+  },
+  "rc_71": {
+   "scope": "world"
+  },
+  "rc_72": {
+   "scope": "world"
+  },
+  "rc_73": {
+   "scope": "world"
+  },
+  "rc_74": {
+   "scope": "world"
+  },
+  "rc_75": {
+   "scope": "world"
+  },
+  "rc_76": {
+   "scope": "world"
+  },
+  "rc_77": {
+   "scope": "world"
+  },
+  "rc_78": {
+   "scope": "world"
+  },
+  "rc_79": {
+   "scope": "world"
+  },
+  "rc_80": {
+   "scope": "world"
+  },
+  "rc_81": {
+   "scope": "world"
+  },
+  "rc_82": {
+   "scope": "world"
+  },
+  "rc_83": {
+   "scope": "world"
+  },
+  "rc_84": {
+   "scope": "world"
+  },
+  "rc_85": {
+   "scope": "world"
+  },
+  "rc_86": {
+   "scope": "world"
+  },
+  "rc_87": {
+   "scope": "world"
+  },
+  "rc_88": {
+   "scope": "world"
+  },
+  "rc_89": {
+   "scope": "world"
+  },
+  "rc_90": {
+   "scope": "world"
+  },
+  "rc_91": {
+   "scope": "world"
+  },
+  "rc_92": {
+   "scope": "world"
+  }
+ },
+ "npcs": {
+  "rc_npc_000": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "17bd0ab4-460b-5fda-a541-a487b0a16988",
+    "name": "Kiln_RosterFix_000"
+   },
+   "names": {
+    "en": "Roster entry 35"
+   },
+   "roster": {
+    "unlock": "rc_0",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_001": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "2b973734-f560-54bb-878e-dd1936e6bbd8",
+    "name": "Kiln_RosterFix_001"
+   },
+   "names": {
+    "en": "Roster entry 36"
+   },
+   "roster": {
+    "unlock": "rc_1",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_002": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "d85d37f1-a370-5294-9053-f3f84cdda5df",
+    "name": "Kiln_RosterFix_002"
+   },
+   "names": {
+    "en": "Roster entry 37"
+   },
+   "roster": {
+    "unlock": "rc_2",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_003": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "cade6187-9795-5711-bce2-28b41a67cf65",
+    "name": "Kiln_RosterFix_003"
+   },
+   "names": {
+    "en": "Roster entry 38"
+   },
+   "roster": {
+    "unlock": "rc_3",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_004": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "5f0ca57b-7ffd-5df6-9b6f-5f64fe62590d",
+    "name": "Kiln_RosterFix_004"
+   },
+   "names": {
+    "en": "Roster entry 39"
+   },
+   "roster": {
+    "unlock": "rc_4",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_005": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "673ff14b-5e26-5682-8250-5c3debb35f7e",
+    "name": "Kiln_RosterFix_005"
+   },
+   "names": {
+    "en": "Roster entry 40"
+   },
+   "roster": {
+    "unlock": "rc_5",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_006": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "2a0d4c59-c64f-5788-a7e7-cd0346bc8a1e",
+    "name": "Kiln_RosterFix_006"
+   },
+   "names": {
+    "en": "Roster entry 41"
+   },
+   "roster": {
+    "unlock": "rc_6",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_007": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "29d92bde-4025-505c-a644-32d0c6fceba8",
+    "name": "Kiln_RosterFix_007"
+   },
+   "names": {
+    "en": "Roster entry 42"
+   },
+   "roster": {
+    "unlock": "rc_7",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_008": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "4cccca80-7010-5b0a-9e2c-bae996e2923b",
+    "name": "Kiln_RosterFix_008"
+   },
+   "names": {
+    "en": "Roster entry 43"
+   },
+   "roster": {
+    "unlock": "rc_8",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_009": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "189301fb-27f5-5c9a-9791-9cc8f432d3a1",
+    "name": "Kiln_RosterFix_009"
+   },
+   "names": {
+    "en": "Roster entry 44"
+   },
+   "roster": {
+    "unlock": "rc_9",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_010": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "b68b09bc-7cb7-5aeb-b0be-d61aa07d6615",
+    "name": "Kiln_RosterFix_010"
+   },
+   "names": {
+    "en": "Roster entry 45"
+   },
+   "roster": {
+    "unlock": "rc_10",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_011": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "e19d7f00-b6a2-537f-8c12-31c040f28e04",
+    "name": "Kiln_RosterFix_011"
+   },
+   "names": {
+    "en": "Roster entry 46"
+   },
+   "roster": {
+    "unlock": "rc_11",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_012": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "88b809bb-7ef0-5042-8319-aea3a5fb9031",
+    "name": "Kiln_RosterFix_012"
+   },
+   "names": {
+    "en": "Roster entry 47"
+   },
+   "roster": {
+    "unlock": "rc_12",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_013": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "bc17bcf7-df04-5c7a-874e-560719c76925",
+    "name": "Kiln_RosterFix_013"
+   },
+   "names": {
+    "en": "Roster entry 48"
+   },
+   "roster": {
+    "unlock": "rc_13",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_014": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "3f0ceda9-0c50-5872-853e-0d4c169ef01a",
+    "name": "Kiln_RosterFix_014"
+   },
+   "names": {
+    "en": "Roster entry 49"
+   },
+   "roster": {
+    "unlock": "rc_14",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_015": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "4885e1e6-2020-5cdb-8ec4-676544ee67ca",
+    "name": "Kiln_RosterFix_015"
+   },
+   "names": {
+    "en": "Roster entry 50"
+   },
+   "roster": {
+    "unlock": "rc_15",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_016": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "e8aa86a1-0860-5c9e-a0b3-8ceed3f0b8f2",
+    "name": "Kiln_RosterFix_016"
+   },
+   "names": {
+    "en": "Roster entry 51"
+   },
+   "roster": {
+    "unlock": "rc_16",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_017": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "812d022d-1332-5da0-8e6e-d3d6067f092d",
+    "name": "Kiln_RosterFix_017"
+   },
+   "names": {
+    "en": "Roster entry 52"
+   },
+   "roster": {
+    "unlock": "rc_17",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_018": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "17d06248-0592-536c-9760-0e8fe071ec06",
+    "name": "Kiln_RosterFix_018"
+   },
+   "names": {
+    "en": "Roster entry 53"
+   },
+   "roster": {
+    "unlock": "rc_18",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_019": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "d9deae5c-6ee8-57ae-b428-bbba63c94199",
+    "name": "Kiln_RosterFix_019"
+   },
+   "names": {
+    "en": "Roster entry 54"
+   },
+   "roster": {
+    "unlock": "rc_19",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_020": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "5fe6d683-9a10-5955-8629-9a0bf9be558b",
+    "name": "Kiln_RosterFix_020"
+   },
+   "names": {
+    "en": "Roster entry 55"
+   },
+   "roster": {
+    "unlock": "rc_20",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_021": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "8670f027-1ce8-5a76-9c3d-91104b4834c2",
+    "name": "Kiln_RosterFix_021"
+   },
+   "names": {
+    "en": "Roster entry 56"
+   },
+   "roster": {
+    "unlock": "rc_21",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_022": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "93147806-15d1-54d0-822d-40343707ce76",
+    "name": "Kiln_RosterFix_022"
+   },
+   "names": {
+    "en": "Roster entry 57"
+   },
+   "roster": {
+    "unlock": "rc_22",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_023": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "5e595265-06b7-5e48-956c-e53ffc6dc1f3",
+    "name": "Kiln_RosterFix_023"
+   },
+   "names": {
+    "en": "Roster entry 58"
+   },
+   "roster": {
+    "unlock": "rc_23",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_024": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "5a98d77c-8fd7-50f8-98d0-23e9caa8c199",
+    "name": "Kiln_RosterFix_024"
+   },
+   "names": {
+    "en": "Roster entry 59"
+   },
+   "roster": {
+    "unlock": "rc_24",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_025": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "d1e7b491-cd03-5ede-97a0-434a77e4a3e4",
+    "name": "Kiln_RosterFix_025"
+   },
+   "names": {
+    "en": "Roster entry 60"
+   },
+   "roster": {
+    "unlock": "rc_25",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_026": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "9904ba60-bdc9-5942-8dec-a65e9cc5638c",
+    "name": "Kiln_RosterFix_026"
+   },
+   "names": {
+    "en": "Roster entry 61"
+   },
+   "roster": {
+    "unlock": "rc_26",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_027": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "01488472-a86b-58a0-8020-6efd7dd3aa6d",
+    "name": "Kiln_RosterFix_027"
+   },
+   "names": {
+    "en": "Roster entry 62"
+   },
+   "roster": {
+    "unlock": "rc_27",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_028": {
+   "template": "NPC_Workshop_Fisher_Trader",
+   "clone": {
+    "guid": "ade7e023-20cb-55b6-b58e-8f8ce8e716d8",
+    "name": "Kiln_RosterFix_028"
+   },
+   "names": {
+    "en": "Roster entry 63"
+   },
+   "roster": {
+    "unlock": "rc_28",
+    "roamingRange": 8,
+    "summonItem": {
+     "guid": "d3b45437-2d74-5643-b697-84cead1531f6",
+     "name": "Kiln_RosterFix_028_Tool",
+     "base": "NPC_Townsfolk_Male_Villager_08_fisher_Trader",
+     "texts": {
+      "en": {
+       "caption": "Roster entry 63",
+       "primaryAction": "Call here, or send to a bed"
+      }
+     },
+     "refs": {
+      "equipment.placedEntity": "ade7e023-20cb-55b6-b58e-8f8ce8e716d8"
+     }
+    }
+   }
+  },
+  "rc_npc_029": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "556a6d14-e865-59aa-9586-9ac36bddc453",
+    "name": "Kiln_RosterFix_029"
+   },
+   "names": {
+    "en": "Roster entry 64"
+   },
+   "roster": {
+    "unlock": "rc_29",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_030": {
+   "template": "NPC_Workshop_Fisher_Trader",
+   "clone": {
+    "guid": "3c949a72-33ba-5d1e-911b-0d1c5e7cbf0b",
+    "name": "Kiln_RosterFix_030"
+   },
+   "names": {
+    "en": "Roster entry 65"
+   },
+   "roster": {
+    "unlock": "rc_30",
+    "roamingRange": 8,
+    "summonItem": {
+     "guid": "43a14e58-814e-5da0-8206-4599d4818611",
+     "name": "Kiln_RosterFix_030_Tool",
+     "base": "NPC_Townsfolk_Male_Villager_08_fisher_Trader",
+     "texts": {
+      "en": {
+       "caption": "Roster entry 65",
+       "primaryAction": "Call here, or send to a bed"
+      }
+     },
+     "refs": {
+      "equipment.placedEntity": "3c949a72-33ba-5d1e-911b-0d1c5e7cbf0b"
+     }
+    }
+   }
+  },
+  "rc_npc_031": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "c4ec2dd9-7c8b-5320-b015-523480f87c85",
+    "name": "Kiln_RosterFix_031"
+   },
+   "names": {
+    "en": "Roster entry 66"
+   },
+   "roster": {
+    "unlock": "rc_31",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_032": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "d020e650-bdf9-5e9d-94c5-984c7d884c36",
+    "name": "Kiln_RosterFix_032"
+   },
+   "names": {
+    "en": "Roster entry 67"
+   },
+   "roster": {
+    "unlock": "rc_32",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_033": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "985303bc-74be-5770-95f0-26bba0c8931d",
+    "name": "Kiln_RosterFix_033"
+   },
+   "names": {
+    "en": "Roster entry 68"
+   },
+   "roster": {
+    "unlock": "rc_33",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_034": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "f013bc3e-6786-5d1d-8516-c0266bf21fa4",
+    "name": "Kiln_RosterFix_034"
+   },
+   "names": {
+    "en": "Roster entry 69"
+   },
+   "roster": {
+    "unlock": "rc_34",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_035": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "b9c08d9f-b204-513f-9545-b167eefbb04d",
+    "name": "Kiln_RosterFix_035"
+   },
+   "names": {
+    "en": "Roster entry 70"
+   },
+   "roster": {
+    "unlock": "rc_35",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_036": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "fe0df7a3-a1b3-577f-9eb6-8549126f44ca",
+    "name": "Kiln_RosterFix_036"
+   },
+   "names": {
+    "en": "Roster entry 71"
+   },
+   "roster": {
+    "unlock": "rc_36",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_037": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "16b8c989-d75e-5bcb-ba1e-413bf4c753a5",
+    "name": "Kiln_RosterFix_037"
+   },
+   "names": {
+    "en": "Roster entry 72"
+   },
+   "roster": {
+    "unlock": "rc_37",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_038": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "3c6a0543-7c73-5937-8bde-d02083ba6cca",
+    "name": "Kiln_RosterFix_038"
+   },
+   "names": {
+    "en": "Roster entry 73"
+   },
+   "roster": {
+    "unlock": "rc_38",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_039": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "53bde752-2b1b-5940-9fba-5480dcf245f3",
+    "name": "Kiln_RosterFix_039"
+   },
+   "names": {
+    "en": "Roster entry 74"
+   },
+   "roster": {
+    "unlock": "rc_39",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_040": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "c64ddd0f-544c-574e-a014-9afc9e584588",
+    "name": "Kiln_RosterFix_040"
+   },
+   "names": {
+    "en": "Roster entry 75"
+   },
+   "roster": {
+    "unlock": "rc_40",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_041": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "56b688b3-5c40-5328-b608-fd2386e6e12f",
+    "name": "Kiln_RosterFix_041"
+   },
+   "names": {
+    "en": "Roster entry 76"
+   },
+   "roster": {
+    "unlock": "rc_41",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_042": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "99f6c5bd-3e1e-541e-98ad-93ad3d380af5",
+    "name": "Kiln_RosterFix_042"
+   },
+   "names": {
+    "en": "Roster entry 77"
+   },
+   "roster": {
+    "unlock": "rc_42",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_043": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "ee970494-bf81-5632-ae5c-c2cec46e2dc5",
+    "name": "Kiln_RosterFix_043"
+   },
+   "names": {
+    "en": "Roster entry 78"
+   },
+   "roster": {
+    "unlock": "rc_43",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_044": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "c5580699-5b90-5915-ba7b-57c93da75da4",
+    "name": "Kiln_RosterFix_044"
+   },
+   "names": {
+    "en": "Roster entry 79"
+   },
+   "roster": {
+    "unlock": "rc_44",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_045": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "5319b2f0-8951-571b-82a8-fad193eef418",
+    "name": "Kiln_RosterFix_045"
+   },
+   "names": {
+    "en": "Roster entry 80"
+   },
+   "roster": {
+    "unlock": "rc_45",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_046": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "6edf9d69-04e4-5631-9915-53718c6fcce1",
+    "name": "Kiln_RosterFix_046"
+   },
+   "names": {
+    "en": "Roster entry 81"
+   },
+   "roster": {
+    "unlock": "rc_46",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_047": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "d1a29608-9c63-5bbd-bf02-b7b8a649cf79",
+    "name": "Kiln_RosterFix_047"
+   },
+   "names": {
+    "en": "Roster entry 82"
+   },
+   "roster": {
+    "unlock": "rc_47",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_048": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "05e219d2-d9ef-571e-8ba5-dbf6dcd5ee2a",
+    "name": "Kiln_RosterFix_048"
+   },
+   "names": {
+    "en": "Roster entry 83"
+   },
+   "roster": {
+    "unlock": "rc_48",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_049": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "571f21a9-fefb-5768-9b64-f06de57aab67",
+    "name": "Kiln_RosterFix_049"
+   },
+   "names": {
+    "en": "Roster entry 84"
+   },
+   "roster": {
+    "unlock": "rc_49",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_050": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "63e648af-bcd9-5b5a-8f0c-dd1fe91d6213",
+    "name": "Kiln_RosterFix_050"
+   },
+   "names": {
+    "en": "Roster entry 85"
+   },
+   "roster": {
+    "unlock": "rc_50",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_051": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "b1ae2705-4191-5af8-8d21-69152e9be9a3",
+    "name": "Kiln_RosterFix_051"
+   },
+   "names": {
+    "en": "Roster entry 86"
+   },
+   "roster": {
+    "unlock": "rc_51",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_052": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "6d5b2b9e-1867-5215-9a5b-f76451781443",
+    "name": "Kiln_RosterFix_052"
+   },
+   "names": {
+    "en": "Roster entry 87"
+   },
+   "roster": {
+    "unlock": "rc_52",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_053": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "e7f3124b-84d3-55e9-a830-dda0d132b64f",
+    "name": "Kiln_RosterFix_053"
+   },
+   "names": {
+    "en": "Roster entry 88"
+   },
+   "roster": {
+    "unlock": "rc_53",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_054": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "7ef768cc-d2d1-5911-bb78-f0415d117f5c",
+    "name": "Kiln_RosterFix_054"
+   },
+   "names": {
+    "en": "Roster entry 89"
+   },
+   "roster": {
+    "unlock": "rc_54",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_055": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "dd9f133e-1e76-5661-baa0-b861734300ef",
+    "name": "Kiln_RosterFix_055"
+   },
+   "names": {
+    "en": "Roster entry 90"
+   },
+   "roster": {
+    "unlock": "rc_55",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_056": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "a2523279-f104-5a2e-9263-7f5a5a5a9b9e",
+    "name": "Kiln_RosterFix_056"
+   },
+   "names": {
+    "en": "Roster entry 91"
+   },
+   "roster": {
+    "unlock": "rc_56",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_057": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "8e4fd725-b856-50af-ac94-e4829a9e2939",
+    "name": "Kiln_RosterFix_057"
+   },
+   "names": {
+    "en": "Roster entry 92"
+   },
+   "roster": {
+    "unlock": "rc_57",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_058": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "450ff477-8ff5-5a98-8d6e-5428f5ce5cd4",
+    "name": "Kiln_RosterFix_058"
+   },
+   "names": {
+    "en": "Roster entry 93"
+   },
+   "roster": {
+    "unlock": "rc_58",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_059": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "454a6774-7ba5-5ae1-b21d-d091c8f8ae05",
+    "name": "Kiln_RosterFix_059"
+   },
+   "names": {
+    "en": "Roster entry 94"
+   },
+   "roster": {
+    "unlock": "rc_59",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_060": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "94cc2f55-5a56-53bb-9765-8e20fb62cae0",
+    "name": "Kiln_RosterFix_060"
+   },
+   "names": {
+    "en": "Roster entry 95"
+   },
+   "roster": {
+    "unlock": "rc_60",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_061": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "67cdf473-c74d-569f-ba38-2c9ac8e2f987",
+    "name": "Kiln_RosterFix_061"
+   },
+   "names": {
+    "en": "Roster entry 96"
+   },
+   "roster": {
+    "unlock": "rc_61",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_062": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "620c93a1-e75f-5dbd-a590-55992308552f",
+    "name": "Kiln_RosterFix_062"
+   },
+   "names": {
+    "en": "Roster entry 97"
+   },
+   "roster": {
+    "unlock": "rc_62",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_063": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "befaae95-6671-5961-8747-6adf09c6dda4",
+    "name": "Kiln_RosterFix_063"
+   },
+   "names": {
+    "en": "Roster entry 98"
+   },
+   "roster": {
+    "unlock": "rc_63",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_064": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "33bae052-4da8-540e-9b2f-cacdf4c67dba",
+    "name": "Kiln_RosterFix_064"
+   },
+   "names": {
+    "en": "Roster entry 99"
+   },
+   "roster": {
+    "unlock": "rc_64",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_065": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "25994845-84c3-5fa2-9ba2-38cdb0f51020",
+    "name": "Kiln_RosterFix_065"
+   },
+   "names": {
+    "en": "Roster entry 100"
+   },
+   "roster": {
+    "unlock": "rc_65",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_066": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "8f253436-3fc7-5a22-b617-ef747508276a",
+    "name": "Kiln_RosterFix_066"
+   },
+   "names": {
+    "en": "Roster entry 101"
+   },
+   "roster": {
+    "unlock": "rc_66",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_067": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "7a1ec8a0-a43b-552f-8cc3-491c40fc7773",
+    "name": "Kiln_RosterFix_067"
+   },
+   "names": {
+    "en": "Roster entry 102"
+   },
+   "roster": {
+    "unlock": "rc_67",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_068": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "d7e53f13-deff-53b1-a1b6-b7b58d458bc3",
+    "name": "Kiln_RosterFix_068"
+   },
+   "names": {
+    "en": "Roster entry 103"
+   },
+   "roster": {
+    "unlock": "rc_68",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_069": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "48396879-47b0-5ab9-b346-7db2d6ee699c",
+    "name": "Kiln_RosterFix_069"
+   },
+   "names": {
+    "en": "Roster entry 104"
+   },
+   "roster": {
+    "unlock": "rc_69",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_070": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "83cc1777-4f32-5fed-bf05-5d88f80b018b",
+    "name": "Kiln_RosterFix_070"
+   },
+   "names": {
+    "en": "Roster entry 105"
+   },
+   "roster": {
+    "unlock": "rc_70",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_071": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "059bf0e3-780d-5144-805c-c594e0024152",
+    "name": "Kiln_RosterFix_071"
+   },
+   "names": {
+    "en": "Roster entry 106"
+   },
+   "roster": {
+    "unlock": "rc_71",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_072": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "b7c1b524-5532-5e11-9b1b-26dceff3c350",
+    "name": "Kiln_RosterFix_072"
+   },
+   "names": {
+    "en": "Roster entry 107"
+   },
+   "roster": {
+    "unlock": "rc_72",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_073": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "7d409abc-181b-5083-8a8f-55341939728b",
+    "name": "Kiln_RosterFix_073"
+   },
+   "names": {
+    "en": "Roster entry 108"
+   },
+   "roster": {
+    "unlock": "rc_73",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_074": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "6e2882b2-f07f-5ef9-84ec-10d62268f758",
+    "name": "Kiln_RosterFix_074"
+   },
+   "names": {
+    "en": "Roster entry 109"
+   },
+   "roster": {
+    "unlock": "rc_74",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_075": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "496233d6-5772-5b40-937e-b4250af6b86e",
+    "name": "Kiln_RosterFix_075"
+   },
+   "names": {
+    "en": "Roster entry 110"
+   },
+   "roster": {
+    "unlock": "rc_75",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_076": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "b95ef52c-0505-51b5-adf6-ee3ff4e66be1",
+    "name": "Kiln_RosterFix_076"
+   },
+   "names": {
+    "en": "Roster entry 111"
+   },
+   "roster": {
+    "unlock": "rc_76",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_077": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "2a068d10-fc75-5f62-a27b-5f14f5969fa0",
+    "name": "Kiln_RosterFix_077"
+   },
+   "names": {
+    "en": "Roster entry 112"
+   },
+   "roster": {
+    "unlock": "rc_77",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_078": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "608b05e1-7d0a-50ce-acf1-fd4d76941be9",
+    "name": "Kiln_RosterFix_078"
+   },
+   "names": {
+    "en": "Roster entry 113"
+   },
+   "roster": {
+    "unlock": "rc_78",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_079": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "184c1b07-63a3-5ce3-a7d2-1ac59f4fd5f5",
+    "name": "Kiln_RosterFix_079"
+   },
+   "names": {
+    "en": "Roster entry 114"
+   },
+   "roster": {
+    "unlock": "rc_79",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_080": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "105e73c7-7b29-564d-a7f1-fc921e994683",
+    "name": "Kiln_RosterFix_080"
+   },
+   "names": {
+    "en": "Roster entry 115"
+   },
+   "roster": {
+    "unlock": "rc_80",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_081": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "202499eb-5148-5886-a175-2f46b53dc8d5",
+    "name": "Kiln_RosterFix_081"
+   },
+   "names": {
+    "en": "Roster entry 116"
+   },
+   "roster": {
+    "unlock": "rc_81",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_082": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "32cecab8-c5a1-5481-80d0-147a6722df11",
+    "name": "Kiln_RosterFix_082"
+   },
+   "names": {
+    "en": "Roster entry 117"
+   },
+   "roster": {
+    "unlock": "rc_82",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_083": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "07c7b427-9f4f-51d2-9d00-f54a8dd3bb01",
+    "name": "Kiln_RosterFix_083"
+   },
+   "names": {
+    "en": "Roster entry 118"
+   },
+   "roster": {
+    "unlock": "rc_83",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_084": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "d0cfe253-4fda-5a90-b5a2-7a0dda3900f3",
+    "name": "Kiln_RosterFix_084"
+   },
+   "names": {
+    "en": "Roster entry 119"
+   },
+   "roster": {
+    "unlock": "rc_84",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_085": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "899a7fe0-a890-5c4e-ae4b-1713984a4ab5",
+    "name": "Kiln_RosterFix_085"
+   },
+   "names": {
+    "en": "Roster entry 120"
+   },
+   "roster": {
+    "unlock": "rc_85",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_086": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "c3211f3e-6a5a-53f8-9c59-72d2efa517d6",
+    "name": "Kiln_RosterFix_086"
+   },
+   "names": {
+    "en": "Roster entry 121"
+   },
+   "roster": {
+    "unlock": "rc_86",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_087": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "3c633ebc-3986-5429-8d6a-2094b7b4ab41",
+    "name": "Kiln_RosterFix_087"
+   },
+   "names": {
+    "en": "Roster entry 122"
+   },
+   "roster": {
+    "unlock": "rc_87",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_088": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "4c811f17-8b24-595a-b94e-3e9f886bc836",
+    "name": "Kiln_RosterFix_088"
+   },
+   "names": {
+    "en": "Roster entry 123"
+   },
+   "roster": {
+    "unlock": "rc_88",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_089": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "7c2ec437-8d41-5f41-b4e2-832625898cc1",
+    "name": "Kiln_RosterFix_089"
+   },
+   "names": {
+    "en": "Roster entry 124"
+   },
+   "roster": {
+    "unlock": "rc_89",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_090": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "327bec49-c76b-5d13-93e6-80be89f87213",
+    "name": "Kiln_RosterFix_090"
+   },
+   "names": {
+    "en": "Roster entry 125"
+   },
+   "roster": {
+    "unlock": "rc_90",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_091": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "03e2d3d4-b68d-5e0b-bae3-68c7ee940dad",
+    "name": "Kiln_RosterFix_091"
+   },
+   "names": {
+    "en": "Roster entry 126"
+   },
+   "roster": {
+    "unlock": "rc_91",
+    "roamingRange": 8
+   }
+  },
+  "rc_npc_092": {
+   "template": "Townsfolk_Female_villager_01_HannahReed",
+   "clone": {
+    "guid": "99199561-e63c-50db-8503-c4ab63f3f514",
+    "name": "Kiln_RosterFix_092"
+   },
+   "names": {
+    "en": "Roster entry 127"
+   },
+   "roster": {
+    "unlock": "rc_92",
+    "roamingRange": 8
+   }
+  }
+ }
+}

@@ -316,12 +316,41 @@ def test_programs_match_their_expected_output():
     out = work("programs")
     rc, so, se = run("programs", "--catalog", CATALOG, "--dump", DUMP, "--out", out)
     assert rc == 0, se
-    assert so == "typegen: programs.json: 3 program descriptors\n", so
+    assert so == ("typegen: programs.json: 3 program views (1 programs without one: other_write_unser, all_read, "
+                  "all_write)\n"), so
     assert read(os.path.join(out, "Kiln.Game.Programs.g.cs")) == read(os.path.join(EXPECTED, "Kiln.Game.Programs.g.cs"))
     text = read(os.path.join(out, "Kiln.Game.Programs.g.cs")).decode()
-    contract = ("program lantern_glow\ntpl keen::ecs::Lantern\nread keen::ecs::Comet,keen::ecs::Gauges\n"
-                "write keen::ecs::Warmth\nsys_read light_cache\nevents_out keen::ecs::LanternLit\n")
-    assert f"Contract = 0x{typegen.fnv1a64(contract):016X}ul;" in text
+    # the §9.7 contract (FNV-1a-32 of the text of all 21 lists, masks, flags, interval), as kiln.world hashes it live
+    glow = ("tpl=Lantern\ntpl_opt=Unlit\nread=Gauges,Comet\nread_opt=\nwrite=Warmth\nwrite_opt=\nadd=\nremove=\n"
+            "sys_read=light_cache\nsys_write=\nother_tpl=\nother_read=\nother_write=\nother_write_unser=\nwith=\n"
+            "without=\nany_of=\nall_write=\nall_read=\nevents_in=\nevents_out=LanternLit\n"
+            "sys_read_opt=0000000000000000\nsys_write_opt=0000000000000000\nsys_write_parallel=0000000000000000\n"
+            "flags=00000004\ninterval=1\n")
+    assert f"Contract => 0x{typegen.fnv1a32(glow):08X}u;" in text
+    assert f'entity.Expect("lantern_glow", 0x{typegen.fnv1a32(glow):08X}u)' in text
+    assert "public ref struct LanternGlow : global::Kiln.IGameProgram<LanternGlow>" in text
+    # positions are the catalog's (list id, place in the list): what kiln.world's game_slice_slot takes
+    assert 'ref _e.ReadAt<global::Kiln.Ecs.Comet>(2, 1, "Comet")' in text
+    assert "public readonly bool HasUnlit => _e.HasAt(1, 0);" in text
+    assert 'ref _e.WriteAt<global::Kiln.Ecs.Warmth>(4, 1, "Warmth")' in text      # torch_burn: Torch is write 0
+    assert "Untyped (no layout in the dump): Torch." in text
+    assert "WorldScan" not in text                                                 # all_read: no view
+
+
+def test_program_slots_validate_component_layout_before_memory_access():
+    out = work("program-layout-guard")
+    rc, so, se = run("programs", "--catalog", CATALOG, "--dump", DUMP, "--out", out)
+    assert rc == 0, se
+    text = read(os.path.join(out, "Kiln.Game.Programs.g.cs")).decode()
+    # Same-size field moves do not change a program descriptor or sizeof(T).
+    # Every raw typed read/write must run the recursive live-layout check first.
+    import re
+    slots = list(re.finditer(r'return ref _e\.(?:ReadAt|WriteAt)<([^>]+)>', text))
+    assert slots, "typed slots bypass the layout guard (expression-bodied accessors)"
+    assert len(slots) == len(re.findall(r"_e\.(?:ReadAt|WriteAt)<", text))
+    for slot in slots:
+        getter = text[text.rfind("get", 0, slot.start()):slot.start()]
+        assert f"global::Kiln.Ecs.WhyNot<{slot.group(1)}>()" in getter
 
 
 def test_the_programs_file_declares_no_type_directly_in_namespace_kiln():
@@ -332,25 +361,60 @@ def test_the_programs_file_declares_no_type_directly_in_namespace_kiln():
     assert "    public static class Programs" in text and "class EcsPrograms" not in text
 
 
-def programs_refused(name, catalog, *needles):
+def test_programs_auto_finds_the_committed_catalog_of_the_dumps_exe():
+    out = work("programs-auto-none")
+    rc, so, se = run("programs", "--catalog", "auto", "--dump", DUMP, "--out", out)
+    assert rc == 0, se
+    assert so == "typegen: no program catalog for server 000000000000: no program views\n", so
+    text = read(os.path.join(out, "Kiln.Game.Programs.g.cs")).decode()
+    assert "public static class Programs" in text and "ref struct" not in text
+    server = os.path.join(ROOT, "sigdb", "types", "server", "f0d824be7fcd48ebfe2458ff5c28da26060c2074e3ec1fcac587e5a1d508aeb2.json")
+    out = work("programs-auto-server")
+    rc, so, se = run("programs", "--catalog", "auto", "--dump", server, "--out", out)
+    assert rc == 0, se
+    # 817 programs, 15 with other_write_unser / all_read / all_write (chapter 06a 9.3)
+    assert so.startswith("typegen: f0d824be7fcd48ebfe2458ff5c28da26060c2074e3ec1fcac587e5a1d508aeb2.json: 802 program views "
+                         "(15 programs without one"), so
+    text = read(os.path.join(out, "Kiln.Game.Programs.g.cs")).decode()
+    assert "public ref struct FuelSetup : global::Kiln.IGameProgram<FuelSetup>" in text
+    assert "public static uint Contract => 0xE4713C0Bu;" in text                    # the catalog's fuel_setup
+    assert 'public readonly global::Kiln.Attribute32 Fuel => _e.AttributeAt(4, 0, "Fuel");' in text
+    assert 'FuelValues => _e.AttributeReadAt(4, 0, "Fuel");' in text
+    assert "public readonly ref readonly global::Kiln.Ecs.FuelSetup FuelSetupComponent" in text
+    assert 'return ref _e.ReadAt<global::Kiln.Ecs.FuelSetup>(0, 0, "FuelSetup");' in text
+    assert "struct NpcBed " not in text                                            # other_write_unser
+
+
+def programs_refused(name, catalog, *needles, dump=None):
     p = os.path.join(WORK, "cat-" + name + ".json")
     with open(p, "w", encoding="utf-8") as f:
         json.dump(catalog, f)
     out = work("cat-" + name)
-    rc, so, se = run("programs", "--catalog", p, "--dump", DUMP, "--out", out)
+    rc, so, se = run("programs", "--catalog", p, "--dump", dump or DUMP, "--out", out)
     assert rc == 1 and se.startswith("typegen: error: "), (rc, se)
     for n in needles:
         assert n in se, f"{n!r} not in {se!r}"
     assert not os.path.exists(out)
 
 
-def test_programs_refuse_what_the_dump_cannot_name():
-    programs_refused("missing", [{"name": "p", "lists": {"0x58": ["Torch"]}}], "(p).write: Torch is not among the components of lanterns.json")
-    programs_refused("event", [{"name": "p", "lists": {"0x160": ["Lantern"]}}], "(p).events_in: Lantern is not among the events")
-    programs_refused("offset", [{"name": "p", "lists": {"0x20": ["Lantern"]}}], "'0x20'", "not a known access list offset")
-    programs_refused("name", [{"name": "p q", "lists": {}}], "'p q' is not a program name")
-    programs_refused("key", [{"name": "p", "lists": {}, "fn": 1}], "a program is {name, lists}")
-    programs_refused("twice", [{"name": "a_b", "lists": {}}, {"name": "a__b", "lists": {}}], "name collision", "a_b", "a__b")
+def test_programs_refuse_a_catalog_its_check_rejects_or_of_another_exe():
+    with open(CATALOG, encoding="utf-8") as f:
+        good = json.load(f)
+    other = json.loads(json.dumps(good))
+    other["exe_sha256"] = "2" * 64
+    programs_refused("other-exe", other, "views need both from one exe")
+    bad = json.loads(json.dumps(good))
+    bad["programs"][0]["contract"] = "0x00000000"
+    programs_refused("contract", bad, "lantern_glow: the contract is not FNV-1a-32")
+    key = json.loads(json.dumps(good))
+    key["programs"][0]["site"] = "0x1000"
+    programs_refused("key", key, "the keys are")
+    twice = json.loads(json.dumps(good))
+    a = json.loads(json.dumps(good["programs"][2]))
+    b = json.loads(json.dumps(a))
+    a["name"], b["name"] = "a__b", "a_b"
+    twice["programs"] = [a, b]
+    programs_refused("twice", twice, "name collision", "a_b", "a__b")
 
 
 # --- the legacy mode ------------------------------------------------------------------------------------------------

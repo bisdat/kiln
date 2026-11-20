@@ -5,7 +5,9 @@
 //     "recipes": { "<selector>": { "<field>": ..., "inputs": [...] | {op}, "outputs": [...] | {op} } },
 //     "loot":    { "<item selector>": { "stackSizeMin": 5, ... } },
 //     "drops":   { "<table GUID | glob>": { "count": {op}, "chance": {op}, "items": { "<item>": { "countMin": ... } } } },
+//     "gear":    { "<item selector>": { "@where": {...}, "power": 30, "armor": {"physical": 20}, "levels": [5, 5], ... } },
 //     "options": { "stackGuard": true } }
+// "gear" is a typed face over "items" (gear.h); "gearRules" are boot values (gamedata_bootpatch.cpp), not applied here.
 //
 // Selectors: a debug name, "0x1234abcd" / decimal id, or a case-insensitive glob ("Material_*", "*"). Values: numbers,
 // booleans, enum names, flag-name arrays, keen::Time in seconds, or an op relative to the game's original value:
@@ -19,9 +21,12 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <set>
 #include <sstream>
+#include <unordered_map>
 
 #include "content.h"
+#include "gear.h"
 #include "nlohmann/json.hpp"
 #include "refs.h"
 #include "services/kiln_profile.h"
@@ -519,7 +524,138 @@ bool apply_pack(KilnOwner owner, uint64_t seq_base, const std::string& text, con
 #if KC_GAMEDATA
     gd_pack_adds(owner, seq_base, doc, source, out);  // the gamedata sections' "add" lists first: item rules may name them
 #endif
-    auto section = [&](const char* name, uint32_t kind) {
+    // the gear section's recipe parts (item, recipe rule): applied after the section to the recipes that make each item
+    std::vector<std::pair<std::string, json>> gear_recipes;
+    std::set<std::string> gear_warnings;  // once per rule, not once per matched item
+    // One rule: a selector and its fields over one registry. label names it in messages ("items Material_*"). gear: a gear
+    // rule (gear.h), expanded per matched item into the item fields it stands for, then applied as an items rule.
+    auto rule = [&](const char* name, uint32_t kind, const std::string& sel, const json& body, bool gear, const std::string& label,
+                    const char* nothing = "@where matches nothing") {
+        const Registry& r = reg(kind);
+        const std::vector<const Entry*> hits = select(r, sel);
+        if (hits.empty()) {
+            out->warnings.push_back(label + ": matches nothing");
+            return;
+        }
+        const json* where = body.contains("@where") ? &body["@where"] : nullptr;
+        uint32_t matched = 0;
+        std::vector<std::string> field_errors;
+        for (const Entry* e : hits) {
+            std::string werr;
+            if (where && !where_ok(r, *e, *where, &werr)) {
+                if (!werr.empty()) {
+                    out->errors.push_back(label + ": " + werr);
+                    break;
+                }
+                continue;
+            }
+            ++matched;
+            const std::string src = source + ": " + label;
+            json expanded;
+            const json* fields = &body;
+            if (gear) {  // the typed keys, solved for this item (its level, its speed class), as item field paths
+                const Entry& item = *e;
+                gear::Expansion x = gear::expand(body, [&](const std::string& p) -> std::optional<double> {
+                    const Field* f = r.schema.find(p);
+                    if (!f) return std::nullopt;
+                    return as_double(original_value(item, *f));
+                });
+                for (auto& m : x.errors) field_errors.push_back(std::string(name) + " " + e->name + "." + m);
+                for (auto& m : x.warnings) gear_warnings.insert(label + ": " + m);
+                if (!x.recipe.is_null()) gear_recipes.emplace_back(e->name, std::move(x.recipe));
+                expanded = std::move(x.fields);
+                fields = &expanded;
+            }
+            for (auto& [path, val] : fields->items()) {
+                if (path.empty() || path[0] == '@') continue;
+                std::string err;
+                if (kind == KILN_CONTENT_RECIPES && (path == "inputs" || path == "outputs")) {
+                    const uint32_t which = path == "inputs" ? KILN_CONTENT_INPUTS : KILN_CONTENT_OUTPUTS;
+                    std::vector<KilnContentStack> orig, want;
+                    // the original list: the slot's original header if changed, else memory
+                    Entry o = *e;
+                    uint8_t hb[8];
+                    const uintptr_t h = e->addr + (which == KILN_CONTENT_INPUTS ? RL.input : RL.output);
+                    read_recipe_stacks(*e, which, &orig);
+                    if (store_original(h, 8, hb)) {
+                        // decode the original list from the original header bytes
+                        int32_t off;
+                        uint32_t n;
+                        std::memcpy(&off, hb, 4);
+                        std::memcpy(&n, hb + 4, 4);
+                        (void)o;
+                        orig.clear();
+                        const uint32_t stride = which == KILN_CONTENT_INPUTS ? RL.in_stride : RL.out_stride;
+                        for (uint32_t q = 0; q < n && q < 256; ++q) {
+                            const uintptr_t p = h + static_cast<intptr_t>(off) + static_cast<uintptr_t>(q) * stride;
+                            KilnContentStack s{};
+                            s.chance = 1;
+                            if (which == KILN_CONTENT_INPUTS) {
+                                uint32_t ccount = 0;
+                                rdv(p + RL.in_item, s.item), rdv(p + RL.in_count, s.count), rdv(p + RL.in_cat, s.category),
+                                    rdv(p + RL.in_cat_count, ccount);
+                                if (!s.item) s.count = ccount;
+                            } else {
+                                rdv(p + RL.out_item, s.item), rdv(p + RL.out_count, s.count);
+                            }
+                            s.count_max = s.count;
+                            orig.push_back(s);
+                        }
+                    }
+                    if (!parse_stacks(val, which == KILN_CONTENT_INPUTS, orig, &want, &err) ||
+                        set_recipe_stacks(owner, take_seq(seq_base), *e, which, want, src, &err) != KILN_OK) {
+                        field_errors.push_back(std::string(name) + " " + e->name + "." + path + ": " + err);
+                        continue;
+                    }
+                    ++out->applied;
+                    continue;
+                }
+                if (kind == KILN_CONTENT_ITEMS && is_kitbash_key(r.schema, path)) {
+                    const bool allow = doc_refs || (body.contains("@refs") && body["@refs"] == true) ||
+                                           (gear && path == "perks" && !gear::kPerksNeedRefs);
+                    if (apply_kitbash(owner, take_seq(seq_base), *e, path, val, allow, src, &field_errors) == KILN_OK) ++out->applied;
+                    continue;
+                }
+                const Field* f = r.schema.find(path);
+                if (!f) {
+#if KC_GAMEDATA
+                    if (kind == KILN_CONTENT_ITEMS) {  // item config paths (impactValues.ManaCost, uiValues[2].value, ...)
+                        std::string gerr;
+                        const int g = gd_item_path(owner, take_seq(seq_base), *e, path, val, src, &gerr);
+                        if (g > 0) {
+                            ++out->applied;
+                            continue;
+                        }
+                        if (g < 0) {
+                            field_errors.push_back("items " + e->name + ": " + gerr);
+                            continue;
+                        }
+                    }
+#endif
+                    field_errors.push_back(label + ": unknown field " + path);
+                    continue;
+                }
+                KilnContentValue v{};
+                if (!parse_value(*f, val, original_value(*e, *f), &v, &err) ||
+                    set_field(owner, take_seq(seq_base), kind, *e, *f, v, src, &err) != KILN_OK) {
+                    field_errors.push_back(std::string(name) + " " + e->name + ": " + err);
+                    continue;
+                }
+                ++out->applied;
+            }
+        }
+        // one line per distinct problem, not one per matched entry
+        std::sort(field_errors.begin(), field_errors.end());
+        field_errors.erase(std::unique(field_errors.begin(), field_errors.end()), field_errors.end());
+        if (field_errors.size() > 20) {
+            const size_t more = field_errors.size() - 20;
+            field_errors.resize(20);
+            field_errors.push_back("... and " + std::to_string(more) + " more");
+        }
+        for (auto& e : field_errors) out->errors.push_back(e);
+        if (where && matched == 0) out->warnings.push_back(label + ": " + nothing);
+    };
+    auto section = [&](const char* name, uint32_t kind, bool gear = false) {
         if (!doc.contains(name)) return;
         const json& sec = doc[name];
         const Registry& r = reg(kind);
@@ -533,123 +669,43 @@ bool apply_pack(KilnOwner owner, uint64_t seq_base, const std::string& text, con
         }
         for (auto& [sel, body] : sec.items()) {
             if (sel == "add" && body.is_array()) {  // new items / recipes (newcontent.cpp); later rules can use them
-                nc_pack_add(owner, kind, body.dump(), source, out);
+                if (gear) out->errors.push_back("gear add: new items go in the items section's \"add\" list; gear rules change items");
+                else nc_pack_add(owner, kind, body.dump(), source, out);
                 continue;
             }
             if (!body.is_object()) {
                 out->errors.push_back(std::string(name) + " " + sel + ": must be an object of fields");
                 continue;
             }
-            const std::vector<const Entry*> hits = select(r, sel);
-            if (hits.empty()) {
-                out->warnings.push_back(std::string(name) + " " + sel + ": matches nothing");
-                continue;
-            }
-            const json* where = body.contains("@where") ? &body["@where"] : nullptr;
-            uint32_t matched = 0;
-            std::vector<std::string> field_errors;
-            for (const Entry* e : hits) {
-                std::string werr;
-                if (where && !where_ok(r, *e, *where, &werr)) {
-                    if (!werr.empty()) {
-                        out->errors.push_back(std::string(name) + " " + sel + ": " + werr);
-                        break;
-                    }
-                    continue;
-                }
-                ++matched;
-                const std::string src = source + ": " + name + " " + sel;
-                for (auto& [path, val] : body.items()) {
-                    if (path.empty() || path[0] == '@') continue;
-                    std::string err;
-                    if (kind == KILN_CONTENT_RECIPES && (path == "inputs" || path == "outputs")) {
-                        const uint32_t which = path == "inputs" ? KILN_CONTENT_INPUTS : KILN_CONTENT_OUTPUTS;
-                        std::vector<KilnContentStack> orig, want;
-                        // the original list: the slot's original header if changed, else memory
-                        Entry o = *e;
-                        uint8_t hb[8];
-                        const uintptr_t h = e->addr + (which == KILN_CONTENT_INPUTS ? RL.input : RL.output);
-                        read_recipe_stacks(*e, which, &orig);
-                        if (store_original(h, 8, hb)) {
-                            // decode the original list from the original header bytes
-                            int32_t off;
-                            uint32_t n;
-                            std::memcpy(&off, hb, 4);
-                            std::memcpy(&n, hb + 4, 4);
-                            (void)o;
-                            orig.clear();
-                            const uint32_t stride = which == KILN_CONTENT_INPUTS ? RL.in_stride : RL.out_stride;
-                            for (uint32_t q = 0; q < n && q < 256; ++q) {
-                                const uintptr_t p = h + static_cast<intptr_t>(off) + static_cast<uintptr_t>(q) * stride;
-                                KilnContentStack s{};
-                                s.chance = 1;
-                                if (which == KILN_CONTENT_INPUTS) {
-                                    uint32_t ccount = 0;
-                                    rdv(p + RL.in_item, s.item), rdv(p + RL.in_count, s.count), rdv(p + RL.in_cat, s.category),
-                                        rdv(p + RL.in_cat_count, ccount);
-                                    if (!s.item) s.count = ccount;
-                                } else {
-                                    rdv(p + RL.out_item, s.item), rdv(p + RL.out_count, s.count);
-                                }
-                                s.count_max = s.count;
-                                orig.push_back(s);
-                            }
-                        }
-                        if (!parse_stacks(val, which == KILN_CONTENT_INPUTS, orig, &want, &err) ||
-                            set_recipe_stacks(owner, take_seq(seq_base), *e, which, want, src, &err) != KILN_OK) {
-                            field_errors.push_back(std::string(name) + " " + e->name + "." + path + ": " + err);
-                            continue;
-                        }
-                        ++out->applied;
-                        continue;
-                    }
-                    if (kind == KILN_CONTENT_ITEMS && is_kitbash_key(r.schema, path)) {
-                        const bool allow = doc_refs || (body.contains("@refs") && body["@refs"] == true);
-                        if (apply_kitbash(owner, take_seq(seq_base), *e, path, val, allow, src, &field_errors) == KILN_OK) ++out->applied;
-                        continue;
-                    }
-                    const Field* f = r.schema.find(path);
-                    if (!f) {
-#if KC_GAMEDATA
-                        if (kind == KILN_CONTENT_ITEMS) {  // item config paths (impactValues.ManaCost, uiValues[2].value, ...)
-                            std::string gerr;
-                            const int g = gd_item_path(owner, take_seq(seq_base), *e, path, val, src, &gerr);
-                            if (g > 0) {
-                                ++out->applied;
-                                continue;
-                            }
-                            if (g < 0) {
-                                field_errors.push_back("items " + e->name + ": " + gerr);
-                                continue;
-                            }
-                        }
-#endif
-                        field_errors.push_back(std::string(name) + " " + sel + ": unknown field " + path);
-                        continue;
-                    }
-                    KilnContentValue v{};
-                    if (!parse_value(*f, val, original_value(*e, *f), &v, &err) ||
-                        set_field(owner, take_seq(seq_base), kind, *e, *f, v, src, &err) != KILN_OK) {
-                        field_errors.push_back(std::string(name) + " " + e->name + ": " + err);
-                        continue;
-                    }
-                    ++out->applied;
-                }
-            }
-            // one line per distinct problem, not one per matched entry
-            std::sort(field_errors.begin(), field_errors.end());
-            field_errors.erase(std::unique(field_errors.begin(), field_errors.end()), field_errors.end());
-            if (field_errors.size() > 20) {
-                const size_t more = field_errors.size() - 20;
-                field_errors.resize(20);
-                field_errors.push_back("... and " + std::to_string(more) + " more");
-            }
-            for (auto& e : field_errors) out->errors.push_back(e);
-            if (where && matched == 0) out->warnings.push_back(std::string(name) + " " + sel + ": @where matches nothing");
+            rule(name, kind, sel, body, gear, std::string(name) + " " + sel);
         }
     };
     section("items", KILN_CONTENT_ITEMS);
+    section("gear", KILN_CONTENT_ITEMS, true);  // typed item values (gear.h): after "items", so that a gear rule wins over a raw path
     section("recipes", KILN_CONTENT_RECIPES);
+    if (!gear_recipes.empty() && !reg(KILN_CONTENT_RECIPES).available)
+        out->errors.push_back("gear: \"recipe\" needs the recipes registry, which is not available on this build");
+    else if (!gear_recipes.empty()) {
+        // every recipe that makes the item: the recipes' outputs read once, not once per gear item
+        std::unordered_map<uint32_t, std::vector<uint32_t>> makers;
+        for (const Entry& rc : reg(KILN_CONTENT_RECIPES).entries) {
+            std::vector<KilnContentStack> st;
+            if (read_recipe_stacks(rc, KILN_CONTENT_OUTPUTS, &st))
+                for (const KilnContentStack& s : st)
+                    if (s.item) makers[s.item].push_back(rc.id);
+        }
+        const Registry& items = reg(KILN_CONTENT_ITEMS);
+        for (auto& [item, rec] : gear_recipes) {
+            const Entry* it = items.lookup(item);
+            const auto m = it ? makers.find(it->id) : makers.end();
+            if (m == makers.end()) {
+                out->warnings.push_back("gear " + item + ".recipe: no recipe makes this item");
+                continue;
+            }
+            for (uint32_t id : m->second) rule("recipes", KILN_CONTENT_RECIPES, std::to_string(id), rec, false, "gear " + item + ".recipe");
+        }
+    }
+    for (const std::string& w : gear_warnings) out->warnings.push_back(w);
     section("loot", KILN_CONTENT_LOOT);
     if (doc.contains("drops")) {
         const json& d = doc["drops"];
@@ -684,6 +740,7 @@ bool apply_pack(KilnOwner owner, uint64_t seq_base, const std::string& text, con
     }
     for (auto& [k, v] : doc.items())
         if (k != "items" && k != "recipes" && k != "loot" && k != "drops" && k != "options" && k != "format" &&
+            k != "gear" && k != "gearRules" &&  // gearRules: boot values, read before the game starts (gamedata_bootpatch.cpp)
             k[0] != '@' && k != "comment"
 #if KC_GAMEDATA
             && !gd_is_section(k)
@@ -854,11 +911,28 @@ PacksReport apply_all_packs(const std::vector<PackFile>& files) {
 }
 
 std::string apply_result_json(const ApplyResult& r) {
-    json j = {{"applied", r.applied}, {"errors", r.errors}, {"warnings", r.warnings}};
-    json c = json::array();
-    for (const Conflict& x : store_conflicts())
-        c.push_back({{"field", x.what}, {"winner", x.winner}, {"winnerValue", x.winner_value}, {"loser", x.loser}, {"loserValue", x.loser_value}});
-    j["conflicts"] = c;
+    // ApplyJson has already mutated the store: it cannot be retried as a report-size query. Keep this report below
+    // the sync client's 64 KiB buffer even for a full buff room (or arbitrarily long diagnostic text).
+    const auto conflicts = store_conflicts();
+    json j = {{"applied", r.applied}, {"errors", json::array()}, {"warnings", json::array()}, {"conflicts", json::array()},
+              {"errorCount", r.errors.size()}, {"warningCount", r.warnings.size()}, {"conflictCount", conflicts.size()}};
+    auto message = [](const std::string& text) {
+        // Bound encoded JSON bytes, including escapes. Replacement keeps a cut UTF-8 sequence well formed.
+        std::string encoded = json(text).dump(-1, ' ', false, json::error_handler_t::replace);
+        if (encoded.size() > 1024) encoded = json(text.substr(0, 128) + " ... [truncated]").dump(-1, ' ', false, json::error_handler_t::replace);
+        return json::parse(encoded);
+    };
+    constexpr size_t limit = 8;
+    for (size_t i = 0; i < std::min(limit, r.errors.size()); ++i) j["errors"].push_back(message(r.errors[i]));
+    for (size_t i = 0; i < std::min(limit, r.warnings.size()); ++i) j["warnings"].push_back(message(r.warnings[i]));
+    for (size_t i = 0; i < std::min(limit, conflicts.size()); ++i) {
+        const auto& x = conflicts[i];
+        j["conflicts"].push_back({{"field", message(x.what)}, {"winner", message(x.winner)}, {"winnerValue", message(x.winner_value)},
+                                  {"loser", message(x.loser)}, {"loserValue", message(x.loser_value)}});
+    }
+    // At most 56 encoded messages of <= 1024 bytes, plus fixed keys/counts: comfortably below 64 KiB.
+    j["more"] = r.errors.size() + r.warnings.size() + conflicts.size() -
+                j["errors"].size() - j["warnings"].size() - j["conflicts"].size();
     return j.dump();
 }
 

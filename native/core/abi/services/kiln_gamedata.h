@@ -27,13 +27,19 @@
  * sections "templates", "arsenals", "sequences", "buffs", "perks", "skills"; item paths in "items". Other services add
  * their own pack sections with register_section (e.g. "creatures").
  *
- * Threads: status, configs, definitions, register_section: any thread; everything else on the thread of kiln.content's
- * world (KILN_ERR_WRONG_THREAD otherwise). Fail soft: KILN_ERR_UNAVAILABLE when the resources or a section are not
+ * Buff clones (since 0.2.0-dev.29, members after `definitions`): Kiln's room for them is 4,096 per process (1,024 when
+ * the larger block could not be reserved next to the game's collection); buff_budget reads it, define_buff_result defines
+ * one with an answer (chapter 17 I1: registered now, accepted for the next start, or refused with a code), and
+ * buff_registration reads the answer again by its registration id. Shapes: kiln_capacity.h.
+ *
+ * Threads: status, configs, definitions, register_section, buff_budget, buff_registration: any thread; everything else
+ * on the thread of kiln.content's world (KILN_ERR_WRONG_THREAD otherwise). Fail soft: KILN_ERR_UNAVAILABLE when the resources or a section are not
  * available on this build. Docs: docs/kiln/services/gamedata.md; evidence docs/re/gamedata.md.
  */
 #ifndef KILN_GAMEDATA_H
 #define KILN_GAMEDATA_H
 #include "../kiln_api.h"
+#include "kiln_capacity.h"
 #include "kiln_content.h"
 #ifdef __cplusplus
 extern "C" {
@@ -116,6 +122,35 @@ typedef struct KilnGamedataApi {
     KilnResult(KILN_CALL* define)(KilnOwner owner, uint32_t section, KilnStr json, char* report, size_t cap,
                                   size_t* out_len);
     KilnResult(KILN_CALL* definitions)(char* buf, size_t cap, size_t* out_len);
+
+    /* ---- buff clones that answer: appended since 0.2.0-dev.29 (version stays 1). Check header.size ---- */
+    /* The buff room (process scope; units: clone records). capacity 4,096 (1,024 when the larger block failed:
+     * KILN_CAPACITY_EXPANDED is clear then), game_used 0 (the game's own 274 records take no clone room), kiln_used the
+     * clones of loaded mods and of Kiln, reserved the records nothing active uses: kept for a mod that is gone,
+     * placeholders, orphans, records whose registration failed after they were taken (a record is never freed in a
+     * process). readiness NOT_READY until the first world reserved the room (or when it could not). A snapshot: never a
+     * walk of game memory. Any thread. KILN_ERR_INVALID_ARGUMENT: out NULL or out->size too small. */
+    KilnResult(KILN_CALL* buff_budget)(KilnCapacityInfo* out);
+    /* Defines a buff clone (clone_json as define(): {"guid", "name", "base", "fields", "displayName", "description",
+     * "texts"}; no "placeholder") with an answer. timing KILN_DEFINE_REQUIRE_REGISTERED: registered in this process now, in
+     * kiln.content's world, its record in Kiln's collection and the world's registry pointing at it (the game's own
+     * lookup is asked for it where the symbol resolved), or refused (NO_WORLD, NOT_READY, CAPACITY_EXCEEDED,
+     * ID_COLLISION, NAME_TAKEN, UNKNOWN_BASE, OWNER_INACTIVE, ...) without taking a record. KILN_DEFINE_ALLOW_NEXT_START:
+     * the same when it can register now; when only the moment is wrong (no world, not ready) the definition is written to
+     * <kiln>/data/gamedata/pending/<mod>/<guid>.json and registers at the next process start (ACCEPTED_NEXT_START,
+     * slots_consumed 0; STORAGE_FAILURE when the file cannot be written). A refusal after a record was taken is RETAINED
+     * with its record (slots_consumed 1). The same definition again answers the same (slots_consumed 1 once). report:
+     * {"reason": null | "...", "warnings": [...]}, at most 4096 bytes: with less room KILN_ERR_BUFFER_TOO_SMALL before
+     * anything is done (*out_len 4096). KILN_ERR_INVALID_ARGUMENT: not a definition, a bad timing, out NULL or too small
+     * (the report says why). On kiln.content's world thread (KILN_ERR_WRONG_THREAD) while a world runs. */
+    KilnResult(KILN_CALL* define_buff_result)(KilnOwner owner, KilnStr clone_json, uint32_t timing, KilnDefinitionReply* out,
+                                              char* report, size_t capacity, size_t* out_len);
+    /* The answer for registration_id now (what became of the definition since: registered, superseded by a later
+     * definition of the GUID, kept for a mod that is gone, settled at this start). ok = 0 with reason NOT_FOUND for an
+     * id this process does not know. owner may be 0. report and its room as define_buff_result. Any thread.
+     * KILN_ERR_INVALID_ARGUMENT: registration_id NULL or all zero, out NULL or too small. */
+    KilnResult(KILN_CALL* buff_registration)(KilnOwner owner, const uint8_t registration_id[16], KilnDefinitionReply* out,
+                                             char* report, size_t capacity, size_t* out_len);
 } KilnGamedataApi;
 
 #ifdef __cplusplus

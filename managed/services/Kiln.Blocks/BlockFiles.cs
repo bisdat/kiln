@@ -11,8 +11,9 @@ internal static class BlockFiles
         if (string.IsNullOrWhiteSpace(relative) || relative.Contains(':') || relative.Contains('\0') || Path.IsPathRooted(relative)
             || relative.Split('/').Any(p => p == ".." || p != "." && (p.EndsWith('.') || p.EndsWith(' '))))
             throw new BlockError(ctx.Block, field, $"\"{name}\": a file in the mod's folder, with a relative path");
-        var dir = directory ?? BlocksBridge.ModDirectory(ctx.Mod.Id);
-        if (dir.Length == 0) return relative; // no loader (unit tests): the lexical check still applies
+        var dir = directory ?? ctx.Mod.DirectoryOf(ctx.Mod.Id);
+        if (string.IsNullOrWhiteSpace(dir))
+            throw new BlockError(ctx.Block, field, "the mod's folder is unknown; cannot resolve a file");
         try
         {
             var root = Resolve(Path.GetFullPath(dir));

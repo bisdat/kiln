@@ -119,6 +119,10 @@ public sealed class OldCallShapesTests
         // nine overloads in dev.26: `var d = Blocks.Define;` and `Blocks.Define(null)` were ambiguous already; the two
         // new ones take AffixBlock and AffixPoolBlock, types new in dev.27 (affix-blocks, the owner's decision)
         ["Kiln.Blocks.Define"] = "the two typed affix overloads of dev.27",
+        // two overloads in dev.26 (GameDataClone, JsonObject): `var d = Content.Buffs.Define;` and `Define(null)` were
+        // ambiguous already; the two of dev.29 take a second argument, DefinitionRegistrationOptions (chapter 17 I1: result-
+        // bearing overloads with an options argument), so no one-argument call can meet them
+        ["Kiln.GameDataRegistry.Define"] = "the two result-bearing overloads of dev.29 (chapter 17 I1)",
     };
 
     [Theory]

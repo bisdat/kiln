@@ -14,13 +14,13 @@ public static class BakedOutputs
     /// <summary>The marker; the same text as the bake's (Kiln.Sdk.Bake Baker.Comment, a test keeps them equal).</summary>
     public const string Comment = "baked by the Kiln SDK at build from what the mod defines in code: docs/kiln/modding/baked.md";
 
-    /// <summary>Removes every baked file of the three kinds from <paramref name="folder"/>: the mod's own
+    /// <summary>Removes every SDK-baked artifact from <paramref name="folder"/>: the mod's own
     /// (<paramref name="modId"/>) and those named for another id (a rename). Returns what was removed ('/', sorted).</summary>
     public static IReadOnlyList<string> Clean(string folder, string modId)
     {
         var removed = new List<string>();
         if (!Directory.Exists(folder)) return removed;
-        foreach (var (dir, pattern) in new[] { ("quests/generated", "*.json"), ("skills", "*.generated.json"), ("blocks/generated", "*.json") })
+        foreach (var (dir, pattern) in new[] { ("quests/generated", "*.json"), ("skills", "*.generated.json"), ("blocks/generated", "*.json"), ("", "blocks.tables.json") })
         {
             var at = Path.Combine(folder, dir);
             if (!Directory.Exists(at)) continue;

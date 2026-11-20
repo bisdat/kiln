@@ -11,6 +11,7 @@
 #include "cooktrust.h"
 #include "nlohmann/json.hpp"
 #include "services/kiln_profile.h"
+#include "texture_rgba.h"
 
 namespace fs = std::filesystem;
 using nlohmann::json;
@@ -32,13 +33,30 @@ std::vector<PendingTexture> g_pending_tex;
 // the icon is registered as new and looked at again when S appears (a game item's: its own texture is retextured).
 struct PendingIcon {
     KilnOwner owner;
+    uint32_t origin;
     uint8_t guid[16];
     Rgba img;
     std::string label;
 };
 std::vector<PendingIcon> g_pending_icons;
 std::mutex g_pending_mu;
+// A boot generation's owners of required participants (g_pending_mu): a texture or icon of theirs queued until S appears that then
+// fails stops the start. Also resolves raw resources' late omission provenance (including dedicated servers).
+std::map<KilnOwner, std::string> g_boot_required_owner;
 }  // namespace
+
+void report_resource_omission(const ResourceOmission& omission) {
+    std::string mod = omission.mod;
+    if (mod.empty()) {
+        std::lock_guard lock(g_pending_mu);
+        if (const auto it = g_boot_required_owner.find(omission.owner); it != g_boot_required_owner.end()) mod = it->second;
+    }
+    const std::string key = key_str(omission.key);
+    LOGW("assets: mod %s owner %llu resource %s refused: %s", mod.empty() ? "<unknown>" : mod.c_str(),
+         static_cast<unsigned long long>(omission.owner), key.c_str(), omission.why.c_str());
+    if (!mod.empty())
+        kiln::boot::activation_fault(g_api, g_self, mod, "assets", key, "kiln.assets: " + omission.why);
+}
 
 namespace {
 
@@ -150,7 +168,7 @@ KilnResult icon_for_item(KilnOwner owner, const uint8_t g[16], const Rgba& img, 
     const KilnResult r = op_icon_register(owner, g, img);
     if (r == KILN_OK) {
         std::lock_guard lock(g_pending_mu);
-        PendingIcon p{owner, {}, img, label};
+        PendingIcon p{owner, current_origin(), {}, img, label};
         std::memcpy(p.guid, g, 16);
         g_pending_icons.push_back(std::move(p));
     }
@@ -208,9 +226,37 @@ bool in_cooked(const fs::path& base, const fs::path& fp) {
 std::vector<std::string> g_loaded_dirs;
 std::mutex g_loaded_mu;
 
+// Standard base64 (a boot document's inline resource); false on a character outside the alphabet.
+bool base64_decode(const std::string& in, std::vector<uint8_t>* out) {
+    auto val = [](char c) -> int {
+        if (c >= 'A' && c <= 'Z') return c - 'A';
+        if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+        if (c >= '0' && c <= '9') return c - '0' + 52;
+        return c == '+' ? 62 : c == '/' ? 63 : -1;
+    };
+    out->clear();
+    out->reserve(in.size() / 4 * 3);
+    uint32_t acc = 0;
+    int bits = 0;
+    for (const char c : in) {
+        if (c == '=') break;
+        const int v = val(c);
+        if (v < 0) return false;
+        acc = (acc << 6) | static_cast<uint32_t>(v);
+        bits += 6;
+        if (bits >= 8) {
+            bits -= 8;
+            out->push_back(static_cast<uint8_t>((acc >> bits) & 0xFF));
+        }
+    }
+    return true;
+}
+
 // `doc_in`: a manifest that is not the file (a boot generation's document, chapter 08), its files still the mod's own.
+// `errors`: each entry error, "entries[<i>] (<kind> <file>): <what>" (a boot generation's prepare refuses a required mod for
+// the first one), a cooked file this game's cook did not make and that is therefore not loaded included.
 KilnResult load_manifest(KilnOwner owner, const std::string& mod_dir, std::string* report, const CookTrust* trust_in = nullptr,
-                         const CookedIds* cooked_ids_in = nullptr, const json* doc_in = nullptr) {
+                         const CookedIds* cooked_ids_in = nullptr, const json* doc_in = nullptr, std::vector<std::string>* errors = nullptr) {
     OriginScope origin(KILN_BLOB_ORIGIN_MANIFEST);  // every blob this registers (icons and textures too): catalog provenance
     const fs::path base = fs::path(widen(mod_dir)) / L"assets";
     const fs::path mf = base / L"assets.json";
@@ -226,7 +272,7 @@ KilnResult load_manifest(KilnOwner owner, const std::string& mod_dir, std::strin
         }
         std::vector<uint8_t> text;
         if (!read_file(mf.wstring(), &text, &why)) {
-            *report = why;
+            *report = "assets/assets.json cannot be read: " + why;
             return KILN_ERR_INTERNAL;
         }
         doc = json::parse(text.begin(), text.end(), nullptr, false, true);
@@ -237,6 +283,11 @@ KilnResult load_manifest(KilnOwner owner, const std::string& mod_dir, std::strin
     }
     int icons = 0, res = 0, blobs = 0, tex = 0, errs = 0, icons_server = 0, marked_models = 0, not_here = 0, unmade = 0;
     std::string problems, not_here_names, unmade_names;
+    size_t at = 0;  // the entry being read: entry errors name it
+    std::string at_kind, at_file;
+    auto entry_label = [&] {
+        return "entries[" + std::to_string(at) + "]" + (at_kind.empty() && at_file.empty() ? std::string() : " (" + at_kind + (at_file.empty() ? "" : " " + at_file) + ")");
+    };
     std::optional<CookTrust> own_trust;
     auto trust = [&]() -> const CookTrust& {
         if (trust_in) return *trust_in;
@@ -253,6 +304,8 @@ KilnResult load_manifest(KilnOwner owner, const std::string& mod_dir, std::strin
         int& n = v == CookedVerdict::Refuse ? not_here : unmade;
         std::string& names = v == CookedVerdict::Refuse ? not_here_names : unmade_names;
         if (++n <= 3) names += (names.empty() ? "" : ", ") + name;
+        if (v == CookedVerdict::Refuse && errors)
+            errors->push_back(entry_label() + ": cooked file " + name + " was not cooked by this game's cook, so it is not loaded (cook the mod here)");
         return v == CookedVerdict::LoadUnmade;
     };
     // every file is read from the mod's own assets folder: a link or junction there (to another mod's assets/cooked,
@@ -287,7 +340,13 @@ KilnResult load_manifest(KilnOwner owner, const std::string& mod_dir, std::strin
         ++errs;
         problems += (problems.empty() ? "" : "; ") + m;
         LOGW("assets: %s: %s", mod_dir.c_str(), m.c_str());
+        if (errors) errors->push_back(entry_label() + ": " + m);
     };
+    if (doc.contains("entries") && !doc["entries"].is_array()) {
+        *report = "assets.json: \"entries\" is not an array";
+        if (errors) errors->push_back(*report);
+        return KILN_ERR_INVALID_ARGUMENT;
+    }
     const json entries = doc.value("entries", json::array());
     // What only a game client uses, by what the entry is (a model and its render data): a dedicated server skips it. The manifest is
     // the same file on a server and in a player's game; a server's cook made no model, and one copied from a PC is not served either.
@@ -297,7 +356,7 @@ KilnResult load_manifest(KilnOwner owner, const std::string& mod_dir, std::strin
         for (const json& e : entries) {
             ManifestItem it;
             bool ok;
-            if (e.is_object()) {
+            if (e.is_object()) try {
                 it.kind = e.value("kind", "");
                 it.file = e.value("file", "");
                 it.fixed_hash = it.kind == "blob" && e.contains("hash");
@@ -306,6 +365,8 @@ KilnResult load_manifest(KilnOwner owner, const std::string& mod_dir, std::strin
                     for (const json& p : e.value("patch", json::array()))
                         if (p.is_object()) it.patch_blobs.push_back(p.value("blob", ""));
                 }
+            } catch (const json::exception&) {
+                it = ManifestItem{};  // a malformed entry: the loop below says what is wrong with it
             }
             items.push_back(std::move(it));
         }
@@ -314,8 +375,18 @@ KilnResult load_manifest(KilnOwner owner, const std::string& mod_dir, std::strin
     size_t index = 0;
     for (const json& e : entries) {
         const size_t i = index++;
+        at = i;
+        at_kind.clear();
+        at_file.clear();
+        if (!e.is_object()) {
+            fail("not an object");
+            continue;
+        }
+        try {
         const std::string kind = e.value("kind", "");
         const std::string file = e.value("file", "");
+        at_kind = kind;
+        at_file = file;
         // "side": "client" (soundcook's sounds and cues): a dedicated server has no sound system: not an error
         if (!g_client && e.value("side", "") == "client") {
             ++icons_server;
@@ -324,7 +395,9 @@ KilnResult load_manifest(KilnOwner owner, const std::string& mod_dir, std::strin
         }
         if (!g_client && clients_only[i]) { ++icons_server; continue; }
         fs::path fp;
-        if (kind != "blob" || !file.empty()) {  // every kind but a hash-only blob names a file
+        // a boot generation's resource carries its bytes (chapter 08: Kiln.Blocks' lowered programs), base64 in "data"
+        const bool inline_data = doc_in && kind == "resource" && e.contains("data") && e["data"].is_string();
+        if (!inline_data && (kind != "blob" || !file.empty())) {  // every kind but a hash-only blob names a file
             if (!safe_path(base, file, &fp, &why)) { fail(kind + ": " + why); continue; }
         }
         if (kind == "icon") {
@@ -374,8 +447,12 @@ KilnResult load_manifest(KilnOwner owner, const std::string& mod_dir, std::strin
             bool ok;
             if (!parse_guid(e.value("guid", ""), g)) { fail("resource: bad guid"); continue; }
             std::vector<uint8_t> bytes;
-            if (!read(fp, &bytes, &why)) { fail("resource " + file + ": " + why); continue; }
-            if (!made_here(fp, bytes)) continue;
+            if (inline_data) {
+                if (!base64_decode(e["data"].get<std::string>(), &bytes)) { fail("resource: \"data\" is not base64"); continue; }
+            } else {
+                if (!read(fp, &bytes, &why)) { fail("resource " + file + ": " + why); continue; }
+                if (!made_here(fp, bytes)) continue;
+            }
             // patch: write a referenced blob's ContentHash at the given offset. Every blob is read and judged before
             // anything is added: a resource whose blob this game's cook did not make is left out whole.
             std::vector<std::pair<size_t, std::vector<uint8_t>>> patches;
@@ -405,20 +482,27 @@ KilnResult load_manifest(KilnOwner owner, const std::string& mod_dir, std::strin
             k.part = e.value("part", 0);
             const std::string mode = e.value("mode", "any");
             uint32_t flags = mode == "override" ? KILN_ASSET_PUT_OVERRIDE : mode == "new" ? KILN_ASSET_PUT_NEW : 0;
-            if (op_resource_put(owner, &k, bytes.data(), bytes.size(), flags) == KILN_OK) {
+            const KilnResult put = op_resource_put(owner, &k, bytes.data(), bytes.size(), flags);
+            if (put == KILN_OK) {
                 ++res;
             } else {
                 Key kk;
                 std::memcpy(kk.g, k.guid, 16);
                 kk.type = k.type;
                 kk.part = k.part;
-                fail(player_graph_key(kk) ? "resource " + file + ": refused: " + key_str(kk) +
+                fail(k.type == 0xe64ee036u && put == KILN_ERR_UNAVAILABLE
+                         ? "resource " + file + ": VFX preflight refused " + key_str(kk) +
+                               ": capacity exhausted or original census/enumeration unavailable (see assets log)"
+                         : player_graph_key(kk) ? "resource " + file + ": refused: " + key_str(kk) +
                                                 " is the player's animation graph, reserved for kiln.playeranim (add player animation states in"
                                                 " assets/player-states.json instead)"
                                           : "resource " + file + ": put failed");
             }
         } else {
             fail("unknown kind '" + kind + "'");
+        }
+        } catch (const json::exception& x) {  // a field of the wrong type (e.value on a string where a number belongs)
+            fail(std::string("malformed: ") + x.what());
         }
     }
     char b[256];
@@ -526,26 +610,44 @@ KilnResult dump(const std::string& spec, std::string* report) {
 
 // Called by store.cpp's on_resource_system_ready, on the game's thread, once S is available.
 void flush_pending_textures() {
-    OriginScope origin(KILN_BLOB_ORIGIN_MANIFEST);  // only load_manifest queues icons and textures for this
     std::vector<PendingTexture> pend;
     std::vector<PendingIcon> icons;
+    std::map<KilnOwner, std::string> required;
     {
         std::lock_guard lock(g_pending_mu);
         pend.swap(g_pending_tex);
         icons.swap(g_pending_icons);
+        required = g_boot_required_owner;
     }
-    for (auto& p : icons)
+    struct Late {
+        std::string mod, key, why;
+    };
+    std::vector<Late> late;
+    std::set<std::string> said;
+    auto failed = [&](KilnOwner owner, const std::string& label, const std::string& why) {
+        const auto it = required.find(owner);
+        if (it != required.end() && said.insert(it->second).second) late.push_back({it->second, label, label + ": " + why});
+    };
+    for (auto& p : icons) {
+        OriginScope origin(p.origin);
         if (is_game_icon(p.guid)) {  // registered as new at boot: the game has this key, so it is a game item's icon
             op_icon_remove(p.owner, p.guid);
-            retexture_game_icon(p.owner, p.guid, p.img, p.label);
+            if (retexture_game_icon(p.owner, p.guid, p.img, p.label) != KILN_OK) failed(p.owner, p.label, "the game item's icon was not retextured");
         }
-    for (auto& p : pend) {
-        std::string why;
-        if (texture_override(p.owner, &p.key, p.png.data(), p.png.size(), &why) == KILN_OK)
-            LOGI("assets: %s applied", p.label.c_str());
-        else
-            LOGW("assets: %s failed: %s", p.label.c_str(), why.c_str());
     }
+    for (auto& p : pend) {
+        OriginScope origin(KILN_BLOB_ORIGIN_MANIFEST);  // only load_manifest queues texture overrides
+        std::string why;
+        if (texture_override(p.owner, &p.key, p.png.data(), p.png.size(), &why) == KILN_OK) {
+            LOGI("assets: %s applied", p.label.c_str());
+        } else {
+            LOGW("assets: %s failed: %s", p.label.c_str(), why.c_str());
+            failed(p.owner, p.label, why);
+        }
+    }
+    // a required boot mod's texture that could not be applied: kiln.boot stops the start (the call does not return then)
+    for (const Late& l : late)
+        kiln::boot::activation_fault(g_api, g_self, l.mod, "assets", l.key, "kiln.assets, when the game's resources came up: " + l.why);
 }
 
 namespace {
@@ -603,22 +705,44 @@ void load_profile_manifests(const kiln::boot::Input* boot = nullptr, BootPlan* p
             LOGI("assets: %s is out of the boot generation: its assets.json is not loaded", id.c_str());
             continue;
         }
+        // a required participant's entry errors refuse it (kiln_boot_collector.hpp, entry_error); another mod's are logged and skipped
+        auto strict = [&](KilnResult rc, const std::string& key, const std::string& rep, const std::vector<std::string>& errs) {
+            if (!boot || id.empty() || (rc == KILN_OK && errs.empty())) return;
+            const std::string first = !errs.empty() ? errs.front() : rep;
+            const std::string more = errs.size() > 1 ? " (and " + std::to_string(errs.size() - 1) + " more entry error(s), kiln.log)" : "";
+            kiln::boot::entry_error(boot, id, "assets", key, "kiln.assets: " + key + ": " + first + more);
+        };
+        auto mark = [&](KilnOwner o) {  // a required participant's owner: its textures applied later are checked (flush_pending_textures)
+            if (!boot || id.empty() || !boot->strict(id)) return;
+            std::lock_guard lock(g_pending_mu);
+            g_boot_required_owner[o] = id;
+        };
         if (fs::exists(fs::path(widen(dir)) / L"assets" / L"assets.json", ec)) {
             KilnOwner o = g_api->owner_create(KilnStr{dir.c_str(), dir.size()});
             if (plan) plan->owners.push_back(o);
+            mark(o);
             std::string rep;
-            if (load_manifest(o, dir, &rep, &trust, &cooked_ids) == KILN_OK) ++loaded;
+            std::vector<std::string> errs;
+            const KilnResult rc = load_manifest(o, dir, &rep, &trust, &cooked_ids, nullptr, &errs);
+            if (rc == KILN_OK) ++loaded;
+            else LOGW("assets: %s: assets/assets.json is not loaded: %s", dir.c_str(), rep.c_str());
             if (plan) ++plan->manifests;
+            strict(rc, "assets/assets.json", rep, errs);
         }
         if (!boot || id.empty()) continue;
         for (const auto& d : boot->docs("assets", id)) {  // the mod's OnBoot code: after its own file
+            if (!d.document.is_object() || (d.document.contains("entries") && !d.document["entries"].is_array()))
+                throw kiln::boot::Refusal(id, "assets", d.key, "kiln.assets: a boot document is not an assets.json manifest");
             const auto it = boot->owner.find(id);
             const KilnOwner o = it != boot->owner.end() && it->second ? it->second : g_api->owner_create(KilnStr{dir.c_str(), dir.size()});
             if (std::find(plan->owners.begin(), plan->owners.end(), o) == plan->owners.end()) plan->owners.push_back(o);
+            mark(o);
             std::string rep;
-            if (load_manifest(o, dir, &rep, &trust, &cooked_ids, &d.document) != KILN_OK)
-                LOGW("assets: %s: boot document %s: %s", id.c_str(), d.key.c_str(), rep.c_str());
+            std::vector<std::string> errs;
+            const KilnResult rc = load_manifest(o, dir, &rep, &trust, &cooked_ids, &d.document, &errs);
+            if (rc != KILN_OK) LOGW("assets: %s: boot document %s: %s", id.c_str(), d.key.c_str(), rep.c_str());
             ++plan->documents;
+            strict(rc, d.key, rep, errs);
         }
     }
     if (loaded) LOGI("assets: loaded assets.json for %d mod(s)", loaded);
@@ -633,6 +757,7 @@ void KILN_CALL destroy_boot(const void* p) {
         std::lock_guard lock(g_pending_mu);
         std::erase_if(g_pending_tex, [&](const PendingTexture& t) { return t.owner == o; });
         std::erase_if(g_pending_icons, [&](const PendingIcon& i) { return i.owner == o; });
+        g_boot_required_owner.erase(o);
     }
     {
         std::lock_guard lock(g_loaded_mu);
@@ -646,7 +771,12 @@ KilnResult KILN_CALL prepare_boot(void*, const KilnBootPrepareInputV1* in, KilnB
     const kiln::boot::Input input = kiln::boot::parse(in);
     if (!input.ok) return kiln::boot::refuse(out, issue, "", "", "", "kiln.assets: the boot envelope is not JSON");
     auto* plan = new BootPlan;
-    load_profile_manifests(&input, plan);
+    try {
+        load_profile_manifests(&input, plan);
+    } catch (const kiln::boot::Refusal& r) {
+        destroy_boot(plan);  // what was loaded before the refusal goes with it
+        return kiln::boot::refuse(out, issue, r.mod, r.kind, r.key, r.what());
+    }
     LOGI("assets: boot generation %llu prepared: %zu manifest(s), %zu document(s)", static_cast<unsigned long long>(input.generation),
          plan->manifests, plan->documents);
     return kiln::boot::prepared(out, plan, &destroy_boot);
@@ -732,6 +862,51 @@ KilnResult KILN_CALL t_cat_read(KilnHandle h, uint64_t first, KilnBlobCatalogEnt
 }
 KilnResult KILN_CALL t_cat_close(KilnHandle h) { return op_catalog_close(h); }
 
+// texture_rgba (0.2.0-dev.29.15): a texture's pixels, one mip level, as RGBA8 (texture_rgba.h). Kiln.Ui draws the game's own
+// item icons with it; nothing is written anywhere. The pixel blob is read whole (an item icon's chain is 87 KB), without the
+// content map's lazy accessor (the caller is a worker). A level no mip fits (a mod's one-level PNG icon) is scaled down.
+KilnResult KILN_CALL t_tex_rgba(const KilnAssetKey* k, uint32_t min_side, uint8_t* rgba, size_t cap, uint32_t* out_w, uint32_t* out_h) {
+    if (out_w) *out_w = 0;
+    if (out_h) *out_h = 0;
+    if (!k || (cap && !rgba)) return KILN_ERR_INVALID_ARGUMENT;
+    if (!resources_on()) return KILN_ERR_UNAVAILABLE;
+    std::vector<uint8_t> rb(256);
+    size_t rn = 0;
+    KilnResult rr = op_resource_read(k, rb.data(), rb.size(), &rn);
+    if (rr == KILN_ERR_BUFFER_TOO_SMALL && rn <= (1u << 20)) {
+        rb.resize(rn);
+        rr = op_resource_read(k, rb.data(), rb.size(), &rn);
+    }
+    if (rr != KILN_OK) return rr == KILN_ERR_BUFFER_TOO_SMALL ? KILN_ERR_INVALID_ARGUMENT : rr;
+    tex::Desc d;
+    if (!tex::describe(k->type, rb.data(), rn, &d) || !tex::supported(d.format)) return KILN_ERR_INVALID_ARGUMENT;
+    uint32_t lw = 0, lh = 0, ow = 0, oh = 0;
+    const uint32_t level = tex::pick_level(d, min_side);
+    const size_t at = tex::level_offset(d, level, &lw, &lh), need = tex::level_bytes(d.format, lw, lh);
+    tex::fit_size(lw, lh, min_side, &ow, &oh);
+    if (out_w) *out_w = ow;
+    if (out_h) *out_h = oh;
+    if (!rgba || cap < static_cast<size_t>(ow) * oh * 4) return KILN_ERR_BUFFER_TOO_SMALL;
+    if (at + need > d.blob_size() || d.blob_size() > (64u << 20)) return KILN_ERR_INVALID_ARGUMENT;  // the resource does not add up
+    std::vector<uint8_t> blob(d.blob_size());
+    KilnContentHash h;
+    std::memcpy(&h, d.hash, 16);
+    size_t got = 0;
+    const KilnResult br = op_blob_read(&h, blob.data(), blob.size(), &got, /*resident=*/true);
+    if (br != KILN_OK) return br == KILN_ERR_INTERNAL ? KILN_ERR_INTERNAL : KILN_ERR_NOT_FOUND;
+    if (got < at + need) return KILN_ERR_NOT_FOUND;
+    if (ow == lw && oh == lh) return tex::decode(d.format, lw, lh, blob.data() + at, got - at, rgba) ? KILN_OK : KILN_ERR_NOT_FOUND;
+    std::vector<uint8_t> level_px(static_cast<size_t>(lw) * lh * 4);
+    if (!tex::decode(d.format, lw, lh, blob.data() + at, got - at, level_px.data())) return KILN_ERR_NOT_FOUND;
+    tex::downscale_box(level_px.data(), lw, lh, rgba, ow, oh);
+    return KILN_OK;
+}
+
+// blob_read_resident (0.2.0-dev.29.15): blob_read without the content map's lazy accessor, for callers off the game's threads.
+KilnResult KILN_CALL t_blob_read_resident(const KilnContentHash* h, void* b, size_t c, size_t* n) {
+    return op_blob_read(h, b, c, n, /*resident=*/true);
+}
+
 const KilnAssetsApi kTable = {
     {sizeof(KilnAssetsApi), KILN_ASSETS_VERSION},
     &t_icon_png, &t_icon_file, &t_icon_remove, &t_icon_state,
@@ -745,6 +920,12 @@ const KilnAssetsApi kTable = {
     &t_when_ready,
     &t_blob_add_ex, &t_blob_over_ex,  // since 0.2.0-dev.28
     &t_cat_open, &t_cat_read, &t_cat_close,
+    &t_tex_rgba,  // since 0.2.0-dev.29.15
+    &t_blob_read_resident,
+};
+
+const KilnAssetsVfxApi kVfxTable = {
+    {sizeof(KilnAssetsVfxApi), KILN_ASSETS_VFX_VERSION}, &op_vfx_budget, &op_vfx_set_capacity, &op_vfx_resource_put,
 };
 
 // ---- control commands: kiln/control/assets.cmd -> assets.result.json (handled by the core's console) ------------
@@ -753,11 +934,12 @@ const KilnAssetsApi kTable = {
 // core hook we do not own, so the dump is reachable through C# and through the table's dump() for the models worker.
 
 void KILN_CALL on_ready(void*) {
+    const bool boot_profile = kiln::boot::collect(g_api, g_self, "assets", &prepare_boot, nullptr);
     // The resource system may already be up (services load after the game's early init on the client); try to bind.
     if (uintptr_t S = g_S.load()) on_resource_system_ready(S);
     // Load every mod's assets.json now, before the UI builds, so boot-time icons are served from the first frame. A boot
     // profile (chapter 08) loads them in kiln.boot's prepare instead, after OnBoot, still before the game's entry point.
-    if (kiln::boot::collect(g_api, g_self, "assets", &prepare_boot, nullptr))
+    if (boot_profile)
         LOGI("assets: boot profile: the mods' assets.json load with the boot generation");
     else
         load_profile_manifests();
@@ -777,6 +959,8 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     if (api->abi_version != KILN_ABI_VERSION || api->size < sizeof(KilnApi)) return KILN_ERR_UNAVAILABLE;
     g_api = api;
     g_self = owner;
+    if (!catalog_start())
+        LOGW("assets: blob catalog off: native owner cleanup is unavailable (a revoked owner's registrations stay until revert_owner)");
     info->id = KilnStr{KILN_ASSETS_SERVICE, sizeof(KILN_ASSETS_SERVICE) - 1};
     info->version = KilnStr{"1", 1};
     info->on_ready = &on_ready;
@@ -784,6 +968,19 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     KilnBuildInfo bi{sizeof bi};
     api->build_info(&bi);
     g_client = bi.side == KILN_SIDE_CLIENT;
+    // Census only the original metadata; loader additions are accounted again against the actual type
+    // enumeration at bind/list time. Never read the executable or infer a larger capacity from options.
+    const std::string game_dir = api_path(KILN_PATH_GAME);
+    fs::path archive = game_dir.empty() ? fs::path{} : fs::path(widen(game_dir)) / (g_client ? L"enshrouded.kfc" : L"enshrouded_server.kfc");
+    fs::path original = archive;
+    original += L".bak";
+    std::error_code ec;
+    if (!game_dir.empty() && (fs::exists(original, ec) || ec)) archive = original;
+    int64_t capacity = 0;
+    constexpr char cap_name[] = "caps/vfx.map_limit_request";
+    if (api->constant(KilnStr{cap_name, sizeof cap_name - 1}, &capacity) != KILN_OK || capacity <= 0 || capacity > (1 << 20))
+        capacity = 2048;
+    vfx_preflight_start(archive.wstring(), static_cast<uint32_t>(capacity));
     if (!bi.hooks_enabled) {
         LOGI("assets: hooks disabled (safe idle); service unavailable");
         // still publish the table so managed code sees "unavailable" cleanly via each op's checks
@@ -799,5 +996,7 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
             LOGW("assets: resources unavailable: %s", why.c_str());
         }
     }
-    return api->register_service(owner, KilnStr{KILN_ASSETS_SERVICE, sizeof(KILN_ASSETS_SERVICE) - 1}, &kTable);
+    KilnResult rc = api->register_service(owner, KilnStr{KILN_ASSETS_SERVICE, sizeof(KILN_ASSETS_SERVICE) - 1}, &kTable);
+    if (rc != KILN_OK) return rc;
+    return api->register_service(owner, KilnStr{KILN_ASSETS_VFX_SERVICE, sizeof(KILN_ASSETS_VFX_SERVICE) - 1}, &kVfxTable);
 }

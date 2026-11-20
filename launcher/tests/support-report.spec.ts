@@ -1,5 +1,6 @@
-// The support report block on Logs (docs/kiln/launcher/support-report.md): "Save report..." and "Copy summary" in the
-// browser mock (no file dialog there: the mock answers report_save with the default name).
+// The support report block on Logs (docs/kiln/launcher/support-report.md): "Save report..." (through "What's in this
+// report": tests/report-contents.spec.ts) and "Copy summary" in the browser mock (no file dialog there: the mock answers
+// report_save with the default name).
 import { expect, test, type Page } from "@playwright/test";
 
 async function desktop(page: Page, route: string) {
@@ -14,6 +15,7 @@ test("Logs offers the support report: save it, copy the summary", async ({ page,
   await expect(block).toContainText("Support report");
   await expect(block).toContainText("paths and server addresses are replaced");
   await block.getByRole("button", { name: "Save report..." }).click();
+  await page.getByTestId("krc-save").click();
   await expect(page.locator(".k-toasts")).toContainText("Report saved");
   await expect(page.locator(".k-toasts")).toContainText(/kiln-report-\d{4}-\d{2}-\d{2}\.zip/);
   await block.getByRole("button", { name: "Copy summary" }).click();

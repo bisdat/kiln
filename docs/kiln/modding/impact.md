@@ -236,6 +236,51 @@ kiln.abilities states the same contract from the runtime side in docs/kiln/servi
   ```
   The C# side registers the same name, e.g. `Abilities.Natives.Register("Chill", argc: 2, handler)`; a name without
   the `<modid>.` prefix gets the calling mod's id.
+  A synchronous native (`Abilities.Natives.RegisterSync`, since 0.2.0-dev.29) answers inside the call. Its entry says
+  `"sync": true`, and then its argument types bind: one `"type"` per argument (or `"any"`) and its `"size"`; the cook
+  and kiln.abilities refuse a program that passes another type (`E_ARGTYPE`), and kiln.abilities checks every call
+  (0x2C, 0x18 for a required argument left unconnected). An entry without `"sync"` declares the argc only, as before:
+  ```json
+  { "name": "mymod.OnHit", "sync": true, "args": [
+      { "name": "target", "type": "ecs.EntityId", "size": 4 },
+      { "name": "attackMod", "type": "float32", "dir": "inout", "size": 4 } ] }
+  ```
+- **`[ImpactNative]` methods** (since 0.2.0-dev.29, needs `Abilities` in `KilnServices`): a static method is the
+  whole native. The build generates its thunk, its registration (through `RegisterSync`, in the mod's first tick), its
+  typed entry in the output's `impact/natives.json` (with the mod id in front of the name; an entry of the same name
+  that you wrote by hand is replaced, warning KILN037) and a `NativeRef` field `Natives.<Name>` in the method's
+  namespace (`FullName`, `HashFor(modId)`, `Registration`):
+  ```csharp
+  [ImpactNative("OnHit")]
+  public static bool OnHit(in NativeContext ctx, EntityId target, ref float attackMod)
+  {
+      attackMod *= 1.5f;            // written into the program's variable at once
+      return !target.IsNone;        // what the ECALL pushes
+  }
+  ```
+  Parameters, `args[0]` first: `int` (sint32), `uint` (uint32), `float` (float32), `bool`, `TimeSpan` (Time),
+  `EntityId` (ecs.EntityId), `Vector3` (float3), `DamageSetup` (impact.DamageSetup, 52 bytes); `ref` = in and out (a
+  live view of the variable; a `TimeSpan` is copied in and, when changed, copied back after the method, also when it
+  throws, and two `ref TimeSpan` arguments naming one variable share one copy), `out` = out; `Optional<T>` for one the
+  program may leave not connected; `[Raw] uint` for one it may pass as a literal. An optional first `NativeContext`
+  (`in` or by value) gives the call's `Self`, `Program`, `Site`, `ImpactId`. The return type is `bool`, `byte` or
+  `void` (pushes 1). A shape the generator cannot make is a build error: KILN170 (not static, generic, a bad name),
+  KILN171 (a parameter type no native takes), KILN172 (the return type), KILN173 (a name used twice); the build task refuses a full name ("<modid>.<Name>") over 90 bytes of UTF-8, the
+  runtime's limit (KILN036); KILN174 warns
+  when the project does not reference a Kiln.Abilities that has `ImpactNativeAccess`. The KilnImpactNatives build task
+  reads the compiled assembly without loading it; KILN036 is an error when it cannot read or write. The cook then
+  checks your programs against the generated types (`impact.py asm … --natives <output>/impact/natives.json`). The
+  method runs as a `RegisterSync` handler does: inside the program's call, no tick-thread API, no blocking. Lab
+  (`mods/tests/natives-gen-test`, a mod built this way): `PASS before its natives registered, a program passing
+  float32 to Twice's int parameter is refused from the build's impact/natives.json`, `PASS the cooked program calling
+  the generated Twice answers in its start step`, `PASS a loop over 5 targets with a generated native finishes in 1
+  step`, `PASS types sint32/float32/bool/Time/EntityId/float3 round trip through generated natives`. A whole mod built
+  this way: `mods/samples/FrostMark` (a sword's additional hit effect runs its native first, `EffectBlock.Run` in
+  docs/kiln/modding/blocks.md). Run binds by name and checks each parameter's type and byte size against what it binds; the
+  `attackMod`, `damage` and `position` it binds are the effect's own hit's (its target position; a changed position moves that
+  hit), not the weapon strike's; a JSON `"run"` needs the native declared `"sync": true` with a matching `argc` (what this
+  generator writes). Guided check `06c-impact-damage` asserts the matching Ice-10 damage events and their attackMod 1 / 1.5; the
+  player judges the extra ice number on screen (crits and rounding move it; fresh targets when a hurt one dies early).
 - **Built-ins** (mod id `kiln`; neither suspends; both push 1):
   - `kiln.Log(value)` (`0xc0b137a7`): writes a kiln.log line with the program, instance, entity, site and the value
     (typed by its variable, or a raw integer).
@@ -405,6 +450,9 @@ again:  pop
 ## Testing
 - **Offline:** `impact.py lint`, `impact.py cook`, and `python3 -m unittest discover -s tools/impact/tests` (synthetic
   only).
+- **Your natives in a unit test** (since 0.2.0-dev.29): Kiln.TestKit's fake kiln.abilities runs a mod's `[ImpactNative]`
+  methods, `RegisterSync` natives and attachments, and the test makes the ECALLs (`kiln.ImpactNatives.Call`):
+  docs/kiln/modding/unit-tests.md#impact-natives. `ImpactNativesFakeTests` runs FrostMark that way.
 - **Local check against the installed game:** `impact.py roundtrip`. Every vanilla program must round-trip, and
   listings go to `$KILN_OUT/dis/` (do not commit them).
 - **Lab, no player needed:** `tools/impact/lab/run.sh <lab>` cooks a boot-time override of the Fireball explosion

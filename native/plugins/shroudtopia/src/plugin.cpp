@@ -5,7 +5,8 @@
 //   - one loader thread: wait "bootDelay" ms, then every "updateDelay" ms: reload shroudtopia.json when it changed;
 //     while "active", look for new mod DLLs; Load each new mod that supports this side; Activate / Update /
 //     Deactivate each loaded mod by "mods.<mod name>.active";
-//   - mods: the active profile's "shroudtopia" entries (a mod folder or a DLL), then <game>/mods/<name>/ folders with
+//   - mods: the active profile's "shroudtopia" entries (a mod folder or a DLL), the Shroudtopia module of its "eml"
+//     entries (an EML mod may ship one beside its Lua: Skill Search), then <game>/mods/<name>/ folders with
 //     a mod.json and <game>/mods/*.dll (compat.h's profile rule). Unlike Shroudtopia, a DLL is loaded only when its
 //     file exports CreateModInstance, so other loaders' DLLs in mods/ (Flame, EML packages) are never run by it;
 //   - each call into a mod runs under a fault guard: a mod that faults is switched off, the game runs on;
@@ -20,6 +21,9 @@
 
 #include "shroudtopia_internal.h"
 #include "../../compat/module_watch.h"
+#include "../../compat/first_pass.h"
+#include "../../compat/export_cache.h"
+#include "own_loader.h"
 
 #include <psapi.h>
 
@@ -37,6 +41,8 @@ using kcompat::to_wide;
 using CreateModFn = Mod* (*)();
 
 struct Loaded {
+    HMODULE module = nullptr;
+    bool original_prepared = false;
     fs::path dll;
     std::string origin;  // "profile" or "folder"
     std::string name;    // GetMetaData().name: the key in shroudtopia.json "mods"
@@ -45,10 +51,33 @@ struct Loaded {
     bool client = false, server = false;
     Mod* mod = nullptr;
     bool loaded = false, active = false;  // snapshots read only under the foreign-code guard
-    std::string status = "registered";  // registered, loaded, active, inactive, skipped, faulted, own-loader
+    bool activate_repeats = false;    // the mod left its `active` flag off after Activate: said once (update_mods)
+    bool deactivate_repeats = false;  // the mod left it on after Deactivate: said once
+    // registered, loaded, active, activating (switched on, the mod does not report itself active), inactive, skipped,
+    // faulted, own-loader
+    std::string status = "registered";
     std::string reason;
     uint64_t updates = 0;
 };
+
+// Upstream Shroudtopia (s0t7x/shroudtopia) calls its mod interface 0.0.x and 0.1.x (the header has not changed since
+// 0.0.3; its main branch is 0.1.1), and the 1.0 compatibility release has the same header: those are what Kiln
+// provides. Another number is another build of Shroudtopia (the Shroudweave fork calls itself 0.2.x), whose loader may
+// hand a mod something Kiln does not.
+bool known_target(const std::string& target) {
+    return target.empty() || target.rfind("0.0.", 0) == 0 || target.rfind("0.1.", 0) == 0 || target.rfind("1.0", 0) == 0;
+}
+
+// Why a mod that is switched on reads "activating" and not "active".
+std::string not_active_reason(const Loaded& m) {
+    std::string why = "switched on, but the mod does not report itself active: it leaves its own 'active' flag off after "
+                      "Activate, so Activate is called again on every update, as Shroudtopia's own loader does. Its "
+                      "activation may be failing on this game version";
+    if (!known_target(m.target))
+        why += "; it says it targets Shroudtopia " + m.target + ", and Kiln provides Shroudtopia " + std::string(kShroudtopiaVersion) +
+               "'s mod interface: a mod made for another build of Shroudtopia may need something Kiln does not provide yet";
+    return why;
+}
 
 ModContext* g_ctx = nullptr;
 std::mutex g_mu;  // g_mods, g_seen (the loop thread writes, write_status reads)
@@ -57,6 +86,9 @@ std::set<std::wstring> g_seen;           // DLL paths already handled (loaded, o
 std::map<std::wstring, std::string> g_refused;  // path -> reason, for the status file
 std::string g_stepped_aside;
 kcompat::EnginePlan g_plan;
+// The profile's EML entries: an EML mod may ship a Shroudtopia module beside its Lua (Skill Search draws its search
+// box with one, the In Game Ping System its markers). The EML part is EML's (or ShroudForge's); the module is ours.
+kcompat::EnginePlan g_eml_plan;
 fs::path g_game, g_state;
 bool g_server = false;
 std::atomic<uint64_t> g_cycles{0};
@@ -64,6 +96,7 @@ HANDLE g_stop = nullptr, g_worker = nullptr;
 std::atomic<bool> g_unloading{false};
 bool g_foreign_started = false;
 bool g_handoff = false;
+kiln::first_pass::Channel g_first_pass;
 
 std::string own_loader_in_process();
 // While standing aside: the profile's entries that kiln-shroudtopia did not register, with what happens to each
@@ -86,6 +119,7 @@ bool observe_own_loader() {
         g_stepped_aside = reason;
     }
     g_handoff = true;
+    g_first_pass.bypass();
     loader_log(KILN_LOG_WARN, "kiln-shroudtopia steps aside: " + reason +
         (g_foreign_started ? "; stopping scheduling; already-installed mod hooks remain mapped" : "; no mod was started"));
     report_aside();
@@ -121,7 +155,7 @@ void write_status() {
                 {"mods", mods},
                 {"refused", refused}};
     const auto file = g_state / L"shroudtopia.json";
-    if (!kcompat::write_file_atomic(file, doc.dump(2) + "\n")) H.logf(KILN_LOG_WARN, "cannot write %s", path_utf8(file).c_str());
+    if (!kcompat::write_status_file(file, doc.dump(2) + "\n")) H.logf(KILN_LOG_WARN, "cannot write %s", path_utf8(file).c_str());
 }
 
 // ---- fault guards around every call into a mod ----
@@ -183,6 +217,10 @@ struct Candidate {
     std::string origin;
 };
 
+// Whether a candidate DLL exports CreateModInstance, per version of the file (export_cache.h): the loop looks every
+// updateDelay, and a DLL that did not change is not read again.
+kcompat::ExportCache g_exports;
+
 bool folder_dll(const fs::path& dir, const std::string& id_hint, Candidate* out, std::string* why) {
     std::string text;
     json manifest = json::object();
@@ -201,9 +239,11 @@ bool folder_dll(const fs::path& dir, const std::string& id_hint, Candidate* out,
         return false;
     }
     fs::path dll;
+    // CheckedDll::open's checks: the path on every look, the export table once per version of the file
     auto is_mod_dll = [&](const fs::path& f) {
-        kcompat::CheckedDll checked;
-        return checked.open(dir, f, "CreateModInstance");
+        kcompat::CheckedPath checked;
+        return checked.open(dir, f, true) &&
+               g_exports.exports(f, "CreateModInstance", [](const fs::path& p, std::string_view name) { return kcompat::pe_exports_name(p, name); });
     };
     if (kcompat::exists(named) && is_mod_dll(named)) {
         dll = named;
@@ -260,6 +300,17 @@ std::vector<Candidate> scan() {
         } else {
             add_dll_file(r.path, r.path.parent_path(), r.id, "profile");
         }
+    }
+    // the Shroudtopia module of an EML entry of the profile (the folder scan below finds it only with drop-ins on)
+    for (const auto& r : g_eml_plan.listed) {
+        std::error_code ec;
+        if (!r.enabled || !fs::is_directory(r.path, ec) || kcompat::exists(r.path / L"flame.json")) continue;
+        Candidate c;
+        if (!folder_dll(r.path, r.id, &c, nullptr)) continue;  // an EML mod without a module: nothing of ours
+        if (profile_ids.count(kcompat::lower(c.id))) continue;
+        c.origin = "profile-eml";
+        profile_ids.insert(kcompat::lower(c.id));
+        out.push_back(std::move(c));
     }
     if (!g_plan.read_folder) return out;
     const fs::path mods = g_game / L"mods";
@@ -419,6 +470,7 @@ void check_and_load() {
             g_refused[key] = why;
             continue;  // never FreeLibrary: its DllMain may have started something
         }
+        m->module = h;
         m->mod = inst;
         m->name = meta.name;
         m->version = meta.version;
@@ -426,14 +478,28 @@ void check_and_load() {
         m->target = meta.targetShroudtopiaVersion;
         m->client = meta.hasClientSupport;
         m->server = meta.hasServerSupport;
-        if (!m->target.empty() && m->target.rfind("0.", 0) != 0)
-            H.logf(KILN_LOG_WARN, "%s targets Shroudtopia %s; this is %s", m->name.c_str(), m->target.c_str(), kShroudtopiaVersion);
+        if (!known_target(m->target))
+            H.logf(KILN_LOG_WARN, "%s targets Shroudtopia %s; Kiln provides Shroudtopia %s's mod interface", m->name.c_str(),
+                   m->target.c_str(), kShroudtopiaVersion);
         loader_log(KILN_LOG_INFO, "Registered mod: " + m->name + " " + m->version + " by " + m->author + " (" + m->origin + ", " +
                                       path_utf8(c.dll) + ")");
+        config::ensure_profile_entry(m->name, m->origin == "profile" || m->origin == "profile-eml");
         g_ctx->registeredMods[path_utf8(c.dll)] = inst;  // as Shroudtopia: keyed by the DLL path (only this thread writes)
         std::lock_guard lock(g_mu);
         g_mods.push_back(std::move(m));
     }
+}
+
+void prepare_original_code(Loaded& m) {
+    if (m.original_prepared) return;
+    m.original_prepared = true;
+    if (!m.module) return;
+    const auto* rules = H.service<kiln::compat::OriginalCodeApi>(kiln::compat::kOriginalCodeService, kiln::compat::kOriginalCodeVersion);
+    if (!rules) return;
+    const std::string rule(kcompat::sv(rules->rule(kcompat::kstr("shroudtopia:" + m.id))));
+    if (rule.empty() || !original::install(m.module, rules)) return;
+    H.logf(KILN_LOG_INFO, "shroudtopia: %s sees the game's original code when it checks a hooked function (compat rule %s)",
+           m.id.c_str(), rule.c_str());
 }
 
 void drive(Loaded& m, const char* what, std::function<void()> call) {
@@ -470,6 +536,7 @@ void update_mods() {
                 loader_log(KILN_LOG_INFO, m->name + ": " + m->reason);
                 continue;
             }
+            prepare_original_code(*m);
             loader_log(KILN_LOG_INFO, "Loading mod: " + m->name);
             drive(*m, "Load", [&] { m->mod->Load(g_ctx); m->mod->loaded = true; });
             if (m->status == "faulted") continue;
@@ -482,21 +549,50 @@ void update_mods() {
         set_current_mod(m->name);
         const json v = config::mod_get(m->name.c_str(), "active");
         const bool should = v.is_boolean() && v.get<bool>();
+        // As Shroudtopia's UpdateMods (dllmain.cpp, the same in 0.1.1 and on main): Activate is called whenever the
+        // setting is on and the mod's own `active` field is off, Deactivate whenever the setting is off and the field
+        // is on, and the loader never writes that field (only `loaded`). A mod that does not keep the field is
+        // therefore activated (or deactivated) again on every update, there and here: Kiln keeps the calls, says so
+        // once instead of once per update, and does not report such a mod as switched off.
         if (should) {
             if (!m->active) {
-                loader_log(KILN_LOG_INFO, "Activating: " + m->name);
+                if (!m->activate_repeats) loader_log(KILN_LOG_INFO, "Activating: " + m->name);
                 drive(*m, "Activate", [&] { m->mod->Activate(g_ctx); });
                 if (m->status == "faulted") continue;
+                if (!m->active && !m->activate_repeats) {
+                    m->activate_repeats = true;
+                    m->reason = not_active_reason(*m);
+                    loader_log(KILN_LOG_WARN, m->name + ": " + m->reason);
+                }
             }
+            if (m->active && m->activate_repeats) {
+                m->activate_repeats = false;
+                m->reason.clear();
+                loader_log(KILN_LOG_INFO, m->name + " reports itself active now");
+            }
+            m->deactivate_repeats = false;
             drive(*m, "Update", [&] { m->mod->Update(g_ctx); });
             if (m->status == "faulted") continue;
             ++m->updates;
-        } else if (m->active) {
-            loader_log(KILN_LOG_INFO, "Deactivating: " + m->name);
-            drive(*m, "Deactivate", [&] { m->mod->Deactivate(g_ctx); });
-            if (m->status == "faulted") continue;
+        } else {
+            if (m->activate_repeats) {
+                m->activate_repeats = false;
+                m->reason.clear();
+            }
+            if (m->active) {
+                if (!m->deactivate_repeats) loader_log(KILN_LOG_INFO, "Deactivating: " + m->name);
+                drive(*m, "Deactivate", [&] { m->mod->Deactivate(g_ctx); });
+                if (m->status == "faulted") continue;
+                if (m->active && !m->deactivate_repeats) {
+                    m->deactivate_repeats = true;
+                    loader_log(KILN_LOG_WARN, m->name + ": switched off, but the mod leaves its own 'active' flag on after "
+                                              "Deactivate, so Deactivate is called again on every update, as Shroudtopia's "
+                                              "own loader does");
+                }
+            }
+            if (!m->active) m->deactivate_repeats = false;
         }
-        m->status = m->active ? "active" : "inactive";
+        m->status = m->active ? "active" : should ? "activating" : "inactive";
         set_current_mod({});
     }
 }
@@ -539,6 +635,7 @@ void loop() {
             if (g_handoff || WaitForSingleObject(g_stop, 0) == WAIT_OBJECT_0) break;
             update_mods();
         }
+        g_first_pass.done();
         ++g_cycles;
         const uint64_t now = GetTickCount64();
         if (now - last_status > 5000) {
@@ -553,46 +650,13 @@ DWORD WINAPI thread_main(void*) {
     DWORD code = 0;
     if (!guarded([] { loop(); }, &code))
         loader_log(KILN_LOG_ERROR, "Loader worker stopped after a fault (" + fault_text(code) + ")");
+    g_first_pass.bypass();  // stopped or faulted: no more startup work can complete
     if (g_unloading) stop_memory();
     write_status();
     return 0;
 }
 
-// Shroudtopia's loader in this process: shroudtopia.dll (its winmm.dll proxy loads it by that name), or a winmm.dll
-// from the game folder carrying Shroudtopia's or Shroudweave's name.
-std::string own_loader_in_process() {
-    HMODULE modules[2048]{};
-    DWORD needed = 0;
-    if (!K32EnumProcessModules(GetCurrentProcess(), modules, sizeof modules, &needed)) return {};
-    const auto count = std::min<size_t>(needed / sizeof(HMODULE), std::size(modules));
-    for (size_t i = 0; i < count; ++i) {
-        if (modules[i] == GetModuleHandleW(nullptr)) continue;
-        wchar_t p[32768]{};
-        const auto n = GetModuleFileNameW(modules[i], p, static_cast<DWORD>(std::size(p)));
-        if (!n || n == std::size(p)) continue;
-        const fs::path file(p);
-        // Wine's builtin winmm.dll reports a game-folder winmm.dll's path without running that file.
-        if (!kcompat::module_is_file(modules[i], file)) continue;
-        if (kcompat::kiln_own_module(modules[i], file)) continue;  // Kiln's proxy and plugins name every engine
-        if (kcompat::lower(path_utf8(file.filename())) == "shroudtopia.dll" &&
-            !kcompat::pe_exports_name(file, "CreateModInstance"))
-            return "Shroudtopia's loader is loaded (" + to_utf8(p) + ")";
-        std::error_code ec;
-        const bool game = fs::equivalent(file.parent_path(), g_game, ec);
-        const bool chain = fs::equivalent(file.parent_path(), g_game / L"kiln" / L"chain", ec);
-        if (!game && !chain) continue;
-        // Exclude our own plugin and mods with the API strings; a loader is a process-level proxy, not a
-        // CreateModInstance-exporting mod. Chain DLLs may be renamed, so inspect every eligible module path.
-        if (modules[i] == GetModuleHandleW(L"kiln-shroudtopia.dll") ||
-            kcompat::pe_exports_name(file, KILN_PLUGIN_MAIN) || kcompat::pe_exports_name(file, "CreateModInstance")) continue;
-        std::string d;
-        kcompat::read_file(p, &d);
-        const std::string l = kcompat::lower(d);
-        if (l.find("shroudtopia") != std::string::npos || l.find("shroudweave") != std::string::npos)
-            return "a Shroudtopia loader proxy is loaded (" + to_utf8(p) + ")";
-    }
-    return {};
-}
+std::string own_loader_in_process() { return kshroud::own_loader_in_process(g_game); }
 
 void report_aside() {
     std::set<std::string> registered;
@@ -633,12 +697,17 @@ void note_idle_loader() {
 // <game>/mods (top level or one folder down). Without any, the plugin stays idle: no loop thread, no settings file.
 bool anything_to_load() {
     if (!g_plan.listed.empty()) return true;
-    if (!g_plan.read_folder) return false;
-    if (kcompat::exists(g_game / L"shroudtopia.json")) return true;
     std::error_code ec;
     auto is_mod_dll = [](const fs::path& f) {
         return kcompat::lower(to_utf8(f.extension().wstring())) == ".dll" && kcompat::pe_exports_name(f, "CreateModInstance");
     };
+    for (const auto& r : g_eml_plan.listed) {
+        if (!r.enabled || !fs::is_directory(r.path, ec) || kcompat::exists(r.path / L"flame.json")) continue;
+        for (const auto& f : fs::directory_iterator(r.path, ec))
+            if (is_mod_dll(f.path())) return true;
+    }
+    if (!g_plan.read_folder) return false;
+    if (kcompat::exists(g_game / L"shroudtopia.json")) return true;
     for (const auto& e : fs::directory_iterator(g_game / L"mods", ec)) {
         if (is_mod_dll(e.path())) return true;
         if (!e.is_directory(ec) || !kcompat::exists(e.path() / L"mod.json") || kcompat::exists(e.path() / L"flame.json")) continue;
@@ -649,10 +718,12 @@ bool anything_to_load() {
 }
 
 void KILN_CALL on_ready(void*) {
+    g_first_pass.open(false);
     g_game = H.path(KILN_PATH_GAME);
     g_state = H.state_dir();
     g_server = H.api->side() == KILN_SIDE_SERVER;
     g_plan = kcompat::plan_engine(H, "shroudtopia");
+    g_eml_plan = kcompat::plan_engine(H, "eml");
     if (!anything_to_load() && own_loader_in_process().empty()) {
         H.logf(KILN_LOG_INFO, "kiln-shroudtopia %s: no Shroudtopia mods (%s); idle until the next start", kPluginVersion, g_plan.note.c_str());
         return;
@@ -663,6 +734,7 @@ void KILN_CALL on_ready(void*) {
     g_stepped_aside = own_loader_in_process();
     if (!g_stepped_aside.empty()) {
         H.logf(KILN_LOG_WARN, "kiln-shroudtopia steps aside: %s; the Shroudtopia mods are its to load", g_stepped_aside.c_str());
+        g_first_pass.bypass();
         report_aside();
         write_status();
         return;
@@ -686,8 +758,10 @@ void KILN_CALL on_ready(void*) {
         loader_log(KILN_LOG_ERROR, "Cannot pin the compatibility runtime; no mods were started");
         return;
     }
+    g_first_pass.begin();
     g_stop = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     if (!g_stop || !(g_worker = CreateThread(nullptr, 0, &thread_main, nullptr, 0, nullptr))) {
+        g_first_pass.bypass();
         loader_log(KILN_LOG_ERROR, "Cannot create the loader worker; no mods were started");
         if (g_stop) CloseHandle(g_stop), g_stop = nullptr;
     }
@@ -696,6 +770,7 @@ void KILN_CALL on_ready(void*) {
 
 void KILN_CALL on_unload(void*) {
     g_unloading = true;
+    g_first_pass.stop();
     if (g_stop) SetEvent(g_stop);
     if (g_worker && WaitForSingleObject(g_worker, 1000) != WAIT_OBJECT_0) {
         // A foreign entry point can block indefinitely. Do not unmap its API or revoke its trampolines while it

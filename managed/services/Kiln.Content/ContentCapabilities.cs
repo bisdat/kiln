@@ -21,9 +21,30 @@ internal static unsafe class ContentCaps
     /// <summary>Kiln.Content's own row: this kiln.content sets references (<see cref="ContentEntry.SetRef"/>, table v4).</summary>
     public const string References = "content.references";
 
+    /// <summary>Kiln.Content's own row: typed gear values (<see cref="Content.Gear(string)"/>) and the data packs' "gear" section
+    /// (since 0.2.0-dev.29.19). Off only without kiln.content; "gearRules" also need <c>mods.boot.resource_patches</c>.</summary>
+    public const string Gear = Content.GearCapability;
+
     /// <summary>Kiln.Content's session row: the registries are loaded and the data packs applied
     /// (<see cref="Content.Ready"/>).</summary>
     public const string Ready = "content.ready";
+
+    /// <summary>kiln.gamedata's buff budget (<see cref="GameDataRegistry.GetBudget"/>; native row, since 0.2.0-dev.29).</summary>
+    public const string BuffBudget = "gamedata.buff_budget";
+
+    /// <summary>Result-bearing buff definitions and their receipts (<see cref="GameDataRegistry.Define(GameDataClone, DefinitionRegistrationOptions)"/>,
+    /// <see cref="GameDataRegistry.GetRegistration"/>; native row, since 0.2.0-dev.29).</summary>
+    public const string BuffRegistration = "gamedata.buff_registration";
+
+    /// <summary>The 4,096-clone buff room is reserved (native session row, since 0.2.0-dev.29).</summary>
+    public const string ExpandedBuffRoom = "gamedata.expanded_buff_room";
+
+    /// <summary>The game's own texts (<see cref="Content.Text(uint)"/>; native session row, since 0.2.0-dev.29.18). kiln.content
+    /// reports it; this file only when its table is missing or older.</summary>
+    public const string Text = Content.TextCapability;
+
+    /// <summary>Why the row is off with a kiln.content from before the game-text slots.</summary>
+    public const string TextOlder = "this kiln.content has no game-text lookup (0.2.0-dev.29.18; update Kiln)";
 
     /// <summary>The server-side sigdb features kiln.content serves.</summary>
     public static readonly string[] Features =
@@ -39,8 +60,20 @@ internal static unsafe class ContentCaps
         var t = Content.T;
         if (t == null) ServiceCaps.LowerFeatures(Service, Features);
         if (Content.GD == null) ServiceCaps.LowerFeatures(GameData, Clones, "gamedata.buff_lookup");
+        // kiln.gamedata reports these with its table; missing or older, nobody would: say why here
+        if (GameDataNative.Buffs(Content.GD) == null)
+        {
+            var (reason, text) = Content.GD == null
+                ? (CapabilityReason.ServiceMissing, "kiln.gamedata is not loaded")
+                : (CapabilityReason.ServiceOlder, "this kiln.gamedata has no buff budget or result-bearing buff definitions (update Kiln)");
+            foreach (var row in (string[])[BuffBudget, BuffRegistration, ExpandedBuffRoom])
+                ServiceCaps.Static(row, false, reason, text, GameData);
+        }
         ServiceCaps.Static(References, t != null && ContentNative.Has(t, 4) && t->SetRef != null, CapabilityReason.ServiceOlder,
             "this kiln.content has no reference support (v4; update Kiln)", Service);
+        // kiln.content reports content.text itself (pending, then available; wrong-side on a server); said here only when it cannot
+        ServiceCaps.Static(Text, t != null && ContentNative.HasText(t), CapabilityReason.ServiceOlder, TextOlder, Service);
+        ServiceCaps.Static(Gear, t != null, CapabilityReason.ServiceMissing, "kiln.content is not loaded", Service);
         ServiceCaps.Session(Ready, Content.Ready, "the registries load with the world's game data; the data packs are applied after that", Service);
     }
 

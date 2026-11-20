@@ -12,9 +12,14 @@
     <InternalsVisibleTo Include="Kiln.Blocks" />
     <InternalsVisibleTo Include="Kiln.Blocks.Tests" />
     <InternalsVisibleTo Include="Kiln.Contract.Tests" />
+    <!-- the item icons' resolver (ItemIcons.cs): a new item's own GUID and the UI texture the game draws for it (ContentNames) -->
+    <InternalsVisibleTo Include="Kiln.Ui" />
+    <InternalsVisibleTo Include="Kiln.Ui.Tests" />
+    <InternalsVisibleTo Include="Kiln.Items.Tests" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../Kiln.Api/Kiln.Api.csproj" Private="false" />
+    <ProjectReference Include="../Kiln.PlayerAnim/Kiln.PlayerAnim.csproj" Private="false" />
     <ProjectReference Include="../Kiln.Items/Kiln.Items.csproj" Private="false" />
     <!-- content sync (ContentSync.cs): the kiln:content channel, client state -->
     <ProjectReference Include="../Kiln.Network/Kiln.Network.csproj" Private="false" />

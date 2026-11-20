@@ -90,18 +90,57 @@ part of a release version (the updater ignores it). After a stable release, rais
 The runtime keeps its own version, `<VERSION>+<yyyymmdd>.<commit>` (bundle.md). In a release folder its zip is named
 after the release: `runtime/kiln-runtime-<release version>.zip`.
 
+### Test builds (the beta channel, 0.2.0-dev.29 on)
+A test build of the next release must sort **below** that release and **above** the one before it, so that a tester is
+offered the final build when it is out. Semver cannot say that with a pre-release suffix: `0.2.0-dev.29-beta.1` and
+`0.2.0-dev.29.beta.1` both sort above `0.2.0-dev.29` (an identifier more, or `29-beta` as text against `29`), and
+`0.2.0-dev.29-beta.1` even sorts above `0.2.0-dev.30` (a text identifier outranks a number). So a test build keeps the
+version of the release it leads to and carries its **beta number** outside the precedence:
+
+| What | A test build (beta 3 of 0.2.0-dev.29) | The final build |
+|---|---|---|
+| The launcher's version (Tauri, the bundles, `VERSION` in the export, the runtime's `0.2.0-dev.29+<date>.<commit>`) | `0.2.0-dev.29` | `0.2.0-dev.29` |
+| Baked in at build time (`KILN_LAUNCHER_CHANNEL`, `KILN_LAUNCHER_BETA`; `build.rs`) | channel `beta`, beta `3` | none (the channel follows the version: dev) |
+| The build's id: the manifest's `version`, the version its updater signature is made for | `0.2.0-dev.29+beta.3` | `0.2.0-dev.29` |
+| The manifest's `kiln` object | `"channel": "beta", "beta": 3` | `"channel": "dev"` |
+| Name of the folder, the files, the tag, the download path | `0.2.0-dev.29-beta.3` (`kiln-0.2.0-dev.29-beta.3/`, `v0.2.0-dev.29-beta.3`) | `0.2.0-dev.29` |
+
+The beta number sits in the id as build metadata (`+beta.3`): semver's precedence ignores it, so the updater's order
+is ours (`selfupdate/feed.rs`, `Build`): **newer version; or the same version with a higher beta number; or the same
+version as a final build** (a final build is above all its test builds). Any other build metadata still never decides.
+The updater's signature check (`requireSignedVersion`) compares the whole id, build metadata included (semver equality),
+so a test build's file can never be offered as another test build or as the final, nor the other way round. Tauri's
+bundler accepts only a numeric build number in the app version (the NSIS installer's file version), which is why the
+launcher itself keeps the plain version and the beta number is baked in. `Channel::of_build` of a test build is beta
+(baked in), never guessed from the version.
+
+| Running | Channel | Offered |
+|---|---|---|
+| release 0.2.0-dev.28 | Release (dev) | 0.2.0-dev.29 when it is out; never a test build |
+| release 0.2.0-dev.28 | Beta | beta 1 of 0.2.0-dev.29 (newer version) |
+| beta 1 of 0.2.0-dev.29 | Beta | beta 2 (same version, higher beta number) |
+| beta 2 of 0.2.0-dev.29 | Beta or Release | the final 0.2.0-dev.29 (same version, final) |
+| the final 0.2.0-dev.29 | Beta | beta 1 of 0.2.0-dev.30; never a late beta of 0.2.0-dev.29 |
+| beta 2 of 0.2.0-dev.29 | Release, with "Switch back to the release" | 0.2.0-dev.28 (lower: only as the switch the player started) |
+
 ## The self-update
 Direct builds only (the Nexus Mods build has none, above).
 - **Sources, in order:** frostdev.io, then GitHub Releases.
 
-  | Channel | frostdev.io | GitHub |
-  |---|---|---|
-  | stable | `https://frostdev.io/kiln/updates/stable/latest.json` | `https://github.com/frostdev-ops/kiln/releases/latest/download/latest.json` |
-  | dev | `https://frostdev.io/kiln/updates/dev/latest.json` | `https://github.com/frostdev-ops/kiln/releases/download/updates-dev/latest.json` |
+  | Channel | In the UI | frostdev.io | GitHub |
+  |---|---|---|---|
+  | stable | "Stable (none yet)", only where chosen | `https://frostdev.io/kiln/updates/stable/latest.json` | `https://github.com/frostdev-ops/kiln/releases/latest/download/latest.json` |
+  | dev | "Release" | `https://frostdev.io/kiln/updates/dev/latest.json` | `https://github.com/frostdev-ops/kiln/releases/download/updates-dev/latest.json` |
+  | beta (0.2.0-dev.29) | "Beta (test builds)" | `https://frostdev.io/kiln/updates/beta/latest.json` | `https://github.com/frostdev-ops/kiln/releases/download/updates-beta/latest.json` |
 
   GitHub's "latest" release skips pre-releases, so the dev channel has a fixed pre-release, `updates-dev`, whose
-  `latest.json` each dev release replaces. Files: `https://frostdev.io/kiln/downloads/<version>/<path in the release
-  folder>` and the GitHub release `v<version>`.
+  `latest.json` each dev release replaces; the beta channel has its own, `updates-beta`. Files:
+  `https://frostdev.io/kiln/downloads/<name>/<path in the release folder>` and the GitHub release `v<name>` (`<name>`:
+  the version, or for a test build `X.Y.Z-dev.N-beta.B`, "Test builds" below).
+  Every public release up to now is a dev build (`X.Y.Z-dev.N`): dev is the release line players have, so the UI calls
+  it "Release" until a stable release exists (`STABLE_RELEASED` in `launcher/src/api/channel.ts`; flip it with the first
+  stable release, then stable is "Release" and dev "Dev builds"). The stored values (`updateChannel` in settings.json)
+  stay `stable`, `dev` and `beta`; a launcher before dev.29 reads `beta` as no choice and follows its own channel.
 - **Fallback:** each source is tried with its own updater (`launcher/src-tauri/src/selfupdate/`). A check takes the
   first source that answers. A download falls back to GitHub when anything fails on frostdev.io: no manifest
   (network, 404, invalid JSON), the download, the signature, or the sha256 the manifest lists. `launcher.log` says
@@ -110,9 +149,20 @@ Direct builds only (the Nexus Mods build has none, above).
   launcher (`plugins.updater.pubkey` in `tauri.conf.json`), and with `requireSignedVersion` the version in the
   signature must equal the version the manifest announces, so an old signed file cannot be offered under a new
   number. A file that fails is never installed, whichever source served it.
-- **Channels:** Settings > Updates. Without a choice, a build follows its own channel: a dev build follows dev, a
-  stable build follows stable. Stable never offers a pre-release; dev offers both, whichever is newer. Nothing is
-  ever downgraded.
+- **Channels:** Settings > Updates > Channel (Release, Beta (test builds)). Without a choice, a build follows its own
+  channel: a dev build follows dev, a stable build stable, a test build beta (baked in). Stable never offers a
+  pre-release; dev offers both, whichever is newer, and never a test build; beta offers test builds and releases, by
+  the order of "Test builds" above. An update is never a downgrade.
+- **Switching (0.2.0-dev.29):** choosing Beta on a release build, or Release on a test build, opens a dialog that says
+  what happens (worlds played with a test build may not load the same way on the release; servers and players must run
+  the same build) and switches now: `update_switch` saves nothing itself (the UI saved `updateChannel` first), downloads
+  the channel's newest build from the same sources in the same order, with the same signature, signed-version, sha256
+  and size checks, puts it in place and offers Restart now. To the beta it takes only a newer build; back to the release
+  line any other build, **also an older one**: the only way the launcher ever goes down, and only as the switch the
+  player started (never a background check, never Update), never to a build other than the one the channel's manifest
+  names (`feed::switch_accepts`). The Beta mark in the header (and under the logo on the Deck) names the test build and
+  is one click back. A .deb, .rpm or development build gets the download page; the Nexus Mods build shows only where
+  test builds are (the download page, a launcher that updates itself) and calls no update command.
 - **Checks:** 8 s after the start and every 6 hours while the launcher runs (Settings > Updates > "Check
   automatically", on by default), and Check now in Settings and About. A check is one GET of a small JSON file: no
   ids, no version in the URL, no cookies, nothing else (the request carries the HTTP library's User-Agent). The
@@ -131,6 +181,53 @@ Direct builds only (the Nexus Mods build has none, above).
 - **After an update:** `<data>/update.json` remembers it, and the next start shows "Updated to <version>". The
   launcher ships a runtime: when it is newer than the game's, "Update game" installs it into the game (the parts the
   game has), held with "Close the game first" while the game runs. Updating the launcher while the game runs is fine.
+- **The game's Kiln after a switch back (0.2.0-dev.29):** a newer Kiln in the game than the launcher's own is left as it
+  is and offers nothing (as before), with one exception: a test build of the launcher writes `kiln-launcher <version>
+  beta <n>` as the receipt's installer, and when such a game meets a launcher that is no test build and ships an older
+  Kiln, `InstallState.switchBack` names both (`kiln_manage::install::switch_back`). The Play page says "This game has
+  Kiln <x> from a test build; Play puts this launcher's Kiln <y> in first", "Updated to" offers Update game, and the
+  next Play (not a vanilla start) installs it first through the ordinary install: the same receipt and backups, the same
+  refusals (the game running, Steam updating, a folder that is not Kiln's). When that fails, the start goes on with the
+  Kiln the game has and says why. A test build itself keeps whatever the game has and offers its own newer Kiln as an
+  update. A release launcher offers only its shipped runtime as an ordinary update, even when a newer test runtime is cached. Other cached bundles remain selectable on Runtime. An unbundled release offers no automatic runtime update. The first switch back of all goes to 0.2.0-dev.28, which has none of this: its Play keeps the beta's Kiln in
+  the game until the player installs dev.28's on Runtime (a dev.28 launcher with a dev.29 Kiln in the game is the case
+  testers should report on).
+
+### Going back from the beta (0.2.0-dev.29)
+What a test build writes that a release build reads, and what the release does with it. "dev.28" is the release a
+first tester goes back to; the same rules hold for any release from dev.29 on, which also knows test builds. The copy
+(`<data>/snapshots/before-beta/`, `launcher/src-tauri/src/snapshot.rs`) is taken at the first start of a test build
+after a release build, before settings, profiles, kept-version recovery, updater state or background watchers may write. Capture, startup recovery and restore hold the data-folder lock exclusively. Close another launcher using that folder before continuing. Restore keeps the lock through restart handoff or blocked recovery, and returns to shared access if the operation returns to the original session. Ordinary starts of the same build still share the folder when no startup work is needed. Every copied file is flushed before the staged folder is published; the build marker is written last. A failed copy or marker holds the launcher behind a blocking notice listing the reason and omitted files. The player may quit, or explicitly continue without a restore copy; that decision and its reasons are recorded in the marker and shown by the switch dialog. A completed copy survives a failed marker write and is reused, never replaced with beta-modified files. A switch back offers to put a whole copy back ("Put back my profiles
+and settings from before the beta"), at Restart now, before the release starts. No file a test build of dev.29 writes
+has a new format number, and no file the release reads became strict (checked against `2301cc5f`, the dev.28 release:
+`git diff 2301cc5f -- crates/kiln-manage/src launcher/src-tauri/src` adds `deny_unknown_fields` only to files that are
+new in dev.29), so the release reads all of it; the copy is there for what the player changed in the beta (and for later
+test builds that do change a format).
+
+From dev.29 onward, Clean up and ordinary removal count saved pre-beta profiles as package users, named `<profile> (before beta)`, until that snapshot is replaced. Restore checks every saved profile's Library references before replacing any files, including on interrupted-restore recovery. Missing packages must be reimported first. Dev.28 cannot protect these saved references during cleanup. Keep those packages if you use that legacy launcher before returning to the beta.
+
+| File | Written by | What the release (dev.28) does with what the test build wrote | In the copy |
+|---|---|---|---|
+| `<data>/settings.json` | launcher | reads it: unknown keys are ignored (`keepVersions`), `updateChannel: "beta"` reads as no choice (it follows its own channel, dev); its next save drops `keepVersions` (a test build then uses the default, 1) | yes |
+| `<data>/update.json` | self-update | reads it (format 1): `updated` names the switch (`from` a build id with `+beta.<n>`), so its start says "Updated to <version>" | no (the switch writes it for the release) |
+| `<data>/profiles/<pid>/meta.json` | profiles | reads it: format 1, the same struct since dev.28 (a test build writes it durably, same shape); a mod version taken in the beta is an ordinary Library version | yes |
+| `<data>/profiles/<pid>/config/`, `data/` | the mods (their settings) | the mods' own files; left as they are | no |
+| Library entries `library/<kind>/<id>/<version>+<hash8>/` and their records | library | reads them (unchanged format); a version kept for a roll back is one more version there, and its Clean up may remove it (a test build then forgets it) | no (mods stay) |
+| `library/kiln-kept.json`, `library/kiln-kept/` | kept versions (new in dev.29) | does not read them; back on a test build, a kept entry that is gone is forgotten, a half-done change is finished or undone (`kept::recover`) | no. The live journal and its settings folders stay together. Old copies and restore stages also skip this journal |
+| `<data>/installs/*.json`, `<data>/runtime/*.zip` | games, shipped runtimes | read as before; both launchers' runtimes stay in the list | no |
+| `<data>/state/launcher-build.json`, `<data>/snapshots/before-beta/` | dev.29 (new) | does not read them | (the copy itself) |
+| `<game>/kiln/.install.json` (receipt) | install | reads it (format 1); its installer says `kiln-launcher <v> beta <n>` | no: Play installs the release's Kiln (dev.29 on; dev.28: Runtime) |
+| `<game>/kiln/profile.json`, `chain.ini` | activation | written again for the active profile at every Play, by whichever launcher plays | no |
+| `<game>/kiln/state/placement-journal.json` | placement (new in dev.29) | does not read it; back on a test build, recovery moves or deletes nothing a journal names without proving it | no |
+| `<game>/kiln/kiln.json` | Kiln settings | the runtime in the game reads it; the launcher edits keys by path and keeps the others (not checked by a test here) | no |
+| `<game>/kiln/config/compat-rules.json` (rules the player wrote) | the player | a `before` rule (new in dev.29) is reported as an error and skipped; the rules Kiln ships come with its runtime | no |
+| World saves and Kiln's data beside them | the game, mods | the game's: a world played with a test build may not load the same way on the release (the dialogs say so); the Saves page keeps backups | no |
+
+Tests: `launcher/src-tauri/src/snapshot/tests.rs` (`cargo test -p kiln-launcher snapshot`): a data folder in dev.28's
+formats, a test build's own writes (settings, a profile save, a new profile, kept versions, a mod), dev.28's settings
+reader and channel rule on the result, a second test build keeping the first copy, the restore byte for byte with
+what the beta added left in place, a new copy after a switch back, no copy for a release build or an empty folder,
+and a changed `snapshot.json` with textual traversal paths. Restore also rejects existing symlinks below the data root; concurrent path swaps are not covered by that test. Interrupted restores keep a flushed staging set and journal under `snapshots/restore-beta/`; a launcher from dev.29 onward completes the entire restore before writers start. Dev.28 ignores this inert directory: if it is launched manually after an interruption it may see a mixture of old and restored files. Quit it and start the beta again to finish recovery before editing profiles or settings.
 
 ### Manifest (`latest.json`)
 Tauri's static format, plus fields the updater ignores:
@@ -148,6 +245,9 @@ Tauri's static format, plus fields the updater ignores:
   "kiln": { "format": 1, "channel": "dev", "page": "https://frostdev.io/kiln", "runtime": "0.2.0-dev+20261106.0f1ffa6" }
 }
 ```
+A test build's manifest (`updates/frostdev.io/beta/latest.json`, `updates/github/latest.json`) has the build id as its
+`version` (`0.2.0-dev.29+beta.3`, the version its files are signed for), files named after `0.2.0-dev.29-beta.3`, and
+`"kiln": { "format": 1, "channel": "beta", "beta": 3, ... }` (`launcher/src-tauri/src/selfupdate/testdata/beta/latest.json`).
 `tools/release/lib/release.py manifest` writes it; `launcher/src-tauri/src/selfupdate/testdata/latest.json` is the
 example the tests read.
 
@@ -378,7 +478,10 @@ Each release:
 4. `tools/release/github-draft.sh ~/Kiln-release/kiln-$V` → a draft release `v$V` with the files (flat names, its own
    SHA256SUMS). Check it on GitHub.
 5. `tools/release/publish.sh ~/Kiln-release/kiln-$V --host <the web server's ssh name>`: uploads to frostdev.io (files first, then the manifests),
-   publishes the draft, points `updates-dev` at it. Launchers on that channel see it at their next check.
+   publishes the draft, points `updates-dev` at it. Launchers on that channel see it at their next check. Then the
+   roadmap ("The roadmap" below): `roadmap.py ship $V`, the commit command for the source (run it), and
+   `roadmap.py deploy` of the site checkout in `KILN_SITE_DIR` (default `~/Work/frostdev.io`). A roadmap failure
+   prints `WARNING: ROADMAP NOT UPDATED` and the retry commands; the release itself stays published.
 6. After a stable release: raise `VERSION` to the next `-dev` version.
 7. The website's download page (`https://frostdev.io/kiln/download`, with the stable links `/kiln/download/windows`,
    `/linux`, `/deb`, `/server`, `/runtime`) lists every file of the release with its size and SHA-256. In the site
@@ -388,6 +491,85 @@ Each release:
    run, GET calls only; release.sh runs it at the end when the key is there), then add `--publish` to upload. It
    uploads the Nexus build (nexus/), never the direct one. When an upload fails half way (a storage error), run it
    again with `--only` naming the kinds that are still missing: a kind that went up must not be uploaded twice.
+
+### The roadmap
+Every release, minor patches (0.2.0-dev.29.N) and majors (0.2.0-dev.30) alike, moves on
+<https://frostdev.io/kiln/roadmap>. Its source is `tools/release/roadmap/roadmap.json` in this repository (the site's
+`src/data/kilnRoadmap.json` byte for byte; format and editorial rules in `tools/release/roadmap/README.md`).
+1. **Before the build:** the release's entry is the first `upcoming` one (`"status": "next"`), with what ships, in
+   player words. `release.sh $V` runs `roadmap.py check $V` before it builds anything: no entry, or another unreleased
+   entry before it, stops a final build; a test build (`--beta`, `--worktree`) only warns. Release-notes bullets the
+   entry doesn't seem to mention are warnings.
+2. **At publish:** after the GitHub release and the frostdev.io downloads, `publish.sh` runs
+   `roadmap.py ship $V` (released, dated with the GitHub publish time in New York; the next entry becomes `next`),
+   prints the commit command for the source (commit it on the release branch, push it with the release), then
+   `roadmap.py deploy "$KILN_SITE_DIR" --version $V` (`--yes` when publish.sh has it): in the site checkout it refuses
+   a dirty tree, pulls origin main, stops unless the live revision (`ssh loothing-vps readlink
+   /opt/frostdev-public/current`) is origin/main, writes the data (nothing to do when unchanged), runs `npm ci`,
+   `npm run check`, `npm run build`, commits "Kiln roadmap: $V released", pushes, runs `ops/deploy.sh` and checks the
+   page shows $V as released. `publish.sh --dry-run` runs the check and prints the ship and deploy commands.
+3. **When it fails** (live site ahead of origin, a dirty checkout, a build error, GitHub without a date): the release is
+   out regardless and publish.sh exits with the release's status; the closing `WARNING: ROADMAP NOT UPDATED` names the
+   commands. By hand: `python3 -I tools/release/roadmap.py ship $V [--date YYYY-MM-DD]`, commit the source,
+   `python3 -I tools/release/roadmap.py deploy ~/Work/frostdev.io --version $V --dry-run`, then without `--dry-run`. A
+   deploy that failed after its push is retried by the same command (it deploys undeployed roadmap-only commits).
+4. **Test builds** never touch the roadmap. The page has no "in beta" field: the next minor patch's `note` says it in
+   words when wanted, edited by hand.
+
+Tests: `python3 -I tools/release/test_roadmap.py` (offline; git, ssh, npm and curl stubbed).
+
+### Cutting a beta (a test build for the Discord testers)
+A test build is a release folder of its own, built from a pushed commit like a release, that moves only the beta
+channel. Nothing of it announces a release: no Nexus Mods build or upload, no notes page or download page entry, no
+dev or stable manifest, no `updates-dev`, never GitHub's "latest", no SDK upload, no API record promotion.
+1. Commit and push. `VERSION` stays `X.Y.Z-dev`; the test build carries the version of the release it leads to:
+   `V=$(tools/release/version.sh dev)` (the number the final build will have, or the one planned for it) and the next
+   beta number `B` (1 for the first test build of `V`, then 2, ...; never reuse one).
+2. `tools/release/release.sh $V --beta $B` → `~/Kiln-release/kiln-$V-beta.$B/`. All checks must say PASS (a test
+   build's checks: the folder has no nexus/ and only the beta channel's manifests, its files are signed for
+   `$V+beta.$B`). The launcher has `KILN_LAUNCHER_CHANNEL=beta`, `KILN_LAUNCHER_BETA=$B` baked in (`build.rs`); its
+   README.txt and RELEASE-NOTES.md say "test build". Try the AppImage: the header says "Beta $B".
+3. `tools/release/github-draft.sh ~/Kiln-release/kiln-$V-beta.$B` → a draft pre-release `v$V-beta.$B` ("Kiln $V beta
+   $B (test build)"), without the SDK files and the samples. `--dry-run` shows the command and the staged files.
+4. `tools/release/publish.sh ~/Kiln-release/kiln-$V-beta.$B --host <the web server's ssh name>` (try `--dry-run`
+   first: it prints every remote command and runs none): `downloads/$V-beta.$B/` and `updates/beta/latest.json` on
+   frostdev.io, the draft published as a pre-release, the `updates-beta` pointer (created the first time). It refuses
+   `--nexus` and a folder with another channel's manifest.
+5. Tell the testers (the owner's channel on Discord; nothing in the tooling announces). Launchers following the beta
+   see it at their next check.
+6. **The first beta** (test build 1 of 0.2.0-dev.29): players on 0.2.0-dev.28 have no Beta choice, so the first beta is
+   a download link: `https://frostdev.io/kiln/downloads/0.2.0-dev.29-beta.1/` (or the GitHub pre-release). Installed
+   by hand over 0.2.0-dev.28 (the AppImage replaced, the setup run), it stays on the beta channel by itself (baked in),
+   takes the copy from before the beta at its first start, and can switch back to the release in one click. From
+   0.2.0-dev.29 on, the switch is in every launcher: Settings > Updates > Channel.
+7. **The final build:** `release.sh $V` as always. It also writes `updates/frostdev.io/beta/latest.json`, and
+   publish.sh moves the beta channel to it only after reading and comparing both frostdev.io and GitHub beta manifests. A newer build on either host, an unreadable manifest or an invalid version preserves both beta pointers and produces a closing warning; the release itself still publishes. `--no-beta-channel` always preserves Beta. `--force-beta-channel` explicitly overrides missing/newer live evidence (unless `--no-beta-channel` is also supplied). These checks precede either pointer update; they do not serialize concurrent publishing processes.
+8. **A bad test build:** publish the next beta number. Testers on the bad one are offered it; a switch back to the
+   release always works.
+
+Tests: `python3 -I tools/release/test_beta.py` (the build order, beta manifests, release.sh's `--beta`/`--channel`
+handling, github-draft.sh and publish.sh dry runs on made-up folders signed with a throwaway key: a test build moves
+only the beta channel and publishes no SDK, a release moves dev and beta, a file signed for another build is refused),
+`tools/release/e2e-update.sh --only beta` (below).
+
+**Trial runs of the working tree.** `--worktree` builds the working tree (uncommitted and untracked files too)
+instead of a commit, for test runs only: it needs an explicit `--out` that is not a release folder
+(`tools/release/release.sh $V --worktree --out ~/Kiln-release/trial/kiln-$V --no-nexus`); without one, or with
+`~/Kiln-release/kiln-*` or `~/Kiln-release` itself, release.sh stops before doing anything. Its README.txt says "a test build", it skips the Nexus dry
+run, and github-draft.sh, publish.sh and `nexus.py --publish` refuse such a folder (its README.txt names no commit).
+A release is always built from a commit: no `--worktree` (0.2.0-dev.28's real run had it, and its README.txt had to be
+corrected by hand). Tests: `python3 -I tools/release/test_worktree_guard.py`.
+
+**Trial runs and the NuGet cache.** NuGet keeps a package by id and version for good and never looks at its source
+again. release.sh therefore restores into a private package cache, `<work>/nuget-packages` (or
+`KILN_RELEASE_NUGET_PACKAGES`), never `~/.nuget/packages`, and removes the `kiln.*` packages of the version it builds
+from that cache when it starts; its template check uses a scratch cache of its own. Anything else you build against a
+release folder's packages, such as a mod tried against a trial's `sdk/` feed, needs the same care: a trial of
+`0.2.0-dev.N` that reaches `~/.nuget/packages` leaves `kiln.*` `0.2.0-dev.N` there, and every later local build that
+names that version (a mod on `Kiln.Sdk/0.2.0-dev.N`) restores the trial's packages instead of the published ones. Build
+such a mod with a private cache (`NUGET_PACKAGES=$PWD/.nuget-trial dotnet build`), or give the trial another version
+(`tools/release/version.sh dev 9999`). To clear a cache that already holds a trial's packages:
+`rm -rf ~/.nuget/packages/kiln.*/0.2.0-dev.N` (`dotnet nuget locals global-packages --list` prints the folder).
 
 github-draft.sh stages only linux/ and windows/ (the direct build) of the launchers, plus the runtime files: the server
 pack as `kiln-server-<v>.zip`, and the systemd units as one `kiln-systemd-units-<v>.tar.gz` (GitHub replaces the `@`
@@ -436,7 +618,10 @@ publishing status.
   becomes the release version. The API can't set that field on its own.
 - `--sync-description` compares the page's description with `docs/kiln/launcher/nexus-description.bbcode` (the site
   stores line breaks as `<br />`; those are ignored); with `--publish` it replaces it (`PATCH /mods/{id}`, an
-  experimental endpoint).
+  experimental endpoint). The file is the one in the checkout nexus.py runs in (or `--description FILE`), not the
+  release folder's: run it from a checkout at the release commit. A text that does not name the release's version
+  (a text naming 0.2.0-dev.29.17 does not count for 0.2.0-dev.29.1) is refused before any API call (0.2.0-dev.29.2's
+  first sync put 29.1's text up).
 - The key: `NEXUS_API_KEY` in `~/.config/kiln-release/nexus.env` (chmod 600). It is sent only to the API host (over
   https), never to the storage URLs the uploads go to, and never printed or written.
 - `--only launcher-linux,runtime` limits the files. Tests: `python3 -I tools/release/test_nexus.py` (a local mock of the
@@ -462,7 +647,21 @@ publishing status.
 - `tools/release/e2e-update.sh`: two real AppImages (`0.2.0-dev.1001`, `0.2.0-dev.1002`) built with the QA features
   `dev-eval,update-test-feeds`, signed with a key made for the test, served by two local HTTP servers; scenarios:
   frostdev.io serves it, frostdev.io is down, frostdev.io serves a changed file, both serve a changed file. Each runs
-  on its own X display with its own HOME, data dir and dbus session.
+  on its own X display with its own HOME, data dir and dbus session. `--only beta` (dev.29): a third AppImage, test
+  build 1 of `0.2.0-dev.1003` (baked beta, signed for `0.2.0-dev.1003+beta.1`), on the feeds' beta channel: the
+  release build chooses Beta in Settings, switches and restarts into the test build (the copy from before the beta is
+  taken), then the Beta mark switches back to the older release with the copy put back; the AppImage's sha256 and the
+  settings are checked at each step. It runs no game process.
+- `bun x playwright test tests/beta.spec.ts` (browser mock): the channel names, both switches (Cancel, Switch now,
+  Restart now, the restore choice), nothing to switch to, an install that cannot replace itself, the Beta mark, the
+  Deck's Channel row and mark, the Play page's notices, and the Nexus build's link to the download page.
 - Test feeds: debug builds and builds with the `update-test-feeds` feature read `KILN_UPDATE_FEEDS`
   (`name=url;name=url`, `{channel}` in the URL) and take it only when every URL is on the loopback interface. Release
   builds never read it. Plain http needs `plugins.updater.dangerousInsecureTransportProtocol` in a QA build's config.
+
+### Beta rollback floor and startup commands
+A published beta bakes `KILN_LAUNCHER_BASE_RELEASE`, derived from the same previous non-beta release tag used for notes/API checks. A missing or invalid tag stops the beta cut. The manifest's `kiln.baseRelease` is informational; the binary's baked value is authoritative. A downward switch refuses builds below this floor; a local beta without a floor links to downloads instead. The newer acceptable release advertised by the two feeds is the only version eligible for download; verification failure never falls back to a lower version.
+
+`snapshot_status` returns `{phase, reasons, canContinue}` while data writers are held; `snapshot_continue` records an explicit opt-out after a failed first-beta copy. Recovery of an existing restore journal cannot be skipped. `UpdateStatus.restoreRequested` is the accepted backend choice, retained when the dialog closes; `beforeBetaWarning` lists a recorded opt-out's reasons. The dialogs direct beta users to install its game runtime on Runtime, and explicitly explain the manual runtime reinstall for dev.28.
+
+A planned switch records an intent, not proof that the release ran. A release from dev.29 onward acknowledges its actual start before any writer runs; only then may the next beta capture a new copy. Dev.28 cannot acknowledge this marker, so re-entering Beta after it conservatively retains the earlier complete copy (the restore choice displays its original date). This also prevents a canceled Windows installer followed by a different beta from replacing the original copy with beta data.

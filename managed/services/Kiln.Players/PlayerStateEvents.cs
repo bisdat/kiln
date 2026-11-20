@@ -261,14 +261,22 @@ public sealed class PlayerClientActionEvent : CancelableEvent
 {
     static PlayerClientActionEvent() => PlayerStateWatch.Start();
 
-    internal PlayerClientActionEvent(Player p, PlayerClientActionInfo info, uint version, byte[] payload, bool canCancel)
+    internal PlayerClientActionEvent(Player p, PlayerClientActionInfo info, uint version, byte[] payload, bool canCancel, DecisionId decisionId = default)
     {
         Player = p;
         Action = info;
         Version = version;
         Payload = payload;
         CanCancel = canCancel;
+        DecisionId = decisionId;
     }
+
+    /// <summary>The decision this held action is part of when a typed equipment handler decides it as well
+    /// (<c>PlayerEquippingEvent</c> in Kiln.Items, for <c>changeEquipmentAction</c> and <c>swapEquipmentSetAction</c>):
+    /// the same id is on that event and on the <see cref="DecisionCompletedEvent"/> that ends it, and the action is
+    /// canceled when this event's handlers OR the typed ones canceled. The default id otherwise (no typed handler
+    /// listens, or the action has already run). Since 0.2.0-dev.29.</summary>
+    public DecisionId DecisionId { get; }
 
     public Player Player { get; }
     public PlayerClientActionInfo Action { get; }
@@ -398,9 +406,11 @@ internal static unsafe class PlayerStateWatch
         var glideSubs = Events.HasSubscribers<PlayerGlideEvent>();
         var equipSubs = Events.HasSubscribers<PlayerEquipmentChangedEvent>() || Events.HasSubscribers<PlayerHotbarChangedEvent>();
         var clientSubs = Events.HasSubscribers<PlayerClientActionEvent>();
+        var typed = ClientActionDecisions.Typed is { On: true } ty ? ty : null;  // Kiln.Items' typed equipment decisions
         var armed = Volatile.Read(ref _armedUntil) > Environment.TickCount64;
         if (!clientSubs) StopHolding();
-        if (!stateSubs && !actionSubs && !jumpSubs && !glideSubs && !equipSubs && !clientSubs && !armed)
+        if (typed is null) StopTypedLease();
+        if (!stateSubs && !actionSubs && !jumpSubs && !glideSubs && !equipSubs && !clientSubs && typed is null && !armed)
         {
             if (Slots.Count > 0)
             {
@@ -426,7 +436,7 @@ internal static unsafe class PlayerStateWatch
         var extra = (stateSubs || armed) && (_ticks % ExtraEvery == 0 || !Slots[0].HasPrev);
         var want = PlayerStates.Native.WantActor;
         if (stateSubs || jumpSubs || armed) want |= PlayerStates.Native.WantMotion;
-        if (stateSubs || clientSubs || armed) want |= PlayerStates.Native.WantInput;
+        if (stateSubs || clientSubs || typed is not null || armed) want |= PlayerStates.Native.WantInput;
         if (extra) want |= PlayerStates.Native.WantExtra | PlayerStates.Native.WantBaseZone;
         if (armed) want |= PlayerStates.Native.WantVitals;
         int rc;
@@ -437,7 +447,8 @@ internal static unsafe class PlayerStateWatch
         _cancelSupported ??= PlayerStates.Status is { Cancel: true };
         var canCancel = _cancelSupported == true && _cur[0].World == 0;
         var holding = clientSubs && Hold(t, n);
-        if (holding) PostHeldClientActions(t);
+        var leased = typed is not null && TypedLease(t, n, typed);
+        if (holding || leased) PostHeldClientActions(t, typed, tick.Step);
         for (var i = 0; i < n; i++)
         {
             var s = Slots[i];
@@ -487,12 +498,100 @@ internal static unsafe class PlayerStateWatch
         if (t != null) t->ClientActionHold(null, 0);  // what is held runs
     }
 
-    // The actions held in the last step: the game has not run them. Each gets its answer before the next step.
-    private static void PostHeldClientActions(PlayerStates.Native.Table* t)
+    // The typed equipment decisions' own lease (since 0.2.0-dev.29, kiln.playerstate client_action_interest): only the
+    // actions the typed side decides, only for the players it asks for, so an equipment listener does not delay any
+    // other client action by a step. Renewed every Pre like the legacy hold.
+    private static ulong _leaseOwner;
+    private static bool _leased;
+    private static uint[] _leaseActions = [];
+    private static int _leaseActionsOf = -1;
+
+    private static bool TypedLease(PlayerStates.Native.Table* t, int n, ClientActionDecisions.ITyped typed)
+    {
+        if (_cur[0].World != 0 || !PlayerStates.Native.Has(t, &t->ClientActionInterest) || PlayerStates.Status is not { ClientActionCancel: true })
+            return false;
+        var all = PlayerStates.ClientActions;
+        if (_leaseActionsOf != all.Count)
+        {
+            _leaseActions = all.Where(a => a.CanCancel && typed.KindOf(a.Name) != 0).Select(a => (uint)a.Index).ToArray();
+            _leaseActionsOf = all.Count;
+        }
+        if (_leaseActions.Length == 0) return false;
+        if (_leaseOwner == 0) _leaseOwner = Backend.Current.OwnerCreate("kiln.players.typed-hold");
+        if (_leaseOwner == 0) return false;
+        // every watched player, or those the typed filters name (an id that is no watched player widens to all: the
+        // typed event's own filter then picks)
+        var interest = typed.Interest();
+        var ids = new List<uint>(n);
+        var everyone = interest.All || interest.Entities.Any(e => !Slots.Exists(s => s.Entity == e));
+        for (var i = 0; i < n; i++)
+            if (everyone || Array.BinarySearch(interest.Entities, _ids[i]) >= 0) ids.Add(_ids[i]);
+        if (ids.Count == 0)
+        {
+            StopTypedLease();
+            return false;
+        }
+        int rc;
+        var list = ids.ToArray();
+        fixed (uint* e = list)
+        fixed (uint* a = _leaseActions)
+            rc = t->ClientActionInterest(_leaseOwner, e, (uint)list.Length, a, (uint)_leaseActions.Length);
+        _leased = rc == PlayerStates.Native.Ok;
+        return _leased;
+    }
+
+    private static void StopTypedLease()
+    {
+        if (!_leased) return;
+        _leased = false;
+        var t = PlayerStates.T;
+        if (t != null && PlayerStates.Native.Has(t, &t->ClientActionInterest)) t->ClientActionInterest(_leaseOwner, null, 0, null, 0);  // what it held runs
+    }
+
+    /// <summary>Kiln.Players' side of <see cref="ClientActionDecisions"/>, registered at its start.</summary>
+    internal sealed class TypedIntake : ClientActionDecisions.IIntake
+    {
+        public static readonly TypedIntake Instance = new();
+
+        /// <summary>The capability row of the typed equipment verdict (Kiln.Items' PlayerEquippingEvent).</summary>
+        public const string EquipRow = "events.equip";
+
+        /// <summary>PlayersStartup: offers the intake to Kiln.Items and, where kiln.playerstate cannot hold an equipment
+        /// input without holding every client action (an older kiln-players.dll, no hold point), turns events.equip off
+        /// with the reason: the typed verdict is refused rather than widened to every action.</summary>
+        public static void Register()
+        {
+            ClientActionDecisions.SetIntake(Instance);
+            if (Instance.WhyNotSelective() is not { } why || PlayerStates.T == null) return;  // no table: kiln.playerstate's own row says so
+            if (Capabilities.Get(EquipRow) is { State: CapabilityState.Unavailable }) return;
+            Capabilities.Report(EquipRow, CapabilityState.Unavailable, PlayerStates.T != null && PlayerStates.Status is { ClientActionCancel: true } ? CapabilityReason.ServiceOlder : CapabilityReason.SymbolMissing, why);
+        }
+
+        public void Start() => PlayerStateWatch.Start();
+
+        public string? WhyNotSelective()
+        {
+            var t = PlayerStates.T;
+            if (t == null) return "kiln.playerstate is not here";
+            if (!PlayerStates.Native.Has(t, &t->ClientActionInterest))
+                return "this kiln-players.dll is older than 0.2.0-dev.29: it cannot hold equipment inputs alone (client_action_interest)";
+            if (PlayerStates.Status is not { ClientActionCancel: true })
+                return "client actions cannot be held on this build (the hold point did not resolve)";
+            return null;
+        }
+    }
+
+    // The actions held in the last step: the game has not run them. Each gets its answer before the next step, once. This is
+    // the one reader of kiln.playerstate's held actions (chapter 07 §4.4): an action the typed equipment side decides
+    // gets one decision (kind 16 or 17), the generic event first, the typed one in the broker's pump right after, and
+    // the game is told "cancel" when either side canceled.
+    private static void PostHeldClientActions(PlayerStates.Native.Table* t, ClientActionDecisions.ITyped? typed, ulong step)
     {
         const int Batch = 8;
         var all = PlayerStates.ClientActions;
+        var generic = Events.HasSubscribers<PlayerClientActionEvent>();
         var buf = stackalloc PlayerStates.Native.HeldAction[Batch];
+        List<(DecisionId Id, ClientActionDecisions.Held Held)>? opened = null;
         while (true)
         {
             for (var k = 0; k < Batch; k++) buf[k].Size = (uint)sizeof(PlayerStates.Native.HeldAction);
@@ -508,12 +607,48 @@ internal static unsafe class PlayerStateWatch
                     fixed (byte* src = h.Payload)
                         new ReadOnlySpan<byte>(src, payload.Length).CopyTo(payload);
                     var entity = h.Entity;
-                    var player = Slots.Find(x => x.Entity == entity)?.Player ?? new Player { Entity = new EntityId(entity), State = PlayerState.InGame };
-                    cancel = Events.Post(new PlayerClientActionEvent(player, all[(int)h.Index], h.Version, payload, true)).Canceled;
+                    var info = all[(int)h.Index];
+                    var held = BeginTyped(typed, entity, h.Index, h.Version, info.Name, payload, out var id);
+                    string? canceledBy = null;
+                    if (generic)
+                    {
+                        var player = Slots.Find(x => x.Entity == entity)?.Player ?? new Player { Entity = new EntityId(entity), State = PlayerState.InGame };
+                        var ev = Events.Post(new PlayerClientActionEvent(player, info, h.Version, payload, true, id));
+                        cancel = ev.Canceled;
+                        canceledBy = ev.CanceledBy;
+                    }
+                    if (held is not null)
+                    {
+                        held.GenericCanceled = cancel;
+                        held.GenericCanceledBy = canceledBy;
+                        (opened ??= []).Add((id, held));
+                        continue;  // answered below, after the typed side decided
+                    }
                 }
                 t->ClientActionDecide(h.Entity, h.Index, h.Version, cancel ? 1u : 0u);
             }
             if (rc != PlayerStates.Native.BufferTooSmall) break;
+        }
+        if (opened is null) return;
+        // the decisions just filed are due in this Pre (kind 16/17: one-Pre hold): the broker dispatches them now, and
+        // Kiln.Items' producer posts the typed event with the generic vote as its prior
+        foreach (var (held, cancel) in ClientActionDecisions.Finish(step, opened))
+            t->ClientActionDecide(held.Entity, held.Index, held.Version, cancel ? 1u : 0u);
+    }
+
+    // Files the typed decision of one held action (ClientActionDecisions.Begin); a fault leaves the generic answer.
+    private static ClientActionDecisions.Held? BeginTyped(ClientActionDecisions.ITyped? typed, uint entity, uint index, uint version, string name,
+        byte[] payload, out DecisionId id)
+    {
+        id = default;
+        try
+        {
+            return ClientActionDecisions.Begin(typed, entity, index, version, name, payload, out id);
+        }
+        catch (Exception e)
+        {
+            ModLogOnce($"the typed equipment decision of {name} could not be filed; the generic answer stands: {e.Message}");
+            return null;
         }
     }
 

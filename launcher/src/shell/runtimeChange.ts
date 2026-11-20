@@ -7,6 +7,8 @@ import type { GameInstall, InstallState, RuntimeBundle } from "../api/commands";
 import { invalidateGame, qk, useRuntimeChanges, type RuntimeChange } from "../api/hooks";
 import { installNote, runTask, toast } from "../ui";
 import { notifyInstall } from "./notices";
+import { blockedLine } from "./RuntimeFailure";
+import { t } from "../i18n";
 
 /** `a` is older than `b`. runtime_list sorts newest first (the version, its build date, then when the bundle was
  *  built), so the list decides; a version not in it compares by version and build date. Never by the git id: two
@@ -27,26 +29,29 @@ export async function runRuntimeChange(qc: QueryClient, game: GameInstall, bundl
   const { put } = useRuntimeChanges.getState();
   const gid = game.id;
   if (useRuntimeChanges.getState().last[gid]?.state === "running") {
-    toast.info("A runtime change is already running");
+    toast.info(t("shell.runtimeChange.alreadyRunning"));
     return false;
   }
   const base: RuntimeChange = { what, version, taskId: null, state: "running", error: null, at: Date.now() };
   put(gid, base);
   let ok = false;
   try {
-    const r = await runTask<api.InstallResult | api.UninstallResult | null>(async () => { const id = await start(); put(gid, { ...base, taskId: id }); return id; }, { done: label, detail: installNote });
+    // the error toast is said here: a file Windows refused (an antivirus, inbox 92) has plain words as its title
+    const r = await runTask<api.InstallResult | api.UninstallResult | null>(async () => { const id = await start(); put(gid, { ...base, taskId: id }); return id; }, { done: label, detail: installNote, quiet: true });
     notifyInstall(r);
     put(gid, { ...(useRuntimeChanges.getState().last[gid] ?? base), state: "done" });
     if (r && "runtime" in r) {
       const newer = bundles.find((b) => b.sides.includes(game.kind) && isOlder(r.runtime.version, b.version, bundles))?.version ?? null;
       // an install leaves no default part out unless the player turned it off: nothing is missing after it
-      const fix = (s: InstallState | undefined) => s && { ...s, installed: true, receipt: r, modified: [], upgradeAvailable: newer, missingParts: [] };
+      const fix = (s: InstallState | undefined) => s && { ...s, installed: true, receipt: r, modified: [], missingFiles: [], upgradeAvailable: newer, missingParts: [] };
       qc.setQueryData<InstallState>(qk.runtimeStatus(gid), fix);
       qc.setQueryData<api.GameStatus>(qk.gameStatus(gid), (s) => s && { ...s, runtime: fix(s.runtime)! });
     }
     ok = true;
   } catch (e) {
-    put(gid, { ...(useRuntimeChanges.getState().last[gid] ?? base), state: "failed", error: api.toKilnError(e) });
+    const err = api.toKilnError(e);
+    if (err.code !== "canceled") toast.error(err, blockedLine(err, game.platform) ?? undefined);
+    put(gid, { ...(useRuntimeChanges.getState().last[gid] ?? base), state: "failed", error: err });
   }
   invalidateGame(qc, gid);
   return ok;
@@ -55,8 +60,8 @@ export async function runRuntimeChange(qc: QueryClient, game: GameInstall, bundl
 /** Install (or update to, or roll back to) `b` in the game, as Runtime's buttons do. */
 export function installBundle(qc: QueryClient, game: GameInstall, b: RuntimeBundle, bundles: RuntimeBundle[], current: string | null, opts: api.InstallOptions = {}) {
   const back = !!current && b.version !== current && isOlder(b.version, current, bundles);
-  const what = !current ? `Install of ${b.version}` : back ? `Rollback to ${b.version}` : `Update to ${b.version}`;
-  return runRuntimeChange(qc, game, bundles, what, b.version, `Kiln ${b.version} installed`,
+  const what = !current ? t("shell.runtimeChange.installOf", { version: b.version }) : back ? t("shell.runtimeChange.rollbackTo", { version: b.version }) : t("shell.runtimeChange.updateTo", { version: b.version });
+  return runRuntimeChange(qc, game, bundles, what, b.version, t("shell.play.kilnInstalled", { version: b.version }),
     () => (back && opts.components == null && !opts.switchFromShroudforge
       ? api.runtimeRollback(game.id, b.version) : api.runtimeInstall(game.id, b.version, opts)));
 }

@@ -1,0 +1,10 @@
+{
+  "format": 1,
+  "programs": {
+    "lights": {
+      "world": "client",
+      "flags": [],
+      "with": ["RenderTransform"]
+    }
+  }
+}

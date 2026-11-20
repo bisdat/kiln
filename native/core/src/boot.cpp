@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: MIT
 // kiln_boot: called by the dinput8 proxy on the main thread, at the game's entry point, before any game code ran.
-//   paths, log, kiln.json, profile (kiln.profile), image + side, build record, native mods "early", other loaders'
-//   byte scans (foreign_scan.h), sigdb, hooks,
+//   paths, log, kiln.json, profile (kiln.profile), image + side, build record, other loaders' byte scans
+//   (foreign_scan.h), native mods "early", sigdb, hooks,
 //   in-core services, service DLLs + plugins, native mods "boot", native "world" armed, .NET host, chain DLLs named in
 //   chain.ini [late], state/boot.json, state/hooks.json.
+#include <atomic>
 #include <cstring>
 #include <optional>
 #include <string>
@@ -25,12 +26,14 @@
 #include "profile.h"
 #include "progress_state.h"
 #include "sigdb.h"
+#include "stop_facts.h"
 #include "tick.h"
 #include "services/hooks_internal.h"
 #include "services/service.h"
 
-// The build stamp ("+20261106.8d20598") native/build.sh writes; empty in a build without it. Only this file includes
-// it, so a new commit rebuilds only this file.
+// The build stamp ("+20261106.8d20598", or "+nogit.<nonce>") native/cmake/kiln_build_stamp.sh writes; empty in a
+// build without it. This file, api.cpp (the build identity for Kiln-internal access) and every stamped DLL's
+// native/cmake/kiln_build_stamp.cpp include it, so a new commit rebuilds only those.
 #if __has_include("kiln_build.h")
 #include "kiln_build.h"
 #endif
@@ -50,12 +53,16 @@ void decide(bool hooks, const std::string& safe_idle);
 void bound();
 bool after_clr(bool clr_started, void (*write_state)(void* user, const std::string& last_line), void* user);
 nlohmann::json report();
+void late_hold(void (*write_state)(void* user, const std::string& last_line), void* user);
+void stop_writer(void (*write_state)(void* user, const std::string& last_line, const std::string& why, uint32_t code), void* user);
 }  // namespace kiln::boot_svc
 
 namespace kiln {
 
 // api.cpp: KilnPluginInfo.on_unload at process exit. The sequence is there; its trigger is armed below.
-size_t unload_prepare();
+size_t unload_handlers(bool own_services);
+size_t unload_prepare(bool plugins);
+bool unload_prepared();
 DWORD unload_handler_ms();
 DWORD unload_total_ms();
 void unload_run(uint32_t exit_code, const char* via);
@@ -189,6 +196,28 @@ void check_entry_patch(BootFacts& f) {
     f.errors.push_back(what);
 }
 
+// state/boot.json's text, and kiln.json "unloadAtExit"'s text for the unload policy (below). The block between the
+// markers is pure (nlohmann only): native/core/tests/test-boot-json.sh cuts it out of this file and runs it.
+// boot-json:begin
+// Strings in boot.json can carry bytes Kiln did not make itself: boot's safe-idle text quotes a JSON parser's error,
+// which copies the offending byte, and a Windows error message comes in the ANSI code page. dump() throws on a byte that
+// is not UTF-8, which ended Kiln's boot after it had loaded everything; the replace handler writes U+FFFD instead.
+inline std::string boot_json_text(const nlohmann::json& doc) {
+    return doc.dump(2, ' ', false, nlohmann::json::error_handler_t::replace) + "\n";
+}
+
+// A string's value; a number, true, false or null as its JSON text; an array or an object by its kind only. kiln.json is
+// not depth-checked (nlohmann parses any depth without recursion), and dump() of a value nested a million levels deep
+// recurses until the boot thread's stack overflows. The unload policy counts every one of these but "auto", "on" and
+// "off" as auto, so the kind is all it needs.
+inline std::string unload_setting_text(const nlohmann::json& v) {
+    if (v.is_string()) return v.get<std::string>();
+    if (v.is_array()) return "an array";
+    if (v.is_object()) return "an object";
+    return v.dump();  // number, boolean or null: no recursion, a few bytes
+}
+// boot-json:end
+
 void write_boot_json(const BootFacts& f) {
     using nlohmann::json;
     const auto& prof = profile::state();
@@ -277,7 +306,7 @@ void write_boot_json(const BootFacts& f) {
         if (profile::dropins(k)) doc["profile"]["dropins"].push_back(profile::kind_name(k));
     for (uint32_t i = 0; i < profile::kEngineKindCount; ++i)  // other engines' lists, when the profile has them
         if (!prof.engine_mods[i].empty()) doc["profile"]["counts"][profile::kEngineKinds[i]] = prof.engine_mods[i].size();
-    if (!write_file_atomic(paths().state / L"boot.json", doc.dump(2) + "\n"))
+    if (!write_file_atomic(paths().state / L"boot.json", boot_json_text(doc)))
         KLOG_W("state: cannot write %s", u8(paths().state / L"boot.json").c_str());
 }
 
@@ -302,14 +331,19 @@ void exit_call(uint32_t code) {
 }
 
 // ---- on_unload: is the exit link armed? ----
-// Proven under Wine only (Linux servers, Proton clients, the Steam Deck). On native Windows it is off by default in
-// this release: a link misplaced there would show as a crash at exit for every player, and dev.24 called no handler
-// there either. kiln.json "unloadAtExit": "auto" (the default: on under Wine, off on native Windows), "on" or "off"
-// (case does not matter); any other value counts as "auto" and is warned about. The block between the markers is pure
-// (no Windows, no Kiln calls): native/core/tests/test-unload.sh cuts it out of this file and runs its decision table.
+// Wherever the link is placed, Kiln's own exit steps run first: the task pool refuses new tasks, kiln.engine closes its
+// write gate and the pool parks, before the process ends the pool's threads (ntdll!RtlExitUserProcess runs the link
+// before the loader lock and before it ends the other threads, on Windows as under Wine); then the plugins' handlers.
+// Those are proven under Wine only (Linux servers, Proton clients, the Steam Deck); on native Windows they are off by
+// default in this release (dev.24 called no handler there either), and the link runs Kiln's own steps only.
+// kiln.json "unloadAtExit": "auto" (the default: every handler under Wine, Kiln's own steps on native Windows), "on"
+// (every handler) or "off" (no link at all, also no step of Kiln's own); case does not matter, and any other value
+// counts as "auto" and is warned about. The block between the markers is pure (no Windows, no Kiln calls):
+// native/core/tests/test-unload.sh cuts it out of this file and runs its decision table.
 // unload-policy:begin
 struct UnloadPolicy {
-    bool armed = false;
+    bool armed = false;    // the link is placed (Kiln's own exit steps: its services' handlers, the task pool's park)
+    bool plugins = false;  // ... and calls the plugins' on_unload handlers after them
     bool warn = false;  // the setting is not auto, on or off: it counts as auto, and the boot log says so
     std::string says;   // the boot line after "unload: ", e.g. "on (Wine 11.0; kiln.json \"unloadAtExit\": auto)"
 };
@@ -328,15 +362,16 @@ inline UnloadPolicy unload_policy(std::string_view wine, const std::string* sett
     if (v == "off") {
         p.says = "off (" + key + ")";
     } else if (v == "on") {
-        p.armed = true;
+        p.armed = p.plugins = true;
         p.says = wine.empty() ? "on on native Windows (" + key + "; proven under Wine only)"
                               : "on (Wine " + std::string(wine) + "; " + key + ")";
     } else if (!wine.empty()) {
-        p.armed = true;
+        p.armed = p.plugins = true;
         p.says = "on (Wine " + std::string(wine) + "; " + key + ")";
     } else {
-        p.says = "off on native Windows by default (not yet proven there; " + key +
-                 "); kiln.json \"unloadAtExit\": \"on\" turns it on";
+        p.armed = true;
+        p.says = "Kiln's own exit steps only on native Windows (plugin on_unload handlers are off there by default, not "
+                 "yet proven; " + key + "); kiln.json \"unloadAtExit\": \"on\" calls them too, \"off\" places no link";
     }
     return p;
 }
@@ -353,30 +388,36 @@ std::string wine_version() {
     return v && *v ? std::string(v) : std::string("?");
 }
 
-// kiln.json's top-level "unloadAtExit" (config.cpp keeps no such key): a string's value, else the JSON text of the
-// value; nothing when there is no kiln.json, it does not parse, or the key is not there.
+// kiln.json's top-level "unloadAtExit" (config.cpp keeps no such key): unload_setting_text() of the value; nothing
+// when there is no kiln.json, it does not parse, or the key is not there.
 std::optional<std::string> unload_setting() {
     std::string text;
     if (!read_file(paths().kiln / L"kiln.json", &text)) return std::nullopt;
     const auto doc = nlohmann::json::parse(jsonc_to_json(text), nullptr, false);
     if (!doc.is_object() || !doc.contains("unloadAtExit")) return std::nullopt;
-    const auto& v = doc["unloadAtExit"];
-    return v.is_string() ? v.get<std::string>() : v.dump();
+    return unload_setting_text(doc["unloadAtExit"]);
 }
 
-// After every module ran kiln_plugin_main and on_ready, only with hooks on (no plugin is loaded in safe idle), and only
-// when a loaded module has an on_unload. One line says whether the link is armed and why.
+// After every module ran kiln_plugin_main and on_ready, only with hooks on (no plugin is loaded in safe idle, and the
+// task pool does not run). One line says whether the link is armed and why.
 void arm_unload() {
-    const size_t n = unload_prepare();
-    if (!n) return;
+    const size_t all = unload_handlers(true) + unload_handlers(false);
     const std::optional<std::string> setting = unload_setting();
-    const UnloadPolicy policy = unload_policy(wine_version(), setting ? &*setting : nullptr);
+    const std::string wine = wine_version();
+    const UnloadPolicy policy = unload_policy(wine, setting ? &*setting : nullptr);
     if (policy.warn)
         KLOG_W("unload: kiln.json \"unloadAtExit\": %s is not \"auto\", \"on\" or \"off\"; it counts as \"auto\"",
                setting->c_str());
     if (!policy.armed) {
-        KLOG_I("unload: %s; %zu on_unload handler(s) will not be called at exit", policy.says.c_str(), n);
+        KLOG_I("unload: %s; %zu on_unload handler(s) will not be called at exit, and the task pool is not parked (the "
+               "process exit ends its threads)",
+               policy.says.c_str(), all);
         return;  // no link
+    }
+    const size_t n = unload_prepare(policy.plugins);
+    if (!unload_prepared()) {
+        KLOG_W("unload: %s, but the exit sequence could not be prepared; nothing runs at exit", policy.says.c_str());
+        return;
     }
     if (!hooks::ensure_ready()) {
         KLOG_W("unload: %s, but kiln.hooks is not ready; %zu on_unload handler(s) will not be called",
@@ -398,9 +439,11 @@ void arm_unload() {
         KilnHandle h = 0;
         g_exit_via = a.via;
         if (hooks::chain::install_raw(0, target, o, reinterpret_cast<void*>(&exit_call), &g_exit_next, &h) == KILN_OK) {
-            KLOG_I("unload: %s: %zu on_unload handler(s) will be called when the process exits with code 0 (link on "
-                   "%s; up to %lu ms each, %lu ms in all)",
-                   policy.says.c_str(), n, a.via, unload_handler_ms(), unload_total_ms());
+            KLOG_I("unload: %s: %zu on_unload handler(s) will be called when the process exits with code 0, Kiln's own "
+                   "first: %zu service handler(s), then the task pool parks, then %zu plugin handler(s) (link on %s; up "
+                   "to %lu ms each, %lu ms in all)",
+                   policy.says.c_str(), n, unload_handlers(true), policy.plugins ? unload_handlers(false) : 0, a.via,
+                   unload_handler_ms(), unload_total_ms());
             return;
         }
         KLOG_W("unload: no link on %s", a.via);
@@ -432,13 +475,14 @@ const char* game_label(uint32_t side) {
 
 // `file` holds `text`: waited for, bounded, before the process ends. kiln.log's and progress.json's writers are threads
 // of their own with no flush (each writes in order), so their last words are on disk once the text is there.
-void wait_for_file_text(const std::filesystem::path& file, const std::string& text) {
+bool wait_for_file_text(const std::filesystem::path& file, const std::string& text) {
     const double until = now_ms() + 1000;
     std::string got;
     while (now_ms() < until) {
-        if (read_file(file, &got) && got.find(text) != std::string::npos) return;
+        if (read_file(file, &got) && got.find(text) != std::string::npos) return true;
         Sleep(10);
     }
+    return false;
 }
 
 // boot_svc::after_clr's hold path: the start stops before the game's entry point. What the launcher reads is written
@@ -456,6 +500,66 @@ void hold_boot(void* user, const std::string& last_line) {
     wait_for_file_text(paths().logs / L"kiln.log", last_line);
 }
 
+// The facts a stop writes boot.json from, from any thread (stop_facts.h): boot() publishes a copy after each change of
+// its own facts, from the moment a service may stop the start; never destroyed.
+FactsBox<BootFacts>& g_facts = *new FactsBox<BootFacts>;
+
+// kiln.boot's stop after the entry point (a required boot mod whose published content could not be applied,
+// boot_svc b_activation_fault): the same state files as hold_boot, from the facts boot() ended with.
+void late_hold_boot(void*, const std::string& last_line) {
+    const std::string why = "a required boot mod's content could not be applied, so Kiln stopped the start (no save loads "
+                            "without it); boot.json \"boot\" says which mod and why";
+    bool published = false;
+    g_facts.with([&](BootFacts& lf) {
+        published = true;
+        lf.errors.push_back(why);
+        write_boot_json(lf);
+    });
+    if (!published) return;
+    progress_state::failed(why);
+    wait_for_file_text(paths().state / L"progress.json", "\"failed\"");
+    wait_for_file_text(paths().logs / L"kiln.log", last_line);
+}
+
+// boot.json's "boot"."stop" says `code`: waited for like the other files (bounded).
+bool wait_for_stop_record(const std::filesystem::path& file, uint32_t code) {
+    const double until = now_ms() + 1000;
+    std::string got;
+    while (now_ms() < until) {
+        if (read_file(file, &got)) {
+            const auto doc = nlohmann::json::parse(got, nullptr, false);
+            if (doc.is_object() && doc.contains("boot") && doc["boot"].is_object() && doc["boot"].contains("stop") &&
+                doc["boot"]["stop"].is_object() && doc["boot"]["stop"].value("code", 0u) == code)
+                return true;
+        }
+        Sleep(10);
+    }
+    return false;
+}
+
+// A service's stop (kiln.boot stop_start: kiln.knowledge's roster that cannot be held), before or after the game's
+// entry point: the same files as hold_boot and late_hold_boot, from the facts boot() published last (g_facts: never
+// boot()'s own frame, so any thread may call this at any moment). Best effort: it writes progress.json and boot.json,
+// then waits, a second at most each, until progress.json says "failed", boot.json holds the stop record and kiln.log
+// the stop line; that is text another reader can see, not a flush of every file to the disk. At a bound it goes on and
+// says which file it did not see.
+std::atomic<bool> g_stop_before_entry{true};
+void stop_state(void*, const std::string& last_line, const std::string& why, uint32_t code) {
+    progress_state::failed(why);
+    const bool facts = g_facts.with([&](BootFacts& f) {
+        f.errors.push_back(why);
+        write_boot_json(f);
+    });
+    if (g_stop_before_entry.load()) caps::boot_complete();  // capabilities.json is not written yet before the entry point
+    std::string missed;
+    if (!wait_for_file_text(paths().state / L"progress.json", "\"failed\"")) missed += " progress.json";
+    if (!facts) missed += " boot.json (no facts published yet)";
+    else if (!wait_for_stop_record(paths().state / L"boot.json", code)) missed += " boot.json";
+    if (!missed.empty()) KLOG_W("boot: the stop goes on without seeing its record in:%s (a second each at most)", missed.c_str());
+    if (!wait_for_file_text(paths().logs / L"kiln.log", last_line))
+        KLOG_W("boot: the stop goes on without seeing its line in kiln.log (a second at most)");
+}
+
 void boot() {
     snapshot_entry();  // before anything loads a DLL
     init_paths();
@@ -470,6 +574,7 @@ void boot() {
     load_config();
     profile::load();
     compat::init();  // compat-rules.json (shipped, then the player's); adds overlaps and rules to state/hooks.json
+    hooks::add_map_extension(&sigdb::code_patch_map);  // state/hooks.json "codePatches": who changed which code (inbox 39)
     if (profile::state().mode == KILN_PROFILE_INVALID)
         f.errors.push_back("profile " + profile::state().file + " is invalid (" + profile::state().error + "): no mods loaded");
     if (!init_image()) {
@@ -488,6 +593,7 @@ void boot() {
     // Server or client: its own definitions, build records and kiln.json section.
     const uint32_t side = image().side;
     apply_side(side);
+    gates::configure(side, config().preview_all, config().preview);  // before early plugins or any service init
     // after apply_side: kiln.json's side section may switch .NET (clr) off or on, and the plan follows what applies
     progress_state::begin(kiln_build, side_name(side), f.started_ms, started_utc, start_plan());
     std::string note;
@@ -497,14 +603,15 @@ void boot() {
     progress_state::step("native-early");
     compat::apply_early();  // rules that switch a listed mod off: before anything reads the profile
     native_mods::discover(verified);
-    native_mods::run_early();
     // Another loader that looks for game functions by their bytes on its own thread (shroudlink's client addon) gets to
-    // finish looking before Kiln hooks anything: a Kiln hook over a prologue would hide that function from it.
-    if (verified || config().policy_any) {
-        progress_state::step("native-early", "Waiting for other loaders' code scans");
-        foreign::wait_for_scanners(g_boot_info.addon_log_size);
-        if (foreign::waits().empty()) progress_state::step("native-early", "Loading early native mods");  // none to wait for
-    }
+    // finish looking before Kiln hooks anything and before the early native mods start: a hook over a prologue, Kiln's
+    // or an early native mod's (Auto Doors 1.1.0 hooks the text function at rva 0xaff9f0 that the addon's native UI
+    // scans for), would hide that function from it.
+    // Native policy defaults to always, including safe idle on an unverified build. The scanner gate must too.
+    progress_state::step("native-early", "Waiting for other loaders' code scans");
+    foreign::wait_for_scanners(g_boot_info.addon_log_size);
+    progress_state::step("native-early", "Loading early native mods");
+    native_mods::run_early();
     // kiln.hooks for early plugins that hook game code (kiln-shroudforge's native runtime does it while it initialises);
     // taken away again below when this start is safe idle.
     const bool early_hooks = (verified || config().policy_any) && hooks::serve_early();
@@ -542,19 +649,24 @@ void boot() {
     if (early_hooks && !hooks) hooks::withdraw_early();
     set_runtime_state(verified, hooks);
     if (hooks) svc::init_all();
-    gates::configure(side, config().preview_all, config().preview);  // the client gate, minus kiln.json's "preview"
     caps::core_rows(hooks, verified, f.safe_idle);  // before the service DLLs and plugins, which add their own rows
     for (const auto& feature : sigdb::failed_features()) KLOG_W("feature %s unavailable on this build", feature.c_str());
     // A boot profile (an enabled mod with "boot": true) defers the six collectors' definitions to one generation that
     // is published after OnBoot: decided here, so the collectors know it in kiln_plugin_main and on_ready.
     boot_svc::decide(hooks, f.safe_idle);
 
+    // a service may stop the start from here on (kiln.boot stop_start): its files come from the copy of these facts
+    // published after each change below (g_facts), never from this frame
+    g_facts.publish(f);
+    boot_svc::stop_writer(&stop_state, nullptr);
     if (hooks) load_plugins();  // kiln/services/*.dll, then plugins (profile-aware), then on_ready
     else progress_state::step("plugins");
+    native_mods::plugins_ready();
     if (hooks) boot_svc::bound();  // every on_ready ran: the collectors are registered
     if (hooks) arm_unload();    // on_unload at the process's exit call
     for (const auto& p : plugin_records())
         if (std::string_view(p.status) == "failed") f.errors.push_back("plugin " + p.file + ": " + p.error);
+    g_facts.publish(f);
     progress_state::step("native");
     native_mods::run_boot();
     native_mods::arm_world(hooks);
@@ -563,9 +675,11 @@ void boot() {
     if (config().clr) {
         progress_state::step("dotnet", {}, "Kiln.Host");
         f.clr_tried = true;
+        g_facts.publish(f);  // a boot generation's prepare (inside clr::boot) may stop the start
         f.clr_started = clr::boot(api());
         if (!f.clr_started) f.clr_error = "the .NET host did not start (kiln.log, [clr] lines)";
     }
+    g_facts.publish(f);
     // Kiln.Host ran the boot mods' OnBoot and committed their generation inside clr::boot. In a boot profile anything but
     // a published generation keeps the entry point held and ends the process (KILN_BOOT_EXIT_CODE): no save loads
     // without its mods' content. The commit sits before chain.ini [late] DLLs and before the game's entry point.
@@ -574,6 +688,9 @@ void boot() {
     native_mods::run_late();  // chain DLLs named in kiln/chain.ini [late]: after everything Kiln hosts hooked
     check_entry_patch(f);
     write_boot_json(f);
+    g_facts.publish(f);  // the facts boot ended with: a later stop or late hold writes from these
+    boot_svc::late_hold(&late_hold_boot, nullptr);
+    g_stop_before_entry.store(false);
     caps::boot_complete();  // capabilities.json, then a write after each change (at most one a second)
     hooks::boot_complete();  // state/hooks.json + the foreign-hook check (kiln.hooks v2)
     compat::boot_done();

@@ -308,6 +308,7 @@ fn modpacks_carry_the_enshwick_mods_players_need_and_never_server_only_ones() {
     assert_eq!(req[1].version, "1.0.0");
     let built = modpack::build(&server, &t.0.join("out"), "Isles", "1", &mut NoProgress).unwrap();
     assert_eq!(built.manifest.mods.iter().map(|m| m.path.as_str()).collect::<Vec<_>>(), ["enshwick/lockers", "enshwick/you.lanterns"]);
+    modpack::check_against(&modpack::verify(&built.file, Some(&built.sha256)).unwrap(), &req).unwrap();
     // a player installs it: the library takes both with the same kdh1, the profile lists them
     let dirs = DataDirs::at(t.0.join("data"));
     let game = game_with_z(&t.0);

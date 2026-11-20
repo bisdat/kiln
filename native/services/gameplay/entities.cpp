@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Every entity the server world creates or destroys (Forge: EntityJoinLevelEvent / EntityLeaveLevelEvent), not only
 // Kiln.Spawn's: creatures from spawners, NPCs, props, pickups, loot, child entities, players, and the entities the save
-// loads. Two raw kiln.hooks links on the engine's immediate entity functions (docs/re/spawn.md, docs/re/gameplay.md section 9):
+// loads. Two checked typed kiln.hooks links on the engine's immediate entity functions (docs/re/spawn.md, docs/re/gameplay.md section 9):
 //  - createEntity(storage, id, SpawnRequest*, mask*) -> id: every creation path ends here (SpawnWrapper for Kiln.Spawn
 //    and admin spawns, the command executor for the queued creates of game programs, the save loader).
 //  - destroyEntity(storage, id, mode, skip_culled) -> bool: the command executor's queued destroys, the game's own
@@ -9,10 +9,15 @@
 // Both may run on game worker threads inside the step. With nobody subscribed the hooks only test an atomic mask. With
 // subscribers they read the entity record (template, parent) and position, classify the template through kiln.spawn
 // (thread-safe) against the category filter, and append a record; Post reports them on the tick thread.
+#ifdef _WIN32
 #include <windows.h>
+#else
+#define __try try
+#define __except(x) catch (...)
+#endif
 
 #include "internal.h"
-#include "kiln_hook.hpp"
+#include "demand_hooks.h"
 #include "services/kiln_spawn.h"
 
 namespace kg {
@@ -21,7 +26,7 @@ namespace {
 using CreateFn = uint32_t(__fastcall*)(uintptr_t storage, uint32_t id, void* request, void* mask);
 using DestroyFn = uint8_t(__fastcall*)(uintptr_t storage, uint32_t id, uint8_t mode, uint8_t skip_culled);
 
-kiln::RawHook h_create, h_destroy;
+FrameLink h_create{KILN_GAMEPLAY_HOOK_ENTITIES}, h_destroy{KILN_GAMEPLAY_HOOK_ENTITIES};
 const KilnSpawnApi* g_spawn = nullptr;
 
 struct Offs {
@@ -161,6 +166,7 @@ bool entities_install() {
         return g_api->symbol(KilnStr{n, std::strlen(n)}, out) == KILN_OK && *out;
     };
     auto cst = [](const char* n, int64_t* out) { return g_api->constant(KilnStr{n, std::strlen(n)}, out) == KILN_OK; };
+    auto resolve = [&]() -> bool {
     if (!g_api->feature(kstr("gameplay.entities"))) return false;
     if (!sym("spawn/CreateEntity", &create) || !sym("spawn/DestroyEntity", &destroy)) return false;
     if (!cst("spawn/storage.entity_map", &O.entity_map) || !cst("spawn/storage.entity_map_cap", &O.entity_cap) ||
@@ -175,23 +181,21 @@ bool entities_install() {
              static_cast<long long>(O.entity_records), static_cast<long long>(O.rec_template));
         return false;
     }
-    if (!h_create.install(g_api, g_owner, create, reinterpret_cast<void*>(&hk_create), "spawn/CreateEntity")) {
-        KG_E("hooking createEntity at %p failed", reinterpret_cast<void*>(create));
-        return false;
-    }
-    if (!h_destroy.install(g_api, g_owner, destroy, reinterpret_cast<void*>(&hk_destroy), "spawn/DestroyEntity")) {
-        KG_E("hooking destroyEntity at %p failed", reinterpret_cast<void*>(destroy));
-        h_create = {};
-        return false;
-    }
-    g_ready = true;
     return true;
+    };
+    g_ready=resolve();
+    hook_register(KILN_GAMEPLAY_HOOK_ENTITIES,&h_create,g_ready ? create : 0,"spawn/CreateEntity",&FrameLink::dispatch<&hk_create>,
+                  {KILN_SIG_PTR,KILN_SIG_U32,KILN_SIG_PTR,KILN_SIG_PTR},KILN_SIG_U32);
+    hook_register(KILN_GAMEPLAY_HOOK_ENTITIES,&h_destroy,g_ready ? destroy : 0,"spawn/DestroyEntity",&FrameLink::dispatch<&hk_destroy>,
+                  {KILN_SIG_PTR,KILN_SIG_U32,KILN_SIG_U8,KILN_SIG_U8},KILN_SIG_U8);
+    return g_ready;
 }
 
-bool entities_ready() { return g_ready; }
+bool entities_ready() { return hooks_installed(KILN_GAMEPLAY_HOOK_ENTITIES); }
 
 KilnResult entity_filter(uint32_t categories) {
     if (!g_ready) return KILN_ERR_UNAVAILABLE;
+    if ((categories & KILN_GAMEPLAY_ENTITY_ALL) && !hooks_request(KILN_GAMEPLAY_HOOK_ENTITIES,g_owner)) return KILN_ERR_UNAVAILABLE;
     const uint32_t old = g_categories.exchange(categories & KILN_GAMEPLAY_ENTITY_ALL);
     if (old != (categories & KILN_GAMEPLAY_ENTITY_ALL))
         KG_I("entity events: categories 0x%x (was 0x%x)", categories & KILN_GAMEPLAY_ENTITY_ALL, old);

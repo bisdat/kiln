@@ -141,6 +141,7 @@ struct Shape {
     std::vector<std::string> names;      // per position ("" = unnamed); the sret buffer is "(return buffer)"
     bool sret = false;
 };
+bool compiled_matches(const KilnSig& compiled, const Sig& loaded, std::string* reason);
 Shape shape_of(const Sig& sig);
 Shape shape_of(const KilnSig& sig);  // the caller validated it
 

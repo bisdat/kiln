@@ -1,0 +1,143 @@
+{
+  "format": 1,
+  "side": "server",
+  "comment": "kiln.decisions and kiln.component_changes (dev.28, cancelable events): the death boundary inside combat/DeathProgram, the two loot programs and their pickup helpers (captured from their one caller: the helpers' own prologues match twice), BuildFinish, the two generic mark-written entries (leads only: nothing hooks them in v1) and the live-player mask offset. Only new definitions: combat/*, gameplay/*, items/* names come from their own files. Evidence: docs/re/events.md.",
+  "symbols": {
+    "events/BuildFinish": {
+      "find": [
+        {
+          "pattern": "48 89 5C 24 18 55 57 41 56 48 83 EC 30 48 89 74 24 58 4C 8B F1 48 8B 89 E8 00 00 00 41 0F B6 E9 41 8B F8 48 8B DA 45 84 C9"
+        }
+      ]
+    },
+    "events/MarkRecordWritten": {
+      "find": [
+        {
+          "pattern": "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 48 89 7C 24 20 41 56 48 83 EC 30 4D 8B 50 20 49 8B F0 41 0F B7 E9 4C 8B F2"
+        }
+      ]
+    },
+    "events/MarkIteratorWritten": {
+      "find": [
+        {
+          "pattern": "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 48 89 7C 24 20 41 54 41 56 41 57 48 83 EC 30 48 8B B1 90 02 00 00 49 8B D9"
+        }
+      ]
+    },
+    "events/LootPickupProgram": {
+      "find": [
+        {
+          "pattern": "48 89 4C 24 08 55 41 56 48 8D AC 24 78 FF FF FF 48 81 EC 88 01 00 00 41 B8 B8 00 00 00 48 8D 55 80 4C 8B F1 E8 ?? ?? ?? ??"
+        }
+      ]
+    },
+    "events/LootRangeProgram": {
+      "find": [
+        {
+          "pattern": "40 55 57 48 8D 6C 24 C8 48 81 EC 38 01 00 00 41 B8 D8 00 00 00 48 8D 54 24 40 48 8B F9 E8 ?? ?? ?? ?? 41 B8 D8 00 00 00"
+        }
+      ]
+    },
+    "@events/RangePickupCall": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "events/LootRangeProgram",
+            "size": 512
+          },
+          "pattern": "48 89 44 24 20 E8 {events/PickupInRange:rel32} 48 8D 55 68"
+        }
+      ]
+    },
+    "@events/ManualPickupCall": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "events/LootPickupProgram",
+            "size": 1024
+          },
+          "pattern": "48 89 44 24 20 E8 {events/PickupToInventory:rel32} 80 7C 24 40 00"
+        }
+      ]
+    },
+    "@events/PlayerMask": {
+      "find": [
+        {
+          "pattern": "66 44 39 B1 {events/storage.players_mask:d32} 40 0F 95 C7 48 8B 01"
+        }
+      ]
+    },
+    "events/DeathBoundary": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "combat/DeathProgram",
+            "size": 2048
+          },
+          "pattern": "48 8B 4C 24 70 85 C0 7E ?? 48 85 C9"
+        }
+      ]
+    },
+    "@events/DeathNext": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "combat/DeathProgram",
+            "size": 512
+          },
+          "pattern": "48 8B 5C 24 38 48 85 DB 0F 84 {events/DeathNextEntity:rel32} F6 43 06 01"
+        }
+      ]
+    }
+  },
+  "constants": {},
+  "features": {
+    "events.thread_report": {
+      "constants": [
+        "events/storage.players_mask"
+      ]
+    },
+    "events.death": {
+      "symbols": [
+        "combat/DeathProgram",
+        "events/DeathBoundary",
+        "events/DeathNextEntity"
+      ]
+    },
+    "events.pickup": {
+      "symbols": [
+        "events/PickupToInventory",
+        "events/PickupInRange"
+      ]
+    },
+    "events.build": {
+      "symbols": [
+        "gameplay/PlaceBlueprint",
+        "gameplay/PlaceProp",
+        "gameplay/DismantleBlock",
+        "gameplay/DismantleBlock2",
+        "gameplay/PickUpProp",
+        "gameplay/TerraformImpact",
+        "events/BuildFinish"
+      ]
+    },
+    "events.equip": {
+      "symbols": [
+        "items/EquipItem",
+        "items/UnequipItem"
+      ]
+    },
+    "events.observe_marks": {
+      "symbols": [
+        "events/MarkRecordWritten",
+        "events/MarkIteratorWritten"
+      ]
+    },
+    "events.component_net": {
+      "symbols": [
+        "GetComponent",
+        "WaitWorldJobs"
+      ]
+    }
+  }
+}

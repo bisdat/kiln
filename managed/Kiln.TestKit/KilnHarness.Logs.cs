@@ -47,6 +47,33 @@ public sealed partial class KilnHarness
         lock (_logLock) return string.Join("\n", _lines);
     }
 
+    /// <summary>The path of <c>kiln/logs/kiln.log</c>, the file the harness writes every captured line to.</summary>
+    public string LogFile => Path.Combine(LogsDirectory, "kiln.log");
+
+    /// <summary>The text of <see cref="LogFile"/> as written so far ("" when it was not created). The harness keeps the
+    /// file open for writing while it lives, and on Windows <c>File.ReadAllText</c> cannot open a file another handle
+    /// writes to: this reads it with the sharing Windows needs, on every OS. <see cref="Logs"/> holds the same lines.</summary>
+    public string ReadLogFile()
+    {
+        lock (_logLock)  // no line half written while it is read
+        {
+            try
+            {
+                using var stream = new FileStream(LogFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                using var reader = new StreamReader(stream);
+                return reader.ReadToEnd();
+            }
+            catch (FileNotFoundException)
+            {
+                return "";
+            }
+            catch (DirectoryNotFoundException)
+            {
+                return "";
+            }
+        }
+    }
+
     /// <summary>From the kit's backend (any thread): one line of Kiln's log.</summary>
     internal void Capture(LogLevel level, string source, string text)
     {
@@ -71,7 +98,7 @@ public sealed partial class KilnHarness
     {
         try
         {
-            _logFile = new StreamWriter(new FileStream(Path.Combine(LogsDirectory, "kiln.log"), FileMode.Create, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete))
+            _logFile = new StreamWriter(new FileStream(LogFile, FileMode.Create, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete))
             {
                 AutoFlush = true,
             };

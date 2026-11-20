@@ -1,0 +1,18 @@
+{
+  "format": 1,
+  "items": {
+    "shard": { "name": "Shard", "stack": 100 },
+    "ember-ring": { "name": "Ember Ring", "recipe": { "needs": { "shard": 2 } } }
+  },
+  "weapons": {
+    "ember-sword": { "name": "Ember Sword", "class": "sword", "recipe": { "needs": { "shard": 1 } } },
+    "found-sword": { "name": "Found Sword", "class": "sword" }
+  },
+  "rarityRolls": {
+    "crafted": { "items": [ "ember-sword" ], "weights": { "common": 3, "rare": 1 } },
+    "own-pattern": { "items": [ "fixture-rarity-rolls:ember-*" ], "sources": "craft", "weights": { "epic": 1 } },
+    "loot-only": { "items": [ "ember-sword", "found-sword", "Weapon_*" ], "sources": "loot, give", "weights": { "legendary": 1 } },
+    "other-mod": { "items": [ "other-mod:ember-sword" ], "weights": { "rare": 1 } },
+    "bad": { "items": [], "sources": "crafting", "weights": { "mythic": 1 }, "chance": 0.5 }
+  }
+}

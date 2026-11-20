@@ -23,6 +23,7 @@
 #include "content.h"
 #include "nlohmann/json.hpp"
 #include "services/kiln_gamedata.h"
+#include "services/kiln_types.h"
 
 namespace kc {
 
@@ -32,12 +33,14 @@ constexpr uint32_t GD_KIND_BASE = 16;  // store slot kinds >= this are gamedata'
 
 // ---- hooks called by kiln.content (content.cpp, packs.cpp, store.cpp) ------------------------------------------
 void gd_boot();
+void gd_boot_patches_bind();  // the boot generation's resource patches (gamedata_bootpatch.cpp): collector "patches"
 void gd_world_ready(uintptr_t world, uint32_t kind);
 void gd_world_reset();
 void gd_tick(uint64_t step);
 void gd_packs_begin();
 void gd_packs_end();
 void gd_owner_gone(KilnOwner owner);
+void gd_owner_revoked(KilnOwner owner);  // the owner is revoked (not merely reverted): since 0.2.0-dev.29
 void gd_pack_sections(KilnOwner owner, uint64_t seq_base, const gjson& doc, const std::string& source, ApplyResult* out);
 // The "add" lists of the sections, before kiln.content's own sections (items may point at clones of the same pack).
 void gd_pack_adds(KilnOwner owner, uint64_t seq_base, const gjson& doc, const std::string& source, ApplyResult* out);
@@ -140,6 +143,62 @@ void configs_scan();
 // references, {"mul","add","min","max","raiseOnly","lowerOnly","set"} ops on the original). *reset: {"reset": true}.
 bool parse_leaf(const Field& f, const gjson& v, const uint8_t* original, uint8_t* out, bool* reset, std::string* err);
 
+// ---- structural edits of a boot resource patch (gamedata_bootstruct.cpp) -----------------------------------------
+// Made in the copy of a resource before its field writes, in this order: remove, add, copy (components), clear, replace,
+// append (lists); the copy only grows (a moved list or a new component's data goes behind its own bytes).
+// *removed / *added / *appended: how many entries changed (0: nothing to do, still true).
+bool boot_remove_components(const TType* type, const std::vector<std::string>& names, std::vector<uint8_t>* bytes, size_t* removed,
+                            std::string* err);
+bool boot_add_components(const TType* type, const std::vector<std::string>& names, std::vector<uint8_t>* bytes, size_t* added,
+                         std::string* err);
+// *first (when given): the index of the first value appended (the list's length before it).
+bool boot_append(Root kind, const TType* root, const std::string& path, const std::vector<gjson>& values, bool above_last,
+                 std::vector<uint8_t>* bytes, size_t* appended, std::string* err, size_t* first = nullptr);
+// "clear": the list at `path` (any element type) made empty. *cleared: how many elements it had.
+bool boot_clear(Root kind, const TType* root, const std::string& path, std::vector<uint8_t>* bytes, size_t* cleared, std::string* err);
+// "replace": the list of scalars at `path` holds exactly `values` (a new list behind the copy). *written: values.size().
+bool boot_replace(Root kind, const TType* root, const std::string& path, const std::vector<gjson>& values, std::vector<uint8_t>* bytes,
+                  size_t* written, std::string* err);
+// "copyComponents": each component (by its type name) copied whole from another template's bytes, its lists, strings,
+// optionals and variants with it (laid out behind the copy, offsets made relative to their new place): added when the
+// template has none of that type, the first of that type replaced when it has. `from` names the source in messages.
+struct CopySource {
+    std::string brief, from;
+    const uint8_t* data = nullptr;  // the source template's bytes (nullptr: not in this game build, or `why`)
+    size_t len = 0;
+    std::string why;                // why it was not read, when that is not a missing resource
+};
+// `max_bytes`: what the copy may grow to in all, every component's data and padding counted before it is allocated (the
+// patched resource's cap).
+bool boot_copy_components(const TType* type, const std::vector<CopySource>& copies, std::vector<uint8_t>* bytes, size_t* copied,
+                          std::string* err, size_t max_bytes = 64u << 20);
+
+// A component type a template can hold, by its name without "keen::ecs::" ("PickupItemZone"): a struct that derives
+// from keen::ecs::Component and is not that base, and, when kiln.types has the game's list of ECS components (read from
+// the exe), one on that list (an intermediate base below Component is not). nullptr + *why otherwise. Boot resource
+// patches (prepare and apply) and clones' addComponents ask it.
+inline const TType* component_type(const std::string& brief, std::string* why) {
+    const TType* t = brief.empty() || brief.find(':') != std::string::npos ? nullptr : type_named("keen::ecs::" + brief);
+    const TType* r = t ? t->resolved() : nullptr;
+    const TType* b = r;
+    for (int depth = 0; b && b->name != "keen::ecs::Component" && depth < 32; ++depth) b = b->inner();
+    if (!r || !b || b->name != "keen::ecs::Component" || r == b || r->kind != K_STRUCT)
+        return *why = "\"" + brief + "\" is not a component type of this game build", nullptr;
+    const auto* T = g_api ? static_cast<const KilnTypesApi*>(g_api->service(KilnStr{KILN_TYPES_SERVICE, sizeof(KILN_TYPES_SERVICE) - 1}, 1))
+                          : nullptr;
+    const uint32_t n = T && T->header.size >= offsetof(KilnTypesApi, component_type_at) + sizeof(void*) && T->type_info && T->component_type_count &&
+                               T->component_type_at
+                           ? T->component_type_count()
+                           : 0;
+    if (!n) return r;  // no list to ask: the base class says it
+    for (uint32_t i = 0; i < n && i < 65536; ++i) {
+        KilnTypeInfo info{};
+        info.size = sizeof info;
+        if (T->type_info(T->component_type_at(i), &info) == KILN_OK && info.hash == r->hash) return r;
+    }
+    return *why = "\"" + brief + "\" is not one of the game's ECS components (a base type, or a type no entity holds)", nullptr;
+}
+
 // ============================================================================================= resources ========
 bool res_ready();
 const char* res_via();
@@ -232,6 +291,7 @@ void clones_world_ready(uintptr_t world, uint32_t kind);
 void clones_world_reset();
 void clones_tick(uint64_t step);
 uint32_t clones_forget_unbound(KilnOwner owner);  // a boot generation not published (chapter 08): owner's unregistered clones out
+void clones_boot_failed(std::vector<BootFailed>* out);  // a boot generation's clones ("boot:<mod>") a world refused (store_mutex held)
 KilnResult clones_define(KilnOwner owner, uint32_t section, const std::string& json, bool pack, const std::string& source,
                          std::string* report);
 std::string clones_json();
@@ -241,6 +301,16 @@ void clones_packs_begin();
 void clones_packs_end();
 // The buff mirror follows the game's buff records (their layers); store_mutex held. Cheap when nothing changed.
 void buffs_sync();
+// Buff clones that answer (kiln_gamedata.h define_buff_result, buff_registration, buff_budget; since 0.2.0-dev.29).
+KilnResult define_buff_result(KilnOwner owner, const std::string& json, uint32_t timing, KilnDefinitionReply* out, std::string* report);
+KilnResult buff_receipt(const uint8_t registration_id[16], KilnDefinitionReply* out, std::string* report);
+void buff_budget(KilnCapacityInfo* out);  // out->size checked by the caller
+void clones_owner_revoked(KilnOwner owner);  // kiln.content found the owner revoked: its clones' records are reserved
+void pending_mods_changed(const std::vector<std::string>& mods);
+void pending_owner_loaded(KilnOwner owner, const std::string& mod);
+void pending_replay();   // clones_boot: the buff definitions mods stored for this start
+void pending_settle();   // after a world's load: stored definitions that settled lose their file (clone lock held)
+bool gd_ready();         // kiln.gamedata's registries are built for the current world
 // A buff's GUID (buffTypeId = FNV-1a of it): a clone's, or one the game data references. false: not known.
 bool buff_guid(uint32_t id, uint8_t out[16]);
 void buff_guid_note(const uint8_t g[16]);  // a BuffTypeReference seen in the game data (configs_scan)

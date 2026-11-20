@@ -58,6 +58,7 @@
 #include <greeneye/jumppatch.h>
 
 #include "greeneye_internal.h"
+#include "original_code.h"
 
 using kgreeneye::Log;
 using kgreeneye::Narrow;
@@ -134,6 +135,7 @@ thread_local Generation* g_staging = nullptr;                // the generation s
 thread_local bool g_stagingFailed = false;
 Generation* g_committing = nullptr;             // started; its new hook sites wait to be written
 unsigned g_commitTries = 0;
+std::string g_unopenedNote;                     // WriteStaged: threads it could not open, for Commit to log
 constexpr unsigned kCommitTries = 100;          // safe points to wait for them, then the reload fails
 std::map<std::string, void*> g_keep;
 std::atomic<bool> g_initialized{false}, g_starting{true}, g_stopping{false};
@@ -220,11 +222,6 @@ void Read(const void* p, void* out, size_t n)
     ReleaseSRWLockShared(&g_slotsLock);
 }
 
-uint8_t* g_text = nullptr;
-size_t g_textSize = 0;
-std::once_flag g_canonicalOnce;
-std::vector<uint8_t> g_canonical; // .text as it was before our hooks (made on first find)
-
 bool TextSection(uint8_t*& start, size_t& size)
 {
     auto base = reinterpret_cast<uint8_t*>(GetModuleHandleW(nullptr));
@@ -240,63 +237,42 @@ bool TextSection(uint8_t*& start, size_t& size)
     return false;
 }
 
-std::vector<int> ParsePattern(const char* pattern)
+bool ReadOriginalCode(std::vector<uint8_t>& out, std::string& why)
 {
-    std::vector<int> bytes;
-    if (!pattern) return bytes;
-    auto hex = [](unsigned char c) -> int {
-        if (c >= '0' && c <= '9') return c - '0';
-        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-        return -1;
-    };
-    for (const char* p = pattern; *p;) {
-        if (std::isspace(static_cast<unsigned char>(*p))) { ++p; continue; }
-        if (*p == '?') {
-            bytes.push_back(-1);
-            p += p[1] == '?' ? 2 : 1;
-        } else {
-            const int a = hex(static_cast<unsigned char>(p[0]));
-            if (!p[1]) return {};
-            const int b = hex(static_cast<unsigned char>(p[1]));
-            if (a < 0 || b < 0) return {};
-            bytes.push_back((a << 4) | b);
-            p += 2;
+    std::wstring path(32768, L'\0');
+    DWORD n = GetModuleFileNameW(nullptr, path.data(), static_cast<DWORD>(path.size()));
+    if (!n || n >= path.size()) return why = "cannot find the exe file", false;
+    path.resize(n);
+    struct FileView {
+        HANDLE file = INVALID_HANDLE_VALUE, mapping = nullptr;
+        const uint8_t* bytes = nullptr;
+        ~FileView() {
+            if (bytes) UnmapViewOfFile(bytes);
+            if (mapping) CloseHandle(mapping);
+            if (file != INVALID_HANDLE_VALUE) CloseHandle(file);
         }
-    }
-    return bytes;
+    } view;
+    view.file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr,
+                            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (view.file == INVALID_HANDLE_VALUE) return why = "cannot open the exe file", false;
+    LARGE_INTEGER size{};
+    if (!GetFileSizeEx(view.file, &size) || size.QuadPart <= 0 || size.QuadPart > 1024ll * 1024 * 1024)
+        return why = "invalid exe file size", false;
+    view.mapping = CreateFileMappingW(view.file, nullptr, PAGE_READONLY, 0, 0, nullptr);
+    if (view.mapping) view.bytes = static_cast<const uint8_t*>(MapViewOfFile(view.mapping, FILE_MAP_READ, 0, 0, 0));
+    if (!view.bytes) return why = "cannot map the exe file", false;
+    auto* base = reinterpret_cast<uint8_t*>(GetModuleHandleW(nullptr));
+    auto* nt = reinterpret_cast<IMAGE_NT_HEADERS*>(base + reinterpret_cast<IMAGE_DOS_HEADER*>(base)->e_lfanew);
+    uint8_t* text = nullptr;
+    size_t textSize = 0;
+    if (!TextSection(text, textSize)) return why = "no loaded code section", false;
+    const code::Identity id{reinterpret_cast<uintptr_t>(base), nt->FileHeader.TimeDateStamp,
+        nt->OptionalHeader.SizeOfImage, static_cast<uint32_t>(text - base), textSize};
+    return code::OriginalText(view.bytes, static_cast<size_t>(size.QuadPart), id, text, out, why,
+        [](uintptr_t at, uintptr_t* target) { return Copy(target, reinterpret_cast<const void*>(at), sizeof(*target)); });
 }
 
-uint8_t* Find(const char* pattern, void* module)
-{
-    if (module && module != GetModuleHandleW(nullptr))
-        return nullptr; // only the exe's code
-    std::call_once(g_canonicalOnce, [] {
-        if (!TextSection(g_text, g_textSize)) return;
-        g_canonical.resize(g_textSize);
-        Read(g_text, g_canonical.data(), g_textSize);
-    });
-    std::vector<int> pat = ParsePattern(pattern);
-    const uint8_t* text = g_canonical.data();
-    const size_t size = g_canonical.size(), n = pat.size();
-    if (!n || n > size || pat[0] < 0) return nullptr;
-    const uint8_t first = static_cast<uint8_t>(pat[0]);
-    const uint8_t* found = nullptr;
-    for (size_t offset = 0; offset <= size - n;) {
-        const auto* p = static_cast<const uint8_t*>(memchr(text + offset, first, size - n - offset + 1));
-        if (!p) break;
-        offset = static_cast<size_t>(p - text) + 1;
-        size_t k = 1;
-        while (k < n && (pat[k] < 0 || p[k] == pat[k])) ++k;
-        if (k == n) {
-            if (found) return nullptr;
-            found = p;
-        }
-    }
-    if (!found)
-        found = jumppatch::FindBehindHook(g_canonical.data(), size, pat.data(), n);
-    return found ? g_text + (found - text) : nullptr;
-}
+#include "find_code.h"
 
 // --- hooks ------------------------------------------------------------------------------------
 
@@ -731,19 +707,35 @@ Patch WriteStaged(Mod& mod, size_t& count, std::string& why)
         why = "could not list the threads (error " + std::to_string(GetLastError()) + ")";
         return Patch::Busy;
     }
+    // What kept the write back, for `why` (inbox 43: one generic sentence hid which condition it was). Filled before and
+    // while the threads are stopped with plain stores only; the sentence is built after they run again.
+    struct Blocker {
+        DWORD thread = 0, error = 0;
+        uintptr_t rip = 0, hook = 0;
+        unsigned count = 0;
+    } unopened, unstopped, unread, inside;
     const DWORD process = GetCurrentProcessId(), self = GetCurrentThreadId();
     THREADENTRY32 entry{sizeof(entry)};
     bool listed = true;
+    DWORD listError = 0;
     BOOL more = Thread32First(snapshot, &entry);
-    if (!more) listed = false;
+    if (!more) listed = false, listError = GetLastError();
     for (; more; more = Thread32Next(snapshot, &entry)) {
         if (entry.th32OwnerProcessID != process || entry.th32ThreadID == self) continue;
         HANDLE h = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_QUERY_LIMITED_INFORMATION,
                               FALSE, entry.th32ThreadID);
-        if (h) threads.push_back({h, false});
-        else if (GetLastError() != ERROR_INVALID_PARAMETER) listed = false;
+        if (h) {
+            threads.push_back({h, false});
+            continue;
+        }
+        // A thread that ended since the snapshot answers ERROR_INVALID_PARAMETER. One that cannot be opened at all
+        // (security software's threads with a restrictive DACL: nothing in the process can stop them) does not hold
+        // the write back, as in Greeneye Loader itself; it is named in the log (g_unopenedNote).
+        const DWORD error = GetLastError();
+        if (error == ERROR_INVALID_PARAMETER) continue;
+        if (!unopened.count++) unopened.thread = entry.th32ThreadID, unopened.error = error;
     }
-    if (GetLastError() != ERROR_NO_MORE_FILES) listed = false;
+    if (listed && GetLastError() != ERROR_NO_MORE_FILES) listed = false, listError = GetLastError();
     CloseHandle(snapshot);
 
     bool clear = listed, written = true;
@@ -753,19 +745,24 @@ Patch WriteStaged(Mod& mod, size_t& count, std::string& why)
         if (!t.suspended) {
             // Only a thread that has ended may refuse; anything else could be running.
             DWORD code = 0;
-            if (!GetExitCodeThread(t.handle, &code) || code == STILL_ACTIVE)
+            if (!GetExitCodeThread(t.handle, &code) || code == STILL_ACTIVE) {
                 clear = false;
+                if (!unstopped.count++) unstopped.thread = GetThreadId(t.handle), unstopped.error = GetLastError();
+            }
             continue;
         }
         CONTEXT context{};
         context.ContextFlags = CONTEXT_CONTROL; // also waits until the thread has stopped
         if (!GetThreadContext(t.handle, &context)) {
             clear = false;
+            if (!unread.count++) unread.thread = GetThreadId(t.handle), unread.error = GetLastError();
             continue;
         }
         for (const Range& r : ranges)
-            if (context.Rip >= r.lo && context.Rip < r.hi)
+            if (context.Rip >= r.lo && context.Rip < r.hi) {
                 clear = false;
+                if (!inside.count++) inside.thread = GetThreadId(t.handle), inside.rip = context.Rip, inside.hook = r.lo;
+            }
     }
     bool unchanged = true;
     if (clear) {
@@ -790,8 +787,26 @@ Patch WriteStaged(Mod& mod, size_t& count, std::string& why)
     }
 
     if (!clear) {
-        why = "a thread was where a new hook goes";
+        char line[200];
+        if (inside.count)
+            sprintf_s(line, "thread %lu was at %p, inside the new hook at %p (%u such)", inside.thread,
+                      reinterpret_cast<void*>(inside.rip), reinterpret_cast<void*>(inside.hook), inside.count);
+        else if (unstopped.count)
+            sprintf_s(line, "thread %lu could not be stopped (error %lu; %u such)", unstopped.thread, unstopped.error,
+                      unstopped.count);
+        else if (unread.count)
+            sprintf_s(line, "thread %lu was stopped but its position could not be read (error %lu; %u such)", unread.thread,
+                      unread.error, unread.count);
+        else
+            sprintf_s(line, "the process's threads could not be listed (error %lu)", listError);
+        why = std::string("a thread was where a new hook goes, or could not be checked: ") + line;
         return Patch::Busy;
+    }
+    if (unopened.count) {
+        char line[200];
+        sprintf_s(line, "%u thread(s) of the process could not be opened to stop them (thread %lu, error %lu); the hooks "
+                        "were written with those running, as Greeneye Loader does", unopened.count, unopened.thread, unopened.error);
+        g_unopenedNote = line;
     }
     if (!unchanged) {
         why = "the code changed while stopping threads for its new hooks";
@@ -855,11 +870,18 @@ void Commit(Generation* g, std::string& outcome)
     }
     g_committing = nullptr;
     g_commitTries = 0;
+    // a first start has no generation to fall back to: it did not start (inbox 43 read "generation 0 stays active")
+    const bool reload = g->mod->active.load() != nullptr;
     if (patch == Patch::Busy)
-        why = "could not write its new hooks: " + why + " at " + std::to_string(kCommitTries) + " safe points";
+        why = std::string(reload ? "could not write its new hooks: " : "could not write its hooks: ") + why + " (" +
+              std::to_string(kCommitTries) + (reload ? " safe points)" : " tries)");
     if (patch != Patch::Written) {
-        Decline(g, why, true, outcome);
+        Decline(g, why, reload, outcome);
         return;
+    }
+    if (!g_unopenedNote.empty()) {
+        Log("%s: %s", g->mod->info.name.c_str(), g_unopenedNote.c_str());
+        g_unopenedNote.clear();
     }
     Swap(g);
     outcome = "active generation " + std::to_string(g->number) + " (" + std::to_string(GetTickCount64() - g->begin) + " ms";
@@ -1107,6 +1129,20 @@ std::string StartMod(const ModInfo& info, bool* started)
     std::string outcome;
     Activate(g, outcome);
     bool ok = mod.active.load() == g;
+    if (g_side == kGreeneyeClient && info.id == "quick-deposit") {
+        auto state = [&](const char* pattern) {
+            uint8_t* target = Find(pattern, nullptr);
+            if (!target) return "missing";
+            for (const auto& s : g_slots)
+                if (s->owner == &mod && s->target == target && !s->staged) return "hooked";
+            return "not hooked";
+        };
+        const char* loop = state("40 53 55 56 57 41 54 41 55 41 56 41 57 48 81 EC 98 00 00 00 48 8D 81 ?? 4F 03 00");
+        const char* dispatch = state("4C 8B DC 55 56 57 49 8D AB 18 FF FF FF");
+        Log("Quick Deposit startup: active=%s; UiCommandLoop=%s; UiDispatch=%s; code=%s%s; %s",
+            ok ? "yes" : "no", loop, dispatch, g_codeFromFile ? "exe file" : "live: ",
+            g_codeFromFile ? "" : g_codeNote.c_str(), outcome.c_str());
+    }
     if (started)
         *started = ok;
     if (g_hotReload)

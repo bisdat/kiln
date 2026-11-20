@@ -9,6 +9,8 @@
 //    move freely; ImGui draws the cursor.
 //  - subscribe_window_input (kiln_ui.h v5): the window's key, button and focus-loss records go to native subscribers
 //    as received, before any of the above decides what the game gets.
+//  - subscribe_pointer_press (0.2.0-dev.30): left and right presses over the game's own UI go to native subscribers
+//    (the core's slot clicks); one they take is kept from the game like a key binding's press, releases always pass.
 //  - The middle and side buttons and the wheel go to the key subscribers that ask for them (subscribe_key_ex with
 //    KILN_UI_KEYS_MOUSE, kiln_ui.h v7; Kiln.Ui does), as key presses (mouse_press.h): once per physical input although
 //    the window gets each one as a raw record and as a message, a notch per WHEEL_DELTA. A press such a subscriber takes
@@ -30,6 +32,8 @@
 
 #include "backends/imgui_impl_win32.h"
 #include "imgui.h"
+#include "key_hold.h"
+#include "key_names.h"
 #include "mouse_press.h"
 #include "safetyhook.hpp"
 #include "ui.h"
@@ -62,8 +66,11 @@ chain::State g_chain;
 HWND g_attached = nullptr;
 bool g_loop_said = false;
 bool g_raw_keyboard_seen = false;
-std::atomic<bool> g_down[256] = {};  // keys down, as the window's messages told (the wheel asks from other threads)
+hold::Keys g_keys;  // keys held, across a focus loss (key_hold.h; the wheel asks from other threads)
+int g_repress_said = 0;
 bool g_consumed[256] = {};  // vk consumed by a binding: swallow its legacy messages too
+// The game's chat field (ui.h ChatInputSink, chat_input_probe.cpp): set while chat history runs, null otherwise.
+std::atomic<const ChatInputSink*> g_chat_sink{nullptr};
 std::atomic<uint32_t> g_pressed_vk{0}, g_pressed_mods{0};
 bool g_was_capturing = false;
 
@@ -133,6 +140,7 @@ uint32_t current_mods() {
 }
 
 void enqueue(HWND h, UINT m, WPARAM w, LPARAM l) {
+    if (!overlay_drawing_on()) return;
     std::lock_guard<std::mutex> lk(g_qmu);
     if (g_queue.size() >= 1024) g_queue.pop_front();
     g_queue.push_back({h, m, w, l});
@@ -147,12 +155,36 @@ bool is_key_msg(UINT m) {
            m == WM_UNICHAR;
 }
 
-// One key transition: menu key + subscribers. true = keep it from the game. A mouse button (mouse_press.h) never
-// repeats (a press while it is down means its release was lost) and is not a key for take_pressed_key.
-bool on_key(uint32_t vk, uint32_t scan, bool down, bool from_mouse = false) {
+// A new press of a key soon after its last one: what Kiln saw in between, for the log (a few times a game). One press
+// that opened a window and shut it again showed as two presses 40 ms apart (Nexus 179900169); this line tells a key
+// that bounces (released a few ms before) from one press delivered twice (no release in between).
+void say_repress(uint32_t vk, const hold::Down& d, bool raw) {
+    if (d.since_press_ms >= 150 || g_repress_said >= 5) return;
+    ++g_repress_said;
+    char name[32];
+    keys::name(vk, name, sizeof name);
+    char released[64];
+    if (d.since_release_ms == hold::kNone) std::snprintf(released, sizeof released, "no release seen in between");
+    else std::snprintf(released, sizeof released, "released %u ms before", d.since_release_ms);
+    logf(KILN_LOG_INFO, "ui: key %s went down again %u ms after its last press (%s; %s): Kiln counts a new press. If one "
+         "press of a key acted twice, send this line (said up to 5 times)", name, d.since_press_ms, released,
+         raw ? "raw input" : "key message");
+}
+
+// One key transition: menu key + subscribers. true = keep it from the game. Whether a down is a repeat: key_hold.h (no
+// release since the key's last down, handled within the repeat window; or a key message's previous-state bit). A focus
+// change does not touch it. A mouse button (mouse_press.h) never repeats (a press while it is down means its release was
+// lost) and is not a key for take_pressed_key.
+bool on_key(uint32_t vk, uint32_t scan, bool down, bool from_mouse = false, hold::Prev prev = hold::Prev::unknown) {
     if (vk == 0 || vk > 255) return false;
-    const bool repeat = down && !from_mouse && g_down[vk].load();
-    g_down[vk].store(down);
+    bool repeat = false;
+    if (down) {
+        const hold::Down d = g_keys.down(vk, from_mouse ? hold::Prev::unknown : prev, now_ms());
+        repeat = !from_mouse && d.repeat;
+        if (!repeat && !from_mouse) say_repress(vk, d, prev == hold::Prev::unknown);
+    } else {
+        g_keys.up(vk, now_ms());
+    }
     KilnUiKey k{};
     k.size = sizeof(k);
     k.vk = vk;
@@ -166,7 +198,10 @@ bool on_key(uint32_t vk, uint32_t scan, bool down, bool from_mouse = false) {
         g_pressed_mods.store(k.mods);
         g_pressed_vk.store(vk);
     }
-    const bool consumed = dispatch_key(k, from_mouse);
+    // The game's chat field keeps Up/Down while it has typing focus (chat history, GitHub issue 44); it only queues
+    // them for the game's UI thread. Kiln's own keys and the key subscribers get every other transition.
+    const ChatInputSink* chat = from_mouse ? nullptr : g_chat_sink.load(std::memory_order_acquire);
+    const bool consumed = (chat && chat->key(vk, k.mods, down, k.captured != 0)) || dispatch_key(k, from_mouse);
     if (!down) {
         g_consumed[vk] = false;
         return false;  // releases always reach the game
@@ -294,16 +329,28 @@ bool message_mouse_presses(UINT m, WPARAM w, bool over_panel) {
     }
 }
 
-// Releases can go to the newly focused window. Forget local repeat/consumption state without inventing key messages
-// for either subscribers or the game (the v5 focus record lets subscribers reset their own state).
+// The window lost the keyboard. What counts as a key press is not touched (key_hold.h): a press's own key message or a
+// held key's repeat after the loss must not count again. Consumption, a pending bind-capture press and the mouse's twins
+// and notches are forgotten, without inventing key messages for either subscribers or the game (the v5 focus record
+// lets subscribers reset their own state).
 void forget_keys() {
-    for (uint32_t vk = 0; vk < 256; ++vk) {
-        g_down[vk].store(false, std::memory_order_relaxed);
-        g_consumed[vk] = false;
-    }
+    for (uint32_t vk = 0; vk < 256; ++vk) g_consumed[vk] = false;
     g_pressed_vk.store(0, std::memory_order_relaxed);
     g_twins.clear();
     g_notches.clear();
+}
+
+// The keyboard is back: a key let go while the game had no focus is no longer held (input_key_held). Presses are not
+// touched (key_hold.h).
+void keys_back() {
+    g_keys.focus_back([](uint32_t vk) { return (GetAsyncKeyState(static_cast<int>(vk)) & 0x8000) != 0; });
+}
+
+// The repeat window follows the system's key repeat delay (key_hold.h).
+void set_repeat_window() {
+    UINT delay = 1;
+    if (!SystemParametersInfoW(SPI_GETKEYBOARDDELAY, 0, &delay, 0)) delay = 1;
+    g_keys.set_window(hold::window_for_delay(delay));
 }
 
 // A Kiln panel next to a game screen (set_hover_capture) has the mouse over it: its clicks and wheel are Kiln's.
@@ -439,6 +486,103 @@ void feed_focus_gained() {
     for (const auto& s : g_feed_subs) s->focus_lost.store(false, std::memory_order_relaxed);
 }
 
+// ---- presses on the game's own UI for native subscribers (subscribe_pointer_press, 0.2.0-dev.30) ----
+// The left and right buttons only (the middle and side buttons are key presses, mouse_press.h). One decision per physical
+// press: the raw record and the button message are paired through g_twins (kinds VK_LBUTTON / VK_RBUTTON, which the key
+// presses never use), the first to arrive leads and asks the subscribers, its twin follows that answer. Window thread.
+struct PointerSub : CallbackLifetime {
+    KilnHandle handle = 0;
+    KilnOwner owner = 0;
+    KilnUiPointerFn fn = nullptr;
+    void* user = nullptr;
+};
+std::mutex g_ptr_mu;
+std::vector<std::shared_ptr<PointerSub>> g_ptr_subs;
+std::unordered_map<KilnHandle, std::shared_ptr<PointerSub>> g_ptr_retiring;
+std::atomic<uint32_t> g_ptr_count{0};
+
+bool guarded_pointer(KilnUiPointerFn fn, const KilnUiPointerPress* p, void* user, uint32_t* answer) {
+    __try {
+        *answer = fn(p, user);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+// Pointer presses run: a subscriber exists, or a twin waits for its decision (also after the last one left).
+bool pointer_wanted() { return g_ptr_count.load(std::memory_order_relaxed) != 0 || g_twins.waiting() != 0; }
+
+// Asks the subscribers about one press at the cursor. true = keep it from the game.
+bool ask_pointer(HWND h, uint32_t button, uint32_t time, const POINT* at) {
+    std::vector<std::shared_ptr<PointerSub>> subs;
+    {
+        std::lock_guard lk(g_ptr_mu);
+        subs = g_ptr_subs;
+    }
+    if (subs.empty()) return false;
+    KilnUiPointerPress p{};
+    p.size = sizeof p;
+    p.button = button;
+    p.mods = current_mods();
+    p.time = time;
+    POINT pt{};
+    if (at) pt = *at;
+    else if (!GetCursorPos(&pt) || !ScreenToClient(h, &pt)) return false;
+    RECT rc{};
+    if (!GetClientRect(h, &rc)) return false;
+    p.x = static_cast<float>(pt.x);
+    p.y = static_cast<float>(pt.y);
+    p.client_width = static_cast<float>(rc.right - rc.left);
+    p.client_height = static_cast<float>(rc.bottom - rc.top);
+    bool take = false;
+    for (const auto& s : subs) {
+        std::lock_guard call(s->gate);
+        if (!s->active.load(std::memory_order_acquire)) continue;
+        CallbackLifetime::Invocation invocation(s.get());
+        auto* outer = t_callback;
+        t_callback = s.get();
+        uint32_t answer = KILN_UI_POINTER_PASS;
+        const bool ok = guarded_pointer(s->fn, &p, s->user, &answer);
+        t_callback = outer;
+        if (!ok) {
+            s->active.store(false, std::memory_order_release);
+            set_error("a pointer press callback faulted; removed");
+            logf(KILN_LOG_ERROR, "ui: a subscribe_pointer_press callback faulted; it was removed");
+            std::lock_guard lk(g_ptr_mu);
+            std::erase_if(g_ptr_subs, [&](const auto& x) { return x == s; });
+            g_ptr_count.store(static_cast<uint32_t>(g_ptr_subs.size()), std::memory_order_release);
+            continue;
+        }
+        take = take || answer == KILN_UI_POINTER_TAKE;
+    }
+    return take;
+}
+
+// One left/right press from one source. true = keep it from the game.
+bool pointer_press(HWND h, mouse::Source s, uint32_t button, const POINT* at) {
+    const uint32_t vk = button == 1 ? VK_LBUTTON : VK_RBUTTON;
+    const uint32_t kind = mouse::button_kind(vk, true);
+    const auto time = static_cast<uint32_t>(GetMessageTime());
+    if (const auto twin = follow_twin(s, kind, 0, time); twin.matched) return twin.kept;
+    if (g_ptr_count.load(std::memory_order_relaxed) == 0) return false;
+    const bool taken = ask_pointer(h, button, time, at);
+    g_twins.lead(s, kind, 0, time, taken);
+    return taken;
+}
+
+// The left/right presses of a raw record a subscriber took (their RI_MOUSE_*_DOWN flags).
+USHORT raw_pointer_presses(HWND h, const RAWMOUSE& ms) {
+    USHORT taken = 0;
+    if ((ms.usButtonFlags & RI_MOUSE_LEFT_BUTTON_DOWN) && pointer_press(h, mouse::Source::Raw, 1, nullptr))
+        taken |= RI_MOUSE_LEFT_BUTTON_DOWN;
+    if ((ms.usButtonFlags & RI_MOUSE_RIGHT_BUTTON_DOWN) && pointer_press(h, mouse::Source::Raw, 3, nullptr))
+        taken |= RI_MOUSE_RIGHT_BUTTON_DOWN;
+    return taken;
+}
+
+bool g_ptr_mixed_said = false;
+
 LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
     // A loop in the window's procedure chain (another module subclassing over and over) would end the window thread's
     // stack. The message leaves the loop here; input_attach never closes one itself.
@@ -466,6 +610,40 @@ LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
                 GetRawInputData(reinterpret_cast<HRAWINPUT>(l), RID_INPUT, buf, &size, sizeof(RAWINPUTHEADER)) == size) {
                 const RAWINPUT* ri = reinterpret_cast<const RAWINPUT*>(buf);
                 if (fed) feed_raw(*ri, m, w, l);
+                // a left/right press a pointer subscriber took (subscribe_pointer_press): kept from the game like a key
+                // binding's press; its release and the record's other input still reach it
+                if (ri->header.dwType == RIM_TYPEMOUSE && !cap && pointer_wanted() &&
+                    (ri->data.mouse.usButtonFlags & (RI_MOUSE_LEFT_BUTTON_DOWN | RI_MOUSE_RIGHT_BUTTON_DOWN)) && !hover_capture()) {
+                    const RAWMOUSE& ms = ri->data.mouse;
+                    if (const USHORT taken = raw_pointer_presses(h, ms)) {
+                        constexpr USHORT kPresses = RI_MOUSE_MIDDLE_BUTTON_DOWN | RI_MOUSE_BUTTON_4_DOWN | RI_MOUSE_BUTTON_5_DOWN;
+                        const USHORT kept = (ms.usButtonFlags & kRawButtonFlags & ~(RI_MOUSE_LEFT_BUTTON_DOWN | RI_MOUSE_LEFT_BUTTON_UP |
+                                                                                    RI_MOUSE_RIGHT_BUTTON_DOWN | RI_MOUSE_RIGHT_BUTTON_UP)) &&
+                                                    mouse_presses_wanted()
+                                                ? raw_mouse_presses(ms, false)
+                                                : 0;
+                        const USHORT own = taken | kept | static_cast<USHORT>((kept & kPresses) << 1);
+                        const bool moved = ms.lLastX != 0 || ms.lLastY != 0 || (ms.usFlags & MOUSE_MOVE_ABSOLUTE);
+                        if (!moved && !(ms.usButtonFlags & kRawButtonFlags & ~own)) {
+                            DefWindowProcW(h, m, w, l);  // lets the system clean up the raw input
+                            return 0;
+                        }
+                        if (g_game_raw_read_hooked) {
+                            const RawEdit outer = t_raw_edit;
+                            t_raw_edit = {reinterpret_cast<HRAWINPUT>(l), own};
+                            const LRESULT r = CallWindowProcW(g_chain.below, h, m, w, l);
+                            t_raw_edit = outer;
+                            return r;
+                        }
+                        if (!g_ptr_mixed_said) {
+                            g_ptr_mixed_said = true;
+                            logf(KILN_LOG_INFO, "ui: a raw mouse record held a press a pointer subscriber took and other "
+                                 "input (flags 0x%x): with no GetRawInputData import of the game to edit, it reached the "
+                                 "game whole (said once)", ms.usButtonFlags);
+                        }
+                        break;
+                    }
+                }
                 if (ri->header.dwType == RIM_TYPEKEYBOARD) {
                     g_raw_keyboard_seen = true;
                     const RAWKEYBOARD& kb = ri->data.keyboard;
@@ -548,8 +726,20 @@ LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
             const uint32_t vk = static_cast<uint32_t>(w) & 0xFF;
             bool consumed = false;
             if (g_raw_keyboard_seen && !raw_input::registered_for(6, h)) g_raw_keyboard_seen = false;
-            if (!g_raw_keyboard_seen) consumed = on_key(vk, (static_cast<uint32_t>(l) >> 16) & 0x1FF, true);
-            else consumed = g_consumed[vk];
+            if (!g_raw_keyboard_seen)
+                consumed = on_key(vk, (static_cast<uint32_t>(l) >> 16) & 0x1FF, true, false, hold::prev_of_lparam(l));
+            else {
+                consumed = g_consumed[vk];
+                // A previous raw keyboard event does not guarantee that
+                // Proton will deliver the *current Tab* as WM_INPUT. Do
+                // not skip this chat-only keydown if raw Tab wasn't taken.
+                // Router deduplicates any subsequent raw report.
+                if (!consumed && vk == VK_TAB && !cap) {
+                    if (const ChatInputSink* chat = g_chat_sink.load(std::memory_order_acquire))
+                        consumed = chat->key(vk, current_mods(), true, false);
+                    if (consumed) g_consumed[vk] = true;
+                }
+            }
             enqueue(h, m, w, l);
             if (cap || consumed) {
                 if (m == WM_SYSKEYDOWN && vk == VK_F4) break;  // Alt+F4 still closes the game
@@ -563,21 +753,43 @@ LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
             const uint32_t vk = static_cast<uint32_t>(w) & 0xFF;
             if (g_raw_keyboard_seen && !raw_input::registered_for(6, h)) g_raw_keyboard_seen = false;
             if (!g_raw_keyboard_seen) on_key(vk, (static_cast<uint32_t>(l) >> 16) & 0x1FF, false);
+            else if (vk == VK_TAB) {
+                // The paired raw release may be absent. Always release the
+                // chat router's one-press guard on the legacy Tab keyup.
+                if (const ChatInputSink* chat = g_chat_sink.load(std::memory_order_acquire))
+                    chat->key(vk, current_mods(), false, cap);
+                g_consumed[vk] = false;
+            }
             enqueue(h, m, w, l);
             break;  // releases always reach the game
         }
         case WM_CHAR:
         case WM_SYSCHAR:
-        case WM_UNICHAR:
+        case WM_UNICHAR: {
+            // The game inserts '\\t' from WM_CHAR even if Tab keydown was
+            // intercepted. The scoped native chat hook may drop only the
+            // character paired with a consumed completion Tab press.
+            bool chat_consumed = false;
+            if (const ChatInputSink* chat = g_chat_sink.load(std::memory_order_acquire);
+                chat && !cap && m != WM_SYSCHAR && !(m == WM_UNICHAR && w == UNICODE_NOCHAR))
+                chat_consumed = chat->text(static_cast<uint32_t>(w));
             enqueue(h, m, w, l);
-            if (cap) return 0;
+            if (cap || chat_consumed) return 0;
+            break;
+        }
+        case WM_IME_STARTCOMPOSITION:
+        case WM_IME_ENDCOMPOSITION:
+            if (const ChatInputSink* chat = g_chat_sink.load(std::memory_order_acquire))
+                chat->ime(m == WM_IME_STARTCOMPOSITION);  // the IME's own Up/Down stay the IME's
             break;
         case WM_SETFOCUS:
             if (fed) feed_focus_gained();
+            keys_back();
             enqueue(h, m, w, l);
             break;
         case WM_KILLFOCUS:
             if (fed) feed_focus_lost(m, w, l);
+            if (const ChatInputSink* chat = g_chat_sink.load(std::memory_order_acquire)) chat->blur();
             forget_keys();
             enqueue(h, m, w, l);
             break;
@@ -589,7 +801,10 @@ LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
                 if (w) feed_focus_gained();
                 else feed_focus_lost(m, w, l);
             }
-            if (!w) forget_keys();
+            if (!w) {
+                if (const ChatInputSink* chat = g_chat_sink.load(std::memory_order_acquire)) chat->blur();
+                forget_keys();
+            } else keys_back();
             break;
         case WM_SETCURSOR:
             if (cap && LOWORD(l) == HTCLIENT) {
@@ -608,6 +823,13 @@ LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
                 if (!(cap && kept && wheel)) enqueue(h, m, w, l);  // a notch the Keys page took does not scroll it too
                 if (cap && !is_button_up(m)) return 0;  // releases reach the game (see WM_INPUT)
                 if (kept) return (m == WM_XBUTTONDOWN || m == WM_XBUTTONDBLCLK) ? TRUE : 0;  // a key binding took it
+                // a left/right press a pointer subscriber took (subscribe_pointer_press; paired with its raw record)
+                if (!cap && (m == WM_LBUTTONDOWN || m == WM_LBUTTONDBLCLK || m == WM_RBUTTONDOWN || m == WM_RBUTTONDBLCLK) &&
+                    pointer_wanted() && !hover_capture()) {
+                    const POINT at{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
+                    if (pointer_press(h, mouse::Source::Message, (m == WM_LBUTTONDOWN || m == WM_LBUTTONDBLCLK) ? 1 : 3, &at))
+                        return 0;
+                }
                 // presses and the wheel over a Kiln panel are Kiln's; releases always reach the game (no stuck drag)
                 if ((m == WM_LBUTTONDOWN || m == WM_RBUTTONDOWN || m == WM_MBUTTONDOWN || m == WM_LBUTTONDBLCLK ||
                      m == WM_RBUTTONDBLCLK || m == WM_MOUSEWHEEL || m == WM_MOUSEHWHEEL) && hover_capture())
@@ -795,6 +1017,8 @@ void input_hook_xinput() {
 namespace {
 }  // namespace
 
+void input_set_chat_sink(const ChatInputSink* sink) { g_chat_sink.store(sink, std::memory_order_release); }
+
 void input_install_iat() {
     HMODULE exe = GetModuleHandleW(nullptr);
     g_real_set_cursor_pos = reinterpret_cast<SetCursorPosFn>(GetProcAddress(GetModuleHandleW(L"user32.dll"), "SetCursorPos"));
@@ -850,7 +1074,9 @@ void input_attach(HWND hwnd) {
     const WNDPROC above_before = g_chain.hwnd == hwnd ? g_chain.above : nullptr;
     switch (chain::attach(g_chain, hwnd, &wndproc, games_procedure)) {
         case chain::Result::Subclassed:
-            logf(KILN_LOG_INFO, "ui: game window %p subclassed", reinterpret_cast<void*>(hwnd));
+            set_repeat_window();
+            logf(KILN_LOG_INFO, "ui: game window %p subclassed (a key's down within %u ms of its last, without a release, "
+                 "is a repeat)", reinterpret_cast<void*>(hwnd), g_keys.window());
             g_attached = hwnd;
             break;
         case chain::Result::Again:
@@ -880,9 +1106,34 @@ void input_attach(HWND hwnd) {
     }
 }
 
+// No swapchain surface exists in drawing-off mode. Poll from the game's UI tick,
+// at most twice a second; select a visible unowned window of this process only.
+void input_poll_window() {
+    static uint64_t next = 0;
+    const auto now = GetTickCount64();
+    if (now < next) return;
+    next = now + 500;
+    static bool imports = false;
+    if (!imports) { imports = true; input_install_iat(); }
+    struct Candidate { HWND hwnd = nullptr; int64_t area = 0; } candidate;
+    EnumWindows([](HWND h, LPARAM arg) -> BOOL {
+        DWORD pid = 0;
+        GetWindowThreadProcessId(h, &pid);
+        if (pid != GetCurrentProcessId() || !IsWindowVisible(h) || GetWindow(h, GW_OWNER) ||
+            (GetWindowLongPtrW(h, GWL_EXSTYLE) & WS_EX_TOOLWINDOW)) return TRUE;
+        RECT r{};
+        if (!GetClientRect(h, &r)) return TRUE;
+        const int64_t area = int64_t(r.right - r.left) * (r.bottom - r.top);
+        auto& best = *reinterpret_cast<Candidate*>(arg);
+        if (area > best.area) best = {h, area};
+        return TRUE;
+    }, reinterpret_cast<LPARAM>(&candidate));
+    if (candidate.hwnd) { g_hwnd.store(candidate.hwnd); input_attach(candidate.hwnd); }
+}
+
 bool input_attached() { return g_attached != nullptr; }
 
-bool input_key_held(uint32_t vk) { return vk > 0 && vk < 256 && g_down[vk].load(); }
+bool input_key_held(uint32_t vk) { return g_keys.held(vk); }
 
 void input_replay() {
     std::deque<Msg> q;
@@ -906,6 +1157,14 @@ void input_replay() {
                 logf(KILN_LOG_INFO, "ui: the game window delivers wheel messages; the raw wheel ignored");
                 break;
             }
+    // A batch with a window cursor position never moves Kiln's cursor by raw deltas as well. After a long frame (a
+    // hitch) the raw records queued ahead of the window's coalesced WM_MOUSEMOVE would fling the cursor by the whole
+    // unaccelerated motion and back within one frame, and a click between the two landed where the cursor never was.
+    for (const auto& m : q)
+        if (m.msg == WM_MOUSEMOVE) {
+            g_last_legacy_move = t;
+            break;
+        }
     for (const auto& m : q) {
         if (m.msg == WM_MOUSEMOVE) g_last_legacy_move = t;
         if (m.msg != kRawMouseMsg) {
@@ -971,9 +1230,20 @@ void input_capture_changed() {
     const bool cap = capturing();
     if (cap == g_was_capturing) return;
     g_was_capturing = cap;
+    if (cap) {
+        // The mouse input of play, still queued, is not the new screen's: during play the game keeps its cursor at the
+        // window's centre for mouse look, so an attack click from just before the screen opened (or seconds of them,
+        // after a hitch) clicked whatever the screen has there (a Close button, "Clear the list").
+        std::lock_guard<std::mutex> lk(g_qmu);
+        g_queue.erase(std::remove_if(g_queue.begin(), g_queue.end(),
+                                     [](const Msg& x) { return x.msg == kRawMouseMsg || is_mouse_msg(x.msg); }),
+                      g_queue.end());
+    }
     if (ImGui::GetCurrentContext()) {
         ImGuiIO& io = ImGui::GetIO();
         io.MouseDrawCursor = cap;
+        if (cap)  // a button held in play (the game had its press) is up for the screen: its release clicks nothing
+            for (int b = 0; b < ImGuiMouseButton_COUNT; ++b) io.AddMouseButtonEvent(b, false);
         if (!cap) {
             io.ClearInputKeys();
             g_pad_fed_any = false;
@@ -1027,40 +1297,54 @@ KilnResult input_feed_unsubscribe(KilnHandle h) {
     return KILN_OK;
 }
 
+KilnResult input_pointer_subscribe(KilnOwner owner, KilnUiPointerFn fn, void* user, KilnHandle* out) {
+    if (!fn) return KILN_ERR_INVALID_ARGUMENT;
+    auto sub = std::make_shared<PointerSub>();
+    sub->owner = owner;
+    sub->fn = fn;
+    sub->user = user;
+    std::lock_guard lk(g_ptr_mu);
+    sub->handle = next_handle();
+    if (out) *out = sub->handle;
+    g_ptr_subs.push_back(std::move(sub));
+    g_ptr_count.store(static_cast<uint32_t>(g_ptr_subs.size()), std::memory_order_release);
+    return KILN_OK;
+}
+
+KilnResult input_pointer_unsubscribe(KilnHandle h) {
+    std::shared_ptr<PointerSub> removed;
+    {
+        std::lock_guard lk(g_ptr_mu);
+        const auto it = std::find_if(g_ptr_subs.begin(), g_ptr_subs.end(), [&](const auto& s) { return s->handle == h; });
+        if (it != g_ptr_subs.end()) {
+            removed = *it;
+            removed->active.store(false, std::memory_order_release);
+            g_ptr_retiring[h] = removed;
+            g_ptr_subs.erase(it);
+            g_ptr_count.store(static_cast<uint32_t>(g_ptr_subs.size()), std::memory_order_release);
+        } else if (const auto r = g_ptr_retiring.find(h); r != g_ptr_retiring.end()) {
+            removed = r->second;
+        }
+    }
+    if (!removed) return KILN_ERR_NOT_FOUND;
+    auto drain = removed->drain(t_callback != nullptr);  // as input_feed_unsubscribe
+    if (!drain.owns_lock()) return KILN_ERR_WRONG_THREAD;
+    std::lock_guard lk(g_ptr_mu);
+    g_ptr_retiring.erase(h);
+    return KILN_OK;
+}
+
 uint32_t input_take_pressed(uint32_t* mods) {
     const uint32_t vk = g_pressed_vk.exchange(0);
     if (mods) *mods = g_pressed_mods.load();
     return vk;
 }
 
-void key_name(uint32_t vk, char* out, size_t cap) {
-    if (!out || cap == 0) return;
-    out[0] = 0;
-    static const struct {
-        uint32_t vk;
-        const char* name;
-    } names[] = {{VK_INSERT, "Insert"}, {VK_DELETE, "Delete"}, {VK_HOME, "Home"}, {VK_END, "End"}, {VK_PRIOR, "PageUp"},
-                 {VK_NEXT, "PageDown"}, {VK_LEFT, "Left"}, {VK_RIGHT, "Right"}, {VK_UP, "Up"}, {VK_DOWN, "Down"},
-                 {VK_RETURN, "Enter"}, {VK_ESCAPE, "Escape"}, {VK_TAB, "Tab"}, {VK_BACK, "Backspace"}, {VK_SPACE, "Space"},
-                 {VK_PAUSE, "Pause"}, {VK_SCROLL, "ScrollLock"}, {VK_CAPITAL, "CapsLock"}, {VK_NUMLOCK, "NumLock"},
-                 {VK_OEM_3, "Backquote"}, {VK_OEM_MINUS, "Minus"}, {VK_OEM_PLUS, "Equals"}, {VK_OEM_4, "LeftBracket"},
-                 {VK_OEM_6, "RightBracket"}, {VK_OEM_5, "Backslash"}, {VK_OEM_1, "Semicolon"}, {VK_OEM_7, "Quote"},
-                 {VK_OEM_COMMA, "Comma"}, {VK_OEM_PERIOD, "Period"}, {VK_OEM_2, "Slash"}, {VK_MULTIPLY, "NumpadMultiply"},
-                 {VK_ADD, "NumpadAdd"}, {VK_SUBTRACT, "NumpadSubtract"}, {VK_DECIMAL, "NumpadDecimal"},
-                 {VK_DIVIDE, "NumpadDivide"}, {VK_LSHIFT, "LeftShift"}, {VK_RSHIFT, "RightShift"},
-                 {VK_LCONTROL, "LeftCtrl"}, {VK_RCONTROL, "RightCtrl"}, {VK_LMENU, "LeftAlt"}, {VK_RMENU, "RightAlt"},
-                 {VK_SHIFT, "Shift"}, {VK_CONTROL, "Ctrl"}, {VK_MENU, "Alt"}, {VK_XBUTTON1, "Mouse4"}, {VK_XBUTTON2, "Mouse5"},
-                 {VK_MBUTTON, "MouseMiddle"}, {KILN_UI_VK_WHEEL_UP, "WheelUp"}, {KILN_UI_VK_WHEEL_DOWN, "WheelDown"},
-                 {KILN_UI_VK_WHEEL_LEFT, "WheelLeft"}, {KILN_UI_VK_WHEEL_RIGHT, "WheelRight"}};
-    for (const auto& n : names)
-        if (n.vk == vk) {
-            std::snprintf(out, cap, "%s", n.name);
-            return;
-        }
-    if (vk >= VK_F1 && vk <= VK_F24) std::snprintf(out, cap, "F%u", vk - VK_F1 + 1);
-    else if ((vk >= '0' && vk <= '9') || (vk >= 'A' && vk <= 'Z')) std::snprintf(out, cap, "%c", static_cast<char>(vk));
-    else if (vk >= VK_NUMPAD0 && vk <= VK_NUMPAD9) std::snprintf(out, cap, "Numpad%u", vk - VK_NUMPAD0);
-    else std::snprintf(out, cap, "Key%u", vk);
-}
+// The names are key_names.h's (the same table as Kiln.Ui's KeyNames: keybinds.json and the Keys page use them).
+static_assert(VK_OEM_3 == 0xC0 && VK_OEM_8 == 0xDF && VK_OEM_102 == 0xE2 && VK_OEM_CLEAR == 0xFE && VK_F24 == 0x87 &&
+                  VK_NUMPAD0 == 0x60 && VK_LSHIFT == 0xA0 && VK_SNAPSHOT == 0x2C && KILN_UI_VK_WHEEL_UP == 0x100 &&
+                  KILN_UI_VK_WHEEL_RIGHT == 0x103,
+              "key_names.h's codes are Windows' and kiln_ui.h's");
+void key_name(uint32_t vk, char* out, size_t cap) { keys::name(vk, out, cap); }
 
 }  // namespace kui

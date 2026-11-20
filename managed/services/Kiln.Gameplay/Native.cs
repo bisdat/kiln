@@ -73,6 +73,9 @@ internal static unsafe class GameplayNative
         public ulong EntitiesJoined, EntitiesLeft, EntitiesFiltered;
         public byte DiscardOn, R3, R4, R5, R6, R7, R8, R9;
         public ulong DiscardsSeen, DiscardsCanceled;
+        public uint BuildHookState, BuildHookMask;
+        public fixed byte BuildHookReason[512];
+        public fixed byte HookGroups[4 * 520];
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -126,6 +129,15 @@ internal static unsafe class GameplayNative
         t != null && t->Header.Size >= (uint)(sizeof(Table) + 4 * sizeof(nint))
             ? *(delegate* unmanaged[Cdecl]<ulong, uint, uint, void*, uint, uint, int>*)((byte*)t + sizeof(Table) + 3 * sizeof(nint))
             : null;
+
+    public static delegate* unmanaged[Cdecl]<ulong, int> RequestBuild(Table* t) =>
+        t != null && t->Header.Size >= (uint)(sizeof(Table) + 5 * sizeof(nint))
+            ? *(delegate* unmanaged[Cdecl]<ulong, int>*)((byte*)t + sizeof(Table) + 4 * sizeof(nint))
+            : null;
+
+    public static delegate* unmanaged[Cdecl]<ulong, uint, int> RequestHooks(Table* t) =>
+        t != null && t->Header.Size >= 144
+            ? *(delegate* unmanaged[Cdecl]<ulong, uint, int>*)((byte*)t + 136) : null;
 
     private static Table* _table;
     public static Table* T => _table != null ? _table : (_table = Services.Get<Table>("kiln.gameplay", 1));

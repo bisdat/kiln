@@ -226,6 +226,88 @@
         "name",
         "glob"
       ],
+      "pointer": "/gear/*/@where/input",
+      "schema": "content-pack.schema.json",
+      "section": "items"
+    },
+    {
+      "files": [
+        "**/content/*.json"
+      ],
+      "forms": [
+        "name",
+        "glob"
+      ],
+      "pointer": "/gear/*/@where/output",
+      "schema": "content-pack.schema.json",
+      "section": "items"
+    },
+    {
+      "files": [
+        "**/content/*.json"
+      ],
+      "forms": [
+        "item:"
+      ],
+      "pointer": "/gear/*/perks",
+      "schema": "content-pack.schema.json",
+      "section": "items"
+    },
+    {
+      "files": [
+        "**/content/*.json"
+      ],
+      "forms": [
+        "item:"
+      ],
+      "pointer": "/gear/*/perks/*",
+      "schema": "content-pack.schema.json",
+      "section": "items"
+    },
+    {
+      "files": [
+        "**/content/*.json"
+      ],
+      "forms": [
+        "guid"
+      ],
+      "pointer": "/gear/*/perks/*",
+      "schema": "content-pack.schema.json",
+      "section": "perks"
+    },
+    {
+      "files": [
+        "**/content/*.json"
+      ],
+      "forms": [
+        "name"
+      ],
+      "pointer": "/gear/*/perks/*",
+      "schema": "content-pack.schema.json",
+      "section": "perks"
+    },
+    {
+      "files": [
+        "**/content/*.json"
+      ],
+      "forms": [
+        "name",
+        "id",
+        "guid",
+        "glob"
+      ],
+      "pointer": "/gear/*~",
+      "schema": "content-pack.schema.json",
+      "section": "items"
+    },
+    {
+      "files": [
+        "**/content/*.json"
+      ],
+      "forms": [
+        "name",
+        "glob"
+      ],
       "pointer": "/itemdata/*/@where/input",
       "schema": "content-pack.schema.json",
       "section": "items"

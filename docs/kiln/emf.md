@@ -1,9 +1,10 @@
 # EMF mods on Kiln (kiln-emf)
 
-Kiln loads unmodified mods for **EMF** (Enshrouded Modding Framework, MIT; API versions through EMF 0.6.8 / v40)
-through the plugin `kiln/plugins/kiln-emf.dll`. It supplies an `EmfApi` v40 table built on Kiln's services:
-of 135 C slots, 76 are full, 17 partial, and 42 (functions EMF added between 0.6.3 and 0.6.8) answer "not available on
-Kiln yet" ([what that means for a mod](#mods-built-for-emf-063-to-068)). API coverage is not a guarantee for every mod
+Kiln loads unmodified mods for **EMF** (Enshrouded Modding Framework, MIT; API versions through EMF 0.6.14 / v46)
+through the plugin `kiln/plugins/kiln-emf.dll`. It supplies an `EmfApi` v46 table built on Kiln's services:
+of 142 C slots, 76 are full, 17 partial, and 49 (functions EMF added between 0.6.3 and 0.6.8, and in 0.6.13 and 0.6.14)
+answer "not available on Kiln yet" ([what that means for a mod](#mods-built-for-emf-063-to-0614)). v41, v42 and v45
+(EMF 0.6.10, 0.6.11 and 0.6.14) added no function. API coverage is not a guarantee for every mod
 pairing or player-facing feature. Every function and its evidence: [emf-parity.md](emf-parity.md). You keep your EMF
 DLL mods and EMF's Lua mods; you do not need EMF's own `dinput8.dll` or `emf_core.dll`.
 
@@ -16,6 +17,11 @@ Evidence, design and the mapping of each function: [docs/re/emf-compat.md](../re
    `<game>/emf/mods/<name>.dll`. EMF's Lua mods also need the `lua` mod (`emf/mods/lua/`).
    With the Kiln Launcher, a profile's `emf` entries are loaded too (`kiln.profile`). The `emf/mods` folder still
    counts while the profile has EMF drop-ins on, which is the default.
+   EMF's Lua mods can be added in the launcher too, one folder or EMF's whole zip (its Lua mods are in
+   `game/emf/mods/`; its `examples/lua/` and `template_lua/` are left out, as EMF does not install them). EMF's `lua`
+   mod finds a Lua mod only by its folder in `emf/mods`, so activation copies each enabled one to
+   `<game>/emf/mods/<id>/` with Kiln's marker, with or without EMF's own loader, and the profile names that copy (a
+   folder of the same mod you put there yourself is used as it is). EMF's DLL mods still run from the Library.
 3. Switch it on. Most shipped EMF mods start switched off. Edit `<configDir>/emf/<id>.ini`:
    ```ini
    [big_stacks]
@@ -57,16 +63,39 @@ Evidence, design and the mapping of each function: [docs/re/emf-compat.md](../re
 - **Faults:** a mod whose `emf_mod_load` returns false or faults is marked `failed`. Its DLL stays loaded: Kiln never
   unloads an EMF mod.
 
-### Mods built for EMF 0.6.3 to 0.6.8
+<a id="mods-built-for-emf-063-to-0611"></a>
+
+### Mods built for EMF 0.6.3 to 0.6.14
 A mod built with EMF's SDK does not start on a host whose table is smaller than the one it was built with. Kiln
 served EMF 0.6.0's table until 0.2.0-dev.26, so every EMF DLL built since 0.6.3 stayed off ("this mod was built for
 EMF API v40; the core is v27"), and with EMF's `lua` mod every Lua mod of a current EMF. Since 0.2.0-dev.27 the table
 is EMF 0.6.8's and they start.
 
+EMF 0.6.10 (API v41) and 0.6.11 (v42) only raised the version: v41 gave move orders `stuck_seconds` and the flag
+`EMF_MOVE_PEACEFUL_ALL`, v42 gave path results the door each point goes through (`EmfPathResult.doors`); the table
+stayed 1088 bytes. Since 0.2.0-dev.28 kiln-emf says version 42, so a mod whose `mod.json` says `"emf": 41` or `42`
+loads instead of being refused ("needs EMF API v42; kiln-emf provides v40"), and `emf::has_v41()` and `has_v42()`
+answer true. The functions those fields belong to, `enemy_move` and `path_find`, are still among the ones Kiln does not
+carry: a move order of either size (128 or 136 bytes) is refused with its reason, and no path result reaches a mod.
+
+EMF 0.6.13 (API v43) and 0.6.14 (v44 to v46) grew the table to 1144 bytes: the game's own permissions of a player
+(`player_permissions`), breaking player-built blocks (`break_blocks`, `block_at`, `find_wall`; v45 spares the world's
+own ruins) and villager moves (`villager_move`, `villager_move_cancel`, `villager_moving`). A mod built with EMF
+0.6.14's SDK, among them EMF's `lua` mod 1.39 (and with it every Lua mod), Night Raids 1.2 and Villager Jobs 1.5.2,
+stayed off on Kiln's 1088-byte table ("this mod was built for EMF API v46; the core is v42: update EMF (the mod stays
+off)"). kiln-emf now serves the v46 table, so that check lets them start (not yet run on Kiln), and a `mod.json`
+that says `"emf": 43` to `46` loads. The
+seven new functions are not carried yet: `player_permissions` answers false, `break_blocks` and `villager_move` refuse
+with their reason (also a villager move with a hold), `block_at` and `find_wall` answer false. Read from their 0.6.14
+source (not seen in a game): Villager Jobs gives jobs to EMF's own admins (`[chat] admins`) but not to the game's
+admins (`player_permissions`); Night Raids' raiders find no wall to break and break none (`find_wall`,
+`break_blocks`).
+
 Kiln does not carry every function EMF added since. Carried: chat lines without a speaker (`chat_tell_ex`,
 `chat_broadcast_ex`; on Kiln every line a mod sends shows without a name, also a plain one) and `world_to_screen`. Not yet: player join/leave/death events, item names and the game's
 language, character names, hit observers and hit rules, buffs, markers, map clicks and map actions, canvases and the
-minimap's parts, `remove_building`, paths, doors, enemy orders and move orders. A mod that calls one of those gets
+minimap's parts, `remove_building`, paths, doors, enemy orders and move orders, a player's game permissions, block
+breaking and villager moves. A mod that calls one of those gets
 EMF's documented "not available" answer, as on a game build EMF does not know: the rest of the mod runs. `kiln.log`
 says once per mod and function `emf: <mod> called <fn>, not supported (not available on Kiln yet)`, and
 `kiln/state/emf.json` lists the calls under `unsupported`.
@@ -96,6 +125,11 @@ What that means for EMF's own mods of 0.6.8, read from their source (not seen wi
 (`tickMsPerStep`, `tickMsMax`), the commands it registered, and the functions it called that Kiln does not support.
 In the lab, server-admin cost about 1.1 ms per step and the lua mod with 8 scripts about 0.8 ms. Every other shipped
 mod cost 0.1 ms or less.
+
+kiln-emf never waits for the disk on the server world's step (since 0.2.0-dev.29.17): `emf.json`, the mods' settings
+files and `emf/commands.txt` are written and read on a thread of its own. When its part of a step still takes over
+100 ms, `kiln.log` names the part (`slow tick: kiln-emf's server Pre took ...`, at most once a minute); a file that took
+the disk thread over a second is logged too (`disk: ... took ... ms`).
 
 ## Commands
 EMF mods register commands (`tp`, `herald.say`, `raids.status`, ...). On Kiln they run from two places:
@@ -148,6 +182,16 @@ player sees of them is not checked.
 | loot_magnet, bulk_craft, companion, villager_jobs | yes | Ready, and their mod programs (`emit_event`) registered. They act on a player's input. | wheel (client) |
 | emf_probe (Kiln's test mod) | yes | 72 checks over the whole table, 0 failures (96 with the v28 to v40 answers in 0.2.0-dev.27). | - |
 
+**Mods kiln-emf runs differently on purpose** (`native/plugins/emf/src/compat_ticks.h`, logged at load):
+
+- **Expeditions (GronGM) up to 1.2.x:** its `on_tick` is called for the server world only. EMF (and kiln-emf) run a
+  mod's `on_tick` after every world's step, each on that world's own thread. Expeditions returns at once for the
+  client and prediction worlds, but first clears the world pointer its server-world work reads through, so in a
+  game that hosts its own world a main-thread tick lands in the middle of a survivor search and empties it ("No free
+  survivors nearby" next to the survivors, Send's "too far away"; seen on a Steam Deck, confirmed with a diagnostic
+  build). Its other worlds' ticks do nothing else, so nothing is lost. Versions after 1.2.90 get every world's tick
+  again.
+
 ## Hook order
 `hook`, `hook_pattern` and `hook_address` put each mod's detour into [kiln.hooks v2](services/hooks.md): one physical
 detour per game function, shared with Kiln's own services, and your detour is a **link** in it, owned by `emf:<mod id>` and
@@ -161,8 +205,9 @@ plain detour and the log says `outside the game exe`. `kiln-emf`'s own hooks (Ch
 v27 client chat bridge) are links too, `ChatLogAdd` after `kiln.chat`'s.
 
 ## Compatibility by function
-The full table for EmfApi v40 (135 functions, and EMF's Lua API) is [emf-parity.md](emf-parity.md); v28 to v40 are
-in [its own table there](emf-parity.md#v28-to-v40-emf-063-to-068). v22-v27 in short:
+The full table for EmfApi v46 (142 functions, and EMF's Lua API) is [emf-parity.md](emf-parity.md); v28 to v40 are
+in [its own table there](emf-parity.md#v28-to-v40-emf-063-to-068), v43 to v46 in
+[another](emf-parity.md#v43-to-v46-emf-0613-to-0614). v22-v27 in short:
 player level and XP through `kiln.progression`; `change_component` and E-prompt offers through kiln-emf's own
 `kiln.world` program; mod windows and pictures through `kiln.ui` in the game client (refused on a dedicated server, as
 in EMF). API v27 adds mod messaging on the official `#!emf1` wire; joined-client handshake and gameplay still need checks.
@@ -180,8 +225,8 @@ listed. **No** means it logs `emf: <mod> called <fn>, not supported` once and re
 | `get_template_component` | full | the game's GetTemplateComponent; the size comes from the game's reflection |
 | `for_each_entity` | full | the storage's entity map (layout from the side's sigdb, as `kiln.world` derives it); client worlds not yet checked in game |
 | `on_tick`, `run_on_world` | full | Post of each world's step (server: after `WaitWorldJobs`) |
-| `on_event` | partial | One `kiln.world` program per event type. Server world only. EntityDiedEvent arrives only near a player. |
-| `register_program`, `register_program_def` | partial | `kiln.world` system programs (server world). Programs on the client world are not supported. |
+| `on_event` | partial | One `kiln.world` program per event type and world kind: the server world, and with `EMF_WORLD_CLIENT` the client world (since 0.2.0-dev.29, delivered after the client world's step on the main thread; not yet run in a game: check `programs.client-emf`, which delivers NotifyEnvFxEvent and HitEvent and checks the payload and thread, and an absent event's refusal). EntityDiedEvent arrives only near a player. |
+| `register_program`, `register_program_def` | partial | `kiln.world` system programs: the server world; `EMF_WORLD_CLIENT` through `register_program_world` into every client world (since 0.2.0-dev.29, not yet run in a game: check `programs.client-emf` with the probe mods/tests/emf-client-test). Refused at the call on a dedicated server and where `world.programs.client` is off, as before. `program_write_other` answers nothing in a client-world program (kiln.world's other-entity write marks for the save and replication). |
 | `emit_event` | full | the game's emitter, as `kiln.gameplay` uses it |
 | `read_events` | full | multiple declared event inputs through `kiln.world` programs |
 | `program_singleton`, `program_read_other` | full | `kiln.world` iterator slots |
@@ -211,7 +256,7 @@ listed. **No** means it logs `emf: <mod> called <fn>, not supported` once and re
 | `wheel_open` | full | radial wheel through `kiln.ui`; host checks pass, client drawing/input still need a player |
 
 ## Client checklist (needs a joined player)
-- A mod of a current EMF runs with no EMF installed: put EMF 0.6.8's `lua` mod and a Lua mod (Kill Counter) in
+- A mod of a current EMF runs with no EMF installed: put EMF 0.6.14's `lua` mod (1.39.0) and a Lua mod (Kill Counter) in
   `emf/mods`, start through Kiln, and kill something: the counter's line shows. `kiln.log` has
   `[emf:lua] ... loaded` and no `built for EMF API` line.
 - The mod check on join: join a server that runs EMF 0.6.8 with `[net] mods_check=refuse` and a mod with a channel,

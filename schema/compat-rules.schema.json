@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "compat-rules.schema.json",
   "title": "Kiln compatibility rules (<kiln>/compat-rules.json, <configDir>/compat-rules.json), format 1",
-  "description": "Rules for closed-source DLL mods and other engines. A rule fires when every `when` matcher is present in this start (no matcher: it always fires). Actions: warn (tell the player), late (load the subject DLL after Kiln and ShroudForge: chain.ini [late]), disable (do not load the subject). The launcher applies `late` and `disable` of chain entries when it writes chain.ini; kiln-core evaluates the same rules at boot end and at the first world, logs warnings, reports what is not applied yet, and switches off a mod the profile lists. Two files are read, the shipped defaults (<game>/kiln/compat-rules.json, may be empty) and then the player's (<configDir>/compat-rules.json, default <game>/kiln/config; the launcher's copy is <data>/profiles/<profile>/config/compat-rules.json): a rule of the second file with the same id replaces the first file's rule in place; other rules are appended. To switch a shipped rule off, replace it with a rule of the same id whose `when` cannot hold. A rule that does not validate (an unknown key included) is dropped with a warning and the others stay; a file that is not one JSON object with `format` 1 is ignored. Plain JSON: no comments. Matching and evaluation fixtures shared by the C++ core and the launcher's Rust reader: schema/fixtures/compat-rules/cases.json. Docs: docs/kiln/engines/README.md#closed-source-dll-mods.",
+  "description": "Rules for closed-source DLL mods and other engines. A rule fires when every `when` matcher is present in this start (no matcher: it always fires). Actions: original-code (only a named Shroudtopia mod sees original bytes when its imported memcmp checks a recognised entry hook; no load-order change), defer (the native loader waits for the Shroudtopia host first pass when the target mod is enabled in the profile, bounded by max_wait_ms; absent or external hosts are not waited on), warn (tell the player), late (load the subject DLL after Kiln and ShroudForge: chain.ini [late]), disable (do not load the subject), before (dev.29: the subject DLL loads before the `target` DLL; the launcher keeps the subject early and loads the target late, whatever their late switches say, and moves nothing when that cannot be done). The launcher applies `late`, `disable` and `before` of chain entries when it writes chain.ini; kiln-core evaluates the same rules at boot end and at the first world, logs warnings, reports what is not applied yet, and switches off a mod the profile lists. Two files are read, the shipped defaults (<game>/kiln/compat-rules.json, may be empty) and then the player's (<configDir>/compat-rules.json, default <game>/kiln/config; the launcher's copy is <data>/profiles/<profile>/config/compat-rules.json): a rule of the second file with the same id replaces the first file's rule in place; other rules are appended. To switch a shipped rule off, replace it with a rule of the same id whose `when` cannot hold. A rule that does not validate (an unknown key included) is dropped with a warning and the others stay (so a reader from before dev.29 drops a `before` rule and keeps the others); a file that is not one JSON object with `format` 1 is ignored. Plain JSON: no comments. Matching and evaluation fixtures shared by the C++ core and the launcher's Rust reader: schema/fixtures/compat-rules/cases.json. Docs: docs/kiln/engines/README.md#closed-source-dll-mods.",
   "type": "object",
   "required": ["format"],
   "properties": {
@@ -84,15 +84,48 @@
           "description": "Unique in a file (the first of a repeated id stays). A rule of the player's file with a shipped rule's id replaces it."
         },
         "when": { "type": "array", "items": { "$ref": "#/$defs/matcher" }, "maxItems": 8, "description": "Every matcher must be present for the rule to fire (at most 8). Empty or absent: the rule always fires." },
-        "action": { "enum": ["warn", "late", "disable"] },
+        "action": { "enum": ["warn", "late", "disable", "before", "defer", "original-code"] },
         "subject": {
           "$ref": "#/$defs/matcher",
-          "description": "What the action is about: required for late and disable, optional for warn. late: a `module` (a chain entry; nothing else can load late). disable: a `module` (chain entries: the launcher leaves them out of chain.ini) or a `mod` (the core switches it off in the profile before the plugins read it; the launcher switches it off in the profile it writes) or an `engine` (the launcher leaves that engine's chain entries out; the core can only report it). Subjects the core cannot apply show in hooks.json `rules` with `applied: false`."
+          "description": "What the action is about: required for late, disable, before, defer and original-code, optional for warn. original-code: exactly one shroudtopia:<id> mod whose imported memcmp may see original entry bytes; no chain changes. defer: a native mod id, a declared DLL file name, or an exact package-relative companion path using forward slashes. Wait plans that include a native init use normal phases to keep init on its documented thread. late: a `module` (a chain entry; nothing else can load late). disable: a `module` (chain entries: the launcher leaves them out of chain.ini) or a `mod` (the core switches it off in the profile before the plugins read it; the launcher switches it off in the profile it writes) or an `engine` (the launcher leaves that engine's chain entries out; the core can only report it). before: the DLL that loads first, as a `module`, an `engine` (the launcher knows a chain DLL's engine by its exports and texts, whatever it is called) or a `mod` (a native mod of the profile, by its Library id); it stays early (in the proxy), also when its late switch is on. Subjects the core cannot apply show in hooks.json `rules` with `applied: false`."
         },
-        "message": { "type": "string", "maxLength": 2000, "description": "Plain sentence for the player: what clashes and what Kiln does about it. Shown in the launcher and logged by the core." }
+        "target": {
+          "$ref": "#/$defs/matcher",
+          "description": "before or defer only, required for both. defer: a shroudtopia:<id> mod enabled in the profile. before (dev.29): the DLL that loads after the subject. The launcher loads it late (chain.ini [late], marked `; kiln rule <id>`). Nothing moves, and the launcher shows a warning, when it cannot load late (EMF's loader, shroudlink's client addon), is not in Kiln's chain, matches the subject too, or another rule loads the subject late."
+        },
+        "max_wait_ms": { "type": "integer", "minimum": 1, "maximum": 30000, "description": "defer only, required: maximum wait after the Shroudtopia host starts its worker, including bootDelay." },
+        "message": { "type": "string", "maxLength": 2000, "description": "Plain sentence for the player: what clashes and what Kiln does about it. Shown in the launcher and logged by the core; for before, also under both chain entries on the profile page and in the activation's notes." }
       },
-      "if": { "properties": { "action": { "enum": ["late", "disable"] } }, "required": ["action"] },
-      "then": { "required": ["subject"] },
+      "allOf": [
+        {
+          "if": { "properties": { "action": { "const": "original-code" } }, "required": ["action"] },
+          "then": {
+            "properties": {
+              "subject": { "type": "object", "required": ["mod"], "properties": { "mod": { "type": "string", "pattern": "^shroudtopia:.+" } }, "additionalProperties": false }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "action": { "enum": ["late", "disable", "original-code"] } }, "required": ["action"] },
+          "then": { "required": ["subject"] }
+        },
+        {
+          "if": { "properties": { "action": { "enum": ["before", "defer"] } }, "required": ["action"] },
+          "then": { "required": ["subject", "target"] },
+          "else": { "not": { "required": ["target"] } }
+        },
+        {
+          "if": { "properties": { "action": { "const": "defer" } }, "required": ["action"] },
+          "then": {
+            "required": ["max_wait_ms"],
+            "properties": {
+              "target": { "type": "object", "required": ["mod"], "properties": { "mod": { "type": "string", "pattern": "^shroudtopia:.+" } }, "additionalProperties": false },
+              "subject": { "oneOf": [{ "required": ["mod"] }, { "required": ["module"] }] }
+            }
+          },
+          "else": { "not": { "required": ["max_wait_ms"] } }
+        }
+      ],
       "additionalProperties": false
     }
   }

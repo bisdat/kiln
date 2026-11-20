@@ -13,7 +13,25 @@ internal static unsafe class QuestsCaps
 
     /// <summary>The sigdb features kiln.knowledge serves.</summary>
     public static readonly string[] Features =
-        ["quests.knowledge", "quests.journal", "quests.dialogue", "quests.npc", "quests.changes", "quests.client_input"];
+        ["quests.knowledge", "quests.journal", "quests.dialogue", "quests.npc", "quests.changes", "quests.client_input",
+         "quests.npc_pages"];
+
+    /// <summary>The server world's roster snapshots (<see cref="NativeQuests.GetServerRosterWorld"/>,
+    /// <see cref="NativeQuests.GetUnlock"/>; native row, since 0.2.0-dev.29).</summary>
+    public const string RosterRead = "npcs.roster_read";
+
+    /// <summary>The client world's roster snapshots (<see cref="NativeQuests.GetClientRosterWorld"/>,
+    /// <see cref="NativeQuests.GetClientUnlock"/>; native row, a game client only).</summary>
+    public const string ClientRosterRead = "npcs.client_roster_read";
+
+    /// <summary>The roster's budget (<see cref="NativeQuests.GetRosterBudget"/>; native row).</summary>
+    public const string RosterBudget = "npcs.roster_budget";
+
+    /// <summary>Kiln's second unlock page: the roster can hold 128 entries on this side (native row: available when it
+    /// is installed, or ready to install when a mod's roster needs more than 64 entries).</summary>
+    public const string ExpandedRoster = "npcs.expanded_roster";
+
+    private static readonly string[] RosterRows = [RosterRead, ClientRosterRead, RosterBudget, ExpandedRoster];
 
     internal static readonly ServiceCapRows Rows = new(Service, Report, everySteps: 25, refreshOnlyWithService: true);
 
@@ -23,6 +41,14 @@ internal static unsafe class QuestsCaps
     private static void Report()
     {
         var t = KnowledgeNative.T;
+        // kiln.knowledge reports the roster's rows with its table; missing or older, nobody would: say why here
+        if (KnowledgeNative.Roster(t) == null)
+        {
+            var (rosterReason, rosterText) = t == null
+                ? (CapabilityReason.ServiceMissing, "kiln.knowledge is not loaded")
+                : (CapabilityReason.ServiceOlder, "this kiln.knowledge has no roster reads (update Kiln)");
+            foreach (var row in RosterRows) ServiceCaps.Static(row, false, rosterReason, rosterText, Service);
+        }
         if (t == null)
         {
             ServiceCaps.LowerFeatures(Service, Features);
@@ -40,5 +66,12 @@ internal static unsafe class QuestsCaps
         if (s.Npc == 0) ServiceCaps.LowerOff("quests.npc", CapabilityReason.Faulted, text);
         if (s.Dialogue == 0) ServiceCaps.LowerOff("quests.dialogue", CapabilityReason.Faulted, text);
         if (s.ClientInput == 0) ServiceCaps.LowerOff("quests.client_input", CapabilityReason.Faulted, text);
+    }
+
+    /// <summary>The exception a roster read throws when its row is off.</summary>
+    public static KilnUnavailableException Off(string capability, string detail)
+    {
+        Rows.Ensure();
+        return ServiceCaps.Unavailable(capability, detail);
     }
 }

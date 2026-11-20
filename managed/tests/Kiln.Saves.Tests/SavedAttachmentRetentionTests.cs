@@ -58,6 +58,7 @@ public sealed class SavedAttachmentRetentionTests : IDisposable
     {
         store.Stage(revision, SaveReason.Request, late: false);
         store.Commit(revision, 1000u + revision, SaveReason.Request);
+        Assert.True(store.Writer.Drain("test"));  // the confirmation is written off the tick thread
     }
 
     private JsonNode Manifest(uint revision) => JsonNode.Parse(File.ReadAllText(

@@ -79,6 +79,8 @@ def build_pe(path, funcs, strings=()):
         size = (len(data) + 0x1FF) & ~0x1FF
         hdr[off:off + 8] = name.ljust(8, b"\0")
         struct.pack_into("<IIII", hdr, off + 8, len(data), va, size, raw)
+        # characteristics: code is the executable section (the core and the fingerprint passes read only that)
+        struct.pack_into("<I", hdr, off + 36, 0x60000020 if name == b".text" else 0x40000040)
         blobs.append(data.ljust(size, b"\0"))
         raw += size
         off += 40
@@ -213,8 +215,72 @@ class SyntheticPort(unittest.TestCase):
         self.assertFalse(r["symbols"]["GetThing"]["ok_new"])
 
 
+class SigCarry(SyntheticPort):
+    """Descriptors across a port (chapter 06b §4.3): carried as they are, checked on the new code."""
+
+    SIG = {"conv": "win64", "ret": "u32", "args": [{"name": "self", "type": "ptr"}],
+           "abi": {"reads": ["rcx"], "stack": []}, "invoke": "tick"}
+    CALLER_SIG = {"ret": "u32", "args": [], "abi": {"reads": [], "stack": []}, "invoke": "none"}
+
+    def setUp(self):
+        super().setUp()
+        defs = json.loads((self.d / "tree/server.json").read_text())
+        defs["symbols"]["GetThing"]["sig"] = self.SIG
+        (self.d / "tree/server.json").write_text(json.dumps(defs, indent=2) + "\n")
+        # a descriptor in a drop-in file's "sigs" section (as the core's dev28-06b-typed-hooks.json has them)
+        (self.d / "tree/server.d/typed.json").write_text(json.dumps({"format": 1, "symbols": {}, "sigs": {"Caller": self.CALLER_SIG}}) + "\n")
+
+    @staticmethod
+    def stack_reading_target(storage, frame):
+        """target() whose body gains a read of the first stack argument (add eax, [rsp+0x50]: entry rsp + 0x28)."""
+        body = target(storage, frame, field_disp8=0x10)
+        tail = body[-1]
+        body[-1] = tail[:5] + h("03 44 24") + bytes([frame + 0x30]) + tail[5:]  # behind mov rbx, [rsp+0x30]
+        return body
+
+    def test_a_ported_symbol_keeps_its_sig_and_the_sigs_section(self):
+        old, new, t = self.exes(target(0xE179C0, 0x30, field_disp8=0x10))  # the frame changes: GetThing's pattern is rewritten
+        rc, r, out = self.run_port(old, new)
+        self.assertEqual(rc, 0, r["summary"])
+        self.assertTrue(r["symbols"]["GetThing"]["strategies"][0]["pattern_changed"])
+        tree = json.loads((out / "tree/server.json").read_text())
+        self.assertEqual(tree["symbols"]["GetThing"]["sig"], self.SIG)
+        self.assertEqual(json.loads((out / "tree/server.d/typed.json").read_text())["sigs"]["Caller"], self.CALLER_SIG)
+        self.assertEqual(r["summary"]["sigs"], {"described": 2, "need_review": 0})
+        self.assertEqual(r["summary"]["sig_review"], [])
+        self.assertEqual(r["sigs"]["GetThing"]["verdict"], "match")
+        self.assertEqual(r["sigs"]["GetThing"]["new"]["reads"], ["rcx"])
+
+    def test_a_function_that_gains_a_stack_read_needs_review(self):
+        old, new, t = self.exes(self.stack_reading_target(0xE179C0, 0x20))
+        rc, r, out = self.run_port(old, new)
+        self.assertEqual(rc, 0, r["summary"])  # the symbol ports: only its typed hooks need a look
+        self.assertEqual(int(r["symbols"]["GetThing"]["new"], 16), t)
+        self.assertEqual(r["summary"]["sigs"]["need_review"], 1)
+        self.assertEqual(r["summary"]["sig_review"], [
+            "sig needs review: GetThing: was [rcx], is [rcx, stack+0x28] (mismatch: the function reads [rcx, stack+0x28], "
+            "the descriptor's fingerprint says [rcx] (the function changed: review the descriptor))"])
+        self.assertIn("sig needs review: GetThing", (out / "report.txt").read_text())
+        # the descriptor is carried unchanged: a human decides what the function takes now
+        self.assertEqual(json.loads((out / "tree/server.json").read_text())["symbols"]["GetThing"]["sig"], self.SIG)
+
+
 class Descriptors(unittest.TestCase):
     """sig blocks (kiln.hooks typed links): composed like the other sections, found in either place."""
+
+    def test_a_return_class_change_needs_review_even_with_identical_arguments(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            old, new, defs = root / "old.exe", root / "new.exe", root / "defs.json"
+            old_rva = build_pe(old, [([h("8b c1 c3")], True)])[0]  # mov eax, ecx; ret
+            new_rva = build_pe(new, [([h("66 0f 6e c1 c3")], True)])[0]  # movd xmm0, ecx; ret
+            defs.write_text(json.dumps({"format": 1, "symbols": {}, "sigs": {"m/F": {
+                "ret": "s32", "args": [{"name": "x", "type": "s32"}], "invoke": "any"}}}))
+            rows, review = port.review_sigs(defs, old, new, {"m/F": {
+                "ok_old": True, "ok_new": True, "old": hex(old_rva), "new": hex(new_rva)}})
+            self.assertEqual(rows["m/F"]["old"]["reads"], rows["m/F"]["new"]["reads"])
+            self.assertEqual(len(review), 1)
+            self.assertIn("return was rax, is xmm0", review[0])
 
     def test_sigs_and_structs_compose_and_overlay(self):
         from sigdb_check import sig_blocks

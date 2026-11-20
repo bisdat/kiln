@@ -3,6 +3,13 @@
 `managed/services/Kiln.Permissions/`. Tests: `managed/tests/Kiln.Api.Tests/PermissionsTests.cs`; lab:
 `mods/tests/api-test`.
 
+## Native mods
+
+There is no slot on `kiln.players` for `Permissions.Has`. The `KILN_PLAYER_CAN_*` bits are the game's user-group
+rights, not this node check. The allow/deny lives in the managed store (registered node defaults, in-memory grants,
+subject groups). A native reader of `permissions.json` would not see those and could disagree with `Permissions.Has`.
+A native mod asks its managed half, or reads the bits on `KilnPlayer` only when it means the game's rights.
+
 ## For mods
 ```csharp
 Permissions.Register("mymod.fly", PermissionLevel.Everyone, "fly around");   // default when no rule says otherwise

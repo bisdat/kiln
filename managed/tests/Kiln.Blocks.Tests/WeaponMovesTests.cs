@@ -203,7 +203,10 @@ public sealed class WeaponMovesTests : IDisposable
 
     private sealed class FakeStates(Dictionary<string, ModStateAnswer> mine, Dictionary<string, GameStateAnswer[]> game) : IPlayerStateLookup
     {
-        public IReadOnlyList<GameStateAnswer> FindGameStates(string name) => game.TryGetValue(name, out var g) ? g : [];
+        public IReadOnlyList<GameStateAnswer> FindGameStates(string name) => game.TryGetValue(name, out var g) ? g
+            : name == "0x11223344" ? [new("SM", "Light", PlayerStateKind.State, [0x11223344])]
+            : name == $"0x{BlockIds.Fnv(Guid.Parse("6b1e0c52-93a4-4f7e-b2d8-1c5a7e9f3d40")):x8}" ? [new("SM", "Heavy", PlayerStateKind.State, [BlockIds.Fnv(Guid.Parse("6b1e0c52-93a4-4f7e-b2d8-1c5a7e9f3d40"))])]
+            : name == "0x00000009" ? [new("SM", "Special", PlayerStateKind.State, [9])] : [];
         public ModStateAnswer? Find(string mod, string name) => mod == Mod && mine.TryGetValue(name, out var s) ? s : null;
     }
 
@@ -316,8 +319,9 @@ public sealed class WeaponMovesTests : IDisposable
         Assert.Contains(w.Problems, p => p.Contains("moves.block.animation") && p.Contains("not available in this build"));
         Assert.Null(seq["moves-test.cinderbrand.primary.2"]["events[SetAnimationEvent#0].animationName"]);
         Assert.False(seq.ContainsKey("moves-test.cinderbrand.block"));
-        // what is known offline still goes in
-        Assert.NotNull(seq["moves-test.cinderbrand.primary.1"]["events[SetAnimationEvent#0].animationName"]);
+        // Raw references now need the receiving graph too; offline syntax is not proof of existence.
+        Assert.Contains(w.Problems, p => p.Contains("moves.primary[0].animation") && p.Contains("unavailable"));
+        Assert.Null(seq["moves-test.cinderbrand.primary.1"]["events[SetAnimationEvent#0].animationName"]);
     }
 
     [Fact]
@@ -377,7 +381,7 @@ public sealed class WeaponMovesTests : IDisposable
             MoveTimingTests.Sub(1.6, Ev("SetAnimationEvent", 0), Ev("SpawnImpact", 0.8, 0.1)) with { Sequence = Like1, Index = 0 },
             MoveTimingTests.Sub(1.6, Ev("SetAnimationEvent", 0), Ev("SpawnImpact", 0.65, 0.1)) with { Sequence = Like1, Index = 1 },
         };
-        var w = MovePlanner.Cast(Mod, "weapon w", "moves.special", "m.w.special", two, [new AnimationRef("0x00000009", BlockIds.WithFnv(9), null)], 0.5, MoveTiming.Swing, null);
+        var w = MovePlanner.Cast(Mod, "weapon w", "moves.special", "m.w.special", two, [new AnimationRef("0x00000009", BlockIds.WithFnv(9), null)], 0.5, MoveTiming.Swing, new FakeStates(new(), new()));
         Assert.Empty(w.Problems);
         Assert.Equal(["m.w.special", "m.w.special#1"], w.Rules.Select(r => r.Entry));
         Assert.All(w.Rules, r => Assert.Equal(0.5, (double)r.Rules["events[SpawnImpact#0].time"]!, 12));

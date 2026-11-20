@@ -20,6 +20,7 @@
 // .text is not the loaded one) the live .text is scanned, as before. A symbol whose live bytes differ from the file's
 // is reported (kiln.log, sigdb-report.json "live"): someone hooked or patched it.
 #pragma once
+#include "services/hooks_fingerprint.h"
 #include <string>
 #include <string_view>
 #include <vector>
@@ -74,6 +75,12 @@ bool code_from_disk();  // true when the file's .text is in use, false on the li
 bool file_bytes(uintptr_t live_addr, uint8_t* out, size_t n);
 // The sigdb symbol (core first, then fragments) resolved to exactly this address, or "".
 std::string symbol_name_at(uintptr_t live_addr);
+// A hook-map extension (hooks::add_map_extension): state/hooks.json "codePatches", every place the live code differs
+// from the exe file's at the time the map is written, with who changed it ("call redirected to x.dll+0x10",
+// "jmp to ad_core.dll+0x49b0", "bytes changed in place") and, for a redirected call, the function it called. Closed mods
+// that check the game's code against the file before they patch it (XHL-Core plugins, inbox 39) refuse a call another
+// module rewrote; this names that module in every support report. `json` is the map's nlohmann::ordered_json.
+void code_patch_map(void* json, const char* phase);
 // A symbol whose live bytes differed from the file's when it was resolved (someone hooked or patched it before Kiln
 // looked): `at` is where the attribution started (0 = unreadable), `bytes` the 16 live bytes there then, `by` the
 // sigdb log's description ("jmp to enshwick.dll+0x11ea80", "bytes changed in place", ...).
@@ -100,6 +107,7 @@ enum class SigStatus : uint8_t {
     Bad,         // the descriptor itself is malformed
 };
 struct SigInfo {
+    hooks::fp::Sig descriptor;  // parsed descriptor of this resolver load
     std::string symbol;
     SigStatus status = SigStatus::Unresolved;
     std::string text;         // the comparison in words, or why there is none
@@ -108,6 +116,9 @@ struct SigInfo {
     uintptr_t address = 0;    // live address (0 = unresolved)
 };
 bool sig(std::string_view symbol, SigInfo* out);   // core first, then the fragment named by the prefix
+// Status only: no descriptor, JSON or fingerprint copies. Text is empty on Match.
+bool sig_status(std::string_view symbol, uintptr_t* address, SigStatus* status, std::string* text);
+uint64_t sig_revision(); // process-local revision of the immutable executable / loaded descriptor set
 bool sig_at(uintptr_t live_addr, SigInfo* out);    // the described symbol resolved to exactly this address
 std::vector<std::string> sig_symbols();            // core symbols with a descriptor
 std::string structs_json();                        // the core's "structs" sections, merged

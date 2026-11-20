@@ -1,0 +1,16 @@
+{
+  "format": 1,
+  "buildingMaterialPools": {
+    "served": {
+      "name": "Served Code Pool",
+      "materials": [
+        {
+          "gameMaterial": "WoodRough"
+        },
+        {
+          "gameMaterial": "StoneRough"
+        }
+      ]
+    }
+  }
+}

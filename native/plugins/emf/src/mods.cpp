@@ -9,6 +9,7 @@
 #include <map>
 #include <set>
 
+#include "compat_ticks.h"
 #include "emf_internal.h"
 #include "../../compat/compat.h"
 #include "v26_model.h"
@@ -340,6 +341,11 @@ bool read_manifest(const std::filesystem::path& folder, Mod* m) {
         m->reason = "\"version\" must be \"1\", \"1.2\" or \"1.2.3\"";
         return false;
     }
+    m->server_ticks_only = server_ticks_only(m->id, v.v);
+    if (m->server_ticks_only)
+        logf(KILN_LOG_INFO, "emf mod %s %s: on_tick for the server world only (its on_tick clears its world pointer on "
+             "every world's step, which empties its server-world work in a hosted game; compat_ticks.h)",
+             m->id.c_str(), m->version.c_str());
     m->name = str("name").empty() ? m->id : str("name");
     m->description = str("description");
     m->side = lower(str("side"));

@@ -2,6 +2,7 @@
 //! list in lib.rs and `COMMANDS` in launcher/src/api/commands.ts are the same (tested).
 
 pub mod app;
+pub mod snapshot;
 pub mod game;
 pub mod runtime;
 pub mod profile;
@@ -22,17 +23,23 @@ pub mod compat;
 pub mod found;
 pub mod cook;
 pub mod data_folder;
+pub mod updates;
+pub mod vendor;
+pub mod community;
 
 /// A background task id; the task reports through `kiln://task`.
 pub type TaskId = String;
 
 /// Every command name, in contracts.md order.
 pub const NAMES: &[&str] = &[
+    "snapshot_status",
+    "snapshot_continue",
     "app_info",
     "app_settings_get",
     "app_settings_set",
     "app_open_path",
     "app_open_url",
+    "app_open_discord",
     "task_list",
     "task_get",
     "task_cancel",
@@ -41,6 +48,8 @@ pub const NAMES: &[&str] = &[
     "game_add",
     "game_remove",
     "game_status",
+    "game_start_get",
+    "game_start_set",
     "runtime_list",
     "runtime_import",
     "runtime_status",
@@ -69,6 +78,8 @@ pub const NAMES: &[&str] = &[
     "library_users",
     "library_lint",
     "library_take_over",
+    "library_rollback",
+    "library_replace_dll",
     "config_list",
     "config_read",
     "config_set",
@@ -146,6 +157,7 @@ pub const NAMES: &[&str] = &[
     "update_status",
     "update_check",
     "update_install",
+    "update_switch",
     "update_restart",
     "update_skip",
     "update_ack",
@@ -176,14 +188,21 @@ pub const NAMES: &[&str] = &[
     "engine_adopt_folder",
     "eml_backup",
     "eml_restore",
+    "eml_data_plan",
+    "eml_data_apply",
+    "eml_data_undo",
+    "eml_data_latest",
     "chain_view",
     "chain_set_late",
+    "shroudlink_notice",
     "found_scan",
     "found_add",
     "cook_plan",
     "cook_run",
+    "boot_snapshot_run",
     "report_save",
     "report_summary",
+    "report_preview",
     "data_folder_get",
     "data_folder_size",
     "data_folder_check",
@@ -194,6 +213,37 @@ pub const NAMES: &[&str] = &[
     "data_folder_restart",
     "app_started",
     "app_render_set",
+    "app_render_report",
+    "updates_check",
+    "app_desktop_set",
+    "app_locales",
+    "app_sandbox_set",
+    "vendor_status",
+    "vendor_license",
+    "vendor_download",
+    "vendor_remove",
+    "community_settings_get",
+    "community_settings_set",
+    "community_status",
+    "community_feed",
+    "community_check_member",
+    "community_signout",
+    "community_signin_start",
+    "community_signin_poll",
+    "community_signin_cancel",
+    "community_posts",
+    "community_post_seen",
+    "community_post_solved",
+    "community_post_delete",
+    "community_presence_facts",
+    "community_report_prepare",
+    "community_report_send",
+    "tester_status",
+    "tester_join",
+    "tester_leave",
+    "tester_result_set",
+    "tester_results_send",
+    "community_steam_keyboard",
 ];
 
 #[cfg(test)]

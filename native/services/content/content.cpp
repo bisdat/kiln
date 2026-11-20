@@ -17,6 +17,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
+#include <mutex>
 #include <unordered_set>
 
 #include "content.h"
@@ -34,6 +35,8 @@ static_assert(sizeof(KilnContentField) == 56 && offsetof(KilnContentField, enum_
 static_assert(sizeof(KilnContentEntry) == 56 && offsetof(KilnContentEntry, guid) == 40);
 static_assert(sizeof(KilnContentStack) == 32);
 static_assert(sizeof(KilnContentStatus) == 208 && offsetof(KilnContentStatus, detail) == 48);
+static_assert(sizeof(KilnContentTextInfo) == 192 && offsetof(KilnContentTextInfo, language_key) == 16 && offsetof(KilnContentTextInfo, detail) == 32);
+static_assert(offsetof(KilnContentApi, text) == offsetof(KilnContentApi, txn_end) + sizeof(void*) && offsetof(KilnContentApi, text_info) == offsetof(KilnContentApi, text) + sizeof(void*));
 
 namespace kc {
 const KilnApi* g_api = nullptr;
@@ -333,6 +336,7 @@ void probe_owners() {
             drops_drop_owner(o);
 #if KC_GAMEDATA
             gd_owner_gone(o);
+            gd_owner_revoked(o);
 #endif
             std::string err;
             store_flush(&err);
@@ -773,9 +777,7 @@ KilnResult KILN_CALL t_apply_json(KilnOwner owner, KilnStr text, KilnStr source,
     return KILN_OK;
 }
 
-uint32_t KILN_CALL t_revert_owner(KilnOwner owner) {
-    if (!tick() || owner == 0) return 0;
-    std::lock_guard lock(store_mutex());
+uint32_t revert_owner_locked(KilnOwner owner) {
     const uint32_t n = store_drop_owner(owner);
     drops_drop_owner(owner);
 #if KC_GAMEDATA
@@ -784,8 +786,64 @@ uint32_t KILN_CALL t_revert_owner(KilnOwner owner) {
     std::string err;
     store_flush(&err);
     g_modified_stale = true;
+    return n;
+}
+
+uint32_t KILN_CALL t_revert_owner(KilnOwner owner) {
+    if (!tick() || owner == 0) return 0;
+    std::lock_guard lock(store_mutex());
+    const uint32_t n = revert_owner_locked(owner);
     if (n) LOGI("%s reverted: %u field(s) put back", owner_label(owner).c_str(), n);
     return n;
+}
+
+KilnResult KILN_CALL t_txn_begin(KilnOwner owner, uint64_t* out) {
+    if (!out) return KILN_ERR_INVALID_ARGUMENT;
+    *out = 0;
+    if (!tick()) return KILN_ERR_WRONG_THREAD;
+    if (!g_ready.load()) return KILN_ERR_UNAVAILABLE;
+    std::lock_guard lock(store_mutex());
+    return store_txn_begin(owner, out) ? KILN_OK : KILN_ERR_INVALID_ARGUMENT;
+}
+
+KilnResult KILN_CALL t_txn_end(uint64_t txn, uint32_t rollback, char* report, size_t cap, size_t* len) {
+    if (!tick()) return KILN_ERR_WRONG_THREAD;
+    nlohmann::ordered_json r;
+    KilnResult rc = KILN_OK;
+    {
+        std::lock_guard lock(store_mutex());
+        if (!rollback) {
+            const bool known = store_txn_commit(txn);
+            r["outcome"] = known ? "committed" : "cancelled";
+            rc = known ? KILN_OK : KILN_ERR_NOT_FOUND;
+        } else {
+            uint32_t fields = 0;
+            KilnOwner owner = 0;
+            std::string why;
+            const TxnOutcome o = store_txn_rollback(txn, [] {
+#if KC_GAMEDATA
+                gd::after_changes();
+#endif
+            }, &owner, &fields, &why);
+            g_modified_stale = true;
+            r["fields"] = fields;
+            if (o == TxnOutcome::Restored) {
+                r["outcome"] = "restored";
+            } else if (o == TxnOutcome::Cancelled) {
+                r["outcome"] = "cancelled";
+                rc = KILN_ERR_NOT_FOUND;
+            } else {
+                // fail closed: what the owner's layers hold cannot be told, so none of them stays
+                const uint32_t n = revert_owner_locked(owner);
+                r["outcome"] = "revoked";
+                r["error"] = why + "; every layer of " + owner_label(owner) + " was taken off (" + std::to_string(n) + " field(s))";
+                rc = KILN_ERR_REVOKED;
+            }
+        }
+    }
+    if (rc == KILN_ERR_REVOKED) LOGW("content transaction %llu: %s", (unsigned long long)txn, r["error"].get<std::string>().c_str());
+    copy_out(r.dump(), report, cap, len);
+    return rc;
 }
 
 KilnResult KILN_CALL t_dump(KilnStr path, char* written, size_t cap, size_t* len) {
@@ -863,11 +921,16 @@ KilnResult KILN_CALL t_pack_mods(KilnStr text) {
         }
         if (s.find('[') == std::string::npos) return KILN_ERR_INVALID_ARGUMENT;
     }
-    std::lock_guard lock(g_filter_mu);
-    if (have == g_have_filter && ids == g_filter) return KILN_OK;
-    g_have_filter = have;
-    g_filter = std::move(ids);
-    if (g_ready.load()) g_filter_changed.store(true);
+    {
+        std::lock_guard lock(g_filter_mu);
+        if (have == g_have_filter && ids == g_filter) return KILN_OK;
+        g_have_filter = have;
+        g_filter = ids;
+        if (g_ready.load()) g_filter_changed.store(true);
+    }
+#if KC_GAMEDATA
+    if (have) gd::pending_mods_changed(ids);
+#endif
     return KILN_OK;
 }
 
@@ -902,7 +965,11 @@ KilnResult KILN_CALL t_definitions(char* buf, size_t cap, size_t* len) {
 
 KilnResult KILN_CALL t_label_owner(KilnOwner owner, KilnStr label) {
     if (!label.ptr || !label.len) return KILN_ERR_INVALID_ARGUMENT;
-    set_owner_label(owner, str(label));
+    const std::string name = str(label);
+    set_owner_label(owner, name);
+#if KC_GAMEDATA
+    if (name.rfind("mod ", 0) == 0) gd::pending_owner_loaded(owner, name.substr(4));
+#endif
     return KILN_OK;
 }
 
@@ -961,6 +1028,8 @@ const KilnContentApi kTable = {
     /* v3 */ &t_define, &t_definitions,
     /* v4 */ &t_set_ref, &t_undefine_owner, &t_info,
     /* appended to v4 */ &t_icon_alias,
+    /* appended to v4, since 0.2.0-dev.28 */ &t_txn_begin, &t_txn_end,
+    /* appended to v4, since 0.2.0-dev.29.18 */ &nc_text_api, &nc_text_info_api,
 };
 
 // ============================================================================================= boot ============
@@ -1044,8 +1113,43 @@ struct BootPlan {
     std::vector<KilnOwner> owners;
     size_t defined = 0, cloned = 0;
 };
+// The generation's required participants (prepare): a definition of theirs that a world does not register stops the start.
+std::mutex g_late_mu;
+kiln::boot::LateFaults g_late;  // g_late_mu
+}  // namespace
+
+// After a registration pass (newcontent's sync_world, gamedata's world-ready pass), with no lock of kiln.content held. Definitions
+// register when a world loads its registries, after the game's entry point, so this is kiln.boot's activation_fault (not a refusal).
+void kc::boot_late_check() {
+    {
+        std::lock_guard l(g_late_mu);
+        if (g_late.required.empty()) return;
+    }
+    std::vector<BootFailed> failed;
+    {
+        std::lock_guard lock(store_mutex());
+        nc_boot_failed(&failed);
+#if KC_GAMEDATA
+        gd::clones_boot_failed(&failed);
+#endif
+    }
+    std::vector<BootFailed> report;
+    {
+        std::lock_guard l(g_late_mu);
+        for (BootFailed& f : failed)
+            if (g_late.take(f.mod)) report.push_back(std::move(f));
+    }
+    for (const BootFailed& f : report)  // a required mod: the call does not return (the start stops, at a world's load)
+        kiln::boot::activation_fault(g_api, g_owner, f.mod, "content", f.key, "kiln.content, while a world loaded (the stop comes at world load): " + f.why);
+}
+
+namespace {
 void KILN_CALL destroy_boot(const void* p) {
     const auto* plan = static_cast<const BootPlan*>(p);
+    {
+        std::lock_guard l(g_late_mu);
+        g_late.reset();
+    }
     for (const KilnOwner o : plan->owners) {
         nc_forget_unbound(o);
 #if KC_GAMEDATA
@@ -1068,6 +1172,11 @@ KilnResult KILN_CALL prepare_boot(void*, const KilnBootPrepareInputV1* in, KilnB
     const kiln::boot::Input input = kiln::boot::parse(in);
     if (!input.ok) return kiln::boot::refuse(out, issue, "", "", "", "kiln.content: the boot envelope is not JSON");
     auto* plan = new BootPlan;
+    {
+        std::lock_guard l(g_late_mu);
+        g_late.reset(input.required);
+    }
+    std::set<std::string> lab_faulted;
     for (const auto& d : input.docs("content")) {
         const auto o = input.owner.find(d.owner);
         const KilnOwner owner = o != input.owner.end() ? o->second : 0;
@@ -1076,7 +1185,10 @@ KilnResult KILN_CALL prepare_boot(void*, const KilnBootPrepareInputV1* in, KilnB
             return kiln::boot::refuse(out, issue, d.owner, "content", d.key, why);
         };
         if (!owner) return refused("kiln.content: no process owner for " + d.owner);
-        if (std::find(plan->owners.begin(), plan->owners.end(), owner) == plan->owners.end()) plan->owners.push_back(owner);
+        if (std::find(plan->owners.begin(), plan->owners.end(), owner) == plan->owners.end()) {
+            plan->owners.push_back(owner);
+            set_owner_label(owner, "boot:" + d.owner);  // its definitions are listed with their mod (mod_of_label)
+        }
         const nlohmann::json& doc = d.document;
         const std::string op = doc.is_object() ? doc.value("op", std::string()) : std::string();
         if (!doc.is_object() || !doc.contains("definition") || !doc["definition"].is_object())
@@ -1089,6 +1201,15 @@ KilnResult KILN_CALL prepare_boot(void*, const KilnBootPrepareInputV1* in, KilnB
             if (kind != KILN_CONTENT_ITEMS && kind != KILN_CONTENT_RECIPES) return refused("\"kind\": items or recipes");
             if (nc_define(owner, kind, text, false, source, &report) != KILN_OK) return refused("kiln.content refused it: " + report);
             ++plan->defined;
+            // the lab switch boot.testFault (policy any): the mod's first boot item or recipe is refused by every world at registration
+            const auto fault = input.test_fault.find(d.owner);
+            if (fault != input.test_fault.end() && fault->second == "content" && !lab_faulted.count(d.owner) &&
+                doc["definition"].contains("guid") && doc["definition"]["guid"].is_string() &&
+                nc_lab_refuse(doc["definition"]["guid"].get<std::string>(), "lab switch boot.testFault: the world refuses this definition at registration")) {
+                lab_faulted.insert(d.owner);
+                LOGW("boot: lab switch boot.testFault: %s's %s %s is refused by every world at registration", d.owner.c_str(),
+                     kind == KILN_CONTENT_ITEMS ? "item" : "recipe", d.key.c_str());
+            }
         } else if (op == "clone") {
 #if KC_GAMEDATA
             const uint32_t section = section_of_name(doc.value("section", nlohmann::json()));
@@ -1116,12 +1237,16 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     near_alloc_boot();
     resolve();
     if (E.items && E.reflection) nc_boot();
+    nc_text_boot();  // the row content.text (also where nc_boot did not run: unavailable, with why)
 #if KC_GAMEDATA
     gd_boot();  // registers kiln.gamedata (available or not)
 #endif
     // bind of a boot generation's content part (no definitions are read here either way); kiln.content without its registries takes none
     if (E.items && E.reflection && kiln::boot::collect(api, owner, "content", &prepare_boot, nullptr))
         LOGI("boot profile: the boot generation's content definitions are prepared before the game's entry point");
+#if KC_GAMEDATA
+    gd_boot_patches_bind();  // the seventh collector: fields of game resources, written when the resource service is up
+#endif
     if (!E.items || !E.reflection) {
         set_detail("the item registry or the game's reflection is not available on this build");
         LOGW("kiln.content unavailable on this build (items %s, reflection %s)", E.items ? "on" : "off",

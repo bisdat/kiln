@@ -42,7 +42,7 @@ internal static class FakeTables
         Features(ChatFake.Features);
         KitBackend.Instance.RegisterTable(ItemsAbi.Service, ItemsTable.Create());
         Features(ItemsFake.Features);
-        foreach (var row in ItemsFake.OfflineRows) Offline(row, "kiln.items' fake in the test kit has the v1 table only (give, take, read, the catalog)");
+        foreach (var row in ItemsFake.OfflineRows) Offline(row, "kiln.items' fake in the test kit models give, take, read, the catalog and gear writes only");
         KitBackend.Instance.RegisterTable(CombatAbi.Service, CombatTable.Create());
         Features(CombatFake.Features);
         foreach (var row in CombatFake.OfflineRows) Offline(row, "kiln.combat's fake in the test kit has the v1 table's health, hits and deaths only");

@@ -9,9 +9,11 @@
 //  - FEW (the default): a menu draws its mods' rows while it has at most kFew of them, else none of them;
 //  - ALWAYS: every row, as before 0.2.0-dev.27;
 //  - NEVER: none.
-// kFew is a guess: neither the code nor docs/re/game-ui.md gives the height of a menu row or the menus' top on a 1080p
-// screen, so the number of rows that still leave Quit on the screen is not known. 3 rows plus MODS is what a guided
-// check (mods/tests/client-pass) is asked to confirm.
+// kFew is FEW's limit, not a measured fit: how many rows leave Quit on the screen depends on the screen, the UI scale
+// and the rows the game and Kiln draw themselves (the owner's 1280x720 menu lost Quit with 2 mods' rows, 2026-11-15).
+// The pause menu does not rely on it: since 0.2.0-dev.29 it scrolls when its rows are taller than its column, as read
+// from the game's layout (menu_scroll.h "wrap by height"), whatever the mode; there kFew only decides until a height has
+// been read. The main menu does not scroll: there FEW keeps a menu with many mods' rows short, and AUTO is FEW.
 #pragma once
 
 #include <cstddef>
@@ -19,7 +21,7 @@
 
 namespace kui::menu_rows {
 
-inline constexpr uint32_t kFew = 3;  // a guess, see above
+inline constexpr uint32_t kFew = 3;  // FEW's limit (see above); not a fit
 
 inline constexpr uint32_t show_few = 0;     // KILN_UI_MENU_SHOW_FEW
 inline constexpr uint32_t show_always = 1;  // KILN_UI_MENU_SHOW_ALWAYS

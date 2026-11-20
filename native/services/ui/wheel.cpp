@@ -266,6 +266,7 @@ bool wheel_on_key(const KilnUiKey& k) {
 }
 
 KilnResult wheel_open(KilnOwner owner, const KilnUiWheel* def, KilnUiWheelFn fn, void* user, KilnHandle* out) {
+    if (!overlay_draws()) return KILN_ERR_UNAVAILABLE;  // off from the start, or turned off since (it could never be drawn)
     if (!def || !fn || def->size < sizeof(KilnUiWheel) || def->flags != 0) return KILN_ERR_INVALID_ARGUMENT;
     if (def->count < 1 || def->count > static_cast<uint32_t>(kwheel::kMaxItems) || !def->items) return KILN_ERR_INVALID_ARGUMENT;
     if (!kwheel::valid_hold_key(def->hold_key)) return KILN_ERR_INVALID_ARGUMENT;

@@ -19,6 +19,27 @@ namespace kiln {
 double now_ms() { return static_cast<double>(GetTickCount64()); }
 const ImageInfo& image() { static ImageInfo i; return i; }
 const Paths& paths() { static Paths p; return p; }
+namespace progress_state {
+void mark(uint32_t) {}  // progress.json's writer is not part of this probe
+}  // namespace progress_state
+namespace tasks_svc {
+// kiln.tasks (services/tasks.cpp) is not part of this probe: no sessions, edges or tick hops to deliver
+void session_started(uint32_t, uint32_t) {}
+void post_edge(uint32_t, uint32_t, uint64_t) {}
+void session_stopping(uint32_t, uint32_t) {}
+void tick_hops(uint32_t) {}
+bool tasks_window(uint32_t, bool, kiln::tasks_stats::WindowSnapshot*) { return false; }  // no pool: lines keep their older shape
+}  // namespace tasks_svc
+namespace window_clock {
+// kiln.window_clock (package 07) is not part of this probe: no window service, so nothing to begin or end
+void world_started() {}
+void pre(uint64_t) {}
+void begin() {}
+bool wants_end() { return false; }
+void end() {}
+void stopping() {}
+void stopped() {}
+}  // namespace window_clock
 namespace log {
 void writef(int, const char*, const char* fmt, ...) {
     if (strstr(fmt, "disabled")) ++disabled_logs;
@@ -32,6 +53,7 @@ bool constant(std::string_view, int64_t*) { return false; }
 namespace worldinfo {
 uintptr_t world(uint32_t k) { return k < KILN_WORLD_KINDS ? worlds[k] : 0; }
 void set_world(uint32_t k, uintptr_t w) { worlds[k] = w; }
+uintptr_t singleton(uintptr_t, std::string_view) { return 0; }  // tick-stats' client-world lines: no singletons here
 }
 namespace reg {
 uint64_t version() { return 1; }

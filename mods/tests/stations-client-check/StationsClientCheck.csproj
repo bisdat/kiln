@@ -1,0 +1,16 @@
+<Project>
+  <!-- kiln.stations' real-client check (docs/kiln/services/stations.md, "Real-client checks" C1-C5): every station event
+       in kiln.log ("stationcheck:") and /stationcheck for the code actions on the station nearest to you. Side both:
+       deploy on the server (or the hosting client) and on the Kiln client (a joined client says Stations.Available false).
+       Build: dotnet build mods/tests/stations-client-check/StationsClientCheck.csproj -t:KilnDeploy -p:KilnModsDir=<folder> -->
+  <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.props" />
+  <PropertyGroup>
+    <KilnModId>stations-client-check</KilnModId>
+    <KilnModName>Production stations client check</KilnModName>
+    <Version>0.1.0</Version>
+    <KilnServices>Blocks;Items;Chat;Players;World;Client;Gameplay</KilnServices>
+    <KilnSide>both</KilnSide>
+    <KilnClients>mod</KilnClients>
+  </PropertyGroup>
+  <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.targets" />
+</Project>

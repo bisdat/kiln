@@ -198,23 +198,63 @@ check_disabled_nexus_tests() {
     echo "Nexus is on in this release: the disabled-build tests do not apply"
     return 0
   fi
-  (cd "$src" && linux "$src/tools/test-nexus-disabled.sh")
+  # a test build's beta identity (KILN_LAUNCHER_CHANNEL/BETA/BASE_RELEASE) is for the shipped launcher only: the
+  # tripwire test binaries compile from the export, whose version is still X.Y.Z-dev, and build.rs refuses a beta base
+  # release that does not precede it (0.2.0-dev.29.19 beta 1's check failed so; the shipped launcher was fine)
+  (cd "$src" && KILN_LAUNCHER_CHANNEL= KILN_LAUNCHER_BETA= KILN_LAUNCHER_BASE_RELEASE= linux "$src/tools/test-nexus-disabled.sh")
 }
 
-check_template() {
+# A subshell: its package cache and dotnet home never reach the release's own shell, also when a step fails half-way.
+check_template() (
   local d=$ck/template
-  rm -rf "$d" && mkdir -p "$d"
+  rm -rf "$d" && mkdir -p "$d" || return
   # a scratch package cache: the user's ~/.nuget/packages never sees these test packages
   export NUGET_PACKAGES=$d/packages DOTNET_CLI_HOME=$d/home
-  dotnet new install "$out/sdk/Kiln.Templates.$sdk_version.nupkg" --debug:custom-hive "$d/hive"
-  (cd "$d" && dotnet new kiln-mod -n CheckMod --feed "$out/sdk" --debug:custom-hive "$d/hive")
+  dotnet new install "$out/sdk/Kiln.Templates.$sdk_version.nupkg" --debug:custom-hive "$d/hive" || return
+  (cd "$d" && dotnet new kiln-mod -n CheckMod --feed "$out/sdk" --debug:custom-hive "$d/hive") || return
   # the new project names this release's Kiln.Sdk, so it restores this release's packages and no cached older ones
   grep -q "Sdk=\"Kiln.Sdk/$sdk_version\"" "$d/CheckMod/CheckMod.csproj" || { echo "CheckMod.csproj does not name Kiln.Sdk/$sdk_version"; return 1; }
-  (cd "$d/CheckMod" && dotnet build -c Release -nologo -v q)
+  (cd "$d/CheckMod" && dotnet build -c Release -nologo -v q) || return
   local m; m=$(find "$d/CheckMod" -path '*/bin/*' -name kiln.mod.json | head -1)
-  unset NUGET_PACKAGES DOTNET_CLI_HOME
   [[ -n $m ]] || { echo "no kiln.mod.json in the build output"; return 1; }
   echo "built: ${m#"$d"/}"; cat "$m"
+  check_template_boot "$d"
+)
+
+# The boot case: a template mod with <KilnBoot>true</KilnBoot> and an OnBoot that reads its settings (Config.Register and
+# Value work there), no kiln.mod.json of its own. It builds only when the packed analyzers see KilnBoot (else KILN034,
+# an error) and allow the settings read in boot code (KILN035, a warning, made an error here); its kiln.mod.json says
+# "boot": true.
+check_template_boot() { # template dir (check_template's: its package cache and template hive)
+  local d=$1 p=$1/BootCheck
+  (cd "$d" && dotnet new kiln-mod -n BootCheck --feed "$out/sdk" --debug:custom-hive "$d/hive") || return
+  [[ -f $p/BootCheck.csproj && -f $p/BootCheckMod.cs && ! -e $p/kiln.mod.json ]] \
+    || { echo "dotnet new kiln-mod -n BootCheck: not the expected project (BootCheck.csproj, BootCheckMod.cs, no kiln.mod.json)"; return 1; }
+  python3 - "$p" <<'PY' || return
+import pathlib, sys
+p = pathlib.Path(sys.argv[1])
+proj = p / "BootCheck.csproj"
+text = proj.read_text(encoding="utf-8")
+if text.count("</PropertyGroup>") < 1:
+    sys.exit("BootCheck.csproj has no PropertyGroup")
+text = text.replace("</PropertyGroup>", "  <KilnBoot>true</KilnBoot>\n    <WarningsAsErrors>$(WarningsAsErrors);KILN035</WarningsAsErrors>\n  </PropertyGroup>", 1)
+proj.write_text(text, encoding="utf-8")
+mod = p / "BootCheckMod.cs"
+text = mod.read_text(encoding="utf-8")
+anchor = "    public override void OnLoad()"
+if anchor not in text:
+    sys.exit("BootCheckMod.cs has no OnLoad override to put OnBoot before")
+text = text.replace(anchor, "    public override void OnBoot(BootContext boot)\n    {\n"
+                    "        if (!Config.Register<BootCheckSettings>().Value.Enabled) return;\n    }\n\n" + anchor, 1)
+text += "\npublic sealed class BootCheckSettings\n{\n    public bool Enabled { get; set; } = true;\n}\n"
+mod.write_text(text, encoding="utf-8")
+PY
+  (cd "$p" && dotnet build -c Release -nologo -v q) || { echo "the boot mod (KilnBoot, OnBoot) did not build against the packed SDK"; return 1; }
+  local m; m=$(find "$p" -path '*/bin/*' -name kiln.mod.json | head -1)
+  [[ -n $m ]] || { echo "no kiln.mod.json in the boot mod's build output"; return 1; }
+  python3 -c 'import json,sys; m=json.load(open(sys.argv[1])); sys.exit(0 if m.get("boot") is True else "kiln.mod.json of the KilnBoot mod has no \"boot\": true")' "$m" \
+    || { cat "$m"; return 1; }
+  echo "built (KilnBoot): ${m#"$d"/}"
 }
 
 check_vsix() {
@@ -238,16 +278,38 @@ check_authenticode() {
   "$here/authenticode.sh" verify "${files[@]}" "${inner[@]}" "${rt[@]}"
 }
 
+# A test build's folder (release.sh --beta N): no nexus/, only the beta channel's manifests, each naming the build id
+check_beta_folder() {
+  [[ ! -e $out/nexus ]] || { echo "a test build has a nexus/ folder"; return 1; }
+  local f
+  for f in "$out"/updates/frostdev.io/*/latest.json; do
+    [[ $f == "$out/updates/frostdev.io/beta/latest.json" ]] || { echo "a test build must not write $f"; return 1; }
+  done
+  python3 - "$out/updates/frostdev.io/beta/latest.json" "$out/updates/github/latest.json" "$build_id" "$beta" <<'PY'
+import json, sys
+for p in sys.argv[1:3]:
+    m = json.load(open(p))
+    k = m.get("kiln", {})
+    assert m["version"] == sys.argv[3], (p, m["version"])
+    assert k.get("channel") == "beta" and k.get("beta") == int(sys.argv[4]), (p, k)
+print("beta manifests:", sys.argv[3])
+PY
+}
+
 run_checks() {
   ck=$work/checks
   rm -rf "$ck" && mkdir -p "$ck"
   check "SHA256SUMS matches the folder" python3 "$lib/release.py" sums "$out" --check
   python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["plugins"]["updater"]["pubkey"])' \
     "$src/launcher/src-tauri/tauri.conf.json" >"$ck/embedded.pub"
-  check "updater signatures verify against the launcher's built-in key, signed for $version" \
-    python3 "$lib/release.py" verify --pubkey "$ck/embedded.pub" --version "$version" "${updater_files[@]}"
+  # a test build's files are signed for its build id (X.Y.Z-dev.N+beta.B), a release's for its version
+  check "updater signatures verify against the launcher's built-in key, signed for ${build_id:-$version}" \
+    python3 "$lib/release.py" verify --pubkey "$ck/embedded.pub" --version "${build_id:-$version}" "${updater_files[@]}"
   check "AppImage --selftest on a private display (distribution direct)" check_appimage
-  check "Nexus AppImage --selftest on a private display (distribution nexus)" check_appimage "$out/nexus/linux/$A" appimage-nexus nexus
+  # a test build has no Nexus Mods build (release.sh nexus_build)
+  if ((${nexus_build:-1})); then
+    check "Nexus AppImage --selftest on a private display (distribution nexus)" check_appimage "$out/nexus/linux/$A" appimage-nexus nexus
+  fi
   if [[ -n $setup ]]; then
     check "NSIS setup installs silently under Wine and passes --selftest (distribution direct)" check_nsis
     check "kilnctl.exe and kiln.exe --version under Wine" check_wine_cli
@@ -257,9 +319,13 @@ run_checks() {
       check_nsis "$out/nexus/windows/$S" wine-pfx-nexus nexus
   fi
   check "deb control and files (dpkg-deb -I/-c equivalent)" python3 "$lib/release.py" deb "$out/linux/$D" --version "$version" --need usr/bin/kiln-launcher
-  check "Nexus deb control and files" python3 "$lib/release.py" deb "$out/nexus/linux/$D" --version "$version" --need usr/bin/kiln-launcher
-  check "the Nexus builds hold none of the self-update (update feeds, updater key, updater plugin; no .sig): AppImage, deb, setup, installed exe" \
-    check_nexus_updater
+  if ((${nexus_build:-1})); then
+    check "Nexus deb control and files" python3 "$lib/release.py" deb "$out/nexus/linux/$D" --version "$version" --need usr/bin/kiln-launcher
+    check "the Nexus builds hold none of the self-update (update feeds, updater key, updater plugin; no .sig): AppImage, deb, setup, installed exe" \
+      check_nexus_updater
+  else
+    check "a test build has no Nexus Mods build and no dev or stable manifest" check_beta_folder
+  fi
   check "the direct builds still hold their self-update (feeds, updater key, plugin)" check_direct_updater
   [[ -n $rpm ]] && check "rpm contains usr/bin/kiln-launcher" check_rpm
   check "kilnctl bundle verify on the runtime zip" "$out/runtime/kilnctl" bundle verify "$out/runtime/kiln-runtime-$version.zip"
@@ -275,8 +341,10 @@ run_checks() {
     python3 "$lib/release.py" glibc "$out" --max "${glibc_max:-2.35}" --tmp "$ck"
   check "kilnctl, kiln and the AppImage start on a clean Ubuntu 22.04 (--selftest, the launcher's window; screenshot in checks/start-ubuntu22)" \
     check_start_ubuntu
-  check "Nexus AppImage starts on a clean Ubuntu 22.04 (distribution nexus; screenshot in checks/start-ubuntu22-nexus)" \
-    check_start_ubuntu nexus
+  if ((${nexus_build:-1})); then
+    check "Nexus AppImage starts on a clean Ubuntu 22.04 (distribution nexus; screenshot in checks/start-ubuntu22-nexus)" \
+      check_start_ubuntu nexus
+  fi
   check "the disabled-Nexus tripwire tests run with KILN_NEXUS_ENABLED=0 and pass (skipped when the release has Nexus on)" \
     check_disabled_nexus_tests
   check "dotnet new kiln-mod from the packed templates builds against the packed SDK (local feed)" check_template

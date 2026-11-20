@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- kiln.world's program quota on a real server (package 17b S5-S6): a mod with 32 declarations in its
+       kiln.programs.json (the file's limit), built twice: -p:QuotaMod=a and -p:QuotaMod=b give the mods
+       world-programs-quota-a and -b (64 declarations together, so Kiln's 64 slots and the 8 kept for its services
+       decide which bind). Each bound program counts its runs. PASS / FAIL lines "world-programs-quota-<a|b>: ...". -->
+  <PropertyGroup>
+    <QuotaMod Condition="'$(QuotaMod)' == ''">a</QuotaMod>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <GenerateRuntimeConfigurationFiles>false</GenerateRuntimeConfigurationFiles>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <AssemblyName>WorldProgramsQuota$(QuotaMod.ToUpperInvariant())</AssemblyName>
+    <DefineConstants Condition="'$(QuotaMod)' == 'a'">$(DefineConstants);QUOTA_A</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../../managed/Kiln.Api/Kiln.Api.csproj" Private="false" ExcludeAssets="runtime" />
+    <ProjectReference Include="../../../../managed/services/Kiln.World/Kiln.World.csproj" Private="false" ExcludeAssets="runtime" />
+    <None Include="$(QuotaMod)/kiln.mod.json;$(QuotaMod)/kiln.programs.json" CopyToOutputDirectory="PreserveNewest" Link="%(Filename)%(Extension)" />
+  </ItemGroup>
+</Project>

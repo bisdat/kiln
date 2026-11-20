@@ -21,10 +21,12 @@
 //! | [`proc`] | process list (Linux /proc, Windows Toolhelp) |
 //! | [`debug`] | debugger targets: the core's descriptor, the checked Windows identity, the resolver, session state (`kiln debug`) |
 //! | [`launch`] | steam:// URIs, the launch flow |
+//! | [`direct`] | starting the client directly (a folder no Steam library knows): per-install start mode, Proton/Wine and prefix on Linux, the command, whether Kiln knows the exe's build |
 //! | [`start_progress`] | what a start is doing (`kiln/state/progress.json` and the launcher's own steps), the history of starts, the time left |
 //! | [`winpath`] | host <-> game path translation (Z:, copy mode) |
 //! | [`bundle`] | runtime bundles (`kiln-runtime.json`) |
 //! | [`install`] | install / upgrade / uninstall / rollback, receipts (`.install.json`) |
+//! | [`blocked`] | a DLL or exe the install could not write because Windows refused it (an antivirus, another program): `detail.blocked`, the report's finding from launcher.log |
 //! | [`chain`] | `kiln/chain.ini`, `kiln/chain/once.ini` |
 //! | [`compat`] | closed DLL mods: compat rules, the last session's hooks.json overlaps, chain.ini [late] plans |
 //! | [`manifest`] | `kiln.mod.json` (port of Manifest.cs), `native.json` |
@@ -36,6 +38,7 @@
 //! | [`notices`] | which activation notices the launcher has shown per game (`installs/<id>.notices-seen.json`) |
 //! | [`quick`] | the simple flow: import + add to the active profile + apply, the default profile "My mods", undo |
 //! | [`engine_mods`] | other engines' mods in the launcher: importers, placing SF/SET mods, settings, plugin status (owner: wire) |
+//! | [`game_files`] | native mods placed in the game folder itself: a plugin loader the game loads (`powrprof.dll` + `plugins\`), Ultimate ASI Loader and `.asi` plugins |
 //! | [`found`] | mods in the game folder Kiln did not put there: whether each loads with a profile, and adding one |
 //! | [`shroudforge`] | ShroudForge mods next to Kiln: install detection, mod packages, switches, settings, status (owner: sf) |
 //! | [`playonce`] | `kiln/play-once.ini` |
@@ -44,6 +47,7 @@
 //! | [`jsonc`] | JSONC CST value edits |
 //! | [`saves`] | save slots, save backups, the save editor's commands |
 //! | [`logs`] | log files, tail/follow, crash reports |
+//! | [`tick_compare`] | before/after tick-cost report from two `tick-stats.jsonl` files (T12) |
 //! | [`report`] | support reports: summary, findings, redacted files, the zip (`zip`) |
 //! | [`control`] | `kiln/control/*.cmd`, `kiln/control/console/*.cmd` |
 //! | [`util`] | paths, UTC time formatting, atomic writes, external commands (from kilnctl) |
@@ -61,6 +65,9 @@
 //! | [`net`] | the HTTP layer of `kiln publish` and the update check: fixed hosts per provider, public addresses only, no redirects, a fake transport for tests |
 //! | [`publish`] | `kiln publish`: the artifact policy and audit of a mod zip (`zip`) |
 //! | [`release_binding`] | `kiln-release.json`: which mod, version and zip a release holds |
+//! | [`updates`] | update checks for installed mods: source receipts, one status per mod from every provider; a notice and a link, never a download |
+//! | [`vendor`] | vendor upscaler files the player asks the launcher for (AMD FSR, Intel XeSS): the shipped manifest with its pins and licences, downloads checked by size and SHA-256, `<game>/kiln/vendor/`, removal |
+//! | [`community`] | the launcher's optional Discord features: the relay client, the session key, sign-in, the public post of a report, known problems, testers, Rich Presence |
 
 pub mod error;
 pub mod task;
@@ -72,11 +79,14 @@ pub mod filecache;
 pub mod hash;
 pub mod hostenv;
 pub mod launch;
+pub mod direct;
 pub mod start_progress;
+pub mod stopped_start;
 pub mod paths;
 pub mod data_folder;
 pub mod data_folder_move;
 pub mod engines;
+pub mod dllmod;
 pub mod pe;
 pub mod proc;
 pub mod debug;
@@ -89,6 +99,7 @@ pub mod bundle;
 pub mod chain;
 pub mod compat;
 pub mod install;
+pub mod blocked;
 pub mod archive;
 pub mod library;
 pub mod manifest;
@@ -97,7 +108,12 @@ pub mod prestart;
 pub mod profile;
 pub mod notices;
 pub mod quick;
+pub mod kept;
+pub mod settings_files;
+pub(crate) mod durable;
 pub mod engine_mods;
+pub mod game_files;
+pub mod restore_data;
 pub mod found;
 pub mod own_loaders;
 pub mod shroudforge;
@@ -112,6 +128,7 @@ pub mod control;
 pub mod jsonc;
 pub mod logs;
 pub mod report;
+pub mod tick_compare;
 pub mod saves;
 pub mod state;
 
@@ -126,6 +143,8 @@ pub mod wine;
 pub mod cook;
 #[cfg(feature = "cooktools")]
 pub mod cooktools;
+#[cfg(feature = "cooktools")]
+pub mod boot_snapshot;
 
 #[cfg(feature = "gameart")]
 pub mod gameart;
@@ -141,6 +160,9 @@ pub mod nexus;
 pub mod net;
 pub mod release_binding;
 pub mod publish;
+pub mod updates;
+pub mod vendor;
+pub mod community;
 
 pub use error::{Error, ErrorCode, Result};
 

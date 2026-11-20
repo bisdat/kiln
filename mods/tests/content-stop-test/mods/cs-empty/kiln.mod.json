@@ -1,0 +1,10 @@
+{
+  "id": "cs-empty",
+  "name": "content-stop lab: a mod with a quests file that holds nothing native",
+  "version": "0.1.0",
+  "apiVersion": "0.2",
+  "side": "both",
+  "clients": "kiln",
+  "advanced": true,
+  "description": "A fixture of mods/tests/content-stop-test (lab.sh): a quests folder whose file holds no knowledge, quest, dialogue or NPC, so a forced failure of the whole build must not stop the start. Data only."
+}

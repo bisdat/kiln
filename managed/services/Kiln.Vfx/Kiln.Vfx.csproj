@@ -16,6 +16,9 @@
     <!-- Kiln.Sdk's bake (managed/Kiln.Sdk/bake) takes the VFX and materials a mod's code defines at build: VfxBake.cs. -->
     <InternalsVisibleTo Include="Kiln.Sdk.Bake" />
     <InternalsVisibleTo Include="Kiln.Sdk.Tests" />
+    <!-- The resource budget's tests serve fake kiln.vfx tables (VfxNative): the contract tests and Kiln.Blocks' own. -->
+    <InternalsVisibleTo Include="Kiln.Contract.Tests" />
+    <InternalsVisibleTo Include="Kiln.Blocks.Tests" />
     <ProjectReference Include="../../Kiln.Api/Kiln.Api.csproj" Private="false" />
     <ProjectReference Include="../Kiln.Client/Kiln.Client.csproj" Private="false" />
     <ProjectReference Include="../Kiln.Network/Kiln.Network.csproj" Private="false" />

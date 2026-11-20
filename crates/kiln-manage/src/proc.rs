@@ -116,6 +116,8 @@ impl Finder {
                 None => self.all.insert(list_with_extra()?),
             }
         };
+        #[cfg(windows)]
+        require_image_paths(candidates)?;
         let want_dir = canon(dir);
         let want_exe = want_dir.join(exe);
         Ok(candidates.iter()
@@ -123,6 +125,15 @@ impl Finder {
             .min_by_key(|(p, _)| p.pid)
             .map(|(p, _)| p.clone()))
     }
+}
+
+#[cfg(any(windows, test))]
+fn require_image_paths(candidates: &[(ProcessInfo, Extra)]) -> Result<()> {
+    if let Some((p, _)) = candidates.iter().find(|(p, _)| p.exe.is_none()) {
+        return Err(crate::Error::new(crate::ErrorCode::Refused, format!(
+            "Cannot check which game folder {} (pid {}) is running from; quit it before changing mods or starting the game", p.name, p.pid)));
+    }
+    Ok(())
 }
 
 fn canon(p: &Path) -> PathBuf {
@@ -448,6 +459,22 @@ mod imp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn windows_game_candidates_with_unreadable_image_paths_refuse_changes() {
+        let mut candidate = ProcessInfo { pid: 42, name: "enshrouded.exe".into(), exe: None, cmdline: vec![] };
+        assert!(require_image_paths(&[(candidate.clone(), Extra::default())]).is_err(),
+            "an unreadable image path does not prove that the game is stopped");
+        #[cfg(windows)]
+        {
+            let mut finder = Finder::default();
+            finder.named.insert(candidate.name.clone(), vec![(candidate.clone(), Extra::default())]);
+            assert!(finder.find_listed(Path::new(r"C:\game"), &candidate.name).is_err());
+        }
+        candidate.exe = Some(PathBuf::from(r"C:\game\enshrouded.exe"));
+        assert!(require_image_paths(&[(candidate, Extra::default())]).is_ok());
+        assert!(require_image_paths(&[]).is_ok());
+    }
 
     #[test]
     fn stat_state() {

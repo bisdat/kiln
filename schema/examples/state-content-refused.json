@@ -1,0 +1,16 @@
+{
+ "advice": "Do not restart the game or the server in a loop: the next start stops the same way (a dedicated server under Wine exits with status 3; a supervisor must not restart on it). Remove or update the mods named here, then start again. If it still stops, send kiln/logs/kiln.log (the launcher's or kilnctl's support report has it) to the mods' authors or to Kiln",
+ "bootStop": true,
+ "exitCode": 19203,
+ "format": 1,
+ "mods": [
+  "cs-good"
+ ],
+ "pid": 252,
+ "refused": true,
+ "restart": false,
+ "side": "server",
+ "unixExitStatus": 3,
+ "utc": "2026-11-15T16:33:22Z",
+ "why": "the build of the mods' native quests failed: lab switch kiln/control/knowledge.fail-build: compile"
+}

@@ -1,6 +1,9 @@
 // Form primitives: Field, TextInput, NumberInput, Select, Slider, TextArea, Toggle, WellInput (a well with its label
-// inside: Filter, Search items), FlameToggle (light a mod or put it out). Fields sit in wells; the rim catches flame on focus.
+// inside: Filter, Search items; with onClear a filter box with a clear button and Esc), FlameToggle (light a mod or put
+// it out). Fields sit in wells; the rim catches flame on focus.
+import { X } from "lucide-react";
 import { forwardRef, useEffect, useId, useRef, useState, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from "react";
+import { useT, type TFunction } from "../i18n";
 
 export interface FieldProps {
   label?: ReactNode;
@@ -151,17 +154,58 @@ export interface WellInputProps extends Omit<InputHTMLAttributes<HTMLInputElemen
   note?: ReactNode;
   compact?: boolean;
   wellStyle?: React.CSSProperties;
+  /** A filter box (controlled `value`): while it has text, a clear (X) button at its end, and Esc in it empties it;
+   *  both leave the focus in the box. Esc in an empty box is left to the page (a dialog closes, as before). */
+  onClear?: () => void;
+  /** The clear button's name (and tooltip); default "Clear <label>" ("Clear filter"). */
+  clearLabel?: string;
 }
 
+/** True when this Esc belongs to a filter box with text (a WellInput with onClear; its input carries
+ *  data-esc-clears): the box empties itself, so a listener on the window that sees keys before React does
+ *  (ui/Modal.tsx) must leave it alone. An empty box, a modifier or an IME composition: false, and Esc does what it did
+ *  before. */
+export function escClearsFilter(e: Pick<KeyboardEvent, "key" | "ctrlKey" | "altKey" | "metaKey" | "shiftKey" | "isComposing" | "target">): boolean {
+  if (e.key !== "Escape" || e.ctrlKey || e.altKey || e.metaKey || e.shiftKey || e.isComposing) return false;
+  const el = e.target as { getAttribute?: (n: string) => string | null; value?: unknown } | null;
+  return !!el && typeof el.getAttribute === "function" && el.getAttribute("data-esc-clears") !== null && typeof el.value === "string" && el.value !== "";
+}
+
+const clearWord = (t: TFunction, label: ReactNode) => (typeof label === "string" ? t("ui.form.clearNamed", { label: label.toLowerCase() }) : t("ui.form.clear"));
+
 /** An input set in a well with its label inside it. */
-export const WellInput = forwardRef<HTMLInputElement, WellInputProps>(function WellInput({ label, note, compact, wellStyle, id, className, ...rest }, ref) {
+export const WellInput = forwardRef<HTMLInputElement, WellInputProps>(function WellInput({ label, note, compact, wellStyle, id, className, onClear, clearLabel, onKeyDown, ...rest }, ref) {
+  const t = useT();
   const auto = useId();
   const fid = id ?? auto;
+  const box = useRef<HTMLInputElement | null>(null);
+  const setRef = (el: HTMLInputElement | null) => {
+    box.current = el;
+    if (typeof ref === "function") ref(el);
+    else if (ref) ref.current = el;
+  };
+  const filled = onClear !== undefined && rest.value !== undefined && rest.value !== null && String(rest.value) !== "";
+  const clear = () => { onClear?.(); box.current?.focus(); };
+  const keyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    onKeyDown?.(e);
+    if (e.defaultPrevented || !onClear || !escClearsFilter(e.nativeEvent)) return;
+    // the box's own: nothing on the page reacts to it (Modal lets it pass, see escClearsFilter); once the box is
+    // empty, Esc goes on as before
+    e.preventDefault();
+    e.stopPropagation();
+    onClear();
+  };
+  const word = clearLabel ?? clearWord(t, label);
   return (
     <div className={["k-well", compact && "compact", className].filter(Boolean).join(" ")} style={wellStyle}>
       <label className="k-label" htmlFor={fid}>{label}</label>
-      <input ref={ref} id={fid} autoComplete="off" spellCheck={false} {...rest} />
+      <input ref={setRef} id={fid} autoComplete="off" spellCheck={false} data-esc-clears={onClear ? "" : undefined} onKeyDown={keyDown} {...rest} />
       {note !== undefined && note !== null && <span className="k-well-note">{note}</span>}
+      {filled && (
+        <button type="button" className="k-well-clear" aria-label={word} title={t("ui.form.clearTitle", { word })} aria-controls={fid} onClick={clear}>
+          <X aria-hidden />
+        </button>
+      )}
     </div>
   );
 });
@@ -171,9 +215,10 @@ const FLAME = "M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.
 /** The flame toggle of mod lists: lit (on) or out. `label` is the mod's name. `asSwitch`: an on/off switch named by the
  *  mod (the main list), not a "Light" button. */
 export function FlameToggle({ on, onChange, label, disabled, asSwitch, title }: { on: boolean; onChange: (on: boolean) => void; label: string; disabled?: boolean; asSwitch?: boolean; title?: string }) {
-  const a11y = asSwitch ? { role: "switch", "aria-checked": on, "aria-label": label } : { "aria-pressed": on, "aria-label": `Light ${label}` };
+  const t = useT();
+  const a11y = asSwitch ? { role: "switch", "aria-checked": on, "aria-label": label } : { "aria-pressed": on, "aria-label": t("ui.form.flameLight", { label }) };
   return (
-    <button type="button" className={"k-flame" + (on ? " on" : "")} {...a11y} title={title ?? (asSwitch ? (on ? `${label} is on: switch it off` : `${label} is off: switch it on`) : on ? `${label} is lit: put it out` : `${label} is out: light it`)}
+    <button type="button" className={"k-flame" + (on ? " on" : "")} {...a11y} title={title ?? (asSwitch ? (on ? t("ui.form.flameOnTitle", { label }) : t("ui.form.flameOffTitle", { label })) : on ? t("ui.form.flameLitTitle", { label }) : t("ui.form.flameOutTitle", { label }))}
       disabled={disabled} onClick={() => onChange(!on)}>
       <svg viewBox="0 0 24 24" aria-hidden><path d={FLAME} /></svg>
     </button>

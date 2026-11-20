@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Kiln.Systems: the managed face of kiln.world's game-program wraps (native/services/world, chapter 06a): the
+       game's ECS programs by name and your code before, after or instead of one. Deployed to kiln/host/ and shared by
+       every mod (mods reference it with Private="false" ExcludeAssets="runtime"). -->
+  <PropertyGroup>
+    <RootNamespace>Kiln</RootNamespace>
+    <AssemblyName>Kiln.Systems</AssemblyName>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../Kiln.Api/Kiln.Api.csproj" Private="false" />
+    <!-- a wrap's writes through an entity view raise Kiln.World's ComponentWrittenEvent -->
+    <ProjectReference Include="../Kiln.World/Kiln.World.csproj" Private="false" />
+    <InternalsVisibleTo Include="Kiln.Systems.Tests" />
+    <!-- the test kit's fake of kiln.world v4 uses these mirrors and resets the per-process caches between harnesses -->
+    <InternalsVisibleTo Include="Kiln.TestKit" />
+    <InternalsVisibleTo Include="Kiln.TestKit.Tests" />
+    <!-- Kiln.Game's generated program views (Ecs.Programs.*) reach a slot by its descriptor position (EntityView.ReadAt) -->
+    <InternalsVisibleTo Include="Kiln.Game" />
+  </ItemGroup>
+</Project>

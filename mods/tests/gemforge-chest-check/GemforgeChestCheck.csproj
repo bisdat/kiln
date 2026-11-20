@@ -1,0 +1,18 @@
+<Project>
+  <!-- GitHub issue 61's real-client check (docs/kiln/ui-gemforge.md, "Real-client check"): chest gems in the Gem Forge's
+       own GEMS list, who pays and where gems and essence go. Where the world runs (server or hosting client) it offers
+       the loose gems of the storage chests near a player whose forge screen opens, logs every gem forge event as
+       "gemchest: ..." in kiln.log, and has /gemchest for the steps a player cannot do by hand. Side both: deploy on the
+       server (or the hosting client) and on the Kiln client (the client half only logs).
+       Build: dotnet build mods/tests/gemforge-chest-check/GemforgeChestCheck.csproj -t:KilnDeploy -p:KilnModsDir=<folder> -->
+  <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.props" />
+  <PropertyGroup>
+    <KilnModId>gemforge-chest-check</KilnModId>
+    <KilnModName>Gem Forge chest gems client check</KilnModName>
+    <Version>0.1.0</Version>
+    <KilnServices>Abilities;Items;Chat;Players;Spawn;World;Client;Ui</KilnServices>
+    <KilnSide>both</KilnSide>
+    <KilnClients>mod</KilnClients>
+  </PropertyGroup>
+  <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.targets" />
+</Project>

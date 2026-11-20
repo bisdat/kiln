@@ -157,6 +157,68 @@ public sealed class MouseBindingTests : IDisposable
         Assert.Equal("F8", KeyChord.Parse("F8").ToString());
     }
 
+    // ---- unfamiliar Windows virtual keys (GitHub issue #33) ----
+
+    // Since 0.2.0-dev.28 VK 223 (VK_OEM_8) has a name of its own, Oem8 (key_names.h, issue 33's item 11): Key223 still
+    // parses to it, and prints as Oem8, which parses back to the same chord.
+    [Theory]
+    [InlineData("Key223", 223u, KeyMods.None, "Oem8")]
+    [InlineData("key223", 223u, KeyMods.None, "Oem8")]
+    [InlineData("Ctrl+Key223", 223u, KeyMods.Ctrl, "Ctrl+Oem8")]
+    [InlineData("shift+alt+key223", 223u, KeyMods.Shift | KeyMods.Alt, "Shift+Alt+Oem8")]
+    [InlineData("Key255", 255u, KeyMods.None, "Key255")]
+    public void Unnamed_windows_virtual_keys_parse_and_print(string text, uint vk, KeyMods mods, string printed)
+    {
+        var chord = KeyChord.Parse(text);
+        Assert.Equal(new KeyChord(vk, mods), chord);
+        Assert.Equal(printed, chord.ToString());  // kiln.ui calls these otherwise unknown VKs KeyN
+        Assert.Equal(chord, KeyChord.Parse(chord.ToString()));
+    }
+
+    [Theory]
+    [InlineData("Key0")]                 // no binding
+    [InlineData("Key1")]                 // left click, forbidden
+    [InlineData("Key2")]                 // right click, forbidden
+    [InlineData("Key256")]               // not a Windows keyboard VK (wheel names are separate)
+    [InlineData("Key4294967295")]
+    [InlineData("Key-1")]
+    [InlineData("Key+1")]
+    [InlineData("Key223extra")]
+    [InlineData("Key 223")]
+    [InlineData("Key")]
+    public void Invalid_numeric_windows_keys_are_refused(string text)
+    {
+        Assert.False(KeyChord.TryParse(text, out var chord));
+        Assert.True(chord.IsNone);
+    }
+
+    [Fact]
+    public void Remapped_Key223_survives_keybinds_json_and_fires_after_restart()
+    {
+        var presses = 0;
+        var original = Register("t.layout.grave", "Backquote", () => presses++);
+        Assert.Equal(new KeyChord(0xC0, KeyMods.None), original.Default);
+        FakeUiTable.MenuOpen = true;
+        Remapping.SetValue(null, original.Id);
+        Assert.True(Send(223, captured: true));  // Windows layout: grave/backtick gives VK_OEM_8
+        FakeUiTable.MenuOpen = false;
+        // dev.28 names VK_OEM_8 Oem8 (it was Key223). This press carries no scan code; a real UK backquote key (scan 0x29)
+        // is saved as Backquote instead (KeyNameTests.The_Keys_page_saves_the_physical_name_of_a_punctuation_key).
+        Assert.Equal("Oem8", original.Key.ToString());
+        Assert.Equal("Oem8", (string?)SavedBindings()[original.Id]);
+        Assert.True(Send(223));
+        Assert.Equal(1, presses);
+        Assert.False(Send(0xC0));  // Backquote's US-layout VK is not the remapped key
+
+        original.Dispose();
+        ForgetSaved(); // simulate the next launch with the same profile keybinds.json
+        var restored = Register("t.layout.grave", "Backquote", () => presses++);
+        Assert.Equal(new KeyChord(223, KeyMods.None), restored.Key);
+        Assert.Equal(new KeyChord(0xC0, KeyMods.None), restored.Default);
+        Assert.True(Send(223));
+        Assert.Equal(2, presses);
+    }
+
     // ---- keybinds.json ----
 
     [Fact]
@@ -229,6 +291,48 @@ public sealed class MouseBindingTests : IDisposable
     }
 
     // ---- presses (UiEngine.Key, the window thread) ----
+
+    [Fact]
+    public void Keyboard_repeats_do_not_toggle_a_mod_window_or_add_presses()
+    {
+        var open = false;
+        var released = 0;
+        var b = Register("t.keyboard.repeat", "F8", () => open = !open);
+        b.OnRelease = () => released++;
+        Assert.True(Send(0x77));
+        Assert.True(open);
+        for (var i = 0; i < 10; i++)
+            Assert.True(UiEngine.Key(new UiNative.Key { Size = 20, Vk = 0x77, Down = 1, Repeat = 1, Captured = 1 }));
+        Assert.True(open);
+        Assert.True(b.IsDown);
+        Assert.Equal(1, b.TakePresses());
+        Assert.False(Send(0x77, down: false));
+        Assert.False(b.IsDown);
+        Assert.Equal(1, released);
+        Assert.True(Send(0x77));
+        Assert.False(open);
+        Assert.Equal(1, b.TakePresses());
+        Send(0x77, down: false);
+    }
+
+    [Fact]
+    public void A_text_field_does_not_swallow_the_release_of_a_held_binding()
+    {
+        var released = 0;
+        var b = Register("t.keyboard.text.release", "F8");
+        b.OnRelease = () => released++;
+        Assert.True(Send(0x77));
+        Assert.True(b.IsDown);
+        var up = new UiNative.Key { Size = 20, Vk = 0x77, TextInput = 1, Captured = 1 };
+        Assert.False(UiEngine.Key(up));
+        Assert.False(b.IsDown);
+        Assert.Equal(1, released);
+        Assert.False(UiEngine.Key(up));
+        Assert.Equal(1, released);
+        Assert.False(UiEngine.Key(up with { Down = 1 }));
+        Assert.Equal(1, b.TakePresses());
+        Assert.False(b.IsDown);
+    }
 
     [Fact]
     public void A_wheel_binding_fires_once_per_notch_and_keeps_the_notch_from_the_game()

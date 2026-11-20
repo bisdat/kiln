@@ -1,0 +1,8 @@
+{
+  "id": "gemforge-chest-test",
+  "name": "Issue 61 lab test: gems in chests, payers, returns and offered chest gems at the Shroud Forge",
+  "version": "0.1.0",
+  "apiVersion": "0.1",
+  "entryAssembly": "GemforgeChestTest.dll",
+  "side": "server"
+}

@@ -1,0 +1,101 @@
+{
+  "description": "Building-material pools: KL201 without clients mod, KL334 for an unknown own material, another mod's without the dependency, the same material twice, a roof material in a wall pool (own and game), a terrain material, and a blueprint naming no pool, another mod's pool without the dependency or a pool of the other roof kind; the schema's 1 to 64 entries. A dependency's material or pool, and the clean roof pool, say nothing.",
+  "diagnostics": [
+    {
+      "code": "KL201",
+      "col": 25,
+      "file": "blocks/p.json",
+      "line": 3,
+      "message": "building material \"ice\" needs \"clients\": \"mod\", and this mod says \"kiln\": cells reach players as ids, so kiln.worldtables refuses it",
+      "severity": "error"
+    },
+    {
+      "code": "KL201",
+      "col": 5,
+      "file": "blocks/p.json",
+      "line": 5,
+      "message": "building material pool \"walls\" needs \"clients\": \"mod\", and this mod says \"kiln\": every player's game must list the same pool, so kiln.worldtables refuses it",
+      "severity": "error"
+    },
+    {
+      "code": "KL334",
+      "col": 108,
+      "file": "blocks/p.json",
+      "line": 5,
+      "message": "pool \"walls\", materials[2] (material other:mud): the material is mod other's, which this mod does not declare in \"dependencies\"",
+      "severity": "error"
+    },
+    {
+      "code": "KL334",
+      "col": 135,
+      "file": "blocks/p.json",
+      "line": 5,
+      "message": "pool \"walls\", materials[3] (material nothere): this mod has no building material \"nothere\"",
+      "severity": "error"
+    },
+    {
+      "code": "KL334",
+      "col": 160,
+      "file": "blocks/p.json",
+      "line": 5,
+      "message": "pool \"walls\", materials[4] (material slate): a roof material in a wall pool; roof must agree",
+      "severity": "error"
+    },
+    {
+      "code": "KL334",
+      "col": 187,
+      "file": "blocks/p.json",
+      "line": 5,
+      "message": "pool \"walls\", materials[5] (gameMaterial TerrainStone): a terrain material; a pool lists building materials",
+      "severity": "error"
+    },
+    {
+      "code": "KL334",
+      "col": 221,
+      "file": "blocks/p.json",
+      "line": 5,
+      "message": "pool \"walls\", materials[6] (gameMaterial RoofStraw): a game roof block in a wall pool; roof must agree",
+      "severity": "error"
+    },
+    {
+      "code": "KL334",
+      "col": 248,
+      "file": "blocks/p.json",
+      "line": 5,
+      "message": "pool \"walls\", materials[7] (material ice) names the same material as materials[0]: a pool lists each block once",
+      "severity": "error"
+    },
+    {
+      "code": "KL108",
+      "col": 45,
+      "file": "blocks/p.json",
+      "line": 7,
+      "message": "an empty list: give at least one entry",
+      "severity": "error"
+    },
+    {
+      "code": "KL334",
+      "col": 88,
+      "file": "blocks/p.json",
+      "line": 11,
+      "message": "blueprint \"roof-on-walls\" is a roof shape and materialPool \"walls\" a wall pool; roof must agree",
+      "severity": "error"
+    },
+    {
+      "code": "KL334",
+      "col": 69,
+      "file": "blocks/p.json",
+      "line": 12,
+      "message": "blueprint \"nopool\": materialPool \"missing\" names no pool of this mod's blocks files (a pool another mod defines is \"<mod>:<key>\", with that mod in \"dependencies\")",
+      "severity": "error"
+    },
+    {
+      "code": "KL334",
+      "col": 71,
+      "file": "blocks/p.json",
+      "line": 13,
+      "message": "blueprint \"foreign\": materialPool \"other:walls\" is mod other's, which this mod does not declare in \"dependencies\"",
+      "severity": "error"
+    }
+  ]
+}

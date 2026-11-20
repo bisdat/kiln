@@ -2,7 +2,9 @@
 
 An ECS program runs inside the game's scheduler on a worker thread. Declare its access in `kiln.programs.json`, next
 to `kiln.mod.json`. The native world service reads this file before the server creates its scheduler. Bind the callback
-in your normal `OnLoad`. `Kiln.Sdk` copies the file and includes it in `KilnPack` and `KilnDeploy`.
+in your normal `OnLoad`. `Kiln.Sdk` copies the file and includes it in `KilnPack` and `KilnDeploy`. Since
+0.2.0-dev.29 the typed way is `Systems.Define` over a `[Query]` struct: the build writes its entry into
+`kiln.programs.json` for you ([../services/systems.md](../services/systems.md#programs-of-your-own-systemsdefine)).
 
 ```json
 {
@@ -36,11 +38,14 @@ See [WorldPrograms](../../../mods/samples/WorldPrograms/) for an event round tri
 fails explicitly. The declaration remains inert until its mod binds it. Disabled mods and client-only mods do not
 reserve server programs; profile entries take precedence over drop-ins, including disabled profile entries.
 
-A mod may declare eight programs in one file of at most 64 KiB. The file uses strict JSON: duplicate keys, unknown
+A mod may declare 32 programs in one file of at most 64 KiB (eight before 0.2.0-dev.29). The file uses strict JSON: duplicate keys, unknown
 fields and repeated access names are refused. The schema is [kiln-programs.schema.json](../../../schema/kiln-programs.schema.json).
 `kiln lint` discovers it alongside the manifest. The native service also checks engine limits (template slots 8,
 read/write slots 42, other-template slots 9, other accessors 92, total event inputs/outputs 24). Programs share the
-world service's 32-slot limit and the game's remaining scheduler capacity; refusals appear in `kiln.log`.
+world service's 64 slots (32 before 0.2.0-dev.29) with Kiln's own services, and the game's remaining scheduler capacity
+(its table of 896, which kiln.world checks live before each registration); mods' declarations leave the last 8 slots to
+Kiln's services, and refusals appear in `kiln.log`. kiln.log "kiln.world program slots: 21 of 64 taken, … by Kiln's
+services and loaders, … by mods' declarations: kiln_world, …, writer x1" names who holds each slot.
 
 Access lists are `tpl`, `tplOptional`, `read`, `readOptional`, `write`, `writeOptional`, `singletonsRead`,
 `singletonsWrite`, `otherTpl`, `otherRead`, `otherWrite`, `with`, `without`, `anyOf`, `eventsIn`, `eventsOut`. Names
@@ -49,8 +54,9 @@ entities. `flags` is an optional array of `system`, `init`, `hostOnly`, `exclusi
 its default is `system, hostOnly`. A system program gets entity zero and cannot declare entity query lists. For a
 per-entity query, supply flags such as `["hostOnly"]` and at least one required component/filter.
 
-`context.TryRead<T>` and `TryWrite<T>` access the current entity's declared slots. `TryReadOther<T>` and
-`TryWriteOther<T>` use declared accessors for another entity. Sizes must match the game's reflected component size.
+`context.TryRead<T>` and `TryWrite<T>` access the current entity's declared slots; `TryReadWritable<T>` (since
+0.2.0-dev.29.18, mod API 0.2.10) reads a `write`/`writeOptional` slot, so a component you read and change is declared
+once, under `write`. `TryReadOther<T>` and `TryWriteOther<T>` use declared accessors for another entity. Sizes must match the game's reflected component size.
 `TryRead`/`TryWrite` get that size from kiln.types: on a build without it they return false (the mod log says so once
 per program). Each name is looked up once per program, so calling them per entity costs no allocation or lock.
 Writes mark the game's replication/save tracker. `otherWrite` is passed to the engine's descriptor before it builds
@@ -59,7 +65,8 @@ the dependency plan. A component may appear in both other-read and other-write l
 
 With Kiln.Game (`KilnServices` `Game`) the same four calls take a generated type and no name (since 0.2.0-dev.27):
 `context.TryGet(out Ecs.Health h)`, `context.TrySet(h)`, `context.TryGetOther(entity, out Ecs.Fuel f)` and
-`context.TrySetOther(entity, f)`. The declaration in `kiln.programs.json` is still by name, and the size check is the
+`context.TrySetOther(entity, f)`; `context.TryGetWritable(out Ecs.SlotAttachment a)` reads a write slot (since
+0.2.0-dev.29.18). The declaration in `kiln.programs.json` is still by name, and the size check is the
 same. A mod that only wants to change a component now and then needs no program of its own: `World.Write<T>` and
 `World.Update<T>` queue the change into Kiln's write program ([../services/world.md](../services/world.md#tracked-writes)).
 
@@ -75,6 +82,17 @@ The reserved scheduler entry remains, so the same declaration can bind after hot
 restart the server, then reload code. Editing the file while the server runs does not change its scheduler.
 
 ## Hooks around game systems
+
+A program of the mod's own can also run in this player's **client world** or **prediction storage** (since
+0.2.0-dev.29): `"world": "client"`, `"both"` or `"prediction"` in `kiln.programs.json`, bound with
+`EcsPrograms.TryBind(key, callback, WorldKind.Client)` on the game's main thread; see
+[services/world.md](../services/world.md#client-world-programs-since-020-dev29) (template `kiln-client-program`).
+
+A client program runs after the game's client programs it conflicts with (so a write to what `slot_attachment` reads is
+drawn from the next client step), and the entities the server sends keep the server's ids in your client world: see
+[services/world.md](../services/world.md#a-client-program-on-the-games-entities-what-holds-020-dev2918).
+
+`systems.wraps.client` is open since 0.2.0-dev.29. Managed callers select `WrapOptions.World = WorldKind.Client`; native plugins can select the client world too, when symbols and lifecycle support resolve and no conflicting runtime disables wraps. Native callers must release and drain before freeing callback memory. The implemented `06a-wraps.client` guided check counts callbacks and filtered admissions on workers; real-game confirmation is still pending.
 
 ```csharp
 hook = GameSystems.Hook("combat_experience_source",
@@ -95,3 +113,34 @@ and receives the real program context. Missing symbols or a conflicting runtime 
 The dedicated-server probes cover scheduler registration, other-entity health readback, both input types, spawn-time
 components, hook/profiler counts and callback removal. A joined client is still needed to confirm replicated visual
 changes and client/prediction-world behaviour. Managed declarations currently target the server world only.
+
+## Wrapping the game's programs
+
+A world program of your own runs in a slot of its own, with the access you declared. To change what one of the
+game's own programs does, wrap it instead (`Kiln.Systems`, since 0.2.0-dev.29; the full page is
+[../services/systems.md](../services/systems.md)):
+
+```csharp
+var wrap = Systems.Wrap("fuel_setup").Wrap!;
+wrap.AfterEach((ref EntityView e) =>
+{
+    var fuel = e.Attribute("Fuel");
+    fuel[0] = fuel[1];   // full
+    fuel.Changed();      // the game's attribute formulas
+});
+```
+
+| | A world program (`EcsPrograms.Bind`) | `GameSystems.Hook` | A wrap (`Systems.Wrap`) |
+|---|---|---|---|
+| Runs | in its own scheduler slot | around a game update function, per slice | in the wrapped program's slot and thread: Before, After, Replace, per slice or per entity |
+| Access | what `kiln.programs.json` declares (needs a restart) | none of its own | the wrapped program's own components (`EntityView`), no declaration |
+| Several mods | each has its own | one per update function | any number of Befores and Afters, one Replace per program |
+| Writes | marked; `ComponentWrittenEvent` not raised | none | marked; `ComponentWrittenEvent` with `Writer = "<modid>/wrap:<program>"` |
+
+The same thread rules hold for all three: handlers run on the game's workers once a player is in the world, tick-thread
+APIs throw inside them, `Slice.Post` (or `Context.Scheduler.Post`) hands work to the tick thread. A wrap's fault or
+exception turns off that stage only. Wraps are refused while native SET is loaded, and target the server world by
+default; a game client's own world takes `WrapOptions.World = WorldKind.Client` (`systems.wraps.client`), and the
+prediction storage, which runs the local player's server programs again on the player's own screen, takes
+`WorldKind.Prediction` since 0.2.0-dev.29.18 (`systems.wraps.prediction`, Before and After only:
+[services/systems.md](../services/systems.md#the-prediction-storage-worldkindprediction-since-020-dev2918)).

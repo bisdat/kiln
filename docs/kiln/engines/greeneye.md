@@ -94,7 +94,7 @@ Greeneye Loader. "Tested" names the check in `native/plugins/compat/tests/run.py
 | `log(line)` | `[greeneye:<id>]` in kiln.log + `greeneye-loader.log` (one log function per mod, so lines carry the mod's id) | `ModContext.Log` | full; host, lab |
 | `generation`, `hotReload`, `token` | ported hook owner | Kiln's own mod reload | full; host `generation=2`, `hot_reload_flag` |
 | `enter(token)` / `leave()` | ported: per-mod shared gate, nestable per thread; active only for the active generation | `HookHandle` removal waits for running handlers | full; host `lease_inactive_while_starting`, detour +1000 runs under an active lease |
-| `find(pattern, module)` | ported: unique match in the exe's `.text` as it was before the loader's hooks, also behind another mod's hook jump; `module` may be null or the main executable handle | **new** `OriginalCode.FindUnique` / `TryFindUnique` (reads the exe file: before every hook) | full; host `find`, `find_wildcard`, `find_ambiguous`, `find_other_module_null`, `find_after_hook`; lab: found the game's chat-log function behind Kiln's own detour |
+| `find(pattern, module)` | unique match in the exe file's relocated `.text`, checked against the loaded image's headers and code section, with other live code changes kept; if unavailable, the previous live snapshot and lookup behind hook jumps; `module` may be null or the main executable handle | **new** `OriginalCode.FindUnique` / `TryFindUnique` (reads the exe file: before every hook) | full; Linux host `native/plugins/greeneye/tests/run.sh` (short and interior patches, ambiguity, fallback); Windows host `find`, `find_wildcard`, `find_ambiguous`, `find_other_module_null`, `find_after_hook`; lab: found the game's chat-log function behind Kiln's own detour |
 | `read(p, out, n)` | ported: live bytes with every Greeneye slot's saved bytes laid back (another loader's jump stays visible, as upstream) | **new** `OriginalCode.Read` (the file: before every hook) | full; host `read_before_hooks`, `read_original`; lab `lab_read` |
 | `hook(target, detour, len, prologue, n)` | ported: 12..32 bytes, `mov rax; jmp rax` to a thunk, trampoline runs the original or the given prologue; chains onto an existing `mov rax`, `jmp rel32` or `jmp [rip]` | `Hooks.Detour` (Kiln's detour chain) | full; host `hook` (+1000), `short_hook_refused` declines the start |
 | `redirectCall(call, detour)` | ported: points one `call rel32` at a thunk near it | `Hooks.Mid` at the call site | full; host `redirect_call` (+100) |
@@ -140,7 +140,14 @@ Greeneye mods are client mods. The Worst Map Mod (Nexus mod 220) is the first on
    is still there (`minimap_config.ini` kept).
 5. Put Greeneye's `dbgcore.dll` next to the game and play: `greeneye.json` says `stepped aside`, the mod is
    `own-loader`, `greeneye/loader.log` shows Greeneye Loader starting it, and the map works the same.
-6. Repeat 1 to 3 with Find (Shift+F in a base) and Quick Deposit (G G in the inventory).
+6. Repeat 1 to 3 with Find (Shift+F in a base) and Quick Deposit (G G at a chest; K on a backpack item). Close Kiln's
+   pages first. Quick Deposit's startup line in `kiln.log` reports `active=yes`, `UiCommandLoop=hooked` and
+   `UiDispatch=hooked` when its two client hooks were published. `code=exe file` means earlier hooks could not hide
+   either signature; `code=live: <reason>` explains why the file view was unavailable. `missing` means the signature
+   was not found; `not hooked` means it was found but Quick Deposit did not publish a hook there. An active startup
+   with both hooks does not prove that the game's UI called them. Other live code changes are kept in the snapshot,
+   so a signature for those bytes must match the live patch. Send this line and `quick-deposit.log` if the keys
+   still fail.
 
 Mod files needed for this (not downloadable by Kiln's tests): the Nexus downloads of The Worst Map Mod, Find, Quick
 Deposit, Town Portals, Embervale Teleport and Hollow Halls Progression.

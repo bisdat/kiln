@@ -28,9 +28,31 @@ internal static unsafe class WorldRows
     private static void Report()
     {
         if (WorldNative.T == null) ServiceCaps.LowerFeatures(Service, Features);
+        // world.program_budget: kiln-world.dll reports it with kiln.world.budget; without the table nobody would
+        if (ProgramBudgetNative.T == null)
+            ServiceCaps.Static(ProgramBudgetNative.Capability, false, WorldNative.T == null ? CapabilityReason.ServiceMissing : CapabilityReason.ServiceOlder,
+                WorldNative.T == null ? "kiln.world is not loaded" : "this kiln.world has no kiln.world.budget (update Kiln)", Service);
+        // events.component_net (since 0.2.0-dev.29): kiln-decisions.dll reports it with kiln.component_changes; without
+        // that table (the DLL is not installed, an older one, no game) nobody would, and ComponentChanges.Watch names it
+        if (ComponentChanges.Table() == null)
+            ServiceCaps.Static(ComponentChanges.Capability, false, CapabilityReason.ServiceMissing,
+                "kiln.component_changes is not loaded (kiln-decisions.dll of 0.2.0-dev.29 or later)", ComponentChangesNative.Service);
         // world.tracked_writes: WorldCapabilities reports it once and follows the session; under a new registry binding
         // (a test kit's next harness) it reports again from the table that is there now
         WorldCapabilities.Reset();
         WorldCapabilities.Is(World.TrackedWritesCapability);
+    }
+}
+
+/// <summary>Started by Kiln (ServiceTick.AutoStart) at its first service tick (0.2.0-dev.28): <c>world.tracked_writes</c>,
+/// <c>world.transform_scale</c> and kiln.world's sigdb features have their rows before a mod first uses Kiln.World, so
+/// <c>Capabilities.Is</c> answers from the start (as World's static constructor does at the first use otherwise).</summary>
+internal static class WorldStartup
+{
+    static WorldStartup()
+    {
+        TransformScale.Start();
+        WorldRows.Rows.Ensure();
+        ServiceTick.Add("kiln.world program budget", static (in TickInfo t) => ProgramBudgetWatch.Tick(t.Step));
     }
 }

@@ -612,3 +612,156 @@ fn a_folder_that_cannot_be_removed_stays_findable_and_is_finished_later() {
     library::take_over_with(&dirs, &old, &mut no_game).unwrap();
     assert!(!folder.exists() && library::record(&dirs, &old).is_err(), "the retry finished");
 }
+
+/// Discord #support, PepegaJedi, 2026-11-16 (Item Skill Descriptions, Nexus 350): a Shroudtopia mod runs from its Library
+/// entry and writes `item-skill-text.log` next to its DLL. That is the mod's own output, not an edit: the list must not
+/// say "Changed on disk", also after the log grew. An edit of the mod itself next to such a log still counts.
+#[test]
+fn a_log_the_mod_writes_beside_itself_is_no_change() {
+    let t = tmp("ownlog");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let s = t.0.join("src/item-skill-text");
+    put(&s, "item-skill-text.dll", &build_test_dll(&["CreateModInstance"], b"skill text"));
+    put(&s, "mod.json", br#"{"id":"item-skill-text","name":"item-skill-text","version":"0.3.0"}"#);
+    let r = library::import(&dirs, &[s], &mut NoProgress).unwrap();
+    let old = r.imported.iter().find(|x| x.kind == ModKind::Shroudtopia).cloned().unwrap_or_else(|| panic!("{r:?}"));
+    let entry = library::path_of(&dirs, &old).unwrap();
+    let changed = || version_of(&library::list(&dirs, Some(ModKind::Shroudtopia)).unwrap(), ModKind::Shroudtopia, &old.id).versions[0].changed;
+    assert!(!changed());
+
+    // the game ran: the mod's log appeared beside its DLL (the folder is newer than the record now)
+    age_record(&entry);
+    put(&entry, "item-skill-text.log", b"Loaded item-skill-text 0.3.0\n");
+    assert!(!changed(), "the mod's own log is no edit");
+    // the next run: the log grew
+    put(&entry, "item-skill-text.log", b"Loaded item-skill-text 0.3.0\nInactive: target function changed\n");
+    assert!(!changed(), "a grown log is no edit");
+
+    // the mod itself edited as well: that is a change
+    put(&entry, "mod.json", br#"{"id":"item-skill-text","name":"Item Skill Text","version":"0.3.0"}"#);
+    assert!(changed(), "an edit of the mod next to its log");
+}
+
+fn ownlog_entry(t: &Path, dirs: &DataDirs) -> (LibraryRef, PathBuf) {
+    let src = t.join("src/item-skill-text");
+    put(&src, "item-skill-text.dll", &build_test_dll(&["CreateModInstance"], b"skill text"));
+    put(&src, "mod.json", br#"{"id":"item-skill-text","name":"item-skill-text","version":"0.3.0"}"#);
+    let r = library::import(dirs, &[src], &mut NoProgress).unwrap();
+    let r = r.imported.into_iter().find(|r| r.kind == ModKind::Shroudtopia).unwrap();
+    let entry = library::path_of(dirs, &r).unwrap();
+    // Stable ordering, independent of filesystem timestamp resolution.
+    for file in ["item-skill-text.dll", "mod.json"] {
+        std::fs::File::options().write(true).open(entry.join(file)).unwrap()
+            .set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1)).unwrap();
+    }
+    age_record(&entry);
+    (r, entry)
+}
+
+#[test]
+fn ownlog_does_not_cache_away_a_later_dll_edit() {
+    let t = tmp("ownlog-cache");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let (r, entry) = ownlog_entry(&t.0, &dirs);
+    put(&entry, "item-skill-text.log", b"loaded\n");
+    let rec = library::record(&dirs, &r).unwrap();
+    assert!(!library::changed_on_disk(&entry, &rec));
+    let dll = entry.join("item-skill-text.dll");
+    let time = std::fs::metadata(&dll).unwrap().modified().unwrap();
+    let mut bytes = std::fs::read(&dll).unwrap();
+    *bytes.last_mut().unwrap() ^= 1;
+    std::fs::write(&dll, bytes).unwrap();
+    std::fs::File::options().write(true).open(&dll).unwrap().set_modified(time).unwrap();
+    assert!(library::changed_on_disk(&entry, &rec), "same-size DLL edit after the log was accepted");
+}
+
+#[test]
+fn ownlog_new_code_is_a_change() {
+    let mut missed = Vec::new();
+    for (i, rel) in ["helper.dll", "helper.lua", "helper.luau", "src/new.txt", "shroudtopia.json"].iter().enumerate() {
+        let t = tmp(&format!("ownlog-code-{i}"));
+        let dirs = DataDirs::at(t.0.join("data"));
+        let (r, entry) = ownlog_entry(&t.0, &dirs);
+        put(&entry, rel, b"new code or manifest");
+        put(&entry, "item-skill-text.log", b"loaded\n");
+        if !library::changed_on_disk(&entry, &library::record(&dirs, &r).unwrap()) { missed.push(*rel); }
+    }
+    assert!(missed.is_empty(), "new code or manifests mistaken for runtime output: {missed:?}");
+}
+
+#[test]
+fn ownlog_copy_mode_activates_and_keeps_the_mods_output() {
+    let t = tmp("ownlog-copy");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let (r, entry) = ownlog_entry(&t.0, &dirs);
+    put(&entry, "item-skill-text.log", b"loaded\n");
+    let mut p = profile::create(&dirs, "p", None).unwrap();
+    p.mods.shroudtopia.push(ProfileMod { id: r.id.clone(), version: r.version.clone(), hash: r.hash.clone(), enabled: true });
+    let p = profile::save(&dirs, &p).unwrap();
+    let mut g = game_with_z(&t.0);
+    g.path_mode = PathMode::Copy;
+    g.prefix = None;
+    profile::activate(&dirs, &p.id, &g).expect("a log in the Library must not prevent copy mode");
+    let f = profile::read_game_profile(&g.path).unwrap().unwrap();
+    let copy = g.path.join("kiln").join(&f.mods.shroudtopia[0].path);
+    assert_eq!(std::fs::read(copy.join("item-skill-text.log")).unwrap(), b"loaded\n");
+    // A copy can preserve or reorder mtimes. Its imported files are still checked by content.
+    std::fs::File::options().write(true).open(copy.join("item-skill-text.log")).unwrap()
+        .set_modified(std::time::UNIX_EPOCH).unwrap();
+    assert_eq!(profile::activate(&dirs, &p.id, &g).unwrap().copied, 0);
+    put(&copy, "item-skill-text.log", b"loaded again\n");
+    assert_eq!(profile::activate(&dirs, &p.id, &g).unwrap().copied, 0);
+    assert_eq!(std::fs::read(copy.join("item-skill-text.log")).unwrap(), b"loaded again\n");
+    let mut bytes = std::fs::read(entry.join("item-skill-text.dll")).unwrap();
+    *bytes.last_mut().unwrap() ^= 1;
+    put(&entry, "item-skill-text.dll", &bytes);
+    // Force a new copy so an already verified destination cannot shortcut the source check.
+    std::fs::remove_dir_all(&copy).unwrap();
+    assert_eq!(profile::activate(&dirs, &p.id, &g).unwrap_err().code, ErrorCode::HashMismatch);
+}
+
+#[cfg(feature = "server")]
+#[test]
+fn ownlog_server_sync_accepts_output_and_refuses_changed_code() {
+    use kiln_manage::server::{control, instance::ServerInstance};
+    let t = tmp("ownlog-server");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let (r, entry) = ownlog_entry(&t.0, &dirs);
+    put(&entry, "item-skill-text.log", b"loaded\n");
+    let server = t.0.join("server");
+    std::fs::create_dir_all(server.join("kiln")).unwrap();
+    let inst: ServerInstance = serde_json::from_value(serde_json::json!({
+        "id": "t", "name": "t", "kind": "local", "dir": server, "port": 27141, "queryPort": 27141, "wine": null,
+        "policy": "any", "source": "launcher", "remote": null,
+    })).unwrap();
+    control::sync(&dirs, &inst, std::slice::from_ref(&r), &mut NoProgress).expect("sync with a mod's own log");
+    let copy = server.join("mods/item-skill-text");
+    assert!(copy.join("item-skill-text.dll").is_file());
+    assert_eq!(std::fs::read(copy.join("item-skill-text.log")).unwrap(), b"loaded\n");
+    put(&copy, "item-skill-text.log", b"loaded on the server\n");
+    control::sync(&dirs, &inst, std::slice::from_ref(&r), &mut NoProgress).expect("a grown copied log is still output");
+    let mut bytes = std::fs::read(entry.join("item-skill-text.dll")).unwrap();
+    *bytes.last_mut().unwrap() ^= 1;
+    put(&entry, "item-skill-text.dll", &bytes);
+    control::sync(&dirs, &inst, &[], &mut NoProgress).unwrap();
+    assert_eq!(std::fs::read(server.join("kiln/kept-mod-files/shroudtopia/item-skill-text/item-skill-text.log")).unwrap(),
+        b"loaded on the server\n", "removing the mod keeps its output");
+    assert_eq!(control::sync(&dirs, &inst, &[r], &mut NoProgress).unwrap_err().code, ErrorCode::HashMismatch);
+}
+
+#[test]
+fn ownlog_prefix_limit_and_timestamps_fail_closed() {
+    let t = tmp("ownlog-limit");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let (r, entry) = ownlog_entry(&t.0, &dirs);
+    for i in 0..64 { put(&entry, &format!("output/{i:02}.log"), b"log\n"); }
+    let rec = library::record(&dirs, &r).unwrap();
+    assert!(!library::changed_on_disk(&entry, &rec), "64 output files are supported");
+    put(&entry, "output/64.log", b"log\n");
+    assert!(library::changed_on_disk(&entry, &rec), "65 files exceed the conservative limit");
+    std::fs::remove_dir_all(entry.join("output")).unwrap();
+    put(&entry, "item-skill-text.log", b"log\n");
+    std::fs::File::options().write(true).open(entry.join("item-skill-text.log")).unwrap()
+        .set_modified(std::time::UNIX_EPOCH).unwrap();
+    assert!(library::changed_on_disk(&entry, &rec), "an older output cannot hide a changed import");
+}

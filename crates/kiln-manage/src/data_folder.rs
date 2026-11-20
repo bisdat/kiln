@@ -66,8 +66,8 @@ pub const KNOWN_ENTRIES: [(&str, bool); 19] = [
 /// file and a rename), by the launcher, the `kiln` CLI or the game: a move copies them for real and never hard-links
 /// them, so a write through the new place never changes the old copy. `names`: the path below the data root.
 /// - `logs/**`: the launcher's log (`launcher_log` appends);
-/// - `profiles/<pid>/config/**`: copy mode's `profile::copy_back` copies the game's files over them, and in Z and
-///   native mode the game writes mod configs there; `profiles/<pid>/data/**`: the game writes per-mod data;
+/// - `profiles/<pid>/config/**`: copy mode's `profile::copy_back` copies the files the game changed over them, and in
+///   Z and native mode the game writes mod configs there; `profiles/<pid>/data/**`: the game writes per-mod data;
 /// - `admin-assets/**`, `editor-assets/**`: the launcher's asset imports copy files over existing ones;
 /// - `sdk/**`: the `kiln` CLI unpacks the SDK with `unzip -o` over an earlier one;
 /// - `modpacks/downloads/*.part`, `nexus/downloads/**`: downloads that may be under way.
@@ -284,8 +284,12 @@ impl DataLock {
     }
 
     /// Shared to exclusive (this process's own shared lock, for its move). Ok(false): another launcher holds it too;
-    /// the lock is shared again then.
+    /// the lock is shared again then. Err: callers must stop writing until the lock is known to be held again.
     pub fn upgrade(&mut self) -> Result<bool> {
+        self.upgrade_after_failure(|| {})
+    }
+
+    fn upgrade_after_failure(&mut self, after_failure: impl FnOnce()) -> Result<bool> {
         if self.exclusive {
             return Ok(true);
         }
@@ -296,7 +300,13 @@ impl DataLock {
                 Ok(true)
             }
             Err(e) => {
-                let _ = self.file.try_lock_shared();
+                after_failure();
+                match self.file.try_lock_shared() {
+                    Ok(()) => {},
+                    Err(std::fs::TryLockError::WouldBlock) => return Err(Error::new(ErrorCode::Busy,
+                        "Another launcher took the data-folder lock. Restart this launcher before writing data.")),
+                    Err(std::fs::TryLockError::Error(e)) => return Err(io_at(&self.path, "reacquiring shared lock")(e)),
+                }
                 match e {
                     std::fs::TryLockError::WouldBlock => Ok(false),
                     std::fs::TryLockError::Error(e) => Err(io_at(&self.path, "locking")(e)),
@@ -317,6 +327,14 @@ impl DataLock {
             Err(std::fs::TryLockError::WouldBlock) => Err(Error::new(ErrorCode::Busy, format!("{}: another process took the lock", self.path.display()))),
             Err(std::fs::TryLockError::Error(e)) => Err(io_at(&self.path, "locking")(e)),
         }
+    }
+}
+
+impl Drop for DataLock {
+    /// Unlocked before the file closes, as [`crate::util::LockedFile`] does and for the same reason: a program started
+    /// meanwhile by another thread holds a copy of the file until its exec, and with it the lock.
+    fn drop(&mut self) {
+        let _ = self.file.unlock();
     }
 }
 
@@ -1021,6 +1039,11 @@ pub fn is_own_file(name: &str, style: PathStyle) -> bool {
 pub struct Space {
     pub free: u64,
     pub unit: u64,
+}
+
+/// The free space of the volume an existing folder is on, as [`RealFacts`] reads it; None when it is not known.
+pub fn space_at(dir: &Path) -> Option<Space> {
+    sys::space(dir)
 }
 
 /// What [`check`] asks the system. [`RealFacts`] asks it; [`Facts`] holds fixed answers (tests, the launcher's mock).
@@ -1838,6 +1861,22 @@ pub fn check_here(located: &Located, env: &DataEnv, picked: &Path, locked: bool)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failed_upgrade_reports_when_another_upgrader_prevents_shared_reacquisition() {
+        let root = std::env::temp_dir().join(format!("kiln-upgrade-reacquire-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let mut first = DataLock::shared(&root).unwrap().unwrap();
+        let mut other = DataLock::shared(&root).unwrap().unwrap();
+        // The first upgrade cannot win while the other shared handle exists.
+        // Before the first reacquires shared access, the other launcher upgrades.
+        let result = first.upgrade_after_failure(|| assert!(other.upgrade().unwrap()));
+        assert!(other.is_exclusive());
+        assert!(result.is_err(), "must not report a safe shared refusal after losing the shared lock");
+        drop((first, other));
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     fn win(s: &str) -> PathParts {
         PathParts::parse(s, PathStyle::Windows)

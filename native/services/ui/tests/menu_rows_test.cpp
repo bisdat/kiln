@@ -49,7 +49,7 @@ std::string texts(const Rows& rows) {
 
 int main() {
     // the default (few): up to kFew mods' rows are drawn, with Kiln's
-    check(kFew == 3, "kFew is 3 (a guess; the client check confirms it)");
+    check(kFew == 3, "kFew is 3 (FEW's limit; the pause menu scrolls by height since dev.29)");
     check(pick(menu(0), show_few, is_kiln).size() == 1, "few: no mods' rows, Kiln's Mods row only");
     check(texts(pick(menu(1), show_few, is_kiln)) == "mod 0,Mods", "few: one mod's row is drawn");
     check(texts(pick(menu(3), show_few, is_kiln)) == "mod 0,mod 1,mod 2,Mods", "few: three mods' rows are drawn");

@@ -90,6 +90,19 @@ An item's kind follows from what you fill in: `Tool` makes a tool, `Ammo` an arr
 | `Torch` (`torch`) | Held, it lights and burns down | `Durability` (seconds it burns while held, the tooltip's Duration: 600), `BreaksInto` |
 
 `BreaksInto` is what it becomes when its durability runs out, as the game's torch becomes a burnt one: a game item or one of yours. Only a torch burns down over time; the game wears the other tools by its own rule (the world's durability setting), with no number of the item's own, so `Durability` on them is refused.
+
+`WearPerDebit` (`wearPerDebit`, since 0.2.0-dev.28) says what each of the game's wear debits costs the tool instead of
+the game's 1: 0 to 32767, where 0 means it does not wear. It is per debit of the game, not per swing: a swing that hits
+twice is debited twice (two debits at 7 spend 14), and a swing that hits nothing spends nothing. It takes an axe or a
+pickaxe (a tool with an item of its own). A torch (whose `Durability` stays its burn time), a glider, a hook or a rod
+is refused when the block compiles; for a rake or a sieve the game answers when the cost is set (`UnsupportedTool` in
+the mod's block errors when it has no item of its own). The cost is set on the server where the world runs
+(a dedicated server, or the host's own game), once the world is there; a game that joined someone else's server sets
+nothing. It is on in hosted worlds since 0.2.0-dev.29 (`items.tool_wear_debit`); check `16b-g` remains unconfirmed. What it does
+and does not change: [services/items.md](../services/items.md#tool-wear-per-debit-since-020-dev28).
+```csharp
+Blocks.Define("brittle-pick", new ItemBlock { Name = "Brittle Pick", Tool = new ToolBlock { Harvests = Harvest.Stone, Power = 18, WearPerDebit = 7 } });
+```
 ```csharp
 Blocks.Define("garden-rake", new ItemBlock { Name = "Garden Rake", Tool = new ToolBlock { Harvests = ToolClass.Rake, Power = 750, Range = 5 } });
 Blocks.Define("slow-torch", new ItemBlock { Name = "Slow Torch", Tool = new ToolBlock { Harvests = ToolClass.Torch, Durability = 1200, BreaksInto = "ash" } });
@@ -159,6 +172,100 @@ Blocks.Define("ember-scavenger", new CreatureBlock { Body = Bodies.Vukah, Drops 
 - **The game's own tables.** To put an item into a table the game already has, use `Loot.Tables` on the item (`DropPlace`: a table GUID or glob, or `DropsLike`, every table that drops that item). Up to 0.2.0-dev.19 `DropPlace` was called `LootTableBlock`: C# that still writes `new LootTableBlock { DropsLike = ... }` there stops at build with error CS0619 saying so. The JSON (`loot.tables`) did not change.
 - **Mistakes.** An empty table, `Pick = One` with every weight 0 (or weights too large to add up), a chance outside 0 to 1, a `countMax` under `countMin`, a block that is no item or no table: refused at load, by block and field. An item name that is nobody's is said once content is ready: `block loottable x, entries[1].item: the game has no item "No_Such_Item"` (`drops.entries[1].item` in a table written in a creature). The rest of the table still rolls.
 - **`clients`.** A table asks nothing of players' games. The items in it ask what they ask.
+
+## Rarity at creation (RarityRollBlock)
+Since 0.2.0-dev.29.19 (the equipment wave). Name item types and five weights, and the server rolls the item's rarity, Common to
+Legendary, whenever the game makes one: a craft at a station or by hand, random loot in a container or on the ground, a
+random drop-table stack. The game then makes the item at that rarity itself: its enhancement slots (one more than the
+rank), the weapon socket chance of that rarity, its durability. So one item type with five perk slots covers common to
+legendary drops and crafts, instead of one item per tier.
+```csharp
+Blocks.Define("ember-rolls", new RarityRollBlock
+{
+    Items = ["my-mod:*"],                                   // every item of this mod; or names, GameItems constants, "Weapon_*"
+    Sources = ItemSource.Craft | ItemSource.Loot,           // the default
+    Weights = new Dictionary<Rarity, double> { [Rarity.Common] = 50, [Rarity.Uncommon] = 30, [Rarity.Rare] = 15, [Rarity.Epic] = 4, [Rarity.Legendary] = 1 },
+});
+```
+```jsonc
+{ "format": 1,
+  "rarityRolls": {
+    "ember-rolls": { "items": [ "my-mod:*" ], "sources": "craft, loot",
+                     "weights": { "common": 50, "uncommon": 30, "rare": 15, "epic": 4, "legendary": 1 } } } }
+```
+- **`items`**: game item names (`Weapon_T1_1H_Sword_Craft`), items of this mod by block name, `"other-mod:name"`, or a pattern
+  with `*` over the game's item names (`"Weapon_*"`; `"my-mod:*"` is every item of that mod). Names are resolved on the server
+  once the world's item registry has them, and again when it grows; a name that matches nothing is said once in kiln.log.
+- **`sources`**: `craft` (the game makes the item and asks for no rarity: crafting, `Items.GiveRecipeResult`), `loot` (the
+  game makes it with a rarity it rolled: random loot, random drop-table stacks; an item whose loot entry fixes its rarity is
+  loot too, so leave `loot` out to keep that), `give` (a Kiln `Items.Give` without `Gear.Rarity`). A give with a rarity is
+  never rolled, nor is anything Kiln re-creates (`Gems.AddSocket`).
+- **`weights`**: per rarity, 0 or more, at least one above 0; a rarity left out is 0. A rarity whose perk slot the item type
+  lacks never comes up (most tools stop at Rare or Epic; a data pack can fill `perkReferences`); with none left the game's own
+  rarity stays.
+- One rule per item type: a later definition (of any mod) wins an item type an earlier one also names, and kiln.log says so.
+  A mod's rules end with the mod.
+- **What players see.** The item is made by the game's own item creation at the rolled rarity, the same way as an item whose
+  rarity the game rolled itself, so its colour, enhancement list and "LEVEL x/y" are the game's (players without Kiln get them
+  like any loot; not yet confirmed in a real game). A recipe's tooltip still shows the item type's rarity (the
+  game builds it from the type, not from a roll): `kiln lint` warns (KL406) when a rule rolls crafts of an item with a recipe.
+- **Where it runs.** On the server: a dedicated server, or the game of the player who hosts the world. A game client joined to
+  another server rolls nothing. Capability `items.gear.rolls` (the hook in the game's item creation); without it items are
+  made at the game's rarity and kiln.log says why.
+- The per-item rarity at creation is the game's; changing an item's rarity afterwards is `Items.SetRarity` / upgrades (the
+  gear API). Balancing-table values (the game's loot rarity rates, rarity durability factors, socket chances) are the
+  content pack's `gearRules`, not this block.
+
+## Rarity upgrades (RarityUpgradeBlock)
+Since 0.2.0-dev.29.19 (the equipment wave). The rule of an upgrade a station, a command or a quest runs on an item: which items
+it takes, up to which rarity, and what each step costs. An upgraded item gets its next enhancement slot in place (the same
+item, its item data and affixes kept), which the player then unlocks at the workbench as usual. The upgrade itself is
+`Items.UpgradeRarity(player, item, "name")` ([../services/items.md](../services/items.md#upgrading-rarity-v8-since-020-dev2919));
+a station that runs it when a player uses it is `InteractBlock.Upgrade` ([world-blocks.md](world-blocks.md#upgrade-stations)).
+```csharp
+Blocks.Define("standard-upgrades", new RarityUpgradeBlock
+{
+    Items = ["Weapon_*", "Armor_*", "Ring_*"],              // none: every item with enhancement slots
+    Max = Rarity.Legendary,                                 // the default
+    Steps =                                                 // by the rarity each step reaches
+    {
+        [Rarity.Uncommon]  = new UpgradeStep { Cost = { [GameItems.Material_T1_Metal_Scraps] = 10 } },
+        [Rarity.Rare]      = new UpgradeStep { Cost = { [GameItems.Material_T1_Metal_Sheets] = 5 }, Chance = 0.9 },
+        [Rarity.Epic]      = new UpgradeStep { Cost = { ["ember-shard"] = 3 }, Chance = 0.75, OnFail = UpgradeFail.KeepItemLoseCost },
+        [Rarity.Legendary] = new UpgradeStep { Cost = { ["ember-shard"] = 8 }, Chance = 0.5, LevelScale = 0.1 },
+    },
+    Durability = DurabilityRule.KeepRatio,                  // the default
+    Socket = SocketRule.Keep,                               // the default; or GameChance
+});
+// later, on the server's tick thread:
+UpgradeResult r = await Items.UpgradeRarity(player, Items.Held(player), "standard-upgrades");
+```
+```jsonc
+{ "format": 1,
+  "rarityUpgrades": {
+    "standard-upgrades": {
+      "items": [ "Weapon_*", "Armor_*", "Ring_*" ], "max": "legendary",
+      "steps": {
+        "uncommon":  { "cost": { "Material_T1_Metal_Scraps": 10 } },
+        "rare":      { "cost": { "Material_T1_Metal_Sheets": 5 }, "chance": 0.9 },
+        "epic":      { "cost": { "ember-shard": 3 }, "chance": 0.75, "onFail": "keepItemLoseCost" },
+        "legendary": { "cost": { "ember-shard": 8 }, "chance": 0.5, "levelScale": 0.1 } },
+      "durability": "keepRatio", "socket": "keep" } } }
+```
+- **`items`**: as `rarityRolls` takes them: game names, items of this mod by block name, `"other-mod:name"`, or a pattern
+  with `*` (`"my-mod:*"` is every item of that mod). Left out: every item with enhancement slots.
+- **`steps`**: by the rarity each reaches (`uncommon` to `legendary`), at least one. `cost`: item names as in `items`, plain
+  items only (never gear or a gem), each 1 to 100000, at most 8; left out: free. `chance` 0 to 1 (default 1; the server rolls
+  it). `onFail`: `keepItemLoseCost` (default), `keepItemKeepCost`, `downgrade`. `levelScale` (default 0): the cost grows
+  with the item's level, `count × (1 + levelScale × (level - 1))` rounded up. `unlock` (default false): the new slot comes
+  unlocked.
+- **`max`** (default `legendary`), **`durability`** (`keepRatio`, the default; `keep`; `repair`), **`socket`** (`keep`, the
+  default; `gameChance`: a weapon without a socket rolls the game's chance at its new rarity, and a won socket re-creates the
+  weapon in its slot), **`allowEmptySlot`** (default false: a rarity whose slot the type has no perk for is refused).
+- An item whose next rarity has no step, or whose type has no slot for it (most tools stop at Rare or Epic), is refused and
+  pays nothing. The same name defined again replaces the rule; a mod's rules end with the mod.
+- **Where it runs.** On the server; asks nothing of players' games (the new rarity is the game's own item state).
+  Capability `items.gear.upgrade`.
 
 ## Recipes of their own
 A `RecipeBlock` on an item says how that item is made. A `RecipeBlock` of its own, in `recipes`, is one more recipe for any item: a game item at the game's workbench, or an item of yours there. It needs `Output`.
@@ -311,10 +418,57 @@ A block is entered by the sequence: `Ability_Block`'s `SetAnimationEvent` names 
 ### Wands and staff casts
 A wand attack's `Moves` takes a premade as before, or one changed: `WandMoves.Heavy with { Animation = …, HitAt = 1.1 }`, in JSON `"moves": { "like": "heavy", "animation": …, "hitAt": 1.1 }` (no `like`: the attack's own premade). A spell's `CastBlock.Animation` the same: `CastAnimation.Lob with { Animation = …, HitAt = 1.2 }`, `"animation": { "like": "lob", "animation": …, "hitAt": 1.2 }`. `HitAt` is the release, the same thing as `releaseAt`: give one, or the same number (two numbers are refused). With `releaseAt` alone the shots (and on a staff the cost, the VFX and the sound) move to it as before; with `hitAt` the whole motion is retimed when content is ready, its first firing shot (a wand premade's shots that fire, a staff cast's shot) landing on it. A `like` other than the premades is refused: a wand motion's shots are a mix of the one that fires, the ones the premade silences and the per-element ones, and only the premades say which is which. Supporting any wand sequence would mean reading each shot's template when content is ready and telling a projectile from the rest by its components: about a day, with a lab check per element, and a game update that adds a shot would need the same check again. Where they work: a spell's `CastBlock.Animation` and a wand attack's `Moves`. An ability's cast (`AbilityBlock.Cast`) refuses them, by block and field (`cast.animation.animation`, `cast.animation.hitAt`): not yet on an ability's cast; its premade alone (`"lob"`) is still its motion.
 
+### Follow-ups
+A motion of the game has timed windows: "between here and there, on this input, go on with that sequence". They are what makes a combo, and what lets a block hand over to a parry. A move's `FollowUps` points windows the motion **already has** at another move of the same weapon:
+
+```csharp
+Block = new MoveBlock
+{
+    FollowUps =
+    [
+        new MoveFollowUpBlock { Trigger = MoveFollowUpTrigger.Parried, To = WeaponMoveSlot.Parry },      // a parried blow: this weapon's own parry
+        new MoveFollowUpBlock { Trigger = MoveFollowUpTrigger.Primary, To = WeaponMoveSlot.Primary },   // light attack while blocking: the first link
+    ],
+},
+```
+```json
+"block": { "followUps": [ { "trigger": "parried", "to": "parry" }, { "trigger": "primary", "to": "primary", "link": 1 } ] }
+```
+
+- **`Trigger`**: `Primary`, `Heavy`, `Block`, or `Parried` (the outcome of a block that parried a blow, not the parry's input). **`To`** and **`Link`** (from 1): a slot this weapon's moves name, and the link of its chain. A slot the moves do not name is refused: give it a move (one with only a `like` plays the class's own there).
+- **Which windows**: only windows of that input that have a follow-up of their own. A motion often has several for one input, one per skill a player may have; they keep their times, skills, tags and costs. `Occurrence` picks one, counted from 0 in the motion's own order by time; left out, the route takes all of them. `SubSequence` (from 0) is for a motion with several sub-sequences.
+- **No window is made.** A window with no follow-up (the dodge out of a swing) stays as it is, and a route that finds no window is refused. A route does not change when a move can be cancelled.
+- **No overlap.** Two routes of one move that select the same window are refused, both named, also when they say the same thing; there is no "the last one wins". A route does win over the chain's own link (primary and heavy chains still link up by themselves) for the windows it names.
+- At most 64 routes per move.
+
+**All or nothing.** A weapon with any `FollowUps` applies its moves, slots and routes as one *generation*: everything is checked on the game's data first, then a fresh set of sequence clones is made that no slot points at; their rules and then the weapon's slots are written in one content transaction of the mod, every link and every slot read back, and only then kept. If any part is refused or does not read back, the transaction is taken back whole and read back, so nothing of it plays: the weapon keeps the generation it had, or its class's moves when it had none. (A weapon without `FollowUps` applies move by move as before, with the same clone GUIDs as before.)
+
+`Blocks.MovesStatus(handle)` says where a weapon is, and `WeaponMovesApplicationChangedEvent` is raised on the tick for every change:
+
+| `State` | `Ok` | What it means |
+|---|---|---|
+| `PendingContent` | false | waiting for the game's data; `Reason` is `"PendingContent"` |
+| `Applied` | true | the slots play generation `AppliedGeneration`; `LiveClones` has its sequences by `slot/link` |
+| `Refused` | false | the last attempt (`RequestedGeneration`) was refused, `Reason` says which field and why; `AppliedGeneration` and `LiveClones` are still what plays |
+| `Removed` | false | the mod unloaded; the game's layers of it are off |
+
+What a failure leaves is read, not assumed. When the transaction is taken back and every field reads back as it was, the status is `Refused` and still names the generation that plays. When taking it back does not read back, Kiln takes every layer of the mod off (fail closed: what is left of the weapon cannot be told apart), and the status says so: `Refused`, a `Reason` with "no generation is applied" and "every layer of the mod was taken off", `AppliedGeneration` 0, and `LiveClones` holding what each slot plays as read, under `slot/<index>`. The mod's other weapons say the same and are planned again at the next ready pass, its other rules are applied again then; the weapon that failed is tried again when content is applied again. After every later application of the mod's rules (a world loaded again, a pack reload) the applied generation is written again in a transaction of its own and read back; when that fails, the status is `Refused` with the reason: it keeps the generation's number when the generation still plays, and says "no generation is applied" with what the slots play when it does not, and the next ready pass plans the weapon again. Removing a weapon resets what its generations wrote in a transaction and reads the slots back; when they still play a clone of the weapon, every layer of the mod is taken off instead and the `Removed` status's `Reason` says so.
+
+The same moves on the same game data are the same generation: applying them again changes nothing and raises no event. A refused weapon is tried again when content is applied again (a world loaded later). The clones' GUIDs follow the moves and the game's data (they change with a game update that changes the motions), and are the same on a server and its clients. The game cannot take a clone out again, so the clones of a refused or replaced generation stay registered, unused, until the game ends; a weapon takes at most 16 different sets of moves per run, then `Reason` starts with `RestartRequired`.
+
+Checked in a lab (a dedicated server, `mods/tests/weapon-moves-test` with the sword of `mods/tests/weapon-routes-fixture`): a sword whose routes overlap is refused naming both; with the sword's first clone refused on purpose, all its slots stay the class's and the status says `Refused` with the reason; the next attempt applies generation 2, the slots play its clones, every Parried and Primary window of the block leads where the routes say, the light chain links up and the game's own sequences are untouched; the same plan again raises no event; unloading the mod reports `Removed` and the slots are the class's again. Not checked in a game: that a player's character enters the routed moves and recovers (guided checks 16c-b, 16c-d).
+
+Capability `blocks.move_followups`. It is on on both sides since 0.2.0-dev.29, subject to kiln.gamedata; checks `16c-b` and `16c-d` still have not confirmed it in a real game ([caps](../services/caps.md#the-client-gate-dev28)). A missing dependency can still cause `KilnUnavailableException` naming the row at definition or `MovesStatus` (a block file records it as that block’s error). `MovesStatus` also throws `ArgumentException` for another mod's handle, a handle from before a reload, and a weapon without `FollowUps`.
+
+Before selecting slots, routed moves wait for successful sequence registration in every consuming world of this process (the server and, when hosting, the local client). Pending attachment is retried for at most 120 content-ready passes, normally about eight seconds at 60 steps per second; expiry or a failed world gives `Refused` with the world and reason. An ordinary readiness refusal resets only this weapon's slot layers. If that reset itself fails, the status reports the observed slots; the existing unverified-rollback policy still applies. Raw state GUIDs and `0x` entry ids, as well as names, require the receiving graph lookup and must match the motion's full-body or overlay kind.
+
+A client receiving server content checks the generation's registration and animation states before selecting its slots, including later chain links. A refusal leaves that weapon on its base sequences, logs the weapon and reason once for that sync application, and applies the rest of the sync. The server still simulates its routed moves and authoritative hit timing while this client shows base moves; presentation and prediction can therefore disagree until both sides accept compatible content.
+
+
 ### Limits
 - Checked in a lab (`mods/tests/weapon-moves-test`, a dedicated server, fresh and after a restart): on the game's data the clones exist under their names and GUIDs, start from their `like`, name the state given by GUID or `0x` id, sit in the slots their selectors name (and `heavyAir` plays the first primary link) while every other slot and the game's own weapons keep their sequences; every event, window end, `followUpTime` and the length follow the map, in order; the chain's and the heavy's follow-ups name the clones; a spawned player character pressing the attack button gets link 1, link 2, link 1 from the game itself, and holding it gets the heavy; the damage window of a retimed clone opens within one step of `hitAt`. With player states in the build (`Kiln.PlayerAnim`), a move names a state of its mod or a game state by name: the clones name the state's GUID, and the server's graph enters the mod's states (a two-link chain, a heavy, a guard) and a game state named by name when a player character presses the attack, heavy and block inputs, the plain sword entering the game's own state; a name nobody has, a name several machines have, a state no id enters, a state with several ids and a mod state the service refused are each reported by block and slot, the move keeping its `like`'s state; a wand move on a mod's overlay state names it in its `SetAnimationOverlayEvent` (the lab cannot read which overlay the graph plays). Not checked in a game: that a player sees the motions (guided checks below), that sub-sequence rules reach the second sub-sequence of a clone (`<clone>#1`). A move on an overlay applies: the wand's bolt plays the overlay its move names (kiln.content takes an overlay's GUID as it takes a state's, both only hashed into the graph's id), checked in the lab. The offline tests (`managed/tests/Kiln.Blocks.Tests`: `WeaponMovesTests`, `MoveTimingTests`, `CastMovesTests`) check what the compile and the content-ready planner make, over made-up slots and events, and replay kiln.gamedata's re-sort after every rule.
 - A plunge's and a special's fall loop is retimed as any window: the loop holds until landing, so the map moves its start and end, not how long a fall lasts.
-- The jump attack's follow-up to the plunge, and every other slot's follow-ups, stay the game's: only the primary and heavy chains are linked to each other.
+- The jump attack's follow-up to the plunge, and every other slot's follow-ups, stay the game's unless a move's `FollowUps` routes them ([Follow-ups](#follow-ups)): by themselves only the primary and heavy chains are linked to each other.
 - A move whose only change could not be made (a name that cannot be looked up) still plays its clone, which is the class's sequence unchanged.
 - A second cast of a mod's wand state started before the first has ended continues its clip rather than restarting it (player-anim's limit, [animations.md](animations.md) "Limits").
 - Capabilities: `blocks.weapon_moves` (moves, and `animation` and `hitAt` on a wand's moves and a spell's cast) needs kiln.gamedata; `blocks.animated_held` (`VisualBlock.Animated`) needs kiln.gamedata and kiln.assets. Item blocks report both rows when the first of them compiles: a row a managed service registers exists only after the service is first used, so a manifest's `features` cannot require it; check `Capabilities.Is` at run time.

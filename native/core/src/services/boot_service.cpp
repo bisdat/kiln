@@ -13,6 +13,9 @@
 // boot.json. The host test (native/core/tests/boot_service_test.cpp) includes this file with stubs for the rest.
 #include <algorithm>
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <thread>
 #include <cstdio>
 #include <cstring>
 #include <map>
@@ -27,9 +30,12 @@
 #include "../log.h"
 #include "../profile.h"
 #include "../registry.h"
+#include "../tick.h"
+#include "../worldinfo.h"
 #include "nlohmann/json.hpp"
 #include "services/kiln_boot.h"
 #include "services/kiln_caps.h"
+#include "boot_gamedata.h"
 #include "service.h"
 
 namespace kiln::caps {
@@ -41,16 +47,17 @@ namespace {
 
 using nlohmann::json;
 
-constexpr size_t kCollectorCount = 6;
+constexpr size_t kCollectorCount = 7;
 // The fixed prepare order (chapter 08 §4.3 step 4).
-constexpr const char* kCollectors[kCollectorCount] = {"assets", "worldtables", "content", "skills", "knowledge", "vfx"};
+constexpr const char* kCollectors[kCollectorCount] = {"assets", "worldtables", "content", "skills", "knowledge", "vfx",
+                                                       "patches"};  // patches (S10): kiln.content's resource field patches, last
 // The boot kinds (chapter 08 §4.1): the plural block sections a staged definition may use. Closed.
 constexpr const char* kKinds[] = {"statuses",     "effects",          "items",            "spells",     "talents",
                                   "talentTrees",  "npcs",             "creatures",        "materialTweaks",
                                   "buildingMaterials", "terrainMaterials", "blueprints", "props",      "stations",
                                   "vfx",          "materials",        "quests",           "dialogues",  "bodies",
                                   "animations",   "ais",              "behaviours",       "perks",      "abilities",
-                                  "looks",        "strengths",        "surfaces"};
+                                  "looks",        "strengths",        "surfaces",         "resourcePatches"};
 constexpr uint64_t kGeneration = 1;  // one generation per process
 constexpr uint32_t kRoleBits = KILN_BOOT_ROLE_DEDICATED | KILN_BOOT_ROLE_HOSTED | KILN_BOOT_ROLE_CLIENT;
 constexpr size_t kManifestMax = 1u << 20;
@@ -66,6 +73,8 @@ struct Owner {
     std::map<std::string, std::string> defs;  // "<kind>/<key>" -> the canonical JSON as staged
     std::vector<std::string> needs;            // the envelope's "requires"
     KilnOwner process = 0;                     // "boot:<id>", from the commit on
+    uint64_t read_bytes = 0;                   // game-data values read_resource gave it (KILN_BOOT_AUTHOR_READ_MAX)
+    std::string refusal;                       // why its frame fails, as its host said (stage "ir"/"refusal")
 };
 
 struct Issue {
@@ -93,8 +102,14 @@ struct Row {  // a capability report, sent after the mutex is released
 };
 
 void os_exit(uint32_t code) { ExitProcess(code); }
+// The stop after the entry point (b_activation_fault): the game's and the CLR's threads are live, so the process is
+// ended without running any DLL's detach code under the loader lock. What the launcher reads is on disk before this.
+void os_exit_late(uint32_t code) { TerminateProcess(GetCurrentProcess(), code); }
 
 std::mutex& g_mutex = *new std::mutex;  // never destroyed: a late reader at process exit must still find it
+// The offline game-data view: the boot snapshot's reader (boot_gamedata.h). Opened once in decide(); it has a lock of
+// its own, and g_mutex is never held across its file IO.
+boot_gd::Reader& g_gamedata = *new boot_gd::Reader;
 bool g_decided = false;
 bool g_deferred = false;
 bool g_bound = false;                  // registration is over (bound() or commit())
@@ -112,6 +127,39 @@ std::atomic<const Root*> g_root{nullptr};
 KilnOwner g_self = 0;     // kiln.boot's own owner, for its capability reports
 uint32_t g_exit_code = 0;  // the code the hold path ended the process with (boot.json)
 void (*g_exit)(uint32_t) = &os_exit;  // the OS-exit adapter (the host test replaces it)
+void (*g_exit_late)(uint32_t) = &os_exit_late;  // the same for the stop after the entry point
+void (*g_late_hold)(void* user, const std::string& last_line) = nullptr;  // boot.cpp: the state files of a stop after the entry point
+void* g_late_hold_user = nullptr;
+// boot.cpp: the state files of a service's stop (stop_start), before or after the entry point
+void (*g_stop_state)(void* user, const std::string& last_line, const std::string& why, uint32_t code) = nullptr;
+void* g_stop_state_user = nullptr;
+// stop_start: what stopped the start (boot.json "boot"."stop"); g_stopping is set once
+struct Stop {
+    uint32_t code = 0;
+    std::string reason, by;
+    std::vector<std::string> mods;
+};
+Stop g_stop;
+std::atomic<bool> g_stopping{false};
+std::chrono::milliseconds g_stop_timeout{65000};  // includes state IO and the caller's 60-second message
+
+// The core's start phase is over: a world is present now, or one has run in this process (tick.cpp counts a world's
+// sessions from its first step). stop_start refuses then.
+bool world_started() {
+    for (uint32_t k = 0; k < KILN_WORLD_KINDS; ++k)
+        if (worldinfo::world(k)) return true;
+    KilnSessionInfo info{};
+    info.size = sizeof info;
+    if (tick::session(&info) == KILN_OK)
+        for (uint32_t k = 0; k < KILN_WORLD_KINDS; ++k)
+            if (info.sessions[k]) return true;
+    return false;
+}
+
+// A bad service callback must not unwind past the final termination. No C++ objects in the SEH frame.
+void stop_callback(void(KILN_CALL* fn)(void*), void* user) {
+    __try { fn(user); } __except (1) {}
+}
 
 // ---- small helpers ----
 template <size_t N>
@@ -176,16 +224,26 @@ bool hex_run(std::string_view s, size_t n, bool lower_only) {
     return true;
 }
 
-// The five query forms of IReadOnlyGameData.Read (chapter 08 §4.1).
+// The query forms of IReadOnlyGameData.Read (chapter 08 §4.1), names:<kind> (the names one kind's index holds) and
+// names:resources/<qualified type name> (every resource of that type).
 bool query_ok(std::string_view q) {
     const auto colon = q.find(':');
     if (colon == std::string_view::npos) return false;
     const std::string_view form = q.substr(0, colon), arg = q.substr(colon + 1);
+    if (form == "names") {
+        // names:<kind>, or names:templates/<component type> (templates that have one: "MiningNode")
+        if (arg == "items" || arg == "templates" || arg == "skills" || arg == "materials") return true;
+        if (arg.substr(0, 10) == "resources/") return boot_gd::type_name_ok(arg.substr(10));
+        if (arg.substr(0, 10) != "templates/" || arg.size() == 10 || arg.size() > 10 + 96) return false;
+        for (const char c : arg.substr(10))
+            if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_')) return false;
+        return true;
+    }
     if (form == "item" || form == "template") return name_ok(arg, true);
     if (form == "material") return name_ok(arg, false);
     if (form == "skill") return arg.size() == 10 && arg[0] == '0' && arg[1] == 'x' && hex_run(arg.substr(2), 8, false);
     if (form != "resource") return false;
-    // <canonical GUID>/<8 hex typeHash>/<decimal part>
+    // <canonical GUID>/<8 hex typeHash>/<decimal part>, or <canonical GUID>/<qualified type name>/<decimal part>
     const auto a = arg.find('/'), b = a == std::string_view::npos ? a : arg.find('/', a + 1);
     if (a == std::string_view::npos || b == std::string_view::npos) return false;
     const std::string_view guid = arg.substr(0, a), type = arg.substr(a + 1, b - a - 1), part = arg.substr(b + 1);
@@ -194,7 +252,7 @@ bool query_ok(std::string_view q) {
         const bool dash = i == 8 || i == 13 || i == 18 || i == 23;
         if (dash ? guid[i] != '-' : !hex_run(guid.substr(i, 1), 1, true)) return false;
     }
-    if (!hex_run(type, 8, false) || part.empty() || part.size() > 10 || (part.size() > 1 && part[0] == '0')) return false;
+    if (!(hex_run(type, 8, false) || boot_gd::type_name_ok(type)) || part.empty() || part.size() > 10 || (part.size() > 1 && part[0] == '0')) return false;
     uint64_t v = 0;
     for (const char c : part) {
         if (c < '0' || c > '9') return false;
@@ -227,6 +285,7 @@ std::string code_name(uint32_t code) {
         case KILN_BOOT_ISSUE_NOT_COMMITTED: return "NotCommitted";
         case KILN_BOOT_ISSUE_WRONG_ROLE: return "WrongRole";
         case KILN_BOOT_ISSUE_ACTIVATION_FAULT: return "ActivationFault";
+        case KILN_BOOT_ISSUE_START_STOPPED: return "StartStopped";
         case KILN_BOOT_ISSUE_SHADOWED_BY_FILE: return "ShadowedByFile";
         default: {
             char b[32];
@@ -263,11 +322,10 @@ void send(const std::vector<Row>& rows) {
 Row phase_row_locked() {
     for (const auto& [id, o] : g_owners)
         if (o.open) return {"mods.boot.phase", KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE, "boot-author frame open: " + id};
-    std::string text = g_status == KILN_BOOT_STATUS_COLLECTING
-                           ? "no boot-author frame is open (generation 1 collecting)"
-                           : std::string("no boot-author frame: the boot phase is over (generation 1 ") +
-                                 status_name(g_status) + ")";
-    return {"mods.boot.phase", KILN_CAP_PENDING, KILN_CAP_REASON_SESSION, std::move(text)};
+    if (g_status != KILN_BOOT_STATUS_COLLECTING)
+        return {"mods.boot.phase", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_POLICY,
+                std::string("the boot phase of this process is over (generation 1 ") + status_name(g_status) + ")"};
+    return {"mods.boot.phase", KILN_CAP_PENDING, KILN_CAP_REASON_SESSION, "no boot-author frame is open (generation 1 collecting)"};
 }
 
 // ---- deferred mode: the manifest scan ----
@@ -275,6 +333,14 @@ struct BootMod {
     std::string id;
     bool required;
 };
+
+std::vector<BootMod> g_scanned;  // decide()'s manifest scan: every boot mod of the profile takes part, with its files at least
+// labs only (kiln.json "boot.testRefuse" with policy any): mod -> the collector that gets an unreadable document of it each round
+std::map<std::string, std::string> g_test_refuse;
+// labs only (kiln.json "boot.testFault" with policy any): mod -> the collector told to fail that mod's content after the publication
+// (the IR's "testFault"; kiln.content: the world refuses the mod's first boot item or recipe at registration)
+std::map<std::string, std::string> g_test_fault;
+constexpr const char* kTestFaultCollectors[] = {"content"};
 
 // kiln.mod.json's "boot" of one folder: 0 none, 1 true, 2 "required". `id` gets the manifest's id.
 int manifest_boot(const std::filesystem::path& dir, uint32_t side, std::string* id) {
@@ -410,7 +476,8 @@ KilnResult KILN_CALL b_begin_owner(KilnOwner author, KilnStr mod_id, uint32_t ro
 
 // The envelope as Kiln.Host stages it: checked whole before it is kept (header, "The IR envelope").
 bool envelope_ok(const json& e, std::string* why) {
-    if (!e.is_object() || e.value("schema", 0) != 1) return *why = "not an object with \"schema\": 1", false;
+    if (!e.is_object() || !e.contains("schema") || !e["schema"].is_number_integer() || e["schema"] != 1)
+        return *why = "not an object with \"schema\": 1", false;
     std::set<std::string> ids;
     if (e.contains("owners")) {
         if (!e["owners"].is_array()) return *why = "\"owners\" is not an array", false;
@@ -454,6 +521,20 @@ KilnResult KILN_CALL b_stage(KilnOwner owner, uint64_t generation, KilnStr kind,
     if (!g_deferred) return KILN_ERR_UNAVAILABLE;
     if (!owner || generation != kGeneration) return KILN_ERR_INVALID_ARGUMENT;
     const auto author = g_by_author.find(owner);
+    if (k == "ir" && name == "refusal" && author != g_by_author.end()) {  // why this author's frame fails (finish_owner)
+        Owner& o = g_owners[author->second];
+        if (!o.open || g_status != KILN_BOOT_STATUS_COLLECTING)
+            return refuse("PhaseClosed: " + o.id + "'s OnBoot frame is closed");
+        const json doc = canonical_json.ptr && canonical_json.len <= KILN_BOOT_DEFINITION_MAX
+                             ? json::parse(sv(canonical_json), nullptr, false)
+                             : json();
+        if (!doc.is_object() || !doc.contains("reason") || !doc["reason"].is_string() || doc["reason"].get<std::string>().empty())
+            return KILN_ERR_INVALID_ARGUMENT;
+        o.refusal = doc["reason"].get<std::string>();
+        out->ok = 1;
+        out->reason[0] = 0;
+        return KILN_OK;
+    }
     if (k == "ir") {  // the host's envelope
         if (author != g_by_author.end() || name != "envelope") return KILN_ERR_INVALID_ARGUMENT;
         if (g_status != KILN_BOOT_STATUS_COLLECTING) return refuse("PhaseClosed: the boot generation is committed");
@@ -520,8 +601,9 @@ KilnResult KILN_CALL b_finish_owner(KilnOwner owner, uint64_t generation, uint32
             const bool dep = accept == KILN_BOOT_FINISH_DEPENDENCY;
             o.state = dep ? KILN_BOOT_STATE_EXCLUDED_DEPENDENCY : KILN_BOOT_STATE_EXCLUDED_CALLBACK;
             issue_locked({static_cast<uint32_t>(dep ? KILN_BOOT_ISSUE_DEPENDENCY : KILN_BOOT_ISSUE_CALLBACK_FAILED), o.id, "", "", "callback",
-                          dep ? "a mod it requires is out of the boot generation; none of its definitions or files are in"
-                              : "its OnBoot failed (kiln.log has the exception); none of its definitions or files are in"});
+                          dep            ? "a mod it requires is out of the boot generation; none of its definitions or files are in"
+                          : o.refusal.empty() ? "its OnBoot failed (kiln.log has the exception); none of its definitions or files are in"
+                                              : o.refusal + "; none of its definitions or files are in"});
             o.defs.clear();
         }
         phase = phase_row_locked();
@@ -530,16 +612,42 @@ KilnResult KILN_CALL b_finish_owner(KilnOwner owner, uint64_t generation, uint32
     return KILN_OK;
 }
 
+// The offline game-data view over the boot snapshot (boot_gamedata.h). The frame and the budget are checked under
+// g_mutex, the files are read without it (boot-thread calls are serialized, kiln_boot.h), and the bytes are charged to
+// the author when the result is written: a BUFFER_TOO_SMALL answer costs nothing.
 KilnResult KILN_CALL b_read_resource(KilnOwner owner, KilnStr query, char* out, size_t capacity, size_t* required) {
-    static_cast<void>(out);
-    static_cast<void>(capacity);
-    std::lock_guard lk(g_mutex);
-    if (!g_deferred) return KILN_ERR_UNAVAILABLE;
-    if (!required || !query_ok(sv(query))) return KILN_ERR_INVALID_ARGUMENT;
-    const auto author = g_by_author.find(owner);
-    if (author == g_by_author.end()) return KILN_ERR_INVALID_ARGUMENT;
-    if (!g_owners[author->second].open || g_status != KILN_BOOT_STATUS_COLLECTING) return KILN_ERR_REVOKED;
-    return KILN_ERR_UNAVAILABLE;  // no offline reader in this build: row mods.boot.game_data says so
+    uint64_t left = 0;
+    std::string id;
+    {
+        std::lock_guard lk(g_mutex);
+        if (!g_deferred) return KILN_ERR_UNAVAILABLE;
+        if (!required || !query_ok(sv(query)) || (!out && capacity)) return KILN_ERR_INVALID_ARGUMENT;
+        const auto author = g_by_author.find(owner);
+        if (author == g_by_author.end()) return KILN_ERR_INVALID_ARGUMENT;
+        const Owner& o = g_owners[author->second];
+        if (!o.open || g_status != KILN_BOOT_STATUS_COLLECTING) return KILN_ERR_REVOKED;
+        id = o.id;
+        left = KILN_BOOT_AUTHOR_READ_MAX - std::min<uint64_t>(o.read_bytes, KILN_BOOT_AUTHOR_READ_MAX);
+    }
+    if (!g_gamedata.is_open()) return KILN_ERR_UNAVAILABLE;  // row mods.boot.game_data says why
+    std::string json, why;
+    size_t need = 0, value = 0;
+    const KilnResult rc = g_gamedata.read(sv(query), capacity, KILN_BOOT_RESULT_MAX, left, &json, &need, &value, &why);
+    if (rc == KILN_ERR_BUFFER_TOO_SMALL) {
+        *required = need;
+        return rc;
+    }
+    if (rc == KILN_ERR_UNAVAILABLE)
+        KLOG_W("boot: %s: game data %.*s: %s", id.c_str(), static_cast<int>(std::min<size_t>(query.len, 200)), query.ptr, why.c_str());
+    if (rc != KILN_OK) return rc;
+    {
+        std::lock_guard lk(g_mutex);
+        const auto author = g_by_author.find(owner);
+        if (author == g_by_author.end()) return KILN_ERR_REVOKED;
+        g_owners[author->second].read_bytes += value;
+    }
+    std::memcpy(out, json.c_str(), json.size() + 1);
+    return KILN_OK;
 }
 
 // ---- commit ----
@@ -576,8 +684,17 @@ std::string build_ir_locked() {
             const std::string id = o["id"].get<std::string>();
             if (out.count(id)) continue;
             o["owner"] = g_owners[id].process;
+            o["required"] = g_owners[id].required;  // the collectors prepare a required participant strictly
             owners.push_back(o);
         }
+    // participants the envelope does not list (files only): the collectors still get their process owner
+    {
+        std::set<std::string> listed;
+        for (const auto& o : owners) listed.insert(o["id"].get<std::string>());
+        for (const auto& [id, o] : g_owners)
+            if (!excluded(o) && !listed.count(id))
+                owners.push_back({{"id", id}, {"owner", o.process}, {"filesOnly", true}, {"required", o.required}});
+    }
     ir["owners"] = owners;
     if (!ir.contains("reservations")) ir["reservations"] = json::object();
     for (auto& [name, list] : ir["reservations"].items())
@@ -594,6 +711,21 @@ std::string build_ir_locked() {
         for (auto& d : list)
             if (!out.count(d["owner"].get<std::string>())) kept.push_back(d);
         list = kept;
+    }
+    // the lab switch boot.testFault: the collector fails the mod's content after the publication (an activation fault)
+    if (!g_test_fault.empty()) {
+        json f = json::object();
+        for (const auto& [mod, c] : g_test_fault) {
+            const auto it = g_owners.find(mod);
+            if (it != g_owners.end() && !excluded(it->second)) f[mod] = c;
+        }
+        ir["testFault"] = f;
+    }
+    // the lab switch: an unreadable document of the mod, which the collector refuses as it refuses any such document
+    for (const auto& [mod, c] : g_test_refuse) {
+        const auto it = g_owners.find(mod);
+        if (it == g_owners.end() || excluded(it->second)) continue;
+        ir["collectors"][c].push_back({{"owner", mod}, {"key", "lab.test-refuse"}, {"document", json::array()}});
     }
     return ir.dump();
 }
@@ -714,6 +846,14 @@ KilnResult KILN_CALL b_commit(KilnOwner host, uint64_t generation, KilnBootCommi
                 o.envelope = true;
                 if (e.contains("requires")) o.needs = e["requires"].get<std::vector<std::string>>();
             }
+        // A boot mod that neither ran OnBoot nor is named by the envelope (a mod of blocks files only; a build whose host
+        // stages no envelope) takes part with its files: a collector may refuse it by name, and "required" holds for it.
+        // Its manifest says whether its boot content is required, also for a participant the envelope names that ran no OnBoot.
+        for (const BootMod& m : g_scanned) {
+            Owner& o = g_owners[m.id];
+            if (o.id.empty()) o.id = m.id;
+            o.required = o.required || m.required;
+        }
         propagate_locked("callback");
         for (auto& [id, o] : g_owners)
             if (!excluded(o)) o.process = reg::owner_create("boot:" + id);
@@ -808,6 +948,7 @@ KilnResult KILN_CALL b_commit(KilnOwner host, uint64_t generation, KilnBootCommi
         } else {
             abort_locked(culprits, why);
         }
+        g_gamedata.release_resource_list();  // OnBoot is over: no read of the snapshot follows in this process
         out->status = g_status;
         out->owner_count = static_cast<uint32_t>(g_owners.size());
         out->issue_count = static_cast<uint32_t>(g_issues.size());
@@ -871,6 +1012,131 @@ const void* KILN_CALL b_active_plan(KilnStr collector_id, uint64_t* generation) 
     return root && i >= 0 ? root->plans[i] : nullptr;
 }
 
+// A consumer could not bind published content of `mod_id` (S10: a resource patch whose resource is not there, an index
+// past its array). The issue is recorded and the mod reads ActivationFault. A mod whose boot content is required stops
+// the start here as an unpublished generation does before the entry point: the state files are written (g_late_hold,
+// boot.cpp) and the process ends with KILN_BOOT_EXIT_CODE. Any thread; nothing is undone.
+KilnResult KILN_CALL b_activation_fault(KilnOwner collector, KilnStr mod_id, KilnStr kind, KilnStr key, KilnStr reason) {
+    const std::string id(sv(mod_id));
+    bool stop = false;
+    std::string last;
+    std::vector<Row> rows;
+    {
+        std::lock_guard lk(g_mutex);
+        if (!g_deferred || g_status == KILN_BOOT_STATUS_COLLECTING || g_status == KILN_BOOT_STATUS_PREPARING) return KILN_ERR_UNAVAILABLE;
+        bool known = false;
+        for (const Collector& c : g_collectors) known |= c.registered && c.owner == collector;
+        const auto it = g_owners.find(id);
+        if (!collector || !known || it == g_owners.end() || !reason.ptr || !reason.len) return KILN_ERR_INVALID_ARGUMENT;
+        Owner& o = it->second;
+        if (o.state == KILN_BOOT_STATE_COMMITTED) o.state = KILN_BOOT_STATE_ACTIVATION_FAULT;
+        if (g_status == KILN_BOOT_STATUS_PUBLISHED) g_status = KILN_BOOT_STATUS_ACTIVATION_FAULT;
+        issue_locked({KILN_BOOT_ISSUE_ACTIVATION_FAULT, id, std::string(sv(kind)), std::string(sv(key)), "activation", std::string(sv(reason))});
+        // A dependent cannot activate against content that failed to bind, including a required transitive dependent.
+        for (bool changed = true; changed;) {
+            changed = false;
+            for (auto& [dependent, d] : g_owners) {
+                if (d.state != KILN_BOOT_STATE_COMMITTED) continue;
+                for (const auto& need : d.needs) {
+                    const auto failed = g_owners.find(need);
+                    if (failed == g_owners.end() || failed->second.state != KILN_BOOT_STATE_ACTIVATION_FAULT) continue;
+                    d.state = KILN_BOOT_STATE_ACTIVATION_FAULT;
+                    issue_locked({KILN_BOOT_ISSUE_DEPENDENCY, dependent, "", "", "activation", "requires " + need + ", whose boot content could not be applied"});
+                    changed = true;
+                    break;
+                }
+            }
+        }
+        rows.push_back(phase_row_locked());
+        std::string required;
+        for (const auto& [mod, d] : g_owners)
+            if (d.required && d.state == KILN_BOOT_STATE_ACTIVATION_FAULT) { required = mod; break; }
+        stop = !required.empty() && !g_exit_code;
+        if (stop) {
+            g_exit_code = KILN_BOOT_EXIT_CODE;
+            char line[96];
+            std::snprintf(line, sizeof line, "boot: the start stops (exit code 0x%04X)", KILN_BOOT_EXIT_CODE);
+            const std::string k(sv(kind)), ky(sv(key));
+            const std::string entry = k.empty() && ky.empty() ? std::string() : k + (k.empty() || ky.empty() ? "" : " ") + ky + ": ";
+            last = std::string(line) + ": " + required + "'s boot content is required and could not be applied: " +
+                   (required == id ? std::string() : "dependency " + id + ": ") + entry + std::string(sv(reason)) +
+                   "; state/boot.json lists every boot mod's state and issue";
+        }
+    }
+    send(rows);
+    if (!stop) {
+        KLOG_E("boot: %s: %.*s (the start goes on without it)", id.c_str(), static_cast<int>(reason.len), reason.ptr);
+        return KILN_OK;
+    }
+    KLOG_E("%s", last.c_str());
+    if (g_late_hold) g_late_hold(g_late_hold_user, last);
+    g_exit_late(KILN_BOOT_EXIT_CODE);
+    return KILN_OK;  // the host test's exit adapter returned
+}
+
+// A service stops the start (kiln_boot.h stop_start): the issue per mod, the stop line, the launcher's files (boot.cpp's
+// g_stop_state), the caller's last word to the player, then the process ends with the caller's code. Any thread, any
+// phase, deferred mode or not.
+KilnResult KILN_CALL b_stop_start(KilnOwner caller, KilnStr mods, KilnStr reason, uint32_t exit_code, void(KILN_CALL* before_exit)(void*),
+                                  void* user) {
+    if (!caller || !reason.ptr || !reason.len || !exit_code) return KILN_ERR_INVALID_ARGUMENT;
+    // A start-time call only: never once a world (any kind, prediction included) is present or has run in this process
+    // (the core's start phase is over then, and ending the process could lose play). A sample, not a lock: a world whose
+    // first step is under way right now is not seen yet (worldinfo and the sessions are set at a world's first step).
+    if (world_started()) return KILN_ERR_UNAVAILABLE;
+    if (g_stopping.exchange(true)) return KILN_ERR_UNAVAILABLE;  // the first stop ends the process
+    const std::string why(sv(reason));
+    std::vector<std::string> ids;
+    for (std::string_view rest = sv(mods); !rest.empty();) {
+        const size_t comma = rest.find(',');
+        std::string_view id = rest.substr(0, comma);
+        while (!id.empty() && id.front() == ' ') id.remove_prefix(1);
+        while (!id.empty() && id.back() == ' ') id.remove_suffix(1);
+        if (!id.empty()) ids.emplace_back(id);
+        rest = comma == std::string_view::npos ? std::string_view() : rest.substr(comma + 1);
+    }
+    std::string last;
+    {
+        std::lock_guard lk(g_mutex);
+        g_stop = Stop{exit_code, why, reg::owner_name(caller), ids};
+        g_exit_code = exit_code;
+        if (ids.empty()) issue_locked({KILN_BOOT_ISSUE_START_STOPPED, "", "", "", "stop", why});
+        for (const std::string& id : ids) issue_locked({KILN_BOOT_ISSUE_START_STOPPED, id, "", "", "stop", why});
+        char line[96];
+        std::snprintf(line, sizeof line, "boot: the start stops (exit code 0x%04X)", exit_code);
+        last = std::string(line) + ": " + why + "; state/boot.json \"boot\".\"stop\" says why";
+    }
+    // A blocked writer or arbitrary before_exit callback cannot leave a refused start running forever.
+    std::mutex deadline_mu;
+    std::condition_variable deadline_cv;
+    bool done = false;
+    std::atomic<bool> expired{false};
+    std::thread deadline([&] {
+        std::unique_lock lk(deadline_mu);
+        if (deadline_cv.wait_for(lk, g_stop_timeout, [&] { return done; })) return;
+        expired = true;
+        lk.unlock();
+        g_exit_late(exit_code);
+    });
+    KLOG_E("%s", last.c_str());
+    try {
+        if (g_stop_state) g_stop_state(g_stop_state_user, last, why, exit_code);
+    } catch (...) {
+        KLOG_E("boot: stop state writer failed; terminating with the recorded reason");
+    }
+    if (before_exit) stop_callback(before_exit, user);
+    {
+        std::lock_guard lk(deadline_mu);
+        done = true;
+    }
+    deadline_cv.notify_one();
+    deadline.join();
+    if (!expired) g_exit_late(exit_code);
+    return KILN_OK;  // the host test's exit adapter returned
+}
+
+static_assert(sizeof(KilnBootApiV1) == 104 && offsetof(KilnBootApiV1, stop_start) == 96, "append-only boot ABI");
+
 const KilnBootApiV1 kTable = {
     {sizeof(KilnBootApiV1), KILN_BOOT_VERSION},
     &b_status,
@@ -883,11 +1149,30 @@ const KilnBootApiV1 kTable = {
     &b_issues,
     &b_collector,
     &b_active_plan,
+    &b_activation_fault,
+    &b_stop_start,
 };
 
 }  // namespace
 
 const KilnBootApiV1* table() { return &kTable; }
+
+// The row mods.boot.game_data: available with a snapshot of exactly this game build (docs/kiln/modding/
+// boot-gamedata.md), which is looked for here, once; otherwise unavailable with what to run and the test that failed.
+// One read of at most 64 KiB of the game's .kfc, index.json and eight file checks: no index is loaded before a mod asks.
+static Row game_data_row(bool hooks, const std::string& idle) {
+    if (!hooks) return {"mods.boot.game_data", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_POLICY, idle};
+    std::filesystem::path kfc = paths().exe;
+    kfc.replace_extension(L".kfc");
+    std::string why;
+    if (g_gamedata.open(paths().data / L"boot-gamedata", image().sha256, kfc, &why)) {
+        KLOG_I("boot: game-data snapshot %s found: OnBoot can read the game's data", g_gamedata.key().c_str());
+        return {"mods.boot.game_data", KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE,
+                "the boot game-data snapshot " + g_gamedata.key() + " matches this game build"};
+    }
+    KLOG_I("boot: %s (%s)", boot_gd::kHint, why.c_str());
+    return {"mods.boot.game_data", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SERVICE_MISSING, std::string(boot_gd::kHint) + " (" + why + ")"};
+}
 
 // boot.cpp, after caps::core_rows and before the service DLLs and plugins load: is this a boot profile? Also reports
 // the rows mods.boot.phase, mods.boot.game_data, mods.boot.client and mods.boot.vfx (mods.boot itself is the sigdb
@@ -896,18 +1181,15 @@ void decide(bool hooks, const std::string& safe_idle) {
     if (!g_self) g_self = reg::owner_create("kiln.boot");
     const bool client = image().side == KILN_SIDE_CLIENT;
     const std::string idle = "safe idle: " + safe_idle;
-    // The rows that do not depend on the decision first: the decision reads mods.boot.client. On a client both rows say
-    // what this build can do; the client gate (native/core/gates/dev28-08-onboot.json) holds them until the guided
-    // checks 08-boot.first-start-definitions and 08-loader-order pass, and kiln.json "preview" lifts it.
+    // The decision reads mods.boot.client, so publish it first. Staged VFX/materials
+    // are absent in this release; that informational row must not gate ordinary boot mods.
     std::vector<Row> rows = {{"mods.boot.phase", KILN_CAP_PENDING, KILN_CAP_REASON_SESSION, "no boot-author frame is open"},
-                             {"mods.boot.game_data", KILN_CAP_UNAVAILABLE,
-                              hooks ? static_cast<uint32_t>(KILN_CAP_REASON_SERVICE_MISSING) : static_cast<uint32_t>(KILN_CAP_REASON_POLICY),
-                              hooks ? "no offline game-data reader is registered (kiln.content provides it)" : idle}};
+                             game_data_row(hooks, idle)};
     if (client) {
         rows.push_back({"mods.boot.client", KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE,
                         "boot mods on a game client, for the hosted world and the client"});
-        rows.push_back({"mods.boot.vfx", KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE,
-                        "the vfx collector cooks staged VFX and materials on the client"});
+        rows.push_back({"mods.boot.vfx", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SERVICE_MISSING,
+                        "not in this build: a client builds VFX and material files at start; staging them into a boot generation comes later"});
     } else {
         rows.push_back({"mods.boot.client", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_WRONG_SIDE,
                         "boot mods on a game client (hosted and joined); a dedicated server's are mods.boot"});
@@ -915,7 +1197,8 @@ void decide(bool hooks, const std::string& safe_idle) {
                         "a dedicated server renders no VFX: its vfx collector prepares an empty plan"});
     }
     send(rows);
-    std::vector<BootMod> mods;
+    // Required content must fail closed even when hooks, .NET or the client boot route are unavailable.
+    const std::vector<BootMod> mods = scan(image().side);
     std::string why;
     bool deferred = false;
     if (!hooks) {
@@ -923,7 +1206,6 @@ void decide(bool hooks, const std::string& safe_idle) {
     } else if (!config().clr) {
         why = ".NET is off (kiln.json \"clr\"), so no mod runs OnBoot";
     } else {
-        mods = scan(image().side);
         if (mods.empty()) why = "no enabled mod has \"boot\": true";
         else if (!row_available("mods.boot"))
             why = "mods.boot is unavailable (" + row_text("mods.boot") + "): boot mods are refused";
@@ -945,11 +1227,57 @@ void decide(bool hooks, const std::string& safe_idle) {
         g_deferred = deferred;
         g_why = why;
         g_boot_mods = names;
+        g_scanned = mods;
+        g_test_refuse.clear();
+        g_test_fault.clear();
+        if (deferred && !config().boot_test_fault.empty()) {
+            if (!config().policy_any) {
+                KLOG_W("boot: kiln.json boot.testFault is ignored: it is a lab switch and needs policy \"any\"");
+            } else {
+                for (const auto& [mod, c] : config().boot_test_fault) {
+                    if (std::find_if(std::begin(kTestFaultCollectors), std::end(kTestFaultCollectors), [&](const char* k) { return c == k; }) ==
+                        std::end(kTestFaultCollectors)) {
+                        KLOG_W("boot: kiln.json boot.testFault.%s: \"%s\" has no late fault to force (content); ignored", mod.c_str(), c.c_str());
+                        continue;
+                    }
+                    g_test_fault[mod] = c;
+                    KLOG_W("boot: lab switch boot.testFault: collector %s fails a definition of %s after the publication", c.c_str(), mod.c_str());
+                }
+            }
+        }
+        if (deferred && !config().boot_test_refuse.empty()) {
+            if (!config().policy_any) {
+                KLOG_W("boot: kiln.json boot.testRefuse is ignored: it is a lab switch and needs policy \"any\"");
+            } else {
+                for (const auto& [mod, c] : config().boot_test_refuse) {
+                    if (collector_index(c) < 0) {
+                        KLOG_W("boot: kiln.json boot.testRefuse.%s: \"%s\" is not a collector; ignored", mod.c_str(), c.c_str());
+                        continue;
+                    }
+                    g_test_refuse[mod] = c;
+                    KLOG_W("boot: lab switch boot.testRefuse: collector %s gets an unreadable document of %s (the mod is dropped)", c.c_str(), mod.c_str());
+                }
+            }
+        }
         g_status = KILN_BOOT_STATUS_COLLECTING;
     }
     if (deferred) {
         KLOG_I("boot: deferred generation on for %s: the collectors prepare after OnBoot, before the game's entry point",
                list.c_str());
+        // the game-data snapshot's files against their checksums, before any OnBoot reads them: a damaged snapshot is not
+        // ready (its row says so) and nothing of it is served
+        if (g_gamedata.is_open()) {
+            const auto t0 = std::chrono::steady_clock::now();
+            std::string bad;
+            if (!g_gamedata.verify(&bad)) {
+                KLOG_W("boot: %s; OnBoot cannot read the game's data", bad.c_str());
+                send({{"mods.boot.game_data", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SERVICE_MISSING,
+                       std::string(boot_gd::kHint) + " (" + bad + ")"}});
+            } else if (g_gamedata.has_checksums()) {
+                KLOG_I("boot: game-data snapshot %s: its %zu files match their checksums (%lld ms)", g_gamedata.key().c_str(), g_gamedata.checksum_count(),
+                       static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count()));
+            }
+        }
         return;
     }
     KLOG_I("boot: no deferred generation (%s); the collectors keep their on_ready paths%s%s", why.c_str(),
@@ -987,16 +1315,36 @@ bool after_clr(bool clr_started, void (*write_state)(void* user, const std::stri
     std::string why;
     {
         std::lock_guard lk(g_mutex);
-        if (!g_deferred || g_status == KILN_BOOT_STATUS_PUBLISHED) return true;
+        if (!g_deferred) {
+            for (const BootMod& m : g_scanned) {
+                if (!m.required) continue;
+                Owner& o = g_owners[m.id];
+                o.id = m.id;
+                o.required = true;
+                issue_locked({KILN_BOOT_ISSUE_NOT_COMMITTED, m.id, "", "", "commit",
+                              "its boot content is required but the boot phase is unavailable: " + g_why});
+            }
+            if (g_owners.empty()) return true;
+            abort_locked({}, g_why);
+        }
+        if (g_status == KILN_BOOT_STATUS_PUBLISHED) return true;
         if (g_status == KILN_BOOT_STATUS_COLLECTING || g_status == KILN_BOOT_STATUS_PREPARING) {
             const std::string what = clr_started ? "Kiln.Host did not commit the boot generation (kiln.log, [host] lines)"
                                                  : "the .NET host did not start, so no OnBoot ran (kiln.log, [clr] lines)";
             issue_locked({KILN_BOOT_ISSUE_NOT_COMMITTED, "", "", "", "commit", what});
             abort_locked({}, what);
         }
-        for (auto it = g_issues.rbegin(); it != g_issues.rend() && why.empty(); ++it)
-            if (!(it->code & KILN_BOOT_ISSUE_WARNING) && it->code != KILN_BOOT_ISSUE_GENERATION_ABORTED)
-                why = (it->mod.empty() ? std::string() : it->mod + ": ") + it->reason;
+        // the line names the cause: an issue of a required mod first (it stopped the start), else the latest error
+        for (const bool required_only : {true, false})
+            for (auto it = g_issues.rbegin(); it != g_issues.rend() && why.empty(); ++it) {
+                if ((it->code & KILN_BOOT_ISSUE_WARNING) || it->code == KILN_BOOT_ISSUE_GENERATION_ABORTED) continue;
+                const auto o = g_owners.find(it->mod);
+                if (required_only && (o == g_owners.end() || !o->second.required)) continue;
+                // the mod, then the entry (kind and file or key), then why: "mod: kind key: reason"
+                const std::string entry = it->kind.empty() && it->key.empty() ? std::string()
+                                          : it->kind + (it->kind.empty() || it->key.empty() ? "" : " ") + it->key + ": ";
+                why = (it->mod.empty() ? std::string() : it->mod + ": ") + entry + it->reason;
+            }
         g_exit_code = KILN_BOOT_EXIT_CODE;
     }
     char line[96];
@@ -1008,6 +1356,20 @@ bool after_clr(bool clr_started, void (*write_state)(void* user, const std::stri
     if (write_state) write_state(user, last);
     g_exit(KILN_BOOT_EXIT_CODE);
     return false;
+}
+
+// boot.cpp: what writes the state files when a required mod's published content cannot be applied (b_activation_fault).
+void late_hold(void (*write_state)(void* user, const std::string& last_line), void* user) {
+    std::lock_guard lk(g_mutex);
+    g_late_hold = write_state;
+    g_late_hold_user = user;
+}
+
+// boot.cpp: what writes the state files when a service stops the start (b_stop_start), set before the services load.
+void stop_writer(void (*write_state)(void* user, const std::string& last_line, const std::string& why, uint32_t code), void* user) {
+    std::lock_guard lk(g_mutex);
+    g_stop_state = write_state;
+    g_stop_state_user = user;
 }
 
 // boot.json "boot".
@@ -1034,10 +1396,12 @@ json report() {
     return {{"deferred", g_deferred},
             {"reason", g_why},
             {"bootMods", g_boot_mods},
-            {"status", g_deferred ? json(status_name(g_status)) : json(nullptr)},
+            {"status", g_deferred || g_status != KILN_BOOT_STATUS_COLLECTING ? json(status_name(g_status)) : json(nullptr)},
             {"generation", g_deferred ? json(kGeneration) : json(nullptr)},
             {"published", g_root.load(std::memory_order_acquire) != nullptr},
             {"exitCode", g_exit_code ? json(g_exit_code) : json(nullptr)},
+            {"stop", g_stop.code ? json{{"code", g_stop.code}, {"reason", g_stop.reason}, {"by", g_stop.by}, {"mods", g_stop.mods}}
+                                 : json(nullptr)},
             {"collectors", collectors},
             {"owners", owners},
             {"issues", issues}};

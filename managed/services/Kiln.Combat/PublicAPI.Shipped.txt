@@ -179,6 +179,16 @@ Kiln.EntityDropsEvent.Killer.get -> Kiln.EntityId
 Kiln.EntityDropsEvent.Position.get -> Kiln.WorldPosition
 Kiln.EntityDropsEvent.Step.get -> ulong
 Kiln.EntityDropsEvent.Victim.get -> Kiln.EntityId
+Kiln.EntityDyingEvent
+Kiln.EntityDyingEvent.Entity.get -> Kiln.EntityId
+Kiln.EntityDyingEvent.EntityDyingEvent(Kiln.DecisionId id, Kiln.EventEntityKey key, int health, int maximumHealth) -> void
+Kiln.EntityDyingEvent.Health.get -> int
+Kiln.EntityDyingEvent.Id.get -> Kiln.DecisionId
+Kiln.EntityDyingEvent.Involves(Kiln.EntityId entity) -> bool
+Kiln.EntityDyingEvent.Key.get -> Kiln.EventEntityKey
+Kiln.EntityDyingEvent.MaximumHealth.get -> int
+Kiln.EntityDyingEvent.SurvivalHealth.get -> int
+Kiln.EntityDyingEvent.SurvivalHealth.set -> void
 Kiln.EntityFallEvent
 Kiln.EntityFallEvent.Damage.get -> int
 Kiln.EntityFallEvent.Damage.set -> void

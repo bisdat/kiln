@@ -201,17 +201,191 @@ public sealed unsafe partial class UiDraw
 
     // ---- images, more widgets, looks ----
 
-    /// <summary>Draws an image (<see cref="Ui.LoadImage(byte[])"/>); 0 = its own size (scaled by <see cref="Scale"/>).</summary>
+    /// <summary>Draws an image (<see cref="Ui.LoadImage(byte[])"/>, or an item's icon from <see cref="Ui.ItemImage"/>); 0 = its
+    /// own size (scaled by <see cref="Scale"/>).</summary>
     public void Image(UiImage image, float width = 0, float height = 0)
     {
-        if (!UiNative.HasGameUi || image.Handle == 0) return;
-        T->Image(image.Handle, width > 0 ? width : image.Width * Scale, height > 0 ? height : image.Height * Scale);
+        ArgumentNullException.ThrowIfNull(image);
+        if (!UiNative.HasGameUi) return;
+        float w = width > 0 ? width : image.Width * Scale, h = height > 0 ? height : image.Height * Scale;
+        if (image.Item is { } item)
+        {
+            ItemIconBox(item, w, h);
+            return;
+        }
+        if (image.Handle == 0) return;
+        T->Image(image.Handle, w, h);
     }
 
-    /// <summary>An image as a button; true when clicked.</summary>
-    public bool ImageButton(string id, UiImage image, float width = 0, float height = 0) =>
-        UiNative.HasGameUi && image.Handle != 0 &&
-        T->ImageButton(Utf8.Of(id), image.Handle, width > 0 ? width : image.Width * Scale, height > 0 ? height : image.Height * Scale) != 0;
+    /// <summary>
+    /// Draws only an image's art (since 0.2.0-dev.29.16), otherwise like <see cref="Image(UiImage, float, float)"/>: the
+    /// transparent margin around it is left out and the art is fitted inside
+    /// <paramref name="width"/> x <paramref name="height"/>, keeping its aspect ratio, centred. The whole box is still taken.
+    /// For the game's item icons (<see cref="Ui.ItemImage"/>), whose art sits small in the middle of a wide margin.
+    /// </summary>
+    public void ImageTrimmed(UiImage image, float width, float height)
+    {
+        ArgumentNullException.ThrowIfNull(image);
+        if (!UiNative.HasGameUi) return;
+        float w = width > 0 ? width : image.Width * Scale, h = height > 0 ? height : image.Height * Scale;
+        if (image.Item is { } item)
+        {
+            ItemIconBox(item, w, h, trim: true);
+            return;
+        }
+        if (image.Handle == 0) return;
+        if (!UiNative.DrawImageEx(null, image.Handle, UiNative.ImageDrawTrim | UiNative.ImageDrawFit, w, h, 0, 0, 0, 0, out _))
+            T->Image(image.Handle, w, h);
+    }
+
+    /// <summary>
+    /// Draws part of an image (since 0.2.0-dev.29.16): the rectangle (<paramref name="u0"/>, <paramref name="v0"/>) to
+    /// (<paramref name="u1"/>, <paramref name="v1"/>) in texture coordinates (0..1 across the image; u1 &lt; u0 flips it)
+    /// stretched over <paramref name="width"/> x <paramref name="height"/> (0 = that part's own size, scaled by
+    /// <see cref="Scale"/>). A sprite sheet's cell, a crop of a picture.
+    /// </summary>
+    public void ImagePart(UiImage image, float width, float height, float u0, float v0, float u1, float v1)
+    {
+        ArgumentNullException.ThrowIfNull(image);
+        if (!UiNative.HasGameUi) return;
+        if (u0 == 0 && v0 == 0 && u1 == 0 && v1 == 0) (u1, v1) = (1, 1);  // as kiln.ui reads it: the whole image
+        float du = Math.Abs(u1 - u0), dv = Math.Abs(v1 - v0);
+        float w = width > 0 ? width : du * image.Width * Scale, h = height > 0 ? height : dv * image.Height * Scale;
+        if (image.Item is not null && !IconOnScreen(w, h))
+        {
+            T->Dummy(w, h);  // scrolled out of its window: neither loaded nor drawn
+            return;
+        }
+        // an item's icon: the level whose part drawn has about as many pixels as the box
+        var handle = image.Item is { } item ? ItemIcons.Handle(item, Math.Max(w, h) / Math.Max(Math.Max(du, dv), 1f / 256), out _, out _) : image.Handle;
+        if (handle == 0)
+        {
+            T->Dummy(w, h);
+            return;
+        }
+        if (!UiNative.DrawImageEx(null, handle, 0, w, h, u0, v0, u1, v1, out _))
+            T->Image(handle, w, h);  // a kiln.ui without image_ex: the whole image
+    }
+
+    /// <summary>An image as a button; true when clicked. An item's icon (<see cref="Ui.ItemImage"/>) is a button while it
+    /// loads too (on its placeholder).</summary>
+    public bool ImageButton(string id, UiImage image, float width = 0, float height = 0)
+    {
+        ArgumentNullException.ThrowIfNull(image);
+        if (!UiNative.HasGameUi) return false;
+        float w = width > 0 ? width : image.Width * Scale, h = height > 0 ? height : image.Height * Scale;
+        if (image.Item is not null && !IconOnScreen(w, h))
+        {
+            T->Dummy(w, h);  // scrolled out of its window: neither loaded nor drawn
+            return false;
+        }
+        var handle = image.Item is { } item ? ItemIcons.Handle(item, Math.Max(w, h), out _, out _) : image.Handle;
+        if (handle == 0)
+        {
+            if (image.Item is not null) return Button(id + "##icon", w, h);  // no overlay image at all: a plain button of the size
+            return false;
+        }
+        return T->ImageButton(Utf8.Of(id), handle, w, h) != 0;
+    }
+
+    /// <summary>An image as a button, like <see cref="ImageButton(string, UiImage, float, float)"/>, showing only its art,
+    /// fitted inside the image's box (see <see cref="ImageTrimmed"/>; since 0.2.0-dev.29.16).</summary>
+    public bool ImageButtonTrimmed(string id, UiImage image, float width, float height)
+    {
+        ArgumentNullException.ThrowIfNull(image);
+        if (!UiNative.HasGameUi) return false;
+        float w = width > 0 ? width : image.Width * Scale, h = height > 0 ? height : image.Height * Scale;
+        if (image.Item is not null && !IconOnScreen(w, h))
+        {
+            T->Dummy(w, h);
+            return false;
+        }
+        var handle = image.Item is { } item ? ItemIcons.Handle(item, ItemIcons.TrimmedPixels(Math.Max(w, h)), out _, out _) : image.Handle;
+        if (handle == 0)
+        {
+            if (image.Item is not null) return Button(id + "##icon", w, h);
+            return false;
+        }
+        if (UiNative.DrawImageEx(id, handle, UiNative.ImageDrawTrim | UiNative.ImageDrawFit, w, h, 0, 0, 0, 0, out var clicked))
+            return clicked;
+        return T->ImageButton(Utf8.Of(id), handle, w, h) != 0;
+    }
+
+    /// <summary>
+    /// Draws the game's own icon of <paramref name="item"/> (since 0.2.0-dev.29.15), <paramref name="size"/> pixels square
+    /// (0: 64 times <see cref="Scale"/>), as the inventory and crafting menus show it: a game item's, or a new item's of
+    /// kiln.content (its PNG icon once the game shows it, its base item's before). Read from the game's resources at run time
+    /// and cached; while it loads, and for an id that is no item, a neutral placeholder of the same size is drawn, so the
+    /// layout never jumps. A picture that is not square keeps its shape inside the square.
+    /// </summary>
+    /// <remarks>Never throws for a bad or unknown id. On a dedicated server, or without the overlay, nothing is drawn.</remarks>
+    public void ItemIcon(ItemId item, float size = 0)
+    {
+        var s = size > 0 ? size : 64 * Scale;
+        ItemIconBox(item, s, s);
+    }
+
+    /// <summary>
+    /// Draws the game's own icon of <paramref name="item"/> like <see cref="ItemIcon(ItemId, float)"/>, but only its art
+    /// (since 0.2.0-dev.29.16): the game's icons sit small in the middle of a wide
+    /// transparent margin, so at 32-40 pixels the art fills a fraction of the box. Trimmed, the art's own bounds (found once
+    /// when the icon is loaded) fill <paramref name="size"/> pixels square, keeping their aspect ratio, centred; a sharper
+    /// level of the icon is read for it. The box taken stays <paramref name="size"/> square.
+    /// </summary>
+    /// <example><c>ui.ItemIconTrimmed(item, 40 * ui.Scale);</c></example>
+    public void ItemIconTrimmed(ItemId item, float size)
+    {
+        var s = size > 0 ? size : 64 * Scale;
+        ItemIconBox(item, s, s, trim: true);
+    }
+
+    /// <summary>Whether a box of w x h at the cursor shows in the current window (an icon scrolled out of a list is neither
+    /// loaded nor drawn). True when the layout calls are missing.</summary>
+    private bool IconOnScreen(float w, float h)
+    {
+        var t3 = UiNative.T3;
+        if (t3 == null) return true;
+        UiNative.Cursor c = default;
+        c.Size = (uint)sizeof(UiNative.Cursor);
+        t3->GetCursor(&c);
+        return ItemIcons.OnScreen(c.ScreenX, c.ScreenY, w, h, c.WindowX, c.WindowY, c.WindowWidth, c.WindowHeight);
+    }
+
+    private void ItemIconBox(ItemId item, float width, float height, bool trim = false)
+    {
+        if (!UiNative.HasGameUi) return;
+        if (!IconOnScreen(width, height))
+        {
+            T->Dummy(width, height);  // scrolled out of its window: neither loaded nor drawn
+            return;
+        }
+        var px = Math.Max(width, height);
+        var handle = ItemIcons.Handle(item, trim ? ItemIcons.TrimmedPixels(px) : px, out var iw, out var ih);
+        if (handle == 0)
+        {
+            T->Dummy(width, height);  // keeps the layout: no overlay image could be made
+            return;
+        }
+        // trimmed: the art's opaque bounds fitted in the box (kiln.ui image_ex); the placeholder has no margin, so it fills it
+        if (trim && UiNative.DrawImageEx(null, handle, UiNative.ImageDrawTrim | UiNative.ImageDrawFit, width, height, 0, 0, 0, 0, out _))
+            return;
+        var t3 = UiNative.T3;
+        if (iw > 0 && ih > 0 && iw != ih && t3 != null)
+        {
+            // fit inside the box, centred, the box itself still taken
+            var k = Math.Min(width / iw, height / ih);
+            float fw = iw * k, fh = ih * k;
+            UiNative.Cursor c = default;
+            c.Size = (uint)sizeof(UiNative.Cursor);
+            t3->GetCursor(&c);
+            t3->SetCursorPos(c.X + (width - fw) / 2, c.Y + (height - fh) / 2);
+            T->Image(handle, fw, fh);
+            t3->SetCursorPos(c.X, c.Y);
+            T->Dummy(width, height);
+            return;
+        }
+        T->Image(handle, width, height);
+    }
 
     /// <summary>A drop-down list; true when <paramref name="index"/> changed.</summary>
     public bool Combo(string label, ref int index, IReadOnlyList<string> items) =>
@@ -261,18 +435,23 @@ public sealed unsafe partial class UiDraw
         if (UiNative.HasGameUi) T->Dummy(width, height);
     }
 
-    /// <summary>Switches the look (game / Kiln) for the windows begun inside the scope: <c>using (ui.Look(UiStyle.Game)) { ... }</c>.</summary>
-    public LookScope Look(UiStyle style)
-    {
-        PushStyleRaw(style);
-        return new LookScope();
-    }
+    /// <summary>Switches the look (the player's, the game's, Kiln's) for the windows begun inside the scope:
+    /// <c>using (ui.Look(UiStyle.Game)) { ... }</c>. For a mod's own theme: <see cref="Theme(UiTheme)"/>.</summary>
+    public LookScope Look(UiStyle style) => PushLookRaw(null, style) ? new LookScope(TopLook) : default;
 
+    /// <summary>Ends a <see cref="Look(UiStyle)"/> or <see cref="Theme(UiTheme)"/>. It pops only its own look, while it is the
+    /// one on top: one Kiln already took off (a callback that ended without disposing it) is not popped again.</summary>
     public readonly struct LookScope : IDisposable
     {
+        private readonly long _serial;
+
+        internal LookScope(long serial) => _serial = serial;
+
         public void Dispose()
         {
-            if (UiNative.HasGameUi) UiNative.T->PopStyle();
+            if (_serial == 0) return;
+            var ui = UiEngine.DrawContext;
+            if (ui.TopLook == _serial) ui.PopStyleRaw();
         }
     }
 
@@ -294,14 +473,13 @@ public sealed unsafe partial class UiDraw
     /// <summary>The <see cref="UiScreen"/> being drawn, if any.</summary>
     public UiScreen? CurrentScreen { get; internal set; }
 
-    internal void PushStyleRaw(UiStyle style)
-    {
-        if (UiNative.HasGameUi) T->PushStyle((uint)style);
-    }
+    internal void PushStyleRaw(UiStyle style) => PushLookRaw(null, style);
 
     internal void PopStyleRaw()
     {
+        if (LookDepth == 0) return;
         if (UiNative.HasGameUi) T->PopStyle();
+        LookPopped();
     }
 
     internal void FocusNextWindow()
@@ -370,6 +548,14 @@ public sealed record UiWindowOptions
 
     /// <summary>Background opacity (0..1), null = the theme's.</summary>
     public float? BackgroundAlpha { get; init; }
+
+    /// <summary>The window's look: <see cref="UiStyle.Player"/> (the default: the look the player chose for Kiln's UI),
+    /// <see cref="UiStyle.Game"/> or <see cref="UiStyle.Kiln"/>. Since 0.2.0-dev.29.16 (before, windows were drawn in Kiln's
+    /// ember look).</summary>
+    public UiStyle Style { get; init; } = UiStyle.Player;
+
+    /// <summary>Your own theme for the window (<see cref="Ui.Themes.Define"/>), over <see cref="Style"/>. Since 0.2.0-dev.29.16.</summary>
+    public UiTheme? Theme { get; init; }
 }
 
 /// <summary>A Kiln window (Forge: a Screen). Draws every frame while open; closes with its X or <see cref="Open"/>.</summary>
@@ -383,15 +569,26 @@ public sealed class UiWindow : IDisposable
         Draw = draw;
         Options = options;
         Owner = owner;
-        Key = $"{title}###kiln.w{Interlocked.Increment(ref _ids)}";
-        _open = options.StartOpen;
+        _id = $"###kiln.w{Interlocked.Increment(ref _ids)}";
+        Key = title + _id;
+        _open = options.StartOpen && UiNative.DrawingOffReason == null;
     }
 
-    public string Title { get; }
+    private readonly string _id;
+
+    public string Title { get; private set; }
     public UiWindowOptions Options { get; }
     internal Action<UiDraw> Draw { get; }
     internal ModContext? Owner { get; }
-    internal string Key { get; }
+    internal string Key { get; private set; }
+
+    /// <summary>Kiln's own windows: a new title in the language Kiln's UI shows (KilnText.Changed); the ImGui id stays, so
+    /// the window keeps its place and size. Any thread.</summary>
+    internal void Retitle(string title)
+    {
+        Title = title;
+        Key = title + _id;
+    }
     internal bool Disposed;
     private volatile bool _open;
 
@@ -402,6 +599,7 @@ public sealed class UiWindow : IDisposable
         get => _open;
         set
         {
+            if (value && UiNative.DrawingOffReason != null) return;
             if (_open == value) return;
             _open = value;
             UiEngine.Recount();
@@ -556,13 +754,18 @@ public static partial class Ui
     }
 }
 
-/// <summary>A PNG image for Kiln windows (<see cref="UiDraw.Image"/>); Dispose frees it (also when the owning mod unloads).</summary>
+/// <summary>A PNG image for Kiln windows (<see cref="UiDraw.Image(UiImage, float, float)"/>); Dispose frees it (also when the owning mod unloads).
+/// An item's icon (<see cref="Ui.ItemImage"/>) is shared and owned by Kiln: its Dispose does nothing.</summary>
 public sealed class UiImage : IDisposable
 {
     internal ulong Handle;
     internal ModContext? Owner;
     public int Width { get; internal init; }
     public int Height { get; internal init; }
+
+    /// <summary>The item whose game icon this image draws (<see cref="Ui.ItemImage"/>), or null for a mod's own picture.
+    /// Since 0.2.0-dev.29.15.</summary>
+    public ItemId? Item { get; internal init; }
 
     public unsafe void Dispose()
     {
@@ -596,6 +799,28 @@ public static unsafe partial class Ui
         var full = Path.IsPathRooted(path) ? path : Path.Combine(ModContext.CurrentMod?.Info.Directory ?? AppContext.BaseDirectory, path);
         return File.Exists(full) ? LoadImage(File.ReadAllBytes(full)) : null;
     }
+
+    /// <summary>
+    /// The game's own icon of <paramref name="item"/> as an image for <see cref="UiDraw.Image(UiImage, float, float)"/>, <see cref="UiDraw.ImageButton(string, UiImage, float, float)"/>
+    /// and <see cref="RenderDraw.Image(UiImage, float, float, float, float, Color?)"/> (since 0.2.0-dev.29.15): the picture the inventory and crafting menus show for it,
+    /// read from the game's resources at run time (Kiln ships no game art). Works for the game's items and for kiln.content's
+    /// new items (their PNG icon once the game shows it, their base item's before). One object per item, shared and kept by
+    /// Kiln (its Dispose does nothing): keep it, or ask again each frame; both are cheap. Its <see cref="UiImage.Width"/> and
+    /// <see cref="UiImage.Height"/> are 64, the size an <c>Image(img)</c> without a size draws (times the UI scale).
+    /// </summary>
+    /// <returns>Null on a dedicated server and where the overlay cannot draw (an older kiln.ui, drawing off). An unknown id
+    /// still gets an image: it draws the neutral placeholder.</returns>
+    /// <remarks>Any thread. The icon is loaded off the render thread the first time it is drawn: the first frames show a
+    /// placeholder of the same size. Kiln keeps at most 512 icons (24 MiB); icons not drawn for a second are dropped first
+    /// past that, and loaded again when drawn. See also <see cref="UiDraw.ItemIconTrimmed"/> (only the art).</remarks>
+    [AnyThread]
+    public static UiImage? ItemImage(ItemId item) => ItemIcons.View(item);
+
+    /// <summary>Whether <see cref="ItemImage"/> draws the game's icons here (a game client whose overlay draws, with this
+    /// Kiln's kiln.ui and kiln.assets). False: item images draw the placeholder, or nothing on a server. Since
+    /// 0.2.0-dev.29.15.</summary>
+    [AnyThread]
+    public static bool ItemIconsAvailable => ItemIcons.Available;
 }
 
 public readonly record struct UiStatus(bool Hooked, bool Device, bool Swapchain, bool Window, uint Width, uint Height,

@@ -174,6 +174,66 @@ fn compat_engines_read_their_folder_unless_the_profile_lists_the_engine() {
     assert_eq!((z.state, z.profile_mod.as_deref()), (FoundState::InProfile, Some("zoom")), "{z:?}");
 }
 
+/// EMF's Lua mods in emf/mods, as EMF's installer puts them there (inbox 61: Kiln listed every one as "Can't run" while
+/// EMF's lua mod ran them): an EMF mod that loads under EMF's lua mod, and says so when that mod is not there.
+#[test]
+fn emf_lua_mods_load_under_emfs_lua_mod() {
+    let t = tmp("emf-lua");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let g = game(&t.0, true);
+    put(&g.path, "emf/mods/beastmaster/mod.json", br#"{"id":"beastmaster","name":"Beastmaster","version":"1.17.1","enabled":false,
+        "emf":14,"side":"server","main":"main.lua","depends":{"lua":">=1.25"}}"#);
+    put(&g.path, "emf/mods/beastmaster/main.lua", b"local tame = require('tame')");
+    put(&g.path, "emf/mods/beastmaster/tame.lua", b"return {}");
+    put(&g.path, "emf/mods/lua/mod.json", br#"{"id":"lua","name":"Lua Scripts","version":"1.33.0","emf":20}"#);
+    put(&g.path, "emf/mods/lua/lua.dll", &build_test_dll(&["emf_mod_load"], b""));
+    let emf = profile(&[ModKind::Emf], true);
+    let r = scan(&dirs, &g, &emf);
+    let b = one(&r, "emf/mods/beastmaster");
+    assert_eq!((b.kind, b.state, b.via), (Some(ModKind::Emf), FoundState::Loads, Some(FoundVia::Kiln)), "{b:?}");
+    assert_eq!((b.name.as_str(), b.version.as_deref(), b.id.as_deref()), ("Beastmaster", Some("1.17.1"), Some("beastmaster")));
+    assert!(b.reason.contains("EMF drop-ins are on") && b.reason.contains("EMF's lua mod runs its Lua"), "{}", b.reason);
+    assert_eq!(one(&r, "emf/mods/lua").state, FoundState::Loads);
+    // EMF drop-ins off: as an EMF DLL mod, the switch helps
+    let b = scan(&dirs, &g, &profile(&[], true)).mods.into_iter().find(|m| m.path == "emf/mods/beastmaster").unwrap();
+    assert_eq!((b.state, b.fix), (FoundState::Off, Some(FoundFix::Dropins)), "{b:?}");
+    // EMF's own loader in the game: it loads the mod, and EMF's lua mod runs it
+    let mut win = g.clone();
+    win.platform = Platform::Windows;
+    put(&g.path, "kiln/chain/emf-dinput8.dll", &build_test_dll(&["DirectInput8Create", "emf_loader_identity"], b""));
+    put(&g.path, "kiln/chain.ini", b"[chain]\r\nchain\\emf-dinput8.dll\r\n");
+    let b = scan(&dirs, &win, &emf).mods.into_iter().find(|m| m.path == "emf/mods/beastmaster").unwrap();
+    assert_eq!((b.state, b.via), (FoundState::Loads, Some(FoundVia::OwnLoader)), "{b:?}");
+    assert!(b.reason.contains("EMF's lua mod runs its Lua"), "{}", b.reason);
+    // ... also with the profile's lua entry off: EMF's own loader reads emf/mods/lua itself, whatever the profile says
+    let mut off = emf.clone();
+    off.mods.emf.push(ProfileMod { enabled: false, ..pm("lua") });
+    let b = scan(&dirs, &win, &off).mods.into_iter().find(|m| m.path == "emf/mods/beastmaster").unwrap();
+    assert_eq!((b.state, b.via), (FoundState::Loads, Some(FoundVia::OwnLoader)), "{b:?}");
+    std::fs::remove_file(g.path.join("kiln/chain.ini")).unwrap();
+    // the profile's lua entry decides: off there, nothing runs the Lua mod; on there, without the folder, it runs
+    let mut p = emf.clone();
+    p.mods.emf.push(ProfileMod { enabled: false, ..pm("lua") });
+    let b = scan(&dirs, &g, &p).mods.into_iter().find(|m| m.path == "emf/mods/beastmaster").unwrap();
+    assert_eq!((b.state, b.fix), (FoundState::Off, None), "{b:?}");
+    assert!(b.reason.contains("this profile has it switched off"), "{}", b.reason);
+    std::fs::remove_dir_all(g.path.join("emf/mods/lua")).unwrap();
+    p.mods.emf[0].enabled = true;
+    assert_eq!(scan(&dirs, &g, &p).mods[0].state, FoundState::Loads);
+    // no lua mod anywhere: not "can't run", but what is missing
+    let r = scan(&dirs, &g, &emf);
+    let b = one(&r, "emf/mods/beastmaster");
+    assert_eq!((b.kind, b.state, b.fix), (Some(ModKind::Emf), FoundState::Off, None), "{b:?}");
+    assert!(b.reason.contains("EMF's lua mod runs Lua mods, and it is not in emf/mods or in this profile"), "{}", b.reason);
+    assert_eq!(r.off(), 1);
+    // EMF's source of a DLL mod (no DLL): still not a mod, and the reason says what it is
+    put(&g.path, "emf/mods/companion/mod.json", br#"{"id":"companion","name":"Companion","version":"1.2.0","emf":20}"#);
+    put(&g.path, "emf/mods/companion/companion.cpp", b"");
+    let c = scan(&dirs, &g, &emf).mods.into_iter().find(|m| m.path == "emf/mods/companion").unwrap();
+    assert_eq!(c.state, FoundState::CannotRun, "{c:?}");
+    assert!(c.reason.contains("An EMF mod without its DLL (companion.dll)"), "{}", c.reason);
+}
+
 #[test]
 fn same_eml_id_in_the_profile_and_wrong_folders() {
     let t = tmp("same");
@@ -363,4 +423,54 @@ fn an_added_shroudforge_folder_stays_the_players_own_at_every_activation() {
         assert!(!g.path.join("mods/hoardershelper").exists(), "no second package of the same id");
         assert!(!g.path.join("mods/HoardersHelper").join(crate::engine_mods::MARKER).exists(), "never adopted");
     }
+}
+
+/// Player report (Nexus, 14 Nov 2026): an EML mod copied by hand into ShroudForge's mods folder while the profile has a
+/// ShroudForge mod on (Kiln hosts ShroudForge, which runs the EML mods of its folder) stays off: it has no
+/// extended.mod.json, so ShroudForge keeps it switched off. The list said it loads (EML drop-ins on) or offered EML's
+/// drop-in switch, and Kiln's other texts read as "Kiln wants a ShroudForge file from an EML mod". The promised words:
+/// what happened and the two ways out, nothing about ShroudForge's files.
+#[test]
+fn a_hand_copied_eml_mod_shroudforge_keeps_off_says_so_in_the_promised_words() {
+    let t = tmp("eml-in-sf");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let g = game(&t.0, true);
+    put(&g.path, "kiln/plugins/kiln-shroudforge.dll", b"x");
+    put(&g.path, "kiln/plugins/shroudforge/shroudforge-runtime.dll", b"x");
+    eml_mod(&g.path, "HoardersHelper");
+    let mut p = profile(&[ModKind::Eml], true);
+    p.mods.shroudforge.push(pm("sf-unlimited-flight"));
+    let m = one(&scan(&dirs, &g, &p), "mods/HoardersHelper").clone();
+    assert_eq!((m.kind, m.state, m.fix), (Some(ModKind::Eml), FoundState::Off, None), "{m:?}");
+    assert_eq!(m.reason, "You put this mod into ShroudForge's folder yourself, and ShroudForge has it switched off. Switch it on in \
+        Kiln's in-game menu (Mods > ShroudForge), or remove the folder and add the mod with Add mods.");
+    // EML's drop-ins do not change it while ShroudForge runs that folder; without a ShroudForge mod they decide, as before
+    let mut q = profile(&[], true);
+    let m = one(&scan(&dirs, &g, &q), "mods/HoardersHelper").clone();
+    assert_eq!((m.state, m.fix), (FoundState::Off, Some(FoundFix::Dropins)), "{m:?}");
+    q.mods.shroudforge.push(pm("sf-unlimited-flight"));
+    let m = one(&scan(&dirs, &g, &q), "mods/HoardersHelper").clone();
+    assert_eq!((m.state, m.fix), (FoundState::Off, None), "{m:?}");
+    assert!(m.reason.starts_with("You put this mod into ShroudForge's folder yourself"), "{}", m.reason);
+    // switched on in the game's Mods > ShroudForge page (it writes ShroudForge's file): ShroudForge runs it
+    put(&g.path, "mods/HoardersHelper/extended.mod.json", br#"{"schemaVersion":1,"enabled":true,"targets":["client","server"],"launcher":"EML","settings":{}}"#);
+    let m = one(&scan(&dirs, &g, &p), "mods/HoardersHelper").clone();
+    assert_eq!((m.state, m.via, m.fix), (FoundState::Loads, Some(FoundVia::Kiln), None), "{m:?}");
+    assert!(m.reason.contains("ShroudForge runs it"), "{}", m.reason);
+    // A client install may also contain the dedicated server executable. Its client-only
+    // package still loads; the selected install, not a neighbouring file, decides the side.
+    put(&g.path, crate::game::SERVER_EXE, b"MZ");
+    put(&g.path, "mods/HoardersHelper/extended.mod.json", br#"{"schemaVersion":1,"enabled":true,"targets":["client"],"launcher":"EML","settings":{}}"#);
+    let m = one(&scan(&dirs, &g, &p), "mods/HoardersHelper").clone();
+    assert_eq!(m.state, FoundState::Loads, "{m:?}");
+    let mut g = g;
+    g.kind = GameKind::Server;
+    g.exe = crate::game::SERVER_EXE.into();
+    // a server has no in-game menu: the way out that is left
+    put(&g.path, "mods/HoardersHelper/extended.mod.json", br#"{"schemaVersion":1,"enabled":false,"launcher":"EML"}"#);
+    put(&g.path, crate::game::SERVER_EXE, b"MZ");
+    let m = one(&scan(&dirs, &g, &p), "mods/HoardersHelper").clone();
+    assert_eq!((m.state, m.fix), (FoundState::Off, None), "{m:?}");
+    assert_eq!(m.reason, "You put this mod into ShroudForge's folder yourself, and ShroudForge has it switched off. A server has no \
+        in-game menu: remove the folder and add the mod with Add mods, and Kiln places its own copy, switched on.");
 }

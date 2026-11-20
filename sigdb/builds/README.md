@@ -138,6 +138,7 @@ server record rests on is in each service's `evidence`; this table says which te
 | `content` | `content-test`, `newcontent-test` (with `content-observer`); `placeholder-test` | one boot; placeholders 4 boots: `placeholder-items` switched off, a `kill -9`, back on |
 | `settings`, `gameplay`, `creatures`, `assets`, `rules`, `pacing`, `progression` | `<file>-test` | one boot each (`progression-test` without a player: its live part needs a client) |
 | `rules` (NoClip, since dev.27) | `noclip-test`, next to `rules-test` | one more boot, with `"allowNoClip": true` in the lab's `kiln/config/rules.json` (without it the test stops at its second check) |
+| `stations` (since dev.29) | `station-actions-test` | two boots on a fresh copy of the standard lab save (it needs its base): the first runs the suite and leaves a stopped, filled kiln, then a SIGINT stop; the second checks that kiln after the restart (`--earlier-log` the first boot's kiln.log) |
 | `items` | `items-test` | one boot with `kiln/data/kiln.items/selftest` (the service's native self-test) |
 | `combat` | `combat-test` | one boot with the lab switch `kiln/data/kiln.combat/watch-all` |
 | `spawn` | `spawn-test` | 3 boots, SIGINT between them |

@@ -451,7 +451,7 @@ internal sealed class CheckNet
         {
             var newest = _runner.Ledger.Newest();
             var items = (_catalog?.Checks ?? []).Select(i =>
-                newest.TryGetValue(i.Mod + "/" + i.Id, out var e) ? i with { Verdict = e.Verdict, Note = e.Note } : i).ToList();
+                newest.TryGetValue(i.Mod + "/" + i.Id, out var e) ? i with { Verdict = e.Counted, Note = e.CountedNote } : i).ToList();
             var current = _asking is { } q
                 ? new ViewCurrent(q.Mod, q.Id, q.Title, q.Area, "confirming", CheatsRule.ThrowawayQuestion, CheatsRule.ThrowawayQuestion, [], "joined", true)
                 : _current;

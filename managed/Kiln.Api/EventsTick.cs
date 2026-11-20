@@ -60,7 +60,22 @@ internal static class ServiceTick
          ("Kiln.Pets", "Kiln.PetsStartup"),
          ("Kiln.Terrain", "Kiln.TerrainStartup"),
          ("Kiln.ClientOptions", "Kiln.ClientOptionsStartup"),
-         ("Kiln.SlotUi", "Kiln.SlotUiStartup")];
+         ("Kiln.CreatureControl", "Kiln.CreatureControlStartup"),  // 19d-creature-control (not in the reserved set)
+         ("Kiln.SlotUi", "Kiln.SlotUiStartup"),
+         ("Kiln.World", "Kiln.WorldStartup"),
+         // 0.2.0-dev.29.17 (GitHub #68): the channel kiln:craftstock only, before anyone joins; not Kiln.Blocks' data tick
+         ("Kiln.Blocks", "Kiln.CraftStockStartup"),
+         // 0.2.0-dev.29.19 (the equipment wave, P7): per-instance gear values kept through loads, written again after each
+         ("Kiln.Blocks", "Kiln.GearKeepStartup")];
+
+    /// <summary>Of <see cref="AutoStart"/>, the services the host starts right before the mods load (their OnLoad runs
+    /// before the first service tick): rows a mod reads in OnLoad and that depend on no mod. Kiln.World's
+    /// <c>world.transform_scale</c> and <c>world.tracked_writes</c> (0.2.0-dev.28 fix round); Kiln.Abilities'
+    /// <c>abilities.natives.sync</c> and <c>abilities.natives.attach</c> (0.2.0-dev.29: RegisterSync and Attach are accepted
+    /// in OnLoad, so their rows say so there). Started again at the first tick with the rest, which does nothing for a type
+    /// whose start already ran.</summary>
+    internal static readonly (string Assembly, string Type)[] EarlyStart =
+        [("Kiln.World", "Kiln.WorldStartup"), ("Kiln.Abilities", "Kiln.AbilitiesStartup")];
 
     private static readonly object Lock = new();
     private static Entry[] _entries = [];
@@ -249,12 +264,31 @@ internal static class ServiceTick
         }
     }
 
-    private static void StartAutoServices()
+    /// <summary>The host, right before it loads the mods (tick thread): starts <see cref="EarlyStart"/>, so their rows are
+    /// decided when a mod's OnLoad asks. Nothing with autostart off (tests that keep the registry to themselves).</summary>
+    internal static void StartEarlyServices()
+    {
+        if (!AutoStartEnabled) return;
+        var previousMod = ModContext.CurrentMod;
+        ModContext.CurrentMod = null;
+        try
+        {
+            Start(EarlyStart);
+        }
+        finally
+        {
+            ModContext.CurrentMod = previousMod;
+        }
+    }
+
+    private static void StartAutoServices() => Start(AutoStart);
+
+    private static void Start((string Assembly, string Type)[] list)
     {
         var self = typeof(ServiceTick).Assembly;
         var alc = AssemblyLoadContext.GetLoadContext(self) ?? AssemblyLoadContext.Default;
         var dir = Path.GetDirectoryName(self.Location) ?? "";
-        foreach (var (name, typeName) in AutoStart)
+        foreach (var (name, typeName) in list)
         {
             try
             {

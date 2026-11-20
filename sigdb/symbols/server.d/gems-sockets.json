@@ -1,0 +1,25 @@
+{
+  "format": 1,
+  "side": "server",
+  "comment": "Gem sockets on any gear (gem wave G4; docs/kiln/services/gems-sockets.md). createPide (items/CreatePide, items.json) gives an empty WeaponGemSlot only when ItemInfo.category == Weapons and either the BalancingRegistry chance roll wins or ItemInfo.gemSlotOverride.isSet: `cmp byte [rdi+0x798], r12b; jne add; test r15b, r15b; je skip` (server 26430253 0x1b1da8). items/item.gem_override is that offset; kiln.items reads it in its createPide hook to honour gemSlotOverride on gear of every category. The rest of the feature is items.pide_options' own symbols and constants (items.json).",
+  "symbols": {
+    "@items/CreatePide.gemOverride": {
+      "find": [
+        {
+          "scope": { "symbol": "items/CreatePide", "size": 1600 },
+          "pattern": "44 38 A7 {items/item.gem_override:d32} 75 05 45 84 FF 74"
+        }
+      ]
+    }
+  },
+  "constants": {
+    "items/item.gem_override": { "min_votes": 1 }
+  },
+  "features": {
+    "gems.sockets": {
+      "symbols": ["items/CreatePide", "items/PideSpawn", "@items/CreatePide.fields", "items/PideLevelMaxIndex", "items/PideLevelIndex",
+                  "@items/CreatePide.gemOverride"],
+      "constants": ["items/pide.list", "items/pide.count", "items/item.category", "items/item.gem_override"]
+    }
+  }
+}

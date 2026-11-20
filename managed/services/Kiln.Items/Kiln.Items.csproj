@@ -9,6 +9,8 @@
     <NoWarn>$(NoWarn);CS1591</NoWarn>
   </PropertyGroup>
   <ItemGroup>
+    <!-- a block's tool wear rule is set as the block's mod (ToolWearRuntime) -->
+    <InternalsVisibleTo Include="Kiln.Blocks" />
     <InternalsVisibleTo Include="Kiln.Blocks.Tests" />
     <!-- Equip (EquipResult from a native result, the slot mapping, the capability verdict): pure parts tested offline. -->
     <InternalsVisibleTo Include="Kiln.Items.Tests" />
@@ -17,6 +19,14 @@
     <!-- Item instances (ItemInstances, ItemRecord, ItemInstanceInfo): instance data lives in Kiln.Saves. -->
     <InternalsVisibleTo Include="Kiln.Saves" />
     <InternalsVisibleTo Include="Kiln.Saves.Tests" />
+    <!-- gems (Kiln.Abilities/Gems): a carrier's socket and a player's items read through the same item instances -->
+    <InternalsVisibleTo Include="Kiln.Abilities" />
+    <!-- the game's own names and item GUIDs (GameNames): the item icons (Kiln.Ui) -->
+    <InternalsVisibleTo Include="Kiln.Ui" />
+    <InternalsVisibleTo Include="Kiln.Ui.Tests" />
+    <InternalsVisibleTo Include="Kiln.Stations.Tests" />
+    <!-- the test kit names the upgrades' rolls (HarnessItems.SetUpgradeRolls: ItemUpgrades.Roller) -->
+    <InternalsVisibleTo Include="Kiln.TestKit" />
     <ProjectReference Include="../../Kiln.Api/Kiln.Api.csproj" Private="false" />
     <EmbeddedResource Include="Data/items.tsv" LogicalName="Kiln.Items.items.tsv" />
     <None Include="Data/ITEMS-LICENSE.txt" />

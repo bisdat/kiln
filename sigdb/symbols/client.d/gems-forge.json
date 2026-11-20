@@ -1,0 +1,9 @@
+{
+  "format": 1,
+  "side": "client",
+  "extends": "server.d/gems-forge.json",
+  "comment": "Gem wave G3 (gems.craft) on the game client: the hosted server world's copy of equipment_actions' weapon-gem handler. Every pattern of server.d/gems-forge.json matches once on client 26430625, so this overlay replaces nothing; measured there: gems/GemAction 0x385880 (called from equipment_actions' update 0x388280 at 0x3882c2), gems/ReadTemplate 0x9b3b60, items/JobStorage 0x9bfb80, items/AttrFind 0x123a930, gems/GemSlotCost 0xe91e60, gems/GemUnslotCost 0xe91df0, gems/GemUpgradeCost 0xe91ee0, gems/GemRecycleYield 0xe91f20, gems/MaterialMultiplier 0xe99940, gems/MultiplierOne 0x13d0c90 (1.0f), gems/UnslotMove 0x415010 (server 0x1b4bb0); the same layout constants as the server (input.weapon 0x260, source 0x264, material 0x270, version 0x274, action 0x278, consumed 0x98, ShroudForge allowAll 0x20, maxGemLevel 0x24, craftingCostModifier 0x28, iterator 0xf0). A client build whose handler differs gets its own patterns here.",
+  "symbols": {},
+  "constants": {},
+  "features": {}
+}

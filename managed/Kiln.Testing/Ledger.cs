@@ -73,6 +73,8 @@ internal sealed record LedgerEntry
     [JsonPropertyName("game")] public LedgerGame Game { get; init; } = new();
     [JsonPropertyName("session")] public string Session { get; init; } = "server";
     [JsonPropertyName("verdict")] public string Verdict { get; init; } = "skip";
+    [JsonPropertyName("playerAnswer"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? PlayerAnswer { get; init; }
+    [JsonPropertyName("assertionFailureCount"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public int AssertionFailureCount { get; init; }
     [JsonPropertyName("note")] public string Note { get; init; } = "";
     [JsonPropertyName("time")] public string Time { get; init; } = "";
     [JsonPropertyName("assertions")] public LedgerAssertion[] Assertions { get; init; } = [];
@@ -81,6 +83,18 @@ internal sealed record LedgerEntry
     [JsonPropertyName("guard"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public LedgerGuard? Guard { get; init; }
 
     public bool Has(string tag) => Tags.Contains(tag, StringComparer.Ordinal);
+
+    /// <summary>How many requirements failed: the stored count, or the failed rows of an entry written before the count
+    /// existed.</summary>
+    [JsonIgnore] public int FailedAssertions => Math.Max(AssertionFailureCount, Assertions.Count(a => !a.Ok));
+
+    /// <summary>The verdict as it counts. An entry written before dev.29 can say "pass" next to failed assertions; such
+    /// an entry never confirms a check, so it reads as "fail" everywhere a verdict is shown or relied on.</summary>
+    [JsonIgnore] public string Counted => Verdict == "pass" && FailedAssertions > 0 ? "fail" : Verdict;
+
+    /// <summary>The note beside <see cref="Counted"/>: the entry's own, or the reason an older pass does not count.</summary>
+    [JsonIgnore] public string CountedNote => Counted == Verdict ? Note
+        : (Note.Length > 0 ? Note + "; " : "") + $"recorded as a pass with {FailedAssertions} failed assertion(s): not a pass";
 
     public static string SessionName(ClientCheckSession s) => s switch
     {

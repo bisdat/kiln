@@ -62,18 +62,18 @@ def sample_ledger() -> dict:
 class SummaryTests(unittest.TestCase):
     def test_counts_per_area(self):
         r = report.summarize(sample_ledger())
-        self.assertEqual(r["areas"]["Alpha"], {"passed": 2, "failed": 0, "skipped": 1, "never run": 0,
+        self.assertEqual(r["areas"]["Alpha"], {"passed": 1, "failed": 1, "skipped": 1, "never run": 0,
                                                "passedWithFailedAssertions": 1})
         self.assertEqual(r["areas"]["Beta"], {"passed": 0, "failed": 1, "skipped": 0, "never run": 1,
                                               "passedWithFailedAssertions": 0})
         self.assertEqual(r["areas"]["Gamma"]["skipped"], 1)
-        self.assertEqual(r["totals"], {"passed": 2, "failed": 1, "skipped": 2, "never run": 1,
+        self.assertEqual(r["totals"], {"passed": 1, "failed": 2, "skipped": 2, "never run": 1,
                                        "passedWithFailedAssertions": 1})
 
     def test_newest_entry_wins(self):
         r = report.summarize(sample_ledger())
-        self.assertEqual([f["id"] for f in r["failed"]], ["b.one"])
-        self.assertEqual(r["failed"][0]["note"], "no flash on the second hit")
+        self.assertEqual([f["id"] for f in r["failed"]], ["a.three", "b.one"])
+        self.assertEqual(r["failed"][1]["note"], "no flash on the second hit")
 
     def test_never_run_comes_from_the_catalogue(self):
         ledger = sample_ledger()
@@ -91,8 +91,21 @@ class SummaryTests(unittest.TestCase):
         r = report.summarize(sample_ledger())
         self.assertEqual([m["id"] for m in r["marked"]], ["a.three"])
         text = report.render(r)
-        self.assertIn("passed with a failed assertion (*): 1", text)
-        self.assertIn("passed* client-pass/a.three: three hits counted (counted 2)", text)
+        self.assertIn("passed with failed assertions: not a pass", text)
+        self.assertIn("passed with failed assertions: not a pass: client-pass/a.three: three hits counted (counted 2)", text)
+
+    def test_forced_fail_preserves_the_answer_and_reason(self):
+        e = entry("m", "worker", "A", "fail", "this check cannot pass: 1 assertion(s) failed: worker ran",
+                  assertions=[{"what": "worker ran", "ok": False, "detail": "zero slices"}])
+        e["playerAnswer"] = "pass"
+        e["assertionFailureCount"] = 1
+        r = report.summarize({"format": 1, "checks": [], "entries": [e]})
+        self.assertEqual(r["totals"]["passed"], 0)
+        self.assertEqual(r["totals"]["failed"], 1)
+        text = report.render(r)
+        self.assertIn("player answered: pass", text)
+        self.assertIn(e["note"], text)
+        self.assertIn("worker ran (zero slices)", text)
 
     def test_other_format_is_refused(self):
         ledger = sample_ledger()
@@ -108,7 +121,7 @@ class SummaryTests(unittest.TestCase):
                 {"section": "S", "key": "row three", "checks": ["a.two", "other/c.one"]},
                 {"section": "S", "key": "row four", "checks": ["missing.id"]}]
         r = report.summarize(sample_ledger(), rows)
-        self.assertEqual([x["state"] for x in r["rows"]], ["passed", "failed", "open", "open"])
+        self.assertEqual([x["state"] for x in r["rows"]], ["failed", "failed", "open", "open"])
         self.assertTrue(r["rows"][0]["checks"][1]["marked"])
         self.assertFalse(r["rows"][3]["checks"][0]["known"])
         self.assertIn("missing.id never run (not in the ledger)", report.render(r))
@@ -132,7 +145,7 @@ class CommandLineTests(unittest.TestCase):
             rc, out, _ = self.run_main(path, "--json", "--rows", str(PACK / "rows.json"))
             self.assertEqual(rc, 0)
             data = json.loads(out)
-            self.assertEqual(data["totals"]["failed"], 1)
+            self.assertEqual(data["totals"]["failed"], 2)
             self.assertEqual(len(data["rows"]), len(json.loads((PACK / "rows.json").read_text("utf-8"))["rows"]))
 
     def test_unreadable_ledger_exits_2(self):
@@ -272,9 +285,13 @@ class CoverageTests(unittest.TestCase):
         self.assertEqual(len(keys), len(set(keys)), "a row is listed twice")
 
     def test_ids_follow_the_rule(self):
+        # An id is area.slug. The ids of the dev.28 dossier are taken as the dossier wrote them (01-los-eye-height,
+        # 19d-c1): the index dev28-checks.json lists them, and an id it lists needs no dot.
+        dossier = {r["id"] for r in json.loads((PACK / "dev28-checks.json").read_text("utf-8"))["checks"]}
         for cid in self.ids:
             self.assertRegex(cid, r"^[a-z0-9][a-z0-9._-]{0,63}$")
-            self.assertIn(".", cid, f"{cid}: ids are area.slug")
+            if cid not in dossier:
+                self.assertIn(".", cid, f"{cid}: ids are area.slug")
 
     def test_the_coverage_check_can_fail(self):
         rows = {"rows": [{"section": "S", "key": "empty", "checks": []},

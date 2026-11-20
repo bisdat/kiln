@@ -373,7 +373,7 @@ public class RulesMathTests
             Assert.Equal(edited, File.ReadAllText(file));
             File.Delete(file);
             var created = RulesPresets.WriteDefault("creative", PlayerRules.Creative, file);
-            Assert.Equal(PresetHeader + CreativeNote + PlayerRules.Creative.ToJson() + "\n", created);
+            Assert.Equal(PresetHeader + CreativeNote + PlayerRules.Creative.ToJson().Replace("\r\n", "\n") + "\n", created);  // LF on every OS
             Assert.Equal(created, File.ReadAllText(file));
         }
         finally

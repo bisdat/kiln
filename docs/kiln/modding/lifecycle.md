@@ -47,6 +47,18 @@ is polled from world steps only; Kiln's service tick (queued events, config watc
 Without kiln.ui (or with `KILN_NO_MENU_LOAD=1`) mods load at the first world step as before. Dedicated servers are
 unaffected.
 
+**The files are read ahead (since 0.2.0-dev.29.16).** That first UI frame (or the first server step) is where Kiln.Host
+reads each mod's layout stamp and assemblies and the CLR maps Kiln.Game and Kiln's shared assemblies. On a hard disk
+the game is loading its menu from, one player's kiln.log showed 1.56 s between the start of a mod's load and its
+OnLoad, of work that takes about 20 ms with the files in memory. So at boot a background thread reads those files
+once (each admitted mod's stamp, assemblies and symbols, this build's Kiln.Game, the shared assemblies the early
+services, the mods and the first service tick load) and throws the bytes away; the load then finds them in the
+system's file cache. Nothing else moves: no assembly loads early, the load order, checks and log lines are as before.
+kiln.log: `prefetch: N file(s), X MB of the mods' and Kiln's assemblies read in T ms on a background thread`;
+`KILN_NO_PREFETCH=1` turns it off. Each mod's line says where its load time went:
+`mod <id> <version> loaded in T ms (layout check A ms, assemblies B ms, OnLoad C ms)` (OnLoad includes the
+registration of its event handlers).
+
 Without the menu load, mods load at the first step of either the hosted server world or the client world (in game). While the client
 hosts, the server world drives the mods (services and `Context.Tick` on the server thread, as in a dedicated
 server); otherwise the client world does (main thread). Never both at once. A hosted session's server world start
@@ -54,6 +66,23 @@ fires ServerStarting + ServerStarted (`Source` = `world-started`); its destructi
 (`Reason` = `world-stopping`, on the destroying thread, world intact). Side "server" mods load at each hosted world's
 first step and unload after its ServerStopping; client and both mods stay loaded (`Lifecycle.Phase` = `Idle` between
 sessions). See docs/kiln/client.md, "Mods and sides".
+
+## OnBoot, before the game starts (since 0.2.0-dev.28)
+A mod whose `kiln.mod.json` says `"boot": true` (or `"required"`) gets `Mod.OnBoot(BootContext)` first, on a dedicated
+server: once per process, on Kiln's boot thread, before the game's entry point and so long before `OnLoad` and the
+events above. It runs on a **throwaway copy**: Kiln loads the mod's assembly on its own, calls `OnBoot` on a fresh
+instance and unloads it again. The instance that then gets `OnLoad` is a new one; fields and statics set in `OnBoot` are
+gone. What `OnBoot` staged with `BootDefinitions` is in the game by then, and `Mods.BootState(id)` says how it went
+([onboot.md](onboot.md)).
+
+- A **hot reload** of a boot mod runs `OnLoad` only. Its boot content stays as the start committed it. `Mods.ReloadAsync`
+  of a loaded boot mod is refused (`RestartRequiredBoot`); unloading it and loading it again works while its files are
+  as the start read them. A changed file of the mod's folder, or a changed value of a config its `OnBoot` read, is
+  refused with `RestartRequiredBoot` and the changes named, until the game is restarted
+  ([onboot.md](onboot.md#after-a-change-restart)).
+- `Blocks.Find` sees the mod's committed boot blocks from the commit on: in `OnLoad`, and after an unload.
+- `BootDefinitionsCommittedEvent` comes after each such load, at Kiln.Blocks' next step; also for a mod whose `OnBoot`
+  staged nothing, with no definitions.
 
 ## The Mods API (Forge's `ModList`)
 ```csharp
@@ -66,7 +95,8 @@ Mods.Side;                                 // Server / Client
 var r = await Mods.ReloadAsync("my-mod");  // also UnloadAsync(id), LoadAsync(folder): run at the next step
 ```
 `ModState`: `Pending`, `Loaded`, `Disabled` (fault policy), `Failed` (with `Error`), `Skipped` (other side,
-`.disabled`), `Unloaded`. `ModInfo` (on `Context.Info` and `ModEntry.Info`) carries the whole manifest: side,
+`.disabled`), `Unloaded`. `Mods.BootState(id)` (any thread) is a boot mod's part in this process's boot generation:
+`BootModState`, its committed definitions and its issues ([onboot.md](onboot.md#afterwards)). `ModInfo` (on `Context.Info` and `ModEntry.Info`) carries the whole manifest: side,
 authors, description, license, url, apiVersion, dependencies, exports, features, `Advanced`.
 
 ## Inter-mod messages (Forge's InterModComms)

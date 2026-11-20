@@ -151,21 +151,96 @@ Another engine (Enshwick, EMF, ShroudForge, a closed DLL) may have hooked a func
 target's live bytes with the exe file's before it hooks:
 
 ```
-[kiln] hooks: chat/ChatLogAdd chained over enshwick.dll+0x11ea80
+[kiln] hooks: chat/ChatLogAdd (kiln-chat) chained over enshwick.dll+0x11ea80
 ```
 
 Kiln's detour sits in front of the other module's jump and the call goes on into it. The map records it as
-`foreignBefore`.
+`foreignBefore`. These lines name Kiln's hooks on the function by their labels and owners (`<label> (<owner>)`, the
+owner `service:kiln-chat.dll` as `kiln-chat`), not by the sigdb name of the address: several symbols can name one
+function, and the map's `label` is the alphabetically first of them (dev.29, GitHub issue 39: `build/ItemFind` for
+kiln-content's `content/ItemRegistryFind`).
 
 After boot and at the first world, never per frame, Kiln checks that each target still begins with its own detour.
 If another module hooked over it:
 
 ```
-[kiln] hooks: xhl.dll+0x4410 hooked over Kiln's chat/ChatLogAdd (Kiln's detour stays armed; it is reached through their jump)
+[kiln] hooks: xhl.dll+0x4410 [mods/xhl/xhl.dll] hooked over Kiln's chat/ChatLogAdd (kiln-chat) (Kiln's detour stays armed; it is reached through their jump)
 ```
+
+The bracket after `<module>+0x...` names the module's file (since 0.2.0-dev.29.19): its path relative to the game folder,
+`[game folder]` for one in the game folder itself, or its full path outside it (a Library DLL, whose folder names the
+mod). Two DLLs can share a file name (two Library `dinput8.dll`); the map's `foreignBefore`/`foreignOver` carry the same
+text as `path`.
 
 The map records `foreignOver`. Kiln never writes over that target again, and never removes the other module's jump.
 Kiln does not unhook its own detours (an empty chain just calls the real function).
+
+## Original code: `read_original`, `code_state` (since 0.2.0-dev.29.19)
+A plugin or a loader that needs the game's own code at an address (to compare with, or to follow a call the game
+makes there), or wants to know whether someone changed it, asks kiln.hooks. Two members are appended to the v2 table
+after `detour_typed_checked`; the version stays 2. Check that `header.size` covers the member, that it is not null,
+and its capability row:
+
+| Member | Offset | Capability row |
+|---|---|---|
+| `read_original(address, out, size)` | 296 | `hooks.read_original` |
+| `code_state(address, size, &state, &generation)` | 304 | `hooks.code_state` |
+
+Both run on any thread, on the dedicated server and the client. They need no world and no owner, keep no pointer, call
+nothing back and never wait for a game or window thread.
+
+- **`read_original`** copies the exe file's bytes at `address`, relocated to where the exe is loaded. Never live memory:
+  a function that Kiln or another module hooked reads as the game shipped it. The range must lie inside the exe's
+  executable `.text` and be at most `KILN_HOOKS_CODE_RANGE_MAX` (64 KiB, since 0.2.0-dev.29.19) long: a zero size,
+  a larger one, a range outside `.text` or one that wraps, and a null `out` are `KILN_ERR_INVALID_ARGUMENT`, checked
+  before anything is read. Exactly 64 KiB is accepted; ask about the bytes you need (a function's first instructions, a
+  call site), not the whole `.text`. `KILN_ERR_UNAVAILABLE` when the file's bytes are not there. A refusal writes
+  nothing.
+- **`code_state`** says whether the live code in the range is still the file's (the same range rules). It reads the live
+  bytes twice under a fault guard and compares them with the file's, and with what Kiln's own detours and patches
+  wrote there:
+
+| `state` | Meaning |
+|---|---|
+| `KILN_CODE_ORIGINAL` (0) | The live bytes are the file's. |
+| `KILN_CODE_MANAGED` (1) | Every byte that differs is a kiln.hooks detour's or patch's, written over the file's code. |
+| `KILN_CODE_FOREIGN` (2) | At least one is not: another module's hook or patch, a `write` through kiln.hooks, or a Kiln detour placed over another module's bytes. |
+| `KILN_CODE_UNKNOWN` (3) | The live bytes could not be read or changed between the two reads, or Kiln's record of what it wrote does not lead back to the file's bytes. |
+
+An unreadable page is `KILN_OK` with `KILN_CODE_UNKNOWN`, never the file's bytes passed off as live ones. A detour owns
+exactly the instructions it overwrote, nop padding included: not the whole function, and not the 5 or 14 bytes the
+foreign check above reads. It keeps them after its last link is revoked, because the detour stays (an empty chain calls
+the real function). A patch owns its bytes until `unpatch`, `revoke` or `revoke_owner`; `write` owns nothing.
+Patches over patches are unwound newest first, so another module's byte inside a range Kiln owns still reads as
+foreign. The hook map's `foreignBefore` and `foreignOver` play no part in the answer. For a support report of every
+changed place, see the map's `codePatches` below.
+
+**The generation is one counter for the whole process**, not one per range. It moves when Kiln writes a detour,
+installs or removes a patch, when a chain's links change (an install, a revoke, a link that faulted), on `write`, and
+when a `code_state` call sees other bytes, readability or state than the call before it. Kiln remembers only the last
+range anyone asked about (at most 64 KiB, so what it keeps stays small; a refused call changes nothing), so a call for
+another range moves it too, whoever made it: two mods that take turns with two ranges see it move on every call. The
+same value as at your last call means nothing changed and no one asked about another range since; a new value means
+"ask again", not "it changed". It is no lock and no watch: another module can write the code right after the call
+returns, and nothing tells you when it does.
+
+**Locking.** `code_state` and Kiln's own writers of game code share one lock:
+- `patch` holds the patch list's mutex and this lock while it reads the old bytes, writes the new ones and records
+  them; `unpatch`, `revoke` and `revoke_owner` hold both while they put the old bytes back;
+- `write` holds this lock around its copy;
+- a detour install takes it right after the chain mutex, before it reads the target's bytes and before it stops the
+  game's threads; `revoke`, `revoke_owner` and the sweep of faulted links take it after the chain mutex.
+
+`code_state` takes only this lock, never the chain or patch mutex, and holds it for two guarded copies and the
+comparison. So it never sees a half-written Kiln detour, and a thread that a Kiln install stops is never inside
+`code_state` holding the lock (a caller that waits for the lock may be stopped while it waits, which is harmless).
+Don't call `code_state`, `patch`, `unpatch` or `write` under the loader lock (from `DllMain` or a TLS callback): an
+install holds this lock while it looks up modules, which can wait for the loader lock. `read_original` takes no lock.
+
+**Capability rows.** The core reports both: available when kiln.hooks runs and the core reads the exe file's code
+(sigdb's verified file view, the usual case). Unavailable: `policy` in safe idle, `service-missing` when kiln.hooks did
+not start, `symbol-missing` ("verified executable file code unavailable; live fallback is not original code") when
+sigdb could not use the exe file and reads the live code instead. They do not change while the game runs.
 
 ## The hook map: `state/hooks.json`
 
@@ -209,6 +284,14 @@ returns the same text; `buf` may be null to ask for the length. Offsets and RVAs
   hook and a Kiln-hosted link meet: `foreign-before`, `foreign-over`, ShroudForge's `refused`), `rules` (the compat rules
   that fired) and `ruleFiles`; what they mean and how to fix an overlap:
   [../engines/README.md](../engines/README.md#closed-source-dll-mods). Schema: `schema/hooks-state.schema.json`.
+- `codePatches` (since 0.2.0-dev.29.8, sigdb's `code_patch_map`): every place the live code differs from the exe file's
+  when the map is written, Kiln's own hooks included: `{available, total, rows: [{rva, size, by, called?,
+  calledSymbol?, symbol?}]}` (at most 1,024 rows; `total` counts them all). `by` says who changed it: `call redirected
+  to <module>+<offset>` for a `call rel32` another module points at its own code (`called` is the function it called
+  in the file), `jmp to <module>+<offset>` for a hook, `bytes changed in place` otherwise. Some closed mods compare the
+  game's code with the exe file before they patch it and refuse a call someone else redirected first (XHL-Core
+  plugins: "could not prepare CALL 11 of 24 (invalid or changed since capture)"); this list names who did.
+  `available: false` with a `reason` when Kiln has no file view of the code.
 
 ## Owner cleanup: `subscribe_owner_retiring` (dev.28)
 A native service that keeps state for other owners (leases, queued work, callbacks into a mod) asks to be told when
@@ -220,6 +303,154 @@ removed). It is not called for owner 0 nor for the observer's own owner. In the 
 state and never call into it again; do not wait and do not call game code. A call into the retiring owner that is
 already running on another thread is the service's own to guard. `unsubscribe_owner_retiring(handle)` may be called
 from inside the callback.
+
+## Hooks inside another module: `open_module`, `module_scan` (since 0.2.0-dev.29.19)
+Every hook kind takes addresses in the game exe's image only (anything else: `KILN_ERR_INVALID_ARGUMENT`). To hook
+inside another loaded module (another mod's DLL, a loader's DLL), open it: `hooks->open_module(owner, name, &m)` (offset 312; `module_scan` at 320, table 328 bytes; check
+`header.size` covers it; the capability row is `hooks.foreign_modules`). It finds the module by file name, never loads
+it (`KILN_ERR_NOT_FOUND` while it is not there), refuses Kiln's own modules (`KILN_ERR_UNAVAILABLE`), reads its
+executable sections from its mapped PE headers and **pins** it (`GetModuleHandleEx` with `PIN`): the registry never
+removes a physical detour, so the code a detour is written into must stay mapped for the life of the process. From then
+on addresses inside those sections are targets for `detour`, `mid`, `raw_detour`, `detour2`, `mid2` and `mid2_checked`,
+for every owner; headers, data and the space between sections stay refused. Typed links stay the game's
+(`KILN_HOOKS_ERR_SIG_UNKNOWN` with a `typed_refusal` text: no exe code to check the descriptor against), and
+`fingerprint`, `read_original` and `code_state` read the exe only (an address in an opened module is `KILN_ERR_INVALID_ARGUMENT` there). `m` gives the base, image size, code span and `KILN_HOOKS_MODULE_PINNED` (or
+`KILN_HOOKS_MODULE_GAME` for the exe, which is not pinned). `module_scan(m.base, pattern, out, cap, &count)` searches the
+live bytes of the opened module's code with `scan`'s results. kiln.log has one line per module opened, and names every
+link and thread-stop line of such a target `<module>+0x<offset> [<file>]` (module_place.h, as the overlap lines) instead of `rva 0x...`; the hook map gives the target
+`"module"`, `"offset"` and `"path"` with `"rva": null`. Managed: `Hooks.Module` ([../hooks.md](../hooks.md#hooks-inside-another-mods-dll-since-020-dev2919)).
+
+## Typed hooks and calls: `detour_typed`, Kiln.Sigs (since 0.2.0-dev.29)
+A typed link hooks or calls a game function as a function: integer, pointer, float and double arguments in their
+Win64 positions (`rcx`/`xmm0` ... `r9`/`xmm3`, then the caller's stack), and the return in `rax`, `xmm0` or a hidden
+return buffer (`sret`). The shape comes from a descriptor in sigdb (`sig`, [../sigport.md](../sigport.md#descriptors-of-typed-hooks-sig-blocks)),
+which the core checks against the function's code when it loads: a descriptor that no longer fits turns
+`sig/<symbol>` off and refuses every typed hook of it, with a reason that names the argument. Capability rows:
+`hooks.typed` (the link kind) and one `sig/<symbol>` per described core symbol.
+
+**Native** (`kiln_hooks.h`, the "typed links" block): `detour_typed(owner, target, order, sig, fn, user, out)` with a
+`KilnTypedFn(KilnCallFrame*, void*)` handler that may change the frame's arguments, call `call_original_frame(frame)`
+once (the rest of the chain and the function; a second call does nothing), set the return fields, and return
+`KILN_TYPED_SKIP` (the function does not run) or `KILN_TYPED_CONTINUE` (when it did not call the original, the original
+runs after it). `call_with_frame(fn, frame, nstack)` is a direct call. A native mod that relies on a described
+signature checks `api->feature("sig/<symbol>")` first. A scalar argument's or return's `size` may be 0 (the kind's own
+size); a by-value struct's is its size.
+
+`detour_typed_checked` (since 0.2.0-dev.29, offset 288; check `header.size`) takes the same arguments and makes the same
+link with `mid2_checked`'s patch policy: the descriptor is checked first, then the first detour on a target is written
+only when every other thread of the process could be stopped and checked and none stands inside the bytes it replaces.
+Otherwise nothing is written, there is no fallback to an unchecked patch, and the result is `KILN_HOOKS_ERR_UNCHECKED`
+(102): a later attempt may succeed, and kiln.log says which threads (`checked installation refused, nothing written:
+...`). A target that already has its detour needs no patch, so a further link goes in as with `detour_typed`. Managed
+typed hooks use only this member.
+
+**C#** (`KilnServices` `Hooks;Sigs`, advanced mods only): one generated class per descriptor,
+`Kiln.Sigs.<Area>.<Name>` (the area is the symbol's part before `/` in Pascal case; `Core` for a symbol without one).
+The core's ten are in Kiln.Sigs:
+
+| Class | Function | `Invoke` | What a caller of `Invoke` provides |
+|---|---|---|---|
+| `Kiln.Sigs.Items.GetItemVolume` | `OptS32 (const ItemInfo* item)` (sret) | any thread | an item from the static registry; null gives `{18, 1}` |
+| `Kiln.Sigs.Items.AttrFind` | `AttrRef (u32 attribute, ptr registry)` (sret) | tick thread | a live entity's attribute component; the pointer it returns lasts until the step ends |
+| `Kiln.Sigs.Items.AttrChanged` | `void (ptr component, ptr registry)` | hook only | |
+| `Kiln.Sigs.Time.SetTimeScale` | `void (Daytime*, f32 scale, s64 ecsNow)` | tick thread | the server world's Daytime and its now |
+| `Kiln.Sigs.Time.GetGameTime` | `s64 (Daytime*, s64 ecsNow)` | tick thread | the same |
+| `Kiln.Sigs.Abilities.RegisterNative` | `bool (ptr registry, u32 hash, ptr fn, ptr name, u8 argc)` | hook only | (world setup, before managed mods load: hook it from a native plugin) |
+| `Kiln.Sigs.World.ReadOther` | `ptr (ptr out, ptr storage, u16* accessor, u32 entity)` | hook only | |
+| `Kiln.Sigs.Core.GetComponent` | `void (ptr out, ptr world, u32 hash, u32 entity)` | tick thread | the live server world; the slice lasts until the step ends |
+| `Kiln.Sigs.Rules.QuatRotate` | `ptr (ptr out, ptr rotation, ptr vector)` | any thread | the caller's own values |
+| `Kiln.Sigs.Weather.SampleAt` | `WeatherSample (ptr weather, ptr at, s64 now)` (sret) | tick thread | the server's WeatherSystem |
+
+```csharp
+using Kiln.Sigs.Items;
+
+if (Capabilities.Is("hooks.typed") && Capabilities.Is(GetItemVolume.Capability))
+{
+    HookResult r = GetItemVolume.Detour((ref GetItemVolume.Call c) =>
+    {
+        c.CallOriginal();                                   // the game answers first
+        if (c.Item != 0 && c.Result.Has != 0) c.Result.Value *= 2;   // Result: a ref into the caller's buffer
+    });
+    if (!r.Ok) Log.Warn(r.Reason);                          // a game update changed the function
+    OptS32 v = GetItemVolume.Invoke(0);                     // a struct return comes back by value
+}
+```
+
+- **`Call`** (a `ref struct`, valid during the handler): one typed property per argument (a narrow integer is masked
+  to its type: the upper bytes of a `u8` on the stack are the caller's garbage), `Result` (a scalar: get and set; a
+  struct: a `ref`), `CallOriginal()`, `OriginalCalled`, `Skip()`. The result is zero when the first handler starts.
+  Without `CallOriginal` and `Skip`, the function runs after the handler with the arguments as it left them. `Skip`
+  ends the call with `Result` as the handler set it (fill an sret `Result` first); after `CallOriginal` it changes
+  nothing.
+- **`Detour(handler, priority)`** returns a `HookResult` (`Ok`, `Reason`, `Handle`): refused (`Ok` false, and a
+  `HookRefusedEvent` for whoever listens) when the descriptor does not fit the function on this build, its symbol does
+  not resolve, or no target slot is left. A null handler throws `ArgumentNullException`, a core without typed links
+  `KilnUnavailableException("hooks.typed")`, a mod that is not advanced `InvalidOperationException`. A link is
+  installed when the mod asks for it and removed with the handle or when the mod unloads; a re-install by the same mod
+  on the same function takes its old link slot again.
+- **`Invoke(...)`** calls the function through its hook chain, as the game's callers do. It never calls a function
+  whose row is off (`KilnUnavailableException` naming `sig/<symbol>`); a `tick` descriptor's `Invoke` throws off the
+  tick thread (also inside a hook handler on a worker). The caller owns every other precondition (the table above):
+  a fault inside the game's function is the game's.
+- **Faults**: a handler that throws is caught in Kiln's dispatcher (logged on the mod's log, three times per install):
+  when it had called the original, the caller gets the original's result (whatever the handler wrote since), else the
+  original runs with the arguments as the handler left them. That holds for a managed exception and for a write to the
+  null page in the handler's own code (the runtime raises `NullReferenceException`; lab: `{18,1}`, the original once,
+  the process went on). It does **not** hold for any other access violation in a managed handler: one in its own code
+  above 64 KiB (`AccessViolationException`) or in native code it calls (a P/Invoke, an `Invoke` of a game function with
+  a bad argument) ends the process. .NET 10 fails fast before Kiln's native guard sees it (lab, Wine, both before and
+  after `CallOriginal`: `Fatal error. 0xC0000005` or `Fatal error. System.AccessViolationException`, exit code 5). This
+  is the runtime's rule for all managed code, not only typed hooks (`Hooks.Detour` and `Hooks.Mid` handlers, a tick
+  handler). With the runtime's `legacyCorruptedStateExceptionsPolicy` the dispatcher receives such a fault as an
+  exception and the rule holds (lab, measured); Kiln does not switch it on. A native typed handler's fault is caught by
+  the native guard, which disables the link and restores the original's complete result, its struct-return buffer
+  included (Wine: 24- and 128-byte structs); snapshot storage is allocated before the handler runs. A fault while the
+  original runs is the game's.
+- **Threads**: the handler runs on the thread that calls the function, game worker threads too; it runs as its mod
+  (gated calls work), and the mod's unload waits for handlers in flight (one second, then the unload goes on and the
+  mod's fragment stays until the last one returns).
+- **A mod's own descriptors**: a `sig` in an entry of the mod's fragment (`sigdb/server.json`, `sigdb/client.json`;
+  names `<modid>/...`) becomes a class `Kiln.Sigs.<ModId>.<Name>`, internal to the mod (Kiln.Sdk's generator; the root
+  namespace is `KilnSigsNamespace`). It may name a struct of its own fragment or one of Kiln.Sigs (`OptS32`,
+  `AttrRef`, `WeatherSample`). Load the fragment with `Symbols.LoadShipped()` before the first `Invoke`: its report
+  (kiln/logs/sigdb-&lt;modid&gt;.json) decides whether the descriptor fits; `"abi": "trust"` accepts a function whose code
+  the check cannot follow. The generator's warnings: KILN180 (a descriptor it cannot use), KILN181 (descriptors but no
+  Kiln.Hooks), KILN182 (an unreadable sigdb file).
+- **What a matching fingerprint does not prove**: f32 versus f64, two types in one stack slot, integer versus
+  pointer, aggregate layout, and the extent of a return buffer are not told apart. The compiled descriptor is also
+  compared with the resolver's loaded descriptor before Invoke, including return class and sizes, but two equally
+  wrong descriptions can still agree. Review the native function's meanings for each executable after an update.
+- **Installation timing**: a request outside a safe Pre point while worlds run is accepted with `HookResult.Pending`
+  true and a handle whose `State` is `Pending`. The host drains it in the next authoritative Pre (joined clients use
+  client Pre). With no world, or in that Pre, it installs immediately. The installation is `detour_typed_checked`
+  (above): the server world's Pre stops the simulation's workers, not a hosting client's render or network threads, so
+  the first patch of a function is written only with every thread checked. When kiln.hooks could not check every
+  thread (nothing written), the request stays `Pending` and is tried again at the next safe tick, three attempts in
+  all; then it is refused. kiln.decisions, the other checked installer, makes one attempt and refuses its kind for the
+  process; a typed hook gets two more because what makes the check fail (a thread caught inside the 5 to 14 bytes, a
+  thread that is ending) is usually gone a step later, while a thread Kiln cannot open or stop stays, and every attempt
+  stops the whole process for a moment. A late refusal (also a descriptor or symbol refusal at the pending attempt)
+  changes `Handle.State` to `Refused`, sets its `Reason`, and posts `HookRefusedEvent` once; the attempts before the
+  last are only logged on the mod's log. Removing a pending handle cancels it. A core without `detour_typed_checked`
+  refuses every typed `Detour` with the reason (no unchecked fallback).
+- **Cost per call** (lab, Wine, server f0d824be, 2026-11-15, the PC busy with other builds): `Invoke` of
+  GetItemVolume takes 634 ns (best of three rounds of 10^6 calls; 158 ns on 2026-11-14, before `Invoke` checked its
+  descriptor against the resolver's on every call), and a managed typed pass-through hook adds 10 ns to it (47 ns
+  measured on 2026-11-14). A hot function hooked by several mods costs the sum of their handlers.
+- **What it costs a player whose mods use none**: nothing is hooked and nothing runs per call. The core checks the
+  ten descriptors once when sigdb loads (a decode of up to 300 instructions each, from the exe file's bytes).
+- **What has run**: unit tests of both halves; the Wine suites (the thunk, the state machine, struct results restored
+  after a native fault, `detour_typed_checked` refusing with a thread parked in the bytes); and
+  `mods/tests/hooks-typed-test` on a dedicated server (lab, Wine, player-free, 0.2.0-dev.29 on 2026-11-15): typed links
+  from a native plugin at boot (RegisterNative, 113 calls, argc from the caller's stack equal to the game's natives for
+  all of them), managed hooks installed through the checked member (no refusal) and direct calls of GetItemVolume and
+  SetTimeScale, a managed hook of AttrChanged on three worker threads with the lab parallel switch, a mod's own
+  descriptor, and 20 hot reloads with nothing leaked. The other seven classes are generated and compiled and their
+  descriptors fit both exes, but their hooks and calls have not run in a lab. The native typed link ran once on the
+  client exe (a research session). A typed hook of a managed mod in a real game client has not run (guided check
+  `06b-typed-hooks.client`): not its checked installation while the game renders, not with a second player joined, not
+  across leaving and rejoining a world; and no lab row had a player, so the effect of a changed GetItemVolume on a real
+  fuel transfer has not been seen.
 
 ## Threads
 
@@ -237,7 +468,9 @@ from inside the callback.
   middle of the replaced bytes, or a call made from inside them that has not returned yet (the 5 to 14 bytes at the
   target: choose a hook address that nothing jumps or returns into). If Kiln cannot list the threads, or the
   trampoline has a shape it does not know, it logs a warning and falls back to safetyhook's own enable, with the old
-  race; a thread it cannot open or stop keeps running and is counted in a warning. A mod that places its own safetyhook
+  race; a thread it cannot open or stop keeps running and is counted in a warning. The checked members
+  (`mid2_checked`, `detour_typed_checked`, every managed typed hook) never fall back: they write nothing and refuse
+  instead. A mod that places its own safetyhook
   hook on game code has the old race too. Two hook libraries that stop threads (Kiln and a MinHook-based DLL mod, say)
   must not install at the same instant from two threads: each could stop the other.
 - Stack arguments, rcx/rdx/r8/r9, xmm0-3 and the flags reach your handler as the game left them. Handlers are called with the
@@ -295,7 +528,34 @@ are not counted per call. Structured and mid dispatches are counted by each thre
   re-installed on a live hook while threads call it (raised and equal priority, `create()`, new labels: no nesting, one
   run per call), revival, an invalid UTF-8 label and a throwing map extension, a refused target. It runs twice, with
   the caller table in the TEB's TLS slots and in the expansion slots, then once in `slots` mode (every link slot used) and
-  once in `targets` mode (every target slot used, a new address refused, a hooked one still takes links).
+  once in `targets` mode (every target slot used, a new address refused, a hooked one still takes links). Original
+  code: `read_original` and `code_state` on the real service (a detour and its revoke, a patch, `write`, an unreadable
+  page, polls while patches and detours come and go, exactly 64 KiB accepted and one byte more refused); a first
+  install, `patch`, `unpatch` and `write` that each wait for a thread holding the `code_state` lock and write nothing
+  meanwhile; four threads polling `code_state` through sixteen first installs (each stops every other thread), seeing
+  only ORIGINAL or MANAGED; a `code_state` call that waits for the lock while a first install stops every thread (a
+  pause inside the install makes it deterministic): it finishes after the install and reads MANAGED, and a
+  `read_original` call made meanwhile returns at once. Each run has a time limit (300 s), so a lock-order deadlock
+  fails the run instead of hanging it.
+  Its   foreign-module test (also alone: `hooks_v2_test.exe module`, run natively on Windows too) opens `hooks-v2-module.dll`
+  (built from `native/core/tests/hooks_module_dll.cpp`): refused before it is opened, not found when not loaded, Kiln's
+  own names refused, pinned (FreeLibrary no longer unloads it), headers and data refused, mid, v1 mid, raw and
+  structured links inside it, module+offset in kiln.log and the map, `module_scan`, typed links, `read_original` and `code_state` refused there.
+- `native/core/tests/test-hooks-modules.sh` (host): the executable sections `open_module` reads from a module's PE
+  headers, and which names are Kiln's own modules.
+- `native/core/tests/test-hooks-typed.sh` (Wine, no game): the typed link kind (the T3 set of sret, f64, eight stack
+  arguments, narrow integers, mixed positions; the call state machine, faults before and after `CallOriginal`, a
+  24- and a 128-byte struct return restored whole after a faulting handler, eight callers while a ninth installs and
+  revokes) and `detour_typed_checked` (a thread parked inside the bytes: refused with `KILN_HOOKS_ERR_UNCHECKED`,
+  nothing written; with the thread gone it installs; a second link writes no patch). The same time limit applies.
+- `native/core/tests/test-hooks-code.sh asan` and `... tsan` (host): the registry behind `code_state` with fake file and live
+  readers: ranges and refusals (one byte over the 64 KiB limit refused before any read or allocation of that size),
+  relocated bytes, patches over patches and over another module's bytes, unreadable and changing pages, two ranges
+  taking turns, a query in flight while a writer waits for the lock, and polls racing installs, removals and faulted
+  links.
+- `native/core/tests/test-hooks-checked-patch.sh`, `test-hooks-thread-stop.sh`, `test-hooks-typed-result.sh`,
+  `test-hooks-fingerprint.sh` (host): the checked patch policy and the typed result code, the thread-stop loop, the
+  complete-result snapshot, the fingerprint pass and the compiled-against-loaded descriptor comparison.
 - `native/spikes/hookchain/run.sh`: how safetyhook chains with another engine's jump.
 - `native/spikes/hooksv2/foreign_stub.cpp` builds `foreign-stub.dll`, a stand-in for another engine for lab servers:
   chain it from `kiln/chain.ini` and give it `foreign-stub.ini` (`before=<rva,...>` hooks at load, before Kiln looks;

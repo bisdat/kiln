@@ -19,6 +19,7 @@ extern KilnOwner g_owner;
 void logf(int level, const char* fmt, ...);
 #define KI(...) ::kiln::knowledge::logf(KILN_LOG_INFO, "knowledge: " __VA_ARGS__)
 #define KW(...) ::kiln::knowledge::logf(KILN_LOG_WARN, "knowledge: " __VA_ARGS__)
+#define KE(...) ::kiln::knowledge::logf(KILN_LOG_ERROR, "knowledge: " __VA_ARGS__)
 
 inline KilnStr kstr(const char* s) { return KilnStr{s, std::strlen(s)}; }
 
@@ -80,7 +81,44 @@ KilnResult KILN_CALL flame_set(KilnOwner owner, uint32_t level, uint64_t* out_re
 KilnResult KILN_CALL flame_result(uint64_t request, KilnFlameResult* out);
 void flame_ready();
 
-// NpcRegistry unlock state (quests.npc): bit i = npc i unlocked; false when unreadable.
-bool npc_unlock_mask(uint64_t* mask, uint16_t* version);
+// NpcRegistry unlock state of the server world's catalog (quests.npc): pages[0] bit i = entry i unlocked, pages[1]
+// bit i = entry 64 + i (only when *npages is 2: the registry's second page matches its cache); false when unreadable
+// or not computed yet. *count: the registry's entries.
+bool npc_unlock_pages_server(uint64_t pages[2], uint32_t* npages, uint16_t* version, uint32_t* count);
+
+// A reason for KilnKnowledgeStatus.reason (the first one stays), from outside knowledge.cpp. Logs nothing.
+void knowledge_reason(const std::string& text);
+
+// The roster (roster.cpp; roster_core.h; docs/re/npc-roster.md).
+void roster_main();   // kiln_plugin_main: what this side has for the second page; the two worlds' Post callbacks
+void roster_ready();  // on_ready: the capability rows npcs.*
+// The boot build's question (questpack.h GameData::roster_max): 64, or 128 with the second page installed now.
+uint32_t roster_max(uint32_t needed, std::string* why);
+// The boot build's roster: the collection's ids before it and the ids it added (both sorted).
+void roster_built(std::vector<uint32_t> boot_ids, std::vector<uint32_t> kiln_ids);
+uint32_t roster_limit();  // 64 or 128
+void roster_world_event(const KilnWorldEvent* e);
+// The start stops here, before any world loads (start_stop.cpp; the texts in start_stop.h), for `kind`:
+//  - StartStop::Roster: the boot build could not hold the mods' roster (more than 128 entries, or more than 64 where
+//    the second page cannot be installed); KILN_KNOW_ROSTER_EXIT_CODE, kiln/state/roster-refused.json.
+//  - StartStop::Content: the whole build of the mods' native quests and NPCs failed and nothing of it is served
+//    (native_pack.cpp); KILN_KNOW_CONTENT_EXIT_CODE, kiln/state/content-refused.json.
+// The state file, the error line, kiln.boot's stop_start (an issue per mod, its stop line, progress.json "failed",
+// boot.json "boot"."stop"), on a client a message box; then the process ends with the kind's code. `mods`: the mods
+// whose content is involved. Call with no lock held. Does not return, except when a world is present or has run in
+// this process already (a start-time call only: ending the process then could lose play): then it logs that the start
+// could not be stopped.
+enum class StartStop : uint8_t;
+void refuse_start(StartStop kind, const std::string& why, const std::vector<std::string>& mods);
+// kiln_plugin_main: the state file of a start an earlier stop ended moves aside (<file>.last.json).
+void start_stop_main();
+// One registry's pages (as npc_unlock_pages_server, for any registry).
+bool npc_unlock_pages(uintptr_t registry, uint64_t pages[2], uint32_t* npages, uint16_t* version, uint32_t* count);
+KilnResult KILN_CALL roster_world(uint32_t kind, uint32_t* out_generation, uint32_t* out_readiness);
+KilnResult KILN_CALL roster_budget(uint32_t kind, uint32_t generation, KilnCapacityInfo* out);
+KilnResult KILN_CALL npc_unlock_at(uint32_t kind, uint32_t generation, uint32_t npc_id, KilnNpcUnlockReply* out);
+// knowledge.cpp: a roster change into the event ring (KILN_KNOW_EVENT_ROSTER). Any thread.
+void emit_roster_change(uint32_t kind, uint32_t generation, uint32_t npc_id, uint8_t before, uint8_t after, uint16_t version,
+                        uint64_t revision, uint64_t step);
 
 }  // namespace kiln::knowledge
