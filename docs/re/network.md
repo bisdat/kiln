@@ -468,9 +468,38 @@ Ids are u32 server ids, preserved by client creation (0.2.0-dev.29.18 static rea
 create case passes the header's `u32 entity` at `msg+8` to createEntityWithId 0x987e50 at 0x9dbcb8, which keeps a
 nonzero id as given; an id already in the client storage's entity map is updated instead; docs/re/world.md "A mod's
 client-world program and wraps"). Bit-31 ids are **world-group**, not a client-local range:
-`group=(id>>20)&0x7ff`, `index=id&0x3ffff`. Two appeared on the real prediction channel; pure client-created id
-allocation is still open. Prediction carried a small control/touch-related set; observations do not identify every
+`group=(id>>20)&0x7ff`, `index=id&0x3ffff`. Two appeared on the real prediction channel; for client-made ids see
+"Client-local entity ids (Q6)" below. Prediction carried a small control/touch-related set; observations do not identify every
 member or establish a distance-only policy.
+
+**Client-local entity ids (Q6; dev.31 static pass, client 26430625) [static].** Every ECS entity id comes from
+`createEntityWithId` client `0x987e50` `u32(Storage*, u32 id, const SpawnRequest*, const void* mask)`. A nonzero id is
+used as given (bit-31 ids go to their world group, client `0x98884e`); id 0 takes the next value of that storage's own
+counter, `lock xadd dword [storage+0x498]` then +1 (client `0x988933..0x98893f`), the only atomic increment of `+0x498`
+in the exe; a nonzero id never moves it. Every storage starts the counter at `0x3ff` (Storage init client `0x95aec0`,
+from the ECS world setup `0x983140` that builds the per-kind storages), so the first allocated id is 1024 and 1..1023
+stay for players (slot + 1). The only other writer is the snapshot restore client `0x977e00` (from `0xa00de0`, one of
+32 saved ticks), which puts the counter back with the entity map. So the server, prediction and client storages each
+count 1024, 1025, ... on their own: **there is no client-local id range** (no high bit, no offset), and a purely
+client-made entity would take the same range the server hands out. The 8 direct call sites of `0x987e50`:
+ProcessClientMessage at `0x9dbcb8` (the header's id); player characters (slot + 1) at `0x98cfd6` (from `0x98cf90`,
+reached from the "[server]" player join `0xe627e0`) and `0x99a0a7` (in `0x999600`); world-group ids at `0x9d2a5e`
+(in `0x9d1e10`); a deferred create from a record that carries its own id at `0xa22bc3` (in `0xa22a70`, from the
+per-storage step pass `0xa2c660`, which skips prediction storages); and three id-0 sites: the World wrappers
+`0x984e50` (tail jump `0x984e63`) and `0x984e70` (`0x984ea9`), and `0x999600` at `0x99a0f9`. Four levels back, the
+wrappers' callers are server-side only (the player join `0xe627e0`, the "[save2]" loaders `0xe55370`, `0xe568d0`,
+`0xe58020` and their driver `0xe63fb0`); no ECS program update is within seven levels. This pass found **no path where
+a joined client makes an id-0 entity of its own**. Were there one, the two orders differ: a local id first, then the
+server's create of that id, takes ProcessClientMessage's update branch (the server's state lands on the local entity);
+a server id first, then a local allocation of it, makes createEntityWithId log that the id exists and return 0 (map
+find `0x9b4dc0` at `0x988954`, `0x98897c..0x988a40`): the local spawn is lost. Still open: whether a record queued for
+`0xa22a70` on a joined client carries id 0; the indirect callers of `0x999600` and `0x49ba10..0x49bd20`; whether a
+dedicated server restores its counter from the save (the server exe's twin, S `0x623ce0`, was not read). Client probe
+that settles it: hook `0x987e50` on a joined client and a host, log storage kind (`storage+8`: 0 server, 1 prediction,
+2 client), the requested id, the result and the caller for every call not from `0x9dbcb8`, and read the client
+storage's counter (`World+0xe179c0+0x498`) at the join and once a minute: `0x3ff` for a whole session with building,
+combat and riding means a joined client never allocates an ECS id of its own. The scans saw direct calls only (no
+stored pointer to `0x987e50` exists in the file).
 
 [seen] The host's own client **does use the session replication pipeline**, as machine 0: hosted SendCallback and
 ClientStore totals matched across shutdown boundaries (136137 sent / 136133 received channel-4 messages). It does
