@@ -172,7 +172,7 @@ after, so players joining get the same version through the existing join offer.
 | `pack server FILE --dir SERVER --yes [--optional ID=on\|off] [--no-settings] [--modpack-out DIR]` | the server part on a server folder |
 
 ## API for the launcher UI and the Crucible service (later briefs)
-Proposed Tauri commands (none exists yet; names follow `modpack_*`). Long ones are tasks (`TaskId`, progress on
+Tauri commands (launcher/src-tauri/src/commands/pack.rs; the network side is "The launcher's Crucible client" below). Long ones are tasks (`TaskId`, progress on
 `kiln://task`), as `modpack_install` is. Rust types are in `kiln_manage::modpack::pack`; all serialize camelCase.
 
 | Command | Arguments | Returns | Crate call |
@@ -206,14 +206,55 @@ deflate code too: a Kiln that changes its zip library may compress differently, 
 (Crucible checks the kdh1, not the archive bytes, for identity). A .kilnpack itself is the same bytes for the same
 input on one PC (entry times are the newest file time, `created` likewise), not across PCs; Crucible never needs that.
 
+## The launcher's Crucible client
+Code: `crates/kiln-manage/src/crucible/` (`mod.rs` client and flows, `sign.rs` the signed envelope, `links.rs` kiln://,
+`dev.rs` a local service), `launcher/src-tauri/src/commands/{crucible,pack}.rs` (contracts.md section 9: `pack_*`,
+`crucible_*`, event `kiln://crucible-link`).
+
+- **Off until a key is known.** Indexes are trusted only through Crucible's Ed25519 signature, checked against public keys
+  compiled in (`crucible::KEYS`). The list is empty until the owner approves the key the service makes at its first
+  deploy (DESIGN.md 13.6); with none, `crucible_status.enabled` is false and the UI shows no Crucible surface. That is
+  also the gate the design asks for until the privacy, terms and copyright pages are live.
+- **Hosts.** The API `https://frostdev.io/kiln/crucible/api/v1` (the only host that gets the Bearer session), the CDN
+  `https://cdn.frostdev.io` (indexes `m/<versionId>.json`, files `f/`, `l/`, `b/` by sha256), upload URLs only on
+  `*.r2.cloudflarestorage.com`. Everything goes through `net::Client` (https, port 443, public addresses, no redirects);
+  a URL from the service on another host is refused before anything is sent.
+- **Receiving** (no sign-in): a code (`H7QK-3MZP`, any case, with or without the dash), a share link, a pack link or a
+  kiln:// link -> `GET /codes/<code>` or `/packs/<slug>` -> the newest ready version's envelope from the CDN (the API's copy
+  when the CDN has none) -> `sign::open` (the key id must be a trusted key, the signature over the payload bytes, then
+  `check_index`; a payload naming another version is refused) -> the preview: what the Library lacks (`pack::lacking`:
+  entries that still hash to their kdh1 count as present), sizes, game build fit, the Kiln range, code, the trust
+  state. Install: the lacking archives download to `<data>/crucible/cache/` (size and sha256 checked; cached for later),
+  overrides by their sha256, then `pack::assemble` puts a .kilnpack together (Library folders + archive entries copied
+  compressed) and `pack::read` checks every kdh1 as for any pack; `pack::install` makes the instance. A creator still
+  uploading: `busy` with the progress. `count` (Settings "Count my installs", `crucibleStats`, on by default) sends the
+  anonymous install count.
+- **Sharing** (the Discord sign-in, its relay session as Bearer): `pack::build` from the profile (version `1.0.0`, then
+  the next patch; the change note "1 added, 1 updated" from the last share), `pack::mod_archive` per mod and
+  `pack::folder_archive` for a layer (deterministic, cached by sha256), `POST /quickshare` (or `POST /packs/<id>/versions`
+  for a profile shared before; a pack gone on Crucible is shared anew), PUT only what Crucible lacks (single PUT with its
+  signed headers, or multipart parts with their ETags), `POST /uploads/<id>/complete`. `<data>/crucible/shared.json`
+  remembers the pack per profile (the "Pack changed" pill: mods added, updated or switched, removed); a share stopped
+  midway is finished by the next press (`POST /uploads` for the same files).
+- **Updates**: `GET /packs/<id>/head` per Crucible instance (cached 5 minutes in the launcher), the new version fetched and
+  planned with `pack::plan_update`, applied with `pack::update` (conflicts, undo as above).
+- **Trust**: "Always trust packs from <creator>" is kept in `<data>/crucible/trust.json` by Discord id; the warning shows
+  every time.
+- **kiln:// links**: `kiln://crucible/<CODE>`, `kiln://crucible/pack/<slug>`. `--link <url>` (or a bare kiln:// argument,
+  nothing else) queues it in `<data>/crucible/inbox/`; the launcher holding `<data>/crucible/instance.lock` reads the
+  inbox every 0.5 s and emits `kiln://crucible-link`. Registered at start while Crucible is on (Kiln is kiln://'s only
+  handler): Linux `kiln-launcher-links.desktop` + xdg-mime, Windows `HKCU\Software\Classes\kiln`.
+- **A local service** (debug builds, or the `crucible-dev` feature): `KILN_CRUCIBLE_DEV="api=http://127.0.0.1:<port>/kiln/crucible/api/v1
+  cdn=http://127.0.0.1:<port>/<bucket> key=<base64>"` maps the local origins to made-up https hosts (`api.crucible.test`,
+  `cdn.crucible.test`) that `crucible::dev::LocalTransport` sends to 127.0.0.1 with the Host header the service signed
+  for. `CRUCIBLE_DIR=<service repo> node launcher/scripts/crucible-e2e.mjs` starts MinIO, the fake relay and the service and
+  runs the launcher's ignored end-to-end test against it.
+
 ## Not done here (later briefs)
-- the signed envelope around a downloaded index, and limiting downloads to cdn.frostdev.io (the Crucible client in
-  `crates/kiln-manage/src/crucible/`); installing from Crucible's split storage (index + archives the Library lacks)
-  rather than one zip;
-- the launcher UI (preview, Install and play, update banner, Pack Studio with its data editors and the `local.<pid>`
-  player data mod), the kiln:// links, the Deck screens;
 - engine mods whose settings live in their own folder (not the configDir) cannot carry overrides yet;
-- a pack's optional mods are imported into the Library even when off (so switching one on later needs no download).
+- a pack's optional mods are imported into the Library even when off (so switching one on later needs no download);
+- a pack also downloads its server-only mods (the assembled .kilnpack must hold every mod for its checks);
+- Pack Studio, the Crucible browse page, comments and upvotes in the launcher, "Make it public".
 
 ## Checks done
 `cargo test -p kiln-manage --features zip,http,server --test packs`: a deterministic build from a profile (same
