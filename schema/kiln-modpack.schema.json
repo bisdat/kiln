@@ -459,7 +459,13 @@
           "properties": {
             "settings": {
               "type": "object",
-              "description": "Merged into enshrouded_server.json ({gameSettings: {...}})."
+              "properties": {
+                "gameSettings": {
+                  "type": "object"
+                }
+              },
+              "additionalProperties": false,
+              "description": "Merged into enshrouded_server.json: gameSettings only (a server's name, ports, user groups with their passwords and bans never travel in a pack)."
             },
             "notes": {
               "type": "string"

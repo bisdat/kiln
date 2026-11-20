@@ -46,6 +46,10 @@ d = clone(); d.layer.path = "elsewhere"; mustNot(modpack, d, "layer path");
 d = clone(); d.overrides[0].mode = "append"; mustNot(modpack, d, "override mode");
 d = clone(); d.overrides[0].path = "../../etc/passwd"; mustNot(modpack, d, "override path");
 d = clone(); delete d.mods; mustNot(modpack, d, "mods required");
+d = clone(); d.overrides[0].size = -1; mustNot(modpack, d, "override size");
+d = clone(); d.overrides[0].size = 65537; mustNot(modpack, d, "override size at most 64 KiB");
+d = clone(); d.server.settings.userGroups = [{ name: "Admin", password: "x" }]; mustNot(modpack, d, "server settings: gameSettings only");
+d = clone(); d.server.settings.gameSettings = 3; mustNot(modpack, d, "server gameSettings is an object");
 // format 1 still needs its server object
 const f1 = read("../examples/kiln-modpack.json"); delete f1.server; mustNot(modpack, f1, "format 1 server required");
 mustNot(instance, { ...read("../examples/kiln-pack-instance.json"), sha256: "nope" }, "instance sha256");

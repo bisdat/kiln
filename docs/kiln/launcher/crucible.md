@@ -47,8 +47,8 @@ bytes and the same sha256):
 | `layer` | `{id: "pack.<id>", version: <pack version>, path: "layer", hash: kdh1, file?}` |
 | `order` | `kiln`: the creator's Kiln load order, layer last (the runtime orders by manifests; the layer's `loadAfter` puts it after every mod of the pack); `late`: native ids for chain.ini `[late]` |
 | `dropins` | drop-in folders the instance loads (a build writes none: an instance has only its pack's mods) |
-| `overrides[]` | `{path, mode, side, sha256}`: `mode` `merge-patch` (.json, RFC 7386), `ini` (.ini keys), `replace` (any other settings file: the whole file); `side` `both\|client\|server` |
-| `server` | `{settings: {gameSettings: {...}}, notes}`: merged into the server's enshrouded_server.json (kiln.settings' rules) |
+| `overrides[]` | `{path, mode, side, sha256, size?}`: `size` the file's bytes (every build writes it, a read checks it when present; Crucible needs it to share); `mode` `merge-patch` (.json, RFC 7386), `ini` (.ini keys), `replace` (any other settings file: the whole file); `side` `both\|client\|server` |
+| `server` | `{settings: {gameSettings: {...}}, notes}`: `settings` holds `gameSettings` only (a server's name, ports, user groups with their passwords and bans never travel: a pack would set them on every server it is put on), merged into the server's enshrouded_server.json (kiln.settings' rules) |
 
 No kiln.json in packs and no client world settings (decided).
 
@@ -57,9 +57,11 @@ No kiln.json in packs and no client world settings (decided).
 - the index's rules (ids, SemVer, paths, unique mods and overrides, `default` only on optional mods, credits with an
   https source, order and late naming the pack's own mods, override paths on the allowlist and modes fitting the file);
 - every entry belongs to a listed mod, the layer or a listed override; no symlinks, absolute or `..` paths, no two
-  entries differing only in case; at most 50 000 entries, 512 MiB a file, 4 GiB unpacked, 64 KiB an override and
+  entries one file on Windows or macOS (NFC + Unicode lower case: `A.json`/`a.json`, `Ä`/`ä`), no dot entries (kdh1
+  skips them, so no hash would cover one; the build never packs them), no Windows device names (`aux`, `nul.json`,
+  `COM1`); at most 50 000 entries, 512 MiB a file, 4 GiB unpacked, 64 KiB an override and
   1 MiB of overrides;
-- each mod's and the layer's kdh1 recomputed from the entries; each override's sha256; a Kiln mod carrying cook
+- each mod's and the layer's kdh1 recomputed from the entries; each override's sha256 (and size when given); a Kiln mod carrying cook
   outputs (`assets/cooked/`) is refused (they are made on each machine);
 - JSON and INI overrides must parse.
 The read also lists the mods with code files (.dll .exe .so .lua scripts ...) for the install warning.
@@ -68,9 +70,14 @@ The read also lists the mods with code files (.dll .exe .so .lua scripts ...) fo
 Only files below the profile's configDir with a settings extension (`txt ini cfg json toml yaml yml`), never
 `.schema/`, `native.json` (switches travel in the index), dot folders or logs; 64 KiB a file, 1 MiB in all. The
 build keeps only the keys the creator chose (`alpha.json:range,loot.smash`), replaces the home folder's path with `~`
-and refuses a file with something that looks private (a key named token, secret, password, api key, webhook, bearer or
-private_key with a text value, a Steam id, a Discord webhook URL): the message names the lines, the creator leaves
-those keys out. Crucible runs the same scan again on upload (later brief).
+and refuses a file with something that looks private: a key whose name says token, secret, password, passwd, pass,
+pwd, auth, api key, access key, private key, webhook, bearer, credential, cookie or session id holding text (numbers,
+switches and empty values are fine), or text shaped like a secret under any key (Discord webhook URLs, also
+`/api/v10/webhooks`, and bot tokens, Steam ids as 7656119... / `STEAM_0:1:n` / `[U:1:n]`, GitHub and Slack tokens, JWTs,
+bearer tokens, private keys). JSON files are read as JSON (by key, whatever the layout), other files by line; words
+in text ("the secret passage", an item called "Secret Stash") are no finding. The message names the keys (JSON) or
+lines, the creator leaves those keys out. The server settings and the layer's settings-like files get the same scan.
+Crucible runs the same scan again on upload (later brief).
 
 ## Building a pack from a profile
 `pack::build(dirs, BuildRequest, out_dir, progress) -> BuiltPack` (`kilnctl pack build`):
@@ -127,8 +134,13 @@ now.
 - **Conflicts** need a choice before anything is written: `resolve` maps `"<path>#<key>"` (as the plan names them, e.g.
   `"kiln-auto-loot.json#range"`) to `pack` or `mine`, `all` answers the rest. Without one the update is refused with
   `conflict` and the plan in the error's `detail`.
-- **Undo**: before writing, `pack/undo/` keeps the profile's meta.json, the config folder, instance.json and base/;
-  `pack::undo(dirs, pid)` (`kilnctl pack undo`) puts them back (once; the next update replaces it).
+- **All or nothing**: every file's merge is computed before anything is imported or written (a live file that does
+  not parse stops the update there). The instance as it was is copied to `pack/undo.new/` (meta.json, the config
+  folder, instance.json, base/); if a later step fails (the profile changed meanwhile, a file that cannot be written)
+  the mods, the config folder, base/ and instance.json come back from that copy and the error is returned. base/ is
+  replaced by moving the old one aside first (`base.old`, read if a crash left no base).
+- **Undo**: once the update stands, `pack/undo.new/` becomes `pack/undo/` (replacing the last one);
+  `pack::undo(dirs, pid)` (`kilnctl pack undo`) puts it back (once; the next update replaces it).
 - The game folder follows at the profile's next activation (Play activates), as for any profile change.
 
 `pack::diff(old, new) -> PackDiff` compares two versions of a pack (mods added/updated/removed, layer changed,
@@ -144,8 +156,8 @@ profile uses any more (the Library's clean-up removes them).
 the pack's server mods (`env.server` not unsupported, optional ones only when on) and the layer go into the Library and
 are synced into the server's folders with kiln.server's sync (`server::control::sync`: the launcher's mods there become
 exactly these; hand-placed folders stay; kinds without a server folder are listed in `leftOut`); the `both` and
-`server` overrides go into `<server>/kiln/config`; `server.settings` into enshrouded_server.json (refused while the
-server runs). With `modpackOut` the server modpack for players (format 1, [modpacks.md](modpacks.md)) is built right
+`server` overrides go into `<server>/kiln/config` (a side's own override over the `both` one, whatever the index
+order); `server.settings` into enshrouded_server.json (a running server is refused before any mod moves). With `modpackOut` the server modpack for players (format 1, [modpacks.md](modpacks.md)) is built right
 after, so players joining get the same version through the existing join offer.
 
 ## kilnctl pack
@@ -185,6 +197,15 @@ For the Crucible service: the index is this format; `mods[].file` and `layer.fil
 on cdn.frostdev.io; `crucible` carries the pack/version/slug/code; the credits are `mods[].credit`. The service's
 checks can run the same Rust (a `kiln crucible-check` CLI over `pack::read` and `pack::secret_findings`).
 
+Per-mod archives (`mods[].file`, stored once at f/<sha256>.zip for every pack): `pack::mod_archive(dirs, LibraryRef,
+out) -> {sha256, size}` zips a Library entry the same way on every PC: the entry folder's files at the zip's root (a
+plugin: its one .dll), the files a pack carries of it (no dot entries, no `assets/cooked/` of a Kiln mod), sorted
+bytewise, every entry dated 1980-01-01 00:00:00, mode 0644, deflate level 6. No file time or folder path reaches the
+bytes; kdh1 over the entries (for a plugin, the sha256 of the one file) is the entry's hash. The bytes depend on the
+deflate code too: a Kiln that changes its zip library may compress differently, which only costs one more upload
+(Crucible checks the kdh1, not the archive bytes, for identity). A .kilnpack itself is the same bytes for the same
+input on one PC (entry times are the newest file time, `created` likewise), not across PCs; Crucible never needs that.
+
 ## Not done here (later briefs)
 - the signed envelope around a downloaded index, and limiting downloads to cdn.frostdev.io (the Crucible client in
   `crates/kiln-manage/src/crucible/`); installing from Crucible's split storage (index + archives the Library lacks)
@@ -205,4 +226,9 @@ conflict is resolved, the merged file keeping its comment, undo, a different pac
 list; the server part (mods synced, overrides, game settings, the player modpack built and verified). Unit tests:
 `modpack::merge` (merge patch, INI, replace, three-way). `cargo test -p kilnctl`: argument parsing and the data lock of
 `pack` commands. Schema: `node schema/tests/kiln_pack.mjs` (examples and bad documents); `tests/contracts.rs` reads the
-examples. Not tried with a real game or server (the owner's tests).
+examples. Review fixes (tests/packs.rs and pack.rs unit tests): `overrides[].size` written and checked; server settings
+other than gameSettings refused; dot entries, device names and Unicode case twins refused; the secret scan's false
+positives and negatives; a side override over the both one in either index order; an update whose merge fails and one
+whose write fails both leave the instance as it was (mods, config, base, instance.json, no undo copy); per-mod
+archives the same bytes after file times change, kdh1 from the entries. Not tried with a real game or server (the
+owner's tests).
