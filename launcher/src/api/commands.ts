@@ -2299,7 +2299,7 @@ export const COMMANDS = [
   "community_posts", "community_post_seen", "community_post_solved", "community_post_delete", "community_presence_facts", "community_report_prepare", "community_report_send",
   "tester_status", "tester_join", "tester_leave", "tester_result_set", "tester_results_send", "community_steam_keyboard",
   "pack_inspect", "pack_install", "pack_instance", "pack_instances", "pack_update_plan", "pack_update", "pack_undo", "pack_uninstall", "pack_build", "pack_verify", "pack_diff", "pack_secret_scan", "pack_peek_format", "crucible_status", "crucible_open", "crucible_install", "crucible_updates", "crucible_update_plan", "crucible_update", "crucible_share", "crucible_shared", "crucible_trust", "crucible_trust_set", "crucible_links",
-  "studio_list", "studio_create", "studio_get", "studio_save", "studio_delete", "studio_credits_set", "studio_capture", "studio_capture_set", "studio_order", "studio_layer_files", "studio_layer_read", "studio_layer_write", "studio_layer_delete", "studio_layer_set", "studio_layer_lint", "studio_pick", "studio_fields", "studio_analyze", "studio_test", "studio_test_report", "studio_test_end", "studio_build", "studio_publish_check", "studio_publish", "studio_server_pack",
+  "studio_list", "studio_create", "studio_get", "studio_save", "studio_delete", "studio_credits_set", "studio_capture", "studio_capture_set", "studio_order", "studio_layer_files", "studio_layer_read", "studio_layer_write", "studio_layer_delete", "studio_layer_set", "studio_layer_lint", "studio_pick", "studio_fields", "studio_analyze", "studio_test", "studio_test_report", "studio_test_end", "studio_build", "studio_publish_check", "studio_publish", "studio_set_visibility", "studio_server_pack",
 ] as const;
 export type CommandName = (typeof COMMANDS)[number];
 
@@ -2723,7 +2723,7 @@ export const packInstall = (gameId: GameId, request: PackInstallRequest) => call
 export type StudioVisibility = "link" | "public";
 export interface StudioModChoice { dep: "required" | "optional"; default?: boolean; env?: PackEnv }
 export interface StudioOverrideSpec { path: string; side: PackSide; keys: string[] }
-export interface StudioPublishedVersion { version: string; id: string; published: string; visibility: StudioVisibility; file?: string }
+export interface StudioPublishedVersion { version: string; id: string; published: string; visibility: StudioVisibility; file?: string; pending?: boolean }
 export interface StudioPublished { pack: string; slug?: string; code?: string; url?: string; visibility: StudioVisibility; versions: StudioPublishedVersion[] }
 /** kiln-pack.json. */
 export interface PackSourceDoc {
@@ -2737,7 +2737,11 @@ export interface StudioMod {
   kind: ModKind; id: string; name: string; version: string; hash: string; enabled: boolean; side?: "client" | "server" | "both";
   dep: "required" | "optional"; default?: boolean; env: PackEnv; credit?: PackCredit;
 }
-export interface Studio { dir: string; source: PackSourceDoc; mods: StudioMod[]; credits: Record<string, PackCredit>; profileName?: string; layerFiles: number }
+export interface Studio {
+  dir: string; source: PackSourceDoc; mods: StudioMod[]; credits: Record<string, PackCredit>; profileName?: string; layerFiles: number;
+  /** Changes with anything a build reads (source, credits, layer files, profile): the analysis is made again. */
+  revision: string;
+}
 export interface StudioSummary { id: string; name: string; version: string; profile: ProfileId; mods: number; updated: string; published?: StudioPublished }
 export interface StudioNewPack { name: string; from?: ProfileId | null; id?: string }
 export interface StudioCaptureKey { key: string; value: Json; default?: Json; chosen: boolean; personal: boolean; secret?: string }
@@ -2772,7 +2776,12 @@ export interface PackCheckReport {
   catalog: boolean;
 }
 export interface StudioTestReport { profile?: ProfileId; ran: boolean; conflicts: string[]; problems: string[] }
-export interface StudioPublishRequest { version: string; changes?: string | null; visibility: StudioVisibility; attest: boolean; gameBuilds?: number[] }
+export interface StudioPublishRequest {
+  version: string; changes?: string | null; visibility: StudioVisibility; attest: boolean; gameBuilds?: number[];
+  /** Publish as a new pack although the source names one (deleted or taken down on Crucible). */
+  fresh?: boolean;
+}
+export interface StudioVisibilityResult { pack: CruciblePack; public: boolean; needs: string[] }
 export interface StudioPublishResult {
   pack: CruciblePack; version: CrucibleVersion; files: number; uploaded: number; skipped: number;
   /** The pack is public now. */
@@ -2788,7 +2797,7 @@ export const studioCreate = (request: StudioNewPack) => call<Studio>("studio_cre
 export const studioGet = (packId: string) => call<Studio>("studio_get", { packId });
 /** Saves the source (id, profile, published and test fields stay as stored). */
 export const studioSave = (packId: string, source: PackSourceDoc) => call<Studio>("studio_save", { packId, source });
-export const studioDelete = (packId: string) => call<null>("studio_delete", { packId });
+export const studioDelete = (packId: string, gameId?: GameId | null) => call<null>("studio_delete", { packId, gameId: gameId ?? null });
 export const studioCreditsSet = (packId: string, credits: Record<string, PackCredit>) => call<Studio>("studio_credits_set", { packId, credits });
 /** The profile's settings files and the keys that differ from the mods' defaults (with a game: copied back first). */
 export const studioCapture = (packId: string, gameId?: GameId | null) => call<StudioCaptureFile[]>("studio_capture", { packId, gameId: gameId ?? null });
@@ -2811,7 +2820,7 @@ export const studioAnalyze = (packId: string) => call<TaskId>("studio_analyze", 
 /** A task (result PackInstallResult): "<name> (test)" built, installed and activated; then Play. */
 export const studioTest = (packId: string, gameId?: GameId | null) => call<TaskId>("studio_test", { packId, gameId: gameId ?? null });
 export const studioTestReport = (packId: string, gameId?: GameId | null) => call<StudioTestReport>("studio_test_report", { packId, gameId: gameId ?? null });
-export const studioTestEnd = (packId: string) => call<null>("studio_test_end", { packId });
+export const studioTestEnd = (packId: string, gameId?: GameId | null) => call<null>("studio_test_end", { packId, gameId: gameId ?? null });
 /** "Save as file" (a task; result BuiltPack). */
 export const studioBuild = (packId: string, outDir: string) => call<TaskId>("studio_build", { packId, outDir });
 /** What publishing would still need (empty: ready); sends nothing. */
@@ -2819,5 +2828,8 @@ export const studioPublishCheck = (packId: string, request: StudioPublishRequest
 /** A task (result StudioPublishResult); auth_failed when not signed in. */
 export const studioPublish = (packId: string, request: StudioPublishRequest, gameId?: GameId | null) =>
   call<TaskId>("studio_publish", { packId, request, gameId: gameId ?? null });
+/** "Make public" / "Link only" for a published pack (no new version); Crucible's refusal comes back as needs. */
+export const studioSetVisibility = (packId: string, visibility: StudioVisibility, attest: boolean) =>
+  call<StudioVisibilityResult>("studio_set_visibility", { packId, visibility, attest });
 /** A server pack from a published version, on one of the launcher's servers (a task; result PackServerInstallResult). */
 export const studioServerPack = (packId: string, version: string, serverId: ServerId) => call<TaskId>("studio_server_pack", { packId, version, serverId });

@@ -16,18 +16,24 @@ export default function CreditsTab({ studio: st }: { studio: Studio }) {
   const qc = useQueryClient();
   const an = useAnalysisOf(st);
   const [rows, setRows] = useState<Record<string, PackCredit>>({});
+  // rows the creator typed in keep their text when the analysis or the pack is read again
+  const [touched, setTouched] = useState<Record<string, true>>({});
   const [busy, setBusy] = useState(false);
+  const edit = (id: string, c: PackCredit) => { setTouched((x) => ({ ...x, [id]: true })); setRows((x) => ({ ...x, [id]: c })); };
   const found = useMemo(() => new Map<string, PackCreditRow>((an.report?.credits ?? []).map((c) => [c.id, c])), [an.report]);
   // the saved credit, else the analysis' prefill
   useEffect(() => {
-    const next: Record<string, PackCredit> = {};
-    for (const m of st.mods) {
-      const own = st.credits[m.id];
-      const c = found.get(m.id);
-      next[m.id] = own ?? { author: c?.author ?? "", source: c?.source ?? "", ...(c?.match ? { match: c.match } : {}) };
-    }
-    setRows(next);
-  }, [st.mods, st.credits, found]);
+    setRows((prev) => {
+      const next: Record<string, PackCredit> = {};
+      for (const m of st.mods) {
+        if (touched[m.id] && prev[m.id]) { next[m.id] = prev[m.id]; continue; }
+        const own = st.credits[m.id];
+        const c = found.get(m.id);
+        next[m.id] = own ?? { author: c?.author ?? "", source: c?.source ?? "", ...(c?.match ? { match: c.match } : {}) };
+      }
+      return next;
+    });
+  }, [st.mods, st.credits, found, touched]);
   const missing = st.mods.filter((m) => !(rows[m.id]?.author?.trim() && https(rows[m.id]?.source ?? "")));
   const changed = st.mods.some((m) => JSON.stringify(rows[m.id] ?? null) !== JSON.stringify(st.credits[m.id] ?? null) && (rows[m.id]?.author || rows[m.id]?.source));
   const save = async () => {
@@ -40,6 +46,7 @@ export default function CreditsTab({ studio: st }: { studio: Studio }) {
       }).filter(([, c]) => (c as PackCredit).author || (c as PackCredit).source));
       const next = await api.studioCreditsSet(st.source.id, clean);
       qc.setQueryData(sk.get(st.source.id), next);
+      setTouched({});
       toast.ok(t("studio.credits.saved"));
     } catch (e) { toast.error(e, t("studio.credits.saveFailed")); } finally { setBusy(false); }
   };
@@ -47,7 +54,7 @@ export default function CreditsTab({ studio: st }: { studio: Studio }) {
     <section className="kst-section" data-testid="studio-credits">
       <div className="kst-row kst-between">
         <p className="kst-p">{t("studio.credits.lead")}</p>
-        <Button size="s" variant="ghost" loading={an.running} onClick={() => void analyze(st.source.id, st.source.updated)}>{t("studio.recheck")}</Button>
+        <Button size="s" variant="ghost" loading={an.running} onClick={() => void analyze(st.source.id, st.revision)}>{t("studio.recheck")}</Button>
       </div>
       {an.running && !an.report && <Spinner />}
       <table className="kst-table kst-credits">
@@ -62,9 +69,9 @@ export default function CreditsTab({ studio: st }: { studio: Studio }) {
               <tr key={m.kind + ":" + m.id} data-testid={"studio-credit-" + m.id}>
                 <td>{m.name} <span className="kst-dim kst-mono">{m.version}</span></td>
                 <td><TextInput value={r.author} placeholder="?" aria-label={t("studio.credits.authorAria", { name: m.name })} data-testid={"studio-author-" + m.id}
-                  onChange={(e) => setRows((x) => ({ ...x, [m.id]: { ...r, author: e.target.value } }))} /></td>
+                  onChange={(e) => edit(m.id, { ...r, author: e.target.value })} /></td>
                 <td><TextInput value={r.source} placeholder="https://" invalid={bad} aria-label={t("studio.credits.sourceAria", { name: m.name })} data-testid={"studio-source-" + m.id}
-                  onChange={(e) => setRows((x) => ({ ...x, [m.id]: { ...r, source: e.target.value } }))} /></td>
+                  onChange={(e) => edit(m.id, { ...r, source: e.target.value })} /></td>
                 <td>{ok && f && r.author === (f.author ?? "") && r.source === (f.source ?? "")
                   ? <span>{t(matchWord(f.match))} {f.confidence !== "certain" && <Badge tone={f.confidence === "conflict" ? "err" : "warn"}>{t(confidenceWord(f.confidence))}</Badge>}</span>
                   : ok ? <span>{t("studio.match.manual")}</span>

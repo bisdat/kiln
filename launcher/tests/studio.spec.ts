@@ -112,8 +112,14 @@ test("test this pack: a test instance, Play, and what the game reported", async 
   await expect(page.getByTestId("studio-test-report")).toContainText("Storm_Ash");
   await shot(page, "desktop-studio-test");
   expect((await state(page))[0].source.testProfile).toBe("ember-run-test");
+  // again: the loaded test instance goes back to the pack's profile first, then the new one is made (the game is passed)
+  await page.getByTestId("studio-test-make").click();
+  await expect.poll(async () => (await requests(page)).filter((r) => r.cmd === "studio_test").length).toBe(2);
+  await expect(page.getByTestId("studio-test-make")).toBeEnabled({ timeout: 15_000 });
   await page.getByTestId("studio-test-end").click();
   await expect(page.getByTestId("studio-test-play")).toHaveCount(0);
+  const end = (await requests(page)).filter((r) => r.cmd === "studio_test_end");
+  expect(end[0].args.gameId).toBeTruthy();
 });
 
 test("credits: prefilled from the analysis, the rest filled in", async ({ page }) => {
@@ -177,15 +183,57 @@ test("a public pack's update is two clicks: Publish tab, Publish", async ({ page
   expect(pub[0].args.request).toMatchObject({ version: "1.0.1", visibility: "public", attest: true });
 });
 
-test("Crucible off hides Studio; the Deck has no Studio", async ({ page }) => {
+test("Crucible not ready for public yet: the pack stays link-only with the reason, then Make public", async ({ page }) => {
+  await open(page, "/?mock=1&discord=in&studio=notready#/studio/ember-run/credits");
+  // complete the credits first
+  const ids = await page.locator("[data-testid^=studio-credit-]").evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.testid!.replace("studio-credit-", "")));
+  for (const id of ids) {
+    if ((await page.getByTestId("studio-author-" + id).inputValue()) === "") {
+      await page.getByTestId("studio-author-" + id).fill("someone");
+      await page.getByTestId("studio-source-" + id).fill("https://www.nexusmods.com/enshrouded/mods/400");
+    }
+  }
+  await page.getByTestId("studio-credits-save").click();
+  await expect(page.getByTestId("studio-credits-state")).toContainText("Every mod is credited");
+  await page.getByTestId("studio-tab-publish").click();
+  await page.getByTestId("studio-vis-public").check();
+  await page.getByTestId("studio-attest").check();
+  await page.getByTestId("studio-publish-go").click();
+  await expect(page.getByTestId("studio-vis-needs")).toContainText("checks are still running", { timeout: 15_000 });
+  await shot(page, "desktop-studio-not-ready");
+  await page.getByTestId("studio-set-visibility").click();
+  await expect(page.getByTestId("studio-state")).toHaveText(/public/i);
+  const sv = (await requests(page)).filter((r) => r.cmd === "studio_set_visibility");
+  expect(sv.map((r) => r.args)).toEqual([{ packId: "ember-run", visibility: "public", attest: true }]);
+});
+
+test("a pack deleted on Crucible: publish says so and only Publish as a new pack goes on", async ({ page }) => {
+  await open(page, "/?mock=1&discord=in&studio=published,gone#/studio/ember-run/publish");
+  await page.getByTestId("studio-publish-go").click();
+  await expect(page.getByTestId("studio-publish-go")).toHaveText("Publish as a new pack");
+  await shot(page, "desktop-studio-gone");
+  await page.getByTestId("studio-publish-go").click();
+  await expect(page.getByTestId("studio-published-link")).toBeVisible({ timeout: 15_000 });
+  const pub = (await requests(page)).filter((r) => r.cmd === "studio_publish");
+  expect(pub.map((r) => (r.args.request as { fresh?: boolean }).fresh)).toEqual([false, true]);
+});
+
+test("Crucible off hides Studio", async ({ page }) => {
   await open(page, "/?mock=1&crucible=off#/");
   await expect(page.locator(".k-nav")).not.toContainText("Studio");
   await page.goto("/?mock=1&crucible=off#/studio");
   await expect(page).toHaveURL(/#\/$/);
   await open(page, "/?mock=1#/");
   await expect(page.locator(".k-nav")).toContainText("Studio");
-  await page.goto("/?deck=steamdeck#/");
-  await expect(page.locator('[data-deck-screen="home"]')).toBeVisible();
-  await expect(page.locator("body")).not.toContainText("Pack Studio");
-  await shot(page, "deck-home-no-studio");
+});
+
+test.describe("Deck", () => {
+  test.use({ viewport: { width: 1280, height: 800 } });
+  test("the Deck has no Studio (Studio-made packs install like any other pack)", async ({ page }) => {
+    await page.goto("/?deck=steamdeck#/");
+    await expect(page.locator('[data-deck-screen="home"]')).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator("body")).not.toContainText("Pack Studio");
+    await expect(page.locator("body")).not.toContainText("Studio");
+    await shot(page, "deck-home-no-studio");
+  });
 });

@@ -5487,7 +5487,13 @@
       "isPublic": "Pubblico su Crucible",
       "isLink": "Pubblicato, solo link",
       "history": "Versioni pubblicate",
-      "toServer": "Metti su un server"
+      "toServer": "Metti su un server",
+      "makePublic": "Rendi pubblico",
+      "makeLink": "Rendi solo link",
+      "goFresh": "Pubblica come nuovo pack",
+      "goneTitle": "Questo pack non è più su Crucible",
+      "gone": "Lì è stato eliminato o rimosso. Pubblicare crea un nuovo pack con un nuovo link e codice.",
+      "notYetPublic": "Non ancora pubblico"
     },
     "serverPack": {
       "title": "{name} {version} su un server",

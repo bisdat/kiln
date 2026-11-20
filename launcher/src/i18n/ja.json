@@ -5361,7 +5361,13 @@
       "isPublic": "Crucible で公開中",
       "isLink": "公開済み（リンクのみ）",
       "history": "公開したバージョン",
-      "toServer": "サーバーに入れる"
+      "toServer": "サーバーに入れる",
+      "makePublic": "公開する",
+      "makeLink": "リンクのみにする",
+      "goFresh": "新しいパックとして公開",
+      "goneTitle": "このパックはもう Crucible にありません",
+      "gone": "Crucible で削除または取り下げられました。公開すると新しいリンクとコードの新しいパックになります。",
+      "notYetPublic": "まだ公開されていません"
     },
     "serverPack": {
       "title": "{name} {version} をサーバーへ",

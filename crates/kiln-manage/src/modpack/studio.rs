@@ -75,6 +75,10 @@ pub struct PublishedVersion {
     /// The .kilnpack kept in versions/ (a server pack is built from it).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub file: Option<String>,
+    /// Crucible has the version but the publish did not finish (an upload, the credits or the visibility failed): the
+    /// next publish of the same version resumes it instead of making another.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub pending: bool,
 }
 
 /// Where the pack is on Crucible.
@@ -183,6 +187,9 @@ pub struct Studio {
     pub profile_name: Option<String>,
     /// Files in layer/content.
     pub layer_files: usize,
+    /// Changes with anything a build reads (the source, the credits, the layer files, the profile): the UI's analysis
+    /// is made again when it differs.
+    pub revision: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -318,10 +325,24 @@ pub fn init(dirs: &DataDirs, dir: &Path, req: &NewPack) -> Result<Studio> {
         Some(id) => id.clone(),
         None => id_from_name(&name),
     };
-    let profile = match &req.from {
-        Some(pid) => crate::profile::get(dirs, pid)?,
-        None => crate::profile::create(dirs, &name, None)?,
+    if !valid_id(&id) {
+        return Err(Error::invalid(format!("not a pack id: {id}")));
+    }
+    if name.chars().count() > 128 {
+        return Err(Error::invalid("the pack needs a name (at most 128 characters)"));
+    }
+    let (profile, made) = match &req.from {
+        Some(pid) => (crate::profile::get(dirs, pid)?, false),
+        None => (crate::profile::create(dirs, &name, None)?, true),
     };
+    let r = init_with(dirs, dir, id, name, &profile);
+    if r.is_err() && made {
+        let _ = crate::profile::delete(dirs, &profile.id);
+    }
+    r
+}
+
+fn init_with(dirs: &DataDirs, dir: &Path, id: String, name: String, profile: &crate::profile::Profile) -> Result<Studio> {
     let now = crate::util::now_rfc3339();
     let s = PackSource {
         format: SOURCE_FORMAT,
@@ -372,13 +393,19 @@ pub fn create(dirs: &DataDirs, req: &NewPack) -> Result<Studio> {
 pub fn open(dirs: &DataDirs, dir: &Path) -> Result<Studio> {
     let source = read_source(dir)?;
     let credits = read_credits(dir)?;
-    let (mods, profile_name) = match crate::profile::get(dirs, &source.profile) {
-        Ok(p) => (mods_of(dirs, &p, &source, &credits)?, Some(p.name)),
-        Err(e) if e.code == ErrorCode::NotFound => (Vec::new(), None),
+    let (mods, profile_name, profile_stamp) = match crate::profile::get(dirs, &source.profile) {
+        Ok(p) => (mods_of(dirs, &p, &source, &credits)?, Some(p.name.clone()), format!("{}:{}", p.generation, p.updated)),
+        Err(e) if e.code == ErrorCode::NotFound => (Vec::new(), None, String::new()),
         Err(e) => return Err(e),
     };
-    let layer_files = layer_files(dir)?.len();
-    Ok(Studio { dir: dir.to_path_buf(), source, mods, credits, profile_name, layer_files })
+    let files = layer_files(dir)?;
+    let mut rev = format!("{}|{}|{}|{}", source.updated, serde_json::to_string(&credits)?, profile_stamp, serde_json::to_string(&source.overrides)?);
+    for f in &files {
+        let t = std::fs::metadata(dir.join(LAYER_DIR).join(&f.path)).and_then(|m| m.modified()).map(crate::util::unix).unwrap_or(0);
+        rev.push_str(&format!("|{}:{}:{t}", f.path, f.size));
+    }
+    let revision = crate::hash::sha256_hex(rev.as_bytes())[..16].to_string();
+    Ok(Studio { dir: dir.to_path_buf(), source, mods, credits, profile_name, layer_files: files.len(), revision })
 }
 
 fn mods_of(dirs: &DataDirs, p: &crate::profile::Profile, s: &PackSource, credits: &BTreeMap<String, Credit>) -> Result<Vec<StudioMod>> {
@@ -470,9 +497,15 @@ pub fn save(dirs: &DataDirs, dir: &Path, mut next: PackSource) -> Result<Studio>
 
 /// The credits (by mod id). A row is kept as given; public publishing checks they are complete.
 pub fn set_credits(dirs: &DataDirs, dir: &Path, credits: &BTreeMap<String, Credit>) -> Result<Studio> {
-    read_source(dir)?;
+    let s = read_source(dir)?;
+    let ids: std::collections::BTreeSet<String> = crate::profile::get(dirs, &s.profile)
+        .map(|p| ModKind::ALL.iter().flat_map(|k| p.mods.list(*k).iter().map(|m| m.id.clone())).collect())
+        .unwrap_or_default();
     let mut clean = BTreeMap::new();
     for (id, c) in credits {
+        if !ids.contains(id) {
+            continue;
+        }
         let author = c.author.trim().to_string();
         let source = c.source.trim().to_string();
         if author.is_empty() && source.is_empty() {
@@ -507,11 +540,9 @@ pub fn public_needs(st: &Studio) -> Vec<String> {
 
 /// Removes a launcher pack source: its folder goes to backups/studio/, its test instance is removed. The profile it
 /// was made from stays.
-pub fn delete(dirs: &DataDirs, dir: &Path) -> Result<()> {
+pub fn delete(dirs: &DataDirs, dir: &Path, game: Option<&crate::game::GameInstall>) -> Result<()> {
     let s = read_source(dir)?;
-    if let Some(t) = &s.test_profile {
-        let _ = pack::uninstall(dirs, t);
-    }
+    drop_test(dirs, &s, game)?;
     let dest = dirs.backups().join(DIR).join(format!("{}-{}", s.id, crate::util::now_rfc3339().replace([':', '-'], "")));
     if let Some(d) = dest.parent() {
         std::fs::create_dir_all(d).map_err(crate::util::io_at(d, "creating"))?;
@@ -545,7 +576,8 @@ pub fn build_request(st: &Studio) -> BuildRequest {
         changes: s.changes.clone(),
         optional,
         env,
-        credits: st.credits.iter().filter(|(_, c)| credit_complete(Some(c))).map(|(k, c)| (k.clone(), c.clone())).collect(),
+        // a credit of a mod the profile no longer has would make the build refuse
+        credits: st.credits.iter().filter(|(k, c)| credit_complete(Some(c)) && st.mods.iter().any(|m| &m.id == *k)).map(|(k, c)| (k.clone(), c.clone())).collect(),
         layer: (layer_files(&st.dir).map(|f| !f.is_empty()).unwrap_or(false)).then_some(layer),
         overrides: s.overrides.clone(),
         server_settings: s.server_settings.clone().filter(|v| v.get("gameSettings").and_then(Value::as_object).is_some_and(|m| !m.is_empty())),
@@ -556,12 +588,23 @@ pub fn build_request(st: &Studio) -> BuildRequest {
 /// Builds the source's .kilnpack into out_dir (default <folder>/out).
 #[cfg(feature = "zip")]
 pub fn build(dirs: &DataDirs, dir: &Path, out_dir: Option<&Path>, progress: &mut dyn Progress) -> Result<BuiltPack> {
+    build_as(dirs, dir, None, out_dir, progress)
+}
+
+/// [build] with another version than the source's (kilnctl pack build DIR --version: the source keeps its own).
+#[cfg(feature = "zip")]
+pub fn build_as(dirs: &DataDirs, dir: &Path, version: Option<&str>, out_dir: Option<&Path>, progress: &mut dyn Progress) -> Result<BuiltPack> {
     let st = open(dirs, dir)?;
     if st.profile_name.is_none() {
         return Err(Error::not_found(format!("the profile this pack is made from ({}) is gone", st.source.profile)));
     }
     let out = out_dir.map(Path::to_path_buf).unwrap_or_else(|| dir.join("out"));
-    pack::build(dirs, &build_request(&st), &out, progress)
+    let mut req = build_request(&st);
+    if let Some(v) = version {
+        crate::semver::SemVersion::parse(v).map_err(|_| Error::invalid(format!("{v} is not a version like 1.2.0")))?;
+        req.version = v.to_string();
+    }
+    pack::build(dirs, &req, &out, progress)
 }
 
 /// Keeps a built version in versions/ (a server pack is made from it later). Returns its file name.
@@ -590,7 +633,17 @@ pub fn version_file(dir: &Path, version: &str) -> Result<PathBuf> {
     Ok(p)
 }
 
-/// Records a publish: the pack on Crucible and the version.
+/// Records where a publish stands before it is finished (the pack on Crucible, the version pending): a failed publish
+/// resumes from here instead of making another pack.
+pub fn record_pending(dir: &Path, published: Published) -> Result<PackSource> {
+    let mut s = read_source(dir)?;
+    s.published = Some(published);
+    s.updated = crate::util::now_rfc3339();
+    write_source(dir, &s)?;
+    Ok(s)
+}
+
+/// Records a finished publish: the pack on Crucible and the version.
 pub fn record_published(dir: &Path, published: Published) -> Result<PackSource> {
     let mut s = read_source(dir)?;
     s.visibility = published.visibility;
@@ -1142,17 +1195,30 @@ pub fn record_test(dir: &Path, profile: Option<String>) -> Result<PackSource> {
     Ok(s)
 }
 
+/// Removes the last test instance; a game that has it active goes back to the pack's own profile first (an instance
+/// that is active cannot be removed).
+fn drop_test(dirs: &DataDirs, s: &PackSource, game: Option<&crate::game::GameInstall>) -> Result<()> {
+    let Some(old) = &s.test_profile else { return Ok(()) };
+    if let Some(g) = game
+        && crate::profile::active(dirs, g).ok().flatten().is_some_and(|a| &a.profile_id == old)
+    {
+        crate::profile::activate(dirs, &s.profile, g)?;
+    }
+    match pack::uninstall(dirs, old) {
+        Ok(_) => Ok(()),
+        Err(e) if e.code == ErrorCode::NotFound => Ok(()),
+        Err(e) if e.code == ErrorCode::Refused => Err(err(ErrorCode::Refused, format!("the test instance is still the loaded profile of a game: load {} again first ({})", s.name, e.message))),
+        Err(e) => Err(e),
+    }
+}
+
 /// "Test this pack": the source built and installed as an instance of its own ("<name> (test)"), replacing the last
 /// test instance; with a game, a save backup and activation (then Play starts it).
 #[cfg(feature = "zip")]
 pub fn test(dirs: &DataDirs, dir: &Path, game: Option<&crate::game::GameInstall>, progress: &mut dyn Progress) -> Result<pack::InstallResult> {
     let s = read_source(dir)?;
-    if let Some(old) = &s.test_profile {
-        match pack::uninstall(dirs, old) {
-            Ok(_) => {}
-            Err(e) if e.code == ErrorCode::NotFound => {}
-            Err(e) => return Err(e),
-        }
+    if s.test_profile.is_some() {
+        drop_test(dirs, &s, game)?;
         record_test(dir, None)?;
     }
     let tmp = dir.join("out").join("test");
@@ -1172,16 +1238,10 @@ pub fn test(dirs: &DataDirs, dir: &Path, game: Option<&crate::game::GameInstall>
     Ok(r)
 }
 
-/// Removes the test instance.
-pub fn test_end(dirs: &DataDirs, dir: &Path) -> Result<()> {
+/// Removes the test instance (a game that has it loaded goes back to the pack's own profile).
+pub fn test_end(dirs: &DataDirs, dir: &Path, game: Option<&crate::game::GameInstall>) -> Result<()> {
     let s = read_source(dir)?;
-    if let Some(t) = &s.test_profile {
-        match pack::uninstall(dirs, t) {
-            Ok(_) => {}
-            Err(e) if e.code == ErrorCode::NotFound => {}
-            Err(e) => return Err(e),
-        }
-    }
+    drop_test(dirs, &s, game)?;
     record_test(dir, None).map(|_| ())
 }
 

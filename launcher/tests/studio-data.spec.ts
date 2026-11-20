@@ -227,7 +227,9 @@ test("Raw JSON: make a file, break it (an error), fix it, rename it, delete it",
   await shot(page, "data-raw");
   await page.getByTestId("data-raw-delete").click();
   const dialog = page.getByRole("dialog");
-  const word = dialog.locator("input");
+  await expect(dialog).toBeVisible();
+  // a typed confirmation only when the player turned it on (Settings); a hidden input is not one
+  const word = dialog.getByRole("textbox");
   if (await word.count()) await word.first().fill("twigs.json");
   await dialog.getByRole("button", { name: "Delete" }).click();
   await expect(page.getByTestId("data-raw-file-content/twigs.json")).toHaveCount(0);

@@ -12,7 +12,7 @@ const NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 export function layerPath(name: string): string | null {
   let n = name.trim().replace(/^content\//, "");
   if (!/\.jsonc?$/i.test(n)) n += ".json";
-  return NAME.test(n) && n.length <= 120 ? "content/" + n : null;
+  return NAME.test(n) && n.length <= 96 ? "content/" + n : null;
 }
 const EMPTY = '{\n  "format": 1\n}\n';
 

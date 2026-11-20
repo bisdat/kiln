@@ -22,12 +22,25 @@ export function refreshStudio(qc: QueryClient, id: string) {
   for (const k of [sk.list, sk.get(id), sk.capture(id), sk.order(id), sk.layer(id), sk.lint(id), ["profile_list"], ["profile_get"], ["profile_resolve"], ["library_list"]]) void qc.invalidateQueries({ queryKey: k });
 }
 
-/** Saves a changed source; the answer replaces the cached pack at once. */
+/** The source as the cache has it now (with edits not answered yet): a second quick change builds on the first. */
+export function latestSource(qc: QueryClient, id: string, fallback: PackSourceDoc): PackSourceDoc {
+  return qc.getQueryData<Studio>(sk.get(id))?.source ?? fallback;
+}
+
+/** Saves a changed source: the cache shows it at once, the answer replaces it; one save at a time per pack. */
 export function useSaveSource(id: string) {
   const qc = useQueryClient();
   return useMutation({
+    mutationKey: ["studio_save", id],
+    scope: { id: "studio_save:" + id },
+    onMutate: (source: PackSourceDoc) => {
+      const cur = qc.getQueryData<Studio>(sk.get(id));
+      if (cur) qc.setQueryData(sk.get(id), { ...cur, source });
+      return { cur };
+    },
     mutationFn: (source: PackSourceDoc) => api.studioSave(id, source),
     onSuccess: (st: Studio) => { qc.setQueryData(sk.get(id), st); void qc.invalidateQueries({ queryKey: sk.list }); },
+    onError: () => { void qc.invalidateQueries({ queryKey: sk.get(id) }); },
   });
 }
 
@@ -62,8 +75,8 @@ export async function analyze(id: string, stamp: string): Promise<PackCheckRepor
 /** The analysis of the pack as it is (made again when the source changed since). */
 export function useAnalysisOf(st: Studio | undefined, auto = true): Analysis & { stale: boolean } {
   const a = useAnalysis((s) => (st ? s.by[st.source.id] : undefined)) ?? EMPTY;
-  const stale = !!st && a.stamp !== st.source.updated;
-  if (auto && st && stale && !a.running && !a.error) queueMicrotask(() => void analyze(st.source.id, st.source.updated));
+  const stale = !!st && a.stamp !== st.revision;
+  if (auto && st && stale && !a.running && !a.error) queueMicrotask(() => void analyze(st.source.id, st.revision));
   return { ...a, stale };
 }
 

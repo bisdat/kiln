@@ -152,7 +152,7 @@ function StudioPack({ packId, tab }: { packId: string; tab: StudioTab }) {
         <ConfirmDanger open title={t("studio.deleteTitle", { name: s.name })} onClose={() => setDel(false)} action={t("common.delete")} word={s.id} relaxable
           message={t("studio.deleteText")}
           onConfirm={async () => {
-            try { await api.studioDelete(packId); refreshStudio(qc, packId); nav("/studio"); } catch (e) { toast.error(e); throw e; }
+            try { await api.studioDelete(packId, game?.id ?? null); refreshStudio(qc, packId); nav("/studio"); } catch (e) { toast.error(e); throw e; }
           }} />
       )}
     </Page>

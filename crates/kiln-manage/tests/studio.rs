@@ -93,7 +93,7 @@ fn a_pack_starts_from_a_profile_or_empty_and_ids_stay_unique() {
     let e = studio::init(&dirs, &st.dir, &NewPack { name: "X".into(), ..Default::default() }).unwrap_err();
     assert_eq!(e.code, ErrorCode::Conflict);
     // delete moves it to backups and keeps the profile
-    studio::delete(&dirs, &again.dir).unwrap();
+    studio::delete(&dirs, &again.dir, None).unwrap();
     assert!(!again.dir.exists());
     assert!(profile::get(&dirs, &again.source.profile).is_ok());
 }
@@ -212,7 +212,7 @@ fn the_source_builds_with_its_choices_layer_and_credits() {
     // a kept version and the publish record move the next version on
     let name = studio::keep_version(&st.dir, &a).unwrap();
     assert_eq!(name, "ember-run-1.2.0.kilnpack");
-    let s = studio::record_published(&st.dir, studio::Published { pack: "pck_1".into(), visibility: Visibility::Link, versions: vec![studio::PublishedVersion { version: "1.2.0".into(), id: "pv_1".into(), published: "now".into(), visibility: Visibility::Link, file: Some(name) }], ..Default::default() }).unwrap();
+    let s = studio::record_published(&st.dir, studio::Published { pack: "pck_1".into(), visibility: Visibility::Link, versions: vec![studio::PublishedVersion { version: "1.2.0".into(), id: "pv_1".into(), published: "now".into(), visibility: Visibility::Link, file: Some(name), pending: false }], ..Default::default() }).unwrap();
     assert_eq!(s.version, "1.2.1");
     assert!(s.changes.is_none());
     assert_eq!(studio::version_file(&st.dir, "1.2.0").unwrap(), st.dir.join("versions/ember-run-1.2.0.kilnpack"));
@@ -264,7 +264,7 @@ fn a_test_instance_is_the_built_pack_installed_and_replaced_by_the_next() {
     assert_eq!(r.problems.len(), 1);
     assert!(r.problems[0].contains("something broke"));
 
-    studio::test_end(&dirs, &st.dir).unwrap();
+    studio::test_end(&dirs, &st.dir, None).unwrap();
     assert_eq!(profile::get(&dirs, &second.profile.id).unwrap_err().code, ErrorCode::NotFound);
     assert!(studio::read_source(&st.dir).unwrap().test_profile.is_none());
 }
@@ -283,4 +283,65 @@ fn the_analysis_prefills_credits_and_finds_conflicts_with_the_layer() {
     assert!(credits.iter().all(|c| c.get("match").is_some() && c.get("confidence").is_some()));
     assert!(v["pack"]["id"] == "ember-run");
     assert!(!st.dir.join("out/analyze/ember-run-1.0.0.kilnpack").exists(), "the analysed build is not kept");
+}
+
+#[test]
+fn a_credit_of_a_mod_that_left_and_a_kept_version_do_not_break_the_build() {
+    let t = tmp("leftcredit");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let st = studio_of(&dirs, &t.0);
+    let mut c = BTreeMap::new();
+    c.insert("beta".to_string(), Credit { author: "someone".into(), source: "https://example.org/beta".into(), match_kind: None });
+    c.insert("nope".to_string(), Credit { author: "x".into(), source: "https://example.org/x".into(), match_kind: None });
+    let st = studio::set_credits(&dirs, &st.dir, &c).unwrap();
+    assert!(!st.credits.contains_key("nope"), "a credit of a mod the profile does not have is dropped");
+    // beta leaves the profile; its saved credit stays in credits.json but the build leaves it out
+    let mut p = profile::get(&dirs, &st.source.profile).unwrap();
+    p.mods.kiln.retain(|m| m.id != "beta");
+    profile::save(&dirs, &p).unwrap();
+    let built = studio::build(&dirs, &st.dir, None, &mut NoProgress).unwrap();
+    assert!(built.index.mods.iter().all(|m| m.id != "beta"));
+    // a build with another version keeps the source's own
+    let b = studio::build_as(&dirs, &st.dir, Some("2.0.0"), None, &mut NoProgress).unwrap();
+    assert_eq!(b.index.version, "2.0.0");
+    assert_eq!(studio::read_source(&st.dir).unwrap().version, "1.0.0");
+    // the revision follows the layer and the credits
+    let r1 = studio::open(&dirs, &st.dir).unwrap().revision;
+    studio::layer_write(&st.dir, "content/x.json", "{ \"format\": 1 }").unwrap();
+    let r2 = studio::open(&dirs, &st.dir).unwrap().revision;
+    assert_ne!(r1, r2);
+    // a bad id makes no profile behind
+    let before = profile::list(&dirs).unwrap().len();
+    assert!(studio::create(&dirs, &NewPack { name: "x".into(), from: None, id: Some("Bad Id!".into()) }).is_err());
+    assert_eq!(profile::list(&dirs).unwrap().len(), before);
+}
+
+/// A test instance the game has loaded: the next test and the end of the test put the pack's own profile back first
+/// (an active instance cannot be removed; pack::uninstall refuses one a registered game has active).
+#[cfg(unix)]
+#[test]
+fn a_loaded_test_instance_goes_back_to_the_packs_profile_before_it_is_replaced() {
+    use kiln_manage::game::{GameInstall, GameKind, PathMode, Platform};
+    let t = tmp("testgame");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let st = studio_of(&dirs, &t.0);
+    let game = t.0.join("game");
+    put(&game, "enshrouded.exe", b"MZ");
+    std::fs::create_dir_all(game.join("kiln")).unwrap();
+    let pfx = t.0.join("pfx");
+    std::fs::create_dir_all(pfx.join("dosdevices")).unwrap();
+    std::os::unix::fs::symlink("/", pfx.join("dosdevices/z:")).unwrap();
+    let inst = GameInstall {
+        id: "g-test".into(), kind: GameKind::Client, path: game.clone(), exe: "enshrouded.exe".into(), app_id: kiln_manage::CLIENT_APP_ID, library: None,
+        platform: Platform::Proton, prefix: Some(pfx), build_id: None, exe_sha256: None, steam_flavor: None, path_mode: PathMode::Copy, source: "manual".into(),
+    };
+    let first = studio::test(&dirs, &st.dir, Some(&inst), &mut NoProgress).unwrap();
+    assert_eq!(profile::active(&dirs, &inst).unwrap().map(|a| a.profile_id), Some(first.profile.id.clone()));
+    // again, with the game: the pack's profile is loaded for a moment, the old instance goes, the new one is loaded
+    let second = studio::test(&dirs, &st.dir, Some(&inst), &mut NoProgress).unwrap();
+    assert_eq!(profile::active(&dirs, &inst).unwrap().map(|a| a.profile_id), Some(second.profile.id.clone()));
+    assert_eq!(profile::list(&dirs).unwrap().iter().filter(|p| p.name.ends_with("(test)")).count(), 1);
+    studio::test_end(&dirs, &st.dir, Some(&inst)).unwrap();
+    assert_eq!(profile::active(&dirs, &inst).unwrap().map(|a| a.profile_id), Some(st.source.profile.clone()), "the pack's own profile is loaded again");
+    assert!(profile::list(&dirs).unwrap().iter().all(|p| !p.name.ends_with("(test)")));
 }

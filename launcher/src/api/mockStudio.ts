@@ -4,6 +4,8 @@
 //   ?studio=empty       no pack sources yet
 //   ?studio=published   "Ember run" 1.0.0 is published (public, credits complete); the next version is 1.0.1
 //   ?studio=nocatalog   no game-data catalog on this PC: the pickers list only what the pack's mods add, no fields
+//   ?studio=notready    Crucible does not take a pack public yet (its checks still run): publish answers needs, Make public
+//   ?studio=gone        the published pack was deleted on Crucible: publish refuses until "Publish as a new pack"
 // Tests and the console: __kilnStudioMock.requests() (every studio call with its arguments), .state().
 import type {
   BuiltPack, CatalogFieldInfo, CruciblePack, CrucibleVersion, Json, LibraryEntry, LintDiagnostic, LintReport, ModKind, PackCheckReport, PackCredit,
@@ -32,6 +34,7 @@ function err(code: string, message: string, detail?: unknown): never {
   throw { code, message, ...(detail !== undefined ? { detail } : {}) };
 }
 const S = (v: unknown) => String(v ?? "");
+const hashOf = (text: string) => { let h = 0x811c9dc5; for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 16777619) >>> 0; return h.toString(16); };
 
 interface MockStudio { source: PackSourceDoc; credits: Record<string, PackCredit>; layer: Map<string, string> }
 
@@ -122,6 +125,19 @@ const MANIFEST_AUTHORS: Record<string, [string, string]> = {
 export function studioMockHandlers(d: StudioMockDeps): Record<string, Handler> {
   const studios = new Map<string, MockStudio>();
   const requests: { cmd: string; args: Record<string, unknown> }[] = [];
+  /** The game a test instance was activated in (pack id -> game id), as Rust's activation would be. */
+  const testGame = new Map<string, string>();
+  /** Removes the test instance like studio::drop_test: a game that has it loaded goes back to the pack's profile first;
+   *  without that game, an active instance is refused. */
+  const dropTest = (s: MockStudio, gameId: string | null) => {
+    const old = s.source.testProfile;
+    if (!old) return;
+    const active = testGame.get(s.source.id);
+    if (active && !gameId) err("refused", "the test instance is still the loaded profile of a game: load " + s.source.name + " again first");
+    if (active && gameId) { d.activate(s.source.profile, gameId); testGame.delete(s.source.id); }
+    d.profiles.delete(old);
+  };
+  let goneOnCrucible = FLAGS.has("gone");
   const signedIn = () => !!(d.handlers.community_status?.({}) as { account?: unknown } | undefined)?.account;
 
   const libName = (kind: ModKind, id: string) => d.library.find((e) => e.kind === kind && e.id === id)?.name ?? id;
@@ -142,7 +158,10 @@ export function studioMockHandlers(d: StudioMockDeps): Record<string, Handler> {
   };
   const view = (id: string): Studio => {
     const s = studios.get(id) ?? err("not_found", "No pack '" + id + "'.");
-    return clone({ dir: "/home/player/.local/share/kiln/studio/" + id, source: s.source, mods: modsOf(s), credits: s.credits, profileName: d.profiles.get(s.source.profile)?.name, layerFiles: s.layer.size });
+    const p = d.profiles.get(s.source.profile);
+    // like Rust's revision: anything a build reads (the source, credits, layer files, the profile)
+    const revision = String(hashOf(JSON.stringify([s.source.updated, s.credits, s.source.overrides, [...s.layer.entries()], p?.generation, p?.updated, p?.mods])));
+    return clone({ dir: "/home/player/.local/share/kiln/studio/" + id, source: s.source, mods: modsOf(s), credits: s.credits, profileName: p?.name, layerFiles: s.layer.size, revision });
   };
   const make = (id: string, name: string, profile: string): MockStudio => ({
     source: { format: 1, kind: "pack-source", id, name, version: "1.0.0", profile, summary: null, description: null, authors: [], tags: [], changes: null, mods: {}, overrides: [],
@@ -285,7 +304,7 @@ export function studioMockHandlers(d: StudioMockDeps): Record<string, Handler> {
         testStarted: s.source.testStarted, name: next.name.trim(), version: next.version.trim(), updated: now() };
       return view(s.source.id);
     },
-    studio_delete: (a) => { const s = of(a); studios.delete(s.source.id); return null; },
+    studio_delete: (a) => { const s = of(a); dropTest(s, a.gameId ? S(a.gameId) : null); studios.delete(s.source.id); return null; },
     studio_credits_set: (a) => {
       const s = of(a);
       const c = (a.credits ?? {}) as Record<string, PackCredit>;
@@ -405,7 +424,7 @@ export function studioMockHandlers(d: StudioMockDeps): Record<string, Handler> {
       const s = of(a);
       const gameId = a.gameId ? S(a.gameId) : null;
       return d.startTask("studio_test", "Making the test instance", ["building the pack", "installing the test instance", "activating"], () => {
-        if (s.source.testProfile) d.profiles.delete(s.source.testProfile);
+        dropTest(s, gameId);
         const src = d.profiles.get(s.source.profile)!;
         const pid = d.slug(s.source.name + " (test)");
         const prof: Profile = { ...clone(src), id: pid, name: s.source.name + " (test)", created: now(), updated: now(), generation: 1, dataDir: "profile" };
@@ -414,6 +433,7 @@ export function studioMockHandlers(d: StudioMockDeps): Record<string, Handler> {
         s.source.testProfile = pid;
         s.source.testStarted = now();
         const activation = gameId ? d.activate(pid, gameId) : null;
+        if (gameId) testGame.set(s.source.id, gameId);
         return { profile: prof, instance: { pack: s.source.id, name: s.source.name, version: s.source.version, layer: "pack." + s.source.id, optional: {}, installed: now() }, imported: [], overrides: s.source.overrides.map((o) => o.path), backup: null, activation };
       }, 300);
     },
@@ -423,7 +443,7 @@ export function studioMockHandlers(d: StudioMockDeps): Record<string, Handler> {
         conflicts: ["[W 21:04:11.210] [kiln] conflict: items Material_T1_Wood_Logs.maxStackSize: big-stacks sets 1000, pack." + s.source.id + " sets 500 (the later one wins: pack." + s.source.id + ")"],
         problems: ["[E 21:04:12.002] [mod:weather-plus] weather table 'Storm_Ash' not found"] } : { ran: false, conflicts: [], problems: [] };
     },
-    studio_test_end: (a) => { const s = of(a); if (s.source.testProfile) d.profiles.delete(s.source.testProfile); s.source.testProfile = null; s.source.testStarted = null; return null; },
+    studio_test_end: (a) => { const s = of(a); dropTest(s, a.gameId ? S(a.gameId) : null); s.source.testProfile = null; s.source.testStarted = null; s.source.updated = now(); return null; },
     studio_build: (a) => {
       const s = of(a);
       return d.startTask("studio_build", "Saving the pack as a file", ["hashing", "packing"], (): BuiltPack => ({
@@ -437,23 +457,44 @@ export function studioMockHandlers(d: StudioMockDeps): Record<string, Handler> {
       if (!signedIn()) err("auth_failed", "Sign in with Discord to publish.");
       const needs = needsOf(s, r);
       if (needs.length) err("refused", "Before publishing: " + needs.join("; ") + ".", needs);
+      if (goneOnCrucible && s.source.published && !r.fresh) err("refused", "This pack is no longer on Crucible. (Publish as a new pack to put it on Crucible again.)", { gone: true });
       return d.startTask("studio_publish", "Publishing to Crucible", ["building the pack", "asking Crucible for upload slots", "uploading 4.1 MB of 18.4 MB", "confirming the credits"], (): StudioPublishResult => {
-        const prev = s.source.published;
-        const packId = prev?.pack ?? "pck_" + s.source.id.replace(/[^a-z0-9]/g, "");
-        const vis = r.visibility;
+        const prev = r.fresh ? null : s.source.published;
+        if (r.fresh) goneOnCrucible = false;
+        const packId = prev?.pack ?? "pck_" + s.source.id.replace(/[^a-z0-9]/g, "") + (r.fresh ? "2" : "");
+        // ?studio=notready: Crucible's checks still run, so the pack stays link-only and says why
+        const notReady = FLAGS.has("notready") && r.visibility === "public" && prev?.visibility !== "public";
+        const vis = notReady ? "link" : r.visibility;
         const vId = "pv_" + s.source.id.replace(/[^a-z0-9]/g, "") + (prev?.versions.length ?? 0 + 1) + Date.now() % 1000;
         const pack: CruciblePack = { id: packId, slug: s.source.id, code: prev?.code ?? "H7QK-3MZP", url: vis === "public" ? "https://frostdev.io/kiln/crucible/" + s.source.id : "https://frostdev.io/kiln/crucible/p/H7QK-3MZP",
           title: s.source.name, summary: s.source.summary ?? "", icon: null, owner: { id: "731204485922648124", name: "emberfox" }, visibility: vis, upvotes: 0, comments: 0, installs: 0, mods: modsOf(s).length, builds: r.gameBuilds ?? [] };
         const version: CrucibleVersion = { id: vId, number: (prev?.versions.length ?? 0) + 1, version: r.version.trim(), changes: r.changes ?? null, size: 18_422_113, published: now(), status: "ready" } as CrucibleVersion;
         const file = s.source.id + "-" + r.version.trim() + ".kilnpack";
         s.source.published = { pack: packId, slug: s.source.id, code: pack.code, url: pack.url, visibility: vis,
-          versions: [...(prev?.versions ?? []), { version: r.version.trim(), id: vId, published: now(), visibility: vis, file }] };
-        s.source.visibility = vis;
+          versions: [...(s.source.published?.versions ?? []), { version: r.version.trim(), id: vId, published: now(), visibility: vis, file }] };
+        s.source.visibility = r.visibility;
+        s.source.updated = now();
         const [ma, mi, pa] = r.version.trim().split(/[.-]/).map(Number);
         s.source.version = ma + "." + mi + "." + (pa + 1);
         s.source.changes = null;
-        return { pack, version, files: modsOf(s).length + 2, uploaded: 4_300_000, skipped: 14_122_113, public: vis === "public", needs: [], file };
+        return { pack, version, files: modsOf(s).length + 2, uploaded: 4_300_000, skipped: 14_122_113, public: vis === "public", needs: notReady ? ["the checks are still running: try again in a minute"] : [], file };
       }, 350);
+    },
+    studio_set_visibility: (a) => {
+      const s = of(a);
+      if (!signedIn()) err("auth_failed", "Sign in with Discord to publish.");
+      const p = s.source.published ?? err("not_found", "publish the pack first");
+      const to = S(a.visibility) as "link" | "public";
+      if (to === "public") {
+        const why = needsOf(s, { version: "0.0.0-x", visibility: "public", attest: !!a.attest }).filter((n) => !n.includes("version"));
+        if (why.length) err("refused", "Before going public: " + why.join("; ") + ".", why);
+      }
+      p.visibility = to;
+      s.source.visibility = to;
+      s.source.updated = now();
+      const pack: CruciblePack = { id: p.pack, slug: s.source.id, code: p.code ?? "H7QK-3MZP", url: to === "public" ? "https://frostdev.io/kiln/crucible/" + s.source.id : "https://frostdev.io/kiln/crucible/p/" + (p.code ?? "H7QK-3MZP"),
+        title: s.source.name, summary: s.source.summary ?? "", icon: null, owner: { id: "731204485922648124", name: "emberfox" }, visibility: to, upvotes: 0, comments: 0, installs: 0, mods: modsOf(s).length, builds: [] };
+      return { pack, public: to === "public", needs: [] };
     },
     studio_server_pack: (a) => {
       const s = of(a);

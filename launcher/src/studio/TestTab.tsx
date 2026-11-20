@@ -29,7 +29,7 @@ export default function TestTab({ studio: st, gameId }: { studio: Studio; gameId
     } catch { /* toasted */ } finally { setBusy(false); }
   };
   const end = async () => {
-    try { await api.studioTestEnd(id); refreshStudio(qc, id); qc.setQueryData(sk.get(id), await api.studioGet(id)); } catch (e) { toast.error(e); }
+    try { await api.studioTestEnd(id, gameId); refreshStudio(qc, id); qc.setQueryData(sk.get(id), await api.studioGet(id)); } catch (e) { toast.error(e); }
   };
   const r = report.data;
   return (

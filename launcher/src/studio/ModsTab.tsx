@@ -7,7 +7,7 @@ import * as api from "../api/commands";
 import type { GameId, ImportReport, LibraryRef, PackEnv, Studio, StudioMod } from "../api/commands";
 import { useT } from "../i18n";
 import { Badge, Button, Modal, Select, WellInput, pickPaths, runTask, toast } from "../ui";
-import { matchWord, refreshStudio, useAnalysisOf, useSaveSource } from "./state";
+import { latestSource, matchWord, refreshStudio, useAnalysisOf, useSaveSource } from "./state";
 
 type Dep = "required" | "on" | "off";
 type Sides = "both" | "client" | "server";
@@ -23,9 +23,10 @@ export default function ModsTab({ studio: st, gameId }: { studio: Studio; gameId
   const [adding, setAdding] = useState(false);
   const credit = (m: StudioMod) => an.report?.credits.find((c) => c.kind === m.kind && c.id === m.id);
   const setChoice = (m: StudioMod, dep: Dep, sides: Sides) => {
-    const mods = { ...st.source.mods };
+    const base = latestSource(qc, st.source.id, st.source);
+    const mods = { ...base.mods };
     mods[m.id] = { dep: dep === "required" ? "required" : "optional", ...(dep === "required" ? {} : { default: dep === "on" }), ...(sides === "both" ? {} : { env: envOf(sides) }) };
-    save.mutate({ ...st.source, mods }, { onError: (e) => toast.error(e) });
+    save.mutate({ ...base, mods }, { onError: (e) => toast.error(e) });
   };
   const remove = async (m: StudioMod) => {
     try {

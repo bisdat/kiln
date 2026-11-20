@@ -4826,7 +4826,13 @@
       "isPublic": "已在 Crucible 公开",
       "isLink": "已发布，仅链接",
       "history": "已发布的版本",
-      "toServer": "放到服务器上"
+      "toServer": "放到服务器上",
+      "makePublic": "设为公开",
+      "makeLink": "改为仅链接",
+      "goFresh": "作为新整合包发布",
+      "goneTitle": "这个整合包已不在 Crucible 上",
+      "gone": "它在那里已被删除或下架。发布会创建一个新的整合包，带有新的链接和代码。",
+      "notYetPublic": "尚未公开"
     },
     "serverPack": {
       "title": "{name} {version} 放到服务器",

@@ -40,7 +40,7 @@ export default function OrderTab({ studio: st }: { studio: Studio }) {
       <div>
         <div className="kst-row kst-between">
           <h3 className="kst-h3">{t("studio.order.conflicts")}</h3>
-          <Button size="s" variant="ghost" loading={an.running} onClick={() => void analyze(st.source.id, st.source.updated)} data-testid="studio-recheck">{t("studio.recheck")}</Button>
+          <Button size="s" variant="ghost" loading={an.running} onClick={() => void analyze(st.source.id, st.revision)} data-testid="studio-recheck">{t("studio.recheck")}</Button>
         </div>
         {an.running && !an.report ? <Spinner /> : an.error ? <p className="kst-p kst-warn-text">{an.error}</p>
           : conflicts.length === 0 ? <p className="kst-p kst-dim" data-testid="studio-no-conflicts">{t("studio.order.none")}</p> : (
@@ -66,7 +66,7 @@ function ConflictRow({ studio: st, c }: { studio: Studio; c: PackDataConflict })
       void qc.invalidateQueries({ queryKey: sk.layer(st.source.id) });
       const next = await api.studioGet(st.source.id);
       qc.setQueryData(sk.get(st.source.id), next);
-      await analyze(st.source.id, next.source.updated);
+      await analyze(st.source.id, next.revision);
       toast.ok(t("studio.order.setDone", { field: c.field }));
     } catch (e) { toast.error(e); } finally { setBusy(false); }
   };

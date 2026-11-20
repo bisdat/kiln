@@ -5361,7 +5361,13 @@
       "isPublic": "Crucible에 공개됨",
       "isLink": "게시됨, 링크 전용",
       "history": "게시한 버전",
-      "toServer": "서버에 넣기"
+      "toServer": "서버에 넣기",
+      "makePublic": "공개로 전환",
+      "makeLink": "링크 전용으로 전환",
+      "goFresh": "새 팩으로 게시",
+      "goneTitle": "이 팩은 더 이상 Crucible에 없습니다",
+      "gone": "Crucible에서 삭제되었거나 내려졌습니다. 게시하면 새 링크와 코드로 새 팩이 만들어집니다.",
+      "notYetPublic": "아직 공개되지 않음"
     },
     "serverPack": {
       "title": "{name} {version}을(를) 서버에",

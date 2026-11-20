@@ -39,9 +39,14 @@ pub async fn studio_save(pack_id: String, source: PackSource) -> Result<Studio, 
     blocking(move || studio::save(&dirs()?, &dir(&pack_id)?, source)).await
 }
 
+/// The pack's draft goes to backups; a test instance the game has loaded goes back to the pack's own profile first.
 #[tauri::command]
-pub async fn studio_delete(pack_id: String) -> Result<(), Error> {
-    blocking(move || studio::delete(&dirs()?, &dir(&pack_id)?)).await
+pub async fn studio_delete(pack_id: String, game_id: Option<String>) -> Result<(), Error> {
+    blocking(move || {
+        let g = game_id.as_deref().map(game).transpose()?;
+        studio::delete(&dirs()?, &dir(&pack_id)?, g.as_ref())
+    })
+    .await
 }
 
 #[tauri::command]
@@ -166,8 +171,12 @@ pub async fn studio_test_report(pack_id: String, game_id: Option<String>) -> Res
 }
 
 #[tauri::command]
-pub async fn studio_test_end(pack_id: String) -> Result<(), Error> {
-    blocking(move || studio::test_end(&dirs()?, &dir(&pack_id)?)).await
+pub async fn studio_test_end(pack_id: String, game_id: Option<String>) -> Result<(), Error> {
+    blocking(move || {
+        let g = game_id.as_deref().map(game).transpose()?;
+        studio::test_end(&dirs()?, &dir(&pack_id)?, g.as_ref())
+    })
+    .await
 }
 
 /// "Save as file" (a task; result pack::BuiltPack).
@@ -203,6 +212,21 @@ pub async fn studio_publish(app: AppHandle, pack_id: String, request: publish::P
         launcher_log("studio", &format!("published {} version {} ({})", r.pack.id, r.version.version, if r.public { "public" } else { "link" }));
         to_value(r)
     }))
+}
+
+/// "Make public" / "Link only" for a published pack (no new version); Crucible's refusal comes back as needs.
+#[tauri::command]
+pub async fn studio_set_visibility(pack_id: String, visibility: studio::Visibility, attest: bool) -> Result<publish::VisibilityResult, Error> {
+    blocking(move || {
+        let key = super::community::session_key().ok_or_else(|| Error::new(ErrorCode::AuthFailed, "Sign in with Discord to publish."))?;
+        let (ep, t) = super::crucible::service()?;
+        if !ep.enabled() {
+            return Err(Error::new(ErrorCode::Unsupported, "Crucible is not available in this version of Kiln yet."));
+        }
+        let c = Crucible::new(&ep, t.as_ref(), &super::crucible::launcher_version()).with_session(Some(key));
+        publish::set_visibility(&dirs()?, &c, &dir(&pack_id)?, visibility, attest)
+    })
+    .await
 }
 
 /// A server pack from a published version (DESIGN 3.6): the version's server part put on one of the launcher's servers

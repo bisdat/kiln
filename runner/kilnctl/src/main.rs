@@ -629,7 +629,7 @@ mod data_use_tests {
             // Pack Studio's pack source commands (they read and write the source's profile)
             &["pack", "init", "dir", "--name", "Ember run", "--profile", "p"], &["pack", "add", "dir", "eml:loot@1.0.0", "mod.zip"],
             &["pack", "capture-settings", "dir", "--take", "a.json:range@client"], &["pack", "lint", "dir"], &["pack", "credits", "dir", "--set", "a=Me,https://x.y"],
-            &["pack", "publish", "dir", "--public", "--yes"], &["pack", "build", "dir"],
+            &["pack", "publish", "dir", "--public", "--yes"], &["pack", "build", "./dir"],
         ] {
             assert_eq!(use_of(args), Use::Whole, "{args:?}");
         }

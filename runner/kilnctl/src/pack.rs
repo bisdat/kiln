@@ -89,7 +89,7 @@ pub enum PackCmd {
     /// Build a .kilnpack from a launcher profile (its mods as the Library holds them, a layer, config overrides), or from
     /// a pack source folder (kilnctl pack init; its own choices, the other options then do not apply)
     Build {
-        /// The profile id, or a pack source folder
+        /// The profile id, or a pack source folder given as a path (./my-pack, /home/me/my-pack)
         profile: String,
         /// The pack's version (SemVer; a pack source's own when not given)
         #[arg(long)]
@@ -325,18 +325,16 @@ pub fn run(cmd: PackCmd) -> Result<i32> {
     match cmd {
         PackCmd::Build { profile, version, id, name, layer, overrides, optional, client_only, server_only, server_settings, changes, out, json } => {
             let dirs = data_dirs()?;
+            // a folder is named as a path (it has a separator, or is "."): a profile id never shadows a folder or the other way round
             let folder = std::path::Path::new(&profile);
-            if folder.join(studio::SOURCE_FILE).is_file() {
+            let looks_like_path = profile.contains('/') || profile.contains(std::path::MAIN_SEPARATOR) || profile == "." || profile == "..";
+            if looks_like_path && folder.join(studio::SOURCE_FILE).is_file() {
                 if id.is_some() || name.is_some() || layer.is_some() || !overrides.is_empty() || !optional.is_empty() || !client_only.is_empty()
                     || !server_only.is_empty() || server_settings.is_some() || changes.is_some() {
                     bail!("{profile} is a pack source: its kiln-pack.json holds those choices (only --version and --out apply)");
                 }
-                if let Some(v) = version {
-                    let mut s = studio::read_source(folder).km()?;
-                    s.version = v;
-                    studio::save(&dirs, folder, s).km()?;
-                }
-                let built = if json { studio::build(&dirs, folder, Some(&out), &mut kiln_manage::task::NoProgress) } else { studio::build(&dirs, folder, Some(&out), &mut Printer::new()) }.km()?;
+                let v = version.as_deref();
+                let built = if json { studio::build_as(&dirs, folder, v, Some(&out), &mut kiln_manage::task::NoProgress) } else { studio::build_as(&dirs, folder, v, Some(&out), &mut Printer::new()) }.km()?;
                 if json { return print_json(&built); }
                 show_index(&built.index);
                 for n in &built.notes { println!("  note: {n}"); }
@@ -652,6 +650,7 @@ fn publish(dir: PathBuf, version: Option<String>, changes: Option<String>, publi
         visibility: if public { studio::Visibility::Public } else { studio::Visibility::Link },
         attest: yes,
         game_builds: Vec::new(),
+        fresh: false,
     };
     let c = Crucible::new(&ep, transport.as_ref(), env!("CARGO_PKG_VERSION")).with_session(Some(session));
     let r = if json { publish::publish(&dirs, &c, &dir, &req, None, &mut kiln_manage::task::NoProgress) } else { publish::publish(&dirs, &c, &dir, &req, None, &mut Printer::new()) }.km()?;

@@ -31,6 +31,9 @@ pub struct PublishRequest {
     /// Game builds the creator tested with (default: the source's, else the installed game's).
     #[serde(default)]
     pub game_builds: Vec<u64>,
+    /// Publish as a new pack on Crucible even though the source names one (it was deleted there, or taken down).
+    #[serde(default)]
+    pub fresh: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -61,7 +64,7 @@ pub fn precheck(st: &studio::Studio, req: &PublishRequest) -> Vec<String> {
         out.push(format!("{} is not a version like 1.2.0", req.version));
     }
     if let Some(p) = &st.source.published {
-        if p.versions.iter().any(|v| v.version == req.version.trim()) {
+        if p.versions.iter().any(|v| !v.pending && v.version == req.version.trim()) {
             out.push(format!("version {} is published already: choose a newer one", req.version.trim()));
         }
     }
@@ -108,17 +111,43 @@ pub fn publish(dirs: &DataDirs, c: &Crucible, dir: &Path, req: &PublishRequest, 
         let create = || -> Result<ShareAnswer> {
             read(c.call(Method::Post, "/packs", Some(&json!({ "index": files.index, "title": st.source.name, "summary": summary, "body": body, "tags": st.source.tags, "changes": files.index.changes })), true)?)
         };
-        let (answer, existing) = match st.source.published.as_ref().map(|p| p.pack.clone()) {
-            Some(id) => match c.call(Method::Post, &format!("/packs/{id}/versions"), Some(&json!({ "index": files.index, "changes": files.index.changes })), true) {
+        let known = st.source.published.clone().filter(|_| !req.fresh);
+        // a version Crucible has from a publish that stopped midway: resume it (the archives are the same bytes)
+        let resume = known.as_ref().and_then(|p| p.versions.last().filter(|v| v.pending && v.version == files.index.version).map(|v| (p.pack.clone(), v.id.clone())));
+        let (answer, existing) = match (&resume, known.as_ref().map(|p| p.pack.clone())) {
+            (Some((pack, vid)), _) => {
+                let plan = c.call(Method::Post, "/uploads", Some(&json!({ "files": super::file_list(&files.index) })), true)?;
+                let mut a: ShareAnswer = read(plan)?;
+                a.version = CrucibleVersion { id: vid.clone(), version: files.index.version.clone(), ..Default::default() };
+                (a, Some(pack.clone()))
+            }
+            (None, Some(id)) => match c.call(Method::Post, &format!("/packs/{id}/versions"), Some(&json!({ "index": files.index, "changes": files.index.changes })), true) {
                 Ok(v) => (read::<ShareAnswer>(v)?, Some(id)),
-                // gone on Crucible (deleted, expired): a new pack
-                Err(e) if matches!(e.code, ErrorCode::NotFound | ErrorCode::Refused) => (create()?, None),
+                // gone without a trace (expired, purged): a new pack
+                Err(e) if e.code == ErrorCode::NotFound => (create()?, None),
+                // deleted or taken down: never quietly a new pack; the creator chooses "Publish as a new pack" (fresh)
+                Err(e) if e.code == ErrorCode::Refused => {
+                    return Err(err(ErrorCode::Refused, format!("{} (Publish as a new pack to put it on Crucible again.)", e.message)).with_detail(json!({ "gone": true, "service": e.detail })));
+                }
                 Err(e) => return Err(e),
             },
-            None => (create()?, None),
+            (None, None) => (create()?, None),
         };
         let pack_id = answer.pack.as_ref().map(|p| p.id.clone()).or(existing).ok_or_else(|| err(ErrorCode::Network, "Crucible sent an answer Kiln cannot read."))?;
         let version_id = answer.version.id.clone();
+        // remember it at once: a publish that stops from here on resumes this pack and version
+        // a new pack (first publish, fresh, or gone without a trace) keeps the local history of versions
+        let history = st.source.published.clone().map(|p| p.versions).unwrap_or_default();
+        let mut rec: Published = known.clone().filter(|p| p.pack == pack_id).unwrap_or_else(|| Published { versions: history, ..Default::default() });
+        rec.pack = pack_id.clone();
+        if let Some(p) = &answer.pack {
+            rec.slug = Some(p.slug.clone()).filter(|s| !s.is_empty()).or(rec.slug);
+            rec.code = Some(p.code.clone()).filter(|s| !s.is_empty()).or(rec.code);
+            rec.url = Some(p.url.clone()).filter(|s| !s.is_empty()).or(rec.url);
+        }
+        rec.versions.retain(|v| !(v.pending && v.version == files.index.version));
+        rec.versions.push(PublishedVersion { version: files.index.version.clone(), id: version_id.clone(), published: crate::util::now_rfc3339(), visibility: rec.visibility, file: None, pending: true });
+        studio::record_pending(dir, rec.clone())?;
         let uploaded = send(c, &answer.uploads, &files, "canceled: publish again to send the rest", progress)?;
         // the credits of this version (every complete row; public packs have one for every mod)
         let rows: Vec<Value> = files.index.mods.iter().filter_map(|m| m.credit.as_ref().map(|cr| json!({ "kind": m.kind.as_str(), "id": m.id, "author": cr.author, "source": cr.source }))).collect();
@@ -133,7 +162,7 @@ pub fn publish(dirs: &DataDirs, c: &Crucible, dir: &Path, req: &PublishRequest, 
             patch["tags"] = json!(st.source.tags);
         }
         let current = answer.pack.as_ref().map(|p| p.visibility.clone());
-        let was_public = st.source.published.as_ref().is_some_and(|p| p.visibility == Visibility::Public) || current.as_deref() == Some("public");
+        let was_public = rec.visibility == Visibility::Public || current.as_deref() == Some("public");
         match req.visibility {
             Visibility::Public if !was_public => patch["visibility"] = json!("public"),
             Visibility::Link if was_public => patch["visibility"] = json!("link"),
@@ -163,13 +192,16 @@ pub fn publish(dirs: &DataDirs, c: &Crucible, dir: &Path, req: &PublishRequest, 
         let file = studio::keep_version(dir, &built)?;
         let public = pack_view.visibility == "public";
         let vis = if public { Visibility::Public } else { Visibility::Link };
-        let mut rec: Published = st.source.published.clone().filter(|p| p.pack == pack_id).unwrap_or_default();
-        rec.pack = pack_id.clone();
         rec.slug = Some(pack_view.slug.clone()).filter(|s| !s.is_empty()).or(rec.slug);
         rec.code = Some(pack_view.code.clone()).filter(|s| !s.is_empty()).or(rec.code);
         rec.url = Some(pack_view.url.clone()).filter(|s| !s.is_empty()).or(rec.url);
         rec.visibility = vis;
-        rec.versions.push(PublishedVersion { version: files.index.version.clone(), id: version_id.clone(), published: crate::util::now_rfc3339(), visibility: vis, file: Some(file.clone()) });
+        if let Some(v) = rec.versions.iter_mut().rev().find(|v| v.id == version_id) {
+            v.pending = false;
+            v.visibility = vis;
+            v.file = Some(file.clone());
+            v.published = crate::util::now_rfc3339();
+        }
         studio::record_published(dir, rec)?;
         progress.report(Some(1.0), &format!("published {} {}", st.source.name, files.index.version));
         let count = super::file_list(&files.index).len();
@@ -177,6 +209,59 @@ pub fn publish(dirs: &DataDirs, c: &Crucible, dir: &Path, req: &PublishRequest, 
     })();
     let _ = std::fs::remove_file(&built.file);
     result
+}
+
+/// What changing a published pack's visibility answers.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VisibilityResult {
+    pub pack: CruciblePack,
+    pub public: bool,
+    /// What Crucible still wants before the pack can be public (empty when it is).
+    pub needs: Vec<String>,
+}
+
+/// "Make public" / "Link only" for a pack published before (DESIGN 3.6): PATCH /packs/<id> with the texts and the
+/// visibility, no new version. Going public needs what publish needs (credits, a summary, the attestation) and what
+/// Crucible checks (its analysis must be done: a refusal comes back as needs, to try again).
+pub fn set_visibility(dirs: &DataDirs, c: &Crucible, dir: &Path, visibility: Visibility, attest: bool) -> Result<VisibilityResult> {
+    if !c.signed_in() {
+        return Err(err(ErrorCode::AuthFailed, "Sign in with Discord to publish."));
+    }
+    let st = studio::open(dirs, dir)?;
+    let mut rec = st.source.published.clone().ok_or_else(|| err(ErrorCode::NotFound, "publish the pack first"))?;
+    if visibility == Visibility::Public {
+        let mut why = studio::public_needs(&st);
+        if !attest {
+            why.push("confirm that you credited every mod and may share these files".into());
+        }
+        if !why.is_empty() {
+            return Err(err(ErrorCode::Refused, format!("Before going public: {}.", why.join("; "))).with_detail(why));
+        }
+    }
+    let patch = json!({
+        "title": st.source.name, "summary": st.source.summary.clone().unwrap_or_default(), "body": st.source.description.clone().unwrap_or_default(),
+        "visibility": if visibility == Visibility::Public { "public" } else { "link" },
+    });
+    let (pack, needs) = match c.call(Method::Patch, &format!("/packs/{}", rec.pack), Some(&patch), true) {
+        Ok(v) => (read::<CruciblePack>(v.get("pack").cloned().unwrap_or(Value::Null))?, Vec::new()),
+        Err(e) if e.code == ErrorCode::Refused => {
+            let mut needs: Vec<String> = e.detail.as_ref().and_then(|d| d.pointer("/service/needs")).and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default();
+            if needs.is_empty() {
+                needs.push(e.message.clone());
+            }
+            (pack_state(c, &rec.pack)?, needs)
+        }
+        Err(e) => return Err(e),
+    };
+    let public = pack.visibility == "public";
+    rec.visibility = if public { Visibility::Public } else { Visibility::Link };
+    let mut s = studio::read_source(dir)?;
+    s.published = Some(rec);
+    s.visibility = visibility;
+    s.updated = crate::util::now_rfc3339();
+    studio::write_source(dir, &s)?;
+    Ok(VisibilityResult { pack, public, needs })
 }
 
 /// The pack on Crucible as its owner sees it now (visibility, counts), for the Studio's publish tab.

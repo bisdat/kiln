@@ -338,6 +338,7 @@ pub fn run() {
             commands::studio::studio_build,
             commands::studio::studio_publish_check,
             commands::studio::studio_publish,
+            commands::studio::studio_set_visibility,
             commands::studio::studio_server_pack
         ]))
         .build(tauri::generate_context!())

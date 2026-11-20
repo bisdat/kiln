@@ -27,6 +27,8 @@ struct State {
     public: std::collections::BTreeSet<String>,
     credits: BTreeMap<String, Value>, // version -> the credits PUT
     patches: Vec<Value>,
+    fail_credits: u32,                 // the next PUT /credits calls that answer 503
+    gone: std::collections::BTreeSet<String>, // packs that answer 410 (deleted or taken down)
 }
 
 struct Fake {
@@ -200,6 +202,9 @@ impl Fake {
                 let (vid, uploads, have) = Self::add_version(&mut s, &id, jbody["index"].clone());
                 json(201, serde_json::json!({ "pack": Self::pack_view(&s, &id), "version": Self::version_view(&s, &vid), "uploads": uploads, "have": have }))
             }
+            (Method::Post, ["packs", id, "versions"]) if s.gone.contains(*id) => {
+                json(410, serde_json::json!({ "error": "gone", "message": "This pack is no longer on Crucible." }))
+            }
             (Method::Post, ["packs", id, "versions"]) => {
                 let (vid, uploads, have) = Self::add_version(&mut s, id, jbody["index"].clone());
                 json(201, serde_json::json!({ "version": Self::version_view(&s, &vid), "uploads": uploads, "have": have }))
@@ -233,7 +238,17 @@ impl Fake {
                 let latest = s.packs[*id].3.clone();
                 json(200, serde_json::json!({ "pack": id, "title": "x", "version": latest.map(|v| Self::version_view(&s, &v)) }))
             }
+            (Method::Post, ["uploads"]) => {
+                let files: Vec<(String, String, u64)> = jbody["files"].as_array().into_iter().flatten()
+                    .map(|f| (f["role"].as_str().unwrap().to_string(), f["sha256"].as_str().unwrap().to_string(), f["size"].as_u64().unwrap_or(0))).collect();
+                let (uploads, have) = Self::plan(&mut s, &files);
+                json(200, serde_json::json!({ "uploads": uploads, "have": have }))
+            }
             (Method::Put, ["versions", vid, "credits"]) => {
+                if s.fail_credits > 0 {
+                    s.fail_credits -= 1;
+                    return json(503, serde_json::json!({ "error": "unavailable", "message": "try again" }));
+                }
                 s.credits.insert(vid.to_string(), jbody["credits"].clone());
                 json(200, serde_json::json!({ "version": Self::version_view(&s, vid), "complete": true }))
             }
@@ -545,4 +560,57 @@ fn a_studio_pack_is_published_link_only_then_public_with_its_credits() {
     assert_eq!(s.published.as_ref().unwrap().visibility, Visibility::Public);
     assert_eq!(s.published.as_ref().unwrap().versions.len(), 2);
     assert!(fake.sent().iter().any(|r| r.starts_with("PATCH ")));
+}
+
+#[test]
+fn a_publish_that_stops_midway_resumes_the_same_pack_and_version() {
+    use crate::modpack::studio::{self, NewPack, Visibility};
+    use publish::{PublishRequest, publish, set_visibility};
+    let t = tmp("publish-resume");
+    let fake = Fake::new();
+    let ep = endpoints(&fake.signer.key);
+    let (a, pid) = creator(&t);
+    let st = studio::create(&a, &NewPack { name: "Ember run".into(), from: Some(pid), id: None }).unwrap();
+    let mut credits = BTreeMap::new();
+    for id in ["alpha", "beta"] {
+        credits.insert(id.to_string(), pack::Credit { author: "frostdev".into(), source: format!("https://github.com/frostdev-ops/{id}"), match_kind: None });
+    }
+    studio::set_credits(&a, &st.dir, &credits).unwrap();
+    let c = Crucible::new(&ep, &fake, "0.2.0-dev").with_session(Some(KEY.into()));
+    // the credits call fails: the pack and the pending version are remembered
+    fake.s.lock().unwrap().fail_credits = 1;
+    let req = PublishRequest { version: "1.0.0".into(), ..Default::default() };
+    assert!(publish(&a, &c, &st.dir, &req, None, &mut NoProgress).is_err());
+    let s = studio::read_source(&st.dir).unwrap();
+    let p = s.published.clone().expect("remembered at once");
+    assert_eq!((p.versions.len(), p.versions[0].pending, s.version.as_str()), (1, true, "1.0.0"));
+    // the same version again resumes it: no second pack, no second version
+    let r = publish(&a, &c, &st.dir, &req, None, &mut NoProgress).unwrap();
+    assert_eq!(r.pack.id, p.pack);
+    assert_eq!(r.version.id, p.versions[0].id);
+    assert_eq!(fake.s.lock().unwrap().packs.len(), 1);
+    assert_eq!(fake.s.lock().unwrap().versions.len(), 1);
+    let s = studio::read_source(&st.dir).unwrap();
+    assert!(!s.published.as_ref().unwrap().versions[0].pending);
+    assert_eq!(s.version, "1.0.1");
+    // Make public without a new version (summary + attestation first)
+    let mut src = s.clone();
+    src.summary = Some("A loot run with friends".into());
+    studio::save(&a, &st.dir, src).unwrap();
+    assert_eq!(set_visibility(&a, &c, &st.dir, Visibility::Public, false).unwrap_err().code, ErrorCode::Refused);
+    let v = set_visibility(&a, &c, &st.dir, Visibility::Public, true).unwrap();
+    assert!(v.public && v.needs.is_empty(), "{v:?}");
+    assert_eq!(studio::read_source(&st.dir).unwrap().published.unwrap().visibility, Visibility::Public);
+    // deleted or taken down on Crucible: refused, never quietly a new pack; fresh makes one
+    fake.s.lock().unwrap().gone.insert(p.pack.clone());
+    let next = PublishRequest { version: "1.0.1".into(), ..Default::default() };
+    let e = publish(&a, &c, &st.dir, &next, None, &mut NoProgress).unwrap_err();
+    assert_eq!(e.code, ErrorCode::Refused);
+    assert_eq!(e.detail.as_ref().and_then(|d| d.get("gone")), Some(&serde_json::json!(true)));
+    assert_eq!(fake.s.lock().unwrap().packs.len(), 1);
+    let r2 = publish(&a, &c, &st.dir, &PublishRequest { fresh: true, ..next }, None, &mut NoProgress).unwrap();
+    assert_ne!(r2.pack.id, p.pack);
+    let s = studio::read_source(&st.dir).unwrap();
+    assert_eq!(s.published.as_ref().unwrap().pack, r2.pack.id);
+    assert_eq!(s.published.as_ref().unwrap().versions.len(), 2, "the local history stays");
 }

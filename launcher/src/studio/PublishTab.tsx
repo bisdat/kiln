@@ -24,7 +24,11 @@ export default function PublishTab({ studio: st, gameId }: { studio: Studio; gam
   const [version, setVersion] = useState(s.version);
   const [changes, setChanges] = useState(s.changes ?? "");
   const [summary, setSummary] = useState(s.summary ?? "");
-  const [vis, setVis] = useState<StudioVisibility>(s.published?.visibility ?? s.visibility ?? "link");
+  // what the creator asked for last (a public pack Crucible did not take yet stays asked for: Make public)
+  const [vis, setVis] = useState<StudioVisibility>(s.visibility ?? s.published?.visibility ?? "link");
+  const [gone, setGone] = useState(false);
+  const [visBusy, setVisBusy] = useState(false);
+  const [visNeeds, setVisNeeds] = useState<string[]>([]);
   // a pack published public before was attested then: unchanged credits need no new tick (two clicks to update)
   const [attest, setAttest] = useState(s.published?.visibility === "public");
   const build = game?.buildId ? Number(game.buildId) : null;
@@ -33,7 +37,7 @@ export default function PublishTab({ studio: st, gameId }: { studio: Studio; gam
   const [done, setDone] = useState<StudioPublishResult | null>(null);
   const [server, setServer] = useState<string | null>(null);
   useEffect(() => { setVersion(s.version); }, [s.version]);
-  const request = { version, changes: changes.trim() || null, visibility: vis, attest, gameBuilds: tested && build ? [build] : [] };
+  const request = { version, changes: changes.trim() || null, visibility: vis, attest, gameBuilds: tested && build ? [build] : [], fresh: gone };
   const needs = useQuery({ queryKey: ["studio_publish_check", s.id, request, s.updated], queryFn: () => api.studioPublishCheck(s.id, request), retry: false });
   const summaryDirty = (summary.trim() || null) !== (s.summary ?? null);
   const publish = async () => {
@@ -43,6 +47,8 @@ export default function PublishTab({ studio: st, gameId }: { studio: Studio; gam
       if (summaryDirty) qc.setQueryData(sk.get(s.id), await api.studioSave(s.id, { ...s, summary: summary.trim() || null }));
       const r = await runTask<StudioPublishResult>(() => api.studioPublish(s.id, request, gameId), { quiet: true });
       setDone(r);
+      setGone(false);
+      setVisNeeds(r.needs);
       refreshStudio(qc, s.id);
       const copied = await copyText(r.pack.url);
       toast.ok(r.public ? t("studio.publish.donePublic", { version: r.version.version }) : t("studio.publish.doneLink", { version: r.version.version }),
@@ -50,6 +56,8 @@ export default function PublishTab({ studio: st, gameId }: { studio: Studio; gam
     } catch (e) {
       const k = api.toKilnError(e);
       if (k.code === "auth_failed") useCommunityUi.getState().openSignIn(false);
+      // deleted or taken down on Crucible: never quietly a new pack; the creator chooses it
+      if ((k.detail as { gone?: boolean } | undefined)?.gone) setGone(true);
       toast.error(crucibleError(k), t("studio.publish.failed"));
     } finally { setBusy(false); }
   };
@@ -61,6 +69,23 @@ export default function PublishTab({ studio: st, gameId }: { studio: Studio; gam
       toast.ok(t("crucible.save.done", { name: s.name }), r.file);
     } catch { /* toasted */ }
   };
+  /** Make public / Link only for a published pack, without a new version. */
+  const setVisibility = async (to: StudioVisibility) => {
+    setVisBusy(true);
+    try {
+      if (summaryDirty) qc.setQueryData(sk.get(s.id), await api.studioSave(s.id, { ...s, summary: summary.trim() || null }));
+      const r = await api.studioSetVisibility(s.id, to, attest);
+      setVisNeeds(r.needs);
+      refreshStudio(qc, s.id);
+      if (r.public) toast.ok(t("studio.publish.isPublic"), shortLink(r.pack.url));
+      else if (to === "link") toast.ok(t("studio.publish.isLink"));
+    } catch (e) {
+      const k = api.toKilnError(e);
+      if (k.code === "auth_failed") useCommunityUi.getState().openSignIn(false);
+      toast.error(crucibleError(k), t("studio.publish.failed"));
+    } finally { setVisBusy(false); }
+  };
+  const visDiffers = !!s.published && !s.published.versions.every((v) => v.pending) && s.published.visibility !== vis;
   const report = an.report;
   const signedIn = !!status.data?.signedIn;
   const blocking = needs.data ?? [];
@@ -100,27 +125,35 @@ export default function PublishTab({ studio: st, gameId }: { studio: Studio; gam
         <span className="kst-label">{t("studio.publish.checks")}</span>
         {an.running && !report ? <span className="kst-dim">{t("studio.mods.checking")}</span> : an.error ? <span className="kst-warn-text">{an.error}</span>
           : checks.map(([label, tone]) => <span key={label} className={"kst-check kst-check-" + tone}>{label} [{t(toneWord(tone))}]</span>)}
-        <Button size="s" variant="ghost" loading={an.running} onClick={() => void analyze(s.id, s.updated)}>{t("studio.recheck")}</Button>
+        <Button size="s" variant="ghost" loading={an.running} onClick={() => void analyze(s.id, st.revision)}>{t("studio.recheck")}</Button>
       </div>
       {blocking.filter((n) => !(summaryDirty && n.includes("summary"))).length > 0 && (
         <ul className="kst-needs" data-testid="studio-needs">{blocking.map((n) => <li key={n}>{n}</li>)}</ul>
       )}
       <div className="kst-row">
         <Button variant="primary" loading={busy} disabled={!signedIn || (blocking.length > 0 && !(summaryDirty && blocking.every((n) => n.includes("summary"))))}
-          onClick={() => void publish()} data-testid="studio-publish-go">{t("studio.publish.go")}</Button>
+          onClick={() => void publish()} data-testid="studio-publish-go">{gone ? t("studio.publish.goFresh") : t("studio.publish.go")}</Button>
+        {visDiffers && (
+          <Button loading={visBusy} disabled={!signedIn || (vis === "public" && blocking.some((n) => !n.includes("published already")))}
+            onClick={() => void setVisibility(vis)} data-testid="studio-set-visibility">{vis === "public" ? t("studio.publish.makePublic") : t("studio.publish.makeLink")}</Button>
+        )}
         <Button variant="ghost" onClick={() => void saveFile()} data-testid="studio-save-file">{t("studio.publish.saveFile")}</Button>
       </div>
+      {gone && <Banner tone="warn" title={t("studio.publish.goneTitle")}>{t("studio.publish.gone")}</Banner>}
+      {visNeeds.length > 0 && !done?.public && (
+        <Banner tone="warn" title={t("studio.publish.notYetPublic")}><ul className="kst-needs" data-testid="studio-vis-needs">{visNeeds.map((n) => <li key={n}>{n}</li>)}</ul></Banner>
+      )}
       {done && (
         <Banner tone={done.public || vis === "link" ? "ok" : "warn"} title={done.public ? t("studio.publish.isPublic") : t("studio.publish.isLink")}>
           <span data-testid="studio-published-link">{shortLink(done.pack.url)}</span> · <span className="kcr-code">{done.pack.code}</span>
-          {done.needs.length > 0 && <ul className="kst-needs">{done.needs.map((n) => <li key={n}>{n}</li>)}</ul>}
+
         </Banner>
       )}
       {s.published && (
         <div className="kst-history" data-testid="studio-history">
           <h3 className="kst-h3">{t("studio.publish.history")}</h3>
           <ul>
-            {[...s.published.versions].reverse().map((v) => (
+            {[...s.published.versions].reverse().filter((v) => !v.pending).map((v) => (
               <li key={v.id} className="kst-row kst-between" data-testid={"studio-version-" + v.version}>
                 <span><span className="kst-mono">{v.version}</span> <span className="kst-dim">{v.visibility === "public" ? t("studio.state.public") : t("studio.state.link")} · {fmtAgo(v.published)}</span></span>
                 <Button size="s" variant="ghost" disabled={!v.file} onClick={() => setServer(v.version)} data-testid={"studio-server-pack-" + v.version}>{t("studio.publish.toServer")}</Button>

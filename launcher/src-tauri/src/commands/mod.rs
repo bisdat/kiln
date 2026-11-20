@@ -295,6 +295,7 @@ pub const NAMES: &[&str] = &[
     "studio_build",
     "studio_publish_check",
     "studio_publish",
+    "studio_set_visibility",
     "studio_server_pack",
 ];
 
