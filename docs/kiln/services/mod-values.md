@@ -70,8 +70,8 @@ thread, row `stats.own`.
 - Every initialization, write, migration, import and reset posts `ModValueChangedEvent` (cause, before, after). Like
   every event on Kiln's bus it reaches every subscriber, whatever the value's read policy: the read policy guards
   `Read`, `Synced` and the native facade (whose subscriptions are filtered per subscriber), not the managed event
-  bus. Filter your handlers by `Key.Mod`, and keep a value that must stay with its mod at `Sync = None` and out of
-  other mods' event handlers by not relying on the policy for secrecy.
+  bus. Filter your handlers by `Key.Mod`, and do not rely on the read policy to keep a number from other mods' event
+  handlers.
 - `Spend` is not a transaction with anything else: when what you sell then fails, give the amount back (the sample's
   `fishing-buy-bait`).
 - Players change values only through your server code: a command (`[Command]`, its permission node
