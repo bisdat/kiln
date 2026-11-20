@@ -14,6 +14,18 @@ Kiln.HookHandle.Dispose() -> void
 Kiln.HookHandle.Reason.get -> string?
 Kiln.HookHandle.Remove() -> void
 Kiln.HookHandle.State.get -> Kiln.HookRegistrationState
+Kiln.HookModule
+Kiln.HookModule.At(nuint offset) -> nuint
+Kiln.HookModule.Base.get -> nuint
+Kiln.HookModule.CodeEnd.get -> nuint
+Kiln.HookModule.CodeStart.get -> nuint
+Kiln.HookModule.Contains(nuint address) -> bool
+Kiln.HookModule.Describe(nuint address) -> string!
+Kiln.HookModule.Find(string! pattern) -> nuint
+Kiln.HookModule.FindAll(string! pattern, int max = 64) -> nuint[]!
+Kiln.HookModule.IsGame.get -> bool
+Kiln.HookModule.Name.get -> string!
+Kiln.HookModule.Size.get -> nuint
 Kiln.HookRefusedEvent
 Kiln.HookRefusedEvent.ModId.get -> string!
 Kiln.HookRefusedEvent.Reason.get -> string!
@@ -175,6 +187,7 @@ Kiln.SigSummary.SymbolsOk.get -> int
 Kiln.SigSummary.SymbolsOk.init -> void
 Kiln.Symbols
 Kiln.TypedHooks
+override Kiln.HookModule.ToString() -> string!
 override Kiln.HookRefusedEvent.ToString() -> string!
 override Kiln.HookResult.Equals(object? obj) -> bool
 override Kiln.HookResult.GetHashCode() -> int
@@ -190,9 +203,12 @@ static Kiln.HookResult.operator ==(Kiln.HookResult? left, Kiln.HookResult? right
 static Kiln.Hooks.Available.get -> bool
 static Kiln.Hooks.Detour(nuint address, Kiln.DetourHandler! handler, int priority = 0) -> Kiln.HookHandle!
 static Kiln.Hooks.Detour(string! symbol, Kiln.DetourHandler! handler, int priority = 0) -> Kiln.HookHandle!
+static Kiln.Hooks.FindInModule(string! moduleName, string! pattern) -> nuint
 static Kiln.Hooks.Mid(nuint address, Kiln.MidHandler! handler, int priority = 0) -> Kiln.HookHandle!
 static Kiln.Hooks.Mid(string! symbol, Kiln.MidHandler! handler, int priority = 0) -> Kiln.HookHandle!
+static Kiln.Hooks.Module(string! name) -> Kiln.HookModule!
 static Kiln.Hooks.Stats() -> Kiln.HooksStats
+static Kiln.Hooks.TryModule(string! name, out Kiln.HookModule? module) -> bool
 static Kiln.HooksStats.operator !=(Kiln.HooksStats left, Kiln.HooksStats right) -> bool
 static Kiln.HooksStats.operator ==(Kiln.HooksStats left, Kiln.HooksStats right) -> bool
 static Kiln.Keep.Block(string! key, int size) -> nint

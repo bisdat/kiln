@@ -637,6 +637,7 @@ Kiln.TestKit.KilnHarness.Language.set -> void
 Kiln.TestKit.KilnHarness.LeaveWorld() -> void
 Kiln.TestKit.KilnHarness.Load<TMod>(Kiln.TestKit.ModManifest? manifest = null) -> Kiln.TestKit.ModHandle!
 Kiln.TestKit.KilnHarness.LoadFolder(string! path) -> Kiln.TestKit.ModHandle!
+Kiln.TestKit.KilnHarness.LogFile.get -> string!
 Kiln.TestKit.KilnHarness.Logs.get -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.LogLine!>!
 Kiln.TestKit.KilnHarness.LogsDirectory.get -> string!
 Kiln.TestKit.KilnHarness.LogsOf(Kiln.TestKit.ModHandle! mod) -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.LogLine!>!
@@ -647,6 +648,7 @@ Kiln.TestKit.KilnHarness.OnMainThread(System.Action! work) -> void
 Kiln.TestKit.KilnHarness.Players.get -> Kiln.TestKit.HarnessPlayers!
 Kiln.TestKit.KilnHarness.Programs.get -> Kiln.TestKit.HarnessPrograms!
 Kiln.TestKit.KilnHarness.Queries.get -> Kiln.TestKit.HarnessQueries!
+Kiln.TestKit.KilnHarness.ReadLogFile() -> string!
 Kiln.TestKit.KilnHarness.Reload(Kiln.TestKit.ModHandle! mod, bool checkCollected = true) -> Kiln.TestKit.ModHandle!
 Kiln.TestKit.KilnHarness.ReportWorldRunning() -> void
 Kiln.TestKit.KilnHarness.Run(System.Action! action) -> void
