@@ -320,8 +320,22 @@ pub fn override_path_ok(path: &str) -> bool {
         && !path.contains('\\')
         && crate::settings_files::is_settings_extension(path)
         && !crate::settings_files::is_log(path)
-        && !path.split('/').any(|p| p.starts_with('.'))
+        && !path.split('/').any(|p| p.starts_with('.') || windows_device(p))
         && !path.eq_ignore_ascii_case("native.json")
+}
+
+/// The name two zip entries share when Windows (or macOS) would make them one file: NFC, Unicode lower case. Two
+/// entries with one folded name are refused, so an unpack never writes one file over another.
+pub fn fold_name(rel: &str) -> String {
+    unicode_normalization::UnicodeNormalization::nfc(rel).collect::<String>().to_lowercase()
+}
+
+/// A Windows device name (CON, PRN, AUX, NUL, COM1-9, LPT1-9, also with an extension, as Windows 10 reads them): no
+/// file of that name can be made there.
+pub fn windows_device(part: &str) -> bool {
+    let stem = part.split('.').next().unwrap_or_default().trim_end_matches(' ').to_ascii_uppercase();
+    let numbered = |p: &str| stem.strip_prefix(p).is_some_and(|n| matches!(n, "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "\u{b9}" | "\u{b2}" | "\u{b3}"));
+    matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$") || numbered("COM") || numbered("LPT")
 }
 
 fn semver_ok(v: &str) -> bool {
@@ -403,7 +417,7 @@ pub fn check_index(ix: &PackIndex) -> Result<()> {
         if !override_path_ok(&o.path) {
             problems.push(format!("override {:?}: a settings file below the config folder (not .schema/, not native.json)", o.path));
         }
-        if !paths.insert((o.side, o.path.to_ascii_lowercase())) {
+        if !paths.insert((o.side, fold_name(&o.path))) {
             problems.push(format!("override {} is listed twice", o.path));
         }
         if !sha256_ok(&o.sha256) {
@@ -523,8 +537,12 @@ pub fn read(zip_file: &Path, sha256: Option<&str>, extract_to: Option<&Path>) ->
         let mut e = a.by_index(i).map_err(zerr)?;
         let name = e.name().map_err(zerr)?.to_string();
         let rel = name.trim_end_matches('/');
-        if !valid_rel(rel) || e.enclosed_name().is_none() || !paths.insert(rel.to_ascii_lowercase()) {
+        if !valid_rel(rel) || e.enclosed_name().is_none() || !paths.insert(fold_name(rel)) {
             return Err(err(ErrorCode::Refused, format!("{}: entry {name:?} has an unsafe path", zip_file.display())));
+        }
+        // kdh1 skips dot entries, so no hash would cover one; a Windows device name is no file there
+        if rel.split('/').any(|p| p.starts_with('.') || windows_device(p)) {
+            return Err(err(ErrorCode::Refused, format!("{}: entry {name:?}: a dot name (no hash covers it) or a Windows device name", zip_file.display())));
         }
         if e.is_symlink() || e.unix_mode().is_some_and(|m| m & 0o170000 == 0o120000) {
             return Err(err(ErrorCode::Refused, format!("{}: entry {name} is a symlink", zip_file.display())));

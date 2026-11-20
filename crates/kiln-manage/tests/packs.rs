@@ -357,3 +357,30 @@ fn server_settings_carry_game_settings_only() {
     ix.server = Some(pack::PackServer { settings: Some(serde_json::json!({ "gameSettings": 3 })), notes: None });
     assert_eq!(pack::check_index(&ix).unwrap_err().code, ErrorCode::Schema);
 }
+
+#[test]
+fn entries_no_hash_covers_or_windows_would_merge_are_refused() {
+    let t = tmp("names");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let pid = creator(&dirs, &t.0);
+    let built = pack::build(&dirs, &request(&pid, &t.0, "1.0.0"), &t.0.join("out"), &mut NoProgress).unwrap();
+    let bad = t.0.join("bad.kilnpack");
+    // kdh1 skips dot entries: a pack must not smuggle files past the hash
+    for extra in ["mods/kiln/alpha/.payload.dll", "mods/kiln/alpha/.cache/x.bin", "layer/.hidden.json"] {
+        rezip(&built.file, &bad, None, Some((extra, b"MZ")));
+        assert_eq!(pack::verify(&bad, None).unwrap_err().code, ErrorCode::Refused, "{extra}");
+    }
+    // a Windows device name cannot be a file there
+    rezip(&built.file, &bad, None, Some(("mods/kiln/alpha/aux.json", b"{}")));
+    assert_eq!(pack::verify(&bad, None).unwrap_err().code, ErrorCode::Refused);
+    // names that differ in Unicode case only are one file on Windows: refused (the build checks its own pack too)
+    let d = kiln_mod(&t.0, "twins", "1.0.0");
+    put(&d, "data/\u{c4}.json", b"1");
+    put(&d, "data/\u{e4}.json", b"2");
+    let refs = import(&dirs, &[d]);
+    let mut p = profile::get(&dirs, &pid).unwrap();
+    p.mods.kiln.push(pm(&find(&refs, "twins"), true));
+    profile::save(&dirs, &p).unwrap();
+    let e = pack::build(&dirs, &request(&pid, &t.0, "1.0.1"), &t.0.join("out"), &mut NoProgress).unwrap_err();
+    assert_eq!(e.code, ErrorCode::Refused, "{}", e.message);
+}
