@@ -207,6 +207,7 @@ pub const NAMES: &[&str] = &[
     "report_save",
     "report_summary",
     "report_preview",
+    "report_note",
     "data_folder_get",
     "data_folder_size",
     "data_folder_check",

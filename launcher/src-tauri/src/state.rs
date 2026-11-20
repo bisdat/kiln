@@ -109,11 +109,88 @@ pub fn steam_roots() -> Vec<kiln_manage::steam::SteamRoot> {
 
 use kiln_manage::install::InstallState;
 
-/// `install::status` (cheap: kiln-manage caches file hashes by path, size and mtime). `fresh` is kept for callers that
-/// want to say so; both paths recompute. (dev.29) With `switch_back` when the game's Kiln came with a test build of the
-/// launcher and this launcher ships an older one (after a switch back to the release: the next Play installs it).
-pub fn install_state(install: &GameInstall, _fresh: bool) -> Result<InstallState, Error> {
+/// `install::status`. (dev.29) With `switch_back` when the game's Kiln came with a test build of the launcher and this
+/// launcher ships an older one (after a switch back to the release: the next Play installs it).
+///
+/// `fresh` false (game_status, polled by the window): the last answer for this game folder while nothing it is made of
+/// looks changed ([`StatusKey`]: kiln/.install.json, the proxy DLL, the game and kiln folders, the runtime bundles)
+/// and it is less than [`STATUS_MAX_AGE`] old. The full check looks at every installed file (615 for a client) and
+/// reads the runtime bundles: polled every few seconds it kept a player's slow drive busy while the launcher only sat
+/// there (a player's report 2026-11-20). `fresh` true (Runtime, after an install): always the full check.
+pub fn install_state(install: &GameInstall, fresh: bool) -> Result<InstallState, Error> {
     let d = dirs()?;
+    let key = StatusKey::of(&d, install);
+    let mut cache = INSTALL_STATUS.lock().unwrap_or_else(|e| e.into_inner());
+    if !fresh
+        && let Some(c) = cache.get(&install.path)
+        && c.key == key
+        && c.at.elapsed() < STATUS_MAX_AGE
+    {
+        status_checks(false);
+        return Ok(c.state.clone());
+    }
+    drop(cache);
+    let st = install_state_now(&d, install)?;
+    status_checks(true);
+    cache = INSTALL_STATUS.lock().unwrap_or_else(|e| e.into_inner());
+    cache.insert(install.path.clone(), CachedStatus { key, at: std::time::Instant::now(), state: st.clone() });
+    Ok(st)
+}
+
+/// How long [`install_state`] answers from its cache at most.
+const STATUS_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// What a cached install status was made from: a change in any of these is a full check at once.
+#[derive(Debug, Clone, PartialEq)]
+struct StatusKey {
+    receipt: Option<(std::time::SystemTime, u64)>,
+    proxy: Option<(std::time::SystemTime, u64)>,
+    game: Option<std::time::SystemTime>,
+    kiln: Option<std::time::SystemTime>,
+    bundles: Option<std::time::SystemTime>,
+}
+
+impl StatusKey {
+    fn of(d: &DataDirs, install: &GameInstall) -> StatusKey {
+        let file = |p: std::path::PathBuf| std::fs::metadata(p).ok().and_then(|m| Some((m.modified().ok()?, m.len())));
+        let dir = |p: std::path::PathBuf| std::fs::metadata(p).ok().and_then(|m| m.modified().ok());
+        StatusKey {
+            receipt: file(install.path.join(kiln_manage::paths::game::RECEIPT)),
+            proxy: file(install.path.join(kiln_manage::install::PROXY)),
+            game: dir(install.path.clone()),
+            kiln: dir(install.path.join("kiln")),
+            bundles: dir(d.runtime()),
+        }
+    }
+}
+
+struct CachedStatus {
+    key: StatusKey,
+    at: std::time::Instant,
+    state: InstallState,
+}
+
+static INSTALL_STATUS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<std::path::PathBuf, CachedStatus>>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+/// Counts full and cached install checks; one launcher.log line per 10 minutes with any, so a support report shows how
+/// often the game folder was looked at.
+fn status_checks(full: bool) {
+    static COUNTS: std::sync::Mutex<(u32, u32, Option<std::time::Instant>)> = std::sync::Mutex::new((0, 0, None));
+    let mut c = COUNTS.lock().unwrap_or_else(|e| e.into_inner());
+    if full { c.0 += 1 } else { c.1 += 1 }
+    let since = *c.2.get_or_insert_with(std::time::Instant::now);
+    if since.elapsed() >= std::time::Duration::from_secs(600) {
+        let (full, cached) = (c.0, c.1);
+        *c = (0, 0, Some(std::time::Instant::now()));
+        drop(c);
+        crate::commands::app::launcher_log("status", &format!(
+            "game folder checks in the last {} min: {full} full (every installed file), {cached} answered from the last one", since.elapsed().as_secs() / 60));
+    }
+}
+
+fn install_state_now(d: &DataDirs, install: &GameInstall) -> Result<InstallState, Error> {
+    let d = d.clone();
     let mut st = kiln_manage::install::status(&d, install)?;
     let shipped = crate::commands::runtime::shipped_version();
     let beta = crate::distribution::beta().is_some();
@@ -145,8 +222,16 @@ fn runtime_policy(st: &mut InstallState, side: kiln_manage::manifest::RunSide, s
     st.switch_back = kiln_manage::install::switch_back(st.receipt.as_ref(), side, shipped, beta, bundles);
 }
 
-/// Kept for callers after install/uninstall (nothing cached here any more).
-pub fn forget_install_state(_id: &str) {}
+/// After an install, an update or an uninstall: the next status is a full check. (The id's install is looked up for
+/// its folder; an id no longer known clears every cached status.)
+pub fn forget_install_state(id: &str) {
+    let path = game(id).ok().map(|g| g.path);
+    let mut cache = INSTALL_STATUS.lock().unwrap_or_else(|e| e.into_inner());
+    match path {
+        Some(p) => { cache.remove(&p); }
+        None => cache.clear(),
+    }
+}
 
 /// `game::status` with the launcher's Steam roots (same fields as kiln_manage::game::status_with).
 pub fn game_status(install: &GameInstall) -> Result<kiln_manage::game::GameStatus, Error> {

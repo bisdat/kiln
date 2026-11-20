@@ -56,6 +56,7 @@ pub fn link_entry(url: &str) -> bool {
 }
 
 pub fn run() {
+    panic_to_log();
     let builder = tauri::Builder::default().plugin(tauri_plugin_dialog::init());
     #[cfg(feature = "self-update")]
     let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
@@ -250,6 +251,7 @@ pub fn run() {
             commands::logs::report_save,
             commands::logs::report_summary,
             commands::logs::report_preview,
+            commands::logs::report_note,
             commands::data_folder::data_folder_get,
             commands::data_folder::data_folder_size,
             commands::data_folder::data_folder_check,
@@ -421,6 +423,26 @@ pub(crate) fn after_snapshot(app: &tauri::AppHandle) {
 /// Every command passes the data folder's gate first (folder.rs): while the pointer is broken, another launcher moves
 /// the folder, or this one moves it, only the commands that do not reach the folder answer; the others are refused
 /// with the reason before they run.
+/// A panic in any of the launcher's threads goes into launcher.log too (a support report holds it), after the default
+/// hook's stderr line. Once per thread at a time: a panic while logging one is not logged again.
+fn panic_to_log() {
+    let prev = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        prev(info);
+        thread_local! { static LOGGING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
+        if LOGGING.with(|l| l.replace(true)) {
+            return;
+        }
+        let thread = std::thread::current();
+        let msg = info.payload().downcast_ref::<&str>().map(|s| s.to_string())
+            .or_else(|| info.payload().downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "(no message)".into());
+        let at = info.location().map(|l| format!("{}:{}", l.file(), l.line())).unwrap_or_else(|| "?".into());
+        commands::app::launcher_log("panic", &format!("thread '{}' panicked at {at}: {msg}", thread.name().unwrap_or("unnamed")));
+        LOGGING.with(|l| l.set(false));
+    }));
+}
+
 fn gated<R: tauri::Runtime>(handler: impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static) -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static {
     move |invoke| {
         if let Some(e) = folder::current().command_refusal(invoke.message.command()) {

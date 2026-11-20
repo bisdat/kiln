@@ -8,7 +8,7 @@ import * as api from "../api/commands";
 import type { LogTarget } from "../api/commands";
 import { isTauri } from "../api/commands";
 import { t, useT } from "../i18n";
-import { Button, fmtBytes, toast } from "../ui";
+import { Button, errorText, fmtBytes, toast } from "../ui";
 import { SendToSupport } from "../community/parts";
 import { ReportContentsDialog } from "./ReportContents";
 
@@ -33,7 +33,11 @@ export function SupportReport({ target, compact }: { target: LogTarget | null; c
     setContents(false);
     try {
       const path = await choosePath();
-      if (!path) return;
+      if (!path) {
+        void api.reportNote("dialogCancelled");
+        return;
+      }
+      void api.reportNote("dialogChosen", path);
       setBusy("save");
       const r = await api.reportSave(target, path, exclude);
       const problems = r.findings.filter((f) => f.level === "problem").length;
@@ -45,6 +49,7 @@ export function SupportReport({ target, compact }: { target: LogTarget | null; c
       ].filter(Boolean).join(" "),
         { actions: isTauri() && folder && folder !== r.path ? [{ label: t("supportReport.openFolder"), onClick: () => { api.appOpenPath(folder).catch((e) => toast.error(e)); } }] : [] });
     } catch (e) {
+      void api.reportNote("failed", errorText(e));
       toast.error(e, t("supportReport.notSaved"));
     } finally {
       setBusy(null);
@@ -70,7 +75,7 @@ export function SupportReport({ target, compact }: { target: LogTarget | null; c
         {t("supportReport.hint")}
       </span>
       <SendToSupport from="logs" target={target} variant="primary" />
-      <Button size="s" loading={busy === "save"} disabled={!!busy} onClick={() => setContents(true)}>{t("supportReport.save")}</Button>
+      <Button size="s" loading={busy === "save"} disabled={!!busy} onClick={() => { void api.reportNote("opened"); setContents(true); }}>{t("supportReport.save")}</Button>
       <Button size="s" variant="ghost" loading={busy === "copy"} disabled={!!busy} onClick={copy}>{t("supportReport.copy")}</Button>
       {contents && <ReportContentsDialog target={target} onSave={(x) => void save(x)} onClose={() => setContents(false)} />}
     </div>

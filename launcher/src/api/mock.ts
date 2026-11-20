@@ -1527,6 +1527,7 @@ const handlers: Record<string, Handler> = {
     return { path, size: 48_213, findings: mockReportFindings, errors: [] } satisfies ReportSaved;
   },
   report_preview: (a) => mockReportContents(a.exclude),
+  report_note: () => null,
   report_summary: () => [
     "Kiln support report, 2026-11-10T12:00:00Z",
     "kiln-launcher 0.2.0-dev (mock); Kiln in the game: 0.2.0-dev",

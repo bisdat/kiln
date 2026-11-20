@@ -1361,6 +1361,26 @@ fn writes_a_zip() {
     assert!(out.file_name().unwrap().to_string_lossy().starts_with("kiln-report-20"));
 }
 
+/// Two saves of one report file at once (a second click, a second window): both end with the whole zip at the path
+/// chosen and no temp file left. With one shared `<file>.tmp` the second one's rename found nothing (2026-11-20).
+#[cfg(feature = "zip")]
+#[test]
+fn saves_of_one_report_file_at_once_all_succeed() {
+    let f = Fx::healthy("zip-race");
+    let r = build(&f.input());
+    let dir = f.root.join("saved");
+    std::fs::create_dir_all(&dir).unwrap();
+    let out = dir.join("kiln-report.zip");
+    let errors: Vec<String> = std::thread::scope(|s| {
+        let ws: Vec<_> = (0..4).map(|_| s.spawn(|| (0..10).filter_map(|_| write_zip(&r, &out).err().map(|e| e.message)).collect::<Vec<_>>())).collect();
+        ws.into_iter().flat_map(|w| w.join().unwrap()).collect()
+    });
+    assert!(errors.is_empty(), "{} of 40 saves failed, first: {:?}", errors.len(), errors.first());
+    assert!(zip::ZipArchive::new(std::fs::File::open(&out).unwrap()).unwrap().len() > 1);
+    let names: Vec<_> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name()).collect();
+    assert_eq!(names, ["kiln-report.zip"], "nothing else beside it");
+}
+
 // ---------------------------------------------------------------- ShroudForge's own startup pass
 
 /// A game folder where ShroudForge's own loader 1.7.9 runs next to Kiln (kiln-shroudforge stood aside) and one
