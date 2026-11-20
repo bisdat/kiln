@@ -1,0 +1,13 @@
+{
+  "format": 1,
+  "values": {
+    "heat": { "kind": "counter", "label": "Heat", "min": "-100", "max": "100" },
+    "weight": { "kind": "counter", "label": { "en": "Weight", "*": "kg" }, "scale": 3, "numberFormat": { "en": "0.000", "*": "F3" }, "max": "500000" },
+    "renown": {
+      "kind": "experience", "label": "Renown", "thresholds": ["0", "9", "10", "9007199254740992", "9007199254740993"],
+      "persistence": "carried", "trustClientImports": true, "carryEpoch": 2, "version": 3,
+      "readPolicy": "allowList", "readMods": ["fixture-values-other"], "sync": "readers"
+    },
+    "secret": { "kind": "counter", "label": "Secret", "initial": "5", "sync": "none" }
+  }
+}
