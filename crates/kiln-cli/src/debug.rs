@@ -174,6 +174,12 @@ impl Target {
     }
 }
 
+/// The Wine sync-mode variables of a server process's environment block (`/proc/<pid>/environ`): the helper and
+/// netcoredbg must join its wineserver with the same mode.
+fn server_sync_env(block: &[u8]) -> Vec<(String, String)> {
+    kiln_manage::debug::runner_env::allowlisted(block).into_iter().filter(|(k, _)| matches!(k.as_str(), "WINEESYNC" | "WINEFSYNC" | "WINENTSYNC")).collect()
+}
+
 /// Inherited variables that would point a Wine call at another runner, prefix, wineserver, sync mode, loader or display.
 /// netcoredbg and the helper get these only from the target's own runner environment ([`Target::env`],
 /// [`RunnerLaunch`]), never from the environment kiln was started in.
@@ -293,17 +299,16 @@ pub(crate) struct RunnerLaunch {
 }
 
 impl RunnerLaunch {
-    /// A dedicated server's runner: its wine, its own prefix.
-    fn server(wine: &Path, prefix: &Path) -> RunnerLaunch {
-        RunnerLaunch {
-            wine: wine.to_path_buf(),
-            env: vec![
-                ("WINEPREFIX".into(), prefix.display().to_string()),
-                ("WINEDEBUG".into(), "-all".into()),
-                ("WINEDLLOVERRIDES".into(), format!("{};winedbg.exe=d", kiln_manage::wine::DLL_OVERRIDES)),
-            ],
-            cwd: prefix.to_path_buf(),
-        }
+    /// A dedicated server's runner: its wine, its own prefix, and the sync mode the server runs with (`sync`, from
+    /// [`server_sync_env`]; kiln's own environment never supplies one, see [`scrub`]).
+    fn server(wine: &Path, prefix: &Path, sync: &[(String, String)]) -> RunnerLaunch {
+        let mut env = vec![
+            ("WINEPREFIX".into(), prefix.display().to_string()),
+            ("WINEDEBUG".into(), "-all".into()),
+            ("WINEDLLOVERRIDES".into(), format!("{};winedbg.exe=d", kiln_manage::wine::DLL_OVERRIDES)),
+        ];
+        env.extend(sync.iter().cloned());
+        RunnerLaunch { wine: wine.to_path_buf(), env, cwd: prefix.to_path_buf() }
     }
 
     /// `wine "<helper>" debug-inspect`, headless: the helper is an argument of wine, never a command of its own.
@@ -447,12 +452,14 @@ fn plan_server(a: &DebugArgs) -> Result<Planned> {
         }
     }
     let (netcoredbg, netcoredbg_note) = netcoredbg()?;
-    let wine = match &prefix {
+    // the server's wine, and the Wine sync mode it runs with (a client of another sync mode cannot share its wineserver)
+    let (wine, sync) = match &prefix {
         Some(p) => {
             let host = resolver::server_host_pid(&s.dir, p).map_err(cli_error)?;
-            Some(resolver::wine_of(host).ok_or_else(|| CliError::new("not_found", format!("cannot tell which wine runs pid {host}")))?)
+            let wine = resolver::wine_of(host).ok_or_else(|| CliError::new("not_found", format!("cannot tell which wine runs pid {host}")))?;
+            (Some(wine), std::fs::read(format!("/proc/{host}/environ")).map(|b| server_sync_env(&b)).unwrap_or_default())
         }
-        None => None,
+        None => (None, Vec::new()),
     };
     let spec = HostSpec {
         kind,
@@ -462,7 +469,7 @@ fn plan_server(a: &DebugArgs) -> Result<Planned> {
         prefix: prefix.clone(),
     };
     let runner = match (&wine, &prefix) {
-        (Some(w), Some(p)) => Some(RunnerLaunch::server(w, p)),
+        (Some(w), Some(p)) => Some(RunnerLaunch::server(w, p, &sync)),
         _ => None,
     };
     let mut host = ServerHost { spec, dir: s.dir.clone(), wine: wine.clone() };
@@ -486,7 +493,7 @@ fn plan_server(a: &DebugArgs) -> Result<Planned> {
         resolved,
         max_pause_ms,
         allow_client_pause: false,
-        runner_env: None,
+        runner_env: runner.map(|r| r.env),
     };
     Ok(Planned { target, host: Box::new(host), source })
 }
@@ -605,7 +612,7 @@ fn observe_target(
 ) -> Box<dyn FnMut() -> Option<String>> {
     let header = move |text: String, v: Value| if json { v.to_string() } else { format!("[kiln debug] {text}") };
     let proven = sides.and_then(|(mut host, launch)| {
-        let mut source = open_source(launch.as_ref())?;
+        let mut source = open_checked(&host.spec, launch.as_ref())?;
         let r = resolver::resolve(&mut host, source.as_mut(), &mut resolver::new_challenge)?;
         Ok((r, source))
     });
@@ -1982,6 +1989,18 @@ mod tests {
         assert_eq!((code.as_str(), reason.as_deref(), msg.as_str()), ("identity_changed", Some("creation_time"), "gone"));
         let c = e.downcast_ref::<CliError>().unwrap();
         assert_eq!(c.detail.as_ref().unwrap()["reason"], "creation_time");
+    }
+
+    #[test]
+    fn a_server_runner_takes_the_servers_sync_mode_and_nothing_else_of_its_environment() {
+        let block = b"WINEPREFIX=/l.pfx\0WINEFSYNC=1\0LD_PRELOAD=/x.so\0HOME=/h\0WINEESYNC=1\0";
+        let sync = server_sync_env(block);
+        assert_eq!(sync, vec![("WINEESYNC".to_string(), "1".to_string()), ("WINEFSYNC".to_string(), "1".to_string())]);
+        let r = RunnerLaunch::server(Path::new("/w/bin/wine"), Path::new("/l.pfx"), &sync);
+        let keys: Vec<&str> = r.env.iter().map(|(k, _)| k.as_str()).collect();
+        assert_eq!(keys, ["WINEPREFIX", "WINEDEBUG", "WINEDLLOVERRIDES", "WINEESYNC", "WINEFSYNC"]);
+        assert!(r.env.iter().any(|(k, v)| k == "WINEDLLOVERRIDES" && v.ends_with(";winedbg.exe=d")));
+        assert!(server_sync_env(b"WINEPREFIX=/l.pfx\0").is_empty(), "a server without a sync mode gives none");
     }
 
     /// netcoredbg and the helper get Wine's sync switches and the loader's variables only from the target's runner
