@@ -71,15 +71,15 @@ public sealed class UiDemandRegistration : IKilnResult, IDisposable
     public void Dispose() => Interlocked.Exchange(ref _release, null)?.Invoke();
 }
 
-/// <summary>Where the block runtime gets live game values. The game's kiln.ui.snapshot in a game; tests replace both.</summary>
+/// <summary>Where the block runtime gets live game values: kiln.ui.snapshot in a game (UiWorldSnapshotNative); tests replace them.</summary>
 internal static class UiWorldSource
 {
     /// <summary>The latest whole publication (AnyThread; never a world read).</summary>
-    internal static Func<UiWorldReadResult> Read = static () => new UiWorldReadResult(false, "no world snapshot service here", null);
+    internal static Func<UiWorldReadResult> Read = static () => UiWorldSnapshotNative.RuntimeRead();
 
     /// <summary>Adds a demand for some groups for <c>mod</c>; dispose to remove it (AnyThread).</summary>
-    internal static Func<string, UiWorldFields, UiDemandRegistration> Demand = static (_, _) => new UiDemandRegistration(false, "no world snapshot service here", 0, null);
+    internal static Func<string, UiWorldFields, UiDemandRegistration> Demand = static (mod, fields) => UiWorldSnapshotNative.RuntimeDemand(mod, fields);
 
     /// <summary>This process hosts a live server world (world.server.available).</summary>
-    internal static Func<bool> Hosting = static () => false;
+    internal static Func<bool> Hosting = static () => UiWorldSnapshotNative.Hosting();
 }
