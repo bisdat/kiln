@@ -74,7 +74,7 @@
 # KILN_BUILD_REMOTE=win1: the sample mods build on kiln-win1 (ssh kiln-win1, the owner's Windows PC; lib/remote-win1.sh)
 #   while this machine builds the rest, and come back as output folders that are zipped here like a local build's. Same
 #   .NET SDK version there; nothing signed or secret goes there. A failed or unreachable win1 means a local build of the
-#   samples (noted in the log), never a missing sample. Off by default. With it the native Windows DLLs build there too
+#   samples (noted in the log), never a missing sample. Off by default. With KILN_BUILD_REMOTE_NATIVE=1 as well, the native Windows DLLs build there too
 #   (lib/remote-win1-native.sh: the same clang-cl/lld-link release and this machine's xwin CRT/SDK, the same path maps; the
 #   DLLs equal this machine's but for the PDB id) and the runtime stage builds only the rest (KILN_NATIVE_PREBUILT).
 # The Windows launcher builds (direct, Nexus) run beside the Linux ones once the notices are complete (their frontend in
@@ -453,11 +453,11 @@ if ((!launcher_only)); then
     remote_pid=$!
   fi
 fi
-# The native Windows DLLs (CMake targets) on kiln-win1 too, with the same clang-cl, lld-link and xwin CRT/SDK as here
+# KILN_BUILD_REMOTE_NATIVE=1 (with KILN_BUILD_REMOTE=win1): the native Windows DLLs (CMake targets) on kiln-win1 too, with the same clang-cl, lld-link and xwin CRT/SDK as here
 # (lib/remote-win1-native.sh): collected before the runtime stage, which then builds only what they leave out.
 unset KILN_NATIVE_PREBUILT
 native_pid=""
-if [[ $remote == win1 ]]; then
+if [[ $remote == win1 && ${KILN_BUILD_REMOTE_NATIVE:-} == 1 ]]; then
   step "native DLLs: building on kiln-win1 meanwhile (lib/remote-win1-native.sh; log $work/remote-win1-native.log)"
   RELEASE_WORK=$work "$lib/remote-win1-native.sh" "$src" "$work/remote-win1-native" >"$work/remote-win1-native.log" 2>&1 &
   native_pid=$!
