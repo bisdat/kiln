@@ -22,6 +22,8 @@ public sealed class TablesTests
     [Theory]
     [InlineData("M:Kiln.Symbols.Get(System.String)")]                                    // HooksGate
     [InlineData("M:Kiln.Hooks.Detour(System.String,Kiln.DetourHandler,System.Int32)")]
+    [InlineData("M:Kiln.Hooks.Module(System.String)")]                                   // HooksGate, via Hooks.Open
+    [InlineData("M:Kiln.HookModule.FindAll(System.String,System.Int32)")]
     [InlineData("M:Kiln.Abilities.Programs.Register(System.Byte[])")]                     // AbilitiesGate
     [InlineData("M:Kiln.NativeCall.Bytes(System.Int32)")]                                // AbilitiesGate.NotAdvanced
     [InlineData("M:Kiln.Is.Job(System.UInt32,System.UInt32)")]                           // CreaturesGate
@@ -39,8 +41,9 @@ public sealed class TablesTests
         // The services with an advanced gate: Kiln.Hooks (HooksGate), Kiln.Abilities (AbilitiesGate), Kiln.Creatures
         // (CreaturesGate). A new type here means a new gated entry point: check that it is meant to be advanced.
         // TypedHooks (dev.29): the runtime of typed hooks and calls under the generated Kiln.Sigs classes.
+        // HookModule (dev.30): another loaded module a mod opens to hook inside (Hooks.Module, docs/kiln/modding/client-hooks.md).
         Assert.All(KilnApis.Advanced, id => Assert.Matches(
-            @"^M:Kiln\.(Hooks|TypedHooks|Symbols|Memory|Constants|OriginalCode|Keep|Abilities\.Programs|NativeCall|Is|Act|Arsenals)\.", id));
+            @"^M:Kiln\.(Hooks|TypedHooks|HookModule|Symbols|Memory|Constants|OriginalCode|Keep|Abilities\.Programs|NativeCall|Is|Act|Arsenals)\.", id));
     }
 
     [Theory]

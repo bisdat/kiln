@@ -168,6 +168,7 @@ pub(crate) fn run(l: &mut Linter) {
     }
     defs.check(&mut out, cat);
     profile(&mut out);
+    data_conflicts(&mut out, cat);
     let first = l.mods.iter().find(|m| m.report).and_then(|m| m.manifest().or(m.files.first())).or(l.loose.first()).map(|f| f.display.clone());
     if let Some(file) = first {
         if let Some(p) = &l.catalog_problem {
@@ -3216,6 +3217,38 @@ fn profile(out: &mut Out) {
         } else {
             seen.insert(id, i);
         }
+    }
+}
+
+/// KL701: data packs of two mods setting one field differently (super::conflicts), reported on the later mod's entry.
+fn data_conflicts(out: &mut Out, cat: Option<&Catalog>) {
+    let mut packs = Vec::new();
+    let mut index = Vec::new();
+    for (mi, m) in out.mods.iter().enumerate() {
+        let Some(id) = m.id.clone() else { continue };
+        let files: Vec<super::conflicts::PackFile> = m.files.iter().filter(|f| f.kind == "content").filter_map(|f| {
+            crate::jsonc::parse(&crate::manifest::decode_text(&f.bytes)).ok().map(|root| super::conflicts::PackFile { file: f.display.clone(), root })
+        }).collect();
+        if !files.is_empty() {
+            packs.push(super::conflicts::ModPacks { id, files });
+            index.push(mi);
+        }
+    }
+    if packs.len() < 2 {
+        return;
+    }
+    let found = super::conflicts::analyze(&packs, cat);
+    let pos = |id: &str| packs.iter().position(|p| p.id == id).map(|k| index[k]);
+    for c in found {
+        let Some(li) = pos(&c.later.mod_id) else { continue };
+        if !out.mods[li].report {
+            continue;
+        }
+        let span = out.mods[li].files.iter().find(|f| f.display == c.later.file).and_then(|f| f.root.as_ref())
+            .and_then(|r| r.get(&c.section)).and_then(|s| s.member(&c.later.selector)).map(|m| m.key_span).unwrap_or_default();
+        let d = Diagnostic::new(&c.later.file, codes::DATA_CONFLICT, span, &c.message())
+            .with_related(&c.earlier.file, Span::default(), &format!("{} sets {}", c.earlier.mod_id, c.earlier.value));
+        out.push(d);
     }
 }
 

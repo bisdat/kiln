@@ -50,6 +50,11 @@ pub fn nxm_entry(url: &str) -> bool {
     commands::nexus::nxm_entry(url)
 }
 
+/// The launcher was started with a kiln:// link (Crucible): queue it. False: exit, the running launcher takes it.
+pub fn link_entry(url: &str) -> bool {
+    commands::crucible::link_entry(url)
+}
+
 pub fn run() {
     let builder = tauri::Builder::default().plugin(tauri_plugin_dialog::init());
     #[cfg(feature = "self-update")]
@@ -284,7 +289,31 @@ pub fn run() {
             commands::community::tester_leave,
             commands::community::tester_result_set,
             commands::community::tester_results_send,
-            commands::community::community_steam_keyboard
+            commands::community::community_steam_keyboard,
+            commands::pack::pack_inspect,
+            commands::pack::pack_install,
+            commands::pack::pack_instance,
+            commands::pack::pack_instances,
+            commands::pack::pack_update_plan,
+            commands::pack::pack_update,
+            commands::pack::pack_undo,
+            commands::pack::pack_uninstall,
+            commands::pack::pack_build,
+            commands::pack::pack_verify,
+            commands::pack::pack_diff,
+            commands::pack::pack_secret_scan,
+            commands::pack::pack_peek_format,
+            commands::crucible::crucible_status,
+            commands::crucible::crucible_open,
+            commands::crucible::crucible_install,
+            commands::crucible::crucible_updates,
+            commands::crucible::crucible_update_plan,
+            commands::crucible::crucible_update,
+            commands::crucible::crucible_share,
+            commands::crucible::crucible_shared,
+            commands::crucible::crucible_trust,
+            commands::crucible::crucible_trust_set,
+            commands::crucible::crucible_links
         ]))
         .build(tauri::generate_context!())
         .expect("error while building the Kiln Launcher")
@@ -342,6 +371,8 @@ pub(crate) fn after_snapshot(app: &tauri::AppHandle) {
     commands::modpack::watch_last_server(app);
     // nxm:// links (Nexus Mods' Mod Manager Download): the instance lock and the link inbox (commands/nexus.rs)
     commands::nexus::start(app);
+    // kiln:// links (Crucible packs): the instance lock, the registration while Crucible is on, the inbox (commands/crucible.rs)
+    commands::crucible::start(app);
     // the AppImage's app menu entry and icons, so taskbars and docks show Kiln's icon (desktop.rs)
     std::thread::spawn(desktop::start);
     // self-update: the state for this start, then a check after 8 s and every 6 hours (crate::selfupdate)

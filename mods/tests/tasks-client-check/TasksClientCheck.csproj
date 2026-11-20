@@ -2,18 +2,21 @@
   <!-- Kiln tasks in a game client, for the owner's real-game pass (out/tasks-stable/CLIENT-CHECKS.md in the dev.30 wave):
        tasks started from client code hop back to the game's main thread in the same client world, a host's task also
        reaches the server tick, a joined client reads its client world from a task, and hops left pending when a world
-       ends never run in the next one. PASS / FAIL lines in kiln.log. -->
+       ends never run in the next one; on the title screen a menu hop (#83) lands on the UI frame, and the menu work still
+       waiting when a world starts is cancelled. PASS / FAIL lines in kiln.log. -->
   <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.props" />
   <PropertyGroup>
     <AssemblyName>TasksClientCheck</AssemblyName>
     <KilnModId>tasks-client-check</KilnModId>
     <KilnModName>Kiln tasks client check</KilnModName>
-    <Version>0.1.0</Version>
+    <Version>0.2.0</Version>
     <Description>PASS/FAIL lines: Kiln tasks and their hops in a game client (hosting or joined).</Description>
     <KilnSide>client</KilnSide>
     <KilnServices>Client;World</KilnServices>
     <KilnFeatures>tasks.pool</KilnFeatures>
     <KilnGameIds>None</KilnGameIds>
+    <!-- WorldConcurrent is KILNX003 on dev30/integration until the experimental status ends (2d2d55a9); harmless after -->
+    <NoWarn>$(NoWarn);KILNX003</NoWarn>
   </PropertyGroup>
   <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.targets" />
   <Target Name="_TasksClientCheckSharedOut" AfterTargets="_KilnModFiles">

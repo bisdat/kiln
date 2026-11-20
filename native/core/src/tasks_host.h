@@ -45,13 +45,21 @@ typedef uint64_t KilnLease; /* a managed logical task; the same value as its pub
 enum {
     KILN_LEASE_SEGMENT = 1,  /* run the next segment (the first, or the continuation of the armed await) */
     KILN_LEASE_TICK_HOP = 2, /* run a bounded tick apply (OnTick/ToTick/PostToTick) on the tick thread */
-    KILN_LEASE_CLIENT_HOP = 3 /* the same on the client world's step (the game's main thread), before its Pre */
+    KILN_LEASE_CLIENT_HOP = 3, /* the same on the client world's step (the game's main thread), before its Pre */
+    KILN_LEASE_MENU_HOP = 4    /* the same on the game's UI frame while no world runs (the main menu, #83) */
 };
+
+/* The main menu as a hop target (#83): a Kiln-internal world kind of this table only (world_session, tick_hop_in). It is
+ * no KILN_WORLD_* of kiln_api.h (KILN_WORLD_KINDS stays 3) and the public kiln.tasks table never takes it. A menu
+ * session is the stretch between two worlds: menu_frame opens one at the game's UI frame while neither the server nor
+ * the client world has a live session, and the next world's start (either kind) ends it. */
+#define KILN_TASKS_WORLD_MENU 3u
 
 /* The host's one dispatcher. `cancelled` is the lease's cancellation state at dispatch (the host also polls
  * is_cancelled). Runs on a pool worker (SEGMENT), on the server world's tick (TICK_HOP), on the client world's step
- * (CLIENT_HOP) and on the thread that destroys a world (the cancelled hops of its STOPPING: the server world's thread,
- * or the game's main thread for the client world), so it can run on several threads at once: it must
+ * (CLIENT_HOP), on the game's UI frame in the main menu (MENU_HOP) and on the thread that destroys a world (the cancelled
+ * hops of its STOPPING: the server world's thread, or the game's main thread for the client world) or starts one (the
+ * menu's cancelled hops), so it can run on several threads at once: it must
  * be reentrant and thread-safe. A managed exception is caught by the host before it returns here, so it never crosses
  * the ABI and never quarantines the owner; a structured fault is contained by the core (the task cancelled, its owner
  * quarantined, kiln.log). */
@@ -100,7 +108,8 @@ typedef struct KilnTaskStatsRunningRow {
     uint64_t started_ns;  /* the task's admission on the pool clock */
     uint64_t elapsed_ns;  /* the current segment's (or the task's, while suspended) age */
     uint32_t state;       /* 1 running, 2 suspended, 3 on-tick (tasks_stats EntryState) */
-    uint32_t world;       /* on-tick: the world whose hop runs (KILN_WORLD_SERVER 0, KILN_WORLD_CLIENT 2); else 0 */
+    uint32_t world;       /* on-tick: the world whose hop runs (KILN_WORLD_SERVER 0, KILN_WORLD_CLIENT 2,
+                             KILN_TASKS_WORLD_MENU 3); else 0 */
     char owner_name[129];
     char task_name[129];
     char reserved2[6];
@@ -183,12 +192,12 @@ typedef struct KilnTasksHostApi {
     KilnResult(KILN_CALL* stats_fault_row)(uint32_t index, KilnTaskStatsFaultRow* row);
     KilnResult(KILN_CALL* stats_totals)(KilnTaskStatsTotals* totals);
     /* ---- appended (client-world hops, #82; same version, checked by size and build stamp) ---- */
-    /* The newest session of `world` (KILN_WORLD_SERVER or KILN_WORLD_CLIENT) and its state (*state: 0 none yet, 1 live,
+    /* The newest session of `world` (KILN_WORLD_SERVER, KILN_WORLD_CLIENT or KILN_TASKS_WORLD_MENU) and its state (*state: 0 none yet, 1 live,
      * 2 its STOPPING came and no later one started); 0 with none. Any thread; never blocks on a task. */
     uint32_t(KILN_CALL* world_session)(uint32_t world, uint32_t* state);
     /* tick_hop for `world`'s `session`: queued only while that session is the live, open one (one lock for the
      * compare and the push), dispatched as TICK_HOP (server) or CLIENT_HOP (client) on that world's step before its
-     * Pre subscribers, within that world's budget; at its STOPPING dispatched cancelled on the destroying thread.
+     * Pre subscribers, or MENU_HOP (the menu) at menu_frame, within that world's budget; at its STOPPING dispatched cancelled on the destroying thread.
      * UNAVAILABLE otherwise (never queued into another session), INVALID_ARGUMENT for another world kind, INTERNAL
      * as tick_hop. */
     KilnResult(KILN_CALL* tick_hop_in)(KilnLease lease, uint32_t world, uint32_t session);
@@ -196,6 +205,16 @@ typedef struct KilnTasksHostApi {
      * registration still armed when `session` is not that world's live one; INVALID_ARGUMENT for another kind. */
     KilnResult(KILN_CALL* resume_after_step_world)(KilnLease lease, uint64_t registration, uint32_t world,
                                                    uint32_t session, uint32_t* refusal);
+    /* ---- appended (menu hops, #83; same version, checked by size and build stamp) ----
+     * world_session and tick_hop_in also take KILN_TASKS_WORLD_MENU (resume_after_step_world does not: the menu has no
+     * Post edges). A world's start (either kind) ends the live menu session: its pending hops are dispatched cancelled
+     * on the starting thread, and no hop is queued into it any more. */
+    /* The game's UI frame while no world runs (Kiln.Host's kiln.ui.tick, on the UI thread, about 30 a second): opens a
+     * menu session when none is live and neither the server nor the client world has a live session, then dispatches
+     * that session's pending hops as KILN_LEASE_MENU_HOP, FIFO per owner and owners round-robin, at most 64 hops and
+     * 1 ms per owner and 2 ms in all per frame (the rest waits for the next frame, never dropped). Returns the hops
+     * dispatched; 0 and nothing opened while a world runs. */
+    uint32_t(KILN_CALL* menu_frame)(void);
 } KilnTasksHostApi;
 }
 
@@ -203,7 +222,7 @@ static_assert(sizeof(KilnLeaseSnapshot) == 168, "KilnLeaseSnapshot v1");
 static_assert(sizeof(KilnTaskStatsOwnerRow) == 400 && sizeof(KilnTaskStatsRunningRow) == 320 &&
                   sizeof(KilnTaskStatsFaultRow) == 312 && sizeof(KilnTaskStatsTotals) == 72,
               "kiln.tasks diagnostics rows (issue #49)");
-static_assert(sizeof(KilnTasksHostApi) == 192 && offsetof(KilnTasksHostApi, build_stamp) == 8 &&
+static_assert(sizeof(KilnTasksHostApi) == 200 && offsetof(KilnTasksHostApi, menu_frame) == 192 && offsetof(KilnTasksHostApi, build_stamp) == 8 &&
                   offsetof(KilnTasksHostApi, bind) == 16 && offsetof(KilnTasksHostApi, admit) == 24 &&
                   offsetof(KilnTasksHostApi, arm) == 32 && offsetof(KilnTasksHostApi, resume) == 40 &&
                   offsetof(KilnTasksHostApi, resume_after_step) == 48 && offsetof(KilnTasksHostApi, tick_hop) == 56 &&

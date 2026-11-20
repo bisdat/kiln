@@ -21,6 +21,7 @@ import { mockReportContents } from "./mockReport";
 import { updatesMockHandlers } from "./mockUpdates";
 import { MOCK_PREVIEW, vendorMockHandlers } from "./mockVendor";
 import { chainMockHandlers } from "./mockChain";
+import { crucibleMockHandlers } from "./mockCrucible";
 import { dataFolderBlocks, dataFolderMockHandlers, mockDataDir, mockPickFolder } from "./mockDataFolder";
 import { mockSpeak, bootJsonAt, clearStartHistory, mockBegin, mockProgress, mockStartEnded, ownerScript, processAt, scriptedStart, setStartScript, type StartScript } from "./mockProgress";
 import bootExample from "../../../schema/examples/state-boot.json";
@@ -1577,6 +1578,9 @@ Object.assign(handlers, updatesMockHandlers(handlers, mockEmit));
 Object.assign(handlers, vendorMockHandlers(startTask, (id) => gameOf(id).kind));
 Object.assign(handlers, chainMockHandlers({ profiles, library, reject }));
 Object.assign(handlers, dataFolderMockHandlers(startTask, (id) => tasks.get(id)));
+// Crucible packs (./mockCrucible.ts, `?crucible=` flags): a fake Crucible, an instance with an update waiting
+Object.assign(handlers, crucibleMockHandlers({ handlers, emit: mockEmit, startTask, profiles, library, activations, activate, importPaths, makeBackup, slug,
+  isRunning: (g) => !!live(g), emitGame: (g) => emitGame(g, "status"), seeded: !FRESH }));
 // the save editor: synthetic character saves in memory, or a local fixture with ?editor=fixture (mockEditor.ts). Loaded
 // at the first editor command: its saves bring hash and buffer code no other page of the mock needs, and loading that
 // with the mock made every first page of a cold dev server slower

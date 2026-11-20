@@ -176,7 +176,16 @@ session is never queued into the next one:
   posted work and before its Pre subscribers, at most 64 hops and 1 ms per mod and 2 ms in all per client step. On a
   joined client Kiln.Host runs them as the mods' tick (its drive lock, `Game.IsTickThread` true); on a hosting client
   as main-thread work that never takes that lock;
-- the rest wait for the next step of their world, never dropped; the two worlds never share a budget;
+- **menu hops** (`KILN_LEASE_MENU_HOP`, #83, since 0.2.0-dev.30) run on the game's UI frame while no world runs:
+  Kiln.Host's UI tick (`kiln.ui.tick`, about 30 a second in the main menu) calls the table's `menu_frame`, at most
+  64 hops and 1 ms per mod and 2 ms in all per frame. The menu is `KILN_TASKS_WORLD_MENU` (3), a world kind of the
+  lease table only: `world_session` and `tick_hop_in` take it, `resume_after_step_world` and the public table's
+  `submit_in` do not (the menu has no Post edges). A menu session is one stretch between two worlds: `menu_frame` opens
+  one while neither the server nor the client world has a live session, and the next world's start (either kind) ends
+  it, dispatching its pending hops cancelled on the starting thread before that world's first Pre. Kiln.Host runs a
+  menu hop under its drive lock with no thread marked as the mods' tick (`Game.IsTickThread` false; tick-only APIs
+  refuse with a "menu hop" message). A dedicated server never opens a menu session;
+- the rest wait for the next step of their world (or the next menu frame), never dropped; no two of them share a budget;
 - at a world's `KILN_WORLD_STOPPING` its pending hops are dispatched cancelled on the destroying thread (the server
   world's thread, or the main thread for the client world); the other world's are untouched;
 - a hop asked for a world kind with no live world and no binding is refused at once (`KilnUnavailableException` in
