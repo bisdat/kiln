@@ -5087,5 +5087,174 @@
       "turnOn": "Einschalten",
       "turnOff": "Ausschalten"
     }
+  },
+  "studio": {
+    "data": {
+      "tabsAria": "Daten-Editoren",
+      "tab": {
+        "items": "Gegenstände",
+        "recipes": "Rezepte",
+        "loot": "Beute",
+        "drops": "Drops",
+        "added": "Neue Gegenstände",
+        "raw": "Roh-JSON"
+      },
+      "lint": {
+        "line": "Lint: {errors}, {warnings}",
+        "errors": {
+          "one": "{count} Fehler",
+          "other": "{count} Fehler"
+        },
+        "warnings": {
+          "one": "{count} Warnung",
+          "other": "{count} Warnungen"
+        },
+        "checking": "Lint: Prüfung läuft…",
+        "show": "Probleme anzeigen",
+        "hide": "Probleme ausblenden",
+        "error": "Fehler",
+        "warning": "Warnung",
+        "info": "Hinweis"
+      },
+      "noCatalog": "Kein Spieldaten-Katalog auf diesem PC: Die Auswahllisten zeigen nur, was die Mods des Packs hinzufügen, und Felder werden von Hand eingetippt.",
+      "thisPack": "dieses Pack",
+      "save": "Speichern",
+      "saved": "Gespeichert",
+      "unsaved": "Ungespeicherte Änderungen",
+      "discard": "Verwerfen",
+      "remove": "Entfernen",
+      "saveFailed": "{file} wurde nicht gespeichert",
+      "broken": "Diese Datei ist kein gültiges JSON. Behebe das zuerst in Roh-JSON.",
+      "alsoIn": "Auch gesetzt in {files} (Roh-JSON).",
+      "name": "Name",
+      "guid": "Feste GUID (einmal erzeugt, nie ändern)",
+      "badName": "Ein Name hat 1 bis 200 Buchstaben, Ziffern, _ - oder .",
+      "dupName": "{name} wird doppelt verwendet",
+      "pick": {
+        "ph": "Gegenstände suchen",
+        "selectorPh": "Name oder Muster wie Material_T1_*",
+        "glob": "jeder Treffer",
+        "unknown": "weder im Spiel noch in den Mods des Packs gefunden",
+        "none": "Nichts gefunden",
+        "searching": "Suche läuft…"
+      },
+      "value": {
+        "set": "setzen auf",
+        "mul": "mal",
+        "add": "plus",
+        "min": "min",
+        "max": "max",
+        "modeAria": "Wie sich {field} ändert",
+        "minAria": "Niedrigster Wert für {field}",
+        "maxAria": "Höchster Wert für {field}",
+        "raiseOnly": "nur erhöhen",
+        "lowerOnly": "nur senken",
+        "on": "an",
+        "off": "aus"
+      },
+      "field": {
+        "add": "+ Feld",
+        "remove": "{field} entfernen",
+        "nameAria": "Feld"
+      },
+      "where": {
+        "add": "+ Bedingung",
+        "where": "wenn",
+        "and": "und",
+        "fieldAria": "Bedingungsfeld",
+        "fieldPh": "Feld",
+        "valueAria": "Bedingung für {field}",
+        "remove": "Bedingung entfernen"
+      },
+      "rules": {
+        "add": "+ Regel",
+        "addAll": "+ Regel für jeden Gegenstand",
+        "remove": "Regel entfernen",
+        "selectorAria": "Welche Einträge",
+        "noSelector": "Jede Regel braucht einen Namen oder ein Muster",
+        "duplicate": "{selector} hat zwei Regeln: Fasse sie zu einer zusammen"
+      },
+      "items": {
+        "lead": "Ändere die Gegenstände des Spiels und die der Mods im Pack: eine Regel pro Gegenstand oder Muster, mit Bedingungen auf die Werte des Spiels. Die Pack-Ebene lädt nach allen Mods, ihre Werte gewinnen.",
+        "empty": "Noch keine Gegenstandsregeln.",
+        "selector": "Gegenstände"
+      },
+      "loot": {
+        "lead": "Zufällige Beute aus Truhen und Fundstücken in der Welt, pro Gegenstand: wie viele in einem Stapel liegen.",
+        "empty": "Noch keine Beuteregeln.",
+        "selector": "Gegenstand"
+      },
+      "recipes": {
+        "lead": "Ändere, was Rezepte verbrauchen und herstellen und wie lange sie dauern, oder füge eigene Rezepte hinzu.",
+        "changes": "Geänderte Rezepte",
+        "noChanges": "Noch keine Rezeptänderungen.",
+        "add": "+ Rezept ändern",
+        "recipe": "Rezept",
+        "noRecipe": "Jede Änderung braucht ein Rezept",
+        "changeInputs": "Zutaten ändern",
+        "changeOutputs": "Ergebnisse ändern",
+        "inputs": "Zutaten",
+        "outputs": "Ergebnisse",
+        "addInput": "+ Zutat",
+        "addOutput": "+ Ergebnis",
+        "duration": "Dauer",
+        "durationPh": "Standard",
+        "seconds": "Sekunden",
+        "itemAria": "Gegenstand",
+        "countAria": "Anzahl",
+        "category": "beliebiger Gegenstand der Kategorie {id}",
+        "modNote": "Ändert das Rezept der Mod; die Pack-Ebene gewinnt (sie lädt nach {mod}).",
+        "stationNote": "Ein Rezept des Spiels behält seine Werkbank; neue Rezepte wählen ihre eigene.",
+        "new": "Neue Rezepte",
+        "noNew": "Noch keine neuen Rezepte.",
+        "addNew": "+ Neues Rezept",
+        "removeNew": "Neues Rezept entfernen",
+        "station": "Werkbank",
+        "stationPh": "Werkbänke suchen",
+        "hand": "Von Hand hergestellt",
+        "noStation": "Jedes neue Rezept braucht eine Werkbank",
+        "needStacks": "Jedes neue Rezept braucht eine Zutat und ein Ergebnis"
+      },
+      "drops": {
+        "lead": "Standard-Inventare: Gegnerbeute und feste Truhen, pro Tabelle oder für jede Tabelle (*).",
+        "empty": "Noch keine Drop-Regeln.",
+        "table": "Tabelle",
+        "add": "+ Tabelle",
+        "addAll": "+ Regel für jede Tabelle",
+        "count": "Mengen",
+        "chance": "Chance",
+        "items": "Einzelne Gegenstände",
+        "addItem": "+ Gegenstand",
+        "noTable": "Jede Drop-Regel braucht eine Tabelle"
+      },
+      "added": {
+        "lead": "Eigene Gegenstände: Jeder ist eine Kopie eines Basisgegenstands (Modell, Symbol und Verhalten) mit eigenem Namen und eigenen Werten.",
+        "empty": "Noch keine neuen Gegenstände.",
+        "add": "+ Neuer Gegenstand",
+        "remove": "Neuen Gegenstand entfernen",
+        "displayName": "Angezeigt als",
+        "base": "Basisgegenstand",
+        "description": "Beschreibung",
+        "rolledLoot": "Wie Beute ausgewürfelt (Seltenheit und Stufe variieren)",
+        "fields": "Werte",
+        "noBase": "Jeder neue Gegenstand braucht einen Basisgegenstand"
+      },
+      "raw": {
+        "none": "Noch keine Dateien.",
+        "newPh": "name.json",
+        "newAria": "Name der neuen Datei",
+        "new": "Neue Datei",
+        "rename": "Umbenennen",
+        "renameAria": "Neuer Name",
+        "renameOk": "Umbenennen",
+        "exists": "{file} gibt es schon",
+        "delete": "Löschen",
+        "deleteTitle": "{file} löschen?",
+        "deleteText": "Die Datei verlässt die Pack-Ebene.",
+        "textAria": "Text von {file}",
+        "clean": "Keine Probleme in dieser Datei.",
+        "pick": "Wähle eine Datei oder erstelle eine neue."
+      }
+    }
   }
 }

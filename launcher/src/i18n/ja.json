@@ -4975,5 +4975,172 @@
       "turnOn": "オンにする",
       "turnOff": "オフにする"
     }
+  },
+  "studio": {
+    "data": {
+      "tabsAria": "データエディター",
+      "tab": {
+        "items": "アイテム",
+        "recipes": "レシピ",
+        "loot": "ルート",
+        "drops": "ドロップ",
+        "added": "新規アイテム",
+        "raw": "Raw JSON"
+      },
+      "lint": {
+        "line": "Lint: {errors}、{warnings}",
+        "errors": {
+          "other": "{count} 件のエラー"
+        },
+        "warnings": {
+          "other": "{count} 件の警告"
+        },
+        "checking": "Lint: チェック中…",
+        "show": "問題を表示",
+        "hide": "問題を隠す",
+        "error": "エラー",
+        "warning": "警告",
+        "info": "メモ"
+      },
+      "noCatalog": "このPCにゲームデータのカタログがありません。選択リストにはパックのMODが追加するものだけが表示され、フィールドは手入力になります。",
+      "thisPack": "このパック",
+      "save": "保存",
+      "saved": "保存しました",
+      "unsaved": "未保存の変更",
+      "discard": "破棄",
+      "remove": "削除",
+      "saveFailed": "{file} を保存できませんでした",
+      "broken": "このファイルは有効なJSONではありません。先にRaw JSONで修正してください。",
+      "alsoIn": "{files} でも設定されています（Raw JSON）。",
+      "name": "名前",
+      "guid": "固定GUID（一度だけ作成し、変更しないこと）",
+      "badName": "名前は1〜200文字の英数字、_ - または . です",
+      "dupName": "{name} が重複しています",
+      "pick": {
+        "ph": "アイテムを検索",
+        "selectorPh": "名前、または Material_T1_* のようなパターン",
+        "glob": "すべての一致",
+        "unknown": "ゲームにもパックのMODにも見つかりません",
+        "none": "見つかりません",
+        "searching": "検索中…"
+      },
+      "value": {
+        "set": "次に設定",
+        "mul": "倍",
+        "add": "加算",
+        "min": "最小",
+        "max": "最大",
+        "modeAria": "{field} の変更方法",
+        "minAria": "{field} の最小値",
+        "maxAria": "{field} の最大値",
+        "raiseOnly": "増加のみ",
+        "lowerOnly": "減少のみ",
+        "on": "オン",
+        "off": "オフ"
+      },
+      "field": {
+        "add": "+ フィールド",
+        "remove": "{field} を削除",
+        "nameAria": "フィールド"
+      },
+      "where": {
+        "add": "+ 条件",
+        "where": "条件:",
+        "and": "かつ",
+        "fieldAria": "条件のフィールド",
+        "fieldPh": "フィールド",
+        "valueAria": "{field} の条件",
+        "remove": "条件を削除"
+      },
+      "rules": {
+        "add": "+ ルール",
+        "addAll": "+ すべてのアイテムのルール",
+        "remove": "ルールを削除",
+        "selectorAria": "対象のエントリ",
+        "noSelector": "ルールには名前またはパターンが必要です",
+        "duplicate": "{selector} に2つのルールがあります。1つにまとめてください"
+      },
+      "items": {
+        "lead": "ゲームのアイテムとパックのMODのアイテムを変更します。アイテムまたはパターンごとに1つのルールを作り、ゲームの値に条件を付けられます。パックレイヤーはすべてのMODの後に読み込まれるため、その値が優先されます。",
+        "empty": "アイテムのルールはまだありません。",
+        "selector": "アイテム"
+      },
+      "loot": {
+        "lead": "チェストやワールド上の拾得物のランダムなルートを、アイテムごとに設定します。1スタックに入る数です。",
+        "empty": "ルートのルールはまだありません。",
+        "selector": "アイテム"
+      },
+      "recipes": {
+        "lead": "レシピの必要素材、完成品、所要時間を変更するか、独自のレシピを追加します。",
+        "changes": "変更したレシピ",
+        "noChanges": "レシピの変更はまだありません。",
+        "add": "+ レシピを変更",
+        "recipe": "レシピ",
+        "noRecipe": "変更にはレシピが必要です",
+        "changeInputs": "材料を変更",
+        "changeOutputs": "完成品を変更",
+        "inputs": "材料",
+        "outputs": "完成品",
+        "addInput": "+ 材料",
+        "addOutput": "+ 完成品",
+        "duration": "所要時間",
+        "durationPh": "ゲーム標準",
+        "seconds": "秒",
+        "itemAria": "アイテム",
+        "countAria": "個数",
+        "category": "カテゴリ {id} の任意のアイテム",
+        "modNote": "MODのレシピを変更します。パックレイヤーが優先されます（{mod} の後に読み込まれます）。",
+        "stationNote": "ゲームのレシピは作業台がそのままです。新規レシピは作業台を自分で選びます。",
+        "new": "新規レシピ",
+        "noNew": "新規レシピはまだありません。",
+        "addNew": "+ 新規レシピ",
+        "removeNew": "新規レシピを削除",
+        "station": "作業台",
+        "stationPh": "作業台を検索",
+        "hand": "手作業で作成",
+        "noStation": "新規レシピには作業台が必要です",
+        "needStacks": "新規レシピには材料と完成品が必要です"
+      },
+      "drops": {
+        "lead": "デフォルトのインベントリ：敵のルートと固定チェストを、テーブルごと、またはすべてのテーブル（*）に設定します。",
+        "empty": "ドロップのルールはまだありません。",
+        "table": "テーブル",
+        "add": "+ テーブル",
+        "addAll": "+ すべてのテーブルのルール",
+        "count": "数量",
+        "chance": "確率",
+        "items": "単体アイテム",
+        "addItem": "+ アイテム",
+        "noTable": "ドロップのルールにはテーブルが必要です"
+      },
+      "added": {
+        "lead": "独自のアイテム：それぞれベースアイテム（モデル、アイコン、挙動）のコピーで、独自の名前と値を持ちます。",
+        "empty": "新規アイテムはまだありません。",
+        "add": "+ 新規アイテム",
+        "remove": "新規アイテムを削除",
+        "displayName": "表示名",
+        "base": "ベースアイテム",
+        "description": "説明",
+        "rolledLoot": "ルートのように抽選（レアリティとレベルが変動）",
+        "fields": "値",
+        "noBase": "新規アイテムにはベースアイテムが必要です"
+      },
+      "raw": {
+        "none": "ファイルはまだありません。",
+        "newPh": "name.json",
+        "newAria": "新しいファイル名",
+        "new": "新規ファイル",
+        "rename": "名前を変更",
+        "renameAria": "新しい名前",
+        "renameOk": "変更",
+        "exists": "{file} は既に存在します",
+        "delete": "削除",
+        "deleteTitle": "{file} を削除しますか？",
+        "deleteText": "このファイルはパックレイヤーから外れます。",
+        "textAria": "{file} のテキスト",
+        "clean": "このファイルに問題はありません。",
+        "pick": "ファイルを選ぶか、新しく作成してください。"
+      }
+    }
   }
 }

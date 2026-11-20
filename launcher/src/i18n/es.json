@@ -5087,5 +5087,174 @@
       "turnOn": "Activar",
       "turnOff": "Desactivar"
     }
+  },
+  "studio": {
+    "data": {
+      "tabsAria": "Editores de datos",
+      "tab": {
+        "items": "Objetos",
+        "recipes": "Recetas",
+        "loot": "Botín",
+        "drops": "Drops",
+        "added": "Objetos nuevos",
+        "raw": "JSON sin procesar"
+      },
+      "lint": {
+        "line": "Lint: {errors}, {warnings}",
+        "errors": {
+          "one": "{count} error",
+          "other": "{count} errores"
+        },
+        "warnings": {
+          "one": "{count} advertencia",
+          "other": "{count} advertencias"
+        },
+        "checking": "Lint: comprobando…",
+        "show": "Mostrar problemas",
+        "hide": "Ocultar problemas",
+        "error": "Error",
+        "warning": "Advertencia",
+        "info": "Nota"
+      },
+      "noCatalog": "No hay catálogo de datos del juego en este PC: los selectores solo listan lo que añaden los mods del pack y los campos se escriben a mano.",
+      "thisPack": "este pack",
+      "save": "Guardar",
+      "saved": "Guardado",
+      "unsaved": "Cambios sin guardar",
+      "discard": "Descartar",
+      "remove": "Quitar",
+      "saveFailed": "{file} no se guardó",
+      "broken": "Este archivo no es JSON válido. Arréglalo primero en JSON sin procesar.",
+      "alsoIn": "También definido en {files} (JSON sin procesar).",
+      "name": "Nombre",
+      "guid": "GUID fijo (se crea una vez, no lo cambies nunca)",
+      "badName": "Un nombre tiene de 1 a 200 letras, dígitos, _ - o .",
+      "dupName": "{name} se usa dos veces",
+      "pick": {
+        "ph": "Buscar objetos",
+        "selectorPh": "Nombre o patrón como Material_T1_*",
+        "glob": "todas las coincidencias",
+        "unknown": "no se encuentra en el juego ni en los mods del pack",
+        "none": "No se encontró nada",
+        "searching": "Buscando…"
+      },
+      "value": {
+        "set": "fijar en",
+        "mul": "multiplicar por",
+        "add": "sumar",
+        "min": "mín.",
+        "max": "máx.",
+        "modeAria": "Cómo cambia {field}",
+        "minAria": "Mínimo de {field}",
+        "maxAria": "Máximo de {field}",
+        "raiseOnly": "solo subir",
+        "lowerOnly": "solo bajar",
+        "on": "sí",
+        "off": "no"
+      },
+      "field": {
+        "add": "+ Campo",
+        "remove": "Quitar {field}",
+        "nameAria": "Campo"
+      },
+      "where": {
+        "add": "+ Condición",
+        "where": "donde",
+        "and": "y",
+        "fieldAria": "Campo de la condición",
+        "fieldPh": "campo",
+        "valueAria": "Condición sobre {field}",
+        "remove": "Quitar condición"
+      },
+      "rules": {
+        "add": "+ Regla",
+        "addAll": "+ Regla para todos los objetos",
+        "remove": "Quitar regla",
+        "selectorAria": "Qué entradas",
+        "noSelector": "Cada regla necesita un nombre o un patrón",
+        "duplicate": "{selector} tiene dos reglas: únelas en una"
+      },
+      "items": {
+        "lead": "Cambia los objetos del juego y los de los mods del pack: una regla por objeto o patrón, con condiciones sobre los valores del juego. La capa del pack se carga después de todos los mods, así que sus valores ganan.",
+        "empty": "Aún no hay reglas de objetos.",
+        "selector": "Objetos"
+      },
+      "loot": {
+        "lead": "Botín aleatorio de cofres y objetos del mundo, por objeto: cuántos vienen en una pila.",
+        "empty": "Aún no hay reglas de botín.",
+        "selector": "Objeto"
+      },
+      "recipes": {
+        "lead": "Cambia lo que piden y producen las recetas y cuánto tardan, o añade recetas propias.",
+        "changes": "Recetas modificadas",
+        "noChanges": "Aún no hay cambios de recetas.",
+        "add": "+ Cambiar una receta",
+        "recipe": "Receta",
+        "noRecipe": "Cada cambio necesita una receta",
+        "changeInputs": "Cambiar los ingredientes",
+        "changeOutputs": "Cambiar los resultados",
+        "inputs": "Ingredientes",
+        "outputs": "Resultados",
+        "addInput": "+ Ingrediente",
+        "addOutput": "+ Resultado",
+        "duration": "Duración",
+        "durationPh": "del juego",
+        "seconds": "segundos",
+        "itemAria": "Objeto",
+        "countAria": "Cantidad",
+        "category": "cualquier objeto de la categoría {id}",
+        "modNote": "Cambia la receta del mod; la capa del pack gana (se carga después de {mod}).",
+        "stationNote": "Una receta del juego conserva su estación; las recetas nuevas eligen la suya.",
+        "new": "Recetas nuevas",
+        "noNew": "Aún no hay recetas nuevas.",
+        "addNew": "+ Receta nueva",
+        "removeNew": "Quitar receta nueva",
+        "station": "Estación",
+        "stationPh": "Buscar estaciones",
+        "hand": "Fabricada a mano",
+        "noStation": "Cada receta nueva necesita una estación",
+        "needStacks": "Cada receta nueva necesita un ingrediente y un resultado"
+      },
+      "drops": {
+        "lead": "Inventarios por defecto: botín de enemigos y cofres fijos, por tabla o para todas las tablas (*).",
+        "empty": "Aún no hay reglas de drops.",
+        "table": "Tabla",
+        "add": "+ Tabla",
+        "addAll": "+ Regla para todas las tablas",
+        "count": "Cantidades",
+        "chance": "Probabilidad",
+        "items": "Objetos sueltos",
+        "addItem": "+ Objeto",
+        "noTable": "Cada regla de drops necesita una tabla"
+      },
+      "added": {
+        "lead": "Objetos propios: cada uno es una copia de un objeto base (su modelo, icono y comportamiento) con nombre y valores propios.",
+        "empty": "Aún no hay objetos nuevos.",
+        "add": "+ Objeto nuevo",
+        "remove": "Quitar objeto nuevo",
+        "displayName": "Se muestra como",
+        "base": "Objeto base",
+        "description": "Descripción",
+        "rolledLoot": "Se genera como botín (la rareza y el nivel varían)",
+        "fields": "Valores",
+        "noBase": "Cada objeto nuevo necesita un objeto base"
+      },
+      "raw": {
+        "none": "Aún no hay archivos.",
+        "newPh": "name.json",
+        "newAria": "Nombre del archivo nuevo",
+        "new": "Archivo nuevo",
+        "rename": "Renombrar",
+        "renameAria": "Nombre nuevo",
+        "renameOk": "Renombrar",
+        "exists": "{file} ya existe",
+        "delete": "Eliminar",
+        "deleteTitle": "¿Eliminar {file}?",
+        "deleteText": "El archivo sale de la capa del pack.",
+        "textAria": "Texto de {file}",
+        "clean": "No hay problemas en este archivo.",
+        "pick": "Elige un archivo o crea uno nuevo."
+      }
+    }
   }
 }
