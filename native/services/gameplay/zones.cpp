@@ -152,6 +152,13 @@ KilnResult zone_add(KilnOwner owner, const KilnGameplayZone* in, uint32_t* out) 
     Zone z;
     if (KilnResult rc = copy_in(in, &z); rc != KILN_OK) return rc;
     if (g_zones.size() >= 1024) return KILN_ERR_BUFFER_TOO_SMALL;
+    const bool others=hooks_denies(z.deny,owner);
+    if ((z.deny & (KILN_GAMEPLAY_DENY_BUILD | KILN_GAMEPLAY_DENY_BREAK)) &&
+        (!build_request(owner) || !build_installed())) {
+        KG_W("zone add refused: %s", build_reason().c_str());
+        return KILN_ERR_UNAVAILABLE;
+    }
+    if (!others) return KILN_ERR_UNAVAILABLE;
     z.id = g_next_id++;
     z.owner = owner;
     g_zones.push_back(std::move(z));
@@ -170,6 +177,13 @@ KilnResult zone_update(uint32_t id, const KilnGameplayZone* in) {
         if (z.id != id) continue;
         Zone n = z;
         if (KilnResult rc = copy_in(in, &n); rc != KILN_OK) return rc;
+        const bool others=hooks_denies(n.deny,n.owner);
+        if ((n.deny & (KILN_GAMEPLAY_DENY_BUILD | KILN_GAMEPLAY_DENY_BREAK)) &&
+            (!build_request(n.owner) || !build_installed())) {
+            KG_W("zone update refused: %s", build_reason().c_str());
+            return KILN_ERR_UNAVAILABLE;
+        }
+        if (!others) return KILN_ERR_UNAVAILABLE;
         z = std::move(n);
         g_dirty = true;
         publish();

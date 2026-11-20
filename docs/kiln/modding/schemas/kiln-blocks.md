@@ -28,6 +28,7 @@ A mod's blocks: spells, weapons, wands, armor, items, stations, statuses, effect
 | `behaviours` | object |  | Behaviours: attacks, rules, a brain. |
 | `blueprints` | object |  | New shapes for the game's building materials, half a metre a cell: a table each game merges at its start, so needs "clients": "mod". |
 | `bodies` | object |  | Bodies, for creatures and NPCs to name. |
+| `buildingMaterialPools` | object |  |  |
 | `buildingMaterials` | object |  | New building materials: an id and a GUID in the game's tables, and a block item. 49 fit across all mods. Needs "clients": "mod". |
 | `comforts` | object |  | Parts: what the game's comfort counts. |
 | `containers` | object |  | Things that hold items, as the game's chests do: a lid, sounds and upgrades from the game's small chest. |
@@ -54,7 +55,10 @@ A mod's blocks: spells, weapons, wands, armor, items, stations, statuses, effect
 | `processing` | object |  | Parts: how a station works on its own. |
 | `props` | object |  | Things placed that stand there: furniture, banners, lamps. |
 | `quests` | object |  | Quest chains in the game's own journal: steps, objectives, conditions, rewards. Needs "clients": "mod". |
+| `rarityRolls` | object |  | Rarity at creation: which item types roll which rarity (Common to Legendary, by weight) when the game crafts them, loot makes them or a Kiln give asks for none. The game then makes the item at that rarity. Server; asks nothing of players' games. A later definition wins an item type an earlier one also names. |
+| `rarityUpgrades` | object |  | Rarity upgrades: which items an upgrade takes, up to which rarity, and what each step costs (items, a chance, what a failed roll costs). Items.UpgradeRarity(player, item, "name") runs one; an upgraded item gets its next enhancement slot in place, which the player unlocks at the workbench as usual. Server; asks nothing of players' games. |
 | `recipes` | object |  | Recipes of their own: one more way to make any item at a station, such as a game item at the game's workbench. |
+| `resourcePatches` | object |  | Changes to the game's own resources, made before the game reads them: fields, a template's components, a list's length (a mod with "boot": true; docs/kiln/modding/resource-patches.md). Not blocks: kiln.content applies them. |
 | `rules` | object |  | Rules, for behaviours to name. |
 | `screenEffects` | object |  | Full-screen effects: colour grading, a tint, a vignette, fades and flashes. Drawn by each Kiln client; players' games need nothing for them. |
 | `seats` | object |  | Seats: the game's sitting, comfort of the chair category. |
@@ -407,6 +411,7 @@ A new shape on the game's building materials: beside the walls and floors in the
 | `cells` | array of array of string | yes | Layers from the bottom up; in a layer, rows from the back to the front; in a row, # a cell and . or a space none. Half a metre a cell, 32 at most each way. min items 1 max items 32 |
 | `cost` | integer |  | Obsolete and not used: a placement takes one block of the chosen material per cell it fills, as the game's own shapes do. min 1 max 9999 |
 | `description` | string |  |  |
+| `materialPool` | string |  | min length 1 |
 | `name` | string | yes | min length 1 |
 | `recipe` | [recipe](#recipe) |  |  |
 | `roof` | boolean |  | A roof shape: it cycles through the roof materials. |
@@ -453,6 +458,15 @@ A new building material.
 | `strength` | [strengthRef](#strengthref) |  |  |
 | `surface` | [buildingSurfaceRef](#buildingsurfaceref) |  | How it looks. Without one, like the game's Rough Stone. |
 | `was` | string |  | The block's old name, after a rename: the material's id comes from it, so its walls stay in every world. |
+
+## buildingMaterialPool
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `materials` | array of object or object | yes | min items 1 max items 64 |
+| `name` | string | yes | min length 1 |
+| `roof` | boolean |  |  |
+| `was` | string |  | min length 1 |
 
 ## buildingSurface
 
@@ -745,6 +759,7 @@ What happens. Parts run in this order: chance decides, area, spawns, vfx, sound,
 | `on` | `"target"` \| `"caster"` |  | Who it is for: what the trigger gives it (default), or the caster, whoever wields the weapon or cast the spell. |
 | `removes` | array of [statusRef](#statusref) |  | Statuses taken off the target: blocks by name, or the game's by their 0x id. |
 | `restores` | object |  | Given back to the target. Less than 0 takes it away. A target without that attribute gets nothing. |
+| `run` | string |  | A mod's [ImpactNative] method, "<modid>.<Name>", called first when the effect happens, with its parameters bound by name (self, target, attacker, caster, position, attackMod, damage); when it returns false the rest of the effect, then included, does not happen. Its parameters come from that mod's impact/natives.json (kiln lint KL340). max length 90 Pattern `^[a-z0-9][a-z0-9._-]*\.[A-Za-z0-9_]+$`. |
 | `screen` | [screenRef](#screenref) |  | A full-screen effect for the target, when it is a player, or for the players near the place. It needs seconds. |
 | `sound` | string |  | A sound at the target or the place: a cue of this mod (needs clients: mod), "other-mod:name", or a cue's GUID. min length 1 |
 | `spawns` | string |  | Spawned at the target or the place: a game template's name, or a template's GUID. min length 1 |
@@ -832,6 +847,7 @@ What happens when a player uses a placed thing. A field left out is what its sta
 | `prompt` | string |  | A prompt of your own instead of verb: the same text in every language. min length 1 |
 | `requires` | [requires](#requires) |  |  |
 | `toggle` | object |  | Two states, and each use flips it, as a door's: the guest's sequence flips it. A prompt left out is its starter's. |
+| `upgrade` | [upgradeAction](#upgradeaction) |  | The use raises an item's rarity by one step of a rarity upgrade (rarityUpgrades), on the server once the game has accepted it: the item in the player's hand, or the one they pick in a window on a Kiln player's game. Without plays the player plays the hand on it (toggle), which replaces what the starter's own use did. |
 | `verb` | `"open"` \| `"close"` \| `"use"` \| `"activate"` \| `"deactivate"` \| `"flip"` \| `"read"` \| `"sit"` \| `"sleep"` \| `"search"` \| `"inspect"` \| `"talk"` \| `"craft"` \| `"collect"` \| `"harvest"` \| `"drink"` |  | The prompt's word: one of the game's, so every language has it. |
 
 ## interactionRef
@@ -1354,6 +1370,29 @@ What a made item is: its colour, and how many enhancements it can have (one more
 
 Type: `"common"` \| `"uncommon"` \| `"rare"` \| `"epic"` \| `"legendary"`
 
+## rarityRoll
+
+Which item types roll which rarity when they are made (RarityRollBlock). A rarity whose enhancement slot the item type lacks never comes up; with none left the game's rarity stays. A recipe's tooltip still shows the type's rarity.
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `items` | array of string | yes | The item types: game items, items of this mod by block name, "other-mod:name", or a pattern with * over the game's item names ("Weapon_*"; "my-mod:*" is every item of that mod). min items 1 max items 1024 |
+| `sources` | string |  | Which creations roll (default "craft, loot"): craft, the game makes it without a rarity (crafting); loot, the game makes it with a rarity it rolled or fixed (random loot, random drop-table stacks); give, a Kiln give without a rarity. Pattern `^(craft\|loot\|give)(, ?(craft\|loot\|give))*$`. |
+| `weights` | object | yes | How likely each rarity is, among the five; one left out is 0. At least one above 0. |
+
+## rarityUpgrade
+
+A rarity upgrade (RarityUpgradeBlock): which items it takes, up to which rarity, and each step by the rarity it reaches. An item whose next rarity has no step, or whose type has no enhancement slot for it, is refused; nothing is paid then.
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `allowEmptySlot` | boolean |  | Upgrade into an enhancement slot the item's type has no perk for (default false: refused). |
+| `durability` | `"keepRatio"` \| `"keep"` \| `"repair"` |  | What happens to durability (default keepRatio: the game computes max durability again at the new rarity, the share kept). |
+| `items` | array of string |  | The item types: game items, items of this mod by block name, "other-mod:name", or a pattern with * over the game's item names ("Weapon_*"; "my-mod:*" is every item of that mod). Left out: every item with enhancement slots. max items 1024 |
+| `max` | `"uncommon"` \| `"rare"` \| `"epic"` \| `"legendary"` |  | The highest rarity it upgrades to (default legendary). |
+| `socket` | `"keep"` \| `"gameChance"` |  | A gem socket: keep (default: as it is), or gameChance (a weapon without one rolls the game's chance at the new rarity; a won socket re-creates the item in its slot). |
+| `steps` | object | yes | The steps, by the rarity each reaches (uncommon .. legendary). A rarity without a step is not reached. |
+
 ## recipe
 
 How something is crafted.
@@ -1388,6 +1427,24 @@ What it takes to use it. item, count, uses and time are the game's own lock, sho
 | `unless` | [states](#states) |  | Not while the player is in any of these. |
 | `uses` | boolean |  | The use takes item from the bag, as a lockpick goes. |
 | `when` | [states](#states) |  | Only while the player is in one of these. |
+
+## resourcePatch
+
+One resource and what to change in it: fields to set, a template's components, lists cleared, replaced or appended to. At least one of set, append, replace, clear, addComponents, removeComponents, copyComponents. Made in the order removeComponents, addComponents, copyComponents, clear, replace, append, set. A patch is applied whole or not at all.
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `addComponents` | array of string |  | Components of the game's types a template gets, zeroed ("PickupItemZone"); one it has already stays. Made after removeComponents; set then fills them in ("PickupItemZone.lastAttempt.value"). min items 1 |
+| `append` | object |  | List path to the values added at its end: a list of numbers, bools or enum members. Made after the components, clear and replace, before set. |
+| `clear` | array of string |  | List paths made empty, any element type ("noBuildZones"). A path names one list: [i] on the way is fine, [*] is not. Made after the components, before replace. min items 1 |
+| `copyComponents` | object |  | Component type name to the GUID of the template it is copied from, whole (its lists, strings and nested structs with it): added when the template has none of that type, its own replaced when it has. The source must have the component; CurrentTransform, and what an actor needs to live, are refused. Made after addComponents; set can then change the copy's fields. |
+| `format` | `1` |  |  |
+| `part` | integer |  | The part index; 0 when left out. min 0 |
+| `removeComponents` | array of string |  | A template's (keen::ecs::TemplateResource) components to take out, by type name ("SpawnTime"); one it has not got is skipped. Made first. CurrentTransform, and what an actor needs to live, are refused. min items 1 |
+| `replace` | object |  | List path to the values it holds afterwards, exactly: a list of numbers, bools or enum members. Made after clear, before append. |
+| `resource` | string | yes | The resource's GUID. |
+| `set` | object |  | Member path to value. A path: members by name, [i] an element of a list, [*] every element. |
+| `type` | string | yes | The resource's qualified type name, as keen::BalancingTable. min length 1 |
 
 ## rule
 
@@ -1695,6 +1752,7 @@ What a tool does: what it is for, and how well. Each class takes the fields it h
 | `power` | integer |  | How hard it bites: an axe's wood damage, a pickaxe's or a sieve's stone damage (the rest scales along), a rake's flattening strength (the game's: 500, 1000). |
 | `range` | number |  | Metres: how far a rake flattens around where it aims (3), how far a grappling hook reaches (13.5). max 32 |
 | `staminaCost` | integer |  | Stamina each use costs; the tooltip follows. Not for a fishing rod or a torch. min 0 |
+| `wearPerDebit` | integer |  | What each of the game's wear debits costs the tool's durability (1: the game's own; 0: it does not wear). Per debit, not per swing. A tool with enhancement slots (an axe, a pickaxe, a sieve). Set where the world runs. Needs items.tool_wear_debit. min 0 max 32767 |
 
 ## trigger
 
@@ -1875,6 +1933,28 @@ Type: string or object
 Shown only while this is true: a name (game.inGame, config.clock.show: true, not 0, not empty), !name, or name == value with == != < <= > >=, joined with &&. Examples: "game.inGame", "!game.inGame", "game.screen == InGame", "game.fps < 30 && config.hud.on". min length 1
 
 Type: string
+
+## upgradeAction
+
+A rarity upgrade as what a use does (UpgradeAction): one step of a rarity upgrade rule, paid by the player, on the server.
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `range` | number |  | How far from it, in metres, a player may stand when they pick an item in the choose window (default 6). min 1 max 64 |
+| `rule` | string | yes | The rarity upgrade it runs: a rarityUpgrades block of this mod by name, or "other-mod:name". min length 1 Pattern `\S`. |
+| `target` | `"held"` \| `"choose"` |  | held (default): the item in the player's hand, for every player; choose: a window lists the player's gear with each next step's cost and chance (Kiln players; others get held). |
+
+## upgradeStep
+
+One step of a rarity upgrade: what reaching its rarity costs and how likely it is.
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `chance` | number |  | How likely the step is to succeed (default 1). The server rolls it. min 0 max 1 |
+| `cost` | object |  | The items it costs, by name (as in items; plain items such as materials, never gear or a gem), each 1 to 100000. Left out: free. |
+| `levelScale` | number |  | The cost grows with the item's level: count x (1 + levelScale x (level - 1)), rounded up (default 0). min 0 max 1000 |
+| `onFail` | `"keepItemLoseCost"` \| `"keepItemKeepCost"` \| `"downgrade"` |  | What a failed roll costs (default keepItemLoseCost: the item stays, the cost is spent; downgrade: the cost is spent and the item drops one rarity). |
+| `unlock` | boolean |  | The new enhancement slot comes unlocked (one level, one more perk acting) instead of waiting for the workbench (default false). |
 
 ## vfx
 

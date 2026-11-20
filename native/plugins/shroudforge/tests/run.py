@@ -19,7 +19,7 @@ with tempfile.TemporaryDirectory(prefix='kiln-sf-fixtures-', dir=build.parent) a
     env.pop('DISPLAY', None)
     MISSING = object()  # menu_key: no toggleKey in ShroudForge's config (None writes a JSON null)
     only = os.environ.get('KILN_SF_ONLY', '')  # run only the cases whose name starts with this
-    def case(name, installed='good', bundled='good', early=False, fault=False, linked_layout=False, busy=False, reservation=None, extra_env=None, verify=None, helper=False, menu_off=False, self_hosted=False, menu_key=MISSING, runtime='runtime'):
+    def case(name, installed='good', bundled='good', early=False, fault=False, linked_layout=False, linked_game=False, busy=False, reservation=None, extra_env=None, verify=None, helper=False, menu_off=False, self_hosted=False, menu_key=MISSING, runtime='runtime'):
         if only and not name.startswith(only):
             return
         game = root / name
@@ -27,6 +27,11 @@ with tempfile.TemporaryDirectory(prefix='kiln-sf-fixtures-', dir=build.parent) a
             layout = root / (name + '-steam-library')
             layout.symlink_to(root, target_is_directory=True)
             game = layout / name
+        if linked_game:
+            # the game folder itself is a link (a Steam library moved behind a junction; inbox 45): the player's layout
+            real = root / (name + '-real')
+            real.mkdir()
+            game.symlink_to(real, target_is_directory=True)
         for kind, mode in [('shroudforge', installed), ('kiln/plugins/shroudforge', bundled)]:
             dest = game / kind
             dest.mkdir(parents=True)
@@ -75,6 +80,10 @@ with tempfile.TemporaryDirectory(prefix='kiln-sf-fixtures-', dir=build.parent) a
         if self_hosted:
             assert status['mode'] == 'self-hosted' and not log.exists(), (name, status)
             assert status.get('menu') != 'kiln', status
+            loader = status['loaderFile']
+            line = ("shroudforge: its own loader (" + loader + ") runs it. Kiln's adapter steps aside. Managed package switches still apply.").encode()
+            assert result.stdout.count(line) == 1, result.stdout
+            assert loader and loader in status['reason'], status
             print('PASS', name)
             return
         if reservation:
@@ -112,6 +121,7 @@ with tempfile.TemporaryDirectory(prefix='kiln-sf-fixtures-', dir=build.parent) a
     case('early-reservation', installed='corrupt', early=True)
     case('faulted-update', installed='corrupt', fault=True)
     case('linked-layout', installed='corrupt', linked_layout=True)
+    case('linked-game-folder', installed='corrupt', linked_game=True)
     case('standalone-busy-install', busy=True)
     case('closed-reservation', installed='corrupt', early=True, reservation='DENY_RESERVATION')
     case('short-eml-table', installed='corrupt', early=True, reservation='SHORT_EML_TABLE')
@@ -456,7 +466,7 @@ with tempfile.TemporaryDirectory(prefix='kiln-sf-fixtures-', dir=build.parent) a
               extra_env=dict(stopped, KILN_SF_STOP_IN_SUBSCRIBE='1', KILN_SF_FAULT_AFTER_SUBSCRIBE='1'), verify=stop_during)
 
     # ---- dev.22: drop-ins for ShroudForge with an active profile that lists no ShroudForge mods ----
-    def profile_case(name, dropins, package, state=None):
+    def profile_case(name, dropins, package, state=None, requirements=None, override=None):
         game = root / name
         (game / 'kiln').mkdir(parents=True)
         for kind in ('shroudforge', 'kiln/plugins/shroudforge'):
@@ -472,6 +482,8 @@ with tempfile.TemporaryDirectory(prefix='kiln-sf-fixtures-', dir=build.parent) a
         if state:  # ShroudForge's own state file: <game>/shroudforge/state.json (its default paths.state folder)
             (game / 'shroudforge/state.json').write_text(json.dumps(state))
         profile = {'format': 1, 'id': 'p', 'generation': 1, 'mods': {}}
+        if requirements is not None:
+            profile['emlRuntime'] = requirements
         if dropins is not None:
             profile['dropins'] = dropins
         (game / 'kiln/profile.json').write_text(json.dumps(profile))
@@ -479,6 +491,8 @@ with tempfile.TemporaryDirectory(prefix='kiln-sf-fixtures-', dir=build.parent) a
         call_env = dict(env, KILN_SF_TEST_LOG='Z:' + str(log).replace('/', '\\'),
                         KILN_SF_PROFILE='Z:' + str(game / 'kiln/profile.json').replace('/', '\\'))
         call_env.pop('KILN_SHROUDFORGE', None)
+        if override is not None:
+            call_env['KILN_SHROUDFORGE'] = override
         result = subprocess.run(['wine', str(build / 'sfhost.exe'), str(game), str(adapter)], env=call_env,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=40)
         if result.returncode:
@@ -497,3 +511,11 @@ with tempfile.TemporaryDirectory(prefix='kiln-sf-fixtures-', dir=build.parent) a
         status, log, out = profile_case(name, dropins, package)
         assert status['mode'] == 'off' and not log.exists(), (name, status, out)
         print('PASS', name)
+
+    status, log, out = profile_case('profile-runtime-eml', False, False, requirements=['ammo-slots'])
+    assert status['mode'] != 'off' and log.exists() and 'prepare' in log.read_text().splitlines(), (status, out)
+    assert status['hostingReason'] == "the EML package ammo-slots needs ShroudForge's runtime", status
+    print('PASS profile-runtime-eml')
+    status, log, out = profile_case('profile-runtime-eml-off', False, False, requirements=['ammo-slots'], override='0')
+    assert status['mode'] == 'off' and status['reason'] == 'KILN_SHROUDFORGE=0' and not log.exists(), (status, out)
+    print('PASS profile-runtime-eml-off')

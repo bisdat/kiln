@@ -9,6 +9,7 @@
 
 #include "kiln_api.h"
 #include "moves.h"
+#include "services/kiln_component_changes.h"
 #include "services/kiln_items.h"
 
 namespace kitems {
@@ -118,6 +119,10 @@ struct Engine {
     uintptr_t add_component = 0;       // feature items.names (lab only: the rename handler's AddComponent)
     EquipFn equip_item = nullptr;      // feature items.equip (v5)
     EquipFn unequip_item = nullptr;
+    // feature items.equip_sets (v6): the commit's own rollback conditions, captured from InventoryCommit's first bytes
+    // (sigdb @items/CommitGuards): flags byte (bit 0x40 = roll back), the InventoryEmptyState accessor's slot, the touched
+    // inventories' count. A set refuses before the commit when either would make the commit roll back by itself.
+    int64_t tx_guard_flags = 0, tx_empty_state = 0, tx_touched_count = 0;
 
     int64_t world_storage = 0;      // world -> entity storage
     int64_t tx_size = 0;            // InventoryTx bytes (result flags + 8, rounded to 16)
@@ -148,6 +153,7 @@ struct Engine {
     bool names_ok = false;    // feature items.names: container names
     bool instances_ok = false;  // feature items.instances: stamps, locations, records (v4)
     bool equip_ok = false;      // feature items.equip: the game's equip / unequip resolved (v5; also needs kiln.world)
+    bool sets_ok = false;       // feature items.equip_sets: equip plus the commit's guards (v6; also needs kiln.decisions)
 };
 extern Engine E;
 // After resolve(): blank the game functions a feature that is off must never call. items.move off drops the slot transfer
@@ -159,6 +165,7 @@ constexpr uint32_t kSetupBlock = 0xF0;  // InventoryTx setup block (InventoryTx_
 constexpr uint32_t kOpStride = 0x34;    // commit op record
 constexpr uint32_t kInventorySize = 96; // 8 x ItemStack {u32 id; u32 count; u32 pide}
 constexpr uint32_t kSetupSize = 84;     // InventorySetup
+constexpr uint32_t kSetupFlags = 0x50;  // InventorySetup: u8 flags (bit 0 a player's, bit 1 an NPC's inventory)
 constexpr uint32_t kItemStateSize = 20; // ItemState (on a pide)
 constexpr uint32_t kMaxPlayer = 1023;
 constexpr uint32_t kRecipeWorkshopId = 0x24;  // RecipeInfo.workshopId (the recipe function compares it with its argument)
@@ -197,6 +204,8 @@ struct Access {
 struct Job {
     bool take = false;
     KilnItemsRequest r{};
+    uint32_t dye = 0;          // v7 KILN_ITEMS_DYE (from KilnItemsRequestEx)
+    float durability = 1.0f;   // v7 KILN_ITEMS_DURABILITY
 };
 
 // A Fuel request (set / add / fill) or one keep-full entry, as the program sees it.
@@ -269,6 +278,14 @@ struct PageSet {
     uint32_t n = 0;
 };
 bool read_pages(const Access& a, KilnEntity e, PageSet* out, bool* initialized);
+// Upgrades (v8, package P3, gear.cpp): opens a transaction of ours on `tx` (E.tx_size bytes, 16-aligned) with the
+// accessors of `a` and `entity` as its operator, no flags (the caller commits or rolls back, then frees its arrays);
+// and whether every op queued on it takes a plain stack (op 1 without an item entity). Not guarded: call them inside
+// the caller's structured-exception guard.
+void tx_begin(const Access& a, KilnEntity entity, uint8_t* tx);
+bool tx_takes_plain_only(const uint8_t* tx);
+// InventorySetup's flags byte (kSetupFlags) through the accessors of `a`. False: no setup (or a fault).
+bool setup_flags(const Access& a, KilnEntity e, uint8_t* flags);
 
 // A player's own stacks, from the entity's SlotSelection: whether it is a player at all (an action-bar page is set), the
 // two action-bar pages, and the equipped slots plus the item in hand (each a slot id).
@@ -312,5 +329,59 @@ struct MoveJob {
     KilnItemsMoveRequest r{};
 };
 bool run_move(const Access& a, const MoveJob& job, uint8_t* tx, KilnItemsMoveResult* res, unsigned long* code);
+
+// ---- kiln.component_changes (since 0.2.0-dev.29, chapter 07 S7) ----
+// A job of this service may change Inventory (give, take, recipes, moves, equipment, sets), Fuel (water) and
+// SlotSelection of the entities it names and of their inventory trees. While anything is watched
+// (kiln_component_watching), NoteLease::begin walks those trees (link ids only, no copy) and asks the service's filter
+// (kiln_component_watched) for each entity and component; only those it may watch are copied, into a note lent from a
+// small pool (no allocation once the pool has its notes; none at all when nothing the job touches is watched).
+// NoteLease::end compares them after the job; each one that changed is told to kiln.component_changes as kiln.items'
+// write. Guarded (a fault copies or tells nothing). An accessor the program does not have is skipped.
+struct WatchNote {
+    struct Item {
+        KilnEntity entity;
+        uint32_t index, size;  // component index (kiln_component_changes.h), bytes
+        uint8_t bytes[256];
+    };
+    static constexpr uint32_t kMax = 600;  // two holders' trees: SlotSelection, Fuel, 32 x (Inventory + 8 item entities)
+    uint32_t count = 0;
+    Item items[kMax];
+};
+// on_ready: the table (null: kiln-decisions.dll is not loaded) and the service's owner.
+void note_setup(const KilnComponentChangesApiV1* table, KilnOwner owner);
+// Whether a job should be noted now (anything watched). Any thread, lock-free.
+bool note_wanted();
+class NoteLease {
+public:
+    NoteLease() = default;
+    NoteLease(const NoteLease&) = delete;
+    NoteLease& operator=(const NoteLease&) = delete;
+    ~NoteLease();
+    // Before the job: the watched components of the holders' trees (none copied when none is watched).
+    void begin(const Access& a, const KilnEntity* holders, uint32_t n);
+    // After the job: what changed is told.
+    void end(const Access& a);
+    explicit operator bool() const { return note_ != nullptr && note_->count != 0; }
+    // test and lab: how many components begin copied
+    uint32_t copied() const { return note_ ? note_->count : 0; }
+
+private:
+    friend void note_add(const Access& a, uint32_t index, KilnEntity e, NoteLease* lease);
+    WatchNote* note_ = nullptr;
+    int slot_ = -1;  // the pool's slot, -1 for a note of its own (the pool was busy)
+};
+// The pool's notes made so far and the notes made outside it (lab counters).
+void note_pool_stats(uint32_t* pooled, uint64_t* extra);
+
+// ---- equipment sets (v6, setexec.cpp) ----
+namespace sets {
+struct SetJob;
+struct SetOutcome;
+}  // namespace sets
+// Runs one set inside kiln_items_equip's update of `player` (the program's accessors in `a`, its transaction buffer
+// `tx`): the snapshot checked again, the plan, one transaction and its terminal state (setexec.h). Every game call is
+// guarded; a fault ends it with out->engine_fault set.
+void set_run(const Access& a, KilnEntity player, uint8_t* tx, const sets::SetJob& job, sets::SetOutcome* out);
 
 }  // namespace kitems

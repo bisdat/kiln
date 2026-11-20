@@ -4,7 +4,7 @@ import { expect, test } from "@playwright/test";
 test("shell renders: header navigation, state word, mock flag", async ({ page }) => {
   await page.goto("/");
   const nav = page.getByRole("navigation", { name: "Main" });
-  for (const item of ["Play", "Runtime", "Logs", "Saves", "Editor", "Servers"])
+  for (const item of ["Play", "Runtime", "Logs", "Saves", "Editor", "Servers", "Community"])
     await expect(nav.getByRole("link", { name: item, exact: true })).toBeVisible();
   // mods are seen on Play, profiles in Settings: neither has a header word
   for (const item of ["Profiles", "Library"]) await expect(nav.getByRole("link", { name: item, exact: true })).toHaveCount(0);

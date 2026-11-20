@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Kiln.Terrain in the capability registry (docs/kiln/services/caps.md). The library has no native table: its rows say
-// whether what it is built on is there. terrain.overlays is in the client gate's list for the client side
-// (native/core/gates/dev28-19f-terrain.json): on a client that hosts a world it is held until its game test.
+// whether what it is built on is there. Hosted worlds use the server-world Build and Saves services.
 namespace Kiln;
 
 internal static class TerrainCaps
@@ -15,16 +14,26 @@ internal static class TerrainCaps
     /// <summary>Biome changes: not built.</summary>
     public const string Biomes = "terrain.biomes";
 
-    private static readonly string[] Needs = ["kiln.build", "build.read", "build.write", "build.persist", "kiln.saves"];
+    private static readonly string[] Needs = ["kiln.build", "build.read", "build.write", "build.persist", "kiln.saves", "saves.load", "saves.write"];
 
     internal static readonly ServiceCapRows Rows = new(Library, Report, everySteps: 25);
 
     private static void Report()
     {
         ServiceCaps.Report(Library, CapabilityState.Available);
-        var on = true;
-        foreach (var n in Needs) on &= Capabilities.Is(n);
-        ServiceCaps.Static(Overlays, on, CapabilityReason.ServiceMissing, "kiln.build or kiln.saves is not loaded", Needs);
+        // a world put behind the library (the test kit's fake) stands for kiln.build and kiln.saves
+        var on = Terrain.BackendFactory is not null;
+        if (!on)
+        {
+            on = true;
+            foreach (var n in Needs) on &= Capabilities.Is(n);
+        }
+        string? failure = null;
+        if (on)
+            failure = Terrain.BackendFactory is { } factory ? factory().PersistenceFailure :
+                BuildTerrainBackend.PersistenceReason();
+        if (failure is not null) ServiceCaps.Report(Overlays, CapabilityState.Unavailable, CapabilityReason.Session, failure);
+        else ServiceCaps.Static(Overlays, on, CapabilityReason.ServiceMissing, "kiln.build or kiln.saves is not loaded", Needs);
         ServiceCaps.Report(Baked, CapabilityState.Unavailable, CapabilityReason.Policy, "baked terrain regions are not built in this version");
         ServiceCaps.Report(Biomes, CapabilityState.Unavailable, CapabilityReason.Policy, "biome changes are not built in this version");
     }
@@ -32,8 +41,8 @@ internal static class TerrainCaps
     /// <summary>Throws <see cref="KilnUnavailableException"/> naming <paramref name="capability"/> unless it is available.</summary>
     public static void Require(string capability)
     {
+        Terrain.CapabilityOverride?.Invoke(capability);
         Rows.Ensure();
-        if (Capabilities.Is(capability)) return;
         Report();
         if (Capabilities.Is(capability)) return;
         throw ServiceCaps.Unavailable(capability);

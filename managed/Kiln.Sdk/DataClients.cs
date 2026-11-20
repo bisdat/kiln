@@ -30,7 +30,7 @@ internal static class DataClients
         // affix kinds and pools: Kiln's own on the server; the rolls reach Kiln clients as item data, and vanilla clients need nothing
         ["affixes"] = None, ["affixPools"] = None,
         // built by every player's game from the mod's own files
-        ["vfx"] = Mod, ["windows"] = Mod, ["hudLines"] = Mod, ["keyBindings"] = Mod, ["sounds"] = Mod, ["materials"] = Mod, ["talents"] = Mod, ["talentTrees"] = Mod, ["buildingMaterials"] = Mod, ["blueprints"] = Mod, ["npcs"] = Mod, ["terrainMaterials"] = Mod,
+        ["vfx"] = Mod, ["windows"] = Mod, ["hudLines"] = Mod, ["keyBindings"] = Mod, ["sounds"] = Mod, ["materials"] = Mod, ["talents"] = Mod, ["talentTrees"] = Mod, ["buildingMaterialPools"] = Mod, ["buildingMaterials"] = Mod, ["blueprints"] = Mod, ["npcs"] = Mod, ["terrainMaterials"] = Mod,
         // the game's own journal and NPC menu, built from the mod's files at start
         ["quests"] = Mod, ["dialogues"] = Mod,
     };

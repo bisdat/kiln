@@ -1,0 +1,333 @@
+{
+  "format": 1,
+  "side": "client",
+  "comment": "Kiln's upscaler swap (0.2.0-dev.29.18 phase B; docs/kiln/graphics.md, native/services/ui/upscale.cpp): the game's FSR 3 upscaler pass on the client (docs/re/client-upscale.md; proven on the real client by spike B0). PassRecord records the upscaler pass for FSR 3 (state byte 1) and DLSS (2): rcx = the pass context (its command writer at +upscale/client.ctx.writer), rdx = the upscaler state, r8 = the input struct. Its FSR branch declares the six textures' use and calls Fsr3Dispatch(ctx, fsr context, description); the description's fields are captured as upscale/client.desc.*. Its DLSS branch flushes the pending barriers (FlushBarriers(ctx, 0x7ffffffff)) and writes render command 0x2c into the writer's chunk list (CmdChunkAlloc when the chunk is full): Kiln's own command (type 0xF0) is written the same way. CmdExecute runs one render command on the render thread (rcx = executor state, rdx = the game's Vulkan function table, r8 = the VkCommandBuffer, r9 = the command: u16 size, u8 type at +2); types above upscale/client.cmd.last are ignored by the game. ResolveHandle turns a 16-byte texture handle into the texture object (VkImage at +upscale/client.tex.image, VkImageView at +upscale/client.tex.view, width/height, the format byte). Fsr3Create(allocator, device, ?, params) makes the FSR 3 context at each FSR set-up (world load, quality, resolution and 3D render scale changes); params hold the max render and the output size. Found on client 26430625 (5d9ef2f1...).",
+  "symbols": {
+    "upscale/client.PassRecord": {
+      "find": [
+        {
+          "pattern": "48 8B C4 55 41 54 41 55 41 57 48 8D A8 A8 FE FF FF 48 81 EC 38 02 00 00 44 0F B6 0A 4D 8B E8 4C 8B FA 4C 8B E1 45 85 C9 0F 84 ?? ?? ?? ?? 41 83"
+        }
+      ]
+    },
+    "upscale/client.Fsr3DispatchCall": {
+      "comment": "the FSR branch's last stores into the description (pre-exposure at +0x13C from input +0xA0), then the call",
+      "find": [
+        {
+          "scope": {
+            "symbol": "upscale/client.PassRecord",
+            "size": 1792
+          },
+          "pattern": "F3 41 0F 10 8D A0 00 00 00 F3 0F 11 85 F4 00 00 00 F3 0F 11 8D FC 00 00 00 E8 {upscale/client.Fsr3Dispatch:rel32}",
+          "offset": 25
+        }
+      ]
+    },
+    "upscale/client.DlssFlushCall": {
+      "comment": "the DLSS branch: rdx = 0x7ffffffff, rcx = r12 (the pass context), then FlushBarriers",
+      "find": [
+        {
+          "scope": {
+            "symbol": "upscale/client.PassRecord",
+            "size": 1792
+          },
+          "pattern": "48 BA FF FF FF FF 07 00 00 00 41 0F 10 4D 20 49 8B CC 48 89 44 24 60 0F 11 44 24 68 41 0F 10 45 30 0F 11 4D 98 41 0F 10 4D 40 0F 11 45 88 F3 41 0F 10 45 00 F3 0F 11 45 AC F3 41 0F 10 85 A0 00 00 00 0F 11 4C 24 78 F3 41 0F 10 4D 04 F3 0F 11 45 B4 F3 0F 11 4D B0 E8 {upscale/client.FlushBarriers:rel32}",
+          "offset": 87
+        }
+      ]
+    },
+    "upscale/client.DlssCommandWrite": {
+      "comment": "rbx = [r12 + ctx.writer]; r8 = [rbx + writer.chunk]; room = [r8+0x10] - [r8+8]; when < 0x40: CmdChunkAlloc([rbx]), linked as the old chunk's next and made current",
+      "find": [
+        {
+          "scope": {
+            "symbol": "upscale/client.PassRecord",
+            "size": 1792
+          },
+          "pattern": "49 8B 5C 24 {upscale/client.ctx.writer:d8} F3 0F 10 45 AC F3 0F 10 75 B0 F3 0F 10 7D B4 4C 8B 43 {upscale/client.writer.chunk:d8} 4C 8B B4 24 30 02 00 00 48 8B BC 24 78 02 00 00 48 8B B4 24 70 02 00 00 48 89 44 24 30 49 8B 40 10 49 2B 40 08 F3 0F 11 44 24 4C 48 83 F8 40 73 16 48 8B 0B E8 {upscale/client.CmdChunkAlloc:rel32} 48 8B 4B 28 4C 8B C0 48 89 01 48 89 43 28"
+        }
+      ]
+    },
+    "upscale/client.CmdExecute": {
+      "find": [
+        {
+          "pattern": "4C 89 4C 24 20 4C 89 44 24 18 48 89 54 24 10 55 56 41 54 41 56 41 57 48 8D AC 24 80 EE FF FF B8 80 12 00 00 E8 ?? ?? ?? ?? 48 2B E0 41 0F B6 41 02 4D 8B F1 4D 8B E0 4C 8B FA 48 8B F1 83 F8 {upscale/client.cmd.last:d8} 0F 87"
+        }
+      ]
+    },
+    "upscale/client.DlssExecuteTextures": {
+      "comment": "render command 0x2c reads the texture objects: view, image, height, width",
+      "find": [
+        {
+          "scope": {
+            "symbol": "upscale/client.CmdExecute",
+            "size": 9216
+          },
+          "pattern": "48 8B 42 {upscale/client.tex.view:d8} 48 89 44 24 50 48 8B 42 {upscale/client.tex.image:d8} 0F 11 44 24 68 89 5C 24 70 0F 11 44 24 58 48 89 44 24 58 8B 42 {upscale/client.tex.height:d8} 0F 10 44 24 50 89 44 24 7C 8B 42 {upscale/client.tex.width:d8}"
+        }
+      ]
+    },
+    "upscale/client.Fsr3CreateCall": {
+      "find": [
+        {
+          "pattern": "48 89 44 24 38 49 8B 04 24 48 89 44 24 40 E8 {upscale/client.Fsr3Create:rel32} 48 89 86 ?? ?? ?? ??",
+          "offset": 14
+        }
+      ]
+    },
+    "upscale/client.DlssResolveCall": {
+      "comment": "the DLSS branch turns its four texture handles into texture objects: lea rcx,[rsp+0x68]; ...; call ResolveHandle",
+      "find": [
+        {
+          "scope": {
+            "symbol": "upscale/client.PassRecord",
+            "size": 1792
+          },
+          "pattern": "48 8B 44 24 60 48 8D 4C 24 68 48 89 44 24 20 C6 44 24 48 00 E8 {upscale/client.ResolveHandle:rel32} 48 8D 4D 98 48 89 44 24 28 E8",
+          "offset": 20
+        }
+      ]
+    },
+    "@upscale/client.ResolveHandle.fields": {
+      "comment": "texture object = [[handle.owner + handle.table] + handle.index * 8] (index: the u16 at handle+8)",
+      "find": [
+        {
+          "scope": {
+            "symbol": "upscale/client.ResolveHandle",
+            "size": 24
+          },
+          "pattern": "48 8B 01 48 85 C0 74 10 0F B7 49 08 48 8B 80 {upscale/client.handle.table:d32} 48 8B 04 C8 C3"
+        }
+      ]
+    },
+    "@upscale/client.desc.sizes": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "upscale/client.Fsr3Dispatch",
+            "size": 12261
+          },
+          "pattern": "F2 41 0F 10 8F {upscale/client.desc.jitter:d32} F2 41 0F 11 8D ?? ?? ?? ?? 49 8B 87 {upscale/client.desc.prev_render:d32} 89 85 ?? ?? ?? ?? 48 C1 E8 20 89 85 ?? ?? ?? ?? 48 8B 85 ?? ?? ?? ?? 49 89 85 ?? ?? ?? ?? 49 8B 87 {upscale/client.desc.render:d32} 89 85 ?? ?? ?? ?? 48 C1 E8 20 89 85 ?? ?? ?? ?? 48 8B 85 ?? ?? ?? ?? 49 89 85 ?? ?? ?? ?? 49 8B 87 {upscale/client.desc.upscale:d32} 89"
+        }
+      ],
+      "comment": "Fsr3Dispatch (r15 = the FSR description) copies the jitter, then the previous render, render and upscale sizes into its context"
+    },
+    "@upscale/client.desc.reset": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "upscale/client.Fsr3Dispatch",
+            "size": 12261
+          },
+          "pattern": "41 38 9F {upscale/client.desc.reset:d32} 75 0E 41 38 9D"
+        }
+      ],
+      "comment": "the reset byte, or'ed with the context's first-frame flag"
+    },
+    "@upscale/client.desc.fov": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "upscale/client.Fsr3Dispatch",
+            "size": 12261
+          },
+          "pattern": "00 00 80 3F F3 41 0F 10 87 {upscale/client.desc.fov:d32} F3 41 0F 59 C0 E8"
+        }
+      ],
+      "comment": "the vertical FOV (radians), halved for tan"
+    },
+    "@upscale/client.desc.depth": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "upscale/client.Fsr3Dispatch",
+            "size": 12261
+          },
+          "pattern": "F3 41 0F 10 97 {upscale/client.desc.near:d32} F3 41 0F 5F 97 {upscale/client.desc.far:d32} F3 41 0F 10 9F"
+        }
+      ],
+      "comment": "the camera planes: the game takes their max and min (deviceToViewDepth); 0.01 and 10000 seen"
+    },
+    "@upscale/client.desc.exposure": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "upscale/client.Fsr3Dispatch",
+            "size": 12261
+          },
+          "pattern": "F3 41 0F 10 87 {upscale/client.desc.exposure:d32} 41 0F 2E C2 7A 07 75 05"
+        }
+      ],
+      "comment": "pre-exposure, 0 taken as 1"
+    },
+    "@upscale/client.desc.mv_scale": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "upscale/client.Fsr3Dispatch",
+            "size": 12261
+          },
+          "pattern": "0F 57 C0 F3 41 0F 10 8F {upscale/client.desc.mv_scale:d32} 48 8B C8 F3 41 0F 10 97 ?? ?? ?? ?? 48 C1 E9 20"
+        }
+      ],
+      "comment": "the motion-vector scale x (y follows at +4)"
+    },
+    "@upscale/client.desc.frame_ns": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "upscale/client.Fsr3Dispatch",
+            "size": 12261
+          },
+          "pattern": "0F 57 C0 F2 49 0F 2A 87 {upscale/client.desc.frame_ns:d32} F2 0F 59"
+        }
+      ],
+      "comment": "the frame time, int64 nanoseconds"
+    },
+    "@upscale/client.desc.sharpness": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "upscale/client.Fsr3Dispatch",
+            "size": 12261
+          },
+          "pattern": "F3 41 0F 10 8F {upscale/client.desc.sharpness:d32} 0F AF C1 F3 41 0F 59"
+        }
+      ],
+      "comment": "RCAS sharpness (0 from the game)"
+    },
+    "@upscale/client.create.params": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "upscale/client.Fsr3Create",
+            "size": 4096
+          },
+          "pattern": "48 8B 43 {upscale/client.create.render:d8} 48 8D 55 ?? 89 45 ?? BF 01 00 00 00 48 C1 E8 20 0F 57 C0 89 45 ?? 48 8B 45 ?? 49 89 86 ?? ?? ?? ?? 48 8B 43 ?? 89 45 ?? 48 C1 E8 20 89 45 ?? 48 8B 45 ?? 49 89 86 ?? ?? ?? ?? 48 8B 43 {upscale/client.create.output:d8} 89 45"
+        }
+      ],
+      "comment": "Fsr3Create(r9 = params): the max render size and the output size, two u32 each"
+    },
+    "@upscale/client.tex.format": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "upscale/client.CmdExecute",
+            "size": 9216
+          },
+          "pattern": "4D 8B 7E 18 48 89 55 ?? 0F B6 4B {upscale/client.tex.format:d8} 48 89 5D ?? E8 ?? ?? ?? ?? 41 0F B6 4D ?? 8B F8 E8"
+        }
+      ],
+      "comment": "render command 0x2c reads each texture object's format byte (the engine's format number is the VkFormat)"
+    }
+  },
+  "constants": {
+    "upscale/client.cmd.last": {
+      "min_votes": 1
+    },
+    "upscale/client.ctx.writer": {
+      "min_votes": 1
+    },
+    "upscale/client.writer.chunk": {
+      "min_votes": 1
+    },
+    "upscale/client.tex.view": {
+      "min_votes": 1
+    },
+    "upscale/client.tex.image": {
+      "min_votes": 1
+    },
+    "upscale/client.tex.width": {
+      "min_votes": 1
+    },
+    "upscale/client.tex.height": {
+      "min_votes": 1
+    },
+    "upscale/client.handle.table": {
+      "min_votes": 1
+    },
+    "upscale/client.desc.jitter": {
+      "min_votes": 1
+    },
+    "upscale/client.desc.prev_render": {
+      "min_votes": 1
+    },
+    "upscale/client.desc.render": {
+      "min_votes": 1
+    },
+    "upscale/client.desc.upscale": {
+      "min_votes": 1
+    },
+    "upscale/client.desc.reset": {
+      "min_votes": 1
+    },
+    "upscale/client.desc.fov": {
+      "min_votes": 1
+    },
+    "upscale/client.desc.near": {
+      "min_votes": 1
+    },
+    "upscale/client.desc.far": {
+      "min_votes": 1
+    },
+    "upscale/client.desc.exposure": {
+      "min_votes": 1
+    },
+    "upscale/client.desc.mv_scale": {
+      "min_votes": 1
+    },
+    "upscale/client.desc.frame_ns": {
+      "min_votes": 1
+    },
+    "upscale/client.desc.sharpness": {
+      "min_votes": 1
+    },
+    "upscale/client.create.render": {
+      "min_votes": 1
+    },
+    "upscale/client.create.output": {
+      "min_votes": 1
+    },
+    "upscale/client.tex.format": {
+      "min_votes": 1
+    }
+  },
+  "features": {
+    "upscale.swap": {
+      "symbols": [
+        "upscale/client.PassRecord",
+        "upscale/client.Fsr3Dispatch",
+        "upscale/client.FlushBarriers",
+        "upscale/client.CmdChunkAlloc",
+        "upscale/client.CmdExecute",
+        "upscale/client.ResolveHandle",
+        "upscale/client.Fsr3Create"
+      ],
+      "constants": [
+        "upscale/client.cmd.last",
+        "upscale/client.ctx.writer",
+        "upscale/client.writer.chunk",
+        "upscale/client.tex.view",
+        "upscale/client.tex.image",
+        "upscale/client.tex.width",
+        "upscale/client.tex.height",
+        "upscale/client.handle.table",
+        "upscale/client.desc.jitter",
+        "upscale/client.desc.prev_render",
+        "upscale/client.desc.render",
+        "upscale/client.desc.upscale",
+        "upscale/client.desc.reset",
+        "upscale/client.desc.fov",
+        "upscale/client.desc.near",
+        "upscale/client.desc.far",
+        "upscale/client.desc.exposure",
+        "upscale/client.desc.mv_scale",
+        "upscale/client.desc.frame_ns",
+        "upscale/client.desc.sharpness",
+        "upscale/client.create.render",
+        "upscale/client.create.output",
+        "upscale/client.tex.format"
+      ]
+    }
+  }
+}

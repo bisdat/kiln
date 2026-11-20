@@ -1,0 +1,13 @@
+{
+  "format": 1,
+  "entries": [
+    {
+      "kind": "resource",
+      "guid": "4b8e6f21-0c3a-4d5e-9f17-2a6b8c0d1e93",
+      "type": "keen::ImpactProgram",
+      "part": 0,
+      "mode": "new",
+      "file": "hit.bin"
+    }
+  ]
+}

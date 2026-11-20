@@ -6,5 +6,5 @@
   "entryAssembly": "SystemsTest.dll",
   "side": "server",
   "advanced": true,
-  "description": "PASS/FAIL lines: Kiln.Testing.LabSystems, the lab parallel switch (on, held, let go). The native part (native/build.sh, kiln-systems-test.dll in kiln/plugins) checks kiln.world's game-program table. A lab with kiln/control/systems.parallel and no player."
+  "description": "PASS/FAIL lines: Kiln.Testing.LabSystems, the lab parallel switch (on, held, let go); Kiln.Systems (wraps, per-entity views, writes, typed views of Kiln.Game's Ecs.Programs, the contract check, AroundEach x4 on fuel_setup). The native part (native/build.sh, kiln-systems-test.dll in kiln/plugins) checks kiln.world's game-program table, every live contract against the committed catalog (kiln/data/systems-test-catalog.json) and a wrap applied when the world stops. A lab with kiln/control/systems.parallel and no player."
 }

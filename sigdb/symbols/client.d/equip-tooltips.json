@@ -1,0 +1,296 @@
+{
+  "format": 1,
+  "side": "client",
+  "comment": "Native tooltip lines and values in the game's item detail view (equipment wave P8b; docs/re/game-ui.md \"Native tooltip lines\" and the wave's TOOLTIPS.md, client 26430625, static analysis; client checks equip.c5..equip.c9 unplayed). ItemDetail (05a's ui/ItemDetail) builds the detail inside one scroll area whose content is a vertical list. ui/DetailContentEnd (H1) is a mid at that list's end, right before the game closes it (lea rcx,[rbp+detail.contentScope]; call scope end): rsi = ItemDetail's own record, r15 = the client ItemInfo or 0, rbp = the frame, the layouter's current parent is the content list, so text drawn there is the list's last child and scrolls with the vanilla stats and description. ui/DetailAfterStats (H2) is a mid between the stats block and the description (the same registers). The description's recipe (@ui/TooltipDesc.fields): NativeTextLine(text object at rbp+tt.descText, GameText, bundle+tt.descStyle, 1); the object's byte +(tt.descShown - tt.descText) = 1; UiNodeAlign(node at +(tt.descNode - tt.descText), u16 0x101 with an ItemInfo, 0x102 without) and the same u16 at +(tt.descAlign - tt.descText); the byte +(tt.descWrap - tt.descText) = 1; UiNodeSize(node, {1.0, 0.0}) (fill the parent's width, fit the height: the shaper then wraps at the laid-out width); NativeTextDraw(object). Colour (@ui/TooltipColor.fields, the compact line's recipe): +(tt.colorBits - tt.colorText) |= 1, u16 +(tt.colorFlags - tt.colorText) |= 0x40, 8 bytes +(tt.colorValue - tt.colorText) = a palette entry, u16 +(tt.colorFlags2 - tt.colorText) = 0. Small text (@ui/TooltipSmall.fields): u16 flags |= 8 and the f32 at flags + (tt.smallField - tt.smallFlags) = *(float*)(bundle + tt.smallSize). The palette (@ui/TooltipPalette.fields, the header model's rarity colour): 8-byte entries at bundle + tt.palette + tt.pal<Name>; bundle = *(*(ui/UiApp) + ui/ui.config). ui/DetailStatsBlockCall is the stats block call's first instruction (r9d load); a mid there and H2 bracket the only ItemDetail call of the stats block, the window in which ui/StatValueDraw (H4, void(const StatLabel*, float value in xmm1)) draws ItemDetail's numbers (the block has three other callers). ui/DetailStatsModel (H3) is a mid after the stats model is built (rax = rbp+0x810 = the model). ui/DetailHeaderModel (H5) is a mid after the header model is built (probe logs only). detail.compact / detail.mode: ItemDetail's record (u32 compact view, pointer to the u32 mode; mode 0 is the inline body that reaches H1/H2); detail.available / detail.unlocked: the record's PerkContainerNew copy (bytes). Probe only (no feature needs them): @ui/TooltipBuffTints.fields (the stats block's buff icon tints, bundle offsets; Q6), ui/detail.headerModel and ui/headerModel.color (the header model in ItemDetail's frame and its rarity colour), ui/statsModel.* (the stats model's rows at +0x580, 0x70 bytes each, available +0x7b8, unlocked +0x7c0, base level +0x7cc; TOOLTIPS.md §2).",
+  "symbols": {
+    "ui/DetailContentEnd": {
+      "find": [
+        {
+          "pattern": "48 8D 4D {ui/detail.contentScope:d8} E8 ?? ?? ?? ?? 48 8D 8D {ui/detail.scrollScope:d32} E8 ?? ?? ?? ?? 83 BE F4 00 00 00 00",
+          "offset": 0
+        }
+      ]
+    },
+    "ui/DetailAfterStats": {
+      "find": [
+        {
+          "pattern": "48 83 BD 70 02 00 00 00 0F 84 ?? ?? ?? ?? 0F 10 85 68 02 00 00",
+          "offset": 0
+        }
+      ]
+    },
+    "ui/DetailStatsBlockCall": {
+      "find": [
+        {
+          "pattern": "44 0F B6 8E E5 00 00 00 48 8D 95 10 08 00 00 4D 8B C6 48 8B CE E8 ?? ?? ?? ?? 48 83 BD 70 02 00 00 00",
+          "offset": 0
+        }
+      ]
+    },
+    "ui/DetailStatsModel": {
+      "find": [
+        {
+          "pattern": "4C 8B 86 68 01 00 00 48 8D 8D 10 08 00 00 48 8B D6 E8 ?? ?? ?? ?? 83 BE BC 00 00 00 01",
+          "offset": 22
+        }
+      ]
+    },
+    "ui/StatValueDraw": {
+      "find": [
+        {
+          "pattern": "F3 0F 11 4C 24 10 55 53 56 57 41 56 48 8D AC 24 A0 FC FF FF 48 81 EC 60 04 00 00 48 8B 05 ?? ?? ?? ?? 48 8B F9 8B 11",
+          "offset": 0
+        }
+      ]
+    },
+    "ui/DetailHeaderModel": {
+      "find": [
+        {
+          "pattern": "4C 8D 8D F0 04 00 00 4C 8B C6 49 8B D7 48 8D 8D {ui/detail.headerModel:d32} E8 ?? ?? ?? ?? 48 8B BD F0 02 00 00",
+          "offset": 25
+        }
+      ]
+    },
+    "@ui/TooltipDesc.fields": {
+      "find": [
+        {
+          "pattern": "48 8D 8D {ui/tt.descText:d32} 48 F7 D8 0F 29 45 C0 48 8B 05 ?? ?? ?? ?? 41 B1 01 66 1B DB F2 0F 11 4D D0 66 81 C3 02 01 4C 8B 80 ?? ?? ?? ?? 49 81 C0 {ui/tt.descStyle:d32} E8 ?? ?? ?? ?? 48 8B 8D {ui/tt.descNode:d32} 48 8D 95 ?? ?? ?? ?? C6 85 {ui/tt.descShown:d32} 01 88 9D ?? ?? ?? ?? C6 85 ?? ?? ?? ?? 01 E8 ?? ?? ?? ?? 48 8B 8D ?? ?? ?? ?? 41 0F 28 C0 41 0F 14 C1 66 48 0F 7E C2 66 89 9D {ui/tt.descAlign:d32} C6 85 {ui/tt.descWrap:d32} 01 E8 {ui/UiNodeSize:rel32}",
+          "offset": 0
+        }
+      ]
+    },
+    "@ui/TooltipColor.fields": {
+      "find": [
+        {
+          "pattern": "48 8B 85 ?? ?? ?? ?? 48 8D 8D {ui/tt.colorText:d32} 80 8D {ui/tt.colorBits:d32} 01 33 FF 66 83 8D {ui/tt.colorFlags:d32} 40 48 89 85 {ui/tt.colorValue:d32} 66 89 BD {ui/tt.colorFlags2:d32} E8",
+          "offset": 0
+        }
+      ]
+    },
+    "@ui/TooltipSmall.fields": {
+      "find": [
+        {
+          "pattern": "48 8B 82 ?? ?? ?? ?? F3 0F 10 80 {ui/tt.smallSize:d32} 66 83 8D {ui/tt.smallFlags:d32} 08 F3 0F 11 85 {ui/tt.smallField:d32} 48 8B 9A",
+          "offset": 0
+        }
+      ]
+    },
+    "@ui/TooltipPalette.fields": {
+      "find": [
+        {
+          "pattern": "48 8B 90 ?? ?? ?? ?? 48 81 C2 {ui/tt.palette:d32} 45 84 ED 4C 8B 6C 24 50 74 06 48 8B 42 {ui/tt.palUnique:d8} EB 4C 80 BF CC 00 00 00 0C 75 06 48 8B 42 ?? EB 3D 0F B6 4E 2C 85 C9 74 31 83 E9 01 74 26 83 E9 01 74 1B 83 E9 01 74 10 83 F9 01 74 05 48 8B 02 EB 1C 48 8B 42 {ui/tt.palLegendary:d8} EB 16 48 8B 42 {ui/tt.palEpic:d8} EB 10 48 8B 42 {ui/tt.palRare:d8} EB 0A 48 8B 42 {ui/tt.palUncommon:d8} EB 04 48 8B 42 {ui/tt.palCommon:d8} 48 89 83 {ui/headerModel.color:d32}",
+          "offset": 0
+        }
+      ]
+    },
+    "@ui/DetailMode.fields": {
+      "find": [
+        {
+          "pattern": "4C 8B AE {ui/detail.mode:d32} 4C 8B F8 48 8B 5E 58 F3 0F 10 BE D4 00 00 00 48 89 5D A8 4D 85 ED 74 06 45 8B 6D 00",
+          "offset": 0
+        }
+      ]
+    },
+    "@ui/DetailCompact.fields": {
+      "find": [
+        {
+          "pattern": "48 2B E0 8B B9 {ui/detail.compact:d32} 48 8B F1 0F 29 B4 24 D0 19 00 00",
+          "offset": 0
+        }
+      ]
+    },
+    "@ui/TooltipBuffTints.fields": {
+      "find": [
+        {
+          "pattern": "84 DB 74 0E F3 49 0F 2A F5 48 81 C7 {ui/tt.buffPositive:d32} EB 11 B9 B4 00 00 00 48 81 C7 {ui/tt.buffNegative:d32} F3 48 0F 2A F1",
+          "offset": 0
+        }
+      ]
+    }
+  },
+  "constants": {
+    "ui/detail.contentScope": {
+      "min_votes": 1
+    },
+    "ui/detail.scrollScope": {
+      "min_votes": 1
+    },
+    "ui/tt.descText": {
+      "min_votes": 1
+    },
+    "ui/tt.descStyle": {
+      "min_votes": 1
+    },
+    "ui/tt.descNode": {
+      "min_votes": 1
+    },
+    "ui/tt.descShown": {
+      "min_votes": 1
+    },
+    "ui/tt.descAlign": {
+      "min_votes": 1
+    },
+    "ui/tt.descWrap": {
+      "min_votes": 1
+    },
+    "ui/tt.colorText": {
+      "min_votes": 1
+    },
+    "ui/tt.colorBits": {
+      "min_votes": 1
+    },
+    "ui/tt.colorFlags": {
+      "min_votes": 1
+    },
+    "ui/tt.colorValue": {
+      "min_votes": 1
+    },
+    "ui/tt.colorFlags2": {
+      "min_votes": 1
+    },
+    "ui/tt.smallSize": {
+      "min_votes": 1
+    },
+    "ui/tt.smallFlags": {
+      "min_votes": 1
+    },
+    "ui/tt.smallField": {
+      "min_votes": 1
+    },
+    "ui/tt.palette": {
+      "min_votes": 1
+    },
+    "ui/tt.palUnique": {
+      "min_votes": 1
+    },
+    "ui/tt.palLegendary": {
+      "min_votes": 1
+    },
+    "ui/tt.palEpic": {
+      "min_votes": 1
+    },
+    "ui/tt.palRare": {
+      "min_votes": 1
+    },
+    "ui/tt.palUncommon": {
+      "min_votes": 1
+    },
+    "ui/tt.palCommon": {
+      "min_votes": 1
+    },
+    "ui/detail.mode": {
+      "min_votes": 1
+    },
+    "ui/detail.compact": {
+      "min_votes": 1
+    },
+    "ui/detail.available": {
+      "value": 45
+    },
+    "ui/detail.unlocked": {
+      "value": 46
+    },
+    "ui/detail.headerModel": {
+      "min_votes": 1
+    },
+    "ui/headerModel.color": {
+      "min_votes": 1
+    },
+    "ui/tt.buffPositive": {
+      "min_votes": 1
+    },
+    "ui/tt.buffNegative": {
+      "min_votes": 1
+    },
+    "ui/statsModel.rows": {
+      "value": 1408
+    },
+    "ui/statsModel.rowStride": {
+      "value": 112
+    },
+    "ui/statsModel.available": {
+      "value": 1976
+    },
+    "ui/statsModel.unlocked": {
+      "value": 1984
+    },
+    "ui/statsModel.baseLevel": {
+      "value": 1996
+    }
+  },
+  "features": {
+    "ui.tooltip.lines": {
+      "symbols": [
+        "ui/ItemDetail",
+        "ui/DetailContentEnd",
+        "ui/NativeTextLine",
+        "ui/NativeTextDraw",
+        "ui/UiNodeAlign",
+        "ui/UiNodeSize",
+        "ui/UiApp",
+        "@ui/TooltipDesc.fields",
+        "@ui/TooltipColor.fields",
+        "@ui/TooltipSmall.fields",
+        "@ui/TooltipPalette.fields"
+      ],
+      "constants": [
+        "ui/tt.descText",
+        "ui/tt.descStyle",
+        "ui/tt.descNode",
+        "ui/tt.descShown",
+        "ui/tt.descAlign",
+        "ui/tt.descWrap",
+        "ui/tt.colorText",
+        "ui/tt.colorBits",
+        "ui/tt.colorFlags",
+        "ui/tt.colorValue",
+        "ui/tt.colorFlags2",
+        "ui/tt.smallSize",
+        "ui/tt.smallFlags",
+        "ui/tt.smallField",
+        "ui/tt.palette",
+        "ui/tt.palUnique",
+        "ui/tt.palLegendary",
+        "ui/tt.palEpic",
+        "ui/tt.palRare",
+        "ui/tt.palUncommon",
+        "ui/tt.palCommon",
+        "ui/ui.config",
+        "ui/view.stride",
+        "ui/view.inventoryPage",
+        "ui/view.slotIndex",
+        "ui/view.item",
+        "ui/view.count",
+        "ui/view.pide",
+        "ui/view.durability",
+        "ui/view.durabilityMax",
+        "ui/view.fuel",
+        "ui/view.fuelMax",
+        "ui/view.level",
+        "ui/view.rarity"
+      ]
+    },
+    "ui.tooltip.values": {
+      "symbols": [
+        "ui/ItemDetail",
+        "ui/DetailStatsBlockCall",
+        "ui/DetailAfterStats",
+        "ui/StatValueDraw"
+      ],
+      "constants": [
+        "ui/view.stride",
+        "ui/view.inventoryPage",
+        "ui/view.slotIndex",
+        "ui/view.item",
+        "ui/view.count",
+        "ui/view.pide",
+        "ui/view.durability",
+        "ui/view.durabilityMax",
+        "ui/view.fuel",
+        "ui/view.fuelMax",
+        "ui/view.level",
+        "ui/view.rarity"
+      ]
+    }
+  }
+}

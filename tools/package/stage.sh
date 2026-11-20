@@ -2,7 +2,7 @@
 # Stages Kiln's runtime for a bundle (docs/kiln/launcher/bundle.md): one folder per component holding its files at
 # their game-relative paths, plus kiln-runtime.json without files[] (kilnctl bundle create hashes and zips them).
 #   tools/package/stage.sh <stage dir> [--no-build] [--allow-missing]
-# Components: core (proxy, kiln-core, services, host, .NET, kiln.json, Kiln's other plugins), sigdb-server,
+# Components: core (proxy, kiln-core, services, host, .NET, kiln.json, compat-rules.json, Kiln's other plugins), sigdb-server,
 # sigdb-client, admin (Kiln.Admin), emf (kiln-emf plugin), eml (kiln-eml, GPL-3, gpl/kiln-eml), samples (hello mod +
 # native hello plugin), shroudforge (ShroudForge's runtime, GPL-3, kiln/plugins/shroudforge/, from
 # third_party/shroudforge), enshwick (Enshwick's own loader, MIT, kiln/plugins/enshwick/, built from the pinned
@@ -93,7 +93,9 @@ done
 # A successful command (or --no-build) is not evidence that its required output exists.
 for dir in "$repo"/native/services/*/; do
   svc=$(basename "$dir"); [[ -f $dir/CMakeLists.txt ]] || continue
-  [[ -s $bin/services/kiln-$svc.dll ]] || miss "native service kiln-$svc: no $bin/services/kiln-$svc.dll"
+  # a folder name with "_" may build a DLL named with "-" (native/services/creature_control -> kiln-creature-control.dll)
+  [[ -s $bin/services/kiln-$svc.dll || -s $bin/services/kiln-${svc//_/-}.dll ]] ||
+    miss "native service kiln-$svc: no $bin/services/kiln-$svc.dll (nor kiln-${svc//_/-}.dll)"
 done
 for proj in "$repo"/managed/services/*/*.csproj; do
   [[ -f $proj ]] || continue
@@ -119,6 +121,11 @@ rsync -a --include='*.dll' --include='*.pdb' --exclude='*' "$bin/services/" "$k/
 rsync -a --include='Kiln.*' --include='game/***' --exclude='*' "$out/host/" "$k/host/"
 rsync -a "$dotnet_root/" "$k/dotnet/"
 printf '{\n  "policy": "verified-only",\n  "clr": true,\n  "plugins": true,\n  "log_level": "info"\n}\n' > "$k/kiln.json"
+# Kiln's shipped compat rules (dev.29): not config, every update replaces them; the player's own go in <configDir>
+install -m 644 "$repo/native/core/compat-rules.json" "$k/compat-rules.json"
+# Kiln's own in-game texts (runtime/locales/<language>.json, docs/kiln/translating-game.md): every update replaces them
+mkdir -p "$k/locales"
+install -m 644 "$repo"/runtime/locales/*.json "$k/locales/"
 # Kiln's own plugins (native/plugins/*): kiln-emf is the emf component, any other plugin is core
 if [[ -d $bin/plugins ]]; then
   for f in "$bin"/plugins/*.dll "$bin"/plugins/*.pdb; do

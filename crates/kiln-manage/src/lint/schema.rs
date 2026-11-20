@@ -84,7 +84,7 @@ impl Known {
 /// The schema documents, by `$id` (file name).
 pub struct Schemas {
     docs: HashMap<String, J>,
-    regex: Mutex<HashMap<String, Option<Regex>>>,
+    regex: Mutex<HashMap<String, Option<std::sync::Arc<Regex>>>>,
 }
 
 impl Schemas {
@@ -98,11 +98,19 @@ impl Schemas {
         self.docs.keys()
     }
 
+    /// Whether `s` matches `pattern`; `Err` (said as KL109) when kiln lint could not tell: a pattern its matcher does
+    /// not support, or a match too costly to check on this value (super::regex's budget). Never a guess: a value that
+    /// was not checked is not called wrong.
     fn regex_match(&self, pattern: &str, s: &str) -> Result<bool, String> {
-        let mut cache = self.regex.lock().unwrap_or_else(|e| e.into_inner());
-        let re = cache.entry(pattern.to_string()).or_insert_with(|| Regex::new(pattern).ok());
+        // the compiled pattern is taken out of the cache: a long match never holds the lock
+        let re = {
+            let mut cache = self.regex.lock().unwrap_or_else(|e| e.into_inner());
+            cache.entry(pattern.to_string()).or_insert_with(|| Regex::new(pattern).ok().map(std::sync::Arc::new)).clone()
+        };
         match re {
-            Some(r) => Ok(r.is_match(s)),
+            Some(r) => r.is_match(s).map_err(|_| format!(
+                "the schema's pattern {pattern} is too costly to check on this value ({} characters): kiln lint did not check it",
+                s.chars().count())),
             None => Err(format!("the schema's pattern {pattern} is not supported by kiln lint")),
         }
     }
@@ -264,7 +272,8 @@ impl V<'_> {
     }
 
     fn is_known(&self, key: &str, k: &Known) -> bool {
-        k.props.contains(key) || k.patterns.iter().any(|p| self.s.regex_match(p, key).unwrap_or(false))
+        // a key kiln lint could not match against a pattern is not called unknown (the member walk said why)
+        k.props.contains(key) || k.patterns.iter().any(|p| self.s.regex_match(p, key).unwrap_or(true))
     }
 
     fn unknown_keys(&self, members: &[Member], k: &Known, cx: &Cx, out: &mut Out) {
@@ -498,9 +507,17 @@ impl V<'_> {
             }
             if let Some(p) = pats {
                 for (pat, sub) in p {
-                    if self.s.regex_match(pat, &m.key).unwrap_or(false) {
-                        matched = true;
-                        out.merge(self.inst(&m.value, sub, &c));
+                    match self.s.regex_match(pat, &m.key) {
+                        Ok(true) => {
+                            matched = true;
+                            out.merge(self.inst(&m.value, sub, &c));
+                        }
+                        Ok(false) => {}
+                        // not known: said, and the key is not called "not allowed" for it
+                        Err(e) => {
+                            matched = true;
+                            out.issues.push(self.issue(&c, codes::SCHEMA_RULE, m.key_span, e));
+                        }
                     }
                 }
             }
@@ -624,12 +641,15 @@ impl V<'_> {
         {
             out.issues.push(self.issue(cx, codes::SIZE, node.span, if min == 1 { "an empty string".into() } else { format!("at least {min} characters") }));
         }
-        if let Some(max) = o.get("maxLength").and_then(J::as_u64)
-            && len > max
-        {
+        let too_long = o.get("maxLength").and_then(J::as_u64).filter(|max| len > *max);
+        if let Some(max) = too_long {
             out.issues.push(self.issue(cx, codes::SIZE, node.span, format!("{len} characters, at most {max}")));
         }
-        if let Some(p) = o.get("pattern").and_then(J::as_str) {
+        // a value already too long is not matched against the pattern as well: one finding says what is wrong, and an
+        // oversized value never costs the matcher its budget
+        if too_long.is_none()
+            && let Some(p) = o.get("pattern").and_then(J::as_str)
+        {
             match self.s.regex_match(p, s) {
                 Ok(true) => {}
                 Ok(false) => out.issues.push(self.issue(cx, codes::PATTERN, node.span, format!("\"{s}\" does not have the expected form ({p})"))),

@@ -1,0 +1,53 @@
+{
+  "description": "blocks-rarity-rolls: the rarityRolls section: schema (no item, a source that is none of craft, loot, give, a rarity that is none, a misspelt field), KL406 for a rule that rolls crafts (its default sources, or \"craft\") of an item of this mod with a recipe, by block name or by a pattern over this mod's items (\"loot, give\" and other mods' items are not warned); the mod says clients kiln for its new items.",
+  "diagnostics": [
+    {
+      "code": "KL406",
+      "col": 29,
+      "file": "blocks/rolls.json",
+      "line": 12,
+      "message": "rarity roll \"crafted\" rolls crafts of \"ember-sword\", which has a recipe: the recipe tooltip shows the item's own rarity while a craft comes out at a rolled one; leave \"craft\" out of \"sources\" to keep crafts as the tooltip says",
+      "severity": "warning"
+    },
+    {
+      "code": "KL406",
+      "col": 33,
+      "file": "blocks/rolls.json",
+      "line": 13,
+      "message": "rarity roll \"own-pattern\" rolls crafts of \"ember-sword\" (and 1 more), which has a recipe: the recipe tooltip shows the item's own rarity while a craft comes out at a rolled one; leave \"craft\" out of \"sources\" to keep crafts as the tooltip says",
+      "severity": "warning"
+    },
+    {
+      "code": "KL108",
+      "col": 23,
+      "file": "blocks/rolls.json",
+      "line": 16,
+      "message": "an empty list: give at least one entry",
+      "severity": "error"
+    },
+    {
+      "code": "KL106",
+      "col": 38,
+      "file": "blocks/rolls.json",
+      "line": 16,
+      "message": "\"crafting\" does not have the expected form (^(craft|loot|give)(, ?(craft|loot|give))*$)",
+      "severity": "error"
+    },
+    {
+      "code": "KL102",
+      "col": 63,
+      "file": "blocks/rolls.json",
+      "line": 16,
+      "message": "\"mythic\" is not allowed here (allowed: common, epic, legendary, rare, uncommon)",
+      "severity": "error"
+    },
+    {
+      "code": "KL102",
+      "col": 78,
+      "file": "blocks/rolls.json",
+      "line": 16,
+      "message": "\"chance\" is not allowed here (allowed: items, sources, weights)",
+      "severity": "error"
+    }
+  ]
+}

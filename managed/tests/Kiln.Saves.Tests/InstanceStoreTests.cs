@@ -872,6 +872,7 @@ public sealed class EndSessionTests
             TestMods.As(mod, () => other.Get(key).Count = 2);
             Store.Stage(1, SaveReason.Request, late: false);
             Store.Commit(1, 1001, SaveReason.Request);
+            InstanceHarness.Written();  // the confirmation is written off the tick thread
             Assert.Equal(firstFiles, Directory.EnumerateFiles(h.Root, "*", SearchOption.AllDirectories).Order().ToList());  // world one untouched
             var manifest = JsonNode.Parse(File.ReadAllText(Directory.EnumerateFiles(Path.Combine(second, "manifests")).Single()))!;
             Assert.Equal("world-two", manifest["world"]!.GetValue<string>());

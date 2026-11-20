@@ -1,0 +1,37 @@
+<Project>
+  <!--
+    Kiln.Sigs: typed hooks and calls of a mod's own game functions (docs/kiln/services/hooks.md "Typed hooks"). Every `sig`
+    descriptor of the mod's sigdb fragment (sigdb/server.json and sigdb/client.json in the project folder) becomes a class
+    <root>.<Area>.<Name> with Detour, Call and Invoke, internal to the mod (the area is the part of the symbol before its
+    first '/': the mod id). The core's ten descriptors are Kiln.Sigs itself (KilnServices "Sigs"). Imported by Sdk.targets
+    after Kiln.Mod.targets.
+
+    Properties (all optional):
+      KilnSigs           false: no generator
+      KilnSigsNamespace  the root namespace of the generated classes (default Kiln.Sigs)
+      KilnSigdb          ;-list of the fragment files to read (default: sigdb/server.json and sigdb/client.json, those that exist)
+    The generated classes use Kiln.Hooks (KilnServices "Hooks"; without it the build warns KILN181), and a descriptor that names
+    one of the core's structs (OptS32, ...) needs Kiln.Sigs too. The fragment itself still ships as before: the mod copies its
+    sigdb/*.json to the output and calls Symbols.LoadShipped() in OnLoad.
+  -->
+  <PropertyGroup>
+    <KilnSigs Condition="'$(KilnSigs)' == ''">true</KilnSigs>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(KilnSigs)' == 'true'">
+    <CompilerVisibleProperty Include="KilnSigsNamespace" />
+    <CompilerVisibleItemMetadata Include="AdditionalFiles" MetadataName="KilnSigdb" />
+    <AdditionalFiles Include="$(KilnSigdb)" KilnSigdb="true" Visible="false" Condition="'$(KilnSigdb)' != ''" />
+    <AdditionalFiles Include="$(MSBuildProjectDirectory)/sigdb/server.json" KilnSigdb="true" Visible="false"
+                     Condition="'$(KilnSigdb)' == '' and Exists('$(MSBuildProjectDirectory)/sigdb/server.json')" />
+    <AdditionalFiles Include="$(MSBuildProjectDirectory)/sigdb/client.json" KilnSigdb="true" Visible="false"
+                     Condition="'$(KilnSigdb)' == '' and Exists('$(MSBuildProjectDirectory)/sigdb/client.json')" />
+
+    <!-- the generator: repository mode builds it from source; package mode takes it from analyzers/dotnet/cs -->
+    <ProjectReference Include="$(KilnRepoRoot)managed/Kiln.Analyzers/src/Kiln.Sigs.Generator/Kiln.Sigs.Generator.csproj"
+                      OutputItemType="Analyzer" ReferenceOutputAssembly="false" Private="false"
+                      Condition="'$(KilnRepoMode)' == 'true' and Exists('$(KilnRepoRoot)managed/Kiln.Analyzers/src/Kiln.Sigs.Generator/Kiln.Sigs.Generator.csproj')" />
+    <Analyzer Include="$(MSBuildThisFileDirectory)../analyzers/dotnet/cs/Kiln.Sigs.Generator.dll"
+              Condition="'$(KilnRepoMode)' != 'true' and Exists('$(MSBuildThisFileDirectory)../analyzers/dotnet/cs/Kiln.Sigs.Generator.dll')" />
+  </ItemGroup>
+</Project>

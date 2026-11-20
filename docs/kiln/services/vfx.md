@@ -6,11 +6,11 @@ Play the game's VFX, or a mod's, at a position or attached to an entity and slot
 | Layer | Where |
 |---|---|
 | Symbols | `sigdb/symbols/client.d/vfx.json`, features `vfx.guard`, `vfx.play` |
-| C table | `native/core/abi/services/kiln_vfx.h` (`kiln.vfx` v1) |
-| Native | `native/services/vfx/` → `kiln/services/kiln-vfx.dll`. Client only |
+| C table | `native/core/abi/services/kiln_vfx.h` (`kiln.vfx` v1; since 0.2.0-dev.29 `resource_budget`, `define_vfx_result`, `vfx_registration` appended, 136 bytes) |
+| Native | `native/services/vfx/` → `kiln/services/kiln-vfx.dll`. Client only. The budget: `ledger.cpp` |
 | Managed | `managed/services/Kiln.Vfx/` → `kiln/host/Kiln.Vfx.dll` (namespace `Kiln`: `Vfx`, `VfxId`, `VfxHandle`, `VfxParams`, `Slot`, `Offset`) |
 | Network | Kiln channel `kiln:vfx` v1, `required: false` |
-| Test | `mods/tests/vfx-test`, `native/services/vfx/tests/run.sh` |
+| Test | `mods/tests/vfx-test`, `native/services/vfx/tests/run.sh`; the budget: `tests/test_ledger.cpp`, `managed/tests/Kiln.Contract.Tests/VfxBudgetTests.cs`, guided checks `17-vfx-budget.before` / `17-vfx-budget.after` |
 
 ## C#
 ```xml
@@ -85,6 +85,73 @@ guard turns off and the game runs as vanilla, and kiln.vfx plays nothing, since 
 | `kiln/config/vfx.json` `{"enabled": false}` | `vfx: off by kiln/config/vfx.json: nothing hooked, mods play nothing` |
 | Dedicated server | No `kiln.vfx`; calls relay |
 
+## The resource budget (since 0.2.0-dev.29)
+The game's VFX system holds a fixed number of VFX resources: its count limit, 2,048 on the game client 26430625, of which the
+game's own 1,575 leave 473 for all mods together. One more than the limit aborts the game, so Kiln's builder refuses a mod that
+would not fit, at the start ([vfx-cook.md](vfx-cook.md)). A mod can read what is left and define a VFX with an answer:
+
+```csharp
+var budget = Vfx.ResourceBudget;                     // client, any thread: a CapacityQueryResult
+if (budget.Ok) Log.Info($"{budget.Budget.Available} VFX left of {budget.Budget.Capacity}");
+
+var r = Blocks.Define("frost_burst", new VfxBlock { Particles = [ /* ... */ ] },
+    new DefinitionRegistrationOptions(DefinitionTiming.AllowNextStart));   // client, tick thread (OnLoad)
+// r.State: Registered (in the game now, 1 slot), AcceptedNextStart (stored, there from the next start, 0 slots) or Refused
+// (r.Code and r.Reason say why). Blocks.GetVfxRegistration(r.RegistrationId) reads the answer again later.
+```
+
+- **The budget.** `Capacity` is the count limit kiln.vfx reads from the game's VFX table (`sys + caps/vfx.map +
+  caps/vfx.map_limit_relative`, sigdb `client.d/dev29-17a-vfx-cap.json`), never a number of Kiln's. `GameUsed` is the game's own
+  VFX (counted in its archive at the start), `KilnUsed` Kiln's VFX of loaded mods that the table holds with the bytes Kiln
+  served, `Reserved` the rest of the table: Kiln's VFX of a mod that is no longer loaded (they stay until the process ends; back
+  to `KilnUsed` when the mod loads again) and other loaders' resources (the table's count less the game's and Kiln's). In-flight definition writes also reserve their
+  new GUID's place in `Reserved`; a failed write or unload releases it. The file I/O holds no snapshot lock, so observation,
+  budget reads and world stop can continue. NotReady replies retain the shared zero-count contract. The
+  table is read on the FxController update (the thread the game makes its own VFX calls on), at the first update of a client
+  world and every 30 updates after; a read of the budget copies that snapshot, never the game's memory. Before the first
+  reading (the main menu has no FxController) it is `NotReady` with no counts; `UnknownExternalUsage` when the game's count
+  could not be read from its archive; `AccountingMismatch` when the counts do not add up or a Kiln resource cannot be verified. The record walk checks the
+  map value against the resource-table capacity and rechecks the table descriptor before copying. A served-size above the
+  fixed 1 MiB sanity bound is not copied; this bound is not a measurement of a game allocation's length.
+  Nothing here changes the game: a larger table (4,096) is chapter 17.1's later slice, not this release.
+- **Defining with an answer.** The game lists its VFX once, before any mod loads. So a VFX is `Registered` in this process only
+  when this start built that block with that content (from the mod's blocks files, its baked file, or a definition stored at an
+  earlier start) and kiln.vfx found it in the game's table, by a read of the GUID map (never `vfx/Resolve`, which would acquire
+  the resource), with the bytes it served, while the system's state is 2 (ready).
+  `RequireRegistered`: otherwise refused, nothing stored: `RegistryClosed` (a new VFX, or a changed one), `NotReady` (built at this
+  start, the table not read yet), `GameRefused` (not in the game's table, or other bytes under its GUID), `CapacityExceeded`,
+  `OwnerInactive`, `IdCollision`. `AllowNextStart`: when only the moment stands in the way, the block is written whole (a temporary
+  file and a rename) to `kiln/data/vfx/pending/<mod>/<name>.json` with its registration id, and the next start builds it before the
+  game lists its VFX, checking it against the limit again: `AcceptedNextStart`, 0 slots. A new VFX that would not fit (what the
+  table holds now, the new VFX accepted in this process, and this one, over the capacity; before the first reading, the game's own
+  and the start's built VFX against the limit the game's code gives) is `CapacityExceeded` and never stored. The pending folder of
+  a mod is read only for mods in the load order, so a stored definition of a mod that is gone or switched off is never built.
+  VFX replay inspects at most 1,892 directory entries and 473 JSON files across the pass, with 64 KiB per file and
+  473 × 64 KiB in total. Encountered excess files are named once in kiln.log and left unread; links/reparse points are refused
+  using the cooker's final-handle containment checks. Both definition paths refuse to persist a larger pending file. The
+  shared writer's stronger containment and durability work is separate; these bounds do not claim power-loss durability.
+- **Receipts.** `RegistrationId` is UUIDv5 over the mod, the kind, the VFX's GUID and the SHA-256 of its definition (keys sorted).
+  The same definition again answers the same and writes nothing. `Blocks.GetVfxRegistration(id)` says what became of it since:
+  registered once the table was read, `Retained` with `OwnerInactive` for a mod that is no longer loaded (its slot still taken),
+  `Superseded` when a later definition of the block replaced the stored one, `NotFound` for an id this process does not know. A
+  definition stored at an earlier start is known again at this one, from its file, and says what this start made of it.
+- **Events.** `CapacityChangedEvent` (`Quota` `vfx.budget`) and `DefinitionRegistrationChangedEvent`, posted at a later step and
+  only while something listens (the receipts a mod's calls of this process made are read again every 25 steps when the budget's
+  revision rose).
+- **Capabilities.** `vfx.budget` and `blocks.vfx_registration`, reported by kiln.vfx with its table: available when this build
+  can read the count limit (and, for the second, compare a resource's bytes); `symbol-missing` when the sigdb constants did not
+  resolve; `faulted` when the guard turned off or Kiln's VFX are not built this session (no kiln.assets, the particle layouts
+  changed). Without kiln.vfx (a dedicated server has no VFX) the rows read `service-missing`, and a member throws
+  `KilnUnavailableException` naming its row; an older kiln.vfx: `service-older`.
+- **Not run in a game client.** The ledger runs in host tests and on a simulated game; no real VFX table was read with it. The
+  fixture is `vfx-test`. Run `17-vfx-budget.before` at the first start: it requires the exact red/green/blue definitions still
+  AcceptedNextStart with zero slots and the fourth definition refused. It records process/receipt identities and the baseline
+  Kiln count, then ends as Skip, never Pass. Quit to the desktop and restart with the same profile and fixture. Run
+  `17-vfx-budget.after`: missing first-part evidence cannot run the proof; the same process, changed fixture receipts or a count
+  other than exactly three more Kiln slots fails it. Each exact definition must now be Registered with one slot, the player
+  must judge all three coloured bursts, and the budget must stay unchanged after playing. Both parts have separate catalogue
+  entries, so an earlier single-part Pass cannot complete this proof.
+
 ## Threads
 `FxUpdate` runs on the client world's thread (measured). The queue runs inside it, with the access rights the game's own FX calls have. Nothing in the VFX path takes a
 lock, so a call from anywhere else could corrupt its free lists. Mods never call the game directly.
@@ -121,8 +188,9 @@ something the game draws next to it. Remove the setting afterwards.
 
 ## The contract (dev.27)
 
-Kiln.Vfx follows [the API contract](../modding/contract.md) as far as it applies: its calls never throw for a missing capability (they return
-`VfxHandle.None`), so no member carries `[RequiresCapability]`.
+Kiln.Vfx follows [the API contract](../modding/contract.md) as far as it applies: its play calls never throw for a missing capability
+(they return `VfxHandle.None`). Since 0.2.0-dev.29 `Vfx.ResourceBudget` carries `[RequiresCapability("vfx.budget")]`,
+`[ClientOnly]` and `[AnyThread]` (above).
 
 - **Capabilities.** In the game client: `kiln.vfx` and `vfx.play` (and `kiln.screen` for screen effects). On the server
   side: `vfx.relay` (managed, session, refreshed every 25 steps) says what `Vfx.Available` says there: available while

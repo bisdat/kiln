@@ -57,7 +57,8 @@ enum class Result { ok, refused, over };
 enum class Mark : uint32_t {
     menu = 1,            // client: the main menu (or, a start straight into a world, a world frame) drew (kiln-ui)
     server_started = 2,  // server: Kiln.Host's ServerStarted (the world runs, the mods are loaded): kilnctl's signal
-    world_started = 3,   // server: the server world's first step (kiln-core's tick; the signal when there is no .NET)
+    world_started = 3,   // the game's first world took its first step (kiln-core's tick, any world kind; not in the ABI):
+                         // a server's signal when there is no .NET, a client's when the menu's mark never comes
 };
 
 // The label a step has when the caller gives none.
@@ -193,15 +194,35 @@ public:
         return Result::ok;
     }
 
+    // A fact the core cannot see itself. The first world is written at once (the file's worldMs): the launcher then
+    // knows the game is in use, whatever step of the start never ended.
     Result mark(Mark m, uint64_t now, Change* change) {
         *change = Change::none;
         if (final()) return Result::over;
+        const bool first_world = m == Mark::world_started && !world_started_;
         if (m == Mark::menu) menu_ = true;
         else if (m == Mark::server_started) server_started_ = true;
         else if (m == Mark::world_started) world_started_ = true;
         else return Result::refused;
-        if (try_ready(now)) *change = Change::now;
+        if (first_world) world_ms_ = now;
+        const bool ready = try_ready(now);
+        if (ready || first_world) *change = Change::now;
+        if (first_world && !ready && who_.side == "client")
+            note_ = "progress.json: the game's first world began while the start is at " + waiting_for() +
+                    "; it ends once it reaches its last step";
         return Result::ok;
+    }
+
+    // What kiln.log should say about the start since the last call (one sentence, or empty), and forget it.
+    std::string take_note() { return std::exchange(note_, {}); }
+
+    // Where the start stands, in words: "step mods (Loading the mods)".
+    std::string waiting_for() const {
+        if (steps_.empty()) return "no step";
+        const Step& s = steps_.back();
+        std::string w = "step " + s.id + " (" + s.label + ")";
+        if (state_ == State::booting) w += ", Kiln's boot not complete";
+        return w;
     }
 
     // idle or failed, with why (one sentence). The running step ends; the file's life ends with it.
@@ -219,10 +240,11 @@ public:
 
     // Is the start usable? Kiln's boot is complete, Kiln's part is over (the plan's last step, "game", has begun: the mods
     // are loaded and their content applied), and the side's signal has come, before or after that (a signal that comes
-    // early is remembered).
+    // early is remembered). A client's signal is its main menu, or its first world: a start whose menu mark never comes
+    // (another mod's hook over kiln-ui's menu detection) still ends once the game is in a world.
     bool ready_due() const {
         if (state_ != State::loading || steps_.empty() || plan_.empty() || steps_.back().id != plan_.back()) return false;
-        return who_.side == "client" ? menu_ : index_of("dotnet") >= 0 ? server_started_ : world_started_;
+        return who_.side == "client" ? menu_ || world_started_ : index_of("dotnet") >= 0 ? server_started_ : world_started_;
     }
 
     // The core's own way past steps of the plan that this start turned out not to have (a second line of defence: the
@@ -273,6 +295,7 @@ public:
             {"steps", steps},
             {"why", (state_ == State::idle || state_ == State::failed) && !why_.empty() ? json(why_) : json(nullptr)},
         };
+        if (world_started_) doc["worldMs"] = world_ms_;  // since 0.2.0-dev.29
         // invalid UTF-8 from a caller becomes U+FFFD instead of an exception
         return doc.dump(1, ' ', false, json::error_handler_t::replace) + "\n";
     }
@@ -289,6 +312,10 @@ private:
         end_running(now);
         state_ = State::ready;
         final_at_ = now;
+        // kiln.log names the mark that never came: a player's report then shows it
+        if (who_.side == "client" && !menu_)
+            note_ = "progress.json: the start ended at the game's first world: the main menu's mark had not come (kiln-ui marks "
+                    "the menu's first frame; a start straight into a world, or another mod's hook over the menu, ends it here)";
         return true;
     }
 
@@ -297,7 +324,9 @@ private:
     std::vector<Step> steps_;
     State state_ = State::booting;
     std::string why_;
+    std::string note_;
     uint64_t final_at_ = 0;
+    uint64_t world_ms_ = 0;  // the first world's mark, ms since started
     bool menu_ = false, server_started_ = false, world_started_ = false;
 };
 
@@ -308,8 +337,11 @@ public:
     using Sink = std::function<bool(const std::string&)>;
     using Clock = std::function<uint64_t()>;
 
-    Writer(Model model, Sink sink, Clock clock, bool threaded, std::function<void()> on_fail = {})
-        : model_(std::move(model)), sink_(std::move(sink)), clock_(std::move(clock)), on_fail_(std::move(on_fail)) {
+    // on_note: a sentence for kiln.log (Model::take_note), told outside the writer's lock.
+    Writer(Model model, Sink sink, Clock clock, bool threaded, std::function<void()> on_fail = {},
+           std::function<void(const std::string&)> on_note = {})
+        : model_(std::move(model)), sink_(std::move(sink)), clock_(std::move(clock)), on_fail_(std::move(on_fail)),
+          on_note_(std::move(on_note)) {
         if (threaded) thread_ = std::thread([this] { loop(); });
     }
     // The game never destroys its writer (services/progress_file.cpp); a test does: the thread ends first.
@@ -383,13 +415,19 @@ public:
 private:
     template <class F>
     Result apply(F f) {
-        std::lock_guard lk(mu_);
-        if (written_final_) return Result::over;
-        Model::Change c = Model::Change::none;
-        const Result r = f(clock_(), &c);
-        if (c == Model::Change::now) now_ = true, pending_ = true;
-        else if (c == Model::Change::later) pending_ = true;
-        if (c != Model::Change::none) cv_.notify_one();
+        std::string note;
+        Result r = Result::over;
+        {
+            std::lock_guard lk(mu_);
+            if (written_final_) return Result::over;
+            Model::Change c = Model::Change::none;
+            r = f(clock_(), &c);
+            if (c == Model::Change::now) now_ = true, pending_ = true;
+            else if (c == Model::Change::later) pending_ = true;
+            if (c != Model::Change::none) cv_.notify_one();
+            note = model_.take_note();
+        }
+        if (!note.empty() && on_note_) on_note_(note);
         return r;
     }
 
@@ -436,6 +474,7 @@ private:
     Sink sink_;
     Clock clock_;
     std::function<void()> on_fail_;
+    std::function<void(const std::string&)> on_note_;
     bool pending_ = false, now_ = false, written_final_ = false, stop_ = false;
     std::thread thread_;  // last: it starts once everything above is there
     uint64_t writes_ = 0, failures_ = 0, last_write_ = 0;

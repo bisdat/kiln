@@ -7,11 +7,11 @@ entity, and the change is replicated and saved like a vanilla one. Evidence and 
 
 | Layer | Where |
 |---|---|
-| Symbols | `sigdb/symbols/server.d/items.json` (features `items.transaction`, `items.program`, `items.read`, `items.catalog`, `items.scan`, `items.recipe`, `items.fuel`, `items.pide_options`, `items.move`, `items.transfer`, `items.names`, `items.instances`, `items.equip`) |
-| C table | `native/core/abi/services/kiln_items.h` (`kiln.items` v5: v1 + water + moves, container names, transfer rules and events + item instances + equip and unequip) |
+| Symbols | `sigdb/symbols/server.d/items.json` (features `items.transaction`, `items.program`, `items.read`, `items.catalog`, `items.scan`, `items.recipe`, `items.fuel`, `items.pide_options`, `items.move`, `items.transfer`, `items.names`, `items.instances`, `items.equip`, `items.gear`, `items.gear.rolls`); `sigdb/symbols/server.d/dev29-10-equipment-sets.json` (`items.equip_sets`, used by the client unchanged) |
+| C table | `native/core/abi/services/kiln_items.h` (`kiln.items` v6: v1 + water + moves, container names, transfer rules and events + item instances + equip and unequip + equipment sets) |
 | Native | `native/services/items/` → `kiln/services/kiln-items.dll` |
 | Managed | `managed/services/Kiln.Items/` → `kiln/host/Kiln.Items.dll` (namespace `Kiln`, class `Items`) |
-| Test | `mods/tests/items-test/` (PASS / FAIL lines in kiln.log; v3: `MovesTest.cs`; v5: `EquipTest.cs`); `managed/tests/Kiln.Items.Tests` (offline); `mods/tests/craftmatch-test/` (rarity, level, perks of made items); `mods/tests/fuel-test/` (water, three boots); `native/services/items/tests/run.sh` (host tests under Wine); `mods/tests/instances-test/` (entity refs, item instances, following items) |
+| Test | `mods/tests/items-test/` (PASS / FAIL lines in kiln.log; v3: `MovesTest.cs`; v5: `EquipTest.cs`); `mods/tests/equipment-sets-test/` (v6); `managed/tests/Kiln.Items.Tests` (offline); `mods/tests/craftmatch-test/` (rarity, level, perks of made items); `mods/tests/fuel-test/` (water, three boots); `native/services/items/tests/run.sh` (host tests under Wine); `mods/tests/instances-test/` (entity refs, item instances, following items) |
 
 ## C#
 
@@ -61,7 +61,7 @@ IReadOnlyList<EntityId> chests = Items.FindInventories(InventoryKinds.Containers
   Unset `Gear` values are the game's defaults, the same as crafting: a level rolled in the item's range, `rarity` or, with
   `generateRarity` set (loot weapons), the lowest allowed rarity (Common), never a rolled one: docs/re/items.md section 10.
 - `Gear.Unlocked` (1-4, 5 or 255 = all the item has; null or 0 = none) and `Gear.GemSlot` (weapons: an empty gem slot when the game's roll
-  gave none) are applied as the item entity is created: a hook in the game's createPide changes the component list it
+  gave none; other gear only when a mod allowed its kind with `Gems.AllowSockets`: [gems-sockets.md](gems-sockets.md)) are applied as the item entity is created: a hook in the game's createPide changes the component list it
   spawns the item with (`PerkContainerNew.unlockedPerks`, the `Level` value + the unlocked count, a `WeaponGemSlot` entry;
   docs/re/creative-mode-146.md "Part 3 research", section 2). `Items.GearOptionsAvailable` says whether this build has
   it (feature `items.pide_options`); without it a give with them is `Unavailable`. C: `KILN_ITEMS_UNLOCK` with
@@ -81,7 +81,14 @@ IReadOnlyList<EntityId> chests = Items.FindInventories(InventoryKinds.Containers
   `AvailableSlots`, `IsPlayer`, `Count(item)`, `FreeSlots()`.
 - Catalog: `All`, `Get(id)`, `Lookup(nameOrId)`, `Search(text)`; `ItemInfo` = id, debug `Name`, `DisplayName`, `Label`,
   `MaxStack`, `Category`, `Rarity`, `IsGear`, `LevelMin/Max`, `EquipSlot`, `Flags`, `IsBlueprint`, `Guid`.
-  `ItemId.FromGuidBytes(bytes)` computes an id like the game.
+  `ItemId.FromGuidBytes(bytes)` computes an id like the game. The catalog is the server world's registry: on a client that
+  joined another's world (and in the main menu) it is empty.
+- `Items.DisplayName(item)` (since 0.2.0-dev.29.15, any side, any thread, never waits): the item's name for players. On a game
+  client in the game's text language, read from the game's own texts (its loca table of that language), also on a joined
+  client and in the main menu; a new item of kiln.content: its definition's text for that language (`Texts`, then
+  `DisplayName`, else its base item's name). On a dedicated server (no texts in its data), and until the game's texts are read
+  (the first call starts that in the background), the English name Kiln ships (`ItemInfo.DisplayName`). Null for an id Kiln
+  knows no name of. Icons: `Ui.ItemImage` ([ui.md](../ui.md#item-icons-and-names)).
 - `Available` (service loaded), `CanTransact`, `Status()` (program state, pending, commits, detail).
 
 Rules: call on the tick thread (mod code always is; `Read`/`FindInventories` throw `InvalidOperationException`
@@ -394,6 +401,459 @@ there; the host test checks the rule), a remote client, a request queued when th
 A dry run into the item's own slot cannot name the slot (`Slot` null): the game writes the selection only at its commit.
 What a player sees is the guided checks `items.equip` and `items.unequip` (mods/tests/client-pass, session 1).
 
+## Equipment sets (v6, since 0.2.0-dev.29)
+A player's 20 equipment slots changed in **one inventory transaction**: every slot a set names changes, or none does,
+with one exception, `InvariantFailure`: the game's transaction left the inventory neither as asked nor as before, or the
+game faulted inside it (then the inventory may be in an unknown state, and sets and single equips go off until the server,
+or the hosting player's game, restarts; "The transaction" below).
+`Items.CaptureSet` reads what a player wears as an `EquipmentSet`, a mod builds a subset (or keeps the capture),
+`Items.PlanSet` checks it against a snapshot taken now, and `Items.EquipSet` applies it: one request, one
+`PlayerEquippingEvent` for the whole set, one transaction inside `kiln_items_equip`, one result. Capability
+`items.equip_sets` (sigdb feature of the same name over the game's equip functions and the commit's own rollback
+guards; Kiln.Items lowers it when the table is older than v6, `items.equip` or `items.instances` is off, kiln.decisions or
+kiln.window_clock is not here, this build's component layouts are not the ones the snapshot reads, or kiln.items switched
+sets off after an invariant failure, until the server, or the hosting player's game, restarts). Chapter 10 of the dev.28 dossier is the contract.
+
+```csharp
+EquipmentSetCaptureResult day = Items.CaptureSet(player);         // all 20 slots, empty ones as EmptyEquipment
+var rings = day.Set! with { Entries = day.Set!.Entries.Where(e => e.Slot is EquipmentSlot.Ring0 or EquipmentSlot.Ring1).ToArray() };
+EquipmentSetResult r = await Items.EquipSet(player, rings);       // only the two ring slots; the rest stays as it is
+if (!r.Ok) Log.Info($"{r.Status}: {r.Reason}");                   // a refusal is a result: nothing changed
+using var plan = Items.PlanSet(player, rings).Plan;              // the steps, without changing anything
+```
+
+| Member | Side, thread | What |
+|---|---|---|
+| `Items.CaptureSet(player)` → `EquipmentSetCaptureResult` | `[ServerOnly][TickThreadOnly]` | the 20 slots as a set: `InstanceEquipment` (an item with its own entity), `StackEquipment` (a plain stack: arrows, bait), `EmptyEquipment`; scoped to this process, server world and session of the player. Reads only, holds no snapshot |
+| `Items.PlanSet(player, set)` → `EquipmentSetPlanResult` | `[ServerOnly][TickThreadOnly]` | a snapshot taken now and the plan: the game's equip and unequip calls in order (`Steps`), the free backpack slots they need (`RequiredFreeSlots`), `ValidThroughStep`. The plan holds the snapshot until it is applied, disposed, 250 steps pass, the mod unloads or the world stops |
+| `Items.EquipSet(player, set, options)` → `Task<EquipmentSetResult>` | `[ServerOnly][TickThreadOnly]` | a fresh snapshot and plan, then the set in one transaction |
+| `Items.EquipSet(plan, options)` → `Task<EquipmentSetResult>` | `[ServerOnly][TickThreadOnly]` | the plan's set against the plan's snapshot (used up: a plan applies once) |
+| `EquipmentSetResult` (`IKilnResult`) | value | `Status`, `Reason` (it starts with its code: `NoRoom: ...`), `Player`, `Ticket`, `Decision`, `DryRun`, `Committed`, `MayHaveMutated`, `FailedOperation`, `GameError`, `Changes` (one `EquipmentSlotChange` per slot a commit changed) |
+| `EquipmentSetChangedEvent` (`Player`, `Ticket`, `Outcome`, `Changes`) | `[ServerOnly][TickThreadOnly]` | once per committed set, when its result arrives, also when the asking mod unloaded first; not for a dry run, a refusal or a cancel |
+| `EquipmentSetFaultedEvent` (`Result`) | `[ServerOnly][TickThreadOnly]` | an invariant failure: the inventory is neither as asked nor as before, or the game faulted (`MayHaveMutated`: it may be in an unknown state; without it, a fault in a read before the transaction, nothing was changed); sets and single equips are off until the server, or the hosting player's game, restarts, other item calls still run. Posted after an `EquipmentSetChangedEvent` of the same ticket when the changes could still be read: the two are not exclusive (chapter 10 §4.4 asks for both) |
+| `EquipmentSetJson.Serialize(set)` / `Deserialize(json)` | any | the session JSON (schema 1): a round trip for this session and for logs, never a saved loadout |
+
+| `EquipmentSetStatus` | `Ok` | Means |
+|---|---|---|
+| `Done` | yes | every named slot changed, committed in one transaction |
+| `NoChange` | yes | every named slot held what the set asks already (or no entries): no decision, no transaction, no event |
+| `Simulated` | yes | a dry run: the transaction ran, was rolled back and the snapshot compared equal; `Changes` is empty (the plan's steps say what it would do) |
+| `Canceled` | no | a `PlayerEquippingEvent` handler canceled the set: nothing ran |
+| `StaleSnapshot` | no | another process, server world or session of the player, or the inventory changed since the snapshot (also by a decision's handler): nothing ran |
+| `Refused` | no | refused before or during the transaction (`NoRoom`, `UnsupportedCycle`, `UnsupportedBackpack`, `OmittedSlotWouldChange`, `StackMerge`, `SlotType`, `NotHere`, `SnapshotBudgetExceeded`, the game refused a step: `FailedOperation`, `GameError`); after a transaction it was rolled back and compared equal |
+| `CommitRolledBack` | no | the game's commit rolled the transaction back by itself; compared equal to the snapshot |
+| `Dropped` | no | never ran: the world stopped, the asking mod unloaded before it ran, it waited 250 steps |
+| `InvariantFailure` | no | neither as asked nor as before, or the game faulted inside it (`MayHaveMutated`) or in a read before it (nothing changed); sets and equips go off until the server, or the hosting player's game, restarts |
+| `Unavailable` | no | sets went off after the call was accepted |
+
+The one error rule: a bad argument (`ArgumentException`): a null or zero scope, a null entry or selection, a slot named
+twice, a value outside `EquipmentSlot` (the building materials and the main hand are not equipment slots), one item or
+one stack selected twice, an item ref without a kiln.items stamp, a stack without its item, slot or a positive count, a
+player that is not the set's, unknown options. Capability off: `KilnUnavailableException("items.equip_sets")`. Everything
+else is a result.
+
+The rules (chapter 10 §4.2-4.5):
+- **Omitted means unchanged.** A set names the slots it changes; `EmptyEquipment` takes off what a slot holds (into the
+  first free Generic backpack slot); an empty slot asked empty is no change. `StackEquipment.ExpectedCount` is a guard
+  (the stack must still hold that many), not a split: the whole stack moves.
+- **Session only.** A set's scope is the process nonce (kiln.window_clock), the server world's epoch and the player's
+  identity (kiln.decisions' `EventEntityKey`: the connection session of a player slot, the spawn time of anything else).
+  A set from another process, world or session comes back `StaleSnapshot`; nothing in it is re-resolved. Keep sets in
+  memory for the current session and forget a player's when they leave; nothing is saved (the session JSON is for logs and
+  this session).
+- **The snapshot.** Canonical copied bytes, compared byte for byte, never a revision counter or a hash: the player's
+  InventorySetup tree (the root and every Virtual node it reaches: their ordered links and counts), every leaf inventory
+  (eight `{item, count, item entity}`, empty stacks all zero), `SlotSelection`'s 20 equipment slots and two action bars,
+  every item entity's kiln.items stamp, `ItemState` slot and item and `OwnerRelationship` owner. Left out: the selected
+  hotbar slot, the item in hand, the materials, durability, fuel, perks and level. A tree beyond 64 setups, Virtual links
+  below depth 3 or 32 inventories, a cycle or a link that cannot be read is a refusal (the inventory reads elsewhere stop
+  there silently; a set never runs on a cut tree). 256 snapshots live at most, 16 per mod; a full budget refuses
+  (`SnapshotBudgetExceeded`), it never evicts another mod's plan.
+- **The plan.** Items into equipment slots that are empty first, in numeric slot order; then the slots to be emptied;
+  then items into slots that hold another item (the game's equip swaps: what the slot held goes to the source slot);
+  plain stacks (arrows, spells, bait, which the game equips where they lie) last. Each source is found again by its item
+  entity after the steps before it. At most 128 steps. Refused before anything is touched: no free backpack slot for an
+  unequip (`NoRoom`), **more than one slot that holds an item getting another one, or a slot emptied after such a swap**
+  (`UnsupportedSwaps`: on this game build the commit then points the swapped slot at the item that came off; the
+  rollback matrix below; apply it as two sets), a backpack change (`UnsupportedBackpack`: its contents move with it), an
+  item worn in a slot the set leaves out, a stack of the item type its slot already holds (the game could merge them
+  instead of swapping), an item that does not fit its slot. Two worn items exchanged between their slots (a cycle) go
+  through a free backpack slot (`UnsupportedCycle` without one). A backpack change stays refused until its rollback matrix
+  has run.
+- **The decision.** In the Pre after the call kiln.items files one kiln.decisions request of kind 18 for the set; Kiln's
+  dispatcher posts one `PlayerEquippingEvent` with a `SetEquipmentChange` (the ticket, the snapshot, the set, `DryRun`).
+  Cancel: `Canceled`, nothing runs. A handler that changes the inventory makes the set `StaleSnapshot` at its check.
+  Without a decision consumer, with a full queue, a timeout or a released capability the set goes on (kiln.decisions
+  fails open). Subscribing to `PlayerEquippingEvent` needs `events.equip`.
+- **The transaction.** In the Pre of the step it runs in the player's session and identity are checked again; inside
+  `kiln_items_equip` the snapshot is read again through the program's own accessors and compared before the
+  transaction, the plan is made again from it (a caller's steps are never replayed), every step is staged on one
+  transaction set up as the game's `equipment_actions` sets up its own, and the terminal state is checked against the
+  request and the snapshot: a refusal rolls back once and compares, a dry run rolls back once and compares (never
+  commits), the commit's own rollback conditions (flags bit 0x40, no InventoryEmptyState accessor with touched
+  inventories) refuse before the commit, the commit is called once and never followed by a rollback, the arrays are freed
+  once. "As it was" after a refusal, a dry run or a commit that rolled back by itself is two comparisons in the same
+  program update: the canonical snapshot, and every byte of the seven components the program declares (Fuel,
+  Inventory, InventoryEmptyState, InventorySetup, ItemState, OwnerRelationship, SlotSelection) of the player, every
+  setup node, every inventory and every item entity, read before the transaction opened; a difference in either (an
+  item's fuel, its level or rarity byte, an empty-state flag) is `InvariantFailure`. A part this build's program does not
+  declare is not compared (it cannot write it either): kiln.log says which once, at the first set, and the capability
+  row's text carries it; a component that cannot be read whole before the transaction refuses the set before anything
+  changes, and one readable before and not after the rollback is `InvariantFailure`. Durability, level and perks are
+  other components (Durability, Level, PerkContainer), which the program cannot write; Kiln does not compare them (the
+  lab's rollback series did). After a set that succeeded: every named slot as asked, every slot left out as it was, and
+  every stack, item entity, stamp and owner, the tree and the action bars conserved (an item may move); nothing else is
+  compared after a commit. A mismatch or a fault: `InvariantFailure`, sets (and equip) go off; nothing is repaired.
+- **A fault inside the transaction is not rolled back.** The game's rollback replays the operations its transaction
+  recorded; a structured exception inside its equip, unequip or commit may have left that record half written, so asking
+  for a rollback could undo a write that never happened or miss one that did. No lab probe has shown the rollback safe
+  after a fault (the dev.28 dossier proved commit and rollback for staged equips only), so kiln.items stops: no further
+  engine call, no read, no free. The result is `InvariantFailure` with `MayHaveMutated` and a reason that says the
+  inventory may be in an unknown state; `EquipmentSetFaultedEvent` carries it; kiln.log has an error line with the
+  player, the server step and the set's step; the capability row `items.equip_sets` keeps that reason until the server,
+  or the hosting player's game, restarts (on a hosted world the process is the game), and single equips are off too. A
+  fault in one of the set's reads before the transaction opened is reported the same way (the event, the log line, sets
+  and equips off), without `MayHaveMutated`: nothing was changed.
+- **What stays on after a fault.** Moves, gives, takes and fuel writes (`Items.Move`, `Give`, `Take`, `Items.Fuel`) keep
+  running after an "unknown state" fault: the player can still move their own items by hand, and Kiln's own jobs are no
+  riskier than that (owner's decision, 2026-11-15). The reason text says so ("sets and equips are off ...; other item
+  calls still run").
+- **Order.** FIFO by request with the player's single `Equip`/`Unequip` requests (setorder.h, host test
+  `setorder_test.cpp`): at most one set per player and step, and only the player's oldest set (a later set that is ready
+  waits for an earlier one still being decided); a single request waits for every set of the player asked before it; a
+  set waits for every single request asked before it. 256 sets queued at most (`Refused`, try again).
+- **Ownership.** Kiln.Items submits under Kiln's own owner and names the asking mod as the snapshot's owner, so a
+  committed set is reported (`EquipmentSetChangedEvent`) even when the mod unloads first; a mod's sets that did not start
+  end `Dropped` at its unload; its tasks are left alone. A result kiln.items never sends within 400 steps ends the task
+  `Dropped` and switches sets off (a lost result must not hang a mod).
+- **What runs for a server whose mods use no set:** `kiln_items_equip` is equip's program (registered when equip is on);
+  sets add an atomic check to it and to equip's Pre, and nothing else: no hook, no snapshot, no decision.
+  kiln.window_clock, kiln.decisions and the component layouts (kiln.types) are looked up once, at the first status
+  query of `items.equip_sets` (Kiln.Items' capability refresh asks at boot and on its heartbeat) or the first set call,
+  whichever comes first; this happens on every server, also when no mod uses a set.
+
+C (v6, header size >= the member's end): `set_capture(owner, player, KilnSetSnapshotV1*)` (world thread, Pre or Post),
+`set_release_snapshot(owner, token)`, `set_status(KilnSetStatusV1*)`, `set_plan(owner, token, entries, count,
+KilnSetPlanV1*)`, `equip_set(owner, KilnSetRequestV1*, KilnSetDoneV1, user, &ticket)` and `set_cancel(ticket)`; the
+entries are kiln.decisions' `KilnSetOpV1`. `done` runs once, on the tick thread in Pre (or on the thread that stops the
+world), with a `KilnSetResultV1` valid during the call. A native caller other than Kiln names itself (or 0) as the
+snapshot's owner; `cancel_owner` drops its queued sets.
+
+Lab: see "Lab results: equipment sets" below. What a player sees (one decision, both rings and the helmet at once, no
+in-between state on the player's own screen) is the guided check `10-items.equip-set`, and what a second player sees
+`10-items.equip-set.observer` (mods/tests/client-pass; it needs a second player in a hosted world). Both prepare a
+supported set (the three target slots emptied first) and put the player's own gear back with fresh plans, asserted.
+
+### Lab results: equipment sets (lab `dev29-10`, server 26430253 `f0d824be…`, the standard lab save, no player)
+`mods/tests/equipment-sets-test` on a spawned `1_Player` character: a stand-in for a player, so these rows show Kiln's
+machinery on the game's own transaction, not what a player's client shows. With `kiln/control/systems.parallel` (the
+game's programs forced onto its workers, players mask 0x8000) 12 of the 16 sets of the full run ran on a worker thread
+and 4 on the world thread (each result's log line says which). `kiln/data/kiln.items/sets-lab` injects faults into
+real runs.
+
+- Full run: 28 PASS, 0 FAIL: SET-CAPTURE (20 unique slots, the scope), SET-EMPTY / NOCHANGE (no decision, no
+  transaction), SET-OMITTED (one Ring0 entry, the other 19 slots and the hand unchanged), SET-EMPTY (an explicit empty),
+  SET-SINGLE-DECISION (one `SetEquipmentChange` for three slots; a cancel leaves everything), SET-DRY, SET-ROLLBACK (the
+  game's equip refused at the first, a middle and the last step: Refused, kiln.items' snapshot compared equal after the
+  rollback), SET-COMMIT-ROLLBACK (the commit's rollback bit: refused before the commit; committed anyway: the game's
+  commit rolled back by itself, `CommitRolledBack`, no second rollback), three slots in one transaction, a single swap,
+  SET-SWAPS (three occupied slots refused before mutation), SET-SNAPSHOT (a give after the plan: StaleSnapshot before the
+  transaction; a plan applies once; a disposed plan is stale), SET-CALLBACK (a cancel before it ran: Dropped once; the
+  copied changes still right three steps later), SET-SESSION-ONLY (a JSON round trip applies; another process, world or
+  life: StaleSnapshot), SET-CYCLE (two worn rings exchanged through a free slot, and the same refused at its last step),
+  SET-BACKPACK (refused), SET-INVARIANT last (a faked mismatch after a real commit: `InvariantFailure`, the real change
+  reported, one `EquipmentSetFaultedEvent`, sets off and `CaptureSet` throwing afterwards).
+- The rollback matrix (`kiln/data/equipment-sets-test/matrix` with `kiln/data/kiln.items/sets-matrix`, one fresh character
+  per form). First run, the order of 0.2.0-dev.29's first build (swaps in numeric order): 11 of 14 forms committed exactly;
+  **a swap followed by another equip, by a second swap or by a removal left the swapped slot's selection pointing at the
+  backpack slot the old item went to** (`InvariantFailure`; a swap alone, an equip into an empty slot followed by a swap,
+  arrows after a swap and the cycle were exact; arrows are equipped where they lie). Second run, with the order above
+  and `UnsupportedSwaps`: 15 of 15 forms as expected (the three forms that failed are reordered and exact, two swaps are
+  refused before mutation; a removal then a swap, two equips into empty slots then a swap then arrows, the cycle: exact).
+- After the review (merged tree, 2026-11-15; logs `out/10/lab-r3-series-kiln.log` .. `lab-r6-matrix-kiln.log` of the dev.29
+  wave): full run 29 PASS, 0 FAIL (the rows above and SET-FIFO: a set's dry run, the same set and a single equip asked in
+  one step: Simulated, Done, Done); the matrix again 15 of 15 forms as expected, now with the commit's conservation check.
+- **The rollback series** (`kiln/data/equipment-sets-test/series`, `mods/tests/equipment-sets-test/Series.cs`): one
+  stand-in with items that carry their own data (two shields with a level, a rarity and unlocked perks, a sword with a
+  level and a perk, a grappling hook and a pickaxe with lowered durability, a watering can with its fuel set). For each
+  form a plan can take on this build (empty targets: a shield, a hook, a ring and a helmet; removals; the one swap; plain
+  stacks; arrows in place; the cycle through a free slot; a form mixing a removal, an empty target, the swap and arrows) a
+  failure at every operation (the game's equip refused at step k), after the last one (the commit's rollback bit), at the
+  commit (the game's commit rolling back by itself) and a dry run: 38 rollbacks, each Refused, CommitRolledBack or
+  Simulated with kiln.items' full comparison equal (every byte of the program's seven components of every entity of the
+  tree, in the same program update) and the test's own read of every byte of those components and of Durability, Level,
+  PerkContainer, PerkContainerNew, NetworkDurability, NetworkFuel, NetworkLevel and ItemEquippedLifetime equal. Each form
+  then committed: Done, as asked, and every item's own bytes as before. Equipping changes two fields of an item on
+  purpose: ItemState's equipped bit (0x08 of `itemState`) and OwnerRelationship, which names **the inventory that holds
+  the item** (the backpack's or an equipment page's), not the player. The first version of the commit's conservation check
+  (the review's) read the owner as identity and failed every set that moved an item between the backpack and an
+  equipment page; it now requires the owner to follow the item's inventory (or stay what it was when it named anything
+  else). 48 PASS, 0 FAIL. Every form a plan can take stays on.
+- **A save and a restart cannot be shown in a lab:** the game does not load a spawned `1_Player` from a dedicated server's
+  world save (a character is its client's own), so SERIES-RESTART found no character. After a rollback the program's
+  components are byte for byte what they were, so a later save writes what it would have written without the set; what a
+  committed set leaves after a save and a reload of a real character is the guided checks `10-items.equip-set.persist` and
+  `10-items.equip-set.persist.after`.
+- Not run: a backpack change (refused), a set while a player is in the world (the lab has no client), a set whose server
+  world stops while it waits, the 250-step timeout, a set from a native caller, derived stats and set bonuses read per
+  program boundary (chapter 10 §8: no attribute snapshot was taken), a fault of the game inside the transaction (only the
+  host test injects one).
+
+## Gear: rarity, enhancements, level (v8, since 0.2.0-dev.29.19)
+
+The game keeps an item's rarity as its number of **enhancement slots** (its `PerkContainerNew` component: Common one ..
+Legendary five), and every unlocked slot is one level (docs/re/items.md section 19). Kiln.Items reads and writes these in
+place: the same item entity, so its item data (`InstanceData`), affixes and gem stay on it. The writes run in the next
+sim step inside kiln.items' serial program `kiln_items_gear` through the game's tracked writes, so players and the save
+get them like the game's own; the game derives the shown rarity (colour), the "LEVEL x/y" line and the damage itself in
+its next step.
+
+```csharp
+var item = Items.Held(player);                         // or a slot's Ref, a give result's Changes[i].Ref
+GearState? g = Items.GearOf(item);                     // null: gone, or the id names another item now
+// g.Rarity, g.Enhancements (slots), g.Unlocked, g.Level, g.BaseLevel, g.MaxLevel ("LEVEL x/max"), g.MaxRarity (the
+// type's last perk slot), g.Durability / DurabilityMax, g.HasSocket, g.Perks[0..4] (Available, Unlocked, TypeHasSlot),
+// g.ShownRarity / ShownLevel (what the game derived and sends: a step behind a change)
+ItemRarity? r = Items.RarityOf(item);
+
+GearResult up = await Items.SetRarity(item, ItemRarity.Epic);          // one more slot, locked: unlocked at the workbench
+if (!up.Ok) Log.Info($"not changed: {up.Reason}");                     // NoSlot, Stale, OutOfRange, ...
+await Items.SetEnhancements(item, 2);                                   // unlock two; the level moves with them
+await Items.SetLevel(item, 12, new GearWriteOptions { Durability = DurabilityRule.Repair });
+
+Events.On<GearRarityChangedEvent>(e => Log.Info($"{e.Item}: {e.From} -> {e.To} ({e.Source} by {e.Origin})"));
+Events.On<GearEnhancedEvent>(e => Log.Info($"{e.Item}: unlocked {e.From} -> {e.To}"));   // also a player's workbench unlock
+```
+
+- `GearOf(item)` / `RarityOf(item)` (server, tick thread; capability `items.gear.read`). The ref must carry kiln.items'
+  stamp (`Items.Held`, `Items.Equipped`, `InventorySlot.Ref`, `ItemChange.Ref`): another ref is an `ArgumentException`.
+  `MaxRarity` is the highest rarity the type has a perk slot for: 487 of 497 weapons and 653 of 863 equipment items with an
+  item entity fill all five (the equipment dossier); tools stop at Rare or Epic.
+- `SetRarity(item, rarity, options)`, `SetEnhancements(item, unlocked 0..5, options)`, `SetLevel(item, level 1..255,
+  options)` → `Task<GearResult>` (server, tick thread; capability `items.gear.write`). A higher rarity adds slots,
+  locked; a lower one takes slots away, unlocked ones among them, and the level comes down by as many (as the game's own
+  -1 does). `SetLevel` sets the level the game shows, unlocked slots included; the base (level - unlocked) must be in the
+  type's level range, since the game sets anything else back when the world loads (`OutOfRange`), unless
+  `GearWriteOptions.AnyLevel`: Kiln then keeps the level and writes it again after each load (see "Per-instance values"). The task completes on the tick thread one step after the write.
+- `GearWriteOptions`: `Durability` (`KeepRatio`, the default: the game computes max durability again at the new rarity
+  and level in its next step and the item keeps its share; `Keep`: max stays; `Repair`: as `KeepRatio`, and full; both
+  need `items.gear.durability`), `AllowEmptySlot` (default false: a rarity whose slot the type has no perk for is refused
+  `NoSlot`; with it the slot exists and unlocks a level, but no perk acts), `RefuseEquipped` (default false: an equipped
+  item changes in place too), `DryRun`.
+- `GearResult` (`IKilnResult`): `Status` (`Done`, `Stale`, `NotGear`, `NoSlot`, `OutOfRange`, `Equipped`, `Unavailable`,
+  `Dropped`, `Refused`: kiln.items' own values), `Before` / `After` (`GearState`; null when it never ran), `Changed`
+  (`Enhancements`, `Level`, `Durability`, `DurabilityRefresh`), `Message`, `Steps`, `DryRun`. `Done` also when nothing
+  needed a change. A refusal changes nothing; bad arguments throw; an off capability throws `KilnUnavailableException`.
+  1024 writes waiting is a `Refused` result.
+- Events (server, tick thread; through the change-notice queue of docs/kiln/modding/contract.md "Change events", so a
+  handler that writes again gets its event in a later step, never inside the dispatch): `GearChangedEvent` (every change of
+  slots, unlocked, level or, a repair, durability; `Changed`), then `GearRarityChangedEvent` (`From`, `To`) and
+  `GearEnhancedEvent` (`From`, `To` unlocked) where they apply. All carry `Before`, `After`, `Source` (`Code`,
+  `Upgrade`, `Game`) and `Origin` (the mod's id, "kiln", or "game"). Kiln's own writes post when their result arrives,
+  only when something changed (not a dry run, not a refusal). **The game's own changes** (a player's unlock at the workbench,
+  the game's free +1 / -1) are found by Kiln.Items' gear watch: while one of the three events has subscribers, it reads one
+  player's items per step (kiln.items' inventory read, then its gear read of each item entity) and compares them with the
+  last read, so a change shows within as many steps as players are in game. The first read of an item is its baseline (no
+  event); items outside players' inventories (chests) are not read; wear is not a gear change; Kiln's own writes are never
+  reported again as the game's. Gear writes are not reported to kiln.component_changes, which is why this is a poll.
+- Capabilities: `items.gear` (sigdb, the core; kiln-items.dll lowers it, see [caps.md](caps.md)), and Kiln.Items' own rows
+  `items.gear.read` (kiln.items v8 and `items.gear`), `items.gear.write` (the read row and kiln.items says
+  `kiln_items_gear` can run: `faulted` with its detail when it was refused or switched off), `items.gear.durability` (with
+  the write row). Followed every 25 steps; a call checks `items.gear` live. `Items.GearReadAvailable`,
+  `Items.GearWriteAvailable`.
+- Not confirmed in a real game yet: that a client shows the new rarity, enhancement list and level without re-joining (vanilla
+  and Kiln clients), that the workbench then offers the new unlock at its cost, an equipped item's perks after a change, and
+  the durability bar after a refresh. Lab (package P1's self-test, server 26430253, no player): the writes, the derived
+  rarity within 10 steps, the refreshed max durability with its ratio, and a save and restart keeping them.
+- Test kit: every piece of gear the fake kiln.items makes has enhancement slots, a level, a durability of 100 and a stamp;
+  `HarnessItems.SetPerkSlots(item, n)` sets a type's filled perk slots, `HarnessItems.SetGear(ref, ...)` plays the game's
+  own change ([unit-tests.md](../modding/unit-tests.md)).
+
+## Upgrading rarity (v8, since 0.2.0-dev.29.19)
+
+`Items.UpgradeRarity` raises an item's rarity by one step of a rule, paid for: the item gets its next enhancement slot in
+place (locked: the player unlocks it at the workbench as usual, for its cost, and gets a level and the perk), and the
+step's cost comes out of the player's inventories (or a chest) in the same server step as the change, all or nothing. The
+rule is a C# record or a block (`RarityUpgradeBlock`, `rarityUpgrades` in `blocks/*.json`:
+[item-blocks.md](../modding/item-blocks.md#rarity-upgrades-rarityupgradeblock)). A station that runs it when a player uses it is
+`InteractBlock.Upgrade`, and from code `UpgradeStation.Use` / `UpgradeStation.Offer`
+([../modding/world-blocks.md](../modding/world-blocks.md#upgrade-stations)).
+
+```csharp
+var rule = new RarityUpgradeRule
+{
+    Items = ["Weapon_*", "Armor_*"],                    // none: every item with enhancement slots
+    Steps =                                             // by the rarity each step reaches
+    {
+        [ItemRarity.Uncommon]  = new UpgradeStep { Cost = { ["Material_T1_Metal_Scraps"] = 10 } },
+        [ItemRarity.Rare]      = new UpgradeStep { Cost = { ["Material_T1_Metal_Sheets"] = 5 }, Chance = 0.9 },
+        [ItemRarity.Epic]      = new UpgradeStep { Cost = { ["my-mod:ember-shard"] = 3 }, Chance = 0.75, OnFail = UpgradeFail.KeepItemLoseCost },
+        [ItemRarity.Legendary] = new UpgradeStep { Cost = { ["my-mod:ember-shard"] = 8 }, Chance = 0.5, LevelScale = 0.1 },
+    },
+};
+UpgradeResult r = await Items.UpgradeRarity(player, Items.Held(player), rule);
+if (!r.Ok) Chat.Tell(player, $"Not upgraded: {r.Reason}");               // Failed, CantPay, NoSlot, AtMax, ...
+await Items.UpgradeRarity(player, item, "standard-upgrades");            // a block of this mod, or "other-mod:name"
+await Items.UpgradeRarity(player, item, rule, new UpgradeOptions { PayFrom = chest });  // a chest pays
+```
+
+- **What it checks, in order** (each a result, nothing paid): the item is gone (`Stale`), has no enhancement slots
+  (`NotGear`), the rule does not take it or has no step to its next rarity (`NotAllowed`), it is at the rule's `Max` or
+  Legendary (`AtMax`), its type has no enhancement slot for the next rarity (`NoSlot`, unless `AllowEmptySlot`), a cost
+  item the game does not have or that is no plain item (`Refused`), a `GearUpgradingEvent` handler canceled it
+  (`Canceled`), the payers hold too little (`CantPay`), a payer that is another player or an NPC (`Refused`). A rule that
+  is malformed (a chance outside 0..1, a count outside 1..100000, more than 8 cost items, a step below Uncommon) throws.
+- **The cost.** Item names as everywhere in blocks: game names, `"other-mod:name"`, or the rule's own mod's item by block
+  name. Plain items only (materials, runes): an item with an entity of its own (gear, a gem) cannot be a cost, so the item
+  being upgraded is never spent. `LevelScale` grows the cost with the item's level: `count × (1 + LevelScale × (level - 1))`,
+  rounded up. `PayFrom`: a container your mod vouches for pays instead of the player (each payer pays what it has, in
+  order; kiln.items takes up to 8). `Free`: nothing is paid.
+- **The roll** is the server's (a cryptographic random number; a player's game has no part in it). `Chance` 1 (the
+  default) rolls nothing; `UpgradeOptions.Guaranteed` always succeeds. A failed roll does what the step's `OnFail` says:
+  `KeepItemLoseCost` (the default: the item stays, the cost is spent), `KeepItemKeepCost` (nothing paid), `Downgrade` (the
+  cost is spent and the item drops a rarity; a Common item stays). An upgrade never destroys an item. The result says
+  `Failed`, with `Rolled` and `Chance`.
+- **One step, all or nothing.** kiln.items' program `kiln_items_gear` checks the item's stamp, plans the write, counts the
+  costs in the payers, takes them on one inventory transaction of its own, counts again after the commit (a commit that
+  rolled back by itself ends `Refused`, nothing written), and only then writes the enhancement slots. Two upgrades of one
+  item in the same step: the second finds the slots it was priced for changed and is `Refused`, paying nothing.
+- **Options of the rule:** `Max` (default Legendary), `Durability` (default `KeepRatio`: max durability computed again at
+  the new rarity, the share kept; it needs `items.gear.durability`), `Socket` (default `Keep`; `GameChance`: a weapon
+  without a socket rolls one with the unchanged game's chances for new weapons, 0 / 5 / 25 / 50 / 100 % from Common to
+  Legendary, and a won socket re-creates the weapon in its slot as `Gems.AddSocket` does, a new item entity that
+  `UpgradeResult.After` names; not for an equipped weapon, and a pack's changed chances are not read), `AllowEmptySlot`.
+  `UpgradeStep.Unlock` also unlocks one more slot at once (one level, one more perk acting) instead of waiting for the
+  workbench.
+- `UpgradeResult` (`IKilnResult`; `Ok` only for `Done`): `Status`, `Player`, `Item`, `From`, `To`, `Before`, `After`
+  (`GearState`), `Paid` (by item), `Chance`, `Rolled`, `Message`, `Rule` (a block's id), `DryRun`, `SocketAdded`.
+  `UpgradeOptions.DryRun` checks, counts and plans, pays and changes nothing, rolls nothing: `Paid` and `After` say what a
+  success would cost and make.
+- **Events** (server, tick thread): `GearUpgradingEvent` (cancelable) inside the call, after the checks and before
+  anything is paid or rolled, for every upgrade (code or a station's interaction; not a dry run): `Player`, `Gear`, `From`,
+  `To`, settable `Cost` (by item id, already level-scaled) and `Chance`, `Rule`, `Origin`. `GearUpgradedEvent` when the
+  result arrives, for a success or a failed roll (`Succeeded`, `Result`). The rarity change itself is also a
+  `GearRarityChangedEvent` (and `GearChangedEvent`) with `Source` `Upgrade`.
+- Capability `items.gear.upgrade` (Kiln.Items' row: the write row, kiln.items' `gear_upgrade` and the inventory
+  transaction); `Items.UpgradeAvailable`.
+- **Players without Kiln:** the write is the game's own state on the server (enhancement slots), so a vanilla client should
+  show it like any server change; not seen in a real game yet (the equipment wave's client checks).
+- Test kit: the fake kiln.items runs upgrades with kiln.items' rules (pay and write together, payers, refusals);
+  `HarnessItems.SetUpgradeRolls(0.9, 0.1)` names the rolls of the upgrades that follow.
+
+## Per-instance values: power, armour, max durability, levels outside the range (v8, since 0.2.0-dev.29.19)
+
+One item can be stronger or weaker than others of its type, and keep it wherever it goes: its power (the damage it deals),
+its armour, its max durability and a level outside its type's range. The game stores none of these per item, so Kiln does
+it: multipliers in kiln.items' table, applied where the game computes the item's power and armour on the server, and the
+values the game sets back at a load (the level, max durability) kept with the item as Kiln's own item data and written
+again after each load (docs/re/items.md section 20).
+
+```csharp
+var sword = Items.Held(player);
+GearValuesResult p = Items.SetPower(sword, 1.25);             // this sword deals a quarter more, wherever it goes
+Items.SetArmor(Items.Equipped(player, EquipmentSlot.ArmourUpperBody), 1.5);
+await Items.SetDurabilityMax(sword, 900);                     // lasts longer; a half-worn sword stays half worn
+await Items.SetLevel(sword, 60, new GearWriteOptions { AnyLevel = true });   // past its type's levels
+GearValues? v = Items.ValuesOf(sword);                        // Power, Armor, KeptBaseLevel, KeptDurabilityMax, Kept
+Items.SetPower(sword, 1);                                     // its own power again
+await Items.SetDurabilityMax(sword, null);                    // the game's own max again
+```
+
+- `SetPower(item, scale)` / `SetArmor(item, scale)` → `GearValuesResult` at once (server, tick thread; capabilities
+  `items.gear.power`, `items.gear.armor`). Scale 0.01 to 100; 1 removes it. **Power:** the game computes a used item's power
+  when an impact of it starts (a swing, a shot, a cast; `items/ItemPower`) and multiplies the impact's damage distribution by
+  the weapon's power plus its ammunition's; Kiln multiplies that one item's power, so armour, block, crit and the attacker's
+  attributes still act after, as for the game's numbers. An arrow's or a spell's own power is that item's. **Armour:** the
+  game sums each worn piece's armour (its type's armour at its level plus each unlocked enhancement's) into the wearer's
+  armour values; Kiln multiplies what that one piece adds. Both act on the server world only; the first scale of a kind
+  installs its hooks (a server that never uses them hooks nothing). `Status` `Done`, `Stale`, `Full` (8,192 items with a
+  multiplier in this world).
+- `SetDurabilityMax(item, max, options)` → `Task<GearResult>` (capability `items.gear.write`): the max in place, current
+  at the same share (`DurabilityRule.Repair`: full). `null` hands the item back to the game's own max (computed again in its
+  next step, the share kept). `Refused` while the game has not computed the item's durability yet (its first step);
+  `NotGear` without durability.
+- `SetLevel(item, level, new GearWriteOptions { AnyLevel = true })`: a level whose base (the level without the unlocked
+  enhancements) lies outside the type's range; the base must still be 1 or more. Without `AnyLevel` such a level is
+  `OutOfRange`, as before. A level inside the range ends a kept one.
+- **Kept through saves and restarts.** `GearValuesResult.Kept` / `GearResult.Kept` say Kiln keeps the value: item data of
+  Kiln's own (owner `kiln-gear`, key `values`), so it follows the item through moves, saves, restarts and a restored backup
+  by item data's rules ([../modding/inventory.md](../modding/inventory.md)). After a load the game sets the level back into the
+  range and computes max durability again, and kiln.items' multipliers start empty; a pass of Kiln.Blocks about once a second
+  writes every kept value again wherever the item differs (also after a rarity change that made the game compute max
+  durability again). Item data recognises the item by the level as a load gives it back, so the record still finds it. The
+  pass starts only once a value was kept on this install (`<kiln>/data/kiln-gear/used`), so a server that never uses this
+  does not start item data for it. `Kept` false: item data is off, and the value lasts until the server world closes.
+- **What players see.** Every value acts on the server for everyone. The game's tooltip computes damage and armour from the
+  item type on each player's own game, so a vanilla client shows the type's numbers; on Kiln clients with the tooltip values
+  on (`ui.tooltip.values`, [ui.md](ui.md)) Kiln shows the item's main number times its multiplier (the value synced to
+  players near the item). The level and the durability bar come from the game's own replicated components: every client
+  should show them; not yet seen in a real game.
+- Test kit: the fake kiln.items keeps the multipliers (no damage or armour is computed) and writes levels and max
+  durability with kiln.items' rules; the keeping is Kiln.Blocks' (a mod's test registers no keeper unless Kiln.Blocks
+  started).
+- Lab (server 26430253, a copy of a real world, no player; docs/re/items.md section 20): the writes, the hooks installing at
+  the first scale with the server running on, and after a save and restart every value back within about three seconds;
+  with the keeper's pass off the same load showed the game's level clamp and its own max durability.
+- Not confirmed in a real game (guided checks `equip-p7.power`, `equip-p7.armor`, `equip-p7.tooltip`, `equip-p7.reload`): the damage a player deals with a multiplied
+  weapon, the damage a player takes in multiplied armour, a Kiln client's scaled tooltip number and a vanilla client's
+  unchanged one, the level and durability bar after a load on both.
+
+## Tool wear per debit (since 0.2.0-dev.28)
+`Items.SetToolWearPerDebit(tool, n)` (or `ToolBlock.WearPerDebit` in a block) sets what one of the game's wear debits
+costs a tool: `n` instead of the game's 1, 0 to 32767. Native table `kiln.toolwear` (`kiln_toolwear.h`), published by
+kiln-items.dll; capability `items.tool_wear_debit`.
+
+- **Per debit of the game, not per swing.** The game debits a tool in two places a rule reaches: when a hit debits the
+  attacker's weapon (the game's own hit-counter cap still decides whether it does), and after a projectile was spawned
+  with the tool as the used item. Two debits in one swing spend twice the cost; a swing with no debit spends nothing.
+- **Which tools take a rule:** a tool that is gear with an item of its own (an item entity): the game's axes (category
+  Tools) and pickaxes (category BuildTools). A torch (its durability burns down by another path), a rake and the
+  other tools without an item entity answer `Ok = false`, `Reason` `UnsupportedTool: …`.
+- **What stays the game's:** the skill roll that can save a debit, the clamp at 0 (a cost larger than what is left ends
+  at 0), the break notice, save, reload and repair. The armor a hit debits and a torch's burn-down are never touched.
+  Only the authoritative server world of the process is acted on (a dedicated server, or the host's own game).
+- **Hooks:** installed when a mod first sets a valid tool-wear rule, before the rule is published, rather than at startup; they remain installed until process exit even after all rules are removed. The host’s prediction and joined players still use the game’s own wear rate locally: this service does not reconcile their bars with the server, so early breaks, correction timing and repair display remain unconfirmed. Check `16b-g` currently covers the host only and does not require wearing the tool to zero.
+- **Rules:** the calling mod's. Setting it again replaces it (same `ToolWearRule`); across mods the latest set is in
+  effect, and disposing it reveals the one before. A rule goes when its mod unloads. Rules last for the process: they
+  are not saved (durability itself is the game's and is saved as usual). 256 tools can have had a rule in a process.
+- **Results** by Kiln's error rule: a refusal is `Ok = false` with `Reason` `UnsupportedTool`, `NoAuthoritativeWorld`,
+  `UnknownItem`, `PendingContent` or `TooManyRules`; `Reason` is `""` (not null) when `Ok`. A cost outside 0..32767 or
+  no item throws `ArgumentException`; the capability off throws `KilnUnavailableException` naming
+  `items.tool_wear_debit`. `Items.ToolWearStatus(tool)` says the cost in effect, whose rule it is, and why not.
+- **Events** on the server tick: `ToolWearRuleChangedEvent` once per change of the cost in effect or of whose rule it
+  is (an identical replay raises none), in the order the changes were made, whoever made them: a mod (raised before its
+  call returns), a native plugin through `kiln.toolwear` or a plugin's owner going away (raised on the next tick). Its
+  `Generation` grows by one per change, so five changes within one tick are five events even when the last state equals
+  the first. `ToolDurabilityChangedEvent` once per debit that changed the value (a cost of 0 or a debit the skill saved
+  raises none), with the item instance as it was at the debit, also under a native plugin's rule.
+- **Native plugins:** `define`, `remove`, `changes` and `status` as `kiln_toolwear.h` says; `rule_changes` (appended in
+  0.2.0-dev.28: check `header.size`) reads the rule changes after a generation, oldest first, as
+  `KilnToolWearRuleChange` records (item, cause `DEFINED`, `REMOVED` or `RETIRED`, cost, owner, rule handle and mod id
+  before and after, generation). Reading takes nothing away: each reader keeps its own cursor, so a plugin's reads do
+  not cost Kiln's managed events. The service holds the last 1024 changes and says how many a reader that fell behind
+  missed (`*lost`); Kiln.Items logs such a gap as a warning. `changes` (durability) is different: it takes the records
+  away, and Kiln.Items drains it every tick from the first one, so a plugin that drains it too takes records from the
+  managed `ToolDurabilityChangedEvent`s.
+
+### Lab test
+`mods/tests/toolwear-test` (with its second rule owner `toolwear-test-b`; how to run it is in its project file) drives
+the game's own debits of a real pickaxe in a lab: HitEvents through a declared program, and a projectile spawn. On server
+26430253 (lab `dev28-16b-tool-durability`, 2026-11-14), 11 of 11 PASS: a torch refused; one hit at cost 7 spends 7, two
+hits 14, a hit over the game's cap 0; the armor a hit debits loses the game's 1 while the weapon loses 7; a projectile
+spawn spends 7 at cost 7 and 0 at cost 0; another mod's rule on top (3) and its removal (back to 7, no event for an
+identical replay); forced parallel mode (the lab switch) with exact debits; the clamp at 0. Since the fix round
+(lab `dev28-16b-tool-durability-events`, 2026-11-14, 12 of 12 PASS) a native rule owner as well (`native/`,
+kiln-toolwear-test.dll in `kiln/plugins`): its define, its replacement, a second native owner's define and remove, all
+in one tick, then its retirement: five `ToolWearRuleChangedEvent`s in order with consecutive generations, a hit under
+its rule spends 6 with its durability event, and the mod's rule is back after the retirement.
+
+**Limits (not run):** worker threads: the two programs whose debits a rule changes (`durability_loss`,
+`actor_spawn_entity`) run on the world thread also in parallel mode, by their flags, so the hooks ran on one thread;
+the torch's burn-down (the only debit on worker threads) was not driven. The game's own armor: the armor items tried
+have no durability of their own, so an axe with a rule stood in as the armor a hit debits. Not run: save and reload,
+repair, a world change dropping queued changes (a host test proves it), a debit the skill saved, the world's durability
+setting off, the game client (on since 0.2.0-dev.29; check `16b-g` still needs to confirm the predicted bar in a hosted and a joined game).
+
 ## C (native plugins and services)
 ```c
 const KilnItemsApi* it = api->service((KilnStr){"kiln.items", 10}, 1);   /* in on_ready */
@@ -401,6 +861,12 @@ KilnItemsRequest r = { sizeof r, KILN_ITEMS_LEVEL | KILN_ITEMS_RARITY, chest, 0x
 uint64_t ticket;
 it->give(owner, &r, on_done, user, &ticket);       /* on_done(const KilnItemsResult*, user): tick thread, Pre */
 ```
+There is no native `DisplayName`. `Items.DisplayName` on a dedicated server returns the English string from the managed
+assembly's embedded item catalog (`items.tsv`), because that server's game data has no loca texts. On a client it is
+the game's loca text for the current language, read in the background, with a kiln.content text for a mod item. A
+native reader of the game's loca table would return null on a dedicated server where `Items.DisplayName` returns the
+shipped English name, and a second copy of that catalog inside kiln-items would drift from the managed one.
+
 `give`/`take` (any thread; refused at once with `KILN_ERR_INVALID_ARGUMENT` / `KILN_ERR_UNAVAILABLE`), `cancel`,
 `cancel_owner`, `read` / `find_inventories` (tick thread, Pre or Post), `item_count` / `item_at` / `item_info` /
 `find_item` / `item_id_of_guid`, `status`. v2 (check `header.size`): `fuel` (a `KilnItemsFuelRequest`: `SET`, `FILL` or
@@ -410,7 +876,25 @@ per Pre) / `fuel_keep_end`. v4 (header size >= `sizeof(KilnItemsApi)` of v4; fea
 `read_instances(items, count, item_size, flags)` and `read_holder(holder, out, capacity, item_size, &count, &initialized)`
 fill `KilnItemsInstance` records (stamp, item, holder, slot, link, flat slot, count, the save record's fields; tick thread),
 `instances_status` (any thread); the stamps are in the `reserved` fields of `KilnItemsSlot`, `KilnItemsChange` and
-`KilnItemsMoveChange` (0 from an older service). Details and every field: the header.
+`KilnItemsMoveChange` (0 from an older service). v8 (since 0.2.0-dev.29.19; feature `items.gear`): `gear_write` queues a
+`KilnItemsGearRequest` for one item entity named with its stamp (`AVAILABLE` sets the enhancement slots, so the rarity;
+`UNLOCKED` the unlocked enhancements, Level moving with them; `LEVEL`; `DURABILITY_REFRESH` / `DURABILITY_REPAIR`;
+`DRY_RUN`; `FORCE_SLOT`; `NOT_EQUIPPED`), run in the next step inside the serial program `kiln_items_gear` through the
+game's tracked writes; the callback gets a `KilnItemsGearResult` (status, what changed, before and after). `gear_read`
+(tick thread) and `gear_status` (any thread). The game derives the shown rarity and level in the next step; evidence in
+docs/re/items.md section 19. v8, package P5 (feature `items.gear.rolls`): `rarity_rolls(owner, rolls, count, size)` sets an
+owner's `KilnItemsRarityRoll` rules (item type, `KILN_ITEMS_ROLL_CRAFT` / `LOOT` / `GIVE`, five weights) and
+`roll_status` counts what they did; a mid hook where createPide loads the rarity its caller asked for replaces it with a
+weighted roll among the rarities the type has a perk slot for, so the game makes the item at that rarity (docs/re/items.md
+section 10, "Rarity rolls at creation"). Managed: `RarityRollBlock` ([item-blocks.md](../modding/item-blocks.md#rarity-at-creation-rarityrollblock)).
+v8, package P3 (feature `items.gear` and the inventory transaction): `gear_upgrade` queues a `KilnItemsUpgradeRequest`: the
+item (a gear request, with `KILN_ITEMS_UPGRADE_WRITE` the write to make), up to 8 costs (plain items), up to 8 payers in
+order (the player, or containers) and `expect_available` (the enhancement slots it was priced for); `kiln_items_gear`
+counts the costs, takes them on one inventory transaction of its own, counts again after the commit, and only then makes
+the write, all or nothing. `DRY_RUN` plans without paying. The callback gets a `KilnItemsUpgradeResult` (status, what
+each cost took, what the payers held, the gear result). kiln.items never rolls: a failed roll is the caller's request
+without `WRITE`. Managed: `Items.UpgradeRarity` ("Upgrading rarity" above).
+Details and every field: the header.
 
 ## How it runs
 - A system ECS program `kiln_items` (other-write Inventory, InventorySetup, InventoryEmptyState, ItemState,
@@ -527,3 +1011,11 @@ Kiln.Items followed [the API contract](../modding/contract.md) since dev.26; dev
 - `[TickThreadOnly]` on every member that reaches a tick-thread check (`Read`, `Give`, `Take`, `Move`, the `Fuel`
   calls, ...).
 - Tested offline: `managed/tests/Kiln.Contract.Tests/Group10ContractTests.cs` and the conformance rules.
+
+## Typed equipment decisions (since 0.2.0-dev.29)
+`PlayerEquippingEvent`: a player's equipment input, one slot (`SingleEquipmentChange` with `InstanceEquipment`,
+`StackEquipment` for a plain stack such as arrows, or `EmptyEquipment`) or the game's collection swap
+(`CollectionEquipmentChange`, its contents as read in Pre), shares one verdict with the same input's
+`PlayerClientActionEvent`: refused when either canceled. Kiln set requests (`SetEquipmentChange`) come with
+10-equipment-sets. The set model (`EquipmentSet`, `EquipmentSetEntry`, `EquipmentSetSelection`, `InventorySnapshotToken`)
+is declared here as chapter 10 has it. Capability `events.equip`. [decisions.md](decisions.md#equipment).

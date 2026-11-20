@@ -70,6 +70,19 @@ public sealed class ModProjectAnalyzer : DiagnosticAnalyzer
         return null;
     }
 
+    // KilnServices "Stations" (0.2.0-dev.29.15): the production stations and bases, which live in Kiln.Blocks' assembly. Its
+    // types and members are these (World/Stations/*.cs, World/StationRuntime.cs); the rest of Kiln.Blocks still asks for Blocks.
+    private static readonly System.Text.RegularExpressions.Regex StationsTypes = new(
+        "^(Stations|Bases|BaseId|BaseIdChange|BaseInfo|BaseAltar|Station[A-Za-z]*|Ingredient(Category|Option)|CategoryChoice|Fill(Options|Mode|Plan|Input|Limit)|StopWhen|CollectWhat|BasesChangedEvent)$",
+        System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    internal static bool IsStationsApi(ISymbol sym)
+    {
+        for (var t = sym as INamedTypeSymbol ?? sym.ContainingType; t is not null; t = t.ContainingType)
+            if (StationsTypes.IsMatch(t.Name)) return true;
+        return false;
+    }
+
     private static void AnalyzeServices(SemanticModelAnalysisContext ctx, HashSet<string> declared)
     {
         var reported = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -81,6 +94,7 @@ public sealed class ModProjectAnalyzer : DiagnosticAnalyzer
             var sym = ctx.SemanticModel.GetSymbolInfo(name, ctx.CancellationToken).Symbol;
             if (sym is null || sym is INamespaceSymbol) continue;
             var service = KilnApis.ServiceOf(sym.ContainingAssembly);
+            if (service == "Blocks" && IsStationsApi(sym)) service = declared.Contains("Blocks") ? "Blocks" : "Stations";
             if (service is null || declared.Contains(service) || !reported.Add(service)) continue;
             var display = sym is IMethodSymbol { MethodKind: MethodKind.Constructor } ctor ? ctor.ContainingType.Name : Syntax.Display(sym);
             ctx.ReportDiagnostic(Diagnostic.Create(Descriptors.MissingService, name.GetLocation(), display, service));

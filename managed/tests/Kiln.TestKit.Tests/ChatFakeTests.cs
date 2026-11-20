@@ -73,10 +73,60 @@ public sealed class ChatFakeTests
         Assert.Equal([ada, ada, bo], kiln.Chat.Typed.Select(m => m.Player));
 
         ada.Say("shout");  // ChatMessageEvent rewrites it
-        bo.Say("/tkf-nope");  // an unknown command
+        bo.Say("/tkf-nope");  // not a Kiln command: it goes on to the game untouched, as if Kiln weren't there
         kiln.Step();
-        Assert.Equal("Ada: SHOUT", Texts(bo)[^2]);
-        Assert.Contains("tkf-nope", Texts(bo)[^1]);
+        Assert.Equal(["Ada: SHOUT", "Bo: /tkf-nope"], Texts(bo)[^2..]);
+        Assert.Equal("Bo: /tkf-nope", Texts(ada)[^1]);
+        Assert.False(kiln.Chat.Typed[^1].Consumed);
+        Assert.DoesNotContain(Texts(bo), t => t.Contains("Unknown command", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void UnknownSlashLinesPassThroughUnlessTheServerAsksForKilnsReply()
+    {
+        var (kiln, ada, bo) = Start();
+        using var _ = kiln;
+        kiln.Load<TkCommands.TkCommandsMod>();
+        kiln.Step();
+        Assert.Equal(UnknownCommandPolicy.PassThrough, Commands.UnknownCommands);
+
+        // the default: another loader's command reaches the game and everyone in chat; Kiln says nothing
+        bo.Say("/lua print(1)");
+        kiln.Step();
+        Assert.Equal(["Bo: /lua print(1)"], Texts(ada));
+        Assert.Equal(["Bo: /lua print(1)"], Texts(bo));
+        Assert.False(kiln.Chat.Typed[^1].Consumed);
+
+        // a handler's rewrite to an unknown command is said as rewritten (the original is not passed on instead)
+        bo.Say("/tkf-redirect");
+        kiln.Step();
+        string[] seen = ["Bo: /lua print(1)", "Bo: /elsewhere now"];
+        Assert.Equal(seen, Texts(ada));
+        Assert.Equal(seen, Texts(bo));
+
+        // Kiln's commands are unchanged: run, not shown; a known command with wrong arguments still gets its usage
+        bo.Say("/tk-echo hi");
+        bo.Say("/tk-echo");
+        kiln.Step();
+        Assert.True(kiln.Chat.Typed[^2].Consumed && kiln.Chat.Typed[^1].Consumed);
+        Assert.Equal(seen, Texts(ada));
+        Assert.Equal("[Server] echo: hi", Texts(bo)[seen.Length]);
+        Assert.Contains("Usage: /tk-echo", Texts(bo)[^1]);
+
+        // the server's opt-in (kiln/config/chat.json): Kiln eats the line and replies, as before 0.2.0-dev.29.17
+        File.WriteAllText(Path.Combine(kiln.ConfigDirectory, "chat.json"), """{ "unknownCommands": "reply" }""");
+        Assert.Equal(UnknownCommandPolicy.Reply, Commands.UnknownCommands);
+        bo.Say("/lua print(2)");
+        kiln.Step();
+        Assert.True(kiln.Chat.Typed[^1].Consumed);
+        Assert.Equal(seen, Texts(ada));
+        Assert.Equal("[Server] Unknown command '/lua'. Type /help for a list.", Texts(bo)[^1]);
+
+        // the setting removed: back to the default without a restart
+        File.Delete(Path.Combine(kiln.ConfigDirectory, "chat.json"));
+        bo.Say("/lua print(3)");
+        kiln.Step();
+        Assert.Equal("Bo: /lua print(3)", Texts(ada)[^1]);
     }
 
     [Fact]

@@ -15,6 +15,11 @@ internal static unsafe class SavesRuntime
     private static ulong _lastSeq;
     private static string? _worldFile;
     private static bool _loadedEventSeen, _labHosted;
+    internal static bool NewWorldSession { get; private set; }
+    internal static bool TerrainPersistenceAvailable(uint features) =>
+        (features & (SavesNative.CanLoad | SavesNative.CanWrite)) == (SavesNative.CanLoad | SavesNative.CanWrite);
+    internal static string? TerrainPersistenceFailure => Ensure() && SavesNative.ReadStatus() is { } status && TerrainPersistenceAvailable(status.Features)
+        ? null : "persistent terrain overlays require kiln.saves to observe world loads and world writes; the sidecar cannot otherwise be bound to this world";
     private static readonly List<Pending> Requests = [];
     private static readonly HashSet<ModContext> Watched = new(ReferenceEqualityComparer.Instance);
 
@@ -37,6 +42,8 @@ internal static unsafe class SavesRuntime
         {
             // per-world configs (Kiln.Api's WorldConfig) keep their files in this world's sidecar folder, and follow it
             WorldConfigs.DirectoryProvider = OpenWorldDirectory;
+            // Kiln services' own values on saved entities (Kiln.World's transform scale) live in the entity attachments
+            ServiceEntityData.Store ??= new ServiceEntities();
             Ensure();
             SavesCaps.Rows.Ensure();
         }
@@ -129,6 +136,10 @@ internal static unsafe class SavesRuntime
 
     private static bool _shutdownAnnounced;
     private static ulong _savingSeq, _snapshotSeq;
+
+    /// <summary>The game's load was reported while the world's mod data could not be read yet (a deferred load): its
+    /// WorldLoadedEvent goes when the data is read (the pump), so a mod never takes "no data" for the world's data.</summary>
+    private static (uint Revision, bool NewWorld)? _loadedEventDeferred;
     private static uint _savingRevision;
 
     /// <summary>Tick thread, after the mods' own ServerStopping handlers and before they unload. The game's shutdown
@@ -160,6 +171,7 @@ internal static unsafe class SavesRuntime
     private static void CloseHostedWorld()
     {
         DrainEvents();
+        NewWorldSession = false;
         _worldFile = null;
         if (SavesNative.ReadStatus() is { } st && (st.Features & SavesNative.CanLoad) == 0)
         {
@@ -167,8 +179,10 @@ internal static unsafe class SavesRuntime
             return;
         }
         var closed = Store.WorldId;
+        _loadedEventDeferred = null;
         Store.CloseWorld();
         _loadedEventSeen = false;
+        NewWorldSession = false;
         InstanceCapabilities.Refresh();
         Log(LogLevel.Info, $"Kiln.Saves: hosted world {closed ?? "(no id yet)"} closed after its shutdown save; the next world opens its own mod data when the game loads it");
     }
@@ -186,6 +200,7 @@ internal static unsafe class SavesRuntime
     {
         _worldFile = null;
         _loadedEventSeen = true;
+        NewWorldSession = newWorld;
         Store.OnWorldLoaded(id, revision, unix, newWorld);
         InstanceCapabilities.Refresh();
         if (Events.HasSubscribers<WorldLoadedEvent>())
@@ -202,10 +217,12 @@ internal static unsafe class SavesRuntime
         Store.Reopenable();
         _shutdownAnnounced = false;
         _loadedEventSeen = false;
+        NewWorldSession = false;
         _labHosted = false;
         _worldFile = null;
         _savingSeq = _snapshotSeq = 0;
         _savingRevision = 0;
+        _loadedEventDeferred = null;
         lock (Gate)
         {
             Requests.Clear();
@@ -222,6 +239,7 @@ internal static unsafe class SavesRuntime
         get
         {
             if (!Ensure()) return true;
+            if (Store.LoadDeferred) return false;  // not read yet: the writer is still busy with the world's folder
             var st = SavesNative.ReadStatus();
             var hosted = _labHosted || (st is { } h && (h.Features & SavesNative.ClientHosted) != 0);
             // a lab's hosted close without the native status (the offline tests) waits for its load as a hosted game does
@@ -337,7 +355,9 @@ internal static unsafe class SavesRuntime
         try
         {
             DrainEvents();
+            if (Store.LoadDeferred && Store.RetryLoad()) LoadedAfterAll();
             Store.Entities.Tick();
+            Store.Entities.HandOverServiceValues();
             Store.Instances.Tick();
             InstanceCapabilities.Refresh();
         }
@@ -433,9 +453,11 @@ internal static unsafe class SavesRuntime
                 _worldFile = null;
                 _loadedEventSeen = true;
                 var newWorld = (ev.Flags & SavesNative.FlagNewWorld) != 0;
+                NewWorldSession = newWorld;
                 Store.OnWorldLoaded(id, ev.Revision, ev.WorldUnix, newWorld);
                 InstanceCapabilities.Refresh();
-                if (Events.HasSubscribers<WorldLoadedEvent>())
+                if (Store.LoadDeferred) _loadedEventDeferred = (ev.Revision, newWorld);
+                else if (Events.HasSubscribers<WorldLoadedEvent>())
                     Events.Post(new WorldLoadedEvent(Store.WorldId ?? id, ev.Revision, newWorld, WorldFile, Store.Match));
                 break;
             }
@@ -443,6 +465,16 @@ internal static unsafe class SavesRuntime
     }
 
     internal static bool WorldLoaded => _loadedEventSeen;
+
+    /// <summary>A deferred load was read now: the capabilities follow, and the game's load is told to mods if it came meanwhile.</summary>
+    private static void LoadedAfterAll()
+    {
+        InstanceCapabilities.Refresh();
+        if (_loadedEventDeferred is not { } e) return;
+        _loadedEventDeferred = null;
+        if (Events.HasSubscribers<WorldLoadedEvent>())
+            Events.Post(new WorldLoadedEvent(Store.WorldId, e.Revision, e.NewWorld, WorldFile, Store.Match));
+    }
 
     private static void CompleteRequests(in SavesNative.Event ev, bool success, string? error)
     {

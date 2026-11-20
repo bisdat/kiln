@@ -27,9 +27,12 @@ Measured (kiln.log, tick-stats.jsonl, probe mod):
   back to the exe name. `kiln.log`: `side: client (pdb enshrouded.pdb)`.
 - The side selects the definitions (`kiln/sigdb/<side>.json` + `<side>.d/`), the build records (`sigdb/builds/<side>/`)
   and the `kiln.json` section for that side.
-- Steam launch options: none are needed with GE-Proton11-11. Its wine loads a native `dinput8.dll` from the game folder
-  without an override (tested, see `docs/re/client.md`). For older Proton builds the fallback is
-  `WINEDLLOVERRIDES="dinput8=n,b" %command%`. The user's entry already has
+- Steam launch options: none are needed with GE-Proton11-11 or newer. Its wine loads a native `dinput8.dll` from the game folder
+  without an override (tested on 11-11, see `docs/re/client.md`; also tested on 11-12 by a user, issue #77).
+  The launcher checks Steam's GE-Proton11-11+ per-app compatibility mapping, or the global
+  `CompatToolMapping/0` default when no app-specific mapping exists, in `kiln-manage::game`.
+  It suppresses the routine warning for known compatible runners; unknown or older runners keep it. **If Kiln does not load**, the launcher still offers
+  `WINEDLLOVERRIDES="dinput8=n,b" %command%` as the fallback, regardless of the runner. The user's entry already has
   `WINEDLLOVERRIDES="dinput8,dbghelp,winmm=n,b" DXVK_FRAME_RATE=117 %command%`, which works as is.
 - The game's crash reporter is its own exe started again (`enshrouded.exe --upload-dump "<dir>" --process_duration <t>`, also on the
   dedicated server). The proxy leaves that process alone: no core, no chain, kiln.log, proxy.log and play-once.ini untouched, so the
@@ -83,12 +86,20 @@ tools/client/client.sh logs [n] | report [n] | check | backup-saves
 ```
 A `"server"` or `"client"` section overrides the top-level keys on that side (`config.cpp: apply_side`).
 `"preview"`: lifts the client gate ([services/caps.md](services/caps.md#the-client-gate-dev28)) for capabilities that
-ship switched off until their game test: `true` for all of them, or a list of capability names. In a side section it
+are held until their game test (the list is empty in 0.2.0-dev.29): `true` for all of them, or a list of capability names. In a side section it
 replaces the top-level value.
 `"cooked"`: what kiln.assets does with a mod's cooked file no cook of this game made (no receipt lists it,
 [modding/cooking.md](modding/cooking.md)): `"warn"` (the default, `kCookedDefault` in `native/services/assets/cooktrust.h`)
 loads it with one warning per mod, `"local"` does not load it, `"any"` loads it (development servers); read by
 kiln.assets itself, with the same side sections.
+`"ui": {"chatHistory": true}`: Up/Down history in the game's chat field ([chat-history.md](chat-history.md)); off by
+default, read by kiln.ui at start (top level only), shown in the launcher's Settings.
+`"ui": {"chatCompletion": false}`: Tab completion of Kiln commands in the game's chat off
+([chat-history.md](chat-history.md#tab-completion)); on by default (0.2.0-dev.29.22), needs Kiln on the server, read by kiln.ui at start
+(top level only), shown in the launcher's Settings.
+`"ui": {"overlay": "off"}` (0.2.0-dev.29.18): Kiln's overlay drawing off, as `KILN_UI_OVERLAY=0` (which wins where it
+is set); `"auto"` by default; read by kiln.ui at start (top level only), shown in the launcher's Settings
+([ui.md](ui.md#frame-generation-mods-and-drawing-off)).
 
 ## Symbol database per side
 - `sigdb/symbols/client.json` is the core set. It is the server's core set unchanged (all of its patterns match the
@@ -115,7 +126,7 @@ kiln.assets itself, with the same side sections.
 | World (kind) | where | thread | Kiln API |
 |---|---|---|---|
 | server (0) | dedicated server; a client **while hosting** | the game's server thread ("GameServer" in a client, created at start-up) | `subscribe_tick` / `post` / `on_tick_thread` (unchanged), `Context.Tick`, `Scheduler`, every service |
-| client (2) | a client in game (hosting or joined) | the game's main thread | `subscribe_world_tick(…, KILN_WORLD_CLIENT, …)`, `post_world`, `on_world_thread(2)`; managed `Client.Tick`, `Client.Post` |
+| client (2) | a client in game (hosting or joined) | the game's main thread | `subscribe_world_tick(…, KILN_WORLD_CLIENT, …)`, `post_world`, `on_world_thread(2)`, kiln.tasks `submit_in`; managed `Client.Tick`, `Client.Post`, a Kiln task's client-world hops ([modding/tasks.md](modding/tasks.md#which-world-a-hop-goes-to)) |
 | prediction (1) | a client in game | main thread | `subscribe_world_tick(…, 1, …)`; not a full world: only a storage (`world(1) + world.storage`) inside an object the client world owns, on the client world's singletons and entity tables; it stops with the client world. **It steps first in each frame, before the client world's Pre**: what it reads must be in place before that (docs/re/content.md section 9) |
 
 - A world **starts** at its first step: a new world pointer of that kind, logged

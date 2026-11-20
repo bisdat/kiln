@@ -87,6 +87,7 @@ else:
         self.env = {**os.environ, "PATH": str(bin_dir) + os.pathsep + os.environ["PATH"],
                     "KILN_OUT": str(self.out), "MOCK_SDK": str(sdk.parent)}
         self.env.pop("KILN_DOCS_BASELINE", None)
+        self.env.pop("KILN_DOCS_TRACKED", None)
 
     def build(self, metadata, strict=False):
         return subprocess.run(["bash", str(self.here / "build.sh")],
@@ -145,6 +146,42 @@ else:
         for name in ("building-blocks-plan.md", "world-blocks-plan.md", "phase2-status.md"):
             self.assertNotIn(name, staged)
         self.assertIn("local.md", staged)
+
+    def export(self):
+        """The repository as release.sh exports it: no .git, and the list of its files."""
+        shutil.rmtree(self.root / "repo/.git")
+        listed = self.root / "src-files"
+        listed.write_bytes(b"\0".join(n.encode() for n in (
+            "docs/kiln/modding/README.md", "docs/kiln/modding/local.md", "docs/kiln/modding/schemas/example.md",
+            "docs/kiln/services/caps.md")) + b"\0")
+        return listed
+
+    def test_an_export_stages_the_listed_pages(self):
+        self.env["KILN_DOCS_TRACKED"] = str(self.export())
+        result = self.build("documented")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("stage-guide: 3 git-tracked pages", result.stdout)
+        staged = {p.name for p in (self.out / "docs-work").rglob("*.md")}
+        self.assertIn("local.md", staged)
+        self.assertNotIn("private.md", staged)
+        page = (self.out / "docs-work/modding/README.md").read_text()
+        self.assertIn("[Caps](https://github.com/frostdev-ops/kiln/blob/main/docs/kiln/services/caps.md)", page)
+
+    def test_an_export_without_its_list_fails_staging(self):
+        self.export()
+        result = self.build("documented")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("is not the top of a git checkout", result.stderr)
+
+    def test_a_folder_git_ignores_inside_another_repository_fails_staging(self):
+        # dev.28: the release's export inside ~/Work/kiln/.out (ignored) staged 0 pages without an error
+        self.export()
+        outer = self.root
+        (outer / ".gitignore").write_text("repo/\n")
+        subprocess.run(["git", "init", "-q", str(outer)], check=True)
+        result = self.build("documented")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("is not the top of a git checkout", result.stderr)
 
     def test_found_names_have_a_distinct_exit_code(self):
         api = self.root / "api"

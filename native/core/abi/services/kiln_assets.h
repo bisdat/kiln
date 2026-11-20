@@ -130,7 +130,9 @@ enum {
  *   Only status COMPLETE or INCOMPLETE returns a handle (KILN_OK). Otherwise *handle = 0 and: NOT_READY and UNAVAILABLE
  *   return KILN_ERR_UNAVAILABLE, LIMIT_EXCEEDED returns KILN_ERR_BUFFER_TOO_SMALL (never a truncated snapshot).
  *   KILN_ERR_INVALID_ARGUMENT: owner 0, an unknown mode, a NULL handle or info, info->size < 32.
- *   Budgets: 1,000,000 entries and 64 MiB per snapshot, 128 MiB for every distinct snapshot handles hold, 64 handles.
+ *   KILN_ERR_REVOKED: the owner was revoked, or reverted during open (status UNAVAILABLE, reason NONE, no handle).
+ *   Budgets: 1,000,000 entries and 64 MiB per snapshot, 128 MiB for distinct snapshots handles or page copies hold,
+ *   64 handles. Allocated entry capacity counts, including unused slots.
  *   A snapshot never changes; its generation is the catalog's when it was built. Handles that open at the same
  *   generation and mode share one. owner's handles close when kiln.assets reverts the owner (revoked or revert_owner).
  * blob_catalog_read(handle, first, out, entry_size, cap, written): copies entries first.. (at most cap of them, each
@@ -281,6 +283,31 @@ typedef struct KilnAssetsApi {
     KilnResult(KILN_CALL* blob_catalog_read)(KilnHandle handle, uint64_t first, KilnBlobCatalogEntry* out,
                                              uint32_t entry_size, size_t cap, size_t* written);
     KilnResult(KILN_CALL* blob_catalog_close)(KilnHandle handle);
+
+    /* ---- since 0.2.0-dev.29.15 (check header.size >= offsetof(KilnAssetsApi, texture_rgba) + sizeof(void*)) ----
+     * texture_rgba: the pixels the game reads now for the texture resource `key` (keen::UiTextureResource or
+     *   keen::RenderTextureResource: a retexture or a mod's icon when one is served, else the game's own) as RGBA8: rows top
+     *   down, 4 bytes a pixel (R, G, B, A), straight alpha, an sRGB format's bytes as they are. One mip level: the smallest
+     *   whose width and height are both at least `min_side` (0, or a texture smaller than that: the largest level).
+     *   *out_w / *out_h get that level's size whenever the texture was found and can be decoded; with `rgba` NULL or `cap`
+     *   below w * h * 4 the answer is KILN_ERR_BUFFER_TOO_SMALL and no pixel is read (ask the size first).
+     *   Formats: RGBA8, BGRA8, R8, BC1, BC3, BC4 and BC5 (unorm), BC7; anything else (BC2, BC6H, snorm, a side above 4096)
+     *   is KILN_ERR_INVALID_ARGUMENT. A level no mip fits (one whose longer side is over twice min_side: a mod's PNG icon has
+     *   one level up to 512, some textures stop early) is box-scaled down so its longer side is min_side, its shape kept;
+     *   *out_w / *out_h are that size. KILN_ERR_NOT_FOUND: no such resource, or its pixel blob cannot be read (also before
+     *   the game has opened its content index: texture_rgba never asks the game for it, see blob_read_resident).
+     *   KILN_ERR_UNAVAILABLE: resources are off on this build. Any thread: it reads that one blob's bytes (an item icon's
+     *   mip chain is 87 KB) from the game's container or a mod's registration. Both sides, but a dedicated server's data
+     *   has no UI textures. Kiln.Ui draws the game's own item icons with it (Ui.ItemImage); Kiln never writes the pixels
+     *   anywhere. Pure part, host-tested: native/services/assets/texture_rgba.h. */
+    KilnResult(KILN_CALL* texture_rgba)(const KilnAssetKey* key, uint32_t min_side, uint8_t* rgba, size_t cap,
+                                        uint32_t* out_w, uint32_t* out_h);
+    /* blob_read_resident (0.2.0-dev.29.15, check header.size >= offsetof(KilnAssetsApi, blob_read_resident) + sizeof(void*)):
+     *   blob_read for a caller off the game's threads. blob_read asks the game's content-map accessor itself when the game
+     *   has not opened its content index yet, which only the game's own threads may do (loading can own the reader then);
+     *   this one answers KILN_ERR_NOT_FOUND until the game has opened it. Otherwise the same. Kiln.Items reads the game's
+     *   texts with it (Items.DisplayName). */
+    KilnResult(KILN_CALL* blob_read_resident)(const KilnContentHash* hash, void* buffer, size_t capacity, size_t* out_len);
 } KilnAssetsApi;
 
 #ifdef __cplusplus

@@ -158,9 +158,9 @@ public sealed class ServiceStartTests
         ["Kiln.Creatures"] = "creatures.* lowered when kiln.creatures is missing",
         ["Kiln.Hooks"] = "kiln.hooks probed again after a registry reset",
         ["Kiln.Example"] = "the template: only the core's kiln.example row",
-        ["Kiln.World"] = "world.* lowered when kiln.world is missing, at its first use, with world.tracked_writes",
-        ["Kiln.Blocks"] = "no native table; its rows exist from its first use (an item block's compile, the affix " +
-                          "session), so a manifest's features cannot require them",
+        ["Kiln.Blocks"] = "its rows exist from its first use (an item block's compile, the affix session), so a " +
+                          "manifest's features cannot require them. The assembly loads at the first tick for the " +
+                          "craft-stock and upgrade-station channels alone (CraftStockStartup): no rows, no blocks data tick",
         ["Kiln.Saves"] = "starts at its first use: its start subscribes to kiln.saves' pump; saves.* lowered and " +
                          "InstanceData's rows reported then (the core's kiln.saves row says the table is missing from the start)",
     };
@@ -215,6 +215,7 @@ public sealed class ServiceStartTests
     [InlineData("gameplay.spawn_replace", "needs kiln.gameplay")]
     [InlineData("content.references", "needs kiln.content")]
     [InlineData("content.ready", "needs kiln.content")]
+    [InlineData("content.text", "needs kiln.content")]
     [InlineData("assets.textures", "needs kiln.assets")]
     [InlineData("settings.ready", "needs kiln.settings")]
     [InlineData("spawn.components", "needs kiln.spawn")]
@@ -245,6 +246,30 @@ public sealed class ServiceStartTests
     {
         Assert.True(Started.Value.ServedFeature(feature));
         Assert.Equal("Unknown", Started.Value.Row(feature).Reason);
+    }
+
+    /// <summary>Kiln.Blocks' first-tick start (GitHub #68 step 2) registers the craft-stock channel only: its blocks data
+    /// tick (subscriptions, reports, a stat of every mod's blocks folder every 10 steps) waits for a blocks mod, and the
+    /// crafting stock's own tick for a Kiln client's first crafting menu.</summary>
+    [Fact]
+    public void Kiln_Blocks_first_tick_starts_no_tick()
+    {
+        var ticks = Started.Value.TickHandlers();
+        Assert.DoesNotContain("kiln blocks data", ticks);
+        Assert.DoesNotContain("kiln.stations craft stock", ticks);
+    }
+
+    /// <summary>Kiln.World starts at the first service tick (WorldStartup, 0.2.0-dev.28): its two rows of its own are
+    /// there although nothing used Kiln.World, each with the reason it is off with no game.</summary>
+    [Theory]
+    [InlineData("world.transform_scale", "needs kiln.types")]
+    [InlineData("world.tracked_writes", "kiln.world is not loaded")]
+    public void Kiln_World_rows_are_there_after_the_first_tick_with_no_call(string row, string because)
+    {
+        var (state, reason, text) = Started.Value.Row(row);
+        Assert.Equal("Unavailable", state);
+        Assert.NotEqual("Unknown", reason);  // reported, not a missing row
+        Assert.StartsWith(because, text);
     }
 
     [Fact]

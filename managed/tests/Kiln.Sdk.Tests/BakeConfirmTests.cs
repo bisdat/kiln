@@ -160,23 +160,19 @@ public sealed class BakeCleanTargetsTests
         public void Baked(string relative) => File.WriteAllText(Path.Combine(Out, relative),
             new JsonObject { ["format"] = 1, ["comment"] = Baker.Comment, ["quests"] = new JsonObject() }.ToJsonString());
 
-        public (int Code, string Output) MsBuild(params string[] args)
-        {
-            var psi = new ProcessStartInfo("dotnet") { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
-            psi.ArgumentList.Add("msbuild");
-            psi.ArgumentList.Add(Path.Combine(Dir, "stub.proj"));
-            psi.ArgumentList.Add("-nologo");
-            psi.ArgumentList.Add("-v:m");
-            foreach (var a in args) psi.ArgumentList.Add(a);
-            foreach (var k in psi.Environment.Keys.Where(k => k.StartsWith("MSBuild", StringComparison.OrdinalIgnoreCase)).ToList()) psi.Environment.Remove(k);
-            using var p = Process.Start(psi)!;
-            var o = p.StandardOutput.ReadToEndAsync();
-            var e = p.StandardError.ReadToEndAsync();
-            p.WaitForExit(180_000);
-            return (p.ExitCode, o.Result + e.Result);
-        }
+        public (int Code, string Output) MsBuild(params string[] args) => StubMsBuild.Run(Path.Combine(Dir, "stub.proj"), args);
 
         public void Dispose() => Directory.Delete(Dir, true);
+    }
+
+    [Fact]
+    public void TurnedOffRemovesAWorldTableArtifactWithoutOtherOutputsOrBookkeeping()
+    {
+        using var s = new Stub();
+        s.Baked("blocks.tables.json");
+        var (code, output) = s.MsBuild("-t:_KilnBakeOff", "-p:KilnBake=false");
+        Assert.True(code == 0, output);
+        Assert.False(File.Exists(Path.Combine(s.Out,"blocks.tables.json")));
     }
 
     [Fact]

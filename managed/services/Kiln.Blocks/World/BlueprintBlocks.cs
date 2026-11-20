@@ -11,7 +11,7 @@ using System.Text.Json.Serialization;
 
 namespace Kiln;
 
-/// <summary>A new shape on the game's building materials: in the build menu beside the walls and floors, and it takes every material they take. The cells are a picture of it, half a metre
+/// <summary>A new shape on the game's building materials: in the build menu beside the walls and floors, and uses their materials unless MaterialPool selects an opt-in pool. The cells are a picture of it, half a metre
 /// each. The game reads its shapes once at start: a shape new to this game is there from the next start, see <see cref="TableBlockHandle{T}.Status"/>. Every player needs the mod: each game merges its
 /// shapes' table from the mods' files at its own start.</summary>
 [BlockClients(ClientsLevel.Mod)]
@@ -26,6 +26,9 @@ public sealed record BlueprintBlock : IBlock, ITweakable
 
     /// <summary>A roof shape: it cycles through the roof materials, not the walls'.</summary>
     public bool Roof { get; init; }
+
+    /// <summary>An opt-in custom pool. Null keeps the shape's ordinary wall/roof pool. Vanilla shapes are unchanged.</summary>
+    public PartRef<BuildingMaterialPoolBlock>? MaterialPool { get; init; }
 
     /// <summary>Not used. A placement takes one block of the chosen material per cell it fills, as the game's own shapes do, and cells already built cost nothing; a
     /// shape's cost can't be set.</summary>
@@ -120,7 +123,20 @@ internal static partial class Compiler
         d.Refs["equipment.voxelObject"] = d.Guid.ToString();
         var shape = new JsonObject { ["size"] = new JsonArray(x, y, z), ["cells"] = Convert.ToHexString(bits).ToLowerInvariant(), ["full"] = full, ["cost"] = full, ["roof"] = b.Roof };
         low.Json["blueprint"] = shape;
-        var (status, _) = AskShapes(ctx, low, name, new JsonObject { ["name"] = b.Name, ["item"] = d.Guid.ToString(), ["size"] = new JsonArray(x, y, z), ["cells"] = Convert.ToBase64String(bits), ["roof"] = b.Roof });
+        var descriptor = new JsonObject { ["name"] = b.Name, ["item"] = d.Guid.ToString(), ["size"] = new JsonArray(x, y, z), ["cells"] = Convert.ToBase64String(bits), ["roof"] = b.Roof };
+        if(b.MaterialPool is {} reference) {
+            WorldTablesNative.RequirePoolWriter();
+            if(reference.Name is null) throw new ArgumentException("A shape takes a named material pool.",nameof(b));
+            var h=ctx.Find(reference.Name,"materialPool") as TableBlockHandle<BuildingMaterialPoolBlock>
+                ?? throw new BlockError(ctx.Block,"materialPool",$"no material pool \"{reference.Name}\" in this mod or a declared dependency (another mod's is \"<mod>:<key>\")");
+            if(h.Block.Roof!=b.Roof) throw new ArgumentException(
+                $"Blueprint {name} is a {(b.Roof?"roof":"wall")} shape and material pool {h.Mod}:{h.Name} a {(h.Block.Roof?"roof":"wall")} pool: Roof must agree.",nameof(b));
+            if(h.Status==TableBlockStatus.Off && !WorldTablesNative.Baking) throw new BlockError(ctx.Block,"materialPool",$"material pool {h.Mod}:{h.Name} is not registered (kiln.worldtables is off: its capability row says why)");
+            // The item is created by Draft after native admission of its shape-table row.
+            d.Refs["equipment.voxelBlueprintMaterialPool"]=h.Guid.ToString();
+            descriptor["materialPool"]=h.Mod+":"+h.Name;
+        }
+        var (status, _) = AskShapes(ctx, low, name, descriptor);
         // A blueprint item with no entry in the shapes' table is one the game can't place: it is made once the table has it.
         if (status == TableBlockStatus.Registered)
         {

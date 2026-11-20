@@ -33,6 +33,7 @@ public sealed partial class KilnHarness
             Lifecycle.Phase = ServerPhase.Stopping;
             if (!_modsLoaded) return;
             var count = _mods.Mods.Count;
+            TasksSessionStopping();
             _mods.UnloadAll("server killed");
             _host.Log(LogLevel.Info, $"lifecycle: server killed (step {_step}): no shutdown save; {count} mod(s) unloaded");
         });
@@ -51,11 +52,11 @@ public sealed partial class KilnHarness
         StartRecordingFakes();  // KilnHarness.Fakes.cs
     }
 
-    partial void EndFakes()
+    partial void EndFakes(List<Exception> failures)
     {
-        EndRecordingFakes();
-        EndPlayers();
-        EndEntities();
+        EndRecordingFakes(failures);  // KilnHarness.Fakes.cs: every fake ends, also after one that threw
+        Ending(failures, EndPlayers);
+        Ending(failures, EndEntities);
     }
 
     /// <summary>The native services' Pre, before Kiln's: the save cycle, then the players' scan, then the saves pump.</summary>

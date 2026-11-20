@@ -226,6 +226,66 @@ public sealed unsafe class GameSystemsHookTests : KilnTest
         Backend.TickThread=false;Assert.Throws<InvalidOperationException>(hook.Dispose);Assert.True(_native.Bound);
         Backend.TickThread=true;hook.Dispose();Assert.False(_native.Bound);
     }
+    // A system-hook callback that destroys (or creates) an entity: it goes through as on 0.2.0-dev.28 (kiln.spawn lets
+    // kiln.types' callbacks through; only wrap stages and Kiln programs are refused), with one warning per mod and call
+    // kind that says what it is.
+    [Fact]
+    public void Spawn_in_a_system_hook_goes_through_as_on_dev28_and_warns_once_per_mod_and_kind()
+    {
+        using var spawn = new FakeSpawn(Backend);
+        var a = NewMod("hook-a");
+        var b = NewMod("hook-b");
+        var results = new List<bool>();
+        var hook = As(a, () => GameSystems.Hook("sample", () => { results.Add(Spawn.Destroy(new EntityId(5000))); results.Add(Spawn.Destroy(new EntityId(5001))); }));
+        _native.Run();
+        _native.Run();
+        hook.Dispose();
+        using var other = As(b, () => GameSystems.Hook("sample", () => results.Add(Spawn.Destroy(new EntityId(5002)))));
+        _native.Run();
+        Assert.Equal(5, FakeSpawn.Destroys);                    // every call reached kiln.spawn: none refused
+        Assert.Equal([false, false, false, false, false], results);  // the fake has no such entities
+        int Warnings(string kind) { lock (Backend.Lines) return Backend.Lines.Count(l => l.Contains($"kiln.spawn: {kind} in a GameSystems.Hook callback")); }
+        Assert.Equal(2, Warnings("destroy"));                   // once for hook-a, once for hook-b
+        Assert.True(Backend.Logged("an entity destroyed in the middle of the world's step"));
+        Assert.True(Backend.Logged("unsafe once the game runs its programs on worker threads"));
+        Assert.True(Backend.Logged("post it with Scheduler.Post"));
+        Backend.Lines.Clear();
+        results.Clear();
+        Assert.False(Spawn.Destroy(new EntityId(5003)));        // outside a hook: no warning
+        Assert.Equal(0, Warnings("destroy"));
+    }
+
+    // kiln.spawn's v1 table with destroy only (every other entry null): 8 header bytes and 16 entries.
+    private sealed class FakeSpawn : IDisposable
+    {
+        internal static int Destroys;
+        private readonly FakeServiceRegistration _service;
+        private readonly byte* _table;
+        internal FakeSpawn(FakeBackend backend)
+        {
+            Destroys = 0;
+            ResetCache();
+            _table = (byte*)NativeMemory.AllocZeroed(8 + 16 * 8);
+            *(ServiceHeader*)_table = new ServiceHeader { Size = 8 + 16 * 8, Version = 1 };
+            *(delegate* unmanaged[Cdecl]<uint, int>*)(_table + 8 + 2 * 8) = &Destroy;
+            _service = new(backend.Tables, "kiln.spawn", (nint)_table);
+        }
+        // Kiln.Spawn keeps the table it found: forget it, so no later test sees this one
+        private static void ResetCache()
+        {
+            var f = typeof(Spawn).GetField("_table", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+            f.SetValue(null, System.Reflection.Pointer.Box(null, f.FieldType));
+        }
+        public void Dispose()
+        {
+            _service.Dispose();
+            ResetCache();
+            NativeMemory.Free(_table);
+        }
+        [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+        private static int Destroy(uint entity) { Destroys++; return 2; }  // NOT_FOUND
+    }
+
     [Fact]
     public void Retired_owner_cannot_root_a_new_system_hook()
     {

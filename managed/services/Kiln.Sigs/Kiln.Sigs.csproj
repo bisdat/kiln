@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Kiln.Sigs: the core's typed game functions (chapter 06b §9.3, docs/kiln/services/hooks.md "Typed hooks"): one class
+       per `sig` descriptor of the core's sigdb (Kiln.Sigs.<Area>.<Name>: Detour, Call, Invoke) and the descriptors'
+       structs. Sigs.g.cs is the output of the Kiln.Sigs generator's emitter over sigdb/symbols/server.json and
+       server.d/*.json, committed so the API record, the docs and the analyzer tables see it; Kiln.Sigs.Generator.Tests
+       fails when it differs (regenerate: KILN_SIGS_REGEN=1 dotnet test managed/Kiln.Analyzers/tests/Kiln.Sigs.Generator.Tests).
+       Deployed to kiln/host/ beside Kiln.Hooks and shared by every mod (KilnServices "Hooks;Sigs"); no autostart: it
+       holds descriptors only, and nothing runs until a mod hooks or calls. -->
+  <PropertyGroup>
+    <RootNamespace>Kiln.Sigs</RootNamespace>
+    <AssemblyName>Kiln.Sigs</AssemblyName>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../Kiln.Api/Kiln.Api.csproj" Private="false" />
+    <ProjectReference Include="../Kiln.Hooks/Kiln.Hooks.csproj" Private="false" />
+  </ItemGroup>
+</Project>

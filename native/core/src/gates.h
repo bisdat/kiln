@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// The client gate: capabilities that ship switched off until their guided client checks have passed in a real game.
+// The client gate can hold capabilities until guided real-game checks pass. Its list is empty in 0.2.0-dev.29.
 // The list is native/core/gates/*.json (README.md there), compiled in. While a name is held:
 //   - kiln.caps shows it unavailable, reason policy, text "game test pending: <check ids>" (caps.cpp, the core's own
 //     report: unavailable beats whatever a service reports, and a sigdb feature whose symbols resolved);
@@ -26,13 +26,13 @@ struct Held {
     std::string text;  // "game test pending: 03-c11, 03-c12"
 };
 
-// Once at boot, after kiln.json's side section was applied and before caps::core_rows. `side` is KILN_SIDE_*.
+// Once at boot, after kiln.json's side section was applied, before early plugins or service init. `side` is KILN_SIDE_*.
 // preview_all / preview: kiln.json's "preview". A name in `preview` that the list does not hold is logged as a warning.
 void configure(uint32_t side, bool preview_all, const std::vector<std::string>& preview);
 
-// What is held on this side after configure(), sorted by name. Before configure(): everything in the list.
-const std::vector<Held>& held();
-// `name` is held. Any thread once configure() has returned (the list does not change afterwards).
+// A snapshot of what is held on this side, sorted by name. Before configure(): everything in the list. Any thread.
+std::vector<Held> held();
+// `name` is held. Any thread, including before or during boot configuration.
 bool is_held(std::string_view name);
 
 // Host tests: another list than the compiled one (nullptr: the compiled one). Call before configure().

@@ -33,7 +33,19 @@ pub async fn profile_create(name: String, copy_from: Option<String>) -> Result<P
 pub async fn profile_save(app: AppHandle, profile: Profile) -> Result<Profile, Error> {
     let (saved, applied) = blocking(move || {
         let d = dirs()?;
-        let saved = profile::save(&d, &profile)?;
+        // another version of a mod ("Use <version>"): the one it replaced is kept for a roll back (kiln_manage::kept),
+        // its settings read before the re-apply below places the new one; one transaction with the save
+        let kept = profile::get(&d, &profile.id).ok().map(|before| kiln_manage::kept::prepare_saved(&d, &before, &profile));
+        let saved = match profile::save(&d, &profile) {
+            Ok(saved) => saved,
+            Err(e) => {
+                if let Some(k) = kept { k.abort(); }
+                return Err(e);
+            }
+        };
+        for line in kept.map(|k| k.commit()).unwrap_or_default() {
+            crate::commands::app::launcher_log("library", &line);
+        }
         Ok((saved.clone(), reapply_where_active(&d, &saved.id)))
     })
     .await?;
@@ -162,12 +174,7 @@ pub(crate) fn reapply_checked(d: &kiln_manage::paths::DataDirs, g: &kiln_manage:
             } else {
                 log(format!("{} changed: written again to {} (generation {})", a.profile_id, g.path.display(), a.generation));
             }
-            for r in &a.retained {
-                log(format!("kept {} in the game folder: {}", r.path.display(), r.reason));
-            }
-            for line in a.kept_files.iter().chain(&a.warnings) {
-                log(format!("note: {line}"));
-            }
+            log_notes(&a);
             let written = before != Some(a.generation);
             Some((a, written))
         }
@@ -206,13 +213,28 @@ pub(crate) fn emit_status_later(app: AppHandle, game_id: String) {
     std::thread::spawn(move || crate::watch::emit_status(&app, &game_id));
 }
 
+/// What an activation kept in the game folder and its notes (Activation.warnings: among them what the compat rules
+/// decided about the load order, kiln_manage::compat::Plan::order_notes), into launcher.log.
+pub(crate) fn log_notes(a: &Activation) {
+    let log = |line: String| crate::commands::app::launcher_log("profile", &line);
+    for r in &a.retained {
+        log(format!("kept {} in the game folder: {}", r.path.display(), r.reason));
+    }
+    for line in a.kept_files.iter().chain(&a.warnings) {
+        log(format!("note: {line}"));
+    }
+}
+
 #[tauri::command]
 pub async fn profile_activate(app: AppHandle, profile_id: String, game_id: String) -> Result<Activation, Error> {
     let id = game_id.clone();
     let r = blocking(move || {
         let g = crate::state::game(&id)?;
         crate::state::refuse_running(&g)?;
-        profile::activate(&dirs()?, &profile_id, &g)
+        let a = profile::activate(&dirs()?, &profile_id, &g)?;
+        crate::commands::app::launcher_log("profile", &format!("{} activated in {} (generation {})", a.profile_id, g.path.display(), a.generation));
+        log_notes(&a);
+        Ok(a)
     })
     .await?;
     emit_status_later(app, game_id);

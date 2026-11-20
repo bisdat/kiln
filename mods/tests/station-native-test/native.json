@@ -1,0 +1,12 @@
+{
+  "format": 1,
+  "id": "station-native-test",
+  "name": "kiln.stations native calls",
+  "version": "0.1.0",
+  "description": "PASS/FAIL lines on a dedicated server: an 88-byte fill (no chests), a full-size fill naming an ordinary chest, and collect with KILN_STATION_COLLECT_TO_BASE. Does not run the game by itself.",
+  "side": "server",
+  "dlls": ["station-native-test.dll"],
+  "phase": "boot",
+  "init": "kiln_native_init",
+  "kiln": ">=0.2.0-dev"
+}

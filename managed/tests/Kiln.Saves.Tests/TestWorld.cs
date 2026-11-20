@@ -93,7 +93,7 @@ internal static unsafe class TestWorld
     {
         if (InspectResult != 0) return InspectResult;
         if (!World.TryGetValue(id, out var entity)) return 2;
-        *snapshot = new Snapshot { Size = (uint)sizeof(Snapshot), Position = new Vec3 { X = entity.Position.X, Y = entity.Position.Y, Z = entity.Position.Z }, Yaw = entity.Yaw };
+        *snapshot = new Snapshot { Size = (uint)sizeof(Snapshot), Position = new Vec3 { X = entity.Position.X, Y = entity.Position.Y, Z = entity.Position.Z }, Yaw = entity.Yaw, SpawnTime = entity.Generation ?? 0, HasSpawnTime = entity.Generation is null ? 0u : 1u };
         if (entity.Template is { } g)
         {
             snapshot->HasTemplate = 1;

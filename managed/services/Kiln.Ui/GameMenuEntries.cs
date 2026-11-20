@@ -31,6 +31,10 @@ internal sealed class MenuSettings
              "such as Quit, off the screen), Always, or Never. Kiln's own Mods entry is always there, and every mod's " +
              "entry is also on Kiln's Mods page under \"Menu entries\".")]
     public ModMenuEntries ModEntries { get; set; } = ModMenuEntries.Auto;
+
+    [Comment("Kiln's line in the main menu's footer, above the game's build number: Kiln's mark, \"Kiln <version> - <N> " +
+             "Mods Loaded\". It takes the place of XHL-Core's \"All mods loaded\" line. Off: the game's footer as it was.")]
+    public bool MainMenuFooter { get; set; } = true;
 }
 
 /// <summary>One mod's entry in a game menu, as the Mods page lists it.</summary>
@@ -56,6 +60,10 @@ internal static unsafe class GameMenuEntries
     /// <summary>The setting in use (Auto until the config is registered).</summary>
     internal static ModMenuEntries Mode => _config?.Value.ModEntries ?? ModMenuEntries.Auto;
 
+    /// <summary>Kiln's line in the main menu's footer is shown (the setting <c>mainMenuFooter</c>; on until the config is
+    /// registered).</summary>
+    internal static bool FooterShown => _config?.Value.MainMenuFooter ?? true;
+
     /// <summary>KILN_UI_SCROLL_*: whether the pause menu scrolls in this game (0 when kiln.ui cannot say).</summary>
     internal static uint ScrollStatus()
     {
@@ -67,7 +75,7 @@ internal static unsafe class GameMenuEntries
 
     /// <summary>What the player is told once at start for a scroll status (pure: tests); null for nothing.</summary>
     internal static string? StartNotice(uint status) => status == ScrollOffCrashed
-        ? "Kiln: the scrolling pause menu ended the game last time, so it stays off; Kiln's Mods page lists the mods' menu entries."
+        ? KilnText.T("gamemenu.scroll_crashed")
         : null;
 
     /// <summary>Registers Kiln's config "menus" and hands its value to kiln.ui (a game client with kiln.ui v6; once).
@@ -79,6 +87,7 @@ internal static unsafe class GameMenuEntries
         // kiln.ui draws every entry until told otherwise (an older Kiln.Ui has no list to reach hidden ones); this one
         // lists them, so the default (Few) applies from now, and the saved setting once the config is registered
         Apply();
+        MainMenuFooter.Start();
         if (StartNotice(ScrollStatus()) is { } notice)
         {
             try { Hud.Toast(notice, ToastKind.Warning, 10); }
@@ -122,6 +131,7 @@ internal static unsafe class GameMenuEntries
     {
         var t = UiNative.T6;
         if (t != null && t->MenuShown != null) t->MenuShown(NativeMode(Mode));
+        MainMenuFooter.Push();  // the footer line's setting may have changed too
     }
 
     /// <summary>Every mod's entry in the game's menus, in drawing order (empty without kiln.ui v6). Any thread.</summary>
@@ -168,16 +178,13 @@ internal static unsafe class GameMenuEntries
         var notDrawn = rows.Count(r => !r.Drawn);
         var how = mode switch
         {
-            ModMenuEntries.Auto when scrolls =>
-                "The pause menu shows every one of them and scrolls when they do not fit (Kiln settings, modEntries: Auto).",
-            ModMenuEntries.Auto => "A game menu shows them while it has at most 3, so its own entries (Quit) stay on the " +
-                                   "screen (Kiln settings, modEntries: Auto; this menu does not scroll here).",
-            ModMenuEntries.Always => "The game's menus show every one of them (Kiln settings, modEntries: Always).",
-            ModMenuEntries.Never => "The game's menus show none of them (Kiln settings, modEntries: Never).",
-            _ => "A game menu shows them while it has at most 3, so its own entries (Quit) stay on the screen " +
-                 "(Kiln settings, modEntries: Few).",
+            ModMenuEntries.Auto when scrolls => KilnText.T("gamemenu.summary.auto_scrolls"),
+            ModMenuEntries.Auto => KilnText.T("gamemenu.summary.auto"),
+            ModMenuEntries.Always => KilnText.T("gamemenu.summary.always"),
+            ModMenuEntries.Never => KilnText.T("gamemenu.summary.never"),
+            _ => KilnText.T("gamemenu.summary.few"),
         };
-        return notDrawn == 0 ? how : $"{how} {notDrawn} of them {(notDrawn == 1 ? "is" : "are")} not in the game's menu now; choose {(notDrawn == 1 ? "it" : "them")} here.";
+        return notDrawn == 0 ? how : KilnText.Plural("gamemenu.summary.not_drawn", notDrawn, ("how", how));
     }
 
     /// <summary>Does what choosing the entry in its menu does: its action runs after the next UI frame. False when kiln.ui

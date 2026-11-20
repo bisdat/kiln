@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Mirror of native/core/abi/services/kiln_content.h (kiln.content v1..v4). Blittable only; field order is the ABI (the
+// Mirror of native/core/abi/services/kiln_content.h (kiln.content v1..v4, with the slots appended to v4). Blittable only; field order is the ABI (the
 // native side static_asserts the same sizes and offsets).
 using System.Runtime.InteropServices;
 
@@ -121,7 +121,38 @@ internal static unsafe class ContentNative
 
         // ---- appended to v4 (check Header.Size): a UI texture key shown as another until kiln.assets serves it ----
         public delegate* unmanaged[Cdecl]<byte*, byte*, int> IconAlias;
+
+        // ---- appended to v4 since 0.2.0-dev.28 (check Header.Size, HasTransactions): content transactions (ContentTransaction.cs) ----
+        public delegate* unmanaged[Cdecl]<ulong, ulong*, int> TxnBegin;
+        public delegate* unmanaged[Cdecl]<ulong, uint, byte*, nuint, nuint*, int> TxnEnd;
+
+        // ---- appended to v4 since 0.2.0-dev.29.18 (check Header.Size, HasText): the game's own texts (ContentText.cs) ----
+        public delegate* unmanaged[Cdecl]<uint, byte*, nuint, nuint*, int> Text;
+        public delegate* unmanaged[Cdecl]<TextInfo*, int> GetTextInfo;
     }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct TextInfo  // 192 bytes
+    {
+        public uint Size;
+        public uint State;     // KILN_CAP_*: 0 unavailable, 1 available, 2 pending
+        public uint Reason;    // KILN_CAP_REASON_*
+        public uint Language;  // keen::LanguageId
+        public fixed byte LanguageKey[16];
+        public fixed byte Detail[160];
+    }
+
+    /// <summary>The table has the game-text slots (appended to v4 in 0.2.0-dev.29.18).</summary>
+    internal static bool HasText(Table* t) =>
+        t != null && t->Header.Size >= (uint)Marshal.OffsetOf<Table>(nameof(Table.GetTextInfo)) + (uint)sizeof(nint) && t->Text != null && t->GetTextInfo != null;
+
+    /// <summary>The table has the IconAlias slot (appended to v4).</summary>
+    internal static bool HasIconAlias(Table* t) =>
+        t != null && t->Header.Size >= (uint)Marshal.OffsetOf<Table>(nameof(Table.IconAlias)) + (uint)sizeof(nint) && t->IconAlias != null;
+
+    /// <summary>The table has the content transaction slots (appended to v4 in 0.2.0-dev.28).</summary>
+    internal static bool HasTransactions(Table* t) =>
+        t != null && t->Header.Size >= (uint)Marshal.OffsetOf<Table>(nameof(Table.TxnEnd)) + (uint)sizeof(nint) && t->TxnBegin != null && t->TxnEnd != null;
 
     // v4 before IconAlias is still a complete content service. Check the appended slot separately at its call site.
     internal static Table* FromService(nint address)
@@ -140,7 +171,7 @@ internal static unsafe class ContentNative
     internal static string ReadText(delegate* unmanaged[Cdecl]<byte*, nuint, nuint*, int> call) => NativeText.Read((b, cap, len) => call(b, cap, len), out _);
 
     public const int Ok = 0, InvalidArgument = 1, NotFound = 2, Unavailable = 3, WrongThread = 4, BufferTooSmall = 5,
-        Internal = 7;
+        Revoked = 6, Internal = 7;
 
     public static string Text(byte* p, int max)
     {

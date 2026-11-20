@@ -9,6 +9,7 @@ folders stay in the repository rather than becoming broken relative site links.
 Private or missing targets fail staging, never become public repository URLs.
 """
 import importlib.util
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -24,13 +25,31 @@ INLINE = re.compile(r"(\]\(\s*)(<[^>]+>|[^\s)]+)")
 REFERENCE = re.compile(r"(^ {0,3}\[[^\]]+\]:\s*)(<[^>]+>|\S+)")
 
 
+def tracked_files(repo):
+    """The repository's files: KILN_DOCS_TRACKED names a NUL-separated list of paths relative to the repository (a
+    release's export has no .git: release.sh lists what it exported), else git's tracked files of this checkout.
+    A folder that is not the top of a git checkout (an export, or a folder git ignores inside another repository,
+    where ls-files lists nothing) without the list stops staging."""
+    listed = os.environ.get("KILN_DOCS_TRACKED")
+    if listed:
+        names = Path(listed).read_bytes().decode("utf-8").split("\0")
+    else:
+        top = subprocess.run(["git", "-C", str(repo), "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+        if top.returncode or Path(top.stdout.strip()).resolve() != repo:
+            raise SystemExit(f"stage-guide: {repo} is not the top of a git checkout (an export?): "
+                             "set KILN_DOCS_TRACKED to the list of its files")
+        names = subprocess.run(["git", "-C", str(repo), "ls-files", "-z"],
+                               check=True, capture_output=True).stdout.decode("utf-8").split("\0")
+    return {repo / f for f in names if f}
+
+
 def stage(repo, work):
     repo, work = Path(repo).resolve(), Path(work)
-    files = subprocess.run(["git", "-C", str(repo), "ls-files", "-z"],
-                           check=True, capture_output=True).stdout.decode("utf-8").split("\0")
-    tracked = {repo / f for f in files if f}
+    tracked = tracked_files(repo)
     guide = repo / "docs/kiln/modding"
     pages = {p for p in tracked if p.is_relative_to(guide) and p.suffix == ".md"}
+    if not pages:
+        raise SystemExit(f"stage-guide: no guide pages (docs/kiln/modding/*.md) among the {len(tracked)} files of {repo}")
 
     def rewrite(source, target):
         if links.SCHEME.match(target) or target.startswith(("//", "#")):

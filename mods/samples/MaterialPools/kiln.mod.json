@@ -1,0 +1,8 @@
+{
+  "id": "material-pools-sample",
+  "name": "Ice and Wood material pool",
+  "version": "1.0.0",
+  "apiVersion": "0.2.0-dev.29",
+  "side": "both",
+  "clients": "mod"
+}

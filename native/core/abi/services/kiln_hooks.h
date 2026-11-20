@@ -117,6 +117,23 @@ typedef struct KilnHookOrder {
 
 #define KILN_HOOK_NEWEST_FIRST 1u  /* among links of the same priority: newest first, before those without the flag */
 
+/* A loaded module opened for hooks (open_module, since 0.2.0-dev.29.19): another mod's DLL or a loader's DLL whose
+ * executable code may then be the target of every hook kind but typed links, like the game's own code. */
+typedef struct KilnHooksModule {
+    uint32_t size;          /* sizeof(KilnHooksModule): set by the caller */
+    uint32_t flags;         /* KILN_HOOKS_MODULE_* below */
+    uintptr_t base;         /* where the module is loaded (its HMODULE) */
+    uint64_t image_size;    /* SizeOfImage */
+    uintptr_t code_lo;      /* start of its first executable section */
+    uintptr_t code_hi;      /* end of its last executable section (exclusive); a hook target must lie in an executable
+                               section, which kiln.hooks checks against each section, not only this span */
+    uint32_t code_sections; /* how many executable sections it has */
+    uint32_t reserved;
+} KilnHooksModule;
+
+#define KILN_HOOKS_MODULE_GAME 1u    /* the game's exe: its code was a hook target already */
+#define KILN_HOOKS_MODULE_PINNED 2u  /* pinned by kiln.hooks: it stays loaded until the process ends */
+
 typedef struct KilnHooksStats {
     uint32_t size;
     uint32_t detour_targets;   /* distinct addresses with a detour (raw, structured or v1) link */
@@ -212,6 +229,9 @@ typedef struct KilnSig {
 /* detour_typed's refusals (KilnResult values of this service; the generic codes keep their meaning). */
 #define KILN_HOOKS_ERR_SIG_MISMATCH 100 /* the function's code does not fit the descriptor */
 #define KILN_HOOKS_ERR_SIG_UNKNOWN 101  /* the function's code could not be followed far enough to say */
+/* detour_typed_checked's refusal (since 0.2.0-dev.29): a thread could not be checked, or stood inside the bytes the
+ * first detour on the target replaces; nothing was written. A later attempt may succeed. */
+#define KILN_HOOKS_ERR_UNCHECKED 102
 
 #define KILN_TYPED_CONTINUE ((uintptr_t)0)
 #define KILN_TYPED_SKIP ((uintptr_t)1)
@@ -219,6 +239,16 @@ typedef uintptr_t(KILN_CALL* KilnTypedFn)(KilnCallFrame* frame, void* user);
 
 /* Owner-retiring observer (since 0.2.0-dev.28; see subscribe_owner_retiring). */
 typedef void(KILN_CALL* KilnOwnerRetiringFn)(KilnOwner retiring, void* user);
+
+/* code_state's *state (since 0.2.0-dev.29.19; not KilnResult codes). */
+#define KILN_CODE_ORIGINAL 0u /* the live bytes are the exe file's */
+#define KILN_CODE_MANAGED 1u  /* every byte that differs is a kiln.hooks detour's or patch's, over the file's code */
+#define KILN_CODE_FOREIGN 2u  /* a byte that differs is not: another module's hook or patch, kiln.hooks' write, or a
+                                 Kiln detour placed over another module's bytes */
+#define KILN_CODE_UNKNOWN 3u  /* the live bytes could not be read or changed while they were read, or Kiln's record of
+                                 what it wrote there does not lead back to the file's bytes */
+/* read_original's and code_state's largest range, in bytes (since 0.2.0-dev.29.19): a larger size is refused. */
+#define KILN_HOOKS_CODE_RANGE_MAX 65536u
 
 typedef struct KilnHooksApi {
     KilnServiceHeader header;
@@ -364,10 +394,122 @@ typedef struct KilnHooksApi {
     KilnResult(KILN_CALL* subscribe_owner_retiring)(KilnOwner observer_owner, KilnOwnerRetiringFn fn, void* user,
                                                     KilnHandle* out);
     KilnResult(KILN_CALL* unsubscribe_owner_retiring)(KilnHandle handle);
+
+    /* ======== checked mid installation (since 0.2.0-dev.29, package 07): check header.size covers it ========
+     * Refuses before writing when any thread cannot be checked, or is paused inside the bytes to replace. No unsafe
+     * fallback. Existing targets need no physical patch. */
+    KilnResult(KILN_CALL* mid2_checked)(KilnOwner owner, uintptr_t target, const KilnHookOrder* order,
+        KilnMidFn fn, void* user, KilnHandle* out, uint32_t* unchecked);
+
+    /* ======== typed safety extension (since 0.2.0-dev.29): check header.size covers each member before reading it ========
+     * validate_typed checks THIS compiled descriptor against the resolver descriptor and original image bytes.
+     * sig_status queries the current resolver (never a report); revision changes at fragment replacement/unload.
+     * typed_install_ready permits installation with no live world (2) OR on the current authoritative/joined-client Pre
+     * thread (1); 0: not now. On 1 a world is running and each first detour on a target stops the game's other
+     * threads for its check: install a few per tick, not a batch. */
+    KilnResult(KILN_CALL* validate_typed)(KilnStr symbol, uintptr_t expected_address, uint64_t expected_revision,
+                                          const KilnSig* sig);
+    KilnResult(KILN_CALL* sig_status)(KilnStr symbol, uintptr_t* address, uint64_t* revision);
+    uint32_t(KILN_CALL* typed_install_ready)(void);
+
+    /* ======== checked typed installation (since 0.2.0-dev.29): check header.size covers it before calling ========
+     * detour_typed_checked: detour_typed with mid2_checked's patch policy. The descriptor is checked first, exactly as
+     * detour_typed does (the same refusals); then, when the target has no detour yet, the first detour is written only
+     * when every other thread of the process could be stopped and checked and none stands inside the bytes it
+     * replaces. Otherwise nothing is written (no fallback to an unchecked patch) and the result is
+     * KILN_HOOKS_ERR_UNCHECKED: a later attempt may succeed (kiln.log names the threads). A target that already has a
+     * detour needs no patch: the link joins its chain as with detour_typed. Same arguments as detour_typed. */
+    KilnResult(KILN_CALL* detour_typed_checked)(KilnOwner owner, uintptr_t target, const KilnHookOrder* order,
+                                                const KilnSig* sig, KilnTypedFn fn, void* user, KilnHandle* out);
+
+    /* ======== original code (since 0.2.0-dev.29.19): check header.size covers each member before reading it ========
+     * Both sides, any thread. Neither needs a world, a session or an owner, keeps a pointer or calls back, and neither
+     * waits for a game or window thread. Check header.size >= offsetof(KilnHooksApi, member) + sizeof(void*), then
+     * that the member is not NULL, then its capability row (hooks.read_original, hooks.code_state); the version stays
+     * 2. Both rows are off when Kiln has no verified view of the exe file's code (symbol-missing).
+     *
+     * read_original: copies `size` bytes of the exe file's code at `address` (relocated to where the exe is loaded)
+     * into `out`. Never live memory: a function that Kiln or another module hooked reads as the game shipped it. The
+     * whole range must lie inside the exe's executable .text and be at most KILN_HOOKS_CODE_RANGE_MAX (64 KiB) long: a
+     * zero `size`, a larger one, a range outside .text or one that wraps, and a NULL `out` are
+     * KILN_ERR_INVALID_ARGUMENT, checked before anything is read. KILN_ERR_UNAVAILABLE when the file's bytes are not
+     * there. A refusal writes nothing.
+     *
+     * code_state: whether the live code in [address, address + size) is the file's (the same range rules). It reads the
+     * live bytes twice under a fault guard and compares them with the file's and with what Kiln's own detours and
+     * patches wrote there: *state is one of KILN_CODE_* above. Live bytes that cannot be read, or that differ between
+     * the two reads, are KILN_OK with KILN_CODE_UNKNOWN (never the file's bytes passed off as live ones). A detour owns
+     * exactly the instructions it overwrote, padding included, not the whole function, and keeps them after its last
+     * link is revoked (the detour stays in place). A patch owns its bytes until unpatch, revoke or revoke_owner.
+     * kiln.hooks' `write` owns nothing: its bytes read as FOREIGN.
+     * *generation is one counter for the whole process, not per range. It moves when Kiln writes a detour, installs or
+     * removes a patch, when a chain's links change (an install, a revoke, a link that faulted), on `write`, and when a
+     * call sees other bytes, readability or state than the call before it. Only the last range asked about is
+     * remembered (at most 64 KiB, so what Kiln keeps stays small; a refused call changes nothing), so a call for
+     * another range (by any mod) moves it too: two callers taking turns with two ranges see it move on every call. The
+     * same value as at your last call means nothing changed and no one asked about another range in between; another
+     * value means "ask again", not "changed". It is no lock: another module may write the code right after the call
+     * returns. A refusal writes neither output.
+     *
+     * Locking: Kiln's writers of game code (patch, unpatch, write, revoke and revoke_owner of patches, every detour
+     * install, revoke and sweep) take the lock code_state reads under; an install takes it before it stops the game's
+     * threads. A code_state call therefore never sees a half-written Kiln detour, and a Kiln install never stops it
+     * while it holds that lock. Not under the loader lock (DllMain, a TLS callback): an install holds this lock while
+     * it looks up modules, which can wait for the loader lock, so code_state, patch, unpatch and write could wait there
+     * for good. */
+    KilnResult(KILN_CALL* read_original)(uintptr_t address, void* out, size_t size);
+    KilnResult(KILN_CALL* code_state)(uintptr_t address, size_t size, uint32_t* state, uint64_t* generation);
+
+    /* ======== hooks inside other modules (since 0.2.0-dev.29.19): check header.size covers each member ========
+     *
+     * Every hook kind takes addresses in the game exe's image only; anything else is KILN_ERR_INVALID_ARGUMENT. To hook
+     * inside another loaded module (another mod's DLL, a loader's DLL: Creative Mode's creative.dll under kiln-flame),
+     * open it first:
+     *
+     * open_module: finds the loaded module `name` (its file name, "creative.dll"; matched like GetModuleHandle, never
+     * loaded by this call), pins it (it stays loaded until the process ends: a hook's bytes and trampoline must never
+     * outlive the code they replace, and kiln.hooks never removes a physical detour) and from then on accepts addresses
+     * inside its executable sections as targets of detour, mid, raw_detour, detour2, mid2 and mid2_checked, for every
+     * owner. Typed links stay the game's: their descriptor is checked against the exe's code (KILN_HOOKS_ERR_SIG_UNKNOWN
+     * elsewhere). Fills `out` (out->size set by the caller). kiln.log names the module once, and every link on it as
+     * "<module>+0x<offset>"; the hook map lists such targets with "module" and "offset" (and "rva": null). The game's
+     * exe answers KILN_OK with KILN_HOOKS_MODULE_GAME (nothing pinned). Calling it again is cheap.
+     * KILN_ERR_NOT_FOUND: no such module is loaded (it may load later: open it then). KILN_ERR_UNAVAILABLE: one of
+     * Kiln's own modules (kiln-core.dll, kiln-*.dll), which mods use through their APIs, or pinning failed.
+     * KILN_ERR_INVALID_ARGUMENT: an empty name, a short `out`, or a module without an executable section.
+     *
+     * module_scan: matches of `pattern` (sigdb syntax, as `scan`) in the executable sections of the module opened at
+     * `module_base`, read from the live bytes (another engine's hook there can hide a match), in address order, with
+     * `scan`'s results. KILN_ERR_INVALID_ARGUMENT: a bad pattern, or `module_base` is not an opened module (open it
+     * first). The capability row is `hooks.foreign_modules`.
+     *
+     * read_original and code_state stay the game exe's: an address in an opened module is KILN_ERR_INVALID_ARGUMENT
+     * there (they compare with the exe file's code, and another module has none Kiln reads). */
+    KilnResult(KILN_CALL* open_module)(KilnOwner owner, KilnStr name, KilnHooksModule* out);
+    KilnResult(KILN_CALL* module_scan)(uintptr_t module_base, KilnStr pattern, uintptr_t* out, uint32_t cap,
+                                       uint32_t* count);
 } KilnHooksApi;
 
 #ifdef __cplusplus
 }
+static_assert(offsetof(KilnHooksApi, mid2_checked) == 256, "checked installation is appended at 256");
+static_assert(offsetof(KilnHooksApi, validate_typed) == 264, "validate_typed is appended at 264");
+static_assert(offsetof(KilnHooksApi, sig_status) == 272, "sig_status is appended at 272");
+static_assert(offsetof(KilnHooksApi, typed_install_ready) == 280, "typed_install_ready is appended at 280");
+static_assert(offsetof(KilnHooksApi, detour_typed_checked) == 288, "detour_typed_checked is appended at 288");
+static_assert(offsetof(KilnHooksApi, read_original) == 296, "read_original is appended at 296");
+static_assert(offsetof(KilnHooksApi, code_state) == 304, "code_state is appended at 304");
+static_assert(offsetof(KilnHooksApi, open_module) == 312, "open_module is appended at 312");
+static_assert(offsetof(KilnHooksApi, module_scan) == 320, "module_scan is appended at 320");
+static_assert(sizeof(KilnHooksApi) == 328, "KilnHooksApi is 328 bytes");
+static_assert(sizeof(KilnHooksModule) == 48, "KilnHooksModule is 48 bytes");
+#else
+_Static_assert(offsetof(KilnHooksApi, read_original) == 296, "read_original is appended at 296");
+_Static_assert(offsetof(KilnHooksApi, code_state) == 304, "code_state is appended at 304");
+_Static_assert(offsetof(KilnHooksApi, open_module) == 312, "open_module is appended at 312");
+_Static_assert(offsetof(KilnHooksApi, module_scan) == 320, "module_scan is appended at 320");
+_Static_assert(sizeof(KilnHooksApi) == 328, "KilnHooksApi is 328 bytes");
+_Static_assert(sizeof(KilnHooksModule) == 48, "KilnHooksModule is 48 bytes");
 #endif
 
 #endif /* KILN_HOOKS_H */

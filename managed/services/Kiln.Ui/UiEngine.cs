@@ -93,6 +93,9 @@ internal static unsafe class UiEngine
 
     public static void Log(LogLevel level, string text) => Backend.Current.Log(0, level, "ui: " + text);
 
+    /// <summary>The drawing context of the frames (render thread).</summary>
+    internal static UiDraw DrawContext => Draw;
+
     public static void EnsureStarted()
     {
         if (Interlocked.CompareExchange(ref _started, 1, 0) != 0) return;
@@ -101,10 +104,15 @@ internal static unsafe class UiEngine
             Log(LogLevel.Info, "kiln.ui is not available here (dedicated server, or no overlay on this build)");
             return;
         }
+        if (UiNative.DrawingOffReason is { } reason) Log(LogLevel.Info, reason);
+        PlayerLook.Start();  // the player's look of Kiln's UI (kiln.json "ui")
+        UiLanguage.Start();  // the language of Kiln's own texts (kiln.json "ui.language"), handed to kiln.ui too
+        GraphicsTools.Start();  // Kiln's own graphics tools (kiln.json "graphics"), handed to kiln.ui (0.2.0-dev.29.18)
+        ChatCompletionNetwork.Start(); // optional kiln:chat completion protocol
         KeyBindings.Load();
         ApplyMenuKey(KeyBindings.MenuKey);
         // the game page needs the layout calls (v3) for the page itself and v4 for the page state
-        _pageHost = UiNative.T3 != null && GamePageHost.Claim();
+        _pageHost = UiNative.DrawingOffReason == null && UiNative.T3 != null && GamePageHost.Claim();
         var page = _pageHost ? GamePageHost.Read() : null;
         Ui.Screens.Start();
         RefusalNotice.Start();
@@ -278,10 +286,12 @@ internal static unsafe class UiEngine
         }
         foreach (var i in imgs) i.Dispose();
         UiWheel.RemoveOwnedBy(mod);
+        UiThemes.RemoveOwnedBy(mod);
         Ui.Menus.RemoveOwnedBy(mod);
         Ui.Screens.RemoveOwnedBy(mod);
         Ui.Crafting.RemoveOwnedBy(mod);
         KeyBindings.RemoveOwnedBy(mod);
+        KeyInput.RemoveOwnedBy(mod);
         FrameHandlers.RemoveOwnedBy(mod);
         Recount();
     }
@@ -337,6 +347,8 @@ internal static unsafe class UiEngine
     {
         Draw.Frame = f;
         var ui = Draw;
+        KilnLook.BeginFrame();  // the player's palette for Kiln's own pages
+        UiLanguage.Frame();     // Kiln's own texts follow the game's language (setting auto)
         RenderDispatch.Frame(ui);  // RenderFrameEvent handlers (they draw on the background list, under everything below)
         // the Kiln menu: inside the game's main menu (the game page), or the full-display mod manager over the game; an
         // older kiln.ui without the layout calls keeps the small window
@@ -379,11 +391,25 @@ internal static unsafe class UiEngine
             DrawWindow(ui, w);
         }
         Ui.Crafting.DrawPanels(ui);
+        ChatCompletionPanel.Draw(ui); // non-focusable suggestions over native HUD/Social chat
         DrawScreens(ui);
         foreach (var (h, owner) in FrameHandlers.Snapshot())
+        {
+            var looks = ui.LookDepth;
             if (!UiModCalls.Invoke(owner, h, ui, "Ui.Frame handler") && Fault(h, owner, "a frame handler")) FrameHandlers.Remove(h);
-        DrawHud(ui, hud);
-        DrawToasts(ui);
+            ui.RestoreLooks(looks);  // a look the handler left on never reaches the next one
+        }
+        var hudLooks = ui.LookDepth;
+        ui.PushStyleRaw(UiStyle.Player);  // Kiln's HUD lines and toasts: the player's look and its font
+        try
+        {
+            DrawHud(ui, hud);
+            DrawToasts(ui);
+        }
+        finally
+        {
+            ui.RestoreLooks(hudLooks);
+        }
     }
 
     /// <summary>A rebind armed in the Keys tab lasts only while the tab is drawn: kiln.ui closes the menu on Escape
@@ -406,12 +432,17 @@ internal static unsafe class UiEngine
         if (!o.TitleBar) flags |= 1u << 0;
         if (!o.Interactive && !ui.Capturing) flags |= (1u << 9) | (1u << 18) | (1u << 19);  // no inputs
         var open = true;
+        var looks = ui.LookDepth;
+        ui.PushLookRaw(o.Theme, o.Style);  // the player's look unless the window's mod chose its own
         if (ui.BeginWindow(w.Key, ref open, flags))
         {
+            var inner = ui.LookDepth;
             if (!UiModCalls.Invoke(w.Owner, w.Draw, ui, $"window '{w.Title}'") && Fault(w, w.Owner, $"window '{w.Title}'"))
                 w.SetOpenFromUi(false);
+            ui.RestoreLooks(inner);  // a look the callback left on goes before the window ends
         }
         ui.EndWindow();
+        ui.RestoreLooks(looks);
         if (!open) w.SetOpenFromUi(false);
     }
 
@@ -424,12 +455,12 @@ internal static unsafe class UiEngine
         var s0 = ui.Scale;
         if (open.Any(s => s.Options.DimBackground))
         {
-            // a full-screen, input-less window behind the screens
+            // a full-screen, input-less window behind the screens, in the player's look (lighter when it is translucent)
             ui.NextWindowPos(0, 0, 1);
             ui.NextWindowSize(ui.Width, ui.Height, 1);
-            ui.NextWindowAlpha(0.45f);
+            ui.NextWindowAlpha(0.45f * GameColors.Backdrop);
             uint dim = (1u << 0) | (1u << 1) | (1u << 2) | (1u << 3) | (1u << 5) | (1u << 9) | (1u << 12) | (1u << 13) | (1u << 18) | (1u << 19);
-            ui.PushStyleRaw(UiStyle.Kiln);
+            ui.PushStyleRaw(UiStyle.Player);
             if (ui.BeginWindowNoClose("###kiln.screens.dim", dim)) { }
             ui.EndWindow();
             ui.PopStyleRaw();
@@ -437,7 +468,8 @@ internal static unsafe class UiEngine
         foreach (var s in open)
         {
             var o = s.Options;
-            ui.PushStyleRaw(o.Style);
+            var looks = ui.LookDepth;
+            ui.PushLookRaw(o.Theme, o.Style);
             if (o.FullScreen)
             {
                 ui.NextWindowPos(0, 0, 1);
@@ -460,10 +492,12 @@ internal static unsafe class UiEngine
             var keep = true;
             ui.CurrentScreen = s;
             var visible = o.CloseButton && !o.FullScreen ? ui.BeginWindow($"{s.Title}{s.Id}", ref keep, flags) : ui.BeginWindowNoClose($"{s.Title}{s.Id}", flags);
+            var inner = ui.LookDepth;
             if (visible && !UiModCalls.Invoke(s.Owner, s.Draw, ui, $"screen '{s.Title}'") && Fault(s, s.Owner, $"screen '{s.Title}'")) keep = false;
+            ui.RestoreLooks(inner);
             ui.EndWindow();
             ui.CurrentScreen = null;
-            ui.PopStyleRaw();
+            ui.RestoreLooks(looks);
             if (!keep) s.Close();
         }
     }
@@ -498,7 +532,7 @@ internal static unsafe class UiEngine
             var (ax, ay) = Anchor(group.Key);
             var x0 = ax switch { 0 => pad, 1 => (ui.Width - boxW) / 2, _ => ui.Width - boxW - pad };
             var y0 = ay switch { 0 => pad * 4, 1 => (ui.Height - boxH) / 2, _ => ui.Height - boxH - pad * 4 };
-            ui.DrawRect(x0, y0, x0 + boxW, y0 + boxH, new Color(0, 0, 0, 110), 4 * ui.Scale);
+            ui.DrawRect(x0, y0, x0 + boxW, y0 + boxH, GameColors.Night.WithAlpha(110), 4 * ui.Scale);  // the player's look
             var y = y0 + pad * 0.25f;
             foreach (var l in lines)
             {
@@ -537,13 +571,15 @@ internal static unsafe class UiEngine
             var (w, h) = ui.MeasureText(t.Text);
             var left = (t.Until - now).TotalSeconds;
             var alpha = (byte)Math.Clamp(255 * Math.Min(1, left / 0.5) * Math.Min(1, (now - t.Start).TotalSeconds / 0.2), 0, 255);
-            var accent = t.Kind switch { ToastKind.Success => Color.Green, ToastKind.Warning => Color.Yellow, ToastKind.Error => Color.Red, _ => Color.Orange };
+            // in the player's look: its window colour, a status colour by kind, its text colour
+            var p = KilnLook.Player;
+            var accent = t.Kind switch { ToastKind.Success => p.Ok, ToastKind.Warning => p.Attention, ToastKind.Error => p.Warning, _ => p.Accent };
             var x1 = ui.Width - 20 * s;
             var x0 = x1 - w - 28 * s;
             var y0 = y - h - 12 * s;
-            ui.DrawRect(x0, y0, x1, y, new Color(16, 16, 20, (byte)(alpha * 0.85)), 5 * s);
+            ui.DrawRect(x0, y0, x1, y, GameColors.Night.WithAlpha((byte)(alpha * 0.88)), 5 * s);
             ui.DrawRect(x0, y0, x0 + 5 * s, y, accent.WithAlpha(alpha), 2 * s);
-            ui.DrawText(x0 + 16 * s, y0 + 6 * s, t.Text, Color.White.WithAlpha(alpha));
+            ui.DrawText(x0 + 16 * s, y0 + 6 * s, t.Text, p.Text.WithAlpha(alpha));
             y = y0 - 8 * s;
         }
     }
@@ -563,15 +599,16 @@ internal static unsafe class UiEngine
             _remapping = null;
             if (k.Vk == 0x1B) return true;  // Escape cancels
             // a key, or (since 0.2.0-dev.27) the middle or a side button or a wheel notch; never the left or right click
-            var chord = new KeyChord(k.Vk, mods);
+            // a punctuation key is saved by its place (Backquote is the key left of 1 on any layout: key_names.h)
+            var chord = new KeyChord(KeyNames.PressCode(k.Vk, k.Scan), mods);
             if (KeyBindings.Rebind(id, chord) || id != KeyBindings.MenuId)
                 Hud.Toast($"{id}: {chord}", ToastKind.Success, 2.5);
             else
-                Hud.Toast($"The Kiln menu's key can't be on the wheel ({chord}): it would close the menu as you scroll it",
-                    ToastKind.Warning, 4);
+                Hud.Toast(KilnText.T("keys.toast.wheel_menu", ("key", chord)), ToastKind.Warning, 4);
             return true;
         }
-        if (k.TextInput != 0) return false;
+        // A text field blocks presses, but a hold that started before it still needs its release.
+        if (k.TextInput != 0 && down) return false;
         // Escape closes the top Kiln screen (the game does not see it: Kiln has the keyboard while a screen is open)
         if (k.Vk == 0x1B && down && k.Repeat == 0 && !Ui.MenuOpen)
         {
@@ -589,7 +626,7 @@ internal static unsafe class UiEngine
         if ((wheel || MouseKeys.IsButton(k.Vk)) && k.Captured != 0 && down) return false;
         foreach (var b in KeyBindings.All)
         {
-            if (!b.Enabled || b.Disposed || b.Key.IsNone || b.Key.VirtualKey != k.Vk) continue;
+            if (!b.Enabled || b.Disposed || b.Key.IsNone || !KeyNames.Matches(b.Key.VirtualKey, k.Vk, k.Scan)) continue;
             if (!down)
             {
                 if (!b.IsDown) continue;
@@ -624,7 +661,7 @@ internal static unsafe class UiEngine
     internal static bool TypesText(uint vk, KeyMods mods)
     {
         if ((mods & (KeyMods.Ctrl | KeyMods.Alt)) != 0) return false;
-        return vk is 0x20 or >= 0x30 and <= 0x39 or >= 0x41 and <= 0x5A or >= 0x60 and <= 0x6F or >= 0xBA and <= 0xC0 or >= 0xDB and <= 0xDF or 0xE2;
+        return vk is 0x20 or >= 0x30 and <= 0x39 or >= 0x41 and <= 0x5A or >= 0x60 and <= 0x6F or >= 0xBA and <= 0xC2 or >= 0xDB and <= 0xDF or 0xE2;
     }
 
     /// <summary>The player is playing, not in one of the game's own screens. The game's text fields (chat, a rename, the main
@@ -651,10 +688,10 @@ internal static unsafe class UiEngine
         {
             if (ui.BeginTabBar("kiln.menu.tabs"))
             {
-                if (ui.BeginTab("Mods")) { ModsTab(ui); ui.EndTab(); }
-                if (ui.BeginTab("Network")) { NetworkTab(ui); ui.EndTab(); }
-                if (ui.BeginTab("Keys")) { KeysTab(ui); ui.EndTab(); }
-                if (ui.BeginTab("Overlay")) { OverlayTab(ui); ui.EndTab(); }
+                if (ui.BeginTab(KilnText.T("classic.tab.mods") + "###kiln.tab.mods")) { ModsTab(ui); ui.EndTab(); }
+                if (ui.BeginTab(KilnText.T("classic.tab.network") + "###kiln.tab.network")) { NetworkTab(ui); ui.EndTab(); }
+                if (ui.BeginTab(KilnText.T("classic.tab.keys") + "###kiln.tab.keys")) { KeysTab(ui); ui.EndTab(); }
+                if (ui.BeginTab(KilnText.T("classic.tab.overlay") + "###kiln.tab.overlay")) { OverlayTab(ui); ui.EndTab(); }
                 ui.EndTabBar();
             }
         }
@@ -668,21 +705,21 @@ internal static unsafe class UiEngine
     {
         if (ShroudlinkMenu.Available || ShroudlinkMenu.Open)  // an open page keeps its way back when the bridge goes
         {
-            if (ui.SmallButton(ShroudlinkMenu.Open ? "Back to mods" : "shroudlink menus")) ShroudlinkMenu.Open = !ShroudlinkMenu.Open;
+            if (ui.SmallButton(ShroudlinkMenu.Open ? KilnText.T("classic.mods.back") : KilnText.T("classic.mods.shroudlink"))) ShroudlinkMenu.Open = !ShroudlinkMenu.Open;
             if (ShroudlinkMenu.Open) { ShroudlinkMenu.Draw(ui); return; }
         }
         IReadOnlyList<ModEntry> mods;
         try { mods = Mods.All; }
         catch (Exception) { mods = []; }
-        ui.Text($"{mods.Count(m => m.IsLoaded)} loaded, {mods.Count} found (side: {Mods.Side})");
+        ui.Text(KilnText.T("classic.mods.count", ("loaded", mods.Count(m => m.IsLoaded)), ("found", mods.Count), ("side", Mods.Side)));
         if (ConfigScreens.HasConfigs("kiln"))
         {
             ui.SameLine();
-            if (ui.SmallButton(_configOpen == "kiln" ? "Close Kiln settings" : "Kiln settings")) _configOpen = _configOpen == "kiln" ? null : "kiln";
+            if (ui.SmallButton(_configOpen == "kiln" ? KilnText.T("classic.mods.kiln_settings_close") : KilnText.T("classic.mods.kiln_settings"))) _configOpen = _configOpen == "kiln" ? null : "kiln";
         }
         (string ModId, Action<UiDraw> Draw, ModContext? Owner, Handle H)[] pages;
         lock (Lock) pages = _configPages;
-        if (ui.BeginTable("kiln.mods", "Mod", "Version", "Side", "State", ""))
+        if (ui.BeginTable("kiln.mods", KilnText.T("classic.mods.col_mod"), KilnText.T("classic.mods.col_version"), KilnText.T("classic.mods.col_side"), KilnText.T("classic.mods.col_state"), ""))
         {
             foreach (var m in mods)
             {
@@ -696,13 +733,13 @@ internal static unsafe class UiEngine
                 ui.Text(m.Side.ToString().ToLowerInvariant());
                 ui.NextColumn();
                 var c = m.State switch { ModState.Loaded => Color.Green, ModState.Failed => Color.Red, ModState.Disabled => Color.Yellow, _ => Color.Gray };
-                ui.Text(c, m.State.ToString().ToLowerInvariant());
+                ui.Text(c, KilnText.T("classic.mods.state." + m.State.ToString().ToLowerInvariant()));
                 if (m.Error is { } err) ui.Tooltip(err);
                 ui.NextColumn();
                 if (pages.Any(p => p.ModId == m.Id) || ConfigScreens.HasConfigs(m.Id))  // generated pages: ConfigScreens.cs
                 {
                     using (ui.Id(m.Id))
-                        if (ui.SmallButton(_configOpen == m.Id ? "Close" : "Config")) _configOpen = _configOpen == m.Id ? null : m.Id;
+                        if (ui.SmallButton(_configOpen == m.Id ? KilnText.T("classic.mods.config_close") : KilnText.T("classic.mods.config"))) _configOpen = _configOpen == m.Id ? null : m.Id;
                 }
             }
             ui.EndTable();
@@ -710,14 +747,14 @@ internal static unsafe class UiEngine
         StatusSection(ui);
         if (_configOpen is { } open)
         {
-            ui.Separator($"Config: {open}");
+            ui.Separator(KilnText.T("classic.mods.config_of", ("mod", open)));
             ConfigScreens.Draw(ui, open);
             foreach (var p in pages.Where(p => p.ModId == open))
                 if (!UiModCalls.Invoke(p.Owner, p.Draw, ui, $"config page {open}") && Fault(p.Draw, p.Owner, $"config page {open}")) p.H.Dispose();
         }
         else if (pages.Length == 0)
         {
-            ui.TextDisabled("Mods add config pages with Ui.AddConfigPage (the config registry's editor plugs in here).");
+            ui.TextDisabled(KilnText.T("classic.mods.no_pages"));
         }
     }
 
@@ -732,11 +769,16 @@ internal static unsafe class UiEngine
         foreach (var p in pages)
             if (p.ModId == modId) { any = true; break; }
         if (!any) return;
-        label(ui, "SETTINGS", s);
+        label(ui, KilnText.T("configpage.caption"), s);
         if (generated) ConfigScreens.Draw(ui, modId);
         foreach (var p in pages)
-            if (p.ModId == modId && !UiModCalls.Invoke(p.Owner, p.Draw, ui, $"config page {modId}") && Fault(p.Draw, p.Owner, $"config page {modId}"))
+        {
+            if (p.ModId != modId) continue;
+            var looks = ui.LookDepth;
+            if (!UiModCalls.Invoke(p.Owner, p.Draw, ui, $"config page {modId}") && Fault(p.Draw, p.Owner, $"config page {modId}"))
                 p.H.Dispose();
+            ui.RestoreLooks(looks);
+        }
     }
 
     /// <summary>What mods say about themselves (<see cref="StatusLines"/>): the last snapshot; the sources run on a worker about
@@ -746,7 +788,7 @@ internal static unsafe class UiEngine
         IReadOnlyList<ModStatus> status;
         try { status = StatusLines.Snapshot(TimeSpan.FromMilliseconds(500)); }
         catch (Exception) { return; }
-        if (status.Count == 0 || !ui.CollapsingHeader($"Status ({status.Count})", true)) return;
+        if (status.Count == 0 || !ui.CollapsingHeader(KilnText.T("classic.mods.status", ("count", status.Count)), true)) return;
         foreach (var m in status)
         {
             ui.TextDisabled(m.Name == m.ModId ? m.ModId : $"{m.Name} ({m.ModId})");
@@ -757,44 +799,50 @@ internal static unsafe class UiEngine
     internal static void NetworkTab(UiDraw ui)
     {
         var st = Network.Status;
-        ui.Text(st.Available ? "Kiln's network is on: mods can talk between this game and a Kiln server."
-                             : "Kiln's network is not running in this session.");
-        var roles = st.ServerRole && st.ClientRole ? "server and client" : st.ServerRole ? "server" : st.ClientRole ? "client" : "none";
-        ui.TextDisabled($"Role: {roles}. Messages in {st.FramesIn}, out {st.FramesOut}, dropped {st.Dropped}. Channels: {st.Channels}. Largest message: {st.MaxFrame} bytes.");
+        ui.Text(st.Available ? KilnText.T("network.on") : KilnText.T("network.off"));
+        var roles = st.ServerRole && st.ClientRole ? KilnText.T("network.role.both") : st.ServerRole ? KilnText.T("network.role.server")
+                  : st.ClientRole ? KilnText.T("network.role.client") : KilnText.T("network.role.none");
+        ui.TextDisabled(KilnText.T("network.stats", ("role", roles), ("in", st.FramesIn), ("out", st.FramesOut), ("dropped", st.Dropped),
+            ("channels", st.Channels), ("largest", st.MaxFrame)));
         if (Network.Server is { } srv)
         {
-            ui.Separator("Server");
+            ui.Separator(KilnText.T("network.server.caption"));
             var c = srv.State switch { NetPeerState.Ready => Color.Green, NetPeerState.Rejected => Color.Red, NetPeerState.Vanilla => Color.Yellow, _ => Color.Gray };
             ui.Text(c, srv.State switch
             {
-                NetPeerState.Ready => $"Kiln {srv.KilnVersion} on the server",
-                NetPeerState.Vanilla => "the server has no Kiln (vanilla)",
-                NetPeerState.Rejected => "the server refused this client",
-                _ => "handshake in progress",
+                NetPeerState.Ready => KilnText.T("network.server.ready", ("version", srv.KilnVersion)),
+                NetPeerState.Vanilla => KilnText.T("network.server.vanilla"),
+                NetPeerState.Rejected => KilnText.T("network.server.rejected"),
+                _ => KilnText.T("network.server.handshake"),
             });
-            if (srv.RoundTrip is { } rtt) ui.Text($"round trip {rtt.TotalMilliseconds:F0} ms");
+            if (srv.RoundTrip is { } rtt) ui.Text(KilnText.T("network.server.round_trip", ("ms", rtt.TotalMilliseconds)));
             foreach (var w in srv.Warnings) ui.Text(Color.Yellow, w);
-            if (srv.Mods.Count > 0) ui.TextWrapped("server mods: " + string.Join(", ", srv.Mods.Select(m => $"{m.Id} {m.Version}")));
+            if (srv.Mods.Count > 0) ui.TextWrapped(KilnText.T("network.server.mods", ("mods", string.Join(", ", srv.Mods.Select(m => $"{m.Id} {m.Version}")))));
             SyncLines(ui);
         }
         else
         {
-            ui.TextDisabled("Not connected to a server.");
+            ui.TextDisabled(KilnText.T("network.server.none"));
         }
         var peers = Network.Peers;
-        if (peers.Count > 0 && ui.CollapsingHeader($"Clients ({peers.Count})", true))
+        if (peers.Count > 0 && ui.CollapsingHeader(KilnText.T("network.clients.caption", ("count", peers.Count)) + "###kiln.net.clients", true))
         {
-            if (ui.BeginTable("kiln.peers", "Player", "State", "Kiln", "Mods", "RTT"))
+            if (ui.BeginTable("kiln.peers", KilnText.T("network.clients.col_player"), KilnText.T("network.clients.col_state"), "Kiln",
+                    KilnText.T("network.clients.col_mods"), KilnText.T("network.clients.col_rtt"), KilnText.T("network.clients.col_frames")))
             {
                 foreach (var p in peers)
-                    ui.Row(p.Name, p.State.ToString(), p.KilnVersion ?? "-", p.Mods.Count.ToString(),
-                        p.RoundTrip is { } r ? $"{r.TotalMilliseconds:F0} ms" : "-");
+                    ui.Row(p.Name, KilnText.T("network.peer." + p.State.ToString().ToLowerInvariant()), p.KilnVersion ?? "-", p.Mods.Count.ToString(),
+                        p.RoundTrip is { } r ? KilnText.T("network.ms", ("ms", r.TotalMilliseconds)) : "-", $"{p.FramesIn}/{p.FramesOut}");
                 ui.EndTable();
             }
         }
-        if (Network.Channels.Count > 0 && ui.CollapsingHeader($"Channels ({Network.Channels.Count})"))
+        if (st.ServerRole && ui.CollapsingHeader(KilnText.T("network.admission") + "###kiln.net.admission"))
+            foreach (var line in NetAdmission.StatusLines()) ui.Text(line);
+        if (Network.Channels.Count > 0 && ui.CollapsingHeader(KilnText.T("network.channels.caption", ("count", Network.Channels.Count)) + "###kiln.net.channels"))
             foreach (var ch in Network.Channels)
-                ui.Text($"{ch.Name} v{ch.Version}{(ch.Required ? " (required)" : "")}: in {ch.MessagesIn}, out {ch.MessagesOut}");
+                ui.Text(ch.Required
+                    ? KilnText.T("network.channels.required", ("name", ch.Name), ("version", ch.Version), ("in", ch.MessagesIn), ("out", ch.MessagesOut))
+                    : KilnText.T("network.channels.line", ("name", ch.Name), ("version", ch.Version), ("in", ch.MessagesIn), ("out", ch.MessagesOut)));
     }
 
     /// <summary>Kiln's server-to-client sync, client side (docs/kiln/sync.md).</summary>
@@ -806,17 +854,18 @@ internal static unsafe class UiEngine
             var c = cs.State switch { ContentSyncState.Applied => Color.Green, ContentSyncState.Failed => Color.Red, _ => Color.Gray };
             ui.Text(c, cs.State switch
             {
-                ContentSyncState.Applied => $"content: {cs.Applied} change(s) from the server{(cs.Reset > 0 ? $", {cs.Reset} own change(s) put back" : "")}" +
-                                            $"{(cs.Errors > 0 ? $", {cs.Errors} error(s)" : "")} ({cs.Bytes / 1024.0:F0} KiB)",
-                ContentSyncState.Hosting => "content: hosting (the server's content is this game's)",
-                ContentSyncState.Waiting => $"content: {cs.Detail}",
-                ContentSyncState.Failed => $"content: not synced: {cs.Detail}",
-                _ => "content: the server sent no content state",
+                ContentSyncState.Applied => KilnText.T("network.sync.applied", ("count", cs.Applied),
+                    ("reset", cs.Reset > 0 ? KilnText.T("network.sync.reset", ("count", cs.Reset)) : ""),
+                    ("errors", cs.Errors > 0 ? KilnText.T("network.sync.errors", ("count", cs.Errors)) : ""), ("kib", cs.Bytes / 1024.0)),
+                ContentSyncState.Hosting => KilnText.T("network.sync.hosting"),
+                ContentSyncState.Waiting => KilnText.T("network.sync.waiting", ("detail", cs.Detail)),
+                ContentSyncState.Failed => KilnText.T("network.sync.failed", ("detail", cs.Detail)),
+                _ => KilnText.T("network.sync.none"),
             });
             var n = ConfigSync.ServerConfigs;
             ui.Text(n > 0 ? Color.Green : Color.Gray, ConfigSync.LastReceived is { } r
-                ? $"configs: {r.Configs} synced config(s) from the server, {n} in use here"
-                : "configs: the server sent no synced configs");
+                ? KilnText.T("network.sync.configs", ("count", r.Configs), ("used", n))
+                : KilnText.T("network.sync.configs_none"));
         }
         catch (Exception)
         {
@@ -832,38 +881,46 @@ internal static unsafe class UiEngine
         var now = Environment.TickCount64;
         if (now - _keysDrawnAtMs > 250) _remapping = null;
         _keysDrawnAtMs = now;
-        ui.TextDisabled(UiNative.MouseKeysAvailable
-            ? "Click a key, then press the new one: a key, the middle or a side mouse button, or a turn of the wheel, " +
-              "with Ctrl, Shift or Alt if you like (left and right click can't be bound). Click it again to cancel; " +
-              "Escape cancels and closes the menu. Saved to kiln/config/keybinds.json."
-            : "Click a key, then press the new one. Click it again to cancel; Escape cancels and closes the menu. Saved to kiln/config/keybinds.json.");
-        if (!ui.BeginTable("kiln.keys", "Action", "Key", "Default", "")) return;
-        void Line(string id, string what, KeyChord key, KeyChord def)
-        {
-            using var _ = ui.Id(id);
-            ui.NextRow();
-            ui.NextColumn();
-            ui.Text(what);
-            ui.Tooltip(id);
-            ui.NextColumn();
-            if (ui.Button(_remapping == id ? "press a key..." : key.ToString(), 160 * ui.Scale)) _remapping = _remapping == id ? null : id;
-            ui.NextColumn();
-            ui.TextDisabled(def.ToString());
-            ui.NextColumn();
-            if (key != def && ui.SmallButton("Reset")) KeyBindings.Reset(id);
-        }
-        Line(KeyBindings.MenuId, "Kiln: open this menu", KeyBindings.MenuKey, KeyBindings.MenuDefault);
+        // wrapped: a single line was cut off at the menu's width in the game (inbox 40)
+        ui.TextWrapped(UiNative.MouseKeysAvailable ? KilnText.T("keys.help_mouse") : KilnText.T("keys.help"));
+        if (!ui.BeginTable("kiln.keys", KilnText.T("keys.col_action"), KilnText.T("keys.col_key"), KilnText.T("keys.col_default"), "")) return;
+        KeyLine(ui, KeyBindings.MenuId, KilnText.T("keys.menu"), KeyBindings.MenuKey, KeyBindings.MenuDefault);
         foreach (var g in KeyBindings.All.GroupBy(b => b.Category))
             foreach (var b in g)
-                Line(b.Id, $"{g.Key}: {b.Description}", b.Key, b.Default);
+                KeyLine(ui, b.Id, $"{g.Key}: {b.Description}", b.Key, b.Default);
         ui.EndTable();
+    }
+
+    /// <summary>One row of the Keys page: the action, its key (click to rebind), the default, Reset when it differs and
+    /// Unbind (the key becomes None) for every binding but the menu's own key, which would lock the menu away.</summary>
+    internal static void KeyLine(UiDraw ui, string id, string what, KeyChord key, KeyChord def)
+    {
+        using var _ = ui.Id(id);
+        ui.NextRow();
+        ui.NextColumn();
+        ui.Text(what);
+        ui.Tooltip(id);
+        ui.NextColumn();
+        if (ui.Button(_remapping == id ? KilnText.T("keys.press") : key.ToString(), 160 * ui.Scale)) _remapping = _remapping == id ? null : id;
+        ui.NextColumn();
+        ui.TextDisabled(def.ToString());
+        ui.NextColumn();
+        var reset = key != def;
+        if (reset && ui.SmallButton(KilnText.T("keys.reset"))) KeyBindings.Reset(id);
+        if (id == KeyBindings.MenuId || key.IsNone) return;
+        if (reset) ui.SameLine();
+        if (ui.SmallButton(KilnText.T("keys.unbind")))
+        {
+            if (_remapping == id) _remapping = null;
+            KeyBindings.Rebind(id, KeyChord.None);
+        }
     }
 
     internal static void OverlayTab(UiDraw ui)
     {
         var s = Ui.Status;
-        ui.Text($"{s.Width}x{s.Height}, format {s.Format}, scale {s.Scale:F2}");
-        ui.Text($"presents {s.Presents}, drawn {s.FramesDrawn}, last overlay frame {s.FrameMs:F2} ms");
+        ui.Text(KilnText.T("overlay.surface", ("width", s.Width), ("height", s.Height), ("format", s.Format), ("scale", s.Scale)));
+        ui.Text(KilnText.T("overlay.frames", ("presents", s.Presents), ("drawn", s.FramesDrawn), ("ms", s.FrameMs)));
         if (s.Error.Length > 0) ui.Text(Color.Red, s.Error);
         int windows, hud;
         lock (Lock)
@@ -871,12 +928,19 @@ internal static unsafe class UiEngine
             windows = _windows.Length;
             hud = _hud.Length;
         }
-        ui.Text($"windows {windows}, HUD lines {hud}, frame handlers {FrameHandlers.Count}");
+        ui.Text(KilnText.T("overlay.counts", ("windows", windows), ("hud", hud), ("handlers", FrameHandlers.Count)));
         var g = Ui.Screens.Current;
-        ui.Text($"game screen: {g.Kind} ({g.State}/{g.Hud}), language {g.Language}, UI frame {g.Frame}" +
-                (g.Crafting is { } c ? $"; crafting {(c.AtStation ? "station" : "own")} workshop 0x{c.Workshop:x8} recipe 0x{c.Recipe:x8}" : ""));
-        ui.Text($"screens open {OpenScreens().Count}, crafting panels {Ui.Crafting.VisiblePanels}, menu extension {(Ui.Crafting.MenuAvailable ? "on" : "off")}");
-        if (ui.Button("Test toast")) Hud.Toast("Kiln overlay works", ToastKind.Success);
+        ui.Text(g.Crafting is not { } c
+            ? KilnText.T("overlay.screen", ("kind", g.Kind), ("state", g.State), ("hud", g.Hud), ("language", g.Language), ("frame", g.Frame))
+            : c.AtStation
+                ? KilnText.T("overlay.screen_station", ("kind", g.Kind), ("state", g.State), ("hud", g.Hud), ("language", g.Language),
+                    ("frame", g.Frame), ("workshop", c.Workshop), ("recipe", c.Recipe))
+                : KilnText.T("overlay.screen_own", ("kind", g.Kind), ("state", g.State), ("hud", g.Hud), ("language", g.Language),
+                    ("frame", g.Frame), ("workshop", c.Workshop), ("recipe", c.Recipe)));
+        ui.Text(Ui.Crafting.MenuAvailable
+            ? KilnText.T("overlay.panels_on", ("screens", OpenScreens().Count), ("panels", Ui.Crafting.VisiblePanels))
+            : KilnText.T("overlay.panels_off", ("screens", OpenScreens().Count), ("panels", Ui.Crafting.VisiblePanels)));
+        if (ui.Button(KilnText.T("overlay.test_toast"))) Hud.Toast(KilnText.T("overlay.test_toast_text"), ToastKind.Success);
     }
 }
 

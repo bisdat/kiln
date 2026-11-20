@@ -7,8 +7,18 @@ target_include_directories(kiln-imgui PUBLIC ${KILN_IMGUI} ${KILN_IMGUI}/vulkan-
 target_compile_definitions(kiln-imgui PUBLIC IMGUI_IMPL_VULKAN_NO_PROTOTYPES VK_NO_PROTOTYPES IMGUI_IMPL_WIN32_DISABLE_GAMEPAD)
 target_compile_options(kiln-imgui PRIVATE -w)
 
-kiln_service(ui ui.cpp vk.cpp input.cpp keys.cpp game.cpp menu_page.cpp menu_scroll.cpp style.cpp render.cpp wheel.cpp)
+# The upscaler swap (phase B, upscale.cpp) and its backends: AMD FSR (upscale_amd.cpp) and Intel XeSS (upscale_xess.cpp;
+# upscale_xess_none.cpp stands in while it is not in the tree).
+set(KILN_UI_UPSCALE upscale.cpp upscale_mv.cpp upscale_amd.cpp)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/upscale_xess.cpp")
+    list(APPEND KILN_UI_UPSCALE upscale_xess.cpp)
+else()
+    list(APPEND KILN_UI_UPSCALE upscale_xess_none.cpp)
+endif()
+kiln_service(ui ui.cpp overlay_guard.cpp vk.cpp graphics.cpp input.cpp keys.cpp game.cpp menu_page.cpp menu_scroll.cpp menu_footer.cpp style.cpp render.cpp wheel.cpp chat_input_probe.cpp ${KILN_UI_UPSCALE})
 target_link_libraries(kiln-ui PRIVATE kiln-imgui user32 imm32 dwmapi gdi32)
+target_include_directories(kiln-ui PRIVATE ${CMAKE_SOURCE_DIR}/third_party/ffx)  # AMD's FSR API headers (MIT)
+
 
 # Opt-in build target, never packaged: real third-party addon against Kiln's production input and startup gate.
 add_executable(ui-addon-harness EXCLUDE_FROM_ALL tests/addon_harness/harness.cpp input.cpp keys.cpp
@@ -34,3 +44,8 @@ target_compile_definitions(ui-load-hook-nested PRIVATE FIXTURE_NESTED)
 add_library(ui-addon-inert SHARED EXCLUDE_FROM_ALL tests/addon_harness/fixture.cpp)
 add_library(ui-addon-forwarded SHARED EXCLUDE_FROM_ALL tests/addon_harness/fixture.cpp)
 target_compile_definitions(ui-addon-forwarded PRIVATE FORWARDED_SHUTDOWN)
+# Opt-in build target, never packaged: code_copy_win.h (the main menu's footer copy) on a function of its own exe under
+# plain Wine (tests/test-code-copy-wine.sh).
+add_executable(ui-code-copy-test EXCLUDE_FROM_ALL tests/code_copy_wine/harness.cpp)
+target_include_directories(ui-code-copy-test PRIVATE .)
+target_link_libraries(ui-code-copy-test PRIVATE kiln-safetyhook)

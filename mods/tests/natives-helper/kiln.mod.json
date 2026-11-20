@@ -1,0 +1,8 @@
+{
+  "id": "natives-helper",
+  "name": "kiln.abilities lab helper: a synchronous native that abilities-test unloads during a running cast",
+  "version": "0.1.0",
+  "apiVersion": "0.1",
+  "entryAssembly": "NativesHelper.dll",
+  "side": "server"
+}

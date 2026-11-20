@@ -29,7 +29,30 @@ const void* KILN_CALL service(KilnStr, uint32_t) { return nullptr; }
 bool KILN_CALL feature(KilnStr) { return false; }
 bool KILN_CALL have_feature(KilnStr) { return true; }
 KilnResult KILN_CALL symbol(KilnStr, uintptr_t* out) { *out = 0x1000; return KILN_OK; }
-KilnResult KILN_CALL constant(KilnStr, int64_t* out) { *out = 8; return KILN_OK; }
+KilnResult KILN_CALL constant(KilnStr name, int64_t* out) {
+    const std::string n(name.ptr, name.len);
+    *out = n == "rules/flight.locomotion" ? 0x10 : n == "rules/flight.spring_rows" ? 4 : 8;
+    return KILN_OK;
+}
+
+// The game's BuildingFlying mover as far as the rows go: Locomotion from the iterator's slot, the row from the actor's
+// InSneakMode and Strafing flags (rules_sigdb_test.py checks this shape on both exes).
+bool mover_sneak = false, mover_strafe = false, mover_throws = false;
+float mover_row[4]{};
+uint8_t* mover_slot = nullptr;
+int mover_calls = 0;
+void game_mover(uint8_t* it) {
+    ++mover_calls;
+    mover_slot = *reinterpret_cast<uint8_t**>(it + 24);
+    std::memcpy(mover_row, mover_slot + 4 + 16 * (int(mover_sneak) + 2 * int(mover_strafe)), sizeof mover_row);
+    if (mover_throws) throw 3;
+}
+// Locomotion.springAccelerationConfig of the player body (1_Player): enabled, then velocityDefault, velocityCrouched,
+// strafingDefault, strafingCrouched (walk, run, sprint acceleration, braking deceleration)
+struct Spring {
+    uint8_t enabled[4] = {1, 0, 0, 0};
+    float rows[4][4] = {{20, 20, 25, 30}, {15, 15, -1, -1}, {20, 20, -1, -1}, {15, 15, -1, -1}};
+};
 void set_rule(uint32_t e, const KilnRulesPlayer* rule) {
     if (e <= kMaxPlayer) { store(g_players[e], rule); return; }
     store(g_extra[0], rule); g_extra_ids[0] = rule ? e : 0; g_extra_hint[0] = rule ? e : 0;
@@ -41,7 +64,7 @@ int main() {
     f::g_entity_of = &entity;
     f::g_actor_state = &actor_flag;
     f::L.loco_actor = 16; f::L.loco_dynloco = 8; f::L.loco_state = 0x59; f::L.grav_actor = 16;
-    f::L.mover_dynloco = 8; f::L.player_input = 16; f::L.input_mask = 0;
+    f::L.mover_dynloco = 8; f::L.player_input = 16; f::L.input_mask = 0; f::L.mover_locomotion = 24; f::L.spring_rows = 4;
     alignas(16) uint8_t dyn[128]{};
     bool actor[64]{};
     void* frame[4] = {nullptr, dyn, actor, nullptr};
@@ -67,9 +90,42 @@ int main() {
     check(c.xmm6.f32[0] == 9, "another player's gravity stays intact");
     e = 3;
     uint64_t input[2] = {0, uint64_t{1} << 32};
-    void* it[3] = {&e, dyn, input};
+    Spring spring;
+    void* it[4] = {&e, dyn, input, &spring};
     f::mover_pre(reinterpret_cast<uint8_t*>(it));
     check(reinterpret_cast<float*>(dyn)[1] == flight_math::kClimb, "replicated held jump drives vertical flight");
+
+    // GitHub issue #25: in the game's sneak mode (or strafing) the mover took the crouched (strafing) row, whose sprint
+    // acceleration and braking are -1: no steering at speed and none when braking. Kiln's flight steers with the default
+    // row in every case, for the length of the call only.
+    f::h_mover.target = reinterpret_cast<void*>(&game_mover);
+    auto* iter = reinterpret_cast<uint8_t*>(it);
+    input[1] = uint64_t{1} << 55;
+    for (int k = 0; k < 4; ++k) {
+        mover_sneak = k & 1; mover_strafe = k & 2;
+        f::hk_mover(iter);
+        check(mover_row[2] == 25 && mover_row[3] == 30 && reinterpret_cast<float*>(dyn)[1] == -flight_math::kClimb,
+              k == 0 ? "flying: the mover steers with the default row and sneak sinks"
+              : k == 1 ? "flying in the game's sneak mode: still the default row (sprint 25, braking 30), and sneak sinks"
+              : k == 2 ? "flying while strafing: the default row"
+                       : "flying, sneaking and strafing: the default row");
+    }
+    check(mover_slot != reinterpret_cast<uint8_t*>(&spring) && it[3] == &spring && spring.rows[1][2] == -1,
+          "the mover saw Kiln's copy; the iterator's slot and the game's own rows are as they were");
+    mover_sneak = true; mover_throws = true;
+    bool threw = false;
+    try { f::hk_mover(iter); } catch (int) { threw = true; }
+    check(threw && it[3] == &spring, "a fault in the mover passes on, and the slot is put back");
+    mover_throws = false;
+    e = 4;  // a player without the rule, in a BuildingFlying state: the game's own rows
+    f::hk_mover(iter);
+    check(mover_slot == reinterpret_cast<uint8_t*>(&spring) && mover_row[2] == -1, "a character Kiln does not fly keeps the game's rows");
+    e = 3;
+    void* spark[4] = {&e, dyn, nullptr, &spring};  // the building spark: no PlayerInput
+    f::hk_mover(reinterpret_cast<uint8_t*>(spark));
+    check(mover_slot == reinterpret_cast<uint8_t*>(&spring), "the building spark keeps the game's rows");
+    mover_sneak = false;
+    input[1] = uint64_t{1} << 32;
     dyn[0x59] = flight_math::kBuildingFlying;
     input[1] = uint64_t{1} << 55;
     f::mover_pre(reinterpret_cast<uint8_t*>(it));

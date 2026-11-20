@@ -31,6 +31,7 @@
       "propertyNames": { "$ref": "#/$defs/name" },
       "additionalProperties": { "$ref": "#/$defs/materialTweak" }
     },
+    "buildingMaterialPools": { "type": "object", "propertyNames": { "$ref": "#/$defs/name" }, "additionalProperties": { "$ref": "#/$defs/buildingMaterialPool" } },
     "buildingMaterials": {
       "type": "object",
       "description": "New building materials: an id and a GUID in the game's tables, and a block item. 49 fit across all mods. Needs \"clients\": \"mod\".",
@@ -215,10 +216,118 @@
       }
     },
     "affixes": {"type": "object", "description": "Affix kinds: rolled modifiers on one item (\"+5 Strength\" on this sword), a stat with tiers and the range each rolls in. A pool rolls them onto an item, and Kiln applies them while it is worn or in hand. Server; asks nothing of players' games. Rolled items keep the id \"mod:name\", the same as Affixes.Define gives.", "propertyNames": {"$ref": "#/$defs/affixName"}, "additionalProperties": {"$ref": "#/$defs/affix"}},
-    "affixPools": {"type": "object", "description": "Affix pools: which items roll which affixes, and how many. Code rolls one onto an item (AffixPoolHandle.Roll); its entries name affixes of this mod's code or blocks files, in either order.", "propertyNames": {"$ref": "#/$defs/affixName"}, "additionalProperties": {"$ref": "#/$defs/affixPool"}}
+    "affixPools": {"type": "object", "description": "Affix pools: which items roll which affixes, and how many. Code rolls one onto an item (AffixPoolHandle.Roll); its entries name affixes of this mod's code or blocks files, in either order.", "propertyNames": {"$ref": "#/$defs/affixName"}, "additionalProperties": {"$ref": "#/$defs/affixPool"}},
+    "rarityUpgrades": {"type": "object", "description": "Rarity upgrades: which items an upgrade takes, up to which rarity, and what each step costs (items, a chance, what a failed roll costs). Items.UpgradeRarity(player, item, \"name\") runs one; an upgraded item gets its next enhancement slot in place, which the player unlocks at the workbench as usual. Server; asks nothing of players' games.", "propertyNames": {"$ref": "#/$defs/name"}, "additionalProperties": {"$ref": "#/$defs/rarityUpgrade"}},
+    "rarityRolls": {"type": "object", "description": "Rarity at creation: which item types roll which rarity (Common to Legendary, by weight) when the game crafts them, loot makes them or a Kiln give asks for none. The game then makes the item at that rarity. Server; asks nothing of players' games. A later definition wins an item type an earlier one also names.", "propertyNames": {"$ref": "#/$defs/name"}, "additionalProperties": {"$ref": "#/$defs/rarityRoll"}},
+    "resourcePatches": {
+      "type": "object",
+      "description": "Changes to the game's own resources, made before the game reads them: fields, a template's components, a list's length (a mod with \"boot\": true; docs/kiln/modding/resource-patches.md). Not blocks: kiln.content applies them.",
+      "propertyNames": { "pattern": "^[a-z][a-z0-9_.-]{0,95}$" },
+      "additionalProperties": { "$ref": "#/$defs/resourcePatch" }
+    }
+  },
+  "patternProperties": {
+    "^[a-z0-9][a-z0-9._-]{0,63}:[A-Za-z0-9-]{1,64}$": {
+      "description": "Blocks of a kind another mod registered (Blocks.RegisterKind): \"provider-mod:plural\". List the provider mod in this mod's dependencies: the kind must be registered before this mod's blocks compile. A block's name takes 1 to 64 letters, digits, '.', '_' and '-'. Every block says \"format\": 1; the rest is the kind's record, read strictly into the provider's record type when the block compiles (a member the record does not have, or a value of the wrong type, is an error). The provider's SchemaJson is kept for editors and tools; it is not checked by Kiln. docs/kiln/modding/block-kinds.md",
+      "type": "object",
+      "propertyNames": { "pattern": "^[A-Za-z0-9._-]{1,64}$" },
+      "additionalProperties": {
+        "type": "object",
+        "required": ["format"],
+        "properties": { "format": { "const": 1 } }
+      }
+    }
   },
   "additionalProperties": false,
   "$defs": {
+    "buildingMaterialPool": {"type": "object", "required": ["name", "materials"], "additionalProperties": false, "properties": {"name": {"type": "string", "minLength": 1}, "roof": {"type": "boolean"}, "was": {"type": "string", "minLength": 1}, "materials": {"type": "array", "minItems": 1, "maxItems": 64, "items": {"oneOf": [{"type": "object", "required": ["material"], "additionalProperties": false, "properties": {"material": {"type": "string", "minLength": 1}}}, {"type": "object", "required": ["gameMaterial"], "additionalProperties": false, "properties": {"gameMaterial": {"type": "string", "minLength": 1}}}]}}}},
+
+    "resourcePatch": {
+      "type": "object",
+      "description": "One resource and what to change in it: fields to set, a template's components, lists cleared, replaced or appended to. At least one of set, append, replace, clear, addComponents, removeComponents, copyComponents. Made in the order removeComponents, addComponents, copyComponents, clear, replace, append, set. A patch is applied whole or not at all.",
+      "required": ["resource", "type"],
+      "anyOf": [ { "required": ["set"] }, { "required": ["append"] }, { "required": ["replace"] }, { "required": ["clear"] }, { "required": ["addComponents"] }, { "required": ["removeComponents"] }, { "required": ["copyComponents"] } ],
+      "additionalProperties": false,
+      "properties": {
+        "format": { "const": 1 },
+        "resource": { "type": "string", "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", "description": "The resource's GUID." },
+        "type": { "type": "string", "minLength": 1, "description": "The resource's qualified type name, as keen::BalancingTable." },
+        "part": { "type": "integer", "minimum": 0, "description": "The part index; 0 when left out." },
+        "set": {
+          "type": "object",
+          "minProperties": 1,
+          "description": "Member path to value. A path: members by name, [i] an element of a list, [*] every element.",
+          "additionalProperties": {
+            "anyOf": [
+              { "type": ["number", "boolean", "string"] },
+              { "type": "array", "items": { "type": ["string", "integer"] } },
+              {
+                "type": "object",
+                "minProperties": 1,
+                "additionalProperties": false,
+                "properties": {
+                  "set": { "type": ["number", "boolean", "string"] },
+                  "mul": { "type": "number" }, "add": { "type": "number" }, "min": { "type": "number" }, "max": { "type": "number" },
+                  "raiseOnly": { "type": "boolean" }, "lowerOnly": { "type": "boolean" }
+                }
+              }
+            ]
+          }
+        },
+        "removeComponents": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
+          "description": "A template's (keen::ecs::TemplateResource) components to take out, by type name (\"SpawnTime\"); one it has not got is skipped. Made first. CurrentTransform, and what an actor needs to live, are refused."
+        },
+        "addComponents": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
+          "description": "Components of the game's types a template gets, zeroed (\"PickupItemZone\"); one it has already stays. Made after removeComponents; set then fills them in (\"PickupItemZone.lastAttempt.value\")."
+        },
+        "copyComponents": {
+          "type": "object",
+          "minProperties": 1,
+          "description": "Component type name to the GUID of the template it is copied from, whole (its lists, strings and nested structs with it): added when the template has none of that type, its own replaced when it has. The source must have the component; CurrentTransform, and what an actor needs to live, are refused. Made after addComponents; set can then change the copy's fields.",
+          "propertyNames": { "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
+          "additionalProperties": { "type": "string", "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$" }
+        },
+        "clear": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 },
+          "description": "List paths made empty, any element type (\"noBuildZones\"). A path names one list: [i] on the way is fine, [*] is not. Made after the components, before replace."
+        },
+        "replace": {
+          "type": "object",
+          "minProperties": 1,
+          "description": "List path to the values it holds afterwards, exactly: a list of numbers, bools or enum members. Made after clear, before append.",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["values"],
+            "additionalProperties": false,
+            "properties": {
+              "values": { "type": "array", "minItems": 1, "items": { "type": ["number", "boolean", "string"] }, "description": "Numbers, bools or enum members' names, in order." }
+            }
+          }
+        },
+        "append": {
+          "type": "object",
+          "minProperties": 1,
+          "description": "List path to the values added at its end: a list of numbers, bools or enum members. Made after the components, clear and replace, before set.",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["values"],
+            "additionalProperties": false,
+            "properties": {
+              "values": { "type": "array", "minItems": 1, "items": { "type": ["number", "boolean", "string"] }, "description": "Numbers, bools or enum members' names, in order." },
+              "aboveLast": { "type": "boolean", "description": "Only a value greater than the list's last (the last one added counts): a sorted list stays sorted." }
+            }
+          }
+        }
+      }
+    },
     "strength": {
       "type": "object",
       "description": "What it takes to dig a material. Cost per block = health / (the tool's damage for this hardness x the server's mining factor x the class modifier). A field left out stays what it was.",
@@ -432,7 +541,8 @@
         "chance": { "type": "number", "minimum": 0, "maximum": 1, "description": "The whole effect happens this often." },
         "area": { "$ref": "#/$defs/area" },
         "then": { "$ref": "#/$defs/effects", "description": "More effects, on the same target." },
-        "casts": { "$ref": "#/$defs/ref", "description": "An ability the target casts, as from code: its costs and cooldown apply. With on: caster, whoever wields, wears or cast." }
+        "casts": { "$ref": "#/$defs/ref", "description": "An ability the target casts, as from code: its costs and cooldown apply. With on: caster, whoever wields, wears or cast." },
+        "run": { "type": "string", "maxLength": 90, "pattern": "^[a-z0-9][a-z0-9._-]*\\.[A-Za-z0-9_]+$", "description": "A mod's [ImpactNative] method, \"<modid>.<Name>\", called first when the effect happens, with its parameters bound by name (self, target, attacker, caster, position, attackMod, damage); when it returns false the rest of the effect, then included, does not happen. Its parameters come from that mod's impact/natives.json (kiln lint KL340)." }
       },
       "additionalProperties": false
     },
@@ -1054,6 +1164,7 @@
         "range": { "type": "number", "exclusiveMinimum": 0, "maximum": 32, "description": "Metres: how far a rake flattens around where it aims (3), how far a grappling hook reaches (13.5)." },
         "durability": { "type": "number", "exclusiveMinimum": 0, "description": "Seconds a torch burns while held, the tooltip's Duration (600). Only a torch." },
         "breaksInto": { "$ref": "#/$defs/itemRef", "description": "What it becomes when its durability runs out: a game item or an item of this mod. A torch, or a tool with enhancement slots." },
+        "wearPerDebit": { "type": "integer", "minimum": 0, "maximum": 32767, "description": "What each of the game's wear debits costs the tool's durability (1: the game's own; 0: it does not wear). Per debit, not per swing. A tool with enhancement slots (an axe, a pickaxe, a sieve). Set where the world runs. Needs items.tool_wear_debit." },
         "fishing": {
           "type": "object", "additionalProperties": false, "description": "A fishing rod's pull and stamina.",
           "properties": {
@@ -1917,6 +2028,10 @@
         "onRefused": {
           "$ref": "#/$defs/effects",
           "description": "What happens to the player when requires' when or unless refuses them."
+        },
+        "upgrade": {
+          "$ref": "#/$defs/upgradeAction",
+          "description": "The use raises an item's rarity by one step of a rarity upgrade (rarityUpgrades), on the server once the game has accepted it: the item in the player's hand, or the one they pick in a window on a Kiln player's game. Without plays the player plays the hand on it (toggle), which replaces what the starter's own use did."
         }
       },
       "additionalProperties": false
@@ -1986,6 +2101,7 @@
       ],
       "description": "A new shape on the game's building materials: beside the walls and floors in the build menu, taking every material they take.",
       "properties": {
+        "materialPool": {"type":"string","minLength":1},
         "tweak": {
           "$ref": "#/$defs/tweak"
         },
@@ -4269,6 +4385,77 @@
         "affixes": { "type": "array", "minItems": 1, "maxItems": 256, "items": { "$ref": "#/$defs/affixEntry" }, "description": "What can come up." },
         "min": { "type": "integer", "minimum": 0, "maximum": 8, "description": "How many different affixes a roll gives at least (default 1). A pool whose entries can never give that many (entries with a weight above 0, one per group) is refused." },
         "max": { "type": "integer", "minimum": 0, "maximum": 8, "description": "How many at most (default 1): at least min." }
+      },
+      "additionalProperties": false
+    },
+    "rarityUpgrade": {
+      "type": "object",
+      "required": ["steps"],
+      "description": "A rarity upgrade (RarityUpgradeBlock): which items it takes, up to which rarity, and each step by the rarity it reaches. An item whose next rarity has no step, or whose type has no enhancement slot for it, is refused; nothing is paid then.",
+      "properties": {
+        "items": { "type": "array", "maxItems": 1024, "items": { "type": "string", "minLength": 1, "pattern": "\\S" }, "description": "The item types: game items, items of this mod by block name, \"other-mod:name\", or a pattern with * over the game's item names (\"Weapon_*\"; \"my-mod:*\" is every item of that mod). Left out: every item with enhancement slots." },
+        "max": { "enum": ["uncommon", "rare", "epic", "legendary"], "description": "The highest rarity it upgrades to (default legendary)." },
+        "steps": {
+          "type": "object",
+          "minProperties": 1,
+          "description": "The steps, by the rarity each reaches (uncommon .. legendary). A rarity without a step is not reached.",
+          "properties": {
+            "uncommon": { "$ref": "#/$defs/upgradeStep" },
+            "rare": { "$ref": "#/$defs/upgradeStep" },
+            "epic": { "$ref": "#/$defs/upgradeStep" },
+            "legendary": { "$ref": "#/$defs/upgradeStep" }
+          },
+          "additionalProperties": false
+        },
+        "durability": { "enum": ["keepRatio", "keep", "repair"], "description": "What happens to durability (default keepRatio: the game computes max durability again at the new rarity, the share kept)." },
+        "socket": { "enum": ["keep", "gameChance"], "description": "A gem socket: keep (default: as it is), or gameChance (a weapon without one rolls the game's chance at the new rarity; a won socket re-creates the item in its slot)." },
+        "allowEmptySlot": { "type": "boolean", "description": "Upgrade into an enhancement slot the item's type has no perk for (default false: refused)." }
+      },
+      "additionalProperties": false
+    },
+    "upgradeAction": {
+      "type": "object",
+      "required": ["rule"],
+      "description": "A rarity upgrade as what a use does (UpgradeAction): one step of a rarity upgrade rule, paid by the player, on the server.",
+      "properties": {
+        "rule": { "type": "string", "minLength": 1, "pattern": "\\S", "description": "The rarity upgrade it runs: a rarityUpgrades block of this mod by name, or \"other-mod:name\"." },
+        "target": { "enum": ["held", "choose"], "description": "held (default): the item in the player's hand, for every player; choose: a window lists the player's gear with each next step's cost and chance (Kiln players; others get held)." },
+        "range": { "type": "number", "minimum": 1, "maximum": 64, "description": "How far from it, in metres, a player may stand when they pick an item in the choose window (default 6)." }
+      },
+      "additionalProperties": false
+    },
+    "upgradeStep": {
+      "type": "object",
+      "description": "One step of a rarity upgrade: what reaching its rarity costs and how likely it is.",
+      "properties": {
+        "cost": { "type": "object", "maxProperties": 8, "description": "The items it costs, by name (as in items; plain items such as materials, never gear or a gem), each 1 to 100000. Left out: free.", "additionalProperties": { "type": "integer", "minimum": 1, "maximum": 100000 } },
+        "chance": { "type": "number", "minimum": 0, "maximum": 1, "description": "How likely the step is to succeed (default 1). The server rolls it." },
+        "onFail": { "enum": ["keepItemLoseCost", "keepItemKeepCost", "downgrade"], "description": "What a failed roll costs (default keepItemLoseCost: the item stays, the cost is spent; downgrade: the cost is spent and the item drops one rarity)." },
+        "levelScale": { "type": "number", "minimum": 0, "maximum": 1000, "description": "The cost grows with the item's level: count x (1 + levelScale x (level - 1)), rounded up (default 0)." },
+        "unlock": { "type": "boolean", "description": "The new enhancement slot comes unlocked (one level, one more perk acting) instead of waiting for the workbench (default false)." }
+      },
+      "additionalProperties": false
+    },
+    "rarityRoll": {
+      "type": "object",
+      "required": ["items", "weights"],
+      "description": "Which item types roll which rarity when they are made (RarityRollBlock). A rarity whose enhancement slot the item type lacks never comes up; with none left the game's rarity stays. A recipe's tooltip still shows the type's rarity.",
+      "properties": {
+        "items": { "type": "array", "minItems": 1, "maxItems": 1024, "items": { "type": "string", "minLength": 1, "pattern": "\\S" }, "description": "The item types: game items, items of this mod by block name, \"other-mod:name\", or a pattern with * over the game's item names (\"Weapon_*\"; \"my-mod:*\" is every item of that mod)." },
+        "sources": { "type": "string", "pattern": "^(craft|loot|give)(, ?(craft|loot|give))*$", "description": "Which creations roll (default \"craft, loot\"): craft, the game makes it without a rarity (crafting); loot, the game makes it with a rarity it rolled or fixed (random loot, random drop-table stacks); give, a Kiln give without a rarity." },
+        "weights": {
+          "type": "object",
+          "minProperties": 1,
+          "description": "How likely each rarity is, among the five; one left out is 0. At least one above 0.",
+          "properties": {
+            "common": { "type": "number", "minimum": 0, "maximum": 1000000 },
+            "uncommon": { "type": "number", "minimum": 0, "maximum": 1000000 },
+            "rare": { "type": "number", "minimum": 0, "maximum": 1000000 },
+            "epic": { "type": "number", "minimum": 0, "maximum": 1000000 },
+            "legendary": { "type": "number", "minimum": 0, "maximum": 1000000 }
+          },
+          "additionalProperties": false
+        }
       },
       "additionalProperties": false
     },

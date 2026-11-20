@@ -114,7 +114,7 @@ internal static partial class Ops
         {
             ["available"] = true, ["intercept"] = s.Intercept, ["craftHook"] = s.CraftHook, ["buildHooks"] = s.BuildHooks,
             ["terraformHook"] = s.TerraformHook, ["spawnHook"] = s.SpawnHook, ["zones"] = s.Zones, ["denied"] = s.Denied,
-            ["canceled"] = s.Canceled,
+            ["canceled"] = s.Canceled, ["hookGroups"] = GameplayHookRows.Snapshot(),
         };
     }
 }

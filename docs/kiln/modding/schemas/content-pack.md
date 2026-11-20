@@ -2,7 +2,7 @@
 
 <!-- Generated from schema/content-pack.schema.json by kiln_manage::lint::docs (cargo test -p kiln-manage --test lint with KILN_LINT_WRITE=1). Do not edit. -->
 
-kiln.content's and kiln.gamedata's data packs: rules over the game's registries (items, recipes, loot, drops, templates, arsenals, sequences, buffs, perks, skills, itemdata), new items / recipes and gamedata clones ("add" lists), and sections of other services (creatures). Read by native/services/content (nlohmann::json with comments allowed; trailing commas are NOT allowed). Field paths come from the game's reflection at run time, so this schema checks the document's shape; `kiln lint` checks names and paths against the game-data catalog. Docs: docs/kiln/services/content.md, gamedata.md, creatures.md.
+kiln.content's and kiln.gamedata's data packs: rules over the game's registries (items, recipes, loot, drops, templates, arsenals, sequences, buffs, perks, skills, itemdata), typed gear values (gear, gearRules), new items / recipes and gamedata clones ("add" lists), and sections of other services (creatures). Read by native/services/content (nlohmann::json with comments allowed; trailing commas are NOT allowed). Field paths come from the game's reflection at run time, so this schema checks the document's shape; `kiln lint` checks names and paths against the game-data catalog. Docs: docs/kiln/services/content.md, gamedata.md, creatures.md.
 
 - Files: `**/content/*.json`
 - JSON: comments allowed, trailing commas **not allowed**
@@ -19,6 +19,8 @@ kiln.content's and kiln.gamedata's data packs: rules over the game's registries 
 | `creatures` | [creaturesSection](#creaturessection) |  |  |
 | `drops` | [dropsSection](#dropssection) |  |  |
 | `format` | `1` |  | 1 (optional). Another value refuses the whole file. |
+| `gear` | [gearSection](#gearsection) |  |  |
+| `gearRules` | [gearRules](#gearrules) |  |  |
 | `itemdata` | [itemdataSection](#itemdatasection) |  |  |
 | `items` | [itemsSection](#itemssection) |  |  |
 | `loot` | [lootSection](#lootsection) |  |  |
@@ -121,6 +123,61 @@ Paths of the game's reflection -> values. @where: conditions on original values 
 |---|---|---|---|
 | `@refs` | boolean |  |  |
 | `@where` | [where](#where) |  |  |
+
+## gearNumber
+
+A number in the tooltip's own units, or an op relative to the game's value of the item: {"mul": 1.2}, {"add": 5}, {"set": 30}, "min", "max", "raiseOnly", "lowerOnly".
+
+Type: number or object
+
+## gearRarityValues
+
+One value per rarity: a list of up to five, common to legendary (null keeps the game's), or {"common": ..., "legendary": ...}.
+
+Type: array of null or [gearNumber](#gearnumber) or object
+
+## gearRule
+
+The gear values of every item the selector matches. Other keys are item field paths, as in the items section (the typed keys win where both name one field).
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `@refs` | boolean |  | Opt in to changing the perk slots of game items (perks), as in the items section. |
+| `@where` | [where](#where) |  | Conditions on the game's original values of the item, as in the items section. |
+| `armor` | object |  | The armour the tooltip shows per kind at the item's lowest level, solved into armorSetup.distribution. 0..100000. |
+| `block` | [gearNumber](#gearnumber) |  | blockSetup.quality, 0..1. |
+| `damage` | object |  | Shares of the damage per kind (0.5 = half; the game's weapons add up to 1), and for wood, stone, metal and explosion the whole numbers the game keeps for what a tool harvests and breaks. Kinds not named keep their value. |
+| `levels` | integer or array of integer |  | The levels a copy is made at: a level (both ends) or [lowest, highest], 1..55. |
+| `maxStack` | [gearNumber](#gearnumber) |  | maxStackSize, 1..65535. |
+| `perks` | [perks](#kitbash) |  |  |
+| `power` | [gearNumber](#gearnumber) |  | The damage the tooltip shows at the item's lowest level (levels, else the game's), solved into damageSetup.dmgMod with the item's speed. 0..100000. |
+| `rarity` | string or integer |  | The type's rarity: what the recipe tooltip shows and a copy is made with when the game does not roll it. The game has no rarity above legendary. |
+| `recipe` | object |  | Every recipe that makes the item: its ingredients and crafting time (other recipe fields: the recipes section). |
+| `rolled` | boolean |  | generateRarity: the game rolls the rarity of each new copy (true, as for loot weapons), or every copy is the type's rarity (false). |
+| `socket` | boolean |  | gemSlotOverride: new copies get a gem socket (gear other than weapons needs Kiln's sockets: docs/kiln/services/gems-sockets.md). |
+| `speed` | [gearNumber](#gearnumber) |  | damageSetup.speedMod: the damage factor of the weapon's speed class (it multiplies the damage; the attack speed is the animation). More than 0, at most 100. Alone it changes the tooltip's damage: give power too to keep it. |
+| `staminaCost` | [gearNumber](#gearnumber) |  | The item's StaminaCost value (impactValues.StaminaCost), as weapon blocks write it; for items that have one. |
+
+## gearRules
+
+The game's balancing values for gear (keen::BalancingTable): boot values, read before the game starts, so the mod needs "boot": true; they act where the mod runs (the server's values act; a player's game shows them when it has the mod too). Applied whole or not at all. Docs: docs/kiln/services/content.md#gear-rules-boot-values.
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `comment` |  |  | Free text, ignored. |
+| `durability` | object |  | Max durability: (start + growth x (level - 1)) x the rarity's factor x the item's own factor. |
+| `lootRarityRates` |  |  | not supported yet: Kiln has not mapped the game resource that holds the loot rarity rates |
+| `rarityDurability` | [gearRarityValues](#gearrarityvalues) |  | rarityDurabilityMod: the factor of each rarity on a copy's max durability (the game's: 0.9, 0.95, 1, 1.05, 1.1). 0.01..100. |
+| `socketChance` | [gearRarityValues](#gearrarityvalues) |  | gemSlotProbability: the chance of each rarity that a new weapon gets a gem socket (the game's: 0, 0.05, 0.25, 0.5, 1). 0..1. |
+| `unlockCost` | object |  | What unlocking an enhancement at the workbench costs (the game's perk unlock cost). |
+
+## gearSection
+
+Typed values of item types in the numbers the game's tooltip shows ("<selector>": {gear rule}): kiln.content solves them into item fields per matched item, as layers of the pack's mod, after the items section. Docs: docs/kiln/services/content.md#gear-values.
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `add` |  |  | new items go in the items section's "add" list; gear rules change items |
 
 ## guid
 

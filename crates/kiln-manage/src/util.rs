@@ -238,6 +238,21 @@ pub fn run_status(cmd: &mut Command, what: &str) -> Result<()> {
     Ok(())
 }
 
+/// A file this process holds locked ([`std::fs::File::lock`] and its kin), unlocked explicitly when it is dropped.
+///
+/// Closing the file is not enough: a program another thread starts holds a copy of every descriptor from its fork
+/// until its exec (close-on-exec closes them only then), and on Unix the lock belongs to the open file, so it outlives
+/// this process's close for that moment. A lock taken again right after (the next move, the next quick operation)
+/// would then be refused as if another launcher held it. Unlocking releases it for every copy at once.
+#[derive(Debug)]
+pub(crate) struct LockedFile(pub(crate) std::fs::File);
+
+impl Drop for LockedFile {
+    fn drop(&mut self) {
+        let _ = self.0.unlock();
+    }
+}
+
 /// An io error with the path in its message (the code follows the io error kind).
 pub fn io_at(path: &Path, what: &str) -> impl FnOnce(std::io::Error) -> Error {
     let p = path.display().to_string();
@@ -298,6 +313,99 @@ pub fn rename_replace(from: &Path, to: &Path) -> Result<()> {
     std::fs::rename(from, to).map_err(io_at(to, "renaming to"))
 }
 
+/// [`write_atomic`] for a file whose new content must be on disk when this returns, a crash or power cut later
+/// included (the publish journal: an intent written here is what keeps a request from being sent twice). The temp file
+/// `<name>.tmp` is written and flushed (`fsync`; `FlushFileBuffers` on Windows), then it replaces `path` durably: on
+/// Unix `rename` and an `fsync` of the folder, on Windows `MoveFileExW` with `MOVEFILE_REPLACE_EXISTING |
+/// MOVEFILE_WRITE_THROUGH`. The folder must exist (a folder made here would need its own parent flushed). The temp
+/// file is removed when the write fails. [`write_atomic`] and its callers are unchanged.
+pub fn write_atomic_durable(path: &Path, data: &[u8]) -> Result<()> {
+    use std::io::Write;
+    let dir = path.parent().ok_or_else(|| Error::invalid(format!("{}: no parent folder", path.display())))?;
+    let name = path.file_name().ok_or_else(|| Error::invalid(format!("{}: no file name", path.display())))?;
+    let mut tmp_name = name.to_os_string();
+    tmp_name.push(".tmp");
+    let tmp = dir.join(tmp_name);
+    let written = std::fs::File::create(&tmp).map_err(io_at(&tmp, "writing")).and_then(|mut f| {
+        f.write_all(data).map_err(io_at(&tmp, "writing"))?;
+        f.sync_all().map_err(io_at(&tmp, "flushing"))
+    });
+    written.and_then(|_| replace_durable(&tmp, path)).inspect_err(|_| {
+        let _ = std::fs::remove_file(&tmp);
+    })
+}
+
+/// Durable replacement using an unpredictable, exclusively created temporary file.
+pub fn write_atomic_durable_exclusive(path: &Path, data: &[u8]) -> Result<()> {
+    use std::io::Write;
+    let dir = path.parent().ok_or_else(|| Error::invalid(format!("{}: no parent folder", path.display())))?;
+    let name = path.file_name().ok_or_else(|| Error::invalid(format!("{}: no file name", path.display())))?;
+    let mut tmp_name = name.to_os_string();
+    tmp_name.push(format!(".{}.kiln-tmp", crate::hash::hex(&random_bytes::<16>()?)));
+    let tmp = dir.join(tmp_name);
+    let mut f = std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp).map_err(io_at(&tmp, "writing"))?;
+    let written = f.write_all(data).map_err(io_at(&tmp, "writing")).and_then(|_| f.sync_all().map_err(io_at(&tmp, "flushing")));
+    drop(f);
+    written.and_then(|_| replace_durable(&tmp, path)).inspect_err(|_| {
+        let _ = std::fs::remove_file(&tmp);
+    })
+}
+
+/// Unix: the rename is made durable by flushing the folder that holds both names.
+#[cfg(unix)]
+fn replace_durable(from: &Path, to: &Path) -> Result<()> {
+    std::fs::rename(from, to).map_err(io_at(to, "renaming to"))?;
+    let dir = to.parent().ok_or_else(|| Error::invalid(format!("{}: no parent folder", to.display())))?;
+    std::fs::File::open(dir).and_then(|d| d.sync_all()).map_err(io_at(dir, "flushing"))
+}
+
+/// Absolute, extended Windows names for direct Win32 calls, including paths beyond MAX_PATH.
+#[cfg(windows)]
+pub(crate) fn win32_path(path: &Path) -> Result<Vec<u16>> {
+    use std::os::windows::ffi::OsStrExt;
+    let path = std::path::absolute(path).map_err(io_at(path, "resolving"))?;
+    win32_path_units(path.as_os_str().encode_wide().collect())
+}
+
+#[cfg(any(windows, test))]
+fn win32_path_units(mut path: Vec<u16>) -> Result<Vec<u16>> {
+    if path.contains(&0) { return Err(Error::invalid("the path holds a NUL character")); }
+    let slash = u16::from(b'\\');
+    let extended: Vec<u16> = r"\\?\".encode_utf16().collect();
+    if !path.starts_with(&extended) {
+        for c in &mut path { if *c == u16::from(b'/') { *c = slash; } }
+        let prefix = if path.len() >= 3 && path[1] == u16::from(b':') && path[2] == slash {
+            extended
+        } else if path.starts_with(&[slash, slash]) {
+            path.drain(..2);
+            r"\\?\UNC\".encode_utf16().collect()
+        } else {
+            return Err(Error::invalid("expected an absolute Windows path"));
+        };
+        path.splice(..0, prefix);
+    }
+    path.push(0);
+    Ok(path)
+}
+
+/// Windows: the folder cannot be flushed like on Unix; the replace itself is written through before it returns.
+#[cfg(windows)]
+fn replace_durable(from: &Path, to: &Path) -> Result<()> {
+    use windows_sys::Win32::Storage::FileSystem::{MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH};
+    let (src, dst) = (win32_path(from)?, win32_path(to)?);
+    // SAFETY: both are NUL-terminated UTF-16 strings that live until the call returns.
+    if unsafe { MoveFileExW(src.as_ptr(), dst.as_ptr(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) } == 0 {
+        return Err(io_at(to, "renaming to")(std::io::Error::last_os_error()));
+    }
+    Ok(())
+}
+
+/// Elsewhere: the plain replace (no Kiln build targets such a system).
+#[cfg(not(any(unix, windows)))]
+fn replace_durable(from: &Path, to: &Path) -> Result<()> {
+    rename_replace(from, to)
+}
+
 /// JSON (pretty, two spaces, trailing newline) written atomically.
 pub fn write_json_atomic<T: serde::Serialize>(path: &Path, value: &T) -> Result<()> {
     let mut text = serde_json::to_string_pretty(value)?;
@@ -355,6 +463,66 @@ pub fn uuid_v4() -> Result<String> {
     Ok(format!("{}-{}-{}-{}-{}", &h[0..8], &h[8..12], &h[12..16], &h[16..20], &h[20..32]))
 }
 
+/// Gives the owner write access to `path` (a file or a folder; a link is left as it is, never followed) when it has
+/// none: on Unix the owner's write bit, on Windows the read-only attribute cleared. No other permission changes.
+/// `std::fs::copy` and a rename keep a file's permissions, so a mod folder from a read-only place (a disc, an archive
+/// tool that marks files read-only, a file set read-only by hand) reached the Library and the game read-only, and a
+/// mod's or the player's settings could not be saved there. A zip import's files are writable already. Ok(true) when
+/// it changed something.
+pub fn make_writable(path: &Path) -> std::io::Result<bool> {
+    let meta = std::fs::symlink_metadata(path)?;
+    if !(meta.is_file() || meta.is_dir()) { return Ok(false); }
+    let mut perms = meta.permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = perms.mode();
+        if mode & 0o200 != 0 { return Ok(false); }
+        perms.set_mode(mode | 0o200);
+    }
+    #[cfg(windows)]
+    {
+        if !perms.readonly() { return Ok(false); }
+        // clears FILE_ATTRIBUTE_READONLY only; the file's other attributes and its ACL stay
+        #[allow(clippy::permissions_set_readonly_false)]
+        perms.set_readonly(false);
+    }
+    std::fs::set_permissions(path, perms)?;
+    Ok(true)
+}
+
+/// [`make_writable`] for `root` and every file and folder in it (links are left alone, not followed). The number of
+/// entries it changed.
+pub fn make_tree_writable(root: &Path) -> std::io::Result<u32> {
+    let mut n = u32::from(make_writable(root)?);
+    if std::fs::symlink_metadata(root)?.is_dir() {
+        for e in std::fs::read_dir(root)? {
+            let e = e?;
+            if e.file_type()?.is_symlink() { continue; }
+            n += make_tree_writable(&e.path())?;
+        }
+    }
+    Ok(n)
+}
+
+/// [`make_writable`] for what [`copy_tree`] copied from `from` into `to`: `to`, and each file and folder of `from` at the
+/// same place in `to` (links are left alone, never followed). What else is in `to` (a mod's own output, a file the
+/// player keeps read-only there on purpose) stays as it is. The number of entries it changed.
+pub fn make_copy_writable(from: &Path, to: &Path) -> std::io::Result<u32> {
+    let mut n = u32::from(make_writable(to)?);
+    if std::fs::symlink_metadata(from)?.is_dir() {
+        for e in std::fs::read_dir(from)? {
+            let e = e?;
+            if e.file_type()?.is_symlink() { continue; }
+            let there = to.join(e.file_name());
+            if std::fs::symlink_metadata(&there).is_ok_and(|m| !m.file_type().is_symlink()) {
+                n += make_copy_writable(&e.path(), &there)?;
+            }
+        }
+    }
+    Ok(n)
+}
+
 /// Copies a folder tree (regular files and folders; symlinks are refused). Returns the number of files.
 pub fn copy_tree(from: &Path, to: &Path) -> Result<u64> {
     std::fs::create_dir_all(to).map_err(io_at(to, "creating"))?;
@@ -380,6 +548,24 @@ mod tests {
     use super::*;
 
     #[test]
+    fn windows_rename_paths_support_long_drive_and_unc_names() {
+        for (root, expected) in [(r"C:\game\", r"\\?\C:\game\"), (r"\\server\share\game\", r"\\?\UNC\server\share\game\")] {
+            let path = format!("{root}{}\\mod.dll", "subfolder\\".repeat(35));
+            let wide = win32_path_units(path.encode_utf16().collect()).unwrap();
+            assert_eq!(wide.last(), Some(&0));
+            assert!(String::from_utf16(&wide[..wide.len()-1]).unwrap().starts_with(expected));
+        }
+        let extended = r"\\?\C:\game\mod.dll";
+        let wide = win32_path_units(extended.encode_utf16().collect()).unwrap();
+        assert_eq!(String::from_utf16(&wide[..wide.len()-1]).unwrap(), extended);
+        assert!(win32_path_units(vec![u16::from(b'C'), 0]).is_err());
+        let unusual = vec![67, 58, 92, 0xD800, 46, 100, 108, 108];
+        let wide = win32_path_units(unusual.clone()).unwrap();
+        assert_eq!(&wide[4..wide.len()-1], unusual, "Windows names must retain unpaired UTF-16 units too");
+        assert!(win32_path_units("relative\\mod.dll".encode_utf16().collect()).is_err());
+    }
+
+    #[test]
     fn rfc3339_round_trip() {
         assert_eq!(rfc3339(1_762_257_600), "2025-11-04T12:00:00Z");
         assert_eq!(parse_rfc3339("2025-11-04T12:00:00Z"), Some(1_762_257_600));
@@ -400,6 +586,64 @@ mod tests {
         assert_eq!(u.len(), 36);
         assert_eq!(&u[14..15], "4");
         assert_ne!(u, uuid_v4().unwrap());
+    }
+
+    #[test]
+    fn durable_writes_replace_and_leave_no_temp_file() {
+        let d = std::env::temp_dir().join(format!("km-util-durable-{}", uuid_v4().unwrap()));
+        std::fs::create_dir_all(&d).unwrap();
+        let f = d.join("journal.json");
+        write_atomic_durable(&f, b"first\n").unwrap();
+        assert_eq!(std::fs::read(&f).unwrap(), b"first\n");
+        write_atomic_durable(&f, b"second, longer than the first\n").unwrap();
+        assert_eq!(std::fs::read(&f).unwrap(), b"second, longer than the first\n");
+        // a stale temp file from a crash is overwritten, not appended to
+        std::fs::write(d.join("journal.json.tmp"), vec![b'x'; 4096]).unwrap();
+        write_atomic_durable(&f, b"third\n").unwrap();
+        assert_eq!(std::fs::read(&f).unwrap(), b"third\n");
+        assert!(!d.join("journal.json.tmp").exists());
+        let names: Vec<String> = std::fs::read_dir(&d).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        assert_eq!(names, ["journal.json"]);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_failed_durable_write_keeps_what_was_there_and_creates_no_folder() {
+        let d = std::env::temp_dir().join(format!("km-util-durable-{}", uuid_v4().unwrap()));
+        // no folder: an error, and nothing is created (write_atomic would create it)
+        assert!(write_atomic_durable(&d.join("journal.json"), b"x").is_err());
+        assert!(!d.exists());
+        // the target cannot be replaced (a folder with something in it): the error leaves the target and no temp file
+        std::fs::create_dir_all(d.join("journal.json")).unwrap();
+        std::fs::write(d.join("journal.json").join("keep"), b"kept").unwrap();
+        assert!(write_atomic_durable(&d.join("journal.json"), b"new").is_err());
+        assert_eq!(std::fs::read(d.join("journal.json").join("keep")).unwrap(), b"kept");
+        assert!(!d.join("journal.json.tmp").exists());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// The folder is flushed after the rename: a folder that can be written and entered but not opened for reading
+    /// lets the rename through and fails the flush, which must be reported (a write whose rename may not be on disk
+    /// is not a durable write). Root can open any folder, so the check means nothing there.
+    #[cfg(unix)]
+    #[test]
+    fn a_durable_write_flushes_the_folder_and_reports_when_it_cannot() {
+        use std::os::unix::fs::PermissionsExt;
+        if unsafe { libc::geteuid() } == 0 {
+            return;
+        }
+        let d = std::env::temp_dir().join(format!("km-util-durable-{}", uuid_v4().unwrap()));
+        std::fs::create_dir_all(&d).unwrap();
+        let f = d.join("journal.json");
+        write_atomic_durable(&f, b"before\n").unwrap();
+        std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o300)).unwrap();
+        let e = write_atomic_durable(&f, b"after\n");
+        std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let e = e.expect_err("the folder could not be flushed and that was not reported");
+        assert!(e.message.starts_with("flushing"), "{}", e.message);
+        // the rename itself happened; only its durability is not proven
+        assert_eq!(std::fs::read(&f).unwrap(), b"after\n");
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]

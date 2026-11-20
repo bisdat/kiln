@@ -839,6 +839,25 @@ Kiln.NativeWanted.NativeWanted() -> void
 Kiln.NativeWanted.NativeWanted(string! Name, uint Id, uint Value) -> void
 Kiln.NativeWanted.Value.get -> uint
 Kiln.NativeWanted.Value.init -> void
+Kiln.NpcUnlockResult
+Kiln.NpcUnlockResult.<Clone>$() -> Kiln.NpcUnlockResult!
+Kiln.NpcUnlockResult.Deconstruct(out bool Ok, out string? Reason, out uint NpcId, out bool? Unlocked, out ushort? KnowledgeVersion, out Kiln.CapacityWorldToken World, out ulong SnapshotRevision) -> void
+Kiln.NpcUnlockResult.Equals(Kiln.NpcUnlockResult? other) -> bool
+Kiln.NpcUnlockResult.KnowledgeVersion.get -> ushort?
+Kiln.NpcUnlockResult.KnowledgeVersion.init -> void
+Kiln.NpcUnlockResult.NpcId.get -> uint
+Kiln.NpcUnlockResult.NpcId.init -> void
+Kiln.NpcUnlockResult.NpcUnlockResult(bool Ok, string? Reason, uint NpcId, bool? Unlocked, ushort? KnowledgeVersion, Kiln.CapacityWorldToken World, ulong SnapshotRevision) -> void
+Kiln.NpcUnlockResult.Ok.get -> bool
+Kiln.NpcUnlockResult.Ok.init -> void
+Kiln.NpcUnlockResult.Reason.get -> string?
+Kiln.NpcUnlockResult.Reason.init -> void
+Kiln.NpcUnlockResult.SnapshotRevision.get -> ulong
+Kiln.NpcUnlockResult.SnapshotRevision.init -> void
+Kiln.NpcUnlockResult.Unlocked.get -> bool?
+Kiln.NpcUnlockResult.Unlocked.init -> void
+Kiln.NpcUnlockResult.World.get -> Kiln.CapacityWorldToken
+Kiln.NpcUnlockResult.World.init -> void
 Kiln.Obelisk
 Kiln.Obelisk.<Clone>$() -> Kiln.Obelisk!
 Kiln.Obelisk.Deconstruct(out string! Id, out string! Region, out Kiln.WorldPosition? Position, out Kiln.ProgressFact! Reading) -> void
@@ -1399,6 +1418,24 @@ Kiln.QuestType.Auto = 0 -> Kiln.QuestType
 Kiln.QuestType.PlayerQuest = 2 -> Kiln.QuestType
 Kiln.QuestType.WorldQuest = 1 -> Kiln.QuestType
 Kiln.Quests
+Kiln.RosterUnlockChangedEvent
+Kiln.RosterUnlockChangedEvent.After.get -> bool
+Kiln.RosterUnlockChangedEvent.Before.get -> bool
+Kiln.RosterUnlockChangedEvent.KnowledgeVersion.get -> ushort
+Kiln.RosterUnlockChangedEvent.NpcId.get -> uint
+Kiln.RosterUnlockChangedEvent.SnapshotRevision.get -> ulong
+Kiln.RosterUnlockChangedEvent.World.get -> Kiln.CapacityWorldToken
+Kiln.RosterWorldResult
+Kiln.RosterWorldResult.<Clone>$() -> Kiln.RosterWorldResult!
+Kiln.RosterWorldResult.Deconstruct(out bool Ok, out string? Reason, out Kiln.CapacityWorldToken? World) -> void
+Kiln.RosterWorldResult.Equals(Kiln.RosterWorldResult? other) -> bool
+Kiln.RosterWorldResult.Ok.get -> bool
+Kiln.RosterWorldResult.Ok.init -> void
+Kiln.RosterWorldResult.Reason.get -> string?
+Kiln.RosterWorldResult.Reason.init -> void
+Kiln.RosterWorldResult.RosterWorldResult(bool Ok, string? Reason, Kiln.CapacityWorldToken? World) -> void
+Kiln.RosterWorldResult.World.get -> Kiln.CapacityWorldToken?
+Kiln.RosterWorldResult.World.init -> void
 Kiln.ShrineFoundEvent
 Kiln.ShrineFoundEvent.Shrine.get -> Kiln.FlameShrine!
 Kiln.ShrineKind
@@ -1532,6 +1569,7 @@ Kiln.WorldProgressStatus.WorldProgressStatus(bool Knowledge, bool World, bool Se
 [KILNX001]static Kiln.QuestInput.SetInventory(Kiln.QuestHolder h, string! item, int count) -> void
 [KILNX001]static Kiln.QuestInput.SetLevel(Kiln.QuestHolder h, int level) -> void
 [KILNX001]static Kiln.QuestInput.Talk(Kiln.QuestHolder h, string! npc, uint line = 0, string? node = null, string? modId = null) -> void
+const Kiln.NativeQuests.RosterPage = 64 -> int
 override Kiln.Boss.Equals(object? obj) -> bool
 override Kiln.Boss.GetHashCode() -> int
 override Kiln.Boss.ToString() -> string!
@@ -1626,6 +1664,9 @@ override Kiln.NativeStepInfo.Equals(object? obj) -> bool
 override Kiln.NativeStepInfo.GetHashCode() -> int
 override Kiln.NativeStepInfo.ToString() -> string!
 override Kiln.NativeWanted.GetHashCode() -> int
+override Kiln.NpcUnlockResult.Equals(object? obj) -> bool
+override Kiln.NpcUnlockResult.GetHashCode() -> int
+override Kiln.NpcUnlockResult.ToString() -> string!
 override Kiln.Obelisk.Equals(object? obj) -> bool
 override Kiln.Obelisk.GetHashCode() -> int
 override Kiln.Obelisk.ToString() -> string!
@@ -1663,6 +1704,10 @@ override Kiln.QuestStartedEvent.ToString() -> string!
 override Kiln.QuestStateChangedEvent.ToString() -> string!
 override Kiln.QuestStatusChangedEvent.ToString() -> string!
 override Kiln.QuestStepEvent.ToString() -> string!
+override Kiln.RosterUnlockChangedEvent.ToString() -> string!
+override Kiln.RosterWorldResult.Equals(object? obj) -> bool
+override Kiln.RosterWorldResult.GetHashCode() -> int
+override Kiln.RosterWorldResult.ToString() -> string!
 override Kiln.ShrineFoundEvent.ToString() -> string!
 override Kiln.ShroudRoot.Equals(object? obj) -> bool
 override Kiln.ShroudRoot.GetHashCode() -> int
@@ -1787,6 +1832,11 @@ static Kiln.NativePlacement.operator ==(Kiln.NativePlacement? left, Kiln.NativeP
 static Kiln.NativeQuestInfo.operator !=(Kiln.NativeQuestInfo? left, Kiln.NativeQuestInfo? right) -> bool
 static Kiln.NativeQuestInfo.operator ==(Kiln.NativeQuestInfo? left, Kiln.NativeQuestInfo? right) -> bool
 static Kiln.NativeQuests.Counters.get -> (ulong Mirrored, ulong Lines, ulong Placed)
+static Kiln.NativeQuests.GetClientRosterWorld() -> Kiln.RosterWorldResult!
+static Kiln.NativeQuests.GetClientUnlock(uint npcId, Kiln.CapacityWorldToken clientWorld) -> Kiln.NpcUnlockResult!
+static Kiln.NativeQuests.GetRosterBudget(Kiln.CapacityWorldToken world) -> Kiln.CapacityQueryResult!
+static Kiln.NativeQuests.GetServerRosterWorld() -> Kiln.RosterWorldResult!
+static Kiln.NativeQuests.GetUnlock(uint npcId, Kiln.CapacityWorldToken serverWorld) -> Kiln.NpcUnlockResult!
 static Kiln.NativeQuests.Holds(Kiln.NativeComputed! c, Kiln.QuestHolder holder) -> bool
 static Kiln.NativeQuests.KnowledgeId(string! mod, string! name) -> uint?
 static Kiln.NativeQuests.ManifestJson.get -> string!
@@ -1802,6 +1852,8 @@ static Kiln.NativeStepInfo.operator !=(Kiln.NativeStepInfo? left, Kiln.NativeSte
 static Kiln.NativeStepInfo.operator ==(Kiln.NativeStepInfo? left, Kiln.NativeStepInfo? right) -> bool
 static Kiln.NativeWanted.operator !=(Kiln.NativeWanted left, Kiln.NativeWanted right) -> bool
 static Kiln.NativeWanted.operator ==(Kiln.NativeWanted left, Kiln.NativeWanted right) -> bool
+static Kiln.NpcUnlockResult.operator !=(Kiln.NpcUnlockResult? left, Kiln.NpcUnlockResult? right) -> bool
+static Kiln.NpcUnlockResult.operator ==(Kiln.NpcUnlockResult? left, Kiln.NpcUnlockResult? right) -> bool
 static Kiln.Obelisk.operator !=(Kiln.Obelisk? left, Kiln.Obelisk? right) -> bool
 static Kiln.Obelisk.operator ==(Kiln.Obelisk? left, Kiln.Obelisk? right) -> bool
 static Kiln.ProgressFact.operator !=(Kiln.ProgressFact? left, Kiln.ProgressFact? right) -> bool
@@ -1886,6 +1938,8 @@ static Kiln.Quests.Status.get -> Kiln.QuestEngineStatus!
 static Kiln.Quests.StatusOf(string! quest, Kiln.QuestHolder holder) -> Kiln.QuestStatus
 static Kiln.Quests.TrackedBy(Kiln.QuestHolder holder) -> string?
 static Kiln.Quests.WaypointCounters.get -> (ulong Requests, ulong Written)
+static Kiln.RosterWorldResult.operator !=(Kiln.RosterWorldResult? left, Kiln.RosterWorldResult? right) -> bool
+static Kiln.RosterWorldResult.operator ==(Kiln.RosterWorldResult? left, Kiln.RosterWorldResult? right) -> bool
 static Kiln.ShroudRoot.operator !=(Kiln.ShroudRoot? left, Kiln.ShroudRoot? right) -> bool
 static Kiln.ShroudRoot.operator ==(Kiln.ShroudRoot? left, Kiln.ShroudRoot? right) -> bool
 static Kiln.Spire.operator !=(Kiln.Spire? left, Kiln.Spire? right) -> bool

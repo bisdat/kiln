@@ -4,8 +4,11 @@
  * Evidence and engine notes: docs/re/spawn.md. Usage: docs/kiln/services/spawn.md.
  *
  * Threads: functions marked "tick" touch game state and must run on the tick thread in Pre or Post (posted tasks
- * count as Pre); elsewhere they return KILN_ERR_WRONG_THREAD. Managed mods always call from there. Catalog and
- * tracked-list reads are thread-safe.
+ * count as Pre); elsewhere they return KILN_ERR_WRONG_THREAD. Managed mods always call from there. spawn, spawn_item,
+ * destroy and cleanup also return KILN_ERR_WRONG_THREAD on the tick thread inside a program wrap's stage or a Kiln
+ * program's callback (since 0.2.0-dev.29: kiln.world's in_program answers 1 there); post them. Inside a kiln.types
+ * system-hook callback they go through as on dev.28, with one warning per call kind in kiln.log.
+ * Catalog and tracked-list reads are thread-safe.
  *
  * Templates are identified by their 16-byte GUID in the game's (Windows) layout: the text form
  * a56d2777-daf1-4164-90d4-b7b12749c723 is the bytes 77 27 6d a5 f1 da 64 41 90 d4 b7 b1 27 49 c7 23. Names come from

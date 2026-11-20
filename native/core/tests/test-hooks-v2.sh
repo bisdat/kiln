@@ -3,7 +3,8 @@
 # Builds hooks_v2_test.exe and runs it under plain Wine (a scratch prefix under $KILN_OUT; no game, no window).
 # Runs it twice: with the caller-table TLS slot below 64 (TEB TlsSlots) and at/above 64 (TlsExpansionSlots), then once
 # in "slots" mode (a process that uses up every link slot) and in "targets" mode (every target slot).
-# Exit code 0 = everything passed.
+# Exit code 0 = everything passed. Each run has a time limit (KILN_HOOKS_TEST_LIMIT seconds, 300 by default): a run that
+# waits forever, as a lock-order deadlock between an install and code_state would, fails instead of hanging.
 #   KILN_OUT=<build dir> native/core/tests/test-hooks-v2.sh
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
@@ -15,9 +16,15 @@ unset DISPLAY; export WAYLAND_DISPLAY=kiln-no-display
 mkdir -p "$WINEPREFIX"
 [[ -f $WINEPREFIX/system.reg ]] || wine wineboot -i >/dev/null 2>&1
 exe=$KILN_OUT/cmake/bin/hooksv2/hooks_v2_test.exe
+limit=${KILN_HOOKS_TEST_LIMIT:-300}
 rc=0
 for mode in normal tls64 slots targets; do
   echo "== hooks_v2_test ($mode)"
-  wine "$exe" "$mode" || rc=1
+  status=0
+  timeout -k 10 "$limit" wine "$exe" "$mode" || status=$?
+  if ((status == 124 || status == 137)); then
+    echo "FAIL hooks_v2_test ($mode) timed out after ${limit}s: possible lock-order deadlock"
+  fi
+  ((status == 0)) || rc=1
 done
 exit $rc

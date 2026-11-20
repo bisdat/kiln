@@ -48,6 +48,60 @@ void read_preview(const nlohmann::json& sec, const char* where) {
         KLOG_W("config: %s \"preview\" is not true, false or a list of capability names; ignored", where);
     }
 }
+// "boot": {"testRefuse" | "testFault": {"<mod>": "<collector>"}}: kiln.boot honours them only with policy any (labs).
+void read_boot(const nlohmann::json& doc) {
+    if (!doc.contains("boot") || !doc["boot"].is_object()) return;
+    for (const auto& [key, into] : {std::pair{"testRefuse", &g_config.boot_test_refuse}, std::pair{"testFault", &g_config.boot_test_fault}}) {
+        if (!doc["boot"].contains(key)) continue;
+        const auto& t = doc["boot"][key];
+        if (!t.is_object()) {
+            KLOG_W("config: kiln.json boot.%s is not an object of mod id -> collector; ignored", key);
+            continue;
+        }
+        for (const auto& [mod, collector] : t.items())
+            if (collector.is_string()) (*into)[mod] = collector.get<std::string>();
+            else KLOG_W("config: kiln.json boot.%s.%s is not a collector name; ignored", key, mod.c_str());
+    }
+}
+// "tooltipProbe": true | false | "<key>" (the client session's tooltip probe; a side section replaces it).
+void read_tooltip_probe(const nlohmann::json& sec, const char* where) {
+    if (!sec.contains("tooltipProbe")) return;
+    const auto& p = sec["tooltipProbe"];
+    if (p.is_boolean()) g_config.tooltip_probe = p.get<bool>() ? "default" : "";
+    else if (p.is_string()) g_config.tooltip_probe = p.get<std::string>();
+    else KLOG_W("config: %s \"tooltipProbe\" is not true, false or a key name; ignored", where);
+}
+// "tasks": {...}: the pool's global knobs (config.h TasksConfig). Present in a section, each valid key replaces the
+// value before it; a wrong type or a value out of its bound gives the default and one warning naming the key and bound.
+void read_tasks(const nlohmann::json& sec, const char* where) {
+    if (!sec.contains("tasks")) return;
+    const auto& t = sec["tasks"];
+    const TasksConfig defaults;
+    if (!t.is_object()) {
+        KLOG_W("config: %s \"tasks\" is not an object; the task pool keeps its defaults", where);
+        g_config.tasks = defaults;
+        return;
+    }
+    struct Knob {
+        const char* key;
+        uint32_t TasksConfig::*field;
+        uint32_t lo, hi;
+    };
+    static constexpr Knob kKnobs[] = {{"workers", &TasksConfig::workers, 1, 8},
+                                      {"long_running_global", &TasksConfig::long_running_global, 1, 16},
+                                      {"watchdog_running_s", &TasksConfig::watchdog_running_s, 5, 600},
+                                      {"watchdog_queued_s", &TasksConfig::watchdog_queued_s, 5, 600}};
+    for (const Knob& k : kKnobs) {
+        if (!t.contains(k.key)) continue;
+        const auto& v = t[k.key];
+        if (v.is_number_integer() && v.get<int64_t>() >= k.lo && v.get<int64_t>() <= k.hi) {
+            g_config.tasks.*k.field = static_cast<uint32_t>(v.get<int64_t>());
+        } else {
+            g_config.tasks.*k.field = defaults.*k.field;
+            KLOG_W("config: %s tasks.%s is not a whole number in %u..%u; the default is used", where, k.key, k.lo, k.hi);
+        }
+    }
+}
 }  // namespace
 
 const Config& config() { return g_config; }
@@ -73,6 +127,9 @@ void load_config() {
         log::set_level(g_config.log_level);
         read_native(doc, "kiln.json");
         read_preview(doc, "kiln.json");
+        read_boot(doc);
+        read_tasks(doc, "kiln.json");
+        read_tooltip_probe(doc, "kiln.json");
         KLOG_I("config: policy=%s clr=%d plugins=%d native.policy=%s", g_config.policy_any ? "any" : "verified-only",
                g_config.clr, g_config.plugins, native_policy_name(g_config.native_policy));
     } catch (const std::exception& e) {
@@ -85,6 +142,10 @@ void apply_side(uint32_t side) {
     if (!g_doc.is_object() || !g_doc.contains(name) || !g_doc[name].is_object()) return;
     try {
         const auto& sec = g_doc[name];
+        // Apply the gate override even if another side option has the wrong type. In particular, preview:false
+        // must not inherit a top-level preview:true because e.g. clr could not be read.
+        read_preview(sec, name);
+        read_tooltip_probe(sec, name);
         if (sec.contains("policy")) g_config.policy_any = sec.value("policy", "verified-only") == "any";
         g_config.clr = sec.value("clr", g_config.clr);
         g_config.plugins = sec.value("plugins", g_config.plugins);
@@ -93,12 +154,12 @@ void apply_side(uint32_t side) {
             log::set_level(g_config.log_level);
         }
         read_native(sec, name);
-        read_preview(sec, name);
+        read_tasks(sec, name);
         KLOG_I("config: \"%s\" section: policy=%s clr=%d plugins=%d native.policy=%s", name,
                g_config.policy_any ? "any" : "verified-only", g_config.clr, g_config.plugins,
                native_policy_name(g_config.native_policy));
     } catch (const std::exception& e) {
-        KLOG_E("config: kiln.json \"%s\" section unreadable (%s); top-level values stay", name, e.what());
+        KLOG_E("config: kiln.json \"%s\" section partly unreadable (%s); readable values stay", name, e.what());
     }
 }
 

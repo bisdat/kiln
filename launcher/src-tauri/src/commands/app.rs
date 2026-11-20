@@ -42,6 +42,21 @@ pub struct AppInfo {
     /// next start for software mode (crate::render). Absent elsewhere.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub render: Option<crate::render::RenderInfo>,
+    /// Linux AppImage only: the app menu entry Kiln writes so taskbars show its icon (crate::desktop). Absent elsewhere.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub desktop: Option<crate::desktop::DesktopInfo>,
+    /// (dev.29.18) Linux only: WebKit's sandbox in this start (the player's choice, what WebKit does, the probe of bwrap)
+    /// and whether the marker turns it off at the next start (crate::sandbox). Absent elsewhere.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandbox: Option<crate::sandbox::SandboxInfo>,
+    /// (dev.29) The previews on for this start (settings.json `preview` and `KILN_LAUNCHER_PREVIEW`;
+    /// commands/vendor.rs `previews`): none is used since 0.2.0-dev.29.18 (`"upscalers"` ended with phase B). Left out while none is on.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub preview: Vec<String>,
+    /// (dev.29.18) A Windows install's own files that are gone from the launcher's folder at this start: its exe, its
+    /// `uninstall.exe` (an antivirus took them; crate::own_files). Left out while none is.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub own_files_missing: Vec<String>,
 }
 
 /// `<data>/settings.json`
@@ -60,7 +75,9 @@ pub struct LauncherSettings {
     /// `checkUpdates`, which old files may still carry (ignored).
     #[serde(default = "yes")]
     pub update_check: bool,
-    /// The update channel, "stable" or "dev"; absent: the channel of the running build (a dev build follows dev).
+    /// The update channel, "stable", "dev" (the release line: "Release" in the UI) or "beta" (dev.29: test builds);
+    /// absent: the channel of the running build (a dev build follows dev, a test build beta). A launcher before
+    /// dev.29 reads "beta" as absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub update_channel: Option<String>,
     /// The fire on Play (WebGL). Off: the plain Play button (Settings, Appearance).
@@ -79,6 +96,23 @@ pub struct LauncherSettings {
     /// Off: none is raised, except the first notice of a folder that may still run although its mod is off.
     #[serde(default = "yes")]
     pub mod_folder_notes: bool,
+    /// "Check for mod updates once a day" (Settings, Launcher): the background check of the installed mods' sources
+    /// (commands/updates.rs). Off by default: a check runs only when the player asks for one.
+    #[serde(default)]
+    pub mod_updates_daily: bool,
+    /// (dev.29) "Earlier versions to keep" (Settings, Launcher): how many of a mod's earlier versions an update keeps
+    /// for a roll back, with their settings (kiln_manage::kept); 0 keeps none, at most kiln_manage::kept::KEEP_MAX.
+    #[serde(default = "one")]
+    pub keep_versions: u32,
+    /// The launcher's language (Settings, Language; launcher/src/i18n): absent or "system" = the system's languages,
+    /// else a tag ("zh-CN"). Only the page reads it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+    /// (dev.29) Previews of unfinished features, by name (none since 0.2.0-dev.29.18: `"upscalers"` ended with phase B;
+    /// commands/vendor.rs). Not in the UI: set by hand while the launcher is closed; `KILN_LAUNCHER_PREVIEW`
+    /// adds names for one start. Left out while empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub preview: Vec<String>,
 }
 
 impl Default for LauncherSettings {
@@ -94,12 +128,20 @@ impl Default for LauncherSettings {
             add_to_active_profile: true,
             ui_mode: None,
             mod_folder_notes: true,
+            mod_updates_daily: false,
+            keep_versions: kiln_manage::kept::KEEP_DEFAULT,
+            language: None,
+            preview: Vec::new(),
         }
     }
 }
 
 fn ten() -> u32 {
     10
+}
+
+fn one() -> u32 {
+    kiln_manage::kept::KEEP_DEFAULT
 }
 
 fn yes() -> bool {
@@ -250,8 +292,14 @@ pub fn spawn_task(
     let app = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut p = TaskProgress { app: app.clone(), task, cancel, last: Instant::now() - Duration::from_secs(1) };
-        let out = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| work(&mut p)))
+        let alone = ALONE_KINDS.contains(&p.task.kind.as_str());
+        let _writing = (!alone).then(crate::state::writing);
+        let out = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            if !alone && let Some(e) = crate::snapshot::startup::refusal() { return Err(e); }
+            work(&mut p)
+        }))
             .unwrap_or_else(|_| Err(Error::new(ErrorCode::Internal, "the task panicked (a bug; see launcher.log)")));
+        drop(_writing);
         let mut t = p.task;
         t.finished = Some(kiln_manage::util::now_rfc3339());
         match out {
@@ -320,6 +368,10 @@ pub async fn app_info(app: AppHandle) -> Result<AppInfo, Error> {
         deck: crate::deck::detect::current(),
         distribution: crate::distribution::CURRENT,
         render: crate::render::info(),
+        desktop: crate::desktop::info(),
+        sandbox: crate::sandbox::info(),
+        preview: super::vendor::previews(),
+        own_files_missing: crate::own_files::missing().to_vec(),
     })
 }
 
@@ -331,11 +383,33 @@ pub async fn app_started() -> Result<(), Error> {
     Ok(())
 }
 
+/// What the page measured about its drawing (launcher/src/shell/renderReport.ts): whether WebKit composites, WebGL, the
+/// window, a frame sample on Play. One line in launcher.log each, at most two a start (crate::render::page_report).
+#[tauri::command]
+pub async fn app_render_report(report: crate::render::PageRender) -> Result<(), Error> {
+    crate::render::page_report(&report);
+    Ok(())
+}
+
 /// Settings, "Draw the launcher without the GPU": sets (`software`) or clears the marker; applies at the next start.
 /// Linux only (else `unsupported`).
 #[tauri::command]
 pub async fn app_render_set(software: bool) -> Result<crate::render::RenderInfo, Error> {
     crate::state::blocking(move || crate::render::set_next(software)).await
+}
+
+/// Settings, "WebKit's sandbox": on removes the marker, off writes it; applies at the next start. Linux only (else
+/// `unsupported`).
+#[tauri::command]
+pub async fn app_sandbox_set(on: bool) -> Result<crate::sandbox::SandboxInfo, Error> {
+    crate::state::blocking(move || crate::sandbox::set_next(on)).await
+}
+
+/// Settings, "Kiln Launcher in the app menu" (Linux AppImage): on writes the entry and icons (replacing a
+/// `kiln-launcher.desktop` Kiln did not write), off removes Kiln's; kept for the next starts. Elsewhere `unsupported`.
+#[tauri::command]
+pub async fn app_desktop_set(on: bool) -> Result<crate::desktop::DesktopInfo, Error> {
+    crate::state::blocking(move || crate::desktop::set(on)).await
 }
 
 #[tauri::command]
@@ -348,21 +422,109 @@ pub async fn app_settings_set(settings: LauncherSettings) -> Result<LauncherSett
     if settings.saves_keep == 0 || settings.saves_keep > 100 {
         return Err(Error::invalid("Keep between 1 and 100 save backups."));
     }
+    if settings.keep_versions > kiln_manage::kept::KEEP_MAX {
+        return Err(Error::invalid(format!("Keep between 0 and {} earlier versions of a mod.", kiln_manage::kept::KEEP_MAX)));
+    }
     crate::state::blocking(move || {
         let dirs = crate::state::dirs()?;
         kiln_manage::util::write_json_atomic(&dirs.settings(), &settings)?;
+        // a lower count: every mod keeps at most that many from now on
+        if let Err(e) = kiln_manage::kept::apply_count(&dirs) {
+            crate::commands::app::launcher_log("library", &format!("the kept versions could not follow the new count: {}", e.message));
+        }
         Ok(settings)
     })
     .await
 }
 
-#[tauri::command]
-pub async fn app_open_path(path: String) -> Result<(), Error> {
-    let p = std::path::PathBuf::from(&path);
-    if path.trim().is_empty() || !p.exists() {
-        return Err(Error::not_found(format!("{path} does not exist")));
+/// `app_locales`: translation files a player put in `<data>/locales/` (docs/kiln/translating.md), for the page to use
+/// beside the ones built in.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LocaleFiles {
+    /// The folder (it need not exist).
+    pub dir: String,
+    /// `<tag>.json` files as text, by name; the page parses them.
+    pub files: Vec<LocaleFile>,
+    /// Files left out, and why.
+    pub errors: Vec<LocaleFileError>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LocaleFile {
+    pub tag: String,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LocaleFileError {
+    pub file: String,
+    pub message: String,
+}
+
+/// A locale file larger than this is not read: texts, not data (as Kiln's mod locales).
+const LOCALE_MAX_BYTES: u64 = 1 << 20;
+/// At most this many files are read.
+const LOCALE_MAX_FILES: usize = 64;
+
+/// A language tag as a file name: "en", "zh-CN", "pt-BR", "es-419".
+fn locale_tag(name: &str) -> Option<&str> {
+    let tag = name.strip_suffix(".json")?;
+    let mut parts = tag.split('-');
+    let first = parts.next()?;
+    let ok = (2..=3).contains(&first.len()) && first.chars().all(|c| c.is_ascii_alphabetic())
+        && parts.all(|p| (2..=8).contains(&p.len()) && p.chars().all(|c| c.is_ascii_alphanumeric()));
+    ok.then_some(tag)
+}
+
+/// Reads `dir/<tag>.json` (sorted by name; other files are not looked at). A missing folder is no files.
+pub fn read_locales(dir: &std::path::Path) -> LocaleFiles {
+    let mut out = LocaleFiles { dir: dir.display().to_string(), ..Default::default() };
+    let Ok(rd) = std::fs::read_dir(dir) else { return out };
+    let mut names: Vec<String> = rd.filter_map(|e| e.ok()).filter_map(|e| e.file_name().into_string().ok()).filter(|n| n.ends_with(".json")).collect();
+    names.sort();
+    for name in names {
+        let Some(tag) = locale_tag(&name) else {
+            out.errors.push(LocaleFileError { file: name, message: "not named <language>.json (en.json, zh-CN.json)".into() });
+            continue;
+        };
+        if out.files.len() >= LOCALE_MAX_FILES {
+            out.errors.push(LocaleFileError { file: name, message: format!("more than {LOCALE_MAX_FILES} files") });
+            continue;
+        }
+        let path = dir.join(&name);
+        let meta = match std::fs::symlink_metadata(&path) {
+            Ok(m) if m.is_file() => m,
+            Ok(_) => continue,
+            Err(e) => {
+                out.errors.push(LocaleFileError { file: name, message: e.to_string() });
+                continue;
+            }
+        };
+        if meta.len() > LOCALE_MAX_BYTES {
+            out.errors.push(LocaleFileError { file: name, message: format!("larger than {} KB", LOCALE_MAX_BYTES / 1024) });
+            continue;
+        }
+        match std::fs::read_to_string(&path) {
+            Ok(text) => out.files.push(LocaleFile { tag: tag.to_string(), text }),
+            Err(e) => out.errors.push(LocaleFileError { file: name, message: e.to_string() }),
+        }
     }
-    crate::state::open_external(p.as_os_str())
+    out
+}
+
+#[tauri::command]
+pub async fn app_locales() -> Result<LocaleFiles, Error> {
+    crate::state::blocking(|| Ok(read_locales(&crate::state::dirs()?.root.join("locales")))).await
+}
+
+/// Opens a folder, or shows a file selected in its folder. `path` relative (a found mod's game-relative path) is under
+/// `base` (the game folder); a path that is gone opens its nearest existing parent folder (reveal.rs).
+#[tauri::command]
+pub async fn app_open_path(path: String, base: Option<String>) -> Result<(), Error> {
+    crate::reveal::open(base.as_deref(), &path)
 }
 
 #[tauri::command]
@@ -371,6 +533,100 @@ pub async fn app_open_url(url: String) -> Result<(), Error> {
         return Err(Error::new(ErrorCode::Refused, "Only https links open.").with_detail(url));
     }
     crate::state::open_external(std::ffi::OsStr::new(&url))
+}
+
+/// "Open in Discord" (a support post, the build's post in #testing, the server): in the Discord app when this PC has it,
+/// else in the browser (kiln_manage::community::open). `url` is the discord.com link; `fallback` the web link to open
+/// instead of it, when another one fits better (the invite, for the server). The web link alone in Game Mode, where an
+/// app opening over the game is no help. Answers "app" or "web".
+#[tauri::command]
+pub async fn app_open_discord(url: String, fallback: Option<String>) -> Result<String, Error> {
+    if !url.starts_with("https://") || fallback.as_deref().is_some_and(|f| !f.starts_with("https://")) {
+        return Err(Error::new(ErrorCode::Refused, "Only https links open.").with_detail(url));
+    }
+    crate::state::blocking(move || open_discord_link(&url, fallback.as_deref()).map(|r| r.as_str().to_string())).await
+}
+
+/// May this Discord link open in the Discord app: it has an app link, this is no Game Mode session, and the
+/// `discord:` scheme is registered (asked each time: the app may have been installed or removed since).
+pub fn discord_app_usable(url: &str) -> bool {
+    kiln_manage::community::open::app_link(url).is_some() && !crate::deck::detect::current().gamescope && discord_scheme_registered()
+}
+
+/// [`app_open_discord`] without the command (also a reply notification's Open, community/posts.rs). Blocks a few
+/// seconds at most.
+pub fn open_discord_link(url: &str, fallback: Option<&str>) -> Result<kiln_manage::community::open::Opened, Error> {
+    use kiln_manage::community::open;
+    let usable = discord_app_usable(url);
+    let r = open::open_with(url, fallback, usable, |t| open_checked(std::ffi::OsStr::new(t)))?;
+    launcher_log("community", match r {
+        open::Opened::App => "opened a Discord link in the Discord app",
+        open::Opened::Web if usable => "opened a Discord link in the browser (the Discord app did not take it)",
+        open::Opened::Web => "opened a Discord link in the browser (no Discord app for discord: links here, or Game Mode)",
+    });
+    Ok(r)
+}
+
+/// Is the `discord:` scheme registered to a program that is there? Windows: `HKCR\discord` with `URL Protocol` and
+/// an open command whose program exists (reg.exe prints in the OEM code page, so a path with other letters can't be
+/// checked and is trusted). Linux: `xdg-mime` names a handler. Elsewhere: no.
+fn discord_scheme_registered() -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let query = |args: &[&str]| {
+            std::process::Command::new("reg").args(args).creation_flags(CREATE_NO_WINDOW).stdin(std::process::Stdio::null())
+                .output().ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        };
+        if query(&["query", r"HKCR\discord", "/v", "URL Protocol"]).is_none() {
+            return false;
+        }
+        let Some(cmd) = query(&["query", r"HKCR\discord\shell\open\command", "/ve"]) else { return false };
+        match kiln_manage::community::open::reg_command_exe(&cmd, &|k| std::env::var(k).ok()) {
+            Some(exe) if exe.is_ascii() => std::path::Path::new(&exe).is_file(),
+            Some(_) => true,
+            None => false,
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        kiln_manage::hostenv::command("xdg-mime").args(["query", "default", "x-scheme-handler/discord"])
+            .stdin(std::process::Stdio::null()).stderr(std::process::Stdio::null()).output().ok()
+            .filter(|o| o.status.success())
+            .is_some_and(|o| kiln_manage::community::open::xdg_handler(&String::from_utf8_lossy(&o.stdout)).is_some())
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
+    {
+        false
+    }
+}
+
+/// Opens a link and, where the opener says so, whether it worked: on Linux xdg-open's exit within 3 seconds (a handler
+/// that fails or is missing exits non-zero; one that keeps running is taken as opened and reaped in the background).
+/// Windows' explorer exits the same way for every link, so there only its start counts (the scheme was checked before).
+fn open_checked(target: &std::ffi::OsStr) -> Result<(), Error> {
+    #[cfg(not(windows))]
+    {
+        let mut child = kiln_manage::hostenv::command("xdg-open").arg(target)
+            .stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null())
+            .spawn().map_err(|e| Error::new(ErrorCode::Unsupported, format!("could not open it: {e}")))?;
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        while std::time::Instant::now() < until {
+            match child.try_wait() {
+                Ok(Some(s)) if s.success() => return Ok(()),
+                Ok(Some(s)) => return Err(Error::new(ErrorCode::Unsupported, format!("could not open it: xdg-open {s}"))),
+                Ok(None) => std::thread::sleep(std::time::Duration::from_millis(50)),
+                Err(e) => return Err(Error::new(ErrorCode::Unsupported, format!("could not open it: {e}"))),
+            }
+        }
+        std::thread::spawn(move || { let _ = child.wait(); });
+        Ok(())
+    }
+    #[cfg(windows)]
+    {
+        crate::state::open_external(target)
+    }
 }
 
 #[tauri::command]
@@ -643,6 +899,10 @@ pub async fn app_assets_import(app: AppHandle, kind: String, from: Option<String
 /// `flush_held_log`; a move that committed restarts, and they end with the process). At most HELD_MAX.
 static HELD_LOG: Mutex<Vec<String>> = Mutex::new(Vec::new());
 const HELD_MAX: usize = 500;
+/// Lines of the start that came before the beta copy's gate opened (crate::snapshot::startup: `state::dirs()` refuses
+/// until then, and the start's render and sandbox lines come before it): on stderr at once, and into launcher.log when
+/// the gate opens (`flush_early_log`, lib.rs `after_snapshot`). At most HELD_MAX.
+static EARLY_LOG: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 /// Appends one line to `<data>/logs/launcher.log`: `<time> <area>: <msg>`. Best effort. While the data folder is held
 /// nothing is written there (the move copies and verifies `logs/`): during a move of this process the line waits in
@@ -663,7 +923,25 @@ pub fn launcher_log(area: &str, msg: &str) {
     }
     match f.dirs() {
         Ok(d) => append_log(&d, &[line]),
-        Err(_) => eprintln!("{line}"),
+        Err(_) => {
+            // the folder is fine and only the beta copy's gate is not open yet: the line goes into the log later
+            if f.held_error().is_none() && crate::snapshot::startup::refusal().is_some() {
+                let mut h = EARLY_LOG.lock().unwrap_or_else(|e| e.into_inner());
+                if h.len() < HELD_MAX {
+                    h.push(line.clone());
+                }
+            }
+            eprintln!("{line}");
+        }
+    }
+}
+
+/// Writes the start's lines from before the beta copy's gate opened (they were on stderr already).
+pub fn flush_early_log() {
+    let _writing = crate::state::writing();
+    let lines = std::mem::take(&mut *EARLY_LOG.lock().unwrap_or_else(|e| e.into_inner()));
+    if let (false, Ok(d)) = (lines.is_empty(), crate::state::dirs()) {
+        append_log(&d, &lines);
     }
 }
 
@@ -680,6 +958,7 @@ fn append_log(d: &kiln_manage::paths::DataDirs, lines: &[String]) {
 
 /// Writes the lines held back during a move that did not commit (the data folder is free again).
 pub fn flush_held_log() {
+    let _writing = crate::state::writing();
     let lines = std::mem::take(&mut *HELD_LOG.lock().unwrap_or_else(|e| e.into_inner()));
     if lines.is_empty() {
         return;
@@ -858,4 +1137,41 @@ fn copy_assets_task(app: &AppHandle, kind: &str, from: std::path::PathBuf) -> Re
         }
         to_value(assets_status()?)
     }))
+}
+
+#[cfg(test)]
+mod locale_tests {
+    use super::*;
+
+    #[test]
+    fn locale_files_are_read_by_tag_and_bad_ones_named() {
+        let dir = std::env::temp_dir().join(format!("kiln-locales-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(read_locales(&dir).files, vec![], "a missing folder is no files");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("zh-CN.json"), r#"{"settings": {"title": "设置"}}"#).unwrap();
+        std::fs::write(dir.join("de.json"), "{}").unwrap();
+        std::fs::write(dir.join("notes.txt"), "x").unwrap();
+        std::fs::write(dir.join("Chinese.json"), "{}").unwrap();
+        std::fs::write(dir.join("ja.json"), vec![b' '; (LOCALE_MAX_BYTES + 1) as usize]).unwrap();
+        let got = read_locales(&dir);
+        assert_eq!(got.files.iter().map(|f| f.tag.as_str()).collect::<Vec<_>>(), ["de", "zh-CN"]);
+        assert!(got.files[1].text.contains("设置"));
+        let bad: Vec<&str> = got.errors.iter().map(|e| e.file.as_str()).collect();
+        assert_eq!(bad, ["Chinese.json", "ja.json"]);
+        assert_eq!(locale_tag("es-419.json"), Some("es-419"));
+        assert_eq!(locale_tag("pt-BR.json"), Some("pt-BR"));
+        assert_eq!(locale_tag("../x.json"), None);
+        assert_eq!(locale_tag("zh_CN.json"), None);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn the_language_setting_is_optional() {
+        let s: LauncherSettings = serde_json::from_str(r#"{"savesKeep": 3}"#).unwrap();
+        assert_eq!(s.language, None);
+        assert!(!serde_json::to_string(&s).unwrap().contains("language"));
+        let s: LauncherSettings = serde_json::from_str(r#"{"language": "zh-CN"}"#).unwrap();
+        assert_eq!(s.language.as_deref(), Some("zh-CN"));
+    }
 }

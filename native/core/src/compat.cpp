@@ -13,6 +13,7 @@
 #include "log.h"
 #include "native_mods.h"
 #include "profile.h"
+#include "sigdb.h"
 #include "services/hooks_internal.h"
 
 #include <psapi.h>  // after windows.h (common.h)
@@ -49,6 +50,15 @@ bool is_emf_loader(const KilnChainEntry& e) {
     return GetProcAddress(m, "emf_loader_identity") || GetProcAddress(m, "emf_loader_play_once");
 }
 
+// The engine word of a loaded chain DLL that its exports name, for `before` rules (dev.29): Ultimate ASI Loader, by the
+// export the launcher knows it by too (crates/kiln-manage/src/engines.rs), whatever the file is called. Empty otherwise.
+std::string engine_of(const KilnChainEntry& e, const std::string& path) {
+    HMODULE m = static_cast<HMODULE>(e.module);
+    if (!m) m = GetModuleHandleW(to_wide(path).c_str());  // a DLL the late phase loaded
+    if (m && GetProcAddress(m, "IsUltimateASILoader")) return "ultimate-asi-loader";
+    return {};
+}
+
 // The proxy's chain entries, a late one with the status the late phase gave it (still "late" while it has not run).
 std::vector<ChainRow> chain_rows() {
     std::vector<ChainRow> rows;
@@ -67,6 +77,11 @@ std::vector<ChainRow> chain_rows() {
         r.late_ignored = status == kLateAlreadyLoaded;
         r.loader = is_emf_loader(e);
         emf_chained = emf_chained || r.loader;
+        if (r.on()) r.engine = engine_of(e, r.path);
+        if (e.source == KILN_CHAIN_SOURCE_PROFILE) {
+            const std::string id = native_mods::dllmain_mod_of(i);
+            if (!id.empty()) r.mod = "kiln:" + id;
+        }
         rows.push_back(std::move(r));
     }
     // EMF's loader (chained) reads dinput8-chain.ini and starts those DLLs itself
@@ -98,11 +113,13 @@ void add_unique(std::vector<std::string>& v, const std::string& s) {
 bool ieq(const std::string& a, const char* b) { return glob_match(b, a); }  // no wildcard in b: a case-insensitive compare
 
 // What is present now (compat_rules.h Facts).
-Facts gather_facts(const std::vector<ChainRow>& rows, const std::vector<std::string>& symbols, bool sf_hosted) {
+Facts gather_facts(const std::vector<ChainRow>& rows, const std::vector<std::string>& symbols, bool sf_hosted, bool include_disabled = true) {
     Facts f;
     f.modules = loaded_module_names();
     for (const ChainRow& r : rows)
         if (r.on()) add_unique(f.modules, r.file);
+    for (const ChainRow& r : rows)  // an engine a chain DLL's exports name (the launcher classifies its chain DLLs too)
+        if (r.on() && !r.engine.empty()) add_unique(f.engines, r.engine);
     f.symbols = symbols;
     f.engines.push_back("kiln");
     if (sf_hosted) add_unique(f.engines, "shroudforge");
@@ -129,7 +146,7 @@ Facts gather_facts(const std::vector<ChainRow>& rows, const std::vector<std::str
             }
         }
     }
-    for (const std::string& m : g_rule_off) add_unique(f.mods, m);
+    if (include_disabled) for (const std::string& m : g_rule_off) add_unique(f.mods, m);
     return f;
 }
 
@@ -179,6 +196,7 @@ ojson rules_report(const std::vector<ChainRow>& rows, const Facts& facts) {
             ctx.proxy_loaded.insert(r.id);
     }
     for (const Rule& r : g_rules) {
+        if (r.action == "original-code") continue; // per-mod import results belong to the host log
         const bool early = std::any_of(g_early.begin(), g_early.end(), [&](const auto& e) { return e.first == r.id; });
         if (!fired.count(&r) && !early && !sticky_late(r, rows)) continue;
         const Outcome oc = outcome_of(r, rows, facts, ctx);
@@ -188,6 +206,7 @@ ojson rules_report(const std::vector<ChainRow>& rows, const Facts& facts) {
         o["applied"] = oc.applied;
         o["message"] = r.message;
         o["subject"] = r.has_subject ? matcher_json(r.subject) : ojson(nullptr);
+        if (r.has_target) o["target"] = matcher_json(r.target);  // dev.29, `before` only
         o["source"] = r.source;
         if (!oc.note.empty()) o["note"] = oc.note;
         out.push_back(std::move(o));
@@ -327,6 +346,49 @@ void apply_early() {
         g_early.emplace_back(r->id, "switched off in the profile before the plugins read it");
     }
 }
+
+std::vector<Rule> native_wait_rules(Facts* facts) {
+    std::lock_guard lock(g_mu);
+    *facts = gather_facts(chain_rows(), {}, false, false);
+    std::vector<Rule> out;
+    for (const Rule* r : evaluate(g_rules, *facts))
+        if (r->action == "defer" && present(r->target, *facts)) out.push_back(*r);
+    return out;
+}
+
+namespace {
+KilnStr KILN_CALL original_rule(KilnStr mod) {
+    std::lock_guard lock(g_mu);
+    const Facts facts = gather_facts(chain_rows(), {}, false, false);
+    const Rule* r = original_code_rule(g_rules, facts, sv(mod));
+    return r ? kstr(r->id) : KilnStr{};
+}
+void KILN_CALL original_used(uint32_t rva) {
+    std::string who;
+    for (const auto& t : hooks::hooked_targets()) {
+        if (t.rva != rva) continue;
+        if (t.has_over) who = t.over.module;
+        else if (!t.links.empty()) who = t.links.front().owner;
+        else if (t.has_before) who = t.before.module;
+        break;
+    }
+    if (who.empty()) {
+        const auto address = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr)) + rva;
+        for (const auto& d : sigdb::live_differs())
+            if (d.address == address) { who = d.by; break; }
+    }
+    KLOG_I("shroudtopia: original-code check used the game's original bytes at rva 0x%X%s%s", rva,
+           who.empty() ? "" : "; hook ", who.c_str());
+}
+bool KILN_CALL original_read(uintptr_t address, uint8_t* out, size_t size) {
+    if (!out || !size || size > 4096 + 34) return false;
+    // A mapped file can fault after a disk error. Never propagate that fault into a foreign memcmp.
+    __try { return sigdb::file_bytes(address, out, size); }
+    __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+const OriginalCodeApi kOriginalCodeTable{{sizeof(OriginalCodeApi), kOriginalCodeVersion}, &original_rule, &original_used, &original_read};
+} // namespace
+const OriginalCodeApi* original_code_table() { return &kOriginalCodeTable; }
 
 void boot_done() {
     const bool hooked = hooks::chain::ready();

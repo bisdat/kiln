@@ -8,12 +8,17 @@
 #include <functional>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <regex>
 #include <set>
 
+#include "../../proxy/image_match.h"
 #include "api.h"
 #include "chain_status.h"
 #include "config.h"
+#include "compat.h"
+#include "../../plugins/compat/first_pass.h"
+#include "../../plugins/shroudtopia/src/own_loader.h"
 #include "crash.h"
 #include "image.h"
 #include "kiln_native.h"
@@ -68,6 +73,9 @@ struct Mod {
     std::vector<std::pair<std::string, semver::Range>> incompatible;
     std::vector<Dll> dlls;
     St state = St::Pending;
+    std::optional<compat::Rule> wait_rule;
+    bool phase_reached = false;
+    bool loading = false;
     std::string reason;
     std::vector<std::string> notes;
     int load_index = -1;
@@ -107,6 +115,8 @@ struct LateDll {
 std::vector<LateDll> g_late;
 bool g_late_collected = false;
 bool g_late_ran = false;
+first_pass::Channel g_first_pass;
+bool g_defer_ready = false, g_defer_worker = false;
 
 void fail(Mod& m, St st, std::string reason) {
     m.state = st;
@@ -134,6 +144,33 @@ std::wstring final_path(const fs::path& p) {
     if (buf.rfind(L"\\\\?\\UNC\\", 0) == 0) buf = L"\\\\" + buf.substr(8);
     else if (buf.rfind(L"\\\\?\\", 0) == 0) buf = buf.substr(4);
     return lower(buf);
+}
+
+// chain.ini [late]: the proxy's check after its loads (proxy/image_match.h), with the proxy's wording. The warning when
+// module `h` is not the file at `path` (Wine's builtin of the same name mapped in its place, which still reports the
+// asked path), else empty: only a proven mismatch counts, a file or module header that cannot be read is none.
+// `shown`: the path as the proxy listed it; `canon`: its final_path().
+std::string swap_warning(const fs::path& path, const std::string& shown, const std::wstring& canon, HMODULE h) {
+    namespace im = kiln::image_match;
+    const im::Id loaded = im::module_headers(h);
+    if (!loaded.ok) return {};
+    HANDLE f = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+                           FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return {};
+    unsigned char head[4096];
+    DWORD got = 0;
+    const BOOL ok = ReadFile(f, head, sizeof head, &got, nullptr);
+    CloseHandle(f);
+    if (!ok || !im::mismatch(loaded, im::read(head, got))) return {};
+    std::wstring reported(4096, L'\0');
+    const DWORD n = GetModuleFileNameW(h, reported.data(), static_cast<DWORD>(reported.size()));
+    reported.resize(n < reported.size() ? n : 0);
+    const bool another = !reported.empty() && final_path(fs::path(reported)) != canon;
+    const std::string rep = to_utf8(reported);
+    std::string out(2 * shown.size() + rep.size() + 256, '\0');
+    if (!im::warning(out.data(), out.size(), "late: ", shown.c_str(), im::instead(another, loaded), rep.c_str())) return {};
+    out.resize(std::char_traits<char>::length(out.c_str()));
+    return out;
 }
 
 // ---- SEH guards: no objects with destructors in these frames ----
@@ -273,7 +310,14 @@ void read_manifest(Mod& m, const fs::path& folder) {
     }
     if (doc.contains("builds") && doc["builds"].is_array() && !doc["builds"].empty()) {
         bool listed = false;
-        for (const auto& b : doc["builds"]) listed |= b.is_string() && b.get<std::string>() == image().sha256;
+        // case ignored: Enshrouded ModLoader 0.6.15's native.json gives the hash in upper case
+        for (const auto& b : doc["builds"]) {
+            if (!b.is_string()) continue;
+            std::string s = b.get<std::string>();
+            for (char& c : s)
+                if (c >= 'A' && c <= 'F') c = static_cast<char>(c - 'A' + 'a');
+            listed |= s == image().sha256;
+        }
         if (!listed) m.notes.push_back("untested build (the exe's sha256 is not in \"builds\")");
     }
     if (doc.contains("enabled") && doc["enabled"].is_boolean() && !doc["enabled"].get<bool>()) m.notes.push_back("#off");
@@ -701,6 +745,10 @@ void write_state() {
 // ---- loading ----
 
 void load_mod(Mod& m, uint32_t phase) {
+    std::unique_lock lock(g_mutex);
+    if (m.state != St::Pending || m.loading) return;
+    m.loading = true;
+    struct Finish { Mod& m; ~Finish() { m.loading = false; } } finish{m};
     for (const auto& r : m.needs) {
         const Mod* p = any_by_id(r);
         if (!p || p->state != St::Loaded) {
@@ -732,7 +780,9 @@ void load_mod(Mod& m, uint32_t phase) {
         const bool again = g_loaded_paths.count(canon) != 0;
         const double t0 = now_ms();
         DWORD error = 0;
+        lock.unlock();  // Foreign code may need the game thread, which also reads native state.
         HMODULE h = guarded_load(path.c_str(), &error);
+        lock.lock();
         d.ms = now_ms() - t0;
         if (!h) {
             d.status = "failed";
@@ -768,8 +818,14 @@ void load_mod(Mod& m, uint32_t phase) {
         c.hooks_enabled = hooks_enabled() ? 1u : 0u;
         c.play_once = boot_info().play_once;
         const double ti = now_ms();
+        int result = 0;
+        unsigned long fault = 0;
+        lock.unlock();
+        const bool ok = guarded_init(fn, &c, &result, &fault);
+        lock.lock();
         m.init_called = true;
-        const bool ok = guarded_init(fn, &c, &m.init_result, &m.init_fault);
+        m.init_result = result;
+        m.init_fault = fault;
         m.init_ms = now_ms() - ti;
         if (!ok) {
             m.init_faulted = true;
@@ -804,16 +860,23 @@ void load_mod(Mod& m, uint32_t phase) {
 }
 
 void run_phase(uint32_t phase) {
-    std::lock_guard lock(g_mutex);
+    std::unique_lock lock(g_mutex);
     g_last_phase = kPhases[phase];
     int n = 0;
     for (Mod* m : g_order[phase]) {
-        if (m->state != St::Pending) continue;
+        if (m->state != St::Pending || m->loading) continue;
+        m->phase_reached = true;
+        if (m->wait_rule) continue;
+        lock.unlock();
         load_mod(*m, phase);
+        lock.lock();
         ++n;
     }
     if (n) KLOG_I("native: phase %s: %d mod(s) handled", kPhases[phase], n);
     write_state();
+    const bool ready = g_defer_ready;
+    lock.unlock();
+    if (ready) start_deferred();
 }
 
 const char* const kChainSources[] = {"chain", "profile", "emf"};
@@ -907,7 +970,155 @@ void discover(bool verified) {
     write_state();
 }
 
-void run_early() { run_phase(KILN_NATIVE_PHASE_EARLY); }
+// native-defer:begin
+bool ordered_after(const Mod& m, const Mod& d) {
+    if (d.phase > m.phase) return false;
+    const auto has = [](const auto& ids, const auto& id) { return std::find(ids.begin(), ids.end(), id) != ids.end(); };
+    return has(m.needs, d.id) || (d.phase == m.phase && (has(m.after, d.id) || has(d.before, m.id)));
+}
+
+// Exact package-relative companion paths only. Do not scan folders or follow a path outside this package.
+bool package_module(const Mod& m, const compat::Matcher& subject) {
+    if (subject.kind != compat::Matcher::Kind::Module || subject.value.find_first_of("*?\\:") != std::string::npos) return false;
+    const fs::path relative = to_wide(subject.value);
+    if (!relative.has_parent_path() || relative.has_root_path()) return false;
+    for (const auto& part : relative) if (part == L"..") return false;
+    std::error_code ec;
+    const fs::path file = fs::path(to_wide(m.folder)) / relative;
+    if (!fs::is_regular_file(file, ec)) return false;
+    const auto within = fs::relative(file, fs::path(to_wide(m.folder)), ec);
+    if (ec || within.empty() || within.has_root_path()) return false;
+    for (const auto& part : within) if (part == L"..") return false;
+    return true;
+}
+
+// The same load_mod path as each normal phase. Waiting and deferred loads run off the game thread.
+DWORD WINAPI deferred_main(void*) {
+    for (;;) {
+        bool waiting = false, changed = false;
+        {
+            std::unique_lock lock(g_mutex);
+            for (uint32_t phase = KILN_NATIVE_PHASE_EARLY; phase <= KILN_NATIVE_PHASE_WORLD; ++phase) {
+                for (Mod* m : g_order[phase]) {
+                    if (m->state != St::Pending || m->loading || !m->phase_reached || !m->wait_rule) continue;
+                    const auto decision = g_first_pass.decision(m->wait_rule->max_wait_ms);
+                    if (decision == first_pass::Decision::Wait || std::any_of(g_mods.begin(), g_mods.end(), [&](const Mod& d) {
+                        return d.state == St::Pending && d.wait_rule && ordered_after(*m, d);
+                    })) { waiting = true; continue; }
+                    if (decision == first_pass::Decision::Cancel) {
+                        fail(*m, St::Skipped, "Shroudtopia is stopping; native startup canceled");
+                        changed = true;
+                        continue;
+                    }
+                    const auto started = g_first_pass.started();
+                    const auto elapsed = started ? GetTickCount64() - started : 0;
+                    if (decision == first_pass::Decision::Timeout)
+                        KLOG_W("native %s: Shroudtopia's first pass did not finish within %u ms; starting anyway", m->id.c_str(),
+                               m->wait_rule->max_wait_ms);
+                    lock.unlock();
+                    load_mod(*m, phase);
+                    lock.lock();
+                    if (m->state == St::Loaded)
+                        KLOG_I("native %s started %s, %llu ms", m->id.c_str(),
+                               decision == first_pass::Decision::Complete ? "after Shroudtopia's first pass" :
+                               decision == first_pass::Decision::Timeout ? "after the Shroudtopia wait timed out" :
+                               "without a Shroudtopia host wait", static_cast<unsigned long long>(elapsed));
+                    changed = true;
+                }
+            }
+            if (changed) write_state();
+            if (!waiting) { g_defer_worker = false; return 0; }
+        }
+        Sleep(25);  // no native loader lock while the host is running its pass
+    }
+}
+// native-defer:end
+
+void run_early() {
+    compat::Facts facts;
+    const auto rules = compat::native_wait_rules(&facts);
+    if (rules.empty()) { run_phase(KILN_NATIVE_PHASE_EARLY); return; }
+    std::error_code ec;
+    bool host = config().plugins && (g_verified || config().policy_any) &&
+                fs::is_regular_file(paths().plugins / L"kiln-shroudtopia.dll", ec);
+    if (!host && config().plugins && (g_verified || config().policy_any)) {
+        for (const auto& e : profile::state().mods[KILN_PROFILE_KIND_PLUGIN])
+            if (e.enabled && lower(to_wide(e.path)).ends_with(L"\\kiln-shroudtopia.dll")) host = true;
+    }
+    if (host && !kshroud::own_loader_in_process(paths().game).empty()) host = false;
+    {
+        std::lock_guard lock(g_mutex);
+        bool channel = false;
+        for (Mod& m : g_mods) {
+            if (m.state != St::Pending || m.phase == KILN_NATIVE_PHASE_DLLMAIN) continue;
+            compat::Facts own;
+            own.mods.push_back("native:" + m.id);
+            for (const auto& d : m.dlls) own.modules.push_back(u8(fs::path(to_wide(d.file)).filename()));
+            for (const auto& rule : rules)
+                if (package_module(m, rule.subject)) own.modules.push_back(rule.subject.value);
+            const auto* rule = compat::native_defer_rule(rules, facts, own, host);
+            if (!rule) continue;
+            if (!channel && !(channel = g_first_pass.open(true))) {
+                KLOG_W("native %s: cannot create the Shroudtopia first-pass wait; starting in its normal phase", m.id.c_str());
+                continue;
+            }
+            m.wait_rule = *rule;
+            m.notes.push_back("waits for Shroudtopia's first pass (" + rule->target.value.substr(12) + " is on)");
+            KLOG_I("native %s %s", m.id.c_str(), m.notes.back().c_str());
+        }
+        // Keep declared load dependencies when their predecessor waits, including across later phases.
+        bool changed;
+        do {
+            changed = false;
+            for (Mod& m : g_mods) {
+                if (m.state != St::Pending || m.wait_rule || m.phase == KILN_NATIVE_PHASE_DLLMAIN) continue;
+                for (const Mod& d : g_mods) {
+                    if (!d.wait_rule || !ordered_after(m, d)) continue;
+                    m.wait_rule = d.wait_rule;
+                    m.notes.push_back("waits for native " + d.id + " after Shroudtopia's first pass");
+                    KLOG_I("native %s %s", m.id.c_str(), m.notes.back().c_str());
+                    changed = true;
+                    break;
+                }
+            }
+        } while (changed);
+        // The native ABI keeps init on its phase thread. A connected successor may have init too.
+        if (std::any_of(g_mods.begin(), g_mods.end(), [](const Mod& m) { return m.wait_rule && !m.init.empty(); })) {
+            KLOG_W("native: cannot wait for Shroudtopia without moving a native init off its phase thread; using normal phases");
+            for (Mod& m : g_mods) {
+                if (!m.wait_rule) continue;
+                m.wait_rule.reset();
+                m.notes.pop_back();
+            }
+        }
+    }
+    run_phase(KILN_NATIVE_PHASE_EARLY);
+    start_deferred();  // watch the host as soon as it starts, even if another plugin callback blocks
+}
+
+void start_deferred() {
+    std::unique_lock lock(g_mutex);
+    if (g_defer_worker) return;
+    bool any = false;
+    for (const Mod& m : g_mods) any |= m.state == St::Pending && m.phase_reached && m.wait_rule.has_value();
+    if (!any) return;
+    g_defer_worker = true;
+    HANDLE worker = CreateThread(nullptr, 0, &deferred_main, nullptr, 0, nullptr);
+    if (worker) { CloseHandle(worker); return; }
+    KLOG_W("native: cannot start the Shroudtopia wait worker; starting the waiting natives now");
+    g_first_pass.bypass();
+    lock.unlock();
+    deferred_main(nullptr);
+}
+
+void plugins_ready() {
+    {
+        std::lock_guard lock(g_mutex);
+        g_defer_ready = true;
+        g_first_pass.absent();  // every on_ready returned; an absent/failed/idle host cannot start a pass
+    }
+    start_deferred();
+}
 
 void run_late() {
     std::lock_guard lock(g_mutex);
@@ -958,7 +1169,10 @@ void run_late() {
         l.module = h;
         l.row.status = "loaded";
         g_loaded_paths.insert(l.canon);
-        KLOG_I("late: %s loaded at %p (%.1f ms)", l.row.path.c_str(), static_cast<void*>(h), l.row.ms);
+        if (const std::string swap = swap_warning(path, l.row.path, l.canon, h); !swap.empty())
+            ::kiln::log::write(KILN_LOG_WARN, "kiln", swap);  // longer than writef's buffer can be
+        else
+            KLOG_I("late: %s loaded at %p (%.1f ms)", l.row.path.c_str(), static_cast<void*>(h), l.row.ms);
     }
     // A dllmain native mod whose DLL was late finishes here.
     for (Mod& m : g_mods) {
@@ -1005,6 +1219,22 @@ bool loaded_by_proxy(const std::string& mod_id) {
     return false;
 }
 
+std::string dllmain_mod_of(size_t index) {
+    std::lock_guard lock(g_mutex);
+    const KilnBootInfo& bi = boot_info();
+    if (index >= bi.chain_count || bi.chain[index].source != KILN_CHAIN_SOURCE_PROFILE) return {};
+    const std::wstring path = lower(to_wide(sv(bi.chain[index].path)));
+    for (const Mod& m : g_mods) {
+        if (m.phase != KILN_NATIVE_PHASE_DLLMAIN || m.id.empty()) continue;
+        for (const Dll& d : m.dlls) {
+            std::string f = d.file;
+            std::replace(f.begin(), f.end(), '/', '\\');
+            if (final_path(fs::path(to_wide(m.folder)) / to_wide(f)) == path) return m.id;
+        }
+    }
+    return {};
+}
+
 std::vector<LateRow> late_rows() {
     std::lock_guard lock(g_mutex);
     std::vector<LateRow> out;
@@ -1013,7 +1243,10 @@ std::vector<LateRow> late_rows() {
 }
 
 void run_boot() {
-    g_hooks = hooks_enabled();
+    {
+        std::lock_guard lock(g_mutex);
+        g_hooks = hooks_enabled();
+    }
     run_phase(KILN_NATIVE_PHASE_BOOT);
 }
 

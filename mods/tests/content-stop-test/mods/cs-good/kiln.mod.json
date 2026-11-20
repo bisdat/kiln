@@ -1,0 +1,10 @@
+{
+  "id": "cs-good",
+  "name": "content-stop lab: a mod with native knowledge, a clone NPC and a journal quest",
+  "version": "0.1.0",
+  "apiVersion": "0.2",
+  "side": "both",
+  "clients": "mod",
+  "advanced": true,
+  "description": "A fixture of mods/tests/content-stop-test (lab.sh): two knowledge objects, a clone NPC and one world quest in the game's journal, so the boot build serves all three shared resources and a template. Data only."
+}

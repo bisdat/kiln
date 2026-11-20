@@ -15,7 +15,7 @@
     "programs": {
       "type": "object",
       "minProperties": 1,
-      "maxProperties": 8,
+      "maxProperties": 32,
       "propertyNames": {
         "pattern": "^[A-Za-z0-9_]{1,63}$"
       },
@@ -198,6 +198,15 @@
               "maxLength": 120,
               "pattern": "^[A-Za-z0-9_]+$"
             }
+          },
+          "world": {
+            "description": "Which world the program runs in (since 0.2.0-dev.29): \"server\" (the default: a dedicated server's or a host's world), \"client\" (a game client's client world: this player's process only), \"both\" (one program in each), \"prediction\" (the client world's table, run by the prediction storage). A client or prediction program without \"flags\" is SYSTEM; hostOnly is for server programs only.",
+            "enum": [
+              "server",
+              "client",
+              "both",
+              "prediction"
+            ]
           },
           "flags": {
             "type": "array",

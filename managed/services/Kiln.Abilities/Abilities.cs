@@ -11,7 +11,19 @@ public sealed record AbilitiesStatus(bool Natives, bool Programs, bool Instances
     int NativeCapacity, int KilnNatives, int ProgramsTotal, int ProgramsKiln, int HeldNow, uint Interest,
     ulong InstancesCreated, ulong InstancesHeld, ulong OverridesApplied, ulong OverridesMismatched, ulong Runs,
     ulong NativeCalls, ulong NativeCallsObserved, ulong Signals, ulong ManagedCalls, ulong ManagedSuspends,
-    ulong EventsDelivered, ulong EventsDropped, ulong WrapCalls, ulong ProgramsRefused, ulong Step);
+    ulong EventsDelivered, ulong EventsDropped, ulong WrapCalls, ulong ProgramsRefused, ulong Step)
+{
+    /// <summary>Attachments whose program and site are not checked yet (no server world's programs yet); since
+    /// 0.2.0-dev.29, 0 with an older kiln-abilities.dll.</summary>
+    public int AttachmentsPending { get; init; }
+
+    /// <summary>Attachments checked and taking calls (since 0.2.0-dev.29).</summary>
+    public int AttachmentsActive { get; init; }
+
+    /// <summary>Attachments that take no call: their program is not loaded or does not call the native there (checked
+    /// again whenever a program is registered; since 0.2.0-dev.29).</summary>
+    public int AttachmentsOff { get; init; }
+}
 
 /// <summary>A program in the game's ImpactRegistry.</summary>
 public sealed record ImpactProgramInfo(uint Id, Guid Guid, int CodeWords, int ShutdownWords, int Variables, int DataBytes,
@@ -29,6 +41,9 @@ public enum ImpactNativeKind
     Builtin = 2,
     /// <summary>Registered by a mod through <see cref="Abilities.Natives.Register"/>.</summary>
     Managed = 3,
+    /// <summary>Registered by a mod through <see cref="Abilities.Natives.RegisterSync"/> or an <see cref="ImpactNativeAttribute">[ImpactNative]</see>
+    /// method: answered inside the call (since 0.2.0-dev.29).</summary>
+    Sync = 4,
 }
 
 /// <summary>A resource attribute an ability can cost or change.</summary>
@@ -99,11 +114,17 @@ public static unsafe partial class Abilities
             AbilitiesNative.Status s = default;
             s.Size = (uint)sizeof(AbilitiesNative.Status);
             if (t->GetStatus(&s) != AbilitiesNative.Ok) return null;
+            var c = AbilitiesNative.Counters();  // dev.29: the attachments' states
             return new AbilitiesStatus(s.Natives != 0, s.Programs != 0, s.Instances != 0, s.Attributes != 0,
                 (int)s.VanillaNatives, (int)s.NativeCapacity, (int)s.KilnNatives, (int)s.ProgramsTotal, (int)s.ProgramsKiln,
                 (int)s.HeldNow, s.Interest, s.InstancesCreated, s.InstancesHeld, s.OverridesApplied, s.OverridesMismatched,
                 s.Runs, s.NativeCalls, s.NativeCallsObserved, s.Signals, s.ManagedCalls, s.ManagedSuspends,
-                s.EventsDelivered, s.EventsDropped, s.WrapCalls, s.ProgramsRefused, s.Step);
+                s.EventsDelivered, s.EventsDropped, s.WrapCalls, s.ProgramsRefused, s.Step)
+            {
+                AttachmentsPending = c is { } p ? (int)p.AttachPending : 0,
+                AttachmentsActive = c is { } a ? (int)a.AttachActive : 0,
+                AttachmentsOff = c is { } o ? (int)o.AttachOff : 0,
+            };
         }
     }
 

@@ -1,0 +1,9 @@
+{
+  "id": "station-chests-test",
+  "name": "kiln.stations ordinary chests lab test",
+  "version": "0.1.0",
+  "apiVersion": "0.2",
+  "entryAssembly": "StationChestsTest.dll",
+  "side": "server",
+  "description": "PASS/FAIL lines: a fill takes from a named ordinary chest after the Magic chests and before station outputs; a short exact fill moves nothing; CollectToBase puts finished items into Magic chests. Dedicated server, no player."
+}

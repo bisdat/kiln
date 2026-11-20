@@ -24,7 +24,7 @@
   "13c-eml": "0.2.0-dev.30",
   "13d-shroudlink": "0.2.0-dev.30",
   "13e-enshwick": "0.2.0-dev.31",
-  "13f-emf": "0.2.0-dev.29",
+  "13f-emf": "0.2.0-dev.30",
   "14-client-world-programs": "0.2.0-dev.29",
   "15-replication-sidecars": "0.2.0-dev.31",
   "15a-net-admission": "0.2.0-dev.28",
@@ -46,7 +46,8 @@
   "19d-creature-control": "0.2.0-dev.28",
   "19d-pets": "0.2.0-dev.32",
   "19e-taming": "0.2.0-dev.32",
-  "19f-terrain": "0.2.0-dev.28"
+  "19f-terrain": "0.2.0-dev.28",
+  "dev30-ui-hooks": "0.2.0-dev.30"
  },
  "owners": {
   "12-debug.client-windows": "12a-debugger",
@@ -72,8 +73,11 @@
   "16a-a": "16a-station-tabs",
   "17-vfx-boundary": "17a-vfx-cap",
   "17-vfx-boot-order": "17a-vfx-cap",
+  "17-vfx-budget.before": "17a-vfx-cap",
+  "17-vfx-budget.after": "17a-vfx-cap",
   "17-buffs-client": "17b-kiln-quotas",
   "17-roster-client": "17c-roster-cap",
+  "17-roster.refused-start": "17c-roster-cap",
   "17-programs-vanilla": "17b-kiln-quotas",
   "17-material-pools": "17d-material-pools",
   "17-material-worlds": "17d-material-pools",
@@ -90,9 +94,17 @@
   "19d-c6": "19d-pets"
  },
  "ids": {
+  "17-vfx-boundary": "0.2.0-dev.30",
+  "17-vfx-boot-order": "0.2.0-dev.30",
   "19f-terrain-client": "0.2.0-dev.32",
   "19f-derived-companions": "0.2.0-dev.32",
   "19f-base-exposure": "0.2.0-dev.32",
-  "19f-outer-tile": "0.2.0-dev.32"
+  "19f-outer-tile": "0.2.0-dev.32",
+  "00-sigdb.in-place-patches": "0.2.0-dev.28",
+  "00-keys.physical-backquote": "0.2.0-dev.28",
+  "rules.noclip-descent": "0.2.0-dev.28",
+  "rules.noclip-death": "0.2.0-dev.28",
+  "rules.noclip-world": "0.2.0-dev.28",
+  "rules.noclip-disconnect": "0.2.0-dev.28"
  }
 }

@@ -1,10 +1,138 @@
 #nullable enable
+Kiln.AttributeValueChangedEvent
+Kiln.AttributeValueChangedEvent.After.get -> int
+Kiln.AttributeValueChangedEvent.Attribute.get -> Kiln.ObservedAttribute
+Kiln.AttributeValueChangedEvent.AttributeValueChangedEvent(Kiln.ComponentValueChangedEvent! change, Kiln.ObservedAttribute attribute, int before, int after, int maximumBefore, int maximumAfter) -> void
+Kiln.AttributeValueChangedEvent.Before.get -> int
+Kiln.AttributeValueChangedEvent.Change.get -> Kiln.ComponentValueChangedEvent!
+Kiln.AttributeValueChangedEvent.Involves(Kiln.EntityId entity) -> bool
+Kiln.AttributeValueChangedEvent.MaximumAfter.get -> int
+Kiln.AttributeValueChangedEvent.MaximumBefore.get -> int
+Kiln.ChangeOrigin
+Kiln.ChangeOrigin.Game = 1 -> Kiln.ChangeOrigin
+Kiln.ChangeOrigin.Kiln = 2 -> Kiln.ChangeOrigin
+Kiln.ChangeOrigin.Mixed = 3 -> Kiln.ChangeOrigin
+Kiln.ChangeOrigin.Unknown = 0 -> Kiln.ChangeOrigin
+Kiln.ClientComponentWrittenEvent
+Kiln.ClientComponentWrittenEvent.After.get -> System.ReadOnlyMemory<byte>
+Kiln.ClientComponentWrittenEvent.Before.get -> System.ReadOnlyMemory<byte>
+Kiln.ClientComponentWrittenEvent.Component.get -> string!
+Kiln.ClientComponentWrittenEvent.Entity.get -> Kiln.EntityId
+Kiln.ClientComponentWrittenEvent.Involves(Kiln.EntityId entity) -> bool
+Kiln.ClientComponentWrittenEvent.World.get -> Kiln.WorldKind
+Kiln.ClientComponentWrittenEvent.Writer.get -> string!
+Kiln.ComponentChanges
+Kiln.ComponentValueChangedEvent
+Kiln.ComponentValueChangedEvent.After.get -> System.ReadOnlyMemory<byte>
+Kiln.ComponentValueChangedEvent.Before.get -> System.ReadOnlyMemory<byte>
+Kiln.ComponentValueChangedEvent.Component.get -> string!
+Kiln.ComponentValueChangedEvent.ComponentValueChangedEvent(Kiln.EventEntityKey key, string! component, byte[]! before, byte[]! after, ulong step, Kiln.ChangeOrigin origin, string? sourceMod, System.Collections.Generic.IEnumerable<ulong>! tokens, System.Collections.Generic.IEnumerable<Kiln.EntityId>! roots, System.Collections.Generic.IEnumerable<ulong>! watches) -> void
+Kiln.ComponentValueChangedEvent.Entity.get -> Kiln.EntityId
+Kiln.ComponentValueChangedEvent.Involves(Kiln.EntityId entity) -> bool
+Kiln.ComponentValueChangedEvent.IsPresent.get -> bool
+Kiln.ComponentValueChangedEvent.Key.get -> Kiln.EventEntityKey
+Kiln.ComponentValueChangedEvent.OperationTokens.get -> System.Collections.Generic.IReadOnlyList<ulong>!
+Kiln.ComponentValueChangedEvent.Origin.get -> Kiln.ChangeOrigin
+Kiln.ComponentValueChangedEvent.RootEntities.get -> System.Collections.Generic.IReadOnlyList<Kiln.EntityId>!
+Kiln.ComponentValueChangedEvent.SourceMod.get -> string?
+Kiln.ComponentValueChangedEvent.Step.get -> ulong
+Kiln.ComponentValueChangedEvent.WasPresent.get -> bool
+Kiln.ComponentValueChangedEvent.WatchIds.get -> System.Collections.Generic.IReadOnlyList<ulong>!
+Kiln.ComponentValueChangedEvent.World.get -> Kiln.WorldKind
+Kiln.ComponentWatch
+Kiln.ComponentWatch.Dispose() -> void
+Kiln.ComponentWatch.Id.get -> ulong
+Kiln.ComponentWatch.LastCompleteStep.get -> ulong
+Kiln.ComponentWatch.Pairs.get -> int
+Kiln.ComponentWatch.Reason.get -> string?
+Kiln.ComponentWatch.Request.get -> Kiln.ComponentWatchRequest!
+Kiln.ComponentWatch.State.get -> Kiln.ComponentWatchState
+Kiln.ComponentWatch.World.get -> Kiln.WorldKind
+Kiln.ComponentWatchExpansion
+Kiln.ComponentWatchExpansion.None = 0 -> Kiln.ComponentWatchExpansion
+Kiln.ComponentWatchExpansion.PlayerInventoryAndItems = 1 -> Kiln.ComponentWatchExpansion
+Kiln.ComponentWatchRequest
+Kiln.ComponentWatchRequest.<Clone>$() -> Kiln.ComponentWatchRequest!
+Kiln.ComponentWatchRequest.ComponentWatchRequest(Kiln.ComponentWatchScope Scope, System.Collections.Generic.IReadOnlyList<Kiln.EntityId>! Entities, Kiln.ObservedComponents Components, Kiln.ComponentWatchExpansion Expansion = Kiln.ComponentWatchExpansion.None) -> void
+Kiln.ComponentWatchRequest.Components.get -> Kiln.ObservedComponents
+Kiln.ComponentWatchRequest.Components.init -> void
+Kiln.ComponentWatchRequest.Deconstruct(out Kiln.ComponentWatchScope Scope, out System.Collections.Generic.IReadOnlyList<Kiln.EntityId>! Entities, out Kiln.ObservedComponents Components, out Kiln.ComponentWatchExpansion Expansion) -> void
+Kiln.ComponentWatchRequest.Entities.get -> System.Collections.Generic.IReadOnlyList<Kiln.EntityId>!
+Kiln.ComponentWatchRequest.Entities.init -> void
+Kiln.ComponentWatchRequest.Equals(Kiln.ComponentWatchRequest? other) -> bool
+Kiln.ComponentWatchRequest.Expansion.get -> Kiln.ComponentWatchExpansion
+Kiln.ComponentWatchRequest.Expansion.init -> void
+Kiln.ComponentWatchRequest.Scope.get -> Kiln.ComponentWatchScope
+Kiln.ComponentWatchRequest.Scope.init -> void
+Kiln.ComponentWatchResult
+Kiln.ComponentWatchResult.<Clone>$() -> Kiln.ComponentWatchResult!
+Kiln.ComponentWatchResult.ComponentWatchResult(bool Ok, string? Reason, Kiln.ComponentWatch? Watch, int Pairs) -> void
+Kiln.ComponentWatchResult.Deconstruct(out bool Ok, out string? Reason, out Kiln.ComponentWatch? Watch, out int Pairs) -> void
+Kiln.ComponentWatchResult.Equals(Kiln.ComponentWatchResult? other) -> bool
+Kiln.ComponentWatchResult.Ok.get -> bool
+Kiln.ComponentWatchResult.Ok.init -> void
+Kiln.ComponentWatchResult.Pairs.get -> int
+Kiln.ComponentWatchResult.Pairs.init -> void
+Kiln.ComponentWatchResult.Reason.get -> string?
+Kiln.ComponentWatchResult.Reason.init -> void
+Kiln.ComponentWatchResult.Watch.get -> Kiln.ComponentWatch?
+Kiln.ComponentWatchResult.Watch.init -> void
+Kiln.ComponentWatchScope
+Kiln.ComponentWatchScope.Entities = 0 -> Kiln.ComponentWatchScope
+Kiln.ComponentWatchScope.Players = 1 -> Kiln.ComponentWatchScope
+Kiln.ComponentWatchState
+Kiln.ComponentWatchState.Disposed = 3 -> Kiln.ComponentWatchState
+Kiln.ComponentWatchState.Ready = 0 -> Kiln.ComponentWatchState
+Kiln.ComponentWatchState.SuspendedBudget = 1 -> Kiln.ComponentWatchState
+Kiln.ComponentWatchState.SuspendedMetadata = 2 -> Kiln.ComponentWatchState
+Kiln.ComponentWatchStateChangedEvent
+Kiln.ComponentWatchStateChangedEvent.ComponentWatchStateChangedEvent(ulong watchId, Kiln.ComponentWatchState state, string? reason, ulong lastCompleteStep) -> void
+Kiln.ComponentWatchStateChangedEvent.LastCompleteStep.get -> ulong
+Kiln.ComponentWatchStateChangedEvent.Reason.get -> string?
+Kiln.ComponentWatchStateChangedEvent.State.get -> Kiln.ComponentWatchState
+Kiln.ComponentWatchStateChangedEvent.WatchId.get -> ulong
 Kiln.ComponentWrittenEvent
 Kiln.ComponentWrittenEvent.Component.get -> string!
 Kiln.ComponentWrittenEvent.Entity.get -> Kiln.EntityId
 Kiln.ComponentWrittenEvent.Involves(Kiln.EntityId entity) -> bool
 Kiln.ComponentWrittenEvent.ModId.get -> string?
 Kiln.ComponentWrittenEvent.Result.get -> Kiln.WorldWriteResult!
+Kiln.ComponentWrittenEvent.Writer.get -> string?
+Kiln.ComponentWrittenEvent.Writers.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Kiln.EntityScaleChangedEvent
+Kiln.EntityScaleChangedEvent.Before.get -> Kiln.Scale3
+Kiln.EntityScaleChangedEvent.Entity.get -> Kiln.EntityId
+Kiln.EntityScaleChangedEvent.Involves(Kiln.EntityId entity) -> bool
+Kiln.EntityScaleChangedEvent.ModId.get -> string?
+Kiln.EntityScaleChangedEvent.Now.get -> Kiln.Scale3
+Kiln.EntityScaleChangedEvent.Result.get -> Kiln.EntityScaleResult!
+Kiln.EntityScaleResult
+Kiln.EntityScaleResult.<Clone>$() -> Kiln.EntityScaleResult!
+Kiln.EntityScaleResult.Before.get -> Kiln.Scale3?
+Kiln.EntityScaleResult.Before.init -> void
+Kiln.EntityScaleResult.Changed.get -> bool
+Kiln.EntityScaleResult.Deconstruct(out Kiln.EntityId Entity, out Kiln.Scale3? Before, out Kiln.Scale3 Requested, out Kiln.Scale3? Now, out bool? Kept, out Kiln.WorldWriteStatus WorldWriteStatus, out string? Reason, out bool? SaveTracked, out bool? ReplicationTracked) -> void
+Kiln.EntityScaleResult.Entity.get -> Kiln.EntityId
+Kiln.EntityScaleResult.Entity.init -> void
+Kiln.EntityScaleResult.EntityScaleResult(Kiln.EntityId Entity, Kiln.Scale3? Before, Kiln.Scale3 Requested, Kiln.Scale3? Now, bool? Kept, Kiln.WorldWriteStatus WorldWriteStatus, string? Reason, bool? SaveTracked, bool? ReplicationTracked) -> void
+Kiln.EntityScaleResult.Equals(Kiln.EntityScaleResult? other) -> bool
+Kiln.EntityScaleResult.Kept.get -> bool?
+Kiln.EntityScaleResult.Kept.init -> void
+Kiln.EntityScaleResult.Now.get -> Kiln.Scale3?
+Kiln.EntityScaleResult.Now.init -> void
+Kiln.EntityScaleResult.Ok.get -> bool
+Kiln.EntityScaleResult.Persisted.get -> bool?
+Kiln.EntityScaleResult.Persisted.init -> void
+Kiln.EntityScaleResult.Reason.get -> string?
+Kiln.EntityScaleResult.Reason.init -> void
+Kiln.EntityScaleResult.ReplicationTracked.get -> bool?
+Kiln.EntityScaleResult.ReplicationTracked.init -> void
+Kiln.EntityScaleResult.Requested.get -> Kiln.Scale3
+Kiln.EntityScaleResult.Requested.init -> void
+Kiln.EntityScaleResult.SaveTracked.get -> bool?
+Kiln.EntityScaleResult.SaveTracked.init -> void
+Kiln.EntityScaleResult.WorldWriteStatus.get -> Kiln.WorldWriteStatus
+Kiln.EntityScaleResult.WorldWriteStatus.init -> void
 Kiln.EntitySet
 Kiln.EntitySet.Contains(Kiln.EntityId entity) -> bool
 Kiln.EntitySet.Count.get -> int
@@ -26,6 +154,72 @@ Kiln.EntityTransform.Scale.get -> System.Numerics.Vector3
 Kiln.EntityTransform.Scale.init -> void
 Kiln.EntityTransform.YawDegrees.get -> double
 Kiln.Nearby
+Kiln.ObservedAttribute
+Kiln.ObservedAttribute.Fuel = 4 -> Kiln.ObservedAttribute
+Kiln.ObservedAttribute.Health = 1 -> Kiln.ObservedAttribute
+Kiln.ObservedAttribute.Mana = 3 -> Kiln.ObservedAttribute
+Kiln.ObservedAttribute.Stamina = 2 -> Kiln.ObservedAttribute
+Kiln.ObservedComponents
+Kiln.ObservedComponents.All = Kiln.ObservedComponents.Health | Kiln.ObservedComponents.Stamina | Kiln.ObservedComponents.Mana | Kiln.ObservedComponents.Fuel | Kiln.ObservedComponents.Inventory | Kiln.ObservedComponents.SlotSelection -> Kiln.ObservedComponents
+Kiln.ObservedComponents.Fuel = 8 -> Kiln.ObservedComponents
+Kiln.ObservedComponents.Health = 1 -> Kiln.ObservedComponents
+Kiln.ObservedComponents.Inventory = 16 -> Kiln.ObservedComponents
+Kiln.ObservedComponents.Mana = 4 -> Kiln.ObservedComponents
+Kiln.ObservedComponents.None = 0 -> Kiln.ObservedComponents
+Kiln.ObservedComponents.SlotSelection = 32 -> Kiln.ObservedComponents
+Kiln.ObservedComponents.Stamina = 2 -> Kiln.ObservedComponents
+Kiln.ProgramAccessLimits
+Kiln.ProgramAccessLimits.<Clone>$() -> Kiln.ProgramAccessLimits!
+Kiln.ProgramAccessLimits.Deconstruct(out uint Templates, out uint ReadWrite, out uint SingletonReads, out uint SingletonWrites, out uint OtherTemplates, out uint OtherAccessors, out uint EventsInOut, out uint IteratorBytes) -> void
+Kiln.ProgramAccessLimits.Equals(Kiln.ProgramAccessLimits? other) -> bool
+Kiln.ProgramAccessLimits.EventsInOut.get -> uint
+Kiln.ProgramAccessLimits.EventsInOut.init -> void
+Kiln.ProgramAccessLimits.IteratorBytes.get -> uint
+Kiln.ProgramAccessLimits.IteratorBytes.init -> void
+Kiln.ProgramAccessLimits.OtherAccessors.get -> uint
+Kiln.ProgramAccessLimits.OtherAccessors.init -> void
+Kiln.ProgramAccessLimits.OtherTemplates.get -> uint
+Kiln.ProgramAccessLimits.OtherTemplates.init -> void
+Kiln.ProgramAccessLimits.ProgramAccessLimits(uint Templates, uint ReadWrite, uint SingletonReads, uint SingletonWrites, uint OtherTemplates, uint OtherAccessors, uint EventsInOut, uint IteratorBytes) -> void
+Kiln.ProgramAccessLimits.ReadWrite.get -> uint
+Kiln.ProgramAccessLimits.ReadWrite.init -> void
+Kiln.ProgramAccessLimits.SingletonReads.get -> uint
+Kiln.ProgramAccessLimits.SingletonReads.init -> void
+Kiln.ProgramAccessLimits.SingletonWrites.get -> uint
+Kiln.ProgramAccessLimits.SingletonWrites.init -> void
+Kiln.ProgramAccessLimits.Templates.get -> uint
+Kiln.ProgramAccessLimits.Templates.init -> void
+Kiln.ProgramBudgetResult
+Kiln.ProgramBudgetResult.<Clone>$() -> Kiln.ProgramBudgetResult!
+Kiln.ProgramBudgetResult.AccessLimits.get -> Kiln.ProgramAccessLimits!
+Kiln.ProgramBudgetResult.AccessLimits.init -> void
+Kiln.ProgramBudgetResult.Deconstruct(out bool Ok, out string? Reason, out Kiln.CapacityWorldToken? World, out Kiln.CapacityInfo! KilnSlots, out Kiln.CapacityInfo! EngineSlots, out uint PerFileMax, out Kiln.ProgramAccessLimits! AccessLimits) -> void
+Kiln.ProgramBudgetResult.EngineSlots.get -> Kiln.CapacityInfo!
+Kiln.ProgramBudgetResult.EngineSlots.init -> void
+Kiln.ProgramBudgetResult.Equals(Kiln.ProgramBudgetResult? other) -> bool
+Kiln.ProgramBudgetResult.KilnSlots.get -> Kiln.CapacityInfo!
+Kiln.ProgramBudgetResult.KilnSlots.init -> void
+Kiln.ProgramBudgetResult.Ok.get -> bool
+Kiln.ProgramBudgetResult.Ok.init -> void
+Kiln.ProgramBudgetResult.PerFileMax.get -> uint
+Kiln.ProgramBudgetResult.PerFileMax.init -> void
+Kiln.ProgramBudgetResult.ProgramBudgetResult(bool Ok, string? Reason, Kiln.CapacityWorldToken? World, Kiln.CapacityInfo! KilnSlots, Kiln.CapacityInfo! EngineSlots, uint PerFileMax, Kiln.ProgramAccessLimits! AccessLimits) -> void
+Kiln.ProgramBudgetResult.Reason.get -> string?
+Kiln.ProgramBudgetResult.Reason.init -> void
+Kiln.ProgramBudgetResult.World.get -> Kiln.CapacityWorldToken?
+Kiln.ProgramBudgetResult.World.init -> void
+Kiln.Scale3
+Kiln.Scale3.Deconstruct(out float X, out float Y, out float Z) -> void
+Kiln.Scale3.Equals(Kiln.Scale3 other) -> bool
+Kiln.Scale3.IsValid.get -> bool
+Kiln.Scale3.Scale3() -> void
+Kiln.Scale3.Scale3(float X, float Y, float Z) -> void
+Kiln.Scale3.X.get -> float
+Kiln.Scale3.X.init -> void
+Kiln.Scale3.Y.get -> float
+Kiln.Scale3.Y.init -> void
+Kiln.Scale3.Z.get -> float
+Kiln.Scale3.Z.init -> void
 Kiln.Teleport
 Kiln.TeleportFlags
 Kiln.TeleportFlags.None = 0 -> Kiln.TeleportFlags
@@ -68,6 +262,21 @@ Kiln.TeleportResult.TeleportResult(Kiln.TeleportStatus Status, Kiln.EntityId Ent
 Kiln.TeleportStatus
 Kiln.TeleportStatus.Failed = 0 -> Kiln.TeleportStatus
 Kiln.TeleportStatus.Moved = 1 -> Kiln.TeleportStatus
+Kiln.WaitingTransformScale
+Kiln.WaitingTransformScale.<Clone>$() -> Kiln.WaitingTransformScale!
+Kiln.WaitingTransformScale.Deconstruct(out string! Mod, out System.Guid? Template, out Kiln.WorldPosition Position, out Kiln.Scale3 Scale, out string! Reason) -> void
+Kiln.WaitingTransformScale.Equals(Kiln.WaitingTransformScale? other) -> bool
+Kiln.WaitingTransformScale.Mod.get -> string!
+Kiln.WaitingTransformScale.Mod.init -> void
+Kiln.WaitingTransformScale.Position.get -> Kiln.WorldPosition
+Kiln.WaitingTransformScale.Position.init -> void
+Kiln.WaitingTransformScale.Reason.get -> string!
+Kiln.WaitingTransformScale.Reason.init -> void
+Kiln.WaitingTransformScale.Scale.get -> Kiln.Scale3
+Kiln.WaitingTransformScale.Scale.init -> void
+Kiln.WaitingTransformScale.Template.get -> System.Guid?
+Kiln.WaitingTransformScale.Template.init -> void
+Kiln.WaitingTransformScale.WaitingTransformScale(string! Mod, System.Guid? Template, Kiln.WorldPosition Position, Kiln.Scale3 Scale, string! Reason) -> void
 Kiln.World
 Kiln.WorldChange<T>
 Kiln.WorldStatus
@@ -161,15 +370,204 @@ Kiln.WorldWriteStatus.OutOfRange = 3 -> Kiln.WorldWriteStatus
 Kiln.WorldWriteStatus.Refused = 5 -> Kiln.WorldWriteStatus
 Kiln.WorldWriteStatus.Unchanged = 1 -> Kiln.WorldWriteStatus
 Kiln.WorldWriteStatus.Written = 0 -> Kiln.WorldWriteStatus
+[KILNX001]static Kiln.ComponentChanges.LabCounters() -> string?
+[KILNX001]static Kiln.ComponentChanges.LabHoldDelivery(int steps) -> bool
+[KILNX003]Kiln.ComponentExchangedEvent
+[KILNX003]Kiln.ComponentExchangedEvent.ComponentExchangedEvent(Kiln.EntityId entity, uint generation, uint componentHash, ulong session, ulong step, string? mod) -> void
+[KILNX003]Kiln.ComponentExchangedEvent.ComponentHash.get -> uint
+[KILNX003]Kiln.ComponentExchangedEvent.Entity.get -> Kiln.EntityId
+[KILNX003]Kiln.ComponentExchangedEvent.Generation.get -> uint
+[KILNX003]Kiln.ComponentExchangedEvent.Involves(Kiln.EntityId entity) -> bool
+[KILNX003]Kiln.ComponentExchangedEvent.Is(string! component) -> bool
+[KILNX003]Kiln.ComponentExchangedEvent.Mod.get -> string?
+[KILNX003]Kiln.ComponentExchangedEvent.Session.get -> ulong
+[KILNX003]Kiln.ComponentExchangedEvent.Step.get -> ulong
+[KILNX003]Kiln.ComponentExchangedEvent.World.get -> Kiln.WorldKind
+[KILNX003]Kiln.ComponentSet
+[KILNX003]Kiln.ComponentSet.ComponentSet(params string![]! components) -> void
+[KILNX003]Kiln.ComponentSet.Count.get -> int
+[KILNX003]Kiln.ComponentSet.this[int index].get -> string!
+[KILNX003]Kiln.ComponentWritePolicy
+[KILNX003]Kiln.ComponentWritePolicy.Budget.get -> int
+[KILNX003]Kiln.ComponentWritePolicy.Component.get -> string!
+[KILNX003]Kiln.ComponentWritePolicy.ComponentWritePolicy() -> void
+[KILNX003]Kiln.ComponentWritePolicy.IsPlain.get -> bool
+[KILNX003]Kiln.ComponentWritePolicy.IsTracked.get -> bool
+[KILNX003]Kiln.ComponentWritePolicy.IsWritable.get -> bool
+[KILNX003]Kiln.ComponentWritePolicy.Reason.get -> Kiln.WriteReason
+[KILNX003]Kiln.ComponentWritePolicy.Size.get -> int
+[KILNX003]Kiln.ComponentWritePolicy.Status.get -> Kiln.ExchangeStatus
+[KILNX003]Kiln.ComponentWritePolicy.Text.get -> string!
+[KILNX003]Kiln.ComponentWritePolicy.TrackingKnown.get -> bool
+[KILNX003]Kiln.ConcurrentCopy
+[KILNX003]Kiln.ConcurrentCopy.ConcurrentCopy() -> void
+[KILNX003]Kiln.ConcurrentCopy.Required.get -> int
+[KILNX003]Kiln.ConcurrentCopy.Status.get -> Kiln.ReadStatus
+[KILNX003]Kiln.ConcurrentCopy.Written.get -> int
+[KILNX003]Kiln.ConcurrentEntity
+[KILNX003]Kiln.ConcurrentEntity.ConcurrentEntity() -> void
+[KILNX003]Kiln.ConcurrentEntity.Equals(Kiln.ConcurrentEntity other) -> bool
+[KILNX003]Kiln.ConcurrentEntity.Generation.get -> uint
+[KILNX003]Kiln.ConcurrentEntity.Id.get -> Kiln.EntityId
+[KILNX003]Kiln.ConcurrentEntity.IsNone.get -> bool
+[KILNX003]Kiln.ConcurrentEntity.Session.get -> ulong
+[KILNX003]Kiln.ConcurrentEntity.World.get -> Kiln.WorldKind
+[KILNX003]Kiln.ConcurrentQueryResult
+[KILNX003]Kiln.ConcurrentQueryResult.ConcurrentQueryResult() -> void
+[KILNX003]Kiln.ConcurrentQueryResult.Count.get -> int
+[KILNX003]Kiln.ConcurrentQueryResult.Required.get -> int
+[KILNX003]Kiln.ConcurrentQueryResult.Status.get -> Kiln.ReadStatus
+[KILNX003]Kiln.ConcurrentRead<T>
+[KILNX003]Kiln.ConcurrentRead<T>.ConcurrentRead() -> void
+[KILNX003]Kiln.ConcurrentRead<T>.IsOk.get -> bool
+[KILNX003]Kiln.ConcurrentRead<T>.Status.get -> Kiln.ReadStatus
+[KILNX003]Kiln.ConcurrentRead<T>.Value.get -> T
+[KILNX003]Kiln.ConcurrentSnapshot
+[KILNX003]Kiln.ConcurrentSnapshot.Bytes(int index) -> System.ReadOnlySpan<byte>
+[KILNX003]Kiln.ConcurrentSnapshot.Count.get -> int
+[KILNX003]Kiln.ConcurrentSnapshot.Status.get -> Kiln.ReadStatus
+[KILNX003]Kiln.ConcurrentSnapshot.StatusOf(int index) -> Kiln.ReadStatus
+[KILNX003]Kiln.ConcurrentSnapshot.TryGet<T>(int index, out T value) -> bool
+[KILNX003]Kiln.EntityQuery
+[KILNX003]Kiln.EntityQuery.Center.get -> Kiln.WorldPosition?
+[KILNX003]Kiln.EntityQuery.Center.init -> void
+[KILNX003]Kiln.EntityQuery.Components.get -> System.Collections.Generic.IReadOnlyList<string!>!
+[KILNX003]Kiln.EntityQuery.EntityQuery() -> void
+[KILNX003]Kiln.EntityQuery.EntityQuery(Kiln.WorldKind world, params string![]! components) -> void
+[KILNX003]Kiln.EntityQuery.Mode.get -> Kiln.ReadMode
+[KILNX003]Kiln.EntityQuery.Mode.init -> void
+[KILNX003]Kiln.EntityQuery.Radius.get -> double
+[KILNX003]Kiln.EntityQuery.Radius.init -> void
+[KILNX003]Kiln.EntityQuery.World.get -> Kiln.WorldKind
+[KILNX003]Kiln.ExchangeBytesResult
+[KILNX003]Kiln.ExchangeBytesResult.ExchangeBytesResult() -> void
+[KILNX003]Kiln.ExchangeBytesResult.Flags.get -> Kiln.ExchangeFlags
+[KILNX003]Kiln.ExchangeBytesResult.HoldTime.get -> System.TimeSpan
+[KILNX003]Kiln.ExchangeBytesResult.IsOk.get -> bool
+[KILNX003]Kiln.ExchangeBytesResult.Reason.get -> Kiln.WriteReason
+[KILNX003]Kiln.ExchangeBytesResult.Status.get -> Kiln.ExchangeStatus
+[KILNX003]Kiln.ExchangeBytesResult.Written.get -> bool
+[KILNX003]Kiln.ExchangeFlags
+[KILNX003]Kiln.ExchangeFlags.Confirmed = 4 -> Kiln.ExchangeFlags
+[KILNX003]Kiln.ExchangeFlags.EventQueued = 32 -> Kiln.ExchangeFlags
+[KILNX003]Kiln.ExchangeFlags.NoOp = 2 -> Kiln.ExchangeFlags
+[KILNX003]Kiln.ExchangeFlags.None = 0 -> Kiln.ExchangeFlags
+[KILNX003]Kiln.ExchangeFlags.RolledBack = 8 -> Kiln.ExchangeFlags
+[KILNX003]Kiln.ExchangeFlags.TargetLatched = 16 -> Kiln.ExchangeFlags
+[KILNX003]Kiln.ExchangeFlags.Written = 1 -> Kiln.ExchangeFlags
+[KILNX003]Kiln.ExchangeResult<T>
+[KILNX003]Kiln.ExchangeResult<T>.Current.get -> T
+[KILNX003]Kiln.ExchangeResult<T>.ExchangeResult() -> void
+[KILNX003]Kiln.ExchangeResult<T>.Flags.get -> Kiln.ExchangeFlags
+[KILNX003]Kiln.ExchangeResult<T>.HoldTime.get -> System.TimeSpan
+[KILNX003]Kiln.ExchangeResult<T>.IsOk.get -> bool
+[KILNX003]Kiln.ExchangeResult<T>.Reason.get -> Kiln.WriteReason
+[KILNX003]Kiln.ExchangeResult<T>.Status.get -> Kiln.ExchangeStatus
+[KILNX003]Kiln.ExchangeResult<T>.Written.get -> bool
+[KILNX003]Kiln.ExchangeStatus
+[KILNX003]Kiln.ExchangeStatus.Absent = 1 -> Kiln.ExchangeStatus
+[KILNX003]Kiln.ExchangeStatus.Busy = 5 -> Kiln.ExchangeStatus
+[KILNX003]Kiln.ExchangeStatus.Conflict = 7 -> Kiln.ExchangeStatus
+[KILNX003]Kiln.ExchangeStatus.NotWritable = 8 -> Kiln.ExchangeStatus
+[KILNX003]Kiln.ExchangeStatus.Ok = 0 -> Kiln.ExchangeStatus
+[KILNX003]Kiln.ExchangeStatus.Stale = 2 -> Kiln.ExchangeStatus
+[KILNX003]Kiln.ExchangeStatus.Unavailable = 4 -> Kiln.ExchangeStatus
+[KILNX003]Kiln.ExchangeStatus.Uncertain = 9 -> Kiln.ExchangeStatus
+[KILNX003]Kiln.ExchangeStatus.Unreadable = 3 -> Kiln.ExchangeStatus
+[KILNX003]Kiln.ReadMode
+[KILNX003]Kiln.ReadMode.FrameQuiet = 1 -> Kiln.ReadMode
+[KILNX003]Kiln.ReadMode.Stable = 0 -> Kiln.ReadMode
+[KILNX003]Kiln.ReadStatus
+[KILNX003]Kiln.ReadStatus.Absent = 1 -> Kiln.ReadStatus
+[KILNX003]Kiln.ReadStatus.Busy = 5 -> Kiln.ReadStatus
+[KILNX003]Kiln.ReadStatus.Changed = 7 -> Kiln.ReadStatus
+[KILNX003]Kiln.ReadStatus.Ok = 0 -> Kiln.ReadStatus
+[KILNX003]Kiln.ReadStatus.SizeMismatch = 9 -> Kiln.ReadStatus
+[KILNX003]Kiln.ReadStatus.Stale = 2 -> Kiln.ReadStatus
+[KILNX003]Kiln.ReadStatus.TooSmall = 8 -> Kiln.ReadStatus
+[KILNX003]Kiln.ReadStatus.Unavailable = 4 -> Kiln.ReadStatus
+[KILNX003]Kiln.ReadStatus.Unreadable = 3 -> Kiln.ReadStatus
+[KILNX003]Kiln.ReadStatus.Unsupported = 6 -> Kiln.ReadStatus
+[KILNX003]Kiln.WorldConcurrent
+[KILNX003]Kiln.WriteReason
+[KILNX003]Kiln.WriteReason.Compare = 16 -> Kiln.WriteReason
+[KILNX003]Kiln.WriteReason.EventsFull = 12 -> Kiln.WriteReason
+[KILNX003]Kiln.WriteReason.Fault = 17 -> Kiln.WriteReason
+[KILNX003]Kiln.WriteReason.Gate = 11 -> Kiln.WriteReason
+[KILNX003]Kiln.WriteReason.InFrame = 10 -> Kiln.WriteReason
+[KILNX003]Kiln.WriteReason.NoProfile = 2 -> Kiln.WriteReason
+[KILNX003]Kiln.WriteReason.NoWorld = 3 -> Kiln.WriteReason
+[KILNX003]Kiln.WriteReason.None = 0 -> Kiln.WriteReason
+[KILNX003]Kiln.WriteReason.NotOwnersRef = 19 -> Kiln.WriteReason
+[KILNX003]Kiln.WriteReason.NotPlain = 7 -> Kiln.WriteReason
+[KILNX003]Kiln.WriteReason.NotServerWorld = 1 -> Kiln.WriteReason
+[KILNX003]Kiln.WriteReason.OverBudget = 9 -> Kiln.WriteReason
+[KILNX003]Kiln.WriteReason.OwnerRetired = 14 -> Kiln.WriteReason
+[KILNX003]Kiln.WriteReason.Readback = 18 -> Kiln.WriteReason
+[KILNX003]Kiln.WriteReason.Ref = 15 -> Kiln.WriteReason
+[KILNX003]Kiln.WriteReason.RetireRace = 20 -> Kiln.WriteReason
+[KILNX003]Kiln.WriteReason.Size = 8 -> Kiln.WriteReason
+[KILNX003]Kiln.WriteReason.TargetLatched = 13 -> Kiln.WriteReason
+[KILNX003]Kiln.WriteReason.Tracked = 5 -> Kiln.WriteReason
+[KILNX003]Kiln.WriteReason.TrackingUnknown = 6 -> Kiln.WriteReason
+[KILNX003]Kiln.WriteReason.Unregistered = 4 -> Kiln.WriteReason
+[KILNX003]const Kiln.WorldConcurrent.Capability = "world.ecs_read" -> string!
+[KILNX003]const Kiln.WorldConcurrent.WriteCapability = "world.ecs_write" -> string!
+[KILNX003]override Kiln.ComponentWritePolicy.ToString() -> string!
+[KILNX003]override Kiln.ConcurrentEntity.Equals(object? obj) -> bool
+[KILNX003]override Kiln.ConcurrentEntity.GetHashCode() -> int
+[KILNX003]override Kiln.ConcurrentEntity.ToString() -> string!
+[KILNX003]override Kiln.ConcurrentRead<T>.ToString() -> string!
+[KILNX003]override Kiln.ExchangeBytesResult.ToString() -> string!
+[KILNX003]override Kiln.ExchangeResult<T>.ToString() -> string!
+[KILNX003]static Kiln.ConcurrentEntity.operator !=(Kiln.ConcurrentEntity left, Kiln.ConcurrentEntity right) -> bool
+[KILNX003]static Kiln.ConcurrentEntity.operator ==(Kiln.ConcurrentEntity left, Kiln.ConcurrentEntity right) -> bool
+[KILNX003]static Kiln.WorldConcurrent.CanWrite.get -> bool
+[KILNX003]static Kiln.WorldConcurrent.IsAvailable.get -> bool
+[KILNX003]static Kiln.WorldConcurrent.IsPresent(Kiln.WorldKind world) -> bool
+[KILNX003]static Kiln.WorldConcurrent.Open(Kiln.EntityId id, Kiln.WorldKind world = Kiln.WorldKind.Server) -> Kiln.ConcurrentRead<Kiln.ConcurrentEntity>
+[KILNX003]static Kiln.WorldConcurrent.OrOnTick<T>(Kiln.KilnTaskContext! ctx, System.Func<T>! offTick, System.Func<T>! onTick) -> System.Threading.Tasks.Task<T>!
+[KILNX003]static Kiln.WorldConcurrent.Query(in Kiln.EntityQuery query, System.Span<Kiln.ConcurrentEntity> into) -> Kiln.ConcurrentQueryResult
+[KILNX003]static Kiln.WorldConcurrent.Read<T>(Kiln.ConcurrentEntity entity, string! component, Kiln.ReadMode mode = Kiln.ReadMode.Stable) -> Kiln.ConcurrentRead<T>
+[KILNX003]static Kiln.WorldConcurrent.ReadBytes(Kiln.ConcurrentEntity entity, string! component, System.Span<byte> into, Kiln.ReadMode mode = Kiln.ReadMode.Stable) -> Kiln.ConcurrentCopy
+[KILNX003]static Kiln.WorldConcurrent.ReadMany(Kiln.ConcurrentEntity entity, Kiln.ComponentSet! components, Kiln.ReadMode mode = Kiln.ReadMode.Stable) -> Kiln.ConcurrentSnapshot!
+[KILNX003]static Kiln.WorldConcurrent.Template(Kiln.ConcurrentEntity entity) -> Kiln.ConcurrentRead<System.Guid>
+[KILNX003]static Kiln.WorldConcurrent.TryCompareExchange<T>(Kiln.ConcurrentEntity entity, string! component, in T expected, in T desired) -> Kiln.ExchangeResult<T>
+[KILNX003]static Kiln.WorldConcurrent.TryCompareExchangeBytes(Kiln.ConcurrentEntity entity, string! component, System.ReadOnlySpan<byte> expected, System.ReadOnlySpan<byte> desired, System.ReadOnlySpan<byte> mask = default(System.ReadOnlySpan<byte>), System.Span<byte> current = default(System.Span<byte>)) -> Kiln.ExchangeBytesResult
+[KILNX003]static Kiln.WorldConcurrent.Validate(Kiln.ConcurrentEntity entity) -> Kiln.ReadStatus
+[KILNX003]static Kiln.WorldConcurrent.WritePolicy(string! component, Kiln.WorldKind world = Kiln.WorldKind.Server) -> Kiln.ComponentWritePolicy
+const Kiln.ComponentChanges.Capability = "events.component_net" -> string!
 const Kiln.EntitySet.Capability = "world.find" -> string!
 const Kiln.World.TrackedWritesCapability = "world.tracked_writes" -> string!
+const Kiln.World.TransformScaleCapability = "world.transform_scale" -> string!
+override Kiln.ComponentWatchRequest.Equals(object? obj) -> bool
+override Kiln.ComponentWatchRequest.GetHashCode() -> int
+override Kiln.ComponentWatchRequest.ToString() -> string!
+override Kiln.ComponentWatchResult.Equals(object? obj) -> bool
+override Kiln.ComponentWatchResult.GetHashCode() -> int
+override Kiln.ComponentWatchResult.ToString() -> string!
+override Kiln.EntityScaleChangedEvent.ToString() -> string!
+override Kiln.EntityScaleResult.Equals(object? obj) -> bool
+override Kiln.EntityScaleResult.GetHashCode() -> int
+override Kiln.EntityScaleResult.ToString() -> string!
 override Kiln.EntityTransform.GetHashCode() -> int
+override Kiln.ProgramAccessLimits.Equals(object? obj) -> bool
+override Kiln.ProgramAccessLimits.GetHashCode() -> int
+override Kiln.ProgramAccessLimits.ToString() -> string!
+override Kiln.ProgramBudgetResult.Equals(object? obj) -> bool
+override Kiln.ProgramBudgetResult.GetHashCode() -> int
+override Kiln.ProgramBudgetResult.ToString() -> string!
+override Kiln.Scale3.GetHashCode() -> int
+override Kiln.Scale3.ToString() -> string!
 override Kiln.TeleportOptions.Equals(object? obj) -> bool
 override Kiln.TeleportOptions.GetHashCode() -> int
 override Kiln.TeleportOptions.ToString() -> string!
 override Kiln.TeleportResult.Equals(object? obj) -> bool
 override Kiln.TeleportResult.GetHashCode() -> int
 override Kiln.TeleportResult.ToString() -> string!
+override Kiln.WaitingTransformScale.Equals(object? obj) -> bool
+override Kiln.WaitingTransformScale.GetHashCode() -> int
+override Kiln.WaitingTransformScale.ToString() -> string!
 override Kiln.WorldStatus.GetHashCode() -> int
 override Kiln.WorldWriteInfo.Equals(object? obj) -> bool
 override Kiln.WorldWriteInfo.GetHashCode() -> int
@@ -177,12 +575,28 @@ override Kiln.WorldWriteInfo.ToString() -> string!
 override Kiln.WorldWriteResult.Equals(object? obj) -> bool
 override Kiln.WorldWriteResult.GetHashCode() -> int
 override Kiln.WorldWriteResult.ToString() -> string!
+static Kiln.ComponentChanges.Resume(Kiln.ComponentWatch! watch) -> Kiln.ComponentWatchResult!
+static Kiln.ComponentChanges.Watch(Kiln.ComponentWatchRequest! request) -> Kiln.ComponentWatchResult!
+static Kiln.ComponentWatchRequest.operator !=(Kiln.ComponentWatchRequest? left, Kiln.ComponentWatchRequest? right) -> bool
+static Kiln.ComponentWatchRequest.operator ==(Kiln.ComponentWatchRequest? left, Kiln.ComponentWatchRequest? right) -> bool
+static Kiln.ComponentWatchResult.operator !=(Kiln.ComponentWatchResult? left, Kiln.ComponentWatchResult? right) -> bool
+static Kiln.ComponentWatchResult.operator ==(Kiln.ComponentWatchResult? left, Kiln.ComponentWatchResult? right) -> bool
+static Kiln.EntityScaleResult.operator !=(Kiln.EntityScaleResult? left, Kiln.EntityScaleResult? right) -> bool
+static Kiln.EntityScaleResult.operator ==(Kiln.EntityScaleResult? left, Kiln.EntityScaleResult? right) -> bool
 static Kiln.EntityTransform.operator !=(Kiln.EntityTransform left, Kiln.EntityTransform right) -> bool
 static Kiln.EntityTransform.operator ==(Kiln.EntityTransform left, Kiln.EntityTransform right) -> bool
 static Kiln.Nearby.Entities(Kiln.EntityId center, double radius, string! component) -> System.Collections.Generic.IReadOnlyList<Kiln.EntityId>!
 static Kiln.Nearby.Entities(Kiln.WorldPosition at, double radius, string! component) -> System.Collections.Generic.IReadOnlyList<Kiln.EntityId>!
 static Kiln.Nearby.Within(System.Collections.Generic.IEnumerable<Kiln.EntityId>! candidates, Kiln.EntityId center, double radius) -> System.Collections.Generic.IReadOnlyList<Kiln.EntityId>!
 static Kiln.Nearby.Within(System.Collections.Generic.IEnumerable<Kiln.EntityId>! candidates, Kiln.WorldPosition at, double radius) -> System.Collections.Generic.IReadOnlyList<Kiln.EntityId>!
+static Kiln.ProgramAccessLimits.operator !=(Kiln.ProgramAccessLimits? left, Kiln.ProgramAccessLimits? right) -> bool
+static Kiln.ProgramAccessLimits.operator ==(Kiln.ProgramAccessLimits? left, Kiln.ProgramAccessLimits? right) -> bool
+static Kiln.ProgramBudgetResult.operator !=(Kiln.ProgramBudgetResult? left, Kiln.ProgramBudgetResult? right) -> bool
+static Kiln.ProgramBudgetResult.operator ==(Kiln.ProgramBudgetResult? left, Kiln.ProgramBudgetResult? right) -> bool
+static Kiln.Scale3.One.get -> Kiln.Scale3
+static Kiln.Scale3.Uniform(float factor) -> Kiln.Scale3
+static Kiln.Scale3.operator !=(Kiln.Scale3 left, Kiln.Scale3 right) -> bool
+static Kiln.Scale3.operator ==(Kiln.Scale3 left, Kiln.Scale3 right) -> bool
 static Kiln.Teleport.Available.get -> bool
 static Kiln.Teleport.To(Kiln.EntityId entity, Kiln.WorldPosition target, Kiln.TeleportOptions? options = null) -> System.Threading.Tasks.Task<Kiln.TeleportResult!>!
 static Kiln.Teleport.ToEntity(Kiln.EntityId entity, Kiln.EntityId target, double offset = 1.5, Kiln.TeleportOptions? options = null) -> System.Threading.Tasks.Task<Kiln.TeleportResult!>!
@@ -191,12 +605,16 @@ static Kiln.TeleportOptions.operator !=(Kiln.TeleportOptions? left, Kiln.Telepor
 static Kiln.TeleportOptions.operator ==(Kiln.TeleportOptions? left, Kiln.TeleportOptions? right) -> bool
 static Kiln.TeleportResult.operator !=(Kiln.TeleportResult? left, Kiln.TeleportResult? right) -> bool
 static Kiln.TeleportResult.operator ==(Kiln.TeleportResult? left, Kiln.TeleportResult? right) -> bool
+static Kiln.WaitingTransformScale.operator !=(Kiln.WaitingTransformScale? left, Kiln.WaitingTransformScale? right) -> bool
+static Kiln.WaitingTransformScale.operator ==(Kiln.WaitingTransformScale? left, Kiln.WaitingTransformScale? right) -> bool
 static Kiln.World.Available.get -> bool
 static Kiln.World.ComponentHash(string! name) -> uint
 static Kiln.World.ComponentSize(Kiln.EntityId entity, string! component) -> int
 static Kiln.World.EntityCount.get -> int
 static Kiln.World.Exists(Kiln.EntityId entity) -> bool
 static Kiln.World.Find(string! component) -> System.Collections.Generic.IReadOnlyList<Kiln.EntityId>!
+static Kiln.World.GetProgramBudget(Kiln.CapacityWorldKind kind = Kiln.CapacityWorldKind.Server) -> Kiln.ProgramBudgetResult!
+static Kiln.World.GetWaitingTransformScales() -> System.Collections.Generic.IReadOnlyList<Kiln.WaitingTransformScale!>!
 static Kiln.World.Has(Kiln.EntityId entity, string! component) -> bool
 static Kiln.World.Position(Kiln.EntityId entity) -> Kiln.WorldPosition?
 static Kiln.World.Query(System.Collections.Generic.IEnumerable<string!>! with, System.Collections.Generic.IEnumerable<string!>? without) -> Kiln.EntitySet!
@@ -204,6 +622,7 @@ static Kiln.World.Query(params string![]! with) -> Kiln.EntitySet!
 static Kiln.World.Query<T1, T2>() -> Kiln.EntitySet!
 static Kiln.World.Query<T>() -> Kiln.EntitySet!
 static Kiln.World.ReadBytes(Kiln.EntityId entity, string! component) -> byte[]?
+static Kiln.World.SetTransformScale(Kiln.EntityId entity, Kiln.Scale3 scale) -> System.Threading.Tasks.Task<Kiln.EntityScaleResult!>!
 static Kiln.World.Status.get -> Kiln.WorldStatus
 static Kiln.World.SupportsTrackedWrites.get -> bool
 static Kiln.World.Transform(Kiln.EntityId entity) -> Kiln.EntityTransform?
@@ -227,5 +646,6 @@ static readonly Kiln.TeleportOptions.Default -> Kiln.TeleportOptions!
 virtual Kiln.WorldChange<T>.Invoke(ref T value) -> void
 ~override Kiln.EntityTransform.Equals(object obj) -> bool
 ~override Kiln.EntityTransform.ToString() -> string
+~override Kiln.Scale3.Equals(object obj) -> bool
 ~override Kiln.WorldStatus.Equals(object obj) -> bool
 ~override Kiln.WorldStatus.ToString() -> string

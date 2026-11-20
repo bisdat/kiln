@@ -22,7 +22,9 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -35,6 +37,7 @@
 #include "nlohmann/json.hpp"
 #include "registry.h"
 #include "services/hooks_chain.h"
+#include "services/hooks_code.h"
 #include "services/hooks_internal.h"
 #include "services/kiln_hooks.h"
 #include "services/service.h"
@@ -50,6 +53,18 @@ namespace {
 std::mutex g_log_mutex;
 std::vector<std::string> g_lines;
 std::map<uintptr_t, std::vector<uint8_t>> g_file;  // "the exe file's" first bytes of functions a foreign hooker patched
+// test_code_wait_during_stop: a one-shot pause inside a first install, at its read of the file's bytes (target_for does
+// that after the install took code_state's lock and before it stops the other threads).
+std::atomic<uintptr_t> g_pause_at{0};      // the target whose file read is watched
+std::atomic<DWORD> g_pause_installer{0};   // the installing thread: it runs g_pause_fn once, at that read
+std::atomic<DWORD> g_pause_reader{0};      // a code_state caller: its read of the file's bytes is noted
+std::atomic<bool> g_pause_reader_read{false};
+std::function<void()> g_pause_fn;
+void file_read_noted() {
+    const DWORD me = GetCurrentThreadId();
+    if (me == g_pause_reader.load()) g_pause_reader_read = true;  // its next step is the lock
+    else if (DWORD installer = me; g_pause_installer.compare_exchange_strong(installer, 0) && g_pause_fn) g_pause_fn();
+}
 std::vector<kiln::sigdb::LiveDiff> g_live_diffs;
 std::filesystem::path g_state_dir;
 kiln::svc::Service* g_service = nullptr;
@@ -70,6 +85,11 @@ const ImageInfo& image() { return g_image; }
 const Paths& paths() {
     static Paths p;
     p.state = g_state_dir;
+    if (p.game.empty()) {  // as init_paths: the test exe's folder plays the game folder
+        wchar_t exe[MAX_PATH];
+        const DWORD n = GetModuleFileNameW(nullptr, exe, MAX_PATH);
+        p.game = std::filesystem::path(std::wstring(exe, n)).parent_path();
+    }
     return p;
 }
 std::string to_utf8(std::wstring_view w) {
@@ -122,6 +142,8 @@ KilnResult add_owner_retiring(KilnOwner, OwnerRetiringFn, void*, KilnHandle*) { 
 KilnResult remove_owner_retiring(KilnHandle) { return KILN_ERR_NOT_FOUND; }
 }  // namespace reg
 namespace tick {
+bool typed_install_pre() { return false; }
+KilnResult session(KilnSessionInfo* out) { *out = {}; out->size = sizeof *out; return KILN_OK; }
 KilnResult subscribe_world(KilnOwner, KilnWorldEventFn, void*, KilnHandle*) { return KILN_ERR_UNAVAILABLE; }
 }  // namespace tick
 namespace sigdb {
@@ -135,12 +157,16 @@ bool load_fragment(std::string_view, const std::filesystem::path&, const std::fi
 }
 bool unload_fragment(std::string_view) { return false; }
 bool file_bytes(uintptr_t a, uint8_t* out, size_t n) {
+    bool found = false;
     for (auto& [at, bytes] : g_file)
         if (a >= at && a + n <= at + bytes.size()) {
             std::memcpy(out, bytes.data() + (a - at), n);
-            return true;
+            found = true;
+            break;
         }
-    std::memcpy(out, reinterpret_cast<const void*>(a), n);  // "the file" equals the live code unless a hooker patched it
+    // "the file" equals the live code unless a hooker patched it
+    if (!found) std::memcpy(out, reinterpret_cast<const void*>(a), n);
+    if (a == g_pause_at.load()) file_read_noted();
     return true;
 }
 std::atomic<int> g_sym_calls{0};
@@ -149,6 +175,9 @@ std::string symbol_name_at(uintptr_t) {
     return {};
 }
 std::vector<LiveDiff> live_differs() { return g_live_diffs; }
+uint64_t sig_revision() { return 1; }
+bool sig(std::string_view, SigInfo*) { return false; }
+bool sig_status(std::string_view, uintptr_t*, SigStatus*, std::string*) { return false; }
 bool sig_at(uintptr_t, SigInfo*) { return false; }
 bool fingerprint(uintptr_t, hooks::fp::Fingerprint*) { return false; }
 }  // namespace sigdb
@@ -172,6 +201,12 @@ bool log_has(const std::string& needle) {
     for (const auto& l : g_lines)
         if (l.find(needle) != std::string::npos) return true;
     return false;
+}
+std::string log_line(const std::string& needle) {
+    std::lock_guard lock(g_log_mutex);
+    for (const auto& l : g_lines)
+        if (l.find(needle) != std::string::npos) return l;
+    return "(no line)";
 }
 size_t log_count(const std::string& needle) {
     std::lock_guard lock(g_log_mutex);
@@ -302,6 +337,10 @@ extern char game_asm_flags_hook[];
 int game_asm_regs(int);
 extern char game_asm_regs_hook[];
 int game_asm_fb(int);
+int game_asm_code(int);
+int game_asm_code_hold(int);
+int game_asm_code_stop(int);
+extern char game_code_many[];
 int game_asm_fo(int);
 int game_asm_mid(int);
 int game_asm_mid2(int);
@@ -340,7 +379,17 @@ __asm__(".intel_syntax noprefix\n.section .game,\"xr\"\n" GAME_ASM(game_asm_er1)
         "  mov rsp, rbx\n  mov eax, 0xBADBAD\n"
         "1:\n  add rsp, 0x20\n  pop rbx\n  ret\n.seh_endproc\n");
 __asm__(".intel_syntax noprefix\n.section .game,\"xr\"\n" GAME_ASM(game_asm_fb) GAME_ASM(game_asm_fo)
-            GAME_ASM(game_asm_mid) GAME_ASM(game_asm_mid2) GAME_ASM(game_asm_mid3) GAME_ASM(game_asm_mix) ".text\n");
+            GAME_ASM(game_asm_mid) GAME_ASM(game_asm_mid2) GAME_ASM(game_asm_mid3) GAME_ASM(game_asm_mix)
+                GAME_ASM(game_asm_code) GAME_ASM(game_asm_code_hold) GAME_ASM(game_asm_code_stop) ".text\n");
+
+// 16 more of them for test_code_lock_order: first installs while other threads poll code_state.
+__asm__(".intel_syntax noprefix\n.section .game,\"xr\"\n.balign 32, 0xCC\n"
+        ".globl game_code_many\n.def game_code_many; .scl 2; .type 32; .endef\ngame_code_many:\n"
+        ".rept 16\n  push rbx\n  sub rsp, 0x20\n  mov eax, ecx\n  add eax, 1\n  add rsp, 0x20\n  pop rbx\n  ret\n  .balign 32, 0xCC\n.endr\n"
+        ".text\n");
+
+// Filler that makes the test's code section longer than KILN_HOOKS_CODE_RANGE_MAX (test_code_range_limit); never run.
+__asm__(".section .game,\"xr\"\n.balign 4096, 0xCC\ngame_code_filler:\n.fill 0x10400, 1, 0xCC\n.text\n");
 
 // 600 small functions, 32 bytes apart, `int f(int x)` = x + 1, for the target-cap test (512 distinct addresses to hook).
 __asm__(".intel_syntax noprefix\n.section .game,\"xr\"\n.balign 32, 0xCC\n"
@@ -579,6 +628,296 @@ int call_av(int x, DWORD* code) {
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
+void test_code_inspection() {
+    std::puts("-- original code: read_original and code_state on the real service (detours, patches, write, an unreadable page)");
+    const uintptr_t at = reinterpret_cast<uintptr_t>(&game_asm_code);
+    snapshot_file(reinterpret_cast<void*>(at));
+    uint8_t original[16] = {};
+    uint32_t state = 99; uint64_t generation = 0;
+    check(A->read_original && A->code_state && A->read_original(at, original, sizeof original) == KILN_OK,
+          "the table has read_original and code_state; read_original copies the file's bytes");
+    check(A->code_state(at, 16, &state, &generation) == KILN_OK && state == KILN_CODE_ORIGINAL,
+          "a function nobody changed is ORIGINAL");
+    const auto before = generation;
+    static int (*continuation)(int) = nullptr;
+    static auto handler = +[](int x) { return continuation(x); };
+    KilnHandle h = 0;
+    check(A->raw_detour(6, at, nullptr, reinterpret_cast<void*>(handler), reinterpret_cast<void**>(&continuation), &h) == KILN_OK,
+          "the registry places a detour on it");
+    check(A->code_state(at, 16, &state, &generation) == KILN_OK && state == KILN_CODE_MANAGED && generation > before,
+          "its detour is MANAGED and the generation moved");
+    uint8_t after[16] = {};
+    check(A->read_original(at, after, sizeof after) == KILN_OK && !std::memcmp(original, after, sizeof after),
+          "read_original still returns the file's bytes under the detour");
+    check(A->code_state(at + 7, 9, &state, &generation) == KILN_OK && state == KILN_CODE_ORIGINAL,
+          "the detour owns the instructions it overwrote, not the rest of the function");
+    uint64_t again = 0;
+    check(A->code_state(at, 16, &state, &generation) == KILN_OK && A->code_state(at, 16, &state, &again) == KILN_OK &&
+              again == generation,
+          "the same range asked twice with nothing changed keeps the generation");
+    const auto installed = generation;
+    A->revoke(h);  // the bytes stay: only the chain changes
+    check(A->code_state(at, 16, &state, &generation) == KILN_OK && state == KILN_CODE_MANAGED && generation > installed,
+          "after the revoke the detour stays MANAGED (an empty chain) and the generation moved");
+    const uint8_t patch = original[10] ^ 0x7f;
+    KilnHandle p = 0;
+    check(A->patch(6, at + 10, &patch, 1, &p) == KILN_OK &&
+          A->code_state(at + 10, 1, &state, &generation) == KILN_OK && state == KILN_CODE_MANAGED,
+          "a patch's byte is MANAGED");
+    const auto patched = generation;
+    A->unpatch(p);
+    check(A->code_state(at + 10, 1, &state, &generation) == KILN_OK && state == KILN_CODE_ORIGINAL && generation > patched,
+          "unpatch makes it ORIGINAL again and moves the generation");
+    A->write(at + 10, &patch, 1);  // write owns nothing: like another module's patch
+    check(A->code_state(at, 16, &state, &generation) == KILN_OK && state == KILN_CODE_FOREIGN,
+          "a byte from write beside Kiln's detour is FOREIGN");
+    A->write(at + 10, original + 10, 1);
+    DWORD old = 0, ignored = 0;
+    check(VirtualProtect(reinterpret_cast<void*>(at), 16, PAGE_NOACCESS, &old) != 0, "the test page is made unreadable");
+    const auto result = A->code_state(at, 16, &state, &generation);
+    VirtualProtect(reinterpret_cast<void*>(at), 16, old, &ignored);
+    check(result == KILN_OK && state == KILN_CODE_UNKNOWN, "an unreadable page is UNKNOWN (guarded read), never the file's bytes");
+    std::atomic<bool> done{false}; std::atomic<unsigned> polls{0}, bad{0};
+    std::thread observer([&] {
+        do { uint32_t s; uint64_t g;
+             if (A->code_state(at + 10, 1, &s, &g) != KILN_OK || s > KILN_CODE_MANAGED) ++bad;
+             ++polls;
+        } while (!done.load());
+    });
+    for (int i = 0; i < 1000; ++i) {
+        KilnHandle handle = 0;
+        if (A->patch(6, at + 10, &patch, 1, &handle) != KILN_OK || A->unpatch(handle) != KILN_OK) ++bad;
+        if (A->raw_detour(6, at, nullptr, reinterpret_cast<void*>(handler), reinterpret_cast<void**>(&continuation), &handle) != KILN_OK ||
+            A->revoke(handle) != KILN_OK) ++bad;
+    }
+    done = true; observer.join();
+    check(polls > 0 && bad == 0, "a poller sees only ORIGINAL or MANAGED while patches and links come and go 1000 times");
+}
+
+// The range limit on the real members: exactly KILN_HOOKS_CODE_RANGE_MAX (64 KiB) is accepted; one byte more is refused
+// with nothing written, and the generation and the remembered range are left alone. game_code_filler makes the
+// test's code section longer than that.
+void test_code_range_limit() {
+    std::puts("-- original code: a range of exactly 64 KiB is accepted, one byte more is refused");
+    constexpr size_t cap = KILN_HOOKS_CODE_RANGE_MAX;
+    const uintptr_t at = reinterpret_cast<uintptr_t>(kiln::g_image.text);
+    check(kiln::g_image.text_size > cap, "the test's code section is longer than 64 KiB",
+          std::to_string(kiln::g_image.text_size));
+    std::vector<uint8_t> out(cap + 1, 0x55);
+    const auto untouched = [&] { return std::all_of(out.begin(), out.end(), [](uint8_t b) { return b == 0x55; }); };
+    check(A->read_original(at, out.data(), cap) == KILN_OK && out[cap] == 0x55 &&
+              !std::memcmp(out.data(), reinterpret_cast<const void*>(at), cap),
+          "read_original accepts exactly 64 KiB");
+    std::fill(out.begin(), out.end(), 0x55);
+    check(A->read_original(at, out.data(), cap + 1) == KILN_ERR_INVALID_ARGUMENT && untouched(),
+          "read_original refuses 64 KiB + 1 and writes nothing");
+    uint32_t state = 99;
+    uint64_t generation = 0;
+    check(A->code_state(at, cap, &state, &generation) == KILN_OK && state <= KILN_CODE_UNKNOWN,
+          "code_state accepts exactly 64 KiB");
+    const uint64_t kept = generation;
+    uint32_t refused_state = 77;
+    uint64_t refused_generation = 88;
+    check(A->code_state(at, cap + 1, &refused_state, &refused_generation) == KILN_ERR_INVALID_ARGUMENT &&
+              refused_state == 77 && refused_generation == 88,
+          "code_state refuses 64 KiB + 1 and leaves state and generation alone");
+    uint64_t again = 0;
+    check(A->code_state(at, cap, &state, &again) == KILN_OK && again == kept,
+          "the refused call left the remembered range alone (the same range keeps the generation)");
+}
+
+// A first install takes code_state's lock before it reads the target and stops the game's threads. A code_state call
+// holds that lock only for its two guarded copies, so a thread the install stops is never one that holds it. An install
+// that wrote without the lock fails the checks below; one that stopped threads first and then waited for the lock would
+// hang here for good, which is this test's failure too. The same lock makes patch, unpatch and write wait for a reader.
+void test_code_lock_order() {
+    std::puts("-- original code: installs, patches and write wait for a thread holding code_state's lock; polls during first installs");
+    const uintptr_t at = reinterpret_cast<uintptr_t>(&game_asm_code_hold);
+    const size_t unstoppable = log_count("could not be opened or stopped");
+    snapshot_file(reinterpret_cast<void*>(at));
+    uint8_t file[16];
+    std::memcpy(file, reinterpret_cast<const void*>(at), sizeof file);
+    auto live_is = [&](const uint8_t* bytes) { return !std::memcmp(reinterpret_cast<const void*>(at), bytes, 16); };
+    // One writer call, made while another thread holds the lock: it must not return and must not change a byte until
+    // the lock is free.
+    auto while_held = [&](const char* what, auto&& call) {
+        uint8_t before[16];
+        std::memcpy(before, reinterpret_cast<const void*>(at), sizeof before);
+        std::atomic<int> phase{0};
+        std::thread holder([&] {
+            auto guard = kiln::hooks::code::registry().lock();
+            phase = 1;
+            while (phase.load() < 2) Sleep(1);
+            guard.unlock();
+            // Stay alive until the writer returned: a thread that is ending while an install stops the others cannot
+            // always be stopped, and that is another test's failure (test_many_threads_stopped counts those lines).
+            while (phase.load() < 3) Sleep(1);
+        });
+        while (phase.load() < 1) Sleep(0);
+        std::atomic<bool> returned{false};
+        KilnResult rc = KILN_ERR_INTERNAL;
+        std::thread writer([&] {
+            rc = call();
+            returned = true;
+        });
+        bool waited = true;
+        for (int i = 0; i < 20 && waited; ++i) {  // about 200 ms
+            Sleep(10);
+            waited = !returned.load() && live_is(before);
+        }
+        phase = 2;
+        writer.join();
+        phase = 3;
+        holder.join();
+        check(waited, (std::string(what) + " waits for a thread that holds code_state's lock: nothing written meanwhile").c_str());
+        return rc;
+    };
+    static int (*continuation)(int) = nullptr;
+    static auto handler = +[](int x) { return continuation(x); };
+    KilnHandle h = 0;
+    const KilnResult installed = while_held("a first install", [&] {
+        return A->raw_detour(6, at, nullptr, reinterpret_cast<void*>(handler), reinterpret_cast<void**>(&continuation), &h);
+    });
+    uint32_t state = 99;
+    uint64_t generation = 0;
+    check(installed == KILN_OK && !live_is(file) && reinterpret_cast<int (*)(int)>(at)(41) == 42 &&
+              A->code_state(at, 16, &state, &generation) == KILN_OK && state == KILN_CODE_MANAGED,
+          "...then it installs, and its detour reads MANAGED");
+    const uint8_t byte = file[10] ^ 0x7f;
+    KilnHandle p = 0;
+    check(while_held("patch", [&] { return A->patch(6, at + 10, &byte, 1, &p); }) == KILN_OK &&
+              *reinterpret_cast<const uint8_t*>(at + 10) == byte,
+          "...then the patch is written");
+    check(while_held("unpatch", [&] { return A->unpatch(p); }) == KILN_OK && *reinterpret_cast<const uint8_t*>(at + 10) == file[10],
+          "...then the byte is put back");
+    check(while_held("write", [&] { return A->write(at + 10, &byte, 1); }) == KILN_OK &&
+              *reinterpret_cast<const uint8_t*>(at + 10) == byte,
+          "...then write copies its byte");
+    A->write(at + 10, file + 10, 1);
+    A->revoke(h);
+
+    // Four threads poll code_state on 16 functions while this thread places their first detours (each one stops every
+    // other thread) and revokes the links: no poll waits forever, and none sees a half-written jump (UNKNOWN or FOREIGN).
+    constexpr int kTargets = 16;
+    uintptr_t targets[kTargets];
+    for (int i = 0; i < kTargets; ++i) {
+        targets[i] = reinterpret_cast<uintptr_t>(game_code_many) + 32 * static_cast<uintptr_t>(i);
+        snapshot_file(reinterpret_cast<void*>(targets[i]));
+    }
+    std::atomic<bool> done{false};
+    std::atomic<unsigned> polls{0}, bad{0};
+    std::vector<std::thread> pollers;
+    for (int k = 0; k < 4; ++k)
+        pollers.emplace_back([&, k] {
+            for (unsigned n = static_cast<unsigned>(k); !done.load(); ++n) {
+                uint32_t s = 99;
+                uint64_t g = 0;
+                if (A->code_state(targets[n % kTargets], 16, &s, &g) != KILN_OK ||
+                    (s != KILN_CODE_ORIGINAL && s != KILN_CODE_MANAGED))
+                    ++bad;
+                ++polls;
+            }
+        });
+    while (polls.load() < 1000) Sleep(0);
+    const unsigned first = polls.load();
+    unsigned refused = 0;
+    static auto many = +[](int x) { return x + 1; };  // the functions' own result; it never calls on
+    for (int i = 0; i < kTargets; ++i) {
+        KilnHandle link = 0;
+        if (A->raw_detour(6, targets[i], nullptr, reinterpret_cast<void*>(many), nullptr, &link) != KILN_OK ||
+            A->revoke(link) != KILN_OK)
+            ++refused;
+    }
+    const unsigned during = polls.load() - first;
+    while (polls.load() < first + during + 1000) Sleep(0);
+    done = true;
+    for (auto& t : pollers) t.join();
+    bool all_managed = true;
+    for (int i = 0; i < kTargets; ++i) {
+        uint32_t s = 99;
+        uint64_t g = 0;
+        all_managed = all_managed && A->code_state(targets[i], 16, &s, &g) == KILN_OK && s == KILN_CODE_MANAGED;
+    }
+    check(refused == 0 && all_managed, "16 first installs while 4 threads poll code_state: each placed, each MANAGED after");
+    check(bad == 0 && during > 0, "the polls during them see only ORIGINAL or MANAGED", std::to_string(bad.load()) + " bad of " +
+          std::to_string(polls.load()) + ", " + std::to_string(during) + " during the installs");
+    check(log_count("could not be opened or stopped") == unstoppable, "these installs stopped every other thread they listed");
+}
+
+// A code_state call that waits for the lock while a first install stops every thread. The install holds the lock from
+// before it reads the target until it has written the jump and let the threads run again, so a caller waiting for it
+// holds nothing when it is stopped, and it finishes after the install, with the new bytes. The pause inside the
+// install (at its read of the file's bytes, after it took the lock and before it stops the threads) makes this
+// deterministic: the caller has read the file's bytes, its next step is the lock, and it cannot finish before the
+// install does. read_original takes no lock: a call made during the pause returns at once. A lock taken only after the
+// threads are stopped would deadlock in test_code_lock_order; an install without the lock fails the checks here.
+void test_code_wait_during_stop() {
+    std::puts("-- original code: a code_state call waits for the lock while a first install stops every thread");
+    const uintptr_t at = reinterpret_cast<uintptr_t>(&game_asm_code_stop);
+    snapshot_file(reinterpret_cast<void*>(at));
+    uint8_t file[16];
+    std::memcpy(file, reinterpret_cast<const void*>(at), sizeof file);
+    const size_t unstoppable = log_count("could not be opened or stopped");
+    const size_t stops = log_count("hooks: detour on rva");
+    struct Original {  // a read_original call made during the pause; it outlives the pause if it ever waits
+        std::atomic<bool> done{false};
+        KilnResult rc = KILN_ERR_INTERNAL;
+        uint8_t bytes[16] = {};
+    };
+    auto original = std::make_shared<Original>();
+    std::atomic<bool> reader_done{false};
+    KilnResult reader_rc = KILN_ERR_INTERNAL;
+    uint32_t reader_state = 99;
+    bool paused = false, reached = false, done_in_pause = true, original_in_pause = false;
+    std::thread reader;
+    g_pause_reader_read = false;
+    g_pause_fn = [&] {  // on the installing thread, inside the install
+        paused = true;
+        reader = std::thread([&] {
+            g_pause_reader = GetCurrentThreadId();
+            uint64_t g = 0;
+            reader_rc = A->code_state(at, 16, &reader_state, &g);
+            reader_done = true;
+        });
+        for (int i = 0; i < 5000 && !g_pause_reader_read.load(); ++i) Sleep(1);
+        reached = g_pause_reader_read.load();
+        Sleep(20);  // its next step is the lock: let it get there and wait
+        done_in_pause = reader_done.load();
+        std::thread reading([original, at] {
+            original->rc = A->read_original(at, original->bytes, sizeof original->bytes);
+            original->done = true;
+        });
+        for (int i = 0; i < 5000 && !original->done.load(); ++i) Sleep(1);
+        original_in_pause = original->done.load() && original->rc == KILN_OK &&
+                            !std::memcmp(original->bytes, file, sizeof file);
+        // Joined, it has ended before the install lists the threads (a thread still ending then cannot always be
+        // stopped). One that waits for this install's lock is let go instead.
+        if (original->done.load()) reading.join();
+        else reading.detach();
+    };
+    g_pause_at = at;
+    g_pause_installer = GetCurrentThreadId();
+    static int (*continuation)(int) = nullptr;
+    static auto handler = +[](int x) { return continuation(x); };
+    KilnHandle h = 0;
+    const KilnResult installed =
+        A->raw_detour(6, at, nullptr, reinterpret_cast<void*>(handler), reinterpret_cast<void**>(&continuation), &h);
+    if (reader.joinable()) reader.join();
+    g_pause_at = 0;
+    g_pause_installer = 0;
+    g_pause_reader = 0;
+    g_pause_fn = nullptr;
+    check(installed == KILN_OK && paused && reached,
+          "the install paused after taking the lock; the caller read the file's bytes meanwhile");
+    check(!done_in_pause, "...and could not finish while the install held the lock");
+    check(reader_done && reader_rc == KILN_OK && reader_state == KILN_CODE_MANAGED,
+          "...it finished after the install and saw the detour (MANAGED)", "state " + std::to_string(reader_state));
+    check(log_count("hooks: detour on rva") == stops + 1 && log_count("could not be opened or stopped") == unstoppable,
+          "the install stopped every other thread it listed, the waiting caller among them");
+    check(original_in_pause, "read_original returned the file's bytes while the install held the lock");
+    check(reinterpret_cast<int (*)(int)>(at)(41) == 42 && A->revoke(h) == KILN_OK, "the detour works");
+}
+
 void test_raw_chain_9args() {
     std::puts("-- raw links: 9 arguments through a chain of 3, caller() in each link");
     // probe the real return address of each call site before anything is hooked
@@ -1064,9 +1403,8 @@ void test_foreign() {
         check(A->raw_detour(6, reinterpret_cast<uintptr_t>(f), &o, reinterpret_cast<void*>(fn), reinterpret_cast<void**>(&orig), &h) == KILN_OK,
               "Kiln hooks a function that starts with a foreign jmp");
         check(reinterpret_cast<int (*)(int)>(f)(41) == 42 && take_order() == "KF", "both run: Kiln, then the other engine, then the original once");
-        check(log_has("t/fb chained over " + exe_name_lower()) || log_has("chained over " + exe_name_lower()) ||
-                  log_has("chained over hooks_v2_test.exe"),
-              "kiln.log: \"<label> chained over <module>+0x...\"");
+        check(log_has("hooks: t/fb (test) chained over " + exe_name_lower()) || log_has("hooks: t/fb (test) chained over hooks_v2_test.exe"),
+              "kiln.log: \"<label> (<owner>) chained over <module>+0x...\" (the hook and its owner, GitHub issue 39)");
         const auto ch = chain::chain_of(reinterpret_cast<uintptr_t>(f));
         check(ch.size() == 1, "one link on the target");
         bool found = false;
@@ -1093,7 +1431,9 @@ void test_foreign() {
         check(reinterpret_cast<int (*)(int)>(f)(41) == 42 && take_order() == "FK", "both run: the other engine, then Kiln, then the original once");
         const size_t over = chain::check_foreign();
         check(over == 1, "check_foreign: one target hooked over", std::to_string(over));
-        check(log_has("hooked over Kiln's t/fo") || log_has("hooked over Kiln's"), "kiln.log: \"<module> hooked over Kiln's <label>\"");
+        check(log_has("hooked over Kiln's t/fo (test)"), "kiln.log: \"<module> hooked over Kiln's <label> (<owner>)\"");
+        check(log_has(" [game folder] hooked over Kiln's t/fo (test)"),
+              "kiln.log: the module's file follows its name (\"<module>+0x.. [game folder] hooked over\"; two DLLs can share a name)");
         KilnHooksStats st{};
         st.size = sizeof st;
         A->stats(&st);
@@ -1116,6 +1456,8 @@ void test_foreign() {
                 saw_over = true;
                 check(lower(t["foreignOver"].value("module", "")) == exe_name_lower(), "map: foreignOver names the module",
                       t["foreignOver"].dump());
+                check(lower(t["foreignOver"].value("path", "")) == exe_name_lower(),
+                      "map: foreignOver's path is relative to the game folder", t["foreignOver"].dump());
             }
             check(t.contains("rva") && t.contains("symbol") && t.contains("label") && t["links"].is_array(), "map: target has rva/symbol/label/links");
             for (auto& l : t["links"])
@@ -2070,6 +2412,169 @@ void test_symbol_cache_and_counts() {
     A->revoke_owner(6);
 }
 
+// ---- hooks inside another module (open_module, 0.2.0-dev.29.19): XHL-Creative-Mode-Fix's mid hook in creative.dll
+struct HooksModuleInfo {
+    void* add;
+    void* add_mid;
+    void* twice;
+    void* marked;
+    const void* data;
+};
+
+std::wstring exe_dir() {
+    wchar_t path[MAX_PATH];
+    const DWORD n = GetModuleFileNameW(nullptr, path, MAX_PATH);
+    std::wstring w(path, n);
+    return w.substr(0, w.find_last_of(L"\\/") + 1);
+}
+
+KilnStr kstr(const char* s) { return KilnStr{s, std::strlen(s)}; }
+
+void test_foreign_module() {
+    std::puts("-- hooks inside another module: refused until the module is opened; then pinned, hooked, named, scanned");
+    const HMODULE dll = LoadLibraryW((exe_dir() + L"hooks-v2-module.dll").c_str());
+    check(dll != nullptr, "hooks-v2-module.dll loads (another mod's DLL)");
+    if (!dll) return;
+    HooksModuleInfo mi{};
+    const auto info = reinterpret_cast<void (*)(HooksModuleInfo*)>(reinterpret_cast<void*>(GetProcAddress(dll, "hooks_module_info")));
+    if (info) info(&mi);
+    check(info && mi.add && mi.add_mid && mi.marked && mi.data, "it hands out its functions");
+    if (!info) return;
+    const auto mod_add = reinterpret_cast<int (*)(int)>(mi.add);
+    const auto mod_twice = reinterpret_cast<int (*)(int)>(mi.twice);
+    const uintptr_t mid_at = reinterpret_cast<uintptr_t>(mi.add_mid);
+    static auto plus100 = +[](KilnRegisters* r, void*) { r->rcx += 100; ran('X'); };
+    const auto om = ord(0, "t/module-mid");
+    // what netjunk's kiln.log showed: "Hooks.Mid(0x7FFB83A7F5F7): invalid argument" for an address in creative.dll
+    check(A->mid2(6, mid_at, &om, plus100, nullptr, nullptr) == KILN_ERR_INVALID_ARGUMENT &&
+              A->mid(6, mid_at, 0, plus100, nullptr, nullptr) == KILN_ERR_INVALID_ARGUMENT,
+          "an address in a module nobody opened is still refused (the game's image only)");
+    const bool has = A->header.size >= offsetof(KilnHooksApi, module_scan) + sizeof(void*) && A->open_module && A->module_scan;
+    check(has && offsetof(KilnHooksApi, open_module) == 312 && offsetof(KilnHooksApi, module_scan) == 320 && A->header.size == 328,
+          "the table carries open_module at 312 and module_scan at 320 (328 bytes)", "size " + std::to_string(A->header.size));
+    if (!has) return;
+    KilnHooksModule m{};
+    m.size = sizeof m;
+    check(A->open_module(6, kstr("hooks-v2-never-loaded.dll"), &m) == KILN_ERR_NOT_FOUND &&
+              GetModuleHandleW(L"hooks-v2-never-loaded.dll") == nullptr,
+          "a module that is not loaded: not found, and open_module does not load it");
+    check(A->open_module(6, kstr(""), &m) == KILN_ERR_INVALID_ARGUMENT, "an empty name is refused");
+    KilnHooksModule small{};
+    small.size = 8;
+    check(A->open_module(6, kstr("hooks-v2-module.dll"), &small) == KILN_ERR_INVALID_ARGUMENT, "a short out struct is refused");
+    // one of Kiln's own modules (a copy of the test DLL under a kiln-*.dll name)
+    const std::wstring own = exe_dir() + L"kiln-hooks-v2-own.dll";
+    CopyFileW((exe_dir() + L"hooks-v2-module.dll").c_str(), own.c_str(), FALSE);
+    const HMODULE own_h = LoadLibraryW(own.c_str());
+    check(own_h && A->open_module(6, kstr("kiln-hooks-v2-own.dll"), &m) == KILN_ERR_UNAVAILABLE,
+          "Kiln's own modules (kiln-*.dll) are not opened for hooks");
+    if (own_h) FreeLibrary(own_h);
+    check(GetModuleHandleW(L"kiln-hooks-v2-own.dll") == nullptr, "...and not pinned: it unloads");
+
+    m = {};
+    m.size = sizeof m;
+    const KilnResult rc = A->open_module(6, kstr("HOOKS-V2-MODULE.DLL"), &m);
+    const uintptr_t base = reinterpret_cast<uintptr_t>(dll);
+    check(rc == KILN_OK && m.base == base && m.image_size > 0 && (m.flags & KILN_HOOKS_MODULE_PINNED) &&
+              !(m.flags & KILN_HOOKS_MODULE_GAME) && m.code_sections >= 1 && m.code_lo <= mid_at && mid_at < m.code_hi,
+          "open_module finds it by file name (any case), pins it and reports its code", std::to_string(rc));
+    check(log_has("hooks: hooks-v2-module.dll [") && log_has("] opened for hooks by test"),
+          "kiln.log names the module, its file in brackets as the overlap lines do, and who opened it", log_line("opened for hooks"));
+    KilnHooksModule again{};
+    again.size = sizeof again;
+    const size_t opened_lines = log_count("opened for hooks");
+    check(A->open_module(5, kstr("hooks-v2-module.dll"), &again) == KILN_OK && again.base == base &&
+              log_count("opened for hooks") == opened_lines,
+          "opening it again is the same module and logs nothing new");
+    // pinned: every reference the test holds is given back (and more), the module stays
+    for (int i = 0; i < 4; ++i) FreeLibrary(dll);
+    check(GetModuleHandleW(L"hooks-v2-module.dll") == dll, "pinned: FreeLibrary no longer unloads it");
+
+    check(A->mid2(6, base, &om, plus100, nullptr, nullptr) == KILN_ERR_INVALID_ARGUMENT,
+          "its headers are no hook target");
+    check(A->mid2(6, reinterpret_cast<uintptr_t>(mi.data), &om, plus100, nullptr, nullptr) == KILN_ERR_INVALID_ARGUMENT,
+          "its read-only data is no hook target");
+    check(A->mid2(6, base + m.image_size + 0x1000, &om, plus100, nullptr, nullptr) == KILN_ERR_INVALID_ARGUMENT,
+          "an address past its image is no hook target");
+    KilnHandle hm = 0;
+    check(A->mid2(6, mid_at, &om, plus100, nullptr, &hm) == KILN_OK && hm, "a mid hook inside its code is installed");
+    take_order();
+    check(mod_add(1) == 102 && take_order() == "X", "the mid hook runs inside the other module and changes a register");
+    check(log_line("on hooks-v2-module.dll+0x").find(" [") != std::string::npos, "kiln.log names the link's place as module+offset [file]", log_line("on hooks-v2-module.dll+0x"));
+    check(!log_has("on rva 0xffff"), "...not as an rva of the game");
+    // v1 mid, raw and structured links work there too
+    static int (*orig_twice)(int) = nullptr;
+    static auto raw_twice = +[](int x) -> int { ran('R'); return orig_twice(x) * 2; };
+    static auto s2 = +[](KilnHookCall2* c, void*) -> uintptr_t { ran('S'); c->args[0] += 10; return A->call_original2(c); };
+    const auto orw = ord(2, "t/module-raw"), os2 = ord(1, "t/module-s2");
+    const uintptr_t twice = reinterpret_cast<uintptr_t>(mi.twice);
+    check(A->raw_detour(6, twice, &orw, reinterpret_cast<void*>(raw_twice), reinterpret_cast<void**>(&orig_twice), nullptr) == KILN_OK &&
+              A->detour2(6, twice, &os2, 1, s2, nullptr, nullptr) == KILN_OK,
+          "raw and structured detours on a function of the module");
+    check(mod_twice(1) == 24 && take_order() == "RS", "both run in order, then the module's function once", "");
+    static auto v1 = +[](KilnRegisters* r, void*) { r->rcx += 1000; ran('V'); };
+    check(A->mid(6, mid_at, 5, v1, nullptr, nullptr) == KILN_OK && mod_add(1) == 1102 && take_order() == "VX",
+          "a v1 mid link joins the mid hook's chain (priority 5 first)");
+    // the map lists the targets with module and offset
+    size_t len = 0;
+    A->map_json(nullptr, 0, &len);
+    std::string buf(len + 1, '\0');
+    A->map_json(buf.data(), buf.size(), &len);
+    const json j = json::parse(buf.data(), buf.data() + len, nullptr, false);
+    bool row = false;
+    char want[32];
+    std::snprintf(want, sizeof want, "0x%llx", static_cast<unsigned long long>(mid_at - base));
+    if (j.is_object())
+        for (auto& t : j["targets"])
+            if (lower(t.value("module", "")) == "hooks-v2-module.dll" && t.value("offset", "") == want && t["rva"].is_null())
+                row = true;
+    check(row, "the hook map lists the target with module, offset and rva null", want);
+    // module_scan: the live bytes of its code
+    uintptr_t hits[4] = {};
+    uint32_t count = 0;
+    const KilnResult sr = A->module_scan(base, kstr("41 BA 4D 3C 2B 1A 89 C8 83 C0 07 C3"), hits, 4, &count);
+    check(sr == KILN_OK && count == 1 && hits[0] == reinterpret_cast<uintptr_t>(mi.marked),
+          "module_scan finds the one match in its code", std::to_string(sr) + " / " + std::to_string(count));
+    check(A->module_scan(base, kstr("41 BA 4D 3C 2B 1A 89 C8 83 C0 08 C3"), hits, 4, &count) == KILN_ERR_NOT_FOUND && count == 0,
+          "a pattern that is not there: not found");
+    check(A->module_scan(base + 0x10, kstr("41 BA"), hits, 4, &count) == KILN_ERR_INVALID_ARGUMENT &&
+              A->module_scan(base, kstr("zz"), hits, 4, &count) == KILN_ERR_INVALID_ARGUMENT,
+          "module_scan wants an opened module's base and a valid pattern");
+    // the game's exe: reported, not pinned; an address of the exe outside the game's image stays refused
+    KilnHooksModule game{};
+    game.size = sizeof game;
+    check(A->open_module(6, kstr(exe_name_lower().c_str()), &game) == KILN_OK && (game.flags & KILN_HOOKS_MODULE_GAME) &&
+              !(game.flags & KILN_HOOKS_MODULE_PINNED),
+          "the game's exe answers as the game, nothing pinned");
+    check(A->mid2(6, reinterpret_cast<uintptr_t>(&kiln_check_call), &om, plus100, nullptr, nullptr) == KILN_ERR_INVALID_ARGUMENT,
+          "the exe's code outside the game's image is still refused");
+    // typed links stay the game's: there is no exe code to check a descriptor against in another module
+    KilnSigArg targ{};
+    targ.name = kstr("x");
+    targ.kind = KILN_SIG_S32;
+    KilnSig tsig{};
+    tsig.size = sizeof tsig;
+    tsig.argc = 1;
+    tsig.args = &targ;
+    tsig.ret_kind = KILN_SIG_S32;
+    static auto typed_fn = +[](KilnCallFrame*, void*) -> uintptr_t { return KILN_TYPED_CONTINUE; };
+    const auto oty = ord(0, "t/module-typed");
+    check(A->detour_typed_checked(6, twice, &oty, &tsig, typed_fn, nullptr, nullptr) == KILN_HOOKS_ERR_SIG_UNKNOWN &&
+              log_has("typed hook on t/module-typed refused: typed hooks check their descriptor against the game exe's code"),
+          "a typed hook inside the module is refused with a reason (its descriptor needs the game's code)");
+    check(A->fingerprint(twice, nullptr, 0, &len) == KILN_ERR_INVALID_ARGUMENT, "fingerprint stays the game's code");
+    // read_original and code_state compare with the exe file's code: they do not apply inside another module
+    uint8_t orig[8];
+    std::memset(orig, 0x55, sizeof orig);
+    uint32_t cstate = 0x77;
+    uint64_t cgen = 0x77;
+    check(A->read_original(twice, orig, sizeof orig) == KILN_ERR_INVALID_ARGUMENT && orig[0] == 0x55 && orig[7] == 0x55 &&
+              A->code_state(twice, 8, &cstate, &cgen) == KILN_ERR_INVALID_ARGUMENT && cstate == 0x77 && cgen == 0x77,
+          "read_original and code_state refuse an address in the opened module and write nothing");
+    A->revoke_owner(6);
+    check(mod_add(1) == 2 && mod_twice(1) == 2 && take_order().empty(), "revoked: the module's functions run as before");
+}
+
 // ---- ur8 finding 6: the target cap (its own process: it uses up every target slot)
 void test_target_cap() {
     std::puts("-- every target slot used: a new address is refused and the plugins can tell; hooked addresses still take links");
@@ -2186,6 +2691,14 @@ int main(int argc, char** argv) {
         std::puts(g_fail ? "FAILED" : "all passed");
         return g_fail ? 1 : 0;
     }
+    if (argc > 1 && !std::strcmp(argv[1], "module")) {  // the foreign-module test alone (a quick run on real Windows)
+        g_service->init();
+        A = static_cast<const KilnHooksApi*>(g_service->table);
+        test_foreign_module();
+        std::printf("%d passed, %d failed\n", g_pass, g_fail);
+        std::puts(g_fail ? "FAILED" : "all passed");
+        return g_fail ? 1 : 0;
+    }
     if (argc > 1 && !std::strcmp(argv[1], "tls64"))  // push the caller-table slot into TlsExpansionSlots
         for (int i = 0; i < 70; ++i) TlsAlloc();
     std::printf("hooks_v2_test: game section %p +0x%zx, tls %s\n", reinterpret_cast<void*>(kiln::g_image.base),
@@ -2207,6 +2720,10 @@ int main(int argc, char** argv) {
           "size " + std::to_string(A->header.size));
     check(A->raw_detour && A->caller && A->detour2 && A->call_original2 && A->mid2 && A->map_json, "every v2 entry is set");
 
+    test_code_inspection();
+    test_code_range_limit();
+    test_code_lock_order();
+    test_code_wait_during_stop();
     test_raw_chain_9args();
     test_floats();
     test_structured();
@@ -2234,6 +2751,7 @@ int main(int argc, char** argv) {
     test_map_robust();
     test_refused_target();
     test_symbol_cache_and_counts();
+    test_foreign_module();
 
     {
         std::lock_guard lock(g_log_mutex);

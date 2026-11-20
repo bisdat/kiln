@@ -127,6 +127,16 @@ bundleId@0x14, u64 sortKey@0x18}`; `keen::ContentHash` 16 B `{u32 size, hash0, h
 `keen::PixelFormat` values Kiln encodes: 37 R8G8B8A8_unorm, 43 srgb, 44/50 BGRA; 131-134 BC1, 137/138 BC3,
 139/140 BC4, 141/142 BC5, 145/146 BC7 **[refl]**.
 
+### Item icons as pictures (client 26430625, 0.2.0-dev.29.15) **[data]**
+Every one of the client's 4,268 `keen::ItemInfo` resources has a `UiTextureResource` under its own GUID (tools/kfc, a scan of
+all of them): all `BC7_unorm_block` (145), 4,017 of 256x256 with 9 levels, 242 of 512x512 (10 levels), 3 of 200x200 (8), and
+6 that are not square or not a power of two (lore map pieces 360x388, 338x366, 319x366, 374x388 with 9 levels; two
+1299x1314 with 11). The content blob is the whole mip chain, largest level first, tightly packed, level l
+`max(1, w >> l) x max(1, h >> l)` in 4x4 blocks: the sum matches the blob's size for all 4,268 (a 256x256 icon is 87,408
+bytes). kiln.assets' `texture_rgba` decodes one level of such a texture (the smallest at least as large as asked) with the
+vendored bc7enc_rdo decoders; Kiln.Ui uploads it as an overlay image (docs/kiln/ui.md "Item icons and names"). The game's
+own UI uploads the same textures into its own cache (above); Kiln does not touch that cache for drawing.
+
 ## 5. Resident vs streamed
 - **Resources** are all resident (one read-only region, loaded at start; EMF §1.1, ShroudForge root check). An
   override of a resource the game has already read takes effect only the next time the game reads it: for a

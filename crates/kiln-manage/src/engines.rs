@@ -40,6 +40,105 @@ pub const PROXY_NAMES: [&str; 13] = [
     "steam_api64.dll",
 ];
 
+/// The names OptiScaler's DLL is installed under in the game folder (its docs and installer). Not part of
+/// [`PROXY_NAMES`]: d3d12.dll, wininet.dll and winhttp.dll are no mod loaders' names, and the names both lists share
+/// keep their rules. A file under one of them is OptiScaler only when its contents say so ([`classify_markers`]).
+pub const OPTISCALER_NAMES: [&str; 7] =
+    ["dxgi.dll", "winmm.dll", "version.dll", "dbghelp.dll", "d3d12.dll", "wininet.dll", "winhttp.dll"];
+
+/// The largest OptiScaler.ini read (the shipped one is tens of KiB); kiln.ui reads none larger either.
+pub const OPTISCALER_INI_MAX: u64 = 4 * 1024 * 1024;
+
+/// What OptiScaler.ini sets that decides for Kiln's in-game overlay (kiln.ui reads it the same way:
+/// native/services/ui/overlay_optiscaler.h). Sections and keys case ignored, `;`/`#` comment lines, the last key wins.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct OptiScalerIni {
+    /// `[Menu] OverlayMenu`: None for auto (OptiScaler's default: on).
+    pub overlay_menu: Option<bool>,
+    /// `[FrameGen] FGInput` and `FGOutput` both set to something other than nofg/auto: OptiScaler's frame generation is
+    /// made with the game's device (its nightly builds since October 2026, with its menu on or off; 0.9.5 has none for
+    /// Vulkan).
+    /// An input without an output or the other way round makes none. `[FrameGen] Enabled` does not matter: it only
+    /// switches frame generation while it runs, its own present queue and swapchain are there either way.
+    pub frame_gen: bool,
+}
+
+impl OptiScalerIni {
+    pub fn parse(text: &str) -> Self {
+        let mut section = String::new();
+        let (mut menu, mut input, mut output) = (None, String::new(), String::new());
+        for line in text.split('\n') {
+            let line = line.trim_start_matches('\u{feff}').trim();
+            if line.is_empty() || line.starts_with(';') || line.starts_with('#') {
+                continue;
+            }
+            if let Some(rest) = line.strip_prefix('[') {
+                section = rest.split(']').next().unwrap_or("").trim().to_ascii_lowercase();
+                continue;
+            }
+            let Some((key, value)) = line.split_once('=') else { continue };
+            let (key, value) = (key.trim().to_ascii_lowercase(), value.trim().to_ascii_lowercase());
+            match (section.as_str(), key.as_str()) {
+                ("menu", "overlaymenu") => menu = match value.as_str() { "false" => Some(false), "true" => Some(true), _ => None },
+                ("framegen", "fginput") => input = value,
+                ("framegen", "fgoutput") => output = value,
+                _ => {}
+            }
+        }
+        let none = |v: &str| v.is_empty() || v == "auto" || v == "nofg";
+        OptiScalerIni { overlay_menu: menu, frame_gen: !none(&input) && !none(&output) }
+    }
+
+    /// OptiScaler.ini in `dir` (any spelling of its name); the default settings when there is none, or when it is not a
+    /// file or larger than [`OPTISCALER_INI_MAX`] (kiln.ui's limit: both then take OptiScaler's menu for on).
+    pub fn read(dir: &Path) -> Self {
+        std::fs::read_dir(dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .find(|e| e.file_name().to_string_lossy().eq_ignore_ascii_case("OptiScaler.ini"))
+            .filter(|e| e.metadata().is_ok_and(|m| m.is_file() && m.len() <= OPTISCALER_INI_MAX))
+            .and_then(|e| std::fs::read(e.path()).ok())
+            .map(|b| Self::parse(&String::from_utf8_lossy(&b)))
+            .unwrap_or_default()
+    }
+
+    /// Kiln's overlay draws next to OptiScaler: its own overlay menu is off and no frame generation is set, so it
+    /// patches none of the game's presents or swapchains. Otherwise kiln.ui's drawing steps aside on its own (with frame
+    /// generation the game's frames are presented from OptiScaler's own queue, where Kiln cannot draw).
+    pub fn kiln_overlay_draws(&self) -> bool {
+        self.overlay_menu == Some(false) && !self.frame_gen
+    }
+}
+
+/// What a player can expect from Kiln's in-game overlay next to OptiScaler with these settings (the Play page's note).
+pub fn optiscaler_overlay_note(ini: &OptiScalerIni) -> String {
+    if ini.kiln_overlay_draws() {
+        return "OptiScaler's own overlay menu is off in OptiScaler.ini (OverlayMenu=false) and no frame generation is set, so Kiln's \
+                in-game overlay draws next to it."
+            .into();
+    }
+    if ini.overlay_menu == Some(false) {
+        return "Kiln's in-game overlay steps aside while OptiScaler's frame generation is set in OptiScaler.ini (FGInput and FGOutput \
+                under [FrameGen]): the game's frames are then presented from OptiScaler's own queue, where Kiln cannot draw. Kiln's key \
+                bindings and the Mods entry still work, Kiln's windows and Mods page don't show. For Kiln's overlay, set FGInput and \
+                FGOutput to auto (frame generation off, upscaling stays), or try both with the launch option KILN_UI_OVERLAY=1."
+            .into();
+    }
+    "Kiln's in-game overlay steps aside while OptiScaler's own menu is on (its default; both open with Insert): Kiln's key \
+     bindings and the Mods entry still work, Kiln's windows and Mods page don't show. For Kiln's overlay, set OverlayMenu=false \
+     under [Menu] in OptiScaler.ini and leave FGInput and FGOutput under [FrameGen] at auto (OptiScaler's menu and frame \
+     generation off, its upscaling on), or try both with the launch option KILN_UI_OVERLAY=1."
+        .into()
+}
+
+/// True for a name OptiScaler's DLL goes by: one of [`OPTISCALER_NAMES`], or `OptiScaler*.dll` / `OptiScaler*.asi` as it
+/// ships (case ignored).
+pub fn is_optiscaler_name(file_name: &str) -> bool {
+    let low = file_name.to_ascii_lowercase();
+    OPTISCALER_NAMES.contains(&low.as_str()) || (low.starts_with("optiscaler") && (low.ends_with(".dll") || low.ends_with(".asi")))
+}
+
 /// True for one of [`PROXY_NAMES`] (case ignored).
 pub fn is_proxy_name(file_name: &str) -> bool {
     PROXY_NAMES.iter().any(|n| n.eq_ignore_ascii_case(file_name))
@@ -61,6 +160,10 @@ pub enum Engine {
     Flame,
     Shroudlink,
     Ember,
+    /// AndyPimms' Enshrouded ModLoader (github.com/aebischer/Enshrouded-ModLoader): its dinput8.dll runs packages with a
+    /// .dll.mod manifest (CarryOn, Belt Lantern). Kiln runs those packages itself (kiln-dllmod); its dinput8.dll stays a
+    /// DLL mod Kiln chain-loads when a player adds it (kiln-dllmod then steps aside).
+    Dllmod,
     ModLoaderProxy,
     UltimateAsiLoader,
     Aldrich,
@@ -69,6 +172,11 @@ pub enum Engine {
     #[serde(rename = "reshade")]
     ReShade,
     ChainLoader,
+    /// OptiScaler (github.com/optiscaler/OptiScaler): an upscaler and frame generation tool under one of its own proxy
+    /// names ([`OPTISCALER_NAMES`]). Serialized by its name ("optiscaler"), like every variant: the position is no contract.
+    #[serde(rename = "optiscaler")]
+    OptiScaler,
+    NativeFolders,
 }
 
 /// What Kiln knows about one engine.
@@ -120,6 +228,9 @@ pub const ENGINES: &[EngineInfo] = &[
     EngineInfo { engine: Engine::Ember, word: "ember", name: "Ember (server SDK)",
         proxies: &["powrprof.dll", "iphlpapi.dll", "dbghelp.dll"], exports: &[], texts: &["ember-loader", "ember_loader"],
         what: "a server mod framework" },
+    // AndyPimms' loader names its world profile files' header (ENSHROUDED_MODS_V1) and logs to ModLoader/mod-loader.log
+    EngineInfo { engine: Engine::Dllmod, word: "enshrouded-modloader", name: "Enshrouded ModLoader", proxies: &["dinput8.dll"],
+        exports: &[], texts: &["enshrouded_mods_v1"], what: "a DLL mod loader (CarryOn, Belt Lantern)" },
     EngineInfo { engine: Engine::ModLoaderProxy, word: "modloader-proxy", name: "ModLoader Proxy",
         proxies: &["dinput8.dll", "powrprof.dll"], exports: &[], texts: &["modloader-proxy.dll", "chainloader.ini"],
         what: "a DLL chain loader" },
@@ -132,10 +243,23 @@ pub const ENGINES: &[EngineInfo] = &[
         exports: &[], texts: &["livemap.ini"], what: "a stand-alone server mod" },
     EngineInfo { engine: Engine::SharedXp, word: "shared-xp", name: "Shared XP", proxies: &["powrprof.dll"],
         exports: &[], texts: &["xpshare.ini"], what: "a stand-alone server mod" },
+    // OptiScaler's DLL reads its own OptiScaler.ini and can load ReShade itself, so it carries ReShade's word too: it
+    // comes before ReShade. Its proxy names include winmm.dll and version.dll, which other loaders use as well: only
+    // its texts make a DLL OptiScaler, never the name.
+    // `proxies`: its names that are in PROXY_NAMES; all of them are OPTISCALER_NAMES.
+    EngineInfo { engine: Engine::OptiScaler, word: "optiscaler", name: "OptiScaler",
+        proxies: &["dxgi.dll", "winmm.dll", "version.dll", "dbghelp.dll"],
+        exports: &[], texts: &["optiscaler.ini", "optiscaler.log"], what: "an upscaler and frame generation tool" },
     EngineInfo { engine: Engine::ReShade, word: "reshade", name: "ReShade", proxies: &["dxgi.dll"],
         exports: &[], texts: &["reshade"], what: "a graphics post-processing tool" },
     EngineInfo { engine: Engine::ChainLoader, word: "chain-loader", name: "a dinput8-chain.ini chain loader", proxies: &["dinput8.dll"],
         exports: &[], texts: &["dinput8-chain.ini"], what: "a DLL chain loader (XHL-Core, Auto Loot Plus and others)" },
+    // CharosDX's loader (github.com/CharosDX/sparkworks-enhanced src/dinput8_proxy.c, MIT; the same file ships with
+    // Cross-Base Storage and Craft From Stations): in DllMain it LoadLibrary's every <game>\mods\<mod>\native\*.dll and
+    // logs to native-loader.log there. Kiln imports those mod folders as native mods (library::native_folder_dlls).
+    EngineInfo { engine: Engine::NativeFolders, word: "native-folders", name: "CharosDX's DLL mod loader",
+        proxies: &["dinput8.dll"], exports: &[], texts: &["native-loader.log"],
+        what: "a DLL mod loader (Sparkworks Enhanced, Cross-Base Storage, Craft From Stations)" },
 ];
 
 const KILN_INFO: EngineInfo = EngineInfo { engine: Engine::Kiln, word: "kiln", name: "Kiln", proxies: &["dinput8.dll"],
@@ -165,6 +289,7 @@ impl Engine {
             Engine::Flame => ProxyKind::Flame,
             Engine::Shroudlink => ProxyKind::Shroudlink,
             Engine::Ember => ProxyKind::Ember,
+            Engine::Dllmod => ProxyKind::Dllmod,
             Engine::ModLoaderProxy => ProxyKind::ModLoaderProxy,
             Engine::UltimateAsiLoader => ProxyKind::UltimateAsiLoader,
             Engine::Aldrich => ProxyKind::Aldrich,
@@ -172,6 +297,8 @@ impl Engine {
             Engine::SharedXp => ProxyKind::SharedXp,
             Engine::ReShade => ProxyKind::ReShade,
             Engine::ChainLoader => ProxyKind::ChainLoader,
+            Engine::OptiScaler => ProxyKind::OptiScaler,
+            Engine::NativeFolders => ProxyKind::NativeFolders,
         }
     }
 
@@ -272,6 +399,22 @@ pub fn scan_proxies(game_dir: &Path) -> Vec<ProxySlot> {
         .collect()
 }
 
+/// OptiScaler installed in a game folder: the DLL whose contents say it is OptiScaler, under one of its names directly
+/// in the folder ([`OPTISCALER_NAMES`], `OptiScaler*.dll`, `OptiScaler*.asi`). Its OptiScaler.ini alone (left behind by
+/// an uninstall) is not OptiScaler. None when there is none.
+pub fn optiscaler_in(game_dir: &Path) -> Option<String> {
+    let mut names: Vec<String> = std::fs::read_dir(game_dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| is_optiscaler_name(n))
+        .collect();
+    names.sort();
+    names.into_iter().find(|n| crate::pe::classify_proxy(&game_dir.join(n)).is_ok_and(|c| c.kind == ProxyKind::OptiScaler))
+}
+
 // ---- what a player reads ----
 
 /// "<what it is>: <why it cannot load yet>" for an engine's mod (no final period: the launcher adds one).
@@ -299,7 +442,7 @@ pub fn short_name(engine: Engine) -> &'static str {
 /// Engines whose mods Kiln runs itself (a plugin per engine): their own loader in a package is not needed.
 pub fn kiln_runs(engine: Engine) -> bool {
     matches!(engine, Engine::Emf | Engine::Eml | Engine::ShroudForge | Engine::Set | Engine::Greeneye | Engine::Flame
-        | Engine::Shroudtopia | Engine::Enshwick | Engine::Shroudlink | Engine::Ember)
+        | Engine::Shroudtopia | Engine::Enshwick | Engine::Shroudlink | Engine::Ember | Engine::Dllmod)
 }
 
 /// The engine whose own loader is a DLL directly in `dir`, when Kiln runs that engine's mods itself ([`kiln_runs`]): a
@@ -317,7 +460,7 @@ pub fn own_loader_in(dir: &Path) -> Option<(Engine, String)> {
 
 /// Loaders of DLL mods that Kiln does itself (it chains DLLs and reads `dinput8-chain.ini`).
 fn is_chain_loader(engine: Engine) -> bool {
-    matches!(engine, Engine::ChainLoader | Engine::ModLoaderProxy)
+    matches!(engine, Engine::ChainLoader | Engine::ModLoaderProxy | Engine::NativeFolders)
 }
 
 /// A loader in a package that is only worth a line of information: the player has nothing to do.
@@ -328,7 +471,7 @@ pub fn loader_is_note(engine: Engine) -> bool {
 /// A tool that runs on its own next to Kiln (not a loader of mods): a package built around it is left out whole,
 /// with one reason, instead of importing its helper DLLs one by one.
 pub fn is_standalone_tool(engine: Engine) -> bool {
-    matches!(engine, Engine::Aldrich | Engine::LiveMap | Engine::SharedXp | Engine::ReShade)
+    matches!(engine, Engine::Aldrich | Engine::LiveMap | Engine::SharedXp | Engine::ReShade | Engine::OptiScaler)
 }
 
 /// Why a loader or tool DLL is not imported as a mod: one short sentence, with what to do when the player has to
@@ -336,18 +479,142 @@ pub fn is_standalone_tool(engine: Engine) -> bool {
 pub fn loader_reason(engine: Engine, file: &str) -> String {
     let n = engine.name();
     let short = short_name(engine);
+    // A loader or tool shipped under Kiln's own proxy name: "copy it into the game folder" would replace Kiln's
+    // dinput8.dll (0.2.0-dev.29 told a player to do that for Ultimate ASI Loader). The supported way is a chain entry.
+    let kilns_name = info(Engine::Kiln).proxies.iter().any(|p| file.eq_ignore_ascii_case(p));
+    if kilns_name && engine != Engine::Kiln && !loader_is_note(engine) {
+        return match engine {
+            Engine::UltimateAsiLoader => format!("{file} is {n}: don't copy it over Kiln's own dinput8.dll; name it \
+                xinput9_1_0.dll and list that in dinput8-chain.ini (Kiln wiki)"),
+            _ => format!("{file} is {n}: don't copy it over Kiln's own dinput8.dll; give it another name and list it in \
+                dinput8-chain.ini (Kiln wiki)"),
+        };
+    }
     match engine {
         Engine::Kiln => format!("{file} is Kiln's own loader: install or update Kiln on the Runtime page instead of adding it as a mod"),
         Engine::Ember => "Ember's own loader is in this package: not needed, and Kiln can't run Ember mods yet".to_string(),
         e if kiln_runs(e) => format!("{short}'s own loader is in this package: not needed, Kiln runs {short} mods"),
         Engine::ChainLoader | Engine::ModLoaderProxy => format!("{file} is {n}: not needed, Kiln loads DLL mods itself"),
+        Engine::NativeFolders => format!("{file} is {n}: not needed, Kiln loads the DLLs in each mods\\<mod>\\native folder itself"),
         Engine::LiveMap | Engine::SharedXp => format!(
             "{file} is {n}, a stand-alone server mod: Kiln doesn't manage it, copy it into the server folder yourself"
         ),
         Engine::ReShade => format!("{file} is ReShade, which runs on its own next to Kiln: Kiln doesn't manage it, copy it into the Enshrouded folder yourself"),
+        // one sentence (the Library's rule); what it means for Kiln's overlay is on the Play page (game::graphics_tools)
+        Engine::OptiScaler => format!("{file} is OptiScaler, which runs on its own next to Kiln: Kiln doesn't manage it, copy it into the Enshrouded folder yourself"),
+        // its download is a dinput8.dll: copied into the game folder by hand it would replace Kiln's proxy
+        Engine::UltimateAsiLoader => format!("{file} is Ultimate ASI Loader: add it to the Library and Kiln puts it next to the game as {} \
+            (never as dinput8.dll, that is Kiln's)", crate::game_files::UAL_FILE),
         Engine::Aldrich => format!("{file} is {n}, which runs on its own from the Enshrouded folder: Kiln doesn't manage it, copy its files there yourself"),
         _ => format!("{file} is {n}, {}: Kiln doesn't manage it, copy it into the Enshrouded folder yourself", info(engine).what),
     }
+}
+
+// ---- modified EML loaders ----
+
+/// The source files of EML 0.2.0's `mod-loader-runtime` crate: a stub (`loader_attach` only logs "Attaching runtime
+/// loader"). A build whose panic and log locations name another file of that crate carries code of its own there.
+const EML_STOCK_RUNTIME_FILES: [&str; 2] = ["lib.rs", "log.rs"];
+
+/// Texts of known EML rebuilds' own code, and what that code does for a player. "Put Away Your Weapon" (Nexus 371,
+/// `holster-toggle`) ships EML's dbghelp.dll rebuilt with a native layer (crates\mod-loader-runtime\src\native\):
+/// a thread `m182-holster` that, on a key, rewrites weapon poses in the game's memory from the map its Lua part
+/// exports, a PvP patch of the game's isEnemy/isFriend checks, and a stance dump key (analysis 2026-11-17,
+/// dev29/out/holster/REPORT.md).
+const EML_EXTRA_TEXTS: [(&str, &str); 3] = [
+    ("m182-holster", "a weapon holster hotkey"),
+    ("isEnemy(values)", "a PvP patch of the game's faction checks"),
+    ("m182-stancedump", "a stance dump key"),
+];
+
+/// Settings files known EML rebuilds read next to the game, named in what Kiln tells the player.
+pub const EML_EXTRA_SETTINGS: [&str; 1] = ["m182_native.json"];
+
+/// What a modified EML loader carries besides EML.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EmlExtras {
+    /// What that code does, where Kiln recognises it; empty for code Kiln does not know.
+    pub features: Vec<&'static str>,
+    /// The settings file it reads next to the game, when Kiln knows it.
+    pub settings: Option<&'static str>,
+    /// What gave it away: a source file of its own (`mod-loader-runtime\src\native\mod.rs`) or a known text.
+    pub evidence: String,
+}
+
+impl EmlExtras {
+    /// "a weapon holster hotkey and a PvP patch of the game's faction checks; settings in m182_native.json", or
+    /// "code Kiln does not recognise".
+    pub fn what(&self) -> String {
+        let mut s = match self.features.as_slice() {
+            [] => "code Kiln does not recognise".to_string(),
+            [one] => one.to_string(),
+            [first @ .., last] => format!("{} and {last}", first.join(", ")),
+        };
+        if let Some(f) = self.settings {
+            s += &format!("; settings in {f}");
+        }
+        s
+    }
+}
+
+/// The source files of `mod-loader-runtime` a build names (`native\holster.rs`), from its panic and log locations.
+fn runtime_sources(bytes: &[u8]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for prefix in [b"mod-loader-runtime\\src\\".as_slice(), b"mod-loader-runtime/src/".as_slice()] {
+        let mut from = 0;
+        while let Some(at) = crate::pe::contains(&bytes[from..], prefix) {
+            let start = from + at + prefix.len();
+            let rest = &bytes[start..bytes.len().min(start + 96)];
+            let n = rest.iter().take_while(|c| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'-' | b'.' | b'\\' | b'/')).count();
+            let name = String::from_utf8_lossy(&rest[..n]);
+            if let Some(end) = name.find(".rs") {
+                let file = name[..end + 3].replace('/', "\\");
+                if !out.contains(&file) { out.push(file); }
+            }
+            from = start;
+        }
+    }
+    out
+}
+
+/// The code a DLL with EML's marker carries besides EML (None: a stock EML build, as far as Kiln can tell). Only
+/// meaningful for a DLL [`classify_markers`] calls EML's.
+pub fn eml_loader_extras(bytes: &[u8]) -> Option<EmlExtras> {
+    let own = runtime_sources(bytes).into_iter().find(|f| !EML_STOCK_RUNTIME_FILES.contains(&f.as_str()));
+    let features: Vec<&'static str> = EML_EXTRA_TEXTS.iter()
+        .filter(|(t, _)| crate::pe::contains(bytes, t.as_bytes()).is_some()).map(|(_, f)| *f).collect();
+    if own.is_none() && features.is_empty() {
+        return None;
+    }
+    let settings = EML_EXTRA_SETTINGS.iter().copied().find(|s| crate::pe::contains(bytes, s.as_bytes()).is_some());
+    let evidence = match own {
+        Some(f) => format!("mod-loader-runtime\\src\\{f}"),
+        None => EML_EXTRA_TEXTS.iter().find(|(_, f)| features.contains(f)).map(|(t, _)| format!("text {t}")).unwrap_or_default(),
+    };
+    Some(EmlExtras { features, settings, evidence })
+}
+
+/// The Library's line for a modified EML loader in a package (`what`: [`EmlExtras::what`]). Never "not needed": Kiln
+/// runs the package's EML mods, but not the loader's own code.
+pub fn modified_eml_reason(file: &str, what: &str) -> String {
+    format!("{file} is a modified EML loader with code of its own ({what}). Kiln runs the EML mods of this package, but not \
+        that code: it runs only when this file is the game's EML loader in place of Kiln's EML support (Kiln wiki: EML, \
+        modified loaders). Not added to the Library")
+}
+
+/// What an EML mod imported with a modified EML loader beside it says about itself: which part runs under Kiln.
+pub fn eml_partial_note(file: &str, what: &str) -> String {
+    format!("part of this mod is in {file}, a modified EML loader with code of its own ({what}). Kiln runs the mod's EML \
+        part (its game data), not that code, so what the code does (such as a hotkey) does not work under Kiln")
+}
+
+/// A modified EML loader directly in `dir` (file name, [`EmlExtras::what`]), the first by name.
+pub fn modified_eml_in(dir: &Path) -> Option<(String, String)> {
+    dlls_in(dir).into_iter().find_map(|dll| {
+        let class = crate::pe::classify_proxy(&dll).ok()?;
+        let what = class.modified.filter(|_| class.kind == ProxyKind::Eml)?;
+        Some((dll.file_name()?.to_string_lossy().into_owned(), what))
+    })
 }
 
 // ---- Library detection ----
@@ -360,6 +627,13 @@ const FLAME_MOD_EXPORT: &str = "FlameStartRuntime";
 /// shroudlink's mod DLLs (its server looks for `shroudlink_mod_v2`, then `_v1`).
 const SHROUDLINK_MOD_EXPORTS: [&str; 2] = ["shroudlink_mod_v2", "shroudlink_mod_v1"];
 
+/// EMF's own DLLs beside its loader in `<game>/emf/` (EMF scripts/package.ps1), by their exports, with what each is:
+/// its core (`emf_core.dll`: `emf_core_start`, which the loader calls, and its console's Vulkan layer), its builder of
+/// EML content (`emf_content.dll`) and its frame-time recorder (`emf_frametime.dll`, a Vulkan layer). They are EMF, not
+/// mods: Kiln's EMF support runs EMF's mods.
+const EMF_OWN_FILES: [(&str, &str); 4] = [("emf_core_start", "its core"), ("emf_vk_negotiate", "its core"),
+    ("emf_content_abi", "its builder of EML content"), ("emf_ft_negotiate", "its frame-time recorder")];
+
 /// shroudlink's client addon: its `dinput8.dll` draws the in-game MODS tab, the chest search and the slot locks. It
 /// is a mod of its own, not a loader Kiln replaces: kiln-shroudlink is shroudlink's server core, and the addon is what
 /// shows that core's windows. The core is told apart by the export `CrashHandlerFactory` (it also runs as
@@ -371,6 +645,21 @@ pub fn is_shroudlink_addon(file: &str, bytes: &[u8], exports: &[String]) -> bool
     let names = |t: &str| find_any(&lower, &[t.as_bytes().to_vec(), utf16(t)]).iter().any(|f| *f);
     file.to_ascii_lowercase().ends_with("dinput8.dll") && has("DirectInput8Create") && !has("CrashHandlerFactory")
         && names("shroudlink") && !names("steam_api64_o.dll")
+}
+
+/// The file name shroudlink's client addon loads its core from, in the game folder (its singleplayer mode).
+pub const SHROUDLINK_CORE: &str = "shroudlink_core.dll";
+
+/// shroudlink's own server core as the client addon loads it (`shroudlink_core.dll` next to the game), by the rule
+/// kiln-shroudlink steps aside by (native/plugins/shroudlink/upstream/server/src/kiln.rs `is_core_image`): that file
+/// name, or the core's export pair `CrashHandlerFactory` + `DirectInput8Create`, together with the core's own texts.
+pub fn shroudlink_core_at(path: &Path) -> bool {
+    let Ok(bytes) = std::fs::read(path) else { return false };
+    let Ok(pe) = crate::pe::parse(&bytes) else { return false };
+    let has = |e: &str| pe.exports.iter().any(|x| x == e);
+    let named = path.file_name().is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case(SHROUDLINK_CORE));
+    crate::pe::is_pe64_dll(&bytes) && (named || (has("CrashHandlerFactory") && has("DirectInput8Create")))
+        && [b"shroudlink server ".as_slice(), b"chestsort_server_".as_slice()].iter().all(|s| crate::pe::contains(&bytes, s).is_some())
 }
 
 /// [`is_shroudlink_addon`] for a file on disk (false when it cannot be read).
@@ -390,7 +679,7 @@ fn detected(kind: DetectKind, engine: Option<Engine>, path: &Path, reason: Strin
         version: None,
         name,
         reason,
-        items: vec![],
+        items: vec![], asi_omit: vec![],
         engine,
     }
 }
@@ -401,6 +690,11 @@ pub fn detect_dll(path: &Path, bytes: &[u8], exports: &[String]) -> Option<Detec
     if !crate::pe::is_pe64_dll(bytes) { return None; }
     let has = |e: &str| exports.iter().any(|x| x == e);
     let file = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    // EMF's own files beside its loader (its download's game/emf/): left out as its loader is, never plain DLL mods
+    if let Some((_, what)) = EMF_OWN_FILES.iter().find(|(e, _)| has(e)) {
+        return Some(detected(DetectKind::Proxy, Some(Engine::Emf), path,
+            format!("{file} is part of EMF itself ({what}): not needed, Kiln runs EMF mods")));
+    }
     let mod_dll = |engine: Engine| Some(detected(engine_kind(engine), Some(engine), path, mod_reason(engine, &file)));
     if has(GREENEYE_MOD_EXPORT) {
         return mod_dll(Engine::Greeneye);
@@ -424,8 +718,23 @@ pub fn detect_dll(path: &Path, bytes: &[u8], exports: &[String]) -> Option<Detec
     }
     let class = crate::pe::classify_bytes(bytes);
     let engine = Engine::of_proxy(class.kind).filter(|e| *e != Engine::Kiln)?; // Kiln's own proxy: library's rule
+    // Enshrouded ModLoader's own dinput8.dll keeps Kiln's own rules (a DLL mod Kiln chain-loads, as before kiln-dllmod):
+    // a player who wants its MODS page adds it, and kiln-dllmod steps aside while it runs
+    if engine == Engine::Dllmod {
+        return None;
+    }
+    // a modified EML loader is left out with what it is and what does not run, never as "not needed" (Unknown: the
+    // import skips it with that reason; detect_folder does not take its folder for an EML mod)
+    if engine == Engine::Eml && let Some(what) = &class.modified {
+        return Some(detected(DetectKind::Unknown, Some(engine), path, modified_eml_reason(&file, what)));
+    }
     // a plain DLL that merely mentions "dinput8-chain.ini" or "reshade" keeps Kiln's own rules unless it is one by name
-    if matches!(engine, Engine::ChainLoader | Engine::ReShade | Engine::Aldrich) && !is_proxy_name(&file) {
+    if matches!(engine, Engine::ChainLoader | Engine::ReShade | Engine::Aldrich | Engine::NativeFolders) && !is_proxy_name(&file) {
+        return None;
+    }
+    // OptiScaler: under one of its own names, or as it ships (OptiScaler.dll, renamed by its installer); a DLL that only
+    // mentions OptiScaler.ini under another name keeps Kiln's own rules
+    if engine == Engine::OptiScaler && !is_optiscaler_name(&file) {
         return None;
     }
     // shroudlink's client addon is a DLL mod (Kiln chains it), not a loader Kiln replaces
@@ -433,6 +742,32 @@ pub fn detect_dll(path: &Path, bytes: &[u8], exports: &[String]) -> Option<Detec
         return None;
     }
     Some(detected(DetectKind::Proxy, Some(engine), path, loader_reason(engine, &file)))
+}
+
+/// A package folder for Enshrouded ModLoader (one or more DLLs with their `.dll.mod` manifest directly in it,
+/// [`crate::dllmod::packages_in`]): one Library entry named after the folder (the loader's package id is the folder's name
+/// and the DLL's), with the version of its first kind=mod package. A folder whose packages Kiln cannot run (a manifest
+/// the format refuses, a mod without its export) is left out with the reason. None for any other folder.
+pub fn dllmod_folder(dir: &Path) -> Option<Detected> {
+    if crate::dllmod::packages_in(dir).is_empty() {
+        return None;
+    }
+    let shown = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let mut d = detected(DetectKind::Dllmod, Some(Engine::Dllmod), dir, String::new());
+    match crate::dllmod::read_folder(dir) {
+        Ok(f) => {
+            d.version = f.mods.first().or(f.libraries.first()).map(|(_, m)| m.version.clone());
+            d.reason = mod_reason(Engine::Dllmod, &shown);
+            if f.mods.is_empty() {
+                d.reason += " (library packages only: they load when a mod that requires them runs)";
+            }
+        }
+        Err(e) => {
+            d.kind = DetectKind::Unknown;
+            d.reason = format!("{shown}: a package for Enshrouded ModLoader that Kiln cannot run: {e}");
+        }
+    }
+    Some(d)
 }
 
 /// The Library kind of an engine's mods.
@@ -449,9 +784,12 @@ pub fn engine_kind(engine: Engine) -> DetectKind {
         Engine::Flame => DetectKind::Flame,
         Engine::Shroudlink => DetectKind::Shroudlink,
         Engine::Ember => DetectKind::Ember,
+        Engine::Dllmod => DetectKind::Dllmod,
         Engine::UltimateAsiLoader => DetectKind::Asi,
         Engine::ReShade => DetectKind::Reshade,
-        Engine::ModLoaderProxy | Engine::Aldrich | Engine::LiveMap | Engine::SharedXp | Engine::ChainLoader => DetectKind::Proxy,
+        Engine::OptiScaler => DetectKind::Proxy,
+        Engine::ModLoaderProxy | Engine::Aldrich | Engine::LiveMap | Engine::SharedXp | Engine::ChainLoader
+            | Engine::NativeFolders => DetectKind::Proxy,
     }
 }
 
@@ -685,6 +1023,10 @@ pub fn is_container(dir: &Path) -> bool {
 /// whose own DLL is another engine's mod (Greeneye, Enshwick, Flame, Shroudtopia).
 pub fn detect_folder(dir: &Path) -> Option<Detected> {
     let has = |f: &str| dir.join(f).is_file();
+    // a package for Enshrouded ModLoader: a DLL with its .dll.mod manifest directly in the folder
+    if let Some(d) = dllmod_folder(dir) {
+        return Some(d);
+    }
     if has("flame.json") {
         let m = read_json(&dir.join("mod.json"));
         return Some(folder_detected(DetectKind::Flame, Engine::Flame, dir, m.as_ref(), "this Flame mod"));
@@ -733,6 +1075,7 @@ pub fn detect_folder(dir: &Path) -> Option<Detected> {
         let exports = crate::pe::parse(&bytes).map(|i| i.exports).unwrap_or_default();
         if let Some(d) = detect_dll(&dll, &bytes, &exports)
             && d.kind != DetectKind::Proxy
+            && d.kind != DetectKind::Unknown // a modified EML loader: a loader, not a mod that makes its folder one
             && let Some(engine) = d.engine
         {
             if engine == Engine::Shroudlink && has_eml_subfolder(dir) {
@@ -776,6 +1119,13 @@ pub fn detect_file(path: &Path) -> Option<Detected> {
     if ext == "ini" && low.contains("reshade") {
         return d(DetectKind::Reshade, Some(Engine::ReShade), format!("{file} is a ReShade preset. ReShade runs on its own next to Kiln; Kiln doesn't install it"));
     }
+    // OptiScaler's settings and its .asi build (Ultimate ASI Loader can load it): the tool, never a mod
+    if low.starts_with("optiscaler") && ext == "ini" {
+        return d(DetectKind::Proxy, Some(Engine::OptiScaler), format!("{file} is OptiScaler's settings file. OptiScaler runs on its own next to Kiln; Kiln doesn't install it"));
+    }
+    if low.starts_with("optiscaler") && ext == "asi" {
+        return d(DetectKind::Proxy, Some(Engine::OptiScaler), loader_reason(Engine::OptiScaler, &file));
+    }
     if ext == "kfc" {
         return d(DetectKind::Data, None, format!(
             "{file} is a patched game data file: it replaces one of the game's files. Kiln can't apply patched game files yet; support is coming"
@@ -783,7 +1133,7 @@ pub fn detect_file(path: &Path) -> Option<Detected> {
     }
     if ext == "asi" {
         return d(DetectKind::Asi, Some(Engine::UltimateAsiLoader), format!(
-            "{file} is an .asi plugin for Ultimate ASI Loader. Kiln can't load .asi plugins yet; support is coming"
+            "{file} is an .asi plugin for Ultimate ASI Loader: {}", crate::game_files::ASI_REASON
         ));
     }
     None
@@ -842,6 +1192,8 @@ fn registry() -> &'static RwLock<HashMap<DetectKind, Loader>> {
 /// Every engine mod kind (EML ... Ember): `engine_mods::import_engine_mod` (content-addressed copy).
 fn builtin_loaders(m: &mut HashMap<DetectKind, Loader>) {
     crate::engine_mods::builtin_loaders(m);
+    // Ultimate ASI Loader and .asi plugins: a native mod Kiln places in the game folder (game_files)
+    m.insert(DetectKind::Asi, Loader { name: "ultimate-asi-loader", import: crate::game_files::import_asi });
 }
 
 /// Registers (or replaces) the loader of a Library kind at run time. Returns the previous one.
@@ -896,6 +1248,12 @@ mod tests {
         assert_eq!(kind_of(&["GetAdaptersInfo"], b"disabled in livemap.ini"), ProxyKind::LiveMap);
         assert_eq!(kind_of(&["PowerGetActiveScheme"], b"disabled in xpshare.ini"), ProxyKind::SharedXp);
         assert_eq!(kind_of(&["CreateDXGIFactory"], b"ReShade 6.3"), ProxyKind::ReShade);
+        // OptiScaler names its ini and can load ReShade: it is OptiScaler, ASCII or UTF-16
+        assert_eq!(kind_of(&["CreateDXGIFactory"], b"OptiScaler.ini ReShade64.dll"), ProxyKind::OptiScaler);
+        assert_eq!(kind_of(&["timeGetTime"], &utf16("OptiScaler.ini")), ProxyKind::OptiScaler);
+        assert_eq!(kind_of(&["GetFileVersionInfoW"], b"OptiScaler.log"), ProxyKind::OptiScaler);
+        // the name OptiScaler alone (another tool's list of known tools) is not
+        assert_eq!(kind_of(&["CreateDXGIFactory"], b"ReShade, OptiScaler"), ProxyKind::ReShade);
         assert_eq!(kind_of(&[d8], b"[Chain] dinput8-chain.ini"), ProxyKind::ChainLoader);
         assert_eq!(kind_of(&[d8], b"nothing known"), ProxyKind::Unknown);
     }
@@ -908,6 +1266,50 @@ mod tests {
         assert_eq!(kind_of(&[], b"dinput8-chain.ini greeneye"), ProxyKind::Greeneye);
         // UTF-16 texts count, case ignored
         assert_eq!(kind_of(&[], &utf16("SHROUDTOPIA")), ProxyKind::Shroudtopia);
+    }
+
+    /// "Put Away Your Weapon" (Nexus 371): EML's dbghelp.dll rebuilt with a native layer of its own (player report
+    /// 2026-11-17). Stock EML 0.2.0 names only lib.rs of mod-loader-runtime; the rebuild names native\*.rs too.
+    #[test]
+    fn a_modified_eml_loader_is_told_from_a_stock_one() {
+        let stock = b"EML_LOG_FILE_PATH FieldSet corrupted (this is a bug)crates\\mod-loader-runtime\\src\\lib.rs Attaching runtime loader";
+        let modified = b"EML_LOG_FILE_PATH crates\\mod-loader-runtime\\src\\lib.rs event crates\\mod-loader-runtime\\src\\native\\holster.rs:376 \
+            m182-holster isEnemy(values)isEnemy(pointers) Errorm182_native.json";
+        assert_eq!(eml_loader_extras(stock), None);
+        let x = eml_loader_extras(modified).unwrap();
+        assert_eq!(x.evidence, "mod-loader-runtime\\src\\native\\holster.rs");
+        assert_eq!(x.what(), "a weapon holster hotkey and a PvP patch of the game's faction checks; settings in m182_native.json");
+        // own code Kiln does not know (a cross build names it with '/'), and known texts alone, still count
+        let unknown = eml_loader_extras(b"EML_LOG_FILE_PATH crates/mod-loader-runtime/src/hotkeys.rs").unwrap();
+        assert_eq!((unknown.what(), unknown.evidence.as_str()), ("code Kiln does not recognise".to_string(), "mod-loader-runtime\\src\\hotkeys.rs"));
+        assert_eq!(eml_loader_extras(b"EML_LOG_FILE_PATH m182-stancedump").unwrap().what(), "a stance dump key");
+
+        // the classification keeps the kind (an EML loader: kiln-eml stands aside for it when it runs) and says modified
+        let class = crate::pe::classify_bytes(&build_test_dll(&["MiniDumpWriteDump"], modified));
+        assert_eq!((class.kind, class.modified.as_deref()), (ProxyKind::Eml, Some(x.what().as_str())));
+        assert_eq!(crate::pe::classify_bytes(&build_test_dll(&["MiniDumpWriteDump"], stock)).modified, None);
+        // ShroudForge's loader carries EML's text and may name runtime files of its own: it is ShroudForge's, not modified EML
+        let sf = crate::pe::classify_bytes(&build_test_dll(&[], b"EML_LOG_FILE_PATH shroudforge mod-loader-runtime\\src\\native\\x.rs"));
+        assert_eq!((sf.kind, sf.modified), (ProxyKind::ShroudForge, None));
+
+        // the Library: never "not needed" (Unknown: the import leaves it out with its reason), and its folder is no EML mod
+        let exports = vec!["MiniDumpWriteDump".to_string()];
+        let d = detect_dll(Path::new("dbghelp.dll"), &build_test_dll(&["MiniDumpWriteDump"], modified), &exports).unwrap();
+        assert_eq!((d.kind, d.engine), (DetectKind::Unknown, Some(Engine::Eml)));
+        assert!(d.reason.starts_with("dbghelp.dll is a modified EML loader with code of its own (a weapon holster hotkey"), "{}", d.reason);
+        assert!(!d.reason.contains("not needed"), "{}", d.reason);
+        let plain = detect_dll(Path::new("dbghelp.dll"), &build_test_dll(&["MiniDumpWriteDump"], stock), &exports).unwrap();
+        assert_eq!((plain.kind, plain.reason.as_str()), (DetectKind::Proxy, "EML's own loader is in this package: not needed, Kiln runs EML mods"));
+        let dir = std::env::temp_dir().join(format!("km-modified-eml-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("dbghelp.dll"), build_test_dll(&["MiniDumpWriteDump"], modified)).unwrap();
+        std::fs::write(dir.join("m182_native.json"), b"{}").unwrap();
+        assert!(detect_folder(&dir).is_none(), "a folder with a modified loader is not an EML mod of its own");
+        assert_eq!(modified_eml_in(&dir), Some(("dbghelp.dll".to_string(), x.what())));
+        std::fs::write(dir.join("dbghelp.dll"), build_test_dll(&["MiniDumpWriteDump"], stock)).unwrap();
+        assert_eq!(modified_eml_in(&dir), None);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -943,10 +1345,12 @@ mod tests {
                              (DetectKind::Shroudlink, "kiln-shroudlink"), (DetectKind::Ember, "kiln-ember")] {
             assert_eq!(loader_for(kind).map(|l| l.name), Some(name));
         }
-        assert!(loader_for(DetectKind::Asi).is_none());
-        assert!(register_loader(DetectKind::Asi, Loader { name: "test", import: noop }).is_none());
-        assert_eq!(loader_for(DetectKind::Asi).map(|l| l.name), Some("test"));
-        registry().write().unwrap().remove(&DetectKind::Asi);
+        // .asi packages: a native mod placed in the game folder (game_files)
+        assert_eq!(loader_for(DetectKind::Asi).map(|l| l.name), Some("ultimate-asi-loader"));
+        assert!(loader_for(DetectKind::Data).is_none());
+        assert!(register_loader(DetectKind::Data, Loader { name: "test", import: noop }).is_none());
+        assert_eq!(loader_for(DetectKind::Data).map(|l| l.name), Some("test"));
+        registry().write().unwrap().remove(&DetectKind::Data);
     }
 
     #[test]

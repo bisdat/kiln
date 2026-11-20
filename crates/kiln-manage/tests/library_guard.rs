@@ -405,3 +405,53 @@ fn a_game_mods_entry_of_a_running_copy_mode_server_does_not_block_removal() {
         assert_eq!(e.code, ErrorCode::GameRunning, "{path}");
     }
 }
+
+#[test]
+fn before_beta_profiles_protect_library_versions_from_cleanup_and_ordinary_removal() {
+    let t = tmp("before-beta");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let old = import(&dirs, &t.0, "map", "1.0.0", "old");
+    let current = import(&dirs, &t.0, "map", "3.0.0", "current");
+    let mut p = profile::create(&dirs, "Before beta", None).unwrap();
+    p.mods.kiln.push(ProfileMod { id: old.id.clone(), version: old.version.clone(), hash: old.hash.clone(), enabled: false });
+    p = profile::save(&dirs, &p).unwrap();
+    let saved = dirs.root.join("snapshots/before-beta/profiles").join(&p.id).join("meta.json");
+    kiln_manage::util::write_json_atomic(&saved, &p).unwrap();
+    p.mods.kiln[0] = ProfileMod { id: current.id.clone(), version: current.version.clone(), hash: current.hash.clone(), enabled: true };
+    profile::save(&dirs, &p).unwrap();
+    assert_eq!(library::users(&dirs, &old), [format!("{} (before beta)", p.id)]);
+    assert!(!library::unused(&dirs).unwrap().contains(&old), "disabled saved entries still need their packages");
+    let error = library::remove_with(&dirs, &old, false, &mut nothing).unwrap_err();
+    assert_eq!(error.code, ErrorCode::Conflict);
+    assert!(error.message.contains("before beta"));
+    assert!(library::path_of(&dirs, &old).unwrap().is_dir());
+    // Replacing the snapshot releases its former packages. The live profile is unchanged.
+    kiln_manage::util::write_json_atomic(&saved, &profile::get(&dirs, &p.id).unwrap()).unwrap();
+    assert!(library::users(&dirs, &old).is_empty());
+    assert!(library::unused(&dirs).unwrap().contains(&old));
+    library::remove_with(&dirs, &old, false, &mut nothing).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn saved_profile_usage_does_not_follow_symbolic_links() {
+    let t = tmp("before-beta-link");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let r = import(&dirs, &t.0, "map", "1.0.0", "old");
+    let mut p = profile::create(&dirs, "Outside", None).unwrap();
+    p.mods.kiln.push(ProfileMod { id: r.id.clone(), version: r.version.clone(), hash: r.hash.clone(), enabled: true });
+    p = profile::save(&dirs, &p).unwrap();
+    let outside = t.0.join("outside");
+    std::fs::rename(dirs.profile(&p.id), &outside).unwrap();
+    let profiles = dirs.root.join("snapshots/before-beta/profiles");
+    std::fs::create_dir_all(&profiles).unwrap();
+    std::os::unix::fs::symlink(&outside, profiles.join(&p.id)).unwrap();
+    assert!(library::users(&dirs, &r).is_empty());
+    std::fs::remove_file(profiles.join(&p.id)).unwrap();
+    std::fs::create_dir_all(profiles.join(&p.id)).unwrap();
+    std::os::unix::fs::symlink(outside.join("meta.json"), profiles.join(&p.id).join("meta.json")).unwrap();
+    assert!(library::users(&dirs, &r).is_empty());
+    std::fs::remove_dir_all(&profiles).unwrap();
+    std::os::unix::fs::symlink(&outside, &profiles).unwrap();
+    assert!(library::users(&dirs, &r).is_empty());
+}

@@ -169,13 +169,140 @@ may ship while approval is pending. Mock-provider tests demonstrate local flow b
    - Deck mode shows the same as a dialog: OK, Undo, Get.
 
 ## Updates
-- The Catalog page checks the installed mods' files once when it opens (`nexus_installed(check: true)`). Each file is
-  checked at most every 30 minutes.
+- The Catalog page asks for the shared update check once when it opens (`updates_check` with
+  `providers: ["nexus"]`, see "Update notices" below): the catalog's own check of the installed mods' files, as before.
+  Each file is checked at most every 30 minutes. Opening the page sends nothing to GitHub.
 - A mod has an update when the newest listed version of its file is another upload and its version string is not
   older ([`nexus::version`](../../../crates/kiln-manage/src/nexus/version.rs) compares Nexus's free-text versions).
 - The card says "Update 1.1.0", a banner lists the updates, and the details offer "Update to 1.1.0" (premium) or
   "Update on Nexus Mods" (free).
 - Updating is that click, never automatic.
+
+## Update notices (every mod, since 0.2.0-dev.28)
+One check covers every mod in the Library, whatever it was made for: `updates_check` (also `kiln updates check`,
+[../modding/updates.md](../modding/updates.md)). The Catalog's banner and the notices in the main screen's mod list
+read the same result (`CheckReport`, also sent as the event `kiln://mod-updates`).
+
+- **Where a mod is checked.** In this order: the source you set yourself (a mod's menu, Updates…), the record of its
+  install from the Catalog, the `updates` its author wrote into the manifest. Nothing else: Kiln never guesses a source
+  from a name or a homepage. A mod with none shows "No update source".
+- **What a check asks.** For a GitHub source: the repository's public release list, anonymously (no account, no
+  cookie, nothing about you, your PC or your other mods; one repository per request), and at most the small
+  `kiln-release.json` of the newest release. For a Nexus Mods source: the catalog's signed-in check, as above. A check
+  never requests a mod's zip.
+- **What it shows.** In a mod's row: "Update 1.1.0" (a link), "New upload" (the same version published again as
+  another file), or, for a mod with a source whose check could not tell, "Update unknown" / "Update check is stale".
+  A mod's Updates… dialog has the whole status in words: up to date, update, new upload, unknown with its reason, no
+  update source, checks off (its provider is switched off in this build), and "stale" when the answer is older than a
+  day or the last try failed. A stale or unknown status is never shown as up to date.
+- **What you can do with a notice.** Open its page in the browser (a release page on github.com or the mod's files on
+  nexusmods.com; Kiln builds the address itself and opens no other). That is all: a check never downloads, installs,
+  switches or reloads a mod, and the version your profile uses stays the one you chose. Text that comes from a provider
+  (versions, names) is shown as plain text.
+- **When it runs.** When you press **Check for updates** above your mods. Opening the Catalog asks Nexus Mods only
+  (as before this check existed); GitHub sources then show what the last check remembered. The list first shows
+  what the last check remembered, without asking anybody. Settings, Launcher, **Check for mod updates once a day**
+  (`LauncherSettings.modUpdatesDaily`, off by default) adds a background check: the first one 2 to 15 minutes after
+  the launcher starts, then about once a day (24 to 25 hours), and only while no task runs and the game is closed.
+  The daily check asks a source at most once a day; a check you start asks again after 30 minutes. GitHub's
+  anonymous limit is 60 requests an hour for your connection: when it is used up, checks stop until it resets
+  ("the provider's request limit is used up for now"), also for a check you start.
+- **A source that changes.** When a new version of a mod names another repository or file than the one it was checked
+  against, Kiln asks before it checks there ("Its update source changed", Use the new source). Setting a source by
+  hand to another place asks the same way ("Change where this mod is checked?"). A source you set is where Kiln
+  looks; it does not claim that your copy came from there.
+- **Not in the Deck UI yet:** the notices and the dialog are in the desktop UI only.
+
+Files: `<data>/updates/receipts.json` and `cache.json` ([contracts.md](contracts.md), section 3).
+
+Tests: `cargo test -p kiln-manage --features full updates` (fake transport; no request leaves the PC),
+`launcher/tests/updates.spec.ts` (browser mock: `src/api/mockUpdates.ts`), `launcher/unit/updates.test.ts`.
+
+## Rolling back an update (since 0.2.0-dev.29)
+When you update a mod (drop its new version on the launcher, add it from the Catalog, or pick another version with
+"Use <version>" in its menu), Kiln keeps the version you had in your Library, together with a copy of the settings
+files that mod had written into its folder in the game at that moment (an `.ini`, `config.txt`, `settings.json`, a log,
+ShroudForge's setting values). This works for every kind of mod Kiln holds: Kiln, native and EMF mods, plugins, EML,
+ShroudForge, SET, Greeneye, Flame, XHL and the other loaders' mods.
+
+- **Roll back.** A mod with a kept version has **Roll back to <version>** in its menu on Play. It puts that version
+  back into your profile in place of the one you have now, switched on or off as it was. It is a profile change like
+  any other: the toast has **Undo**, and nothing is downloaded. When Kiln next writes your profile into the game (at
+  once when the game is closed, else at the next Play), the old version goes into the game folder with the settings it
+  had before the update, subject to the later-change rule below. Settings can also stay as they are when the mod's copy in
+  the game folder is not Kiln's to replace any more (you changed its code there: Kiln leaves that folder alone and says
+  so), or the game folder moved since the update (the roll back says so; the settings wait for the folder they were
+  kept in).
+- **If Kiln stops half-way**, recovery is tested before and after the profile save, while replacing an owned mod
+  copy, and during settings restoration. Each restore records hashes of the current files and ShroudForge values
+  before writing any settings. On every attempt, a value already equal to the snapshot stays; a value still equal
+  to its recorded preimage is restored; any other value stays as the player's later change, with a note naming it.
+  The done mark is then written and dropped separately, so a failed acknowledgement does not reset later edits.
+  A deletion stays deleted when the preimage was a file. If the preimage was already absent, absence still means
+  “not restored yet” and a retry can recreate the snapshot file. Legacy pending restores without preimages never
+  overwrite differing content: current content stays, the restore settles, and a note explains why.
+  Changed code, an unreadable publication journal, or a missing replacement with a parked old copy requires
+  attention; Kiln preserves those folders. A first placement stopped before its receipt remains an unowned folder.
+  Library import files, settings snapshots, placed-copy files, receipt publication, profile/activation records and
+  replacement park/publish/put-back renames now use the ordered durability seam. This checks software ordering,
+  not real power cuts or Windows hardware. Copy-mode fallback/config delivery, chain.ini, explicit adoption and
+  removal use their existing protocols: a cut can leave a partial fallback/config or stale chain; verification may
+  retain/refuse a damaged copy or create another fallback, and manual repair can be needed. They are not covered
+  by the replacement journal's automatic-retry guarantee. Two simultaneous full activations are not proven atomic.
+- **Roll back twice.** The version you rolled back from is kept now, so its menu offers **Roll back to** it again,
+  with the settings it had when you left it.
+- **How many are kept.** Settings, Launcher, **Earlier versions to keep**: 1 by default (the last one), up to 5 per mod,
+  0 keeps none (the earlier version then stays in your Library as an ordinary version, as before dev.29, and
+  **Clean up** removes it). Kiln does not keep a version when your disk would then have less free than it keeps for
+  moving the data folder (256 MiB and 5 % on top of the version's size); the update's message says so, and the update
+  goes on.
+- **Seeing and removing them.** Settings, **Library** lists every kept version with its size and the settings kept with
+  it; **Remove** takes one out (you can no longer roll back to it). **Clean up** never removes a kept version.
+- **What is kept.** The mod's own files are the Library entry as you imported it. The settings are the files of its
+  copy in the game folder that were not as Kiln put them there (changed or added since) and are settings files (`txt`,
+  `ini`, `cfg`, `json`, `toml`, `yaml`, `yml`: the same list Kiln uses when it carries a mod's settings to its new
+  version) or logs (`log`: some mods keep data in them), up to 16 MiB a file and 64 MiB per version. Never its code,
+  its manifest, a script or a DLL; files of any other kind stay as the newer version left them. A Kiln mod's configs
+  live in your profile and are not tied to a version: a roll back leaves them as they are. The same holds for mods that run from their Library folder and keep no files in the game folder.
+- **Update notices.** Kiln checks the newest version you have in your Library, kept ones included, so after a roll back
+  the version you rolled back from is not offered to you again as an update; a newer upload still is. A notice can't
+  be dismissed or pinned (there is no such switch yet).
+- **Another profile** never uses a kept version unless you pick it: switching the mod on there takes the newest version
+  that is not a kept one. A kept version belongs to the profile it was kept in: only that profile offers **Roll back
+  to** it, another profile's update or roll back of the same mod never takes it, and the settings a roll back brings
+  back go into that profile's copy in the game they came from (with the profile loaded in another game they wait).
+- **Older launchers** (before dev.29) see a kept version as one more version of the mod ("Use <version>"), and their
+  Clean up may remove it; dev.29 then forgets it.
+
+The same from the command line: `kilnctl library rollback <profile> kind:id[@version]` ([../kilnctl.md](../kilnctl.md)).
+Files: `<data>/library/kiln-kept.json` and `<data>/library/kiln-kept/` ([contracts.md](contracts.md), section 3).
+Tests: `cargo test -p kiln-manage --features full --test kept_versions`, `launcher/tests/rollback.spec.ts`,
+`launcher/unit/rollback.test.ts`.
+
+### Replace DLL…
+
+For a patched DLL you got from a mod's author or its forum. A native DLL mod in the loaded profile has **Replace
+DLL…** in its menu on Play (dropping a DLL on the window still adds it as a new mod).
+
+- **What it does.** You choose one 64-bit Windows DLL. Kiln makes a new build of the same mod in your Library: the
+  mod's files as they are, with that one DLL swapped. The mod keeps its place in your list, its switch and its
+  settings. With the game closed, the game folder follows at once, as after an update; a running game gets it at its
+  next start.
+- **Which file is replaced.** The one with the same file name (case does not matter). When the mod has exactly one DLL
+  and yours has another name, Kiln asks first, and the file keeps the mod's name, because the loader finds it by that
+  name. A mod with several DLLs and no match is refused with their names.
+- **A different kind of DLL** than the one it replaces (by what it exports) is asked about before it is used.
+- **The build before it is kept** like a version before an update: **Roll back to <version> (earlier build)** returns
+  to it, and **Earlier versions to keep** counts it.
+- **The version stays the author's.** The row shows it with "replaced DLL" and the date. Update notices still compare
+  the release the mod came from, so a later release is offered as before. Kiln never records your patched file as
+  that release.
+- **Other profiles** that switch the mod on take your replaced build, as the newest one.
+
+From the command line: `kilnctl library replace-dll native:<id> <file> --profile <profile-id>` (`--confirm` accepts
+the two questions above; the game folder follows at the profile's next activation). Not run in the desktop window or
+on Windows yet. Tests: `cargo test -p kiln-manage --features full --test replace_dll`, `launcher/unit/replaceDll.test.ts`,
+`launcher/tests/replace-dll.spec.ts`.
 
 ## Mod Manager Download links (nxm://)
 This is opt-in: Settings > Nexus Mods > "Mod Manager Download links". It never turns on at install or start.

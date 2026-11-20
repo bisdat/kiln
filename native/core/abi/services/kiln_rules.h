@@ -132,6 +132,10 @@ enum {
     KILN_RULES_HOOK_GLIDE_STEER = 0x2000u, /* the glider's pitch step in actor_rotation (GLIDE_STEER) */
     /* since 0.2.0-dev.27 */
     KILN_RULES_HOOK_NOCLIP = 0x4000u,      /* the character's collision step (NOCLIP); only ever set with HOOK_FLIGHT */
+    /* since 0.2.0-dev.29.17 */
+    KILN_RULES_HOOK_PAYMENT = 0x8000u,     /* the inventory payment (rules/InventoryPay) is hooked: free crafting, the storage
+                                              upgrade and kiln.stations' craft sources answer through it. Set at the first
+                                              world (never while Creative Mode runs) */
 };
 
 /* map_reveal modes (client) */

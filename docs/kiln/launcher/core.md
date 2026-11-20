@@ -111,7 +111,9 @@ clashes), `get`, `list` (`ProfileSummary.active` = installs whose profile.json n
   `<configDir>/native.json` (the profile's native switches), `chain.ini [profile]` (dllmain DLLs; `[chain]`
   byte-identical), `kiln/profile.json` (generation = previous + 1), clears `chain/once.ini` and
   `profile.once.json`, records `<data>/installs/<id>.active.json`.
-- `copy_back(pid, install)` after the game exits (copy mode), `deactivate` (profile.json to `kiln/backups/`,
+- `copy_back(pid, install)` after the game exits and before an activation (copy mode; file by file against
+  `config_sync_record`, a file both sides changed keeps the newer and the other as `<name>.conflict-<time>`:
+  contracts.md section 6; returns `ConfigSync {copied, conflicts}`), `deactivate` (profile.json to `kiln/backups/`,
   `[profile]` cleared), `deactivate_report` (also returns the fixed-folder placement cleanup result), `active`, `render`
   (no writes), `read_game_profile`, `write_once` (launch mode once). Activation never edits player-owned SF folders.
   Cleanup needs a trusted placement receipt plus unchanged contents, including exact SF settings bytes (old receipts
@@ -123,8 +125,18 @@ clashes), `get`, `list` (`ProfileSummary.active` = installs whose profile.json n
   / `no-mods` write `kiln/play-once.ini`, `once` renders `profile.once.json` + `chain/once.ini` and writes mode
   `profile`; a save backup (`saves`, reason `launch`) when the kms1 of what loads differs from the last launch
   (`<data>/installs/<id>.launch.json`; vanilla and no-mods are the empty set); then `steam://rungameid/<app>`
-  (xdg-open / ShellExecuteW). A failure removes the flag again. `play_with` takes the save folders and the opener
-  (tests). Then `wait_started`, `read_boot_for(install, nonce)`, `boot_is_current` (boot.json was written after the
+  (xdg-open / ShellExecuteW), or for an install that starts directly (dev.29.17, `direct`: a folder no Steam library
+  knows by default, else the record's `start`) the folder's `enshrouded.exe` itself, with no Steam needed: on Windows
+  in the game folder, on Linux through `umu-run` (`WINEPREFIX`, `GAMEID=umu-default`, `PROTONPATH`), `proton run`
+  (`STEAM_COMPAT_DATA_PATH`, `STEAM_COMPAT_CLIENT_INSTALL_PATH`: Steam's folder, else Kiln's empty
+  `kiln-prefixes/_compat-client`) or `wine` (`WINEPREFIX`); automatic takes umu-run, else the newest Proton, else
+  Wine; with `WINEDLLOVERRIDES` `dinput8=n,b`, in Kiln's own prefix per install unless the player picked one
+  ([custom-game-folders.md](custom-game-folders.md); contracts.md section 7, Launch, step 4). A failure removes the
+  flag again. `play_with` takes the save folders and the URI opener (tests), `play_via` a `Starter` (the URI opener or
+  the direct command and its starter; tests record the command, nothing runs).
+- `direct::build_check(install, bundle)`: the exe's sha256 (remembered while the file is unchanged) against the
+  game's `kiln/sigdb/builds/<side>/<sha256>.json` (`verified: true`), else the `builds` index of the runtime zip
+  `bundle` gives; `unknown_build_sentence` is the sentence the launcher and the support report say for an unknown one. Then `wait_started`, `read_boot_for(install, nonce)`, `boot_is_current` (boot.json was written after the
   running game's process started; on Windows its pid must also be that process's).
 - `hostenv::{command, clean, clean_with, changes}`: every program of the host the crate starts (xdg-open and with it
   Steam, Wine, SteamCMD, tar, cp, ssh, systemctl, archive tools, xdg-mime, secret-tool, a forwarded nxm handler) gets

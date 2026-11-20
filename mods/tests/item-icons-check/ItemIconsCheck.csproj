@@ -1,0 +1,16 @@
+<Project>
+  <!-- The game's own item icons and names in Kiln windows (0.2.0-dev.29.15), and a crafting panel at a production station's
+       screen: the owner's real-client check (docs/kiln/ui.md "Item icons", "Client steps"). Side both: the server half (a
+       hosting client's own) defines one new item, the client half draws. Lines in kiln.log start with "iconcheck:".
+       Build: dotnet build mods/tests/item-icons-check/ItemIconsCheck.csproj -t:KilnDeploy -p:KilnModsDir=<kiln/mods> -->
+  <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.props" />
+  <PropertyGroup>
+    <KilnModId>item-icons-check</KilnModId>
+    <KilnModName>Item icons check</KilnModName>
+    <Version>0.1.0</Version>
+    <KilnServices>Ui;Items;Content;Stations;Saves;Client</KilnServices>
+    <KilnSide>both</KilnSide>
+    <KilnClients>kiln</KilnClients>
+  </PropertyGroup>
+  <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.targets" />
+</Project>

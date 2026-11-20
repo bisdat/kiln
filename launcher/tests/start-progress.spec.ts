@@ -42,8 +42,6 @@ async function wholeStart(page: Page) {
   await expect(page.locator(".k-head-state")).toHaveText("Stopped");
 }
 
-test.describe.configure({ mode: "serial" });
-
 test("first start: the steps are named and Kiln says it is timing them; then the second start counts down", async ({ page }) => {
   test.setTimeout(120_000);
   await page.setViewportSize({ width: 1280, height: 800 });
@@ -292,7 +290,10 @@ test("a long detail stays inside its line at 1024×640 and on the Deck, and the 
   const fits = async () => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1 && document.documentElement.scrollHeight <= innerHeight + 1);
   await page.setViewportSize({ width: 1024, height: 640 });
   await open(page);
-  await mock(page).script({ scale: 0.06, servicesDetail: long, quietAt: undefined });
+  // scale 0.12, not 0.06: the detail is on screen while kiln-vfx is the current service, 18 s of the owner's start. At
+  // 0.06 that is 1.08 s, as long as one polling interval of the expect below, and a start that begins a few
+  // milliseconds later (the status read before Play, dev.29) misses it about one run in three on a busy machine.
+  await mock(page).script({ scale: 0.12, servicesDetail: long, quietAt: undefined });
   await mouth(page).click();
   await expect(page.locator(".k-start-line")).toContainText("kiln-vfx, building the materials", { timeout: 20_000 });
   expect(await inside(".k-start-line")).toBe(true);
@@ -309,7 +310,7 @@ test("a long detail stays inside its line at 1024×640 and on the Deck, and the 
   await expect(page.locator('[data-deck-screen="home"]')).toBeVisible();
   const focused = () => page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset?.deckId ?? null);
   await expect.poll(focused).toBe("mouth");
-  await mock(page).script({ scale: 0.06, servicesDetail: long });
+  await mock(page).script({ scale: 0.12, servicesDetail: long });
   await page.keyboard.press("Enter");
   const deck = page.getByTestId("deck-start");
   await expect(deck).toContainText("kiln-vfx, building the materials", { timeout: 20_000 });
@@ -400,4 +401,25 @@ test("Kiln speaking late overrides No Kiln: a chained DLL held the boot back for
   await expect(mouth(page)).toHaveAccessibleName(/^Starting: /);
   await page.evaluate(() => (window as unknown as Calls).__kilnMock.setNoProxy(false));
   await mock(page).stop();
+});
+
+test("Play with an OnBoot mod and no game data yet: the start shows the game data step with the tool's lines, then goes on", async ({ page }) => {
+  test.setTimeout(90_000);
+  await open(page);
+  // nothing to cook; the boot game-data tool builds the snapshot for 40 s (4 s here), saying what it reads
+  await mock(page).script({ scale: 0.1, cook: [], bootSnapshotMs: 40_000 });
+  await mouth(page).click();
+  const line = page.locator(".k-start-line[role=status]");
+  await expect(line.filter({ hasText: /^Making the game data for OnBoot mods \(once per game update\): (items|templates|skills|materials) \d+\/\d+$/ })).toBeVisible({ timeout: 10_000 });
+  const steps = page.getByRole("list", { name: "Steps of the start" });
+  await expect(steps.locator('[aria-current="step"]')).toContainText("Making the game data for OnBoot mods");
+  // the bar says it too (before, the line was "Starting" with no step running)
+  await expect(bar(page)).toHaveAttribute("aria-valuetext", /Making the game data for OnBoot mods/);
+  // then the start goes on: the step is done with its time, and another step runs
+  await expect(steps.locator(".is-done").filter({ hasText: "Making the game data for OnBoot mods" })).toHaveCount(1, { timeout: 15_000 });
+  await expect(steps.locator('[aria-current="step"]')).not.toContainText("Making the game data");
+  await expect(line).not.toHaveText(/^Making the game data/);
+  await expect(page.locator(".k-head-state")).toHaveText(/^Running/, { timeout: 30_000 });
+  await mock(page).stop();
+  await expect(page.locator(".k-head-state")).toHaveText("Stopped");
 });

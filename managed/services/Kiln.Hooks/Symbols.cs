@@ -81,6 +81,15 @@ public static unsafe class Symbols
     public static SigSummary LoadShipped()
     {
         var mod = HooksGate.RequireAdvanced("Symbols.LoadShipped");
+        lock (HooksGate.Lifecycle) return LoadShipped(mod);
+    }
+
+    // Serialize replacement with delayed retirement: an earlier context must never unload the fragment of a reload.
+    private static readonly Dictionary<string, ModContext> FragmentOwners = new(StringComparer.Ordinal);
+
+    private static SigSummary LoadShipped(ModContext mod)
+    {
+        if (!mod.Alive) throw HooksGate.Retired("Symbols.LoadShipped", mod);
         var t = HooksNative.Require("Symbols.LoadShipped");
         // Pick the fragment for the side this process runs as, so a coremod ships server.json and/or client.json and
         // the right one resolves (the client hosts a server world, so client coremods are real).
@@ -94,7 +103,9 @@ public static unsafe class Symbols
             HooksNative.WithUtf8(path, pp => t->LoadSymbols(mod.Owner, idp, pp, sp)));
         if (rc != HooksNative.Ok)
             throw new InvalidOperationException($"Symbols.LoadShipped: {HooksNative.Describe(rc)} (see kiln.log)");
+        FragmentOwners[mod.Info.Id] = mod;
         HooksGate.Track(mod).SymbolsLoaded = true;
+        // Signature status is queried from this resolver load, never from its diagnostic report.
         var r = new SigSummary((int)s.Symbols, (int)s.SymbolsOk, (int)s.Constants, (int)s.ConstantsOk,
             (int)s.Features, (int)s.FeaturesOk);
         mod.Log.Info($"hooks: loaded shipped symbols ({r.SymbolsOk}/{r.Symbols} symbols, {r.ConstantsOk}/{r.Constants} constants)");
@@ -103,9 +114,51 @@ public static unsafe class Symbols
 
     internal static void UnloadShipped(ModContext mod)
     {
-        var t = HooksNative.T;
-        if (t == null) return;
-        HooksNative.WithUtf8(mod.Info.Id, s => t->UnloadSymbols(s));
+        lock (HooksGate.Lifecycle)
+        {
+            if (!FragmentOwners.TryGetValue(mod.Info.Id, out var owner) || !ReferenceEquals(owner, mod)) return;
+            FragmentOwners.Remove(mod.Info.Id);
+
+            var t = HooksNative.T;
+            if (t == null) return;
+            HooksNative.WithUtf8(mod.Info.Id, s => t->UnloadSymbols(s));
+        }
+    }
+
+    // Diagnostic parsing is retained for tooling/tests; report contents never authorize a call.
+    internal static Func<string, string> FragmentReport = id => Path.Combine(KilnPaths.Root, "logs", $"sigdb-{id}.json");
+
+    /// <summary>The descriptors of a fragment's report: name to "its status is match".</summary>
+    internal static IReadOnlyDictionary<string, bool> ParseFragmentSigs(string json)
+    {
+        var result = new Dictionary<string, bool>(StringComparer.Ordinal);
+        using var doc = JsonDocument.Parse(json);
+        if (doc.RootElement.ValueKind != JsonValueKind.Object ||
+            !doc.RootElement.TryGetProperty("sigs", out var sigs) || sigs.ValueKind != JsonValueKind.Object)
+            return result;
+        foreach (var p in sigs.EnumerateObject())
+            result[p.Name] = p.Value.ValueKind == JsonValueKind.Object && p.Value.TryGetProperty("status", out var st) &&
+                             st.ValueKind == JsonValueKind.String && st.GetString() == "match";
+        return result;
+    }
+
+    /// <summary>True when <paramref name="symbol"/> is a descriptor of a loaded mod fragment whose code fit it at load
+    /// (its "&lt;modid&gt;/" prefix names the fragment).</summary>
+    internal static bool FragmentSigMatches(string symbol)
+    {
+        var slash = symbol.IndexOf('/');
+        if (slash <= 0) return false;
+        lock (HooksGate.Lifecycle)
+        {
+            if (!FragmentOwners.ContainsKey(symbol[..slash])) return false;
+            var t = HooksNative.Checked;
+            if (t == null) return false;
+            return HooksNative.WithUtf8(symbol, s =>
+            {
+                nuint address; ulong revision;
+                return t->SigStatus(s, &address, &revision) == HooksNative.Ok && address != 0;
+            });
+        }
     }
 }
 

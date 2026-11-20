@@ -60,6 +60,65 @@ pub(crate) fn strip_verbatim(s: &str) -> std::borrow::Cow<'_, str> {
     s.strip_prefix(r"\\?\").unwrap_or(s).into()
 }
 
+/// [`strip_verbatim`] where the path has a spelling without the prefix (a drive letter or a server): a verbatim path
+/// without one (`\\?\Volume{…}\x`) stays as it is.
+pub(crate) fn plain_path(s: &str) -> std::borrow::Cow<'_, str> {
+    // Win32 trims these components without the verbatim prefix. Such a spelling would name
+    // a different folder, so it must also stay verbatim in receipts and comparison keys.
+    if s.starts_with(r"\\?\") && s.split('\\').skip(1).any(|c| c.ends_with(['.', ' '])) {
+        return s.into();
+    }
+    let plain = strip_verbatim(s);
+    if plain.len() == s.len() || is_absolute_game_path(&plain) { plain } else { s.into() }
+}
+
+/// Where `path` is below `base`, compared as Windows compares folders: without Windows' verbatim prefix (`\\?\C:\x` is
+/// `C:\x`, `\\?\UNC\s\x` is `\\s\x`; ShroudForge writes its `paths.mods` from a canonical path, which carries it, and
+/// Kiln names the game folder without it), `/` and `\` alike, empty and `.` parts dropped, case ignored (each
+/// character's simple upper case, as Windows' ordinal comparison of names). The parts of `path` below `base` (none: the
+/// same folder), None when it is not there. Pure: a Linux build tests Windows' rules too.
+pub(crate) fn windows_below(base: &str, path: &str) -> Option<Vec<String>> {
+    // (how many separators lead: 2 a network path, 1 the root of a drive, 0 a drive letter or a relative path; the parts)
+    fn parts(p: &str) -> (usize, Vec<String>) {
+        let p = p.replace('/', "\\");
+        let p = plain_path(&p);
+        let lead = p.bytes().take_while(|&b| b == b'\\').count().min(2)
+            + if p.as_bytes().get(1) == Some(&b':') && p.as_bytes().get(2) == Some(&b'\\') { 3 } else { 0 };
+        (lead, p.split('\\').filter(|c| !c.is_empty() && *c != ".").map(str::to_owned).collect())
+    }
+    fn same_name(a: &str, b: &str) -> bool {
+        let upper = |c: char| {
+            let mut u = c.to_uppercase();
+            match (u.next(), u.next()) { (Some(x), None) => x, _ => c }
+        };
+        a.chars().map(upper).eq(b.chars().map(upper))
+    }
+    let ((base_lead, base), (lead, path)) = (parts(base), parts(path));
+    (base_lead == lead && path.len() >= base.len() && base.iter().zip(&path).all(|(a, b)| same_name(a, b)))
+        .then(|| path[base.len()..].to_vec())
+}
+
+/// `a` and `b` name the same folder as Windows compares folders ([`windows_below`]).
+pub(crate) fn windows_same_folder(a: &str, b: &str) -> bool {
+    windows_below(a, b).is_some_and(|rest| rest.is_empty())
+}
+
+/// `a` and `b` are the same folder, compared as the system the launcher runs on compares folders: on Windows by
+/// Windows' rules ([`windows_same_folder`]: the verbatim prefix and case do not matter), elsewhere exactly (a launcher
+/// on Linux names a Proton game's folders by their host paths, which are case-sensitive).
+pub(crate) fn same_folder(a: &Path, b: &Path) -> bool {
+    if cfg!(windows) { windows_same_folder(&a.to_string_lossy(), &b.to_string_lossy()) } else { a == b }
+}
+
+/// `dir` relative to `base`, '/' separated ("" for `base` itself), compared as [`same_folder`] compares; None when
+/// `dir` is not below `base`.
+pub(crate) fn relative_folder(base: &Path, dir: &Path) -> Option<String> {
+    if cfg!(windows) {
+        return windows_below(&base.to_string_lossy(), &dir.to_string_lossy()).map(|rest| rest.join("/"));
+    }
+    dir.strip_prefix(base).ok().map(|p| p.to_string_lossy().replace('\\', "/"))
+}
+
 /// A host path as the game sees it, for an install's path mode.
 /// - Z: `Z:\...` (the caller has checked the Z: drive: `game::path_mode`).
 /// - Native: the path as it is (Windows; no `\\?\` prefix).
@@ -182,5 +241,49 @@ mod tests {
         } else {
             assert_eq!(z_to_unix(&z).unwrap(), PathBuf::from("/home/user/.local/share/kiln/library"));
         }
+    }
+
+    /// ShroudForge's `paths.mods` on Windows is `\\?\C:\…\mods` (written from a canonical path at every start), Kiln's
+    /// game folder `C:\…` (Nexus report, 2026-11-14: Auto Loot Plus stayed off). Windows' rules, tested on every system.
+    #[test]
+    fn windows_compares_folders_without_the_verbatim_prefix_and_case() {
+        let game = r"C:\Program Files (x86)\Steam\steamapps\common\Enshrouded";
+        let mods = format!(r"{game}\mods");
+        let sf = format!(r"\\?\{mods}");
+        assert!(windows_same_folder(&sf, &mods) && windows_same_folder(&mods, &sf), "the verbatim prefix");
+        assert!(windows_same_folder(&mods.to_lowercase(), &mods) && windows_same_folder(&sf.to_uppercase(), &mods), "case");
+        assert!(windows_same_folder(&format!("{sf}\\"), &mods.replace('\\', "/")), "separators");
+        assert!(windows_same_folder(r"\\?\UNC\nas\games\Enshrouded\mods", r"\\NAS\Games\Enshrouded\mods\."), "a network path");
+        assert!(windows_same_folder(r"C:\Spiele\ÄÖÜ", r"c:\spiele\äöü"), "non-ASCII case pairs");
+        assert!(!windows_same_folder(&mods, &format!("{mods}-other")), "a sibling with a longer name");
+        assert!(!windows_same_folder(&mods, &format!(r"D:{}", &mods[2..])), "another drive");
+        assert!(!windows_same_folder(r"\mods", "mods"), "a root-relative path is not a relative one");
+        assert!(!windows_same_folder(r"\\?\Volume{1b3}\mods", r"Volume{1b3}\mods"), "a volume path has no other spelling");
+        assert_eq!(windows_below(game, &format!(r"{}\auto-loot-plus", sf.to_lowercase())), Some(vec!["mods".into(), "auto-loot-plus".into()]));
+        assert_eq!(windows_below(&sf, game), None, "a parent is not below");
+        // the spelling a receipt keeps: the plain one where there is one
+        assert_eq!(plain_path(&format!(r"{sf}\auto-loot-plus")), format!(r"{mods}\auto-loot-plus"));
+        assert_eq!(plain_path(r"\\?\UNC\nas\games\mods"), r"\\nas\games\mods");
+        assert_eq!(plain_path(r"\\?\Volume{1b3}\mods"), r"\\?\Volume{1b3}\mods");
+        assert_eq!(plain_path("/home/u/game/mods"), "/home/u/game/mods");
+    }
+
+    #[test]
+    fn verbatim_names_that_need_the_prefix_keep_it() {
+        for p in [r"\\?\C:\Game.\mods", r"\\?\C:\Game \mods", r"\\?\UNC\nas\share\Game.\mods"] {
+            assert_eq!(plain_path(p), p, "removing the prefix changes Win32 name resolution");
+            assert!(!windows_same_folder(p, &strip_verbatim(p)));
+        }
+        assert!(!windows_same_folder("C:", r"C:\"), "drive current directory is not its root");
+    }
+
+    /// The launcher on Linux keeps comparing host paths exactly: `/game/Mods` and `/game/mods` are two folders there.
+    #[test]
+    fn this_systems_comparison_is_exact_on_linux() {
+        let (a, b) = (Path::new("/srv/game/mods"), Path::new("/srv/game/Mods"));
+        assert!(same_folder(a, a));
+        assert_eq!(same_folder(a, b), cfg!(windows));
+        assert_eq!(relative_folder(Path::new("/srv/game"), a).as_deref(), Some("mods"));
+        assert_eq!(relative_folder(Path::new("/srv/Game"), a).is_some(), cfg!(windows));
     }
 }

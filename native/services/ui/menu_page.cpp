@@ -235,6 +235,7 @@ bool plausible(const Metrics& m) {
 }  // namespace
 
 bool page_install(bool main_menu_hooked) {
+    if (!overlay_drawing_on()) return false; // page contents require overlay; native menu rows remain
     P = PageLayout{};
     if (!main_menu_hooked) return false;
     P.on = feat("ui.menu_page") && sym("ui/PreGameGoTo", &P.go_to) && sym("ui/PreGameCredits", &P.credits) &&

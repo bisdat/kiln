@@ -12,14 +12,15 @@ namespace Kiln;
 internal static partial class Compiler
 {
     // The game's armour: round((gradient * level + offset) * distribution[kind]) (client 0xe6dfe0, keen::BalancingTable +0x2a0 armorSetup). Checked at ready (ItemChecks).
-    internal static float ArmorOffset = 23, ArmorGradient = 15;
+    internal static float ArmorOffset => GearMath.ArmorOffset;  // Kiln.Content's GearMath, shared with the gear values
+    internal static float ArmorGradient => GearMath.ArmorGradient;
     private const uint ConfigLevel = 0x17147b63, RowDuration = 0x86a75e07, RowHealth = 0xf38b388c, RowItemLevel = 0x88fbd16d;
     // A food item's own time for the status it gives (PrimerBuffDuration, a Time in seconds). Eaten, the game gives the status for this long, not for the
     // status's defaultLifeTime; the tooltip's Duration row follows it. Every food starter has one (Honey: 60 s).
     private const uint ConfigFoodDuration = 0xbee6d4a9;
     private const string ConfigStamina = "StaminaCost";
 
-    internal static double ArmorShare(int armor, int level) => armor / (ArmorGradient * level + ArmorOffset);
+    internal static double ArmorShare(int armor, int level) => GearMath.ArmorShare(armor, level);
 
     /// <summary>The blocks of this file. Null: not one of them.</summary>
     private static BlockHandle? DefineItemBlock<T>(BlockContext ctx, Lowered low, string name, T block) where T : class, IBlock
@@ -559,6 +560,15 @@ internal static partial class Compiler
         Not(t.Durability != null && c.Use != ToolUse.Light, "durability", "only the game's torches burn down over time; the game wears the others by its own rule (the world's durability setting), with no number of the item's own");
         Not(t.BreaksInto != null && !c.Gear && c.Use != ToolUse.Light, "breaksInto", "it has no durability to run out");
         Not(t.Fishing != null && c.Use != ToolUse.Fish, "fishing", "that is for a fishing rod");
+        if (t.WearPerDebit is { } wear)
+        {
+            Not(!c.Gear, "wearPerDebit", "the game debits durability per use only on a tool with a level and enhancement slots (a torch burns down: durability)");
+            if (wear is < 0 or > ToolWearRuntime.MaxCost) throw new BlockError(ctx.Block, "tool.wearPerDebit", $"{wear} is outside 0..{ToolWearRuntime.MaxCost}");
+            // a server's behaviour, not content: nothing of it is in what the block lowers to for players' games. Set once the block is committed, where a server world runs
+            var (blocks, block, item) = (ctx.Mod, ctx.Block, BlockIds.Fnv(d.Guid));
+            d.Low.Json["toolWear"] = new JsonObject { ["perDebit"] = wear };
+            d.Low.AfterCommit(() => ToolWearRuntime.Add(blocks, block, item, wear));
+        }
         if (c.Gear)
         {
             // an axe, a pickaxe, a sieve, a rake: an item entity with a level, a rarity and enhancement slots

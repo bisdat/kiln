@@ -1,0 +1,16 @@
+{
+  "format": 1,
+  "natives": [
+    {
+      "name": "blocks-abilities-test.WrongSize",
+      "argc": 1,
+      "sync": true,
+      "args": [ { "name": "target", "type": "ecs.EntityId", "dir": "in", "size": 8 } ]
+    },
+    {
+      "name": "blocks-abilities-test.Later",
+      "argc": 1,
+      "args": [ { "name": "target", "type": "ecs.EntityId", "dir": "in", "size": 4 } ]
+    }
+  ]
+}

@@ -234,15 +234,65 @@ fn player_states_reader_agrees() {
     assert!(bad.is_empty(), "{}", bad.join("\n"));
 }
 
+/// The version of `name` the launcher's lockfile pins (`"name": ["name@1.2.3", ...` in launcher/bun.lock).
+fn locked_version(lock: &str, name: &str) -> Option<String> {
+    let key = format!("\"{name}\": [\"{name}@");
+    let rest = &lock[lock.find(&key)? + key.len()..];
+    Some(rest[..rest.find('"')?].to_string())
+}
+
+/// The node_modules `ajv_agrees` runs ajv from: the launcher's when it is installed; else `KILN_AJV_MODULES`; else ajv,
+/// ajv-formats and jsonc-parser at the launcher's locked versions, installed once from bun's cache (offline, no
+/// scripts) under the build's tmp folder. `None` only with `KILN_LINT_NO_AJV=1`. Otherwise, no node, no bun or a failed
+/// install fails the test: the cross-check must not pass by skipping. It did that in every gate without
+/// launcher/node_modules, and hid schema patterns kiln lint could not run.
+fn ajv_modules(root: &Path) -> Option<PathBuf> {
+    if std::env::var("KILN_LINT_NO_AJV").is_ok_and(|v| v == "1") {
+        eprintln!("ajv_agrees: skipped (KILN_LINT_NO_AJV=1)");
+        return None;
+    }
+    assert!(has_tool("node", "--version"), "ajv_agrees needs node (set KILN_LINT_NO_AJV=1 to skip this cross-check knowingly)");
+    let launcher = root.join("launcher/node_modules");
+    let need = ["ajv", "ajv-formats", "jsonc-parser"];
+    if need.iter().all(|n| launcher.join(n).join("package.json").is_file()) {
+        return Some(launcher);
+    }
+    if let Ok(m) = std::env::var("KILN_AJV_MODULES") {
+        return Some(PathBuf::from(m));
+    }
+    let lock = std::fs::read_to_string(root.join("launcher/bun.lock")).unwrap();
+    let deps: Vec<(&str, String)> = need.iter().map(|n| (*n, locked_version(&lock, n).unwrap_or_else(|| panic!("{n} is not in launcher/bun.lock")))).collect();
+    let tag = deps.iter().map(|(n, v)| format!("{n}-{v}")).collect::<Vec<_>>().join("_");
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("kiln-lint-ajv").join(&tag);
+    if need.iter().all(|n| dir.join("node_modules").join(n).join("package.json").is_file()) {
+        return Some(dir.join("node_modules"));
+    }
+    // installed beside, then moved in place: two test runs at once never see a half-installed folder
+    let work = dir.with_file_name(format!("{tag}.tmp{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&work);
+    std::fs::create_dir_all(&work).unwrap();
+    let pkg = serde_json::json!({ "name": "kiln-lint-ajv", "private": true,
+        "dependencies": deps.iter().map(|(n, v)| (n.to_string(), Value::String(v.clone()))).collect::<serde_json::Map<_, _>>() });
+    std::fs::write(work.join("package.json"), pkg.to_string()).unwrap();
+    let out = std::process::Command::new("bun").args(["install", "--offline", "--ignore-scripts", "--no-progress"]).current_dir(&work).output();
+    let ok = out.as_ref().is_ok_and(|o| o.status.success()) && need.iter().all(|n| work.join("node_modules").join(n).join("package.json").is_file());
+    if !ok {
+        let _ = std::fs::remove_dir_all(&work);
+    }
+    assert!(ok, "ajv_agrees: could not provide ajv: install the launcher's packages (cd launcher && bun install), set KILN_AJV_MODULES \
+        to a node_modules with ajv, ajv-formats and jsonc-parser, or set KILN_LINT_NO_AJV=1 to skip knowingly. bun said: {}",
+        out.map(|o| String::from_utf8_lossy(&o.stderr).into_owned()).unwrap_or_else(|e| e.to_string()));
+    if std::fs::rename(&work, &dir).is_err() {
+        let _ = std::fs::remove_dir_all(&work); // another run put it in place first
+    }
+    Some(dir.join("node_modules"))
+}
+
 /// kiln lint's schema validator agrees with ajv (draft 2020-12) on every fixture and every mod file of the repo.
 #[test]
 fn ajv_agrees() {
     let root = repo();
-    let modules = root.join("launcher/node_modules");
-    if !has_tool("node", "--version") || !modules.join("ajv").exists() {
-        eprintln!("skipped: no node or launcher/node_modules/ajv");
-        return;
-    }
+    let Some(modules) = ajv_modules(&root) else { return };
     let mut files = Vec::new();
     json_files(&fixtures().join("cases"), &mut files);
     json_files(&root.join("mods"), &mut files);
@@ -457,14 +507,15 @@ fn sound_schema_matches_the_recipe_reader() {
     }
 }
 
-/// Every mod in the repository passes the schemas (the resolver samples are broken on purpose).
+/// Every mod in the repository passes the schemas (the resolver samples and the content-stop lab's cs-broken are
+/// broken on purpose).
 #[test]
 fn repository_mods_pass_the_schemas() {
     let r = run(&[repo().join("mods")], &opts());
     let bad: Vec<String> = r
         .diagnostics
         .iter()
-        .filter(|d| d.severity == Severity::Error && (d.code.starts_with("KL0") || d.code.starts_with("KL1")) && !d.file.contains("sample-bad-manifest"))
+        .filter(|d| d.severity == Severity::Error && (d.code.starts_with("KL0") || d.code.starts_with("KL1")) && !d.file.contains("sample-bad-manifest") && !d.file.contains("content-stop-test/mods/cs-broken"))
         .map(|d| format!("{}:{}: {} {}", d.file, d.line, d.code, d.message))
         .collect();
     assert!(r.checked.len() > 60, "{}", r.checked.len());
@@ -593,4 +644,108 @@ fn every_rule_is_documented() {
     let doc = std::fs::read_to_string(repo().join("docs/kiln/modding/lint.md")).unwrap_or_default();
     let missing: Vec<&str> = lint::rules().iter().filter(|r| !doc.contains(&format!("### {} {}\n", r.code, r.name))).map(|r| r.code).collect();
     assert!(missing.is_empty(), "lint.md lacks: {missing:?}");
+}
+
+/// A very long value is checked whole: the shipped kiln-publish tag pattern on 100,000 characters once aborted the
+/// process (a stack overflow). Such a tag cannot have the form (at most 137 characters), so it is KL106, said once.
+#[test]
+fn a_very_long_value_is_checked_whole() {
+    let dir = tmp("very-long");
+    let tag = format!("{}cb", "a".repeat(100_000));
+    let text = format!(r#"{{ "format": 1, "provider": "github", "github": {{ "repository": "example/hello", "tag": "{tag}", "commit": "0000000000000000000000000000000000000000" }} }}"#);
+    let r = lint_as(&dir, "kiln.publish.json", &text);
+    let at_tag: Vec<&str> = r.diagnostics.iter().filter(|d| d.pointer.as_deref() == Some("/github/tag")).map(|d| d.code.as_str()).collect();
+    assert_eq!(at_tag, ["KL106"]);
+    // an ordinary tag is checked as before
+    let ok = lint_as(&dir, "kiln.publish.json", &text.replace(&tag, "v{version}"));
+    assert!(!ok.diagnostics.iter().any(|d| d.pointer.as_deref() == Some("/github/tag")), "{:?}", ok.diagnostics);
+    let bad = lint_as(&dir, "kiln.publish.json", &text.replace(&tag, "v{version}/"));
+    assert!(bad.diagnostics.iter().any(|d| d.pointer.as_deref() == Some("/github/tag") && d.code == "KL106"), "{:?}", bad.diagnostics);
+}
+
+/// A value over its maxLength is said once (KL108), and is not matched against the pattern too.
+#[test]
+fn a_value_over_its_max_length_is_not_matched_as_well() {
+    let dir = tmp("max-length");
+    // kiln-release.schema.json: an artifact name is at most 200 characters of a pattern this one breaks too
+    let name = format!("{}..x", "a".repeat(200));
+    let text = format!(r#"{{ "format": 1, "mods": [ {{ "artifact": {{ "name": "{name}" }} }} ] }}"#);
+    let r = lint_as(&dir, "kiln-release.json", &text);
+    let at: Vec<&str> = r.diagnostics.iter().filter(|d| d.pointer.as_deref() == Some("/mods/0/artifact/name")).map(|d| d.code.as_str()).collect();
+    assert_eq!(at, ["KL108"], "{:?}", r.diagnostics);
+}
+
+#[test]
+fn run_bindings_reject_wrong_sizes_and_damage_with_only_knockback() {
+    let d = tmp("run-bindings-contract");
+    std::fs::create_dir_all(d.join("blocks")).unwrap();
+    std::fs::create_dir_all(d.join("impact")).unwrap();
+    std::fs::write(d.join("kiln.mod.json"), r#"{"id":"run-contract","version":"1.0.0","apiVersion":"0.2.0","side":"server"}"#).unwrap();
+    std::fs::write(d.join("impact/natives.json"), r#"{"format":1,"natives":[
+      {"name":"run-contract.WrongSize","argc":1,"sync":true,"args":[{"name":"target","type":"ecs.EntityId","size":8}]},
+      {"name":"run-contract.NeedsDamage","argc":1,"sync":true,"args":[{"name":"damage","type":"impact.DamageSetup","size":52}]}
+    ]}"#).unwrap();
+    std::fs::write(d.join("blocks/run.json"), r#"{"format":1,"effects":{
+      "wrong":{"run":"run-contract.WrongSize","heal":1},
+      "knock":{"run":"run-contract.NeedsDamage","knockback":"small"}
+    }}"#).unwrap();
+    let report = run(&[d], &opts());
+    let bindings: Vec<_> = report.diagnostics.iter().filter(|d| d.code == "KL340").collect();
+    assert_eq!(bindings.len(), 2, "{}", report.to_text());
+    assert!(bindings.iter().any(|d| d.message.contains("size")), "{}", report.to_text());
+    assert!(bindings.iter().any(|d| d.message.contains("damage") && d.message.contains("nothing")), "{}", report.to_text());
+}
+
+#[test]
+fn effect_run_names_obey_the_registry_byte_limit() {
+    let d = tmp("run-name-limit");
+    std::fs::create_dir_all(d.join("blocks")).unwrap();
+    std::fs::write(d.join("kiln.mod.json"), r#"{"id":"run-contract","version":"1.0.0","apiVersion":"0.2","side":"server","license":"MIT"}"#).unwrap();
+    let name = format!("run-contract.{}", "A".repeat(90));
+    std::fs::write(d.join("blocks/run.json"), serde_json::json!({"format":1,"effects":{"long":{"run":name,"heal":1}}}).to_string()).unwrap();
+    let report = run(&[d], &opts());
+    assert!(report.diagnostics.iter().any(|d| d.severity == Severity::Error && d.message.contains("90")), "{}", report.to_text());
+}
+
+/// docs/kiln/modding/resource-patches.md: every blocks-file example passes the schema, and a patch is at least one change
+/// of set, append, replace, clear, addComponents, removeComponents, copyComponents (with nothing else, or an appended change of the
+/// game's value, refused).
+#[test]
+fn resource_patch_examples_pass_and_a_patch_needs_a_change() {
+    let doc = std::fs::read_to_string(repo().join("docs/kiln/modding/resource-patches.md")).unwrap();
+    let examples: Vec<&str> = doc.split("```json").skip(1).filter_map(|b| b.split("```").next()).filter(|b| b.contains("\"resourcePatches\"")).collect();
+    assert!(examples.len() >= 2, "{}", examples.len());
+    let d = tmp("resource-patch-examples");
+    std::fs::create_dir_all(d.join("blocks")).unwrap();
+    std::fs::write(d.join("kiln.mod.json"), r#"{"id":"patch-docs","version":"1.0.0","apiVersion":"0.2","side":"server","boot":true,"license":"MIT"}"#).unwrap();
+    for (i, e) in examples.iter().enumerate() {
+        std::fs::write(d.join(format!("blocks/example-{i}.json")), e).unwrap();
+    }
+    let r = run(&[d.clone()], &opts());
+    let errors: Vec<String> = r.diagnostics.iter().filter(|x| x.severity == Severity::Error).map(|x| format!("{}:{} {} {}", x.file, x.line, x.code, x.message)).collect();
+    assert!(errors.is_empty(), "{}", errors.join("\n"));
+    let guid = "82706b40-61b1-4b8f-8b23-dcec6971bda1";
+    let cases = [
+        (serde_json::json!({"resource": guid, "type": "keen::BalancingTable"}), true),
+        (serde_json::json!({"resource": guid, "type": "keen::BalancingTable", "append": {"steps": {"values": [{"mul": 2}]}}}), true),
+        (serde_json::json!({"resource": guid, "type": "keen::BalancingTable", "append": {"steps": {"values": [1], "below": true}}}), true),
+        (serde_json::json!({"resource": guid, "type": "keen::ecs::TemplateResource", "addComponents": []}), true),
+        (serde_json::json!({"resource": guid, "type": "keen::ecs::TemplateResource", "removeComponents": ["SpawnTime"]}), false),
+        (serde_json::json!({"resource": guid, "type": "keen::BalancingTable", "append": {"steps": {"values": [3, 5], "aboveLast": true}}}), false),
+        (serde_json::json!({"resource": guid, "type": "keen::SceneResource", "clear": ["noBuildZones"]}), false),
+        (serde_json::json!({"resource": guid, "type": "keen::SceneResource", "clear": []}), true),
+        (serde_json::json!({"resource": guid, "type": "keen::FbUiBundle", "replace": {"steps": {"values": [0.5, 1]}}}), false),
+        (serde_json::json!({"resource": guid, "type": "keen::FbUiBundle", "replace": {"steps": {"values": [1], "aboveLast": true}}}), true),
+        (serde_json::json!({"resource": guid, "type": "keen::ecs::TemplateResource", "copyComponents": {"InventoryCraftingStock": guid}}), false),
+        (serde_json::json!({"resource": guid, "type": "keen::ecs::TemplateResource", "copyComponents": {"InventoryCraftingStock": "magic"}}), true),
+    ];
+    for (i, (patch, bad)) in cases.iter().enumerate() {
+        let e = tmp(&format!("resource-patch-case-{i}"));
+        std::fs::create_dir_all(e.join("blocks")).unwrap();
+        std::fs::write(e.join("kiln.mod.json"), r#"{"id":"patch-case","version":"1.0.0","apiVersion":"0.2","side":"server","boot":true,"license":"MIT"}"#).unwrap();
+        std::fs::write(e.join("blocks/p.json"), serde_json::json!({"format": 1, "resourcePatches": {"one": patch}}).to_string()).unwrap();
+        let r = run(&[e], &opts());
+        let errors = r.diagnostics.iter().filter(|x| x.severity == Severity::Error).count();
+        assert_eq!(errors > 0, *bad, "case {i}: {patch}: {}", r.to_text());
+    }
 }

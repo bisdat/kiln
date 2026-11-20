@@ -2,7 +2,8 @@
 // kiln.knowledge's catalog: names for knowledge ids and queries, the NPC roster and the journal, read from the game's
 // own data at the world's first step (tick thread):
 //  - NpcCollection through the NpcRegistry singleton (the array npc_unlock_state_server walks; its unlock bit i is
-//    NPC i): "npc:<debugName>[.unlock]" -> the NPC's unlockRequirement.
+//    NPC i, entries 64 to 127 on Kiln's second page where it is installed, roster.cpp): "npc:<debugName>[.unlock]" ->
+//    the NPC's unlockRequirement. The 4,096 below is a guard against a damaged collection, not a capacity.
 //  - JournalRegistryResource through g38_journal::JournalRegistry (the quest array trigger_quest_rewards walks):
 //    "quest:0x<entryId>" -> the quest's "rewarded" player knowledge, ".step<n>.visible|.done" -> the step's queries.
 //  - GameKnowledgeQueryResourceDb through kiln.assets (the resource by GUID): "query:<name>" -> the named query.
@@ -11,6 +12,7 @@
 #include <algorithm>
 #include <bit>
 #include <cctype>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <mutex>
@@ -87,8 +89,17 @@ void add_name(const std::string& name, const KilnKnowledgeName& n) {
 void build_npcs(uintptr_t npcreg) {
     uintptr_t field = 0, base = 0;
     uint32_t n = 0;
-    if (!npcreg || o_npcs < 0 || !rd(npcreg + o_npcs, &field) || !field || !blob(field, &base, &n) || !base || n > 4096)
+    if (!npcreg || o_npcs < 0 || !rd(npcreg + o_npcs, &field) || !field || !blob(field, &base, &n) || !base) return;
+    if (n > 4096) {  // a corruption guard, never a capacity: named, not an empty roster that looks fine
+        static uint32_t said = 0;
+        if (said != n) {
+            said = n;
+            KE("catalog: the NpcRegistry's collection reads %u entries (more than 4096): damaged, or not the game's layout; the roster "
+               "is not listed and no unlock state is answered", n);
+            knowledge_reason("the NPC roster is damaged (" + std::to_string(n) + " entries, more than 4096): not listed");
+        }
         return;
+    }
     for (uint32_t i = 0; i < n; ++i) {
         const uintptr_t e = base + i * 136u;
         CatNpc c;
@@ -266,13 +277,28 @@ void catalog_build(uintptr_t npcreg, uintptr_t journal) {
     size_t unlocks = 0, steps = 0;
     for (const CatNpc& n : g_npcs) unlocks += n.npc.unlock.id != 0;
     for (const CatQuest& q : g_quests) steps += q.steps.size();
-    uint64_t mask = 0;
+    // the unlocked count through the roster's pages: page 0 is the game's value, page 1 Kiln's (roster.cpp); an entry
+    // past what the pages cover is not counted (it is unknown, not locked)
+    uint64_t pages[2] = {};
+    uint32_t npages = 0, count = 0;
     uint16_t ver = 0;
     int unlocked = -1;
-    if (npc_unlock_mask(&mask, &ver)) unlocked = std::popcount(mask & (g_npcs.size() >= 64 ? ~0ull : ((1ull << g_npcs.size()) - 1)));
+    if (npc_unlock_pages_server(pages, &npages, &ver, &count)) {
+        const size_t covered = std::min<size_t>(g_npcs.size(), size_t{npages} * 64);
+        unlocked = 0;
+        for (size_t i = 0; i < covered; ++i) unlocked += static_cast<int>((pages[i / 64] >> (i % 64)) & 1);
+    }
     KI("catalog: %zu NPCs (%zu with an unlock requirement; NpcRegistry: %d unlocked, version %u), %zu quests (%zu steps), "
        "%zu named queries, %zu names",
        g_npcs.size(), unlocks, unlocked, ver, g_quests.size(), steps, g_queries.size(), g_names.size());
+    if (g_npcs.size() > roster_limit()) {
+        // listed, but no entry's state is answered (unlocked 0xff, Unlocked null), not even below 64: the game's value then
+        // holds two entries in a bit
+        KE("catalog: unsupported roster: %zu entries, more than this side's maximum %u (another loader's collection?); the entries are "
+           "listed, no unlock state is answered", g_npcs.size(), roster_limit());
+        knowledge_reason("unsupported roster: " + std::to_string(g_npcs.size()) + " entries, more than this side's maximum " +
+                         std::to_string(roster_limit()) + ": no unlock state is answered");
+    }
 }
 
 void catalog_clear() {
@@ -349,9 +375,9 @@ std::string catalog_entry_name(uint32_t cat, uint32_t index) {
     }
 }
 
-bool npc_unlock_mask(uint64_t* mask, uint16_t* version) {
+bool npc_unlock_pages_server(uint64_t pages[2], uint32_t* npages, uint16_t* version, uint32_t* count) {
     if (!g_npcreg || o_npc_state < 0 || o_npc_version < 0) return false;
-    return rd(g_npcreg + o_npc_state + 8, mask) && rd(g_npcreg + o_npc_version, version);
+    return npc_unlock_pages(g_npcreg, pages, npages, version, count);
 }
 
 // "line:<template name>/<init|option|transition|farewell><k>" (k from 0, in the template's NpcDialog order)
@@ -383,7 +409,9 @@ bool catalog_resolve_line(const std::string& name, uint32_t* out_id) {
     if (!end || *end) return false;
     const auto* GD = static_cast<const KilnGamedataApi*>(g_api->service(kstr(KILN_GAMEDATA_SERVICE), 1));
     uint32_t id = 0;
-    if (GD && GD->header.size >= sizeof(KilnGamedataApi)) {
+    // the members used here (find, fields) are from the table's first version: a kiln.content older than this build,
+    // whose table is shorter than today's, still answers
+    if (GD && GD->header.size >= offsetof(KilnGamedataApi, fields) + sizeof(GD->fields)) {
         KilnGdEntry e{};
         e.size = sizeof e;
         if (GD->find(KILN_GD_TEMPLATES, KilnStr{tmpl.data(), tmpl.size()}, &e) == KILN_OK) {

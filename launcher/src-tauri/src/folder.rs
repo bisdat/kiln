@@ -120,6 +120,7 @@ impl Folder {
 
     /// The data folder for everyone but the move: refused while held (see the module docs).
     pub fn dirs(&self) -> Result<DataDirs, Error> {
+        if let Some(e) = crate::snapshot::startup::refusal() { return Err(e); }
         if let Some(e) = self.held_error() {
             return Err(e);
         }
@@ -133,7 +134,7 @@ impl Folder {
             OPEN_WHEN_BROKEN
         } else {
             match self.hold() {
-                Hold::Free => return None,
+                Hold::Free => return crate::snapshot::startup::command_refusal(cmd),
                 Hold::Elsewhere => OPEN_WHEN_ELSEWHERE,
                 Hold::Moving | Hold::Moved | Hold::Leaving | Hold::Undoing => OPEN_WHEN_MOVING,
             }
@@ -198,6 +199,13 @@ fn process_env() -> DataEnv {
         app_data: Some(t.join("roaming").into()),
         xdg_config_home: Some(t.join("config").into()),
     }
+}
+
+/// The data folder as found, held or not, for what a start reads before Tauri: the render and sandbox markers (read
+/// only; nothing is written through it). `state::dirs()` refuses until the beta copy's gate opens
+/// (crate::snapshot::startup), which is after the window exists. None: the pointer is broken.
+pub fn found_dirs() -> Option<DataDirs> {
+    current().located().ok().map(|l| l.dirs.clone())
 }
 
 /// The data folder without opening it (no lock, nothing created): for `--selftest`'s report.

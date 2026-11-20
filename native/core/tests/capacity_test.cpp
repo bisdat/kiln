@@ -24,7 +24,23 @@ KilnCapacityInfo fresh() {
 bool counts_zero(const KilnCapacityInfo& i) { return !i.capacity && !i.game_used && !i.kiln_used && !i.reserved; }
 }  // namespace
 
+std::string hex_of(const std::array<uint8_t, 32>& h) {
+    std::string s;
+    for (uint8_t b : h) {
+        char x[3];
+        std::snprintf(x, sizeof x, "%02x", b);
+        s += x;
+    }
+    return s;
+}
+
 int main(int argc, char** argv) {
+    // FIPS 180-2 vectors: the empty message, one block, two blocks
+    check(hex_of(cap::sha256("")) == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "sha256 of the empty text");
+    check(hex_of(cap::sha256("abc")) == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", "sha256 of \"abc\"");
+    check(hex_of(cap::sha256("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq")) ==
+              "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1",
+          "sha256 of a two-block message");
     check(sizeof(KilnCapacityInfo) == 48 && offsetof(KilnCapacityInfo, revision) == 40 && alignof(KilnCapacityInfo) == 8,
           "KilnCapacityInfo is 48 bytes, revision at +40");
     check(sizeof(KilnDefinitionReply) == 64 && offsetof(KilnDefinitionReply, snapshot_revision) == 48 &&

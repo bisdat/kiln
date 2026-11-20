@@ -18,7 +18,7 @@ case ${1:-} in
   stable) echo "$base" ;;
   check)
     v=${2:?usage: $0 check VERSION}
-    [[ $v == "$base" || $v =~ ^${base//./\\.}-dev\.[1-9][0-9]*$ ]] || {
-      echo "version '$v' is not $base or $base-dev.<n> (VERSION is $(cat "$repo/VERSION"))" >&2; exit 1; } ;;
+    [[ $v == "$base" || $v =~ ^${base//./\\.}-dev\.[1-9][0-9]*(\.[1-9][0-9]*)?$ ]] || {
+      echo "version '$v' is not $base, $base-dev.<n> or a quick fix $base-dev.<n>.<m> (VERSION is $(cat "$repo/VERSION"))" >&2; exit 1; } ;;
   *) echo "usage: $0 dev [N] | stable | check VERSION" >&2; exit 2 ;;
 esac

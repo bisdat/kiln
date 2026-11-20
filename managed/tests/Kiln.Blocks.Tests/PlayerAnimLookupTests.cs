@@ -92,11 +92,11 @@ public sealed class PlayerAnimLookupTests : IDisposable
     }
 
     [Fact]
-    public void A_guid_or_an_id_needs_no_lookup()
+    public void A_guid_or_an_id_is_refused_without_the_receiving_graph()
     {
         var g = Guid.NewGuid();
-        Assert.Equal(g, MoveStates.Resolve(Mod, new AnimationRef(g.ToString(), g, null), Lookup(available: false), out var problem)!.Value.Guid);
-        Assert.Null(problem);
+        Assert.Null(MoveStates.Resolve(Mod, new AnimationRef(g.ToString(), g, null), Lookup(available: false), out var problem));
+        Assert.Contains("not loaded", problem);
     }
 
     // ---- a name through the adapter ----

@@ -291,6 +291,8 @@ public static unsafe partial class PlayerStates
             public delegate* unmanaged[Cdecl]<uint, uint, uint, uint, int> ClientActionDecide;
             // since 0.2.0-dev.27: check Has()
             public delegate* unmanaged[Cdecl]<uint, AimData*, int> Aim;
+            // since 0.2.0-dev.29: check Has() (a selective hold: kiln.decisions' typed equipment verdict)
+            public delegate* unmanaged[Cdecl]<ulong, uint*, uint, uint*, uint, int> ClientActionInterest;
         }
 
         [StructLayout(LayoutKind.Sequential)]

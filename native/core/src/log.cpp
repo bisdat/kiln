@@ -2,6 +2,7 @@
 #include "log.h"
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <cstdio>
 #include <deque>
@@ -18,6 +19,7 @@ namespace {
 struct Entry {
     bool game = false;
     int level = KILN_LOG_INFO;
+    int64_t logged_ns = 0;  // game lines: when the game logged it (steady_clock), for kiln.log's line_time()
     SYSTEMTIME time{};
     std::string source;
     std::string text;
@@ -43,14 +45,47 @@ char level_letter(int level) {
     }
 }
 
+// One kiln.log line. The block between the markers is pure: native/core/tests/test-log-line.sh cuts it out of this file
+// and runs it.
+// log-line:begin
+// "[<level> hh:mm:ss.mmm] [<source>] <text>\n", every byte of the counted text kept: printf's %.*s stopped at the first
+// NUL (a C# string can hold one) and dropped the rest. A NUL is written as the two characters \0, so kiln.log stays a
+// text file for grep and support tools; CR and LF pass through as they are.
+inline std::string log_line(char level, unsigned h, unsigned m, unsigned s, unsigned ms, std::string_view source,
+                            std::string_view text) {
+    char head[32];
+    const int n = std::snprintf(head, sizeof head, "[%c %02u:%02u:%02u.%03u] [", level, h % 100, m % 100, s % 100,
+                                ms % 1000);
+    std::string line;
+    line.reserve(static_cast<size_t>(n > 0 ? n : 0) + source.size() + text.size() + 4);
+    line.append(head, static_cast<size_t>(n > 0 ? n : 0));
+    line.append(source);
+    line.append("] ");
+    for (const char c : text) {
+        if (c == '\0')
+            line.append("\\0");
+        else
+            line.push_back(c);
+    }
+    line.push_back('\n');
+    return line;
+}
+// log-line:end
+
 void write_entry(const Entry& e) {
     if (!g_file) return;
-    std::fprintf(g_file, "[%c %02u:%02u:%02u.%03u] [%s] %.*s\n", level_letter(e.level), e.time.wHour, e.time.wMinute,
-                 e.time.wSecond, e.time.wMilliseconds, e.source.c_str(), static_cast<int>(e.text.size()),
-                 e.text.data());
+    const std::string line = log_line(level_letter(e.level), e.time.wHour, e.time.wMinute, e.time.wSecond,
+                                      e.time.wMilliseconds, e.source, e.text);
+    std::fwrite(line.data(), 1, line.size(), g_file);  // one write: the text with its length
 }
 
+thread_local int64_t t_line_ns = 0;  // the line being handed to subscribers on this (the writer) thread
+
 void dispatch_game_line(const Entry& e, std::vector<std::shared_ptr<reg::LogSub>>& subs, uint64_t& version) {
+    t_line_ns = e.logged_ns;
+    struct Reset {
+        ~Reset() { t_line_ns = 0; }
+    } reset;
     const uint64_t v = reg::version();
     if (v != version) {
         subs = reg::log_subs();
@@ -135,6 +170,7 @@ void __cdecl game_listener(uint8_t level, uint8_t /*flags*/, const GameStr* line
     while (n && (line->ptr[n - 1] == '\n' || line->ptr[n - 1] == '\r')) --n;
     Entry e;
     e.game = true;
+    e.logged_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
     e.level = map_game_level(level);
     e.text.assign(line->ptr, n);
     enqueue(std::move(e));
@@ -154,6 +190,8 @@ void start() {
 }
 
 void set_level(int level) { g_level.store(level); }
+
+int64_t current_line_time() { return t_line_ns; }
 
 void write(int level, std::string_view source, std::string_view text) {
     if (level > g_level.load(std::memory_order_relaxed)) return;

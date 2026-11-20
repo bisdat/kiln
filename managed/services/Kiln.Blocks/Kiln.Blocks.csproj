@@ -15,7 +15,15 @@
     <InternalsVisibleTo Include="BlocksTest" />
     <InternalsVisibleTo Include="BlocksAbilitiesTest" />
     <InternalsVisibleTo Include="Kiln.Blocks.Tests" />
+    <!-- kiln.stations' managed side (World/Stations) on a fake kiln.stations -->
+    <InternalsVisibleTo Include="Kiln.Stations.Tests" />
+    <InternalsVisibleTo Include="Kiln.Sdk.Bake" />
+    <InternalsVisibleTo Include="Kiln.Sdk.Tests" />
+    <InternalsVisibleTo Include="Kiln.TestKit" />
     <InternalsVisibleTo Include="FurnitureTest" />
+    <!-- the upgrade station's lab test stands a chest in for the player (UpgradeStations' seams) -->
+    <InternalsVisibleTo Include="UpgradeStationTest" />
+    <InternalsVisibleTo Include="KindsFaultTest" />
     <ProjectReference Include="../../Kiln.Api/Kiln.Api.csproj" Private="false" />
     <ProjectReference Include="../Kiln.Content/Kiln.Content.csproj" Private="false" />
     <ProjectReference Include="../Kiln.Assets/Kiln.Assets.csproj" Private="false" />
@@ -38,5 +46,6 @@
     <!-- Affixes keep an item's rolls as item data (InstanceData) and read the server's copies in a player's game. -->
     <ProjectReference Include="../Kiln.Saves/Kiln.Saves.csproj" Private="false" />
     <ProjectReference Include="../Kiln.Queries/Kiln.Queries.csproj" Private="false" />
+    <ProjectReference Include="../Kiln.CreatureControl/Kiln.CreatureControl.csproj" Private="false" />
   </ItemGroup>
 </Project>

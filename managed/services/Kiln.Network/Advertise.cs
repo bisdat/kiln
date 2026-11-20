@@ -227,8 +227,7 @@ internal static partial class NetAdvertise
         var statedMod = new List<string>();
         foreach (var m in mods)
         {
-            if (string.IsNullOrEmpty(m.Directory) || m.State == ModState.Failed) continue;
-            if (File.Exists(Path.Combine(m.Directory, ".disabled"))) continue;
+            if (!Counts(m.State, m.Error, m.Directory)) continue;
             var declared = DeclaredClients(Path.Combine(m.Directory, "kiln.mod.json"));
             if (declared is "kiln" or "mod") kilnClient.Add(m.Id);
             if (declared == "mod" && m.Side == ModSide.Both) statedMod.Add(m.Id);
@@ -247,6 +246,7 @@ internal static partial class NetAdvertise
                 if (NativeIdentity(manifest) is { } ident) candidates.Add(new Candidate("native", ident.Id, ident.Version, ident.Name, dir));
             }
         candidates.AddRange(EngineCandidates(kilnRoot));  // other engines' mods (AdvertiseEngines.cs)
+        var game = Path.GetDirectoryName(Path.GetFullPath(kilnRoot)) ?? kilnRoot;
         var oldKilnClient = _kilnClientMods;
         _kilnClientMods = [.. kilnClient.Distinct()];
         _statedModClients = [.. statedMod.Distinct()];
@@ -259,16 +259,20 @@ internal static partial class NetAdvertise
             try
             {
                 // a Kiln mod is advertised by its identity: its files without what the cook made on this machine (assets/cooked),
-                // so a server's cooked folder and a player's give the same hash; other kinds' folders are all theirs
+                // so a server's cooked folder and a player's give the same hash; another engine's mod by what stays the same
+                // while it runs (AdvertiseIdentity.cs: the Library entry of Kiln's copy); a native mod's folder is all its own,
+                // and so is an EMF mod's: emf is one of Kiln's own kinds for kiln-manage (ModKind::CORE, not is_engine), whose
+                // engine_identity does not apply to it
                 var mod = c.Kind == "kiln";
-                var tree = DirHash.Signature(c.Dir, mod);
+                var engine = !mod && c.Kind is not ("native" or "emf");
+                var tree = engine ? EngineSignature(c.Dir, game) : DirHash.Signature(c.Dir, mod);
                 lock (HashCache)
                     if (HashCache.TryGetValue(c.Dir, out var cached) && cached.Sig == tree)
                     {
                         list.Add(new NetRequiredMod(c.Id, c.Version, cached.Hash, c.Kind, c.Name));
                         continue;
                     }
-                hash = mod ? DirHash.ModIdentity(c.Dir) : DirHash.Compute(c.Dir);
+                hash = mod ? DirHash.ModIdentity(c.Dir) : engine ? EngineHash(c.Kind, c.Dir, game) : DirHash.Compute(c.Dir);
                 lock (HashCache) HashCache[c.Dir] = (tree, hash);
             }
             catch (Exception e) when (e is DirHashException or IOException or UnauthorizedAccessException)
@@ -288,6 +292,18 @@ internal static partial class NetAdvertise
             NetEngine.Log(LogLevel.Info, $"advertising {list.Count} mod(s) players need: " +
                                           (list.Count == 0 ? "none" : string.Join(", ", list.Take(12).Select(r => $"{r.Id} {r.Version} {r.Hash[..13]}"))));
     }
+
+    /// <summary>Kiln.Host's reason for a mod whose profile entry is off (Mods.cs, "disabled in profile").</summary>
+    internal const string DisabledInProfile = "disabled in profile";
+
+    /// <summary>Whether a mod of the host's list counts for what players need: not a failed one, and not one switched off
+    /// (a <c>.disabled</c> file, or its profile entry off: Skipped "disabled in profile"; until 0.2.0-dev.29.11 such a mod
+    /// was still advertised, and a game hosting its world refused its own player, who had it off too). A mod skipped for
+    /// its side (a client mod on a server) still counts: players need it.</summary>
+    internal static bool Counts(ModState state, string? error, string? directory) =>
+        !string.IsNullOrEmpty(directory) && state != ModState.Failed
+        && !(state == ModState.Skipped && error is { } e && e.StartsWith(DisabledInProfile, StringComparison.Ordinal))
+        && !File.Exists(Path.Combine(directory, ".disabled"));
 
     /// <summary>The <c>clients</c> a manifest states itself, without a default; null when it says nothing.</summary>
     internal static string? DeclaredClients(string manifest)

@@ -1,0 +1,1 @@
+{ "id": "fixture-rarity-upgrades", "version": "1.0.0", "apiVersion": "0.2", "side": "server", "clients": "none", "license": "MIT", "entryAssembly": "FixtureRarityUpgrades.dll" }

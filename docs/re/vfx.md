@@ -572,7 +572,7 @@ runtime slot size 192 B. [refl] [data]
 vanilla. Resolve `0x1a0200` indexes it without a bounds check at `0x1a0311`; expanding the table/map alone permits
 out-of-bounds read-modify-write at index>=2048, and pending iteration at `0x1b181c` never visits those indices.
 This is a statically demonstrated heap-corruption path, not a safe capacity patch. No expansion/client boundary
-run was done in this wave. Full alias/lifetime audit remains open; no runtime growth or relocation is established.
+run was done in this wave. The alias/lifetime audit is §4.3.2 (dev.29); no runtime growth or relocation is established.
 
 Enforcement: find-slot `0x1a2500` compares current count with map+0x50 (=sys+0x1c28) at `0x1a258a`; grow `0x1ab9e0`
 fails because the map allocator is null; find-slot returns physical slot count as sentinel. RegisterVfx `0x1981d0`
@@ -589,6 +589,34 @@ Scratch `caps/VfxCreateSystem`, `caps/VfxInitResources` (`0x1b0ed0`), `caps/VfxR
 `caps/VfxPendingResizeSite` (`0x1996e2` anchor; operand `0x1996ea`) resolve uniquely on this client. These are
 inspection/patch-site signatures, not callable APIs or proof an expansion is installed. See dossier chapter 17.1
 for the complete safety gates rather than copying the superseded REPORT four-site summary.
+
+### 4.3.2 Alias, bitset, index-width and lifetime audit (dev.29; client 26430625) **[static]**
+A full linear sweep of `.text` (pdata bodies and gaps, 5.40 M instructions; no decode stop in the module
+0x190000-0x1b4000), read as a file. Verdict: **the five operands of §4.3.1 are the complete set** for this build;
+changed together before VfxSystemCreate runs they give a consistent 4,096-resource registry. Signatures:
+`sigdb/symbols/client.d/dev29-17a-vfx-cap.json` (each site once; feature `caps.vfx.expansion_sites`).
+
+| Storage | Indexed by | Sized by |
+|---|---|---|
+| GUID map sys+0x1bd8 (slots +0x1be8, keys +0x1c00, u32 values +0x1c18, count limit +0x1c28, count +0x1c2c) | GUID hash, value = resource index | operand `0x199574` (limit = request, slots = 2 x pow2) |
+| record table sys+0x1c38, alias sys+0x2118 (set once at `0x19973a`) | u32 index x 0xc0 | operands `0x19959c` (bytes), `0x1995bd` (init loop) |
+| table count sys+0x1c40 (sub-object sys+0x1c30 = {allocator, base, count}) | - | operand `0x1995c2`; read by the table release 0x19c3b0 (constructor `0x199589`, destructor `0x195142`) as its loop count; copied to +0x2120 (no reader) |
+| pending-activation bits sys+0x20f8, count +0x2100 | u32 index, unchecked in Resolve `0x1a0311` (bts), evict `0x1ac6ed` / activate `0x1b0dbe` (btr) | operand `0x1996ea`; iterator `0x1b180d` bounded by +0x2100 |
+| LRU head/tail/count sys+0x2128/+0x212c/+0x2130, record links +0/+4 | u32 index + 1 | - |
+
+Every resource index is 32 bits (map values, instance+0x70, the 11 built-ins at sys+0x1c8, RegisterVfx's count,
+VfxActivate 0x1afb50 and evict 0x1ac360 take u32); u16 values in the module are instance-handle indices and
+refcounts. Index recovery from a record pointer (`(p - base) * 0x2aaaaaaaaaaaaaab >> 69`, 12 sites, alias - base)
+needs base == alias, which the constructor guarantees. The other 2,048-sized objects of the constructor are not
+resource-indexed: the pipeline cache (sys+0x1ab8 map, +0x1b10 free list, +0x1b40 0x800 x 64 B, +0x1b50 bits; keyed
+by code hash; full = -1, evict and retry), the resource-data heap sys+0x1c60 (0x80000 B, 0x800 descriptors; errors
+0x26/0x27, evict and retry, else the activation waits), the GPU block at sys+0x1a8 (byte sizes) and the scene's
+per-frame list scene+0x6b8 (0x800 x 84 B, bounded append). VfxSystemCreate's only call path is 0x101ea0 <- 0x8520a0
+(an entry of the application's virtual table at .rdata 0x1d68b38); the image has no TLS callback and its entry
+point 0x2a05310 is in `.bind`. The constructor runs the VFX update 0x1b1610 at `0x199d5a`, so InitResources can
+register everything inside it. Not shown statically: GPU shader indexing, and every runtime effect (activation at
+indices 2,048 and 4,095, a second world, teardown with 4,096 records): guided checks 17-vfx-boot-order and
+17-vfx-boundary.
 
 ### 4.4 Activation **[dis]**
 1. `VfxInitResources 0x1b0ed0`, state `+0x2138`: 0 → enumerate through `S+0x7d0` three lists (mesh, curve, VFX), register all;

@@ -17,6 +17,8 @@ internal static partial class KilnApis
         public static readonly HashSet<string> Advanced = new(KilnApis.Advanced, StringComparer.Ordinal);
         public static readonly HashSet<string> Services = new(KilnApis.Services, StringComparer.OrdinalIgnoreCase);
         public static readonly HashSet<string> Completed = new(CompletedTasks, StringComparer.Ordinal);
+        public static readonly HashSet<string> BootWorks = new(KilnApis.BootWorks, StringComparer.Ordinal);
+        public static readonly HashSet<string> BootRefused = new(KilnApis.BootRefused, StringComparer.Ordinal);
         public static readonly Dictionary<string, string[]> Guards = ParseGuards();
 
         private static Dictionary<string, string[]> ParseGuards()
@@ -40,6 +42,26 @@ internal static partial class KilnApis
         var id = p.OriginalDefinition.GetDocumentationCommentId();
         return id is not null && Sets.Guards.TryGetValue(id, out var rows) ? rows : Array.Empty<string>();
     }
+
+    /// <summary>The task-thread world API's members that need a Kiln task's scope (or the tick) on the calling thread:
+    /// WorldConcurrent's reads and its compare-exchange writes. Its any-thread members (IsAvailable, IsPresent, CanWrite,
+    /// WritePolicy, OrOnTick) are not in it.</summary>
+    private static readonly HashSet<string> TaskGatedMembers = new(StringComparer.Ordinal)
+    {
+        "Open", "Validate", "Read", "ReadBytes", "ReadMany", "Query", "Template", "TryCompareExchange", "TryCompareExchangeBytes",
+    };
+
+    /// <summary>The members of <see cref="TaskGatedMembers"/> that write: on the tick they always answer busy (the
+    /// server frame holds the engine's write gate for its whole update).</summary>
+    private static readonly HashSet<string> TaskGatedWrites = new(StringComparer.Ordinal) { "TryCompareExchange", "TryCompareExchangeBytes" };
+
+    /// <summary>A member Kiln refuses where no task scope is installed (KILN105's gated world row), by symbol.</summary>
+    internal static bool IsTaskGated(IMethodSymbol method) =>
+        method.ContainingType?.Name == "WorldConcurrent" && TaskGatedMembers.Contains(method.Name) &&
+        ThreadClassifier.IsKilnType(method.ContainingType, "WorldConcurrent");
+
+    /// <summary>A gated member that writes (KILN105's gated-write row), by symbol.</summary>
+    internal static bool IsTaskGatedWrite(IMethodSymbol method) => IsTaskGated(method) && TaskGatedWrites.Contains(method.Name);
 
     /// <summary>Attribute names honoured in addition to the tables (a future Kiln.Api may mark members itself).</summary>
     internal const string TickThreadOnlyAttribute = "TickThreadOnlyAttribute";
@@ -78,12 +100,22 @@ internal static partial class KilnApis
         private readonly ConcurrentDictionary<ISymbol, bool> _tick = new(SymbolEqualityComparer.Default);
         private readonly ConcurrentDictionary<ISymbol, bool> _advanced = new(SymbolEqualityComparer.Default);
         private readonly ConcurrentDictionary<ISymbol, bool> _completed = new(SymbolEqualityComparer.Default);
+        private readonly ConcurrentDictionary<ISymbol, bool> _bootWorks = new(SymbolEqualityComparer.Default);
+        private readonly ConcurrentDictionary<ISymbol, bool> _bootRefused = new(SymbolEqualityComparer.Default);
 
         public bool RequiresTickThread(ISymbol member) =>
             _tick.GetOrAdd(member, m => Lookup(m, Sets.Tick, TickThreadOnlyAttribute));
 
         public bool RequiresAdvanced(ISymbol member) =>
             _advanced.GetOrAdd(member, m => Lookup(m, Sets.Advanced, AdvancedApiAttribute));
+
+        /// <summary>A Kiln API with a boot path of its own (the generated BootWorks table): it works in Mod.OnBoot.</summary>
+        public bool WorksInBoot(ISymbol member) =>
+            _bootWorks.GetOrAdd(member, m => Lookup(m, Sets.BootWorks, "\0"));
+
+        /// <summary>A Kiln API that Kiln refuses in Mod.OnBoot (the generated BootRefused table).</summary>
+        public bool RefusedInBoot(ISymbol member) =>
+            _bootRefused.GetOrAdd(member, m => Lookup(m, Sets.BootRefused, "\0"));
 
         /// <summary>A Kiln API whose returned task is always complete (Task.FromResult): its Result never blocks.</summary>
         public bool ReturnsCompletedTask(ISymbol member) =>

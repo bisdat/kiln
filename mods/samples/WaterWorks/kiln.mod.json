@@ -1,0 +1,10 @@
+{
+  "id": "waterworks",
+  "name": "WaterWorks sample",
+  "version": "0.1.0",
+  "apiVersion": "0.2",
+  "license": "MIT",
+  "entryAssembly": "WaterWorks.dll",
+  "side": "server",
+  "description": "Wells and water barrels refill faster (2x by default, the config's WellRefill). Wraps the game's own fuel_setup program: before its update it notes each well's water, after it adds what the game added once more. Shows a typed program wrap (Systems.Wrap<Ecs.Programs.FuelSetup>) with AroundEach."
+}

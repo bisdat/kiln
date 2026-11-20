@@ -73,6 +73,149 @@ public sealed class NoClipTestMod : Mod
         return (Math.Sqrt((to.X - from.X) * (to.X - from.X) + (to.Z - from.Z) * (to.Z - from.Z)), onFoot);
     }
 
+    // ---- GitHub issue #25: the game's sneak mode. The BuildingFlying mover takes its spring-acceleration row from the
+    // actor's InSneakMode and Strafing flags; the crouched row holds -1 (do not steer) for sprint and braking. In that
+    // mode a flight at speed ignored the sneak key, and letting go drifted on. Kiln's flight steers with the default row.
+    // The test holds the flag in Actor.currentState (+0xbf8, InSneakMode = bit 21) every step.
+    private const int ActorState = 0xbf8, InSneakMode = 21;
+
+    private static void ForceSneakMode(EntityId f)
+    {
+        if (World.ReadBytes(f, "Actor") is { Length: > ActorState + 8 } a)
+            World.TryWrite(f, "Actor", ActorState, BitConverter.ToUInt64(a, ActorState) | 1UL << InSneakMode);
+    }
+
+    private async Task SneakMode(EntityId f, double ground)
+    {
+        Hold(f, true, false);
+        await Until(() => Y(f) > ground + 25, 120);
+        Hold(f, false, false);
+        await Steps(10);
+        // Does holding the sneak key itself put the flying character into the game's sneak mode? (This lab's
+        // PlayerInput has no toggle configuration: sneak is "hold".)
+        var y = Y(f);
+        var seen = 0;
+        for (var i = 0; i < 30; i++)
+        {
+            Hold(f, false, true);
+            await Steps(1);
+            if (PlayerStates.Is(f, PlayerStateId.InSneakMode)) seen++;
+        }
+        Hold(f, false, false);
+        Info($"holding sneak in NoClip's flight for 30 steps: {y - Y(f):0.00} m down, the game's sneak mode on in {seen} of them");
+        await Steps(20);
+        ForceSneakMode(f);
+        await Steps(1);
+        if (!PlayerStates.Is(f, PlayerStateId.InSneakMode))
+        {
+            Info("the game's sneak mode: the flag written into Actor.currentState did not hold for a step; the sneak-mode checks are skipped");
+            return;
+        }
+        World.TryWrite(f, "PlayerInput", CameraRotation, System.Numerics.Quaternion.Identity);
+        World.TryWrite(f, "PlayerInput", Stick, new System.Numerics.Vector2(0, 1));
+        var held = 0;
+        for (var i = 0; i < 40; i++, held++)
+        {
+            ForceSneakMode(f);
+            Hold(f, false, false, sprint: true);
+            await Steps(1);
+            if (!PlayerStates.Is(f, PlayerStateId.InSneakMode)) break;
+        }
+        var y0 = Y(f);
+        var mode = 0;
+        for (var i = 0; i < 30; i++)
+        {
+            ForceSneakMode(f);
+            Hold(f, false, true, sprint: true);
+            await Steps(1);
+            if (PlayerStates.Is(f, PlayerStateId.InSneakMode)) mode++;
+        }
+        var drop = y0 - Y(f);
+        Check(drop > 1.5 && mode >= 25, $"in the game's sneak mode, flying forward at sprint, holding sneak sinks: {drop:0.00} m in 30 steps " +
+                                        $"(sneak mode on in {mode} of them, {held} steps of sprint before)");
+        World.TryWrite(f, "PlayerInput", Stick, System.Numerics.Vector2.Zero);
+        for (var i = 0; i < 20; i++)
+        {
+            ForceSneakMode(f);
+            Hold(f, false, false);
+            await Steps(1);
+        }
+        var p0 = World.Position(f)!.Value;
+        for (var i = 0; i < 10; i++)
+        {
+            ForceSneakMode(f);
+            await Steps(1);
+        }
+        var p1 = World.Position(f)!.Value;
+        var moved = Math.Sqrt((p1.X - p0.X) * (p1.X - p0.X) + (p1.Y - p0.Y) * (p1.Y - p0.Y) + (p1.Z - p0.Z) * (p1.Z - p0.Z));
+        Check(moved < 0.3, $"in the game's sneak mode, letting go stops the flight: {moved:0.00} m in the last 10 of 30 steps with no input");
+        await Steps(5);
+        Info($"after the sneak-mode checks: sneak mode {PlayerStates.Is(f, PlayerStateId.InSneakMode)}, {Line(f, ground)}");
+    }
+
+    // NoClip on, down into the rock, then the player leaves there (and, with closeWorld, the world closes and loads again
+    // in between); back, Kiln holds collision off and moves the character to its last free position.
+    // NoClipReturns.NoteEvery: the kept position follows the last free one in steps of half a metre
+    private const double NoClipReturnsNoteEvery = 0.6;
+
+    private static double Distance(WorldPosition a, WorldPosition b) =>
+        Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y) + (a.Z - b.Z) * (a.Z - b.Z));
+
+    private async Task LeaveInside(EntityId f, WorldPosition home, bool closeWorld)
+    {
+        var what = closeWorld ? "a world close" : "a leave";
+        var ground = Y(f);
+        var ended = new List<PlayerNoClipEndedEvent>();
+        using var sub = Events.On<PlayerNoClipEndedEvent>(e => { if (e.Player == f) ended.Add(e); });
+        Check(NoClip.Set(f, true) is { Ok: true, On: true }, $"{what}: NoClip on");
+        await Until(() => NoClip.Of(f).Active, 20);
+        Hold(f, false, true);
+        var deep = await Until(() => Y(f) < ground - 6 && Solid(World.Position(f)!.Value, 1.0) && Solid(World.Position(f)!.Value, 1.7), 120);
+        Hold(f, false, false);
+        await Steps(5);
+        var free = NoClip.Of(f).LastFree;
+        Check(deep && free is { } p0 && p0.Y > ground - 1.0, $"{what}: inside the rock, last free position at the surface: {Line(f, ground)}");
+        ended.Clear();
+        string? worldId = null;
+        uint revision = 0;
+        if (closeWorld)
+        {
+            // the world's last save before it closes (a hosted game saves when it quits): NoClip is on, the entry is in it
+            worldId = Saves.WorldId;
+            var saved = await Saves.Request();
+            revision = Saves.Status?.Revision ?? 0;
+            Check(saved.Success && worldId is not null, $"{what}: the world saved with NoClip on ({saved})");
+        }
+        Rules.Simulate(f, false);
+        await Steps(1);
+        if (closeWorld)
+        {
+            Saves.LabCloseWorld();
+            Check(!Saves.WorldDataReady, $"{what}: the world closed, its data is not ready");
+            await Steps(3);
+            Saves.LabWorldLoaded(worldId, revision);
+            Check(Saves.WorldDataReady, $"{what}: the world loaded again");
+        }
+        Check(ended.Count == 0, $"{what}: nothing is reported while the player is away");
+        Rules.Simulate(f);
+        var back = await Until(() => ended.Count > 0, 200);
+        await Steps(10);
+        var at = World.Position(f)!.Value;
+        Check(back && ended[0] is { Reason: NoClipEnd.Left, RestoredTo: { } r } && free is { } p1 && Distance(r, p1) < NoClipReturnsNoteEvery &&
+              Math.Abs(at.Y - r.Y) < 1.5,
+            $"{what}: back inside the rock, the character is put at its last free position: {(ended.Count > 0 ? ended[0].ToString() : "no event")}; {Line(f, ground)}");
+        var stands = await Until(() => PlayerStates.Is(f, PlayerStateId.Grounded) && Loco(f) != 11, 200);
+        Check(stands && Y(f) > ground - 1.2 && !NoClip.Of(f).Active && !Rules.Of(f).NoClip,
+            $"{what}: collision is back, NoClip off, and it stands on the ground: {Line(f, ground)}");
+        // a second return finds nothing: the entry went when the character was seen free
+        ended.Clear();
+        Rules.Simulate(f, false);
+        await Steps(1);
+        Rules.Simulate(f);
+        await Steps(30);
+        Check(ended.Count == 0, $"{what}: leaving and coming back again in open space reports and moves nothing");
+    }
+
     private byte Loco(EntityId f) => World.ReadBytes(f, "DynamicLocomotion") is { Length: > State } b ? b[State] : (byte)255;
     private static double Y(EntityId f) => World.Position(f)!.Value.Y;
     private static void Hold(EntityId f, bool jump, bool sneak, bool sprint = false) =>
@@ -270,6 +413,22 @@ public sealed class NoClipTestMod : Mod
             Check(NoClip.Set(f, true) is { Ok: true, On: true }, "NoClip.Set on asks anew after that teleport");
             await Until(() => NoClip.Of(f).Active, 10);
         }
+
+        // ---- 5c. issue #25: sneak sinks and letting go stops, also in the game's sneak mode
+        if (!NoClip.Of(f).Active) NoClip.Set(f, true);
+        await Until(() => NoClip.Of(f).Active, 20);
+        await SneakMode(f, Y(f));
+
+        // ---- 5d. GitHub issue #25: leaving inside the ground, and the world closing. Rules.Simulate(f, false) is the lab's
+        // leave (the runtime forgets the player as when a player leaves), Rules.Simulate(f) the return; Saves.LabCloseWorld
+        // and LabWorldLoaded play a hosted world's close and next load.
+        await Home(f, home);
+        await LeaveInside(f, home, closeWorld: false);
+        await Home(f, home);
+        await LeaveInside(f, home, closeWorld: true);
+        await Home(f, home);
+        if (!NoClip.Of(f).Active) NoClip.Set(f, true);
+        await Until(() => NoClip.Of(f).Active, 20);
 
         // ---- 6. death ends it
         await Steps(5);

@@ -92,10 +92,25 @@ namespace log {
 void write(int, const char*, std::string_view) { ++logs; if (throw_log) throw std::runtime_error("log fault"); }
 }
 namespace caps { bool flush() { ++flushes; return true; } }
+// kiln.tasks (services/tasks.cpp): the exit closes task admission first, for a normal exit only
+std::vector<std::string> order;  // what the sequence did, in order: handler names, "park"
+namespace tasks_svc {
+int exits = 0, refusals = 0, parks = 0;
+DWORD park_wait = 0;
+double park_takes_ms = 0;  // the park's wait (the fake clock moves)
+void exiting() { ++exits; }
+void exit_begins() { ++refusals; }
+void park(uint32_t wait_ms) {
+    ++parks;
+    park_wait = wait_ms;
+    clock_now += park_takes_ms;
+    order.push_back("park");
+}
+}
 #define KLOG_I(...) log::write(KILN_LOG_INFO, "kiln", "test log")
 #define KLOG_W(...) log::write(KILN_LOG_WARN, "kiln", "test log")
 #define KLOG_E(...) log::write(KILN_LOG_ERROR, "kiln", "test log")
-struct LoadedModule { std::string name; KilnPluginInfo info{}; };
+struct LoadedModule { std::string name; KilnPluginInfo info{}; bool own_service = false; };
 std::vector<LoadedModule> g_modules;
 #include "unload_sequence.inc"
 #include "unload_trigger.inc"
@@ -118,6 +133,11 @@ void prepare(void (KILN_CALL* handler)(void*)) {
     g_unload_count = 0;
     g_unload_state = 0;
     g_unload_started_ms = -1;
+    g_unload_over = nullptr;
+    order.clear();
+    tasks_svc::parks = 0;
+    tasks_svc::park_wait = 0;
+    tasks_svc::park_takes_ms = 0;
     next_event = 0;
     for (auto& e : events) e.set = false;
     clock_now = 1000;
@@ -126,17 +146,75 @@ void prepare(void (KILN_CALL* handler)(void*)) {
     logs = file_reads = real_exits = flushes = clock_reads = 0;
     stall_flush = false;
     flush_wait = 0;
-    unload_prepare();
+    unload_prepare(true);
     sequence_event = g_unload_over;
     g_exit_next = reinterpret_cast<void*>(&fake_exit);
 }
 void cleanup() { delete[] kiln::g_unload_jobs; kiln::g_unload_jobs = nullptr; }
 void KILN_CALL marker(void*) {}
+int tasks_exits_at_handler = -1;
+void KILN_CALL tasks_marker(void*) { tasks_exits_at_handler = kiln::tasks_svc::exits; }
+int exits_at_service = -1, refusals_at_service = -1;
+void KILN_CALL record_service(void*) {
+    exits_at_service = kiln::tasks_svc::exits;
+    refusals_at_service = kiln::tasks_svc::refusals;
+    kiln::order.push_back("service");
+}
+void KILN_CALL record_plugin(void*) { kiln::order.push_back("plugin"); }
+double service_takes_ms = 0;
+void KILN_CALL slow_service(void*) {
+    clock_now += service_takes_ms;
+    kiln::order.push_back("service");
+}
+// Kiln's own service (loaded first, as kiln/services DLLs are) and a plugin, each with an on_unload; then the policy's
+// choice: the plugins' handlers called or not.
+void prepare_two(bool plugins, void (KILN_CALL* service)(void*) = &record_service) {
+    using namespace kiln;
+    prepare(&marker);
+    delete[] g_unload_jobs;
+    g_unload_jobs = nullptr;
+    g_unload_count = 0;
+    g_unload_over = nullptr;
+    g_modules = {{"kiln-engine.dll", {}, true}, {"a-plugin.dll", {}, false}};
+    for (auto& m : g_modules) m.info.size = sizeof(KilnPluginInfo);
+    g_modules[0].info.on_unload = service;
+    g_modules[1].info.on_unload = &record_plugin;
+    tasks_svc::exits = tasks_svc::refusals = 0;
+    exits_at_service = refusals_at_service = -1;
+    unload_prepare(plugins);
+    sequence_event = g_unload_over;
+}
+std::string joined() {
+    std::string s;
+    for (const auto& o : kiln::order) s += (s.empty() ? "" : " ") + o;
+    return s;
+}
 int main() {
+    // kiln.tasks: a normal exit seals task admission before any on_unload handler runs; also with no handler at all;
+    // never on a non-zero exit (a crash must not touch the pool's locks)
+    prepare(&tasks_marker);
+    kiln::tasks_svc::exits = kiln::tasks_svc::refusals = 0;
+    kiln::exit_call(0);
+    check(kiln::tasks_svc::exits == 1 && kiln::tasks_svc::refusals == 1 && tasks_exits_at_handler == 1,
+          "kiln.tasks: a normal exit closes task admission once, before the on_unload handlers");
+    cleanup();
+    prepare(&marker);
+    kiln::g_unload_count = 0;  // nothing registered an on_unload
+    kiln::tasks_svc::exits = 0;
+    kiln::unload_run(0, "test");
+    check(kiln::tasks_svc::exits == 1, "kiln.tasks: closed also when no on_unload handler exists");
+    cleanup();
+    prepare(&marker);
+    kiln::tasks_svc::exits = kiln::tasks_svc::refusals = 0;
+    kiln::exit_call(42);
+    check(kiln::tasks_svc::exits == 0 && kiln::tasks_svc::refusals == 1,
+          "kiln.tasks: a non-zero exit only closes admission (lock-free); it does not seal the pool");
+    cleanup();
     prepare(&reexit);
     kiln::exit_call(0);
-    check(secondary_waits.size() == 1 && secondary_waits[0] == 13250,
-          "second exit waits remaining handler + 2000 ms flush + 500 ms log + 1000 ms margin from sequence start");
+    check(secondary_waits.size() == 1 && secondary_waits[0] == 13750,
+          "second exit waits remaining handler + 500 ms park + 2000 ms flush + 500 ms log + 1000 ms margin from sequence "
+          "start");
     check(kiln::g_unload_state == 2 && static_cast<Event*>(sequence_event)->set && real_exits == 1 && flushes == 1,
           "reentrant exit leaves the whole sequence completed");
     cleanup();
@@ -172,6 +250,78 @@ int main() {
     check(secondary_waits.empty() && logs == 0 && clock_reads == 0 && kiln::g_unload_state == 2 &&
               static_cast<Event*>(sequence_event)->set && real_exits == 1,
           "non-zero exit never waits for an already running normal sequence");
+    cleanup();
+
+    // ---- Kiln's own exit steps first, then the plugins (every platform) ----
+    prepare_two(true);
+    kiln::exit_call(0);
+    check(joined() == "service park plugin" && kiln::tasks_svc::park_wait == 500 && real_exits == 1,
+          "Kiln's own steps first: its service's handler, then the task pool parks (500 ms), then the plugin's handler");
+    check(exits_at_service == 1 && refusals_at_service == 1 && kiln::tasks_svc::exits == 1,
+          "task admission closed and every owner sealed once, before Kiln's service handler");
+    cleanup();
+    prepare_two(false);
+    kiln::exit_call(0);
+    check(joined() == "service park" && kiln::g_unload_count == 1 && real_exits == 1,
+          "plugin handlers off (native Windows by default): Kiln's service handler and the park only");
+    cleanup();
+    prepare_two(true);
+    kiln::g_modules.clear();  // nothing with an on_unload: the steps of Kiln's own still run
+    delete[] kiln::g_unload_jobs;
+    kiln::g_unload_jobs = nullptr;
+    kiln::g_unload_count = 0;
+    kiln::g_unload_over = nullptr;
+    kiln::unload_prepare(false);
+    sequence_event = kiln::g_unload_over;
+    kiln::exit_call(0);
+    check(sequence_event && joined() == "park" && kiln::g_unload_state == 2 && real_exits == 1,
+          "no handler at all: the pool still parks and the sequence completes");
+    cleanup();
+    prepare_two(true);
+    kiln::tasks_svc::exits = kiln::tasks_svc::refusals = 0;
+    kiln::exit_call(41);
+    check(joined().empty() && kiln::tasks_svc::parks == 0 && kiln::tasks_svc::exits == 0 &&
+              kiln::tasks_svc::refusals == 1 && logs == 0 && real_exits == 1,
+          "a non-zero exit with Kiln's steps first: admission only; no park, no handler, no log");
+    cleanup();
+    prepare_two(true);
+    {
+        auto* peb = reinterpret_cast<uint8_t*>(::__readgsqword(0x60));
+        static RTL_CRITICAL_SECTION loader_lock;
+        loader_lock.OwningThread = reinterpret_cast<void*>(uintptr_t{thread_id});
+        *reinterpret_cast<RTL_CRITICAL_SECTION**>(peb + 0x110) = &loader_lock;
+        kiln::exit_call(0);
+        *reinterpret_cast<RTL_CRITICAL_SECTION**>(peb + 0x110) = nullptr;
+    }
+    check(joined().empty() && kiln::tasks_svc::parks == 0 && kiln::tasks_svc::exits == 1 && real_exits == 1,
+          "an exit from under the loader lock seals the pool but never waits: no park, no handler");
+    cleanup();
+    prepare_two(true);
+    kiln::g_modules[1].info.on_unload = &reexit;  // the plugin's handler calls the exit again during the sequence
+    delete[] kiln::g_unload_jobs;
+    kiln::g_unload_jobs = nullptr;
+    kiln::g_unload_count = 0;
+    kiln::g_unload_over = nullptr;
+    kiln::unload_prepare(true);
+    sequence_event = kiln::g_unload_over;
+    kiln::exit_call(0);
+    check(secondary_waits.size() == 1 && secondary_waits[0] == 13750,
+          "a second exit during the sequence waits the handlers' 10000 ms + the park's 500 ms + flush, log and margin");
+    cleanup();
+    // the park's wait is not the handlers' time: a service handler that took 9600 ms and a 500 ms park leave the
+    // plugin 400 ms of the 10000 ms, not "used up"
+    service_takes_ms = 9600;
+    prepare_two(true, &slow_service);
+    kiln::tasks_svc::park_takes_ms = 500;
+    kiln::exit_call(0);
+    check(joined() == "service park plugin", "the park's time does not count against the plugins' handlers");
+    service_takes_ms = 0;
+    cleanup();
+
+    // one plugin (prepare): it runs after the park, so a plugin's on_unload never sees a task body or done running
+    prepare(&record_plugin);
+    kiln::exit_call(0);
+    check(joined() == "park plugin", "a plugin's handler runs after the pool parked");
     cleanup();
     std::printf("%d checks, %d failed\n", checks, failures);
     return failures ? 1 : 0;

@@ -404,7 +404,7 @@ struct ServedResource {
     Bytes data;
     std::string what;
     bool override = false;  // replaces a game resource of this GUID (a material's "replaces"): served as an override, not a new key
-    std::string mod;        // with override: the mod it belongs to. kiln.vfx serves it under an owner of that mod's, never its own
+    std::string mod;        // originating mod. Material overrides use its owner; VFX retain it for admission failures
     bool standby = false;   // with override: an earlier mod in the load order replaces the same material; this one draws only if that one unloads
 };
 
@@ -559,6 +559,7 @@ struct CookResult {
     std::vector<BuiltMaterialBlock> materials;
     std::vector<std::string> errors, warnings, notes;
     std::vector<std::string> refused_mods;  // refused by the budget or a manifest rule, whole
+    std::map<std::string, std::vector<std::string>> mod_errors;  // mod id -> its errors and refusals (a boot generation's required mods)
     uint32_t mods_with_vfx = 0;
     uint32_t mod_modules = 0;                // mods' own particle modules served
     uint32_t used_vfx = 0, used_meshes = 0, used_sounds = 0, used_curves = 0, used_materials = 0, used_streamed_textures = 0;
