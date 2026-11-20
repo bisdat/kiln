@@ -1266,7 +1266,6 @@ pub fn build(dirs: &DataDirs, req: &BuildRequest, out_dir: &Path, progress: &mut
 /// more upload). kdh1 recomputed from the entries is the entry's hash (for a plugin, sha256 of its one file).
 #[cfg(feature = "zip")]
 pub fn mod_archive(dirs: &DataDirs, r: &LibraryRef, out: &Path) -> Result<StoredFile> {
-    use std::io::Write;
     let at = crate::library::path_of(dirs, r)?;
     let (files, hash) = if r.kind == ModKind::Plugin {
         let name = at.file_name().and_then(|n| n.to_str()).ok_or_else(|| Error::invalid(format!("plugin {}: no file name", r.id)))?.to_string();
@@ -1280,10 +1279,26 @@ pub fn mod_archive(dirs: &DataDirs, r: &LibraryRef, out: &Path) -> Result<Stored
     if hash != r.hash {
         return Err(err(ErrorCode::Refused, format!("{} {} changed in its Library folder since it was imported ({hash}, expected {})", r.kind.as_str(), r.id, r.hash)));
     }
+    archive_files(&files, &format!("{} {}", r.kind.as_str(), r.id), out)
+}
+
+/// [`mod_archive`] of a folder that is no Library entry (a pack layer unpacked from a built pack): the same bytes rules.
+/// Returns the archive and the folder's kdh1.
+#[cfg(feature = "zip")]
+pub fn folder_archive(kind: ModKind, dir: &Path, out: &Path) -> Result<(StoredFile, String)> {
+    let files = super::mod_files(kind, dir)?;
+    let hash = crate::hash::of_mod_records(kind, records(&files)?)?;
+    Ok((archive_files(&files, &dir.display().to_string(), out)?, hash))
+}
+
+/// The deterministic archive writer of [`mod_archive`] and [`folder_archive`].
+#[cfg(feature = "zip")]
+fn archive_files(files: &[(String, PathBuf)], what: &str, out: &Path) -> Result<StoredFile> {
+    use std::io::Write;
     let mut seen = BTreeSet::new();
-    for (rel, _) in &files {
+    for (rel, _) in files {
         if !valid_rel(rel) || rel.split('/').any(windows_device) || !seen.insert(fold_name(rel)) {
-            return Err(err(ErrorCode::Refused, format!("{} {}: {rel:?} cannot be a file on every system", r.kind.as_str(), r.id)));
+            return Err(err(ErrorCode::Refused, format!("{what}: {rel:?} cannot be a file on every system")));
         }
     }
     let time = zip::DateTime::from_date_and_time(1980, 1, 1, 0, 0, 0).map_err(|e| err(ErrorCode::Internal, format!("zip time: {e}")))?;
@@ -1302,7 +1317,7 @@ pub fn mod_archive(dirs: &DataDirs, r: &LibraryRef, out: &Path) -> Result<Stored
         let f = std::fs::File::create(&tmp).map_err(crate::util::io_at(&tmp, "writing"))?;
         let mut w = zip::ZipWriter::new(std::io::BufWriter::new(f));
         let zerr = |e: zip::result::ZipError| err(ErrorCode::Io, format!("writing {}: {e}", tmp.display()));
-        for (rel, p) in &files {
+        for (rel, p) in files {
             let data = std::fs::read(p).map_err(crate::util::io_at(p, "reading"))?;
             let o = if data.len() as u64 >= 0xFFFF_0000 { opts.large_file(true) } else { opts };
             w.start_file(rel.as_str(), o).map_err(zerr)?;
@@ -1320,6 +1335,187 @@ pub fn mod_archive(dirs: &DataDirs, r: &LibraryRef, out: &Path) -> Result<Stored
     crate::util::rename_replace(&tmp, out)?;
     let (sha256, size) = crate::hash::sha256_file(out)?;
     Ok(StoredFile { sha256, size, url: None })
+}
+
+#[cfg(not(feature = "zip"))]
+pub fn folder_archive(kind: ModKind, dir: &Path, out: &Path) -> Result<(StoredFile, String)> {
+    let _ = (kind, dir, out);
+    Err(err(ErrorCode::Unsupported, "kiln-manage was built without the zip feature"))
+}
+
+// ================================================================================================= split storage
+
+/// Where an assembled pack took each part from (the Library or a downloaded archive): what the launcher reports.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Assembled {
+    pub file: PathBuf,
+    pub sha256: String,
+    pub size: u64,
+    /// Mods (and the layer, as its id) taken from the Library.
+    pub from_library: Vec<String>,
+    /// Mods (and the layer) taken from a downloaded archive.
+    pub from_archives: Vec<String>,
+}
+
+/// The parts of a pack the Library lacks: (mod id or the layer id, the archive Crucible stores it as). A Library entry
+/// that no longer hashes to its name (edited in place) counts as lacking.
+pub fn lacking(dirs: &DataDirs, ix: &PackIndex) -> Result<Vec<(String, StoredFile)>> {
+    let mut out = Vec::new();
+    for (id, lr, file) in parts(ix) {
+        if library_part(dirs, &lr).is_none() {
+            let f = file.ok_or_else(|| err(ErrorCode::Schema, format!("{id}: the index names no file for it")))?;
+            out.push((id, f));
+        }
+    }
+    Ok(out)
+}
+
+/// Every part of a pack as (id, its Library ref, its stored file).
+fn parts(ix: &PackIndex) -> Vec<(String, LibraryRef, Option<StoredFile>)> {
+    let mut v: Vec<(String, LibraryRef, Option<StoredFile>)> = ix.mods.iter().map(|m| (m.id.clone(), m.library_ref(), m.file.clone())).collect();
+    if let Some(l) = &ix.layer {
+        v.push((l.id.clone(), LibraryRef { kind: ModKind::Kiln, id: l.id.clone(), version: l.version.clone(), hash: l.hash.clone() }, l.file.clone()));
+    }
+    v
+}
+
+/// A Library entry's files when it is there and still hashes to its name: (zip-relative files).
+fn library_part(dirs: &DataDirs, r: &LibraryRef) -> Option<Vec<(String, PathBuf)>> {
+    let at = crate::library::path_of(dirs, r).ok()?;
+    if r.kind == ModKind::Plugin {
+        let name = at.file_name()?.to_str()?.to_string();
+        let ok = at.is_file() && crate::hash::sha256_file(&at).ok()?.0 == r.hash;
+        return ok.then(|| vec![(name, at)]);
+    }
+    if !at.is_dir() {
+        return None;
+    }
+    let files = super::mod_files(r.kind, &at).ok()?;
+    let hash = crate::hash::of_mod_records(r.kind, records(&files).ok()?).ok()?;
+    (hash == r.hash).then_some(files)
+}
+
+/// Puts a .kilnpack together from Crucible's split storage: the index as given (signed and checked by the caller), each
+/// mod and the layer from the Library when it has them (same kdh1) or else from its archive (`archives`: the stored
+/// file's sha256 -> the downloaded archive, already checked against that sha256), each override from `blobs` (sha256 ->
+/// bytes). Archive entries are copied as they are compressed; [`read`] then checks the whole result as for any pack
+/// (every kdh1, override hashes, entry names and sizes), so a part that does not match its index is refused there.
+#[cfg(feature = "zip")]
+pub fn assemble(dirs: &DataDirs, ix: &PackIndex, archives: &BTreeMap<String, PathBuf>, blobs: &BTreeMap<String, Vec<u8>>, out: &Path) -> Result<Assembled> {
+    use std::io::Write;
+    check_index(ix)?;
+    if let Some(d) = out.parent() {
+        std::fs::create_dir_all(d).map_err(crate::util::io_at(d, "creating"))?;
+    }
+    let tmp = crate::util::with_suffix(out, ".tmp");
+    let mut done = Assembled { file: out.to_path_buf(), ..Default::default() };
+    let opts = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Stored)
+        .last_modified_time(zip::DateTime::default_for_write())
+        .unix_permissions(0o644)
+        .system(zip::System::Unix);
+    let written = (|| -> Result<()> {
+        let f = std::fs::File::create(&tmp).map_err(crate::util::io_at(&tmp, "writing"))?;
+        let mut w = zip::ZipWriter::new(std::io::BufWriter::new(f));
+        let zerr = |e: zip::result::ZipError| err(ErrorCode::Io, format!("writing {}: {e}", tmp.display()));
+        let mut index_bytes = serde_json::to_vec_pretty(ix)?;
+        index_bytes.push(b'\n');
+        w.start_file(super::MANIFEST, opts).map_err(zerr)?;
+        w.write_all(&index_bytes)?;
+        let mut expanded = 0u64;
+        for (id, lr, file) in parts(ix) {
+            let zip_path = match ix.mods.iter().find(|m| m.id == id && m.kind == lr.kind) {
+                Some(m) => m.path.clone(),
+                None => LAYER_PATH.to_string(),
+            };
+            let plugin = lr.kind == ModKind::Plugin;
+            if let Some(files) = library_part(dirs, &lr) {
+                for (rel, p) in files {
+                    let name = if plugin { zip_path.clone() } else { format!("{zip_path}/{rel}") };
+                    let len = std::fs::metadata(&p).map_err(crate::util::io_at(&p, "reading"))?.len();
+                    expanded += len;
+                    if len > MAX_FILE || expanded > MAX_EXPANDED {
+                        return Err(err(ErrorCode::Refused, "the pack unpacks to more than its limits (512 MiB a file, 4 GiB in all)"));
+                    }
+                    w.start_file(name.as_str(), opts.large_file(len >= 0xFFFF_0000)).map_err(zerr)?;
+                    let mut src = std::fs::File::open(&p).map_err(crate::util::io_at(&p, "reading"))?;
+                    std::io::copy(&mut src, &mut w).map_err(crate::util::io_at(&p, "copying"))?;
+                }
+                done.from_library.push(id);
+                continue;
+            }
+            let sha = file.as_ref().map(|f| f.sha256.clone()).ok_or_else(|| err(ErrorCode::Schema, format!("{id}: the index names no file for it")))?;
+            let arc = archives.get(&sha).ok_or_else(|| err(ErrorCode::NotFound, format!("{id}: its archive was not downloaded")))?;
+            let af = std::fs::File::open(arc).map_err(crate::util::io_at(arc, "opening"))?;
+            let mut a = zip::ZipArchive::new(af).map_err(|e| err(ErrorCode::Parse, format!("{id}: its archive is no zip ({e})")))?;
+            if a.len() > MAX_ENTRIES {
+                return Err(err(ErrorCode::Refused, format!("{id}: its archive has more than {MAX_ENTRIES} entries")));
+            }
+            let mut files = 0usize;
+            for i in 0..a.len() {
+                let e = a.by_index_raw(i).map_err(|e| err(ErrorCode::Parse, format!("{id}: {e}")))?;
+                let name = e.name().map_err(|e| err(ErrorCode::Parse, format!("{id}: {e}")))?.to_string();
+                if e.is_dir() {
+                    continue;
+                }
+                if e.is_symlink() || e.unix_mode().is_some_and(|m| m & 0o170000 == 0o120000) {
+                    return Err(err(ErrorCode::Refused, format!("{id}: its archive holds a symlink")));
+                }
+                if !valid_rel(&name) {
+                    return Err(err(ErrorCode::Refused, format!("{id}: its archive has an unsafe entry {name:?}")));
+                }
+                expanded += e.size();
+                if e.size() > MAX_FILE || expanded > MAX_EXPANDED {
+                    return Err(err(ErrorCode::Refused, "the pack unpacks to more than its limits (512 MiB a file, 4 GiB in all)"));
+                }
+                files += 1;
+                if plugin && files > 1 {
+                    return Err(err(ErrorCode::Refused, format!("{id}: a plugin's archive holds one file")));
+                }
+                let to = if plugin { zip_path.clone() } else { format!("{zip_path}/{name}") };
+                w.raw_copy_file_rename(e, to.as_str()).map_err(zerr)?;
+            }
+            if files == 0 {
+                return Err(err(ErrorCode::Refused, format!("{id}: its archive is empty")));
+            }
+            done.from_archives.push(id);
+        }
+        for o in &ix.overrides {
+            let b = blobs.get(&o.sha256).ok_or_else(|| err(ErrorCode::NotFound, format!("override {}: not downloaded", o.path)))?;
+            w.start_file(o.zip_path().as_str(), opts).map_err(zerr)?;
+            w.write_all(b)?;
+        }
+        let mut inner = w.finish().map_err(zerr)?;
+        inner.flush()?;
+        inner.into_inner().map_err(|e| Error::from(e.into_error()))?.sync_all()?;
+        Ok(())
+    })();
+    if let Err(e) = written {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
+    crate::util::rename_replace(&tmp, out)?;
+    let checked = match read(out, None, None) {
+        Ok(r) => r,
+        Err(e) => {
+            let _ = std::fs::remove_file(out);
+            return Err(e);
+        }
+    };
+    if checked.index != *ix {
+        let _ = std::fs::remove_file(out);
+        return Err(err(ErrorCode::Internal, "the assembled pack's index differs from the one given"));
+    }
+    done.sha256 = checked.sha256;
+    done.size = checked.size;
+    Ok(done)
+}
+
+#[cfg(not(feature = "zip"))]
+pub fn assemble(dirs: &DataDirs, ix: &PackIndex, archives: &BTreeMap<String, PathBuf>, blobs: &BTreeMap<String, Vec<u8>>, out: &Path) -> Result<Assembled> {
+    let _ = (dirs, ix, archives, blobs, out);
+    Err(err(ErrorCode::Unsupported, "kiln-manage was built without the zip feature"))
 }
 
 #[cfg(not(feature = "zip"))]
