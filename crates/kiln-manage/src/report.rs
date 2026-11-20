@@ -2659,12 +2659,15 @@ Replaced in every file: your home folder (<home>), user name (<user>), computer 
 (<ip>, <mac>), mail addresses (<email>), and the values of fields named like passwords, tokens, keys, addresses, hosts,
 URLs or account names (<redacted>; the server you joined last keeps its name, not its address).";
 
-/// Writes the report as a zip (atomically). Returns its size in bytes.
+/// Writes the report as a zip (atomically: a temp file of its own next to `out`, `<out>.<pid>.<n>.tmp` created new,
+/// renamed to `out`). Returns its size in bytes, read back from `out`: a report that is not there is an error.
 #[cfg(feature = "zip")]
 pub fn write_zip(report: &Report, out: &Path) -> crate::Result<u64> {
     use std::io::Write;
-    let tmp = crate::util::with_suffix(out, ".tmp");
-    let f = std::fs::File::create(&tmp).map_err(crate::util::io_at(&tmp, "writing"))?;
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = crate::util::with_suffix(out, &format!(".{}.{n}.tmp", std::process::id()));
+    let f = std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp).map_err(crate::util::io_at(&tmp, "writing"))?;
     let zerr = |e: zip::result::ZipError| crate::Error::new(crate::ErrorCode::Io, format!("{}: {e}", out.display()));
     let mut w = zip::ZipWriter::new(std::io::BufWriter::new(f));
     let opts = zip_options();
@@ -2682,8 +2685,10 @@ pub fn write_zip(report: &Report, out: &Path) -> crate::Result<u64> {
         let _ = std::fs::remove_file(&tmp);
         return Err(e);
     }
-    crate::util::rename_replace(&tmp, out)?;
-    Ok(std::fs::metadata(out)?.len())
+    crate::util::rename_replace(&tmp, out).inspect_err(|_| {
+        let _ = std::fs::remove_file(&tmp);
+    })?;
+    std::fs::metadata(out).map(|m| m.len()).map_err(crate::util::io_at(out, "reading back"))
 }
 
 /// Each file's options in a report zip: deflated, the time of writing.

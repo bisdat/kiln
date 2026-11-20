@@ -161,7 +161,15 @@ fn follow_profile_in(d: &kiln_manage::paths::DataDirs, g: &kiln_manage::game::Ga
         }
         return None;
     }
-    let applied = if now.id.is_some() { crate::commands::profile::reapply_checked(d, g) } else { None };
+    let applied = match now.id {
+        Some(_) => match crate::commands::profile::reapply_if_free(d, g) {
+            Some(r) => r,
+            // an add (or a roll back) holds the data folder and writes profile.json itself: seen stays as it was, so
+            // the next round looks again once it is done
+            None => return None,
+        },
+        None => None,
+    };
     if foreign && applied.as_ref().is_some_and(|(_, written)| *written) {
         f.rewrites.wrote(Instant::now());
     }
@@ -400,6 +408,30 @@ mod tests {
         profile::save(&d, &p).unwrap();
         f.seen.as_mut().unwrap().meta = Some(SystemTime::UNIX_EPOCH);
         assert!(follow_profile_in(&d, &g, &mut f).is_some());
+    }
+
+    /// While an add holds the data folder (quick.lock), the watcher writes nothing: the add writes native.json and
+    /// profile.json itself, and two writers side by side undid the add (a player's report 2026-11-20). The change is
+    /// applied at the next round once the add is done.
+    #[test]
+    #[cfg(unix)]
+    fn the_watcher_waits_while_an_add_holds_the_data_folder() {
+        use kiln_manage::{manifest::ModKind, profile};
+        let (_tmp, d, g, id) = retained_game();
+        let mut f = Followed::default();
+        assert!(follow_profile_in(&d, &g, &mut f).is_some(), "startup");
+        let mut p = profile::get(&d, &id).unwrap();
+        p.dropins.push(ModKind::Emf);
+        profile::save(&d, &p).unwrap();
+        let file = g.path.join(gp::PROFILE);
+        let before = std::fs::read(&file).unwrap();
+        let held = kiln_manage::quick::hold(&d).unwrap();
+        f.seen.as_mut().unwrap().meta = Some(SystemTime::UNIX_EPOCH);
+        assert!(follow_profile_in(&d, &g, &mut f).is_none(), "nothing applied while the add runs");
+        assert_eq!(std::fs::read(&file).unwrap(), before, "profile.json is not written beside the add");
+        drop(held);
+        assert!(follow_profile_in(&d, &g, &mut f).is_some(), "applied at the next round");
+        assert_ne!(std::fs::read(&file).unwrap(), before);
     }
 
     #[test]
