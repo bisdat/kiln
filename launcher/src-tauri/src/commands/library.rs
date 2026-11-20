@@ -38,6 +38,8 @@ pub async fn library_import(app: AppHandle, paths: Vec<String>) -> Result<TaskId
     };
     let paths: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
     Ok(spawn_task(&app, "library_import", title, move |p| {
+        // a file still downloading or being scanned: waited for a few seconds, then said so (as library_add does)
+        kiln_manage::quick::wait_until_ready(&paths, p)?;
         for path in &paths { kiln_manage::quick::validate_import_path(path)?; }
         let r = library::import(&dirs()?, &paths, p)?;
         log_import("library_import", &r);
