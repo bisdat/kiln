@@ -241,7 +241,9 @@ Before the game starts (a mistake here keeps your mod's boot content out, or sto
 - no other mod's patch steps on it ([Two mods on one resource](#two-mods-on-one-resource)).
 
 A path that goes through a variant or an optional is checked as far as the types go; the rest is checked when the write
-is made.
+is made. When Kiln has a view of this start's game data that is newer than the boot snapshot (the snapshot itself is never
+used for this), what needs the data (the list below) is checked against that view before the start as well, as far as
+the view shows it.
 
 When the write is made (the game's data is in memory only then):
 
