@@ -14,6 +14,7 @@ import { KIND_NAME } from "../api/kinds";
 import { t, useT } from "../i18n";
 import { Banner, Button, Modal, Skeleton, Toggle, fmtBytes, runTask, toast } from "../ui";
 import { coverFor } from "./code";
+import { usePlayControl } from "../shell/play";
 import { crk, crucibleError, refreshCrucible, useCrucibleUi, useUpdates, type PreviewSource } from "./state";
 
 /** One mod of a pack as the preview lists it. */
@@ -173,6 +174,7 @@ export function PreviewModal({ source }: { source: PreviewSource }) {
   const [showMods, setShowMods] = useState(false);
   const [busy, setBusy] = useState(false);
   const install = useInstallPack();
+  const ctl = usePlayControl();
   useEffect(() => { if (m && !optional) setOptional({ ...m.optional }); }, [m, optional]);
   // a pack that finished uploading while the player waited: Install is ready
   useEffect(() => { if (wait && m && m.uploading == null) setWait(false); }, [wait, m]);
@@ -183,8 +185,10 @@ export function PreviewModal({ source }: { source: PreviewSource }) {
     if (!m || !ok) return;
     setBusy(true);
     try {
-      await install(m, { optional: optional ?? m.optional, trustAlways: always && !trusted });
+      const r = await install(m, { optional: optional ?? m.optional, trustAlways: always && !trusted });
       close();
+      // "Install and play": the instance is loaded now (the task activated it); the start is the Play control's own
+      if (ctl.canPlay) ctl.play("profile", r.profile.id);
     } catch (e) { toast.error(crucibleError(e), t("crucible.install.failed", { name: m.title })); }
     finally { setBusy(false); }
   };

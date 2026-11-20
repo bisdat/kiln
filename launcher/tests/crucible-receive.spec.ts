@@ -51,6 +51,9 @@ test("a code: the preview, trust, optional mods, Install and play, then Undo", a
   await expect(page.locator(".k-hero-profile")).toHaveText("Profile: Cinder Trails");
   const req = (await crucible(page, (h) => h.requests())).find((r) => r.cmd === "crucible_install");
   expect(req?.args).toEqual({ gameId: "client-steam", request: { target: "pv_cinder3", consent: true, trustAlways: true, optional: { "cozy-camp": true, "hardcore-hunger": true }, play: true } });
+  // "and play": the Play control starts the new instance
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __kilnMock: { calls: () => string[] } }).__kilnMock.calls().includes("launch_play")), { timeout: 15_000 }).toBe(true);
+  await page.evaluate(() => (window as unknown as { __kilnMock: { stopGame: () => void } }).__kilnMock.stopGame());
   await toast.getByRole("button", { name: "Undo" }).click();
   await expect(page.locator(".k-toast").filter({ hasText: "Back to Ember run" })).toBeVisible();
   await expect(page.locator(".k-hero-profile")).toHaveText("Profile: Ember run");
