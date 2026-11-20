@@ -1276,12 +1276,14 @@ fn proxy(p: Planned) -> Result<i32> {
         }
     };
     loop {
-        let wake = [deadline, pause.deadline()].into_iter().flatten().min();
+        // once a disconnect is out the watchdog is silent: the detach is under way, and a continue now would race it
+        let pause_deadline = if disconnect_sent { None } else { pause.deadline() };
+        let wake = [deadline, pause_deadline].into_iter().flatten().min();
         let ev = match wake {
             Some(d) => match rx.recv_timeout(d.saturating_duration_since(Instant::now())) {
                 Ok(e) => e,
                 Err(mpsc::RecvTimeoutError::Timeout) => {
-                    if let Some(thread) = pause.due(Instant::now()) {
+                    if let Some(thread) = (!disconnect_sent).then(|| pause.due(Instant::now())).flatten() {
                         own += 1;
                         let c = json!({ "seq": own, "type": "request", "command": "continue", "arguments": { "threadId": thread } });
                         if let Some(w) = adapter_in.lock().unwrap().as_mut() {
