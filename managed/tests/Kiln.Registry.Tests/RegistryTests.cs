@@ -53,13 +53,8 @@ public class RegistryTests
 {
     private static readonly Assembly Asm = typeof(RegistrySchema).Assembly;
 
-    private static string Repo()
-    {
-        for (var dir = AppContext.BaseDirectory; dir is not null; dir = Path.GetDirectoryName(dir))
-            if (File.Exists(Path.Combine(dir, "schema", "registry", "ids.lock.json")))
-                return dir;
-        throw new InvalidOperationException("the repository root (schema/registry/ids.lock.json) was not found above the test's folder");
-    }
+    // schema/registry/ids.lock.json, copied next to the test assembly by the project file
+    private static string LockFile() => Path.Combine(AppContext.BaseDirectory, "ids.lock.json");
 
     private static IEnumerable<(PropertyInfo Prop, RegistryFieldAttribute Attr)> Attributed() =>
         from t in Asm.GetTypes()
@@ -85,7 +80,7 @@ public class RegistryTests
     [Fact]
     public void CatalogFollowsTheIdsLock()
     {
-        var lockJson = JsonNode.Parse(File.ReadAllText(Path.Combine(Repo(), "schema", "registry", "ids.lock.json")))!;
+        var lockJson = JsonNode.Parse(File.ReadAllText(LockFile()))!;
         var regs = lockJson["registries"]!.AsObject();
         int n = 0;
         foreach (var (name, reg) in regs)
