@@ -110,6 +110,9 @@ test("a save with an item no table knows is read-only: Save stays off and the pa
   await expect(first).toContainText("120");
   await expect(page.locator(".ke")).not.toContainText("Not saved");
   await expect(page.getByRole("button", { name: "Save" })).toBeDisabled();
+  // the skill tree takes no click either, and says why (the banner above can be closed)
+  await page.getByRole("tab", { name: "Skills" }).click();
+  await expect(page.locator(".ke-tree-warn")).toContainText("Read-only: Unknown items in this save");
   // Cedric cannot be read at all: the reason is in English
   await page.locator(".ke-who-btn").click();
   await expect(page.getByRole("option", { name: /Cedric/ })).toContainText("The editor cannot find the equipment and inventory in this save");

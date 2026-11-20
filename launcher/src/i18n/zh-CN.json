@@ -4391,7 +4391,8 @@
       "noneSelected": "未选择物品。",
       "noneSelectedHint": "选择一个格子以查看和更改其中的物品。",
       "emptyHint": "从物品目录中选择要放到这里的物品。",
-      "pickItem": "选择物品"
+      "pickItem": "选择物品",
+      "notFound": "在此背包中未找到任何物品，编辑器也无法确定它在此存档中的位置。如果游戏在这里显示了物品，说明它们未能被读取：无法添加任何物品。把此存档的副本发给我们有助于修复此问题。"
     },
     "inspector": {
       "item": "物品",
@@ -4542,7 +4543,10 @@
         "notOpen": "存档未打开编辑",
         "noEquipment": "编辑器在此存档中找不到装备和物品栏",
         "skillList": "编辑器无法识别此存档的技能列表",
-        "notSave": "不是 Enshrouded 存档"
+        "notSave": "不是 Enshrouded 存档",
+        "inventoryUnsure": "编辑器无法确定此存档的背包位置：不能向其中写入物品。",
+        "modData": "此存档包含编辑器无法写入的模组数据（{mods}）：只读，以保持模组数据不变。",
+        "inventoryUnread": "编辑器无法确定地读取此角色的背包（背包、切换栏和动作栏）：只读，以免覆盖其内容。"
       },
       "saveFileFilter": "Enshrouded 存档",
       "rarity": {

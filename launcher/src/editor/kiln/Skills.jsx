@@ -13,6 +13,7 @@ import { totalKey as totalKeyOf, checkTree } from '../src/treecheck.js';
 import { t } from '../../i18n';
 import { t as tv } from '../src/i18n.js';
 import { useDeckActions, useEditorEnv } from './env.jsx';
+import { readOnly } from './session.js';
 
 const ST = ui.skilltree;
 const C = 4000;
@@ -54,6 +55,8 @@ export default function Skills({ model, setModel }) {
   };
   const { daArvore } = atributosDaArvore(model.skills);
   const { problems } = checkTree(model);
+  // a read-only save (session.readOnly) takes no change, and a click on the tree would do nothing without a word: say why
+  const warnings = [...(readOnly(model) ? [t('editor.page.readOnlyError', { erro: tv(model.error || '') })] : []), ...problems];
 
   const setLevel = (id, lv) => {
     const n = byId.get(id); const max = n.maxLevel || 1;
@@ -203,7 +206,7 @@ export default function Skills({ model, setModel }) {
         )}
       </div>
 
-      {problems.length > 0 && <div className="ke-tree-warn" role="alert">{problems.join(' · ')}</div>}
+      {warnings.length > 0 && <div className="ke-tree-warn" role="alert">{warnings.join(' · ')}</div>}
 
       <dl className="ke-attrs ke-tree-attrs" onPointerDown={(e) => e.stopPropagation()}>
         {ATRIBUTOS.map((a) => <div key={a}><dt className="k-label">{tv(a)}</dt><dd className="k-num">{BASE_ATTR + daArvore[a]}</dd></div>)}

@@ -96,6 +96,7 @@ export default function Inventory({ model, setModel }) {
   return (
     <div className="ke-split">
       <div className="ke-main">
+        {model.inventoryUnsure && !model.main.length && !model.extra.length && <p className="ke-note warn" role="alert">{t('editor.inventory.notFound')}</p>}
         <section className="ke-group ke-group-grow">
           <header className="ke-group-head">
             <h2 className="k-card-title">{t('editor.tabs.inventory')}</h2>

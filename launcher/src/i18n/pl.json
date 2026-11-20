@@ -5239,7 +5239,8 @@
       "noneSelected": "Nie wybrano przedmiotu.",
       "noneSelectedHint": "Wybierz miejsce, aby zobaczyć i zmienić jego przedmiot.",
       "emptyHint": "Wybierz przedmiot z katalogu, aby go tu umieścić.",
-      "pickItem": "Wybierz przedmiot"
+      "pickItem": "Wybierz przedmiot",
+      "notFound": "W tym ekwipunku nie znaleziono przedmiotów, a edytor nie wie na pewno, gdzie leży on w tym zapisie. Jeśli gra pokazuje tu przedmioty, nie udało się ich odczytać: nie można niczego dodać. Kopia tego zapisu przesłana do nas pomoże to naprawić."
     },
     "inspector": {
       "item": "Przedmiot",
@@ -5405,7 +5406,10 @@
         "notOpen": "Zapis nie jest otwarty do edycji",
         "noEquipment": "Edytor nie może znaleźć ekwipunku i plecaka w tym zapisie",
         "skillList": "Edytor nie zna listy umiejętności tego zapisu",
-        "notSave": "To nie jest zapis Enshrouded"
+        "notSave": "To nie jest zapis Enshrouded",
+        "inventoryUnsure": "Edytor nie znalazł na pewno ekwipunku w tym zapisie: nie można w nim zapisać przedmiotów.",
+        "modData": "Ten zapis zawiera dane moda, których edytor nie umie zapisać ({mods}): tylko do odczytu, aby dane moda zostały bez zmian.",
+        "inventoryUnread": "Edytor nie odczytał na pewno ekwipunku tej postaci (plecak, pasek zamiany i pasek akcji): tylko do odczytu, aby nic go nie nadpisało."
       },
       "saveFileFilter": "Zapis Enshrouded",
       "rarity": {

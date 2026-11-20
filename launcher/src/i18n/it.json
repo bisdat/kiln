@@ -5033,7 +5033,8 @@
       "noneSelected": "Nessun oggetto selezionato.",
       "noneSelectedHint": "Scegli uno slot per vedere e cambiare il suo oggetto.",
       "emptyHint": "Scegli un oggetto dal catalogo da mettere qui.",
-      "pickItem": "Scegli oggetto"
+      "pickItem": "Scegli oggetto",
+      "notFound": "Non sono stati trovati oggetti in questo inventario e l'editor non può sapere con certezza dove si trovi in questo salvataggio. Se il gioco mostra oggetti qui, non è stato possibile leggerli: non si può aggiungere nulla. Inviarci una copia di questo salvataggio aiuta a risolvere il problema."
     },
     "inspector": {
       "item": "Oggetto",
@@ -5189,7 +5190,10 @@
         "notOpen": "Salvataggio non aperto per la modifica",
         "noEquipment": "L'editor non trova l'equipaggiamento e l'inventario in questo salvataggio",
         "skillList": "L'editor non conosce l'elenco delle abilità di questo salvataggio",
-        "notSave": "Non è un salvataggio di Enshrouded"
+        "notSave": "Non è un salvataggio di Enshrouded",
+        "inventoryUnsure": "L'editor non ha trovato con certezza l'inventario di questo salvataggio: non si possono scriverci oggetti.",
+        "modData": "Questo salvataggio contiene dati di una mod che l'editor non sa scrivere ({mods}): sola lettura, così i dati della mod restano come sono.",
+        "inventoryUnread": "L'editor non è riuscito a leggere con certezza l'inventario di questo personaggio (zaino, barra di scambio e barra delle azioni): sola lettura, così non viene scritto nulla sopra."
       },
       "saveFileFilter": "Salvataggio di Enshrouded",
       "rarity": {

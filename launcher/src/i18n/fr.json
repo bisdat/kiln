@@ -5033,7 +5033,8 @@
       "noneSelected": "Aucun objet sélectionné.",
       "noneSelectedHint": "Choisissez un emplacement pour voir et modifier son objet.",
       "emptyHint": "Choisissez un objet dans le catalogue pour le placer ici.",
-      "pickItem": "Choisir un objet"
+      "pickItem": "Choisir un objet",
+      "notFound": "Aucun objet n'a été trouvé dans cet inventaire, et l'éditeur ne peut pas savoir avec certitude où il se trouve dans cette sauvegarde. Si le jeu montre des objets ici, ils n'ont pas pu être lus : rien ne peut être ajouté. Nous envoyer une copie de cette sauvegarde aide à corriger cela."
     },
     "inspector": {
       "item": "Objet",
@@ -5189,7 +5190,10 @@
         "notOpen": "Sauvegarde non ouverte pour l'édition",
         "noEquipment": "L'éditeur ne trouve pas l'équipement et l'inventaire dans cette sauvegarde",
         "skillList": "L'éditeur ne connaît pas la liste de compétences de cette sauvegarde",
-        "notSave": "Ce n'est pas une sauvegarde Enshrouded"
+        "notSave": "Ce n'est pas une sauvegarde Enshrouded",
+        "inventoryUnsure": "L'éditeur n'a pas trouvé avec certitude l'inventaire de cette sauvegarde : aucun objet ne peut y être écrit.",
+        "modData": "Cette sauvegarde contient des données d'un mod que l'éditeur ne sait pas écrire ({mods}) : lecture seule, pour que les données du mod restent telles quelles.",
+        "inventoryUnread": "L'éditeur n'a pas pu lire avec certitude l'inventaire de ce personnage (sac, barre d'échange et barre d'action) : lecture seule, pour que rien ne soit écrit par-dessus."
       },
       "saveFileFilter": "Sauvegarde Enshrouded",
       "rarity": {

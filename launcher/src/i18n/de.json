@@ -5033,7 +5033,8 @@
       "noneSelected": "Kein Gegenstand ausgewählt.",
       "noneSelectedHint": "Wähle einen Platz, um seinen Gegenstand zu sehen und zu ändern.",
       "emptyHint": "Wähle einen Gegenstand aus dem Katalog, um ihn hier abzulegen.",
-      "pickItem": "Gegenstand wählen"
+      "pickItem": "Gegenstand wählen",
+      "notFound": "In diesem Inventar wurden keine Gegenstände gefunden, und der Editor kann nicht sicher sagen, wo es in diesem Spielstand liegt. Zeigt das Spiel hier Gegenstände, konnten sie nicht gelesen werden: Es lässt sich nichts hinzufügen. Eine Kopie dieses Spielstands an uns hilft, das zu beheben."
     },
     "inspector": {
       "item": "Gegenstand",
@@ -5189,7 +5190,10 @@
         "notOpen": "Spielstand nicht zum Bearbeiten geöffnet",
         "noEquipment": "Der Editor findet Ausrüstung und Inventar in diesem Spielstand nicht",
         "skillList": "Der Editor kennt die Talentliste dieses Spielstands nicht",
-        "notSave": "Kein Enshrouded-Spielstand"
+        "notSave": "Kein Enshrouded-Spielstand",
+        "inventoryUnsure": "Der Editor hat das Inventar dieses Spielstands nicht sicher gefunden: Es können keine Gegenstände hineingeschrieben werden.",
+        "modData": "Dieser Spielstand enthält Daten einer Mod, die der Editor nicht schreiben kann ({mods}): nur lesbar, damit die Daten der Mod bleiben, wie sie sind.",
+        "inventoryUnread": "Der Editor konnte das Inventar dieser Figur (Rucksack, Wechselleiste und Aktionsleiste) nicht sicher lesen: nur lesbar, damit nichts darüber geschrieben wird."
       },
       "saveFileFilter": "Enshrouded-Spielstand",
       "rarity": {

@@ -5033,7 +5033,8 @@
       "noneSelected": "No item selected.",
       "noneSelectedHint": "Pick a slot to see and change its item.",
       "emptyHint": "Pick an item from the catalog to put here.",
-      "pickItem": "Pick item"
+      "pickItem": "Pick item",
+      "notFound": "No items were found in this inventory, and the editor cannot tell for sure where it sits in this save. If the game shows items here, they could not be read: nothing can be added. A copy of this save sent to us helps fix it."
     },
     "inspector": {
       "item": "Item",
@@ -5189,7 +5190,10 @@
         "notOpen": "Save not open for editing",
         "noEquipment": "The editor cannot find the equipment and inventory in this save",
         "skillList": "The editor does not know this save's skill list",
-        "notSave": "Not an Enshrouded save"
+        "notSave": "Not an Enshrouded save",
+        "inventoryUnsure": "The editor could not find this save's inventory for sure: no items can be written into it.",
+        "modData": "This save holds data of a mod the editor cannot write ({mods}): read-only, so the mod's data stays as it is.",
+        "inventoryUnread": "The editor could not read this character's inventory (backpack, swap bar and action bar) for sure: read-only, so nothing is written over it."
       },
       "saveFileFilter": "Enshrouded save",
       "rarity": {

@@ -5033,7 +5033,8 @@
       "noneSelected": "Nenhum item selecionado.",
       "noneSelectedHint": "Escolha um espaço para ver e alterar o item.",
       "emptyHint": "Escolha um item do catálogo para colocar aqui.",
-      "pickItem": "Escolher item"
+      "pickItem": "Escolher item",
+      "notFound": "Nenhum item foi encontrado neste inventário, e o editor não sabe com certeza onde ele fica neste save. Se o jogo mostra itens aqui, eles não puderam ser lidos: nada pode ser adicionado. Uma cópia deste save enviada para nós ajuda a corrigir isso."
     },
     "inspector": {
       "item": "Item",
@@ -5189,7 +5190,10 @@
         "notOpen": "Save não aberto para edição",
         "noEquipment": "O editor não encontra o equipamento e o inventário neste save",
         "skillList": "O editor não conhece a lista de habilidades deste save",
-        "notSave": "Não é um save do Enshrouded"
+        "notSave": "Não é um save do Enshrouded",
+        "inventoryUnsure": "O editor não encontrou com certeza o inventário deste save: nenhum item pode ser gravado nele.",
+        "modData": "Este save guarda dados de um mod que o editor não sabe gravar ({mods}): somente leitura, para os dados do mod ficarem como estão.",
+        "inventoryUnread": "O editor não conseguiu ler com certeza o inventário deste personagem (mochila, barra de troca e barra de ação): somente leitura, para nada ser gravado por cima."
       },
       "saveFileFilter": "Save do Enshrouded",
       "rarity": {

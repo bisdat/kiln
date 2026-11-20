@@ -5033,7 +5033,8 @@
       "noneSelected": "Ningún objeto seleccionado.",
       "noneSelectedHint": "Elige un espacio para ver y cambiar su objeto.",
       "emptyHint": "Elige un objeto del catálogo para ponerlo aquí.",
-      "pickItem": "Elegir objeto"
+      "pickItem": "Elegir objeto",
+      "notFound": "No se encontraron objetos en este inventario y el editor no puede saber con certeza dónde está en esta partida. Si el juego muestra objetos aquí, no se pudieron leer: no se puede añadir nada. Enviarnos una copia de esta partida nos ayuda a arreglarlo."
     },
     "inspector": {
       "item": "Objeto",
@@ -5189,7 +5190,10 @@
         "notOpen": "Partida no abierta para editar",
         "noEquipment": "El editor no encuentra el equipo ni el inventario en esta partida",
         "skillList": "El editor no conoce la lista de habilidades de esta partida",
-        "notSave": "No es una partida de Enshrouded"
+        "notSave": "No es una partida de Enshrouded",
+        "inventoryUnsure": "El editor no pudo encontrar con certeza el inventario de esta partida: no se pueden escribir objetos en él.",
+        "modData": "Esta partida guarda datos de un mod que el editor no sabe escribir ({mods}): solo lectura, para que los datos del mod queden como están.",
+        "inventoryUnread": "El editor no pudo leer con certeza el inventario de este personaje (mochila, barra de cambio y barra de acción): solo lectura, para no escribir nada encima."
       },
       "saveFileFilter": "Partida de Enshrouded",
       "rarity": {

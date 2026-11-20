@@ -83,19 +83,36 @@ function parseCharacter(p, isItem, isSkill, ehEquipavel = null) {
   // Trecho entre equipamento e inventário: termina em 05 <qtd> 04 <qtd extra>. O tamanho desse
   // trecho varia muito de save para save (medido: de 4 a mais de 64 bytes), então procuramos até
   // o fim do bloco e confiamos na conferência de que todas as pilhas depois do cabeçalho são lidas.
+  // Kiln: the header is the bag's and the backpack's page counts with their entry counts: <bag pages> <main count>
+  // <backpack pages> <backpack count>, eight slots a page (Belt Lantern's source, docs/INVENTORY_STORAGE.md: the game
+  // gives 5 bag pages = 40 slots, a 32-slot backpack is 4 pages). Upstream matched only 05 for the bag, and took the first
+  // fit: a header with no entries reads as soon as it is found, and the bytes 05 00 00 00 (a u32 5) are one. That
+  // showed an empty Backpack when such a u32 sat before the real header, or after a real header the strict reading
+  // could not take (an item the tables do not know, a bag with an extra page from a mod): player report 2026-11-20. So
+  // every fit is collected, an entry's slot must lie in its container's pages, the first fit with entries wins, and the
+  // result is "unsure" when a header before it read its first entries but not all (an unknown item, an entry flag this
+  // parser does not know), or when it is empty and not the only fit.
   const findInventory = (from) => {
+    const fits = [];
+    let broken = false;
     for (let s = from + 4; s < p.length; s++) {
-      // 05 <qtd principal> <grupos do contêiner extra> <qtd extra>; sem mochila vestida os grupos são 0
-      if (p[s - 4] !== 0x05 || p[s - 2] > 8) continue;
-      const mc = p[s - 3], ec = p[s - 1];
-      let q = s, ok = true;
-      for (let k = 0; k < mc + ec && ok; k++) {
+      const pages = p[s - 4], mc = p[s - 3], groups = p[s - 2], ec = p[s - 1];
+      if (pages < 1 || pages > 16 || groups > 8 || (ec && !groups)) continue;
+      let q = s, read = 0;
+      for (; read < mc + ec; read++) {
         const e = readEntry(p, q, isItem);
-        if (e) q = e._end; else ok = false;
+        if (!e || e.slot >= (read < mc ? pages : groups) * 8) break;
+        q = e._end;
       }
-      if (ok) return { invStart: s, mainCount: mc, extraCount: ec };
+      if (read === mc + ec) {
+        fits.push({ invStart: s, mainCount: mc, extraCount: ec, unsure: broken });
+        if (mc + ec > 0) break; // the first fit with entries is the one; what follows it is the rest of the block
+      } else if (read > 0) broken = true;
     }
-    return null;
+    if (!fits.length) return null;
+    const chosen = fits[fits.length - 1];
+    if (chosen.mainCount + chosen.extraCount > 0) return chosen;
+    return { ...fits[0], unsure: fits.length > 1 || broken };
   };
 
   // Equipamento: lista densa com os índices em ordem crescente (0, 1, 2…), precedida pela máscara
@@ -150,6 +167,10 @@ function parseCharacter(p, isItem, isSkill, ehEquipavel = null) {
     _equipCount: equipment.length,
     _equipMask: mask,
     _equipFree: free,
+    _invStart: invStart,
+    /** where the inventory starts is a guess (findInventory): the editor opens the character read-only, and an empty
+     *  inventory read this way takes no items */
+    _invUnsure: inv.unsure,
     _raw: {
       head: Buffer.from(p.subarray(0, 0x3a)),
       mid: Buffer.from(p.subarray(skillsEnd, equipStart)), // os 4 últimos bytes são a máscara
@@ -185,6 +206,9 @@ function buildCharacter(c) {
   c.skills.forEach((s, i) => { skills.writeUInt32LE(s.id >>> 0, 5 * i); skills[5 * i + 4] = s.level; });
   if (c.equipment.length > c._equipCount) throw new Error('Não é possível adicionar peças de equipamento: não sei em que espaço do boneco elas entram');
   if (c.main.length > 255 || c.extra.length > 255) throw new Error('Itens demais em um contêiner');
+  // Kiln: an inventory whose place is a guess (parseCharacter) takes no items: written there they would land inside
+  // another part of the block (the editor opens such a character read-only; this is the last guard)
+  if (c._invUnsure && (c.main.length || c.extra.length)) throw new Error('Inventário não encontrado com certeza: nenhum item pode ser gravado nele');
 
   // peças tiradas: os índices da lista original que não vieram de volta. A lista é densa,
   // então as que ficam são renumeradas de 0 em diante, e a máscara e os espaços livres acompanham.
@@ -212,4 +236,36 @@ function buildCharacter(c) {
   ]);
 }
 
-export { parseCharacter, buildCharacter, EQUIP_MAX };
+/** Kiln: the character as the editor opens it. The strict reading (only item ids the tables know) first; when it
+ *  fails, finds an empty inventory or is unsure of it, and a reading that accepts any item id finds the inventory for
+ *  sure with unknown items in it, the latter is taken and `unknownItems` is true (the editor shows it read-only:
+ *  saving refuses unknown ids). Otherwise the strict reading, `_invUnsure` and all. Throws the strict reading's error
+ *  when neither reads. */
+function readCharacter(p, isItem, isSkill, ehEquipavel = null) {
+  let strict = null, err = null;
+  try { strict = parseCharacter(p, isItem, isSkill, ehEquipavel); } catch (e) { err = e; }
+  if (strict && !strict._invUnsure && strict.main.length + strict.extra.length > 0) return { character: strict, unknownItems: false };
+  let lenient = null;
+  try {
+    lenient = parseCharacter(p, (id) => id > 0xffff, isSkill, (id) => !isItem(id) || !ehEquipavel || ehEquipavel(id));
+  } catch { /* keep the strict reading's error */ }
+  // past an empty or unsure strict reading, the lenient one must be sure, hold unknown items and look like stacks (a
+  // count, a slot in the grids): random bytes read with any id accepted can pass for a few entries
+  const plausible = (c) => [...c.main, ...c.extra].every((e) => e.count > 0 && e.slot < 128);
+  if (lenient && (!strict || (!lenient._invUnsure && plausible(lenient) && [...lenient.equipment, ...lenient.main, ...lenient.extra].some((e) => !isItem(e.itemId))))) {
+    return { character: lenient, unknownItems: true };
+  }
+  if (strict) return { character: strict, unknownItems: false };
+  throw err;
+}
+
+/** Kiln: the mods whose own data rides in this character block, by their markers. The editor cannot write such a block
+ *  safely: Belt Lantern (AndyPimms' mod) checks that its lantern row is still the bag's last row, and refuses the
+ *  character when it is not; the editor sorts and renumbers the bag. */
+const MOD_MARKERS = [['Belt Lantern', ['LNTINV02', 'LNTEND02']]];
+function modDataIn(p) {
+  const b = Buffer.isBuffer(p) ? p : Buffer.from(p);
+  return MOD_MARKERS.filter(([, marks]) => marks.some((m) => b.indexOf(m, 0, 'latin1') >= 0)).map(([name]) => name);
+}
+
+export { parseCharacter, buildCharacter, readCharacter, modDataIn, EQUIP_MAX };
