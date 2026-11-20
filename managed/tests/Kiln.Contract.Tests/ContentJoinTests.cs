@@ -66,10 +66,26 @@ public sealed unsafe class ContentJoinTests : FakeTableTest
             new NetNative.PeerInfo { Peer = peer, Flags = peer == Peer ? NetNative.PeerProved | NetNative.PeerHeld : 0 };
         public int Kick(uint peer, uint reason) => NetNative.Ok;
 
+        /// <summary>Set: the client role's frames arrive outside any Kiln tick, as in a game held at the join (kiln.net
+        /// delivers them from the game's ClientReceive on its main thread; no Kiln tick runs while a world is there that does
+        /// not step). The server role's frames stay on its tick thread.</summary>
+        public OfflineBackend? OffTickClient;
+
         public void Pump()
         {
             for (var i = 0; i < 64 && !Inbox.IsEmpty; i++)
-                while (Inbox.TryDequeue(out var f)) NetEngine.OnFrame(f.From, f.Frame);
+                while (Inbox.TryDequeue(out var f))
+                {
+                    if (OffTickClient is { } b) b.TickThread = f.From != NetNative.PeerServer;
+                    try
+                    {
+                        NetEngine.OnFrame(f.From, f.Frame);
+                    }
+                    finally
+                    {
+                        if (OffTickClient is { } b2) b2.TickThread = true;
+                    }
+                }
         }
     }
 
@@ -199,6 +215,65 @@ public sealed unsafe class ContentJoinTests : FakeTableTest
         return p;
     }
 
+    /// <summary>The client role's own events off the tick thread (a held game: <see cref="Loop.OffTickClient"/>).</summary>
+    private void OffTick(Action a)
+    {
+        Backend.TickThread = false;
+        try
+        {
+            a();
+        }
+        finally
+        {
+            Backend.TickThread = true;
+        }
+    }
+
+    /// <summary><see cref="Join"/> as a held game does it: every client-role event off the tick thread.</summary>
+    private NetPeer JoinHeldGame()
+    {
+        _loop.OffTickClient = Backend;
+        NetEngine.OnPeer(Peer, true);
+        var p = NetEngine.ServerPeers().Single(x => x.Id == Peer);
+        NetEngine.RefreshInfo(p);
+        Assert.NotNull(p.HeldSince);
+        OffTick(() => NetEngine.OnPeer(NetNative.PeerServer, true));
+        NetEngine.ServerLink!.NextHelloAt = DateTime.UtcNow.AddSeconds(-1);
+        for (var frame = 0; frame < 3; frame++)
+        {
+            OffTick(NetEngine.ClientUiFrame);
+            _loop.Pump();
+        }
+        Assert.Equal(NetPeerState.Ready, p.State);
+        Assert.Equal(NetPeerState.Ready, NetEngine.ServerLink!.State);
+        return p;
+    }
+
+    /// <summary>The game leaves before its world ran (refused, or its join ended while loading): both roles see the
+    /// connection end; the client role's off the tick thread, so its leave waits for a Kiln tick.</summary>
+    private void LeaveBeforeTheWorldRan()
+    {
+        OffTick(() => NetEngine.OnPeer(NetNative.PeerServer, false));
+        NetEngine.OnPeer(Peer, false);
+    }
+
+    /// <summary>What the client role sent the server on kiln:content (its acks), in order.</summary>
+    private List<ContentSync.AckMsg> Acks()
+    {
+        var list = new List<ContentSync.AckMsg>();
+        foreach (var (to, frame) in _loop.Sent)
+        {
+            if (to != NetNative.PeerServer || !Wire.TryHeader(frame, out var t) || t != Wire.Type.Data) continue;
+            var r = new NetReader(frame.AsSpan(Wire.HeaderSize));
+            if (r.UInt16() != ContentChannel.ServerId || r.UInt16() != 1) continue;
+            list.Add(ContentSync.AckMsg.Decode(ref r));
+        }
+        return list;
+    }
+
+    private static void SetStatic(string field, object value) =>
+        typeof(ContentSync).GetField(field, BindingFlags.Static | BindingFlags.NonPublic)!.SetValue(null, value);
+
     /// <summary>The server's content state with the placeholders of the removed mod's two buffs, sent as ContentSync sends it.</summary>
     private uint SendPlaceholderState(NetPeer p)
     {
@@ -285,6 +360,95 @@ public sealed unsafe class ContentJoinTests : FakeTableTest
         ContentChannel.SendToServer(new ContentSync.AckMsg(id, 1, 0, 0, 1, 0, "client: definition essai.essai-rage: refused"));
         _loop.Pump();
         Assert.Equal("client: definition essai.essai-rage: refused", RejectTo(Peer));
+    }
+
+    [Fact]
+    public void A_held_game_answers_from_outside_any_kiln_tick_and_is_let_in()
+    {
+        var p = JoinHeldGame();
+        SendPlaceholderState(p);
+        NetAdmission.Step(DateTime.UtcNow);
+
+        Assert.Contains(Peer, _gate.Released);
+        Assert.Null(RejectTo(Peer));
+        Assert.Equal(ContentSync.AckDeferred, Assert.Single(Acks()).Result);
+    }
+
+    [Fact]
+    public void A_game_held_again_after_a_join_that_ended_before_its_world_ran_answers_the_same_state_again()
+    {
+        // review of dev29/statusblock-join: the first join was answered (deferred) and let in, then ended before its
+        // world ran (a refusal by another holder, a disconnect while loading). The leave that forgets that answer waits
+        // for a Kiln tick, which this game does not get before it is held again at its next join.
+        var p = JoinHeldGame();
+        var id = SendPlaceholderState(p);
+        NetAdmission.Step(DateTime.UtcNow);
+        Assert.Equal(1, _gate.Released.Count(x => x == Peer));
+        LeaveBeforeTheWorldRan();
+
+        p = JoinHeldGame();
+        Assert.Equal(id, SendPlaceholderState(p));  // the server's content did not change: the same state
+        NetAdmission.Step(DateTime.UtcNow);
+
+        Assert.Equal(2, _gate.Released.Count(x => x == Peer));
+        Assert.Null(RejectTo(Peer));
+        Assert.Equal(2, Acks().Count(a => a.StateId == id && a.Result == ContentSync.AckDeferred));
+    }
+
+    [Fact]
+    public void A_game_that_rejoins_after_it_applied_the_state_answers_it_again_while_its_leave_waits_for_a_step()
+    {
+        // review of dev29/statusblock-join: the player played (its world applied the state), left, and joins the same
+        // server again with the same content. Until the leave runs at a Kiln tick, the applied state is the last
+        // connection's: it must not stand for an answer to this one.
+        var p = JoinHeldGame();
+        var id = SendPlaceholderState(p);
+        NetAdmission.Step(DateTime.UtcNow);
+        SetStatic("_appliedState", id);  // its world ran and applied it
+        LeaveBeforeTheWorldRan();
+
+        p = JoinHeldGame();
+        SendPlaceholderState(p);
+        NetAdmission.Step(DateTime.UtcNow);
+
+        Assert.Equal(2, _gate.Released.Count(x => x == Peer));
+        Assert.Null(RejectTo(Peer));
+    }
+
+    [Fact]
+    public void A_held_game_without_kiln_content_says_so_at_once_instead_of_timing_out()
+    {
+        // review of dev29/statusblock-join: ClientTick answers this without registries, but no Kiln tick runs in a held
+        // game: the player waited 25 s for "did not answer in time ... update Kiln", the hold's own text
+        Swap(typeof(ContentSync), "_owner", 0UL);
+        var p = JoinHeldGame();
+        SendPlaceholderState(p);
+        NetAdmission.Step(DateTime.UtcNow);
+
+        Assert.DoesNotContain(Peer, _gate.Released);
+        Assert.Contains("kiln.content", RejectTo(Peer));
+    }
+
+    [Fact]
+    public void An_older_clients_program_refresh_error_on_a_joined_game_does_not_refuse_it()
+    {
+        // review of dev29/statusblock-join: a Kiln client before 0.2.0-dev.29.24 still reports kiln.abilities'
+        // WRONG_THREAD for a state with programs (a StatusBlock's) although it applied it whole. The fixed server is not
+        // to refuse it for that (at the join, or at a hot load with the player in).
+        HostAccess.Current = null;
+        Network.SetHandshakeProperty(HeldAnswer, static () => "0");
+        HostAccess.Current = Mod;
+        var p = Join();
+        NetAdmission.Step(DateTime.UtcNow);
+        var id = SendPlaceholderState(p);
+        ContentChannel.SendToServer(new ContentSync.AckMsg(id, 1, 2, 0, 1, 3, "kiln.abilities did not register the programs (4)"));
+        _loop.Pump();
+        Assert.Null(RejectTo(Peer));
+
+        // any other error besides it is a failure, as before
+        ContentChannel.SendToServer(new ContentSync.AckMsg(id, 1, 2, 0, 2, 3, "kiln.abilities did not register the programs (4); definition essai.essai-rage: refused"));
+        _loop.Pump();
+        Assert.Equal("kiln.abilities did not register the programs (4); definition essai.essai-rage: refused", RejectTo(Peer));
     }
 
     [Fact]

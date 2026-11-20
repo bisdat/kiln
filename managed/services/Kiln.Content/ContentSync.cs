@@ -113,7 +113,7 @@ public static unsafe class ContentSync
 
     /// <summary>Ack result: a client that cannot apply the state yet (its world does not run: a server holds it at the join,
     /// and a joining game's registries load only in its world's steps) received it and applies it once its world runs. That
-    /// later ack decides (a failure refuses it then). Since 0.2.0-dev.29.23, sent only to a server whose WELCOME has
+    /// later ack decides (a failure refuses it then). Since 0.2.0-dev.29.24, sent only to a server whose WELCOME has
     /// <see cref="HeldAnswerProperty"/>: an older server reads any result but 0 and 2 as a failure.</summary>
     internal const byte AckDeferred = 4;
 
@@ -649,8 +649,25 @@ public static unsafe class ContentSync
         return true;
     }
 
+    /// <summary>The one error a Kiln client before 0.2.0-dev.29.24 reports for a state with programs (a StatusBlock's, any
+    /// clone with a program) although it applied the state whole: kiln.abilities' program_refresh answers WRONG_THREAD (4)
+    /// on a joined client, which runs no Impact programs (<see cref="SyncPrograms.RefreshProblem"/>).</summary>
+    internal const string OlderClientProgramRefresh = "kiln.abilities did not register the programs (4)";
+
+    /// <summary>An older Kiln client's failed ack whose only error is <see cref="OlderClientProgramRefresh"/>: its apply
+    /// was whole (any other error, or a native apply failure, adds an error of its own), so it counts as applied. Without
+    /// this a client before 0.2.0-dev.29.24 was refused by a server with a StatusBlock, at the join or at a hot load. Pure (tests).</summary>
+    internal static bool OlderClientAppliedWhole(AckMsg a, NetPeer sender) =>
+        a.Result == 1 && a.Errors == 1 && a.Detail == OlderClientProgramRefresh && !AnswersWhileHeld(sender);
+
     private static void OnAck(AckMsg a, NetContext ctx)
     {
+        if (OlderClientAppliedWhole(a, ctx.Sender))
+        {
+            Log(LogLevel.Info, $"{ctx.Sender.Name}: content state {a.StateId:x8}: its older Kiln reports \"{a.Detail}\", " +
+                               "which a joined game answers for programs it never runs: taken as applied");
+            a = a with { Result = 0, Errors = 0, Detail = "" };
+        }
         var what = a.Result switch
         {
             0 => "applied", 1 => "FAILED", 2 => "skipped (hosting)", 3 => "refused", AckDeferred => "received while joining (applied once its world runs)",
@@ -786,39 +803,25 @@ public static unsafe class ContentSync
         (uint StateId, string Json, uint Fields, int Compressed) p;
         lock (Lock)
         {
-            if (_pending is not { } pp || _heldAnswered == pp.StateId || _appliedState == pp.StateId) return;
+            // _appliedState is the last connection's while the Leave of a new handshake still waits for a step
+            if (_pending is not { } pp || _heldAnswered == pp.StateId || (!_leavePending && _appliedState == pp.StateId)) return;
             p = pp;
         }
         if (Kiln.Client.IsClient && Kiln.Client.IsHosting) return;
-        if (!ServerTakesHeldAnswers) return;  // an older server: it would read the answer as a failure
-        // the cases ClientTick answers without the registries: those answers do not wait for the world
-        if (!SyncSettings.Current.AcceptContent || !Content.Available || !HasExport || _owner == 0) return;
-        if (Content.Status() is { Ready: true }) return;  // ClientTick applies it
+        // No Kiln tick runs in a held game (its world does not step and kiln.ui.tick's menu tick waits while a world is
+        // there), so ClientTick cannot answer what needs no registries either: answered here, as ClientTick would.
+        AckMsg ack;
+        if (!SyncSettings.Current.AcceptContent) ack = new AckMsg(p.StateId, 3, 0, 0, 0, 0, AcceptContentOff);
+        else if (!Content.Available || !HasExport || _owner == 0) ack = new AckMsg(p.StateId, 1, 0, 0, 0, 0, ContentUnavailable);
+        else if (Content.Status() is { Ready: true }) return;  // ClientTick applies it
+        else ack = HeldAnswerNow(p.StateId, p.Json);
+        // a deferral only to a server whose WELCOME takes it (an older one reads any result but 0 and 2 as a failure); a
+        // refusal is an answer every Kiln server reads, and there it gives the player its reason before the hold's deadline
+        if (ack.Result == AckDeferred && !ServerTakesHeldAnswers) return;
         lock (Lock)
         {
-            if (_heldAnswered == p.StateId) return;
+            if (_heldAnswered == p.StateId || _pending?.StateId != p.StateId) return;  // answered, or left meanwhile
             _heldAnswered = p.StateId;
-        }
-        AckMsg ack;
-        try
-        {
-            var server = JsonNode.Parse(p.Json) as JsonObject;
-            CapacityInfo? room = null;
-            IReadOnlySet<Guid> existing = new HashSet<Guid>();
-            if (server?["buffs"] is JsonObject { } buffs && buffs["add"] is JsonArray { Count: > 0 })
-            {
-                var budget = Content.Buffs.GetBudget();
-                if (budget.Budget is { Ready: true } known)
-                {
-                    room = known;
-                    existing = Content.Buffs.Definitions().Where(d => d.State is "registered" or "orphaned").Select(d => d.Guid).ToHashSet();
-                }
-            }
-            ack = HeldAnswer(p.StateId, server, room, existing);
-        }
-        catch (Exception)
-        {
-            ack = HeldAnswer(p.StateId, null, null, new HashSet<Guid>());  // what cannot be checked now is checked when it applies
         }
         if (ack.Result == AckDeferred)
         {
@@ -831,6 +834,36 @@ public static unsafe class ContentSync
             _status = _status with { State = ContentSyncState.Failed, StateId = p.StateId, Detail = ack.Detail };
         }
         _channel?.SendToServer(ack);
+    }
+
+    internal const string AcceptContentOff = "client: this game does not take a server's content (acceptContent is off in its kiln/config/sync.json)";
+    internal const string ContentUnavailable = "client: kiln.content is not available in this game (update or repair Kiln)";
+
+    /// <summary>The answer to a state this game cannot apply yet (<see cref="HeldAnswer"/>), from this game's buff room now.</summary>
+    private static AckMsg HeldAnswerNow(uint stateId, string json)
+    {
+        AckMsg ack;
+        try
+        {
+            var server = JsonNode.Parse(json) as JsonObject;
+            CapacityInfo? room = null;
+            IReadOnlySet<Guid> existing = new HashSet<Guid>();
+            if (server?["buffs"] is JsonObject { } buffs && buffs["add"] is JsonArray { Count: > 0 })
+            {
+                var budget = Content.Buffs.GetBudget();
+                if (budget.Budget is { Ready: true } known)
+                {
+                    room = known;
+                    existing = Content.Buffs.Definitions().Where(d => d.State is "registered" or "orphaned").Select(d => d.Guid).ToHashSet();
+                }
+            }
+            ack = HeldAnswer(stateId, server, room, existing);
+        }
+        catch (Exception)
+        {
+            ack = HeldAnswer(stateId, null, null, new HashSet<Guid>());  // what cannot be checked now is checked when it applies
+        }
+        return ack;
     }
 
     internal const string DeferredDetail = "client: this game applies the server's content once its world runs";
@@ -870,7 +903,7 @@ public static unsafe class ContentSync
             {
                 _appliedState = p.StateId;
                 Log(LogLevel.Info, "the server's content changes are not used (acceptContent is off in kiln/config/sync.json)");
-                _channel?.SendToServer(new AckMsg(p.StateId, 3, 0, 0, 0, 0, "client: acceptContent off"));
+                _channel?.SendToServer(new AckMsg(p.StateId, 3, 0, 0, 0, 0, AcceptContentOff));
                 _status = _status with { State = ContentSyncState.Failed, Detail = "acceptContent is off" };
             }
             return;
@@ -880,7 +913,7 @@ public static unsafe class ContentSync
             if (_status.State != ContentSyncState.Failed)
             {
                 Log(LogLevel.Warn, "kiln.content (v2) is not available in this game: the server's content changes cannot be applied");
-                _channel?.SendToServer(new AckMsg(p.StateId, 1, 0, 0, 0, 0, "client: kiln.content unavailable"));
+                _channel?.SendToServer(new AckMsg(p.StateId, 1, 0, 0, 0, 0, ContentUnavailable));
                 _status = _status with { State = ContentSyncState.Failed, Detail = "kiln.content unavailable" };
             }
             return;
@@ -1173,6 +1206,9 @@ public static unsafe class ContentSync
         {
             _incoming = null;
             _pending = null;
+            // the next connection's state is answered again. Leave() runs at the next Kiln tick, which a game held at its
+            // next join may not get first (no menu tick without kiln.ui.tick, nor while a world is there)
+            _heldAnswered = 0;
         }
         if (Game.IsTickThread) Leave(why);
         else _leavePending = true;
@@ -1183,7 +1219,6 @@ public static unsafe class ContentSync
         _leavePending = false;
         var had = _appliedState != 0;
         _appliedState = 0;
-        _heldAnswered = 0;
         _appliedGeneration = 0;
         var n = 0;
         if (had && _owner != 0 && Content.T != null)
