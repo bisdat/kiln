@@ -26,9 +26,9 @@
 //! - a [`DMABUF_VAR`] the launcher set is named in [`SET_BY_US`] like software mode's variables: host programs never get it.
 //!
 //! X11 on Wayland (0.2.0-dev.30): where WebKit turns hardware acceleration off by itself on a Wayland session with
-//! XWayland, one restart through X11 ([`X11_VAR`]`=x11`, [`X11_RESTARTED`]); the outcome is remembered
-//! ([`x11_marker`] / [`x11_no_help`]), a page late through X11 goes back to Wayland first, the user's own
-//! `GDK_BACKEND` always wins, Settings can turn it off ([`x11_auto_off`]); never a loop.
+//! XWayland, one restart through X11 ([`X11_VAR`]`=x11`, [`X11_RESTARTED`]); X11 is remembered ([`x11_marker`], also
+//! when WebKit composites nothing there too), a page late through X11 goes back to Wayland first ([`x11_no_help`]),
+//! the user's own `GDK_BACKEND` always wins, Settings can turn it off ([`x11_auto_off`]); never a loop.
 //! docs/kiln/launcher/app.md, "Drawing without the GPU".
 
 use kiln_manage::paths::DataDirs;
@@ -286,11 +286,10 @@ pub fn decide_x11(yours: Option<&str>, wayland: bool, display: bool, software: b
 pub enum X11Step {
     /// Wayland, and WebKit composites nothing: start again once through X11.
     Switch,
-    /// X11, and WebKit composites: remember it (`state/x11.json`), later starts go straight to X11.
+    /// The switch's X11 start: remember it (`state/x11.json`), later starts go straight to X11. Also when WebKit still
+    /// composites nothing there (work-cm 2026-11-20: Oryx593's lag was gone under GDK_BACKEND=x11 although the torch
+    /// stood still, so X11's painting on the CPU was far better than Wayland's); only a page late through X11 goes back.
     Keep,
-    /// X11, and WebKit still composites nothing: X11 did not help; later starts stay on Wayland (no restart now: this
-    /// start is no worse than the Wayland one was).
-    NoHelp,
     /// Nothing to do.
     Nothing,
 }
@@ -300,8 +299,7 @@ pub enum X11Step {
 pub fn x11_step(x: &X11, off: bool, by_vars: bool) -> X11Step {
     match x.why {
         X11Why::Default if off && !by_vars => X11Step::Switch,
-        X11Why::Restart | X11Why::Marker if off => X11Step::NoHelp,
-        X11Why::Restart if !off => X11Step::Keep,
+        X11Why::Restart => X11Step::Keep,
         _ => X11Step::Nothing,
     }
 }
@@ -652,7 +650,7 @@ fn x11_note(note: Option<X11Note>, gate: bool) {
     let Ok(dirs) = crate::state::dirs() else { return };
     let (write, clear, why) = match note {
         X11Note::Helped => (x11_marker(&dirs), x11_no_help(&dirs),
-            "The launcher turned this on by itself: WebKit drew without the GPU on Wayland, and with it through X11 (XWayland)".to_string()),
+            "The launcher turned this on by itself: WebKit drew without the GPU on Wayland, so it switched to X11 (XWayland)".to_string()),
         X11Note::NoHelp(why) => (x11_no_help(&dirs), x11_marker(&dirs), why),
     };
     match write_marker_file(&write, &why) {
@@ -1410,13 +1408,13 @@ fn x11_after_policy(x: &X11, off: bool, by_vars: bool) {
             log(&format!("PROBLEM: could not start again through X11: {err}; this start goes on on Wayland"));
         }
         X11Step::Keep => {
-            log("X11: WebKit draws with the GPU through X11 (XWayland): later starts go straight to X11");
+            log(if off {
+                "X11: WebKit draws without the GPU through X11 (XWayland) too, which still paints far faster than Wayland: \
+                    staying on X11, later starts go straight to X11 (a page late through X11 goes back to Wayland)"
+            } else {
+                "X11: WebKit draws with the GPU through X11 (XWayland): later starts go straight to X11"
+            });
             x11_note(Some(X11Note::Helped), false);
-        }
-        X11Step::NoHelp => {
-            log(&format!("X11: WebKit draws without the GPU through X11 too ({}): X11 did not help; this start goes on, later \
-                starts stay on Wayland", says_x11(x)));
-            x11_note(Some(X11Note::NoHelp("The launcher turned this on by itself: WebKit drew without the GPU through X11 (XWayland) too".into())), false);
         }
         X11Step::Nothing if off => {
             let why = if by_vars && x.why == X11Why::Default { "a variable turns WebKit's compositing off, X11 would not change that".to_string() } else { says_x11(x) };
@@ -1653,10 +1651,11 @@ mod tests {
         assert_eq!(r.set, vec![(X11_RESTARTED, "1".to_string())]);
         let second = x11_of(None, false, false, Some("1"), false, false);
         assert_eq!(second, X11 { on: true, why: X11Why::Restart });
-        // X11 helped: remembered; X11 did not: no help, and never a switch from an X11 start
+        // X11 is remembered, with the GPU or still without it (X11's CPU painting beat Wayland's: Oryx593), and an X11
+        // start never switches again
         assert_eq!(x11_step(&second, false, false), X11Step::Keep);
-        assert_eq!(x11_step(&second, true, false), X11Step::NoHelp);
-        assert_ne!(x11_step(&second, true, true), X11Step::Switch);
+        assert_eq!(x11_step(&second, true, false), X11Step::Keep, "still without the GPU through X11: stays on X11");
+        assert_eq!(x11_step(&second, true, true), X11Step::Keep);
     }
 
     #[test]
@@ -1675,7 +1674,7 @@ mod tests {
         let x = x11_of(None, false, false, None, true, false);
         assert_eq!(x, X11 { on: true, why: X11Why::Marker });
         assert_eq!(x11_step(&x, false, false), X11Step::Nothing, "already remembered: nothing to write");
-        assert_eq!(x11_step(&x, true, false), X11Step::NoHelp, "X11 stopped helping: back to Wayland next time");
+        assert_eq!(x11_step(&x, true, false), X11Step::Nothing, "without the GPU through X11 too: stays on X11, never a restart");
         // Settings' switch off: the marker no longer counts (set_x11_auto removes it too)
         assert_eq!(x11_of(None, false, true, None, true, false), X11 { on: false, why: X11Why::Off });
         // no help beats an old X11 marker
