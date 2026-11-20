@@ -61,13 +61,14 @@ The patches collector refuses mods with resource patches in a start where the ga
 (a base view: one query's decoded value, one resource's bytes, and a digest that names the data it serves); kiln.boot's
 default is the boot snapshot. The patches collector can check its resource patches against such a view as well
 (`native/services/content/gamedata_bootview.h`): when a start has a view of its game data that is newer than the boot
-snapshot, a patch whose list index, variant or optional member, template component or `copyComponents` component that
-data has not got is refused before the start, as any other refusal of the collector, and the plan keeps the view's
-digest. A resource (or a `copyComponents` source) the view has not got is refused only when the view's source says nothing
-in the start can create it: Kiln, a boot mod or a data pack may register one with a new GUID in the same start. What the
-view cannot say is checked when the patch is written, as before. The boot snapshot is never used for
-this check (it is made before the start, so it may not hold what the start's data holds), and no such view is registered
-by default: resource patches behave as before.
+snapshot, a patch whose resource, list index, variant or optional member, template component or `copyComponents` source
+that data has not got can be refused before the start, as any other refusal of the collector, and the plan keeps the
+view's digest. Such a refusal holds only for a resource whose view the source says is final for this start: Kiln, a boot
+mod, a data pack or another mod's `assets.json` may create or override a resource in the same start (an `assets.json`
+"new" or "override" resource is served before the patches are written), and without that answer the patch is checked
+when it is written, as before. What the view cannot say is checked when the patch is written as well. The boot snapshot
+is never used for this check (it is made before the start, so it may not hold what the start's data holds), and no such
+view is registered by default: resource patches behave as before.
 
 **Bind.** `kiln::boot::collect(api, owner, "<id>", prepare, user)` registers and says `true` only in a boot process.
 Then the service keeps its definitions back in `on_ready`. `false`: the old `on_ready` path, untouched.
@@ -218,8 +219,8 @@ handles, which no runtime unload clears: `Blocks.Find` and a block's reference b
   through the live base; each built with ASan/UBSan and with TSan) and `test-boot-archive-view-wine.sh` (the view tests
   under Wine).
 - Host: `native/services/content/tests/bootview_test.sh` (the patches collector against a fake base view: a list made
-  longer or shorter in the start's data, a missing resource the start may create or not, `[*]` over an empty list,
-  arithmetic from the data's value, a variant of one scalar, a config shown by its alias, a
+  longer or shorter in the start's data, a missing resource and another mod's override with and without a final view,
+  `[*]` over an empty list, arithmetic from the data's value, a variant of one scalar, a config shown by its alias, a
   variant's and an optional's member, a template's component, `copyComponents`' source, places the generation's own
   structural edits change left to the bytes, a fault after the publication, the view's reads ended once; ASan/UBSan and
   TSan).

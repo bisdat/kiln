@@ -24,10 +24,11 @@
 //     any other way by another mod (the same clear, or the same values, from both is fine), a "components[i]" path on a
 //     template whose components change. Then, when the start has a base view of its game data newer than the boot
 //     snapshot (gamedata_bootview.h; none by default), what only the data can say is checked against that view's decoded
-//     values too (check_base below): an index inside its list, a variant's or an optional's member there, a template's
-//     component there, the place a scalar or a list, copyComponents' source has the component, and the resource (or the
-//     source) there when nothing in this start can create it. Such a refusal is the mod's as any other; what the view
-//     cannot say is left to the bytes. The plan is frozen, with the view's digest.
+//     values too (check_base below): the resource there, an index inside its list, a variant's or an optional's member
+//     there, a template's component there, the place a scalar or a list, copyComponents' source there with the component.
+//     Such a refusal holds only for a resource whose view the source says is final for this start (nothing in the start
+//     creates or overrides it), and is then the mod's as any other; anything else, and what the view cannot say, is left
+//     to the bytes. The plan is frozen, with the view's digest.
 //   apply (kiln.assets when_resources_ready: the game's resource service is up and nothing has read through it): each
 //     resource is copied, every document's structural edits are made in the copy (kPhases: removes, adds, copies, clears,
 //     replaces, appends), then every set, with the game's values as the originals, and the copy is served as an override. A document is all or
@@ -439,9 +440,10 @@ std::vector<kiln::boot::Doc> file_docs(const kiln::boot::Input* boot) {
 // the way, a component added, removed or copied), a member outside a variant (the types say which members a struct has,
 // and a config named by its alias is no member of the value), a config shown by its alias, a value cut at the view's
 // depth or shown as text, a struct of one scalar shown as that scalar (also inside a variant, which the bytes follow to
-// the scalar), a resource the view cannot decode. A resource (or a copyComponents source) the view has not got is the
-// bytes' as well unless nothing in this start can create it (Source::nothing_creates): Kiln, a boot mod or a data pack
-// may register it with a new GUID, served once the game's resources are up.
+// the scalar), a resource the view cannot decode. And whatever the view says about a resource refuses only when the source
+// says its view of that resource is final for this start (Source::final_for): Kiln, a boot mod, a data pack or another
+// mod's assets.json may create or override a resource in this start, served before the patch is written, and then the
+// bytes say.
 constexpr size_t kBaseReadMax = 16u << 20;    // bytes of one resource's decoded value a check reads
 constexpr size_t kBaseReadsMax = 128u << 20;  // bytes of decoded values one prepare reads in all
 
@@ -609,33 +611,38 @@ bool touched(const Shape& sh, const std::vector<Seg>& place, bool tmpl) {
     return false;
 }
 
-// One document against the base view. false + *f: refused.
-template <class ReadFn>
-bool check_doc(const ResPatch& rp, const DocPatch& d, ReadFn&& read, const Shape& sh, BaseRefusal* f) {
+// One document against the base view. false + *f: refused. What the view says about a resource refuses only when
+// final_of(key) says the source's view of that resource is final for this start; otherwise it is logged and the bytes say.
+template <class ReadFn, class FinalFn>
+bool check_doc(const ResPatch& rp, const DocPatch& d, ReadFn&& read, FinalFn&& final_of, const Shape& sh, BaseRefusal* f) {
     auto refuse = [&](const std::string& path, const std::string& why) {
         *f = {d.mod, d.key, path, why};
         return false;
     };
+    // a refusal of what the view says about `key` (`of`: that resource in words): false, refused, when the view of that
+    // resource is final for this start; true, not refused, when the start may create or override it before the patch is
+    // written (the bytes say then)
+    auto refuse_if_final = [&](const KilnAssetKey& key, const std::string& of, const std::string& path, const std::string& why) {
+        if (final_of(key)) return refuse(path, why + " (nothing in this start creates or overrides " + of + ")");
+        LOGI("boot: resource patch %s/%s: %s%s; this start may create or override %s before the patch is written, so the patch is checked when it "
+             "is written",
+             d.mod.c_str(), d.key.c_str(), path.empty() ? "" : ("\"" + path + "\": ").c_str(), why.c_str(), of.c_str());
+        return true;
+    };
     const std::string what = rp.type + " " + guid_text(rp.res.guid);
     const bootview::Read& res = read(bootview::query_of(guid_text(rp.res.guid), rp.res.type, rp.res.part));
-    // a resource the data has not got: refused only when nothing in this start can create it; Kiln, a boot mod or a data
-    // pack may register a new GUID, served once the game's resources are up, and then the bytes say
-    if (res.found == bootview::Found::Missing) {
-        if (bootview::nothing_creates(rp.res))
-            return refuse("", "MissingResource: the game data this start reads has no " + what + ", and nothing in this start creates it");
-        LOGI("boot: resource patch %s/%s: the game data this start reads has no %s; this start may create it, so the patch is checked when it "
-             "is written",
-             d.mod.c_str(), d.key.c_str(), what.c_str());
-    }
+    if (res.found == bootview::Found::Missing && !refuse_if_final(rp.res, what, "", "MissingResource: the game data this start reads has no " + what))
+        return false;
     // copyComponents' sources, as the game has them before any patch of this start
     for (const StructOp& o : d.ops)
         for (size_t k = 0; o.op == 'c' && k < o.sources.size(); ++k) {
             const std::string g = guid_text(o.sources[k].guid);
             const bootview::Read& src = read(bootview::query_of(g, o.sources[k].type, o.sources[k].part));
-            if (src.found == bootview::Found::Missing && bootview::nothing_creates(o.sources[k]))
-                return refuse("", "\"copyComponents\": MissingResource: the template " + g + " that " + o.names[k] + " is copied from is not" + kInBase +
-                                      ", and nothing in this start creates it");
-            if (src.found != bootview::Found::Yes) continue;  // missing: this start may create it, and the bytes say
+            if (src.found == bootview::Found::Missing &&
+                !refuse_if_final(o.sources[k], "the template " + g, "",
+                                 "\"copyComponents\": MissingResource: the template " + g + " that " + o.names[k] + " is copied from is not" + kInBase))
+                return false;
+            if (src.found != bootview::Found::Yes) continue;
             const nlohmann::json* comps = src.value.is_object() ? member_of(src.value, "components") : nullptr;
             if (!comps || !comps->is_array()) continue;
             bool found = false, unknown = false;
@@ -644,9 +651,12 @@ bool check_doc(const ResPatch& rp, const DocPatch& d, ReadFn&& read, const Shape
                 unknown = unknown || t.empty();
                 found = found || folded(t) == folded(o.names[k]);
             }
-            if (!found && !unknown) return refuse("", "\"copyComponents\": the template " + g + " has no " + o.names[k] + kInBase);
+            if (!found && !unknown &&
+                !refuse_if_final(o.sources[k], "the template " + g, "", "\"copyComponents\": the template " + g + " has no " + o.names[k] + kInBase))
+                return false;
         }
     if (res.found != bootview::Found::Yes) return true;
+    // the paths on the resource itself: the first one the view refuses decides (not final: none of them can refuse)
     for (const StructOp& o : d.ops) {
         if (o.op != 'x' && o.op != 'r' && o.op != 'a') continue;
         std::vector<Seg> segs;
@@ -656,7 +666,7 @@ bool check_doc(const ResPatch& rp, const DocPatch& d, ReadFn&& read, const Shape
         w.tmpl = rp.tmpl;
         walk(res.value, segs, 0, "", &w);
         if (list_verdict(w, o.op, &why) == Seen::Refused)
-            return refuse(o.path, std::string(o.op == 'x' ? "\"clear\": " : o.op == 'r' ? "\"replace\": " : "\"append\": ") + why);
+            return refuse_if_final(rp.res, what, o.path, std::string(o.op == 'x' ? "\"clear\": " : o.op == 'r' ? "\"replace\": " : "\"append\": ") + why);
     }
     for (const Set& s : d.sets) {
         std::vector<Seg> segs;
@@ -665,7 +675,7 @@ bool check_doc(const ResPatch& rp, const DocPatch& d, ReadFn&& read, const Shape
         Walk w;
         w.tmpl = rp.tmpl;
         walk(res.value, segs, 0, "", &w);
-        if (set_verdict(w, s.value, &why) == Seen::Refused) return refuse(s.path, why);
+        if (set_verdict(w, s.value, &why) == Seen::Refused) return refuse_if_final(rp.res, what, s.path, why);
     }
     return true;
 }
@@ -709,13 +719,19 @@ bool check_base(BootPlan* plan, BaseRefusal* r) {
         }
         return reads.emplace(q, std::move(rd)).first->second;
     };
+    std::map<std::string, bool> finals;  // by resource: the source's answer, asked once, only for a refusal
+    auto final_of = [&](const KilnAssetKey& key) {
+        const std::string q = bootview::query_of(guid_text(key.guid), key.type, key.part);
+        if (const auto it = finals.find(q); it != finals.end()) return it->second;
+        return finals.emplace(q, bootview::final_for(key)).first->second;
+    };
     std::map<const ResPatch*, Shape> shapes;
     BaseRefusal first;
     bool refused = false;
     for (const Item& it : order) {
         auto sh = shapes.find(it.rp);
         if (sh == shapes.end()) sh = shapes.emplace(it.rp, shape_of(*it.rp)).first;
-        if (!check_doc(*it.rp, *it.d, read, sh->second, &first)) {
+        if (!check_doc(*it.rp, *it.d, read, final_of, sh->second, &first)) {
             refused = true;
             break;
         }

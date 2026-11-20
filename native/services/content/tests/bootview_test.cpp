@@ -77,8 +77,8 @@ void shorter_list() {
 }
 
 // A resource the data has not got: Kiln, a boot mod or a data pack may register it with a new GUID in this start (served
-// once the game's resources are up), so the bytes say; only when the start says nothing in it creates one is the patch
-// refused before the start.
+// once the game's resources are up), so the bytes say; only when the source says its view of it is final for this start
+// is the patch refused before the start.
 void missing_resource() {
     FakeView v;
     v.values[kFixture] = json({{"value", 75}, {"flag", true}, {"list", {1, 2}}});
@@ -87,23 +87,61 @@ void missing_resource() {
     serve(75, {1, 2});
     const json made = {{"resource", "made-by-a-mod"}, {"type", "fixture"}, {"set", {{"value", 5}}}};
     const json copy = templ({{"copyComponents", {{"Stock", "new-template"}}}});
-    nothing_asked = 0;
+    g_final = false;
+    final_asked = 0;
     run(docs_of({{"r", "k", made}}));
     check(faults.empty() && put_count == 1 && patched.value == 5, "a resource this start creates is not refused (a required mod's either) and is written");
-    check(logged("this start may create it") && nothing_asked > 0, "the source was asked, and the log says the bytes decide");
+    check(logged("this start may create or override") && final_asked > 0, "the source was asked, and the log says the bytes decide");
     missing_assets.insert(gid("made-by-a-mod"));
     run(docs_of({{"a", "k", made}}));
     check(faults.size() == 1 && has(faults[0].reason, "MissingResource") && put_count == 0, "not served when it is written: an activation fault, as before");
     missing_assets.clear();
     check(accepted(docs_of({{"a", "k", copy}})), "a copyComponents source this start may create: the bytes say");
-    g_nothing_creates = true;
-    check(refused(docs_of({{"b", "k", made}}), "b", "MissingResource") && has(issue.reason, "nothing in this start creates it"),
-          "nothing in this start creates it: refused before the start");
+    g_final = true;
+    check(refused(docs_of({{"b", "k", made}}), "b", "MissingResource") && has(issue.reason, "nothing in this start creates or overrides"),
+          "final for this start: refused before the start");
     check(refused(docs_of({{"r", "k", made}}), "r", "MissingResource"), "a required mod's as well (kiln.boot stops the start)");
     check(refused(docs_of({{"a", "k", copy}}), "a", "copyComponents") && has(issue.reason, "MissingResource"), "and a copyComponents source");
-    nothing_asked = 0;
-    check(accepted(docs_of({{"a", "k", set1("list[1]", 3)}})) && nothing_asked == 0, "a resource the data has: the source is not asked");
-    g_nothing_creates = false;
+    final_asked = 0;
+    check(accepted(docs_of({{"a", "k", set1("list[1]", 3)}})) && final_asked == 0, "nothing to refuse: the source is not asked");
+    g_view = nullptr;
+}
+
+// Another mod overrides a resource in this start: mod A's assets.json puts a template with a component the game's has not
+// got, and kiln.assets serves it before the patches are written; mod B patches that component. The view (the game's data)
+// has no such component, but it is not final for this start, so B is not refused and its patch is written on A's template.
+// Only when the source says its view of the template is final is B refused before the start. No data-based refusal holds
+// without that answer.
+void overridden() {
+    FakeView v;
+    v.values[kFixture] = json({{"value", 75}, {"flag", true}, {"list", {1, 2}}, {"effect", {{"$type", "Heal"}, {"amount", 2}}}});
+    v.values[kTemplate] = {{"name", "T"}, {"components", {{{"$type", "Alpha"}, {"x", 1}}}}};
+    g_view = &v;
+    serve(75, {1, 2});  // what kiln.assets serves when the patches are written: mod A's template, Beta in it
+    const json b = templ({{"set", {{"Beta.y", 4}}}});
+    g_final = false;
+    final_asked = 0;
+    {
+        std::lock_guard lk(g_log_mutex);
+        g_log.clear();
+    }
+    run(docs_of({{"r", "b", b}}));
+    check(faults.empty() && put_count == 1 && patched.value == 4, "not final: B's patch of the component A's override adds is written (a required mod's too)");
+    check(final_asked > 0 && logged("no component Beta") && logged("may create or override"), "the source was asked, and the log says the bytes decide");
+    check(accepted(docs_of({{"a", "k", set1("list[5]", 1)}, {"b", "k2", set1("effect.damage", 1)}, {"b", "k3", set1("flag", {{"mul", 2}})}})),
+          "not final: no data-based refusal (an index past a list, another variant's member, an operation on a bool)");
+    check(accepted(docs_of({{"a", "k", templ({{"copyComponents", {{"Beta", "tmpl2"}}}})}})), "nor of a copyComponents source");
+    static const bootview::Source no_answer{[](std::string* why) -> kiln::boot_view::BaseView* {
+                                                if (!g_view) *why = g_view_why;
+                                                return g_view;
+                                            },
+                                            nullptr};
+    bootview::set_source(&no_answer);
+    check(accepted(docs_of({{"r", "b", b}})), "a source without the answer: as not final");
+    bootview::set_source(&kSource);
+    g_final = true;
+    check(refused(docs_of({{"r", "b", b}}), "r", "no component Beta") && has(issue.reason, "nothing in this start creates or overrides"),
+          "final for this start: B is refused before the start");
     g_view = nullptr;
 }
 
@@ -236,7 +274,7 @@ void variants_optionals_components() {
     check(refused(docs_of({{"a", "k", templ({{"set", {{"Alpha.steps[2]", 1}}}})}}), "a", "IndexPastEnd"), "an index past a component's list");
     check(accepted(docs_of({{"a", "k", templ({{"copyComponents", {{"Stock", "magic-chest"}}}})}})), "the source has the component");
     check(refused(docs_of({{"a", "k", templ({{"copyComponents", {{"Beta", "magic-chest"}}}})}}), "a", "no Beta"), "the source has not got it");
-    check(accepted(docs_of({{"a", "k", templ({{"copyComponents", {{"Stock", "gone-template"}}}})}})), "a source the data has not got: this start may create it");
+    check(refused(docs_of({{"a", "k", templ({{"copyComponents", {{"Stock", "gone-template"}}}})}}), "a", "MissingResource"), "the source is not there");
     g_view = nullptr;
 }
 
@@ -368,6 +406,7 @@ int main() {
                                                          {"longer_list", longer_list},
                                                          {"shorter_list", shorter_list},
                                                          {"missing_resource", missing_resource},
+                                                         {"overridden", overridden},
                                                          {"view_forms", view_forms},
                                                          {"wildcard", wildcard},
                                                          {"arithmetic", arithmetic},
@@ -382,7 +421,7 @@ int main() {
     for (const auto& [name, fn] : groups) {
         bootview::set_source(&kSource);
         g_view = nullptr;
-        g_nothing_creates = false;
+        g_final = true;  // the groups below test what a final view refuses; missing_resource and overridden what it does not
         gd::g_types = false;
         g_mod_dirs.clear();
         try {

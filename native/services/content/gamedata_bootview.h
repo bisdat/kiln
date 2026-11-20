@@ -15,10 +15,11 @@
 // {"resourceId","typeHash","part","value"} carries it), that the data has no such resource (Found::Missing), or nothing
 // (Found::Unknown, with why: a value larger than a check reads, a type the view cannot decode, the view gone).
 //
-// A resource the view has not got may still be there when the patch is written: Kiln, a boot mod or a data pack can
-// register one with a new GUID in this start (kiln.assets' new resources, served once the game's resources are up). So a
-// missing resource refuses a patch before the start only when the source says nothing in this start can create it
-// (nothing_creates); otherwise the bytes say, as before.
+// What the view says about a resource is not always what the patch meets when it is written: Kiln, a boot mod, a data
+// pack or another mod's assets.json can create a resource or override one in this start (kiln.assets serves an
+// assets.json "new" or "override" resource before the patches are written). So what the view says about a resource (it is
+// not there, an index past its list, a member, a component, a scalar) refuses a patch before the start only when the
+// source says its view of that resource is final for this start (final_for); otherwise the bytes say, as before.
 //
 // Threads: set_source() before the first prepare (a service's bind, or when its DLL loads). current() is called by
 // prepare (kiln.boot's boot thread), finished() once by apply (the resource service's readiness, any thread). The slot
@@ -43,10 +44,11 @@ struct Source {
     /// The checks are over (the generation is published and the game's resources are up): what the source holds for
     /// them may be let go. May be null.
     void (*finished)() = nullptr;
-    /// True: nothing in this start can create the resource `key` that the view has not got (no Kiln service, boot mod
-    /// or data pack registers it before the patch is written), so a patch of it is refused before the start. Null, or
-    /// false: it may be created, and the bytes say when the patch is written.
-    bool (*nothing_creates)(const KilnAssetKey& key) = nullptr;
+    /// True: the view's answer for the resource `key` (its value, or that it has none) is final for this start: nothing
+    /// in the start creates or overrides it before the patch is written (no Kiln service, boot mod, data pack or other
+    /// mod's assets.json). Only then does what the view says about that resource refuse a patch before the start. Null,
+    /// or false: the bytes say when the patch is written.
+    bool (*final_for)(const KilnAssetKey& key) = nullptr;
 };
 
 inline std::atomic<const Source*>& source_slot() {
@@ -72,10 +74,10 @@ inline BaseView* current(std::string* why) {
     return v;
 }
 
-/// Whether nothing in this start can create a resource the view has not got (Source::nothing_creates; no answer: it may).
-inline bool nothing_creates(const KilnAssetKey& key) {
+/// Whether the view of the resource is final for this start (Source::final_for; no answer: it is not).
+inline bool final_for(const KilnAssetKey& key) {
     const Source* s = source_slot().load(std::memory_order_acquire);
-    return s && s->nothing_creates && s->nothing_creates(key);
+    return s && s->final_for && s->final_for(key);
 }
 
 /// The checks of this start are over (apply, once).

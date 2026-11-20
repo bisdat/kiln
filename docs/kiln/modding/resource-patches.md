@@ -243,8 +243,8 @@ Before the game starts (a mistake here keeps your mod's boot content out, or sto
 A path that goes through a variant or an optional is checked as far as the types go; the rest is checked when the write
 is made. When Kiln has a view of this start's game data that is newer than the boot snapshot (the snapshot itself is never
 used for this), what needs the data (the list below) is checked against that view before the start as well, as far as
-the view shows it. A resource that view has not got is still left to the write: Kiln, a boot mod or a data pack can
-register a new resource in the same start.
+the view shows it, and only for a resource nothing else in the same start creates or overrides (Kiln, a boot mod, a data
+pack or another mod's `assets.json` can); for any other resource the check is left to the write.
 
 When the write is made (the game's data is in memory only then):
 
