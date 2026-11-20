@@ -364,7 +364,7 @@ false)`; the fake then answers as the native service does without it. The table 
 public void CtrlClickAsksToMarkTheItem()
 {
     using var kiln = new KilnHarness();
-    kiln.Load<SlotMarksMod>();
+    kiln.Load<MyMod>();   // its OnLoad: Ui.Inventory.OnClick(new SlotClickOptions { Modifiers = SlotModifiers.Ctrl }, ...)
     kiln.Step();
     kiln.UiInventory.Draw(HudScreen.Backpack, new FakeInventorySlot(Item: 0xAA, ItemEntity: 900));
     Assert.Equal(new FakeSlotClickResult(1, Taken: true), kiln.UiInventory.Click(0, SlotButton.Left, SlotModifiers.Ctrl));
