@@ -206,7 +206,7 @@ back there. `ctx.TickWorld` says which:
 | a dedicated server's tick code (`Tick.Pre`, events, commands, `OnLoad`) | the server world |
 | a hosting client's server-side code (its `Context.Tick`, events, chat commands, server-side network handlers, a server mod's `OnLoad`) | the server world (the game's server thread) |
 | the game's main thread: `Client.Tick`, `Client.Post`, Kiln's UI callbacks (menu entries, key bindings, value providers), client-side network handlers, `Context.Tick` on a joined client, a client or `both` mod's `OnLoad` in the main menu | the client world (the game's main thread) |
-| inside a task | its parent's world (inside a hop, that hop's world) |
+| inside a task | its parent's world (inside a hop, that hop's world; inside a menu hop, the main menu) |
 | anywhere else (a window's draw on the render thread, `Task.Run`, your own threads, after `ConfigureAwait(false)`) | the server world, as before |
 
 **The other world, by name.** Each has an overload with a `WorldKind`:
@@ -218,7 +218,8 @@ ctx.PostToTick(WorldKind.Server, () => Chat.Tell(player, "done"));
 await ctx.NextGateWindow(WorldKind.Client);               // back to a worker after the client world's next step
 ```
 
-`WorldKind.Prediction` is not a hop target (`ArgumentOutOfRangeException`).
+`WorldKind.Prediction` is not a hop target (`ArgumentOutOfRangeException`). `WorldKind.Menu` is the main menu, not a
+world: [Hops in the main menu](#hops-in-the-main-menu).
 
 **Where a hop lands, and what code there may do.**
 - **A server-world hop** runs on the server world's tick, before the mods' `Tick.Pre` handlers, as everywhere above.
@@ -314,6 +315,46 @@ the task:
 Use `PostToTick(WorldKind.Client, ...)` when the task should track it. Don't `await Client.NextTick()` inside a task: the
 rest of the method would run on the main thread, outside the task, and a dropped post would leave the task waiting for
 good. [KILN105](analyzers.md#kiln105) reports it; write `await ctx.ToTick(WorldKind.Client)`.
+
+### Hops in the main menu
+
+Since 0.2.0-dev.30, a task on a game client can also hop to the **main menu**, where no world runs (the title screen,
+and the stretch between leaving one world and the next one's first step):
+
+```csharp
+// a client mod's OnLoad runs in the main menu: fetch the news off the main thread, show it on the UI frame
+public override void OnLoad() =>
+    Context.Tasks.Run("news", async ctx =>
+    {
+        var news = await FetchNewsAsync(ctx.Cancellation);     // on a worker
+        await ctx.ToTick(WorldKind.Menu);                      // the game's UI frame, while no world runs
+        _panel.Show(news);                                     // main-thread UI work
+    });
+```
+
+`ToTick(WorldKind.Menu)`, `OnTick(WorldKind.Menu, ...)` and `PostToTick(WorldKind.Menu, ...)` work as the world
+overloads do, with these rules:
+- **Where it lands.** On the game's UI frame (the game's main thread), about 30 times a second, only while no world
+  runs. Menu hops have their own budget: 64 hops and 1 ms per mod, 2 ms in all per frame; the rest waits for the next
+  frame and is never dropped.
+- **What code there may do.** Only APIs that work on any thread and the game's main-thread UI APIs (Kiln.Ui's menus,
+  pages, values). `Game.IsTickThread` is false there, and a world API (anything tick-only: `Items`, `Chat.Tell`,
+  `Spawn`, ...) throws `InvalidOperationException` saying it was called in a menu hop.
+- **One menu stretch is one session.** A menu hop still waiting when a world starts (the player hosts or joins) is
+  dropped and ends the task `Cancelled` through its own token, quietly, as a world's stop does for its hops. A task bound
+  to one menu stretch never hops into the next one: back in the menu after a world, its menu hops end it `Cancelled`.
+  A world hop never runs in the menu either (a world's stop ends them, as above).
+- **No menu, no hop.** While a world runs, and on a dedicated server, a menu hop throws `KilnUnavailableException`
+  naming `tasks.pool` at once, and the task stays usable. Right after a world ends there is no menu session until the
+  game's next UI frame (a moment).
+- **No gate windows.** The menu has no world steps: `NextGateWindow(WorldKind.Menu)` throws
+  `ArgumentOutOfRangeException`. Wait with `await Task.Delay(...)` in the task instead.
+- **Which world.** A task started on the main thread in the menu (`OnLoad` there, a UI callback) still belongs to the
+  client world, so its parameterless `ToTick()` goes to the next client world; name the menu with
+  `ToTick(WorldKind.Menu)`. A task started inside a menu hop belongs to the menu (`ctx.TickWorld` is `Menu`).
+
+Menu hops are new in 0.2.0-dev.30 (mod API 0.2.12): on an older Kiln `WorldKind.Menu` does not exist, so a mod that
+uses it needs this Kiln.
 
 ## Reading the world from a task
 
@@ -485,6 +526,9 @@ The [TestKit](unit-tests.md) runs a mod's tasks under `dotnet test`:
   harness's tick thread. `HarnessSide.HostingClient` has both worlds, the client world on a main thread of its own:
   `kiln.OnMainThread(...)` runs code there, and a task started there comes back there. `kiln.LeaveWorld()` and
   `kiln.EnterWorld()` stop and start the worlds' sessions, as leaving and hosting or joining again do.
+- **The main menu.** After `kiln.LeaveWorld()`, `kiln.MenuFrame()` is one UI frame of the main menu: it opens the
+  menu's session and runs the menu hops waiting for it (`Settle()` runs menu frames while the menu is open).
+  `kiln.EnterWorld()` ends the menu session, so a test can check that its waiting menu hops end `Cancelled`.
 
 The example's tests are in `managed/tests/Kiln.TestKit.Tests/FetchNearbyTests.cs`, with their helpers (`Start`,
 `Finish`, `Said`, `Wood`, `ChatOf`). The first one, without its last check (its `WorldConcurrent` line is why the

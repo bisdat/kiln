@@ -5,6 +5,12 @@
 //   2. hosting only: ToTick(WorldKind.Server) lands on the server tick;
 //   3. a task reads the client world (WorldConcurrent.Query near the local player);
 //   4. a resident task hops every 100 ms until the world ends; when the next world starts, none of its hops ran there.
+// On the title screen (the mods load in the main menu, #83):
+//   M1. a task started in OnLoad hops ToTick(WorldKind.Menu): it lands on the game's UI frame (the main thread, no world,
+//       Game.IsTickThread false, a world API refuses saying "menu hop");
+//   M2. a task keeps a backlog of PostToTick(WorldKind.Menu) waiting (more than a frame's budget runs) until the player
+//       starts or joins a world; at the world's first client tick: the task ended Cancelled, none of its menu work ran
+//       inside the world.
 // "tasks-client-check: PASS|FAIL ...", then "tasks-client-check: world N done: P PASS, F FAIL".
 using System.Runtime.InteropServices;
 using Kiln;
@@ -29,10 +35,86 @@ public sealed class ClientCheckMod : Mod
         else { Interlocked.Increment(ref _fail); Log.Error($"{Me}: FAIL {what}"); }
     }
 
-    public override void OnLoad() => Client.Tick += (in TickInfo _) => OnClientTick();
+    public override void OnLoad()
+    {
+        Client.Tick += (in TickInfo _) => OnClientTick();
+        if (!Client.InGame) StartMenuChecks();
+    }
+
+    // ---- the main menu (#83) ----
+
+    private KilnTask? _menuBacklog;
+    private int _menuApplied, _menuAppliedInWorld, _menuWaiting;
+    private bool _menuChecked;
+
+    private void StartMenuChecks()
+    {
+        // OnLoad runs on the game's UI frame in the main menu: that thread (Client.IsClientThread says so only once a
+        // client world has run)
+        var ui = Environment.CurrentManagedThreadId;
+        try
+        {
+            var landed = Context.Tasks.Run("menu-hop", async ctx =>
+            {
+                await ctx.ToTick(WorldKind.Menu);
+                var refused = false;
+                try
+                {
+                    Game.AssertTickThread();
+                }
+                catch (InvalidOperationException e)
+                {
+                    refused = e.Message.Contains("menu hop", StringComparison.Ordinal);
+                }
+                return (Environment.CurrentManagedThreadId == ui, Client.InGame, Game.IsTickThread, refused);
+            });
+            _ = landed.AsTask().ContinueWith(t =>
+            {
+                var (main, inGame, tick, refused) = t.IsCompletedSuccessfully ? t.Result : default;
+                Check(t.IsCompletedSuccessfully && main && !inGame && !tick && refused,
+                    $"menu: ToTick(Menu) on the title screen landed on the UI frame (OnLoad's thread {main}, in a world {inGame}, " +
+                    $"Game.IsTickThread {tick}, a world API refused as a menu hop {refused}){(t.Exception is { } e ? ": " + e.InnerException : "")}");
+            });
+            _menuBacklog = Context.Tasks.Run("menu-backlog", async ctx =>
+            {
+                // more than a frame's budget (64 hops a mod) always waits, until a world's start cancels it
+                while (true)
+                {
+                    while (Volatile.Read(ref _menuWaiting) < 500)
+                    {
+                        Interlocked.Increment(ref _menuWaiting);
+                        ctx.PostToTick(WorldKind.Menu, () =>
+                        {
+                            Interlocked.Decrement(ref _menuWaiting);
+                            if (Client.InGame) Interlocked.Increment(ref _menuAppliedInWorld);
+                            else Interlocked.Increment(ref _menuApplied);
+                        });
+                    }
+                    await Task.Delay(20, ctx.Cancellation);
+                }
+            });
+            Log.Info($"{Me}: menu: menu work is waiting on the title screen; start or join a world to check it is cancelled there");
+        }
+        catch (KilnUnavailableException e)
+        {
+            Log.Info($"{Me}: SKIP menu checks: {e.Message} (the mods did not load in the main menu)");
+        }
+    }
+
+    // At the first client tick in a world: the menu's waiting work was cancelled at the world's start.
+    private void CheckMenuEnded()
+    {
+        if (_menuChecked || _menuBacklog is not { } task) return;
+        _menuChecked = true;
+        _ = task.AsTask().ContinueWith(_ => Check(
+            task.State == KilnTaskState.Cancelled && Volatile.Read(ref _menuAppliedInWorld) == 0 && _menuApplied > 0,
+            $"menu: the menu work still waiting when the world started was cancelled (task {task.State}, " +
+            $"{_menuApplied} applied in the menu, {_menuAppliedInWorld} in the world (0 expected), {Volatile.Read(ref _menuWaiting)} dropped)"));
+    }
 
     private void OnClientTick()
     {
+        if (Client.InGame) CheckMenuEnded();
         if (_running || !Client.InGame || Client.LocalPlayer.IsNone) return;
         var session = Client.ClientWorldSession;
         if (session == _session) return;
@@ -105,7 +187,7 @@ public sealed class ClientCheckMod : Mod
         // 4. a resident task: its hops must stay in this world
         _lastResidentSession = session;
         Volatile.Write(ref _foreignHops, 0);
-        Context.Tasks.Run("client-resident", async ctx =>
+        _ = Context.Tasks.Run("client-resident", async ctx =>
         {
             while (!ctx.Cancellation.IsCancellationRequested)
             {
