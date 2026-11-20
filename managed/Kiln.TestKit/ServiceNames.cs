@@ -50,6 +50,7 @@ internal static class ServiceNames
         "kiln.questmark",
         "kiln.render",
         "kiln.repl",
+        "kiln.repl.lab",
         "kiln.rules",
         "kiln.saves",
         "kiln.screen",
