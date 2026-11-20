@@ -884,9 +884,14 @@ void run_cmd(VkCommandBuffer cb, const KCmd& c) {
     if (live && KUI_GUARD("the backend's upscale", ok = g_backend->record(f, &detail)) && ok) {
         const uint64_t k = g_kiln_frames.fetch_add(1, std::memory_order_relaxed) + 1;
         g_last_kiln_ms.store(now_ms(), std::memory_order_relaxed);
-        if (k == 1 || k == 600 || k % 36000 == 0)
-            logf(KILN_LOG_INFO, "graphics: upscaler: %s upscaled %llu frames in the game's command buffer", g_backend->name().c_str(),
-                 static_cast<unsigned long long>(k));
+        // the game's pre-exposure since the last line (how it moves is what an FSR 4 report needs)
+        static ExposureRange range;
+        range.add(f.game_exposure);
+        if (k == 1 || k == 600 || (k <= 36000 && k % 3600 == 0) || k % 36000 == 0) {
+            logf(KILN_LOG_INFO, "graphics: upscaler: %s upscaled %llu frames in the game's command buffer; the game's pre-exposure since the last line: %s",
+                 g_backend->name().c_str(), static_cast<unsigned long long>(k), range.text().c_str());
+            range.reset();
+        }
         return;
     }
     if (live && !ok && !g_failed.load()) fall_back(Why::runtime_failed, detail.empty() ? "the upscale failed" : detail);

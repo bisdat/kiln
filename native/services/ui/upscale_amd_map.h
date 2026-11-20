@@ -138,13 +138,45 @@ inline DeviceNeeds device_needs() {
 // RX 9070 XT, 29.19 beta 1). Kiln asks for AMD's own auto-exposure, AMD's recommendation; the output stays in the
 // input's domain (AMD reverses its internal tone mapping), so the game's tone mapping after it is unchanged.
 enum class Exposure : uint32_t { automatic = 0, one = 1 };
+// FSR 4's inputs: OptiScaler's known-good set. In this game FSR 3.1 is right with the FSR 3 pass's inputs as they are
+// (29.19 beta 1 A/B), FSR 4 is not: dark scenes far too dark (betas 1 and 3, RX 9070 XT, also with auto exposure). FSR 4
+// 4.1.2 through OptiScaler, fed from the game's DLSS path, is not dark on the same card (29.19 beta 3 report
+// "optiscaler-fsr4": its FSR 3 w/Dx12 backend, FFX 4.1.2, FP8 model). It differs from Kiln's in what it gets:
+//  - the pre-exposure: 1 (the game gives DLSS 0, NGX's helper makes it 1: client DOSSIER section 3), where the FSR 3
+//    description carries the game's eye adaptation (1 right after a load, 0.077 in the world). FSR 3.1 uses that only as
+//    the ratio between frames (ffx_fsr3upscaler DeltaPreExposure), as the game's own port does (fsr_dispatch.txt
+//    0x82080); FSR 4's use of it is not public (a signed DLL);
+//  - the masks: none (the DLSS path has no reactive or transparency mask; OptiScaler then runs with its reactive mask
+//    off), where the FSR 3 pass has both (R8, made for the game's own FSR 3);
+//  - the same colour image (view +0x140), depth, motion vectors, HDR, inverted depth, auto exposure (it has no
+//    exposure texture), linear colour; its FSR 4 ran through DX12 (Kiln's through AMD's Vulkan DLL).
+// So for FSR 4 Kiln gives pre-exposure 1 and no masks by default, FSR 3.1 keeps the game's; each knob below undoes one
+// part for an A/B (which one matters is not proven yet).
+enum class PreExposure : uint32_t { automatic = 0, game = 1, one = 2 };
+enum class Mask : uint32_t { automatic = 0, on = 1, off = 2 };
+// What the colour is said to be (create flag NON_LINEAR_COLORSPACE plus the dispatch's colour flag): linear (the game's,
+// the default), or sRGB / PQ for an A/B only.
+enum class Colour : uint32_t { linear = 0, srgb = 1, pq = 2 };
 // Test knobs: <game>/kiln/control/amd, one per line ('#' starts a comment), read at each of the game's FSR set-ups;
-// nothing reads them in normal play. "exposure auto" (the default) | "exposure one" (no auto exposure: the game's
-// pre-exposure only, as up to 0.2.0-dev.29.19 beta 1, for an A/B on a real card).
+// nothing reads them in normal play, each is named in kiln.log's set-up line (the first value is the default):
+//   exposure auto|one               auto: AMD's auto exposure; one: none (exposure 1, as up to 29.19 beta 1)
+//   preexposure auto|game|one       auto: 1 for FSR 4, the game's for FSR 3.1; game / one: that for both
+//   reactive auto|on|off            auto: none for FSR 4, the game's for FSR 3.1; on / off: that for both
+//   transparency auto|on|off        the same for the transparency & composition mask
+//   masks auto|on|off               both masks at once
+//   hdr on|off                      on: the HDR flag (the colour is linear HDR); off: without it
+//   colour linear|srgb|pq           linear; srgb / pq: tell FSR the colour is perceptual
 struct Tuning {
     Exposure exposure = Exposure::automatic;
+    PreExposure pre_exposure = PreExposure::automatic;
+    Mask reactive = Mask::automatic, transparency = Mask::automatic;
+    bool hdr_off = false;
+    Colour colour = Colour::linear;
     std::vector<std::string> notes;  // lines Kiln did not understand
-    bool changed() const { return exposure != Exposure::automatic; }
+    bool changed() const {
+        return exposure != Exposure::automatic || pre_exposure != PreExposure::automatic || reactive != Mask::automatic ||
+               transparency != Mask::automatic || hdr_off || colour != Colour::linear;
+    }
 };
 inline Tuning parse_tuning(std::string_view text) {
     Tuning t;
@@ -169,17 +201,49 @@ inline Tuning parse_tuning(std::string_view text) {
         const std::string v = w.size() > 1 ? w[1] : "";
         if (w[0] == "exposure" && v == "auto") t.exposure = Exposure::automatic;
         else if (w[0] == "exposure" && v == "one") t.exposure = Exposure::one;
+        else if (w[0] == "preexposure" && v == "auto") t.pre_exposure = PreExposure::automatic;
+        else if (w[0] == "preexposure" && v == "game") t.pre_exposure = PreExposure::game;
+        else if (w[0] == "preexposure" && v == "one") t.pre_exposure = PreExposure::one;
+        else if (w[0] == "hdr" && (v == "on" || v == "off")) t.hdr_off = v == "off";
+        else if ((w[0] == "reactive" || w[0] == "transparency" || w[0] == "masks") && (v == "auto" || v == "on" || v == "off")) {
+            const Mask m = v == "on" ? Mask::on : v == "off" ? Mask::off : Mask::automatic;
+            if (w[0] != "transparency") t.reactive = m;
+            if (w[0] != "reactive") t.transparency = m;
+        }
+        else if ((w[0] == "colour" || w[0] == "color") && v == "linear") t.colour = Colour::linear;
+        else if ((w[0] == "colour" || w[0] == "color") && v == "srgb") t.colour = Colour::srgb;
+        else if ((w[0] == "colour" || w[0] == "color") && v == "pq") t.colour = Colour::pq;
         else t.notes.push_back(line);
     }
     return t;
 }
 
+// The pre-exposure AMD FSR gets this frame, for what runs (`game`: the game's value, already > 0: Frame::pre_exposure).
+inline float pre_exposure_for(Running running, const Tuning& t, float game) {
+    if (t.pre_exposure == PreExposure::game) return game;
+    if (t.pre_exposure == PreExposure::one) return 1.0f;
+    return running == Running::amd_fsr4 ? 1.0f : game;
+}
+// Whether a mask of the game goes to AMD FSR, for what runs.
+inline bool mask_used(Running running, Mask m) { return m == Mask::on || (m == Mask::automatic && running != Running::amd_fsr4); }
+// What AMD FSR gets beyond the flags, in words, for kiln.log's set-up line.
+inline std::string tuning_text(Running running, const Tuning& t) {
+    const bool game_pe = pre_exposure_for(running, t, 0.5f) == 0.5f;
+    std::string s = game_pe ? "pre-exposure from the game" : "pre-exposure 1";
+    const bool r = mask_used(running, t.reactive), tr = mask_used(running, t.transparency);
+    s += r && tr ? ", the game's masks" : r ? ", the game's reactive mask only" : tr ? ", the game's transparency mask only" : ", no masks";
+    if (t.colour == Colour::srgb) s += ", colour said sRGB";
+    if (t.colour == Colour::pq) s += ", colour said PQ";
+    return s;
+}
+
 inline uint32_t create_flags(const CreateInfo& ci, const Tuning& t = {}) {
     uint32_t f = 0;
-    if (ci.hdr) f |= FFX_UPSCALE_ENABLE_HIGH_DYNAMIC_RANGE;
+    if (ci.hdr && !t.hdr_off) f |= FFX_UPSCALE_ENABLE_HIGH_DYNAMIC_RANGE;
     if (ci.depth_inverted) f |= FFX_UPSCALE_ENABLE_DEPTH_INVERTED;
     if (ci.depth_infinite) f |= FFX_UPSCALE_ENABLE_DEPTH_INFINITE;
     if (ci.dynamic_resolution) f |= FFX_UPSCALE_ENABLE_DYNAMIC_RESOLUTION;
+    if (t.colour != Colour::linear) f |= FFX_UPSCALE_ENABLE_NON_LINEAR_COLORSPACE;
     if (t.exposure == Exposure::automatic) f |= FFX_UPSCALE_ENABLE_AUTO_EXPOSURE;  // the game has no exposure texture
     return f;  // render-size MVs (no DISPLAY_RESOLUTION_MOTION_VECTORS), no jitter in them (no JITTER_CANCELLATION), linear
                // colour (no NON_LINEAR_COLORSPACE)
@@ -253,7 +317,8 @@ inline FfxApiResource resource(const Texture& t, bool output) {
 }
 
 // The dispatch for `f`; `motion`: the motion vectors as AMD gets them (Kiln's R16G16_SFLOAT copy, upscale_mv.h).
-inline ffxDispatchDescUpscale dispatch(const Frame& f, const Texture& motion, bool reset) {
+inline ffxDispatchDescUpscale dispatch(const Frame& f, const Texture& motion, bool reset, Running running = Running::amd_fsr3,
+                                       const Tuning& t = {}) {
     ffxDispatchDescUpscale d{};
     d.header.type = FFX_API_DISPATCH_DESC_TYPE_UPSCALE;
     d.header.pNext = nullptr;
@@ -262,8 +327,8 @@ inline ffxDispatchDescUpscale dispatch(const Frame& f, const Texture& motion, bo
     d.depth = resource(f.depth, false);
     d.motionVectors = resource(motion, false);
     d.exposure = FfxApiResource{};  // none: the pre-exposure below (the game has no exposure texture for FSR)
-    d.reactive = resource(f.reactive, false);
-    d.transparencyAndComposition = resource(f.transparency, false);
+    d.reactive = mask_used(running, t.reactive) ? resource(f.reactive, false) : FfxApiResource{};
+    d.transparencyAndComposition = mask_used(running, t.transparency) ? resource(f.transparency, false) : FfxApiResource{};
     d.output = resource(f.output, true);
     d.jitterOffset = {f.jitter_x, f.jitter_y};
     d.motionVectorScale = {f.mv_scale_x, f.mv_scale_y};
@@ -272,13 +337,15 @@ inline ffxDispatchDescUpscale dispatch(const Frame& f, const Texture& motion, bo
     d.enableSharpening = f.sharpness > 0.0f;
     d.sharpness = f.sharpness;
     d.frameTimeDelta = f.frame_ms;
-    d.preExposure = f.pre_exposure;
+    d.preExposure = pre_exposure_for(running, t, f.pre_exposure);
     d.reset = reset || f.reset;
     d.cameraNear = f.camera_near;
     d.cameraFar = f.camera_far;
     d.cameraFovAngleVertical = f.fov_y;
     d.viewSpaceToMetersFactor = 1.0f;  // the game's units are metres
-    d.flags = 0;
+    d.flags = t.colour == Colour::srgb ? static_cast<uint32_t>(FFX_UPSCALE_FLAG_NON_LINEAR_COLOR_SRGB)
+              : t.colour == Colour::pq   ? static_cast<uint32_t>(FFX_UPSCALE_FLAG_NON_LINEAR_COLOR_PQ)
+                                         : 0u;
     return d;
 }
 

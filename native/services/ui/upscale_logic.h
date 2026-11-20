@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdio>
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -161,6 +162,26 @@ inline bool latch_at_frame(bool any, uint32_t latched, uint32_t latched_pin, uin
 inline bool restart_to_use(uint32_t chosen, uint32_t reason) {
     return static_cast<Choice>(chosen) != Choice::game && static_cast<Why>(reason) == Why::restart;
 }
+// The game's pre-exposure over a stretch of frames, for kiln.log's "upscaled N frames" lines (29.19 beta 3: 1 right after
+// a load, 0.077 in the world; how it moves decides what FSR 4 should get).
+struct ExposureRange {
+    float lo = 0, hi = 0, last = 0;
+    uint64_t n = 0;
+    void add(float v) {
+        if (!std::isfinite(v)) return;
+        lo = n ? std::fmin(lo, v) : v;
+        hi = n ? std::fmax(hi, v) : v;
+        last = v;
+        ++n;
+    }
+    void reset() { *this = {}; }
+    std::string text() const {
+        if (!n) return "none";
+        char b[96];
+        std::snprintf(b, sizeof b, "%g..%g (last %g)", static_cast<double>(lo), static_cast<double>(hi), static_cast<double>(last));
+        return b;
+    }
+};
 inline float sane_exposure(float e) { return std::isfinite(e) && e > 0 ? e : 1.0f; }
 inline float sane_fov(float f) { return std::isfinite(f) && f > 0.01f && f < 3.1f ? f : 1.1345f; }
 

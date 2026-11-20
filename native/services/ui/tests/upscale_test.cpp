@@ -420,6 +420,76 @@ static const FeatureNeed* need_of(const DeviceNeeds& n, VkStructureType t) {
     return nullptr;
 }
 
+// FSR 4's inputs (29.19 beta 3, SleepyPuppy, RX 9070 XT): FSR 4 dark with the FSR 3 pass's inputs as they are (the game's
+// pre-exposure: 0.077 in the world; the game's two masks), not dark through OptiScaler from the game's DLSS path
+// (pre-exposure 1, no masks, auto exposure, HDR). So FSR 4 gets pre-exposure 1 and no masks; FSR 3.1 (right as it is,
+// beta 1 A/B) keeps the game's. kiln/control/amd undoes each part for an A/B, and kiln.log's set-up line names it.
+static void amd_fsr4_inputs() {
+    Frame f = b0_frame();
+    f.pre_exposure = 0.077f;
+    Texture mv = tex(VK_FORMAT_R16G16_SFLOAT, 960, 540, 0x8000);
+    const amd::Tuning def{};
+    CHECK(!def.changed());
+    const ffxDispatchDescUpscale d4 = amd::dispatch(f, mv, false, Running::amd_fsr4, def);
+    CHECK(d4.preExposure == 1.0f && d4.reactive.resource == nullptr && d4.transparencyAndComposition.resource == nullptr);
+    const ffxDispatchDescUpscale d3 = amd::dispatch(f, mv, false, Running::amd_fsr3, def);
+    CHECK(d3.preExposure == 0.077f && d3.reactive.resource == reinterpret_cast<void*>(f.reactive.image) &&
+          d3.transparencyAndComposition.resource == reinterpret_cast<void*>(f.transparency.image));
+    CHECK(amd::tuning_text(Running::amd_fsr4, def) == "pre-exposure 1, no masks");
+    CHECK(amd::tuning_text(Running::amd_fsr3, def) == "pre-exposure from the game, the game's masks");
+    // preexposure game|one|auto
+    const amd::Tuning pg = amd::parse_tuning("preexposure game\n");
+    CHECK(pg.pre_exposure == amd::PreExposure::game && pg.changed());
+    CHECK(amd::dispatch(f, mv, false, Running::amd_fsr4, pg).preExposure == 0.077f);
+    CHECK(amd::dispatch(f, mv, false, Running::amd_fsr3, amd::parse_tuning("preexposure one")).preExposure == 1.0f);
+    CHECK(!amd::parse_tuning("preexposure auto").changed());
+    // reactive / transparency / masks
+    const amd::Tuning ron = amd::parse_tuning("reactive on");
+    CHECK(amd::dispatch(f, mv, false, Running::amd_fsr4, ron).reactive.resource != nullptr &&
+          amd::dispatch(f, mv, false, Running::amd_fsr4, ron).transparencyAndComposition.resource == nullptr);
+    CHECK(amd::tuning_text(Running::amd_fsr4, ron) == "pre-exposure 1, the game's reactive mask only");
+    const amd::Tuning ton = amd::parse_tuning("transparency on");
+    CHECK(amd::tuning_text(Running::amd_fsr4, ton) == "pre-exposure 1, the game's transparency mask only");
+    const amd::Tuning mon = amd::parse_tuning("masks on"), moff = amd::parse_tuning("masks off");
+    CHECK(amd::tuning_text(Running::amd_fsr4, mon) == "pre-exposure 1, the game's masks");
+    CHECK(amd::dispatch(f, mv, false, Running::amd_fsr3, moff).reactive.resource == nullptr &&
+          amd::dispatch(f, mv, false, Running::amd_fsr3, moff).transparencyAndComposition.resource == nullptr);
+    // beta 3's FSR 4 inputs, whole: "preexposure game" + "masks on"
+    const amd::Tuning beta3 = amd::parse_tuning("preexposure game\nmasks on");
+    const ffxDispatchDescUpscale b3 = amd::dispatch(f, mv, false, Running::amd_fsr4, beta3);
+    CHECK(b3.preExposure == 0.077f && b3.reactive.resource != nullptr && b3.transparencyAndComposition.resource != nullptr);
+    // hdr off
+    CreateInfo ci;
+    const amd::Tuning ldr = amd::parse_tuning("hdr off");
+    CHECK(ldr.hdr_off && ldr.changed());
+    CHECK(!(amd::create_flags(ci, ldr) & FFX_UPSCALE_ENABLE_HIGH_DYNAMIC_RANGE) && (amd::create_flags(ci) & FFX_UPSCALE_ENABLE_HIGH_DYNAMIC_RANGE));
+    CHECK(!amd::parse_tuning("hdr on").hdr_off);
+    // colour srgb / pq: the create flag and the dispatch's colour flag
+    const amd::Tuning srgb = amd::parse_tuning("colour srgb"), pq = amd::parse_tuning("color pq");
+    CHECK((amd::create_flags(ci, srgb) & FFX_UPSCALE_ENABLE_NON_LINEAR_COLORSPACE) && !(amd::create_flags(ci) & FFX_UPSCALE_ENABLE_NON_LINEAR_COLORSPACE));
+    CHECK(amd::dispatch(f, mv, false, Running::amd_fsr4, srgb).flags == FFX_UPSCALE_FLAG_NON_LINEAR_COLOR_SRGB &&
+          amd::dispatch(f, mv, false, Running::amd_fsr4, pq).flags == FFX_UPSCALE_FLAG_NON_LINEAR_COLOR_PQ);
+    CHECK(amd::dispatch(f, mv, false, Running::amd_fsr4, def).flags == 0);
+    CHECK(amd::tuning_text(Running::amd_fsr3, srgb) == "pre-exposure from the game, the game's masks, colour said sRGB");
+    // several at once, and lines Kiln does not know
+    const amd::Tuning many = amd::parse_tuning("exposure one\npreexposure one\nhdr off\nbogus 1\n");
+    CHECK(many.exposure == amd::Exposure::one && many.pre_exposure == amd::PreExposure::one && many.hdr_off && many.notes.size() == 1);
+}
+
+// The game's pre-exposure over a stretch of frames, for kiln.log (min..max, the last).
+static void exposure_range() {
+    ExposureRange r;
+    CHECK(r.text() == "none");
+    r.add(1.0f);
+    r.add(0.077f);
+    r.add(0.5f);
+    CHECK(r.text() == "0.077..1 (last 0.5)");
+    r.reset();
+    CHECK(r.text() == "none");
+    r.add(0.0f);  // the game's 0 (none): shown as it is
+    CHECK(r.text() == "0..0 (last 0)");
+}
+
 static void amd_map() {
     // device needs: everything FFX uses when offered, and FSR 4's set; all optional
     const DeviceNeeds n = amd::device_needs();
@@ -565,6 +635,8 @@ int main(int argc, char** argv) {
     restart_lead();
     latch();
     amd_map();
+    amd_fsr4_inputs();
+    exposure_range();
     std::printf("upscale_test: %d checks passed\n", g_checks);
     return 0;
 }

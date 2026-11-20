@@ -228,7 +228,7 @@ class AmdBackend final : public Backend {
         reset_ = true;
         // what AMD FSR was told about the game's picture (kiln.log, for reports: the dark-picture fix of 29.19)
         *detail = "FSR " + version_name_ + " (" + amd::flags_text(amd::create_flags(ci, tuning_)) +
-                  (tuning_.changed() ? ", from kiln/control/amd" : "") + "; pre-exposure from the game, no exposure texture)" +
+                  (tuning_.changed() ? ", from kiln/control/amd" : "") + "; " + amd::tuning_text(running_, tuning_) + ", no exposure texture)" +
                   (note.empty() ? "" : "; " + note);
         for (const auto& n : tuning_.notes) *detail += "; kiln/control/amd: not understood: " + n;
         return true;
@@ -252,7 +252,7 @@ class AmdBackend final : public Backend {
         }
         Texture motion = f.motion;
         if (f.motion.format == VK_FORMAT_R16G16_SNORM && !mv_.record(f.cb, f.motion, f.frame, &motion, detail)) return false;
-        ffxDispatchDescUpscale d = amd::dispatch(f, motion, reset_);
+        ffxDispatchDescUpscale d = amd::dispatch(f, motion, reset_, running_, tuning_);
         reset_ = false;
         const uint32_t r = fx_.Dispatch(&ctx_, &d.header);
         if (r != FFX_API_RETURN_OK) {
