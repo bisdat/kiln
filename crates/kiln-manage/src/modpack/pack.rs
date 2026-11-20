@@ -1433,7 +1433,10 @@ fn pack_mods(ix: &PackIndex, choices: &BTreeMap<String, bool>) -> crate::profile
 /// Writes the overrides of a side into a config folder (each a fresh merge onto what is there): the files written.
 fn apply_overrides(config_dir: &Path, r: &ReadPack, side_ok: &dyn Fn(PartSide) -> bool) -> Result<Vec<String>> {
     let mut written = Vec::new();
-    for o in r.index.overrides.iter().filter(|o| side_ok(o.side)) {
+    // the both-sides override first, the side's own on top of it, whatever order the index lists them in
+    let mut list: Vec<&PackOverride> = r.index.overrides.iter().filter(|o| side_ok(o.side)).collect();
+    list.sort_by_key(|o| o.side != PartSide::Both);
+    for o in list {
         let text = r.override_text(o.side, &o.path).unwrap_or_default();
         let leaves = merge::leaves(o.mode, &o.path, &text)?;
         let target = config_dir.join(&o.path);
@@ -1463,14 +1466,27 @@ fn write_base(dirs: &DataDirs, pid: &str, r: &ReadPack) -> Result<()> {
         }
         std::fs::write(&p, bytes).map_err(crate::util::io_at(&p, "writing"))?;
     }
-    let _ = std::fs::remove_dir_all(&base);
-    std::fs::rename(&tmp, &base).map_err(crate::util::io_at(&base, "moving"))?;
+    // the old base moves aside first and comes back if the new one cannot take its place: an instance always has one
+    let old = pack_dir(dirs, pid).join("base.old");
+    let _ = std::fs::remove_dir_all(&old);
+    if base.exists() {
+        std::fs::rename(&base, &old).map_err(crate::util::io_at(&base, "moving"))?;
+    }
+    if let Err(e) = std::fs::rename(&tmp, &base) {
+        let _ = std::fs::rename(&old, &base);
+        return Err(crate::util::io_at(&base, "moving")(e));
+    }
+    let _ = std::fs::remove_dir_all(&old);
     Ok(())
 }
 
 /// The installed version (index + overrides) of an instance.
 fn read_base(dirs: &DataDirs, pid: &str) -> Result<(PackIndex, BTreeMap<(PartSide, String), Vec<u8>>)> {
-    let base = pack_dir(dirs, pid).join("base");
+    let mut base = pack_dir(dirs, pid).join("base");
+    // a write_base cut off between its two renames left the installed version in base.old
+    if !base.exists() && pack_dir(dirs, pid).join("base.old").join(super::MANIFEST).is_file() {
+        base = pack_dir(dirs, pid).join("base.old");
+    }
     let ix: PackIndex = crate::util::read_json(&base.join(super::MANIFEST))?
         .ok_or_else(|| Error::not_found(format!("profile {pid} has no pack base (pack/base/{})", super::MANIFEST)))?;
     let mut ov = BTreeMap::new();
@@ -2087,6 +2103,29 @@ mod tests {
             // a bot token's last part, made here: written out, it would be a secret to scanners
             let t = &t.replace("TOKENTAIL", &"x".repeat(27));
             assert!(!secret_findings(f, t).is_empty(), "{f}: {t}");
+        }
+    }
+
+    fn rp(overrides: &[(PartSide, &str)]) -> ReadPack {
+        let mut ix: PackIndex = serde_json::from_value(serde_json::json!({ "format": 2, "kind": "pack", "id": "p", "name": "P", "version": "1.0.0", "mods": [] })).unwrap();
+        let mut ov = BTreeMap::new();
+        for (side, text) in overrides {
+            ix.overrides.push(PackOverride { path: "a.json".into(), mode: OverrideMode::MergePatch, side: *side, sha256: crate::hash::sha256_hex(text.as_bytes()), size: None });
+            ov.insert((*side, "a.json".to_string()), text.as_bytes().to_vec());
+        }
+        ReadPack { index: ix, overrides: ov, sha256: String::new(), size: 0, code: BTreeSet::new() }
+    }
+
+    #[test]
+    fn a_side_override_wins_over_the_both_sides_one_whatever_the_index_order() {
+        let dir = std::env::temp_dir().join(format!("km-pack-order-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        for order in [[(PartSide::Client, r#"{ "v": "client" }"#), (PartSide::Both, r#"{ "v": "both" }"#)],
+                      [(PartSide::Both, r#"{ "v": "both" }"#), (PartSide::Client, r#"{ "v": "client" }"#)]] {
+            apply_overrides(&dir, &rp(&order), &|s| s.for_client()).unwrap();
+            let v = crate::jsonc::parse_tree(&std::fs::read_to_string(dir.join("a.json")).unwrap()).unwrap().to_value();
+            assert_eq!(v["v"], "client", "{order:?}");
+            let _ = std::fs::remove_dir_all(&dir);
         }
     }
 }
