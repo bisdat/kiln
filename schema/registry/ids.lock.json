@@ -1,0 +1,447 @@
+{
+  "format": 1,
+  "doc": "Every registry and field name Kiln's registry schemas have published, with the version that published it and its numeric id (schema.g.h's field ids). Names and ids are never reused: a field that leaves its schema moves to \"retired\" (registrygen.py retire). Written by tools/registrygen/registrygen.py lock; never edit an id by hand.",
+  "registries": {
+    "items": {
+      "id": 1,
+      "version": "1.0.0",
+      "since": "1.0.0",
+      "fields": {
+        "maxStack": {
+          "id": 1,
+          "since": "1.0.0"
+        },
+        "rarity": {
+          "id": 2,
+          "since": "1.0.0"
+        },
+        "rolled": {
+          "id": 3,
+          "since": "1.0.0"
+        },
+        "levels.min": {
+          "id": 4,
+          "since": "1.0.0"
+        },
+        "levels.max": {
+          "id": 5,
+          "since": "1.0.0"
+        },
+        "socket": {
+          "id": 6,
+          "since": "1.0.0"
+        },
+        "perks": {
+          "id": 7,
+          "since": "1.0.0"
+        },
+        "power": {
+          "id": 8,
+          "since": "1.0.0"
+        },
+        "speed": {
+          "id": 9,
+          "since": "1.0.0"
+        },
+        "hasDamage": {
+          "id": 10,
+          "since": "1.0.0"
+        },
+        "damage.cut": {
+          "id": 11,
+          "since": "1.0.0"
+        },
+        "damage.pierce": {
+          "id": 12,
+          "since": "1.0.0"
+        },
+        "damage.blunt": {
+          "id": 13,
+          "since": "1.0.0"
+        },
+        "damage.fire": {
+          "id": 14,
+          "since": "1.0.0"
+        },
+        "damage.ice": {
+          "id": 15,
+          "since": "1.0.0"
+        },
+        "damage.shroud": {
+          "id": 16,
+          "since": "1.0.0"
+        },
+        "damage.lightning": {
+          "id": 17,
+          "since": "1.0.0"
+        },
+        "damage.poison": {
+          "id": 18,
+          "since": "1.0.0"
+        },
+        "damage.healing": {
+          "id": 19,
+          "since": "1.0.0"
+        },
+        "damage.wood": {
+          "id": 20,
+          "since": "1.0.0"
+        },
+        "damage.stone": {
+          "id": 21,
+          "since": "1.0.0"
+        },
+        "damage.metal": {
+          "id": 22,
+          "since": "1.0.0"
+        },
+        "damage.explosion": {
+          "id": 23,
+          "since": "1.0.0"
+        },
+        "hasArmor": {
+          "id": 24,
+          "since": "1.0.0"
+        },
+        "armor.physical": {
+          "id": 25,
+          "since": "1.0.0"
+        },
+        "armor.magical": {
+          "id": 26,
+          "since": "1.0.0"
+        },
+        "armor.cut": {
+          "id": 27,
+          "since": "1.0.0"
+        },
+        "armor.pierce": {
+          "id": 28,
+          "since": "1.0.0"
+        },
+        "armor.blunt": {
+          "id": 29,
+          "since": "1.0.0"
+        },
+        "armor.fire": {
+          "id": 30,
+          "since": "1.0.0"
+        },
+        "armor.ice": {
+          "id": 31,
+          "since": "1.0.0"
+        },
+        "armor.shroud": {
+          "id": 32,
+          "since": "1.0.0"
+        },
+        "armor.lightning": {
+          "id": 33,
+          "since": "1.0.0"
+        },
+        "block": {
+          "id": 34,
+          "since": "1.0.0"
+        },
+        "staminaCost": {
+          "id": 35,
+          "since": "1.0.0"
+        },
+        "manaCost": {
+          "id": 36,
+          "since": "1.0.0"
+        },
+        "fuel.burnTime": {
+          "id": 37,
+          "since": "1.0.0"
+        },
+        "comfort": {
+          "id": 38,
+          "since": "1.0.0"
+        }
+      },
+      "retired": {}
+    },
+    "recipes": {
+      "id": 2,
+      "version": "1.0.0",
+      "since": "1.0.0",
+      "fields": {
+        "inputs": {
+          "id": 1,
+          "since": "1.0.0"
+        },
+        "inputs[].item": {
+          "id": 2,
+          "since": "1.0.0"
+        },
+        "inputs[].category": {
+          "id": 3,
+          "since": "1.0.0"
+        },
+        "inputs[].count": {
+          "id": 4,
+          "since": "1.0.0"
+        },
+        "outputs": {
+          "id": 5,
+          "since": "1.0.0"
+        },
+        "outputs[].item": {
+          "id": 6,
+          "since": "1.0.0"
+        },
+        "outputs[].count": {
+          "id": 7,
+          "since": "1.0.0"
+        },
+        "duration": {
+          "id": 8,
+          "since": "1.0.0"
+        },
+        "unlock": {
+          "id": 9,
+          "since": "1.0.0"
+        },
+        "station": {
+          "id": 10,
+          "since": "1.0.0"
+        }
+      },
+      "retired": {}
+    },
+    "loot": {
+      "id": 3,
+      "version": "1.0.0",
+      "since": "1.0.0",
+      "fields": {
+        "stack.min": {
+          "id": 1,
+          "since": "1.0.0"
+        },
+        "stack.max": {
+          "id": 2,
+          "since": "1.0.0"
+        },
+        "stack.scalable": {
+          "id": 3,
+          "since": "1.0.0"
+        },
+        "stack.maxScaled": {
+          "id": 4,
+          "since": "1.0.0"
+        },
+        "rarities": {
+          "id": 5,
+          "since": "1.0.0"
+        },
+        "fixedRarity": {
+          "id": 6,
+          "since": "1.0.0"
+        }
+      },
+      "retired": {}
+    },
+    "drops": {
+      "id": 4,
+      "version": "1.0.0",
+      "since": "1.0.0",
+      "fields": {
+        "entries": {
+          "id": 1,
+          "since": "1.0.0"
+        },
+        "entries[].item": {
+          "id": 2,
+          "since": "1.0.0"
+        },
+        "entries[].count.min": {
+          "id": 3,
+          "since": "1.0.0"
+        },
+        "entries[].count.max": {
+          "id": 4,
+          "since": "1.0.0"
+        },
+        "entries[].chance": {
+          "id": 5,
+          "since": "1.0.0"
+        },
+        "entries[].weight": {
+          "id": 6,
+          "since": "1.0.0"
+        }
+      },
+      "retired": {}
+    },
+    "balance": {
+      "id": 5,
+      "version": "1.0.0",
+      "since": "1.0.0",
+      "fields": {
+        "xpPerLevel": {
+          "id": 1,
+          "since": "1.0.0"
+        },
+        "xpCurve.start": {
+          "id": 2,
+          "since": "1.0.0"
+        },
+        "xpCurve.end": {
+          "id": 3,
+          "since": "1.0.0"
+        },
+        "xpCurve.levelMax": {
+          "id": 4,
+          "since": "1.0.0"
+        },
+        "xpCurve.seed": {
+          "id": 5,
+          "since": "1.0.0"
+        },
+        "xpCurve.fromKnowledge": {
+          "id": 6,
+          "since": "1.0.0"
+        },
+        "levelCap": {
+          "id": 7,
+          "since": "1.0.0"
+        },
+        "skillPointsPerLevel": {
+          "id": 8,
+          "since": "1.0.0"
+        },
+        "flameLevelMax": {
+          "id": 9,
+          "since": "1.0.0"
+        },
+        "altarsPerFlameLevel": {
+          "id": 10,
+          "since": "1.0.0"
+        },
+        "waterSourcesPerFlameLevel": {
+          "id": 11,
+          "since": "1.0.0"
+        },
+        "buildzoneSizesPerAltarLevel": {
+          "id": 12,
+          "since": "1.0.0"
+        },
+        "buildzoneSizesPerAltarLevel[].x": {
+          "id": 13,
+          "since": "1.0.0"
+        },
+        "buildzoneSizesPerAltarLevel[].y": {
+          "id": 14,
+          "since": "1.0.0"
+        },
+        "buildzoneSizesPerAltarLevel[].z": {
+          "id": 15,
+          "since": "1.0.0"
+        },
+        "fogResistance.base": {
+          "id": 16,
+          "since": "1.0.0"
+        },
+        "fogResistance.perFlameLevel": {
+          "id": 17,
+          "since": "1.0.0"
+        },
+        "durability.start": {
+          "id": 18,
+          "since": "1.0.0"
+        },
+        "durability.growth": {
+          "id": 19,
+          "since": "1.0.0"
+        },
+        "rarityDurability.common": {
+          "id": 20,
+          "since": "1.0.0"
+        },
+        "rarityDurability.uncommon": {
+          "id": 21,
+          "since": "1.0.0"
+        },
+        "rarityDurability.rare": {
+          "id": 22,
+          "since": "1.0.0"
+        },
+        "rarityDurability.epic": {
+          "id": 23,
+          "since": "1.0.0"
+        },
+        "rarityDurability.legendary": {
+          "id": 24,
+          "since": "1.0.0"
+        },
+        "socketChance.common": {
+          "id": 25,
+          "since": "1.0.0"
+        },
+        "socketChance.uncommon": {
+          "id": 26,
+          "since": "1.0.0"
+        },
+        "socketChance.rare": {
+          "id": 27,
+          "since": "1.0.0"
+        },
+        "socketChance.epic": {
+          "id": 28,
+          "since": "1.0.0"
+        },
+        "socketChance.legendary": {
+          "id": 29,
+          "since": "1.0.0"
+        },
+        "unlockCost.seed": {
+          "id": 30,
+          "since": "1.0.0"
+        },
+        "unlockCost.creep": {
+          "id": 31,
+          "since": "1.0.0"
+        },
+        "unlockCost.weapons": {
+          "id": 32,
+          "since": "1.0.0"
+        },
+        "unlockCost.armor": {
+          "id": 33,
+          "since": "1.0.0"
+        },
+        "unlockCost.rings": {
+          "id": 34,
+          "since": "1.0.0"
+        },
+        "unlockCost.advanced": {
+          "id": 35,
+          "since": "1.0.0"
+        },
+        "unlockCost.advancedFrom": {
+          "id": 36,
+          "since": "1.0.0"
+        },
+        "gear.seed": {
+          "id": 37,
+          "since": "1.0.0"
+        },
+        "gear.creep": {
+          "id": 38,
+          "since": "1.0.0"
+        },
+        "gear.armorOffset": {
+          "id": 39,
+          "since": "1.0.0"
+        },
+        "gear.armorGradient": {
+          "id": 40,
+          "since": "1.0.0"
+        }
+      },
+      "retired": {}
+    }
+  },
+  "retiredRegistries": {}
+}

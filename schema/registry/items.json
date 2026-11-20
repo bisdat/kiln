@@ -1,0 +1,321 @@
+{
+  "$schema": "../registry-schema.schema.json",
+  "registrySchema": 1,
+  "registry": "items",
+  "typeName": "Item",
+  "version": "1.0.0",
+  "stability": "experimental",
+  "experimentalId": "KILNX031",
+  "doc": "Every item the game or a mod defines: stack sizes, rarity, levels, the gear numbers a tooltip shows (power, speed, damage, armour), costs, perks and sockets.",
+  "ids": {
+    "game": "game:<stable name>",
+    "mod": "<mod id>:<name>",
+    "rule": "The stable name starts as the item's debug name in lower case (Material_T1_Wood_Logs is game:material_t1_wood_logs). An item without a debug name is game:item_<its 32-bit item id as 8 hex digits>. When two items would get the same name, the one that held it first keeps it and the other is game:<name>~<first 8 hex digits of its GUID>."
+  },
+  "traits": {
+    "weapon": "deals damage (hasDamage)",
+    "armor": "gives armour (hasArmor)",
+    "stackable": "maxStack above 1"
+  },
+  "fields": {
+    "maxStack": {
+      "type": "int",
+      "min": 1,
+      "max": 65535,
+      "applies": "worldLoad",
+      "ops": "number",
+      "doc": "The largest stack. In place before the world's save is read: a lower value cuts stacks in that save."
+    },
+    "rarity": {
+      "type": "enum",
+      "values": [
+        "common",
+        "uncommon",
+        "rare",
+        "epic",
+        "legendary"
+      ],
+      "applies": "now",
+      "ops": "set",
+      "doc": "The rarity a new copy gets when it does not roll one. Copies that exist keep theirs.",
+      "typeName": "RegistryRarity"
+    },
+    "rolled": {
+      "type": "bool",
+      "applies": "now",
+      "ops": "set",
+      "doc": "New copies roll their rarity (and perks) instead of taking rarity. Copies that exist keep theirs."
+    },
+    "levels": {
+      "type": "struct",
+      "applies": "now",
+      "doc": "The item's level range. New copies are made inside it; a save load clamps existing copies into it.",
+      "fields": {
+        "min": {
+          "type": "int",
+          "min": 1,
+          "max": 105,
+          "ops": "number",
+          "doc": "The lowest level (also the level power and armour are shown at)."
+        },
+        "max": {
+          "type": "int",
+          "min": 1,
+          "max": 105,
+          "ops": "number",
+          "doc": "The highest level."
+        }
+      },
+      "typeName": "ItemLevels"
+    },
+    "socket": {
+      "type": "bool",
+      "applies": "now",
+      "ops": "set",
+      "doc": "New copies get a gem socket."
+    },
+    "perks": {
+      "type": "list",
+      "of": {
+        "type": "ref",
+        "registry": "perks"
+      },
+      "maxItems": 5,
+      "applies": "now",
+      "ops": "list",
+      "doc": "The perk of each rarity slot, common first. A copy fills rarity + 1 slots. New copies only."
+    },
+    "power": {
+      "type": "int",
+      "min": 0,
+      "max": 100000,
+      "applies": "now",
+      "ops": "number",
+      "formula": "gear.power",
+      "doc": "The damage the tooltip shows at levels.min. Kiln solves the game's damage factor for it with the balance table's constants."
+    },
+    "speed": {
+      "type": "float",
+      "min": 0.01,
+      "max": 100,
+      "applies": "now",
+      "ops": "number",
+      "doc": "The speed factor of the weapon's damage (multiplies power)."
+    },
+    "hasDamage": {
+      "type": "bool",
+      "readOnly": true,
+      "applies": "now",
+      "doc": "The item deals damage (power, speed and damage apply)."
+    },
+    "damage": {
+      "type": "struct",
+      "applies": "now",
+      "doc": "The kinds of damage a hit deals. The hit kinds (cut to poison) are shares that should add up to 1; wood, stone, metal and explosion are whole numbers.",
+      "fields": {
+        "cut": {
+          "type": "float",
+          "min": 0,
+          "max": 10,
+          "ops": "number"
+        },
+        "pierce": {
+          "type": "float",
+          "min": 0,
+          "max": 10,
+          "ops": "number"
+        },
+        "blunt": {
+          "type": "float",
+          "min": 0,
+          "max": 10,
+          "ops": "number"
+        },
+        "fire": {
+          "type": "float",
+          "min": 0,
+          "max": 10,
+          "ops": "number"
+        },
+        "ice": {
+          "type": "float",
+          "min": 0,
+          "max": 10,
+          "ops": "number"
+        },
+        "shroud": {
+          "type": "float",
+          "min": 0,
+          "max": 10,
+          "ops": "number"
+        },
+        "lightning": {
+          "type": "float",
+          "min": 0,
+          "max": 10,
+          "ops": "number"
+        },
+        "poison": {
+          "type": "float",
+          "min": 0,
+          "max": 10,
+          "ops": "number"
+        },
+        "healing": {
+          "type": "float",
+          "min": 0,
+          "max": 10,
+          "ops": "number"
+        },
+        "wood": {
+          "type": "int",
+          "min": 0,
+          "max": 1000000,
+          "ops": "number"
+        },
+        "stone": {
+          "type": "int",
+          "min": 0,
+          "max": 1000000,
+          "ops": "number"
+        },
+        "metal": {
+          "type": "int",
+          "min": 0,
+          "max": 1000000,
+          "ops": "number"
+        },
+        "explosion": {
+          "type": "int",
+          "min": 0,
+          "max": 1000000,
+          "ops": "number"
+        }
+      },
+      "typeName": "ItemDamage"
+    },
+    "hasArmor": {
+      "type": "bool",
+      "readOnly": true,
+      "applies": "now",
+      "doc": "The item gives armour (armor applies)."
+    },
+    "armor": {
+      "type": "struct",
+      "applies": "now",
+      "formula": "gear.armor",
+      "doc": "The armour of each kind the tooltip shows at levels.min. Kiln solves the game's share for it with the balance table's constants.",
+      "fields": {
+        "physical": {
+          "type": "int",
+          "min": 0,
+          "max": 100000,
+          "ops": "number"
+        },
+        "magical": {
+          "type": "int",
+          "min": 0,
+          "max": 100000,
+          "ops": "number"
+        },
+        "cut": {
+          "type": "int",
+          "min": 0,
+          "max": 100000,
+          "ops": "number"
+        },
+        "pierce": {
+          "type": "int",
+          "min": 0,
+          "max": 100000,
+          "ops": "number"
+        },
+        "blunt": {
+          "type": "int",
+          "min": 0,
+          "max": 100000,
+          "ops": "number"
+        },
+        "fire": {
+          "type": "int",
+          "min": 0,
+          "max": 100000,
+          "ops": "number"
+        },
+        "ice": {
+          "type": "int",
+          "min": 0,
+          "max": 100000,
+          "ops": "number"
+        },
+        "shroud": {
+          "type": "int",
+          "min": 0,
+          "max": 100000,
+          "ops": "number"
+        },
+        "lightning": {
+          "type": "int",
+          "min": 0,
+          "max": 100000,
+          "ops": "number"
+        }
+      },
+      "typeName": "ItemArmor"
+    },
+    "block": {
+      "type": "float",
+      "min": 0,
+      "max": 1,
+      "applies": "now",
+      "ops": "number",
+      "doc": "How well the item blocks (0 to 1)."
+    },
+    "staminaCost": {
+      "type": "float",
+      "min": 0,
+      "max": 100000,
+      "applies": "now",
+      "ops": "number",
+      "doc": "The stamina a use costs, at the next payment."
+    },
+    "manaCost": {
+      "type": "float",
+      "min": 0,
+      "max": 100000,
+      "applies": "now",
+      "ops": "number",
+      "doc": "The mana a use costs, at the next cast."
+    },
+    "fuel": {
+      "type": "struct",
+      "applies": "worldLoad",
+      "doc": "What the item gives as fuel. When the game reads it is not traced yet: unproven until a Kiln update maps it.",
+      "fields": {
+        "burnTime": {
+          "type": "time",
+          "unit": "s",
+          "min": 0,
+          "max": 86400,
+          "ops": "number",
+          "doc": "How long one item burns."
+        }
+      },
+      "typeName": "ItemFuel"
+    },
+    "comfort": {
+      "type": "int",
+      "min": 0,
+      "max": 1000,
+      "applies": "worldLoad",
+      "ops": "number",
+      "doc": "The comfort the item gives when placed. When the game reads it is not traced yet: unproven until a Kiln update maps it."
+    }
+  },
+  "entry": {
+    "add": true,
+    "remove": "hidden",
+    "removeDoc": "A removed item stays in the game's tables (saves keep their copies) but is hidden from loot, drops and recipes."
+  },
+  "raw": "allowed"
+}

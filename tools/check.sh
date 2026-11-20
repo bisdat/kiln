@@ -8,6 +8,9 @@
 #           in <Assembly>)" line (a type moved, recorded by <Assembly>), and no merge conflict marker in a PublicAPI file
 #   records tools/sigport/build_record.py check: the newest build record of each side lists every name sigdb declares,
 #           once, with a level (sigdb/builds/README.md); a sigdb name added without a refresh fails here
+#   registry tools/registrygen/registrygen.py --check: the registry schemas (schema/registry/*.json) are valid, every name
+#           is in ids.lock.json, and the files made from them (Kiln.Registry's Generated/*.g.cs, schema.g.h, the data
+#           section's schema, docs/kiln/modding/registries/*.md) are current
 #   build   every managed project with a PublicAPI.Shipped.txt (found by that file, so gate 1, the PublicApiAnalyzers
 #           record, runs), Kiln.Host and the unit test projects: one Release build of one generated solution
 #           ($KILN_OUT/check/check.slnx), so each project is built once
@@ -93,6 +96,16 @@ else
   result records FAILED $((SECONDS - t)) "a build record does not list what sigdb declares:"
   grep -vE '^ +(server|client) [0-9a-f]+… .*superseded' "$work/records.log" | head -40
   failed+=(records)
+fi
+
+# registry
+t=$SECONDS
+if python3 -I "$repo/tools/registrygen/registrygen.py" --check >"$work/registry.log" 2>&1; then
+  result registry OK $((SECONDS - t)) "$(tail -1 "$work/registry.log" | sed 's/^registrygen: //')"
+else
+  result registry FAILED $((SECONDS - t)) "the registry schemas or the files made from them:"
+  head -40 "$work/registry.log"
+  failed+=(registry)
 fi
 
 # build
