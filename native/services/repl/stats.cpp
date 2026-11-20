@@ -108,6 +108,7 @@ void cb_after(void* p) {
         add(s.destroyed_ids, n.destroyed_ids);
     }
     if (watch_active()) watch_callback(b);
+    if (track_active()) track_callback(b);  // kiln.repl.net's sidecar tracking
     if (t0) {
         add(s.cb_calls);
         add(s.cb_cycles, __rdtsc() - t0);
@@ -222,7 +223,7 @@ void stats_apply_hooks() {
         counting = g_owner_n > 0;
     }
     g_counting.store(counting, std::memory_order_relaxed);
-    const bool want_send = counting || watch_active(), want_tick = counting;
+    const bool want_send = counting || watch_active() || track_active(), want_tick = counting;
     if (want_send != g_send_hooked) {
         if (want_send) {
             const One send[] = {
@@ -230,7 +231,9 @@ void stats_apply_hooks() {
                 {&h_wr, F.entity_writer, reinterpret_cast<void*>(&d_wr), "repl/stats EntityWriter"},
             };
             g_send_hooked = install_all(send, std::size(send), "send");
-            if (g_send_hooked) logf(KILN_LOG_INFO, "repl: send hooks installed (send callback, entity writer) for %s", counting ? "the stats" : "a watch");
+            if (g_send_hooked)
+                logf(KILN_LOG_INFO, "repl: send hooks installed (send callback, entity writer) for %s",
+                     counting ? "the stats" : watch_active() ? "a watch" : "sidecar tracking");
         } else {
             h_cb.revoke();
             h_wr.revoke();
@@ -266,6 +269,7 @@ void clear_all_stats() {
 void KILN_CALL owner_retiring(KilnOwner owner, void*) {
     watch_owner_retiring(owner);
     client_owner_retiring(owner);
+    net_owner_retiring(owner);
     std::lock_guard lock(g_owners_mu);
     for (uint32_t i = 0; i < g_owner_n; ++i)
         if (g_owners[i] == owner) {

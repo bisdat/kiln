@@ -158,4 +158,77 @@ KilnResult KILN_CALL lab_decoded(uint32_t machine, KilnEntity entity, uint32_t h
 KilnResult KILN_CALL lab_payload(uint32_t machine, KilnEntity entity, uint32_t kind, uint8_t* out, uint32_t cap, uint32_t* len,
                                  uint32_t* tick);
 
+// ---- kiln.repl.net (since 0.2.0-dev.31; kiln_repl.h): what mods add to replication (the dossier's chapter 15) ----
+// net.cpp: the table, handle routing by tag, and the lifecycle fan-out to the parts:
+//   track.cpp     sidecar tracking: client-channel creates and destroy lists per peer (SendCallback, stats.cpp's
+//                 want-set) and on a game client (ClientStore, client.cpp); peer_entities
+//   filter.cpp    the per-peer snapshot filters (raw detour on repl/Snapshot) and the remap step's place in them
+//   touch.cpp     the touch program (kiln.world's write_other on carrier components) and invalidation touches
+//   remap.cpp     the item remap (fails closed)
+//   messages.cpp  message hooks at the receive dispatch sites and on the session's send, inject
+//   schema.cpp    the game's message codec
+// Handles carry a tag in their top 16 bits: the part that owns them.
+constexpr uint64_t kTagMask = 0xffffull << 48;
+constexpr uint64_t kTrackTag = 0x544bull << 48;    // "TK"
+constexpr uint64_t kFilterTag = 0x464cull << 48;   // "FL"
+constexpr uint64_t kMessageTag = 0x4d48ull << 48;  // "MH"
+
+void net_start();                                  // kiln_plugin_main, after observe and client resolved
+void net_ready();                                  // on_ready
+void net_pre(uintptr_t world);                     // tick thread, every Pre with a server world, after watch_deliver
+void net_peer_changed(uint32_t machine, uint32_t old_peer);  // tick thread (snapshot_peers)
+void net_world_stopping();                         // the server world goes
+void net_owner_retiring(KilnOwner owner);          // any thread
+uint32_t net_capabilities();                       // KILN_REPL_NET_CAP_*
+extern const KilnReplNetApi kNetTable;
+
+// track.cpp
+void track_start();
+uint32_t track_caps();
+bool track_active();                               // any thread: SendCallback serves the track part
+void track_callback(const Batch* b);               // stats.cpp's SendCallback hook, inside its guard (job thread)
+void track_pre();
+void track_peer_changed(uint32_t machine, uint32_t old_peer);
+void track_world_stopping();
+void track_owner_retiring(KilnOwner owner);
+KilnResult track_remove(KilnHandle h);
+KilnResult KILN_CALL t_track(KilnOwner owner, uint32_t direction, KilnReplTrackFn fn, void* user, KilnHandle* out);
+KilnResult KILN_CALL t_peer_entities(uint32_t peer, KilnReplPeerEntity* out, uint32_t cap, uint32_t* count);
+
+// filter.cpp, touch.cpp, remap.cpp
+void filter_start();
+void filter_ready();
+uint32_t filter_caps();
+void filter_pre(uintptr_t world);
+void filter_peer_changed(uint32_t machine, uint32_t old_peer);
+void filter_world_stopping();
+void filter_owner_retiring(KilnOwner owner);
+KilnResult filter_remove(KilnHandle h);
+KilnResult KILN_CALL t_filter_add(KilnOwner owner, uint32_t component_hash, const uint32_t* peers, uint32_t peer_count,
+                                  uint32_t channels, int32_t priority, const uint32_t* sources, uint32_t source_count,
+                                  KilnReplFilterFn fn, void* user, KilnHandle* out);
+KilnResult KILN_CALL t_filter_set_peers(KilnHandle filter, const uint32_t* peers, uint32_t peer_count);
+KilnResult KILN_CALL t_touch(KilnEntity e, uint32_t* out_status);
+KilnResult KILN_CALL t_remap_set(const KilnReplItemSite* sites, uint32_t site_count, const uint32_t* game_ids,
+                                 uint32_t game_id_count, const KilnReplItemMap* map, uint32_t map_count);
+KilnResult KILN_CALL t_remap_peers(const uint32_t* peers, uint32_t peer_count);
+KilnResult KILN_CALL t_remap_stats(KilnReplRemapStats* out);
+
+// messages.cpp, schema.cpp
+void messages_start();
+uint32_t messages_caps();
+void messages_pre();
+void messages_owner_retiring(KilnOwner owner);
+KilnResult messages_remove(KilnHandle h);
+KilnResult KILN_CALL t_message_hook(KilnOwner owner, uint8_t channel, uint32_t directions, KilnReplMessageFn fn, void* user,
+                                    KilnHandle* out);
+KilnResult KILN_CALL t_message_inject(uint32_t peer, uint8_t channel, const void* data, uint32_t length);
+void schema_start();
+uint32_t schema_caps();
+KilnResult KILN_CALL t_schema_find(KilnStr name, uint32_t* out_size, uint64_t* out_schema);
+KilnResult KILN_CALL t_schema_fields(uint64_t schema, KilnReplSchemaField* out, uint32_t cap, uint32_t* count);
+KilnResult KILN_CALL t_schema_decode(uint64_t schema, const void* bytes, uint32_t length, void* out, uint32_t out_size);
+KilnResult KILN_CALL t_schema_encode(uint64_t schema, const void* msg, uint32_t msg_size, void* out, uint32_t cap,
+                                     uint32_t* out_length);
+
 }  // namespace repl

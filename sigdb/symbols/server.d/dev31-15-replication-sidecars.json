@@ -1,0 +1,146 @@
+{
+ "format": 1,
+ "side": "server",
+ "comment": "kiln.repl.net (dev.31, package 15: mod data on the network) on the server exe (f0d824be, Steam 26430253); the same patterns match the client exe's hosted copy (client.d overlay). repl.filter = the per-peer snapshot site (Snapshot, after the original: that player's state is final) and the queue's enqueue; repl.touch = MarkReplication (the touch itself goes through kiln.world's write_other); repl.schema = the game's message codec; repl.messages.server = the server's receive loop, its two dispatch sites (rax = channel) and the loops' free sites (drop). Evidence: docs/re/network.md (Replication pipeline; Schema and receive sites), the dev.28 dossier chapter 15.",
+ "symbols": {
+  "repl/Snapshot": {
+   "find": [
+    {
+     "pattern": "48 89 54 24 10 48 89 4C 24 08 55 53 57 41 54 41 55 41 57 48"
+    }
+   ]
+  },
+  "repl/Enqueue": {
+   "find": [
+    {
+     "pattern": "44 89 4C 24 20 55 57 41 56 48 83 EC 50 44 8B 99 DC 04 00 00"
+    }
+   ]
+  },
+  "repl/MarkReplication": {
+   "find": [
+    {
+     "pattern": "4C 8B DC 49 89 5B 08 49 89 73 10 57 48 83 EC 50 0F B7 84 24"
+    }
+   ]
+  },
+  "repl/SchemaEncode": {
+   "find": [
+    {
+     "pattern": "4C 8B DC 4D 89 43 18 49 89 53 10 53 57 48 83 EC 58 33 C0 48"
+    }
+   ]
+  },
+  "repl/SchemaDecode": {
+   "find": [
+    {
+     "pattern": "48 89 5C 24 08 4C 89 44 24 18 55 56 57 41 54 41 55 41 56 41 57 48 83 EC 40"
+    }
+   ]
+  },
+  "repl/ServerReceiveFn": {
+   "find": [
+    {
+     "pattern": "40 55 53 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 ?? ?? FF FF 48 81 EC ?? ?? 00 00 4C 8B E9 48 8B 49 ?? E8 ?? ?? ?? ?? 49 8B 55 10"
+    },
+    {
+     "pattern": "40 55 53 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 ?? ?? FF FF 48 81 EC ?? ?? 00 00 4C 8B F9 48 8B 49 ?? E8 ?? ?? ?? ?? 49 8B 57 10"
+    }
+   ]
+  },
+  "repl/ServerMachineDispatch": {
+   "find": [
+    {
+     "scope": {
+      "symbol": "repl/ServerReceiveFn",
+      "size": 4096
+     },
+     "offset": 10,
+     "pattern": "84 C0 0F 85 ?? ?? ?? ?? 8B C6 41 8B 8C 82 ?? ?? ?? ?? 49 03 CA FF E1"
+    }
+   ]
+  },
+  "repl/ServerPlayerDispatch": {
+   "find": [
+    {
+     "scope": {
+      "symbol": "repl/ServerReceiveFn",
+      "size": 4096
+     },
+     "offset": 17,
+     "pattern": "84 C0 0F 85 ?? ?? ?? ?? 48 8D 15 ?? ?? ?? ?? 8B C6 8B 8C 82 ?? ?? ?? ?? 48 03 CA FF E1"
+    },
+    {
+     "scope": {
+      "symbol": "repl/ServerReceiveFn",
+      "size": 4096
+     },
+     "offset": 18,
+     "pattern": "84 C0 0F 85 ?? ?? ?? ?? 48 8D 15 ?? ?? ?? ?? 41 8B C5 8B 8C 82 ?? ?? ?? ?? 48 03 CA FF E1"
+    }
+   ]
+  },
+  "repl/ServerMachineFree": {
+   "find": [
+    {
+     "scope": {
+      "symbol": "repl/ServerReceiveFn",
+      "size": 4096
+     },
+     "pattern": "49 8B ?? 30 48 8D 55 88 48 8B 09 E8 ?? ?? ?? ?? 0F 10 0D ?? ?? ?? ?? 4C 8D"
+    }
+   ]
+  },
+  "repl/ServerPlayerFree": {
+   "find": [
+    {
+     "scope": {
+      "symbol": "repl/ServerReceiveFn",
+      "size": 4096
+     },
+     "pattern": "49 8B ?? 30 48 8D 55 88 48 8B 09 E8 ?? ?? ?? ?? 0F 10 0D ?? ?? ?? ?? 4C 8B"
+    }
+   ]
+  }
+ },
+ "features": {
+  "repl.filter": {
+   "symbols": [
+    "repl/Snapshot",
+    "repl/EntityWriter",
+    "repl/StateIndex",
+    "repl/Enqueue",
+    "@repl.layout"
+   ],
+   "constants": [
+    "repl/world.objects",
+    "repl/obj.stride",
+    "repl/obj.client_ctx",
+    "repl/obj.pred_ctx"
+   ]
+  },
+  "repl.touch": {
+   "symbols": [
+    "repl/MarkReplication"
+   ],
+   "constants": []
+  },
+  "repl.schema": {
+   "symbols": [
+    "repl/SchemaEncode",
+    "repl/SchemaDecode"
+   ],
+   "constants": []
+  },
+  "repl.messages.server": {
+   "symbols": [
+    "repl/ServerReceiveFn",
+    "repl/ServerMachineDispatch",
+    "repl/ServerPlayerDispatch",
+    "repl/ServerMachineFree",
+    "repl/ServerPlayerFree"
+   ],
+   "constants": []
+  }
+ }
+}

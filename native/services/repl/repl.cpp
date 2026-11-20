@@ -129,6 +129,7 @@ void snapshot_peers() {
         if (changed) {
             stats_peer_changed(m);
             watch_peer_changed(m, old);
+            net_peer_changed(m, old);
         }
     }
 }
@@ -267,6 +268,7 @@ void KILN_CALL on_pre(const KilnTickInfo*, void*) {
     if (world) {
         lab_pre(world);
         watch_deliver();   // the last frame's records, under the peers that frame had
+        net_pre(world);    // kiln.repl.net: the same for its parts (tracking), then filters, touches, hooks
         snapshot_peers();
     }
 }
@@ -275,6 +277,7 @@ void KILN_CALL on_world(const KilnWorldEvent* ev, void*) {
     if (!ev || ev->kind != KILN_WORLD_SERVER || ev->event != KILN_WORLD_STOPPING) return;
     lab_world_stopping();
     watch_world_stopping();
+    net_world_stopping();
     stats_world_stopping();
     for (MachinePeer& p : g_peers) p = MachinePeer{};
     g_world.store(0, std::memory_order_relaxed);
@@ -313,8 +316,9 @@ const KilnReplLabApi kLabTable = {{sizeof(KilnReplLabApi), KILN_REPL_LAB_VERSION
 
 void KILN_CALL on_ready(void*) {
     if (g_side == KILN_SIDE_SERVER) lab_ready(g_side);
+    net_ready();
     g_measure.store(lab_allowed(), std::memory_order_relaxed);  // lab servers time the hooks' own code
-    logf(KILN_LOG_INFO, "repl: capabilities() = 0x%x", t_capabilities());
+    logf(KILN_LOG_INFO, "repl: capabilities() = 0x%x, kiln.repl.net 0x%x", t_capabilities(), net_capabilities());
 }
 
 // ---- start ----
@@ -436,6 +440,8 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     // repl.loopback: the lab harness; on_ready decides whether its functions may answer (policy, kiln.net's lab port)
     if (g_side == KILN_SIDE_SERVER) lab_init();
     else logf(KILN_LOG_INFO, "repl: loopback off (the harness runs on lab servers)");
+    // kiln.repl.net (since 0.2.0-dev.31): tracking, filters, touch, remap, message hooks, the codec
+    net_start();
     info->on_ready = &on_ready;
 
     KilnHandle h = 0;
@@ -446,5 +452,7 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     if (g_side == KILN_SIDE_SERVER &&
         api->register_service(owner, KilnStr{KILN_REPL_LAB_SERVICE, sizeof(KILN_REPL_LAB_SERVICE) - 1}, &kLabTable) != KILN_OK)
         logf(KILN_LOG_WARN, "repl: %s could not be published", KILN_REPL_LAB_SERVICE);
+    if (api->register_service(owner, KilnStr{KILN_REPL_NET_SERVICE, sizeof(KILN_REPL_NET_SERVICE) - 1}, &kNetTable) != KILN_OK)
+        logf(KILN_LOG_WARN, "repl: %s could not be published", KILN_REPL_NET_SERVICE);
     return KILN_OK;
 }
