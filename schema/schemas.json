@@ -172,7 +172,7 @@
     },
     {
       "schema": "kiln-modpack.schema.json",
-      "name": "Kiln server modpack manifest",
+      "name": "Kiln modpack manifest (server modpack, Crucible pack)",
       "kind": "modpack",
       "fileMatch": [
         "**/kiln-modpack.json"
@@ -181,10 +181,9 @@
         "comments": false,
         "trailingCommas": false
       },
-      "reader": "kiln_manage::modpack (serde_json)",
-      "docs": "docs/kiln/launcher/modpacks.md"
-    },
-    {
+      "reader": "kiln_manage::modpack (format 1), kiln_manage::modpack::pack (format 2) (serde_json)",
+      "docs": "docs/kiln/launcher/modpacks.md, docs/kiln/launcher/crucible.md"
+    },    {
       "schema": "kschem-header.schema.json",
       "name": "Kiln schematic header",
       "kind": "schematic",
