@@ -133,10 +133,15 @@ Every text goes through one function, `report::redact`:
 - the home folder becomes `<home>`, in Linux form (`/home/me`), Wine form (`Z:\home\me`), Windows form
   (`C:\Users\Me`), with `/` or `\` (also doubled inside JSON), case ignored;
 - the machine name becomes `<host>` (not when it is the distribution's name, as on a Deck named `steamdeck`);
-- the user name, the home folder's last component and the Steam account names in `loginusers.vdf` become `<user>`,
-  also inside other words (`me-pc`, Wine's `C:\users\me`); a name of 3 characters or fewer only as a whole word, a
-  common word (`user`, `steam`, `kiln` ...) only inside the home folder; Steam display names become `<steam-name>`
-  (whole words);
+- the user name, the home folder's last component and the Steam account names (`AccountName` in each Steam root's
+  `config/loginusers.vdf`, `AutoLoginUser` in `registry.vdf` under `~/.steam`, Flatpak's or Snap's `.steam`) become
+  `<user>`, also inside other words (`me-pc`, Wine's `C:\users\me`); a name of 3 characters or fewer only as a whole
+  word, a common word (`user`, `steam`, `kiln` ...) only inside the home folder; Steam display names (`PersonaName` in
+  `loginusers.vdf` and in each `userdata/<id>/config/localconfig.vdf`) become `<steam-name>` (whole words: no letter or
+  digit next to it, so `Name_world` loses it too). The Steam roots are those Kiln finds games in: native
+  (`~/.local/share/Steam`, `~/.steam/steam`, `~/.steam/root`, `~/.steam/debian-installation`), Flatpak
+  (`~/.var/app/com.valvesoftware.Steam/.local/share/Steam`, `.../data/Steam`), Snap, a Steam Deck's, and on Windows the
+  registry's (`Redactor::add_steam_accounts`);
 - other players: the names Kiln's and ShroudLink's own log lines give the players of a session (Kiln's players
   service `players: joined slot 1 entity 7 'Name' (steam ...)`, Kiln.Network `net: Name (0x81) joined with Kiln`, `peer
   Name ...`, `kick`/`kicking`/`banned`/`refusing Name`, `... sent to Name`, Kiln.Saves `Name has no character id`,

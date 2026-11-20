@@ -78,7 +78,8 @@ struct PathNeedle {
 struct Word {
     text: Vec<char>,
     token: &'static str,
-    /// Only between non-word characters (short or common names); else anywhere (`ivan-pc`, `IVAN~1`).
+    /// Only where no letter or digit is next to it (short or common names, display names: `Oryx593_world` too); else
+    /// anywhere (`ivan-pc`, `IVAN~1`).
     whole: bool,
 }
 
@@ -141,19 +142,45 @@ impl Redactor {
         if let Some(last) = home.file_name().map(|n| n.to_string_lossy().into_owned()) {
             r.add_word(&last, "<user>");
         }
+        r.add_steam_accounts(roots, &home);
+        r
+    }
+
+    /// The Steam accounts of this machine (read only): AccountName (`<user>`) and PersonaName (`<steam-name>`) of every
+    /// account in each root's `config/loginusers.vdf`; the PersonaName of each `userdata/<id>/config/localconfig.vdf` (the
+    /// account that signed in there, also when loginusers.vdf does not remember it); and AutoLoginUser of Steam's
+    /// `registry.vdf` under `home` (native `~/.steam`, Flatpak, Snap). The roots are `steam::roots`' (native, Debian,
+    /// Flatpak, Snap, a Deck's `~/.local/share/Steam`; Windows: the registry's).
+    pub fn add_steam_accounts(&mut self, roots: &[SteamRoot], home: &Path) {
+        let read = |p: &Path| std::fs::read(p).ok().and_then(|b| crate::vdf::parse(&String::from_utf8_lossy(&b)).ok());
+        for root in roots {
+            for e in std::fs::read_dir(root.path.join("userdata")).into_iter().flatten().flatten() {
+                if let Some(v) = read(&e.path().join("config/localconfig.vdf"))
+                    && let Some(p) = v.path(&["UserLocalConfigStore", "friends", "PersonaName"]).and_then(|x| x.as_str())
+                {
+                    self.add_whole_word(p, "<steam-name>");
+                }
+            }
+        }
+        for rel in [".steam/registry.vdf", ".var/app/com.valvesoftware.Steam/.steam/registry.vdf", "snap/steam/common/.steam/registry.vdf"] {
+            if let Some(v) = read(&home.join(rel))
+                && let Some(a) = v.path(&["Registry", "HKCU", "Software", "Valve", "Steam", "AutoLoginUser"]).and_then(|x| x.as_str())
+            {
+                self.add_word(a, "<user>");
+            }
+        }
         for root in roots {
             let Ok(text) = std::fs::read(root.path.join("config/loginusers.vdf")) else { continue };
             let Ok(v) = crate::vdf::parse(&String::from_utf8_lossy(&text)) else { continue };
             for (_, u) in v.get("users").map(|u| u.entries()).unwrap_or_default() {
                 if let Some(a) = u.get("AccountName").and_then(|x| x.as_str()) {
-                    r.add_word(a, "<user>");
+                    self.add_word(a, "<user>");
                 }
                 if let Some(p) = u.get("PersonaName").and_then(|x| x.as_str()) {
-                    r.add_whole_word(p, "<steam-name>");
+                    self.add_whole_word(p, "<steam-name>");
                 }
             }
         }
-        r
     }
 
     /// Adds a home folder (Linux form also matched as Wine's `Z:\...`; Windows form with its drive).
@@ -608,7 +635,7 @@ fn redact_word(text: &[char], w: &Word) -> Vec<char> {
     while i < text.len() {
         let fits = i + n <= text.len()
             && text[i..i + n].iter().zip(&w.text).all(|(&a, &b)| lower(a) == b)
-            && (!w.whole || ((i == 0 || !is_word(text[i - 1])) && (i + n == text.len() || !is_word(text[i + n]))));
+            && (!w.whole || ((i == 0 || !text[i - 1].is_alphanumeric()) && (i + n == text.len() || !text[i + n].is_alphanumeric())));
         if fits {
             out.extend(w.token.chars());
             i += n;
