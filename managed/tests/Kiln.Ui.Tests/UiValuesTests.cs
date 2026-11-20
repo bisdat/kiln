@@ -31,6 +31,9 @@ internal static unsafe class FakeUiValues
     public static nint SlotsFn;
     public static nint LinesFn;
     public static nint LinesUser;
+    public static uint NativeLinesFlags;
+    public static byte NativeLinesOn;
+    public static nint ValuesFn, ValuesUser;
     public static uint OpenOk;
     public static int Opens, Closes;
     public static nint SlotsUser;
@@ -43,7 +46,7 @@ internal static unsafe class FakeUiValues
     {
         Free();
         // room for every appended slot (Gem Forge snapshot, gems.sockets, gem sources); the header says which ones are there
-        Table = (UiValuesNative.Table*)NativeMemory.AllocZeroed((nuint)sizeof(UiValuesNative.SourcesTable));
+        Table = (UiValuesNative.Table*)NativeMemory.AllocZeroed((nuint)sizeof(UiValuesNative.TooltipTable));
         Table->Header = new ServiceHeader { Size = (uint)sizeof(UiValuesNative.Table), Version = 1 };
         Table->Subscribe = &Subscribe;
         Table->Unsubscribe = &Unsubscribe;
@@ -55,6 +58,12 @@ internal static unsafe class FakeUiValues
         Table->GetTooltipDetails = &GetDetails;
         Table->RefreshTooltipDetails = &OpenDetails;
         Table->SubscribeSlots = &SubscribeSlots;
+        var tooltip = (UiValuesNative.TooltipTable*)Table;  // present once a test raises Header.Size to the tooltip table
+        tooltip->TooltipLinesNative = &TooltipLinesNative;
+        tooltip->TooltipValues = &TooltipValues;
+        tooltip->TooltipNativeState = &TooltipNativeState;
+        NativeLinesFlags = 0;
+        NativeLinesOn = 0;
         Ops = (UiValuesNative.TextOps*)NativeMemory.AllocZeroed((nuint)sizeof(UiValuesNative.TextOps));
         Ops->Size = (uint)sizeof(UiValuesNative.TextOps);
         Ops->Version = 1;
@@ -138,6 +147,38 @@ internal static unsafe class FakeUiValues
         r->Ok = 1;
         r->Handle = NextHandle++;
         AfterRegistration?.Invoke();
+        return 0;
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int TooltipLinesNative(ulong owner, uint item, uint flags,
+        delegate* unmanaged[Cdecl]<UiValuesNative.ProviderContext*, UiValuesNative.ItemView*, UiValuesNative.LineWriter*, void*, int> fn,
+        void* user, UiValuesNative.Registration* r)
+    {
+        LinesFn = (nint)fn;
+        LinesUser = (nint)user;
+        NativeLinesFlags = flags;
+        r->Ok = 1;
+        r->Handle = NextHandle++;
+        return 0;
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int TooltipValues(ulong owner, uint item,
+        delegate* unmanaged[Cdecl]<UiValuesNative.ProviderContext*, UiValuesNative.ItemView*, float*, void*, int> fn,
+        void* user, UiValuesNative.Registration* r)
+    {
+        ValuesFn = (nint)fn;
+        ValuesUser = (nint)user;
+        r->Ok = 1;
+        r->Handle = NextHandle++;
+        return 0;
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int TooltipNativeState(UiValuesNative.TooltipNativeState* s)
+    {
+        s->LinesOn = NativeLinesOn;
         return 0;
     }
 
@@ -479,7 +520,8 @@ public sealed unsafe class UiValuesTests : IDisposable
         Assert.Equal(200, sizeof(UiValuesNative.ValueChange));
         Assert.Equal(88, sizeof(UiValuesNative.Table));
         Assert.Equal(320, sizeof(UiValuesNative.TooltipDetails));
-        Assert.Equal(288, sizeof(UiValuesNative.LineWriter));
+        Assert.Equal(296, sizeof(UiValuesNative.LineWriter));  // append_line appended in 0.2.0-dev.29.19
+        Assert.Equal(280, (int)Marshal.OffsetOf<UiValuesNative.LineWriter>(nameof(UiValuesNative.LineWriter.Append)));
         Assert.Equal(112, sizeof(UiValuesNative.VisibleSlot));
         Assert.Equal(120, sizeof(UiValuesNative.SlotsFrame));
     }

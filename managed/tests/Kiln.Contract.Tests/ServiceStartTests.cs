@@ -160,7 +160,7 @@ public sealed class ServiceStartTests
         ["Kiln.Example"] = "the template: only the core's kiln.example row",
         ["Kiln.Blocks"] = "its rows exist from its first use (an item block's compile, the affix session), so a " +
                           "manifest's features cannot require them. The assembly loads at the first tick for the " +
-                          "craft-stock channel alone (CraftStockStartup): no rows, no blocks data tick",
+                          "craft-stock and upgrade-station channels alone (CraftStockStartup): no rows, no blocks data tick",
         ["Kiln.Saves"] = "starts at its first use: its start subscribes to kiln.saves' pump; saves.* lowered and " +
                          "InstanceData's rows reported then (the core's kiln.saves row says the table is missing from the start)",
     };

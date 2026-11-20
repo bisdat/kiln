@@ -4,11 +4,13 @@
 #include <cstdarg>
 #include <cstdio>
 #include <stdexcept>
+#include <unistd.h>
 namespace kc {
 const KilnApi* g_api = nullptr;
 KilnOwner g_owner = 7;
 void logf(int, const char*, ...) {}
-std::vector<std::filesystem::path> mod_folder_list() { return {}; }
+std::vector<std::filesystem::path> g_mod_dirs;  // gear_rule_files() gives one
+std::vector<std::filesystem::path> mod_folder_list() { return g_mod_dirs; }
 // "fixture" is the patched resource; any other text a GUID of its own (by its length), "bad" none
 bool guid_parse(const std::string& s, uint8_t out[16]) {
     if (s == "bad") return false;
@@ -400,6 +402,42 @@ void limit() {
 }
 
 // With the game's types: what can be checked before the game starts is.
+
+// A data pack's "gearRules" (content/*.json) become one BalancingTable patch per file; one that does not lower is left out (an
+// optional mod) or refuses the mod (a required one).
+void gear_rule_files() {
+    namespace fs = std::filesystem;
+    const char* base = std::getenv("KILN_OUT");
+    const fs::path root = fs::path(base ? base : fs::temp_directory_path().string()) / "content-tests" / ("gear-mods-" + std::to_string(::getpid()));
+    fs::remove_all(root);
+    fs::create_directories(root / "gearmod" / "content");
+    auto put = [](const fs::path& p, const std::string& s) { std::ofstream(p, std::ios::binary) << s; };
+    put(root / "gearmod" / "kiln.mod.json", R"({"id": "gearmod", "boot": true})");
+    put(root / "gearmod" / "content" / "Gear.JSON",
+        "{ // comments are fine, as in every pack\n \"format\": 1, \"gear\": {}, \"gearRules\": {\"rarityDurability\": [1, 1, 1, 1.25, 1.5], \"socketChance\": {\"epic\": 1}}}");
+    put(root / "gearmod" / "content" / "items.json", R"({"items": {"Material_T1_Wood_Logs": {"maxStackSize": 1000}}})");
+    put(root / "gearmod" / "content" / "zbad.json", R"({"gearRules": {"lootRarityRates": {"common": 1}}})");
+    g_mod_dirs = {root / "gearmod"};
+    auto docs = file_docs(nullptr);
+    check(docs.size() == 1 && docs[0].owner == "gearmod" && docs[0].key == "gearRules@Gear.JSON", "one patch from the file with gearRules; the bad one is left out");
+    const nlohmann::json& d = docs[0].document;
+    check(d["resource"] == "82706b40-61b1-4b8f-8b23-dcec6971bda1" && d["type"] == "keen::BalancingTable" &&
+              d["set"]["rarityDurabilityMod.legendary"] == 1.5 && d["set"]["gemSlotProbability.epic"] == 1,
+          "the patch sets the BalancingTable's members");
+    kiln::boot::Input strict;
+    strict.ok = true;
+    strict.required = {"gearmod"};
+    bool refused_mod = false;
+    try {
+        file_docs(&strict);
+    } catch (const kiln::boot::Refusal& r) {
+        refused_mod = r.mod == "gearmod" && r.key == "content/zbad.json" && std::string(r.what()).find("lootRarityRates: not supported yet") != std::string::npos;
+    }
+    check(refused_mod, "a required mod whose gearRules do not lower is refused, naming the file and the reason");
+    g_mod_dirs.clear();
+    fs::remove_all(root);
+}
+
 void typed_prepare() {
     gd::g_types = true;
     check(refused(docs_of({{"a", "k1", templ({{"addComponents", {"Component"}}})}}), "a", "not a component type"), "the base type Component is refused");
@@ -477,6 +515,7 @@ int main() {
         reshape_conflicts();
         limit();
         typed_prepare();
+        gear_rule_files();
         // Readiness without a published plan (also the immediate callback at a late bind).
         put_count = 0;
         apply(nullptr);

@@ -4,6 +4,7 @@
 
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 #include <thread>
 
 namespace {
@@ -264,6 +265,119 @@ int main() {
     pide_socket_counters(&by_give, &by_override, &by_roll, &extras);
     check(by_give == 3 && by_override == 1 && by_roll == 3 && extras == 4,
           "the counters say how each socket came about (gives 3, overrides 1, rolls 3) and count 4 extras");
+
+
+    // ---- v8 (package P5): rarity rolls at creation ----
+    check(rolls::source_of(false, false) == KILN_ITEMS_ROLL_CRAFT && rolls::source_of(false, true) == KILN_ITEMS_ROLL_LOOT &&
+              rolls::source_of(true, false) == KILN_ITEMS_ROLL_GIVE && rolls::source_of(true, true) == 0,
+          "sources: no rarity asked = craft, a rarity asked = loot, a give of this item = give, a give with a rarity is never rolled");
+    {
+        const float w[5] = {50, 30, 15, 4, 1};
+        int n[5] = {};
+        for (int i = 0; i < 1000; ++i) ++n[rolls::pick(w, 0x1f, (i + 0.5f) / 1000)];
+        check(n[0] == 500 && n[1] == 300 && n[2] == 150 && n[3] == 40 && n[4] == 10,
+              "weights 50/30/15/4/1 over an even spread of 1000 draws give 500/300/150/40/10");
+        const float legendary[5] = {0, 0, 0, 0, 1};
+        const float ends[5] = {1, 0, 0, 0, 1};
+        check(rolls::pick(legendary, 0x0f, 0.5f) == -1 && rolls::pick(legendary, 0x1f, 0.999f) == 4 &&
+                  rolls::pick(ends, 0x0f, 0.999f) == 0,
+              "a rarity whose perk slot the type lacks never comes up; with none left the pick says so");
+    }
+    struct RollFixture {
+        uint8_t info[0x800]{};
+        safetyhook::Context c{};
+        RollFixture(uint32_t item, uint16_t asked) {
+            std::memcpy(info, &item, 4);
+            for (int r = 0; r < 5; ++r) info[0x608 + 16 * r + 3] = 0x5a;  // perkReferences[r] set
+            c.rdi = reinterpret_cast<uintptr_t>(info);
+            c.rbx = 0xabcdef0000000000ull | asked;  // ebx = the word createPide just loaded: {value, has}
+        }
+        uint32_t word() const { return static_cast<uint32_t>(c.rbx & 0xffff); }
+        bool high_kept() const { return (c.rbx >> 16) == 0xabcdef000000ull; }
+    };
+    auto create = [](uint32_t item, uint16_t asked) {
+        RollFixture f(item, asked);
+        hk_rarity(f.c);
+        return f;
+    };
+    g_perk_refs = 0;
+    g_rolls_hooked = false;
+    KilnItemsRarityRoll epic{0x1234, KILN_ITEMS_ROLL_CRAFT, {0, 0, 0, 1, 0}, 0};
+    check(pide_rarity_rolls(1, &epic, 1, sizeof epic) == KILN_ERR_UNAVAILABLE && pide_rarity_rolls(1, nullptr, 0, 0) == KILN_OK &&
+              create(0x1234, 0).word() == 0,
+          "without the hook (feature items.gear.rolls off) a set is unavailable, ending one works, and nothing is rolled");
+    g_rolls_hooked = true;
+    g_resolve_perk_refs = [](uint32_t* offset, char*, size_t) { *offset = 0x608; return true; };  // as kiln.types answers
+    check(create(0x1234, 0).word() == 0, "no rules: a craft keeps the game's rarity");
+    check(pide_rarity_rolls(1, &epic, 1, sizeof epic) == KILN_OK && g_perk_refs == 0x608, "a valid set is taken; the perk slots' offset is resolved at the first set");
+    RollFixture crafted = create(0x1234, 0);
+    check(crafted.word() == 0x0103 && crafted.high_kept(), "a craft of a named item comes out Epic: the asked word becomes {3, has 1}, the rest of rbx kept");
+    check(create(0x1234, 0x0101).word() == 0x0101, "a loot creation (a rarity asked) is left alone by a craft-only rule");
+    check(create(0x9999, 0).word() == 0, "an item type no rule names is never touched");
+    t_item = 0x1234;
+    const uint32_t plain_give = create(0x1234, 0).word(), rarity_give = create(0x1234, 0x0102).word();
+    t_item = 0;
+    check(plain_give == 0 && rarity_give == 0x0102, "a kiln.items give is no craft: a plain give is left alone without GIVE, a give with a rarity keeps it");
+    KilnItemsRarityRoll all{0x1234, KILN_ITEMS_ROLL_CRAFT | KILN_ITEMS_ROLL_LOOT | KILN_ITEMS_ROLL_GIVE, {0, 0, 0, 0, 1}, 0};
+    check(pide_rarity_rolls(1, &all, 1, sizeof all) == KILN_OK, "a later set of the same owner replaces its rules");
+    t_item = 0x1234;
+    const uint32_t give_rolled = create(0x1234, 0).word(), give_kept = create(0x1234, 0x0102).word();
+    t_item = 0;
+    check(create(0x1234, 0x0101).word() == 0x0104 && give_rolled == 0x0104 && give_kept == 0x0102,
+          "with LOOT and GIVE: loot re-rolls to Legendary, a plain give rolls, a give with a rarity still keeps it");
+    {
+        RollFixture noslot(0x1234, 0);
+        noslot.info[0x608 + 16 * 4 + 3] = 0;
+        hk_rarity(noslot.c);
+        check(noslot.word() == 0, "a Legendary-only rule on a type without perk slot 4 leaves the game's rarity (no empty slot)");
+    }
+    KilnItemsRarityRoll rare{0x1234, KILN_ITEMS_ROLL_CRAFT, {0, 0, 1, 0, 0}, 0};
+    check(pide_rarity_rolls(2, &rare, 1, sizeof rare) == KILN_OK && create(0x1234, 0).word() == 0x0102,
+          "owners merge: the owner that set its rules last wins an item both name");
+    check(pide_rarity_rolls(2, nullptr, 0, 0) == KILN_OK && create(0x1234, 0).word() == 0x0104, "ending owner 2's set gives owner 1's rule back");
+    {
+        KilnItemsRarityRoll two[2] = {all, all};
+        KilnItemsRarityRoll nan = all, zero = all, nosrc = all, badsrc = all, noitem = all, reserved = all, negative = all;
+        nan.weights[1] = std::nanf("");
+        for (float& f : zero.weights) f = 0;
+        nosrc.sources = 0;
+        badsrc.sources = 8;
+        noitem.item = 0;
+        reserved.reserved = 1;
+        negative.weights[0] = -1;
+        const bool refused = pide_rarity_rolls(3, two, 2, sizeof all) == KILN_ERR_INVALID_ARGUMENT &&
+                             pide_rarity_rolls(3, &nan, 1, sizeof all) == KILN_ERR_INVALID_ARGUMENT &&
+                             pide_rarity_rolls(3, &zero, 1, sizeof all) == KILN_ERR_INVALID_ARGUMENT &&
+                             pide_rarity_rolls(3, &nosrc, 1, sizeof all) == KILN_ERR_INVALID_ARGUMENT &&
+                             pide_rarity_rolls(3, &badsrc, 1, sizeof all) == KILN_ERR_INVALID_ARGUMENT &&
+                             pide_rarity_rolls(3, &noitem, 1, sizeof all) == KILN_ERR_INVALID_ARGUMENT &&
+                             pide_rarity_rolls(3, &reserved, 1, sizeof all) == KILN_ERR_INVALID_ARGUMENT &&
+                             pide_rarity_rolls(3, &negative, 1, sizeof all) == KILN_ERR_INVALID_ARGUMENT &&
+                             pide_rarity_rolls(3, &all, 1, sizeof all - 4) == KILN_ERR_INVALID_ARGUMENT &&
+                             pide_rarity_rolls(3, &all, rolls::kMaxRules + 1, sizeof all) == KILN_ERR_INVALID_ARGUMENT;
+        check(refused && create(0x1234, 0).word() == 0x0104,
+              "an item twice, NaN, no weight above 0, no or an unknown source, item 0, reserved bits, a negative weight, a short entry or too many: refused, nothing changes");
+    }
+    {
+        struct Wide { KilnItemsRarityRoll r; uint32_t newer; } wide[2] = {{rare, 7}, {{0x4321, KILN_ITEMS_ROLL_CRAFT, {1, 0, 0, 0, 0}, 0}, 7}};
+        wide[0].r.item = 0x5555;
+        check(pide_rarity_rolls(4, &wide[0].r, 2, sizeof(Wide)) == KILN_OK && create(0x5555, 0).word() == 0x0102 && create(0x4321, 0).word() == 0x0100,
+              "entries are read at the caller's stride (a newer, larger entry)");
+        pide_rarity_rolls(4, nullptr, 0, 0);
+    }
+    {
+        RollFixture faulty(0x1234, 0);
+        faulty.c.rdi = 0;
+        hk_rarity(faulty.c);
+        check(faulty.word() == 0, "no ItemInfo: left as the game made it");
+    }
+    KilnItemsRollStatus st{};
+    st.size = sizeof st;
+    check(pide_roll_status(&st) == KILN_OK && st.available == 1 && st.items == 1 && st.owners == 1 && st.rolled[3] == 1 &&
+              st.rolled[4] == 4 && st.rolled[2] == 2 && st.rolled[0] == 1 && st.kept >= 3 && st.no_slot == 1,
+          "the status counts rules, owners and every rarity rolled, kept and no-slot creation");
+    pide_rarity_rolls(1, nullptr, 0, 0);
+    check(create(0x1234, 0).word() == 0 && !g_published.load(), "ending the last set stops every roll");
 
     std::printf("pide options: %d failure(s)\n", failures);
     return failures ? EXIT_FAILURE : EXIT_SUCCESS;

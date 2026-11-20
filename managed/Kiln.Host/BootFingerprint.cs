@@ -5,8 +5,8 @@
 // (Kiln.Network does not reference Kiln.Host) and sends it in HELLO and WELCOME.
 //
 // What it covers, for one mod: every document the IR envelope commits for it (each collector's {owner, key, document}: what its OnBoot
-// staged, as Kiln.Blocks lowered it), and the "resourcePatches" of its blocks/*.json, read as kiln.content's prepare reads them
-// (gamedata_bootpatch.cpp file_docs; a key the file and OnBoot both have stays the file's). What it leaves out, because it differs per
+// staged, as Kiln.Blocks lowered it), and the "resourcePatches" of its blocks/*.json and the "gearRules" of its content/*.json, read as
+// kiln.content's prepare reads them (gamedata_bootpatch.cpp file_docs; a key the file and OnBoot both have stays the file's). What it leaves out, because it differs per
 // machine or per role and changes no committed data: the envelope's owner entry (roles, the inputs hash over the whole folder, the
 // requires list), object key order, file-system order (entries are sorted by collector and key, except patches keep application order; files by name), number spelling (1500,
 // 1500.0, 1.5e3), and the mod's own folder inside a string (an item icon's full path counts as "$mod/<path>"). Other
@@ -158,32 +158,59 @@ internal static class BootFingerprint
     }
 
     /// <summary>The "resourcePatches" sections of the mod's blocks/*.json (files by name, ordinal), as kiln.content reads them: a file that
-    /// does not name the section, or is not JSON with comments and trailing commas, gives none.</summary>
+    /// does not name the section, or is not JSON with comments and trailing commas, gives none. Then the "gearRules" of its data packs
+    /// (content/*.json, any case of .json, comments but no trailing commas), one entry "gearRules@&lt;file&gt;" each: kiln.content lowers
+    /// them to a BalancingTable patch at the boot (gamedata_bootpatch.cpp gear_rule_docs); the section as written is what is hashed.</summary>
     internal static List<(string Key, JsonNode? Document)> FilePatches(string directory)
     {
         var list = new List<(string, JsonNode?)>();
         var blocks = Path.Combine(directory, "blocks");
-        if (!Directory.Exists(blocks)) return list;
-        string[] files;
-        try { files = Directory.GetFiles(blocks).Where(f => Path.GetExtension(f) == ".json").OrderBy(Path.GetFileName, StringComparer.Ordinal).ToArray(); }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return list; }
-        var options = new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true, MaxDepth = 64 };
-        foreach (var f in files)
+        var relaxed = new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true, MaxDepth = 64 };
+        foreach (var (_, text) in Files(blocks, f => Path.GetExtension(f) == ".json"))
         {
             try
             {
-                var text = File.ReadAllText(f);
                 if (!text.Contains("resourcePatches", StringComparison.Ordinal)) continue;
-                using var parsed = JsonDocument.Parse(text, options);
+                using var parsed = JsonDocument.Parse(text, relaxed);
                 if (LastValues(parsed.RootElement) is not JsonObject root || root["resourcePatches"] is not JsonObject section) continue;
                 foreach (var (key, doc) in section.OrderBy(p => p.Key, StringComparer.Ordinal)) list.Add((key, doc));
             }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or ArgumentException or InvalidOperationException)
+            catch (Exception e) when (e is JsonException or ArgumentException or InvalidOperationException)
             {
                 // kiln.content reports such a file (and refuses a required mod for it); it adds no patch
             }
         }
+        var packs = new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = false, MaxDepth = 64 };
+        foreach (var (name, text) in Files(Path.Combine(directory, "content"), f => Path.GetExtension(f).Equals(".json", StringComparison.OrdinalIgnoreCase)))
+        {
+            try
+            {
+                if (!text.Contains("gearRules", StringComparison.Ordinal)) continue;
+                using var parsed = JsonDocument.Parse(text, packs);
+                if (LastValues(parsed.RootElement) is JsonObject root && root["gearRules"] is { } rules) list.Add(("gearRules@" + name, rules.DeepClone()));
+            }
+            catch (Exception e) when (e is JsonException or ArgumentException or InvalidOperationException)
+            {
+                // kiln.content's packs report such a file at the world's load; the boot reads no gearRules from it
+            }
+        }
         return list;
+    }
+
+    // A folder's files that match, by name (ordinal), with their text; unreadable ones are left out.
+    private static IEnumerable<(string Name, string Text)> Files(string folder, Func<string, bool> match)
+    {
+        if (!Directory.Exists(folder)) yield break;
+        string[] files;
+        try { files = Directory.GetFiles(folder).Where(match).OrderBy(Path.GetFileName, StringComparer.Ordinal).ToArray(); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { yield break; }
+        foreach (var f in files)
+        {
+            string text;
+            try { text = File.ReadAllText(f); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { continue; }
+            yield return (Path.GetFileName(f), text);
+        }
     }
 
     // nlohmann::json keeps the last occurrence of duplicate object keys, including nested keys.

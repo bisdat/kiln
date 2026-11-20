@@ -1,0 +1,85 @@
+{
+  "description": "blocks-rarity-upgrades: the rarityUpgrades section: a full rule (items, max, four steps with cost, chance, onFail, levelScale, unlock, durability, socket, allowEmptySlot), a free step, and schema errors (an empty item name, a rarity that is none, a step below uncommon, whose own fields are then not read, a socket rule that is none, a misspelt field, a rule without steps; a step with a count of 0, a chance above 1 and a failure rule that is none); a server mod that asks nothing of players' games.",
+  "diagnostics": [
+    {
+      "code": "KL106",
+      "col": 25,
+      "file": "blocks/upgrades.json",
+      "line": 15,
+      "message": "\"\" does not have the expected form (\\S)",
+      "severity": "error"
+    },
+    {
+      "code": "KL108",
+      "col": 25,
+      "file": "blocks/upgrades.json",
+      "line": 15,
+      "message": "an empty string",
+      "severity": "error"
+    },
+    {
+      "code": "KL105",
+      "col": 38,
+      "file": "blocks/upgrades.json",
+      "line": 15,
+      "message": "\"mythic\" is not one of \"uncommon\", \"rare\", \"epic\", \"legendary\"",
+      "severity": "error"
+    },
+    {
+      "code": "KL102",
+      "col": 59,
+      "file": "blocks/upgrades.json",
+      "line": 15,
+      "message": "\"common\" is not allowed here; did you mean \"uncommon\"?",
+      "severity": "error"
+    },
+    {
+      "code": "KL105",
+      "col": 156,
+      "file": "blocks/upgrades.json",
+      "line": 15,
+      "message": "\"always\" is not one of \"keep\", \"gameChance\"",
+      "severity": "error"
+    },
+    {
+      "code": "KL102",
+      "col": 166,
+      "file": "blocks/upgrades.json",
+      "line": 15,
+      "message": "\"price\" is not allowed here (allowed: allowEmptySlot, durability, items, max, socket, steps)",
+      "severity": "error"
+    },
+    {
+      "code": "KL108",
+      "col": 25,
+      "file": "blocks/upgrades.json",
+      "line": 16,
+      "message": "an empty object: give at least one key",
+      "severity": "error"
+    },
+    {
+      "code": "KL107",
+      "col": 72,
+      "file": "blocks/upgrades.json",
+      "line": 17,
+      "message": "0 is below the minimum 1",
+      "severity": "error"
+    },
+    {
+      "code": "KL107",
+      "col": 87,
+      "file": "blocks/upgrades.json",
+      "line": 17,
+      "message": "2 is above the maximum 1",
+      "severity": "error"
+    },
+    {
+      "code": "KL105",
+      "col": 100,
+      "file": "blocks/upgrades.json",
+      "line": 17,
+      "message": "\"destroy\" is not one of \"keepItemLoseCost\", \"keepItemKeepCost\", \"downgrade\"",
+      "severity": "error"
+    }
+  ]
+}

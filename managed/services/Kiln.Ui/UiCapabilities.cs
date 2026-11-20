@@ -26,7 +26,7 @@ internal static unsafe class UiCaps
     public static readonly string[] ValueFeatures =
     [
         "ui.values.detail", "ui.values.slot", "ui.values.held", "ui.values.hud", "ui.values.tooltip_lines",
-        "ui.slots.inspect", "ui.gemforge.inspect", "ui.gemforge.sources",
+        "ui.slots.inspect", "ui.gemforge.inspect", "ui.gemforge.sources", "ui.tooltip.lines", "ui.tooltip.values",
     ];
 
     internal static readonly ServiceCapRows Rows = new(Service, Report);
@@ -45,6 +45,9 @@ internal static unsafe class UiCaps
                 "kiln.ui.values has no Gem Forge snapshot table");
         if (UiValuesNative.T != null && UiValuesNative.SourcesT == null)
             ServiceCaps.LowerOff(GemForgeSources.Row, CapabilityReason.ServiceOlder, "kiln.ui.values has no gemforge_sources");
+        if (UiValuesNative.T != null && UiValuesNative.TooltipT == null)
+            foreach (var name in (string[])[Ui.Tooltip.LinesCapability, Ui.Tooltip.ValuesCapability])
+                ServiceCaps.LowerOff(name, CapabilityReason.ServiceOlder, "kiln.ui.values has no native tooltip slots");
         // Collected lines have one production consumer: the overlay's Item details window.
         ServiceCaps.LowerFeatures(Service, "ui.values.tooltip_lines");
         if (!RenderNative.Available) ServiceCaps.LowerFeatures(Render, "render.camera");

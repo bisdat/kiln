@@ -1,1 +1,5 @@
 #nullable enable
+Kiln.TestKit.FakeSlot.Ref.get -> Kiln.ItemInstanceRef
+Kiln.TestKit.HarnessItems.SetGear(Kiln.ItemInstanceRef item, int? enhancements = null, int? unlocked = null, int? level = null, int? durability = null) -> void
+Kiln.TestKit.HarnessItems.SetPerkSlots(Kiln.ItemId item, int slots) -> void
+Kiln.TestKit.HarnessItems.SetUpgradeRolls(params double[]! rolls) -> void

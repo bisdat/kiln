@@ -22,6 +22,7 @@ internal static class BlocksRows
         BlockCapabilities.Ensure();
         KindCapabilities.Ensure();
         AffixRuntime.RefreshCapabilities();
+        UpgradeStations.ReportRow();  // blocks.upgrade_station follows items.gear.upgrade
         // blocks.vfx_registration is kiln.vfx's row (Blocks.Define(name, VfxBlock, options)); without its table nobody reports it
         VfxCaps.ReportBudgetRows();
         WorldTablesNative.ReportBudgetRows();

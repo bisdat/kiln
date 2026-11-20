@@ -1904,7 +1904,7 @@ fn blocks(out: &mut Out, m: &LMod, code: &Code, cat: Option<&Catalog>) {
         ("lootTables", "loot table"), ("recipes", "recipe"),
         ("quests", "quest"), ("dialogues", "dialogue"),
         ("windows", "window"), ("hudLines", "HUD line"), ("keyBindings", "key binding"),
-        ("affixes", "affix"), ("affixPools", "affix pool"),
+        ("affixes", "affix"), ("affixPools", "affix pool"), ("rarityRolls", "rarity roll"), ("rarityUpgrades", "rarity upgrade"),
         ("buildingMaterialPools", "building material pool"),
     ];
     let mut known: HashMap<String, (&'static str, String, Span)> = HashMap::new();
@@ -2155,6 +2155,60 @@ fn blocks(out: &mut Out, m: &LMod, code: &Code, cat: Option<&Catalog>) {
                     && b.value.get("recipe").is_some()
                 {
                     out.push(Diagnostic::new(&f.display, codes::CRAFTED_ROLLED, rolled.span, &format!("block \"{}\" has a recipe and \"rolled\": true: a craft comes out as the lowest allowed rarity or a random level while the recipe tooltip shows its rarity and lowest level; Kiln.Blocks refuses it. Give it a recipe or roll it, not both", b.key)));
+                }
+            }
+        }
+    }
+    rarity_rolls_crafted(out, m, &files);
+}
+
+/// KL406 for rarity rolls: a rule that rolls crafts (sources "craft", the default) of an item this mod gives a recipe. The
+/// recipe tooltip shows the item's own rarity while a craft comes out at a rolled one (docs/kiln/modding/item-blocks.md
+/// "Rarity at creation"). Items of this mod by block name, "<this mod>:name" and patterns over them; game items and other
+/// mods' are not looked up here.
+fn rarity_rolls_crafted(out: &mut Out, m: &LMod, files: &[&LFile]) {
+    let mut crafted: Vec<String> = vec![];
+    for f in files {
+        let Some(root) = f.root.as_ref() else { continue };
+        for section in ["weapons", "wands", "armor", "items", "stations"] {
+            for b in root.get(section).and_then(Node::as_object).into_iter().flatten() {
+                if b.value.get("recipe").is_some() {
+                    crafted.push(b.key.clone());
+                }
+            }
+        }
+        for b in root.get("recipes").and_then(Node::as_object).into_iter().flatten() {
+            if let Some(o) = b.value.str_of("output") {
+                crafted.push(o.to_string());
+            }
+        }
+    }
+    if crafted.is_empty() {
+        return;
+    }
+    let own = m.id.as_deref().map(|id| format!("{id}:"));
+    for f in files {
+        let Some(root) = f.root.as_ref() else { continue };
+        for rule in root.get("rarityRolls").and_then(Node::as_object).into_iter().flatten() {
+            let sources = rule.value.str_of("sources").unwrap_or("craft, loot");
+            if !sources.split(',').any(|s| s.trim() == "craft") {
+                continue;
+            }
+            for it in rule.value.get("items").and_then(Node::as_array).into_iter().flatten() {
+                let Some(raw) = it.as_str() else { continue };
+                let name = match &own {
+                    Some(p) if raw.starts_with(p.as_str()) => &raw[p.len()..],
+                    _ if raw.contains(':') => continue,
+                    _ => raw,
+                };
+                let hits: Vec<&String> = if suggest::has_wild(name) {
+                    crafted.iter().filter(|c| suggest::glob_ci(name, c)).collect()
+                } else {
+                    crafted.iter().filter(|c| c.as_str() == name).collect()
+                };
+                if let Some(first) = hits.first() {
+                    let more = if hits.len() > 1 { format!(" (and {} more)", hits.len() - 1) } else { String::new() };
+                    out.push(Diagnostic::new(&f.display, codes::CRAFTED_ROLLED, it.span, &format!("rarity roll \"{}\" rolls crafts of \"{first}\"{more}, which has a recipe: the recipe tooltip shows the item's own rarity while a craft comes out at a rolled one; leave \"craft\" out of \"sources\" to keep crafts as the tooltip says", rule.key)));
                 }
             }
         }

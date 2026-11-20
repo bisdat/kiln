@@ -143,7 +143,7 @@ KilnUiGemForgePayer payer(uint8_t group, uint32_t item, uint32_t count, bool pla
 
 void sources_tests() {
     static_assert(offsetof(KilnUiValuesApi, gemforge_sources) == 112 && offsetof(KilnUiValuesApi, gemforge_sources_state) == 120);
-    static_assert(sizeof(KilnUiValuesApi) == 128);
+    static_assert(offsetof(KilnUiValuesApi, tooltip_lines_native) == 128);  // the next slot starts where this one ended
     static_assert(sizeof(KilnUiGemForgeSource) == 48 && offsetof(KilnUiGemForgeSource, token) == 32);
     static_assert(sizeof(KilnUiGemForgePayer) == 16 && sizeof(KilnUiGemForgeSourcesState) == 200);
     {

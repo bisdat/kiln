@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
-// Mirror of native/core/abi/services/kiln_items.h (kiln.items v6; the v2 functions are in TableV2, the v3 ones in TableV3,
-// the v4 ones in TableV4, the v5 ones in TableV5, the v6 ones in TableV6). Blittable only; field order is the ABI (the native side static_asserts the same sizes and offsets).
+// Mirror of native/core/abi/services/kiln_items.h (kiln.items v8; the v2 functions are in TableV2, the v3 ones in TableV3,
+// the v4 ones in TableV4, the v5 ones in TableV5, the v6 ones in TableV6, v7 in TableV7, the v8 gear functions in TableV8). Blittable only; field order is the ABI (the native side static_asserts the same sizes and offsets).
 using System.Runtime.InteropServices;
 
 namespace Kiln;
@@ -595,6 +595,216 @@ internal static unsafe class ItemsNative
     {
         public TableV6 V6;
         public delegate* unmanaged[Cdecl]<ulong, SocketRoll*, int> SocketRollOf;
+    }
+
+    // KilnItemsRarityRoll.sources (v8, package P5)
+    public const uint RollCraft = 0x1, RollLoot = 0x2, RollGive = 0x4;
+
+    /// <summary>KilnItemsRarityRoll (v8, package P5): one item type's rarity rule at creation.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RarityRoll
+    {
+        public uint Item;
+        public uint Sources;
+        public fixed float Weights[5];
+        public uint Reserved;
+    }
+
+    /// <summary>KilnItemsRollStatus (v8, package P5).</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RollStatus
+    {
+        public uint Size;
+        public byte Available;
+        public byte R0, R1, R2;
+        public uint Items, Owners, Conflicts, R3;
+        public fixed ulong Rolled[5];
+        public ulong Kept, NoSlot, Faults;
+        public fixed byte Detail[160];
+    }
+
+    // ---- v8 (0.2.0-dev.29.19, the equipment wave): gear (KilnItemsGearRequest, KilnItemsGearState, KilnItemsGearResult,
+    // KilnItemsGearStatus; kiln_items.h "gear") ----
+    public const uint GearAvailable = 0x01, GearUnlocked = 0x02, GearLevel = 0x04, GearForceSlot = 0x08, GearDurabilityRefresh = 0x10,
+        GearDurabilityRepair = 0x20, GearDryRun = 0x40, GearNotEquipped = 0x80;
+    // package P7: a level outside the type's range, max durability (kiln_items.h)
+    public const uint GearAnyLevel = 0x200, GearDurabilityMax = 0x400;
+    public const int GearMaxDurability = 1000000;
+    public const int GearDone = 0, GearStale = 1, GearNotGear = 2, GearNoSlot = 3, GearOutOfRange = 4, GearEquipped = 5, GearUnavailableStatus = 6,
+        GearDropped = 7, GearRefused = 8;
+    public const uint GearChangedPerks = 0x01, GearChangedLevel = 0x02, GearChangedDurability = 0x04, GearChangedState = 0x08,
+        GearChangedDurabilityMax = 0x10;
+    public const uint GearHasPerks = 0x01, GearHasLevel = 0x02, GearHasDurability = 0x04, GearEquippedNow = 0x08, GearDurabilityInit = 0x10;
+
+    /// <summary><c>KilnItemsGearRequest</c>, 40 bytes.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GearRequest
+    {
+        public uint Size;
+        public uint Flags;
+        public uint Entity;
+        public uint Stamp;
+        public uint Item;
+        public byte Available;
+        public byte Unlocked;
+        public ushort Reserved0;
+        public uint Level;
+        public int DurabilityMax;  // package P7 (was reserved)
+        public uint R0, R1;
+    }
+
+    /// <summary><c>KilnItemsGearState</c>, 44 bytes.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GearState
+    {
+        public uint Flags;
+        public uint Item;
+        public byte Available;
+        public byte Unlocked;
+        public byte Rarity;
+        public byte TypeRarity;
+        public byte MaxAvailable;
+        public byte RarityUi;
+        public byte LevelUi;
+        public byte Reserved0;
+        public uint Level;
+        public uint LevelMax;
+        public uint TypeLevelMin;
+        public uint TypeLevelMax;
+        public int Durability;
+        public int DurabilityMax;
+        public ushort State;
+        public ushort Reserved1;
+    }
+
+    /// <summary><c>KilnItemsGearResult</c>, 296 bytes.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GearResult
+    {
+        public uint Size;
+        public int Status;
+        public ulong Ticket;
+        public uint Entity;
+        public uint Stamp;
+        public uint Flags;
+        public uint Changed;
+        public uint Steps;
+        public uint Reserved;
+        public ulong Step;
+        public GearState Before;
+        public GearState After;
+        public fixed byte Message[160];
+    }
+
+    /// <summary><c>KilnItemsGearStatus</c>, 192 bytes.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GearStatus
+    {
+        public uint Size;
+        public byte Available;
+        public byte Program;
+        public byte Replicated;
+        public byte Saved;
+        public uint Pending;
+        public ulong Writes;
+        public ulong Refused;
+        public fixed byte Detail[160];
+    }
+
+    // ---- v8 (package P3): upgrades (KilnItemsUpgradeRequest, KilnItemsUpgradeResult; kiln_items.h "upgrades") ----
+    public const uint UpgradeWrite = 0x01, UpgradeDryRun = 0x02;
+    public const int UpgradeCantPay = 9, UpgradeBadPayer = 10, UpgradeChanged = 11;
+    public const int UpgradeMaxCosts = 8, UpgradeMaxPayers = 8, UpgradeMaxCount = 100000;
+
+    /// <summary><c>KilnItemsUpgradeRequest</c>, 160 bytes. Costs are (item, count) pairs: Costs[2 i], Costs[2 i + 1].</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct UpgradeRequest
+    {
+        public uint Size;
+        public uint Flags;
+        public uint Player;
+        public uint CostCount;
+        public uint PayerCount;
+        public uint ExpectAvailable;
+        public GearRequest Gear;
+        public fixed uint Costs[16];
+        public fixed uint Payers[8];
+    }
+
+    /// <summary><c>KilnItemsUpgradeResult</c>, 392 bytes.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct UpgradeResult
+    {
+        public uint Size;
+        public int Status;
+        public ulong Ticket;
+        public uint Flags;
+        public uint CostCount;
+        public uint PaidFromPlayer;
+        public uint Reserved;
+        public fixed uint Paid[8];
+        public fixed uint Have[8];
+        public GearResult Gear;
+    }
+
+    /// <summary>The v8 table (the equipment wave): v7 followed by gear_write, gear_read, gear_status (package P1, typed by
+    /// the managed gear API of package P2; 320 bytes), rarity_rolls, roll_status (package P5; 336 bytes) and gear_upgrade
+    /// (package P3; 344 bytes). Read a member only when the header's size covers it.</summary>
+    /// <summary>Where the v8 gear functions end (offsetof(KilnItemsApi, rarity_rolls)): a table this long has gear.</summary>
+    public const uint V8GearEnd = 320;
+
+    /// <summary>Where the rarity rolls end (offsetof(KilnItemsApi, gear_upgrade)): a table this long has rarity_rolls.</summary>
+    public const uint V8RollsEnd = 336;
+
+    /// <summary>Where gear_upgrade ends: a table this long has upgrades (package P3).</summary>
+    public const uint V8UpgradeEnd = 344;
+
+    /// <summary>Where the scales end (package P7): a table this long has gear_scale, gear_scale_read and scale_status.</summary>
+    public const uint V8ScaleEnd = 368;
+
+    // ---- v8 (package P7): power and armour scales (KilnItemsGearScale, KilnItemsScaleStatus) ----
+    public const uint ScalePower = 0x01, ScaleArmor = 0x02;
+    public const float ScaleMin = 0.01f, ScaleMax = 100f;
+    public const int ScaleCapacity = 8192;
+
+    /// <summary><c>KilnItemsGearScale</c>, 32 bytes.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GearScale
+    {
+        public uint Size;
+        public uint Flags;
+        public uint Entity;
+        public uint Stamp;
+        public float Power;
+        public float Armor;
+        public uint R0, R1;
+    }
+
+    /// <summary><c>KilnItemsScaleStatus</c>, 208 bytes.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct ScaleStatus
+    {
+        public uint Size;
+        public byte Power, Armor, PowerHooked, ArmorHooked;
+        public uint Entries, Capacity, Reserved;
+        public ulong Powered, Armored, Faults;
+        public fixed byte Detail[160];
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct TableV8
+    {
+        public TableV7 V7;
+        public delegate* unmanaged[Cdecl]<ulong, GearRequest*, delegate* unmanaged[Cdecl]<GearResult*, void*, void>, void*, ulong*, int> GearWrite;
+        public delegate* unmanaged[Cdecl]<uint, uint, GearState*, int> GearRead;
+        public delegate* unmanaged[Cdecl]<GearStatus*, int> GetGearStatus;
+        public delegate* unmanaged[Cdecl]<ulong, RarityRoll*, uint, uint, int> RarityRolls;
+        public delegate* unmanaged[Cdecl]<RollStatus*, int> RollStatusOf;
+        public delegate* unmanaged[Cdecl]<ulong, UpgradeRequest*, delegate* unmanaged[Cdecl]<UpgradeResult*, void*, void>, void*, ulong*, int> GearUpgrade;
+        // package P7 (368 bytes)
+        public delegate* unmanaged[Cdecl]<GearScale*, int> GearScaleSet;
+        public delegate* unmanaged[Cdecl]<uint, uint, GearScale*, int> GearScaleRead;
+        public delegate* unmanaged[Cdecl]<ScaleStatus*, int> ScaleStatusOf;
     }
 
     /// <summary>True when a table of <paramref name="size"/> bytes has the v6 member that ends at <paramref name="end"/>.</summary>
