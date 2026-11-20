@@ -78,6 +78,12 @@ row above and grows its own page.
 | [decisions.md](decisions.md) | kiln.decisions / kiln.window_clock: refusing a death (`EntityDyingEvent`), a walk-over pickup (`ItemPickingUpEvent`) and an equipment input (`PlayerEquippingEvent`), each ending in one `DecisionCompletedEvent`; the native death guard and the native adapters' verdict route |
 | [stations.md](stations.md) | kiln.stations / `Stations`, `Bases` (Kiln.Blocks): the production stations of a base, its Magic chests, and the game's own fill from chests, stop, resume and select for code; station events |
 
+### Service pages added in dev.31
+
+| Page | What |
+|---|---|
+| [mod-values.md](mod-values.md) | `Kiln.ModValues` / kiln.mod-values: mods' own per-character counters, currencies and experience with levels; server ledger saved with the character, the owner's synced copy, carried progress |
+
 ## Native rules
 - `kiln_plugin_main(api, owner, info)`: check `api->abi_version == KILN_ABI_VERSION`, resolve symbols with
   `api->symbol` / constants with `api->constant` / features with `api->feature`, install hooks through `kiln.hooks`
