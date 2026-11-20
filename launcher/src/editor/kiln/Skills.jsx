@@ -194,7 +194,7 @@ export default function Skills({ model, setModel }) {
         <div>
           <span className="k-label">{t('editor.skills.available')}</span>
           {derived !== null
-            ? <b className={'ke-tree-avail k-num' + (total - used < 0 ? ' neg' : '')}>{total - used}</b>
+            ? <span className={'ke-tree-avail k-num' + (total - used < 0 ? ' neg' : '')}>{total - used}</span>
             : total === null
             ? <button type="button" className="k-link" onClick={() => askTotal(used)}>{t('editor.skills.enterTotal')}</button>
             : <button type="button" className={'ke-tree-avail k-num' + (total - used < 0 ? ' neg' : '')} title={t('editor.skills.changeTotal')} onClick={() => askTotal(total)}>{total - used}</button>}
