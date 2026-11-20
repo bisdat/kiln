@@ -2298,7 +2298,7 @@ export const COMMANDS = [
   "community_settings_get", "community_settings_set", "community_status", "community_feed", "community_check_member", "community_signout", "community_signin_start", "community_signin_poll", "community_signin_cancel",
   "community_posts", "community_post_seen", "community_post_solved", "community_post_delete", "community_presence_facts", "community_report_prepare", "community_report_send",
   "tester_status", "tester_join", "tester_leave", "tester_result_set", "tester_results_send", "community_steam_keyboard",
-  "pack_inspect", "pack_install", "pack_instance", "pack_instances", "pack_update_plan", "pack_update", "pack_undo", "pack_uninstall", "pack_build", "pack_verify", "pack_diff", "pack_secret_scan", "pack_peek_format", "crucible_status", "crucible_open", "crucible_install", "crucible_updates", "crucible_update_plan", "crucible_update", "crucible_share", "crucible_shared", "crucible_trust", "crucible_trust_set", "crucible_links",
+  "pack_inspect", "pack_install", "pack_instance", "pack_instances", "pack_update_plan", "pack_update", "pack_undo", "pack_uninstall", "pack_build", "pack_verify", "pack_diff", "pack_secret_scan", "pack_peek_format", "pack_local_files", "pack_local_write", "pack_local_save", "crucible_status", "crucible_open", "crucible_install", "crucible_updates", "crucible_update_plan", "crucible_update", "crucible_share", "crucible_shared", "crucible_trust", "crucible_trust_set", "crucible_links", "crucible_resume",
 ] as const;
 export type CommandName = (typeof COMMANDS)[number];
 
@@ -2572,12 +2572,26 @@ export interface PackInstance {
 export interface PackPlanMod { kind: ModKind; id: string; version: string; enabled: boolean; name?: string }
 export interface PackPlanUpdate { kind: ModKind; id: string; from: string; to: string; name?: string }
 export interface PackKeyConflict { key: string; base: unknown; pack: unknown; mine: unknown }
-export interface PackFileMerge { path: string; side: PackSide; mode: PackMergeMode; taken: string[]; kept: string[]; conflicts: PackKeyConflict[] }
+/** `renamedFrom`: the pack renamed this settings file; the player's values move from the old name. */
+export interface PackFileMerge { path: string; side: PackSide; mode: PackMergeMode; taken: string[]; kept: string[]; conflicts: PackKeyConflict[]; renamedFrom?: string }
+/** A data field both the new pack layer and the player layer set: the player's value still wins (it loads later). */
+export interface PackDataOverlap {
+  /** The id for the update's `drop` ("Drop my change"). */
+  key: string; section: string; target: string; field: string;
+  pack: unknown; base?: unknown; mine: unknown; file: string;
+  /** The pack changed this field since the installed version. */
+  changed: boolean;
+}
+/** The player layer (local.<pid>): kept by the update, still loading last. */
+export interface PackLocalPlan { id: string; files: number; fields: number; overlaps: PackDataOverlap[] }
 export interface PackUpdatePlan {
   profile: string; pack: string; from: string; to: string; changes?: string;
   mods: { added: PackPlanMod[]; updated: PackPlanUpdate[]; removed: PackPlanMod[]; yours: PackPlanMod[]; keptSwitches: string[] };
   layer: { from?: string; to?: string; changed: boolean }; files: PackFileMerge[]; conflicts: number;
+  local?: PackLocalPlan | null;
 }
+/** A data file of the player layer (`content/<name>.json`). */
+export interface PackLocalFile { path: string; text: string }
 /** pack_inspect: a .kilnpack file before installing it. */
 export interface PackPreview {
   index: PackIndex; sha256: string; size: number; missing: LibraryRef[]; present: LibraryRef[]; code: string[];
@@ -2667,8 +2681,13 @@ export interface CrucibleUpdateRequest {
   profile: string; versionId: string; consent: boolean; optional?: Record<string, boolean>;
   /** "<path>#<key>" (as the plan names them) -> pack or mine. */
   resolve?: Record<string, PackChoice>; all?: PackChoice;
+  /** Player-layer fields to let go ("Drop my change"): `plan.local.overlaps[].key`. */
+  drop?: string[];
 }
-export interface CrucibleUpdateResult { plan: PackUpdatePlan; profile: Profile; instance: PackInstance; imported: LibraryRef[] }
+/** `backups`: the save backups taken first (one per game the instance is active on). */
+export interface CrucibleUpdateResult { plan: PackUpdatePlan; profile: Profile; instance: PackInstance; imported: LibraryRef[]; backups?: SaveBackup[] }
+/** "Come back after installing Kiln": the first start with this data folder, and a pack code the download carried. */
+export interface CrucibleResume { firstStart: boolean; code: string | null }
 /** Same profile again = a new version of its pack. */
 export interface CrucibleShareRequest { profile: string; title?: string }
 export interface CrucibleShareResult {
@@ -2703,6 +2722,12 @@ export const crucibleTrust = () => call<CrucibleTrust[]>("crucible_trust");
 export const crucibleTrustSet = (id: string, name: string, trusted: boolean) => call<null>("crucible_trust_set", { id, name, trusted });
 /** kiln:// links that arrived (drained); "kiln://crucible-link" {count} says one did. */
 export const crucibleLinks = () => call<string[]>("crucible_links");
+/** Asked once at start: the first start (the UI looks at the clipboard once) and a code the download carried. */
+export const crucibleResume = () => call<CrucibleResume>("crucible_resume");
+/** The player layer of an instance: its data files; write (null removes) and save (into the Library, last). */
+export const packLocalFiles = (profileId: ProfileId) => call<PackLocalFile[]>("pack_local_files", { profileId });
+export const packLocalWrite = (profileId: ProfileId, path: string, text: string | null) => call<null>("pack_local_write", { profileId, path, text });
+export const packLocalSave = (profileId: ProfileId) => call<Profile>("pack_local_save", { profileId });
 export const packInstance = (profileId: ProfileId) => call<PackInstance | null>("pack_instance", { profileId });
 export const packInstances = () => call<[ProfileId, PackInstance][]>("pack_instances");
 export const packUndo = (profileId: ProfileId) => call<Profile>("pack_undo", { profileId });

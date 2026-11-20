@@ -1973,6 +1973,8 @@ pub struct LocalPlan {
     pub id: String,
     /// Its data files.
     pub files: usize,
+    /// The data fields it sets ("Your changes kept: ... data edits").
+    pub fields: usize,
     /// Fields the new pack layer sets too ("your change still wins"; `drop` lets go of one).
     pub overlaps: Vec<super::layers::DataOverlap>,
 }
@@ -2301,6 +2303,7 @@ fn compute(dirs: &DataDirs, profile: &Profile, inst: &Instance, new: &ReadPack, 
         Some(LocalPlan {
             id: local.clone(),
             files: local_files.len(),
+            fields: super::layers::fields(&local_files).len(),
             overlaps: super::layers::overlaps(&base_layer_files(dirs, &base), &theirs_files, &local_files),
         })
     };

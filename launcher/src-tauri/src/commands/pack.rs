@@ -1,11 +1,12 @@
 //! Tauri commands: Crucible packs on this PC (kiln_manage::modpack::pack; docs/kiln/launcher/crucible.md, "API for the
 //! launcher UI"): a dropped .kilnpack (inspect, install), instances (list, undo, uninstall, update from a file), "Save as
-//! file" (build), verify, diff and the secret scan Pack Studio shows live. Crucible's network side is commands/crucible.rs.
+//! file" (build), verify, diff and the secret scan Pack Studio shows live; the player layer (local.<pid>) for the editors. Crucible's network side is commands/crucible.rs.
 
 use super::TaskId;
 use super::app::{spawn_task, to_value};
 use crate::state::{blocking, dirs, game};
 use kiln_manage::modpack::ModpackSource;
+use kiln_manage::modpack::layers;
 use kiln_manage::modpack::pack::{self, BuildRequest, BuiltPack, Instance, PackDiff, PackIndex, PackPreview, UninstallResult, UpdatePlan};
 use kiln_manage::profile::Profile;
 use kiln_manage::{Error, ErrorCode};
@@ -105,6 +106,25 @@ pub async fn pack_diff(old_path: PathBuf, new_path: PathBuf) -> Result<PackDiff,
 #[tauri::command]
 pub async fn pack_secret_scan(file: String, text: String) -> Result<Vec<String>, Error> {
     Ok(pack::secret_findings(&file, &text))
+}
+
+/// The player layer of an instance (local.<pid>): its data files.
+#[tauri::command]
+pub async fn pack_local_files(profile_id: String) -> Result<Vec<layers::LocalFile>, Error> {
+    blocking(move || layers::files(&dirs()?, &profile_id)).await
+}
+
+/// Writes (or with `text` null removes) one data file of the player layer's working copy (`content/<name>.json`);
+/// `pack_local_save` makes it count.
+#[tauri::command]
+pub async fn pack_local_write(profile_id: String, path: String, text: Option<String>) -> Result<(), Error> {
+    blocking(move || layers::write(&dirs()?, &profile_id, &path, text.as_deref())).await
+}
+
+/// Puts the player layer into the Library as the profile's last Kiln mod (or out of the profile when it is empty).
+#[tauri::command]
+pub async fn pack_local_save(profile_id: String) -> Result<Profile, Error> {
+    blocking(move || layers::save(&dirs()?, &profile_id)).await
 }
 
 /// The Crucible pack's format (1: a server modpack, 2: a Crucible pack) of a dropped zip.

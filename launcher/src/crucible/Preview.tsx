@@ -222,6 +222,7 @@ export function PreviewModal({ source }: { source: PreviewSource }) {
           <div data-testid="crucible-preview-error"><Banner tone="err" title={t("crucible.preview.cantOpen")}>{crucibleError(q.error)}</Banner></div>
         ) : m && (
           <>
+            {source.kind === "crucible" && source.resume && <p className="kcr-p" data-testid="crucible-resumed">{t("crucible.preview.resumed", { name: m.title })}</p>}
             <div className="kcr-cover" style={{ backgroundImage: "url(" + m.cover + ")" }}>
               <div className="kcr-cover-text">
                 <span className="kcr-cover-title">{m.title}</span>

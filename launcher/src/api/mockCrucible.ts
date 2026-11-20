@@ -6,6 +6,8 @@
 //   ?crucible=shared    "Ember run" was shared before and changed since (+1 added, 1 updated)
 //   ?crucible=packs     an instance "Ashen Frontier" (1.0.0, its 1.1.0 waiting with one conflict) is installed
 //   ?crucible=instance  the same, and it is the loaded profile (its update banner shows on Play)
+//   ?crucible=first     the launcher's first start (crucible_resume: the clipboard is looked at once)
+//   ?crucible=resume    the download carried a pack code (Cinder Trails, K4TW-9XRB): its preview opens at start
 // Tests and the console: __kilnCrucibleMock.link(url) (a kiln://crucible link arrives), .setOnline(bool),
 // .requests() (every crucible/pack call with its arguments), .state().
 import type {
@@ -125,6 +127,10 @@ interface Shared { pack: CruciblePack; version: CrucibleVersion; snapshot: strin
 const shared = new Map<string, Shared>();
 const instances = new Map<string, PackInstance>();
 const undos = new Map<string, { profile: Profile; instance: PackInstance }>();
+/** The player layers (local.<pid>) by profile. */
+const localFiles = new Map<string, { path: string; text: string }[]>();
+let resumed = false;
+const OVERLAP_KEY = '["items","Material_T1_Wood_Logs","maxStackSize"]';
 const trust: CrucibleTrust[] = [{ id: "318840225", name: "Stonewright", since: ago(9) }];
 const links: string[] = [];
 let online = true;
@@ -263,8 +269,13 @@ export function crucibleMockHandlers(d: CrucibleMockDeps): Record<string, Handle
       },
       layer: { from: from.version, to: v.version, changed: from.version !== v.version },
       files: from === v ? [] : [{ path: "kiln-auto-loot.json", side: "both", mode: "merge-patch", taken: ["smash", "loot.chests"], kept: ["sound"],
-        conflicts: [{ key: "range", base: 15, pack: 12, mine: 20 }] }],
+        conflicts: [{ key: "range", base: 15, pack: 12, mine: 20 }] },
+        // the pack renamed the mod's hotkey file: the player's hotkey moves along
+        { path: "kiln-auto-loot/hotkeys.json", side: "both", mode: "merge-patch", taken: [], kept: ["hotkey"], conflicts: [], renamedFrom: "kiln-auto-loot-keys.json" }],
       conflicts: from === v ? 0 : 1,
+      // the player layer: two data edits, one the new pack layer sets too
+      local: from === v ? null : { id: "local." + pid, files: 1, fields: 2, overlaps: [{ key: OVERLAP_KEY, section: "items", target: "Material_T1_Wood_Logs",
+        field: "maxStackSize", pack: 800, base: 500, mine: 999, file: "content/mine.json", changed: true }] },
     };
     return { p, v, plan };
   };
@@ -386,6 +397,8 @@ export function crucibleMockHandlers(d: CrucibleMockDeps): Record<string, Handle
       return d.startTask("crucible_update", "Update " + p.pack.title, ["Downloading what changed", "Merging your settings", "Updating the profile"], (): CrucibleUpdateResult => {
         const open = plan.files.flatMap((f) => f.conflicts.map((c) => f.path + "#" + c.key)).filter((k) => !req.resolve?.[k] && !req.all);
         if (open.length) err("conflict", open.length + " setting(s) need your choice.", plan);
+        const known = new Set(plan.local?.overlaps.map((o) => o.key) ?? []);
+        for (const k of req.drop ?? []) if (!known.has(k)) err("invalid_argument", k + " is no field both the pack and your changes set");
         const pid = req.profile;
         const prof = clone(d.profiles.get(pid)!);
         const inst = clone(instances.get(pid)!);
@@ -410,7 +423,8 @@ export function crucibleMockHandlers(d: CrucibleMockDeps): Record<string, Handle
           crucible: { ...inst.crucible, version: v.id } };
         instances.set(pid, next);
         for (const [g, act] of Object.entries(d.activations)) if (act?.profileId === pid && !d.isRunning(g)) { d.activate(pid, g); d.emitGame(g); }
-        return { plan, profile: clone(prof), instance: clone(next), imported: rep.imported };
+        const backups = Object.entries(d.activations).filter(([, act]) => act?.profileId === pid).map(([g]) => d.makeBackup(g, "modpack", "before updating pack " + p.pack.title, pid));
+        return { plan, profile: clone(prof), instance: clone(next), imported: rep.imported, backups };
       }, 300);
     },
     crucible_share: (a) => {
@@ -438,6 +452,26 @@ export function crucibleMockHandlers(d: CrucibleMockDeps): Record<string, Handle
       return null;
     },
     crucible_links: () => links.splice(0),
+    // ?crucible=first: the first start (the clipboard is looked at once); ?crucible=resume: the download carried Cinder Trails' code
+    crucible_resume: () => { const r = { firstStart: FLAGS.has("first") && !resumed, code: FLAGS.has("resume") && !resumed ? "K4TW9XRB" : null }; resumed = true; return r; },
+    pack_local_files: (a) => clone(localFiles.get(String(a.profileId)) ?? []),
+    pack_local_write: (a) => {
+      const pid = String(a.profileId), path = String(a.path);
+      if (!/^content\/[^/\\.][^/\\]*\.json$/i.test(path)) err("invalid_argument", path + ": the player layer holds content/<name>.json files only");
+      const list = (localFiles.get(pid) ?? []).filter((f) => f.path !== path);
+      if (a.text != null) list.push({ path, text: String(a.text) });
+      localFiles.set(pid, list.sort((x, y) => x.path.localeCompare(y.path)));
+      return null;
+    },
+    pack_local_save: (a) => {
+      const pid = String(a.profileId);
+      const prof = clone(d.profiles.get(pid) ?? err("not_found", "No profile '" + pid + "'."));
+      prof.mods.kiln = prof.mods.kiln.filter((x) => x.id !== "local." + pid);
+      if ((localFiles.get(pid) ?? []).length) prof.mods.kiln.push({ id: "local." + pid, version: "1.0.0", hash: hex("local" + JSON.stringify(localFiles.get(pid))), enabled: true });
+      prof.generation++;
+      d.profiles.set(pid, prof);
+      return clone(prof);
+    },
     pack_instance: (a) => clone(instances.get(String(a.profileId)) ?? null),
     pack_instances: () => [...instances.entries()].filter(([pid]) => d.profiles.has(pid)).map(([pid, i]) => [pid, clone(i)]),
     pack_undo: (a) => {

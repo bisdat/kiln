@@ -61,6 +61,8 @@ export function UpdateModal({ profileId }: { profileId: ProfileId }) {
   const q = useQuery({ queryKey: crk.plan(profileId), queryFn: () => api.crucibleUpdatePlan(profileId), retry: false, staleTime: 60_000 });
   const [plan, setPlan] = useState<PackUpdatePlan | null>(null);
   const [choice, setChoice] = useState<Record<string, PackChoice>>({});
+  /** Player-layer fields to let go ("Drop my change"). */
+  const [drop, setDrop] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   useEffect(() => { if (q.data && !plan) setPlan(q.data.plan); }, [q.data, plan]);
   const name = profiles.data?.find((p) => p.id === profileId)?.name ?? profileId;
@@ -69,13 +71,18 @@ export function UpdateModal({ profileId }: { profileId: ProfileId }) {
   const conflicts = plan?.files.flatMap((f) => f.conflicts.map((c) => ({ file: f.path, ...c, key2: f.path + "#" + c.key }))) ?? [];
   const keptKeys = plan?.files.reduce((s, f) => s + f.kept.length, 0) ?? 0;
   const yours = plan ? plan.mods.yours.length + plan.mods.keptSwitches.length : 0;
+  const dataEdits = plan?.local?.fields ?? 0;
+  const overlaps = plan?.local?.overlaps ?? [];
+  const renamed = plan?.files.filter((f) => f.renamedFrom) ?? [];
   const open = conflicts.filter((c) => !choice[c.key2]);
   const running = !!status.data?.running;
   const go = async () => {
     if (!plan || !q.data || !game || open.length) return;
     setBusy(true);
     try {
-      const r = await runTask<api.CrucibleUpdateResult>(() => api.crucibleUpdate(game.id, { profile: profileId, versionId: q.data!.versionId, consent: true, resolve: choice }), { quiet: true });
+      const keep = drop.filter((k) => overlaps.some((o) => o.key === k));
+      const r = await runTask<api.CrucibleUpdateResult>(() => api.crucibleUpdate(game.id, { profile: profileId, versionId: q.data!.versionId, consent: true, resolve: choice,
+        ...(keep.length ? { drop: keep } : {}) }), { quiet: true });
       refreshCrucible(qc, game.id);
       const undo = async () => {
         try { await api.packUndo(profileId); refreshCrucible(qc, game.id); toast.ok(t("crucible.update.undone", { name, version: plan.from })); }
@@ -111,7 +118,24 @@ export function UpdateModal({ profileId }: { profileId: ProfileId }) {
                 {plan.mods.removed.map((m) => <li key={"r" + m.id} className="rem"><b>−</b> {t("crucible.update.removedKept", { name: modName(m.id, m.name) })}</li>)}
                 {plan.layer.changed && <li className="upd"><b>~</b> {t("crucible.update.packData")}</li>}
               </ul>
-              {(keptKeys > 0 || yours > 0) && <p className="kcr-p k-muted" data-testid="crucible-kept">{t("crucible.update.kept", { settings: keptKeys, mods: yours })}</p>}
+              {(keptKeys > 0 || yours > 0 || dataEdits > 0) && <p className="kcr-p k-muted" data-testid="crucible-kept">
+                {dataEdits > 0 ? t("crucible.update.keptData", { settings: keptKeys, data: dataEdits, mods: yours }) : t("crucible.update.kept", { settings: keptKeys, mods: yours })}</p>}
+              {renamed.map((f) => <p key={"rn" + f.path} className="k-hint" data-testid="crucible-renamed">{t("crucible.update.renamed", { from: f.renamedFrom!, to: f.path })}</p>)}
+              {overlaps.length > 0 && (
+                <div className="kcr-conflicts" data-testid="crucible-overlaps">
+                  <div className="kcr-label">{t("crucible.update.stillWins", { count: overlaps.length })}</div>
+                  {overlaps.map((o) => (
+                    <div key={o.key} className="kcr-conflict">
+                      <p className="k-hint"><span className="k-mono">{[o.target, o.field].filter(Boolean).join(" · ")}</span>{" "}
+                        {o.changed ? t("crucible.update.dataChanged", { pack: show(o.pack), mine: show(o.mine) }) : t("crucible.update.dataSame", { pack: show(o.pack), mine: show(o.mine) })}</p>
+                      <label className="kcr-tick"><input type="checkbox" checked={drop.includes(o.key)} data-testid="crucible-drop-mine"
+                        onChange={(e) => setDrop((x) => (e.target.checked ? [...x, o.key] : x.filter((k) => k !== o.key)))} />
+                        <span>{t("crucible.update.dropMine", { value: show(o.pack) })}</span></label>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {active && <p className="k-hint" data-testid="crucible-saves-first">{t("crucible.update.savesFirst")}</p>}
               {q.data && q.data.download > 0 && <p className="k-hint">{t("crucible.update.download", { size: fmtBytes(q.data.download) })}</p>}
               {conflicts.length > 0 && (
                 <div className="kcr-conflicts" data-testid="crucible-conflicts">

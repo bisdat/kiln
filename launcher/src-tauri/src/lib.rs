@@ -303,6 +303,9 @@ pub fn run() {
             commands::pack::pack_diff,
             commands::pack::pack_secret_scan,
             commands::pack::pack_peek_format,
+            commands::pack::pack_local_files,
+            commands::pack::pack_local_write,
+            commands::pack::pack_local_save,
             commands::crucible::crucible_status,
             commands::crucible::crucible_open,
             commands::crucible::crucible_install,
@@ -313,7 +316,8 @@ pub fn run() {
             commands::crucible::crucible_shared,
             commands::crucible::crucible_trust,
             commands::crucible::crucible_trust_set,
-            commands::crucible::crucible_links
+            commands::crucible::crucible_links,
+            commands::crucible::crucible_resume
         ]))
         .build(tauri::generate_context!())
         .expect("error while building the Kiln Launcher")

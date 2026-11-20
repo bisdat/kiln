@@ -220,6 +220,13 @@ pub async fn crucible_links() -> Result<Vec<String>, Error> {
     Ok(std::mem::take(&mut *LINKS.lock().unwrap()))
 }
 
+/// "Come back after installing Kiln" (DESIGN 1.3): the first start with this data folder, and a pack code the download
+/// carried (the Windows installer's note beside the launcher, or the AppImage's name). Asked once by the UI at start.
+#[tauri::command]
+pub async fn crucible_resume() -> Result<links::Resume, Error> {
+    blocking(|| Ok(links::resume(&dirs()?, launcher_exe().ok().as_deref()))).await
+}
+
 // ---------------------------------------------------------------- links arriving
 
 /// `main` calls this for `--link <url>` (or a bare kiln:// argument). True: start the window (the link waits in the

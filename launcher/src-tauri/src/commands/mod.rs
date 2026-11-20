@@ -259,6 +259,9 @@ pub const NAMES: &[&str] = &[
     "pack_diff",
     "pack_secret_scan",
     "pack_peek_format",
+    "pack_local_files",
+    "pack_local_write",
+    "pack_local_save",
     "crucible_status",
     "crucible_open",
     "crucible_install",
@@ -270,6 +273,7 @@ pub const NAMES: &[&str] = &[
     "crucible_trust",
     "crucible_trust_set",
     "crucible_links",
+    "crucible_resume",
 ];
 
 #[cfg(test)]
