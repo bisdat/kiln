@@ -90,8 +90,8 @@ data (objects are serialized when the mod unloads and read into the new instance
   manifest's delete, pruning's reads and deletes) runs on Kiln.Saves' writer, in order: stagings first, then
   confirmations. Since 0.2.0-dev.30 the writer is a task on Kiln's own pool ([tasks.md](tasks.md)), not a thread of its
   own: one LongRunning task, owner `kiln.saves`, named `SaveWriter` (so the pool's watchdog, `tick-stats.jsonl` and
-  crash reports name it like any task), started with a save's first job, one at a time, and gone again after 5 s with
-  nothing to write. The order on disk is the one the tick thread kept: kiln.saves holds the game's world write (on the
+  crash reports name it like any task), started with a save's first job, one at a time, and gone again as soon as
+  nothing is queued (its pool time is its file work). The order on disk is the one the tick thread kept: kiln.saves holds the game's world write (on the
   game's Save2Thread, not the server's step) until the writer has that generation's pending manifest on disk
   (`stage_progress`, below), so the world file of revision *R* normally never reaches the disk before generation *R*'s
   manifest. A staging whose write fails is tried 3 times (0.25 s and 0.5 s between the tries) while the world write
@@ -131,11 +131,12 @@ data (objects are serialized when the mod unloads and read into the new instance
   waits 500 ms for running tasks and then names the ones still running (`kiln.tasks: parked at exit; ...`): a writer
   still busy then goes on until the process ends, and what it has not renamed into place by then is a temp file, never
   a torn one. A save handed over after the exit began, or when Kiln's task pool cannot run the writer here (safe idle,
-  C# tasks off after a build mismatch, the test kit without the host's component owners), is written on the calling
-  thread, after everything queued before it, as before 0.2.0-dev.29.3; kiln.log says so once per reason (`Kiln.Saves:
-  the writer cannot run on Kiln's task pool here (...)`). So does a writer task the pool admitted but did not start
-  within 2 s (every LongRunning thread busy): until it starts, saves are written on the calling thread, and a world
-  load, a world close or a backup that waits for the writer writes what is queued itself, in order. For a lab or a
+  C# tasks off after a build mismatch), is written on the calling thread, after everything queued before it, as before
+  0.2.0-dev.29.3; kiln.log says so once per reason (`Kiln.Saves: the writer cannot run on Kiln's task pool here
+  (...)`, Info for the exit, Warn otherwise). A writer task the pool admitted but did not start within 1 s (every
+  LongRunning thread busy, or the pool parked at the exit) does not hold the queue: Kiln.Saves writes what is queued
+  itself, in order, from a timer (its line says `start check` instead of `writer`), well inside the world write's 6 s
+  wait, and the next saves are written on the calling thread until the task starts (logged once). For a lab or a
   diagnosis, the environment variable `KILN_SAVES_WRITER=inline` keeps every save on the calling thread.
 - **Back-pressure.** A staging that comes while an earlier one of the same generation still waits for the writer (the
   save request's staging, then the snapshot staging one step later) replaces it; stagings of different generations are

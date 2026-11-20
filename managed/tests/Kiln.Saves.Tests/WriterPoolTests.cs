@@ -25,6 +25,7 @@ public sealed class WriterPoolTests : IDisposable
     private readonly Dictionary<string, object?> _knobs = [];
     private readonly List<ManualResetEventSlim> _gates = [];
     private readonly LogCapture _log = new();
+    private readonly List<string> _copies = [];
 
     public WriterPoolTests()
     {
@@ -47,6 +48,14 @@ public sealed class WriterPoolTests : IDisposable
         {
             Backend.Current = _backend;
             _h.Dispose();
+            foreach (var c in _copies)
+                try
+                {
+                    Directory.Delete(c, recursive: true);
+                }
+                catch (IOException)
+                {
+                }
         }
     }
 
@@ -131,7 +140,7 @@ public sealed class WriterPoolTests : IDisposable
         Save(2);
         Written();
         Assert.True(File.Exists(Confirmed(2, 1002)));
-        Assert.Equal(1, TestPool.WriterAdmissions() - before);  // one runner for both saves (it waits a while for the next job)
+        Assert.True(TestPool.WriterAdmissions() - before >= 1, "the writer's runner was admitted on the pool");
         lock (TestPool.Pool.Admitted)
             Assert.True(TestPool.Pool.Admitted.Last(a => a.Name == SaveWriter.TaskName).Options.LongRunning);
         lock (threads)
@@ -183,19 +192,21 @@ public sealed class WriterPoolTests : IDisposable
     }
 
     [Fact]
-    public void AnIdleRunnerGivesItsThreadBackAndTheNextSaveAdmitsAnother()
+    public void TheRunnerGivesItsThreadBackWhenNothingIsQueuedAndTheNextSaveAdmitsAnother()
     {
-        SetKnob("IdleLinger", TimeSpan.FromMilliseconds(100));
         using var native = new FakeSavesTable();
         var before = TestPool.WriterAdmissions();
         Bundles(1);
         Save(1);
         Written();
-        Until(() => !Store.Writer.Started, "the idle runner gave its thread back");
+        Until(() => !Store.Writer.Started, "the idle runner gave its thread back");  // no waiting on the pool between saves
+        var first = TestPool.WriterAdmissions();
+        Assert.True(first > before);
         Bundles(2);
         Save(2);
         Written();
-        Assert.Equal(2, TestPool.WriterAdmissions() - before);
+        Assert.True(TestPool.WriterAdmissions() > first, "the next save admitted a runner again");
+        Until(() => !Store.Writer.Started, "and that one gave its thread back too");
         Assert.True(File.Exists(Confirmed(2, 1002)));
         Assert.Equal(DataMatch.Exact, _h.Restart(2, new FakeInstanceWorld()));
         Assert.Equal(6, int.Parse(Store.FindBundle("world/mod-4")!.Keys["state"].Json!.Split(':')[1].TrimEnd('}')));
@@ -225,7 +236,9 @@ public sealed class WriterPoolTests : IDisposable
         Assert.True(File.Exists(Confirmed(2, 1002)), "the confirmation queued at the exit was written");
         Assert.False(File.Exists(Pending(2)));
         Assert.Empty(Directory.EnumerateFiles(_h.Root, "*.tmp-*", SearchOption.AllDirectories));
-        var line = _log.Single("Kiln.Saves: the writer's task was asked to stop");
+        var notice = _log.Single("Kiln.Saves: the writer's task was asked to stop (the game is exiting");  // when it saw the stop
+        Assert.True(notice.Text.Contains("with 2 write(s) queued; it writes them before it ends"), notice.Text);
+        var line = _log.Single("Kiln.Saves: the writer's task was asked to stop with");                     // when it ended
         Assert.True(line.Text.Contains("with 2 write(s) queued; it wrote 2 before it ended"), line.Text);
 
         // after the exit began the pool takes no task: the next save is written on the calling thread, logged once
@@ -272,7 +285,7 @@ public sealed class WriterPoolTests : IDisposable
     [Fact]
     public void ARunnerThatDoesNotStartNeverStrandsAJob()
     {
-        SetKnob("StartGrace", TimeSpan.FromMilliseconds(200));
+        SetKnob("StartGrace", TimeSpan.FromMilliseconds(500));
         using var native = new FakeSavesTable();
         Bundles(1);
         Save(1);
@@ -292,9 +305,15 @@ public sealed class WriterPoolTests : IDisposable
         Dispatch(SavesNative.EvSaving, 200, 2);
         Dispatch(SavesNative.EvSnapshot, 201, 2, saveSeq: 200);  // queued for the runner, which cannot start
         Assert.True(Store.Writer.Started);
-        Assert.False(File.Exists(Pending(2)));
-        Thread.Sleep(300);                                          // past the grace
-        Dispatch(SavesNative.EvWritten, 202, 2, saveSeq: 200, unix: 1002);  // written here, after the queued staging
+        // review 1: the world write must not wait out its own 6 s bound (and then go without the manifest): Kiln.Saves'
+        // start check writes the queued staging once the runner has not started within the grace
+        var waited = FakeSavesTable.WaitLikeTheWorldWrite(TimeSpan.FromSeconds(5));
+        Assert.True(waited < TimeSpan.FromSeconds(4), $"the world write waited {waited.TotalMilliseconds:F0} ms");
+        Assert.True(File.Exists(Pending(2)));
+        Assert.Contains(_log.Lines, l => l.Text.StartsWith("Kiln.Saves: staged mod data generation 2", StringComparison.Ordinal) &&
+                                         l.Text.Contains("start check (the writer's pool task had not started)"));
+        Thread.Sleep(600);                                          // past the grace
+        Dispatch(SavesNative.EvWritten, 202, 2, saveSeq: 200, unix: 1002);  // written on this thread: the runner has not started
         Assert.True(Store.Writer.Idle);
         Assert.True(File.Exists(Confirmed(2, 1002)));
         Assert.False(File.Exists(Pending(2)));
@@ -310,12 +329,70 @@ public sealed class WriterPoolTests : IDisposable
     }
 
     [Fact]
+    public void ARunnerThatWaitsForJobsEndsAtOnceWhenThePoolAsksItToStop()
+    {
+        const ulong exiting = 0xE818;
+        ComponentTask.Owners = c => c == SaveWriter.Component ? exiting : 0;
+        SetKnob("IdleLinger", TimeSpan.FromSeconds(30));  // a runner that would wait long for its next job
+        using var native = new FakeSavesTable();
+        Bundles(1);
+        Save(1);
+        Written();
+        var runner = Store.Writer.Runner;
+        Assert.NotNull(runner);
+        var clock = Stopwatch.StartNew();
+        TestPool.Pool.SealOwner(exiting);                 // the exit: the pool asks it to stop while it waits
+        Assert.True(runner!.WaitEnded(Long));
+        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(2), $"it ended {clock.ElapsedMilliseconds} ms after the stop (the pool's exit waits 500 ms)");
+        Assert.False(Store.Writer.Started);
+        Assert.True(File.Exists(Confirmed(1, 1001)));
+    }
+
+    [Fact]
+    public void ARunnerStillQueuedWhenTheExitBeginsLeavesNoSaveBehind()
+    {
+        const ulong exiting = 0xE819;
+        ComponentTask.Owners = c => c == SaveWriter.Component ? exiting : 0;
+        SetKnob("StartGrace", TimeSpan.FromMilliseconds(500));
+        using var native = new FakeSavesTable();
+        Bundles(1);
+        Save(1);
+        Written();
+        Assert.True(Store.Writer.Stop("before the busy pool"));
+        using var release = new ManualResetEventSlim();
+        _gates.Add(release);
+        var running = 0;
+        var blockers = Enumerable.Range(0, 4).Select(i => new ComponentTask(0x89000 + (ulong)i, "other", "blocker", _ =>
+        {
+            Interlocked.Increment(ref running);
+            release.Wait(Long);
+        }).Start()).ToList();
+        Until(() => Volatile.Read(ref running) == 4, "the blockers hold every worker");
+        Bundles(10);
+        Dispatch(SavesNative.EvSaving, 200, 2);
+        Dispatch(SavesNative.EvSnapshot, 201, 2, saveSeq: 200);  // queued for a runner the pool has not started
+        var runner = Store.Writer.Runner;
+        Assert.NotNull(runner);
+        TestPool.Pool.SealOwner(exiting);                          // the exit: the queued runner is cancelled, never runs
+        Until(() => runner!.IsTerminal, "the queued runner ended cancelled");
+        Assert.Equal(KilnTaskState.Cancelled, runner!.State);
+        FakeSavesTable.WaitLikeTheWorldWrite(TimeSpan.FromSeconds(5));  // the start check wrote the staging
+        Assert.True(File.Exists(Pending(2)));
+        Dispatch(SavesNative.EvWritten, 202, 2, saveSeq: 200, unix: 1002);  // the pool takes no task now: written here
+        Assert.True(File.Exists(Confirmed(2, 1002)));
+        Assert.False(File.Exists(Pending(2)));
+        Assert.True(Store.Writer.Idle);
+        release.Set();
+        foreach (var b in blockers) Assert.True(b.WaitEnded(Long));
+        Assert.Equal(DataMatch.Exact, _h.Restart(2, new FakeInstanceWorld()));
+    }
+
+    [Fact]
     public void ThePoolAndTheSynchronousPathWriteTheSameFiles()
     {
         using var native = new FakeSavesTable();
         var pool = Folder(onPool: true);
-        _h.Dispose();
-        using var other = new InstanceHarness();
+        using var other = new InstanceHarness();  // a new folder for the same saves; _h's is deleted at the end as usual
         ComponentTask.Owners = null;
         var sync = Folder(onPool: false, other);
         var a = Files(pool);
@@ -344,6 +421,7 @@ public sealed class WriterPoolTests : IDisposable
         Written();
         lock (threads) Assert.Equal(onPool, threads.All(t => TestPool.Pool.IsWorker(t.Thread)));
         var copy = Path.Combine(AppContext.BaseDirectory, "instance-tests", "same-" + Guid.NewGuid().ToString("N"));
+        _copies.Add(copy);
         foreach (var f in Directory.EnumerateFiles(h.Root, "*", SearchOption.AllDirectories))
         {
             var to = Path.Combine(copy, Path.GetRelativePath(h.Root, f));

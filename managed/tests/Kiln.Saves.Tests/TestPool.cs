@@ -12,7 +12,7 @@ internal static class TestPool
     /// <summary>The owner Kiln.Host would create for kiln.saves.</summary>
     public const ulong SavesOwner = 0x5A7E5;
 
-    public static readonly Kiln.TestKit.KitTaskPool Pool = new(4, () => false, "saves-test-pool-", notifyEnded: false);
+    public static readonly Kiln.TestKit.KitTaskPool Pool = new(4, () => false, "saves-test-pool-", notifyEnded: true);
 
     /// <summary>The host's source of component owners: kiln.saves gets <see cref="SavesOwner"/>, others an id of their own.</summary>
     public static ulong Owners(string component) => component == SaveWriter.Component ? SavesOwner : 0xC0000 + (ulong)(component.Length & 0xFF);
