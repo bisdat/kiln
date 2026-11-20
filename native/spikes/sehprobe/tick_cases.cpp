@@ -53,6 +53,7 @@ bool constant(std::string_view, int64_t*) { return false; }
 namespace worldinfo {
 uintptr_t world(uint32_t k) { return k < KILN_WORLD_KINDS ? worlds[k] : 0; }
 void set_world(uint32_t k, uintptr_t w) { worlds[k] = w; }
+uintptr_t singleton(uintptr_t, std::string_view) { return 0; }  // tick-stats' client-world lines: no singletons here
 }
 namespace reg {
 uint64_t version() { return 1; }
