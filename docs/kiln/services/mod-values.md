@@ -28,7 +28,10 @@ ModValues.Define("tokens", new ModValueOptions(ModValueKind.Currency, "Tokens", 
 ```
 
 Kiln reads every loaded mod's `mod-values/*.json` (strict JSON, file-name order, 64-bit numbers as strings): both sides
-describe them, the side that runs the world defines them. The same options again are accepted; other options for the same
+describe them, the side that runs the world defines them; a game client that starts hosting a world (single player, a
+co-op host) defines them then, and a mod reloaded later is read again. Call `Define` in `OnLoad`: on a dedicated
+server it is active at once; on a game client that runs no world yet (a both-side mod in the main menu) the value is
+described and kept, and it becomes active when that client hosts a world. The same options again are accepted; other options for the same
 id in the same load of the mod are refused (`DefinitionConflict`). A mod's next load (a reload) defines them again.
 
 | Field | Rule |
@@ -38,7 +41,7 @@ id in the same load of the mod are refused (`DefinitionConflict`). A mod's next 
 | `Min`, `Max`, `Initial` | 64-bit; `Initial` defaults to `Min` (a counter with Min 10 starts at 10) and must be within the bounds |
 | `Scale` | 0-6 fixed decimal places: raw 1234 at scale 2 is 12.34. Formatting is exact (decimal, never a double) |
 | `Thresholds` | experience only: from 0, strictly increasing, at most 256. Level = how many thresholds the value reached |
-| `Persistence` | World (this world's record) or Carried (travels with the character, see below) |
+| `Persistence` | World (this world's record) or Carried (travels with the character, see below; give a carried value a real `Max`: lint KL356 warns without one) |
 | `Version` | raise it when kind, bounds, initial, scale, thresholds or persistence change (see Migration) |
 | `ReadPolicy`, `ReadMods` | which mods read it: OwnerOnly, Public, AllowList (at most 32). Cooperative, not a sandbox |
 | `Sync` | None (never sent), OwnerMod (sent; on the client only the owning mod reads it), Readers (the read policy decides) |
@@ -64,7 +67,11 @@ thread, row `stats.own`.
   `BoundExceeded` with no change.
 - Every value has a revision per world (`ModValueSnapshot.Version`); pass it back as `expected` for compare-and-set.
   Revision 0 is a real revision (a fresh value): the world id in it keeps another world's revision 0 from matching.
-- Every initialization, write, migration, import and reset posts `ModValueChangedEvent` (cause, before, after).
+- Every initialization, write, migration, import and reset posts `ModValueChangedEvent` (cause, before, after). Like
+  every event on Kiln's bus it reaches every subscriber, whatever the value's read policy: the read policy guards
+  `Read`, `Synced` and the native facade (whose subscriptions are filtered per subscriber), not the managed event
+  bus. Filter your handlers by `Key.Mod`, and keep a value that must stay with its mod at `Sync = None` and out of
+  other mods' event handlers by not relying on the policy for secrecy.
 - `Spend` is not a transaction with anything else: when what you sell then fails, give the amount back (the sample's
   `fishing-buy-bait`).
 - Players change values only through your server code: a command (`[Command]`, its permission node
@@ -79,7 +86,8 @@ OwnerMod values; others read Readers values their read policy allows. `NotSynced
 with `Sync = None`, and after leaving the world (the copy is cleared then). `ModValueSyncedEvent` per changed value,
 then `ModValuesSnapshotPublishedEvent`. `ModValues.Format(snapshot)` gives the text players see, in the game's language;
 `ModValues.Definition(key)` the label and format. In a hosted game the host's own copy runs through the same code in
-process.
+process, and is cleared when the host leaves its world. Window draws and HUD line callbacks run as the mod that made them,
+so a mod's HUD line reads its own OwnerOnly values.
 
 ## Carried values
 `Persistence = Carried` is for progress that travels: experience, or a counter with Min 0 or more, with
@@ -104,8 +112,17 @@ again. Nothing deletes a saved value.
 Per character and owning mod: CharacterData `mod-values.world.v1` (World values), CharacterData
 `mod-values.carried-authority.v1` (accepted Carried values), CharacterData.Carried `mod-values.carried.v1` (a projection
 for the transport, rebuilt from the authority at start, before each save and after a carried import; never read as
-authority). These keys are reserved: do not use them in your own CharacterData. A stored object that is not such a record
-is held, never overwritten.
+authority). These keys are reserved: mods' own CharacterData calls refuse them (`ArgumentException`) and `Keys` does not
+list them. A stored object that is not such a record is held, never overwritten.
+
+The copy is rewritten only for characters that have a carried record in this world, and never below what the player's
+own copy holds for the same value (kind, scale and epoch): a world that does not hold the mod, a world the player's offer
+was refused by, or a first visit before the offer is merged passes the player's copy on unchanged.
+
+A new world has no id until its first save. Until then its values use a provisional world id for the session (the
+records are in memory, as all of a new world's mod data is, and go to disk with that save); the first save gives the
+real id, the values stay, the stream starts over with a new nonce, and a compare-and-set made with a version from before
+the save is refused once as `StaleRevision`.
 
 ## Capability rows
 | Row | Side | What |
