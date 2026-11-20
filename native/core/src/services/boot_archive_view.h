@@ -5,8 +5,8 @@
 //   tree(query)  one query of kiln.boot's grammar (boot_service.cpp query_ok) as a JSON tree: the result kiln.boot
 //                answers with, {"resourceId","typeHash","part","value"}
 //   bytes(key)   one resource's bytes as the game keeps it, by KilnAssetKey (GUID in game byte order, type hash, part)
-//   digest()     the generation digest: 64 lower-case hex digits naming exactly the data the view serves; two views with
-//                one digest give the same answers
+//   digest()     the generation digest: 64 lower-case hex digits naming exactly the data the view serves (LiveView: the
+//                data it has served so far); two views with one digest gave the same answers for that data
 //   release()    the reads of the generation are over
 // Backings here:
 //   SnapshotView  the boot game-data snapshot (boot_gamedata.h), made before the start. Trees only: the snapshot holds
@@ -14,6 +14,8 @@
 //   LiveView      kiln.assets (kiln_assets.h): the bytes the game's resource service serves now, a Kiln override or new
 //                 resource first, else the game's own. Bytes only, and only once the game's resources are up
 //                 (when_resources_ready): they load after the game's entry point, so before it a read is unavailable.
+//                 kiln.assets keeps the readiness callback it is given (the view): a LiveView lives as long as
+//                 kiln.assets runs (kiln.boot's is never destroyed).
 // Another backing derives from BaseView.
 //
 // Header-only and free of the core's other headers, like boot_gamedata.h: boot_service.cpp, its host tests and a
@@ -182,7 +184,7 @@ class LiveView final : public BaseView {
     }
 
     KilnResult tree(std::string_view, size_t, size_t, uint64_t, std::string*, size_t*, size_t*, std::string* why) override {
-        *why = "the live game data has no decoded values: kiln.boot reads them from a snapshot or a committed generation";
+        *why = "the live game data has no decoded values, only bytes";
         return KILN_ERR_UNAVAILABLE;
     }
 
@@ -195,8 +197,9 @@ class LiveView final : public BaseView {
             KilnResult rc = a->resource_read(&key, &probe, 0, &len);
             if (rc == KILN_ERR_NOT_FOUND) return *why = "not in the game's resources", KILN_ERR_NOT_FOUND;
             if (rc == KILN_OK) {  // an empty resource
-                out->clear();
-                return keep(key, *out, why);
+                const KilnResult kept = keep(key, std::string(), why);
+                if (kept == KILN_OK) out->clear();
+                return kept;
             }
             if (rc != KILN_ERR_BUFFER_TOO_SMALL) return *why = "kiln.assets could not read it", KILN_ERR_UNAVAILABLE;
             if (len > max) return *why = "the resource is larger than the read may be", KILN_ERR_UNAVAILABLE;
@@ -205,8 +208,9 @@ class LiveView final : public BaseView {
             rc = a->resource_read(&key, data.data(), data.size(), &got);
             if (rc == KILN_OK && got <= len) {  // one copy: it may have shrunk between the two calls, never torn
                 data.resize(got);
-                *out = std::move(data);
-                return keep(key, *out, why);
+                const KilnResult kept = keep(key, data, why);  // refused when the view was released meanwhile: *out stays
+                if (kept == KILN_OK) *out = std::move(data);
+                return kept;
             }
             if (rc == KILN_ERR_NOT_FOUND) return *why = "not in the game's resources", KILN_ERR_NOT_FOUND;
             if (rc != KILN_ERR_BUFFER_TOO_SMALL) return *why = "kiln.assets could not read it", KILN_ERR_UNAVAILABLE;

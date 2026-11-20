@@ -12,6 +12,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <map>
 #include <mutex>
 #include <string>
@@ -252,6 +253,7 @@ struct FakeAssets {
     std::mutex m;
     std::map<std::string, std::string> res;  // key bytes -> data
     std::map<std::string, int> grow;         // key -> how many more copies find it larger than its size said
+    std::function<void()> on_copy;           // runs at the start of a copy (a read with room), before it answers
     void(KILN_CALL* ready_fn)(void*) = nullptr;
     void* ready_user = nullptr;
     bool up = false;
@@ -264,6 +266,7 @@ std::string key_bytes(const KilnAssetKey& k) { return std::string(reinterpret_ca
 KilnResult KILN_CALL fake_read(const KilnAssetKey* key, void* buffer, size_t capacity, size_t* out_len) {
     FakeAssets& f = *t_fake;
     ++f.reads;
+    if (capacity != 0 && f.on_copy) f.on_copy();
     std::lock_guard lk(f.m);
     const auto it = f.res.find(key_bytes(*key));
     if (it == f.res.end()) return KILN_ERR_NOT_FOUND;
@@ -387,6 +390,13 @@ void live_case() {
     CHECK(v.bytes(other, 1 << 20, &out, &why) == KILN_ERR_UNAVAILABLE && f.reads == reads);
     v.restart();
     CHECK(v.ready(&why) && v.digest() == none);
+    // released while it read (between the copy and its record): refused, *out as it was, nothing kept
+    f.on_copy = [&] { v.release(); };
+    out = "keep";
+    CHECK(v.bytes(other, 1 << 20, &out, &why) == KILN_ERR_UNAVAILABLE && out == "keep" && why.find("released") != std::string::npos);
+    f.on_copy = nullptr;
+    v.restart();
+    CHECK(v.digest() == none);
     // kiln.assets too old (no when_resources_ready in its table), or without resources on this build: never serves
     {
         t_table_size = offsetof(KilnAssetsApi, when_resources_ready);
