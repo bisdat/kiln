@@ -4,11 +4,13 @@
 // native/third_party/ffx). No windows.h, no calls into AMD's DLLs: host test tests/upscale_test.cpp.
 #pragma once
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "api/include/ffx_api.h"
@@ -62,7 +64,20 @@ inline std::string missing_used_if_offered(const VkContext& vk, const std::vecto
     return {};
 }
 
-inline DeviceNeeds device_needs() {
+// The six extensions (with their features) of AMD's sample for FSR 4 that Kiln adds to the game's device only with
+// kiln/control/amd "fsr4ext on": cooperative matrix, FP8, compute-shader derivatives, 8-bit storage, the memory model,
+// maintenance4. With them, AMD's Vulkan FSR 4 (SDK 2.4.0, 4.1.2) drew dark scenes too dark on an RX 9070 XT (29.19);
+// OptiScaler 0.9.5's pure-Vulkan FSR 4 from the same DLL ran FP8 FSR 4 correctly on the same card on a device without
+// them (its log: the game's 26 device extensions, of these only float16/int8 and integer dot product). FSR 3.1, XeSS and
+// Kiln's own passes need none of the six.
+inline const std::vector<const char*>& fsr4_native_extensions() {
+    static const std::vector<const char*> v = {VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME, VK_EXT_SHADER_FLOAT8_EXTENSION_NAME,
+                                               VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME, VK_KHR_8BIT_STORAGE_EXTENSION_NAME,
+                                               VK_KHR_VULKAN_MEMORY_MODEL_EXTENSION_NAME, VK_KHR_MAINTENANCE_4_EXTENSION_NAME};
+    return v;
+}
+
+inline DeviceNeeds device_needs(bool fsr4_native = false) {
     DeviceNeeds n;
     // what FSR 3.1's Vulkan backend uses when the GPU offers it
     n.want_extension(VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME);
@@ -100,13 +115,15 @@ inline DeviceNeeds device_needs() {
         f.features.shaderStorageImageReadWithoutFormat = VK_TRUE;
         n.want(f);
     }
-    // FSR 4 (AMD's sample's set)
+    // integer dot product (OptiScaler's device had it too)
+    n.want_extension(VK_KHR_SHADER_INTEGER_DOT_PRODUCT_EXTENSION_NAME);
+    n.want(VkPhysicalDeviceShaderIntegerDotProductFeatures{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_DOT_PRODUCT_FEATURES, nullptr, VK_TRUE});
+    if (!fsr4_native) return n;
+    // FSR 4's native set (AMD's sample's), only with "fsr4ext on": see fsr4_native_extensions
     n.want_extension(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME);
     n.want(VkPhysicalDeviceCooperativeMatrixFeaturesKHR{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR, nullptr, VK_TRUE, VK_FALSE});
     n.want_extension(VK_EXT_SHADER_FLOAT8_EXTENSION_NAME);
     n.want(VkPhysicalDeviceShaderFloat8FeaturesEXT{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT8_FEATURES_EXT, nullptr, VK_TRUE, VK_TRUE});
-    n.want_extension(VK_KHR_SHADER_INTEGER_DOT_PRODUCT_EXTENSION_NAME);
-    n.want(VkPhysicalDeviceShaderIntegerDotProductFeatures{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_DOT_PRODUCT_FEATURES, nullptr, VK_TRUE});
     n.want_extension(VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME);
     n.want(VkPhysicalDeviceComputeShaderDerivativesFeaturesKHR{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COMPUTE_SHADER_DERIVATIVES_FEATURES_KHR, nullptr,
                                                               VK_TRUE, VK_TRUE});
@@ -171,6 +188,15 @@ enum class Colour : uint32_t { linear = 0, srgb = 1, pq = 2 };
 //                                   for FSR 3.1
 //   planes auto|game|swap           auto: the camera planes swapped for FSR 4 (OptiScaler does that with inverted depth,
 //                                   FSR31Feature_VkOn12.cpp), the game's for FSR 3.1
+//   usage game|rw                   game: inputs read-only, depth a depth target only in a depth format; rw: as NGX's
+//                                   ReadWrite resources OptiScaler hands FFX (UAV on every input, depth always a depth
+//                                   target)
+//   maxrender texture|output        maxRenderSize: the colour texture's, or the output's (OptiScaler: the display size)
+//   keyvalues off|optiscaler        OptiScaler's five FFX key-values (velocity 0.5, reactiveness 0.25, shading change
+//                                   0.5/ratio, accumulation ratio/10, disocclusion ratio/20)
+//   debug off|on                    FSR's own debug view in the output (what it makes of the inputs)
+//   fsr4ext off|on                  read when the game makes its device (the next game start): off, the game's device
+//                                   without FSR 4's native set (fsr4_native_extensions); on, with it (as up to 29.20)
 enum class Planes : uint32_t { automatic = 0, game = 1, swap = 2 };
 struct Tuning {
     Exposure exposure = Exposure::automatic;
@@ -180,11 +206,13 @@ struct Tuning {
     Colour colour = Colour::linear;
     Mask dynres = Mask::automatic;
     Planes planes = Planes::automatic;
+    bool usage_rw = false, maxrender_output = false, keyvalues = false, debug = false;
+    bool fsr4ext = false;  // read when the game makes its device (from the next game start)
     std::vector<std::string> notes;  // lines Kiln did not understand
     bool changed() const {
         return exposure != Exposure::automatic || pre_exposure != PreExposure::automatic || reactive != Mask::automatic ||
                transparency != Mask::automatic || hdr_off || colour != Colour::linear || dynres != Mask::automatic ||
-               planes != Planes::automatic;
+               planes != Planes::automatic || usage_rw || maxrender_output || keyvalues || debug || fsr4ext;
     }
 };
 inline Tuning parse_tuning(std::string_view text) {
@@ -223,6 +251,11 @@ inline Tuning parse_tuning(std::string_view text) {
         else if ((w[0] == "colour" || w[0] == "color") && v == "srgb") t.colour = Colour::srgb;
         else if ((w[0] == "colour" || w[0] == "color") && v == "pq") t.colour = Colour::pq;
         else if (w[0] == "dynres" && (v == "auto" || v == "on" || v == "off")) t.dynres = v == "on" ? Mask::on : v == "off" ? Mask::off : Mask::automatic;
+        else if (w[0] == "usage" && (v == "game" || v == "rw")) t.usage_rw = v == "rw";
+        else if (w[0] == "maxrender" && (v == "texture" || v == "output")) t.maxrender_output = v == "output";
+        else if (w[0] == "keyvalues" && (v == "off" || v == "optiscaler")) t.keyvalues = v == "optiscaler";
+        else if (w[0] == "debug" && (v == "off" || v == "on")) t.debug = v == "on";
+        else if (w[0] == "fsr4ext" && (v == "off" || v == "on")) t.fsr4ext = v == "on";
         else if (w[0] == "planes" && (v == "auto" || v == "game" || v == "swap"))
             t.planes = v == "game" ? Planes::game : v == "swap" ? Planes::swap : Planes::automatic;
         else t.notes.push_back(line);
@@ -251,6 +284,10 @@ inline std::string tuning_text(Running running, const Tuning& t) {
     if (t.colour == Colour::srgb) s += ", colour said sRGB";
     if (t.colour == Colour::pq) s += ", colour said PQ";
     if (planes_swapped(running, t)) s += ", planes swapped";
+    if (t.usage_rw) s += ", inputs read-write";
+    if (t.maxrender_output) s += ", maxRenderSize the output's";
+    if (t.keyvalues) s += ", OptiScaler's key-values";
+    if (t.debug) s += ", debug view";
     return s;
 }
 
@@ -263,6 +300,7 @@ inline uint32_t create_flags(const CreateInfo& ci, const Tuning& t = {}, Running
         f |= FFX_UPSCALE_ENABLE_DYNAMIC_RESOLUTION;
     if (t.colour != Colour::linear) f |= FFX_UPSCALE_ENABLE_NON_LINEAR_COLORSPACE;
     if (t.exposure == Exposure::automatic) f |= FFX_UPSCALE_ENABLE_AUTO_EXPOSURE;  // the game has no exposure texture
+    if (t.debug) f |= FFX_UPSCALE_ENABLE_DEBUG_VISUALIZATION;
     return f;  // render-size MVs (no DISPLAY_RESOLUTION_MOTION_VECTORS), no jitter in them (no JITTER_CANCELLATION), linear
                // colour (no NON_LINEAR_COLORSPACE)
 }
@@ -324,7 +362,7 @@ inline int pick_fsr3(const std::vector<std::string>& names) {
 inline bool is_depth(VkFormat f) { return ffxApiIsDepthFormat(f); }
 // An input in SHADER_READ_ONLY_OPTIMAL (AMD's COMPUTE_READ), or the output in GENERAL (UNORDERED_ACCESS). AMD's backend
 // makes its own views of the image and puts each back in the state given here when it is done.
-inline FfxApiResource resource(const Texture& t, bool output) {
+inline FfxApiResource resource(const Texture& t, bool output, bool rw = false, bool depth_role = false) {
     if (!t.present()) return FfxApiResource{};
     FfxApiResourceDescription d{};
     d.type = FFX_API_RESOURCE_TYPE_TEXTURE2D;
@@ -335,24 +373,39 @@ inline FfxApiResource resource(const Texture& t, bool output) {
     d.mipCount = 1;
     d.flags = FFX_API_RESOURCE_FLAGS_NONE;
     d.usage = output ? FFX_API_RESOURCE_USAGE_UAV : FFX_API_RESOURCE_USAGE_READ_ONLY;
-    if (is_depth(t.format)) d.usage |= FFX_API_RESOURCE_USAGE_DEPTHTARGET;
+    if (rw) d.usage |= FFX_API_RESOURCE_USAGE_UAV;
+    if (is_depth(t.format) || (rw && depth_role)) d.usage |= FFX_API_RESOURCE_USAGE_DEPTHTARGET;
     return ffxApiGetResourceVK(reinterpret_cast<void*>(t.image), d,
                                output ? FFX_API_RESOURCE_STATE_UNORDERED_ACCESS : FFX_API_RESOURCE_STATE_COMPUTE_READ);
 }
 
 // The dispatch for `f`; `motion`: the motion vectors as AMD gets them (Kiln's R16G16_SFLOAT copy, upscale_mv.h).
+// The context's maxRenderSize: the colour texture's, or with "maxrender output" the output's (OptiScaler's choice).
+inline FfxApiDimensions2D max_render(const CreateInfo& ci, const Tuning& t) {
+    return t.maxrender_output ? FfxApiDimensions2D{ci.output_width, ci.output_height} : FfxApiDimensions2D{ci.max_render_width, ci.max_render_height};
+}
+// OptiScaler's key-values for an upscale ratio (output / render), in the order it sets them.
+inline std::vector<std::pair<uint64_t, float>> optiscaler_keyvalues(float ratio) {
+    if (!(ratio > 0.0f) || !std::isfinite(ratio)) ratio = 1.0f;
+    return {{FFX_API_CONFIGURE_UPSCALE_KEY_FVELOCITYFACTOR, 0.5f},
+            {FFX_API_CONFIGURE_UPSCALE_KEY_FREACTIVENESSSCALE, 0.25f},
+            {FFX_API_CONFIGURE_UPSCALE_KEY_FSHADINGCHANGESCALE, 0.5f / ratio},
+            {FFX_API_CONFIGURE_UPSCALE_KEY_FACCUMULATIONADDEDPERFRAME, ratio / 10.0f},
+            {FFX_API_CONFIGURE_UPSCALE_KEY_FMINDISOCCLUSIONACCUMULATION, ratio / 20.0f}};
+}
+
 inline ffxDispatchDescUpscale dispatch(const Frame& f, const Texture& motion, bool reset, Running running = Running::amd_fsr3,
                                        const Tuning& t = {}) {
     ffxDispatchDescUpscale d{};
     d.header.type = FFX_API_DISPATCH_DESC_TYPE_UPSCALE;
     d.header.pNext = nullptr;
     d.commandList = reinterpret_cast<void*>(f.cb);
-    d.color = resource(f.color, false);
-    d.depth = resource(f.depth, false);
-    d.motionVectors = resource(motion, false);
+    d.color = resource(f.color, false, t.usage_rw);
+    d.depth = resource(f.depth, false, t.usage_rw, true);
+    d.motionVectors = resource(motion, false, t.usage_rw);
     d.exposure = FfxApiResource{};  // none: the pre-exposure below (the game has no exposure texture for FSR)
-    d.reactive = mask_used(running, t.reactive) ? resource(f.reactive, false) : FfxApiResource{};
-    d.transparencyAndComposition = mask_used(running, t.transparency) ? resource(f.transparency, false) : FfxApiResource{};
+    d.reactive = mask_used(running, t.reactive) ? resource(f.reactive, false, t.usage_rw) : FfxApiResource{};
+    d.transparencyAndComposition = mask_used(running, t.transparency) ? resource(f.transparency, false, t.usage_rw) : FfxApiResource{};
     d.output = resource(f.output, true);
     d.jitterOffset = {f.jitter_x, f.jitter_y};
     d.motionVectorScale = {f.mv_scale_x, f.mv_scale_y};
@@ -370,6 +423,7 @@ inline ffxDispatchDescUpscale dispatch(const Frame& f, const Texture& motion, bo
     d.flags = t.colour == Colour::srgb ? static_cast<uint32_t>(FFX_UPSCALE_FLAG_NON_LINEAR_COLOR_SRGB)
               : t.colour == Colour::pq   ? static_cast<uint32_t>(FFX_UPSCALE_FLAG_NON_LINEAR_COLOR_PQ)
                                          : 0u;
+    if (t.debug) d.flags |= FFX_UPSCALE_FLAG_DRAW_DEBUG_VIEW;
     return d;
 }
 

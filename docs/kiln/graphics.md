@@ -336,8 +336,12 @@ any of it DLSS. Code: `native/services/ui/upscale.cpp` (the swap), `upscale_amd.
   RX 7000 and 6000, some recent APUs), else FSR 3.1; `auto` and `fsr3` pin FSR 3.1. Where FSR 4 is
   chosen but does not start, Kiln runs FSR 3.1 instead and says so in kiln.log. The device additions: everything AMD's
   Vulkan backend uses when the GPU offers it (subgroup size control, 16-bit floats, synchronization2, AMD's buffer
-  markers and coherent memory, descriptor indexing) and FSR 4's set (cooperative matrix, FP8, integer dot product,
-  compute-shader derivatives, 8- and 16-bit storage), each only where the GPU has it.
+  markers and coherent memory, descriptor indexing), 16-bit storage, float16/int8 and integer dot product, each only
+  where the GPU has it. Not, since 0.2.0-dev.29.21, AMD's sample's native FSR 4 set (cooperative matrix, FP8,
+  compute-shader derivatives, 8-bit storage, the memory model, maintenance4): with it AMD's Vulkan FSR 4 drew dark scenes
+  too dark on an RX 9070 XT (29.19), while OptiScaler's pure-Vulkan FSR 4 from the same DLL ran correctly on a device
+  without it. `kiln/control/amd` `fsr4ext on` adds it back from the next game start; kiln.log says at the game's start
+  which way the device was made, and the AMD FSR set-up line names the device path.
 - **Intel XeSS.** XeSS Super Resolution from the XeSS SDK 3.0.2: Intel's own `libxess.dll`, from
   `<game>/kiln/vendor/intel/3.0.2/` (the launcher's Settings, Graphics card), checked and kept open as AMD's files are,
   mapped only from that folder, and never patched or hooked (Intel's licence: the software unmodified, also while it

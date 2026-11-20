@@ -531,14 +531,67 @@ static void amd_fsr4_model() {
     CHECK(amd::expected_running({}, false) == Running::off);
 }
 
+// More of OptiScaler's pure-Vulkan FSR 4 (FSR31Feature_Vk.cpp, 0.9.5; the 29.19 beta 3 run from 21:17:52 on used the
+// same amd_fidelityfx_upscaler_vk.dll 4.1.2 as Kiln), as A/B knobs: its resources are NGX's ReadWrite ones (UAV usage
+// on every input, depth always a depth target: FSR31Feature_Vk.cpp:10-41, 461), its maxRenderSize is the display size,
+// and it sets five FFX key-values; plus FSR 4's own debug view, to see what FSR 4 makes of the inputs.
+static void amd_optiscaler_knobs() {
+    Frame f = b0_frame();
+    f.depth.format = VK_FORMAT_R32_SFLOAT;  // the game's depth on most frames (fmt 100)
+    Texture mv = tex(VK_FORMAT_R16G16_SFLOAT, 960, 540, 0x8000);
+    const amd::Tuning def{};
+    const ffxDispatchDescUpscale d = amd::dispatch(f, mv, false, Running::amd_fsr4, def);
+    CHECK(d.color.description.usage == FFX_API_RESOURCE_USAGE_READ_ONLY && d.depth.description.usage == FFX_API_RESOURCE_USAGE_READ_ONLY);
+    const amd::Tuning rw = amd::parse_tuning("usage rw");
+    CHECK(rw.usage_rw && rw.changed());
+    const ffxDispatchDescUpscale r = amd::dispatch(f, mv, false, Running::amd_fsr4, rw);
+    CHECK(r.color.description.usage == FFX_API_RESOURCE_USAGE_UAV && r.motionVectors.description.usage == FFX_API_RESOURCE_USAGE_UAV);
+    CHECK(r.depth.description.usage == (FFX_API_RESOURCE_USAGE_UAV | FFX_API_RESOURCE_USAGE_DEPTHTARGET));
+    CHECK(r.output.description.usage == FFX_API_RESOURCE_USAGE_UAV && r.output.state == FFX_API_RESOURCE_STATE_UNORDERED_ACCESS);
+    // debug view: the create flag and the dispatch flag
+    CreateInfo ci;
+    const amd::Tuning dbg = amd::parse_tuning("debug on");
+    CHECK(dbg.debug && (amd::create_flags(ci, dbg, Running::amd_fsr4) & FFX_UPSCALE_ENABLE_DEBUG_VISUALIZATION) &&
+          !(amd::create_flags(ci, def, Running::amd_fsr4) & FFX_UPSCALE_ENABLE_DEBUG_VISUALIZATION));
+    CHECK((amd::dispatch(f, mv, false, Running::amd_fsr4, dbg).flags & FFX_UPSCALE_FLAG_DRAW_DEBUG_VIEW) && !(d.flags & FFX_UPSCALE_FLAG_DRAW_DEBUG_VIEW));
+    // maxRenderSize: the colour texture's (default) or the output's
+    ci.max_render_width = 1505, ci.max_render_height = 847, ci.output_width = 2560, ci.output_height = 1440;
+    CHECK(amd::max_render(ci, def).width == 1505 && amd::max_render(ci, amd::parse_tuning("maxrender output")).width == 2560 &&
+          amd::max_render(ci, amd::parse_tuning("maxrender output")).height == 1440);
+    // OptiScaler's key-values (its defaults "when not set by the user", FSR31Feature_Vk.cpp:212-232), for a ratio of 1.7
+    const amd::Tuning kv = amd::parse_tuning("keyvalues optiscaler");
+    CHECK(kv.keyvalues && kv.changed() && !def.keyvalues);
+    const auto vals = amd::optiscaler_keyvalues(2560.0f / 1505.0f);
+    CHECK(vals.size() == 5 && vals[0].first == FFX_API_CONFIGURE_UPSCALE_KEY_FVELOCITYFACTOR && vals[0].second == 0.5f);
+    CHECK(vals[1].second == 0.25f && std::fabs(vals[2].second - 0.5f / (2560.0f / 1505.0f)) < 1e-6f);
+    CHECK(std::fabs(vals[3].second - (2560.0f / 1505.0f) / 10.0f) < 1e-6f && std::fabs(vals[4].second - (2560.0f / 1505.0f) / 20.0f) < 1e-6f);
+    // the set-up line names them
+    const amd::Tuning all = amd::parse_tuning("usage rw\nmaxrender output\nkeyvalues optiscaler\ndebug on");
+    CHECK(amd::tuning_text(Running::amd_fsr4, all) ==
+          "pre-exposure 1, no masks, planes swapped, inputs read-write, maxRenderSize the output's, OptiScaler's key-values, debug view");
+}
+
 static void amd_map() {
-    // device needs: everything FFX uses when offered, and FSR 4's set; all optional
+    // device needs: everything FFX uses when offered, float16/int8 and integer dot product; all optional
     const DeviceNeeds n = amd::device_needs();
     for (const char* e : {VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME, VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME, VK_AMD_BUFFER_MARKER_EXTENSION_NAME,
-                          VK_AMD_DEVICE_COHERENT_MEMORY_EXTENSION_NAME, VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME, VK_EXT_SHADER_FLOAT8_EXTENSION_NAME,
-                          VK_KHR_SHADER_INTEGER_DOT_PRODUCT_EXTENSION_NAME, VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME,
+                          VK_AMD_DEVICE_COHERENT_MEMORY_EXTENSION_NAME, VK_KHR_SHADER_INTEGER_DOT_PRODUCT_EXTENSION_NAME,
                           VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME})
         CHECK(has_ext(n, e));
+    // Not, by default, the cooperative-matrix / FP8 set of AMD's sample (29.19, SleepyPuppy, RX 9070 XT: FSR 4 drew dark
+    // scenes too dark on the game's device with them; OptiScaler 0.9.5's pure-Vulkan FSR 4, from the same
+    // amd_fidelityfx_upscaler_vk.dll, ran FP8 FSR 4 without darkness on a device without them, its log 981-1004)
+    const char* const fsr4_native[] = {VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME, VK_EXT_SHADER_FLOAT8_EXTENSION_NAME,
+                                       VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME, VK_KHR_8BIT_STORAGE_EXTENSION_NAME,
+                                       VK_KHR_VULKAN_MEMORY_MODEL_EXTENSION_NAME, VK_KHR_MAINTENANCE_4_EXTENSION_NAME};
+    for (const char* e : fsr4_native) CHECK(!has_ext(n, e));
+    CHECK(!need_of(n, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR) &&
+          !need_of(n, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT8_FEATURES_EXT));
+    // ... and with kiln/control/amd "fsr4ext on" (read when the game makes its device) the whole set as before
+    const DeviceNeeds n4 = amd::device_needs(true);
+    for (const char* e : fsr4_native) CHECK(has_ext(n4, e));
+    CHECK(need_of(n4, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR) && n4.extensions.size() == n.extensions.size() + 6);
+    CHECK(amd::parse_tuning("fsr4ext on").fsr4ext && !amd::parse_tuning("").fsr4ext && amd::parse_tuning("fsr4ext on").changed());
     for (const auto& f : n.features) CHECK(!f.required && f.bytes.size() > 16);
     const FeatureNeed* ssc = need_of(n, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_FEATURES);
     CHECK(ssc);
@@ -677,6 +730,7 @@ int main(int argc, char** argv) {
     latch();
     amd_map();
     amd_fsr4_model();
+    amd_optiscaler_knobs();
     amd_fsr4_inputs();
     exposure_range();
     std::printf("upscale_test: %d checks passed\n", g_checks);

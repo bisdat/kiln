@@ -78,10 +78,29 @@ class AmdBackend final : public Backend {
     }
 
     InstanceNeeds instance_needs() override { return {}; }
-    DeviceNeeds device_needs(const PhysicalDevice&) override { return amd::device_needs(); }
+    DeviceNeeds device_needs(const PhysicalDevice&) override {
+        // kiln/control/amd "fsr4ext on" (read here, when the game makes its device) puts FSR 4's native set back
+        const bool native = amd::parse_tuning(read_control()).fsr4ext;
+        std::string names;
+        for (const char* e : amd::fsr4_native_extensions()) names += (names.empty() ? "" : ", ") + std::string(e);
+        static bool said = false;
+        if (!said) {
+            said = true;
+            if (native)
+                logf(KILN_LOG_INFO, "graphics: upscaler: AMD FSR: the game's device also gets %s (kiln/control/amd \"fsr4ext on\")", names.c_str());
+            else
+                logf(KILN_LOG_INFO, "graphics: upscaler: AMD FSR: the game's device does not get %s: with them AMD's Vulkan FSR 4 drew dark "
+                     "scenes too dark on an RX 9070 XT (29.19), without them it runs as OptiScaler's working FSR 4 does; FSR 3.1 needs "
+                     "none of them (kiln/control/amd \"fsr4ext on\" adds them from the next game start)", names.c_str());
+        }
+        return amd::device_needs(native);
+    }
 
     bool device_ready(const VkContext& vk, Why* why, std::string* detail) override {
         vk_ = vk;
+        device_path_ = vk.has_extension(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME) && vk.has_extension(VK_EXT_SHADER_FLOAT8_EXTENSION_NAME)
+                           ? "device with cooperative matrix + FP8"
+                           : "device without cooperative matrix + FP8";
         version_ids_.clear();
         version_names_.clear();
         if (!vk.needs_merged) {
@@ -242,10 +261,25 @@ class AmdBackend final : public Backend {
         }
         ci_ = ci;
         reset_ = true;
+        std::string kv_note;
+        if (tuning_.keyvalues) {
+            // kiln/control/amd "keyvalues optiscaler": OptiScaler's five FFX key-values for this ratio
+            kv_note = fx_.Configure ? "" : "; keyvalues: ffxConfigure missing";
+            for (auto [key, value] : amd::optiscaler_keyvalues(ci.ratio)) {
+                if (!fx_.Configure) break;
+                float v = value;
+                ffxConfigureDescUpscaleKeyValue kv{};
+                kv.header.type = FFX_API_CONFIGURE_DESC_TYPE_UPSCALE_KEYVALUE;
+                kv.key = key;
+                kv.ptr = &v;
+                if (const uint32_t cr = fx_.Configure(&ctx_, &kv.header); cr != FFX_API_RETURN_OK)
+                    kv_note += "; keyvalue " + std::to_string(key) + ": " + amd::code_name(cr);
+            }
+        }
         // what AMD FSR was told about the game's picture (kiln.log, for reports: the dark-picture fix of 29.19)
         *detail = "FSR " + version_name_ + " (" + amd::flags_text(amd::create_flags(ci, tuning_, expect)) +
-                  (tuning_.changed() ? ", from kiln/control/amd" : "") + "; " + amd::tuning_text(running_, tuning_) + ", no exposure texture)" +
-                  (note.empty() ? "" : "; " + note);
+                  (tuning_.changed() ? ", from kiln/control/amd" : "") + "; " + amd::tuning_text(running_, tuning_) + ", no exposure texture; " + device_path_ + ")" +
+                  (note.empty() ? "" : "; " + note) + kv_note;
         for (const auto& n : tuning_.notes) *detail += "; kiln/control/amd: not understood: " + n;
         return true;
     }
@@ -328,7 +362,7 @@ class AmdBackend final : public Backend {
         ffxCreateContextDescUpscale c{};
         c.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_UPSCALE;
         c.flags = amd::create_flags(ci, tuning_, running);
-        c.maxRenderSize = {ci.max_render_width, ci.max_render_height};
+        c.maxRenderSize = amd::max_render(ci, tuning_);
         c.maxUpscaleSize = {ci.output_width, ci.output_height};
         c.fpMessage = &ffx_message;
         ffxCreateBackendVKDesc b{};
@@ -383,6 +417,7 @@ class AmdBackend final : public Backend {
     std::vector<Retired> retired_;
     CreateInfo ci_;
     amd::Tuning tuning_;
+    std::string device_path_ = "device not seen";
     bool reset_ = true;
     uint64_t frame_ = 0;
     Running running_ = Running::off;
