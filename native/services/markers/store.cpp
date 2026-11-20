@@ -247,6 +247,7 @@ KilnResult Store::set_local(KilnOwner owner, const KilnMarkerSpec* spec, KilnMar
     std::string_view interned;
     if (!arena_.intern(rec.text, &ledger.text_charged, &interned, &why)) return refuse(r, KILN_MARKER_FULL, "Full: %s", why);
     rec.text = interned;
+    rec.sequence = sequence_[kRoleClient] + 1;  // the sequence enqueue_change gives this change
     uint32_t kind = KILN_MARKER_UPDATED;
     if (it == b->local.end()) {
         b->local.emplace(std::string(key), rec);
@@ -340,6 +341,23 @@ KilnResult Store::world_epoch(uint32_t kind, uint64_t* out) const {
     if (!out || (kind != KILN_WORLD_SERVER && kind != KILN_WORLD_CLIENT)) return KILN_ERR_INVALID_ARGUMENT;
     *out = epochs_[kind].load();
     return KILN_OK;
+}
+
+void Store::snapshot_client(std::vector<ClientRow>* out) const {
+    out->clear();
+    std::lock_guard g(mu_);
+    out->reserve(local_total_ + received_total_);
+    for (const auto& [owner, b] : bindings_) {
+        for (const auto& [key, rec] : b.local) {
+            ClientRow row;
+            row.source = KILN_MARKER_LOCAL;
+            row.publisher_generation = b.generation;
+            row.ns = ledger_[b.ledger].ns;
+            row.key = key;
+            row.rec = rec;
+            out->push_back(std::move(row));
+        }
+    }
 }
 
 uint32_t Store::local_count() const {

@@ -55,10 +55,25 @@ struct Record {
     int32_t priority = 0;
     uint32_t label_mode = 0;
     std::string_view text;  // interned (arena), or the caller's bytes before commit
+    uint64_t follow = 0;    // the followed incarnation (the anchors' watch serial, never reused); 0 = fixed at x, y, z
+    uint64_t sequence = 0;  // not part of the value: the logical sequence of the change that stored it
     bool same(const Record& o) const {
         return surfaces == o.surfaces && x == o.x && y == o.y && z == o.z && height == o.height && max_distance == o.max_distance &&
-               icon == o.icon && rgba == o.rgba && priority == o.priority && label_mode == o.label_mode && text == o.text;
+               icon == o.icon && rgba == o.rgba && priority == o.priority && label_mode == o.label_mode && text == o.text &&
+               follow == o.follow;
     }
+};
+
+// One row of a client's records as the surfaces see it (S5, S6): a copy taken under the store lock at a client Post.
+// Local records and received ones (the receiver's virtual publishers) alike.
+struct ClientRow {
+    uint32_t source = KILN_MARKER_LOCAL;       // KILN_MARKER_LOCAL or KILN_MARKER_RECEIVED
+    uint64_t publisher_generation = 0;
+    uint64_t peer_generation = 0;              // received: the link's generation; 0 for local records
+    std::string ns, key;
+    Record rec;                                // rec.text lives in the arena (process lifetime)
+    uint32_t source_reason = KILN_MARKER_READY; // received: the sender's FOLLOW_MISSING, ANCHOR_ENDED or BAD_POSITION,
+                                                // or SOURCE_STALE; local: READY (follow state comes from the anchors)
 };
 
 class Store {
@@ -88,6 +103,9 @@ public:
     std::vector<Note> take(uint32_t role);  // the queued notes of a role, in order; frees their reservations
 
     // ---- for tests and logs ----
+    // The client's rows now (local, then received), for the surfaces at a client Post.
+    void snapshot_client(std::vector<ClientRow>* out) const;
+
     uint32_t local_count() const;
     uint32_t pending(uint32_t role) const;
     uint64_t text_charged(std::string_view ns) const;

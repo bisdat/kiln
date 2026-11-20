@@ -2,10 +2,9 @@
 // kiln.markers (services/kiln_markers.h): session-only markers on the game's map, Kiln's compass strip and world labels,
 // and the internal kiln.markers.bridge the managed built-in receiver uses. Dossier chapter 04; docs/kiln/services/markers.md.
 //
-// This file is the glue to the core: it publishes both tables and the capability rows, feeds the store (store.h) the world
-// lifecycle, and delivers the queued notifications at each client step (and on the stopping thread when a world stops).
-// The parts not built yet read unavailable (policy, "not built yet") and their members answer KILN_ERR_UNAVAILABLE naming
-// the row.
+// This file is the glue to the core (glue.h): it publishes both tables and the capability rows, feeds the store (store.h)
+// and the parts (anchors, surfaces, link) the world lifecycle and each world's Post, and delivers the queued notifications
+// at each step (and on the stopping thread when a world stops).
 #include <windows.h>
 
 #include <atomic>
@@ -26,58 +25,61 @@
 #include "arena.h"
 #include "catalog.h"
 #include "events.h"
+#include "glue.h"
 #include "store.h"
 
 namespace {
-
-const KilnApi* g_api = nullptr;
-KilnOwner g_owner = 0;
 const KilnCapsApi* g_caps = nullptr;
-
-#define KM_STR(s) KilnStr{s, sizeof(s) - 1}
-
-void logf(int32_t level, const char* fmt, ...) {
-    char text[768];
-    va_list v;
-    va_start(v, fmt);
-    const int n = std::vsnprintf(text, sizeof text, fmt, v);
-    va_end(v);
-    if (n > 0) g_api->log(g_owner, level, KilnStr{text, static_cast<size_t>(n < static_cast<int>(sizeof text) ? n : static_cast<int>(sizeof text) - 1)});
-}
-
-void log_line(int level, const char* text) {
-    if (g_api) g_api->log(g_owner, level, KilnStr{text, std::strlen(text)});
-}
-
+void log_line(int level, const char* text);
 kmk::Arena g_arena;
 kmk::Switches g_switches;
 kmk::Store g_store(g_arena, g_switches);
 kmk::Subscribers g_subs(&log_line);
 kmk::CatalogHolder g_catalog;
-const KilnAssetsApi* g_assets = nullptr;
-std::string g_exe;  // this process's exe sha256 (lower-case hex)
+}  // namespace
 
-uint32_t g_side = KILN_SIDE_SERVER;
-bool g_lifecycle = false;    // world STARTED and STOPPING are seen
+namespace kmk {
+
+Glue g;
+
+void logf(int32_t level, const char* fmt, ...) {
+    if (!g.api) return;
+    char text[768];
+    va_list v;
+    va_start(v, fmt);
+    const int n = std::vsnprintf(text, sizeof text, fmt, v);
+    va_end(v);
+    if (n > 0) g.api->log(g.owner, level, KilnStr{text, static_cast<size_t>(n < static_cast<int>(sizeof text) ? n : static_cast<int>(sizeof text) - 1)});
+}
+
+void report(const char* name, uint32_t state, uint32_t reason, const char* text) {
+    if (!g_caps || !g_caps->report) return;
+    g_caps->report(g.owner, KilnStr{name, std::strlen(name)}, state, reason, KilnStr{text, std::strlen(text)});
+}
+
+}  // namespace kmk
+
+namespace {
+
+using kmk::g;
+using kmk::logf;
+using kmk::report;
+
+#define KM_STR(s) KilnStr{s, sizeof(s) - 1}
+
+void log_line(int level, const char* text) {
+    if (g.api) g.api->log(g.owner, level, KilnStr{text, std::strlen(text)});
+}
+
+const KilnAssetsApi* g_assets = nullptr;
 bool g_client_post = false;  // the client world's Post is ours
+bool g_server_post = false;  // the server world's Post is ours
 
 // ---- capability rows (chapter 04 §5) ------------------------------------------------------------------------------------
 
 constexpr char kLocal[] = "markers.local";
 constexpr char kCatalog[] = "markers.catalog";
-constexpr char kMap[] = "markers.map";
-constexpr char kCompass[] = "markers.compass";
-constexpr char kWorld[] = "markers.world";
-constexpr char kNameplates[] = "markers.nameplates";
-constexpr char kAnchorsClient[] = "markers.anchors.client";
-constexpr char kAnchorsServer[] = "markers.anchors.server";
-constexpr char kSend[] = "markers.send";
 constexpr char kMapText[] = "markers.map_text";
-
-void report(const char* name, uint32_t state, uint32_t reason, const char* text) {
-    if (!g_caps || !g_caps->report) return;
-    g_caps->report(g_owner, KilnStr{name, std::strlen(name)}, state, reason, KilnStr{text, std::strlen(text)});
-}
 
 // markers.catalog: a client reads the game's resources through kiln.assets; a dedicated server has none and takes the
 // catalog from a verified client over the marker link (not built yet).
@@ -85,19 +87,17 @@ std::atomic<bool> g_catalog_reader{false};
 const char* g_catalog_off = "";
 uint32_t g_catalog_off_reason = KILN_CAP_REASON_POLICY;
 
+// The rows of the glue; each part reports its own (anchors_ready, surfaces_ready, link_ready).
 void report_rows() {
-    static const char kNotBuilt[] = "not built yet in this kiln.markers (0.2.0-dev.28 in work)";
-    for (const char* name : {kMap, kCompass, kWorld, kNameplates, kAnchorsClient, kAnchorsServer, kSend})
-        report(name, KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_POLICY, kNotBuilt);
     if (g_catalog_reader)
         report(kCatalog, KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE, "");
     else
         report(kCatalog, KILN_CAP_UNAVAILABLE, g_catalog_off_reason, g_catalog_off);
     report(kMapText, KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_POLICY,
            "the native map tooltip is not part of v1: its game test (04-map-text) has not been answered");
-    if (g_side != KILN_SIDE_CLIENT)
+    if (g.side != KILN_SIDE_CLIENT)
         report(kLocal, KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_WRONG_SIDE, "local markers are a game client's; a server sends them (markers.send)");
-    else if (!g_lifecycle)
+    else if (!g.lifecycle)
         report(kLocal, KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SYMBOL_MISSING, "needs world.lifecycle (a client's markers end with its world)");
     else if (!g_client_post)
         report(kLocal, KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_FAULTED, "the client world's step could not be subscribed");
@@ -115,6 +115,7 @@ void clear_result(KilnMarkerResult* r) {
     r->size = size;
 }
 
+
 // KILN_ERR_UNAVAILABLE with the row's name as the reason (header: "Results")
 KilnResult off(KilnMarkerResult* r, const char* capability) {
     if (result_ok(r)) {
@@ -126,8 +127,13 @@ KilnResult off(KilnMarkerResult* r, const char* capability) {
 
 // ---- delivery -----------------------------------------------------------------------------------------------------------
 
-void dispatch(uint32_t role) {
-    g_subs.dispatch([role] { return g_store.take(role); });
+// The role's queued notes, then `extra` (the surfaces' visibility notes), as one batch.
+void dispatch(uint32_t role, std::vector<kmk::Note>* extra = nullptr) {
+    g_subs.dispatch([role, extra] {
+        auto batch = g_store.take(role);
+        if (extra) batch.insert(batch.end(), extra->begin(), extra->end());
+        return batch;
+    });
 }
 
 void KILN_CALL on_world(const KilnWorldEvent* e, void*) {
@@ -135,10 +141,17 @@ void KILN_CALL on_world(const KilnWorldEvent* e, void*) {
     const uint32_t role = e->kind == KILN_WORLD_CLIENT ? kmk::kRoleClient : kmk::kRoleServer;
     if (e->event == KILN_WORLD_STARTED) {
         g_store.world_started(e->kind);
+        kmk::anchors_world(*e);
+        kmk::link_world(*e);
     } else if (e->event == KILN_WORLD_STOPPING) {
-        // records end with their world; their last notes go out before the stop returns, on this (stopping) thread
+        // anchors end first (their storage can be reused), then the link and the surfaces; records end with their world and
+        // their last notes go out before the stop returns, on this (stopping) thread
+        kmk::anchors_world(*e);
+        kmk::link_world(*e);
+        std::vector<kmk::Note> notes;
+        kmk::surfaces_world(*e, &notes);
         g_store.world_stopping(e->kind);
-        dispatch(role);
+        dispatch(role, &notes);
     }
 }
 
@@ -181,7 +194,7 @@ void KILN_CALL on_resources_ready(void*) {
         post_catalog(0, 0, 0, why);
         return;
     }
-    const kmk::BuildPair* pair = kmk::pair_of_client(g_exe);
+    const kmk::BuildPair* pair = kmk::pair_of_client(g.exe);
     const bool verified = pair && c->digest_hex() == pair->catalog_sha256;
     std::string reason;
     if (!verified)
@@ -216,7 +229,17 @@ void recheck_catalog() {
 
 void KILN_CALL on_client_post(const KilnTickInfo*, void*) {
     recheck_catalog();
-    dispatch(kmk::kRoleClient);
+    kmk::anchors_post(KILN_WORLD_CLIENT);
+    kmk::link_client_post();
+    std::vector<kmk::Note> notes;
+    kmk::surfaces_client_post(&notes);
+    dispatch(kmk::kRoleClient, &notes);
+}
+
+void KILN_CALL on_server_post(const KilnTickInfo*, void*) {
+    kmk::anchors_post(KILN_WORLD_SERVER);
+    kmk::link_server_post();
+    dispatch(kmk::kRoleServer);
 }
 
 // ---- kiln.markers v1 ----------------------------------------------------------------------------------------------------
@@ -225,7 +248,10 @@ KilnResult KILN_CALL t_bind_owner(KilnOwner owner, KilnStr ns) { return g_store.
 KilnResult KILN_CALL t_release_owner(KilnOwner owner) {
     if (!owner) return KILN_ERR_INVALID_ARGUMENT;
     g_subs.remove_owner(owner);  // its callbacks first: what follows is for the others
-    return g_store.release(owner);
+    kmk::link_release_owner(owner);
+    const KilnResult rc = g_store.release(owner);
+    kmk::anchors_release_owner(owner);  // after the store dropped the records' references
+    return rc;
 }
 KilnResult KILN_CALL t_catalog_count(uint32_t* count, uint64_t* generation) {
     if (!count || !generation) return KILN_ERR_INVALID_ARGUMENT;
@@ -286,15 +312,19 @@ KilnResult KILN_CALL t_catalog_resolve(KilnStr name, KilnMarkerIcon* out, KilnMa
     return KILN_ERR_INVALID_ARGUMENT;
 }
 KilnResult KILN_CALL t_world_epoch(uint32_t kind, uint64_t* epoch) { return g_store.world_epoch(kind, epoch); }
-KilnResult KILN_CALL t_capture_anchor(KilnOwner, uint32_t, uint64_t, KilnEntity, KilnMarkerAnchorResult*) { return KILN_ERR_UNAVAILABLE; }
-KilnResult KILN_CALL t_release_anchor(KilnOwner, KilnMarkerAnchor) { return KILN_ERR_UNAVAILABLE; }
+KilnResult KILN_CALL t_capture_anchor(KilnOwner owner, uint32_t kind, uint64_t epoch, KilnEntity entity, KilnMarkerAnchorResult* out) {
+    return kmk::anchors_capture(owner, kind, epoch, entity, out);
+}
+KilnResult KILN_CALL t_release_anchor(KilnOwner owner, KilnMarkerAnchor anchor) { return kmk::anchors_release(owner, anchor); }
 KilnResult KILN_CALL t_set_local(KilnOwner owner, const KilnMarkerSpec* spec, KilnMarkerResult* r) { return g_store.set_local(owner, spec, r); }
 KilnResult KILN_CALL t_remove_local(KilnOwner owner, KilnStr key, KilnMarkerResult* r) { return g_store.remove_local(owner, key, r); }
 KilnResult KILN_CALL t_clear_local(KilnOwner owner, KilnMarkerResult* r) { return g_store.clear_local(owner, r); }
-KilnResult KILN_CALL t_send(KilnOwner, KilnEntity, const KilnMarkerSpec*, KilnMarkerResult* r) { return off(r, kSend); }
-KilnResult KILN_CALL t_unsend(KilnOwner, KilnEntity, KilnStr, KilnMarkerResult* r) { return off(r, kSend); }
-KilnResult KILN_CALL t_clear_sent(KilnOwner, KilnEntity, KilnMarkerResult* r) { return off(r, kSend); }
-KilnResult KILN_CALL t_suppress_sent(KilnOwner, KilnEntity, KilnStr, KilnMarkerResult* r) { return off(r, kSend); }
+KilnResult KILN_CALL t_send(KilnOwner owner, KilnEntity to, const KilnMarkerSpec* spec, KilnMarkerResult* r) { return kmk::link_send(owner, to, spec, r); }
+KilnResult KILN_CALL t_unsend(KilnOwner owner, KilnEntity to, KilnStr key, KilnMarkerResult* r) { return kmk::link_unsend(owner, to, key, r); }
+KilnResult KILN_CALL t_clear_sent(KilnOwner owner, KilnEntity to, KilnMarkerResult* r) { return kmk::link_clear_sent(owner, to, r); }
+KilnResult KILN_CALL t_suppress_sent(KilnOwner owner, KilnEntity to, KilnStr key, KilnMarkerResult* r) {
+    return kmk::link_suppress_sent(owner, to, key, r);
+}
 KilnResult KILN_CALL t_subscribe(KilnOwner owner, KilnMarkerChangedFn changed, KilnMarkerVisibilityFn visibility, KilnMarkerCatalogFn catalog,
                                  void* user, KilnHandle* out) {
     return g_subs.subscribe(owner, changed, visibility, catalog, user, out);
@@ -307,30 +337,17 @@ const KilnMarkersApi kTable = {{sizeof(KilnMarkersApi), KILN_MARKERS_VERSION},
                                &t_clear_local, &t_send, &t_unsend, &t_clear_sent, &t_suppress_sent, &t_subscribe,
                                &t_unsubscribe};
 
-// ---- kiln.markers.bridge v1 (internal; the wire and the receiver land with the managed bridge) -------------------------
-
-KilnResult KILN_CALL b_attach(KilnOwner) { return KILN_ERR_UNAVAILABLE; }
-KilnResult KILN_CALL b_peer_up(const KilnMarkerPeer*) { return KILN_ERR_UNAVAILABLE; }
-KilnResult KILN_CALL b_peer_down(uint32_t, uint32_t, uint64_t) { return KILN_ERR_UNAVAILABLE; }
-KilnResult KILN_CALL b_receive(const KilnMarkerEnvelope*) { return KILN_ERR_UNAVAILABLE; }
-KilnResult KILN_CALL b_pump(uint32_t, uint32_t, KilnMarkerSendFn, void*, uint32_t* processed) {
-    if (processed) *processed = 0;
-    return KILN_ERR_UNAVAILABLE;
-}
-
-const KilnMarkersBridgeApi kBridge = {{sizeof(KilnMarkersBridgeApi), KILN_MARKERS_BRIDGE_VERSION},
-                                      &b_attach, &b_peer_up, &b_peer_down, &b_receive, &b_pump};
 
 void KILN_CALL on_ready(void*) {
-    g_caps = static_cast<const KilnCapsApi*>(g_api->service(KM_STR(KILN_CAPS_SERVICE), KILN_CAPS_VERSION));
+    g_caps = static_cast<const KilnCapsApi*>(g.api->service(KM_STR(KILN_CAPS_SERVICE), KILN_CAPS_VERSION));
     if (g_caps && g_caps->header.size < sizeof(KilnCapsApi)) g_caps = nullptr;
     g_store.set_icon_check(&kmk::CatalogHolder::check, &g_catalog);
-    if (g_side != KILN_SIDE_CLIENT) {
+    if (g.side != KILN_SIDE_CLIENT) {
         g_catalog_off = "a dedicated server has no marker resources: it takes the catalog from a verified client over the marker link (not built yet)";
         g_catalog_off_reason = KILN_CAP_REASON_POLICY;
     } else {
         // kiln.assets v1 with resource_read and the appended when_resources_ready (header.size covers it)
-        g_assets = static_cast<const KilnAssetsApi*>(g_api->service(KM_STR(KILN_ASSETS_SERVICE), KILN_ASSETS_VERSION));
+        g_assets = static_cast<const KilnAssetsApi*>(g.api->service(KM_STR(KILN_ASSETS_SERVICE), KILN_ASSETS_VERSION));
         constexpr size_t need = offsetof(KilnAssetsApi, when_resources_ready) + sizeof(g_assets->when_resources_ready);
         if (!g_assets || g_assets->header.size < need || !g_assets->resource_read || !g_assets->when_resources_ready) {
             g_assets = nullptr;
@@ -341,6 +358,9 @@ void KILN_CALL on_ready(void*) {
         }
     }
     report_rows();
+    kmk::anchors_ready();
+    kmk::surfaces_ready();
+    kmk::link_ready();
     if (g_catalog_reader && g_assets->when_resources_ready(&on_resources_ready, nullptr) != KILN_OK) {
         g_catalog_reader = false;
         logf(KILN_LOG_WARN, "markers: kiln.assets' resources are off on this build: markers.catalog is off");
@@ -352,28 +372,37 @@ void KILN_CALL on_ready(void*) {
 
 extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api, KilnOwner owner, KilnPluginInfo* info) {
     if (api->abi_version != KILN_ABI_VERSION || api->size < sizeof(KilnApi)) return KILN_ERR_UNAVAILABLE;
-    g_api = api;
-    g_owner = owner;
+    g.api = api;
+    g.owner = owner;
+    g.store = &g_store;
+    g.subs = &g_subs;
+    g.catalog = &g_catalog;
+    g.sw = &g_switches;
     info->id = KM_STR(KILN_MARKERS_SERVICE);
     info->version = KilnStr{"1", 1};
     info->on_ready = &on_ready;
-    g_side = api->side();
+    g.side = api->side();
     KilnBuildInfo build{};
     build.size = sizeof build;
-    if (api->build_info(&build) == KILN_OK) g_exe.assign(build.exe_sha256, strnlen(build.exe_sha256, sizeof build.exe_sha256));
+    if (api->build_info(&build) == KILN_OK) g.exe.assign(build.exe_sha256, strnlen(build.exe_sha256, sizeof build.exe_sha256));
     // Session only: every store is bound to a world, so without the lifecycle there is no store (chapter 04 §4.2).
     KilnHandle h = 0;
-    g_lifecycle = api->feature && api->feature(KM_STR("world.lifecycle")) && api->subscribe_world(owner, &on_world, nullptr, &h) == KILN_OK;
-    if (!g_lifecycle) logf(KILN_LOG_WARN, "markers: the world lifecycle is unavailable on this build: markers.local and markers.send are off");
-    if (g_side == KILN_SIDE_CLIENT) {
+    g.lifecycle = api->feature && api->feature(KM_STR("world.lifecycle")) && api->subscribe_world(owner, &on_world, nullptr, &h) == KILN_OK;
+    if (!g.lifecycle) logf(KILN_LOG_WARN, "markers: the world lifecycle is unavailable on this build: markers.local and markers.send are off");
+    if (g.side == KILN_SIDE_CLIENT) {
         KilnHandle p = 0;
         g_client_post = api->subscribe_world_tick(owner, KILN_WORLD_CLIENT, KILN_TICK_POST, &on_client_post, nullptr, &p) == KILN_OK;
         if (!g_client_post) logf(KILN_LOG_WARN, "markers: the client world's step could not be subscribed: markers.local is off");
     }
-    g_switches.local = g_side == KILN_SIDE_CLIENT && g_lifecycle && g_client_post;
+    // the server world's Post: a dedicated server, and the server world of a hosting client
+    KilnHandle sp = 0;
+    g_server_post = api->subscribe_world_tick(owner, KILN_WORLD_SERVER, KILN_TICK_POST, &on_server_post, nullptr, &sp) == KILN_OK;
+    if (!g_server_post) logf(KILN_LOG_WARN, "markers: the server world's step could not be subscribed: markers.send is off");
+    g_switches.local = g.side == KILN_SIDE_CLIENT && g.lifecycle && g_client_post;
+    kmk::anchors_start();
     KilnResult rc = api->register_service(owner, KM_STR(KILN_MARKERS_SERVICE), &kTable);
     if (rc != KILN_OK) return rc;
-    rc = api->register_service(owner, KM_STR(KILN_MARKERS_BRIDGE_SERVICE), &kBridge);
+    rc = api->register_service(owner, KM_STR(KILN_MARKERS_BRIDGE_SERVICE), &kmk::kBridgeTable);
     if (rc != KILN_OK) logf(KILN_LOG_WARN, "markers: kiln.markers.bridge was not registered (%d): the built-in receiver cannot attach", rc);
     return KILN_OK;
 }
