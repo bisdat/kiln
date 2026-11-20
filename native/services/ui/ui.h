@@ -93,9 +93,11 @@ inline bool capturing() {
 extern std::atomic<uint32_t> g_render_demand;  // kiln.render acquire_frames handles (render.cpp)
 extern std::atomic<uint32_t> g_footer_demand;  // Kiln's mark next to its line in the main menu's footer (menu_footer.cpp)
 extern std::atomic<uint32_t> g_graphics_demand;  // the graphics readout (graphics.cpp)
+extern std::atomic<uint32_t> g_chat_completion_demand; // focused native slash-command suggestions (issue #44)
 inline bool want_draw() {
     return overlay_draws() && (capturing() || g_demand.load(std::memory_order_relaxed) > 0 || g_render_demand.load(std::memory_order_relaxed) > 0 ||
-                                    g_footer_demand.load(std::memory_order_relaxed) > 0 || g_graphics_demand.load(std::memory_order_relaxed) > 0);
+                                    g_footer_demand.load(std::memory_order_relaxed) > 0 || g_graphics_demand.load(std::memory_order_relaxed) > 0 ||
+                                    g_chat_completion_demand.load(std::memory_order_relaxed) > 0);
 }
 bool in_frame();  // the calling thread is inside the overlay frame's callbacks (drawing calls work)
 
@@ -105,15 +107,16 @@ extern std::atomic<uint32_t> g_hover_panels; // Kiln panels that take the mouse 
 
 // ---- chat_input_probe.cpp (GitHub issue 44: Up/Down history in the game's chat field) ----
 bool chat_input_probe_install();  // game_install: hooks the chat field when chat history (or a diagnostic) is on
-void chat_input_frame_end();      // the game's UI thread, after each GameUiFrame: whether the chat field has focus
+void chat_input_frame_end(uintptr_t sys10);  // game's UI thread, focus and native rectangle conversion
 void chat_input_exit();           // on_unload: writes the history file still pending, stops its writer thread
+KilnResult chat_completion_io(KilnUiChatCompletion* io);  // internal managed snapshot/selection/replacement, NOT game call
 
 // The window procedure's one hook point for the game's chat field (input.cpp calls it on the window thread, before
 // Kiln's own key handling). Set by chat_input_probe_install while chat history or its diagnostic runs; null otherwise,
 // and in the input.cpp host harnesses, which do not link chat_input_probe.cpp.
 struct ChatInputSink {
     bool (*key)(uint32_t vk, uint32_t mods, bool down, bool captured);  // a key transition; true keeps a press from the game
-    void (*text)(uint32_t ch);                                           // WM_CHAR / WM_UNICHAR, while Kiln does not capture
+    bool (*text)(uint32_t ch);                                           // WM_CHAR / WM_UNICHAR; true drops a consumed Tab's character
     void (*ime)(bool composing);                                         // an IME composition started (true) or ended
     void (*blur)();                                                      // the window lost focus / the game was deactivated
 };

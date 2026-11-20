@@ -19,6 +19,7 @@ kiln_service(ui ui.cpp overlay_guard.cpp vk.cpp graphics.cpp input.cpp keys.cpp 
 target_link_libraries(kiln-ui PRIVATE kiln-imgui user32 imm32 dwmapi gdi32)
 target_include_directories(kiln-ui PRIVATE ${CMAKE_SOURCE_DIR}/third_party/ffx)  # AMD's FSR API headers (MIT)
 
+
 # Opt-in build target, never packaged: real third-party addon against Kiln's production input and startup gate.
 add_executable(ui-addon-harness EXCLUDE_FROM_ALL tests/addon_harness/harness.cpp input.cpp keys.cpp
     ${CMAKE_SOURCE_DIR}/core/src/foreign_scan.cpp)

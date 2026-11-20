@@ -342,7 +342,8 @@ struct PlanItem {
     std::string error;  // why the package cannot be read (missing, bad manifest)
 };
 
-// The packages to load for the wanted kind=mod package ids, each after the packages it requires, every one once.
+// The packages to load for the wanted kind=mod package ids (sorted by id, as the loader does), each after the packages
+// it requires, every one once.
 // lookup(id, item) reads a package. Refuses (false with the reason): a package that cannot be read, a version that is
 // not the exact one required, a cycle, a required kind=mod package that is not wanted itself, a library asked for on
 // its own, depth over 64 or more than 1024 packages.
@@ -384,7 +385,10 @@ inline bool make_plan(const std::vector<std::string>& wanted, const std::functio
         ordered->push_back(seen[id]);
         return true;
     };
-    for (const auto& id : wanted)
+    // In the loader's order: it walks its enabled ids as a std::set (sorted by id; mod_packages.inl makeLoadPlan), not
+    // in profile order. Mods that patch the same game data rely on it (CarryOn reads the crafting menu Lantern patched
+    // only when Lantern went first, and fails "truncated native resource" then).
+    for (const auto& id : want)
         if (!visit(id, 0)) return false;
     return true;
 }

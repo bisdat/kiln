@@ -38,7 +38,9 @@ use std::ffi::c_void;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 
-use chestsort_common::{log, proxy, scan::Module};
+use chestsort_common::{log, scan::Module};
+#[cfg(not(feature = "kiln"))] // kiln: no DirectInput8Create proxy in the Kiln build
+use chestsort_common::proxy;
 use windows_sys::Win32::Foundation::{HMODULE, TRUE};
 use windows_sys::Win32::System::LibraryLoader::{
     GetModuleHandleExW, GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, GET_MODULE_HANDLE_EX_FLAG_PIN,

@@ -35,7 +35,9 @@ static_assert(offsetof(KilnUiApi, set_texts) == offsetof(KilnUiApi, image_opaque
 static_assert(offsetof(KilnUiApi, set_texts) == 1008);
 static_assert(offsetof(KilnUiApi, graphics_set) == offsetof(KilnUiApi, set_texts) + sizeof(void*));
 static_assert(offsetof(KilnUiApi, graphics_status) == 1024);
-static_assert(sizeof(KilnUiApi) == offsetof(KilnUiApi, graphics_status) + sizeof(void*));
+// chat_completion (internal to Kiln.Ui, GitHub issue 44) after them
+static_assert(offsetof(KilnUiApi, chat_completion) == 1032);
+static_assert(sizeof(KilnUiApi) == offsetof(KilnUiApi, chat_completion) + sizeof(void*));
 int main() {
     // Drawing off: no frame/context, just as KILN_UI_OVERLAY=0. Must not enter ImGui.
     kui_draw::t_set_next_window_size_constraints(300, 0, 300, 918);

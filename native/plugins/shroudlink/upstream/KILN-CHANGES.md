@@ -49,6 +49,21 @@ stuttered at every scan on a 4-thread CPU with the page file on a hard drive):
 |---|---|
 | `server/src/names.rs` | A scan reads only the pages in the working set (`K32QueryWorkingSetEx` per 1 MiB chunk): a record on a skipped page stays as the scan before saw it (`keep_skipped`; such a page was not written since it was paged out), and the scan no longer pages the game's memory back in. The background thread runs in `THREAD_MODE_BACKGROUND_BEGIN` and rests 4 ms after each 4 ms of work; a scan the game thread waits for (`lookup_fresh`) does not rest. The log line says what a scan read and skipped and how many records it kept. Host tests `ranges_and_runs`, `records_on_skipped_pages_are_kept`, `a_scan_finds_a_record_in_this_process`. |
 
+The chest-name index, steady state (0.2.0-dev.29.22, marked `kiln:`; the same player on 29.21: with nearly all of the
+game's 5.9 GB of private memory resident, each background scan read all of it in 90-155 s with its rests, the next began
+15 s after it ended, so it never stopped, and an unknown key ran the whole sweep on the game thread):
+
+| File | Change |
+|---|---|
+| `server/src/names.rs` | No sweep on a timer. A name key is the FNV-1a 64 of its text, so a record whose text hashes to its key stays in the index for good (`known`); a renamed object carries a new key. A sweep runs only for a key that is asked for and not known (`lookup_known` / `lookup_fresh` -> `want`): first a warm sweep of the 4 MiB windows around the records found before, then (background) a whole sweep that reads the allocations that held records first and stops when the asked keys are found. Asked whole sweeps start at least 30 s, and at least the last whole sweep's duration, after it ended (`ask_gap`); a key a whole sweep missed is not asked for again for 5-30 min (`miss_retry`). The game thread runs at most a 32 MiB warm sweep (before: the whole sweep). Periodic sweeps only while the name component is not known by its type hash (4x the last duration, doubled per quiet sweep, 30 s to 30 min, a quarter of a core); asked sweeps half a core. Records whose text does not hash to their key keep upstream's address rules and are re-read every 15 s (`verify`). One log line per sweep (kind, read, skipped, kept, stopped early). Host tests `schedule_sweeps_only_when_asked_or_learning_and_never_back_to_back`, `unknown_keys_are_asked_for_once_and_a_missed_one_waits`, `merge_keeps_hashed_names_for_good_and_counts_new_ones`, `name_keys_are_fnv1a_64_of_the_text`, `warm_and_asked_sweeps_read_near_known_records_first`, `benchmark_whole_against_warm_sweep` (512 MiB synthetic heap: whole sweep 108 ms, warm 44 us, asked 256 us under Wine). |
+| `server/src/game_api.rs` | The `CustomPlayerString` component's index is found once by its type hash (`components::index_of`, `0x0e699564`), so the index needs no sweep to learn it (the learning path stays as the fallback and turns periodic sweeps on). With `kiln`, a named object's text comes from kiln.items `container_name` first (the game's string table, no sweep), accepted only when its FNV-1a 64 is the object's key; the index answers when Kiln cannot (no service, feature off, not the tick thread). An unknown key from `name_known` is handed to the index (`lookup_known`). |
+| `server/src/kiln.rs` | `container_name`: kiln.items v3 table up to `container_name`; logs once which source answers chest names. |
+| `server/src/plugins.rs`, `server/src/lib.rs` | `LoadLibraryW` and `proxy` imported only without `kiln` (no unused-import warnings in the Kiln build). |
+
+Staleness: a name Kiln reads is current at every ask. From the index: a known key's text never changes; a new or
+renamed object's key is found at the ask when its record lies near known ones, else by the background within
+`ask_gap` (30 s, or the last whole sweep's duration) plus the time an early-stopping sweep takes to reach it.
+
 The enclosing workspace enables `Win32_Storage_FileSystem` and `Win32_Security` for those checked handles.
 `../build.sh --test` also includes the common crate's tests. `../src/guard.c` and `../tests/nearby/` are Kiln's own
 integration code/tests outside the vendored crates.

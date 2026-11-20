@@ -11,7 +11,8 @@
  * image_load_rgba, screen_target and image_state (0.2.0-dev.29.15), and looks, themes and fonts (0.2.0-dev.29.16:
  * theme_create, theme_free, push_theme, set_look, look_info, font_load, font_free, push_font_handle; then image_ex and
  * image_opaque_rect: part of an image, trimmed item icons; then set_texts: Kiln's own texts in the player's language), and
- * graphics_set and graphics_status (0.2.0-dev.29.18): Kiln's own graphics tools, the frame cap, DLSS settings and readout.
+ * graphics_set and graphics_status (0.2.0-dev.29.18): Kiln's own graphics tools, the frame cap, DLSS settings and readout,
+ * then chat_completion (internal to Kiln.Ui, refused from native plugins): Tab completion in the game's chat (issue #44).
  *
  * How (docs/re/client-render.md):
  *  - The game loads vulkan-1.dll at run time and presents with vkQueuePresentKHR on queue family 0 (no static Vulkan
@@ -800,6 +801,27 @@ enum {
     KILN_UI_UPSCALE_AMD_PINNED = 1u << 5,  /* AMD FSR 3.1 runs because Kiln pins it (amd_upscaler AUTO or FSR3) */
 };
 
+/* Issue #44: internal Kiln.Ui chat-completion transport, NOT for native plugins.
+ * Appended after graphics_status at byte 1032; kiln.ui v1's earlier slots never move.
+ * The caller sets size and operation:
+ *  1: snapshot the focused native HUD/Social chat input, plus one queued key action.
+ *  2: set whether suggestions exist and whether the list is active.
+ *  3: queue one safe full-line replacement: text is the expected current input;
+ *     replacement is the new input. Applied ONLY by the game UI thread if
+ *     the expected text and input field still match.
+ * Completion key actions: 3 Tab, 4 Shift+Tab, 5 Up, 6 Down, 7 Escape.
+ * Text strings are UTF-8 byte sequences with explicit lengths, bounded to
+ * 256 bytes; never NUL-terminated by assumption. No player identity on wire.
+ */
+typedef struct KilnUiChatCompletion {
+    uint32_t size, operation;
+    uint32_t focused, action, cursor, text_len, replacement_len;
+    uint32_t suggestions, list_open, field, revision;
+    float x, y, width, height; /* screen pixels; field's native UiNodeRect */
+    char text[257];
+    char replacement[257];
+} KilnUiChatCompletion;
+
 typedef struct KilnUiApi {
     KilnServiceHeader header; /* { sizeof(KilnUiApi), KILN_UI_VERSION } */
     KilnResult(KILN_CALL* status)(KilnUiStatus* out);
@@ -1209,6 +1231,10 @@ typedef struct KilnUiApi {
      *   read it. Any thread. INVALID_ARGUMENT: NULL or size too small. */
     KilnResult(KILN_CALL* graphics_set)(const KilnUiGraphics* settings);
     KilnResult(KILN_CALL* graphics_status)(KilnUiGraphicsStatus* out);
+    /* Appended internal-only slot (issue #44). Native plugins are refused;
+     * Kiln.Ui uses this on its render thread, never calls game input itself.
+     * The game UI thread owns all reads and actual EditSetText replacements. */
+    KilnResult(KILN_CALL* chat_completion)(KilnUiChatCompletion* io);
 } KilnUiApi;
 
 /* ====================================================================================================================

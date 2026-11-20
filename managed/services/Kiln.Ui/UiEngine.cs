@@ -108,6 +108,7 @@ internal static unsafe class UiEngine
         PlayerLook.Start();  // the player's look of Kiln's UI (kiln.json "ui")
         UiLanguage.Start();  // the language of Kiln's own texts (kiln.json "ui.language"), handed to kiln.ui too
         GraphicsTools.Start();  // Kiln's own graphics tools (kiln.json "graphics"), handed to kiln.ui (0.2.0-dev.29.18)
+        ChatCompletionNetwork.Start(); // optional kiln:chat completion protocol
         KeyBindings.Load();
         ApplyMenuKey(KeyBindings.MenuKey);
         // the game page needs the layout calls (v3) for the page itself and v4 for the page state
@@ -390,6 +391,7 @@ internal static unsafe class UiEngine
             DrawWindow(ui, w);
         }
         Ui.Crafting.DrawPanels(ui);
+        ChatCompletionPanel.Draw(ui); // non-focusable suggestions over native HUD/Social chat
         DrawScreens(ui);
         foreach (var (h, owner) in FrameHandlers.Snapshot())
         {

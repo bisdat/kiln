@@ -140,6 +140,61 @@ fn api() -> Option<&'static KilnApi> {
     unsafe { API.load(Ordering::Acquire).as_ref() }
 }
 
+/// kiln.items v3+ (native/core/abi/services/kiln_items.h): the table up to `container_name`, the 18th function after
+/// the header (give, take, cancel, cancel_owner, read, find_inventories, item_count, item_at, item_info, find_item,
+/// item_id_of_guid, status, fuel, fuel_read, fuel_keep, fuel_keep_end, move, container_name).
+#[repr(C)]
+struct KilnItemsApi {
+    header: KilnServiceHeader,
+    #[allow(dead_code)] // only its size matters
+    before: [Fp; 17],
+    container_name: Option<unsafe extern "C" fn(u32, *mut u8, u32, *mut u32) -> i32>,
+}
+const KILN_ERR_NOT_FOUND: i32 = 2;
+static ITEMS: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+static NAMES_SAID: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+fn items() -> Option<&'static KilnItemsApi> {
+    let table = *ITEMS.get_or_init(|| {
+        let Some(a) = api() else { return 0 };
+        let t = unsafe { (a.service.unwrap())(KilnStr::lit("kiln.items"), 3) } as *const KilnItemsApi;
+        let ok = unsafe { service_usable(t.cast(), std::mem::size_of::<KilnItemsApi>()) && (*t).header.version >= 3 && (*t).container_name.is_some() };
+        if ok { t as usize } else { 0 }
+    });
+    unsafe { (table as *const KilnItemsApi).as_ref() }
+}
+
+/// The name kiln.items reads from the game's string table for `entity`, when it is the one whose key (its FNV-1a 64)
+/// is `key`. None when Kiln cannot answer here (no service, the feature off, not on the server world's tick thread) or
+/// answers differently: shroudlink's own name index answers then. The first answer of each kind is logged.
+pub(crate) fn container_name(entity: u32, key: u64) -> Option<String> {
+    let say = |bit: u8, text: &str| {
+        if NAMES_SAID.fetch_or(bit, Ordering::Relaxed) & bit == 0 {
+            chestsort_common::log!("{text}");
+        }
+    };
+    let Some(f) = items().and_then(|t| t.container_name) else {
+        say(1, "chest names: no kiln.items v3 here: shroudlink's name index looks for them");
+        return None;
+    };
+    let mut buf = [0u8; 512];
+    let mut len = 0u32;
+    let rc = unsafe { f(entity, buf.as_mut_ptr(), buf.len() as u32, &mut len) };
+    if rc != KILN_OK {
+        if rc != KILN_ERR_NOT_FOUND {
+            say(2, &format!("chest names: kiln.items cannot read them here (result {rc}): shroudlink's name index looks for them"));
+        }
+        return None;
+    }
+    let text = &buf[..(len as usize).min(buf.len() - 1)];
+    if crate::names::fnv1a64(text) != key {
+        say(4, "chest names: kiln.items answered a name that is not the object's key: shroudlink's name index looks for it");
+        return None;
+    }
+    say(8, "chest names: read from kiln.items (the game's string table), no memory sweep");
+    String::from_utf8(text.to_vec()).ok()
+}
+
 fn klog(level: i32, text: &str) {
     if let Some(a) = api() {
         let line = format!("[shroudlink] {text}");

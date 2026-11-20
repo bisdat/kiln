@@ -1,4 +1,10 @@
 {
+  "chat": {
+    "completion": {
+      "title": "命令提示",
+      "hint": "Tab：补全 · Esc：关闭"
+    }
+  },
   "language": {
     "name": "简体中文"
   },

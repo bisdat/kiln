@@ -167,6 +167,91 @@ fn json_fields_that_name_people_are_redacted() {
     }
 }
 
+// ---------------------------------------------------------------- the local Steam account, on every Steam layout
+
+const LOGINUSERS: &str = "\"users\"\n{\n\t\"76561198000000009\"\n\t{\n\t\t\"AccountName\"\t\t\"oryx_acct\"\n\t\t\"PersonaName\"\t\t\"Oryx593\"\n\t\t\"MostRecent\"\t\t\"1\"\n\t}\n}\n";
+
+/// A fake home with one Steam root at `rel` (with `steamapps/`, as `steam::roots_at` wants), its loginusers.vdf.
+fn steam_home(name: &str, user: &str, rel: &str, loginusers: Option<&str>) -> (PathBuf, PathBuf) {
+    let base = std::env::temp_dir().join(format!("km-report-steam-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let home = base.join(user);
+    let root = home.join(rel);
+    std::fs::create_dir_all(root.join("steamapps")).unwrap();
+    std::fs::create_dir_all(root.join("config")).unwrap();
+    if let Some(t) = loginusers {
+        std::fs::write(root.join("config/loginusers.vdf"), t).unwrap();
+    }
+    (base, home)
+}
+
+fn steam_redactor(home: &Path) -> Redactor {
+    let roots = crate::steam::roots_at(home);
+    assert_eq!(roots.len(), 1, "the fixture's Steam root is found: {roots:?}");
+    let mut r = Redactor::new(Some(&home.to_string_lossy()), None, None);
+    r.add_steam_accounts(&roots, home);
+    r
+}
+
+/// Every place a Linux report shows the local Steam names (oryx_acct, Oryx593): none may survive.
+fn assert_no_steam_names(r: &Redactor, layout: &str) {
+    for text in [
+        "[I 22:31:42.935] [service:kiln-players.dll] players: joined slot 0 entity 1 'Oryx593' (steam 76561198000000009, admin 1, perms 0x3f) [event 1]",
+        "[I 22:31:36.187] [kiln] net: Oryx593 (0x80) joined with Kiln 0.2.0-dev.29.21: 6 mod(s)",
+        "[1794424596] shroudlink: client 2eaa65d2d4c437f9 is Oryx593",
+        "[1] world: client 2eaa65d2d4c437f9 is player 1 (the only unmatched one) (ORYX593)",
+        "[I 1] [mod:chat-plus] welcome back, oryx593! saved Oryx593_world.json and oryx593-backup",
+        "Folder: /run/media/oryx_acct/Games/SteamLibrary/steamapps/common/Enshrouded",
+        r"save dir Z:\run\media\Oryx_Acct\Saves",
+    ] {
+        let out = redact(text, r);
+        assert!(!out.to_ascii_lowercase().contains("oryx"), "{layout}: {text}\n  -> {out}");
+    }
+}
+
+#[test]
+fn the_local_steam_names_are_replaced_on_every_steam_layout() {
+    for (name, user, rel) in [
+        ("native", "oryx", ".local/share/Steam"),
+        ("debian", "oryx", ".steam/debian-installation"),
+        ("flatpak", "oryx", ".var/app/com.valvesoftware.Steam/.local/share/Steam"),
+        ("flatpak-data", "oryx", ".var/app/com.valvesoftware.Steam/data/Steam"),
+        ("snap", "oryx", "snap/steam/common/.local/share/Steam"),
+        // a Steam Deck: the user is `deck`, a word Kiln's files are full of, so only Steam's names say who it is
+        ("deck", "deck", ".local/share/Steam"),
+    ] {
+        let (base, home) = steam_home(name, user, rel, Some(LOGINUSERS));
+        assert_no_steam_names(&steam_redactor(&home), name);
+        let _ = std::fs::remove_dir_all(base);
+    }
+}
+
+#[test]
+fn the_signed_in_persona_comes_from_localconfig_when_loginusers_does_not_have_it() {
+    // loginusers.vdf without the account (a fresh Steam, a login that is not remembered): userdata/<id>/config/localconfig.vdf
+    // still names the signed-in account's persona, and Steam's registry.vdf its login name
+    let (base, home) = steam_home("localconfig", "deck", ".local/share/Steam", None);
+    let root = home.join(".local/share/Steam");
+    std::fs::create_dir_all(root.join("userdata/39734281/config")).unwrap();
+    std::fs::write(root.join("userdata/39734281/config/localconfig.vdf"),
+        "\"UserLocalConfigStore\"\n{\n\t\"friends\"\n\t{\n\t\t\"PersonaName\"\t\t\"Oryx593\"\n\t}\n}\n").unwrap();
+    std::fs::write(home.join(".steam/registry.vdf").tap_dir(),
+        "\"Registry\"\n{\n\t\"HKCU\"\n\t{\n\t\t\"Software\"\n\t\t{\n\t\t\t\"Valve\"\n\t\t\t{\n\t\t\t\t\"Steam\"\n\t\t\t\t{\n\t\t\t\t\t\"AutoLoginUser\"\t\t\"oryx_acct\"\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t}\n}\n").unwrap();
+    assert_no_steam_names(&steam_redactor(&home), "localconfig");
+    let _ = std::fs::remove_dir_all(base);
+}
+
+trait TapDir {
+    fn tap_dir(self) -> Self;
+}
+impl TapDir for PathBuf {
+    /// Creates the parent folder, for a write.
+    fn tap_dir(self) -> Self {
+        std::fs::create_dir_all(self.parent().unwrap()).unwrap();
+        self
+    }
+}
+
 #[test]
 fn os_release_names() {
     assert_eq!(os_release("NAME=\"Arch Linux\"\nPRETTY_NAME=\"Arch Linux\"\nID=arch\n"), (Some("Arch Linux".into()), Some("arch".into())));

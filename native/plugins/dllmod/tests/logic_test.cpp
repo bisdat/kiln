@@ -130,6 +130,8 @@ int main() {
             {"c/c.dll", "ENSHROUDED_PACKAGE_V1\nkind=mod\nversion=1\nabi=1\nrequire=lib/l.dll@3\n"},
             {"d/d.dll", "ENSHROUDED_PACKAGE_V1\nkind=mod\nversion=1\nabi=1\nrequire=e/e.dll@1\n"},
             {"e/e.dll", "ENSHROUDED_PACKAGE_V1\nkind=library\nversion=1\nabi=1\nrequire=d/d.dll@1\n"},
+            {"carryon/carryon.dll", "ENSHROUDED_PACKAGE_V1\nkind=mod\nversion=1\nabi=1\n"},
+            {"lantern/lantern.dll", "ENSHROUDED_PACKAGE_V1\nkind=mod\nversion=1\nabi=1\n"},
         };
         auto lookup = [&](const std::string& id, PlanItem* item) {
             item->id = id;
@@ -145,6 +147,9 @@ int main() {
         std::string e;
         CHECK(make_plan({"a/a.dll", "b/b.dll"}, lookup, &plan, &e));
         CHECK(plan.size() == 3 && plan[0].id == "lib/l.dll" && plan[1].id == "b/b.dll" && plan[2].id == "a/a.dll");
+        // the loader's order (sorted ids), not the profile's: CarryOn must start before Lantern as it does there
+        CHECK(make_plan({"lantern/lantern.dll", "carryon/carryon.dll"}, lookup, &plan, &e));
+        CHECK(plan.size() == 2 && plan[0].id == "carryon/carryon.dll" && plan[1].id == "lantern/lantern.dll");
         CHECK(!make_plan({"a/a.dll"}, lookup, &plan, &e) && e.find("switch it on") != std::string::npos);
         CHECK(!make_plan({"c/c.dll"}, lookup, &plan, &e) && e.find("version 3") != std::string::npos);
         CHECK(!make_plan({"d/d.dll"}, lookup, &plan, &e) && e.find("cycle") != std::string::npos);

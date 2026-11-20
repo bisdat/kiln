@@ -1,4 +1,10 @@
 {
+  "chat": {
+    "completion": {
+      "title": "Подсказки команд",
+      "hint": "Tab: дополнить · Esc: закрыть"
+    }
+  },
   "language": {
     "name": "Русский"
   },
