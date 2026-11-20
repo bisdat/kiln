@@ -14,7 +14,7 @@ public sealed class FacadeTests
     public void AModDefinesAwardsSpendsAndReadsThroughTheFacade()
     {
         using var kiln = new KilnHarness();
-        var fish = kiln.Load<FishTestMod>();
+        var fish = kiln.Load<FishTestMod>(new ModManifest("fish-kit"));
         kiln.Step(2);
         var a = HarnessModValues.Character(1);
         var mv = kiln.ModValues;
