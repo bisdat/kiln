@@ -1887,4 +1887,51 @@ mod tests {
         let c = e.downcast_ref::<CliError>().unwrap();
         assert_eq!(c.detail.as_ref().unwrap()["reason"], "creation_time");
     }
+
+    /// netcoredbg and the helper get Wine's sync switches and the loader's variables only from the target's runner
+    /// environment (the allowlist), never from whatever environment kiln itself was started in.
+    #[test]
+    fn inherited_runner_variables_are_not_passed_on() {
+        const INHERITED: [&str; 7] = ["WINEESYNC", "WINEFSYNC", "WINENTSYNC", "LD_LIBRARY_PATH", "LD_PRELOAD", "WINESERVERSOCKET", "WINELOADERNOEXEC"];
+        let envs = |c: &Command| -> BTreeMap<String, Option<String>> {
+            c.get_envs().map(|(k, v)| (k.to_string_lossy().into_owned(), v.map(|v| v.to_string_lossy().into_owned()))).collect()
+        };
+        let mut c = Command::new("x");
+        scrub(&mut c);
+        let e = envs(&c);
+        for k in INHERITED.iter().chain(&["WINEPREFIX", "WINESERVER", "WINELOADER", "WINEDLLOVERRIDES", "STEAM_COMPAT_DATA_PATH"]) {
+            assert_eq!(e.get(*k), Some(&None), "{k} is passed on from kiln's own environment");
+        }
+        // the helper: what the runner's allowlist holds, nothing else
+        let runner = RunnerLaunch { wine: "/w/bin/wine".into(), env: vec![("WINEFSYNC".into(), "1".into()), ("LD_LIBRARY_PATH".into(), "/runner/lib".into())], cwd: "/".into() };
+        let e = envs(&runner.helper_command(Path::new("/h/kiln.exe")));
+        assert_eq!(e.get("WINEFSYNC"), Some(&Some("1".to_string())));
+        assert_eq!(e.get("LD_LIBRARY_PATH"), Some(&Some("/runner/lib".to_string())));
+        for k in ["WINEESYNC", "WINENTSYNC", "LD_PRELOAD", "WINESERVERSOCKET", "WINELOADERNOEXEC"] {
+            assert_eq!(e.get(k), Some(&None), "helper: {k}");
+        }
+        // netcoredbg for a client: the runner environment's allowlisted names only (LD_PRELOAD is not one)
+        let w = World::new("scrub");
+        let (p, d) = w.kiln("a", 32, 100, N1, TargetKind::Client);
+        w.put("a", &d);
+        let resolved = prepare(TargetKind::Client, true, &mut w.host("a", TargetKind::Client), &mut FakeSource::new(vec![p]), &mut counter()).unwrap();
+        let t = Target {
+            kind: TargetKind::Client,
+            install: w.root.join("a"),
+            via: "install",
+            lab: None,
+            wine: Some("/w/bin/wine".into()),
+            prefix: Some("/pfx".into()),
+            netcoredbg: "/n/netcoredbg.exe".into(),
+            resolved,
+            max_pause_ms: None,
+            allow_client_pause: true,
+            runner_env: Some(vec![("WINEFSYNC".into(), "1".into()), ("LD_PRELOAD".into(), "/evil.so".into())]),
+        };
+        let e = envs(&t.command());
+        assert_eq!(e.get("WINEFSYNC"), Some(&Some("1".to_string())));
+        for k in ["WINEESYNC", "WINENTSYNC", "LD_LIBRARY_PATH", "LD_PRELOAD", "WINESERVERSOCKET", "WINELOADERNOEXEC"] {
+            assert_eq!(e.get(k), Some(&None), "netcoredbg: {k}");
+        }
+    }
 }
