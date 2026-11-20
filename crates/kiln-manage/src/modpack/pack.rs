@@ -211,6 +211,9 @@ pub struct PackOverride {
     pub side: PartSide,
     /// Of the file in the zip.
     pub sha256: String,
+    /// Of the file in the zip, in bytes (Crucible plans an upload by sha256 and size; checked when present).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<u64>,
 }
 
 impl PackOverride {
@@ -406,6 +409,9 @@ pub fn check_index(ix: &PackIndex) -> Result<()> {
         if !sha256_ok(&o.sha256) {
             problems.push(format!("override {}: sha256", o.path));
         }
+        if o.size.is_some_and(|n| n > MAX_OVERRIDE) {
+            problems.push(format!("override {}: size over 64 KiB", o.path));
+        }
         let fits = match o.mode {
             OverrideMode::MergePatch => o.path.to_ascii_lowercase().ends_with(".json"),
             OverrideMode::Ini => o.path.to_ascii_lowercase().ends_with(".ini"),
@@ -533,6 +539,9 @@ pub fn read(zip_file: &Path, sha256: Option<&str>, extract_to: Option<&Path>) ->
             }
             if crate::hash::sha256_hex(&b) != o.sha256 {
                 return Err(err(ErrorCode::HashMismatch, format!("override {} does not match its sha256", o.path)));
+            }
+            if let Some(n) = o.size && n != b.len() as u64 {
+                return Err(err(ErrorCode::HashMismatch, format!("override {} is {} bytes, its index says {n}", o.path, b.len())));
             }
             overrides.insert((*side, o.path.clone()), b);
             continue;
@@ -1015,7 +1024,7 @@ pub fn build(dirs: &DataDirs, req: &BuildRequest, out_dir: &Path, progress: &mut
         if bytes.len() as u64 > MAX_OVERRIDE || total_override > MAX_OVERRIDES {
             return Err(err(ErrorCode::Refused, "overrides: 64 KiB a file, 1 MiB in all"));
         }
-        let o = PackOverride { path: spec.path.clone(), mode, side: spec.side, sha256: crate::hash::sha256_hex(&bytes) };
+        let o = PackOverride { path: spec.path.clone(), mode, side: spec.side, sha256: crate::hash::sha256_hex(&bytes), size: Some(bytes.len() as u64) };
         entries.push((o.zip_path(), Src::Mem(bytes)));
         index.overrides.push(o);
     }

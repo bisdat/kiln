@@ -88,7 +88,8 @@
       "path": "kiln-auto-loot.json",
       "mode": "merge-patch",
       "side": "both",
-      "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "size": 412
     }
   ],
   "server": {

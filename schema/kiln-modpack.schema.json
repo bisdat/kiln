@@ -444,6 +444,12 @@
               },
               "sha256": {
                 "$ref": "common.schema.json#/$defs/sha256"
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 65536,
+                "description": "Of the file in the zip, in bytes (written by every build; Crucible needs it to plan the upload). Checked when present."
               }
             }
           }

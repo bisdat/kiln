@@ -320,3 +320,21 @@ fn the_server_part_goes_into_a_server_folder_and_builds_the_player_modpack() {
     assert_eq!(ids, ["alpha", "beta", "pack.ember-run"]);
     modpack::verify(&mp.file, Some(&mp.sha256)).unwrap();
 }
+
+#[test]
+fn overrides_carry_their_size() {
+    let t = tmp("ovsize");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let pid = creator(&dirs, &t.0);
+    let built = pack::build(&dirs, &request(&pid, &t.0, "1.0.0"), &t.0.join("out"), &mut NoProgress).unwrap();
+    let rp = pack::read(&built.file, None, None).unwrap();
+    for o in &built.index.overrides {
+        assert_eq!(o.size, Some(rp.overrides[&(o.side, o.path.clone())].len() as u64), "{}", o.path);
+    }
+    // an index whose size does not match the file is refused
+    let mut ix = built.index.clone();
+    ix.overrides[0].size = Some(1);
+    let bad = t.0.join("bad.kilnpack");
+    rezip(&built.file, &bad, Some(("kiln-modpack.json", &serde_json::to_vec_pretty(&ix).unwrap())), None);
+    assert_eq!(pack::verify(&bad, None).unwrap_err().code, ErrorCode::HashMismatch);
+}
