@@ -13,7 +13,7 @@
 //! Nothing here terminates a process, and no job created here ends what it holds.
 
 use super::errors::{DebugCode, DebugError};
-use super::resolver::{PipeAnswer, Probe, Seen};
+use super::resolver::{PipeAnswer, Probe, Seen, check_creation};
 #[cfg(windows)]
 use super::resolver::{ProcessSource, Watch};
 
@@ -97,13 +97,17 @@ pub enum Hashing {
     Cached,
 }
 
-/// One look at a held process: what the OS says about it and its control pipe's answer to the probe's challenge.
+/// One look at a held process: what the OS says about it and its control pipe's answer to the probe's challenge. The
+/// creation time is compared with the probe's right after it is read; everything else is compared by `check_seen`.
 pub fn look(p: &mut dyn HeldProcess, probe: &Probe, digest: &mut DigestCache, hashing: Hashing) -> Result<Seen, DebugError> {
     let pid = p.pid();
     if p.exited() {
         return Err(DebugError::new(DebugCode::NotRunning, format!("PID {pid} has exited")).because("exited"));
     }
     let creation_time_100ns = p.creation_time_100ns()?;
+    // first: another creation time proves the PID is another process now, and nothing after this may hide that (a
+    // reused PID serves no control pipe, and its image may be unreadable or another user's)
+    check_creation(probe, &creation_time_100ns)?;
     let image = p.image()?;
     let image_sha256 = match (&digest.0, hashing) {
         (Some((path, sha)), Hashing::Cached) if *path == image => sha.clone(),
@@ -457,6 +461,89 @@ mod tests {
         let e = refusal("GetProcessTimes", 120, 32);
         assert_eq!((e.code, e.reason.as_deref()), (DebugCode::UnsupportedIdentity, Some("GetProcessTimes")));
         assert_eq!(refusal("QueryFullProcessImageNameW", 31, 32).reason.as_deref(), Some("QueryFullProcessImageNameW"));
+    }
+
+    /// A held process from a script, recording the OS calls a look makes.
+    struct Script {
+        calls: Vec<&'static str>,
+        created: &'static str,
+        unreadable: bool,
+        pipe: bool,
+    }
+
+    impl HeldProcess for Script {
+        fn pid(&self) -> u32 {
+            32
+        }
+        fn exited(&mut self) -> bool {
+            self.calls.push("exited");
+            false
+        }
+        fn creation_time_100ns(&mut self) -> Result<String, DebugError> {
+            self.calls.push("creation");
+            Ok(self.created.into())
+        }
+        fn image(&mut self) -> Result<String, DebugError> {
+            self.calls.push("image");
+            Ok(r"Z:\srv\enshrouded_server.exe".into())
+        }
+        fn hash_image(&mut self, image: &str) -> Result<String, DebugError> {
+            self.calls.push("hash");
+            if self.unreadable {
+                return Err(DebugError::new(DebugCode::UnsupportedIdentity, format!("{image} cannot be read")).because("image_read"));
+            }
+            Ok("a".repeat(64))
+        }
+        fn ask_pipe(&mut self, probe: &Probe) -> Result<PipeAnswer, DebugError> {
+            self.calls.push("pipe");
+            if !self.pipe {
+                return Err(DebugError::identity_changed("PID 32 serves no control pipe", "pipe_missing"));
+            }
+            Ok(PipeAnswer {
+                session_nonce: probe.session_nonce.clone(),
+                challenge: probe.challenge.clone(),
+                windows_pid: 32,
+                creation_time_100ns: self.created.into(),
+                image: probe.image.clone(),
+                image_sha256: probe.image_sha256.clone(),
+                managed_ready: true,
+                session_mode: crate::debug::SessionMode::Hosted,
+                runtime_version: "8.0.11".into(),
+            })
+        }
+    }
+
+    fn probe() -> Probe {
+        Probe {
+            windows_pid: 32,
+            image: r"Z:\srv\enshrouded_server.exe".into(),
+            creation_time_100ns: "100".into(),
+            image_sha256: "a".repeat(64),
+            session_nonce: "1".repeat(32),
+            pipe: crate::debug::identity::pipe_name(32, &"1".repeat(32)),
+            challenge: "challenge-0001".into(),
+        }
+    }
+
+    /// Review item 3: a PID that is another process now is told by its creation time, before its image is read or its
+    /// pipe asked (a reused PID serves no pipe, and its image may be unreadable: neither may hide the proof).
+    #[test]
+    fn a_reused_pid_is_told_by_its_creation_time_before_any_image_or_pipe_work() {
+        let mut other = Script { calls: vec![], created: "999", unreadable: true, pipe: false };
+        let e = look(&mut other, &probe(), &mut DigestCache::default(), Hashing::Fresh).unwrap_err();
+        assert_eq!((e.code, e.reason.as_deref()), (DebugCode::IdentityChanged, Some("creation_time")), "{}", e.message);
+        assert_eq!(other.calls, ["exited", "creation"], "nothing after the creation time");
+        // the process itself: everything, in this order
+        let mut same = Script { calls: vec![], created: "100", unreadable: false, pipe: true };
+        let s = look(&mut same, &probe(), &mut DigestCache::default(), Hashing::Fresh).unwrap();
+        assert_eq!(same.calls, ["exited", "creation", "image", "hash", "pipe"]);
+        assert_eq!((s.creation_time_100ns.as_str(), s.pipe.challenge.as_str()), ("100", "challenge-0001"));
+        // a watch poll on the same handle: no hash
+        let mut digest = DigestCache::default();
+        look(&mut same, &probe(), &mut digest, Hashing::Fresh).unwrap();
+        same.calls.clear();
+        look(&mut same, &probe(), &mut digest, Hashing::Cached).unwrap();
+        assert_eq!(same.calls, ["exited", "creation", "image", "pipe"]);
     }
 
     /// Nothing in the Windows side or the helper may end a process: no terminate call, no kill-on-close job of ours.

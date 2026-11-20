@@ -165,6 +165,22 @@ pub trait ProcessSource {
     fn close(&mut self);
 }
 
+/// The OS's creation time of the process the probe's PID names against the descriptor's: another one proves that PID is
+/// another process now (the descriptor is stale, see `proves_stale`). The Windows side checks it right after
+/// `GetProcessTimes`, before any image or pipe work (a reused PID serves no pipe and may have an unreadable image).
+pub fn check_creation(p: &Probe, created: &str) -> Result<(), DebugError> {
+    if created != p.creation_time_100ns {
+        return Err(DebugError::identity_changed(
+            format!(
+                "PID {} is another process now (created {created}, the descriptor's was created {}): the game was restarted or the PID reused",
+                p.windows_pid, p.creation_time_100ns
+            ),
+            "creation_time",
+        ));
+    }
+    Ok(())
+}
+
 /// Every Windows-side fact against the probe (the descriptor): the OS view and the pipe's answer must both be that
 /// process. Used by the resolver and by the helper (which refuses before answering).
 pub fn check_seen(p: &Probe, s: &Seen) -> Result<(), DebugError> {
@@ -172,12 +188,7 @@ pub fn check_seen(p: &Probe, s: &Seen) -> Result<(), DebugError> {
     if s.windows_pid != pid {
         return Err(DebugError::identity_changed(format!("the Windows side opened PID {} for PID {pid}", s.windows_pid), "pid"));
     }
-    if s.creation_time_100ns != p.creation_time_100ns {
-        return Err(DebugError::identity_changed(
-            format!("PID {pid} is another process now (created {}, the descriptor's was created {}): the game was restarted or the PID reused", s.creation_time_100ns, p.creation_time_100ns),
-            "creation_time",
-        ));
-    }
+    check_creation(p, &s.creation_time_100ns)?;
     if !same_windows_path(&s.image, &p.image) {
         return Err(DebugError::identity_changed(format!("PID {pid} runs {}, the descriptor names {}", s.image, p.image), "image_path"));
     }
@@ -341,14 +352,19 @@ fn resolve_inner(
     let me_elevated = source.elevated();
     let mut live: Vec<(PathBuf, Descriptor, Seen)> = Vec::new();
     let mut stale = Vec::new();
+    // descriptors that could not be checked (rights, an elevated target, a failed query, no answer): a note when another
+    // one is the live target, the refusal when none is
+    let mut unchecked: Vec<(String, DebugError)> = Vec::new();
     let mut last = None;
     for (i, (path, d)) in candidates.iter().enumerate() {
         if d.elevated && me_elevated == Some(false) {
-            return Err(DebugError::new(
+            let e = DebugError::new(
                 DebugCode::PrivilegeMismatch,
                 format!("the {} (PID {}) runs elevated and this kiln does not; a debugger could not attach to it", what(kind), d.windows_pid),
             )
-            .because("elevated_target"));
+            .because("elevated_target");
+            unchecked.push((format!("{}: {}", path.display(), e.message), e));
+            continue;
         }
         let probe = Probe::of(d, challenge()?);
         last = Some(i);
@@ -360,11 +376,14 @@ fn resolve_inner(
                 }
                 stale.push(format!("{}: {}", path.display(), e.message))
             }
-            Err(e) => return Err(e),
+            Err(e) => unchecked.push((format!("{}: {}", path.display(), e.message), e)),
         }
     }
     notes.extend(stale.iter().cloned());
+    notes.extend(unchecked.iter().map(|(n, _)| n.clone()));
     let (path, d, mut seen) = match live.len() {
+        // the first descriptor that could not be checked says why nothing could be proven ("not running" could be wrong)
+        0 if !unchecked.is_empty() => return Err(unchecked.swap_remove(0).1),
         0 => {
             return Err(DebugError::new(
                 DebugCode::NotRunning,
@@ -913,7 +932,9 @@ mod tests {
         other.pipe = None;
         let e = run(&mut w.host("a", TargetKind::Server), &mut FakeSource::new(vec![other.clone()])).unwrap_err();
         assert_eq!((e.code, e.reason.as_deref()), (DebugCode::NotRunning, Some("stale_descriptor")));
+        assert!(e.message.contains("created 999"), "told by its creation time, not by the missing pipe: {}", e.message);
         // even when the new process is a Kiln with the same image: its creation time differs
+        w.put("a", &d);
         let (k, _) = w.kiln("a", 32, 999, N1);
         let e = run(&mut w.host("a", TargetKind::Server), &mut FakeSource::new(vec![k])).unwrap_err();
         assert_eq!(e.code, DebugCode::NotRunning);
@@ -1232,6 +1253,53 @@ mod tests {
         // another handle (a new inspect) hashes again
         run(&mut host, &mut src).unwrap();
         assert_eq!(src.hashes, 3);
+    }
+
+    /// Review item 3: a reused PID is proven stale by its creation time even when its new process serves no pipe or
+    /// cannot be read, and a descriptor that cannot be checked is a note when another one is the live target.
+    #[test]
+    fn a_reused_or_unreadable_pid_does_not_hide_the_live_descriptor() {
+        let w = World::new("reuse-order");
+        let file = |pid: u32| w.root.join("a/kiln/state/debug").join(format!("{pid}.json"));
+        let mut host = w.host("a", TargetKind::Server);
+        // PID 32 is another process now: no control pipe, an image this user cannot read
+        let (_, d32) = w.kiln("a", 32, 100, N1);
+        let (mut other, _) = w.kiln("a", 32, 999, N2);
+        other.pipe = None;
+        other.unreadable = true;
+        let (p48, d48) = w.kiln("a", 48, 300, N2);
+        w.put("a", &d32);
+        w.put("a", &d48);
+        let r = run(&mut host, &mut FakeSource::new(vec![other, p48.clone()])).expect("the live one is the target");
+        assert_eq!(r.target.identity.windows_pid, 48);
+        assert!(!file(32).exists(), "its creation time proves 32's descriptor stale: removed");
+        assert!(r.notes.iter().any(|n| n.contains("created 999")), "{:?}", r.notes);
+        // a PID this user cannot open now (an elevated or another user's process took it), a descriptor of an elevated
+        // process, and one whose check failed: notes, and the live one is still the target
+        let (mut denied, d40) = w.kiln("a", 40, 200, N1);
+        denied.denied = true;
+        let (_, mut d44) = w.kiln("a", 44, 250, N1);
+        d44.elevated = true;
+        w.put("a", &d40);
+        w.put("a", &d44);
+        let mut src = FakeSource::new(vec![denied, p48.clone()]);
+        src.elevated = Some(false);
+        let r = run(&mut host, &mut src).expect("the live one is the target");
+        assert_eq!((r.target.identity.windows_pid, src.held), (48, Some(48)));
+        assert!(r.notes.iter().any(|n| n.contains("40.json") && n.contains("access denied")), "{:?}", r.notes);
+        assert!(r.notes.iter().any(|n| n.contains("44.json") && n.contains("runs elevated")), "{:?}", r.notes);
+        assert!(!src.calls.contains(&"inspect 44".to_string()), "an elevated target is not opened: {:?}", src.calls);
+        assert!(file(40).exists() && file(44).exists(), "not proof: their files stay");
+        // with none live the refusal is the one that says why it could not be checked, not "not running"
+        std::fs::remove_file(file(48)).unwrap();
+        let mut src = FakeSource::new(vec![]);
+        src.procs = vec![{
+            let (mut p, _) = w.kiln("a", 40, 200, N1);
+            p.denied = true;
+            p
+        }];
+        let e = run(&mut host, &mut src).unwrap_err();
+        assert_eq!(e.code, DebugCode::PrivilegeMismatch, "{}", e.message);
     }
 
     /// The answer lines exactly as native/core/src/debug_descriptor.cpp writes them.
