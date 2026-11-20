@@ -377,6 +377,9 @@ fn entries_no_hash_covers_or_windows_would_merge_are_refused() {
     let d = kiln_mod(&t.0, "twins", "1.0.0");
     put(&d, "data/\u{c4}.json", b"1");
     put(&d, "data/\u{e4}.json", b"2");
+    if std::fs::read_dir(d.join("data")).unwrap().count() != 2 {
+        return; // this disk folds case itself (macOS, Windows): no such mod can be made here
+    }
     let refs = import(&dirs, &[d]);
     let mut p = profile::get(&dirs, &pid).unwrap();
     p.mods.kiln.push(pm(&find(&refs, "twins"), true));
