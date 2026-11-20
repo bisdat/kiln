@@ -55,6 +55,7 @@ Machine-readable copies:
 | `<game>/kiln/state/emf.json` | kiln-emf | launcher | format in `docs/re/emf-compat.md` |
 | `<game>/kiln/state/last-server.json` | Kiln.Network (client) | launcher | `state-last-server.schema.json`, `examples/state-last-server.json` |
 | `<game>/kiln/state/graphics.json` | Kiln.Ui (client, 0.2.0-dev.29.18): what Kiln's graphics tools do, the upscaler behind the game's FSR 3 above all; written atomically at start and when it changes (checked every 2 s; no frame rates) | launcher (`GameStatus.graphicsState`; "Now" while the process that wrote it runs: `launch::written_after_start` against that process, and on Windows its pid) | `state-graphics.schema.json`, `examples/state-graphics.json`; [../graphics.md](../graphics.md) "What runs now, and why not" |
+| `<game>/kiln/state/registry.json` | kiln.content's registry stage (0.2.0-dev.31, experimental KILNX031): written atomically when the stage ends (phase `start`) and again at each world load (`worldLoad`, the generation grows) | launcher (the Conflicts view, registry P2), kilnctl, support reports | `state-registry.schema.json`, `examples/state-registry.json`; section 5.9 |
 | `<server>/kiln/data/kiln-admin/endpoint.json` | Kiln.Admin | launcher, kilnctl | `admin-endpoint.schema.json`, `examples/admin-endpoint.json` |
 | `<server>/kiln/data/kiln-admin/admin-token` | Kiln.Admin (first start) | launcher, kilnctl | 64 hex chars ([admin-protocol.md](admin-protocol.md)) |
 | `<game>/kiln/logs/proxy.log` | proxy | humans, launcher | one line per decision, rewritten at each start |
@@ -869,6 +870,17 @@ All written atomically; a file whose `pid` is not a live process is stale.
   `unixExitStatus` 3, `why` (what failed, word for word: show it), `mods[]` (the mods whose content was not served: the
   ones to remove or update) and `advice` (remove or update them; send kiln.log if it still stops). A launcher shows
   `why` and the `mods` after the game exits with 19203, and offers to disable those mods.
+- `registry.json` (kiln.content's registry stage, 0.2.0-dev.31; `state-registry.schema.json`): what this start's registry
+  stage did. Per touched field (`fields[]`): its Kiln id and field (or, `raw: true`, the Advanced tier's game member path),
+  `applies` (`now`, `worldLoad`, `restart`), the base value and its origin, every writer in the order they apply (Kiln's
+  older paths and the archive writer's packages below, then the registry's edits by stage and load order; each with its
+  certainty: `certain` for Kiln's own writers, `named` for a ShroudForge/EML package), the result and the winner. Every
+  conflict line (`conflicts[]`: `overridden`, `composed`, `composedOn`, `exclusive`, `dropped`, `yielded`, with winner,
+  loser and one English sentence) and every refused edit (`refused[]`: mod, source, stage, ordinal, reason). `phase`
+  `start` (restart fields final) or `worldLoad` (every field applied), `generation`, the regmap record of this build, the
+  base's origin and archive writer, the order the mods ran in (`orderSource` `kiln.host` or `folders`). Caps: 20,000
+  field rows, 2,000 conflicts, 2,000 refused edits (`truncated` counts what was left out; `counts` has the totals); kiln.log
+  carries at most 50 of the lines per start and a total. A reader ignores members it does not know (format 1 only grows).
 - Launcher stopped-start notice (dev.29): `kiln_manage::stopped_start::read` reads `roster-refused.json` first,
   then `content-refused.json`, then `boot.json` (`boot.stop`, or the older required-boot-mod exit 19201). The kind is
   `roster` (19202), `content` (19203) or `boot-mod` (anything else); the notice shows a sentence of its own for
