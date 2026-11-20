@@ -349,7 +349,9 @@ mod developer_debugging_tests {
         let doc = kiln_set(&path, "developer_debugging", Some(&json!(true))).unwrap();
         assert_eq!(doc.values["developer_debugging"], true);
         assert!(doc.errors.is_empty() && doc.text.contains("// keep me"), "{:?}", doc.errors);
-        for bad in [json!("true"), json!(1), json!(null)] {
+        // the schema's text forms ("on", "true") are written as a JSON bool, which is all the core reads
+        assert_eq!(kiln_set(&path, "developer_debugging", Some(&json!("on"))).unwrap().values["developer_debugging"], json!(true));
+        for bad in [json!("maybe"), json!(1), json!(null), json!({"a": 1})] {
             assert!(kiln_set(&path, "developer_debugging", Some(&bad)).is_err(), "{bad}");
         }
         assert_eq!(kiln_setting_line("g", "developer_debugging", Some(&json!(true))), "kiln.json of g: developer_debugging = true");
